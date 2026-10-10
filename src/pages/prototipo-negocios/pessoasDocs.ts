@@ -222,11 +222,6 @@ export function listaVisivel(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, o
   return ordenarPessoas(S, filtrarPessoas(S, pessoasDoSeparador(S, aba), filtrosEfetivos(aba, f)), ordem);
 }
 
-/** A pessoa que o painel mostra quando ninguém foi escolhido (no computador): a primeira da lista, a mais urgente. Sem resultados não há nenhuma. */
-export function primeiraDaLista(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, ordem: Ordem): PessoaApp | undefined {
-  return listaVisivel(S, aba, f, ordem)[0];
-}
-
 /** Um negócio da pessoa com os documentos dele. `negocio` fica por definir quando os itens apontam para um negócio que a pessoa não tem. */
 export interface GrupoNegocio { chave: string; negocio: Negocio | undefined; principal: ItemNegocio; docs: ItemNegocio[] }
 

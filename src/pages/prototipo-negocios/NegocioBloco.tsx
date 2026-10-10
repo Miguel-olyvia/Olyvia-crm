@@ -1,15 +1,21 @@
-// O desenho de um negócio no separador Negócios da ficha: o bloco (serviço, estado, valor, probabilidade e próximo passo)
-// e o percurso em quatro passos. Serve a lead com um só negócio (detalhe) e a lista de vários (compacto).
+// O detalhe de um negócio no separador Negócios da ficha (o lado direito do mestre-detalhe): estado, valor, probabilidade de fechar,
+// próximo passo, o percurso numa linha fina de quatro passos, "O que falta" e os documentos. O orçamento, a proposta e a proposta conjunta
+// (com as suas linhas) são documentos dentro do detalhe, não negócios novos.
+import { forwardRef, type ReactNode } from "react";
 import { ArrowRight, Check, Circle, CircleDot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { eur, type Negocio } from "./motor";
+import { eur, type Estado, type Negocio } from "./motor";
 import type { ItemNegocio } from "./leadsDocs";
-import { estadoNegocio, percursoDe, probabilidade, type EstadoPasso } from "./perfilDocs";
+import type { GrupoNegocio } from "./pessoasDocs";
+import { estadoCurto, faltaParaOrcamento, percursoDe, probabilidade, type EstadoPasso } from "./perfilDocs";
 import { BORDA_CTRL } from "./PessoaLinha";
+import { COR_NEGOCIO, ICONE_NEGOCIO } from "./iconeNegocio";
 import { Chip } from "./pecas";
 import { CHIP_PEQ, Exemplo, LINHA, SETA, icone } from "./FichaListas";
-import type { GrupoNegocio } from "./pessoasDocs";
+
+type Abrir = (id: number) => () => void;
+const MAX_CAMPOS = 4;
 
 const PASSO: Record<EstadoPasso, { texto: string; icone: typeof Check; classe: string }> = {
   feito: { texto: "Feito", icone: Check, classe: "border-foreground text-foreground" },
@@ -17,7 +23,10 @@ const PASSO: Record<EstadoPasso, { texto: string; icone: typeof Check; classe: s
   seguinte: { texto: "Por fazer", icone: Circle, classe: cn(BORDA_CTRL, "text-muted-foreground") },
 };
 
-/** Levantamento, Orçamento, Proposta e Contrato: o passo atual marcado em ícone e em texto, os seguintes a cinzento. Em fila quando há largura, em lista vertical quando não. */
+/** O valor em texto: o do documento principal do negócio, ou "Sem valor ainda". */
+export const valorTexto = (it: ItemNegocio): string => (it.valor === null ? "Sem valor ainda" : `${it.conjunta ? "Total " : ""}${eur(it.valor)} €`);
+
+/** Levantamento, Orçamento, Proposta e Contrato: o passo atual marcado em ícone e em texto. Em fila fina quando há largura, em lista quando não. */
 export function Percurso({ d }: { d: Negocio }) {
   return (
     <div className="percurso-cx">
@@ -26,8 +35,8 @@ export function Percurso({ d }: { d: Negocio }) {
           const p = PASSO[estado], I = p.icone;
           return (
             <li key={nome} aria-current={estado === "atual" ? "step" : undefined} className={cn("grid gap-0.5", p.classe)}>
-              <span className="flex items-center gap-1.5"><I className="h-4 w-4 shrink-0" aria-hidden="true" />{p.texto}</span>
-              <span className="font-medium text-foreground">{nome}</span>
+              <span className="flex items-center gap-1.5"><I className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="break-words font-medium text-foreground">{nome}</span></span>
+              <span>{p.texto}</span>
             </li>
           );
         })}
@@ -36,23 +45,41 @@ export function Percurso({ d }: { d: Negocio }) {
   );
 }
 
-/** Um negócio da lista de vários: o serviço, o estado, o próximo passo e os documentos dele em linhas (tipo, valor e, na proposta conjunta, as linhas), com o percurso uma só vez. */
-export function NegocioAgrupado({ g, d, abrir }: { g: GrupoNegocio; d: Negocio; abrir: (id: number) => () => void }) {
-  const it = g.principal, ic = icone(it.tipo), preparacao = g.docs.length === 0;
+function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return <section aria-label={titulo} className="grid min-w-0 gap-2 border-t border-border pt-3"><h4 className="text-[16px] font-semibold">{titulo}</h4>{children}</section>;
+}
+
+/** Uma lista curta e concreta, derivada da fase e dos campos obrigatórios que o motor ainda pede. */
+function Falta({ S, d }: { S: Estado; d: Negocio }) {
+  const f = faltaParaOrcamento(S, d), extra = f.campos.length - MAX_CAMPOS;
   return (
-    <section aria-label={`Negócio: ${d.servico}`} className="grid min-w-0 gap-3">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-muted-foreground">
-        <Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{estadoNegocio(d)}{g.docs.some((x) => x.demo) && <Exemplo />}
-      </p>
-      <h3 className="break-words text-xl font-semibold tracking-tight">{d.servico}</h3>
-      {!preparacao && (
+    <Secao titulo={f.titulo}>
+      {f.passos.length === 0 ? <p className="text-[15px] text-muted-foreground">Nada em falta: o percurso está completo.</p> : (
+        <ol className="grid gap-1.5">
+          {f.passos.map((t, i) => (
+            <li key={t} className="flex items-center gap-2 text-[15px]">
+              <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />{t}{i === 0 && <span className="text-muted-foreground">· agora</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+      {f.campos.length > 0 && <p className="text-[15px] text-muted-foreground">Campos por preencher: {f.campos.slice(0, MAX_CAMPOS).join(", ")}{extra > 0 ? ` e mais ${extra}` : ""}.</p>}
+    </Secao>
+  );
+}
+
+/** Os documentos do negócio (orçamento, proposta, contrato…), cada um com o ícone do seu tipo; sem eles, diz quando aparecem. */
+function Documentos({ docs, abrir }: { docs: ItemNegocio[]; abrir: Abrir }) {
+  return (
+    <Secao titulo="Documentos">
+      {docs.length === 0 ? <p className="text-[15px] text-muted-foreground">Orçamento, proposta e contrato aparecem aqui quando existirem.</p> : (
         <ul className="divide-y divide-border border-y border-border" aria-label="Documentos do negócio">
-          {g.docs.map((x) => {
-            const dx = icone(x.tipo);
+          {docs.map((x) => {
+            const ic = icone(x.tipo);
             return (
               <li key={x.id}>
                 <button type="button" onClick={abrir(x.negocioId)} className={LINHA}>
-                  <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={dx.i} cor={dx.cor} className={CHIP_PEQ} />{x.tipo}{x.demo && <Exemplo />}</span>
+                  <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{x.tipo}{x.demo && <Exemplo />}</span>
                   <span className="text-[15px] font-medium">{x.valor !== null ? `${x.conjunta ? "Total " : ""}${eur(x.valor)} € · ` : ""}Abrir<ArrowRight className={SETA} aria-hidden="true" /></span>
                 </button>
                 {x.linhas.length > 0 && (
@@ -65,46 +92,35 @@ export function NegocioAgrupado({ g, d, abrir }: { g: GrupoNegocio; d: Negocio; 
           })}
         </ul>
       )}
-      <div>
-        <p className="text-[15px] text-muted-foreground">Próximo passo</p>
-        <Button type="button" variant="outline" className={cn("mt-1 min-h-11 max-w-full cursor-pointer whitespace-normal text-left text-[15px]", BORDA_CTRL)} onClick={abrir(it.negocioId)}>
-          {it.proximo}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
-        </Button>
-      </div>
-      <Percurso d={d} />
-    </section>
+    </Secao>
   );
 }
 
-interface BlocoProps { it: ItemNegocio; d: Negocio; abrir: (id: number) => () => void }
+interface DetalheProps { S: Estado; g: GrupoNegocio; d: Negocio; abrir: Abrir; id: string }
 
-/** O negócio: serviço, estado em palavras, valor (ou "Sem valor ainda"), probabilidade de fechar (exemplo) e o próximo passo. */
-export function BlocoNegocio({ it, d, abrir }: BlocoProps) {
-  const ic = icone(it.tipo), preparacao = ["Lead", "Contacto", "Visita"].includes(it.tipo);
+/** O negócio escolhido. O foco vai para aqui quando o detalhe aparece por baixo da lista (ver SepNegocios). */
+export const NegocioDetalhe = forwardRef<HTMLDivElement, DetalheProps>(function NegocioDetalhe({ S, g, d, abrir, id }, ref) {
+  const it = g.principal;
   return (
-    <section aria-label={`Negócio: ${it.servico}`} className="grid min-w-0 gap-3">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-muted-foreground">
-        <Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />
-        {preparacao ? estadoNegocio(d) : `${it.tipo} · ${estadoNegocio(d)}`}{it.demo && <Exemplo />}
-      </p>
-      <h3 className="break-words text-xl font-semibold tracking-tight">{it.servico}</h3>
-      <dl className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-x-6 gap-y-2 text-[15px]">
-        <div><dt className="text-muted-foreground">{it.valor === null ? "Valor" : "Valor com IVA"}</dt>
-          <dd className="text-base font-semibold tabular-nums">{it.valor === null ? "Sem valor ainda" : `${it.conjunta ? "Total " : ""}${eur(it.valor)} €`}</dd></div>
-        <div><dt className="text-muted-foreground">Probabilidade de fechar</dt>
-          <dd className="text-base font-semibold tabular-nums">{probabilidade(it.tipo)} %<Exemplo /></dd></div>
+    <div ref={ref} id={id} tabIndex={-1} role="region" aria-label={`Negócio: ${d.servico}`} className="grid min-w-0 content-start gap-4 focus-visible:outline-none">
+      <div className="flex items-center gap-3">
+        <Chip icone={ICONE_NEGOCIO} cor={COR_NEGOCIO} />
+        <h3 className="min-w-0 break-words text-xl font-semibold tracking-tight">{d.servico}</h3>
+      </div>
+      <dl className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-6 gap-y-2 text-[15px]">
+        <div><dt className="text-muted-foreground">Estado</dt><dd className="text-base font-semibold">{estadoCurto(d)}</dd></div>
+        <div><dt className="text-muted-foreground">Valor</dt><dd className="text-base font-semibold tabular-nums">{valorTexto(it)}</dd></div>
+        <div><dt className="text-muted-foreground">Probabilidade de fechar</dt><dd className="text-base font-semibold tabular-nums">{probabilidade(it.tipo)} %<Exemplo /></dd></div>
       </dl>
-      {it.linhas.length > 0 && (
-        <ul className="divide-y divide-border border-y border-border text-[15px]" aria-label="Linhas do documento">
-          {it.linhas.map((l) => <li key={l.rotulo} className="flex justify-between gap-2 py-1"><span>{l.rotulo}</span><span className="tabular-nums">{eur(l.valor)} €</span></li>)}
-        </ul>
-      )}
       <div>
         <p className="text-[15px] text-muted-foreground">Próximo passo</p>
         <Button type="button" variant="outline" className={cn("mt-1 min-h-11 max-w-full cursor-pointer whitespace-normal text-left text-[15px]", BORDA_CTRL)} onClick={abrir(it.negocioId)}>
           {it.proximo}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
         </Button>
       </div>
-    </section>
+      <Secao titulo="Percurso do negócio"><Percurso d={d} /></Secao>
+      <Falta S={S} d={d} />
+      <Documentos docs={g.docs} abrir={abrir} />
+    </div>
   );
-}
+});

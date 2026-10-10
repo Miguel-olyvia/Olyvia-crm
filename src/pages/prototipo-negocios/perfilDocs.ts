@@ -1,12 +1,12 @@
 // O perfil de cada pessoa (lead ou cliente) para as páginas de Pessoas: contactos, saúde, notas, chamadas e emails.
 // Funções puras e determinísticas: nada aqui muda o Estado nem existe no Estado. O que não vem da seed é de exemplo e
 // calcula-se a partir do nome, das fases e das datas dos negócios, com regras fixas.
-import { PAPEIS, campoVisita, eur, proximo, tot, visitas, type Estado, type Evento, type Negocio } from "./motor";
+import { PAPEIS, campoVisita, proximo, tot, visitas, type Estado, type Evento, type Negocio } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, INTERIOR, LEAD, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { atrasada, idade, localDe, proximoDe, somarDias, tempoDesde } from "./leadsDocs";
 import { canalDe, infoOrigem, toquesDe, utmTexto } from "./toquesDocs";
 import {
-  clientesApp, comercialDe, dadosCliente, ehContrato, leadsApp, valorPessoa, type PessoaApp, type SeparadorLista,
+  clientesApp, comercialDe, dadosCliente, ehContrato, leadsApp, valorPessoa, type PessoaApp,
 } from "./pessoasDocs";
 
 /** "Hoje" do protótipo (o mesmo de leadsDocs). */
@@ -297,6 +297,13 @@ export function estadoNegocio(d: Negocio): string {
   return ["Em preparação", "Orçamento por enviar", "Proposta enviada", "Contrato por assinar", "Em contrato"][passoAtual(d)];
 }
 
+/** O estado numa só palavra, para a lista de negócios: Em preparação, Orçamento, Proposta, Contrato, e depois Financeiro ou Obra. */
+export function estadoCurto(d: Negocio): string {
+  if (d.fase >= 5) return "Obra";
+  if (d.fase === 4) return "Financeiro";
+  return ["Em preparação", "Orçamento", "Proposta", "Contrato", "Contrato"][passoAtual(d)];
+}
+
 export interface Falta { titulo: string; passos: string[]; campos: string[] }
 const PASSOS_LEVANTAMENTO = ["Registar a chamada", "Marcar a visita", "Fechar o levantamento"];
 
@@ -315,7 +322,7 @@ export function faltaParaOrcamento(S: Estado, d: Negocio): Falta {
   return { titulo: "O que falta para o orçamento", passos: PASSOS_LEVANTAMENTO.slice(d.fase), campos: [...new Set(emFalta(gs, d.f).map((c) => c.l))] };
 }
 
-/* ---------------------------------------------------------------- faixa de factos e resumo numa linha */
+/* ---------------------------------------------------------------- factos do Resumo */
 
 export interface Facto { rotulo: string; valor: string; exemplo?: boolean }
 
@@ -330,18 +337,7 @@ export function factosDe(p: PessoaApp, f: Perfil): Facto[] {
   ];
 }
 
-const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
+const FACTOS_RESUMO: readonly string[] = ["Comercial", "Criada", "Tipo de cliente", "Contacto preferido"];
 
-/** O resumo do separador em uma ou duas linhas curtas (cabem a 340 px). `exemplo`: a última linha inclui um valor de exemplo (o que está por receber). */
-export function resumoLinha(S: Estado, aba: SeparadorLista): { linhas: string[]; exemplo: boolean } {
-  if (aba === "leads") {
-    const r = resumoLeads(S);
-    return { linhas: [`${plural(r.leads, "lead", "leads")} · ${r.porContactar} por contactar · ${plural(r.atrasadas, "atrasada", "atrasadas")}`, `${eur(r.valorEmJogo)} € em orçamentos`], exemplo: false };
-  }
-  if (aba === "clientes") {
-    const r = resumoClientes(S);
-    return { linhas: [`${plural(r.clientes, "cliente", "clientes")} · ${eur(r.valorContratado)} € contratado`, `${plural(r.obrasEmCurso, "obra", "obras")} · ${eur(r.aReceber)} € a receber`], exemplo: true };
-  }
-  const r = resumoTodos(S);
-  return { linhas: [`${plural(r.pessoas, "pessoa", "pessoas")} · ${plural(r.leads, "lead", "leads")} · ${plural(r.clientes, "cliente", "clientes")}`], exemplo: false };
-}
+/** Os factos que o Resumo da ficha mostra em lista pequena: a origem e o serviço têm o seu sítio, e a saúde a sua barra. */
+export const factosResumo = (p: PessoaApp, f: Perfil): Facto[] => factosDe(p, f).filter((x) => FACTOS_RESUMO.includes(x.rotulo));

@@ -1,13 +1,12 @@
-// A página de Pessoas na proposta simples (V2): leads e clientes numa só lista, com a ficha ao lado.
-// No computador (lg e acima) são duas colunas: a lista e a ficha (a primeira da lista, se ninguém foi escolhido); abaixo disso só uma de cada vez, e a ficha ocupa o ecrã.
-// A pessoa é uma só; lead e cliente são papéis dela. Esta página é só a casca: o estado e a escolha entre lista e ficha.
+// A página de Pessoas na proposta simples (V2): primeiro a lista (leads e clientes, a largura toda); ao clicar numa pessoa abre-se a ficha
+// num painel lateral, com setas para a pessoa vizinha. Ninguém vem escolhido por defeito. A pessoa é uma só; lead e cliente são papéis dela.
+// Esta página é só a casca: o estado e a ligação entre a lista e o painel.
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { SEM_FILTROS, pessoasDoSeparador, primeiraDaLista, separadorPorDefeito, todosApp, type FiltrosPessoa, type Ordem, type SeparadorLista } from "./pessoasDocs";
+import { SEM_FILTROS, listaVisivel, separadorPorDefeito, todosApp, type FiltrosPessoa, type Ordem, type SeparadorLista } from "./pessoasDocs";
 import { PessoaLista } from "./PessoaLista";
-import { PessoaFicha, type SepFicha } from "./PessoaFicha";
-import { PainelVazio } from "./PessoaResumo";
-import { useDesktop } from "./useDesktop";
+import { PessoaPainel } from "./PessoaPainel";
+import type { SepFicha } from "./PessoaFicha";
 import type { Ctx } from "./pecas";
 
 /** O que a página lembra quando se abre um negócio e se volta: vive fora do componente porque a página desmonta. */
@@ -28,7 +27,6 @@ export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: Separado
   const [f, setFEstado] = useState<FiltrosPessoa>(memoria.f);
   const [ordem, setOrdemEstado] = useState<Ordem>(memoria.ordem);
   const [sep, setSepEstado] = useState<SepFicha>(memoria.sep);
-  const [focar, setFocar] = useState<string | null>(null);
   const setLista = (v: SeparadorLista) => { setListaEstado(v); lembrar({ lista: v }); };
   const setSel = (v: string | null) => { setSelEstado(v); lembrar(v === null ? { sel: null, sep: "resumo" } : { sel: v }); if (v === null) setSepEstado("resumo"); };
   const setF = (v: Partial<FiltrosPessoa>) => { const n = { ...f, ...v }; setFEstado(n); lembrar({ f: n }); };
@@ -36,10 +34,8 @@ export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: Separado
   const setSep = (v: SepFicha) => { setSepEstado(v); lembrar({ sep: v }); };
 
   const aba = lista ?? separadorPorDefeito(S.role);
-  const daUtilizador = sel ? todosApp(S).find((p) => p.nome === sel) : undefined;
-  // No computador o painel nunca fica vazio: sem escolha do utilizador mostra-se a primeira da lista (a mais urgente). Esta escolha automática não se grava na memória.
-  const desktop = useDesktop();
-  const escolhida = daUtilizador ?? (desktop ? primeiraDaLista(S, aba, f, ordem) : undefined);
+  const escolhida = sel ? todosApp(S).find((p) => p.nome === sel) : undefined;
+  const nomes = listaVisivel(S, aba, f, ordem).map((p) => p.nome);
 
   // Ir de Leads para Clientes (ou ao contrário) pelo menu não remonta a página: o separador pedido aplica-se só quando abrirEm MUDA,
   // e não no mount, para não apagar a escolha guardada ao voltar de um negócio.
@@ -52,17 +48,9 @@ export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: Separado
   }, [abrirEm]);
   // Se a pessoa escolhida deixou de existir (por exemplo depois de repor a demonstração), esquece-se a escolha.
   useEffect(() => {
-    if (sel && !daUtilizador) { setSelEstado(null); setSepEstado("resumo"); lembrar({ sel: null, sep: "resumo" }); }
-  }, [sel, daUtilizador]);
-  // Ao voltar da ficha (no telemóvel a lista só reaparece então) o foco regressa à linha que se tinha escolhido.
-  useEffect(() => {
-    if (!focar || sel) return;
-    document.querySelector<HTMLElement>(`[data-pessoa="${CSS.escape(focar)}"]`)?.focus();
-    setFocar(null);
-  }, [focar, sel]);
-
-  // Sempre que a pessoa mostrada muda (escolha na lista, ou a automática quando a pesquisa e os filtros mudam a primeira da lista),
-  // cancela-se uma confirmação de "perdida" que tivesse ficado aberta na ficha anterior.
+    if (sel && !escolhida) { setSelEstado(null); setSepEstado("resumo"); lembrar({ sel: null, sep: "resumo" }); }
+  }, [sel, escolhida]);
+  // Sempre que a pessoa mostrada muda (clique na lista ou nas setas), cancela-se uma confirmação de "perdida" que tivesse ficado aberta na ficha anterior.
   const nomeEscolhido = escolhida?.nome ?? null;
   const nomeAnterior = useRef(nomeEscolhido);
   useEffect(() => {
@@ -70,21 +58,12 @@ export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: Separado
     nomeAnterior.current = nomeEscolhido;
     if (S.confirmPerda !== null) go(() => A.perderNao())();
   }, [nomeEscolhido, S.confirmPerda, go, A]);
-  const abrir = (nome: string) => setSel(nome);
   const leitura = !!S.leitura;
 
   return (
-    <div className={cn("pessoas-pagina mx-auto w-full max-w-[1600px] lg:grid lg:h-dvh lg:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]", leitura && "pessoas-leitura")}>
-      {escolhida && <h1 className="sr-only lg:hidden">Pessoas</h1>}
-      <section aria-label="Lista de pessoas" className={cn("min-w-0 flex-col lg:flex lg:min-h-0 lg:border-r lg:border-border", escolhida ? "hidden" : "flex")}>
-        <PessoaLista S={S} aba={aba} setAba={setLista} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} sel={escolhida?.nome ?? null} leitura={leitura}
-          abrir={abrir} novaLead={go(() => A.novo())} />
-      </section>
-      <section aria-label={escolhida ? `Ficha de ${escolhida.nome}` : "Resumo"} className={cn("min-w-0 lg:block lg:min-h-0 lg:overflow-y-auto", escolhida ? "block" : "hidden")}>
-        {escolhida
-          ? <PessoaFicha key={escolhida.nome} S={S} A={A} go={go} p={escolhida} sep={sep} aoMudarSep={setSep} voltar={() => { setFocar(escolhida.nome); setSel(null); }} />
-          : <PainelVazio haPessoas={pessoasDoSeparador(S, aba).length > 0} limpar={() => setF({ ...SEM_FILTROS })} novaLead={go(() => A.novo())} />}
-      </section>
+    <div className={cn("mx-auto w-full max-w-[1600px]", leitura && "pessoas-leitura")}>
+      <PessoaLista S={S} aba={aba} setAba={setLista} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} leitura={leitura} abrir={setSel} novaLead={go(() => A.novo())} />
+      <PessoaPainel S={S} A={A} go={go} p={escolhida} nomes={nomes} leitura={leitura} sep={sep} aoMudarSep={setSep} abrir={setSel} fechar={() => setSel(null)} />
     </div>
   );
 }

@@ -1,11 +1,13 @@
-// O separador Resumo da ficha: secções em colunas, separadas por linhas, e "Marcar como perdida" só nas leads.
+// O separador Resumo da ficha, numa só coluna: próximo passo, avisos (só se houver), contacto, origem, factos e notas, separados por linhas
+// (sem cartões dentro de cartões), e "Marcar como perdida" só nas leads.
 import { useEffect, useRef, type ReactNode } from "react";
-import { AlertCircle, ArrowRight, CalendarClock } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { eur, type Estado } from "./motor";
+import { Progress } from "@/components/ui/progress";
+import type { Estado } from "./motor";
 import { atrasada, proximoDe } from "./leadsDocs";
-import { itensPessoa, type PessoaApp } from "./pessoasDocs";
-import { LIMITE_SEM_CONTACTO, camposContacto, infoOrigemDe, probabilidade, utmDe, type Perfil } from "./perfilDocs";
+import type { PessoaApp } from "./pessoasDocs";
+import { LIMITE_SEM_CONTACTO, camposContacto, factosResumo, infoOrigemDe, type Perfil } from "./perfilDocs";
 import { ListaCampos } from "./FichaListas";
 import type { Ctx } from "./pecas";
 
@@ -58,32 +60,16 @@ function MarcarPerdida({ nome, abertos, confirmar, perder, cancelar, confirmarSi
   );
 }
 
-function NegociosCurso({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir: (id: number) => () => void }) {
-  const negocios = itensPessoa(S, p).slice(0, 3);
-  return (
-    <Secao titulo="Negócios em curso">
-      {negocios.length === 0 ? <p className="text-[15px] text-muted-foreground">Sem negócios em curso.</p> : (
-        <ul className="divide-y divide-border">
-          {negocios.map((it) => (
-            <li key={it.id}>
-              <button type="button" onClick={abrir(it.negocioId)} className="group flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 py-2 text-left text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <span><span className="block font-medium">{it.tipo} · {it.servico}</span><span className="block text-muted-foreground">{it.valor !== null ? `${eur(it.valor)} € · ` : ""}{probabilidade(it.tipo)} % de fechar</span></span>
-                <ArrowRight className="h-4 w-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Secao>
-  );
-}
+const MAX_NOTAS = 3;
+/** Os campos de origem que o Resumo mostra; o resto (primeiro e último toque, UTM) está em Entradas. */
+const CAMPOS_ORIGEM: readonly string[] = ["Origem", "Canal", "Campanha", "Via de entrada", "Formulário"];
 
 function NotasRapidas({ f }: { f: Perfil }) {
   if (f.notas.length === 0) return <Secao titulo="Notas rápidas"><p className="text-[15px] text-muted-foreground">Ainda sem notas.</p></Secao>;
   return (
     <Secao titulo="Notas rápidas">
       <ul className="divide-y divide-border">
-        {f.notas.map((n) => (
+        {f.notas.slice(0, MAX_NOTAS).map((n) => (
           <li key={n.id} className="py-2 text-[15px]"><p>{n.texto}</p><p className="text-muted-foreground">{n.autor} · {n.q}{n.exemplo ? " · exemplo" : ""}</p></li>
         ))}
       </ul>
@@ -94,36 +80,47 @@ function NotasRapidas({ f }: { f: Perfil }) {
 export interface ResumoProps extends Pick<Ctx, "S" | "A" | "go"> {
   p: PessoaApp;
   f: Perfil;
+  /** Fecha a ficha (depois de marcar a lead como perdida). */
   voltar: () => void;
 }
 
-export function FichaResumo({ S, A, go, p, f, voltar }: ResumoProps) {
-  const d = p.principal, nx = proximoDe(p, S), abrir = (id: number) => go(() => A.abrir(id));
-  const avisos = avisosDe(S, p, f), origem = infoOrigemDe(S, p), utm = utmDe(S, p);
-  const perder = () => { for (const x of p.negocios) A.perderSim(x.id); A.nav("pessoas"); voltar(); };
-  const contacto = camposContacto(f);
+/** Saúde (com a barra, de exemplo) e os factos pequenos, em etiqueta e valor. */
+function Factos({ p, f }: { p: PessoaApp; f: Perfil }) {
+  const { score } = f.saude;
   return (
-    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-x-10 gap-y-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <dl aria-label="Factos da pessoa" className="grid gap-x-6 gap-y-1.5 text-[15px] sm:grid-cols-[9rem_minmax(0,1fr)]">
+      <dt className="text-muted-foreground">Saúde</dt>
+      <dd><span className="font-semibold tabular-nums">{score}/100</span><span className="ml-1.5 text-muted-foreground">exemplo</span>
+        <Progress value={score} aria-label={`Saúde ${score} em 100`} className="mt-1 h-2 max-w-48" /></dd>
+      {factosResumo(p, f).map((x) => (
+        <div key={x.rotulo} className="contents">
+          <dt className="text-muted-foreground">{x.rotulo}</dt>
+          <dd className="break-words text-foreground">{x.valor}{x.exemplo && <span className="ml-1.5 text-muted-foreground">exemplo</span>}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function FichaResumo({ S, A, go, p, f, voltar }: ResumoProps) {
+  const d = p.principal, nx = proximoDe(p, S);
+  const avisos = avisosDe(S, p, f), origem = infoOrigemDe(S, p).origem.filter((c) => CAMPOS_ORIGEM.includes(c.rotulo));
+  const perder = () => { for (const x of p.negocios) A.perderSim(x.id); A.nav("pessoas"); voltar(); };
+  return (
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
       <Secao titulo="Próximo passo e prazo">
         <p className="text-base font-medium">{nx.t}</p>
         {nx.sub && <p className="text-[15px] text-muted-foreground">{nx.sub}</p>}
         <p className="mt-1 text-[15px]">{f.prazo.atrasado ? `Prazo ultrapassado (era ${f.prazo.data})` : `Até ${f.prazo.data}`}<span className="ml-2 text-muted-foreground">exemplo</span></p>
+        {f.visita && <p className="mt-1 text-[15px]">Visita {f.visita.estado.toLowerCase()}: {f.visita.data}{f.visita.hora && ` · ${f.visita.hora}`}</p>}
       </Secao>
-      <Secao titulo="Avisos">{avisos.length ? <ul className="grid gap-2">{avisos}</ul> : <p className="text-[15px] text-muted-foreground">Sem avisos. Está tudo em ordem com esta pessoa.</p>}</Secao>
-      <Secao titulo="Contacto"><ListaCampos campos={contacto} larg="6rem" /></Secao>
-      <Secao titulo="Origem e atribuição" exemplo>
-        <ListaCampos campos={[...origem.origem, { rotulo: "UTM em bruto", valor: utm || "Sem UTM" }]} larg="9rem" />
-      </Secao>
-      {f.visita ? (
-        <Secao titulo="Visita">
-          <p className="mb-2 flex items-center gap-2 text-[15px] font-medium"><CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />{f.visita.estado}</p>
-          <ListaCampos larg="6rem" campos={[{ rotulo: "Data", valor: f.visita.data }, { rotulo: "Hora", valor: f.visita.hora }, { rotulo: "Quem vai", valor: f.visita.quemExemplo ? `${f.visita.quem} (exemplo)` : f.visita.quem }, { rotulo: "Morada", valor: f.visita.morada }]} />
-        </Secao>
-      ) : <Secao titulo="Visita"><p className="text-[15px] text-muted-foreground">Sem visita marcada.</p></Secao>}
-      <NegociosCurso S={S} p={p} abrir={abrir} />
+      {avisos.length > 0 && <Secao titulo="Avisos"><ul className="grid gap-2">{avisos}</ul></Secao>}
+      <Secao titulo="Contacto"><ListaCampos campos={camposContacto(f)} larg="9rem" /></Secao>
+      <Secao titulo="Origem" exemplo><ListaCampos campos={origem} larg="9rem" /></Secao>
+      <Secao titulo="Sobre a pessoa"><Factos p={p} f={f} /></Secao>
       <NotasRapidas f={f} />
       {p.papel === "lead" && (
-        <div className="border-t border-border pt-4 2xl:col-span-2">
+        <div className="border-t border-border pt-4">
           <MarcarPerdida nome={p.nome} abertos={p.negocios.length} confirmar={S.confirmPerda === d.id} perder={go(() => A.perder(d.id))} cancelar={go(() => A.perderNao())} confirmarSim={go(perder)} />
         </div>
       )}

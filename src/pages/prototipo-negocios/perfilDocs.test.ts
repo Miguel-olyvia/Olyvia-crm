@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { VERSAO, seed, tot } from "./motor";
 import { clientesApp, leadsApp, todosApp } from "./pessoasDocs";
 import {
-  atividadeDe, camposContacto, estadoNegocio, factosDe, faltaParaOrcamento, minutosAtras, pagamentoDe, percursoDe, perfilDe, probabilidade, resumoClientes,
-  resumoLeads, resumoLinha, resumoTodos,
+  atividadeDe, camposContacto, estadoCurto, estadoNegocio, factosDe, factosResumo, faltaParaOrcamento, minutosAtras, pagamentoDe, percursoDe, perfilDe, probabilidade, resumoClientes,
+  resumoLeads, resumoTodos,
 } from "./perfilDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
@@ -330,19 +330,49 @@ describe("faixa de factos da ficha", () => {
   });
 });
 
-describe("resumo numa linha", () => {
+describe("estado curto do negócio (a lista do separador Negócios)", () => {
   const S = seed();
-  it("leads: duas linhas curtas", () => { expect(resumoLinha(S, "leads")).toEqual({ linhas: ["8 leads · 3 por contactar · 1 atrasada", "11.432,82 € em orçamentos"], exemplo: false }); });
-  it("clientes: duas linhas curtas, e o que está por receber é de exemplo", () => {
-    expect(resumoLinha(S, "clientes")).toEqual({ linhas: ["3 clientes · 16.225,82 € contratado", "1 obra · 8.784,10 € a receber"], exemplo: true });
+  const neg = (id: number) => S.deals.find((d) => d.id === id)!;
+  it("uma lead sem documentos está Em preparação", () => {
+    expect(estadoCurto(neg(1044))).toBe("Em preparação");
   });
-  it("nenhuma linha passa dos 42 caracteres (cabem a 340 px)", () => {
-    for (const aba of ["leads", "clientes", "todos"] as const) for (const l of resumoLinha(S, aba).linhas) expect(l.length, l).toBeLessThanOrEqual(42);
+  it("com orçamento diz Orçamento, Proposta ou Contrato, conforme o passo", () => {
+    const d = structuredClone(neg(1031));
+    d.fase = 3; d.orc!.enviada = null; d.orc!.aceite = null; d.orc!.contrato = null;
+    expect(estadoCurto(d)).toBe("Orçamento");
+    d.orc!.enviada = "07/10";
+    expect(estadoCurto(d)).toBe("Proposta");
+    d.orc!.aceite = "08/10"; d.orc!.vendaDireta = false;
+    expect(estadoCurto(d)).toBe("Contrato");
+    d.orc!.contrato = "assinado";
+    expect(estadoCurto(d)).toBe("Contrato");
   });
-  it("todos", () => { expect(resumoLinha(S, "todos")).toEqual({ linhas: ["11 pessoas · 8 leads · 3 clientes"], exemplo: false }); });
-  it("singular e plural", () => {
+  it("em Financeiro e em Obra diz a fase", () => {
+    const d = structuredClone(neg(1031));
+    d.fase = 4;
+    expect(estadoCurto(d)).toBe("Financeiro");
+    d.fase = 5;
+    expect(estadoCurto(d)).toBe("Obra");
+  });
+  it("só usa as palavras da lista", () => {
+    const ok = ["Em preparação", "Orçamento", "Proposta", "Contrato", "Financeiro", "Obra"];
+    expect(S.deals.every((d) => ok.includes(estadoCurto(d)))).toBe(true);
+  });
+});
+
+describe("factos do Resumo", () => {
+  const S = seed();
+  it("só traz o que o Resumo não diz noutro sítio: comercial, criada, tipo de cliente e contacto preferido", () => {
+    const p = todosApp(S).find((x) => x.nome === "Pedro Lopes")!;
+    expect(factosResumo(p, perfilDe(p, S)).map((x) => x.rotulo)).toEqual(["Comercial", "Criada", "Tipo de cliente", "Contacto preferido"]);
+  });
+  it("mantém a marca de exemplo e omite o contacto preferido quando não existe", () => {
     const T = seed();
-    for (const d of T.deals) if (d.id !== 1044) d.perdido = true;
-    expect(resumoLinha(T, "leads").linhas[0]).toBe("1 lead · 1 por contactar · 1 atrasada");
+    delete T.deals.find((d) => d.id === 1044)!.f.tipo_cliente;
+    delete T.deals.find((d) => d.id === 1044)!.f.pref;
+    const p = todosApp(T).find((x) => x.nome === "Pedro Lopes")!;
+    const r = factosResumo(p, perfilDe(p, T));
+    expect(r.find((x) => x.rotulo === "Tipo de cliente")?.exemplo).toBe(true);
+    expect(r.some((x) => x.rotulo === "Contacto preferido")).toBe(false);
   });
 });

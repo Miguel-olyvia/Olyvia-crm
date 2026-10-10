@@ -221,7 +221,7 @@
 .pg.estreito .withside > .card .kv{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}
 @media (max-width:640px){.pg.estreito .withside > .card .kv{grid-template-columns:minmax(0,1fr) auto}}
 .pn .toast{background:hsl(var(--sidebar-background))}
-.pn .toasts{z-index:70}
+.pn .toasts{z-index:650}
 /* cantos e sombras como os cartões da Olyvia */
 .pg .card,.pg .kpi,.pg .dhead,.pg .sec{border-radius:16px;box-shadow:var(--shadow-sm)}
 .pg .col{border-radius:16px;background:hsl(var(--muted) / .7)}
@@ -283,10 +283,9 @@
 .leitura em,.leitura i{font-style:normal}
 /* Página Pessoas com leitura fácil: espaçamento no mínimo do WCAG 1.4.12 (letra 0,12em, palavra 0,16em, linha 1,5) em todos os
    descendentes, o menu dos Select incluído (abre num portal com "calma leitura pessoas-leitura"). Não altera a regra global .leitura:
-   o line-height das linhas de texto (1,7) mantém-se. O zoom de 1,1 faz o h-dvh da página passar a altura; divide-se por 1,1. */
+   o line-height das linhas de texto (1,7) mantém-se. */
 .leitura .pessoas-leitura,.leitura .pessoas-leitura *,.leitura.pessoas-leitura,.leitura.pessoas-leitura *{letter-spacing:.12em;word-spacing:.16em}
 .leitura .pessoas-leitura *:not(p,li,label),.leitura.pessoas-leitura *:not(p,li,label){line-height:1.5}
-@media (min-width:1024px){.leitura .pessoas-pagina{height:calc(100dvh / 1.1)}}
 
 /* Proposta simples, 2.ª versão (09/10): menos "preto no branco". Fundo suave
    e cartões brancos para agrupar; a cor só nos ícones de cada fase e bloco. */
@@ -294,16 +293,16 @@
   --shadow-sm:0 1px 2px rgb(30 30 60 / .05), 0 1px 1px rgb(30 30 60 / .03);--shadow-md:0 4px 14px rgb(30 30 60 / .08)}
 .leitura{--background:42 45% 95%;--muted:40 22% 91%}
 
-/* Ficha da pessoa: as seis etapas e o percurso do negócio ajustam-se à largura do próprio bloco (e não à do ecrã), porque a ficha
-   ocupa só o que sobra ao lado da lista. Etapas: 2 colunas, 3 a partir de 420 px, 6 a partir de 760 px.
-   Percurso: lista vertical, e em quatro passos lado a lado a partir de 520 px. */
-.etapas-cx,.percurso-cx{container-type:inline-size;min-width:0}
-.etapas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem .5rem;margin:0;padding:0;list-style:none}
-@container (min-width:420px){.etapas{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@container (min-width:760px){.etapas{grid-template-columns:repeat(6,minmax(0,1fr))}}
-.detalhe-cx{container-type:inline-size;min-width:0}
-.detalhe{display:grid;grid-template-columns:minmax(0,1fr);gap:1.5rem 2.5rem}
-@container (min-width:900px){.detalhe{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* Ficha da pessoa, no painel lateral. As seis etapas ajustam-se à largura do próprio bloco: com 560 px ou mais cada uma mostra o nome,
+   senão ficam só os ícones e o nome da atual por baixo (.etapa-atual). O percurso do negócio (quatro passos) é uma lista vertical e,
+   a partir de 440 px de largura do bloco, uma linha fina. O separador Negócios é um mestre-detalhe: lista e detalhe lado a lado a partir de 640 px. */
+.etapas-cx,.percurso-cx,.negocios-cx{container-type:inline-size;min-width:0}
+.etapas{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.5rem;margin:0;padding:0;list-style:none}
+.etapa-nome{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@container (min-width:560px){.etapa-nome{position:static;width:auto;height:auto;overflow:visible;clip:auto}.etapa-atual{display:none}}
 .percurso{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:0;padding:0;list-style:none}
 .percurso>li{border-left-width:2px;padding-left:.75rem}
-@container (min-width:520px){.percurso{grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}.percurso>li{border-left-width:0;border-top-width:2px;padding-left:0;padding-top:.5rem}}
+@container (min-width:440px){.percurso{grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem}.percurso>li{border-left-width:0;border-top-width:2px;padding-left:0;padding-top:.5rem}}
+.negocios-md{display:grid;grid-template-columns:minmax(0,1fr);gap:1.5rem}
+.negocios-vazio{display:none}
+@container (min-width:640px){.negocios-md{grid-template-columns:minmax(13rem,15rem) minmax(0,1fr)}.negocios-vazio{display:block}}

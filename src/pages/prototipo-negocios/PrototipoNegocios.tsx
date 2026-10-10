@@ -2,7 +2,7 @@
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
+  Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ import { NegocioSimples } from "./NegocioSimples";
 import { NegociosSimples } from "./NegociosSimples";
 import { NegociosV2 } from "./NegociosV2";
 import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
+import { ICONE_NEGOCIO } from "./iconeNegocio";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
 import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
 import { CamposEditor } from "./CamposEditor";
@@ -164,7 +165,7 @@ export default function PrototipoNegocios() {
   // Com a V2, Pessoas ocupa o lugar de Leads e Clientes.
   const pessoas: [Vista, string, LucideIcon][] = v2 ? [["pessoas", "Pessoas", Users]] : [["leads", "Leads", Users], ["clientes", "Clientes", Building]];
   const itens: [Vista, string, LucideIcon, number?][] = [
-    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", Handshake], ...pessoas,
+    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", ICONE_NEGOCIO], ...pessoas,
     ["operacoes", "Operações", Wrench], ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
   ];
   const itensAtual = itens.filter(([v]) => v !== "leads"); // o aspeto atual não tem a página de Leads

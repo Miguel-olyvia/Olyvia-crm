@@ -3,7 +3,7 @@ import { seed, tot, type Estado, type Papel } from "./motor";
 import { leadsDe } from "./leadsDocs";
 import {
   SEM_FILTROS, chipsDe, clientesApp, comerciaisDe, contagens, dadosCliente, documentosDe, filtrarPessoas, filtrarTexto, filtrosEfetivos, itensPessoa, leadsApp,
-  listaVisivel, negocioDoItem, negociosAgrupados, negociosDemo, ordenarPessoas, primeiraDaLista, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
+  listaVisivel, negocioDoItem, negociosAgrupados, negociosDemo, ordenarPessoas, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
 } from "./pessoasDocs";
 import { resumoClientes, resumoLeads, resumoTodos } from "./perfilDocs";
 
@@ -304,21 +304,21 @@ describe("pessoas · filtros extra (origem e comercial)", () => {
   });
 });
 
-describe("pessoas · a escolha automática da primeira da lista", () => {
+describe("pessoas · a lista como se vê (ordem e filtros)", () => {
   const S = seed();
-  it("sem escolha, a primeira da lista ordenada por urgência é a mais urgente (a atrasada)", () => {
-    expect(primeiraDaLista(S, "leads", SEM_FILTROS, "urgencia")?.nome).toBe("Pedro Lopes");
-    expect(primeiraDaLista(S, "clientes", SEM_FILTROS, "urgencia")?.nome).toBe("Marta Lima");
-    expect(primeiraDaLista(S, "todos", SEM_FILTROS, "urgencia")?.nome).toBe("Pedro Lopes");
+  it("a primeira da lista ordenada por urgência é a mais urgente (a atrasada)", () => {
+    expect(listaVisivel(S, "leads", SEM_FILTROS, "urgencia")[0]?.nome).toBe("Pedro Lopes");
+    expect(listaVisivel(S, "clientes", SEM_FILTROS, "urgencia")[0]?.nome).toBe("Marta Lima");
+    expect(listaVisivel(S, "todos", SEM_FILTROS, "urgencia")[0]?.nome).toBe("Pedro Lopes");
   });
   it("segue a ordem e os filtros escolhidos", () => {
     const porValor = nomes(ordenarPessoas(S, leadsApp(S), "valor"));
-    expect(primeiraDaLista(S, "leads", SEM_FILTROS, "valor")?.nome).toBe(porValor[0]);
-    expect(primeiraDaLista(S, "leads", { ...SEM_FILTROS, filtro: "visita" }, "urgencia")?.nome).toBe("Hugo Matos");
+    expect(listaVisivel(S, "leads", SEM_FILTROS, "valor")[0]?.nome).toBe(porValor[0]);
+    expect(listaVisivel(S, "leads", { ...SEM_FILTROS, filtro: "visita" }, "urgencia")[0]?.nome).toBe("Hugo Matos");
     expect(nomes(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "wc social" }, "urgencia"))).toEqual(["Pedro Lopes", "Manuel Costa"]);
   });
-  it("lista vazia (sem resultados): não há ninguém para escolher", () => {
-    expect(primeiraDaLista(S, "leads", { ...SEM_FILTROS, q: "zzzz" }, "urgencia")).toBeUndefined();
+  it("lista vazia (sem resultados): não há ninguém", () => {
+    expect(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "zzzz" }, "urgencia")[0]).toBeUndefined();
     expect(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "zzzz" }, "urgencia")).toEqual([]);
   });
   it("um chip que o separador não tem volta a Todas; Com visita é um filtro à parte, só das leads", () => {
@@ -330,7 +330,7 @@ describe("pessoas · a escolha automática da primeira da lista", () => {
   });
   it("não muda o Estado", () => {
     const antes = JSON.stringify(S);
-    primeiraDaLista(S, "todos", SEM_FILTROS, "recentes");
+    listaVisivel(S, "todos", SEM_FILTROS, "recentes");
     expect(JSON.stringify(S)).toBe(antes);
   });
 });
