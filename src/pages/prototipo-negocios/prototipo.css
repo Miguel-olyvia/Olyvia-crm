@@ -281,6 +281,12 @@
 .leitura main *{letter-spacing:.02em;word-spacing:.1em}
 .leitura main p,.leitura main li,.leitura main label{line-height:1.7}
 .leitura em,.leitura i{font-style:normal}
+/* Página Pessoas com leitura fácil: espaçamento no mínimo do WCAG 1.4.12 (letra 0,12em, palavra 0,16em, linha 1,5) em todos os
+   descendentes, o menu dos Select incluído (abre num portal com "calma leitura pessoas-leitura"). Não altera a regra global .leitura:
+   o line-height das linhas de texto (1,7) mantém-se. O zoom de 1,1 faz o h-dvh da página passar a altura; divide-se por 1,1. */
+.leitura .pessoas-leitura,.leitura .pessoas-leitura *,.leitura.pessoas-leitura,.leitura.pessoas-leitura *{letter-spacing:.12em;word-spacing:.16em}
+.leitura .pessoas-leitura *:not(p,li,label),.leitura.pessoas-leitura *:not(p,li,label){line-height:1.5}
+@media (min-width:1024px){.leitura .pessoas-pagina{height:calc(100dvh / 1.1)}}
 
 /* Proposta simples, 2.ª versão (09/10): menos "preto no branco". Fundo suave
    e cartões brancos para agrupar; a cor só nos ícones de cada fase e bloco. */

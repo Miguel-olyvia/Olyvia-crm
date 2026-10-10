@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { seed, tot, type Estado, type Papel } from "./motor";
 import { leadsDe } from "./leadsDocs";
 import {
-  clientesApp, contagens, dadosCliente, documentosDe, filtrarTexto, itensPessoa, leadsApp, negociosDemo, pessoasDoSeparador, separadorPorDefeito, todosApp,
+  SEM_FILTROS, clientesApp, comerciaisDe, contagens, dadosCliente, documentosDe, filtrarPessoas, filtrarTexto, itensPessoa, leadsApp, negociosDemo,
+  ordenarPessoas, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
 } from "./pessoasDocs";
+import { resumoClientes, resumoLeads, resumoTodos } from "./perfilDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
 const CLIENTES = ["Tiago Almeida", "Marta Lima", "Joana Ribeiro"];
@@ -205,5 +207,99 @@ describe("pessoas · não mutam o Estado", () => {
     for (const p of todosApp(S)) { itensPessoa(S, p); documentosDe(p); if (p.papel === "cliente") dadosCliente(S, p); }
     contagens(S, "a"); filtrarTexto(todosApp(S), "a");
     expect(JSON.stringify(S)).toBe(antes);
+  });
+});
+
+describe("pessoas · resumos por separador face à seed", () => {
+  it("o resumo bate com as listas de cada separador", () => {
+    const S = seed();
+    const l = resumoLeads(S), c = resumoClientes(S), t = resumoTodos(S);
+    expect(l.leads).toBe(leadsApp(S).length);
+    expect(c.clientes).toBe(clientesApp(S).length);
+    expect(t).toEqual({ pessoas: 11, leads: l.leads, clientes: c.clientes });
+    expect(l.porContactar).toBe(leadsApp(S).filter((p) => p.principal.fase === 0).length);
+    expect(c.valorContratado).toBeCloseTo(clientesApp(S).reduce((a, p) => a + dadosCliente(S, p).valorTotal, 0), 2);
+  });
+  it("uma lead nova por contactar sobe os números certos", () => {
+    const S = seed();
+    const antes = resumoLeads(S);
+    clone(S, 1043, 2501, { nome: "Nova Pessoa", tel: "910 000 000", atraso: true });
+    const depois = resumoLeads(S);
+    expect(depois.leads).toBe(antes.leads + 1);
+    expect(depois.porContactar).toBe(antes.porContactar + 1);
+    expect(depois.atrasadas).toBe(antes.atrasadas + 1);
+    expect(resumoTodos(S).pessoas).toBe(12);
+  });
+});
+
+describe("pessoas · ordenar", () => {
+  const S = seed();
+  it("urgência mantém a ordem da lista", () => {
+    const ls = leadsApp(S);
+    expect(nomes(ordenarPessoas(S, ls, "urgencia"))).toEqual(nomes(ls));
+    expect(nomes(ordenarPessoas(S, ls, "urgencia"))[0]).toBe("Pedro Lopes");
+  });
+  it("mais recentes: a que chegou há menos tempo primeiro (Rita Sousa, 08/10) e a mais antiga no fim", () => {
+    const o = nomes(ordenarPessoas(S, leadsApp(S), "recentes"));
+    expect(o[0]).toBe("Rita Sousa");
+    expect(o[o.length - 1]).toBe("Carla Nunes");
+    expect(o).toHaveLength(8);
+  });
+  it("mais recentes com empates: quem chegou ao mesmo tempo mantém a ordem da lista (ordem estável)", () => {
+    const S2 = seed();
+    clone(S2, 1043, 91001, { nome: "Zé Empate", tel: "910 000 001", quando: "10/10" });
+    clone(S2, 1043, 91002, { nome: "Abel Empate", tel: "910 000 002", quando: "10/10" });
+    const ls = leadsApp(S2);
+    const ordemLista = nomes(ls).filter((n) => n.endsWith("Empate"));
+    expect(ordemLista).toHaveLength(2);
+    const o = nomes(ordenarPessoas(S2, ls, "recentes"));
+    expect(o.filter((n) => n.endsWith("Empate"))).toEqual(ordemLista);
+    expect(o.slice(0, 2).sort()).toEqual(["Abel Empate", "Zé Empate"]);
+    expect(o[2]).toBe("Rita Sousa");
+    expect(nomes(ordenarPessoas(S2, ls, "recentes"))).toEqual(o);
+  });
+  it("valor: do maior para o menor, e quem não tem orçamento fica no fim pela ordem original", () => {
+    const o = ordenarPessoas(S, leadsApp(S), "valor");
+    const v = o.map((p) => valorPessoa(S, p));
+    for (let i = 1; i < v.length; i++) expect(v[i]).toBeLessThanOrEqual(v[i - 1]);
+    expect(nomes(o).slice(0, 2).sort()).toEqual(["Carla Nunes", "Sérgio Pinto"]);
+    expect(nomes(o).slice(2)).toEqual(nomes(leadsApp(S)).filter((n) => !["Carla Nunes", "Sérgio Pinto"].includes(n)));
+  });
+  it("não altera a lista de entrada", () => {
+    const ls = leadsApp(S), antes = nomes(ls);
+    ordenarPessoas(S, ls, "valor");
+    expect(nomes(ls)).toEqual(antes);
+  });
+});
+
+describe("pessoas · filtros extra (origem e comercial)", () => {
+  const S = seed();
+  it("as origens e os comerciais disponíveis vêm das pessoas", () => {
+    expect(origensDe(S, todosApp(S))).toEqual(expect.arrayContaining(["Google Ads", "Meta Ads", "Indicação", "Site", "TikTok Ads"]));
+    expect(comerciaisDe(todosApp(S))).toEqual(["Rúben"]);
+  });
+  it("origem filtra pelo primeiro toque", () => {
+    const f = (origem: string) => nomes(filtrarPessoas(S, todosApp(S), { ...SEM_FILTROS, origem }));
+    expect(f("Google Ads")).toEqual(["Luísa Freitas"]);
+    expect(f("Meta Ads")).toEqual(["Rita Sousa"]);
+    expect(f("TikTok Ads")).toEqual(["Ana Martins"]);
+    expect(f("Indicação").sort()).toEqual(["Hugo Matos", "Joana Ribeiro"]);
+    expect(f("Origem que não existe")).toEqual([]);
+    expect(f("")).toHaveLength(11);
+  });
+  it("comercial filtra por quem é dono do negócio", () => {
+    const T = seed();
+    clone(T, 1043, 2601, { nome: "Ana Martins", dono: "direcao" });
+    T.deals.find((d) => d.id === 1043)!.dono = "direcao";
+    const f = (comercial: string) => nomes(filtrarPessoas(T, todosApp(T), { ...SEM_FILTROS, comercial }));
+    expect(f("Direção")).toEqual(["Ana Martins"]);
+    expect(f("Rúben")).toHaveLength(10);
+    expect(comerciaisDe(todosApp(T))).toEqual(["Direção", "Rúben"]);
+  });
+  it("combina com a pesquisa e com os filtros de lead", () => {
+    const r = filtrarPessoas(S, leadsApp(S), { ...SEM_FILTROS, filtro: "visita", origem: "Google Ads" });
+    expect(nomes(r)).toEqual(["Luísa Freitas"]);
+    expect(filtrarPessoas(S, leadsApp(S), { ...SEM_FILTROS, q: "cascais", origem: "Google Ads" })).toEqual([]);
+    expect(nomes(filtrarPessoas(S, leadsApp(S), { ...SEM_FILTROS, filtro: "atrasadas" }))).toEqual(["Pedro Lopes"]);
   });
 });

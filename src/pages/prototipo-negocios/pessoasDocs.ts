@@ -1,7 +1,8 @@
 // Página de Pessoas: uma lista única de leads e clientes. A pessoa é uma só; lead e cliente são papéis dela.
 // Funções puras: nada aqui muda o Estado. O negócio de exemplo do cliente (negociosDemo) vive só nesta camada.
-import { criarOrc, proximo, tot, type Estado, type Negocio, type Papel } from "./motor";
-import { ehLead, filtrarLeads, idade, itensNegocios, leadsDe, pessoasDe, type ItemNegocio, type Pessoa } from "./leadsDocs";
+import { PAPEIS, criarOrc, proximo, tot, type Estado, type Negocio, type Papel } from "./motor";
+import { ehLead, filtrarLeads, idade, itensNegocios, leadsDe, pessoasDe, type FiltroLead, type ItemNegocio, type Pessoa } from "./leadsDocs";
+import { toquesDe } from "./toquesDocs";
 
 export type PapelPessoa = "lead" | "cliente";
 export type SeparadorLista = "leads" | "clientes" | "todos";
@@ -67,7 +68,7 @@ export function negociosDemo(S: Estado): Negocio[] {
 /* ---------------------------------------------------------------- quem é quem */
 
 /** Já é contrato: negócio em Financeiro ou Obra, ou contrato assinado. */
-const ehContrato = (d: Negocio): boolean => d.fase >= 4 || d.orc?.contrato === "assinado";
+export const ehContrato = (d: Negocio): boolean => d.fase >= 4 || d.orc?.contrato === "assinado";
 
 function todasAsPessoas(S: Estado): PessoaApp[] {
   const demo = negociosDemo(S);
@@ -153,4 +154,51 @@ export function itensPessoa(S: Estado, p: PessoaApp): ItemNegocio[] {
     demo: true, conjunta: false, linhas: [],
   }));
   return [...demo, ...itensNegocios(S, p)];
+}
+
+/* ---------------------------------------------------------------- ordenar e filtrar a lista */
+
+export type Ordem = "urgencia" | "recentes" | "valor";
+export const ORDENS: { id: Ordem; nome: string }[] = [
+  { id: "urgencia", nome: "Urgência" }, { id: "recentes", nome: "Mais recentes" }, { id: "valor", nome: "Valor" },
+];
+
+/** Os filtros da lista. `origem` e `comercial` vazios querem dizer "todos". */
+export interface FiltrosPessoa { filtro: FiltroLead; soMinhas: boolean; q: string; origem: string; comercial: string }
+export const SEM_FILTROS: FiltrosPessoa = { filtro: "todas", soMinhas: false, q: "", origem: "", comercial: "" };
+
+/** Soma dos orçamentos da pessoa (com o IVA), o negócio de exemplo incluído. */
+export function valorPessoa(S: Estado, p: PessoaApp): number {
+  return [...p.negocios, ...p.extra].filter((d) => d.orc).reduce((a, d) => a + tot(d, S).pf, 0);
+}
+
+/** Dias desde que a pessoa chegou: o do negócio mais antigo. */
+export function idadePessoa(p: PessoaApp): number {
+  return p.negocios.reduce((a, d) => Math.max(a, idade(d.quando)), 0);
+}
+
+/** A origem da pessoa: a do primeiro toque. */
+export function origemDe(S: Estado, p: PessoaApp): string {
+  return toquesDe(S, p.nome)[0]?.origem ?? p.principal.origem;
+}
+
+export const comercialDe = (p: PessoaApp): string => PAPEIS[p.principal.dono].nome;
+
+const unicos = (l: string[]): string[] => [...new Set(l)].sort((a, b) => a.localeCompare(b, "pt"));
+export const origensDe = (S: Estado, ps: PessoaApp[]): string[] => unicos(ps.map((p) => origemDe(S, p)));
+export const comerciaisDe = (ps: PessoaApp[]): string[] => unicos(ps.map(comercialDe));
+
+/** Urgência mantém a ordem de cada lista (já vem por urgência); os outros desempatam por essa ordem. */
+export function ordenarPessoas(S: Estado, ps: PessoaApp[], ordem: Ordem): PessoaApp[] {
+  const itens = ps.map((p, i) => ({ p, i, v: valorPessoa(S, p), n: idadePessoa(p) }));
+  if (ordem === "recentes") itens.sort((a, b) => a.n - b.n || a.i - b.i);
+  else if (ordem === "valor") itens.sort((a, b) => b.v - a.v || a.i - b.i);
+  return itens.map((x) => x.p);
+}
+
+/** A pesquisa e os filtros de leads (para os clientes só contam os que fazem sentido) e depois a origem e o comercial. */
+export function filtrarPessoas(S: Estado, ps: PessoaApp[], f: FiltrosPessoa): PessoaApp[] {
+  return filtrarLeads(ps, f.filtro, f.soMinhas, f.q)
+    .filter((p) => !f.origem || origemDe(S, p) === f.origem)
+    .filter((p) => !f.comercial || comercialDe(p) === f.comercial);
 }
