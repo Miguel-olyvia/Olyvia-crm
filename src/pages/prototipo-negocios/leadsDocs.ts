@@ -1,5 +1,5 @@
-// Página de Leads: quem é lead, os negócios e as submissões de cada uma.
-// Funções puras: nada aqui muda o Estado. As submissões são de exemplo (não existem no Estado).
+// Página de Leads: quem é lead e os negócios de cada uma.
+// Funções puras: nada aqui muda o Estado. Os toques (formulários e registos à mão) estão em toquesDocs.ts.
 import { FASES, PAPEIS, aberto, proximo, type Estado, type Evento, type Negocio, type Proximo } from "./motor";
 import { cartoesV2, docFase, type CartaoV2 } from "./negociosDocs";
 
@@ -17,25 +17,9 @@ export interface Pessoa {
 
 export type FiltroLead = "todas" | "por_contactar" | "visita" | "atrasadas";
 
-export type EstadoSubmissao = "por_rever" | "associada" | "gerou_lead" | "revista";
-
-export interface CampoSubmissao {
+export interface CampoRotulado {
   rotulo: string;
   valor: string;
-}
-
-export interface Submissao {
-  id: string;
-  /** Sempre verdadeiro: estes dados não existem no protótipo. */
-  exemplo: true;
-  formulario: string;
-  quando: string;
-  estado: EstadoSubmissao;
-  /** Porque não gerou lead nova (só quando não gerou). */
-  motivo: string | null;
-  campos: CampoSubmissao[];
-  origem: string;
-  utm: string;
 }
 
 export interface ItemNegocio {
@@ -52,16 +36,11 @@ export interface ItemNegocio {
 }
 
 export interface InfoLead {
-  contacto: CampoSubmissao[];
-  local: CampoSubmissao[];
-  origem: CampoSubmissao[];
+  contacto: CampoRotulado[];
+  local: CampoRotulado[];
   comercial: string;
   notas: string;
 }
-
-export const ESTADO_SUBMISSAO: Record<EstadoSubmissao, string> = {
-  por_rever: "Por rever", associada: "Associada à ficha", gerou_lead: "Gerou lead nova", revista: "Revista",
-};
 
 export const FILTROS_LEAD: { id: FiltroLead; nome: string }[] = [
   { id: "todas", nome: "Todas" }, { id: "por_contactar", nome: "Por contactar" }, { id: "visita", nome: "Com visita" }, { id: "atrasadas", nome: "Atrasadas" },
@@ -101,7 +80,7 @@ function lerQuando(q: string): { dia: number; mes: number; hm: string } | null {
 }
 
 /** Idade em dias da lead (para ordenar); as sem data contam como novas. */
-function idade(q: string): number {
+export function idade(q: string): number {
   const t = lerQuando(q);
   return t ? diaDoAno(REF.dia, REF.mes) - diaDoAno(t.dia, t.mes) : 0;
 }
@@ -140,7 +119,7 @@ export function leadsDe(S: Estado): Pessoa[] {
     .map((x) => x.p);
 }
 
-export function filtrarLeads(ls: Pessoa[], filtro: FiltroLead | string, soMinhas: boolean, q: string): Pessoa[] {
+export function filtrarLeads<T extends Pessoa>(ls: T[], filtro: FiltroLead | string, soMinhas: boolean, q: string): T[] {
   const ql = q.trim().toLowerCase();
   return ls.filter((p) => {
     if (ql && !(p.nome + " " + p.tel + " " + p.principal.servico + " " + localDe(p.principal)).toLowerCase().includes(ql)) return false;
@@ -167,61 +146,13 @@ export function itensNegocios(S: Estado, p: Pessoa): ItemNegocio[] {
   return [...sem, ...cartoes.map(doc)];
 }
 
-/* ---------------------------------------------------------------- submissões de exemplo */
-
-function formularioDe(d: Negocio): string {
-  const o = d.origem.toLowerCase();
-  if (o.startsWith("campanha")) return `${d.origem[0].toUpperCase()}${d.origem.slice(1)} · formulário "${d.linha === "coz" ? "Cozinha nova" : "Casa de banho nova"}"`;
-  if (o === "site") return "Site · pedido de orçamento";
-  if (o === "telefone") return "Pedido por telefone (registado pela equipa)";
-  if (o === "recomendação") return "Recomendação (registada pela equipa)";
-  return "Registo manual da equipa";
-}
-
-function utmDe(d: Negocio): string {
-  const o = d.origem.toLowerCase();
-  if (o.startsWith("campanha")) return "utm_source=meta · utm_medium=paid · utm_campaign=outono";
-  if (o === "site") return "utm_source=google · utm_medium=organic";
-  return "sem UTM (não veio de um formulário público)";
-}
-
-function camposDe(d: Negocio): CampoSubmissao[] {
-  const c: CampoSubmissao[] = [{ rotulo: "Nome", valor: d.nome }, { rotulo: "Telefone", valor: d.tel }];
-  const mais: [string, string | undefined][] = [
-    ["Email", d.f.email], ["Localidade", localDe(d)], ["Serviço", d.servico], ["Pedido", d.f.pedido],
-  ];
-  for (const [rotulo, valor] of mais) if (valor) c.push({ rotulo, valor });
-  return c;
-}
-
-function somarDias(q: string, n: number): string {
+/** Soma dias a uma data "dd/mm" ou "dd/mm hh:mm"; vazio se não houver data. */
+export function somarDias(q: string, n: number): string {
   const t = lerQuando(q);
   if (!t) return "";
   const x = new Date(Date.UTC(REF.ano, t.mes - 1, t.dia + n));
   const dd = String(x.getUTCDate()).padStart(2, "0"), mm = String(x.getUTCMonth() + 1).padStart(2, "0");
   return `${dd}/${mm}${t.hm !== "00:00" ? " " + t.hm : ""}`;
-}
-
-/**
- * As submissões de formulário de exemplo de uma lead, da mais antiga para a mais recente.
- * Uma por lead; quem tem mais do que um negócio tem uma segunda, associada à ficha (mostra a deduplicação).
- */
-export function submissoesExemplo(S: Estado, p: Pessoa): Submissao[] {
-  const d = p.negocios.reduce((a, x) => (idade(x.quando) > idade(a.quando) ? x : a), p.negocios[0]);
-  const estado: EstadoSubmissao = d.fase === 0 ? "por_rever" : d.fase >= 3 ? "revista" : "gerou_lead";
-  const primeira: Submissao = {
-    id: `sub-${d.id}-1`, exemplo: true, formulario: formularioDe(d), quando: d.quando || "hoje", estado,
-    motivo: null, campos: camposDe(d), origem: d.origem, utm: utmDe(d),
-  };
-  const subs = [primeira];
-  if (itensNegocios(S, p).length > 1) {
-    subs.push({
-      id: `sub-${d.id}-2`, exemplo: true, formulario: formularioDe(d), quando: somarDias(d.quando, 2) || "hoje", estado: "associada",
-      motivo: "O telefone já existia nesta ficha, por isso não criou uma lead nova.",
-      campos: camposDe(d).filter((c) => c.rotulo !== "Pedido"), origem: d.origem, utm: utmDe(d),
-    });
-  }
-  return subs;
 }
 
 /* ---------------------------------------------------------------- informação e histórico */
@@ -231,17 +162,17 @@ const LOCAL: [string, string][] = [
   ["tem_elevador", "Elevador"], ["acesso", "Acesso"], ["estacionamento", "Estacionamento"],
 ];
 
-function par(l: [string, string | undefined][]): CampoSubmissao[] {
+function par(l: [string, string | undefined][]): CampoRotulado[] {
   return l.filter((x): x is [string, string] => !!x[1]).map(([rotulo, valor]) => ({ rotulo, valor }));
 }
 
+/** Contacto, local, responsável e notas. A origem vem dos toques (toquesDocs.ts). */
 export function infoLead(p: Pessoa): InfoLead {
   const d = p.principal, f = d.f;
   const morada = [f.morada, f.cp, f.localidade].filter(Boolean).join(", ");
   return {
-    contacto: par([["Telefone", d.tel], ["Email", f.email], ["Prefere", f.pref]]),
+    contacto: par([["Telefone", d.tel], ["Email", f.email], ["Consentimento (RGPD)", f.rgpd], ["Prefere", f.pref]]),
     local: [...par([["Morada", morada || d.local]]), ...par(LOCAL.map(([k, r]): [string, string | undefined] => [r, f[k]]))],
-    origem: par([["Origem", d.origem], ["Campanha ou formulário", f.campanha || formularioDe(d)]]),
     comercial: PAPEIS[d.dono].nome,
     notas: f.pedido || "",
   };

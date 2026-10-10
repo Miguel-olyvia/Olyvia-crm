@@ -155,7 +155,7 @@ export interface Negocio {
   hist: Evento[];
 }
 
-export type Vista = "hoje" | "negocios" | "negocio" | "leads" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes" | "campos";
+export type Vista = "hoje" | "negocios" | "negocio" | "leads" | "pessoas" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes" | "campos";
 
 export interface Estado {
   v: number;

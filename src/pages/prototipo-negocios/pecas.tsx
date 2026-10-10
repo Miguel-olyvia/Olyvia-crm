@@ -1,5 +1,5 @@
 // Peças comuns do protótipo de Negócios.
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Euro, FileSignature, Hammer, Phone, Ruler, Target, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Estado, acoes } from "./motor";
@@ -60,6 +60,16 @@ export function fazer(A: Ctx["A"], act: string, id: number) {
 }
 
 /* A cor de cada fase: só nos ícones, nunca no texto, para ajudar a reconhecer de relance. */
+/** Navegação de um tablist por setas, Home e End: escolhe o separador seguinte e passa-lhe o foco (o id do botão é `${prefixo}-${id}`). */
+export function teclasTablist<T extends string>(e: KeyboardEvent<HTMLButtonElement>, i: number, ids: readonly T[], prefixo: string, escolher: (id: T) => void): void {
+  const n = ids.length;
+  const j = e.key === "ArrowRight" ? (i + 1) % n : e.key === "ArrowLeft" ? (i - 1 + n) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
+  if (j < 0) return;
+  e.preventDefault();
+  escolher(ids[j]);
+  document.getElementById(`${prefixo}-${ids[j]}`)?.focus();
+}
+
 export const FASE_ICONE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 export const FASE_COR = [
   "bg-sky-100 text-sky-700", "bg-teal-100 text-teal-700", "bg-amber-100 text-amber-800",

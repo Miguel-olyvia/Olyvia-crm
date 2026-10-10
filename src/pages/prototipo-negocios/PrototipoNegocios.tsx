@@ -17,6 +17,8 @@ import { HojeSimples } from "./HojeSimples";
 import { LeadsSimples, esquecerLeads } from "./LeadsSimples";
 import { NegocioSimples } from "./NegocioSimples";
 import { NegociosSimples } from "./NegociosSimples";
+import { NegociosV2 } from "./NegociosV2";
+import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
 import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
 import { CamposEditor } from "./CamposEditor";
@@ -24,6 +26,16 @@ import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
 const CHAVE = "olyvia-prototipo-negocios";
+// O interruptor "Ver a V2" vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração.
+const CHAVE_V2 = "olyvia-prototipo-v2";
+
+function lerV2(): boolean {
+  try {
+    return localStorage.getItem(CHAVE_V2) === "1";
+  } catch {
+    return false; // sem storage: V2 desligada
+  }
+}
 
 function ler(): Estado {
   try {
@@ -44,6 +56,7 @@ export default function PrototipoNegocios() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [q, setQ] = useState("");
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
+  const [v2On, setV2On] = useState<boolean>(lerV2);
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
 
@@ -92,11 +105,23 @@ export default function PrototipoNegocios() {
     try { localStorage.removeItem(CHAVE); } catch { /* ignora */ }
     ref.current = seed();
     esquecerLeads();
+    esquecerPessoas();
     avisar({ msg: "Demonstração reposta", sub: "Todos os negócios voltaram ao início", kind: "ok" });
   });
 
   const ctx: Ctx = { S, A, run, go, q, setQ, repor };
   const simples = (S.aspeto ?? "simples") === "simples";
+  // A V2 só se aplica ao aspeto simples: no aspeto atual o interruptor nem aparece.
+  const v2 = v2On && simples;
+  const mudarV2 = (on: boolean) => {
+    setV2On(on);
+    try { localStorage.setItem(CHAVE_V2, on ? "1" : "0"); } catch { /* sem storage: vale só nesta sessão */ }
+    // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
+    run(() => {
+      if (on && (ref.current.view === "leads" || ref.current.view === "clientes")) A.nav("pessoas");
+      if (!on && ref.current.view === "pessoas") A.nav("leads");
+    });
+  };
 
   // A letra da proposta simples: Lexend, desenhada para facilitar a leitura (inclui quem tem dislexia).
   useEffect(() => {
@@ -106,28 +131,51 @@ export default function PrototipoNegocios() {
     l.href = "https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600&display=swap";
     document.head.appendChild(l);
   }, []);
+  // Com a V2 ligada a lista de Negócios é por documento. Enquanto se cria uma lead (S.novo) mostra-se a lista de sempre, que tem o formulário.
+  // Com a V2 ligada, "Nova lead" é de Pessoas: o menu destaca Pessoas e uma frase avisa que a lead criada se vê lá.
+  const novaLeadV2 = v2 && !!S.novo;
+  const listaNegocios = simples
+    ? (v2 && !S.novo ? <NegociosV2 {...ctx} /> : novaLeadV2
+      ? (
+        <>
+          <p className="mx-auto w-full max-w-3xl px-4 pt-6 text-[15px] text-muted-foreground sm:px-8">Nova lead: depois de criada, vê-se em Pessoas.</p>
+          <NegociosSimples {...ctx} />
+        </>
+      )
+      : <NegociosSimples {...ctx} />)
+    : <Negocios {...ctx} />;
   let corpo: ReactNode;
   switch (S.view) {
     case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
-    case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />; break;
-    case "leads": corpo = simples ? <LeadsSimples {...ctx} /> : <Negocios {...ctx} />; break;
+    case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : listaNegocios; break;
+    case "leads": corpo = simples ? (v2 ? <PessoasSimples {...ctx} abrirEm="leads" /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
+    case "pessoas": corpo = simples ? (v2 ? <PessoasSimples {...ctx} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
     case "operacoes": corpo = simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
     case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
     case "catalogo": corpo = simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
-    case "clientes": corpo = simples ? <ClientesSimples {...ctx} /> : <Clientes {...ctx} />; break;
+    case "clientes": corpo = simples ? (v2 ? <PessoasSimples {...ctx} abrirEm="clientes" /> : <ClientesSimples {...ctx} />) : <Clientes {...ctx} />; break;
     case "marketing": corpo = simples ? <MarketingSimples /> : <Marketing />; break;
     case "definicoes": corpo = simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
     case "campos": corpo = <CamposEditor {...ctx} />; break;
-    default: corpo = simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />;
+    default: corpo = listaNegocios;
   }
 
   const n = minhas(S, S.role).length;
+  // Com a V2, Pessoas ocupa o lugar de Leads e Clientes.
+  const pessoas: [Vista, string, LucideIcon][] = v2 ? [["pessoas", "Pessoas", Users]] : [["leads", "Leads", Users], ["clientes", "Clientes", Building]];
   const itens: [Vista, string, LucideIcon, number?][] = [
-    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", Handshake], ["leads", "Leads", Users], ["clientes", "Clientes", Building], ["operacoes", "Operações", Wrench],
-    ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
+    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", Handshake], ...pessoas,
+    ["operacoes", "Operações", Wrench], ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
   ];
   const itensAtual = itens.filter(([v]) => v !== "leads"); // o aspeto atual não tem a página de Leads
-  const cur = S.view === "negocio" ? "negocios" : S.view;
+  const porVista = (v: Vista) => itens.find(([x]) => x === v)!;
+  // A vista que o menu destaca: com a V2, Leads e Clientes são Pessoas (e sem ela Pessoas é Leads). O aspeto atual não tem Leads
+  // nem Pessoas (mostra Negócios), por isso destaca Negócios. Com a V2, criar uma lead (S.novo) destaca Pessoas.
+  const cur: Vista = novaLeadV2 ? "pessoas"
+    : S.view === "negocio" ? "negocios"
+    : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
+    : v2 && (S.view === "leads" || S.view === "clientes") ? "pessoas"
+    : !v2 && S.view === "pessoas" ? "leads" : S.view;
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
 
   const icone = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
@@ -172,6 +220,15 @@ export default function PrototipoNegocios() {
       </label>
     );
     const listaNova = true; // na proposta simples todos os ecrãs são novos
+    const interruptorV2 = (
+      <button type="button" role="switch" aria-checked={v2On} onClick={() => mudarV2(!v2On)}
+        className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg text-left text-[15px] text-foreground">
+        <span>Ver a V2<span className="block text-[15px] text-muted-foreground">Negócios por documento e Pessoas</span></span>
+        <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", v2On ? "bg-primary" : "bg-input")}>
+          <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", v2On ? "left-[22px]" : "left-0.5")} />
+        </span>
+      </button>
+    );
     return (
       <div className={cn("pn calma fixed inset-0 flex bg-background text-foreground", S.leitura && "leitura")}>
         <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card px-3 py-5 md:flex">
@@ -190,6 +247,7 @@ export default function PrototipoNegocios() {
                 <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", S.leitura ? "left-[22px]" : "left-0.5")} />
               </span>
             </button>
+            <div className="px-3">{interruptorV2}</div>
             <div className="space-y-1 px-3 text-sm text-muted-foreground">
               <p>Protótipo com dados de exemplo.</p>
               <button type="button" onClick={go(() => A.aspeto("atual"))} className="text-left font-medium text-primary underline-offset-4 hover:underline">Comparar com o aspeto atual</button>
@@ -217,11 +275,12 @@ export default function PrototipoNegocios() {
               <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-16 rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
-                  {[itens[2], itens[3], itens[6], itens[7]].map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {[...pessoas.map(([v]) => v), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
+                <div className="mt-3 border-t border-border px-3 pt-3">{interruptorV2}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
-                  className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 border-t border-border px-3 pt-3 text-left text-[15px]">
+                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">
                   Leitura fácil
                   <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", S.leitura ? "bg-primary" : "bg-input")}>
                     <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", S.leitura ? "left-[22px]" : "left-0.5")} />
@@ -231,7 +290,7 @@ export default function PrototipoNegocios() {
             </div>
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">
-            {[itens[0], itens[1], itens[4], itens[5]].map(([v, l, Ic, c]) => (
+            {(["hoje", "negocios", "operacoes", "inventario"] as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
               <button key={v} type="button" onClick={go(() => { setMais(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
@@ -239,7 +298,7 @@ export default function PrototipoNegocios() {
               </button>
             ))}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
-              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
+              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "pessoas", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
             </button>
           </nav>

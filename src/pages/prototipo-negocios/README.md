@@ -40,6 +40,21 @@ npx tsc --noEmit -p tsconfig.app.json        # o tipo (há erros antigos noutros
 
 Troca-se com **"Comparar com o aspeto atual"** no menu. O estado fica em `S.aspeto`.
 
+### O interruptor "Ver a V2" (só no aspeto simples)
+
+No menu lateral, junto a "Comparar com o aspeto atual", e no menu "Mais" do telemóvel. Liga e desliga a V2 do protótipo **inteira**:
+
+| | V2 desligada (por defeito) | V2 ligada |
+|---|---|---|
+| Menu | Leads, Clientes | **Pessoas** (no lugar dos dois) |
+| Negócios | a lista de sempre, uma coluna por fase | `NegociosV2`: só negócios, por documento |
+| Leads e Clientes | `LeadsSimples` e a página de Clientes | `PessoasSimples` |
+
+- A escolha **não é do `Estado`**: vive num `useState` de `PrototipoNegocios.tsx`, gravado em `localStorage` na chave própria `olyvia-prototipo-v2` (`"1"` ou `"0"`). Não mexe na `VERSAO` e não é apagada por "Repor a demonstração".
+- Ao ligar ou desligar, se a vista atual deixa de existir no menu, o protótipo muda para a equivalente: `leads` e `clientes` passam a `pessoas`, e `pessoas` passa a `leads`.
+- No **aspeto atual** o interruptor não aparece e a V2 não se aplica.
+- Enquanto se cria uma lead com a V2 ligada ("Nova lead" abre `A.novo()`), mostra-se a lista de Negócios de sempre, porque é ela que tem o formulário. Depois de criada, a lead vê-se em Pessoas.
+
 **As regras de desenho, pedidas pelo Ruben:**
 - um só botão primário por ecrã;
 - texto a 15–16 px;
@@ -68,11 +83,14 @@ Troca-se com **"Comparar com o aspeto atual"** no menu. O estado fica em `S.aspe
 |---|---|
 | `PrototipoNegocios.tsx` | A raiz: o estado, a gravação, os avisos (toasts), a moldura dos dois aspetos e o encaminhamento entre ecrãs (`S.view`). |
 | `HojeSimples.tsx` | O Hoje: o que é mais urgente, depois o resto, e a agenda. A agenda (`agenda()`) vem de `Hoje.tsx`. |
-| `NegociosSimples.tsx` | A lista de Negócios, com uma coluna por fase. Tem o seletor **Atual \| V2** no cabeçalho (estado local, por defeito "Atual"). |
-| `NegociosV2.tsx` | A **V2 da lista de Negócios** (10/10/2026): só negócios, por fase de documento: Orçamento, Proposta, Contrato, e depois Financeiro (quatro colunas). A Obra vê-se em Operações. Lead, Contacto e Visita saem, porque são fases da pessoa. Uma pessoa pode ter vários negócios, e vários orçamentos podem juntar-se numa proposta conjunta. |
+| `NegociosSimples.tsx` | A lista de Negócios, com uma coluna por fase. |
+| `NegociosV2.tsx` | A **V2 da lista de Negócios** (10/10/2026), que aparece em Negócios quando o interruptor **Ver a V2** está ligado: só negócios, por fase de documento: Orçamento, Proposta, Contrato, e depois Financeiro (quatro colunas). A Obra vê-se em Operações. Lead, Contacto e Visita saem, porque são fases da pessoa. Uma pessoa pode ter vários negócios, e vários orçamentos podem juntar-se numa proposta conjunta. |
 | `negociosDocs.ts` | A lógica da V2, sem React: `docFase` (a fase de documento a partir de `Orcamento.enviada`, `aceite` e `contrato`), os cartões (`cartoesV2`) e os **dados de exemplo** da V2 (marcados `demo`, só nesta camada: um segundo orçamento da Carla Nunes e uma proposta conjunta do Sérgio Pinto). Não muda o `Estado`, o `seed()` nem a `VERSAO`. O ficheiro não se chama `negociosV2.ts` porque, no Windows, colide com `NegociosV2.tsx`. |
-| `LeadsSimples.tsx` | A página de **Leads** (menu "Leads", antes de Clientes; o aspeto atual não a tem): lista curta por urgência (pesquisa, quatro chips e "Só as minhas", um só botão "Nova lead" que abre o formulário de novo negócio em Negócios) e, ao escolher uma lead, a ficha na mesma página, sem diálogo. A ficha tem contactos (Ligar, WhatsApp, Email), um botão com o próximo passo e quatro separadores: **Negócios** (os cartões da V2, com os de exemplo), **Informação** (com "Marcar como perdida"), **Submissões** e **Histórico**. |
-| `leadsDocs.ts` | A lógica dos Leads, sem React e sem mudar o `Estado`: quem é lead (pessoa, agrupada por nome, sem negócio em Financeiro ou Obra nem contrato assinado, e sem perdidos), a ordem por urgência, os filtros, o "há quanto tempo" (com um "hoje" fixo, 10/10/2026) e as **submissões de formulário de exemplo** (uma por lead, e uma segunda "Associada à ficha" quando a pessoa tem mais de um negócio, como a Carla Nunes). Estas submissões não existem no `Estado`: são calculadas a partir de `linha`, `origem`, `f` e `quando`, e aparecem marcadas "exemplo". Testes em `leadsDocs.test.ts`. |
+| `LeadsSimples.tsx` | A página de **Leads** (menu "Leads", antes de Clientes, com a V2 desligada; o aspeto atual não a tem): lista curta por urgência (pesquisa, quatro chips e "Só as minhas", um só botão "Nova lead" que abre o formulário de novo negócio em Negócios) e, ao escolher uma lead, a ficha na mesma página, sem diálogo. A ficha tem contactos (Ligar, WhatsApp, Email), um botão com o próximo passo e quatro separadores: **Negócios** (os cartões da V2, com os de exemplo), **Informação** (com "Marcar como perdida"), **Submissões e registos** e **Histórico**. A ficha (`FichaLead`) e a linha (`LinhaLead`) são exportadas e a página de Pessoas reutiliza-as. |
+| `leadsDocs.ts` | A lógica dos Leads, sem React e sem mudar o `Estado`: quem é lead (pessoa, agrupada por nome, sem negócio em Financeiro ou Obra nem contrato assinado, e sem perdidos), a ordem por urgência, os filtros, o "há quanto tempo" (com um "hoje" fixo, 10/10/2026) e a informação de contacto e local. A origem, as submissões e os registos à mão vêm de `toquesDocs.ts`. Testes em `leadsDocs.test.ts`. |
+| `toquesDocs.ts` | Os **toques** de cada pessoa (11 pessoas da seed: 8 leads e 3 clientes): cada vez que entrou em contacto, online por formulário ou registada à mão. Um toque tem via, formulário, origem (da lista da empresa), canal (o mapa fixo: Meta Ads e TikTok Ads = Redes sociais pagas; Google Ads = Pesquisa; Outdoor, Panfleto e Feira = Offline; Influencer e Indicação = Parcerias; o resto Outros), campanha, UTM em bruto (com `gclid`, `fbclid`…), data, campos preenchidos, estado de revisão, motivo e aviso de conflito. Puro, determinístico e **de exemplo**: calcula-se a partir do nome, da linha, da origem, dos campos e da data de cada negócio, com uma tabela por pessoa para a variedade (Google Ads, Meta Ads, Indicação, chamada, Outdoor por QR, Site, uma UTM de TikTok "por mapear", uma lead que voltou por outra campanha, e um conflito de email e telefone). Não toca no `Estado` nem na seed. Testes em `toquesDocs.test.ts`. |
+| `PessoasSimples.tsx` | A página de **Pessoas** (só com a V2 ligada): lista única de leads e clientes, com os separadores Leads, Clientes e Todos (o comercial abre em Leads, os outros em Clientes). Só "Nova lead" é primário, e só em Leads e Todos. A ficha é a da `LeadsSimples`: a lead tem 4 separadores e o cliente 5 (mais **Contratos e documentos**, só em leitura). A escolha sobrevive a abrir um negócio e voltar (variável de módulo, apagada em "Repor a demonstração" por `esquecerPessoas`). |
+| `pessoasDocs.ts` | A lógica de Pessoas, sem React: é **lead** a pessoa sem negócio em Financeiro ou Obra nem contrato assinado; é **cliente** a que tem. Um cliente com um negócio aberto que ainda não é contrato continua cliente e leva a etiqueta "Novo negócio em curso". Como a seed não tem nenhum, `negociosDemo` junta, só nesta camada (marcado "exemplo"), um orçamento de cozinha em fase de orçamento à Marta Lima. Também tem os dados do cliente (valor dos contratos, n.º de contratos, obras em curso, último negócio) e os contratos e documentos (contrato, fatura, recibo e obra, derivados de `fin` e `obra`). Testes em `pessoasDocs.test.ts`. |
 | `NegocioSimples.tsx` | A página do negócio: o cabeçalho, os passos da fase (um de cada vez), as fases feitas, o botão "Ouvir" (leitura em voz alta) e a mensagem de fase concluída. |
 | `PaginaNegocio.tsx` | **`passosDaFase(ctx, d, simples)`**: os passos de cada fase, partilhados pelos dois aspetos. Também tem `BotaoFase` e o aspeto atual. |
 | `CamposFase.tsx` | Os campos: `Campos` (os blocos), `CampoSimples` (botões, contador, datas rápidas), `Assistente` (o acordeão do aspeto atual) e o ícone de cada bloco (`BLOCO`). |

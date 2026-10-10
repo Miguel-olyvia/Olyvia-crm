@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { seed } from "./motor";
-import { filtrarLeads, historicoDe, itensNegocios, leadsDe, submissoesExemplo, tempoDesde } from "./leadsDocs";
+import { filtrarLeads, historicoDe, infoLead, itensNegocios, leadsDe, somarDias, tempoDesde } from "./leadsDocs";
 
 const nomes = (S = seed()) => leadsDe(S).map((p) => p.nome);
 
@@ -66,28 +66,14 @@ describe("leads · negócios da pessoa", () => {
   });
 });
 
-describe("leads · submissões de exemplo", () => {
-  it("são determinísticas", () => {
+describe("leads · informação", () => {
+  it("contacto com telefone, email e consentimento; a origem vem dos toques e não daqui", () => {
     const S = seed();
-    const a = leadsDe(S).map((p) => submissoesExemplo(S, p));
-    const b = leadsDe(S).map((p) => submissoesExemplo(S, p));
-    expect(a).toEqual(b);
-  });
-  it("cada lead tem pelo menos uma; alguma tem duas, a segunda associada à ficha", () => {
-    const S = seed();
-    const ls = leadsDe(S);
-    for (const p of ls) expect(submissoesExemplo(S, p).length).toBeGreaterThanOrEqual(1);
-    const duas = ls.map((p) => submissoesExemplo(S, p)).filter((s) => s.length === 2);
-    expect(duas.length).toBeGreaterThanOrEqual(1);
-    expect(duas[0][1].estado).toBe("associada");
-    expect(duas[0][1].motivo).toBeTruthy();
-    expect(duas[0][0].estado).not.toBe("associada");
-  });
-  it("têm campos etiqueta/valor", () => {
-    const S = seed();
-    const s = submissoesExemplo(S, leadsDe(S)[0])[0];
-    expect(s.campos.length).toBeGreaterThan(2);
-    expect(s.campos.every((c) => c.rotulo && c.valor)).toBe(true);
+    const info = infoLead(leadsDe(S).find((p) => p.nome === "Rita Sousa")!);
+    const rotulos = info.contacto.map((c) => c.rotulo);
+    expect(rotulos).toEqual(expect.arrayContaining(["Telefone", "Email", "Consentimento (RGPD)"]));
+    expect(info.comercial).toBe("Rúben");
+    expect(info).not.toHaveProperty("origem");
   });
 });
 
@@ -99,6 +85,12 @@ describe("leads · tempo", () => {
     expect(tempoDesde("22/09")).toBe("há 2 semanas");
     expect(tempoDesde("")).toBe("");
   });
+  it("somar dias mantém a hora e não inventa datas", () => {
+    expect(somarDias("30/09 21:40", 2)).toBe("02/10 21:40");
+    expect(somarDias("22/09", 12)).toBe("04/10");
+    expect(somarDias("", 2)).toBe("");
+    expect(somarDias("hoje 10:00", 2)).toBe("");
+  });
 });
 
 describe("leads · não mutam o Estado", () => {
@@ -106,7 +98,7 @@ describe("leads · não mutam o Estado", () => {
     const S = seed();
     const antes = JSON.stringify(S);
     const ls = leadsDe(S);
-    for (const p of ls) { itensNegocios(S, p); submissoesExemplo(S, p); }
+    for (const p of ls) { itensNegocios(S, p); infoLead(p); }
     filtrarLeads(ls, "atrasadas", true, "a");
     expect(JSON.stringify(S)).toBe(antes);
   });
@@ -168,13 +160,10 @@ describe("leads · casos de borda", () => {
     p.negocios.forEach((d) => { d.hist = []; });
     expect(historicoDe(p)).toEqual([]);
   });
-  it("quando vazio nas submissões não inventa data e ainda tem uma submissão", () => {
+  it("quando vazio não inventa data nem para o tempo", () => {
     const S = seed();
     S.deals.find((d) => d.id === 1045)!.quando = "";
     const p = leadsDe(S).find((x) => x.nome === "Rita Sousa")!;
-    const subs = submissoesExemplo(S, p);
-    expect(subs.length).toBeGreaterThanOrEqual(1);
-    expect(subs[0].quando).toBe("hoje");
     expect(tempoDesde(p.principal.quando)).toBe("");
   });
 });
