@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, aberto, eur, proximo, tot, type LinhaId, type Negocio } from "./motor";
 import { IconeFase, Progresso, type Ctx } from "./pecas";
+import { NegociosV2 } from "./NegociosV2";
 
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
 
-export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
+export function NegociosSimples({ S, A, go, run, q, setQ, repor }: Ctx) {
   const f = S.filtro, ql = q.toLowerCase();
   let ds = aberto(S).filter((d) => !ql || (d.nome + " " + d.tel + " " + d.servico + " " + d.local).toLowerCase().includes(ql));
   if (f === "meus") ds = ds.filter((d) => d.dono === "comercial");
@@ -17,6 +18,16 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
   if (f === "atraso") ds = ds.filter((d) => d.atraso);
   const emNeg = aberto(S).filter((d) => d.fase === 3 && d.orc).reduce((a, d) => a + tot(d, S).pf, 0);
   const [faseMovel, setFaseMovel] = useState(0);
+  const [versao, setVersao] = useState<"atual" | "v2">("atual");
+  const seletor = (
+    <div role="group" aria-label="Versão da página" className="inline-flex rounded-lg border border-input bg-card p-1">
+      {([["atual", "Atual"], ["v2", "V2"]] as const).map(([k, l]) => (
+        <button key={k} type="button" aria-pressed={versao === k} onClick={() => setVersao(k)}
+          className={cn("min-h-11 min-w-14 rounded-md px-3 text-[15px]", versao === k ? "bg-foreground text-background" : "text-foreground")}>{l}</button>
+      ))}
+    </div>
+  );
+  if (versao === "v2") return <NegociosV2 {...{ S, A, go, run, q, setQ, repor }} seletor={seletor} />;
 
   const cartao = (d: Negocio) => {
     const p = proximo(d, S), late = d.atraso && d.fase === 0;
@@ -61,7 +72,10 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
           <h1 className="text-3xl font-semibold tracking-tight">Negócios</h1>
           <p className="mt-1 text-base text-muted-foreground">{aberto(S).length} abertos · {eur(emNeg)} € em proposta</p>
         </div>
-        <Button size="lg" onClick={go(() => { A.novo(); setFaseMovel(0); })}><Plus className="mr-2 h-4 w-4" />Novo negócio</Button>
+        <div className="flex flex-wrap items-center gap-3">
+          {seletor}
+          <Button size="lg" onClick={go(() => { A.novo(); setFaseMovel(0); })}><Plus className="mr-2 h-4 w-4" />Novo negócio</Button>
+        </div>
       </header>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
