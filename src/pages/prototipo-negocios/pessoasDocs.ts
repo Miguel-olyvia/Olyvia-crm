@@ -2,8 +2,11 @@
 // Funções puras: nada aqui muda o Estado. Os negócios de cada pessoa (o da seed e os de exemplo) vêm de negociosDe (negociosApp.ts).
 // Quem é lead e quem é cliente decide-se aqui (a página de Leads V1 mantém a regra antiga, em leadsDocs.ts): cliente é quem tem um negócio GANHO.
 import { PAPEIS, proximo, type Estado, type Negocio, type Papel, type Proximo } from "./motor";
-import { FILTROS_LEAD, atrasada, filtrarLeads, idade, pessoasDe, type FiltroLead, type Pessoa } from "./leadsDocs";
+import { FILTROS_LEAD, atrasada, filtrarLeads, idade, type FiltroLead, type Pessoa } from "./leadsDocs";
 import { toquesDe } from "./toquesDocs";
+import { agruparPessoas } from "./dealsPessoas";
+import { extraDe, ehPessoaExemplo, type Empresa, type Qualificacao } from "./pessoasExemplo";
+import { SEM_MOTIVO, motivoDaPerda } from "./perdaDocs";
 import { documentosDoNegocio, ehGanho, negociosDe, valorNegocio, type DocNegocio, type NegocioApp } from "./negociosApp";
 
 export { ehGanho } from "./negociosApp";
@@ -17,7 +20,18 @@ export interface PessoaApp extends Pessoa {
   novoNegocio: boolean;
   /** Todos os negócios da pessoa: o da seed e os de exemplo (que só existem nesta camada). Só os da seed decidem o papel. */
   todos: NegocioApp[];
+  /** O motivo da perda (ou "Motivo não registado") quando todos os negócios da pessoa estão perdidos; `null` nas outras. Uma pessoa perdida é uma lead perdida. */
+  perdida: string | null;
+  /** MQL ou SQL: só algumas pessoas de exemplo têm. */
+  qualificacao: Qualificacao | null;
+  /** Quando a pessoa é uma empresa: a pessoa de contacto e o NIF. O nome da pessoa na lista é então o da empresa. */
+  empresa: Empresa | null;
+  /** Pessoa inventada só para a demonstração (não existe na seed). */
+  exemplo: boolean;
 }
+
+/** Os chips da lista: os de lead mais "Perdidas". */
+export type FiltroPessoa = FiltroLead | "perdidas";
 
 export interface DadosCliente {
   /** Soma dos orçamentos dos negócios ganhos (contrato assinado, ou proposta aceite quando não há contrato), com o IVA. */
@@ -47,17 +61,21 @@ export function proximoNegocio(d: Negocio, S: Estado): Proximo {
   return d.fase >= 5 ? { t: "Concluído", sub: "O negócio está pago e fechado.", done: true } : proximo(d, S);
 }
 
-/** O papel vem só dos negócios da seed: um negócio de exemplo nunca muda ninguém de lead para cliente. */
+/** O papel vem só dos negócios da seed (e do negócio principal das pessoas de exemplo): um negócio de exemplo extra nunca muda ninguém de lead para cliente.
+ *  Quem tem todos os negócios perdidos é uma lead perdida. */
 function todasAsPessoas(S: Estado): PessoaApp[] {
-  return pessoasDe(S).map((p): PessoaApp => {
-    const cliente = p.negocios.some(ehGanho), todos = negociosDe(S, p.nome);
-    return { ...p, papel: cliente ? "cliente" : "lead", todos, novoNegocio: cliente && todos.some((n) => n.perdido === null && !ehGanho(n.deal)) };
+  return agruparPessoas(S).map(({ perdida, ...p }): PessoaApp => {
+    const cliente = !perdida && p.negocios.some(ehGanho), todos = negociosDe(S, p.nome), extra = extraDe(p.nome);
+    return {
+      ...p, papel: cliente ? "cliente" : "lead", todos, novoNegocio: cliente && todos.some((n) => n.perdido === null && !ehGanho(n.deal)),
+      perdida: perdida ? motivoDaPerda(p.nome) ?? SEM_MOTIVO : null, qualificacao: extra.qualificacao ?? null, empresa: extra.empresa ?? null, exemplo: ehPessoaExemplo(p.nome),
+    };
   });
 }
 
-/** As leads por urgência: atrasadas primeiro, depois as mais atrás no processo, depois as mais antigas (a mesma ordem da página de Leads). */
+/** As leads por urgência (as perdidas não): atrasadas primeiro, depois as mais atrás no processo, depois as mais antigas (a mesma ordem da página de Leads). */
 export function leadsApp(S: Estado): PessoaApp[] {
-  return todasAsPessoas(S).filter((p) => p.papel === "lead").map((p, i) => ({ p, i }))
+  return todasAsPessoas(S).filter((p) => p.papel === "lead" && p.perdida === null).map((p, i) => ({ p, i }))
     .sort((a, b) =>
       Number(atrasada(b.p)) - Number(atrasada(a.p))
       || a.p.principal.fase - b.p.principal.fase
@@ -74,9 +92,14 @@ export function clientesApp(S: Estado): PessoaApp[] {
     .map((x) => x.p);
 }
 
-/** Cada pessoa uma só vez: as leads e depois os clientes. */
+/** As leads perdidas, pela ordem em que aparecem. */
+export function perdidasApp(S: Estado): PessoaApp[] {
+  return todasAsPessoas(S).filter((p) => p.perdida !== null);
+}
+
+/** Cada pessoa uma só vez: as leads, os clientes e as perdidas. */
 export function todosApp(S: Estado): PessoaApp[] {
-  return [...leadsApp(S), ...clientesApp(S)];
+  return [...leadsApp(S), ...clientesApp(S), ...perdidasApp(S)];
 }
 
 export function pessoasDoSeparador(S: Estado, sep: SeparadorLista): PessoaApp[] {
@@ -88,10 +111,10 @@ export function filtrarTexto<T extends Pessoa>(ps: T[], q: string): T[] {
   return filtrarLeads(ps, "todas", false, q);
 }
 
-/** Quantas pessoas tem cada separador (com a pesquisa aplicada). */
+/** Quantas pessoas tem cada separador (com a pesquisa aplicada). As perdidas só contam em Todos (em Leads vêm pelo chip Perdidas). */
 export function contagens(S: Estado, q: string): Record<SeparadorLista, number> {
-  const l = filtrarTexto(leadsApp(S), q).length, c = filtrarTexto(clientesApp(S), q).length;
-  return { leads: l, clientes: c, todos: l + c };
+  const l = filtrarTexto(leadsApp(S), q).length, c = filtrarTexto(clientesApp(S), q).length, p = filtrarTexto(perdidasApp(S), q).length;
+  return { leads: l, clientes: c, todos: l + c + p };
 }
 
 /* ---------------------------------------------------------------- o cliente */
@@ -129,7 +152,7 @@ export const ORDENS: { id: Ordem; nome: string }[] = [
 ];
 
 /** Os filtros da lista. `origem` e `comercial` vazios querem dizer "todos". */
-export interface FiltrosPessoa { filtro: FiltroLead; soMinhas: boolean; q: string; origem: string; comercial: string }
+export interface FiltrosPessoa { filtro: FiltroPessoa; soMinhas: boolean; q: string; origem: string; comercial: string }
 export const SEM_FILTROS: FiltrosPessoa = { filtro: "todas", soMinhas: false, q: "", origem: "", comercial: "" };
 
 /** Soma dos orçamentos dos negócios abertos da pessoa (com o IVA), os de exemplo incluídos. */
@@ -161,16 +184,19 @@ export function ordenarPessoas(S: Estado, ps: PessoaApp[], ordem: Ordem): Pessoa
   return itens.map((x) => x.p);
 }
 
-/** A pesquisa e os filtros de leads (para os clientes só contam os que fazem sentido) e depois a origem e o comercial. */
+/** A pesquisa e os filtros de leads (para os clientes só contam os que fazem sentido) e depois a origem e o comercial.
+ *  "Perdidas" fica só com as perdidas; os outros filtros (menos "Todas") deixam-nas de fora. */
 export function filtrarPessoas(S: Estado, ps: PessoaApp[], f: FiltrosPessoa): PessoaApp[] {
-  return filtrarLeads(ps, f.filtro, f.soMinhas, f.q)
+  const pool = f.filtro === "perdidas" ? ps.filter((p) => p.perdida !== null) : f.filtro === "todas" ? ps : ps.filter((p) => p.perdida === null);
+  return filtrarLeads(pool, f.filtro, f.soMinhas, f.q)
     .filter((p) => !f.origem || origemDe(S, p) === f.origem)
     .filter((p) => !f.comercial || comercialDe(p) === f.comercial);
 }
 
 /** Os chips sempre à vista: nos clientes não há "por contactar". "Com visita" vive em Mais filtros (ver `filtrosEfetivos`). */
-export function chipsDe(aba: SeparadorLista): { id: FiltroLead; nome: string }[] {
-  return FILTROS_LEAD.filter((c) => c.id === "todas" || c.id === "atrasadas" || (c.id === "por_contactar" && aba !== "clientes"));
+export function chipsDe(aba: SeparadorLista): { id: FiltroPessoa; nome: string }[] {
+  const base = FILTROS_LEAD.filter((c) => c.id === "todas" || c.id === "atrasadas" || (c.id === "por_contactar" && aba !== "clientes"));
+  return aba === "clientes" ? base : [...base, { id: "perdidas", nome: "Perdidas" }];
 }
 
 /** Os filtros que de facto se aplicam: um filtro que o separador não tem (nos clientes, "por contactar" e "com visita") volta a "Todas". */
@@ -179,7 +205,13 @@ export function filtrosEfetivos(aba: SeparadorLista, f: FiltrosPessoa): FiltrosP
   return vale ? f : { ...f, filtro: "todas" };
 }
 
+/** As pessoas entre as quais se filtra: as do separador, e as perdidas quando o filtro é "Perdidas" (as leads do separador Leads não as têm). */
+export function poolDoSeparador(S: Estado, aba: SeparadorLista, filtro: FiltroPessoa): PessoaApp[] {
+  return filtro === "perdidas" ? perdidasApp(S) : pessoasDoSeparador(S, aba);
+}
+
 /** A lista como se vê: o separador, a pesquisa e os filtros, pela ordem escolhida. */
 export function listaVisivel(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, ordem: Ordem): PessoaApp[] {
-  return ordenarPessoas(S, filtrarPessoas(S, pessoasDoSeparador(S, aba), filtrosEfetivos(aba, f)), ordem);
+  const ef = filtrosEfetivos(aba, f);
+  return ordenarPessoas(S, filtrarPessoas(S, poolDoSeparador(S, aba, ef.filtro), ef), ordem);
 }

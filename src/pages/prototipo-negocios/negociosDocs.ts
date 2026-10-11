@@ -1,8 +1,9 @@
 // V2 da página de Negócios: só negócios a decorrer, UM CARTÃO POR NEGÓCIO, na coluna da fase dele
 // (Orçamento, Proposta, Contrato, Financeiro). Os negócios vêm de negociosDe (negociosApp.ts): o da seed e os de exemplo.
 // Funções puras: nada aqui muda o Estado.
-import { aberto, proximo, type Estado, type LinhaId, type Negocio } from "./motor";
+import { proximo, type Estado, type LinhaId, type Negocio } from "./motor";
 import { docFase, negociosDe, textoOrcamentos, valorNegocio, type DocFase, type NegocioApp } from "./negociosApp";
+import { dealsTodos } from "./dealsPessoas";
 
 export { docFase, type DocFase } from "./negociosApp";
 
@@ -61,16 +62,16 @@ function cartao(n: NegocioApp, doc: DocFase, S: Estado): CartaoV2 {
 
 /** A lista de cartões da V2: cada negócio a decorrer (o da seed e os de exemplo) é um cartão, na coluna da sua fase. Perdidos, levantamento e obra ficam de fora. */
 export function cartoesV2(S: Estado): CartaoV2[] {
-  const nomes = [...new Set(aberto(S).map((d) => d.nome))];
+  const nomes = [...new Set(dealsTodos(S).filter((d) => !d.perdido).map((d) => d.nome))];
   return nomes.flatMap((nome) => negociosDe(S, nome).flatMap((n) => {
     const doc = docFase(n.deal);
     return doc ? [cartao(n, doc, S)] : [];
   }));
 }
 
-/** Pessoas ainda em lead, contacto ou visita (fases da pessoa, não do negócio). */
+/** Pessoas ainda em lead, contacto ou visita (fases da pessoa, não do negócio), as de exemplo incluídas. */
 export function pessoasAntes(S: Estado): number {
-  return aberto(S).filter((d) => d.fase < 3).length;
+  return dealsTodos(S).filter((d) => !d.perdido && d.fase < 3).length;
 }
 
 /** Quantos cartões tem cada pessoa (por nome). */

@@ -12,6 +12,7 @@ import type { PessoaApp } from "./pessoasDocs";
 import type { Perfil } from "./perfilDocs";
 import { ETAPAS_PESSOA, etapaPessoa, etapaTexto } from "./listaDocs";
 import { Atrasada, AvatarPessoa, BORDA_CTRL } from "./PessoaLinha";
+import { Etiqueta, EtiquetaQualificacao, MarcaExemplo, Perdida } from "./SelosPessoa";
 import { FASE_COR, FASE_ICONE } from "./pecas";
 
 const soDigitos = (t: string): string => t.replace(/\D/g, "");
@@ -80,8 +81,9 @@ interface CabecalhoProps {
 
 export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
   // O cliente já diz "Cliente" no início: a etapa só acrescenta algo às leads; no cliente, o que importa é um negócio novo em curso.
-  const etapa = p.papel === "lead" ? etapaTexto(p) : p.novoNegocio ? "Novo negócio em curso" : "";
-  const subtitulo = [p.papel === "lead" ? "Lead" : "Cliente", etapa, f.morada.localidade].filter(Boolean).join(" · ");
+  // Numa lead perdida a etapa é a etiqueta "Perdida" junto ao nome (o motivo está no Resumo).
+  const etapa = p.perdida !== null ? "" : p.papel === "lead" ? etapaTexto(p) : p.novoNegocio ? "Novo negócio em curso" : "";
+  const resto = [etapa, f.morada.localidade].filter(Boolean).join(" · ");
   return (
     <header className="grid min-w-0 gap-3">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -91,17 +93,26 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <SheetTitle tabIndex={-1} className="break-words text-xl font-semibold tracking-tight">{p.nome}</SheetTitle>
               {atrasada(p) && <Atrasada />}
+              {p.perdida !== null && <Perdida />}
             </div>
-            <SheetDescription className="break-words text-base text-muted-foreground">{subtitulo}</SheetDescription>
+            <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 break-words text-base text-muted-foreground">
+              <span>{p.papel === "lead" ? "Lead" : "Cliente"}</span>
+              {p.empresa && <Etiqueta>Empresa</Etiqueta>}
+              {p.qualificacao && <EtiquetaQualificacao q={p.qualificacao} />}
+              {resto && <span>· {resto}</span>}
+              {(p.exemplo || p.qualificacao !== null) && <MarcaExemplo />}
+            </SheetDescription>
           </div>
         </div>
         {topo}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Contactos f={f} nome={p.nome} />
-        <Button className={cn(BOTAO, "h-auto cursor-pointer whitespace-normal py-2 text-left")} onClick={aoProximo}>
-          {nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
-        </Button>
+        {p.perdida === null && (
+          <Button className={cn(BOTAO, "h-auto cursor-pointer whitespace-normal py-2 text-left")} onClick={aoProximo}>
+            {nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
+          </Button>
+        )}
       </div>
       <Etapas fase={etapaPessoa(p)} />
     </header>

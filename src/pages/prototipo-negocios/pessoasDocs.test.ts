@@ -2,15 +2,20 @@ import { describe, expect, it } from "vitest";
 import { seed, tot, type Estado, type Papel } from "./motor";
 import { leadsDe } from "./leadsDocs";
 import { EXEMPLOS } from "./exemplosDocs";
+import { NEGOCIOS_PESSOAS } from "./pessoasExemplo";
 import { estadoDe } from "./perfilDocs";
 import { valorColuna } from "./listaDocs";
 import {
   SEM_FILTROS, chipsDe, clientesApp, comerciaisDe, contagens, dadosCliente, documentosDe, filtrarPessoas, filtrarTexto, filtrosEfetivos, leadsApp,
-  listaVisivel, ordenarPessoas, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
+  listaVisivel, ordenarPessoas, origensDe, perdidasApp, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
 } from "./pessoasDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
 const CLIENTES = ["Tiago Almeida", "Marta Lima", "Joana Ribeiro"];
+/** As pessoas de exemplo novas (pessoasExemplo.ts): mudam os totais, não o papel de ninguém da seed. */
+const NOVAS_LEADS = ["Inês Carvalho", "Bruno Teixeira", "Filipa Moreira", "Ricardo Nogueira", "Condomínio Jardins do Tejo", "Modas Aurora"];
+const NOVOS_CLIENTES = ["Hotel Praia Dourada", "Armando Figueiredo"];
+const NOVAS_PERDIDAS = ["Teresa Antunes", "Duarte Gouveia"];
 const nomes = (l: { nome: string }[]): string[] => l.map((p) => p.nome);
 const clone = (S: Estado, id: number, novoId: number, mudar: Record<string, unknown> = {}): void => {
   const base = S.deals.find((d) => d.id === id)!;
@@ -32,11 +37,11 @@ describe("pessoas · lead com um negócio perdido (Rita Sousa)", () => {
 });
 
 describe("pessoas · quem é lead e quem é cliente", () => {
-  it("com a seed: 8 leads e 3 clientes, os mesmos da página de Leads", () => {
+  it("com a seed: as 8 leads e os 3 clientes de sempre (os mesmos da página de Leads, pela mesma ordem), mais as pessoas de exemplo", () => {
     const S = seed();
-    expect(nomes(leadsApp(S)).sort()).toEqual([...LEADS].sort());
-    expect(nomes(clientesApp(S)).sort()).toEqual([...CLIENTES].sort());
-    expect(nomes(leadsApp(S))).toEqual(nomes(leadsDe(S)));
+    expect(nomes(leadsApp(S)).sort()).toEqual([...LEADS, ...NOVAS_LEADS].sort());
+    expect(nomes(clientesApp(S)).sort()).toEqual([...CLIENTES, ...NOVOS_CLIENTES].sort());
+    expect(nomes(leadsApp(S)).filter((n) => LEADS.includes(n))).toEqual(nomes(leadsDe(S)));
     expect(leadsApp(S).every((p) => p.papel === "lead")).toBe(true);
     expect(clientesApp(S).every((p) => p.papel === "cliente")).toBe(true);
   });
@@ -49,10 +54,13 @@ describe("pessoas · quem é lead e quem é cliente", () => {
     S2.deals.find((d) => d.id === 1030)!.fase = 4;
     expect(nomes(clientesApp(S2))).toContain("Sérgio Pinto");
   });
-  it("só negócios perdidos: a pessoa não é lead nem cliente", () => {
+  it("só negócios perdidos: a pessoa sai das leads e passa a lead perdida (Perdidas, e em Todos)", () => {
     const S = seed();
     S.deals.find((d) => d.id === 1044)!.perdido = true;
-    expect(nomes(todosApp(S))).not.toContain("Pedro Lopes");
+    expect(nomes(leadsApp(S))).not.toContain("Pedro Lopes");
+    expect(nomes(clientesApp(S))).not.toContain("Pedro Lopes");
+    expect(nomes(perdidasApp(S))).toContain("Pedro Lopes");
+    expect(nomes(todosApp(S))).toContain("Pedro Lopes");
   });
   it("um perdido em fase 4 mais um aberto em fase 1 mantém a pessoa como lead", () => {
     const S = seed();
@@ -63,10 +71,10 @@ describe("pessoas · quem é lead e quem é cliente", () => {
 });
 
 describe("pessoas · cliente que pede algo novo", () => {
-  it("com a seed os três clientes têm um negócio novo em curso (de exemplo), e só aparecem em Clientes", () => {
+  it("com a seed os três clientes têm um negócio novo em curso (de exemplo), mais o Hotel Praia Dourada, e só aparecem em Clientes", () => {
     const S = seed();
     const marcados = clientesApp(S).filter((p) => p.novoNegocio);
-    expect(nomes(marcados).sort()).toEqual([...CLIENTES].sort());
+    expect(nomes(marcados).sort()).toEqual([...CLIENTES, "Hotel Praia Dourada"].sort());
     for (const nome of CLIENTES) expect(nomes(leadsApp(S))).not.toContain(nome);
     expect(leadsApp(S).some((p) => p.novoNegocio)).toBe(false);
   });
@@ -97,7 +105,7 @@ describe("pessoas · cliente que pede algo novo", () => {
     const S = seed();
     for (const p of todosApp(S)) {
       const exemplos = p.todos.filter((n) => n.demo).length;
-      expect(exemplos, p.nome).toBe(EXEMPLOS[p.nome]?.length ?? 0);
+      expect(exemplos, p.nome).toBe((EXEMPLOS[p.nome]?.length ?? 0) + (NEGOCIOS_PESSOAS[p.nome]?.length ?? 0));
       expect(p.todos.filter((n) => !n.demo), p.nome).toHaveLength(p.negocios.length);
     }
   });
@@ -126,13 +134,14 @@ describe("pessoas · casos de borda do negócio novo", () => {
 });
 
 describe("pessoas · Todos", () => {
-  it("cada pessoa uma só vez e Leads mais Clientes dá Todos", () => {
+  it("cada pessoa uma só vez e Leads mais Clientes mais Perdidas dá Todos", () => {
     const S = seed();
     const t = nomes(todosApp(S));
     expect(new Set(t).size).toBe(t.length);
-    expect(t).toHaveLength(leadsApp(S).length + clientesApp(S).length);
-    expect([...t].sort()).toEqual([...LEADS, ...CLIENTES].sort());
-    expect(contagens(S, "")).toEqual({ leads: 8, clientes: 3, todos: 11 });
+    expect(t).toHaveLength(leadsApp(S).length + clientesApp(S).length + perdidasApp(S).length);
+    expect([...t].sort()).toEqual([...LEADS, ...CLIENTES, ...NOVAS_LEADS, ...NOVOS_CLIENTES, ...NOVAS_PERDIDAS].sort());
+    // Os totais mudam só por causa das 10 pessoas de exemplo: 8 + 6 leads, 3 + 2 clientes e 2 perdidas (que só contam em Todos).
+    expect(contagens(S, "")).toEqual({ leads: 14, clientes: 5, todos: 21 });
   });
   it("uma pessoa com vários negócios aparece uma só vez", () => {
     const S = seed();
@@ -234,7 +243,7 @@ describe("pessoas · ordenar", () => {
     const o = nomes(ordenarPessoas(S, leadsApp(S), "recentes"));
     expect(o[0]).toBe("Rita Sousa");
     expect(o[o.length - 1]).toBe("Carla Nunes");
-    expect(o).toHaveLength(8);
+    expect(o).toHaveLength(14); // 8 da seed e 6 de exemplo
   });
   it("mais recentes com empates: quem chegou ao mesmo tempo mantém a ordem da lista (ordem estável)", () => {
     const S2 = seed();
@@ -253,8 +262,10 @@ describe("pessoas · ordenar", () => {
     const o = ordenarPessoas(S, leadsApp(S), "valor");
     const v = o.map((p) => valorPessoa(S, p));
     for (let i = 1; i < v.length; i++) expect(v[i]).toBeLessThanOrEqual(v[i - 1]);
-    expect(nomes(o).slice(0, 2).sort()).toEqual(["Carla Nunes", "Sérgio Pinto"]);
-    expect(nomes(o).slice(2)).toEqual(nomes(leadsApp(S)).filter((n) => !["Carla Nunes", "Sérgio Pinto"].includes(n)));
+    // Carla (22.636,60), Sérgio (4.686,22) e o Condomínio Jardins do Tejo (3.306,22, a proposta de um WC); os outros não têm orçamento.
+    const topo = ["Carla Nunes", "Sérgio Pinto", "Condomínio Jardins do Tejo"];
+    expect(nomes(o).slice(0, 3)).toEqual(topo);
+    expect(nomes(o).slice(3)).toEqual(nomes(leadsApp(S)).filter((n) => !topo.includes(n)));
   });
   it("não altera a lista de entrada", () => {
     const ls = leadsApp(S), antes = nomes(ls);
@@ -271,25 +282,25 @@ describe("pessoas · filtros extra (origem e comercial)", () => {
   });
   it("origem filtra pelo primeiro toque", () => {
     const f = (origem: string) => nomes(filtrarPessoas(S, todosApp(S), { ...SEM_FILTROS, origem }));
-    expect(f("Google Ads")).toEqual(["Luísa Freitas"]);
-    expect(f("Meta Ads")).toEqual(["Rita Sousa"]);
+    expect(f("Google Ads")).toEqual(["Luísa Freitas", "Filipa Moreira"]);
+    expect(f("Meta Ads")).toEqual(["Rita Sousa", "Bruno Teixeira", "Armando Figueiredo"]);
     expect(f("TikTok Ads")).toEqual(["Ana Martins"]);
-    expect(f("Indicação").sort()).toEqual(["Hugo Matos", "Joana Ribeiro"]);
+    expect(f("Indicação").sort()).toEqual(["Duarte Gouveia", "Hugo Matos", "Joana Ribeiro"]);
     expect(f("Origem que não existe")).toEqual([]);
-    expect(f("")).toHaveLength(11);
+    expect(f("")).toHaveLength(21);
   });
   it("comercial filtra por quem é dono do negócio", () => {
     const T = seed();
     clone(T, 1043, 2601, { nome: "Ana Martins", dono: "direcao" });
     T.deals.find((d) => d.id === 1043)!.dono = "direcao";
     const f = (comercial: string) => nomes(filtrarPessoas(T, todosApp(T), { ...SEM_FILTROS, comercial }));
-    expect(f("Direção")).toEqual(["Ana Martins"]);
-    expect(f("Rúben")).toHaveLength(10);
+    expect(f("Direção")).toEqual(["Ana Martins", "Inês Carvalho"]); // a Inês é uma pessoa de exemplo copiada do negócio da Ana, por isso tem o mesmo dono
+    expect(f("Rúben")).toHaveLength(19); // todas menos a Ana Martins e a Inês, que passaram para a Direção
     expect(comerciaisDe(todosApp(T))).toEqual(["Direção", "Rúben"]);
   });
   it("combina com a pesquisa e com os filtros de lead", () => {
     const r = filtrarPessoas(S, leadsApp(S), { ...SEM_FILTROS, filtro: "visita", origem: "Google Ads" });
-    expect(nomes(r)).toEqual(["Luísa Freitas"]);
+    expect(nomes(r)).toEqual(["Luísa Freitas", "Filipa Moreira"]);
     expect(filtrarPessoas(S, leadsApp(S), { ...SEM_FILTROS, q: "cascais", origem: "Google Ads" })).toEqual([]);
     expect(nomes(filtrarPessoas(S, leadsApp(S), { ...SEM_FILTROS, filtro: "atrasadas" }))).toEqual(["Pedro Lopes"]);
   });
@@ -299,8 +310,9 @@ describe("pessoas · a lista como se vê (ordem e filtros)", () => {
   const S = seed();
   it("a primeira da lista ordenada por urgência é a mais urgente (a atrasada)", () => {
     expect(listaVisivel(S, "leads", SEM_FILTROS, "urgencia")[0]?.nome).toBe("Pedro Lopes");
-    const porValor = [...clientesApp(S)].sort((a, b) => dadosCliente(S, b).valorTotal - dadosCliente(S, a).valorTotal);
-    expect(clientesApp(S).every((p) => p.novoNegocio)).toBe(true);
+    // Os clientes com negócio novo vêm primeiro (os 3 da seed e o Hotel); o Armando Figueiredo, sem negócio novo, vem depois.
+    const porValor = clientesApp(S).filter((p) => p.novoNegocio).sort((a, b) => dadosCliente(S, b).valorTotal - dadosCliente(S, a).valorTotal);
+    expect(clientesApp(S).map((p) => p.novoNegocio)).toEqual([true, true, true, true, false]);
     expect(listaVisivel(S, "clientes", SEM_FILTROS, "urgencia")[0]?.nome).toBe(porValor[0].nome);
     expect(listaVisivel(S, "todos", SEM_FILTROS, "urgencia")[0]?.nome).toBe("Pedro Lopes");
   });
@@ -308,14 +320,15 @@ describe("pessoas · a lista como se vê (ordem e filtros)", () => {
     const porValor = nomes(ordenarPessoas(S, leadsApp(S), "valor"));
     expect(listaVisivel(S, "leads", SEM_FILTROS, "valor")[0]?.nome).toBe(porValor[0]);
     expect(listaVisivel(S, "leads", { ...SEM_FILTROS, filtro: "visita" }, "urgencia")[0]?.nome).toBe("Hugo Matos");
-    expect(nomes(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "wc social" }, "urgencia"))).toEqual(["Pedro Lopes", "Manuel Costa"]);
+    // Pedro (atrasado), depois as de fase Contacto, a mais antiga primeiro: o Bruno Teixeira (02/10, de exemplo) e o Manuel Costa (03/10).
+    expect(nomes(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "wc social" }, "urgencia"))).toEqual(["Pedro Lopes", "Bruno Teixeira", "Manuel Costa"]);
   });
   it("lista vazia (sem resultados): não há ninguém", () => {
     expect(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "zzzz" }, "urgencia")[0]).toBeUndefined();
     expect(listaVisivel(S, "leads", { ...SEM_FILTROS, q: "zzzz" }, "urgencia")).toEqual([]);
   });
   it("um chip que o separador não tem volta a Todas; Com visita é um filtro à parte, só das leads", () => {
-    expect(chipsDe("leads").map((c) => c.id)).toEqual(["todas", "por_contactar", "atrasadas"]);
+    expect(chipsDe("leads").map((c) => c.id)).toEqual(["todas", "por_contactar", "atrasadas", "perdidas"]);
     expect(chipsDe("clientes").map((c) => c.id)).toEqual(["todas", "atrasadas"]);
     expect(filtrosEfetivos("clientes", { ...SEM_FILTROS, filtro: "por_contactar" }).filtro).toBe("todas");
     expect(filtrosEfetivos("clientes", { ...SEM_FILTROS, filtro: "visita" }).filtro).toBe("todas");

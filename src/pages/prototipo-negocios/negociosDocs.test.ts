@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seed, type Negocio } from "./motor";
 import { cartoesV2, docFase, negociosPorPessoa, pessoasAntes } from "./negociosDocs";
+import { PESSOAS_EXEMPLO, idAbrivel } from "./pessoasExemplo";
 
 const base = (id: number): Negocio => structuredClone(seed().deals.find((d) => d.id === id)!);
 
@@ -95,7 +96,12 @@ describe("negociosV2 · lista de cartões", () => {
     const cs = cartoesV2(S);
     const demo = cs.filter((c) => c.demo);
     expect(demo.length).toBeGreaterThanOrEqual(2);
-    for (const c of demo) expect(S.deals.find((d) => d.id === c.negocioId)!.nome).toBe(c.nome);
+    // Os cartões das pessoas de exemplo novas têm o número do negócio de exemplo (que não está no Estado) e abrem o negócio base da seed (limite conhecido).
+    for (const c of demo) {
+      const real = S.deals.find((d) => d.id === c.negocioId);
+      if (real) expect(real.nome).toBe(c.nome);
+      else expect(S.deals.some((d) => d.id === idAbrivel(c.negocioId))).toBe(true);
+    }
     expect(cs.filter((c) => !c.demo).every((c) => !c.linhas && c.orcamentos === 1)).toBe(true);
   });
   it("uma pessoa com mais de um negócio tem um cartão por negócio", () => {
@@ -118,6 +124,8 @@ describe("negociosV2 · lista de cartões", () => {
   });
   it("conta as pessoas ainda em lead, contacto ou visita", () => {
     const S = seed();
-    expect(pessoasAntes(S)).toBe(S.deals.filter((d) => !d.perdido && d.fase < 3).length);
+    // 6 da seed mais 5 de exemplo (a lead nova, a que não atendeu, a da visita, o MQL e a empresa de retalho; o Duarte Gouveia, também antes do orçamento, está perdido).
+    expect(pessoasAntes(S)).toBe(S.deals.filter((d) => !d.perdido && d.fase < 3).length + PESSOAS_EXEMPLO.filter((e) => e.fase < 3 && e.perdida === undefined).length);
+    expect(pessoasAntes(S)).toBe(11);
   });
 });

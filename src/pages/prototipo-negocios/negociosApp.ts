@@ -2,8 +2,11 @@
 // e os de exemplo de exemplosDocs.ts. A V2 de Negócios (um cartão por negócio) e a página Pessoas (um bloco por negócio) leem daqui.
 // Um negócio tem FASES e UM OU MAIS orçamentos (cada um com título e valor); os orçamentos geram UMA proposta e, se exigido, um contrato.
 // Funções puras: nada aqui muda o Estado. Os exemplos são cópias do negócio base da pessoa; nunca entram no Estado.
-import { aberto, eur, r2, tot, type Estado, type LinhaId, type Negocio, type Orcamento } from "./motor";
+import { eur, r2, tot, type Estado, type LinhaId, type Negocio, type Orcamento } from "./motor";
 import { EXEMPLOS, type EstadoContrato, type EstadoProposta, type ExemploNegocio } from "./exemplosDocs";
+import { NEGOCIOS_PESSOAS } from "./pessoasExemplo";
+import { dealsTodos } from "./dealsPessoas";
+import { SEM_MOTIVO, motivoDaPerda } from "./perdaDocs";
 
 export type { EstadoContrato, EstadoProposta } from "./exemplosDocs";
 
@@ -91,7 +94,8 @@ export function textoOrcamentos(n: NegocioApp): string {
 function deSeed(d: Negocio, S: Estado): NegocioApp {
   const o = d.orc;
   return {
-    id: `neg-${d.id}`, negocioId: d.id, nome: d.nome, titulo: d.servico, fase: faseDe(d), demo: false, perdido: null, linhas: [d.linha], deal: d,
+    id: `neg-${d.id}`, negocioId: d.id, nome: d.nome, titulo: d.servico, fase: faseDe(d), demo: false, perdido: d.perdido ? motivoDaPerda(d.nome) ?? SEM_MOTIVO : null,
+    linhas: [d.linha], deal: d,
     orcamentos: o ? [{ id: `neg-${d.id}-o1`, titulo: d.servico, valor: tot(d, S).pf }] : [],
     proposta: !o ? "por gerar" : o.aceite ? "aceite" : o.enviada ? "enviada" : "por gerar",
     contrato: o?.vendaDireta ? null : o?.contrato ?? "por gerar", vendaDireta: !!o?.vendaDireta,
@@ -127,11 +131,13 @@ function deExemplo(base: Negocio, ex: ExemploNegocio): NegocioApp {
   };
 }
 
-/** Os negócios de uma pessoa: primeiro os da seed (abertos), depois os de exemplo. Sem negócio aberto na seed não há exemplos, porque não há a que ligá-los. */
+/** Os negócios de uma pessoa: primeiro os da seed (abertos), depois os de exemplo. Só uma pessoa sem nenhum negócio aberto (uma lead perdida) mostra os perdidos da seed,
+ *  para a ficha dela não ficar vazia; os de exemplo ligam-se ao primeiro negócio dela. Sem negócios não há a que ligá-los. */
 export function negociosDe(S: Estado, nome: string): NegocioApp[] {
-  const reais = aberto(S).filter((d) => d.nome === nome);
+  const seus = dealsTodos(S).filter((d) => d.nome === nome), abertos = seus.filter((d) => !d.perdido), reais = abertos.length ? abertos : seus;
   if (!reais.length) return [];
-  return [...reais.map((d) => deSeed(d, S)), ...(EXEMPLOS[nome] ?? []).map((ex) => deExemplo(reais[0], ex))];
+  const exemplos = [...(EXEMPLOS[nome] ?? []), ...(NEGOCIOS_PESSOAS[nome] ?? [])];
+  return [...reais.map((d) => deSeed(d, S)), ...exemplos.map((ex) => deExemplo(reais[0], ex))];
 }
 
 /* ---------------------------------------------------------------- os documentos do negócio */

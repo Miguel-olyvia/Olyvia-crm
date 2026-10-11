@@ -8,6 +8,7 @@ import { FichaCabecalho } from "./FichaCabecalho";
 import { FichaResumo } from "./FichaResumo";
 import { SepAtividade, SepDocumentos, SepEntradas } from "./FichaListas";
 import { SepNegocios } from "./SepNegocios";
+import { idAbrivel } from "./pessoasExemplo";
 import { fazer, type Ctx } from "./pecas";
 
 export type SepFicha = "resumo" | "negocios" | "entradas" | "atividade" | "contratos";
@@ -31,11 +32,12 @@ export interface FichaProps extends Pick<Ctx, "S" | "A" | "go"> {
 export function PessoaFicha({ S, A, go, p, fechar, sep, aoMudarSep, topo }: FichaProps) {
   const f = perfilDe(p, S), d = p.principal, nx = proximoNegocio(d, S);
   const separadores = separadoresDe(p.papel), ativo = separadores.some((s) => s.id === sep) ? sep : "resumo";
-  const abrir = (id: number) => go(() => A.abrir(id));
+  // Os negócios de uma pessoa de exemplo não existem no Estado: abrem o negócio base da seed (idAbrivel) e o próximo passo também só abre (não corre a ação do motor).
+  const abrir = (id: number) => go(() => A.abrir(idAbrivel(id)));
   return (
     <Tabs value={ativo} onValueChange={(v) => aoMudarSep(v as SepFicha)} className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="max-h-[60dvh] shrink-0 overflow-y-auto border-b border-border px-4 pb-3 pt-4 sm:px-6">
-        <FichaCabecalho p={p} f={f} nx={nx} topo={topo} aoProximo={go(() => (nx.act ? fazer(A, nx.act, d.id) : A.abrir(d.id)))} />
+        <FichaCabecalho p={p} f={f} nx={nx} topo={topo} aoProximo={go(() => (nx.act && !p.exemplo ? fazer(A, nx.act, d.id) : A.abrir(idAbrivel(d.id))))} />
         <TabsList className="mt-3 h-auto w-full flex-wrap justify-start gap-1 p-1" aria-label={p.papel === "cliente" ? "Ficha do cliente" : "Ficha da lead"}>
           {separadores.map(({ id, nome }) => (
             <TabsTrigger key={id} value={id} className="min-h-11 cursor-pointer px-4 text-[15px] data-[state=active]:bg-foreground data-[state=active]:text-background">{nome}</TabsTrigger>

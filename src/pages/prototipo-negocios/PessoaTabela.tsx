@@ -5,10 +5,10 @@ import type { PessoaApp } from "./pessoasDocs";
 import { CartaoPessoa, LinhaTabela } from "./PessoaLinha";
 import { useDesktop } from "./useDesktop";
 
-/** Largura de cada coluna (soma 100): o valor cabe sem quebrar "16.225,82 €" e o resto quebra em duas linhas. */
+/** Largura de cada coluna (soma 100): o valor cabe sem quebrar "16.225,82 €" e o resto quebra em duas linhas. A pessoa tem a maior (nome e selos). */
 const COLUNAS: { nome: string; larg: string; direita?: boolean }[] = [
-  { nome: "Pessoa", larg: "w-[18%]" }, { nome: "Serviço · localidade", larg: "w-[17%]" }, { nome: "Etapa", larg: "w-[14%]" }, { nome: "Origem", larg: "w-[9%]" },
-  { nome: "Último contacto", larg: "w-[14%]" }, { nome: "Próximo passo", larg: "w-[17%]" }, { nome: "Valor", larg: "w-[11%]", direita: true },
+  { nome: "Pessoa", larg: "w-[26%]" }, { nome: "Serviço · localidade", larg: "w-[13%]" }, { nome: "Etapa", larg: "w-[11%]" }, { nome: "Formulário", larg: "w-[10%]" },
+  { nome: "Último contacto", larg: "w-[16%]" }, { nome: "Próximo passo", larg: "w-[13%]" }, { nome: "Valor", larg: "w-[11%]", direita: true },
 ];
 
 interface TabelaProps { S: Estado; pessoas: PessoaApp[]; titulo: string; abrir: (nome: string) => void }

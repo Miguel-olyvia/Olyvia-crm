@@ -18,8 +18,8 @@ describe("perfil · determinismo", () => {
 describe("perfil · o que cada pessoa da seed tem", () => {
   const S = seed();
   const todas = todosApp(S);
-  it("todas as 11 pessoas têm email, telefone, morada, comercial e último contacto", () => {
-    expect(todas).toHaveLength(11);
+  it("todas as 21 pessoas (11 da seed e 10 de exemplo) têm email, telefone, morada, comercial e último contacto", () => {
+    expect(todas).toHaveLength(21);
     for (const p of todas) {
       const f = perfilDe(p, S);
       expect(f.email, p.nome).toMatch(/@/);
@@ -52,8 +52,12 @@ describe("perfil · o que cada pessoa da seed tem", () => {
     expect(pedro.score).toBeLessThan(rita.score);
     expect(pedro.motivos.join(" ")).toMatch(/atrasada/i);
   });
-  it("o NIF só existe nos clientes, com 9 dígitos", () => {
-    for (const p of leadsApp(S)) expect(perfilDe(p, S).nif, p.nome).toBeNull();
+  it("o NIF tem 9 dígitos: os clientes têm sempre; nas leads só algumas pessoas de exemplo (a Filipa Moreira e as duas empresas), nenhuma lead da seed", () => {
+    const comNif = ["Filipa Moreira", "Condomínio Jardins do Tejo", "Modas Aurora"];
+    for (const p of leadsApp(S)) {
+      if (comNif.includes(p.nome)) expect(perfilDe(p, S).nif, p.nome).toMatch(/^\d{9}$/);
+      else expect(perfilDe(p, S).nif, p.nome).toBeNull();
+    }
     for (const p of clientesApp(S)) expect(perfilDe(p, S).nif, p.nome).toMatch(/^\d{9}$/);
   });
   it("tem de 2 a 3 notas, cada nota com autor e data", () => {
@@ -82,11 +86,12 @@ describe("perfil · o que cada pessoa da seed tem", () => {
       for (const x of l) expect(["chamada", "email"]).toContain(x.tipo);
     }
   });
-  it("só a Luísa Freitas tem visita marcada (qui 15/10 · 10:00); o Hugo Matos tem uma já feita", () => {
+  it("só a Luísa Freitas (da seed) e a Filipa Moreira (de exemplo) têm visita marcada; o Hugo Matos tem uma já feita", () => {
     const v = (n: string) => perfilDe(todas.find((p) => p.nome === n)!, S).visita;
     expect(v("Luísa Freitas")).toMatchObject({ estado: "Marcada", data: "qui 15/10", hora: "10:00" });
     expect(v("Hugo Matos")?.estado).toBe("Feita");
-    expect(todas.filter((p) => perfilDe(p, S).visita?.estado === "Marcada").map((p) => p.nome)).toEqual(["Luísa Freitas"]);
+    expect(todas.filter((p) => perfilDe(p, S).visita?.estado === "Marcada").map((p) => p.nome)).toEqual(["Luísa Freitas", "Filipa Moreira"]);
+    expect(v("Filipa Moreira")).toMatchObject({ estado: "Marcada", data: "sex 16/10", hora: "09:30" });
     expect(v("Ana Martins")).toBeNull();
     expect(v("Luísa Freitas")?.quemExemplo).toBe(false);
   });
@@ -105,7 +110,7 @@ describe("perfil · o que cada pessoa da seed tem", () => {
     expect(todas.filter((p) => perfilDe(p, S).conflito)).toHaveLength(1);
   });
   it("as 8 leads da seed são as esperadas (a visita e o negócio novo não mudam quem é lead)", () => {
-    expect(todas.filter((p) => p.papel === "lead").map((p) => p.nome).sort()).toEqual([...LEADS].sort());
+    expect(todas.filter((p) => p.papel === "lead" && !p.exemplo).map((p) => p.nome).sort()).toEqual([...LEADS].sort());
   });
 });
 

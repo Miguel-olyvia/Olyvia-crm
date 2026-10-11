@@ -2,7 +2,7 @@
 // e as cinco etapas da pessoa (Lead, Contacto, Visita, Negócio, Cliente). A obra não entra em nada disto.
 import { describe, expect, it } from "vitest";
 import { seed, type Estado, type Negocio } from "./motor";
-import { clientesApp, dadosCliente, documentosDe, ehGanho, leadsApp, proximoNegocio, todosApp } from "./pessoasDocs";
+import { clientesApp, dadosCliente, documentosDe, ehGanho, leadsApp, perdidasApp, proximoNegocio, todosApp } from "./pessoasDocs";
 import { ETAPAS_PESSOA, etapaPessoa, etapaTexto } from "./listaDocs";
 import { estadoCurto, estadoDe, estadoNegocio, faltaParaOrcamento, pagamentoDe, percursoDe, proximoTexto } from "./perfilDocs";
 import { valorNegocio } from "./negociosApp";
@@ -170,10 +170,15 @@ describe("a obra não é um passo nem um próximo passo da pessoa", () => {
 });
 
 describe("lead e cliente · quem é quem", () => {
-  it("a seed: as mesmas 8 leads e 3 clientes de antes (ninguém muda de papel)", () => {
+  it("a seed: as mesmas 8 leads e 3 clientes de antes (ninguém muda de papel); só os totais mudam, por causa das pessoas de exemplo (14 leads e 5 clientes)", () => {
     const S = seed();
-    expect(nomes(leadsApp(S)).sort()).toEqual(["Ana Martins", "Carla Nunes", "Hugo Matos", "Luísa Freitas", "Manuel Costa", "Pedro Lopes", "Rita Sousa", "Sérgio Pinto"]);
-    expect(nomes(clientesApp(S)).sort()).toEqual(["Joana Ribeiro", "Marta Lima", "Tiago Almeida"]);
+    const leadsSeed = ["Ana Martins", "Carla Nunes", "Hugo Matos", "Luísa Freitas", "Manuel Costa", "Pedro Lopes", "Rita Sousa", "Sérgio Pinto"], clientesSeed = ["Joana Ribeiro", "Marta Lima", "Tiago Almeida"];
+    expect(nomes(leadsApp(S))).toEqual(expect.arrayContaining(leadsSeed));
+    expect(nomes(clientesApp(S))).toEqual(expect.arrayContaining(clientesSeed));
+    expect(nomes(leadsApp(S)).filter((n) => clientesSeed.includes(n))).toEqual([]);
+    expect(nomes(clientesApp(S)).filter((n) => leadsSeed.includes(n))).toEqual([]);
+    expect(leadsApp(S)).toHaveLength(leadsSeed.length + 6);
+    expect(clientesApp(S)).toHaveLength(clientesSeed.length + 2);
   });
   it("contrato assinado faz da pessoa um cliente", () => {
     const S = seed();
@@ -202,10 +207,13 @@ describe("lead e cliente · quem é quem", () => {
     S.deals.find((d) => d.id === 1031)!.fase = 5;
     expect(nomes(clientesApp(S))).toEqual(expect.arrayContaining(["Sérgio Pinto", "Carla Nunes"]));
   });
-  it("um negócio perdido não faz a pessoa cliente nem lead", () => {
+  it("quem fica só com negócios perdidos deixa de ser lead e cliente e passa a lead perdida (chip Perdidas)", () => {
     const S = seed();
     S.deals.find((d) => d.id === 1027)!.perdido = true;
-    expect(nomes(todosApp(S))).not.toContain("Tiago Almeida");
+    expect(nomes(leadsApp(S))).not.toContain("Tiago Almeida");
+    expect(nomes(clientesApp(S))).not.toContain("Tiago Almeida");
+    expect(nomes(perdidasApp(S))).toContain("Tiago Almeida");
+    expect(nomes(todosApp(S)).filter((n) => n === "Tiago Almeida")).toHaveLength(1);
   });
   it("um negócio ganho mais um perdido: continua cliente; um perdido em fase 4 mais um aberto em fase 1 é lead", () => {
     const S = seed();

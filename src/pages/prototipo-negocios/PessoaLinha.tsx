@@ -1,5 +1,6 @@
 // Uma pessoa na lista de Pessoas: uma linha da tabela (computador) ou um cartão de três linhas (abaixo de lg).
 // Só o essencial. O elemento acessível é UM botão com o nome; a linha toda também é clicável. A cor fica nos ícones.
+// Por baixo do nome, pequenas: Lead ou Cliente, Empresa, MQL ou SQL, Atrasada, "exemplo" e, derivado, "Voltou a contactar".
 import { AlertCircle, Clock, UserCheck } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { TableCell, TableRow } from "@/components/ui/table";
@@ -9,7 +10,9 @@ import { atrasada, localDe } from "./leadsDocs";
 import type { PessoaApp } from "./pessoasDocs";
 import { perfilDe, proximoTexto } from "./perfilDocs";
 import { contactoTexto, etapaPessoa, etapaTexto, valorColuna } from "./listaDocs";
+import { formularioDe, resultadoContacto, voltouAContactar } from "./camposPessoa";
 import { FASE_COR, IconeFase } from "./pecas";
+import { Etiqueta, EtiquetaQualificacao, IconePerdida, MarcaExemplo, ResultadoSelo, VoltouAContactar } from "./SelosPessoa";
 
 /** Contorno dos controlos da página Pessoas: cerca de 5:1 sobre branco e 4,6:1 sobre o fundo (mínimo pedido: 3:1). */
 export const BORDA_CTRL = "border-[hsl(220_10%_45%)]";
@@ -45,27 +48,48 @@ export function IconeEtapa({ etapa, tam = "md" }: { etapa: number; tam?: keyof t
 const papel = (p: PessoaApp): string => (p.papel === "lead" ? "Lead" : "Cliente");
 const localidade = (p: PessoaApp): string => { const l = localDe(p.principal); return p.principal.servico + (l ? " · " + l : ""); };
 
+/** As linhas pequenas por baixo do nome, todas na mesma lista que quebra (nunca mais de duas): o papel, as etiquetas que a pessoa tem
+ *  (só nalgumas aparecem) e, se for o caso, "Voltou a contactar" (derivado: quem chama passa `voltou`). */
+export function LinhaPapel({ p, voltou, className }: { p: PessoaApp; voltou?: boolean; className?: string }) {
+  return (
+    <span className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[15px] leading-5 text-muted-foreground", className)}>
+      <span>{papel(p)}</span>
+      {p.empresa && <Etiqueta>Empresa</Etiqueta>}
+      {p.qualificacao && <EtiquetaQualificacao q={p.qualificacao} />}
+      {atrasada(p) && <Atrasada className="mr-0 py-0" />}
+      {(p.exemplo || p.qualificacao !== null) && <MarcaExemplo />}
+      {voltou && <VoltouAContactar />}
+    </span>
+  );
+}
+
 interface LinhaProps { p: PessoaApp; S: Estado; abrir: () => void }
 
-/** Uma linha da tabela, cerca de 56 px: pessoa, serviço e local, etapa, origem, último contacto, próximo passo e valor. */
+/** Uma linha da tabela, de 52 a 56 px (68 px quando há "Voltou a contactar", que passa para uma segunda linha de selos): pessoa, serviço e local, etapa, formulário, último contacto (com o resultado), próximo passo e valor. */
 export function LinhaTabela({ p, S, abrir }: LinhaProps) {
   const f = perfilDe(p, S), c = contactoTexto(f), v = valorColuna(S, p);
-  const celula = "px-2 py-1.5 align-middle text-[15px]";
+  const celula = "px-2 py-1 align-middle text-[15px]";
   return (
     <TableRow onClick={abrir} className="cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60 motion-reduce:transition-none">
       <TableCell className={celula}>
         <button type="button" data-pessoa={p.nome} aria-haspopup="dialog" className={cn("flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md text-left", FOCO)}>
           <AvatarPessoa nome={p.nome} className="h-9 w-9" />
-          <span className="min-w-0"><span className="block break-words font-semibold text-foreground">{p.nome}</span><span className="block text-muted-foreground">{papel(p)}{atrasada(p) && <Atrasada className="ml-2 mr-0 py-0" />}</span></span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-semibold leading-5 text-foreground" title={p.nome}>{p.nome}</span>
+            <LinhaPapel p={p} voltou={voltouAContactar(S, p, f)} />
+          </span>
         </button>
       </TableCell>
       <TableCell className={celula}>{localidade(p)}</TableCell>
       <TableCell className={celula}>
-        <span className="flex items-center gap-2"><IconeEtapa etapa={etapaPessoa(p)} tam="sm" /><span>{etapaTexto(p)}</span></span>
+        <span className="flex items-center gap-2">{p.perdida !== null ? <IconePerdida /> : <IconeEtapa etapa={etapaPessoa(p)} tam="sm" />}<span>{etapaTexto(p)}</span></span>
       </TableCell>
-      <TableCell className={celula}>{f.origem}</TableCell>
+      <TableCell className={celula}>{formularioDe(S, p)}</TableCell>
       <TableCell className={celula}>
-        <span className="flex items-start gap-1.5 text-muted-foreground"><Clock className={cn("mt-1 h-4 w-4 shrink-0", c.sem && "text-destructive")} aria-hidden="true" />{c.texto}</span>
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Clock className={cn("h-4 w-4 shrink-0", c.sem && "text-destructive")} aria-hidden="true" />{c.texto}</span>
+          <ResultadoSelo resultado={resultadoContacto(f)} className="py-0 leading-5" />
+        </span>
       </TableCell>
       <TableCell className={cn(celula, "font-medium")}><span className="line-clamp-2" title={proximoTexto(p, S)}>{proximoTexto(p, S)}</span></TableCell>
       <TableCell className={cn(celula, "whitespace-nowrap text-right tabular-nums")}>
@@ -75,18 +99,19 @@ export function LinhaTabela({ p, S, abrir }: LinhaProps) {
   );
 }
 
-/** Abaixo de lg: três linhas (nome e papel com alerta; serviço e local; próximo passo e há quanto tempo), sem scroll horizontal. */
+/** Abaixo de lg: três linhas (nome e papel com etiquetas; serviço, local e formulário; próximo passo, há quanto tempo e resultado), sem scroll horizontal. */
 export function CartaoPessoa({ p, S, abrir }: LinhaProps) {
-  const c = contactoTexto(perfilDe(p, S));
+  const f = perfilDe(p, S), c = contactoTexto(f);
   return (
     <li>
       <button type="button" data-pessoa={p.nome} aria-haspopup="dialog" onClick={abrir}
         className={cn("flex min-h-11 w-full cursor-pointer gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-muted/60 motion-reduce:transition-none focus-visible:ring-inset", FOCO)}>
         <AvatarPessoa nome={p.nome} className="h-10 w-10" />
         <span className="min-w-0 flex-1">
-          <span className="block"><span className="font-semibold text-foreground">{p.nome}</span><span className="ml-2 text-[15px] text-muted-foreground">{papel(p)}</span>{atrasada(p) && <span className="ml-2"><Atrasada /></span>}</span>
-          <span className="block text-[15px] text-muted-foreground">{localidade(p)}</span>
-          <span className="block text-[15px]"><span className="font-medium text-foreground">{proximoTexto(p, S)}</span><span className="text-muted-foreground"> · {c.texto}</span></span>
+          <span className="block font-semibold text-foreground">{p.nome}</span>
+          <LinhaPapel p={p} voltou={voltouAContactar(S, p, f)} />
+          <span className="block text-[15px] text-muted-foreground">{localidade(p)} · {formularioDe(S, p)}{p.perdida !== null ? ` · ${etapaTexto(p)}` : ""}</span>
+          <span className="block text-[15px]"><span className="font-medium text-foreground">{proximoTexto(p, S)}</span><span className="text-muted-foreground"> · {c.texto}</span> <ResultadoSelo resultado={resultadoContacto(f)} /></span>
         </span>
       </button>
     </li>

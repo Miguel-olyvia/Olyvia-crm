@@ -6,6 +6,9 @@ import { contactoTexto, etapaTexto, negocioMaisAvancado, negocioPorDefeito, posi
 import type { FaseNegocio } from "./negociosApp";
 
 const NOMES = ["Ana", "Bruno", "Carla", "Duarte"];
+/** As pessoas da seed: os valores de baixo são os delas (as pessoas de exemplo novas somam mais, e têm os seus testes em pessoasCampos.test.ts). */
+const LEADS_SEED = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
+const CLIENTES_SEED = ["Tiago Almeida", "Marta Lima", "Joana Ribeiro"];
 
 describe("lista · a pessoa vizinha e a posição", () => {
   it("no meio há anterior e seguinte, e a posição conta a partir de 1", () => {
@@ -51,10 +54,11 @@ describe("lista · etapa e valor por papel", () => {
   it("a lead diz a etapa do contacto (ou o estado do negócio); o cliente diz só Cliente", () => {
     expect(etapaTexto(leadsApp(S).find((p) => p.nome === "Pedro Lopes")!)).toBe("Por contactar");
     expect(etapaTexto(leadsApp(S).find((p) => p.nome === "Carla Nunes")!)).toBe("Negócio · proposta");
-    expect(clientesApp(S).map(etapaTexto)).toEqual(["Cliente", "Cliente", "Cliente"]);
+    // Cinco clientes: os 3 da seed mais o Hotel Praia Dourada e o Armando Figueiredo (pessoas de exemplo).
+    expect(clientesApp(S).map(etapaTexto)).toEqual(["Cliente", "Cliente", "Cliente", "Cliente", "Cliente"]);
   });
   it("leads: o valor em orçamento, ou null quando não há (mostra-se '—')", () => {
-    const v = Object.fromEntries(leadsApp(S).map((p) => [p.nome, valorColuna(S, p)]));
+    const v = Object.fromEntries(leadsApp(S).filter((p) => LEADS_SEED.includes(p.nome)).map((p) => [p.nome, valorColuna(S, p)]));
     expect(v["Pedro Lopes"]).toBeNull();
     // Carla (8.126,60 + 4.850 + 1.920 + 3.480 + 4.260) e Sérgio (3.306,22 + 1.380): os orçamentos de todos os negócios abertos.
     expect(Object.values(v).reduce<number>((a, x) => a + (x ?? 0), 0)).toBeCloseTo(8126.6 + 6770 + 7740 + 3306.22 + 1380, 2);
@@ -62,7 +66,7 @@ describe("lista · etapa e valor por papel", () => {
   });
   it("clientes: o valor contratado", () => {
     // Os três contratos da seed (16.225,82) mais a venda direta aceite do Tiago (4.200 + 2.350); o resto está em curso, à espera de assinatura ou perdido.
-    expect(clientesApp(S).reduce((a, p) => a + (valorColuna(S, p) ?? 0), 0)).toBeCloseTo(16225.82 + 6550, 2);
+    expect(clientesApp(S).filter((p) => CLIENTES_SEED.includes(p.nome)).reduce((a, p) => a + (valorColuna(S, p) ?? 0), 0)).toBeCloseTo(16225.82 + 6550, 2);
   });
 });
 

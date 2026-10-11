@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, type LinhaId } from "./motor";
 import { COLUNAS_V2, cartoesV2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
+import { idAbrivel } from "./pessoasExemplo";
 import { Chip, FASE_COR, type Ctx } from "./pecas";
 
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
@@ -42,7 +43,7 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
     const n = porPessoa[c.nome] || 1;
     return (
       <li key={c.id} className="rounded-xl border border-border bg-card">
-        <button type="button" onClick={go(() => A.abrir(c.negocioId))}
+        <button type="button" onClick={go(() => A.abrir(idAbrivel(c.negocioId)))}
           className="group block min-h-11 w-full rounded-xl p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <span className="mb-2 flex items-center gap-2 text-[15px] text-muted-foreground">
             <Chip icone={I} cor={ICONE[c.doc].cor} className={CHIP_PEQ} />

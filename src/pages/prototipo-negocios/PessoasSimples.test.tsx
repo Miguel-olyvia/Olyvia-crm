@@ -37,8 +37,8 @@ describe("Pessoas · lista primeiro", () => {
     pagina();
     const tabela = screen.getByRole("table");
     expect(within(tabela).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(
-      ["Pessoa", "Serviço · localidade", "Etapa", "Origem", "Último contacto", "Próximo passo", "Valor"]);
-    expect(within(tabela).getAllByRole("row")).toHaveLength(9);
+      ["Pessoa", "Serviço · localidade", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Valor"]);
+    expect(within(tabela).getAllByRole("row")).toHaveLength(15); // o cabeçalho e as 14 leads (8 da seed e 6 de exemplo)
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "Pessoas" })).toBeInTheDocument();
     expect(screen.queryByText("Escolhe uma pessoa")).toBeNull();
@@ -47,15 +47,16 @@ describe("Pessoas · lista primeiro", () => {
     ecra(false);
     pagina();
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("list", { name: "Leads" }).querySelectorAll("li")).toHaveLength(8);
+    expect(screen.getByRole("list", { name: "Leads" }).querySelectorAll("li")).toHaveLength(14);
   });
   it("o cabeçalho tem os separadores com contagens e uma só fila de chips", () => {
     pagina();
-    expect(screen.getByRole("tab", { name: /Leads/ })).toHaveTextContent("8");
-    expect(screen.getByRole("tab", { name: /Clientes/ })).toHaveTextContent("3");
-    expect(screen.getByRole("tab", { name: /Todos/ })).toHaveTextContent("11");
+    expect(screen.getByRole("tab", { name: /Leads/ })).toHaveTextContent("14");
+    expect(screen.getByRole("tab", { name: /Clientes/ })).toHaveTextContent("5");
+    expect(screen.getByRole("tab", { name: /Todos/ })).toHaveTextContent("21"); // 14 leads, 5 clientes e 2 perdidas
     const chips = within(screen.getByRole("group", { name: "Mostrar" })).getAllByRole("button");
-    expect(chips.map((c) => c.textContent?.replace(/\s*\d+$/, ""))).toEqual(["Todas", "Por contactar", "Atrasadas", "Só as minhas"]);
+    expect(chips.map((c) => c.textContent?.replace(/\s*\d+$/, ""))).toEqual(["Todas", "Por contactar", "Atrasadas", "Perdidas", "Só as minhas"]);
+    expect(chips.map((c) => c.textContent?.match(/\d+$/)?.[0])).toEqual(["14", "4", "1", "2", undefined]);
   });
   it("clicar na linha abre a ficha num painel, com o foco no nome e a posição; Esc fecha e devolve o foco à linha da pessoa certa", async () => {
     pagina();
@@ -63,10 +64,10 @@ describe("Pessoas · lista primeiro", () => {
     const painel = await screen.findByRole("dialog");
     const titulo = within(painel).getByRole("heading", { name: "Pedro Lopes" });
     await waitFor(() => expect(document.activeElement).toBe(titulo));
-    expect(within(painel).getByText("1 de 8")).toBeInTheDocument();
+    expect(within(painel).getByText("1 de 14")).toBeInTheDocument();
     expect(within(painel).getByRole("button", { name: "Anterior" })).toBeDisabled();
     fireEvent.click(within(painel).getByRole("button", { name: /^Seguinte: / }));
-    expect(within(painel).getByText("2 de 8")).toBeInTheDocument();
+    expect(within(painel).getByText("2 de 14")).toBeInTheDocument();
     expect(within(painel).getByRole("heading", { name: "Ana Martins" })).toBeInTheDocument();
     expect(within(painel).getByRole("button", { name: /^Anterior: Pedro Lopes/ })).toBeEnabled();
     esc();
@@ -93,16 +94,19 @@ describe("Pessoas · lista primeiro", () => {
   it("com um filtro, as setas só percorrem a lista filtrada e o Seguinte desativa-se na última pessoa", async () => {
     pagina();
     fireEvent.click(screen.getByRole("button", { name: /^Por contactar/ }));
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(4);
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(5); // o cabeçalho, Pedro, Ana, Rita e a Inês Carvalho (de exemplo)
     fireEvent.click(linha("Ana Martins"));
     const painel = await screen.findByRole("dialog");
-    expect(within(painel).getByText("2 de 3")).toBeInTheDocument();
+    expect(within(painel).getByText("2 de 4")).toBeInTheDocument();
     fireEvent.click(within(painel).getByRole("button", { name: /^Seguinte: Rita Sousa/ }));
-    expect(within(painel).getByText("3 de 3")).toBeInTheDocument();
+    expect(within(painel).getByText("3 de 4")).toBeInTheDocument();
+    fireEvent.click(within(painel).getByRole("button", { name: /^Seguinte: Inês Carvalho/ }));
+    expect(within(painel).getByText("4 de 4")).toBeInTheDocument();
     expect(within(painel).getByRole("button", { name: "Seguinte" })).toBeDisabled();
+    fireEvent.click(within(painel).getByRole("button", { name: /^Anterior: Rita Sousa/ }));
     fireEvent.click(within(painel).getByRole("button", { name: /^Anterior: Ana Martins/ }));
     fireEvent.click(within(painel).getByRole("button", { name: /^Anterior: Pedro Lopes/ }));
-    expect(within(painel).getByText("1 de 3")).toBeInTheDocument();
+    expect(within(painel).getByText("1 de 4")).toBeInTheDocument();
     expect(within(painel).getByRole("button", { name: "Anterior" })).toBeDisabled();
   });
   it("sem resultados diz-se, anuncia-se, e Limpar filtros devolve a lista e põe o foco na pesquisa", () => {
@@ -113,7 +117,7 @@ describe("Pessoas · lista primeiro", () => {
     expect(screen.getByText("Nenhuma pessoa com este filtro.")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Nenhuma pessoa");
     fireEvent.click(screen.getByRole("button", { name: "Limpar filtros" }));
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(9);
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(15);
     expect(screen.queryByText("Nenhuma pessoa com este filtro.")).toBeNull();
     expect(document.activeElement).toBe(pesquisa);
   });
@@ -343,6 +347,8 @@ describe("Pessoas · os avisos com o painel aberto", () => {
   it("marcar como perdida deixa o botão Anular acessível, e Anular repõe a lead na lista", async () => {
     const painel = await abrirPessoas();
     fireEvent.click(within(painel).getByRole("button", { name: "Marcar como perdida" }));
+    expect(await within(painel).findByRole("button", { name: /^Sim, marcar como perdida/ })).toBeDisabled(); // sem motivo escolhido não se confirma
+    fireEvent.change(within(painel).getByLabelText("Motivo da perda"), { target: { value: "Preço" } });
     fireEvent.click(await within(painel).findByRole("button", { name: /^Sim, marcar como perdida/ }));
     const anular = await screen.findByRole("button", { name: "Anular" });
     expect(acessivel(anular)).toBe(true);

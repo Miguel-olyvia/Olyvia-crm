@@ -8,6 +8,7 @@ import { PessoaLista } from "./PessoaLista";
 import { PessoaPainel } from "./PessoaPainel";
 import type { SepFicha } from "./PessoaFicha";
 import { esquecerNegocios } from "./SepNegocios";
+import { esquecerPerdas } from "./perdaDocs";
 import type { Ctx } from "./pecas";
 
 /** O que a página lembra quando se abre um negócio e se volta: vive fora do componente porque a página desmonta. */
@@ -16,7 +17,7 @@ const MEMORIA_VAZIA: Memoria = { lista: null, sel: null, sep: "resumo", f: SEM_F
 let memoria: Memoria = MEMORIA_VAZIA;
 const lembrar = (m: Partial<Memoria>): void => { memoria = { ...memoria, ...m }; };
 /** Esquece tudo (por exemplo quando a demonstração é reposta). */
-export function esquecerPessoas(): void { memoria = MEMORIA_VAZIA; esquecerNegocios(); }
+export function esquecerPessoas(): void { memoria = MEMORIA_VAZIA; esquecerNegocios(); esquecerPerdas(); }
 
 /** `alvoAvisos` recebe o elemento do painel onde os avisos (toasts) devem aparecer enquanto ele está aberto, e `null` quando fecha. */
 export function PessoasSimples({ S, A, go, abrirEm, alvoAvisos }: Ctx & { abrirEm?: SeparadorLista; alvoAvisos?: (el: HTMLElement | null) => void }) {

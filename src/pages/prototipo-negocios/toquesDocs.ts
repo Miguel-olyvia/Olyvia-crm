@@ -3,6 +3,9 @@
 // calculados a partir do nome, da linha, da origem, dos campos e da data de cada negócio.
 import { PAPEIS, type Estado, type Negocio } from "./motor";
 import { idade, localDe, somarDias, tempoDesde, type CampoRotulado } from "./leadsDocs";
+import { dealsTodos } from "./dealsPessoas";
+import { PESSOAS_EXEMPLO, type ToqueExemplo } from "./pessoasExemplo";
+import { distritoTexto } from "./distritos";
 
 export type Via = "online" | "mao";
 export type Canal = "Redes sociais pagas" | "Pesquisa" | "Offline" | "Parcerias" | "Outros";
@@ -121,6 +124,19 @@ const REGISTO: Record<string, Esboco[]> = {
   "Joana Ribeiro": [INDICACAO],
 };
 
+/** A UTM de um toque online de uma pessoa de exemplo: só as origens pagas a têm (a de exemplo é sempre a mesma). */
+function utmPorOrigem(origem: string, campanha: string | undefined): Utm | null {
+  const c = (campanha ?? "campanha").toLowerCase().replace(/\s+/g, "-");
+  if (origem === "Meta Ads") return utm("facebook", "paid_social", c, null, null, "fbclid=IwAR0aB3cD4eF5gH");
+  return origem === "Google Ads" ? utm("google", "cpc", c, null, null, "gclid=Cj0KCQjw7pK2BhDJ") : null;
+}
+
+/** O esboço de um toque de uma pessoa de exemplo (pessoasExemplo.ts). */
+const deExemplo = (t: ToqueExemplo): Esboco => ({
+  dias: t.dias, via: t.via, origem: t.origem, campanha: t.campanha ?? null, formulario: t.formulario ?? null,
+  utm: t.via === "online" ? utmPorOrigem(t.origem, t.campanha) : null, estado: t.estado, motivo: t.motivo,
+});
+
 /** Para quem não está no registo (por exemplo uma lead criada no ecrã): deriva-se da origem do negócio. */
 function esbocosDe(d: Negocio): Esboco[] {
   const o = d.origem.toLowerCase();
@@ -166,10 +182,12 @@ function camposOnline(d: Negocio, telefone: string, completo: boolean): CampoRot
     { rotulo: "Nome", valor: d.nome }, { rotulo: "Telefone", valor: telefone }, { rotulo: "Email", valor: d.f.email || "" },
   ];
   const obs = d.f.pedido || escolher(OBS[d.linha], n);
-  if (!completo) return [...base, { rotulo: "Observações", valor: obs }].filter(preenchido);
+  const distrito = { rotulo: "Distrito", valor: distritoTexto(localDe(d)) };
+  if (!completo) return [...base, distrito, { rotulo: "Observações", valor: obs }].filter(preenchido);
   return [
     ...base,
     { rotulo: "Localidade", valor: localDe(d) },
+    distrito,
     { rotulo: "Tipologia", valor: tipologia },
     { rotulo: "Área (m²)", valor: d.f.area_util_m2 || AREA_DE[tipologia] || "" },
     { rotulo: "Prazo desejado", valor: d.f.prazo || escolher(PRAZOS, n + 1) },
@@ -198,11 +216,12 @@ function estadoInicial(d: Negocio, via: Via): EstadoToque {
  * Vazio se a pessoa não existe.
  */
 export function toquesDe(S: Estado, nome: string): Toque[] {
-  const seus = S.deals.filter((d) => d.nome === nome);
+  const todos = dealsTodos(S), seus = todos.filter((d) => d.nome === nome);
   if (!seus.length) return [];
   const d = seus.reduce((a, x) => (idade(x.quando) > idade(a.quando) ? x : a), seus[0]);
-  return (REGISTO[nome] ?? esbocosDe(d)).map((e, i): Toque => {
-    const outro = e.conflitoCom ? S.deals.find((x) => x.nome === e.conflitoCom) : undefined;
+  const exemplo = PESSOAS_EXEMPLO.find((e) => e.nome === nome);
+  return (REGISTO[nome] ?? (exemplo ? exemplo.toques.map(deExemplo) : esbocosDe(d))).map((e, i): Toque => {
+    const outro = e.conflitoCom ? todos.find((x) => x.nome === e.conflitoCom) : undefined;
     const telefone = outro ? outro.tel : d.tel;
     const primeiro = i === 0;
     return {

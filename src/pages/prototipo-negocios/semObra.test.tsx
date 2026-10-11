@@ -13,9 +13,26 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); window.matchMedia = original; });
 
+/** O texto de cada nó de texto, separado por espaços: o textContent junta "Distrito" e "Braga" em "DistritoBraga", que contém "obra" sem que alguém o leia. */
+const textoVisivel = (): string => {
+  const nos = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT), l: string[] = [];
+  for (let n = nos.nextNode(); n; n = nos.nextNode()) l.push(n.textContent ?? "");
+  return l.join(" ");
+};
 /** Todo o texto que se lê ou ouve: o texto dos elementos e os rótulos acessíveis. */
-const texto = (): string => [document.body.textContent ?? "", ...[...document.querySelectorAll("[aria-label]")].map((e) => e.getAttribute("aria-label") ?? "")].join("\n");
+const texto = (): string => [textoVisivel(),...[...document.querySelectorAll("[aria-label]")].map((e) => e.getAttribute("aria-label") ?? "")].join("\n");
 const OBRA = /obra/i;
+
+describe("Pessoas · sem obra · o próprio detetor", () => {
+  it("apanha a palavra 'obra' quando ela existe, e não apanha falsos positivos de nós vizinhos ('Distrito' e 'Braga')", () => {
+    const { unmount } = render(<dl><dt>Distrito</dt><dd>Braga</dd></dl>);
+    expect(textoVisivel()).toContain("Distrito Braga");
+    expect(texto()).not.toMatch(OBRA);
+    unmount();
+    render(<p>Fase seguinte: <b>obra</b> em curso</p>);
+    expect(texto()).toMatch(OBRA);
+  });
+});
 
 describe("Pessoas · sem obra", () => {
   it("a lista de todas as pessoas, em tabela e em cartões, não fala de obra", async () => {
@@ -34,7 +51,7 @@ describe("Pessoas · sem obra", () => {
     expect(texto()).not.toMatch(OBRA);
   });
 
-  it("a ficha das 11 pessoas (etapas, subtítulo, resumo, negócios, entradas, atividade, contratos e documentos) não fala de obra", async () => {
+  it("a ficha das 21 pessoas (11 da seed e 10 de exemplo: etapas, subtítulo, resumo, negócios, entradas, atividade, contratos e documentos) não fala de obra", async () => {
     const S = seed();
     const run = (fn: () => void) => fn();
     render(<PessoasSimples S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" repor={vi.fn()} />);
@@ -54,5 +71,5 @@ describe("Pessoas · sem obra", () => {
         await waitFor(() => expect(within(painel).getByRole("heading", { name: nomes[i + 1] })).toBeInTheDocument());
       }
     }
-  });
+  }, 60000);
 });

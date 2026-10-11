@@ -7,6 +7,8 @@ import { atrasada, idade, localDe, somarDias, tempoDesde } from "./leadsDocs";
 import { canalDe, infoOrigem, toquesDe, utmTexto } from "./toquesDocs";
 import { comercialDe, ehGanho, proximoNegocio, type PessoaApp } from "./pessoasDocs";
 import { valorNegocio, type NegocioApp } from "./negociosApp";
+import { RESULTADO_SEED, extraDe, type Empresa } from "./pessoasExemplo";
+import { distritoDe } from "./distritos";
 
 /** "Hoje" do protótipo (o mesmo de leadsDocs). */
 const HOJE = "10/10";
@@ -25,13 +27,20 @@ export interface Interacao { id: string; tipo: "chamada" | "email"; titulo: stri
 export interface Prazo { data: string; atrasado: boolean }
 export interface Pagamento { total: number; pago: number; falta: number }
 
+/** O título do email automático que a Olyvia manda ao entrar uma pessoa: não é um contacto da equipa. */
+export const EMAIL_AUTOMATICO = "Email de boas-vindas";
+/** Os resultados de uma chamada em que ninguém falou com a pessoa. */
+const SEM_RESPOSTA: readonly string[] = ["Não atendeu", "Número errado"];
+
 export interface Perfil {
   email: string;
   /** O email foi inventado a partir do nome (a seed não tem email). */
   emailExemplo: boolean;
   telefone: string;
   morada: Morada;
-  /** Só os clientes têm NIF. */
+  /** O distrito, derivado da localidade (mapa fixo em distritos.ts); `null` se a localidade não está no mapa. */
+  distrito: string | null;
+  /** Os clientes têm NIF e, nas leads, só algumas pessoas de exemplo (as empresas e uma pessoa com NIF). */
   nif: string | null;
   /** O NIF foi inventado (a seed não o tem). */
   nifExemplo: boolean;
@@ -89,13 +98,15 @@ const porRecente = <T extends { q: string }>(l: T[]): T[] =>
 type Esboco = Omit<Interacao, "id" | "exemplo">;
 
 function esbocosDeInteracoes(d: Negocio, base: string, s: number): Esboco[] {
-  const l: Esboco[] = [{ tipo: "email", titulo: "Email de boas-vindas", detalhe: "Enviado pela Olyvia", q: quandoEm(base, 0, 9 + (s % 4), (s * 3) % 60) }];
+  const l: Esboco[] = [{ tipo: "email", titulo: EMAIL_AUTOMATICO, detalhe: "Enviado pela Olyvia", q: quandoEm(base, 0, 9 + (s % 4), (s * 3) % 60) }];
   const tentativas = d.fase >= 1 ? Math.max(1, Number(d.f.tentativas) || 1) : 0;
+  // O resultado da última chamada: o da seed, ou o de exemplo (RESULTADO_SEED) para dar variedade sem mudar a seed.
+  const resultado = RESULTADO_SEED[d.nome] ?? (d.f.resultado || "Atendeu · interessado");
   for (let i = 0; i < tentativas; i++) {
-    const atendeu = i === tentativas - 1;
+    const ultima = i === tentativas - 1, atendeu = ultima && !SEM_RESPOSTA.includes(resultado);
     l.push({
       tipo: "chamada", titulo: atendeu ? `Chamada · ${3 + (s % 7)} min` : "Chamada sem resposta",
-      detalhe: atendeu ? d.f.resultado || "Atendeu · interessado" : "Não atendeu", q: quandoEm(base, 1 + i, 10 + ((s + i) % 7), (s * 7 + i * 13) % 60),
+      detalhe: ultima ? resultado : "Não atendeu", q: quandoEm(base, 1 + i, 10 + ((s + i) % 7), (s * 7 + i * 13) % 60),
     });
   }
   if (d.fase >= 2) l.push({ tipo: "email", titulo: "Confirmação da visita", detalhe: "Enviado ao cliente", q: quandoEm(base, tentativas + 2, 11, (s * 5) % 60) });
@@ -187,24 +198,28 @@ export function perfilDe(p: PessoaApp, S: Estado): Perfil {
   const ultimo = interacoes[0].q, dias = Math.max(0, idade(ultimo));
   const morada = moradaDe(d), conflito = toques.some((t) => t.conflito);
   const visita = visitaDe(p, morada.completa);
-  const nif = p.papel === "cliente" ? d.f.nif || "2" + String((s * 7919) % 100000000).padStart(8, "0") : null;
+  const extra = extraDe(p.nome);
+  const nif = extra.empresa?.nif ?? extra.nif ?? (p.papel === "cliente" ? d.f.nif || "2" + String((s * 7919) % 100000000).padStart(8, "0") : null);
   return {
     emailExemplo: !d.f.email,
     email: d.f.email || `${p.nome.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ /g, ".")}@exemplo.pt`,
-    telefone: p.tel, morada, nif, nifExemplo: nif !== null && !d.f.nif, comercial: comercialDe(p), criada: base, criadaHa: tempoDesde(base), ultimoContacto: ultimo, diasSemContacto: dias,
+    telefone: p.tel, morada, distrito: distritoDe(morada.localidade), nif, nifExemplo: nif !== null && !d.f.nif, comercial: comercialDe(p), criada: base, criadaHa: tempoDesde(base), ultimoContacto: ultimo, diasSemContacto: dias,
     saude: saudeDe(p, dias, conflito, visita, pagamentoDe(S, p)), visita, notas: notasDe(p, base, PAPEIS[d.dono].nome), interacoes,
     origem: primeiro?.origem ?? d.origem, canal: primeiro?.canal ?? canalDe(d.origem), campanha: primeiro?.campanha ?? (primeiro?.porMapear ? "por mapear" : null),
     conflito, prazo: prazoDe(p, ultimo, s),
   };
 }
 
-/** Os campos do bloco Contacto da ficha. Sem telefone ou sem email diz-se, em vez de mostrar um campo vazio; o que foi inventado leva "exemplo". */
-export function camposContacto(f: Perfil): { rotulo: string; valor: string }[] {
+/** Os campos do bloco Contacto da ficha, iguais na lead e no cliente (só aparece o que a pessoa tem). Sem telefone ou sem email diz-se, em vez de mostrar um campo vazio;
+ *  o que foi inventado leva "exemplo". Numa empresa o nome da ficha é o da empresa, e mostram-se a pessoa de contacto e o NIF da empresa. */
+export function camposContacto(f: Perfil, empresa: Empresa | null = null): { rotulo: string; valor: string }[] {
   return [
     { rotulo: "Telefone", valor: f.telefone.trim() || "Sem telefone" },
     { rotulo: "Email", valor: f.email.trim() ? (f.emailExemplo ? `${f.email} (exemplo)` : f.email) : "Sem email" },
     { rotulo: "Morada", valor: f.morada.completa },
-    ...(f.nif ? [{ rotulo: "NIF", valor: f.nifExemplo ? `${f.nif} (exemplo)` : f.nif }] : []),
+    { rotulo: "Distrito", valor: f.distrito ?? "Por indicar" },
+    ...(empresa ? [{ rotulo: "Pessoa de contacto", valor: `${empresa.contacto} (exemplo)` }] : []),
+    ...(f.nif ? [{ rotulo: empresa ? "NIF da empresa" : "NIF", valor: f.nifExemplo ? `${f.nif} (exemplo)` : f.nif }] : []),
   ];
 }
 

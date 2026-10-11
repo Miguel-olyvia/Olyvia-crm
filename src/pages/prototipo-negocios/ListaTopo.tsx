@@ -8,7 +8,7 @@ import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import type { Estado } from "./motor";
 import {
-  ORDENS, SEPARADORES_LISTA, chipsDe, comerciaisDe, contagens, filtrarPessoas, origensDe,
+  ORDENS, SEPARADORES_LISTA, chipsDe, comerciaisDe, contagens, filtrarPessoas, origensDe, poolDoSeparador,
   type FiltrosPessoa, type Ordem, type PessoaApp, type SeparadorLista,
 } from "./pessoasDocs";
 import { BORDA_CTRL } from "./PessoaLinha";
@@ -81,7 +81,8 @@ function Filtros({ S, aba, f, setF, ordem, setOrdem, todas, leitura }: Omit<Topo
 export function ListaTopo(props: TopoProps) {
   const { S, aba, f, setF, todas, novaLead, pesquisa } = props;
   const porAba = contagens(S, f.q);
-  const contar = (filtro: FiltrosPessoa["filtro"]) => filtrarPessoas(S, todas, { ...f, filtro }).length;
+  // "Perdidas" conta entre as perdidas (o separador Leads não as tem); os outros chips contam entre as pessoas do separador.
+  const contar = (filtro: FiltrosPessoa["filtro"]) => filtrarPessoas(S, poolDoSeparador(S, aba, filtro), { ...f, filtro }).length;
   return (
     <div className="border-b border-border bg-background px-4 pt-1 lg:sticky lg:top-0 lg:z-20">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">

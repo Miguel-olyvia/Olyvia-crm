@@ -8,6 +8,7 @@ import { COLUNAS_V2, cartoesV2, negociosPorPessoa } from "./negociosDocs";
 import { clientesApp, documentosDe, ehGanho, leadsApp, todosApp } from "./pessoasDocs";
 import { leadsDe } from "./leadsDocs";
 import { estadoDe, percursoDe } from "./perfilDocs";
+import { SEM_MOTIVO } from "./perdaDocs";
 
 const NOMES = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto", "Tiago Almeida", "Marta Lima", "Joana Ribeiro"];
 const todos = (S: Estado): NegocioApp[] => NOMES.flatMap((n) => negociosDe(S, n));
@@ -31,10 +32,12 @@ describe("negociosDe · a função única de negócios por pessoa", () => {
     for (const nome of ["Ana Martins", "Pedro Lopes", "Manuel Costa", "Luísa Freitas", "Hugo Matos"]) expect(por(nome), nome).toBe(1);
     expect(negociosDe(S, "Ninguém")).toEqual([]);
   });
-  it("sem negócio aberto na seed não há exemplos (não há a que ligá-los)", () => {
+  it("sem nenhum negócio aberto, a pessoa mostra o negócio perdido da seed (lead perdida) com os exemplos ligados a ele; sem negócios não há a que ligá-los", () => {
     const S = seed();
     S.deals.find((d) => d.id === 1022)!.perdido = true;
-    expect(negociosDe(S, "Marta Lima")).toEqual([]);
+    const marta = negociosDe(S, "Marta Lima");
+    expect(marta.map((n) => n.id)).toEqual(["neg-1022", "ex-90107", "ex-90108"]);
+    expect(marta[0].perdido).toBe(SEM_MOTIVO);
     const T = seed();
     T.deals = T.deals.filter((d) => d.id !== 1031);
     expect(negociosDe(T, "Carla Nunes")).toEqual([]);
@@ -180,11 +183,13 @@ describe("matriz de exemplos · cobertura da V2", () => {
 });
 
 describe("matriz de exemplos · ninguém muda de papel", () => {
-  it("as mesmas 8 leads e 3 clientes de sempre, e os mesmos da regra de leads", () => {
+  it("as mesmas 8 leads e 3 clientes de sempre (14 leads e 5 clientes com as pessoas de exemplo), e os mesmos da regra de leads", () => {
     const S = seed();
-    expect(leadsApp(S).map((p) => p.nome).sort()).toEqual(NOMES.slice(0, 8).sort());
-    expect(clientesApp(S).map((p) => p.nome).sort()).toEqual(NOMES.slice(8).sort());
-    expect(leadsApp(S).map((p) => p.nome)).toEqual(leadsDe(S).map((p) => p.nome));
+    const seedLeads = leadsApp(S).map((p) => p.nome).filter((n) => NOMES.includes(n));
+    expect(seedLeads.slice().sort()).toEqual(NOMES.slice(0, 8).sort());
+    expect(clientesApp(S).map((p) => p.nome).filter((n) => NOMES.includes(n)).sort()).toEqual(NOMES.slice(8).sort());
+    expect([leadsApp(S).length, clientesApp(S).length]).toEqual([14, 5]);
+    expect(seedLeads).toEqual(leadsDe(S).map((p) => p.nome));
   });
   it("pelo menos 4 pessoas com 2 ou mais negócios", () => {
     expect(todosApp(seed()).filter((p) => p.todos.length >= 2).length).toBeGreaterThanOrEqual(4);

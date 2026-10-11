@@ -68,7 +68,7 @@ export function PessoaLista({ S, aba, setAba, f, setF, ordem, setOrdem, abrir, n
         {todas.length === 0 ? <SeparadorVazio aba={aba} /> : visiveis.length === 0 ? <SemResultados limpar={limpar} pesquisa={f.q.trim() !== ""} /> : (
           <>
             <PessoaTabela S={S} pessoas={visiveis} titulo={titulo} abrir={abrir} />
-            <p className="px-4 pt-3 text-[15px] text-muted-foreground">Exemplo: o negócio novo juntado a clientes, a saúde, as notas e os pagamentos são inventados para a demonstração.</p>
+            <p className="px-4 pt-3 text-[15px] text-muted-foreground">Exemplo: as pessoas marcadas exemplo, o negócio novo juntado a clientes, a qualificação (MQL e SQL), o resultado do último contacto, a saúde, as notas e os pagamentos são inventados para a demonstração.</p>
           </>
         )}
       </TabsContent>
