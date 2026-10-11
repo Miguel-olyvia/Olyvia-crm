@@ -2,7 +2,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "npm:zod";
 import { sanitizeTracking } from "../_shared/leadTracking.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -33,10 +32,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-api-key",
   "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
 };
-
-const RATE_LIMIT_BUCKET = "update-lead";
-const RATE_LIMIT_MAX_ATTEMPTS = 10;
-const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // --- Input Validation ---
 const MAX_FIELD_VALUE_LENGTH = 10_000;
@@ -95,19 +90,6 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Rate limiting check — persistent, DB-backed
-    const clientIp = getClientIp(req);
-    const rateLimit = await checkRateLimit(supabase, {
-      bucket: RATE_LIMIT_BUCKET,
-      identifier: clientIp,
-      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
-      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
-    });
-    if (!rateLimit.allowed) {
-      return rateLimitResponse(rateLimit, corsHeaders);
-    }
-    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
