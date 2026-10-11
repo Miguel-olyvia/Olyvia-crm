@@ -4,7 +4,7 @@
 // Funções puras: nada aqui muda o Estado. Os exemplos são cópias do negócio base da pessoa; nunca entram no Estado.
 import { eur, r2, tot, type Estado, type LinhaId, type Negocio, type Orcamento } from "./motor";
 import { EXEMPLOS, type EstadoContrato, type EstadoProposta, type ExemploNegocio } from "./exemplosDocs";
-import { NEGOCIOS_PESSOAS } from "./pessoasExemplo";
+import { NEGOCIOS_PESSOAS, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import { dealsTodos } from "./dealsPessoas";
 import { SEM_MOTIVO, motivoDaPerda } from "./perdaDocs";
 
@@ -19,7 +19,7 @@ export interface OrcamentoApp { id: string; titulo: string; valor: number }
 export interface NegocioApp {
   /** Único por negócio: `neg-1031` no da seed, `ex-90101` nos de exemplo. */
   id: string;
-  /** O negócio base da pessoa na seed: é o que se abre (os de exemplo abrem o da mesma pessoa). */
+  /** O negócio base da pessoa na seed. Os de exemplo não têm página própria: ver `semPaginaPropria`. */
   negocioId: number;
   nome: string;
   titulo: string;
@@ -52,6 +52,8 @@ export interface DocNegocio {
   data: string | null;
   /** Só na proposta: quantos orçamentos inclui. */
   inclui: number | null;
+  /** O documento é de um negócio de exemplo (sem página própria nem ações). */
+  exemplo: boolean;
 }
 
 /** Em que fase de documento está o negócio; null se fica fora da V2 de Negócios. */
@@ -82,6 +84,11 @@ function faseDe(d: Negocio): FaseNegocio {
 /** A soma dos orçamentos do negócio; `null` quando ainda não há nenhum. */
 export function valorNegocio(n: NegocioApp): number | null {
   return n.orcamentos.length ? r2(n.orcamentos.reduce((a, o) => a + o.valor, 0)) : null;
+}
+
+/** O negócio só existe na camada de exemplo (um negócio extra, ou o principal de uma pessoa de exemplo): não está no Estado, por isso não tem página própria nem ações. */
+export function semPaginaPropria(n: Pick<NegocioApp, "demo" | "negocioId">): boolean {
+  return n.demo || PESSOAS_EXEMPLO.some((e) => e.id === n.negocioId);
 }
 
 /** "2 orçamentos" quando há mais de um; vazio com um só. */
@@ -149,7 +156,7 @@ const ESTADO_CONTRATO: Record<EstadoContrato, string> = { "por gerar": "Por gera
 export function documentosDoNegocio(n: NegocioApp): DocNegocio[] {
   const d = n.deal, o = d.orc, valor = valorNegocio(n);
   const doc = (tipo: DocNegocio["tipo"], chave: string, titulo: string, estado: string, v: number | null, data: string | null, inclui: number | null = null): DocNegocio => ({
-    id: `doc-${n.id}-${chave}`, negocioId: n.negocioId, tipo, titulo, servico: n.titulo, estado, valor: v, referencia: null, data, inclui,
+    id: `doc-${n.id}-${chave}`, negocioId: n.negocioId, tipo, titulo, servico: n.titulo, estado, valor: v, referencia: null, data, inclui, exemplo: semPaginaPropria(n),
   });
   const docs = n.orcamentos.map((x) => doc("Orçamento", x.id, x.titulo, n.proposta === "por gerar" ? "A compor" : "Na proposta", x.valor, null));
   if (n.orcamentos.length) docs.push(doc("Proposta", "proposta", n.titulo, ESTADO_PROPOSTA[n.proposta], valor, o?.aceite ?? o?.enviada ?? null, n.orcamentos.length));

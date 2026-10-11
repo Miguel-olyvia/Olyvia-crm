@@ -7,7 +7,7 @@ import { toquesDe } from "./toquesDocs";
 import { agruparPessoas } from "./dealsPessoas";
 import { extraDe, ehPessoaExemplo, type Empresa, type Qualificacao } from "./pessoasExemplo";
 import { SEM_MOTIVO, motivoDaPerda } from "./perdaDocs";
-import { documentosDoNegocio, ehGanho, negociosDe, valorNegocio, type DocNegocio, type NegocioApp } from "./negociosApp";
+import { documentosDoNegocio, ehGanho, negociosDe, semPaginaPropria, valorNegocio, type DocNegocio, type NegocioApp } from "./negociosApp";
 
 export { ehGanho } from "./negociosApp";
 
@@ -134,7 +134,7 @@ export function dadosCliente(S: Estado, p: PessoaApp): DadosCliente {
 export function documentosDe(p: PessoaApp): DocPessoa[] {
   return p.todos.filter((n) => n.perdido === null).flatMap((n): DocPessoa[] => {
     const fin = n.deal.fin, extra = (tipo: "Fatura" | "Recibo", estado: string, e: { n: string; q: string }): DocPessoa => ({
-      id: `doc-${n.id}-${tipo}`, negocioId: n.negocioId, tipo, titulo: n.titulo, servico: n.titulo, estado, valor: null, referencia: e.n, data: e.q, inclui: null,
+      id: `doc-${n.id}-${tipo}`, negocioId: n.negocioId, tipo, titulo: n.titulo, servico: n.titulo, estado, valor: null, referencia: e.n, data: e.q, inclui: null, exemplo: semPaginaPropria(n),
     });
     return [
       ...documentosDoNegocio(n),

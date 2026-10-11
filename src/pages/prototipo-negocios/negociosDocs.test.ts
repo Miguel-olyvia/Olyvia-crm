@@ -91,12 +91,12 @@ describe("negociosV2 · lista de cartões", () => {
     expect(new Set(a).size).toBe(a.length);
     expect(cartoesV2(seed()).map((c) => c.id)).toEqual(a);
   });
-  it("os exemplos existem, estão marcados e abrem o negócio da mesma pessoa", () => {
+  it("os exemplos existem, estão marcados e ligam-se ao negócio da mesma pessoa (não têm página própria)", () => {
     const S = seed();
     const cs = cartoesV2(S);
     const demo = cs.filter((c) => c.demo);
     expect(demo.length).toBeGreaterThanOrEqual(2);
-    // Os cartões das pessoas de exemplo novas têm o número do negócio de exemplo (que não está no Estado) e abrem o negócio base da seed (limite conhecido).
+    // Os cartões das pessoas de exemplo novas têm o número do negócio de exemplo (que não está no Estado) e ligam-se ao negócio base da seed (o clique não o abre: abre o painel de exemplo).
     for (const c of demo) {
       const real = S.deals.find((d) => d.id === c.negocioId);
       if (real) expect(real.nome).toBe(c.nome);

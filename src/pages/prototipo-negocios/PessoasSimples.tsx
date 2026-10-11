@@ -24,6 +24,9 @@ const lembrar = (m: Partial<Memoria>): void => { memoria = { ...memoria, ...m };
 /** Esquece tudo (por exemplo quando a demonstração é reposta). */
 export function esquecerPessoas(): void { memoria = MEMORIA_VAZIA; esquecerNegocios(); esquecerPerdas(); esquecerNegociosV2(); esquecerMaisGraficos(); }
 
+/** Deixa a ficha de uma pessoa escolhida para quando a página Pessoas abrir (a V2 de Negócios usa-o em "Ver a pessoa"): no separador da lista a que ela pertence, sem filtros, no Resumo. */
+export function escolherPessoa(nome: string, lista: SeparadorLista): void { lembrar({ lista, sel: nome, sep: "resumo", f: SEM_FILTROS_P }); }
+
 /** `alvoAvisos` recebe o elemento do painel onde os avisos (toasts) devem aparecer enquanto ele está aberto, e `null` quando fecha. */
 export function PessoasSimples({ S, A, go, abrirEm, alvoAvisos }: Ctx & { abrirEm?: SeparadorLista; alvoAvisos?: (el: HTMLElement | null) => void }) {
   // Abrir por um separador diferente do que ficou guardado (por exemplo pelo menu) começa limpo; o mesmo separador recupera a escolha.

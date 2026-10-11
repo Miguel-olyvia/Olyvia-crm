@@ -110,7 +110,7 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
         <Contactos f={f} nome={p.nome} />
         {p.perdida === null && (
           <Button className={cn(BOTAO, "h-auto cursor-pointer whitespace-normal py-2 text-left")} onClick={aoProximo}>
-            {nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
+            {p.exemplo ? "Ver negócios" : nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
           </Button>
         )}
       </div>

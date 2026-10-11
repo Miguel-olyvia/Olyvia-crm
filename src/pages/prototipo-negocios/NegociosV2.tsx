@@ -6,13 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { eur } from "./motor";
+import { negociosDe } from "./negociosApp";
 import { COLUNAS_V2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
 import { SEM_FILTROS_N, linhasNegocios, selecionarQuadro, type AcaoN, type ContextoN, type FiltrosN } from "./filtrosNegocios";
-import { idAbrivel } from "./pessoasExemplo";
 import { Chip, FASE_COR, type Ctx } from "./pecas";
 import { BarraFiltrosN } from "./NegociosFiltros";
 import { NegociosDashboard } from "./NegociosDashboard";
 import { esquecerMaisGraficos } from "./MaisGraficos";
+import { NegocioExemploPainel } from "./NegocioExemploPainel";
+import { escolherPessoa } from "./PessoasSimples";
 
 type VistaN = "quadro" | "dashboard";
 /** O que a página lembra quando se muda de ecrã e se volta (a página desmonta): o separador e os filtros do painel. Limpa-se ao repor a demonstração. */
@@ -42,6 +44,9 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   const [pedidoFoco, setPedidoFoco] = useState(0);
   const [aviso, setAviso] = useState("");
   useEffect(() => { if (pedidoFoco > 0) tituloQuadro.current?.focus(); }, [pedidoFoco]);
+  // Um cartão de exemplo abre um painel com o detalhe dele (não existe no Estado); o cartão clicado guarda-se para lhe devolver o foco.
+  const [exemplo, setExemplo] = useState<string | null>(null);
+  const cartaoClicado = useRef<HTMLElement | null>(null);
   const [vista, setVistaEstado] = useState<VistaN>(memoria.vista);
   const [fN, setFEstado] = useState<FiltrosN>(memoria.f);
   const setVista = (v: VistaN) => { setVistaEstado(v); memoria = { ...memoria, vista: v }; };
@@ -71,13 +76,20 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   const visiveis = selecionarQuadro(linhas, ctx).map((l) => l.cartao!);
   const emProposta = visiveis.filter((c) => c.doc === "proposta").reduce((a, c) => a + (c.valor || 0), 0);
   const antes = pessoasAntes(S);
+  const negocioExemplo = exemplo ? todos.find((c) => c.id === exemplo) : undefined;
+  const aberto = negocioExemplo ? negociosDe(S, negocioExemplo.nome).find((x) => x.id === negocioExemplo.id) : undefined;
+  const verPessoa = (nome: string, papel: "lead" | "cliente" | "perdida") => {
+    setExemplo(null);
+    escolherPessoa(nome, papel === "cliente" ? "clientes" : papel === "perdida" ? "todos" : "leads");
+    go(() => A.nav("pessoas"))();
+  };
 
   const cartao = (c: CartaoV2) => {
     const I = ICONE[c.doc].i;
     const n = porPessoa[c.nome] || 1;
     return (
       <li key={c.id} className="rounded-xl border border-border bg-card">
-        <button type="button" onClick={go(() => A.abrir(idAbrivel(c.negocioId)))}
+        <button type="button" onClick={c.demo ? (e) => { cartaoClicado.current = e.currentTarget; setExemplo(c.id); } : go(() => A.abrir(c.negocioId))}
           className="group block min-h-11 w-full rounded-xl p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <span className="mb-2 flex items-center gap-2 text-[15px] text-muted-foreground">
             <Chip icone={I} cor={ICONE[c.doc].cor} className={CHIP_PEQ} />
@@ -157,6 +169,7 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
 
       <BarraFiltrosN S={S} A={A} go={go} q={q} setQ={setQ} linhas={linhas} f={fN} setF={setF} total={visiveis.length} />
       <div aria-live="polite" aria-atomic="true" className="sr-only">{aviso}</div>
+      <NegocioExemploPainel S={S} n={aberto} fechar={() => setExemplo(null)} verPessoa={verPessoa} retorno={cartaoClicado} />
 
       <TabsContent value={vista} className="mt-0">
         {vista === "dashboard" ? <NegociosDashboard linhas={linhas} ctx={ctx} aoAgir={agir} verAtrasos={verAtrasos} limpar={go(limpar)} A={A} go={go} /> : (

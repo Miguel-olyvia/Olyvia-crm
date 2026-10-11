@@ -102,19 +102,24 @@ export function SepDocumentos({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir:
       <ListaCampos campos={[
         { rotulo: "Valor contratado", valor: `${eur(pg.total)} €` }, { rotulo: "Já recebido", valor: `${eur(pg.pago)} €` }, { rotulo: "Falta receber", valor: `${eur(pg.falta)} €` },
       ]} />
-      <p className="-mt-3 text-[15px] text-muted-foreground">Pagamentos de exemplo, calculados a partir do valor contratado. Só para ler: cada linha abre o negócio. Os negócios de exemplo abrem o negócio base da pessoa.</p>
+      <p className="-mt-3 text-[15px] text-muted-foreground">Pagamentos de exemplo, calculados a partir do valor contratado. Só para ler: cada linha dos negócios reais abre o negócio. Os negócios de exemplo não têm página própria nem ações.</p>
       <ul className="divide-y divide-border border-y border-border" aria-label="Contratos e documentos">
         {docs.map((d) => {
           const ic = icone(d.tipo);
+          const corpo = (
+            <>
+              <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{d.tipo}{d.exemplo && <Exemplo />}</span>
+              <span className="text-base font-semibold">{d.titulo}</span>
+              {d.titulo !== d.servico && <span className="text-[15px] text-muted-foreground">Negócio: {d.servico}</span>}
+              <span className="text-[15px] text-muted-foreground">{resumoDoc(d)}</span>
+              {!d.exemplo && <span className="text-[15px] font-medium">Abrir o negócio<ArrowRight className={SETA} aria-hidden="true" /></span>}
+            </>
+          );
           return (
             <li key={d.id}>
-              <button type="button" onClick={abrir(d.negocioId)} className={LINHA}>
-                <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{d.tipo}</span>
-                <span className="text-base font-semibold">{d.titulo}</span>
-                {d.titulo !== d.servico && <span className="text-[15px] text-muted-foreground">Negócio: {d.servico}</span>}
-                <span className="text-[15px] text-muted-foreground">{resumoDoc(d)}</span>
-                <span className="text-[15px] font-medium">Abrir o negócio<ArrowRight className={SETA} aria-hidden="true" /></span>
-              </button>
+              {d.exemplo
+                ? <div className="flex min-h-11 w-full flex-col gap-0.5 px-1 py-3 text-left">{corpo}</div>
+                : <button type="button" onClick={abrir(d.negocioId)} className={LINHA}>{corpo}</button>}
             </li>
           );
         })}

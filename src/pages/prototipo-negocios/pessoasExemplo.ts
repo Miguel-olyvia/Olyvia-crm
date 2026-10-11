@@ -1,6 +1,7 @@
 // As pessoas de exemplo da página Pessoas e os campos extra das pessoas da seed. Só dados: nada aqui toca no Estado, na seed nem na VERSAO.
 // Cada pessoa nova é um negócio copiado de um negócio base da seed (ver dealsPessoas.ts), com um número único (90201 em diante) que não existe no Estado.
-// Limite conhecido: os botões e os cartões de uma pessoa de exemplo abrem o negócio BASE da seed (`base`), não o dela (ver idAbrivel).
+// Os negócios de uma pessoa de exemplo não existem no Estado e não abrem nada: nas listas são texto e o botão da ficha leva ao separador Negócios (ver semPaginaPropria).
+// `base` só dá a linha, o dono e o orçamento da cópia; `idAbrivel` fica para quem ainda precisa de um negócio real.
 // Cada pessoa usa um base diferente, menos dois pares (Hotel Praia Dourada e Armando Figueiredo no 1027; Bruno Teixeira e Modas Aurora no 1038): só há dois
 // negócios de cozinha com orçamento (1027, 1031) para três pessoas que precisam dele, e só quatro de casa de banho sem orçamento para cinco.
 import type { Orcamento } from "./motor";
@@ -32,7 +33,7 @@ export interface PessoaExemplo extends ExtraPessoa {
   id: number;
   nome: string;
   tel: string;
-  /** O negócio da seed que se copia (a linha, a fase e o orçamento vêm dele) e que se abre ao carregar nos botões. */
+  /** O negócio da seed que se copia (a linha, a fase e o orçamento vêm dele). */
   base: number;
   servico: string;
   /** "Rua, localidade": a localidade é a última parte. */

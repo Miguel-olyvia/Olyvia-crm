@@ -1,12 +1,13 @@
 // O detalhe de um negócio no separador Negócios da ficha (o lado direito do mestre-detalhe): estado, valor total, probabilidade de fechar,
 // próximo passo, o percurso numa linha fina de quatro ou cinco passos (com a marca "Ganho"), "O que falta" e os documentos REAIS do negócio:
 // cada orçamento, a proposta que os junta e o contrato (se exigido). Um negócio perdido aparece a cinzento, com o motivo, sem próximo passo nem percurso.
+// Um negócio de exemplo não existe no Estado: o próximo passo e os documentos são só texto (sem ações). Sem `abrir` (o painel do Quadro) também.
 import { forwardRef, type ReactNode } from "react";
 import { ArrowRight, BadgeCheck, Check, Circle, CircleDot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, type Estado, type Negocio } from "./motor";
-import { documentosDoNegocio, resumoDoc, textoOrcamentos, valorNegocio, type NegocioApp } from "./negociosApp";
+import { documentosDoNegocio, resumoDoc, semPaginaPropria, textoOrcamentos, valorNegocio, type NegocioApp } from "./negociosApp";
 import { proximoNegocio } from "./pessoasDocs";
 import { estadoDe, faltaParaOrcamento, percursoDe, probabilidadeDe, type EstadoPasso } from "./perfilDocs";
 import { BORDA_CTRL } from "./PessoaLinha";
@@ -80,22 +81,25 @@ function Falta({ S, d }: { S: Estado; d: Negocio }) {
 }
 
 /** Os documentos do negócio, cada um com o ícone do seu tipo; sem eles, diz quando aparecem. */
-function Documentos({ n, abrir }: { n: NegocioApp; abrir: Abrir }) {
-  const docs = documentosDoNegocio(n);
+function Documentos({ n, abrir }: { n: NegocioApp; abrir?: Abrir }) {
+  const docs = documentosDoNegocio(n), acao = !semPaginaPropria(n) ? abrir : undefined;
   return (
     <Secao titulo="Documentos">
       {docs.length === 0 ? <p className="text-[15px] text-muted-foreground">Orçamento, proposta e contrato aparecem aqui quando existirem.</p> : (
         <ul className="divide-y divide-border border-y border-border" aria-label="Documentos do negócio">
           {docs.map((x) => {
             const ic = icone(x.tipo);
+            const corpo = (
+              <>
+                <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{x.tipo}</span>
+                <span className="text-base font-semibold">{x.titulo}</span>
+                <span className="text-[15px] text-muted-foreground">{resumoDoc(x)}</span>
+                {acao && <span className="text-[15px] font-medium">Abrir<ArrowRight className={SETA} aria-hidden="true" /></span>}
+              </>
+            );
             return (
               <li key={x.id}>
-                <button type="button" onClick={abrir(x.negocioId)} className={LINHA}>
-                  <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{x.tipo}</span>
-                  <span className="text-base font-semibold">{x.titulo}</span>
-                  <span className="text-[15px] text-muted-foreground">{resumoDoc(x)}</span>
-                  <span className="text-[15px] font-medium">Abrir<ArrowRight className={SETA} aria-hidden="true" /></span>
-                </button>
+                {acao ? <button type="button" onClick={acao(x.negocioId)} className={LINHA}>{corpo}</button> : <div className="flex min-h-11 w-full flex-col gap-0.5 px-1 py-3 text-left">{corpo}</div>}
               </li>
             );
           })}
@@ -105,17 +109,21 @@ function Documentos({ n, abrir }: { n: NegocioApp; abrir: Abrir }) {
   );
 }
 
-interface DetalheProps { S: Estado; n: NegocioApp; abrir: Abrir; id: string }
+/** `abrir` falta no painel do Quadro (só leitura); `painel` tira o título (já está no cabeçalho do painel) e a nota de exemplo (está no rodapé). */
+interface DetalheProps { S: Estado; n: NegocioApp; abrir?: Abrir; id: string; painel?: boolean }
 
 /** O que só um negócio em curso tem: o próximo passo, o percurso e o que falta. */
-function EmCurso({ S, n, abrir }: { S: Estado; n: NegocioApp; abrir: Abrir }) {
+function EmCurso({ S, n, abrir }: { S: Estado; n: NegocioApp; abrir?: Abrir }) {
+  const proximo = proximoNegocio(n.deal, S).t, acao = !semPaginaPropria(n) ? abrir : undefined;
   return (
     <>
       <div>
         <p className="text-[15px] text-muted-foreground">Próximo passo</p>
-        <Button type="button" variant="outline" className={cn("mt-1 min-h-11 max-w-full cursor-pointer whitespace-normal text-left text-[15px]", BORDA_CTRL)} onClick={abrir(n.negocioId)}>
-          {proximoNegocio(n.deal, S).t}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
-        </Button>
+        {acao ? (
+          <Button type="button" variant="outline" className={cn("mt-1 min-h-11 max-w-full cursor-pointer whitespace-normal text-left text-[15px]", BORDA_CTRL)} onClick={acao(n.negocioId)}>
+            {proximo}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
+          </Button>
+        ) : <p className="mt-1 text-base font-medium">{proximo}</p>}
       </div>
       <Secao titulo="Percurso do negócio"><Percurso d={n.deal} orcamentos={n.orcamentos.length} /></Secao>
       <Falta S={S} d={n.deal} />
@@ -124,14 +132,16 @@ function EmCurso({ S, n, abrir }: { S: Estado; n: NegocioApp; abrir: Abrir }) {
 }
 
 /** O negócio escolhido. O foco vai para aqui quando o detalhe aparece por baixo da lista (ver SepNegocios). */
-export const NegocioDetalhe = forwardRef<HTMLDivElement, DetalheProps>(function NegocioDetalhe({ S, n, abrir, id }, ref) {
+export const NegocioDetalhe = forwardRef<HTMLDivElement, DetalheProps>(function NegocioDetalhe({ S, n, abrir, id, painel }, ref) {
   const perdido = n.perdido !== null, nOrc = textoOrcamentos(n);
   return (
     <div ref={ref} id={id} tabIndex={-1} role="region" aria-label={`Negócio: ${n.titulo}`} className="grid min-w-0 content-start gap-4 focus-visible:outline-none">
-      <div className="flex items-center gap-3">
-        <Chip icone={ICONE_NEGOCIO} cor={perdido ? COR_PERDIDO : COR_NEGOCIO} />
-        <h3 className={cn("min-w-0 break-words text-xl font-semibold tracking-tight", perdido && "text-muted-foreground")}>{n.titulo}{n.demo && <Exemplo />}</h3>
-      </div>
+      {!painel && (
+        <div className="flex items-center gap-3">
+          <Chip icone={ICONE_NEGOCIO} cor={perdido ? COR_PERDIDO : COR_NEGOCIO} />
+          <h3 className={cn("min-w-0 break-words text-xl font-semibold tracking-tight", perdido && "text-muted-foreground")}>{n.titulo}{n.demo && <Exemplo />}</h3>
+        </div>
+      )}
       <dl className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-6 gap-y-2 text-[15px]">
         <div><dt className="text-muted-foreground">Estado</dt><dd className="text-base font-semibold">{estadoDe(n)}</dd></div>
         <div><dt className="text-muted-foreground">Valor total</dt><dd className="text-base font-semibold tabular-nums">{valorTexto(n)}</dd></div>
@@ -140,7 +150,7 @@ export const NegocioDetalhe = forwardRef<HTMLDivElement, DetalheProps>(function 
           : <div><dt className="text-muted-foreground">Probabilidade de fechar</dt><dd className="text-base font-semibold tabular-nums">{probabilidadeDe(n.deal)} %<Exemplo /></dd></div>}
       </dl>
       {nOrc && <p className="text-[15px] text-muted-foreground">{nOrc}, numa só proposta.</p>}
-      {n.demo && <p className="text-[15px] text-muted-foreground">Negócio de exemplo: os botões abrem o negócio base da pessoa.</p>}
+      {semPaginaPropria(n) && !painel && <p className="text-[15px] text-muted-foreground">Negócio de exemplo: sem ações.</p>}
       {!perdido && <EmCurso S={S} n={n} abrir={abrir} />}
       <Documentos n={n} abrir={abrir} />
     </div>

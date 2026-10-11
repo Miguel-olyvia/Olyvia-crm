@@ -42,7 +42,7 @@ describe("negociosDe · a função única de negócios por pessoa", () => {
     T.deals = T.deals.filter((d) => d.id !== 1031);
     expect(negociosDe(T, "Carla Nunes")).toEqual([]);
   });
-  it("os exemplos abrem o negócio base da mesma pessoa e o motor vê-os como negócios dela", () => {
+  it("o negocioId dos exemplos é o do negócio base da mesma pessoa (só serve de ligação) e o motor vê-os como negócios dela", () => {
     const S = seed();
     for (const n of todos(S)) {
       const base = S.deals.find((d) => d.id === n.negocioId)!;
