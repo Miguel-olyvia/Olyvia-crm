@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { seed } from "./motor";
 import { cartoesV2 } from "./negociosDocs";
+import { semPaginaPropria } from "./negociosApp";
 import { SEM_FILTROS_N, linhasNegocios, selecionarQuadro, type ContextoN, type FiltrosN } from "./filtrosNegocios";
 import {
   cartoesNegocios, funilFases, passosEmAtraso, perdidosPorMotivo, porFaixa, porFechar, porServicoN, porTipoN, resultadosN, tempoParado, valorPorComercial,
@@ -159,5 +160,16 @@ describe("dashboard de Negócios · estados vazios e pureza", () => {
     cartoesNegocios(linhas, ctx());
     funilFases(linhas);
     expect(JSON.stringify(S)).toBe(antes);
+  });
+});
+
+describe("dashboard de Negócios · próximos passos em atraso", () => {
+  it("um negócio de exemplo com atraso forçado não aparece (não tem página para abrir); um da seed com atraso aparece", () => {
+    const exemplo = linhas.find((l) => l.cartao && semPaginaPropria(l.negocio))!;
+    const real = linhas.find((l) => l.cartao && !semPaginaPropria(l.negocio))!;
+    const forcadas = linhas.map((l) => (l === exemplo || l === real ? { ...l, atraso: true } : l));
+    const ids = passosEmAtraso(forcadas).map((p) => p.id);
+    expect(ids).toContain(real.id);
+    expect(ids).not.toContain(exemplo.id);
   });
 });

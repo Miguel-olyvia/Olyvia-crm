@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { eur } from "./motor";
-import { negociosDe } from "./negociosApp";
+import { negociosDe, semPaginaPropria } from "./negociosApp";
 import { COLUNAS_V2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
 import { SEM_FILTROS_N, linhasNegocios, selecionarQuadro, type AcaoN, type ContextoN, type FiltrosN } from "./filtrosNegocios";
 import { Chip, FASE_COR, type Ctx } from "./pecas";
@@ -80,6 +80,8 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   const aberto = negocioExemplo ? negociosDe(S, negocioExemplo.nome).find((x) => x.id === negocioExemplo.id) : undefined;
   const verPessoa = (nome: string, papel: "lead" | "cliente" | "perdida") => {
     setExemplo(null);
+    // A memória só se grava quando a navegação vai acontecer; e a pesquisa global limpa-se para a pessoa aparecer em Pessoas.
+    setQ("");
     escolherPessoa(nome, papel === "cliente" ? "clientes" : papel === "perdida" ? "todos" : "leads");
     go(() => A.nav("pessoas"))();
   };
@@ -87,14 +89,16 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   const cartao = (c: CartaoV2) => {
     const I = ICONE[c.doc].i;
     const n = porPessoa[c.nome] || 1;
+    // Uma só fonte para a marca "exemplo" e para a ação: um negócio sem página própria abre o painel, os da seed abrem o negócio.
+    const deExemplo = semPaginaPropria(c);
     return (
       <li key={c.id} className="rounded-xl border border-border bg-card">
-        <button type="button" onClick={c.demo ? (e) => { cartaoClicado.current = e.currentTarget; setExemplo(c.id); } : go(() => A.abrir(c.negocioId))}
+        <button type="button" onClick={deExemplo ? (e) => { cartaoClicado.current = e.currentTarget; setExemplo(c.id); } : go(() => A.abrir(c.negocioId))}
           className="group block min-h-11 w-full rounded-xl p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <span className="mb-2 flex items-center gap-2 text-[15px] text-muted-foreground">
             <Chip icone={I} cor={ICONE[c.doc].cor} className={CHIP_PEQ} />
             <span>{NOME_DOC[c.doc]}</span>
-            {c.demo && <span className="ml-auto text-xs text-muted-foreground">exemplo</span>}
+            {deExemplo && <span className="ml-auto text-xs text-muted-foreground">exemplo</span>}
           </span>
           <span className="block text-base font-semibold text-foreground">{c.nome}</span>
           <span className="mt-0.5 block text-[15px] text-muted-foreground">{c.servico}{c.local ? " · " + c.local : ""}</span>

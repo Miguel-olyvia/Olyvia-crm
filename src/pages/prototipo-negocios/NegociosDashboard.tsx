@@ -11,7 +11,6 @@ import {
   type BarraN,
 } from "./dashboardNegocios";
 import { eurosTexto, pctTexto, valorCartao } from "./graficosTipos";
-import { idAbrivel } from "./pessoasExemplo";
 import { BORDA_CTRL } from "./PessoaLinha";
 import { BarrasH } from "./BarrasH";
 import { CaixaGrafico } from "./CaixaGrafico";
@@ -73,7 +72,7 @@ function Atrasos({ F, A, go, noQuadro, verAtrasos }: AtrasosProps) {
         <ul aria-label="Próximos passos em atraso" className="grid gap-1">
           {passos.slice(0, PASSOS_VISIVEIS).map((p) => (
             <li key={p.id}>
-              <button type="button" onClick={go(() => A.abrir(idAbrivel(p.negocioId)))}
+              <button type="button" onClick={go(() => A.abrir(p.negocioId))}
                 className="block min-h-11 w-full cursor-pointer rounded-md px-1 py-1.5 text-left hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                 <span className="block text-[15px] font-medium text-foreground">{p.nome} · {p.titulo}</span>
                 <span className="block text-[15px] text-muted-foreground">{p.proximo}<ArrowRight className="ml-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" /></span>

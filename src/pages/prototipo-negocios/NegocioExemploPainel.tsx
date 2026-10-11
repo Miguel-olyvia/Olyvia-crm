@@ -26,9 +26,10 @@ export interface PainelExemploProps {
   retorno: RefObject<HTMLElement | null>;
 }
 
-const papelDe = (S: Estado, nome: string): PapelVer => {
+/** O papel da pessoa na lista de Pessoas; `null` quando ela não existe (não se inventa um papel). */
+const papelDe = (S: Estado, nome: string): PapelVer | null => {
   const p = todosApp(S).find((x) => x.nome === nome);
-  return !p ? "lead" : p.perdida !== null ? "perdida" : p.papel;
+  return !p ? null : p.perdida !== null ? "perdida" : p.papel;
 };
 const TEXTO_PAPEL: Record<PapelVer, string> = { lead: "Lead", cliente: "Cliente", perdida: "Lead perdida" };
 
@@ -38,7 +39,7 @@ export function NegocioExemploPainel({ S, n, fechar, verPessoa, retorno }: Paine
   const ultimo = useRef<NegocioApp | undefined>(n);
   if (n) ultimo.current = n;
   const mostrado = n ?? ultimo.current;
-  const papel = mostrado ? papelDe(S, mostrado.nome) : "lead";
+  const papel = mostrado ? papelDe(S, mostrado.nome) : null;
   const focarTitulo = (e: Event) => {
     const titulo = conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']");
     if (!titulo) return;
@@ -56,7 +57,7 @@ export function NegocioExemploPainel({ S, n, fechar, verPessoa, retorno }: Paine
               <div className="min-w-0 flex-1 basis-60">
                 <SheetTitle tabIndex={-1} className="break-words text-xl font-semibold tracking-tight">{mostrado.titulo}</SheetTitle>
                 <SheetDescription className="mt-1 break-words text-base text-muted-foreground">
-                  {mostrado.nome} · {TEXTO_PAPEL[papel]}<span className="ml-2 text-[15px]">exemplo</span>
+                  {mostrado.nome}{papel ? ` · ${TEXTO_PAPEL[papel]}` : ""}<span className="ml-2 text-[15px]">exemplo</span>
                 </SheetDescription>
               </div>
               <Button type="button" variant="outline" className={cn("min-h-11 cursor-pointer text-[15px]", BORDA_CTRL)} onClick={fechar}>
@@ -67,8 +68,8 @@ export function NegocioExemploPainel({ S, n, fechar, verPessoa, retorno }: Paine
               <NegocioDetalhe S={S} n={mostrado} id="painel-negocio-exemplo" painel />
             </div>
             <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-border px-4 py-3 sm:px-6">
-              <Button type="button" variant="outline" className={cn("min-h-11 cursor-pointer text-[15px]", BORDA_CTRL)} onClick={() => verPessoa(mostrado.nome, papel)}>Ver a pessoa</Button>
-              <p className="text-[15px] text-muted-foreground">Negócio de exemplo: não tem página própria nem ações.</p>
+              <Button type="button" variant="outline" className={cn("min-h-11 cursor-pointer text-[15px]", BORDA_CTRL)} disabled={!papel} onClick={() => { if (papel) verPessoa(mostrado.nome, papel); }}>Ver a pessoa</Button>
+              <p className="text-[15px] text-muted-foreground">Negócio de exemplo: não tem página própria nem ações.{!papel && " A pessoa não está na lista de Pessoas."}</p>
             </footer>
           </>
         )}

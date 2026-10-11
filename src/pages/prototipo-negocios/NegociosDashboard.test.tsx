@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Estado } from "./motor";
 import { SEM_FILTROS_N, linhasNegocios } from "./filtrosNegocios";
 import { NegociosDashboard } from "./NegociosDashboard";
+import { semPaginaPropria } from "./negociosApp";
 import { NegociosV2, esquecerNegociosV2 } from "./NegociosV2";
 
 /** Como a aplicação: o Estado muda no sítio e `run` volta a desenhar a página. */
@@ -304,14 +305,15 @@ describe("Negócios V2 · foco e aviso depois de um cartão ou de uma barra", ()
 });
 
 describe("Negócios V2 · 'e mais N' nos próximos passos em atraso", () => {
-  /** O dashboard sozinho, com seis negócios do Quadro marcados em atraso (a seed só tem três reais com atraso possível, e os exemplos nunca o têm). */
+  /** O dashboard sozinho, com seis negócios do Quadro marcados em atraso (só contam os negócios reais: os de exemplo não aparecem nesta lista). */
   function dashboardComSeisAtrasos(verAtrasos: () => void) {
     const S = todos(seed());
     const run = (fn: () => void): void => fn();
     const A = acoes(S, vi.fn(), run);
     const ctx = { rapido: "todos", q: "", f: SEM_FILTROS_N };
-    let n = 0;
-    const linhas = linhasNegocios(S).map((l) => (l.cartao && n++ < 6 ? { ...l, atraso: true } : l));
+    // A seed só tem três negócios reais no Quadro: duplicam-se (com outro id) até haver seis em atraso.
+    const reais = linhasNegocios(S).filter((l) => l.cartao && !semPaginaPropria(l.negocio));
+    const linhas = Array.from({ length: 6 }, (_, i) => { const l = reais[i % reais.length]; return { ...l, id: `${l.id}-${i}`, atraso: true, cartao: { ...l.cartao!, id: `${l.cartao!.id}-${i}` } }; });
     return render(<NegociosDashboard linhas={linhas} ctx={ctx} aoAgir={vi.fn()} verAtrasos={verAtrasos} limpar={vi.fn()} A={A} go={(fn) => () => run(fn)} />);
   }
   it("a lista corta aos 5, diz 'e mais 1' e o botão chama 'Com atraso' com o número que o Quadro vai mostrar (6)", () => {

@@ -3,6 +3,7 @@
 // Os ganhos e os perdidos não têm coluna no Quadro: contam-se à parte (só com os filtros que fazem sentido para eles) e em todo o período,
 // porque os negócios perdidos não têm data: é a mesma janela para os ganhos, os perdidos e a conversão.
 import { COLUNAS_V2 } from "./negociosDocs";
+import { semPaginaPropria } from "./negociosApp";
 import {
   NOME_FAIXA, NOME_PARADO, NOME_SERVICO, NOTA_RESULTADOS, faixaDe, faixaParado, ignoraResultados, selecionarQuadro, selecionarResultados, servicoDe,
   type AcaoN, type ContextoN, type FaixaValor, type FiltrosN, type LinhaN, type ParadoFaixa, type ServicoN,
@@ -95,9 +96,9 @@ export function perdidosPorMotivo(perdidos: readonly LinhaN[]): BarraN[] {
 
 export interface PassoAtraso { id: string; nome: string; titulo: string; proximo: string; negocioId: number }
 
-/** Os próximos passos em atraso: os negócios a decorrer que o motor marca com atraso. */
+/** Os próximos passos em atraso: os negócios a decorrer que o motor marca com atraso. Os de exemplo ficam de fora: não têm página para abrir. */
 export function passosEmAtraso(F: readonly LinhaN[]): PassoAtraso[] {
-  return F.filter((l) => l.atraso && l.cartao).map((l) => ({
+  return F.filter((l) => l.atraso && l.cartao && !semPaginaPropria(l.negocio)).map((l) => ({
     id: l.id, nome: l.negocio.nome, titulo: l.negocio.titulo, proximo: l.cartao!.proximo, negocioId: l.negocio.negocioId,
   }));
 }
