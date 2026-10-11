@@ -59,7 +59,6 @@ import {
   validateLocationDistrict,
 } from '../_shared/leadsValidation.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -68,10 +67,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-api-key',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
 };
-
-const RATE_LIMIT_BUCKET = 'create-lead';
-const RATE_LIMIT_MAX_ATTEMPTS = 10;
-const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // --- Input Validation ---
 const MAX_FIELD_VALUE_LENGTH = 10_000;
@@ -156,19 +151,6 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Rate limiting check — persistent, DB-backed (survives cold starts / shared across instances)
-    const clientIp = getClientIp(req);
-    const rateLimit = await checkRateLimit(supabase, {
-      bucket: RATE_LIMIT_BUCKET,
-      identifier: clientIp,
-      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
-      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
-    });
-    if (!rateLimit.allowed) {
-      return rateLimitResponse(rateLimit, corsHeaders);
-    }
-    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const body = await req.json();
     const parsedBody = requestSchema.safeParse(body);
