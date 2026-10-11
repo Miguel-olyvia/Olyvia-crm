@@ -1,15 +1,28 @@
-// V2 da página de Negócios: só negócios a decorrer, por fase de documento.
-// Lead, contacto e visita são fases da pessoa e ficam em Clientes.
-import { useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, Euro, FileCheck2, FileSignature, FileText, Search, Users, type LucideIcon } from "lucide-react";
+// V2 da página de Negócios: só negócios a decorrer, por fase de documento, em dois separadores: Quadro (as colunas) e Dashboard (números e gráficos).
+// Lead, contacto e visita são fases da pessoa e ficam em Clientes. A barra de filtros (NegociosFiltros) é uma só e vale para os dois separadores.
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowRight, Euro, FileCheck2, FileSignature, FileText, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { eur, type LinhaId } from "./motor";
-import { COLUNAS_V2, cartoesV2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
+import { eur } from "./motor";
+import { COLUNAS_V2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
+import { SEM_FILTROS_N, linhasNegocios, selecionarQuadro, type AcaoN, type ContextoN, type FiltrosN } from "./filtrosNegocios";
 import { idAbrivel } from "./pessoasExemplo";
 import { Chip, FASE_COR, type Ctx } from "./pecas";
+import { BarraFiltrosN } from "./NegociosFiltros";
+import { NegociosDashboard } from "./NegociosDashboard";
+import { esquecerMaisGraficos } from "./MaisGraficos";
 
-const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
+type VistaN = "quadro" | "dashboard";
+/** O que a página lembra quando se muda de ecrã e se volta (a página desmonta): o separador e os filtros do painel. Limpa-se ao repor a demonstração. */
+interface Memoria { vista: VistaN; f: FiltrosN }
+const MEMORIA_VAZIA: Memoria = { vista: "quadro", f: SEM_FILTROS_N };
+let memoria: Memoria = MEMORIA_VAZIA;
+/** Esquece o separador e os filtros (quando a demonstração é reposta). */
+export function esquecerNegociosV2(): void { memoria = MEMORIA_VAZIA; esquecerMaisGraficos(); }
+
+const TAB = "h-11 min-w-11 cursor-pointer rounded-none px-4 text-[15px] data-[state=active]:bg-foreground data-[state=active]:text-background";
 const ICONE: Record<DocFase, { i: LucideIcon; cor: string }> = {
   orcamento: { i: FileText, cor: FASE_COR[0] },
   proposta: { i: FileCheck2, cor: FASE_COR[3] },
@@ -19,24 +32,45 @@ const ICONE: Record<DocFase, { i: LucideIcon; cor: string }> = {
 const NOME_DOC: Record<DocFase, string> = { orcamento: "Orçamento", proposta: "Proposta", contrato: "Contrato", financeiro: "Financeiro" };
 const eur0 = (x: number) => eur(x).replace(/,00$/, "");
 const CHIP_PEQ = "h-7 w-7 rounded-lg [&_svg]:h-4 [&_svg]:w-4";
+const negociosTexto = (n: number): string => (n === 1 ? "1 negócio" : `${n} negócios`);
 
-export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: ReactNode }) {
+export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & { seletor?: ReactNode }) {
+  const setQ = setQOpcional ?? ((): void => undefined);
   const [colMovel, setColMovel] = useState<DocFase>("orcamento");
-  const f = S.filtro, ql = q.toLowerCase();
-  const todos = cartoesV2(S);
+  // Depois de um cartão ou uma barra do dashboard o foco passa para o título do Quadro e a mudança é anunciada (o foco não se perde no separador que desapareceu).
+  const tituloQuadro = useRef<HTMLHeadingElement>(null);
+  const [pedidoFoco, setPedidoFoco] = useState(0);
+  const [aviso, setAviso] = useState("");
+  useEffect(() => { if (pedidoFoco > 0) tituloQuadro.current?.focus(); }, [pedidoFoco]);
+  const [vista, setVistaEstado] = useState<VistaN>(memoria.vista);
+  const [fN, setFEstado] = useState<FiltrosN>(memoria.f);
+  const setVista = (v: VistaN) => { setVistaEstado(v); memoria = { ...memoria, vista: v }; };
+  const setF = (v: Partial<FiltrosN>) => { const n = { ...fN, ...v }; setFEstado(n); memoria = { ...memoria, f: n }; };
+  const linhas = linhasNegocios(S);
+  const ctx: ContextoN = { rapido: S.filtro, q, f: fN };
+  /** Passa ao Quadro, leva-lhe o foco e anuncia o que ficou ("Quadro filtrado por Casa de banho: 5 negócios"). */
+  const passarAoQuadro = (texto: string, filtros: FiltrosN, rapido = ctx.rapido) => {
+    const n = selecionarQuadro(linhas, { ...ctx, rapido, f: filtros }).length;
+    setAviso(`${texto}: ${negociosTexto(n)}`); setPedidoFoco((v) => v + 1);
+  };
+  /** Um cartão ou uma barra do dashboard: junta o filtro e passa ao Quadro. */
+  const agir = (acao: AcaoN, rotulo: string) => {
+    const n = { ...fN, ...acao.f };
+    setFEstado(n); setVistaEstado("quadro"); memoria = { vista: "quadro", f: n };
+    passarAoQuadro(Object.keys(acao.f ?? {}).length ? `Quadro filtrado por ${rotulo}` : "Quadro", n);
+  };
+  /** "e mais N" dos próximos passos em atraso: liga o filtro rápido "Com atraso" e passa ao Quadro. */
+  const verAtrasos = () => {
+    go(() => A.filtro("atraso"))();
+    setVistaEstado("quadro"); memoria = { ...memoria, vista: "quadro" };
+    passarAoQuadro("Quadro filtrado por Com atraso", fN, "atraso");
+  };
+  const todos = linhas.flatMap((l) => (l.cartao ? [l.cartao] : []));
   const porPessoa = negociosPorPessoa(todos);
   // O dono, o telefone e o atraso são os do próprio cartão (c.deal): nos exemplos, a cópia do negócio base (mesmo dono e telefone, e sem atraso).
-  const visiveis = todos.filter((c) => {
-    const d = c.deal;
-    if (ql && !(c.nome + " " + d.tel + " " + c.servico + " " + c.local).toLowerCase().includes(ql)) return false;
-    if (f === "meus") return d.dono === "comercial";
-    if (f === "wc" || f === "coz") return c.linhasFiltro.includes(f as LinhaId);
-    if (f === "atraso") return !!d.atraso;
-    return true;
-  });
-  const emProposta = todos.filter((c) => c.doc === "proposta").reduce((a, c) => a + (c.valor || 0), 0);
+  const visiveis = selecionarQuadro(linhas, ctx).map((l) => l.cartao!);
+  const emProposta = visiveis.filter((c) => c.doc === "proposta").reduce((a, c) => a + (c.valor || 0), 0);
   const antes = pessoasAntes(S);
-  const decorrer = todos.length; // todos os negócios em curso (os de exemplo incluídos), antes da pesquisa e dos filtros
 
   const cartao = (c: CartaoV2) => {
     const I = ICONE[c.doc].i;
@@ -66,7 +100,7 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
           </span>
         </button>
         {n > 1 && (
-          <button type="button" onClick={() => setQ?.(c.nome)} aria-label={`Ver os ${n} negócios de ${c.nome}`}
+          <button type="button" onClick={() => setQ(c.nome)} aria-label={`Ver os ${n} negócios de ${c.nome}`}
             className="flex min-h-11 w-full items-center gap-2 border-t border-border px-4 text-left text-[15px] text-muted-foreground hover:text-foreground">
             <Users className="h-4 w-4" aria-hidden="true" />{n} negócios desta pessoa
           </button>
@@ -75,7 +109,7 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
     );
   };
 
-  const limpar = () => { setQ?.(""); A.filtro("todos"); };
+  const limpar = () => { setQ(""); A.filtro("todos"); setF({ ...SEM_FILTROS_N }); };
   const teclaSeparador = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
     const n = COLUNAS_V2.length;
     const j = e.key === "ArrowRight" ? (i + 1) % n : e.key === "ArrowLeft" ? (i - 1 + n) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
@@ -107,62 +141,62 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-8">
+    <Tabs value={vista} onValueChange={(v) => setVista(v as VistaN)} className="mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Negócios</h1>
-          <p className="mt-1 text-base text-muted-foreground">{decorrer} negócios a decorrer · {eur0(emProposta)} € em proposta</p>
+          <p className="mt-1 text-base text-muted-foreground">{visiveis.length} no Quadro{visiveis.length !== todos.length && ` (de ${todos.length})`} · {eur0(emProposta)} € em proposta</p>
         </div>
         {seletor}
       </header>
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <label className="relative w-full sm:w-80">
-          <span className="sr-only">Procurar</span>
-          <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-          <input type="search" placeholder="Procurar nome, telefone ou serviço" value={q} onChange={(e) => setQ?.(e.target.value)}
-            className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
-        </label>
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden" role="group" aria-label="Mostrar">
-          {FILTROS.map(([k, l]) => (
-            <button key={k} type="button" aria-pressed={f === k} onClick={go(() => A.filtro(k))}
-              className={cn("min-h-11 shrink-0 rounded-full border px-4 text-[15px] transition-colors", f === k ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>
-              {l}
-            </button>
-          ))}
-        </div>
-      </div>
+      <TabsList aria-label="Vista" className="mt-4 h-11 gap-0 overflow-hidden p-0">
+        <TabsTrigger value="quadro" className={TAB}>Quadro</TabsTrigger>
+        <TabsTrigger value="dashboard" className={TAB}>Dashboard</TabsTrigger>
+      </TabsList>
 
-      {!visiveis.length && (
-        <div role="status" className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
-          <p className="text-base text-foreground">Nenhum negócio encontrado.</p>
-          <Button type="button" variant="outline" className="min-h-11" onClick={limpar}>Limpar pesquisa e filtro</Button>
-        </div>
-      )}
+      <BarraFiltrosN S={S} A={A} go={go} q={q} setQ={setQ} linhas={linhas} f={fN} setF={setF} total={visiveis.length} />
+      <div aria-live="polite" aria-atomic="true" className="sr-only">{aviso}</div>
 
-      {/* Telemóvel: escolhe-se a coluna */}
-      <div className="mt-6 lg:hidden">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Fase do documento">
-          {COLUNAS_V2.map(({ id, nome }, i) => (
-            <button key={id} type="button" role="tab" id={`v2-tab-${id}`} aria-selected={colMovel === id} aria-controls="v2-painel" tabIndex={colMovel === id ? 0 : -1}
-              onClick={() => setColMovel(id)} onKeyDown={(e) => teclaSeparador(e, i)}
-              className={cn("min-h-11 shrink-0 rounded-lg px-3 text-[15px]", colMovel === id ? "bg-foreground text-background" : "bg-muted text-foreground")}>
-              {nome} <span className="tabular-nums opacity-70">{visiveis.filter((c) => c.doc === id).length}</span>
-            </button>
-          ))}
-        </div>
-        <div id="v2-painel" role="tabpanel" aria-labelledby={`v2-tab-${colMovel}`} className="mt-4">{coluna(colMovel, "m")}</div>
-      </div>
+      <TabsContent value={vista} className="mt-0">
+        {vista === "dashboard" ? <NegociosDashboard linhas={linhas} ctx={ctx} aoAgir={agir} verAtrasos={verAtrasos} limpar={go(limpar)} A={A} go={go} /> : (
+          <>
+          <h2 ref={tituloQuadro} tabIndex={-1} className="sr-only focus:not-sr-only focus:mt-6 focus:rounded-md focus:text-[16px] focus:font-semibold focus:outline-none focus:ring-2 focus:ring-primary">
+            Quadro
+          </h2>
+          {!visiveis.length && (
+            <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
+              <p className="text-base text-foreground">Nenhum negócio encontrado.</p>
+              <Button type="button" variant="outline" className="min-h-11" onClick={limpar}>Limpar pesquisa e filtro</Button>
+            </div>
+          )}
 
-      {/* Computador: as quatro colunas lado a lado */}
-      <div className="mt-8 hidden gap-5 lg:grid lg:grid-cols-4">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
+          {/* Telemóvel: escolhe-se a coluna */}
+          <div className="mt-6 lg:hidden">
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Fase do documento">
+              {COLUNAS_V2.map(({ id, nome }, i) => (
+                <button key={id} type="button" role="tab" id={`v2-tab-${id}`} aria-selected={colMovel === id} aria-controls="v2-painel" tabIndex={colMovel === id ? 0 : -1}
+                  onClick={() => setColMovel(id)} onKeyDown={(e) => teclaSeparador(e, i)}
+                  className={cn("min-h-11 shrink-0 rounded-lg px-3 text-[15px]", colMovel === id ? "bg-foreground text-background" : "bg-muted text-foreground")}>
+                  {nome} <span className="tabular-nums opacity-70">{visiveis.filter((c) => c.doc === id).length}</span>
+                </button>
+              ))}
+            </div>
+            <div id="v2-painel" role="tabpanel" aria-labelledby={`v2-tab-${colMovel}`} className="mt-4">{coluna(colMovel, "m")}</div>
+          </div>
 
-      <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-border pt-5">
-        <p className="text-[15px] text-muted-foreground">{antes} {antes === 1 ? "pessoa ainda em" : "pessoas ainda em"} lead, contacto ou visita.</p>
-        <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("clientes"))}>Ver em Clientes</Button>
-        <p className="text-[15px] text-muted-foreground">Os negócios já em obra veem-se em Operações.</p>
-        <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("operacoes"))}>Ver em Operações</Button>
-      </div>
-    </div>
+          {/* Computador: as quatro colunas lado a lado */}
+          <div className="mt-8 hidden gap-5 lg:grid lg:grid-cols-4">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
+
+          <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-border pt-5">
+            <p className="text-[15px] text-muted-foreground">{antes} {antes === 1 ? "pessoa ainda em" : "pessoas ainda em"} lead, contacto ou visita.</p>
+            <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("clientes"))}>Ver em Clientes</Button>
+            <p className="text-[15px] text-muted-foreground">Os negócios já em obra veem-se em Operações.</p>
+            <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("operacoes"))}>Ver em Operações</Button>
+          </div>
+          </>
+        )}
+      </TabsContent>
+    </Tabs>
   );
 }

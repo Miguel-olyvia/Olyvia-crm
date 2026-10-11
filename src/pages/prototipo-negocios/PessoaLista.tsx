@@ -1,27 +1,37 @@
-// A lista de Pessoas: ocupa a largura toda. O cabeçalho (ListaTopo) fica fixo e as linhas rolam; ao escolher uma pessoa abre-se a ficha num painel.
-import { useRef } from "react";
+// A página de Pessoas, sem a ficha: dois separadores principais (Dashboard e Lista, a Lista por defeito) e, por baixo, a barra de filtros única
+// (ListaTopo) que se aplica aos dois. A lista ocupa a largura toda; o cabeçalho fica fixo e as linhas rolam; ao escolher uma pessoa abre-se a ficha num painel.
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import type { Estado } from "./motor";
-import {
-  SEM_FILTROS, SEPARADORES_LISTA, filtrosEfetivos, listaVisivel, pessoasDoSeparador,
-  type FiltrosPessoa, type Ordem, type SeparadorLista,
-} from "./pessoasDocs";
+import { SEPARADORES_LISTA, type Ordem, type SeparadorLista } from "./pessoasDocs";
+import { SEM_FILTROS_P, listaP, selecionar, type FiltrosP, type LinhaP } from "./filtrosPessoas";
+import type { AcaoP } from "./dashboardPessoas";
 import { BORDA_CTRL } from "./PessoaLinha";
-import { ListaTopo } from "./ListaTopo";
+import { ListaTopo, PessoasCabecalho, type Vista } from "./ListaTopo";
 import { PessoaTabela } from "./PessoaTabela";
+import { PessoasDashboard } from "./PessoasDashboard";
+import type { Estado } from "./motor";
 
 export interface ListaProps {
   S: Estado;
+  linhas: readonly LinhaP[];
   aba: SeparadorLista;
   setAba: (v: SeparadorLista) => void;
-  f: FiltrosPessoa;
-  setF: (v: Partial<FiltrosPessoa>) => void;
+  vista: Vista;
+  setVista: (v: Vista) => void;
+  f: FiltrosP;
+  setF: (v: Partial<FiltrosP>) => void;
   ordem: Ordem;
   setOrdem: (v: Ordem) => void;
   abrir: (nome: string) => void;
   novaLead: () => void;
+  /** Um cartão ou uma barra do dashboard: junta filtros, eventualmente muda de separador, e passa à Lista. */
+  agir: (acao: AcaoP, rotulo: string) => void;
+  /** O que se anuncia a quem usa leitor de ecrã depois de um cartão ou uma barra ("Lista filtrada por Lisboa: 10 pessoas"). */
+  aviso: string;
+  /** Sobe de cada vez que um cartão ou uma barra manda para a Lista: o foco passa para o título dela. */
+  pedidoFoco: number;
   /** Leitura fácil ativa: o painel dos filtros, que abre num portal, também a aplica. */
   leitura: boolean;
 }
@@ -49,28 +59,36 @@ function SemResultados({ limpar, pesquisa }: { limpar: () => void; pesquisa: boo
   );
 }
 
-/** O que se anuncia a quem usa leitor de ecrã quando a pesquisa ou os filtros mudam o número de resultados. */
-export const contagemTexto = (n: number): string => (n === 0 ? "Nenhuma pessoa" : n === 1 ? "1 pessoa" : `${n} pessoas`);
-
-export function PessoaLista({ S, aba, setAba, f, setF, ordem, setOrdem, abrir, novaLead, leitura }: ListaProps) {
+export function PessoaLista({ S, linhas, aba, setAba, vista, setVista, f, setF, ordem, setOrdem, abrir, novaLead, agir, leitura, aviso, pedidoFoco }: ListaProps) {
   const pesquisa = useRef<HTMLInputElement>(null);
-  const ef = filtrosEfetivos(aba, f);
-  const todas = pessoasDoSeparador(S, aba);
-  const visiveis = listaVisivel(S, aba, f, ordem);
+  const tituloLista = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { if (pedidoFoco > 0) tituloLista.current?.focus(); }, [pedidoFoco]);
+  const todas = selecionar(linhas, aba, SEM_FILTROS_P);
+  const visiveis = listaP(S, linhas, aba, f, ordem);
   // "Limpar filtros" desaparece com o estado vazio: o foco passa para a pesquisa em vez de se perder.
-  const limpar = () => { setF({ ...SEM_FILTROS }); pesquisa.current?.focus(); };
+  const limpar = () => { setF({ ...SEM_FILTROS_P }); pesquisa.current?.focus(); };
   const titulo = SEPARADORES_LISTA.find((s) => s.id === aba)!.nome;
   return (
-    <Tabs value={aba} onValueChange={(v) => setAba(v as SeparadorLista)} className="min-w-0">
-      <ListaTopo S={S} aba={aba} f={ef} setF={setF} ordem={ordem} setOrdem={setOrdem} todas={todas} novaLead={novaLead} leitura={leitura} pesquisa={pesquisa} />
-      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{contagemTexto(visiveis.length)}</p>
-      <TabsContent value={aba} className="mt-0 pb-24 lg:pb-6">
-        {todas.length === 0 ? <SeparadorVazio aba={aba} /> : visiveis.length === 0 ? <SemResultados limpar={limpar} pesquisa={f.q.trim() !== ""} /> : (
-          <>
-            <PessoaTabela S={S} pessoas={visiveis} titulo={titulo} abrir={abrir} />
-            <p className="px-4 pt-3 text-[15px] text-muted-foreground">Exemplo: as pessoas marcadas exemplo, o negócio novo juntado a clientes, a qualificação (MQL e SQL), o resultado do último contacto, a saúde, as notas e os pagamentos são inventados para a demonstração.</p>
-          </>
-        )}
+    <Tabs value={vista} onValueChange={(v) => setVista(v as Vista)} className="min-w-0">
+      <PessoasCabecalho novaLead={novaLead} />
+      <div aria-live="polite" aria-atomic="true" className="sr-only">{aviso}</div>
+      <TabsContent value={vista} className="mt-0">
+        <Tabs value={aba} onValueChange={(v) => setAba(v as SeparadorLista)} className="min-w-0">
+          <ListaTopo linhas={linhas} aba={aba} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} total={visiveis.length} leitura={leitura} pesquisa={pesquisa} />
+          <TabsContent value={aba} className="mt-0 pb-24 lg:pb-6">
+            {vista === "lista" && (
+              <h2 ref={tituloLista} tabIndex={-1} className="sr-only focus:not-sr-only focus:mx-4 focus:mt-4 focus:rounded-md focus:text-[16px] focus:font-semibold focus:outline-none focus:ring-2 focus:ring-primary">
+                Lista: {titulo}
+              </h2>
+            )}
+            {vista === "dashboard" ? <PessoasDashboard linhas={linhas} aba={aba} f={f} aoAgir={agir} limpar={limpar} /> : todas.length === 0 ? <SeparadorVazio aba={aba} /> : visiveis.length === 0 ? <SemResultados limpar={limpar} pesquisa={f.q.trim() !== ""} /> : (
+              <>
+                <PessoaTabela S={S} pessoas={visiveis.map((l) => l.p)} titulo={titulo} abrir={abrir} />
+                <p className="px-4 pt-3 text-[15px] text-muted-foreground">Exemplo: as pessoas marcadas exemplo, o negócio novo juntado a clientes, a qualificação (MQL e SQL), o resultado do último contacto, a saúde, as notas e os pagamentos são inventados para a demonstração.</p>
+              </>
+            )}
+          </TabsContent>
+        </Tabs>
       </TabsContent>
     </Tabs>
   );

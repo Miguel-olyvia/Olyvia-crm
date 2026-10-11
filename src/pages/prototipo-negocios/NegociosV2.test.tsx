@@ -15,24 +15,25 @@ const desenhados = (c: HTMLElement): HTMLElement[] => [...c.querySelectorAll<HTM
 const eur0 = (x: number): string => eur(x).replace(/,00$/, "");
 
 describe("NegociosV2 · o cabeçalho e os cartões contam o mesmo", () => {
-  it("o número a decorrer é o total de cartões (exemplos incluídos) e o valor em proposta é a soma dos cartões em Proposta", () => {
+  it("o número no Quadro é o total de cartões (exemplos incluídos) e o valor em proposta é a soma dos cartões em Proposta", () => {
     const S = seed();
     const todos = cartoesV2(S);
     const { container } = pagina(S);
     const proposta = todos.filter((c) => c.doc === "proposta").reduce((a, c) => a + (c.valor ?? 0), 0);
-    expect(container.querySelector("header p")).toHaveTextContent(`${todos.length} negócios a decorrer · ${eur0(proposta)} € em proposta`);
+    expect(container.querySelector("header p")).toHaveTextContent(`${todos.length} no Quadro · ${eur0(proposta)} € em proposta`);
     expect(todos.some((c) => c.demo)).toBe(true);
     S.filtro = "todos";
     cleanup();
     expect(desenhados(pagina(S).container)).toHaveLength(todos.length);
   });
-  it("o cabeçalho não muda com a pesquisa nem com o filtro", () => {
+  it("com a pesquisa e o filtro o cabeçalho conta o que o Quadro mostra, e diz de quantos", () => {
     const S = seed();
     const total = cartoesV2(S).length;
     S.filtro = "wc";
     const { container } = pagina(S, "Carla");
-    expect(desenhados(container).length).toBeLessThan(total);
-    expect(container.querySelector("header p")).toHaveTextContent(`${total} negócios a decorrer`);
+    const mostrados = desenhados(container).length;
+    expect(mostrados).toBeLessThan(total);
+    expect(container.querySelector("header p")).toHaveTextContent(`${mostrados} no Quadro (de ${total})`);
   });
 });
 
