@@ -6,8 +6,8 @@ import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt 
 initSentry();
 
 const RATE_LIMIT_BUCKET = "get-form-data";
-const RATE_LIMIT_MAX_ATTEMPTS = 60;
-const RATE_LIMIT_WINDOW_MINUTES = 60;
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const querySchema = z.object({
   form_id: z.string().uuid().optional(),
