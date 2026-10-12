@@ -25,6 +25,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 
 
 const Deals = lazy(() => import("./pages/Deals"));
+const NegocioMetas = lazy(() => import("./pages/NegocioMetas"));
 const Proposals = lazy(() => import("./pages/Proposals"));
 
 
@@ -243,6 +244,7 @@ const App = () => (
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
+                      <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
                       <Route path="/acquisition-help" element={<AcquisitionHelp />} />
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
