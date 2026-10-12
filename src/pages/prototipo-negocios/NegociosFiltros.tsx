@@ -1,5 +1,6 @@
 // A barra de filtros da V2 de Negócios, única e partilhada pelo Quadro e pelo Dashboard: pesquisa, os chips rápidos de sempre (Os meus, Todos, Com atraso,
 // Casa de banho, Cozinha), o botão Filtros com o painel, os filtros ativos (chips removíveis, com Limpar tudo) e o contador de resultados (aria-live).
+import type { ReactNode } from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -47,9 +48,13 @@ interface BarraProps extends Pick<Ctx, "S" | "A" | "go" | "q"> {
   f: FiltrosN;
   setF: (v: Partial<FiltrosN>) => void;
   total: number;
+  /** Uma fila de chips (as vistas rápidas) por baixo da pesquisa, só na V2. */
+  vistas?: ReactNode;
+  /** A margem de cima (por defeito a de sempre). */
+  margem?: string;
 }
 
-export function BarraFiltrosN({ S, A, go, q, setQ, linhas, f, setF, total }: BarraProps) {
+export function BarraFiltrosN({ S, A, go, q, setQ, linhas, f, setF, total, vistas, margem = "mt-6" }: BarraProps) {
   const rapido = S.filtro;
   const limparTudo = go(() => { setQ(""); A.filtro("todos"); setF({ ...SEM_FILTROS_N }); });
   const chips = [
@@ -58,7 +63,7 @@ export function BarraFiltrosN({ S, A, go, q, setQ, linhas, f, setF, total }: Bar
     ...chipsAtivosN(f).map((c) => ({ id: c.id, texto: c.texto, remover: () => setF(c.limpar) })),
   ];
   return (
-    <div className="mt-6 grid gap-2">
+    <div className={cn(margem, "grid gap-2")}>
       <div className="flex flex-wrap items-center gap-3">
         <label className="relative w-full sm:w-80">
           <span className="sr-only">Procurar</span>
@@ -76,6 +81,7 @@ export function BarraFiltrosN({ S, A, go, q, setQ, linhas, f, setF, total }: Bar
         </div>
         <Painel linhas={linhas} f={f} setF={setF} leitura={!!S.leitura} />
       </div>
+      {vistas}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <ChipsFiltros chips={chips} limparTudo={limparTudo} />
         <p role="status" aria-live="polite" aria-atomic="true" className="text-[15px] tabular-nums text-muted-foreground">{contagemNegocios(total)}</p>
