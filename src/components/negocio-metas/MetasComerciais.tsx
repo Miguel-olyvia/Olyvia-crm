@@ -1,60 +1,69 @@
+import { useMemo, useState } from "react";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import {
-  Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import { BarraMeta } from "./BarraMeta";
-import { formatarMeta } from "./formatoMetas";
+import { cn } from "@/lib/utils";
+import { LinhaComercial } from "./LinhaComercial";
+import { TabelaComerciais } from "./TabelaComerciais";
+import { ordenarPorGanho, totalEquipa, type OrdemGanho } from "./comparativoComerciais";
+import { FOCO } from "./estilos";
+import { ALTURA, CARTAO, TRANSICAO } from "./estilosDashboard";
 import type { TotaisComercial } from "./negocioMetas";
 
 interface MetasComerciaisProps {
   totais: TotaisComercial[];
+  ritmo: number;
+  /** Comercial escolhido para filtrar o Dashboard, ou `null`. */
+  selecionado: string | null;
+  aoSelecionar: (comercial: string | null) => void;
 }
 
-/** Tabela de metas por comercial: meta, ganho, percentagem e barra. */
-export function MetasComerciais({ totais }: MetasComerciaisProps) {
+/** Comparativo por comercial: bullet charts do maior para o menor ganho e total da equipa. */
+export function MetasComerciais({ totais, ritmo, selecionado, aoSelecionar }: MetasComerciaisProps) {
   const { t } = useTranslation();
+  const [ordem, setOrdem] = useState<OrdemGanho>("desc");
+  const ordenados = useMemo(() => ordenarPorGanho(totais, ordem), [totais, ordem]);
+  const equipa = useMemo(() => totalEquipa(totais), [totais]);
+  const Seta = ordem === "desc" ? ArrowDownWideNarrow : ArrowUpNarrowWide;
+  const ordemTexto = t(ordem === "desc" ? "businessGoals.reps.sortDesc" : "businessGoals.reps.sortAsc");
+
   return (
     <section aria-labelledby="metas-comerciais-titulo" className="space-y-3">
-      <h2 id="metas-comerciais-titulo" className="text-base font-semibold text-foreground">
-        {t("businessGoals.reps.title")}
-      </h2>
-      <div className="overflow-x-auto rounded-2xl border border-border/70 bg-card">
-        <Table>
-          <TableCaption className="sr-only">{t("businessGoals.reps.caption")}</TableCaption>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("businessGoals.reps.name")}</TableHead>
-              <TableHead className="text-right">{t("businessGoals.reps.goal")}</TableHead>
-              <TableHead className="text-right">{t("businessGoals.reps.won")}</TableHead>
-              <TableHead className="text-right">{t("businessGoals.reps.percent")}</TableHead>
-              <TableHead className="min-w-32">{t("businessGoals.reps.progress")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {totais.map((c) => (
-              <TableRow key={c.comercial}>
-                <TableCell className="font-medium">{c.comercial}</TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatarMeta("euro", c.meta)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatarMeta("euro", c.atual)}
-                </TableCell>
-                <TableCell className="text-right font-mono font-semibold tabular-nums">
-                  {c.percentagem}%
-                </TableCell>
-                <TableCell>
-                  <BarraMeta
-                    atual={c.atual}
-                    meta={c.meta}
-                    rotulo={`${c.comercial}: ${c.percentagem}%`}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="metas-comerciais-titulo" className="text-lg font-semibold text-foreground">
+          {t("businessGoals.reps.title")}
+        </h2>
+        <button
+          type="button"
+          onClick={() => setOrdem(ordem === "desc" ? "asc" : "desc")}
+          aria-label={t("businessGoals.reps.sortLabel", { order: ordemTexto })}
+          className={cn(
+            "inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm text-foreground hover:bg-muted",
+            TRANSICAO, FOCO,
+          )}
+        >
+          <Seta className="h-4 w-4" aria-hidden="true" />
+          {ordemTexto}
+        </button>
       </div>
+      <ul className={cn(CARTAO, ALTURA.comerciais, "space-y-1 p-2")}>
+        {ordenados.map((c) => (
+          <LinhaComercial
+            key={c.comercial}
+            nome={c.comercial}
+            progresso={c}
+            ritmo={ritmo}
+            ativo={selecionado === c.comercial}
+            aoEscolher={() => aoSelecionar(selecionado === c.comercial ? null : c.comercial)}
+          />
+        ))}
+        <LinhaComercial
+          nome={t("businessGoals.reps.total")}
+          progresso={equipa}
+          ritmo={ritmo}
+          testId="total-equipa"
+        />
+      </ul>
+      <TabelaComerciais totais={ordenados} equipa={equipa} />
     </section>
   );
 }

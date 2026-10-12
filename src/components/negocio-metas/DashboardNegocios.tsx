@@ -1,51 +1,82 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
+import { DashboardCarregando, DashboardErro, DashboardVazio } from "./EstadosDashboard";
 import { EvolucaoMensal } from "./EvolucaoMensal";
 import { MetasComerciais } from "./MetasComerciais";
 import { MetasMes } from "./MetasMes";
-import { formatarMeta } from "./formatoMetas";
+import { NumerosQuadro } from "./NumerosQuadro";
+import { filtrarPorComercial } from "./comparativoComerciais";
+import { ritmoEsperado } from "./estadoMeta";
+import { FOCO } from "./estilos";
+import { TRANSICAO } from "./estilosDashboard";
+import { numerosDashboard } from "./logicaQuadro";
 import {
   cartoesDoMes, evolucaoMensal, totaisPorComercial, type DadosNegocioMetas,
 } from "./negocioMetas";
-import { numerosDashboard } from "./logicaQuadro";
 
-/** Aba Dashboard: números do quadro, metas do mês, metas por comercial e evolução. */
-export function DashboardNegocios({ dados }: { dados: DadosNegocioMetas }) {
+export type EstadoDashboard = "pronto" | "carregando" | "vazio" | "erro";
+
+interface DashboardNegociosProps {
+  dados: DadosNegocioMetas;
+  /** Para simular carga, vazio e erro (nos testes e até haver dados reais). */
+  estado?: EstadoDashboard;
+  aoTentarDeNovo?: () => void;
+  aoIrParaQuadro?: () => void;
+  /** Dia de hoje, para o ritmo esperado do mês (por omissão, a data atual). */
+  hoje?: Date;
+}
+
+/** Aba Dashboard: metas do mês em foco, comparativo por comercial, números do Quadro e evolução. */
+export function DashboardNegocios({
+  dados, estado = "pronto", aoTentarDeNovo, aoIrParaQuadro, hoje,
+}: DashboardNegociosProps) {
   const { t } = useTranslation();
-  const numeros = useMemo(() => numerosDashboard(dados.negocios), [dados]);
+  const [comercial, setComercial] = useState<string | null>(null);
+  const ritmo = ritmoEsperado(dados.mesAtual, hoje ?? new Date());
   const cartoes = useMemo(() => cartoesDoMes(dados.negocios, dados.metasMes), [dados]);
   const totais = useMemo(
     () => totaisPorComercial(dados.negocios, dados.metasComerciais),
     [dados],
   );
+  const numeros = useMemo(
+    () => numerosDashboard(filtrarPorComercial(dados.negocios, comercial)),
+    [dados, comercial],
+  );
   const evolucao = useMemo(() => evolucaoMensal(dados), [dados]);
+
+  if (estado === "carregando") return <DashboardCarregando />;
+  if (estado === "erro") return <DashboardErro aoTentarDeNovo={aoTentarDeNovo} />;
+  if (estado === "vazio" || dados.negocios.length === 0) {
+    return <DashboardVazio aoIrParaQuadro={aoIrParaQuadro} />;
+  }
 
   return (
     <div className="space-y-6">
-      <section aria-labelledby="numeros-titulo" className="space-y-3">
-        <h2 id="numeros-titulo" className="text-base font-semibold text-foreground">
-          {t("businessGoals.numbers.title")}
-        </h2>
-        <ul className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
-          {numeros.map((n) => (
-            <li key={n.chave} className="bg-card p-4">
-              <span className="text-sm font-medium text-muted-foreground">
-                {t(`businessGoals.numbers.${n.chave}`)}
-              </span>
-              <p className="mt-1.5 font-mono text-2xl font-bold tabular-nums tracking-tight text-foreground">
-                {n.euros ? formatarMeta("euro", n.valor) : n.valor}
-              </p>
-              {n.valorNota !== null && (
-                <p className="text-xs text-muted-foreground">
-                  {t("businessGoals.numbers.worth", { value: formatarMeta("euro", n.valorNota) })}
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-      <MetasMes cartoes={cartoes} />
-      <MetasComerciais totais={totais} />
+      {comercial !== null && (
+        <button
+          type="button"
+          onClick={() => setComercial(null)}
+          aria-label={t("businessGoals.reps.clear")}
+          className={cn(
+            "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-primary bg-primary/10 px-4 text-sm font-medium text-foreground hover:bg-primary/20",
+            TRANSICAO, FOCO,
+          )}
+        >
+          <span>{t("businessGoals.reps.viewing", { name: comercial })}</span>
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
+      <MetasMes
+        cartoes={cartoes}
+        ritmo={ritmo}
+        nota={comercial ? t("businessGoals.reps.teamNote") : undefined}
+      />
+      <MetasComerciais
+        totais={totais} ritmo={ritmo} selecionado={comercial} aoSelecionar={setComercial}
+      />
+      <NumerosQuadro numeros={numeros} comValor={comercial !== null} />
       <EvolucaoMensal meses={evolucao} />
     </div>
   );

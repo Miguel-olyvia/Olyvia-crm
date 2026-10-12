@@ -78,7 +78,7 @@ const NegocioMetas = () => {
           <AbaQuadro negocios={negocios} filtros={filtros} modo={modo} aoMudarFiltros={setFiltros} />
         </TabsContent>
         <TabsContent value="dashboard" className="mt-0">
-          <DashboardNegocios dados={DADOS_EXEMPLO} />
+          <DashboardNegocios dados={DADOS_EXEMPLO} aoIrParaQuadro={() => setVista("quadro")} />
         </TabsContent>
       </Tabs>
     </div>
