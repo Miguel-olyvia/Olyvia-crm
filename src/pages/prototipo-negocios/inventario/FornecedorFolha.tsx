@@ -1,7 +1,7 @@
 // A ficha de um fornecedor (folha lateral): Resumo (SLA e encomendas), Dados, Artigos e preços (com o preferido), Preços por aprovar e Portal (catálogo por ligar).
 import { useState } from "react";
 import { Star } from "lucide-react";
-import { Kpi } from "../Kpi";
+import { Kpi } from "./kpiInv";
 import { CHIP } from "../FiltrosPopover";
 import { adicionarArtigo, decidirPreco, definirFornecedorAtivo, definirPreferido, desligarCatalogo, dispensarCatalogo, eliminarFornecedor, ligarCatalogo, removerArtigo, restaurarFornecedor } from "./cadastros";
 import { eur, falhar, fmtD, fmtDT, fornecedor, nomeProd, pct, produto } from "./base";
@@ -25,8 +25,8 @@ function Resumo({ id }: { id: string }) {
     { id: "s", titulo: "Estado", celula: (p) => poStatusLabel[poStatus(p)] }, { id: "v", titulo: "Valor", direita: true, celula: (p) => eur(poTotals(p).total) }]} />;
   return (
     <div className="grid gap-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Kpi rotulo="Recebidas" valor={String(sl.rec)} nota="histórico" /><Kpi rotulo="Dentro do SLA" valor={String(sl.inn)} nota={`prazo ${s?.sla} dias`} /><Kpi rotulo="Fora do SLA" valor={String(sl.out)} />
+      <div className="kpis">
+        <Kpi rotulo="Recebidas" valor={String(sl.rec)} nota="histórico" /><Kpi tom="ok" rotulo="Dentro do SLA" valor={String(sl.inn)} nota={`prazo ${s?.sla} dias`} /><Kpi rotulo="Fora do SLA" valor={String(sl.out)} />
         <Kpi rotulo="% cumprimento" valor={pct(sl.pct)} /><Kpi rotulo="Atraso médio" valor={`${(Math.round(sl.avg * 10) / 10).toString().replace(".", ",")} dias`} />
       </div>
       <h3 className="text-base font-semibold">POs abertas ({pos.filter(poOpen).length})</h3>

@@ -75,8 +75,7 @@ export function MovimentosInv() {
   };
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Livro completo e imutável: cada entrada, saída, transferência, ajuste, devolução e quebra. Correções fazem-se com novos movimentos (ajuste, estorno, reversão). Uma saída que deixaria o stock abaixo de zero falha por inteiro.</p>
+      <div className="flex flex-wrap items-start justify-end gap-3">
         <div className="flex flex-wrap gap-2"><Sec onClick={exportar}>Exportar</Sec><Pri onClick={() => setDlg({ t: "mov" })}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Registar movimento</Pri></div>
       </div>
       <Filtros />

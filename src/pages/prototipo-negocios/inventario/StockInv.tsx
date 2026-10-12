@@ -2,7 +2,8 @@
 // Um só botão primário: "Adicionar stock".
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import { Kpi } from "../Kpi";
+import { Kpi } from "./kpiInv";
+import { ExportarInv } from "./ExportarInv";
 import { CHIP, Escolher, Interruptor } from "../FiltrosPopover";
 import { cancelarPedidoTransf } from "./cadastros";
 import { contadores, estadoStock, ESTADOS_STOCK, type EstadoStock } from "./contadores";
@@ -126,15 +127,14 @@ export function StockInv() {
   const porProduto = [...new Set(lista.map((r) => r.sku))].map((sku) => ({ sku, rs: lista.filter((r) => r.sku === sku) }));
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Stock por produto e armazém. Livre = stock − reservas das Encomendas Clientes (FIFO); encomendas a caminho não contam.</p>
-        <div className="flex flex-wrap gap-2"><Sec onClick={() => setDlg("mov")}>Registar movimento</Sec><Pri onClick={() => setDlg("add")}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Adicionar stock</Pri></div>
+      <div className="flex flex-wrap items-start justify-end gap-3">
+        <div className="flex flex-wrap gap-2"><ExportarInv nome="existencias" rotulo="linhas de stock" cabecalho={["SKU", "Produto", "Armazém", "Localização", "Quantidade", "Reservado", "Livre", "Mínimo", "Máximo", "Ponto de encomenda"]} linhas={() => lista.map((r) => [r.sku, nomeProd(db, r.sku), nomeArm(db, r.wh), r.loc, r.qty, reservadoEm(db, r.sku, r.wh), livreEm(db, r.sku, r.wh), r.min, r.max, r.rop])} /><Sec onClick={() => setDlg("mov")}>Registar movimento</Sec><Pri onClick={() => setDlg("add")}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Adicionar stock</Pri></div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="kpis">
         <Kpi rotulo="Valor em stock" valor={eur(c.stockValue)} nota="custo médio ponderado" />
-        <Kpi rotulo="Abaixo do ponto de encomenda" valor={String(c.low)} nota="stock livre < ponto de encomenda" aoClicar={() => setFiltros("stock", { state: "low" })} acaoRotulo="Filtrar por baixo" />
-        <Kpi rotulo="Em excesso" valor={String(c.excess)} nota="acima do máximo" aoClicar={() => setFiltros("stock", { state: "high" })} acaoRotulo="Filtrar por excesso" />
-        <Kpi rotulo="Unidades reservadas" valor={N(c.reservedUnits)} nota="para Encomendas Clientes" />
+        <Kpi tom="bad" rotulo="Abaixo do ponto de encomenda" valor={String(c.low)} nota="stock livre < ponto de encomenda" aoClicar={() => setFiltros("stock", { state: "low" })} acaoRotulo="Filtrar por baixo" />
+        <Kpi tom="warn" rotulo="Em excesso" valor={String(c.excess)} nota="acima do máximo" aoClicar={() => setFiltros("stock", { state: "high" })} acaoRotulo="Filtrar por excesso" />
+        <Kpi tom="info" rotulo="Unidades reservadas" valor={N(c.reservedUnits)} nota="para Encomendas Clientes" />
       </div>
       {(c.transfers > 0 || f.transferencias) && (
         <section aria-labelledby="st-tr" className="grid gap-2 rounded-xl border border-border p-3">

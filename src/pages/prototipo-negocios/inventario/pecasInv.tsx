@@ -1,7 +1,6 @@
 // As peças pequenas do Inventário nativo, nas regras de desenho do protótipo: texto de 15 px no mínimo, alvos de 44 px, cor só nos ícones, nada de cartões dentro de cartões.
 import { useId, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Circle, Info, Search, XCircle, type LucideIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BORDA_CTRL } from "../PessoaLinha";
 import { FOCO } from "../FiltrosPopover";
@@ -76,11 +75,12 @@ export function Notas({ rotulo, valor, aoMudar, linhas = 3, ajuda, obrigatorio, 
 }
 
 /** Um botão secundário (contorno); o único primário do ecrã é o `Button` normal. */
-export function Sec({ className, ...p }: React.ComponentProps<typeof Button>) {
-  return <Button type="button" variant="outline" className={cn("min-h-11 cursor-pointer text-[15px]", BORDA_CTRL, className)} {...p} />;
+type PropsBotao = React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "default" | "destructive" };
+export function Sec({ className, variant: _v, ...p }: PropsBotao) {
+  return <button type="button" className={cn("btn", className)} {...p} />;
 }
-export function Pri({ className, ...p }: React.ComponentProps<typeof Button>) {
-  return <Button type="button" className={cn("min-h-11 cursor-pointer text-[15px]", className)} {...p} />;
+export function Pri({ className, variant, ...p }: PropsBotao) {
+  return <button type="button" className={cn("btn", variant === "destructive" ? "btn-danger" : "btn-p", className)} {...p} />;
 }
 /** Uma ligação que é um botão (abre outro detalhe). */
 export function Ligacao({ children, aoClicar, className }: { children: ReactNode; aoClicar: () => void; className?: string }) {

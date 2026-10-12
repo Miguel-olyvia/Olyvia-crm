@@ -12,7 +12,8 @@ import { Pesquisa, Pri, Sec, Selo, Vazio } from "./pecasInv";
 import { enviarPo, poLate, poOpen, poPublished, poStatus, poStatusLabel, poTotals, restaurarPo, textoPortal } from "./po";
 import { ReceberDialogo } from "./ReceberDialogo";
 import { TabelaInv, type Coluna } from "./TabelaInv";
-import { Kpi } from "../Kpi";
+import { Kpi } from "./kpiInv";
+import { ExportarInv } from "./ExportarInv";
 import { CHIP } from "../FiltrosPopover";
 import type { Po, Tom } from "./tipos";
 
@@ -73,14 +74,13 @@ export function EncomendasInv() {
   const alvo = dlg && dlg.t !== "nova" ? db.pos.find((p) => p.id === dlg.id) : undefined;
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Rascunhos gerados pelas Encomendas Clientes ou criados à mão, aprovação, portal do fornecedor e receção, numa só lista. Todas as linhas abrem, incluindo as recebidas.</p>
-        <Pri onClick={() => setDlg({ t: "nova" })}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova encomenda</Pri>
+      <div className="flex flex-wrap items-start justify-end gap-3">
+        <ExportarInv nome="encomendas" rotulo="encomendas" cabecalho={["Nº", "Fornecedor", "Origem", "Data", "Entrega", "Estado", "Valor"]} linhas={() => lista.map((p) => [p.id, nomeForn(db, p.sup), p.origin.ref || p.origin.k, p.date, p.due, poStatusLabel[poStatus(p)], poTotals(p).total])} /><Pri onClick={() => setDlg({ t: "nova" })}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova encomenda</Pri>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi rotulo="Por aprovar" valor={String(c.pending)} nota="pendente → encomendado" aoClicar={() => setFiltros("po", { status: "pending" })} acaoRotulo="Filtrar por pendentes" />
-        <Kpi rotulo="Encomendadas" valor={String(c.ordered + c.partialPO)} nota={`${c.partialPO} parcialmente recebidas`} aoClicar={() => setFiltros("po", { status: "ordered" })} acaoRotulo="Filtrar por encomendadas" />
-        <Kpi rotulo="Atrasadas" valor={String(c.late)} nota="entrega prevista ultrapassada" aoClicar={() => setFiltros("po", { status: "late" })} acaoRotulo="Filtrar por atrasadas" />
+      <div className="kpis">
+        <Kpi tom="warn" rotulo="Por aprovar" valor={String(c.pending)} nota="pendente → encomendado" aoClicar={() => setFiltros("po", { status: "pending" })} acaoRotulo="Filtrar por pendentes" />
+        <Kpi tom="info" rotulo="Encomendadas" valor={String(c.ordered + c.partialPO)} nota={`${c.partialPO} parcialmente recebidas`} aoClicar={() => setFiltros("po", { status: "ordered" })} acaoRotulo="Filtrar por encomendadas" />
+        <Kpi tom="bad" rotulo="Atrasadas" valor={String(c.late)} nota="entrega prevista ultrapassada" aoClicar={() => setFiltros("po", { status: "late" })} acaoRotulo="Filtrar por atrasadas" />
         <Kpi rotulo="Valor por receber" valor={eur(c.openValue)} nota="com IVA, só o que falta" />
       </div>
       <Filtros n={n} />

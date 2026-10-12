@@ -2,7 +2,8 @@
 // A lista tem KPI, filtros e ordenação; a linha abre a folha. Um só botão primário: "Nova encomenda manual".
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import { Kpi } from "../Kpi";
+import { Kpi } from "./kpiInv";
+import { ExportarInv } from "./ExportarInv";
 import { CHIP, Escolher, Interruptor } from "../FiltrosPopover";
 import { fmtD, nomeArm, armazem } from "./base";
 import { contadores } from "./contadores";
@@ -49,15 +50,14 @@ export function EcInv() {
   const chip = (k: "" | EstadoEc, nome: string, n?: number): React.ReactNode => <button key={k + nome} type="button" aria-pressed={f.status === k && !f.prontas} onClick={() => setFiltros("ec", { status: k, prontas: false })} className={CHIP(f.status === k && !f.prontas)}>{nome}{n != null && <> <span className="tabular-nums opacity-70">{n}</span></>}</button>;
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Encomendas Clientes: o que existe em stock é reservado (FIFO) e sai do armazém de expedição; o que falta vai para a encomenda ao fornecedor preferencial.</p>
-        <Pri onClick={() => setNova(true)}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova encomenda manual</Pri>
+      <div className="flex flex-wrap items-start justify-end gap-3">
+        <ExportarInv nome="saidas-clientes" rotulo="encomendas de cliente" cabecalho={["Nº EC", "Origem", "Cliente", "Morada", "Data", "Linhas", "Estado"]} linhas={() => lista.map((e) => [e.id, origemTexto(e), e.client, e.addr, e.date, e.lines.length, EC_ESTADOS[ecEstado(db, e)]])} /><Pri onClick={() => setNova(true)}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova encomenda manual</Pri>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi rotulo="Prontas a expedir" valor={String(c.ecReady)} nota="com linhas prontas a sair" aoClicar={() => setFiltros("ec", { prontas: true, status: "" })} acaoRotulo="Filtrar por prontas a expedir" />
-        <Kpi rotulo="Parcialmente pendentes" valor={String(c.ecPartial)} aoClicar={() => setFiltros("ec", { status: "partial", prontas: false })} acaoRotulo="Filtrar por parcialmente pendentes" />
-        <Kpi rotulo="A aguardar PO" valor={String(c.ecWaiting)} nota="à espera do fornecedor" aoClicar={() => setFiltros("ec", { status: "waiting", prontas: false })} acaoRotulo="Filtrar por a aguardar PO" />
-        <Kpi rotulo="Sem fornecedor" valor={String(c.ecNoSup)} nota="sem preferido para encomendar" aoClicar={() => setFiltros("ec", { status: "nosup", prontas: false })} acaoRotulo="Filtrar por sem fornecedor" />
+      <div className="kpis">
+        <Kpi tom="ok" rotulo="Prontas a expedir" valor={String(c.ecReady)} nota="com linhas prontas a sair" aoClicar={() => setFiltros("ec", { prontas: true, status: "" })} acaoRotulo="Filtrar por prontas a expedir" />
+        <Kpi tom="warn" rotulo="Parcialmente pendentes" valor={String(c.ecPartial)} aoClicar={() => setFiltros("ec", { status: "partial", prontas: false })} acaoRotulo="Filtrar por parcialmente pendentes" />
+        <Kpi tom="info" rotulo="A aguardar PO" valor={String(c.ecWaiting)} nota="à espera do fornecedor" aoClicar={() => setFiltros("ec", { status: "waiting", prontas: false })} acaoRotulo="Filtrar por a aguardar PO" />
+        <Kpi tom="bad" rotulo="Sem fornecedor" valor={String(c.ecNoSup)} nota="sem preferido para encomendar" aoClicar={() => setFiltros("ec", { status: "nosup", prontas: false })} acaoRotulo="Filtrar por sem fornecedor" />
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <Pesquisa valor={f.q} aoMudar={(q) => setFiltros("ec", { q })} rotulo="Pesquisar encomendas clientes por nº, contrato, cliente ou produto" dica="Nº EC, contrato, VD, cliente ou produto" />

@@ -1,108 +1,129 @@
-// O Hoje do Inventário: o fluxo em cinco passos, a fila de trabalho (cada cartão abre a lista já filtrada), as POs automáticas e os últimos movimentos.
-// Os números vêm do estado atual e mudam quando se age. Um só botão primário: "Simular venda assinada".
-import { useState } from "react";
-import { ArrowRight } from "lucide-react";
+// O Hoje do Inventário, igual ao do mockup (scrHoje): o fluxo em cinco passos (cartões numerados, a bifurcação "Sim / Não"), a fila de trabalho (cada cartão abre a lista
+// já filtrada), as POs automáticas e os últimos movimentos. Os números vêm do estado atual. O botão primário é só um: "Simular venda assinada".
+import { useState, type ReactNode } from "react";
+import { ArrowLeftRight, ArrowRight, GitFork, Play, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { FOCO } from "../FiltrosPopover";
-import { BORDA_CTRL } from "../PessoaLinha";
 import { eur, fmtDT, N, nomeArm, nomeProd } from "./base";
+import { Cab, Fonte } from "./cabInv";
 import { contadores, type Contadores } from "./contadores";
 import { useCtxInv, type Destino } from "./ctxInv";
 import { TIPOS_MOV } from "./stock";
 import { MovimentoDialogo } from "./MovimentoDialogo";
-import { Bloco, Ligacao, Pri, Sec, Selo, Vazio } from "./pecasInv";
 import { VendaDialogo } from "./VendaDialogo";
 import type { Tom } from "./tipos";
 
-interface ItemFila { n: number; titulo: string; desc: string; tom: Tom; destino: Destino }
+interface ItemFila { n: number; titulo: string; desc: string; tom: Tom; destino: Destino; fonte: string }
 const fila = (c: Contadores): ItemFila[] => [
-  { n: c.pending, titulo: "POs por aprovar", desc: "Rascunhos, manuais ou automáticos. Passar a Encomendado é aprovar.", tom: "warn", destino: { aba: "po", f: { status: "pending" } } },
-  { n: c.late, titulo: "POs atrasadas", desc: "A entrega prevista passou e a receção não está completa.", tom: "bad", destino: { aba: "po", f: { status: "late" } } },
-  { n: c.ecReady, titulo: "ECs prontas a expedir", desc: "Têm linhas com stock reservado (FIFO) à espera de saída.", tom: "ok", destino: { aba: "ec", f: { prontas: true } } },
-  { n: c.ecNoSup, titulo: "ECs sem fornecedor preferencial", desc: "Há quantidades em falta sem fornecedor para encomendar.", tom: "bad", destino: { aba: "ec", f: { status: "nosup" } } },
-  { n: c.transfers, titulo: "Pedidos de transferência", desc: "Entre armazéns, ligados a ECs.", tom: "info", destino: { aba: "stock", f: { transferencias: true } } },
-  { n: c.prices, titulo: "Alterações de preço por aprovar", desc: "Submetidas pelos fornecedores no portal.", tom: "warn", destino: { aba: "sup", f: { precos: true } } },
-  { n: c.low, titulo: "Produtos abaixo do ponto de encomenda", desc: "O stock livre (sem reservas) está abaixo do ponto de encomenda.", tom: "warn", destino: { aba: "stock", f: { state: "low" } } },
-  { n: c.stalled, titulo: "Contagem parada", desc: "Em curso sem atividade há 7 dias ou mais.", tom: "neu", destino: { aba: "cont", f: { estado: "open" } } },
-  { n: c.awaiting, titulo: "Fornecedores à espera da ficha", desc: "Convidados para o portal: ainda não a preencheram.", tom: "info", destino: { aba: "sup", f: { aguardam: true } } },
-  { n: c.catUnlinked, titulo: "Artigos do portal por ligar", desc: "Catálogo carregado pelos fornecedores, com sugestões.", tom: "neu", destino: { aba: "sup", f: { catalogo: true } } },
-  { n: c.guiasDiv, titulo: "Guias abertas com divergências", desc: "O anunciado é diferente do recebido.", tom: "bad", destino: { aba: "guia", f: { estado: "div" } } },
+  { n: c.pending, titulo: "POs por aprovar", desc: "Rascunhos (manuais ou automáticos, se a aprovação estiver ativa). Passar a Encomendado exige purchase_orders.approve.", tom: "warn", destino: { aba: "po", f: { status: "pending" } }, fonte: "purchase_orders.status = pending" },
+  { n: c.late, titulo: "POs atrasadas", desc: "Entrega prevista ultrapassada sem receção completa.", tom: "bad", destino: { aba: "po", f: { status: "late" } }, fonte: "purchase_orders.expected_delivery_date" },
+  { n: c.ecReady, titulo: "ECs prontas a expedir", desc: "Têm linhas com stock reservado (FIFO) à espera de saída.", tom: "ok", destino: { aba: "ec", f: { prontas: true } }, fonte: "fn_client_order_line_reservations" },
+  { n: c.ecNoSup, titulo: "ECs sem fornecedor preferencial", desc: "Há quantidades em falta sem fornecedor para encomendar.", tom: "bad", destino: { aba: "ec", f: { status: "nosup" } }, fonte: "item_suppliers.is_preferred" },
+  { n: c.transfers, titulo: "Pedidos de transferência", desc: "Entre armazéns, ligados a ECs.", tom: "info", destino: { aba: "stock", f: { transferencias: true } }, fonte: "stock_transfer_requests · rpc_list_stock_transfer_requests" },
+  { n: c.prices, titulo: "Alterações de preço por aprovar", desc: "Submetidas pelos fornecedores no portal.", tom: "warn", destino: { aba: "sup", f: { precos: true } }, fonte: "supplier_price_change_requests · rpc_price_changes_list" },
+  { n: c.low, titulo: "Produtos abaixo do ponto de encomenda", desc: "Stock livre (sem reservas) abaixo do ponto de encomenda.", tom: "warn", destino: { aba: "stock", f: { state: "low" } }, fonte: "stocks.reorder_point" },
+  { n: c.stalled, titulo: "Contagem parada", desc: "Em curso sem atividade há 7 dias ou mais.", tom: "neu", destino: { aba: "cont", f: { estado: "open" } }, fonte: "inventory_counts" },
+  { n: c.awaiting, titulo: "Fornecedores à espera da ficha", desc: "Convidados para o portal: ainda não preencheram a ficha.", tom: "info", destino: { aba: "sup", f: { aguardam: true } }, fonte: "supplier_portal_user_access (convite pendente)" },
+  { n: c.catUnlinked, titulo: "Artigos do portal por ligar", desc: "Catálogo carregado pelos fornecedores, com sugestões.", tom: "neu", destino: { aba: "sup", f: { catalogo: true } }, fonte: "supplier_catalog_items · rpc_catalog_link_suggestions" },
+  { n: c.guiasDiv, titulo: "Guias abertas com divergências", desc: "Anunciado diferente do recebido.", tom: "bad", destino: { aba: "guia", f: { estado: "div" } }, fonte: "supplier_delivery_notes · fn_delivery_note_summary" },
 ];
 
-function Etapa({ n, titulo, children }: { n: number; titulo: string; children: React.ReactNode }) {
-  return (
-    <li className="grid gap-1 py-3">
-      <h3 className="flex items-center gap-2 text-base font-semibold"><span className="grid h-7 w-7 place-items-center rounded-full border border-foreground text-[15px] tabular-nums" aria-hidden="true">{n}</span>{titulo}</h3>
-      <div className="flex flex-wrap gap-x-4 gap-y-1 pl-9 text-[15px]">{children}</div>
-    </li>
-  );
+const Seta = ({ garfo }: { garfo?: boolean }) => <span className="stage-arrow" aria-hidden="true">{garfo ? <GitFork className="ic" /> : <ArrowRight className="ic" />}</span>;
+const Selo = ({ tom, children }: { tom: "ok" | "warn" | "bad"; children: ReactNode }) => <span className={`badge b-${tom}`}>{children}</span>;
+const Num = ({ n }: { n: number }) => <span className="no" style={{ width: 18, height: 18, fontSize: 10, background: "var(--i-primary)", color: "var(--i-primary-fg)", borderRadius: "50%", display: "inline-grid", placeItems: "center" }}>{n}</span>;
+function Cnt({ r, n, ir, tom }: { r: string; n: string | number; ir: () => void; tom?: "ok" | "bad" | "warn" }) {
+  return <button type="button" className="cnt-btn" onClick={ir}><span>{r}</span><b style={tom && n ? { color: `var(--i-${tom})` } : undefined}>{n}</b></button>;
 }
-const Conta = ({ r, n, ir }: { r: string; n: string | number; ir: () => void }) => <Ligacao aoClicar={ir}>{r}: <b className="tabular-nums">{n}</b></Ligacao>;
 
-function Fluxo({ c }: { c: Contadores }) {
+function Etapas12({ c }: { c: Contadores }) {
   const { db, ir } = useCtxInv();
   const por = (k: string): number => db.ecs.filter((e) => !e.deleted && e.origin.k === k).length;
   const ded = db.settings.deduction === "contract" ? "contrato assinado" : "proposta aceite";
   return (
-    <Bloco titulo="Fluxo" id="h-fluxo">
-      <ol className="divide-y divide-border rounded-xl border border-border px-4">
-        <Etapa n={1} titulo="Vendas assinadas">
-          <Conta r="Contratos" n={por("CT")} ir={() => ir({ aba: "ec", f: { q: "CT-" } })} /><Conta r="Vendas diretas" n={por("VD")} ir={() => ir({ aba: "ec", f: { q: "VD-" } })} /><Conta r="Encomendas manuais" n={por("manual")} ir={() => ir({ aba: "ec", f: { q: "Manual" } })} />
-          <span className="text-muted-foreground">Baixa no momento definido: {ded} (nunca os dois).</span>
-        </Etapa>
-        <Etapa n={2} titulo="Encomendas Clientes">
-          <Conta r="Em aberto" n={c.ecOpen} ir={() => ir({ aba: "ec" })} /><Conta r="Prontas a expedir" n={c.ecReady} ir={() => ir({ aba: "ec", f: { prontas: true } })} /><Conta r="Sem fornecedor" n={c.ecNoSup} ir={() => ir({ aba: "ec", f: { status: "nosup" } })} />
-          <span className="text-muted-foreground">Cada linha: há stock livre (stock − reservas anteriores)?</span>
-        </Etapa>
-        <Etapa n={3} titulo="Se há stock, serve do stock">
-          <Conta r="Reserva FIFO" n={N(c.reservedUnits) + " un"} ir={() => ir({ aba: "stock" })} /><Conta r="Saídas por fazer" n={c.ecReady + " EC"} ir={() => ir({ aba: "ec", f: { prontas: true } })} />
-        </Etapa>
-        <Etapa n={4} titulo="Se falta, encomenda ao fornecedor preferencial">
-          <Conta r="POs por aprovar" n={c.pending} ir={() => ir({ aba: "po", f: { status: "pending" } })} /><Conta r="No portal, por ver" n={c.portalUnseen} ir={() => ir({ aba: "po", f: { status: "portal" } })} />
-          <Conta r="Confirmadas pelo fornecedor" n={c.portalConfirmed} ir={() => ir({ aba: "po", f: { status: "portal" } })} /><Conta r="Guias abertas" n={c.guiasOpen} ir={() => ir({ aba: "guia" })} />
-        </Etapa>
-        <Etapa n={5} titulo="Stock">
-          <Conta r="Abaixo do ponto de encomenda" n={c.low} ir={() => ir({ aba: "stock", f: { state: "low" } })} /><Conta r="Transferências pendentes" n={c.transfers} ir={() => ir({ aba: "stock", f: { transferencias: true } })} />
-          <Conta r="Contagens em curso" n={c.countsOpen} ir={() => ir({ aba: "cont", f: { estado: "open" } })} /><span>Valor em stock (custo médio): <b className="tabular-nums">{eur(c.stockValue)}</b></span>
-        </Etapa>
-      </ol>
-    </Bloco>
+    <>
+      <div className="stage"><h3><span className="no">1</span>Vendas assinadas</h3>
+        <Cnt r="Contratos" n={por("CT")} ir={() => ir({ aba: "ec", f: { q: "CT-" } })} /><Cnt r="Vendas diretas" n={por("VD")} ir={() => ir({ aba: "ec", f: { q: "VD-" } })} /><Cnt r="Encomendas manuais" n={por("manual")} ir={() => ir({ aba: "ec", f: { q: "Manual" } })} />
+        <small className="muted">Baixa no momento definido: <b>{ded}</b> (nunca os dois).</small>
+        <Fonte>client_contracts · proposals · direct_sales · organization_inventory_settings.stock_deduction_trigger</Fonte><Seta /></div>
+      <div className="stage"><h3><span className="no">2</span>Encomendas Clientes</h3>
+        <Cnt r="Em aberto" n={c.ecOpen} ir={() => ir({ aba: "ec" })} /><Cnt r="Prontas a expedir" n={c.ecReady} tom="ok" ir={() => ir({ aba: "ec", f: { prontas: true } })} /><Cnt r="Sem fornecedor" n={c.ecNoSup} tom="bad" ir={() => ir({ aba: "ec", f: { status: "nosup" } })} />
+        <small className="muted">Cada linha: há stock livre (stock − reservas anteriores)?</small>
+        <Fonte>client_orders · client_order_items · fn_client_order_line_reservations</Fonte><Seta garfo /></div>
+    </>
+  );
+}
+
+function Bifurcacao({ c }: { c: Contadores }) {
+  const { ir } = useCtxInv();
+  const Lig = ({ aoClicar, children }: { aoClicar: () => void; children: ReactNode }) => <button type="button" className="link" onClick={aoClicar} style={{ fontWeight: 700 }}>{children}</button>;
+  return (
+    <div className="fork">
+      <div className="branch"><h4><Selo tom="ok">Sim</Selo> Há stock → serve do stock</h4>
+        <div className="steps">
+          <span className="st">Reserva FIFO <Lig aoClicar={() => ir({ aba: "stock", f: { vista: "product" } })}>{N(c.reservedUnits)} un</Lig></span><span className="arrow">→</span>
+          <span className="st">Saída <Lig aoClicar={() => ir({ aba: "ec", f: { prontas: true } })}>{c.ecReady} EC</Lig></span><span className="arrow">→</span>
+          <span className="st">Encomenda servida</span>
+        </div>
+        <Fonte>stocks − reservas · rpc_confirm_client_order_stock_exit · stock_movements</Fonte></div>
+      <div className="branch"><h4><Selo tom="warn">Não</Selo> Falta → encomenda ao fornecedor preferencial</h4>
+        <div className="steps">
+          <span className="st"><Num n={3} />PO <Lig aoClicar={() => ir({ aba: "po", f: { status: "pending" } })}>{c.pending} por aprovar</Lig></span><span className="arrow">→</span>
+          <span className="st">Publicada no portal <Lig aoClicar={() => ir({ aba: "po", f: { status: "portal" } })}>{c.portalUnseen} por ver</Lig></span><span className="arrow">→</span>
+          <span className="st">Fornecedor confirma <Lig aoClicar={() => ir({ aba: "po", f: { status: "portal" } })}>{c.portalConfirmed}</Lig></span><span className="arrow">→</span>
+          <span className="st"><Num n={4} />Receção <Lig aoClicar={() => ir({ aba: "guia" })}>{c.guiasOpen} guias abertas</Lig></span><span className="arrow">→</span>
+          <span className="st">Serve a EC</span>
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          {c.late ? <button type="button" className="btn btn-xs" onClick={() => ir({ aba: "po", f: { status: "late" } })}><Selo tom="bad">{c.late} atrasadas</Selo></button> : null}
+          <button type="button" className="btn btn-xs" onClick={() => ir({ aba: "guia" })}><Truck className="ic sm" aria-hidden="true" />Receber</button>
+        </div>
+        <Fonte>purchase_orders · supplier_po_publications · rpc_receive_by_code · fn_po_receipt_allocation</Fonte></div>
+    </div>
+  );
+}
+
+function Fluxo({ c }: { c: Contadores }) {
+  const { ir } = useCtxInv();
+  return (
+    <section aria-labelledby="h-flow" className="stack" style={{ marginBottom: 22 }}>
+      <h2 id="h-flow" style={{ fontSize: 16 }}>Fluxo</h2>
+      <div className="flowline"><Etapas12 c={c} /><Bifurcacao c={c} /></div>
+      <div className="stage"><h3><span className="no">5</span>Stock</h3>
+        <div className="flow-top">
+          <Cnt r="Abaixo do ponto de encomenda" n={c.low} tom="warn" ir={() => ir({ aba: "stock", f: { state: "low" } })} /><Cnt r="Transferências pendentes" n={c.transfers} ir={() => ir({ aba: "stock", f: { transferencias: true } })} />
+          <Cnt r="Contagens em curso" n={c.countsOpen} ir={() => ir({ aba: "cont", f: { estado: "open" } })} /><Cnt r="Valor em stock (custo médio)" n={eur(c.stockValue)} ir={() => ir({ aba: "stock" })} />
+        </div>
+        <small className="muted">A receção fecha o ciclo: a parte “para EC” fica reservada e serve a encomenda; a parte “para stock” entra livre e atualiza o custo médio ponderado.</small>
+        <Fonte>stocks · stock_movements · products.average_cost</Fonte></div>
+    </section>
   );
 }
 
 function Fila({ c }: { c: Contadores }) {
   const { ir } = useCtxInv();
   return (
-    <Bloco titulo="Fila de trabalho" id="h-fila">
-      <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+    <section aria-labelledby="h-q" style={{ marginBottom: 22 }}>
+      <div className="row between" style={{ marginBottom: 10 }}><h2 id="h-q" style={{ fontSize: 16 }}>Fila de trabalho</h2><span className="muted" style={{ fontSize: 12.5 }}>Equivale aos alertas atuais do menu (alert_settings), agora com destino filtrado.</span></div>
+      <div className="queue">
         {fila(c).map((q) => (
-          <li key={q.titulo}>
-            <button type="button" onClick={() => ir(q.destino)} className={cn("flex min-h-11 w-full cursor-pointer items-start gap-3 rounded-xl border bg-card p-3 text-left hover:border-foreground", q.n ? "border-border" : "border-dashed border-border opacity-80", FOCO)}>
-              <span className="min-w-10 text-2xl font-semibold tabular-nums">{q.n}</span>
-              <span className="min-w-0"><span className="block text-[15px] font-semibold">{q.titulo}</span><span className="block text-[15px] text-muted-foreground">{q.desc}</span>
-                <span className="mt-1 flex items-center gap-1 text-[15px]">{q.n ? "Abrir lista filtrada" : "Nada pendente"}<ArrowRight className="h-4 w-4" aria-hidden="true" /></span></span>
-            </button>
-          </li>
+          <button key={q.titulo} type="button" className={cn("qcard", `t-${q.tom}`, !q.n && "zero")} onClick={() => ir(q.destino)}>
+            <span className="qn">{q.n}</span>
+            <span><span className="qt">{q.titulo}</span><br /><span className="qd">{q.desc}</span><br /><span className="go">{q.n ? "Abrir lista filtrada" : "Nada pendente"}<ArrowRight className="ic sm" aria-hidden="true" /></span><Fonte>{q.fonte}</Fonte></span>
+          </button>
         ))}
-      </ul>
-    </Bloco>
+      </div>
+    </section>
   );
 }
 
 function AutoPo() {
   const { db, agir } = useCtxInv();
   const escolher = (v: "direct" | "approval"): void => { agir((d) => { d.settings.autoPO = v; }, v === "direct" ? "POs automáticas passam a ser enviadas diretamente." : "POs automáticas voltam a nascer como rascunho."); };
-  const Op = ({ v, nome, nota }: { v: "direct" | "approval"; nome: string; nota: string }) => (
-    <label className={cn("flex min-h-11 cursor-pointer items-start gap-3 rounded-md border p-3", BORDA_CTRL)}>
-      <input type="radio" name="autopo" checked={db.settings.autoPO === v} onChange={() => escolher(v)} className="mt-1 h-5 w-5 accent-foreground" />
-      <span><span className="block text-[15px] font-medium">{nome}</span><span className="block text-[15px] text-muted-foreground">{nota}</span></span>
-    </label>
-  );
   return (
-    <fieldset className="grid gap-2"><legend className="text-lg font-semibold">POs automáticas</legend>
-      <Op v="direct" nome="Envio direto ao fornecedor (portal ou email)" nota="Proposta do mockup: a PO nasce encomendada." />
-      <Op v="approval" nome="Rascunho com aprovação" nota="Comportamento atual: nasce pendente e alguém aprova e envia." />
-    </fieldset>
+    <section className="card pad stack" aria-labelledby="h-set"><h2 id="h-set" style={{ fontSize: 15 }}>POs automáticas</h2>
+      <label className="check"><input type="radio" name="autopo" checked={db.settings.autoPO === "direct"} onChange={() => escolher("direct")} /> Envio direto ao fornecedor (portal ou email) <span className="badge b-warn">Proposta do mockup</span></label>
+      <label className="check"><input type="radio" name="autopo" checked={db.settings.autoPO === "approval"} onChange={() => escolher("approval")} /> Rascunho (pending) com aprovação <span className="badge b-neu">Comportamento atual</span></label>
+      <p className="muted" style={{ fontSize: 12.5 }}>Decisão a confirmar. Com aprovação, “Aprovar e enviar” continua a exigir <span className="mono">purchase_orders.approve</span>.</p>
+      <Fonte>organization_inventory_settings (mockup) · generate PO drafts</Fonte></section>
   );
 }
 
@@ -110,17 +131,13 @@ function Ultimos() {
   const { db, ir } = useCtxInv();
   const recentes = db.moves.slice(-6).reverse();
   return (
-    <Bloco titulo="Últimos movimentos" id="h-mov" accao={<Sec onClick={() => ir({ aba: "mov" })}>Ver livro completo</Sec>}>
-      {recentes.length === 0 ? <Vazio titulo="Sem movimentos" /> : (
-        <ul className="grid gap-2">{recentes.map((m) => (
-          <li key={m.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[15px]">
-            <Selo tom={TIPOS_MOV[m.type].tone}>{TIPOS_MOV[m.type].t}</Selo>
-            <span className="min-w-0 flex-1">{m.qty > 0 ? "+" : ""}{N(m.qty)} {nomeProd(db, m.sku)} · {nomeArm(db, m.wh)}</span>
-            <span className="text-muted-foreground">{fmtDT(m.at)}</span>
-          </li>))}
-        </ul>
-      )}
-    </Bloco>
+    <section className="card pad stack" aria-labelledby="h-act"><div className="row between"><h2 id="h-act" style={{ fontSize: 15 }}>Últimos movimentos</h2><button type="button" className="btn btn-sm" onClick={() => ir({ aba: "mov" })}>Ver livro completo</button></div>
+      {recentes.length === 0 ? <p className="muted">Sem movimentos.</p> : recentes.map((m) => (
+        <div key={m.id} className="row" style={{ gap: 8, fontSize: 13 }}>
+          <span className={`badge b-${TIPOS_MOV[m.type].tone}`}>{TIPOS_MOV[m.type].t}</span>
+          <span className="grow">{m.qty > 0 ? "+" : ""}{N(m.qty)} {nomeProd(db, m.sku)} · {nomeArm(db, m.wh)}</span><span className="muted nowrap">{fmtDT(m.at)}</span>
+        </div>))}
+      <Fonte>stock_movements</Fonte></section>
   );
 }
 
@@ -128,17 +145,19 @@ export function HojeInv() {
   const { db, ir } = useCtxInv();
   const c = contadores(db);
   const [dlg, setDlg] = useState<"venda" | "mov" | null>(null);
+  const acoes = (
+    <>
+      <button type="button" className="btn" onClick={() => setDlg("mov")}><ArrowLeftRight className="ic" aria-hidden="true" />Registar movimento</button>
+      <button type="button" className="btn" onClick={() => ir({ aba: "guia" })}><Truck className="ic" aria-hidden="true" />Receber</button>
+      <button type="button" className="btn btn-p" onClick={() => setDlg("venda")}><Play className="ic" aria-hidden="true" />Simular venda assinada</button>
+    </>
+  );
   return (
-    <div className="grid gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Tudo o que precisa de ação no inventário, por ordem do fluxo. Os números vêm do estado atual e mudam quando age.</p>
-        <div className="flex flex-wrap gap-2">
-          <Sec onClick={() => setDlg("mov")}>Registar movimento</Sec><Sec onClick={() => ir({ aba: "guia" })}>Receber</Sec><Pri onClick={() => setDlg("venda")}>Simular venda assinada</Pri>
-        </div>
-      </div>
+    <div>
+      <Cab aba="hoje" acoes={acoes} />
       <Fluxo c={c} />
       <Fila c={c} />
-      <div className="grid gap-6 lg:grid-cols-2"><AutoPo /><Ultimos /></div>
+      <div className="flow-top" style={{ alignItems: "start" }}><AutoPo /><Ultimos /></div>
       {dlg === "venda" && <VendaDialogo aberto aoFechar={() => setDlg(null)} />}
       {dlg === "mov" && <MovimentoDialogo aberto aoFechar={() => setDlg(null)} />}
     </div>

@@ -22,7 +22,8 @@ export interface CtxInv {
   agir: <T>(fn: (db: Inventario) => T, ok?: string | ((r: T) => string)) => Resultado<T>;
   avisar: (texto: string, erro?: boolean) => void;
   aviso: AvisoInv | null;
-  ir: (d: Destino) => void;
+  /** Vai para outro ecrã (com filtros) e, se se der `detalhe`, abre-o logo a seguir. */
+  ir: (d: Destino, detalhe?: Detalhe) => void;
   abrir: (d: Detalhe) => void;
   fecharDetalhe: () => void;
   filtros: FiltrosInv;

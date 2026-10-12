@@ -90,8 +90,7 @@ export function ContagensInv() {
   const [nova, setNova] = useState(false);
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Contagens físicas por armazém e categoria. Só fecham sem diferenças por resolver; as diferenças ajustadas geram movimentos de ajuste no livro.</p>
+      <div className="flex flex-wrap items-start justify-end gap-3">
         <Pri onClick={() => setNova(true)}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova contagem</Pri>
       </div>
       <div role="group" aria-label="Estado das contagens" className="flex flex-wrap gap-2">

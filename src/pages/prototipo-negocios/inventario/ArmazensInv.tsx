@@ -85,8 +85,7 @@ export function ArmazensInv() {
   const alvo = dlg?.t === "eliminar" ? db.warehouses.find((w) => w.id === dlg.id) : undefined;
   return (
     <div className="grid gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Onde está o stock. Só armazéns ativos e que servem clientes entram na reserva FIFO das Encomendas Clientes; um armazém desligado continua a receber e guardar stock.</p>
+      <div className="flex flex-wrap items-start justify-end gap-3">
         <div className="flex flex-wrap items-center gap-2"><Interruptor nome="Ver eliminados" ativo={eliminados} aoMudar={() => setEliminados(!eliminados)} /><Pri onClick={() => setDlg({ t: "form" })}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Novo armazém</Pri></div>
       </div>
       <Definicoes />

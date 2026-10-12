@@ -31,9 +31,11 @@ import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples }
 import { CamposEditor } from "./CamposEditor";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
+import type { AbaInv } from "./inventario/ctxInv";
 
 // O Inventário completo (nativo, só na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
+const MenuInventario = lazy(() => import("./inventario/MenuInventario"));
 
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
@@ -59,7 +61,8 @@ export default function PrototipoNegocios() {
   const [alvoAvisos, setAlvoAvisos] = useState<HTMLElement | null>(null);
   const [q, setQ] = useState("");
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
-  const [invMock, setInvMock] = useState(false); // a página Inventário completo: só existe na V2 e na V2 funcional, e vive fora do Estado
+  const [invMock, setInvMock] = useState(false); // um ecrã do Inventário (do menu lateral): só existe na V2 (não na Atual nem na V2 funcional) e vive fora do Estado
+  const [invAba, setInvAba] = useState<AbaInv>("hoje"); // qual deles
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
@@ -124,8 +127,8 @@ export default function PrototipoNegocios() {
   const mudarVersao = (nova: VersaoProto) => {
     setVersao(nova);
     gravarVersao(nova);
-    // A página Inventário completo não existe na Atual: volta à vista equivalente (Negócios).
-    if (nova === "atual" && invMock) { setInvMock(false); run(() => A.nav("negocios")); return; }
+    // Os ecrãs do Inventário só existem na V2: volta à vista equivalente (Negócios).
+    if (nova !== "v2" && invMock) { setInvMock(false); run(() => A.nav("negocios")); return; }
     // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
     run(() => {
       const vista = vistaEquivalente(ref.current.view, nova);
@@ -181,7 +184,8 @@ export default function PrototipoNegocios() {
   const porVista = (v: Vista) => itens.find(([x]) => x === v)!;
   // A vista que o menu destaca: com a V2, Leads e Clientes são Pessoas (e sem ela Pessoas é Leads). O aspeto atual não tem Leads
   // nem Pessoas (mostra Negócios), por isso destaca Negócios. Com a V2, criar uma lead (S.novo) destaca Pessoas.
-  const ativoInv = v2 && invMock;
+  const soV2 = versao === "v2" && simples; // o Inventário do mockup só aparece na V2
+  const ativoInv = soV2 && invMock;
   const cur: Vista | "inv" = ativoInv ? "inv" : novaLeadV2 ? "pessoas"
     : S.view === "negocio" ? "negocios"
     : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
@@ -222,14 +226,8 @@ export default function PrototipoNegocios() {
         {c ? <span className="text-sm tabular-nums text-muted-foreground" aria-label={c + " por fazer"}>{c}</span> : null}
       </button>
     );
-    const itemInv = (
-      <button key="inv" type="button" onClick={() => { setMais(false); setInvMock(true); }} aria-current={cur === "inv" ? "page" : undefined}
-        className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
-          cur === "inv" ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
-        <Boxes className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-        <span className="flex-1">Inventário completo</span>
-      </button>
-    );
+    const abrirInv = (a: AbaInv): void => { setMais(false); setInvAba(a); setInvMock(true); };
+    const menuInv = soV2 ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} /></Suspense> : null;
     const papel = (
       <label className="grid gap-1.5 text-sm text-muted-foreground">
         A ver como
@@ -243,12 +241,13 @@ export default function PrototipoNegocios() {
     const seletorVersao = <SeletorVersao versao={versao} mudar={mudarVersao} />;
     return (
       <div className={cn("pn calma fixed inset-0 flex bg-background text-foreground", S.leitura && "leitura")}>
-        <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card px-3 py-5 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-card px-3 py-5 md:flex">
           <div className="flex items-center gap-2.5 px-3 pb-6">
             <img src={mascote} alt="" className="h-8 w-8 object-contain" />
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
-          <nav className="flex flex-col gap-0.5" aria-label="Menu">{itens.map(([v, l, Ic, c]) => item(v, l, Ic, c))}{v2 && itemInv}</nav>
+          <nav className="flex flex-col gap-0.5" aria-label="Menu">{itens.map(([v, l, Ic, c]) => item(v, l, Ic, c))}</nav>
+          {menuInv}
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
             <div className="px-3">{papel}</div>
@@ -279,7 +278,7 @@ export default function PrototipoNegocios() {
           <main ref={mainRef} className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
             {ativoInv ? (
               <div className="h-full animate-in fade-in-0 duration-200">
-                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} /></Suspense>
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} /></Suspense>
               </div>
             ) : <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
 
@@ -288,13 +287,13 @@ export default function PrototipoNegocios() {
           </main>
           {mais && (
             <div className="fixed inset-0 z-40 bg-foreground/20 md:hidden animate-in fade-in-0" onClick={() => setMais(false)}>
-              <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-16 rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
+              <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-16 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
                   {[...pessoas.map(([v]) => v), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
-                  {v2 && itemInv}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
+                {menuInv}
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
                   className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">
@@ -314,10 +313,10 @@ export default function PrototipoNegocios() {
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
               </button>
             ))}
-            {v2 && (
-              <button type="button" onClick={() => { setMais(false); setInvMock(true); }} aria-label="Inventário completo" aria-current={cur === "inv" ? "page" : undefined}
+            {soV2 && (
+              <button type="button" onClick={() => setMais(true)} aria-label="Menu do Inventário" aria-current={cur === "inv" ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === "inv" ? "font-semibold text-primary" : "text-muted-foreground")}>
-                <Boxes className="h-5 w-5" aria-hidden="true" />Completo
+                <Boxes className="h-5 w-5" aria-hidden="true" />Armazém
               </button>
             )}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}

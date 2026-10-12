@@ -20,12 +20,10 @@ export function Dlg({ aberto, aoFechar, titulo, descricao, largo, children, roda
   const { leitura } = useCtxInv();
   return (
     <Dialog open={aberto} onOpenChange={(a) => { if (!a) aoFechar(); }}>
-      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} className={cn("flex max-h-[90vh] flex-col gap-4 overflow-hidden p-5", largo ? "max-w-3xl" : "max-w-lg", classePortal(leitura))}>
-        <DialogTitle className="text-lg font-semibold">{titulo}</DialogTitle>
-        <DialogDescription className={descricao ? "text-[15px] text-muted-foreground" : "sr-only"}>{descricao ?? titulo}</DialogDescription>
-        <AvisoCaixa />
-        <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto pr-1">{children}</div>
-        <div className="flex flex-wrap items-center justify-end gap-2">{rodape}</div>
+      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !border-0 !p-0", largo && "wide", classePortal(leitura))}>
+        <div className="dh"><div><DialogTitle>{titulo}</DialogTitle>{descricao ? <DialogDescription className="muted" style={{ marginTop: 4 }}>{descricao}</DialogDescription> : <DialogDescription className="sr">{titulo}</DialogDescription>}</div></div>
+        <div className="db"><AvisoCaixa />{children}</div>
+        <div className="df">{rodape}</div>
       </DialogContent>
     </Dialog>
   );
@@ -74,20 +72,20 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
     <Sheet open={aberta} onOpenChange={(a) => { if (!a) aoFechar(); }}>
       <SheetContent ref={conteudo} side="right" onCloseAutoFocus={voltar}
         onOpenAutoFocus={(e) => { e.preventDefault(); conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']")?.focus(); }}
-        className={cn("flex w-[min(720px,100vw)] flex-col gap-0 p-0 text-foreground sm:max-w-none [&>button.absolute]:hidden", classePortal(leitura))}>
-        <div className="shrink-0 border-b border-border p-4">
-          <div className="flex items-start justify-between gap-3">
+        className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 text-foreground sm:!max-w-none [&>button.absolute]:hidden", classePortal(leitura))}>
+        <div className="sh-head">
+          <div className="sh-top">
             <div className="min-w-0">
-              {subtitulo && <SheetDescription className="text-[15px] text-muted-foreground">{subtitulo}</SheetDescription>}
-              <SheetTitle tabIndex={-1} className="text-xl font-semibold outline-none">{titulo}</SheetTitle>
-              {selos && <div className="mt-2 flex flex-wrap gap-2">{selos}</div>}
+              {subtitulo && <SheetDescription className="crumbs">{subtitulo}</SheetDescription>}
+              <SheetTitle tabIndex={-1} className="outline-none">{titulo}</SheetTitle>
+              {selos && <div className="chips" style={{ marginTop: 8 }}>{selos}</div>}
             </div>
-            <Sec onClick={aoFechar}><X className="mr-1.5 h-4 w-4" aria-hidden="true" />Fechar</Sec>
+            <Sec onClick={aoFechar}><X className="ic" aria-hidden="true" />Fechar</Sec>
           </div>
           {abas}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4"><div className="grid gap-4"><AvisoCaixa />{children}</div></div>
-        {rodape && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border p-4">{rodape}</div>}
+        <div className="sh-body"><div className="stack"><AvisoCaixa />{children}</div></div>
+        {rodape && <div className="sh-foot">{rodape}</div>}
       </SheetContent>
     </Sheet>
   );

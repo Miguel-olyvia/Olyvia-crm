@@ -253,7 +253,7 @@ Só estas duas páginas têm dashboard. Os números **batem sempre com as listas
 
 ## Inventário
 
-Na V2 e na V2 funcional (na Atual não aparece) há uma entrada **Inventário completo** no menu lateral, no Mais e na barra do telemóvel. É o módulo de inventário do mockup `mockup-inventario-ui.html`, reconstruído **nativamente** (componentes, tokens e regras de desenho do protótipo, sem iframe, sem browser, sem localhost), com dados de exemplo e o dia de hoje fixo em **09/10/2026**.
+Só na **V2** (na Atual e na V2 funcional não aparece nada) há uma secção **INVENTÁRIO** no menu lateral, no Mais e (pelo botão "Armazém") na barra do telemóvel, igual à do mockup `mockup-inventario-ui.html`: **Hoje** (com o total da fila), o grupo **Compras** (Encomendas, Fornecedores) e o grupo **Armazém** (Existências, Movimentos "Novo", Saídas para clientes, Receção, Contagens, Armazéns), com os contadores do mockup e o "Simular perfil" que filtra o menu. Cada item abre diretamente o ecrã (sem separadores internos). O módulo foi reconstruído **nativamente** (sem iframe, sem browser, sem localhost), com o CSS do mockup copiado com escopo `.inv-root` (`inventario.css`, variáveis `--i-*` para não colidirem com os tokens do protótipo) e dados de exemplo com o dia de hoje fixo em **09/10/2026**. Por decisão do utilizador, no módulo Inventário o mockup manda sobre as regras de desenho do protótipo (texto de 14 px, alvos menores, cor nos selos).
 
 - **Onde vive:** a pasta `inventario/`. A página é `InventarioPagina.tsx` (carregada só quando se abre, com `lazy`). O resto do protótipo não muda: o `Estado`, o `motor.ts`, a `seed()`, a `VERSAO`, o `pecas.tsx` e os componentes `ui` ficaram como estavam.
 - **Estado próprio, em memória:** `loja.ts` guarda uma base de exemplo (`useSyncExternalStore`, como o `diaADia.ts`). Cada ação corre numa **cópia** da base e só a substitui se acabar bem: uma regra que recusa (`ErroInv`) não deixa nada a meio. Não grava no `localStorage`. O botão **Repor inventário** (com diálogo) volta aos dados de exemplo; **Repor a demonstração** não lhe mexe.
@@ -265,7 +265,8 @@ Na V2 e na V2 funcional (na Atual não aparece) há uma entrada **Inventário co
 - **Diferença ao mockup:** o contrato novo da "Simular venda assinada" recebe sempre o número seguinte ao maior que existe (o mockup repetia o CT-2026-043).
 
 **Por portar** (nada disto aparece vazio no menu; o que não está portado não tem separador nem botão):
-- os **perfis simulados e as permissões** (o mockup filtrava o menu e desativava ações por perfil): aqui o utilizador é sempre o administrador de exemplo;
+- as **permissões por perfil nas ações** (o perfil simulado só filtra o menu; as ações continuam a valer para o administrador de exemplo);
+- a **edição na própria célula** das tabelas, **importar CSV**, **agrupar as encomendas por fornecedor**, **duplicar PO**, o tema escuro e os diálogos/folhas com o DOM exato do mockup (usam o Radix com as classes do mockup);
 - a **Receção por código** (o telemóvel com leitor, o cesto, as leituras rejeitadas e a fila sem rede) e a "câmara": recebe-se na folha de cada encomenda, escolhendo a guia;
 - **criar fornecedor / convidar para o portal** (NIF, emails únicos) e a **simulação do portal do fornecedor** (entrada, ficha e catálogo); no Portal da PO só se simula "abre" e "confirma";
 - **editar inline** os dados do fornecedor e dos artigos (preço, embalagem, MOQ, prazo) e as células das listas;

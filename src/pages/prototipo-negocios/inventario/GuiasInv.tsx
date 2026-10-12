@@ -90,8 +90,7 @@ export function GuiasInv() {
   const [nova, setNova] = useState(false);
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-prose text-[15px] text-muted-foreground">Cada guia do fornecedor traz o que foi anunciado; a receção regista o que chegou, e a diferença fica à vista. Fechar com divergências exige uma nota. Para receber, abra a encomenda e use «Receber», escolhendo a guia.</p>
+      <div className="flex flex-wrap items-start justify-end gap-3">
         <Pri onClick={() => setNova(true)}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova guia</Pri>
       </div>
       <div role="group" aria-label="Estado das guias" className="flex flex-wrap gap-2">
