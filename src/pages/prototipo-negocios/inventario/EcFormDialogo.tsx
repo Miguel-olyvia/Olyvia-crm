@@ -1,61 +1,75 @@
-// "Nova encomenda manual" e "Editar" (só manuais): cada linha reserva o stock livre do armazém de expedição e o que falta vai para a PO do preferencial;
+// "Nova encomenda manual" e "Editar" (ecFormDlg e ecFormGo do mockup, só manuais): cada linha reserva o stock livre do armazém de expedição e o que falta vai para a PO do preferencial;
 // as linhas já servidas ficam trancadas (a quantidade não desce abaixo do servido) e os pacotes expandem-se.
 import { useState } from "react";
-import { cn } from "@/lib/utils";
-import { BORDA_CTRL } from "../PessoaLinha";
-import { ecPorId, nomeProd } from "./base";
+import { Info, Lock, Plus, X } from "lucide-react";
+import { ecPorId, exigir } from "./base";
+import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
 import { Dlg } from "./DialogosInv";
 import { criarEc, editarEcManual } from "./ec";
-import { EditorLinhas } from "./EditorLinhas";
-import { linhasValidas, type LinhaEd } from "./linhasEd";
+import { useAbrirEc } from "./ecAbrir";
+import { ListaProdutos } from "./EditorLinhas";
+import { eansDe, reconhecerProduto } from "./prodTexto";
 import { opcoesExpedicao, opcoesProdutos } from "./opcoes";
 import { Lista, Nota, Pri, Sec, Texto } from "./pecasInv";
 
-interface Existente { id: string; sku: string; qty: number | ""; servido: number }
+interface LinhaF { id?: string; p: string; sku: string; qty: number | ""; servido: number }
 
 export function EcFormDialogo({ aberto, aoFechar, id }: { aberto: boolean; aoFechar: () => void; id?: string }) {
-  const { db, agir, abrir } = useCtxInv();
+  const { db, agir } = useCtxInv();
+  const abrirEc = useAbrirEc();
   const e = id ? ecPorId(db, id) : undefined;
+  const opcoes = opcoesProdutos(db);
   const [f, setF] = useState(() => ({
     client: e?.client ?? "", addr: e?.addr ?? "", notes: e?.notes ?? "", wh: e?.wh ?? db.settings.defaultWh, erro: "",
-    existentes: (e?.lines.filter((l) => l.sku) ?? []).map((l): Existente => ({ id: l.id, sku: l.sku as string, qty: l.qty, servido: l.served })),
-    novas: (e ? [] : [{ sku: "", qty: 1 }]) as LinhaEd[],
+    linhas: (e ? e.lines.filter((l) => l.sku).map((l): LinhaF => ({ id: l.id, p: `${l.sku} — ${db.products.find((p) => p.sku === l.sku)?.name ?? l.sku}`, sku: l.sku as string, qty: l.qty, servido: l.served })) : [{ p: "", sku: "", qty: 1, servido: 0 }]),
   }));
   const m = (p: Partial<typeof f>): void => setF((x) => ({ ...x, ...p, erro: "" }));
+  const mudarLinha = (i: number, p: Partial<LinhaF>): void => m({ linhas: f.linhas.map((l, j) => (j === i ? { ...l, ...p } : l)) });
+  /** ecFormGo() do mockup: reconhece os produtos escritos e grava; se a regra recusar, o aviso diz porquê e o diálogo fica aberto. */
   const gravar = (): void => {
-    const novas = linhasValidas(f.novas);
-    if (!novas) { setF((x) => ({ ...x, erro: "Quantidades inteiras e maiores que zero." })); return; }
+    const eans = eansDe(db), linhas: { id?: string; sku?: string; qty: number }[] = [];
+    for (const l of f.linhas) {
+      if (l.id) { linhas.push({ id: l.id, qty: Number(l.qty) }); continue; }
+      if (!l.p.trim()) continue;
+      const sku = reconhecerProduto(l.p, opcoes, eans);
+      if (!sku) { setF((x) => ({ ...x, erro: `Produto não reconhecido: ${l.p}` })); return; }
+      linhas.push({ sku, qty: Number(l.qty) });
+    }
     const r = agir((d) => {
-      if (id) { editarEcManual(d, ecPorId(d, id)!, { client: f.client, addr: f.addr, notes: f.notes }, [...f.existentes.map((x) => ({ id: x.id, qty: Number(x.qty) })), ...novas.map((x) => ({ sku: x.sku, qty: x.qty }))]); return ecPorId(d, id)!; }
-      return criarEc(d, { origin: { k: "manual", ref: null }, client: f.client, addr: f.addr, wh: f.wh, notes: f.notes, lines: novas.map((x) => ({ sku: x.sku, qty: x.qty })) });
+      exigir("inventory.manage", "criar encomendas");
+      if (id) { editarEcManual(d, ecPorId(d, id)!, { client: f.client, addr: f.addr, notes: f.notes }, linhas); return ecPorId(d, id)!; }
+      return criarEc(d, { origin: { k: "manual", ref: null }, client: f.client, addr: f.addr, wh: f.wh, notes: f.notes, lines: linhas });
     }, id ? "Encomenda gravada." : "Encomenda manual criada.");
-    if (!r.ok) { setF((x) => ({ ...x, erro: r.erro })); return; }
+    if (!r.ok) return;
     aoFechar();
-    abrir({ t: "ec", id: r.valor.id });
+    abrirEc(r.valor.id);
   };
   return (
     <Dlg aberto={aberto} aoFechar={aoFechar} largo titulo={id ? `Editar ${id}` : "Nova encomenda manual"}
-      descricao="Ao gravar, cada linha reserva o stock livre do armazém de expedição; o que falta vai para a PO do fornecedor preferencial. Linhas já servidas ficam trancadas. Pacotes são expandidos."
       rodape={<><Sec onClick={aoFechar}>Cancelar</Sec><Pri onClick={gravar}>Gravar</Pri></>}>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="fg">
         <Texto rotulo="Cliente" valor={f.client} aoMudar={(v) => m({ client: v })} obrigatorio />
         <Texto rotulo="Morada de entrega" valor={f.addr} aoMudar={(v) => m({ addr: v })} />
         <Lista rotulo="Armazém de expedição" valor={f.wh} aoMudar={(v) => m({ wh: v })} opcoes={opcoesExpedicao(db)} desativado={!!id} />
         <Texto rotulo="Notas" valor={f.notes} aoMudar={(v) => m({ notes: v })} />
       </div>
-      {f.existentes.length > 0 && (
-        <fieldset className="grid gap-2"><legend className="text-[15px] font-medium">Linhas da encomenda</legend>
-          {f.existentes.map((x, i) => (
-            <div key={x.id} className="flex flex-wrap items-end gap-3">
-              <p className="min-w-0 flex-1 basis-48 text-[15px]">{nomeProd(db, x.sku)}{x.servido ? <span className="block text-muted-foreground">Linha trancada abaixo de {x.servido}: já saíram {x.servido} un</span> : null}</p>
-              <label className="w-28 text-[15px] text-muted-foreground">Quantidade<input type="number" min={Math.max(1, x.servido)} step={1} value={x.qty} onChange={(ev) => m({ existentes: f.existentes.map((y, j) => (j === i ? { ...y, qty: ev.target.value === "" ? "" : Number(ev.target.value) } : y)) })} aria-label={`Quantidade de ${nomeProd(db, x.sku)}`} className={cn("block h-11 w-full rounded-md border bg-card px-3 text-[15px] text-foreground", BORDA_CTRL)} /></label>
-            </div>
-          ))}
-        </fieldset>
-      )}
-      <EditorLinhas titulo={id ? "Acrescentar linhas" : "Linhas (quantidade em unidades inteiras)"} linhas={f.novas} aoMudar={(l) => m({ novas: l })} opcoes={opcoesProdutos(db)} minimo={id ? 0 : 1} />
-      {f.erro && <Nota tom="bad" alerta>{f.erro}</Nota>}
+      <ListaProdutos opcoes={opcoes} />
+      <div className="stack" style={{ gap: 8 }}>
+        <b style={{ fontSize: 13 }}>Linhas (quantidade em unidades inteiras)</b>
+        {f.linhas.map((l, i) => (
+          <div key={l.id ?? `n${i}`} className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+            <input className="grow" list="dl-prod" value={l.p} aria-label="Produto" disabled={!!l.id} title={l.id ? "Produto de linha existente: para trocar, remova a quantidade e adicione nova linha" : undefined} onChange={(ev) => mudarLinha(i, { p: ev.target.value })} />
+            <input type="number" min={l.servido || 1} step={1} style={{ width: 90 }} value={l.qty} aria-label="Quantidade" onChange={(ev) => mudarLinha(i, { qty: ev.target.value === "" ? "" : Number(ev.target.value) })} />
+            {l.servido ? <span className="badge b-neu" title={`Linha trancada: já saíram ${l.servido} un`}><Lock className="ic sm" aria-hidden="true" /> {l.servido} servidas</span> : null}
+            {!l.id && <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label="Remover" onClick={() => m({ linhas: f.linhas.filter((_, j) => j !== i) })}><X className="ic" aria-hidden="true" /></button>}
+          </div>
+        ))}
+        <div><button type="button" className="btn btn-sm" onClick={() => m({ linhas: [...f.linhas, { p: "", sku: "", qty: 1, servido: 0 }] })}><Plus className="ic" aria-hidden="true" />Adicionar linha</button></div>
+      </div>
+      <p className="rules"><Info className="ic sm" aria-hidden="true" />Ao gravar, cada linha reserva o stock livre do armazém de expedição; o que falta vai para a PO do fornecedor preferencial. Linhas já servidas ficam trancadas. Pacotes são expandidos.</p>
+      {f.erro && <Nota tom="bad">{f.erro}</Nota>}
+      <Fonte>{id ? "rpc_update_manual_client_order" : "rpc_create_manual_client_order"}</Fonte>
     </Dlg>
   );
 }

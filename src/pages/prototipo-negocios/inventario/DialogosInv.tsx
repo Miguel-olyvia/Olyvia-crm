@@ -12,15 +12,17 @@ import { motivoValido } from "./base";
 import type { Resultado } from "./loja";
 import { Notas, Nota, Pri, Sec } from "./pecasInv";
 
-interface DlgProps { aberto: boolean; aoFechar: () => void; titulo: string; descricao?: string; largo?: boolean; children: ReactNode; rodape: ReactNode }
+interface DlgProps { aberto: boolean; aoFechar: () => void; titulo: string; descricao?: string; largo?: boolean; children: ReactNode; rodape: ReactNode;
+  /** Uma classe do mockup para o diálogo (por exemplo `portalsim`, que traz a sua borda e cabeçalho) e o que se desenha por cima/por baixo do título. */
+  classe?: string; acima?: ReactNode; abaixo?: ReactNode }
 
 /** Um diálogo: título, corpo que rola e rodapé com os botões (Cancelar à esquerda, o primário no fim). */
-export function Dlg({ aberto, aoFechar, titulo, descricao, largo, children, rodape }: DlgProps) {
+export function Dlg({ aberto, aoFechar, titulo, descricao, largo, children, rodape, classe, acima, abaixo }: DlgProps) {
   const { tema } = useCtxInv();
   return (
     <Dialog open={aberto} onOpenChange={(a) => { if (!a) aoFechar(); }}>
-      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} data-theme={tema} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !border-0 !p-0", largo && "wide")}>
-        <div className="dh"><div><DialogTitle>{titulo}</DialogTitle>{descricao ? <DialogDescription className="muted" style={{ marginTop: 4 }}>{descricao}</DialogDescription> : <DialogDescription className="sr">{titulo}</DialogDescription>}</div><button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button></div>
+      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} data-theme={tema} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !p-0", !classe && "!border-0", largo && "wide", classe)}>
+        <div className="dh"><div>{acima}<DialogTitle>{titulo}</DialogTitle>{descricao ? <DialogDescription className="muted" style={{ marginTop: 4 }}>{descricao}</DialogDescription> : <DialogDescription className="sr">{titulo}</DialogDescription>}{abaixo}</div><button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button></div>
         <div className="db"><AvisoCaixa />{children}</div>
         <div className="df">{rodape}</div>
       </DialogContent>
@@ -46,7 +48,7 @@ export function Confirmar({ aberto, aoFechar, titulo, texto, ok, perigo, motivo,
   };
   return (
     <Dlg aberto={aberto} aoFechar={fechar} titulo={titulo}
-      rodape={<><Sec onClick={fechar}>Cancelar</Sec><Pri disabled={faltaMotivo} variant={perigo ? "destructive" : "default"} onClick={confirmar}>{ok}</Pri></>}>
+      rodape={<><Sec onClick={fechar}>Cancelar</Sec><Pri disabled={faltaMotivo} title={faltaMotivo ? "Escreva o motivo (mínimo 3 caracteres)" : undefined} variant={perigo ? "destructive" : "default"} onClick={confirmar}>{ok}</Pri></>}>
       {texto}
       {motivo !== undefined && <Notas rotulo={motivo || "Motivo"} valor={m} aoMudar={(v) => { setM(v); setErro(""); }} linhas={2} obrigatorio ajuda="Mínimo 3 caracteres." />}
       {erro && <Nota tom="bad" alerta>{erro}</Nota>}
@@ -58,9 +60,13 @@ interface FolhaProps {
   aberta: boolean; aoFechar: () => void; titulo: string; subtitulo?: string; selos?: ReactNode; chave: string; children: ReactNode; rodape?: ReactNode;
   /** As abas da folha, por baixo do cabeçalho. */
   abas?: ReactNode;
+  /** Botões à esquerda do "Fechar" no topo (por exemplo o menu "Mais ações"). */
+  acoesTopo?: ReactNode;
+  /** Uma classe para o título (por exemplo `mono` nos números de documento). */
+  tituloClasse?: string;
 }
 /** A folha lateral de um detalhe (largura min(720px, 100vw)): cabeçalho fixo, corpo que rola, rodapé fixo. Ao fechar, o foco volta à linha de onde se abriu. */
-export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, children, rodape, abas }: FolhaProps) {
+export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, children, rodape, abas, acoesTopo, tituloClasse }: FolhaProps) {
   const { tema } = useCtxInv();
   const conteudo = useRef<HTMLDivElement>(null);
   const voltar = (e: Event): void => {
@@ -76,10 +82,10 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
           <div className="sh-top">
             <div style={{ minWidth: 0 }}>
               {subtitulo && <SheetDescription className="crumbs">{subtitulo}</SheetDescription>}
-              <SheetTitle tabIndex={-1} style={{ outline: "none" }}>{titulo}</SheetTitle>
+              <SheetTitle tabIndex={-1} className={tituloClasse} style={{ outline: "none" }}>{titulo}</SheetTitle>
               {selos && <div className="chips" style={{ marginTop: 8 }}>{selos}</div>}
             </div>
-            <button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button>
+            <div className="row">{acoesTopo}<button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button></div>
           </div>
           {abas}
         </div>

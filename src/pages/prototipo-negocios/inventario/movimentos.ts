@@ -1,5 +1,5 @@
 // "Registar movimento": entrada, saída (a partir de uma EC ou avulsa), transferência, ajuste, devolução e quebra, com resultado parcial por linha. Portado do mockup.
-import { ErroInv, ecPorId, ehInteiro, falhar, fornecedor, nomeArm, nomeForn, produto } from "./base";
+import { ErroInv, ecPorId, ehInteiro, exigir, falhar, fornecedor, nomeArm, nomeForn, produto } from "./base";
 import { ecLinhaInfo, executarPedidoTransf, reservadoEm, reservas, sairLinha } from "./ec";
 import { aplicarMovimentos, qtyAt, transferir } from "./stock";
 import type { Inventario } from "./tipos";
@@ -54,6 +54,7 @@ function transferirLinha(db: Inventario, d: PedidoRegisto, sku: string, q: numbe
 
 /** Regista as linhas uma a uma: as que falham ficam de fora com a mensagem, as outras entram no livro. */
 export function registarMovimento(db: Inventario, d: PedidoRegisto): ResultadoRegisto {
+  exigir("inventory.manage", "registar movimentos");
   if (["adjust", "loss"].includes(d.type) && !d.reason) falhar("Motivo obrigatório em " + (d.type === "adjust" ? "ajustes" : "quebras") + ".");
   if (d.type === "ret" && !d.supplier) falhar("Indique o fornecedor da devolução.");
   if (d.type === "ret" && !fornecedor(db, d.supplier ?? "")) falhar("Fornecedor inexistente.");
@@ -81,7 +82,7 @@ export function avisosLinha(db: Inventario, c: ContextoAviso, linhas: { sku: str
   const l = linhas[i];
   if (!l.sku) return [];
   const p = produto(db, l.sku);
-  if (!p) return [{ tom: "bad", msg: "Produto não reconhecido. Escolha da lista." }];
+  if (!p) return [{ tom: "bad", msg: "Produto não reconhecido. Escolha da lista ou leia o código." }];
   if (p.kit) return [{ tom: "bad", msg: "Pacote: registe os componentes (o pacote não tem stock)." }];
   const w: AvisoLinha[] = [];
   if (linhas.some((x, j) => j !== i && x.sku === l.sku)) w.push({ tom: "warn", msg: "Produto repetido noutra linha." });

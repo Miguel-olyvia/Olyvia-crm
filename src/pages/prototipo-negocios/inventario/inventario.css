@@ -407,3 +407,6 @@
 .inv-root.show-src .src{display:inline-block}
 .inv-root .dh h2{font-size:18px;font-weight:700;line-height:1.25}
 .inv-root .sh-top h2{font-size:20px;font-weight:700;line-height:1.25}
+
+.inv-root.inv-sbbox button.sb-item{cursor:pointer}
+.inv-root.inv-sbbox button.sb-item:hover{background:var(--i-sidebar-hi)}

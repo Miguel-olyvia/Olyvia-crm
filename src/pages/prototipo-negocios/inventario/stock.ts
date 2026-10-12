@@ -1,5 +1,5 @@
 // O livro de movimentos: o único caminho para mudar o stock. Regras portadas do mockup (applyMoves, doTransfer, setStockField...). Sem React.
-import { ErroInv, UTILIZADOR, agora, armazem, ehInteiro, falhar, mudou, nomeArm, nomeProd, pad, produto, proximoId } from "./base";
+import { ErroInv, UTILIZADOR, agora, armazem, ehInteiro, exigir, falhar, mudou, nomeArm, nomeProd, pad, produto, proximoId } from "./base";
 import type { Inventario, LinhaStock, MovPedido, Movimento, Tom, TipoMov, Transferencia } from "./tipos";
 
 /** Cada tipo de movimento: o nome, a cor do ícone e o sinal sobre o stock. */
@@ -85,6 +85,7 @@ export function criarPedidoTransf(db: Inventario, p: { sku: string; from: string
 
 /** A transferência em duas pernas: saída na origem e entrada no destino, no mesmo documento. */
 export function transferir(db: Inventario, sku: string, from: string, to: string, qty: number, opts: { doc?: string; note?: string } = {}): string {
+  exigir("inventory.manage", "transferir");
   if (from === to) falhar("Origem e destino têm de ser diferentes.");
   const doc = opts.doc ?? "TR-" + pad(++db.n.tr);
   const nota = opts.note ? " · " + opts.note : "";
@@ -97,6 +98,7 @@ export function transferir(db: Inventario, sku: string, from: string, to: string
 
 /** Nova nota num movimento (a única coisa editável do livro; fica marcada como editada). */
 export function anotarMovimento(db: Inventario, id: number, nota: string): void {
+  exigir("inventory.manage", "anotar movimentos");
   const m = db.moves.find((x) => x.id === id);
   if (!m) throw new ErroInv("Movimento inexistente.");
   m.note = nota.trim();
@@ -106,6 +108,7 @@ export function anotarMovimento(db: Inventario, id: number, nota: string): void 
 
 /** Edita a localização e os limites de uma linha de stock; a quantidade nunca se edita (só por movimentos). */
 export function editarLinhaStock(db: Inventario, id: string, patch: Partial<Pick<LinhaStock, "loc" | "min" | "max" | "rop">>): void {
+  exigir("inventory.manage");
   const r = db.stocks.find((x) => x.id === id);
   if (!r) return falhar("Linha de stock inexistente.");
   const t = { ...r, ...patch };
@@ -116,6 +119,7 @@ export function editarLinhaStock(db: Inventario, id: string, patch: Partial<Pick
 
 /** Adiciona uma linha de stock (a quantidade inicial entra por um movimento de Entrada). */
 export function adicionarStock(db: Inventario, d: { sku: string; wh: string; loc: string; min: number; max: number; rop: number; qty: number; cost: number | null }): void {
+  exigir("inventory.manage");
   const p = produto(db, d.sku);
   if (!p) falhar("Escolha um produto válido.");
   if (p.kit) falhar("Pacotes não têm stock próprio: são expandidos nos componentes.");
@@ -124,4 +128,19 @@ export function adicionarStock(db: Inventario, d: { sku: string; wh: string; loc
   const r = linhaStock(db, d.sku, d.wh, true);
   if (r) Object.assign(r, { loc: d.loc, min: d.min, max: d.max, rop: d.rop });
   if (d.qty > 0) aplicarMovimentos(db, [{ type: "in", sku: d.sku, wh: d.wh, qty: d.qty, doc: "Stock inicial", note: "Adicionar stock", cost: d.cost }]);
+}
+
+/** Edição na própria célula (setStockField do mockup): localização, mínimo, máximo ou ponto de encomenda; a quantidade nunca. */
+export function definirCampoStock(db: Inventario, id: string, k: "loc" | "min" | "max" | "rop" | "qty", valor: string): void {
+  exigir("inventory.manage", "editar stock");
+  const r = db.stocks.find((x) => x.id === id);
+  if (!r) return falhar("Linha de stock inexistente.");
+  if (k === "qty") return falhar("A quantidade só muda por movimentos: use “Registar ajuste”.");
+  if (k === "loc") { r.loc = valor.trim(); return; }
+  if (valor.trim() === "") falhar("Inteiro ≥ 0.");
+  const v = Number(valor);
+  if (!ehInteiro(v) || v < 0) falhar("Inteiro ≥ 0.");
+  const t = { ...r, [k]: v };
+  if (t.max && t.min > t.max) falhar("O mínimo não pode ser maior que o máximo.");
+  r[k] = v;
 }

@@ -1,81 +1,81 @@
-// Armazém › Encomendas de cliente (as saídas): o que existe em stock é reservado (FIFO) e sai do armazém de expedição; o que falta vai para a PO do preferencial.
-// A lista tem KPI, filtros e ordenação; a linha abre a folha. Um só botão primário: "Nova encomenda manual".
+// Armazém › Saídas para clientes (scrEC do mockup): o que existe em stock é reservado (FIFO) e sai do armazém de expedição; o que falta vai para a encomenda ao fornecedor preferencial.
+// O cabeçalho leva Exportar e "Nova encomenda manual"; depois vêm os KPI, os filtros (um cartão com pesquisa, armazém, datas, chips e legenda) e a tabela.
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import { Kpi } from "./kpiInv";
-import { ExportarInv } from "./ExportarInv";
-import { CHIP, Escolher, Interruptor } from "../FiltrosPopover";
-import { fmtD, nomeArm, armazem } from "./base";
+import { fmtD } from "./base";
+import { AcoesCab, Fonte } from "./cabInv";
 import { contadores } from "./contadores";
 import { useCtxInv } from "./ctxInv";
-import { EC_ESTADOS, ecEstado, ecProntas, ecSegmentos, origemTexto, type EstadoEc } from "./ec";
+import { EC_ESTADOS, ecEstado, ecProntas, type EstadoEc } from "./ec";
+import { defEcs } from "./ecAcoes";
+import { OrigemChip, Progresso } from "./ecPecas";
+import { useAbrirEc } from "./ecAbrir";
+import { AcoesLinhaEc } from "./EcMenu";
 import { EcFormDialogo } from "./EcFormDialogo";
 import { filtrarEcs } from "./filtros";
-import { opcoesExpedicao } from "./opcoes";
-import { Pesquisa, Pri, Sec, Selo, Vazio } from "./pecasInv";
+import { BotaoExportar } from "./ImportarInv";
+import { Kpi } from "./kpiInv";
+import { Check, Chip } from "./mockPecas";
+import { opcoesArmazens } from "./opcoes";
+import { can, porqueNao } from "./perfil";
+import { Pesquisa, Selo, Vazio } from "./pecasInv";
 import { TabelaInv, type Coluna } from "./TabelaInv";
-import type { Ec, Inventario, Tom } from "./tipos";
+import type { Ec, Tom } from "./tipos";
 
 const TOM: Record<EstadoEc, Tom> = { full: "ok", partial: "warn", waiting: "info", nosup: "bad", deleted: "neu" };
-
-/** O progresso de uma EC: servido, em stock (reservado), à espera de PO e em falta, em barra e em texto (a barra nunca diz nada sozinha). */
-export function Progresso({ db, e }: { db: Inventario; e: Ec }) {
-  const s = ecSegmentos(db, e);
-  if (!s.tot) return <span className="text-muted-foreground">Só serviços</span>;
-  const w = (n: number): string => `${(n / s.tot) * 100}%`;
-  return (
-    <span className="grid min-w-40 gap-1">
-      <span className="flex h-2 overflow-hidden rounded-full bg-border" role="img" aria-label={`Servido ${s.s}, em stock ${s.st}, a aguardar PO ${s.po}, em falta ${s.mi}`}>
-        <span className="bg-foreground" style={{ width: w(s.s) }} /><span className="bg-foreground/60" style={{ width: w(s.st) }} /><span className="bg-foreground/30" style={{ width: w(s.po) }} />
-      </span>
-      <span className="text-muted-foreground">{s.s} servido · {s.st} em stock · {s.po} PO · {s.mi} falta</span>
-    </span>
-  );
-}
+const ESTADOS: readonly (readonly [EstadoEc, string])[] = [["full", "Totalmente servido"], ["partial", "Parcialmente pendente"], ["waiting", "A aguardar encomenda"], ["nosup", "Sem fornecedor"]];
 
 export function EcInv() {
-  const { db, filtros, setFiltros, abrir, ir } = useCtxInv();
+  const { db, filtros, setFiltros } = useCtxInv();
+  const abrirEc = useAbrirEc();
   const f = filtros.ec, c = contadores(db);
   const lista = filtrarEcs(db, f);
   const [nova, setNova] = useState(false);
+  const pode = can("inventory.manage");
   const cols: Coluna<Ec>[] = [
-    { id: "id", titulo: "Nº EC · origem", celula: (e) => <>{e.id} · {origemTexto(e)}</>, valor: (e) => e.id },
-    { id: "cl", titulo: "Cliente", celula: (e) => e.client, valor: (e) => e.client },
-    { id: "ad", titulo: "Morada", celula: (e) => e.addr },
-    { id: "d", titulo: "Data", celula: (e) => <>{fmtD(e.date)}<span className="block text-muted-foreground">{armazem(db, e.wh)?.code}</span></>, valor: (e) => e.date },
+    { id: "id", titulo: "Nº EC · origem", celula: (e) => <><b className="mono">{e.id}</b><br /><OrigemChip e={e} /></> },
+    { id: "cl", titulo: "Cliente", celula: (e) => e.client },
+    { id: "ad", titulo: "Morada", celula: (e) => <small>{e.addr}</small> },
+    { id: "d", titulo: "Data", classe: () => "nowrap", celula: (e) => <>{fmtD(e.date)}<br /><small className="muted">{db.warehouses.find((w) => w.id === e.wh)?.code}</small></> },
     { id: "ln", titulo: "Linhas", direita: true, celula: (e) => e.lines.length },
-    { id: "pr", titulo: "Progresso", celula: (e) => <Progresso db={db} e={e} /> },
-    { id: "st", titulo: "Estado", celula: (e) => <span className="grid justify-items-start gap-1"><Selo tom={TOM[ecEstado(db, e)]}>{EC_ESTADOS[ecEstado(db, e)]}</Selo>{ecProntas(db, e) > 0 && <Selo tom="violet">{ecProntas(db, e)} pronta(s) a sair</Selo>}</span> },
+    { id: "pr", titulo: "Progresso", largura: "170px", celula: (e) => <Progresso db={db} e={e} /> },
+    { id: "st", titulo: "Estado", celula: (e) => { const st = ecEstado(db, e), n = ecProntas(db, e); return <><Selo tom={TOM[st]}>{EC_ESTADOS[st]}</Selo>{n > 0 && <><br /><Selo tom="violet">{n} pronta(s) a sair</Selo></>}</>; } },
   ];
-  const chip = (k: "" | EstadoEc, nome: string, n?: number): React.ReactNode => <button key={k + nome} type="button" aria-pressed={f.status === k && !f.prontas} onClick={() => setFiltros("ec", { status: k, prontas: false })} className={CHIP(f.status === k && !f.prontas)}>{nome}{n != null && <> <span className="tabular-nums opacity-70">{n}</span></>}</button>;
+  const estado = (k: "" | EstadoEc, nome: string, n?: number): React.ReactNode => <Chip key={k + nome} ativo={f.status === k && !f.prontas} n={n} aoClicar={() => setFiltros("ec", { status: k, prontas: false })}>{nome}</Chip>;
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-start justify-end gap-3">
-        <ExportarInv nome="saidas-clientes" rotulo="encomendas de cliente" cabecalho={["Nº EC", "Origem", "Cliente", "Morada", "Data", "Linhas", "Estado"]} linhas={() => lista.map((e) => [e.id, origemTexto(e), e.client, e.addr, e.date, e.lines.length, EC_ESTADOS[ecEstado(db, e)]])} /><Pri onClick={() => setNova(true)}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova encomenda manual</Pri>
-      </div>
+    <>
+      <AcoesCab>
+        <BotaoExportar def={defEcs(db, () => lista)} novo />
+        <button type="button" className="btn btn-p" disabled={!pode} title={pode ? undefined : porqueNao("inventory.manage")} onClick={() => setNova(true)}><Plus className="ic" aria-hidden="true" />Nova encomenda manual</button>
+      </AcoesCab>
       <div className="kpis">
-        <Kpi tom="ok" rotulo="Prontas a expedir" valor={String(c.ecReady)} nota="com linhas prontas a sair" aoClicar={() => setFiltros("ec", { prontas: true, status: "" })} acaoRotulo="Filtrar por prontas a expedir" />
-        <Kpi tom="warn" rotulo="Parcialmente pendentes" valor={String(c.ecPartial)} aoClicar={() => setFiltros("ec", { status: "partial", prontas: false })} acaoRotulo="Filtrar por parcialmente pendentes" />
-        <Kpi tom="info" rotulo="A aguardar PO" valor={String(c.ecWaiting)} nota="à espera do fornecedor" aoClicar={() => setFiltros("ec", { status: "waiting", prontas: false })} acaoRotulo="Filtrar por a aguardar PO" />
-        <Kpi tom="bad" rotulo="Sem fornecedor" valor={String(c.ecNoSup)} nota="sem preferido para encomendar" aoClicar={() => setFiltros("ec", { status: "nosup", prontas: false })} acaoRotulo="Filtrar por sem fornecedor" />
+        <Kpi tom="ok" rotulo="Prontas a expedir" valor={String(c.ecReady)} nota="com linhas prontas a sair" fonte="fn_client_order_line_reservations" aoClicar={() => setFiltros("ec", { prontas: true, status: "" })} />
+        <Kpi tom="warn" rotulo="Parcialmente pendentes" valor={String(c.ecPartial)} fonte="client_orders" aoClicar={() => setFiltros("ec", { status: "partial", prontas: false })} />
+        <Kpi tom="info" rotulo="A aguardar PO" valor={String(c.ecWaiting)} nota="à espera do fornecedor" fonte="purchase_order_items ↔ client_order_items" aoClicar={() => setFiltros("ec", { status: "waiting", prontas: false })} />
+        <Kpi tom="bad" rotulo="Sem fornecedor" valor={String(c.ecNoSup)} nota="sem preferido para encomendar" fonte="item_suppliers.is_preferred" aoClicar={() => setFiltros("ec", { status: "nosup", prontas: false })} />
       </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <Pesquisa valor={f.q} aoMudar={(q) => setFiltros("ec", { q })} rotulo="Pesquisar encomendas clientes por nº, contrato, cliente ou produto" dica="Nº EC, contrato, VD, cliente ou produto" />
-        <div className="w-60"><Escolher rotulo="Armazém de expedição" valor={f.wh} aoMudar={(wh) => setFiltros("ec", { wh })} todas="Todos os armazéns" opcoes={opcoesExpedicao(db).map(([valor, nome]) => ({ valor, nome }))} /></div>
-        <label className="text-[15px] text-muted-foreground">De<input type="date" value={f.de} onChange={(e) => setFiltros("ec", { de: e.target.value })} className="block h-11 rounded-md border border-[hsl(220_10%_45%)] bg-card px-2 text-[15px] text-foreground" /></label>
-        <label className="text-[15px] text-muted-foreground">Até<input type="date" value={f.ate} onChange={(e) => setFiltros("ec", { ate: e.target.value })} className="block h-11 rounded-md border border-[hsl(220_10%_45%)] bg-card px-2 text-[15px] text-foreground" /></label>
-        <Interruptor nome="Ver eliminadas" ativo={f.eliminadas} aoMudar={() => setFiltros("ec", { eliminadas: !f.eliminadas })} />
+      <div className="card filters">
+        <div className="frow">
+          <Pesquisa valor={f.q} aoMudar={(q) => setFiltros("ec", { q })} rotulo="Pesquisar encomendas clientes" dica="Nº EC, contrato, VD, cliente ou produto" />
+          <select aria-label="Armazém de expedição" value={f.wh} onChange={(e) => setFiltros("ec", { wh: e.target.value })}>
+            <option value="">Todos os armazéns de expedição</option>
+            {opcoesArmazens(db).map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+          </select>
+          <label className="inl">De <input type="date" value={f.de} onChange={(e) => setFiltros("ec", { de: e.target.value })} /></label>
+          <label className="inl">Até <input type="date" value={f.ate} onChange={(e) => setFiltros("ec", { ate: e.target.value })} /></label>
+          <Check rotulo="Ver eliminadas" ativo={f.eliminadas} aoMudar={(v) => setFiltros("ec", { eliminadas: v })} />
+        </div>
+        <div className="chips" role="group" aria-label="Estado">
+          {estado("", "Todas", db.ecs.filter((e) => !e.deleted).length)}
+          <Chip ativo={f.prontas} n={c.ecReady} aoClicar={() => setFiltros("ec", { prontas: !f.prontas, status: "" })}>Prontas a expedir</Chip>
+          {ESTADOS.map(([k, t]) => estado(k, t))}
+        </div>
+        <div className="legend"><span><i className="s-served" />Servido</span><span><i className="s-stock" />Em stock (reservado, pronto)</span><span><i className="s-po" />A aguardar PO</span><span><i className="s-miss" />Em falta / sem fornecedor</span></div>
       </div>
-      <div role="group" aria-label="Estado" className="flex flex-wrap gap-2">
-        {chip("", "Todas", db.ecs.filter((e) => !e.deleted).length)}
-        <button type="button" aria-pressed={f.prontas} onClick={() => setFiltros("ec", { prontas: !f.prontas, status: "" })} className={CHIP(f.prontas)}>Prontas a expedir <span className="tabular-nums opacity-70">{c.ecReady}</span></button>
-        {chip("full", "Totalmente servido")}{chip("partial", "Parcialmente pendente")}{chip("waiting", "A aguardar encomenda")}{chip("nosup", "Sem fornecedor")}
-      </div>
-      {lista.length === 0 ? <Vazio titulo="Sem encomendas com estes filtros"><Sec onClick={() => ir({ aba: "ec", f: {} })}>Limpar filtros</Sec></Vazio> : (
-        <TabelaInv titulo="Encomendas de cliente" colunas={cols} linhas={lista} chave={(e) => e.id} abrir={(e) => abrir({ t: "ec", id: e.id })} classeLinha={(e) => (e.deleted ? "opacity-70" : "")} rotuloAbrir={(e) => `Abrir ${e.id}, ${e.client}`} />
-      )}
-      <p className="text-[15px] text-muted-foreground" aria-live="polite">{lista.length} encomenda{lista.length === 1 ? "" : "s"} · armazém por defeito: {nomeArm(db, db.settings.defaultWh)}</p>
+      {lista.length ? <TabelaInv titulo="Saídas para clientes" minimo={1000} colunas={cols} linhas={lista} chave={(e) => e.id} abrir={(e) => abrirEc(e.id)} classeLinha={(e) => (e.deleted ? "deleted" : "")} rotuloAbrir={(e) => `Abrir ${e.id}, ${e.client}`} acoes={(e) => <AcoesLinhaEc id={e.id} />} />
+        : <Vazio titulo="Sem encomendas com estes filtros" />}
+      <div className="tbl-foot"><span>{lista.length} encomenda(s)</span><Fonte>client_orders · client_order_items · rpc_list_client_order_documents</Fonte></div>
       {nova && <EcFormDialogo aberto aoFechar={() => setNova(false)} />}
-    </div>
+    </>
   );
 }

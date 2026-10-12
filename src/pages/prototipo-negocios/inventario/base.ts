@@ -11,8 +11,12 @@ export const utilizadorAtual = (): string => PERFIS[lerPerfil()].user;
 /** Uma regra do negócio que recusa a ação: a mensagem é para mostrar a quem usa. */
 export class ErroInv extends Error {}
 export function falhar(msg: string): never { throw new ErroInv(msg); }
+let sistema = 0;
+/** Corre `fn` como o próprio sistema (o seed e as regras automáticas): sem verificar o perfil (opts.system do mockup). */
+export function comoSistema<T>(fn: () => T): T { sistema++; try { return fn(); } finally { sistema--; } }
 /** need() do mockup: recusa a ação se o perfil simulado não tem a permissão (mensagem igual à do mockup). */
 export function exigir(perm: string, oQue?: string): void {
+  if (sistema > 0) return;
   if (!podePerfil(lerPerfil(), perm)) falhar(`Sem permissão: ${oQue ?? perm} (requer ${perm}).`);
 }
 export const ehInteiro = (v: unknown): v is number => Number.isInteger(v);

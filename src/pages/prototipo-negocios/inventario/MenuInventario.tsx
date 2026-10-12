@@ -3,7 +3,7 @@
 import { useEffect, useId } from "react";
 import { cn } from "@/lib/utils";
 import type { AbaInv } from "./ctxInv";
-import { GRUPOS, ICONE_HOJE, grupoDe, pilulas, totalFila, type Pilula } from "./menuInv";
+import { GRUPOS, ICONE_COBERTURA, ICONE_HOJE, grupoDe, pilulas, totalFila, type Pilula } from "./menuInv";
 import { useTema } from "./tema";
 import { PERFIS, mudarPerfil, podePerfil, usePerfil, type PerfilId } from "./perfil";
 import { useInventario } from "./loja";
@@ -19,7 +19,7 @@ export default function MenuInventario({ aba, aoIr }: Props) {
   const pil = pilulas(db);
   const total = totalFila(db);
   const ativo = aba ? grupoDe(aba)?.id : undefined;
-  const rotulo = useId(), seletor = useId();
+  const rotulo = useId(), seletor = useId(), rotuloMock = useId();
   // Um perfil que não vê o ecrã aberto volta ao Hoje.
   useEffect(() => {
     const item = GRUPOS.flatMap((g) => g.itens).find((i) => i.aba === aba);
@@ -38,7 +38,7 @@ export default function MenuInventario({ aba, aoIr }: Props) {
           const Ic = g.icone;
           return (
             <div key={g.id} role="group" aria-label={g.t}>
-              <div className={cn("sb-item", ativo === g.id && "on")}><Ic className="ic" aria-hidden="true" /><span>{g.t}</span></div>
+              <button type="button" className={cn("sb-item", ativo === g.id && "on")} aria-expanded="true" onClick={() => aoIr(ativo === g.id && aba ? aba : itens[0].aba)}><Ic className="ic" aria-hidden="true" /><span>{g.t}</span></button>
               <div className="sb-subs">
                 {itens.map((i) => (
                   <button key={i.aba} type="button" className={cn("sb-sub", aba === i.aba && "on")} aria-current={aba === i.aba ? "page" : undefined} onClick={() => aoIr(i.aba)}>
@@ -50,12 +50,16 @@ export default function MenuInventario({ aba, aoIr }: Props) {
           );
         })}
       </nav>
+      <div className="sb-sec" id={rotuloMock}>Mockup</div>
+      <nav className="sb-nav" aria-labelledby={rotuloMock}>
+        <button type="button" className={cn("sb-item", aba === "cov" && "on")} aria-current={aba === "cov" ? "page" : undefined} onClick={() => aoIr("cov")}><ICONE_COBERTURA className="ic" aria-hidden="true" /><span>Mockup · cobertura</span></button>
+      </nav>
       <div className="sb-foot">
         <label htmlFor={seletor}>Simular perfil · menu filtrado por permissão <span className="new">Novo</span></label>
         <select id={seletor} value={perfil} onChange={(e) => mudarPerfil(e.target.value as PerfilId)}>
           {(Object.keys(PERFIS) as PerfilId[]).map((k) => <option key={k} value={k}>{PERFIS[k].t}</option>)}
         </select>
-        <span style={{ opacity: 0.8 }}>{PERFIS[perfil].nota}</span>
+        <span style={{ opacity: 0.8 }}>{PERFIS[perfil].nota}</span><span className="src" title="Fonte de dados">has_permission() · anew_role_permissions</span>
       </div>
     </div>
   );

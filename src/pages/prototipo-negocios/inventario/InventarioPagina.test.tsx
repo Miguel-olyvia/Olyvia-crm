@@ -55,9 +55,10 @@ describe("Inventário no menu lateral", () => {
     const m = within(menuInv()!);
     expect(m.getByText("Inventário")).toBeInTheDocument();
     const nomes = m.getAllByRole("button").map((b) => b.querySelector("span")!.textContent!.trim());
-    expect(nomes.slice(0, 9)).toEqual(["Hoje", "Encomendas", "Fornecedores", "Existências", "Movimentos Novo", "Saídas para clientes", "Receção", "Contagens", "Armazéns"]);
-    expect(within(m.getByRole("group", { name: "Compras" })).getAllByRole("button")).toHaveLength(2);
-    expect(within(m.getByRole("group", { name: "Armazém" })).getAllByRole("button")).toHaveLength(6);
+    expect(nomes.slice(0, 11)).toEqual(["Hoje", "Compras", "Encomendas", "Fornecedores", "Armazém", "Existências", "Movimentos Novo", "Saídas para clientes", "Receção", "Contagens", "Armazéns"]);
+    expect(nomes[11]).toBe("Mockup · cobertura");
+    expect(within(m.getByRole("group", { name: "Compras" })).getAllByRole("button")).toHaveLength(3);
+    expect(within(m.getByRole("group", { name: "Armazém" })).getAllByRole("button")).toHaveLength(7);
     expect(m.queryByRole("button", { name: /Inventário completo/ })).toBeNull();
   });
 
@@ -175,7 +176,8 @@ describe("Ecrãs do menu", () => {
     render(<Casa />);
     for (const nome of ["Hoje", "Encomendas", "Fornecedores", "Stock", "Movimentos", "Encomendas de cliente", "Guias", "Contagens", "Armazéns"]) {
       separador(nome);
-      const primarios = painel().querySelectorAll("button.btn-p");
+      // As ações das linhas (td.act) seguem o mockup (a PO pendente tem "Aprovar e enviar" primário): a regra vale para o cabeçalho e o corpo do ecrã.
+      const primarios = [...painel().querySelectorAll("button.btn-p")].filter((b) => !b.closest("td.act"));
       expect(primarios.length, nome).toBeLessThanOrEqual(1);
     }
   });
@@ -217,7 +219,7 @@ describe("Encomendas", () => {
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
     const dlg = await screen.findByRole("dialog", { name: "Receber PO-2026-0137" });
-    expect(within(dlg).getByText(/falta 2/)).toBeInTheDocument();
+    expect(within(dlg).getByText(/faltam 2 un/)).toBeInTheDocument();
     expect(within(dlg).getByText(/2 → EC-0087/)).toBeInTheDocument();
     fireEvent.click(within(dlg).getByRole("button", { name: "Confirmar receção" }));
     expect(await screen.findAllByText(/Receção registada: 2 un servem Encomendas Clientes/)).not.toHaveLength(0);
@@ -269,14 +271,14 @@ describe("Encomendas (continuação)", () => {
 });
 
 describe("Stock, movimentos e transferências", () => {
-  it("o stock filtra por estado e o detalhe do produto abre numa folha lateral", async () => {
+  it("o stock filtra por estado e a linha do produto abre-se para mostrar os armazéns", async () => {
     render(<Casa />);
     separador("Stock");
     fireEvent.click(screen.getByRole("button", { name: /Em excesso/ }));
-    expect(screen.getAllByRole("row", { name: /^Abrir o stock de/ }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getAllByRole("row", { name: /^Abrir o stock de/ })[0]);
-    const folha = await screen.findByRole("dialog");
-    expect(within(folha).getByRole("button", { name: "Registar movimento" })).toBeInTheDocument();
+    const abrir = document.querySelectorAll<HTMLElement>('tr.click button[aria-expanded="false"]');
+    expect(abrir.length).toBeGreaterThan(0);
+    fireEvent.click(abrir[0]);
+    expect(document.querySelectorAll("tr.subrow").length).toBeGreaterThan(0);
   });
 
   it("registar um ajuste sem motivo recusa na hora e com motivo regista no livro", async () => {
@@ -287,9 +289,9 @@ describe("Stock, movimentos e transferências", () => {
     const dlg = await screen.findByRole("dialog", { name: /Registar movimento · 1 de 2/ });
     fireEvent.click(within(dlg).getByRole("button", { name: /^Ajuste/ }));
     const d2 = await screen.findByRole("dialog", { name: /2 de 2 · Ajuste/ });
-    fireEvent.change(within(d2).getByLabelText(/Produto da linha 1/), { target: { value: "CD-80" } });
+    fireEvent.change(within(d2).getByLabelText(/^Produto/), { target: { value: "CD-80" } });
     fireEvent.click(within(d2).getByRole("button", { name: /^Registar 1 linha/ }));
-    expect((await within(d2).findAllByText("Motivo obrigatório em ajustes.")).length).toBeGreaterThan(0);
+    expect((await within(d2).findAllByText("Motivo obrigatório.")).length).toBeGreaterThan(0);
     expect(lerInventario().moves).toHaveLength(antes);
     fireEvent.change(within(d2).getByLabelText(/^Motivo/), { target: { value: "Contagem" } });
     fireEvent.click(within(d2).getByRole("button", { name: /^Registar 1 linha/ }));
@@ -358,7 +360,7 @@ describe("Teclado e Repor", () => {
     fireEvent.click(within(dlg).getByRole("button", { name: "Aprovar e enviar" }));
     await waitFor(() => expect(lerInventario().pos.filter((p) => p.status === "pending" && !p.deleted)).toHaveLength(2));
     localStorage.setItem("outra-chave", "fica");
-    fireEvent.click(screen.getByRole("button", { name: "Repor dados de demonstração" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Repor dados de demonstração/ }));
     const conf = await screen.findByRole("dialog", { name: "Repor dados de demonstração" });
     fireEvent.click(within(conf).getByRole("button", { name: "Repor dados" }));
     await waitFor(() => expect(lerInventario().pos.filter((p) => p.status === "pending" && !p.deleted)).toHaveLength(3));

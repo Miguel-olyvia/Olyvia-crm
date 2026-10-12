@@ -6,10 +6,10 @@ import type { PerfilId } from "./perfil";
 import type { Tema } from "./tema";
 import type { Inventario } from "./tipos";
 
-export type AbaInv = "hoje" | "po" | "sup" | "stock" | "mov" | "ec" | "guia" | "cont" | "wh";
+export type AbaInv = "hoje" | "po" | "sup" | "stock" | "mov" | "ec" | "guia" | "cont" | "wh" | "cov";
 /** Para onde ir: o separador e, se se quiser, os filtros já aplicados (a fila do Hoje abre listas filtradas). */
 export type Destino =
-  | { aba: "hoje" | "wh" } | { aba: "po"; f?: Partial<FiltrosPo> } | { aba: "sup"; f?: Partial<FiltrosForn> } | { aba: "stock"; f?: Partial<FiltrosStock> }
+  | { aba: "hoje" | "wh" | "cov" } | { aba: "po"; f?: Partial<FiltrosPo> } | { aba: "sup"; f?: Partial<FiltrosForn> } | { aba: "stock"; f?: Partial<FiltrosStock> }
   | { aba: "mov"; f?: Partial<FiltrosMov> } | { aba: "ec"; f?: Partial<FiltrosEc> } | { aba: "guia"; f?: Partial<FiltrosGuia> } | { aba: "cont"; f?: Partial<FiltrosCont> };
 /** O detalhe aberto numa folha lateral. */
 export type Detalhe =

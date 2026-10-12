@@ -1,5 +1,5 @@
 // As Encomendas Clientes (EC): reserva FIFO do stock, o que falta vai para a PO do fornecedor preferencial, saídas e anulações. Portado do mockup. Sem React.
-import { UTILIZADOR, agora, armazem, ecPorId, ehInteiro, exigirMotivo, falhar, mudou, nomeArm, nomeProd, pad, poPorId, produto, proximoId } from "./base";
+import { UTILIZADOR, agora, armazem, ecPorId, ehInteiro, exigir, exigirMotivo, falhar, mudou, nomeArm, nomeProd, pad, poPorId, produto, proximoId } from "./base";
 import { artigoPreferido, enviarPo, linhaDeArtigo, novaPo, poOpen, poRem } from "./po";
 import { aplicarMovimentos, armazemServe, qtyAt, transferir } from "./stock";
 import type { Ec, EcLinha, Inventario, Po, PoLinha, Transferencia } from "./tipos";
@@ -241,6 +241,7 @@ export function reverterSaida(db: Inventario, e: Ec, l: EcLinha): void {
 
 /** Elimina (manual ou venda direta) ou anula o contrato: estorna saídas, anula as POs ligadas e cancela as transferências pendentes. */
 export function eliminarEc(db: Inventario, e: Ec, motivo: string, opts: { contrato?: boolean } = {}): void {
+  exigir("inventory.manage");
   if (!opts.contrato && !["manual", "VD"].includes(e.origin.k)) falhar("Só se eliminam encomendas manuais ou de venda direta. Para contratos, anule o contrato.");
   exigirMotivo(motivo);
   if (e.deleted) falhar("Já eliminada.");
@@ -296,6 +297,7 @@ export function executarPedidoTransf(db: Inventario, t: Transferencia): void {
 
 /** Muda o armazém de expedição (só antes de haver saídas) e recalcula as reservas. */
 export function mudarArmazemEc(db: Inventario, e: Ec, wh: string): void {
+  exigir("inventory.manage");
   if (e.lines.some((l) => l.served > 0)) falhar("Já há saídas.");
   if (!armazemServe(db, wh)) falhar("Armazém não serve clientes.");
   e.wh = wh;

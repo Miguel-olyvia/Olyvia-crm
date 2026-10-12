@@ -3,24 +3,37 @@
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { useCtxInv } from "./ctxInv";
-import type { AbaInv } from "./ctxInv";
-import { TITULOS, grupoDe } from "./menuInv";
+import type { AbaInv, Destino } from "./ctxInv";
+import { NOME_ABA, TITULOS, grupoDe } from "./menuInv";
+import { podePerfil } from "./perfil";
 
 
 /** O cabeçalho do ecrã `aba`; `acoes` são os botões à direita (o Hoje tem os seus). */
 export function Cab({ aba }: { aba: AbaInv }) {
-  const { registarAcoes } = useCtxInv();
+  const { registarAcoes, ir, perfil } = useCtxInv();
   const [titulo, sub] = TITULOS[aba];
   const g = grupoDe(aba);
+  const separadores = g?.itens.filter((i) => podePerfil(perfil, i.perm));
   return (
+    <>
+      {separadores ? (
+        <div className="tabs" role="tablist" aria-label={g?.t}>
+          {separadores.map((i) => (
+            <button key={i.aba} type="button" role="tab" aria-selected={i.aba === aba} className={`tab${i.aba === aba ? " on" : ""}`} onClick={() => ir({ aba: i.aba } as Destino)}>
+              {NOME_ABA[i.aba]}{i.novo ? <span className="new">Novo</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
     <div className="ph">
       <div>
-        <div className="crumbs">Inventário{g ? ` › ${g.t}` : ""}</div>
+        <div className="crumbs">{aba === "cov" ? "Mockup" : `Inventário${g ? ` › ${g.t}` : ""}`}</div>
         <h1>{titulo}</h1>
         <p className="muted" style={{ marginTop: 4, maxWidth: 760 }}>{sub}</p>
       </div>
       <div className="ph-actions" ref={registarAcoes} />
     </div>
+    </>
   );
 }
 
@@ -31,4 +44,4 @@ export function AcoesCab({ children }: { children: ReactNode }) {
 }
 
 /** A fonte de dados de cada bloco (o interruptor "Mostrar fontes de dados" do topo mostra-as). */
-export const Fonte = ({ children }: { children: string }) => <span className="src">{children}</span>;
+export const Fonte = ({ children }: { children: string }) => <span className="src" title="Fonte de dados">{children}</span>;

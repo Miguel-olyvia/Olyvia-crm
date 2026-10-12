@@ -22,6 +22,7 @@ import { TITULOS } from "./menuInv";
 import { PesquisaGlobal } from "./PesquisaGlobal";
 import "./inventario.css";
 import { ArmazensInv } from "./ArmazensInv";
+import { CoberturaInv } from "./CoberturaInv";
 import { ContagensInv } from "./ContagensInv";
 import { EcInv } from "./EcInv";
 import { EncomendasInv } from "./EncomendasInv";
@@ -46,6 +47,7 @@ function Painel({ aba }: { aba: AbaInv }) {
     case "guia": return <GuiasInv />;
     case "cont": return <ContagensInv />;
     case "wh": return <ArmazensInv />;
+    case "cov": return <CoberturaInv />;
     default: return <HojeInv />;
   }
 }
@@ -74,7 +76,7 @@ function Topo({ fontes, mudarFontes, pedirRepor }: { fontes: boolean; mudarFonte
       <div className="top-actions">
         <label className="switch"><input type="checkbox" checked={fontes} onChange={(e) => mudarFontes(e.target.checked)} /><span className="sw" aria-hidden="true" /><span>Mostrar fontes de dados</span></label>
         <button type="button" className="btn btn-sm btn-ghost" onClick={() => mudarTema(lerTema() === "dark" ? "light" : "dark")}>{lerTema() === "dark" ? <Sun className="ic" aria-hidden="true" /> : <Moon className="ic" aria-hidden="true" />}<span>{lerTema() === "dark" ? "Tema claro" : "Tema escuro"}</span></button>
-        <button type="button" className="btn btn-sm" onClick={pedirRepor} title="Apaga as alterações feitas no mockup"><RefreshCw className="ic" aria-hidden="true" /><span>Repor dados de demonstração</span></button>
+        <button type="button" className="btn btn-sm" onClick={pedirRepor} title="Apaga as alterações feitas no mockup"><RefreshCw className="ic" aria-hidden="true" /><span className="hide-sm">Repor dados de demonstração</span><span className="sr">Repor dados</span></button>
       </div>
     </div>
   );

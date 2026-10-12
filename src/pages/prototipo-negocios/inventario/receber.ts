@@ -1,5 +1,5 @@
 // A receção de mercadoria numa PO: parcial e com limites, repartida entre a EC e o stock; reverter, passar para stock e anular o resto. Portado do mockup.
-import { UTILIZADOR, agora, armazem, ecPorId, ehInteiro, exigirMotivo, falhar, guiaPorId, mudou, nomeArm, nomeProd, produto, proximoId } from "./base";
+import { UTILIZADOR, agora, armazem, ecPorId, ehInteiro, exigir, exigirMotivo, falhar, guiaPorId, mudou, nomeArm, nomeProd, produto, proximoId } from "./base";
 import { ecDerivado, repartirRececao } from "./ec";
 import { poOpen, poRem, poStatus, poStatusLabel, poUnits } from "./po";
 import { aplicarMovimentos, criarPedidoTransf } from "./stock";
@@ -26,6 +26,7 @@ const notaMovimento = (x: Plano, guia: string | null): string =>
 
 /** Receção parcial: as unidades para a EC ficam reservadas, as outras entram livres (custo médio atualizado); uma EC que expede de outro armazém gera um pedido de transferência. */
 export function receberLinhas(db: Inventario, p: Po, items: ItemReceber[], wh: string, guiaId: string | null, opts: { date?: string } = {}): ResultadoRececao {
+  exigir("inventory.receive", "receber mercadoria");
   if (p.deleted) falhar("A encomenda está eliminada.");
   if (!poOpen(p)) falhar(`${p.id} não está em aberto (estado: ${poStatusLabel[poStatus(p)]}).`);
   if (!armazem(db, wh) || armazem(db, wh)?.deleted) falhar("Escolha o armazém de destino.");
@@ -61,6 +62,7 @@ function registarRececao(db: Inventario, p: Po, x: Plano, wh: string, guia: stri
 
 /** Reverte uma receção: sai do stock e falha se as unidades já saíram para o cliente. */
 export function reverterRececao(db: Inventario, p: Po, rid: string, motivo: string): void {
+  exigir("inventory.receive", "reverter receções");
   exigirMotivo(motivo);
   const r = p.receipts.find((x) => x.id === rid);
   if (!r || r.state !== "Ativa" || r.type !== "Receção") falhar("Receção não está ativa.");
@@ -81,6 +83,7 @@ export function reverterRececao(db: Inventario, p: Po, rid: string, motivo: stri
 
 /** Com a EC inativa, as unidades que lhe estavam destinadas passam a stock livre. */
 export function passarParaStock(db: Inventario, p: Po, rid: string): void {
+  exigir("inventory.receive", "passar para stock");
   const r = p.receipts.find((x) => x.id === rid);
   if (!r || r.state !== "Ativa" || !r.toEC || r.released) falhar("Nada para passar a stock.");
   const e = r.ec ? ecPorId(db, r.ec) : undefined;
@@ -97,6 +100,7 @@ export const MOTIVOS_RESTO = ["Encontrei stock/outra solução", "Fornecedor sem
 
 /** "Não vou receber o resto": exige motivo (e nota se for "Outro"); a EC ligada perde a parte anulada. */
 export function anularResto(db: Inventario, p: Po, lineIds: string[], motivo: string, nota: string): void {
+  exigir("purchase_orders.manage", "anular resto");
   if (!motivo) falhar("Escolha o motivo para não receber o resto.");
   if (motivo === "Outro" && (!nota || nota.trim().length < 3)) falhar('Com motivo "Outro", escreva uma nota (mínimo 3 caracteres).');
   if (!poOpen(p)) falhar("A encomenda não está em aberto.");
@@ -118,6 +122,7 @@ export function anularResto(db: Inventario, p: Po, lineIds: string[], motivo: st
 
 /** Desfaz uma anulação (ou o lote todo): a EC só recupera o que ainda lhe faltar. */
 export function desfazerAnulacao(db: Inventario, p: Po, cid: string, lote: boolean): void {
+  exigir("purchase_orders.manage", "desfazer anulação");
   const c0 = p.cancels.find((c) => c.id === cid);
   if (!c0 || c0.undone) falhar("Anulação já desfeita.");
   const lista = lote ? p.cancels.filter((c) => c.batch === c0.batch && !c.undone) : [c0];

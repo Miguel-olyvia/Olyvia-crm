@@ -27,3 +27,5 @@ export const posAbertas = (db: Inventario, sid: string): number => db.pos.filter
 /** A margem de venda sobre o custo, em %: para ver se um preço novo a come. */
 export const margem = (venda: number, custo: number): number => (venda ? ((venda - custo) / venda) * 100 : 0);
 export const portalTexto = (s: Fornecedor): string => (s.portal === "invited" && s.awaiting ? "Convidado · à espera da ficha" : { none: "Sem acesso", invited: "Convidado", active: "Ativo", revoked: "Revogado" }[s.portal]);
+/** A cor do selo do portal: convidado à espera da ficha, convidado, ativo, revogado ou sem acesso. */
+export const portalTom = (s: Fornecedor): "ok" | "info" | "bad" | "neu" => ({ none: "neu", invited: "info", active: "ok", revoked: "bad" } as const)[s.portal];

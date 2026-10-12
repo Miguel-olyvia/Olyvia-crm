@@ -7,21 +7,21 @@ import { poLate, poPublished, poStatus, ultimaRececao } from "./po";
 import type { Ec, Fornecedor, Guia, Contagem, Inventario, LinhaStock, Movimento, Po, TipoMov } from "./tipos";
 
 export type EstadoPoFiltro = "all" | "pending" | "ordered" | "partial" | "received" | "cancelled" | "late" | "portal";
-export interface FiltrosPo { q: string; status: EstadoPoFiltro; sup: string; campoData: "date" | "real"; de: string; ate: string; eliminadas: boolean }
+export interface FiltrosPo { q: string; status: EstadoPoFiltro; sup: string; campoData: "date" | "real"; de: string; ate: string; eliminadas: boolean; group: boolean }
 export interface FiltrosStock { q: string; cat: string; sub: string; wh: string; state: "" | EstadoStock; vista: "product" | "wh"; eliminadas: boolean; transferencias: boolean }
 export interface FiltrosMov { q: string; type: "" | TipoMov; wh: string; doc: string; de: string; ate: string; limite: number }
 export interface FiltrosEc { q: string; status: "" | EstadoEc; wh: string; de: string; ate: string; prontas: boolean; eliminadas: boolean }
-export interface FiltrosForn { q: string; estado: "" | "active" | "inactive"; precos: boolean; aguardam: boolean; catalogo: boolean; eliminados: boolean }
+export interface FiltrosForn { q: string; estado: "" | "active" | "inactive"; empresa: string; precos: boolean; aguardam: boolean; catalogo: boolean; eliminados: boolean }
 export interface FiltrosGuia { estado: "all" | "open" | "closed" | "cancelled" | "div" }
 export interface FiltrosCont { estado: "" | "open" | "final" | "cancelled" }
 export interface FiltrosInv { po: FiltrosPo; stock: FiltrosStock; mov: FiltrosMov; ec: FiltrosEc; forn: FiltrosForn; guia: FiltrosGuia; cont: FiltrosCont }
 
 export const FILTROS_VAZIOS: FiltrosInv = {
-  po: { q: "", status: "all", sup: "", campoData: "date", de: "", ate: "", eliminadas: false },
+  po: { q: "", status: "all", sup: "", campoData: "date", de: "", ate: "", eliminadas: false, group: false },
   stock: { q: "", cat: "", sub: "", wh: "", state: "", vista: "product", eliminadas: false, transferencias: false },
   mov: { q: "", type: "", wh: "", doc: "", de: "", ate: "", limite: 40 },
   ec: { q: "", status: "", wh: "", de: "", ate: "", prontas: false, eliminadas: false },
-  forn: { q: "", estado: "", precos: false, aguardam: false, catalogo: false, eliminados: false },
+  forn: { q: "", estado: "", empresa: "", precos: false, aguardam: false, catalogo: false, eliminados: false },
   guia: { estado: "all" },
   cont: { estado: "" },
 };
@@ -78,7 +78,7 @@ export function filtrarForn(db: Inventario, f: FiltrosForn): Fornecedor[] {
   const q = norm(f.q);
   const precos = (id: string): number => db.prices.filter((c) => c.sup === id && c.state === "pending").length;
   const porLigar = (id: string): number => db.catalog.filter((c) => c.sup === id && c.state === "unlinked").length;
-  return db.suppliers.filter((s) => (f.eliminados || !s.deleted) && (!f.estado || (f.estado === "active" ? s.active : !s.active)) && (!f.precos || precos(s.id) > 0)
+  return db.suppliers.filter((s) => (f.eliminados || !s.deleted) && (!f.estado || (f.estado === "active" ? s.active : !s.active)) && (!f.empresa || s.company === f.empresa) && (!f.precos || precos(s.id) > 0)
     && (!f.aguardam || (s.portal === "invited" && s.awaiting)) && (!f.catalogo || porLigar(s.id) > 0) && (!q || tem([s.name, s.code, s.nif, s.city, s.email, s.contact], q)));
 }
 

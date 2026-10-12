@@ -1,5 +1,5 @@
 // Os cadastros do Inventário: armazéns (e as definições), fornecedores, artigos e preços, e o catálogo do portal. Regras portadas do mockup. Sem React.
-import { armazem, ehInteiro, exigirMotivo, falhar, fornecedor, produto, produtoObrigatorio, proximoId } from "./base";
+import { agora, armazem, ehInteiro, exigir, exigirMotivo, falhar, fornecedor, produto, produtoObrigatorio, proximoId, utilizadorAtual } from "./base";
 import { ecEstado, reservadoEm } from "./ec";
 import { poOpen } from "./po";
 import type { Armazem, Inventario } from "./tipos";
@@ -31,6 +31,7 @@ export function erosArmazem(db: Inventario, d: DadosArmazem, id: string | null):
 
 /** Grava (ou cria) um armazém; o armazém por defeito tem de continuar ativo e a servir clientes. */
 export function guardarArmazem(db: Inventario, d: DadosArmazem, id: string | null): Armazem {
+  exigir("inventory.manage");
   const e = Object.values(erosArmazem(db, d, id))[0];
   if (e) falhar(e);
   if (id && db.settings.defaultWh === id && (!d.active || !d.serves)) falhar("É o armazém por defeito: tem de estar ativo e servir clientes.");
@@ -45,6 +46,7 @@ export function guardarArmazem(db: Inventario, d: DadosArmazem, id: string | nul
 
 /** Desligar um armazém (ativo/serve clientes) respeita o por defeito e as encomendas clientes a expedir daí. */
 export function alternarArmazem(db: Inventario, id: string, k: "active" | "serves", v: boolean): void {
+  exigir("inventory.manage", "editar armazéns");
   const w = armazem(db, id);
   if (!w) return falhar("Armazém inexistente.");
   if (!v && db.settings.defaultWh === id) falhar("É o armazém por defeito: escolha outro nas Definições primeiro.");
@@ -52,8 +54,31 @@ export function alternarArmazem(db: Inventario, id: string, k: "active" | "serve
   w[k] = v;
 }
 
+/** Edição de um campo do cartão do armazém (setWhField do mockup): cada campo tem a sua regra e a sua mensagem. */
+export function definirCampoArmazem(db: Inventario, id: string, k: keyof DadosArmazem, valor: string | boolean): void {
+  exigir("inventory.manage", "editar armazéns");
+  const w = armazem(db, id);
+  if (!w) return falhar("Armazém inexistente.");
+  const v = typeof valor === "string" ? valor.trim() : valor;
+  if (k === "name" && !v) falhar("Nome obrigatório.");
+  if (k === "code") {
+    if (!v) falhar("Código obrigatório.");
+    if (db.warehouses.some((x) => x.id !== id && x.code.toLowerCase() === String(v).toLowerCase())) falhar("Código já usado.");
+  }
+  if (k === "cp") {
+    if (v && !/^d{4}-d{3}$/.test(String(v))) falhar("Código postal no formato 0000-000.");
+    const g = cpGeo(String(v));
+    w.lat = g ? g[0] : null;
+    w.lng = g ? g[1] : null;
+  }
+  if (k === "email" && v && !emailOk(String(v))) falhar("Email inválido.");
+  if ((k === "active" || k === "serves") && !v) alternarArmazem(db, id, k, false);
+  (w as unknown as Record<string, string | boolean>)[k] = v;
+}
+
 /** Eliminar só é possível sem stock, sem ser o por defeito e sem encomendas clientes a expedir daí. */
 export function eliminarArmazem(db: Inventario, id: string): void {
+  exigir("inventory.manage");
   const w = armazem(db, id);
   if (!w) return falhar("Armazém inexistente.");
   if (db.settings.defaultWh === id) falhar("É o armazém por defeito.");
@@ -63,6 +88,7 @@ export function eliminarArmazem(db: Inventario, id: string): void {
   w.active = false;
 }
 export function restaurarArmazem(db: Inventario, id: string): void {
+  exigir("inventory.manage");
   const w = armazem(db, id);
   if (w) w.deleted = false;
 }
@@ -74,11 +100,13 @@ export function definirArmazemPorDefeito(db: Inventario, id: string): void {
 
 /** Ativar ou desativar um fornecedor. */
 export function definirFornecedorAtivo(db: Inventario, id: string, v: boolean): void {
+  exigir("suppliers.manage");
   const s = fornecedor(db, id);
   if (!s) return falhar("Fornecedor inexistente.");
   s.active = v;
 }
 export function eliminarFornecedor(db: Inventario, id: string): void {
+  exigir("suppliers.manage");
   const s = fornecedor(db, id);
   if (!s) return falhar("Fornecedor inexistente.");
   if (db.pos.some((p) => p.sup === id && poOpen(p))) falhar("Tem encomendas em aberto: receba-as ou anule o resto primeiro.");
@@ -86,12 +114,14 @@ export function eliminarFornecedor(db: Inventario, id: string): void {
   if (s.portal === "active") s.portal = "revoked";
 }
 export function restaurarFornecedor(db: Inventario, id: string): void {
+  exigir("suppliers.manage");
   const s = fornecedor(db, id);
   if (s) s.deleted = false;
 }
 
 /** Marca um artigo como o preferido do produto (os outros deixam de o ser) e atualiza o custo do produto. */
 export function definirPreferido(db: Inventario, itemId: string): void {
+  exigir("suppliers.manage");
   const i = db.items.find((x) => x.id === itemId);
   if (!i) return falhar("Artigo inexistente.");
   for (const x of db.items) if (x.sku === i.sku) x.pref = false;
@@ -102,6 +132,7 @@ export function definirPreferido(db: Inventario, itemId: string): void {
 export interface DadosArtigo { sku: string; ref: string; packN: number; unitLabel: string; price: number | null; moq: number; lead: number }
 /** Acrescenta um artigo ao fornecedor (o primeiro de um produto fica como preferido). */
 export function adicionarArtigo(db: Inventario, supId: string, d: DadosArtigo): void {
+  exigir("suppliers.manage");
   const s = fornecedor(db, supId);
   if (!s) return falhar("Fornecedor inexistente.");
   if (!produto(db, d.sku)) falhar("Escolha um produto válido.");
@@ -115,6 +146,7 @@ export function adicionarArtigo(db: Inventario, supId: string, d: DadosArtigo): 
 }
 /** Remover um artigo falha com encomendas em aberto; o item do catálogo volta a "por ligar". */
 export function removerArtigo(db: Inventario, itemId: string): void {
+  exigir("suppliers.manage");
   const i = db.items.find((x) => x.id === itemId);
   if (!i) return falhar("Artigo inexistente.");
   if (db.pos.some((p) => poOpen(p) && p.lines.some((l) => l.itemId === itemId))) falhar("Há encomendas em aberto com este artigo: receba-as ou anule o resto primeiro.");
@@ -125,22 +157,27 @@ export function removerArtigo(db: Inventario, itemId: string): void {
 
 /** Decide uma alteração de preço submetida no portal: aceitar atualiza o artigo (e o custo se for o preferido). */
 export function decidirPreco(db: Inventario, id: string, aceitar: boolean, nota = ""): void {
+  exigir("products.manage_prices", "decidir preços");
   const c = db.prices.find((x) => x.id === id);
   if (!c || c.state !== "pending") falhar("Alteração já decidida.");
   if (aceitar) {
     const it = db.items.find((i) => i.id === c.itemId);
     if (!it) return falhar("Artigo inexistente.");
     c.state = "accepted";
+    it.history = [...(it.history ?? []), { at: agora(db), from: it.price, to: c.nw }];
     it.price = c.nw;
     if (it.pref) produtoObrigatorio(db, it.sku).cost = c.nw / it.packN;
   } else {
     c.state = "rejected";
     c.note = nota;
   }
+  c.decidedAt = agora(db);
+  c.by = utilizadorAtual();
 }
 
 /** Liga um artigo do catálogo do portal a um produto (cria o artigo do fornecedor). */
 export function ligarCatalogo(db: Inventario, cid: string, sku: string): void {
+  exigir("suppliers.manage", "ligar artigos");
   const c = db.catalog.find((x) => x.id === cid);
   if (!c) return;
   if (!produto(db, sku)) falhar("Produto inexistente.");
@@ -151,6 +188,7 @@ export function ligarCatalogo(db: Inventario, cid: string, sku: string): void {
   c.link = sku;
 }
 export function desligarCatalogo(db: Inventario, cid: string): void {
+  exigir("suppliers.manage", "desligar artigos");
   const c = db.catalog.find((x) => x.id === cid);
   if (!c) return;
   const idx = db.items.findIndex((x) => x.sup === c.sup && x.ref === c.ref);

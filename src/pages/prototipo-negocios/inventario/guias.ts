@@ -1,5 +1,5 @@
 // As guias do fornecedor: o que foi anunciado contra o que foi recebido, fechar com nota quando há divergências, reabrir e cancelar. Portado do mockup.
-import { HOJE, agora, exigirMotivo, falhar, guiaPorId, nomeForn } from "./base";
+import { HOJE, agora, exigir, exigirMotivo, falhar, guiaPorId, nomeForn, utilizadorAtual } from "./base";
 import type { Guia, Inventario } from "./tipos";
 
 export type TipoDiferenca = "ok" | "falta" | "excesso" | "div";
@@ -34,6 +34,7 @@ export function resumoGuia(db: Inventario, g: Guia): ResumoGuia {
 export interface DadosGuia { orig?: string | null; no: string; sup: string; date: string; wh: string; ann: { sku: string; qty: number }[] }
 /** Cria ou edita (só abertas) uma guia; o número é único por fornecedor. */
 export function guardarGuia(db: Inventario, d: DadosGuia): Guia {
+  exigir("inventory.receive", "gerir guias");
   const no = (d.no ?? "").trim();
   if (!no) falhar("Indique o número da guia.");
   if (!d.sup) falhar("Escolha o fornecedor.");
@@ -48,13 +49,14 @@ export function guardarGuia(db: Inventario, d: DadosGuia): Guia {
     g0.history.push({ at: agora(db), t: "Guia editada" });
     return g0;
   }
-  const g: Guia = { id: no, sup: d.sup, date: d.date || HOJE, wh: d.wh || db.settings.defaultWh, ann, pos: [], state: "open", note: "", history: [{ at: agora(db), t: "Guia criada por Admin Demo" }] };
+  const g: Guia = { id: no, sup: d.sup, date: d.date || HOJE, wh: d.wh || db.settings.defaultWh, ann, pos: [], state: "open", note: "", history: [{ at: agora(db), t: "Guia criada por " + utilizadorAtual() }] };
   db.guias.push(g);
   return g;
 }
 
 /** Fechar com divergências exige uma nota. */
 export function fecharGuia(db: Inventario, g: Guia, nota: string): void {
+  exigir("inventory.receive", "fechar guias");
   if (g.state !== "open") falhar("A guia não está aberta.");
   const s = resumoGuia(db, g);
   if (s.div && (!nota || nota.trim().length < 3)) falhar(`A guia tem ${s.div} divergência(s): escreva uma nota para fechar (mínimo 3 caracteres).`);
@@ -63,12 +65,14 @@ export function fecharGuia(db: Inventario, g: Guia, nota: string): void {
   g.history.push({ at: agora(db), t: "Fechada" + (nota ? ": " + nota : "") });
 }
 export function reabrirGuia(db: Inventario, g: Guia): void {
+  exigir("inventory.receive", "reabrir guias");
   if (g.state !== "closed") falhar("Só guias fechadas podem ser reabertas.");
   g.state = "open";
   g.history.push({ at: agora(db), t: "Reaberta" });
 }
 /** Cancelar exige motivo e não é possível com receções ativas (reverta-as na encomenda). */
 export function cancelarGuia(db: Inventario, g: Guia, motivo: string): void {
+  exigir("inventory.receive", "cancelar guias");
   if (g.state === "cancelled") falhar("Já cancelada.");
   exigirMotivo(motivo);
   if (resumoGuia(db, g).anyRec) falhar("A guia tem receções ativas. Reverta-as na encomenda antes de cancelar.");

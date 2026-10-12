@@ -1,6 +1,6 @@
 // Os dados de exemplo do Inventário (do mockup): construídos pelo próprio motor, como no original, com a data de hoje fixa (09/10/2026).
 // Tudo isto é inventado: produtos, fornecedores, clientes, encomendas e guias.
-import { mudou, nifCompleto, proximoId } from "./base";
+import { comoSistema, mudou, nifCompleto, proximoId } from "./base";
 import { criarContagem, finalizarContagem } from "./contagens";
 import { criarEc, sairLinha } from "./ec";
 import { cancelarGuia, fecharGuia, guardarGuia } from "./guias";
@@ -13,6 +13,7 @@ export function baseVazia(): Inventario {
   return {
     v: 0, seq: 0, n: { po: 131, ec: 84, tr: 6, inv: 11 }, settings: { autoPO: "direct", deduction: "contract", defaultWh: "LIS" },
     products: [], warehouses: [], stocks: [], suppliers: [], items: [], catalog: [], prices: [], pos: [], ecs: [], guias: [], counts: [], transfers: [], moves: [], vds: [], relogio: null,
+    rc: { wh: "LIS", guia: "GR 2026/312", sup: "zeta", poFilter: "", mode: "scanner", basket: [], rejected: [{ code: "7790001112223", at: "2026-10-09T08:41" }], queued: [], toSend: [{ sku: "KF-10", qty: 2, at: "2026-10-08T18:02" }], toConfirm: [{ items: [{ sku: "CS-6", qty: 100 }], at: "2026-10-08T17:55", err: "Sem rede ao confirmar" }], session: [], ack: false, net: true, result: null },
   };
 }
 
@@ -57,7 +58,7 @@ function fornecedores(db: Inventario): void {
     });
   };
   su("alfa", "Fornecedor Alfa Materiais", "FOR-001", "Lisboa", "Empresa A (Lisboa)", "509000001", 5, "active", "encomendas@alfa.exemplo", { web: "alfa.exemplo" });
-  su("beta", "Beta Climatização", "FOR-002", "Porto", "Empresa A (Lisboa)", "509000002", 7, "invited", "compras@beta.exemplo", { awaiting: true });
+  su("beta", "Beta Climatização", "FOR-002", "Porto", "Empresa A (Lisboa)", "509000002", 7, "invited", "compras@beta.exemplo", { awaiting: true, invite: { email: "compras@beta.exemplo", name: "Responsável de compras", state: "pending", at: "2026-10-01T10:00" } });
   su("gama", "Gama Elétrica", "FOR-003", "Braga", "Empresa B (Porto)", "509000003", 4, "none", "vendas@gama.exemplo");
   su("delta", "Delta Isolamentos", "FOR-004", "Coimbra", "Empresa A (Lisboa)", "509000004", 6, "revoked", "geral@delta.exemplo");
   su("eps", "Épsilon Ferragens", "FOR-005", "Leiria", "Empresa B (Porto)", "509000005", 3, "none", "pedidos@epsilon.exemplo");
@@ -222,6 +223,10 @@ function precosECatalogo(db: Inventario): void {
 
 /** A base de exemplo completa, no estado de 09/10/2026. */
 export function criarSeed(): Inventario {
+  return comoSistema(construirSeed);
+}
+
+function construirSeed(): Inventario {
   const db = baseVazia();
   produtos(db);
   armazens(db);

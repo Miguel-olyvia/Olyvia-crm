@@ -19,9 +19,12 @@ export function PesquisaGlobal() {
         onKeyDown={(e) => { if (e.key === "Escape") { setQ(""); setAberta(false); } }} />
       {aberta && q.trim() ? (
         <div className="gres" role="listbox" aria-label="Resultados da pesquisa">
-          {res.length ? res.map((r) => (
-            <button key={r.tipo + r.titulo} type="button" role="option" aria-selected="false" onClick={() => escolher(r)}><span className="gk">{r.tipo}</span><b>{r.titulo}</b><small>{r.sub}</small></button>
-          )) : <div className="empty" style={{ padding: 14 }}>Sem resultados para “{q.trim()}”.</div>}
+          {res.length ? <>
+            {res.map((r) => (
+              <button key={r.tipo + r.titulo} type="button" role="option" aria-selected="false" onClick={() => escolher(r)}><span className="gk">{r.tipo}</span><b>{r.titulo}</b><small>{r.sub}</small></button>
+            ))}
+            <span className="src" title="Fonte de dados">pesquisa unificada: purchase_orders · client_orders · products(sku, ean, product_codes) · suppliers · supplier_delivery_notes</span>
+          </> : <div className="empty" style={{ padding: 14 }}>Sem resultados para “{q.trim()}”.</div>}
         </div>
       ) : null}
     </div>

@@ -10,6 +10,10 @@ export interface Coluna<T> {
   valor?: (t: T) => Chave; direita?: boolean; largura?: string;
   /** O nome do cabeçalho para leitores de ecrã quando `titulo` não é texto (por exemplo uma caixa de seleção). */
   nome?: string;
+  /** Classe extra da célula (por exemplo `nowrap` ou `late`, como no mockup). */
+  classe?: (t: T) => string;
+  /** Estilo da célula (por exemplo `font-size:12.5px`, como no mockup); `largura` é o `min-width`. */
+  estilo?: React.CSSProperties;
 }
 export interface Ordem { col: string; dir: Direcao }
 
@@ -22,6 +26,8 @@ interface Props<T> {
   rolar?: boolean;
   /** Uma linha extra por baixo de cada linha (por exemplo o detalhe de um grupo). */
   extra?: (t: T) => ReactNode;
+  /** O que se mostra numa linha única quando não há linhas (o `empty()` dentro de `<td colspan>` do mockup). */
+  vazio?: ReactNode;
 }
 
 function Cabecalho<T>({ c, ordem, ordenar }: { c: Coluna<T>; ordem: Ordem | null; ordenar: (id: string) => void }) {
@@ -41,7 +47,7 @@ function Linha<T>({ t, p }: { t: T; p: Props<T> }) {
       <tr className={cn(abre && "click", p.classeLinha?.(t))} tabIndex={abre ? 0 : undefined} data-linha-func={abre ? "" : undefined} data-chave={abre ? k : undefined}
         aria-label={abre ? p.rotuloAbrir?.(t) : undefined} aria-haspopup={abre ? "dialog" : undefined}
         onClick={abre ? () => abre(t) : undefined} onKeyDown={abre ? (e) => { if (e.key === "Enter" && e.target === e.currentTarget) abre(t); } : undefined}>
-        {p.colunas.map((c) => <td key={c.id} className={cn(c.direita && "num")}>{c.celula(t)}</td>)}
+        {p.colunas.map((c) => <td key={c.id} className={cn(c.direita && "num", c.classe?.(t))} style={c.largura || c.estilo ? { minWidth: c.largura, ...c.estilo } : undefined}>{c.celula(t)}</td>)}
         {p.acoes && <td className="act" onClick={(e) => e.stopPropagation()}><div className="row-act">{p.acoes(t)}</div></td>}
       </tr>
       {p.extra?.(t)}
@@ -64,7 +70,7 @@ export function TabelaInv<T>(p: Props<T>) {
             {p.acoes && <th scope="col" className="acth"><span className="sr">Ações</span></th>}
           </tr>
         </thead>
-        <tbody>{linhas.map((t) => <Linha key={p.chave(t)} t={t} p={p} />)}</tbody>
+        <tbody>{linhas.length === 0 && p.vazio ? <tr><td colSpan={p.colunas.length + (p.acoes ? 1 : 0)}>{p.vazio}</td></tr> : linhas.map((t) => <Linha key={p.chave(t)} t={t} p={p} />)}</tbody>
       </table>
     </div>
   );

@@ -5,6 +5,7 @@ import { ArrowLeftRight, ArrowRight, GitFork, Play, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, fmtDT, N, nomeArm, nomeProd } from "./base";
 import { AcoesCab, Fonte } from "./cabInv";
+import { can } from "./perfil";
 import { contadores, type Contadores } from "./contadores";
 import { useCtxInv, type Destino } from "./ctxInv";
 import { TIPOS_MOV } from "./stock";
@@ -90,7 +91,7 @@ function Fluxo({ c }: { c: Contadores }) {
       <div className="stage"><h3><span className="no">5</span>Stock</h3>
         <div className="flow-top">
           <Cnt r="Abaixo do ponto de encomenda" n={c.low} tom="warn" ir={() => ir({ aba: "stock", f: { state: "low" } })} /><Cnt r="Transferências pendentes" n={c.transfers} ir={() => ir({ aba: "stock", f: { transferencias: true } })} />
-          <Cnt r="Contagens em curso" n={c.countsOpen} ir={() => ir({ aba: "cont", f: { estado: "open" } })} /><Cnt r="Valor em stock (custo médio)" n={eur(c.stockValue)} ir={() => ir({ aba: "stock" })} />
+          <Cnt r="Contagens em curso" n={c.countsOpen} ir={() => ir({ aba: "cont", f: { estado: "open" } })} /><Cnt r="Valor em stock (custo médio)" n={can("purchase_orders.view_prices") ? eur(c.stockValue) : "—"} ir={() => ir({ aba: "stock" })} />
         </div>
         <small className="muted">A receção fecha o ciclo: a parte “para EC” fica reservada e serve a encomenda; a parte “para stock” entra livre e atualiza o custo médio ponderado.</small>
         <Fonte>stocks · stock_movements · products.average_cost</Fonte></div>
