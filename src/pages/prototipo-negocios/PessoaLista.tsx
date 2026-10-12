@@ -1,14 +1,17 @@
 // A página de Pessoas, sem a ficha: dois separadores principais (Dashboard e Lista, a Lista por defeito) e, por baixo, a barra de filtros única
 // (ListaTopo) que se aplica aos dois. A lista ocupa a largura toda; o cabeçalho fica fixo e as linhas rolam; ao escolher uma pessoa abre-se a ficha num painel.
 import { useEffect, useRef } from "react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { SEPARADORES_LISTA, type Ordem, type SeparadorLista } from "./pessoasDocs";
-import { SEM_FILTROS_P, listaP, selecionar, type FiltrosP, type LinhaP } from "./filtrosPessoas";
+import { SEM_FILTROS_P, contagensP, listaP, selecionar, type FiltrosP, type LinhaP } from "./filtrosPessoas";
 import type { AcaoP } from "./dashboardPessoas";
 import { BORDA_CTRL } from "./PessoaLinha";
-import { ListaTopo, PessoasCabecalho, type Vista } from "./ListaTopo";
+import { ListaTopo, type Vista } from "./ListaTopo";
+import { CabecalhoPagina } from "./CabecalhoPagina";
+import { PessoasResumo } from "./PessoasResumo";
 import { PessoaTabela } from "./PessoaTabela";
 import { PessoasDashboard } from "./PessoasDashboard";
 import type { Estado } from "./motor";
@@ -34,6 +37,15 @@ export interface ListaProps {
   pedidoFoco: number;
   /** Leitura fácil ativa: o painel dos filtros, que abre num portal, também a aplica. */
   leitura: boolean;
+}
+
+const TAB = "cursor-pointer text-[15px]";
+const mais = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
+
+/** "14 leads e 5 clientes, mais 2 perdidas": as pessoas de todos os separadores, sem filtros. */
+function resumoPessoas(linhas: readonly LinhaP[]): string {
+  const n = contagensP(linhas, "");
+  return `${mais(n.leads, "lead", "leads")} e ${mais(n.clientes, "cliente", "clientes")}, mais ${mais(n.todos - n.leads - n.clientes, "perdida", "perdidas")}`;
 }
 
 const PLURAL: Record<SeparadorLista, string> = { leads: "leads", clientes: "clientes", todos: "pessoas" };
@@ -70,9 +82,17 @@ export function PessoaLista({ S, linhas, aba, setAba, vista, setVista, f, setF, 
   const titulo = SEPARADORES_LISTA.find((s) => s.id === aba)!.nome;
   return (
     <Tabs value={vista} onValueChange={(v) => setVista(v as Vista)} className="min-w-0">
-      <PessoasCabecalho novaLead={novaLead} />
+      <div className="px-4">
+        <CabecalhoPagina migalhas={`Pessoas › ${vista === "lista" ? "Lista" : "Dashboard"}`} titulo="Pessoas" subtitulo={resumoPessoas(linhas)}
+          acoes={<Button type="button" className="min-h-11 cursor-pointer text-[15px]" onClick={novaLead}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova lead</Button>} />
+        <TabsList aria-label="Vista" className="abas-inv">
+          <TabsTrigger value="dashboard" className={TAB}>Dashboard</TabsTrigger>
+          <TabsTrigger value="lista" className={TAB}>Lista</TabsTrigger>
+        </TabsList>
+      </div>
       <div aria-live="polite" aria-atomic="true" className="sr-only">{aviso}</div>
       <TabsContent value={vista} className="mt-0">
+        {vista === "lista" && <PessoasResumo linhas={linhas} aba={aba} f={f} aoAgir={agir} />}
         <Tabs value={aba} onValueChange={(v) => setAba(v as SeparadorLista)} className="min-w-0">
           <ListaTopo linhas={linhas} aba={aba} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} total={visiveis.length} leitura={leitura} pesquisa={pesquisa} />
           <TabsContent value={aba} className="mt-0 pb-24 lg:pb-6">
@@ -83,7 +103,7 @@ export function PessoaLista({ S, linhas, aba, setAba, vista, setVista, f, setF, 
             )}
             {vista === "dashboard" ? <PessoasDashboard linhas={linhas} aba={aba} f={f} aoAgir={agir} limpar={limpar} /> : todas.length === 0 ? <SeparadorVazio aba={aba} /> : visiveis.length === 0 ? <SemResultados limpar={limpar} pesquisa={f.q.trim() !== ""} /> : (
               <>
-                <PessoaTabela S={S} pessoas={visiveis.map((l) => l.p)} titulo={titulo} abrir={abrir} />
+                <div className="tw mx-4 mt-3"><PessoaTabela S={S} pessoas={visiveis.map((l) => l.p)} titulo={titulo} abrir={abrir} /></div>
                 <p className="px-4 pt-3 text-[15px] text-muted-foreground">Exemplo: as pessoas marcadas exemplo, o negócio novo juntado a clientes, a qualificação (MQL e SQL), o resultado do último contacto, a saúde, as notas e os pagamentos são inventados para a demonstração.</p>
               </>
             )}

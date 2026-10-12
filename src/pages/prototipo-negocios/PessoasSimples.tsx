@@ -86,7 +86,7 @@ export function PessoasSimples({ S, A, go, abrirEm, alvoAvisos }: Ctx & { abrirE
   const leitura = !!S.leitura;
 
   return (
-    <div className={cn("mx-auto w-full max-w-[1600px]", leitura && "pessoas-leitura")}>
+    <div className={cn("pg-root mx-auto w-full max-w-[1600px]", leitura && "pessoas-leitura")}>
       <PessoaLista S={S} linhas={linhas} aba={aba} setAba={setLista} vista={vista} setVista={setVista} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} leitura={leitura} abrir={setSel}
         novaLead={go(() => A.novo())} agir={agir} aviso={aviso} pedidoFoco={pedidoFoco} />
       <PessoaPainel S={S} A={A} go={go} p={escolhida} nomes={nomes} leitura={leitura} sep={sep} aoMudarSep={setSep} abrir={setSel} fechar={() => setSel(null)} alvoAvisos={alvoAvisos} />

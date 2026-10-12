@@ -1,8 +1,6 @@
-// O cabeçalho da página Pessoas, em duas partes. PessoasCabecalho: título, Nova lead e os separadores Dashboard e Lista.
-// ListaTopo (a barra de filtros, única e partilhada pelos dois): pesquisa, Leads, Clientes e Todos com as contagens, o botão Filtros, os chips rápidos,
+// A barra de filtros da página Pessoas. ListaTopo (única e partilhada pelo dashboard e pela lista): pesquisa, Leads, Clientes e Todos com as contagens, o botão Filtros, os chips rápidos,
 // os filtros ativos (chips removíveis, com Limpar tudo) e o contador de resultados (aria-live). Tudo o que se filtra aqui vale para a lista e para o dashboard.
-import { Plus, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Search } from "lucide-react";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { SEPARADORES_LISTA, type Ordem, type SeparadorLista } from "./pessoasDocs";
@@ -22,24 +20,6 @@ export type Vista = "dashboard" | "lista";
 export const contagemTexto = (n: number): string => (n === 0 ? "Nenhuma pessoa" : n === 1 ? "1 pessoa" : `${n} pessoas`);
 
 const TAB = "h-11 min-w-11 cursor-pointer rounded-none px-4 text-[15px] data-[state=active]:bg-foreground data-[state=active]:text-background";
-
-/** Título, Nova lead e os dois separadores principais. Fica dentro do <Tabs> da vista. */
-export function PessoasCabecalho({ novaLead }: { novaLead: () => void }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-1">
-      <h1 className="text-2xl font-semibold tracking-tight">Pessoas</h1>
-      <div className="flex flex-wrap items-center gap-2">
-        <TabsList aria-label="Vista" className="h-11 gap-0 overflow-hidden p-0">
-          <TabsTrigger value="dashboard" className={TAB}>Dashboard</TabsTrigger>
-          <TabsTrigger value="lista" className={TAB}>Lista</TabsTrigger>
-        </TabsList>
-        <Button type="button" variant="outline" className={cn("min-h-11 cursor-pointer text-[15px]", BORDA_CTRL)} onClick={novaLead}>
-          <Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova lead
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 export interface TopoProps {
   linhas: readonly LinhaP[];
@@ -89,7 +69,7 @@ export function ListaTopo(props: TopoProps) {
       <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
         <Pesquisa f={f} setF={setF} pesquisa={pesquisa} />
         <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:flex-1">
-          <TabsList aria-label="Tipo de pessoa" className="h-11 gap-0 overflow-hidden p-0">
+          <TabsList aria-label="Tipo de pessoa" className="abas-inv h-11 gap-0 overflow-hidden p-0">
             {SEPARADORES_LISTA.map(({ id, nome }) => (
               <TabsTrigger key={id} value={id} className={TAB}>{nome}<span className="ml-1.5 tabular-nums opacity-70">{porAba[id]}</span></TabsTrigger>
             ))}

@@ -135,7 +135,7 @@ describe("Inventário no menu lateral", () => {
     fireEvent.click(cabecalho());
     const nomes = m.getAllByRole("button").map((b) => b.querySelector("span")!.textContent!.trim());
     expect(nomes.slice(0, 12)).toEqual(["Inventário", "Hoje", "Compras", "Encomendas", "Fornecedores", "Armazém", "Existências", "Movimentos Novo", "Saídas para clientes", "Receção", "Contagens", "Armazéns"]);
-    expect(nomes[12]).toBe("Mockup · cobertura");
+    expect(nomes).toHaveLength(12);
     expect(within(m.getByRole("group", { name: "Compras" })).getAllByRole("button")).toHaveLength(3);
     expect(within(m.getByRole("group", { name: "Armazém" })).getAllByRole("button")).toHaveLength(7);
     expect(m.queryByRole("button", { name: /Inventário completo/ })).toBeNull();

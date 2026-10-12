@@ -12,6 +12,8 @@ import { SEM_FILTROS_N, linhasNegocios, selecionarQuadro, type AcaoN, type Conte
 import { Chip, FASE_COR, type Ctx } from "./pecas";
 import { BarraFiltrosN } from "./NegociosFiltros";
 import { NegociosDashboard } from "./NegociosDashboard";
+import { NegociosResumo } from "./NegociosResumo";
+import { CabecalhoPagina } from "./CabecalhoPagina";
 import { esquecerMaisGraficos } from "./MaisGraficos";
 import { NegocioExemploPainel } from "./NegocioExemploPainel";
 import { escolherPessoa } from "./PessoasSimples";
@@ -24,7 +26,7 @@ let memoria: Memoria = MEMORIA_VAZIA;
 /** Esquece o separador e os filtros (quando a demonstração é reposta). */
 export function esquecerNegociosV2(): void { memoria = MEMORIA_VAZIA; esquecerMaisGraficos(); }
 
-const TAB = "h-11 min-w-11 cursor-pointer rounded-none px-4 text-[15px] data-[state=active]:bg-foreground data-[state=active]:text-background";
+const TAB = "cursor-pointer text-[15px]";
 const ICONE: Record<DocFase, { i: LucideIcon; cor: string }> = {
   orcamento: { i: FileText, cor: FASE_COR[0] },
   proposta: { i: FileCheck2, cor: FASE_COR[3] },
@@ -92,7 +94,7 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
     // Uma só fonte para a marca "exemplo" e para a ação: um negócio sem página própria abre o painel, os da seed abrem o negócio.
     const deExemplo = semPaginaPropria(c);
     return (
-      <li key={c.id} className="rounded-xl border border-border bg-card">
+      <li key={c.id} className={cn("cartaoq rounded-xl border border-border bg-card", `f-${c.doc}`)}>
         <button type="button" onClick={deExemplo ? (e) => { cartaoClicado.current = e.currentTarget; setExemplo(c.id); } : go(() => A.abrir(c.negocioId))}
           className="group block min-h-11 w-full rounded-xl p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <span className="mb-2 flex items-center gap-2 text-[15px] text-muted-foreground">
@@ -141,7 +143,7 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
     const cs = visiveis.filter((c) => c.doc === id);
     const total = cs.reduce((a, c) => a + (c.valor || 0), 0);
     return (
-      <section key={id} aria-labelledby={`v2-col-${id}-${suf}`} className="min-w-0">
+      <section key={id} aria-labelledby={`v2-col-${id}-${suf}`} className="colq min-w-0">
         <h2 id={`v2-col-${id}-${suf}`} className="flex items-center gap-2 px-1 text-[16px] font-semibold">
           <Chip icone={ICONE[id].i} cor={ICONE[id].cor} className={CHIP_PEQ} />
           <span className="flex-1">{NOME_DOC[id]}</span>
@@ -157,16 +159,18 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   };
 
   return (
-    <Tabs value={vista} onValueChange={(v) => setVista(v as VistaN)} className="mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Negócios</h1>
-          <p className="mt-1 text-base text-muted-foreground">{visiveis.length} no Quadro{visiveis.length !== todos.length && ` (de ${todos.length})`} · {eur0(emProposta)} € em proposta</p>
-        </div>
-        {seletor}
-      </header>
+    <Tabs value={vista} onValueChange={(v) => setVista(v as VistaN)} className="pg-root mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-8">
+      <CabecalhoPagina migalhas={`Negócios › ${vista === "quadro" ? "Quadro" : "Dashboard"}`} titulo="Negócios"
+        subtitulo={`${visiveis.length} no Quadro${visiveis.length !== todos.length ? ` (de ${todos.length})` : ""} · ${eur0(emProposta)} € em proposta`}
+        acoes={(
+          <>
+            {seletor}
+            <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("clientes"))}>Ver em Clientes</Button>
+            <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("operacoes"))}>Ver em Operações</Button>
+          </>
+        )} />
 
-      <TabsList aria-label="Vista" className="mt-4 h-11 gap-0 overflow-hidden p-0">
+      <TabsList aria-label="Vista" className="abas-inv">
         <TabsTrigger value="quadro" className={TAB}>Quadro</TabsTrigger>
         <TabsTrigger value="dashboard" className={TAB}>Dashboard</TabsTrigger>
       </TabsList>
@@ -178,6 +182,7 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
       <TabsContent value={vista} className="mt-0">
         {vista === "dashboard" ? <NegociosDashboard linhas={linhas} ctx={ctx} aoAgir={agir} verAtrasos={verAtrasos} limpar={go(limpar)} A={A} go={go} /> : (
           <>
+          <div className="mt-6"><NegociosResumo linhas={linhas} ctx={ctx} aoAgir={agir} verAtrasos={verAtrasos} /></div>
           <h2 ref={tituloQuadro} tabIndex={-1} className="sr-only focus:not-sr-only focus:mt-6 focus:rounded-md focus:text-[16px] focus:font-semibold focus:outline-none focus:ring-2 focus:ring-primary">
             Quadro
           </h2>
@@ -205,12 +210,9 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
           {/* Computador: as quatro colunas lado a lado */}
           <div className="mt-8 hidden gap-5 lg:grid lg:grid-cols-4">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
 
-          <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-border pt-5">
-            <p className="text-[15px] text-muted-foreground">{antes} {antes === 1 ? "pessoa ainda em" : "pessoas ainda em"} lead, contacto ou visita.</p>
-            <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("clientes"))}>Ver em Clientes</Button>
-            <p className="text-[15px] text-muted-foreground">Os negócios já em obra veem-se em Operações.</p>
-            <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("operacoes"))}>Ver em Operações</Button>
-          </div>
+          <p className="mt-8 border-t border-border pt-5 text-[15px] text-muted-foreground">
+            {antes} {antes === 1 ? "pessoa ainda em" : "pessoas ainda em"} lead, contacto ou visita (em Clientes). Os negócios já em obra veem-se em Operações.
+          </p>
           </>
         )}
       </TabsContent>

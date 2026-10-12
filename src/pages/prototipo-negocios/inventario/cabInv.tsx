@@ -27,7 +27,7 @@ export function Cab({ aba }: { aba: AbaInv }) {
       ) : null}
     <div className="ph">
       <div>
-        <div className="crumbs">{aba === "cov" ? "Mockup" : `Inventário${g ? ` › ${g.t}` : ""}`}</div>
+        <div className="crumbs">{`Inventário${g ? ` › ${g.t}` : ""}`}</div>
         <h1>{titulo}</h1>
         <p className="muted" style={{ marginTop: 4, maxWidth: 760 }}>{sub}</p>
       </div>

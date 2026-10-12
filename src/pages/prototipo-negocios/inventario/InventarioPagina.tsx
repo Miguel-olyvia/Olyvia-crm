@@ -22,7 +22,6 @@ import { TITULOS } from "./menuInv";
 import { PesquisaGlobal } from "./PesquisaGlobal";
 import "./inventario.css";
 import { ArmazensInv } from "./ArmazensInv";
-import { CoberturaInv } from "./CoberturaInv";
 import { ContagensInv } from "./ContagensInv";
 import { EcInv } from "./EcInv";
 import { EncomendasInv } from "./EncomendasInv";
@@ -47,7 +46,6 @@ function Painel({ aba }: { aba: AbaInv }) {
     case "guia": return <GuiasInv />;
     case "cont": return <ContagensInv />;
     case "wh": return <ArmazensInv />;
-    case "cov": return <CoberturaInv />;
     default: return <HojeInv />;
   }
 }

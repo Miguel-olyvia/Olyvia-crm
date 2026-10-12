@@ -1,0 +1,71 @@
+/* O vocabulário visual do Inventário (inventario.css) para as páginas Negócios V2 e Pessoas V2: cabeçalho com migalhas, faixa de KPIs, fila de trabalho,
+   abas sublinhadas, chips, tabela e colunas. Escopo .pg-root: nada aqui chega à Atual nem à V2 funcional. As cores vêm dos tokens do protótipo. */
+.pg-root{
+  --g-card:hsl(var(--card));--g-bg:hsl(var(--background));--g-fg:hsl(var(--foreground));--g-muted:hsl(var(--muted));--g-muted-fg:hsl(var(--muted-foreground));
+  --g-border:hsl(var(--border));--g-primary:hsl(var(--primary));--g-primary-fg:hsl(var(--primary-foreground));--g-primary-soft:hsl(var(--primary)/.1);
+  --g-radius:var(--radius);--g-ring:hsl(var(--ring));
+  --g-ok:color-mix(in srgb,hsl(var(--success)) 60%,hsl(var(--foreground)));
+  --g-warn:color-mix(in srgb,hsl(var(--warning)) 55%,hsl(var(--foreground)));
+  --g-bad:color-mix(in srgb,hsl(var(--destructive)) 70%,hsl(var(--foreground)));
+  --g-info:color-mix(in srgb,hsl(214 85% 50%) 60%,hsl(var(--foreground)));
+  --g-vio:color-mix(in srgb,hsl(var(--primary)) 70%,hsl(var(--foreground)));
+  --g-shadow:0 1px 2px rgb(0 0 0/.06),0 6px 20px rgb(0 0 0/.08);
+}
+.pg-root .ph{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap;margin:14px 0 16px}
+.pg-root .ph h1{font-size:22px;font-weight:700;line-height:1.25;letter-spacing:0}
+.pg-root .ph-sub{margin:4px 0 0;max-width:760px;font-size:14px;color:var(--g-muted-fg)}
+.pg-root .ph-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pg-root .crumbs{font-size:12.5px;color:var(--g-muted-fg);margin-bottom:2px}
+.pg-root .blk-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin:0 0 10px}
+.pg-root .blk-h h2{font-size:16px;font-weight:650}
+.pg-root .blk-h span{font-size:12.5px;color:var(--g-muted-fg)}
+.pg-root .blk{margin-bottom:22px}
+.pg-root .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px}
+.pg-root .kpi{background:var(--g-card);border:1px solid var(--g-border);border-radius:var(--g-radius);padding:12px 14px;text-align:left;display:flex;flex-direction:column;gap:2px;box-shadow:var(--g-shadow);min-width:0;min-height:44px;color:var(--g-fg)}
+.pg-root button.kpi{cursor:pointer}
+.pg-root button.kpi:hover{border-color:var(--g-primary)}
+.pg-root .kl{font-size:12.5px;color:var(--g-muted-fg);font-weight:550}
+.pg-root .kv{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.pg-root .kh{font-size:12px;color:var(--g-muted-fg)}
+.pg-root .k-warn .kv{color:var(--g-warn)}
+.pg-root .k-bad .kv{color:var(--g-bad)}
+.pg-root .k-ok .kv{color:var(--g-ok)}
+.pg-root .k-info .kv{color:var(--g-info)}
+.pg-root .queue{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.pg-root .qcard{display:flex;gap:12px;align-items:flex-start;text-align:left;background:var(--g-card);border:1px solid var(--g-border);border-left:4px solid var(--g-muted-fg);border-radius:var(--g-radius);padding:12px 14px;cursor:pointer;box-shadow:var(--g-shadow);min-width:0;min-height:44px;color:var(--g-fg)}
+.pg-root .qcard:hover{border-color:var(--g-primary)}
+.pg-root .qcard .qn{font-size:24px;font-weight:700;min-width:36px;font-variant-numeric:tabular-nums;line-height:1.2}
+.pg-root .qcard.t-warn{border-left-color:hsl(38 92% 50%)}
+.pg-root .qcard.t-bad{border-left-color:var(--g-bad)}
+.pg-root .qcard.t-ok{border-left-color:var(--g-ok)}
+.pg-root .qcard.t-info{border-left-color:hsl(214 80% 55%)}
+.pg-root .qcard.zero{opacity:.6}
+.pg-root .qcard .qt{display:block;font-weight:650}
+.pg-root .qcard .qd{display:block;font-size:12.5px;color:var(--g-muted-fg)}
+.pg-root .qcard .go{margin-top:4px;font-size:12.5px;color:var(--g-primary);font-weight:600;display:inline-flex;gap:4px;align-items:center}
+.pg-root .qcard .go svg{width:14px;height:14px}
+.pg-root :is(.kpi,.qcard):focus-visible,.pg-root .abas-inv [role=tab]:focus-visible{outline:2px solid var(--g-ring);outline-offset:2px}
+/* Abas sublinhadas, como as do Inventário (só com a classe abas-inv). */
+.pg-root .abas-inv[role=tablist]{display:flex;gap:2px;height:auto;padding:0;border-radius:0;background:none;border-bottom:1px solid var(--g-border);overflow-x:auto;scrollbar-width:thin;justify-content:flex-start}
+.pg-root .abas-inv [role=tab]{height:auto;min-height:44px;border-radius:0;background:none;box-shadow:none;border-bottom:2px solid transparent;margin-bottom:-1px;padding:10px 14px;font-weight:550;color:var(--g-muted-fg);white-space:nowrap}
+.pg-root .abas-inv [role=tab]:hover{color:var(--g-fg)}
+.pg-root .abas-inv [role=tab][data-state=active]{background:none;color:var(--g-primary);border-bottom-color:var(--g-primary)}
+/* Chips de filtro: o ativo enche com a cor primária, como no Inventário. */
+.pg-root [role=group] button[aria-pressed=true].rounded-full{background:var(--g-primary);border-color:var(--g-primary);color:var(--g-primary-fg)}
+.pg-root [role=group] button[aria-pressed=false].rounded-full{background:var(--g-card)}
+/* Tabela e quadro: cartão com borda, sombra e cabeçalho em cinzento. */
+.pg-root .tw{position:relative;overflow-x:auto;border:1px solid var(--g-border);border-radius:var(--g-radius);background:var(--g-card);box-shadow:var(--g-shadow);max-width:100%}
+.pg-root .tw thead th{background:var(--g-muted);color:var(--g-muted-fg);font-size:12px;font-weight:650;border-bottom:1px solid var(--g-border);white-space:nowrap}
+.pg-root .tw tbody tr:last-child td{border-bottom:0}
+.pg-root .tw tbody tr:hover td{background:var(--g-muted)}
+.pg-root .tw ul{border:0}
+.pg-root .colq{background:var(--g-card);border:1px solid var(--g-border);border-radius:var(--g-radius);box-shadow:var(--g-shadow);padding:12px}
+.pg-root .cartaoq{border-left-width:4px;box-shadow:var(--g-shadow)}
+.pg-root .cartaoq:hover{border-color:var(--g-primary)}
+.pg-root .cartaoq.f-orcamento{border-left-color:hsl(214 80% 55%)}
+.pg-root .cartaoq.f-proposta{border-left-color:hsl(38 92% 50%)}
+.pg-root .cartaoq.f-contrato{border-left-color:var(--g-ok)}
+.pg-root .cartaoq.f-financeiro{border-left-color:var(--g-vio)}
+@media (max-width:640px){
+.pg-root .queue{grid-template-columns:1fr}
+}

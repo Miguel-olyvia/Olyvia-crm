@@ -1,6 +1,6 @@
 // A estrutura do menu do Inventário (o grupo do menu geral), igual à do mockup (NAV e AREAS): a entrada Hoje, o grupo Compras e o grupo Armazém, e os contadores de cada item.
 // Os contadores são as contas do mockup (função counts() e o objeto badge da barra lateral), calculadas da base em memória.
-import { Home, Layers, ShoppingCart, Warehouse, type LucideIcon } from "lucide-react";
+import { Home, ShoppingCart, Warehouse, type LucideIcon } from "lucide-react";
 import { contadores } from "./contadores";
 import type { AbaInv } from "./ctxInv";
 import type { Inventario } from "./tipos";
@@ -17,14 +17,13 @@ export const GRUPOS: readonly GrupoMenu[] = [
 ];
 export const ICONE_INVENTARIO = ShoppingCart;
 export const ICONE_HOJE = Home;
-export const ICONE_COBERTURA = Layers;
 
 export type TomPilula = "" | "warn" | "bad";
 export interface Pilula { n: number; tom: TomPilula; dica: string }
 
 /** O nome de cada ecrã, tal como o mockup o usa (NAV). */
 export const NOME_ABA: Record<AbaInv, string> = {
-  hoje: "Hoje", po: "Encomendas", sup: "Fornecedores", stock: "Existências", mov: "Movimentos", ec: "Saídas para clientes", guia: "Receção", cont: "Contagens", wh: "Armazéns", cov: "Cobertura",
+  hoje: "Hoje", po: "Encomendas", sup: "Fornecedores", stock: "Existências", mov: "Movimentos", ec: "Saídas para clientes", guia: "Receção", cont: "Contagens", wh: "Armazéns",
 };
 export const grupoDe = (aba: AbaInv): GrupoMenu | undefined => GRUPOS.find((g) => g.itens.some((i) => i.aba === aba));
 
@@ -58,6 +57,5 @@ export const TITULOS: Record<AbaInv, [string, string]> = {
   ec: ["Saídas para clientes", "Encomendas Clientes: o que existe em stock é reservado (FIFO) e sai do armazém de expedição; o que falta vai para a encomenda ao fornecedor preferencial. Requer inventário + contratos."],
   guia: ["Receção", "Receber mercadoria por código no telemóvel ou manualmente na encomenda. A receção fecha o fluxo: a parte para EC serve a encomenda de cliente; a parte para stock entra livre e atualiza o custo médio."],
   cont: ["Contagens", "Contagens físicas por armazém e categoria. Só fecham sem diferenças por resolver; as diferenças ajustadas geram movimentos de ajuste no livro."],
-  cov: ["Mockup · cobertura", "Cada funcionalidade atual e onde fica na nova UI, com a fonte de dados (que não muda). Nada é removido nem enfraquecido."],
   wh: ["Armazéns", "Onde está o stock. Só armazéns ativos e que servem clientes entram na reserva FIFO das Encomendas Clientes; um armazém desligado continua a receber e guardar stock."],
 };

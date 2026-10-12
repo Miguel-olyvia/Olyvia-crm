@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AbaInv } from "./ctxInv";
-import { GRUPOS, ICONE_COBERTURA, ICONE_HOJE, ICONE_INVENTARIO, grupoDe, pilulas, totalFila, type Pilula, type TomPilula } from "./menuInv";
+import { GRUPOS, ICONE_HOJE, ICONE_INVENTARIO, grupoDe, pilulas, totalFila, type Pilula, type TomPilula } from "./menuInv";
 import { podePerfil, usePerfil } from "./perfil";
 import { useInventario } from "./loja";
 
@@ -62,9 +62,6 @@ export default function MenuInventario({ aba, aoIr, iniciarAberto = false }: Pro
               </div>
             );
           })}
-          <button type="button" className={estiloSub(aba === "cov")} aria-current={aba === "cov" ? "page" : undefined} onClick={() => aoIr("cov")}>
-            <ICONE_COBERTURA className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="flex-1">Mockup · cobertura</span>
-          </button>
         </div>
       ) : null}
     </div>

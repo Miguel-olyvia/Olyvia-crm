@@ -291,7 +291,6 @@
 .inv-root .gsearch input{padding-left:38px !important}
 .inv-root .inp-ic input{padding-left:34px !important}
 .inv-root b.mono,.inv-root span.mono,.inv-root button.mono,.inv-root td.mono{white-space:nowrap}
-.inv-root td.cov-src{white-space:normal}
 .inv-root .tw td.act{position:sticky;right:0;background:var(--i-card);box-shadow:-10px 0 10px -10px rgb(0 0 0/.25)}
 .inv-root .tw th.acth{position:sticky;right:0;background:var(--i-muted)}
 .inv-root tr.click:hover td.act{background:var(--i-muted)}
