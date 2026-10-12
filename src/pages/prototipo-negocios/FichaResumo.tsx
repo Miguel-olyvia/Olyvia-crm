@@ -65,6 +65,8 @@ export interface ResumoProps extends Pick<Ctx, "S" | "A" | "go"> {
   f: Perfil;
   /** Fecha a ficha (depois de marcar a lead como perdida). */
   voltar: () => void;
+  /** Opcional (V2 funcional): o conteúdo do bloco Contacto (com os botões de copiar). Sem ele, a lista de sempre. */
+  contacto?: ReactNode;
 }
 
 /** Saúde (com a barra, de exemplo), o último contacto com o resultado e os factos pequenos, em etiqueta e valor. */
@@ -102,7 +104,7 @@ function PassoOuPerda({ S, p, f }: { S: Estado; p: PessoaApp; f: Perfil }) {
   );
 }
 
-export function FichaResumo({ S, A, go, p, f, voltar }: ResumoProps) {
+export function FichaResumo({ S, A, go, p, f, voltar, contacto }: ResumoProps) {
   const d = p.principal;
   const avisos = avisosDe(S, p, f), origem = infoOrigemDe(S, p).origem.filter((c) => CAMPOS_ORIGEM.includes(c.rotulo));
   // Uma pessoa de exemplo não tem negócio no Estado: perde-se só na memória da sessão (perdaDocs.ts), sem tocar no negócio base.
@@ -117,7 +119,7 @@ export function FichaResumo({ S, A, go, p, f, voltar }: ResumoProps) {
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-6">
       <PassoOuPerda S={S} p={p} f={f} />
       {avisos.length > 0 && <Secao titulo="Avisos"><ul className="grid gap-2">{avisos}</ul></Secao>}
-      <Secao titulo="Contacto"><ListaCampos campos={camposContacto(f, p.empresa)} larg="9rem" /></Secao>
+      <Secao titulo="Contacto">{contacto ?? <ListaCampos campos={camposContacto(f, p.empresa)} larg="9rem" />}</Secao>
       <Secao titulo="Origem" exemplo><ListaCampos campos={origem} larg="9rem" /></Secao>
       <Secao titulo="Sobre a pessoa"><Factos p={p} f={f} /></Secao>
       <NotasRapidas f={f} />

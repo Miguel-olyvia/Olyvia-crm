@@ -71,8 +71,9 @@ const TIPO_ATIV: Record<ItemAtividade["tipo"], { i: LucideIcon; nome: string; co
   email: { i: Mail, nome: "Email", cor: FASE_COR[0] }, nota: { i: NotebookPen, nome: "Nota", cor: FASE_COR[2] },
 };
 
-export function SepAtividade({ S, p, f }: { S: Estado; p: PessoaApp; f: Perfil }) {
-  const itens = atividadeDe(p, S, f);
+/** `registados` (opcional, V2 funcional): as linhas registadas agora, que entram no topo (a coluna da data diz "registado agora"). */
+export function SepAtividade({ S, p, f, registados = [] }: { S: Estado; p: PessoaApp; f: Perfil; registados?: ItemAtividade[] }) {
+  const itens = [...registados, ...atividadeDe(p, S, f)];
   if (!itens.length) return <Vazio texto="Ainda não se passou nada com esta pessoa." />;
   return (
     <ol className="divide-y divide-border border-y border-border" aria-label="Atividade, da mais recente para a mais antiga">

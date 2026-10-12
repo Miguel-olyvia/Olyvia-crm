@@ -77,9 +77,11 @@ interface CabecalhoProps {
   aoProximo: () => void;
   /** As setas Anterior e Seguinte, a posição e Fechar (vêm do painel). */
   topo: ReactNode;
+  /** Opcional (V2 funcional): a barra de ações no lugar de Ligar, WhatsApp e Email. Sem ela, fica como sempre. */
+  acoes?: ReactNode;
 }
 
-export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
+export function FichaCabecalho({ p, f, nx, aoProximo, topo, acoes }: CabecalhoProps) {
   // O cliente já diz "Cliente" no início: a etapa só acrescenta algo às leads; no cliente, o que importa é um negócio novo em curso.
   // Numa lead perdida a etapa é a etiqueta "Perdida" junto ao nome (o motivo está no Resumo).
   const etapa = p.perdida !== null ? "" : p.papel === "lead" ? etapaTexto(p) : p.novoNegocio ? "Novo negócio em curso" : "";
@@ -107,7 +109,7 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
         {topo}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Contactos f={f} nome={p.nome} />
+        {acoes ?? <Contactos f={f} nome={p.nome} />}
         {p.perdida === null && (
           <Button className={cn(BOTAO, "h-auto cursor-pointer whitespace-normal py-2 text-left")} onClick={aoProximo}>
             {p.exemplo ? "Ver negócios" : nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />

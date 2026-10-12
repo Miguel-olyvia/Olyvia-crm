@@ -10,7 +10,8 @@ import type { PessoaApp } from "./pessoasDocs";
 import { posicaoTexto, vizinhasDe } from "./listaDocs";
 import { classePortal } from "./ListaTopo";
 import { BORDA_CTRL } from "./PessoaLinha";
-import { PessoaFicha, type FichaProps, type SepFicha } from "./PessoaFicha";
+import { PAINEL_FICHA } from "./useAtalhos";
+import { PessoaFicha, type FichaExtras, type FichaProps, type SepFicha } from "./PessoaFicha";
 
 export interface PainelProps extends Pick<FichaProps, "S" | "A" | "go"> {
   /** A pessoa aberta; `undefined` com o painel fechado. */
@@ -24,11 +25,13 @@ export interface PainelProps extends Pick<FichaProps, "S" | "A" | "go"> {
   fechar: () => void;
   /** Recebe o elemento do painel onde ficam os avisos enquanto ele está aberto (e `null` quando fecha). */
   alvoAvisos?: (el: HTMLElement | null) => void;
+  /** Opcional (V2 funcional): as peças extra da ficha de cada pessoa. Sem elas, a ficha de sempre. */
+  extras?: (p: PessoaApp) => FichaExtras;
 }
 
 const SETA = cn("min-h-11 min-w-11 cursor-pointer px-0", BORDA_CTRL);
 
-export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abrir, fechar, alvoAvisos }: PainelProps) {
+export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abrir, fechar, alvoAvisos, extras }: PainelProps) {
   const conteudo = useRef<HTMLDivElement>(null);
   // Durante a animação de saída o conteúdo mantém-se: guarda-se a última pessoa mostrada.
   const ultima = useRef<PessoaApp | undefined>(p);
@@ -74,12 +77,12 @@ export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abr
   );
   return (
     <Sheet open={!!p} onOpenChange={(aberto) => { if (!aberto) fechar(); }}>
-      <SheetContent ref={conteudo} side="right" onOpenAutoFocus={focarTitulo} onCloseAutoFocus={voltarFoco}
+      <SheetContent ref={conteudo} side="right" {...{ [PAINEL_FICHA]: "" }} onOpenAutoFocus={focarTitulo} onCloseAutoFocus={voltarFoco}
         className={cn("flex w-[min(760px,100vw)] flex-col gap-0 p-0 text-foreground sm:max-w-none motion-reduce:!animate-none [&>button.absolute]:hidden", classePortal(leitura))}>
         <TooltipProvider>
           <p className="sr-only" aria-live="polite">{mostrada ? `Ficha de ${mostrada.nome}${pos ? `, ${pos}` : ""}` : ""}</p>
           <div ref={alvoAvisos} className="pn" />
-          {mostrada && <PessoaFicha key={mostrada.nome} S={S} A={A} go={go} p={mostrada} sep={sep} aoMudarSep={aoMudarSep} fechar={fechar} topo={topo} />}
+          {mostrada && <PessoaFicha key={mostrada.nome} S={S} A={A} go={go} p={mostrada} sep={sep} aoMudarSep={aoMudarSep} fechar={fechar} topo={topo} extras={extras?.(mostrada)} />}
         </TooltipProvider>
       </SheetContent>
     </Sheet>

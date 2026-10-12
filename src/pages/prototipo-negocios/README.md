@@ -22,7 +22,7 @@ Funciona como se fosse a app, mas **só com dados de exemplo**:
 ```bash
 npm install
 npm run dev                                  # e abrir http://localhost:8080/prototipo/negocios
-npx vitest run src/pages/prototipo-negocios  # os testes do protótipo (21 ficheiros, 435 testes)
+npx vitest run src/pages/prototipo-negocios  # os testes do protótipo (32 ficheiros, 573 testes a 12/10/2026)
 npx tsc --noEmit -p tsconfig.app.json        # o tipo (há erros antigos noutros ficheiros da app; os do protótipo têm de ficar a zero)
 ```
 
@@ -40,9 +40,9 @@ npx tsc --noEmit -p tsconfig.app.json        # o tipo (há erros antigos noutros
 
 Troca-se com **"Comparar com o aspeto atual"** no menu. O estado fica em `S.aspeto`.
 
-### O interruptor "Ver a V2" (só no aspeto simples)
+### O seletor de versão: Atual · V2 · V2 funcional (só no aspeto simples)
 
-No menu lateral, junto a "Comparar com o aspeto atual", e no menu "Mais" do telemóvel. Liga e desliga a V2 do protótipo **inteira**:
+No menu lateral, junto a "Comparar com o aspeto atual", e no menu "Mais" do telemóvel: três botões ("Versão", com `aria-pressed`) e, por baixo, a versão ativa ("A comparar: V2 funcional"). Desde 12/10/2026 substitui o antigo interruptor "Ver a V2". **Atual** e **V2** comportam-se exatamente como o interruptor desligado e ligado; a **V2 funcional** é descrita em [V2 funcional](#v2-funcional-12102026). A tabela abaixo compara a Atual (antes "V2 desligada") com a V2:
 
 | | V2 desligada (por defeito) | V2 ligada |
 |---|---|---|
@@ -50,9 +50,9 @@ No menu lateral, junto a "Comparar com o aspeto atual", e no menu "Mais" do tele
 | Negócios | a lista de sempre, uma coluna por fase | `NegociosV2`: só negócios, por documento |
 | Leads e Clientes | `LeadsSimples` e a página de Clientes | `PessoasSimples` |
 
-- A escolha **não é do `Estado`**: vive num `useState` de `PrototipoNegocios.tsx`, gravado em `localStorage` na chave própria `olyvia-prototipo-v2` (`"1"` ou `"0"`). Não mexe na `VERSAO` e não é apagada por "Repor a demonstração".
-- Ao ligar ou desligar, se a vista atual deixa de existir no menu, o protótipo muda para a equivalente: `leads` e `clientes` passam a `pessoas`, e `pessoas` passa a `leads`.
-- No **aspeto atual** o interruptor não aparece e a V2 não se aplica.
+- A escolha **não é do `Estado`**: vive num `useState` de `PrototipoNegocios.tsx`, gravado em `localStorage` na chave própria `olyvia-prototipo-v2` (`versaoPrototipo.ts`): `"0"` é a Atual, `"1"` a V2 e `"funcional"` a V2 funcional. O valor antigo do interruptor continua a valer (`"1"` abre na V2 e `"0"` na Atual). Não mexe na `VERSAO` e não é apagada por "Repor a demonstração".
+- Ao mudar de versão, se a vista atual deixa de existir no menu, o protótipo muda para a equivalente (`vistaEquivalente`): `leads` e `clientes` passam a `pessoas`, e `pessoas` passa a `leads`. Entre a V2 e a V2 funcional a vista mantém-se.
+- No **aspeto atual** o seletor não aparece e nenhuma das V2 se aplica.
 - Enquanto se cria uma lead com a V2 ligada ("Nova lead" abre `A.novo()`), mostra-se a lista de Negócios de sempre, porque é ela que tem o formulário. Depois de criada, a lead vê-se em Pessoas.
 
 **As regras de desenho, pedidas pelo Ruben:**
@@ -200,6 +200,32 @@ A lista e a ficha de Pessoas ganharam sete campos (aprovados na lista de campos 
 | Armando Figueiredo | Cliente | não | Porto | Cozinha nova (Meta Ads) | Atendeu · interessado | SQL histórico | não | não | Cozinha (contrato assinado, Financeiro) |
 
 **Totais com as pessoas novas:** **14 leads** (8 da seed e 6 novas), **5 clientes** (3 e 2) e **2 perdidas**; Todos mostra **21**. As 8 leads e os 3 clientes da seed **mantêm o papel**: só os totais mudam. O papel das novas segue as mesmas regras (`ehGanho`: contrato assinado ou venda direta com proposta aceite; um negócio perdido não conta). Na V2 de Negócios as novas têm um cartão por negócio nas colunas certas (o Condomínio em Proposta, o Hotel em Financeiro e em Orçamento, o Armando em Financeiro), os perdidos ficam de fora e as quatro colunas continuam cobertas. Testes em `pessoasCampos.test.ts` (lógica) e `camposNovos.test.tsx` (ecrã).
+
+---
+
+## V2 funcional (12/10/2026)
+
+**O que é.** Uma terceira versão das duas páginas que a V2 mudou, Pessoas e Negócios, pensada para o **dia a dia de um comercial**: rapidez e menos cliques. Escolhe-se no seletor de versão ("V2 funcional"); o menu é o da V2 (Negócios e Pessoas). As outras páginas (Hoje, Operações, Inventário...) são as de sempre. As regras de desenho mantêm-se: um só botão primário por ecrã ("Guardar", no registo da chamada; nas páginas não há primário, só "Nova lead" secundário), texto a 15–16 px, alvos de 44 px, cor só nos ícones e nada de cartões dentro de cartões.
+
+**Pessoas · dia a dia** (`PessoasFunc.tsx`). Três separadores: **Hoje** (por defeito), **Lista** e **Dashboard** (o `PessoasDashboard` de sempre, com a barra de filtros de sempre).
+
+- **Hoje** (`FuncHojePessoas.tsx`, regras em `funcHoje.ts`): quatro listas recolhíveis (botão com `aria-expanded` e a contagem), cada pessoa **uma só vez**, na lista de maior prioridade, com a razão em texto. Com a seed e os exemplos: **Contactar hoje: 7** (leads por contactar, que voltaram a contactar, que pediram para ligar mais tarde, atrasadas, ou com "Voltar a ligar em" para hoje ou antes), **Visitas esta semana: 2** (visita marcada nos próximos 7 dias, a contar de 10/10), **À espera de resposta: 1** (leads contactadas sem avanço há 7 ou mais dias, e negócios com a proposta enviada há 5 ou mais dias) e **Contratos e faturação: 4** (contrato por assinar, ou negócio em Financeiro sem fatura). Total 14. As perdidas e os adiados não entram. Cada linha: avatar, nome (com "Empresa"), papel, serviço e localidade, a razão ("Sem contacto há 10 dias", "Voltou a contactar ontem", "Visita qui 15/10 · 10:00", "Proposta enviada há 5 dias") e as ações rápidas em botões de ícone com nome e tooltip: Ligar, WhatsApp, Email (links `tel:`, `wa.me` e `mailto:`), Registar chamada e Adiar. A linha toda abre a ficha no painel.
+- **Registar chamada** (`FuncRegistos.tsx`, num popover): o resultado (as opções do campo "Resultado" de `campos.ts`), uma nota curta opcional e o próximo passo (Ligar amanhã, Marcar visita, Enviar orçamento, Sem próximo passo, Voltar a ligar hoje); "Guardar". A chamada entra no topo da Atividade ("registado agora"), passa a ser o último contacto ("hoje") e dá o resultado (na lista, na ficha e no Hoje), o aviso "Voltou a contactar" desaparece e a pessoa sai de "Contactar hoje" (menos com "Voltar a ligar hoje"); com "Ligar amanhã" fica adiada para 11/10.
+- **Nota** e **Adiar** (na ficha; Adiar também no Hoje e na Lista): a nota entra na Atividade e nas notas do Resumo; Adiar (Amanhã, Em 3 dias, Na próxima semana) muda o próximo contacto e tira a pessoa do Hoje até lá.
+- **Lista** (`FuncListaPessoas.tsx`, `FuncTabela.tsx`, `funcLista.ts`): a barra de filtros de sempre e, por cima da tabela, as **vistas rápidas** com contagem (Contactar hoje 7, Visitas esta semana 2, À espera de resposta 1, Voltaram a contactar 2, Sem contacto 4, Perdidas 2, no separador Leads), o menu **Colunas** (Formulário, Etapa, Origem, Último contacto, Próximo passo, Valor; a Origem começa escondida) e **Exportar lista (CSV)**. Os cabeçalhos Pessoa, Último contacto, Próximo passo e Valor ordenam (botão no cabeçalho, `aria-sort`; os vazios ficam sempre no fim). Cada linha tem uma caixa; ao escolher aparece a barra da seleção ("2 selecionadas", "Exportar selecionadas (CSV)", "Limpar seleção").
+- **CSV** (`funcCsv.ts`): BOM, ponto e vírgula, aspas só quando é preciso (as de dentro duplicam-se), CRLF, valor com vírgula decimal; colunas Nome, Papel, Empresa, Serviço, Localidade, Distrito, Formulário, Etapa, Último contacto, Resultado, Próximo passo, Valor, Comercial. Descarrega-se com um Blob e um link temporário, e anuncia-se "Exportadas N pessoas".
+- **Ficha**: a mesma ficha (`PessoaFicha`), com peças opcionais: a barra de ações fixa no topo (Ligar, WhatsApp, Email, Registar chamada, Nota, Adiar e, nas leads em curso, Marcar como perdida, que leva à confirmação do Resumo), "Copiar" junto ao telefone, ao email e à morada (aviso "Copiado"; se a área de transferência recusar, o texto fica selecionado e diz-se como copiar) e os registos no topo da Atividade.
+
+**Negócios · dia a dia** (`NegociosFunc.tsx`). Três separadores: **Hoje** (por defeito), **Quadro** e **Dashboard** (o `NegociosDashboard` de sempre), com a barra de filtros de sempre a valer para os três.
+
+- **Hoje** (`FuncHojeNegocios.tsx`, regras em `funcNegocios.ts`): **Orçamentos por enviar: 5**, **Propostas à espera do cliente: 4**, **Contratos por assinar: 1** e **A faturar: 4** (Financeiro sem fatura): os 14 do Quadro, cada um numa só lista. Cada linha diz a pessoa, o serviço, o valor e o tempo parado ("Enviada há 5 dias", "Ganho há 24 dias, por faturar"); ações: Abrir (o da seed abre a página do negócio, o de exemplo o painel de exemplo), Ver a pessoa (abre Pessoas funcional com a ficha dela), Ligar e WhatsApp. Ordena-se dentro de cada lista por "Mais parados" ou "Maior valor".
+- **Quadro** (`FuncQuadro.tsx`): as quatro colunas, com vistas rápidas (Para enviar 5, À espera do cliente 4, Por assinar 1, A faturar 4, Parados há 7+ dias 3, Com 2+ orçamentos 4), ordem global ou por coluna (valor, tempo parado, nome), densidade Normal ou Compacta (cartões de uma linha), colunas que se recolhem e "Exportar CSV" do Quadro filtrado. **Nenhuma ação muda a fase** (fica para uma fase seguinte).
+
+**Atalhos** (`funcAtalhos.ts`, `useAtalhos.ts`), no Hoje e na Lista de Pessoas e no Hoje e no Quadro de Negócios: ↓ ou j e ↑ ou k movem o foco entre as linhas (as de uma lista recolhida ficam de fora), Enter abre, "/" vai para a pesquisa, Esc fecha o painel ou limpa a pesquisa, "?" abre a ajuda "Atalhos"; no painel, ← ou [ e → ou ] passam à pessoa anterior e seguinte. Nunca disparam num campo de texto, num select, num separador (Tabs) nem dentro dos popovers da V2 funcional, nem com Ctrl, Cmd ou Alt. Há uma dica discreta: "Prima ? para ver atalhos".
+
+**O limite dos registos.** Os registos do dia a dia (chamadas, notas e adiamentos) vivem **só em memória**, numa store de módulo (`diaADia.ts`, lida com `useSyncExternalStore`): **duram até recarregar e só existem na V2 funcional**. Não tocam no `Estado`, no motor, no `seed()` nem na `VERSAO`; a camada aplica-se por cima dos dados derivados (`perfilFunc`, `linhasFunc`), com funções puras que recebem os registos. "Repor a demonstração" apaga-os (e a memória das duas páginas), mas não a versão escolhida.
+
+**O que NÃO muda na Atual e na V2.** Nenhum ecrã da Atual nem da V2 mudou de comportamento: os ficheiros partilhados só ganharam **props opcionais** (por omissão tudo igual): `PessoaFicha` (`extras`), `PessoaPainel` (`extras`), `FichaCabecalho` (`acoes`), `FichaResumo` (`contacto`) e `SepAtividade` (`registados`). `PrototipoNegocios.tsx` trocou o interruptor pelo seletor e encaminha a V2 funcional. Os testes da Atual e da V2 continuam a passar sem mudanças. Testes novos: `funcHoje.test.ts`, `funcNegocios.test.ts`, `funcOrdenar.test.ts`, `funcCsv.test.ts`, `funcAtalhos.test.ts`, `versaoPrototipo.test.ts`, `PessoasFunc.test.tsx`, `NegociosFunc.test.tsx` e `SeletorVersao.test.tsx`.
 
 ---
 
