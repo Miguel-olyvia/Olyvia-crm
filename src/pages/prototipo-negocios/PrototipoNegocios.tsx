@@ -32,8 +32,8 @@ import { CamposEditor } from "./CamposEditor";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
-// O mockup do Inventário só se carrega (com o seu HTML) quando se abre essa página.
-const InventarioMockup = lazy(() => import("./inventario/InventarioMockup"));
+// O Inventário completo (nativo, só na V2) só se carrega quando se abre essa página.
+const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
 
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
@@ -59,7 +59,7 @@ export default function PrototipoNegocios() {
   const [alvoAvisos, setAlvoAvisos] = useState<HTMLElement | null>(null);
   const [q, setQ] = useState("");
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
-  const [invMock, setInvMock] = useState(false); // a página Inventário (mockup): só existe na V2 e na V2 funcional, e vive fora do Estado
+  const [invMock, setInvMock] = useState(false); // a página Inventário completo: só existe na V2 e na V2 funcional, e vive fora do Estado
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
@@ -124,7 +124,7 @@ export default function PrototipoNegocios() {
   const mudarVersao = (nova: VersaoProto) => {
     setVersao(nova);
     gravarVersao(nova);
-    // A página Inventário (mockup) não existe na Atual: volta à vista equivalente (Negócios).
+    // A página Inventário completo não existe na Atual: volta à vista equivalente (Negócios).
     if (nova === "atual" && invMock) { setInvMock(false); run(() => A.nav("negocios")); return; }
     // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
     run(() => {
@@ -279,7 +279,7 @@ export default function PrototipoNegocios() {
           <main ref={mainRef} className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
             {ativoInv ? (
               <div className="h-full animate-in fade-in-0 duration-200">
-                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioMockup /></Suspense>
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} /></Suspense>
               </div>
             ) : <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
 

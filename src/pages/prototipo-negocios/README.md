@@ -22,7 +22,7 @@ Funciona como se fosse a app, mas **só com dados de exemplo**:
 ```bash
 npm install
 npm run dev                                  # e abrir http://localhost:8080/prototipo/negocios
-npx vitest run src/pages/prototipo-negocios  # os testes do protótipo (32 ficheiros, 573 testes a 12/10/2026)
+npx vitest run src/pages/prototipo-negocios  # os testes do protótipo (43 ficheiros, 697 testes a 12/10/2026)
 npx tsc --noEmit -p tsconfig.app.json        # o tipo (há erros antigos noutros ficheiros da app; os do protótipo têm de ficar a zero)
 ```
 
@@ -251,14 +251,25 @@ Só estas duas páginas têm dashboard. Os números **batem sempre com as listas
 
 ---
 
-## Inventário (mockup)
+## Inventário
 
-Na V2 e na V2 funcional (na Atual não aparece) há uma entrada **Inventário completo** no menu lateral, no Mais e na barra do telemóvel. Mostra o módulo de inventário completo, com dados de exemplo.
+Na V2 e na V2 funcional (na Atual não aparece) há uma entrada **Inventário completo** no menu lateral, no Mais e na barra do telemóvel. É o módulo de inventário do mockup `mockup-inventario-ui.html`, reconstruído **nativamente** (componentes, tokens e regras de desenho do protótipo, sem iframe, sem browser, sem localhost), com dados de exemplo e o dia de hoje fixo em **09/10/2026**.
 
-- **De onde vem:** `inventario/mockup-inventario.html`, copiado tal e qual de `mockup-inventario-ui.html` (HTML com motor JS próprio). `inventario/InventarioMockup.tsx` mostra-o num iframe (`srcDoc`), carregado só quando a página se abre.
-- **Isolado:** vive dentro do iframe e não toca no Estado nem nos dados do protótipo. Guarda só as suas chaves `inv-mockup-tab` e `inv-mockup-db-v3` no `localStorage`.
-- **Repor inventário:** o botão da faixa de cima apaga essas duas chaves e recria o iframe. "Repor a demonstração" não lhe mexe.
-- Não é a página **Inventário** do protótipo (a antiga, da vista `inventario`): essa continua como estava.
+- **Onde vive:** a pasta `inventario/`. A página é `InventarioPagina.tsx` (carregada só quando se abre, com `lazy`). O resto do protótipo não muda: o `Estado`, o `motor.ts`, a `seed()`, a `VERSAO`, o `pecas.tsx` e os componentes `ui` ficaram como estavam.
+- **Estado próprio, em memória:** `loja.ts` guarda uma base de exemplo (`useSyncExternalStore`, como o `diaADia.ts`). Cada ação corre numa **cópia** da base e só a substitui se acabar bem: uma regra que recusa (`ErroInv`) não deixa nada a meio. Não grava no `localStorage`. O botão **Repor inventário** (com diálogo) volta aos dados de exemplo; **Repor a demonstração** não lhe mexe.
+- **Separadores** (um por área, como no mockup): **Hoje** (fluxo em cinco passos, fila de trabalho com listas já filtradas, POs automáticas, últimos movimentos, "Simular venda assinada"), **Encomendas** (POs com KPI, filtros e ordenação; folha com Linhas, Receções, Guias, Portal, Anulações, Notas e Histórico; receber com repartição EC/stock, não vou receber o resto, aprovar e enviar, reverter com motivo), **Fornecedores** (lista e ficha: resumo e SLA, dados, artigos e preços com preferido, preços por aprovar, catálogo do portal por ligar), **Stock** (por produto ou por armazém, pedidos de transferência, adicionar stock, detalhe do produto), **Movimentos** (o livro, filtros, nota editável, exportar CSV, "Registar movimento" em dois passos), **Encomendas de cliente** (reserva FIFO, o progresso em texto e barra, saída por linha, pedir o que falta, eliminar ou anular o contrato, editar as manuais), **Guias** (anunciado contra recebido, fechar com nota, reabrir, cancelar), **Contagens** (esperado com o movido durante a contagem, resolução por linha, finalizar gera ajustes) e **Armazéns** (uma lista com estatísticas, as definições e o formulário).
+- **Regras de desenho cumpridas:** um só botão primário por ecrã (as ações de linha e os diálogos de confirmação não competem), texto de 15 px no mínimo, alvos de 44 px, cor só nos ícones (`Selo`, `Nota`), nada de cartões dentro de cartões, a marca "exemplo" com 15 px. Listas com pesquisa, filtros e ordenação (cabeçalhos com `aria-sort`; abaixo de `lg` cada linha passa a cartão). O detalhe abre numa `Sheet` lateral (largura `min(720px, 100vw)`) e o foco volta à linha ao fechar. Nunca `confirm()` nativo: os diálogos pedem motivo (≥3 caracteres) quando a regra o exige. Os avisos vão para uma região `aria-live` (`AvisoCaixa`), também dentro das folhas e dos diálogos.
+- **Teclado** (como nas páginas funcionais): `↓`/`j` e `↑`/`k` entre linhas, `Enter` abre, `/` vai à pesquisa, `Esc` limpa a pesquisa ou fecha a folha, `?` mostra a ajuda. Um só ouvinte para todo o módulo (`useAtalhos`).
+- **Regras do motor portadas como funções puras** (sem React; recebem a base e lançam `ErroInv` quando a regra recusa): `stock.ts` (livro de movimentos, custo médio ponderado, transferência em duas pernas), `po.ts` (estado calculado, totais, envio, portal, edição e bloqueios), `ec.ts` (reserva FIFO, atribuição stock/PO/sem fornecedor, pacotes expandidos, saídas, eliminar e anular o contrato, editar as manuais), `receber.ts` (receção parcial com limites, repartição, reverter, passar para stock, anular o resto e desfazer), `guias.ts`, `contagens.ts`, `movimentos.ts` (registar movimento com resultado parcial por linha e avisos), `cadastros.ts` (armazéns, fornecedores, preços, catálogo) e `fornecedores.ts` (SLA). Os filtros das listas estão em `filtros.ts` e os números do Hoje em `contadores.ts`.
+- **Testes:** a seed foi comparada com o motor original do HTML (medido a correr o próprio mockup): os números do Hoje, as POs, as ECs, o stock, as reservas, as guias e as contagens batem. Cada regra do `RULES` do mockup tem testes (`regrasStock`, `regrasPo`, `regrasEc`, `regrasCadastros`, `regrasExtra`, `fornecedores`, `filtros`, `seed`), mais `InventarioPagina.test.tsx` (menu só na V2, separadores, receber, motivo, teclado, repor, "um só primário por ecrã").
+- **Diferença ao mockup:** o contrato novo da "Simular venda assinada" recebe sempre o número seguinte ao maior que existe (o mockup repetia o CT-2026-043).
+
+**Por portar** (nada disto aparece vazio no menu; o que não está portado não tem separador nem botão):
+- os **perfis simulados e as permissões** (o mockup filtrava o menu e desativava ações por perfil): aqui o utilizador é sempre o administrador de exemplo;
+- a **Receção por código** (o telemóvel com leitor, o cesto, as leituras rejeitadas e a fila sem rede) e a "câmara": recebe-se na folha de cada encomenda, escolhendo a guia;
+- **criar fornecedor / convidar para o portal** (NIF, emails únicos) e a **simulação do portal do fornecedor** (entrada, ficha e catálogo); no Portal da PO só se simula "abre" e "confirma";
+- **editar inline** os dados do fornecedor e dos artigos (preço, embalagem, MOQ, prazo) e as células das listas;
+- **importar** CSV e exportar exceto os Movimentos; os **PDF** de encomenda, EC e guia (pré-visualização imprimível); a **pesquisa global**; a **duplicar PO**; o separador **Cobertura** e o portal do fornecedor.
 
 ---
 
