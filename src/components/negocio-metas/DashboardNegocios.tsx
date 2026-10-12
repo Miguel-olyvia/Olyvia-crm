@@ -26,9 +26,9 @@ export function DashboardNegocios({ dados }: { dados: DadosNegocioMetas }) {
         <h2 id="numeros-titulo" className="text-base font-semibold text-foreground">
           {t("businessGoals.numbers.title")}
         </h2>
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ul className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
           {numeros.map((n) => (
-            <li key={n.chave} className="rounded-2xl border border-border/70 bg-card p-4">
+            <li key={n.chave} className="bg-card p-4">
               <span className="text-sm font-medium text-muted-foreground">
                 {t(`businessGoals.numbers.${n.chave}`)}
               </span>

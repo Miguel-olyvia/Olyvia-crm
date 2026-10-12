@@ -1,31 +1,54 @@
+import type { ReactNode } from "react";
+import { Check } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { formatarMeta } from "./formatoMetas";
 import type { NegocioMes } from "./negocioMetas";
+import { temValor } from "./logicaQuadro";
 
 interface CadeiaNegocioProps {
   negocio: NegocioMes;
   id: string;
 }
 
-function Passo({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+interface PassoProps {
+  numero: number;
+  titulo: string;
+  feito: boolean;
+  ultimo: boolean;
+  children: ReactNode;
+}
+
+/** Um passo da cadeia: marca (✓ ou número) ligada ao seguinte por uma linha, sem caixas à volta. */
+function Passo({ numero, titulo, feito, ultimo, children }: PassoProps) {
   return (
-    <div className="rounded-xl border border-border/70 bg-background p-3">
-      <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {titulo}
-      </h4>
-      {children}
-    </div>
+    <li className={cn("relative flex gap-3", !ultimo && "pb-5")}>
+      {!ultimo && <span aria-hidden="true" className="absolute left-3 top-7 bottom-0 w-px -translate-x-1/2 bg-border" />}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+          feito ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background text-muted-foreground",
+        )}
+      >
+        {feito ? <Check className="h-3.5 w-3.5" /> : numero}
+      </span>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <h4 className="text-sm font-semibold text-foreground">{titulo}</h4>
+        {children}
+      </div>
+    </li>
   );
 }
 
-/** A cadeia do negócio: orçamentos (com o escolhido), proposta e contrato. */
+/** A cadeia do negócio, de cima para baixo: orçamentos (com o escolhido), proposta e contrato. */
 export function CadeiaNegocio({ negocio, id }: CadeiaNegocioProps) {
   const { t } = useTranslation();
   const { orcamentos, proposta, contrato } = negocio;
   return (
-    <div id={id} className="grid gap-3 border-t border-border/60 bg-muted/20 p-3 md:grid-cols-3">
-      <Passo titulo={t("businessGoals.chain.quotes")}>
+    <ol id={id} aria-label={t("businessGoals.panel.chain")}>
+      <Passo numero={1} titulo={t("businessGoals.chain.quotes")} feito={temValor(negocio)} ultimo={false}>
         <ul className="space-y-1">
           {orcamentos.map((o) => (
             <li key={o.id} className="flex items-center justify-between gap-2 text-sm">
@@ -35,20 +58,20 @@ export function CadeiaNegocio({ negocio, id }: CadeiaNegocioProps) {
           ))}
         </ul>
       </Passo>
-      <Passo titulo={t("businessGoals.chain.proposal")}>
+      <Passo numero={2} titulo={t("businessGoals.chain.proposal")} feito={proposta?.estado === "aceite"} ultimo={false}>
         {proposta ? (
           <Badge variant="secondary">{t(`businessGoals.proposal.${proposta.estado}`)}</Badge>
         ) : (
           <p className="text-sm text-muted-foreground">{t("businessGoals.chain.none")}</p>
         )}
       </Passo>
-      <Passo titulo={t("businessGoals.chain.contract")}>
+      <Passo numero={3} titulo={t("businessGoals.chain.contract")} feito={contrato?.estado === "assinado"} ultimo>
         {contrato ? (
           <Badge variant="secondary">{t(`businessGoals.contract.${contrato.estado}`)}</Badge>
         ) : (
           <p className="text-sm text-muted-foreground">{t("businessGoals.chain.optional")}</p>
         )}
       </Passo>
-    </div>
+    </ol>
   );
 }

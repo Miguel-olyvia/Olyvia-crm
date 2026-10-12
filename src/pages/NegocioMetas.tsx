@@ -5,11 +5,14 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AbaQuadro } from "@/components/negocio-metas/AbaQuadro";
 import { DashboardNegocios } from "@/components/negocio-metas/DashboardNegocios";
+import { SeletorModo } from "@/components/negocio-metas/SeletorModo";
+import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { DADOS_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import {
   SEM_FILTROS, filtrarNegocios, numerosDashboard, resumoQuadro, type FiltrosQuadro,
 } from "@/components/negocio-metas/logicaQuadro";
+import { guardarVista, lerVista, type ModoVista } from "@/components/negocio-metas/vistaGuardada";
 
 /**
  * "Negócio e metas" (Aquisição): Quadro (com Lista) e Dashboard. Só conteúdo de
@@ -21,6 +24,12 @@ const NegocioMetas = () => {
   const { t } = useTranslation();
   const { negocios } = DADOS_EXEMPLO;
   const [filtros, setFiltros] = useState<FiltrosQuadro>(SEM_FILTROS);
+  const [vista, setVista] = useState<"quadro" | "dashboard">("quadro");
+  const [modo, setModo] = useState<ModoVista>(lerVista);
+  const mudarModo = (m: ModoVista) => {
+    setModo(m);
+    guardarVista(m);
+  };
 
   const visiveis = useMemo(() => filtrarNegocios(negocios, filtros), [negocios, filtros]);
   const resumo = resumoQuadro(visiveis);
@@ -39,10 +48,7 @@ const NegocioMetas = () => {
         <nav aria-label={t("businessGoals.breadcrumb.label")}>
           <ol className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <li>
-              <Link
-                to="/deals"
-                className="rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
+              <Link to="/deals" className={`rounded-sm hover:text-foreground ${FOCO}`}>
                 {t("businessGoals.breadcrumb.acquisition")}
               </Link>
             </li>
@@ -53,23 +59,23 @@ const NegocioMetas = () => {
         <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
           {t("businessGoals.title")}
         </h1>
-        <p className="text-sm text-muted-foreground">{subtitulo}</p>
-        <p
-          role="note"
-          className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-3 py-1 text-xs font-medium text-warning"
-        >
+        <p className="text-sm text-foreground/80">{subtitulo}</p>
+        <p role="note" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
           {t("businessGoals.sample")}
         </p>
       </header>
 
-      <Tabs defaultValue="quadro" className="space-y-4">
-        <TabsList aria-label={t("businessGoals.tabs.label")}>
-          <TabsTrigger value="quadro">{t("businessGoals.tabs.board")}</TabsTrigger>
-          <TabsTrigger value="dashboard">{t("businessGoals.tabs.dashboard")}</TabsTrigger>
-        </TabsList>
+      <Tabs value={vista} onValueChange={(v) => setVista(v as "quadro" | "dashboard")} className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <TabsList aria-label={t("businessGoals.tabs.label")} className="h-auto">
+            <TabsTrigger value="quadro" className="min-h-11 px-4">{t("businessGoals.tabs.board")}</TabsTrigger>
+            <TabsTrigger value="dashboard" className="min-h-11 px-4">{t("businessGoals.tabs.dashboard")}</TabsTrigger>
+          </TabsList>
+          {vista === "quadro" && <SeletorModo modo={modo} aoMudar={mudarModo} />}
+        </div>
         <TabsContent value="quadro" className="mt-0">
-          <AbaQuadro negocios={negocios} filtros={filtros} aoMudarFiltros={setFiltros} />
+          <AbaQuadro negocios={negocios} filtros={filtros} modo={modo} aoMudarFiltros={setFiltros} />
         </TabsContent>
         <TabsContent value="dashboard" className="mt-0">
           <DashboardNegocios dados={DADOS_EXEMPLO} />

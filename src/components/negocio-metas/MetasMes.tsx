@@ -15,11 +15,11 @@ export function MetasMes({ cartoes }: MetasMesProps) {
       <h2 id="metas-mes-titulo" className="text-base font-semibold text-foreground">
         {t("businessGoals.month.title")}
       </h2>
-      <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/70 sm:grid-cols-2 lg:grid-cols-4">
         {cartoes.map((c) => {
           const nome = t(`businessGoals.card.${c.chave}`);
           return (
-            <li key={c.chave} className="rounded-2xl border border-border/70 bg-card p-4">
+            <li key={c.chave} className="bg-card p-4">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium text-muted-foreground">{nome}</span>
                 <span className="font-mono text-sm font-semibold tabular-nums text-primary">

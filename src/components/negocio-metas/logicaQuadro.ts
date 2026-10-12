@@ -7,18 +7,52 @@ import {
 
 export const FASES: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "financeiro"];
 
+export type FaixaValor = "" | "ate10" | "10a20" | "20mais";
+export type NumOrcamentos = "" | "1" | "2+";
+
 export interface FiltrosQuadro {
   q: string;
+  /** "Os meus": só os negócios do comercial atual. */
+  meus: boolean;
   comercial: string;
   fase: "" | FaseNegocio;
+  servico: string;
+  orcamentos: NumOrcamentos;
+  faixa: FaixaValor;
   /** Parados há mais de 7 dias (só Orçamento e Proposta têm "parado há"). */
   parados: boolean;
   atraso: boolean;
 }
 
-export const SEM_FILTROS: FiltrosQuadro = { q: "", comercial: "", fase: "", parados: false, atraso: false };
+export const SEM_FILTROS: FiltrosQuadro = {
+  q: "", meus: false, comercial: "", fase: "", servico: "", orcamentos: "", faixa: "", parados: false, atraso: false,
+};
 
 export const LIMITE_PARADOS = 7;
+
+/** O comercial "eu" da página de exemplo (sem sessão): quem "Os meus" mostra. */
+export const COMERCIAL_ATUAL = "Ana Ribeiro";
+
+/** Limites das faixas de valor, em euros (o intervalo do meio inclui os dois extremos). */
+const LIMITE_BAIXO = 10000;
+const LIMITE_ALTO = 20000;
+
+function naFaixa(n: NegocioMes, faixa: FaixaValor): boolean {
+  if (!faixa) return true;
+  if (!temValor(n)) return false;
+  const v = valorDoNegocio(n);
+  if (faixa === "ate10") return v < LIMITE_BAIXO;
+  if (faixa === "20mais") return v > LIMITE_ALTO;
+  return v >= LIMITE_BAIXO && v <= LIMITE_ALTO;
+}
+
+/** Os serviços que existem nos negócios, sem repetir e por ordem alfabética. */
+export const servicosDe = (negocios: readonly NegocioMes[]): string[] =>
+  [...new Set(negocios.map((n) => n.servico))].sort((a, b) => a.localeCompare(b, "pt"));
+
+/** Os comerciais que existem nos negócios, sem repetir e por ordem alfabética. */
+export const comerciaisDe = (negocios: readonly NegocioMes[]): string[] =>
+  [...new Set(negocios.map((n) => n.comercial))].sort((a, b) => a.localeCompare(b, "pt"));
 
 /** O negócio já tem um orçamento escolhido (senão ainda não tem valor). */
 export function temValor(n: NegocioMes): boolean {
@@ -29,8 +63,13 @@ export function filtrarNegocios(negocios: readonly NegocioMes[], f: FiltrosQuadr
   const q = f.q.trim().toLowerCase();
   return negocios.filter((n) => {
     if (q && !`${n.pessoa} ${n.servico} ${n.comercial}`.toLowerCase().includes(q)) return false;
+    if (f.meus && n.comercial !== COMERCIAL_ATUAL) return false;
     if (f.comercial && n.comercial !== f.comercial) return false;
     if (f.fase && faseDoNegocio(n) !== f.fase) return false;
+    if (f.servico && n.servico !== f.servico) return false;
+    if (f.orcamentos === "1" && n.orcamentos.length !== 1) return false;
+    if (f.orcamentos === "2+" && n.orcamentos.length < 2) return false;
+    if (!naFaixa(n, f.faixa)) return false;
     if (f.parados && !(n.parado !== null && n.parado > LIMITE_PARADOS)) return false;
     if (f.atraso && !n.atraso) return false;
     return true;
@@ -76,6 +115,31 @@ export function alternarVista(f: FiltrosQuadro, id: IdVista): FiltrosQuadro {
 
 export const filtrosAtivos = (f: FiltrosQuadro): boolean =>
   (Object.keys(SEM_FILTROS) as (keyof FiltrosQuadro)[]).some((k) => f[k] !== SEM_FILTROS[k]);
+
+/** Os campos do painel Filtros que estão ligados (é o número do botão). */
+export const filtrosNoPopover = (f: FiltrosQuadro): number =>
+  [f.comercial, f.fase, f.servico, f.orcamentos, f.faixa].filter(Boolean).length;
+
+export type IdChip = "q" | "meus" | "comercial" | "servico" | "orcamentos" | "faixa";
+export interface ChipFiltro {
+  id: IdChip;
+  /** O valor a mostrar (a pesquisa já sem espaços; o nome do serviço; "1" ou "2+"...). */
+  valor: string;
+  /** O que repor para tirar este filtro. */
+  limpar: Partial<FiltrosQuadro>;
+}
+
+/** Os filtros ligados que se mostram como chip removível (fase, parados e atraso já se veem nos chips das vistas rápidas). */
+export function chipsDosFiltros(f: FiltrosQuadro): ChipFiltro[] {
+  const chips: ChipFiltro[] = [];
+  if (f.q.trim()) chips.push({ id: "q", valor: f.q.trim(), limpar: { q: "" } });
+  if (f.meus) chips.push({ id: "meus", valor: "", limpar: { meus: false } });
+  if (f.comercial) chips.push({ id: "comercial", valor: f.comercial, limpar: { comercial: "" } });
+  if (f.servico) chips.push({ id: "servico", valor: f.servico, limpar: { servico: "" } });
+  if (f.orcamentos) chips.push({ id: "orcamentos", valor: f.orcamentos, limpar: { orcamentos: "" } });
+  if (f.faixa) chips.push({ id: "faixa", valor: f.faixa, limpar: { faixa: "" } });
+  return chips;
+}
 
 /* ------------------------------------------------------------ próximo passo */
 

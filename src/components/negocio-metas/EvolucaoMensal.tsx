@@ -51,6 +51,7 @@ export function EvolucaoMensal({ meses }: EvolucaoMensalProps) {
                 type="stepAfter"
                 stroke="hsl(var(--warning))"
                 strokeWidth={2}
+                strokeDasharray="6 4"
                 dot={false}
               />
             </ComposedChart>
@@ -62,7 +63,7 @@ export function EvolucaoMensal({ meses }: EvolucaoMensalProps) {
             {rotuloGanho}
           </li>
           <li className="inline-flex items-center gap-1.5">
-            <span aria-hidden="true" className="h-0.5 w-4 bg-warning" />
+            <span aria-hidden="true" className="w-4 border-t-2 border-dashed border-warning" />
             {rotuloMeta}
           </li>
         </ul>
