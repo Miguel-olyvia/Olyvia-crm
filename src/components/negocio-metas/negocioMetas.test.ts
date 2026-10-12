@@ -7,7 +7,7 @@ import {
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 
 const base: NegocioMes = {
-  id: "x", pessoa: "P", servico: "S", comercial: "C",
+  id: "x", pessoa: "P", servico: "S", comercial: "C", dias: 1, parado: null, atraso: false,
   orcamentos: [{ id: "a", valor: 100, escolhido: true }, { id: "b", valor: 300, escolhido: false }],
   proposta: null, contrato: null,
 };
@@ -38,6 +38,9 @@ describe("negócio", () => {
     expect(
       faseDoNegocio({ ...base, proposta: { estado: "aceite" }, contrato: { estado: "pendente" } }),
     ).toBe("contrato");
+    expect(
+      faseDoNegocio({ ...base, proposta: { estado: "aceite" }, contrato: { estado: "assinado" } }),
+    ).toBe("financeiro");
   });
   it("só um contrato assinado é ganho", () => {
     expect(isNegocioGanho({ ...base, contrato: { estado: "pendente" } })).toBe(false);
