@@ -1,4 +1,4 @@
-// A estrutura do menu do Inventário, igual à do mockup (NAV e AREAS): a entrada Hoje, o grupo Compras e o grupo Armazém, e os contadores de cada item.
+// A estrutura do menu do Inventário (o grupo do menu geral), igual à do mockup (NAV e AREAS): a entrada Hoje, o grupo Compras e o grupo Armazém, e os contadores de cada item.
 // Os contadores são as contas do mockup (função counts() e o objeto badge da barra lateral), calculadas da base em memória.
 import { Home, Layers, ShoppingCart, Warehouse, type LucideIcon } from "lucide-react";
 import { contadores } from "./contadores";
@@ -15,6 +15,7 @@ export const GRUPOS: readonly GrupoMenu[] = [
     { aba: "guia", t: "Receção" }, { aba: "cont", t: "Contagens", perm: "inventory.count" }, { aba: "wh", t: "Armazéns" },
   ] },
 ];
+export const ICONE_INVENTARIO = ShoppingCart;
 export const ICONE_HOJE = Home;
 export const ICONE_COBERTURA = Layers;
 

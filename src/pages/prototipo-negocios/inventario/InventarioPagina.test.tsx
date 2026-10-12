@@ -1,5 +1,8 @@
-// O Inventário nativo: o menu lateral só o mostra na V2 (secção INVENTÁRIO, grupos e contadores como no mockup), o Hoje, as listas com filtros, receber numa PO com diálogo próprio, o motivo exigido, o aviso aria-live,
+/// <reference types="node" />
+// O Inventário nativo: o menu lateral só o mostra na V2 (um grupo expansível do menu único, com os subitens e os contadores do mockup), o Hoje, as listas com filtros, receber numa PO com diálogo próprio, o motivo exigido, o aviso aria-live,
 // o teclado (/, setas, Enter, Esc) e "Repor inventário". Em jsdom (sem matchMedia) as listas mostram-se como cartões.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,7 +17,9 @@ import { contadores } from "./contadores";
 import type { AbaInv } from "./ctxInv";
 import { esquecerInventario, lerInventario } from "./loja";
 import { esquecerPerfil } from "./perfil";
+import { seed } from "../motor";
 
+const css = readFileSync(resolve(process.cwd(), "src/pages/prototipo-negocios/inventario/inventario.css"), "utf8"); // o CSS do módulo, lido do disco (o vitest não o devolve em ?raw)
 const CHAVE = "olyvia-prototipo-v2";
 const app = (guardado: string | null): void => {
   localStorage.clear();
@@ -24,7 +29,13 @@ const app = (guardado: string | null): void => {
 const menuInv = (): HTMLElement | null => screen.queryAllByTestId("menu-inventario")[0] ?? null;
 // Os nomes do menu (os do mockup): o que a app chamava Stock é Existências, Encomendas de cliente é Saídas para clientes e Guias é Receção.
 const NOME_MENU: Record<string, string> = { Stock: "Existências", "Encomendas de cliente": "Saídas para clientes", Guias: "Receção" };
-const item = (nome: string): HTMLElement => within(menuInv()!).getByRole("button", { name: new RegExp("^" + (NOME_MENU[nome] ?? nome)) });
+/** O grupo Inventário do menu: o botão que o abre e fecha. */
+const cabecalho = (): HTMLElement => within(menuInv()!).getByRole("button", { name: "Inventário" });
+/** Um subitem do menu (abre o grupo primeiro, se estiver recolhido). */
+const item = (nome: string): HTMLElement => {
+  if (cabecalho().getAttribute("aria-expanded") === "false") fireEvent.click(cabecalho());
+  return within(menuInv()!).getByRole("button", { name: new RegExp("^" + (NOME_MENU[nome] ?? nome)) });
+};
 const separador = (nome: string): void => { fireEvent.click(item(nome)); };
 /** O que a página do protótipo faz: o menu lateral manda no ecrã aberto (a página não tem separadores). */
 function Casa() {
@@ -49,14 +60,82 @@ describe("Inventário no menu lateral", () => {
     expect(await screen.findAllByTestId("menu-inventario")).not.toHaveLength(0);
   });
 
-  it("tem a estrutura do mockup: rótulo INVENTÁRIO, Hoje, grupo Compras (2) e grupo Armazém (6), com Movimentos marcado Novo", async () => {
+  it("o item antigo desapareceu da V2 (só há o grupo Inventário, dentro do menu); a Atual e a V2 funcional mantêm o seu", async () => {
+    app("1");
+    await screen.findAllByTestId("menu-inventario");
+    const lateral = within(screen.getAllByRole("navigation", { name: "Menu" })[0]);
+    expect(lateral.getAllByRole("button", { name: "Inventário" })).toHaveLength(1);
+    expect(menuInv()!.contains(lateral.getByRole("button", { name: "Inventário" }))).toBe(true);
+    expect(screen.queryByRole("button", { name: /Inventário completo/ })).toBeNull();
+    // o painel roxo separado já não existe: nem a secção, nem o rodapé fora do menu
+    expect(document.querySelector(".inv-sbbox, .sb-sec")).toBeNull();
+    cleanup();
+    app("funcional");
+    expect(within(screen.getAllByRole("navigation", { name: "Menu" })[0]).getByRole("button", { name: "Inventário" })).toBeInTheDocument();
+  });
+
+  it("o grupo abre ao entrar em qualquer ecrã do inventário, recolhe fora dele e o chevron abre e fecha à mão", async () => {
+    app("1");
+    await screen.findAllByTestId("menu-inventario");
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(cabecalho());
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(within(menuInv()!).getByRole("button", { name: /^Existências/ }));
+    await screen.findByRole("heading", { level: 1, name: "Existências" });
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(cabecalho());
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getAllByRole("button", { name: /^Negócios/ })[0]);
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("heading", { level: 1, name: "Existências" })).toBeNull();
+    fireEvent.click(item("Fornecedores"));
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("a antiga vista Inventário (Abrir no Inventário) leva às Encomendas do novo inventário, sem beco", async () => {
+    localStorage.clear();
+    localStorage.setItem(CHAVE, "1");
+    localStorage.setItem("olyvia-prototipo-negocios", JSON.stringify({ ...seed(), view: "inventario" }));
+    render(<PrototipoNegocios />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Encomendas a fornecedor" })).toBeInTheDocument();
+    expect(item("Encomendas")).toHaveAttribute("aria-current", "page");
+    expect(cabecalho()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("é uma só interface: a pesquisa global está no cabeçalho do protótipo, sem interruptor de tema e sem tema próprio", async () => {
+    app("1");
+    await screen.findAllByTestId("menu-inventario");
+    expect(screen.queryByLabelText("Pesquisa global")).toBeNull();
+    fireEvent.click(item("Hoje"));
+    const pesquisa = await screen.findByLabelText("Pesquisa global");
+    expect(pesquisa.closest("header")).not.toBeNull();
+    expect(screen.getByPlaceholderText("Procurar PO, EC, produto, SKU, EAN, fornecedor…")).toBe(pesquisa);
+    expect(screen.queryByRole("button", { name: /Tema (claro|escuro)/ })).toBeNull();
+    expect(document.querySelector("[data-theme]")).toBeNull();
+  });
+
+  it("herda os tokens do protótipo: as variáveis --i-* apontam para os tokens da app e não há paleta nem tema próprios", () => {
+    expect(css).not.toMatch(/data-theme|prefers-color-scheme/);
+    for (const t of ["--background", "--foreground", "--card", "--muted", "--border", "--primary", "--accent", "--radius", "--ring"]) expect(css).toContain(`var(${t})`);
+    expect(css).not.toMatch(/--i-(bg|card|primary):\s*(#|hsl\(\d)/);
+  });
+
+  it("o seletor Simular perfil só aparece quando se está no inventário", async () => {
+    app("1");
+    await screen.findAllByTestId("menu-inventario");
+    expect(screen.queryByTestId("perfil-simulado")).toBeNull();
+    fireEvent.click(item("Hoje"));
+    expect(await screen.findAllByLabelText(/Simular perfil/)).not.toHaveLength(0);
+  });
+
+  it("tem a estrutura do mockup: item Inventário com chevron, Hoje, grupo Compras (2) e grupo Armazém (6), com Movimentos marcado Novo", async () => {
     app("1");
     await screen.findAllByTestId("menu-inventario");
     const m = within(menuInv()!);
-    expect(m.getByText("Inventário")).toBeInTheDocument();
+    fireEvent.click(cabecalho());
     const nomes = m.getAllByRole("button").map((b) => b.querySelector("span")!.textContent!.trim());
-    expect(nomes.slice(0, 11)).toEqual(["Hoje", "Compras", "Encomendas", "Fornecedores", "Armazém", "Existências", "Movimentos Novo", "Saídas para clientes", "Receção", "Contagens", "Armazéns"]);
-    expect(nomes[11]).toBe("Mockup · cobertura");
+    expect(nomes.slice(0, 12)).toEqual(["Inventário", "Hoje", "Compras", "Encomendas", "Fornecedores", "Armazém", "Existências", "Movimentos Novo", "Saídas para clientes", "Receção", "Contagens", "Armazéns"]);
+    expect(nomes[12]).toBe("Mockup · cobertura");
     expect(within(m.getByRole("group", { name: "Compras" })).getAllByRole("button")).toHaveLength(3);
     expect(within(m.getByRole("group", { name: "Armazém" })).getAllByRole("button")).toHaveLength(7);
     expect(m.queryByRole("button", { name: /Inventário completo/ })).toBeNull();
@@ -110,10 +189,12 @@ describe("Inventário no menu lateral", () => {
   it("o perfil simulado filtra o menu: Fiel de armazém não vê Saídas para clientes", async () => {
     app("1");
     await screen.findAllByTestId("menu-inventario");
-    fireEvent.change(within(menuInv()!).getByLabelText(/Simular perfil/), { target: { value: "armazem" } });
+    fireEvent.click(item("Hoje"));
+    const perfil = (): HTMLElement => screen.getAllByLabelText(/Simular perfil/)[0];
+    fireEvent.change(perfil(), { target: { value: "armazem" } });
     expect(within(menuInv()!).queryByRole("button", { name: /^Saídas para clientes/ })).toBeNull();
     expect(within(menuInv()!).getByRole("button", { name: /^Contagens/ })).toBeInTheDocument();
-    fireEvent.change(within(menuInv()!).getByLabelText(/Simular perfil/), { target: { value: "consulta" } });
+    fireEvent.change(perfil(), { target: { value: "consulta" } });
     expect(within(menuInv()!).queryByRole("button", { name: /^Contagens/ })).toBeNull();
   });
 });

@@ -68,7 +68,7 @@ export function Ed({ valor, aoGravar, tipo = "text", opcoes, atributos, mostrar,
 export interface ItemMenu { label: string; icone?: ReactNode; perigo?: boolean; desativado?: boolean; porque?: string; fonte?: string; run: () => void }
 /** O botão "Mais ações" (⋯) e o seu menu (`.menu` do mockup), que fecha ao escolher, com Esc ou ao clicar fora. */
 export function MenuMais({ itens, rotulo = "Mais ações" }: { itens: readonly (ItemMenu | "-")[]; rotulo?: string }) {
-  const { tema } = useCtxInv();
+  useCtxInv(); // o perfil muda → redesenha
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -88,7 +88,7 @@ export function MenuMais({ itens, rotulo = "Mais ações" }: { itens: readonly (
     <>
       <button type="button" className="btn btn-sm btn-ghost btn-icon" aria-label={rotulo} aria-haspopup="menu" aria-expanded={!!pos} onClick={abrir}><MoreHorizontal className="ic" aria-hidden="true" /></button>
       {pos && createPortal(
-        <div ref={menu} role="menu" className={cn("inv-root menu")} data-theme={tema} style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
+        <div ref={menu} role="menu" className={cn("inv-root menu")} style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
           {itens.map((it, i) => it === "-" ? <hr key={i} /> : (
             <button key={it.label} type="button" role="menuitem" className={it.perigo ? "danger" : undefined} disabled={it.desativado} onClick={() => { setPos(null); it.run(); }}>
               {it.icone}<span>{it.label}</span>{it.desativado && it.porque ? <small>{it.porque}</small> : null}{it.fonte ? <small><span className="src">{it.fonte}</span></small> : null}

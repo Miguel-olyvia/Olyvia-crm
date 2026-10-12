@@ -2,7 +2,8 @@
 // pesquisa global no topo, as listas com pesquisa, filtros e ordenação, o detalhe numa folha lateral e as ações com diálogos próprios (nunca confirm()).
 // Vive numa base de exemplo em memória (loja.ts): não toca no Estado nem no localStorage e "Repor inventário" apaga-a. Dados inventados, a 09/10/2026.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Moon, RefreshCw, Sun } from "lucide-react";
+import { createPortal } from "react-dom";
+import { RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -17,7 +18,6 @@ import { esquecerInventario, executar, guardarAba, lerAba, useInventario } from 
 import { Sec } from "./pecasInv";
 import { Cab } from "./cabInv";
 import { usePerfil } from "./perfil";
-import { lerTema, mudarTema, useTema } from "./tema";
 import { TITULOS } from "./menuInv";
 import { PesquisaGlobal } from "./PesquisaGlobal";
 import "./inventario.css";
@@ -68,24 +68,24 @@ function AjudaTeclas({ aberta, mudar, leitura }: { aberta: boolean; mudar: (v: b
   );
 }
 
-/** O topo do mockup: a pesquisa global, o interruptor das fontes de dados e o botão de repor os dados de demonstração. */
+/** O topo do mockup: a pesquisa global, o interruptor das fontes de dados e o botão de repor os dados de demonstração (o tema vem do resto do protótipo). */
 function Topo({ fontes, mudarFontes, pedirRepor }: { fontes: boolean; mudarFontes: (v: boolean) => void; pedirRepor: () => void }) {
   return (
     <div className="topbar">
       <PesquisaGlobal />
       <div className="top-actions">
         <label className="switch"><input type="checkbox" checked={fontes} onChange={(e) => mudarFontes(e.target.checked)} /><span className="sw" aria-hidden="true" /><span>Mostrar fontes de dados</span></label>
-        <button type="button" className="btn btn-sm btn-ghost" onClick={() => mudarTema(lerTema() === "dark" ? "light" : "dark")}>{lerTema() === "dark" ? <Sun className="ic" aria-hidden="true" /> : <Moon className="ic" aria-hidden="true" />}<span>{lerTema() === "dark" ? "Tema claro" : "Tema escuro"}</span></button>
         <button type="button" className="btn btn-sm" onClick={pedirRepor} title="Apaga as alterações feitas no mockup"><RefreshCw className="ic" aria-hidden="true" /><span className="hide-sm">Repor dados de demonstração</span><span className="sr">Repor dados</span></button>
       </div>
     </div>
   );
 }
 
-interface PaginaProps { leitura?: boolean; aba?: AbaInv; aoMudarAba?: (a: AbaInv) => void }
+/** `alvoTopo` é o sítio, no cabeçalho do protótipo, onde se desenha o topo (pesquisa e ações); sem ele (testes e uso isolado) o topo fica dentro da página. */
+interface PaginaProps { leitura?: boolean; aba?: AbaInv; aoMudarAba?: (a: AbaInv) => void; alvoTopo?: HTMLElement | null }
 
 /** Sem `aba`, a página guarda ela própria o ecrã aberto (testes e uso isolado); com `aba`, quem manda é o menu lateral. */
-export default function InventarioPagina({ leitura = false, aba: abaFora, aoMudarAba }: PaginaProps) {
+export default function InventarioPagina({ leitura = false, aba: abaFora, aoMudarAba, alvoTopo }: PaginaProps) {
   const db = useInventario();
   const [abaInterna, setAbaInterna] = useState<AbaInv>(lerAba);
   const aba = abaFora ?? abaInterna;
@@ -94,7 +94,7 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
   const [detalhe, setDetalhe] = useState<Detalhe | null>(null);
   const [aviso, anunciar] = useAvisoInv();
   const [repor, setRepor] = useState(false), [ajuda, setAjuda] = useState(false), [fontes, setFontes] = useState(false);
-  const perfil = usePerfil(), tema = useTema();
+  const perfil = usePerfil();
   const [alvoAcoes, registarAcoes] = useState<HTMLElement | null>(null);
   const painel = useRef<HTMLDivElement>(null), primeira = useRef(true), viaIr = useRef(false);
   useEffect(() => { guardarAba(aba); }, [aba]);
@@ -114,20 +114,21 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
     if (k && "f" in d && d.f) setFiltros((x) => ({ ...x, [k]: { ...FILTROS_VAZIOS[k], ...d.f } }));
   }, [setAba, aba]);
   const ctx = useMemo<CtxInv>(() => ({
-    db, leitura, agir, avisar: anunciar, aviso, ir, perfil, tema, alvoAcoes, registarAcoes, abrir: setDetalhe, fecharDetalhe: () => setDetalhe(null), filtros,
+    db, leitura, agir, avisar: anunciar, aviso, ir, perfil, alvoAcoes, registarAcoes, abrir: setDetalhe, fecharDetalhe: () => setDetalhe(null), filtros,
     setFiltros: (k, p) => setFiltros((x) => ({ ...x, [k]: { ...x[k], ...p } })),
-  }), [db, leitura, agir, anunciar, aviso, ir, perfil, tema, alvoAcoes, filtros]);
+  }), [db, leitura, agir, anunciar, aviso, ir, perfil, alvoAcoes, filtros]);
 
   // Os atalhos: ↓ ↑ j k entre linhas, Enter abre, "/" vai à pesquisa, Esc limpa-a, "?" mostra a ajuda. Um só ouvinte para todo o módulo.
   useAtalhos(!ajuda, "lista", painel, {
     pesquisa: () => painel.current?.querySelector<HTMLInputElement>("input[type=search]")?.focus(), ajuda: () => setAjuda(true),
     esc: () => { const k = CHAVE_FILTRO[aba]; const f = k ? (filtros[k] as { q?: string }) : null; if (k && f?.q) setFiltros((x) => ({ ...x, [k]: { ...x[k], q: "" } })); },
   });
+  const topo = <Topo fontes={fontes} mudarFontes={setFontes} pedirRepor={() => setRepor(true)} />;
   return (
     <Contexto.Provider value={ctx}>
       <TooltipProvider>
-        <div className={cn("inv-root inv-pagina", fontes && "show-src")} data-theme={tema}>
-          <Topo fontes={fontes} mudarFontes={setFontes} pedirRepor={() => setRepor(true)} />
+        <div className={cn("inv-root inv-pagina", fontes && "show-src")}>
+          {alvoTopo === undefined ? topo : alvoTopo ? createPortal(<div className="inv-root inv-topo">{topo}</div>, alvoTopo) : null}
           <div className="content">
             <AvisoCaixa />
             <div id="inv-painel" ref={painel} role="region" aria-label={TITULOS[aba][0]} tabIndex={-1} className="min-w-0 outline-none">

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import InventarioPagina from "./InventarioPagina";
 import MenuInventario from "./MenuInventario";
+import PerfilSimulado from "./PerfilSimulado";
 import { COBERTURA, PROBLEMAS, REGRAS } from "./coberturaDados";
 import type { AbaInv } from "./ctxInv";
 import { esquecerInventario } from "./loja";
@@ -11,7 +12,7 @@ import { esquecerPerfil, mudarPerfil } from "./perfil";
 
 function Casa() {
   const [aba, setAba] = useState<AbaInv>("hoje");
-  return <><MenuInventario aba={aba} aoIr={setAba} /><InventarioPagina aba={aba} aoMudarAba={setAba} /></>;
+  return <><MenuInventario aba={aba} aoIr={setAba} /><PerfilSimulado /><InventarioPagina aba={aba} aoMudarAba={setAba} /></>;
 }
 const menu = (): HTMLElement => screen.getByTestId("menu-inventario");
 const painel = (): HTMLElement => document.getElementById("inv-painel") as HTMLElement;
@@ -20,23 +21,23 @@ beforeEach(() => { esquecerPerfil(); esquecerInventario(); });
 afterEach(() => cleanup());
 
 describe("menu lateral", () => {
-  it("tem a secção MOCKUP com o item Mockup · cobertura, por baixo do Inventário", () => {
+  it("tem o item Mockup · cobertura como último subitem do grupo Inventário (sem secção própria)", () => {
     render(<Casa />);
-    const seccoes = Array.from(menu().querySelectorAll(".sb-sec")).map((e) => e.textContent);
-    expect(seccoes).toEqual(["Inventário", "Mockup"]);
+    expect(menu().querySelectorAll(".sb-sec")).toHaveLength(0);
+    const botoes = within(menu()).getAllByRole("button");
+    expect(botoes[botoes.length - 1].textContent).toBe("Mockup · cobertura");
     fireEvent.click(within(menu()).getByRole("button", { name: "Mockup · cobertura" }));
     expect(within(painel()).getByRole("heading", { level: 1, name: "Mockup · cobertura" })).toBeTruthy();
     expect(painel().querySelector(".crumbs")?.textContent).toBe("Mockup");
     expect(within(menu()).getByRole("button", { name: "Mockup · cobertura" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("os grupos são botões expandidos e o rodapé traz o perfil e a fonte", () => {
+  it("o item Inventário está expandido dentro do inventário, o grupo leva ao primeiro ecrã e o seletor de perfil traz a fonte", () => {
     render(<Casa />);
-    const compras = within(menu()).getByRole("button", { name: /^Compras/ });
-    expect(compras.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(compras);
+    expect(within(menu()).getByRole("button", { name: "Inventário" }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(within(menu()).getByRole("button", { name: /^Compras/ }));
     expect(painel().querySelector(".crumbs")?.textContent).toBe("Inventário › Compras");
-    expect(menu().querySelector(".sb-foot .src")?.textContent).toBe("has_permission() · anew_role_permissions");
+    expect(screen.getByTestId("perfil-simulado").querySelector(".src")?.textContent).toBe("has_permission() · anew_role_permissions");
   });
 });
 

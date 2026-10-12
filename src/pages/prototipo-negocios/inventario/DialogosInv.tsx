@@ -18,10 +18,10 @@ interface DlgProps { aberto: boolean; aoFechar: () => void; titulo: string; desc
 
 /** Um diálogo: título, corpo que rola e rodapé com os botões (Cancelar à esquerda, o primário no fim). */
 export function Dlg({ aberto, aoFechar, titulo, descricao, largo, children, rodape, classe, acima, abaixo }: DlgProps) {
-  const { tema } = useCtxInv();
+  useCtxInv(); // o perfil muda → redesenha
   return (
     <Dialog open={aberto} onOpenChange={(a) => { if (!a) aoFechar(); }}>
-      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} data-theme={tema} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !p-0", !classe && "!border-0", largo && "wide", classe)}>
+      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !p-0", !classe && "!border-0", largo && "wide", classe)}>
         <div className="dh"><div>{acima}<DialogTitle>{titulo}</DialogTitle>{descricao ? <DialogDescription className="muted" style={{ marginTop: 4 }}>{descricao}</DialogDescription> : <DialogDescription className="sr">{titulo}</DialogDescription>}{abaixo}</div><button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button></div>
         <div className="db"><AvisoCaixa />{children}</div>
         <div className="df">{rodape}</div>
@@ -67,7 +67,7 @@ interface FolhaProps {
 }
 /** A folha lateral de um detalhe (largura min(720px, 100vw)): cabeçalho fixo, corpo que rola, rodapé fixo. Ao fechar, o foco volta à linha de onde se abriu. */
 export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, children, rodape, abas, acoesTopo, tituloClasse }: FolhaProps) {
-  const { tema } = useCtxInv();
+  useCtxInv(); // o perfil muda → redesenha
   const conteudo = useRef<HTMLDivElement>(null);
   const voltar = (e: Event): void => {
     e.preventDefault();
@@ -77,7 +77,7 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
     <Sheet open={aberta} onOpenChange={(a) => { if (!a) aoFechar(); }}>
       <SheetContent ref={conteudo} side="right" onCloseAutoFocus={voltar}
         onOpenAutoFocus={(e) => { e.preventDefault(); conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']")?.focus(); }}
-        data-theme={tema} className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 sm:!max-w-none [&>button.absolute]:hidden")}>
+        className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 sm:!max-w-none [&>button.absolute]:hidden")}>
         <div className="sh-head">
           <div className="sh-top">
             <div style={{ minWidth: 0 }}>
