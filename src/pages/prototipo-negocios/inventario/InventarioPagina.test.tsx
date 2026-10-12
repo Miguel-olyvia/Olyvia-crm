@@ -194,7 +194,7 @@ describe("Ecrãs do menu", () => {
     fireEvent.click(screen.getByRole("button", { name: /^3\s*POs por aprovar/ }));
     expect(item("Encomendas")).toHaveAttribute("aria-current", "page");
     expect(estado(/^Pendente/)).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getAllByRole("button", { name: /^Abrir PO-/ })).toHaveLength(3);
+    expect(screen.getAllByRole("row", { name: /^Abrir PO-/ })).toHaveLength(3);
   });
 });
 
@@ -202,18 +202,18 @@ describe("Encomendas", () => {
   it("filtra por estado e pesquisa por fornecedor", () => {
     render(<Casa />);
     separador("Encomendas");
-    expect(screen.getAllByRole("button", { name: /^Abrir PO-/ })).toHaveLength(13);
+    expect(screen.getAllByRole("row", { name: /^Abrir PO-/ })).toHaveLength(13);
     fireEvent.click(estado(/^Atrasadas/));
-    expect(screen.getAllByRole("button", { name: /^Abrir PO-/ })).toHaveLength(4);
+    expect(screen.getAllByRole("row", { name: /^Abrir PO-/ })).toHaveLength(4);
     fireEvent.click(estado(/^Todas/));
     fireEvent.change(screen.getByRole("searchbox", { name: /Pesquisar encomendas/ }), { target: { value: "zeta" } });
-    expect(screen.getAllByRole("button", { name: /^Abrir PO-/ })).toHaveLength(1);
+    expect(screen.getAllByRole("row", { name: /^Abrir PO-/ })).toHaveLength(1);
   });
 
   it("receber a PO da Silva & Filhos: o diálogo mostra a repartição, confirma, avisa e a PO fica Recebida", async () => {
     render(<Casa />);
     separador("Encomendas");
-    fireEvent.click(screen.getByRole("button", { name: /^Abrir PO-2026-0137/ }));
+    fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
     const dlg = await screen.findByRole("dialog", { name: "Receber PO-2026-0137" });
@@ -232,7 +232,7 @@ describe("Encomendas (continuação)", () => {
   it("um valor acima do que falta não passa do campo: fica no máximo", async () => {
     render(<Casa />);
     separador("Encomendas");
-    fireEvent.click(screen.getByRole("button", { name: /^Abrir PO-2026-0137/ }));
+    fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
     const dlg = await screen.findByRole("dialog", { name: "Receber PO-2026-0137" });
@@ -254,7 +254,7 @@ describe("Encomendas (continuação)", () => {
   it("reverter uma receção pede motivo: o botão só fica ativo com 3 caracteres, e a regra que recusa aparece no diálogo", async () => {
     render(<Casa />);
     separador("Encomendas");
-    fireEvent.click(screen.getByRole("button", { name: /^Abrir PO-2026-0136/ }));
+    fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0136/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0136" });
     fireEvent.click(within(folha).getByRole("tab", { name: /^Receções/ }));
     fireEvent.click(within(folha).getByRole("button", { name: "Reverter receção" }));
@@ -273,8 +273,8 @@ describe("Stock, movimentos e transferências", () => {
     render(<Casa />);
     separador("Stock");
     fireEvent.click(screen.getByRole("button", { name: /Em excesso/ }));
-    expect(screen.getAllByRole("button", { name: /^Abrir o stock de/ }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getAllByRole("button", { name: /^Abrir o stock de/ })[0]);
+    expect(screen.getAllByRole("row", { name: /^Abrir o stock de/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("row", { name: /^Abrir o stock de/ })[0]);
     const folha = await screen.findByRole("dialog");
     expect(within(folha).getByRole("button", { name: "Registar movimento" })).toBeInTheDocument();
   });
@@ -302,16 +302,16 @@ describe("Encomendas de cliente, guias e contagens", () => {
   it("a lista de ECs mostra o progresso em texto e filtra as prontas a expedir", () => {
     render(<Casa />);
     separador("Encomendas de cliente");
-    expect(screen.getAllByRole("button", { name: /^Abrir EC-/ })).toHaveLength(9);
+    expect(screen.getAllByRole("row", { name: /^Abrir EC-/ })).toHaveLength(9);
     fireEvent.click(estado(/^Prontas a expedir/));
-    expect(screen.getAllByRole("button", { name: /^Abrir EC-/ })).toHaveLength(7);
+    expect(screen.getAllByRole("row", { name: /^Abrir EC-/ })).toHaveLength(7);
     expect(screen.getAllByText(/servido ·/).length).toBeGreaterThan(0);
   });
 
   it("fechar uma guia com divergências pede nota", async () => {
     render(<Casa />);
     separador("Guias");
-    fireEvent.click(screen.getByRole("button", { name: /^Abrir a guia GR 2026\/311/ }));
+    fireEvent.click(screen.getByRole("row", { name: /^Abrir a guia GR 2026\/311/ }));
     const folha = await screen.findByRole("dialog", { name: "GR 2026/311" });
     const fechar = within(folha).getAllByRole("button", { name: "Fechar" });
     fireEvent.click(fechar[fechar.length - 1]);
@@ -325,7 +325,7 @@ describe("Encomendas de cliente, guias e contagens", () => {
   it("a contagem em curso só finaliza com tudo contado e resolvido", async () => {
     render(<Casa />);
     separador("Contagens");
-    fireEvent.click(screen.getByRole("button", { name: /^Abrir a contagem INV-2026-014/ }));
+    fireEvent.click(screen.getByRole("row", { name: /^Abrir a contagem INV-2026-014/ }));
     const folha = await screen.findByRole("dialog", { name: "INV-2026-014" });
     expect(within(folha).getByRole("button", { name: "Finalizar" })).toBeDisabled();
   });
@@ -339,7 +339,7 @@ describe("Teclado e Repor", () => {
     expect(screen.getByRole("searchbox", { name: /Pesquisar encomendas/ })).toHaveFocus();
     (document.activeElement as HTMLElement).blur();
     fireEvent.keyDown(document.body, { key: "ArrowDown" });
-    const primeira = screen.getAllByRole("button", { name: /^Abrir PO-/ }).find((b) => b.hasAttribute("data-linha-func"))!;
+    const primeira = screen.getAllByRole("row", { name: /^Abrir PO-/ }).find((b) => b.hasAttribute("data-linha-func"))!;
     expect(primeira).toHaveFocus();
     fireEvent.keyDown(primeira, { key: "Enter" });
     fireEvent.click(primeira);

@@ -1,13 +1,20 @@
 // O básico do motor do Inventário: o dia de hoje do exemplo, os formatos, os erros "de utilizador" e as pesquisas na base. Sem React.
+import { PERFIS, lerPerfil, podePerfil } from "./perfil";
 import type { Armazem, Contagem, Ec, Fornecedor, Guia, Inventario, Po, Produto } from "./tipos";
 
 /** Hoje, no exemplo: fixo, como no mockup (09/10/2026). */
 export const HOJE = "2026-10-09";
 export const UTILIZADOR = "Admin Demo";
+/** O utilizador do perfil simulado (CUR_USER do mockup). */
+export const utilizadorAtual = (): string => PERFIS[lerPerfil()].user;
 
 /** Uma regra do negócio que recusa a ação: a mensagem é para mostrar a quem usa. */
 export class ErroInv extends Error {}
 export function falhar(msg: string): never { throw new ErroInv(msg); }
+/** need() do mockup: recusa a ação se o perfil simulado não tem a permissão (mensagem igual à do mockup). */
+export function exigir(perm: string, oQue?: string): void {
+  if (!podePerfil(lerPerfil(), perm)) falhar(`Sem permissão: ${oQue ?? perm} (requer ${perm}).`);
+}
 export const ehInteiro = (v: unknown): v is number => Number.isInteger(v);
 
 export const pad = (n: number, l = 4): string => String(n).padStart(l, "0");

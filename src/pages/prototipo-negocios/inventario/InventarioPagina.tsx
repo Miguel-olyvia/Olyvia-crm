@@ -2,7 +2,7 @@
 // pesquisa global no topo, as listas com pesquisa, filtros e ordenação, o detalhe numa folha lateral e as ações com diálogos próprios (nunca confirm()).
 // Vive numa base de exemplo em memória (loja.ts): não toca no Estado nem no localStorage e "Repor inventário" apaga-a. Dados inventados, a 09/10/2026.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Moon, RefreshCw, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -16,6 +16,8 @@ import { FILTROS_VAZIOS, type FiltrosInv } from "./filtros";
 import { esquecerInventario, executar, guardarAba, lerAba, useInventario } from "./loja";
 import { Sec } from "./pecasInv";
 import { Cab } from "./cabInv";
+import { usePerfil } from "./perfil";
+import { lerTema, mudarTema, useTema } from "./tema";
 import { TITULOS } from "./menuInv";
 import { PesquisaGlobal } from "./PesquisaGlobal";
 import "./inventario.css";
@@ -71,6 +73,7 @@ function Topo({ fontes, mudarFontes, pedirRepor }: { fontes: boolean; mudarFonte
       <PesquisaGlobal />
       <div className="top-actions">
         <label className="switch"><input type="checkbox" checked={fontes} onChange={(e) => mudarFontes(e.target.checked)} /><span className="sw" aria-hidden="true" /><span>Mostrar fontes de dados</span></label>
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => mudarTema(lerTema() === "dark" ? "light" : "dark")}>{lerTema() === "dark" ? <Sun className="ic" aria-hidden="true" /> : <Moon className="ic" aria-hidden="true" />}<span>{lerTema() === "dark" ? "Tema claro" : "Tema escuro"}</span></button>
         <button type="button" className="btn btn-sm" onClick={pedirRepor} title="Apaga as alterações feitas no mockup"><RefreshCw className="ic" aria-hidden="true" /><span>Repor dados de demonstração</span></button>
       </div>
     </div>
@@ -89,6 +92,8 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
   const [detalhe, setDetalhe] = useState<Detalhe | null>(null);
   const [aviso, anunciar] = useAvisoInv();
   const [repor, setRepor] = useState(false), [ajuda, setAjuda] = useState(false), [fontes, setFontes] = useState(false);
+  const perfil = usePerfil(), tema = useTema();
+  const [alvoAcoes, registarAcoes] = useState<HTMLElement | null>(null);
   const painel = useRef<HTMLDivElement>(null), primeira = useRef(true), viaIr = useRef(false);
   useEffect(() => { guardarAba(aba); }, [aba]);
   useEffect(() => { if (primeira.current) { primeira.current = false; return; } if (viaIr.current) viaIr.current = false; else setDetalhe(null); painel.current?.focus({ preventScroll: true }); }, [aba]);
@@ -107,9 +112,9 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
     if (k && "f" in d && d.f) setFiltros((x) => ({ ...x, [k]: { ...FILTROS_VAZIOS[k], ...d.f } }));
   }, [setAba, aba]);
   const ctx = useMemo<CtxInv>(() => ({
-    db, leitura, agir, avisar: anunciar, aviso, ir, abrir: setDetalhe, fecharDetalhe: () => setDetalhe(null), filtros,
+    db, leitura, agir, avisar: anunciar, aviso, ir, perfil, tema, alvoAcoes, registarAcoes, abrir: setDetalhe, fecharDetalhe: () => setDetalhe(null), filtros,
     setFiltros: (k, p) => setFiltros((x) => ({ ...x, [k]: { ...x[k], ...p } })),
-  }), [db, leitura, agir, anunciar, aviso, ir, filtros]);
+  }), [db, leitura, agir, anunciar, aviso, ir, perfil, tema, alvoAcoes, filtros]);
 
   // Os atalhos: ↓ ↑ j k entre linhas, Enter abre, "/" vai à pesquisa, Esc limpa-a, "?" mostra a ajuda. Um só ouvinte para todo o módulo.
   useAtalhos(!ajuda, "lista", painel, {
@@ -119,12 +124,12 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
   return (
     <Contexto.Provider value={ctx}>
       <TooltipProvider>
-        <div className={cn("inv-root inv-pagina", fontes && "show-src")}>
+        <div className={cn("inv-root inv-pagina", fontes && "show-src")} data-theme={tema}>
           <Topo fontes={fontes} mudarFontes={setFontes} pedirRepor={() => setRepor(true)} />
           <div className="content">
             <AvisoCaixa />
             <div id="inv-painel" ref={painel} role="region" aria-label={TITULOS[aba][0]} tabIndex={-1} className="min-w-0 outline-none">
-              {aba !== "hoje" && <Cab aba={aba} />}
+              <Cab aba={aba} />
               <Painel aba={aba} />
             </div>
           </div>

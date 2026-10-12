@@ -2,6 +2,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { FiltrosCont, FiltrosEc, FiltrosForn, FiltrosGuia, FiltrosInv, FiltrosMov, FiltrosPo, FiltrosStock } from "./filtros";
 import type { Resultado } from "./loja";
+import type { PerfilId } from "./perfil";
+import type { Tema } from "./tema";
 import type { Inventario } from "./tipos";
 
 export type AbaInv = "hoje" | "po" | "sup" | "stock" | "mov" | "ec" | "guia" | "cont" | "wh";
@@ -26,6 +28,12 @@ export interface CtxInv {
   ir: (d: Destino, detalhe?: Detalhe) => void;
   abrir: (d: Detalhe) => void;
   fecharDetalhe: () => void;
+  /** O perfil simulado e o tema: estão no contexto para os ecrãs (e os diálogos, que vivem fora da raiz) redesenharem quando mudam. */
+  perfil: PerfilId;
+  tema: Tema;
+  /** Onde as ações do ecrã se desenham: dentro do cabeçalho (função head() do mockup). */
+  alvoAcoes: HTMLElement | null;
+  registarAcoes: (el: HTMLElement | null) => void;
   filtros: FiltrosInv;
   setFiltros: <K extends keyof FiltrosInv>(k: K, p: Partial<FiltrosInv[K]>) => void;
 }

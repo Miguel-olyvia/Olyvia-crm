@@ -1,12 +1,15 @@
 // O cabeçalho de cada ecrã do Inventário, igual ao do mockup (função head()): o rótulo pequeno "Inventário › Grupo", o título, o texto e as ações.
 // Os textos são os do mockup, palavra por palavra.
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
+import { useCtxInv } from "./ctxInv";
 import type { AbaInv } from "./ctxInv";
 import { TITULOS, grupoDe } from "./menuInv";
 
 
 /** O cabeçalho do ecrã `aba`; `acoes` são os botões à direita (o Hoje tem os seus). */
-export function Cab({ aba, acoes }: { aba: AbaInv; acoes?: ReactNode }) {
+export function Cab({ aba }: { aba: AbaInv }) {
+  const { registarAcoes } = useCtxInv();
   const [titulo, sub] = TITULOS[aba];
   const g = grupoDe(aba);
   return (
@@ -16,9 +19,15 @@ export function Cab({ aba, acoes }: { aba: AbaInv; acoes?: ReactNode }) {
         <h1>{titulo}</h1>
         <p className="muted" style={{ marginTop: 4, maxWidth: 760 }}>{sub}</p>
       </div>
-      {acoes ? <div className="ph-actions">{acoes}</div> : null}
+      <div className="ph-actions" ref={registarAcoes} />
     </div>
   );
+}
+
+/** As ações do ecrã, desenhadas dentro do cabeçalho (`.ph-actions`) onde o mockup as põe. */
+export function AcoesCab({ children }: { children: ReactNode }) {
+  const { alvoAcoes } = useCtxInv();
+  return alvoAcoes ? createPortal(children, alvoAcoes) : null;
 }
 
 /** A fonte de dados de cada bloco (o interruptor "Mostrar fontes de dados" do topo mostra-as). */

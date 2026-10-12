@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { ArrowLeftRight, ArrowRight, GitFork, Play, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, fmtDT, N, nomeArm, nomeProd } from "./base";
-import { Cab, Fonte } from "./cabInv";
+import { AcoesCab, Fonte } from "./cabInv";
 import { contadores, type Contadores } from "./contadores";
 import { useCtxInv, type Destino } from "./ctxInv";
 import { TIPOS_MOV } from "./stock";
@@ -154,7 +154,7 @@ export function HojeInv() {
   );
   return (
     <div>
-      <Cab aba="hoje" acoes={acoes} />
+      <AcoesCab>{acoes}</AcoesCab>
       <Fluxo c={c} />
       <Fila c={c} />
       <div className="flow-top" style={{ alignItems: "start" }}><AutoPo /><Ultimos /></div>

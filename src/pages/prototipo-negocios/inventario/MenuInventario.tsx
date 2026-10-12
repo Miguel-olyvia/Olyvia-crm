@@ -4,6 +4,7 @@ import { useEffect, useId } from "react";
 import { cn } from "@/lib/utils";
 import type { AbaInv } from "./ctxInv";
 import { GRUPOS, ICONE_HOJE, grupoDe, pilulas, totalFila, type Pilula } from "./menuInv";
+import { useTema } from "./tema";
 import { PERFIS, mudarPerfil, podePerfil, usePerfil, type PerfilId } from "./perfil";
 import { useInventario } from "./loja";
 import "./inventario.css";
@@ -14,7 +15,7 @@ interface Props { aba: AbaInv | null; aoIr: (a: AbaInv) => void }
 /** `aba` é o ecrã aberto (null quando se está noutra página do protótipo). */
 export default function MenuInventario({ aba, aoIr }: Props) {
   const db = useInventario();
-  const perfil = usePerfil();
+  const perfil = usePerfil(), tema = useTema();
   const pil = pilulas(db);
   const total = totalFila(db);
   const ativo = aba ? grupoDe(aba)?.id : undefined;
@@ -25,7 +26,7 @@ export default function MenuInventario({ aba, aoIr }: Props) {
     if (item && !podePerfil(perfil, item.perm)) aoIr("hoje");
   }, [aba, perfil, aoIr]);
   return (
-    <div className="inv-root inv-sbbox" data-testid="menu-inventario">
+    <div className="inv-root inv-sbbox" data-theme={tema} data-testid="menu-inventario">
       <div className="sb-sec" id={rotulo}>Inventário</div>
       <nav className="sb-nav" aria-labelledby={rotulo}>
         <button type="button" className={cn("sb-head", aba === "hoje" && "on")} aria-current={aba === "hoje" ? "page" : undefined} onClick={() => aoIr("hoje")}>

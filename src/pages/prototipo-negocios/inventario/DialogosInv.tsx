@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { SEM_ATALHOS } from "../useAtalhos";
-import { classePortal } from "../FiltrosPopover";
 import { AvisoCaixa } from "./AvisoCaixa";
 import { useCtxInv } from "./ctxInv";
 import { motivoValido } from "./base";
@@ -17,11 +16,11 @@ interface DlgProps { aberto: boolean; aoFechar: () => void; titulo: string; desc
 
 /** Um diálogo: título, corpo que rola e rodapé com os botões (Cancelar à esquerda, o primário no fim). */
 export function Dlg({ aberto, aoFechar, titulo, descricao, largo, children, rodape }: DlgProps) {
-  const { leitura } = useCtxInv();
+  const { tema } = useCtxInv();
   return (
     <Dialog open={aberto} onOpenChange={(a) => { if (!a) aoFechar(); }}>
-      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !border-0 !p-0", largo && "wide", classePortal(leitura))}>
-        <div className="dh"><div><DialogTitle>{titulo}</DialogTitle>{descricao ? <DialogDescription className="muted" style={{ marginTop: 4 }}>{descricao}</DialogDescription> : <DialogDescription className="sr">{titulo}</DialogDescription>}</div></div>
+      <DialogContent hideClose {...{ [SEM_ATALHOS]: "" }} data-theme={tema} className={cn("inv-root dlg !flex !max-w-none !flex-col !gap-0 !border-0 !p-0", largo && "wide")}>
+        <div className="dh"><div><DialogTitle>{titulo}</DialogTitle>{descricao ? <DialogDescription className="muted" style={{ marginTop: 4 }}>{descricao}</DialogDescription> : <DialogDescription className="sr">{titulo}</DialogDescription>}</div><button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button></div>
         <div className="db"><AvisoCaixa />{children}</div>
         <div className="df">{rodape}</div>
       </DialogContent>
@@ -48,7 +47,7 @@ export function Confirmar({ aberto, aoFechar, titulo, texto, ok, perigo, motivo,
   return (
     <Dlg aberto={aberto} aoFechar={fechar} titulo={titulo}
       rodape={<><Sec onClick={fechar}>Cancelar</Sec><Pri disabled={faltaMotivo} variant={perigo ? "destructive" : "default"} onClick={confirmar}>{ok}</Pri></>}>
-      {texto && <div className="grid gap-2 text-[15px]">{texto}</div>}
+      {texto}
       {motivo !== undefined && <Notas rotulo={motivo || "Motivo"} valor={m} aoMudar={(v) => { setM(v); setErro(""); }} linhas={2} obrigatorio ajuda="Mínimo 3 caracteres." />}
       {erro && <Nota tom="bad" alerta>{erro}</Nota>}
     </Dlg>
@@ -62,7 +61,7 @@ interface FolhaProps {
 }
 /** A folha lateral de um detalhe (largura min(720px, 100vw)): cabeçalho fixo, corpo que rola, rodapé fixo. Ao fechar, o foco volta à linha de onde se abriu. */
 export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, children, rodape, abas }: FolhaProps) {
-  const { leitura } = useCtxInv();
+  const { tema } = useCtxInv();
   const conteudo = useRef<HTMLDivElement>(null);
   const voltar = (e: Event): void => {
     e.preventDefault();
@@ -72,15 +71,15 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
     <Sheet open={aberta} onOpenChange={(a) => { if (!a) aoFechar(); }}>
       <SheetContent ref={conteudo} side="right" onCloseAutoFocus={voltar}
         onOpenAutoFocus={(e) => { e.preventDefault(); conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']")?.focus(); }}
-        className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 text-foreground sm:!max-w-none [&>button.absolute]:hidden", classePortal(leitura))}>
+        data-theme={tema} className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 sm:!max-w-none [&>button.absolute]:hidden")}>
         <div className="sh-head">
           <div className="sh-top">
-            <div className="min-w-0">
+            <div style={{ minWidth: 0 }}>
               {subtitulo && <SheetDescription className="crumbs">{subtitulo}</SheetDescription>}
-              <SheetTitle tabIndex={-1} className="outline-none">{titulo}</SheetTitle>
+              <SheetTitle tabIndex={-1} style={{ outline: "none" }}>{titulo}</SheetTitle>
               {selos && <div className="chips" style={{ marginTop: 8 }}>{selos}</div>}
             </div>
-            <Sec onClick={aoFechar}><X className="ic" aria-hidden="true" />Fechar</Sec>
+            <button type="button" className="btn btn-ghost btn-icon" onClick={aoFechar} aria-label="Fechar"><X className="ic" aria-hidden="true" /></button>
           </div>
           {abas}
         </div>
@@ -91,11 +90,11 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
   );
 }
 
-/** As abas de uma folha: botões com role=tab e as setas a mudar de aba. */
+/** As abas de uma folha (`.tabs` e `.tab` do mockup): botões com role=tab e as setas a mudar de aba. */
 export function AbasFolha<T extends string>({ rotulo, abas, atual, escolher }: { rotulo: string; abas: readonly (readonly [T, string, number?])[]; atual: T; escolher: (a: T) => void }) {
   const ids = abas.map((a) => a[0]);
   return (
-    <div role="tablist" aria-label={rotulo} className="mt-3 flex gap-1 overflow-x-auto">
+    <div role="tablist" aria-label={rotulo} className="tabs">
       {abas.map(([id, nome, n], i) => (
         <button key={id} id={`fa-${id}`} type="button" role="tab" aria-selected={atual === id} tabIndex={atual === id ? 0 : -1} onClick={() => escolher(id)}
           onKeyDown={(e) => {
@@ -103,8 +102,8 @@ export function AbasFolha<T extends string>({ rotulo, abas, atual, escolher }: {
             if (j < 0) return;
             e.preventDefault(); escolher(ids[j]); document.getElementById(`fa-${ids[j]}`)?.focus();
           }}
-          className={cn("min-h-11 shrink-0 cursor-pointer rounded-md border px-3 text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", atual === id ? "border-foreground bg-foreground text-background" : "border-transparent hover:border-border")}>
-          {nome}{n ? <span className="ml-1.5 tabular-nums opacity-70">{n}</span> : null}
+          className={cn("tab", atual === id && "on")}>
+          {nome}{n ? <span className="pill">{n}</span> : null}
         </button>
       ))}
     </div>

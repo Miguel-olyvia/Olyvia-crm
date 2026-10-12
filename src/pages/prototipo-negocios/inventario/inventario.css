@@ -10,6 +10,28 @@
   --i-shadow:0 1px 2px rgb(20 10 50/.06),0 6px 20px rgb(30 10 60/.07);--i-overlay:rgb(15 8 35/.5);
   color-scheme:light;
 }
+@media (prefers-color-scheme: dark){
+.inv-root:not([data-theme="light"]){
+    --i-bg:hsl(250 25% 8%);--i-fg:hsl(250 20% 94%);--i-card:hsl(250 22% 12%);--i-muted:hsl(250 18% 17%);--i-muted-fg:hsl(250 12% 70%);
+    --i-border:hsl(250 16% 24%);--i-primary:hsl(262 83% 68%);--i-primary-fg:hsl(262 60% 10%);--i-primary-soft:hsl(262 40% 20%);
+    --i-accent:hsl(340 82% 62%);--i-accent-soft:hsl(340 40% 20%);--i-sidebar:hsl(262 50% 9%);--i-sidebar-fg:hsl(262 25% 82%);
+    --i-sidebar-hi:hsl(262 45% 22%);--i-ring:hsl(262 83% 72%);
+    --i-ok:hsl(142 60% 66%);--i-ok-bg:hsl(142 40% 15%);--i-warn:hsl(40 90% 64%);--i-warn-bg:hsl(35 50% 16%);
+    --i-bad:hsl(0 80% 70%);--i-bad-bg:hsl(0 45% 18%);--i-info:hsl(214 90% 72%);--i-info-bg:hsl(214 45% 18%);
+    --i-neu:hsl(220 10% 72%);--i-neu-bg:hsl(220 10% 20%);--i-vio:hsl(262 80% 78%);--i-vio-bg:hsl(262 35% 20%);
+    --i-shadow:0 1px 2px rgb(0 0 0/.4),0 6px 20px rgb(0 0 0/.35);--i-overlay:rgb(0 0 0/.6);color-scheme:dark;
+  }
+}
+.inv-root[data-theme="dark"]{
+    --i-bg:hsl(250 25% 8%);--i-fg:hsl(250 20% 94%);--i-card:hsl(250 22% 12%);--i-muted:hsl(250 18% 17%);--i-muted-fg:hsl(250 12% 70%);
+    --i-border:hsl(250 16% 24%);--i-primary:hsl(262 83% 68%);--i-primary-fg:hsl(262 60% 10%);--i-primary-soft:hsl(262 40% 20%);
+    --i-accent:hsl(340 82% 62%);--i-accent-soft:hsl(340 40% 20%);--i-sidebar:hsl(262 50% 9%);--i-sidebar-fg:hsl(262 25% 82%);
+    --i-sidebar-hi:hsl(262 45% 22%);--i-ring:hsl(262 83% 72%);
+    --i-ok:hsl(142 60% 66%);--i-ok-bg:hsl(142 40% 15%);--i-warn:hsl(40 90% 64%);--i-warn-bg:hsl(35 50% 16%);
+    --i-bad:hsl(0 80% 70%);--i-bad-bg:hsl(0 45% 18%);--i-info:hsl(214 90% 72%);--i-info-bg:hsl(214 45% 18%);
+    --i-neu:hsl(220 10% 72%);--i-neu-bg:hsl(220 10% 20%);--i-vio:hsl(262 80% 78%);--i-vio-bg:hsl(262 35% 20%);
+    --i-shadow:0 1px 2px rgb(0 0 0/.4),0 6px 20px rgb(0 0 0/.35);--i-overlay:rgb(0 0 0/.6);color-scheme:dark;
+}
 .inv-root *{box-sizing:border-box}
 .inv-root{margin:0;background:var(--i-bg);color:var(--i-fg);font:14px/1.45 "Inter",system-ui,-apple-system,"Segoe UI",sans-serif;}
 .inv-root button,.inv-root input,.inv-root select,.inv-root textarea{font:inherit}
@@ -330,6 +352,7 @@
 .inv-root .portalsim .dh{background:hsl(190 70% 22%);color:#fff;border-radius:12px 12px 0 0}
 .inv-root .portalsim .dh .btn{color:#fff}
 .inv-root .portalsim .db{background:hsl(190 30% 97%);color:hsl(200 30% 15%)}
+.inv-root[data-theme="dark"] .portalsim .db{background:hsl(195 30% 10%);color:hsl(190 20% 92%)}
 .inv-root .ps-steps{display:flex;gap:6px;flex-wrap:wrap}
 .inv-root .ps-steps span{font-size:12px;padding:3px 10px;border-radius:999px;background:hsl(190 20% 88%);color:hsl(195 40% 20%)}
 .inv-root .ps-steps span.on{background:hsl(190 70% 30%);color:#fff}
