@@ -11,7 +11,8 @@ import type { AcaoP } from "./dashboardPessoas";
 import { BORDA_CTRL } from "./PessoaLinha";
 import { ListaTopo, type Vista } from "./ListaTopo";
 import { CabecalhoPagina } from "./CabecalhoPagina";
-import { PessoasResumo } from "./PessoasResumo";
+import { ChipsVista } from "./ChipsVista";
+import { vistasPessoas } from "./filaPessoas";
 import { PessoaTabela } from "./PessoaTabela";
 import { PessoasDashboard } from "./PessoasDashboard";
 import type { Estado } from "./motor";
@@ -42,10 +43,22 @@ export interface ListaProps {
 const TAB = "cursor-pointer text-[15px]";
 const mais = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 
-/** "14 leads e 5 clientes, mais 2 perdidas": as pessoas de todos os separadores, sem filtros. */
+/** "14 leads e 5 clientes, mais 2 perdidas · 4 por contactar · 1 atrasada": as pessoas de todos os separadores, sem filtros. */
 function resumoPessoas(linhas: readonly LinhaP[]): string {
-  const n = contagensP(linhas, "");
-  return `${mais(n.leads, "lead", "leads")} e ${mais(n.clientes, "cliente", "clientes")}, mais ${mais(n.todos - n.leads - n.clientes, "perdida", "perdidas")}`;
+  const n = contagensP(linhas, ""), com = (f: Partial<FiltrosP>): number => selecionar(linhas, "todos", { ...SEM_FILTROS_P, ...f }).length;
+  const atrasadas = com({ atrasadas: true });
+  return `${mais(n.leads, "lead", "leads")} e ${mais(n.clientes, "cliente", "clientes")}, mais ${mais(n.todos - n.leads - n.clientes, "perdida", "perdidas")}`
+    + ` · ${com({ porContactar: true })} por contactar · ${mais(atrasadas, "atrasada", "atrasadas")}`;
+}
+
+/** Os chips de vista que o ListaTopo ainda não tem (Voltaram a contactar, Com visita, Com negócio novo): ligam e desligam o filtro com o número da lista. */
+function VistasExtra({ linhas, aba, f, setF }: Pick<ListaProps, "linhas" | "aba" | "f" | "setF">) {
+  const itens = vistasPessoas(linhas, aba, f).filter((v) => ["voltou", "visita", "novo"].includes(v.id));
+  const alternar = (id: string): void => {
+    const v = itens.find((x) => x.id === id)!;
+    setF({ [v.chave]: v.ativo ? SEM_FILTROS_P[v.chave] : v.valor });
+  };
+  return <ChipsVista nome="Mais vistas" itens={itens} aoAlternar={alternar} />;
 }
 
 const PLURAL: Record<SeparadorLista, string> = { leads: "leads", clientes: "clientes", todos: "pessoas" };
@@ -92,9 +105,9 @@ export function PessoaLista({ S, linhas, aba, setAba, vista, setVista, f, setF, 
       </div>
       <div aria-live="polite" aria-atomic="true" className="sr-only">{aviso}</div>
       <TabsContent value={vista} className="mt-0">
-        {vista === "lista" && <PessoasResumo linhas={linhas} aba={aba} f={f} aoAgir={agir} />}
         <Tabs value={aba} onValueChange={(v) => setAba(v as SeparadorLista)} className="min-w-0">
-          <ListaTopo linhas={linhas} aba={aba} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} total={visiveis.length} leitura={leitura} pesquisa={pesquisa} />
+          <ListaTopo linhas={linhas} aba={aba} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} total={visiveis.length} leitura={leitura} pesquisa={pesquisa}
+            chipsExtra={<VistasExtra linhas={linhas} aba={aba} f={f} setF={setF} />} />
           <TabsContent value={aba} className="mt-0 pb-24 lg:pb-6">
             {vista === "lista" && (
               <h2 ref={tituloLista} tabIndex={-1} className="sr-only focus:not-sr-only focus:mx-4 focus:mt-4 focus:rounded-md focus:text-[16px] focus:font-semibold focus:outline-none focus:ring-2 focus:ring-primary">

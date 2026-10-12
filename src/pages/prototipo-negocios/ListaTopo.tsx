@@ -32,6 +32,8 @@ export interface TopoProps {
   total: number;
   leitura: boolean;
   pesquisa: React.RefObject<HTMLInputElement>;
+  /** Mais chips de vista na mesma linha dos chips rápidos (só a V2 os dá). */
+  chipsExtra?: React.ReactNode;
 }
 
 function Pesquisa({ f, setF, pesquisa }: Pick<TopoProps, "f" | "setF" | "pesquisa">) {
@@ -61,7 +63,7 @@ function ChipsRapidos({ linhas, aba, f, setF }: Pick<TopoProps, "linhas" | "aba"
 }
 
 export function ListaTopo(props: TopoProps) {
-  const { linhas, aba, f, setF, total, pesquisa } = props;
+  const { linhas, aba, f, setF, total, pesquisa, chipsExtra } = props;
   const porAba = contagensP(linhas, f.q);
   const chips = chipsAtivos(efetivos(aba, f)).map((c) => ({ id: c.id, texto: c.texto, remover: () => setF(c.limpar) }));
   return (
@@ -77,7 +79,7 @@ export function ListaTopo(props: TopoProps) {
           <PessoasFiltros {...props} />
         </div>
       </div>
-      <ChipsRapidos linhas={linhas} aba={aba} f={f} setF={setF} />
+      {chipsExtra ? <div className="flex flex-wrap items-center gap-2"><ChipsRapidos linhas={linhas} aba={aba} f={f} setF={setF} />{chipsExtra}</div> : <ChipsRapidos linhas={linhas} aba={aba} f={f} setF={setF} />}
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
         <ChipsFiltros chips={chips} limparTudo={() => setF({ ...SEM_FILTROS_P })} />
         <p role="status" aria-live="polite" aria-atomic="true" className="text-[15px] tabular-nums text-muted-foreground">{contagemTexto(total)}</p>

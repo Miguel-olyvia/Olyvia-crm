@@ -10,9 +10,14 @@ import { negociosDe, semPaginaPropria } from "./negociosApp";
 import { COLUNAS_V2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
 import { SEM_FILTROS_N, linhasNegocios, selecionarQuadro, type AcaoN, type ContextoN, type FiltrosN } from "./filtrosNegocios";
 import { Chip, FASE_COR, type Ctx } from "./pecas";
+import { CHIP } from "./FiltrosPopover";
 import { BarraFiltrosN } from "./NegociosFiltros";
 import { NegociosDashboard } from "./NegociosDashboard";
-import { NegociosResumo } from "./NegociosResumo";
+import { NegociosLista } from "./NegociosLista";
+import { ChipsVista } from "./ChipsVista";
+import { vistasNegocios } from "./filaNegocios";
+import { cartoesNegocios } from "./dashboardNegocios";
+import { valorCartao } from "./graficosTipos";
 import { CabecalhoPagina } from "./CabecalhoPagina";
 import { esquecerMaisGraficos } from "./MaisGraficos";
 import { NegocioExemploPainel } from "./NegocioExemploPainel";
@@ -20,8 +25,9 @@ import { escolherPessoa } from "./PessoasSimples";
 
 type VistaN = "quadro" | "dashboard";
 /** O que a página lembra quando se muda de ecrã e se volta (a página desmonta): o separador e os filtros do painel. Limpa-se ao repor a demonstração. */
-interface Memoria { vista: VistaN; f: FiltrosN }
-const MEMORIA_VAZIA: Memoria = { vista: "quadro", f: SEM_FILTROS_N };
+type ModoN = "quadro" | "lista";
+interface Memoria { vista: VistaN; modo: ModoN; f: FiltrosN }
+const MEMORIA_VAZIA: Memoria = { vista: "quadro", modo: "quadro", f: SEM_FILTROS_N };
 let memoria: Memoria = MEMORIA_VAZIA;
 /** Esquece o separador e os filtros (quando a demonstração é reposta). */
 export function esquecerNegociosV2(): void { memoria = MEMORIA_VAZIA; esquecerMaisGraficos(); }
@@ -51,6 +57,8 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   const cartaoClicado = useRef<HTMLElement | null>(null);
   const [vista, setVistaEstado] = useState<VistaN>(memoria.vista);
   const [fN, setFEstado] = useState<FiltrosN>(memoria.f);
+  const [modo, setModoEstado] = useState<ModoN>(memoria.modo);
+  const setModo = (m: ModoN) => { setModoEstado(m); memoria = { ...memoria, modo: m }; };
   const setVista = (v: VistaN) => { setVistaEstado(v); memoria = { ...memoria, vista: v }; };
   const setF = (v: Partial<FiltrosN>) => { const n = { ...fN, ...v }; setFEstado(n); memoria = { ...memoria, f: n }; };
   const linhas = linhasNegocios(S);
@@ -63,7 +71,7 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   /** Um cartão ou uma barra do dashboard: junta o filtro e passa ao Quadro. */
   const agir = (acao: AcaoN, rotulo: string) => {
     const n = { ...fN, ...acao.f };
-    setFEstado(n); setVistaEstado("quadro"); memoria = { vista: "quadro", f: n };
+    setFEstado(n); setVistaEstado("quadro"); memoria = { ...memoria, vista: "quadro", f: n };
     passarAoQuadro(Object.keys(acao.f ?? {}).length ? `Quadro filtrado por ${rotulo}` : "Quadro", n);
   };
   /** "e mais N" dos próximos passos em atraso: liga o filtro rápido "Com atraso" e passa ao Quadro. */
@@ -88,6 +96,20 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
     go(() => A.nav("pessoas"))();
   };
 
+  /** Um negócio sem página própria abre o painel (e guarda o elemento para lhe devolver o foco); os da seed abrem o negócio. */
+  const abrirCartao = (c: CartaoV2, el: HTMLElement) => {
+    if (semPaginaPropria(c)) { cartaoClicado.current = el; setExemplo(c.id); } else go(() => A.abrir(c.negocioId))();
+  };
+  const vistas = vistasNegocios(linhas, ctx);
+  /** Um chip de vista rápida liga ou desliga o filtro dele (o "Com atraso" é o filtro rápido do Estado). */
+  const alternarVista = (id: string) => {
+    const v = vistas.find((x) => x.id === id)!;
+    if (v.acao.rapido) go(() => A.filtro(v.ativo ? "todos" : "atraso"))();
+    else setF(v.ativo ? Object.fromEntries(Object.keys(v.acao.f ?? {}).map((k) => [k, ""])) : { ...v.acao.f });
+  };
+  const resumo = cartoesNegocios(linhas, ctx);
+  const dado = (id: string): string => valorCartao(resumo.find((c) => c.id === id)!);
+
   const cartao = (c: CartaoV2) => {
     const I = ICONE[c.doc].i;
     const n = porPessoa[c.nome] || 1;
@@ -95,7 +117,7 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
     const deExemplo = semPaginaPropria(c);
     return (
       <li key={c.id} className={cn("cartaoq rounded-xl border border-border bg-card", `f-${c.doc}`)}>
-        <button type="button" onClick={deExemplo ? (e) => { cartaoClicado.current = e.currentTarget; setExemplo(c.id); } : go(() => A.abrir(c.negocioId))}
+        <button type="button" onClick={(e) => abrirCartao(c, e.currentTarget)}
           className="group block min-h-11 w-full rounded-xl p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <span className="mb-2 flex items-center gap-2 text-[15px] text-muted-foreground">
             <Chip icone={I} cor={ICONE[c.doc].cor} className={CHIP_PEQ} />
@@ -159,9 +181,9 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
   };
 
   return (
-    <Tabs value={vista} onValueChange={(v) => setVista(v as VistaN)} className="pg-root mx-auto w-full max-w-[1400px] px-4 pb-24 pt-6 sm:px-8">
-      <CabecalhoPagina migalhas={`Negócios › ${vista === "quadro" ? "Quadro" : "Dashboard"}`} titulo="Negócios"
-        subtitulo={`${visiveis.length} no Quadro${visiveis.length !== todos.length ? ` (de ${todos.length})` : ""} · ${eur0(emProposta)} € em proposta`}
+    <Tabs value={vista} onValueChange={(v) => setVista(v as VistaN)} className="pg-root mx-auto w-full max-w-[1400px] px-4 pb-24 pt-3 sm:px-8">
+      <CabecalhoPagina migalhas={`Negócios › ${vista === "dashboard" ? "Dashboard" : modo === "lista" ? "Lista" : "Quadro"}`} titulo="Negócios"
+        subtitulo={`${visiveis.length} no Quadro${visiveis.length !== todos.length ? ` (de ${todos.length})` : ""} · ${eur0(emProposta)} € em proposta · ${dado("porfechar")} por fechar · ${dado("conversao")} de conversão`}
         acoes={(
           <>
             {seletor}
@@ -170,21 +192,30 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
           </>
         )} />
 
-      <TabsList aria-label="Vista" className="abas-inv">
-        <TabsTrigger value="quadro" className={TAB}>Quadro</TabsTrigger>
-        <TabsTrigger value="dashboard" className={TAB}>Dashboard</TabsTrigger>
-      </TabsList>
+      <div className="flex flex-wrap items-end justify-between gap-x-4">
+        <TabsList aria-label="Vista" className="abas-inv">
+          <TabsTrigger value="quadro" className={TAB}>Quadro</TabsTrigger>
+          <TabsTrigger value="dashboard" className={TAB}>Dashboard</TabsTrigger>
+        </TabsList>
+        {vista === "quadro" && (
+          <div role="group" aria-label="Ver os negócios como" className="mb-1 flex gap-2">
+            {(["quadro", "lista"] as const).map((m) => (
+              <button key={m} type="button" aria-pressed={modo === m} onClick={() => setModo(m)} className={CHIP(modo === m)}>{m === "quadro" ? "Quadro" : "Lista"}</button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      <BarraFiltrosN S={S} A={A} go={go} q={q} setQ={setQ} linhas={linhas} f={fN} setF={setF} total={visiveis.length} />
+      <BarraFiltrosN S={S} A={A} go={go} q={q} setQ={setQ} linhas={linhas} f={fN} setF={setF} total={visiveis.length} margem="mt-3"
+        vistas={vista === "quadro" ? <ChipsVista nome="Vistas rápidas" itens={vistas} aoAlternar={alternarVista} /> : undefined} />
       <div aria-live="polite" aria-atomic="true" className="sr-only">{aviso}</div>
       <NegocioExemploPainel S={S} n={aberto} fechar={() => setExemplo(null)} verPessoa={verPessoa} retorno={cartaoClicado} />
 
       <TabsContent value={vista} className="mt-0">
         {vista === "dashboard" ? <NegociosDashboard linhas={linhas} ctx={ctx} aoAgir={agir} verAtrasos={verAtrasos} limpar={go(limpar)} A={A} go={go} /> : (
           <>
-          <div className="mt-6"><NegociosResumo linhas={linhas} ctx={ctx} aoAgir={agir} verAtrasos={verAtrasos} /></div>
           <h2 ref={tituloQuadro} tabIndex={-1} className="sr-only focus:not-sr-only focus:mt-6 focus:rounded-md focus:text-[16px] focus:font-semibold focus:outline-none focus:ring-2 focus:ring-primary">
-            Quadro
+            {modo === "lista" ? "Lista" : "Quadro"}
           </h2>
           {!visiveis.length && (
             <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
@@ -193,8 +224,10 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
             </div>
           )}
 
+          {modo === "lista" ? <NegociosLista linhas={selecionarQuadro(linhas, ctx)} aoAbrir={abrirCartao} /> : (
+          <>
           {/* Telemóvel: escolhe-se a coluna */}
-          <div className="mt-6 lg:hidden">
+          <div className="mt-4 lg:hidden">
             <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Fase do documento">
               {COLUNAS_V2.map(({ id, nome }, i) => (
                 <button key={id} type="button" role="tab" id={`v2-tab-${id}`} aria-selected={colMovel === id} aria-controls="v2-painel" tabIndex={colMovel === id ? 0 : -1}
@@ -208,7 +241,9 @@ export function NegociosV2({ S, A, go, q, setQ: setQOpcional, seletor }: Ctx & {
           </div>
 
           {/* Computador: as quatro colunas lado a lado */}
-          <div className="mt-8 hidden gap-5 lg:grid lg:grid-cols-4">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
+          <div className="mt-4 hidden gap-5 lg:grid lg:grid-cols-4">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
+          </>
+          )}
 
           <p className="mt-8 border-t border-border pt-5 text-[15px] text-muted-foreground">
             {antes} {antes === 1 ? "pessoa ainda em" : "pessoas ainda em"} lead, contacto ou visita (em Clientes). Os negócios já em obra veem-se em Operações.
