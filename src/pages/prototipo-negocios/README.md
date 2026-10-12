@@ -251,6 +251,17 @@ Só estas duas páginas têm dashboard. Os números **batem sempre com as listas
 
 ---
 
+## Inventário (mockup)
+
+Na V2 e na V2 funcional (na Atual não aparece) há uma entrada **Inventário completo** no menu lateral, no Mais e na barra do telemóvel. Mostra o módulo de inventário completo, com dados de exemplo.
+
+- **De onde vem:** `inventario/mockup-inventario.html`, copiado tal e qual de `mockup-inventario-ui.html` (HTML com motor JS próprio). `inventario/InventarioMockup.tsx` mostra-o num iframe (`srcDoc`), carregado só quando a página se abre.
+- **Isolado:** vive dentro do iframe e não toca no Estado nem nos dados do protótipo. Guarda só as suas chaves `inv-mockup-tab` e `inv-mockup-db-v3` no `localStorage`.
+- **Repor inventário:** o botão da faixa de cima apaga essas duas chaves e recria o iframe. "Repor a demonstração" não lhe mexe.
+- Não é a página **Inventário** do protótipo (a antiga, da vista `inventario`): essa continua como estava.
+
+---
+
 ## Como funciona (o essencial)
 
 - **O estado é um objeto mutável.**

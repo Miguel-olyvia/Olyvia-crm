@@ -1,9 +1,9 @@
 // Protótipo de Negócios (08/10/2026, com o aspeto da Olyvia desde 09/10): as 12
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { createPortal } from "react-dom";
-import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
+  Bell, Boxes, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,9 @@ import { CamposEditor } from "./CamposEditor";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
+// O mockup do Inventário só se carrega (com o seu HTML) quando se abre essa página.
+const InventarioMockup = lazy(() => import("./inventario/InventarioMockup"));
+
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
 
@@ -56,6 +59,7 @@ export default function PrototipoNegocios() {
   const [alvoAvisos, setAlvoAvisos] = useState<HTMLElement | null>(null);
   const [q, setQ] = useState("");
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
+  const [invMock, setInvMock] = useState(false); // a página Inventário (mockup): só existe na V2 e na V2 funcional, e vive fora do Estado
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
@@ -120,6 +124,8 @@ export default function PrototipoNegocios() {
   const mudarVersao = (nova: VersaoProto) => {
     setVersao(nova);
     gravarVersao(nova);
+    // A página Inventário (mockup) não existe na Atual: volta à vista equivalente (Negócios).
+    if (nova === "atual" && invMock) { setInvMock(false); run(() => A.nav("negocios")); return; }
     // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
     run(() => {
       const vista = vistaEquivalente(ref.current.view, nova);
@@ -175,7 +181,8 @@ export default function PrototipoNegocios() {
   const porVista = (v: Vista) => itens.find(([x]) => x === v)!;
   // A vista que o menu destaca: com a V2, Leads e Clientes são Pessoas (e sem ela Pessoas é Leads). O aspeto atual não tem Leads
   // nem Pessoas (mostra Negócios), por isso destaca Negócios. Com a V2, criar uma lead (S.novo) destaca Pessoas.
-  const cur: Vista = novaLeadV2 ? "pessoas"
+  const ativoInv = v2 && invMock;
+  const cur: Vista | "inv" = ativoInv ? "inv" : novaLeadV2 ? "pessoas"
     : S.view === "negocio" ? "negocios"
     : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
     : v2 && (S.view === "leads" || S.view === "clientes") ? "pessoas"
@@ -207,12 +214,20 @@ export default function PrototipoNegocios() {
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
-      <button key={v} type="button" onClick={go(() => A.nav(v))} aria-current={cur === v ? "page" : undefined}
+      <button key={v} type="button" onClick={go(() => { setInvMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
         className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
           cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
         <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
         <span className="flex-1">{l}</span>
         {c ? <span className="text-sm tabular-nums text-muted-foreground" aria-label={c + " por fazer"}>{c}</span> : null}
+      </button>
+    );
+    const itemInv = (
+      <button key="inv" type="button" onClick={() => { setMais(false); setInvMock(true); }} aria-current={cur === "inv" ? "page" : undefined}
+        className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
+          cur === "inv" ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
+        <Boxes className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+        <span className="flex-1">Inventário completo</span>
       </button>
     );
     const papel = (
@@ -233,7 +248,7 @@ export default function PrototipoNegocios() {
             <img src={mascote} alt="" className="h-8 w-8 object-contain" />
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
-          <nav className="flex flex-col gap-0.5" aria-label="Menu">{itens.map(([v, l, Ic, c]) => item(v, l, Ic, c))}</nav>
+          <nav className="flex flex-col gap-0.5" aria-label="Menu">{itens.map(([v, l, Ic, c]) => item(v, l, Ic, c))}{v2 && itemInv}</nav>
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
             <div className="px-3">{papel}</div>
@@ -262,10 +277,14 @@ export default function PrototipoNegocios() {
             </select>
           </header>
           <main ref={mainRef} className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
-            <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
+            {ativoInv ? (
+              <div className="h-full animate-in fade-in-0 duration-200">
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioMockup /></Suspense>
+              </div>
+            ) : <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
 
               {antigo && !listaNova ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">{corpo}</div> : corpo}
-            </div>
+            </div>}
           </main>
           {mais && (
             <div className="fixed inset-0 z-40 bg-foreground/20 md:hidden animate-in fade-in-0" onClick={() => setMais(false)}>
@@ -273,6 +292,7 @@ export default function PrototipoNegocios() {
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
                   {[...pessoas.map(([v]) => v), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {v2 && itemInv}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
@@ -288,12 +308,18 @@ export default function PrototipoNegocios() {
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">
             {(["hoje", "negocios", "operacoes", "inventario"] as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
-              <button key={v} type="button" onClick={go(() => { setMais(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
               </button>
             ))}
+            {v2 && (
+              <button type="button" onClick={() => { setMais(false); setInvMock(true); }} aria-label="Inventário completo" aria-current={cur === "inv" ? "page" : undefined}
+                className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === "inv" ? "font-semibold text-primary" : "text-muted-foreground")}>
+                <Boxes className="h-5 w-5" aria-hidden="true" />Completo
+              </button>
+            )}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
               className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "pessoas", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
