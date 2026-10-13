@@ -1,7 +1,8 @@
 /**
- * O separador "Arranque": os 3 cartões (2 provisórios até à junção com a
- * Frente A), o estado do plano e o botão "Aprovar plano". A base é simulada;
- * as regras estão em tools/validar-obra-arranque.mjs.
+ * O separador "Arranque": os 3 cartões (Encomenda Cliente e Encomenda a
+ * fornecedor reais, simulados aqui; os seus testes estão em
+ * ArranqueEncomendas.test.tsx), o estado do plano e o botão "Aprovar plano".
+ * A base é simulada; as regras estão em tools/validar-obra-arranque.mjs.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -15,6 +16,25 @@ const lib = vi.hoisted(() => ({
   sincronizarMaterial: vi.fn(),
 }));
 vi.mock("../../lib/arranque", () => lib);
+
+const { cartao } = vi.hoisted(() => ({ cartao: (nome: string) => ({
+  contratoId,
+  obraId,
+  aoMudar,
+}: {
+  contratoId: string;
+  obraId?: string | null;
+  aoMudar?: () => void;
+}) => (
+  <div data-testid={nome}>
+    {nome} {contratoId} {obraId}
+    <button type="button" onClick={() => aoMudar?.()}>
+      mudar {nome}
+    </button>
+  </div>
+) }));
+vi.mock("../arranque/EncomendaClienteCartao", () => ({ EncomendaClienteCartao: cartao("cartao-ec") }));
+vi.mock("../arranque/NotaEncomendaCartao", () => ({ NotaEncomendaCartao: cartao("cartao-nota") }));
 
 import ArranqueObra from "../arranque/ArranqueObra";
 
@@ -75,9 +95,8 @@ describe("ArranqueObra", () => {
     render(<ArranqueObra obraId="o1" contratoId="c1" podePlanear />);
     expect(await screen.findByText(/Falta: aprovar a encomenda a fornecedor; aprovar o plano da obra\./)).toBeInTheDocument();
     expect(screen.getByText("1 de 3 validações")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Encomenda Cliente" })).toHaveTextContent(/validada/);
-    expect(screen.getByRole("region", { name: "Encomenda Cliente" })).toHaveTextContent(/por Gestora/);
-    expect(screen.getByRole("region", { name: "Encomenda a fornecedor" })).toHaveTextContent(/1 por aprovar/);
+    expect(screen.getByRole("region", { name: "Encomenda Cliente" })).toHaveTextContent("cartao-ec c1 o1");
+    expect(screen.getByRole("region", { name: "Encomenda a fornecedor" })).toHaveTextContent("cartao-nota c1 o1");
     const plano = screen.getByRole("region", { name: "Plano da obra" });
     expect(plano).toHaveTextContent(/por aprovar/);
     expect(plano).toHaveTextContent(/começam antes de o material chegar/);
@@ -112,6 +131,29 @@ describe("ArranqueObra", () => {
     render(<ArranqueObra obraId="o1" contratoId="c1" podePlanear={false} />);
     expect(await screen.findByText(/Pronta a arrancar/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Aprovar plano" })).toBeNull();
+  });
+
+  it("uma ação num cartão de encomenda volta a ler o checklist e avisa a obra", async () => {
+    lib.obterArranque.mockResolvedValue(arranque());
+    const aoMudar = vi.fn();
+    render(<ArranqueObra obraId="o1" contratoId="c1" podePlanear aoMudar={aoMudar} />);
+    fireEvent.click(await screen.findByRole("button", { name: "mudar cartao-ec" }));
+    await waitFor(() => expect(lib.obterArranque).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "mudar cartao-nota" }));
+    await waitFor(() => expect(lib.obterArranque).toHaveBeenCalledTimes(3));
+    expect(aoMudar).toHaveBeenCalledTimes(2);
+  });
+
+  it("obra sem contrato: só o estado, sem cartões de encomenda", async () => {
+    lib.obterArranque.mockResolvedValue(
+      arranque({
+        encomenda_cliente: { ...arranque().encomenda_cliente, estado: "nao_aplicavel", ok: true },
+        fornecedor: { estado: "nao_necessaria", ok: true, notas: null },
+      })
+    );
+    render(<ArranqueObra obraId="o1" contratoId={null} podePlanear />);
+    expect(await screen.findByRole("region", { name: "Encomenda Cliente" })).toHaveTextContent(/Obra sem contrato/);
     expect(screen.getByRole("region", { name: "Encomenda a fornecedor" })).toHaveTextContent(/não necessária/);
+    expect(screen.queryByTestId("cartao-ec")).toBeNull();
   });
 });

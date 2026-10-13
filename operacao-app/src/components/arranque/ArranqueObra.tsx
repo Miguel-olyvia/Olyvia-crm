@@ -13,14 +13,17 @@ import {
   type RotuloEstado,
 } from "../../domain/arranque";
 import { data as formatarData } from "../../lib/formatar";
+import { EncomendaClienteCartao } from "./EncomendaClienteCartao";
+import { NotaEncomendaCartao } from "./NotaEncomendaCartao";
 
 /**
  * Separador "Arranque" da obra: as 3 validações do Planeador (fluxo-encomendas.md
  * 1.1) — Encomenda Cliente, encomenda a fornecedor, plano — e se a obra já pode
  * arrancar. Lê `rpc_ops_obra_arranque` (db/obra-arranque.sql).
  *
- * Os cartões 1 e 2 são da Frente A (EncomendaClienteCartao / NotaEncomendaCartao).
- * Até à junção, um cartão provisório mostra só o estado que vem da base.
+ * Os cartões 1 e 2 são EncomendaClienteCartao / NotaEncomendaCartao (encomendas
+ * pós-contrato); cada ação neles volta a ler este checklist. Numa obra sem
+ * contrato mostra-se só o estado que vem da base.
  */
 export default function ArranqueObra({
   obraId,
@@ -43,6 +46,8 @@ export default function ArranqueObra({
   const [aGravar, setAGravar] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [n, setN] = useState(0);
+  const [nEncomenda, setNEncomenda] = useState(0);
+  const [nNotas, setNNotas] = useState(0);
 
   const carregar = useCallback(async () => {
     setErro(null);
@@ -154,47 +159,50 @@ export default function ArranqueObra({
       )}
 
       <div className="grid gap-3 lg:grid-cols-3">
-        {/* JUNÇÃO: trocar por <EncomendaClienteCartao contratoId={contratoId} obraId={obraId} aoMudar={mudou} />
-            (Frente A, ./EncomendaClienteCartao.tsx). */}
-        <ArranqueCartaoProvisorio
-          numero={1}
-          titulo="Encomenda Cliente"
-          estado={rotuloEncomendaCliente(ec.estado)}
-          detalhe={
-            ec.estado === "validada"
-              ? `Validada${ec.validada_por_nome ? ` por ${ec.validada_por_nome}` : ""}${ec.validada_em ? ` a ${formatarData(ec.validada_em)}` : ""}.`
-              : ec.estado === "por_instalar"
-                ? "A Encomenda Cliente ainda não está instalada: não impede o arranque."
-                : ec.estado === "nao_aplicavel"
-                  ? "Obra sem contrato: não há Encomenda Cliente."
-                  : ec.estado === "por_gerar"
-                    ? "Ainda não foi gerada a partir do contrato."
-                    : "Em rascunho: falta validar o que tem de estar pronto no armazém."
-          }
-          contratoId={contratoId}
-        />
-        {/* JUNÇÃO: trocar por <NotaEncomendaCartao contratoId={contratoId} obraId={obraId} aoMudar={mudou} />
-            (Frente A, ./NotaEncomendaCartao.tsx). */}
-        <ArranqueCartaoProvisorio
-          numero={2}
-          titulo="Encomenda a fornecedor"
-          estado={rotuloFornecedor(fo.estado)}
-          detalhe={
-            fo.notas && fo.notas.total > 0
-              ? `${fo.notas.aprovadas} aprovada(s), ${fo.notas.propostas} por aprovar` +
-                (fo.notas.sem_fornecedor ? ` (${fo.notas.sem_fornecedor} sem fornecedor)` : "") +
-                (fo.notas.prazo_previsto ? ` · chega até ${formatarData(fo.notas.prazo_previsto)}` : "") +
-                "."
-              : fo.estado === "nao_necessaria"
-                ? "Há tudo em stock: não é preciso encomendar."
-                : fo.estado === "por_instalar"
-                  ? "As notas de encomenda ainda não estão instaladas: não impedem o arranque."
-                  : fo.estado === "por_validar"
-                    ? "Gera-se ao validar a Encomenda Cliente."
-                    : null
-          }
-          contratoId={contratoId}
-        />
+        {contratoId ? (
+          <>
+            {/* Cada cartão volta a ler quando o outro muda (validar a Encomenda
+                Cliente gera as notas; aprovar uma nota não mexe na encomenda,
+                mas mantém os dois coerentes). */}
+            <section aria-label="Encomenda Cliente">
+              <EncomendaClienteCartao
+                key={`ec-${nNotas}`}
+                contratoId={contratoId}
+                obraId={obraId}
+                aoMudar={() => {
+                  setNEncomenda((x) => x + 1);
+                  mudou();
+                }}
+              />
+            </section>
+            <section aria-label="Encomenda a fornecedor">
+              <NotaEncomendaCartao
+                key={`nota-${nEncomenda}`}
+                contratoId={contratoId}
+                obraId={obraId}
+                aoMudar={() => {
+                  setNNotas((x) => x + 1);
+                  mudou();
+                }}
+              />
+            </section>
+          </>
+        ) : (
+          <>
+            <ArranqueCartaoEstado
+              numero={1}
+              titulo="Encomenda Cliente"
+              estado={rotuloEncomendaCliente(ec.estado)}
+              detalhe="Obra sem contrato: não há Encomenda Cliente."
+            />
+            <ArranqueCartaoEstado
+              numero={2}
+              titulo="Encomenda a fornecedor"
+              estado={rotuloFornecedor(fo.estado)}
+              detalhe="Obra sem contrato: não há encomendas a fornecedor."
+            />
+          </>
+        )}
         <ArranqueCartaoPlano
           arranque={a}
           podePlanear={podePlanear}
@@ -217,8 +225,8 @@ export function EstadoValidacao({ estado }: { estado: RotuloEstado }) {
   return <Badge className={TOM[estado.tom]}>{estado.texto}</Badge>;
 }
 
-/** Só o estado (vindo de rpc_ops_obra_arranque). Sai na junção com a Frente A. */
-export function ArranqueCartaoProvisorio({
+/** Só o estado (vindo de rpc_ops_obra_arranque): para obras sem contrato. */
+export function ArranqueCartaoEstado({
   numero,
   titulo,
   estado,
@@ -228,7 +236,6 @@ export function ArranqueCartaoProvisorio({
   titulo: string;
   estado: RotuloEstado;
   detalhe: string | null;
-  contratoId: string | null;
 }) {
   return (
     <section aria-label={titulo}>
