@@ -1,6 +1,6 @@
 // O que cada resposta do levantamento faz ao orçamento (13/10/2026). Funções puras, sem React.
 // Três tipos de efeito: uma linha com custo e preço (ex.: proteções), uma percentagem sobre os
-// serviços (ex.: acesso difícil) e uma mudança nos materiais (gama, materiais do cliente).
+// serviços (ex.: acesso difícil) e uma mudança nos materiais (materiais do cliente).
 // Os valores são de exemplo; na app real vêm das Definições de cada empresa.
 
 export interface Efeito {
@@ -35,7 +35,6 @@ const PARQUE_DIA = { Verde: 4, Amarela: 8, Vermelha: 14 } as Record<string, numb
 const DIAS_OBRA_PADRAO = 10;
 const AMIANTO = [300, 520];         // remoção certificada
 const GAS = { Anular: [110, 182], Instalar: [280, 450] } as Record<string, number[]>;
-const GAMA = { Económica: 0.85, Média: 1, Alta: 1.35 } as Record<string, number>;
 
 /** Todos os efeitos das respostas dadas até agora. */
 export function efeitosDoLevantamento(f: Record<string, string>): Efeito[] {
@@ -67,7 +66,6 @@ export function efeitosDoLevantamento(f: Record<string, string>): Efeito[] {
   if (f.diag_janela === "Não") e.push(pctEf("diag_janela", "Sem janela: trabalhos com pó mais lentos (+3%)", 0.03));
   // Materiais
   if (f.materiais_cliente === "Sim") e.push({ k: "materiais_cliente", t: "material", d: "Materiais fornecidos pelo cliente: sai a linha de materiais", custo: 0, preco: 0, fator: 0 });
-  else if (f.gama && GAMA[f.gama] !== undefined && GAMA[f.gama] !== 1) e.push({ k: "gama", t: "material", d: `Gama ${f.gama.toLowerCase()}: materiais ×${String(GAMA[f.gama]).replace(".", ",")}`, custo: 0, preco: 0, fator: GAMA[f.gama] });
   return e;
 }
 
@@ -77,5 +75,5 @@ export const efeitosDoCampo = (k: string, f: Record<string, string>): Efeito[] =
 /** Os campos que podem mexer no orçamento (para o aviso "mexe no orçamento" ao lado do campo). */
 export const CAMPOS_COM_EFEITO = new Set([
   "diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes", "estacionamento",
-  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", "materiais_cliente", "gama",
+  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", "materiais_cliente",
 ]);

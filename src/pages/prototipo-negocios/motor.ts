@@ -332,7 +332,7 @@ const EXEMPLO_COMPLETO: Record<string, string> = {
   diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio", diag_portas_proteger: "3",
   diag_demolir_descricao: "Banheira, azulejo das paredes até ao teto e pavimento.",
   // Visita · escolhas
-  gama: "Média", materiais_cliente: "Não", mobilidade_reduzida: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
+  materiais_cliente: "Não", mobilidade_reduzida: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
   // Negócio
   validade: "30 dias", prazo_exec: "8", inicio_prev: "2026-09-29", pagamento: "50% + 50% no fim", garantia: "2 anos",
   notas_cliente: "Inclui a remoção do entulho e a limpeza final.",
@@ -370,7 +370,7 @@ function exemplo(d: Negocio): Record<string, string> {
     n_divisoes: "6", ano_construcao: "1970 a 1990", pavimento: "Flutuante", eletrica: "Antiga", quadro_diferencial: "Sim", canalizacao: "Ferro", gas: "Canalizado",
     amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_pontos_eletricos: "4",
     diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda", diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio",
-    diag_portas_proteger: "3", gama: "Média", materiais_cliente: "Não",
+    diag_portas_proteger: "3", materiais_cliente: "Não",
     validade: "30 dias", prazo_exec: "8", pagamento: "50% + 50% no fim", garantia: "2 anos",
     modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben",
   });
@@ -433,7 +433,7 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
 }
 
 /** As respostas do levantamento no orçamento (efeitosLevantamento.ts): refaz as linhas "Levantamento · …"
- *  e a linha de materiais (gama, materiais do cliente). Só antes de a proposta ser enviada. */
+ *  e a linha de materiais (materiais do cliente). Só antes de a proposta ser enviada. */
 export function sincronizarEfeitos(d: Negocio, _S: Estado) {
   const o = d.orc;
   if (!o || o.vendaDireta) return;

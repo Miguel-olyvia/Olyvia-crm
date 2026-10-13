@@ -111,7 +111,7 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
             );
           })}
         </ul>
-        {d.visita.nec.length > 0 && <p className="mt-2 text-sm text-slate-600">Equipamentos escolhidos: {d.visita.nec.join(", ")}{d.f.gama ? ` · gama ${d.f.gama.toLowerCase()}` : ""}.</p>}
+        {d.visita.nec.length > 0 && <p className="mt-2 text-sm text-slate-600">Equipamentos escolhidos: {d.visita.nec.join(", ")}.</p>}
       </section>
       <Totais d={d} S={S} />
       <section className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2">
