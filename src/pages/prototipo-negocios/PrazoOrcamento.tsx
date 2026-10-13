@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { iconeOficio } from "./LinhasOrcamento";
-import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, diasPrevistos, tarefasPrevistas } from "./ganttOrcamento";
+import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, diasPrevistos, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
 
@@ -21,6 +21,7 @@ export function PrazoOrcamento({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; 
   const passo = Math.ceil(escala / 10); // no máximo ~10 marcas na régua
   const pos = (x: number) => `${(x / escala) * 100}%`;
   const delta = T.reduce((a, t) => a + t.delta, 0);
+  const naProposta = Number(d.f.prazo_exec) || 0, doGantt = prazoProposta(T), segue = !!d.sug?.prazo_exec;
 
   return (
     <section aria-labelledby={`prazo-${d.id}`}>
@@ -28,6 +29,14 @@ export function PrazoOrcamento({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; 
         <h3 id={`prazo-${d.id}`} className="flex items-center gap-2 text-base font-semibold"><CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Prazo previsto</h3>
         <span className="text-sm text-muted-foreground">{dias(total)} úteis · sem técnicos · toque numa tarefa para ver o custo</span>
       </div>
+      <p className="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+        Na proposta: <b className="font-semibold text-foreground tabular-nums">{naProposta ? `${naProposta} dias úteis` : "a definir"}</b>
+        {naProposta === doGantt ? (segue ? <span>(do prazo previsto)</span> : null) : !fechado && (
+          <button type="button" onClick={() => run(() => A.usarPrazoPrevisto(d.id))} className="inline-flex min-h-9 items-center font-medium text-primary underline-offset-4 hover:underline">
+            Usar {doGantt} dias na proposta
+          </button>
+        )}
+      </p>
       {delta !== 0 && (
         <p className="mt-1 text-sm text-warning">Os dias mudados à mão {delta > 0 ? "somam" : "tiram"} {eur(Math.abs(delta))} € ao custo do orçamento. O preço ao cliente não muda.</p>
       )}

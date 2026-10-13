@@ -9,7 +9,7 @@ import {
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
-import { ajustePrazo } from "./ganttOrcamento";
+import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -545,6 +545,7 @@ export function sincronizarDemolicao(d: Negocio, _S: Estado) {
   const r = calcularDemolicao(o.demolicao.itens, K.artigosDem ?? ARTIGOS_DEM0, P, fatorAcesso(d.f, P), o.demolicao.aj);
   o.demolicao.r = r;
   if (r.preco > 0 || r.custo > 0) o.linhas.push({ t: "mat", d: LINHA_DEMOLICAO, custo: r.custo, preco: r.preco });
+  sugerirPrazo(d, _S); // as horas da demolição mexem no prazo
 }
 
 /** Todos os serviços da visita: do pacote (pelas medidas), postos à mão e trazidos pelos produtos escolhidos. */
@@ -571,6 +572,7 @@ export function preservarManuais(antes: Orcamento, novo: Orcamento, L: LinhaServ
   novo.linhas.push(...antes.linhas.filter((l) => l.t === "mat" && !geradas(l.d)));
   novo.desconto = antes.desconto; novo.vendaDireta = antes.vendaDireta; novo.avisosVistos = { ...antes.avisosVistos };
   if (antes.precosMan) { novo.precosMan = { ...antes.precosMan }; aplicarPrecosMan(novo); }
+  if (antes.prazo) novo.prazo = { ...antes.prazo }; // os dias mudados à mão no prazo previsto (as tarefas que já não existem não contam)
   return novo;
 }
 
@@ -801,6 +803,15 @@ function sugerir(d: Negocio, o: Record<string, string>) {
   for (const k in o) if (!d.f[k] && o[k]) { d.f[k] = o[k]; (d.sug ??= {})[k] = true; }
 }
 
+/** O prazo de execução da proposta vem do prazo previsto (Gantt) e acompanha-o enquanto for sugestão (ninguém o mexeu). */
+export function sugerirPrazo(d: Negocio, S: Estado) {
+  if (!d.orc || d.orc.enviada || d.fase < 3 || (d.f.prazo_exec && !d.sug?.prazo_exec)) return;
+  const T = tarefasPrevistas(d, S);
+  if (!T.length) return;
+  d.f.prazo_exec = String(prazoProposta(T));
+  (d.sug ??= {}).prazo_exec = true;
+}
+
 // Uma resposta que dá outra: o que se sabe por dedução vem preenchido (como sugestão).
 const AREA_TIPO: Record<string, [string, string, string]> = {
   T0: ["35", "1", "1"], T1: ["55", "2", "1"], T2: ["80", "3", "1"], T3: ["110", "4", "2"], T4: ["140", "5", "2"], "T5+": ["180", "6", "3"],
@@ -926,7 +937,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (antes) preservarManuais(antes, d.orc, L);
       // a demolição calcula-se nos orçamentos novos (com o Catálogo ligado); os artigos e ajustes à mão de antes ficam
       ligarDemolicao(d.orc, antes?.demolicao);
-      sincronizarEfeitos(d, S); sincronizarDemolicao(d, S); fase(d, 3);
+      sincronizarEfeitos(d, S); sincronizarDemolicao(d, S); fase(d, 3); sugerirPrazo(d, S);
       avisar(antes
         ? { msg: "Orçamento refeito com a visita", sub: "Os preços e o desconto que tinha mudado mantêm-se", kind: "auto" }
         : { msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
@@ -967,7 +978,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     qtdLinha(id: number, i: number, q: number) {
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (l?.t !== "svc" || o.enviada || !(q >= 0)) return;
-      l.q = r2(q); o.aprov = null; sincronizarDemolicao(d, S);
+      l.q = r2(q); o.aprov = null; sincronizarDemolicao(d, S); sugerirPrazo(d, S);
     },
     /** Os dias de uma tarefa do prazo previsto (null volta aos dias das horas do orçamento). */
     prazoTarefa(id: number, chave: string, dias: number | null) {
@@ -977,7 +988,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       else if (dias >= 0.5) (o.prazo ??= {})[chave] = Math.round(dias * 2) / 2;
       else return;
       if (o.prazo && !Object.keys(o.prazo).length) delete o.prazo;
-      o.aprov = null;
+      o.aprov = null; sugerirPrazo(d, S);
+    },
+    /** O prazo de execução da proposta passa a ser o do prazo previsto (e volta a acompanhá-lo). */
+    usarPrazoPrevisto(id: number) {
+      const d = deal(id);
+      if (!d.orc || d.orc.enviada) return;
+      delete d.f.prazo_exec; sugerirPrazo(d, S);
     },
     /** Liga (ou desliga) a demolição e entulho num orçamento (os de exemplo vêm sem ela). Desligar devolve as linhas de serviço. */
     demolicaoLigar(id: number, on: boolean) {

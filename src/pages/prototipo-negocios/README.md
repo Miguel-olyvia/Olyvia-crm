@@ -521,6 +521,8 @@ No orçamento (`OrcamentoSimples.tsx`), a seguir às linhas, a secção "Prazo p
 - Mudar os dias (−/+ meio dia) passa as horas da tarefa a dias × 8. O custo do orçamento e a margem mudam (o ajuste entra no `tot()` e na mão de obra do `partes()`); **o preço ao cliente não muda**. "Repor" volta aos dias das horas. Com menos horas do que o orçamento conta, aparece um aviso.
 - Guardado em `Orcamento.prazo` (dias por tarefa). Sem dias mudados, o orçamento fica exatamente igual. Numa proposta enviada não se mexe.
 - Confirmado pelo Ruben (13/10): 8 h por dia; tarefas em simultâneo quando é válido; mudar os dias muda o custo e a margem, não o preço.
+- **O prazo de execução da proposta** (`prazo_exec`) vem do prazo previsto: os dias arredondados para cima (`sugerirPrazo` no motor). Acompanha o Gantt enquanto for sugestão. Se alguém o mudar à mão, fica, e o "Prazo previsto" mostra "Usar N dias na proposta".
+- Reabrir o levantamento guarda os dias mudados à mão (`preservarManuais`).
 
 ## Linha "Materiais" do modelo sem contar a dobrar (13/10/2026)
 

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { acoes, partes, seed, tot, type Negocio } from "./motor";
+import { LINHAS, acoes, criarOrc, partes, preservarManuais, seed, sugerirPrazo, tot, type Negocio } from "./motor";
 import { ligarCatalogo } from "./produtosVisita";
 import { catalogo0 } from "./v2/catalogoModelo";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, type Grupo } from "./campos";
-import { HORAS_DIA, TAREFA_DEMOLICAO, ajustePrazo, diasDeHoras, diasPrevistos, ordemOficio, tarefasPrevistas } from "./ganttOrcamento";
+import { HORAS_DIA, TAREFA_DEMOLICAO, prazoProposta, ajustePrazo, diasDeHoras, diasPrevistos, ordemOficio, tarefasPrevistas } from "./ganttOrcamento";
 
 const comServicos = () => {
   const S = seed();
@@ -121,5 +121,42 @@ describe("prazo previsto no orçamento", () => {
       // o preço da demolição não muda
       expect(d.orc!.demolicao!.r!.preco).toBe(r.preco);
     });
+  });
+
+  describe("o prazo de execução da proposta", () => {
+    it("vem do prazo previsto (arredondado para cima) e acompanha-o enquanto ninguém o mexer", () => {
+      const { S, d, A } = comServicos();
+      d.fase = 3; delete d.f.prazo_exec;
+      sugerirPrazo(d, S);
+      const p0 = prazoProposta(tarefasPrevistas(d, S));
+      expect(d.f.prazo_exec).toBe(String(p0));
+      expect(d.sug?.prazo_exec).toBe(true);
+      const t0 = tarefasPrevistas(d, S)[0];
+      A.prazoTarefa(d.id, t0.chave, t0.dias + 2);
+      expect(d.f.prazo_exec).toBe(String(prazoProposta(tarefasPrevistas(d, S))));
+      expect(Number(d.f.prazo_exec)).toBeGreaterThan(p0);
+    });
+    it("mexido à mão fica; 'Usar o prazo previsto' volta a pô-lo a acompanhar", () => {
+      const { S, d, A } = comServicos();
+      d.fase = 3; d.f.prazo_exec = "20"; if (d.sug) delete d.sug.prazo_exec;
+      const t0 = tarefasPrevistas(d, S)[0];
+      A.prazoTarefa(d.id, t0.chave, t0.dias + 1);
+      expect(d.f.prazo_exec).toBe("20");
+      A.usarPrazoPrevisto(d.id);
+      expect(d.f.prazo_exec).toBe(String(prazoProposta(tarefasPrevistas(d, S))));
+      expect(d.sug?.prazo_exec).toBe(true);
+    });
+    it("os dias inteiros: 6,5 dias dão 7", () => {
+      expect(prazoProposta([{ inicio: 0, dias: 6.5 } as never])).toBe(7);
+      expect(prazoProposta([{ inicio: 0, dias: 0.5 } as never])).toBe(1);
+    });
+  });
+
+  it("reabrir o levantamento guarda os dias mudados à mão", () => {
+    const { S, d, A } = comServicos();
+    const t0 = tarefasPrevistas(d, S)[0];
+    A.prazoTarefa(d.id, t0.chave, t0.dias + 1);
+    const novo = preservarManuais(d.orc!, criarOrc(d, S), LINHAS[d.linha]);
+    expect(novo.prazo).toEqual({ [t0.chave]: t0.dias + 1 });
   });
 });

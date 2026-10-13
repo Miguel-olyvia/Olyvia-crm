@@ -107,3 +107,6 @@ export function ajustePrazo(d: Negocio, S: Estado): number {
 
 /** Os dias de obra previstos: até ao fim da última tarefa. */
 export const diasPrevistos = (T: TarefaPrevista[]) => T.reduce((a, t) => Math.max(a, t.inicio + t.dias), 0);
+
+/** O prazo de execução para a proposta (dias úteis inteiros): os dias previstos arredondados para cima. */
+export const prazoProposta = (T: TarefaPrevista[]) => Math.max(1, Math.ceil(diasPrevistos(T) - 1e-9));
