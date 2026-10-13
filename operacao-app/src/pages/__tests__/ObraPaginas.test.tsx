@@ -186,6 +186,13 @@ const PREVISAO_CONTRATO = {
   ],
 };
 
+// O checklist de arranque (db/obra-arranque.sql): por omissão, por instalar.
+vi.mock("../../lib/arranque", () => ({
+  obterArranque: vi.fn(async () => null),
+  aprovarPlano: vi.fn(),
+  sincronizarMaterial: vi.fn(),
+}));
+
 vi.mock("../../lib/dados", () => ({
   ErroDeDados: class extends Error {},
   ErroDeEscrita: class extends Error {},
@@ -409,6 +416,7 @@ import Validar from "../Validar";
 import ObraMetricas from "../ObraMetricas";
 import ObraModelos from "../ObraModelos";
 import * as obras from "../../lib/obras";
+import * as arranqueLib from "../../lib/arranque";
 
 function em(rota: string, elemento: JSX.Element, caminho = rota) {
   return render(
@@ -490,6 +498,30 @@ describe("páginas de Obras (fumo)", () => {
     fireEvent.click(screen.getByText(/Trabalhos extra/));
     expect(await screen.findByText("Tubagem podre")).toBeInTheDocument();
     expect(screen.getByText("Aprovar")).toBeInTheDocument();
+  });
+
+  it("Obra: Arrancar diz o que falta do checklist e fica bloqueado", async () => {
+    vi.mocked(obras.obterObra).mockResolvedValueOnce({ ...OBRA, estado: "planeada" } as never);
+    vi.mocked(arranqueLib.obterArranque).mockResolvedValue({
+      obra_id: "o1",
+      estado_obra: "planeada",
+      arrancou: false,
+      frente_a_instalada: false,
+      encomenda_cliente: { estado: "por_instalar", ok: true, id: null, contrato_id: null, validada_por: null, validada_por_nome: null, validada_em: null },
+      fornecedor: { estado: "por_instalar", ok: true, notas: null },
+      plano: {
+        estado: "por_aprovar", ok: false, motivo: null, aprovado_por: null, aprovado_por_nome: null, aprovado_em: null,
+        tarefas: 3, sem_datas: 0, sem_pessoas: 0, material_antes: [], avisos: [],
+      },
+      pode_arrancar: false,
+      falta: ["aprovar o plano da obra"],
+    });
+    em("/obras/OB-2026-00001", <ObraDetalhe />, "/obras/:codigo");
+    fireEvent.click(await screen.findByRole("button", { name: "Arrancar" }));
+    expect(await screen.findByTestId("arrancar-falta")).toHaveTextContent(/Falta: aprovar o plano da obra\./);
+    const botoes = screen.getAllByRole("button", { name: "Arrancar" });
+    expect(botoes[botoes.length - 1]).toBeDisabled();
+    vi.mocked(arranqueLib.obterArranque).mockResolvedValue(null);
   });
 
   it("Obra: abrir uma tarefa mostra a ficha editável ao gestor, com o choque", async () => {
