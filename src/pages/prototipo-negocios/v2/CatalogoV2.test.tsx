@@ -62,7 +62,7 @@ describe("CatalogoV2 · a ficha do serviço numa página", () => {
   it("um só botão primário; mudar o preço fica no histórico e no motor", () => {
     const S = seed();
     pagina(S);
-    fireEvent.click(screen.getByRole("button", { name: /^Canalização ?Canalizador$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Canalização ?Canalização › Águas e esgotos$/ }));
     const guardar = screen.getByRole("button", { name: "Guardar o preço" });
     expect(guardar).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: /Preço de tabela/ }), { target: { value: "120" } });
