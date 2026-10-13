@@ -64,16 +64,30 @@ interface LinhaServico {
   n: string;
   modelo: string;
   nec: string[];
-  mat: { d: string; custo: number; preco: number };
+  mat: MateriaisModelo;
   map: [SvcId, MedKey][];
   med: Partial<Record<MedKey, string>>;
   mats: [string, string, (m: Medidas) => number, StockKey][];
 }
 
+/** Uma parte da estimativa de materiais do modelo: o peso no total, o ramo do Catálogo cujos produtos a cobrem
+ *  (ofício › sub) e os serviços cuja resposta "o cliente mantém" a tira. Sem ramo, nunca é coberta (colas, pequeno material). */
+export interface ParteMateriais { d: string; peso: number; ramo?: [string, string?]; manter?: SvcId[] }
+export interface MateriaisModelo { d: string; custo: number; preco: number; partes?: ParteMateriais[] }
+
 export const LINHAS: Record<LinhaId, LinhaServico> = {
   wc: {
     n: "Casa de banho", modelo: "WC com base de duche", nec: ["Base de duche", "Sanita suspensa", "Banheira", "Móvel 80 cm"],
-    mat: { d: "cerâmico, louças, base, torneiras", custo: 1400, preco: 2168 },
+    mat: {
+      d: "cerâmico, louças, base, torneiras", custo: 1400, preco: 2168,
+      // a divisão da estimativa (exemplo, a confirmar com a Mudelar)
+      partes: [
+        { d: "cerâmico de parede", peso: 0.25, ramo: ["Revestimentos", "Parede"] },
+        { d: "pavimento", peso: 0.15, ramo: ["Revestimentos", "Pavimento"], manter: ["pav", "c6"] },
+        { d: "louças, base e torneiras", peso: 0.5, ramo: ["Canalização", "Louças e torneiras"], manter: ["loucas", "c13", "c17"] },
+        { d: "colas e pequeno material", peso: 0.1 },
+      ],
+    },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["loucas", "pcs"]],
     med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Vasos sanitários" },
     mats: [
@@ -86,7 +100,15 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
   },
   coz: {
     n: "Cozinha", modelo: "Cozinha linear", nec: ["Bancada em pedra", "Ilha", "Eletrodomésticos", "Mudar canalização"],
-    mat: { d: "móveis, bancada, torneira", custo: 3800, preco: 5890 },
+    mat: {
+      d: "móveis, bancada, torneira", custo: 3800, preco: 5890,
+      partes: [
+        { d: "móveis e bancada", peso: 0.7, ramo: ["Carpintaria", "Mobiliário"], manter: ["moveis"] },
+        { d: "cerâmico de parede", peso: 0.1, ramo: ["Revestimentos", "Parede"] },
+        { d: "pavimento", peso: 0.1, ramo: ["Revestimentos", "Pavimento"], manter: ["pav", "c6"] },
+        { d: "torneira e pequeno material", peso: 0.1 },
+      ],
+    },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["moveis", "pcs"]],
     med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Módulos" },
     mats: [
@@ -452,7 +474,7 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     if (sv && t.q > 0) linhas.push({ t: "svc", sid, q: t.q, cu: r2(custoUn(sv, S)), pu: sv.preco });
   }
   // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais)
-  const mm = materiaisDoModelo(L.mat, prod);
+  const mm = materiaisDoModelo(L.mat, prod, d.visita.manter);
   if (mm) linhas.push({ t: "mat", d: L.mat.d, custo: mm.custo, preco: mm.preco });
   linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
@@ -562,7 +584,7 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
   o.linhas = o.linhas.filter((l) => !(l.t === "mat" && (l.d.startsWith(PREFIXO_LEV) || l.d === L.mat.d)));
   const ef = efeitosDoLevantamento(d.f);
   const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
-  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? []);
+  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter);
   if (tinhaMat && fator > 0 && mm) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(mm.custo * fator), preco: r2(mm.preco * fator) });
   let bc = 0, bp = 0;
   for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }

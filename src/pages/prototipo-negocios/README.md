@@ -521,3 +521,13 @@ No orçamento (`OrcamentoSimples.tsx`), a seguir às linhas, a secção "Prazo p
 - Mudar os dias (−/+ meio dia) passa as horas da tarefa a dias × 8. O custo do orçamento e a margem mudam (o ajuste entra no `tot()` e na mão de obra do `partes()`); **o preço ao cliente não muda**. "Repor" volta aos dias das horas. Com menos horas do que o orçamento conta, aparece um aviso.
 - Guardado em `Orcamento.prazo` (dias por tarefa). Sem dias mudados, o orçamento fica exatamente igual. Numa proposta enviada não se mexe.
 - Confirmado pelo Ruben (13/10): 8 h por dia; tarefas em simultâneo quando é válido; mudar os dias muda o custo e a margem, não o preço.
+
+## Linha "Materiais" do modelo sem contar a dobrar (13/10/2026)
+
+A estimativa de materiais do modelo (`LINHAS[…].mat` no `motor.ts`) está dividida em partes, cada uma com o seu peso e o ramo do Catálogo. `materiaisDoModelo` (`produtosVisita.ts`):
+- **WC (1.400 €):** cerâmico de parede 25% (Revestimentos › Parede), pavimento 15% (Revestimentos › Pavimento), louças, base e torneiras 50% (Canalização › Louças e torneiras), colas e pequeno material 10% (nunca coberto).
+- **Cozinha (3.800 €):** móveis e bancada 70% (Carpintaria › Mobiliário), cerâmico de parede 10%, pavimento 10%, torneira e pequeno material 10%.
+- Se **o cliente mantém** o que tem ("Sim" a "O cliente mantém…?" de um serviço da parte), a parte sai.
+- Os **produtos escolhidos** (também os fornecidos pelo cliente) descem só a parte do seu ramo, até zero. Os produtos fora do modelo (espelho, toalheiro…) **não descem nada**, porque têm linha própria.
+- O preço desce na mesma proporção do custo. Se não sobrar nada, a linha sai.
+- Os pesos são um exemplo, a confirmar com a Mudelar.

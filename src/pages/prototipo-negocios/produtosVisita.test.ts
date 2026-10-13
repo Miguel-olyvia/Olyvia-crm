@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { acoes, criarOrc, seed, tot, type Negocio } from "./motor";
+import { LINHAS, acoes, criarOrc, seed, tot, type Negocio } from "./motor";
 import { catalogo0, retirarNo, type Catalogo } from "./v2/catalogoModelo";
 import {
   PREFIXO_CLIENTE, PREFIXO_PROD, fotografia, juntarProduto, ligarCatalogo, materiaisDoModelo, obrigacoes, qtdSugerida, servicosTrazidos,
@@ -93,6 +93,34 @@ describe("a linha de materiais do modelo com produtos escolhidos", () => {
   });
 });
 
+describe("a linha de materiais do modelo, por partes (13/10)", () => {
+  const mat = LINHAS.wc.mat; // 1.400 €: parede 25%, pavimento 15%, louças 50%, colas 10%
+  const prod = (n: string, q: number) => fotografia(prodN(K0, n), q);
+  it("sem produtos nem respostas fica igual", () => {
+    expect(materiaisDoModelo(mat, [], {}, K0.arvore)).toEqual({ custo: 1400, preco: 2168 });
+  });
+  it("um produto só desce a parte do seu ramo, e não abaixo de zero", () => {
+    expect(materiaisDoModelo(mat, [prod("Sanita suspensa com estrutura", 1)], {}, K0.arvore)!.custo).toBe(1400 - 285);
+    // 10 sanitas cobrem as louças todas (700), mas não a parede, o pavimento nem as colas
+    expect(materiaisDoModelo(mat, [prod("Sanita compacta", 10)], {}, K0.arvore)!.custo).toBe(350 + 210 + 140);
+  });
+  it("um produto fora do modelo (espelho) não desce nada", () => {
+    expect(materiaisDoModelo(mat, [prod("Espelho simples 60×80", 1)], {}, K0.arvore)).toEqual({ custo: 1400, preco: 2168 });
+  });
+  it("o cliente mantém: a parte sai; o preço desce na mesma proporção", () => {
+    const r = materiaisDoModelo(mat, [], { pav: "sim", loucas: "sim" }, K0.arvore)!;
+    expect(r.custo).toBe(350 + 140);
+    expect(r.preco).toBeCloseTo(2168 * (490 / 1400), 2);
+    // "Não" não tira nada
+    expect(materiaisDoModelo(mat, [], { pav: "nao" }, K0.arvore)!.custo).toBe(1400);
+  });
+  it("se nada sobrar, a linha sai", () => {
+    const soLoucas = { custo: 300, preco: 450, partes: [{ peso: 1, ramo: ["Canalização", "Louças e torneiras"] as [string, string], manter: ["loucas"] }] };
+    expect(materiaisDoModelo(soLoucas, [], { loucas: "sim" }, K0.arvore)).toBeNull();
+    expect(materiaisDoModelo(soLoucas, [prod("Sanita suspensa com estrutura", 2)], {}, K0.arvore)).toBeNull();
+  });
+});
+
 describe("na visita: portão, orçamento e reabrir", () => {
   const preparar = () => {
     const S = seed();
@@ -144,7 +172,9 @@ describe("na visita: portão, orçamento e reabrir", () => {
     const mats = o.linhas.flatMap((l) => (l.t === "mat" ? [l] : []));
     expect(mats.find((l) => l.d === PREFIXO_PROD + "Sanita suspensa com estrutura")).toMatchObject({ custo: 285, preco: 380 });
     expect(mats.find((l) => l.d === PREFIXO_PROD + "Espelho simples 60×80")).toBeTruthy();
-    expect(mats.find((l) => l.d.startsWith("cerâmico"))!.custo).toBe(1400 - 285 - 35);
+    // a estimativa do modelo por partes: parede 350 + pavimento 0 (o cliente mantém) + louças 700 − 285 (a sanita)
+    // + colas 140; o espelho não é do modelo e não desconta nada
+    expect(mats.find((l) => l.d.startsWith("cerâmico"))!.custo).toBe(350 + 0 + (700 - 285) + 140);
   });
 
   it("o cliente compra (com materiais do cliente): linha a zero", () => {

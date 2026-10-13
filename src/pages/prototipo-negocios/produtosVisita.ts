@@ -196,14 +196,42 @@ export function linhasDosProdutos(prod: ProdVisita[]): LinhaOrc[] {
 }
 
 /**
- * A linha "Materiais" do modelo é uma estimativa de TODOS os materiais. Os produtos escolhidos (mesmo os
- * que o cliente fornece) já são parte dela: a estimativa desce pelo custo deles e o preço desce na mesma
- * proporção. Se os produtos cobrirem a estimativa toda, a linha sai (null). Sem produtos, fica igual.
+ * A linha "Materiais" do modelo é uma estimativa de TODOS os materiais do modelo, dividida em partes (motor: LINHAS[…].mat.partes).
+ * - Uma parte sai se o cliente mantém o que tem (a resposta "Sim" a "O cliente mantém…?" de um dos seus serviços).
+ * - Os produtos escolhidos (mesmo os que o cliente fornece) cobrem a parte do seu ramo do Catálogo: ela desce pelo custo
+ *   deles, até zero. Os produtos fora do modelo (espelho, toalheiro…) não baixam nada: são linhas próprias.
+ * O preço desce na mesma proporção do custo. Se não sobrar nada, a linha sai (null). Sem produtos nem respostas, fica igual.
+ * Sem partes (ou sem Catálogo ligado para saber os ramos), cai na regra antiga: desce pelo custo de todos os produtos.
  */
-export function materiaisDoModelo(mat: { custo: number; preco: number }, prod: ProdVisita[]): { custo: number; preco: number } | null {
-  const coberto = prod.reduce((a, p) => a + (p.q > 0 ? p.custo * p.q : 0), 0);
-  if (!(coberto > 0)) return { custo: mat.custo, preco: mat.preco };
-  if (coberto >= mat.custo) return null;
-  const custo = r2(mat.custo - coberto);
+export function materiaisDoModelo(
+  mat: { custo: number; preco: number; partes?: { peso: number; ramo?: [string, string?]; manter?: SvcId[] }[] },
+  prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, arvore = catalogoLigado()?.arvore,
+): { custo: number; preco: number } | null {
+  const ativos = prod.filter((p) => p.q > 0);
+  let custo: number;
+  if (mat.partes && arvore) {
+    // os nós de um ramo: o próprio e os de baixo
+    const ramo = ([o, sub]: [string, string?]) => {
+      const of = arvore.find((x) => x.pai == null && x.n === o);
+      const raiz = of && (sub ? arvore.find((x) => x.pai === of.id && x.n === sub) : of);
+      if (!raiz) return new Set<string>();
+      const ids = new Set([raiz.id]);
+      for (let mudou = true; mudou;) { mudou = false; for (const x of arvore) if (x.pai && ids.has(x.pai) && !ids.has(x.id)) { ids.add(x.id); mudou = true; } }
+      return ids;
+    };
+    custo = 0;
+    for (const pt of mat.partes) {
+      if (pt.manter?.some((sid) => manter?.[sid] === "sim")) continue; // o cliente mantém: esta parte não se compra
+      const est = mat.custo * pt.peso;
+      const nos = pt.ramo ? ramo(pt.ramo) : null;
+      const coberto = nos ? ativos.reduce((a, p) => a + (p.no && nos.has(p.no) ? p.custo * p.q : 0), 0) : 0;
+      custo += Math.max(0, est - coberto);
+    }
+  } else {
+    custo = mat.custo - ativos.reduce((a, p) => a + p.custo * p.q, 0);
+  }
+  custo = r2(custo);
+  if (!(custo > 0.004)) return null;
+  if (custo >= mat.custo) return { custo: mat.custo, preco: mat.preco };
   return { custo, preco: r2(mat.preco * (custo / mat.custo)) };
 }
