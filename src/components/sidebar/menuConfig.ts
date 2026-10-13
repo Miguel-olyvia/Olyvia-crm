@@ -40,6 +40,7 @@ import {
   Receipt,
   Sun,
   ScanBarcode,
+  Calculator,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -131,8 +132,8 @@ export const menuSections: MenuSection[] = [
     id: "organizations",
     icon: Building,
     labelKey: "sidebar.organizations",
-    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees"],
-    permissions: ["organizations.view", "products.view", "services.view"],
+    paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees", "/custos"],
+    permissions: ["organizations.view", "products.view", "services.view", "costs.view"],
     items: [
       { to: "/organizations", icon: Building, labelKey: "sidebar.organizations", permission: "organizations.view" },
       { to: "/org-chart", icon: Network, labelKey: "sidebar.orgChart", permission: "organizations.view" },
@@ -161,6 +162,8 @@ export const menuSections: MenuSection[] = [
           { to: "/service-categories", icon: ListTree, labelKey: "sidebar.serviceCategories", permission: "services.view" },
           { to: "/service-subcategories", icon: LayoutGrid, labelKey: "sidebar.serviceSubcategories", permission: "services.view" },
           { to: "/service-fees", icon: DollarSign, labelKey: "sidebar.serviceFees", permission: "services.view" },
+          // Sem tradução: o t() devolve a chave quando não a encontra, e a chave é o texto PT.
+          { to: "/custos", icon: Calculator, labelKey: "Custos", permission: "costs.view" },
         ],
       },
     ],
