@@ -94,10 +94,68 @@ interface WarehouseStats {
   belowReorder: number;
 }
 
-// TITULOS.wh do protótipo (menuInv.ts), sem a frase sobre "servem clientes"/
-// reserva FIFO: warehouses não tem serves_customers na BD de produção.
+// TITULOS.wh do protótipo (menuInv.ts). warehouses.serves_customers existe
+// em produção: fn_client_order_line_reservations e
+// rpc_confirm_client_order_stock_exit só usam armazéns ativos que servem
+// clientes.
 const PAGE_TITLE = "Armazéns";
-const PAGE_DESCRIPTION = "Onde está o stock.";
+const PAGE_DESCRIPTION =
+  "Onde está o stock. Só armazéns ativos e que servem clientes entram na reserva FIFO das Encomendas Clientes; um armazém desligado continua a receber e guardar stock.";
+
+interface WarehouseFormData {
+  name: string;
+  code: string;
+  address: string;
+  city: string;
+  postal_code: string;
+  country: string;
+  manager_name: string;
+  phone: string;
+  email: string;
+  capacity: string;
+  is_active: boolean;
+  serves_customers: boolean;
+  latitude: string;
+  longitude: string;
+}
+
+const EMPTY_FORM: WarehouseFormData = {
+  name: "",
+  code: "",
+  address: "",
+  city: "",
+  postal_code: "",
+  country: "",
+  manager_name: "",
+  phone: "",
+  email: "",
+  capacity: "",
+  is_active: true,
+  serves_customers: true,
+  latitude: "",
+  longitude: "",
+};
+
+/**
+ * Coordenada do formulário → número ou null (vazio). Aceita vírgula decimal.
+ * Erro se não for número ou estiver fora de [-limit, limit] (mesmos limites
+ * dos CHECK warehouses_latitude_range / warehouses_longitude_range).
+ */
+function parseCoordinate(
+  raw: string,
+  limit: number,
+  label: string,
+): { value: number | null; error: string | null } {
+  const trimmed = raw.trim().replace(",", ".");
+  if (!trimmed) return { value: null, error: null };
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return { value: null, error: `${label} tem de ser um número` };
+  if (value < -limit || value > limit) return { value: null, error: `${label} tem de estar entre -${limit} e ${limit}` };
+  return { value, error: null };
+}
+
+const formatCoordinates = (w: Pick<WarehouseData, "latitude" | "longitude">): string | null =>
+  w.latitude != null && w.longitude != null ? `${Number(w.latitude)}, ${Number(w.longitude)}` : null;
 
 const STATS_PAGE_SIZE = 1000;
 const EMPTY_STATS: WarehouseStats = { products: 0, value: 0, belowReorder: 0 };
@@ -169,6 +227,11 @@ const Warehouses = () => {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   // Desativar pede confirmação (revisão #8); ativar grava logo.
   const [deactivateTarget, setDeactivateTarget] = useState<WarehouseData | null>(null);
+  // Desligar "Serve clientes" também pede confirmação; ligar grava logo.
+  const [stopServingTarget, setStopServingTarget] = useState<WarehouseData | null>(null);
+  // Mesma confirmação, a partir do switch do formulário de edição (só muda o
+  // formulário; grava ao submeter).
+  const [formStopServingOpen, setFormStopServingOpen] = useState(false);
   const [warehouses, setWarehouses] = useState<WarehouseData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -176,19 +239,7 @@ const Warehouses = () => {
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseData | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
-  const [formData, setFormData] = useState({
-    name: "",
-    code: "",
-    address: "",
-    city: "",
-    postal_code: "",
-    country: "",
-    manager_name: "",
-    phone: "",
-    email: "",
-    capacity: "",
-    is_active: true,
-  });
+  const [formData, setFormData] = useState<WarehouseFormData>(EMPTY_FORM);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
   const [movementWarehouseId, setMovementWarehouseId] = useState<string | undefined>(undefined);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
@@ -254,15 +305,24 @@ const Warehouses = () => {
     e.preventDefault();
 
     const validation = warehouseSchema.safeParse(formData);
+    const errors: Record<string, string> = {};
     if (!validation.success) {
-      const errors: Record<string, string> = {};
       validation.error.errors.forEach((err) => {
         if (err.path[0]) errors[err.path[0].toString()] = err.message;
       });
+    }
+    const lat = parseCoordinate(formData.latitude, 90, "Latitude");
+    const lng = parseCoordinate(formData.longitude, 180, "Longitude");
+    if (lat.error) errors.latitude = lat.error;
+    if (lng.error) errors.longitude = lng.error;
+    if (!lat.error && !lng.error && (lat.value === null) !== (lng.value === null)) {
+      errors[lat.value === null ? "latitude" : "longitude"] = "Indique latitude e longitude, ou deixe as duas vazias";
+    }
+    if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       toast({
         title: t("warehouses.toast.error"),
-        description: validation.error.errors[0]?.message,
+        description: Object.values(errors)[0],
         variant: "destructive",
       });
       return;
@@ -275,12 +335,17 @@ const Warehouses = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
 
+      const { latitude: _latitude, longitude: _longitude, ...baseData } = formData;
       const warehouseData = {
-        ...formData,
+        ...baseData,
         capacity: formData.capacity ? parseInt(formData.capacity) : null,
+        latitude: lat.value,
+        longitude: lng.value,
       };
 
       if (editingWarehouse) {
+        const organizationId = activeCompany?.id;
+        if (!organizationId) throw new Error("No active company selected");
         await withAuditContext(supabase, businessUserId, async () => {
           const { error } = await supabase
             .from("warehouses")
@@ -288,7 +353,8 @@ const Warehouses = () => {
               ...warehouseData,
               updated_at: new Date().toISOString(),
             })
-            .eq("id", editingWarehouse.id);
+            .eq("id", editingWarehouse.id)
+            .eq("organization_id", organizationId);
 
           if (error) throw error;
         });
@@ -329,29 +395,43 @@ const Warehouses = () => {
   };
 
   // Depois de criar/editar/eliminar/restaurar/importar: a lista do cartão de
-  // definições (armazém por defeito) e os mini-KPIs também mudam.
+  // definições (armazém por defeito) e os mini-KPIs também mudam. is_active /
+  // serves_customers mudam a reserva FIFO das EC (calculada ao vivo por
+  // fn_client_order_line_reservations), por isso também o painel "Hoje" e os
+  // resumos das Encomendas Clientes. O documento da EC é lido a cada abertura
+  // (sem cache React Query), não há chave dele a invalidar.
   const refreshAll = () => {
     fetchWarehouses();
     queryClient.invalidateQueries({ queryKey: ["organization-inventory-settings"] });
     queryClient.invalidateQueries({ queryKey: ["warehouses-stock-stats"] });
+    queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany?.id) });
+    queryClient.invalidateQueries({ queryKey: ["inventory-today-warehouses"] });
+    queryClient.invalidateQueries({ queryKey: ["client-orders-status-summary"] });
+    queryClient.invalidateQueries({ queryKey: ["client-order-po-states"] });
   };
 
-  // Mesma gravação que a edição pelo diálogo (warehouses.edit), só do is_active.
-  const handleToggleActive = async (warehouse: WarehouseData, next: boolean) => {
+  // Mesma gravação que a edição pelo diálogo (warehouses.edit), só de um
+  // booleano do cartão (is_active ou serves_customers).
+  const handleToggleFlag = async (
+    warehouse: WarehouseData,
+    field: "is_active" | "serves_customers",
+    next: boolean,
+  ) => {
     if (!activeCompany?.id) return;
     setTogglingId(warehouse.id);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
+      const patch = field === "is_active" ? { is_active: next } : { serves_customers: next };
       await withAuditContext(supabase, businessUserId, async () => {
         const { error } = await supabase
           .from("warehouses")
-          .update({ is_active: next, updated_at: new Date().toISOString() })
+          .update({ ...patch, updated_at: new Date().toISOString() })
           .eq("id", warehouse.id)
           .eq("organization_id", activeCompany.id);
         if (error) throw error;
       });
-      setWarehouses((prev) => prev.map((w) => (w.id === warehouse.id ? { ...w, is_active: next } : w)));
+      setWarehouses((prev) => prev.map((w) => (w.id === warehouse.id ? { ...w, ...patch } : w)));
       toast({ title: t("warehouses.toast.updateSuccess") });
       // A lista do cartão de definições (armazém por defeito) e os KPIs mudam.
       refreshAll();
@@ -403,19 +483,7 @@ const Warehouses = () => {
   };
 
   const resetForm = () => {
-    setFormData({
-      name: "",
-      code: "",
-      address: "",
-      city: "",
-      postal_code: "",
-      country: "",
-      manager_name: "",
-      phone: "",
-      email: "",
-      capacity: "",
-      is_active: true,
-    });
+    setFormData(EMPTY_FORM);
     setEditingWarehouse(null);
     setFieldErrors({});
   };
@@ -495,7 +563,11 @@ const Warehouses = () => {
       email: warehouse.email || "",
       capacity: warehouse.capacity?.toString() || "",
       is_active: warehouse.is_active,
+      serves_customers: warehouse.serves_customers,
+      latitude: warehouse.latitude != null ? String(warehouse.latitude) : "",
+      longitude: warehouse.longitude != null ? String(warehouse.longitude) : "",
     });
+    setFieldErrors({});
     setDialogOpen(true);
   };
 
@@ -745,20 +817,85 @@ const Warehouses = () => {
                     {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="is_active"
-                    checked={formData.is_active}
-                    onChange={(e) =>
-                      setFormData({ ...formData, is_active: e.target.checked })
-                    }
-                    className="w-4 h-4"
-                  />
-                  <Label htmlFor="is_active" className="cursor-pointer">
-                    {t("warehouses.form.active")}
-                  </Label>
+                <fieldset className="space-y-1">
+                  <legend className="text-sm font-medium">Coordenadas</legend>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="latitude">Latitude</Label>
+                      <Input
+                        id="latitude"
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        min={-90}
+                        max={90}
+                        placeholder="38.751"
+                        value={formData.latitude}
+                        onChange={(e) => setFormData({ ...formData, latitude: e.target.value })}
+                        aria-invalid={!!fieldErrors.latitude}
+                        aria-describedby={fieldErrors.latitude ? "latitude-error" : undefined}
+                        className={cn("font-mono", fieldErrors.latitude && "border-destructive")}
+                      />
+                      {fieldErrors.latitude && (
+                        <p id="latitude-error" className="text-xs text-destructive">{fieldErrors.latitude}</p>
+                      )}
+                    </div>
+                    <div>
+                      <Label htmlFor="longitude">Longitude</Label>
+                      <Input
+                        id="longitude"
+                        type="number"
+                        inputMode="decimal"
+                        step="any"
+                        min={-180}
+                        max={180}
+                        placeholder="-9.102"
+                        value={formData.longitude}
+                        onChange={(e) => setFormData({ ...formData, longitude: e.target.value })}
+                        aria-invalid={!!fieldErrors.longitude}
+                        aria-describedby={fieldErrors.longitude ? "longitude-error" : undefined}
+                        className={cn("font-mono", fieldErrors.longitude && "border-destructive")}
+                      />
+                      {fieldErrors.longitude && (
+                        <p id="longitude-error" className="text-xs text-destructive">{fieldErrors.longitude}</p>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Graus decimais (latitude −90 a 90, longitude −180 a 180). Vazio = sem coordenadas.</p>
+                </fieldset>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="is_active"
+                      checked={formData.is_active}
+                      onCheckedChange={(next) => setFormData({ ...formData, is_active: next })}
+                    />
+                    <Label htmlFor="is_active" className="cursor-pointer">
+                      {t("warehouses.form.active")}
+                    </Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="serves_customers"
+                      checked={formData.serves_customers}
+                      onCheckedChange={(next) => {
+                        // Desligar num armazém que hoje serve clientes pede a
+                        // mesma confirmação que o switch do cartão.
+                        if (!next && editingWarehouse?.serves_customers) {
+                          setFormStopServingOpen(true);
+                          return;
+                        }
+                        setFormData((prev) => ({ ...prev, serves_customers: next }));
+                      }}
+                    />
+                    <Label htmlFor="serves_customers" className="cursor-pointer">
+                      Serve clientes
+                    </Label>
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Só armazéns ativos e que servem clientes entram na reserva FIFO das Encomendas Clientes e nas saídas para EC. Um armazém desligado continua a receber e guardar stock.
+                </p>
                 <div className="flex justify-end gap-2">
                   <Button
                     type="button"
@@ -793,6 +930,8 @@ const Warehouses = () => {
               const stats = statsQuery.data?.[warehouse.id] ?? EMPTY_STATS;
               const statsReady = statsQuery.isSuccess;
               const switchId = `wh-active-${warehouse.id}`;
+              const servesSwitchId = `wh-serves-${warehouse.id}`;
+              const coordinates = formatCoordinates(warehouse);
               const fields: ReadonlyArray<readonly [string, string | null]> = [
                 ["Morada", warehouse.address],
                 ["Código postal", warehouse.postal_code],
@@ -871,11 +1010,28 @@ const Warehouses = () => {
                           checked={warehouse.is_active}
                           disabled={!editGate.allowed || togglingId === warehouse.id}
                           onCheckedChange={(next) =>
-                            next ? handleToggleActive(warehouse, true) : setDeactivateTarget(warehouse)
+                            next ? handleToggleFlag(warehouse, "is_active", true) : setDeactivateTarget(warehouse)
                           }
                         />
                         <Label htmlFor={switchId} className="text-sm font-normal">
                           {t("warehouses.form.active")}
+                        </Label>
+                      </div>
+                    )}
+                    {deleted ? null : (
+                      <div className="flex items-center gap-2" title={editGate.reason}>
+                        <Switch
+                          id={servesSwitchId}
+                          checked={warehouse.serves_customers}
+                          disabled={!editGate.allowed || togglingId === warehouse.id}
+                          onCheckedChange={(next) =>
+                            next
+                              ? handleToggleFlag(warehouse, "serves_customers", true)
+                              : setStopServingTarget(warehouse)
+                          }
+                        />
+                        <Label htmlFor={servesSwitchId} className="text-sm font-normal">
+                          Serve clientes
                         </Label>
                       </div>
                     )}
@@ -891,6 +1047,12 @@ const Warehouses = () => {
                         <dd className="break-words">{value || "—"}</dd>
                       </div>
                     ))}
+                    <div className="min-w-0">
+                      <dt className="text-xs text-muted-foreground">Coordenadas</dt>
+                      <dd className={cn("break-words font-mono", !coordinates && "text-muted-foreground")}>
+                        {coordinates ?? "—"}
+                      </dd>
+                    </div>
                   </dl>
 
                   <div className="grid grid-cols-3 gap-2">
@@ -986,11 +1148,56 @@ const Warehouses = () => {
             <AlertDialogCancel>{t("warehouses.form.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (deactivateTarget) handleToggleActive(deactivateTarget, false);
+                if (deactivateTarget) handleToggleFlag(deactivateTarget, "is_active", false);
                 setDeactivateTarget(null);
               }}
             >
               Desativar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!stopServingTarget || formStopServingOpen}
+        onOpenChange={(open) => {
+          if (open) return;
+          setStopServingTarget(null);
+          setFormStopServingOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {(stopServingTarget ?? editingWarehouse)?.name} deixa de servir clientes?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  O stock deste armazém deixa de contar para a reserva das Encomendas Clientes e o armazém deixa de
+                  poder ser usado nas saídas para Encomendas Clientes.
+                </p>
+                <p>As reservas recalculam-se sozinhas. O armazém continua a receber e guardar stock.</p>
+                {formStopServingOpen && !stopServingTarget && (
+                  <p>A alteração só é gravada quando guardar o formulário.</p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("warehouses.form.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (stopServingTarget) {
+                  handleToggleFlag(stopServingTarget, "serves_customers", false);
+                } else if (formStopServingOpen) {
+                  setFormData((prev) => ({ ...prev, serves_customers: false }));
+                }
+                setStopServingTarget(null);
+                setFormStopServingOpen(false);
+              }}
+            >
+              Deixar de servir clientes
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
