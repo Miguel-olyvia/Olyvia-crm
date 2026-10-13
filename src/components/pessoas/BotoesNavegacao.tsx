@@ -18,7 +18,7 @@ const BOTAO = cn("h-11 w-11 shrink-0 p-0", FOCO);
 export function BotoesNavegacao({ vizinhas: v, aoIr }: BotoesNavegacaoProps) {
   const { t } = useTranslation();
   return (
-    <div role="group" aria-label={t("pessoasPagina.nav.label")} className="ml-auto flex shrink-0 items-center gap-0.5">
+    <div role="group" aria-label={t("pessoasPagina.nav.label")} className="ml-auto flex shrink-0 items-center gap-1">
       <Button
         type="button" variant="ghost" data-seta="anterior" disabled={v.anterior === null} className={BOTAO}
         aria-label={t("pessoasPagina.nav.prev")} aria-keyshortcuts="[" title={t("pessoasPagina.nav.hint")}
@@ -26,7 +26,7 @@ export function BotoesNavegacao({ vizinhas: v, aoIr }: BotoesNavegacaoProps) {
       >
         <ChevronLeft aria-hidden="true" />
       </Button>
-      <span className="min-w-12 text-center text-sm tabular-nums text-muted-foreground">
+      <span className="min-w-14 shrink-0 whitespace-nowrap px-1 text-center text-sm tabular-nums text-muted-foreground">
         {v.posicao > 0 ? t("pessoasPagina.nav.position", { n: v.posicao, total: v.total }) : <span className="sr-only">{t("pessoasPagina.nav.positionNone")}</span>}
       </span>
       <Button

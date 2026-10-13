@@ -69,7 +69,7 @@ function AbasFicha(p: AbasProps) {
   const { resumo, submissoes, notas, atividade } = p;
   const verSubmissoes = () => p.aoMudar("submissoes");
   return (
-    <Tabs value={p.aba} onValueChange={(v) => p.aoMudar(v as AbaFicha)} className="flex flex-col">
+    <Tabs value={p.aba} onValueChange={(v) => p.aoMudar(v as AbaFicha)} className="mt-2 flex flex-col">
       <ListaAbas aria-label={t("pessoasPagina.fichaTabs.label")} className="sticky top-0 z-10 shrink-0 bg-background px-6">
         <Aba value="resumo" rotulo={t("pessoasPagina.fichaTabs.summary")} />
         <Aba value="negocios" rotulo={t("pessoasPagina.fichaTabs.deals")} contador={resumo.negocios.length} />
@@ -83,23 +83,23 @@ function AbasFicha(p: AbasProps) {
         <Aba value="notas" rotulo={t("pessoasPagina.fichaTabs.notes")} contador={notas.length} />
         <Aba value="atividade" rotulo={t("pessoasPagina.fichaTabs.activity")} contador={atividade.length} />
       </ListaAbas>
-      <div data-foco-ficha tabIndex={-1} className="p-6 outline-none">
+      <div data-foco-ficha tabIndex={-1} className="px-6 pb-6 outline-none">
         <TabsContent value="resumo" className="mt-0">
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={submissoes.length}
             aoVerSubmissoes={verSubmissoes}
           />
         </TabsContent>
-        <TabsContent value="negocios" className="mt-0"><ConteudoNegocios {...p} /></TabsContent>
-        <TabsContent value="submissoes" className="mt-0">
+        <TabsContent value="negocios" className="mt-0 pt-4"><ConteudoNegocios {...p} /></TabsContent>
+        <TabsContent value="submissoes" className="mt-0 pt-4">
           <FichaSubmissoes
             submissoes={submissoes} hoje={p.hoje} pessoas={p.pessoas} aoPedir={(id) => p.aoPedir(id, resumo.pessoa.id)} aoVerTodas={p.aoVerTodasSubmissoes}
           />
         </TabsContent>
-        <TabsContent value="notas" className="mt-0">
+        <TabsContent value="notas" className="mt-0 pt-4">
           <FichaNotas notas={notas} hoje={p.hoje} pendentes={submissoes.length} aoVerSubmissoes={verSubmissoes} />
         </TabsContent>
-        <TabsContent value="atividade" className="mt-0"><AtividadeFicha itens={atividade} hoje={p.hoje} /></TabsContent>
+        <TabsContent value="atividade" className="mt-0 pt-4"><AtividadeFicha itens={atividade} hoje={p.hoje} /></TabsContent>
       </div>
     </Tabs>
   );
@@ -138,7 +138,7 @@ export function FichaInterior(p: FichaInteriorProps) {
       <div className="flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto">
         <CabecalhoFicha resumo={p.resumo} vizinhas={p.vizinhas} aoIr={p.aoIr} />
         <BarraAcoesFicha resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar} />
-        <div className="px-6 pb-4"><PercursoPessoa resumo={p.resumo} /></div>
+        <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
         {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("perder", origem)} />}
         {visitados.map((a) => (
           <PainelAcaoFicha

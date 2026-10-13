@@ -63,9 +63,9 @@ export function BarraSelecao(p: BarraSelecaoProps) {
       {p.total > 0 && (
         <div
           id={ID_BARRA_SELECAO} role="region" tabIndex={-1} aria-label={t("businessGoals.selection.region")}
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-4 py-3 shadow-lg focus:outline-none"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card px-4 py-3 shadow-lg sm:px-6 focus:outline-none"
         >
-          <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="mx-auto flex max-w-[1536px] flex-wrap items-center gap-x-4 gap-y-2">
             <p className="text-sm font-medium text-foreground tabular-nums">{contagem}</p>
             <div role="alert">
               {p.recusado && (

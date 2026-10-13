@@ -1,7 +1,7 @@
 import { useTranslation } from "@/hooks/useTranslation";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AvatarPessoa } from "./AvatarPessoa";
-import { textoEtapaBase } from "./formatoPessoas";
+import { textoLinhaCabecalho } from "./formatoPessoas";
 import { BotoesNavegacao } from "./BotoesNavegacao";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
 import type { ResumoPessoa } from "./pessoasTipos";
@@ -13,14 +13,6 @@ interface CabecalhoFichaProps {
   aoIr: (id: string, qual: TeclaNavegacao) => void;
 }
 
-/** "Lead · Por contactar · Sintra": o papel, a etapa e a localidade (da morada, ou o distrito). */
-function linhaDe(t: ReturnType<typeof useTranslation>["t"], r: ResumoPessoa): string {
-  const { pessoa } = r;
-  return [t(`pessoasPagina.role.${r.papel}`), textoEtapaBase(t, r), pessoa.morada?.localidade ?? pessoa.distrito]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 /** O cabeçalho da ficha: avatar, nome, a linha "Lead · etapa · localidade", os selos "Empresa" e "Perdida" e a navegação. */
 export function CabecalhoFicha({ resumo, vizinhas, aoIr }: CabecalhoFichaProps) {
   const { t } = useTranslation();
@@ -30,7 +22,7 @@ export function CabecalhoFicha({ resumo, vizinhas, aoIr }: CabecalhoFichaProps) 
       <AvatarPessoa nome={pessoa.nome} />
       <div className="min-w-40 flex-1 space-y-1.5">
         <SheetTitle tabIndex={-1} className="text-xl outline-none">{pessoa.nome}</SheetTitle>
-        <SheetDescription className="text-[15px]">{linhaDe(t, resumo)}</SheetDescription>
+        <SheetDescription className="text-[15px]">{textoLinhaCabecalho(t, resumo)}</SheetDescription>
         {(pessoa.empresa || pessoa.perdida) && (
           <div className="flex flex-wrap gap-1.5">
             {pessoa.empresa && <SeloEmpresa />}

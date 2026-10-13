@@ -18,7 +18,7 @@ interface Campo {
 }
 
 /** Os campos que a pessoa tem, pela ordem em que se mostram. */
-function camposDeContacto(pessoa: Pessoa): Campo[] {
+export function camposDeContacto(pessoa: Pessoa): Campo[] {
   const l = ligacoes(pessoa.contacto);
   const { telefone, email } = pessoa.contacto;
   const m = pessoa.morada;

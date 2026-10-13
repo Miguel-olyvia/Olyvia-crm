@@ -53,9 +53,9 @@ async function copiar(valor: string, el: HTMLElement | null, copia: CopiaContact
 
 const LIGACAO = "inline-flex min-h-11 items-center rounded-sm text-primary underline underline-offset-2 dark:text-violet-300";
 
-const GRELHA = {
+export const GRELHA = {
   painel: "grid grid-cols-1 items-center gap-x-2 sm:grid-cols-[8rem_1fr] border-b border-border py-1 last:border-b-0",
-  ficha: "group grid grid-cols-1 items-center gap-x-4 gap-y-0.5 sm:grid-cols-[9rem_minmax(0,1fr)]",
+  ficha: "group grid min-h-11 grid-cols-1 items-center gap-x-4 gap-y-0.5 sm:grid-cols-[9rem_minmax(0,1fr)]",
 };
 const ROTULO = { painel: "text-xs text-muted-foreground", ficha: "text-[15px] text-muted-foreground" };
 const VALOR = { painel: "text-sm", ficha: "text-[15px]" };

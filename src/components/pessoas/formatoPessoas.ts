@@ -91,3 +91,15 @@ export function textoDia(t: Traduzir, dia: string, hoje: string): string {
   if (dias === -1) return t(`${P}day.yesterday`);
   return dia.slice(0, 4) === hoje.slice(0, 4) ? textoDiaMes(dia) : textoDiaCompleto(dia);
 }
+
+/**
+ * A linha do cabeçalho da ficha: "Lead · Por contactar · Sintra" (o papel, a etapa e a localidade, ou o distrito).
+ * Nunca repete um segmento ("Cliente · Porto", não "Cliente · Cliente · Porto") nem deixa um "·" solto.
+ */
+export function textoLinhaCabecalho(t: Traduzir, r: ResumoPessoa): string {
+  const { pessoa } = r;
+  const segmentos = [t(`${P}role.${r.papel}`), textoEtapaBase(t, r), pessoa.morada?.localidade ?? pessoa.distrito];
+  const vistos: string[] = [];
+  for (const s of segmentos) if (s && !vistos.includes(s)) vistos.push(s);
+  return vistos.join(" · ");
+}

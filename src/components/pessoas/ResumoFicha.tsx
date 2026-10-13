@@ -18,7 +18,7 @@ interface ResumoFichaProps {
 export function ResumoFicha(p: ResumoFichaProps) {
   const { resumo } = p;
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
       <SeccaoPasso resumo={resumo} hoje={p.hoje} />
       <SeccaoAvisos
         resumo={resumo} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={p.pendentes}
