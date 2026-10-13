@@ -7,18 +7,17 @@ import { Check, Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATALOGO, OFICIOS, normal, type ItemCatalogo } from "./catalogo";
 import { aValidar } from "./CamposFase";
-import { LINHAS, eur, garantirServico, nfmt, r2, type Negocio, type SvcId } from "./motor";
+import { LINHAS, eur, garantirServico, nfmt, r2, servicosVisita, type Negocio, type SvcId } from "./motor";
+import { obrigacoes, servicosTrazidos, trazidosParaOrc, ativosDoPacote } from "./produtosVisita";
+import { useCatalogo } from "./v2/catalogoStore";
 import { numero, type Ctx } from "./pecas";
 
 const MAX = 8;
 
 /** Os serviços que vão para o orçamento, tirados da visita. */
 export function orcLinhas(d: Negocio, S: Ctx["S"]): SvcId[] {
-  const L = LINHAS[d.linha], v = d.visita;
-  return [
-    ...L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).map(([sid]) => sid),
-    ...Object.keys(v.extra).filter((sid) => (v.extra[sid] || 0) > 0 && (!!S.svc[sid] || CATALOGO.some((c) => c.id === sid))),
-  ];
+  // do pacote, postos à mão e trazidos pelos produtos escolhidos
+  return servicosVisita(d).filter((sid) => !!S.svc[sid] || CATALOGO.some((c) => c.id === sid));
 }
 
 export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; simples?: boolean }) {
@@ -57,13 +56,31 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
     if (s) total += (qt || 0) * s.preco;
     return { sid, s, qt: qt || 0 };
   });
+  // os trazidos pelos produtos (os que não estão no pacote nem foram postos à mão) e de onde vieram
+  const prod = v.prod ?? [], trazTodos = servicosTrazidos(prod);
+  const trazidos = trazidosParaOrc(prod, ativosDoPacote(L.map, v.med, v.off), v.extra).map(([sid, tr]) => {
+    const s = S.svc[sid] || garantirServicoLeitura(S, sid);
+    if (s) total += tr.q * s.preco;
+    return { sid, s, qt: tr.q, de: tr.de };
+  });
+  // os serviços que obrigam a escolher produto: a nota ao lado do serviço
+  const K = useCatalogo();
+  const obr = Object.fromEntries(obrigacoes(K, servicosVisita(d), v, d.f.materiais_cliente === "Sim").map((o) => [o.sid, o]));
+  const notaProduto = (sid: SvcId) => {
+    const o = obr[sid];
+    if (!o) return null;
+    const txt = o.estado === "mantem" ? "o cliente mantém o que tem" : o.estado === "produto" ? o.por.join(", ") : o.estado === "cliente" ? "o cliente compra"
+      : o.estado === "pergunta" ? "falta responder em Produtos" : "falta escolher em Produtos";
+    return <span className={cn("block text-sm", o.cumprida ? "text-muted-foreground" : "font-medium text-destructive")}>Produto de {o.caminho}: {txt}</span>;
+  };
+  const tambem = (sid: SvcId) => trazTodos[sid] ? <span className="block text-sm text-muted-foreground">também vem de: {trazTodos[sid].de.join(", ")}</span> : null;
 
   const titulo = simples ? "text-base font-semibold" : "text-sm font-semibold";
   const linha = "flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 py-3";
 
   return (
     <div className="max-w-3xl space-y-8">
-      {aValidar(d, "nec") && !juntados.length && !pacote.some((x) => x.on) && (
+      {aValidar(d, "nec") && !juntados.length && !trazidos.length && !pacote.some((x) => x.on) && (
         <p className="text-[15px] font-medium text-destructive">Marque pelo menos um serviço.</p>
       )}
 
@@ -80,6 +97,7 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
               <label htmlFor={`pac-${sid}-${d.id}`} className="min-w-0 flex-1 cursor-pointer">
                 <span className={cn("block", t, on ? "text-foreground" : "text-muted-foreground")}>{s.n}</span>
                 <span className="block text-sm text-muted-foreground">{qt > 0 ? `${nfmt(qt)} ${s.un} · ${s.perfil}` : "falta a medida"}</span>
+                {on && notaProduto(sid)}{on && tambem(sid)}
               </label>
               <span className={cn("w-24 text-right tabular-nums", t)}>{on ? eur(qt * s.preco) + " €" : ""}</span>
             </li>
@@ -99,8 +117,9 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
                 <span className="min-w-0 flex-1">
                   <span className={cn("block text-foreground", t)}>{s.n}</span>
                   <span className="block text-sm text-muted-foreground">{s.perfil} · {nfmt(s.h)} h/{s.un} na receita · {eur(s.preco)} €/{s.un}</span>
+                  {notaProduto(sid)}{tambem(sid)}
                 </span>
-                {ro ? <span className={t}>{nfmt(qt)} {s.un}</span> : (
+                {ro ?<span className={t}>{nfmt(qt)} {s.un}</span> : (
                   <span className="flex items-center gap-2">
                     <label htmlFor={`q-${sid}-${d.id}`} className="sr-only">Quantidade de {s.n}</label>
                     <input id={`q-${sid}-${d.id}`} key={sid + qt} type="number" min="0" step="any" inputMode="decimal" defaultValue={qt}
@@ -124,6 +143,32 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
           <p className={cn("mt-2 text-muted-foreground", t)}>Junte abaixo o que a obra leva além do pacote: nichos, toalheiro, resguardo, pontos de gás…</p>
         )}
       </section>
+
+      {trazidos.length > 0 && (
+        <section aria-labelledby={`tra-${d.id}`}>
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 id={`tra-${d.id}`} className={titulo}>Trazidos pelos produtos</h3>
+            <span className="text-sm text-muted-foreground">saem se tirar o produto</span>
+          </div>
+          <ul className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
+            {trazidos.map(({ sid, s, qt, de }) => s && (
+              <li key={sid} className={cn(linha, "animate-in fade-in-0 slide-in-from-top-1 duration-300")}>
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block text-foreground", t)}>{s.n}</span>
+                  <span className="block text-sm text-muted-foreground">veio de: {de.join(", ")} · {s.perfil}</span>
+                  {notaProduto(sid)}
+                </span>
+                <span className={t}>{nfmt(qt)} {s.un}</span>
+                <span className={cn("w-24 text-right tabular-nums", t)}>{eur(qt * s.preco)} €</span>
+                {!ro && (
+                  <button type="button" onClick={() => run(() => A.extra(d.id, sid, qt))}
+                    className="min-h-10 rounded-lg px-2 text-sm font-medium text-primary underline-offset-4 hover:underline">Pôr à mão</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {!ro && (
         <section aria-labelledby={`cat-${d.id}`} className="rounded-2xl border border-border bg-card p-4 sm:p-5">

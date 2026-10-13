@@ -12,7 +12,7 @@ import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { DocumentosSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
-import { ServicosCatalogo } from "./ServicosCatalogo";
+import { NecessidadesCliente } from "./NecessidadesVisita";
 import { VisitasLista } from "./Visitas";
 import { nfmt, type MedKey } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
@@ -21,7 +21,7 @@ const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOL
 // nomes curtos para a lista dos passos
 const CURTO: Record<string, string> = {
   "Local · exterior (edifício e acessos)": "Exterior do edifício", "Local · interior": "Interior do espaço",
-  "nec": "Serviços necessários", "Escolhas do cliente": "Escolhas do cliente", "Plano, materiais e resultado": "Plano e materiais",
+  "nec": "Necessidades do cliente", "Escolhas do cliente": "Escolhas do cliente", "Plano, materiais e resultado": "Plano e materiais",
 };
 const curto = (p: Passo) => (p.personalizado ? p.titulo : CURTO[p.id] || CURTO[p.titulo] || p.titulo);
 const completo = (p: Passo) => (p.conta ? p.conta.n > 0 && p.conta.f >= p.conta.n : !!p.feito);
@@ -133,7 +133,7 @@ export function NegocioSimples(ctx: Ctx) {
                     </p>
                   </div>
                 )}
-                {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Serviços necessários</h3><ServicosCatalogo {...ctx} d={d} simples /></div>}
+                {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Necessidades do cliente</h3><NecessidadesCliente {...ctx} d={d} simples /></div>}
                 {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Orçamento</h3><OrcamentoSimples {...ctx} d={d} /></div>}
                 {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Proposta</h3><Partilhar ctx={ctx} d={d} tipo="proposta" estado={d.orc.aceite ? `aceite ${d.orc.aceite}` : "enviada"}><PropostaDoc S={S} d={d} /></Partilhar></div>}
                 {ver === 3 && d.orc && !d.orc.vendaDireta && <div><h3 className="mb-3 text-base font-semibold">Contrato</h3><Partilhar ctx={ctx} d={d} tipo="contrato" estado={d.orc.contrato === "assinado" ? "assinado" : "enviado"}><ContratoDoc S={S} d={d} /></Partilhar></div>}

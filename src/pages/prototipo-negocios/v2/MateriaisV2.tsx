@@ -7,7 +7,7 @@ import { Clock, PackagePlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CHIP } from "../FiltrosPopover";
-import { normal } from "../catalogo";
+import { CATALOGO, normal } from "../catalogo";
 import { numero } from "../pecas";
 import { eur, type Estado } from "../motor";
 import { aplicarTodos, dataPT, listaCatalogo, type Custos } from "./custosModelo";
@@ -61,6 +61,9 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
     anunciar(`${p.n} retirado`, () => porCatalogo(antes));
   };
   const arvoreOp = [{ v: "", t: "Sem classificação" }, ...opcoesArvore(K.arvore)];
+  // os serviços que um produto pode trazer: os em uso e os do Catálogo real
+  const nomeSvc = (sid: string) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
+  const svcOp = [{ v: "", t: "Nenhum (só vendido)" }, ...[...Object.keys(S.svc), ...CATALOGO.map((c) => c.id).filter((id) => !S.svc[id])].map((sid) => ({ v: sid, t: nomeSvc(sid) }))];
   const nVelhos = pesquisados.filter(velho).length;
 
   return (
@@ -83,12 +86,13 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
       <p className="mt-3 text-[15px] text-muted-foreground" aria-live="polite">{filtrados.length} de {K.produtos.length} materiais{curta ? ` · a mostrar os primeiros ${lista.length}` : ""}</p>
 
       <div className="mt-2 overflow-x-auto">
-        <table className="w-full min-w-[1180px] border-collapse">
+        <table className="w-full min-w-[1380px] border-collapse">
           <caption className="sr-only">Materiais e consumíveis, com custo, unidade, marca, fornecedor e data do preço</caption>
           <thead>
             <tr className="border-b border-border">
               <th scope="col" className={TH}>Material</th><th scope="col" className={TH}>Classificação</th><th scope="col" className={cn(TH, "text-right")}>Custo €</th>
               <th scope="col" className={TH}>Unidade</th><th scope="col" className={TH}>Marca</th><th scope="col" className={TH}>Fornecedor preferido</th>
+              <th scope="col" className={TH}>Serviço que traz</th>
               <th scope="col" className={TH}>Preço de</th><th scope="col" className={TH}><span className="sr-only">Retirar</span></th>
             </tr>
           </thead>
@@ -112,6 +116,20 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
                   <td className={TD}><Combo rotulo={`Unidade de ${p.n}`} w="w-28" v={p.un} lista={K.unidades} onSet={(u, novo) => mudar(p.id, (x, k) => ({ ...x, un: lista_("unidades", k, u) }), novo ? `Unidade «${u}» criada` : "Unidade mudada")} /></td>
                   <td className={TD}><Combo rotulo={`Marca de ${p.n}`} v={p.marca} lista={K.marcas} onSet={(m, novo) => mudar(p.id, (x, k) => ({ ...x, marca: lista_("marcas", k, m) }), novo ? `Marca «${m}» criada` : "Marca mudada")} /></td>
                   <td className={TD}><Combo rotulo={`Fornecedor de ${p.n}`} w="w-44" v={p.fornecedor} lista={K.fornecedores} onSet={(f, novo) => mudar(p.id, (x, k) => ({ ...x, fornecedor: lista_("fornecedores", k, f) }), novo ? `Fornecedor «${f}» criado` : "Fornecedor mudado")} /></td>
+                  <td className={TD}>
+                    {/* o serviço que o produto traz na visita (e quanto por unidade): um editor na linha de cada vez */}
+                    {editor === `mat:svc:${p.id}`
+                      ? <span className="flex items-center gap-2">
+                          <Escolha rotulo={`Serviço que ${p.n} traz`} w="w-56" v={p.servico ?? ""} opcoes={svcOp}
+                            onSet={(s) => mudar(p.id, (x) => { const y = { ...x }; if (s) { y.servico = s; y.fatorServico ??= 1; } else { delete y.servico; delete y.fatorServico; } return y; }, s ? `${p.n} traz ${nomeSvc(s)}` : `${p.n}: só o produto`)} />
+                          {p.servico && <NumeroCelula rotulo={`Fator do serviço de ${p.n}`} w="w-16" v={p.fatorServico ?? 1} onSet={(f) => mudar(p.id, (x) => ({ ...x, fatorServico: f }), `${nomeSvc(p.servico!)} × ${String(f).replace(".", ",")} por ${p.un}`)} />}
+                          <Button variant="ghost" className="min-h-11" onClick={() => setEditor(null)}>Feito</Button>
+                        </span>
+                      : <button type="button" aria-label={`Serviço que ${p.n} traz: ${p.servico ? nomeSvc(p.servico) : "nenhum"}. Mudar`} onClick={() => setEditor(`mat:svc:${p.id}`)}
+                          className="min-h-11 rounded-lg px-1 text-left text-[15px] underline-offset-4 hover:underline">
+                          {p.servico ? `${nomeSvc(p.servico)} × ${String(p.fatorServico ?? 1).replace(".", ",")}` : <span className="text-muted-foreground">Nenhum (só vendido)</span>}
+                        </button>}
+                  </td>
                   <td className={cn(TD, "whitespace-nowrap text-[15px] tabular-nums text-muted-foreground")}>
                     <span className="inline-flex items-center gap-1.5">{v && <Clock className="h-4 w-4 text-warning" aria-hidden="true" />}{dataPT(p.data)}{v && <span className="sr-only"> (desatualizado)</span>}</span>
                   </td>
@@ -119,7 +137,7 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
                 </tr>
               );
             })}
-            {!lista.length && <tr><td colSpan={8} className="px-3 py-4 text-[15px] text-muted-foreground">Nada com esse nome ou filtro.</td></tr>}
+            {!lista.length && <tr><td colSpan={9} className="px-3 py-4 text-[15px] text-muted-foreground">Nada com esse nome ou filtro.</td></tr>}
           </tbody>
         </table>
       </div>

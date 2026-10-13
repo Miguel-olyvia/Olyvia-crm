@@ -1,75 +1,64 @@
-// Os produtos do Catálogo escolhem-se no ORÇAMENTO, não no levantamento (13/10/2026).
-// Por cada serviço do orçamento, os produtos do Catálogo classificados nesse serviço (equipamentosCliente.ts).
-// Tocar num produto junta-o como linha; se o cliente fornece materiais, um 2.º toque marca-o
-// "fornecido pelo cliente" (fica na lista, sem custo nem preço); um 3.º toque tira-o.
-import { Check, PackagePlus, UserRound } from "lucide-react";
+// Os produtos no ORÇAMENTO (13/10/2026, revisto): escolhem-se na visita (etapa "Necessidades do cliente",
+// ProdutosVisita.tsx) e chegam ao orçamento como linhas "Produto · …" / "Fornecido pelo cliente · …".
+// Aqui só se mostra o que veio da visita e de onde vieram os serviços trazidos; para mudar, reabre-se o
+// levantamento (enquanto a proposta não foi enviada). Escolher aqui outra vez seria uma segunda verdade.
+import { useState } from "react";
+import { PackageCheck, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { eur, r2, type Negocio } from "./motor";
+import { eur, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { lerCatalogo } from "./v2/catalogoStore";
-import { equipamentosDosServicos } from "./equipamentosCliente";
+import { PREFIXO_CLIENTE, PREFIXO_PROD, precoProduto, servicosTrazidos } from "./produtosVisita";
 
-export const PREFIXO_PROD = "Produto · ";
-export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
-/** Margem sobre o custo dos produtos (exemplo; na app real vem do pacote ou das Definições). */
-const MARGEM_PROD = 0.25;
+export { PREFIXO_CLIENTE, PREFIXO_PROD };
 
-type EstadoProd = "fora" | "incluido" | "cliente";
-
-export function ProdutosOrcamento({ S, run, d, simples }: Pick<Ctx, "S" | "run"> & { d: Negocio; simples?: boolean }) {
-  const o = d.orc!;
-  const K = lerCatalogo();
-  const sids = [...new Set(o.linhas.flatMap((l) => (l.t === "svc" ? [l.sid] : [])))];
-  const grupos = equipamentosDosServicos(K, sids);
-  if (!grupos.length) return null;
-  const fechado = !!o.enviada;
-  const clienteFornece = d.f.materiais_cliente === "Sim";
-
-  const estado = (n: string): EstadoProd =>
-    o.linhas.some((l) => l.t === "mat" && l.d === PREFIXO_PROD + n) ? "incluido"
-      : o.linhas.some((l) => l.t === "mat" && l.d === PREFIXO_CLIENTE + n) ? "cliente" : "fora";
-
-  const alternar = (n: string, custo: number) => run(() => {
-    const e = estado(n);
-    o.linhas = o.linhas.filter((l) => !(l.t === "mat" && (l.d === PREFIXO_PROD + n || l.d === PREFIXO_CLIENTE + n)));
-    if (e === "fora") o.linhas.push({ t: "mat", d: PREFIXO_PROD + n, custo, preco: r2(custo / (1 - MARGEM_PROD)) });
-    else if (e === "incluido" && clienteFornece) o.linhas.push({ t: "mat", d: PREFIXO_CLIENTE + n, custo: 0, preco: 0 });
-    o.aprov = null; d.fresh = false;
-  });
-
+export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A" | "run"> & { d: Negocio; simples?: boolean }) {
+  const o = d.orc!, prod = d.visita.prod ?? [], compra = Object.values(d.visita.clienteCompra ?? {});
+  const traz = Object.entries(servicosTrazidos(prod));
+  const t = simples ? "text-[15px]" : "text-sm";
   return (
     <section aria-labelledby={`prod-${d.id}`} className={simples ? "" : "mt-4"}>
       <h3 id={`prod-${d.id}`} className={cn("flex items-center gap-2 font-semibold", simples ? "text-base" : "text-sm")}>
-        <PackagePlus className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Produtos do Catálogo
+        <PackageCheck className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Produtos da visita
       </h3>
-      <p className="mt-0.5 text-sm text-muted-foreground">
-        Escolha os produtos de cada serviço.{clienteFornece ? " O cliente fornece materiais: toque outra vez para marcar \"fornecido pelo cliente\"." : ""}
-      </p>
-      <div className="mt-2 space-y-3">
-        {grupos.map((g) => (
-          <div key={g.sid}>
-            <p className="text-xs font-medium text-muted-foreground">{S.svc[g.sid]?.n ?? g.sid}</p>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {g.produtos.map((p) => {
-                const e = estado(p.n);
-                return (
-                  <button key={p.id} type="button" disabled={fechado} aria-pressed={e !== "fora"} onClick={() => alternar(p.n, p.custo)}
-                    className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors disabled:opacity-60",
-                      e === "incluido" ? "border-primary bg-primary text-primary-foreground"
-                        : e === "cliente" ? "border-success bg-success/10 text-success"
-                          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground")}>
-                    {e === "incluido" && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
-                    {e === "cliente" && <UserRound className="h-3.5 w-3.5" aria-hidden="true" />}
-                    {p.n}
-                    <span className="tabular-nums opacity-80">{e === "cliente" ? "· o cliente fornece" : `· ${eur(r2(p.custo / (1 - MARGEM_PROD)))} €`}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
+      {prod.length || compra.length ? (
+        <ul className={cn("mt-2 space-y-1", t)}>
+          {prod.map((p) => (
+            <li key={p.id} className="flex flex-wrap justify-between gap-x-4">
+              <span>{p.n} · {nfmt(p.q)} {p.un}{p.cliente ? " · o cliente fornece" : ""}</span>
+              <span className="tabular-nums text-muted-foreground">{p.cliente ? "0,00" : eur(precoProduto(p))} €</span>
+            </li>
+          ))}
+          {compra.map((c) => <li key={c}>O cliente compra: {c}</li>)}
+          {traz.map(([sid, tr]) => (
+            <li key={sid} className="text-muted-foreground">{S.svc[sid]?.n ?? sid}: {nfmt(tr.q)} {S.svc[sid]?.un ?? "un"} · veio de {tr.de.join(", ")}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className={cn("mt-1 text-muted-foreground", t)}>Nenhum produto escolhido na visita: os materiais são a estimativa do modelo.</p>
+      )}
+      {!o.enviada && <Reabrir A={A} run={run} d={d} />}
     </section>
+  );
+}
+
+/** "Reabrir levantamento", com o aviso do que acontece ao orçamento. Só antes de a proposta ser enviada. */
+export function Reabrir({ A, run, d }: Pick<Ctx, "A" | "run"> & { d: Negocio }) {
+  const [pergunta, setPergunta] = useState(false);
+  if (d.orc?.enviada || d.fase !== 3) return null;
+  return pergunta ? (
+    <div role="alertdialog" aria-label="Reabrir o levantamento" className="mt-3 space-y-3 rounded-xl border border-warning/40 bg-warning/[0.06] p-4">
+      <p className="text-[15px]">
+        Reabrir o levantamento? Volta a poder mexer nos campos, nas medidas, nos serviços e nos produtos. Ao fechar de novo, o orçamento refaz-se:
+        os preços por serviço e o desconto que mudou mantêm-se; as quantidades mudadas à mão no orçamento perdem-se.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => setPergunta(false)}>Cancelar</Button>
+        <Button onClick={() => run(() => A.reabrirVisita(d.id))}>Reabrir levantamento</Button>
+      </div>
+    </div>
+  ) : (
+    <Button variant="outline" className="mt-3" onClick={() => setPergunta(true)}><RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />Reabrir levantamento</Button>
   );
 }
 

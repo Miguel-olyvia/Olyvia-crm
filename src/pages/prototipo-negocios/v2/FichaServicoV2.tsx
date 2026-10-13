@@ -85,6 +85,25 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
           onSet={(v) => { mudarCatalogo((k) => { if (v) k.classe[sid] = v; else delete k.classe[sid]; }); anunciar(`Classificação: ${caminho(K.arvore, v || null)}`); }} />
       </label>
 
+      {/* na visita: este serviço obriga a escolher um produto de um ramo (com uma pergunta antes, opcional) */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label className="flex flex-wrap items-center gap-3">
+          <span className="text-[15px] font-medium">Obriga a escolher produto de</span>
+          <Escolha rotulo="Obriga a escolher produto de" w="w-72" v={K.exigeProduto?.[sid] ?? ""} opcoes={[{ v: "", t: "Não obriga (serviço sem produto)" }, ...opcoesArvore(K.arvore)]}
+            onSet={(v) => { mudarCatalogo((k) => { k.exigeProduto ??= {}; if (v) k.exigeProduto[sid] = v; else delete k.exigeProduto[sid]; }); anunciar(v ? `Obriga a escolher produto de ${caminho(K.arvore, v)}` : "Já não obriga a produto"); }} />
+        </label>
+        {K.exigeProduto?.[sid] && (
+          <label className="flex flex-wrap items-center gap-3">
+            <span className="text-[15px] font-medium">Pergunta antes</span>
+            <input key={K.perguntaManter?.[sid] ?? ""} type="text" aria-label="Pergunta antes de obrigar ao produto" defaultValue={K.perguntaManter?.[sid] ?? ""} placeholder="Ex.: O cliente mantém a sanita?"
+              className="h-11 w-80 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
+              onBlur={(e) => { const t = e.target.value.trim(); if (t !== (K.perguntaManter?.[sid] ?? "")) { mudarCatalogo((k) => { k.perguntaManter ??= {}; if (t) k.perguntaManter[sid] = t; else delete k.perguntaManter[sid]; }); anunciar(t ? `Pergunta: ${t}` : "Sem pergunta: obriga sempre ao produto"); } }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          </label>
+        )}
+      </div>
+      {K.exigeProduto?.[sid] && <p className="mt-1 text-sm text-muted-foreground">Com «Sim» à pergunta não é preciso produto; com «Não» (ou sem pergunta) a visita só fecha com um produto deste ramo escolhido.</p>}
+
       {A.length > 0 && <div className="mt-6"><ListaAlertas A={A} /></div>}
 
       <div className="mt-6"><CustoServicoInline S={S} C={C} sid={sid} s={s} /></div>

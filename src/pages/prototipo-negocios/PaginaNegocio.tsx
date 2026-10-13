@@ -10,13 +10,14 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, SLOTS, visitaFeita, visitas,
-  alertas, bloqueado, conflitos, custoUn, eur, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
+  alertas, bloqueado, conflitos, custoUn, eur, faltaProdutosVisita, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
   type Estado, type MedKey, type Negocio, type Papel, type SvcId,
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
 import { UsarLocalizacao } from "./Localizacao";
-import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
+import { orcLinhas } from "./ServicosCatalogo";
+import { NecessidadesCliente } from "./NecessidadesVisita";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { ProdutosOrcamento, rotuloMat } from "./ProdutosOrcamento";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
@@ -295,8 +296,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
           </div>
         </div>
       ) },
-      { id: "nec", titulo: "Serviços necessários", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed,
-        resumo: orcLinhas(d, S).map((sid) => S.svc[sid].n), corpo: <ServicosCatalogo {...ctx} d={d} simples={simples} /> },
+      { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length,
+        resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
       g(ESCOLHAS, Sparkles),
       { id: "fotos", titulo: "Fotografias", icone: Camera, feito: v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim", resumo: [v.fotos + " fotos"], corpo: (
         <div className="space-y-3">
@@ -358,7 +359,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0)).length;
-    if (ps.id === "nec" && aValidar(d, "nec") && !orcLinhas(d, S).length) ps.falta = 1;
+    if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
     if (ps.id === "fotos" && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = 1;
   }
   return passos;
@@ -536,7 +537,7 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
               <tr className="sum"><td>Total sem IVA</td><td>{nfmt(T.h)} h</td><td className="n">{eur(T.custo)}</td><td className="n">{eur(T.pf)}</td><td className="n">{pct(T.m)}</td></tr>
             </tbody>
           </table></div>
-          <ProdutosOrcamento S={S} run={run} d={d} />
+          <ProdutosOrcamento S={S} A={A} run={run} d={d} />
           {o.verif && !locked && (
             <div className={"card " + (S.pulse === "verif" ? "sec pulse" : "")} id="verif" style={{ borderColor: "var(--pri-line)" }}>
               <h3>Verificar antes de enviar <span>{nX} bloqueio(s) · {nW} aviso(s)</span></h3>

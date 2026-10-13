@@ -6,7 +6,7 @@ import { RECEITAS } from "./receitas";
 
 export interface EquipServico { sid: string; produtos: Produto[] }
 
-const CONSUMIVEIS = new Set(Object.values(RECEITAS).flatMap((r) => r.cons.map((c) => c.n)));
+export const CONSUMIVEIS = new Set(Object.values(RECEITAS).flatMap((r) => r.cons.map((c) => c.n)));
 
 /** O nó e tudo o que está abaixo dele na árvore. */
 function abaixo(K: Catalogo, no: string): Set<string> {
