@@ -372,3 +372,28 @@ Na **V2** e na **V2 funcional**, "Definições" é **uma só página** (`v2/Defi
 - **`CamposEditor.tsx` corrigido** (vale para todas as versões, na vista "campos"): a fase escolhe-se num grupo de rádios (`fieldset`) em vez de `tablist`; os modelos de setor são linhas de uma lista, não cartões; a confirmação do modelo é uma linha na página; o detalhe do campo e o "Novo campo" já não são cartões dentro do cartão do grupo; campos, botões de subir/descer, ícones e chips de 44 px; texto a 15 px; sem cor no texto ("campo da empresa" e o papel do campo a cinzento); "Usar este modelo" e "Criar o campo" passaram a secundários. Exporta `ModelosSetor` e `EditorFases`, que as Definições da V2 usam. Nenhum teste dependia da marcação antiga.
 - **Testes:** `v2/definicoes.test.ts` (índice da pesquisa, arranque, modelos novos) e `v2/DefinicoesV2.test.tsx` (página única com todas as âncoras e sem separadores nem diálogos, um só primário, "/" e resultados, "?", arranque aplicado, Lixo, Reenviar, perfis, margens no motor, nome da fase, Repor).
 - **Por fazer:** os nomes das fases e os nomes de Cliente/Local/Obra só se veem nesta página (não chegam a Negócios nem à ficha); as margens por linha e as taxas de deslocação não entram no cálculo do orçamento; os modelos de documentos não abrem; convidar utilizadores e criar modelos novos ficam para a app real.
+
+## Marketing (V2, 13/10/2026)
+
+Só na **V2** e na **V2 funcional** (o ecrã `v2/MarketingV2.tsx`). Na **Atual** fica o `MarketingSimples` de sempre (`OutrosSimples.tsx`, sem mudanças). Segue o lote 1, item 5, e a secção 4.3 de `docs/melhorias-v2-2026-10-13/README.md`.
+
+**Três conceitos distintos** (decisão 8, com a proposta do levantamento):
+- o **canal** é a categoria fixa da empresa (Redes sociais pagas, Pesquisa, Offline, Parcerias, Outros: `Canal` de `toquesDocs.ts`);
+- a **campanha** é o que se cria e se mede;
+- o **anúncio** é a colocação paga dentro da campanha (Meta Ads, Google Ads, Outdoor…), com o seu **investimento**.
+
+**A lista** (`MarketingV2.tsx`): uma tabela com Campanha (com o canal por baixo e "N por rever"), Leads, Ganhos, Receita, Investimento, Custo por lead e Custo por ganho. Os cabeçalhos ordenam (botão no cabeçalho, `aria-sort`); começa por **Ganhos**, do maior para o menor, e os vazios ("—") ficam sempre no fim. Há uma pesquisa (nome, canal ou onde anuncia, sem acentos). A linha toda abre a campanha. Por baixo diz-se quem ficou **sem campanha** (com os dados de exemplo, só a Ana Martins, com uma UTM do TikTok por mapear). Único primário: **Nova campanha**.
+
+**De onde vêm os números** (`v2/campanhas.ts`, funções puras): as leads são os negócios de exemplo (`dealsTodos`: a seed e as pessoas de exemplo), ligados à campanha pelo **primeiro toque** da pessoa (`toquesDe`): pela campanha do toque ou, sem campanha, pela origem. Cada negócio conta numa campanha no máximo. **A receita só vem dos negócios ganhos** (`ehGanho`: contrato assinado, ou proposta aceite numa venda direta) e é o total do orçamento (`tot().pf`); nunca se escreve à mão. O custo por lead e por ganho é o investimento a dividir; sem investimento, ou sem leads ou ganhos, é "—". Com a seed: Site 6 leads e 2 ganhos; Cozinhas outubro 3 leads, 1.130 € em dois anúncios; Chamadas diretas 4; Recomendações 3; Cozinhas setembro, Casa de banho outubro, Outdoor A1 e Feira Casa e Obra 1 cada. As oito campanhas, os anúncios, os investimentos e as submissões por rever são **de exemplo**.
+
+**Nova campanha** (na própria página, sem modal): Nome, Canal (chips) e Modelo de formulário (chips: Pedido de orçamento, Marcar visita, Contacto simples; vem escolhido o primeiro) → **Criar e abrir a campanha**. São 4 cliques e o nome. A campanha nova não tem anúncios nem leads.
+
+**A página da campanha** (`v2/CampanhaV2.tsx`), sem separadores, com âncoras no topo:
+- **Submissões por rever**, quando as há: um aviso com a contagem e, em cada linha, **Aceitar** (passa a lead da campanha, na fase Lead, e conta nas leads) e **Rejeitar** (sai e não conta).
+- **Resumo**: os seis números e o **funil** Lead → Contacto → Visita → Negócio → Ganho, em barras cinzentas com o número (um perdido conta até à fase onde ficou).
+- **Formulário**: os campos na linha, com o tipo escolhido numa lista, Obrigatório, Subir, Descer e Tirar; "Juntar campo" escolhe de uma lista de campos prontos (não se escreve). Por baixo, a **pré-visualização** como o cliente a vê.
+- **Onde anuncia**: os anúncios com o investimento editável na linha (grava ao sair do campo) e Tirar; "Juntar anúncio em" com chips das origens pagas.
+- **Leads**: a lista só de leitura das pessoas da campanha (nome, fase e valor). Faz as vezes do filtro "Campanha" em Pessoas, que **não** se juntou (a página Pessoas é de outro colega).
+- **Partilhar**: Link, No site (iframe) ou Pixel, em chips; o código num campo só de leitura e **Copiar** (o único primário da página; se a área de transferência recusar, o texto fica selecionado). O domínio `formularios.olyvia.pt` é de exemplo.
+
+**O limite.** As campanhas vivem **só em memória** (`v2/campanhasStore.ts`, `useSyncExternalStore`, como o `diaADia.ts`): duram até recarregar a página. Não tocam no `Estado`, no `motor.ts`, no `seed()` nem na `VERSAO`, e o "Repor a demonstração" não as apaga (o `repor` vive no `PrototipoNegocios.tsx`, que não se mexeu); recarregar a página volta aos exemplos. Peças comuns em `v2/pecasMarketing.tsx`. Testes: `v2/campanhas.test.ts` (contas, lista, formulário, partilha e store) e `v2/MarketingV2.test.tsx` (lista, nova campanha, página, por rever, editor e anúncios).
