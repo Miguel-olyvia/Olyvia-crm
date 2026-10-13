@@ -327,6 +327,30 @@ DROP TRIGGER IF EXISTS trg_service_recipe_consumables_data ON public.service_rec
 CREATE TRIGGER trg_service_recipe_consumables_data BEFORE INSERT OR UPDATE ON public.service_recipe_consumables
   FOR EACH ROW EXECUTE FUNCTION public.fn_custos_consumivel_data();
 
+-- As margens gerais dos parâmetros são da Direção: quem só tem costs.edit
+-- muda o resto dos parâmetros, mas não as margens. (Sem sessão — SQL Editor,
+-- service_role — passa.)
+CREATE OR REPLACE FUNCTION public.fn_custos_parametros_margens()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS $$
+BEGIN
+  IF auth.uid() IS NOT NULL
+     AND (TG_OP = 'INSERT' AND (NEW.margem_minima_padrao <> 28 OR NEW.margem_alvo_padrao <> 35)
+          OR TG_OP = 'UPDATE' AND (NEW.margem_minima_padrao IS DISTINCT FROM OLD.margem_minima_padrao
+                                   OR NEW.margem_alvo_padrao IS DISTINCT FROM OLD.margem_alvo_padrao))
+     AND NOT public.has_anew_permission(auth.uid(), 'margins.approve') THEN
+    RAISE EXCEPTION 'Só a Direção muda as margens mínima e alvo' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NEW.margem_alvo_padrao < NEW.margem_minima_padrao THEN
+    RAISE EXCEPTION 'A margem alvo não pode ser menor do que a mínima' USING ERRCODE = 'check_violation';
+  END IF;
+  NEW.updated_by := COALESCE(public.current_business_user_id(), NEW.updated_by);
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_cost_parameters_margens ON public.cost_parameters;
+CREATE TRIGGER trg_cost_parameters_margens BEFORE INSERT OR UPDATE ON public.cost_parameters
+  FOR EACH ROW EXECUTE FUNCTION public.fn_custos_parametros_margens();
+
 -- ============================================================
 -- 4. RLS
 -- ============================================================
@@ -373,7 +397,23 @@ BEGIN
 END $$;
 
 -- INSERT/UPDATE: as filhas da receita têm de ficar na mesma organização da
--- receita, e a receita na organização do serviço.
+-- receita (e do perfil/equipamento), e a receita na organização do serviço.
+-- A organização do "pai" lê-se com fn_custos_org_de (SECURITY DEFINER): um
+-- EXISTS direto passaria pelo RLS do pai, e cost_profiles só se lê com
+-- costs.salaries.view — quem edita receitas sem ver salários ficava barrado.
+CREATE OR REPLACE FUNCTION public.fn_custos_org_de(p_tipo text, p_id uuid)
+RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public', 'pg_temp' AS $$
+  SELECT CASE p_tipo
+    WHEN 'servico'     THEN (SELECT organization_id FROM public.services WHERE id = p_id)
+    WHEN 'receita'     THEN (SELECT organization_id FROM public.service_recipes WHERE id = p_id)
+    WHEN 'perfil'      THEN (SELECT organization_id FROM public.cost_profiles WHERE id = p_id)
+    WHEN 'equipamento' THEN (SELECT organization_id FROM public.cost_equipment WHERE id = p_id)
+    WHEN 'categoria'   THEN (SELECT organization_id FROM public.service_categories WHERE id = p_id)
+  END
+$$;
+REVOKE ALL ON FUNCTION public.fn_custos_org_de(text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fn_custos_org_de(text, uuid) TO authenticated, service_role;
+
 DO $$
 DECLARE
   t text;
@@ -382,19 +422,17 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['cost_parameters','cost_equipment','cost_structure_items','service_recipes',
                            'service_recipe_labor','service_recipe_equipment','service_recipe_consumables']
   LOOP
-    -- Qualificar com o nome da tabela: dentro do EXISTS, um organization_id
-    -- solto resolvia para a tabela do subselect, e a verificação passava sempre.
     extra := CASE t
       WHEN 'service_recipes' THEN
-        ' AND EXISTS (SELECT 1 FROM public.services s WHERE s.id = service_recipes.service_id AND s.organization_id = service_recipes.organization_id)'
+        ' AND public.fn_custos_org_de(''servico'', service_id) = organization_id'
       WHEN 'service_recipe_labor' THEN
-        ' AND EXISTS (SELECT 1 FROM public.service_recipes r WHERE r.id = service_recipe_labor.recipe_id AND r.organization_id = service_recipe_labor.organization_id)'
-        || ' AND EXISTS (SELECT 1 FROM public.cost_profiles p WHERE p.id = service_recipe_labor.perfil_id AND p.organization_id = service_recipe_labor.organization_id)'
+        ' AND public.fn_custos_org_de(''receita'', recipe_id) = organization_id'
+        || ' AND public.fn_custos_org_de(''perfil'', perfil_id) = organization_id'
       WHEN 'service_recipe_equipment' THEN
-        ' AND EXISTS (SELECT 1 FROM public.service_recipes r WHERE r.id = service_recipe_equipment.recipe_id AND r.organization_id = service_recipe_equipment.organization_id)'
-        || ' AND EXISTS (SELECT 1 FROM public.cost_equipment e WHERE e.id = service_recipe_equipment.equipamento_id AND e.organization_id = service_recipe_equipment.organization_id)'
+        ' AND public.fn_custos_org_de(''receita'', recipe_id) = organization_id'
+        || ' AND public.fn_custos_org_de(''equipamento'', equipamento_id) = organization_id'
       WHEN 'service_recipe_consumables' THEN
-        ' AND EXISTS (SELECT 1 FROM public.service_recipes r WHERE r.id = service_recipe_consumables.recipe_id AND r.organization_id = service_recipe_consumables.organization_id)'
+        ' AND public.fn_custos_org_de(''receita'', recipe_id) = organization_id'
       ELSE '' END;
     EXECUTE format($p$CREATE POLICY %I ON public.%I FOR INSERT TO authenticated
       WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
@@ -427,14 +465,13 @@ CREATE POLICY service_line_margins_select ON public.service_line_margins FOR SEL
 CREATE POLICY service_line_margins_insert ON public.service_line_margins FOR INSERT TO authenticated
   WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
               AND public.has_anew_permission((SELECT auth.uid()), 'margins.approve')
-              AND EXISTS (SELECT 1 FROM public.service_categories c
-                          WHERE c.id = service_line_margins.service_category_id
-                            AND c.organization_id = service_line_margins.organization_id));
+              AND public.fn_custos_org_de('categoria', service_category_id) = organization_id);
 CREATE POLICY service_line_margins_update ON public.service_line_margins FOR UPDATE TO authenticated
   USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
          AND public.has_anew_permission((SELECT auth.uid()), 'margins.approve'))
   WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
-              AND public.has_anew_permission((SELECT auth.uid()), 'margins.approve'));
+              AND public.has_anew_permission((SELECT auth.uid()), 'margins.approve')
+              AND public.fn_custos_org_de('categoria', service_category_id) = organization_id);
 CREATE POLICY service_line_margins_delete ON public.service_line_margins FOR DELETE TO authenticated
   USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
          AND public.has_anew_permission((SELECT auth.uid()), 'margins.approve'));
@@ -451,6 +488,21 @@ REVOKE INSERT, UPDATE, DELETE ON public.margin_approvals FROM authenticated;
 -- ============================================================
 -- 5. Funções de cálculo (puras e internas)
 -- ============================================================
+
+-- 5.0 Números em português, sem depender da locale do servidor
+-- (lc_numeric no Supabase não é pt_PT): 2.454,55 · 9,4 · 28.
+CREATE OR REPLACE FUNCTION public.fn_custos_eur(p numeric)
+RETURNS text LANGUAGE sql IMMUTABLE SET search_path TO 'public', 'pg_temp' AS $$
+  SELECT translate(to_char(round(p, 2), 'FM999,999,990.00'), ',.', '.,')
+$$;
+CREATE OR REPLACE FUNCTION public.fn_custos_pct(p numeric)
+RETURNS text LANGUAGE sql IMMUTABLE SET search_path TO 'public', 'pg_temp' AS $$
+  SELECT replace(to_char(round(p, 1), 'FM9990.0'), '.', ',')
+$$;
+CREATE OR REPLACE FUNCTION public.fn_custos_num(p numeric)
+RETURNS text LANGUAGE sql IMMUTABLE SET search_path TO 'public', 'pg_temp' AS $$
+  SELECT replace(trim_scale(round(p, 2))::text, '.', ',')
+$$;
 
 -- 5.1 Custo/hora a partir do salário (pura; espelho: src/lib/custos/custoHora.ts).
 CREATE OR REPLACE FUNCTION public.fn_custo_hora_calc(
@@ -773,8 +825,8 @@ BEGIN
       v_alertas := v_alertas || jsonb_build_object('tipo', 'abaixo_custo', 'nivel', 'bloqueio', 'linha_id', l.id, 'linha', v_nome,
         'preco', round(v_rev, 2), 'custo', round(v_custo, 2),
         'margem', CASE WHEN v_rev > 0 THEN round((v_rev - v_custo) / v_rev * 100, 2) END,
-        'mensagem', v_nome || ': o preço (' || to_char(round(v_rev, 2), 'FM999G999G990D00') || ' €) não cobre o custo ('
-                    || to_char(round(v_custo, 2), 'FM999G999G990D00') || ' €). Não se envia assim.');
+        'mensagem', v_nome || ': o preço (' || public.fn_custos_eur(v_rev) || ' €) não cobre o custo ('
+                    || public.fn_custos_eur(v_custo) || ' €). Não se envia assim.');
       CONTINUE;
     END IF;
 
@@ -787,13 +839,13 @@ BEGIN
       IF v_fator < 1 AND v_margem_bruta >= m.margem_minima THEN
         v_alertas := v_alertas || jsonb_build_object('tipo', 'desconto_come_margem', 'nivel', 'aprovacao', 'linha_id', l.id, 'linha', v_nome,
           'preco', round(v_rev, 2), 'custo', round(v_custo, 2), 'margem', round(v_margem, 2), 'margem_minima', m.margem_minima,
-          'mensagem', 'O desconto de ' || trim(to_char(q.desconto, 'FM990D##')) || '% deixa ' || v_nome || ' com '
-                      || trim(to_char(round(v_margem, 1), 'FM990D0')) || '% de margem (mínimo ' || trim(to_char(m.margem_minima, 'FM990D##')) || '%).');
+          'mensagem', 'O desconto de ' || public.fn_custos_num(q.desconto) || '% deixa ' || v_nome || ' com '
+                      || public.fn_custos_pct(v_margem) || '% de margem (mínimo ' || public.fn_custos_num(m.margem_minima) || '%).');
       ELSE
         v_alertas := v_alertas || jsonb_build_object('tipo', 'abaixo_minimo', 'nivel', 'aprovacao', 'linha_id', l.id, 'linha', v_nome,
           'preco', round(v_rev, 2), 'custo', round(v_custo, 2), 'margem', round(v_margem, 2), 'margem_minima', m.margem_minima,
-          'mensagem', v_nome || ': margem de ' || trim(to_char(round(v_margem, 1), 'FM990D0')) || '%, abaixo do mínimo de '
-                      || trim(to_char(m.margem_minima, 'FM990D##')) || '% da linha de serviço. Precisa da aprovação da Direção.');
+          'mensagem', v_nome || ': margem de ' || public.fn_custos_pct(v_margem) || '%, abaixo do mínimo de '
+                      || public.fn_custos_num(m.margem_minima) || '% da linha de serviço. Precisa da aprovação da Direção.');
       END IF;
     END IF;
   END LOOP;
@@ -805,8 +857,8 @@ BEGIN
     v_min_exigida := g.margem_minima;
     v_alertas := v_alertas || jsonb_build_object('tipo', 'margem_total', 'nivel', 'aprovacao',
       'margem', round(v_margem_total, 2), 'margem_minima', g.margem_minima,
-      'mensagem', 'Margem total de ' || trim(to_char(round(v_margem_total, 1), 'FM990D0')) || '%, abaixo do mínimo geral de '
-                  || trim(to_char(g.margem_minima, 'FM990D##')) || '%.');
+      'mensagem', 'Margem total de ' || public.fn_custos_pct(v_margem_total) || '%, abaixo do mínimo geral de '
+                  || public.fn_custos_num(g.margem_minima) || '%.');
   END IF;
 
   SELECT * INTO ap FROM public.margin_approvals
@@ -1028,7 +1080,7 @@ BEGIN
     INSERT INTO public.notifications (user_id, type, title, message, link, organization_id, entity_type, entity_id, priority, kind)
     SELECT DISTINCT au.auth_user_id, 'margin_approval', 'Margem por aprovar',
            'O orçamento ' || COALESCE(v_num, '') || ' tem margem de '
-             || COALESCE(trim(to_char((v_ver ->> 'margem_total')::numeric, 'FM990D0')), '?') || '%, abaixo do mínimo.',
+             || COALESCE(public.fn_custos_pct((v_ver ->> 'margem_total')::numeric), '?') || '%, abaixo do mínimo.',
            '/custos#aprovacoes', v_org, 'quote', p_quote_id, 'high', 'notification'
     FROM public.anew_memberships am
     JOIN public.anew_users au ON au.id = am.user_id AND au.auth_user_id IS NOT NULL
@@ -1154,5 +1206,6 @@ GRANT EXECUTE ON FUNCTION public.rpc_margem_aprovacoes(uuid, text) TO authentica
 -- O gatilho e as funções de tabela não precisam de EXECUTE para ninguém.
 REVOKE ALL ON FUNCTION public.fn_custos_touch() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.fn_custos_consumivel_data() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.fn_custos_parametros_margens() FROM PUBLIC, anon, authenticated;
 
 NOTIFY pgrst, 'reload schema';
