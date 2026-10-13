@@ -2,15 +2,14 @@
 // numa lista (toca-se numa para a mudar), e o que falta resolver antes de
 // enviar, cada coisa com o botão que a resolve. Nada de tabelas largas.
 import { useState } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { alertas, bloqueado, custoUn, eur, linhaCalc, nfmt, partes, pct, r2, tot, type Negocio } from "./motor";
-import { numero, type Ctx } from "./pecas";
-import { CustoServico } from "./CustoServico";
+import { alertas, bloqueado, eur, partes, pct, tot, type Negocio } from "./motor";
+import type { Ctx } from "./pecas";
 import { totais } from "./DocsCliente";
-import { ProdutosOrcamento, rotuloMat } from "./ProdutosOrcamento";
-import { PREFIXO_LEV } from "./efeitosLevantamento";
+import { ProdutosOrcamento } from "./ProdutosOrcamento";
+import { LinhasOrcamento } from "./LinhasOrcamento";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -18,7 +17,6 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
   const { S, A, go, run, d } = ctx;
   const o = d.orc!, T = tot(d, S), TI = totais(d, S), fechado = !!o.enviada;
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
-  const [aberta, setAberta] = useState<number | null>(null);
   const [verCusto, setVerCusto] = useState(false);
   const mudou = () => { o.aprov = null; };
   const AL = o.verif && !fechado ? alertas(d, S) : [];
@@ -112,70 +110,9 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
       <section aria-labelledby="linhas-t">
         <div className="flex items-baseline justify-between gap-3">
           <h3 id="linhas-t" className="text-base font-semibold">Linhas</h3>
-          <span className="text-sm text-muted-foreground">toque numa linha para ver o custo</span>
+          <span className="text-sm text-muted-foreground">toque no preço para o mudar</span>
         </div>
-        <ul className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-          {o.linhas.map((l, i) => {
-            const x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
-            const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-muted-foreground";
-            if (l.t === "mat") return (
-              <li key={i} className="flex min-h-16 items-center gap-4 py-3">
-                <span className="min-w-0 flex-1"><span className="block text-[15px]">{rotuloMat(l.d, PREFIXO_LEV)[0]}</span><span className="block text-sm text-muted-foreground">{rotuloMat(l.d, PREFIXO_LEV)[1]}</span></span>
-                <span className="text-right"><span className="block text-[15px] tabular-nums">{eur(x.preco)} €</span><span className={cn("block text-sm", mc)}>margem {pct(m)}</span></span>
-              </li>
-            );
-            const s = x.s!, aberto = aberta === i, novo = r2(custoUn(s, S)), mud = !fechado && Math.abs(novo - l.cu) > 0.004;
-            return (
-              <li key={i}>
-                <button type="button" onClick={() => setAberta(i)} aria-haspopup="dialog"
-                  className="flex min-h-16 w-full items-center gap-4 rounded-lg py-3 text-left transition-colors hover:bg-muted/50 sm:px-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[15px]">{s.n}</span>
-                    <span className="block text-sm text-muted-foreground">{nfmt(l.q)} {s.un} × {eur(l.pu)} €</span>
-                  </span>
-                  <span className="text-right">
-                    <span className="block text-[15px] tabular-nums">{eur(x.preco)} €</span>
-                    <span className={cn("block text-sm", mc)}>margem {pct(m)}{m < min ? " · abaixo do mínimo" : ""}</span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                </button>
-                {aberto && (
-                  <CustoServico S={S} sid={l.sid} s={s} q={l.q} pu={l.pu} onClose={() => setAberta(null)}>
-                  {!fechado && <section className="grid gap-4 rounded-2xl border border-border bg-card p-4 sm:grid-cols-2">
-                    <h3 className="text-[15px] font-semibold sm:col-span-2">Mudar nesta linha</h3>
-                    <div className="grid gap-2">
-                      <span className="text-sm font-medium" id={`q-${i}`}>Quantidade ({s.un})</span>
-                      <div role="group" aria-labelledby={`q-${i}`} className="inline-flex w-fit items-center rounded-lg border border-input bg-card p-0.5">
-                        <button type="button" aria-label="Menos" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => run(() => { l.q = Math.max(0, r2(l.q - 1)); mudou(); })}><Minus className="h-4 w-4" /></button>
-                        <output className="w-16 text-center text-[17px] font-medium tabular-nums">{nfmt(l.q)}</output>
-                        <button type="button" aria-label="Mais" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => run(() => { l.q = r2(l.q + 1); mudou(); })}><Plus className="h-4 w-4" /></button>
-                      </div>
-                    </div>
-                    <label className="grid gap-2">
-                      <span className="text-sm font-medium">Preço por {s.un}</span>
-                      <span className="flex items-center gap-2">
-                        <input key={l.pu} type="number" inputMode="decimal" step="0.01" min="0" defaultValue={l.pu}
-                          className="h-11 w-32 rounded-lg border border-input bg-card px-3 text-right text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
-                          onBlur={(e) => { const n = numero(e.target.value); if (!isNaN(n) && n >= 0 && n !== l.pu) run(() => { l.pu = n; mudou(); }); }}
-                          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-                        <span className="text-[15px] text-muted-foreground">€</span>
-                      </span>
-                    </label>
-                    <p className="text-sm text-muted-foreground sm:col-span-2">
-                      Custo do Catálogo: {eur(l.cu)} €/{s.un} ({s.perfil}, {nfmt(s.h)} h/{s.un}).
-                      {" "}Para o alvo de {S.cfg.alvo}%: {eur(r2(l.cu / (1 - alvo)))} €/{s.un}.
-                    </p>
-                    <div className="flex flex-wrap gap-2 sm:col-span-2">
-                      <Button variant="outline" onClick={() => run(() => { l.pu = r2(l.cu / (1 - alvo)); mudou(); })}>Usar o preço do alvo</Button>
-                      {mud && <Button variant="outline" onClick={go(() => A.recalc(d.id, i))}>O Catálogo mudou: usar {eur(novo)} €</Button>}
-                    </div>
-                  </section>}
-                  </CustoServico>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <div className="mt-2"><LinhasOrcamento ctx={ctx} d={d} simples /></div>
         <div className="mt-6"><ProdutosOrcamento {...ctx} d={d} simples /></div>
       </section>
 

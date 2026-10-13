@@ -5,7 +5,7 @@
 import { CATALOGO } from "./catalogo";
 import {
   ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
-  mudarQtd, servicosDaVisita, textoFalta, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
+  mudarQtd, precoProduto, servicosDaVisita, textoFalta, textoProduto, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
@@ -125,6 +125,8 @@ export interface Orcamento {
   aceite: string | null;
   contrato: null | "enviado" | "assinado";
   avisosVistos: Record<string, boolean>;
+  /** Preços de linhas de materiais mudados à mão, pela descrição: as linhas refeitas (levantamento, modelo, produtos) guardam-nos. */
+  precosMan?: Record<string, number>;
 }
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
 export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
@@ -485,6 +487,13 @@ export function fotosPor(v: Negocio["visita"]): Record<EtapaFotos, number> {
   return { exterior: t, interior: t, area: (v.fotos || 0) - 2 * t };
 }
 
+/** Os preços mudados à mão nas linhas de materiais (pela descrição) voltam a valer nas linhas refeitas. */
+export function aplicarPrecosMan(o: Orcamento) {
+  const m = o.precosMan;
+  if (!m) return;
+  for (const l of o.linhas) if (l.t === "mat" && m[l.d] != null) l.preco = m[l.d];
+}
+
 /** Todos os serviços da visita: do pacote (pelas medidas), postos à mão e trazidos pelos produtos escolhidos. */
 export function servicosVisita(d: Negocio): SvcId[] {
   const v = d.visita;
@@ -508,6 +517,7 @@ export function preservarManuais(antes: Orcamento, novo: Orcamento, L: LinhaServ
   const geradas = (dl: string) => dl === L.mat.d || [PREFIXO_LEV, PREFIXO_PROD, PREFIXO_CLIENTE].some((p) => dl.startsWith(p));
   novo.linhas.push(...antes.linhas.filter((l) => l.t === "mat" && !geradas(l.d)));
   novo.desconto = antes.desconto; novo.vendaDireta = antes.vendaDireta; novo.avisosVistos = { ...antes.avisosVistos };
+  if (antes.precosMan) { novo.precosMan = { ...antes.precosMan }; aplicarPrecosMan(novo); }
   return novo;
 }
 
@@ -529,6 +539,7 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
     if (e.t === "linha") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: e.custo, preco: e.preco });
     if (e.t === "percent") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: r2(bc * e.pct!), preco: r2(bp * e.pct!) });
   }
+  aplicarPrecosMan(o);
 }
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
@@ -556,6 +567,8 @@ export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?:
 export function alertas(d: Negocio, S: Estado): Alerta[] {
   const A: Alerta[] = [], min = S.cfg.min / 100, alvo = S.cfg.alvo / 100, o = d.orc!, vistos = o.avisosVistos || {};
   o.linhas.forEach((l, i) => {
+    // uma linha de materiais com o preço mudado à mão para baixo do custo também bloqueia
+    if (l.t === "mat" && o.precosMan?.[l.d] != null && l.custo > 0 && l.preco < l.custo) A.push({ k: "x", fix: true, t: `Preço abaixo do custo em ${l.d}`, d: `${eur(l.preco)} € não cobre o custo de ${eur(l.custo)} €. Não se envia assim.`, i, sug: r2(l.custo / (1 - alvo)), aprov: false });
     if (l.t !== "svc") return;
     const s = S.svc[l.sid], x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
     if (x.preco < x.custo) A.push({ k: "x", fix: true, t: `Preço abaixo do custo em ${s.n}`, d: `${eur(l.pu)} €/${s.un} não cobre o custo de ${eur(l.cu)} €/${s.un}. Não se envia assim.`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
@@ -879,7 +892,23 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, "Orçamento verificado · " + A2.filter((a) => a.k === "x").length + " bloqueio(s), " + A2.filter((a) => a.k === "w").length + " aviso(s)", A2.some((a) => a.k === "x") ? "x" : "a");
     },
     irVerif() { S.pulse = "verif"; },
-    sugerido(id: number, i: number, v: number) { const d = deal(id); const l = d.orc!.linhas[i]; if (l.t === "svc") l.pu = v; d.orc!.aprov = null; log(d, "Preço corrigido para " + eur(v) + " €"); avisar({ msg: "Preço corrigido", sub: "A margem da linha volta ao alvo de " + S.cfg.alvo + "%", kind: "ok" }); },
+    sugerido(id: number, i: number, v: number) { const d = deal(id); const l = d.orc!.linhas[i]; if (l.t === "svc") l.pu = v; else { l.preco = v; (d.orc!.precosMan ??= {})[l.d] = v; } d.orc!.aprov = null; log(d, "Preço corrigido para " + eur(v) + " €"); avisar({ msg: "Preço corrigido", sub: "A margem da linha volta ao alvo de " + S.cfg.alvo + "%", kind: "ok" }); },
+    /** O preço de uma linha mudado à mão na lista do orçamento: o preço por unidade (serviço) ou o preço da linha (materiais, levantamento, produto). */
+    precoLinha(id: number, i: number, v: number) {
+      const d = deal(id), o = d.orc!, l = o.linhas[i];
+      if (!l || o.enviada || !(v >= 0)) return;
+      if (l.t === "svc") l.pu = r2(v); else { l.preco = r2(v); (o.precosMan ??= {})[l.d] = l.preco; }
+      o.aprov = null; d.fresh = false;
+    },
+    /** Volta ao preço calculado de uma linha de materiais (esquece o preço à mão). */
+    reporPreco(id: number, i: number) {
+      const d = deal(id), o = d.orc!, l = o.linhas[i];
+      if (l?.t !== "mat" || !o.precosMan || o.enviada) return;
+      delete o.precosMan[l.d];
+      const p = (d.visita.prod ?? []).find((x) => !x.cliente && PREFIXO_PROD + textoProduto(x) === l.d);
+      if (p) l.preco = precoProduto(p); else sincronizarEfeitos(d, S);
+      o.aprov = null;
+    },
     vistoAviso(id: number, key: string) { const d = deal(id); d.orc!.avisosVistos[key] = true; log(d, "Aviso visto: " + key.slice(2), "w"); },
     pedirAprov(id: number) {
       const d = deal(id); d.orc!.aprov = "pedida"; log(d, "Pedida aprovação à Direção", "w");

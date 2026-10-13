@@ -20,8 +20,8 @@ import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
 import { FotosEtapa } from "./FotosEtapa";
 import { OrcamentoSimples } from "./OrcamentoSimples";
-import { ProdutosOrcamento, rotuloMat } from "./ProdutosOrcamento";
-import { PREFIXO_LEV } from "./efeitosLevantamento";
+import { LinhasOrcamento } from "./LinhasOrcamento";
+import { ProdutosOrcamento } from "./ProdutosOrcamento";
 import { DocumentosSimples, ObraSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
@@ -501,38 +501,15 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
       </div>
       <div className="withside">
         <div className="stack">
-          <div className="tw"><table style={{ minWidth: 560 }}>
-            <thead><tr><th>Serviço</th><th>Medida</th><th className="n">Custo</th><th className="n">Preço/un.</th><th className="n">Margem</th></tr></thead>
-            <tbody>
-              {o.linhas.map((l, i) => {
-                const x = linhaCalc(l, S);
-                const m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
-                const cls = m < S.cfg.min / 100 ? "bad" : m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
-                if (l.t === "mat") return (
-                  <tr key={i}><td>{rotuloMat(l.d, PREFIXO_LEV)[0]}<small>{rotuloMat(l.d, PREFIXO_LEV)[1]}</small></td><td className="sub">—</td><td className="n">{eur(x.custo)}</td><td className="n">{eur(x.preco)}</td><td className="n"><span className={"pill " + cls}>{pct(m)}</span></td></tr>
-                );
-                const s = x.s!, novo = r2(custoUn(s, S));
-                const mud = !locked && Math.abs(novo - l.cu) > 0.004;
-                return (
-                  <tr key={i} className={cls === "bad" ? "hl" : ""}>
-                    <td>{s.n}<small>custo {eur(l.cu)} €/{s.un} do Catálogo{mud && <> · <button className="link" onClick={go(() => A.recalc(d.id, i))}>Catálogo mudou: usar {eur(novo)}</button></>}</small></td>
-                    <td><Campo id={`lq-${d.id}-${i}`} ariaLabel="Medida" value={nfmt(l.q)} readOnly={locked} onCommit={(v) => run(() => { const n = numero(v); if (!isNaN(n) && n >= 0) { l.q = n; mudou(); } })} /> {s.un}</td>
-                    <td className="n">{eur(x.custo)}</td>
-                    <td className="n"><Campo id={`lp-${d.id}-${i}`} ariaLabel="Preço unitário" value={eur(l.pu)} readOnly={locked}
-                      onCommit={(v) => run(() => { const n = numero(v.replace(/\./g, "")); if (!isNaN(n) && n >= 0) { l.pu = n; mudou(); } })} /><small>{eur(x.preco)} €</small></td>
-                    <td className="n"><span className={"pill " + cls}>{pct(m)}</span></td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td colSpan={3}>Desconto</td>
-                <td className="n"><Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
-                  onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %</td>
-                <td />
-              </tr>
-              <tr className="sum"><td>Total sem IVA</td><td>{nfmt(T.h)} h</td><td className="n">{eur(T.custo)}</td><td className="n">{eur(T.pf)}</td><td className="n">{pct(T.m)}</td></tr>
-            </tbody>
-          </table></div>
+          <LinhasOrcamento ctx={{ S, A, go, run }} d={d} />
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[var(--shadow-sm)]">
+            <label className="flex items-center gap-2 text-sm">Desconto
+              <Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
+                onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %
+            </label>
+            <span className="text-sm text-muted-foreground">{nfmt(T.h)} h · custo {eur(T.custo)} €</span>
+            <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span></span>
+          </div>
           <ProdutosOrcamento S={S} A={A} run={run} d={d} />
           {o.verif && !locked && (
             <div className={"card " + (S.pulse === "verif" ? "sec pulse" : "")} id="verif" style={{ borderColor: "var(--pri-line)" }}>
