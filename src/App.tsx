@@ -69,6 +69,8 @@ const ServiceCategories = lazy(() => import("./pages/ServiceCategories"));
 const ServiceSubcategories = lazy(() => import("./pages/ServiceSubcategories"));
 const ServiceCatalogItems = lazy(() => import("./pages/ServiceCatalogItems"));
 const ServiceFees = lazy(() => import("./pages/ServiceFees"));
+const Custos = lazy(() => import("./pages/Custos"));
+const CustoServicoReceita = lazy(() => import("./pages/CustoServicoReceita"));
 
 const TeamHub = lazy(() => import("./pages/TeamHub"));
 const TechnicalSettings = lazy(() => import("./pages/TechnicalSettings"));
@@ -283,6 +285,9 @@ const App = () => (
                       <Route path="/service-subcategories" element={<ServiceSubcategories />} />
                       <Route path="/service-catalog-items" element={<ServiceCatalogItems />} />
                       <Route path="/service-fees" element={<ServiceFees />} />
+                      {/* Área de custos (20261214110000_area_custos.sql): costs.view para ver; editar e aprovar controlam-se dentro da página. */}
+                      <Route path="/custos" element={<ProtectedRoute permission="costs.view"><Custos /></ProtectedRoute>} />
+                      <Route path="/custos/servicos/:id" element={<ProtectedRoute permission="costs.view"><CustoServicoReceita /></ProtectedRoute>} />
                       <Route path="/settings" element={<ProtectedRoute permission="settings.update"><Settings /></ProtectedRoute>} />
                       <Route path="/alert-settings" element={<ProtectedRoute permission="settings.update"><AlertSettings /></ProtectedRoute>} />
                       <Route path="/docs/architecture" element={<DocsArchitecture />} />
