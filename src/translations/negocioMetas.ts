@@ -1,7 +1,8 @@
 // Página "Negócio e metas" (/negocio-metas) — módulo próprio, mesmo padrão de
 // `today.ts` e `directSales.ts`, juntado em `useTranslation.ts`. Apenas en/pt:
 // nas outras línguas o `t()` cai para `en`. Os textos do Quadro, da Lista, do painel e da
-// comparação estão em `negocioMetasQuadro.ts` e juntam-se aqui (prevalecem sobre os daqui).
+// comparação estão em `negocioMetasQuadro.ts` (e os do painel de um negócio em `negocioMetasPainel.ts`) e juntam-se aqui (prevalecem sobre os daqui).
+import { negocioMetasPainelTranslations } from "./negocioMetasPainel";
 import { negocioMetasQuadroTranslations } from "./negocioMetasQuadro";
 import { negocioMetasWorkflowTranslations } from "./negocioMetasWorkflow";
 
@@ -27,7 +28,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.reps.goal': 'Goal',
     'businessGoals.reps.won': 'Won',
     'businessGoals.reps.percent': 'Attainment',
-    'businessGoals.reps.progress': 'Progress',
 
     'businessGoals.evolution.title': 'Monthly evolution',
     'businessGoals.evolution.chartLabel': 'Chart: value won against the monthly goal, last six months (sample)',
@@ -59,7 +59,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.numbers.ponderadoHint': 'Value of open deals multiplied by the probability of their stage',
 
     'businessGoals.deals.person': 'Person',
-    'businessGoals.deals.service': 'Service',
     'businessGoals.deals.phase': 'Phase',
     'businessGoals.deals.value': 'Value',
     'businessGoals.deals.rep': 'Salesperson',
@@ -99,14 +98,14 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.clear': 'Clear search and filters',
     'businessGoals.list.caption': 'Deals, one per row. Choose one to open it.',
     'businessGoals.deals.next': 'Next step',
-    'businessGoals.phase.financeiro': 'Finance',
+    'businessGoals.phase.ganho': 'Won',
     'businessGoals.step.escolherOrcamento': 'Choose a quote',
     'businessGoals.step.criarProposta': 'Create the proposal',
     'businessGoals.step.enviarProposta': 'Send the proposal',
     'businessGoals.step.esperarCliente': 'Wait for the customer',
     'businessGoals.step.criarContrato': 'Create the contract',
     'businessGoals.step.pedirAssinatura': 'Get the signature',
-    'businessGoals.step.passarFinanceiro': 'Hand over to Finance',
+    'businessGoals.step.concluido': 'Won: nothing to do',
     'businessGoals.numbers.title': 'Board numbers',
     'businessGoals.numbers.quadro': 'On the board',
     'businessGoals.numbers.porfechar': 'Still to close',
@@ -153,8 +152,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.shortcuts.esc': 'Clear the search or close the panel',
     'businessGoals.shortcuts.help': 'Show these shortcuts',
     'businessGoals.panel.chain': 'Deal chain',
-    'businessGoals.panel.open': 'Open in Proposal Requests',
-    'businessGoals.panel.note': 'Sample deal: it has no page of its own yet.',
   },
   pt: {
     'sidebar.businessGoals': 'Negócio e metas',
@@ -177,7 +174,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.reps.goal': 'Meta',
     'businessGoals.reps.won': 'Ganho',
     'businessGoals.reps.percent': 'Cumprimento',
-    'businessGoals.reps.progress': 'Progresso',
 
     'businessGoals.evolution.title': 'Evolução mensal',
     'businessGoals.evolution.chartLabel': 'Gráfico: valor ganho face à meta mensal, últimos seis meses (exemplo)',
@@ -209,7 +205,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.numbers.ponderadoHint': 'Valor dos negócios por fechar multiplicado pela probabilidade da fase',
 
     'businessGoals.deals.person': 'Pessoa',
-    'businessGoals.deals.service': 'Serviço',
     'businessGoals.deals.phase': 'Fase',
     'businessGoals.deals.value': 'Valor',
     'businessGoals.deals.rep': 'Comercial',
@@ -249,14 +244,14 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.clear': 'Limpar pesquisa e filtros',
     'businessGoals.list.caption': 'Negócios: um por linha. Escolhe um para o abrir.',
     'businessGoals.deals.next': 'Próximo passo',
-    'businessGoals.phase.financeiro': 'Financeiro',
+    'businessGoals.phase.ganho': 'Ganho',
     'businessGoals.step.escolherOrcamento': 'Escolher orçamento',
     'businessGoals.step.criarProposta': 'Criar a proposta',
     'businessGoals.step.enviarProposta': 'Enviar a proposta',
     'businessGoals.step.esperarCliente': 'Esperar pelo cliente',
     'businessGoals.step.criarContrato': 'Criar o contrato',
     'businessGoals.step.pedirAssinatura': 'Recolher a assinatura',
-    'businessGoals.step.passarFinanceiro': 'Passar a Financeiro',
+    'businessGoals.step.concluido': 'Ganho: nada a fazer',
     'businessGoals.numbers.title': 'Números do Quadro',
     'businessGoals.numbers.quadro': 'No Quadro',
     'businessGoals.numbers.porfechar': 'Por fechar',
@@ -303,12 +298,10 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.shortcuts.esc': 'Limpar a pesquisa ou fechar o painel',
     'businessGoals.shortcuts.help': 'Ver estes atalhos',
     'businessGoals.panel.chain': 'Cadeia do negócio',
-    'businessGoals.panel.open': 'Abrir nos Pedidos de Proposta',
-    'businessGoals.panel.note': 'Negócio de exemplo: ainda não tem página própria.',
   },
 };
 
 export const negocioMetasTranslations: Record<string, Record<string, string>> = {
-  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en },
-  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt },
+  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en, ...negocioMetasPainelTranslations.en },
+  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt, ...negocioMetasPainelTranslations.pt },
 };

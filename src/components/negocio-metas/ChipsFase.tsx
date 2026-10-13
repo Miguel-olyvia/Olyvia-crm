@@ -27,6 +27,9 @@ export function ChipsFase({ fases, paraTratar, aoAlternarFase, aoAlternarParaTra
       {fases.map((c) => (
         <button
           key={c.fase} type="button" aria-pressed={c.ativo} className={chip(c.ativo)}
+          aria-label={t(c.n === 1 ? "businessGoals.chip.phaseLabelOne" : "businessGoals.chip.phaseLabel", {
+            phase: t(`businessGoals.phase.${c.fase}`), count: c.n, value: t("businessGoals.units.thousandsLong", { value: formatarMilhares(c.valor) }),
+          })}
           onClick={() => aoAlternarFase(c.fase)}
         >
           {c.ativo && <Check className="h-4 w-4" aria-hidden="true" />}

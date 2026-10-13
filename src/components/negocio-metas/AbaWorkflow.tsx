@@ -9,14 +9,14 @@ import { FOCO } from "./estilos";
 import { faseDoNegocio } from "./negocioMetas";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 import { useWorkflowExemplo } from "./useWorkflowExemplo";
-import { simularAceite, type EventoAceite, type Simulacao } from "./workflowNegocio";
+import { destinoDoEvento, eventosDoPasso, simularEvento, type EventoWorkflow } from "./workflowSimulacao";
 
 const { negocios } = DADOS_EXEMPLO;
 /** Abre num negócio com uma proposta enviada, onde a simulação já tem resposta. */
 const NEGOCIO_INICIAL = (negocios.find((n) => faseDoNegocio(n) === "proposta" && n.proposta?.estado === "enviada") ?? negocios[0]).id;
 
 /**
- * O conteúdo do workflow (hoje no diálogo do botão "Workflow"): o que acontece ao aceitar um orçamento ou uma proposta. Só dados de exemplo e
+ * O conteúdo do workflow (hoje no diálogo do botão "Workflow"): o que acontece ao ganhar ou perder cada passo do negócio. Só dados de exemplo e
  * estado local (ver `useWorkflowExemplo`): nada é gravado na organização. Ordem: faixa e repor,
  * diagrama, simulador, configuração.
  */
@@ -24,15 +24,11 @@ export function AbaWorkflow({ emDialogo = false }: { emDialogo?: boolean }) {
   const { t } = useTranslation();
   const { config, reposta, repor } = useWorkflowExemplo();
   const [negocioId, setNegocioId] = useState(NEGOCIO_INICIAL);
-  const [evento, setEvento] = useState<EventoAceite | null>(null);
+  const [evento, setEvento] = useState<EventoWorkflow | null>(null);
   const negocio = negocios.find((n) => n.id === negocioId) ?? negocios[0];
   // Calculado uma só vez: o simulador usa-o para os botões e o resultado, o diagrama para o destino.
-  const simulacoes: Record<EventoAceite, Simulacao> = {
-    aceitarOrcamento: simularAceite(config, "aceitarOrcamento", negocio),
-    aceitarProposta: simularAceite(config, "aceitarProposta", negocio),
-  };
-  const ativa = evento ? simulacoes[evento] : null;
-  const destino = ativa?.tipo === "resultado" ? ativa.proximo : null;
+  const eventos = eventosDoPasso(negocio).map((e) => ({ evento: e, simulacao: simularEvento(config, e, negocio) }));
+  const destino = evento ? destinoDoEvento(evento, eventos.find((e) => e.evento === evento)?.simulacao ?? null) : null;
 
   const mudarNegocio = (id: string) => {
     setNegocioId(id);
@@ -57,7 +53,7 @@ export function AbaWorkflow({ emDialogo = false }: { emDialogo?: boolean }) {
       </div>
       <DiagramaWorkflow config={config} destino={destino} />
       <SimuladorWorkflow
-        simulacoes={simulacoes} negocios={negocios} negocioId={negocio.id} aoMudarNegocio={mudarNegocio}
+        eventos={eventos} negocios={negocios} negocioId={negocio.id} aoMudarNegocio={mudarNegocio}
         evento={evento} aoSimular={setEvento}
       />
       <OpcoesWorkflow />

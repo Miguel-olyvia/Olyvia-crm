@@ -6,24 +6,27 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { FOCO } from "./estilos";
 import { faseDoNegocio, type NegocioMes } from "./negocioMetas";
-import { traduzir, type EventoAceite, type Simulacao } from "./workflowNegocio";
+import { traduzir } from "./workflowNegocio";
+import type { EstadoResultante, EventoWorkflow, Simulacao } from "./workflowSimulacao";
 
 interface SimuladorWorkflowProps {
-  /** O resultado de cada simulação para o negócio escolhido, calculado uma só vez por quem usa o simulador. */
-  simulacoes: Record<EventoAceite, Simulacao>;
+  /** Os dois eventos do passo atual do negócio escolhido, com o resultado de cada um (calculado por quem usa o simulador). */
+  eventos: readonly { evento: EventoWorkflow; simulacao: Simulacao }[];
   negocios: readonly NegocioMes[];
   negocioId: string;
   aoMudarNegocio: (id: string) => void;
-  evento: EventoAceite | null;
-  aoSimular: (evento: EventoAceite) => void;
+  evento: EventoWorkflow | null;
+  aoSimular: (evento: EventoWorkflow) => void;
 }
 
-const BOTOES: readonly { evento: EventoAceite; rotulo: string }[] = [
-  { evento: "aceitarOrcamento", rotulo: "businessGoals.workflow.sim.btnOrcamento" },
-  { evento: "aceitarProposta", rotulo: "businessGoals.workflow.sim.btnProposta" },
-];
+/** O estado em que o negócio fica, dito por texto. */
+function textoEstado(t: (chave: string, params?: Record<string, string | number>) => string, estado: EstadoResultante): string {
+  const base = "businessGoals.workflow.sim.state.";
+  if (estado.tipo === "curso") return t(`${base}curso`, { fase: t(`businessGoals.workflow.no.${estado.fase}`) });
+  return t(base + estado.tipo);
+}
 
-/** O texto do resultado: o que acontece, o passo seguinte e, se fecha sem contrato, o aviso das metas. */
+/** O resultado: o que acontece, o estado em que o negócio fica, a nota do simulador e, se perde, que pede um motivo. */
 function Resultado({ simulacao }: { simulacao: Simulacao | null }) {
   const { t } = useTranslation();
   if (simulacao === null) return <p className="text-sm text-muted-foreground">{t("businessGoals.workflow.sim.empty")}</p>;
@@ -33,21 +36,19 @@ function Resultado({ simulacao }: { simulacao: Simulacao | null }) {
   return (
     <div className="space-y-1 text-sm text-foreground">
       <p className="font-medium">{traduzir(t, simulacao.resultado)}</p>
-      <p>
-        {simulacao.proximo
-          ? t("businessGoals.workflow.sim.next", { no: t(`businessGoals.workflow.no.${simulacao.proximo}`) })
-          : t("businessGoals.workflow.sim.noNext")}
-      </p>
+      <p>{t("businessGoals.workflow.sim.state", { estado: textoEstado(t, simulacao.estado) })}</p>
+      {simulacao.pedeMotivo && <p>{t("businessGoals.workflow.sim.askReason")}</p>}
+      {simulacao.nota && <p className="text-muted-foreground">{traduzir(t, simulacao.nota)}</p>}
       {simulacao.ganhoSemContrato && <p className="text-muted-foreground">{t("businessGoals.workflow.sim.goalsNote")}</p>}
     </div>
   );
 }
 
-/** O simulador: escolhe-se um negócio de exemplo e vê-se o que aconteceria ao aceitar. Só calcula; não grava nada. */
-export function SimuladorWorkflow({ simulacoes, negocios, negocioId, aoMudarNegocio, evento, aoSimular }: SimuladorWorkflowProps) {
+/** O simulador: escolhe-se um negócio de exemplo e vê-se o que aconteceria ao ganhar ou perder o seu passo atual. Só calcula; não grava nada. */
+export function SimuladorWorkflow({ eventos, negocios, negocioId, aoMudarNegocio, evento, aoSimular }: SimuladorWorkflowProps) {
   const { t } = useTranslation();
   const id = useId();
-  const negocio = negocios.find((n) => n.id === negocioId) ?? negocios[0];
+  const negocio: NegocioMes | undefined = negocios.find((n) => n.id === negocioId) ?? negocios[0];
   const opcoes = useMemo(
     () => negocios.map((n) => ({
       value: n.id,
@@ -57,7 +58,8 @@ export function SimuladorWorkflow({ simulacoes, negocios, negocioId, aoMudarNego
     })),
     [negocios, t],
   );
-  const simulacao = evento ? simulacoes[evento] : null;
+  const simulacao = eventos.find((e) => e.evento === evento)?.simulacao ?? null;
+  if (!negocio) return null; // sem negócios de exemplo não há o que simular
   return (
     <section aria-labelledby={`${id}-titulo`} className="space-y-4 rounded-lg border border-border bg-card p-4 sm:p-5">
       <div className="space-y-1">
@@ -69,9 +71,8 @@ export function SimuladorWorkflow({ simulacoes, negocios, negocioId, aoMudarNego
         <NativeSelect id={`${id}-negocio`} options={opcoes} value={negocio.id} onValueChange={aoMudarNegocio} className="h-11" />
       </div>
       <div className="flex flex-wrap items-start gap-4">
-        {BOTOES.map(({ evento: e, rotulo }) => {
-          const pendente = simulacoes[e];
-          const motivo = pendente.tipo === "nao-aplicavel" ? pendente.motivo : null;
+        {eventos.map(({ evento: e, simulacao: s }) => {
+          const motivo = s.tipo === "nao-aplicavel" ? s.motivo : null;
           return (
             <div key={e} className="max-w-xs space-y-1">
               <Button
@@ -81,7 +82,7 @@ export function SimuladorWorkflow({ simulacoes, negocios, negocioId, aoMudarNego
                 className={`min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${FOCO}`}
               >
                 {evento === e && <Check aria-hidden="true" />}
-                {t(rotulo)}
+                {t(`businessGoals.workflow.sim.btn.${e}`)}
               </Button>
               {motivo && <p id={`${id}-${e}`} className="text-xs text-muted-foreground">{t("businessGoals.workflow.sim.unavailable", { motivo: traduzir(t, motivo) })}</p>}
             </div>

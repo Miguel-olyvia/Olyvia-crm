@@ -32,6 +32,10 @@ describe("preferências do Quadro", () => {
     );
     expect(lerPreferencias()).toEqual({ ordem: null, meus: true, fases: ["proposta"] });
   });
+  it("o nome antigo \"financeiro\" lê-se como \"ganho\"", () => {
+    window.localStorage.setItem(CHAVE_PREFERENCIAS, JSON.stringify({ fases: ["financeiro", "proposta"] }));
+    expect(lerPreferencias().fases).toEqual(["proposta", "ganho"]);
+  });
   it("funciona quando o armazenamento falha", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("bloqueado"); });
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("bloqueado"); });

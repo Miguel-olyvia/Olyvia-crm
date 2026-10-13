@@ -23,6 +23,12 @@ function lerOrdem(valor: unknown): Ordem | null {
   return { coluna: o.coluna, dir: o.dir === "desc" ? "desc" : "asc" };
 }
 
+/** O valor guardado "financeiro" (nome antigo da última fase) lê-se como "ganho". */
+function lerFases(guardadas: unknown[]): FaseNegocio[] {
+  const nomes = guardadas.map((f) => (f === "financeiro" ? "ganho" : f));
+  return FASES.filter((f) => nomes.includes(f));
+}
+
 /** Lê as preferências, campo a campo: o que estiver estragado volta ao valor por defeito. */
 export function lerPreferencias(): PreferenciasQuadro {
   try {
@@ -32,7 +38,7 @@ export function lerPreferencias(): PreferenciasQuadro {
     return {
       ordem: lerOrdem(p.ordem),
       meus: typeof p.meus === "boolean" ? p.meus : PREFERENCIAS_INICIAIS.meus,
-      fases: Array.isArray(p.fases) ? FASES.filter((f) => (p.fases as unknown[]).includes(f)) : [],
+      fases: Array.isArray(p.fases) ? lerFases(p.fases) : [],
     };
   } catch {
     return PREFERENCIAS_INICIAIS;

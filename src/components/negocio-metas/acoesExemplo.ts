@@ -14,7 +14,6 @@ export function useAcoesExemplo(): AcoesNegocio {
       abrirNegocio: aviso("openDeal"),
       abrirPessoa: aviso("openPerson"),
       criarOrcamento: aviso("createQuote"),
-      copiarContacto: aviso("copyContact"),
     };
   }, [t]);
 }

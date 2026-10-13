@@ -2,7 +2,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import type { NegocioMes } from "./negocioMetas";
 import { textoCadeia } from "./saudeTexto";
 
-/** A cadeia em três frases curtas: "2 orç. (1 escolhido)", "Proposta: enviada", "Contrato: pendente". Só texto. */
+/** A cadeia em três frases curtas: "2 orçamentos (1 escolhido)", "Proposta: enviada", "Contrato: pendente". Só texto. */
 export function MiniCadeia({ negocio }: { negocio: NegocioMes }) {
   const { t } = useTranslation();
   return (

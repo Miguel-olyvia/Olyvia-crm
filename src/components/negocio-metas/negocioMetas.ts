@@ -2,7 +2,7 @@
 // negócios e as metas e devolve totais e percentagens, para que os números do
 // ecrã nunca sejam escritos à mão.
 
-export type FaseNegocio = "orcamento" | "proposta" | "contrato" | "financeiro";
+export type FaseNegocio = "orcamento" | "proposta" | "contrato" | "ganho";
 export type EstadoProposta = "rascunho" | "enviada" | "aceite";
 export type EstadoContrato = "pendente" | "assinado";
 
@@ -86,9 +86,9 @@ export function valorDoNegocio(negocio: NegocioMes): number {
   return negocio.orcamentos.find((o) => o.escolhido)?.valor ?? 0;
 }
 
-/** A fase é a do último passo da cadeia; contrato assinado passa a Financeiro. */
+/** A fase é a do último passo da cadeia; contrato assinado passa a Ganho. */
 export function faseDoNegocio(negocio: NegocioMes): FaseNegocio {
-  if (negocio.contrato) return negocio.contrato.estado === "assinado" ? "financeiro" : "contrato";
+  if (negocio.contrato) return negocio.contrato.estado === "assinado" ? "ganho" : "contrato";
   if (negocio.proposta) return "proposta";
   return "orcamento";
 }

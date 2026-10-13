@@ -41,7 +41,7 @@ function DetalheLinha({ negocio }: { negocio: NegocioMes }) {
   const contactos = [telefone, email].filter((c): c is string => c !== null);
   return (
     <div className="space-y-3 py-1">
-      <CadeiaNegocio negocio={negocio} id={`cadeia-linha-${negocio.id}`} horizontal />
+      <CadeiaNegocio negocio={negocio} id={`cadeia-linha-${negocio.id}`} />
       <div className="grid gap-3 text-sm sm:grid-cols-2">
         <div>
           <p className="font-semibold text-foreground">{t("businessGoals.list.quotesTitle")}</p>

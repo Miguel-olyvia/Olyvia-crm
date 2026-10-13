@@ -28,14 +28,19 @@ export function textoSaude(saude: SaudeNegocio, n: NegocioMes, hoje: string, t: 
   }
 }
 
-/** A cadeia em frases curtas: "2 orç. (1 escolhido)", "Proposta: enviada", "Contrato: pendente". */
-export function textoCadeia(n: NegocioMes, t: Traduzir): string[] {
+/** "2 orçamentos (1 escolhido)", "1 orçamento (nenhum escolhido)": por extenso e com o singular certo. */
+export function textoOrcamentos(n: NegocioMes, t: Traduzir): string {
   const escolhidos = n.orcamentos.filter((o) => o.escolhido).length;
+  return t(n.orcamentos.length === 1 ? "businessGoals.mini.quotesOne" : "businessGoals.mini.quotes", {
+    count: n.orcamentos.length,
+    chosen: t(escolhidos > 0 ? "businessGoals.mini.chosenOne" : "businessGoals.mini.chosenNone"),
+  });
+}
+
+/** A cadeia em frases curtas: "2 orçamentos (1 escolhido)", "Proposta: enviada", "Contrato: pendente". */
+export function textoCadeia(n: NegocioMes, t: Traduzir): string[] {
   const partes = [
-    t("businessGoals.mini.quotes", {
-      count: n.orcamentos.length,
-      chosen: t(escolhidos > 0 ? "businessGoals.mini.chosenOne" : "businessGoals.mini.chosenNone"),
-    }),
+    textoOrcamentos(n, t),
     n.proposta && t("businessGoals.mini.proposal", { state: t(`businessGoals.proposal.${n.proposta.estado}`).toLowerCase() }),
     n.contrato && t("businessGoals.mini.contract", { state: t(`businessGoals.contract.${n.contrato.estado}`).toLowerCase() }),
   ];

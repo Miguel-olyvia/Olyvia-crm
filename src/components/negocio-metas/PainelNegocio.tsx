@@ -1,16 +1,24 @@
 import { Link } from "react-router-dom";
-import { useId } from "react";
-import { Copy, ExternalLink, FilePlus2, UserRound } from "lucide-react";
+import { useRef, useState } from "react";
+import { ExternalLink, FilePlus2, UserRound } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
+import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
+import { useAnunciosFicha } from "@/components/ficha-comum/useAnunciosFicha";
 import type { AcoesNegocio } from "./AcoesNegocio";
-import { CadeiaNegocio } from "./CadeiaNegocio";
-import { ResumoNegocio } from "./ResumoNegocio";
+import { CabecalhoPainel } from "./CabecalhoPainel";
+import { ContratoPainel } from "./ContratoPainel";
+import { OrcamentosPainel } from "./OrcamentosPainel";
+import { PessoaPainel } from "./PessoaPainel";
+import { PropostaPainel } from "./PropostaPainel";
+import { ResumoPainel } from "./ResumoPainel";
 import { FOCO } from "./estilos";
 import type { NegocioMes } from "./negocioMetas";
+import { abasDoNegocio, ehAba } from "./negocioPainel";
+import { useDadosPainel } from "./useDadosPainel";
 
 interface PainelNegocioProps {
   negocio: NegocioMes | null;
@@ -19,11 +27,13 @@ interface PainelNegocioProps {
   aoFechar: () => void;
 }
 
-/** As quatro ações do painel: abrir negócio e pessoa são ligações; criar orçamento e copiar contacto vêm de `acoes`. */
-function FaixaAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegocio }) {
+/**
+ * A barra de ações, fixa: Abrir negócio (a única principal), Abrir pessoa e Criar orçamento. Os dois primeiros são
+ * ligações reais (/deals?open=, /pessoas?open=); "Criar orçamento" e as ações dos cartões e das linhas da Lista
+ * ainda só mostram um aviso de exemplo (ver `acoesExemplo.ts`).
+ */
+function BarraAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegocio }) {
   const { t } = useTranslation();
-  const idMotivo = useId();
-  const semContacto = negocio.contacto.telefone === null && negocio.contacto.email === null;
   const botao = cn("min-h-11 gap-2", FOCO);
   return (
     <div role="group" aria-label={t("businessGoals.panel.actions")} className="flex flex-wrap gap-2 border-b border-border px-6 py-3">
@@ -43,52 +53,64 @@ function FaixaAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegoc
         <FilePlus2 className="h-4 w-4" aria-hidden="true" />
         {t("businessGoals.actions.createQuote")}
       </Button>
-      <TooltipProvider delayDuration={300}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button" variant="outline" aria-disabled={semContacto || undefined}
-              aria-describedby={semContacto ? idMotivo : undefined}
-              className={cn(botao, "aria-disabled:cursor-not-allowed aria-disabled:opacity-50")}
-              onClick={() => { if (!semContacto) acoes.copiarContacto(negocio); }}
-            >
-              <Copy className="h-4 w-4" aria-hidden="true" />
-              {t("businessGoals.actions.copyContact")}
-            </Button>
-          </TooltipTrigger>
-          {semContacto && <TooltipContent>{t("businessGoals.actions.noContact")}</TooltipContent>}
-        </Tooltip>
-      </TooltipProvider>
-      {semContacto && <span id={idMotivo} className="sr-only">{t("businessGoals.actions.noContact")}</span>}
     </div>
   );
 }
 
+/** Os separadores do painel: Resumo (por defeito), Pessoa, Orçamentos, e Proposta e Contrato só se o negócio os tem. */
+function SeparadoresPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: string }) {
+  const { t } = useTranslation();
+  const { pessoaDe, detalheDe } = useDadosPainel();
+  const [aba, setAba] = useState("resumo");
+  const abas = abasDoNegocio(negocio);
+  // Se a aba escolhida deixar de existir, volta ao Resumo em vez de ficar em branco.
+  const ativa = ehAba(aba, negocio) ? aba : "resumo";
+  const detalhe = detalheDe(negocio.id);
+  const conteudo = cn("mt-0 rounded-sm", FOCO);
+  return (
+    <Tabs value={ativa} onValueChange={setAba} className="flex min-h-0 flex-1 flex-col [@media(max-height:480px)]:flex-none">
+      <ListaAbas aria-label={t("businessGoals.painel.tabs.label")} className="shrink-0 px-6">
+        {abas.map((a) => (
+          <Aba key={a.id} value={a.id} rotulo={t(`businessGoals.painel.tabs.${a.id}`)} contador={a.contador} />
+        ))}
+      </ListaAbas>
+      {/* Com pouca altura (zoom a 400 %) a zona dos separadores deixa de rolar sozinha: o painel inteiro rola. */}
+      <div className="flex-1 overflow-y-auto p-6 [@media(max-height:480px)]:flex-none [@media(max-height:480px)]:overflow-visible">
+        <TabsContent value="resumo" className={conteudo}><ResumoPainel negocio={negocio} hoje={hoje} /></TabsContent>
+        <TabsContent value="pessoa" className={conteudo}><PessoaPainel pessoa={pessoaDe(negocio.pessoaId)} /></TabsContent>
+        <TabsContent value="orcamentos" className={conteudo}><OrcamentosPainel negocio={negocio} detalhe={detalhe} /></TabsContent>
+        <TabsContent value="proposta" className={conteudo}><PropostaPainel negocio={negocio} detalhe={detalhe} hoje={hoje} /></TabsContent>
+        <TabsContent value="contrato" className={conteudo}><ContratoPainel negocio={negocio} detalhe={detalhe} /></TabsContent>
+      </div>
+    </Tabs>
+  );
+}
+
 /**
- * Painel lateral. Em cima, fixos: o resumo do negócio (o mesmo do cartão, mais fase e
- * parado) e a faixa de ações. Só a cadeia (orçamentos, proposta, contrato) rola.
+ * O painel lateral de um negócio: cabeçalho e barra de ações fixos e, por baixo, os separadores. Cada negócio abre
+ * no Resumo (a `key` repõe o separador ao trocar de negócio). Guarda o último negócio enquanto o painel fecha, para o
+ * conteúdo (e o título) não desaparecerem durante a animação de saída. Inclui a região de anúncios (copiar, etc.).
  */
 export function PainelNegocio({ negocio, hoje, acoes, aoFechar }: PainelNegocioProps) {
-  const { t } = useTranslation();
+  const ultimo = useRef<NegocioMes | null>(negocio);
+  if (negocio) ultimo.current = negocio;
+  const mostrado = negocio ?? ultimo.current;
+  const { texto, anunciar } = useAnunciosFicha();
   return (
     <Sheet open={negocio !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
-      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-lg motion-reduce:!animate-none">
-        {negocio && (
-          <>
-            <SheetHeader className="sr-only">
-              <SheetTitle>{negocio.pessoa}</SheetTitle>
-              <SheetDescription>{negocio.servico} · {negocio.comercial}</SheetDescription>
-            </SheetHeader>
-            <div className="border-b border-border p-6 pr-12">
-              <ResumoNegocio negocio={negocio} hoje={hoje} detalhado />
-            </div>
-            <FaixaAcoes negocio={negocio} acoes={acoes} />
-            <div className="flex-1 space-y-5 overflow-y-auto p-6">
-              <CadeiaNegocio negocio={negocio} id={`cadeia-${negocio.id}`} />
-              <p className="text-xs text-muted-foreground">{t("businessGoals.panel.note")}</p>
-            </div>
-          </>
-        )}
+      <SheetContent
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl motion-reduce:!animate-none [@media(max-height:480px)]:overflow-y-auto [@media(max-height:480px)]:[&>*]:shrink-0"
+      >
+        <AnuncioFichaContext.Provider value={anunciar}>
+          {mostrado && (
+            <>
+              <CabecalhoPainel negocio={mostrado} />
+              <BarraAcoes negocio={mostrado} acoes={acoes} />
+              <SeparadoresPainel key={mostrado.id} negocio={mostrado} hoje={hoje} />
+            </>
+          )}
+          <div role="status" className="sr-only">{texto}</div>
+        </AnuncioFichaContext.Provider>
       </SheetContent>
     </Sheet>
   );

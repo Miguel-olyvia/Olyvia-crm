@@ -66,8 +66,8 @@ describe("Os meus | Todos", () => {
 
   it("os chips das fases contam já com Os meus", () => {
     renderPage();
-    expect(screen.getByRole("button", { name: /^Orçamento 0/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Financeiro 2/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Orçamento: 0 / })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Ganho: 2 / })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Para tratar 0/ })).toBeInTheDocument();
   });
 
@@ -198,7 +198,7 @@ describe("atalhos de teclado", () => {
     const todos = within(grupoEscopo()).getByRole("button", { name: "Todos" });
     todos.focus();
     expect(fireEvent.keyDown(todos, { key: "ArrowDown" })).toBe(true);
-    const chip = screen.getByRole("button", { name: /^Proposta 2/ });
+    const chip = screen.getByRole("button", { name: /^Proposta: 2 / });
     chip.focus();
     expect(fireEvent.keyDown(chip, { key: "j" })).toBe(true);
     expect(chip).toHaveFocus();

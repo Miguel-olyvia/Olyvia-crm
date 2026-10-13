@@ -1,7 +1,8 @@
 import { Check, CircleHelp, Sparkles } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import type { EstadoAcao } from "./workflowEtapas";
+/** O estado de uma opção do protótipo: o que já existe, o que é novo e o que está por confirmar. */
+export type EstadoAcao = "existe" | "novo" | "confirmar";
 
 const ICONE = { existe: Check, novo: Sparkles, confirmar: CircleHelp } as const;
 

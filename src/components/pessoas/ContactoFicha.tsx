@@ -1,15 +1,9 @@
 // Os dados de contacto da ficha: rótulo e valor, com um botão de ícone "Copiar" ao lado (irmão do valor, nunca dentro
-// de um botão). Telefone e email são ligações. Copia para a área de transferência e, se não puder, seleciona o texto.
-import { useId, useRef } from "react";
-import { Copy } from "lucide-react";
+// de um botão; ver `ficha-comum/LinhaContacto`). Telefone e email são ligações.
+import { useId } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "@/lib/toast";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { FOCO } from "@/components/negocio-metas/estilos";
-import type { Traduzir } from "@/components/negocio-metas/saudeNegocio";
+import { LinhaContacto } from "@/components/ficha-comum/LinhaContacto";
 import { ligacoes } from "./acoesPessoa";
-import { useAnunciar } from "./anuncioFicha";
 import { MarcaExemplo } from "./SelosPessoa";
 import type { Pessoa } from "./pessoasTipos";
 
@@ -40,55 +34,17 @@ function camposDeContacto(pessoa: Pessoa): Campo[] {
   return campos.filter((c): c is Campo => c !== null);
 }
 
-function selecionarTexto(el: HTMLElement | null): void {
-  const selecao = window.getSelection();
-  if (!el || !selecao) return;
-  const intervalo = document.createRange();
-  intervalo.selectNodeContents(el);
-  selecao.removeAllRanges();
-  selecao.addRange(intervalo);
-}
-
-/** Copia (ou, se não puder, seleciona o texto) e diz o resultado num toast e na região de anúncios da ficha. */
-async function copiar(campo: Campo, el: HTMLElement | null, t: Traduzir, anunciar: (m: string) => void): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(campo.valor);
-    const mensagem = t(`pessoasPagina.contact.copied.${campo.chave}`);
-    toast.success(mensagem);
-    anunciar(mensagem);
-  } catch {
-    selecionarTexto(el);
-    const mensagem = t("pessoasPagina.contact.selected");
-    toast.info(mensagem);
-    anunciar(mensagem);
-  }
-}
-
-function LinhaContacto({ campo }: { campo: Campo }) {
+function LinhaDoCampo({ campo }: { campo: Campo }) {
   const { t } = useTranslation();
-  const valor = useRef<HTMLSpanElement>(null);
-  const anunciar = useAnunciar();
   return (
-    <div className="grid grid-cols-[8rem_1fr] items-center gap-2 border-b border-border py-1 last:border-b-0">
-      <dt className="text-xs text-muted-foreground">{t(`pessoasPagina.contact.label.${campo.chave}`)}</dt>
-      <dd className="flex min-w-0 items-center justify-between gap-1">
-        <span ref={valor} className="min-w-0 break-words text-sm text-foreground">
-          {campo.href ? (
-            <a href={campo.href} className={cn("inline-flex min-h-11 items-center rounded-sm text-primary underline underline-offset-2", FOCO)}>
-              {campo.valor}
-            </a>
-          ) : campo.valor}
-        </span>
-        {!campo.semCopia && (
-          <Button
-            type="button" variant="ghost" className={cn("h-11 w-11 shrink-0 p-0", FOCO)}
-            aria-label={t(`pessoasPagina.contact.copy.${campo.chave}`)} onClick={() => void copiar(campo, valor.current, t, anunciar)}
-          >
-            <Copy aria-hidden="true" />
-          </Button>
-        )}
-      </dd>
-    </div>
+    <LinhaContacto
+      rotulo={t(`pessoasPagina.contact.label.${campo.chave}`)} valor={campo.valor} href={campo.href}
+      copia={campo.semCopia ? undefined : {
+        rotulo: t(`pessoasPagina.contact.copy.${campo.chave}`),
+        mensagemCopiado: t(`pessoasPagina.contact.copied.${campo.chave}`),
+        mensagemSelecionado: t("pessoasPagina.contact.selected"),
+      }}
+    />
   );
 }
 
@@ -105,7 +61,7 @@ export function ContactoFicha({ pessoa }: { pessoa: Pessoa }) {
       {campos.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("pessoasPagina.contact.none")}</p>
       ) : (
-        <dl>{campos.map((c) => <LinhaContacto key={c.chave} campo={c} />)}</dl>
+        <dl>{campos.map((c) => <LinhaDoCampo key={c.chave} campo={c} />)}</dl>
       )}
     </section>
   );

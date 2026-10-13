@@ -62,7 +62,7 @@ describe("juntarPessoas", () => {
   });
 
   it("a fase é a mais avançada entre os abertos ou ganhos", () => {
-    expect(de("Marta Silveira").fase).toBe("financeiro");
+    expect(de("Marta Silveira").fase).toBe("ganho");
     expect(de("Vasco Pinto").fase).toBe("contrato");
     expect(de("Nuno Barros").fase).toBe("proposta");
     expect(de("Tiago Rocha").fase).toBe("orcamento");

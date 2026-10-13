@@ -46,7 +46,10 @@ export function QuadroNegocios({ negocios, fases, aoLimpar, ...resto }: QuadroNe
             <div aria-hidden="true" className={cn("h-1", COR_FASE[fase])} />
             <div className="flex items-center justify-between gap-2 border-b px-3 py-2.5">
               <div className="flex min-w-0 items-center gap-2">
-                <h3 id={`coluna-${fase}`} className="truncate text-sm font-semibold">{t(`businessGoals.phase.${fase}`)}</h3>
+                <h3 id={`coluna-${fase}`} className="truncate text-sm font-semibold">
+                  {t(`businessGoals.phase.${fase}`)}
+                  <span className="sr-only">, {cartoes.length === 1 ? t("businessGoals.countOne") : t("businessGoals.count", { count: cartoes.length })}</span>
+                </h3>
                 <Badge variant="secondary" className="h-5 px-1.5 text-xs">{cartoes.length}</Badge>
               </div>
               <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">{formatarMeta("euro", valor)}</span>
