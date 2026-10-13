@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -12,12 +12,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -26,21 +23,28 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PermissionGate } from "@/components/PermissionGate";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
-import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ClipboardCheck, Download, FileDown, ExternalLink, Loader2, Pencil, Plus, Search, ShoppingBag, Trash2, Truck, Undo2 } from "lucide-react";
+import { Download, FileDown, Info, Loader2, Lock, Pencil, Plus, Printer, Receipt, Search, ShoppingCart, Trash2, Truck, Undo2, X } from "lucide-react";
 import {
   FilterPills,
   InventoryPageHeader,
   InventoryStatusBadge,
+  RowActions,
   parseClientOrdersParams,
   type ClientOrderStatusFilter,
   type FilterPillOption,
   type InventoryTone,
+  type RowActionEntry,
 } from "@/components/inventory/ui";
+import { ClientOrderDetailSheet, ClientOrderInfoGrid, type ClientOrderInfoItem } from "@/components/client-orders/ClientOrderDetailSheet";
+import { ClientOrderDiagnosticSection } from "@/components/client-orders/ClientOrderDiagnosticSection";
+import { ClientOrderLineSource } from "@/components/client-orders/ClientOrderLineSource";
+import { ClientOrderLineStateBadge, ClientOrderLineStateLegend, clientOrderLineState } from "@/components/client-orders/clientOrderLineState";
+import { ClientOrderProductPicker, type ClientOrderCatalogProduct } from "@/components/client-orders/ClientOrderProductPicker";
+import { useClientOrderPoStates } from "@/components/client-orders/useClientOrderPoStates";
 import { useInventoryToday } from "@/hooks/useInventoryToday";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { useQueryClient } from "@tanstack/react-query";
@@ -123,7 +127,24 @@ interface ManualClientOrderItem {
   // Linha existente: quote_lines.uom_id tal como lido, reenviado sem alteração
   // (este ecrã não escolhe unidade). Linhas novas: null/ausente.
   uom_id?: string | null;
+  // Chave React local e estável das linhas novas (nunca vai para a BD; as
+  // linhas existentes usam quote_line_id).
+  row_key?: string;
 }
+
+const newRowKey = (): string => (
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `row-${Date.now()}-${Math.random().toString(36).slice(2)}`
+);
+
+// IVA vindo do catálogo: 0% é válido (isento) — só cai no default quando não
+// há valor.
+const toVatRate = (value: unknown): number => {
+  if (value === null || value === undefined || value === '') return DEFAULT_VAT_RATE;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : DEFAULT_VAT_RATE;
+};
 
 // Valor da opção "+ Nova morada…" no Select de moradas de entrega.
 const NEW_DELIVERY_ADDRESS_VALUE = "__new_delivery_address__";
@@ -1410,46 +1431,9 @@ const ClientOrders = () => {
     navigate(`/purchase-orders?${params.toString()}`);
   };
 
-  // Origem da encomenda (20261204290000): contrato → "Contrato CC-…"; venda
-  // direta → distintivo + nº VD (origin_number pode vir null por permissões —
-  // cai para a query própria a direct_sales); manual → "Sem documento
-  // anterior". Sem origin_type (RPC antiga) mantém-se o comportamento
-  // anterior: só o distintivo de venda direta, quando existe.
-  const renderOrigin = (
-    contractId: string,
-    originType: ClientOrderOriginType | null | undefined,
-    originNumber: string | null | undefined,
-    contractNumber: string,
-  ) => {
-    const sale = salesByContract[contractId];
-    if (originType === 'direct_sale' || (!originType && sale)) {
-      const number = originNumber || sale?.sale_number || sale?.proforma_number || '';
-      return (
-        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
-          <ShoppingBag className="h-3 w-3" />
-          {t('clientOrders.origin.directSale')}
-          {number ? ` ${number}` : ''}
-        </Badge>
-      );
-    }
-    if (originType === 'contract') {
-      return (
-        <span className="text-xs text-muted-foreground font-normal">
-          {t('clientOrders.origin.contract', { number: originNumber || contractNumber })}
-        </span>
-      );
-    }
-    if (originType === 'manual') {
-      return (
-        <span className="text-xs text-muted-foreground font-normal">{t('clientOrders.origin.manual')}</span>
-      );
-    }
-    return null;
-  };
-
   // Origem elegível para eliminação: manual ou venda direta. Contrato real
   // (ou origem desconhecida sem venda direta associada) não se elimina aqui.
-  // Mesma lógica de renderOrigin para a RPC antiga sem origin_type.
+  // Mesma regra de getListOrigin para a RPC antiga sem origin_type.
   const getDeletableOrigin = (
     contractId: string,
     originType: ClientOrderOriginType | null | undefined,
@@ -1667,124 +1651,6 @@ const ClientOrders = () => {
       default:
         return line.line_status;
     }
-  };
-
-  // Indicador "Produtos Disponíveis" no cabeçalho do diálogo — recalculado a
-  // cada render a partir de detailData (sem memoização: a tabela é pequena e
-  // já recalcula badges/labels da mesma forma).
-  const getAvailableProductsProgress = () => {
-    if (!detailData) return { done: 0, total: 0, percent: 0 };
-    // Só produtos entram na contagem: uma linha de serviço nunca pode ficar
-    // "disponível", por isso contá-la no denominador tornava os 100%
-    // inalcançáveis em qualquer encomenda com serviços.
-    const productLines = detailData.lines.filter((line) => line.line_status !== 'servico');
-    const total = productLines.length;
-    // 'parcial' não conta como disponível: parte ainda depende do fornecedor.
-    // 'nao_recebido_anulado' conta: a linha está concluída (anulada na PO).
-    const done = productLines.filter((line) =>
-      ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar', 'nao_recebido_anulado'].includes(line.line_status)
-    ).length;
-    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
-    return { done, total, percent };
-  };
-
-  // Checklist inline da célula "Estado" — só para linhas
-  // stock_disponivel_confirmar e 'parcial' com reserva (isStockExitConfirmable).
-  // Armazéns e quantidade são os do produto (getProductExitGroup). Estados:
-  // 1) sem permissão inventory.edit → checkbox desativado + tooltip;
-  // 2) nenhum armazém com stock suficiente para a quantidade a enviar (a RPC
-  //    recusaria) → checkbox desativado + tooltip com a quantidade;
-  // 3) 1 armazém → checkbox dispara logo a confirmação;
-  // 4) 2+ armazéns → checkbox revela Select + botão "Confirmar";
-  // 5) a processar → spinner em vez do checkbox.
-  const renderStockExitChecklist = (line: ClientOrderDocumentLine) => {
-    const key = lineKey(line);
-    const group = line.product_id && detailData
-      ? getProductExitGroup(line.product_id, detailData.lines)
-      : null;
-    const warehouses = group?.warehouses ?? [];
-    const isProcessing = confirmingLineId === key || confirmingAll;
-
-    if (isProcessing) {
-      return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
-    }
-
-    if (!canConfirmStockExit) {
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Checkbox checked={false} disabled />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{t('clientOrders.dialog.noPermissionToConfirm')}</TooltipContent>
-        </Tooltip>
-      );
-    }
-
-    if (warehouses.length === 0) {
-      const message = group && group.quantity > 0
-        ? t('clientOrders.dialog.noWarehouseEnoughStock', { qty: formatDiagnosticNumber(group.quantity) })
-        : t('clientOrders.dialog.noWarehouseAvailable');
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex" tabIndex={0} aria-label={message}>
-              <Checkbox checked={false} disabled />
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{message}</TooltipContent>
-        </Tooltip>
-      );
-    }
-
-    const isActive = checklistActiveLineIds.has(key);
-    const selectedWarehouseId = selectedWarehouseByLine[key];
-
-    if (warehouses.length > 1 && isActive) {
-      return (
-        <div className="flex items-center gap-1.5">
-          <Checkbox
-            checked
-            onCheckedChange={(checked) => handleChecklistCheckboxChange(line, checked === true)}
-          />
-          <Select
-            value={selectedWarehouseId || ""}
-            onValueChange={(value) =>
-              setSelectedWarehouseByLine((prev) => ({ ...prev, [key]: value }))
-            }
-          >
-            <SelectTrigger className="h-8 w-[190px] text-xs">
-              <SelectValue placeholder={t('clientOrders.dialog.selectWarehouse')} />
-            </SelectTrigger>
-            <SelectContent>
-              {warehouses.map((wh) => (
-                <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
-                  {wh.warehouse_name} ({formatDiagnosticNumber(asQty(wh.quantity))})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedWarehouseId && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8"
-              onClick={() => handleConfirmStockExit(line, selectedWarehouseId)}
-            >
-              {t('clientOrders.dialog.confirmStockExit')}
-            </Button>
-          )}
-        </div>
-      );
-    }
-
-    return (
-      <Checkbox
-        checked={isActive}
-        onCheckedChange={(checked) => handleChecklistCheckboxChange(line, checked === true)}
-      />
-    );
   };
 
   // ── Criação manual de Encomenda Cliente ──────────────────────────────────
@@ -2187,7 +2053,8 @@ const ClientOrders = () => {
             sku: comp.sku ?? null,
             quantity: (Number(comp.quantity) || 0) * (Number(quantity) || 1),
             unit_price: Number(comp.unit_price) || 0,
-            vat_rate: Number(comp.vat_rate) || DEFAULT_VAT_RATE,
+            vat_rate: toVatRate(comp.vat_rate),
+            row_key: newRowKey(),
           });
         });
         return;
@@ -2217,7 +2084,8 @@ const ClientOrders = () => {
         sku: item.sku ?? null,
         quantity: Number(quantity) || 1,
         unit_price: (Number(item.retail_price) || 0) + (Number(attributePriceAddon) || 0),
-        vat_rate: Number(item.vat_rate) || DEFAULT_VAT_RATE,
+        vat_rate: toVatRate(item.vat_rate),
+        row_key: newRowKey(),
       });
     });
 
@@ -2246,11 +2114,55 @@ const ClientOrders = () => {
     setCreateItems((prev) => prev.filter((item, i) => i !== index || item.locked));
   };
 
+  // Layout do protótipo: "+ Adicionar linha" acrescenta uma linha de produto
+  // por escolher (seletor de produto + quantidade). Linhas deixadas por
+  // escolher não se gravam (como no protótipo) — ver getFilledCreateItems.
+  const handleAddBlankCreateItem = () => {
+    setCreateItems((prev) => [...prev, {
+      item_type: 'product',
+      product_id: null,
+      service_id: null,
+      description: '',
+      categoria: '',
+      sku: null,
+      quantity: 1,
+      unit_price: 0,
+      vat_rate: DEFAULT_VAT_RATE,
+      row_key: newRowKey(),
+    }]);
+  };
+
+  // Produto escolhido no seletor da linha: mesmos campos que o AddItemsDialog
+  // preenchia (descrição, categoria, SKU, preço de venda e IVA do catálogo).
+  const handleCreateItemProductSelect = (index: number, product: ClientOrderCatalogProduct) => {
+    setCreateItems((prev) => {
+      const current = prev[index];
+      if (!current || current.locked || current.quote_line_id) return prev;
+      const next = [...prev];
+      next[index] = {
+        ...current,
+        item_type: 'product',
+        product_id: product.id,
+        service_id: null,
+        description: product.name,
+        categoria: product.category_name || t('clientOrders.create.noCategory'),
+        sku: product.sku,
+        unit_price: Number(product.retail_price) || 0,
+        vat_rate: toVatRate(product.vat_rate),
+      };
+      return next;
+    });
+  };
+
+  // Linhas a gravar: sem as linhas novas deixadas por escolher.
+  const getFilledCreateItems = (): ManualClientOrderItem[] =>
+    createItems.filter((item) => item.locked || !!item.quote_line_id || !!item.product_id || !!item.service_id);
+
   // Validação comum a criar/editar — um toast por erro, mesmo padrão de
   // PurchaseOrders.tsx (o backend valida na mesma; isto é só UX). As linhas
   // trancadas não se validam: seguem tal como estão gravadas.
-  const validateOrderItems = (): boolean => {
-    if (createItems.length === 0) {
+  const validateOrderItems = (items: ManualClientOrderItem[]): boolean => {
+    if (items.length === 0) {
       toast({
         title: t('clientOrders.create.validation.itemsRequired'),
         description: t('clientOrders.create.validation.itemsRequiredDesc'),
@@ -2259,13 +2171,17 @@ const ClientOrders = () => {
       return false;
     }
 
-    for (let i = 0; i < createItems.length; i++) {
-      const item = createItems[i];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       if (item.locked) continue;
+      // Número da linha como o utilizador a vê no diálogo (as linhas por
+      // escolher saem de `items`, mas continuam visíveis e numeradas).
+      const visibleIndex = createItems.indexOf(item);
+      const lineNo = (visibleIndex >= 0 ? visibleIndex : i) + 1;
       if (!item.product_id && !item.service_id) {
         toast({
           title: t('clientOrders.create.validation.lineWithoutItem'),
-          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: i + 1 }),
+          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: lineNo }),
           variant: "destructive",
         });
         return false;
@@ -2273,7 +2189,7 @@ const ClientOrders = () => {
       if (!(item.quantity > 0)) {
         toast({
           title: t('clientOrders.create.validation.invalidQuantity'),
-          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: i + 1 }),
+          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: lineNo }),
           variant: "destructive",
         });
         return false;
@@ -2282,7 +2198,7 @@ const ClientOrders = () => {
       if (!isValidQtyFor(item.quantity, integer)) {
         toast({
           title: t('clientOrders.create.validation.invalidQuantity'),
-          description: integerQtyMessage(i + 1, productUom.getBaseCode(item.product_id)),
+          description: integerQtyMessage(lineNo,productUom.getBaseCode(item.product_id)),
           variant: "destructive",
         });
         return false;
@@ -2293,16 +2209,17 @@ const ClientOrders = () => {
 
   const handleUpdateOrder = async () => {
     if (!editingContractId) return;
-    if (!validateOrderItems()) return;
+    const items = getFilledCreateItems();
+    if (!validateOrderItems(items)) return;
     const contractId = editingContractId;
 
     // Produto já servido/pedido (linha trancada) não pode ganhar quantidade
     // noutra linha nova ou alterada: a saída de stock é por (contrato,
     // produto) e não há segunda. O servidor também valida; isto é só UX.
     const lockedProductIds = new Set(
-      createItems.filter((item) => item.locked && item.product_id).map((item) => item.product_id as string),
+      items.filter((item) => item.locked && item.product_id).map((item) => item.product_id as string),
     );
-    const conflicting = createItems.find((item) => (
+    const conflicting = items.find((item) => (
       !item.locked
       && !!item.product_id
       && lockedProductIds.has(item.product_id)
@@ -2325,7 +2242,7 @@ const ClientOrders = () => {
       // por isso vão todas — as trancadas com os valores exatos lidos.
       const { data: updateResult, error } = await (supabase as any).rpc('rpc_update_manual_client_order', {
         p_contract_id: contractId,
-        p_items: createItems.map((item) => (
+        p_items: items.map((item) => (
           item.locked && item.locked_payload
             ? item.locked_payload
             : {
@@ -2383,7 +2300,8 @@ const ClientOrders = () => {
       return;
     }
 
-    if (!validateOrderItems()) return;
+    const items = getFilledCreateItems();
+    if (!validateOrderItems(items)) return;
 
     setCreating(true);
     try {
@@ -2398,7 +2316,7 @@ const ClientOrders = () => {
           start_date: createDate || null,
           delivery_address: createDeliveryAddress.trim() || null,
         },
-        p_items: createItems.map((item) => ({
+        p_items: items.map((item) => ({
           product_id: item.product_id,
           service_id: item.service_id,
           descricao: item.description,
@@ -2517,7 +2435,7 @@ const ClientOrders = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailData, detailOpen]);
 
-  // Origem para o distintivo da lista — mesma regra de renderOrigin.
+  // Origem para o distintivo da lista — mesma regra de getDeletableOrigin/direct_sales.
   const getListOrigin = (order: ClientOrderDocumentRow): { kind: ClientOrderOriginKind; label: string } | null => {
     const sale = salesByContract[order.contract_id];
     if (order.origin_type === 'direct_sale' || (!order.origin_type && sale)) {
@@ -2617,6 +2535,388 @@ const ClientOrders = () => {
     } finally {
       setExporting(false);
     }
+  };
+
+  // ── Folha do detalhe (UI do protótipo) ──────────────────────────────────
+  // Estado das POs ligadas às linhas, para "De onde vem" (best-effort).
+  const detailPoStates = useClientOrderPoStates(
+    activeCompany?.id,
+    (detailData?.lines || []).map((l) => l.purchase_order_id).filter((id): id is string => !!id),
+  );
+
+  // Nova encomenda manual: abre com uma linha por escolher, como no protótipo.
+  useEffect(() => {
+    if (createOpen && !editingContractId) {
+      setCreateItems((prev) => (prev.length === 0
+        ? [{ item_type: 'product', product_id: null, service_id: null, description: '', categoria: '', sku: null, quantity: 1, unit_price: 0, vat_rate: DEFAULT_VAT_RATE, row_key: newRowKey() }]
+        : prev));
+    }
+  }, [createOpen, editingContractId]);
+
+  // Estado geral da encomenda: o da lista (rpc_list_client_order_documents)
+  // quando a encomenda está carregada; senão a mesma regra da RPC da lista
+  // aplicada às linhas do documento.
+  const getDetailOverallStatus = (doc: ClientOrderDocumentDetail): string => {
+    const row = orders.find((o) => o.contract_id === doc.contract_id);
+    if (row?.overall_status) return row.overall_status;
+    const lines = doc.lines.filter((l) => l.line_status !== 'servico');
+    if (lines.length === 0) return 'totalmente_servido';
+    const count = (statuses: string[]) => lines.filter((l) => statuses.includes(l.line_status)).length;
+    const stock = count(['servido_por_stock', 'stock_disponivel_confirmar']);
+    const awaiting = count(['a_aguardar_encomenda', 'parcial']);
+    const received = count(['recebido']);
+    const noSupplier = count(['sem_fornecedor']);
+    if (awaiting === 0 && noSupplier === 0) return 'totalmente_servido';
+    if (stock + received === 0 && noSupplier === 0 && awaiting > 0) return 'a_aguardar_encomenda';
+    if (stock + received === 0 && awaiting === 0 && noSupplier > 0) return 'sem_fornecedor';
+    return 'parcialmente_pendente';
+  };
+
+  // Origem do documento para o distintivo e a grelha — mesma regra de getListOrigin.
+  const getDetailOrigin = (doc: ClientOrderDocumentDetail): { kind: ClientOrderOriginKind; label: string } | null => {
+    const sale = salesByContract[doc.contract_id];
+    if (doc.origin_type === 'direct_sale' || (!doc.origin_type && sale)) {
+      const number = doc.origin_number || sale?.sale_number || sale?.proforma_number || '';
+      return { kind: 'direct_sale', label: `Venda direta${number ? ` ${number}` : ''}` };
+    }
+    if (doc.origin_type === 'contract') {
+      return { kind: 'contract', label: `Contrato ${doc.origin_number || doc.contract_number}` };
+    }
+    if (doc.origin_type === 'manual') return { kind: 'manual', label: 'Manual' };
+    return null;
+  };
+
+  const formatEur = (value: number | null | undefined): string =>
+    value === null || value === undefined
+      ? '—'
+      : new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(value));
+
+  // Editar a partir do detalhe — mesmas condições dos botões antigos:
+  // manual editável → diálogo da encomenda manual (linhas + morada);
+  // com documento de origem → só morada e notas (rpc_update_client_order_header).
+  const getDetailEditAction = (doc: ClientOrderDocumentDetail): (() => void) | null => {
+    if (!canEditOrder) return null;
+    if (doc.is_editable) return () => { void openEditOrder(); };
+    if (doc.can_edit_header) return openHeaderEdit;
+    return null;
+  };
+
+  // Menu ⋯ no topo da folha (MenuEc do protótipo).
+  const renderDetailMenu = (doc: ClientOrderDocumentDetail) => {
+    const label = doc.order_number || doc.contract_number;
+    const editAction = getDetailEditAction(doc);
+    const deletable = !!getDeletableOrigin(doc.contract_id, doc.origin_type);
+    const sale = salesByContract[doc.contract_id];
+    const items: RowActionEntry[] = [
+      {
+        label: 'PDF',
+        icon: Printer,
+        onSelect: () => handleGeneratePdf(doc.contract_id, label),
+        disabled: pdfGeneratingId === doc.contract_id,
+        disabledReason: 'A gerar o PDF…',
+      },
+      {
+        label: doc.is_editable ? 'Editar encomenda' : 'Editar morada e notas',
+        icon: Pencil,
+        onSelect: () => editAction?.(),
+        disabled: !editAction || editLoading || headerEditSaving || confirmingAll,
+        disabledReason: !editAction ? 'Esta encomenda não pode ser editada' : 'A carregar…',
+        permission: 'client_orders.edit',
+      },
+      {
+        label: 'Pedir em falta ao fornecedor',
+        icon: ShoppingCart,
+        onSelect: () => setRequestMissingConfirmOpen(true),
+        disabled: !doc.can_request_missing || requestingMissing || confirmingAll,
+        disabledReason: !doc.can_request_missing ? 'Nada em falta que se possa pedir' : 'A pedir…',
+        permission: ['purchase_orders.create', 'client_orders.view'],
+        requireAllPermissions: true,
+      },
+      ...(sale?.proforma_number
+        ? [{
+            label: `Proforma ${sale.proforma_number}`,
+            icon: Receipt,
+            onSelect: () => handleDownloadProforma(doc.contract_id),
+            disabled: proformaDownloadingId === doc.contract_id,
+            disabledReason: 'A gerar a proforma…',
+          }]
+        : []),
+      'separator',
+      {
+        label: 'Eliminar',
+        icon: Trash2,
+        destructive: true,
+        onSelect: () => openDeleteOrder(doc.contract_id, label, doc.origin_type, doc.origin_number),
+        disabled: !deletable || deleting || confirmingAll,
+        disabledReason: !deletable ? 'Só manuais ou venda direta' : 'A eliminar…',
+        permission: 'client_orders.delete',
+      },
+    ];
+    // Dentro da folha (Sheet) o menu não pode ser modal — o focus trap fechava-o.
+    return <RowActions items={items} modal={false} menuLabel={`Mais ações para ${label}`} />;
+  };
+
+  // Grelha de dados (Dados do protótipo). Sem "Armazém de expedição": não
+  // existe nos dados.
+  const renderDetailInfo = (doc: ClientOrderDocumentDetail) => {
+    const label = doc.order_number || doc.contract_number;
+    const origin = getDetailOrigin(doc);
+    const sale = salesByContract[doc.contract_id];
+    const editAction = getDetailEditAction(doc);
+    const editBusy = editLoading || headerEditSaving || confirmingAll;
+    // Notas: só no cabeçalho das encomendas com documento de origem (a RPC da
+    // encomenda manual não as recebe) — como antes.
+    const notesEdit = canEditOrder && !doc.is_editable && doc.can_edit_header ? openHeaderEdit : null;
+    const items: ClientOrderInfoItem[] = [
+      { label: 'Cliente', value: doc.client_name || '—' },
+      {
+        label: 'Encomenda · data',
+        value: (
+          <>
+            <span className="font-mono text-[0.92em]">{label}</span>
+            {' · '}
+            {doc.signature_date ? new Date(doc.signature_date).toLocaleDateString('pt-PT') : '—'}
+          </>
+        ),
+      },
+      { label: 'Valor', value: <span className="tabular-nums">{formatEur(doc.total_value)}</span> },
+      {
+        label: 'Morada',
+        value: doc.delivery_address?.trim() || '—',
+        onEdit: editAction,
+        editLabel: doc.is_editable ? 'Editar encomenda (morada e linhas)' : 'Editar morada de entrega',
+        editDisabled: editBusy,
+      },
+      {
+        label: 'Notas',
+        value: doc.notes?.trim() || '—',
+        onEdit: notesEdit,
+        editLabel: 'Editar notas',
+        editDisabled: editBusy,
+      },
+      {
+        label: 'Origem',
+        value: (
+          <span className="flex flex-col items-start gap-1">
+            <span>{origin?.label ?? '—'}</span>
+            {sale?.proforma_number ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={() => handleDownloadProforma(doc.contract_id)}
+                disabled={proformaDownloadingId === doc.contract_id}
+                aria-label={`Descarregar a proforma ${sale.proforma_number}`}
+              >
+                {proformaDownloadingId === doc.contract_id
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  : <FileDown className="h-3.5 w-3.5" aria-hidden="true" />}
+                Proforma {sale.proforma_number}
+              </Button>
+            ) : null}
+          </span>
+        ),
+      },
+    ];
+    return <ClientOrderInfoGrid items={items} />;
+  };
+
+  // Rodapé fixo: PDF à esquerda; "Pedir em falta ao fornecedor" e
+  // "Confirmar saída (N)" à direita (N = produtos prontos, a RPC é por
+  // produto). Com vários armazéns possíveis pede-se um antes de confirmar.
+  const renderDetailFooter = (doc: ClientOrderDocumentDetail) => {
+    const label = doc.order_number || doc.contract_number;
+    const { pending, warehouses, singleEach } = getConfirmAllInfo();
+    const busy = confirmingAll || confirmingLineId !== null;
+    const confirmReason = !canConfirmStockExit
+      ? t('clientOrders.dialog.noPermissionToConfirm')
+      : pending.length === 0
+        ? 'Nada pronto a sair: as linhas esperam stock ou a encomenda ao fornecedor'
+        : !singleEach && !confirmAllWarehouseId
+          ? 'Escolha o armazém de saída'
+          : null;
+    const requestReason = !canRequestMissing
+      ? 'Sem permissão: requer encomendas a fornecedor (criar)'
+      : !doc.can_request_missing
+        ? 'Nada em falta que se possa pedir'
+        : null;
+    const missingCount = asQty(doc.missing_lines_count);
+    return (
+      <>
+        <div className="mr-auto flex flex-wrap gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => handleGeneratePdf(doc.contract_id, label)}
+            disabled={pdfGeneratingId === doc.contract_id}
+          >
+            {pdfGeneratingId === doc.contract_id
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              : <Printer className="mr-2 h-4 w-4" aria-hidden="true" />}
+            PDF
+          </Button>
+        </div>
+        <span title={requestReason ?? undefined} className="inline-flex">
+          <Button
+            variant="outline"
+            onClick={() => setRequestMissingConfirmOpen(true)}
+            disabled={!!requestReason || requestingMissing || confirmingAll}
+          >
+            {requestingMissing
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              : <ShoppingCart className="mr-2 h-4 w-4" aria-hidden="true" />}
+            Pedir em falta ao fornecedor{missingCount > 0 && !requestReason ? ` (${missingCount})` : ''}
+          </Button>
+        </span>
+        {canConfirmStockExit && pending.length > 0 && !singleEach && (
+          <Select value={confirmAllWarehouseId} onValueChange={setConfirmAllWarehouseId} disabled={busy}>
+            <SelectTrigger className="h-10 w-[200px] text-xs" aria-label={t('clientOrders.dialog.confirmAllWarehouse')}>
+              <SelectValue placeholder={t('clientOrders.dialog.confirmAllWarehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              {warehouses.map((wh) => (
+                <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
+                  {wh.warehouse_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <span title={confirmReason ?? undefined} className="inline-flex">
+          <Button onClick={handleConfirmAllStockExits} disabled={!!confirmReason || busy}>
+            {confirmingAll
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              : <Truck className="mr-2 h-4 w-4" aria-hidden="true" />}
+            Confirmar saída ({pending.length})
+          </Button>
+        </span>
+      </>
+    );
+  };
+
+  // "Confirmar saída" por linha (substitui a checkbox): mesma lógica de
+  // handleChecklistCheckboxChange — 1 armazém confirma logo; 2+ mostram o
+  // Select do armazém e "Confirmar". Sem permissão ou sem armazém com stock
+  // suficiente fica desativado com o motivo.
+  const renderStockExitAction = (line: ClientOrderDocumentLine) => {
+    const key = lineKey(line);
+    const group = line.product_id && detailData ? getProductExitGroup(line.product_id, detailData.lines) : null;
+    const warehouses = group?.warehouses ?? [];
+    if (confirmingLineId === key || confirmingAll) {
+      return <Loader2 key="exit" className="h-4 w-4 animate-spin text-muted-foreground" aria-label="A confirmar a saída" />;
+    }
+    const reason = !canConfirmStockExit
+      ? t('clientOrders.dialog.noPermissionToConfirm')
+      : warehouses.length === 0
+        ? (group && group.quantity > 0
+          ? t('clientOrders.dialog.noWarehouseEnoughStock', { qty: formatDiagnosticNumber(group.quantity) })
+          : t('clientOrders.dialog.noWarehouseAvailable'))
+        : null;
+    if (reason) {
+      return (
+        <Tooltip key="exit">
+          <TooltipTrigger asChild>
+            <span className="inline-flex" tabIndex={0} aria-label={`Confirmar saída: ${reason}`}>
+              <Button size="sm" className="h-7 px-2 text-xs" disabled tabIndex={-1}>
+                Confirmar saída
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{reason}</TooltipContent>
+        </Tooltip>
+      );
+    }
+    const isActive = checklistActiveLineIds.has(key);
+    const selectedWarehouseId = selectedWarehouseByLine[key];
+    if (warehouses.length > 1 && isActive) {
+      return (
+        <div key="exit" className="flex items-center gap-1.5">
+          <Select
+            value={selectedWarehouseId || ""}
+            onValueChange={(value) => setSelectedWarehouseByLine((prev) => ({ ...prev, [key]: value }))}
+          >
+            <SelectTrigger className="h-8 w-[190px] text-xs" aria-label={t('clientOrders.dialog.selectWarehouse')}>
+              <SelectValue placeholder={t('clientOrders.dialog.selectWarehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              {warehouses.map((wh) => (
+                <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
+                  {wh.warehouse_name} ({formatDiagnosticNumber(asQty(wh.quantity))})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={!selectedWarehouseId || confirmingLineId !== null}
+            onClick={() => selectedWarehouseId && handleConfirmStockExit(line, selectedWarehouseId)}
+          >
+            {t('clientOrders.dialog.confirmStockExit')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label="Cancelar a escolha do armazém"
+            onClick={() => handleChecklistCheckboxChange(line, false)}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <Button
+        key="exit"
+        size="sm"
+        className="h-7 px-2 text-xs"
+        onClick={() => handleChecklistCheckboxChange(line, true)}
+        disabled={confirmingLineId !== null}
+      >
+        Confirmar saída
+      </Button>
+    );
+  };
+
+  // Ações por linha: confirmar saída, reverter saída (só saídas manuais) e
+  // pedir em falta (abre a mesma confirmação do rodapé — a RPC é por encomenda).
+  // Abrir a PO é a ligação na coluna "De onde vem".
+  const renderLineActions = (line: ClientOrderDocumentLine) => {
+    const nodes: ReactElement[] = [];
+    if (isStockExitConfirmable(line)) nodes.push(renderStockExitAction(line));
+    if (isStockExitRevertible(line) && canConfirmStockExit) {
+      nodes.push(
+        <Button
+          key="revert"
+          variant="outline"
+          size="sm"
+          className="h-7 gap-1 px-2 text-xs"
+          onClick={() => setRevertTarget(line)}
+          disabled={reverting || confirmingAll}
+        >
+          <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+          Reverter saída
+        </Button>,
+      );
+    }
+    const missingHere = line.item_type !== 'service'
+      && (line.line_status === 'sem_fornecedor' || asQty(line.qty_missing) > 0)
+      && line.has_preferred_supplier !== false;
+    if (missingHere && detailData?.can_request_missing && canRequestMissing) {
+      nodes.push(
+        <Button
+          key="missing"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => setRequestMissingConfirmOpen(true)}
+          disabled={requestingMissing || confirmingAll}
+        >
+          Pedir em falta
+        </Button>,
+      );
+    }
+    return nodes.length > 0 ? <div className="flex flex-wrap items-center justify-end gap-1">{nodes}</div> : null;
   };
 
   if (companyLoading) {
@@ -2900,432 +3200,148 @@ const ClientOrders = () => {
         </div>
       </div>
 
-      <Dialog
+      <ClientOrderDetailSheet
         open={detailOpen}
         onOpenChange={(o) => {
           // Não fechar a meio de "Confirmar saída de todas".
           if (!o && confirmingAll) return;
           setDetailOpen(o);
         }}
+        crumbs="Armazém › Saídas para clientes"
+        title={detailData ? (detailData.order_number || detailData.contract_number) : 'Encomenda Cliente'}
+        badges={detailData && !detailLoading ? (() => {
+          const status = getDetailOverallStatus(detailData);
+          const origin = getDetailOrigin(detailData);
+          const ready = detailData.lines.filter(isStockExitConfirmable).length;
+          return (
+            <>
+              <InventoryStatusBadge tone={OVERALL_STATUS_TONE[status] ?? 'warn'}>{getOverallStatusLabel(status)}</InventoryStatusBadge>
+              {origin ? <ClientOrderOriginChip kind={origin.kind} label={origin.label} /> : null}
+              {ready > 0 ? <InventoryStatusBadge tone="violet">{ready} linha(s) pronta(s) a sair</InventoryStatusBadge> : null}
+            </>
+          );
+        })() : null}
+        topActions={detailData && !detailLoading ? renderDetailMenu(detailData) : null}
+        info={detailData && !detailLoading ? renderDetailInfo(detailData) : null}
+        footer={detailData && !detailLoading ? renderDetailFooter(detailData) : null}
       >
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {t('clientOrders.dialog.title')}
-              {detailData ? ` — ${detailData.order_number || detailData.contract_number}` : ""}
-            </DialogTitle>
-          </DialogHeader>
+        {detailLoading ? (
+          <div className="flex items-center justify-center py-10">
+            <OlyviaLoader size={32} />
+          </div>
+        ) : detailData ? (
+          <>
+            {/* Diagnóstico da obra — só leitura, colapsável. Nada quando a
+                encomenda não tem diagnóstico (vendas diretas, manuais). */}
+            <ClientOrderDiagnosticSection needs={detailData.diagnostic ?? []} tf={tf} />
 
-          {detailLoading ? (
-            <div className="flex items-center justify-center py-10">
-              <OlyviaLoader size={32} />
-            </div>
-          ) : detailData ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>
-                  <span className="text-muted-foreground">{t('clientOrders.dialog.client')}: </span>
-                  <span className="font-medium">{detailData.client_name || '-'}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">{t('clientOrders.dialog.order')}: </span>
-                  <span className="font-medium">{detailData.order_number || detailData.contract_number}</span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">{t('clientOrders.dialog.signatureDate')}: </span>
-                  <span className="font-medium">
-                    {detailData.signature_date ? new Date(detailData.signature_date).toLocaleDateString('pt-PT') : '-'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">{t('clientOrders.dialog.totalValue')}: </span>
-                  <span className="font-medium">
-                    {detailData.total_value !== null && detailData.total_value !== undefined
-                      ? `€${Number(detailData.total_value).toFixed(2)}`
-                      : '-'}
-                  </span>
-                </div>
-                {detailData.delivery_address && (
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">{t('clientOrders.dialog.deliveryAddress')}: </span>
-                    <span className="font-medium whitespace-pre-wrap break-words">{detailData.delivery_address}</span>
-                  </div>
-                )}
-                {detailData.notes?.trim() && (
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">{t('clientOrders.create.notes')}: </span>
-                    <span className="font-medium whitespace-pre-wrap break-words">{detailData.notes}</span>
-                  </div>
-                )}
-                {(detailData.origin_type || salesByContract[detailData.contract_id]) && (
-                  <div className="col-span-2 flex flex-wrap items-center gap-2">
-                    <span className="text-muted-foreground">{t('clientOrders.dialog.origin')}: </span>
-                    {renderOrigin(detailData.contract_id, detailData.origin_type, detailData.origin_number, detailData.contract_number)}
-                    {salesByContract[detailData.contract_id]?.proforma_number && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1"
-                        onClick={() => handleDownloadProforma(detailData.contract_id)}
-                        disabled={proformaDownloadingId === detailData.contract_id}
-                      >
-                        {proformaDownloadingId === detailData.contract_id
-                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          : <FileDown className="h-3.5 w-3.5" />}
-                        {salesByContract[detailData.contract_id].proforma_number}
-                      </Button>
-                    )}
-                  </div>
-                )}
-              </div>
+            <ClientOrderLineStateLegend />
 
-              {/* Diagnóstico da obra — só-leitura. Cópia congelada tirada pelo
-                  QuoteBuilder quando o orçamento é gravado (não há trigger de
-                  assinatura de contrato nenhum por trás disto), para o armazém
-                  saber o que vai executar. Não renderiza nada (nem título, nem
-                  caixa) quando a encomenda não tem diagnóstico: é o caso normal
-                  das vendas diretas e das encomendas manuais. */}
-              {(() => {
-                const needs = detailData.diagnostic ?? [];
-                if (needs.length === 0) return null;
-                return (
-                  <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <ClipboardCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <h3 className="text-sm font-semibold">
-                        {tf('clientOrders.dialog.diagnostic.title', 'Diagnóstico da obra')}
-                      </h3>
-                      <Badge variant="outline" className="font-normal">
-                        {tf('clientOrders.dialog.diagnostic.readOnlyBadge', 'Só leitura')}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {tf(
-                        'clientOrders.dialog.diagnostic.subtitle',
-                        'Cópia do diagnóstico no momento em que o orçamento foi gravado. Não faz parte das linhas da encomenda.'
-                      )}
-                    </p>
-
-                    {needs.map((need) => {
-                      // Só os campos preenchidos entram na lista — rótulos sem
-                      // valor não se mostram.
-                      const fields: Array<{ label: string; value: string; wide?: boolean }> = [];
-                      if (need.diag_demolir_descricao) {
-                        fields.push({
-                          label: tf('clientOrders.dialog.diagnostic.demolish', 'Demolir'),
-                          value: need.diag_demolir_descricao,
-                          wide: true,
-                        });
-                      }
-                      if (need.diag_demolir_m2 !== null) {
-                        fields.push({
-                          label: tf('clientOrders.dialog.diagnostic.demolishArea', 'Área a demolir'),
-                          value: `${formatDiagnosticNumber(need.diag_demolir_m2)} m²`,
-                        });
-                      }
-                      if (need.diag_proteger_descricao) {
-                        fields.push({
-                          label: tf('clientOrders.dialog.diagnostic.protect', 'Proteger'),
-                          value: need.diag_proteger_descricao,
-                          wide: true,
-                        });
-                      }
-                      if (need.diag_intervencao_tipo) {
-                        fields.push({
-                          label: tf('clientOrders.dialog.diagnostic.interventionType', 'Tipo de intervenção'),
-                          value: need.diag_intervencao_tipo,
-                        });
-                      }
-                      if (need.diag_intervencao_descricao) {
-                        fields.push({
-                          label: tf('clientOrders.dialog.diagnostic.interventionDescription', 'Descrição da intervenção'),
-                          value: need.diag_intervencao_descricao,
-                          wide: true,
-                        });
-                      }
-
-                      return (
-                        <div
-                          key={need.deal_need_id}
-                          className="space-y-3 rounded-md border bg-background p-3"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="min-w-0 break-words text-sm font-medium">
-                              {need.need_title
-                                || tf('clientOrders.dialog.diagnostic.untitledNeed', 'Necessidade sem título')}
-                            </span>
-                            {need.diag_area_m2 !== null && (
-                              <Badge variant="secondary" className="shrink-0 font-normal">
-                                {formatDiagnosticNumber(need.diag_area_m2)} m²
-                              </Badge>
-                            )}
-                          </div>
-
-                          {fields.length > 0 && (
-                            <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
-                              {fields.map((field) => (
-                                <div key={field.label} className={field.wide ? 'sm:col-span-2' : undefined}>
-                                  <dt className="text-xs text-muted-foreground">{field.label}</dt>
-                                  <dd className="whitespace-pre-wrap break-words font-medium">{field.value}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                          )}
-
-                          {need.materials.length > 0 && (
-                            <div className="space-y-1.5">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                  {tf('clientOrders.dialog.diagnostic.materials', 'Materiais previstos')}
-                                </span>
-                                <Badge variant="outline" className="font-normal">
-                                  {tf(
-                                    'clientOrders.dialog.diagnostic.materialsBadge',
-                                    'Informativo para o armazém'
-                                  )}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                {tf(
-                                  'clientOrders.dialog.diagnostic.materialsNote',
-                                  'Não são linhas da encomenda, não têm preço e não somam ao total.'
-                                )}
-                              </p>
-                              <ul className="space-y-1">
-                                {need.materials.map((material, materialIndex) => (
-                                  <li
-                                    key={`${need.deal_need_id}-mat-${materialIndex}`}
-                                    className="flex items-baseline gap-2 text-sm"
-                                  >
-                                    <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">
-                                      {formatDiagnosticNumber(material.quantity)}
-                                      {material.unidade ? ` ${material.unidade}` : ''}
-                                    </span>
-                                    <span className="min-w-0 break-words text-muted-foreground">
-                                      {material.descricao || '-'}
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-
-              {(() => {
-                const { done, total, percent } = getAvailableProductsProgress();
-                const barColorClass = total === 0
-                  ? "[&>div]:bg-muted-foreground"
-                  : percent === 100
-                    ? "[&>div]:bg-success"
-                    : "[&>div]:bg-warning";
-                return (
-                  <div className="space-y-1.5 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">{t('clientOrders.dialog.availableProducts')}</span>
-                      <span className="font-medium">{done}/{total} ({percent}%)</span>
-                    </div>
-                    <Progress value={percent} className={`h-2 ${barColorClass}`} />
-                  </div>
-                );
-              })()}
-
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {/* Confirmar saída de todas as linhas pendentes. Com vários
-                    armazéns possíveis pede-se um; aplica-se só onde tem stock. */}
-                {canConfirmStockExit && (() => {
-                  const { pending, warehouses, singleEach } = getConfirmAllInfo();
-                  if (pending.length === 0) return null;
-                  const busy = confirmingAll || confirmingLineId !== null;
-                  return (
-                    <>
-                      {!singleEach && (
-                        <Select
-                          value={confirmAllWarehouseId}
-                          onValueChange={setConfirmAllWarehouseId}
-                          disabled={busy}
-                        >
-                          <SelectTrigger className="h-9 w-[200px] text-xs" aria-label={t('clientOrders.dialog.confirmAllWarehouse')}>
-                            <SelectValue placeholder={t('clientOrders.dialog.confirmAllWarehouse')} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {warehouses.map((wh) => (
-                              <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
-                                {wh.warehouse_name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleConfirmAllStockExits}
-                        disabled={busy || (!singleEach && !confirmAllWarehouseId)}
-                      >
-                        {confirmingAll
-                          ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          : <ClipboardCheck className="w-4 h-4 mr-2" />}
-                        {t('clientOrders.dialog.confirmAll', { count: pending.length })}
-                      </Button>
-                    </>
-                  );
-                })()}
-                {/* Pedir ao fornecedor a parte das linhas sem reserva nem pedido. */}
-                {detailData.can_request_missing && canRequestMissing && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setRequestMissingConfirmOpen(true)}
-                    disabled={requestingMissing || confirmingAll}
-                  >
-                    {requestingMissing
-                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      : <Truck className="w-4 h-4 mr-2" />}
-                    {asQty(detailData.missing_lines_count) > 0
-                      ? t('clientOrders.requestMissing.buttonCount', { count: asQty(detailData.missing_lines_count) })
-                      : t('clientOrders.requestMissing.button')}
-                  </Button>
-                )}
-                {detailData.is_editable && canEditOrder && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={openEditOrder}
-                    disabled={editLoading || confirmingAll}
-                  >
-                    {editLoading
-                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      : <Pencil className="w-4 h-4 mr-2" />}
-                    {t('clientOrders.dialog.editOrder')}
-                  </Button>
-                )}
-                {/* Com documento de origem: só morada de entrega e notas. */}
-                {!detailData.is_editable && detailData.can_edit_header && canEditOrder && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={openHeaderEdit}
-                    disabled={headerEditSaving || confirmingAll}
-                  >
-                    <Pencil className="w-4 h-4 mr-2" />
-                    {t('clientOrders.dialog.editOrder')}
-                  </Button>
-                )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleGeneratePdf(detailData.contract_id, detailData.order_number || detailData.contract_number)}
-                  disabled={pdfGeneratingId === detailData.contract_id}
-                >
-                  <FileDown className="w-4 h-4 mr-2" />
-                  {t('clientOrders.downloadPdf')}
-                </Button>
-                {canDeleteOrder && getDeletableOrigin(detailData.contract_id, detailData.origin_type) && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-destructive border-destructive/40 hover:text-destructive hover:bg-destructive/10"
-                    onClick={() => openDeleteOrder(
-                      detailData.contract_id,
-                      detailData.order_number || detailData.contract_number,
-                      detailData.origin_type,
-                      detailData.origin_number,
-                    )}
-                    disabled={deleting || confirmingAll}
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Eliminar
-                  </Button>
-                )}
-              </div>
-
-              <Table>
+            <div className="overflow-x-auto rounded-lg border bg-card">
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>{t('clientOrders.dialog.sku')}</TableHead>
-                    <TableHead>{t('clientOrders.dialog.product')}</TableHead>
-                    <TableHead className="text-right">{t('clientOrders.dialog.quantity')}</TableHead>
-                    <TableHead>{t('clientOrders.dialog.lineStatus')}</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Produto</TableHead>
+                    <TableHead className="text-right">Qtd</TableHead>
+                    <TableHead className="w-[260px]">De onde vem</TableHead>
+                    <TableHead>Estado</TableHead>
+                    <TableHead className="text-right">
+                      <span className="sr-only">{t('clientOrders.table.actions')}</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {detailData.lines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
                         {t('clientOrders.dialog.noLines')}
                       </TableCell>
                     </TableRow>
                   ) : (
-                    detailData.lines.map((line) => (
-                      <TableRow key={lineKey(line)}>
-                        <TableCell>{line.product_sku || line.service_sku || '-'}</TableCell>
-                        <TableCell>{line.product_name || line.service_name || '-'}</TableCell>
-                        <TableCell className="text-right">
-                          <div>{line.quantity}</div>
-                          {(() => {
-                            const summary = getReservationSummary(line);
-                            return summary
-                              ? <div className="text-xs text-muted-foreground">{summary}</div>
-                              : null;
-                          })()}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Badge className={getLineStatusColor(line)}>
-                              {getLineStatusLabel(line)}
-                            </Badge>
-                            {isStockExitConfirmable(line) && renderStockExitChecklist(line)}
-                            {/* Só saídas manuais (com movimento próprio) se
-                                revertem; a baixa automática na assinatura não.
-                                Também em 'parcial'/'recebido' com parte servida. */}
-                            {isStockExitRevertible(line) && canConfirmStockExit && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 gap-1 px-2 text-xs"
-                                onClick={() => setRevertTarget(line)}
-                                disabled={reverting || confirmingAll}
-                              >
-                                <Undo2 className="h-3.5 w-3.5" />
-                                {t('clientOrders.dialog.revert')}
-                              </Button>
-                            )}
-                            {line.purchase_order_id && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openPurchaseOrder(line)}
-                                title={t('clientOrders.openPurchaseOrder')}
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
-                          {/* Só leitura: resto anulado na PO ligada ("não vou receber o resto").
-                              Quando o documento já traz as anulações da linha
-                              (20261206150000), o rótulo do estado já as mostra. */}
-                          {!hasDocumentCancellations(line) &&
-                            poCancellationsByLine?.contractId === detailData.contract_id &&
-                            (poCancellationsByLine.byLine[lineKey(line)] || []).map((c) => (
-                              <div key={c.id} className="mt-1 text-xs text-muted-foreground" title={c.notes || undefined}>
-                                {formatBaseQty(c.units)} anulado(s){c.poNumber ? ` na ${c.poNumber}` : ''} — {PO_CANCELLATION_REASON_LABELS[c.reason] || c.reason}
+                    detailData.lines.map((line) => {
+                      const isProductLine = line.item_type !== 'service' && !!line.product_id;
+                      const served = asQty(line.qty_served);
+                      const reserved = asQty(line.qty_reserved);
+                      // Notas de anulação na PO ("não vou receber o resto").
+                      const extra: ReactElement[] = [];
+                      if (line.line_status === 'nao_recebido_anulado') {
+                        extra.push(
+                          <div key="void" className="text-muted-foreground">{getBaseLineStatusLabel(line)}</div>,
+                        );
+                      } else {
+                        const suffix = getCancelledSuffix(line).replace(/^ · /, '');
+                        if (suffix) extra.push(<div key="cancel" className="text-muted-foreground">{suffix}</div>);
+                      }
+                      if (!hasDocumentCancellations(line) && poCancellationsByLine?.contractId === detailData.contract_id) {
+                        (poCancellationsByLine.byLine[lineKey(line)] || []).forEach((c) => {
+                          extra.push(
+                            <div key={c.id} className="text-muted-foreground" title={c.notes || undefined}>
+                              {formatBaseQty(c.units)} anulado(s){c.poNumber ? ` na ${c.poNumber}` : ''} — {PO_CANCELLATION_REASON_LABELS[c.reason] || c.reason}
+                            </div>,
+                          );
+                        });
+                      }
+                      return (
+                        <TableRow key={lineKey(line)}>
+                          <TableCell className="whitespace-nowrap align-top font-mono text-[0.92em]">
+                            {line.product_sku || line.service_sku || '—'}
+                          </TableCell>
+                          <TableCell className="align-top">{line.product_name || line.service_name || '—'}</TableCell>
+                          <TableCell className="text-right align-top">
+                            <div className="inline-flex items-center justify-end gap-1">
+                              <b className="tabular-nums">{line.quantity}</b>
+                              {line.line_locked ? (
+                                <span
+                                  className="inline-flex text-muted-foreground"
+                                  title="Linha trancada: já saiu de stock ou foi pedida ao fornecedor"
+                                >
+                                  <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                                  <span className="sr-only">Linha trancada</span>
+                                </span>
+                              ) : null}
+                            </div>
+                            {isProductLine && (line.qty_served != null || line.qty_reserved != null) ? (
+                              <div className="whitespace-nowrap text-xs text-muted-foreground">
+                                servido {formatBaseQty(served)}{reserved > 0 ? ` · reservado ${formatBaseQty(reserved)}` : ''}
                               </div>
-                            ))}
-                        </TableCell>
-                      </TableRow>
-                    ))
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="align-top text-[12.5px]">
+                            <ClientOrderLineSource
+                              line={line}
+                              poState={line.purchase_order_id ? detailPoStates[line.purchase_order_id] ?? null : null}
+                              onOpenPo={line.purchase_order_id ? () => openPurchaseOrder(line) : null}
+                              extra={extra.length > 0 ? <>{extra}</> : undefined}
+                            />
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <ClientOrderLineStateBadge
+                              state={clientOrderLineState(line.line_status, line.has_preferred_supplier)}
+                              title={getLineStatusLabel(line)}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right align-top">{renderLineActions(line)}</TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
             </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+
+            <p className="flex items-start gap-1.5 text-[12.5px] text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                Regra: cada produto reserva o stock livre (stock − reservas das encomendas assinadas antes, por ordem
+                de assinatura); o que falta vai para a encomenda ao fornecedor preferencial, que a pode receber no
+                portal. A saída confirma-se aqui, por produto, a partir de um armazém com stock suficiente; só as
+                saídas confirmadas aqui se podem estornar. A receção da encomenda ao fornecedor serve esta encomenda.
+              </span>
+            </p>
+          </>
+        ) : null}
+      </ClientOrderDetailSheet>
 
       {/* Confirmação do estorno de uma saída de stock manual */}
       <AlertDialog
@@ -3539,51 +3555,55 @@ const ClientOrders = () => {
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingContractId
-                ? t('clientOrders.edit.title', { number: editingOrderNumber || '' })
-                : t('clientOrders.create.title')}
+              {editingContractId ? `Editar ${editingOrderNumber || ''}` : 'Nova encomenda manual'}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Cliente, morada de entrega, notas e linhas da encomenda manual.
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6">
-            <div className="space-y-2">
-              <Label>{t('clientOrders.create.client')} *</Label>
-              {editingContractId ? (
-                // Em edição o cliente não muda (o contrato já está assinado para ele).
-                <Input value={editingClientName || '-'} disabled readOnly />
-              ) : (
-                <EntitySearchInput
-                  value={createClient}
-                  onChange={handleCreateClientChange}
-                  searchTypes={["client"]}
-                  placeholder={t('clientOrders.create.clientPlaceholder')}
-                  disabled={creating}
-                />
-              )}
-            </div>
-
-            <DeliveryAddressPicker
-              entityId={deliveryEntityId}
-              options={deliveryOptions}
-              optionsLoading={deliveryOptionsLoading}
-              choice={deliveryChoice}
-              onChoiceChange={handleDeliveryChoiceChange}
-              showNewForm={showNewDeliveryForm}
-              onShowNewFormChange={setShowNewDeliveryForm}
-              onAdded={handleDeliveryAddressAdded}
-              value={createDeliveryAddress}
-              onValueChange={setCreateDeliveryAddress}
-              textareaId="client_order_delivery_address"
-              newFormIdPrefix="client_order_new_delivery"
-              label={t('clientOrders.create.deliveryAddress')}
-              disabled={creating}
-              canAddNew={canAddDeliveryInManualDialog}
-              t={t}
-            />
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
               <div className="space-y-2">
-                <Label htmlFor="client_order_date">{t('clientOrders.create.date')} *</Label>
+                <Label>Cliente *</Label>
+                {editingContractId ? (
+                  // Em edição o cliente não muda (o contrato já está assinado para ele).
+                  <Input value={editingClientName || '-'} disabled readOnly aria-label="Cliente" />
+                ) : (
+                  <EntitySearchInput
+                    value={createClient}
+                    onChange={handleCreateClientChange}
+                    searchTypes={["client"]}
+                    placeholder={t('clientOrders.create.clientPlaceholder')}
+                    disabled={creating}
+                  />
+                )}
+              </div>
+
+              <DeliveryAddressPicker
+                entityId={deliveryEntityId}
+                options={deliveryOptions}
+                optionsLoading={deliveryOptionsLoading}
+                choice={deliveryChoice}
+                onChoiceChange={handleDeliveryChoiceChange}
+                showNewForm={showNewDeliveryForm}
+                onShowNewFormChange={setShowNewDeliveryForm}
+                onAdded={handleDeliveryAddressAdded}
+                value={createDeliveryAddress}
+                onValueChange={setCreateDeliveryAddress}
+                textareaId="client_order_delivery_address"
+                newFormIdPrefix="client_order_new_delivery"
+                label="Morada de entrega"
+                disabled={creating}
+                canAddNew={canAddDeliveryInManualDialog}
+                t={t}
+              />
+
+              {/* Data da encomenda (start_date do contrato sintético): fica no
+                  lugar do "Armazém de expedição" do protótipo, que não existe
+                  nos dados. Só se define na criação. */}
+              <div className="space-y-2">
+                <Label htmlFor="client_order_date">Data *</Label>
                 <Input
                   id="client_order_date"
                   type="date"
@@ -3592,10 +3612,11 @@ const ClientOrders = () => {
                   disabled={creating || !!editingContractId}
                 />
               </div>
+
               {/* As notas só se definem na criação — a RPC de edição não as recebe. */}
               {!editingContractId && (
                 <div className="space-y-2">
-                  <Label htmlFor="client_order_notes">{t('clientOrders.create.notes')}</Label>
+                  <Label htmlFor="client_order_notes">Notas</Label>
                   <Textarea
                     id="client_order_notes"
                     value={createNotes}
@@ -3607,168 +3628,137 @@ const ClientOrders = () => {
               )}
             </div>
 
-            <div className="border-t pt-4">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">{t('clientOrders.create.items')}</h3>
-                <Button type="button" onClick={() => setShowItemsDialog(true)} disabled={creating}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  {t('clientOrders.create.addItems')}
+            <div className="space-y-2">
+              <b className="block text-[13px]">Linhas (quantidade em unidades inteiras)</b>
+              {createItems.length === 0 && (
+                <p className="text-sm text-muted-foreground">{t('clientOrders.create.noItems')}</p>
+              )}
+              {createItems.map((item, index) => {
+                const integerQty = itemRequiresInteger(item);
+                // Linha trancada (já servida/pedida): só leitura.
+                const rowDisabled = creating || !!item.locked;
+                // Produto de linha existente, serviço ou componente de pack do
+                // catálogo: não se troca aqui (remove-se e acrescenta-se outra).
+                const fixedItem = !!item.locked || !!item.quote_line_id || !!item.service_id;
+                const hasItem = !!item.product_id || !!item.service_id;
+                const itemLabel = hasItem ? `${item.sku ? `${item.sku} — ` : ''}${item.description}` : '';
+                return (
+                  <div key={item.quote_line_id || item.row_key || `new-${index}`} className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        {fixedItem ? (
+                          <div
+                            className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm ${item.locked ? 'bg-muted/40' : 'bg-muted/20'}`}
+                            title={item.quote_line_id ? 'Produto de linha existente: para trocar, remova a linha e acrescente outra' : undefined}
+                          >
+                            <span className="min-w-0 truncate">{itemLabel || '—'}</span>
+                            {item.item_type === 'service' && <InventoryStatusBadge>Serviço</InventoryStatusBadge>}
+                          </div>
+                        ) : (
+                          <ClientOrderProductPicker
+                            organizationId={activeCompany?.id}
+                            valueLabel={itemLabel}
+                            selectedId={item.product_id}
+                            onSelect={(product) => handleCreateItemProductSelect(index, product)}
+                            disabled={creating}
+                            ariaLabel={`Produto da linha ${index + 1}`}
+                          />
+                        )}
+                      </div>
+                      <Input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => handleCreateItemChange(index, 'quantity', e.target.value)}
+                        className="w-[90px]"
+                        min="0"
+                        step={integerQty ? 1 : 0.01}
+                        inputMode={integerQty ? 'numeric' : 'decimal'}
+                        disabled={rowDisabled}
+                        aria-label={`Quantidade da linha ${index + 1}`}
+                      />
+                      <Input
+                        type="number"
+                        value={item.unit_price}
+                        onChange={(e) => handleCreateItemChange(index, 'unit_price', e.target.value)}
+                        className="w-[110px]"
+                        min="0"
+                        step="0.01"
+                        disabled={rowDisabled}
+                        aria-label={`Preço unitário da linha ${index + 1} (€)`}
+                        title="Preço unitário (€, sem IVA)"
+                      />
+                      {item.locked ? (
+                        <span title={t('clientOrders.edit.lockedNote')} className="inline-flex">
+                          <InventoryStatusBadge>
+                            <Lock className="h-3 w-3" aria-hidden="true" /> Trancada
+                          </InventoryStatusBadge>
+                        </span>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                        onClick={() => handleRemoveCreateItem(index)}
+                        aria-label={`Remover linha ${index + 1}`}
+                        title={item.locked ? t('clientOrders.edit.lockedNote') : t('clientOrders.create.removeItem')}
+                        disabled={rowDisabled}
+                      >
+                        <X className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                    {hasItem && (
+                      <p className="pl-1 text-xs text-muted-foreground">
+                        {item.categoria ? `${item.categoria} · ` : ''}
+                        {formatEur(item.unit_price)}/un · IVA {item.vat_rate}%
+                        {item.locked ? <span className="text-amber-700 dark:text-warning"> · {t('clientOrders.edit.lockedNote')}</span> : null}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={handleAddBlankCreateItem} disabled={creating}>
+                  <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                  Adicionar linha
+                </Button>
+                {/* Serviços, packs (expandidos nos componentes) e produtos com
+                    atributos: o seletor completo do catálogo dos orçamentos. */}
+                <Button type="button" variant="ghost" size="sm" onClick={() => setShowItemsDialog(true)} disabled={creating}>
+                  Catálogo completo (serviços, packs)…
                 </Button>
               </div>
-
-              {createItems.length > 0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-2">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t('clientOrders.create.itemType')}</TableHead>
-                          <TableHead>{t('clientOrders.create.itemDescription')}</TableHead>
-                          <TableHead>{t('clientOrders.create.itemQuantity')}</TableHead>
-                          <TableHead>{t('clientOrders.create.itemUnitPrice')}</TableHead>
-                          <TableHead>{t('clientOrders.create.itemVat')}</TableHead>
-                          <TableHead className="text-right">{t('clientOrders.create.itemTotal')}</TableHead>
-                          <TableHead></TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {createItems.map((item, index) => {
-                          const lineSubtotal = item.unit_price * item.quantity;
-                          const lineTotal = lineSubtotal * (1 + item.vat_rate / 100);
-                          const integerQty = itemRequiresInteger(item);
-                          // Linha trancada (já servida/pedida): só leitura.
-                          const rowDisabled = creating || !!item.locked;
-                          return (
-                            <TableRow
-                              key={item.quote_line_id || `${item.product_id || item.service_id}-${index}`}
-                              className={item.locked ? 'bg-muted/40' : undefined}
-                            >
-                              <TableCell>
-                                <Badge variant="outline">
-                                  {item.item_type === 'product'
-                                    ? t('clientOrders.create.typeProduct')
-                                    : t('clientOrders.create.typeService')}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="font-medium">{item.description}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {item.sku ? `${item.sku} · ` : ''}{item.categoria}
-                                </div>
-                                {item.locked && (
-                                  <div className="text-xs text-warning mt-0.5">{t('clientOrders.edit.lockedNote')}</div>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  value={item.quantity}
-                                  onChange={(e) => handleCreateItemChange(index, 'quantity', e.target.value)}
-                                  className="w-20"
-                                  min="0"
-                                  step={integerQty ? 1 : 0.01}
-                                  inputMode={integerQty ? 'numeric' : 'decimal'}
-                                  disabled={rowDisabled}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  value={item.unit_price}
-                                  onChange={(e) => handleCreateItemChange(index, 'unit_price', e.target.value)}
-                                  className="w-24"
-                                  min="0"
-                                  step="0.01"
-                                  disabled={rowDisabled}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  value={item.vat_rate}
-                                  onChange={(e) => handleCreateItemChange(index, 'vat_rate', e.target.value)}
-                                  className="w-20"
-                                  min="0"
-                                  step="0.5"
-                                  disabled={rowDisabled}
-                                />
-                              </TableCell>
-                              <TableCell className="text-right font-semibold">€{lineTotal.toFixed(2)}</TableCell>
-                              <TableCell>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => handleRemoveCreateItem(index)}
-                                  title={item.locked ? t('clientOrders.edit.lockedNote') : t('clientOrders.create.removeItem')}
-                                  disabled={rowDisabled}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  <div>
-                    {(() => {
-                      const totals = getCreateTotals();
-                      return (
-                        <Card>
-                          <CardHeader>
-                            <CardTitle>{t('clientOrders.create.summary')}</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-2">
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">{t('clientOrders.create.subtotal')}</span>
-                              <span>€{totals.subtotal.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">{t('clientOrders.create.vat')}</span>
-                              <span>€{totals.totalVat.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-lg font-bold pt-2 border-t">
-                              <span>{t('clientOrders.create.total')}</span>
-                              <span>€{totals.total.toFixed(2)}</span>
-                            </div>
-                            <div className="text-sm text-muted-foreground pt-2">
-                              {t('clientOrders.create.itemsCount')}: {createItems.length}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })()}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  {t('clientOrders.create.noItems')}
-                </div>
-              )}
             </div>
 
-            <div className="flex gap-2 justify-end pt-4 border-t">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeCreateDialog}
-                disabled={creating}
-              >
-                {t('clientOrders.create.cancel')}
-              </Button>
-              <Button
-                type="button"
-                onClick={editingContractId ? handleUpdateOrder : handleCreateOrder}
-                disabled={creating}
-              >
-                {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {editingContractId
-                  ? (creating ? t('clientOrders.edit.submitting') : t('clientOrders.edit.submit'))
-                  : (creating ? t('clientOrders.create.submitting') : t('clientOrders.create.submit'))}
-              </Button>
+            <p className="flex items-start gap-1.5 text-[12.5px] text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                Ao gravar, cada produto reserva o stock livre (stock − reservas das encomendas anteriores); o que
+                falta vai para a encomenda ao fornecedor preferencial. Linhas já servidas ou pedidas ao fornecedor
+                ficam trancadas. Os packs entram pelos seus componentes. Linhas sem produto escolhido não se gravam.
+              </span>
+            </p>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+              <span className="text-sm text-muted-foreground">
+                {(() => {
+                  const totals = getCreateTotals();
+                  return <>Total {formatEur(totals.subtotal)} s/ IVA · <b className="text-foreground">{formatEur(totals.total)}</b> c/ IVA</>;
+                })()}
+              </span>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" onClick={closeCreateDialog} disabled={creating}>
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={editingContractId ? handleUpdateOrder : handleCreateOrder}
+                  disabled={creating}
+                >
+                  {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  {creating ? 'A gravar…' : 'Gravar'}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

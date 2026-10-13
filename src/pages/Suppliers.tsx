@@ -16,7 +16,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,11 +26,8 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
+import type { OrganizationSelection } from "@/components/OrganizationFormSection";
 import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
-import SupplierPortalTab from "@/components/supplier-portal-crm/SupplierPortalTab";
-import SupplierPortalCatalogSection from "@/components/supplier-portal-crm/SupplierPortalCatalogSection";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SupplierSlaReportDialog from "@/components/SupplierSlaReportDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -52,6 +48,10 @@ import {
   SupplierSla,
 } from "@/components/suppliers/SupplierRowStats";
 import { Clock, Eye, ShoppingCart, Undo2, Users } from "lucide-react";
+import { SupplierSheet, supplierSheetTabFromParams, type SupplierSheetTab } from "@/components/suppliers/SupplierSheet";
+import { SupplierDataForm, type SupplierFormData } from "@/components/suppliers/SupplierDataForm";
+
+const SUPPLIER_FORM_ID = "supplier-sheet-form";
 
 // Título e descrição do ecrã (tom do TITULOS.sup do protótipo, ajustado ao que
 // a app faz: a tabela não se edita inline e o convite ao portal é um passo à
@@ -103,9 +103,11 @@ const Suppliers = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   // Ficha em edição: o separador Portal usa a empresa/nome gravados.
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [formTab, setFormTab] = useState<"dados" | "portal">("dados");
+  // Separador da folha do fornecedor (Resumo · Dados · Artigos e preços ·
+  // Preços por aprovar · Portal).
+  const [formTab, setFormTab] = useState<SupplierSheetTab>("dados");
   // Link do sino "Preços do fornecedor por aprovar" (F3.4b): a ficha abre no
-  // separador Portal do fornecedor, já em "Preços por aprovar".
+  // separador "Preços por aprovar".
   const [focusPriceChanges, setFocusPriceChanges] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const handledDeepLinkRef = useRef<string | null>(null);
@@ -195,7 +197,7 @@ const Suppliers = () => {
   const [bulkCompanyDialogOpen, setBulkCompanyDialogOpen] = useState(false);
   const [bulkCompanyId, setBulkCompanyId] = useState("");
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<SupplierFormData>({
     name: "",
     contact_person: "",
     email: "",
@@ -446,7 +448,7 @@ const Suppliers = () => {
   const handleEdit = async (supplier: Supplier) => {
     setEditingId(supplier.id);
     setEditingSupplier(supplier);
-    setFormTab("dados");
+    setFormTab("resumo");
     setFocusPriceChanges(false);
     setFormData({
       name: supplier.name,
@@ -487,11 +489,11 @@ const Suppliers = () => {
     setOpen(true);
   };
 
-  // /suppliers?open=<id>&tab=portal&prices=pending (link do sino): abre a ficha
-  // do fornecedor; com tab=portal|catalogo ou prices=pending vai para o
-  // separador "Portal do fornecedor" (é lá que está o catálogo e a secção
-  // "Preços por aprovar"). Os parâmetros são limpos para fechar a ficha não a
-  // voltar a abrir.
+  // /suppliers?open=<id>&tab=…&prices=pending (link do sino): abre a ficha do
+  // fornecedor no separador certo (supplierSheetTabFromParams): prices=pending
+  // → Preços por aprovar; tab=catalogo → Artigos e preços; tab=portal → Portal;
+  // tab=dados → Dados; também aceita resumo/artigos/precos; sem tab → Resumo.
+  // Os parâmetros são limpos para fechar a ficha não a voltar a abrir.
   const deepLinkSupplierId = searchParams.get("open");
   const deepLinkTab = searchParams.get("tab");
   const deepLinkPrices = searchParams.get("prices");
@@ -523,9 +525,7 @@ const Suppliers = () => {
       }
       await handleEdit(data as Supplier);
       const wantsPrices = deepLinkPrices === "pending";
-      setFormTab(
-        wantsPrices || deepLinkTab === "portal" || deepLinkTab === "catalogo" ? "portal" : "dados",
-      );
+      setFormTab(supplierSheetTabFromParams(deepLinkTab, deepLinkPrices));
       setFocusPriceChanges(wantsPrices);
     })();
     // handleEdit/toast: lidos no momento do link.
@@ -1118,6 +1118,13 @@ const Suppliers = () => {
   }
 
   const awaitingList = !showDeleted ? orgStats?.awaiting ?? [] : [];
+  // Portal ligado no fornecedor em edição: a BD recusa mudar NIF/empresa (aviso em Dados).
+  const editingPortalState =
+    editingSupplier && editingSupplier.organization_id === statsOrgId && orgStats
+      ? orgStats.portal.get(editingSupplier.id) ?? "none"
+      : "none";
+  const editingPortalLinked =
+    !!editingId && (editingPortalState === "active" || editingPortalState === "awaiting" || editingPortalState === "suspended");
   const priceGateReason = "Sem permissão: requer suppliers.view_pricing ou products.view_cost. Peça acesso a um administrador.";
 
   return (
@@ -1517,207 +1524,38 @@ const Suppliers = () => {
           </CardContent>
         </Card>
 
-        {/* Form Dialog */}
-        <Dialog open={open} onOpenChange={(isOpen) => {
-          setOpen(isOpen);
-          if (!isOpen) {
+        {/* Ficha do fornecedor: folha lateral (FornecedorFolha do protótipo) */}
+        <SupplierSheet
+          open={open}
+          onClose={() => {
+            setOpen(false);
             setEditingId(null);
             resetForm();
+          }}
+          supplier={editingId ? editingSupplier : null}
+          tab={formTab}
+          onTabChange={setFormTab}
+          formId={SUPPLIER_FORM_ID}
+          cancelLabel={t("suppliers.form.cancel")}
+          submitLabel={editingId ? t("suppliers.form.update") : t("suppliers.form.create")}
+          focusPriceChanges={focusPriceChanges}
+          canManagePortal={canManagePortal}
+          fallbackOrganizationId={activeCompany?.id ?? null}
+          dataForm={
+            <SupplierDataForm
+              formId={SUPPLIER_FORM_ID}
+              formData={formData}
+              setFormData={setFormData}
+              fieldErrors={fieldErrors}
+              organizationSelection={organizationSelection}
+              onOrganizationChange={setOrganizationSelection}
+              onSubmit={handleSubmit}
+              t={t}
+              portalLinked={editingPortalLinked}
+              onGoToPortal={editingId ? () => setFormTab("portal") : undefined}
+            />
           }
-        }}>
-          <DialogContent className={`${editingId && formTab === "portal" ? "max-w-4xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`}>
-            <DialogHeader>
-              <DialogTitle>{editingId ? t("suppliers.editSupplier") : t("suppliers.newSupplier")}</DialogTitle>
-            </DialogHeader>
-            <Tabs value={editingId ? formTab : "dados"} onValueChange={(v) => setFormTab(v as "dados" | "portal")}>
-            {editingId && (
-              <TabsList className="mb-2">
-                <TabsTrigger value="dados">Dados</TabsTrigger>
-                <TabsTrigger value="portal">Portal do fornecedor</TabsTrigger>
-              </TabsList>
-            )}
-            <TabsContent value="dados" className="mt-0">
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Organization Selection */}
-              <OrganizationFormSection
-                value={organizationSelection}
-                onChange={setOrganizationSelection}
-                showSecondaryCompanies={false}
-                multiSelectCompanies={true}
-              />
-              {fieldErrors.organization_id && (
-                <p className="text-sm text-destructive" role="alert">{fieldErrors.organization_id}</p>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="col-span-2 space-y-2">
-                  <Label htmlFor="name">{t("suppliers.form.name")} *</Label>
-                  <Input
-                    id="name"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
-                    className={fieldErrors.name ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="contact_person">{t("suppliers.form.contactPerson")}</Label>
-                  <Input
-                    id="contact_person"
-                    value={formData.contact_person}
-                    onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
-                    className={fieldErrors.contact_person ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.contact_person && <p className="text-sm text-destructive">{fieldErrors.contact_person}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">{t("suppliers.form.email")}</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className={fieldErrors.email ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone">{t("suppliers.form.phone")}</Label>
-                  <Input
-                    id="phone"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className={fieldErrors.phone ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tax_id">{t("suppliers.form.taxId")}</Label>
-                  <Input
-                    id="tax_id"
-                    value={formData.tax_id}
-                    onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
-                    className={fieldErrors.tax_id ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.tax_id && <p className="text-sm text-destructive">{fieldErrors.tax_id}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="delivery_sla_days">{t("suppliers.form.deliverySlaDays")}</Label>
-                  <Input
-                    id="delivery_sla_days"
-                    type="number"
-                    min="1"
-                    value={formData.delivery_sla_days}
-                    onChange={(e) => setFormData({ ...formData, delivery_sla_days: e.target.value })}
-                    className={fieldErrors.delivery_sla_days ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.delivery_sla_days && <p className="text-sm text-destructive">{fieldErrors.delivery_sla_days}</p>}
-                </div>
-                <div className="col-span-2 space-y-2">
-                  <Label htmlFor="address">{t("suppliers.form.address")}</Label>
-                  <Input
-                    id="address"
-                    value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                    className={fieldErrors.address ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.address && <p className="text-sm text-destructive">{fieldErrors.address}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="city">{t("suppliers.form.city")}</Label>
-                  <Input
-                    id="city"
-                    value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    className={fieldErrors.city ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.city && <p className="text-sm text-destructive">{fieldErrors.city}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="postal_code">{t("suppliers.form.postalCode")}</Label>
-                  <Input
-                    id="postal_code"
-                    value={formData.postal_code}
-                    onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
-                    className={fieldErrors.postal_code ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.postal_code && <p className="text-sm text-destructive">{fieldErrors.postal_code}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="country">{t("suppliers.form.country")}</Label>
-                  <Input
-                    id="country"
-                    value={formData.country}
-                    onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                    className={fieldErrors.country ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.country && <p className="text-sm text-destructive">{fieldErrors.country}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="website">{t("suppliers.form.website")}</Label>
-                  <Input
-                    id="website"
-                    type="url"
-                    value={formData.website}
-                    onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                    className={fieldErrors.website ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.website && <p className="text-sm text-destructive">{fieldErrors.website}</p>}
-                </div>
-                <div className="col-span-2 space-y-2">
-                  <Label htmlFor="notes">{t("suppliers.form.notes")}</Label>
-                  <Textarea
-                    id="notes"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    rows={3}
-                    className={fieldErrors.notes ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.notes && <p className="text-sm text-destructive">{fieldErrors.notes}</p>}
-                </div>
-                <div className="col-span-2 flex items-center gap-2">
-                  <Checkbox
-                    id="is_active"
-                    checked={formData.is_active}
-                    onCheckedChange={(checked) => setFormData({ ...formData, is_active: !!checked })}
-                  />
-                  <Label htmlFor="is_active" className="cursor-pointer">{t("suppliers.form.active")}</Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                  {t("suppliers.form.cancel")}
-                </Button>
-                <Button type="submit">{editingId ? t("suppliers.form.update") : t("suppliers.form.create")}</Button>
-              </DialogFooter>
-            </form>
-            </TabsContent>
-            {editingId && (
-              <TabsContent value="portal" className="mt-0 space-y-6">
-                {canManagePortal ? (
-                  <SupplierPortalTab
-                    supplierId={editingId}
-                    supplierName={editingSupplier?.name || formData.name}
-                    organizationId={editingSupplier?.organization_id ?? activeCompany?.id ?? null}
-                    defaultEmail={editingSupplier?.email ?? null}
-                    defaultName={editingSupplier?.contact_person ?? null}
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Sem permissão para gerir o acesso deste fornecedor ao portal.
-                  </p>
-                )}
-                <SupplierPortalCatalogSection
-                  supplierId={editingId}
-                  organizationId={editingSupplier?.organization_id ?? null}
-                  focusPriceChanges={focusPriceChanges}
-                />
-              </TabsContent>
-            )}
-            </Tabs>
-          </DialogContent>
-        </Dialog>
+        />
 
         {catalogSupplier && (
           <SupplierCatalogDialog

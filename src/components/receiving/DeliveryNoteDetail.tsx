@@ -1,4 +1,5 @@
-// Ficha de uma guia do fornecedor (Fase 2 — fatia 2): resumo por produto
+// Ficha de uma guia do fornecedor (Fase 2 — fatia 2) — folha lateral igual à
+// GuiaFolha do protótipo (DocumentSheet): resumo por produto
 // (ok / falta / excesso / não anunciado / não encomendado), receções feitas
 // pela guia, histórico e ações (editar, fechar, reabrir, cancelar).
 //
@@ -14,12 +15,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { usePermissions } from "@/hooks/usePermissions";
+import { DocInfoGrid, DocSection, DocumentSheetContent, DOC_TABLE_WRAP_CLASS } from "@/components/inventory/DocumentSheet";
+import { DocumentLink, InventoryStatusBadge, purchaseOrdersLink, type InventoryTone } from "@/components/inventory/ui";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Ban, CheckCircle2, FileDown, Lock, Pencil, RefreshCw, Unlock } from "lucide-react";
 import { DeliveryNoteDialog } from "./DeliveryNoteDialog";
 import {
-  FULLSCREEN_DIALOG_CLASS,
   NOTE_STATUS_LABEL,
   PRODUCT_STATUS_LABEL,
   fetchDeliveryNote,
@@ -89,6 +93,9 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
   const seqRef = useRef(0);
   const onChangedRef = useRef(onChanged);
   onChangedRef.current = onChanged;
+  // Ligações às encomendas só para quem as pode abrir (antes eram só texto).
+  const { hasPermission } = usePermissions();
+  const canViewOrders = hasPermission("purchase_orders.view");
 
   const load = useCallback(async (id: string) => {
     const seq = ++seqRef.current;
@@ -191,280 +198,362 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
     (mode === "close" && needsCloseNote && !text.trim()) ||
     ((mode === "reopen" || mode === "cancel") && !text.trim());
 
-  return (
-    <>
-      <Dialog open={open && !editOpen} onOpenChange={(o) => !busy && onOpenChange(o)}>
-        <DialogContent className={FULLSCREEN_DIALOG_CLASS}>
-          <DialogHeader className="border-b p-4 pr-12 text-left">
-            <DialogTitle className="flex flex-wrap items-center gap-2">
-              <span>Guia {note ? noteLabel(note.note_number) : ""}</span>
-              {note && (
-                <Badge variant={note.status === "open" ? "secondary" : "outline"}>{NOTE_STATUS_LABEL[note.status] ?? note.status}</Badge>
+  const closeSheet = () => {
+    if (!busy) onOpenChange(false);
+  };
+  const statusTone: InventoryTone = note?.status === "open" ? "info" : note?.status === "closed" ? "ok" : "neutral";
+  const statusLabel = note ? NOTE_STATUS_LABEL[note.status] ?? note.status : "";
+
+  // Rodapé (.sh-foot do protótipo GuiaFolha): PDF e Atualizar à esquerda; à
+  // direita as ações do estado — as mesmas condições/permissões de antes.
+  const footer =
+    note && !mode
+      ? {
+          left: (
+            <>
+              {canDownloadProof && note.status !== "cancelled" && (
+                <Button type="button" variant="ghost" className="h-10" onClick={() => void downloadProof()} disabled={downloading}>
+                  <FileDown className="mr-2 h-4 w-4" aria-hidden />
+                  {downloading ? "A gerar…" : "PDF prova de receção"}
+                </Button>
               )}
-            </DialogTitle>
-            <DialogDescription>
-              {note
-                ? [note.supplier_name ?? "Fornecedor", note.document_date ? `data ${fmtDay(note.document_date)}` : null]
-                    .filter(Boolean)
-                    .join(" · ")
-                : "Resumo da guia do fornecedor"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-            {loading && !note && <p className="text-sm text-muted-foreground">A carregar guia…</p>}
-            {loadError && (
-              <div className="space-y-2">
-                <p role="alert" className="text-sm text-destructive">
-                  {loadError}
-                </p>
-                {noteId && (
-                  <Button type="button" variant="outline" className="h-11" onClick={() => void load(noteId)}>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Tentar de novo
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {note && (
-              <>
-                {note.changed_since_close && (
-                  <Callout tone="warning">
-                    O recebido mudou depois do fecho (por exemplo, uma receção revertida). O resumo abaixo é o atual; o do
-                    fecho ficou guardado.
-                  </Callout>
-                )}
-                {note.status === "closed" && (
-                  <Callout tone="info">
-                    Fechada em {fmtDateTime(note.closed_at)}
-                    {note.close_notes ? ` — ${note.close_notes}` : ""}. Leituras com esta guia são recusadas até ser reaberta.
-                  </Callout>
-                )}
-                {note.status === "cancelled" && (
-                  <Callout tone="error">
-                    Cancelada em {fmtDateTime(note.cancelled_at)}
-                    {note.cancel_reason ? ` — ${note.cancel_reason}` : ""}.
-                  </Callout>
-                )}
-                {note.notes && <p className="whitespace-pre-wrap break-words text-sm">{note.notes}</p>}
-
-                <section aria-labelledby="dnd-pos" className="space-y-1">
-                  <h3 id="dnd-pos" className="font-semibold">
-                    Encomendas
-                  </h3>
-                  <p className="break-words text-sm">
-                    {note.purchase_orders.length === 0
-                      ? "Todas as encomendas em aberto do fornecedor."
-                      : note.purchase_orders
-                          .map((p) => `${p.order_number ?? "PO"}${p.deleted ? " (apagada)" : p.status === "cancelled" ? " (cancelada)" : ""}`)
-                          .join(", ")}
-                  </p>
-                </section>
-
-                <section aria-labelledby="dnd-products" className="space-y-2">
-                  <h3 id="dnd-products" className="font-semibold">
-                    Resumo por produto
-                  </h3>
-                  {totals && (
-                    <p className="text-sm text-muted-foreground">
-                      {summary?.has_lines ? `Anunciado ${fmtQty(totals.announced_units)} un · ` : "Sem linhas anunciadas · "}
-                      recebido {fmtQty(totals.received_units)} un
-                      {summary?.has_lines && totals.missing_units > 0 ? ` · falta ${fmtQty(totals.missing_units)} un` : ""}
-                      {summary?.has_lines && totals.excess_units > 0 ? ` · excesso ${fmtQty(totals.excess_units)} un` : ""}
-                      {totals.divergences > 0 ? ` · ${totals.divergences} com divergência` : ""}
-                    </p>
-                  )}
-                  {!summary || summary.products.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Ainda nada anunciado nem recebido.</p>
-                  ) : (
-                    <ul className="divide-y rounded-md border">
-                      {summary.products.map((p) => (
-                        <li key={p.product_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-2 text-sm">
-                          <div className="min-w-0 flex-1 basis-40">
-                            <p className="break-words font-medium">{p.name ?? "Produto"}</p>
-                            {p.sku && <p className="break-all text-xs text-muted-foreground">{p.sku}</p>}
-                          </div>
-                          <span className="whitespace-nowrap text-muted-foreground">
-                            {summary.has_lines ? `${fmtQty(p.received_units)} / ${fmtQty(p.announced_units)} un` : `${fmtQty(p.received_units)} un`}
-                          </span>
-                          <Badge variant="outline" className={cn("whitespace-nowrap", STATUS_TONE[p.status])}>
-                            {PRODUCT_STATUS_LABEL[p.status] ?? p.status}
-                            {p.status === "falta" && ` ${fmtQty(p.missing_units)}`}
-                            {p.status === "excesso" && ` +${fmtQty(p.excess_units)}`}
-                          </Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                <section aria-labelledby="dnd-receipts" className="space-y-2">
-                  <h3 id="dnd-receipts" className="font-semibold">
-                    Receções por esta guia{summary ? ` (${summary.receipts.length})` : ""}
-                  </h3>
-                  {!summary || summary.receipts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Ainda nenhuma receção com esta guia.</p>
-                  ) : (
-                    <ul className="divide-y rounded-md border">
-                      {summary.receipts.map((r) => (
-                        <li key={r.id} className={cn("space-y-0.5 p-2 text-sm", r.reverted && "opacity-60")}>
-                          <p className="break-words">
-                            <span className="font-medium">{r.product_name ?? "Produto"}</span> · {fmtQty(r.units)} un ·{" "}
-                            {r.order_number ?? "PO"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {fmtDateTime(r.received_at)}
-                            {Number(r.units_to_order) > 0 ? ` · ${fmtQty(r.units_to_order)} un para EC` : ""}
-                            {Number(r.units_to_stock) > 0 ? ` · ${fmtQty(r.units_to_stock)} un para stock` : ""}
-                            {r.reverted ? ` · revertida em ${fmtDateTime(r.reverted_at)}${r.revert_reason ? ` — ${r.revert_reason}` : ""}` : ""}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-
-                {note.history.length > 0 && (
-                  <section aria-labelledby="dnd-history" className="space-y-1">
-                    <h3 id="dnd-history" className="font-semibold">
-                      Histórico
-                    </h3>
-                    <ul className="space-y-1 text-sm">
-                      {note.history.map((h, i) => (
-                        <li key={i} className="break-words text-muted-foreground">
-                          {fmtDateTime(h.at)} · {HISTORY_LABEL[h.action] ?? h.action}
-                          {h.notes ? ` — ${h.notes}` : ""}
-                          {h.reason ? ` — ${h.reason}` : ""}
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-
-                {/* Ação em curso */}
-                {canEdit && mode && (
-                  <section className="space-y-2 rounded-md border p-3" aria-labelledby="dnd-action">
-                    <h3 id="dnd-action" className="font-semibold">
-                      {mode === "close" ? "Fechar a guia" : mode === "reopen" ? "Reabrir a guia" : "Cancelar a guia"}
-                    </h3>
-                    {mode === "close" && (
-                      <p className="text-sm text-muted-foreground">
-                        Fechar só fecha a guia: as encomendas ficam como estão (o que faltar continua em aberto na PO).
-                        {needsCloseNote && " Há divergências — indica uma nota."}
-                      </p>
-                    )}
-                    {mode === "cancel" && (
-                      <p className="text-sm text-muted-foreground">
-                        Só para guias registadas por engano. Uma guia com receções ativas não pode ser cancelada (reverte-as
-                        primeiro na encomenda).
-                      </p>
-                    )}
-                    {(mode === "close" || mode === "cancel") && workCount > 0 && work && (
-                      <Callout tone="warning">
-                        Ainda há trabalho por enviar com esta guia neste dispositivo:{" "}
-                        {[
-                          work.basket > 0 ? `${work.basket} no cesto` : null,
-                          work.unsent > 0 ? `${work.unsent} em "Por enviar"` : null,
-                          work.pending > 0 ? `${work.pending} por confirmar` : null,
-                        ]
-                          .filter(Boolean)
-                          .join(", ")}
-                        . Depois de {mode === "close" ? "fechada" : "cancelada"}, essas receções são recusadas até a guia ser
-                        reaberta (nada se perde — ficam no ecrã).
-                      </Callout>
-                    )}
-                    <Label htmlFor="dnd-text">
-                      {mode === "close" ? `Nota de fecho${needsCloseNote ? " *" : " (opcional)"}` : "Motivo *"}
-                    </Label>
-                    <Textarea
-                      id="dnd-text"
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      maxLength={mode === "close" ? 2000 : 1000}
-                      rows={3}
-                      disabled={busy}
-                    />
-                    {actionError && (
-                      <p role="alert" className="break-words text-sm text-destructive">
-                        {actionError}
-                      </p>
-                    )}
-                    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                      <Button type="button" variant="outline" className="h-11" onClick={() => startAction(null)} disabled={busy}>
-                        Voltar
-                      </Button>
-                      <Button
-                        type="button"
-                        variant={mode === "cancel" ? "destructive" : "default"}
-                        className="h-11"
-                        onClick={() => void runAction()}
-                        disabled={actionDisabled}
-                      >
-                        {busy
-                          ? "A gravar…"
-                          : mode === "close"
-                            ? "Fechar guia"
-                            : mode === "reopen"
-                              ? "Reabrir guia"
-                              : "Cancelar guia"}
-                      </Button>
-                    </div>
-                  </section>
-                )}
-                {!mode && actionError && (
-                  <p role="alert" className="break-words text-sm text-destructive">
-                    {actionError}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-
-          {note && !mode && (
-            <div className="flex flex-col-reverse flex-wrap gap-2 border-t p-4 sm:flex-row sm:justify-end">
-              <Button type="button" variant="outline" className="h-11" onClick={() => noteId && void load(noteId)} disabled={loading}>
+              <Button type="button" variant="ghost" className="h-10" onClick={() => noteId && void load(noteId)} disabled={loading}>
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Atualizar
               </Button>
-              {canDownloadProof && note.status !== "cancelled" && (
-                <Button type="button" variant="outline" className="h-11" onClick={() => void downloadProof()} disabled={downloading}>
-                  <FileDown className="mr-2 h-4 w-4" aria-hidden />
-                  {downloading ? "A gerar…" : "Descarregar PDF"}
-                </Button>
+            </>
+          ),
+          right: (
+            <>
+              {note.status === "closed" && (
+                <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                  <Lock className="h-3.5 w-3.5" aria-hidden /> Guia fechada
+                </span>
               )}
-              {onUse && note.status === "open" && (
-                <Button type="button" variant="secondary" className="h-11" onClick={() => onUse(note)}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Usar esta guia
-                </Button>
+              {note.status === "cancelled" && (
+                <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                  <Lock className="h-3.5 w-3.5" aria-hidden /> Guia cancelada
+                </span>
               )}
               {canEdit && note.status === "open" && (
                 <>
-                  <Button type="button" variant="outline" className="h-11" onClick={() => startAction("cancel")}>
-                    <Ban className="mr-2 h-4 w-4" />
-                    Cancelar guia
-                  </Button>
-                  <Button type="button" variant="outline" className="h-11" onClick={() => setEditOpen(true)}>
+                  <Button type="button" variant="outline" className="h-10" onClick={() => setEditOpen(true)}>
                     <Pencil className="mr-2 h-4 w-4" />
                     Editar
                   </Button>
-                  <Button type="button" className="h-11" onClick={() => startAction("close")}>
+                  <Button type="button" variant="outline" className="h-10" onClick={() => startAction("cancel")}>
+                    <Ban className="mr-2 h-4 w-4" />
+                    Cancelar guia
+                  </Button>
+                  <Button type="button" variant={onUse ? "outline" : "default"} className="h-10" onClick={() => startAction("close")}>
                     <Lock className="mr-2 h-4 w-4" />
                     Fechar guia
                   </Button>
                 </>
               )}
+              {onUse && note.status === "open" && (
+                <Button type="button" className="h-10" onClick={() => onUse(note)}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Usar esta guia
+                </Button>
+              )}
               {canEdit && note.status === "closed" && (
-                <Button type="button" className="h-11" onClick={() => startAction("reopen")}>
+                <Button type="button" className="h-10" onClick={() => startAction("reopen")}>
                   <Unlock className="mr-2 h-4 w-4" />
                   Reabrir
                 </Button>
               )}
+            </>
+          ),
+        }
+      : null;
+
+  return (
+    <>
+      <Sheet open={open && !editOpen} onOpenChange={(o) => !busy && onOpenChange(o)}>
+        <DocumentSheetContent
+          crumbs="Armazém › Receção › Guia do fornecedor"
+          title={note ? noteLabel(note.note_number) : "Guia"}
+          titleClassName="font-mono"
+          onClose={closeSheet}
+          badges={
+            note ? (
+              <>
+                <InventoryStatusBadge tone={statusTone}>{statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)}</InventoryStatusBadge>
+                {totals && totals.divergences > 0 && (
+                  <InventoryStatusBadge tone="bad">{totals.divergences} divergência(s)</InventoryStatusBadge>
+                )}
+                {note.changed_since_close && <InventoryStatusBadge tone="warn">Mudou depois do fecho</InventoryStatusBadge>}
+              </>
+            ) : undefined
+          }
+          header={
+            note ? (
+              <DocInfoGrid
+                items={[
+                  { label: "Fornecedor", value: note.supplier_name ?? "—" },
+                  { label: "Data", value: note.document_date ? fmtDay(note.document_date) : "—" },
+                  {
+                    label: "Encomendas",
+                    value:
+                      note.purchase_orders.length === 0 ? (
+                        "Todas as encomendas em aberto do fornecedor"
+                      ) : (
+                        <span>
+                          {note.purchase_orders.map((p, i) => (
+                            <span key={p.purchase_order_id}>
+                              {i > 0 ? ", " : ""}
+                              {canViewOrders && !p.deleted ? (
+                                <DocumentLink to={purchaseOrdersLink({ open: p.purchase_order_id })}>{p.order_number ?? "PO"}</DocumentLink>
+                              ) : (
+                                <span className="font-mono text-[0.92em]">{p.order_number ?? "PO"}</span>
+                              )}
+                              {p.deleted ? " (apagada)" : p.status === "cancelled" ? " (cancelada)" : ""}
+                            </span>
+                          ))}
+                        </span>
+                      ),
+                  },
+                  note.notes ? { label: "Nota", value: <span className="whitespace-pre-wrap">{note.notes}</span> } : null,
+                ]}
+              />
+            ) : undefined
+          }
+          footer={footer}
+        >
+          {loading && !note && <p className="text-sm text-muted-foreground">A carregar guia…</p>}
+          {loadError && (
+            <div className="space-y-2">
+              <p role="alert" className="text-sm text-destructive">
+                {loadError}
+              </p>
+              {noteId && (
+                <Button type="button" variant="outline" className="h-11" onClick={() => void load(noteId)}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Tentar de novo
+                </Button>
+              )}
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+
+          {note && (
+            <>
+              {note.changed_since_close && (
+                <Callout tone="warning">
+                  O recebido mudou depois do fecho (por exemplo, uma receção revertida). O resumo abaixo é o atual; o do
+                  fecho ficou guardado.
+                </Callout>
+              )}
+              {note.status === "closed" && (
+                <Callout tone="info">
+                  Fechada em {fmtDateTime(note.closed_at)}
+                  {note.close_notes ? ` — ${note.close_notes}` : ""}. Leituras com esta guia são recusadas até ser reaberta.
+                </Callout>
+              )}
+              {note.status === "cancelled" && (
+                <Callout tone="error">
+                  Cancelada em {fmtDateTime(note.cancelled_at)}
+                  {note.cancel_reason ? ` — ${note.cancel_reason}` : ""}.
+                </Callout>
+              )}
+
+              <DocSection title={summary?.has_lines === false ? "Recebido por produto" : "Anunciado vs recebido"}>
+                {totals && (
+                  <p className="text-sm text-muted-foreground">
+                    {summary?.has_lines ? `Anunciado ${fmtQty(totals.announced_units)} un · ` : "Sem linhas anunciadas · "}
+                    recebido {fmtQty(totals.received_units)} un
+                    {summary?.has_lines && totals.missing_units > 0 ? ` · falta ${fmtQty(totals.missing_units)} un` : ""}
+                    {summary?.has_lines && totals.excess_units > 0 ? ` · excesso ${fmtQty(totals.excess_units)} un` : ""}
+                    {totals.divergences > 0 ? ` · ${totals.divergences} com divergência` : ""}
+                  </p>
+                )}
+                {!summary || summary.products.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Ainda nada anunciado nem recebido.</p>
+                ) : (
+                  <div className={DOC_TABLE_WRAP_CLASS}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Produto</TableHead>
+                          {summary.has_lines && <TableHead className="text-right">Anunciado</TableHead>}
+                          <TableHead className="text-right">Recebido</TableHead>
+                          <TableHead>
+                            <span className="sr-only">Estado</span>
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summary.products.map((p) => (
+                          <TableRow key={p.product_id}>
+                            <TableCell>
+                              <p className="break-words font-medium">{p.name ?? "Produto"}</p>
+                              {p.sku && <p className="break-all font-mono text-xs text-muted-foreground">{p.sku}</p>}
+                            </TableCell>
+                            {summary.has_lines && <TableCell className="text-right tabular-nums">{fmtQty(p.announced_units)} un</TableCell>}
+                            <TableCell className="text-right tabular-nums">{fmtQty(p.received_units)} un</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={cn("whitespace-nowrap", STATUS_TONE[p.status])}>
+                                {PRODUCT_STATUS_LABEL[p.status] ?? p.status}
+                                {p.status === "falta" && ` ${fmtQty(p.missing_units)}`}
+                                {p.status === "excesso" && ` +${fmtQty(p.excess_units)}`}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </DocSection>
+
+              <DocSection title={`Receções por esta guia${summary ? ` (${summary.receipts.length})` : ""}`}>
+                {!summary || summary.receipts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Ainda nenhuma receção com esta guia.</p>
+                ) : (
+                  <div className={DOC_TABLE_WRAP_CLASS}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Data</TableHead>
+                          <TableHead>Encomenda</TableHead>
+                          <TableHead>Produto</TableHead>
+                          <TableHead className="text-right">Qtd</TableHead>
+                          <TableHead>Repartição</TableHead>
+                          <TableHead>Estado</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {summary.receipts.map((r) => (
+                          <TableRow key={r.id} className={cn(r.reverted && "opacity-60")}>
+                            <TableCell className="whitespace-nowrap">{fmtDateTime(r.received_at)}</TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {canViewOrders ? (
+                                <DocumentLink to={purchaseOrdersLink({ open: r.purchase_order_id })}>{r.order_number ?? "PO"}</DocumentLink>
+                              ) : (
+                                <span className="font-mono text-[0.92em]">{r.order_number ?? "PO"}</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="break-words">{r.product_name ?? "Produto"}</TableCell>
+                            <TableCell className="text-right tabular-nums">{fmtQty(r.units)} un</TableCell>
+                            <TableCell className="text-xs">
+                              {Number(r.units_to_order) > 0 && <span className="block">{fmtQty(r.units_to_order)} un → EC</span>}
+                              {Number(r.units_to_stock) > 0 && <span className="block">{fmtQty(r.units_to_stock)} un → stock</span>}
+                              {!(Number(r.units_to_order) > 0) && !(Number(r.units_to_stock) > 0) && "—"}
+                            </TableCell>
+                            <TableCell>
+                              {r.reverted ? (
+                                <span className="text-xs">
+                                  <InventoryStatusBadge tone="neutral">Revertida</InventoryStatusBadge>
+                                  <span className="mt-0.5 block text-muted-foreground">
+                                    {fmtDateTime(r.reverted_at)}
+                                    {r.revert_reason ? ` — ${r.revert_reason}` : ""}
+                                  </span>
+                                </span>
+                              ) : (
+                                <InventoryStatusBadge tone="ok">Ativa</InventoryStatusBadge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </DocSection>
+
+              {note.history.length > 0 && (
+                <DocSection title="Histórico">
+                  <ol className="list-decimal space-y-1 pl-5 text-sm">
+                    {note.history.map((h, i) => (
+                      <li key={i} className="break-words text-muted-foreground">
+                        {fmtDateTime(h.at)} · {HISTORY_LABEL[h.action] ?? h.action}
+                        {h.notes ? ` — ${h.notes}` : ""}
+                        {h.reason ? ` — ${h.reason}` : ""}
+                      </li>
+                    ))}
+                  </ol>
+                </DocSection>
+              )}
+
+              {/* Ação em curso (fechar/reabrir/cancelar com nota ou motivo). */}
+              {canEdit && mode && (
+                <section className="space-y-2 rounded-md border p-3" aria-labelledby="dnd-action">
+                  <h3 id="dnd-action" className="font-semibold">
+                    {mode === "close" ? "Fechar a guia" : mode === "reopen" ? "Reabrir a guia" : "Cancelar a guia"}
+                  </h3>
+                  {mode === "close" && (
+                    <p className="text-sm text-muted-foreground">
+                      Fechar só fecha a guia: as encomendas ficam como estão (o que faltar continua em aberto na PO).
+                      {needsCloseNote && " Há divergências — indica uma nota."}
+                    </p>
+                  )}
+                  {mode === "cancel" && (
+                    <p className="text-sm text-muted-foreground">
+                      Só para guias registadas por engano. Uma guia com receções ativas não pode ser cancelada (reverte-as
+                      primeiro na encomenda).
+                    </p>
+                  )}
+                  {(mode === "close" || mode === "cancel") && workCount > 0 && work && (
+                    <Callout tone="warning">
+                      Ainda há trabalho por enviar com esta guia neste dispositivo:{" "}
+                      {[
+                        work.basket > 0 ? `${work.basket} no cesto` : null,
+                        work.unsent > 0 ? `${work.unsent} em "Por enviar"` : null,
+                        work.pending > 0 ? `${work.pending} por confirmar` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                      . Depois de {mode === "close" ? "fechada" : "cancelada"}, essas receções são recusadas até a guia ser
+                      reaberta (nada se perde — ficam no ecrã).
+                    </Callout>
+                  )}
+                  <Label htmlFor="dnd-text">
+                    {mode === "close" ? `Nota de fecho${needsCloseNote ? " *" : " (opcional)"}` : "Motivo *"}
+                  </Label>
+                  <Textarea
+                    id="dnd-text"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    maxLength={mode === "close" ? 2000 : 1000}
+                    rows={3}
+                    disabled={busy}
+                  />
+                  {actionError && (
+                    <p role="alert" className="break-words text-sm text-destructive">
+                      {actionError}
+                    </p>
+                  )}
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" className="h-11" onClick={() => startAction(null)} disabled={busy}>
+                      Voltar
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={mode === "cancel" ? "destructive" : "default"}
+                      className="h-11"
+                      onClick={() => void runAction()}
+                      disabled={actionDisabled}
+                    >
+                      {busy
+                        ? "A gravar…"
+                        : mode === "close"
+                          ? "Fechar guia"
+                          : mode === "reopen"
+                            ? "Reabrir guia"
+                            : "Cancelar guia"}
+                    </Button>
+                  </div>
+                </section>
+              )}
+              {!mode && actionError && (
+                <p role="alert" className="break-words text-sm text-destructive">
+                  {actionError}
+                </p>
+              )}
+            </>
+          )}
+        </DocumentSheetContent>
+      </Sheet>
 
       {canEdit && note && (
         <DeliveryNoteDialog

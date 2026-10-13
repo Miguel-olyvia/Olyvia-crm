@@ -17,7 +17,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { ArrowRightLeft, Download, Loader2, ScanLine, Upload } from "lucide-react";
+import { ArrowRightLeft, Check, Download, Info, Loader2, ScanLine, Upload } from "lucide-react";
+import { Sheet } from "@/components/ui/sheet";
+import { DocInfoGrid, DocumentSheetContent, DOC_TABLE_WRAP_CLASS } from "@/components/inventory/DocumentSheet";
+import { InventoryStatusBadge, type InventoryTone } from "@/components/inventory/ui";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
@@ -1160,56 +1163,118 @@ export default function InventoryCountDetailDialog({
     }
   };
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      em_contagem: "bg-info/10 text-info",
-      finalizada: "bg-success/10 text-success",
-      cancelada: "bg-muted text-muted-foreground",
-    };
-    return colors[status] || colors.em_contagem;
-  };
+  // Cabeçalho da folha (ContagemFolha do protótipo): progresso e diferenças por
+  // resolver, contados sobre TODAS as linhas (o filtro de categoria só muda a tabela).
+  const countedLines = lines.filter((l) => l.counted_quantity != null).length;
+  const unresolvedLines = lines.filter((l) => {
+    const d = getDiff(l);
+    return d !== null && d !== 0 && !l.discrepancy_resolution;
+  }).length;
+  const pendingLines = lines.length - countedLines + unresolvedLines;
+  const statusTone: InventoryTone = header?.status === "finalizada" ? "ok" : header?.status === "cancelada" ? "neutral" : "info";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {t('stockCounts.detail.title')}
-            {header ? ` — ${header.document_number}` : ""}
-          </DialogTitle>
-        </DialogHeader>
-
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <DocumentSheetContent
+        crumbs="Armazém › Contagens"
+        title={header?.document_number || t('stockCounts.detail.title')}
+        titleClassName="font-mono"
+        onClose={() => onOpenChange(false)}
+        badges={
+          header ? (
+            <>
+              <InventoryStatusBadge tone={statusTone}>{getStatusLabel(header.status)}</InventoryStatusBadge>
+              <InventoryStatusBadge tone="neutral">{header.warehouses?.name || '-'}</InventoryStatusBadge>
+              <InventoryStatusBadge tone="neutral">{header.product_categories?.name || t('stockCounts.allCategories')}</InventoryStatusBadge>
+            </>
+          ) : undefined
+        }
+        header={
+          header && !loading ? (
+            <>
+              <DocInfoGrid
+                items={[
+                  { label: t('stockCounts.detail.startedAt'), value: new Date(header.started_at).toLocaleString('pt-PT') },
+                  header.finalized_at
+                    ? { label: t('stockCounts.detail.finalizedAt'), value: new Date(header.finalized_at).toLocaleString('pt-PT') }
+                    : null,
+                  { label: "Progresso", value: `${countedLines} / ${lines.length} contadas` },
+                  { label: "Por resolver", value: unresolvedLines },
+                ]}
+              />
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                {canCount && isActive && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setScanOpen(true)}
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    {t('stockCounts.scan.button')}
+                  </Button>
+                )}
+                {/* Sem PermissionGate próprio: quem consegue abrir o
+                    diálogo já pode ver estas mesmas linhas no ecrã. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={handleExport}
+                >
+                  <Download className="w-4 h-4" />
+                  {t('stockCounts.export.button')}
+                </Button>
+                {canCount && isActive && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setImportOpen(true)}
+                  >
+                    <Upload className="w-4 h-4" />
+                    {t('stockCounts.import.button')}
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : undefined
+        }
+        footer={
+          header && isActive && canEdit
+            ? {
+                right: (
+                  <>
+                    <span className="text-sm text-muted-foreground">
+                      {pendingLines > 0 ? `${pendingLines} linha(s) por contar ou resolver` : "Pronta a finalizar"}
+                    </span>
+                    <Button onClick={handleFinalize} disabled={finalizing || loading}>
+                      <Check className="mr-2 h-4 w-4" aria-hidden="true" />
+                      {finalizing ? t('stockCounts.detail.finalizing') : t('stockCounts.detail.finalize')}
+                    </Button>
+                  </>
+                ),
+              }
+            : header
+              ? {
+                  right: (
+                    <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                      Fechar
+                    </Button>
+                  ),
+                }
+              : null
+        }
+      >
         {loading ? (
           <div className="flex items-center justify-center py-10">
             <OlyviaLoader size={32} />
           </div>
         ) : header ? (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <div>
-                <span className="text-muted-foreground">{t('stockCounts.detail.warehouse')}: </span>
-                <span className="font-medium">{header.warehouses?.name || '-'}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t('stockCounts.detail.category')}: </span>
-                <span className="font-medium">{header.product_categories?.name || t('stockCounts.allCategories')}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t('stockCounts.detail.status')}: </span>
-                <Badge className={getStatusColor(header.status)}>{getStatusLabel(header.status)}</Badge>
-              </div>
-              <div>
-                <span className="text-muted-foreground">{t('stockCounts.detail.startedAt')}: </span>
-                <span className="font-medium">{new Date(header.started_at).toLocaleString('pt-PT')}</span>
-              </div>
-              {header.finalized_at && (
-                <div>
-                  <span className="text-muted-foreground">{t('stockCounts.detail.finalizedAt')}: </span>
-                  <span className="font-medium">{new Date(header.finalized_at).toLocaleString('pt-PT')}</span>
-                </div>
-              )}
-            </div>
-
             {isActive && !canEdit && canCount && (
               <p className="text-xs text-muted-foreground border rounded-md p-2 bg-muted/40">
                 {t('stockCounts.detail.countOnlyNotice')}
@@ -1218,45 +1283,7 @@ export default function InventoryCountDetailDialog({
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold">{t('stockCounts.detail.lines.title')}</h3>
-                <div className="flex items-center gap-2">
-                  {canCount && isActive && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => setScanOpen(true)}
-                    >
-                      <ScanLine className="w-4 h-4" />
-                      {t('stockCounts.scan.button')}
-                    </Button>
-                  )}
-                  {/* Sem PermissionGate próprio: quem consegue abrir o
-                      diálogo já pode ver estas mesmas linhas no ecrã. */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={handleExport}
-                  >
-                    <Download className="w-4 h-4" />
-                    {t('stockCounts.export.button')}
-                  </Button>
-                  {canCount && isActive && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => setImportOpen(true)}
-                    >
-                      <Upload className="w-4 h-4" />
-                      {t('stockCounts.import.button')}
-                    </Button>
-                  )}
-                </div>
+                <h3 className="text-[15px] font-semibold">{t('stockCounts.detail.lines.title')}</h3>
               </div>
               {lines.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -1282,6 +1309,7 @@ export default function InventoryCountDetailDialog({
                   )}
                 </div>
               )}
+              <div className={DOC_TABLE_WRAP_CLASS}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1410,6 +1438,13 @@ export default function InventoryCountDetailDialog({
                   )}
                 </TableBody>
               </Table>
+              </div>
+              <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  Diferença = contada − sistema no início da contagem. As diferenças resolvidas como “Ajustado” geram um movimento de ajuste ao finalizar.
+                </span>
+              </p>
               {paginateLines && (
                 <div className="flex items-center justify-between gap-3 mt-2">
                   <span className="text-xs text-muted-foreground">
@@ -1446,7 +1481,8 @@ export default function InventoryCountDetailDialog({
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold mb-2">{t('stockCounts.detail.movements.title')}</h3>
+              <h3 className="text-[15px] font-semibold mb-2">{t('stockCounts.detail.movements.title')}</h3>
+              <div className={DOC_TABLE_WRAP_CLASS}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1485,18 +1521,11 @@ export default function InventoryCountDetailDialog({
                   )}
                 </TableBody>
               </Table>
+              </div>
             </div>
           </div>
         ) : null}
-
-        {header && isActive && canEdit && (
-          <DialogFooter>
-            <Button onClick={handleFinalize} disabled={finalizing || loading}>
-              {finalizing ? t('stockCounts.detail.finalizing') : t('stockCounts.detail.finalize')}
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
+      </DocumentSheetContent>
 
       <Dialog open={scanOpen} onOpenChange={setScanOpen}>
         <DialogContent className="max-w-md">
@@ -1650,6 +1679,6 @@ export default function InventoryCountDetailDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Dialog>
+    </Sheet>
   );
 }

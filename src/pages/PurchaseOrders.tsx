@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useSearchParams, Link } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,6 +25,17 @@ import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Sheet, SheetTrigger } from "@/components/ui/sheet";
+import {
+  DOC_TABLE_WRAP_CLASS,
+  DocInfoGrid,
+  DocSection,
+  DocSheetTabs,
+  DocumentSheetContent,
+  docTabId,
+  docTabPanelId,
+} from "@/components/inventory/DocumentSheet";
+import { PoSheetMenu } from "@/components/purchase-orders/PoSheetMenu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,6 +83,8 @@ import {
   poSupplierStatus,
   type PoSupplierStatus,
 } from "@/components/purchase-orders/poSupplierPortalApi";
+
+type PoSheetTab = "lines" | "rec" | "guias" | "portal" | "ann" | "notes";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -412,7 +426,10 @@ const PurchaseOrders = () => {
     warehouseNames: Record<string, string>;
     deliveryNotes: Record<string, { number: string; status: string }>;
   } | null>(null);
-  const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
+  // Folha da encomenda: separador ativo e o sítio do rodapé onde o painel do
+  // portal desenha "Aprovar e enviar" (só layout).
+  const [orderSheetTab, setOrderSheetTab] = useState<PoSheetTab>("lines");
+  const [poSendSlot, setPoSendSlot] = useState<HTMLDivElement | null>(null);
   // Reverter receção (por linha) — para encomendas marcadas como recebidas por
   // engano. Liga a rpc_revert_purchase_order_receipt: as linhas escolhidas
   // voltam a "por receber" e o stock que entrou é retirado (recusa se já saiu).
@@ -1139,6 +1156,7 @@ const PurchaseOrders = () => {
 
   const handleEdit = async (order: PurchaseOrder, opts?: { keepPortalStatus?: boolean }) => {
     openOrderIdRef.current = order.id;
+    if (!opts?.keepPortalStatus) setOrderSheetTab("lines");
     // Recarregar a mesma PO (F3.2) mantém o estado do portal — senão o
     // formulário desbloquear-se-ia até o painel voltar a ler.
     if (!opts?.keepPortalStatus) setPortalStatus(null);
@@ -1172,7 +1190,6 @@ const PurchaseOrders = () => {
     setOrderContractState(null);
     setOrderReceiptItems(null);
     setOrderReceipts(null);
-    setReceiptHistoryOpen(false);
     void loadOrderReceipts(order.id);
     if ((order as any).source_type === "contract" && (order as any).source_id) {
       const contractId: string = (order as any).source_id;
@@ -1306,7 +1323,9 @@ const PurchaseOrders = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  // Devolve true só quando a RPC apagou — a folha usa-o para fechar apenas
+  // depois do sucesso (cancelar um confirm() mantém a folha aberta e intacta).
+  const handleDelete = async (id: string): Promise<boolean> => {
     // F3.2: uma PO apagada desaparece do portal do fornecedor sem aviso
     // (contrato-f32, risco 3) — pedir para retirar primeiro.
     const publication = await readPublicationForDelete(id);
@@ -1317,11 +1336,11 @@ const PurchaseOrders = () => {
           description: "Retire-a primeiro do portal (abra a encomenda → Retirar do portal) e depois apague-a.",
           variant: "destructive",
         });
-        return;
+        return false;
       }
-      if (!confirm("O fornecedor já confirmou esta encomenda no portal. Se a apagar, deixa de a ver sem qualquer aviso. Apagar mesmo assim?")) return;
+      if (!confirm("O fornecedor já confirmou esta encomenda no portal. Se a apagar, deixa de a ver sem qualquer aviso. Apagar mesmo assim?")) return false;
     }
-    if (!confirm(t('purchaseOrders.delete.confirm'))) return;
+    if (!confirm(t('purchaseOrders.delete.confirm'))) return false;
 
     try {
       const { error } = await supabase.rpc("rpc_delete_purchase_order", { p_id: id });
@@ -1333,6 +1352,7 @@ const PurchaseOrders = () => {
       });
 
       loadData();
+      return true;
     } catch (error: any) {
       captureFlowError(error, "purchase-order-lifecycle");
       toast({
@@ -1340,6 +1360,7 @@ const PurchaseOrders = () => {
         description: error.message,
         variant: "destructive",
       });
+      return false;
     }
   };
 
@@ -3033,6 +3054,35 @@ const PurchaseOrders = () => {
     );
   }
 
+  // Folha da encomenda (PoFolha do protótipo): a PO aberta, a linha da lista
+  // correspondente (para Receber / Não vou receber / Eliminar, que pedem a
+  // PurchaseOrder) e o atalho que fecha a folha antes de abrir outro diálogo —
+  // mesmo padrão de handleRevertFromOrderDialog (a folha não fica com um
+  // formulário de estado antigo que pudesse ser regravado).
+  const sheetMeta = editingId && editingOrderMeta?.id === editingId ? editingOrderMeta : null;
+  const sheetOrderRow = sheetMeta ? orders.find((o) => o.id === sheetMeta.id) ?? null : null;
+  const sheetCanReceive = !!sheetOrderRow && (sheetMeta?.status === 'ordered' || sheetMeta?.status === 'partially_received');
+  // Fechar a folha repõe o formulário — com alterações por gravar, perguntar antes.
+  const runFromOrderSheet = (fn: (order: PurchaseOrder) => void) => {
+    const order = sheetOrderRow;
+    if (!order) return;
+    if (hasUnsavedOrderChanges && !confirm("Tem alterações por gravar. Descartar?")) return;
+    skipOrderDialogFocusRestoreRef.current = true;
+    handleOrderDialogOpenChange(false);
+    fn(order);
+  };
+  // Eliminar: verificações e confirm() com a folha ainda aberta; só fecha depois
+  // de a RPC ter apagado (cancelar ou erro deixam a folha como estava).
+  const deleteFromOrderSheet = async () => {
+    const order = sheetOrderRow;
+    if (!order) return;
+    const deleted = await handleDelete(order.id);
+    if (deleted && openOrderIdRef.current === order.id) {
+      skipOrderDialogFocusRestoreRef.current = true;
+      handleOrderDialogOpenChange(false);
+    }
+  };
+
   return (
     <>
       <div className="space-y-4">
@@ -3085,142 +3135,323 @@ const PurchaseOrders = () => {
             {/* O diálogo abre para quem pode ver (linha/?open=); criar nova
                 encomenda continua a exigir purchase_orders.create. */}
             <PermissionGate permissions={["purchase_orders.view", "purchase_orders.create"]}>
-           <Dialog open={open} onOpenChange={handleOrderDialogOpenChange}>
+           {/* Folha lateral da encomenda (PoFolha do protótipo): migalha, nº,
+               distintivos, ⋯ e fechar; grelha de dados; separadores; rodapé com PDF
+               à esquerda e as ações do estado à direita. Mesmo formulário, mesmos
+               handlers e as mesmas condições de só de leitura de antes. */}
+           <Sheet open={open} onOpenChange={handleOrderDialogOpenChange}>
               <PermissionGate permission="purchase_orders.create">
-              <DialogTrigger asChild>
+              <SheetTrigger asChild>
                 <Button>
                   <Plus className="w-4 h-4 mr-2" />
                   {t('purchaseOrders.newOrder')}
                 </Button>
-              </DialogTrigger>
+              </SheetTrigger>
               </PermissionGate>
-              <DialogContent
-                className="max-w-6xl max-h-[90vh] overflow-y-auto"
+              <DocumentSheetContent
                 onCloseAutoFocus={(e) => {
                   if (skipOrderDialogFocusRestoreRef.current) {
                     skipOrderDialogFocusRestoreRef.current = false;
                     e.preventDefault();
                   }
                 }}
+                form={{
+                  onSubmit: handleSubmit,
+                  // Campos inválidos num separador escondido bloqueiam o submit sem
+                  // aviso ("not focusable") — voltar às Linhas já, de forma síncrona,
+                  // para o browser conseguir focar o campo e mostrar o aviso.
+                  onInvalidCapture: () => {
+                    if (orderSheetTab !== "lines") flushSync(() => setOrderSheetTab("lines"));
+                  },
+                }}
+                crumbs={editingId ? "Compras › Encomenda a fornecedor" : "Compras › Nova encomenda"}
+                title={
+                  !editingId
+                    ? t('purchaseOrders.newOrder')
+                    : editingOrderMeta?.id === editingId
+                      ? editingOrderMeta.orderNumber
+                      : t('purchaseOrders.editOrder')
+                }
+                titleClassName={editingId ? "font-mono" : undefined}
+                onClose={() => handleOrderDialogOpenChange(false)}
+                badges={
+                  sheetMeta ? (
+                    <>
+                      <PoStatusBadge status={sheetMeta.status} label={getStatusLabel(sheetMeta.status)} />
+                      <PoPortalPill publication={poPublications.get(sheetMeta.id)} />
+                      {sheetOrderRow && isPoLate(sheetOrderRow, todayIso) && (
+                        <InventoryStatusBadge tone="bad">Atrasada</InventoryStatusBadge>
+                      )}
+                      {sheetOrderRow && isPoAutoGenerated(sheetOrderRow) && (
+                        <InventoryStatusBadge tone="neutral">Automática</InventoryStatusBadge>
+                      )}
+                      {isOrderReadOnly && <InventoryStatusBadge tone="neutral">Só de leitura</InventoryStatusBadge>}
+                      {!isOrderReadOnly && isPublishedLock && (
+                        <InventoryStatusBadge tone="neutral">Bloqueada pelo portal</InventoryStatusBadge>
+                      )}
+                    </>
+                  ) : undefined
+                }
+                headerActions={
+                  sheetMeta ? (
+                    <PoSheetMenu
+                      orderNumber={sheetMeta.orderNumber}
+                      status={sheetMeta.status}
+                      hasReceivedLines={sheetMeta.hasReceivedLines}
+                      canRelease={isOrderReceivedLock && releasableLines.length > 0}
+                      onPdf={() => handleGeneratePDF(sheetMeta.id)}
+                      onReceive={() => runFromOrderSheet((o) => void openReceiveDialog(o))}
+                      onCancelRemainder={() => runFromOrderSheet((o) => openPoOrderCancelFromList(o))}
+                      onRevert={handleRevertFromOrderDialog}
+                      onRelease={() => void handleReleaseFromOrderDialog()}
+                      onDelete={() => void deleteFromOrderSheet()}
+                      revertLabel={t('purchaseOrders.revert.action') || "Reverter receção"}
+                    />
+                  ) : undefined
+                }
+                header={
+                  <>
+                    <DocInfoGrid
+                      items={[
+                        {
+                          label: t('purchaseOrders.form.supplier'),
+                          value: isStructureLocked ? (
+                            <span className="font-medium">
+                              {suppliers.find((s) => s.id === formData.supplier_id)?.name || editingOrderMeta?.supplierName || "—"}
+                            </span>
+                          ) : (
+                            <>
+                              <Select value={formData.supplier_id} onValueChange={(value) => {
+                                setFormData({ ...formData, supplier_id: value });
+                                setOrderItems([]);
+                              }} required disabled={isStructureLocked}>
+                                <SelectTrigger id="supplier_id" className="h-9" aria-label={t('purchaseOrders.form.supplier')}>
+                                  <SelectValue placeholder={t('purchaseOrders.form.selectSupplier')} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {suppliers.map((supplier) => (
+                                    <SelectItem key={supplier.id} value={supplier.id}>
+                                      {supplier.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {fieldErrors.supplier_id && <p className="text-xs text-destructive">{fieldErrors.supplier_id}</p>}
+                            </>
+                          ),
+                        },
+                        editingId
+                          ? {
+                              label: "Origem",
+                              value: orderSourceInfo ? (
+                                <span>
+                                  {orderSourceInfo.originType === 'direct_sale'
+                                    ? `Venda Direta ${orderSourceInfo.number}`
+                                    : orderSourceInfo.originType === 'manual'
+                                      ? `Encomenda Cliente ${orderSourceInfo.number}`
+                                      : `Contrato ${orderSourceInfo.number}`}
+                                  {orderSourceInfo.clientName ? ` · ${orderSourceInfo.clientName}` : ""}
+                                  {" "}
+                                  <Link to={`/client-orders?open=${orderSourceInfo.contractId}`} className="text-primary underline underline-offset-2">
+                                    {t('purchaseOrders.viewClientOrder') || 'Ver Encomenda Cliente'}
+                                  </Link>
+                                </span>
+                              ) : sheetOrderRow ? (
+                                renderOrderOrigin(sheetOrderRow)
+                              ) : (
+                                "—"
+                              ),
+                            }
+                          : null,
+                        {
+                          label: t('purchaseOrders.form.orderDate'),
+                          value: isStructureLocked ? (
+                            formData.order_date ? formatPoDate(formData.order_date) : "—"
+                          ) : (
+                            <>
+                              <Input
+                                id="order_date"
+                                type="date"
+                                aria-label={t('purchaseOrders.form.orderDate')}
+                                value={formData.order_date}
+                                onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
+                                required
+                                disabled={isStructureLocked}
+                                className={`h-9 ${fieldErrors.order_date ? "border-destructive" : ""}`}
+                              />
+                              {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
+                            </>
+                          ),
+                        },
+                        {
+                          label: t('purchaseOrders.form.expectedDelivery'),
+                          value: isOrderReadOnly ? (
+                            formData.expected_delivery ? formatPoDate(formData.expected_delivery) : "—"
+                          ) : (
+                            <Input
+                              id="expected_delivery"
+                              type="date"
+                              aria-label={t('purchaseOrders.form.expectedDelivery')}
+                              className="h-9"
+                              value={formData.expected_delivery}
+                              onChange={(e) => setFormData({ ...formData, expected_delivery: e.target.value })}
+                              disabled={isOrderReadOnly}
+                            />
+                          ),
+                        },
+                        {
+                          label: t('purchaseOrders.form.status'),
+                          value: isStructureLocked ? (
+                            getStatusLabel(formData.status)
+                          ) : (
+                            <>
+                              <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })} disabled={isStructureLocked}>
+                                <SelectTrigger id="status" className="h-9" aria-label={t('purchaseOrders.form.status')}>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
+                                  {/* F3.2 (contrato-f32 5.2.2): "Encomendado" deixa de ser uma
+                                      escolha aqui — passa só pelo botão "Aprovar e enviar"
+                                      (rodapé), que também publica no portal do fornecedor.
+                                      Continua visível (desativado) quando já está encomendada. */}
+                                  {editingOrderMeta?.id === editingId && editingOrderMeta?.status === 'ordered' && (
+                                    <SelectItem value="ordered" disabled>{t('purchaseOrders.status.ordered')}</SelectItem>
+                                  )}
+                                  {/* "received" não é uma opção genérica — passa pela receção
+                                      (Fase 4C), que gera a entrada em stock_movements. */}
+                                  {editingId && formData.status === 'received' && (
+                                    <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
+                                  )}
+                                  {/* "partially_received" nunca é manual — derivado das receções. */}
+                                  {editingId && formData.status === 'partially_received' && (
+                                    <SelectItem value="partially_received" disabled>
+                                      {t('purchaseOrders.status.partiallyReceived')}
+                                    </SelectItem>
+                                  )}
+                                  <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {formData.status === 'pending' && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {hasPermission('purchase_orders.approve')
+                                    ? 'Para encomendar, grave e use "Aprovar e enviar".'
+                                    : `Sem permissão para encomendar (passar a "${t('purchaseOrders.status.ordered')}").`}
+                                </p>
+                              )}
+                            </>
+                          ),
+                        },
+                        { label: t('purchaseOrders.summary.total'), value: <span className="font-semibold tabular-nums">€{totals.total.toFixed(2)}</span> },
+                      ]}
+                    />
+                    {editingId && (
+                      <DocSheetTabs<PoSheetTab>
+                        idBase="po-sheet"
+                        label="Partes da encomenda"
+                        value={orderSheetTab}
+                        onChange={setOrderSheetTab}
+                        tabs={[
+                          { id: "lines", label: "Linhas", count: orderItems.length },
+                          { id: "rec", label: "Receções", count: orderReceipts?.orderId === editingId ? orderReceipts.rows.length : 0 },
+                          { id: "guias", label: "Guias", count: orderReceipts?.orderId === editingId ? Object.keys(orderReceipts.deliveryNotes).length : 0 },
+                          { id: "portal", label: "Portal" },
+                          { id: "ann", label: "Anulações", count: orderCancellations?.orderId === editingId ? orderCancellations.rows.length : 0 },
+                          { id: "notes", label: "Notas" },
+                        ]}
+                      />
+                    )}
+                  </>
+                }
+                footer={{
+                  left: editingId ? (
+                    <Button type="button" variant="ghost" onClick={() => handleGeneratePDF(editingId)}>
+                      <FileDown className="w-4 h-4 mr-2" />
+                      PDF
+                    </Button>
+                  ) : undefined,
+                  right: (
+                    <>
+                      {/* Recebida: só de leitura — passar para stock e reverter por
+                          linha (mesmas permissões que antes no aviso do diálogo). */}
+                      {isOrderReceivedLock && releasableLines.length > 0 && (
+                        <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                          <Button type="button" variant="outline" onClick={() => void handleReleaseFromOrderDialog()}>
+                            <PackageCheck className="w-4 h-4 mr-2" />
+                            Passar para stock
+                          </Button>
+                        </PermissionGate>
+                      )}
+                      {isOrderReceivedLock && editingOrderMeta?.hasReceivedLines && (
+                        <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                          <Button type="button" variant="outline" onClick={handleRevertFromOrderDialog}>
+                            <Undo2 className="w-4 h-4 mr-2" />
+                            {t('purchaseOrders.revert.action')}
+                          </Button>
+                        </PermissionGate>
+                      )}
+                      {isOrderReadOnly ? (
+                        // Fecho completo (repõe o formulário) — o Cancelar abaixo só
+                        // fecha, e deixaria o editingId/modo só de leitura agarrados
+                        // à próxima "Nova Encomenda".
+                        <Button type="button" variant="outline" onClick={() => handleOrderDialogOpenChange(false)}>
+                          {t('purchaseOrders.form.close')}
+                        </Button>
+                      ) : (
+                        <>
+                          <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                            {t('purchaseOrders.form.cancel')}
+                          </Button>
+                          <Button type="submit" variant={sheetMeta?.status === 'pending' || sheetCanReceive ? "outline" : "default"}>
+                            {editingId ? t('purchaseOrders.form.update') : t('purchaseOrders.form.create')}
+                          </Button>
+                        </>
+                      )}
+                      {/* "Aprovar e enviar" do painel do portal (rpc_po_send_to_supplier),
+                          desenhado aqui por portal — mesmas condições (can_send e
+                          alterações por gravar). */}
+                      {editingId && <div ref={setPoSendSlot} className="contents" />}
+                      {sheetCanReceive && (
+                        <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                          <Button type="button" onClick={() => runFromOrderSheet((o) => void openReceiveDialog(o))}>
+                            <PackageCheck className="w-4 h-4 mr-2" />
+                            Receber
+                          </Button>
+                        </PermissionGate>
+                      )}
+                    </>
+                  ),
+                }}
               >
-                <DialogHeader>
-                  <DialogTitle>
-                    {!editingId
-                      ? t('purchaseOrders.newOrder')
-                      : editingOrderMeta?.id === editingId
-                        ? (isOrderReadOnly
-                            ? t('purchaseOrders.orderTitle', {
-                                number: editingOrderMeta.orderNumber,
-                                supplier: editingOrderMeta.supplierName || '—',
-                              })
-                            : `${t('purchaseOrders.editOrder')} ${editingOrderMeta.orderNumber} — ${editingOrderMeta.supplierName || '—'}`)
-                        : t('purchaseOrders.editOrder')}
-                  </DialogTitle>
-                  {editingId && orderSourceInfo && (
-                    <p className="text-sm text-muted-foreground">
-                      {orderSourceInfo.originType === 'direct_sale'
-                        ? (t('purchaseOrders.generatedFromDirectSale', {
-                            number: orderSourceInfo.number,
-                            clientName: orderSourceInfo.clientName,
-                          }) || `Gerada automaticamente a partir da Venda Direta ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)
-                        : orderSourceInfo.originType === 'manual'
-                        ? (t('purchaseOrders.generatedFromClientOrder', {
-                            number: orderSourceInfo.number,
-                            clientName: orderSourceInfo.clientName,
-                          }) || `Gerada automaticamente a partir da Encomenda Cliente ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)
-                        : (t('purchaseOrders.generatedFromContract', {
-                            contractNumber: orderSourceInfo.number,
-                            clientName: orderSourceInfo.clientName,
-                          }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)}
-                      {' '}
-                      <Link to={`/client-orders?open=${orderSourceInfo.contractId}`} className="underline">
-                        {t('purchaseOrders.viewClientOrder') || 'Ver Encomenda Cliente'}
-                      </Link>
-                    </p>
-                  )}
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  {/* Encomenda recebida: só de leitura. A reversão é por linha, no
-                      diálogo próprio — mesmas permissões que o botão ↩ da lista. */}
+                {/* Separador Linhas (ou formulário de nova encomenda). */}
+                <div
+                  role={editingId ? "tabpanel" : undefined}
+                  id={editingId ? docTabPanelId("po-sheet", "lines") : undefined}
+                  aria-labelledby={editingId ? docTabId("po-sheet", "lines") : undefined}
+                  hidden={!!editingId && orderSheetTab !== "lines"}
+                  className="space-y-4"
+                >
                   {lacksOrderEditPermission && !isOrderReceivedLock && (
                     <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
                       Sem permissão para editar encomendas — só de leitura.
                     </p>
                   )}
                   {isOrderReceivedLock && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2">
+                    <div className="space-y-1 rounded-md border bg-muted/40 px-3 py-2">
                       <p className="text-sm text-muted-foreground">
                         {t('purchaseOrders.readOnlyReceived')}
                       </p>
-                      <div className="flex flex-wrap gap-2">
-                        {/* EC inativa: o que foi entregue à EC pode passar para stock.
-                            Mesmas permissões que rpc_po_receipt_release_to_stock. */}
-                        {releasableLines.length > 0 && (
-                          <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
-                            <Button type="button" variant="outline" size="sm" onClick={() => void handleReleaseFromOrderDialog()}>
-                              <PackageCheck className="w-4 h-4 mr-2" />
-                              Passar para stock
-                            </Button>
-                          </PermissionGate>
-                        )}
-                        {editingOrderMeta?.hasReceivedLines && (
-                          <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
-                            <Button type="button" variant="outline" size="sm" onClick={handleRevertFromOrderDialog}>
-                              <Undo2 className="w-4 h-4 mr-2" />
-                              {t('purchaseOrders.revert.action')}
-                            </Button>
-                          </PermissionGate>
-                        )}
-                      </div>
                       {releasableLines.length > 0 && orderContractState?.active === false && (
-                        <p className="w-full text-xs text-amber-700 dark:text-amber-400">
-                          A encomenda cliente {orderContractState.number || "ligada"} está inativa — o que foi recebido para ela pode passar para stock.
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          A encomenda cliente {orderContractState.number || "ligada"} está inativa — o que foi recebido para ela pode passar para stock (rodapé).
                         </p>
                       )}
                     </div>
                   )}
 
-                  {/* F3.2: portal do fornecedor — estado, Encomendar, Aceitar data, Retirar. */}
-                  {editingId && editingOrderMeta?.id === editingId && (
-                    <PoSupplierPortalPanel
-                      key={editingId}
-                      orderId={editingId}
-                      orderNumber={editingOrderMeta.orderNumber}
-                      supplierName={editingOrderMeta.supplierName}
-                      refreshKey={portalRefreshKey}
-                      onStatusChange={setPortalStatus}
-                      onOrderChanged={() => loadData()}
-                      onOrderStatusChanged={(status) => {
-                        applyServerFormPatch(editingId, { status });
-                        setEditingOrderMeta((prev) => (prev && prev.id === editingId ? { ...prev, status } : prev));
-                      }}
-                      onExpectedDeliveryAccepted={(date) =>
-                        applyServerFormPatch(editingId, { expected_delivery: date || "" })
-                      }
-                      onPublished={() => void reloadEditingOrder(editingId)}
-                      hasUnsavedChanges={hasUnsavedOrderChanges}
-                      formReadOnly={isOrderReadOnly}
-                    />
-                  )}
-
-                  {/* Organization Selection — sem prop disabled; em só de leitura o
-                      fieldset desativa os controlos e bloqueia o rato. */}
-                  <fieldset
-                    disabled={isStructureLocked}
-                    className={isStructureLocked ? "min-w-0 pointer-events-none opacity-70" : "min-w-0"}
-                  >
-                    <OrganizationFormSection
-                      value={organizationSelection}
-                      onChange={setOrganizationSelection}
-                      showSecondaryCompanies={false}
-                      multiSelectCompanies={false}
-                    />
-                  </fieldset>
-
                   {/* Fase 5.0F: ligação manual opcional a uma Encomenda Cliente — só
                       na criação, resolve o caso "sem_fornecedor" em Encomendas
-                      Clientes (produto sem fornecedor preferencial na altura da
-                      assinatura, nenhuma PO autogerada). */}
+                      Clientes. */}
                   {!editingId && clientOrderOptions.length > 0 && (
                     <div className="space-y-2">
                       <Label htmlFor="new_order_client_order">{t('purchaseOrders.form.clientOrderSource') || 'Encomenda Cliente de origem (opcional)'}</Label>
@@ -3251,102 +3482,376 @@ const PurchaseOrders = () => {
                         {clientOrderLinesLoading
                           ? "A carregar produtos da encomenda…"
                           : (pendingClientOrderLines.length > 0 && !formData.supplier_id)
-                            ? "Escolhe o fornecedor abaixo para os produtos desta Encomenda Cliente serem adicionados automaticamente."
+                            ? "Escolhe o fornecedor acima para os produtos desta Encomenda Cliente serem adicionados automaticamente."
                             : (t('purchaseOrders.form.clientOrderSourceHint') || 'Liga esta encomenda à Encomenda Cliente que está a satisfazer — os produtos preenchem-se automaticamente ao escolher o fornecedor. Fica rastreável em "Encomendas Clientes" e o estado atualiza quando esta for recebida.')}
                       </p>
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="supplier_id">{t('purchaseOrders.form.supplier')} *</Label>
-                      <Select value={formData.supplier_id} onValueChange={(value) => {
-                        setFormData({ ...formData, supplier_id: value });
-                        setOrderItems([]);
-                      }} required disabled={isStructureLocked}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={t('purchaseOrders.form.selectSupplier')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {suppliers.map((supplier) => (
-                            <SelectItem key={supplier.id} value={supplier.id}>
-                              {supplier.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {fieldErrors.supplier_id && <p className="text-xs text-destructive">{fieldErrors.supplier_id}</p>}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="order_date">{t('purchaseOrders.form.orderDate')} *</Label>
-                      <Input
-                        id="order_date"
-                        type="date"
-                        value={formData.order_date}
-                        onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
-                        required
-                        disabled={isStructureLocked}
-                        className={fieldErrors.order_date ? "border-destructive" : ""}
-                      />
-                      {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="expected_delivery">{t('purchaseOrders.form.expectedDelivery')}</Label>
-                      <Input
-                        id="expected_delivery"
-                        type="date"
-                        value={formData.expected_delivery}
-                        onChange={(e) => setFormData({ ...formData, expected_delivery: e.target.value })}
-                        disabled={isOrderReadOnly}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="status">{t('purchaseOrders.form.status')} *</Label>
-                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })} disabled={isStructureLocked}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
-                          {/* F3.2 (contrato-f32 5.2.2): "Encomendado" deixa de ser uma
-                              escolha aqui — passa só pelo botão "Encomendar", que também
-                              publica no portal do fornecedor. Continua visível (desativado)
-                              quando a encomenda já está encomendada, para mostrar o estado. */}
-                          {editingOrderMeta?.id === editingId && editingOrderMeta?.status === 'ordered' && (
-                            <SelectItem value="ordered" disabled>{t('purchaseOrders.status.ordered')}</SelectItem>
-                          )}
-                          {/* "received" já não é uma opção genérica aqui — passa pelo botão
-                              dedicado "Marcar como recebida" na lista (Fase 4C), que pede o
-                              armazém de destino e gera a entrada em stock_movements. Manter
-                              este dropdown a permitir 'received' deixaria criar encomendas
-                              "recebidas" sem nunca dar entrada em stock nenhum. */}
-                          {editingId && formData.status === 'received' && (
-                            <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
-                          )}
-                          {/* "partially_received" nunca é uma escolha manual — é derivado por
-                              rpc_receive_purchase_order_lines a partir das receções parciais
-                              já registadas. Só aparece aqui, desativado, se a encomenda já
-                              estiver neste estado (hoje inatingível a partir deste formulário,
-                              já que o botão de editar fica desativado para encomendas com
-                              receção parcial — mantido por clareza/defesa em profundidade). */}
-                          {editingId && formData.status === 'partially_received' && (
-                            <SelectItem value="partially_received" disabled>
-                              {t('purchaseOrders.status.partiallyReceived')}
-                            </SelectItem>
-                          )}
-                          <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {!isStructureLocked && formData.status === 'pending' && (
-                        <p className="text-xs text-muted-foreground">
-                          {hasPermission('purchase_orders.approve')
-                            ? 'Para encomendar, grave e use o botão "Encomendar".'
-                            : `Sem permissão para encomendar (passar a "${t('purchaseOrders.status.ordered')}").`}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  <DocSection
+                    title={t('purchaseOrders.form.orderItems')}
+                    actions={!isStructureLocked ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => setShowItemsDialog(true)}
+                        disabled={!formData.supplier_id}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        {t('purchaseOrders.form.addItems')}
+                      </Button>
+                    ) : undefined}
+                  >
+                    {orderItems.length > 0 ? (
+                      <>
+                        <div className={DOC_TABLE_WRAP_CLASS}>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>{t('purchaseOrders.items.sku')}</TableHead>
+                                <TableHead>{t('purchaseOrders.items.description')}</TableHead>
+                                <TableHead>{t('purchaseOrders.items.quantity')}</TableHead>
+                                <TableHead>{t('purchaseOrders.items.unitPrice')}</TableHead>
+                                <TableHead>{t('purchaseOrders.items.vat')}</TableHead>
+                                <TableHead className="text-right">{t('purchaseOrders.items.total')}</TableHead>
+                                <TableHead><span className="sr-only">{t('purchaseOrders.table.actions')}</span></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {orderItems.map((item, index) => (
+                                <TableRow key={index}>
+                                  <TableCell className="font-mono text-xs">{item.sku || "N/A"}</TableCell>
+                                  <TableCell>{item.description}</TableCell>
+                                  <TableCell>
+                                    <Input
+                                      type="number"
+                                      value={item.quantity}
+                                      onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                                      disabled={isStructureLocked}
+                                      className="w-20"
+                                      min="0"
+                                      step={itemRequiresIntegerQty(item) ? "1" : "0.01"}
+                                      inputMode={itemRequiresIntegerQty(item) ? "numeric" : undefined}
+                                      aria-label={`${t('purchaseOrders.items.quantity')} ${item.description}`}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Input
+                                      type="number"
+                                      value={item.unit_price}
+                                      onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
+                                      disabled={isStructureLocked}
+                                      className="w-24"
+                                      min="0"
+                                      step="0.01"
+                                      aria-label={`${t('purchaseOrders.items.unitPrice')} ${item.description}`}
+                                    />
+                                  </TableCell>
+                                  <TableCell>{item.vat_rate}%</TableCell>
+                                  <TableCell className="text-right font-semibold tabular-nums">€{item.total_price.toFixed(2)}</TableCell>
+                                  <TableCell>
+                                    <div className="flex gap-1">
+                                      {!isStructureLocked && item.item_type === 'product' && item.product_id && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => {
+                                            const product = products.find(p => p.id === item.product_id);
+                                            setEditingItemIndex(index);
+                                            setEditingProductId(item.product_id);
+                                            setEditingProductName(product?.name || item.description);
+                                          }}
+                                          title={t('quoteBuilder.editAttributes')}
+                                          aria-label={t('quoteBuilder.editAttributes')}
+                                        >
+                                          <Tag className="w-4 h-4" />
+                                        </Button>
+                                      )}
+                                      {!isStructureLocked && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => handleRemoveItem(index)}
+                                          aria-label={`Remover ${item.description}`}
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                        {/* Resumo (subtotal, IVA, total, nº de itens) — à direita, por baixo das linhas. */}
+                        <dl className="ml-auto w-full max-w-xs space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <dt className="text-muted-foreground">{t('purchaseOrders.summary.subtotal')}</dt>
+                            <dd className="tabular-nums">€{totals.subtotal.toFixed(2)}</dd>
+                          </div>
+                          <div className="flex justify-between">
+                            <dt className="text-muted-foreground">{t('purchaseOrders.summary.vat')}</dt>
+                            <dd className="tabular-nums">€{totals.totalVat.toFixed(2)}</dd>
+                          </div>
+                          <div className="flex justify-between border-t pt-1.5 text-base font-bold">
+                            <dt>{t('purchaseOrders.summary.total')}</dt>
+                            <dd className="tabular-nums">€{totals.total.toFixed(2)}</dd>
+                          </div>
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <dt>{t('purchaseOrders.summary.items')}</dt>
+                            <dd>{orderItems.length}</dd>
+                          </div>
+                        </dl>
+                      </>
+                    ) : (
+                      <div className="rounded-lg border py-8 text-center text-muted-foreground">
+                        {t('purchaseOrders.form.noItems')}
+                      </div>
+                    )}
+                  </DocSection>
+                </div>
 
+                {/* Separador Receções — histórico de purchase_order_receipts (só de leitura). */}
+                {editingId && (
+                  <div
+                    role="tabpanel"
+                    id={docTabPanelId("po-sheet", "rec")}
+                    aria-labelledby={docTabId("po-sheet", "rec")}
+                    hidden={orderSheetTab !== "rec"}
+                  >
+                    {(() => {
+                      const rows = orderReceipts?.orderId === editingId ? orderReceipts.rows : [];
+                      const warehouseNames = orderReceipts?.orderId === editingId ? orderReceipts.warehouseNames : {};
+                      const deliveryNotes = orderReceipts?.orderId === editingId ? orderReceipts.deliveryNotes : {};
+                      const itemsById = new Map(
+                        (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
+                      );
+                      if (rows.length === 0) {
+                        return (
+                          <p className="text-sm text-muted-foreground">
+                            {editingOrderMeta?.id === editingId && editingOrderMeta.hasReceivedLines
+                              ? "Sem registo detalhado — as receções feitas antes desta funcionalidade não aparecem aqui."
+                              : "Ainda sem receções."}
+                          </p>
+                        );
+                      }
+                      return (
+                        <div className={DOC_TABLE_WRAP_CLASS}>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Data</TableHead>
+                                <TableHead>Linha / produto</TableHead>
+                                <TableHead>Tipo</TableHead>
+                                <TableHead className="text-right">Quantidade</TableHead>
+                                <TableHead className="text-right">Para EC</TableHead>
+                                <TableHead className="text-right">Para stock</TableHead>
+                                <TableHead>Armazém</TableHead>
+                                <TableHead>Guia</TableHead>
+                                <TableHead>Estado</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {rows.map((r) => {
+                                const item = r.purchase_order_item_id ? itemsById.get(r.purchase_order_item_id) : undefined;
+                                const units = Number(r.units_per_uom) || 1;
+                                const baseCode = stockUnitCode(item);
+                                const isRelease = r.kind === "release_to_stock";
+                                return (
+                                  <TableRow key={r.id} className={r.reverted_at ? "opacity-60" : ""}>
+                                    <TableCell className="whitespace-nowrap">{new Date(r.received_at).toLocaleString("pt-PT")}</TableCell>
+                                    <TableCell>
+                                      <div className="max-w-[240px] truncate" title={item?.products?.name || item?.description || ""}>
+                                        {item?.products?.name || item?.description || "Linha removida"}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap">
+                                      <InventoryStatusBadge tone={isRelease ? "violet" : "info"}>{isRelease ? "Passagem para stock" : "Receção"}</InventoryStatusBadge>
+                                    </TableCell>
+                                    <TableCell className="text-right whitespace-nowrap">
+                                      {isRelease ? "—" : `${formatQty(r.quantity)}${units === 1 && item ? ` ${baseCode}` : ""}`}
+                                    </TableCell>
+                                    <TableCell className="text-right whitespace-nowrap">
+                                      {Number(r.units_to_order) > 0 ? `${formatQty(r.units_to_order)} ${baseCode}` : "—"}
+                                    </TableCell>
+                                    <TableCell className="text-right whitespace-nowrap">
+                                      {Number(r.units_to_stock) > 0 ? `${formatQty(r.units_to_stock)} ${baseCode}` : "—"}
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap">{r.warehouse_id ? warehouseNames[r.warehouse_id] || "—" : "—"}</TableCell>
+                                    <TableCell className="whitespace-nowrap">
+                                      {r.delivery_note_id ? (deliveryNotes[r.delivery_note_id] ? noteLabel(deliveryNotes[r.delivery_note_id].number) : "Guia") : "—"}
+                                    </TableCell>
+                                    <TableCell>
+                                      {r.reverted_at ? (
+                                        <span className="text-xs">
+                                          Revertida em {new Date(r.reverted_at).toLocaleString("pt-PT")}
+                                          {r.revert_reason ? ` — ${r.revert_reason}` : ""}
+                                        </span>
+                                      ) : (
+                                        <span className="text-xs text-muted-foreground">
+                                          Ativa{isRelease && r.notes ? ` — ${r.notes}` : ""}
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Separador Guias — guias do fornecedor ligadas a esta PO ou com
+                    receções por ela (Fase 2, fatia 2), só de leitura. */}
+                {editingId && (
+                  <div
+                    role="tabpanel"
+                    id={docTabPanelId("po-sheet", "guias")}
+                    aria-labelledby={docTabId("po-sheet", "guias")}
+                    hidden={orderSheetTab !== "guias"}
+                  >
+                    {orderReceipts?.orderId === editingId && Object.keys(orderReceipts.deliveryNotes).length > 0 ? (
+                      <div className={DOC_TABLE_WRAP_CLASS}>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Guia</TableHead>
+                              <TableHead>Estado</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {Object.entries(orderReceipts.deliveryNotes)
+                              .sort(([, a], [, b]) => a.number.localeCompare(b.number, "pt-PT", { numeric: true }))
+                              .map(([id, n]) => (
+                                <TableRow key={id}>
+                                  <TableCell className="font-mono">{noteLabel(n.number)}</TableCell>
+                                  <TableCell>
+                                    <InventoryStatusBadge tone={n.status === "open" ? "info" : n.status === "closed" ? "ok" : "neutral"}>
+                                      {n.status === "open" ? "Aberta" : n.status === "closed" ? "Fechada" : "Cancelada"}
+                                    </InventoryStatusBadge>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Sem guias do fornecedor para esta encomenda.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Separador Portal — F3.2: estado, Aceitar data, Retirar. Fica
+                    sempre montado (só escondido): o estado lido bloqueia o
+                    formulário (isPublishedLock) e o "Aprovar e enviar" vai para o rodapé. */}
+                {editingId && editingOrderMeta?.id === editingId && (
+                  <div
+                    role="tabpanel"
+                    id={docTabPanelId("po-sheet", "portal")}
+                    aria-labelledby={docTabId("po-sheet", "portal")}
+                    hidden={orderSheetTab !== "portal"}
+                  >
+                    <PoSupplierPortalPanel
+                      key={editingId}
+                      orderId={editingId}
+                      orderNumber={editingOrderMeta.orderNumber}
+                      supplierName={editingOrderMeta.supplierName}
+                      refreshKey={portalRefreshKey}
+                      onStatusChange={setPortalStatus}
+                      onOrderChanged={() => loadData()}
+                      onOrderStatusChanged={(status) => {
+                        applyServerFormPatch(editingId, { status });
+                        setEditingOrderMeta((prev) => (prev && prev.id === editingId ? { ...prev, status } : prev));
+                      }}
+                      onExpectedDeliveryAccepted={(date) =>
+                        applyServerFormPatch(editingId, { expected_delivery: date || "" })
+                      }
+                      onPublished={() => void reloadEditingOrder(editingId)}
+                      hasUnsavedChanges={hasUnsavedOrderChanges}
+                      formReadOnly={isOrderReadOnly}
+                      sendActionTarget={poSendSlot}
+                    />
+                  </div>
+                )}
+
+                {/* Separador Anulações — "Não vou receber o resto" desta PO (linha
+                    ou PO inteira). Só informação + Desfazer; o lote desfaz-se junto. */}
+                {editingId && (
+                  <div
+                    role="tabpanel"
+                    id={docTabPanelId("po-sheet", "ann")}
+                    aria-labelledby={docTabId("po-sheet", "ann")}
+                    hidden={orderSheetTab !== "ann"}
+                  >
+                    {orderCancellations?.orderId === editingId && orderCancellations.rows.length > 0 ? (() => {
+                      const rows = orderCancellations.rows;
+                      const itemsById = new Map(
+                        (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
+                      );
+                      return (
+                        <DocSection title="Resto anulado (não vai ser recebido)">
+                          <ul className="divide-y rounded-lg border">
+                            {rows.map((c, idx) => {
+                              // purchase_order_item_id null = linha recriada na edição
+                              // da PO: mostra-se sem nome de linha e sem Desfazer.
+                              const lineGone = !c.purchase_order_item_id;
+                              const item = c.purchase_order_item_id ? itemsById.get(c.purchase_order_item_id) : undefined;
+                              const lineUomCode = poCancellationUomCode(item);
+                              const name = item?.products?.name || item?.description || (lineGone ? "Linha já não existe" : "Linha");
+                              // Lote: um só "Desfazer" (na primeira linha do lote que ainda existe).
+                              const isBatchFollower = lineGone || (!!c.batch_id &&
+                                rows.findIndex((r) => r.batch_id === c.batch_id && !!r.purchase_order_item_id) !== idx);
+                              return (
+                                <li key={c.id} className="flex flex-wrap items-center gap-x-2 px-3 py-2 text-sm text-muted-foreground">
+                                  <span>
+                                    {name}: {formatQty(c.quantity_cancelled)}{lineUomCode ? ` ${lineUomCode}` : ""} anulado(s) — {poCancellationReasonLabel(c.reason)}
+                                    {c.notes ? ` (${c.notes})` : ""} · {new Date(c.created_at).toLocaleString("pt-PT")}
+                                  </span>
+                                  {!isBatchFollower && (
+                                    <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                                      <Button
+                                        type="button"
+                                        variant="link"
+                                        size="sm"
+                                        className="h-6 px-1 text-xs"
+                                        onClick={() => setPoUndoTarget({
+                                          cancellationId: c.id,
+                                          batchId: c.batch_id ?? null,
+                                          orderId: c.purchase_order_id,
+                                          source: "orderDialog",
+                                          description: `Volta a ficar por receber: ${formatQty(c.quantity_cancelled)}${lineUomCode ? ` ${lineUomCode}` : ""} de ${name}.`,
+                                        })}
+                                      >
+                                        {c.batch_id ? "Desfazer (toda a encomenda)" : "Desfazer"}
+                                      </Button>
+                                    </PermissionGate>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </DocSection>
+                      );
+                    })() : (
+                      <p className="text-sm text-muted-foreground">Sem anulações ativas.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Separador Notas (em nova encomenda aparece logo a seguir às linhas). */}
+                <div
+                  role={editingId ? "tabpanel" : undefined}
+                  id={editingId ? docTabPanelId("po-sheet", "notes") : undefined}
+                  aria-labelledby={editingId ? docTabId("po-sheet", "notes") : undefined}
+                  hidden={!!editingId && orderSheetTab !== "notes"}
+                  className="space-y-4"
+                >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="notes">Notas internas (não vão para o fornecedor)</Label>
@@ -3376,322 +3881,22 @@ const PurchaseOrders = () => {
                     </div>
                   </div>
 
-                  <div className="border-t pt-4">
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-semibold">{t('purchaseOrders.form.orderItems')}</h3>
-                      {!isStructureLocked && (
-                      <Button 
-                        type="button" 
-                        onClick={() => setShowItemsDialog(true)}
-                        disabled={!formData.supplier_id}
-                      >
-                        <Plus className="w-4 h-4 mr-2" />
-                        {t('purchaseOrders.form.addItems')}
-                      </Button>
-                      )}
-                    </div>
-
-                    {orderItems.length > 0 ? (
-                      <div className="grid grid-cols-3 gap-6">
-                        <div className="col-span-2 space-y-4">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>{t('purchaseOrders.items.sku')}</TableHead>
-                                <TableHead>{t('purchaseOrders.items.description')}</TableHead>
-                                <TableHead>{t('purchaseOrders.items.quantity')}</TableHead>
-                                <TableHead>{t('purchaseOrders.items.unitPrice')}</TableHead>
-                                <TableHead>{t('purchaseOrders.items.vat')}</TableHead>
-                                <TableHead>{t('purchaseOrders.items.total')}</TableHead>
-                                <TableHead></TableHead>
-                              </TableRow>
-                            </TableHeader>
-                             <TableBody>
-                               {orderItems.map((item, index) => (
-                                 <TableRow key={index}>
-                                   <TableCell className="font-mono text-xs">{item.sku || "N/A"}</TableCell>
-                                   <TableCell>{item.description}</TableCell>
-                                   <TableCell>
-                                     <Input
-                                       type="number"
-                                       value={item.quantity}
-                                       onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                                       disabled={isStructureLocked}
-                                       className="w-20"
-                                       min="0"
-                                       step={itemRequiresIntegerQty(item) ? "1" : "0.01"}
-                                       inputMode={itemRequiresIntegerQty(item) ? "numeric" : undefined}
-                                     />
-                                   </TableCell>
-                                   <TableCell>
-                                     <Input
-                                       type="number"
-                                       value={item.unit_price}
-                                       onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
-                                       disabled={isStructureLocked}
-                                       className="w-24"
-                                       min="0"
-                                       step="0.01"
-                                     />
-                                   </TableCell>
-                                   <TableCell>{item.vat_rate}%</TableCell>
-                                   <TableCell className="font-semibold">€{item.total_price.toFixed(2)}</TableCell>
-                                   <TableCell>
-                                     <div className="flex gap-1">
-                                        {!isStructureLocked && item.item_type === 'product' && item.product_id && (
-                                         <Button
-                                           type="button"
-                                           variant="ghost"
-                                           size="icon"
-                                           onClick={() => {
-                                             const product = products.find(p => p.id === item.product_id);
-                                             setEditingItemIndex(index);
-                                             setEditingProductId(item.product_id);
-                                             setEditingProductName(product?.name || item.description);
-                                           }}
-                                           title={t('quoteBuilder.editAttributes')}
-                                         >
-                                           <Tag className="w-4 h-4" />
-                                         </Button>
-                                       )}
-                                       {!isStructureLocked && (
-                                       <Button
-                                         type="button"
-                                         variant="ghost"
-                                         size="icon"
-                                         onClick={() => handleRemoveItem(index)}
-                                       >
-                                         <Trash2 className="w-4 h-4" />
-                                       </Button>
-                                       )}
-                                     </div>
-                                   </TableCell>
-                                 </TableRow>
-                               ))}
-                             </TableBody>
-                          </Table>
-                        </div>
-
-                        <div>
-                          <Card>
-                            <CardHeader>
-                              <CardTitle>{t('purchaseOrders.summary.title')}</CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-2">
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">{t('purchaseOrders.summary.subtotal')}</span>
-                                <span>€{totals.subtotal.toFixed(2)}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">{t('purchaseOrders.summary.vat')}</span>
-                                <span>€{totals.totalVat.toFixed(2)}</span>
-                              </div>
-                              <div className="flex justify-between text-lg font-bold pt-2 border-t">
-                                <span>{t('purchaseOrders.summary.total')}</span>
-                                <span>€{totals.total.toFixed(2)}</span>
-                              </div>
-                              <div className="text-sm text-muted-foreground pt-2">
-                                {t('purchaseOrders.summary.items')}: {orderItems.length}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 text-muted-foreground">
-                        {t('purchaseOrders.form.noItems')}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* "Não vou receber o resto": anulações ativas desta PO (linha ou
-                      PO inteira). Só informação + Desfazer; a anulação da PO
-                      inteira (batch_id) desfaz-se em lote. */}
-                  {editingId && orderCancellations?.orderId === editingId && orderCancellations.rows.length > 0 && (() => {
-                    const rows = orderCancellations.rows;
-                    const itemsById = new Map(
-                      (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
-                    );
-                    return (
-                      <div className="border-t pt-4 space-y-2">
-                        <p className="text-sm font-medium">Resto anulado (não vai ser recebido)</p>
-                        <ul className="space-y-1">
-                          {rows.map((c, idx) => {
-                            // purchase_order_item_id null = linha recriada na edição
-                            // da PO: mostra-se sem nome de linha e sem Desfazer.
-                            const lineGone = !c.purchase_order_item_id;
-                            const item = c.purchase_order_item_id ? itemsById.get(c.purchase_order_item_id) : undefined;
-                            const lineUomCode = poCancellationUomCode(item);
-                            const name = item?.products?.name || item?.description || (lineGone ? "Linha já não existe" : "Linha");
-                            // Lote: um só "Desfazer" (na primeira linha do lote que ainda existe).
-                            const isBatchFollower = lineGone || (!!c.batch_id &&
-                              rows.findIndex((r) => r.batch_id === c.batch_id && !!r.purchase_order_item_id) !== idx);
-                            return (
-                              <li key={c.id} className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-                                <span>
-                                  {name}: {formatQty(c.quantity_cancelled)}{lineUomCode ? ` ${lineUomCode}` : ""} anulado(s) — {poCancellationReasonLabel(c.reason)}
-                                  {c.notes ? ` (${c.notes})` : ""} · {new Date(c.created_at).toLocaleString("pt-PT")}
-                                </span>
-                                {!isBatchFollower && (
-                                  <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
-                                    <Button
-                                      type="button"
-                                      variant="link"
-                                      size="sm"
-                                      className="h-6 px-1 text-xs"
-                                      onClick={() => setPoUndoTarget({
-                                        cancellationId: c.id,
-                                        batchId: c.batch_id ?? null,
-                                        orderId: c.purchase_order_id,
-                                        source: "orderDialog",
-                                        description: `Volta a ficar por receber: ${formatQty(c.quantity_cancelled)}${lineUomCode ? ` ${lineUomCode}` : ""} de ${name}.`,
-                                      })}
-                                    >
-                                      {c.batch_id ? "Desfazer (toda a encomenda)" : "Desfazer"}
-                                    </Button>
-                                  </PermissionGate>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Guias do fornecedor desta PO (ligadas à guia ou com receções
-                      por ela) — só de leitura (Fase 2, fatia 2). */}
-                  {editingId && orderReceipts?.orderId === editingId && Object.keys(orderReceipts.deliveryNotes).length > 0 && (
-                    <p className="border-t pt-4 text-sm">
-                      <span className="font-medium">Guias: </span>
-                      {Object.entries(orderReceipts.deliveryNotes)
-                        .sort(([, a], [, b]) => a.number.localeCompare(b.number, "pt-PT", { numeric: true }))
-                        .map(([, n]) => `${noteLabel(n.number)} (${n.status === "open" ? "aberta" : n.status === "closed" ? "fechada" : "cancelada"})`)
-                        .join(", ")}
-                    </p>
-                  )}
-
-                  {/* Histórico de receções (purchase_order_receipts, 20261206130000) —
-                      só de leitura, colapsável. Receções anteriores à tabela não
-                      têm registo aqui. */}
-                  {editingId && (
-                    (orderReceipts?.orderId === editingId && orderReceipts.rows.length > 0) ||
-                    (editingOrderMeta?.id === editingId && editingOrderMeta.hasReceivedLines)
-                  ) && (() => {
-                    const rows = orderReceipts?.orderId === editingId ? orderReceipts.rows : [];
-                    const warehouseNames = orderReceipts?.orderId === editingId ? orderReceipts.warehouseNames : {};
-                    const deliveryNotes = orderReceipts?.orderId === editingId ? orderReceipts.deliveryNotes : {};
-                    const itemsById = new Map(
-                      (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
-                    );
-                    return (
-                      <div className="border-t pt-4">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="px-2 -ml-2"
-                          onClick={() => setReceiptHistoryOpen((v) => !v)}
-                          aria-expanded={receiptHistoryOpen}
-                        >
-                          {receiptHistoryOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-                          Histórico de receções{rows.length > 0 ? ` (${rows.length})` : ""}
-                        </Button>
-                        {receiptHistoryOpen && (
-                          rows.length === 0 ? (
-                            <p className="text-sm text-muted-foreground mt-2">
-                              Sem registo detalhado — as receções feitas antes desta funcionalidade não aparecem aqui.
-                            </p>
-                          ) : (
-                            <div className="mt-2 overflow-x-auto">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Data</TableHead>
-                                    <TableHead>Linha / produto</TableHead>
-                                    <TableHead>Tipo</TableHead>
-                                    <TableHead className="text-right">Quantidade</TableHead>
-                                    <TableHead className="text-right">Para EC</TableHead>
-                                    <TableHead className="text-right">Para stock</TableHead>
-                                    <TableHead>Armazém</TableHead>
-                                    <TableHead>Guia</TableHead>
-                                    <TableHead>Estado</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {rows.map((r) => {
-                                    const item = r.purchase_order_item_id ? itemsById.get(r.purchase_order_item_id) : undefined;
-                                    const units = Number(r.units_per_uom) || 1;
-                                    const baseCode = stockUnitCode(item);
-                                    const isRelease = r.kind === "release_to_stock";
-                                    return (
-                                      <TableRow key={r.id} className={r.reverted_at ? "opacity-60" : ""}>
-                                        <TableCell className="whitespace-nowrap">{new Date(r.received_at).toLocaleString("pt-PT")}</TableCell>
-                                        <TableCell>
-                                          <div className="max-w-[240px] truncate" title={item?.products?.name || item?.description || ""}>
-                                            {item?.products?.name || item?.description || "Linha removida"}
-                                          </div>
-                                        </TableCell>
-                                        <TableCell className="whitespace-nowrap">{isRelease ? "Passagem para stock" : "Receção"}</TableCell>
-                                        <TableCell className="text-right whitespace-nowrap">
-                                          {isRelease ? "—" : `${formatQty(r.quantity)}${units === 1 && item ? ` ${baseCode}` : ""}`}
-                                        </TableCell>
-                                        <TableCell className="text-right whitespace-nowrap">
-                                          {Number(r.units_to_order) > 0 ? `${formatQty(r.units_to_order)} ${baseCode}` : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right whitespace-nowrap">
-                                          {Number(r.units_to_stock) > 0 ? `${formatQty(r.units_to_stock)} ${baseCode}` : "—"}
-                                        </TableCell>
-                                        <TableCell className="whitespace-nowrap">{r.warehouse_id ? warehouseNames[r.warehouse_id] || "—" : "—"}</TableCell>
-                                        <TableCell className="whitespace-nowrap">
-                                          {r.delivery_note_id ? (deliveryNotes[r.delivery_note_id] ? noteLabel(deliveryNotes[r.delivery_note_id].number) : "Guia") : "—"}
-                                        </TableCell>
-                                        <TableCell>
-                                          {r.reverted_at ? (
-                                            <span className="text-xs">
-                                              Revertida em {new Date(r.reverted_at).toLocaleString("pt-PT")}
-                                              {r.revert_reason ? ` — ${r.revert_reason}` : ""}
-                                            </span>
-                                          ) : (
-                                            <span className="text-xs text-muted-foreground">
-                                              Ativa{isRelease && r.notes ? ` — ${r.notes}` : ""}
-                                            </span>
-                                          )}
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  })}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  <div className="flex gap-2 justify-end pt-4 border-t">
-                    {isOrderReadOnly ? (
-                      // Fecho completo (repõe o formulário) — o Cancelar abaixo só
-                      // fecha, e deixaria o editingId/modo só de leitura agarrados
-                      // à próxima "Nova Encomenda".
-                      <Button type="button" variant="outline" onClick={() => handleOrderDialogOpenChange(false)}>
-                        {t('purchaseOrders.form.close')}
-                      </Button>
-                    ) : (
-                      <>
-                        <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                          {t('purchaseOrders.form.cancel')}
-                        </Button>
-                        <Button type="submit">
-                          {editingId ? t('purchaseOrders.form.update') : t('purchaseOrders.form.create')}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+                  {/* Organização — sem prop disabled; em só de leitura o fieldset
+                      desativa os controlos e bloqueia o rato. */}
+                  <fieldset
+                    disabled={isStructureLocked}
+                    className={isStructureLocked ? "min-w-0 pointer-events-none opacity-70" : "min-w-0"}
+                  >
+                    <OrganizationFormSection
+                      value={organizationSelection}
+                      onChange={setOrganizationSelection}
+                      showSecondaryCompanies={false}
+                      multiSelectCompanies={false}
+                    />
+                  </fieldset>
+                </div>
+              </DocumentSheetContent>
+            </Sheet>
             </PermissionGate>
           </>
           }

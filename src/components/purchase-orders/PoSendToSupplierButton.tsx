@@ -32,6 +32,9 @@ interface Props {
   disabled?: boolean;
   /** Dica do botão bloqueado (title/aria). */
   disabledHint?: string | null;
+  /** variant="button": tamanho e texto (rodapé da folha da encomenda = "default" / "Aprovar e enviar"). */
+  buttonSize?: "sm" | "default";
+  buttonLabel?: string;
 }
 
 /**
@@ -49,6 +52,8 @@ export function PoSendToSupplierButton({
   disabledHint,
   open,
   onOpenChange,
+  buttonSize = "sm",
+  buttonLabel = "Encomendar",
 }: Props) {
   const { toast } = useToast();
   const showResult = usePoSendToast();
@@ -91,14 +96,14 @@ export function PoSendToSupplierButton({
       ) : variant === "none" ? null : (
         <Button
           type="button"
-          size="sm"
+          size={buttonSize}
           onClick={() => setConfirmOpen(true)}
           disabled={sending || disabled}
           title={disabled && disabledHint ? disabledHint : undefined}
           className="gap-2"
         >
           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          Encomendar
+          {buttonLabel}
         </Button>
       )}
 

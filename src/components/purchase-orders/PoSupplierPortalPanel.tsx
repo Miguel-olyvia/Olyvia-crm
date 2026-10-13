@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CalendarCheck, Globe, Loader2, RefreshCw, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +70,12 @@ interface Props {
   hasUnsavedChanges?: boolean;
   /** Formulário só de leitura por outro motivo (recebida/cancelada): o aviso não fala de notas. */
   formReadOnly?: boolean;
+  /**
+   * Folha da encomenda: o botão "Encomendar" (Aprovar e enviar) é desenhado
+   * neste elemento (rodapé), por portal — mesma lógica e condições (can_send,
+   * alterações por gravar); só muda o sítio.
+   */
+  sendActionTarget?: HTMLElement | null;
 }
 
 /**
@@ -88,6 +95,7 @@ export function PoSupplierPortalPanel({
   onPublished,
   hasUnsavedChanges = false,
   formReadOnly = false,
+  sendActionTarget = null,
 }: Props) {
   const { toast } = useToast();
   const [status, setStatus] = useState<PoSupplierStatus | null>(null);
@@ -218,18 +226,35 @@ export function PoSupplierPortalPanel({
           {pub && pub.revision > 1 && <span className="text-xs text-muted-foreground">versão {pub.revision}</span>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {status.can_send && (
-            <PoSendToSupplierButton
-              orderId={orderId}
-              orderNumber={orderNumber}
-              supplierName={supplierName}
-              variant="button"
-              onDone={handleSent}
-              extraWarning="É enviada a encomenda tal como está gravada."
-              disabled={hasUnsavedChanges}
-              disabledHint="Grava primeiro as alterações para poder encomendar."
-            />
-          )}
+          {status.can_send &&
+            (sendActionTarget
+              ? createPortal(
+                  <PoSendToSupplierButton
+                    orderId={orderId}
+                    orderNumber={orderNumber}
+                    supplierName={supplierName}
+                    variant="button"
+                    buttonSize="default"
+                    buttonLabel="Aprovar e enviar"
+                    onDone={handleSent}
+                    extraWarning="É enviada a encomenda tal como está gravada."
+                    disabled={hasUnsavedChanges}
+                    disabledHint="Grava primeiro as alterações para poder encomendar."
+                  />,
+                  sendActionTarget,
+                )
+              : (
+                <PoSendToSupplierButton
+                  orderId={orderId}
+                  orderNumber={orderNumber}
+                  supplierName={supplierName}
+                  variant="button"
+                  onDone={handleSent}
+                  extraWarning="É enviada a encomenda tal como está gravada."
+                  disabled={hasUnsavedChanges}
+                  disabledHint="Grava primeiro as alterações para poder encomendar."
+                />
+              ))}
           {status.can_accept_date && (
             <Button type="button" size="sm" variant="outline" className="gap-2" onClick={() => void handleAccept()} disabled={accepting}>
               {accepting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />}

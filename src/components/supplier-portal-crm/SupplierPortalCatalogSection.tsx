@@ -43,6 +43,8 @@ interface SupplierPortalCatalogSectionProps {
   onOpenPortalTab?: () => void;
   /** Link do sino (F3.4b): abrir já em "Preços por aprovar". */
   focusPriceChanges?: boolean;
+  /** A ficha do fornecedor mostra "Preços por aprovar" num separador próprio. */
+  hidePriceChanges?: boolean;
 }
 
 const PAGE_SIZE = 50;
@@ -81,6 +83,7 @@ export default function SupplierPortalCatalogSection({
   onLinksChanged,
   onOpenPortalTab,
   focusPriceChanges = false,
+  hidePriceChanges = false,
 }: SupplierPortalCatalogSectionProps) {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
@@ -537,7 +540,7 @@ export default function SupplierPortalCatalogSection({
 
   // Preços por aprovar (F3.4b): também sem conta ativa (pedidos de antes de
   // revogar o acesso continuam por decidir).
-  const priceChanges = (
+  const priceChanges = hidePriceChanges ? null : (
     <SupplierPriceChangesSection
       supplierId={supplierId}
       focus={focusPriceChanges}

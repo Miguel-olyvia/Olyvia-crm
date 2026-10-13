@@ -28,6 +28,10 @@ interface SupplierPriceChangesSectionProps {
   focus?: boolean;
   /** Depois de aceitar: item_suppliers/custos mudaram — quem mostra preços recarrega. */
   onDecided?: () => void;
+  /** Depois de qualquer decisão gravada (aceitar ou recusar): contadores a recarregar. */
+  onAfterDecision?: () => void;
+  /** Separador próprio na ficha: mostra-se mesmo sem pedidos. */
+  alwaysShow?: boolean;
 }
 
 type View = "pending" | "decided";
@@ -45,7 +49,7 @@ interface ResultLine {
 // (rpc_price_changes_list) e aceitar/recusar (rpc_price_changes_decide), por
 // linha ou em lote. Ver: suppliers.view + (suppliers.view_pricing ou
 // products.view_cost). Decidir: can_decide (products.edit + manage_prices).
-export default function SupplierPriceChangesSection({ supplierId, focus = false, onDecided }: SupplierPriceChangesSectionProps) {
+export default function SupplierPriceChangesSection({ supplierId, focus = false, onDecided, onAfterDecision, alwaysShow = false }: SupplierPriceChangesSectionProps) {
   const { toast } = useToast();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canList =
@@ -129,8 +133,8 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
   const decidedCount = (counts?.approved ?? 0) + (counts?.rejected ?? 0);
   // Sem pedidos nenhuns a secção não ocupa espaço (exceto vinda do sino).
   // O resultado da última decisão fica visível mesmo que não sobre nada.
-  if (list && pendingCount === 0 && decidedCount === 0 && !focus && !lastResult) return null;
-  if (!list && !focus && !loadError) return null;
+  if (list && pendingCount === 0 && decidedCount === 0 && !focus && !lastResult && !alwaysShow) return null;
+  if (!list && !focus && !loadError && !alwaysShow) return null;
 
   const selectedItems = items.filter((i) => selected.has(i.id));
   const allSelected = selectable.length > 0 && selectable.every((id) => selected.has(id));
@@ -189,6 +193,7 @@ export default function SupplierPriceChangesSection({ supplierId, focus = false,
     setSelected(new Set());
     await load();
     if (data.approved > 0) onDecided?.();
+    onAfterDecision?.();
   };
 
   // Aceitar uma linha sem mudança de unidade: direto. Com mudança: confirmação.
