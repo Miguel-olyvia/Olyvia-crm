@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, LayoutList, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Sun, Wind, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PAPEL_ROT, alternarVarios, contagem, listaVarios, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
+import { PAPEL_ROT, alternarVarios, chaveBase, contagem, listaVarios, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
 import { eur, type Negocio } from "./motor";
 import { CAMPOS_COM_EFEITO, efeitosDoCampo } from "./efeitosLevantamento";
 import { Chip, type Ctx } from "./pecas";
@@ -114,7 +114,7 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3, plano }: FxPro
 
 /** O que a resposta faz ao orçamento, logo por baixo do campo (efeitosLevantamento.ts). */
 function Impacto({ k, d, simples }: { k: string; d: Negocio; simples?: boolean }) {
-  if (!CAMPOS_COM_EFEITO.has(k)) return null;
+  if (!CAMPOS_COM_EFEITO.has(chaveBase(k))) return null; // os campos de cada divisão contam pela chave de base
   const ef = efeitosDoCampo(k, d.f);
   if (!ef.length) return null;
   return (

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Check, Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATALOGO, OFICIOS, normal, type ItemCatalogo } from "./catalogo";
+import { juntarDivisoes } from "./campos";
 import { aValidar } from "./CamposFase";
 import { LINHAS, eur, garantirServico, nfmt, r2, servicosVisita, type Negocio, type SvcId } from "./motor";
 import { obrigacoes, servicosTrazidos, trazidosParaOrc, ativosDoPacote } from "./produtosVisita";
@@ -30,7 +31,7 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
   // quantidade sugerida ao juntar: das medidas quando faz sentido, senão a habitual nos orçamentos
   const sugestao = (c: ItemCatalogo) => {
     const n = normal(c.n);
-    if (c.id === "eletr") return Number(d.f.diag_pontos_eletricos) || c.qm;
+    if (c.id === "eletr") return Number(juntarDivisoes(d.f).diag_pontos_eletricos) || c.qm; // somados em todas as divisões
     if (c.un === "m²" && n.includes("pavimento") && v.med.pav) return v.med.pav;
     if (c.un === "m²" && (n.includes("revestimento") || n.includes("pintura")) && v.med.par) return v.med.par;
     return c.qm;

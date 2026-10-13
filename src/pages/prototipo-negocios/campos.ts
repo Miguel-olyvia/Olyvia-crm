@@ -144,10 +144,13 @@ export const INTERIOR: Grupo = {
 };
 
 // Diagnóstico da área (deal_needs.diag_*). As medidas ficam à parte, porque dão as quantidades.
+/** As divisões da área de intervenção (escolha múltipla, 13/10): cada uma tem os seus campos. */
+export const DIVISOES = ["Casa de banho", "Cozinha", "Sala", "Quarto", "Outra"];
+
 export const AREA: Grupo = {
   titulo: "Área de intervenção",
   campos: [
-    { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "escolha", op: ["Casa de banho", "Cozinha", "Outra"], papel: "plano" },
+    { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "varios", op: DIVISOES, papel: "plano", ajuda: "Pode escolher mais do que uma: cada divisão tem os seus campos." },
     { k: "diag_intervencao_tipo", bloco: "A divisão", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
     { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "escolha", op: ["2,4 m", "2,5 m", "2,6 m", "2,7 m", "2,8 m", "3 m ou mais"], papel: "plano" },
     { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "contador", min: 0, max: 30, papel: "plano" },
@@ -357,4 +360,91 @@ export function chaveLivre(rotulo: string, usadas: string[]): string {
   let k = base, i = 2;
   while (usadas.includes(k)) k = `${base}_${i++}`;
   return k;
+}
+
+/* ------------------------------------------------------------------ divisões da área (13/10/2026) */
+// A "Divisão" é escolha múltipla; cada divisão escolhida tem os campos da área. A divisão principal (a 1.ª
+// escolhida, guardada em f.diag_div_principal) usa as chaves de sempre, sem prefixo: os negócios de antes
+// e os de exemplo ficam iguais. As outras usam o prefixo div_{divisão}_ (ex.: div_coz_diag_gas).
+// As regras que leem estes campos (efeitos no orçamento, proteções, pontos elétricos) juntam as divisões:
+// somam as contagens e ficam com o pior caso nas escolhas (juntarDivisoes).
+const SLUG_DIV: Record<string, string> = { "Casa de banho": "wc", Cozinha: "coz", Sala: "sala", Quarto: "quarto", Outra: "outra" };
+export const CHAVE_PRINCIPAL = "diag_div_principal";
+export const divisoesEscolhidas = (f: Record<string, string>) => listaVarios(f.diag_tipo_area || "");
+/** A divisão que usa as chaves sem prefixo. */
+export function divisaoPrincipal(f: Record<string, string>): string | null {
+  const ds = divisoesEscolhidas(f);
+  return ds.includes(f[CHAVE_PRINCIPAL]) ? f[CHAVE_PRINCIPAL] : ds[0] ?? null;
+}
+export const prefixoDivisao = (div: string) => `div_${SLUG_DIV[div] ?? normalSlug(div)}_`;
+const normalSlug = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+/** A chave de base de um campo de divisão: "div_coz_diag_gas" → "diag_gas". */
+export const chaveBase = (k: string) => k.replace(/^div_[a-z0-9]+_/, "");
+/** As chaves da área que se repetem por divisão (todas menos a própria escolha da divisão). */
+const camposPorDivisao = (g: Grupo) => g.campos.filter((c) => c.k !== "diag_tipo_area");
+
+/**
+ * Os grupos da área de intervenção para os valores de um negócio: o grupo de base (com a escolha das divisões e
+ * os campos da principal) e um grupo por cada outra divisão, com as chaves prefixadas. O 1.º grupo é o AREA tal
+ * como está (quem o usa aplica-lhe os ajustes da empresa); os outros já saem com os ajustes (cfg).
+ */
+export function gruposArea(cfg: CfgCampos | undefined, f: Record<string, string>): Grupo[] {
+  const ds = divisoesEscolhidas(f), princ = divisaoPrincipal(f);
+  if (ds.length < 2) return [AREA];
+  const comNome = (div: string, c: Def): Def => ({ ...c, bloco: `${div} · ${c.bloco ?? "Campos"}` });
+  const base: Grupo = { ...AREA, campos: AREA.campos.map((c) => (c.k === "diag_tipo_area" ? c : comNome(princ!, c))) };
+  const ef = efetivo(cfg, AREA);
+  const outros = ds.filter((x) => x !== princ).map((div): Grupo => {
+    const p = prefixoDivisao(div);
+    const campos = camposPorDivisao(ef).map((c) => {
+      const se = c.se && c.se.k !== "diag_tipo_area" ? { k: p + c.se.k, v: c.se.v } : c.se;
+      return comNome(div, { ...c, k: p + c.k, se });
+    });
+    return { titulo: `${AREA.titulo} · ${div}`, campos };
+  });
+  return [base, ...outros];
+}
+
+/** Ao mudar as divisões: fixa a principal; se a principal saiu, a nova principal passa para as chaves sem prefixo. */
+export function reorganizarDivisoes(f: Record<string, string>) {
+  const ds = divisoesEscolhidas(f), antes = f[CHAVE_PRINCIPAL];
+  if (!ds.length) return;
+  if (!antes) { f[CHAVE_PRINCIPAL] = ds[0]; return; }
+  if (ds.includes(antes)) return;
+  const nova = ds[0], p = prefixoDivisao(nova);
+  for (const c of camposPorDivisao(AREA)) {
+    const v = f[p + c.k];
+    if (v) f[c.k] = v; else delete f[c.k];
+    delete f[p + c.k];
+  }
+  f[CHAVE_PRINCIPAL] = nova;
+}
+
+// a ordem do melhor para o pior caso, nas escolhas em que não é a ordem das opções
+const PIOR: Record<string, string[]> = {
+  diag_local_cortes: ["Varanda", "Na própria área", "Fora (garagem, rua)"],
+  diag_janela: ["Sim", "Não"],
+  diag_toalheiro: ["Não", "Sim"],
+  diag_intervencao_tipo: ["Só substituir", "Remodelação parcial", "Remodelação total"],
+};
+/**
+ * Os valores com as divisões juntas, nas chaves de base: contagens somadas, o pior caso nas escolhas e o texto
+ * livre junto. As chaves prefixadas saem (assim juntar duas vezes dá o mesmo). Com uma só divisão, fica igual.
+ */
+export function juntarDivisoes(f: Record<string, string>): Record<string, string> {
+  const ds = divisoesEscolhidas(f), princ = divisaoPrincipal(f);
+  if (ds.length < 2) return f;
+  const r: Record<string, string> = {};
+  for (const k in f) if (!/^div_[a-z0-9]+_/.test(k)) r[k] = f[k];
+  for (const c of camposPorDivisao(AREA)) {
+    const vs = ds.map((div) => f[(div === princ ? "" : prefixoDivisao(div)) + c.k]).filter((v): v is string => !!v);
+    if (!vs.length) continue;
+    if (c.t === "contador" || c.t === "numero") r[c.k] = String(vs.reduce((a, v) => a + (Number(v) || 0), 0));
+    else if (c.t === "texto" || c.t === "texto_longo") r[c.k] = vs.join("; ");
+    else {
+      const ordem = PIOR[c.k] ?? c.op ?? [];
+      r[c.k] = vs.reduce((a, v) => (ordem.indexOf(v) > ordem.indexOf(a) ? v : a));
+    }
+  }
+  return r;
 }

@@ -3,6 +3,8 @@
 // serviços (ex.: acesso difícil) e uma mudança nos materiais (materiais do cliente).
 // Os valores são de exemplo; na app real vêm das Definições de cada empresa.
 
+import { chaveBase, juntarDivisoes } from "./campos";
+
 export interface Efeito {
   /** O campo que dá o efeito (pode haver mais de um campo a pesar no mesmo efeito). */
   k: string;
@@ -37,7 +39,9 @@ const AMIANTO = [300, 520];         // remoção certificada
 const GAS = { Anular: [110, 182], Instalar: [280, 450] } as Record<string, number[]>;
 
 /** Todos os efeitos das respostas dadas até agora. */
-export function efeitosDoLevantamento(f: Record<string, string>): Efeito[] {
+export function efeitosDoLevantamento(f0: Record<string, string>): Efeito[] {
+  // com várias divisões, as respostas da área juntam-se (contagens somadas, pior caso nas escolhas)
+  const f = juntarDivisoes(f0);
   const e: Efeito[] = [];
   // Proteções e logística
   const caminho = f.diag_distancia_entrada?.startsWith("Longa") ? 20 : f.diag_distancia_entrada?.startsWith("Média") ? 12 : f.diag_distancia_entrada ? 5 : 0;
@@ -69,7 +73,7 @@ export function efeitosDoLevantamento(f: Record<string, string>): Efeito[] {
 }
 
 /** Os efeitos de um só campo (para mostrar ao lado da resposta). */
-export const efeitosDoCampo = (k: string, f: Record<string, string>): Efeito[] => efeitosDoLevantamento(f).filter((e) => e.k === k);
+export const efeitosDoCampo = (k: string, f: Record<string, string>): Efeito[] => efeitosDoLevantamento(f).filter((e) => e.k === chaveBase(k));
 
 /** Os campos que podem mexer no orçamento (para o aviso "mexe no orçamento" ao lado do campo). */
 export const CAMPOS_COM_EFEITO = new Set([

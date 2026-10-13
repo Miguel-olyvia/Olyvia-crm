@@ -13,7 +13,7 @@ import {
   alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
 import { UsarLocalizacao } from "./Localizacao";
 import { orcLinhas } from "./ServicosCatalogo";
@@ -174,7 +174,7 @@ export function PaginaNegocio(ctx: Ctx) {
 function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: number; aberta: boolean; alternar: () => void }) {
   const { S } = ctx;
   const Ic = ICONE_FASE[i];
-  const gs = i === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[i];
+  const gs = (i === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[i]).flatMap((g) => (g === AREA ? gruposArea(S.campos, d.f) : [g]));
   const c = contagem(gs, d.f);
   let resumo = resumoGrupos(gs, d.f, 4);
   if (i === 0) resumo = [d.f.origem || d.origem, d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
@@ -262,7 +262,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       ) },
     ];
   } else if (d.fase === 2) {
-    const CM = camposMedida(L);
+    const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
     const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
@@ -282,7 +282,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         </div>
       ) },
       { ...g(INTERIOR, Home), corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
-      { ...g(AREA, Wrench), corpo: <div className="space-y-6"><Campos grupo={E(AREA)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
+      // várias divisões: um grupo de campos por divisão (gruposArea), contados todos no passo
+      { ...g(AREA, Wrench), conta: contagem(GA, d.f), corpo: <div className="space-y-6">{GA.map((ga) => <Campos key={ga.titulo} grupo={ga} {...fx} />)}<FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
       { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
         <div className="space-y-2">
           <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. Todas são precisas para fechar o levantamento (os pontos de água quente podem ser 0).</p>
@@ -350,7 +351,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   const TODOS: Grupo[] = [...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA];
   for (const ps of passos) {
     const gr = TODOS.find((x) => x.titulo === ps.id);
-    if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([E(gr)], d.f).length;
+    if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;

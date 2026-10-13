@@ -10,6 +10,7 @@ import {
 import type { Produto } from "./v2/catalogoModelo";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
+import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
@@ -744,11 +745,18 @@ export function derivar(d: Negocio, k: string) {
   }
   if (k === "pagamento") sugerir(d, { tranche: v === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)" });
   if (k === "diag_tipo_area" && v === "Cozinha") sugerir(d, { diag_toalheiro: "Não" });
+  if (k === "diag_tipo_area") {
+    // várias divisões: fixa a principal e, numa cozinha que não é a principal, também não há toalheiro
+    reorganizarDivisoes(f);
+    const princ = divisaoPrincipal(f);
+    for (const div of divisoesEscolhidas(f)) if (div === "Cozinha" && div !== princ) sugerir(d, { [prefixoDivisao(div) + "diag_toalheiro"]: "Não" });
+  }
   if (k === "habitada_durante_obra" && v) sugerir(d, { chaves: v === "Sim" ? "O cliente abre" : "Chave entregue" });
 }
 
 // Proteções sugeridas a partir da ficha do local e da área (como em sugestaoFichaLocal.ts).
-export function protecoesSugeridas(f: Record<string, string>): string {
+export function protecoesSugeridas(f0: Record<string, string>): string {
+  const f = juntarDivisoes(f0); // várias divisões: contagens somadas, pior caso nas escolhas
   const p: string[] = [];
   const caminho = f.diag_distancia_entrada?.startsWith("Longa") ? 20 : f.diag_distancia_entrada?.startsWith("Média") ? 12 : 5;
   p.push(`Cartão canelado no caminho (${caminho} m)`);
@@ -839,7 +847,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
     fecharVisita(id: number) {
       const d = deal(id), L = LINHAS[d.linha];
-      if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
+      if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, ...gruposArea(S.campos, d.f), ESCOLHAS], extrasVisita(d))) return;
       const antes = d.orc && !d.orc.enviada ? d.orc : null; // um levantamento reaberto: o orçamento de antes
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S);
       if (antes) preservarManuais(antes, d.orc, L);
@@ -985,7 +993,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (d.sug) delete d.sug[k]; // mexido por alguém: deixa de ser sugestão
       derivar(d, k);
       // a resposta mexe logo no orçamento, enquanto a proposta não foi enviada
-      if (d.orc && !d.orc.enviada && CAMPOS_COM_EFEITO.has(k)) sincronizarEfeitos(d, S);
+      if (d.orc && !d.orc.enviada && (CAMPOS_COM_EFEITO.has(k) || CAMPOS_COM_EFEITO.has(chaveBase(k)) || k === "diag_tipo_area")) sincronizarEfeitos(d, S);
     },
     confirmar(id: number, ks: string[]) { const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k]; },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {

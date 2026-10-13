@@ -6,7 +6,7 @@ import { ArrowLeft, Check, Euro, MapPin, Phone, Square, TrendingUp, Volume2 } fr
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, type Negocio } from "./motor";
-import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, efetivo, nomeGrupo, type Grupo } from "./campos";
+import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
 import { OrcamentoSimples } from "./OrcamentoSimples";
@@ -139,7 +139,7 @@ export function NegocioSimples(ctx: Ctx) {
                 {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Proposta</h3><Partilhar ctx={ctx} d={d} tipo="proposta" estado={d.orc.aceite ? `aceite ${d.orc.aceite}` : "enviada"}><PropostaDoc S={S} d={d} /></Partilhar></div>}
                 {ver === 3 && d.orc && !d.orc.vendaDireta && <div><h3 className="mb-3 text-base font-semibold">Contrato</h3><Partilhar ctx={ctx} d={d} tipo="contrato" estado={d.orc.contrato === "assinado" ? "assinado" : "enviado"}><ContratoDoc S={S} d={d} /></Partilhar></div>}
                 {ver === 4 && <div><h3 className="mb-3 text-base font-semibold">Fatura e recibo</h3><DocumentosSimples {...ctx} d={d} /></div>}
-                {(ver === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[ver]).map((g0) => efetivo(S.campos, g0)).filter((g) => !g.oculto).map((g) => (
+                {(ver === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[ver]).flatMap((g) => (g === AREA ? gruposArea(S.campos, d.f) : [g])).map((g0) => efetivo(S.campos, g0)).filter((g) => !g.oculto).map((g) => (
                   <div key={g.titulo}>
                     <h3 className="mb-3 text-base font-semibold">{nomeGrupo(g)}</h3>
                     <Campos grupo={g} d={d} A={A} run={ctx.run} ro simples />
