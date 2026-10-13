@@ -742,7 +742,13 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_contrato_orcamento(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_contrato_orcamento(uuid) TO authenticated, service_role;
 
--- TODOS os orçamentos de que a obra de um contrato nasce (pós-contrato, 13/10):
+-- A ÚNICA função que diz que orçamentos tem um contrato (pós-contrato, 13/10;
+-- espelho da fn_ec_orcamentos_do_contrato da Frente A — na junção passam a
+-- uma só). Hoje devolve `origem = 'contrato'`; as ADENDAS (subproposta +
+-- suborçamento ligados ao mesmo contrato, fluxo-encomendas.md 1.1b) entram
+-- aqui com `origem = 'adenda'`, e a obra ganha-as por
+-- ops_obra_acrescentar_orcamentos_impl sem mexer no que já está planeado.
+-- TODOS os orçamentos de que a obra de um contrato nasce:
 --   1. client_contracts.quote_id preenchido → só esse;
 --   2. senão, todos os orçamentos ACEITES da proposta (quotes.accepted_at),
 --      pela ordem em que foram aceites — na Mudelar, um contrato com 4
@@ -753,8 +759,9 @@ GRANT EXECUTE ON FUNCTION public.ops_contrato_orcamento(uuid) TO authenticated, 
 -- `rotulo` = o que o ecrã e os nomes das tarefas mostram ("de que orçamento
 -- vem"): o título, ou o número; títulos repetidos levam o número à frente.
 -- `ordem` = 1..n. INVOKER, como ops_contrato_orcamento.
-CREATE OR REPLACE FUNCTION public.ops_contrato_orcamentos(_contrato_id uuid)
-RETURNS TABLE (quote_id uuid, ordem integer, rotulo text, numero text)
+DROP FUNCTION IF EXISTS public.ops_contrato_orcamentos(uuid);
+CREATE FUNCTION public.ops_contrato_orcamentos(p_contrato_id uuid)
+RETURNS TABLE (quote_id uuid, origem text, ordem integer, rotulo text, numero text)
 LANGUAGE plpgsql STABLE SECURITY INVOKER
 SET search_path TO 'public'
 AS $$
@@ -766,7 +773,7 @@ DECLARE
   v_ids      uuid[] := '{}';
   v_um       uuid;
 BEGIN
-  IF _contrato_id IS NULL OR to_regclass('public.client_contracts') IS NULL THEN
+  IF p_contrato_id IS NULL OR to_regclass('public.client_contracts') IS NULL THEN
     RETURN;
   END IF;
 
@@ -774,7 +781,7 @@ BEGIN
           CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'client_contracts' AND column_name = 'proposal_id')
                THEN 'proposal_id' ELSE 'NULL::uuid' END ||
           ' FROM public.client_contracts WHERE id = $1'
-     INTO v_quote, v_org, v_proposta USING _contrato_id;
+     INTO v_quote, v_org, v_proposta USING p_contrato_id;
 
   IF v_quote IS NOT NULL THEN
     v_ids := ARRAY[v_quote];
@@ -789,7 +796,7 @@ BEGIN
   END IF;
 
   IF cardinality(v_ids) = 0 THEN
-    v_um := public.ops_contrato_orcamento(_contrato_id);
+    v_um := public.ops_contrato_orcamento(p_contrato_id);
     IF v_um IS NOT NULL THEN
       v_ids := ARRAY[v_um];
     END IF;
@@ -806,6 +813,7 @@ BEGIN
     SELECT DISTINCT ON (q.id) q.* FROM q ORDER BY q.id, q.pos
   )
   SELECT u.id,
+         'contrato'::text,
          (row_number() OVER (ORDER BY u.pos))::integer,
          CASE WHEN count(*) OVER (PARTITION BY lower(u.titulo)) > 1 AND u.numero IS NOT NULL
                    AND lower(u.numero) <> lower(u.titulo)
@@ -2274,7 +2282,11 @@ REVOKE ALL ON FUNCTION public.ops_obra_tarefas_do_orcamento(uuid) FROM PUBLIC, a
 -- duas casas de banho, logo dois conjuntos de tarefas; os extras encaixam no
 -- pacote do SEU orçamento (ops_obra_criar_impl). Orçamentos repetidos na
 -- lista contam uma vez.
-CREATE OR REPLACE FUNCTION public.ops_obra_tarefas_dos_orcamentos(_orcs uuid[], _rotulos text[] DEFAULT NULL)
+-- `_prefixo`: NULL = só com mais de um orçamento; true = sempre (acrescentar
+-- orçamentos a uma obra que já tem outros).
+DROP FUNCTION IF EXISTS public.ops_obra_tarefas_dos_orcamentos(uuid[], text[]);
+CREATE OR REPLACE FUNCTION public.ops_obra_tarefas_dos_orcamentos(_orcs uuid[], _rotulos text[] DEFAULT NULL,
+                                                                  _prefixo boolean DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path TO 'public'
@@ -2294,13 +2306,13 @@ AS $$
              'ordem', t.rn,
              'orcamento_id', t.q,
              'orcamento_rotulo', t.rot,
-             'nome', CASE WHEN (SELECT n FROM n) > 1 THEN left(t.rot || ' · ' || (t.j->>'nome'), 300)
+             'nome', CASE WHEN COALESCE(_prefixo, (SELECT n FROM n) > 1) THEN left(t.rot || ' · ' || (t.j->>'nome'), 300)
                           ELSE t.j->>'nome' END)
            ORDER BY t.rn), '[]'::jsonb)
     FROM (SELECT t.*, row_number() OVER (ORDER BY t.pos, t.ordem) AS rn FROM t) t
 $$;
 
-REVOKE ALL ON FUNCTION public.ops_obra_tarefas_dos_orcamentos(uuid[], text[]) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ops_obra_tarefas_dos_orcamentos(uuid[], text[], boolean) FROM PUBLIC, anon, authenticated;
 
 
 -- ============================================================
@@ -3674,6 +3686,158 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_obra_criar_impl(uuid, uuid, text, uuid, uuid, date, uuid, uuid, text, uuid, uuid, jsonb)
   FROM PUBLIC, anon, authenticated;
 
+-- Acrescentar a uma obra que JÁ EXISTE as tarefas de orçamentos novos (as
+-- adendas do contrato, fluxo-encomendas.md 1.1b; hoje, também um orçamento
+-- aceite depois de a obra nascer). Regras:
+--   · as tarefas que já lá estão NÃO mudam (nem datas, nem pessoas);
+--   · um orçamento que já deu tarefas a esta obra (ou a outra viva) salta-se;
+--   · as novas entram DEPOIS do fim planeado atual (1.º dia útil a seguir),
+--     em paralelo dentro de cada fase e com os "depois de" de cada serviço;
+--   · o nome leva sempre o rótulo do orçamento à frente;
+--   · se o plano estava aprovado, volta a "por aprovar" (o gatilho de
+--     db/obra-arranque.sql trata disso ao inserir as tarefas).
+-- Interna: quem chama verifica permissões e a organização dos orçamentos.
+-- Devolve {acrescentadas, orcamentos, inicio}.
+CREATE OR REPLACE FUNCTION public.ops_obra_acrescentar_orcamentos_impl(_obra uuid, _quote_ids uuid[])
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o      record;
+  v_novos  uuid[];
+  v_rots   text[];
+  v_exp    jsonb;
+  v_base   integer;
+  v_ini    date;
+  v_n      integer := 0;
+  v_mpd    integer;
+BEGIN
+  SELECT * INTO v_o FROM public.ops_obra WHERE id = _obra FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Obra não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF v_o.estado IN ('concluida','cancelada') THEN
+    RAISE EXCEPTION 'A obra está %: não se lhe acrescentam tarefas.', v_o.estado;
+  END IF;
+
+  -- Só os orçamentos da organização da obra que ainda não deram tarefas a
+  -- nenhuma obra viva (nem são o orçamento principal de outra).
+  SELECT COALESCE(array_agg(x.q ORDER BY x.pos), '{}'),
+         COALESCE(array_agg(COALESCE(nullif(btrim(q.title), ''), nullif(btrim(q.quote_number), ''), 'Orçamento')
+                            ORDER BY x.pos), '{}')
+    INTO v_novos, v_rots
+    FROM (SELECT DISTINCT ON (u.q) u.q, u.pos FROM unnest(COALESCE(_quote_ids, '{}')) WITH ORDINALITY u(q, pos)
+           ORDER BY u.q, u.pos) x
+    JOIN public.quotes q ON q.id = x.q AND q.organization_id = v_o.organization_id AND q.deleted_at IS NULL
+   WHERE NOT EXISTS (SELECT 1 FROM public.ops_obra_tarefa t JOIN public.ops_obra o2 ON o2.id = t.obra_id
+                      WHERE t.orcamento_id = x.q AND o2.estado <> 'cancelada')
+     AND NOT EXISTS (SELECT 1 FROM public.ops_obra o2
+                      WHERE o2.orcamento_id = x.q AND o2.estado <> 'cancelada');
+
+  IF cardinality(v_novos) = 0 THEN
+    RETURN jsonb_build_object('acrescentadas', 0, 'orcamentos', '[]'::jsonb, 'inicio', NULL);
+  END IF;
+
+  v_exp := public.ops_obra_tarefas_dos_orcamentos(v_novos, v_rots, true);
+  IF jsonb_array_length(v_exp) = 0 THEN
+    RETURN jsonb_build_object('acrescentadas', 0, 'orcamentos', to_jsonb(v_novos), 'inicio', NULL);
+  END IF;
+
+  -- As fases que a obra ainda não tem (5..9) nascem com nome genérico.
+  INSERT INTO public.ops_obra_fase (organization_id, obra_id, ordem, nome)
+  SELECT DISTINCT v_o.organization_id, _obra, (x->>'fase')::smallint, 'Fase ' || (x->>'fase')
+    FROM jsonb_array_elements(v_exp) x
+   WHERE NOT EXISTS (SELECT 1 FROM public.ops_obra_fase f
+                      WHERE f.obra_id = _obra AND f.ordem = (x->>'fase')::smallint);
+
+  SELECT COALESCE(max(ordem), 1000) INTO v_base FROM public.ops_obra_tarefa WHERE obra_id = _obra;
+  v_base := GREATEST(v_base, 1000);
+  SELECT max(COALESCE(fim_planeado, inicio_planeado)) INTO v_ini FROM public.ops_obra_tarefa WHERE obra_id = _obra;
+  v_ini := public.ops_obra_somar_dias_uteis_org(v_o.organization_id,
+             GREATEST(COALESCE(v_ini, current_date), current_date), 1);
+  v_mpd := GREATEST(v_o.minutos_por_dia, 60);
+
+  INSERT INTO public.ops_obra_tarefa (
+    organization_id, obra_id, fase_id, ordem, nome, procedimento, materiais, ferramentas,
+    minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id, servico_tarefa_id,
+    chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave,
+    orcamento_id, orcamento_componente, inicio_planeado, fim_planeado)
+  SELECT v_o.organization_id, _obra, fa.id, v_base + (x->>'ordem')::integer, x->>'nome', x->>'procedimento',
+         x->>'materiais', x->>'ferramentas', (x->>'minutos')::integer, (x->>'pessoas')::smallint,
+         nullif(x->>'skill_id', '')::uuid, nullif(x->>'orcamento_linha_id', '')::uuid,
+         nullif(x->>'servico_id', '')::uuid, nullif(x->>'servico_tarefa_id', '')::uuid,
+         x->>'chave', COALESCE((x->>'espera_antes_horas')::numeric, 0), x->>'medida', (x->>'medida_qt')::numeric,
+         x->>'minutos_origem', COALESCE((x->>'ritmo_n')::integer, 0),
+         COALESCE(x->'fatores', '{}'::jsonb), COALESCE(x->>'fatores_chave', ''),
+         nullif(x->>'orcamento_id', '')::uuid, (x->>'orcamento_componente')::integer,
+         v_ini,
+         -- Duração: minutos ÷ pessoas, em dias de trabalho da obra (mín. 1).
+         public.ops_obra_somar_dias_uteis_org(v_o.organization_id, v_ini,
+           GREATEST(ceil((x->>'minutos')::numeric
+                         / GREATEST(COALESCE((x->>'pessoas')::numeric, 1), 1) / v_mpd)::integer - 1, 0))
+    FROM jsonb_array_elements(v_exp) x
+    JOIN public.ops_obra_fase fa ON fa.obra_id = _obra AND fa.ordem = (x->>'fase')::smallint;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+
+  -- "Depois de" dentro de cada serviço (só entre as tarefas novas).
+  INSERT INTO public.ops_obra_tarefa_dependencia (tarefa_id, depende_de_id, organization_id, obra_id)
+  SELECT DISTINCT t.id, d.id, v_o.organization_id, _obra
+    FROM jsonb_array_elements(v_exp) x
+    JOIN public.ops_obra_tarefa t ON t.obra_id = _obra AND t.ordem = v_base + (x->>'ordem')::integer
+   CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(x->'depende_chaves', '[]'::jsonb)) dc(v)
+    JOIN public.ops_obra_tarefa d
+      ON d.obra_id = _obra AND d.orcamento_linha_id = t.orcamento_linha_id AND d.id <> t.id
+     AND d.orcamento_componente IS NOT DISTINCT FROM t.orcamento_componente AND d.ordem > v_base
+    LEFT JOIN public.ops_obra_servico_tarefa sd ON sd.id = d.servico_tarefa_id
+   WHERE d.chave = dc.v OR ('#' || sd.ordem) = dc.v
+  ON CONFLICT DO NOTHING;
+
+  PERFORM public.ops_obra_evento(v_o.organization_id, _obra, 'orcamentos_acrescentados',
+    v_n || ' tarefa(s) de ' || cardinality(v_novos) || ' orçamento(s) novo(s)', NULL,
+    jsonb_build_object('orcamentos', to_jsonb(v_novos), 'tarefas', v_n, 'inicio', v_ini));
+
+  RETURN jsonb_build_object('acrescentadas', v_n, 'orcamentos', to_jsonb(v_novos), 'inicio', v_ini);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_acrescentar_orcamentos_impl(uuid, uuid[]) FROM PUBLIC, anon, authenticated;
+
+-- O botão (quando houver adendas, a lista vem de ops_contrato_orcamentos):
+-- acrescenta os orçamentos do contrato da obra que ainda não estão nela.
+-- Gestor/admin com operations.orders.edit.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_acrescentar_orcamentos(p_obra_id uuid, p_quote_ids uuid[] DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o    record;
+  v_quem record;
+  v_ids  uuid[] := p_quote_ids;
+BEGIN
+  SELECT * INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Obra não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT * INTO v_quem FROM public.ops_obra_exigir(
+    v_o.organization_id, 'operations.orders.edit', ARRAY['gestor'],
+    'Só quem planeia acrescenta tarefas à obra.');
+  IF v_ids IS NULL THEN
+    SELECT lo.ids INTO v_ids
+      FROM public.ops_obra_lista_orcamentos(v_o.organization_id, v_o.contrato_id, v_o.orcamento_id) lo;
+  ELSIF v_o.contrato_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM unnest(v_ids) u(q)
+           WHERE NOT EXISTS (SELECT 1 FROM public.ops_contrato_orcamentos(v_o.contrato_id) c WHERE c.quote_id = u.q)) THEN
+    RAISE EXCEPTION 'Só se acrescentam orçamentos do contrato desta obra.';
+  END IF;
+  RETURN public.ops_obra_acrescentar_orcamentos_impl(p_obra_id, v_ids);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_acrescentar_orcamentos(uuid, uuid[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_acrescentar_orcamentos(uuid, uuid[]) TO authenticated, service_role;
+
 -- Valida as tarefas do passo "Serviços do contrato" ANTES de criar seja o que
 -- for. Formato de cada elemento (pela ordem; "depende" é a posição 1..n de
 -- outra tarefa da lista):
@@ -4674,12 +4838,12 @@ BEGIN
     RAISE EXCEPTION 'Suspender ou cancelar uma obra exige motivo.';
   END IF;
 
-  -- "Arrancar" (planeada → em curso) só com o checklist de arranque completo:
+  -- "Arrancar" (a 1.ª vez em curso) só com o checklist de arranque completo:
   -- Encomenda Cliente validada, encomenda a fornecedor aprovada (ou não
   -- necessária) e o plano aprovado. Vive em db/obra-arranque.sql; sem esse
-  -- ficheiro instalado, arranca como sempre. Retomar uma suspensa não passa
-  -- por aqui (a obra já arrancou).
-  IF v_o.estado = 'planeada' AND p_estado = 'em_curso'
+  -- ficheiro instalado, arranca como sempre. Retomar uma obra que já tinha
+  -- arrancado (iniciada_em) não passa por aqui.
+  IF p_estado = 'em_curso' AND v_o.iniciada_em IS NULL
      AND to_regprocedure('public.ops_obra_arranque_impl(uuid)') IS NOT NULL THEN
     EXECUTE 'SELECT public.ops_obra_arranque_impl($1)' INTO v_arr USING p_obra_id;
     IF NOT COALESCE((v_arr->>'pode_arrancar')::boolean, false) THEN
