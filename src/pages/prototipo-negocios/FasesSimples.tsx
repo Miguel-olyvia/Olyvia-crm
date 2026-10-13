@@ -1,11 +1,18 @@
 // Financeiro e Obra na proposta simples: estados em frases, listas em vez de
 // cartões e tabelas, um botão por coisa.
-import { ArrowRight, Check, Circle } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, CheckCircle2, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, conflitos, eur, fatorReal, nfmt, pct, r2, tot, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { FaturaDoc, Partilhar, totais } from "./DocsCliente";
+import { lerVersao } from "./versaoPrototipo";
+import { FinanceiroV2 } from "./v2/FinanceiroV2";
+import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
+import { resumoFin } from "./v2/financeiro";
+
+/** A V2 e a V2 funcional registam faturas (com tranches); a Atual fica como era. */
+const ehV2 = () => lerVersao() !== "atual";
 
 function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto: string }) {
   return (
@@ -25,11 +32,12 @@ function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto
 
 export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
   const { S, d } = ctx;
+  if (ehV2()) return <FinanceiroV2 {...ctx} />;
   const T = d.orc ? tot(d, S) : null, TI = totais(d, S), ft = d.fin.fatura, rc = d.fin.recibo;
   return (
     <div className="max-w-2xl space-y-8">
       <section aria-label="Valor" className="rounded-2xl border border-border bg-card p-5">
-        <p className="text-sm text-muted-foreground">A faturar, com IVA</p>
+        <p className="text-[15px] text-muted-foreground">A faturar, com IVA</p>
         <p className="text-3xl font-semibold tabular-nums">{T ? eur(TI.total) : "—"} €</p>
         <p className="mt-1 text-[15px] text-muted-foreground">
           {eur(TI.base)} € sem IVA · IVA de {eur(TI.iva)} € (6% na mão de obra, 23% nos materiais) · {d.f.pagamento || "condições de pagamento por definir"}
@@ -55,7 +63,10 @@ export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
   );
 }
 
-export function ObraSimples({ S, A, go, d }: Ctx & { d: Negocio }) {
+export function ObraSimples(ctx: Ctx & { d: Negocio }) {
+  const { S, A, go, d } = ctx;
+  // V2: as tranches que faltam (a final, por exemplo) registam-se e validam-se aqui, já com a obra a andar
+  const finV2 = ehV2() && !resumoFin(totalComIva(S, d), tranchesDe(d), faturasDe(S, d)).completo;
   const pl = d.obra.plano!, e = d.obra.enc, R = d.obra.real, T = tot(d, S);
   const horas = pl.tasks.reduce((a, t) => a + t.h, 0), nc = conflitos(pl).length;
   const estado = { "por aprovar": "O plano está à espera das Operações.", aprovado: "Plano aprovado. Falta arrancar.", "em curso": `Obra em curso: dia ${pl.dia + 1}.`, "concluída": "Obra concluída." }[pl.estado];
@@ -75,7 +86,7 @@ export function ObraSimples({ S, A, go, d }: Ctx & { d: Negocio }) {
             return (
               <li key={i} className="flex min-h-14 items-center gap-3 py-2.5">
                 <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full border", feita ? "border-success bg-success text-white" : "border-input")}>{feita && <Check className="h-3.5 w-3.5" />}</span>
-                <span className="min-w-0 flex-1"><span className="block text-[15px]">{t.nome}</span><span className="block text-sm text-muted-foreground">{tec ? tec.n : "sem técnico"} · {nfmt(t.h)} h · {t.dur} {t.dur === 1 ? "dia" : "dias"}</span></span>
+                <span className="min-w-0 flex-1"><span className="block text-[15px]">{t.nome}</span><span className="block text-[15px] text-muted-foreground">{tec ? tec.n : "sem técnico"} · {nfmt(t.h)} h · {t.dur} {t.dur === 1 ? "dia" : "dias"}</span></span>
               </li>
             );
           })}
@@ -92,7 +103,11 @@ export function ObraSimples({ S, A, go, d }: Ctx & { d: Negocio }) {
           {(d.obra.mats || []).map((x) => (
             <li key={x.n} className="flex min-h-12 items-center justify-between gap-3 py-2 text-[15px]">
               <span>{x.n}</span>
-              <span className={cn("tabular-nums", x.falta > 0 ? "text-warning" : "text-muted-foreground")}>{x.falta > 0 ? `faltam ${nfmt(x.falta)} ${x.un}` : `${nfmt(x.q)} ${x.un} ✓`}</span>
+              <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
+                {x.falta > 0
+                  ? <><AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />faltam {nfmt(x.falta)} {x.un}</>
+                  : <><Check className="h-4 w-4 text-success" aria-hidden="true" />{nfmt(x.q)} {x.un}</>}
+              </span>
             </li>
           ))}
         </ul>
@@ -103,31 +118,38 @@ export function ObraSimples({ S, A, go, d }: Ctx & { d: Negocio }) {
           <h3 id="real-t" className="text-base font-semibold">Previsto e real</h3>
           <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             {([["Margem orçada", pct(T.m)], ["Margem real", pct(R.m)], ["Custo previsto", eur(T.custo) + " €"], ["Custo real", eur(R.custoReal) + " €"]] as [string, string][]).map(([l, v]) => (
-              <div key={l}><p className="text-sm text-muted-foreground">{l}</p><p className="text-xl font-semibold tabular-nums">{v}</p></div>
+              <div key={l}><p className="text-[15px] text-muted-foreground">{l}</p><p className="text-xl font-semibold tabular-nums">{v}</p></div>
             ))}
           </div>
           <ul className="mt-5 space-y-3">
             {R.tasks.map((t) => (
               <li key={t.nome} className="grid gap-1">
-                <span className="flex justify-between text-[15px]"><span>{t.nome}</span><span className={cn("tabular-nums", t.real > t.prev * 1.05 ? "text-warning" : "text-muted-foreground")}>{nfmt(t.real)} h de {nfmt(t.prev)} h</span></span>
+                <span className="flex justify-between gap-2 text-[15px]"><span>{t.nome}</span>
+                  <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
+                    {t.real > t.prev * 1.05 && <AlertTriangle className="h-4 w-4 text-warning" aria-label="acima do previsto" />}{nfmt(t.real)} h de {nfmt(t.prev)} h
+                  </span>
+                </span>
+                {/* barras cinzentas: o previsto mais claro, o real mais escuro (a cor fica no ícone) */}
                 <span className="relative h-2 rounded-full bg-muted" aria-hidden="true">
-                  <span className="absolute inset-y-0 left-0 rounded-full bg-primary/30" style={{ width: `${(t.prev / mx) * 100}%` }} />
-                  <span className={cn("absolute inset-y-0 left-0 rounded-full", t.real > t.prev * 1.05 ? "bg-warning" : "bg-primary")} style={{ width: `${(t.real / mx) * 100}%`, opacity: 0.85 }} />
+                  <span className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/30" style={{ width: `${(t.prev / mx) * 100}%` }} />
+                  <span className="absolute inset-y-0 left-0 rounded-full bg-foreground/60" style={{ width: `${(t.real / mx) * 100}%` }} />
                 </span>
               </li>
             ))}
           </ul>
           {d.obra.aprendido
-            ? <p className="mt-5 text-[15px] text-success">Receita do revestimento atualizada no Catálogo.</p>
+            ? <p className="mt-5 flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Receita do revestimento atualizada no Catálogo.</p>
             : (
               <div className="mt-5 rounded-xl border border-border bg-card p-4">
                 <p className="text-[15px]">O revestimento levou mais {Math.round((fatorReal("revest") - 1) * 100)}% do que a receita prevê.</p>
                 <p className="text-[15px] text-muted-foreground">Subir de {nfmt(S.svc.revest.h)} para {nfmt(r2(S.svc.revest.h * fatorReal("revest")))} h/m² no Catálogo? Os próximos orçamentos já ficam certos.</p>
-                <Button className="mt-3" onClick={go(() => A.aprender(d.id))}>Atualizar a receita</Button>
+                <Button variant="outline" className="mt-3 min-h-11 text-[15px]" onClick={go(() => A.aprender(d.id))}>Atualizar a receita</Button>
               </div>
             )}
         </section>
       )}
+
+      {finV2 && <FinanceiroV2 {...ctx} compacto />}
     </div>
   );
 }
