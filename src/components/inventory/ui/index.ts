@@ -14,4 +14,4 @@ export {
   movementIncreases,
   signedMovementQty,
 } from "./movementTypes";
-export { toneText, toneBorder, toneBadge, type InventoryTone } from "./tones";
+export { toneText, toneBorder, toneBorderMuted, toneBadge, type InventoryTone } from "./tones";

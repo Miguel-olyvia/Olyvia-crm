@@ -11,6 +11,7 @@ import {
   useInventoryToday,
   getInventoryCounter,
   INVENTORY_TODAY_PERMISSIONS,
+  type InventoryCounterKey,
 } from "@/hooks/useInventoryToday";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
@@ -433,7 +434,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
             >
               <Icon className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{t(item.labelKey)}</span>
-              <CounterPill value={counterFor(item)} />
+              <CounterPill value={counterFor(item)} counterKey={item.counterKey} />
             </button>
           );
         })}
@@ -473,7 +474,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">{t(item.labelKey)}</span>
-                      <CounterPill value={counterFor(item)} />
+                      <CounterPill value={counterFor(item)} counterKey={item.counterKey} />
                     </button>
                   );
                 })}
@@ -487,12 +488,33 @@ const FlyoutPanel = memo(function FlyoutPanel({
   );
 });
 
-// Pílula discreta à direita do item (contadores do Inventário). Sem valor = nada.
-function CounterPill({ value }: { value: number | null }) {
+// Cor da pílula por urgência, como o renderSidebar() do mockup: Hoje e
+// Existências (abaixo do ponto de encomenda) = bad (accent); POs por aprovar,
+// fornecedores e contagens paradas = warn; ECs prontas e guias abertas = neutra
+// (violeta). warn usa texto escuro: branco sobre o âmbar fica abaixo de AA.
+const COUNTER_PILL_TONE: Partial<Record<InventoryCounterKey, "bad" | "warn">> = {
+  today: "bad",
+  stocks: "bad",
+  purchaseOrders: "warn",
+  suppliers: "warn",
+  stockCounts: "warn",
+};
+const COUNTER_PILL_CLASS = {
+  bad: "bg-accent text-accent-foreground",
+  warn: "bg-warning text-amber-950",
+  default: "bg-primary text-primary-foreground",
+} as const;
+
+// Pílula à direita do item (contadores do Inventário). Sem valor = nada.
+function CounterPill({ value, counterKey }: { value: number | null; counterKey?: InventoryCounterKey }) {
   if (!value) return null;
+  const tone = (counterKey && COUNTER_PILL_TONE[counterKey]) || "default";
   return (
     <span
-      className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold leading-none text-foreground tabular-nums"
+      className={cn(
+        "ml-auto inline-grid h-5 min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-[11px] font-semibold leading-none tabular-nums",
+        COUNTER_PILL_CLASS[tone],
+      )}
       aria-label={`${value} pendente${value === 1 ? "" : "s"}`}
     >
       {value > 99 ? "99+" : value}

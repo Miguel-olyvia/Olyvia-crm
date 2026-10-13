@@ -42,9 +42,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { InventoryPageHeader, KpiTile, KpiGrid } from "@/components/inventory/ui";
+import { InventoryPageHeader, InventoryStatusBadge, KpiTile, KpiGrid, toneText } from "@/components/inventory/ui";
 import { useInventoryToday, inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
-import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -809,9 +808,10 @@ const Stocks = () => {
 
   const getStockStatus = (stock: Stock) => {
     const code = getStockStatusCode(stock);
-    if (code === "low") return <Badge variant="destructive">{t('stocks.status.lowStock')}</Badge>;
-    if (code === "overstock") return <Badge variant="outline">{t('stocks.status.overstock')}</Badge>;
-    return <Badge variant="default">{t('stocks.status.normal')}</Badge>;
+    // Tons do mockup (STS): Baixo = bad, Excesso = warn, Normal = ok.
+    if (code === "low") return <InventoryStatusBadge tone="bad">{t('stocks.status.lowStock')}</InventoryStatusBadge>;
+    if (code === "overstock") return <InventoryStatusBadge tone="warn">{t('stocks.status.overstock')}</InventoryStatusBadge>;
+    return <InventoryStatusBadge tone="ok">{t('stocks.status.normal')}</InventoryStatusBadge>;
   };
 
   // Exports every stock matching the current filters, not just what's been
@@ -1710,7 +1710,7 @@ const Stocks = () => {
                                   <span className="text-muted-foreground">0</span>
                                 )}
                               </TableCell>
-                              <TableCell className={`text-right ${free < 0 ? "text-destructive font-medium" : ""}`}>
+                              <TableCell className={cn("text-right", free < 0 && cn(toneText.bad, "font-semibold"))}>
                                 {multiWarehouse ? (
                                   <Tooltip>
                                     <TooltipTrigger asChild>

@@ -21,10 +21,11 @@ export function FlowCounterButton({
   const content = (
     <>
       <span className="truncate text-sm">{label}</span>
-      <b className={cn("tabular-nums", highlighted ? toneText[tone] : "text-foreground")}>{value}</b>
+      <b className={cn("text-[15px] font-bold tabular-nums", highlighted ? toneText[tone] : "text-foreground")}>{value}</b>
     </>
   );
-  const base = "flex w-full items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-left";
+  // Fundo muted sem contorno, como o .cnt-btn do mockup.
+  const base = "flex min-h-8 w-full items-center justify-between gap-3 rounded-md bg-muted px-3 py-1.5 text-left";
   if (!onClick) return <div className={base}>{content}</div>;
   return (
     <button
@@ -32,7 +33,7 @@ export function FlowCounterButton({
       onClick={onClick}
       className={cn(
         base,
-        "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        "transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
       )}
     >
       {content}

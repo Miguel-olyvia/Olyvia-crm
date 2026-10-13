@@ -19,6 +19,7 @@ import {
   movementTypeLabel,
   movementTypeTone,
   signedMovementQty,
+  toneText,
 } from "@/components/inventory/ui";
 import {
   useInventoryToday,
@@ -53,9 +54,28 @@ interface RecentMovement {
 }
 
 /** Uma etapa do fluxo: número, título e conteúdo. */
-function Stage({ n, title, children, className }: { n?: number; title: string; children: ReactNode; className?: string }) {
+function Stage({
+  n,
+  title,
+  children,
+  className,
+  branch,
+}: {
+  n?: number;
+  title: string;
+  children: ReactNode;
+  className?: string;
+  /** Ramo do garfo (Há stock / Falta): contorno tracejado sobre o fundo da página, como o .branch do mockup. */
+  branch?: boolean;
+}) {
   return (
-    <div className={cn("flex flex-col gap-2 rounded-lg border bg-card p-4 shadow-sm", className)}>
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-lg border p-4",
+        branch ? "border-dashed bg-background" : "bg-card shadow-sm",
+        className,
+      )}
+    >
       <h3 className="flex items-center gap-2 text-sm font-semibold">
         {n ? (
           <span className="grid h-6 w-6 place-items-center rounded-full bg-primary text-xs text-primary-foreground" aria-hidden="true">
@@ -72,11 +92,11 @@ function Stage({ n, title, children, className }: { n?: number; title: string; c
 /** Passo do ramo (Reserva → Saída…): texto e, se houver número, ligação. */
 function Step({ label, value, suffix, onClick }: { label: string; value?: number | null; suffix?: string; onClick?: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs">
+    <span className="inline-flex items-center gap-1 rounded-md border bg-card px-2 py-1 text-xs">
       {label}
       {isNum(value) ? (
         onClick ? (
-          <button type="button" onClick={onClick} className="font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
+          <button type="button" onClick={onClick} className="font-bold text-primary underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
             {formatQty(value)}{suffix ? ` ${suffix}` : ""}
           </button>
         ) : (
@@ -150,7 +170,7 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
           <ArrowDown className="mx-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <div className="grid gap-3 lg:grid-cols-2">
             {stockBranch ? (
-              <Stage title="Há stock → serve do stock">
+              <Stage branch title="Há stock → serve do stock">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Step label="Reserva FIFO" value={st?.reserved_units} suffix="un" />
                   <StepArrow />
@@ -166,7 +186,7 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
               </Stage>
             ) : null}
             {poBranch ? (
-              <Stage n={3} title="Falta → encomenda ao fornecedor">
+              <Stage branch n={3} title="Falta → encomenda ao fornecedor">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {canPo && isNum(po?.pending_approval) ? (
                     <><Step label="PO por aprovar" value={po.pending_approval} onClick={go("/purchase-orders")} /><StepArrow /></>
@@ -345,7 +365,7 @@ const InventoryToday = () => {
           {recent.isLoading ? (
             <p className="text-sm text-muted-foreground">A carregar…</p>
           ) : recent.error ? (
-            <p className="text-sm text-destructive">Não foi possível carregar os movimentos.</p>
+            <p className={cn("text-sm", toneText.bad)}>Não foi possível carregar os movimentos.</p>
           ) : (recent.data ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground">Sem movimentos.</p>
           ) : (
@@ -356,7 +376,7 @@ const InventoryToday = () => {
                   <li key={m.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
                     <InventoryStatusBadge tone={movementTypeTone(m.movement_type)}>{movementTypeLabel(m.movement_type)}</InventoryStatusBadge>
                     <span className="min-w-0 flex-1">
-                      <b className={cn("tabular-nums", qty > 0 ? "text-green-700 dark:text-success" : "text-destructive")}>
+                      <b className="tabular-nums">
                         {qty > 0 ? "+" : "−"}{formatQty(Math.abs(qty))}
                       </b>{" "}
                       {m.products?.name ?? "—"} · {m.warehouses?.name ?? warehouseName(m.warehouse_id) ?? "—"}

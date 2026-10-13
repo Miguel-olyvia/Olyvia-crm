@@ -19,7 +19,7 @@ export function KpiTile({ label, value, hint, tone, onClick, actionLabel, active
   const body = (
     <>
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span className={cn("text-2xl font-semibold tabular-nums leading-tight", tone ? toneText[tone] : "text-foreground")}>
+      <span className={cn("text-2xl font-bold tabular-nums leading-tight", tone ? toneText[tone] : "text-foreground")}>
         {value}
       </span>
       {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
@@ -35,7 +35,7 @@ export function KpiTile({ label, value, hint, tone, onClick, actionLabel, active
         aria-pressed={active}
         className={cn(
           base,
-          "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          "transition-colors hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
           active && "ring-2 ring-primary",
         )}
       >

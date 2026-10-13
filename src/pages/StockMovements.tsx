@@ -28,6 +28,7 @@ import {
   movementTypeLabel,
   movementTypeTone,
   signedMovementQty,
+  toneText,
 } from "@/components/inventory/ui";
 import { inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
@@ -486,7 +487,7 @@ const StockMovements = () => {
                 <button
                   type="button"
                   onClick={() => setProductId("")}
-                  className="rounded-full p-0.5 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-full p-0.5 hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label="Remover filtro de produto"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -568,7 +569,7 @@ const StockMovements = () => {
                         <TableCell
                           className={cn(
                             "text-right font-semibold tabular-nums",
-                            qty > 0 ? "text-green-700 dark:text-success" : "text-destructive",
+                            qty > 0 ? toneText.ok : toneText.bad,
                           )}
                         >
                           {qty > 0 ? "+" : "−"}{formatQty(Math.abs(qty))}
