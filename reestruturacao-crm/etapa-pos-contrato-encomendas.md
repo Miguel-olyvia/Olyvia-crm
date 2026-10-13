@@ -4,6 +4,8 @@
 > Ramo: `feat/pos-contrato-encomendas` (a partir de `ccd53f11`).
 > Feita a 13/10/2026.
 >
+> **Junção feita** no ramo `feat/pos-contrato` (13/10/2026): cartões reais no Arranque, `nota_id` fixado, orçamentos do contrato numa só fonte e "Dados em falta" no menu. A ordem única do SQL e o que avisar estão em `etapa-pos-contrato.md`; os pontos "Por fazer"/"Para a junção" abaixo que falam disto já estão feitos.
+>
 > Especificação: `docs/melhorias-v2-2026-10-13/pos-contrato-especificacao.md`
 > (com o acrescento de 13/10: adendas e permissões existentes) e
 > `fluxo-encomendas.md`.

@@ -4,6 +4,8 @@
 > Ramo: `feat/pos-contrato-obra` (worktree `D:\Olyvia\wt-pc-obra`), a partir de `ccd53f11` (lote 2), 13/10/2026.
 > Especificação: `docs/melhorias-v2-2026-10-13/pos-contrato-especificacao.md` e `fluxo-encomendas.md` (1.1 e 1.1b).
 > A Frente A (Encomenda Cliente e notas de encomenda a fornecedor) está noutro ramo. Esta frente lê as tabelas dela só se existirem.
+>
+> **Junção feita** no ramo `feat/pos-contrato` (13/10/2026): cartões reais no Arranque, `nota_id` fixado, orçamentos do contrato numa só fonte e "Dados em falta" no menu. A ordem única do SQL e o que avisar estão em `etapa-pos-contrato.md`; os pontos "Por fazer"/"Para a junção" abaixo que falam disto já estão feitos.
 
 ---
 
