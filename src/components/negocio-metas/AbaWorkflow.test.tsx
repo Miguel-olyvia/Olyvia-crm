@@ -1,8 +1,11 @@
-// Um teste de arranque: a aba abre sem erro com os dados de exemplo e mostra o diagrama com
-// o texto equivalente. A aba não grava nada, por isso não se testam cliques ao detalhe.
+// Testes de arranque: o conteúdo do workflow abre sem erro com os dados de exemplo e mostra o diagrama com
+// o texto equivalente, e o botão "Workflow" abre-o num diálogo e fecha-o. Nada se grava, por isso não se
+// testam cliques ao detalhe.
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AbaWorkflow } from "./AbaWorkflow";
+import { BotaoWorkflow } from "./BotaoWorkflow";
 import { WorkflowExemploProvider } from "./useWorkflowExemplo";
 
 vi.mock("@/hooks/useTranslation", async () => {
@@ -23,7 +26,7 @@ vi.mock("@/hooks/useTranslation", async () => {
 
 beforeEach(() => window.localStorage.clear());
 
-describe("aba Workflow", () => {
+describe("conteúdo do Workflow", () => {
   it("abre com o diagrama, o texto equivalente, o simulador e a configuração", () => {
     render(<WorkflowExemploProvider><AbaWorkflow /></WorkflowExemploProvider>);
 
@@ -54,5 +57,27 @@ describe("aba Workflow", () => {
     }
     expect(screen.getByRole("heading", { level: 4, name: "A · Ao aceitar o orçamento" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Simular aceitar a proposta" })).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("botão Workflow", () => {
+  const Pagina = () => {
+    const [aberto, setAberto] = useState(false);
+    return <WorkflowExemploProvider><BotaoWorkflow aberto={aberto} aoMudar={setAberto} /></WorkflowExemploProvider>;
+  };
+
+  it("abre o diálogo com o diagrama, foca o diálogo e fecha devolvendo o foco ao botão", async () => {
+    render(<Pagina />);
+    const botao = screen.getByRole("button", { name: "Workflow" });
+    fireEvent.click(botao);
+
+    const dialogo = await screen.findByRole("dialog", { name: "Workflow dos negócios" });
+    expect(within(dialogo).getByRole("list", { name: "Passos do negócio, por ordem" })).toBeInTheDocument();
+    await waitFor(() => expect(dialogo).toHaveFocus());
+    expect(within(dialogo).getByRole("heading", { level: 2, name: "Workflow dos negócios" })).toBeInTheDocument();
+
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Fechar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(botao).toHaveFocus();
   });
 });

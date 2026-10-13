@@ -37,7 +37,7 @@ export function Aba({ rotulo, contador, contadorLeitor, novo, className, ...prop
         </>
       )}
       {novo && (
-        <span aria-hidden="true" className="rounded-sm border border-primary px-1 text-[0.625rem] font-semibold uppercase text-primary">
+        <span aria-hidden="true" className="rounded-sm border border-primary px-1 text-[0.625rem] font-semibold uppercase text-primary dark:text-violet-300">
           {t("pessoasPagina.tabs.new")}
         </span>
       )}

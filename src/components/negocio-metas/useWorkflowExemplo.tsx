@@ -22,9 +22,11 @@ export interface WorkflowExemplo {
   reposta: number | null;
   mudar: (mudanca: MudancaWorkflow) => void;
   repor: () => void;
+  /** Esquece o aviso e a "Predefinição reposta" da última alteração (ao fechar o diálogo do workflow). */
+  limparAvisos: () => void;
 }
 
-const SEM_PROVIDER: WorkflowExemplo = { config: PREDEFINICAO, avisos: [], reposta: null, mudar: () => {}, repor: () => {} };
+const SEM_PROVIDER: WorkflowExemplo = { config: PREDEFINICAO, avisos: [], reposta: null, mudar: () => {}, repor: () => {}, limparAvisos: () => {} };
 
 export const WorkflowExemploContext = createContext<WorkflowExemplo | null>(null);
 
@@ -52,8 +54,11 @@ export function useEstadoWorkflowExemplo(): WorkflowExemplo {
   }, [config, aplicar]);
 
   const repor = useCallback(() => aplicar(copiarConfig(PREDEFINICAO), true), [aplicar]);
+  const limparAvisos = useCallback(() => { setAvisos([]); setReposta(null); }, []);
 
-  return useMemo(() => ({ config, avisos, reposta, mudar, repor }), [config, avisos, reposta, mudar, repor]);
+  return useMemo(
+    () => ({ config, avisos, reposta, mudar, repor, limparAvisos }), [config, avisos, reposta, mudar, repor, limparAvisos],
+  );
 }
 
 export function WorkflowExemploProvider({ children }: { children: ReactNode }) {

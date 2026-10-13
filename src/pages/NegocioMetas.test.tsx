@@ -59,6 +59,22 @@ describe("cabeçalho", () => {
     expect(screen.getByRole("note")).toHaveTextContent("Dados de exemplo · ainda sem ligação à base");
   });
 
+  it("põe as abas no topo, depois o título e as ações, e o seletor do Quadro só aparece no Quadro", () => {
+    renderPage();
+    const abas = screen.getByRole("tablist", { name: "Vista" });
+    const titulo = screen.getByRole("heading", { level: 1, name: "Negócio e metas" });
+    const botao = screen.getByRole("button", { name: "Workflow" });
+    const antes = (x: Element, y: Element) => Boolean(x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(antes(abas, screen.getByRole("navigation", { name: "Migalhas de pão" }))).toBe(true);
+    expect(antes(abas, titulo)).toBe(true);
+    expect(antes(titulo, botao)).toBe(true);
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("group", { name: "Ver os negócios como" })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Dashboard" }));
+    expect(screen.queryByRole("group", { name: "Ver os negócios como" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Workflow" })).toBeInTheDocument();
+  });
+
   it("tem as abas Quadro e Dashboard", () => {
     renderPage();
     expect(screen.getByRole("tab", { name: "Quadro" })).toHaveAttribute("aria-selected", "true");

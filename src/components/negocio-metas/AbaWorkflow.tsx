@@ -16,11 +16,11 @@ const { negocios } = DADOS_EXEMPLO;
 const NEGOCIO_INICIAL = (negocios.find((n) => faseDoNegocio(n) === "proposta" && n.proposta?.estado === "enviada") ?? negocios[0]).id;
 
 /**
- * A aba "Workflow": o que acontece ao aceitar um orçamento ou uma proposta. Só dados de exemplo e
+ * O conteúdo do workflow (hoje no diálogo do botão "Workflow"): o que acontece ao aceitar um orçamento ou uma proposta. Só dados de exemplo e
  * estado local (ver `useWorkflowExemplo`): nada é gravado na organização. Ordem: faixa e repor,
  * diagrama, simulador, configuração.
  */
-export function AbaWorkflow() {
+export function AbaWorkflow({ emDialogo = false }: { emDialogo?: boolean }) {
   const { t } = useTranslation();
   const { config, reposta, repor } = useWorkflowExemplo();
   const [negocioId, setNegocioId] = useState(NEGOCIO_INICIAL);
@@ -41,10 +41,11 @@ export function AbaWorkflow() {
 
   return (
     <div className="space-y-5">
-      <h2 className="text-lg font-semibold text-foreground">{t("businessGoals.workflow.title")}</h2>
+      {/* No diálogo, o título e a descrição dele já dizem isto. */}
+      {!emDialogo && <h2 className="text-lg font-semibold text-foreground">{t("businessGoals.workflow.title")}</h2>}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3">
-        <p className="min-w-0 flex-1 text-sm text-foreground">{t("businessGoals.workflow.banner")}</p>
-        <div className="flex flex-wrap items-center gap-3">
+        {!emDialogo && <p className="min-w-0 flex-1 text-sm text-foreground">{t("businessGoals.workflow.banner")}</p>}
+        <div className="ml-auto flex flex-wrap items-center gap-3">
           <div role="status" className="text-sm font-medium text-foreground">
             {reposta !== null && <span key={reposta}>{t("businessGoals.workflow.reset.done")}</span>}
           </div>

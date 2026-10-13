@@ -3,7 +3,7 @@ import type { FaseNegocio } from "./negocioMetas";
 
 /** Anel de foco visível, o mesmo em todos os controlos da página. */
 export const FOCO =
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 /** Chip de filtro: 44 px de altura; o ativo troca de cor e ganha uma marca (✓) que o chip mostra à parte. */
 export const chip = (ativo: boolean): string =>

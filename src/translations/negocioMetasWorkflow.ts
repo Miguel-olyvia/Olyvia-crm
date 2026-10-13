@@ -7,6 +7,8 @@ const comPrefixo = (textos: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(textos).map(([chave, texto]) => [PREFIXO + chave, texto]));
 
 const pt: Record<string, string> = {
+  'open': 'Workflow',
+  'dialog.close': 'Fechar',
   'title': 'Workflow dos negócios',
   'banner': 'Exemplo: não grava na organização. A escolha fica só neste navegador.',
   'reset.button': 'Repor predefinição',
@@ -153,6 +155,8 @@ const pt: Record<string, string> = {
 };
 
 const en: Record<string, string> = {
+  'open': 'Workflow',
+  'dialog.close': 'Close',
   'title': 'Deal workflow',
   'banner': 'Sample: nothing is saved to the organisation. Your choice stays in this browser only.',
   'reset.button': 'Reset to default',
@@ -299,6 +303,6 @@ const en: Record<string, string> = {
 };
 
 export const negocioMetasWorkflowTranslations: Record<"en" | "pt", Record<string, string>> = {
-  en: { ...comPrefixo(en), 'businessGoals.tabs.workflow': 'Workflow' },
-  pt: { ...comPrefixo(pt), 'businessGoals.tabs.workflow': 'Workflow' },
+  en: comPrefixo(en),
+  pt: comPrefixo(pt),
 };

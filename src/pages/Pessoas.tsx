@@ -58,11 +58,8 @@ const Pessoas = () => {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
-      <CabecalhoPagina
-        subtitulo={subtitulo} titulo={t("pessoasPagina.title")} aviso={t("pessoasPagina.sample")}
-        pai={{ to: "/leads", texto: t("sidebar.crm") }}
-      />
-      <Tabs value={url.separador} onValueChange={(v) => url.mudarSeparador(v as SeparadorPagina)} className="space-y-4">
+      {/* Como no Inventário: a barra de abas no topo, com a linha fina por baixo, e só depois migalhas e título. */}
+      <Tabs value={url.separador} onValueChange={(v) => url.mudarSeparador(v as SeparadorPagina)} className="space-y-5">
         <ListaAbas aria-label={t("pessoasPagina.tabs.label")}>
           <Aba value="pessoas" rotulo={t("pessoasPagina.tabs.people")} />
           {podeVer && (
@@ -72,6 +69,10 @@ const Pessoas = () => {
             />
           )}
         </ListaAbas>
+        <CabecalhoPagina
+          subtitulo={subtitulo} titulo={t("pessoasPagina.title")} aviso={t("pessoasPagina.sample")}
+          pai={{ to: "/leads", texto: t("sidebar.crm") }}
+        />
         <TabsContent value="pessoas" className="mt-0">
           <h2 className="sr-only">{t("pessoasPagina.tabs.people")}</h2>
           <SeparadorPessoas
@@ -81,6 +82,7 @@ const Pessoas = () => {
           />
         </TabsContent>
         <TabsContent value="submissoes" className="mt-0">
+          <h2 className="sr-only">{t("pessoasPagina.tabs.submissions")}</h2>
           <SeparadorSubmissoes
             submissoes={ordenadas} pessoas={pessoas} hoje={HOJE_EXEMPLO} aoAbrirFicha={url.abrir}
             aoPedir={(sid, pid) => resolucao.pedir(sid, pid, "lista")} aoVerPessoas={() => url.mudarSeparador("pessoas")}
