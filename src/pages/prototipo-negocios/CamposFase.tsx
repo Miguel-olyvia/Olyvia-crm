@@ -5,7 +5,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, LayoutList, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Sun, Wind, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAPEL_ROT, alternarVarios, contagem, listaVarios, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
-import type { Negocio } from "./motor";
+import { eur, type Negocio } from "./motor";
+import { CAMPOS_COM_EFEITO, efeitosDoCampo } from "./efeitosLevantamento";
 import { Chip, type Ctx } from "./pecas";
 
 export const INPUT =
@@ -111,6 +112,22 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3, plano }: FxPro
   );
 }
 
+/** O que a resposta faz ao orçamento, logo por baixo do campo (efeitosLevantamento.ts). */
+function Impacto({ k, d, simples }: { k: string; d: Negocio; simples?: boolean }) {
+  if (!CAMPOS_COM_EFEITO.has(k)) return null;
+  const ef = efeitosDoCampo(k, d.f);
+  if (!ef.length) return null;
+  return (
+    <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-success/10 px-2 py-1 font-medium text-success animate-in fade-in-0", simples ? "mt-1.5 text-sm" : "text-[11px]")}>
+      {ef.map((e) => (
+        <span key={e.d}>
+          {e.t === "linha" ? `+ ${eur(e.preco)} € no orçamento · ${e.d}` : e.t === "percent" ? `+ ${Math.round(e.pct! * 100)}% sobre os serviços · ${e.d}` : e.d}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: Def; seguinte: boolean; erro?: boolean }) {
   const val = d.f[c.k] || "";
   // o cursor vai sozinho para o próximo campo de escrever, se ninguém estiver a escrever noutro
@@ -125,7 +142,8 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   }, [seguinte, ro, c.t, c.k, d.id]);
   const id = `fx-${c.k}-${d.id}`;
   const set = (x: string) => run(() => A.campo(d.id, c.k, x));
-  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} sugerido={!!d.sug?.[c.k]} />;
+  const impacto = ro ? null : <Impacto k={c.k} d={d} simples={simples} />;
+  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} sugerido={!!d.sug?.[c.k]} impacto={impacto} />;
   const largo = c.t === "texto_longo";
   const caixa = cn(
     "relative grid content-start gap-1.5 rounded-xl transition-all duration-300 animate-in fade-in-0",
@@ -197,8 +215,8 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   }
   const ajuda = c.ajuda && <small className="text-[11px] text-muted-foreground">{c.ajuda}</small>;
   // os botões de escolha não vão dentro de um <label>: um clique no rótulo carregava no primeiro
-  if (botoes) return <div className={caixa}>{rotulo}{ctl}{ajuda}</div>;
-  return <label htmlFor={id} className={caixa}>{rotulo}{ctl}{ajuda}</label>;
+  if (botoes) return <div className={caixa}>{rotulo}{ctl}{ajuda}{impacto}</div>;
+  return <label htmlFor={id} className={caixa}>{rotulo}{ctl}{ajuda}{impacto}</label>;
 }
 
 /** Resumo de um grupo em pastilhas: os primeiros valores preenchidos. */
@@ -322,7 +340,7 @@ export function Assistente({ passos, ativo, setAtivo, fim }: { passos: Passo[]; 
 /* ------------------------------------------------------------------ proposta simples */
 // Cada pergunta é uma linha: a pergunta à esquerda e a resposta à direita.
 // No telemóvel, a resposta passa para baixo da pergunta.
-function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean; erro?: boolean; seguinte?: boolean; sugerido?: boolean }) {
+function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean; erro?: boolean; seguinte?: boolean; sugerido?: boolean; impacto?: ReactNode }) {
   if (ro) return (
     <div className="grid gap-0.5">
       <span className="text-sm text-muted-foreground">{c.l}</span>
@@ -373,6 +391,7 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: De
         {sugerido && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-xs text-muted-foreground" title="Preenchido pela Olyvia a partir de outras respostas. Confirme ou mude."><Sparkles className="h-3 w-3" aria-hidden="true" />Sugerido</span>}
         {c.ajuda && <p id={id + "-ajuda"} className="mt-0.5 text-sm text-muted-foreground">{c.ajuda}</p>}
         {erro && <p id={id + "-erro"} className="mt-1 flex items-center gap-1.5 text-sm font-medium text-destructive animate-in fade-in-0"><AlertCircle className="h-4 w-4" aria-hidden="true" />Falta preencher</p>}
+        {impacto}
       </div>
       {ctl}
     </div>

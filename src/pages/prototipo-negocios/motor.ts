@@ -3,6 +3,7 @@
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
 import { CATALOGO } from "./catalogo";
+import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
@@ -427,7 +428,27 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     if (sv && (q || 0) > 0) linhas.push({ t: "svc", sid, q: q!, cu: r2(custoUn(sv, S)), pu: sv.preco });
   }
   linhas.push({ t: "mat", d: L.mat.d, custo: L.mat.custo, preco: L.mat.preco });
-  return { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
+  const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
+  return o;
+}
+
+/** As respostas do levantamento no orçamento (efeitosLevantamento.ts): refaz as linhas "Levantamento · …"
+ *  e a linha de materiais (gama, materiais do cliente). Só antes de a proposta ser enviada. */
+export function sincronizarEfeitos(d: Negocio, _S: Estado) {
+  const o = d.orc;
+  if (!o || o.vendaDireta) return;
+  const L = LINHAS[d.linha];
+  const tinhaMat = o.linhas.some((l) => l.t === "mat" && l.d === L.mat.d) || !o.linhas.some((l) => l.t === "mat");
+  o.linhas = o.linhas.filter((l) => !(l.t === "mat" && (l.d.startsWith(PREFIXO_LEV) || l.d === L.mat.d)));
+  const ef = efeitosDoLevantamento(d.f);
+  const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
+  if (tinhaMat && fator > 0) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(L.mat.custo * fator), preco: r2(L.mat.preco * fator) });
+  let bc = 0, bp = 0;
+  for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }
+  for (const e of ef) {
+    if (e.t === "linha") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: e.custo, preco: e.preco });
+    if (e.t === "percent") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: r2(bc * e.pct!), preco: r2(bp * e.pct!) });
+  }
 }
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
@@ -738,7 +759,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     fecharVisita(id: number) {
       const d = deal(id), L = LINHAS[d.linha];
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
-      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); fase(d, 3);
+      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); sincronizarEfeitos(d, S); fase(d, 3);
       avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
     },
     verificar(id: number) {
@@ -860,6 +881,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id); d.f[k] = v;
       if (d.sug) delete d.sug[k]; // mexido por alguém: deixa de ser sugestão
       derivar(d, k);
+      // a resposta mexe logo no orçamento, enquanto a proposta não foi enviada
+      if (d.orc && !d.orc.enviada && CAMPOS_COM_EFEITO.has(k)) sincronizarEfeitos(d, S);
     },
     confirmar(id: number, ks: string[]) { const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k]; },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {
