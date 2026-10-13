@@ -10,6 +10,7 @@ const ATALHOS: readonly { teclas: string; chave: string }[] = [
   { teclas: "Enter  o", chave: "open" },
   { teclas: "/", chave: "search" },
   { teclas: "?", chave: "help" },
+  { teclas: "[  ]", chave: "nav" },
   { teclas: "Esc", chave: "esc" },
 ];
 
@@ -31,7 +32,7 @@ export function AjudaAtalhosPessoas({ aberta, aoMudar }: AjudaAtalhosPessoasProp
           <Keyboard className="h-4 w-4" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 motion-reduce:animate-none">
+      <PopoverContent align="end" aria-label={t("pessoasPagina.shortcuts.title")} className="w-72 motion-reduce:animate-none">
         <p className="mb-2 text-sm font-semibold">{t("pessoasPagina.shortcuts.title")}</p>
         <dl className="space-y-1.5 text-sm">
           {ATALHOS.map((a) => (

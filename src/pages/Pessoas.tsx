@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus } from "lucide-react";
+import { toast } from "@/lib/toast";
+import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
+import { FOCO } from "@/components/negocio-metas/estilos";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/pessoas/AbasSublinhadas";
@@ -29,6 +33,8 @@ const Pessoas = () => {
   const { hasPermission } = usePermissions();
   const podeVer = hasPermission(PERMISSAO_SUBMISSOES);
   const estado = usePessoasEstado(podeVer);
+  // A ordem das pessoas visíveis na lista: a ficha usa-a para passar à anterior e à seguinte.
+  const [visiveis, setVisiveis] = useState<string[]>([]);
   const url = usePessoasUrl(podeVer);
   const ordenadas = useMemo(() => ordenarSubmissoes(estado.submissoes), [estado.submissoes]);
   const pessoas = useMemo(() => new Map(estado.resumos.map((r) => [r.pessoa.id, r.pessoa])), [estado.resumos]);
@@ -72,13 +78,19 @@ const Pessoas = () => {
         <CabecalhoPagina
           subtitulo={subtitulo} titulo={t("pessoasPagina.title")} aviso={t("pessoasPagina.sample")}
           pai={{ to: "/leads", texto: t("sidebar.crm") }}
+          acoes={(
+            <Button type="button" className={`min-h-11 gap-2 ${FOCO}`} onClick={() => toast.info(t("pessoasPagina.newLeadToast"))}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {t("pessoasPagina.newLead")}
+            </Button>
+          )}
         />
         <TabsContent value="pessoas" className="mt-0">
           <h2 className="sr-only">{t("pessoasPagina.tabs.people")}</h2>
           <SeparadorPessoas
-            resumos={estado.resumos} pendentes={estado.pendentes} hoje={HOJE_EXEMPLO} chip={estado.prefs.chip}
-            ordem={estado.prefs.ordem} comVoltou={podeVer} aoMudarChip={estado.mudarChip}
-            aoMudarOrdem={estado.mudarOrdem} aoAbrir={url.abrir}
+            resumos={estado.resumos} pendentes={estado.pendentes} tipo={estado.prefs.tipo} chip={estado.prefs.chip}
+            ordem={estado.prefs.ordem} comVoltou={podeVer} aoMudarTipo={estado.mudarTipo} aoMudarChip={estado.mudarChip}
+            aoMudarOrdem={estado.mudarOrdem} aoAbrir={url.abrir} aoMudarVisiveis={setVisiveis}
           />
         </TabsContent>
         <TabsContent value="submissoes" className="mt-0">
@@ -93,6 +105,7 @@ const Pessoas = () => {
         resumo={daFicha} aberto={aberta !== null} anuncioExterno={resolucao.anuncio} hoje={HOJE_EXEMPLO} submissoes={ordenadas.filter(daAberta)} podeVerSubmissoes={podeVer}
         notas={estado.notas.filter((n) => n.pessoaId === idAberta)} atividade={atividadeAberta}
         voltou={idAberta !== undefined && estado.pendentes.has(idAberta)} acoes={estado} aoFechar={url.fechar}
+        idsVisiveis={url.separador === "pessoas" ? visiveis : []} aoIrPara={url.abrir} pessoas={pessoas}
         aoPedir={(sid, pid) => resolucao.pedir(sid, pid, "ficha")} aoVerTodasSubmissoes={url.irParaSubmissoes}
       />
       <ConfirmarResolver

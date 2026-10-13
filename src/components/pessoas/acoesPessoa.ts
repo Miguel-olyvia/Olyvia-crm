@@ -1,9 +1,8 @@
 // As ações da ficha da pessoa, em memória: funções puras e imutáveis. O dia de hoje (AAAA-MM-DD) chega sempre
 // por parâmetro e nada lê o relógio. Um id que não existe (ou uma ação que não se aplica) devolve o próprio estado.
+import { indiceEtapa } from "./etapaPessoa";
 import { DIAS_DO_PASSO, RESULTADOS_ATENDIDOS } from "./opcoesPessoa";
-import type {
-  EstadoPessoas, EtapaPessoa, ItemAtividade, MotivoPerda, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto,
-} from "./pessoasTipos";
+import type { EstadoPessoas, ItemAtividade, MotivoPerda, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto } from "./pessoasTipos";
 
 /** A parte do estado que as ações mudam. */
 export type EstadoAcoes = Pick<EstadoPessoas, "pessoas" | "atividade" | "contactadas">;
@@ -72,17 +71,43 @@ export function juntarNota<E extends EstadoAcoes>(estado: E, id: string, texto: 
   return { ...estado, atividade: [item, ...estado.atividade] };
 }
 
-/** Marca uma lead em curso como perdida. Clientes e leads já perdidas ficam como estão (a etapa "cliente" é a dos clientes). */
-export function perder<E extends EstadoAcoes>(estado: E, id: string, motivo: MotivoPerda, hoje: string): E {
+/**
+ * Marca uma lead como perdida, em qualquer passo do percurso antes de cliente (Lead, Contacto, Visita ou Negócio), e
+ * guarda o passo (índice 0 a 3). `contexto` vem de quem chama e conhece os negócios: `passo` é o índice da etapa efetiva
+ * na altura (sem ele vale a etapa guardada) e `papel` diz se é cliente. Um cliente (pelo papel, ou pelo passo 4) e uma
+ * lead já perdida ficam como estão, sem alterações.
+ */
+export interface ContextoPerda {
+  passo?: number;
+  papel?: PapelPessoa;
+}
+
+export function perder<E extends EstadoAcoes>(estado: E, id: string, motivo: MotivoPerda, hoje: string, contexto: ContextoPerda = {}): E {
   const alvo = estado.pessoas.find((p) => p.id === id);
-  if (!alvo || alvo.etapa === "cliente" || alvo.perdida) return estado;
+  const indice = contexto.passo ?? (alvo ? indiceEtapa(alvo.etapa) : 0);
+  if (!alvo || alvo.perdida || contexto.papel === "cliente" || indice >= indiceEtapa("cliente")) return estado;
   const item: ItemAtividade = {
     id: novoId(estado, "perda"), pessoaId: id, tipo: "historico", titulo: "", chaveTitulo: "pessoasPagina.activity.lost",
     detalhe: "", chaveDetalhe: `pessoasPagina.lost.${motivo}`, quando: hoje, exemplo: false,
   };
   return {
     ...estado,
-    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, perdida: { motivo, data: hoje }, proximoContacto: null })),
+    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, perdida: { motivo, data: hoje, passo: Math.max(0, indice) }, proximoContacto: null })),
+    atividade: [item, ...estado.atividade],
+  };
+}
+
+/** Reativa uma lead perdida: limpa a perda, repõe o próximo contacto para amanhã e regista-o na atividade. Só vale em perdidas. */
+export function reativar<E extends EstadoAcoes>(estado: E, id: string, hoje: string): E {
+  const alvo = estado.pessoas.find((p) => p.id === id);
+  if (!alvo?.perdida) return estado;
+  const item: ItemAtividade = {
+    id: novoId(estado, "reativar"), pessoaId: id, tipo: "historico", titulo: "", chaveTitulo: "pessoasPagina.activity.reactivated",
+    detalhe: "", chaveDetalhe: `pessoasPagina.lost.${alvo.perdida.motivo}`, quando: hoje, exemplo: false,
+  };
+  return {
+    ...estado,
+    pessoas: mudarPessoa(estado.pessoas, id, ({ perdida: _perdida, ...resto }) => ({ ...resto, proximoContacto: somarDias(hoje, 1) })),
     atividade: [item, ...estado.atividade],
   };
 }
@@ -90,14 +115,6 @@ export function perder<E extends EstadoAcoes>(estado: E, id: string, motivo: Mot
 /** A atividade de exemplo e a nova numa só lista, da mais recente para a mais antiga (em empate, as novas primeiro). */
 export function juntarAtividade(semente: readonly ItemAtividade[], novas: readonly ItemAtividade[]): ItemAtividade[] {
   return [...novas, ...semente].sort((a, b) => b.quando.localeCompare(a.quando));
-}
-
-export type SeloCabecalho = { tipo: "papel"; valor: PapelPessoa } | { tipo: "etapa"; valor: EtapaPessoa };
-
-/** Os selos de papel e etapa: a etapa sai quando só repete o papel (cliente na etapa "cliente"). */
-export function selosCabecalho(papel: PapelPessoa, etapa: EtapaPessoa): SeloCabecalho[] {
-  const papelSelo: SeloCabecalho = { tipo: "papel", valor: papel };
-  return etapa === papel ? [papelSelo] : [papelSelo, { tipo: "etapa", valor: etapa }];
 }
 
 export { ligacoes, type LigacoesContacto } from "@/components/ficha-comum/ligacoesContacto";

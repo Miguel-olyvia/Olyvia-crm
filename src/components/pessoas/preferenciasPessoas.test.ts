@@ -1,31 +1,37 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  CHAVE_PREFS_PESSOAS, PREFS_PESSOAS_INICIAIS, chipEfetivo, guardarPrefsPessoas, lerPrefsPessoas,
+  CHAVE_PREFS_PESSOAS, PREFS_PESSOAS_INICIAIS, guardarPrefsPessoas, lerPrefsPessoas,
 } from "./preferenciasPessoas";
 
 beforeEach(() => window.localStorage.clear());
 
-describe("chipEfetivo", () => {
-  it("sem permissão para ver submissões, o chip guardado Voltou a contactar vira Todos", () => {
-    expect(chipEfetivo("voltou", false)).toBe("todos");
-  });
-
-  it("com permissão, ou noutro chip, não muda", () => {
-    expect(chipEfetivo("voltou", true)).toBe("voltou");
-    expect(chipEfetivo("leads", false)).toBe("leads");
-  });
-});
-
 describe("preferências guardadas", () => {
-  it("guardam e leem a ordem e o chip", () => {
-    guardarPrefsPessoas({ ordem: "valor", chip: "clientes" });
-    expect(lerPrefsPessoas()).toEqual({ ordem: "valor", chip: "clientes" });
+  it("o defeito é Todos, Todas e Urgência", () => {
+    expect(PREFS_PESSOAS_INICIAIS).toEqual({ tipo: "todos", chip: "todas", ordem: "urgencia" });
+    expect(lerPrefsPessoas()).toEqual(PREFS_PESSOAS_INICIAIS);
+  });
+
+  it("guardam e leem o tipo, o chip e a ordem", () => {
+    guardarPrefsPessoas({ tipo: "leads", chip: "atrasadas", ordem: "valor" });
+    expect(lerPrefsPessoas()).toEqual({ tipo: "leads", chip: "atrasadas", ordem: "valor" });
   });
 
   it("lixo no armazenamento volta aos valores por defeito", () => {
     window.localStorage.setItem(CHAVE_PREFS_PESSOAS, "{não é json");
     expect(lerPrefsPessoas()).toEqual(PREFS_PESSOAS_INICIAIS);
-    window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ ordem: "x", chip: 3 }));
+    window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ ordem: "x", chip: 3, tipo: null }));
     expect(lerPrefsPessoas()).toEqual(PREFS_PESSOAS_INICIAIS);
+  });
+
+  it("valores de versões antigas (ordem atencao, chip voltou) caem no defeito, valor a valor", () => {
+    window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ ordem: "atencao", chip: "voltou", tipo: "clientes" }));
+    expect(lerPrefsPessoas()).toEqual({ tipo: "clientes", chip: "todas", ordem: "urgencia" });
+    window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ ordem: "nome", chip: "semNegocio" }));
+    expect(lerPrefsPessoas()).toEqual(PREFS_PESSOAS_INICIAIS);
+  });
+
+  it("um chip que o tipo não tem (Perdidas em Clientes) volta a Todas", () => {
+    window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ tipo: "clientes", chip: "perdidas", ordem: "recentes" }));
+    expect(lerPrefsPessoas()).toEqual({ tipo: "clientes", chip: "todas", ordem: "recentes" });
   });
 });

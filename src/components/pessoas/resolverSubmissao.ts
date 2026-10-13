@@ -9,6 +9,11 @@ export function ordenarSubmissoes(submissoes: readonly Submissao[]): Submissao[]
   return [...submissoes].sort((a, b) => conflito(a) - conflito(b) || b.data.localeCompare(a.data));
 }
 
+/** O id da submissão mais recente (pela data); `null` sem submissões. É a que a ficha destaca com "Nova". */
+export function idDaMaisRecente(submissoes: readonly Submissao[]): string | null {
+  return submissoes.reduce<Submissao | null>((m, s) => (m === null || s.data > m.data ? s : m), null)?.id ?? null;
+}
+
 /** Quem tem pelo menos uma submissão pendente (as duas candidatas de um conflito contam). */
 export function pessoasComPendentes(submissoes: readonly Submissao[]): Set<string> {
   return new Set(submissoes.flatMap((s) => s.candidatas.map((c) => c.pessoaId)));

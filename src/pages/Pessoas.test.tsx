@@ -27,17 +27,49 @@ const renderPage = (endereco = "/pessoas") =>
 
 beforeEach(() => window.localStorage.clear());
 
-describe("Pessoas: arranque", () => {
-  it("mostra o resumo, a tabela com 13 linhas e o separador de submissões com (6)", () => {
+describe("Pessoas: arranque da lista", () => {
+  it("mostra o resumo, a tabela com 17 linhas e o separador de submissões com (6)", () => {
     renderPage();
-    expect(screen.getByText("13 pessoas · 6 clientes · 3 sem negócio")).toBeInTheDocument();
+    expect(screen.getByText("17 pessoas · 6 clientes · 6 sem negócio")).toBeInTheDocument();
     const tabela = screen.getByRole("table");
-    expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 13);
+    expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 17);
     expect(screen.getByRole("tab", { name: "Submissões, 6 pendentes" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Pessoas" })).toHaveAttribute("aria-selected", "true");
   });
+
+  it("tem as 7 colunas, o seletor abre em Todos e há o botão Nova lead", () => {
+    renderPage();
+    const tabela = screen.getByRole("table");
+    expect(within(tabela).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(
+      ["Pessoa", "Localidade", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Valor"],
+    );
+    expect(screen.getByRole("button", { name: /Todos 17/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Leads 9/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Nova lead" })).toBeInTheDocument();
+    expect(screen.queryByText(/Serviço/)).not.toBeInTheDocument();
+  });
+
+  it("a lista não tem faixa de KPIs, Fila de trabalho nem Dashboard", () => {
+    renderPage();
+    expect(screen.queryByText(/Fila de trabalho/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Dashboard/i)).not.toBeInTheDocument();
+  });
 });
 
+describe("Pessoas: arranque da ficha", () => {
+  it("?open= abre a ficha com o percurso, as ações e o Resumo em secções", () => {
+    renderPage("/pessoas?open=p-nuno");
+    const ficha = screen.getByRole("dialog");
+    expect(within(ficha).getByRole("heading", { name: "Nuno Barros", level: 2 })).toBeInTheDocument();
+    expect(within(ficha).getByRole("list", { name: "Percurso da lead" })).toBeInTheDocument();
+    const chamada = within(ficha).getByRole("button", { name: /Registar chamada/ });
+    expect(chamada).toHaveAttribute("aria-expanded", "false");
+    for (const titulo of ["Próximo passo e prazo", "Contacto", "Origem", "Sobre a pessoa"]) {
+      expect(within(ficha).getByRole("heading", { name: titulo })).toBeInTheDocument();
+    }
+    expect(within(ficha).getByText(/Lead · Negócio · Proposta · Setúbal/)).toBeInTheDocument();
+  });
+});
 describe("Submissões pendentes: arranque", () => {
   it("?separador=submissoes mostra os 6 cartões, o conflito primeiro", () => {
     renderPage("/pessoas?separador=submissoes");

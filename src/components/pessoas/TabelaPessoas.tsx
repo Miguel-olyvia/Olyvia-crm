@@ -1,15 +1,19 @@
 import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCaption, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { LinhaPessoa } from "./LinhaPessoa";
 import type { ResumoPessoa } from "./pessoasTipos";
 
-const COLUNAS = ["person", "contact", "origin", "stage", "lastContact", "rep", "deals", "health"] as const;
+/** As colunas e a largura de cada uma, em percentagem (somam 100). */
+export const COLUNAS = [
+  { id: "person", largura: 26 }, { id: "place", largura: 11 }, { id: "stage", largura: 13 }, { id: "form", largura: 12 },
+  { id: "lastContact", largura: 16 }, { id: "next", largura: 12 }, { id: "value", largura: 10 },
+] as const;
 
 interface TabelaPessoasProps {
   resumos: ResumoPessoa[];
   pendentes: ReadonlySet<string>;
-  hoje: string;
   aoAbrir: (id: string) => void;
   aoLimpar: () => void;
 }
@@ -25,29 +29,35 @@ function EstadoVazioPessoas({ aoLimpar }: { aoLimpar: () => void }) {
   );
 }
 
-/** A tabela de pessoas, com cabeçalhos fixos ao rolar; o nome de cada uma abre a ficha. */
-export function TabelaPessoas({ resumos, pendentes, hoje, aoAbrir, aoLimpar }: TabelaPessoasProps) {
+/** A tabela de pessoas, com cabeçalhos fixos ao rolar; o nome de cada uma abre a ficha. Abaixo de lg rola na horizontal. */
+export function TabelaPessoas({ resumos, pendentes, aoAbrir, aoLimpar }: TabelaPessoasProps) {
   const { t } = useTranslation();
   if (resumos.length === 0) return <EstadoVazioPessoas aoLimpar={aoLimpar} />;
   return (
     <div className="rounded-xl border border-border/70 bg-card">
-      <Table className="min-w-[1100px] text-sm" containerClassName="max-h-[70vh] scroll-pt-14 rounded-xl">
+      <Table className="min-w-[1000px] table-fixed text-sm" containerClassName="max-h-[70vh] scroll-pt-14 rounded-xl">
+        <colgroup>
+          {COLUNAS.map((c) => <col key={c.id} style={{ width: `${c.largura}%` }} />)}
+        </colgroup>
         <TableCaption className="sr-only">{t("pessoasPagina.caption")}</TableCaption>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {COLUNAS.map((c) => (
               <TableHead
-                key={c} scope="col"
-                className="sticky top-0 z-10 bg-card px-3 font-semibold text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]"
+                key={c.id} scope="col"
+                className={cn(
+                  "sticky top-0 z-10 bg-card px-3 font-semibold text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]",
+                  c.id === "value" && "text-right",
+                )}
               >
-                {t(`pessoasPagina.col.${c}`)}
+                {t(`pessoasPagina.col.${c.id}`)}
               </TableHead>
             ))}
           </TableRow>
         </TableHeader>
         <TableBody>
           {resumos.map((r) => (
-            <LinhaPessoa key={r.pessoa.id} resumo={r} hoje={hoje} voltou={pendentes.has(r.pessoa.id)} aoAbrir={aoAbrir} />
+            <LinhaPessoa key={r.pessoa.id} resumo={r} voltou={pendentes.has(r.pessoa.id)} aoAbrir={aoAbrir} />
           ))}
         </TableBody>
       </Table>

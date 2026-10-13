@@ -1,14 +1,13 @@
 // O estado local da página "Pessoas": as pessoas, as pendentes, as notas e a atividade vivem só em memória (nada
-// persiste, ao recarregar volta tudo ao exemplo) e as preferências de ordem e chip em localStorage.
+// persiste, ao recarregar volta tudo ao exemplo) e as preferências de tipo, chip e ordem em localStorage.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
-import { adiar, juntarNota, perder, registarChamada, type DadosChamada } from "./acoesPessoa";
+import { adiar, juntarNota, perder, reativar, registarChamada, type ContextoPerda, type DadosChamada } from "./acoesPessoa";
+import { chipValido } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
-import {
-  chipEfetivo, guardarPrefsPessoas, lerPrefsPessoas, type PreferenciasPessoas,
-} from "./preferenciasPessoas";
-import type { ChipPessoa, EstadoPessoas, MotivoPerda, OrdemPessoa } from "./pessoasTipos";
+import { guardarPrefsPessoas, lerPrefsPessoas, type PreferenciasPessoas } from "./preferenciasPessoas";
+import type { ChipPessoa, EstadoPessoas, MotivoPerda, OrdemPessoa, TipoPessoa } from "./pessoasTipos";
 import { pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
 
 const ESTADO_INICIAL: EstadoPessoas = {
@@ -32,10 +31,7 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
   );
 
   const notas = useMemo(() => (podeVerSubmissoes ? estado.notas : []), [podeVerSubmissoes, estado.notas]);
-  const prefsEfetivas = useMemo(
-    () => ({ ...prefs, chip: chipEfetivo(prefs.chip, podeVerSubmissoes) }),
-    [prefs, podeVerSubmissoes],
-  );
+  const prefsEfetivas = useMemo(() => ({ ...prefs, chip: chipValido(prefs.tipo, prefs.chip) }), [prefs]);
 
   const resolver = useCallback(
     (submissaoId: string, pessoaId?: string) => setEstado((atual) => resolverSubmissao(atual, submissaoId, pessoaId)),
@@ -50,19 +46,23 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
     (id: string, dias: 1 | 3 | 7) => setEstado((atual) => adiar(atual, id, dias, HOJE_EXEMPLO)),
     [],
   );
+  /** O contexto traz o passo (0 a 3) e o papel: quem chama conhece os negócios da pessoa. */
   const perderLead = useCallback(
-    (id: string, motivo: MotivoPerda) => setEstado((atual) => perder(atual, id, motivo, HOJE_EXEMPLO)),
+    (id: string, motivo: MotivoPerda, contexto: ContextoPerda) => setEstado((atual) => perder(atual, id, motivo, HOJE_EXEMPLO, contexto)),
     [],
   );
+  const reativarLead = useCallback((id: string) => setEstado((atual) => reativar(atual, id, HOJE_EXEMPLO)), []);
   const juntarNotaManual = useCallback(
     (id: string, texto: string) => setEstado((atual) => juntarNota(atual, id, texto, HOJE_EXEMPLO)),
     [],
   );
   const mudarOrdem = useCallback((ordem: OrdemPessoa) => setPrefs((p) => ({ ...p, ordem })), []);
   const mudarChip = useCallback((chip: ChipPessoa) => setPrefs((p) => ({ ...p, chip })), []);
+  const mudarTipo = useCallback((tipo: TipoPessoa) => setPrefs((p) => ({ ...p, tipo, chip: chipValido(tipo, p.chip) })), []);
 
   return {
     resumos, submissoes, notas, pendentes, atividade: estado.atividade, prefs: prefsEfetivas, resolver,
-    registarChamada: chamar, adiar: adiarContacto, perder: perderLead, juntarNota: juntarNotaManual, mudarOrdem, mudarChip,
+    registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual,
+    mudarOrdem, mudarChip, mudarTipo,
   };
 }

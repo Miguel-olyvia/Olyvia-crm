@@ -1,7 +1,7 @@
-// A barra de ações da ficha: "Registar chamada" é o único botão cheio; Ligar, WhatsApp e Email são ligações em contorno
-// (só existem se há telefone ou email) e "Mais" guarda o resto. Cada ação abre um painel em linha, não um popover.
+// A barra de ações da ficha: Ligar, WhatsApp e Email são ligações em contorno (só existem se há telefone ou email),
+// "Registar chamada" é o único botão cheio e "Mais" guarda o resto. Cada ação abre um painel em linha, não um popover.
 import { useRef } from "react";
-import { Mail, MessageCircle, MoreHorizontal, Phone, PhoneCall } from "lucide-react";
+import { ArrowRight, Mail, MessageCircle, MoreHorizontal, Phone } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAnunciar } from "./anuncioFicha";
 import { toast } from "@/lib/toast";
@@ -24,6 +24,7 @@ interface BarraAcoesProps {
   painelId: string;
   /** `origem` é o botão a que o foco regressa quando o painel fecha. */
   aoAbrir: (acao: AcaoFicha, origem: HTMLElement | null) => void;
+  aoReativar: () => void;
 }
 
 /** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. */
@@ -55,8 +56,11 @@ function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
   );
 }
 
-/** "Mais": Nota, Adiar, Criar negócio e, só numa lead em curso, "Marcar como perdida" (separada, no fim). */
-function MenuMais({ resumo, aoAbrir }: BarraAcoesProps) {
+/**
+ * "Mais": Nota, Adiar, Criar negócio e, no fim e separada, "Marcar como perdida" (uma lead, em qualquer passo antes de
+ * cliente, mesmo com negócios abertos) ou, numa perdida, "Reativar lead". Um cliente não se perde.
+ */
+function MenuMais({ resumo, aoAbrir, aoReativar }: BarraAcoesProps) {
   const { t } = useTranslation();
   const anunciar = useAnunciar();
   const gatilho = useRef<HTMLButtonElement>(null);
@@ -83,12 +87,16 @@ function MenuMais({ resumo, aoAbrir }: BarraAcoesProps) {
         <DropdownMenuItem className="min-h-11" onSelect={() => { const m = t("pessoasPagina.bar.createToast", { name: pessoa.nome }); toast.info(m); anunciar(m); }}>
           {t("pessoasPagina.bar.createDeal")}
         </DropdownMenuItem>
-        {papel === "lead" && !pessoa.perdida && (
+        {papel === "lead" && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="min-h-11 text-destructive focus:text-destructive" onSelect={() => abrir("perder")}>
-              {t("pessoasPagina.bar.markLost")}
-            </DropdownMenuItem>
+            {pessoa.perdida ? (
+              <DropdownMenuItem className="min-h-11" onSelect={aoReativar}>{t("pessoasPagina.bar.reactivate")}</DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem className="min-h-11 text-destructive focus:text-destructive" onSelect={() => abrir("perder")}>
+                {t("pessoasPagina.bar.markLost")}
+              </DropdownMenuItem>
+            )}
           </>
         )}
       </DropdownMenuContent>
@@ -100,14 +108,14 @@ export function BarraAcoesFicha(p: BarraAcoesProps) {
   const { t } = useTranslation();
   return (
     <div role="group" aria-label={t("pessoasPagina.actions.label")} className="flex flex-wrap gap-2 px-6 pb-4">
+      <Ligacoes resumo={p.resumo} />
       <Button
         type="button" className={BOTAO} aria-expanded={p.aberta === "chamada"} aria-controls={p.aberta === "chamada" ? `${p.painelId}-chamada` : undefined}
         onClick={(e) => p.aoAbrir("chamada", e.currentTarget)}
       >
-        <PhoneCall aria-hidden="true" />
         {t("pessoasPagina.bar.call")}
+        <ArrowRight aria-hidden="true" />
       </Button>
-      <Ligacoes resumo={p.resumo} />
       <MenuMais {...p} />
     </div>
   );

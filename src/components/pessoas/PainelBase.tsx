@@ -2,8 +2,8 @@
 // campo; o Esc fecha só o painel (a ficha trata disso: ver `FichaPessoa`). Os painéis já abertos ficam montados (e
 // escondidos) enquanto a ficha está aberta, para não perderem o que se escreveu ao trocar de painel.
 import { useId, type ReactNode } from "react";
-import type { DadosChamada } from "./acoesPessoa";
-import type { MotivoPerda, Pessoa } from "./pessoasTipos";
+import type { ContextoPerda, DadosChamada } from "./acoesPessoa";
+import type { MotivoPerda, Pessoa, ResumoPessoa } from "./pessoasTipos";
 
 export type AcaoFicha = "chamada" | "nota" | "adiar" | "perder";
 
@@ -11,7 +11,9 @@ export type AcaoFicha = "chamada" | "nota" | "adiar" | "perder";
 export interface AcoesFicha {
   registarChamada: (id: string, dados: Omit<DadosChamada, "hoje">) => void;
   adiar: (id: string, dias: 1 | 3 | 7) => void;
-  perder: (id: string, motivo: MotivoPerda) => void;
+  /** O contexto diz o passo do percurso (0 a 3) em que a lead se perde e o papel (um cliente não se perde). */
+  perder: (id: string, motivo: MotivoPerda, contexto: ContextoPerda) => void;
+  reativar: (id: string) => void;
   juntarNota: (id: string, texto: string) => void;
 }
 
@@ -31,6 +33,8 @@ export interface PropsPainel {
   /** É o painel à vista: ao tornar-se ativo, o foco vai para o primeiro campo. */
   ativo: boolean;
   pessoa: Pessoa;
+  /** A pessoa com os negócios (o painel de perder diz em que passo se perde e quantos negócios ficam abertos). */
+  resumo: ResumoPessoa;
   hoje: string;
   acoes: AcoesFicha;
   /** Cancelar: fecha o painel e descarta o que se escreveu. */

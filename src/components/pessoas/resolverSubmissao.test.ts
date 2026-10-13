@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { ATIVIDADE_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import type { EstadoPessoas } from "./pessoasTipos";
-import { ordenarSubmissoes, pessoasComPendentes, pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
+import { idDaMaisRecente, ordenarSubmissoes, pessoasComPendentes, pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
 
 const inicial = (): EstadoPessoas => ({
   submissoes: [...SUBMISSOES_EXEMPLO], notas: [], pessoas: [], atividade: [], contactadas: [],
@@ -135,5 +135,13 @@ describe("pessoasQueVoltaram", () => {
     expect(menos.has("p-marta")).toBe(false);
     expect(menos.has("p-hugo")).toBe(true);
     expect(todas.has("p-marta")).toBe(true);
+  });
+});
+
+describe("idDaMaisRecente", () => {
+  it("é a submissão com a data mais recente; sem submissões, null", () => {
+    expect(idDaMaisRecente(SUBMISSOES_EXEMPLO)).toBe("s2");
+    expect(idDaMaisRecente([SUBMISSOES_EXEMPLO[0], SUBMISSOES_EXEMPLO[3]])).toBe("s1");
+    expect(idDaMaisRecente([])).toBeNull();
   });
 });

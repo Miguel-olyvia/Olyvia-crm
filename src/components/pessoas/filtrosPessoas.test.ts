@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import {
-  LIMITE_SEM_CONTACTO, contagensChips, filtrarPessoas, ordenarPessoas, pesquisaCorresponde,
+  FILTROS_INICIAIS, FORMULARIO_MANUAL, LIMITE_SEM_CONTACTO, chipsDoTipo, chipValido, contagensChips, contagensTipos, filtrarPessoas,
+  filtrosAtivos, ordenarPessoas, pesquisaCorresponde, resultadoEfetivo,
 } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
@@ -10,47 +11,84 @@ import { pessoasComPendentes } from "./resolverSubmissao";
 
 const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO);
 const pendentes = pessoasComPendentes(SUBMISSOES_EXEMPLO);
-const SEM: FiltrosPessoas = { chip: "todos", pesquisa: "" };
 const nomes = (f: Partial<FiltrosPessoas>) =>
-  filtrarPessoas(todos, { ...SEM, ...f }, pendentes).map((r) => r.pessoa.nome);
+  filtrarPessoas(todos, { ...FILTROS_INICIAIS, ...f }, pendentes).map((r) => r.pessoa.nome).sort();
+
+describe("o seletor Leads, Clientes, Todos", () => {
+  it("abre em Todos e as perdidas só contam em Todos", () => {
+    expect(FILTROS_INICIAIS.tipo).toBe("todos");
+    expect(contagensTipos(todos, FILTROS_INICIAIS, pendentes)).toEqual({ leads: 9, clientes: 6, todos: 17 });
+  });
+  it("Leads não inclui as perdidas; Clientes são os 6 com negócio ganho", () => {
+    expect(nomes({ tipo: "leads" })).toHaveLength(9);
+    expect(nomes({ tipo: "leads" })).not.toContain("Joana Bastos");
+    expect(nomes({ tipo: "clientes" })).toEqual(["Helena Tavares", "Inês Pacheco", "Marta Silveira", "Paulo Neves", "Rui Figueiredo", "Sofia Matos"]);
+    expect(nomes({ tipo: "todos" })).toHaveLength(17);
+  });
+  it("as contagens respeitam a pesquisa e os outros filtros", () => {
+    expect(contagensTipos(todos, { ...FILTROS_INICIAIS, pesquisa: "marta" }, pendentes)).toEqual({ leads: 0, clientes: 1, todos: 1 });
+    expect(contagensTipos(todos, { ...FILTROS_INICIAIS, soMinhas: true }, pendentes)).toEqual({ leads: 3, clientes: 2, todos: 5 });
+  });
+});
 
 describe("chips", () => {
-  it("contagens sem pesquisa", () => {
-    expect(contagensChips(todos, "", pendentes)).toEqual({
-      todos: 13, leads: 7, clientes: 6, semNegocio: 3, voltou: 7, semContacto: 6,
-    });
+  it("contagens em Todos", () => {
+    expect(contagensChips(todos, FILTROS_INICIAIS, pendentes)).toEqual({ todas: 17, porContactar: 2, atrasadas: 4, perdidas: 2 });
   });
-
-  it("as contagens respeitam a pesquisa (os outros filtros)", () => {
-    expect(contagensChips(todos, "marta", pendentes)).toEqual({
-      todos: 1, leads: 0, clientes: 1, semNegocio: 0, voltou: 1, semContacto: 0,
-    });
+  it("em Leads não há perdidas e em Clientes só Todas e Atrasadas", () => {
+    expect(contagensChips(todos, { ...FILTROS_INICIAIS, tipo: "leads" }, pendentes)).toEqual({ todas: 9, porContactar: 2, atrasadas: 3, perdidas: 0 });
+    expect(chipsDoTipo("clientes")).toEqual(["todas", "atrasadas"]);
+    expect(chipsDoTipo("leads")).toEqual(["todas", "porContactar", "atrasadas"]);
+    expect(chipsDoTipo("todos")).toEqual(["todas", "porContactar", "atrasadas", "perdidas"]);
+    expect(contagensChips(todos, { ...FILTROS_INICIAIS, tipo: "clientes" }, pendentes).atrasadas).toBe(1);
   });
-
   it("a contagem de cada chip é o nº de linhas que o chip mostra", () => {
-    const c = contagensChips(todos, "", pendentes);
+    const c = contagensChips(todos, FILTROS_INICIAIS, pendentes);
     (Object.keys(c) as (keyof typeof c)[]).forEach((chip) => {
-      expect(filtrarPessoas(todos, { ...SEM, chip }, pendentes)).toHaveLength(c[chip]);
+      expect(filtrarPessoas(todos, { ...FILTROS_INICIAIS, chip }, pendentes)).toHaveLength(c[chip]);
     });
   });
+  it("Atrasadas: leads com contacto atrasado e clientes só com negócio em curso atrasado", () => {
+    expect(nomes({ chip: "atrasadas" })).toEqual(["Gonçalo Matias", "Lúcia Faria", "Paulo Neves", "Tiago Rocha"]);
+  });
+  it("Por contactar: as leads sem chamada; Perdidas: as duas perdidas", () => {
+    expect(nomes({ chip: "porContactar" })).toEqual(["Beatriz Sampaio", "Hugo Teixeira"]);
+    expect(nomes({ chip: "perdidas" })).toEqual(["Fábio Lemos", "Joana Bastos"]);
+  });
+  it("um chip que o tipo não tem volta a Todas", () => {
+    expect(chipValido("clientes", "perdidas")).toBe("todas");
+    expect(chipValido("clientes", "atrasadas")).toBe("atrasadas");
+    expect(nomes({ tipo: "clientes", chip: "perdidas" })).toHaveLength(6);
+  });
+});
 
+describe("filtros do popover", () => {
   it("Voltou a contactar = tem submissão pendente (candidatas do conflito incluídas)", () => {
-    expect(nomes({ chip: "voltou" }).sort()).toEqual(
+    expect(nomes({ voltou: true })).toEqual(
       ["Clara Dias", "Helena Tavares", "Hugo Teixeira", "Marta Silveira", "Paulo Neves", "Rui Figueiredo", "Sofia Matos"],
     );
   });
-
-  it("Sem contacto 7+ usa a constante própria (>= 7 dias)", () => {
-    expect(LIMITE_SEM_CONTACTO).toBe(7);
-    const esperado = todos.filter((r) => r.pessoa.ultimoContactoDias >= LIMITE_SEM_CONTACTO).map((r) => r.pessoa.nome);
-    expect(nomes({ chip: "semContacto" })).toEqual(esperado);
-    expect(todos.some((r) => r.pessoa.ultimoContactoDias === 7)).toBe(false);
+  it("Com visita: só quem está na etapa Visita e não está perdida", () => {
+    expect(nomes({ comVisita: true })).toEqual(["Rita Albuquerque"]);
   });
-
-  it("Leads, Clientes e Sem negócio", () => {
-    expect(nomes({ chip: "leads" })).toHaveLength(7);
-    expect(nomes({ chip: "clientes" })).toHaveLength(6);
-    expect(nomes({ chip: "semNegocio" }).sort()).toEqual(["Beatriz Sampaio", "Hugo Teixeira", "Lúcia Faria"]);
+  it("Só as minhas usa o comercial de exemplo", () => {
+    expect(nomes({ soMinhas: true })).toEqual(["Beatriz Sampaio", "Marta Silveira", "Rita Albuquerque", "Rui Figueiredo", "Vasco Pinto"]);
+  });
+  it("Comercial, Formulário (incluindo Registada à mão) e Resultado do último contacto", () => {
+    expect(nomes({ comercial: "Diogo Lopes" })).toEqual(["Clara Dias", "Inês Pacheco", "Tiago Rocha"]);
+    expect(nomes({ formulario: "Contacto geral" })).toEqual(["Beatriz Sampaio", "Sofia Matos"]);
+    expect(nomes({ formulario: FORMULARIO_MANUAL })).toHaveLength(6);
+    expect(nomes({ resultado: "semContacto" })).toEqual(["Beatriz Sampaio", "Hugo Teixeira"]);
+    expect(nomes({ resultado: "semInteresse" })).toEqual(["Fábio Lemos"]);
+  });
+  it("o resultado aplica-se a qualquer pessoa e sem chamada é Sem contacto", () => {
+    expect(resultadoEfetivo({ resultadoContacto: undefined })).toBe("semContacto");
+    expect(nomes({ resultado: "atendeuInteressado", tipo: "clientes" })).toEqual(["Helena Tavares", "Marta Silveira", "Paulo Neves"]);
+  });
+  it("o contador conta os interruptores e selects ativos (Atrasadas é o chip)", () => {
+    expect(filtrosAtivos(FILTROS_INICIAIS)).toBe(0);
+    expect(filtrosAtivos({ ...FILTROS_INICIAIS, voltou: true, soMinhas: true, comercial: "Ana Ribeiro", chip: "atrasadas" })).toBe(4);
+    expect(filtrosAtivos({ ...FILTROS_INICIAIS, chip: "porContactar" })).toBe(0);
   });
 });
 
@@ -59,68 +97,61 @@ describe("pesquisa", () => {
     expect(nomes({ pesquisa: "INES" })).toEqual(["Inês Pacheco"]);
     expect(nomes({ pesquisa: "  lucia " })).toEqual(["Lúcia Faria"]);
   });
-
   it("por email", () => {
     expect(nomes({ pesquisa: "clara.dias@" })).toEqual(["Clara Dias"]);
   });
-
+  it("por localidade, sem acentos", () => {
+    expect(nomes({ pesquisa: "viseu" })).toEqual(["Beatriz Sampaio", "Vasco Pinto"]);
+    expect(nomes({ pesquisa: "SETUBAL" })).toEqual(["Inês Pacheco", "Nuno Barros"]);
+  });
   it("por telefone, com ou sem espaços", () => {
     expect(nomes({ pesquisa: "914 567" })).toEqual(["Paulo Neves"]);
     expect(nomes({ pesquisa: "914567803" })).toEqual(["Paulo Neves"]);
   });
-
+  it("não procura pelo serviço", () => {
+    expect(nomes({ pesquisa: "Pavimento" })).toEqual([]);
+  });
   it("sem resultados dá lista vazia; caracteres especiais não rebentam", () => {
     expect(nomes({ pesquisa: "zzzz" })).toEqual([]);
     expect(nomes({ pesquisa: "(.*[" })).toEqual([]);
   });
-
   it("pesquisa vazia ou só espaços corresponde a tudo; pessoa sem contacto não rebenta", () => {
     const tiago = todos.find((r) => r.pessoa.nome === "Tiago Rocha")!.pessoa;
     expect(pesquisaCorresponde(tiago, "   ")).toBe(true);
     expect(pesquisaCorresponde(tiago, "912")).toBe(false);
   });
+  it("pesquisa e tipo combinam-se", () => {
+    expect(nomes({ tipo: "leads", pesquisa: "marta" })).toEqual([]);
+  });
+});
 
-  it("pesquisa e chip combinam-se", () => {
-    expect(nomes({ chip: "clientes", pesquisa: "a" }).length).toBeLessThan(6);
-    expect(nomes({ chip: "leads", pesquisa: "marta" })).toEqual([]);
+describe("sem contacto há N dias", () => {
+  it("o limite é 7 dias", () => {
+    expect(LIMITE_SEM_CONTACTO).toBe(7);
   });
 });
 
 describe("ordenação", () => {
-  const ordem = (o: Parameters<typeof ordenarPessoas>[1]) =>
-    ordenarPessoas(todos, o, pendentes).map((r) => r.pessoa.nome);
+  const ordem = (o: Parameters<typeof ordenarPessoas>[1]) => ordenarPessoas(todos, o, pendentes).map((r) => r.pessoa.nome);
 
-  it("Precisa de atenção: com submissão primeiro, depois pior saúde, depois nome", () => {
-    expect(ordem("atencao")).toEqual([
-      "Clara Dias", "Helena Tavares", "Hugo Teixeira", "Marta Silveira", "Paulo Neves", "Rui Figueiredo", "Sofia Matos",
-      "Nuno Barros", "Tiago Rocha", "Vasco Pinto", "Beatriz Sampaio", "Inês Pacheco", "Lúcia Faria",
+  it("Urgência: voltou a contactar e atrasadas primeiro, depois a pior saúde, as perdidas no fim", () => {
+    expect(ordem("urgencia")).toEqual([
+      "Paulo Neves", "Clara Dias", "Marta Silveira", "Helena Tavares", "Hugo Teixeira", "Rui Figueiredo", "Sofia Matos",
+      "Tiago Rocha", "Gonçalo Matias", "Lúcia Faria", "Nuno Barros", "Vasco Pinto", "Beatriz Sampaio", "Inês Pacheco",
+      "Rita Albuquerque", "Fábio Lemos", "Joana Bastos",
     ]);
   });
-
-  it("Nome: ordem alfabética em português", () => {
-    const n = ordem("nome");
-    expect(n[0]).toBe("Beatriz Sampaio");
-    expect(n[n.length - 1]).toBe("Vasco Pinto");
-    expect(n.indexOf("Inês Pacheco")).toBeLessThan(n.indexOf("Lúcia Faria"));
+  it("Mais recentes: a que chegou há menos tempo primeiro", () => {
+    expect(ordem("recentes").slice(0, 3)).toEqual(["Hugo Teixeira", "Beatriz Sampaio", "Gonçalo Matias"]);
+    expect(ordem("recentes")[16]).toBe("Inês Pacheco");
   });
-
-  it("Último contacto: o que está há mais tempo sem contacto primeiro", () => {
-    const dias = ordenarPessoas(todos, "ultimoContacto", pendentes).map((r) => r.pessoa.ultimoContactoDias);
-    expect(dias).toEqual([...dias].sort((a, b) => b - a));
-    expect(dias[0]).toBe(30);
+  it("Valor: o maior valor em jogo primeiro, em empate por nome", () => {
+    expect(ordem("valor").slice(0, 5)).toEqual(["Vasco Pinto", "Clara Dias", "Nuno Barros", "Paulo Neves", "Marta Silveira"]);
   });
-
-  it("Valor: maior primeiro", () => {
-    expect(ordem("valor").slice(0, 3)).toEqual(["Vasco Pinto", "Rui Figueiredo", "Clara Dias"]);
-  });
-
-  it("não altera a lista recebida", () => {
+  it("não altera a lista recebida e lista vazia dá lista vazia", () => {
     const antes = todos.map((r) => r.pessoa.id);
-    ordenarPessoas(todos, "nome", pendentes);
+    ordenarPessoas(todos, "valor", pendentes);
     expect(todos.map((r) => r.pessoa.id)).toEqual(antes);
-  });
-
-  it("lista vazia dá lista vazia", () => {
-    expect(ordenarPessoas([], "atencao", new Set())).toEqual([]);
+    expect(ordenarPessoas([], "urgencia", new Set())).toEqual([]);
   });
 });
