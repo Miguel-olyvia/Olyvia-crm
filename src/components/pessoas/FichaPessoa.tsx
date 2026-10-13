@@ -25,7 +25,7 @@ export function FichaPessoa({ resumo, aberto, aoFechar, ...resto }: FichaPessoaP
   return (
     <Sheet open={aberto && resumo !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
       <SheetContent
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-xl motion-reduce:!animate-none"
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl motion-reduce:!animate-none"
         onEscapeKeyDown={(e) => { if (fecharPainel.current?.()) e.preventDefault(); }}
         onOpenAutoFocus={() => { origem.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
         onCloseAutoFocus={(e) => {
