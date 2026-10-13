@@ -1,7 +1,7 @@
 // Operações e Inventário na proposta simples. Cada ecrã diz numa frase em que
 // ponto está, mostra só o que é preciso e tem um botão principal, de quem tem
 // de agir. Os outros papéis veem o mesmo, com "Mudar para…".
-import { ArrowLeft, ArrowRight, Check } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DIAS, PAPEIS, TECS, aberto, conflitos, nfmt, type Negocio, type Papel } from "./motor";
@@ -39,7 +39,7 @@ export function OperacoesSimples(ctx: Ctx) {
                   <span className="block text-base font-medium">{o.nome} · {o.servico}</span>
                   <span className="block text-[15px] text-muted-foreground">
                     Plano {ESTADO_PLANO[p.estado]} · {nfmt(p.tasks.reduce((a, t) => a + t.h, 0))} h
-                    {nc ? <span className="text-warning"> · {nc} conflito</span> : null}
+                    {nc ? <span className="inline-flex items-center gap-1"> · <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />{nc} conflito</span> : null}
                   </span>
                 </span>
                 <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
@@ -81,7 +81,8 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <p className="mt-1 text-base text-muted-foreground">{d.servico} · {p.tasks.length} fases · {nfmt(horas)} h de equipa · plano {ESTADO_PLANO[p.estado]}</p>
       </header>
 
-      <section aria-label="O que fazer" className="mt-8 rounded-2xl border border-border bg-card p-5">
+      {/* Sem cartão à volta: as duas saídas de um conflito são os únicos cartões (botões), para não haver cartões dentro de cartões */}
+      <section aria-label="O que fazer" className="mt-8 border-t border-border pt-6">
         <p className="text-lg">{frase}</p>
         {C.map((c) => {
           const ti = p.tasks.indexOf(c.t);
@@ -90,15 +91,15 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             <div key={ti} className="mt-4 grid gap-3 sm:grid-cols-2">
               {alt && (
                 <button type="button" disabled={!pode} onClick={go(() => A.trocar(d.id, ti))}
-                  className="rounded-xl border border-border p-4 text-left transition-colors hover:border-primary disabled:opacity-60">
+                  className="min-h-11 rounded-xl border border-border p-4 text-left transition-colors hover:border-foreground disabled:opacity-60">
                   <span className="block text-[15px] font-medium">Trocar por {alt.n}</span>
-                  <span className="block text-sm text-muted-foreground">{alt.sk}, livre nesses dias, mesmo custo por hora. A obra não atrasa.</span>
+                  <span className="block text-[15px] text-muted-foreground">{alt.sk}, livre nesses dias, mesmo custo por hora. A obra não atrasa.</span>
                 </button>
               )}
               <button type="button" disabled={!pode} onClick={go(() => A.adiar(d.id, ti))}
-                className="rounded-xl border border-border p-4 text-left transition-colors hover:border-primary disabled:opacity-60">
+                className="min-h-11 rounded-xl border border-border p-4 text-left transition-colors hover:border-foreground disabled:opacity-60">
                 <span className="block text-[15px] font-medium">Adiar {c.t.nome.toLowerCase()}</span>
-                <span className="block text-sm text-muted-foreground">{c.tec.n.split(" ")[0]} faz quando voltar de férias. A obra acaba mais tarde.</span>
+                <span className="block text-[15px] text-muted-foreground">{c.tec.n.split(" ")[0]} faz quando voltar de férias. A obra acaba mais tarde.</span>
               </button>
             </div>
           );
@@ -112,17 +113,20 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       <section aria-labelledby="tempo-t" className="mt-10">
         <h2 id="tempo-t" className="text-lg font-semibold">Dias</h2>
         <div className="mt-4 overflow-x-auto">
-          <div className="grid min-w-[640px] gap-y-2" style={{ gridTemplateColumns: `180px repeat(${nd}, minmax(52px, 1fr))` }}>
+          <div className="grid min-w-[760px] gap-y-2" style={{ gridTemplateColumns: `180px repeat(${nd}, minmax(76px, 1fr))` }}>
             <span />
-            {Array.from({ length: nd }, (_, k) => <span key={k} className="px-1 text-center text-xs text-muted-foreground">{DIAS[k]}</span>)}
+            {Array.from({ length: nd }, (_, k) => <span key={k} className="px-1 text-center text-[15px] text-muted-foreground">{DIAS[k]}</span>)}
             {p.tasks.map((t, i) => {
               const tec = TECS.find((x) => x.id === t.tec), c = C.find((x) => x.t === t);
               const feita = p.estado === "concluída" || (p.estado === "em curso" && t.dia + t.dur <= p.dia);
+              const I = c ? AlertTriangle : feita ? Check : Circle;
               return [
-                <span key={t.nome + "n"} className="pr-3 text-[15px]" style={{ gridColumn: 1, gridRow: i + 2 }}>{t.nome}<span className="block text-sm text-muted-foreground">{tec ? tec.n : "sem técnico"}</span></span>,
+                <span key={t.nome + "n"} className="pr-3 text-[15px]" style={{ gridColumn: 1, gridRow: i + 2 }}>{t.nome}<span className="block text-[15px] text-muted-foreground">{tec ? tec.n : "sem técnico"}</span></span>,
                 <span key={t.nome + "b"} className="flex items-center px-0.5" style={{ gridColumn: `${t.dia + 2} / span ${t.dur}`, gridRow: i + 2 }}>
-                  <span className={cn("block h-9 w-full rounded-lg px-3 text-sm leading-9 text-foreground/80 transition-colors", c ? "bg-warning/60" : feita ? "bg-success/60" : "bg-primary/40")}
+                  {/* barras cinzentas; o estado diz-se no ícone (com cor) e no texto */}
+                  <span className={cn("flex h-11 w-full items-center gap-1.5 rounded-lg px-3 text-[15px] text-foreground", feita ? "bg-muted-foreground/25" : "bg-muted")}
                     title={`${t.nome} · ${DIAS[t.dia]}${t.dur > 1 ? " a " + DIAS[t.dia + t.dur - 1] : ""}${c ? " · técnico de férias" : ""}`}>
+                    <I className={cn("h-4 w-4 shrink-0", c ? "text-warning" : feita ? "text-success" : "text-muted-foreground")} aria-hidden="true" />
                     {c ? "de férias" : feita ? "feito" : `${nfmt(t.h)} h`}
                   </span>
                 </span>,
@@ -130,10 +134,10 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             })}
           </div>
         </div>
-        <p className="mt-3 flex flex-wrap gap-4 text-sm text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5"><i className="h-3 w-3 rounded bg-primary/60" />previsto</span>
-          <span className="inline-flex items-center gap-1.5"><i className="h-3 w-3 rounded bg-success/70" />feito</span>
-          <span className="inline-flex items-center gap-1.5"><i className="h-3 w-3 rounded bg-warning/70" />conflito</span>
+        <p className="mt-3 flex flex-wrap gap-4 text-[15px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5"><Circle className="h-4 w-4" aria-hidden="true" />previsto</span>
+          <span className="inline-flex items-center gap-1.5"><Check className="h-4 w-4 text-success" aria-hidden="true" />feito</span>
+          <span className="inline-flex items-center gap-1.5"><AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />conflito</span>
         </p>
       </section>
 
@@ -164,8 +168,10 @@ export function InventarioSimples(ctx: Ctx) {
                 {d.obra.mats!.map((x) => (
                   <li key={x.n} className="flex min-h-12 flex-wrap items-center justify-between gap-2 py-2.5 text-[15px]">
                     <span>{x.n}</span>
-                    <span className={cn("tabular-nums", x.falta > 0 ? "font-medium text-warning" : "text-muted-foreground")}>
-                      {x.falta > 0 ? `faltam ${nfmt(x.falta)} de ${nfmt(x.q)} ${x.un}` : <><Check className="mr-1 inline h-4 w-4 text-success" aria-hidden="true" />{nfmt(x.q)} {x.un} reservados</>}
+                    <span className={cn("tabular-nums", x.falta > 0 ? "font-medium" : "text-muted-foreground")}>
+                      {x.falta > 0
+                        ? <><AlertTriangle className="mr-1 inline h-4 w-4 text-warning" aria-hidden="true" />faltam {nfmt(x.falta)} de {nfmt(x.q)} {x.un}</>
+                        : <><Check className="mr-1 inline h-4 w-4 text-success" aria-hidden="true" />{nfmt(x.q)} {x.un} reservados</>}
                     </span>
                   </li>
                 ))}

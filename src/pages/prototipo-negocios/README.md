@@ -434,3 +434,45 @@ Com a **V2** ou a **V2 funcional** escolhida, o Hoje é `v2/HojeV2.tsx`; a **Atu
 - **Onde vive o que se marca:** `v2/hojeV2Store.ts`, uma store de módulo **só em memória** (como `diaADia.ts`): dura até recarregar. Não toca no `Estado`, no `seed()` nem na `VERSAO`, e o `motor.ts` não mudou. **"Repor a demonstração" ainda não a apaga** (o botão vive em `PrototipoNegocios.tsx`, que não era deste trabalho): basta chamar `esquecerHojeV2()` lá.
 - **Datas:** o "hoje" é o mesmo da V2 funcional, sáb 10/10/2026 (`HOJE_FUNC`); a saudação usa a hora real.
 - **Testes:** `v2/hojeV2Regras.test.ts` (regras) e `v2/HojeV2.test.tsx` (ecrã, com as regras de desenho: texto ≥ 15 px, alvos de 44 px, cor só nos ícones, um só primário). Com eles, o protótipo tem 54 ficheiros e 880 testes.
+
+## Operações e Financeiro (V2, 13/10/2026)
+
+O lote 1, item 6, de `docs/melhorias-v2-2026-10-13/README.md` (secções 1, 3 e 4.5). Vale para a **V2** e a **V2 funcional**; a **Atual** fica como era. Tudo com dados de exemplo; não se mexeu na `VERSAO` nem no comportamento do `motor.ts`.
+
+### Operações (menu Operações, `v2/OperacoesV2.tsx`)
+
+- **No topo, o Hoje do supervisor:** as tarefas **por validar** e os **atrasos** das obras abertas, cada coisa uma só vez (`hojeSupervisor`); cada linha abre a obra.
+- **A lista das obras**, com o estado em texto e ícone (`v2/EstadoObra.tsx`: Plano por aprovar, Aprovado, Em curso, Concluída), as horas, quantas por validar e quantos atrasos.
+- **A página da obra** (`v2/ObraV2.tsx`), em secções seguidas, **sem separadores** e sem modais, com ligações "Nesta página":
+  - **Plano:** as tarefas com o técnico, as datas, as horas e o estado. Com o plano por aprovar, o **supervisor** e a **data de início** escolhem-se ali (botões; vêm sugeridos do negócio) e os conflitos resolvem-se na linha (Trocar técnico, Adiar). Um só botão primário, o do estado: **Aprovar plano** (escreve `responsavel` e `inicio` no negócio e chama `A.aprovarPlano`), **Arrancar a obra** ou **Registar o fim da obra**.
+  - **Validar:** as tarefas que os técnicos deram por feitas. **Validar** na linha; **Rejeitar** abre o motivo na própria linha (botões com os motivos comuns ou texto livre; sem motivo não rejeita). **Validar todas** quando há mais de uma.
+  - **Atrasos:** "Registar um atraso" abre na linha: a fase, os dias e o motivo em botões, e o interruptor **Cliente avisado** (que se pode ligar depois em cada atraso).
+  - **Previsto contra real:** mão de obra, equipamentos, consumíveis e estrutura. O previsto é a receita (`partes()` do orçamento); o real é **de exemplo** (`v2/realExemplo.ts`, fatores por obra) e o ecrã di-lo. Numa obra em curso compara só a parte feita. Barras cinzentas e números; o desvio em texto com ícone (até 2% é "dentro do previsto").
+  - **Materiais:** só leitura, com "Abrir no Inventário".
+- O que o supervisor faz (validações, rejeições, atrasos, supervisor e data) vive **em memória** em `v2/estadoV2.ts`, preso ao objeto `Estado` (um `WeakMap`): "Repor a demonstração" recomeça-o, e recarregar a página também. A obra em curso da Marta Lima traz um atraso **de exemplo**. As regras puras estão em `v2/operacoes.ts`.
+
+### Financeiro (fase Financeiro do negócio, `v2/FinanceiroV2.tsx`)
+
+- **A Olyvia não emite faturas** (certificação da AT): a fatura emite-se no programa certificado e **regista-se** aqui: tranche, número, data, valor (vem da tranche) e, opcional, o PDF. O ecrã diz isto numa frase.
+- **Várias faturas, uma por tranche** do plano de pagamento do contrato (campo `pagamento`): "50% + 50% no fim" dá **Adiantamento 50%** e **Final 50%**; "30% + 40% + 30%" dá Adiantamento, A meio e Final; "100% na adjudicação" dá uma só. A última tranche leva o resto, para a soma bater com o total com IVA.
+- **Validar pagamento** em cada fatura, na linha: a data (Hoje, Ontem ou o calendário), a conta (botões) e a referência. Sai o **recibo**.
+- **O disparo:** o pagamento da tranche que dispara chama a ação do motor de sempre (`A.validar`), que emite o recibo e põe a obra a andar (Inventário + plano por aprovar). Qual é a tranche está na constante `DISPARO` de `v2/financeiro.ts`, com um comentário: **hoje é a primeira** (o adiantamento), porque com "50% + 50% no fim" a final só se paga no fim da obra. É uma **decisão em aberto** (melhorias-v2, decisão 3; negócios de 08/10, secção 6): para mudar, troca-se para `"ultima"`.
+- As tranches que faltam depois do disparo (a final) registam-se e validam-se no fim da fase **Obra** do negócio ("Faturas e pagamentos").
+- A fatura única que o motor já tinha (a da demonstração, ou a criada pelo botão do fim da fase) conta como a 1.ª tranche; se o motor validou o pagamento por fora, essa fatura fica paga com o recibo dele.
+- Liga-se em `FasesSimples.tsx` (`DocumentosSimples` e `ObraSimples`) só quando `lerVersao()` não é a Atual. As faturas também vivem em memória em `v2/estadoV2.ts`; o motor só guarda a primeira em `fin.fatura` e o recibo do disparo em `fin.recibo`.
+
+### Regras de desenho corrigidas
+
+- `OperacoesSimples.tsx`: o "O que fazer" deixou de ser um cartão com cartões dentro; os dias da linha do tempo passaram de 12 px para 15 px; as barras são cinzentas e o estado (feito, conflito) diz-se com um ícone de cor e texto; o "conflito" da lista e o "faltam" do Inventário têm a cor só no ícone.
+- `FasesSimples.tsx`: as barras do previsto e real são cinzentas; a cor do "acima do previsto", dos materiais em falta e da receita atualizada passou para ícones; o texto pequeno passou a 15 px; "Atualizar a receita" deixou de ser um segundo botão primário.
+
+### Testes
+
+`v2/financeiro.test.ts` e `v2/operacoes.test.ts` (as regras), `v2/FinanceiroV2.test.tsx` e `v2/OperacoesV2.test.tsx` (os ecrãs, montados com `v2/testeV2.tsx`). O protótipo fica com 56 ficheiros e 884 testes.
+
+### O que ficou por fazer
+
+- O botão do fim da fase Financeiro (em `NegocioSimples` e `PaginaNegocio`, vem de `proximo()` no motor) ainda diz **"Emitir fatura"** na V2 antes de haver uma fatura registada. Não se mexeu, para não mudar o motor nem a página do negócio; registar a primeira fatura muda-o para "Validar pagamento".
+- O documento da fatura para o cliente (`FaturaDoc`, partilha no portal) não aparece no Financeiro V2, porque a fatura deixa de ser feita pela Olyvia.
+- Validações, atrasos e faturas não ficam guardados ao recarregar (estão em memória). Na app real: `client_invoices`, `client_receipts` e as tabelas da obra.
+- O real do "Previsto contra real" é de exemplo até haver `calculo_snapshot` e registos de horas.
