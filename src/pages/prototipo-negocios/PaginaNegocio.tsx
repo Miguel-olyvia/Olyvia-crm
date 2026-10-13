@@ -297,6 +297,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
               </label>
             ))}
           </div>
+          {/* notas livres sobre as medidas (opcional): ex. "parede do fundo com 2,4 m até ao teto falso" */}
+          <div className="pt-4">
+            <Campos grupo={{ titulo: "", campos: [{ k: "obs_medidas", l: "Observações", t: "texto_longo", opcional: true }] }} {...fx} />
+          </div>
         </div>
       ) },
       { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length,
