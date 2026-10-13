@@ -42,6 +42,7 @@ import {
   ScanBarcode,
   Calculator,
 } from "lucide-react";
+import { Wallet } from "lucide-react";
 
 export interface MenuItem {
   to: string;
@@ -124,6 +125,14 @@ export const topLevelItems: TopLevelItem[] = [
     labelKey: "sidebar.operations",
     permissions: ["operations.view"],
     external: true,
+  },
+  {
+    // Financeiro: registar faturas e validar pagamentos (finance.view).
+    id: "finance",
+    to: "/financeiro",
+    icon: Wallet,
+    labelKey: "sidebar.finance",
+    permissions: ["finance.view"],
   },
 ];
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import {
   ErroDeDados,
@@ -39,6 +39,8 @@ import {
   type ServicoEditavel,
 } from "../domain/novaObra";
 import { NovaObraServicos, type StockCarregado } from "../components/NovaObraServicos";
+import { ObrasPorCriar } from "../components/ObrasPorCriar";
+import { contratoDoLink, listarObrasPorCriar, type ObraPorCriar } from "../lib/financeiroObra";
 import {
   Badge,
   Barra,
@@ -82,9 +84,45 @@ export default function Obras() {
   const [erro, setErro] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
   const [nova, setNova] = useState(false);
+  const [contratoInicial, setContratoInicial] = useState<string | null>(null);
+  const [porCriar, setPorCriar] = useState<ObraPorCriar[]>([]);
   const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
+  const [params, setParams] = useSearchParams();
 
   const planeia = podePlanear(funcao);
+
+  const abrirNova = (contratoId: string | null = null) => {
+    setContratoInicial(contratoId);
+    setNova(true);
+  };
+
+  // O aviso do sino ("Criar obra: <cliente>") traz ?criar=<contrato>: abre a
+  // Nova obra já nesse contrato, e tira o parâmetro do endereço.
+  useEffect(() => {
+    if (!planeia) return;
+    const id = contratoDoLink(params);
+    if (!id) return;
+    abrirNova(id);
+    const p = new URLSearchParams(params);
+    p.delete("criar");
+    setParams(p, { replace: true });
+  }, [planeia, params, setParams]);
+
+  // Os contratos já pagos (Financeiro) e sem obra. É uma ajuda: se falhar,
+  // a lista de obras continua.
+  useEffect(() => {
+    if (!activeOrgId || !planeia) {
+      setPorCriar([]);
+      return;
+    }
+    let vivo = true;
+    listarObrasPorCriar(activeOrgId)
+      .then((l) => vivo && setPorCriar(l))
+      .catch(() => vivo && setPorCriar([]));
+    return () => {
+      vivo = false;
+    };
+  }, [activeOrgId, planeia, recarga]);
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -165,12 +203,14 @@ export default function Obras() {
             </Button>
           </Link>
           {planeia && (
-            <Button size="sm" onClick={() => setNova(true)}>
+            <Button size="sm" onClick={() => abrirNova()}>
               <Plus width={14} height={14} /> Nova obra
             </Button>
           )}
         </div>
       </div>
+
+      {planeia && <ObrasPorCriar lista={porCriar} aoCriar={(id) => abrirNova(id)} />}
 
       <div className="flex gap-1 rounded-lg bg-slate-100 p-1 text-sm sm:w-fit">
         {(["abertas", "todas"] as const).map((f) => (
@@ -200,7 +240,7 @@ export default function Obras() {
             }
             action={
               planeia ? (
-                <Button size="sm" onClick={() => setNova(true)}>
+                <Button size="sm" onClick={() => abrirNova()}>
                   <Plus width={14} height={14} /> Nova obra
                 </Button>
               ) : undefined
@@ -267,7 +307,15 @@ export default function Obras() {
       )}
 
       {nova && activeOrgId && (
-        <NovaObra orgId={activeOrgId} aoFechar={() => setNova(false)} aoCriar={() => setRecarga((r) => r + 1)} />
+        <NovaObra
+          orgId={activeOrgId}
+          contratoInicial={contratoInicial}
+          aoFechar={() => {
+            setNova(false);
+            setContratoInicial(null);
+          }}
+          aoCriar={() => setRecarga((r) => r + 1)}
+        />
       )}
     </div>
   );
@@ -277,9 +325,20 @@ export default function Obras() {
 
 type Fonte = "orcamento" | "contrato" | "branco";
 
-function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () => void; aoCriar: () => void }) {
+function NovaObra({
+  orgId,
+  aoFechar,
+  aoCriar,
+  contratoInicial = null,
+}: {
+  orgId: string;
+  aoFechar: () => void;
+  aoCriar: () => void;
+  /** Vem das "Obras por criar" ou do link do sino: abre já no separador Contrato, com este escolhido. */
+  contratoInicial?: string | null;
+}) {
   const navegar = useNavigate();
-  const [fonte, setFonte] = useState<Fonte>("orcamento");
+  const [fonte, setFonte] = useState<Fonte>(contratoInicial ? "contrato" : "orcamento");
   const [orcamentos, setOrcamentos] = useState<OrcamentoAceite[]>([]);
   const [contratos, setContratos] = useState<ContratoAssinado[]>([]);
   const [semContratos, setSemContratos] = useState(false);
@@ -290,7 +349,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
   const [erro, setErro] = useState<string | null>(null);
 
   const [orcamentoId, setOrcamentoId] = useState("");
-  const [contratoId, setContratoId] = useState("");
+  const [contratoId, setContratoId] = useState(contratoInicial ?? "");
   const [modeloId, setModeloId] = useState("");
   const [titulo, setTitulo] = useState("");
   const [clienteId, setClienteId] = useState("");
@@ -397,7 +456,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
 
   const pronto =
     (fonte === "orcamento" && orcamentoId) ||
-    (fonte === "contrato" && contratoId) ||
+    (fonte === "contrato" && contratoId && contratos.some((c) => c.id === contratoId)) ||
     (fonte === "branco" && titulo.trim() && clienteId);
 
   // ── Passo 2: "Serviços do contrato" (contrato ou orçamento aceite) ──────
@@ -633,6 +692,13 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
               </p>
             ) : contratos.length === 0 ? (
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">Nenhum contrato assinado sem obra.</p>
+            ) : contratoInicial && contratoId === contratoInicial && !contratos.some((c) => c.id === contratoInicial) ? (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Este contrato já tem obra, ou já não está assinado.{" "}
+                <button type="button" className="font-medium underline" onClick={() => setContratoId("")}>
+                  Escolher outro
+                </button>
+              </p>
             ) : (
               <div className="max-h-[45vh] space-y-1.5 overflow-y-auto">
                 {contratos.filter((c) => corresponde(procura, c.numero, c.titulo, c.cliente_id ? nomeCliente.get(c.cliente_id) : null)).map((c) => (

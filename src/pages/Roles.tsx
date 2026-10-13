@@ -231,6 +231,7 @@ export default function Roles() {
     'marketing', 'forms',
     'suppliers', 'warehouses', 'purchase_orders', 'receiving', 'stocks', 'inventory', 'client_orders',
     'scheduling',
+    'finance',
     'users', 'roles',
     'settings', 'smtp', 'email_templates',
   ]);
@@ -274,6 +275,7 @@ export default function Roles() {
     inventory: 'Acesso a Stock',
     client_orders: 'Encomendas Clientes',
     scheduling: 'Agendamentos',
+    finance: 'Financeiro',
     users: 'Utilizadores',
     roles: 'Funções',
     settings: 'Definições',
@@ -358,6 +360,8 @@ export default function Roles() {
         { label: 'Outros', categories: ['scheduling_other'] },
       ],
     },
+    { label: 'Custos e margens', categories: ['costs'] },
+    { label: 'Financeiro', categories: ['finance'] },
     { label: 'Utilizadores', categories: ['users', 'roles'] },
     { label: 'Definições', categories: ['settings', 'smtp', 'email_templates'] },
   ];
@@ -413,6 +417,9 @@ export default function Roles() {
       manage_delivery_notes: { label: 'Guias', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300' },
       learn_codes: { label: 'Códigos', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
       download_proof: { label: 'PDF', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
+      // Financeiro (finance.register / finance.validate)
+      register: { label: 'Registar', className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' },
+      validate: { label: 'Validar', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
     };
     return badgeMap[suffix] || { label: suffix.charAt(0).toUpperCase() + suffix.slice(1).replace(/_/g, ' '), className: '' };
   };

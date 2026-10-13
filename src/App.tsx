@@ -71,6 +71,7 @@ const ServiceCatalogItems = lazy(() => import("./pages/ServiceCatalogItems"));
 const ServiceFees = lazy(() => import("./pages/ServiceFees"));
 const Custos = lazy(() => import("./pages/Custos"));
 const CustoServicoReceita = lazy(() => import("./pages/CustoServicoReceita"));
+const Financeiro = lazy(() => import("./pages/Financeiro"));
 
 const TeamHub = lazy(() => import("./pages/TeamHub"));
 const TechnicalSettings = lazy(() => import("./pages/TechnicalSettings"));
@@ -280,6 +281,8 @@ const App = () => (
                       {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
                       <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
+                      {/* Financeiro: registar faturas (emitidas no programa certificado) e validar pagamentos — migration 20261214100000. */}
+                      <Route path="/financeiro" element={<ProtectedRoute permission="finance.view"><Financeiro /></ProtectedRoute>} />
                       <Route path="/services" element={<Services />} />
                       <Route path="/service-categories" element={<ServiceCategories />} />
                       <Route path="/service-subcategories" element={<ServiceSubcategories />} />
