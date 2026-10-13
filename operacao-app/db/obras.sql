@@ -261,6 +261,14 @@ ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS material_chega_em da
 ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS material_chega_origem text
   CHECK (material_chega_origem IS NULL OR material_chega_origem IN ('crm','manual'));
 ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS material_chega_nota text;
+-- Pós-contrato (13/10): de que orçamento do contrato veio a tarefa (um
+-- contrato pode ter vários aceites) e, se o serviço estava dentro de um
+-- conjunto (quote_lines.selected_attributes->'bundle_components'), a posição
+-- do componente (1..n, como o component_index do CRM). SEM FK.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS orcamento_id uuid;          -- → quotes.id
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS orcamento_componente integer;
+CREATE INDEX IF NOT EXISTS ops_obra_tarefa_orcamento_idx
+  ON public.ops_obra_tarefa (orcamento_id) WHERE orcamento_id IS NOT NULL;
 
 -- Quem está numa tarefa. `obra_id` vai repetido para a policy não precisar
 -- de um join por linha.
@@ -733,6 +741,83 @@ $$;
 
 REVOKE ALL ON FUNCTION public.ops_contrato_orcamento(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_contrato_orcamento(uuid) TO authenticated, service_role;
+
+-- TODOS os orçamentos de que a obra de um contrato nasce (pós-contrato, 13/10):
+--   1. client_contracts.quote_id preenchido → só esse;
+--   2. senão, todos os orçamentos ACEITES da proposta (quotes.accepted_at),
+--      pela ordem em que foram aceites — na Mudelar, um contrato com 4
+--      orçamentos aceites (WC + WC + cozinha + …) e sem quote_id fazia a obra
+--      só com o mais recente (≈ 38 % do contrato);
+--   3. senão, o de ops_contrato_orcamento (os caminhos de sempre).
+-- Só orçamentos da organização do contrato e não apagados; sem repetidos.
+-- `rotulo` = o que o ecrã e os nomes das tarefas mostram ("de que orçamento
+-- vem"): o título, ou o número; títulos repetidos levam o número à frente.
+-- `ordem` = 1..n. INVOKER, como ops_contrato_orcamento.
+CREATE OR REPLACE FUNCTION public.ops_contrato_orcamentos(_contrato_id uuid)
+RETURNS TABLE (quote_id uuid, ordem integer, rotulo text, numero text)
+LANGUAGE plpgsql STABLE SECURITY INVOKER
+SET search_path TO 'public'
+AS $$
+#variable_conflict use_column
+DECLARE
+  v_quote    uuid;
+  v_proposta uuid;
+  v_org      uuid;
+  v_ids      uuid[] := '{}';
+  v_um       uuid;
+BEGIN
+  IF _contrato_id IS NULL OR to_regclass('public.client_contracts') IS NULL THEN
+    RETURN;
+  END IF;
+
+  EXECUTE 'SELECT quote_id, organization_id, ' ||
+          CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'client_contracts' AND column_name = 'proposal_id')
+               THEN 'proposal_id' ELSE 'NULL::uuid' END ||
+          ' FROM public.client_contracts WHERE id = $1'
+     INTO v_quote, v_org, v_proposta USING _contrato_id;
+
+  IF v_quote IS NOT NULL THEN
+    v_ids := ARRAY[v_quote];
+  ELSIF v_proposta IS NOT NULL
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quotes' AND column_name = 'proposal_id')
+        AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'quotes' AND column_name = 'accepted_at') THEN
+    EXECUTE 'SELECT COALESCE(array_agg(q.id ORDER BY q.accepted_at, q.quote_number NULLS LAST, q.id), ''{}'')
+               FROM public.quotes q
+              WHERE q.proposal_id = $1 AND q.accepted_at IS NOT NULL
+                AND q.deleted_at IS NULL AND q.organization_id = $2'
+       INTO v_ids USING v_proposta, v_org;
+  END IF;
+
+  IF cardinality(v_ids) = 0 THEN
+    v_um := public.ops_contrato_orcamento(_contrato_id);
+    IF v_um IS NOT NULL THEN
+      v_ids := ARRAY[v_um];
+    END IF;
+  END IF;
+
+  RETURN QUERY
+  WITH q AS (
+    SELECT x.id, x.pos::integer AS pos,
+           COALESCE(nullif(btrim(qq.title), ''), nullif(btrim(qq.quote_number), ''), 'Orçamento ' || x.pos) AS titulo,
+           nullif(btrim(qq.quote_number), '') AS numero
+      FROM unnest(v_ids) WITH ORDINALITY AS x(id, pos)
+      JOIN public.quotes qq ON qq.id = x.id AND qq.deleted_at IS NULL AND qq.organization_id = v_org
+  ), u AS (
+    SELECT DISTINCT ON (q.id) q.* FROM q ORDER BY q.id, q.pos
+  )
+  SELECT u.id,
+         (row_number() OVER (ORDER BY u.pos))::integer,
+         CASE WHEN count(*) OVER (PARTITION BY lower(u.titulo)) > 1 AND u.numero IS NOT NULL
+                   AND lower(u.numero) <> lower(u.titulo)
+              THEN u.titulo || ' (' || u.numero || ')' ELSE u.titulo END,
+         u.numero
+    FROM u
+   ORDER BY u.pos;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_contrato_orcamentos(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_contrato_orcamentos(uuid) TO authenticated, service_role;
 
 
 -- ============================================================
@@ -1847,7 +1932,8 @@ RETURNS TABLE (
   fatores_chave      text,
   contexto           text,       -- 'casa_banho' / 'cozinha' / NULL: o pacote a que a linha pertence
   pacote             boolean,    -- a linha é um pacote (traz a obra inteira da divisão)
-  encaixe            jsonb)      -- {modo:'junta'|'entre', alvo} já resolvido para o contexto
+  encaixe            jsonb,      -- {modo:'junta'|'entre', alvo} já resolvido para o contexto
+  orcamento_componente integer)  -- serviço dentro de um conjunto: a posição do componente (1..n)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
@@ -1910,30 +1996,55 @@ BEGIN
   END IF;
 
   -- 1.ª passagem: as linhas de serviço, com o papel de cada serviço e a área
-  -- de intervenção de onde vieram (a necessidade do negócio).
+  -- de intervenção de onde vieram (a necessidade do negócio). E os SERVIÇOS
+  -- DENTRO DOS CONJUNTOS (selected_attributes->'bundle_components', type
+  -- 'service'): cada um conta como uma linha de serviço com qt = quantidade
+  -- do componente × qt da linha (pós-contrato, 13/10 — antes não davam
+  -- tarefas). `componente` = 0 na linha direta, 1..n no conjunto.
   FOR r IN EXECUTE $q$
-    SELECT l.id, COALESCE(l.qt, 1) AS qt, l.service_id,
-           nullif(to_jsonb(l)->>'source_deal_need_id', '') AS need_id,
-           COALESCE(nullif(btrim(s.name), ''), nullif(btrim(l.descricao_snapshot), ''), 'Serviço') AS nome,
+    WITH x AS (
+      SELECT l.id, COALESCE(l.qt, 1) AS qt, l.service_id, 0 AS componente,
+             l.ordem, l.descricao_snapshot AS descr, l.section_name AS secao,
+             nullif(to_jsonb(l)->>'source_deal_need_id', '') AS need_id
+        FROM public.quote_lines l
+       WHERE l.quote_id = $1 AND l.service_id IS NOT NULL
+      UNION ALL
+      SELECT l.id,
+             COALESCE(l.qt, 1) * COALESCE(public.ops_num(comp.value->>'quantity'), 1),
+             (comp.value->>'source_id')::uuid, comp.ord::integer,
+             l.ordem, COALESCE(nullif(btrim(comp.value->>'name'), ''), l.descricao_snapshot), l.section_name,
+             nullif(to_jsonb(l)->>'source_deal_need_id', '')
+        FROM public.quote_lines l
+       CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(to_jsonb(l)->'selected_attributes'->'bundle_components') = 'array'
+                    THEN to_jsonb(l)->'selected_attributes'->'bundle_components' ELSE '[]'::jsonb END)
+               WITH ORDINALITY AS comp(value, ord)
+       WHERE l.quote_id = $1
+         AND comp.value->>'type' = 'service'
+         AND comp.value->>'source_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+         AND COALESCE(public.ops_num(comp.value->>'quantity'), 1) > 0
+    )
+    SELECT x.id, x.qt, x.service_id, x.componente,
+           x.need_id,
+           COALESCE(nullif(btrim(s.name), ''), nullif(btrim(x.descr), ''), 'Serviço') AS nome,
            nullif(btrim(s.technical_sheet_labor_description), '') AS proc,
            s.technical_sheet_labor_hours AS horas,
            s.technical_sheet_labor_people_count AS pessoas,
            (CASE
-              WHEN lower(concat_ws(' ', c.name, s.name, l.section_name)) ~ '(demol|prepara|remoç|remoc|retirad|desmont|proteç|protec|estaleiro)' THEN 1
-              WHEN lower(concat_ws(' ', c.name, s.name, l.section_name)) ~ '(eletric|elétric|electric|canaliz|água|agua|esgot|gás|gas |avac|climatiz|ar condicionado|instalaç|instalac|tubag|quadro|rede )' THEN 2
-              WHEN lower(concat_ws(' ', c.name, s.name, l.section_name)) ~ '(limpez|entrega)' THEN 4
+              WHEN lower(concat_ws(' ', c.name, s.name, x.secao)) ~ '(demol|prepara|remoç|remoc|retirad|desmont|proteç|protec|estaleiro)' THEN 1
+              WHEN lower(concat_ws(' ', c.name, s.name, x.secao)) ~ '(eletric|elétric|electric|canaliz|água|agua|esgot|gás|gas |avac|climatiz|ar condicionado|instalaç|instalac|tubag|quadro|rede )' THEN 2
+              WHEN lower(concat_ws(' ', c.name, s.name, x.secao)) ~ '(limpez|entrega)' THEN 4
               ELSE 3
             END)::smallint AS fase,
-           (SELECT string_agg(p.name || ' × ' || trim_scale(round((sm.quantity * COALESCE(l.qt, 1))::numeric, 2))::text,
+           (SELECT string_agg(p.name || ' × ' || trim_scale(round((sm.quantity * x.qt)::numeric, 2))::text,
                               '; ' ORDER BY sm.sort_order NULLS LAST, p.name)
               FROM public.service_materials sm
               JOIN public.products p ON p.id = sm.product_id
-             WHERE sm.service_id = l.service_id AND sm.deleted_at IS NULL) AS materiais
-      FROM public.quote_lines l
-      JOIN public.services s ON s.id = l.service_id
+             WHERE sm.service_id = x.service_id AND sm.deleted_at IS NULL) AS materiais
+      FROM x
+      JOIN public.services s ON s.id = x.service_id
       LEFT JOIN public.service_categories c ON c.id = s.service_category_id
-     WHERE l.quote_id = $1
-     ORDER BY l.ordem NULLS LAST, l.id
+     ORDER BY x.ordem NULLS LAST, x.id, x.componente
   $q$ USING _orc
   LOOP
     v_area := NULL;
@@ -1952,7 +2063,8 @@ BEGIN
     END IF;
 
     l := jsonb_build_object(
-      'id', r.id, 'qt', r.qt, 'service_id', r.service_id, 'nome', r.nome, 'proc', r.proc,
+      'id', r.id, 'componente', r.componente,
+      'qt', r.qt, 'service_id', r.service_id, 'nome', r.nome, 'proc', r.proc,
       'horas', r.horas, 'pessoas', r.pessoas, 'fase', r.fase, 'materiais', r.materiais,
       'area', v_area,
       'tipo', (SELECT p.tipo FROM public.ops_obra_servico_perfil p
@@ -2106,6 +2218,7 @@ BEGIN
         contexto := v_ctx;
         pacote := l->>'tipo' IS NOT NULL;
         encaixe := v_e;
+        orcamento_componente := nullif((l->>'componente')::integer, 0);
         RETURN NEXT;
       END LOOP;
     ELSE
@@ -2141,6 +2254,7 @@ BEGIN
       contexto := v_ctx;
       pacote := l->>'tipo' IS NOT NULL;
       encaixe := NULL;
+      orcamento_componente := nullif((l->>'componente')::integer, 0);
       RETURN NEXT;
     END IF;
   END LOOP;
@@ -2148,6 +2262,45 @@ END
 $$;
 
 REVOKE ALL ON FUNCTION public.ops_obra_tarefas_do_orcamento(uuid) FROM PUBLIC, anon, authenticated;
+
+-- As tarefas de VÁRIOS orçamentos (os aceites de um contrato), num só jsonb
+-- (o formato de to_jsonb(ops_obra_tarefas_do_orcamento)), com:
+--   · `ordem` 1..n seguida (orçamento a orçamento);
+--   · `orcamento_id` e `orcamento_rotulo` de cada tarefa;
+--   · com mais de um orçamento, o nome leva o rótulo à frente
+--     ("WC suite · Modelo WC: Demolição") — é o agrupamento por orçamento no
+--     Gantt (as fases 1..4 continuam a querer dizer o mesmo).
+-- Cada orçamento expande-se SOZINHO: dois "Modelo WC" em dois orçamentos são
+-- duas casas de banho, logo dois conjuntos de tarefas; os extras encaixam no
+-- pacote do SEU orçamento (ops_obra_criar_impl). Orçamentos repetidos na
+-- lista contam uma vez.
+CREATE OR REPLACE FUNCTION public.ops_obra_tarefas_dos_orcamentos(_orcs uuid[], _rotulos text[] DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  WITH o AS (
+    SELECT DISTINCT ON (x.q) x.q, x.pos, COALESCE(nullif(btrim(_rotulos[x.pos]), ''), 'Orçamento ' || x.pos) AS rot
+      FROM unnest(COALESCE(_orcs, '{}')) WITH ORDINALITY AS x(q, pos)
+     WHERE x.q IS NOT NULL
+     ORDER BY x.q, x.pos
+  ), n AS (SELECT count(*) AS n FROM o),
+  t AS (
+    SELECT o.q, o.pos, o.rot, to_jsonb(e) AS j, e.ordem
+      FROM o CROSS JOIN LATERAL public.ops_obra_tarefas_do_orcamento(o.q) e
+  )
+  SELECT COALESCE(jsonb_agg(
+           t.j || jsonb_build_object(
+             'ordem', t.rn,
+             'orcamento_id', t.q,
+             'orcamento_rotulo', t.rot,
+             'nome', CASE WHEN (SELECT n FROM n) > 1 THEN left(t.rot || ' · ' || (t.j->>'nome'), 300)
+                          ELSE t.j->>'nome' END)
+           ORDER BY t.rn), '[]'::jsonb)
+    FROM (SELECT t.*, row_number() OVER (ORDER BY t.pos, t.ordem) AS rn FROM t) t
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_tarefas_dos_orcamentos(uuid[], text[]) FROM PUBLIC, anon, authenticated;
 
 
 -- ============================================================
@@ -3138,6 +3291,40 @@ $$;
 
 REVOKE ALL ON FUNCTION public.ops_obra_passo_do_pacote(uuid, jsonb, text, text) FROM PUBLIC, anon, authenticated;
 
+-- Os orçamentos de onde a obra nasce: os do contrato (ops_contrato_orcamentos)
+-- e, se vier um orçamento indicado que não esteja nessa lista, esse à frente.
+-- Sem contrato: só o orçamento. `rotulos` vai na mesma ordem.
+CREATE OR REPLACE FUNCTION public.ops_obra_lista_orcamentos(_org uuid, _contrato uuid, _orc uuid)
+RETURNS TABLE (ids uuid[], rotulos text[])
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_ids uuid[] := '{}';
+  v_rot text[] := '{}';
+  v_r   text;
+BEGIN
+  IF _contrato IS NOT NULL THEN
+    SELECT COALESCE(array_agg(c.quote_id ORDER BY c.ordem), '{}'),
+           COALESCE(array_agg(c.rotulo ORDER BY c.ordem), '{}')
+      INTO v_ids, v_rot
+      FROM public.ops_contrato_orcamentos(_contrato) c
+      JOIN public.quotes q ON q.id = c.quote_id AND q.organization_id = _org;
+  END IF;
+  IF _orc IS NOT NULL AND NOT (_orc = ANY (v_ids)) THEN
+    SELECT COALESCE(nullif(btrim(q.title), ''), nullif(btrim(q.quote_number), ''), 'Orçamento')
+      INTO v_r FROM public.quotes q WHERE q.id = _orc;
+    v_ids := _orc || v_ids;
+    v_rot := COALESCE(v_r, 'Orçamento') || v_rot;
+  END IF;
+  ids := v_ids;
+  rotulos := v_rot;
+  RETURN NEXT;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_lista_orcamentos(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+
 -- `_tarefas` (opcional): as tarefas dos serviços, já revistas pelo gestor no
 -- passo "Serviços do contrato" (validadas antes, em ops_obra_validar_tarefas).
 -- NULL = como sempre: cada linha vendida expande-se pelo modelo do serviço.
@@ -3177,19 +3364,27 @@ DECLARE
   v_tid    uuid;
   v_alvo   uuid;
   v_alvo2  uuid;
+  v_orcs   uuid[] := '{}';
+  v_rots   text[] := '{}';
+  v_exp_o  jsonb;
 BEGIN
   v_codigo := public.ops_proximo_codigo_interno(_org, 'OB');
+
+  -- Os orçamentos da obra: com contrato, TODOS os aceites (ou o quote_id).
+  SELECT lo.ids, lo.rotulos INTO v_orcs, v_rots
+    FROM public.ops_obra_lista_orcamentos(_org, _contrato_id, _orcamento_id) lo;
+  v_orcs := COALESCE(v_orcs, '{}');
 
   -- Há um PACOTE no orçamento (remodelação completa de casa de banho /
   -- cozinha)? Então ele traz as tarefas da obra inteira — proteção,
   -- limpeza, entrega — e as do tipo de obra ficariam repetidas.
-  IF _orcamento_id IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns
+  IF cardinality(v_orcs) > 0 AND EXISTS (SELECT 1 FROM information_schema.columns
                     WHERE table_schema = 'public' AND table_name = 'quote_lines' AND column_name = 'service_id') THEN
     EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.quote_lines l
                               JOIN public.ops_obra_servico_perfil p
                                 ON p.servico_id = l.service_id AND p.organization_id = $2 AND p.tipo IS NOT NULL
-                             WHERE l.quote_id = $1)'
-       INTO v_pacote USING _orcamento_id, _org;
+                             WHERE l.quote_id = ANY ($1))'
+       INTO v_pacote USING v_orcs, _org;
   END IF;
 
   INSERT INTO public.ops_obra (
@@ -3231,20 +3426,21 @@ BEGIN
   -- 2. O que foi vendido: cada serviço do orçamento/contrato, pelo seu modelo
   --    (ou pela ficha técnica). Ficam depois das tarefas do tipo, na fase.
   IF _tarefas IS NULL THEN
-    SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.ordem), '[]'::jsonb) INTO v_exp
-      FROM public.ops_obra_tarefas_do_orcamento(_orcamento_id) t;
+    v_exp := public.ops_obra_tarefas_dos_orcamentos(v_orcs, v_rots);
 
     INSERT INTO public.ops_obra_tarefa (
       organization_id, obra_id, fase_id, ordem, nome, procedimento, materiais, ferramentas,
       minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id, servico_tarefa_id,
-      chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave)
+      chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave,
+      orcamento_id, orcamento_componente)
     SELECT _org, v_id, fa.id, 1000 + (x->>'ordem')::integer, x->>'nome', x->>'procedimento', x->>'materiais',
            x->>'ferramentas', (x->>'minutos')::integer, (x->>'pessoas')::smallint, nullif(x->>'skill_id', '')::uuid,
            nullif(x->>'orcamento_linha_id', '')::uuid, nullif(x->>'servico_id', '')::uuid,
            nullif(x->>'servico_tarefa_id', '')::uuid,
            x->>'chave', COALESCE((x->>'espera_antes_horas')::numeric, 0), x->>'medida', (x->>'medida_qt')::numeric,
            x->>'minutos_origem', COALESCE((x->>'ritmo_n')::integer, 0),
-           COALESCE(x->'fatores', '{}'::jsonb), COALESCE(x->>'fatores_chave', '')
+           COALESCE(x->'fatores', '{}'::jsonb), COALESCE(x->>'fatores_chave', ''),
+           nullif(x->>'orcamento_id', '')::uuid, (x->>'orcamento_componente')::integer
       FROM jsonb_array_elements(v_exp) x
       JOIN public.ops_obra_fase fa ON fa.obra_id = v_id AND fa.ordem = (x->>'fase')::smallint;
 
@@ -3257,6 +3453,8 @@ BEGIN
      CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(x->'depende_chaves', '[]'::jsonb)) dc(v)
       JOIN public.ops_obra_tarefa d
         ON d.obra_id = v_id AND d.orcamento_linha_id = t.orcamento_linha_id AND d.id <> t.id
+       -- dois serviços do mesmo conjunto partilham a linha: cada um com os seus passos
+       AND d.orcamento_componente IS NOT DISTINCT FROM t.orcamento_componente
       LEFT JOIN public.ops_obra_servico_tarefa sd ON sd.id = d.servico_tarefa_id
      WHERE d.chave = dc.v OR ('#' || sd.ordem) = dc.v
     ON CONFLICT DO NOTHING;
@@ -3269,8 +3467,13 @@ BEGIN
       SELECT t.id INTO v_tid FROM public.ops_obra_tarefa t
        WHERE t.obra_id = v_id AND t.ordem = 1000 + (v_x->>'ordem')::integer;
       CONTINUE WHEN v_tid IS NULL;
+      -- O pacote do MESMO orçamento (dois orçamentos com casa de banho = duas
+      -- casas de banho: o extra de cada um encaixa na sua).
+      SELECT COALESCE(jsonb_agg(y), '[]'::jsonb) INTO v_exp_o
+        FROM jsonb_array_elements(v_exp) y
+       WHERE y->>'orcamento_id' IS NOT DISTINCT FROM v_x->>'orcamento_id';
       IF v_x->'encaixe'->>'modo' = 'junta' THEN
-        v_alvo := public.ops_obra_passo_do_pacote(v_id, v_exp, v_x->>'contexto', v_x->'encaixe'->>'alvo');
+        v_alvo := public.ops_obra_passo_do_pacote(v_id, v_exp_o, v_x->>'contexto', v_x->'encaixe'->>'alvo');
         IF v_alvo IS NOT NULL THEN
           UPDATE public.ops_obra_tarefa a
              SET minutos_previstos = a.minutos_previstos + (v_x->>'minutos')::integer,
@@ -3282,8 +3485,8 @@ BEGIN
           DELETE FROM public.ops_obra_tarefa WHERE id = v_tid;
         END IF;
       ELSIF v_x->'encaixe'->>'modo' = 'entre' THEN
-        v_alvo := public.ops_obra_passo_do_pacote(v_id, v_exp, v_x->>'contexto', v_x->'encaixe'->'alvo'->>0);
-        v_alvo2 := public.ops_obra_passo_do_pacote(v_id, v_exp, v_x->>'contexto', v_x->'encaixe'->'alvo'->>1);
+        v_alvo := public.ops_obra_passo_do_pacote(v_id, v_exp_o, v_x->>'contexto', v_x->'encaixe'->'alvo'->>0);
+        v_alvo2 := public.ops_obra_passo_do_pacote(v_id, v_exp_o, v_x->>'contexto', v_x->'encaixe'->'alvo'->>1);
         BEGIN
           IF v_alvo IS NOT NULL THEN
             INSERT INTO public.ops_obra_tarefa_dependencia (tarefa_id, depende_de_id, organization_id, obra_id)
@@ -3318,7 +3521,8 @@ BEGIN
       organization_id, obra_id, fase_id, ordem, nome, procedimento, materiais, ferramentas,
       minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id,
       servico_tarefa_id, materiais_crm,
-      chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave, minutos_juntos)
+      chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave, minutos_juntos,
+      orcamento_id, orcamento_componente)
     SELECT _org, v_id, fa.id, 1000 + x.pos::integer, btrim(x.e->>'nome'),
            nullif(btrim(x.e->>'procedimento'), ''), nullif(btrim(x.e->>'materiais'), ''),
            nullif(btrim(x.e->>'ferramentas'), ''),
@@ -3356,7 +3560,12 @@ BEGIN
            COALESCE(public.ops_num(x.e->>'ritmo_n'), 0)::integer,
            CASE WHEN jsonb_typeof(x.e->'fatores') = 'object' THEN x.e->'fatores' ELSE '{}'::jsonb END,
            COALESCE(x.e->>'fatores_chave', ''),
-           COALESCE(public.ops_num(x.e->>'minutos_juntos'), 0)::integer
+           COALESCE(public.ops_num(x.e->>'minutos_juntos'), 0)::integer,
+           -- validados em ops_obra_validar_tarefas (um dos orçamentos da obra)
+           CASE WHEN nullif(x.e->>'orcamento_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                THEN (x.e->>'orcamento_id')::uuid END,
+           CASE WHEN COALESCE(x.e->>'orcamento_componente', '') ~ '^\d{1,3}$'
+                THEN nullif((x.e->>'orcamento_componente')::integer, 0) END
       FROM jsonb_array_elements(_tarefas) WITH ORDINALITY AS x(e, pos)
       JOIN public.ops_obra_fase fa ON fa.obra_id = v_id AND fa.ordem = (x.e->>'fase')::smallint;
 
@@ -3385,6 +3594,17 @@ BEGIN
 
     SELECT COALESCE(array_agg(DISTINCT tp.tarefa_id), '{}') INTO v_fixas
       FROM public.ops_obra_tarefa_pessoa tp WHERE tp.obra_id = v_id;
+  END IF;
+
+  -- De que orçamento veio cada tarefa de serviço (um ecrã antigo não manda).
+  IF cardinality(v_orcs) > 0 AND EXISTS (SELECT 1 FROM public.ops_obra_tarefa
+                                          WHERE obra_id = v_id AND orcamento_id IS NULL
+                                            AND orcamento_linha_id IS NOT NULL) THEN
+    EXECUTE 'UPDATE public.ops_obra_tarefa t SET orcamento_id = l.quote_id
+               FROM public.quote_lines l
+              WHERE t.obra_id = $1 AND t.orcamento_id IS NULL
+                AND l.id = t.orcamento_linha_id AND l.quote_id = ANY ($2)'
+      USING v_id, v_orcs;
   END IF;
 
   -- Quando chega o material que falta (encomenda ou prazo do fornecedor,
@@ -3442,6 +3662,7 @@ BEGIN
 
   PERFORM public.ops_obra_evento(_org, v_id, 'criada', _titulo, _autor,
     jsonb_build_object('codigo', v_codigo, 'orcamento_id', _orcamento_id,
+                       'orcamentos', to_jsonb(v_orcs),
                        'contrato_id', _contrato_id, 'modelo_id', _modelo_id, 'tarefas', v_n,
                        'revistas', _tarefas IS NOT NULL));
 
@@ -3460,12 +3681,19 @@ REVOKE ALL ON FUNCTION public.ops_obra_criar_impl(uuid, uuid, text, uuid, uuid, 
 --     skill_id | skill_nome, orcamento_linha_id, servico_id, servico_tarefa_id,
 --     depende, procedimento, materiais, ferramentas,
 --     materiais_crm [{produto_id, nome, quantidade, origem}] }
-CREATE OR REPLACE FUNCTION public.ops_obra_validar_tarefas(_org uuid, _orc uuid, _tarefas jsonb)
+-- `_orcs` (pós-contrato): TODOS os orçamentos da obra (os aceites do
+-- contrato); NULL = só `_orc`, como antes. `orcamento_id` (opcional) tem de
+-- ser o orçamento da linha; `orcamento_componente` 1..999.
+-- (DROP: a assinatura antiga, de 3 argumentos, ficava como sobrecarga.)
+DROP FUNCTION IF EXISTS public.ops_obra_validar_tarefas(uuid, uuid, jsonb);
+CREATE OR REPLACE FUNCTION public.ops_obra_validar_tarefas(_org uuid, _orc uuid, _tarefas jsonb, _orcs uuid[] DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
+  v_orcs uuid[] := COALESCE(_orcs, CASE WHEN _orc IS NULL THEN '{}'::uuid[] ELSE ARRAY[_orc] END);
+  v_qlin uuid;
   v_n    integer;
   e      jsonb;
   i      integer := 0;
@@ -3584,17 +3812,29 @@ BEGIN
       RAISE EXCEPTION '"%": nome de especialidade demasiado comprido.', v_nome;
     END IF;
 
-    -- Linha do orçamento: tem de ser DESTE orçamento (só lê o CRM).
+    -- Linha do orçamento: tem de ser de UM DOS orçamentos desta obra (só lê o CRM).
     IF nullif(e->>'orcamento_linha_id', '') IS NOT NULL THEN
-      IF _orc IS NULL OR e->>'orcamento_linha_id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+      IF cardinality(v_orcs) = 0 OR e->>'orcamento_linha_id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
         RAISE EXCEPTION '"%": essa linha não é do orçamento desta obra.', v_nome;
       END IF;
       v_lin := (e->>'orcamento_linha_id')::uuid;
-      EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.quote_lines WHERE id = $1 AND quote_id = $2)'
-         INTO v_ok USING v_lin, _orc;
-      IF NOT v_ok THEN
+      EXECUTE 'SELECT quote_id FROM public.quote_lines WHERE id = $1 AND quote_id = ANY ($2)'
+         INTO v_qlin USING v_lin, v_orcs;
+      IF v_qlin IS NULL THEN
         RAISE EXCEPTION '"%": essa linha não é do orçamento desta obra.', v_nome;
       END IF;
+      IF nullif(e->>'orcamento_id', '') IS NOT NULL AND lower(e->>'orcamento_id') <> v_qlin::text THEN
+        RAISE EXCEPTION '"%": essa linha não é desse orçamento.', v_nome;
+      END IF;
+    ELSIF nullif(e->>'orcamento_id', '') IS NOT NULL
+          AND (e->>'orcamento_id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+               OR NOT ((e->>'orcamento_id')::uuid = ANY (v_orcs))) THEN
+      RAISE EXCEPTION '"%": esse orçamento não é desta obra.', v_nome;
+    END IF;
+    IF nullif(e->>'orcamento_componente', '') IS NOT NULL
+       AND (CASE WHEN e->>'orcamento_componente' ~ '^\d{1,3}$' THEN (e->>'orcamento_componente')::integer END)
+           BETWEEN 1 AND 999 IS NOT TRUE THEN
+      RAISE EXCEPTION '"%": componente do conjunto inválido.', v_nome;
     END IF;
     IF nullif(e->>'servico_id', '') IS NOT NULL THEN
       IF e->>'servico_id' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
@@ -3658,7 +3898,7 @@ BEGIN
 END
 $$;
 
-REVOKE ALL ON FUNCTION public.ops_obra_validar_tarefas(uuid, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.ops_obra_validar_tarefas(uuid, uuid, jsonb, uuid[]) FROM PUBLIC, anon, authenticated;
 
 -- `p_tarefas` (novo, opcional): as tarefas dos serviços revistas no passo
 -- "Serviços do contrato" (formato em ops_obra_validar_tarefas). NULL = o
@@ -3694,6 +3934,8 @@ DECLARE
   v_c        record;
   v_existe   text;
   v_ctr_num  text;
+  v_orcs     uuid[] := '{}';
+  v_n_orcs   integer := 0;
 BEGIN
   SELECT * INTO v_quem FROM public.ops_obra_exigir(
     p_org, 'operations.orders.create', ARRAY['gestor'],
@@ -3723,6 +3965,11 @@ BEGIN
     v_orc := COALESCE(v_orc, v_c.quote_id);
     v_cliente := COALESCE(v_cliente, v_c.client_id);
     v_ctr_num := COALESCE(v_c.contract_number, 's/ número');
+    -- Todos os orçamentos aceites do contrato (ou o quote_id). O principal
+    -- (ops_obra.orcamento_id) continua a ser o de ops_contrato_orcamento.
+    SELECT lo.ids INTO v_orcs FROM public.ops_obra_lista_orcamentos(p_org, p_contrato_id, v_orc) lo;
+    v_orcs := COALESCE(v_orcs, '{}');
+    v_n_orcs := cardinality(v_orcs);
     -- Com orçamento, o título vem dele (mais legível); senão, o número do contrato.
     IF v_orc IS NULL THEN
       v_titulo := COALESCE(v_titulo, 'Obra — contrato ' || v_ctr_num);
@@ -3745,6 +3992,18 @@ BEGIN
     END IF;
     SELECT codigo INTO v_existe FROM public.ops_obra
      WHERE orcamento_id = v_orc AND estado <> 'cancelada' LIMIT 1;
+    IF v_existe IS NOT NULL THEN
+      RAISE EXCEPTION 'Esse orçamento já tem obra: %.', v_existe;
+    END IF;
+    -- Um orçamento que entrou numa obra de contrato (não o principal) também conta.
+    SELECT o.codigo INTO v_existe
+      FROM public.ops_obra o
+     WHERE o.estado <> 'cancelada'
+       AND (o.orcamento_id = ANY (COALESCE(nullif(v_orcs, '{}'), ARRAY[v_orc]))
+            OR EXISTS (SELECT 1 FROM public.ops_obra_tarefa t
+                        WHERE t.obra_id = o.id
+                          AND t.orcamento_id = ANY (COALESCE(nullif(v_orcs, '{}'), ARRAY[v_orc]))))
+     LIMIT 1;
     IF v_existe IS NOT NULL THEN
       RAISE EXCEPTION 'Esse orçamento já tem obra: %.', v_existe;
     END IF;
@@ -3787,7 +4046,8 @@ BEGIN
   END IF;
 
   IF p_tarefas IS NOT NULL THEN
-    PERFORM public.ops_obra_validar_tarefas(p_org, v_orc, p_tarefas);
+    PERFORM public.ops_obra_validar_tarefas(p_org, v_orc, p_tarefas,
+              CASE WHEN v_n_orcs > 0 THEN v_orcs END);
   END IF;
 
   -- Sem supervisor escolhido, ops_obra_criar_impl escolhe um livre nessas datas.
@@ -3817,6 +4077,8 @@ DECLARE
   v_quem record;
   v_orc  uuid := p_orcamento_id;
   v_org  uuid;
+  v_orcs uuid[];
+  v_rots text[];
 BEGIN
   SELECT * INTO v_quem FROM public.ops_obra_exigir(
     p_org, 'operations.orders.create', ARRAY['gestor'],
@@ -3840,16 +4102,23 @@ BEGIN
     RAISE EXCEPTION 'Orçamento não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
   END IF;
 
+  -- Com contrato: TODOS os orçamentos aceites (ver ops_contrato_orcamentos).
+  SELECT lo.ids, lo.rotulos INTO v_orcs, v_rots
+    FROM public.ops_obra_lista_orcamentos(p_org, p_contrato_id, v_orc) lo;
+
   RETURN (
     SELECT jsonb_build_object(
       'orcamento_id', v_orc,
+      'orcamentos', to_jsonb(COALESCE(v_orcs, '{}')),
       'tarefas', COALESCE(jsonb_agg(jsonb_build_object(
-                   'fase', t.fase, 'nome', t.nome, 'minutos', t.minutos, 'pessoas', t.pessoas,
-                   'sem_ficha', t.sem_ficha, 'materiais', t.materiais)
-                   ORDER BY t.fase, t.ordem), '[]'::jsonb),
-      'minutos', COALESCE(sum(t.minutos), 0),
-      'sem_ficha', count(*) FILTER (WHERE t.sem_ficha))
-      FROM public.ops_obra_tarefas_do_orcamento(v_orc) t);
+                   'fase', (t->>'fase')::integer, 'nome', t->>'nome', 'minutos', (t->>'minutos')::integer,
+                   'pessoas', (t->>'pessoas')::integer,
+                   'sem_ficha', (t->>'sem_ficha')::boolean, 'materiais', t->>'materiais',
+                   'orcamento_id', t->>'orcamento_id', 'orcamento_rotulo', t->>'orcamento_rotulo')
+                   ORDER BY (t->>'fase')::integer, (t->>'ordem')::integer), '[]'::jsonb),
+      'minutos', COALESCE(sum((t->>'minutos')::integer), 0),
+      'sem_ficha', count(*) FILTER (WHERE (t->>'sem_ficha')::boolean))
+      FROM jsonb_array_elements(public.ops_obra_tarefas_dos_orcamentos(v_orcs, v_rots)) t);
 END
 $$;
 
@@ -3904,6 +4173,9 @@ DECLARE
   v_servicos jsonb := '[]'::jsonb;
   v_produtos jsonb := '[]'::jsonb;
   v_crm      boolean;
+  v_orcs     uuid[] := '{}';
+  v_rots     text[] := '{}';
+  v_lista    jsonb := '[]'::jsonb;
 BEGIN
   SELECT * INTO v_quem FROM public.ops_obra_exigir(
     p_org, 'operations.orders.create', ARRAY['gestor'],
@@ -3925,7 +4197,7 @@ BEGIN
   END IF;
 
   IF v_orc IS NULL THEN
-    RETURN jsonb_build_object('orcamento_id', NULL, 'inicio', NULL, 'minutos', 0,
+    RETURN jsonb_build_object('orcamento_id', NULL, 'inicio', NULL, 'minutos', 0, 'orcamentos', '[]'::jsonb,
                               'servicos', '[]'::jsonb, 'produtos', '[]'::jsonb, 'outras', '[]'::jsonb);
   END IF;
 
@@ -3933,6 +4205,17 @@ BEGIN
   IF v_org IS DISTINCT FROM p_org THEN
     RAISE EXCEPTION 'Orçamento não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
   END IF;
+
+  -- Com contrato: TODOS os orçamentos aceites (ver ops_contrato_orcamentos).
+  -- Sem contrato: só o orçamento.
+  SELECT lo.ids, lo.rotulos INTO v_orcs, v_rots
+    FROM public.ops_obra_lista_orcamentos(p_org, p_contrato_id, v_orc) lo;
+  v_orcs := COALESCE(nullif(v_orcs, '{}'), ARRAY[v_orc]);
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', x.q, 'rotulo', COALESCE(v_rots[x.pos], 'Orçamento'),
+                                               'numero', q.quote_number) ORDER BY x.pos), '[]'::jsonb)
+    INTO v_lista
+    FROM unnest(v_orcs) WITH ORDINALITY AS x(q, pos)
+    LEFT JOIN public.quotes q ON q.id = x.q;
 
   v_crm := to_regclass('public.services') IS NOT NULL
        AND to_regclass('public.service_categories') IS NOT NULL
@@ -3945,9 +4228,19 @@ BEGIN
   -- ── A simulação: criar e desfazer ─────────────────────────────────────
   BEGIN
     IF p_tarefas IS NULL AND v_crm THEN
+      -- Os serviços das linhas e os de dentro dos conjuntos, de todos os orçamentos.
       FOR v_s IN EXECUTE
-        'SELECT DISTINCT l.service_id FROM public.quote_lines l
-          WHERE l.quote_id = $1 AND l.service_id IS NOT NULL' USING v_orc
+        'SELECT l.service_id FROM public.quote_lines l
+          WHERE l.quote_id = ANY ($1) AND l.service_id IS NOT NULL
+         UNION
+         SELECT (comp.value->>''source_id'')::uuid
+           FROM public.quote_lines l
+          CROSS JOIN LATERAL jsonb_array_elements(
+                  CASE WHEN jsonb_typeof(to_jsonb(l)->''selected_attributes''->''bundle_components'') = ''array''
+                       THEN to_jsonb(l)->''selected_attributes''->''bundle_components'' ELSE ''[]''::jsonb END) comp(value)
+          WHERE l.quote_id = ANY ($1) AND comp.value->>''type'' = ''service''
+            AND comp.value->>''source_id'' ~* ''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''
+            AND EXISTS (SELECT 1 FROM public.services s WHERE s.id = (comp.value->>''source_id'')::uuid)' USING v_orcs
       LOOP
         IF NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa x
                         WHERE x.organization_id = p_org AND x.servico_id = v_s)
@@ -3979,6 +4272,8 @@ BEGIN
              'id', t.id,
              'ordem', t.ordem,
              'linha_id', t.orcamento_linha_id,
+             'orcamento_id', t.orcamento_id,
+             'orcamento_componente', t.orcamento_componente,
              'servico_id', t.servico_id,
              'servico_tarefa_id', t.servico_tarefa_id,
              'do_tipo', t.modelo_tarefa_id IS NOT NULL,
@@ -4042,15 +4337,44 @@ BEGIN
     ) lv ON true;
 
   IF v_crm THEN
+    -- Um "serviço" por linha de serviço E por serviço dentro de um conjunto
+    -- (componente 1..n da linha), de TODOS os orçamentos da obra, cada um
+    -- com o orçamento de onde vem (o ecrã mostra-o).
     EXECUTE $q$
+      WITH o AS (
+        SELECT x.q, x.pos, COALESCE($5[x.pos], 'Orçamento') AS rot
+          FROM unnest($1::uuid[]) WITH ORDINALITY AS x(q, pos)
+      ), sl AS (
+        SELECT l.id, l.quote_id, l.ordem, 0 AS componente, l.service_id, COALESCE(l.qt, 1) AS qt,
+               to_jsonb(l)->>'unidade' AS unidade, nullif(btrim(l.descricao_snapshot), '') AS descr
+          FROM public.quote_lines l
+         WHERE l.quote_id = ANY ($1) AND l.service_id IS NOT NULL
+        UNION ALL
+        SELECT l.id, l.quote_id, l.ordem, comp.ord::integer, (comp.value->>'source_id')::uuid,
+               COALESCE(l.qt, 1) * COALESCE(public.ops_num(comp.value->>'quantity'), 1),
+               COALESCE(nullif(comp.value->>'unit', ''), to_jsonb(l)->>'unidade'),
+               nullif(btrim(COALESCE(comp.value->>'name', l.descricao_snapshot)), '')
+          FROM public.quote_lines l
+         CROSS JOIN LATERAL jsonb_array_elements(
+                 CASE WHEN jsonb_typeof(to_jsonb(l)->'selected_attributes'->'bundle_components') = 'array'
+                      THEN to_jsonb(l)->'selected_attributes'->'bundle_components' ELSE '[]'::jsonb END)
+                 WITH ORDINALITY AS comp(value, ord)
+         WHERE l.quote_id = ANY ($1)
+           AND comp.value->>'type' = 'service'
+           AND comp.value->>'source_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+           AND COALESCE(public.ops_num(comp.value->>'quantity'), 1) > 0
+      )
       SELECT COALESCE(jsonb_agg(jsonb_build_object(
                'linha_id', l.id,
+               'componente', nullif(l.componente, 0),
+               'orcamento_id', l.quote_id,
+               'orcamento_rotulo', o.rot,
                'servico_id', l.service_id,
-               'nome', COALESCE(nullif(btrim(s.name), ''), nullif(btrim(l.descricao_snapshot), ''), 'Serviço'),
-               'descricao', nullif(btrim(l.descricao_snapshot), ''),
+               'nome', COALESCE(nullif(btrim(s.name), ''), l.descr, 'Serviço'),
+               'descricao', l.descr,
                'categoria', c.name,
-               'quantidade', COALESCE(l.qt, 1),
-               'unidade', to_jsonb(l)->>'unidade',
+               'quantidade', l.qt,
+               'unidade', l.unidade,
                'sugerido', l.service_id = ANY ($3),
                'com_modelo', EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa x
                                       WHERE x.organization_id = $2 AND x.servico_id = l.service_id),
@@ -4058,41 +4382,65 @@ BEGIN
                'materiais_ficha', COALESCE((
                   SELECT jsonb_agg(jsonb_build_object(
                            'produto_id', p.id, 'nome', p.name, 'origem', 'ficha',
-                           'quantidade', trim_scale(round((sm.quantity * COALESCE(l.qt, 1))::numeric, 2)))
+                           'quantidade', trim_scale(round((sm.quantity * l.qt)::numeric, 2)))
                            ORDER BY sm.sort_order NULLS LAST, p.name)
                     FROM public.service_materials sm JOIN public.products p ON p.id = sm.product_id
                    WHERE sm.service_id = l.service_id AND sm.deleted_at IS NULL), '[]'::jsonb),
                'tarefas', COALESCE((
                   SELECT jsonb_agg(x ORDER BY (x->>'ordem')::integer)
-                    FROM jsonb_array_elements($4) x WHERE x->>'linha_id' = l.id::text), '[]'::jsonb))
-               ORDER BY l.ordem NULLS LAST, l.id), '[]'::jsonb)
-        FROM public.quote_lines l
+                    FROM jsonb_array_elements($4) x
+                   WHERE x->>'linha_id' = l.id::text
+                     AND COALESCE((x->>'orcamento_componente')::integer, 0) = l.componente), '[]'::jsonb))
+               ORDER BY o.pos, l.ordem NULLS LAST, l.id, l.componente), '[]'::jsonb)
+        FROM sl l
+        JOIN o ON o.q = l.quote_id
         JOIN public.services s ON s.id = l.service_id
         LEFT JOIN public.service_categories c ON c.id = s.service_category_id
-       WHERE l.quote_id = $1
-    $q$ INTO v_servicos USING v_orc, p_org, v_sug, v_tarefas;
+    $q$ INTO v_servicos USING v_orcs, p_org, v_sug, v_tarefas, v_rots;
 
-    -- Produtos vendidos no contrato (louças, equipamentos): para ligar às
-    -- tarefas. Sem coluna product_id, não há.
+    -- Produtos vendidos no contrato (louças, equipamentos), também os de
+    -- dentro dos conjuntos: para ligar às tarefas. Sem coluna product_id, não há.
     EXECUTE $q$
+      WITH o AS (
+        SELECT x.q, x.pos FROM unnest($1::uuid[]) WITH ORDINALITY AS x(q, pos)
+      ), pl AS (
+        SELECT l.id, l.quote_id, l.ordem, 0 AS componente, to_jsonb(l)->>'product_id' AS produto_id,
+               COALESCE(l.qt, 1) AS qt, to_jsonb(l)->>'unidade' AS unidade,
+               COALESCE(nullif(btrim(l.descricao_snapshot), ''), nullif(btrim(to_jsonb(l)->>'item_description'), '')) AS descr
+          FROM public.quote_lines l
+         WHERE l.quote_id = ANY ($1) AND l.service_id IS NULL
+           AND nullif(to_jsonb(l)->>'product_id', '') IS NOT NULL
+        UNION ALL
+        SELECT l.id, l.quote_id, l.ordem, comp.ord::integer, comp.value->>'source_id',
+               COALESCE(l.qt, 1) * COALESCE(public.ops_num(comp.value->>'quantity'), 1),
+               COALESCE(nullif(comp.value->>'unit', ''), to_jsonb(l)->>'unidade'),
+               nullif(btrim(comp.value->>'name'), '')
+          FROM public.quote_lines l
+         CROSS JOIN LATERAL jsonb_array_elements(
+                 CASE WHEN jsonb_typeof(to_jsonb(l)->'selected_attributes'->'bundle_components') = 'array'
+                      THEN to_jsonb(l)->'selected_attributes'->'bundle_components' ELSE '[]'::jsonb END)
+                 WITH ORDINALITY AS comp(value, ord)
+         WHERE l.quote_id = ANY ($1)
+           AND comp.value->>'type' = 'product'
+           AND comp.value->>'source_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      )
       SELECT COALESCE(jsonb_agg(jsonb_build_object(
                'linha_id', l.id,
-               'produto_id', to_jsonb(l)->>'product_id',
+               'componente', nullif(l.componente, 0),
+               'orcamento_id', l.quote_id,
+               'produto_id', l.produto_id,
                'nome', COALESCE((SELECT nullif(btrim(p.name), '') FROM public.products p
-                                  WHERE p.id::text = to_jsonb(l)->>'product_id'),
-                                nullif(btrim(l.descricao_snapshot), ''),
-                                nullif(btrim(to_jsonb(l)->>'item_description'), ''), 'Produto'),
-               'quantidade', COALESCE(l.qt, 1),
-               'unidade', to_jsonb(l)->>'unidade',
-               'origem', 'contrato') ORDER BY l.ordem NULLS LAST, l.id), '[]'::jsonb)
-        FROM public.quote_lines l
-       WHERE l.quote_id = $1 AND l.service_id IS NULL
-         AND nullif(to_jsonb(l)->>'product_id', '') IS NOT NULL
-    $q$ INTO v_produtos USING v_orc;
+                                  WHERE p.id::text = l.produto_id), l.descr, 'Produto'),
+               'quantidade', l.qt,
+               'unidade', l.unidade,
+               'origem', 'contrato') ORDER BY o.pos, l.ordem NULLS LAST, l.id, l.componente), '[]'::jsonb)
+        FROM pl l JOIN o ON o.q = l.quote_id
+    $q$ INTO v_produtos USING v_orcs;
   END IF;
 
   RETURN jsonb_build_object(
     'orcamento_id', v_orc,
+    'orcamentos', v_lista,
     'inicio', v_inicio,
     'servicos', v_servicos,
     'produtos', v_produtos,
@@ -4303,6 +4651,7 @@ DECLARE
   v_o      record;
   v_quem   record;
   v_falta  integer;
+  v_arr    jsonb;
   v_motivo text := nullif(btrim(coalesce(p_motivo,'')), '');
 BEGIN
   SELECT * INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
@@ -4323,6 +4672,22 @@ BEGIN
 
   IF p_estado IN ('suspensa','cancelada') AND v_motivo IS NULL THEN
     RAISE EXCEPTION 'Suspender ou cancelar uma obra exige motivo.';
+  END IF;
+
+  -- "Arrancar" (planeada → em curso) só com o checklist de arranque completo:
+  -- Encomenda Cliente validada, encomenda a fornecedor aprovada (ou não
+  -- necessária) e o plano aprovado. Vive em db/obra-arranque.sql; sem esse
+  -- ficheiro instalado, arranca como sempre. Retomar uma suspensa não passa
+  -- por aqui (a obra já arrancou).
+  IF v_o.estado = 'planeada' AND p_estado = 'em_curso'
+     AND to_regprocedure('public.ops_obra_arranque_impl(uuid)') IS NOT NULL THEN
+    EXECUTE 'SELECT public.ops_obra_arranque_impl($1)' INTO v_arr USING p_obra_id;
+    IF NOT COALESCE((v_arr->>'pode_arrancar')::boolean, false) THEN
+      RAISE EXCEPTION 'A obra ainda não pode arrancar. Falta: %.',
+        COALESCE((SELECT string_agg(f, '; ') FROM jsonb_array_elements_text(v_arr->'falta') f),
+                 'completar o checklist de arranque')
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 
   IF p_estado = 'concluida' THEN
