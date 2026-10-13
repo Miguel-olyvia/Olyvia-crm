@@ -124,12 +124,14 @@ export const EXTERIOR: Grupo = {
 export const INTERIOR: Grupo = {
   titulo: "Local · interior",
   campos: [
-    { k: "tipologia", bloco: "A casa", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"] },
-    { k: "area_util_m2", bloco: "A casa", l: "Área útil", t: "numero", un: "m²" },
-    { k: "n_divisoes", bloco: "A casa", l: "Divisões", t: "contador", min: 1, max: 20 },
-    { k: "n_casas_banho", bloco: "A casa", l: "Casas de banho", t: "contador", min: 0, max: 10 },
-    { k: "ano_construcao", bloco: "A casa", l: "Época de construção", t: "escolha", op: ["Antes de 1950", "1950 a 1970", "1970 a 1990", "1990 a 2010", "Depois de 2010"] },
-    { k: "pavimento", bloco: "A casa", l: "Pavimento da casa", t: "escolha", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
+    // Casa ou escritório (B2B): num escritório não há tipologia (T0…T5+). Vazio conta como casa.
+    { k: "tipo_espaco", bloco: "O espaço", l: "Tipo de espaço", t: "escolha", op: ["Casa", "Escritório"] },
+    { k: "tipologia", bloco: "O espaço", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"], se: { k: "tipo_espaco", v: ["Casa", ""] } },
+    { k: "area_util_m2", bloco: "O espaço", l: "Área útil", t: "numero", un: "m²" },
+    { k: "n_divisoes", bloco: "O espaço", l: "Divisões", t: "contador", min: 1, max: 20 },
+    { k: "n_casas_banho", bloco: "O espaço", l: "Casas de banho", t: "contador", min: 0, max: 10 },
+    { k: "ano_construcao", bloco: "O espaço", l: "Época de construção", t: "escolha", op: ["Antes de 1950", "1950 a 1970", "1970 a 1990", "1990 a 2010", "Depois de 2010"] },
+    { k: "pavimento", bloco: "O espaço", l: "Pavimento", t: "varios", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
     { k: "eletrica", bloco: "Instalações", l: "Instalação elétrica", t: "escolha", op: ["Antiga", "Renovada"] },
     { k: "quadro_diferencial", bloco: "Instalações", l: "Quadro com diferencial", t: "sim_nao" },
     { k: "canalizacao", bloco: "Instalações", l: "Canalização", t: "escolha", op: ["Ferro", "PVC", "Multicamada", "Cobre", "Misto", "Não sei"] },
@@ -256,6 +258,15 @@ export const PAPEL_ROT: Record<Papel, string> = {
   sugestoes: "dá sugestões de proteção e logística",
   orcamento: "mexe no orçamento",
   fatura: "vai para a fatura",
+};
+
+/** Escolha múltipla ("varios"): o valor guarda-se como "A, B". */
+export const listaVarios = (v: string): string[] => (v ? v.split(", ").filter(Boolean) : []);
+/** Liga/desliga uma opção, mantendo a ordem das opções. */
+export const alternarVarios = (op: string[], v: string, x: string): string => {
+  const s = new Set(listaVarios(v));
+  if (s.has(x)) s.delete(x); else s.add(x);
+  return op.filter((o) => s.has(o)).join(", ");
 };
 
 export const visivel = (c: Def, v: Record<string, string>) => !c.se || c.se.v.includes(v[c.se.k] || "");

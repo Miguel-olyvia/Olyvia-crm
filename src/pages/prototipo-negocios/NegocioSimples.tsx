@@ -20,7 +20,7 @@ import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
 const CURTO: Record<string, string> = {
-  "Local · exterior (edifício e acessos)": "Exterior do edifício", "Local · interior": "Interior da casa",
+  "Local · exterior (edifício e acessos)": "Exterior do edifício", "Local · interior": "Interior do espaço",
   "nec": "Serviços necessários", "Escolhas do cliente": "Escolhas do cliente", "Plano, materiais e resultado": "Plano e materiais",
 };
 const curto = (p: Passo) => (p.personalizado ? p.titulo : CURTO[p.id] || CURTO[p.titulo] || p.titulo);
