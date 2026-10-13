@@ -241,6 +241,13 @@ CREATE TRIGGER ops_obra_plano_supervisor
 -- mão ('manual') não se pisa. NÃO mexe nas datas do plano: o arranque
 -- avisa quando a tarefa começa antes. Devolve quantas tarefas mudaram.
 -- Sem as tabelas da Frente A: 0.
+-- Colunas lidas (as da migração 20261215100000_pos_contrato_encomendas.sql):
+--   obra_encomenda_cliente(id, organization_id, obra_id, contract_id, estado
+--     rascunho|validada|anulada), nota_encomenda_fornecedor(id,
+--     encomenda_cliente_id, estado proposta|aprovada|rejeitada, prazo_previsto,
+--     purchase_order_id), nota_encomenda_fornecedor_linha(nota_id, product_id),
+--   obra_encomenda_cliente_linha(encomenda_id, product_id, quote_line_id,
+--     service_id, tipo).
 CREATE OR REPLACE FUNCTION public.ops_obra_material_frente_a_impl(_obra uuid)
 RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER
@@ -249,7 +256,6 @@ AS $$
 DECLARE
   v_o      record;
   v_encs   uuid[];
-  v_fk     text;
   v_po_e   text := 'NULL::date';
   v_po_j   text := '';
   v_datas  jsonb;
@@ -260,7 +266,7 @@ DECLARE
 BEGIN
   IF to_regclass('public.obra_encomenda_cliente') IS NULL
      OR NOT public.ops_obra_crm_tem('nota_encomenda_fornecedor', ARRAY['id','encomenda_cliente_id','estado','prazo_previsto'])
-     OR NOT public.ops_obra_crm_tem('nota_encomenda_fornecedor_linha', ARRAY['product_id']) THEN
+     OR NOT public.ops_obra_crm_tem('nota_encomenda_fornecedor_linha', ARRAY['nota_id','product_id']) THEN
     RETURN 0;
   END IF;
 
@@ -277,14 +283,6 @@ BEGIN
     RETURN 0;
   END IF;
 
-  -- A ligação linha → nota (o nome fica do lado da Frente A).
-  SELECT c INTO v_fk FROM unnest(ARRAY['nota_id','nota_encomenda_id','nota_encomenda_fornecedor_id']) c
-   WHERE public.ops_obra_crm_tem('nota_encomenda_fornecedor_linha', ARRAY[c]) LIMIT 1;
-  IF v_fk IS NULL THEN
-    RAISE NOTICE 'nota_encomenda_fornecedor_linha sem coluna de ligação à nota: datas do material por ler.';
-    RETURN 0;
-  END IF;
-
   IF public.ops_obra_crm_tem('nota_encomenda_fornecedor', ARRAY['purchase_order_id'])
      AND public.ops_obra_crm_tem('purchase_orders', ARRAY['id','expected_delivery']) THEN
     v_po_e := 'po.expected_delivery';
@@ -295,12 +293,12 @@ BEGIN
     SELECT COALESCE(jsonb_object_agg(x.pid, x.d), '{}'::jsonb)
       FROM (SELECT nl.product_id::text AS pid, max(COALESCE(%s, n.prazo_previsto)) AS d
               FROM public.nota_encomenda_fornecedor n
-              JOIN public.nota_encomenda_fornecedor_linha nl ON nl.%I = n.id
+              JOIN public.nota_encomenda_fornecedor_linha nl ON nl.nota_id = n.id
               %s
              WHERE n.encomenda_cliente_id = ANY ($1) AND n.estado IN ('proposta','aprovada')
                AND nl.product_id IS NOT NULL
              GROUP BY nl.product_id) x
-     WHERE x.d IS NOT NULL $q$, v_po_e, v_fk, v_po_j)
+     WHERE x.d IS NOT NULL $q$, v_po_e, v_po_j)
     INTO v_datas USING v_encs;
   IF v_datas = '{}'::jsonb THEN
     RETURN 0;
