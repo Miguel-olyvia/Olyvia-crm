@@ -15,6 +15,8 @@ import {
 import { lerCustos, mudarCustos } from "./custosStore";
 import { CustoServicoInline } from "./CustoServicoInline";
 import { Escolha, ListaAlertas, NumeroCelula, Retirar, TextoCelula } from "./pecasCustos";
+import { caminho, consumivelDe, noDoServico, opcoesArvore } from "./catalogoModelo";
+import { mudarCatalogo, useCatalogo } from "./catalogoStore";
 
 const UNIDADES = ["un", "kg", "m", "m²", "ml", "l", "kit", "tubo", "saco", "pç"];
 const TH = "px-2 py-2 text-left text-[15px] font-medium text-muted-foreground";
@@ -24,6 +26,7 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
   S: Estado; C: Custos; run: (fn: () => void) => void; sid: SvcId; voltar: () => void; anunciar: (msg: string) => void;
 }) {
   const titulo = useRef<HTMLHeadingElement>(null);
+  const K = useCatalogo();
   useEffect(() => { titulo.current?.focus(); }, [sid]);
   const s = S.svc[sid] ?? null, cat = CATALOGO.find((x) => x.id === sid);
   const rec = receitaDe(C, sid, s, S.cfg.alvo)!;
@@ -75,6 +78,12 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
         {cat?.linhas?.length ? ` · ${cat.linhas.map((l) => LINHA_NOME[l]).join(" e ")}` : ""}
         {rec.origem === "estimada" ? " · receita por completar" : rec.origem === "editada" ? " · receita editada" : ""}
       </p>
+
+      <label className="mt-4 flex flex-wrap items-center gap-3">
+        <span className="text-[15px] font-medium">Classificação</span>
+        <Escolha rotulo="Classificação" w="w-72" v={noDoServico(K, sid, cat?.cat ?? s?.perfil ?? "") ?? ""} opcoes={[{ v: "", t: "Sem classificação" }, ...opcoesArvore(K.arvore)]}
+          onSet={(v) => { mudarCatalogo((k) => { if (v) k.classe[sid] = v; else delete k.classe[sid]; }); anunciar(`Classificação: ${caminho(K.arvore, v || null)}`); }} />
+      </label>
 
       {A.length > 0 && <div className="mt-6"><ListaAlertas A={A} /></div>}
 
@@ -179,9 +188,14 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
             </table>
           </div>
         ) : <p className="mt-3 text-[15px] text-muted-foreground">Sem consumíveis na receita.</p>}
-        <Button variant="outline" className="mt-3 min-h-11 text-[15px]" onClick={() => editar((r) => { r.cons.push({ id: nid("c", r.cons), n: "Novo consumível", q: 1, un: "un", preco: 1, fornecedor: "Por escolher", data: HOJE }); }, "Consumível juntado")}>
-          <Plus className="h-4 w-4" aria-hidden="true" />Juntar consumível
-        </Button>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {/* escolher da lista de Materiais e consumíveis (custo, unidade, fornecedor e data vêm de lá) */}
+          <Escolha rotulo="Juntar da lista de materiais" w="w-80" v="" opcoes={[{ v: "", t: "Juntar da lista de materiais…" }, ...K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: `${p.n} · ${eur(p.custo)} €/${p.un}` }))]}
+            onSet={(id) => { const p = K.produtos.find((x) => x.id === id); if (p) editar((r) => { r.cons.push(consumivelDe(p, nid("c", r.cons), 1)); }, `${p.n} juntado`); }} />
+          <Button variant="outline" className="min-h-11 text-[15px]" onClick={() => editar((r) => { r.cons.push({ id: nid("c", r.cons), n: "Novo consumível", q: 1, un: "un", preco: 1, fornecedor: "Por escolher", data: HOJE }); }, "Consumível juntado")}>
+            <Plus className="h-4 w-4" aria-hidden="true" />Juntar consumível
+          </Button>
+        </div>
       </section>
 
       {S.cfg.estrutura && (
