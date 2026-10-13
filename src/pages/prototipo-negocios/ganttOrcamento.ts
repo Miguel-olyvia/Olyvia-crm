@@ -1,5 +1,7 @@
 // O prazo previsto no orçamento (13/10/2026): um Gantt sem técnicos, com uma tarefa por serviço do orçamento
-// (e uma para a demolição e entulho), em sequência pela ordem dos ofícios. A duração vem das horas do orçamento
+// (e uma para a demolição e entulho), por etapas na ordem dos ofícios. Cada etapa começa quando a anterior acaba;
+// dentro da etapa, ofícios diferentes trabalham em simultâneo e o mesmo ofício faz uma tarefa de cada vez (sem
+// técnicos, conta-se uma equipa por ofício). A duração vem das horas do orçamento
 // (8 h por dia, ao meio dia); mudá-la à mão passa as horas da tarefa a dias × 8 e o custo do orçamento muda
 // com elas (só a mão de obra; o equipamento e os consumíveis não). O preço ao cliente não muda.
 import { ESTR, r2, type Estado, type Negocio, type SvcId } from "./motor";
@@ -16,6 +18,7 @@ export function ordemOficio(txt: string): number {
   const t = txt.toLowerCase();
   if (/demol/.test(t)) return 0;
   if (/montag/.test(t)) return 3;
+  if (/pint/.test(t)) return 4; // antes do teto: "Pintura de tetos" é pintura, não teto falso
   if (/canaliz|eletric|gás|gas/.test(t)) return 1;
   if (/revest|ladrilh|pavim/.test(t)) return 2;
   if (/carpint|montador|móve|move|teto|pladur/.test(t)) return 3;
@@ -72,8 +75,13 @@ export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
   }
   // a ordem dos ofícios; dentro do mesmo ofício, a ordem das linhas
   const ord = base.map((t, i) => ({ t, i })).sort((a, b) => ordemOficio(`${a.t.nome} ${a.t.perfil}`) - ordemOficio(`${b.t.nome} ${b.t.perfil}`) || a.i - b.i).map((x) => x.t);
-  let dia = 0;
+  // cada etapa começa quando a anterior acaba; dentro dela, cada ofício (perfil) vai na sua fila
+  let etapa = -1, inicioEtapa = 0, fimEtapa = 0;
+  const fila: Record<string, number> = {};
   return ord.map((t) => {
+    const e = ordemOficio(`${t.nome} ${t.perfil}`);
+    if (e !== etapa) { etapa = e; inicioEtapa = fimEtapa; for (const k in fila) delete fila[k]; }
+    const oficio = t.perfil.toLowerCase(), dia = fila[oficio] ?? inicioEtapa;
     const manual = man[t.chave] != null;
     const dias = manual ? man[t.chave] : diasDeHoras(t.hOrc);
     const h = manual ? dias * HORAS_DIA : t.hOrc;
@@ -85,7 +93,8 @@ export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
       custo: { mo: r2(mo), eq: r2(x.eq), cons: r2(x.cons), outros: r2(x.outros), total: r2(total) },
       custoOrc: r2(x.custoOrc), delta: r2((h - t.hOrc) * t.custoHora),
     };
-    dia += dias;
+    fila[oficio] = dia + dias;
+    fimEtapa = Math.max(fimEtapa, dia + dias);
     return tarefa;
   });
 }
@@ -96,5 +105,5 @@ export function ajustePrazo(d: Negocio, S: Estado): number {
   return r2(tarefasPrevistas(d, S).reduce((a, t) => a + t.delta, 0));
 }
 
-/** Os dias de obra previstos (a soma, porque as tarefas vêm em sequência). */
-export const diasPrevistos = (T: TarefaPrevista[]) => T.reduce((a, t) => a + t.dias, 0);
+/** Os dias de obra previstos: até ao fim da última tarefa. */
+export const diasPrevistos = (T: TarefaPrevista[]) => T.reduce((a, t) => Math.max(a, t.inicio + t.dias), 0);

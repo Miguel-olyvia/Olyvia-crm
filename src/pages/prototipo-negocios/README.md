@@ -514,9 +514,10 @@ A auditoria 4.5 ("Baixa": equipamentos na obra; atualizar a receita com dados re
 ## Prazo previsto no orçamento (13/10/2026, versão Atual)
 
 No orçamento (`OrcamentoSimples.tsx`), a seguir às linhas, a secção "Prazo previsto" (`PrazoOrcamento.tsx`, cálculo em `ganttOrcamento.ts`):
-- Um Gantt **sem técnicos**: uma tarefa por serviço do orçamento e uma para a demolição e entulho, em sequência pela ordem dos ofícios (demolição → canalização/eletricidade/gás → revestimentos → montagem → pintura). A montagem de louças vem depois do revestimento, mesmo feita pelo canalizador.
+- Um Gantt **sem técnicos**: uma tarefa por serviço do orçamento e uma para a demolição e entulho, por etapas (demolição → canalização/eletricidade/gás → revestimentos → montagem e teto falso → pintura). A montagem de louças vem depois do revestimento, mesmo feita pelo canalizador.
+- **Em simultâneo quando é válido:** cada etapa começa quando a anterior acaba. Dentro da etapa, ofícios diferentes trabalham ao mesmo tempo (canalizador e eletricista), e o mesmo ofício faz uma tarefa de cada vez (uma equipa por ofício; o ladrilhador faz a parede e depois o chão).
 - A duração vem das horas do orçamento, a 8 h por dia e ao meio dia (pelo menos meio dia).
 - Tocar numa tarefa mostra o custo: mão de obra (h × €/h), equipamento e consumíveis. Na demolição, o custo só a Direção o vê, como na linha.
 - Mudar os dias (−/+ meio dia) passa as horas da tarefa a dias × 8. O custo do orçamento e a margem mudam (o ajuste entra no `tot()` e na mão de obra do `partes()`); **o preço ao cliente não muda**. "Repor" volta aos dias das horas. Com menos horas do que o orçamento conta, aparece um aviso.
 - Guardado em `Orcamento.prazo` (dias por tarefa). Sem dias mudados, o orçamento fica exatamente igual. Numa proposta enviada não se mexe.
-- Decisões minhas, por confirmar com o Ruben: 8 h por dia, tarefas em sequência (sem sobreposição) e o custo a mudar com os dias.
+- Confirmado pelo Ruben (13/10): 8 h por dia; tarefas em simultâneo quando é válido; mudar os dias muda o custo e a margem, não o preço.

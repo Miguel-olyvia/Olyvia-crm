@@ -26,17 +26,15 @@ describe("prazo previsto no orçamento", () => {
     expect(["Pintor", "Ladrilhador", "Canalizador", "Servente · demolição", "Montador"].map(ordemOficio)).toEqual([4, 2, 1, 0, 3]);
     // as louças montam-se depois do revestimento, mesmo pelo canalizador
     expect(ordemOficio("Montagem de louças Canalizador")).toBe(3);
+    expect(ordemOficio("Pintura de tetos e paredes Pintor")).toBe(4);
+    expect(ordemOficio("Teto falso em pladur Montador")).toBe(3);
   });
 
-  it("uma tarefa por serviço, em sequência, e sem mexer o custo e o preço do orçamento", () => {
+  it("uma tarefa por serviço, sem mexer o custo e o preço do orçamento", () => {
     const { S, d } = comServicos();
     const antes = tot(d, S);
     const T = tarefasPrevistas(d, S);
     expect(T.length).toBe(d.orc!.linhas.filter((l) => l.t === "svc" && l.q > 0).length);
-    for (let i = 1; i < T.length; i++) {
-      expect(T[i].inicio).toBe(T[i - 1].inicio + T[i - 1].dias);
-      expect(ordemOficio(`${T[i].nome} ${T[i].perfil}`)).toBeGreaterThanOrEqual(ordemOficio(`${T[i - 1].nome} ${T[i - 1].perfil}`));
-    }
     // o custo de cada tarefa é o da linha do orçamento
     for (const t of T) {
       const l = d.orc!.linhas.find((x) => x.t === "svc" && x.sid === t.chave)!;
@@ -45,7 +43,25 @@ describe("prazo previsto no orçamento", () => {
     }
     expect(ajustePrazo(d, S)).toBe(0);
     expect(tot(d, S)).toEqual(antes);
-    expect(diasPrevistos(T)).toBe(T.reduce((a, t) => a + diasDeHoras(t.hOrc), 0));
+  });
+
+  it("por etapas: ofícios diferentes em simultâneo, o mesmo ofício um de cada vez, e a etapa seguinte depois", () => {
+    const { S, d, A } = comServicos();
+    const svc = (sid: string, q: number) => ({ t: "svc" as const, sid, q, cu: S.svc[sid].h * S.svc[sid].eh + S.svc[sid].eq + S.svc[sid].cons, pu: S.svc[sid].preco });
+    // a ordem das linhas não conta: conta a etapa
+    d.orc!.linhas = [svc("pint", 20), svc("loucas", 3), svc("revest", 16), svc("pav", 5), svc("eletr", 4), svc("canal", 4), svc("demol", 8)];
+    const plano = () => Object.fromEntries(tarefasPrevistas(d, S).map((t) => [t.chave, [t.inicio, t.inicio + t.dias]]));
+    expect(plano()).toEqual({
+      demol: [0, 0.5],
+      canal: [0.5, 1.5], eletr: [0.5, 1.5], // canalizador e eletricista ao mesmo tempo
+      revest: [1.5, 3], pav: [3, 4], // o ladrilhador faz uma de cada vez
+      loucas: [4, 5], pint: [5, 6],
+    });
+    expect(diasPrevistos(tarefasPrevistas(d, S))).toBe(6);
+    // a canalização a durar 2 dias: o eletricista não muda, os revestimentos começam um dia depois
+    A.prazoTarefa(d.id, "canal", 2);
+    expect(plano()).toMatchObject({ canal: [0.5, 2.5], eletr: [0.5, 1.5], revest: [2.5, 4], pint: [6, 7] });
+    expect(diasPrevistos(tarefasPrevistas(d, S))).toBe(7);
   });
 
   it("mudar os dias de uma tarefa: as horas passam a dias × 8 e o custo e a margem mudam; o preço não", () => {
@@ -64,9 +80,6 @@ describe("prazo previsto no orçamento", () => {
     expect(depois.pf).toBe(antes.pf);
     expect(depois.m).toBeLessThan(antes.m);
     expect(partes(d, S).mo).toBeCloseTo(mo0 + delta, 2);
-    // as tarefas a seguir começam um dia depois
-    const T = tarefasPrevistas(d, S);
-    expect(T[1].inicio).toBe(t0.dias + 1);
     // repor
     A.prazoTarefa(d.id, t0.chave, null);
     expect(d.orc!.prazo).toBeUndefined();
