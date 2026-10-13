@@ -124,12 +124,14 @@ export const EXTERIOR: Grupo = {
 export const INTERIOR: Grupo = {
   titulo: "Local · interior",
   campos: [
-    { k: "tipologia", bloco: "A casa", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"] },
-    { k: "area_util_m2", bloco: "A casa", l: "Área útil", t: "numero", un: "m²" },
-    { k: "n_divisoes", bloco: "A casa", l: "Divisões", t: "contador", min: 1, max: 20 },
-    { k: "n_casas_banho", bloco: "A casa", l: "Casas de banho", t: "contador", min: 0, max: 10 },
-    { k: "ano_construcao", bloco: "A casa", l: "Época de construção", t: "escolha", op: ["Antes de 1950", "1950 a 1970", "1970 a 1990", "1990 a 2010", "Depois de 2010"] },
-    { k: "pavimento", bloco: "A casa", l: "Pavimento da casa", t: "escolha", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
+    // Casa ou escritório (B2B): num escritório não há tipologia (T0…T5+). Vazio conta como casa.
+    { k: "tipo_espaco", bloco: "O espaço", l: "Tipo de espaço", t: "escolha", op: ["Casa", "Escritório"] },
+    { k: "tipologia", bloco: "O espaço", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"], se: { k: "tipo_espaco", v: ["Casa", ""] } },
+    { k: "area_util_m2", bloco: "O espaço", l: "Área útil", t: "numero", un: "m²" },
+    { k: "n_divisoes", bloco: "O espaço", l: "Divisões", t: "contador", min: 1, max: 20 },
+    { k: "n_casas_banho", bloco: "O espaço", l: "Casas de banho", t: "contador", min: 0, max: 10 },
+    { k: "ano_construcao", bloco: "O espaço", l: "Época de construção", t: "escolha", op: ["Antes de 1950", "1950 a 1970", "1970 a 1990", "1990 a 2010", "Depois de 2010"] },
+    { k: "pavimento", bloco: "O espaço", l: "Pavimento", t: "varios", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
     { k: "eletrica", bloco: "Instalações", l: "Instalação elétrica", t: "escolha", op: ["Antiga", "Renovada"] },
     { k: "quadro_diferencial", bloco: "Instalações", l: "Quadro com diferencial", t: "sim_nao" },
     { k: "canalizacao", bloco: "Instalações", l: "Canalização", t: "escolha", op: ["Ferro", "PVC", "Multicamada", "Cobre", "Misto", "Não sei"] },
@@ -148,7 +150,6 @@ export const AREA: Grupo = {
     { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "escolha", op: ["Casa de banho", "Cozinha", "Outra"], papel: "plano" },
     { k: "diag_intervencao_tipo", bloco: "A divisão", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
     { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "escolha", op: ["2,4 m", "2,5 m", "2,6 m", "2,7 m", "2,8 m", "3 m ou mais"], papel: "plano" },
-    { k: "diag_altura_revestimento", bloco: "A divisão", l: "Revestimento de parede até", t: "escolha", op: ["20 cm", "60 cm", "120 cm", "Ao teto"], papel: "plano" },
     { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "contador", min: 0, max: 30, papel: "plano" },
     { k: "diag_gas", bloco: "Instalações da divisão", l: "Gás na área", t: "escolha", op: ["Não há", "Manter", "Anular", "Instalar"], papel: "plano" },
     { k: "diag_toalheiro", bloco: "Instalações da divisão", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano" },
@@ -164,8 +165,8 @@ export const AREA: Grupo = {
 export const ESCOLHAS: Grupo = {
   titulo: "Escolhas do cliente",
   campos: [
-    { k: "gama", l: "Gama", t: "escolha", op: ["Económica", "Média", "Alta"], papel: "orcamento" },
     { k: "materiais_cliente", l: "O cliente fornece materiais", t: "sim_nao", papel: "orcamento" },
+    { k: "mobilidade_reduzida", l: "Mobilidade reduzida", t: "sim_nao", ajuda: "O cliente ou alguém da casa tem mobilidade reduzida (pesa nas escolhas: base de duche, barras, alturas)." },
     { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara", opcional: true },
   ],
 };
@@ -256,6 +257,15 @@ export const PAPEL_ROT: Record<Papel, string> = {
   sugestoes: "dá sugestões de proteção e logística",
   orcamento: "mexe no orçamento",
   fatura: "vai para a fatura",
+};
+
+/** Escolha múltipla ("varios"): o valor guarda-se como "A, B". */
+export const listaVarios = (v: string): string[] => (v ? v.split(", ").filter(Boolean) : []);
+/** Liga/desliga uma opção, mantendo a ordem das opções. */
+export const alternarVarios = (op: string[], v: string, x: string): string => {
+  const s = new Set(listaVarios(v));
+  if (s.has(x)) s.delete(x); else s.add(x);
+  return op.filter((o) => s.has(o)).join(", ");
 };
 
 export const visivel = (c: Def, v: Record<string, string>) => !c.se || c.se.v.includes(v[c.se.k] || "");

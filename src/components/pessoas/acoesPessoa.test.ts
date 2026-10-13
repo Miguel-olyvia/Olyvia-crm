@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  adiar, juntarAtividade, juntarNota, ligacoes, perder, registarChamada, selosCabecalho, somarDias, type EstadoAcoes,
+  adiar, juntarAtividade, juntarNota, ligacoes, perder, reativar, registarChamada, somarDias, type EstadoAcoes,
 } from "./acoesPessoa";
 import { ATIVIDADE_EXEMPLO, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 
 const pessoa = (id: string, extra: Partial<Pessoa> = {}): Pessoa => ({
-  id, nome: id, contacto: { telefone: null, email: null }, comercial: "Ana", origem: "site", etapa: "emContacto",
-  ultimoContactoDias: 9, ...extra,
+  id, nome: id, contacto: { telefone: null, email: null }, comercial: "Ana", origem: "site", viaEntrada: "formulario", saude: 50,
+  etapa: "emContacto", ultimoContactoDias: 9, ...extra,
 });
 const estado = (pessoas: Pessoa[] = [pessoa("a"), pessoa("c", { etapa: "cliente" })]): EstadoAcoes => ({
   pessoas, atividade: [], contactadas: [],
@@ -18,17 +18,23 @@ const item = (id: string, quando: string): ItemAtividade => ({
 const chamada = { resultado: "atendeuInteressado", nota: "Quer visita", passo: "ligarAmanha", hoje: "2026-10-13" } as const;
 
 describe("dados de exemplo da ficha", () => {
-  it("preenche os campos novos nas 13 pessoas e gera 2 ou 3 itens de atividade por pessoa", () => {
-    expect(PESSOAS_EXEMPLO).toHaveLength(13);
-    expect(PESSOAS_EXEMPLO.filter((p) => p.empresa)).toHaveLength(3);
-    expect(PESSOAS_EXEMPLO.filter((p) => p.qualificacao)).toHaveLength(4);
+  it("preenche os campos novos nas 17 pessoas e gera 1 a 3 itens de atividade por pessoa", () => {
+    expect(PESSOAS_EXEMPLO).toHaveLength(17);
+    expect(PESSOAS_EXEMPLO.filter((p) => p.empresa)).toHaveLength(4);
+    expect(PESSOAS_EXEMPLO.filter((p) => p.qualificacao)).toHaveLength(6);
     expect(PESSOAS_EXEMPLO.filter((p) => p.etapa === "cliente").every((p) => p.nif)).toBe(true);
-    expect(PESSOAS_EXEMPLO.every((p) => p.morada && p.distrito && p.desde && p.resultadoContacto)).toBe(true);
+    expect(PESSOAS_EXEMPLO.every((p) => p.morada && p.distrito && p.desde)).toBe(true);
+    expect(PESSOAS_EXEMPLO.every((p) => p.saude >= 0 && p.saude <= 100 && p.canal)).toBe(true);
     PESSOAS_EXEMPLO.forEach((p) => {
       const n = ATIVIDADE_EXEMPLO.filter((i) => i.pessoaId === p.id).length;
-      expect([2, 3]).toContain(n);
+      expect([1, 2, 3]).toContain(n);
     });
     expect(ATIVIDADE_EXEMPLO.every((i) => i.exemplo)).toBe(true);
+  });
+
+  it("só as pessoas sem chamada ficam sem resultado (Sem contacto) e as duas perdidas têm passo", () => {
+    expect(PESSOAS_EXEMPLO.filter((p) => !p.resultadoContacto).map((p) => p.id).sort()).toEqual(["p-beatriz", "p-hugo"]);
+    expect(PESSOAS_EXEMPLO.filter((p) => p.perdida).map((p) => [p.id, p.perdida?.passo])).toEqual([["p-joana", 1], ["p-fabio", 3]]);
   });
 });
 
@@ -50,6 +56,11 @@ describe("registarChamada", () => {
     expect(novo.atividade[0]).toMatchObject({ pessoaId: "a", tipo: "chamada", detalhe: "Quer visita", quando: "2026-10-13", exemplo: false });
   });
 
+  it("vale para a lead e para o cliente", () => {
+    const novo = registarChamada(estado(), "c", { ...chamada, resultado: "semInteresse" });
+    expect(novo.pessoas.find((x) => x.id === "c")?.resultadoContacto).toBe("semInteresse");
+  });
+
   it("só um resultado 'atendeu' marca a pessoa como respondida (tira de 'Voltou a contactar'), sem repetir", () => {
     const uma = registarChamada(estado(), "a", chamada);
     expect(uma.contactadas).toEqual(["a"]);
@@ -65,7 +76,7 @@ describe("registarChamada", () => {
   });
 
   it("numa pessoa perdida regista a chamada e mantém a perda", () => {
-    const perdida = { motivo: "preco", data: "2026-10-01" } as const;
+    const perdida = { motivo: "preco", data: "2026-10-01", passo: 2 } as const;
     const novo = registarChamada(estado([pessoa("a", { perdida })]), "a", chamada);
     expect(novo.pessoas[0].perdida).toEqual(perdida);
     expect(novo.atividade).toHaveLength(1);
@@ -125,19 +136,64 @@ describe("perder", () => {
   it("marca a lead como perdida, limpa o próximo contacto e regista na atividade", () => {
     const e = estado([pessoa("a", { proximoContacto: "2026-10-20" })]);
     const novo = perder(e, "a", "preco", "2026-10-13");
-    expect(novo.pessoas[0].perdida).toEqual({ motivo: "preco", data: "2026-10-13" });
+    expect(novo.pessoas[0].perdida).toEqual({ motivo: "preco", data: "2026-10-13", passo: 1 });
     expect(novo.pessoas[0].proximoContacto).toBeNull();
     expect(novo.atividade[0]).toMatchObject({ pessoaId: "a", tipo: "historico", exemplo: false });
   });
 
-  it("ignora clientes", () => {
-    const e = estado();
-    expect(perder(e, "c", "preco", "2026-10-13")).toBe(e);
+  it.each([["nova", 0], ["emContacto", 1], ["visitaMarcada", 2], ["qualificada", 3]] as const)(
+    "em qualquer passo antes de cliente: a etapa guardada %s dá o passo %s", (etapa, passo) => {
+      const novo = perder(estado([pessoa("a", { etapa })]), "a", "adiou", "2026-10-13");
+      expect(novo.pessoas[0].perdida?.passo).toBe(passo);
+    },
+  );
+
+  it("o passo dado por quem chama (que conhece os negócios) manda sobre a etapa guardada", () => {
+    expect(perder(estado([pessoa("a", { etapa: "nova" })]), "a", "preco", "2026-10-13", { passo: 3 }).pessoas[0].perdida?.passo).toBe(3);
   });
 
-  it("ignora leads que já estão perdidas", () => {
-    const e = estado([pessoa("a", { perdida: { motivo: "adiou", data: "2026-10-01" } })]);
+  it("o cliente não pode ser perdido (etapa guardada ou passo 4)", () => {
+    const e = estado();
+    expect(perder(e, "c", "preco", "2026-10-13")).toBe(e);
+    expect(perder(e, "a", "preco", "2026-10-13", { passo: 4 })).toBe(e);
+  });
+
+  it("um cliente com passo limitado a 3 (negócio novo em aberto) também não se perde, pelo papel", () => {
+    const e = estado([pessoa("a", { etapa: "qualificada" })]);
+    expect(perder(e, "a", "preco", "2026-10-13", { passo: 3, papel: "cliente" })).toBe(e);
+    expect(perder(e, "a", "preco", "2026-10-13", { passo: 3, papel: "lead" }).pessoas[0].perdida?.passo).toBe(3);
+  });
+
+  it("ignora leads que já estão perdidas e ids que não existem", () => {
+    const e = estado([pessoa("a", { perdida: { motivo: "adiou", data: "2026-10-01", passo: 1 } })]);
     expect(perder(e, "a", "preco", "2026-10-13")).toBe(e);
+    expect(perder(e, "x", "preco", "2026-10-13")).toBe(e);
+  });
+});
+
+describe("reativar", () => {
+  const perdida = { motivo: "preco", data: "2026-10-01", passo: 2 } as const;
+
+  it("só em perdidas: limpa a perda, repõe o próximo contacto para amanhã e regista na atividade", () => {
+    const e = estado([pessoa("a", { perdida, proximoContacto: null })]);
+    const novo = reativar(e, "a", "2026-10-13");
+    expect(novo.pessoas[0].perdida).toBeUndefined();
+    expect(novo.pessoas[0].proximoContacto).toBe("2026-10-14");
+    expect(novo.atividade[0]).toMatchObject({ pessoaId: "a", tipo: "historico", chaveTitulo: "pessoasPagina.activity.reactivated", exemplo: false });
+    expect(e.pessoas[0].perdida).toEqual(perdida);
+  });
+
+  it("numa lead que não está perdida, num cliente ou num id que não existe, não faz nada", () => {
+    const e = estado();
+    expect(reativar(e, "a", "2026-10-13")).toBe(e);
+    expect(reativar(e, "c", "2026-10-13")).toBe(e);
+    expect(reativar(e, "x", "2026-10-13")).toBe(e);
+  });
+
+  it("perder e reativar voltam à lead em curso, com as duas linhas na atividade", () => {
+    const volta = reativar(perder(estado([pessoa("a")]), "a", "preco", "2026-10-13"), "a", "2026-10-14");
+    expect(volta.pessoas[0].perdida).toBeUndefined();
+    expect(volta.atividade).toHaveLength(2);
   });
 });
 
@@ -154,18 +210,6 @@ describe("juntarAtividade", () => {
     juntarAtividade(semente, novas);
     expect(semente.map((i) => i.id)).toEqual(["s1", "s2"]);
     expect(novas).toHaveLength(1);
-  });
-});
-
-describe("selosCabecalho", () => {
-  it("cliente com etapa cliente: uma só etiqueta", () => {
-    expect(selosCabecalho("cliente", "cliente")).toEqual([{ tipo: "papel", valor: "cliente" }]);
-  });
-  it("lead com etapa: duas etiquetas", () => {
-    expect(selosCabecalho("lead", "nova")).toEqual([{ tipo: "papel", valor: "lead" }, { tipo: "etapa", valor: "nova" }]);
-  });
-  it("cliente com outra etapa mantém as duas", () => {
-    expect(selosCabecalho("cliente", "qualificada")).toHaveLength(2);
   });
 });
 

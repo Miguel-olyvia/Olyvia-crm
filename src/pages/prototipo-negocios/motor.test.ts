@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
 import { totais } from "./DocsCliente";
+import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { SETORES } from "./setores";
 import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
 import { efetivo, grupoVisita, AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
@@ -45,7 +46,11 @@ describe("protótipo de Negócios", () => {
     A.fecharVisita(id);
     expect(d().fase).toBe(3);
 
-    let T = tot(d(), S);
+    // as respostas do levantamento juntam linhas próprias (proteções, logística…); sem elas, o orçamento de referência
+    const lev = d().orc!.linhas.filter((l) => l.t === "mat" && l.d.startsWith(PREFIXO_LEV));
+    expect(lev.length).toBeGreaterThan(0);
+    const semLev = { ...d(), orc: { ...d().orc!, linhas: d().orc!.linhas.filter((l) => !lev.includes(l)) } };
+    let T = tot(semLev, S);
     expect(T.custo).toBeCloseTo(2454.55, 0);
     expect(T.pf).toBeCloseTo(3606.12, 0);
 

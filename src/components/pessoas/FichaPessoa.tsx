@@ -1,13 +1,19 @@
 import { useRef } from "react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { FichaInterior, type FichaInteriorProps } from "./FichaInterior";
+import { vizinhas } from "./navegacaoFicha";
 import type { ResumoPessoa } from "./pessoasTipos";
+import { useTeclasFicha } from "./useTeclasFicha";
 
-export interface FichaPessoaProps extends Omit<FichaInteriorProps, "resumo" | "fecharPainel"> {
+export interface FichaPessoaProps extends Omit<FichaInteriorProps, "resumo" | "fecharPainel" | "vizinhas" | "aoIr"> {
   /** A pessoa da ficha: ao fechar, fica a última, para o painel não deslizar vazio. `null` antes de abrir a primeira. */
   resumo: ResumoPessoa | null;
   aberto: boolean;
   aoFechar: () => void;
+  /** Os ids das pessoas visíveis na lista, pela ordem da lista. */
+  idsVisiveis: string[];
+  /** Passa à pessoa `id` (troca o ?open= sem acrescentar entradas ao histórico). */
+  aoIrPara: (id: string) => void;
 }
 
 /** O foco depois de fechar: o elemento que abriu a ficha; se já não existe (abriu por ?open=, ou a ficha fechou-se a si própria), o separador ativo ou o título da página. */
@@ -18,16 +24,26 @@ function focoDeRegresso(origem: HTMLElement | null): HTMLElement | null {
   return document.querySelector<HTMLElement>('[role="tab"][data-state="active"]') ?? titulo;
 }
 
-/** A ficha da pessoa, num painel lateral (Sheet): cabeçalho, ações e abas. O Esc fecha primeiro o painel de ação, se houver. */
-export function FichaPessoa({ resumo, aberto, aoFechar, ...resto }: FichaPessoaProps) {
+/**
+ * A ficha da pessoa, num painel lateral (Sheet) que cobre metade do ecrã (no mínimo 640 px; em ecrã estreito, todo): cabeçalho
+ * com navegação, ações, percurso e abas. O Esc fecha primeiro o painel de ação, se houver; o "X" por defeito do Sheet
+ * esconde-se por classe, porque a ficha tem o seu botão Fechar.
+ */
+export function FichaPessoa({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara, ...resto }: FichaPessoaProps) {
   const origem = useRef<HTMLElement | null>(null);
   const fecharPainel = useRef<(() => boolean) | null>(null);
+  const viz = vizinhas(idsVisiveis, resumo?.pessoa.id ?? "");
+  const ir = useTeclasFicha(aberto && resumo !== null, viz, resumo?.pessoa.id, aoIrPara);
   return (
     <Sheet open={aberto && resumo !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
       <SheetContent
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl motion-reduce:!animate-none"
+        className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
         onEscapeKeyDown={(e) => { if (fecharPainel.current?.()) e.preventDefault(); }}
-        onOpenAutoFocus={() => { origem.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }}
+        onOpenAutoFocus={(e) => {
+          origem.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          e.preventDefault();
+          document.querySelector<HTMLElement>('[role="dialog"] h2')?.focus();
+        }}
         onCloseAutoFocus={(e) => {
           const alvo = focoDeRegresso(origem.current);
           if (!alvo) return;
@@ -35,7 +51,7 @@ export function FichaPessoa({ resumo, aberto, aoFechar, ...resto }: FichaPessoaP
           alvo.focus();
         }}
       >
-        {resumo && <FichaInterior key={resumo.pessoa.id} {...resto} resumo={resumo} fecharPainel={fecharPainel} />}
+        {resumo && <FichaInterior key={resumo.pessoa.id} {...resto} resumo={resumo} fecharPainel={fecharPainel} vizinhas={viz} aoIr={ir} />}
       </SheetContent>
     </Sheet>
   );

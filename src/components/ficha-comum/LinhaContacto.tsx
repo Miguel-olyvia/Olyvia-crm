@@ -25,6 +25,8 @@ export interface LinhaContactoProps {
   whatsapp?: { href: string; rotulo: string; avisoNovoSeparador: string };
   /** Sem cópia (por exemplo, o nome da empresa só se lê): não se passa. */
   copia?: CopiaContacto;
+  /** "ficha": o aspeto das secções da ficha (sem divisórias; o botão de copiar só aparece ao foco ou ao hover). Por defeito, o do painel. */
+  variante?: "painel" | "ficha";
 }
 
 function selecionarTexto(el: HTMLElement | null): void {
@@ -51,19 +53,28 @@ async function copiar(valor: string, el: HTMLElement | null, copia: CopiaContact
 
 const LIGACAO = "inline-flex min-h-11 items-center rounded-sm text-primary underline underline-offset-2 dark:text-violet-300";
 
-export function LinhaContacto({ rotulo, valor, href, whatsapp, copia }: LinhaContactoProps) {
+export const GRELHA = {
+  painel: "grid grid-cols-1 items-center gap-x-2 sm:grid-cols-[8rem_1fr] border-b border-border py-1 last:border-b-0",
+  ficha: "group grid min-h-11 grid-cols-1 items-center gap-x-4 gap-y-0.5 sm:grid-cols-[9rem_minmax(0,1fr)]",
+};
+const ROTULO = { painel: "text-xs text-muted-foreground", ficha: "text-[15px] text-muted-foreground" };
+const VALOR = { painel: "text-sm", ficha: "text-[15px]" };
+/** Na ficha o botão de copiar fica discreto: aparece ao foco e ao hover, e está sempre à vista nos ecrãs sem hover. */
+const COPIAR_FICHA = "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100";
+
+export function LinhaContacto({ rotulo, valor, href, whatsapp, copia, variante = "painel" }: LinhaContactoProps) {
   const texto = useRef<HTMLSpanElement>(null);
   const anunciar = useAnunciar();
   return (
-    <div className="grid grid-cols-1 items-center gap-x-2 sm:grid-cols-[8rem_1fr] border-b border-border py-1 last:border-b-0">
-      <dt className="text-xs text-muted-foreground">{rotulo}</dt>
+    <div className={GRELHA[variante]}>
+      <dt className={ROTULO[variante]}>{rotulo}</dt>
       <dd className="flex min-w-0 items-center justify-between gap-1">
         <span className="flex min-w-0 flex-wrap items-center gap-x-3">
-          <span ref={texto} className="min-w-0 break-words text-sm text-foreground">
+          <span ref={texto} className={cn("min-w-0 break-words text-foreground", VALOR[variante])}>
             {href ? <a href={href} className={cn(LIGACAO, FOCO)}>{valor}</a> : valor}
           </span>
           {whatsapp && (
-            <a href={whatsapp.href} target="_blank" rel="noopener noreferrer" className={cn(LIGACAO, "text-sm", FOCO)}>
+            <a href={whatsapp.href} target="_blank" rel="noopener noreferrer" className={cn(LIGACAO, VALOR[variante], FOCO)}>
               {whatsapp.rotulo}
               <span className="sr-only">{whatsapp.avisoNovoSeparador}</span>
             </a>
@@ -71,7 +82,7 @@ export function LinhaContacto({ rotulo, valor, href, whatsapp, copia }: LinhaCon
         </span>
         {copia && (
           <Button
-            type="button" variant="ghost" className={cn("h-11 w-11 shrink-0 p-0", FOCO)}
+            type="button" variant="ghost" className={cn("h-11 w-11 shrink-0 p-0", FOCO, variante === "ficha" && COPIAR_FICHA)}
             aria-label={copia.rotulo} onClick={() => void copiar(valor, texto.current, copia, anunciar)}
           >
             <Copy aria-hidden="true" />

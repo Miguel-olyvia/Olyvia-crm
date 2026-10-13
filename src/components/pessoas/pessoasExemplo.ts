@@ -25,25 +25,44 @@ const PROPRIOS: Record<string, CamposProprios> = {
   "p-vasco": { origem: "indicacao", etapa: "qualificada", ultimoContactoDias: 4 },
 };
 
+/** Valores por defeito dos campos obrigatórios; os dados de exemplo de cada pessoa sobrepõem-nos. */
+const PADRAO = { viaEntrada: "manual", saude: 50 } as const;
+
 const doNegocio = (n: NegocioMes): Pessoa => ({
-  id: n.pessoaId, nome: n.pessoa, contacto: n.contacto, comercial: n.comercial, ...PROPRIOS[n.pessoaId], ...extrasExemplo(n.pessoaId),
+  ...PADRAO, id: n.pessoaId, nome: n.pessoa, contacto: n.contacto, comercial: n.comercial, ...PROPRIOS[n.pessoaId], ...extrasExemplo(n.pessoaId),
 });
 
 const PESSOAS_COM_NEGOCIO: Pessoa[] = DADOS_EXEMPLO.negocios.map(doNegocio);
 
-/** As três leads novas, sem negócio. */
+/** Leads sem negócio no quadro do mês: três novas, uma com visita, uma com empresa e duas perdidas (a do Negócio tem um negócio histórico). */
 const LEADS_NOVAS: Pessoa[] = [
   {
-    id: "p-beatriz", nome: "Beatriz Sampaio", comercial: "Ana Ribeiro", origem: "site", etapa: "nova", ultimoContactoDias: 2,
+    ...PADRAO, id: "p-beatriz", nome: "Beatriz Sampaio", comercial: "Ana Ribeiro", origem: "site", etapa: "nova", ultimoContactoDias: 2,
     contacto: { telefone: "921 234 510", email: "beatriz.sampaio@exemplo.pt" },
   },
   {
-    id: "p-hugo", nome: "Hugo Teixeira", comercial: "Bruno Costa", origem: "formulario", origemDetalhe: "Casa de banho",
+    ...PADRAO, id: "p-hugo", nome: "Hugo Teixeira", comercial: "Bruno Costa", origem: "formulario",
     etapa: "nova", ultimoContactoDias: 1, contacto: { telefone: "922 345 611", email: "hugo.teixeira@exemplo.pt" },
   },
   {
-    id: "p-lucia", nome: "Lúcia Faria", comercial: "Carla Mendes", origem: "campanha", etapa: "emContacto", ultimoContactoDias: 21,
+    ...PADRAO, id: "p-lucia", nome: "Lúcia Faria", comercial: "Carla Mendes", origem: "campanha", etapa: "emContacto", ultimoContactoDias: 21,
     contacto: { telefone: "923 456 712", email: null },
+  },
+  {
+    ...PADRAO, id: "p-rita", nome: "Rita Albuquerque", comercial: "Ana Ribeiro", origem: "formulario", etapa: "visitaMarcada", ultimoContactoDias: 2,
+    contacto: { telefone: "924 567 813", email: "rita.albuquerque@exemplo.pt" },
+  },
+  {
+    ...PADRAO, id: "p-goncalo", nome: "Gonçalo Matias", comercial: "Bruno Costa", origem: "campanha", etapa: "emContacto", ultimoContactoDias: 6,
+    contacto: { telefone: "925 678 914", email: "goncalo.matias@exemplo.pt" },
+  },
+  {
+    ...PADRAO, id: "p-joana", nome: "Joana Bastos", comercial: "Carla Mendes", origem: "telefone", etapa: "emContacto", ultimoContactoDias: 8,
+    contacto: { telefone: "926 789 015", email: null },
+  },
+  {
+    ...PADRAO, id: "p-fabio", nome: "Fábio Lemos", comercial: "Bruno Costa", origem: "site", etapa: "visitaMarcada", ultimoContactoDias: 20,
+    contacto: { telefone: "927 890 116", email: "fabio.lemos@exemplo.pt" },
   },
 ];
 
@@ -73,7 +92,47 @@ const HISTORICOS: NegocioHistorico[] = [
   },
 ];
 
-export const NEGOCIOS_PESSOAS_EXEMPLO: NegocioPessoa[] = [...DADOS_EXEMPLO.negocios, ...HISTORICOS];
+const contactoDe = (id: string) => PESSOAS_EXEMPLO.find((p) => p.id === id)!.contacto;
+const orc = (id: string, valor: number, escolhido = false) => ({ id, valor, escolhido });
+
+/** Um negócio aberto que só existe nesta página (fora do quadro do mês, sem detalhes): mostra pessoas com vários negócios. */
+const aberto = (n: Omit<NegocioMes, "contacto" | "contrato">): NegocioMes => ({ ...n, contrato: null, contacto: contactoDe(n.pessoaId) });
+
+/** Negócios novos em aberto, só da página Pessoas: um cliente com negócio novo e uma lead com três negócios, em fases diferentes. */
+const ABERTOS_EXTRA: NegocioMes[] = [
+  aberto({
+    id: "x1", pessoaId: "p-marta", pessoa: "Marta Silveira", servico: "Cozinha", comercial: "Ana Ribeiro", dias: 5, parado: 2,
+    proximoPrazo: "2026-10-16", orcamentos: [orc("x1-o1", 3200, true)], proposta: null,
+  }),
+  aberto({
+    id: "x2", pessoaId: "p-paulo", pessoa: "Paulo Neves", servico: "Climatização", comercial: "Bruno Costa", dias: 18, parado: 10,
+    proximoPrazo: "2026-10-10", orcamentos: [orc("x2-o1", 4100, true)], proposta: { estado: "enviada" },
+  }),
+  aberto({
+    id: "x3", pessoaId: "p-vasco", pessoa: "Vasco Pinto", servico: "Casa de banho", comercial: "Ana Ribeiro", dias: 2, parado: 0,
+    proximoPrazo: "2026-10-15", orcamentos: [], proposta: null,
+  }),
+  aberto({
+    id: "x4", pessoaId: "p-vasco", pessoa: "Vasco Pinto", servico: "Janelas", comercial: "Ana Ribeiro", dias: 9, parado: 4,
+    proximoPrazo: "2026-10-14", orcamentos: [orc("x4-o1", 5600, true)], proposta: { estado: "rascunho" },
+  }),
+  aberto({
+    id: "x5", pessoaId: "p-clara", pessoa: "Clara Dias", servico: "Armários", comercial: "Diogo Lopes", dias: 3, parado: 1,
+    proximoPrazo: "2026-10-17", orcamentos: [orc("x5-o1", 4800), orc("x5-o2", 5300)], proposta: null,
+  }),
+];
+
+/** Um negócio perdido há meses, de uma lead que também foi perdida (no passo Negócio). */
+const HISTORICO_FABIO: NegocioHistorico = {
+  id: "h3", pessoaId: "p-fabio", pessoa: "Fábio Lemos", servico: "Porta de entrada", comercial: "Bruno Costa",
+  dias: 45, parado: null, proximoPrazo: null, contacto: contactoDe("p-fabio"),
+  orcamentos: [orcamento("h3-o1", 2800)], proposta: { estado: "enviada" }, contrato: null, mes: "2026-09", resultado: "perdido",
+};
+
+/** Os ids dos negócios que estão no quadro de Negócio e metas (só esses se abrem lá). */
+export const IDS_NEGOCIOS_DO_QUADRO: ReadonlySet<string> = new Set(DADOS_EXEMPLO.negocios.map((n) => n.id));
+
+export const NEGOCIOS_PESSOAS_EXEMPLO: NegocioPessoa[] = [...DADOS_EXEMPLO.negocios, ...ABERTOS_EXTRA, ...HISTORICOS, HISTORICO_FABIO];
 
 /**
  * A distribuição dos códigos 01 a 06: a ÚNICA tabela a mudar quando os utilizadores

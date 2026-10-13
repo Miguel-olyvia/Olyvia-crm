@@ -36,7 +36,7 @@ export const SETORES: Setor[] = [
       },
       "Área de intervenção": {
         nome: "Divisões a climatizar",
-        ocultos: ["diag_tipo_area", "diag_intervencao_tipo", "diag_altura_revestimento", "diag_gas", "diag_toalheiro", "diag_local_cortes", "diag_demolir_descricao"],
+        ocultos: ["diag_tipo_area", "diag_intervencao_tipo", "diag_gas", "diag_toalheiro", "diag_local_cortes", "diag_demolir_descricao"],
         novos: [
           { k: "av_area", l: "Área a climatizar", t: "numero", un: "m²", novo: true, bloco: "A divisão" },
           ESC("av_orientacao", "Orientação das janelas", ["Norte", "Sul", "Este", "Oeste"], { bloco: "A divisão" }),

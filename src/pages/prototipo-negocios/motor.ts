@@ -3,6 +3,7 @@
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
 import { CATALOGO } from "./catalogo";
+import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
@@ -322,16 +323,16 @@ const EXEMPLO_COMPLETO: Record<string, string> = {
   // Visita · exterior
   acesso: "Fácil", estacionamento: "Pago", zona_estacionamento: "Amarela", tem_elevador: "Sim", n_elevadores: "1", n_andares: "6", andar: "3", n_fracoes_por_andar: "2",
   // Visita · interior
-  tipologia: "T3", area_util_m2: "105", n_divisoes: "4", n_casas_banho: "2", ano_construcao: "1950 a 1970", pavimento: "Madeira", eletrica: "Antiga",
+  tipo_espaco: "Casa", tipologia: "T3", area_util_m2: "105", n_divisoes: "4", n_casas_banho: "2", ano_construcao: "1950 a 1970", pavimento: "Madeira", eletrica: "Antiga",
   quadro_diferencial: "Não", canalizacao: "Ferro", gas: "Canalizado", amianto: "Não sei", habitada_durante_obra: "Sim", animais: "Sim",
   notas_interior: "Há um gato: manter a porta da cozinha fechada durante a obra.",
   // Visita · área
-  diag_tipo_area: "Casa de banho", diag_intervencao_tipo: "Remodelação total", diag_pe_direito_m: "2,7 m", diag_altura_revestimento: "Ao teto",
+  diag_tipo_area: "Casa de banho", diag_intervencao_tipo: "Remodelação total", diag_pe_direito_m: "2,7 m",
   diag_pontos_eletricos: "5", diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda",
   diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio", diag_portas_proteger: "3",
   diag_demolir_descricao: "Banheira, azulejo das paredes até ao teto e pavimento.",
   // Visita · escolhas
-  gama: "Média", materiais_cliente: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
+  materiais_cliente: "Não", mobilidade_reduzida: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
   // Negócio
   validade: "30 dias", prazo_exec: "8", inicio_prev: "2026-09-29", pagamento: "50% + 50% no fim", garantia: "2 anos",
   notas_cliente: "Inclui a remoção do entulho e a limpeza final.",
@@ -367,9 +368,9 @@ function exemplo(d: Negocio): Record<string, string> {
   });
   if (d.fase >= 3) Object.assign(f, {
     n_divisoes: "6", ano_construcao: "1970 a 1990", pavimento: "Flutuante", eletrica: "Antiga", quadro_diferencial: "Sim", canalizacao: "Ferro", gas: "Canalizado",
-    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_altura_revestimento: "Ao teto", diag_pontos_eletricos: "4",
+    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_pontos_eletricos: "4",
     diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda", diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio",
-    diag_portas_proteger: "3", gama: "Média", materiais_cliente: "Não",
+    diag_portas_proteger: "3", materiais_cliente: "Não",
     validade: "30 dias", prazo_exec: "8", pagamento: "50% + 50% no fim", garantia: "2 anos",
     modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben",
   });
@@ -427,7 +428,27 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     if (sv && (q || 0) > 0) linhas.push({ t: "svc", sid, q: q!, cu: r2(custoUn(sv, S)), pu: sv.preco });
   }
   linhas.push({ t: "mat", d: L.mat.d, custo: L.mat.custo, preco: L.mat.preco });
-  return { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
+  const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
+  return o;
+}
+
+/** As respostas do levantamento no orçamento (efeitosLevantamento.ts): refaz as linhas "Levantamento · …"
+ *  e a linha de materiais (materiais do cliente). Só antes de a proposta ser enviada. */
+export function sincronizarEfeitos(d: Negocio, _S: Estado) {
+  const o = d.orc;
+  if (!o || o.vendaDireta) return;
+  const L = LINHAS[d.linha];
+  const tinhaMat = o.linhas.some((l) => l.t === "mat" && l.d === L.mat.d) || !o.linhas.some((l) => l.t === "mat");
+  o.linhas = o.linhas.filter((l) => !(l.t === "mat" && (l.d.startsWith(PREFIXO_LEV) || l.d === L.mat.d)));
+  const ef = efeitosDoLevantamento(d.f);
+  const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
+  if (tinhaMat && fator > 0) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(L.mat.custo * fator), preco: r2(L.mat.preco * fator) });
+  let bc = 0, bp = 0;
+  for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }
+  for (const e of ef) {
+    if (e.t === "linha") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: e.custo, preco: e.preco });
+    if (e.t === "percent") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: r2(bc * e.pct!), preco: r2(bp * e.pct!) });
+  }
 }
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
@@ -669,7 +690,6 @@ function preencher(d: Negocio, n: number) {
   }
   if (n === 2) {
     def({ diag_tipo_area: d.linha === "coz" ? "Cozinha" : "Casa de banho", diag_intervencao_tipo: "Remodelação total" });
-    if (d.linha === "wc") def({ diag_altura_revestimento: "Ao teto" });
     if (d.linha === "coz") def({ diag_toalheiro: "Não" });
     derivar(d, "fracao"); derivar(d, "localidade");
   }
@@ -739,7 +759,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     fecharVisita(id: number) {
       const d = deal(id), L = LINHAS[d.linha];
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
-      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); fase(d, 3);
+      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); sincronizarEfeitos(d, S); fase(d, 3);
       avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
     },
     verificar(id: number) {
@@ -861,6 +881,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id); d.f[k] = v;
       if (d.sug) delete d.sug[k]; // mexido por alguém: deixa de ser sugestão
       derivar(d, k);
+      // a resposta mexe logo no orçamento, enquanto a proposta não foi enviada
+      if (d.orc && !d.orc.enviada && CAMPOS_COM_EFEITO.has(k)) sincronizarEfeitos(d, S);
     },
     confirmar(id: number, ks: string[]) { const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k]; },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {

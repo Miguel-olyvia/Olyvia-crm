@@ -19,7 +19,7 @@ import { SETORES, type Setor } from "./setores";
 import { IconeFase, type Ctx } from "./pecas";
 
 const GRUPOS: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
-const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["data", "Data"], ["texto_longo", "Nota"]];
+const TIPOS: [Tipo, string][] = [["escolha", "Escolha"], ["varios", "Escolha múltipla"], ["sim_nao", "Sim ou não"], ["contador", "Contador"], ["numero", "Número"], ["texto", "Texto curto"], ["data", "Data"], ["texto_longo", "Nota"]];
 const NOME_TIPO = Object.fromEntries(TIPOS) as Record<Tipo, string>;
 const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const ESCOLHA = "inline-flex min-h-11 items-center rounded-lg border px-3 text-[15px]";
@@ -241,10 +241,10 @@ function NovoCampo({ g, cs, onAdd, onCancel }: { g: Grupo; cs: Def[]; onAdd: (c:
   const blocos = [...new Set(cs.map((c) => c.bloco).filter(Boolean))] as string[];
   const [bloco, setBloco] = useState(blocos[0] || "");
   const id = useId();
-  const pronto = l.trim() && (t !== "escolha" || op.length >= 2);
+  const pronto = l.trim() && ((t !== "escolha" && t !== "varios") || op.length >= 2);
   const criar = () => {
     if (!pronto) return;
-    onAdd({ k: chaveLivre(l, cs.map((c) => c.k)), l: l.trim(), t, op: t === "escolha" ? op : undefined, novo: true, obrigatorio: obrig, bloco: bloco || undefined, min: t === "contador" ? 0 : undefined, max: t === "contador" ? 50 : undefined });
+    onAdd({ k: chaveLivre(l, cs.map((c) => c.k)), l: l.trim(), t, op: t === "escolha" || t === "varios" ? op : undefined, novo: true, obrigatorio: obrig, bloco: bloco || undefined, min: t === "contador" ? 0 : undefined, max: t === "contador" ? 50 : undefined });
   };
   return (
     <div className="grid gap-4 py-3 animate-in fade-in-0" role="group" aria-label={`Novo campo em ${g.titulo}`}>
@@ -257,7 +257,7 @@ function NovoCampo({ g, cs, onAdd, onCancel }: { g: Grupo; cs: Def[]; onAdd: (c:
           ))}
         </div>
       </div>
-      {t === "escolha" && (
+      {(t === "escolha" || t === "varios") && (
         <div className="grid gap-1.5">
           <span className="text-[15px] font-medium">Opções (pelo menos 2)</span>
           <div className="flex flex-wrap items-center gap-2">

@@ -5,8 +5,18 @@ import type { FaseNegocio, NegocioMes } from "@/components/negocio-metas/negocio
 import type { SaudeNegocio } from "@/components/negocio-metas/saudeNegocio";
 
 export type PapelPessoa = "lead" | "cliente";
+/** Os 5 passos do percurso: Lead, Contacto, Visita, Negócio e Cliente (as chaves não mudam, só os textos). */
 export type EtapaPessoa = "nova" | "emContacto" | "visitaMarcada" | "qualificada" | "cliente";
 export type OrigemPessoa = "site" | "formulario" | "campanha" | "indicacao" | "telefone";
+export type ViaEntrada = "formulario" | "telefone" | "indicacao" | "manual";
+
+/** Quando uma lead é perdida: o motivo, o dia (AAAA-MM-DD) e o índice (0 a 3) do passo do percurso em que aconteceu. */
+export interface PerdidaPessoa {
+  motivo: MotivoPerda;
+  data: string;
+  /** Falta nas perdidas antigas: nesse caso vale o índice da etapa (ver `passoDaPerdida`). */
+  passo?: number;
+}
 
 export interface Pessoa {
   id: string;
@@ -15,9 +25,14 @@ export interface Pessoa {
   comercial: string;
   /** Campo de exemplo, só desta página. */
   origem: OrigemPessoa;
-  /** Detalhe da origem (por exemplo o serviço do formulário); opcional. */
-  origemDetalhe?: string;
-  /** Campo de exemplo, só desta página. */
+  /** Campos de exemplo da origem (todos opcionais): canal, campanha e o formulário de onde veio. */
+  canal?: string;
+  campanha?: string;
+  formulario?: string;
+  viaEntrada: ViaEntrada;
+  /** Saúde da pessoa, de 0 a 100 (campo de exemplo). */
+  saude: number;
+  /** Campo de exemplo, só desta página. Só vale a etapa efetiva (ver `etapaPessoa.ts`). */
   etapa: EtapaPessoa;
   /** Campo de exemplo: dias desde o último contacto. */
   ultimoContactoDias: number;
@@ -27,18 +42,20 @@ export interface Pessoa {
   distrito?: string;
   nif?: string;
   qualificacao?: QualificacaoPessoa;
-  /** O resultado da última chamada (ver `opcoesPessoa.ts`). */
+  /** O resultado da última chamada (ver `opcoesPessoa.ts`); vale para lead e cliente. */
   resultadoContacto?: ResultadoContacto;
   /** AAAA-MM-DD. */
   proximoContacto?: string | null;
   /** AAAA-MM-DD: cliente ou lead desde. */
   desde?: string;
-  /** Marcada como perdida na ficha: o motivo e o dia (AAAA-MM-DD). */
-  perdida?: { motivo: MotivoPerda; data: string };
+  /** Marcada como perdida na ficha: o motivo, o dia e o passo. Só as leads se perdem. */
+  perdida?: PerdidaPessoa;
 }
 
 export type QualificacaoPessoa = "MQL" | "SQL";
 export type ResultadoContacto = "atendeuInteressado" | "atendeuMaisTarde" | "naoAtendeu" | "semInteresse" | "numeroErrado";
+/** O resultado como se filtra e se mostra: os cinco da chamada e "Sem contacto" (nunca houve chamada). */
+export type ResultadoOuNenhum = ResultadoContacto | "semContacto";
 export type MotivoPerda = "preco" | "adiou" | "outraEmpresa" | "semResposta" | "naoProcurava";
 export type PassoChamada = "ligarAmanha" | "ligarHoje" | "visitaOuOrcamento" | "nenhum";
 
@@ -47,7 +64,7 @@ export type TipoAtividade = "chamada" | "nota" | "email" | "historico";
 /**
  * Uma linha da atividade de uma pessoa. `titulo` e `detalhe` são texto escrito à mão (nunca uma chave); quando o texto
  * é da aplicação, vão vazios e `chaveTitulo` / `chaveDetalhe` levam a chave de tradução. `quando` é AAAA-MM-DD;
- * `exemplo` é falso nos registos feitos nesta sessão.
+ * `hora` (HH:MM) só existe nos registos de exemplo; `exemplo` é falso nos registos feitos nesta sessão.
  */
 export interface ItemAtividade {
   id: string;
@@ -58,6 +75,7 @@ export interface ItemAtividade {
   chaveTitulo?: string;
   chaveDetalhe?: string;
   quando: string;
+  hora?: string;
   exemplo: boolean;
 }
 
@@ -72,11 +90,18 @@ export interface ResumoPessoa {
   papel: PapelPessoa;
   /** Todos os negócios da pessoa, do quadro e históricos. */
   negocios: NegocioPessoa[];
-  /** Negócios abertos ou ganhos (os perdidos e os históricos perdidos não contam). */
-  numero: number;
-  valor: number;
-  /** A fase mais avançada entre os negócios abertos ou ganhos; `null` sem eles. */
-  fase: FaseNegocio | null;
+  /** Os negócios abertos: sem contrato assinado e fora dos históricos (os perdidos também ficam de fora). */
+  abertos: NegocioMes[];
+  /** O valor em jogo: a soma dos negócios abertos (nem ganhos nem perdidos). */
+  emJogo: number;
+  /** Lead: próximo contacto anterior a hoje. Cliente: só com um negócio em curso com o prazo anterior a hoje. */
+  atrasada: boolean;
+  /** O formulário de onde veio; `null` quando foi registada à mão. */
+  formulario: string | null;
+  /** A etapa efetiva (ver `etapaEfetiva`); uma perdida é um estado à parte, por cima desta. */
+  etapa: EtapaPessoa;
+  /** A fase do negócio aberto mais avançado; `null` sem negócio aberto. */
+  faseEtapa: FaseNegocio | null;
   /** O pior negócio aberto (do quadro do mês); `null` sem nenhum. */
   piorAberto: NegocioMes | null;
   saude: SaudeNegocio | null;
@@ -130,10 +155,20 @@ export interface EstadoPessoas {
   contactadas: string[];
 }
 
-export type ChipPessoa = "todos" | "leads" | "clientes" | "semNegocio" | "voltou" | "semContacto";
-export type OrdemPessoa = "atencao" | "nome" | "ultimoContacto" | "valor";
+/** O seletor "Leads, Clientes, Todos": as perdidas só contam em "Todos". */
+export type TipoPessoa = "leads" | "clientes" | "todos";
+export type ChipPessoa = "todas" | "porContactar" | "atrasadas" | "perdidas";
+export type OrdemPessoa = "urgencia" | "recentes" | "valor";
 
+/** Os filtros da lista; `comercial`, `formulario` e `resultado` vazios querem dizer "todos". */
 export interface FiltrosPessoas {
+  tipo: TipoPessoa;
   chip: ChipPessoa;
   pesquisa: string;
+  soMinhas: boolean;
+  voltou: boolean;
+  comVisita: boolean;
+  comercial: string;
+  formulario: string;
+  resultado: ResultadoOuNenhum | "";
 }

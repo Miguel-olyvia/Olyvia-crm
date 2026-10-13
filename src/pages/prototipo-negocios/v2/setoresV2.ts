@@ -44,7 +44,7 @@ const MANUTENCAO_CFG: CfgCampos = {
   },
   "Área de intervenção": {
     nome: "A avaria ou o pedido",
-    ocultos: ["diag_tipo_area", "diag_intervencao_tipo", "diag_altura_revestimento", "diag_toalheiro", "diag_local_cortes", "diag_demolir_descricao"],
+    ocultos: ["diag_tipo_area", "diag_intervencao_tipo", "diag_toalheiro", "diag_local_cortes", "diag_demolir_descricao"],
     novos: [ESC("mn_urgencia", "Urgência", ["Hoje", "Esta semana", "Pode esperar"], { bloco: "O pedido" })],
   },
   "Escolhas do cliente": {

@@ -20,7 +20,7 @@ import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
 const CURTO: Record<string, string> = {
-  "Local · exterior (edifício e acessos)": "Exterior do edifício", "Local · interior": "Interior da casa",
+  "Local · exterior (edifício e acessos)": "Exterior do edifício", "Local · interior": "Interior do espaço",
   "nec": "Serviços necessários", "Escolhas do cliente": "Escolhas do cliente", "Plano, materiais e resultado": "Plano e materiais",
 };
 const curto = (p: Passo) => (p.personalizado ? p.titulo : CURTO[p.id] || CURTO[p.titulo] || p.titulo);
@@ -131,7 +131,6 @@ export function NegocioSimples(ctx: Ctx) {
                     <p className="text-[15px]">
                       {(Object.entries(LINHAS[d.linha].med) as [MedKey, string][]).map(([k, l]) => `${l} ${nfmt(d.visita.med[k] || 0)}`).join(" · ")} · {d.visita.fotos} fotos
                     </p>
-                    {d.visita.nec.length > 0 && <p className="mt-1 text-[15px] text-muted-foreground">Equipamentos pedidos: {d.visita.nec.join(", ")}</p>}
                   </div>
                 )}
                 {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Serviços necessários</h3><ServicosCatalogo {...ctx} d={d} simples /></div>}

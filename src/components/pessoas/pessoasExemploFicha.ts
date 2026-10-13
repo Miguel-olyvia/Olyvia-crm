@@ -2,12 +2,18 @@
 // existe noutro sítio nem vem da base. Os dias são relativos a HOJE_EXEMPLO, para a ficha não envelhecer.
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { somarDias } from "./acoesPessoa";
-import type { ItemAtividade, Pessoa, QualificacaoPessoa, ResultadoContacto } from "./pessoasTipos";
+import { origemExemplo } from "./pessoasExemploOrigem";
+import type {
+  ItemAtividade, MotivoPerda, Pessoa, QualificacaoPessoa, ResultadoContacto,
+} from "./pessoasTipos";
 
-type Extra = Pick<Pessoa, "empresa" | "morada" | "distrito" | "nif" | "qualificacao" | "resultadoContacto" | "proximoContacto" | "desde">;
+type Extra = Partial<Pick<Pessoa,
+  "empresa" | "morada" | "distrito" | "nif" | "qualificacao" | "resultadoContacto" | "proximoContacto" | "desde" | "perdida" |
+  "canal" | "campanha" | "formulario" | "viaEntrada" | "saude">>;
 
 interface Dados {
-  resultado: ResultadoContacto;
+  /** `null`: nunca houve uma chamada ("Sem contacto"). */
+  resultado: ResultadoContacto | null;
   /** Dias de hoje até ao próximo contacto (negativo: em atraso); `null` sem próximo contacto. */
   proximo: number | null;
   desde: string;
@@ -16,6 +22,8 @@ interface Dados {
   nif?: string;
   qualificacao?: QualificacaoPessoa;
   empresa?: { nome: string; contacto: string; nif: string };
+  /** Perdida há `dias` dias, no passo `passo` do percurso (0 a 3). */
+  perdida?: { motivo: MotivoPerda; dias: number; passo: number };
 }
 
 const DADOS: Record<string, Dados> = {
@@ -38,17 +46,33 @@ const DADOS: Record<string, Dados> = {
   },
   "p-clara": { resultado: "atendeuInteressado", proximo: 0, desde: "2026-09-20", morada: ["Rua da Pêra 41", "3800-100", "Aveiro"], distrito: "Aveiro", qualificacao: "SQL" },
   "p-vasco": { resultado: "atendeuMaisTarde", proximo: 3, desde: "2026-08-11", morada: ["Rua do Castelo 2", "3500-120", "Viseu"], distrito: "Viseu", qualificacao: "MQL" },
-  "p-beatriz": { resultado: "naoAtendeu", proximo: 1, desde: "2026-10-11", morada: ["Rua Direita 66", "3510-050", "Viseu"], distrito: "Viseu" },
-  "p-hugo": { resultado: "atendeuInteressado", proximo: 2, desde: "2026-10-12", morada: ["Largo da Sé 5", "4700-010", "Braga"], distrito: "Braga" },
+  "p-beatriz": { resultado: null, proximo: 1, desde: "2026-10-11", morada: ["Rua Direita 66", "3510-050", "Viseu"], distrito: "Viseu" },
+  "p-hugo": { resultado: null, proximo: 2, desde: "2026-10-12", morada: ["Largo da Sé 5", "4700-010", "Braga"], distrito: "Braga" },
   "p-lucia": { resultado: "naoAtendeu", proximo: -5, desde: "2026-09-22", morada: ["Rua de Avis 30", "7000-100", "Évora"], distrito: "Évora" },
+  "p-rita": {
+    resultado: "atendeuInteressado", proximo: 0, desde: "2026-10-01", morada: ["Rua dos Combatentes 12", "2710-100", "Sintra"], distrito: "Lisboa",
+    qualificacao: "SQL",
+  },
+  "p-goncalo": {
+    resultado: "atendeuMaisTarde", proximo: -1, desde: "2026-10-07", morada: ["Av. do Mar 220", "2750-300", "Cascais"], distrito: "Lisboa",
+    qualificacao: "MQL", empresa: { nome: "Matias Construções, Lda.", contacto: "Gonçalo Matias (sócio)", nif: "516 789 012" },
+  },
+  "p-joana": {
+    resultado: "naoAtendeu", proximo: null, desde: "2026-09-18", morada: ["Rua do Giestal 4", "2000-250", "Santarém"], distrito: "Santarém",
+    perdida: { motivo: "semResposta", dias: 8, passo: 1 },
+  },
+  "p-fabio": {
+    resultado: "semInteresse", proximo: null, desde: "2026-07-20", morada: ["Rua da Olaria 19", "2300-400", "Tomar"], distrito: "Santarém",
+    perdida: { motivo: "preco", dias: 20, passo: 3 },
+  },
 };
 
 /** Os campos de exemplo da ficha de uma pessoa (vazio se o id não tem dados). */
-export function extrasExemplo(id: string): Extra | Record<string, never> {
+export function extrasExemplo(id: string): Extra {
   const d = DADOS[id];
   if (!d) return {};
   return {
-    resultadoContacto: d.resultado,
+    resultadoContacto: d.resultado ?? undefined,
     proximoContacto: d.proximo === null ? null : somarDias(HOJE_EXEMPLO, d.proximo),
     desde: d.desde,
     morada: { linha: d.morada[0], cp: d.morada[1], localidade: d.morada[2] },
@@ -56,26 +80,30 @@ export function extrasExemplo(id: string): Extra | Record<string, never> {
     nif: d.nif,
     qualificacao: d.qualificacao,
     empresa: d.empresa,
+    perdida: d.perdida && { motivo: d.perdida.motivo, data: somarDias(HOJE_EXEMPLO, -d.perdida.dias), passo: d.perdida.passo },
+    ...origemExemplo(id),
   };
 }
 
-/** A atividade de exemplo de uma pessoa: a última chamada, um email (se já passaram dias) e o registo da ficha. */
+/** A atividade de exemplo de uma pessoa: a última chamada (se houve), um email (se já passaram dias) e o registo da ficha. */
 function atividadeDe(p: Pessoa): ItemAtividade[] {
   const ultimo = somarDias(HOJE_EXEMPLO, -p.ultimoContactoDias);
   const base = { pessoaId: p.id, exemplo: true };
   const itens: ItemAtividade[] = [
     {
-      ...base, id: `${p.id}-a1`, tipo: "chamada", quando: ultimo,
-      titulo: "", chaveTitulo: `pessoasPagina.result.${p.resultadoContacto ?? "naoAtendeu"}`, detalhe: "", chaveDetalhe: "pessoasPagina.seed.callNote",
-    },
-    {
-      ...base, id: `${p.id}-a3`, tipo: "historico", quando: p.desde ?? ultimo,
+      ...base, id: `${p.id}-a3`, tipo: "historico", quando: p.desde ?? ultimo, hora: "09:00",
       titulo: "", chaveTitulo: "pessoasPagina.seed.created", detalhe: "", chaveDetalhe: `pessoasPagina.origin.${p.origem}`,
     },
   ];
+  if (p.resultadoContacto) {
+    itens.push({
+      ...base, id: `${p.id}-a1`, tipo: "chamada", quando: ultimo, hora: "10:30",
+      titulo: "", chaveTitulo: `pessoasPagina.result.${p.resultadoContacto}`, detalhe: "", chaveDetalhe: "pessoasPagina.seed.callNote",
+    });
+  }
   if (p.ultimoContactoDias >= 3) {
     itens.push({
-      ...base, id: `${p.id}-a2`, tipo: "email", quando: somarDias(ultimo, -2),
+      ...base, id: `${p.id}-a2`, tipo: "email", quando: somarDias(ultimo, -2), hora: "15:10",
       titulo: "", chaveTitulo: "pessoasPagina.seed.emailSent", detalhe: "", chaveDetalhe: "pessoasPagina.seed.emailDetail",
     });
   }

@@ -84,7 +84,7 @@ const NegocioMetas = () => {
   return (
     <WorkflowExemploProvider>
       <DadosPainelProvider pessoaDe={pessoaDe} detalheDe={detalheDe}>
-        <div className="mx-auto w-full max-w-6xl space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
+        <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
           {/* Como no Inventário: a barra de abas no topo, com a linha fina por baixo, e só depois migalhas e título. */}
           <Tabs value={vista} onValueChange={(v) => { if (ehVista(v)) mudarVista(v); }} className="space-y-5">
             <ListaAbas aria-label={t("businessGoals.tabs.label")}>

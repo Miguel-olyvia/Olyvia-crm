@@ -4,8 +4,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, LayoutList, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Sun, Wind, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PAPEL_ROT, contagem, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
-import type { Negocio } from "./motor";
+import { PAPEL_ROT, alternarVarios, contagem, listaVarios, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
+import { eur, type Negocio } from "./motor";
+import { CAMPOS_COM_EFEITO, efeitosDoCampo } from "./efeitosLevantamento";
 import { Chip, type Ctx } from "./pecas";
 
 export const INPUT =
@@ -51,7 +52,7 @@ export function proximoVazio(g: Grupo, f: Record<string, string>): string | null
 // O ícone e a cor de cada bloco dos formulários (ajuda a encontrar o sítio de relance).
 const BLOCO: Record<string, [LucideIcon, string]> = {
   "Acesso e estacionamento": [Car, "bg-sky-100 text-sky-700"], "O prédio": [Building2, "bg-indigo-100 text-indigo-700"],
-  "A casa": [Home, "bg-amber-100 text-amber-800"], "Instalações": [Zap, "bg-yellow-100 text-yellow-800"],
+  "O espaço": [Home, "bg-amber-100 text-amber-800"], "Instalações": [Zap, "bg-yellow-100 text-yellow-800"],
   "Durante a obra": [ShieldAlert, "bg-rose-100 text-rose-700"], "A divisão": [Ruler, "bg-violet-100 text-violet-700"],
   "Instalações da divisão": [Plug, "bg-teal-100 text-teal-700"], "Trabalho e proteções": [HardHat, "bg-orange-100 text-orange-700"],
   "Telhado": [Sun, "bg-amber-100 text-amber-800"], "Consumo": [Zap, "bg-yellow-100 text-yellow-800"], "Unidade exterior": [Wind, "bg-sky-100 text-sky-700"],
@@ -111,6 +112,22 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3, plano }: FxPro
   );
 }
 
+/** O que a resposta faz ao orçamento, logo por baixo do campo (efeitosLevantamento.ts). */
+function Impacto({ k, d, simples }: { k: string; d: Negocio; simples?: boolean }) {
+  if (!CAMPOS_COM_EFEITO.has(k)) return null;
+  const ef = efeitosDoCampo(k, d.f);
+  if (!ef.length) return null;
+  return (
+    <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-success/10 px-2 py-1 font-medium text-success animate-in fade-in-0", simples ? "mt-1.5 text-sm" : "text-[11px]")}>
+      {ef.map((e) => (
+        <span key={e.d}>
+          {e.t === "linha" ? `+ ${eur(e.preco)} € no orçamento · ${e.d}` : e.t === "percent" ? `+ ${Math.round(e.pct! * 100)}% sobre os serviços · ${e.d}` : e.d}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: Def; seguinte: boolean; erro?: boolean }) {
   const val = d.f[c.k] || "";
   // o cursor vai sozinho para o próximo campo de escrever, se ninguém estiver a escrever noutro
@@ -125,7 +142,8 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   }, [seguinte, ro, c.t, c.k, d.id]);
   const id = `fx-${c.k}-${d.id}`;
   const set = (x: string) => run(() => A.campo(d.id, c.k, x));
-  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} sugerido={!!d.sug?.[c.k]} />;
+  const impacto = ro ? null : <Impacto k={c.k} d={d} simples={simples} />;
+  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} sugerido={!!d.sug?.[c.k]} impacto={impacto} />;
   const largo = c.t === "texto_longo";
   const caixa = cn(
     "relative grid content-start gap-1.5 rounded-xl transition-all duration-300 animate-in fade-in-0",
@@ -145,7 +163,22 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   if (c.t === "contador") return <div className={caixa}>{rotulo}<Contador c={c} val={val} set={set} rot={id + "-rot"} erro={erro} /></div>;
   let ctl: ReactNode;
   let botoes = false;
-  if (c.t === "sim_nao" || c.t === "escolha") {
+  if (c.t === "varios") {
+    // escolha múltipla: botões que ligam e desligam; o valor fica "A, B"
+    const sel = listaVarios(val);
+    botoes = true;
+    ctl = (
+      <div className="inline-flex w-fit flex-wrap gap-0.5 rounded-lg border border-input bg-background p-0.5" role="group" aria-label={c.l}>
+        {c.op!.map((x) => (
+          <button key={x} type="button" aria-pressed={sel.includes(x)} onClick={() => set(alternarVarios(c.op!, val, x))}
+            className={cn("rounded-md px-2.5 py-1 text-sm transition-all duration-200",
+              sel.includes(x) ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+            {x}
+          </button>
+        ))}
+      </div>
+    );
+  } else if (c.t === "sim_nao" || c.t === "escolha") {
     const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
     botoes = op.length <= 3 && op.join("").length <= 30;
     ctl = botoes ? (
@@ -182,8 +215,8 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   }
   const ajuda = c.ajuda && <small className="text-[11px] text-muted-foreground">{c.ajuda}</small>;
   // os botões de escolha não vão dentro de um <label>: um clique no rótulo carregava no primeiro
-  if (botoes) return <div className={caixa}>{rotulo}{ctl}{ajuda}</div>;
-  return <label htmlFor={id} className={caixa}>{rotulo}{ctl}{ajuda}</label>;
+  if (botoes) return <div className={caixa}>{rotulo}{ctl}{ajuda}{impacto}</div>;
+  return <label htmlFor={id} className={caixa}>{rotulo}{ctl}{ajuda}{impacto}</label>;
 }
 
 /** Resumo de um grupo em pastilhas: os primeiros valores preenchidos. */
@@ -307,7 +340,7 @@ export function Assistente({ passos, ativo, setAtivo, fim }: { passos: Passo[]; 
 /* ------------------------------------------------------------------ proposta simples */
 // Cada pergunta é uma linha: a pergunta à esquerda e a resposta à direita.
 // No telemóvel, a resposta passa para baixo da pergunta.
-function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean; erro?: boolean; seguinte?: boolean; sugerido?: boolean }) {
+function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean; erro?: boolean; seguinte?: boolean; sugerido?: boolean; impacto?: ReactNode }) {
   if (ro) return (
     <div className="grid gap-0.5">
       <span className="text-sm text-muted-foreground">{c.l}</span>
@@ -319,7 +352,10 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: De
   let ctl: ReactNode;
   // largo: a resposta vai para baixo da pergunta (muitas opções ou texto longo)
   let largo = false, comLabel = false;
-  if (c.t === "sim_nao" || c.t === "escolha") {
+  if (c.t === "varios") {
+    largo = c.op!.length > 3 || c.op!.join("").length > 34;
+    ctl = <Botoes op={c.op!} val={val} set={set} rot={rot} desc={desc} erro={erro} largo={largo} multi />;
+  } else if (c.t === "sim_nao" || c.t === "escolha") {
     // escolher é mais rápido do que escrever: botões sempre, nunca uma lista que abre
     const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
     largo = op.length > 3 || op.join("").length > 34;
@@ -355,6 +391,7 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: De
         {sugerido && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-xs text-muted-foreground" title="Preenchido pela Olyvia a partir de outras respostas. Confirme ou mude."><Sparkles className="h-3 w-3" aria-hidden="true" />Sugerido</span>}
         {c.ajuda && <p id={id + "-ajuda"} className="mt-0.5 text-sm text-muted-foreground">{c.ajuda}</p>}
         {erro && <p id={id + "-erro"} className="mt-1 flex items-center gap-1.5 text-sm font-medium text-destructive animate-in fade-in-0"><AlertCircle className="h-4 w-4" aria-hidden="true" />Falta preencher</p>}
+        {impacto}
       </div>
       {ctl}
     </div>
@@ -363,13 +400,16 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: De
 
 type Ctl = { val: string; set: (x: string) => void; rot: string; desc?: string; erro?: boolean };
 
-function Botoes({ op, val, set, rot, desc, erro, largo }: Ctl & { op: string[]; largo?: boolean }) {
+function Botoes({ op, val, set, rot, desc, erro, largo, multi }: Ctl & { op: string[]; largo?: boolean; multi?: boolean }) {
+  // multi: escolha múltipla ("varios"), cada botão liga e desliga a sua opção
+  const ligado = (x: string) => (multi ? listaVarios(val).includes(x) : val === x);
   return (
     <div role="group" aria-labelledby={rot} aria-describedby={desc} className={cn("flex flex-wrap gap-2", !largo && "sm:justify-end")}>
       {op.map((x) => (
-        <button key={x} type="button" aria-pressed={val === x} aria-invalid={erro || undefined} onClick={() => set(val === x ? "" : x)}
+        <button key={x} type="button" aria-pressed={ligado(x)} aria-invalid={erro || undefined}
+          onClick={() => set(multi ? alternarVarios(op, val, x) : val === x ? "" : x)}
           className={cn("min-h-11 min-w-14 rounded-lg border px-4 text-[15px] transition-colors duration-150",
-            val === x ? "border-primary bg-primary text-primary-foreground" : cn("bg-card text-foreground hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
+            ligado(x) ? "border-primary bg-primary text-primary-foreground" : cn("bg-card text-foreground hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
           {x}
         </button>
       ))}
