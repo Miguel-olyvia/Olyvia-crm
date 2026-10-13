@@ -21,3 +21,20 @@ describe("fotografias por etapa da visita", () => {
     expect(fotosPor(d.visita).area).toBe(3);
   });
 });
+
+describe("pontos de água fria e quente", () => {
+  it("negócios de antes: fria = pontos de água, quente = 0; mudar uma refaz o total que os serviços usam", async () => {
+    const { camposMedida, LINHAS, medida, medidaEmFalta, porMedida } = await import("./motor");
+    expect(camposMedida(LINHAS.wc).map(([k]) => k)).toEqual(["pav", "par", "ptf", "ptq", "pcs"]);
+    const m = { pav: 4, par: 14, pts: 3, pcs: 3 } as Parameters<typeof medida>[0];
+    expect([medida(m, "ptf"), medida(m, "ptq")]).toEqual([3, 0]);
+    expect(medidaEmFalta(m, "ptq")).toBe(false);
+    porMedida(m, "ptq", 2);
+    expect(m).toMatchObject({ ptf: 3, ptq: 2, pts: 5 });
+    porMedida(m, "ptf", 0);
+    expect(m.pts).toBe(2);
+    expect(medidaEmFalta(m, "ptf")).toBe(false); // há pontos de água (quentes)
+    porMedida(m, "ptq", 0);
+    expect(medidaEmFalta(m, "ptf")).toBe(true);
+  });
+});

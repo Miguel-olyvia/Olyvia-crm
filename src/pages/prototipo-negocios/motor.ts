@@ -52,7 +52,8 @@ const SVC0: Record<string, Servico> = {
 };
 
 export type MedKey = "pav" | "par" | "pts" | "pcs";
-export type Medidas = Record<MedKey, number>;
+/** pts é o total dos pontos de água (o que os serviços usam); ptf / ptq são os pontos de água fria e quente pedidos na visita (13/10). */
+export type Medidas = Record<MedKey, number> & { ptf?: number; ptq?: number };
 export type StockKey = "cp" | "pv" | "san" | "base" | "cim" | "mov" | "banc";
 export type LinhaId = "wc" | "coz";
 
@@ -449,6 +450,30 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
   return o;
 }
 
+/* Medidas da visita (13/10): os pontos de água pedem-se em fria e quente; pts (o que os serviços usam) é a soma.
+   Negócios de antes (sem ptf/ptq): fria = pts, quente = 0, e os totais ficam iguais. */
+export type CampoMedida = MedKey | "ptf" | "ptq";
+/** Os campos de medida a pedir na visita, pela ordem da linha: "Pontos de água" dá "fria" e "quente". */
+export function camposMedida(L: { med: Partial<Record<MedKey, string>> }): [CampoMedida, string][] {
+  return (Object.entries(L.med) as [MedKey, string][]).flatMap(([k, l]): [CampoMedida, string][] =>
+    k === "pts" ? [["ptf", "Pontos de água fria"], ["ptq", "Pontos de água quente"]] : [[k, l]]);
+}
+export function medida(m: Medidas, k: CampoMedida): number {
+  if (k === "ptq") return m.ptq ?? 0;
+  if (k === "ptf") return m.ptf ?? Math.max(0, (m.pts || 0) - (m.ptq ?? 0));
+  return m[k] || 0;
+}
+/** Muda uma medida; mudar a fria ou a quente refaz o total dos pontos de água. */
+export function porMedida(m: Medidas, k: CampoMedida, n: number) {
+  if (k === "ptf" || k === "ptq") {
+    const f = medida(m, "ptf"), q = medida(m, "ptq");
+    m.ptf = k === "ptf" ? n : f; m.ptq = k === "ptq" ? n : q;
+    m.pts = m.ptf + m.ptq;
+  } else m[k] = n;
+}
+/** Se a medida falta para fechar a visita: a quente pode ser 0 (basta haver pontos de água no total). */
+export const medidaEmFalta = (m: Medidas, k: CampoMedida) => (k === "ptq" ? false : k === "ptf" ? !(medida(m, "ptf") + medida(m, "ptq") > 0) : !(m[k] > 0));
+
 /** As fotografias da visita por etapa (13/10): exterior, interior e área de intervenção. visita.fotos fica o total. */
 export type EtapaFotos = "exterior" | "interior" | "area";
 export const ETAPAS_FOTOS: EtapaFotos[] = ["exterior", "interior", "area"];
@@ -781,8 +806,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
     if (!visitaFeita(d)) x.push({ id: "visitas", t: "Pelo menos uma visita feita" });
-    const semMedida = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0));
-    if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map((k) => L.med[k]).join(", ") });
+    const semMedida = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k));
+    if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map(([, l]) => l).join(", ") });
     const servicos = servicosVisita(d).length;
     if (!servicos) x.push({ id: "nec", t: "Pelo menos um serviço" });
     // os serviços que obrigam a produto: a pergunta respondida e o produto escolhido

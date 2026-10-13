@@ -10,8 +10,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, SLOTS, visitaFeita, visitas,
-  alertas, bloqueado, conflitos, custoUn, eur, faltaProdutosVisita, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
-  type Estado, type MedKey, type Negocio, type Papel, type SvcId,
+  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
+  type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
@@ -262,8 +262,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       ) },
     ];
   } else if (d.fase === 2) {
-    const medOk = (Object.keys(L.med) as MedKey[]).filter((k) => v.med[k] > 0).length;
-    const nMed = Object.keys(L.med).length;
+    const CM = camposMedida(L);
+    const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
+    const nMed = CM.length;
     const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
     passos = [
       { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) ? 1 : 0), n: cv.n + 1 },
@@ -282,20 +283,23 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       ) },
       { ...g(INTERIOR, Home), corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
       { ...g(AREA, Wrench), corpo: <div className="space-y-6"><Campos grupo={E(AREA)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
-      { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: (Object.entries(L.med) as [MedKey, string][]).filter(([k]) => v.med[k] > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(v.med[k])}`), corpo: (
+      { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`), corpo: (
         <div className="space-y-2">
-          <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. Todas são precisas para fechar o levantamento.</p>
-          <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-4"}>
-            {(Object.entries(L.med) as [MedKey, string][]).map(([k, l]) => (
-              <label key={k} className={cn(simples ? ROT : "grid gap-1.5 rounded-xl text-xs font-medium text-muted-foreground transition-all", !simples && !(v.med[k] > 0) && (Object.keys(L.med) as MedKey[]).find((x) => !(v.med[x] > 0)) === k && "rounded-lg bg-primary/[0.04] ring-2 ring-primary/40 ring-offset-[6px] ring-offset-card")}>
+          <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. Todas são precisas para fechar o levantamento (os pontos de água quente podem ser 0).</p>
+          <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-5"}>
+            {CM.map(([k, l]) => {
+              const falta = medidaEmFalta(v.med, k), val = medida(v.med, k);
+              return (
+              <label key={k} className={cn(simples ? ROT : "grid gap-1.5 rounded-xl text-xs font-medium text-muted-foreground transition-all", !simples && falta && CM.find(([x]) => medidaEmFalta(v.med, x))?.[0] === k && "rounded-lg bg-primary/[0.04] ring-2 ring-primary/40 ring-offset-[6px] ring-offset-card")}>
                 {l}
-                <input key={k + v.med[k]} type="number" min="0" step="0.5" defaultValue={v.med[k] || ""} id={`med-${k}-${d.id}`}
-                  className={cn(INP, aValidar(d, "medidas") && !(v.med[k] > 0) && "border-destructive ring-1 ring-destructive/40")}
-                  aria-invalid={(aValidar(d, "medidas") && !(v.med[k] > 0)) || undefined}
-                  onBlur={(e) => { const n = numero(e.target.value); if ((isNaN(n) ? 0 : n) !== v.med[k]) run(() => { v.med[k] = isNaN(n) ? 0 : n; }); }}
+                <input key={k + val} type="number" min="0" step="0.5" defaultValue={val || ""} id={`med-${k}-${d.id}`}
+                  className={cn(INP, aValidar(d, "medidas") && falta && "border-destructive ring-1 ring-destructive/40")}
+                  aria-invalid={(aValidar(d, "medidas") && falta) || undefined}
+                  onBlur={(e) => { const n = numero(e.target.value), x = isNaN(n) ? 0 : n; if (x !== val) run(() => porMedida(v.med, k, x)); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
               </label>
-            ))}
+              );
+            })}
           </div>
           {/* notas livres sobre as medidas (opcional): ex. "parede do fundo com 2,4 m até ao teto falso" */}
           <div className="pt-4">
@@ -348,7 +352,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
-    if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0)).length;
+    if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
     // as fotografias contam no total; o aviso fica na área de intervenção (onde está "o cliente não quis")
     if (ps.id === AREA.titulo && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = (ps.falta || 0) + 1;
