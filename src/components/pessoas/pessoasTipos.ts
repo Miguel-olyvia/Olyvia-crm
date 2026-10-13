@@ -21,6 +21,44 @@ export interface Pessoa {
   etapa: EtapaPessoa;
   /** Campo de exemplo: dias desde o último contacto. */
   ultimoContactoDias: number;
+  /** Campos de exemplo da ficha (todos opcionais): a empresa, a morada, o NIF e o resto. */
+  empresa?: { nome: string; contacto?: string; nif?: string };
+  morada?: { linha: string; cp: string; localidade: string };
+  distrito?: string;
+  nif?: string;
+  qualificacao?: QualificacaoPessoa;
+  /** O resultado da última chamada (ver `opcoesPessoa.ts`). */
+  resultadoContacto?: ResultadoContacto;
+  /** AAAA-MM-DD. */
+  proximoContacto?: string | null;
+  /** AAAA-MM-DD: cliente ou lead desde. */
+  desde?: string;
+  /** Marcada como perdida na ficha: o motivo e o dia (AAAA-MM-DD). */
+  perdida?: { motivo: MotivoPerda; data: string };
+}
+
+export type QualificacaoPessoa = "MQL" | "SQL";
+export type ResultadoContacto = "atendeuInteressado" | "atendeuMaisTarde" | "naoAtendeu" | "semInteresse" | "numeroErrado";
+export type MotivoPerda = "preco" | "adiou" | "outraEmpresa" | "semResposta" | "naoProcurava";
+export type PassoChamada = "ligarAmanha" | "ligarHoje" | "visitaOuOrcamento" | "nenhum";
+
+export type TipoAtividade = "chamada" | "nota" | "email" | "historico";
+
+/**
+ * Uma linha da atividade de uma pessoa. `titulo` e `detalhe` são texto escrito à mão (nunca uma chave); quando o texto
+ * é da aplicação, vão vazios e `chaveTitulo` / `chaveDetalhe` levam a chave de tradução. `quando` é AAAA-MM-DD;
+ * `exemplo` é falso nos registos feitos nesta sessão.
+ */
+export interface ItemAtividade {
+  id: string;
+  pessoaId: string;
+  tipo: TipoAtividade;
+  titulo: string;
+  detalhe: string;
+  chaveTitulo?: string;
+  chaveDetalhe?: string;
+  quando: string;
+  exemplo: boolean;
 }
 
 /** Negócio fora do quadro do mês: acabou ganho ou perdido num mês anterior (AAAA-MM). */
@@ -85,6 +123,11 @@ export interface NotaPessoa {
 export interface EstadoPessoas {
   submissoes: Submissao[];
   notas: NotaPessoa[];
+  pessoas: Pessoa[];
+  /** A atividade registada nesta sessão, a mais recente primeiro (a de exemplo junta-se na leitura). */
+  atividade: ItemAtividade[];
+  /** Quem foi contactada nesta sessão: deixa de contar como "Voltou a contactar". */
+  contactadas: string[];
 }
 
 export type ChipPessoa = "todos" | "leads" | "clientes" | "semNegocio" | "voltou" | "semContacto";

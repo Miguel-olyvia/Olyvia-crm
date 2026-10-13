@@ -14,6 +14,19 @@ export function pessoasComPendentes(submissoes: readonly Submissao[]): Set<strin
   return new Set(submissoes.flatMap((s) => s.candidatas.map((c) => c.pessoaId)));
 }
 
+/**
+ * "Voltou a contactar": quem tem submissões pendentes e ainda não foi respondida (só um resultado "atendeu" conta, ver
+ * `registarChamada`) nem marcada como perdida.
+ */
+export function pessoasQueVoltaram(
+  estado: Pick<EstadoPessoas, "pessoas" | "contactadas">, submissoes: readonly Submissao[],
+): Set<string> {
+  const ids = pessoasComPendentes(submissoes);
+  estado.contactadas.forEach((id) => ids.delete(id));
+  estado.pessoas.filter((p) => p.perdida).forEach((p) => ids.delete(p.id));
+  return ids;
+}
+
 /** A pessoa a quem a nota vai: a escolhida (obrigatória num conflito) ou a única candidata; `null` se não for válida. */
 function pessoaDaNota(s: Submissao, escolhida?: string): string | null {
   const ids = s.candidatas.map((c) => c.pessoaId);
@@ -26,7 +39,9 @@ function pessoaDaNota(s: Submissao, escolhida?: string): string | null {
  * Devolve o estado novo: a submissão sai da lista e a nota entra na ficha. Se a submissão não
  * existe ou a pessoa não é válida, devolve o próprio estado, sem mudanças.
  */
-export function resolverSubmissao(estado: EstadoPessoas, submissaoId: string, pessoaId?: string): EstadoPessoas {
+export function resolverSubmissao<E extends Pick<EstadoPessoas, "submissoes" | "notas">>(
+  estado: E, submissaoId: string, pessoaId?: string,
+): E {
   const submissao = estado.submissoes.find((s) => s.id === submissaoId);
   const destino = submissao ? pessoaDaNota(submissao, pessoaId) : null;
   if (!submissao || destino === null) return estado;
@@ -39,6 +54,7 @@ export function resolverSubmissao(estado: EstadoPessoas, submissaoId: string, pe
     campos: submissao.campos,
   };
   return {
+    ...estado,
     submissoes: estado.submissoes.filter((s) => s.id !== submissaoId),
     notas: [...estado.notas, nota],
   };

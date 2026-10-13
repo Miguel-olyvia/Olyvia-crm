@@ -33,7 +33,7 @@ describe("Pessoas: arranque", () => {
     expect(screen.getByText("13 pessoas · 6 clientes · 3 sem negócio")).toBeInTheDocument();
     const tabela = screen.getByRole("table");
     expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 13);
-    expect(screen.getByRole("tab", { name: "Submissões pendentes (6)" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Submissões, 6 pendentes" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Pessoas" })).toHaveAttribute("aria-selected", "true");
   });
 });
@@ -45,6 +45,6 @@ describe("Submissões pendentes: arranque", () => {
     const cartoes = within(lista).getAllByRole("article");
     expect(cartoes).toHaveLength(6);
     expect(within(cartoes[0]).getByText("Conflito")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Submissões pendentes (6)" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Submissões, 6 pendentes" })).toHaveAttribute("aria-selected", "true");
   });
 });
