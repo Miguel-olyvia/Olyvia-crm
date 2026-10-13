@@ -18,8 +18,8 @@ describe("DefinicoesV2", () => {
   it("é uma só página: todas as secções e âncoras do índice existem, sem separadores nem diálogos", () => {
     const { container } = pagina();
     expect(screen.getByRole("heading", { level: 1, name: "Definições" })).toBeInTheDocument();
-    for (const s of SECOES) expect(container.querySelector(`#${s.id}`)).not.toBeNull();
-    for (const e of INDICE) expect(container.querySelector(`#${e.ancora}`), e.ancora).not.toBeNull();
+    for (const s of SECOES.filter((x) => !x.soDirecao)) expect(container.querySelector(`#${s.id}`)).not.toBeNull();
+    for (const e of INDICE.filter((x) => !x.soDirecao)) expect(container.querySelector(`#${e.ancora}`), e.ancora).not.toBeNull();
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();

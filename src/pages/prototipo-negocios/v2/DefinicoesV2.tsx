@@ -2,8 +2,9 @@
 // âncoras, sem separadores nem diálogos; edita-se na própria linha. O que o motor já tem (margens da
 // empresa, estrutura, campos, setor, aspeto) lê-se e muda-se no Estado, como nas Definições simples;
 // o resto vive numa store de módulo (definicoesDados.ts). O único botão primário é "Aplicar" do arranque.
+// Funil e pontuação, Agenda, Marketing e Plataforma (só para a Direção) estão em DefinicoesMais.tsx.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, Minus, Plus, RotateCcw, Search, Send } from "lucide-react";
+import { Check, RotateCcw, Search, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorFases, ModelosSetor } from "../CamposEditor";
@@ -11,19 +12,16 @@ import { ESTR, FASES, PAPEIS, eur, type Papel } from "../motor";
 import { IconeFase, type Ctx } from "../pecas";
 import { useAviso } from "../useAviso";
 import { AjudaBotao, AjudaTexto, ComAjuda } from "./Ajuda";
+import { BTN, CARTAO, Chip, Escolhas, INP, Interruptor, LINHA, Passo, Secao, Sub } from "./pecasDefinicoes";
 import {
   OPCOES_COBRA, OPCOES_EMPRESAS, OPCOES_PESSOAS, SEM_RESPOSTAS, alternarServico, emFalta, escolherSetor, planoArranque, servicosDoSetor, type Respostas,
 } from "./arranque";
 import {
   PERFIS, TIPOS_LIXO, esquecerDefinicoes, mudarDefinicoes, reenviar, restaurar, useDefinicoes, type Modelo, type TipoLixo,
 } from "./definicoesDados";
-import { SECOES, procurar, tituloSecao } from "./definicoesIndice";
+import { indiceVisivel, procurar, secoesVisiveis, tituloSecao } from "./definicoesIndice";
+import { Agenda, FunilPontuacao, Marketing, Plataforma } from "./DefinicoesMais";
 import { RESUMO_SETOR, SETORES_V2, type Termos } from "./setoresV2";
-
-const CARTAO = "divide-y divide-border rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
-const LINHA = "flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-5";
-const INP = "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
-const BTN = "h-11 px-4 text-[15px]";
 
 const OPCOES_TERMOS: Record<keyof Termos, { rot: string; op: string[] }> = {
   cliente: { rot: "Quem compra", op: ["Cliente", "Condómino", "Empresa"] },
@@ -49,7 +47,8 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
   const [aviso, anunciar] = useAviso();
   const [q, setQ] = useState("");
   const pesquisa = useRef<HTMLInputElement>(null);
-  const achados = useMemo(() => procurar(q), [q]);
+  const direcao = S.role === "direcao";
+  const achados = useMemo(() => procurar(q, indiceVisivel(direcao)), [q, direcao]);
 
   useEffect(() => {
     const tecla = (e: KeyboardEvent): void => {
@@ -99,7 +98,7 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
       </div>
 
       <nav aria-label="Nesta página" className="mt-4 flex flex-wrap gap-x-1 gap-y-0">
-        {SECOES.map((s) => (
+        {secoesVisiveis(direcao).map((s) => (
           <a key={s.id} href={`#${s.id}`} onClick={(ev) => { ev.preventDefault(); irPara(s.id); }}
             className="inline-flex min-h-11 items-center rounded-lg px-2 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">{s.titulo}</a>
         ))}
@@ -147,6 +146,9 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
         </Sub>
       </Secao>
 
+      {/* ---------------------------------------------------------- Funil e pontuação das leads */}
+      <FunilPontuacao anunciar={anunciar} />
+
       {/* ---------------------------------------------------------- Orçamento */}
       <Secao id="orcamento" titulo="Orçamento" ajuda="Abaixo da margem mínima a proposta só sai com aprovação da Direção. A margem-alvo é a que as sugestões de preço procuram. Cada linha de serviço pode ter as suas.">
         <Sub id="orcamento-margens" titulo="Margens">
@@ -176,6 +178,9 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
         </Sub>
         <Sub id="orcamento-modelos" titulo="Modelos de orçamento e PDF"><ListaModelos itens={D.modelosOrc} /></Sub>
       </Secao>
+
+      {/* ---------------------------------------------------------- Agenda */}
+      <Agenda anunciar={anunciar} />
 
       {/* ---------------------------------------------------------- Documentos */}
       <Secao id="documentos" titulo="Documentos" ajuda={`Os modelos de onde saem a proposta, o contrato e os emails. "Usado em" diz onde cada um entra; para mudar o texto abre-se o modelo.`}>
@@ -227,6 +232,9 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
         </Sub>
       </Secao>
 
+      {/* ---------------------------------------------------------- Marketing */}
+      <Marketing anunciar={anunciar} />
+
       {/* ---------------------------------------------------------- Equipa e acessos */}
       <Secao id="equipa" titulo="Equipa e acessos" ajuda="Cada pessoa tem um perfil. Os perfis são fixos: assim ninguém fica com acessos a meio. Para dar mais acesso, muda-se o perfil.">
         <Sub id="equipa-utilizadores" titulo="Utilizadores">
@@ -264,6 +272,9 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
         </Sub>
       </Secao>
 
+      {/* ---------------------------------------------------------- Plataforma (só a Direção) */}
+      {direcao && <Plataforma />}
+
       {/* ---------------------------------------------------------- Dados */}
       <Secao id="dados" titulo="Dados" ajuda="O que se apaga fica 30 dias no Lixo e pode restaurar-se. Depois sai de vez. Só a Direção vê o Lixo.">
         <Lixo anunciar={anunciar} />
@@ -291,68 +302,6 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
 }
 
 /* ------------------------------------------------------------------ peças da página */
-
-function Secao({ id, titulo, ajuda, children }: { id: string; titulo: string; ajuda: string; children: ReactNode }) {
-  return (
-    <section aria-labelledby={`${id}-t`} className="mt-14">
-      <ComAjuda titulo={titulo}>
-        <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
-          <h2 id={id} tabIndex={-1} className="scroll-mt-6 text-xl font-semibold outline-none"><span id={`${id}-t`}>{titulo}</span></h2>
-          <AjudaBotao />
-        </div>
-        <AjudaTexto>{ajuda}</AjudaTexto>
-      </ComAjuda>
-      {children}
-    </section>
-  );
-}
-
-function Sub({ id, titulo, children }: { id: string; titulo: string; children: ReactNode }) {
-  return (
-    <div className="mt-6">
-      <h3 id={id} tabIndex={-1} className="mb-2 scroll-mt-6 text-base font-semibold outline-none">{titulo}</h3>
-      {children}
-    </div>
-  );
-}
-
-function Escolhas({ rot, op, v, onSet }: { rot: string; op: string[]; v: string; onSet: (v: string) => void }) {
-  return (
-    <div role="group" aria-label={rot} className={LINHA}>
-      <span className="w-32 shrink-0 text-[15px] font-medium">{rot}</span>
-      <span className="flex flex-1 flex-wrap gap-2">
-        {op.map((o) => (
-          <button key={o} type="button" aria-pressed={v === o} onClick={() => v !== o && onSet(o)}
-            className={cn("inline-flex min-h-11 items-center rounded-full border px-4 text-[15px]", v === o ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:bg-muted")}>{o}</button>
-        ))}
-      </span>
-    </div>
-  );
-}
-
-function Passo({ rot, v, un, onSet, passo = 1, max }: { rot: string; v: number; un: string; onSet: (n: number) => void; passo?: number; max: number }) {
-  return (
-    <div role="group" aria-label={rot} className={cn(LINHA, "justify-between")}>
-      <span className="text-[15px] font-medium">{rot}</span>
-      <span className="inline-flex items-center rounded-lg border border-input bg-card p-0.5">
-        <button type="button" aria-label={`Menos · ${rot}`} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => onSet(Math.max(0, v - passo))}><Minus className="h-4 w-4" /></button>
-        <output className="w-16 text-center text-[16px] font-medium tabular-nums">{un === "€" ? `${v} €` : `${v}${un}`}</output>
-        <button type="button" aria-label={`Mais · ${rot}`} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => onSet(Math.min(max, v + passo))}><Plus className="h-4 w-4" /></button>
-      </span>
-    </div>
-  );
-}
-
-function Interruptor({ on, onClick, titulo, texto }: { on: boolean; onClick: () => void; titulo: string; texto: string }) {
-  return (
-    <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex min-h-14 w-full items-center justify-between gap-4 py-3 text-left">
-      <span><span className="block text-[15px] font-medium">{titulo}</span><span className="block text-[15px] text-muted-foreground">{texto}</span></span>
-      <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", on ? "bg-primary" : "bg-input")}>
-        <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", on ? "left-[22px]" : "left-0.5")} />
-      </span>
-    </button>
-  );
-}
 
 function ListaModelos({ itens }: { itens: Modelo[] }) {
   return (
@@ -412,13 +361,6 @@ function Pergunta({ n, titulo, children }: { n: number; titulo: string; children
       <legend className="float-left mb-3 w-full text-[15px] font-medium">{n}. {titulo}</legend>
       <div className="clear-left flex flex-wrap gap-2">{children}</div>
     </fieldset>
-  );
-}
-
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" aria-pressed={on} onClick={onClick}
-      className={cn("inline-flex min-h-11 items-center rounded-full border px-4 text-[15px]", on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:bg-muted")}>{children}</button>
   );
 }
 

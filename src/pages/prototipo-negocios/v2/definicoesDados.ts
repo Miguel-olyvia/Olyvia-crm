@@ -5,6 +5,9 @@
 // Tudo de exemplo.
 import { useSyncExternalStore } from "react";
 import { FASES, type Papel } from "../motor";
+import type { Canal } from "../toquesDocs";
+import { agendaInicial, type Quadro, type Recurso, type RegrasMarcacao } from "./agendaDefinicoes";
+import { AVANCO_INICIAL, LIMIARES_INICIAIS, REGRAS_PONTOS_INICIAIS, type Limiares, type RegraPontos, type RegrasAvanco } from "./funil";
 import type { Termos } from "./setoresV2";
 
 export interface MargemLinha { linha: string; min: number; alvo: number }
@@ -29,6 +32,16 @@ export interface DadosDefinicoes {
   falhas: Falha[];
   utilizadores: Utilizador[];
   lixo: ItemLixo[];
+  /** Agenda: quadros, recursos e regras de marcação (antes em separadores do /scheduling). */
+  quadros: Quadro[];
+  recursos: Recurso[];
+  marcacao: RegrasMarcacao;
+  /** Funil e pontuação das leads (antes no diálogo de Leads). */
+  avanco: RegrasAvanco;
+  regrasPontos: RegraPontos[];
+  limiares: Limiares;
+  /** Tipos de canal: se cada canal é pago (os canais são fixos, os de campanhas.ts). */
+  canalPago: Record<Canal, boolean>;
 }
 
 export function dadosIniciais(): DadosDefinicoes {
@@ -75,6 +88,11 @@ export function dadosIniciais(): DadosDefinicoes {
       { id: 5, tipo: "Tarefa", nome: "Ligar ao fornecedor de louças", quando: "há 2 semanas", por: "Nuno" },
       { id: 6, tipo: "Negócio", nome: "Casa de banho · Teste", quando: "há 3 semanas", por: "Direção" },
     ],
+    ...(({ quadros, recursos, regras }) => ({ quadros, recursos, marcacao: regras }))(agendaInicial()),
+    avanco: [...AVANCO_INICIAL],
+    regrasPontos: structuredClone(REGRAS_PONTOS_INICIAIS),
+    limiares: { ...LIMIARES_INICIAIS },
+    canalPago: { ...CANAL_PAGO_INICIAL },
   };
 }
 
@@ -85,6 +103,25 @@ export const PERFIS: { id: Papel; nome: string; faz: string; naoFaz: string }[] 
   { id: "financeiro", nome: "Financeiro", faz: "Faturas, pagamentos, recibos e relatórios de valores.", naoFaz: "Não mexe em orçamentos nem no Catálogo." },
   { id: "armazem", nome: "Armazém", faz: "Inventário, encomendas a fornecedores e receções.", naoFaz: "Não vê negócios nem valores de venda." },
   { id: "operacoes", nome: "Operações", faz: "Obras, planeamento, técnicos e materiais da obra.", naoFaz: "Não vê margens nem propostas." },
+];
+
+/** Pago por omissão: os canais onde se compra espaço (anúncios, outdoor, feiras). */
+const CANAL_PAGO_INICIAL: Record<Canal, boolean> = {
+  "Redes sociais pagas": true, Pesquisa: true, Offline: true, Parcerias: false, Outros: false,
+};
+
+export type TipoPlataforma = "Acesso de suporte" | "Entrada na conta" | "Pedido de apagamento (RGPD)";
+export interface LinhaPlataforma { id: number; tipo: TipoPlataforma; texto: string; quem: string; quando: string; estado: string }
+
+/** A Plataforma (só para o administrador da Olyvia): uma lista com os acessos de suporte, o registo de
+ * entradas e os pedidos de apagamento RGPD. Só de leitura e de exemplo. */
+export const PLATAFORMA: LinhaPlataforma[] = [
+  { id: 1, tipo: "Acesso de suporte", texto: "Suporte Olyvia entrou na conta para ver um erro no PDF", quem: "suporte@olyvia.pt", quando: "hoje, 10:12", estado: "Termina às 12:12" },
+  { id: 2, tipo: "Entrada na conta", texto: "Entrada com palavra-passe", quem: "ruben@mudelar.pt", quando: "hoje, 08:47", estado: "Aceite" },
+  { id: 3, tipo: "Entrada na conta", texto: "Palavra-passe errada 3 vezes", quem: "nuno@mudelar.pt", quando: "ontem, 19:30", estado: "Bloqueada 15 min" },
+  { id: 4, tipo: "Pedido de apagamento (RGPD)", texto: "Apagar os dados de Joana Ferreira", quem: "joana.f@exemplo.pt", quando: "seg 12/10", estado: "Por tratar · prazo 11/11" },
+  { id: 5, tipo: "Acesso de suporte", texto: "Acesso para importar contactos", quem: "suporte@olyvia.pt", quando: "02/10", estado: "Terminado" },
+  { id: 6, tipo: "Pedido de apagamento (RGPD)", texto: "Apagar os dados de Mário Lopes", quem: "Direção", quando: "28/09", estado: "Feito" },
 ];
 
 export const TIPOS_LIXO: TipoLixo[] = ["Negócio", "Pessoa", "Orçamento", "Documento", "Tarefa"];

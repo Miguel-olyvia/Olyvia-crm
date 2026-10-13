@@ -2,22 +2,26 @@
 // as pessoas usam, incluindo os nomes do antigo) e a âncora da secção ou da linha. Estático e puro.
 import { normal } from "../catalogo";
 
-export interface Secao { id: string; titulo: string }
+export interface Secao { id: string; titulo: string; /** Só aparece a quem vê como Direção (a Plataforma). */ soDirecao?: boolean }
 
 /** As secções da página, pela ordem em que aparecem (as âncoras são os ids). */
 export const SECOES: Secao[] = [
   { id: "arranque", titulo: "Arranque" },
   { id: "empresa", titulo: "Empresa e setor" },
   { id: "fases", titulo: "Fases e campos" },
+  { id: "funil", titulo: "Funil e pontuação" },
   { id: "orcamento", titulo: "Orçamento" },
+  { id: "agenda", titulo: "Agenda" },
   { id: "documentos", titulo: "Documentos" },
   { id: "email", titulo: "Email" },
+  { id: "marketing", titulo: "Marketing" },
   { id: "equipa", titulo: "Equipa e acessos" },
+  { id: "plataforma", titulo: "Plataforma", soDirecao: true },
   { id: "dados", titulo: "Dados" },
   { id: "aspeto", titulo: "Aspeto e demonstração" },
 ];
 
-export interface EntradaIndice { rotulo: string; sinonimos: string[]; ancora: string; secao: string }
+export interface EntradaIndice { rotulo: string; sinonimos: string[]; ancora: string; secao: string; soDirecao?: boolean }
 
 const E = (secao: string, ancora: string, rotulo: string, sinonimos: string[]): EntradaIndice => ({ secao, ancora, rotulo, sinonimos });
 
@@ -42,6 +46,16 @@ export const INDICE: EntradaIndice[] = [
   E("aspeto", "aspeto-leitura", "Leitura fácil", ["dislexia", "letra maior", "tamanho do texto", "acessibilidade"]),
   E("aspeto", "aspeto-atual", "Ver o aspeto atual", ["aspeto antigo", "comparar", "tema"]),
   E("aspeto", "aspeto-repor", "Repor a demonstração", ["reset", "recomeçar", "apagar tudo", "dados de exemplo"]),
+  // Acrescentadas a 13/10 (Agenda, Funil e pontuação, Marketing, Plataforma): ficam no fim para não mudar a ordem das de cima.
+  E("funil", "funil-avanco", "Quando cada fase avança", ["regras de etapa", "regras do funil", "estágios", "automático", "workflow de leads", "avançar fase"]),
+  E("funil", "funil-pontos", "Pontuação das leads", ["scoring", "lead scoring", "pontos", "qualificação", "classificar leads", "regras de pontuação"]),
+  E("funil", "funil-limiares", "Limiares MQL e SQL", ["mql", "sql", "lead qualificada", "marketing qualified", "sales qualified", "qualificação"]),
+  E("funil", "funil-experimentar", "Experimentar as regras", ["dry run", "simular", "testar regras", "pré-visualizar", "simulação"]),
+  E("agenda", "agenda-quadros", "Quadros da agenda", ["quadros", "boards", "calendários", "agendas", "scheduling", "cores da agenda"]),
+  E("agenda", "agenda-recursos", "Recursos", ["recursos", "técnicos", "veículos", "carrinha", "equipamentos", "disponibilidade", "ferramentas"]),
+  E("agenda", "agenda-regras", "Regras de marcação", ["duração da visita", "intervalo", "antecedência", "horário de trabalho", "horário", "marcações", "scheduling rules"]),
+  E("marketing", "marketing-canais", "Tipos de canal", ["canais", "channels", "origem", "pago", "redes sociais", "pesquisa", "offline", "parcerias"]),
+  { ...E("plataforma", "plataforma-lista", "Acessos de suporte, entradas e RGPD", ["suporte", "support access", "auditoria", "auth audit log", "entradas", "login", "rgpd", "apagamento", "gdpr", "platform"]), soDirecao: true },
 ];
 
 /**
@@ -66,5 +80,9 @@ export function procurar(q: string, indice: EntradaIndice[] = INDICE): EntradaIn
     .sort((a, b) => b.p - a.p || a.i - b.i)
     .map((x) => x.e);
 }
+
+/** O que esta pessoa vê: a Plataforma só aparece a quem vê como Direção. */
+export const secoesVisiveis = (direcao: boolean): Secao[] => SECOES.filter((s) => direcao || !s.soDirecao);
+export const indiceVisivel = (direcao: boolean): EntradaIndice[] => INDICE.filter((e) => direcao || !e.soDirecao);
 
 export const tituloSecao = (id: string): string => SECOES.find((s) => s.id === id)?.titulo ?? "";
