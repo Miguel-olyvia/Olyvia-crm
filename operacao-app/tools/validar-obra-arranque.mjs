@@ -12,9 +12,14 @@
  *   · acrescentar um orçamento novo a uma obra existente não mexe no que lá está;
  *   · obra-arranque.sql: obras já arrancadas ficam com o plano aprovado; aprovar
  *     o plano e mexer (datas, equipa) → volta a "por aprovar", com evento;
- *   · sem as tabelas da Frente A → "por instalar" e não rebenta; com stubs
- *     mínimos delas → "Arrancar" bloqueado sem as 3 validações e permitido com
- *     elas; material_chega_em das notas de encomenda e o aviso "começa antes";
+ *   · sem as tabelas da Frente A → "por instalar" e não rebenta;
+ *   · JUNÇÃO com a migração real da Frente A (20261215100000, por cima e por
+ *     baixo de obras.sql + obra-arranque.sql): fn_ec_orcamentos_do_contrato =
+ *     ops_contrato_orcamentos (e sem obras.sql dá o mesmo); "Arrancar"
+ *     bloqueado até Encomenda Cliente validada + fornecedor aprovado (nota
+ *     aprovada com rpc_nota_aprovar) ou "não necessária" + plano aprovado —
+ *     cada uma sozinha bloqueia; material_chega_em pela nota (nota_id) e o
+ *     aviso "começa antes";
  *   · obras.sql e obra-arranque.sql correm duas vezes (e por qualquer ordem).
  *
  *     npm run validar-obra-arranque
@@ -446,92 +451,176 @@ if (obraMulti) {
     "depois de arrancar, replanear já não desaprova", "uma obra em curso voltou a por aprovar");
 }
 
-/* ── 8. Com as tabelas da Frente A (stubs mínimos) ──────────────────────── */
-console.log("\n─── com a Frente A ──────────────────────");
+/* ── 8. Com a migração REAL da Frente A (junção) ─────────────────────────── */
+// supabase/migrations/20261215100000_pos_contrato_encomendas.sql, tal e qual,
+// por cima de obras.sql + obra-arranque.sql (e depois ao contrário). Só se
+// acrescenta ao CRM simulado o que essa migração precisa para se instalar e
+// para aprovar uma nota (rpc_nota_aprovar cria a purchase_order a sério).
+// A Encomenda Cliente e as suas linhas escrevem-se direto nas tabelas reais
+// (rpc_ec_gerar / rpc_ec_validar precisam do stock e das funções do Rafael:
+// estão provadas em tools/validar-pos-contrato-encomendas.mjs); o estado do
+// fornecedor é o de fn_ec_estado_fornecedor e a nota aprova-se com
+// rpc_nota_aprovar, ambos da migração.
+console.log("\n─── com a Frente A (migração real) ──────");
+const MIGRACAO_A = readFileSync(
+  join(RAIZ, "..", "supabase", "migrations", "20261215100000_pos_contrato_encomendas.sql"), "utf8");
+const SUP = "5f000000-0000-0000-0000-000000000001";
 await db.exec(`
-  ALTER TABLE public.purchase_orders ADD COLUMN expected_delivery date;
-  CREATE TABLE public.obra_encomenda_cliente (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid NOT NULL, contract_id uuid NOT NULL,
-    obra_id uuid, estado text NOT NULL DEFAULT 'rascunho', fornecedor_estado text NOT NULL DEFAULT 'por_gerar',
-    validada_por uuid, validada_em timestamptz, versao int NOT NULL DEFAULT 1,
-    criada_em timestamptz NOT NULL DEFAULT now(), atualizada_em timestamptz NOT NULL DEFAULT now());
-  CREATE TABLE public.obra_encomenda_cliente_linha (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, encomenda_id uuid NOT NULL,
-    tipo text NOT NULL, product_id uuid, service_id uuid, quote_id uuid, quote_line_id uuid, qtd_necessaria numeric);
-  CREATE TABLE public.nota_encomenda_fornecedor (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), organization_id uuid, encomenda_cliente_id uuid NOT NULL,
-    supplier_id uuid, estado text NOT NULL DEFAULT 'proposta', purchase_order_id uuid, prazo_previsto date);
-  CREATE TABLE public.nota_encomenda_fornecedor_linha (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), nota_id uuid NOT NULL, encomenda_linha_id uuid,
-    product_id uuid, qtd numeric);
+  ALTER TABLE public.anew_role_permissions ADD COLUMN IF NOT EXISTS created_by uuid;
+  INSERT INTO public.anew_permissions (code, name, category) VALUES ('purchase_orders.approve', 'Aprovar encomendas', 'purchase_orders')
+    ON CONFLICT (code) DO NOTHING;
+  INSERT INTO public.anew_role_permissions (role_id, permission_code)
+    VALUES ('d0000000-0000-0000-0000-00000000000a', 'purchase_orders.approve');
+  ALTER TABLE public.client_contracts ADD COLUMN order_number text;
+  ALTER TABLE public.purchase_orders ADD COLUMN supplier_id uuid, ADD COLUMN expected_delivery date,
+    ADD COLUMN source_type text, ADD COLUMN source_id uuid, ADD COLUMN notes text, ADD COLUMN created_by uuid,
+    ADD COLUMN total_value numeric DEFAULT 0;
+  ALTER TABLE public.purchase_order_items ADD COLUMN product_id uuid, ADD COLUMN quote_line_id uuid,
+    ADD COLUMN component_index integer;
+  ALTER TABLE public.products ADD COLUMN sku text;
+  ALTER TABLE public.suppliers ADD COLUMN organization_id uuid, ADD COLUMN name text,
+    ADD COLUMN delivery_sla_days integer, ADD COLUMN deleted_at timestamptz;
+  CREATE TABLE public.item_suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), product_id uuid,
+    supplier_id uuid, lead_time_days integer, deleted_at timestamptz);
+  -- Prazo de 10 anos: a chegada fica sempre depois do início das tarefas.
+  INSERT INTO public.suppliers (id, organization_id, name, delivery_sla_days) VALUES ('${SUP}', '${ORG}', 'Banema', 3650);
 `);
+try {
+  await db.exec(MIGRACAO_A);
+  ok("a migração da Frente A instala-se por cima de obras.sql + obra-arranque.sql");
+  await db.exec(ler("obras.sql"));
+  await db.exec(ler("obra-arranque.sql"));
+  await db.exec(MIGRACAO_A);
+  ok("e outra vez por qualquer ordem: obras.sql → obra-arranque.sql → migração");
+} catch (e) {
+  mau(`junção com a migração da Frente A falhou: ${e.message}`);
+  process.exit(1);
+}
+
+// Os orçamentos do contrato: uma só fonte (fn_ec_orcamentos_do_contrato chama
+// ops_contrato_orcamentos) e, sem obras.sql, as mesmas regras dão o mesmo.
+{
+  const PROP_SEM = "c0000000-0000-0000-0000-000000000003";
+  const C_SEM = "88880000-0000-0000-0000-000000000004";
+  const Q_RECENTE = "99990000-0000-0000-0000-000000000012";
+  await db.exec(`
+    INSERT INTO public.quotes (id, organization_id, cliente_id, quote_number, title, estado, accepted_at, proposal_id, created_at) VALUES
+      ('99990000-0000-0000-0000-000000000011','${ORG}','${CLI}','ORC-11','Antigo','enviado', NULL,'${PROP_SEM}', now() - interval '5 days'),
+      ('${Q_RECENTE}','${ORG}','${CLI}','ORC-12','Recente','enviado', NULL,'${PROP_SEM}', now() - interval '1 day');
+    INSERT INTO public.client_contracts (id, contract_number, client_id, status, organization_id, proposal_id, created_by)
+      VALUES ('${C_SEM}', 'CC-2026-0402', '${CLI}', 'signed', '${ORG}', '${PROP_SEM}', '${U.gestor}');
+  `);
+  const CONTRATOS = { "2 aceites": C.multi, quote_id: C.qid, simples: C.simples, "nenhum aceite": C_SEM };
+  const lista = async (f, c) =>
+    (await q(`SELECT quote_id FROM public.${f}('${c}')${f === "ops_contrato_orcamentos" ? " ORDER BY ordem" : ""}`))
+      .map((r) => r.quote_id).join(",");
+  const todas = async (f) => {
+    const r = {};
+    for (const [nome, c] of Object.entries(CONTRATOS)) r[nome] = await lista(f, c);
+    return r;
+  };
+  const ops = await todas("ops_contrato_orcamentos");
+  const comOps = await todas("fn_ec_orcamentos_do_contrato");
+  verifica(JSON.stringify(ops) === JSON.stringify(comOps) && ops["2 aceites"] === `${Q.suite},${Q.servico}`
+           && ops.quote_id === Q.qid && ops["nenhum aceite"] === Q_RECENTE,
+    "fn_ec_orcamentos_do_contrato = ops_contrato_orcamentos (quote_id; senão todos os aceites; senão o mais recente)",
+    `ops ${JSON.stringify(ops)} · fn_ec ${JSON.stringify(comOps)}`);
+  await db.exec("BEGIN; ALTER FUNCTION public.ops_contrato_orcamentos(uuid) RENAME TO ops_contrato_orcamentos_fora;");
+  let semOps = {};
+  try {
+    semOps = await todas("fn_ec_orcamentos_do_contrato");
+  } finally {
+    await db.exec("ROLLBACK;");
+  }
+  verifica(JSON.stringify(semOps) === JSON.stringify(ops),
+    "sem obras.sql, as regras próprias de fn_ec_orcamentos_do_contrato dão o mesmo resultado",
+    `sem ops ${JSON.stringify(semOps)} · ops ${JSON.stringify(ops)}`);
+}
+
+const arrancar = (obra) => chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_mudar_estado('${obra}', 'em_curso', NULL);`);
 if (obraQid) {
-  // O plano aprovado primeiro (para ver a Encomenda Cliente a "desaprová-lo").
+  const ENC = "ec000000-0000-0000-0000-000000000001";
+  const LIN = "ec000000-0000-0000-0000-0000000000a1";
+  const LIN2 = "ec000000-0000-0000-0000-0000000000a2";
+  const NOTA = "ec000000-0000-0000-0000-0000000000b1";
+
+  // Plano aprovado primeiro: falta a Encomenda Cliente (e o fornecedor, que vem dela).
   await tenta("aprovar o plano da obra com quote_id", () => aprovar(obraQid.id));
   let a = await arranque(obraQid.id);
-  verifica(a.encomenda_cliente.estado === "por_gerar" && a.fornecedor.estado === "por_validar" && !a.pode_arrancar
-           && a.falta.some((f) => /Encomenda Cliente/.test(f)),
-    "sem Encomenda Cliente: por gerar, fornecedor por validar, não arranca", `arranque: ${JSON.stringify(a.falta)}`);
-  await recusa("arrancar sem as 3 validações", () =>
-    chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_mudar_estado('${obraQid.id}', 'em_curso', NULL);`), /Encomenda Cliente/);
+  verifica(a.encomenda_cliente.estado === "por_gerar" && a.fornecedor.estado === "por_validar"
+           && a.plano.estado === "aprovado" && !a.pode_arrancar && a.falta.some((f) => /Encomenda Cliente/.test(f)),
+    "plano aprovado mas sem Encomenda Cliente: por gerar, fornecedor por validar, não arranca", `arranque: ${JSON.stringify(a.falta)}`);
+  await recusa("arrancar sem Encomenda Cliente", () => arrancar(obraQid.id), /Encomenda Cliente/);
 
-  const ENC = "ec000000-0000-0000-0000-000000000001";
   await db.exec(`INSERT INTO public.obra_encomenda_cliente (id, organization_id, contract_id, estado, criada_em)
                  VALUES ('${ENC}', '${ORG}', '${C.qid}', 'rascunho', now() - interval '1 hour');`);
   a = await arranque(obraQid.id);
   verifica(a.encomenda_cliente.estado === "rascunho" && a.fornecedor.estado === "por_validar" && !a.pode_arrancar,
     "Encomenda Cliente em rascunho: não arranca", `arranque: ${JSON.stringify(a.encomenda_cliente)}`);
+  await recusa("arrancar com a Encomenda Cliente em rascunho", () => arrancar(obraQid.id), /validar a Encomenda Cliente/);
 
-  // Validada DEPOIS do plano aprovado; notas por aprovar.
-  const LIN = "ec000000-0000-0000-0000-0000000000a1";
-  const NOTA = "ec000000-0000-0000-0000-0000000000b1";
-  const PO = "ec000000-0000-0000-0000-0000000000c1";
+  // Validada (DEPOIS do plano aprovado), com o que falta numa nota por aprovar.
   await db.exec(`
-    UPDATE public.obra_encomenda_cliente SET estado = 'validada', validada_por = '${U.gestor}', validada_em = now(),
-           fornecedor_estado = 'por_aprovar' WHERE id = '${ENC}';
-    INSERT INTO public.obra_encomenda_cliente_linha (id, organization_id, encomenda_id, tipo, product_id, quote_id, quote_line_id, qtd_necessaria)
-      VALUES ('${LIN}', '${ORG}', '${ENC}', 'produto', '${P.louca}', '${Q.qid}', '${L.conjuntoQid}', 1),
-             (gen_random_uuid(), '${ORG}', '${ENC}', 'consumivel', '${P.tinta}', '${Q.qid}', NULL, 1);
-    INSERT INTO public.nota_encomenda_fornecedor (id, organization_id, encomenda_cliente_id, estado, prazo_previsto)
-      VALUES ('${NOTA}', '${ORG}', '${ENC}', 'proposta', '2030-01-10');
-    INSERT INTO public.nota_encomenda_fornecedor_linha (nota_id, encomenda_linha_id, product_id, qtd)
-      VALUES ('${NOTA}', '${LIN}', '${P.louca}', 1), ('${NOTA}', NULL, '${P.tinta}', 1);
+    UPDATE public.obra_encomenda_cliente SET estado = 'validada', validada_por = '${U.gestor}', validada_em = now(), versao = 1
+     WHERE id = '${ENC}';
+    INSERT INTO public.obra_encomenda_cliente_linha (id, organization_id, encomenda_id, tipo, product_id, descricao, quote_id,
+                                                     quote_line_id, origem, qtd_necessaria, qtd_em_falta)
+      VALUES ('${LIN}', '${ORG}', '${ENC}', 'produto', '${P.louca}', 'Sanita suspensa', '${Q.qid}', '${L.conjuntoQid}', 'conjunto', 1, 1),
+             ('${LIN2}', '${ORG}', '${ENC}', 'consumivel', '${P.tinta}', 'Tinta branca', '${Q.qid}', NULL, 'ficha_servico', 1, 1);
+    INSERT INTO public.nota_encomenda_fornecedor (id, organization_id, encomenda_cliente_id, supplier_id, estado, versao)
+      VALUES ('${NOTA}', '${ORG}', '${ENC}', '${SUP}', 'proposta', 1);
+    INSERT INTO public.nota_encomenda_fornecedor_linha (organization_id, nota_id, encomenda_linha_id, product_id, descricao, qtd)
+      VALUES ('${ORG}', '${NOTA}', '${LIN}', '${P.louca}', 'Sanita suspensa', 1),
+             ('${ORG}', '${NOTA}', '${LIN2}', '${P.tinta}', 'Tinta branca', 1);
   `);
+  const fe = (await um(`SELECT public.fn_ec_estado_fornecedor('${ENC}') AS e`)).e;
   a = await arranque(obraQid.id);
-  verifica(a.encomenda_cliente.estado === "validada" && a.encomenda_cliente.validada_por_nome === "Gestora"
+  verifica(fe === "por_aprovar" && a.encomenda_cliente.estado === "validada" && a.encomenda_cliente.validada_por_nome === "Gestora"
            && a.fornecedor.estado === "por_aprovar" && a.fornecedor.notas?.propostas === 1
            && a.plano.estado === "por_aprovar" && /depois/.test(a.plano.motivo ?? "") && !a.pode_arrancar,
-    "validada depois do plano: o plano volta a por aprovar; nota por aprovar",
-    `arranque: ${JSON.stringify({ ec: a.encomenda_cliente.estado, fo: a.fornecedor, pl: a.plano.motivo })}`);
+    "validada depois do plano: o plano volta a por aprovar; a nota (fn_ec_estado_fornecedor) fica por aprovar",
+    `arranque: ${JSON.stringify({ fe, ec: a.encomenda_cliente.estado, fo: a.fornecedor, pl: a.plano.motivo })}`);
 
-  // Aprovada a nota (com a encomenda ao fornecedor) e o plano outra vez.
-  await db.exec(`
-    INSERT INTO public.purchase_orders (id, organization_id, order_number, status, expected_delivery)
-      VALUES ('${PO}', '${ORG}', 'PO-1', 'pending', '2030-02-01');
-    UPDATE public.nota_encomenda_fornecedor SET estado = 'aprovada', purchase_order_id = '${PO}' WHERE id = '${NOTA}';
-    UPDATE public.obra_encomenda_cliente SET fornecedor_estado = 'aprovada' WHERE id = '${ENC}';
-  `);
-  const ap = await tenta("aprovar o plano com as notas aprovadas", () => aprovar(obraQid.id));
+  // Plano aprovado outra vez: o fornecedor sozinho ainda bloqueia.
+  await tenta("aprovar o plano com a nota por aprovar", () => aprovar(obraQid.id));
+  a = await arranque(obraQid.id);
+  verifica(a.plano.estado === "aprovado" && !a.pode_arrancar && a.falta.length === 1 && /fornecedor/.test(a.falta[0]),
+    "Encomenda Cliente validada e plano aprovado: falta só a encomenda a fornecedor", `falta: ${JSON.stringify(a.falta)}`);
+  await recusa("arrancar com a nota por aprovar", () => arrancar(obraQid.id), /fornecedor/);
+
+  // Aprovar a nota a sério (rpc_nota_aprovar): purchase_order com a data de chegada.
+  const po = await tenta("aprovar a nota (rpc_nota_aprovar)", () =>
+    chamar(AUTH.gestor, `SELECT public.rpc_nota_aprovar('${NOTA}');`));
+  const poRow = po ? await um(`SELECT expected_delivery, source_type FROM public.purchase_orders WHERE id = '${po}'`) : null;
+  const chega = poRow?.expected_delivery?.toISOString().slice(0, 10);
+  a = await arranque(obraQid.id);
+  verifica(poRow?.source_type === "contract" && chega && a.fornecedor.estado === "aprovada" && a.fornecedor.ok,
+    `nota aprovada → purchase_order (contract, chega a ${chega}) e fornecedor "aprovada"`,
+    `po ${JSON.stringify(poRow)} fornecedor ${JSON.stringify(a.fornecedor)}`);
+
+  await tenta("atualizar as datas do material", () =>
+    chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_material_sincronizar('${obraQid.id}');`));
   const ts = await tarefas(obraQid.id);
   const canal = ts.find((t) => t.servico_id === S.canal);
   const pint = ts.find((t) => t.servico_id === S.pint && t.orcamento_id === Q.qid);
-  verifica(canal?.material_chega_em?.toISOString().slice(0, 10) === "2030-02-01" && canal.material_chega_origem === "crm"
-           && pint?.material_chega_em?.toISOString().slice(0, 10) === "2030-02-01",
-    "material_chega_em pela encomenda ao fornecedor (expected_delivery): o conjunto pela linha da Encomenda Cliente, a pintura pela ficha",
-    `canal ${canal?.material_chega_em} pintura ${pint?.material_chega_em}`);
+  verifica(canal?.material_chega_em?.toISOString().slice(0, 10) === chega && canal.material_chega_origem === "crm"
+           && pint?.material_chega_em?.toISOString().slice(0, 10) === chega,
+    "material_chega_em pela nota (nota_id) → purchase_order: o conjunto pela linha da Encomenda Cliente, a pintura pela ficha",
+    `canal ${canal?.material_chega_em} pintura ${pint?.material_chega_em} (esperado ${chega})`);
   a = await arranque(obraQid.id);
-  verifica(a.pode_arrancar && a.plano.material_antes.length >= 2 && ap?.avisos?.some((x) => /antes de o material chegar/.test(x)),
-    "as 3 validadas: pode arrancar, com aviso das tarefas que começam antes do material",
-    `arranque: ${JSON.stringify({ p: a.pode_arrancar, m: a.plano.material_antes?.length, av: ap?.avisos })}`);
+  verifica(a.pode_arrancar && a.falta.length === 0 && a.plano.material_antes.length >= 2
+           && a.plano.avisos.some((x) => /antes de o material chegar/.test(x)),
+    "as 3 validadas (Encomenda Cliente, fornecedor aprovado, plano): pode arrancar, com aviso das tarefas antes do material",
+    `arranque: ${JSON.stringify({ p: a.pode_arrancar, f: a.falta, m: a.plano.material_antes?.length, av: a.plano.avisos })}`);
   // Uma data dita à mão não se pisa.
   await chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_material_chega('${pint.id}', '2029-06-01', 'combinado', false);`);
   await chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_material_sincronizar('${obraQid.id}');`);
   const pint2 = await um(`SELECT material_chega_em, material_chega_origem FROM public.ops_obra_tarefa WHERE id = '${pint.id}'`);
   verifica(pint2.material_chega_origem === "manual" && pint2.material_chega_em.toISOString().slice(0, 10) === "2029-06-01",
     "a data dita à mão não é pisada pelas notas", `pintura: ${JSON.stringify(pint2)}`);
-  await aprovar(obraQid.id);
-  await tenta("arrancar com as 3 validações", () =>
-    chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_mudar_estado('${obraQid.id}', 'em_curso', NULL);`));
+  // (mudar a data do material à mão conta como mexer no plano: aprova-se outra vez)
+  await tenta("voltar a aprovar o plano", () => aprovar(obraQid.id));
+  await tenta("arrancar com as 3 validações", () => arrancar(obraQid.id));
   const est = await um(`SELECT estado FROM public.ops_obra WHERE id = '${obraQid.id}'`);
   verifica(est.estado === "em_curso", "arrancou", `estado: ${est.estado}`);
 }
@@ -545,13 +634,14 @@ if (obraQid) {
     verifica(a.encomenda_cliente.estado === "nao_aplicavel" && a.fornecedor.estado === "nao_aplicavel" && a.encomenda_cliente.ok,
       "obra sem contrato: Encomenda Cliente e fornecedor não aplicáveis", `arranque: ${JSON.stringify(a.encomenda_cliente)}`);
   }
-  const obraS = await um(`SELECT id FROM public.ops_obra WHERE contrato_id = '${C.multi}' AND estado <> 'cancelada'`);
-  await db.exec(`INSERT INTO public.obra_encomenda_cliente (organization_id, contract_id, estado, fornecedor_estado, validada_em)
-                 VALUES ('${ORG}', '${C.simples}', 'validada', 'nao_necessaria', now());`);
+  const ENC_S = "ec000000-0000-0000-0000-000000000002";
+  await db.exec(`INSERT INTO public.obra_encomenda_cliente (id, organization_id, contract_id, estado, validada_em)
+                 VALUES ('${ENC_S}', '${ORG}', '${C.simples}', 'validada', now());`);
+  const fe = (await um(`SELECT public.fn_ec_estado_fornecedor('${ENC_S}') AS e`)).e;
   const s = await arranque((await um(`SELECT id FROM public.ops_obra WHERE contrato_id = '${C.simples}'`)).id);
-  verifica(s.fornecedor.estado === "nao_necessaria" && s.fornecedor.ok, "fornecedor \"não necessária\" conta como feito",
-    `fornecedor: ${JSON.stringify(s.fornecedor)}`);
-  void obraS;
+  verifica(fe === "nao_necessaria" && s.fornecedor.estado === "nao_necessaria" && s.fornecedor.ok,
+    "nada em falta → fornecedor \"não necessária\" (fn_ec_estado_fornecedor) conta como feito",
+    `fornecedor: ${fe} ${JSON.stringify(s.fornecedor)}`);
 }
 
 /* ── 9. Segurança ───────────────────────────────────────────────────────── */
