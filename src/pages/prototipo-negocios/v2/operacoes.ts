@@ -21,9 +21,11 @@ export interface RegObra {
   rejeitadas: Record<number, string>;
   atrasos: Atraso[];
   aprovacao: Partial<Aprovacao>;
+  /** As horas reais dos equipamentos confirmadas no fecho de cada tarefa ("tarefa:equipamento" → horas; equipamentosObra.ts). */
+  horasEquip?: Record<string, number>;
 }
 
-export const regVazio = (): RegObra => ({ validadas: [], rejeitadas: {}, atrasos: [], aprovacao: {} });
+export const regVazio = (): RegObra => ({ validadas: [], rejeitadas: {}, atrasos: [], aprovacao: {}, horasEquip: {} });
 
 export const SUPERVISORES = ["Filipe", "Hugo"];
 export const MOTIVOS_ATRASO = ["Material em falta", "Técnico doente", "O cliente pediu", "Imprevisto na obra", "Chuva"];
@@ -118,13 +120,18 @@ export function fracaoFeita(p: Plano): number {
 /**
  * O previsto vem da receita (o custo de cada serviço do orçamento, em partes(): mão de obra, equipamentos, consumíveis e estrutura).
  * Numa obra em curso compara-se só a parte já feita. O real é o previsto vezes os fatores de exemplo (realExemplo.ts).
+ * `eq` (opcional): os equipamentos contados pelas horas das tarefas feitas (custoEquipamentos, em equipamentosObra.ts), com as horas
+ * reais confirmadas no fecho da tarefa; substitui a linha dos equipamentos.
  */
-export function previstoReal(d: Negocio, S: Estado, f: FatoresReal): PrevistoReal {
+export function previstoReal(d: Negocio, S: Estado, f: FatoresReal, eq?: { prev: number; real: number }): PrevistoReal {
   const p = d.obra.plano;
   if (!p || !d.orc) return { fracao: 0, linhas: [], prev: 0, real: 0 };
   const fr = fracaoFeita(p), P = partes(d, S);
   const ks: TipoCusto[] = ["mo", "eq", "cons", "estr"];
-  const linhas = ks.filter((k) => P[k] > 0).map((k) => ({ k, nome: NOME_CUSTO[k], prev: r2(P[k] * fr), real: r2(P[k] * fr * f[k]) }));
+  const linhas = ks.filter((k) => P[k] > 0).map((k) => (k === "eq" && eq
+    ? { k, nome: NOME_CUSTO[k], prev: r2(eq.prev), real: r2(eq.real) }
+    : { k, nome: NOME_CUSTO[k], prev: r2(P[k] * fr), real: r2(P[k] * fr * f[k]) }))
+    .filter((l) => !(eq && l.k === "eq" && l.prev === 0 && l.real === 0));
   return { fracao: fr, linhas, prev: r2(linhas.reduce((a, l) => a + l.prev, 0)), real: r2(linhas.reduce((a, l) => a + l.real, 0)) };
 }
 
