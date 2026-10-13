@@ -1,8 +1,10 @@
 // Catálogo e custos da V2 (13/10/2026): uma só lista (os serviços em uso e o Catálogo
 // real da Mudelar), com "Em uso / Não usado", medida, custo por medida, preço e margem
 // de cada um; pesquisa e chips com os alertas. Tocar num serviço abre a ficha no lugar
-// da lista (não é modal). Por baixo, os Custos: Parâmetros, Perfis, Equipamentos e Estrutura.
-import { useEffect, useRef, useState } from "react";
+// da lista (não é modal). Por baixo, os Pacotes, os Materiais e consumíveis, a Classificação
+// (uma só árvore, ofício › sub, com chips por ofício na lista) e os Custos: Parâmetros, Perfis,
+// Equipamentos e Estrutura. Um só editor na linha aberto de cada vez (`editor`).
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, CircleCheck, CircleDashed, Search, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,25 +16,34 @@ import { lerCustos, mudarCustos, useCustos } from "./custosStore";
 import { FichaServicoV2 } from "./FichaServicoV2";
 import { CustosV2 } from "./CustosV2";
 import { ICONE_ALERTA, IconeAlerta } from "./pecasCustos";
+import { caminho, dentroDe, noDoServico, oficios } from "./catalogoModelo";
+import { useCatalogo } from "./catalogoStore";
+import { PacotesV2 } from "./PacotesV2";
+import { MateriaisV2 } from "./MateriaisV2";
+import { ClassificacaoV2 } from "./ClassificacaoV2";
 
-const ANCORAS = [["cat-servicos", "Serviços"], ["cat-parametros", "Parâmetros"], ["cat-perfis", "Perfis"], ["cat-equipamentos", "Equipamentos"], ["cat-estrutura", "Estrutura"]] as const;
+const ANCORAS = [["cat-servicos", "Serviços"], ["cat-pacotes", "Pacotes"], ["cat-materiais", "Materiais"], ["cat-classificacao", "Classificação"], ["cat-parametros", "Parâmetros"], ["cat-perfis", "Perfis"], ["cat-equipamentos", "Equipamentos"], ["cat-estrutura", "Estrutura"]] as const;
 const ICONE_FILTRO: Record<Filtro, keyof typeof ICONE_ALERTA | null> = { uso: null, "sem-receita": "sem-receita", margem: "abaixo-minimo", desatualizado: "desatualizado" };
 
 export function CatalogoV2({ S, run }: Ctx) {
   const C = useCustos();
+  const K = useCatalogo();
+  const [editor, setEditor] = useState<string | null>(null);
+  const [oficio, setOficio] = useState<string | null>(null);
   const [aberto, setAberto] = useState<SvcId | null>(null);
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState<Filtro | null>(null);
   const [ord, setOrd] = useState<{ col: Coluna; asc: boolean }>({ col: "usos", asc: false });
-  const [aviso, setAviso] = useState<{ msg: string; antes?: Custos; n: number } | null>(null);
+  const [aviso, setAviso] = useState<{ msg: string; antes?: Custos | (() => void); n: number } | null>(null);
   const voltarPara = useRef<SvcId | null>(null);
 
-  const anunciar = (msg: string, antes?: Custos) => setAviso((a) => ({ msg, antes, n: (a?.n ?? 0) + 1 }));
+  /** Aviso na região aria-live; com `antes` (os custos de antes, ou uma função que desfaz) mostra "Anular". */
+  const anunciar = useCallback((msg: string, antes?: Custos | (() => void)) => setAviso((a) => ({ msg, antes, n: (a?.n ?? 0) + 1 })), []);
   const anular = () => {
     if (!aviso?.antes) return;
     const antes = aviso.antes;
-    mudarCustos(() => antes);
-    run(() => aplicarTodos(S, lerCustos()));
+    if (typeof antes === "function") antes();
+    else { mudarCustos(() => antes); run(() => aplicarTodos(S, lerCustos())); }
     setAviso((a) => ({ msg: "Anulado", n: (a?.n ?? 0) + 1 }));
   };
 
@@ -43,13 +54,21 @@ export function CatalogoV2({ S, run }: Ctx) {
     voltarPara.current = null;
   }, [aberto]);
 
-  const todos = listaCatalogo(S, C);
+  // o ofício de cada serviço sai da árvore (ofício › sub)
+  const noDe = new Map<SvcId, string | null>();
+  const todos = listaCatalogo(S, C).map((i) => { const no = noDoServico(K, i.sid, i.oficio); noDe.set(i.sid, no); return { ...i, oficio: no ? caminho(K.arvore, no) : i.oficio }; });
   const pesquisados = pesquisar(todos, q);
-  const contagem = (f: Filtro) => pesquisados.filter((i) => passaFiltro(i, f)).length;
-  const lista = ordenar(pesquisados.filter((i) => passaFiltro(i, filtro)), ord.col, ord.asc);
+  const doOficio = pesquisados.filter((i) => !oficio || dentroDe(K.arvore, noDe.get(i.sid), oficio));
+  const contagem = (f: Filtro) => doOficio.filter((i) => passaFiltro(i, f)).length;
+  const lista = ordenar(doOficio.filter((i) => passaFiltro(i, filtro)), ord.col, ord.asc);
+  const ofs = oficios(K.arvore);
+  const irDefinicoes = useCallback(() => {
+    run(() => { S.view = "definicoes"; });
+    setTimeout(() => document.getElementById("orcamento-deslocacao")?.scrollIntoView({ block: "start" }), 50);
+  }, [run, S]);
 
   const regiao = (
-    <div aria-live="polite" role="status" className="pointer-events-none sticky bottom-4 z-10 mt-6 flex justify-center">
+    <div aria-live="polite" role="status" aria-label="Avisos" className="pointer-events-none sticky bottom-4 z-10 mt-6 flex justify-center">
       {aviso && (
         <p key={aviso.n} className="pointer-events-auto flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-2 text-[15px] shadow-[var(--shadow-sm)]">
           <span>{aviso.msg}</span>
@@ -111,8 +130,16 @@ export function CatalogoV2({ S, run }: Ctx) {
             );
           })}
         </div>
+        <div role="group" aria-label="Ofício" className="mt-3 flex flex-wrap gap-2">
+          <button type="button" aria-pressed={!oficio} onClick={() => setOficio(null)} className={CHIP(!oficio)}>Todos os ofícios</button>
+          {ofs.map((o) => (
+            <button key={o.id} type="button" aria-pressed={oficio === o.id} onClick={() => setOficio(oficio === o.id ? null : o.id)} className={cn(CHIP(oficio === o.id), "inline-flex items-center gap-2")}>
+              {o.n} <span className="tabular-nums opacity-70">{pesquisados.filter((i) => dentroDe(K.arvore, noDe.get(i.sid), o.id)).length}</span>
+            </button>
+          ))}
+        </div>
         <p className="mt-4 text-[15px] text-muted-foreground" aria-live="polite">
-          {lista.length} de {todos.length} serviços{filtro ? ` · ${FILTROS.find((f) => f.id === filtro)!.t}` : ""}{q.trim() ? ` · "${q.trim()}"` : ""}
+          {lista.length} de {todos.length} serviços{oficio ? ` · ${ofs.find((o) => o.id === oficio)?.n ?? ""}` : ""}{filtro ? ` · ${FILTROS.find((f) => f.id === filtro)!.t}` : ""}{q.trim() ? ` · "${q.trim()}"` : ""}
         </p>
 
         <div className="mt-2 overflow-x-auto rounded-2xl border border-border bg-card">
@@ -173,6 +200,11 @@ export function CatalogoV2({ S, run }: Ctx) {
         <p className="mt-3 text-[15px] text-muted-foreground">Exemplo: os nomes, horas e usos são os do Catálogo da Mudelar; custos e preços são de exemplo. O que se muda aqui dura até recarregar.</p>
       </section>
 
+      <div className="mt-16 space-y-14">
+        <PacotesV2 S={S} C={C} K={K} editor={editor} setEditor={setEditor} anunciar={anunciar} irDefinicoes={irDefinicoes} />
+        <MateriaisV2 S={S} C={C} K={K} run={run} editor={editor} setEditor={setEditor} anunciar={anunciar} />
+        <ClassificacaoV2 S={S} editor={editor} setEditor={setEditor} anunciar={anunciar} />
+      </div>
       <CustosV2 S={S} C={C} run={run} anunciar={anunciar} />
       {regiao}
     </div>

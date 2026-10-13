@@ -5,9 +5,11 @@
 // - Na linha: marcar a visita (dia e hora em chips) e "+ Tarefa" (escolher o quê e quando). Só um editor aberto de cada vez, e o seu
 //   "Guardar" é o único botão primário do ecrã.
 // - A faixa da semana filtra a agenda. Direção: a equipa numa tabela. Armazém: os números do Inventário.
+// - As perguntas do cliente (do portal; perguntasCliente.ts) aparecem no Comercial e na Direção, com a mensagem inteira e a resposta na
+//   linha: o canal (Email / WhatsApp, com o contacto já resolvido) e uma resposta rápida; 2 cliques (a resposta e "Enviar").
 // Não desenha o HojeSimples (que fica como está para a Atual).
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { CalendarDays, CheckCircle2, ListTodo, Plus, Users, Warehouse } from "lucide-react";
+import { CalendarDays, CheckCircle2, ListTodo, Mail, MessageCircle, MessageSquareText, Plus, Users, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, PAPEIS, type Papel } from "../motor";
@@ -25,13 +27,21 @@ import {
   CATEGORIAS, HOJE_V2, HORAS_VISITA, rotuloDia, type AlertaV2, type CatV2, type ItemV2,
 } from "./hojeV2Regras";
 import { resumoInventario } from "./hojeArmazem";
-import { concluirTarefa, guardarVisita, juntarTarefa, useHojeV2, OUTRO, QUANDO_TAREFA, TITULOS_TAREFA, type TituloTarefa } from "./hojeV2Store";
+import { concluirTarefa, guardarVisita, juntarTarefa, responderPergunta, useHojeV2, OUTRO, QUANDO_TAREFA, TITULOS_TAREFA, type RespostaV2, type TituloTarefa } from "./hojeV2Store";
+import {
+  CANAIS, MAX_TEXTO, MODELOS_RESPOSTA, OUTRA, contactoDe, destinoDe, faltaEnviar, haQuanto, perguntasPorResponder, textoResposta,
+  vePerguntas, type CanalResposta, type PerguntaCliente,
+} from "./perguntasCliente";
 
 const saudacao = (h: number): string => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 const BOTAO = "h-11 min-h-11 text-[15px]";
 const idSeguro = (t: string): string => t.normalize("NFD").replace(/[^\w]+/g, "-");
 
-type Editor = { chave: string; tipo: "visita" | "tarefa" } | null;
+type Editor = { chave: string; tipo: "visita" | "tarefa" | "resposta"; modelo?: string } | null;
+/** O filtro da lista: um contador do Hoje, ou as perguntas do cliente. */
+type FiltroV2 = CatV2 | "perguntas" | null;
+const ESCREVER_OUTRA = "Escrever outra";
+const OPCOES_RESPOSTA = [...MODELOS_RESPOSTA.map((m) => ({ id: m.id, nome: m.nome })), { id: OUTRA, nome: ESCREVER_OUTRA }];
 
 /* ---------------------------------------------------------------- peças pequenas */
 
@@ -178,6 +188,112 @@ function Linha({ i, editor, abrirEditor, fecharEditor, anunciar, verPessoa, S, A
   );
 }
 
+/* ---------------------------------------------------------------- as perguntas do cliente */
+
+const ICONE_CANAL: Record<CanalResposta, typeof Mail> = { Email: Mail, WhatsApp: MessageCircle };
+
+interface EditorRespostaProps { p: PerguntaCliente; S: Ctx["S"]; id: string; modelo0: string; fechar: (guardou: boolean) => void; esc: (e: KeyboardEvent) => void; anunciar: (m: string) => void }
+
+function EditorResposta({ p, S, id, modelo0, fechar, esc, anunciar }: EditorRespostaProps) {
+  const c = contactoDe(S, p);
+  const [canal, setCanal] = useState<CanalResposta | null>(c.preferido);
+  const [modelo, setModelo] = useState<string | null>(modelo0);
+  const [escrito, setEscrito] = useState("");
+  const idTexto = useId();
+  const texto = textoResposta(p, modelo, escrito), falta = faltaEnviar(c, canal, texto);
+  const enviar = (): void => {
+    if (falta.length) return;
+    const para = destinoDe(c, canal!)!;
+    responderPergunta({ pergunta: p.id, cliente: p.cliente, canal: canal!, para, texto: texto! });
+    anunciar(`Resposta enviada a ${p.cliente} por ${canal} (${para}). A pergunta saiu da lista.`);
+    fechar(true);
+  };
+  return (
+    <div id={id} role="group" aria-label={`Responder a ${p.cliente}`} onKeyDown={esc} className="mt-3 border-l-2 border-border pl-4">
+      <fieldset className="mt-1">
+        <legend className="text-[15px] font-medium">Responder por</legend>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {CANAIS.map((k) => {
+            const para = destinoDe(c, k), I = ICONE_CANAL[k];
+            return (
+              <button key={k} type="button" aria-pressed={canal === k} disabled={!para} onClick={() => setCanal(k)}
+                className={cn(CHIP(canal === k), "inline-flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60")}>
+                <I className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />{k} · {para ?? (k === "Email" ? "sem email" : "sem telefone")}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
+      <Chips rotulo="Resposta" opcoes={OPCOES_RESPOSTA} valor={modelo} escolher={setModelo} />
+      {modelo === OUTRA && (
+        <div className="mt-3">
+          <label htmlFor={idTexto} className="block text-[15px] font-medium">A sua resposta (curta)</label>
+          <textarea id={idTexto} value={escrito} maxLength={MAX_TEXTO} rows={3} onChange={(e) => setEscrito(e.target.value)} autoFocus
+            className="mt-2 w-full max-w-xl rounded-lg border border-input bg-card px-3 py-2 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+        </div>
+      )}
+      {texto && modelo !== OUTRA && <p className="mt-3 text-[15px] text-foreground">Vai enviar: “{texto}”</p>}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" className={BOTAO} disabled={falta.length > 0} onClick={enviar}>Enviar</Button>
+        <Button type="button" variant="ghost" className={BOTAO} onClick={() => fechar(false)}>Cancelar</Button>
+      </div>
+      {falta.length > 0 && <p className="mt-2 text-[15px] text-muted-foreground">{falta.join(" ")}</p>}
+      <p className="mt-2 text-[15px] text-muted-foreground">Protótipo: a resposta não sai daqui, fica só nesta sessão.</p>
+    </div>
+  );
+}
+
+interface PerguntaProps extends Pick<Ctx, "S" | "A" | "go"> {
+  p: PerguntaCliente; editor: Editor; abrirEditor: (e: Editor) => void; fecharEditor: (guardou: boolean) => void; anunciar: (m: string) => void;
+}
+
+function LinhaPergunta({ p, editor, abrirEditor, fecharEditor, anunciar, S, A, go }: PerguntaProps) {
+  const base = `hv2p-${idSeguro(p.id)}`, aberto = editor?.chave === p.id && editor.tipo === "resposta";
+  const c = contactoDe(S, p);
+  const esc = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopPropagation(); fecharEditor(false); } };
+  const contacto = [c.email && `Email ${c.email}`, c.tel && `WhatsApp ${c.tel}`].filter(Boolean).join(" · ") || "Sem contacto no negócio";
+  return (
+    <li className="border-t border-border py-4 first:border-t-0">
+      <div className="flex items-start gap-3">
+        <MessageSquareText className="mt-0.5 h-6 w-6 shrink-0 text-primary" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-semibold text-foreground">{p.cliente}</p>
+          <p className="text-[15px] text-muted-foreground">Pergunta · {p.negocio} · {p.origem} · {haQuanto(p.minutos)}</p>
+          <blockquote className="mt-2 border-l-2 border-border pl-3 text-base text-foreground">{p.texto}</blockquote>
+          <p className="mt-2 text-[15px] text-muted-foreground">{contacto}</p>
+        </div>
+      </div>
+      {!aberto && (
+        <div role="group" aria-label={`Responder a ${p.cliente} com`} className="mt-3 flex flex-wrap gap-2 pl-0 sm:pl-9">
+          {OPCOES_RESPOSTA.map((m, k) => (
+            <button key={m.id} id={`${base}-br${k}`} type="button" aria-expanded={false} className={CHIP(false)}
+              onClick={() => abrirEditor({ chave: p.id, tipo: "resposta", modelo: m.id })}>{m.nome}</button>
+          ))}
+          <Button type="button" variant="ghost" className={BOTAO} aria-label={`Abrir o negócio: ${p.cliente}`} onClick={go(() => A.abrir(p.dealId))}>Abrir o negócio</Button>
+        </div>
+      )}
+      {aberto && <EditorResposta p={p} S={S} id={`${base}-er`} modelo0={editor!.modelo ?? MODELOS_RESPOSTA[0].id} fechar={fecharEditor} esc={esc} anunciar={anunciar} />}
+    </li>
+  );
+}
+
+function Respondidas({ rs }: { rs: readonly RespostaV2[] }) {
+  if (!rs.length) return null;
+  return (
+    <ul className="mt-2" aria-label="Perguntas respondidas">
+      {rs.map((r) => {
+        const I = ICONE_CANAL[r.canal];
+        return (
+          <li key={r.id} className="flex items-center gap-3 border-t border-border py-3 text-[15px] text-muted-foreground first:border-t-0">
+            <I className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <span><span className="font-medium text-foreground">{r.cliente}</span> · Respondida há instantes por {r.canal} ({r.para})</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /* ---------------------------------------------------------------- Direção: a equipa */
 
 function Equipa({ S, A, go }: Pick<Ctx, "S" | "A" | "go">) {
@@ -240,7 +356,7 @@ export function HojeV2({ S, A, run, go }: Ctx) {
   const r: Papel = S.role;
   const regs = useRegistos(), dados = useHojeV2();
   const [aviso, anunciar] = useAviso();
-  const [cat, setCat] = useState<CatV2 | null>(null);
+  const [cat, setCat] = useState<FiltroV2>(null);
   const [dia, setDia] = useState<string | null>(null);
   const [editor, setEditor] = useState<Editor>(null);
   const focar = useRef<string | null>(null), tituloLista = useRef<HTMLHeadingElement>(null);
@@ -253,14 +369,22 @@ export function HojeV2({ S, A, run, go }: Ctx) {
   useEffect(() => { setCat(null); setEditor(null); }, [r]);
 
   const itens = hojeV2(S, r, regs, dados);
-  const conts = contadores(itens, r), vistos = filtrarCat(itens, cat);
+  const respostas = dados.respostas ?? [];
+  const perguntas = perguntasPorResponder(r, respostas.map((x) => x.pergunta));
+  const verPerguntas = vePerguntas(r) && (cat === null || cat === "perguntas");
+  const conts = contadores(itens, r), vistos = cat === "perguntas" ? [] : filtrarCat(itens, cat);
+  const total = itens.length + perguntas.length;
   const alertas = alertasV2(S, r);
   const ag = agendaV2(S, r, regs, dados), sem = semana(), agVisto = doDia(ag, dia);
   const atrasos = itens.filter((i) => i.atraso).length;
 
   const abrirEditor = (e: Editor): void => setEditor(e);
   const fecharEditor = (guardou: boolean): void => {
-    if (editor) focar.current = guardou ? "lista" : `hv2-${idSeguro(editor.chave)}-${editor.tipo === "visita" ? "bv" : "bt"}`;
+    if (editor) {
+      focar.current = guardou ? "lista"
+        : editor.tipo === "resposta" ? `hv2p-${idSeguro(editor.chave)}-br0`
+          : `hv2-${idSeguro(editor.chave)}-${editor.tipo === "visita" ? "bv" : "bt"}`;
+    }
     setEditor(null);
   };
   const verPessoa = (i: ItemV2): void => {
@@ -273,9 +397,10 @@ export function HojeV2({ S, A, run, go }: Ctx) {
     else if (a.destino === "negocios") { A.nav("negocios"); A.filtro("todos"); }
     else A.nav(a.destino);
   })();
-  const escolherCat = (c: CatV2 | null): void => {
+  const escolherCat = (c: FiltroV2): void => {
     setCat(c); setEditor(null);
-    const n = filtrarCat(itens, c).length;
+    if (c === "perguntas") { anunciar(`Lista filtrada por Perguntas: ${perguntas.length}`); return; }
+    const n = c ? filtrarCat(itens, c).length : total;
     anunciar(c ? `Lista filtrada por ${CATEGORIAS[c].nome}: ${n}` : `A mostrar tudo: ${n}`);
   };
   const escolherDia = (d: string | null): void => {
@@ -284,9 +409,10 @@ export function HojeV2({ S, A, run, go }: Ctx) {
     anunciar(d ? `Agenda de ${rotuloDia(d)}: ${n === 1 ? "1 compromisso" : `${n} compromissos`}` : `Agenda da semana: ${n}`);
   };
 
+  const nP = perguntas.length, textoPerguntas = nP ? `${nP} ${nP === 1 ? "pergunta" : "perguntas"} de clientes` : "";
   const frase = itens.length === 0
-    ? "Não tem nada pendente. Mude de papel no menu para ver o trabalho dos outros."
-    : `Tem ${itens.length} ${itens.length === 1 ? "coisa" : "coisas"} para tratar${atrasos ? `, ${atrasos} com atraso` : ""}.`;
+    ? (nP ? `Tem ${textoPerguntas} por responder.` : "Não tem nada pendente. Mude de papel no menu para ver o trabalho dos outros.")
+    : `Tem ${itens.length} ${itens.length === 1 ? "coisa" : "coisas"} para tratar${atrasos ? `, ${atrasos} com atraso` : ""}${nP ? ` e ${textoPerguntas}` : ""}.`;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
@@ -303,7 +429,12 @@ export function HojeV2({ S, A, run, go }: Ctx) {
 
       <Secao id="hv2-lista" titulo="Para tratar" icone={<ListTodo className="h-5 w-5 text-primary" aria-hidden="true" />} tituloRef={tituloLista}>
         <div role="group" aria-label="Mostrar na lista" className="mt-3 flex flex-wrap gap-2">
-          <button type="button" aria-pressed={cat === null} onClick={() => escolherCat(null)} className={CHIP(cat === null)}>Tudo <span className="tabular-nums">{itens.length}</span></button>
+          <button type="button" aria-pressed={cat === null} onClick={() => escolherCat(null)} className={CHIP(cat === null)}>Tudo <span className="tabular-nums">{total}</span></button>
+          {vePerguntas(r) && (
+            <button type="button" aria-pressed={cat === "perguntas"} onClick={() => escolherCat(cat === "perguntas" ? null : "perguntas")} className={CHIP(cat === "perguntas")}>
+              Perguntas <span className="tabular-nums">{perguntas.length}</span>
+            </button>
+          )}
           {conts.map((c) => (
             <button key={c.cat} type="button" aria-pressed={cat === c.cat} onClick={() => escolherCat(cat === c.cat ? null : c.cat)} className={CHIP(cat === c.cat)}>
               {c.nome} <span className="tabular-nums">{c.n}</span>
@@ -322,7 +453,20 @@ export function HojeV2({ S, A, run, go }: Ctx) {
             ))}
           </ul>
         )}
-        {vistos.length === 0
+        {verPerguntas && (perguntas.length > 0 || respostas.length > 0) && (
+          <div className="mt-4">
+            <h3 className="text-base font-semibold">Perguntas do cliente</h3>
+            {perguntas.length === 0
+              ? <p className="mt-2 text-[15px] text-muted-foreground">Todas as perguntas estão respondidas.</p>
+              : (
+                <ul className="mt-2" aria-label="Perguntas do cliente">
+                  {perguntas.map((p) => <LinhaPergunta key={p.id} p={p} editor={editor} abrirEditor={abrirEditor} fecharEditor={fecharEditor} anunciar={anunciar} S={S} A={A} go={go} />)}
+                </ul>
+              )}
+            <Respondidas rs={respostas} />
+          </div>
+        )}
+        {cat === "perguntas" ? null : vistos.length === 0
           ? <p className="mt-4 text-[15px] text-muted-foreground">{cat ? `Nada em ${CATEGORIAS[cat].nome}.` : "Nada para tratar."}</p>
           : (
             <ul className="mt-4" aria-label={cat ? CATEGORIAS[cat].nome : "Para tratar"}>

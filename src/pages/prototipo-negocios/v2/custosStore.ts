@@ -4,6 +4,7 @@
 // equipamentos, consumíveis, preço) passa para S.svc com aplicarTodos, ao editar.
 import { useSyncExternalStore } from "react";
 import { custos0, type Custos } from "./custosModelo";
+import { reporCatalogo } from "./catalogoStore";
 
 let estado: Custos = custos0();
 const ouvintes = new Set<() => void>();
@@ -18,6 +19,7 @@ export function mudarCustos(fn: (c: Custos) => Custos | void): Custos {
 }
 export function reporCustos(): void {
   estado = custos0();
+  reporCatalogo(); // pacotes, materiais e a árvore (catalogoStore.ts)
   ouvintes.forEach((o) => o());
 }
 const subscrever = (o: () => void) => { ouvintes.add(o); return () => { ouvintes.delete(o); }; };

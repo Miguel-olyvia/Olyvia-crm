@@ -39,9 +39,25 @@ export interface VisitaV2 {
   hora: string;
 }
 
-export interface DadosHojeV2 { tarefas: readonly TarefaV2[]; visitas: readonly VisitaV2[] }
+/** A resposta a uma pergunta do cliente (perguntasCliente.ts): enviada "em memória" (o protótipo não envia nada). */
+export interface RespostaV2 {
+  id: number;
+  pergunta: string;
+  cliente: string;
+  canal: "Email" | "WhatsApp";
+  /** O email ou o telefone para onde foi. */
+  para: string;
+  texto: string;
+}
 
-const VAZIO: DadosHojeV2 = { tarefas: [], visitas: [] };
+export interface DadosHojeV2 {
+  tarefas: readonly TarefaV2[];
+  visitas: readonly VisitaV2[];
+  /** Opcional para os dados escritos à mão nos testes: sem respostas é o mesmo que nenhuma. */
+  respostas?: readonly RespostaV2[];
+}
+
+const VAZIO: DadosHojeV2 = { tarefas: [], visitas: [], respostas: [] };
 let dados: DadosHojeV2 = VAZIO;
 let seq = 0;
 const ouvintes = new Set<() => void>();
@@ -71,6 +87,16 @@ export function guardarVisita(v: Omit<VisitaV2, "id">): VisitaV2 {
   return nova;
 }
 
+/** Responde a uma pergunta do cliente: a pergunta sai da lista e fica em "Respondidas". Uma pergunta só se responde uma vez. */
+export function responderPergunta(r: Omit<RespostaV2, "id">): RespostaV2 | null {
+  if ((dados.respostas ?? []).some((x) => x.pergunta === r.pergunta)) return null;
+  seq += 1;
+  const nova: RespostaV2 = { ...r, id: seq };
+  dados = { ...dados, respostas: [...(dados.respostas ?? []), nova] };
+  avisar();
+  return nova;
+}
+
 export const lerHojeV2 = (): DadosHojeV2 => dados;
 
 export function subscreverHojeV2(fn: () => void): () => void {
@@ -78,7 +104,7 @@ export function subscreverHojeV2(fn: () => void): () => void {
   return () => { ouvintes.delete(fn); };
 }
 
-/** Apaga as tarefas e as visitas guardadas (os testes; e quem um dia ligar "Repor a demonstração" a isto). */
+/** Apaga as tarefas, as visitas e as respostas guardadas (os testes; e quem um dia ligar "Repor a demonstração" a isto). */
 export function esquecerHojeV2(): void {
   dados = VAZIO;
   avisar();
