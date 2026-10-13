@@ -1,3 +1,5 @@
+import { pessoasFichaTranslations } from "./pessoasFicha";
+
 // Página "Pessoas" (/pessoas) — módulo próprio, mesmo padrão de `negocioMetas.ts` e `today.ts`,
 // juntado em `useTranslation.ts`. Apenas en/pt: nas outras línguas o `t()` cai para `en`.
 // Os textos de saúde, fases e cadeia dos negócios vêm de `negocioMetas.ts` (chaves `businessGoals.*`).
@@ -10,7 +12,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.summary': '{total} people · {clients} clients · {noDeal} without a deal',
     'pessoasPagina.tabs.label': 'People sections',
     'pessoasPagina.tabs.people': 'People',
-    'pessoasPagina.tabs.submissions': 'Pending submissions ({count})',
+    'pessoasPagina.tabs.submissions': 'Submissions',
 
     'pessoasPagina.caption': 'People: contact, origin, stage, last contact, salesperson, deals and health (sample)',
     'pessoasPagina.col.person': 'Person',
@@ -70,14 +72,11 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.shortcuts.esc': 'Close the panel or this help',
 
     'pessoasPagina.actions.label': 'Person actions',
-    'pessoasPagina.actions.copy': 'Copy contact',
-    'pessoasPagina.actions.copyToast': 'Sample action: {name}’s contact would be copied',
-    'pessoasPagina.actions.noContact': 'No contact to copy',
     'pessoasPagina.actions.submissions': 'See submissions ({count})',
     'pessoasPagina.fichaTabs.label': 'Person sections',
-    'pessoasPagina.fichaTabs.deals': 'Deals ({count})',
-    'pessoasPagina.fichaTabs.subs': 'Submissions ({count})',
-    'pessoasPagina.fichaTabs.notes': 'Notes ({count})',
+    'pessoasPagina.fichaTabs.deals': 'Deals',
+    'pessoasPagina.fichaTabs.subs': 'Submissions',
+    'pessoasPagina.fichaTabs.notes': 'Notes',
     'pessoasPagina.deals.rep': 'Salesperson: {name}',
     'pessoasPagina.deals.open': 'Open deal',
     'pessoasPagina.deals.won': 'Won {month}',
@@ -144,6 +143,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.month.10': 'oct',
     'pessoasPagina.month.11': 'nov',
     'pessoasPagina.month.12': 'dec',
+    ...pessoasFichaTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -153,7 +153,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.summary': '{total} pessoas · {clients} clientes · {noDeal} sem negócio',
     'pessoasPagina.tabs.label': 'Secções de Pessoas',
     'pessoasPagina.tabs.people': 'Pessoas',
-    'pessoasPagina.tabs.submissions': 'Submissões pendentes ({count})',
+    'pessoasPagina.tabs.submissions': 'Submissões',
 
     'pessoasPagina.caption': 'Pessoas: contacto, origem, etapa, último contacto, comercial, negócios e saúde (exemplo)',
     'pessoasPagina.col.person': 'Pessoa',
@@ -213,14 +213,11 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.shortcuts.esc': 'Fechar a ficha ou esta ajuda',
 
     'pessoasPagina.actions.label': 'Ações da pessoa',
-    'pessoasPagina.actions.copy': 'Copiar contacto',
-    'pessoasPagina.actions.copyToast': 'Ação de exemplo: copiava o contacto de {name}',
-    'pessoasPagina.actions.noContact': 'Sem contacto para copiar',
     'pessoasPagina.actions.submissions': 'Ver submissões ({count})',
     'pessoasPagina.fichaTabs.label': 'Secções da ficha',
-    'pessoasPagina.fichaTabs.deals': 'Negócios ({count})',
-    'pessoasPagina.fichaTabs.subs': 'Submissões ({count})',
-    'pessoasPagina.fichaTabs.notes': 'Notas ({count})',
+    'pessoasPagina.fichaTabs.deals': 'Negócios',
+    'pessoasPagina.fichaTabs.subs': 'Submissões',
+    'pessoasPagina.fichaTabs.notes': 'Notas',
     'pessoasPagina.deals.rep': 'Comercial: {name}',
     'pessoasPagina.deals.open': 'Abrir negócio',
     'pessoasPagina.deals.won': 'Ganho {month}',
@@ -287,5 +284,6 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.month.10': 'out',
     'pessoasPagina.month.11': 'nov',
     'pessoasPagina.month.12': 'dez',
+    ...pessoasFichaTranslations.pt,
   },
 };

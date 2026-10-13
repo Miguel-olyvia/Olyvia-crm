@@ -7,7 +7,7 @@ import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { textoNegocios, textoUltimoContacto } from "./formatoPessoas";
 import { LIMITE_SEM_CONTACTO } from "./filtrosPessoas";
 import type { ResumoPessoa } from "./pessoasTipos";
-import { SeloPapel, SeloVoltou } from "./SelosPessoa";
+import { SeloPapel, SeloPerdida, SeloVoltou } from "./SelosPessoa";
 
 interface LinhaPessoaProps {
   resumo: ResumoPessoa;
@@ -45,7 +45,7 @@ export function LinhaPessoa({ resumo, hoje, voltou, aoAbrir }: LinhaPessoaProps)
   const { t } = useTranslation();
   const { pessoa } = resumo;
   return (
-    <TableRow data-pessoa-id={pessoa.id} className="cursor-pointer" onClick={() => aoAbrir(pessoa.id)}>
+    <TableRow data-pessoa-id={pessoa.id} className="cursor-pointer" onClick={(e) => { e.currentTarget.querySelector<HTMLElement>("[data-linha-pessoa]")?.focus(); aoAbrir(pessoa.id); }}>
       <TableCell className="px-3 py-2 align-middle">
         <button
           type="button" data-linha-pessoa={pessoa.id}
@@ -56,6 +56,7 @@ export function LinhaPessoa({ resumo, hoje, voltou, aoAbrir }: LinhaPessoaProps)
         <span className="flex flex-wrap gap-1.5 pb-1">
           <SeloPapel papel={resumo.papel} />
           {voltou && <SeloVoltou />}
+          {pessoa.perdida && <SeloPerdida />}
         </span>
       </TableCell>
       <TableCell className="px-3 py-2 align-middle"><Contacto resumo={resumo} /></TableCell>

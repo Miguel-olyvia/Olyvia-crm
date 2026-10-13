@@ -3,6 +3,7 @@
 // nas outras línguas o `t()` cai para `en`. Os textos do Quadro, da Lista, do painel e da
 // comparação estão em `negocioMetasQuadro.ts` e juntam-se aqui (prevalecem sobre os daqui).
 import { negocioMetasQuadroTranslations } from "./negocioMetasQuadro";
+import { negocioMetasWorkflowTranslations } from "./negocioMetasWorkflow";
 
 const textosBase: Record<"en" | "pt", Record<string, string>> = {
   en: {
@@ -308,6 +309,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
 };
 
 export const negocioMetasTranslations: Record<string, Record<string, string>> = {
-  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en },
-  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt },
+  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en },
+  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt },
 };

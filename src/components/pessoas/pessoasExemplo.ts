@@ -4,8 +4,9 @@
 // próprios desta página, de exemplo.
 import { DADOS_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { atividadeExemplo, extrasExemplo } from "./pessoasExemploFicha";
 import type {
-  CodigoMatch, EtapaPessoa, NegocioHistorico, NegocioPessoa, OrigemPessoa, Pessoa, Submissao, TipoSubmissao,
+  CodigoMatch, EtapaPessoa, ItemAtividade, NegocioHistorico, NegocioPessoa, OrigemPessoa, Pessoa, Submissao, TipoSubmissao,
 } from "./pessoasTipos";
 
 type CamposProprios = { origem: OrigemPessoa; etapa: EtapaPessoa; ultimoContactoDias: number };
@@ -25,7 +26,7 @@ const PROPRIOS: Record<string, CamposProprios> = {
 };
 
 const doNegocio = (n: NegocioMes): Pessoa => ({
-  id: n.pessoaId, nome: n.pessoa, contacto: n.contacto, comercial: n.comercial, ...PROPRIOS[n.pessoaId],
+  id: n.pessoaId, nome: n.pessoa, contacto: n.contacto, comercial: n.comercial, ...PROPRIOS[n.pessoaId], ...extrasExemplo(n.pessoaId),
 });
 
 const PESSOAS_COM_NEGOCIO: Pessoa[] = DADOS_EXEMPLO.negocios.map(doNegocio);
@@ -46,7 +47,13 @@ const LEADS_NOVAS: Pessoa[] = [
   },
 ];
 
-export const PESSOAS_EXEMPLO: Pessoa[] = [...PESSOAS_COM_NEGOCIO, ...LEADS_NOVAS];
+export const PESSOAS_EXEMPLO: Pessoa[] = [
+  ...PESSOAS_COM_NEGOCIO,
+  ...LEADS_NOVAS.map((p) => ({ ...p, ...extrasExemplo(p.id) })),
+];
+
+/** A atividade de exemplo (chamadas, emails e registo da ficha), gerada a partir do último contacto de cada pessoa. */
+export const ATIVIDADE_EXEMPLO: ItemAtividade[] = atividadeExemplo(PESSOAS_EXEMPLO);
 
 const orcamento = (id: string, valor: number) => ({ id, valor, escolhido: true });
 

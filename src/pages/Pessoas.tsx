@@ -1,14 +1,16 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
+import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/pessoas/AbasSublinhadas";
+import { juntarAtividade } from "@/components/pessoas/acoesPessoa";
+import { textoPendentes } from "@/components/pessoas/formatoPessoas";
 import { ConfirmarResolver } from "@/components/pessoas/ConfirmarResolver";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
 import { SeparadorPessoas } from "@/components/pessoas/SeparadorPessoas";
 import { SeparadorSubmissoes } from "@/components/pessoas/SeparadorSubmissoes";
-import { TAB_PESSOAS } from "@/components/pessoas/estilosPessoas";
+import { ATIVIDADE_EXEMPLO } from "@/components/pessoas/pessoasExemplo";
 import { ordenarSubmissoes } from "@/components/pessoas/resolverSubmissao";
 import { usePessoasEstado } from "@/components/pessoas/usePessoasEstado";
 import { usePessoasUrl, type SeparadorPagina } from "@/components/pessoas/usePessoasUrl";
@@ -36,7 +38,18 @@ const Pessoas = () => {
   // Um ?open= que não é de ninguém limpa-se do endereço, sem abrir nada.
   const { abertaId, limpar } = url;
   useEffect(() => { if (abertaId && !aberta) limpar(); }, [abertaId, aberta, limpar]);
-  const daAberta = (s: { candidatas: { pessoaId: string }[] }) => s.candidatas.some((c) => c.pessoaId === aberta?.pessoa.id);
+  // Ao fechar, a ficha guarda a última pessoa para não deslizar vazia enquanto sai.
+  const ultimoId = useRef<string | null>(null);
+  if (aberta) ultimoId.current = aberta.pessoa.id;
+  const daFicha = aberta ?? estado.resumos.find((r) => r.pessoa.id === ultimoId.current) ?? null;
+  const idAberta = daFicha?.pessoa.id;
+  const atividadeAberta = useMemo(
+    () => juntarAtividade(
+      ATIVIDADE_EXEMPLO.filter((i) => i.pessoaId === idAberta), estado.atividade.filter((i) => i.pessoaId === idAberta),
+    ),
+    [idAberta, estado.atividade],
+  );
+  const daAberta = (s: { candidatas: { pessoaId: string }[] }) => s.candidatas.some((c) => c.pessoaId === idAberta);
   const subtitulo = t("pessoasPagina.summary", {
     total: estado.resumos.length,
     clients: estado.resumos.filter((r) => r.papel === "cliente").length,
@@ -50,14 +63,15 @@ const Pessoas = () => {
         pai={{ to: "/leads", texto: t("sidebar.crm") }}
       />
       <Tabs value={url.separador} onValueChange={(v) => url.mudarSeparador(v as SeparadorPagina)} className="space-y-4">
-        <TabsList aria-label={t("pessoasPagina.tabs.label")} className="h-auto">
-          <TabsTrigger value="pessoas" className={TAB_PESSOAS}>{t("pessoasPagina.tabs.people")}</TabsTrigger>
+        <ListaAbas aria-label={t("pessoasPagina.tabs.label")}>
+          <Aba value="pessoas" rotulo={t("pessoasPagina.tabs.people")} />
           {podeVer && (
-            <TabsTrigger value="submissoes" className={TAB_PESSOAS}>
-              {t("pessoasPagina.tabs.submissions", { count: ordenadas.length })}
-            </TabsTrigger>
+            <Aba
+              value="submissoes" rotulo={t("pessoasPagina.tabs.submissions")} contador={ordenadas.length}
+              contadorLeitor={textoPendentes(t, ordenadas.length)} novo={ordenadas.length > 0}
+            />
           )}
-        </TabsList>
+        </ListaAbas>
         <TabsContent value="pessoas" className="mt-0">
           <h2 className="sr-only">{t("pessoasPagina.tabs.people")}</h2>
           <SeparadorPessoas
@@ -74,8 +88,9 @@ const Pessoas = () => {
         </TabsContent>
       </Tabs>
       <FichaPessoa
-        resumo={aberta} hoje={HOJE_EXEMPLO} submissoes={ordenadas.filter(daAberta)} podeVerSubmissoes={podeVer}
-        notas={estado.notas.filter((n) => n.pessoaId === aberta?.pessoa.id)} aoFechar={url.fechar}
+        resumo={daFicha} aberto={aberta !== null} anuncioExterno={resolucao.anuncio} hoje={HOJE_EXEMPLO} submissoes={ordenadas.filter(daAberta)} podeVerSubmissoes={podeVer}
+        notas={estado.notas.filter((n) => n.pessoaId === idAberta)} atividade={atividadeAberta}
+        voltou={idAberta !== undefined && estado.pendentes.has(idAberta)} acoes={estado} aoFechar={url.fechar}
         aoPedir={(sid, pid) => resolucao.pedir(sid, pid, "ficha")} aoVerTodasSubmissoes={url.irParaSubmissoes}
       />
       <ConfirmarResolver

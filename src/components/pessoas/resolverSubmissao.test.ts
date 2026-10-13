@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
-import { SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
+import { ATIVIDADE_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import type { EstadoPessoas } from "./pessoasTipos";
-import { ordenarSubmissoes, pessoasComPendentes, resolverSubmissao } from "./resolverSubmissao";
+import { ordenarSubmissoes, pessoasComPendentes, pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
 
-const inicial = (): EstadoPessoas => ({ submissoes: [...SUBMISSOES_EXEMPLO], notas: [] });
+const inicial = (): EstadoPessoas => ({
+  submissoes: [...SUBMISSOES_EXEMPLO], notas: [], pessoas: [], atividade: [], contactadas: [],
+});
 
 describe("submissões de exemplo", () => {
   it("são 6, com os códigos e tipos combinados", () => {
@@ -111,5 +113,27 @@ describe("pessoasComPendentes", () => {
 
   it("sem submissões, ninguém voltou a contactar", () => {
     expect(pessoasComPendentes([]).size).toBe(0);
+  });
+
+  it("resolver espalha o estado: pessoas, atividade e contactadas ficam como estavam", () => {
+    const antes: EstadoPessoas = { ...inicial(), pessoas: PESSOAS_EXEMPLO.slice(0, 2), atividade: ATIVIDADE_EXEMPLO.slice(0, 2), contactadas: ["p-rui"] };
+    const depois = resolverSubmissao(antes, "s2");
+    expect(depois.pessoas).toBe(antes.pessoas);
+    expect(depois.atividade).toBe(antes.atividade);
+    expect(depois.contactadas).toBe(antes.contactadas);
+  });
+});
+
+describe("pessoasQueVoltaram", () => {
+  it("tira as respondidas e as perdidas de 'Voltou a contactar'", () => {
+    const pessoas = PESSOAS_EXEMPLO.map((p) => (p.id === "p-clara" ? { ...p, perdida: { motivo: "preco" as const, data: "2026-10-13" } } : p));
+    const todas = pessoasQueVoltaram({ pessoas: PESSOAS_EXEMPLO, contactadas: [] }, SUBMISSOES_EXEMPLO);
+    expect(todas.has("p-clara")).toBe(true);
+    expect(todas.has("p-marta")).toBe(true);
+    const menos = pessoasQueVoltaram({ pessoas, contactadas: ["p-marta"] }, SUBMISSOES_EXEMPLO);
+    expect(menos.has("p-clara")).toBe(false);
+    expect(menos.has("p-marta")).toBe(false);
+    expect(menos.has("p-hugo")).toBe(true);
+    expect(todas.has("p-marta")).toBe(true);
   });
 });
