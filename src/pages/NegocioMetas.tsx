@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
@@ -27,6 +28,9 @@ const NegocioMetas = () => {
   const acoes = useAcoesExemplo();
   const { filtros, mudarFiltros } = useFiltrosPagina(prefs);
   const [vista, setVista] = useState<"quadro" | "dashboard">("quadro");
+  // ?open=<id> (vindo, por exemplo, da ficha de uma pessoa) abre o painel desse negócio, que vive no Quadro.
+  const abrirId = useSearchParams()[0].get("open");
+  useEffect(() => { if (abrirId) setVista("quadro"); }, [abrirId]);
 
   const visiveis = useMemo(() => filtrarNegocios(negocios, filtros, HOJE_EXEMPLO), [negocios, filtros]);
   const resumo = resumoQuadro(visiveis);

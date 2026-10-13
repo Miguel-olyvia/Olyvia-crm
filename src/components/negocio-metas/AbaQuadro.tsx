@@ -14,6 +14,7 @@ import {
 } from "./logicaQuadro";
 import { ordenarNegocios, type Ordem } from "./ordenacaoQuadro";
 import { useAtalhosQuadro } from "./useAtalhosQuadro";
+import { useNegocioAberto } from "./useNegocioAberto";
 import { useSelecaoNegocios } from "./useSelecaoNegocios";
 import type { ModoVista } from "./vistaGuardada";
 
@@ -111,7 +112,7 @@ function Conteudo({ p, dados, selecionados, aoAlternarSelecao, aoAbrir }: Conteu
 /** Aba Quadro: filtros, chips, o Quadro ou a Lista, o painel do negócio e a comparação. */
 export function AbaQuadro(props: AbaQuadroProps) {
   const { negocios, hoje, filtros, ordem, acoes, aoMudarFiltros, aoMudarOrdem } = props;
-  const [aberto, setAberto] = useState<NegocioMes | null>(null);
+  const { aberto, abrir, fechar } = useNegocioAberto(negocios);
   const [ajudaAberta, setAjudaAberta] = useState(false);
   const raiz = useRef<HTMLDivElement>(null);
   const pesquisa = useRef<HTMLInputElement>(null);
@@ -143,9 +144,9 @@ export function AbaQuadro(props: AbaQuadroProps) {
       />
       <Conteudo
         p={props} dados={dados} selecionados={new Set(sel.selecao.ids)}
-        aoAlternarSelecao={sel.selecao.alternar} aoAbrir={setAberto}
+        aoAlternarSelecao={sel.selecao.alternar} aoAbrir={abrir}
       />
-      <PainelNegocio negocio={aberto} hoje={hoje} acoes={acoes} aoFechar={() => setAberto(null)} />
+      <PainelNegocio negocio={aberto} hoje={hoje} acoes={acoes} aoFechar={fechar} />
       <BarraSelecao
         total={sel.selecao.ids.length} ocultos={sel.ocultos} recusado={sel.selecao.recusado}
         tentativas={sel.selecao.tentativas} dicaVez={sel.dicaVez} aoComparar={sel.comparar} aoLimpar={sel.limpar}

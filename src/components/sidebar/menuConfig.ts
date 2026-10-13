@@ -179,9 +179,10 @@ export const menuSections: MenuSection[] = [
     id: "crm",
     icon: UsersRound,
     labelKey: "sidebar.crm",
-    paths: ["/leads", "/leads/pending-submissions", "/clients"],
+    paths: ["/pessoas", "/leads", "/leads/pending-submissions", "/clients"],
     permissions: ["leads.view", "clients.view"],
     items: [
+      { to: "/pessoas", icon: UsersRound, labelKey: "sidebar.people", permission: "leads.view" },
       { to: "/leads", icon: Target, labelKey: "sidebar.leads", permission: "leads.view" },
       { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "platform.pending_submissions.view" },
       { to: "/clients", icon: Building, labelKey: "sidebar.clients", permission: "clients.view" },

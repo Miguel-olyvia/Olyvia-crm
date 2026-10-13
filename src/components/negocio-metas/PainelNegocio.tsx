@@ -34,7 +34,7 @@ function FaixaAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegoc
         </Link>
       </Button>
       <Button asChild variant="outline" className={botao}>
-        <Link to={`/clients?open=${encodeURIComponent(negocio.pessoaId)}`}>
+        <Link to={`/pessoas?open=${encodeURIComponent(negocio.pessoaId)}`}>
           <UserRound className="h-4 w-4" aria-hidden="true" />
           {t("businessGoals.panel.openPerson")}
         </Link>

@@ -318,6 +318,6 @@ describe("painel do negócio", () => {
     expect(passos[1]).toHaveTextContent("Proposta");
     expect(passos[2]).toHaveTextContent("Contrato");
     expect(within(painel).getByRole("link", { name: "Abrir negócio" })).toHaveAttribute("href", "/deals?open=n2");
-    expect(within(painel).getByRole("link", { name: "Abrir pessoa" })).toHaveAttribute("href", "/clients?open=p-rui");
+    expect(within(painel).getByRole("link", { name: "Abrir pessoa" })).toHaveAttribute("href", "/pessoas?open=p-rui");
   });
 });
