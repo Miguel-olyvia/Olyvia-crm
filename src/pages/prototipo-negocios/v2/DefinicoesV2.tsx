@@ -21,6 +21,7 @@ import {
 } from "./definicoesDados";
 import { indiceVisivel, procurar, secoesVisiveis, tituloSecao } from "./definicoesIndice";
 import { Agenda, FunilPontuacao, Marketing, Plataforma } from "./DefinicoesMais";
+import { DemolicaoV2 } from "./DemolicaoV2";
 import { RESUMO_SETOR, SETORES_V2, type Termos } from "./setoresV2";
 
 const OPCOES_TERMOS: Record<keyof Termos, { rot: string; op: string[] }> = {
@@ -177,6 +178,7 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
           </div>
         </Sub>
         <Sub id="orcamento-modelos" titulo="Modelos de orçamento e PDF"><ListaModelos itens={D.modelosOrc} /></Sub>
+        <Sub id="orcamento-entulho" titulo="Demolição e entulho · só a Direção"><DemolicaoV2 S={S} mudarPapel={() => run(() => A.role("direcao"))} /></Sub>
       </Secao>
 
       {/* ---------------------------------------------------------- Agenda */}

@@ -7,6 +7,7 @@
 import { CATALOGO, OFICIOS, normal, type LinhaCat } from "../catalogo";
 import { LINHAS, r2, type Estado, type MedKey, type Medidas, type SvcId } from "../motor";
 import { RECEITAS } from "../receitas";
+import { ARTIGOS_DEM0, PAR_DEM0, type ArtigoDem, type MudancaDem, type ParDem } from "../entulho";
 import {
   HOJE, custoReceita, margemSobrePreco, mesesAntes, mesesEntre, precoReceita, receitaDe,
   type Custos, type ReceitaV2, type UsoCons,
@@ -62,6 +63,12 @@ export interface Catalogo {
   qtdDe?: Record<SvcId, Regra>;
   /** A pergunta feita antes de obrigar ao produto (ex.: "O cliente mantém a sanita?"): "Sim" dispensa o produto. Em falta = sem pergunta. */
   perguntaManter?: Record<SvcId, string>;
+  /** Demolição e entulho (entulho.ts): a tabela de artigos, o artigo que cada serviço de demolição usa, */
+  /** os parâmetros (só a Direção os muda) e o histórico das mudanças. Em falta = os de arranque. */
+  artigosDem?: ArtigoDem[];
+  artigoDoServico?: Record<SvcId, string>;
+  parDem?: ParDem;
+  histDem?: MudancaDem[];
   unidades: string[];
   marcas: string[];
   fornecedores: string[];
@@ -403,6 +410,10 @@ const EXIGE0: Record<SvcId, [[string, string?], Regra]> = {
   c13: [["Canalização", "Louças e torneiras"], { k: "fixo", q: 1 }],
   c17: [["Canalização", "Louças e torneiras"], { k: "fixo", q: 1 }],
 };
+/** Serviço de demolição → o artigo de demolição que usa (a quantidade do serviço é a do artigo). */
+const ARTIGO_SVC0: Record<SvcId, string> = {
+  demol: "DEM-PAV-01", c1: "DEM-SAN-01",
+};
 /** A pergunta antes de obrigar ao produto ("Sim" = reaproveita-se o que há). */
 const PERGUNTA0: Record<SvcId, string> = {
   loucas: "O cliente mantém a sanita e a base de duche?", c13: "O cliente mantém a sanita?", c17: "O cliente mantém a banheira?",
@@ -459,6 +470,7 @@ export function catalogo0(): Catalogo {
   const uniq = (v: string[]) => [...new Set(v.filter(Boolean))];
   return {
     arvore, produtos, pacotes, classe, exigeProduto, qtdDe, perguntaManter,
+    artigosDem: structuredClone(ARTIGOS_DEM0), artigoDoServico: { ...ARTIGO_SVC0 }, parDem: structuredClone(PAR_DEM0), histDem: [],
     unidades: uniq(["un", "m²", "ml", "m", "kg", "l", "kit", "tubo", "saco", "pç", ...produtos.map((p) => p.un)]),
     marcas: uniq(produtos.map((p) => p.marca)).sort((a, b) => a.localeCompare(b, "pt")),
     fornecedores: uniq(produtos.map((p) => p.fornecedor)).sort((a, b) => a.localeCompare(b, "pt")),

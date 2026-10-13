@@ -8,6 +8,7 @@ import {
   mudarQtd, precoProduto, servicosDaVisita, textoFalta, textoProduto, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
+import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -127,6 +128,8 @@ export interface Orcamento {
   avisosVistos: Record<string, boolean>;
   /** Preços de linhas de materiais mudados à mão, pela descrição: as linhas refeitas (levantamento, modelo, produtos) guardam-nos. */
   precosMan?: Record<string, number>;
+  /** Demolição e entulho (orçamentos novos, com o Catálogo ligado): os artigos, os ajustes à mão e o último cálculo (entulho.ts). */
+  demolicao?: { itens: ItemDem[]; aj: AjustesDem; r?: ResultadoDem };
 }
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
 export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
@@ -494,6 +497,31 @@ export function aplicarPrecosMan(o: Orcamento) {
   for (const l of o.linhas) if (l.t === "mat" && m[l.d] != null) l.preco = m[l.d];
 }
 
+/* ------------------------------------------------------------------ demolição e entulho (entulho.ts) */
+/**
+ * Liga a demolição num orçamento: os serviços que dizem que artigo de demolição usam passam a artigos
+ * (com a quantidade da linha) e saem como linhas de serviço; a conta faz-se pela fórmula da Mudelar e o
+ * cliente vê uma só linha. Os artigos postos à mão no orçamento de antes ficam.
+ */
+export function ligarDemolicao(o: Orcamento, antes?: Orcamento["demolicao"]) {
+  const K = catalogoLigado();
+  if (!K) return;
+  const mapa = K.artigoDoServico ?? {};
+  const itens = itensDasLinhas(o.linhas, mapa);
+  o.linhas = o.linhas.filter((l) => !(l.t === "svc" && mapa[l.sid]));
+  o.demolicao = { itens: [...itens, ...(antes?.itens ?? []).filter((x) => !x.de)], aj: { ...(antes?.aj ?? {}) } };
+}
+/** Refaz a conta e a linha da demolição (só com a demolição ligada e o Catálogo ligado; antes de enviar). */
+export function sincronizarDemolicao(d: Negocio, _S: Estado) {
+  const o = d.orc, K = catalogoLigado();
+  if (!o || !o.demolicao || !K || o.enviada) return;
+  o.linhas = o.linhas.filter((l) => !(l.t === "mat" && l.d === LINHA_DEMOLICAO));
+  const P = K.parDem ?? PAR_DEM0;
+  const r = calcularDemolicao(o.demolicao.itens, K.artigosDem ?? ARTIGOS_DEM0, P, fatorAcesso(d.f, P), o.demolicao.aj);
+  o.demolicao.r = r;
+  if (r.preco > 0 || r.custo > 0) o.linhas.push({ t: "mat", d: LINHA_DEMOLICAO, custo: r.custo, preco: r.preco });
+}
+
 /** Todos os serviços da visita: do pacote (pelas medidas), postos à mão e trazidos pelos produtos escolhidos. */
 export function servicosVisita(d: Negocio): SvcId[] {
   const v = d.visita;
@@ -514,7 +542,7 @@ export function preservarManuais(antes: Orcamento, novo: Orcamento, L: LinhaServ
     const a = antes.linhas.find((x) => x.t === "svc" && x.sid === l.sid);
     if (a && a.t === "svc") l.pu = a.pu;
   }
-  const geradas = (dl: string) => dl === L.mat.d || [PREFIXO_LEV, PREFIXO_PROD, PREFIXO_CLIENTE].some((p) => dl.startsWith(p));
+  const geradas = (dl: string) => dl === L.mat.d || [PREFIXO_LEV, PREFIXO_PROD, PREFIXO_CLIENTE].some((p) => dl.startsWith(p)) || dl === LINHA_DEMOLICAO;
   novo.linhas.push(...antes.linhas.filter((l) => l.t === "mat" && !geradas(l.d)));
   novo.desconto = antes.desconto; novo.vendaDireta = antes.vendaDireta; novo.avisosVistos = { ...antes.avisosVistos };
   if (antes.precosMan) { novo.precosMan = { ...antes.precosMan }; aplicarPrecosMan(novo); }
@@ -540,6 +568,7 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
     if (e.t === "percent") o.linhas.push({ t: "mat", d: PREFIXO_LEV + e.d, custo: r2(bc * e.pct!), preco: r2(bp * e.pct!) });
   }
   aplicarPrecosMan(o);
+  sincronizarDemolicao(d, _S);
 }
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
@@ -576,6 +605,10 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
     if (s.semCusto && !vistos["sc" + l.sid]) A.push({ k: "w", t: `Técnico sem custo/hora (${s.perfil.toLowerCase()})`, d: `Foi usado o custo médio do perfil (${eur(s.eh)} €/h). Define-se no Catálogo.`, go: "catalogo", key: "sc" + l.sid });
     if (s.stale && !vistos["st" + l.sid]) A.push({ k: "w", t: "Preço desatualizado", d: s.stale, key: "st" + l.sid });
   });
+  // a demolição: a ocupação dos big bags ou contentores (cheios de mais, ou o último contentor quase vazio)
+  const oc = o.demolicao?.r?.ocupacao;
+  if (oc?.falta && !vistos["enfalta"]) A.push({ k: "w", t: oc?.meio === "contentor" ? "Os contentores não chegam para o entulho" : "Os big bags não chegam para o entulho", d: `${oc.texto}. ${oc.falta.charAt(0).toUpperCase() + oc.falta.slice(1)}.`, key: "enfalta" });
+  if (oc?.sugestao && !vistos["ensug"]) A.push({ k: "w", t: "Contentor quase vazio", d: oc.sugestao.charAt(0).toUpperCase() + oc.sugestao.slice(1) + ".", key: "ensug" });
   const T = tot(d, S);
   if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
   else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: `Margem total de ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
@@ -864,7 +897,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const antes = d.orc && !d.orc.enviada ? d.orc : null; // um levantamento reaberto: o orçamento de antes
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S);
       if (antes) preservarManuais(antes, d.orc, L);
-      sincronizarEfeitos(d, S); fase(d, 3);
+      // a demolição calcula-se nos orçamentos novos (com o Catálogo ligado); os artigos e ajustes à mão de antes ficam
+      ligarDemolicao(d.orc, antes?.demolicao);
+      sincronizarEfeitos(d, S); sincronizarDemolicao(d, S); fase(d, 3);
       avisar(antes
         ? { msg: "Orçamento refeito com a visita", sub: "Os preços e o desconto que tinha mudado mantêm-se", kind: "auto" }
         : { msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
@@ -897,12 +932,53 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     precoLinha(id: number, i: number, v: number) {
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (!l || o.enviada || !(v >= 0)) return;
+      if (l.t === "mat" && l.d === LINHA_DEMOLICAO) { A.demolicaoAjuste(id, "preco", r2(v)); return; } // a demolição: o preço final ajustado
       if (l.t === "svc") l.pu = r2(v); else { l.preco = r2(v); (o.precosMan ??= {})[l.d] = l.preco; }
       o.aprov = null; d.fresh = false;
+    },
+    /** A quantidade de uma linha de serviço (no detalhe da linha). */
+    qtdLinha(id: number, i: number, q: number) {
+      const d = deal(id), o = d.orc!, l = o.linhas[i];
+      if (l?.t !== "svc" || o.enviada || !(q >= 0)) return;
+      l.q = r2(q); o.aprov = null; sincronizarDemolicao(d, S);
+    },
+    /** Liga (ou desliga) a demolição e entulho num orçamento (os de exemplo vêm sem ela). Desligar devolve as linhas de serviço. */
+    demolicaoLigar(id: number, on: boolean) {
+      const d = deal(id), o = d.orc!;
+      if (o.enviada) return;
+      if (on) { ligarDemolicao(o); sincronizarDemolicao(d, S); }
+      else if (o.demolicao) {
+        for (const it of o.demolicao.itens) {
+          const sv = it.de ? garantirServico(S, it.de) : null;
+          if (it.de && sv) o.linhas.splice(Math.max(0, o.linhas.findIndex((l) => l.t === "mat")), 0, { t: "svc", sid: it.de, q: it.q, cu: r2(custoUn(sv, S)), pu: sv.preco });
+        }
+        delete o.demolicao;
+        o.linhas = o.linhas.filter((l) => !(l.t === "mat" && l.d === LINHA_DEMOLICAO));
+      }
+      o.aprov = null;
+    },
+    /** Um artigo de demolição no orçamento: a quantidade (0 tira-o). */
+    demolicaoItem(id: number, codigo: string, q: number) {
+      const d = deal(id), o = d.orc!;
+      if (!o.demolicao || o.enviada || !(q >= 0)) return;
+      const it = o.demolicao.itens.find((x) => x.codigo === codigo);
+      if (it) { if (q > 0) it.q = r2(q); else o.demolicao.itens = o.demolicao.itens.filter((x) => x !== it); }
+      else if (q > 0) o.demolicao.itens.push({ codigo, q: r2(q) });
+      o.aprov = null; sincronizarDemolicao(d, S);
+    },
+    /** Um valor da demolição mexido à mão (meio, n.º, preço do contentor, horas, toneladas, preço final); null repõe o cálculo. */
+    demolicaoAjuste<K extends ChaveAjuste>(id: number, k: K, v: AjustesDem[K] | null) {
+      const d = deal(id), o = d.orc!;
+      if (!o.demolicao || o.enviada) return;
+      if (v == null) delete o.demolicao.aj[k]; else o.demolicao.aj[k] = v;
+      // mudar o meio repõe o n.º (passa a ser o do meio novo)
+      if (k === "meio") delete o.demolicao.aj.n;
+      o.aprov = null; sincronizarDemolicao(d, S);
     },
     /** Volta ao preço calculado de uma linha de materiais (esquece o preço à mão). */
     reporPreco(id: number, i: number) {
       const d = deal(id), o = d.orc!, l = o.linhas[i];
+      if (l?.t === "mat" && l.d === LINHA_DEMOLICAO) { A.demolicaoAjuste(id, "preco", null); return; }
       if (l?.t !== "mat" || !o.precosMan || o.enviada) return;
       delete o.precosMan[l.d];
       const p = (d.visita.prod ?? []).find((x) => !x.cliente && PREFIXO_PROD + textoProduto(x) === l.d);

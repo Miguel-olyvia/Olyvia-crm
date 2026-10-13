@@ -17,6 +17,7 @@ import { CustoServicoInline } from "./CustoServicoInline";
 import { Escolha, ListaAlertas, NumeroCelula, Retirar, TextoCelula } from "./pecasCustos";
 import { caminho, consumivelDe, noDoServico, opcoesArvore } from "./catalogoModelo";
 import { mudarCatalogo, useCatalogo } from "./catalogoStore";
+import { ARTIGOS_DEM0, vSoltoDe } from "../entulho";
 
 const UNIDADES = ["un", "kg", "m", "m²", "ml", "l", "kit", "tubo", "saco", "pç"];
 const TH = "px-2 py-2 text-left text-[15px] font-medium text-muted-foreground";
@@ -102,6 +103,17 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
           </label>
         )}
       </div>
+      {/* demolição e entulho: o artigo de demolição que este serviço usa (a conta é a da especificação da Mudelar) */}
+      <label className="mt-3 flex flex-wrap items-center gap-3">
+        <span className="text-[15px] font-medium">Artigo de demolição</span>
+        <Escolha rotulo="Artigo de demolição" w="w-96" v={K.artigoDoServico?.[sid] ?? ""}
+          opcoes={[{ v: "", t: "Nenhum (não é demolição)" }, ...(K.artigosDem ?? ARTIGOS_DEM0).filter((a) => a.ativo).map((a) => ({ v: a.codigo, t: `${a.descricao} (${a.unidade})` }))]}
+          onSet={(v) => { mudarCatalogo((k) => { k.artigoDoServico ??= {}; if (v) k.artigoDoServico[sid] = v; else delete k.artigoDoServico[sid]; }); anunciar(v ? `Usa o artigo ${v}` : "Sem artigo de demolição"); }} />
+      </label>
+      {(() => {
+        const a = (K.artigosDem ?? ARTIGOS_DEM0).find((x) => x.codigo === K.artigoDoServico?.[sid]);
+        return a ? <p className="mt-1 text-sm text-muted-foreground">No orçamento, este serviço passa a artigo de demolição: {a.tempo.toString().replace(".", ",")} h/{a.unidade}, {String(Math.round(vSoltoDe(a) * 1000) / 1000).replace(".", ",")} m³ de entulho solto/{a.unidade}.{a.unidade !== un ? ` A unidade do artigo (${a.unidade}) não é a do serviço (${un}): usa-se a quantidade da linha tal como está.` : ""}</p> : null;
+      })()}
       {K.exigeProduto?.[sid] && <p className="mt-1 text-sm text-muted-foreground">Com «Sim» à pergunta não é preciso produto; com «Não» (ou sem pergunta) a visita só fecha com um produto deste ramo escolhido.</p>}
 
       {A.length > 0 && <div className="mt-6"><ListaAlertas A={A} /></div>}

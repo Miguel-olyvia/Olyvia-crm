@@ -7,6 +7,7 @@ import { CATALOGO, OFICIOS, normal } from "./catalogo";
 import { ESTR, custoUn, eur, nfmt, pct, type Servico } from "./motor";
 import { numero, type Ctx } from "./pecas";
 import { CustoServico } from "./CustoServico";
+import { DemolicaoV2 } from "./v2/DemolicaoV2";
 
 const Interruptor = ({ on, onClick, titulo, texto }: { on: boolean; onClick: () => void; titulo: string; texto: string }) => (
   <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex w-full items-center justify-between gap-4 py-4 text-left">
@@ -192,6 +193,11 @@ export function DefinicoesSimples({ S, A, go, run, repor }: Ctx) {
           texto="Decisão em aberto. Pelo método BMG a estrutura fica dentro da margem: somá-la aqui cobra-a duas vezes." />
       </div>
       <p className="mt-2 text-[15px] text-muted-foreground">Abaixo do mínimo, a proposta só sai com aprovação da Direção.</p>
+
+      <h2 className="mt-10 text-lg font-semibold">Demolição e entulho</h2>
+      <p className="mt-1 text-[15px] text-muted-foreground">Os valores com que se calcula a demolição e a remoção de entulho no orçamento. Só a Direção os muda.</p>
+      {/* a tabela dos artigos precisa de mais largura do que a coluna: no ecrã largo, o bloco alarga centrado */}
+      <div className="relative mt-3 lg:left-1/2 lg:w-[min(64rem,calc(100vw-22rem))] lg:-translate-x-1/2"><DemolicaoV2 S={S} mudarPapel={() => run(() => A.role("direcao"))} /></div>
 
       <h2 className="mt-10 text-lg font-semibold">Aspeto</h2>
       <div className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">

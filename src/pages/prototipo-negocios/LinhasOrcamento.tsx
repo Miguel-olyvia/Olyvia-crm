@@ -14,7 +14,9 @@ import { custoUn, eur, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } f
 import { numero, type Ctx } from "./pecas";
 import { CustoServico } from "./CustoServico";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
-import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
+import { PREFIXO_CLIENTE, PREFIXO_PROD, catalogoLigado } from "./produtosVisita";
+import { LINHA_DEMOLICAO, resumoDemolicao } from "./entulho";
+import { DemolicaoOrcamento } from "./DemolicaoOrcamento";
 
 /** O ícone do ofício de um serviço (pelo ofício do Catálogo ou pelo perfil do técnico). */
 export function iconeOficio(txt: string): LucideIcon {
@@ -28,9 +30,10 @@ export function iconeOficio(txt: string): LucideIcon {
   if (/gás|gas/.test(t)) return Flame;
   return Wrench;
 }
-export type Origem = "modelo" | "levantamento" | "produto" | "cliente" | "servico";
+export type Origem = "modelo" | "levantamento" | "produto" | "cliente" | "servico" | "demolicao";
 export function origemLinha(l: LinhaOrc): Origem {
   if (l.t === "svc") return "servico";
+  if (l.d === LINHA_DEMOLICAO) return "demolicao";
   if (l.d.startsWith(PREFIXO_PROD)) return "produto";
   if (l.d.startsWith(PREFIXO_CLIENTE)) return "cliente";
   if (l.d.startsWith(PREFIXO_LEV)) return "levantamento";
@@ -42,6 +45,7 @@ const ORIGEM: Record<Origem, { t: string; ic: LucideIcon; cls: string }> = {
   levantamento: { t: "do levantamento", ic: ClipboardList, cls: "bg-info/10 text-info" },
   produto: { t: "produto", ic: Package, cls: "bg-accent/15 text-foreground" },
   cliente: { t: "fornecido pelo cliente", ic: UserRound, cls: "bg-success/10 text-success" },
+  demolicao: { t: "demolição e entulho", ic: Hammer, cls: "bg-warning/15 text-warning" },
 };
 
 export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" | "run" | "go">; d: Negocio; simples?: boolean }) {
@@ -51,10 +55,11 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
   const [aberta, setAberta] = useState<number | null>(null);
   const [editar, setEditar] = useState<number | null>(null);
   const custoTotal = o.linhas.reduce((a, l) => a + linhaCalc(l, S).custo, 0) || 1;
-  const mudou = () => { o.aprov = null; };
+  const direcao = S.role === "direcao";
   const t = simples ? "text-[15px]" : "text-sm";
 
   return (
+    <>
     <ul className="divide-y divide-border rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]" aria-label="Linhas do orçamento">
       {o.linhas.map((l, i) => {
         const x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
@@ -62,7 +67,8 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         const origem = origemLinha(l), O = ORIGEM[origem];
         const nome = l.t === "svc" ? x.s!.n : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
         const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s!.perfil) : O.ic;
-        const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : "";
+        const dem = origem === "demolicao", veCusto = !dem || direcao; // o custo da demolição só a Direção o vê
+        const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
         const ajustado = l.t === "mat" && o.precosMan?.[l.d] != null;
         const valorEditar = l.t === "svc" ? l.pu : l.preco;
         const s = l.t === "svc" ? x.s! : null, novo = s ? r2(custoUn(s, S)) : 0, mud = !!s && !fechado && l.t === "svc" && Math.abs(novo - l.cu) > 0.004;
@@ -95,22 +101,23 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                     {eur(x.preco)} €
                   </button>
                 )}
-                <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums", cor)}>{x.preco > 0 ? `margem ${pct(m)}` : "sem preço"}</span>
+                {veCusto && <span className={cn("rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums", cor)}>{x.preco > 0 ? `margem ${pct(m)}` : "sem preço"}</span>}
               </div>
-              {l.t === "svc" && (
-                <button type="button" onClick={() => setAberta(i)} aria-haspopup="dialog" aria-label={`Detalhe de ${nome}`}
+              {(l.t === "svc" || dem) && (
+                <button type="button" onClick={() => setAberta(aberta === i && dem ? null : i)} aria-haspopup={dem ? undefined : "dialog"} aria-expanded={dem ? aberta === i : undefined} aria-label={`Detalhe de ${nome}`}
                   className="grid h-10 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground">
                   <ChevronRight className="h-4 w-4" aria-hidden="true" />
                 </button>
               )}
             </div>
             {/* o peso da linha no custo total */}
-            <div className="ml-[52px] mt-2 flex items-center gap-2">
+            {veCusto && <div className="ml-[52px] mt-2 flex items-center gap-2">
               <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                 <span className="block h-full rounded-full bg-primary/50" style={{ width: `${Math.min(100, (x.custo / custoTotal) * 100)}%` }} />
               </span>
               <span className="w-24 text-right text-xs tabular-nums text-muted-foreground">custo {eur(x.custo)} €</span>
-            </div>
+            </div>}
+            {dem && aberta === i && <DemolicaoOrcamento S={S} A={A} run={run} d={d} />}
             {ajustado && !fechado && (
               <button type="button" onClick={() => run(() => A.reporPreco(d.id, i))} className="ml-[52px] mt-1 inline-flex min-h-9 items-center gap-1 text-sm font-medium text-primary">
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Repor o preço calculado
@@ -123,9 +130,9 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   <div className="grid gap-2">
                     <span className="text-sm font-medium" id={`q-${d.id}-${i}`}>Quantidade ({s.un})</span>
                     <div role="group" aria-labelledby={`q-${d.id}-${i}`} className="inline-flex w-fit items-center rounded-lg border border-input bg-card p-0.5">
-                      <button type="button" aria-label="Menos" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => run(() => { l.q = Math.max(0, r2(l.q - 1)); mudou(); })}><Minus className="h-4 w-4" /></button>
+                      <button type="button" aria-label="Menos" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => run(() => A.qtdLinha(d.id, i, Math.max(0, r2(l.q - 1))))}><Minus className="h-4 w-4" /></button>
                       <output className="w-16 text-center text-[17px] font-medium tabular-nums">{nfmt(l.q)}</output>
-                      <button type="button" aria-label="Mais" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => run(() => { l.q = r2(l.q + 1); mudou(); })}><Plus className="h-4 w-4" /></button>
+                      <button type="button" aria-label="Mais" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted" onClick={() => run(() => A.qtdLinha(d.id, i, r2(l.q + 1)))}><Plus className="h-4 w-4" /></button>
                     </div>
                   </div>
                   <label className="grid gap-2">
@@ -152,5 +159,13 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         );
       })}
     </ul>
+    {/* a demolição e entulho: nos orçamentos novos já vem ligada; nos outros liga-se aqui */}
+    {!fechado && catalogoLigado() && (
+      <button type="button" onClick={() => run(() => A.demolicaoLigar(d.id, !o.demolicao))}
+        className="mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
+        <Hammer className="h-4 w-4" aria-hidden="true" />{o.demolicao ? "Não calcular a demolição e o entulho" : "Calcular a demolição e o entulho"}
+      </button>
+    )}
+    </>
   );
 }

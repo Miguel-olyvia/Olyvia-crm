@@ -55,6 +55,7 @@ export const INDICE: EntradaIndice[] = [
   E("agenda", "agenda-recursos", "Recursos", ["recursos", "técnicos", "veículos", "carrinha", "equipamentos", "disponibilidade", "ferramentas"]),
   E("agenda", "agenda-regras", "Regras de marcação", ["duração da visita", "intervalo", "antecedência", "horário de trabalho", "horário", "marcações", "scheduling rules"]),
   E("marketing", "marketing-canais", "Tipos de canal", ["canais", "channels", "origem", "pago", "redes sociais", "pesquisa", "offline", "parcerias"]),
+  E("orcamento", "orcamento-entulho", "Demolição e entulho", ["entulho", "demolição", "big bag", "contentor", "deposição", "vazadouro", "rcd", "e-gar", "markup", "artigos de demolição"]),
   { ...E("plataforma", "plataforma-lista", "Acessos de suporte, entradas e RGPD", ["suporte", "support access", "auditoria", "auth audit log", "entradas", "login", "rgpd", "apagamento", "gdpr", "platform"]), soDirecao: true },
 ];
 

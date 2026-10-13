@@ -162,17 +162,17 @@ describe("na visita: portão, orçamento e reabrir", () => {
     A.manter(d.id, "loucas", "sim"); A.manter(d.id, "pav", "sim");
     A.fecharVisita(d.id);
     const o = d.orc!;
-    const i = o.linhas.findIndex((l) => l.t === "svc" && l.sid === "demol");
+    const i = o.linhas.findIndex((l) => l.t === "svc" && l.sid === "revest");
     (o.linhas[i] as { pu: number }).pu = 30;
     o.desconto = 5;
     A.reabrirVisita(d.id);
     expect(d.fase).toBe(2);
     expect(d.visita.fechada).toBe(false);
-    d.visita.med.pav = 6;
+    d.visita.med.par = 18;
     A.fecharVisita(d.id);
     expect(d.fase).toBe(3);
-    const l = d.orc!.linhas.find((x) => x.t === "svc" && x.sid === "demol")!;
-    expect(l).toMatchObject({ q: 6, pu: 30 });
+    const l = d.orc!.linhas.find((x) => x.t === "svc" && x.sid === "revest")!;
+    expect(l).toMatchObject({ q: 18, pu: 30 });
     expect(d.orc!.desconto).toBe(5);
   });
 
