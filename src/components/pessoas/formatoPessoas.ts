@@ -12,7 +12,7 @@ export function textoUltimoContacto(t: Traduzir, dias: number): string {
   return t(`${P}last.${dias === 1 ? "one" : "many"}`, { count: dias });
 }
 
-/** "Sem negócio", "—" (só histórico) ou "2 · €14.100 · Financeiro". */
+/** "Sem negócio", "—" (só histórico) ou "2 · €14.100 · Ganho". */
 export function textoNegocios(t: Traduzir, r: ResumoPessoa): string {
   if (r.semNegocio) return t(`${P}deals.none`);
   if (r.fase === null) return "—";

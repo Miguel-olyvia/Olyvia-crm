@@ -86,8 +86,9 @@ describe("Quadro", () => {
   it("mostra quatro colunas por fase com os cartões", () => {
     renderPage();
     verTodos();
-    for (const fase of ["Orçamento", "Proposta", "Contrato", "Financeiro"]) {
-      expect(screen.getByRole("heading", { level: 3, name: fase })).toBeInTheDocument();
+    for (const fase of ["Orçamento", "Proposta", "Contrato", "Ganho"]) {
+      // O nome da coluna leva, só para leitores de ecrã, quantos negócios tem ("Orçamento, 1 negócio").
+      expect(screen.getByRole("heading", { level: 3, name: new RegExp("^" + fase + ", [0-9]+ negócios?$") })).toBeInTheDocument();
     }
     expect(cartoes()).toHaveLength(10);
   });
@@ -107,7 +108,7 @@ describe("Quadro", () => {
     const antes = chips().map((c) => c.textContent!);
     expect(antes).toHaveLength(5);
     antes.forEach((texto, i) => {
-      const n = Number(texto.match(/(\d+)(?:\s*·[^·]*)?$/)![1]);
+      const n = Number(texto.match(/([0-9]+)(?:\s*·[^·]*)?$/)![1]);
       fireEvent.click(chips()[i]);
       expect(chips()[i]).toHaveAttribute("aria-pressed", "true");
       expect(estado()).toBe(n === 1 ? "1 negócio" : `${n} negócios`);
@@ -120,19 +121,19 @@ describe("Quadro", () => {
   it("os chips de fase somam-se (OU) e o Para tratar junta-se com E", () => {
     renderPage();
     verTodos();
-    fireEvent.click(screen.getByRole("button", { name: /^Orçamento 1/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^Proposta 2/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Orçamento: 1 / }));
+    fireEvent.click(screen.getByRole("button", { name: /^Proposta: 2 / }));
     expect(estado()).toBe("3 negócios");
     fireEvent.click(screen.getByRole("button", { name: /^Para tratar/ }));
     expect(estado()).toBe("3 negócios");
-    fireEvent.click(screen.getByRole("button", { name: /^Orçamento 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Orçamento: 1 / }));
     expect(estado()).toBe("2 negócios");
   });
 
   it("um chip filtra os cartões e o resumo do topo", () => {
     renderPage();
     verTodos();
-    fireEvent.click(screen.getByRole("button", { name: /^Orçamento 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Orçamento: 1 / }));
     expect(estado()).toBe("1 negócio");
     expect(screen.queryByRole("button", { name: /Marta Silveira/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Tiago Rocha · / })).toBeInTheDocument();
@@ -160,9 +161,11 @@ describe("Quadro", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /^Rui Figueiredo · / }));
     const painel = screen.getByRole("dialog");
-    expect(within(painel).getByText("Escolhido")).toBeInTheDocument();
+    // O Resumo abre primeiro, com a cadeia numa linha; o orçamento escolhido está no separador Orçamentos.
     expect(within(painel).getByText("Aceite")).toBeInTheDocument();
     expect(within(painel).getByText("Assinado")).toBeInTheDocument();
+    fireEvent.mouseDown(within(painel).getByRole("tab", { name: /^Orçamentos/ }));
+    expect(within(painel).getByText("Escolhido")).toBeInTheDocument();
   });
 
   it("um negócio sem contrato mostra o passo opcional", () => {

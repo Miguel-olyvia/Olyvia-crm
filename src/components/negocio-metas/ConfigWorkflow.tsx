@@ -2,14 +2,11 @@ import { useId } from "react";
 import { Info } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { AcoesPorEtapa, EtapasPorFase } from "./EtapasWorkflow";
-import { GrupoRadios } from "./GrupoRadios";
+import { MatrizGanhoPerdido } from "./MatrizGanhoPerdido";
 import { MotivosPerda } from "./MotivosPerda";
 import { FOCO } from "./estilos";
 import { useWorkflowExemplo, type AvisoWorkflow } from "./useWorkflowExemplo";
-import {
-  OPCOES_ORCAMENTO, OPCOES_PROPOSTA, opcoesAdmitidas, traduzir, type ConfigWorkflow, type Texto,
-} from "./workflowNegocio";
+import { opcoesAdmitidas, traduzir, type ConfigWorkflow, type Texto } from "./workflowNegocio";
 
 interface FaseLigavelProps {
   nome: string;
@@ -40,7 +37,7 @@ function FaseLigavel({ nome, marcada, bloqueio, aoMudar }: FaseLigavelProps) {
 function FasesEmUso({ config }: { config: ConfigWorkflow }) {
   const { t } = useTranslation();
   const { mudar } = useWorkflowExemplo();
-  const semProposta: Texto | null = opcoesAdmitidas(config).contrato;
+  const semProposta: Texto | null = opcoesAdmitidas(config).contratoLigavel;
   return (
     <fieldset className="space-y-2 rounded-lg border border-border p-4">
       <legend className="px-1"><h4 className="text-sm font-semibold text-foreground">{t("businessGoals.workflow.cfg.c.legend")}</h4></legend>
@@ -78,28 +75,17 @@ function Avisos({ avisos }: { avisos: AvisoWorkflow[] }) {
   );
 }
 
-/** A configuração do Workflow, em cinco grupos de opções (A a E) mais os motivos de perda (F). */
+/** A configuração do Workflow, em três blocos: a matriz Ganho / Perdido (A e B), as fases em uso (C) e os motivos de perda (F). */
 export function OpcoesWorkflow() {
   const { t } = useTranslation();
   const { config, avisos, mudar } = useWorkflowExemplo();
-  const admitidas = opcoesAdmitidas(config);
+  const id = useId();
   return (
-    <section aria-labelledby="wf-config" className="space-y-4 rounded-lg border border-border bg-card p-4 sm:p-5">
-      <h3 id="wf-config" className="text-base font-semibold text-foreground">{t("businessGoals.workflow.cfg.title")}</h3>
+    <section aria-labelledby={`${id}-titulo`} className="space-y-4 rounded-lg border border-border bg-card p-4 sm:p-5">
+      <h3 id={`${id}-titulo`} className="text-base font-semibold text-foreground">{t("businessGoals.workflow.cfg.title")}</h3>
       <Avisos avisos={avisos} />
-      <GrupoRadios
-        legenda={t("businessGoals.workflow.cfg.a.legend")} ajuda={t("businessGoals.workflow.cfg.a.help")}
-        valor={config.aoAceitarOrcamento} opcoes={OPCOES_ORCAMENTO} indisponiveis={admitidas.orcamento}
-        rotulo={(o) => t(`businessGoals.workflow.opt.${o}`)} aoMudar={(aoAceitarOrcamento) => mudar({ aoAceitarOrcamento })}
-      />
-      <GrupoRadios
-        legenda={t("businessGoals.workflow.cfg.b.legend")} ajuda={t("businessGoals.workflow.cfg.b.help")}
-        valor={config.aoAceitarProposta} opcoes={OPCOES_PROPOSTA} indisponiveis={admitidas.proposta}
-        rotulo={(o) => t(`businessGoals.workflow.opt.${o}`)} aoMudar={(aoAceitarProposta) => mudar({ aoAceitarProposta })}
-      />
+      <MatrizGanhoPerdido config={config} aoMudar={mudar} />
       <FasesEmUso config={config} />
-      <EtapasPorFase config={config} />
-      <AcoesPorEtapa config={config} />
       <MotivosPerda motivos={config.motivosPerda} aoMudar={(motivosPerda) => mudar({ motivosPerda })} />
     </section>
   );

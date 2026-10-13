@@ -37,26 +37,34 @@ describe("conteúdo do Workflow", () => {
     expect(passos.map((p) => within(p).getAllByText(/^(Orçamento|Proposta|Contrato|Ganho)$/)[0].textContent)).toEqual([
       "Orçamento", "Proposta", "Contrato", "Ganho",
     ]);
-    expect(screen.getByText("aceite: cria a proposta, para Proposta")).toBeInTheDocument();
-    expect(screen.getByText("Perdido, com motivo, possível em qualquer fase")).toBeInTheDocument();
-    expect(screen.getByText(/Ao aceitar o orçamento, cria a proposta.*Perdido, com motivo, é possível em qualquer fase\./)).toHaveClass("sr-only");
+    expect(screen.getByText("ganho: cria a proposta, para Proposta")).toBeInTheDocument();
+    // A seta de perdido de cada passo vem por baixo, só em texto.
+    expect(screen.getByText("perdido: perde o negócio se for o último orçamento")).toBeInTheDocument();
+    expect(screen.getAllByText("perdido: perde o negócio")).toHaveLength(2);
+    expect(screen.getByText(/Em Orçamento, se ganho: cria a proposta\. Em Orçamento, se perdido: perde o negócio se for o último orçamento\..*Perder um negócio pede sempre um motivo da lista de motivos de perda\./)).toHaveClass("sr-only");
 
     expect(screen.getByLabelText("Negócio de exemplo")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Simular aceitar a proposta" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Aceitar a proposta" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Perder a proposta" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /orçamento|contrato/i })).not.toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Resultado" })).toHaveTextContent("Escolha uma simulação para ver o resultado.");
 
-    for (const legenda of ["A · Ao aceitar o orçamento", "B · Ao aceitar a proposta", "C · Fases em uso", "F · Motivos de perda"]) {
+    for (const legenda of ["Ao ganhar ou perder cada passo", "Fases em uso", "Motivos de perda"]) {
       expect(screen.getByText(legenda)).toBeInTheDocument();
     }
-    expect(screen.getAllByRole("radio")).toHaveLength(7);
+    // Matriz Ganho / Perdido: cinco células com opções e o Contrato ganho fixo (só leitura).
+    for (const celula of ["Orçamento, Ganho", "Orçamento, Perdido", "Proposta, Ganho", "Proposta, Perdido", "Contrato, Ganho", "Contrato, Perdido"]) {
+      expect(screen.getByRole("heading", { level: 5, name: celula })).toBeInTheDocument();
+    }
+    expect(screen.getAllByRole("radio")).toHaveLength(16);
 
     // Títulos: h2 da aba, h3 por secção, h4 por grupo.
     expect(screen.getByRole("heading", { level: 2, name: "Workflow dos negócios" })).toBeInTheDocument();
     for (const nome of ["Fluxo do negócio", "Simulador", "Configuração"]) {
       expect(screen.getByRole("heading", { level: 3, name: nome })).toBeInTheDocument();
     }
-    expect(screen.getByRole("heading", { level: 4, name: "A · Ao aceitar o orçamento" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Simular aceitar a proposta" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("heading", { level: 4, name: "Ao ganhar ou perder cada passo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Aceitar a proposta" })).toHaveAttribute("aria-pressed", "false");
   });
 });
 

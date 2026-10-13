@@ -5,7 +5,7 @@ import { faseDoNegocio, isNegocioGanho, valorDoNegocio, type FaseNegocio, type N
 import { ORDEM_SAUDE, saudeDoNegocio } from "@/components/negocio-metas/saudeNegocio";
 import { ehHistorico, type NegocioPessoa, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
 
-const ORDEM_FASE: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "financeiro"];
+const ORDEM_FASE: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "ganho"];
 
 /** Ganho: contrato assinado no quadro do mês, ou resultado "ganho" num histórico. */
 export const estaGanho = (n: NegocioPessoa): boolean => (ehHistorico(n) ? n.resultado === "ganho" : isNegocioGanho(n));

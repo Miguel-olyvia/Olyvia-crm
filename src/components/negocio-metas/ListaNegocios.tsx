@@ -131,6 +131,7 @@ export function ListaNegocios({ negocios, ocultarComercial, ...p }: ListaNegocio
 
   return (
     <div className="space-y-2">
+      <h2 className="sr-only">{t("businessGoals.section.list")}</h2>
       <div className="flex justify-end">
         <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} aria-expanded={todosAbertos} onClick={alternarTodos}>
           {t("businessGoals.list.expandAll")}

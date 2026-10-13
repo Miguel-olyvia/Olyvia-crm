@@ -23,13 +23,13 @@ export function RodapeLista({ negocios, totaisFase, colunas }: RodapeListaProps)
           <p className="font-semibold text-foreground">
             {t("businessGoals.list.totalVisible")}:{" "}
             <span className="tabular-nums">
-              {t("businessGoals.list.totalLine", { count: negocios.length, value: formatarMeta("euro", valor) })}
+              {t(negocios.length === 1 ? "businessGoals.list.totalLineOne" : "businessGoals.list.totalLine", { count: negocios.length, value: formatarMeta("euro", valor) })}
             </span>
           </p>
           <ul aria-label={t("businessGoals.list.byPhase")} className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
             {FASES.map((fase) => (
               <li key={fase} className="tabular-nums">
-                {t("businessGoals.list.phaseTotal", {
+                {t(totaisFase[fase].n === 1 ? "businessGoals.list.phaseTotalOne" : "businessGoals.list.phaseTotal", {
                   phase: t(`businessGoals.phase.${fase}`),
                   count: totaisFase[fase].n,
                   value: formatarMeta("euro", totaisFase[fase].valor),

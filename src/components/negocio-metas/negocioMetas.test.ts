@@ -41,7 +41,7 @@ describe("negócio", () => {
     ).toBe("contrato");
     expect(
       faseDoNegocio({ ...base, proposta: { estado: "aceite" }, contrato: { estado: "assinado" } }),
-    ).toBe("financeiro");
+    ).toBe("ganho");
   });
   it("só um contrato assinado é ganho", () => {
     expect(isNegocioGanho({ ...base, contrato: { estado: "pendente" } })).toBe(false);

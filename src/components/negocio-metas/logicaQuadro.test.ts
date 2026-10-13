@@ -79,17 +79,17 @@ describe("chips de fase", () => {
   it("contam e somam o valor de cada fase", () => {
     const { fases, paraTratar } = chipsDeFase(negocios, SEM_FILTROS, HOJE);
     expect(fases.map((c) => [c.fase, c.n])).toEqual([
-      ["orcamento", 1], ["proposta", 2], ["contrato", 1], ["financeiro", 6],
+      ["orcamento", 1], ["proposta", 2], ["contrato", 1], ["ganho", 6],
     ]);
     expect(fases.find((c) => c.fase === "proposta")?.valor).toBe(8600 + 15200);
     expect(fases.every((c) => !c.ativo)).toBe(true);
     expect(paraTratar).toMatchObject({ n: 3, ativo: false });
   });
   it("as contagens ignoram o filtro de fase mas respeitam os outros", () => {
-    const f = { ...SEM_FILTROS, comercial: "Diogo Lopes", fases: ["financeiro" as const] };
+    const f = { ...SEM_FILTROS, comercial: "Diogo Lopes", fases: ["ganho" as const] };
     const { fases } = chipsDeFase(negocios, f, HOJE);
     expect(fases.map((c) => c.n)).toEqual([1, 1, 0, 1]);
-    expect(fases.find((c) => c.fase === "financeiro")?.ativo).toBe(true);
+    expect(fases.find((c) => c.fase === "ganho")?.ativo).toBe(true);
     expect(fases.find((c) => c.fase === "proposta")?.ativo).toBe(false);
   });
   it("com Os meus só contam os meus", () => {
@@ -108,8 +108,8 @@ describe("próximo passo e fase", () => {
     expect(proximoPasso(por("n9"))).toBe("enviarProposta");
     expect(proximoPasso(por("n6"))).toBe("esperarCliente");
     expect(proximoPasso(por("n10"))).toBe("pedirAssinatura");
-    expect(proximoPasso(por("n1"))).toBe("passarFinanceiro");
-    expect(faseDoNegocio(por("n1"))).toBe("financeiro");
+    expect(proximoPasso(por("n1"))).toBe("concluido");
+    expect(faseDoNegocio(por("n1"))).toBe("ganho");
   });
 });
 
@@ -123,14 +123,14 @@ describe("totais por fase", () => {
   });
   it("ignora o filtro de fase mas respeita os outros", () => {
     const todas = totaisPorFase(negocios, SEM_FILTROS, HOJE);
-    const soFin = totaisPorFase(negocios, { ...SEM_FILTROS, fases: ["financeiro"] }, HOJE);
+    const soFin = totaisPorFase(negocios, { ...SEM_FILTROS, fases: ["ganho"] }, HOJE);
     expect(soFin).toEqual(todas);
-    const diogo = totaisPorFase(negocios, { ...SEM_FILTROS, comercial: "Diogo Lopes", fases: ["financeiro"] }, HOJE);
+    const diogo = totaisPorFase(negocios, { ...SEM_FILTROS, comercial: "Diogo Lopes", fases: ["ganho"] }, HOJE);
     expect(diogo.proposta.n).toBe(1);
     expect(diogo.contrato.n).toBe(0);
   });
-  it("Financeiro soma o valor ganho", () => {
-    expect(totaisPorFase(negocios, SEM_FILTROS, HOJE).financeiro.valor).toBe(valorGanho(negocios));
+  it("Ganho soma o valor ganho", () => {
+    expect(totaisPorFase(negocios, SEM_FILTROS, HOJE).ganho.valor).toBe(valorGanho(negocios));
   });
   it("resumo do quadro", () => {
     expect(resumoQuadro(negocios)).toEqual({ n: 10, valorEmProposta: 8600 + 15200, porFechar: 4 });

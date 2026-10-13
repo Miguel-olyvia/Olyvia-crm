@@ -3,7 +3,7 @@
 // mesma configuração; sem provider, quem lê recebe a predefinição e nada se grava.
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { guardarWorkflow, lerWorkflow } from "./workflowGuardado";
-import { PREDEFINICAO, copiarConfig, normalizarConfig, type ConfigWorkflow, type Texto } from "./workflowNegocio";
+import { PREDEFINICAO, avisosDeFases, copiarConfig, normalizarConfig, type ConfigWorkflow, type Texto } from "./workflowNegocio";
 
 /** Uma mudança parcial; `fases` também pode vir só com um dos dois campos. */
 export type MudancaWorkflow = Partial<Omit<ConfigWorkflow, "fases">> & { fases?: Partial<ConfigWorkflow["fases"]> };
@@ -41,16 +41,17 @@ export function useEstadoWorkflowExemplo(): WorkflowExemplo {
   const [reposta, setReposta] = useState<number | null>(null);
   const serie = useRef(0);
 
-  const aplicar = useCallback((proxima: ConfigWorkflow, repondo: boolean) => {
+  const aplicar = useCallback((proxima: ConfigWorkflow, repondo: boolean, extra: Texto[] = []) => {
     const { config: coerente, avisos: textos } = normalizarConfig(proxima);
     setConfig(coerente);
-    setAvisos(textos.map((texto) => ({ id: ++serie.current, texto })));
+    setAvisos([...extra, ...textos].map((texto) => ({ id: ++serie.current, texto })));
     setReposta(repondo ? ++serie.current : null);
     guardarWorkflow(coerente);
   }, []);
 
   const mudar = useCallback((m: MudancaWorkflow) => {
-    aplicar({ ...config, ...m, fases: { ...config.fases, ...m.fases } }, false);
+    const proxima = { ...config, ...m, fases: { ...config.fases, ...m.fases } };
+    aplicar(proxima, false, avisosDeFases(config.fases, proxima.fases));
   }, [config, aplicar]);
 
   const repor = useCallback(() => aplicar(copiarConfig(PREDEFINICAO), true), [aplicar]);

@@ -7,7 +7,7 @@ import {
 } from "./negocioMetas";
 import { precisaTratar } from "./saudeNegocio";
 
-export const FASES: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "financeiro"];
+export const FASES: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "ganho"];
 
 export type FaixaValor = "" | "ate10" | "10a20" | "20mais";
 export type NumOrcamentos = "" | "1" | "2+";
@@ -154,10 +154,10 @@ export function chipsDosFiltros(f: FiltrosQuadro): ChipFiltro[] {
 
 export type PassoKey =
   | "escolherOrcamento" | "criarProposta" | "enviarProposta" | "esperarCliente"
-  | "criarContrato" | "pedirAssinatura" | "passarFinanceiro";
+  | "criarContrato" | "pedirAssinatura" | "concluido";
 
 export function proximoPasso(n: NegocioMes): PassoKey {
-  if (n.contrato) return n.contrato.estado === "assinado" ? "passarFinanceiro" : "pedirAssinatura";
+  if (n.contrato) return n.contrato.estado === "assinado" ? "concluido" : "pedirAssinatura";
   if (n.proposta) {
     if (n.proposta.estado === "rascunho") return "enviarProposta";
     return n.proposta.estado === "enviada" ? "esperarCliente" : "criarContrato";
@@ -187,7 +187,7 @@ export function totaisPorFase(
 }
 
 /** Probabilidade (%) de fechar, por fase, só para o "ponderado" de exemplo. */
-export const PROBABILIDADE: Record<FaseNegocio, number> = { orcamento: 20, proposta: 50, contrato: 80, financeiro: 100 };
+export const PROBABILIDADE: Record<FaseNegocio, number> = { orcamento: 20, proposta: 50, contrato: 80, ganho: 100 };
 
 export interface ResumoQuadro {
   n: number;
