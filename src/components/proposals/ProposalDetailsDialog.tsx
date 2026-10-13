@@ -44,7 +44,8 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { ProposalPortalPreview } from "@/components/proposals/ProposalPortalPreview";
 import { resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
 import { getDisplayAttributes } from "@/utils/lineAttributes";
-import { computeLineVatBuckets, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
+import { computeLineVatBuckets, computeLineVatAmount, getLineVatLabel, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
+import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
 import { round2 } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
@@ -90,6 +91,8 @@ interface QuoteLine {
   bundle_id?: string | null;
   /** Unidades de stock por unidade da linha (1 sem embalagem) — escala o custo do catálogo no resolver. */
   units_per_uom?: number | null;
+  /** Preço de venda unitário gravado (NULL nas linhas antigas). */
+  retail_price_unit?: number | null;
 }
 
 interface QuoteItem {
@@ -139,7 +142,12 @@ const splitQuoteIntoDisplayGroups = (quote: QuoteItem): QuoteSectionGroup[] => {
 
   return Object.entries(groupedLines).map(([sectionName, lines], index) => {
     const subtotal = lines.reduce((sum, line) => sum + (line.total_sem_iva || 0), 0);
-    const total = lines.reduce((sum, line) => sum + (line.total_com_iva || 0), 0);
+    // Total c/IVA calculado como o PDF: em bundles o IVA é repartido pelos
+    // componentes. A coluna total_com_iva gravada pode ter IVA flat a 23%.
+    const total = lines.reduce((sum, line) => {
+      const base = line.total_sem_iva || 0;
+      return sum + base + computeLineVatAmount(line, base);
+    }, 0);
 
     return {
       id: `${quote.id}-${sectionName}-${index}`,
@@ -265,7 +273,7 @@ export function ProposalDetailsDialog({
           .order("sort_order"),
         supabase
           .from("quotes")
-          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, units_per_uom)")
+          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, units_per_uom, retail_price_unit)")
           .eq("proposal_id", proposal.id),
         supabase
           .from("proposals")
@@ -306,7 +314,7 @@ export function ProposalDetailsDialog({
         if (pLink?.quote_id) {
           const { data: linkedQuote } = await supabase
             .from("quotes")
-            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, units_per_uom)")
+            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, units_per_uom, retail_price_unit)")
             .eq("id", pLink.quote_id)
             .single();
           if (linkedQuote) {
@@ -714,12 +722,14 @@ export function ProposalDetailsDialog({
                                 </thead>
                                 <tbody>
                                   {group.lines.map((line) => {
-                                    const unitPriceVal = line.qt > 0 ? line.total_sem_iva / line.qt : 0;
+                                    const unitPriceVal = getLineDisplayUnitPrice(line);
+                                    // Margem sobre o preço efetivo (já com o desconto da linha).
+                                    const effectiveUnitPrice = line.qt > 0 ? line.total_sem_iva / line.qt : 0;
                                     const resolvedUnitCost = lineCostMap[line.id]?.unitCost ?? 0;
                                     const fallbackCost = line.cost_price || ((line.custo_material_unit || 0) + (line.custo_mao_obra_unit || 0));
                                     const costVal = resolvedUnitCost > 0 ? resolvedUnitCost : fallbackCost;
-                                    const margin = costVal > 0 && unitPriceVal > 0
-                                      ? ((unitPriceVal - costVal) / unitPriceVal) * 100
+                                    const margin = costVal > 0 && effectiveUnitPrice > 0
+                                      ? ((effectiveUnitPrice - costVal) / effectiveUnitPrice) * 100
                                       : 0;
                                     const hasCostVal = costVal > 0;
                                     const attrEntries = getDisplayAttributes(line.selected_attributes);
@@ -740,7 +750,7 @@ export function ProposalDetailsDialog({
                                         </td>
                                         <td className="p-2 text-center">{line.qt}{line.unidade ? ` ${line.unidade}` : ''}</td>
                                         <td className="p-2 text-right">{formatCurrency(unitPriceVal)}</td>
-                                        <td className="p-2 text-center text-muted-foreground">{line.iva_percent || 0}%</td>
+                                        <td className="p-2 text-center text-muted-foreground">{getLineVatLabel(line)}</td>
                                         <td className="p-2 text-center">
                                           {(line.discount_percent || 0) > 0 ? (
                                             <span className="text-orange-600 dark:text-orange-400 font-medium">{line.discount_percent}%</span>
@@ -762,7 +772,7 @@ export function ProposalDetailsDialog({
                                           </td>
                                         )}
                                         <td className="p-2 text-right">
-                                          <p className="font-semibold">{formatCurrency(line.total_com_iva)}</p>
+                                          <p className="font-semibold">{formatCurrency((line.total_sem_iva || 0) + computeLineVatAmount(line, line.total_sem_iva || 0))}</p>
                                           <p className="text-[10px] text-muted-foreground">{formatCurrency(line.total_sem_iva)} s/IVA</p>
                                         </td>
                                       </tr>
@@ -945,16 +955,18 @@ export function ProposalDetailsDialog({
                             .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
                             .map((line) => {
                               // Preço de venda unitário s/ IVA
-                              const unitPrice = line.qt > 0 ? line.total_sem_iva / line.qt : 0;
-                              
+                              const unitPrice = getLineDisplayUnitPrice(line);
+                              // Preço efetivo (já com o desconto da linha) — base da margem.
+                              const effectiveUnitPrice = line.qt > 0 ? line.total_sem_iva / line.qt : 0;
+
                               // Custo unitário — resolver em tempo real (bundles/products/services); snapshot só como fallback.
                               const resolvedCost = lineCostMap[line.id]?.unitCost ?? 0;
                               const fallbackCost = line.cost_price || ((line.custo_material_unit || 0) + (line.custo_mao_obra_unit || 0));
                               const custoUnit = resolvedCost > 0 ? resolvedCost : fallbackCost;
-                              
+
                               // Margem = (preço venda s/IVA - custo) / preço venda s/IVA * 100
-                              const profitMargin = custoUnit > 0 && unitPrice > 0
-                                ? ((unitPrice - custoUnit) / unitPrice) * 100
+                              const profitMargin = custoUnit > 0 && effectiveUnitPrice > 0
+                                ? ((effectiveUnitPrice - custoUnit) / effectiveUnitPrice) * 100
                                 : 0;
                               const hasCost = custoUnit > 0;
 
@@ -977,7 +989,7 @@ export function ProposalDetailsDialog({
                                       {formatCurrency(unitPrice)}
                                     </div>
                                     <div className="col-span-1 text-center text-muted-foreground">
-                                      {line.iva_percent || 0}%
+                                      {getLineVatLabel(line)}
                                     </div>
                                     <div className="col-span-1 text-center">
                                       {(line.discount_percent || 0) > 0 ? (
@@ -998,7 +1010,7 @@ export function ProposalDetailsDialog({
                                       </div>
                                     )}
                                     <div className={canViewCosts ? "col-span-2 text-right" : "col-span-3 text-right"}>
-                                      <p className="font-semibold">{formatCurrency(line.total_com_iva)}</p>
+                                      <p className="font-semibold">{formatCurrency((line.total_sem_iva || 0) + computeLineVatAmount(line, line.total_sem_iva || 0))}</p>
                                       <p className="text-[10px] text-muted-foreground">{formatCurrency(line.total_sem_iva)} s/ IVA</p>
                                     </div>
                                   </div>

@@ -742,13 +742,14 @@ export async function resolveAndInsertQuoteLines(
             type: isProduct ? "product" : "service",
             source_id: isProduct ? comp.product_id : comp.service_id,
             quantity: Number(comp.quantity ?? 1),
-            unit_price: Number(componentUnitPrice.toFixed(4)),
+            // Fechado ao cêntimo: o preço do bundle é a soma destes × qtd.
+            unit_price: roundCurrency(componentUnitPrice),
             vat_rate: calcBundleComponentVat(comp),
             choice_group_id: comp.choice_group_id ?? null,
           };
         }).filter((c) => c.source_id);
 
-        unitPrice = bundleComponents.reduce((sum, comp) => sum + Number(comp.unit_price || 0) * Number(comp.quantity || 0), 0);
+        unitPrice = roundCurrency(bundleComponents.reduce((sum, comp) => sum + Number(comp.unit_price || 0) * Number(comp.quantity || 0), 0));
         selectedAttributes = { bundle_components: bundleComponents };
         if (!Number.isFinite(unitPrice) || unitPrice < 0) {
           skipped.push({ item: raw, reason: "Bundle sem preço calculável." }); continue;
@@ -760,7 +761,10 @@ export async function resolveAndInsertQuoteLines(
       skipped.push({ item: raw, reason: "unit_price inválido." }); continue;
     }
 
-    const totalSemIva = qt * unitPrice;
+    // Total da linha = preço unitário fechado ao cêntimo × quantidade
+    // (retail_price_unit é numeric(10,2), por isso o unitário gravado já é este).
+    unitPrice = roundCurrency(unitPrice);
+    const totalSemIva = roundCurrency(qt * unitPrice);
     const bundleComponents = Array.isArray(selectedAttributes.bundle_components) ? selectedAttributes.bundle_components : [];
     const componentsTotal = bundleComponents.reduce((s: number, c: any) => s + Number(c.unit_price || 0) * Number(c.quantity || 0), 0);
     const ivaValor = componentsTotal > 0

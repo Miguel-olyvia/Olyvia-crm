@@ -17,6 +17,8 @@
  *     quantidade, para que o subtotal feche com o que está no ecrã.
  */
 
+import { getBundleComponents } from "@/utils/quotes/bundleComponents";
+
 export const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /** Campos de preço de que uma linha precisa. Aceita linhas da UI e da base. */
@@ -45,12 +47,40 @@ export const hasDefinedSalePrice = (line: PricedQuoteLine): boolean =>
   line.retail_price_unit !== undefined && line.retail_price_unit !== null && num(line.retail_price_unit) > 0;
 
 /**
+ * Preço unitário de um bundle (por 1 unidade da linha): soma dos preços
+ * unitários dos componentes, cada um fechado ao cêntimo, vezes a sua
+ * quantidade. Devolve `null` quando a linha não tem componentes de bundle.
+ */
+export function getBundleUnitPrice(line: PricedQuoteLine): number | null {
+  const components = getBundleComponents(line);
+  if (components.length === 0) return null;
+  return round2(components.reduce((s, c) => s + round2(c.unit_price) * c.quantity, 0));
+}
+
+/**
+ * Preço unitário a MOSTRAR numa linha já gravada (PDF, portal, diálogo):
+ *  1. `retail_price_unit` quando existe;
+ *  2. senão, num bundle, a soma dos componentes;
+ *  3. senão, `total_sem_iva / qt` (linhas antigas sem preço de venda gravado).
+ */
+export function getLineDisplayUnitPrice(line: PricedQuoteLine & { total_sem_iva?: number | string | null }): number {
+  if (hasDefinedSalePrice(line)) return round2(num(line.retail_price_unit));
+  const bundleUnit = getBundleUnitPrice(line);
+  if (bundleUnit !== null) return bundleUnit;
+  const qt = num(line.qt);
+  if (qt === 0) return 0;
+  return round2(num(line.total_sem_iva) / qt);
+}
+
+/**
  * Preço unitário de venda da linha, fechado ao cêntimo.
  * O preço de venda definido manda sempre; só na sua ausência é que o preço
  * é construído a partir do custo e do markup.
  */
 export function getLineUnitPrice(line: PricedQuoteLine): number {
   if (hasDefinedSalePrice(line)) return round2(num(line.retail_price_unit));
+  const bundleUnit = getBundleUnitPrice(line);
+  if (bundleUnit !== null) return bundleUnit;
   const custoUnit = getLineUnitCost(line);
   if (custoUnit === 0) return 0;
   return round2(custoUnit * (1 + num(line.margem_percent) / 100) * (1 + num(line.int_percent) / 100));

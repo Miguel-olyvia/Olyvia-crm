@@ -47,12 +47,17 @@ describe("preço de venda definido: do bundle ao subtotal impresso", () => {
     expect(getLineSubtotal(linhaGravada(PRECO_BUNDLE))).toBe(318.15);
   });
 
-  it("sem preço de venda gravado, o preço reconstruído do custo erra por cêntimos", () => {
-    // Este é o defeito, fixado aqui para que não volte sem dar erro:
-    // 48,95 × 1,30 = 63,635 -> 63,64, e 5 × 63,64 = 318,20.
+  it("sem preço de venda gravado, um bundle soma os componentes em vez de reconstruir do custo", () => {
+    // O caminho antigo dava 48,95 × 1,30 = 63,635 -> 63,64, e 5 × 63,64 = 318,20.
+    // Agora o preço do bundle é Σ round2(componente) × qtd, mesmo sem retail_price_unit.
     const semPreco = linhaGravada(null);
-    expect(getLineUnitPrice(semPreco)).toBe(63.64);
-    expect(getLineSubtotal(semPreco)).toBe(318.2);
+    expect(getLineUnitPrice(semPreco)).toBe(63.63);
+    expect(getLineSubtotal(semPreco)).toBe(318.15);
+  });
+
+  it("uma linha simples sem preço de venda continua a ser custo × markup", () => {
+    const { selected_attributes: _ignored, ...simples } = linhaGravada(null);
+    expect(getLineUnitPrice(simples)).toBe(63.64);
   });
 
   it("o valor sobrevive à ida e volta pela coluna numeric(10,2)", () => {

@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { QuoteAIAssistant } from "./QuoteAIAssistant";
 import { BundleSelectionTab, type SelectedBundle, type ExpandedBundleLine } from "./BundleSelectionTab";
+import { round2 } from "@/utils/quotes/quoteLinePricing";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { quoteAddItemsSchema } from "@/lib/validations";
@@ -1704,10 +1705,12 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       //   - component.quantity → per single bundle (line.quantity / quantity)
       //   - bundle unit price → total / quantity
       const safeQty = quantity > 0 ? quantity : 1;
-      const unitTotalPrice = expandedLines.reduce(
-        (sum, line) => sum + line.unit_price * (line.quantity / safeQty),
+      // Preço do bundle = Σ preço unitário do componente (fechado ao cêntimo)
+      // × quantidade por bundle — o mesmo valor gravado em retail_price_unit.
+      const unitTotalPrice = round2(expandedLines.reduce(
+        (sum, line) => sum + round2(line.unit_price) * (line.quantity / safeQty),
         0
-      );
+      ));
       // Custo real do kit = soma do custo de compra de cada componente
       // escolhido, à mesma quantidade. Antes disto existir, cost_price ficava
       // sempre a null para um bundle, e QuoteBuilder.tsx assumia sempre uma
@@ -1729,7 +1732,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
         type: line.type,
         source_id: line.source_id,
         quantity: line.quantity / safeQty,
-        unit_price: line.unit_price,
+        unit_price: round2(line.unit_price),
         unit_cost: line.unit_cost,
         vat_rate: line.vat_rate,
         selected_attributes: line.selected_attributes,
