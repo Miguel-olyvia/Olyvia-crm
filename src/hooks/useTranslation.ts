@@ -5,6 +5,7 @@ import { bundleTranslations } from "@/translations/bundles";
 import { priceContextsTranslations } from "@/translations/priceContexts";
 import { directSalesTranslations } from "@/translations/directSales";
 import { todayTranslations } from "@/translations/today";
+import { inventoryNavTranslations } from "@/translations/inventoryNav";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -23,6 +24,10 @@ Object.keys(directSalesTranslations).forEach((lang) => {
 // Ecrã "Hoje" (/home) — módulo próprio, mesmo padrão.
 Object.keys(todayTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...todayTranslations[lang as keyof typeof todayTranslations] };
+});
+// Menu do Inventário (Hoje · Compras · Armazém) — módulo próprio, mesmo padrão.
+Object.keys(inventoryNavTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...inventoryNavTranslations[lang as keyof typeof inventoryNavTranslations] };
 });
 
 export const useTranslation = () => {

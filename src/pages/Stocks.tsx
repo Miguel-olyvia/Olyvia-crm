@@ -32,7 +32,18 @@ import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
-import { Plus, Pencil, Trash2, Package, Download, Upload, ArrowLeftRight, History } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Download, Upload, ArrowLeftRight, History, MoreHorizontal, RotateCcw, ListOrdered } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { InventoryPageHeader, KpiTile, KpiGrid } from "@/components/inventory/ui";
+import { useInventoryToday, inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Database } from "@/integrations/supabase/types";
@@ -41,7 +52,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
-import { escapeIlike } from "@/lib/clientSearch";
+import { escapePostgrestOrTerm } from "@/lib/clientSearch";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
 import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHistoryDialog";
 import CategorySubcategoryFilter, { UNCATEGORIZED_CATEGORY_VALUE } from "@/components/inventory/CategorySubcategoryFilter";
@@ -56,6 +67,22 @@ type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
 const UNCATEGORIZED_LABEL = "Sem categoria";
 const UNCATEGORIZED_VALUE = UNCATEGORIZED_CATEGORY_VALUE;
 const PAGE_SIZE = 30;
+
+// ?status=low|overstock|normal (cartões do Hoje / KPIs) → filtro de estado.
+// Os mesmos códigos de getStockStatusCode; qualquer outro valor = "all".
+type StockStatusFilter = "all" | "low" | "normal" | "overstock";
+const parseStatusParam = (value: string | null): StockStatusFilter =>
+  value === "low" || value === "overstock" || value === "normal" ? value : "all";
+
+const formatEur = (value: number): string =>
+  new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(value);
+
+// Colunas da grelha de KPIs (lg) pelo nº de cartões visíveis — o KpiGrid fixa 4.
+// Classes literais para o Tailwind as gerar.
+const KPI_GRID_COLS: Record<number, string | undefined> = {
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+};
 
 function getStockStatusCode(stock: Stock): "low" | "overstock" | "normal" {
   // reorder_point/maximum_quantity = 0 means "never configured", not "reencomendar
@@ -180,7 +207,49 @@ const Stocks = () => {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "low" | "normal" | "overstock">("all");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<StockStatusFilter>(() => parseStatusParam(searchParams.get("status")));
+
+  // KPIs do topo (rpc_inventory_today.stock). Sem a RPC ou sem o bloco: escondidos.
+  const { data: inventoryToday } = useInventoryToday();
+  const stockKpis = inventoryToday?.stock ?? null;
+  // Nº de cartões visíveis (cada um some com o valor a null — ex.: "Valor em
+  // stock" sem permissão de custo) para a grelha não deixar buracos.
+  const stockKpiCount = stockKpis
+    ? [stockKpis.value, stockKpis.below_reorder_point, stockKpis.overstock, stockKpis.reserved_units]
+        .filter((v) => v != null).length
+    : 0;
+
+  // Filtro de estado ↔ ?status=, nos dois sentidos.
+  // O setSearchParams do react-router 6 muda de identidade a cada navegação;
+  // se fosse dependência do efeito estado→URL, uma navegação externa (ex.:
+  // "Existências" no menu → /stocks) voltaria a escrever o estado antigo por
+  // cima do URL novo. Por isso o efeito lê-o de uma ref e só corre quando o
+  // estado muda; o efeito URL→estado só corre quando o valor do URL muda.
+  const statusParam = searchParams.get("status");
+  const searchParamsRef = useRef({ searchParams, setSearchParams });
+  searchParamsRef.current = { searchParams, setSearchParams };
+
+  // URL → estado (navegação externa, voltar/avançar do browser).
+  useEffect(() => {
+    const parsed = parseStatusParam(statusParam);
+    setStatusFilter((prev) => (prev === parsed ? prev : parsed));
+  }, [statusParam]);
+
+  // Estado → URL (replace): limpar o filtro não deixa um ?status= antigo que
+  // voltasse a aplicá-lo ao recarregar.
+  useEffect(() => {
+    const { searchParams: currentParams, setSearchParams: writeParams } = searchParamsRef.current;
+    const wanted = statusFilter === "all" ? null : statusFilter;
+    if (currentParams.get("status") === wanted) return;
+    writeParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (wanted) next.set("status", wanted); else next.delete("status");
+      return next;
+    }, { replace: true });
+  }, [statusFilter]);
 
   // Reservado/Livre por produto (rpc_get_product_stock_reservations) e stock
   // total da organização (armazéns ativos) + nº de armazéns com o produto.
@@ -257,6 +326,14 @@ const Stocks = () => {
     if (filters.warehouseFilter !== "all") {
       query = query.eq("warehouse_id", filters.warehouseFilter);
     }
+    // Pesquisa por nome, SKU ou EAN (products.barcode) — sobre o mesmo embed
+    // products!inner, logo sobre o catálogo de produtos da organização.
+    // escapePostgrestOrTerm tira `,()*"` (estruturais/curingas na sintaxe do
+    // `or`) e escapa os curingas do ilike.
+    const searchTerm = escapePostgrestOrTerm(filters.debouncedSearchTerm.trim());
+    const searchOr = searchTerm
+      ? `name.ilike.%${searchTerm}%,sku.ilike.%${searchTerm}%,barcode.ilike.%${searchTerm}%`
+      : null;
     if (filters.categoryFilter === UNCATEGORIZED_VALUE) {
       query = (query as any).is("products.category_id", null);
     } else if (filters.categoryFilterIds && filters.categoryFilterIds.length > 0) {
@@ -267,10 +344,16 @@ const Stocks = () => {
       // antes). category_id OU subcategory_id porque há produtos com o id da
       // subcategoria guardado em category_id.
       const ids = filters.categoryFilterIds.join(",");
-      query = (query as any).or(`category_id.in.(${ids}),subcategory_id.in.(${ids})`, { referencedTable: "products" });
+      const categoryOr = `category_id.in.(${ids}),subcategory_id.in.(${ids})`;
+      // Com pesquisa ativa, as duas condições vão num só `products.or`
+      // (or com um único and = AND das duas), para nunca repetir o parâmetro.
+      query = searchOr
+        ? (query as any).or(`and(or(${categoryOr}),or(${searchOr}))`, { referencedTable: "products" })
+        : (query as any).or(categoryOr, { referencedTable: "products" });
+      return query;
     }
-    if (filters.debouncedSearchTerm.trim()) {
-      query = (query as any).ilike("products.name", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
+    if (searchOr) {
+      query = (query as any).or(searchOr, { referencedTable: "products" });
     }
     return query;
   };
@@ -358,6 +441,14 @@ const Stocks = () => {
       loadStocks(0, true);
     }
   }, [statusFilter, loadAllForStatusFilter, loadStocks]);
+
+  // Depois de um movimento: lista + números do Inventário (KPIs/menu).
+  const handleMovementSuccess = () => {
+    refresh();
+    if (activeCompany?.id) {
+      void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
+    }
+  };
 
   // Reload from scratch whenever a filter changes.
   useEffect(() => {
@@ -1115,7 +1206,7 @@ const Stocks = () => {
     return (
       <>
         <div className="space-y-6 p-6">
-          <div><h1 className="text-3xl font-bold">{t('stocks.title')}</h1><p className="text-muted-foreground">{t('stocks.description')}</p></div>
+          <InventoryPageHeader area="warehouse" title={t('sidebar.inventoryStocks')} />
           <NoOrganizationState inline />
         </div>
       </>
@@ -1125,14 +1216,12 @@ const Stocks = () => {
   return (
     <>
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">{t('stocks.title')}</h1>
-            <p className="text-muted-foreground">
-              {t('stocks.description')}
-            </p>
-          </div>
-          <div className="flex gap-2">
+        <InventoryPageHeader
+          area="warehouse"
+          title={t('sidebar.inventoryStocks')}
+          description={t('inventory.stocks.description')}
+          actions={
+          <>
             <Button
               variant={showDeleted ? "default" : "outline"}
               onClick={() => setShowDeleted((prev) => !prev)}
@@ -1410,12 +1499,59 @@ const Stocks = () => {
               </form>
             </DialogContent>
           </Dialog>
-          </div>
-        </div>
+          </>
+          }
+        />
+
+        {/* KPIs (rpc_inventory_today.stock) — só aparecem com a RPC aplicada;
+            cada cartão some se o seu valor vier a null. */}
+        {stockKpis && stockKpiCount > 0 && (
+          <KpiGrid className={KPI_GRID_COLS[stockKpiCount]}>
+            {stockKpis.value != null && (
+              <KpiTile
+                label="Valor em stock"
+                value={formatEur(Number(stockKpis.value))}
+                hint="custo médio ponderado"
+              />
+            )}
+            {stockKpis.below_reorder_point != null && (
+              <KpiTile
+                label="Abaixo do ponto de encomenda"
+                value={stockKpis.below_reorder_point}
+                tone="bad"
+                hint="quantidade ≤ ponto de encomenda"
+                actionLabel="Filtrar por stock baixo"
+                active={statusFilter === "low"}
+                onClick={() => setStatusFilter(statusFilter === "low" ? "all" : "low")}
+              />
+            )}
+            {stockKpis.overstock != null && (
+              <KpiTile
+                label="Em excesso"
+                value={stockKpis.overstock}
+                tone="warn"
+                hint="quantidade ≥ máximo"
+                actionLabel="Filtrar por excesso"
+                active={statusFilter === "overstock"}
+                onClick={() => setStatusFilter(statusFilter === "overstock" ? "all" : "overstock")}
+              />
+            )}
+            {stockKpis.reserved_units != null && (
+              <KpiTile
+                label="Unidades reservadas"
+                value={formatQty(Number(stockKpis.reserved_units))}
+                tone="info"
+                hint="para Encomendas Clientes"
+              />
+            )}
+          </KpiGrid>
+        )}
 
         <div className="flex flex-wrap gap-3 items-center">
           <Input
-            placeholder="Pesquisar por produto..."
+            type="search"
+            placeholder="Nome, SKU ou EAN"
+            aria-label="Pesquisar por nome, SKU ou EAN"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="max-w-xs"
@@ -1482,7 +1618,9 @@ const Stocks = () => {
                 <TableHead className="text-right">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="cursor-help underline decoration-dotted underline-offset-4">{t('stocks.table.reserved')}</span>
+                      <span className="cursor-help underline decoration-dotted underline-offset-4">
+                        {t('stocks.table.reserved')} <span className="font-normal text-muted-foreground">(organização)</span>
+                      </span>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">{t('stocks.table.reservedHint')}</TooltipContent>
                   </Tooltip>
@@ -1490,7 +1628,9 @@ const Stocks = () => {
                 <TableHead className="text-right">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="cursor-help underline decoration-dotted underline-offset-4">{t('stocks.table.free')}</span>
+                      <span className="cursor-help underline decoration-dotted underline-offset-4">
+                        {t('stocks.table.free')} <span className="font-normal text-muted-foreground">(organização)</span>
+                      </span>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">{t('stocks.table.freeHint')}</TooltipContent>
                   </Tooltip>
@@ -1605,16 +1745,22 @@ const Stocks = () => {
                         </TableCell>
                         <TableCell>{getStockStatus(stock)}</TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
+                          <div className="flex justify-end gap-1">
                             {showDeleted ? (
+                              // Restaurar: mesmo gate de antes (stocks.delete), agora no menu ⋯.
                               <PermissionGate permission="stocks.delete">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleRestore(stock.id)}
-                                >
-                                  {t('stocks.restore') || 'Restaurar'}
-                                </Button>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" aria-label={`Mais ações — ${stock.products?.name ?? "stock"}`}>
+                                      <MoreHorizontal className="w-4 h-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onSelect={() => handleRestore(stock.id)}>
+                                      <RotateCcw className="mr-2 h-4 w-4" /> {t('stocks.restore') || 'Restaurar'}
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </PermissionGate>
                             ) : (
                               <>
@@ -1623,6 +1769,7 @@ const Stocks = () => {
                                     variant="ghost"
                                     size="sm"
                                     title="Registar movimento"
+                                    aria-label="Registar movimento"
                                     onClick={() => {
                                       setMovementContext({ productId: stock.product_id, warehouseId: stock.warehouse_id });
                                       setMovementDialogOpen(true);
@@ -1631,40 +1778,59 @@ const Stocks = () => {
                                     <ArrowLeftRight className="w-4 h-4" />
                                   </Button>
                                 </PermissionGate>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  title="Ver histórico de movimentos"
-                                  onClick={() => {
-                                    setHistoryContext({
-                                      productId: stock.product_id,
-                                      warehouseId: stock.warehouse_id,
-                                      productName: stock.products?.name,
-                                      warehouseName: stock.warehouses?.name,
-                                    });
-                                    setHistoryDialogOpen(true);
-                                  }}
-                                >
-                                  <History className="w-4 h-4" />
-                                </Button>
-                                <PermissionGate permission="stocks.edit">
+                                {/* Histórico → livro de Movimentos filtrado por produto+armazém
+                                    (filtra a organização ativa, ao contrário do diálogo). */}
+                                <PermissionGate permission="inventory.view">
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => openEditDialog(stock)}
+                                    title="Histórico de movimentos"
+                                    aria-label="Histórico de movimentos"
+                                    onClick={() =>
+                                      navigate(`/stock-movements?product=${encodeURIComponent(stock.product_id)}&warehouse=${encodeURIComponent(stock.warehouse_id)}`)
+                                    }
                                   >
-                                    <Pencil className="w-4 h-4" />
+                                    <ListOrdered className="w-4 h-4" />
                                   </Button>
                                 </PermissionGate>
-                                <PermissionGate permission="stocks.delete">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleDelete(stock.id)}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </PermissionGate>
+                                {/* modal={false}: abrir o diálogo de edição a partir do menu sem o Radix deixar o body com pointer-events bloqueado. */}
+                                <DropdownMenu modal={false}>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="sm" aria-label={`Mais ações — ${stock.products?.name ?? "stock"}`}>
+                                      <MoreHorizontal className="w-4 h-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    {/* Diálogo rápido dos últimos movimentos — o mesmo de antes. */}
+                                    <DropdownMenuItem
+                                      onSelect={() => {
+                                        setHistoryContext({
+                                          productId: stock.product_id,
+                                          warehouseId: stock.warehouse_id,
+                                          productName: stock.products?.name,
+                                          warehouseName: stock.warehouses?.name,
+                                        });
+                                        setHistoryDialogOpen(true);
+                                      }}
+                                    >
+                                      <History className="mr-2 h-4 w-4" /> Últimos movimentos (rápido)
+                                    </DropdownMenuItem>
+                                    <PermissionGate permission="stocks.edit">
+                                      <DropdownMenuItem onSelect={() => openEditDialog(stock)}>
+                                        <Pencil className="mr-2 h-4 w-4" /> Editar
+                                      </DropdownMenuItem>
+                                    </PermissionGate>
+                                    <PermissionGate permission="stocks.delete">
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        className="text-destructive focus:text-destructive"
+                                        onSelect={() => handleDelete(stock.id)}
+                                      >
+                                        <Trash2 className="mr-2 h-4 w-4" /> Eliminar
+                                      </DropdownMenuItem>
+                                    </PermissionGate>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </>
                             )}
                           </div>
@@ -1697,7 +1863,7 @@ const Stocks = () => {
         defaultProductId={movementContext.productId}
         defaultWarehouseId={movementContext.warehouseId}
         defaultMovementType={movementContext.movementType}
-        onSuccess={refresh}
+        onSuccess={handleMovementSuccess}
       />
 
       {historyContext && (

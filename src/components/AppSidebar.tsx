@@ -7,6 +7,11 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
+import {
+  useInventoryToday,
+  getInventoryCounter,
+  INVENTORY_TODAY_PERMISSIONS,
+} from "@/hooks/useInventoryToday";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import {
@@ -321,7 +326,22 @@ const FlyoutPanel = memo(function FlyoutPanel({
   const location = useLocation();
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
 
-  // Auto-expand subsection that contains active item
+  // Contadores do Inventário (pílulas): só pedidos com o painel do Inventário
+  // aberto e a quem tem alguma permissão de inventário — a RPC volta a
+  // verificar no servidor. Falha/ausência da RPC = sem pílulas.
+  const { hasPermission, hasAnyPermission } = usePermissions();
+  const wantsInventoryCounters =
+    section.id === "inventory" && hasAnyPermission(INVENTORY_TODAY_PERMISSIONS);
+  const { data: inventoryToday } = useInventoryToday({ enabled: wantsInventoryCounters });
+  const counterFor = (item: MenuItem): number | null => {
+    if (!item.counterKey || !wantsInventoryCounters) return null;
+    const value = getInventoryCounter(item.counterKey, inventoryToday, hasPermission);
+    return value && value > 0 ? value : null;
+  };
+
+  // Auto-expand subsection that contains active item (e as marcadas com
+  // defaultExpanded, só da primeira vez — se o utilizador as fechar, ficam
+  // fechadas).
   useEffect(() => {
     if (section.subSections) {
       const newExpanded: Record<string, boolean> = {};
@@ -330,8 +350,15 @@ const FlyoutPanel = memo(function FlyoutPanel({
           newExpanded[sub.key] = true;
         }
       }
-      if (Object.keys(newExpanded).length > 0) {
-        setExpandedSubs((prev) => ({ ...prev, ...newExpanded }));
+      const defaults = section.subSections.filter((sub) => sub.defaultExpanded);
+      if (Object.keys(newExpanded).length > 0 || defaults.length > 0) {
+        setExpandedSubs((prev) => {
+          const next = { ...prev, ...newExpanded };
+          for (const sub of defaults) {
+            if (!(sub.key in next)) next[sub.key] = true;
+          }
+          return next;
+        });
       }
     }
   }, [location.pathname, section.subSections]);
@@ -406,6 +433,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
             >
               <Icon className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{t(item.labelKey)}</span>
+              <CounterPill value={counterFor(item)} />
             </button>
           );
         })}
@@ -445,6 +473,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">{t(item.labelKey)}</span>
+                      <CounterPill value={counterFor(item)} />
                     </button>
                   );
                 })}
@@ -457,5 +486,18 @@ const FlyoutPanel = memo(function FlyoutPanel({
     </>
   );
 });
+
+// Pílula discreta à direita do item (contadores do Inventário). Sem valor = nada.
+function CounterPill({ value }: { value: number | null }) {
+  if (!value) return null;
+  return (
+    <span
+      className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold leading-none text-foreground tabular-nums"
+      aria-label={`${value} pendente${value === 1 ? "" : "s"}`}
+    >
+      {value > 99 ? "99+" : value}
+    </span>
+  );
+}
 
 export default AppSidebar;

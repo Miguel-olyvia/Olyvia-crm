@@ -40,7 +40,9 @@ import {
   Receipt,
   Sun,
   ScanBarcode,
+  ArrowLeftRight,
 } from "lucide-react";
+import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
 export interface MenuItem {
   to: string;
@@ -50,12 +52,19 @@ export interface MenuItem {
   permissions?: string[];
   /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
   requireAll?: boolean;
+  /**
+   * Contador opcional (pílula no painel do menu), alimentado por
+   * useInventoryToday. Zero ou null = sem pílula. Não mexe no alerta do rail.
+   */
+  counterKey?: InventoryCounterKey;
 }
 
 export interface MenuSubSection {
   key: string;
   labelKey: string;
   items: MenuItem[];
+  /** Abre já expandida no painel (o utilizador pode fechá-la). */
+  defaultExpanded?: boolean;
 }
 
 export interface MenuSection {
@@ -238,22 +247,45 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
-    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/receiving", "/stocks", "/client-orders", "/stock-counts"],
-    permissions: ["suppliers.view"],
+    paths: ["/inventory", "/purchase-orders", "/suppliers", "/stocks", "/stock-movements", "/client-orders", "/receiving", "/stock-counts", "/warehouses"],
+    // Fallback só usado se nenhum item for visível (canViewSection olha
+    // primeiro para os itens) — as mesmas permissões das rotas.
+    permissions: ["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "warehouses.view"],
     items: [
-      { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
-      { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
-      { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
-      // Receção por código: mesma regra da rota (permissão própria receiving.view).
-      { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.receiving", permissions: ["receiving.view"] },
-      { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
-      // Permissão própria (client_orders.view): quem trabalha no armazém vê as
-      // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das
-      // encomendas verificam a mesma permissão.
-      { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.clientOrders", permission: "client_orders.view" },
-      // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
-      // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
-      { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.stockCounts", permission: "inventory.view" },
+      // "Hoje" do Inventário: fila de trabalho e fluxo (rpc_inventory_today).
+      { to: "/inventory", icon: Sun, labelKey: "sidebar.inventoryToday", permission: "inventory.view", counterKey: "today" },
+    ],
+    // Cada item tem a permissão da sua rota (App.tsx): sem isto a secção
+    // aparecia a todos e o clique dava "Acesso negado".
+    subSections: [
+      {
+        key: "inventory-purchases",
+        labelKey: "sidebar.inventoryPurchases",
+        defaultExpanded: true,
+        items: [
+          { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.inventoryPurchaseOrders", permission: "purchase_orders.view", counterKey: "purchaseOrders" },
+          { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view", counterKey: "suppliers" },
+        ],
+      },
+      {
+        key: "inventory-warehouse",
+        labelKey: "sidebar.inventoryWarehouse",
+        defaultExpanded: true,
+        items: [
+          { to: "/stocks", icon: BarChart3, labelKey: "sidebar.inventoryStocks", permission: "inventory.view", counterKey: "stocks" },
+          { to: "/stock-movements", icon: ArrowLeftRight, labelKey: "sidebar.stockMovements", permission: "inventory.view" },
+          // Permissão própria (client_orders.view): quem trabalha no armazém vê as
+          // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das
+          // encomendas verificam a mesma permissão.
+          { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.inventoryClientOrders", permission: "client_orders.view", counterKey: "clientOrders" },
+          // Receção por código: mesma regra da rota (permissão própria receiving.view).
+          { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.inventoryReceiving", permission: "receiving.view", counterKey: "receiving" },
+          // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
+          // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
+          { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.inventoryStockCounts", permission: "inventory.view", counterKey: "stockCounts" },
+          { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses", permission: "warehouses.view" },
+        ],
+      },
     ],
   },
   {

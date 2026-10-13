@@ -58,6 +58,8 @@ const Brands = lazy(() => import("./pages/Brands"));
 const UnitsOfMeasure = lazy(() => import("./pages/UnitsOfMeasure"));
 const Bundles = lazy(() => import("./pages/Bundles"));
 const Stocks = lazy(() => import("./pages/Stocks"));
+const InventoryToday = lazy(() => import("./pages/InventoryToday"));
+const StockMovements = lazy(() => import("./pages/StockMovements"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
 const Receiving = lazy(() => import("./pages/Receiving"));
@@ -271,6 +273,9 @@ const App = () => (
                       <Route path="/brands" element={<Brands />} />
                       <Route path="/units-of-measure" element={<UnitsOfMeasure />} />
                       <Route path="/bundles" element={<Bundles />} />
+                      {/* Inventário › Hoje e Movimentos (livro stock_movements): mesma permissão de leitura que a RLS exige (inventory.view). */}
+                      <Route path="/inventory" element={<ProtectedRoute permission="inventory.view"><InventoryToday /></ProtectedRoute>} />
+                      <Route path="/stock-movements" element={<ProtectedRoute permission="inventory.view"><StockMovements /></ProtectedRoute>} />
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
