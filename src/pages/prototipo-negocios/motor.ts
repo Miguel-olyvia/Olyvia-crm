@@ -3,6 +3,11 @@
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
 import { CATALOGO } from "./catalogo";
+import {
+  ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
+  mudarQtd, servicosDaVisita, textoFalta, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
+} from "./produtosVisita";
+import type { Produto } from "./v2/catalogoModelo";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 
@@ -149,7 +154,8 @@ export interface Negocio {
   /** As visitas do negócio (os números; os campos estão em f, com o prefixo v{n}_). */
   vis?: number[];
   /** off: serviços das medidas que o cliente não quer; extra: serviços juntados à mão, com quantidade. */
-  visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean };
+  /** prod: produtos do Catálogo escolhidos na visita; manter / clienteCompra: as respostas por serviço que obriga a produto (produtosVisita.ts). */
+  visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean } & NecVisita;
   orc: Orcamento | null;
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean };
@@ -427,9 +433,44 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     const sv = garantirServico(S, sid);
     if (sv && (q || 0) > 0) linhas.push({ t: "svc", sid, q: q!, cu: r2(custoUn(sv, S)), pu: sv.preco });
   }
-  linhas.push({ t: "mat", d: L.mat.d, custo: L.mat.custo, preco: L.mat.preco });
+  // os serviços trazidos pelos produtos escolhidos (os que não vêm do pacote nem foram postos à mão)
+  const prod = d.visita.prod ?? [];
+  for (const [sid, t] of trazidosParaOrc(prod, ativosDoPacote(L.map, m, d.visita.off), d.visita.extra)) {
+    const sv = garantirServico(S, sid);
+    if (sv && t.q > 0) linhas.push({ t: "svc", sid, q: t.q, cu: r2(custoUn(sv, S)), pu: sv.preco });
+  }
+  // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais)
+  const mm = materiaisDoModelo(L.mat, prod);
+  if (mm) linhas.push({ t: "mat", d: L.mat.d, custo: mm.custo, preco: mm.preco });
+  linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
   return o;
+}
+
+/** Todos os serviços da visita: do pacote (pelas medidas), postos à mão e trazidos pelos produtos escolhidos. */
+export function servicosVisita(d: Negocio): SvcId[] {
+  const v = d.visita;
+  return servicosDaVisita(ativosDoPacote(LINHAS[d.linha].map, v.med, v.off), v.extra, v.prod ?? []);
+}
+/** O que falta nas necessidades por causa dos produtos (com o Catálogo ligado): perguntas por responder e produtos por escolher. */
+export function faltaProdutosVisita(d: Negocio, S: Estado): { sid: SvcId; t: string }[] {
+  const K = catalogoLigado();
+  if (!K) return [];
+  const nome = (sid: SvcId) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
+  return emFaltaProdutos(K, servicosVisita(d), d.visita, d.f.materiais_cliente === "Sim").map((o) => ({ sid: o.sid, t: textoFalta(o, nome(o.sid)) }));
+}
+/** Ao fechar de novo um levantamento reaberto: o orçamento novo guarda os preços por serviço, o desconto,
+ *  a venda direta e as linhas de materiais postas à mão do orçamento de antes. */
+export function preservarManuais(antes: Orcamento, novo: Orcamento, L: LinhaServico): Orcamento {
+  for (const l of novo.linhas) {
+    if (l.t !== "svc") continue;
+    const a = antes.linhas.find((x) => x.t === "svc" && x.sid === l.sid);
+    if (a && a.t === "svc") l.pu = a.pu;
+  }
+  const geradas = (dl: string) => dl === L.mat.d || [PREFIXO_LEV, PREFIXO_PROD, PREFIXO_CLIENTE].some((p) => dl.startsWith(p));
+  novo.linhas.push(...antes.linhas.filter((l) => l.t === "mat" && !geradas(l.d)));
+  novo.desconto = antes.desconto; novo.vendaDireta = antes.vendaDireta; novo.avisosVistos = { ...antes.avisosVistos };
+  return novo;
 }
 
 /** As respostas do levantamento no orçamento (efeitosLevantamento.ts): refaz as linhas "Levantamento · …"
@@ -442,7 +483,8 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
   o.linhas = o.linhas.filter((l) => !(l.t === "mat" && (l.d.startsWith(PREFIXO_LEV) || l.d === L.mat.d)));
   const ef = efeitosDoLevantamento(d.f);
   const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
-  if (tinhaMat && fator > 0) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(L.mat.custo * fator), preco: r2(L.mat.preco * fator) });
+  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? []);
+  if (tinhaMat && fator > 0 && mm) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(mm.custo * fator), preco: r2(mm.preco * fator) });
   let bc = 0, bp = 0;
   for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }
   for (const e of ef) {
@@ -729,8 +771,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     if (!visitaFeita(d)) x.push({ id: "visitas", t: "Pelo menos uma visita feita" });
     const semMedida = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0));
     if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map((k) => L.med[k]).join(", ") });
-    const servicos = L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).length + Object.values(v.extra).filter((q) => (q || 0) > 0).length;
+    const servicos = servicosVisita(d).length;
     if (!servicos) x.push({ id: "nec", t: "Pelo menos um serviço" });
+    // os serviços que obrigam a produto: a pergunta respondida e o produto escolhido
+    for (const f of faltaProdutosVisita(d, S)) x.push({ id: "nec", t: f.t });
     if (!(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") x.push({ id: "fotos", t: "Fotografias (ou marcar que o cliente não quis)" });
     return x;
   };
@@ -759,9 +803,31 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     fecharVisita(id: number) {
       const d = deal(id), L = LINHAS[d.linha];
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
-      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); sincronizarEfeitos(d, S); fase(d, 3);
-      avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
+      const antes = d.orc && !d.orc.enviada ? d.orc : null; // um levantamento reaberto: o orçamento de antes
+      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S);
+      if (antes) preservarManuais(antes, d.orc, L);
+      sincronizarEfeitos(d, S); fase(d, 3);
+      avisar(antes
+        ? { msg: "Orçamento refeito com a visita", sub: "Os preços e o desconto que tinha mudado mantêm-se", kind: "auto" }
+        : { msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
     },
+    /** Volta a abrir o levantamento (só antes de a proposta ser enviada): a visita fica editável e o negócio volta à Visita. */
+    reabrirVisita(id: number) {
+      const d = deal(id);
+      if (d.fase !== 3 || !d.orc || d.orc.enviada) { avisar({ msg: "Já não se pode reabrir", sub: "A proposta já foi enviada ao cliente", kind: "bad" }); return; }
+      d.visita.fechada = false; d.fase = 2; d.valida = null; d.orc.verif = false; d.orc.aprov = null;
+      log(d, "Levantamento reaberto", "w");
+      avisar({ msg: "Levantamento reaberto", sub: "Ao fechar de novo, o orçamento refaz-se: os preços e o desconto que mudou mantêm-se; quantidades mudadas à mão perdem-se", kind: "" });
+    },
+    /** Produtos do Catálogo na visita: escolher (com a quantidade sugerida), mudar a quantidade, "o cliente fornece", tirar. */
+    produto(id: number, p: Produto, q: number) { const v = deal(id).visita; if (p.servico) garantirServico(S, p.servico); v.prod = juntarProduto(v.prod ?? [], fotografia(p, q)); },
+    produtoQtd(id: number, pid: string, q: number) { const v = deal(id).visita; v.prod = mudarQtd(v.prod ?? [], pid, q); },
+    produtoCliente(id: number, pid: string, cliente: boolean) { const v = deal(id).visita; v.prod = marcarCliente(v.prod ?? [], pid, cliente); },
+    tirarProduto(id: number, pid: string) { const v = deal(id).visita; v.prod = tirarProduto(v.prod ?? [], pid); },
+    /** A resposta à pergunta de um serviço que obriga a produto (ex.: "O cliente mantém a sanita?"). */
+    manter(id: number, sid: SvcId, r: "sim" | "nao" | null) { const v = deal(id).visita; v.manter ??= {}; if (r) v.manter[sid] = r; else delete v.manter[sid]; },
+    /** O cliente compra o produto deste serviço (só quando o cliente fornece materiais): texto do que compra, ou null para desfazer. */
+    clienteCompra(id: number, sid: SvcId, texto: string | null) { const v = deal(id).visita; v.clienteCompra ??= {}; if (texto) v.clienteCompra[sid] = texto; else delete v.clienteCompra[sid]; },
     verificar(id: number) {
       const d = deal(id); d.orc!.verif = true; S.pulse = "verif";
       const A2 = alertas(d, S);

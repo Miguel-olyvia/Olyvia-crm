@@ -24,6 +24,10 @@ export interface Produto {
   data: string;
   /** Onde fica na árvore (null = sem classificação). */
   no: string | null;
+  /** O serviço que o produto traz quando se escolhe na visita (ex.: a sanita traz a instalação da sanita). Sem ele: produto só vendido. */
+  servico?: SvcId;
+  /** Quantidade do serviço por unidade do produto (por omissão 1). */
+  fatorServico?: number;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };
@@ -52,6 +56,12 @@ export interface Catalogo {
   pacotes: Pacote[];
   /** Serviço → nó da árvore. */
   classe: Record<SvcId, string>;
+  /** Serviço → nó da árvore de onde é OBRIGATÓRIO escolher um produto na visita (ex.: louças → Louças e torneiras). Em falta = sem obrigação. */
+  exigeProduto?: Record<SvcId, string>;
+  /** A quantidade sugerida do produto obrigatório, a partir das medidas (ex.: pavimento = m² × 1,1). */
+  qtdDe?: Record<SvcId, Regra>;
+  /** A pergunta feita antes de obrigar ao produto (ex.: "O cliente mantém a sanita?"): "Sim" dispensa o produto. Em falta = sem pergunta. */
+  perguntaManter?: Record<SvcId, string>;
   unidades: string[];
   marcas: string[];
   fornecedores: string[];
@@ -158,6 +168,8 @@ export function retirarNo(K: Catalogo, id: string): Catalogo {
     produtos: K.produtos.map((p) => ({ ...p, no: re(p.no) })),
     pacotes: K.pacotes.map((p) => ({ ...p, no: re(p.no) })),
     classe: Object.fromEntries(Object.entries(K.classe).flatMap(([s, v]) => { const r = re(v); return r ? [[s, r]] : []; })),
+    // a obrigação de produto passa para o ofício (se era um sub) ou sai
+    ...(K.exigeProduto ? { exigeProduto: Object.fromEntries(Object.entries(K.exigeProduto).flatMap(([s, v]) => { const r = re(v); return r ? [[s, r]] : []; })) } : {}),
   };
 }
 /** Quantos serviços, materiais e pacotes estão num nó (ou num ofício, contando os subs). */
@@ -370,6 +382,33 @@ export const REGRAS_LINHAS: Record<string, Regra> = {
 /** As alternativas ("ou") de exemplo. */
 const ALT0: Record<string, string> = { "Sanita suspensa com estrutura": "Sanita compacta", "Base de duche 80×120": "Banheira acrílica 170×70", "Bancada em pedra": "Bancada laminada" };
 
+/** Produtos de exemplo para as relações: um que traz serviço (espelho com LED, toalheiro) e outros só vendidos. */
+const PROD_SVC0: (Omit<Produto, "id" | "no" | "data"> & { cl: [string, string?] })[] = [
+  { n: "Espelho com LED 80 cm", custo: 95, un: "un", marca: "Sanindusa", fornecedor: "Sanitop", cl: ["Eletricidade"] },
+  { n: "Toalheiro elétrico", custo: 120, un: "un", marca: "Roca", fornecedor: "Sanitop", cl: ["Eletricidade"] },
+  { n: "Espelho simples 60×80", custo: 35, un: "un", marca: "Leroy Merlin", fornecedor: "Leroy Merlin Pro", cl: ["Carpintaria", "Acessórios WC"] },
+  { n: "Conjunto de acessórios WC", custo: 48, un: "un", marca: "Roca", fornecedor: "Sanitop", cl: ["Carpintaria", "Acessórios WC"] },
+];
+/** Produto → [serviço que traz, fator]. Os serviços são os do Catálogo real (catalogo.ts). */
+const TRAZ0: Record<string, [SvcId, number]> = {
+  "Sanita suspensa com estrutura": ["c13", 1], "Sanita compacta": ["c13", 1], "Banheira acrílica 170×70": ["c17", 1],
+  "Espelho com LED 80 cm": ["c19", 1], "Toalheiro elétrico": ["c28", 1],
+};
+/** Serviço → [ramo de onde é obrigatório escolher produto, quantidade sugerida a partir das medidas]. */
+const EXIGE0: Record<SvcId, [[string, string?], Regra]> = {
+  loucas: [["Canalização", "Louças e torneiras"], { k: "fixo", q: 1 }],
+  pav: [["Revestimentos", "Pavimento"], { k: "por", med: "pav", f: 1.1, arred: true }],
+  moveis: [["Carpintaria", "Mobiliário"], { k: "fixo", q: 1 }],
+  c6: [["Revestimentos", "Pavimento"], { k: "por", med: "pav", f: 1.1, arred: true }],
+  c13: [["Canalização", "Louças e torneiras"], { k: "fixo", q: 1 }],
+  c17: [["Canalização", "Louças e torneiras"], { k: "fixo", q: 1 }],
+};
+/** A pergunta antes de obrigar ao produto ("Sim" = reaproveita-se o que há). */
+const PERGUNTA0: Record<SvcId, string> = {
+  loucas: "O cliente mantém a sanita e a base de duche?", c13: "O cliente mantém a sanita?", c17: "O cliente mantém a banheira?",
+  pav: "O cliente mantém o pavimento?", c6: "O cliente mantém o pavimento?", moveis: "O cliente mantém os móveis?",
+};
+
 export function catalogo0(): Catalogo {
   let arvore: No[] = [];
   for (const of of OFICIOS) {
@@ -378,6 +417,8 @@ export function catalogo0(): Catalogo {
     arvore = r.A;
     for (const s of SUBS0[of] ?? []) { const q = juntarNo(arvore, s, r.id); if (q.ok) arvore = q.A; }
   }
+  // um sub juntado depois (13/10): fica no fim da Carpintaria, sem mudar os ids dos nós de antes
+  { const carp = arvore.find((x) => x.pai == null && x.n === "Carpintaria"); const q = carp && juntarNo(arvore, "Acessórios WC", carp.id); if (q && q.ok) arvore = q.A; }
   const noDe = ([o, s]: [string, string?]) => {
     const of = arvore.find((x) => x.pai == null && x.n === o);
     if (!of) return null;
@@ -392,6 +433,14 @@ export function catalogo0(): Catalogo {
   for (const p of PROD0) juntar({ n: p.n, custo: p.custo, un: p.un, marca: p.marca, fornecedor: p.fornecedor, data: mesesAntes(HOJE, p.meses ?? 1), no: noDe(p.cl) });
   for (const [sid, R] of Object.entries(RECEITAS)) for (const c of R.cons)
     juntar({ n: c.n, custo: c.preco, un: c.un, marca: MARCA_FORN[c.fornecedor] ?? "", fornecedor: c.fornecedor, data: dataDe(c.data), no: noDe(CL_CONS[sid] ?? ["Demolições"]) });
+  // os produtos de exemplo das relações com serviços (13/10): no fim, para não mudar os ids de antes
+  for (const p of PROD_SVC0) juntar({ n: p.n, custo: p.custo, un: p.un, marca: p.marca, fornecedor: p.fornecedor, data: mesesAntes(HOJE, 1), no: noDe(p.cl) });
+  // produtos que trazem um serviço (quantidade do serviço = quantidade do produto × fator)
+  for (const p of produtos) { const t = TRAZ0[p.n]; if (t) { p.servico = t[0]; p.fatorServico = t[1]; } }
+  // serviços que obrigam a escolher um produto de um ramo, e a quantidade sugerida a partir das medidas
+  const exigeProduto: Record<SvcId, string> = {}, qtdDe: Record<SvcId, Regra> = {};
+  for (const [sid, [cl, r]] of Object.entries(EXIGE0)) { const n = noDe(cl); if (n) { exigeProduto[sid] = n; qtdDe[sid] = r; } }
+  const perguntaManter = { ...PERGUNTA0 };
 
   const idProd = (n: string) => produtos.find((p) => p.n === n)!.id;
   const pacotes: Pacote[] = (Object.entries(LINHAS) as [LinhaCat, (typeof LINHAS)["wc"]][]).map(([lid, L], i) => {
@@ -409,7 +458,7 @@ export function catalogo0(): Catalogo {
   });
   const uniq = (v: string[]) => [...new Set(v.filter(Boolean))];
   return {
-    arvore, produtos, pacotes, classe,
+    arvore, produtos, pacotes, classe, exigeProduto, qtdDe, perguntaManter,
     unidades: uniq(["un", "m²", "ml", "m", "kg", "l", "kit", "tubo", "saco", "pç", ...produtos.map((p) => p.un)]),
     marcas: uniq(produtos.map((p) => p.marca)).sort((a, b) => a.localeCompare(b, "pt")),
     fornecedores: uniq(produtos.map((p) => p.fornecedor)).sort((a, b) => a.localeCompare(b, "pt")),

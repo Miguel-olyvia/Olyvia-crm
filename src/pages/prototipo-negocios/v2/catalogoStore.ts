@@ -3,6 +3,7 @@
 // "Repor a demonstração" limpa-a: reporCustos() chama reporCatalogo().
 import { useSyncExternalStore } from "react";
 import { catalogo0, type Catalogo } from "./catalogoModelo";
+import { ligarCatalogo } from "../produtosVisita";
 
 let estado: Catalogo = catalogo0();
 const ouvintes = new Set<() => void>();
@@ -24,5 +25,7 @@ export function reporCatalogo(): void {
   estado = catalogo0();
   ouvintes.forEach((o) => o());
 }
+// o motor lê o Catálogo por aqui (obrigações de produto no portão da visita), sem importar esta store
+ligarCatalogo(lerCatalogo);
 const subscrever = (o: () => void) => { ouvintes.add(o); return () => { ouvintes.delete(o); }; };
 export const useCatalogo = (): Catalogo => useSyncExternalStore(subscrever, lerCatalogo, lerCatalogo);
