@@ -35,7 +35,7 @@ export function TabelaPessoas({ resumos, pendentes, aoAbrir, aoLimpar }: TabelaP
   if (resumos.length === 0) return <EstadoVazioPessoas aoLimpar={aoLimpar} />;
   return (
     <div className="rounded-xl border border-border/70 bg-card">
-      <Table className="min-w-[1000px] table-fixed text-sm" containerClassName="max-h-[70vh] scroll-pt-14 rounded-xl">
+      <Table className="min-w-[1000px] table-fixed text-sm" containerClassName="max-h-[70vh] scroll-pt-10 rounded-xl">
         <colgroup>
           {COLUNAS.map((c) => <col key={c.id} style={{ width: `${c.largura}%` }} />)}
         </colgroup>
@@ -46,7 +46,7 @@ export function TabelaPessoas({ resumos, pendentes, aoAbrir, aoLimpar }: TabelaP
               <TableHead
                 key={c.id} scope="col"
                 className={cn(
-                  "sticky top-0 z-10 bg-card px-3 font-semibold text-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]",
+                  "sticky top-0 z-10 h-8 bg-card px-3 text-[11px] font-semibold text-muted-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]",
                   c.id === "value" && "text-right",
                 )}
               >

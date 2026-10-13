@@ -7,7 +7,7 @@ import { AvatarPessoa } from "./AvatarPessoa";
 import { proximoPasso } from "./etapaPessoa";
 import { LIMITE_SEM_CONTACTO, resultadoEfetivo } from "./filtrosPessoas";
 import { textoEtapa, textoSemContacto, textoUltimoContacto, textoValor } from "./formatoPessoas";
-import { ICONE_ETAPA } from "./iconesPessoa";
+import { COR_ETAPA, COR_PERDIDA, ICONE_ETAPA } from "./iconesPessoa";
 import type { Pessoa, ResumoPessoa } from "./pessoasTipos";
 import { SeloPerdida, SeloResultado, SeloVoltou } from "./SelosPessoa";
 
@@ -17,7 +17,7 @@ interface LinhaPessoaProps {
   aoAbrir: (id: string) => void;
 }
 
-const CELULA = "px-3 py-2 align-middle";
+const CELULA = "px-3 py-1 align-middle text-sm";
 
 /** A sublinha do nome: "Lead · Empresa · MQL · Atrasada · exemplo", com "Voltou a contactar" e "Perdida" à parte. */
 function Sublinha({ resumo, voltou }: { resumo: ResumoPessoa; voltou: boolean }) {
@@ -29,7 +29,7 @@ function Sublinha({ resumo, voltou }: { resumo: ResumoPessoa; voltou: boolean })
     pessoa.qualificacao,
   ].filter(Boolean);
   return (
-    <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+    <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-4 text-muted-foreground">
       <span>{partes.join(" · ")}</span>
       {resumo.atrasada && (
         <span className="inline-flex items-center gap-1 font-medium text-destructive">
@@ -49,8 +49,13 @@ function Etapa({ resumo }: { resumo: ResumoPessoa }) {
   const { t } = useTranslation();
   const Icone = resumo.pessoa.perdida ? XCircle : ICONE_ETAPA[resumo.etapa];
   return (
-    <span className="inline-flex items-start gap-1.5">
-      <Icone className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+    <span className="inline-flex items-center gap-2">
+      <span
+        className={cn("grid size-6 shrink-0 place-items-center rounded-full", resumo.pessoa.perdida ? COR_PERDIDA : COR_ETAPA[resumo.etapa])}
+        aria-hidden="true"
+      >
+        <Icone className="h-3.5 w-3.5" />
+      </span>
       <span>{textoEtapa(t, resumo)}</span>
     </span>
   );
@@ -62,12 +67,12 @@ function UltimoContacto({ pessoa }: { pessoa: Pessoa }) {
   const dias = pessoa.ultimoContactoDias;
   const antigo = dias >= LIMITE_SEM_CONTACTO;
   return (
-    <span className="flex flex-col items-start gap-1">
-      <span className={cn("inline-flex items-center gap-1.5", antigo && "font-medium")}>
-        <Clock className={cn("h-4 w-4 shrink-0", antigo && "text-destructive")} aria-hidden="true" />
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+      <span className={cn("inline-flex items-center gap-1.5", antigo ? "font-medium text-foreground" : "text-muted-foreground")}>
+        <Clock className={cn("h-3.5 w-3.5 shrink-0", antigo && "text-destructive")} aria-hidden="true" />
         {antigo ? textoSemContacto(t, dias) : textoUltimoContacto(t, dias)}
       </span>
-      <SeloResultado resultado={resultadoEfetivo(pessoa)} />
+      <SeloResultado resultado={resultadoEfetivo(pessoa)} className="h-5 border-transparent py-0" />
     </span>
   );
 }
@@ -93,12 +98,16 @@ export function LinhaPessoa({ resumo, voltou, aoAbrir }: LinhaPessoaProps) {
       onClick={(e) => { e.currentTarget.querySelector<HTMLElement>("[data-linha-pessoa]")?.focus(); aoAbrir(pessoa.id); }}
     >
       <TableCell className={CELULA}>
-        <span className="flex items-start gap-3">
+        <span className="flex items-center gap-2.5">
           <AvatarPessoa nome={pessoa.nome} pequeno />
           <span className="flex min-w-0 flex-col">
             <button
               type="button" data-linha-pessoa={pessoa.id}
-              className={cn("min-h-11 rounded-sm text-left font-medium text-foreground hover:underline", FOCO)}
+              className={cn(
+                "relative w-fit rounded-sm text-left text-sm font-medium leading-5 text-foreground hover:underline",
+                "after:absolute after:-inset-x-1 after:-inset-y-3 after:content-['']", // alvo táctil de 44 px sem aumentar a linha
+                FOCO,
+              )}
             >
               {pessoa.nome}
             </button>
@@ -108,8 +117,8 @@ export function LinhaPessoa({ resumo, voltou, aoAbrir }: LinhaPessoaProps) {
       </TableCell>
       <TableCell className={CELULA}>{pessoa.morada?.localidade ?? <SemTexto rotulo={t("pessoasPagina.place.none")} />}</TableCell>
       <TableCell className={CELULA}><Etapa resumo={resumo} /></TableCell>
-      <TableCell className={cn(CELULA, "break-words", !resumo.formulario && "text-muted-foreground")}>
-        {resumo.formulario ?? t("pessoasPagina.formManual")}
+      <TableCell className={cn(CELULA, "break-words text-xs", !resumo.formulario && "text-muted-foreground")}>
+        <span className="line-clamp-2">{resumo.formulario ?? t("pessoasPagina.formManual")}</span>
       </TableCell>
       <TableCell className={CELULA}><UltimoContacto pessoa={pessoa} /></TableCell>
       <TableCell className={CELULA}>

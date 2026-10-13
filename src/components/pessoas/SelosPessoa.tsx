@@ -6,12 +6,12 @@ import type { QualificacaoPessoa, ResultadoOuNenhum } from "./pessoasTipos";
 
 const SELO = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium text-foreground";
 
-/** "Voltou a contactar": ícone e texto. */
+/** "Voltou a contactar": texto simples, sem fundo, com o ícone de repetir em cor de aviso (legível, com variante escura). */
 export function SeloVoltou() {
   const { t } = useTranslation();
   return (
-    <span className={cn(SELO, "border-warning bg-warning/20")}>
-      <Repeat className="h-3 w-3" aria-hidden="true" />
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-foreground">
+      <Repeat className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
       {t("pessoasPagina.badge.returned")}
     </span>
   );
@@ -35,11 +35,11 @@ export function SeloEmpresa() {
 }
 
 /** O resultado do último contacto, sempre com ícone e texto ("Atendeu · interessado", "Sem contacto"). */
-export function SeloResultado({ resultado }: { resultado: ResultadoOuNenhum }) {
+export function SeloResultado({ resultado, className }: { resultado: ResultadoOuNenhum; className?: string }) {
   const { t } = useTranslation();
   const Icone = ICONE_RESULTADO[resultado];
   return (
-    <span className={cn(SELO, "border-border bg-muted")}>
+    <span className={cn(SELO, "border-border bg-muted", className)}>
       <Icone className="h-3 w-3 shrink-0" aria-hidden="true" />
       {t(`pessoasPagina.result.${resultado}`)}
     </span>
