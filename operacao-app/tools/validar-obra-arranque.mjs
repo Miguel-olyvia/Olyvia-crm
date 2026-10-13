@@ -387,10 +387,12 @@ if (obraAntiga) {
 console.log("\n─── instalar obra-arranque.sql ──────────");
 try {
   await db.exec(ler("obra-arranque.sql"));
-  await db.exec(ler("obra-arranque.sql"));
   await db.exec(ler("obras.sql"));
   await db.exec(ler("obra-arranque.sql"));
-  ok("obra-arranque.sql corre duas vezes, e obras.sql outra vez por cima");
+  // obras.sql por último: colá-lo outra vez não pode desfazer nada do arranque
+  // (os testes a seguir correm assim).
+  await db.exec(ler("obras.sql"));
+  ok("obra-arranque.sql corre duas vezes, e obras.sql outra vez por cima (as duas ordens)");
 } catch (e) {
   mau(`obra-arranque.sql falhou: ${e.message}`);
   process.exit(1);
