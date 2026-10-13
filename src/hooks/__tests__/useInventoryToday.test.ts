@@ -20,6 +20,22 @@ import {
   type InventoryTodayPayload,
 } from "@/hooks/useInventoryToday";
 import { menuSections } from "@/components/sidebar/menuConfig";
+import {
+  fetchClientOrderReadiness,
+  fetchClientOrderRowsByIds,
+  readyContractIds,
+} from "@/components/client-orders/clientOrderList";
+import {
+  PO_STATUS_FILTERS,
+  clientOrdersLink,
+  purchaseOrdersLink,
+  parseClientOrdersParams,
+  parsePurchaseOrdersParams,
+  parseReceivingParams,
+  parseStockCountsParams,
+  parseStocksParams,
+  parseSuppliersParams,
+} from "@/components/inventory/ui/inventoryLinks";
 
 const all = () => true;
 
@@ -106,14 +122,108 @@ describe("fila de trabalho", () => {
 
   it("esconde cartões sem permissão para o destino e não os conta no total", () => {
     const noPo = (p: string) => p !== "purchase_orders.view";
-    expect(getInventoryQueueItems(payload, noPo).some((i) => i.to === "/purchase-orders")).toBe(false);
+    expect(getInventoryQueueItems(payload, noPo).some((i) => i.to.startsWith("/purchase-orders"))).toBe(false);
     // 3+1 (POs) + 2 (EC) + 6 (baixo) + 0 + 2 + 5 + 0 = 19 com tudo; sem POs = 15.
     expect(getInventoryQueueTotal(payload, all)).toBe(19);
     expect(getInventoryQueueTotal(payload, noPo)).toBe(15);
   });
 
+  it("cada cartão abre a lista já filtrada, com valores aceites pelo parser do destino", () => {
+    const full: InventoryTodayPayload = {
+      ...payload,
+      suppliers: { price_changes_pending: 1, awaiting_profile: 2, catalog_unlinked: 5 },
+      client_orders: { ...payload.client_orders!, without_preferred_supplier: 1 },
+    };
+    const to = Object.fromEntries(getInventoryQueueItems(full, all).map((i) => [i.key, i.to]));
+    expect(to).toEqual({
+      "po-pending": "/purchase-orders?status=pending",
+      "po-late": "/purchase-orders?status=late",
+      "ec-ready": "/client-orders?ready=1",
+      "ec-no-supplier": "/client-orders?status=sem_fornecedor",
+      "price-changes": "/suppliers?filter=prices",
+      "stock-low": "/stocks?status=low",
+      "counts-stalled": "/stock-counts?stalled=1",
+      "suppliers-awaiting": "/suppliers?filter=awaiting",
+      "catalog-unlinked": "/suppliers?filter=catalog",
+      "delivery-notes-divergent": "/receiving?notes=divergent",
+    });
+    // Ida e volta: o parser de cada página lê o filtro (valor desconhecido cairia em "all").
+    const query = (url: string) => url.slice(url.indexOf("?"));
+    expect(parsePurchaseOrdersParams(query(to["po-pending"])).status).toBe("pending");
+    expect(parsePurchaseOrdersParams(query(to["po-late"])).status).toBe("late");
+    expect(parseClientOrdersParams(query(to["ec-ready"])).ready).toBe(true);
+    expect(parseClientOrdersParams(query(to["ec-no-supplier"])).status).toBe("sem_fornecedor");
+    expect(parseSuppliersParams(query(to["price-changes"])).filter).toBe("prices");
+    expect(parseSuppliersParams(query(to["suppliers-awaiting"])).filter).toBe("awaiting");
+    expect(parseSuppliersParams(query(to["catalog-unlinked"])).filter).toBe("catalog");
+    expect(parseStocksParams(query(to["stock-low"])).status).toBe("low");
+    expect(parseStockCountsParams(query(to["counts-stalled"])).stalled).toBe(true);
+    expect(parseReceivingParams(query(to["delivery-notes-divergent"])).notes).toBe("divergent");
+  });
+
   it("sem dados não há total", () => {
     expect(getInventoryQueueTotal(null, all)).toBeNull();
+  });
+});
+
+describe("destino \"Prontas a expedir\" (Encomendas Clientes ?ready=1)", () => {
+  beforeEach(() => rpcMock.mockReset());
+
+  it("o cartão e o fluxo usam clientOrdersLink({ ready: true }), lido pelo parser", () => {
+    expect(clientOrdersLink({ ready: true })).toBe("/client-orders?ready=1");
+    expect(parseClientOrdersParams("?ready=1")).toEqual({ status: "all", ready: true, open: null });
+  });
+
+  it("prontidão: uma chamada à RPC com a organização ativa; prontas = lines_ready > 0", async () => {
+    rpcMock.mockResolvedValueOnce({
+      data: [
+        { contract_id: "c1", lines_ready: 2, units_ready: "5", units_in_stock_reserved: "5", units_on_po: "0", units_missing: "1", units_served: "3", units_received: "0", units_needed: "9" },
+        { contract_id: "c2", lines_ready: 0, units_ready: 0, units_in_stock_reserved: 0, units_on_po: 4, units_missing: 0, units_served: 0, units_received: 0, units_needed: 4 },
+      ],
+      error: null,
+    });
+    const map = await fetchClientOrderReadiness("org-1");
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(rpcMock).toHaveBeenCalledWith("rpc_client_order_list_readiness", { p_organization_id: "org-1" });
+    expect(map.c1).toMatchObject({ lines_ready: 2, units_in_stock_reserved: 5, units_served: 3, units_missing: 1 });
+    expect([...readyContractIds(map)]).toEqual(["c1"]);
+  });
+
+  it("filtro: lê a lista por páginas só até encontrar todas as prontas, com os mesmos filtros", async () => {
+    const page = (start: number, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ contract_id: `c${start + i}` }));
+    rpcMock
+      .mockResolvedValueOnce({ data: page(0, 100), error: null })
+      .mockResolvedValueOnce({ data: page(100, 100), error: null })
+      .mockResolvedValueOnce({ data: page(200, 100), error: null });
+    const filters = { search: "ab", status: "all", dateFrom: "2026-01-01", dateTo: "" };
+    const { rows, truncated } = await fetchClientOrderRowsByIds("org-1", filters, new Set(["c5", "c150"]), 20);
+    expect(rows.map((r) => r.contract_id)).toEqual(["c5", "c150"]);
+    expect(truncated).toBe(false);
+    expect(rpcMock).toHaveBeenCalledTimes(2); // pára na 2.ª página
+    expect(rpcMock).toHaveBeenLastCalledWith("rpc_list_client_order_documents", {
+      p_organization_id: "org-1",
+      p_search: "ab",
+      p_status_filter: null,
+      p_limit: 100,
+      p_offset: 100,
+      p_date_from: "2026-01-01",
+      p_date_to: null,
+    });
+  });
+
+  it("filtro: sem prontas não chama a lista; teto atingido = truncado", async () => {
+    const none = { search: "", status: "all", dateFrom: "", dateTo: "" };
+    expect(await fetchClientOrderRowsByIds("org-1", none, new Set(), 20)).toEqual({ rows: [], truncated: false });
+    expect(rpcMock).not.toHaveBeenCalled();
+    rpcMock.mockResolvedValue({ data: Array.from({ length: 100 }, (_, i) => ({ contract_id: `x${i}` })), error: null });
+    expect(await fetchClientOrderRowsByIds("org-1", none, new Set(["nao-existe"]), 2)).toEqual({ rows: [], truncated: true });
+    expect(rpcMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("portal: \"por ver\" e \"confirmou\" partilham ?status=portal (o filtro das POs não tem sub-estado)", () => {
+    expect(purchaseOrdersLink({ status: "portal" })).toBe("/purchase-orders?status=portal");
+    expect(PO_STATUS_FILTERS.filter((s) => s.startsWith("portal"))).toEqual(["portal"]);
   });
 });
 

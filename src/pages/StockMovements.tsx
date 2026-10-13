@@ -20,19 +20,29 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
+import { DeliveryNoteDetail } from "@/components/receiving/DeliveryNoteDetail";
+import { noteLabel } from "@/components/receiving/deliveryNotes";
 import {
+  DocumentLink,
   InventoryPageHeader,
   InventoryStatusBadge,
   InventoryEmptyState,
   MOVEMENT_TYPES,
+  clientOrdersLink,
   movementTypeLabel,
   movementTypeTone,
+  parseStockMovementsParams,
+  purchaseOrdersLink,
+  receivingLink,
   signedMovementQty,
+  stockCountsLink,
   toneText,
+  usePermissionGate,
 } from "@/components/inventory/ui";
 import { inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
+import { useMovementDocumentLinks } from "@/hooks/useMovementDocumentLinks";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
-import { escapeIlike, escapePostgrestOrTerm } from "@/lib/clientSearch";
+import { escapePostgrestOrTerm } from "@/lib/clientSearch";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +68,11 @@ interface MovementRow {
   quantity: number;
   balance_after: number;
   document_number: string;
+  document_type: string | null;
+  reference_id: string | null;
+  sale_source_type: string | null;
+  sale_source_id: string | null;
+  transfer_group_id: string | null;
   counterparty: string | null;
   notes: string | null;
   created_at: string;
@@ -110,8 +125,10 @@ const StockMovements = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [docFilter, setDocFilter] = useState("");
-  const [debouncedDoc, setDebouncedDoc] = useState("");
+  // ?doc= (ligação de outro ecrã ou de uma transferência nesta página).
+  const [docFilter, setDocFilter] = useState(() => parseStockMovementsParams(searchParams).doc ?? "");
+  const [debouncedDoc, setDebouncedDoc] = useState(() => parseStockMovementsParams(searchParams).doc ?? "");
+  const [noteDialogId, setNoteDialogId] = useState<string | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
@@ -134,8 +151,12 @@ const StockMovements = () => {
   // quando o estado muda; os efeitos URL→estado só correm quando o URL muda.
   const productParam = searchParams.get("product") || "";
   const warehouseParam = searchParams.get("warehouse") || "all";
+  const docParam = parseStockMovementsParams(searchParams).doc ?? "";
   const searchParamsRef = useRef({ searchParams, setSearchParams });
   searchParamsRef.current = { searchParams, setSearchParams };
+  // Último ?doc= escrito por este ecrã: o regresso desse valor ao URL não pode
+  // repor o campo (apagaria o que o utilizador entretanto escreveu).
+  const lastWrittenDocRef = useRef(docParam);
 
   // URL → estado (navegação externa, voltar/avançar do browser).
   useEffect(() => {
@@ -144,6 +165,12 @@ const StockMovements = () => {
   useEffect(() => {
     setWarehouseFilter((prev) => (prev === warehouseParam ? prev : warehouseParam));
   }, [warehouseParam]);
+  useEffect(() => {
+    if (docParam === lastWrittenDocRef.current) return;
+    lastWrittenDocRef.current = docParam;
+    setDocFilter(docParam);
+    setDebouncedDoc(docParam);
+  }, [docParam]);
 
   // Estado → URL (partilhável, e o "voltar" do browser não reabre filtros
   // antigos — replace).
@@ -151,14 +178,21 @@ const StockMovements = () => {
     const { searchParams: currentParams, setSearchParams: writeParams } = searchParamsRef.current;
     const wantedProduct = productId || null;
     const wantedWarehouse = warehouseFilter !== "all" ? warehouseFilter : null;
-    if (currentParams.get("product") === wantedProduct && currentParams.get("warehouse") === wantedWarehouse) return;
+    const wantedDoc = debouncedDoc || null;
+    if (
+      currentParams.get("product") === wantedProduct &&
+      currentParams.get("warehouse") === wantedWarehouse &&
+      (parseStockMovementsParams(currentParams).doc ?? null) === wantedDoc
+    ) return;
+    lastWrittenDocRef.current = debouncedDoc;
     writeParams((prev) => {
       const next = new URLSearchParams(prev);
       if (wantedProduct) next.set("product", wantedProduct); else next.delete("product");
       if (wantedWarehouse) next.set("warehouse", wantedWarehouse); else next.delete("warehouse");
+      if (wantedDoc) next.set("doc", wantedDoc); else next.delete("doc");
       return next;
     }, { replace: true });
-  }, [productId, warehouseFilter]);
+  }, [productId, warehouseFilter, debouncedDoc]);
 
   // Armazéns da organização ativa (filtro + nomes + diálogo de movimento).
   const { data: warehouses = [] } = useQuery({
@@ -241,7 +275,7 @@ const StockMovements = () => {
   const searchFailed = !!debouncedSearch && !productSearch.data && !!productSearch.error && !productSearch.isFetching;
 
   const selectColumns = [
-    "id, movement_type, quantity, balance_after, document_number, counterparty, notes, created_at, product_id, warehouse_id",
+    "id, movement_type, quantity, balance_after, document_number, document_type, reference_id, sale_source_type, sale_source_id, transfer_group_id, counterparty, notes, created_at, product_id, warehouse_id",
     canViewCost ? "unit_cost_at_time" : null,
     "products(name, sku)",
     "warehouses(name)",
@@ -257,7 +291,11 @@ const StockMovements = () => {
     if (f.productIds) query = query.in("product_id", f.productIds);
     if (f.type !== "all") query = query.eq("movement_type", f.type);
     if (f.warehouse !== "all") query = query.eq("warehouse_id", f.warehouse);
-    if (f.doc) query = query.ilike("document_number", `%${escapeIlike(f.doc)}%`);
+    // Documento: número do movimento OU contraparte — os ajustes de contagem
+    // ficam com NE-A-NNNN e o INV-NNNN só em counterparty ("Contagem física
+    // INV-NNNN", migration 20261116020000).
+    const docTerm = f.doc ? escapePostgrestOrTerm(f.doc) : "";
+    if (docTerm) query = query.or(`document_number.ilike.%${docTerm}%,counterparty.ilike.%${docTerm}%`);
     if (f.from) query = query.gte("created_at", startOfLocalDay(f.from));
     if (f.to) query = query.lt("created_at", startOfNextLocalDay(f.to));
     return query.order("created_at", { ascending: false }).order("id", { ascending: false });
@@ -293,6 +331,99 @@ const StockMovements = () => {
 
   const rows = useMemo(() => movements.data?.pages.flatMap((p) => p.rows) ?? [], [movements.data]);
   const total = movements.data?.pages[0]?.count ?? null;
+
+  // Ligações dos documentos: só para quem pode abrir o destino; sem permissão
+  // (ou sem registo de origem) o nº fica em texto simples.
+  const gate = usePermissionGate();
+  const canOpenPo = gate("purchase_orders.view").allowed;
+  const canOpenClientOrder = gate("client_orders.view").allowed;
+  const canOpenProposal = gate("proposals.view").allowed;
+  const canOpenCount = gate("inventory.view").allowed;
+  const canOpenNote = gate(["purchase_orders.view", "purchase_orders.receive"]).allowed;
+  // A guia abre na Receção (?guia=) — rota receiving.view. Sem ela, mantém-se
+  // a ficha em diálogo aqui (quem vê POs/recebe não perde o acesso à guia).
+  const canGoReceiving = gate("receiving.view").allowed;
+  const { links: docLinks } = useMovementDocumentLinks(rows, orgId, {
+    purchaseOrders: canOpenPo,
+    counts: canOpenCount,
+    deliveryNotes: canOpenNote,
+  });
+
+  const renderDocument = (m: MovementRow) => {
+    const doc = m.document_number;
+    if (!doc) return <>—</>;
+    const type = m.document_type;
+
+    if (type === "compra") {
+      const poId = canOpenPo ? docLinks.poByNumber[doc] : undefined;
+      const note = canOpenNote ? docLinks.noteByMovementId[m.id] : undefined;
+      return (
+        <>
+          <DocumentLink to={poId ? purchaseOrdersLink({ open: poId }) : undefined} title={poId ? `Abrir ${doc}` : undefined}>
+            {doc}
+          </DocumentLink>
+          {note ? (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              Guia{" "}
+              <DocumentLink
+                to={canGoReceiving ? receivingLink({ guia: note.noteId }) : undefined}
+                onClick={canGoReceiving ? undefined : () => setNoteDialogId(note.noteId)}
+                title="Abrir a guia do fornecedor"
+              >
+                {noteLabel(note.noteNumber)}
+              </DocumentLink>
+            </div>
+          ) : null}
+        </>
+      );
+    }
+
+    if (type === "venda" && m.sale_source_id) {
+      if (m.sale_source_type === "contract" && canOpenClientOrder) {
+        return <DocumentLink to={clientOrdersLink({ open: m.sale_source_id })} title={`Abrir ${doc}`}>{doc}</DocumentLink>;
+      }
+      if (m.sale_source_type === "proposal" && canOpenProposal) {
+        return (
+          <DocumentLink to={`/proposals?open=${encodeURIComponent(m.sale_source_id)}`} title={`Abrir ${doc}`}>
+            {doc}
+          </DocumentLink>
+        );
+      }
+      return <DocumentLink>{doc}</DocumentLink>;
+    }
+
+    if (type === "ajuste" && m.reference_id) {
+      const count = canOpenCount ? docLinks.countByLineId[m.reference_id] : undefined;
+      if (count) {
+        return (
+          <DocumentLink
+            to={stockCountsLink({ open: count.countId })}
+            title={count.countNumber ? `Abrir a contagem ${count.countNumber}` : "Abrir a contagem"}
+          >
+            {doc}
+          </DocumentLink>
+        );
+      }
+      return <DocumentLink>{doc}</DocumentLink>;
+    }
+
+    // As 2 pernas da transferência têm o mesmo nº: filtra este livro por ele.
+    if (type === "transferencia") {
+      return (
+        <DocumentLink
+          onClick={() => {
+            setDocFilter(doc);
+            setDebouncedDoc(doc);
+          }}
+          title="Ver as duas pernas da transferência"
+        >
+          {doc}
+        </DocumentLink>
+      );
+    }
+
+    return <DocumentLink>{doc}</DocumentLink>;
+  };
 
   const hasActiveFilters =
     !!productId || !!searchTerm || typeFilter !== "all" || warehouseFilter !== "all" || !!docFilter || !!fromDate || !!toDate;
@@ -395,7 +526,7 @@ const StockMovements = () => {
   }
 
   const loading = movements.isLoading || searchPending;
-  const columnCount = canViewCost ? 10 : 9;
+  const columnCount = 9;
 
   return (
     <>
@@ -461,7 +592,7 @@ const StockMovements = () => {
             </Select>
             <Input
               type="search"
-              placeholder="Documento (PO, EC, INV, NE…)"
+              placeholder="Documento (PO, EC, INV, TR)"
               aria-label="Documento"
               value={docFilter}
               onChange={(e) => setDocFilter(e.target.value)}
@@ -531,6 +662,7 @@ const StockMovements = () => {
         ) : (
           <div className="rounded-lg border">
             <Table>
+              <caption className="sr-only">Livro de movimentos</caption>
               <TableHeader>
                 <TableRow>
                   <TableHead>Data</TableHead>
@@ -541,7 +673,6 @@ const StockMovements = () => {
                   <TableHead className="text-right">Saldo depois</TableHead>
                   <TableHead>Documento</TableHead>
                   <TableHead>Notas / contraparte</TableHead>
-                  {canViewCost ? <TableHead className="text-right">Custo unit.</TableHead> : null}
                   <TableHead>Utilizador</TableHead>
                 </TableRow>
               </TableHeader>
@@ -575,15 +706,13 @@ const StockMovements = () => {
                           {qty > 0 ? "+" : "−"}{formatQty(Math.abs(qty))}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{formatQty(m.balance_after)}</TableCell>
-                        <TableCell className="font-mono text-xs">{m.document_number}</TableCell>
+                        <TableCell className="text-xs">{renderDocument(m)}</TableCell>
                         <TableCell className="max-w-[280px] text-xs text-muted-foreground">
                           {[m.counterparty, m.notes].filter(Boolean).join(" · ") || "—"}
+                          {canViewCost && m.unit_cost_at_time != null ? (
+                            <div className="mt-0.5 tabular-nums">custo {formatEur(Number(m.unit_cost_at_time))}/un</div>
+                          ) : null}
                         </TableCell>
-                        {canViewCost ? (
-                          <TableCell className="text-right text-xs tabular-nums">
-                            {m.unit_cost_at_time != null ? formatEur(Number(m.unit_cost_at_time)) : "—"}
-                          </TableCell>
-                        ) : null}
                         <TableCell className="text-sm">{m.created_by_user?.name ?? "—"}</TableCell>
                       </TableRow>
                     );
@@ -619,6 +748,17 @@ const StockMovements = () => {
           void movements.refetch();
           void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
         }}
+      />
+
+      {/* Guia do fornecedor, só para quem não pode abrir a Receção (sem receiving.view);
+          os restantes vão para /receiving?guia=. A contagem (INV-) abre em /stock-counts?open=. */}
+      <DeliveryNoteDetail
+        open={!!noteDialogId}
+        onOpenChange={(o) => { if (!o) setNoteDialogId(null); }}
+        noteId={noteDialogId}
+        orgId={activeCompany.id}
+        canEdit={hasPermission("receiving.manage_delivery_notes")}
+        canDownloadProof={hasPermission("receiving.download_proof")}
       />
     </>
   );

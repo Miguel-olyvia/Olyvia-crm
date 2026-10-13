@@ -12,14 +12,22 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { Button } from "@/components/ui/button";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
 import {
+  DocumentLink,
   InventoryPageHeader,
   InventoryStatusBadge,
   FlowCounterButton,
   WorkQueueCard,
+  clientOrdersLink,
   movementTypeLabel,
   movementTypeTone,
+  purchaseOrdersLink,
+  receivingLink,
   signedMovementQty,
+  stockCountsLink,
+  stockMovementsLink,
+  stocksLink,
   toneText,
+  usePermissionGate,
 } from "@/components/inventory/ui";
 import {
   useInventoryToday,
@@ -27,6 +35,7 @@ import {
   inventoryTodayQueryKey,
   type InventoryTodayPayload,
 } from "@/hooks/useInventoryToday";
+import { useMovementDocumentLinks, type MovementDocumentLinks } from "@/hooks/useMovementDocumentLinks";
 import { cn } from "@/lib/utils";
 
 // "Hoje" do Inventário: o que precisa de ação, pela ordem do fluxo
@@ -49,8 +58,50 @@ interface RecentMovement {
   quantity: number;
   created_at: string;
   warehouse_id: string;
+  document_number: string;
+  document_type: string | null;
+  reference_id: string | null;
+  sale_source_type: string | null;
+  sale_source_id: string | null;
   products?: { name: string; sku: string | null } | null;
   warehouses?: { name: string } | null;
+}
+
+interface DocumentAccess {
+  po: boolean;
+  clientOrder: boolean;
+  proposal: boolean;
+  count: boolean;
+}
+
+/**
+ * Nº do documento do movimento como ligação — as mesmas regras do livro de
+ * Movimentos: PO pelo nº, EC/proposta pela origem da venda, contagem pela linha
+ * do ajuste, transferência → livro filtrado pelo nº (as duas pernas). Sem
+ * permissão ou sem registo de origem fica em texto.
+ */
+function MovementDocument({ m, links, can }: { m: RecentMovement; links: MovementDocumentLinks; can: DocumentAccess }) {
+  const doc = m.document_number;
+  if (!doc) return null;
+  const type = m.document_type;
+  let to: string | undefined;
+  if (type === "compra" && can.po) {
+    const poId = links.poByNumber[doc];
+    if (poId) to = purchaseOrdersLink({ open: poId });
+  } else if (type === "venda" && m.sale_source_id) {
+    if (m.sale_source_type === "contract" && can.clientOrder) to = clientOrdersLink({ open: m.sale_source_id });
+    else if (m.sale_source_type === "proposal" && can.proposal) to = `/proposals?open=${encodeURIComponent(m.sale_source_id)}`;
+  } else if (type === "ajuste" && m.reference_id && can.count) {
+    const count = links.countByLineId[m.reference_id];
+    if (count) to = stockCountsLink({ open: count.countId });
+  } else if (type === "transferencia") {
+    to = stockMovementsLink({ doc });
+  }
+  return (
+    <DocumentLink to={to} title={to ? `Abrir ${doc}` : undefined} className="text-xs">
+      {doc}
+    </DocumentLink>
+  );
 }
 
 /** Uma etapa do fluxo: número, título e conteúdo. */
@@ -115,6 +166,7 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
   const canEc = hasPermission("client_orders.view");
   const canPo = hasPermission("purchase_orders.view");
   const canRec = hasPermission("receiving.view");
+  const canStock = hasPermission("inventory.view");
   const go = (to: string) => () => navigate(to);
 
   const co = data.client_orders;
@@ -142,9 +194,9 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
       <div className="grid gap-3 lg:grid-cols-2">
         {salesStage ? (
           <Stage n={1} title="Vendas assinadas">
-            {isNum(origin?.contract) ? <FlowCounterButton label="Contratos" value={origin.contract} onClick={go("/client-orders")} /> : null}
-            {isNum(origin?.direct_sale) ? <FlowCounterButton label="Vendas diretas" value={origin.direct_sale} onClick={go("/client-orders")} /> : null}
-            {isNum(origin?.manual) ? <FlowCounterButton label="Encomendas manuais" value={origin.manual} onClick={go("/client-orders")} /> : null}
+            {isNum(origin?.contract) ? <FlowCounterButton label="Contratos" value={origin.contract} onClick={go(clientOrdersLink())} /> : null}
+            {isNum(origin?.direct_sale) ? <FlowCounterButton label="Vendas diretas" value={origin.direct_sale} onClick={go(clientOrdersLink())} /> : null}
+            {isNum(origin?.manual) ? <FlowCounterButton label="Encomendas manuais" value={origin.manual} onClick={go(clientOrdersLink())} /> : null}
             {trigger ? (
               <p className="text-xs text-muted-foreground">
                 Baixa de stock no momento definido:{" "}
@@ -155,10 +207,10 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
         ) : null}
         {ecStage ? (
           <Stage n={2} title="Encomendas Clientes">
-            {isNum(co?.open) ? <FlowCounterButton label="Em aberto" value={co.open} onClick={go("/client-orders")} /> : null}
-            {isNum(co?.ready_to_ship) ? <FlowCounterButton label="Prontas a expedir" value={co.ready_to_ship} tone="ok" onClick={go("/client-orders")} /> : null}
+            {isNum(co?.open) ? <FlowCounterButton label="Em aberto" value={co.open} onClick={go(clientOrdersLink())} /> : null}
+            {isNum(co?.ready_to_ship) ? <FlowCounterButton label="Prontas a expedir" value={co.ready_to_ship} tone="ok" onClick={go(clientOrdersLink({ ready: true }))} /> : null}
             {isNum(co?.without_preferred_supplier) ? (
-              <FlowCounterButton label="Sem fornecedor" value={co.without_preferred_supplier} tone="bad" onClick={go("/client-orders")} />
+              <FlowCounterButton label="Sem fornecedor" value={co.without_preferred_supplier} tone="bad" onClick={go(clientOrdersLink({ status: "sem_fornecedor" }))} />
             ) : null}
             <p className="text-xs text-muted-foreground">Cada linha: há stock livre (stock − reservas anteriores)?</p>
           </Stage>
@@ -172,13 +224,13 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
             {stockBranch ? (
               <Stage branch title="Há stock → serve do stock">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Step label="Reserva FIFO" value={st?.reserved_units} suffix="un" />
+                  <Step label="Reserva FIFO" value={st?.reserved_units} suffix="un" onClick={canStock ? go(stocksLink()) : undefined} />
                   <StepArrow />
                   <Step
                     label="Saída"
                     value={canEc ? co?.ready_to_ship : null}
                     suffix="EC"
-                    onClick={canEc ? go("/client-orders") : undefined}
+                    onClick={canEc ? go(clientOrdersLink({ ready: true })) : undefined}
                   />
                   <StepArrow />
                   <Step label="Encomenda servida" />
@@ -189,28 +241,31 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
               <Stage branch n={3} title="Falta → encomenda ao fornecedor">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {canPo && isNum(po?.pending_approval) ? (
-                    <><Step label="PO por aprovar" value={po.pending_approval} onClick={go("/purchase-orders")} /><StepArrow /></>
+                    <><Step label="PO por aprovar" value={po.pending_approval} onClick={go(purchaseOrdersLink({ status: "pending" }))} /><StepArrow /></>
                   ) : null}
+                  {/* "Por ver" e "confirmou" abrem ambos ?status=portal: o filtro
+                      das POs (PO_STATUS_FILTERS / parsePurchaseOrdersParams)
+                      só conhece "publicada no portal", sem sub-estado. */}
                   {canPo && isNum(po?.portal_unseen) ? (
-                    <><Step label="No portal, por ver" value={po.portal_unseen} onClick={go("/purchase-orders")} /><StepArrow /></>
+                    <><Step label="No portal, por ver" value={po.portal_unseen} onClick={go(purchaseOrdersLink({ status: "portal" }))} /><StepArrow /></>
                   ) : null}
                   {canPo && isNum(po?.portal_confirmed) ? (
-                    <><Step label="Fornecedor confirmou" value={po.portal_confirmed} onClick={go("/purchase-orders")} /><StepArrow /></>
+                    <><Step label="Fornecedor confirmou" value={po.portal_confirmed} onClick={go(purchaseOrdersLink({ status: "portal" }))} /><StepArrow /></>
                   ) : null}
                   {canRec && isNum(po?.open_delivery_notes) ? (
-                    <><Step label="Receção: guias abertas" value={po.open_delivery_notes} onClick={go("/receiving")} /><StepArrow /></>
+                    <><Step label="Receção: guias abertas" value={po.open_delivery_notes} onClick={go(receivingLink({ notes: "open" }))} /><StepArrow /></>
                   ) : null}
                   <Step label="Serve a EC" />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {canPo && isNum(po?.late) && po.late > 0 ? (
-                    <Button variant="outline" size="sm" onClick={go("/purchase-orders")}>
+                    <Button variant="outline" size="sm" onClick={go(purchaseOrdersLink({ status: "late" }))}>
                       <InventoryStatusBadge tone="bad">{po.late} atrasada{po.late === 1 ? "" : "s"}</InventoryStatusBadge>
                     </Button>
                   ) : null}
                   {canRec ? (
                     <Button variant="outline" size="sm" asChild>
-                      <Link to="/receiving"><Truck className="mr-1 h-3.5 w-3.5" /> Receber</Link>
+                      <Link to={receivingLink()}><Truck className="mr-1 h-3.5 w-3.5" /> Receber</Link>
                     </Button>
                   ) : null}
                 </div>
@@ -224,16 +279,16 @@ function FlowSection({ data }: { data: InventoryTodayPayload }) {
         <Stage n={4} title="Stock">
           <div className={cn("grid gap-2 sm:grid-cols-2", stockCards >= 3 ? "lg:grid-cols-3" : null)}>
             {isNum(st?.below_reorder_point) ? (
-              <FlowCounterButton label="Abaixo do ponto de encomenda" value={st.below_reorder_point} tone="warn" onClick={go("/stocks?status=low")} />
+              <FlowCounterButton label="Abaixo do ponto de encomenda" value={st.below_reorder_point} tone="warn" onClick={go(stocksLink({ status: "low" }))} />
             ) : null}
             {isNum(cnt?.in_progress) ? (
-              <FlowCounterButton label="Contagens em curso" value={cnt.in_progress} onClick={go("/stock-counts")} />
+              <FlowCounterButton label="Contagens em curso" value={cnt.in_progress} onClick={go(stockCountsLink({ status: "em_contagem" }))} />
             ) : null}
             {isNum(st?.value) ? (
               <FlowCounterButton
                 label="Valor em stock (custo médio)"
                 value={formatEur(st.value)}
-                onClick={go("/stocks")}
+                onClick={go(stocksLink())}
               />
             ) : null}
           </div>
@@ -282,7 +337,9 @@ const InventoryToday = () => {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("stock_movements")
-        .select("id, movement_type, quantity, created_at, warehouse_id, products(name, sku), warehouses(name)")
+        .select(
+          "id, movement_type, quantity, created_at, warehouse_id, document_number, document_type, reference_id, sale_source_type, sale_source_id, products(name, sku), warehouses(name)",
+        )
         .eq("organization_id", orgId as string)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
@@ -292,6 +349,20 @@ const InventoryToday = () => {
     },
     enabled: !!orgId,
     staleTime: 30 * 1000,
+  });
+
+  // Documento de cada movimento como ligação (mesmo hook e permissões do livro).
+  const gate = usePermissionGate();
+  const docAccess: DocumentAccess = {
+    po: gate("purchase_orders.view").allowed,
+    clientOrder: gate("client_orders.view").allowed,
+    proposal: gate("proposals.view").allowed,
+    count: gate("inventory.view").allowed,
+  };
+  const { links: docLinks } = useMovementDocumentLinks(recent.data ?? [], orgId, {
+    purchaseOrders: docAccess.po,
+    counts: docAccess.count,
+    deliveryNotes: false,
   });
 
   if (companyLoading) {
@@ -328,7 +399,7 @@ const InventoryToday = () => {
               </PermissionGate>
               <PermissionGate permission="receiving.view">
                 <Button variant="outline" asChild>
-                  <Link to="/receiving"><Truck className="mr-2 h-4 w-4" /> Receber</Link>
+                  <Link to={receivingLink()}><Truck className="mr-2 h-4 w-4" /> Receber</Link>
                 </Button>
               </PermissionGate>
             </>
@@ -359,7 +430,7 @@ const InventoryToday = () => {
           <div className="flex items-center justify-between gap-2">
             <h2 id="inv-recent" className="text-base font-semibold">Últimos movimentos</h2>
             <Button variant="outline" size="sm" asChild>
-              <Link to="/stock-movements">Ver livro completo</Link>
+              <Link to={stockMovementsLink()}>Ver livro completo</Link>
             </Button>
           </div>
           {recent.isLoading ? (
@@ -381,6 +452,7 @@ const InventoryToday = () => {
                       </b>{" "}
                       {m.products?.name ?? "—"} · {m.warehouses?.name ?? warehouseName(m.warehouse_id) ?? "—"}
                     </span>
+                    <MovementDocument m={m} links={docLinks} can={docAccess} />
                     <span className="whitespace-nowrap text-xs text-muted-foreground">{formatDateTime(m.created_at)}</span>
                   </li>
                 );

@@ -21,7 +21,11 @@ interface Props {
   supplierName?: string | null;
   /** Depois de encomendar (recarregar a lista / estado). */
   onDone: (res: PoSendResult) => void;
-  variant?: "icon" | "button";
+  /** "none" = sem botão: só o diálogo de confirmação, aberto por open/onOpenChange. */
+  variant?: "icon" | "button" | "none";
+  /** Modo controlado da confirmação (ex.: "Aprovar e enviar" na linha da lista). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   /** Texto extra no diálogo (ex.: alterações por gravar no formulário). */
   extraWarning?: string | null;
   /** Bloqueia o botão (ex.: formulário com alterações por gravar). */
@@ -43,10 +47,17 @@ export function PoSendToSupplierButton({
   extraWarning,
   disabled = false,
   disabledHint,
+  open,
+  onOpenChange,
 }: Props) {
   const { toast } = useToast();
   const showResult = usePoSendToast();
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const confirmOpen = open ?? internalOpen;
+  const setConfirmOpen = (value: boolean) => {
+    if (onOpenChange) onOpenChange(value);
+    if (open === undefined) setInternalOpen(value);
+  };
   const [sending, setSending] = useState(false);
 
   const send = async () => {
@@ -77,7 +88,7 @@ export function PoSendToSupplierButton({
         >
           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </Button>
-      ) : (
+      ) : variant === "none" ? null : (
         <Button
           type="button"
           size="sm"

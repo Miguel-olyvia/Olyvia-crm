@@ -8,7 +8,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Building, Pencil, Trash2, Mail, Phone, Globe, Download, Upload, Search, Filter, X, Building2, Truck, BarChart3 } from "lucide-react";
+import { Plus, Building, Pencil, Trash2, Globe, Download, Upload, Search, X, Truck, BarChart3 } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { BulkActionsBar } from "@/components/BulkActionsBar";
@@ -35,6 +35,33 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SupplierSlaReportDialog from "@/components/SupplierSlaReportDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import {
+  InventoryEmptyState,
+  InventoryPageHeader,
+  InventoryStatusBadge,
+  RowActions,
+  parseSuppliersParams,
+  purchaseOrdersLink,
+  type RowActionEntry,
+} from "@/components/inventory/ui";
+import { useSupplierOrgStats, useSupplierRowStats } from "@/components/suppliers/useSupplierListStats";
+import {
+  SupplierOpenPos,
+  SupplierPortalBadge,
+  SupplierPricesPending,
+  SupplierSla,
+} from "@/components/suppliers/SupplierRowStats";
+import { Clock, Eye, ShoppingCart, Undo2, Users } from "lucide-react";
+
+// Título e descrição do ecrã (tom do TITULOS.sup do protótipo, ajustado ao que
+// a app faz: a tabela não se edita inline e o convite ao portal é um passo à
+// parte, no separador Portal da ficha).
+const PAGE_TITLE = "Fornecedores";
+const PAGE_DESCRIPTION =
+  "Dados, artigos, preços e portal ficam na ficha do fornecedor. No separador Portal convida-o: ele preenche a ficha e o catálogo.";
+
+/** Tira os caracteres que partem o filtro .or() do PostgREST. */
+const sanitizeSearch = (q: string): string => q.replace(/[,()*%\\]/g, " ").trim();
 
 type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 
@@ -95,6 +122,58 @@ const Suppliers = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState<string | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
+  // Caixas do protótipo: à espera do fornecedor, catálogo por ligar, preços por aprovar.
+  const [awaitingOnly, setAwaitingOnly] = useState(false);
+  const [catalogOnly, setCatalogOnly] = useState(false);
+  const [pricesOnly, setPricesOnly] = useState(false);
+
+  // /suppliers?filter=… (inventoryLinks): aplicado quando o valor muda; qualquer
+  // mudança feita à mão nos filtros tira-o do URL para não voltar a aplicar.
+  const urlFilter = parseSuppliersParams(searchParams).filter;
+  useEffect(() => {
+    if (urlFilter === "all") return;
+    setStatusFilter(urlFilter === "active" || urlFilter === "inactive" ? urlFilter : "all");
+    setAwaitingOnly(urlFilter === "awaiting");
+    setCatalogOnly(urlFilter === "catalog");
+    setPricesOnly(urlFilter === "prices");
+    setShowDeleted(false);
+  }, [urlFilter]);
+  const dropUrlFilter = () => {
+    if (!searchParams.has("filter")) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("filter");
+      return next;
+    }, { replace: true });
+  };
+
+  // Estatísticas por fornecedor: sempre da organização filtrada (ou da ativa).
+  const statsOrgId = companyFilter && companyFilter !== "all" ? companyFilter : activeCompany?.id ?? null;
+  const canPricing =
+    hasPermission("suppliers.view") && (hasPermission("suppliers.view_pricing") || hasPermission("products.view_cost"));
+  // Portal, à espera da ficha e catálogo por ligar: uma chamada por organização.
+  const orgStatsQuery = useSupplierOrgStats(statsOrgId);
+  const orgStats = orgStatsQuery.data ?? null;
+
+  // Caixas ativas → restrição por ids (intersecção). null = sem restrição;
+  // "pending" = à espera das estatísticas.
+  let restrictIds: string[] | null | "pending" = null;
+  if (awaitingOnly || catalogOnly || pricesOnly) {
+    if (!orgStats) {
+      restrictIds = orgStatsQuery.isError ? [] : "pending";
+    } else {
+      let set: Set<string> | null = null;
+      const narrow = (ids: Iterable<string>) => {
+        const next = new Set(ids);
+        set = set === null ? next : new Set([...set].filter((id) => next.has(id)));
+      };
+      if (awaitingOnly) narrow(orgStats.awaiting.map((s) => s.id));
+      if (catalogOnly) narrow([...(orgStats.catalogUnlinked ?? new Map<string, number>())].filter(([, n]) => n > 0).map(([id]) => id));
+      if (pricesOnly) narrow([...(orgStats.pricesPending ?? new Map<string, number>())].filter(([, n]) => n > 0).map(([id]) => id));
+      restrictIds = [...(set ?? new Set<string>())].sort();
+    }
+  }
+  const restrictKey = restrictIds === null ? "" : restrictIds === "pending" ? "pending" : `ids:${restrictIds.join(",")}`;
 
   // Filter data
   const [filterOrganizations, setFilterOrganizations] = useState<FilterOrganization[]>([]);
@@ -180,8 +259,65 @@ const Suppliers = () => {
     } else {
       setLoadingMore(true);
     }
-    
+
+    // Caixas "à espera / catálogo / preços": à espera das estatísticas, ou sem
+    // nenhum fornecedor que cumpra → lista vazia sem ir à BD.
+    if (restrictKey === "pending") return;
+    const onlyIds = restrictKey.startsWith("ids:") ? restrictKey.slice(4).split(",").filter(Boolean) : null;
+    if (onlyIds && onlyIds.length === 0) {
+      setSuppliers([]);
+      setTotalCount(0);
+      setHasMore(false);
+      setLoading(false);
+      setLoadingMore(false);
+      return;
+    }
+    const search = sanitizeSearch(searchQuery);
+    const searchOr = `name.ilike.%${search}%,code.ilike.%${search}%,tax_id.ilike.%${search}%,city.ilike.%${search}%,contact_person.ilike.%${search}%,email.ilike.%${search}%`;
+
     try {
+      // Caixas ativas (à espera / catálogo / preços): o conjunto de ids pode ter
+      // centenas de entradas e um único .in("id", …) estoura o URL. Lê-se em
+      // blocos de 100 com os mesmos filtros, junta-se, ordena-se como a lista
+      // normal (created_at desc, id desc) e mostra-se tudo de uma vez.
+      if (onlyIds) {
+        const ID_CHUNK = 100;
+        const parts: string[][] = [];
+        for (let i = 0; i < onlyIds.length; i += ID_CHUNK) parts.push(onlyIds.slice(i, i + ID_CHUNK));
+        const results = await Promise.all(
+          parts.map((part) => {
+            let q = supabase
+              .from("suppliers")
+              .select("*, anew_organizations:suppliers_organization_id_fkey(id, name)")
+              .in("id", part);
+            if (companyFilter && companyFilter !== "all") {
+              q = q.eq("organization_id", companyFilter);
+            } else if (userType !== "system_admin" && activeCompany?.id) {
+              q = q.eq("organization_id", activeCompany.id);
+            }
+            q = showDeleted ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
+            if (statusFilter !== "all") q = q.eq("is_active", statusFilter === "active");
+            if (search) q = q.or(searchOr);
+            return q;
+          }),
+        );
+        const byId = new Map<string, Supplier>();
+        for (const r of results) {
+          if (r.error) throw r.error;
+          for (const s of (r.data as Supplier[]) ?? []) byId.set(s.id, s);
+        }
+        const all = [...byId.values()].sort((a, b) => {
+          const ca = a.created_at ?? "";
+          const cb = b.created_at ?? "";
+          if (ca !== cb) return ca < cb ? 1 : -1;
+          return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+        });
+        setSuppliers(all);
+        setTotalCount(all.length);
+        setHasMore(false);
+        return;
+      }
+
       // Build count query
       let countQuery = supabase
         .from("suppliers")
@@ -204,9 +340,9 @@ const Suppliers = () => {
         countQuery = countQuery.eq("is_active", statusFilter === "active");
       }
 
-      // Apply search filter
-      if (searchQuery) {
-        countQuery = countQuery.or(`name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,contact_person.ilike.%${searchQuery}%`);
+      // Apply search filter (nome, código, NIF, cidade, contacto, email)
+      if (search) {
+        countQuery = countQuery.or(searchOr);
       }
 
       const { count } = await countQuery;
@@ -239,9 +375,9 @@ const Suppliers = () => {
         dataQuery = dataQuery.eq("is_active", statusFilter === "active");
       }
 
-      // Apply search filter
-      if (searchQuery) {
-        dataQuery = dataQuery.or(`name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,contact_person.ilike.%${searchQuery}%`);
+      // Apply search filter (nome, código, NIF, cidade, contacto, email)
+      if (search) {
+        dataQuery = dataQuery.or(searchOr);
       }
 
       const { data, error } = await dataQuery;
@@ -274,7 +410,7 @@ const Suppliers = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [companyFilter, statusFilter, searchQuery, showDeleted, userType, t, toast]);
+  }, [companyFilter, statusFilter, searchQuery, showDeleted, restrictKey, userType, t, toast]);
 
   // Debounce search
   useEffect(() => {
@@ -287,7 +423,7 @@ const Suppliers = () => {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, statusFilter, companyFilter, showDeleted]);
+  }, [searchQuery, statusFilter, companyFilter, showDeleted, restrictKey]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -395,12 +531,6 @@ const Suppliers = () => {
     // handleEdit/toast: lidos no momento do link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkSupplierId, deepLinkTab, deepLinkPrices, deepLinkStamp, permissionsLoading, setSearchParams]);
-
-  const handleDeleteClick = (supplier: Supplier, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSupplierToDelete(supplier);
-    setDeleteDialogOpen(true);
-  };
 
   const handleDelete = async () => {
     if (!supplierToDelete) return;
@@ -870,9 +1000,88 @@ const Suppliers = () => {
     setSearchQuery("");
     setStatusFilter("all");
     setCompanyFilter("all");
+    setAwaitingOnly(false);
+    setCatalogOnly(false);
+    setPricesOnly(false);
+    dropUrlFilter();
   };
 
-  const hasActiveFilters = searchQuery || statusFilter !== "all" || (companyFilter && companyFilter !== "all");
+  const hasActiveFilters =
+    searchQuery || statusFilter !== "all" || (companyFilter && companyFilter !== "all") || awaitingOnly || catalogOnly || pricesOnly;
+
+  // Estatísticas das linhas carregadas (só as da organização das estatísticas).
+  const rowStatsQuery = useSupplierRowStats(
+    statsOrgId,
+    suppliers.filter((s) => s.organization_id === statsOrgId).map((s) => s.id),
+  );
+  const rowStats = rowStatsQuery.data ?? null;
+  const canEditSupplier = hasPermission("suppliers.edit");
+
+  /** Abre a ficha pelo mesmo caminho do link do sino (?open=&tab=&prices=). */
+  const openSupplierVia = (supplierId: string, extra: { tab?: "portal"; prices?: "pending" } = {}) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("open", supplierId);
+      if (extra.tab) next.set("tab", extra.tab);
+      else next.delete("tab");
+      if (extra.prices) next.set("prices", extra.prices);
+      else next.delete("prices");
+      next.set("_t", String(Date.now()));
+      return next;
+    }, { replace: true });
+  };
+
+  const rowMenu = (supplier: Supplier): RowActionEntry[] => [
+    { label: "Abrir ficha", icon: Eye, onSelect: () => void handleEdit(supplier), permission: "suppliers.edit" },
+    {
+      label: "Ver encomendas",
+      icon: ShoppingCart,
+      onSelect: () => navigate(purchaseOrdersLink({ supplier: supplier.id })),
+      permission: "purchase_orders.view",
+    },
+    {
+      label: "Portal do fornecedor",
+      icon: Users,
+      onSelect: () => openSupplierVia(supplier.id, { tab: "portal" }),
+      permission: "suppliers.edit",
+    },
+    {
+      label: "Catálogo",
+      icon: Truck,
+      onSelect: () => {
+        setCatalogSupplier(supplier);
+        setCatalogDialogOpen(true);
+      },
+      permission: "suppliers.edit",
+    },
+    {
+      label: t("suppliers.actions.slaReport"),
+      icon: BarChart3,
+      onSelect: () => {
+        setSlaReportSupplier(supplier);
+        setSlaReportDialogOpen(true);
+      },
+      permission: ["suppliers.view", "suppliers.view_sla_report"],
+      requireAllPermissions: true,
+    },
+    {
+      label: t("suppliers.form.website"),
+      icon: Globe,
+      onSelect: () => window.open(supplier.website ?? "", "_blank"),
+      hidden: !supplier.website,
+    },
+    "separator",
+    {
+      label: t("common.delete"),
+      icon: Trash2,
+      destructive: true,
+      onSelect: () => {
+        setSupplierToDelete(supplier);
+        setDeleteDialogOpen(true);
+      },
+      permission: "suppliers.delete",
+    },
+  ];
 
   if (companyLoading) {
     return (
@@ -908,150 +1117,228 @@ const Suppliers = () => {
     );
   }
 
+  const awaitingList = !showDeleted ? orgStats?.awaiting ?? [] : [];
+  const priceGateReason = "Sem permissão: requer suppliers.view_pricing ou products.view_cost. Peça acesso a um administrador.";
+
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-3xl font-bold">{t("suppliers.title")}</h1>
-              <p className="text-muted-foreground">{t("suppliers.description")}</p>
-            </div>
-            <PageFAQSheet pageKey="operations.suppliers" />
-          </div>
-          <div className="flex gap-2">
-            <PermissionGate permission="suppliers.export">
-              <Button variant="outline" onClick={handleExport} className="gap-2">
-                <Download className="h-4 w-4" />
-                {t("suppliers.actions.export")}
-              </Button>
-            </PermissionGate>
-            <PermissionGate permission="suppliers.import">
-              <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="gap-2">
-                    <Upload className="h-4 w-4" />
-                    {t("suppliers.actions.import")}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{t("suppliers.import.title")}</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {t("suppliers.import.description")}
-                    </p>
-                    <Input
-                      type="file"
-                      accept=".csv"
-                      onChange={handleImport}
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </PermissionGate>
-            <PermissionGate permission="suppliers.create">
-              <Button
-                onClick={() => {
-                  setEditingId(null);
-                  resetForm();
-                  setOpen(true);
-                }}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                {t("suppliers.newSupplier")}
-              </Button>
-            </PermissionGate>
-          </div>
-        </div>
-
-        {/* Filters Card */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="space-y-4">
-              <div className="flex flex-col md:flex-row gap-4 flex-wrap">
-                {/* Search Input */}
-                <div className="flex-1 relative min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                  <Input
-                    placeholder={t('suppliers.searchPlaceholder')}
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-
-                {/* Status Filter */}
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full md:w-[150px]">
-                    <Filter className="h-4 w-4 mr-2" />
-                    <SelectValue placeholder={t('common.status')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t('suppliers.allStatus')}</SelectItem>
-                    <SelectItem value="active">{t('suppliers.status.active')}</SelectItem>
-                    <SelectItem value="inactive">{t('suppliers.status.inactive')}</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Organization Filter */}
-                <Select
-                  value={companyFilter || "all"}
-                  onValueChange={(value) => {
-                    setCompanyFilter(value);
-                  }}
-                >
-                  <SelectTrigger className="w-full md:w-[180px]">
-                    <Building2 className="w-4 h-4 mr-2" />
-                    <SelectValue placeholder={t('common.company')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t('suppliers.allCompanies')}</SelectItem>
-                    {filterOrganizations.map((org) => (
-                      <SelectItem key={org.id} value={org.id}>
-                        {org.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {/* Deleted toggle */}
-                <Button
-                  variant={showDeleted ? "default" : "outline"}
-                  onClick={() => {
-                    setSelectedIds(new Set());
-                    setShowDeleted((prev) => !prev);
-                  }}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  {showDeleted ? (t('suppliers.hideDeleted') || 'Ocultar eliminados') : (t('suppliers.showDeleted') || 'Ver eliminados')}
+      <div className="space-y-4">
+        <InventoryPageHeader
+          area="purchases"
+          title={PAGE_TITLE}
+          description={PAGE_DESCRIPTION}
+          actions={
+            <>
+              <PageFAQSheet pageKey="operations.suppliers" />
+              <PermissionGate permission="suppliers.export">
+                <Button variant="outline" onClick={handleExport} className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Exportar
                 </Button>
+              </PermissionGate>
+              <PermissionGate permission="suppliers.import">
+                <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="gap-2">
+                      <Upload className="h-4 w-4" />
+                      Importar
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>{t("suppliers.import.title")}</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <p className="text-sm text-muted-foreground">
+                        {t("suppliers.import.description")}
+                      </p>
+                      <Input
+                        type="file"
+                        accept=".csv"
+                        onChange={handleImport}
+                      />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </PermissionGate>
+              <PermissionGate permission="suppliers.create">
+                <Button
+                  onClick={() => {
+                    setEditingId(null);
+                    resetForm();
+                    setOpen(true);
+                  }}
+                  className="gap-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  Novo fornecedor
+                </Button>
+              </PermissionGate>
+            </>
+          }
+        />
 
-                {/* Clear Filters */}
-                {hasActiveFilters && (
-                  <Button variant="outline" onClick={clearFilters}>
-                    <X className="w-4 h-4 mr-2" />
-                    {t('common.clearFilters')}
-                  </Button>
-                )}
-              </div>
-
-              {/* Results count */}
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>
-                  {t('suppliers.showingCount').replace("{current}", String(suppliers.length)).replace("{total}", String(totalCount))}
+        {/* Aviso: convidados que ainda não preencheram a ficha no portal */}
+        {awaitingList.length > 0 && (
+          <div
+            role="status"
+            className="flex items-start gap-2.5 rounded-lg border border-info/30 bg-info/10 px-3.5 py-3 text-sm text-sky-900 dark:text-info"
+          >
+            <Clock className="mt-0.5 h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+            <div>
+              <b>{awaitingList.length} fornecedor(es) à espera de preencher a ficha no portal:</b>{" "}
+              {awaitingList.map((s, i) => (
+                <span key={s.id}>
+                  {i ? ", " : ""}
+                  {canEditSupplier ? (
+                    <button
+                      type="button"
+                      className="rounded-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => openSupplierVia(s.id, { tab: "portal" })}
+                    >
+                      {s.name}
+                    </button>
+                  ) : (
+                    s.name
+                  )}
                 </span>
+              ))}
+              .{" "}
+              <button
+                type="button"
+                className="rounded-sm font-semibold underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => {
+                  dropUrlFilter();
+                  setSelectedIds(new Set());
+                  setAwaitingOnly(true);
+                }}
+              >
+                Filtrar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Filtros */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+              <div className="relative min-w-[220px] flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <Input
+                  aria-label="Pesquisar fornecedores"
+                  title="Nome, código, NIF, cidade, contacto"
+                  placeholder="Nome, código, NIF, cidade, contacto"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    dropUrlFilter();
+                    setSearchQuery(e.target.value);
+                  }}
+                  className="pl-10"
+                />
               </div>
+
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => {
+                  dropUrlFilter();
+                  setStatusFilter(v);
+                }}
+              >
+                <SelectTrigger className="w-full md:w-[170px]" aria-label="Estado">
+                  <SelectValue placeholder="Todos os estados" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os estados</SelectItem>
+                  <SelectItem value="active">Ativos</SelectItem>
+                  <SelectItem value="inactive">Inativos</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={companyFilter || "all"}
+                onValueChange={(value) => {
+                  dropUrlFilter();
+                  setSelectedIds(new Set());
+                  setCompanyFilter(value);
+                }}
+              >
+                <SelectTrigger className="w-full md:w-[200px]" aria-label="Empresa">
+                  <SelectValue placeholder="Todas as empresas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as empresas</SelectItem>
+                  {filterOrganizations.map((org) => (
+                    <SelectItem key={org.id} value={org.id}>
+                      {org.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <label className="inline-flex min-h-6 cursor-pointer items-center gap-2 text-sm">
+                <Checkbox
+                  checked={awaitingOnly}
+                  onCheckedChange={(v) => {
+                    dropUrlFilter();
+                    setSelectedIds(new Set());
+                    setAwaitingOnly(v === true);
+                  }}
+                />
+                À espera do fornecedor
+                <span className="rounded-md bg-accent/10 px-1.5 text-[10.5px] font-bold text-accent">Novo</span>
+              </label>
+              <label className="inline-flex min-h-6 cursor-pointer items-center gap-2 text-sm">
+                <Checkbox
+                  checked={catalogOnly}
+                  onCheckedChange={(v) => {
+                    dropUrlFilter();
+                    setSelectedIds(new Set());
+                    setCatalogOnly(v === true);
+                  }}
+                />
+                Com catálogo por ligar
+              </label>
+              <label
+                className={`inline-flex min-h-6 items-center gap-2 text-sm ${canPricing ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}
+                title={canPricing ? undefined : priceGateReason}
+              >
+                <Checkbox
+                  checked={pricesOnly}
+                  disabled={!canPricing}
+                  onCheckedChange={(v) => {
+                    dropUrlFilter();
+                    setSelectedIds(new Set());
+                    setPricesOnly(v === true);
+                  }}
+                />
+                Com preços por aprovar
+              </label>
+              <label className="inline-flex min-h-6 cursor-pointer items-center gap-2 text-sm">
+                <Checkbox
+                  checked={showDeleted}
+                  onCheckedChange={(v) => {
+                    setSelectedIds(new Set());
+                    setShowDeleted(v === true);
+                  }}
+                />
+                Ver eliminados
+              </label>
+
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1.5">
+                  <X className="h-4 w-4" />
+                  {t("common.clearFilters")}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Table Card */}
+        {/* Tabela */}
         <Card>
-          <CardContent className="p-6">
-            {/* Bulk Actions Bar — not shown while viewing the deleted list */}
+          <CardContent className="p-4">
+            {/* Ações em massa — não aparecem na lista de eliminados */}
             {!showDeleted && (
               <BulkActionsBar
                 selectedCount={selectedIds.size}
@@ -1066,152 +1353,147 @@ const Suppliers = () => {
             )}
 
             {loading ? (
-              <div className="text-center py-8">{t('common.loading')}</div>
-            ) : suppliers.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                {t('suppliers.noSuppliers')}
+              <div className="flex justify-center py-8">
+                <OlyviaLoader size={32} />
               </div>
+            ) : suppliers.length === 0 ? (
+              <InventoryEmptyState title="Sem fornecedores" description="Ajuste os filtros.">
+                {hasActiveFilters ? (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    Limpar filtros
+                  </Button>
+                ) : null}
+              </InventoryEmptyState>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <Checkbox
-                        checked={selectedIds.size === suppliers.length && suppliers.length > 0}
-                        onCheckedChange={toggleSelectAll}
-                      />
-                    </TableHead>
-                    <TableHead>{t('suppliers.form.name')}</TableHead>
-                    <TableHead>{t('common.company')}</TableHead>
-                    <TableHead>{t('suppliers.form.contactPerson')}</TableHead>
-                    <TableHead>{t('suppliers.form.email')}</TableHead>
-                    <TableHead>{t('suppliers.form.phone')}</TableHead>
-                    <TableHead>{t('suppliers.form.city')}</TableHead>
-                    <TableHead>{t('common.status')}</TableHead>
-                    <TableHead className="text-right">{t('common.actions')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {suppliers.map((supplier) => (
-                    <TableRow key={supplier.id} className={selectedIds.has(supplier.id) ? "bg-muted/50" : ""}>
-                      <TableCell>
+              <div className="overflow-x-auto">
+                <Table className="min-w-[1000px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">
                         <Checkbox
-                          checked={selectedIds.has(supplier.id)}
-                          onCheckedChange={() => toggleSelectOne(supplier.id)}
+                          aria-label="Selecionar todos"
+                          checked={selectedIds.size === suppliers.length && suppliers.length > 0}
+                          onCheckedChange={toggleSelectAll}
                         />
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-2">
-                          <Building className="h-4 w-4 text-primary" />
-                          {supplier.name}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {(supplier as any).anew_organizations?.name || "-"}
-                      </TableCell>
-                      <TableCell>{(supplier as any).contact_person || "-"}</TableCell>
-                      <TableCell>
-                        {supplier.email ? (
-                          <div className="flex items-center gap-2">
-                            <Mail className="h-4 w-4 text-muted-foreground" />
-                            {supplier.email}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {supplier.phone ? (
-                          <div className="flex items-center gap-2">
-                            <Phone className="h-4 w-4 text-muted-foreground" />
-                            {supplier.phone}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{supplier.city || "-"}</TableCell>
-                      <TableCell>
-                        <Badge variant={supplier.is_active ? "default" : "secondary"}>
-                          {supplier.is_active ? t('suppliers.status.active') : t('suppliers.status.inactive')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          {showDeleted ? (
-                            <PermissionGate permission="suppliers.delete">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleRestore(supplier)}
-                              >
-                                {t('suppliers.restore') || 'Restaurar'}
-                              </Button>
-                            </PermissionGate>
-                          ) : (
-                            <>
-                              {supplier.website && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => window.open(supplier.website!, '_blank')}
-                                  title={t('suppliers.form.website')}
-                                >
-                                  <Globe className="h-4 w-4" />
-                                </Button>
-                              )}
-                              <PermissionGate permission="suppliers.edit">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setCatalogSupplier(supplier);
-                                    setCatalogDialogOpen(true);
-                                  }}
-                                  title="Catálogo"
-                                >
-                                  <Truck className="h-4 w-4" />
-                                </Button>
-                              </PermissionGate>
-                              <PermissionGate permissions={["suppliers.view", "suppliers.view_sla_report"]} requireAll>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    setSlaReportSupplier(supplier);
-                                    setSlaReportDialogOpen(true);
-                                  }}
-                                  title={t("suppliers.actions.slaReport")}
-                                >
-                                  <BarChart3 className="h-4 w-4" />
-                                </Button>
-                              </PermissionGate>
-                              <PermissionGate permission="suppliers.edit">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleEdit(supplier)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              </PermissionGate>
-                              <PermissionGate permission="suppliers.delete">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => handleDeleteClick(supplier, e)}
-                                >
-                                  <Trash2 className="h-4 w-4 text-destructive" />
-                                </Button>
-                              </PermissionGate>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
+                      </TableHead>
+                      <TableHead>Nome</TableHead>
+                      <TableHead>Código</TableHead>
+                      <TableHead>Contacto</TableHead>
+                      <TableHead>Cidade</TableHead>
+                      <TableHead className="text-right">POs abertas</TableHead>
+                      <TableHead className="text-right">SLA %</TableHead>
+                      <TableHead>Portal</TableHead>
+                      <TableHead>Preços por aprovar</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">
+                        <span className="sr-only">Ações</span>
+                      </TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {suppliers.map((supplier) => {
+                      const inStatsOrg = supplier.organization_id === statsOrgId;
+                      const portalState = inStatsOrg && orgStats ? orgStats.portal.get(supplier.id) ?? "none" : null;
+                      const openPos = inStatsOrg && rowStats?.openPos ? rowStats.openPos.get(supplier.id) ?? 0 : null;
+                      const slaPct = inStatsOrg && rowStats?.slaPct ? rowStats.slaPct.get(supplier.id) : null;
+                      const prices = inStatsOrg && orgStats?.pricesPending ? orgStats.pricesPending.get(supplier.id) ?? 0 : null;
+                      const isDeleted = !!supplier.deleted_at;
+                      const rowOpens = !isDeleted && canEditSupplier;
+                      const hasContact = !!(supplier.contact_person || supplier.email || supplier.phone);
+                      const companyName = (supplier as Supplier & { anew_organizations?: { name?: string } | null }).anew_organizations?.name;
+                      return (
+                        <TableRow
+                          key={supplier.id}
+                          className={`${selectedIds.has(supplier.id) ? "bg-muted/50" : ""} ${rowOpens ? "cursor-pointer" : ""} ${isDeleted ? "opacity-70" : ""}`}
+                          onClick={rowOpens ? () => void handleEdit(supplier) : undefined}
+                        >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              aria-label={`Selecionar ${supplier.name}`}
+                              checked={selectedIds.has(supplier.id)}
+                              onCheckedChange={() => toggleSelectOne(supplier.id)}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <b className="font-semibold">{supplier.name}</b>
+                            {isDeleted ? (
+                              <>
+                                {" "}
+                                <InventoryStatusBadge>Eliminado</InventoryStatusBadge>
+                              </>
+                            ) : null}
+                            <br />
+                            <small className="text-xs text-muted-foreground">{companyName || "—"}</small>
+                          </TableCell>
+                          <TableCell className="font-mono text-[13px]">
+                            {supplier.code || <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell>
+                            {hasContact ? (
+                              <div className="flex flex-col leading-tight">
+                                <span>{supplier.contact_person || "—"}</span>
+                                {supplier.email ? <small className="text-xs text-muted-foreground">{supplier.email}</small> : null}
+                                {supplier.phone ? <small className="text-xs text-muted-foreground">{supplier.phone}</small> : null}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>{supplier.city || <span className="text-muted-foreground">—</span>}</TableCell>
+                          <TableCell className="text-right">
+                            <SupplierOpenPos supplierId={supplier.id} count={openPos} />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <SupplierSla pct={slaPct} slaDays={supplier.delivery_sla_days} />
+                          </TableCell>
+                          <TableCell>
+                            <SupplierPortalBadge state={portalState} />
+                          </TableCell>
+                          <TableCell>
+                            {canEditSupplier ? (
+                              <SupplierPricesPending
+                                count={prices}
+                                onOpen={() => openSupplierVia(supplier.id, { tab: "portal", prices: "pending" })}
+                              />
+                            ) : prices ? (
+                              <InventoryStatusBadge tone="warn">{prices} por aprovar</InventoryStatusBadge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <InventoryStatusBadge tone={supplier.is_active ? "ok" : "neutral"}>
+                              {supplier.is_active ? "Ativo" : "Inativo"}
+                            </InventoryStatusBadge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {isDeleted ? (
+                              <RowActions
+                                primary={{
+                                  label: t("suppliers.restore") || "Restaurar",
+                                  icon: Undo2,
+                                  onClick: () => void handleRestore(supplier),
+                                  permission: "suppliers.delete",
+                                }}
+                              />
+                            ) : (
+                              <RowActions
+                                primary={{
+                                  label: "Abrir",
+                                  onClick: () => void handleEdit(supplier),
+                                  permission: "suppliers.edit",
+                                }}
+                                items={rowMenu(supplier)}
+                                menuLabel={`Mais ações para ${supplier.name}`}
+                              />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
 
             {/* Infinite Scroll Sentinel */}
@@ -1223,11 +1505,13 @@ const Suppliers = () => {
                     <span className="text-sm">{t('common.loadingMore')}</span>
                   </div>
                 )}
-                {!hasMore && !loading && (
-                  <span className="text-sm text-muted-foreground">
-                    {t('suppliers.showingCount').replace("{current}", String(suppliers.length)).replace("{total}", String(totalCount))}
-                  </span>
-                )}
+              </div>
+            )}
+            {!loading && (
+              <div className="flex items-center justify-between border-t pt-3 text-sm text-muted-foreground">
+                <span>
+                  {t('suppliers.showingCount').replace("{current}", String(suppliers.length)).replace("{total}", String(totalCount))}
+                </span>
               </div>
             )}
           </CardContent>

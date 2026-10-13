@@ -39,7 +39,17 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  InventoryPageHeader,
+  parseReceivingParams,
+  purchaseOrdersLink,
+  usePermissionGate,
+  type ReceivingNotesFilter,
+} from "@/components/inventory/ui";
+import { DeliveryNotesPanel, deliveryNotesPanelQueryKey } from "@/components/receiving/DeliveryNotesPanel";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useToast } from "@/hooks/use-toast";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -83,6 +93,7 @@ import {
   RotateCcw,
   ScanBarcode,
   Search,
+  ShoppingCart,
   Tag,
   Trash2,
 } from "lucide-react";
@@ -1386,6 +1397,72 @@ export default function Receiving() {
   const [detailNoteId, setDetailNoteId] = useState<string | null>(null);
   /** "Voltar ao cesto" que mudaria a guia do ecrã: pede confirmação (dn = guia com que entraria). */
   const [unsentConfirm, setUnsentConfirm] = useState<{ id: string; dn: string; message: string } | null>(null);
+
+  // ── Moldura do Inventário: painel "Guias" e URL (?guia=&notes=) ──
+  // Só apresentação: abrir a ficha passa pelo mesmo detailNoteId; nada muda no leitor.
+  const permissionGate = usePermissionGate();
+  // Mesma regra da RLS de supplier_delivery_notes.
+  const canSeeNotesPanel = permissionGate(["purchase_orders.view", "purchase_orders.receive"]).allowed;
+  const newNoteGate = permissionGate("receiving.manage_delivery_notes");
+  const poListGate = permissionGate("purchase_orders.view");
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { guia: guiaParam, notes: notesFilter } = parseReceivingParams(searchParams);
+  const setUrlParam = useCallback(
+    (key: "guia" | "notes", value: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value) next.set(key, value);
+          else next.delete(key);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const orgRefForPanel = useRef(orgId);
+  orgRefForPanel.current = orgId;
+  const refreshNotesPanel = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: deliveryNotesPanelQueryKey(orgRefForPanel.current) });
+  }, [queryClient]);
+  // ?guia=<id> abre a ficha; ao trocar de empresa o parâmetro sai (a guia é da anterior).
+  const prevOrgForUrlRef = useRef(orgId);
+  useEffect(() => {
+    const prev = prevOrgForUrlRef.current;
+    prevOrgForUrlRef.current = orgId;
+    if (prev && orgId !== prev) {
+      if (guiaParam) setUrlParam("guia", null);
+      return;
+    }
+    if (!orgId || !guiaParam) return;
+    // Só abre depois de confirmar que a guia é da organização ativa.
+    let cancelled = false;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("supplier_delivery_notes")
+        .select("id, organization_id")
+        .eq("id", guiaParam)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !data || data.organization_id !== orgId) {
+        setUrlParam("guia", null);
+        toast({
+          title: "Guia não disponível",
+          description: "Esta guia não pertence à organização ativa.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setDetailNoteId(guiaParam);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Só reage ao parâmetro e à empresa (setUrlParam muda de identidade com o URL).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guiaParam, orgId]);
 
   const [code, setCode] = useState("");
   const [queueSize, setQueueSize] = useState(0);
@@ -3597,6 +3674,66 @@ export default function Receiving() {
   /** Leituras à espera da verificação de separador / reposição do cesto. */
   const lookupWaiting = lookupBusy && !scanReady;
 
+  // Receções novas mudam o "Recebido" das guias: atualiza o painel.
+  const receivedCount = received.length;
+  useEffect(() => {
+    if (receivedCount > 0) refreshNotesPanel();
+  }, [receivedCount, refreshNotesPanel]);
+
+  /** "Nova guia" do cabeçalho: mesma regra do "Criar guia" da lista de guias (só com o cesto vazio). */
+  const openNewNote = () => {
+    if (basketRef.current.length > 0 || submittingRef.current) {
+      toast({
+        title: "Cesto por confirmar",
+        description: "Confirma ou esvazia o cesto antes de criar uma guia nova — com leituras no cesto a guia não muda.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setCreateNoteOpen(true);
+  };
+
+  const pageActions = (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        aria-disabled={!newNoteGate.allowed}
+        title={newNoteGate.allowed ? undefined : newNoteGate.reason}
+        className={cn(!newNoteGate.allowed && "cursor-not-allowed opacity-50")}
+        onClick={() => {
+          if (newNoteGate.allowed) openNewNote();
+        }}
+      >
+        <Plus className="mr-2 h-4 w-4" aria-hidden />
+        Nova guia
+      </Button>
+      {poListGate.allowed ? (
+        <Button asChild variant="outline">
+          <Link to={purchaseOrdersLink({ status: "ordered" })}>
+            <ShoppingCart className="mr-2 h-4 w-4" aria-hidden />
+            Receber numa encomenda
+          </Link>
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" aria-disabled title={poListGate.reason} className="cursor-not-allowed opacity-50">
+          <ShoppingCart className="mr-2 h-4 w-4" aria-hidden />
+          Receber numa encomenda
+        </Button>
+      )}
+    </>
+  );
+  const pageHeader = (
+    <InventoryPageHeader
+      area="warehouse"
+      title="Receção"
+      description="Receber mercadoria por código no telemóvel ou manualmente na encomenda. A receção fecha o fluxo: a parte para EC serve a encomenda de cliente; a parte para stock entra livre e atualiza o custo médio."
+      actions={pageActions}
+    />
+  );
+  /** Ecrã largo com o painel das guias: o leitor fica na moldura de telemóvel à esquerda. */
+  const framed = canSeeNotesPanel;
+
   // ── Render ──
   if (companyLoading) {
     return (
@@ -3609,7 +3746,7 @@ export default function Receiving() {
   if (!activeCompany) {
     return (
       <div className="space-y-6">
-        <PageTitle />
+        <InventoryPageHeader area="warehouse" title="Receção" />
         <NoOrganizationState inline />
       </div>
     );
@@ -3619,8 +3756,28 @@ export default function Receiving() {
   const scanDisabled = optionsLoading || !warehouseId;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4">
-      <PageTitle />
+    <div className={cn("mx-auto w-full space-y-4", framed ? "max-w-[1400px]" : "max-w-6xl")}>
+      {pageHeader}
+
+      <div
+        className={cn(
+          "grid grid-cols-1 items-start gap-5",
+          framed && "xl:grid-cols-[400px_minmax(0,1fr)]",
+        )}
+      >
+      {/*
+        Leitor (o que o ecrã sempre mostrou). Em ecrã largo, com o painel das
+        guias ao lado, fica numa moldura de telemóvel (.phone do protótipo) com
+        scroll próprio: o campo de leitura e a barra de confirmar continuam
+        fixos (sticky) dentro da moldura.
+      */}
+      <div
+        className={cn(
+          "min-w-0 space-y-4",
+          framed &&
+            "xl:mx-auto xl:h-[780px] xl:w-full xl:max-w-[400px] xl:overflow-y-auto xl:overflow-x-hidden xl:rounded-[34px] xl:border-[10px] xl:border-[#1d1534] xl:bg-background xl:px-3 xl:pt-3 xl:shadow-lg",
+        )}
+      >
 
       {/* Receções sem resposta do servidor (visita anterior, outra empresa, F5) */}
       {recoveryItems.length > 0 && (
@@ -3693,7 +3850,7 @@ export default function Receiving() {
 
       {/* Armazém, guia do fornecedor e fornecedor */}
       <Card>
-        <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+        <CardContent className={cn("grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3", framed && "xl:grid-cols-1")}>
           <div className="min-w-0 space-y-1.5">
             <Label htmlFor="receiving-warehouse">Armazém *</Label>
             <NativeSelect
@@ -3727,7 +3884,7 @@ export default function Receiving() {
               </span>
             </Button>
           </div>
-          <div className="min-w-0 space-y-1.5 sm:col-span-2 lg:col-span-1">
+          <div className={cn("min-w-0 space-y-1.5 sm:col-span-2 lg:col-span-1", framed && "xl:col-span-1")}>
             <Label htmlFor="receiving-supplier">{deliveryNoteId ? "Fornecedor (da guia)" : "Fornecedor (opcional)"}</Label>
             <NativeSelect
               id="receiving-supplier"
@@ -3739,7 +3896,7 @@ export default function Receiving() {
             />
           </div>
           {selectorsLocked && (
-            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">
+            <p className={cn("text-sm text-muted-foreground sm:col-span-2 lg:col-span-3", framed && "xl:col-span-1")}>
               Confirma ou esvazia o cesto para mudar de armazém, guia ou fornecedor.
             </p>
           )}
@@ -4106,7 +4263,7 @@ export default function Receiving() {
         }}
       />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+      <div className={cn("grid grid-cols-1 gap-4", !framed && "xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]")}>
         {/* Cesto */}
         <section aria-labelledby="receiving-basket-title" className="min-w-0 space-y-3">
           <h2 id="receiving-basket-title" className="text-lg font-semibold">
@@ -4236,7 +4393,13 @@ export default function Receiving() {
         do menu (fixed bottom-4 left-4); pr-20 em todos os tamanhos deixa livre o
         botão do chat interno (fixed bottom-6 right-6, 56 px).
       */}
-      <div className="sticky bottom-0 z-20 -mx-2 border-t bg-background/95 py-3 pl-12 pr-20 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:pl-2">
+      <div
+        className={cn(
+          "sticky bottom-0 z-20 -mx-2 border-t bg-background/95 py-3 pl-12 pr-20 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:pl-2",
+          // Na moldura o botão do chat (canto inferior direito do ecrã) não fica por cima.
+          framed && "xl:pr-2",
+        )}
+      >
         <div className="flex items-center gap-3">
           <p className="hidden min-w-0 flex-1 text-sm text-muted-foreground sm:block">
             {basket.length === 0
@@ -4256,6 +4419,22 @@ export default function Receiving() {
             {confirmLabel}
           </Button>
         </div>
+      </div>
+      </div>
+
+      {/* Painel das guias (à direita em ecrã largo, por baixo do leitor nos outros) */}
+      {canSeeNotesPanel && (
+        <DeliveryNotesPanel
+          orgId={orgId}
+          filter={notesFilter}
+          onFilterChange={(f: ReceivingNotesFilter) => setUrlParam("notes", f === "all" ? null : f)}
+          onOpen={(id) => {
+            setUrlParam("guia", id);
+            setDetailNoteId(id);
+          }}
+          currentNoteId={deliveryNoteId || null}
+        />
+      )}
       </div>
 
       {/* Guia do fornecedor: escolher, criar, ver (componentes em src/components/receiving) */}
@@ -4359,6 +4538,7 @@ export default function Receiving() {
           suppliers={suppliers}
           defaultSupplierId={supplierId || undefined}
           onSaved={(n) => {
+            refreshNotesPanel();
             if (n.status !== "open") {
               toast({
                 title: `Guia ${noteLabel(n.note_number)} gravada mas NÃO escolhida`,
@@ -4390,6 +4570,7 @@ export default function Receiving() {
         onOpenChange={(o) => {
           if (!o) {
             setDetailNoteId(null);
+            if (guiaParam) setUrlParam("guia", null);
             focusScan();
           }
         }}
@@ -4398,7 +4579,10 @@ export default function Receiving() {
         canEdit={canEditNotes}
         canDownloadProof={canDownloadProof}
         localWork={localWorkFor}
-        onChanged={handleNoteChanged}
+        onChanged={(n) => {
+          handleNoteChanged(n);
+          refreshNotesPanel();
+        }}
         onOpenOther={(id) => setDetailNoteId(id)}
         onUse={
           detailNoteId && detailNoteId !== deliveryNoteId && basket.length === 0 && !confirming
@@ -4406,21 +4590,11 @@ export default function Receiving() {
                 selectNote(n);
                 setNoteInfo(n);
                 setDetailNoteId(null);
+                if (guiaParam) setUrlParam("guia", null);
               }
             : undefined
         }
       />
-    </div>
-  );
-}
-
-function PageTitle() {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold sm:text-3xl">Receção no armazém</h1>
-      <p className="text-muted-foreground">
-        Lê o código do artigo; o sistema escolhe as encomendas a fornecedor em aberto e reparte entre Encomenda Cliente e stock.
-      </p>
     </div>
   );
 }

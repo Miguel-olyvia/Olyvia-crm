@@ -28,8 +28,21 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { Plus, Pencil, Trash2, Warehouse, MapPin, Download, Upload, Shield, ArrowLeftRight, History } from "lucide-react";
+import { Plus, Pencil, Trash2, Warehouse, Download, Upload, Shield, ArrowLeftRight, History, Undo2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { exportWarehousesToCSV, parseWarehousesCSV } from "@/utils/warehousesExportImport";
@@ -37,6 +50,19 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { warehouseSchema } from "@/lib/validations";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import {
+  InventoryPageHeader,
+  InventoryStatusBadge,
+  InventoryEmptyState,
+  RowActions,
+  usePermissionGate,
+  stocksLink,
+  stockMovementsLink,
+  toneText,
+} from "@/components/inventory/ui";
+import { InventorySettingsCard, useInventorySettings } from "@/components/inventory/InventorySettingsCard";
+import { inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
+import { cn } from "@/lib/utils";
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   entrada: "Entrada",
@@ -62,12 +88,87 @@ interface WarehouseMovementRow {
 
 type WarehouseData = Database["public"]["Tables"]["warehouses"]["Row"];
 
+interface WarehouseStats {
+  products: number;
+  value: number;
+  belowReorder: number;
+}
+
+// TITULOS.wh do protótipo (menuInv.ts), sem a frase sobre "servem clientes"/
+// reserva FIFO: warehouses não tem serves_customers na BD de produção.
+const PAGE_TITLE = "Armazéns";
+const PAGE_DESCRIPTION = "Onde está o stock.";
+
+const STATS_PAGE_SIZE = 1000;
+const EMPTY_STATS: WarehouseStats = { products: 0, value: 0, belowReorder: 0 };
+const formatEur = (value: number) =>
+  new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(value);
+
+/**
+ * Mini-KPIs por armazém, a partir de `stocks` da organização (linhas não
+ * eliminadas) num só lote paginado: produtos com quantidade > 0, valor
+ * (quantidade × custo médio — só pedido com products.view_cost) e linhas
+ * abaixo do ponto de encomenda — a MESMA regra do "Stock Baixo" das
+ * Existências (getStockStatusCode em Stocks.tsx): reorder_point > 0 e
+ * quantidade ≤ reorder_point (0 = nunca configurado, não conta).
+ */
+function useWarehouseStockStats(organizationId: string | undefined, withCost: boolean) {
+  return useQuery({
+    queryKey: ["warehouses-stock-stats", organizationId ?? null, withCost] as const,
+    enabled: !!organizationId,
+    queryFn: async (): Promise<Record<string, WarehouseStats>> => {
+      const columns = withCost
+        ? "id, warehouse_id, quantity, reorder_point, average_cost"
+        : "id, warehouse_id, quantity, reorder_point";
+      const out: Record<string, WarehouseStats> = {};
+      for (let from = 0; ; from += STATS_PAGE_SIZE) {
+        const { data, error } = await supabase
+          .from("stocks")
+          .select(columns)
+          .eq("organization_id", organizationId as string)
+          .is("deleted_at", null)
+          .order("id")
+          .range(from, from + STATS_PAGE_SIZE - 1);
+        if (error) throw error;
+        const rows = (data ?? []) as unknown as Array<{
+          warehouse_id: string;
+          quantity: number | null;
+          reorder_point: number | null;
+          average_cost?: number | null;
+        }>;
+        for (const r of rows) {
+          const s = (out[r.warehouse_id] ??= { products: 0, value: 0, belowReorder: 0 });
+          const qty = Number(r.quantity) || 0;
+          const reorder = Number(r.reorder_point) || 0;
+          if (qty > 0) s.products += 1;
+          if (withCost) s.value += qty * (Number(r.average_cost) || 0);
+          if (reorder > 0 && qty <= reorder) s.belowReorder += 1;
+        }
+        if (rows.length < STATS_PAGE_SIZE) break;
+      }
+      return out;
+    },
+  });
+}
+
 const Warehouses = () => {
   const { toast } = useToast();
-  const { loading: permissionsLoading, hasModuleAccess } = usePermissions();
+  const { loading: permissionsLoading, hasModuleAccess, hasPermission } = usePermissions();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const gate = usePermissionGate();
   const canView = hasModuleAccess("warehouses");
+  const canViewCost = hasPermission("products.view_cost");
+  const editGate = gate("warehouses.edit");
+  const movementGate = gate("inventory.edit");
+  const statsQuery = useWarehouseStockStats(activeCompany?.id, canViewCost);
+  const settingsQuery = useInventorySettings(activeCompany?.id);
+  const defaultWarehouseId = settingsQuery.data?.default_warehouse_id ?? null;
+  const [deleteTarget, setDeleteTarget] = useState<WarehouseData | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  // Desativar pede confirmação (revisão #8); ativar grava logo.
+  const [deactivateTarget, setDeactivateTarget] = useState<WarehouseData | null>(null);
   const [warehouses, setWarehouses] = useState<WarehouseData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -104,9 +205,11 @@ const Warehouses = () => {
   const loadWarehouseHistory = async (warehouseId: string) => {
     setHistoryLoading(true);
     try {
+      if (!activeCompany?.id) return;
       const { data, error } = await supabase
         .from("stock_movements")
         .select("id, movement_type, quantity, balance_after, document_number, created_at, products(name)")
+        .eq("organization_id", activeCompany.id)
         .eq("warehouse_id", warehouseId)
         .order("created_at", { ascending: false })
         .limit(30);
@@ -215,7 +318,7 @@ const Warehouses = () => {
 
       setDialogOpen(false);
       resetForm();
-      fetchWarehouses();
+      refreshAll();
     } catch (error: any) {
       toast({
         title: t("warehouses.toast.error"),
@@ -225,9 +328,45 @@ const Warehouses = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm(t("warehouses.delete.confirm"))) return;
+  // Depois de criar/editar/eliminar/restaurar/importar: a lista do cartão de
+  // definições (armazém por defeito) e os mini-KPIs também mudam.
+  const refreshAll = () => {
+    fetchWarehouses();
+    queryClient.invalidateQueries({ queryKey: ["organization-inventory-settings"] });
+    queryClient.invalidateQueries({ queryKey: ["warehouses-stock-stats"] });
+  };
 
+  // Mesma gravação que a edição pelo diálogo (warehouses.edit), só do is_active.
+  const handleToggleActive = async (warehouse: WarehouseData, next: boolean) => {
+    if (!activeCompany?.id) return;
+    setTogglingId(warehouse.id);
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("warehouses")
+          .update({ is_active: next, updated_at: new Date().toISOString() })
+          .eq("id", warehouse.id)
+          .eq("organization_id", activeCompany.id);
+        if (error) throw error;
+      });
+      setWarehouses((prev) => prev.map((w) => (w.id === warehouse.id ? { ...w, is_active: next } : w)));
+      toast({ title: t("warehouses.toast.updateSuccess") });
+      // A lista do cartão de definições (armazém por defeito) e os KPIs mudam.
+      refreshAll();
+    } catch (error: any) {
+      toast({
+        title: t("warehouses.toast.error"),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
     try {
       const { error } = await supabase.rpc("rpc_delete_warehouse", { p_id: id });
       if (error) throw error;
@@ -236,7 +375,7 @@ const Warehouses = () => {
         title: t("warehouses.toast.deleteSuccess"),
       });
 
-      fetchWarehouses();
+      refreshAll();
     } catch (error: any) {
       toast({
         title: t("warehouses.toast.error"),
@@ -253,7 +392,7 @@ const Warehouses = () => {
 
       toast({ title: t("warehouses.toast.restoreSuccess") || "Armazém restaurado" });
 
-      fetchWarehouses();
+      refreshAll();
     } catch (error: any) {
       toast({
         title: t("warehouses.toast.error"),
@@ -329,7 +468,7 @@ const Warehouses = () => {
       });
 
       setImportDialogOpen(false);
-      fetchWarehouses();
+      refreshAll();
     } catch (error: any) {
       captureFlowError(error, "record-export-import");
       toast({
@@ -374,7 +513,7 @@ const Warehouses = () => {
     return (
       <>
         <div className="space-y-6 p-6">
-          <div><h1 className="text-2xl sm:text-3xl font-bold">{t("warehouses.title")}</h1><p className="text-muted-foreground">{t("warehouses.description")}</p></div>
+          <InventoryPageHeader area="warehouse" title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
           <NoOrganizationState inline />
         </div>
       </>
@@ -385,12 +524,7 @@ const Warehouses = () => {
     return (
       <>
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold">{t("warehouses.title")}</h1>
-              <p className="text-muted-foreground">{t("warehouses.description")}</p>
-            </div>
-          </div>
+          <InventoryPageHeader area="warehouse" title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
           <div className="text-center py-8">{t("common.loading")}</div>
         </div>
       </>
@@ -422,16 +556,15 @@ const Warehouses = () => {
   return (
     <>
       <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold">{t("warehouses.title")}</h1>
-            <p className="text-muted-foreground">
-              {t("warehouses.description")}
-            </p>
-          </div>
-          <div className="flex gap-2">
+        <InventoryPageHeader
+          area="warehouse"
+          title={PAGE_TITLE}
+          description={PAGE_DESCRIPTION}
+          actions={
+          <>
             <Button
               variant={showDeleted ? "default" : "outline"}
+              aria-pressed={showDeleted}
               onClick={() => setShowDeleted((prev) => !prev)}
             >
               <Trash2 className="w-4 h-4 mr-2" />
@@ -473,14 +606,15 @@ const Warehouses = () => {
               </Dialog>
             </PermissionGate>
             <PermissionGate permission="warehouses.create">
-              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={resetForm}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    {t("warehouses.addWarehouse")}
-                  </Button>
-                </DialogTrigger>
-              </Dialog>
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setDialogOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t("warehouses.addWarehouse")}
+              </Button>
             </PermissionGate>
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -640,139 +774,227 @@ const Warehouses = () => {
               </form>
             </DialogContent>
           </Dialog>
-          </div>
-        </div>
+          </>
+          }
+        />
 
-        <div className="border rounded-lg">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("warehouses.table.name")}</TableHead>
-                <TableHead>{t("warehouses.table.code")}</TableHead>
-                <TableHead>{t("warehouses.table.location")}</TableHead>
-                <TableHead>{t("warehouses.table.manager")}</TableHead>
-                <TableHead>{t("warehouses.table.contact")}</TableHead>
-                <TableHead className="text-right">{t("warehouses.table.capacity")}</TableHead>
-                <TableHead>{t("warehouses.table.status")}</TableHead>
-                <TableHead className="text-right">{t("warehouses.table.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {warehouses.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center">
-                    {t("warehouses.noWarehouses")}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                warehouses.map((warehouse) => (
-                  <TableRow key={warehouse.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Warehouse className="w-4 h-4 text-muted-foreground" />
+        <InventorySettingsCard organizationId={activeCompany.id} />
+
+        {warehouses.length === 0 ? (
+          <InventoryEmptyState
+            icon={Warehouse}
+            title={showDeleted ? "Sem armazéns eliminados" : "Sem armazéns"}
+            description={showDeleted ? undefined : t("warehouses.noWarehouses")}
+          />
+        ) : (
+          <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+            {warehouses.map((warehouse) => {
+              const deleted = !!warehouse.deleted_at;
+              const stats = statsQuery.data?.[warehouse.id] ?? EMPTY_STATS;
+              const statsReady = statsQuery.isSuccess;
+              const switchId = `wh-active-${warehouse.id}`;
+              const fields: ReadonlyArray<readonly [string, string | null]> = [
+                ["Morada", warehouse.address],
+                ["Código postal", warehouse.postal_code],
+                ["Cidade", warehouse.city],
+                ["País", warehouse.country],
+                ["Gestor", warehouse.manager_name],
+                ["Telefone", warehouse.phone],
+                ["Email", warehouse.email],
+                ["Capacidade", warehouse.capacity ? `${warehouse.capacity} m³` : null],
+              ];
+              const movementBlockedReason = deleted
+                ? "Armazém eliminado: restaure-o no menu ⋯"
+                : movementGate.reason;
+              return (
+                <article
+                  key={warehouse.id}
+                  aria-labelledby={`wh-name-${warehouse.id}`}
+                  className={cn(
+                    "flex flex-col gap-2.5 rounded-lg border bg-card p-4 shadow-sm",
+                    deleted && "opacity-60",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 id={`wh-name-${warehouse.id}`} className="truncate text-base font-semibold">
                         {warehouse.name}
+                      </h3>
+                      <small className="font-mono text-xs text-muted-foreground">{warehouse.code}</small>
+                    </div>
+                    <RowActions
+                      menuLabel={`Mais ações para ${warehouse.name}`}
+                      items={[
+                        {
+                          label: "Editar",
+                          icon: Pencil,
+                          permission: "warehouses.edit",
+                          disabled: deleted,
+                          disabledReason: "Armazém eliminado",
+                          onSelect: () => openEditDialog(warehouse),
+                        },
+                        {
+                          label: "Movimentos recentes",
+                          icon: History,
+                          onSelect: () => {
+                            setHistoryWarehouse({ id: warehouse.id, name: warehouse.name });
+                            setHistoryDialogOpen(true);
+                            loadWarehouseHistory(warehouse.id);
+                          },
+                        },
+                        "separator",
+                        deleted
+                          ? {
+                              label: t("warehouses.restore") || "Restaurar",
+                              icon: Undo2,
+                              permission: "warehouses.delete",
+                              onSelect: () => handleRestore(warehouse.id),
+                            }
+                          : {
+                              label: "Eliminar",
+                              icon: Trash2,
+                              destructive: true,
+                              permission: "warehouses.delete",
+                              onSelect: () => setDeleteTarget(warehouse),
+                            },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {deleted ? (
+                      <InventoryStatusBadge tone="neutral">Eliminado</InventoryStatusBadge>
+                    ) : (
+                      <div className="flex items-center gap-2" title={editGate.reason}>
+                        <Switch
+                          id={switchId}
+                          checked={warehouse.is_active}
+                          disabled={!editGate.allowed || togglingId === warehouse.id}
+                          onCheckedChange={(next) =>
+                            next ? handleToggleActive(warehouse, true) : setDeactivateTarget(warehouse)
+                          }
+                        />
+                        <Label htmlFor={switchId} className="text-sm font-normal">
+                          {t("warehouses.form.active")}
+                        </Label>
                       </div>
-                    </TableCell>
-                    <TableCell>{warehouse.code}</TableCell>
-                    <TableCell>
-                      {warehouse.city && warehouse.country ? (
-                        <div className="flex items-center gap-1 text-sm">
-                          <MapPin className="w-3 h-3" />
-                          {warehouse.city}, {warehouse.country}
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell>{warehouse.manager_name || "-"}</TableCell>
-                    <TableCell>
-                      {warehouse.phone || warehouse.email ? (
-                        <div className="text-sm">
-                          {warehouse.phone && <div>{warehouse.phone}</div>}
-                          {warehouse.email && <div>{warehouse.email}</div>}
-                        </div>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {warehouse.capacity ? `${warehouse.capacity} m³` : "-"}
-                    </TableCell>
-                    <TableCell>
-                      {warehouse.is_active ? (
-                        <Badge variant="default">{t("warehouses.status.active")}</Badge>
-                      ) : (
-                        <Badge variant="outline">{t("warehouses.status.inactive")}</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {showDeleted ? (
-                          <PermissionGate permission="warehouses.delete">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRestore(warehouse.id)}
-                            >
-                              {t("warehouses.restore") || "Restaurar"}
-                            </Button>
-                          </PermissionGate>
-                        ) : (
-                          <>
-                            <PermissionGate permission="inventory.edit">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                title="Registar movimento"
-                                onClick={() => {
-                                  setMovementWarehouseId(warehouse.id);
-                                  setMovementDialogOpen(true);
-                                }}
-                              >
-                                <ArrowLeftRight className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title="Ver movimentos"
-                              onClick={() => {
-                                setHistoryWarehouse({ id: warehouse.id, name: warehouse.name });
-                                setHistoryDialogOpen(true);
-                                loadWarehouseHistory(warehouse.id);
-                              }}
-                            >
-                              <History className="w-4 h-4" />
-                            </Button>
-                            <PermissionGate permission="warehouses.edit">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditDialog(warehouse)}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                            <PermissionGate permission="warehouses.delete">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(warehouse.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                          </>
+                    )}
+                    {defaultWarehouseId === warehouse.id ? (
+                      <InventoryStatusBadge tone="info">Por defeito</InventoryStatusBadge>
+                    ) : null}
+                  </div>
+
+                  <dl className="grid gap-x-3 gap-y-1.5 text-[13px] [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
+                    {fields.map(([label, value]) => (
+                      <div key={label} className="min-w-0">
+                        <dt className="text-xs text-muted-foreground">{label}</dt>
+                        <dd className="break-words">{value || "—"}</dd>
+                      </div>
+                    ))}
+                  </dl>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-lg bg-muted p-2">
+                      <b className="block text-base tabular-nums">{statsReady ? stats.products : "…"}</b>
+                      <span className="text-[11.5px] text-muted-foreground">produtos</span>
+                    </div>
+                    <div className="rounded-lg bg-muted p-2">
+                      <b className="block text-base tabular-nums">
+                        {!canViewCost ? "—" : statsReady ? formatEur(stats.value) : "…"}
+                      </b>
+                      <span className="text-[11.5px] text-muted-foreground">valor</span>
+                    </div>
+                    <div className="rounded-lg bg-muted p-2">
+                      <b
+                        className={cn(
+                          "block text-base tabular-nums",
+                          statsReady && (stats.belowReorder ? toneText.bad : toneText.ok),
                         )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                      >
+                        {statsReady ? stats.belowReorder : "…"}
+                      </b>
+                      <span className="text-[11.5px] text-muted-foreground">abaixo do ponto de encomenda</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button asChild variant="outline" size="sm">
+                      <Link to={stocksLink({ warehouse: warehouse.id })}>Ver existências</Link>
+                    </Button>
+                    <Button asChild variant="outline" size="sm">
+                      <Link to={stockMovementsLink({ warehouse: warehouse.id })}>Movimentos</Link>
+                    </Button>
+                    <span title={movementBlockedReason}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deleted || !movementGate.allowed}
+                        onClick={() => {
+                          setMovementWarehouseId(warehouse.id);
+                          setMovementDialogOpen(true);
+                        }}
+                      >
+                        <ArrowLeftRight className="w-4 h-4 mr-1.5" />
+                        Registar movimento
+                      </Button>
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar {deleteTarget?.name}</AlertDialogTitle>
+            <AlertDialogDescription>{t("warehouses.delete.confirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("warehouses.form.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (deleteTarget) handleDelete(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deactivateTarget} onOpenChange={(open) => !open && setDeactivateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desativar {deactivateTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>O armazém deixa de aparecer nas escolhas de armazém. O stock e o histórico mantêm-se.</p>
+                {deactivateTarget && defaultWarehouseId === deactivateTarget.id ? (
+                  <p className="font-medium text-foreground">
+                    Este é o armazém por defeito da organização. Escolha outro em Definições do inventário.
+                  </p>
+                ) : null}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("warehouses.form.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deactivateTarget) handleToggleActive(deactivateTarget, false);
+                setDeactivateTarget(null);
+              }}
+            >
+              Desativar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <StockMovementDialog
         open={movementDialogOpen}
@@ -781,6 +1003,8 @@ const Warehouses = () => {
         warehouses={warehouses.map((w) => ({ id: w.id, name: w.name }))}
         defaultWarehouseId={movementWarehouseId}
         onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["warehouses-stock-stats"] });
+          queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
           // Só recarrega o histórico se for do mesmo armazém já aberto no diálogo.
           if (movementWarehouseId && historyWarehouse?.id === movementWarehouseId) {
             loadWarehouseHistory(movementWarehouseId);

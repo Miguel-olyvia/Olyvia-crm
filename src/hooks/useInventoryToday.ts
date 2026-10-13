@@ -2,6 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import {
+  clientOrdersLink,
+  purchaseOrdersLink,
+  receivingLink,
+  stockCountsLink,
+  stocksLink,
+  suppliersLink,
+} from "@/components/inventory/ui/inventoryLinks";
 
 // "Hoje" do Inventário: um só pedido (rpc_inventory_today) com os números da
 // fila de trabalho, do fluxo e dos contadores do menu. Cada bloco — e cada
@@ -141,7 +149,7 @@ export interface InventoryQueueItem {
   title: string;
   description: string;
   tone: InventoryQueueTone;
-  /** Destino ao clicar (com query string só onde a página a lê). */
+  /** Destino ao clicar: a lista já filtrada (builders de inventoryLinks.ts). */
   to: string;
   /** Permissão da rota de destino — sem ela o cartão não aparece. */
   permission: string;
@@ -169,7 +177,7 @@ export function getInventoryQueueItems(
       title: "POs por aprovar",
       description: "Rascunhos à espera de aprovação para passarem a encomendadas.",
       tone: "warn",
-      to: "/purchase-orders",
+      to: purchaseOrdersLink({ status: "pending" }),
       permission: "purchase_orders.view",
       value: num(data.purchases?.pending_approval),
     },
@@ -178,7 +186,7 @@ export function getInventoryQueueItems(
       title: "POs atrasadas",
       description: "Entrega prevista ultrapassada sem receção completa.",
       tone: "bad",
-      to: "/purchase-orders",
+      to: purchaseOrdersLink({ status: "late" }),
       permission: "purchase_orders.view",
       value: num(data.purchases?.late),
     },
@@ -187,7 +195,7 @@ export function getInventoryQueueItems(
       title: "ECs prontas a expedir",
       description: "Têm linhas com stock reservado à espera de saída.",
       tone: "ok",
-      to: "/client-orders",
+      to: clientOrdersLink({ ready: true }),
       permission: "client_orders.view",
       value: num(data.client_orders?.ready_to_ship),
     },
@@ -196,7 +204,7 @@ export function getInventoryQueueItems(
       title: "ECs sem fornecedor preferencial",
       description: "Há quantidades em falta sem fornecedor para encomendar.",
       tone: "bad",
-      to: "/client-orders",
+      to: clientOrdersLink({ status: "sem_fornecedor" }),
       permission: "client_orders.view",
       value: num(data.client_orders?.without_preferred_supplier),
     },
@@ -205,7 +213,7 @@ export function getInventoryQueueItems(
       title: "Alterações de preço por aprovar",
       description: "Submetidas pelos fornecedores no portal.",
       tone: "warn",
-      to: "/suppliers",
+      to: suppliersLink({ filter: "prices" }),
       permission: "suppliers.view",
       value: num(data.suppliers?.price_changes_pending),
     },
@@ -214,7 +222,7 @@ export function getInventoryQueueItems(
       title: "Produtos abaixo do ponto de encomenda",
       description: "Quantidade igual ou abaixo do ponto de encomenda definido.",
       tone: "warn",
-      to: "/stocks?status=low",
+      to: stocksLink({ status: "low" }),
       permission: "inventory.view",
       value: num(data.stock?.below_reorder_point),
     },
@@ -223,7 +231,7 @@ export function getInventoryQueueItems(
       title: "Contagem parada",
       description: "Em curso sem atividade há 7 dias ou mais.",
       tone: "neutral",
-      to: "/stock-counts",
+      to: stockCountsLink({ stalled: true }),
       permission: "inventory.view",
       value: num(data.counts?.stalled),
     },
@@ -232,7 +240,7 @@ export function getInventoryQueueItems(
       title: "Fornecedores à espera da ficha",
       description: "Convidados para o portal que ainda não preencheram a ficha.",
       tone: "info",
-      to: "/suppliers",
+      to: suppliersLink({ filter: "awaiting" }),
       permission: "suppliers.view",
       value: num(data.suppliers?.awaiting_profile),
     },
@@ -241,7 +249,7 @@ export function getInventoryQueueItems(
       title: "Artigos do portal por ligar",
       description: "Artigos do catálogo dos fornecedores ainda sem produto nosso ligado.",
       tone: "neutral",
-      to: "/suppliers",
+      to: suppliersLink({ filter: "catalog" }),
       permission: "suppliers.view",
       value: num(data.suppliers?.catalog_unlinked),
     },
@@ -250,7 +258,7 @@ export function getInventoryQueueItems(
       title: "Guias abertas com divergências",
       description: "Anunciado pelo fornecedor diferente do recebido.",
       tone: "bad",
-      to: "/receiving",
+      to: receivingLink({ notes: "divergent" }),
       permission: "receiving.view",
       value: num(data.purchases?.delivery_notes_with_divergences),
     },

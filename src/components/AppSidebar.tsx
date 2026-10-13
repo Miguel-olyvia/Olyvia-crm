@@ -7,12 +7,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
-import {
-  useInventoryToday,
-  getInventoryCounter,
-  INVENTORY_TODAY_PERMISSIONS,
-  type InventoryCounterKey,
-} from "@/hooks/useInventoryToday";
+import { CounterPill } from "@/components/inventory/ui/CounterPill";
+import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import {
@@ -330,15 +326,9 @@ const FlyoutPanel = memo(function FlyoutPanel({
   // Contadores do Inventário (pílulas): só pedidos com o painel do Inventário
   // aberto e a quem tem alguma permissão de inventário — a RPC volta a
   // verificar no servidor. Falha/ausência da RPC = sem pílulas.
-  const { hasPermission, hasAnyPermission } = usePermissions();
-  const wantsInventoryCounters =
-    section.id === "inventory" && hasAnyPermission(INVENTORY_TODAY_PERMISSIONS);
-  const { data: inventoryToday } = useInventoryToday({ enabled: wantsInventoryCounters });
-  const counterFor = (item: MenuItem): number | null => {
-    if (!item.counterKey || !wantsInventoryCounters) return null;
-    const value = getInventoryCounter(item.counterKey, inventoryToday, hasPermission);
-    return value && value > 0 ? value : null;
-  };
+  // Mesma lógica dos separadores da área (InventoryAreaTabs).
+  const inventoryCounter = useInventoryCounters(section.id === "inventory");
+  const counterFor = (item: MenuItem): number | null => inventoryCounter(item.counterKey);
 
   // Auto-expand subsection that contains active item (e as marcadas com
   // defaultExpanded, só da primeira vez — se o utilizador as fechar, ficam
@@ -488,38 +478,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
   );
 });
 
-// Cor da pílula por urgência, como o renderSidebar() do mockup: Hoje e
-// Existências (abaixo do ponto de encomenda) = bad (accent); POs por aprovar,
-// fornecedores e contagens paradas = warn; ECs prontas e guias abertas = neutra
-// (violeta). warn usa texto escuro: branco sobre o âmbar fica abaixo de AA.
-const COUNTER_PILL_TONE: Partial<Record<InventoryCounterKey, "bad" | "warn">> = {
-  today: "bad",
-  stocks: "bad",
-  purchaseOrders: "warn",
-  suppliers: "warn",
-  stockCounts: "warn",
-};
-const COUNTER_PILL_CLASS = {
-  bad: "bg-accent text-accent-foreground",
-  warn: "bg-warning text-amber-950",
-  default: "bg-primary text-primary-foreground",
-} as const;
-
-// Pílula à direita do item (contadores do Inventário). Sem valor = nada.
-function CounterPill({ value, counterKey }: { value: number | null; counterKey?: InventoryCounterKey }) {
-  if (!value) return null;
-  const tone = (counterKey && COUNTER_PILL_TONE[counterKey]) || "default";
-  return (
-    <span
-      className={cn(
-        "ml-auto inline-grid h-5 min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-[11px] font-semibold leading-none tabular-nums",
-        COUNTER_PILL_CLASS[tone],
-      )}
-      aria-label={`${value} pendente${value === 1 ? "" : "s"}`}
-    >
-      {value > 99 ? "99+" : value}
-    </span>
-  );
-}
+// CounterPill (contadores do Inventário) vive em components/inventory/ui,
+// partilhada com os separadores da área.
 
 export default AppSidebar;

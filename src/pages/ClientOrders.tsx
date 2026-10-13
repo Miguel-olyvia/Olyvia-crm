@@ -31,7 +31,31 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Pencil, Plus, ShoppingBag, Trash2, Truck, Undo2 } from "lucide-react";
+import { ClipboardCheck, Download, FileDown, ExternalLink, Loader2, Pencil, Plus, Search, ShoppingBag, Trash2, Truck, Undo2 } from "lucide-react";
+import {
+  FilterPills,
+  InventoryPageHeader,
+  InventoryStatusBadge,
+  parseClientOrdersParams,
+  type ClientOrderStatusFilter,
+  type FilterPillOption,
+  type InventoryTone,
+} from "@/components/inventory/ui";
+import { useInventoryToday } from "@/hooks/useInventoryToday";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  fetchAllClientOrderRows,
+  fetchClientOrderRowsByIds,
+  loadClientOrderReadiness,
+  readyContractIds,
+  useClientOrderStatusSummary,
+  type ClientOrderReadinessMap,
+} from "@/components/client-orders/clientOrderList";
+import { ClientOrderKpis } from "@/components/client-orders/ClientOrderKpis";
+import { ClientOrderProgress, ClientOrderProgressLegend, clientOrderProgressParts } from "@/components/client-orders/ClientOrderProgress";
+import { ClientOrderOriginChip, type ClientOrderOriginKind } from "@/components/client-orders/ClientOrderOriginChip";
+import { ClientOrderRowActions } from "@/components/client-orders/ClientOrderRowActions";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
@@ -62,6 +86,9 @@ import {
 // Stocks.tsx: hasMore inferido de "a página veio cheia?").
 
 const PAGE_SIZE = 30;
+// Filtro "Prontas a expedir": teto de leitura da lista (páginas de 100) para
+// encontrar as encomendas prontas — pára antes assim que as encontra todas.
+const READY_MAX_PAGES = 20;
 
 // IVA por omissão quando o artigo do catálogo não traz taxa definida — mesmo
 // valor usado em PurchaseOrders.tsx e no AddItemsDialog.
@@ -122,6 +149,8 @@ interface ClientOrderDocumentRow {
   lines_awaiting_order: number;
   lines_received: number;
   lines_no_supplier: number;
+  // 20261130190000: linhas de serviço (sem stock). Opcional: só se lê no progresso.
+  lines_service?: number | null;
   overall_status: string;
   // 20261204400000: morada de entrega gravada na encomenda (pode ser nula).
   delivery_address?: string | null;
@@ -586,7 +615,12 @@ const ClientOrders = () => {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Estado e "prontas a expedir" vêm do URL (?status=&ready=1, contrato de
+  // inventoryLinks.ts); o URL é a fonte e o estado segue-o (ver efeito abaixo).
+  const [statusFilter, setStatusFilter] = useState<string>(() => parseClientOrdersParams(searchParams).status);
+  const urlParams = parseClientOrdersParams(searchParams);
+  const urlStatus = urlParams.status;
+  const urlReady = urlParams.ready;
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -693,10 +727,25 @@ const ClientOrders = () => {
     statusFilter,
     dateFrom,
     dateTo,
+    ready: urlReady,
   });
   useEffect(() => {
-    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo };
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo]);
+    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, ready: urlReady };
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, urlReady]);
+
+  // Prontidão por encomenda (rpc_client_order_list_readiness, org ativa):
+  // barra de progresso em unidades, "N pronta(s) a sair" e o filtro
+  // "Prontas a expedir". Lida no máximo uma vez por carregamento da lista
+  // (cache de 1 min entre pesquisas; forçada quando a lista recarrega com os
+  // mesmos filtros — i.e. depois de uma ação). null = indisponível.
+  const queryClient = useQueryClient();
+  const [readiness, setReadiness] = useState<ClientOrderReadinessMap | null>(null);
+  // Filtro "Prontas a expedir" truncado pelo teto de leitura.
+  const [readyTruncated, setReadyTruncated] = useState(false);
+  // Muda quando a lista recarrega com os mesmos filtros (depois de uma ação):
+  // as contagens das pílulas voltam a ser lidas.
+  const [listDataVersion, setListDataVersion] = useState(0);
+  const lastResetKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
@@ -767,6 +816,63 @@ const ClientOrders = () => {
     }
 
     try {
+      // Mesmos filtros do carregamento anterior = recarga depois de uma ação.
+      let refresh = false;
+      if (reset) {
+        const resetKey = JSON.stringify([
+          filters.activeCompanyId, filters.debouncedSearchTerm, filters.statusFilter,
+          filters.dateFrom, filters.dateTo, filters.ready,
+        ]);
+        refresh = resetKey === lastResetKeyRef.current;
+        // Outra organização: não mostrar a prontidão da anterior enquanto carrega.
+        if (lastResetKeyRef.current && JSON.parse(lastResetKeyRef.current)[0] !== filters.activeCompanyId) {
+          setReadiness(null);
+        }
+        lastResetKeyRef.current = resetKey;
+        if (refresh) setListDataVersion((v) => v + 1);
+      }
+
+      // Prontidão: uma chamada (ou cache) por carregamento da lista.
+      let readinessMap: ClientOrderReadinessMap | null = null;
+      if (reset) {
+        try {
+          readinessMap = await loadClientOrderReadiness(queryClient, filters.activeCompanyId, refresh);
+        } catch (readinessError) {
+          // Sem o filtro "Prontas" não há o que mostrar: falha a lista. Fora
+          // dele, a lista mostra-se na mesma, com o progresso por linha.
+          if (filters.ready) throw readinessError;
+        }
+        if (filtersRef.current !== filters) return; // filtros mudaram entretanto
+        setReadiness(readinessMap);
+      }
+
+      if (filters.ready) {
+        // "Prontas a expedir": a RPC da lista não filtra por ids — lê-se pela
+        // ordem da lista até ter todas as prontas (ou ao teto), com os mesmos
+        // filtros. Tudo de uma vez: sem paginação a seguir.
+        if (!reset) return;
+        const { rows: readyRows, truncated } = await fetchClientOrderRowsByIds(
+          filters.activeCompanyId,
+          {
+            search: filters.debouncedSearchTerm,
+            status: filters.statusFilter,
+            dateFrom: filters.dateFrom,
+            dateTo: filters.dateTo,
+          },
+          readyContractIds(readinessMap),
+          READY_MAX_PAGES,
+        );
+        if (filtersRef.current !== filters) return;
+        const rows = readyRows as unknown as ClientOrderDocumentRow[];
+        setOrders(rows);
+        setReadyTruncated(truncated);
+        void loadOrigins(rows.map((o) => o.contract_id), true);
+        setHasMore(false);
+        setPage(0);
+        return;
+      }
+      if (reset) setReadyTruncated(false);
+
       const from = pageNum * PAGE_SIZE;
       const { data, error } = await supabase.rpc('rpc_list_client_order_documents', {
         p_organization_id: filters.activeCompanyId,
@@ -801,16 +907,20 @@ const ClientOrders = () => {
     } catch (error: any) {
       toast({ title: t('clientOrders.toast.loadError'), description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      // Um carregamento ultrapassado (filtros mudaram) não apaga o "a carregar"
+      // do que o substituiu.
+      if (filtersRef.current === filters) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [t, toast, loadOrigins]);
+  }, [t, toast, loadOrigins, queryClient]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
     loadOrders(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo]);
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo, urlReady]);
 
   useEffect(() => {
     if (loading) return;
@@ -2318,6 +2428,197 @@ const ClientOrders = () => {
     }
   };
 
+  // ── Lista "Saídas para clientes" (UI do Inventário) ──────────────────────
+  // Só apresentação: filtros no URL, contagens, exportação e o menu ⋯ por
+  // linha. Os handlers de negócio acima ficam como estavam.
+
+  // O estado segue o URL (?status=) — inclui navegar para cá já com filtro.
+  useEffect(() => {
+    setStatusFilter(urlStatus);
+  }, [urlStatus]);
+
+  const applyStatusFilter = (next: ClientOrderStatusFilter) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next === "all") params.delete("status");
+      else params.set("status", next);
+      params.delete("ready");
+      return params;
+    }, { replace: true });
+  };
+
+  // "Prontas a expedir" (?ready=1): exclusivo com o filtro de estado, como no
+  // protótipo; voltar a carregar na pílula ativa desliga-o.
+  const applyReadyFilter = (next: boolean) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (next) {
+        params.set("ready", "1");
+        params.delete("status");
+      } else {
+        params.delete("ready");
+      }
+      return params;
+    }, { replace: true });
+  };
+
+  // Prontas a expedir: nº de encomendas com lines_ready > 0 na prontidão
+  // (rpc_client_order_list_readiness — mesma regra de
+  // rpc_inventory_today.ready_to_ship). Enquanto não chega ou se falhar, o
+  // número agregado de rpc_inventory_today.
+  const canViewOrders = hasPermission('client_orders.view');
+  const { data: inventoryToday } = useInventoryToday({ enabled: canViewOrders });
+  const readyToShipRaw = inventoryToday?.client_orders?.ready_to_ship;
+  const readyToShip = readiness
+    ? readyContractIds(readiness).size
+    : readyToShipRaw === null || readyToShipRaw === undefined || !Number.isFinite(Number(readyToShipRaw))
+      ? null
+      : Number(readyToShipRaw);
+
+  // Contagens por estado com as datas atuais (pílulas e KPI). Não dependem da
+  // pesquisa; voltam a ser lidas quando a lista recarrega depois de uma ação.
+  const statusSummaryQuery = useClientOrderStatusSummary(
+    activeCompany?.id,
+    { dateFrom, dateTo },
+    listDataVersion,
+  );
+  const statusSummary = statusSummaryQuery.data ?? null;
+
+  // Ações do menu ⋯ que só existem no detalhe (dependem de is_editable /
+  // can_request_missing, que a lista não traz): abre o detalhe como o "Ver" e,
+  // quando o documento chega, segue para a mesma ação do botão do detalhe,
+  // com as mesmas condições. Se a condição falhar, fica só o detalhe aberto.
+  const pendingDetailActionRef = useRef<{ contractId: string; action: 'edit' | 'requestMissing' } | null>(null);
+  const openDetailThen = (contractId: string, action: 'edit' | 'requestMissing') => {
+    pendingDetailActionRef.current = { contractId, action };
+    openDetail(contractId);
+  };
+  useEffect(() => {
+    const pending = pendingDetailActionRef.current;
+    if (!pending) return;
+    if (!detailOpen) {
+      pendingDetailActionRef.current = null;
+      return;
+    }
+    if (!detailData || detailData.contract_id !== pending.contractId) return;
+    pendingDetailActionRef.current = null;
+    if (pending.action === 'edit') {
+      if (detailData.is_editable && canEditOrder) void openEditOrder();
+      return;
+    }
+    if (detailData.can_request_missing && canRequestMissing) {
+      setRequestMissingConfirmOpen(true);
+    } else {
+      toast({
+        title: 'Nada a pedir ao fornecedor',
+        description: 'Esta encomenda não tem linhas em falta que se possam pedir.',
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailData, detailOpen]);
+
+  // Origem para o distintivo da lista — mesma regra de renderOrigin.
+  const getListOrigin = (order: ClientOrderDocumentRow): { kind: ClientOrderOriginKind; label: string } | null => {
+    const sale = salesByContract[order.contract_id];
+    if (order.origin_type === 'direct_sale' || (!order.origin_type && sale)) {
+      const number = order.origin_number || sale?.sale_number || sale?.proforma_number || '';
+      return { kind: 'direct_sale', label: `Venda direta${number ? ` ${number}` : ''}` };
+    }
+    if (order.origin_type === 'contract') {
+      return { kind: 'contract', label: `Contrato ${order.origin_number || order.contract_number}` };
+    }
+    if (order.origin_type === 'manual') return { kind: 'manual', label: 'Manual' };
+    return null;
+  };
+
+  const OVERALL_STATUS_TONE: Record<string, InventoryTone> = {
+    totalmente_servido: 'ok',
+    parcialmente_pendente: 'warn',
+    a_aguardar_encomenda: 'info',
+    sem_fornecedor: 'bad',
+  };
+
+  // Exportar (XLSX) as encomendas com os filtros atuais — todas, não só as
+  // páginas já carregadas. Mesma RPC e mesma organização da lista.
+  const [exporting, setExporting] = useState(false);
+  const EXPORT_MAX_PAGES = 50;
+  const handleExport = async () => {
+    if (!activeCompany?.id || exporting) return;
+    setExporting(true);
+    try {
+      const filters = { search: debouncedSearchTerm, status: statusFilter, dateFrom, dateTo };
+      // Com "Prontas a expedir" exporta-se o mesmo conjunto que a lista mostra.
+      const { rows, truncated } = urlReady
+        ? await fetchClientOrderRowsByIds(
+            activeCompany.id,
+            filters,
+            readyContractIds(await loadClientOrderReadiness(queryClient, activeCompany.id, false)),
+            EXPORT_MAX_PAGES,
+          )
+        : await fetchAllClientOrderRows(activeCompany.id, filters, EXPORT_MAX_PAGES);
+      if (rows.length === 0) {
+        toast({ title: 'Nada para exportar', description: 'Não há encomendas com estes filtros.' });
+        return;
+      }
+      downloadStandardXlsx(
+        {
+          sheetName: 'Saídas para clientes',
+          columns: [
+            { key: 'order', header: 'Nº EC', type: 'text' },
+            { key: 'origin', header: 'Origem', type: 'text' },
+            { key: 'client', header: 'Cliente', type: 'text' },
+            { key: 'address', header: 'Morada', type: 'text' },
+            { key: 'date', header: 'Data', type: 'date' },
+            { key: 'lines', header: 'Linhas', type: 'number' },
+            { key: 'served', header: 'Linhas servidas', type: 'number' },
+            { key: 'waiting', header: 'Linhas a aguardar', type: 'number' },
+            { key: 'missing', header: 'Linhas em falta', type: 'number' },
+            { key: 'services', header: 'Serviços', type: 'number' },
+            { key: 'status', header: 'Estado', type: 'text' },
+            { key: 'linesReady', header: 'Linhas prontas a sair', type: 'number' },
+            { key: 'unitsServed', header: 'Un. servidas', type: 'number' },
+            { key: 'unitsStock', header: 'Un. em stock', type: 'number' },
+            { key: 'unitsPo', header: 'Un. em PO', type: 'number' },
+            { key: 'unitsMissing', header: 'Un. em falta', type: 'number' },
+          ],
+          rows: rows.map((r) => {
+            const parts = clientOrderProgressParts(r);
+            const origin = getListOrigin(r as ClientOrderDocumentRow);
+            const rd = readiness?.[r.contract_id];
+            return {
+              order: r.order_number || r.contract_number,
+              origin: origin?.label ?? '',
+              client: r.client_name ?? '',
+              address: r.delivery_address ?? '',
+              date: r.signature_date ? r.signature_date.slice(0, 10) : '',
+              lines: r.total_lines,
+              served: parts.served,
+              waiting: parts.waiting,
+              missing: parts.missing,
+              services: r.lines_service ?? 0,
+              status: getOverallStatusLabel(r.overall_status),
+              // Sem prontidão (RPC indisponível) fica em branco, não a 0.
+              linesReady: rd ? rd.lines_ready : null,
+              unitsServed: rd ? rd.units_served : null,
+              unitsStock: rd ? rd.units_in_stock_reserved : null,
+              unitsPo: rd ? rd.units_on_po : null,
+              unitsMissing: rd ? rd.units_missing : null,
+            };
+          }),
+        },
+        `saidas-para-clientes_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+      toast({
+        title: `Exportado: ${rows.length} encomenda(s)`,
+        description: truncated ? `Limite de ${EXPORT_MAX_PAGES * 100} encomendas atingido — refine os filtros.` : undefined,
+      });
+    } catch (error: any) {
+      toast({ title: 'Não foi possível exportar', description: error?.message, variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (companyLoading) {
     return (
       <>
@@ -2344,164 +2645,250 @@ const ClientOrders = () => {
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <ClipboardCheck className="w-7 h-7 text-muted-foreground" />
-            <div>
-              <h1 className="text-3xl font-bold mb-1">{t('clientOrders.title')}</h1>
-              <p className="text-muted-foreground">{t('clientOrders.description')}</p>
+      <div className="space-y-4">
+        <InventoryPageHeader
+          area="warehouse"
+          title="Saídas para clientes"
+          description="Encomendas Clientes: o que existe em stock é reservado (FIFO) e sai do armazém de expedição; o que falta vai para a encomenda ao fornecedor preferencial. Requer inventário + contratos."
+          actions={
+            <>
+              {/* A página já exige client_orders.view (ProtectedRoute/menu);
+                  não existe client_orders.export (nem nas migrations nem no
+                  frontend) — mantém-se client_orders.view. */}
+              <PermissionGate permission="client_orders.view">
+                <Button variant="outline" onClick={handleExport} disabled={exporting}>
+                  {exporting
+                    ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    : <Download className="w-4 h-4 mr-2" />}
+                  Exportar
+                </Button>
+              </PermissionGate>
+              {/* Criar uma encomenda manual exige client_orders.create
+                  (permissão própria; já não depende de
+                  client_contracts.create, mesmo criando por baixo um contrato
+                  sintético assinado). */}
+              <PermissionGate permission="client_orders.create">
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Nova encomenda manual
+                </Button>
+              </PermissionGate>
+            </>
+          }
+        />
+
+        <ClientOrderKpis
+          readyToShip={readyToShip}
+          counts={statusSummary?.byStatus ?? null}
+          truncated={statusSummary?.truncated}
+          activeStatus={statusFilter}
+          readyActive={urlReady}
+          onSelectStatus={applyStatusFilter}
+          onSelectReady={() => applyReadyFilter(true)}
+        />
+
+        <div className="flex flex-col gap-2.5 rounded-lg border bg-card p-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[240px] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input
+                type="search"
+                placeholder="Nº EC, contrato, VD ou cliente"
+                aria-label="Pesquisar encomendas clientes"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-8"
+              />
             </div>
+            <label className="inline-flex items-center gap-1.5 text-[13px]">
+              De
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-[160px]"
+                title={t('clientOrders.filters.dateFrom')}
+                aria-label={t('clientOrders.filters.dateFrom')}
+              />
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-[13px]">
+              Até
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-[160px]"
+                title={t('clientOrders.filters.dateTo')}
+                aria-label={t('clientOrders.filters.dateTo')}
+              />
+            </label>
+            {(searchTerm || statusFilter !== "all" || dateFrom || dateTo || urlReady) && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchTerm("");
+                  applyStatusFilter("all");
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+              >
+                {t('clientOrders.filters.clear')}
+              </Button>
+            )}
           </div>
-          {/* A página já está protegida por client_orders.view
-              (ProtectedRoute em App.tsx e menuConfig.ts). Criar uma encomenda
-              manual exige client_orders.create (permissão própria; já não
-              depende de client_contracts.create, mesmo criando por baixo um
-              contrato sintético assinado). */}
-          <PermissionGate permission="client_orders.create">
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('clientOrders.create.newOrder')}
-            </Button>
-          </PermissionGate>
+          <FilterPills<ClientOrderStatusFilter | 'ready'>
+            ariaLabel="Estado"
+            value={statusFilter as ClientOrderStatusFilter}
+            onChange={(value) => {
+              if (value !== 'ready') applyStatusFilter(value);
+            }}
+            options={[
+              {
+                value: 'all',
+                label: 'Todas',
+                count: statusSummary?.total ?? null,
+                pressed: !urlReady && statusFilter === 'all',
+              },
+              {
+                value: 'ready',
+                label: 'Prontas a expedir',
+                count: readyToShip,
+                pressed: urlReady,
+                onSelect: () => applyReadyFilter(!urlReady),
+                hint: 'Com linhas com stock reservado, prontas a sair do armazém.',
+              },
+              ...([
+                'totalmente_servido',
+                'parcialmente_pendente',
+                'a_aguardar_encomenda',
+                'sem_fornecedor',
+              ] as const).map((status): FilterPillOption<ClientOrderStatusFilter | 'ready'> => ({
+                value: status,
+                label: getOverallStatusLabel(status),
+                count: statusSummary ? statusSummary.byStatus[status] : null,
+                pressed: !urlReady && statusFilter === status,
+              })),
+            ]}
+          />
+          <ClientOrderProgressLegend />
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center">
-          <Input
-            placeholder={t('clientOrders.searchPlaceholder')}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="max-w-xs"
-          />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder={t('clientOrders.table.status')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t('clientOrders.filterStatusAll')}</SelectItem>
-              <SelectItem value="totalmente_servido">{t('clientOrders.status.totallyServed')}</SelectItem>
-              <SelectItem value="parcialmente_pendente">{t('clientOrders.status.partiallyPending')}</SelectItem>
-              <SelectItem value="a_aguardar_encomenda">{t('clientOrders.status.awaitingOrder')}</SelectItem>
-              <SelectItem value="sem_fornecedor">{t('clientOrders.status.noSupplier')}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="w-[160px]"
-            title={t('clientOrders.filters.dateFrom')}
-            aria-label={t('clientOrders.filters.dateFrom')}
-          />
-          <Input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="w-[160px]"
-            title={t('clientOrders.filters.dateTo')}
-            aria-label={t('clientOrders.filters.dateTo')}
-          />
-          {(searchTerm || statusFilter !== "all" || dateFrom || dateTo) && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSearchTerm("");
-                setStatusFilter("all");
-                setDateFrom("");
-                setDateTo("");
-              }}
-            >
-              {t('clientOrders.filters.clear')}
-            </Button>
-          )}
-        </div>
+        {urlReady && readyTruncated && (
+          <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="status">
+            Lista de prontas a expedir incompleta: foram lidas as {READY_MAX_PAGES * 100} encomendas mais recentes.
+            Use as datas ou a pesquisa para encontrar as restantes.
+          </div>
+        )}
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t('clientOrders.table.orderNumber')}</TableHead>
-              <TableHead>{t('clientOrders.table.client')}</TableHead>
-              <TableHead>{t('clientOrders.table.deliveryAddress')}</TableHead>
-              <TableHead>{t('clientOrders.table.signatureDate')}</TableHead>
-              <TableHead className="text-right">{t('clientOrders.table.lines')}</TableHead>
-              <TableHead>{t('clientOrders.table.status')}</TableHead>
-              <TableHead className="text-right">{t('clientOrders.table.actions')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
+        <div className="overflow-x-auto rounded-lg border bg-card">
+          <Table className="min-w-[1000px]">
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className="text-center">{t('clientOrders.loading')}</TableCell>
+                <TableHead>Nº EC · origem</TableHead>
+                <TableHead>{t('clientOrders.table.client')}</TableHead>
+                <TableHead>{t('clientOrders.table.deliveryAddress')}</TableHead>
+                <TableHead>Data</TableHead>
+                <TableHead className="text-right">{t('clientOrders.table.lines')}</TableHead>
+                <TableHead className="w-[190px]">Progresso</TableHead>
+                <TableHead>{t('clientOrders.table.status')}</TableHead>
+                <TableHead className="text-right">
+                  <span className="sr-only">{t('clientOrders.table.actions')}</span>
+                </TableHead>
               </TableRow>
-            ) : orders.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center">{t('clientOrders.noOrders')}</TableCell>
-              </TableRow>
-            ) : (
-              orders.map((order) => (
-                <TableRow key={order.contract_id}>
-                  <TableCell className="font-medium">
-                    <div className="flex flex-col gap-1">
-                      <span>{order.order_number || order.contract_number}</span>
-                      {renderOrigin(order.contract_id, order.origin_type, order.origin_number, order.contract_number)}
-                    </div>
-                  </TableCell>
-                  <TableCell>{order.client_name || '-'}</TableCell>
-                  <TableCell>
-                    {order.delivery_address?.trim() ? (
-                      <span className="block max-w-[16rem] truncate" title={order.delivery_address}>
-                        {order.delivery_address}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {order.signature_date ? new Date(order.signature_date).toLocaleDateString('pt-PT') : '-'}
-                  </TableCell>
-                  <TableCell className="text-right">{order.total_lines}</TableCell>
-                  <TableCell>
-                    <Badge className={getOverallStatusColor(order.overall_status)}>
-                      {getOverallStatusLabel(order.overall_status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openDetail(order.contract_id)}
-                      title={t('clientOrders.viewDetail')}
-                    >
-                      <Eye className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleGeneratePdf(order.contract_id, order.order_number || order.contract_number)}
-                      title={t('clientOrders.downloadPdf')}
-                      disabled={pdfGeneratingId === order.contract_id}
-                    >
-                      <FileDown className="w-4 h-4" />
-                    </Button>
-                    {canDeleteOrder && getDeletableOrigin(order.contract_id, order.origin_type) && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => openDeleteOrder(order.contract_id, order.order_number || order.contract_number, order.origin_type, order.origin_number)}
-                        title="Eliminar encomenda"
-                        aria-label={`Eliminar encomenda ${order.order_number || order.contract_number}`}
-                        disabled={deleting}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    )}
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center">{t('clientOrders.loading')}</TableCell>
+                </TableRow>
+              ) : orders.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                    Sem encomendas com estes filtros
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                orders.map((order) => {
+                  const orderLabel = order.order_number || order.contract_number;
+                  const origin = getListOrigin(order);
+                  const deletable = !!getDeletableOrigin(order.contract_id, order.origin_type);
+                  const sale = salesByContract[order.contract_id];
+                  return (
+                    <TableRow
+                      key={order.contract_id}
+                      className="cursor-pointer"
+                      onClick={() => openDetail(order.contract_id)}
+                    >
+                      <TableCell className="align-top">
+                        <div className="flex flex-col items-start gap-1">
+                          <b className="whitespace-nowrap font-mono text-[0.92em]">{orderLabel}</b>
+                          {origin ? <ClientOrderOriginChip kind={origin.kind} label={origin.label} /> : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="align-top">{order.client_name || '-'}</TableCell>
+                      <TableCell className="align-top">
+                        {order.delivery_address?.trim() ? (
+                          <small className="block max-w-[16rem] truncate text-xs" title={order.delivery_address}>
+                            {order.delivery_address}
+                          </small>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap align-top">
+                        {order.signature_date ? new Date(order.signature_date).toLocaleDateString('pt-PT') : '-'}
+                      </TableCell>
+                      <TableCell className="text-right align-top tabular-nums">{order.total_lines}</TableCell>
+                      <TableCell className="align-top">
+                        <ClientOrderProgress counts={order} readiness={readiness?.[order.contract_id] ?? null} />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <div className="flex flex-col items-start gap-1">
+                          <InventoryStatusBadge tone={OVERALL_STATUS_TONE[order.overall_status] ?? 'warn'}>
+                            {getOverallStatusLabel(order.overall_status)}
+                          </InventoryStatusBadge>
+                          {(readiness?.[order.contract_id]?.lines_ready ?? 0) > 0 ? (
+                            <InventoryStatusBadge tone="violet">
+                              {readiness?.[order.contract_id]?.lines_ready} pronta(s) a sair
+                            </InventoryStatusBadge>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right align-top">
+                        <ClientOrderRowActions
+                          orderLabel={orderLabel}
+                          onView={() => openDetail(order.contract_id)}
+                          onPdf={() => handleGeneratePdf(order.contract_id, orderLabel)}
+                          pdfBusy={pdfGeneratingId === order.contract_id}
+                          edit={order.origin_type === 'manual'
+                            ? { onSelect: () => openDetailThen(order.contract_id, 'edit') }
+                            : null}
+                          onRequestMissing={() => openDetailThen(order.contract_id, 'requestMissing')}
+                          proforma={sale?.proforma_number
+                            ? {
+                                number: sale.proforma_number,
+                                onSelect: () => handleDownloadProforma(order.contract_id),
+                                busy: proformaDownloadingId === order.contract_id,
+                              }
+                            : null}
+                          remove={{
+                            deletable,
+                            busy: deleting,
+                            onSelect: () => openDeleteOrder(order.contract_id, orderLabel, order.origin_type, order.origin_number),
+                          }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2.5 px-0.5 text-[12.5px] text-muted-foreground">
+          <span>{orders.length} encomenda(s){hasMore && !loading ? ' carregada(s)' : ''}</span>
+        </div>
 
         <div ref={loadMoreRef} className="py-4 flex justify-center">
           {loadingMore && (

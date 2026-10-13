@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -17,13 +15,36 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
-import { Badge } from "@/components/ui/badge";
-import { ListChecks, Plus, Eye } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { PermissionGate } from "@/components/PermissionGate";
 import { escapeIlike } from "@/lib/clientSearch";
 import InventoryCountDetailDialog from "@/components/inventory/InventoryCountDetailDialog";
 import { useProductCategories } from "@/hooks/useProductCategories";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  FilterPills,
+  InventoryPageHeader,
+  parseStockCountsParams,
+  usePermissionGate,
+  type FilterPillOption,
+  type StockCountStatusFilter,
+} from "@/components/inventory/ui";
+import { StockCountsTable, STALLED_AFTER_DAYS, stalledDays, type StockCountRow } from "@/components/inventory/counts/StockCountsTable";
+
+// Título e descrição palavra por palavra de TITULOS.cont (menuInv.ts do protótipo).
+const PAGE_TITLE = "Contagens";
+const PAGE_DESCRIPTION =
+  "Contagens físicas por armazém e categoria. Só fecham sem diferenças por resolver; as diferenças ajustadas geram movimentos de ajuste no livro.";
+
+const STATUS_PILLS: readonly { value: StockCountStatusFilter; label: string }[] = [
+  { value: "all", label: "Todas" },
+  { value: "em_contagem", label: "Em contagem" },
+  { value: "finalizada", label: "Finalizadas" },
+  { value: "cancelada", label: "Canceladas" },
+];
+
+// Mesma permissão que o antigo PermissionGate do botão (qualquer uma das duas).
+const CREATE_PERMISSIONS = ["inventory.count", "inventory.edit"] as const;
 
 // Fase 5.4 do plano de inventário: "Contagem de Inventário" (Stocktake) —
 // listagem de sessões de public.inventory_counts. Mesmo padrão de paginação
@@ -41,28 +62,11 @@ const PAGE_SIZE = 30;
 // paginar as linhas) — o aviso muda de tom e sugere filtrar por categoria.
 const LARGE_INITIAL_COUNT = 500;
 
-interface InventoryCountListRow {
-  id: string;
-  document_number: string;
-  status: string;
-  started_at: string;
-  finalized_at: string | null;
-  warehouse_id: string;
-  category_id: string | null;
-  warehouses?: { name: string } | null;
-  product_categories?: { name: string } | null;
-  // Agregados calculados client-side a partir de inventory_count_lines
-  // (ver loadLineAggregates) — não vêm da query de cabeçalho.
-  total_lines?: number;
-  counted_lines?: number;
-  pending_discrepancies?: number;
-  // Linhas nunca contadas (Qtd. contada vazia) mas com stock real no
-  // sistema (system_quantity_at_start > 0) — não são "discrepâncias" (não
-  // há nada para comparar), mas finalizar a contagem com produtos destes
-  // por contar não deve poder mostrar "Sem discrepâncias" como se tudo
-  // tivesse sido verificado.
-  uncounted_with_stock?: number;
-}
+// Linha da lista: cabeçalho de inventory_counts + agregados calculados
+// client-side a partir de inventory_count_lines (ver loadLineAggregates).
+// uncounted_with_stock = linhas nunca contadas mas com stock no sistema — não
+// são "discrepâncias" (nada a comparar), mas não podem passar por verificadas.
+type InventoryCountListRow = StockCountRow;
 
 interface WarehouseOption {
   id: string;
@@ -85,6 +89,21 @@ const fetchAllRows = async (buildQuery: () => any): Promise<{ data: any[] | null
   return { data: rows, error: null };
 };
 
+/** Maior de várias datas ISO (ignora vazias/inválidas). */
+const maxIso = (...values: (string | null | undefined)[]): string | null => {
+  let best: string | null = null;
+  let bestMs = -Infinity;
+  for (const v of values) {
+    if (!v) continue;
+    const ms = Date.parse(v);
+    if (!Number.isNaN(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = v;
+    }
+  }
+  return best;
+};
+
 const StockCounts = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -98,9 +117,46 @@ const StockCounts = () => {
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
+  // Estado, "paradas" e o detalhe aberto vivem no URL (?status=&stalled=1&open=)
+  // — contrato de inventoryLinks.ts, usado pelos links INV- de Movimentos/Hoje.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlParams = parseStockCountsParams(searchParams);
+  const statusFilter: StockCountStatusFilter = urlParams.stalled ? "em_contagem" : urlParams.status;
+  const stalledFilter = urlParams.stalled;
+  const urlOpen = urlParams.open;
+
+  const updateParams = useCallback(
+    (patch: { status?: StockCountStatusFilter; stalled?: boolean; open?: string | null }) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (patch.status !== undefined) {
+            if (patch.status === "all") next.delete("status");
+            else next.set("status", patch.status);
+          }
+          if (patch.stalled !== undefined) {
+            if (patch.stalled) next.set("stalled", "1");
+            else next.delete("stalled");
+          }
+          if (patch.open !== undefined) {
+            if (patch.open) next.set("open", patch.open);
+            else next.delete("open");
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const setStatusFilter = (value: StockCountStatusFilter) => updateParams({ status: value, stalled: false });
+
+  const [statusCounts, setStatusCounts] = useState<Partial<Record<StockCountStatusFilter, number>>>({});
+  const gate = usePermissionGate();
+  const createPermission = gate(CREATE_PERMISSIONS);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
   // Filtra por inventory_counts.category_id (a categoria com que a contagem
   // foi criada) — só categorias de topo, como no diálogo de criação.
@@ -151,13 +207,14 @@ const StockCounts = () => {
   const filtersRef = useRef({
     activeCompanyId: activeCompany?.id,
     debouncedSearchTerm,
-    statusFilter,
+    statusFilter: statusFilter as string,
+    stalledFilter,
     warehouseFilter,
     categoryFilter,
   });
-  useEffect(() => {
-    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter };
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter]);
+  // Atualizado já no render (não num efeito): o efeito de refresh abaixo corre
+  // na mesma passagem e tem de ver os filtros novos vindos do URL.
+  filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, stalledFilter, warehouseFilter, categoryFilter };
 
   const fetchWarehouses = useCallback(async () => {
     if (!activeCompany?.id) return;
@@ -190,72 +247,114 @@ const StockCounts = () => {
   // resolver) — calculados a partir de inventory_count_lines, filtrados às
   // sessões da página atual (não há RPC de leitura agregada, ver cabeçalho).
   // Mesma condição de "por resolver" usada por rpc_finalize_inventory_count.
-  const loadLineAggregates = async (rows: InventoryCountListRow[]): Promise<InventoryCountListRow[]> => {
+  // Uma só consulta em lote para as sessões da página, filtrada pela
+  // organização ativa através do cabeçalho (inventory_counts!inner) — as
+  // linhas não têm organization_id próprio.
+  const loadLineAggregates = async (rows: InventoryCountListRow[], organizationId: string): Promise<InventoryCountListRow[]> => {
     if (rows.length === 0) return rows;
     const ids = rows.map((r) => r.id);
     const { data, error } = await fetchAllRows(() =>
       supabase
         .from("inventory_count_lines")
-        .select("inventory_count_id, counted_quantity, system_quantity_at_start, discrepancy_resolution")
+        .select("inventory_count_id, counted_quantity, system_quantity_at_start, discrepancy_resolution, updated_at, counted_at, inventory_counts!inner(organization_id)")
+        .eq("inventory_counts.organization_id", organizationId)
         .in("inventory_count_id", ids)
     );
     if (error) {
       console.error("Error loading inventory count line aggregates:", error);
-      return rows;
+      return rows.map((r) => ({ ...r, last_activity_at: maxIso(r.started_at, r.updated_at) }));
     }
 
-    const agg = new Map<string, { total: number; counted: number; pending: number; uncountedWithStock: number }>();
+    type Agg = { total: number; counted: number; diff: number; pending: number; uncountedWithStock: number; lastAt: string | null };
+    const empty = (): Agg => ({ total: 0, counted: 0, diff: 0, pending: 0, uncountedWithStock: 0, lastAt: null });
+    const agg = new Map<string, Agg>();
     for (const line of (data || []) as any[]) {
-      const entry = agg.get(line.inventory_count_id) || { total: 0, counted: 0, pending: 0, uncountedWithStock: 0 };
+      const entry = agg.get(line.inventory_count_id) || empty();
       entry.total += 1;
       if (line.counted_quantity !== null) {
         entry.counted += 1;
-        if (
-          line.counted_quantity !== line.system_quantity_at_start &&
-          !line.discrepancy_resolution
-        ) {
-          entry.pending += 1;
+        if (line.counted_quantity !== line.system_quantity_at_start) {
+          entry.diff += 1;
+          // Mesma condição de "por resolver" usada por rpc_finalize_inventory_count.
+          if (!line.discrepancy_resolution) entry.pending += 1;
         }
       } else if ((line.system_quantity_at_start ?? 0) > 0) {
         // Nunca contada, mas o sistema diz que há stock — ninguém foi
         // verificar fisicamente esta linha antes de a contagem terminar.
         entry.uncountedWithStock += 1;
       }
+      entry.lastAt = maxIso(entry.lastAt, line.updated_at, line.counted_at);
       agg.set(line.inventory_count_id, entry);
     }
 
     return rows.map((r) => {
-      const entry = agg.get(r.id) || { total: 0, counted: 0, pending: 0, uncountedWithStock: 0 };
+      const entry = agg.get(r.id) || empty();
       return {
         ...r,
         total_lines: entry.total,
         counted_lines: entry.counted,
+        discrepancies: entry.diff,
         pending_discrepancies: entry.pending,
         uncounted_with_stock: entry.uncountedWithStock,
+        // GREATEST(started_at, updated_at, linhas) — regra de rpc_inventory_today.
+        last_activity_at: maxIso(r.started_at, r.updated_at, entry.lastAt),
       };
     });
   };
 
+  // Filtros comuns (organização, armazém, categoria, pesquisa) — partilhados
+  // pela lista e pelos contadores das pílulas de estado.
+  const applyBaseFilters = (query: any, filters: typeof filtersRef.current) => {
+    let q = query.eq("organization_id", filters.activeCompanyId);
+    if (filters.warehouseFilter !== "all") q = q.eq("warehouse_id", filters.warehouseFilter);
+    if (filters.categoryFilter !== "all") q = q.eq("category_id", filters.categoryFilter);
+    if (filters.debouncedSearchTerm.trim()) {
+      q = q.ilike("document_number", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
+    }
+    return q;
+  };
+
   const buildCountsQuery = (filters: typeof filtersRef.current) => {
-    let query = supabase
-      .from("inventory_counts")
-      .select("id, document_number, status, started_at, finalized_at, warehouse_id, category_id, warehouses(name), product_categories(name)")
-      .eq("organization_id", filters.activeCompanyId);
+    let query = applyBaseFilters(
+      supabase
+        .from("inventory_counts")
+        .select("id, document_number, status, started_at, updated_at, finalized_at, warehouse_id, category_id, warehouses(name), product_categories(name)"),
+      filters,
+    );
 
     if (filters.statusFilter !== "all") {
       query = query.eq("status", filters.statusFilter);
     }
-    if (filters.warehouseFilter !== "all") {
-      query = query.eq("warehouse_id", filters.warehouseFilter);
-    }
-    if (filters.categoryFilter !== "all") {
-      query = query.eq("category_id", filters.categoryFilter);
-    }
-    if (filters.debouncedSearchTerm.trim()) {
-      query = query.ilike("document_number", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
+    if (filters.stalledFilter) {
+      // Condição necessária no servidor (cabeçalho sem atividade há > 7 dias);
+      // a atividade nas linhas é verificada depois, com os agregados.
+      const cutoff = new Date(Date.now() - STALLED_AFTER_DAYS * 86_400_000).toISOString();
+      query = query.eq("status", "em_contagem").lt("started_at", cutoff).lt("updated_at", cutoff);
     }
     return query;
   };
+
+  const fetchStatusCounts = useCallback(async () => {
+    const filters = filtersRef.current;
+    if (!filters.activeCompanyId) return;
+    try {
+      const results = await Promise.all(
+        STATUS_PILLS.map(async ({ value }) => {
+          let q = applyBaseFilters(supabase.from("inventory_counts").select("id", { count: "exact", head: true }), filters);
+          if (value !== "all") q = q.eq("status", value);
+          const { count, error } = await q;
+          if (error) throw error;
+          return [value, count ?? 0] as const;
+        }),
+      );
+      setStatusCounts(Object.fromEntries(results));
+    } catch (error) {
+      // Só informativo — as pílulas ficam sem número.
+      console.error("Error loading inventory count status counters:", error);
+      setStatusCounts({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadCounts = useCallback(async (pageNum: number, reset: boolean) => {
     const filters = filtersRef.current;
@@ -277,7 +376,13 @@ const StockCounts = () => {
         .range(from, to);
 
       if (error) throw error;
-      const newRows = await loadLineAggregates((data || []) as unknown as InventoryCountListRow[]);
+      const pageRows = (data || []) as unknown as InventoryCountListRow[];
+      const withAggregates = await loadLineAggregates(pageRows, filters.activeCompanyId);
+      // ?stalled=1: a atividade recente nas linhas também conta (mesma regra
+      // de rpc_inventory_today) — só fica o que está mesmo parado.
+      const newRows = filters.stalledFilter
+        ? withAggregates.filter((r) => stalledDays(r) !== null)
+        : withAggregates;
 
       if (reset) {
         setCounts(newRows);
@@ -287,7 +392,8 @@ const StockCounts = () => {
           return [...prev, ...newRows.filter((c) => !existingIds.has(c.id))];
         });
       }
-      setHasMore(newRows.length === PAGE_SIZE);
+      // Pela página do servidor (antes do filtro de paradas no cliente).
+      setHasMore(pageRows.length === PAGE_SIZE);
       setPage(pageNum);
     } catch (error: any) {
       toast({ title: t('stockCounts.toast.loadError'), description: error.message, variant: "destructive" });
@@ -300,13 +406,47 @@ const StockCounts = () => {
   const refresh = useCallback(() => {
     setHasMore(true);
     loadCounts(0, true);
-  }, [loadCounts]);
+    fetchStatusCounts();
+  }, [loadCounts, fetchStatusCounts]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter]);
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, stalledFilter, warehouseFilter, categoryFilter]);
+
+  // ?open=<id> abre o detalhe (links INV- de Movimentos/Hoje e a própria lista).
+  // Só abre depois de confirmar que a contagem é da organização ativa (um link
+  // guardado noutra organização não pode abrir aqui).
+  const activeCompanyId = activeCompany?.id;
+  useEffect(() => {
+    if (!urlOpen || !activeCompanyId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("inventory_counts")
+        .select("id, organization_id")
+        .eq("id", urlOpen)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error || !data || data.organization_id !== activeCompanyId) {
+        setDetailOpen(false);
+        updateParams({ open: null });
+        toast({
+          title: "Contagem não disponível",
+          description: "Esta contagem não pertence à organização ativa.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setDetailCountId(urlOpen);
+      setDetailOpen(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlOpen, activeCompanyId]);
 
   useEffect(() => {
     if (loading) return;
@@ -436,8 +576,7 @@ const StockCounts = () => {
       setCreateOpen(false);
       resetCreateForm();
       refresh();
-      setDetailCountId(result.id);
-      setDetailOpen(true);
+      openDetail(result.id);
     } catch (error: any) {
       // A RPC recusa criar uma contagem que ficaria com 0 linhas e explica
       // porquê (ERRCODE no_data_found). Essa mensagem do servidor é a parte
@@ -454,28 +593,38 @@ const StockCounts = () => {
     }
   };
 
-  const openDetail = (id: string) => {
+  // Abre já e espelha no URL (?open=) para o detalhe ser partilhável/recarregável.
+  function openDetail(id: string) {
     setDetailCountId(id);
     setDetailOpen(true);
+    updateParams({ open: id });
+  }
+
+  const handleDetailOpenChange = (open: boolean) => {
+    setDetailOpen(open);
+    if (!open) updateParams({ open: null });
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "em_contagem": return t('stockCounts.status.emContagem');
-      case "finalizada": return t('stockCounts.status.finalizada');
-      case "cancelada": return t('stockCounts.status.cancelada');
-      default: return status;
-    }
-  };
+  const hasExtraFilters = !!searchTerm || warehouseFilter !== "all" || categoryFilter !== "all";
+  const statusPillOptions: FilterPillOption<StockCountStatusFilter>[] = [
+    ...STATUS_PILLS.map((p) => ({
+      value: p.value,
+      label: p.label,
+      count: statusCounts[p.value] ?? null,
+      // Com ?stalled=1 nenhuma pílula de estado fica ativa — manda a das paradas.
+      pressed: !stalledFilter && urlParams.status === p.value,
+    })),
+  ];
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      em_contagem: "bg-info/10 text-info",
-      finalizada: "bg-success/10 text-success",
-      cancelada: "bg-muted text-muted-foreground",
-    };
-    return colors[status] || colors.em_contagem;
-  };
+  const createButton = (
+    <Button
+      onClick={() => { resetCreateForm(); setCreateOpen(true); }}
+      disabled={!createPermission.allowed}
+    >
+      <Plus className="w-4 h-4 mr-2" />
+      Nova contagem
+    </Button>
+  );
 
   if (companyLoading) {
     return (
@@ -490,11 +639,8 @@ const StockCounts = () => {
   if (!activeCompany) {
     return (
       <>
-        <div className="space-y-6 p-6">
-          <div>
-            <h1 className="text-3xl font-bold">{t('stockCounts.title')}</h1>
-            <p className="text-muted-foreground">{t('stockCounts.description')}</p>
-          </div>
+        <div className="space-y-4">
+          <InventoryPageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} area="warehouse" />
           <NoOrganizationState inline />
         </div>
       </>
@@ -503,22 +649,49 @@ const StockCounts = () => {
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <ListChecks className="w-7 h-7 text-muted-foreground" />
-            <div>
-              <h1 className="text-3xl font-bold mb-1">{t('stockCounts.title')}</h1>
-              <p className="text-muted-foreground">{t('stockCounts.description')}</p>
-            </div>
-          </div>
-          <PermissionGate permissions={["inventory.count", "inventory.edit"]}>
-            <Button onClick={() => { resetCreateForm(); setCreateOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('stockCounts.newCount')}
-            </Button>
-          </PermissionGate>
-        </div>
+      <div className="space-y-4">
+        <InventoryPageHeader
+          title={PAGE_TITLE}
+          description={PAGE_DESCRIPTION}
+          area="warehouse"
+          actions={
+            createPermission.allowed ? (
+              createButton
+            ) : (
+              // Desativado com o porquê (como no protótipo), mesma permissão de antes.
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {createButton}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">{createPermission.reason}</TooltipContent>
+              </Tooltip>
+            )
+          }
+        />
+
+        <FilterPills
+          ariaLabel="Estado das contagens"
+          value={urlParams.status}
+          onChange={setStatusFilter}
+          options={statusPillOptions}
+        />
+        {stalledFilter ? (
+          <FilterPills
+            ariaLabel="Contagens paradas"
+            value="stalled"
+            onChange={() => updateParams({ stalled: false })}
+            options={[
+              {
+                value: "stalled",
+                label: `Paradas há mais de ${STALLED_AFTER_DAYS} dias`,
+                hint: "Em contagem sem atividade há mais de 7 dias. Clique para remover o filtro.",
+                pressed: true,
+              },
+            ]}
+          />
+        ) : null}
 
         <div className="flex flex-wrap gap-3 items-center">
           <Input
@@ -526,10 +699,11 @@ const StockCounts = () => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="max-w-xs"
+            aria-label={t('stockCounts.searchPlaceholder')}
           />
           <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder={t('stockCounts.table.warehouse')} />
+            <SelectTrigger className="w-[200px]" aria-label="Armazém">
+              <SelectValue placeholder="Armazém" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t('stockCounts.filterWarehouseAll')}</SelectItem>
@@ -539,8 +713,8 @@ const StockCounts = () => {
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[200px]" aria-label={t('stockCounts.table.category')}>
-              <SelectValue placeholder={t('stockCounts.table.category')} />
+            <SelectTrigger className="w-[200px]" aria-label="Categoria">
+              <SelectValue placeholder="Categoria" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">{t('stockCounts.allCategories')}</SelectItem>
@@ -549,26 +723,15 @@ const StockCounts = () => {
               ))}
             </SelectContent>
           </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder={t('stockCounts.table.status')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t('stockCounts.filterStatusAll')}</SelectItem>
-              <SelectItem value="em_contagem">{t('stockCounts.status.emContagem')}</SelectItem>
-              <SelectItem value="finalizada">{t('stockCounts.status.finalizada')}</SelectItem>
-              <SelectItem value="cancelada">{t('stockCounts.status.cancelada')}</SelectItem>
-            </SelectContent>
-          </Select>
-          {(searchTerm || statusFilter !== "all" || warehouseFilter !== "all" || categoryFilter !== "all") && (
+          {(hasExtraFilters || urlParams.status !== "all" || stalledFilter) && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
                 setSearchTerm("");
-                setStatusFilter("all");
                 setWarehouseFilter("all");
                 setCategoryFilter("all");
+                updateParams({ status: "all", stalled: false });
               }}
             >
               {t('stockCounts.clearFilters')}
@@ -576,74 +739,13 @@ const StockCounts = () => {
           )}
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t('stockCounts.table.document')}</TableHead>
-              <TableHead>{t('stockCounts.table.warehouse')}</TableHead>
-              <TableHead>{t('stockCounts.table.category')}</TableHead>
-              <TableHead>{t('stockCounts.table.status')}</TableHead>
-              <TableHead>{t('stockCounts.table.startedAt')}</TableHead>
-              <TableHead className="text-right">{t('stockCounts.table.lines')}</TableHead>
-              <TableHead>{t('stockCounts.table.discrepancies')}</TableHead>
-              <TableHead className="text-right">{t('stockCounts.table.actions')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center">{t('stockCounts.loading')}</TableCell>
-              </TableRow>
-            ) : counts.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center">{t('stockCounts.noCounts')}</TableCell>
-              </TableRow>
-            ) : (
-              counts.map((count) => (
-                <TableRow key={count.id}>
-                  <TableCell className="font-medium font-mono text-xs">{count.document_number}</TableCell>
-                  <TableCell>{count.warehouses?.name || '-'}</TableCell>
-                  <TableCell>{count.product_categories?.name || t('stockCounts.allCategories')}</TableCell>
-                  <TableCell>
-                    <Badge className={getStatusColor(count.status)}>{getStatusLabel(count.status)}</Badge>
-                  </TableCell>
-                  <TableCell>{new Date(count.started_at).toLocaleDateString('pt-PT')}</TableCell>
-                  <TableCell className="text-right">
-                    {count.counted_lines ?? 0}/{count.total_lines ?? 0}
-                  </TableCell>
-                  <TableCell>
-                    {/* Badge destacado — é o propósito central do ecrã, não uma
-                        informação secundária. */}
-                    {(count.pending_discrepancies ?? 0) > 0 ? (
-                      <Badge variant="destructive">
-                        {t('stockCounts.discrepanciesBadge', { count: count.pending_discrepancies ?? 0 })}
-                      </Badge>
-                    ) : (count.uncounted_with_stock ?? 0) > 0 ? (
-                      // Não é uma discrepância (nada foi comparado) — mas
-                      // "Sem discrepâncias" mentiria: há produtos com stock
-                      // no sistema que ninguém foi verificar fisicamente.
-                      <Badge className="bg-warning/10 text-warning">
-                        {t('stockCounts.uncountedWithStockBadge', { count: count.uncounted_with_stock ?? 0 })}
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-success/10 text-success">{t('stockCounts.discrepanciesNone')}</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openDetail(count.id)}
-                      title={t('stockCounts.viewDetail')}
-                    >
-                      <Eye className="w-4 h-4" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <StockCountsTable
+          rows={counts}
+          loading={loading}
+          allCategoriesLabel="Todas"
+          uncountedWithStockLabel={(count) => t('stockCounts.uncountedWithStockBadge', { count })}
+          onOpen={openDetail}
+        />
 
         <div ref={loadMoreRef} className="py-4 flex justify-center">
           {loadingMore && (
@@ -757,7 +859,7 @@ const StockCounts = () => {
 
       <InventoryCountDetailDialog
         open={detailOpen}
-        onOpenChange={setDetailOpen}
+        onOpenChange={handleDetailOpenChange}
         countId={detailCountId}
         onChanged={refresh}
       />

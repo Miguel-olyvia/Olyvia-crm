@@ -32,17 +32,24 @@ import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
-import { Plus, Pencil, Trash2, Package, Download, Upload, ArrowLeftRight, History, MoreHorizontal, RotateCcw, ListOrdered } from "lucide-react";
+import { Plus, Pencil, Trash2, Download, Upload, ArrowLeftRight, History, RotateCcw, ListOrdered, ChevronDown, ChevronRight, ClipboardList, Lock, Search } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { InventoryPageHeader, InventoryStatusBadge, KpiTile, KpiGrid, toneText } from "@/components/inventory/ui";
+  FilterPills,
+  InventoryEmptyState,
+  InventoryPageHeader,
+  InventoryStatusBadge,
+  KpiTile,
+  KpiGrid,
+  RowActions,
+  parseStocksParams,
+  stockMovementsLink,
+  toneText,
+  usePermissionGate,
+  type StockStatusFilter,
+} from "@/components/inventory/ui";
 import { useInventoryToday, inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Database } from "@/integrations/supabase/types";
@@ -59,19 +66,36 @@ import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
-  products?: { name: string; sku?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
+  products?: { name: string; sku?: string | null; barcode?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
   warehouses?: { name: string };
 };
 
 const UNCATEGORIZED_LABEL = "Sem categoria";
 const UNCATEGORIZED_VALUE = UNCATEGORIZED_CATEGORY_VALUE;
 const PAGE_SIZE = 30;
+const STOCK_COLUMNS = 9;
 
-// ?status=low|overstock|normal (cartões do Hoje / KPIs) → filtro de estado.
-// Os mesmos códigos de getStockStatusCode; qualquer outro valor = "all".
-type StockStatusFilter = "all" | "low" | "normal" | "overstock";
-const parseStatusParam = (value: string | null): StockStatusFilter =>
-  value === "low" || value === "overstock" || value === "normal" ? value : "all";
+// ?status=low|overstock|normal e ?warehouse=<uuid> (cartões do Hoje, KPIs,
+// Armazéns › "Ver existências") lidos com parseStocksParams (inventoryLinks.ts).
+
+// Vista da tabela, como no protótipo: por produto (agrupada, expansível) ou por
+// armazém (uma linha por produto+armazém, agrupada por categoria).
+type StockView = "product" | "warehouse";
+const VIEW_OPTIONS = [
+  { value: "product" as const, label: "Por produto" },
+  { value: "warehouse" as const, label: "Por armazém" },
+];
+
+interface ProductGroup {
+  productId: string;
+  name: string;
+  sku: string | null;
+  barcode: string | null;
+  rows: Stock[];
+  quantity: number;
+  maxSum: number;
+  status: "low" | "overstock" | "normal";
+}
 
 const formatEur = (value: number): string =>
   new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(value);
@@ -163,7 +187,7 @@ const RESERVATION_CHUNK = 150;
 
 const STOCK_SELECT = `
   *,
-  products!inner(name, sku, category_id, subcategory_id, product_categories!category_id(name)),
+  products!inner(name, sku, barcode, category_id, subcategory_id, product_categories!category_id(name)),
   warehouses(name)
 `;
 
@@ -205,11 +229,16 @@ const Stocks = () => {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
-  const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [searchParams, setSearchParams] = useSearchParams();
+  const [warehouseFilter, setWarehouseFilter] = useState(() => parseStocksParams(searchParams).warehouse ?? "all");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<StockStatusFilter>(() => parseStatusParam(searchParams.get("status")));
+  const [statusFilter, setStatusFilter] = useState<StockStatusFilter>(() => parseStocksParams(searchParams).status);
+  const [view, setView] = useState<StockView>("product");
+  // Produtos abertos na vista "Por produto".
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const gate = usePermissionGate();
+  const canEditStock = gate("stocks.edit").allowed;
 
   // KPIs do topo (rpc_inventory_today.stock). Sem a RPC ou sem o bloco: escondidos.
   const { data: inventoryToday } = useInventoryToday();
@@ -221,34 +250,40 @@ const Stocks = () => {
         .filter((v) => v != null).length
     : 0;
 
-  // Filtro de estado ↔ ?status=, nos dois sentidos.
+  // Filtros de estado e armazém ↔ ?status=&warehouse=, nos dois sentidos.
   // O setSearchParams do react-router 6 muda de identidade a cada navegação;
   // se fosse dependência do efeito estado→URL, uma navegação externa (ex.:
   // "Existências" no menu → /stocks) voltaria a escrever o estado antigo por
   // cima do URL novo. Por isso o efeito lê-o de uma ref e só corre quando o
   // estado muda; o efeito URL→estado só corre quando o valor do URL muda.
-  const statusParam = searchParams.get("status");
+  const urlParams = parseStocksParams(searchParams);
+  const statusParam = urlParams.status;
+  const warehouseParam = urlParams.warehouse ?? "all";
   const searchParamsRef = useRef({ searchParams, setSearchParams });
   searchParamsRef.current = { searchParams, setSearchParams };
 
   // URL → estado (navegação externa, voltar/avançar do browser).
   useEffect(() => {
-    const parsed = parseStatusParam(statusParam);
-    setStatusFilter((prev) => (prev === parsed ? prev : parsed));
+    setStatusFilter((prev) => (prev === statusParam ? prev : statusParam));
   }, [statusParam]);
+  useEffect(() => {
+    setWarehouseFilter((prev) => (prev === warehouseParam ? prev : warehouseParam));
+  }, [warehouseParam]);
 
-  // Estado → URL (replace): limpar o filtro não deixa um ?status= antigo que
-  // voltasse a aplicá-lo ao recarregar.
+  // Estado → URL (replace): limpar o filtro não deixa um ?status=/?warehouse=
+  // antigo que voltasse a aplicá-lo ao recarregar.
   useEffect(() => {
     const { searchParams: currentParams, setSearchParams: writeParams } = searchParamsRef.current;
-    const wanted = statusFilter === "all" ? null : statusFilter;
-    if (currentParams.get("status") === wanted) return;
+    const wantedStatus = statusFilter === "all" ? null : statusFilter;
+    const wantedWarehouse = warehouseFilter === "all" ? null : warehouseFilter;
+    if (currentParams.get("status") === wantedStatus && currentParams.get("warehouse") === wantedWarehouse) return;
     writeParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (wanted) next.set("status", wanted); else next.delete("status");
+      if (wantedStatus) next.set("status", wantedStatus); else next.delete("status");
+      if (wantedWarehouse) next.set("warehouse", wantedWarehouse); else next.delete("warehouse");
       return next;
     }, { replace: true });
-  }, [statusFilter]);
+  }, [statusFilter, warehouseFilter]);
 
   // Reservado/Livre por produto (rpc_get_product_stock_reservations) e stock
   // total da organização (armazéns ativos) + nº de armazéns com o produto.
@@ -283,6 +318,7 @@ const Stocks = () => {
     categoryFilterIds,
     warehouseFilter,
     statusFilter,
+    view,
     activeCompanyId: activeCompany?.id,
   });
   useEffect(() => {
@@ -294,9 +330,10 @@ const Stocks = () => {
       categoryFilterIds,
       warehouseFilter,
       statusFilter,
+      view,
       activeCompanyId: activeCompany?.id,
     };
-  }, [showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterIds, warehouseFilter, statusFilter, activeCompany?.id]);
+  }, [showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterIds, warehouseFilter, statusFilter, view, activeCompany?.id]);
 
   // status (low/normal/overstock) compares two columns of the SAME row
   // (quantity vs reorder_point / maximum_quantity) — PostgREST filters only
@@ -371,8 +408,11 @@ const Stocks = () => {
     try {
       const from = pageNum * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
-      const query = buildStocksQuery(filters)
-        .order("created_at", { ascending: false })
+      // Vista "Por produto": ordenada por produto, para as linhas do mesmo
+      // produto virem seguidas na paginação (ver productGroups).
+      const query = (filters.view === "product"
+        ? buildStocksQuery(filters).order("product_id", { ascending: true })
+        : buildStocksQuery(filters).order("created_at", { ascending: false }))
         .order("id", { ascending: true })
         .range(from, to);
 
@@ -454,7 +494,7 @@ const Stocks = () => {
     if (!activeCompany?.id) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterKey, warehouseFilter, statusFilter]);
+  }, [activeCompany?.id, showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterKey, warehouseFilter, statusFilter, view]);
 
   // Infinite scroll observer — inert while a status filter is active (hasMore is
   // false in that mode, since loadAllForStatusFilter already loaded everything).
@@ -563,6 +603,46 @@ const Stocks = () => {
       return a.localeCompare(b);
     });
   }, [stocks]);
+
+  // Vista "Por produto": agrupamento do lado do cliente sobre as linhas já
+  // carregadas. Para os totais não mentirem com a paginação infinita, nessa
+  // vista a consulta vem ordenada por product_id (as linhas de um produto
+  // chegam seguidas) e, enquanto houver mais páginas, o último produto
+  // carregado fica de fora — pode ter armazéns na página seguinte; aparece
+  // completo quando ela chegar. Com filtro de estado carrega-se tudo
+  // (hasMore = false), por isso nada fica de fora. Os grupos ficam pela ordem
+  // de chegada (product_id): reordenar por nome no cliente fazia os produtos
+  // saltarem a cada página carregada. Com filtro de estado, o total do grupo é
+  // só das linhas filtradas (e diz isso no ecrã).
+  const productGroups = useMemo<ProductGroup[]>(() => {
+    if (view !== "product") return [];
+    const byProduct = new Map<string, Stock[]>();
+    for (const stock of stocks) {
+      const list = byProduct.get(stock.product_id) || [];
+      list.push(stock);
+      byProduct.set(stock.product_id, list);
+    }
+    const lastProductId = hasMore && stocks.length > 0 ? stocks[stocks.length - 1].product_id : null;
+    const groups: ProductGroup[] = [];
+    for (const [productId, rows] of byProduct) {
+      if (productId === lastProductId) continue;
+      const first = rows[0].products;
+      const codes = rows.map(getStockStatusCode);
+      rows.sort((a, b) => (a.warehouses?.name || "").localeCompare(b.warehouses?.name || ""));
+      groups.push({
+        productId,
+        name: first?.name ?? "—",
+        sku: first?.sku ?? null,
+        barcode: first?.barcode ?? null,
+        rows,
+        quantity: rows.reduce((acc, r) => acc + toNum(r.quantity), 0),
+        maxSum: rows.reduce((acc, r) => acc + toNum(r.maximum_quantity), 0),
+        // Pior estado das linhas: baixo > excesso > normal.
+        status: codes.includes("low") ? "low" : codes.includes("overstock") ? "overstock" : "normal",
+      });
+    }
+    return groups;
+  }, [stocks, view, hasMore]);
 
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
@@ -806,12 +886,296 @@ const Stocks = () => {
     setDialogOpen(true);
   };
 
-  const getStockStatus = (stock: Stock) => {
-    const code = getStockStatusCode(stock);
+  const statusBadge = (code: "low" | "overstock" | "normal") => {
     // Tons do mockup (STS): Baixo = bad, Excesso = warn, Normal = ok.
     if (code === "low") return <InventoryStatusBadge tone="bad">{t('stocks.status.lowStock')}</InventoryStatusBadge>;
     if (code === "overstock") return <InventoryStatusBadge tone="warn">{t('stocks.status.overstock')}</InventoryStatusBadge>;
     return <InventoryStatusBadge tone="ok">{t('stocks.status.normal')}</InventoryStatusBadge>;
+  };
+  const getStockStatus = (stock: Stock) =>
+    stock.deleted_at ? <InventoryStatusBadge tone="neutral">Eliminado</InventoryStatusBadge> : statusBadge(getStockStatusCode(stock));
+
+  const openMovement = (ctx: { productId?: string; warehouseId?: string; movementType?: "ajuste" }) => {
+    setMovementContext(ctx);
+    setMovementDialogOpen(true);
+  };
+
+  // Reservado/Livre: a reserva é por produto ao nível da organização (todos os
+  // armazéns), por isso estas células são do produto, não da linha.
+  const renderReservationCells = (productId: string) => {
+    const res = reservationByProduct[productId];
+    const org = orgStockByProduct[productId];
+    if (showDeleted || !res || !org) {
+      return (
+        <>
+          <TableCell className="text-right text-muted-foreground">-</TableCell>
+          <TableCell className="text-right text-muted-foreground">-</TableCell>
+        </>
+      );
+    }
+    const free = Math.round((org.total - res.qty_reserved) * 1e6) / 1e6;
+    const multiWarehouse = org.warehouses > 1;
+    return (
+      <>
+        <TableCell className="text-right tabular-nums">
+          {res.qty_reserved > 0 ? (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-4">{formatQty(res.qty_reserved)}</span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  {t('stocks.table.reservedTooltip', { count: res.orders_count })}
+                  {res.qty_missing > 0 && (
+                    <> {t('stocks.table.reservedMissing', { qty: formatQty(res.qty_missing) })}</>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+              <div className="text-xs text-muted-foreground">{res.orders_count} EC</div>
+            </>
+          ) : (
+            <span className="text-muted-foreground">0</span>
+          )}
+        </TableCell>
+        <TableCell className={cn("text-right tabular-nums", free < 0 && cn(toneText.bad, "font-semibold"))}>
+          {multiWarehouse ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0} className="cursor-help">
+                  {formatQty(free)}
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">{t('stocks.table.orgSuffix')}</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                {t('stocks.table.freeOrgTooltip', {
+                  total: formatQty(org.total),
+                  reserved: formatQty(res.qty_reserved),
+                  count: org.warehouses,
+                })}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            formatQty(free)
+          )}
+          {free < 0 ? <div className="text-xs">reservas acima do stock</div> : null}
+        </TableCell>
+      </>
+    );
+  };
+
+  // Ações da linha (td.act do mockup): Movimento · Histórico · ⋯ — mesmas
+  // permissões de antes (stocks.edit / inventory.view / stocks.delete).
+  const renderStockActions = (stock: Stock) => {
+    const label = stock.products?.name ?? "stock";
+    if (showDeleted) {
+      return (
+        <RowActions
+          primary={{
+            label: t('stocks.restore') || 'Restaurar',
+            icon: RotateCcw,
+            onClick: () => handleRestore(stock.id),
+            permission: "stocks.delete",
+          }}
+        />
+      );
+    }
+    return (
+      <div className="inline-flex items-center gap-1">
+        <RowActions
+          primary={{
+            label: "Movimento",
+            icon: ArrowLeftRight,
+            onClick: () => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id }),
+            permission: "stocks.edit",
+          }}
+        />
+        {/* Histórico → livro de Movimentos filtrado por produto+armazém
+            (filtra a organização ativa, ao contrário do diálogo). */}
+        <RowActions
+          primary={{
+            label: "Histórico",
+            icon: ListOrdered,
+            onClick: () => navigate(stockMovementsLink({ product: stock.product_id, warehouse: stock.warehouse_id })),
+            permission: "inventory.view",
+          }}
+        />
+        {/* modal={false}: abrir o diálogo de edição a partir do menu sem o Radix deixar o body com pointer-events bloqueado. */}
+        <RowActions
+          modal={false}
+          menuLabel={`Mais ações — ${label}`}
+          items={[
+            {
+              label: "Editar",
+              icon: Pencil,
+              onSelect: () => openEditDialog(stock),
+              permission: "stocks.edit",
+            },
+            {
+              label: "Registar ajuste",
+              icon: ClipboardList,
+              onSelect: () => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id, movementType: "ajuste" }),
+              permission: "stocks.edit",
+            },
+            {
+              // Diálogo rápido dos últimos movimentos — o mesmo de antes.
+              label: "Últimos movimentos (rápido)",
+              icon: History,
+              onSelect: () => {
+                setHistoryContext({
+                  productId: stock.product_id,
+                  warehouseId: stock.warehouse_id,
+                  productName: stock.products?.name,
+                  warehouseName: stock.warehouses?.name,
+                });
+                setHistoryDialogOpen(true);
+              },
+            },
+            "separator",
+            {
+              label: "Eliminar",
+              icon: Trash2,
+              destructive: true,
+              onSelect: () => handleDelete(stock.id),
+              permission: "stocks.delete",
+            },
+          ]}
+        />
+      </div>
+    );
+  };
+
+  const productCodes = (sku?: string | null, barcode?: string | null) =>
+    [sku, barcode ? `EAN ${barcode}` : null].filter(Boolean).join(" · ");
+
+  // Uma linha produto+armazém. sub = linha de um produto aberto na vista "Por produto".
+  const renderStockRow = (stock: Stock, sub = false) => {
+    const codes = productCodes(stock.products?.sku, stock.products?.barcode);
+    return (
+      <TableRow key={stock.id} className={cn(sub && "bg-muted/30 hover:bg-muted/40", stock.deleted_at && "opacity-60")}>
+        <TableCell className={cn(sub && "pl-10")}>
+          {sub ? null : <div className="font-semibold">{stock.products?.name}</div>}
+          {codes ? <div className="font-mono text-xs text-muted-foreground">{codes}</div> : null}
+        </TableCell>
+        <TableCell>{stock.warehouses?.name}</TableCell>
+        <TableCell className="font-mono text-sm">{stock.location || "—"}</TableCell>
+        <TableCell className="text-right">
+          <span className="inline-flex items-center gap-1 tabular-nums">
+            <b>{formatQty(toNum(stock.quantity))}</b>
+            <span title="A quantidade só muda por movimentos" className="text-muted-foreground">
+              <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="sr-only">A quantidade só muda por movimentos</span>
+            </span>
+          </span>
+          {!showDeleted && canEditStock ? (
+            <div className="mt-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id, movementType: "ajuste" })}
+              >
+                <ClipboardList className="mr-1 h-3 w-3" aria-hidden="true" /> Registar ajuste
+              </Button>
+            </div>
+          ) : null}
+        </TableCell>
+        {sub ? (
+          // Reserva é do produto (organização): já está na linha do produto.
+          <>
+            <TableCell className="text-right text-muted-foreground" title="Reserva por produto (organização): ver a linha do produto">—</TableCell>
+            <TableCell className="text-right text-muted-foreground" title="Livre por produto (organização): ver a linha do produto">—</TableCell>
+          </>
+        ) : (
+          renderReservationCells(stock.product_id)
+        )}
+        <TableCell className="whitespace-nowrap text-right tabular-nums">
+          {stock.minimum_quantity} / {stock.maximum_quantity} / {stock.reorder_point}
+        </TableCell>
+        <TableCell>{getStockStatus(stock)}</TableCell>
+        <TableCell className="text-right">
+          <div className="flex justify-end">{renderStockActions(stock)}</div>
+        </TableCell>
+      </TableRow>
+    );
+  };
+
+  // Barra reservado/livre do produto (.sbar do mockup), escala = máximo.
+  const renderReservationBar = (group: ProductGroup) => {
+    const res = reservationByProduct[group.productId];
+    if (showDeleted || !res) return null;
+    const reserved = Math.min(group.quantity, res.qty_reserved);
+    const free = Math.max(0, group.quantity - reserved);
+    const scale = Math.max(group.maxSum, group.quantity, 1);
+    return (
+      <div
+        className="ml-auto mt-1 flex h-1.5 w-[100px] overflow-hidden rounded bg-muted"
+        title={`Reservado ${formatQty(reserved)} · Livre ${formatQty(free)} · Máx. ${group.maxSum || "—"}`}
+        aria-hidden="true"
+      >
+        <span className="bg-warning" style={{ width: `${(reserved / scale) * 100}%` }} />
+        <span className="bg-success" style={{ width: `${(free / scale) * 100}%` }} />
+      </div>
+    );
+  };
+
+  const toggleProduct = (productId: string) =>
+    setExpanded((prev) => ({ ...prev, [productId]: !prev[productId] }));
+
+  const renderProductGroup = (group: ProductGroup) => {
+    const open = !!expanded[group.productId];
+    const codes = productCodes(group.sku, group.barcode);
+    const Chevron = open ? ChevronDown : ChevronRight;
+    return (
+      <Fragment key={group.productId}>
+        <TableRow className="cursor-pointer" onClick={() => toggleProduct(group.productId)}>
+          <TableCell>
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleProduct(group.productId);
+              }}
+              className="inline-flex items-center gap-1 rounded-sm text-left font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Chevron className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {group.name}
+            </button>
+            {codes ? <div className="pl-5 font-mono text-xs text-muted-foreground">{codes}</div> : null}
+          </TableCell>
+          <TableCell>{group.rows.length} armazém(ns)</TableCell>
+          <TableCell className="text-muted-foreground">—</TableCell>
+          <TableCell className="text-right tabular-nums">
+            <b>{formatQty(group.quantity)}</b>
+            {statusFilter !== "all" ? (
+              // Total parcial: a barra reservado/livre (do produto inteiro) não se aplica.
+              <small className="block text-xs font-normal text-muted-foreground">das linhas filtradas</small>
+            ) : (
+              renderReservationBar(group)
+            )}
+          </TableCell>
+          {renderReservationCells(group.productId)}
+          <TableCell className="text-right text-muted-foreground">—</TableCell>
+          <TableCell>
+            {showDeleted ? <InventoryStatusBadge tone="neutral">Eliminado</InventoryStatusBadge> : statusBadge(group.status)}
+          </TableCell>
+          <TableCell className="text-right">
+            <div className="flex justify-end">
+              <RowActions
+                primary={{
+                  label: "Histórico",
+                  icon: ListOrdered,
+                  onClick: () => navigate(stockMovementsLink({ product: group.productId })),
+                  permission: "inventory.view",
+                }}
+              />
+            </div>
+          </TableCell>
+        </TableRow>
+        {open ? group.rows.map((stock) => renderStockRow(stock, true)) : null}
+      </Fragment>
+    );
   };
 
   // Exports every stock matching the current filters, not just what's been
@@ -1222,13 +1586,6 @@ const Stocks = () => {
           description={t('inventory.stocks.description')}
           actions={
           <>
-            <Button
-              variant={showDeleted ? "default" : "outline"}
-              onClick={() => setShowDeleted((prev) => !prev)}
-            >
-              <Trash2 className="mr-2 h-4 w-4" />
-              {showDeleted ? (t('stocks.hideDeleted') || 'Ocultar eliminados') : (t('stocks.showDeleted') || 'Ver eliminados')}
-            </Button>
             <PermissionGate permission="stocks.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('stocks.export')}
@@ -1305,14 +1662,15 @@ const Stocks = () => {
               </Button>
             </PermissionGate>
             <PermissionGate permission="stocks.create">
-              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={resetForm}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    {t('stocks.addStock')}
-                  </Button>
-                </DialogTrigger>
-              </Dialog>
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setDialogOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t('stocks.addStock')}
+              </Button>
             </PermissionGate>
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogContent>
@@ -1547,68 +1905,94 @@ const Stocks = () => {
           </KpiGrid>
         )}
 
-        <div className="flex flex-wrap gap-3 items-center">
-          <Input
-            type="search"
-            placeholder="Nome, SKU ou EAN"
-            aria-label="Pesquisar por nome, SKU ou EAN"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="max-w-xs"
-          />
-          <CategorySubcategoryFilter
-            categoryId={categoryFilter}
-            subcategoryId={subcategoryFilter}
-            onChange={({ categoryId, subcategoryId }) => {
-              setCategoryFilter(categoryId);
-              setSubcategoryFilter(subcategoryId);
-            }}
-            includeUncategorized
-          />
-          <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder={t('stocks.table.warehouse')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os armazéns</SelectItem>
-              {warehouses.map((warehouse) => (
-                <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder={t('stocks.table.status')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os estados</SelectItem>
-              <SelectItem value="low">{t('stocks.status.lowStock')}</SelectItem>
-              <SelectItem value="normal">{t('stocks.status.normal')}</SelectItem>
-              <SelectItem value="overstock">{t('stocks.status.overstock')}</SelectItem>
-            </SelectContent>
-          </Select>
-          {(searchTerm || categoryFilter !== "all" || subcategoryFilter !== "all" || warehouseFilter !== "all" || statusFilter !== "all") && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSearchTerm("");
-                setCategoryFilter("all");
-                setSubcategoryFilter("all");
-                setWarehouseFilter("all");
-                setStatusFilter("all");
+        {/* Filtros (card .filters do mockup): pesquisa, categoria/subcategoria,
+            armazém, estado, ver eliminados; pílulas da vista por baixo. */}
+        <div className="space-y-3 rounded-lg border bg-card p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative w-full max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input
+                type="search"
+                placeholder="Nome, SKU ou EAN"
+                aria-label="Pesquisar stock por nome, SKU ou EAN"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <CategorySubcategoryFilter
+              categoryId={categoryFilter}
+              subcategoryId={subcategoryFilter}
+              onChange={({ categoryId, subcategoryId }) => {
+                setCategoryFilter(categoryId);
+                setSubcategoryFilter(subcategoryId);
               }}
-            >
-              Limpar filtros
-            </Button>
-          )}
-          <span className="text-sm text-muted-foreground ml-auto">
-            {stocks.length} carregado{stocks.length === 1 ? "" : "s"}
-          </span>
+              includeUncategorized
+            />
+            <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+              <SelectTrigger className="w-[200px]" aria-label="Armazém">
+                <SelectValue placeholder={t('stocks.table.warehouse')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os armazéns</SelectItem>
+                {warehouses.map((warehouse) => (
+                  <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.name}</SelectItem>
+                ))}
+                {/* Armazém do URL (?warehouse=) que não está na lista (ex.: eliminado). */}
+                {warehouseFilter !== "all" && !warehouses.some((w) => w.id === warehouseFilter) ? (
+                  <SelectItem value={warehouseFilter}>Armazém selecionado</SelectItem>
+                ) : null}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StockStatusFilter)}>
+              <SelectTrigger className="w-[180px]" aria-label="Estado">
+                <SelectValue placeholder={t('stocks.table.status')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os estados</SelectItem>
+                <SelectItem value="low">{t('stocks.status.lowStock')}</SelectItem>
+                <SelectItem value="normal">{t('stocks.status.normal')}</SelectItem>
+                <SelectItem value="overstock">{t('stocks.status.overstock')}</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="stocks-show-deleted"
+                checked={showDeleted}
+                onCheckedChange={(v) => setShowDeleted(v === true)}
+              />
+              <Label htmlFor="stocks-show-deleted" className="cursor-pointer text-sm font-normal">
+                {t('stocks.showDeleted') || 'Ver eliminados'}
+              </Label>
+            </div>
+            {(searchTerm || categoryFilter !== "all" || subcategoryFilter !== "all" || warehouseFilter !== "all" || statusFilter !== "all") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearchTerm("");
+                  setCategoryFilter("all");
+                  setSubcategoryFilter("all");
+                  setWarehouseFilter("all");
+                  setStatusFilter("all");
+                }}
+              >
+                Limpar filtros
+              </Button>
+            )}
+          </div>
+          <FilterPills<StockView> ariaLabel="Vista" value={view} onChange={setView} options={VIEW_OPTIONS} />
         </div>
 
+        {!loading && stocks.length === 0 ? (
+          <InventoryEmptyState
+            title="Sem stock com estes filtros"
+            description={showDeleted ? "Não há linhas de stock eliminadas com estes filtros." : undefined}
+          />
+        ) : (
         <div className="border rounded-lg">
-          <Table>
+          <Table className="min-w-[1000px]">
+            <caption className="sr-only">Existências {view === "product" ? "por produto" : "por armazém"}</caption>
             <TableHeader>
               <TableRow>
                 <TableHead>{t('stocks.table.product')}</TableHead>
@@ -1618,7 +2002,7 @@ const Stocks = () => {
                 <TableHead className="text-right">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="cursor-help underline decoration-dotted underline-offset-4">
+                      <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-4">
                         {t('stocks.table.reserved')} <span className="font-normal text-muted-foreground">(organização)</span>
                       </span>
                     </TooltipTrigger>
@@ -1628,215 +2012,36 @@ const Stocks = () => {
                 <TableHead className="text-right">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="cursor-help underline decoration-dotted underline-offset-4">
+                      <span tabIndex={0} className="cursor-help underline decoration-dotted underline-offset-4">
                         {t('stocks.table.free')} <span className="font-normal text-muted-foreground">(organização)</span>
                       </span>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">{t('stocks.table.freeHint')}</TooltipContent>
                   </Tooltip>
                 </TableHead>
-                <TableHead className="text-right">{t('stocks.table.min')}</TableHead>
-                <TableHead className="text-right">{t('stocks.table.max')}</TableHead>
-                <TableHead className="text-right">{t('stocks.table.reorder')}</TableHead>
+                <TableHead className="whitespace-nowrap text-right">Mín. / Máx. / PE</TableHead>
                 <TableHead>{t('stocks.table.status')}</TableHead>
-                <TableHead className="text-right">{t('stocks.table.actions')}</TableHead>
+                <TableHead className="text-right"><span className="sr-only">{t('stocks.table.actions')}</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center">
+                  <TableCell colSpan={STOCK_COLUMNS} className="text-center">
                     {t('stocks.loading')}
                   </TableCell>
                 </TableRow>
-              ) : stocks.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center">
-                    {t('stocks.noStocks')}
-                  </TableCell>
-                </TableRow>
+              ) : view === "product" ? (
+                productGroups.map(renderProductGroup)
               ) : (
                 groupedStocks.map(([categoryName, categoryStocks]) => (
                   <Fragment key={categoryName}>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableCell colSpan={11} className="font-semibold text-sm">
+                    <TableRow className="bg-primary/5 hover:bg-primary/5">
+                      <TableCell colSpan={STOCK_COLUMNS} className="font-semibold text-sm">
                         {categoryName} <span className="font-normal text-muted-foreground">({categoryStocks.length})</span>
                       </TableCell>
                     </TableRow>
-                    {categoryStocks.map((stock) => (
-                      <TableRow key={stock.id}>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2 pl-4">
-                            <Package className="w-4 h-4 text-muted-foreground" />
-                            {stock.products?.name}
-                          </div>
-                        </TableCell>
-                        <TableCell>{stock.warehouses?.name}</TableCell>
-                        <TableCell>{stock.location || "-"}</TableCell>
-                        <TableCell className="text-right">
-                          {stock.quantity}
-                        </TableCell>
-                        {(() => {
-                          // Reserva ao nível da organização: igual em todas as
-                          // linhas (armazéns) do mesmo produto.
-                          const res = reservationByProduct[stock.product_id];
-                          const org = orgStockByProduct[stock.product_id];
-                          if (showDeleted || !res || !org) {
-                            return (
-                              <>
-                                <TableCell className="text-right text-muted-foreground">-</TableCell>
-                                <TableCell className="text-right text-muted-foreground">-</TableCell>
-                              </>
-                            );
-                          }
-                          const free = Math.round((org.total - res.qty_reserved) * 1e6) / 1e6;
-                          const multiWarehouse = org.warehouses > 1;
-                          return (
-                            <>
-                              <TableCell className="text-right">
-                                {res.qty_reserved > 0 ? (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="cursor-help">{formatQty(res.qty_reserved)}</span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="max-w-xs">
-                                      {t('stocks.table.reservedTooltip', { count: res.orders_count })}
-                                      {res.qty_missing > 0 && (
-                                        <> {t('stocks.table.reservedMissing', { qty: formatQty(res.qty_missing) })}</>
-                                      )}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : (
-                                  <span className="text-muted-foreground">0</span>
-                                )}
-                              </TableCell>
-                              <TableCell className={cn("text-right", free < 0 && cn(toneText.bad, "font-semibold"))}>
-                                {multiWarehouse ? (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="cursor-help">
-                                        {formatQty(free)}
-                                        <span className="ml-1 text-xs font-normal text-muted-foreground">{t('stocks.table.orgSuffix')}</span>
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="max-w-xs">
-                                      {t('stocks.table.freeOrgTooltip', {
-                                        total: formatQty(org.total),
-                                        reserved: formatQty(res.qty_reserved),
-                                        count: org.warehouses,
-                                      })}
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : (
-                                  formatQty(free)
-                                )}
-                              </TableCell>
-                            </>
-                          );
-                        })()}
-                        <TableCell className="text-right">
-                          {stock.minimum_quantity}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {stock.maximum_quantity}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {stock.reorder_point}
-                        </TableCell>
-                        <TableCell>{getStockStatus(stock)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {showDeleted ? (
-                              // Restaurar: mesmo gate de antes (stocks.delete), agora no menu ⋯.
-                              <PermissionGate permission="stocks.delete">
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" aria-label={`Mais ações — ${stock.products?.name ?? "stock"}`}>
-                                      <MoreHorizontal className="w-4 h-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onSelect={() => handleRestore(stock.id)}>
-                                      <RotateCcw className="mr-2 h-4 w-4" /> {t('stocks.restore') || 'Restaurar'}
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </PermissionGate>
-                            ) : (
-                              <>
-                                <PermissionGate permission="stocks.edit">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    title="Registar movimento"
-                                    aria-label="Registar movimento"
-                                    onClick={() => {
-                                      setMovementContext({ productId: stock.product_id, warehouseId: stock.warehouse_id });
-                                      setMovementDialogOpen(true);
-                                    }}
-                                  >
-                                    <ArrowLeftRight className="w-4 h-4" />
-                                  </Button>
-                                </PermissionGate>
-                                {/* Histórico → livro de Movimentos filtrado por produto+armazém
-                                    (filtra a organização ativa, ao contrário do diálogo). */}
-                                <PermissionGate permission="inventory.view">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    title="Histórico de movimentos"
-                                    aria-label="Histórico de movimentos"
-                                    onClick={() =>
-                                      navigate(`/stock-movements?product=${encodeURIComponent(stock.product_id)}&warehouse=${encodeURIComponent(stock.warehouse_id)}`)
-                                    }
-                                  >
-                                    <ListOrdered className="w-4 h-4" />
-                                  </Button>
-                                </PermissionGate>
-                                {/* modal={false}: abrir o diálogo de edição a partir do menu sem o Radix deixar o body com pointer-events bloqueado. */}
-                                <DropdownMenu modal={false}>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" aria-label={`Mais ações — ${stock.products?.name ?? "stock"}`}>
-                                      <MoreHorizontal className="w-4 h-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    {/* Diálogo rápido dos últimos movimentos — o mesmo de antes. */}
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        setHistoryContext({
-                                          productId: stock.product_id,
-                                          warehouseId: stock.warehouse_id,
-                                          productName: stock.products?.name,
-                                          warehouseName: stock.warehouses?.name,
-                                        });
-                                        setHistoryDialogOpen(true);
-                                      }}
-                                    >
-                                      <History className="mr-2 h-4 w-4" /> Últimos movimentos (rápido)
-                                    </DropdownMenuItem>
-                                    <PermissionGate permission="stocks.edit">
-                                      <DropdownMenuItem onSelect={() => openEditDialog(stock)}>
-                                        <Pencil className="mr-2 h-4 w-4" /> Editar
-                                      </DropdownMenuItem>
-                                    </PermissionGate>
-                                    <PermissionGate permission="stocks.delete">
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
-                                        className="text-destructive focus:text-destructive"
-                                        onSelect={() => handleDelete(stock.id)}
-                                      >
-                                        <Trash2 className="mr-2 h-4 w-4" /> Eliminar
-                                      </DropdownMenuItem>
-                                    </PermissionGate>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {categoryStocks.map((stock) => renderStockRow(stock))}
                   </Fragment>
                 ))
               )}
@@ -1844,15 +2049,25 @@ const Stocks = () => {
           </Table>
           {/* Infinite scroll loader — inert (never shows "a carregar mais") while a
               status filter is active, since hasMore is false in that mode. */}
-          <div ref={loadMoreRef} className="py-4 flex justify-center">
-            {loadingMore && (
-              <div className="text-sm text-muted-foreground">{t('stocks.loadingMore') || 'A carregar mais...'}</div>
-            )}
-            {!hasMore && !loading && stocks.length > 0 && (
-              <div className="text-sm text-muted-foreground">{t('stocks.allLoaded') || 'Todos carregados'}</div>
-            )}
+          <div ref={loadMoreRef} className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm text-muted-foreground">
+            <span role="status" className="inline-flex flex-wrap items-center gap-1.5">
+              {stocks.length} linha(s) carregada(s)
+              {view === "product" ? (
+                <>
+                  {" · "}{productGroups.length} produto(s)
+                  {" · "}<span className="inline-block h-1.5 w-2.5 rounded-sm bg-warning" aria-hidden="true" /> reservado
+                  {" · "}<span className="inline-block h-1.5 w-2.5 rounded-sm bg-success" aria-hidden="true" /> livre (escala: máximo)
+                </>
+              ) : null}
+            </span>
+            {loadingMore ? (
+              <span>{t('stocks.loadingMore') || 'A carregar mais...'}</span>
+            ) : !hasMore && !loading && stocks.length > 0 ? (
+              <span>{t('stocks.allLoaded') || 'Todos carregados'}</span>
+            ) : null}
           </div>
         </div>
+        )}
       </div>
 
       <StockMovementDialog
