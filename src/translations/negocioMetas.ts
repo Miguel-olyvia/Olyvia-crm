@@ -1,7 +1,10 @@
 // Página "Negócio e metas" (/negocio-metas) — módulo próprio, mesmo padrão de
 // `today.ts` e `directSales.ts`, juntado em `useTranslation.ts`. Apenas en/pt:
-// nas outras línguas o `t()` cai para `en`.
-export const negocioMetasTranslations: Record<string, Record<string, string>> = {
+// nas outras línguas o `t()` cai para `en`. Os textos do Quadro, da Lista, do painel e da
+// comparação estão em `negocioMetasQuadro.ts` e juntam-se aqui (prevalecem sobre os daqui).
+import { negocioMetasQuadroTranslations } from "./negocioMetasQuadro";
+
+const textosBase: Record<"en" | "pt", Record<string, string>> = {
   en: {
     'sidebar.businessGoals': 'Business & goals',
 
@@ -89,20 +92,12 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.view.board': 'Board',
     'businessGoals.view.list': 'List',
     'businessGoals.quick.label': 'Quick views',
-    'businessGoals.quick.enviar': 'To send',
-    'businessGoals.quick.espera': 'Waiting for the customer',
-    'businessGoals.quick.assinar': 'To sign',
-    'businessGoals.quick.financeiro': 'In Finance',
-    'businessGoals.quick.parados': 'Stalled 7+',
-    'businessGoals.quick.atraso': 'Overdue',
     'businessGoals.count': '{count} deals',
     'businessGoals.countOne': '1 deal',
     'businessGoals.empty': 'No deals found.',
     'businessGoals.clear': 'Clear search and filters',
     'businessGoals.list.caption': 'Deals, one per row. Choose one to open it.',
     'businessGoals.deals.next': 'Next step',
-    'businessGoals.deals.stalled': 'Stalled for',
-    'businessGoals.deals.days': '{count} days',
     'businessGoals.phase.financeiro': 'Finance',
     'businessGoals.step.escolherOrcamento': 'Choose a quote',
     'businessGoals.step.criarProposta': 'Create the proposal',
@@ -122,8 +117,6 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.scope.mine': 'Mine',
     'businessGoals.scope.all': 'All',
     'businessGoals.filters.button': 'Filters',
-    'businessGoals.filters.phase': 'Phase',
-    'businessGoals.filters.allPhases': 'All phases',
     'businessGoals.filters.service': 'Service',
     'businessGoals.filters.allServices': 'All services',
     'businessGoals.filters.quotes': 'Number of quotes',
@@ -147,8 +140,6 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.column.empty': 'No deals in this phase',
     'businessGoals.column.clear': 'Clear filters',
     'businessGoals.card.noValue': 'No value',
-    'businessGoals.card.overdue': 'Overdue',
-    'businessGoals.card.stalled': 'Stalled for {count} days',
     'businessGoals.card.age': 'On the board for {count} days',
     'businessGoals.card.label': '{person} · {service} · {value} · {step}',
     'businessGoals.shortcuts.button': 'Keyboard shortcuts',
@@ -251,20 +242,12 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.view.board': 'Quadro',
     'businessGoals.view.list': 'Lista',
     'businessGoals.quick.label': 'Vistas rápidas',
-    'businessGoals.quick.enviar': 'Para enviar',
-    'businessGoals.quick.espera': 'À espera do cliente',
-    'businessGoals.quick.assinar': 'Por assinar',
-    'businessGoals.quick.financeiro': 'Em Financeiro',
-    'businessGoals.quick.parados': 'Parados 7+',
-    'businessGoals.quick.atraso': 'Com atraso',
     'businessGoals.count': '{count} negócios',
     'businessGoals.countOne': '1 negócio',
     'businessGoals.empty': 'Nenhum negócio encontrado.',
     'businessGoals.clear': 'Limpar pesquisa e filtros',
     'businessGoals.list.caption': 'Negócios: um por linha. Escolhe um para o abrir.',
     'businessGoals.deals.next': 'Próximo passo',
-    'businessGoals.deals.stalled': 'Parado há',
-    'businessGoals.deals.days': '{count} dias',
     'businessGoals.phase.financeiro': 'Financeiro',
     'businessGoals.step.escolherOrcamento': 'Escolher orçamento',
     'businessGoals.step.criarProposta': 'Criar a proposta',
@@ -284,8 +267,6 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.scope.mine': 'Os meus',
     'businessGoals.scope.all': 'Todos',
     'businessGoals.filters.button': 'Filtros',
-    'businessGoals.filters.phase': 'Fase',
-    'businessGoals.filters.allPhases': 'Todas as fases',
     'businessGoals.filters.service': 'Serviço',
     'businessGoals.filters.allServices': 'Todos os serviços',
     'businessGoals.filters.quotes': 'Número de orçamentos',
@@ -309,8 +290,6 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.column.empty': 'Nenhum negócio nesta fase',
     'businessGoals.column.clear': 'Limpar filtros',
     'businessGoals.card.noValue': 'Sem valor',
-    'businessGoals.card.overdue': 'Em atraso',
-    'businessGoals.card.stalled': 'Parado há {count} dias',
     'businessGoals.card.age': 'No Quadro há {count} dias',
     'businessGoals.card.label': '{person} · {service} · {value} · {step}',
     'businessGoals.shortcuts.button': 'Atalhos de teclado',
@@ -326,4 +305,9 @@ export const negocioMetasTranslations: Record<string, Record<string, string>> = 
     'businessGoals.panel.open': 'Abrir nos Pedidos de Proposta',
     'businessGoals.panel.note': 'Negócio de exemplo: ainda não tem página própria.',
   },
+};
+
+export const negocioMetasTranslations: Record<string, Record<string, string>> = {
+  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en },
+  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt },
 };

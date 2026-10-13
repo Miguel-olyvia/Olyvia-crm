@@ -38,8 +38,11 @@ const renderPage = () =>
     </MemoryRouter>,
   );
 
-const estado = () => screen.getByRole("status").textContent;
-const chips = () => within(screen.getByRole("group", { name: "Vistas rápidas" })).getAllByRole("button");
+const estado = () => screen.getAllByRole("status")[0].textContent;
+const chips = () => within(screen.getByRole("group", { name: "Fases e alertas" })).getAllByRole("button");
+const verTodos = () =>
+  fireEvent.click(within(screen.getByRole("group", { name: "Mostrar" })).getByRole("button", { name: "Todos" }));
+const cartoes = () => document.querySelectorAll("[data-cartao]");
 
 beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.restoreAllMocks());
@@ -50,7 +53,9 @@ describe("cabeçalho", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Negócio e metas" })).toBeInTheDocument();
     const migalhas = screen.getByRole("navigation", { name: "Migalhas de pão" });
     expect(within(migalhas).getByText("Aquisição")).toBeInTheDocument();
-    expect(screen.getByText(/10 no Quadro · €23\.800 em proposta · 4 por fechar, no valor de €47\.800/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 \(de 10\) no Quadro · €0 em proposta · 1 por fechar, no valor de €47\.800/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("note")).toHaveTextContent("Dados de exemplo · ainda sem ligação à base");
   });
 
@@ -64,18 +69,29 @@ describe("cabeçalho", () => {
 describe("Quadro", () => {
   it("mostra quatro colunas por fase com os cartões", () => {
     renderPage();
+    verTodos();
     for (const fase of ["Orçamento", "Proposta", "Contrato", "Financeiro"]) {
       expect(screen.getByRole("heading", { level: 3, name: fase })).toBeInTheDocument();
     }
-    expect(screen.getAllByRole("button", { name: /·/ }).length).toBeGreaterThanOrEqual(10);
+    expect(cartoes()).toHaveLength(10);
   });
 
-  it("cada chip mostra a contagem que o filtro dele dá", () => {
+  it("começa em Os meus, sem repetir o comercial em cada cartão", () => {
     renderPage();
+    expect(estado()).toBe("3 negócios");
+    expect(cartoes()).toHaveLength(3);
+    expect(screen.getByRole("button", { name: /^Vasco Pinto · / })).not.toHaveTextContent("Ana Ribeiro");
+    verTodos();
+    expect(screen.getByRole("button", { name: /^Nuno Barros · / })).toHaveTextContent("Carla Mendes");
+  });
+
+  it("há um chip por fase e o Para tratar, cada um com a contagem que o filtro dele dá", () => {
+    renderPage();
+    verTodos();
     const antes = chips().map((c) => c.textContent!);
-    expect(antes).toHaveLength(6);
+    expect(antes).toHaveLength(5);
     antes.forEach((texto, i) => {
-      const n = Number(texto.match(/(\d+)$/)![1]);
+      const n = Number(texto.match(/(\d+)(?:\s*·[^·]*)?$/)![1]);
       fireEvent.click(chips()[i]);
       expect(chips()[i]).toHaveAttribute("aria-pressed", "true");
       expect(estado()).toBe(n === 1 ? "1 negócio" : `${n} negócios`);
@@ -85,17 +101,39 @@ describe("Quadro", () => {
     });
   });
 
+  it("os chips de fase somam-se (OU) e o Para tratar junta-se com E", () => {
+    renderPage();
+    verTodos();
+    fireEvent.click(screen.getByRole("button", { name: /^Orçamento 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Proposta 2/ }));
+    expect(estado()).toBe("3 negócios");
+    fireEvent.click(screen.getByRole("button", { name: /^Para tratar/ }));
+    expect(estado()).toBe("3 negócios");
+    fireEvent.click(screen.getByRole("button", { name: /^Orçamento 1/ }));
+    expect(estado()).toBe("2 negócios");
+  });
+
   it("um chip filtra os cartões e o resumo do topo", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /^Para enviar/ }));
+    verTodos();
+    fireEvent.click(screen.getByRole("button", { name: /^Orçamento 1/ }));
     expect(estado()).toBe("1 negócio");
     expect(screen.queryByRole("button", { name: /Marta Silveira/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Tiago Rocha/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Tiago Rocha · / })).toBeInTheDocument();
     expect(screen.getByText(/1 \(de 10\) no Quadro/)).toBeInTheDocument();
+  });
+
+  it("sem negócios meus a página oferece Ver todos", () => {
+    renderPage();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Tiago" } });
+    expect(screen.getByText("Nenhum negócio teu com estes filtros.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ver todos" }));
+    expect(estado()).toBe("1 negócio");
   });
 
   it("a pesquisa filtra e dá a opção de limpar quando não há resultados", () => {
     renderPage();
+    verTodos();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "zzz" } });
     expect(screen.getByText("Nenhum negócio encontrado.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Limpar pesquisa e filtros" }));
@@ -104,7 +142,7 @@ describe("Quadro", () => {
 
   it("abrir um cartão mostra o painel com a cadeia", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /Rui Figueiredo/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Rui Figueiredo · / }));
     const painel = screen.getByRole("dialog");
     expect(within(painel).getByText("Escolhido")).toBeInTheDocument();
     expect(within(painel).getByText("Aceite")).toBeInTheDocument();
@@ -113,7 +151,8 @@ describe("Quadro", () => {
 
   it("um negócio sem contrato mostra o passo opcional", () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /Nuno Barros/ }));
+    verTodos();
+    fireEvent.click(screen.getByRole("button", { name: /^Nuno Barros · / }));
     expect(within(screen.getByRole("dialog")).getByText("Passo opcional")).toBeInTheDocument();
   });
 });
@@ -121,6 +160,7 @@ describe("Quadro", () => {
 describe("Quadro | Lista", () => {
   it("alterna entre quadro e lista", () => {
     renderPage();
+    verTodos();
     const quadro = screen.getByRole("button", { name: "Quadro" });
     const lista = screen.getByRole("button", { name: "Lista" });
     expect(quadro).toHaveAttribute("aria-pressed", "true");
@@ -129,7 +169,8 @@ describe("Quadro | Lista", () => {
     expect(lista).toHaveAttribute("aria-pressed", "true");
     expect(quadro).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("table")).toBeInTheDocument();
-    expect(screen.getAllByRole("row")).toHaveLength(11);
+    // cabeçalho + 10 negócios + rodapé (as linhas de detalhe estão escondidas)
+    expect(screen.getAllByRole("row")).toHaveLength(12);
     fireEvent.click(quadro);
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
@@ -155,13 +196,16 @@ describe("Quadro | Lista", () => {
   it("a lista respeita os filtros", () => {
     window.localStorage.setItem(CHAVE_VISTA, "lista");
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /^Com atraso/ }));
-    expect(screen.getAllByRole("row")).toHaveLength(3);
+    verTodos();
+    fireEvent.click(screen.getByRole("button", { name: /^Para tratar/ }));
+    // cabeçalho + 3 negócios + rodapé
+    expect(screen.getAllByRole("row")).toHaveLength(5);
   });
 
   it("ordena ao clicar nos cabeçalhos, com aria-sort", () => {
     window.localStorage.setItem(CHAVE_VISTA, "lista");
     renderPage();
+    verTodos();
     const cabecalho = screen.getByRole("columnheader", { name: /Pessoa/ });
     expect(cabecalho).toHaveAttribute("aria-sort", "none");
     fireEvent.click(within(cabecalho).getByRole("button"));
@@ -175,7 +219,7 @@ describe("Quadro | Lista", () => {
   it("abrir uma linha mostra o painel", () => {
     window.localStorage.setItem(CHAVE_VISTA, "lista");
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Vasco Pinto" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Vasco Pinto/ }));
     expect(within(screen.getByRole("dialog")).getByText("Por assinar")).toBeInTheDocument();
   });
 });

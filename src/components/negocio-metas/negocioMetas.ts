@@ -14,6 +14,8 @@ export interface OrcamentoNegocio {
 
 export interface NegocioMes {
   id: string;
+  /** A pessoa (lead/cliente) a que o negócio pertence; serve para a abrir. */
+  pessoaId: string;
   pessoa: string;
   servico: string;
   comercial: string;
@@ -21,8 +23,9 @@ export interface NegocioMes {
   dias: number;
   /** Dias parado em Orçamento ou Proposta; `null` nas outras fases. */
   parado: number | null;
-  /** O próximo passo está em atraso. */
-  atraso: boolean;
+  /** Prazo do próximo passo (AAAA-MM-DD); `null` sem prazo. Estar em atraso deriva daqui (ver `saudeNegocio.ts`). */
+  proximoPrazo: string | null;
+  contacto: { telefone: string | null; email: string | null };
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;

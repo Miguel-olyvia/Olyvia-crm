@@ -5,9 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect, type NativeSelectOption } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { FOCO } from "./estilos";
-import {
-  FASES, filtrosNoPopover, type FaixaValor, type FiltrosQuadro, type NumOrcamentos,
-} from "./logicaQuadro";
+import { filtrosNoPopover, type FaixaValor, type FiltrosQuadro, type NumOrcamentos } from "./logicaQuadro";
 
 interface CampoProps {
   rotulo: string;
@@ -41,7 +39,7 @@ const ORCAMENTOS: readonly { valor: Exclude<NumOrcamentos, "">; chave: string }[
   { valor: "1", chave: "quotesOne" }, { valor: "2+", chave: "quotesMany" },
 ];
 
-/** O botão Filtros e o painel com os filtros avançados: comercial, fase, serviço, orçamentos e valor. */
+/** O botão Filtros e o painel com os filtros avançados: comercial, serviço, orçamentos e valor (a fase está nos chips da barra). */
 export function FiltrosQuadroPopover({ filtros, comerciais, servicos, aoMudarFiltros }: FiltrosQuadroPopoverProps) {
   const { t } = useTranslation();
   const ativos = filtrosNoPopover(filtros);
@@ -64,11 +62,6 @@ export function FiltrosQuadroPopover({ filtros, comerciais, servicos, aoMudarFil
             rotulo={t("businessGoals.filter.rep")} valor={filtros.comercial}
             opcoes={opcoes(t("businessGoals.filter.allReps"), comerciais.map((c) => ({ value: c, label: c })))}
             aoMudar={(comercial) => aoMudarFiltros({ comercial })}
-          />
-          <Campo
-            rotulo={k("phase")} valor={filtros.fase}
-            opcoes={opcoes(k("allPhases"), FASES.map((f) => ({ value: f, label: t(`businessGoals.phase.${f}`) })))}
-            aoMudar={(fase) => aoMudarFiltros({ fase: fase as FiltrosQuadro["fase"] })}
           />
           <Campo
             rotulo={k("service")} valor={filtros.servico}

@@ -10,6 +10,8 @@ import { temValor } from "./logicaQuadro";
 interface CadeiaNegocioProps {
   negocio: NegocioMes;
   id: string;
+  /** Em linha e compacta (para a linha expandida da Lista); por defeito, em coluna (para o painel). */
+  horizontal?: boolean;
 }
 
 interface PassoProps {
@@ -20,20 +22,27 @@ interface PassoProps {
   children: ReactNode;
 }
 
+/** A marca de um passo: ✓ quando está feito, senão o número. */
+function Marca({ numero, feito }: { numero: number; feito: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
+        feito ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background text-muted-foreground",
+      )}
+    >
+      {feito ? <Check className="h-3.5 w-3.5" /> : numero}
+    </span>
+  );
+}
+
 /** Um passo da cadeia: marca (✓ ou número) ligada ao seguinte por uma linha, sem caixas à volta. */
 function Passo({ numero, titulo, feito, ultimo, children }: PassoProps) {
   return (
     <li className={cn("relative flex gap-3", !ultimo && "pb-5")}>
       {!ultimo && <span aria-hidden="true" className="absolute left-3 top-7 bottom-0 w-px -translate-x-1/2 bg-border" />}
-      <span
-        aria-hidden="true"
-        className={cn(
-          "z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold",
-          feito ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background text-muted-foreground",
-        )}
-      >
-        {feito ? <Check className="h-3.5 w-3.5" /> : numero}
-      </span>
+      <Marca numero={numero} feito={feito} />
       <div className="min-w-0 flex-1 space-y-1.5">
         <h4 className="text-sm font-semibold text-foreground">{titulo}</h4>
         {children}
@@ -42,10 +51,46 @@ function Passo({ numero, titulo, feito, ultimo, children }: PassoProps) {
   );
 }
 
-/** A cadeia do negócio, de cima para baixo: orçamentos (com o escolhido), proposta e contrato. */
-export function CadeiaNegocio({ negocio, id }: CadeiaNegocioProps) {
+/** A cadeia numa linha: "1 Orçamentos · 2 orç. (1 escolhido)", "2 Proposta · Enviada", "3 Contrato · Passo opcional". */
+function CadeiaHorizontal({ negocio, id }: Omit<CadeiaNegocioProps, "horizontal">) {
   const { t } = useTranslation();
   const { orcamentos, proposta, contrato } = negocio;
+  const escolhidos = orcamentos.filter((o) => o.escolhido).length;
+  const passos = [
+    {
+      titulo: t("businessGoals.chain.quotes"), feito: temValor(negocio),
+      estado: t("businessGoals.mini.quotes", {
+        count: orcamentos.length,
+        chosen: t(escolhidos > 0 ? "businessGoals.mini.chosenOne" : "businessGoals.mini.chosenNone"),
+      }),
+    },
+    {
+      titulo: t("businessGoals.chain.proposal"), feito: proposta?.estado === "aceite",
+      estado: proposta ? t(`businessGoals.proposal.${proposta.estado}`) : t("businessGoals.chain.none"),
+    },
+    {
+      titulo: t("businessGoals.chain.contract"), feito: contrato?.estado === "assinado",
+      estado: contrato ? t(`businessGoals.contract.${contrato.estado}`) : t("businessGoals.chain.optional"),
+    },
+  ];
+  return (
+    <ol id={id} aria-label={t("businessGoals.panel.chain")} className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      {passos.map((p, i) => (
+        <li key={p.titulo} className="flex items-center gap-2 text-sm">
+          <Marca numero={i + 1} feito={p.feito} />
+          <span className="font-semibold text-foreground">{p.titulo}</span>
+          <span className="text-muted-foreground">{p.estado}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** A cadeia do negócio, de cima para baixo: orçamentos (com o escolhido), proposta e contrato. */
+export function CadeiaNegocio({ negocio, id, horizontal = false }: CadeiaNegocioProps) {
+  const { t } = useTranslation();
+  const { orcamentos, proposta, contrato } = negocio;
+  if (horizontal) return <CadeiaHorizontal negocio={negocio} id={id} />;
   return (
     <ol id={id} aria-label={t("businessGoals.panel.chain")}>
       <Passo numero={1} titulo={t("businessGoals.chain.quotes")} feito={temValor(negocio)} ultimo={false}>

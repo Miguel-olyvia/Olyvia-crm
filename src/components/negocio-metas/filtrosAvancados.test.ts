@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  COMERCIAL_ATUAL, SEM_FILTROS, chipsDosFiltros, filtrarNegocios, filtrosAtivos, filtrosNoPopover, servicosDe,
+  COMERCIAL_ATUAL, SEM_FILTROS, chipsDosFiltros, filtrarNegocios as filtrarCom, filtrosAtivos, filtrosNoPopover, servicosDe,
+  type FiltrosQuadro,
 } from "./logicaQuadro";
-import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
+import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "./negocioMetasExemplo";
 
 const { negocios } = DADOS_EXEMPLO;
+const filtrarNegocios = (ns: typeof negocios, f: FiltrosQuadro) => filtrarCom(ns, f, HOJE_EXEMPLO);
 const ids = (ls: readonly { id: string }[]) => ls.map((n) => n.id);
 
 describe("Os meus | Todos", () => {
@@ -44,10 +46,10 @@ describe("filtros avançados", () => {
 describe("filtros ativos", () => {
   it("o botão Filtros conta só os campos do painel", () => {
     expect(filtrosNoPopover(SEM_FILTROS)).toBe(0);
-    expect(filtrosNoPopover({ ...SEM_FILTROS, q: "x", meus: true, atraso: true })).toBe(0);
+    expect(filtrosNoPopover({ ...SEM_FILTROS, q: "x", meus: true, paraTratar: true, fases: ["proposta"] })).toBe(0);
     expect(
-      filtrosNoPopover({ ...SEM_FILTROS, servico: "Cozinha", faixa: "ate10", comercial: "Ana Ribeiro", fase: "proposta", orcamentos: "1" }),
-    ).toBe(5);
+      filtrosNoPopover({ ...SEM_FILTROS, servico: "Cozinha", faixa: "ate10", comercial: "Ana Ribeiro", orcamentos: "1" }),
+    ).toBe(4);
   });
   it("cada filtro com chip removível sabe como se limpar", () => {
     const f = { ...SEM_FILTROS, q: " marta ", meus: true, servico: "Cozinha", faixa: "ate10" as const };
@@ -56,6 +58,11 @@ describe("filtros ativos", () => {
     expect(chips[0].valor).toBe("marta");
     const sem = chips.reduce((acc, c) => ({ ...acc, ...c.limpar }), f);
     expect(filtrosAtivos(sem)).toBe(false);
+  });
+  it("fases e Para tratar contam como filtros ativos mesmo sem chip removível", () => {
+    expect(filtrosAtivos({ ...SEM_FILTROS, fases: ["contrato"] })).toBe(true);
+    expect(filtrosAtivos({ ...SEM_FILTROS, paraTratar: true })).toBe(true);
+    expect(chipsDosFiltros({ ...SEM_FILTROS, fases: ["contrato"], paraTratar: true })).toEqual([]);
   });
   it("sem filtros não há chips", () => {
     expect(chipsDosFiltros(SEM_FILTROS)).toEqual([]);

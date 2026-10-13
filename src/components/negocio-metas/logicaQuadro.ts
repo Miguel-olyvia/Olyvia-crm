@@ -1,9 +1,11 @@
-// Lógica pura do Quadro e da Lista de "Negócio e metas": filtros, chips de vista
-// rápida com contagem, ordenação, totais por fase e números do dashboard.
-// Tudo calculado a partir dos negócios; nada aqui lê dados nem muda estado.
+// Lógica pura do Quadro e da Lista de "Negócio e metas": filtros, chips de fase
+// e "Para tratar" com contagem, totais por fase e números do dashboard (a
+// ordenação está em `ordenacaoQuadro.ts`). Tudo calculado a partir dos negócios
+// e do dia de hoje recebido por parâmetro; nada aqui lê dados nem o relógio.
 import {
   faseDoNegocio, isNegocioGanho, valorDoNegocio, type FaseNegocio, type NegocioMes,
 } from "./negocioMetas";
+import { precisaTratar } from "./saudeNegocio";
 
 export const FASES: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "financeiro"];
 
@@ -15,20 +17,25 @@ export interface FiltrosQuadro {
   /** "Os meus": só os negócios do comercial atual. */
   meus: boolean;
   comercial: string;
-  fase: "" | FaseNegocio;
+  /** Fases ligadas (OU entre elas); vazio = todas. */
+  fases: FaseNegocio[];
   servico: string;
   orcamentos: NumOrcamentos;
   faixa: FaixaValor;
-  /** Parados há mais de 7 dias (só Orçamento e Proposta têm "parado há"). */
-  parados: boolean;
-  atraso: boolean;
+  /** "Para tratar": em atraso OU parado há mais de 7 dias OU com prazo hoje. */
+  paraTratar: boolean;
 }
 
-export const SEM_FILTROS: FiltrosQuadro = {
-  q: "", meus: false, comercial: "", fase: "", servico: "", orcamentos: "", faixa: "", parados: false, atraso: false,
-};
+/** Os filtros que valem só para esta visita (os outros, "Os meus" e as fases, ficam guardados). */
+export type OutrosFiltros = Omit<FiltrosQuadro, "meus" | "fases">;
 
-export const LIMITE_PARADOS = 7;
+export const outrosFiltros = (f: FiltrosQuadro): OutrosFiltros => ({
+  q: f.q, comercial: f.comercial, servico: f.servico, orcamentos: f.orcamentos, faixa: f.faixa, paraTratar: f.paraTratar,
+});
+
+export const SEM_FILTROS: FiltrosQuadro = {
+  q: "", meus: false, comercial: "", fases: [], servico: "", orcamentos: "", faixa: "", paraTratar: false,
+};
 
 /** O comercial "eu" da página de exemplo (sem sessão): quem "Os meus" mostra. */
 export const COMERCIAL_ATUAL = "Ana Ribeiro";
@@ -59,66 +66,68 @@ export function temValor(n: NegocioMes): boolean {
   return n.orcamentos.some((o) => o.escolhido);
 }
 
-export function filtrarNegocios(negocios: readonly NegocioMes[], f: FiltrosQuadro): NegocioMes[] {
+/** Entre grupos de filtros é E; dentro das fases e dos alertas de "Para tratar" é OU. */
+export function filtrarNegocios(negocios: readonly NegocioMes[], f: FiltrosQuadro, hoje: string): NegocioMes[] {
   const q = f.q.trim().toLowerCase();
   return negocios.filter((n) => {
     if (q && !`${n.pessoa} ${n.servico} ${n.comercial}`.toLowerCase().includes(q)) return false;
     if (f.meus && n.comercial !== COMERCIAL_ATUAL) return false;
     if (f.comercial && n.comercial !== f.comercial) return false;
-    if (f.fase && faseDoNegocio(n) !== f.fase) return false;
+    if (f.fases.length > 0 && !f.fases.includes(faseDoNegocio(n))) return false;
     if (f.servico && n.servico !== f.servico) return false;
     if (f.orcamentos === "1" && n.orcamentos.length !== 1) return false;
     if (f.orcamentos === "2+" && n.orcamentos.length < 2) return false;
     if (!naFaixa(n, f.faixa)) return false;
-    if (f.parados && !(n.parado !== null && n.parado > LIMITE_PARADOS)) return false;
-    if (f.atraso && !n.atraso) return false;
+    if (f.paraTratar && !precisaTratar(n, hoje)) return false;
     return true;
   });
 }
 
-export type IdVista = "enviar" | "espera" | "assinar" | "financeiro" | "parados" | "atraso";
+export interface ChipFase {
+  fase: FaseNegocio;
+  /** Negócios desta fase com os outros filtros ligados (sem o filtro de fase). */
+  n: number;
+  valor: number;
+  ativo: boolean;
+}
 
-const VISTAS: readonly { id: IdVista; acao: Partial<FiltrosQuadro> }[] = [
-  { id: "enviar", acao: { fase: "orcamento" } },
-  { id: "espera", acao: { fase: "proposta" } },
-  { id: "assinar", acao: { fase: "contrato" } },
-  { id: "financeiro", acao: { fase: "financeiro" } },
-  { id: "parados", acao: { parados: true } },
-  { id: "atraso", acao: { atraso: true } },
-];
-
-export interface VistaRapida {
-  id: IdVista;
-  /** Linhas que o Quadro mostra depois de ligar este chip por cima dos filtros de agora. */
+export interface ChipParaTratar {
+  /** Negócios a tratar com os outros filtros ligados (sem o filtro de fase). */
   n: number;
   ativo: boolean;
 }
 
-const vistaLigada = (f: FiltrosQuadro, acao: Partial<FiltrosQuadro>): boolean =>
-  Object.entries(acao).every(([k, v]) => f[k as keyof FiltrosQuadro] === v);
-
-export function vistasRapidas(negocios: readonly NegocioMes[], f: FiltrosQuadro): VistaRapida[] {
-  return VISTAS.map(({ id, acao }) => ({
-    id,
-    n: filtrarNegocios(negocios, { ...f, ...acao }).length,
-    ativo: vistaLigada(f, acao),
-  }));
+/**
+ * Os chips da barra: uma contagem e um valor por fase, mais "Para tratar". As
+ * contagens vêm dos outros filtros e SEM o de fase, para cada chip mostrar o que
+ * ganha quem o liga (as fases somam-se, OU) e a soma dos chips não mudar ao ligá-los.
+ */
+export function chipsDeFase(
+  negocios: readonly NegocioMes[], f: FiltrosQuadro, hoje: string,
+): { fases: ChipFase[]; paraTratar: ChipParaTratar } {
+  const semFase = { ...f, fases: [] };
+  const totais = totaisPorFase(negocios, f, hoje);
+  return {
+    fases: FASES.map((fase) => ({ fase, ...totais[fase], ativo: f.fases.includes(fase) })),
+    paraTratar: { n: filtrarNegocios(negocios, { ...semFase, paraTratar: true }, hoje).length, ativo: f.paraTratar },
+  };
 }
 
-/** Liga o chip, ou desliga-o (repõe os campos dele) se já estiver ligado. */
-export function alternarVista(f: FiltrosQuadro, id: IdVista): FiltrosQuadro {
-  const acao = VISTAS.find((v) => v.id === id)!.acao;
-  if (!vistaLigada(f, acao)) return { ...f, ...acao };
-  const repor = Object.fromEntries(Object.keys(acao).map((k) => [k, SEM_FILTROS[k as keyof FiltrosQuadro]]));
-  return { ...f, ...repor };
+/** Liga a fase, ou desliga-a se já estiver ligada; as outras ficam como estão. */
+export function alternarFase(f: FiltrosQuadro, fase: FaseNegocio): FiltrosQuadro {
+  const fases = f.fases.includes(fase) ? f.fases.filter((x) => x !== fase) : [...f.fases, fase];
+  return { ...f, fases };
 }
+
+export const alternarParaTratar = (f: FiltrosQuadro): FiltrosQuadro => ({ ...f, paraTratar: !f.paraTratar });
 
 export const filtrosAtivos = (f: FiltrosQuadro): boolean =>
-  (Object.keys(SEM_FILTROS) as (keyof FiltrosQuadro)[]).some((k) => f[k] !== SEM_FILTROS[k]);
+  (Object.keys(SEM_FILTROS) as (keyof FiltrosQuadro)[]).some((k) =>
+    k === "fases" ? f.fases.length > 0 : f[k] !== SEM_FILTROS[k]);
 
 /** Os campos do painel Filtros que estão ligados (é o número do botão). */
 export const filtrosNoPopover = (f: FiltrosQuadro): number =>
-  [f.comercial, f.fase, f.servico, f.orcamentos, f.faixa].filter(Boolean).length;
+  [f.comercial, f.servico, f.orcamentos, f.faixa].filter(Boolean).length;
 
 export type IdChip = "q" | "meus" | "comercial" | "servico" | "orcamentos" | "faixa";
 export interface ChipFiltro {
@@ -129,7 +138,7 @@ export interface ChipFiltro {
   limpar: Partial<FiltrosQuadro>;
 }
 
-/** Os filtros ligados que se mostram como chip removível (fase, parados e atraso já se veem nos chips das vistas rápidas). */
+/** Os filtros ligados que se mostram como chip removível (as fases e "Para tratar" já se veem nos chips da barra). */
 export function chipsDosFiltros(f: FiltrosQuadro): ChipFiltro[] {
   const chips: ChipFiltro[] = [];
   if (f.q.trim()) chips.push({ id: "q", valor: f.q.trim(), limpar: { q: "" } });
@@ -156,61 +165,20 @@ export function proximoPasso(n: NegocioMes): PassoKey {
   return temValor(n) ? "criarProposta" : "escolherOrcamento";
 }
 
-/* ------------------------------------------------------------ ordenação */
-
-export type ColunaLista = "pessoa" | "servico" | "fase" | "valor" | "parado" | "proximo" | "comercial";
-export type Direcao = "asc" | "desc";
-export interface Ordem { coluna: ColunaLista; dir: Direcao }
-
-/** Direção com que cada coluna começa ao primeiro clique. */
-export const DIRECAO_INICIAL: Record<ColunaLista, Direcao> = {
-  pessoa: "asc", servico: "asc", fase: "asc", valor: "desc", parado: "desc", proximo: "asc", comercial: "asc",
-};
-
-type Chave = string | number | null;
-
-function chaveDe(n: NegocioMes, c: ColunaLista): Chave {
-  switch (c) {
-    case "pessoa": return n.pessoa;
-    case "servico": return n.servico;
-    case "fase": return FASES.indexOf(faseDoNegocio(n));
-    case "valor": return temValor(n) ? valorDoNegocio(n) : null;
-    case "parado": return n.parado;
-    case "proximo": return proximoPasso(n);
-    case "comercial": return n.comercial;
-  }
-}
-
-function comparar(a: Chave, b: Chave): number {
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b), "pt");
-}
-
-/** Ordena por coluna; os sem valor (null) ficam sempre no fim. Sem ordem, mantém a ordem recebida. */
-export function ordenarNegocios(negocios: readonly NegocioMes[], ordem: Ordem | null): NegocioMes[] {
-  if (!ordem) return [...negocios];
-  const sinal = ordem.dir === "asc" ? 1 : -1;
-  return [...negocios].sort((x, y) => {
-    const a = chaveDe(x, ordem.coluna);
-    const b = chaveDe(y, ordem.coluna);
-    if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
-    return sinal * comparar(a, b);
-  });
-}
-
-/** Um clique no cabeçalho: a mesma coluna inverte, outra começa na sua direção inicial. */
-export function proximaOrdem(atual: Ordem | null, coluna: ColunaLista): Ordem {
-  if (atual?.coluna === coluna) return { coluna, dir: atual.dir === "asc" ? "desc" : "asc" };
-  return { coluna, dir: DIRECAO_INICIAL[coluna] };
-}
-
 /* ------------------------------------------------------------ totais */
+
+/** Soma do valor (orçamento escolhido) dos negócios. */
+export const somaValor = (negocios: readonly NegocioMes[]): number =>
+  negocios.reduce((soma, n) => soma + valorDoNegocio(n), 0);
 
 export interface TotalFase { n: number; valor: number }
 
-export function totaisPorFase(negocios: readonly NegocioMes[]): Record<FaseNegocio, TotalFase> {
-  const totais = Object.fromEntries(FASES.map((f) => [f, { n: 0, valor: 0 }])) as Record<FaseNegocio, TotalFase>;
-  for (const n of negocios) {
+/** Totais por fase dos negócios que passam nos filtros, sem contar o de fase (para o chip e a coluna de cada fase não desaparecerem). */
+export function totaisPorFase(
+  negocios: readonly NegocioMes[], f: FiltrosQuadro, hoje: string,
+): Record<FaseNegocio, TotalFase> {
+  const totais = Object.fromEntries(FASES.map((x) => [x, { n: 0, valor: 0 }])) as Record<FaseNegocio, TotalFase>;
+  for (const n of filtrarNegocios(negocios, { ...f, fases: [] }, hoje)) {
     const t = totais[faseDoNegocio(n)];
     t.n += 1;
     t.valor += valorDoNegocio(n);
@@ -253,10 +221,9 @@ export function numerosDashboard(negocios: readonly NegocioMes[]): NumeroDashboa
     (s, n) => s + (valorDoNegocio(n) * PROBABILIDADE[faseDoNegocio(n)]) / 100,
     0,
   );
-  const soma = (ls: readonly NegocioMes[]) => ls.reduce((s, n) => s + valorDoNegocio(n), 0);
   return [
-    { chave: "quadro", valor: negocios.length, euros: false, valorNota: soma(negocios) },
-    { chave: "porfechar", valor: abertos.length, euros: false, valorNota: soma(abertos) },
+    { chave: "quadro", valor: negocios.length, euros: false, valorNota: somaValor(negocios) },
+    { chave: "porfechar", valor: abertos.length, euros: false, valorNota: somaValor(abertos) },
     { chave: "ponderado", valor: Math.round(ponderado), euros: true, valorNota: null },
     { chave: "duas", valor: negocios.filter((n) => n.orcamentos.length >= 2).length, euros: false, valorNota: null },
   ];

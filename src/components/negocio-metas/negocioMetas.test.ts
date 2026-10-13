@@ -7,7 +7,8 @@ import {
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 
 const base: NegocioMes = {
-  id: "x", pessoa: "P", servico: "S", comercial: "C", dias: 1, parado: null, atraso: false,
+  id: "x", pessoaId: "p-x", pessoa: "P", servico: "S", comercial: "C", dias: 1, parado: null,
+  proximoPrazo: null, contacto: { telefone: null, email: null },
   orcamentos: [{ id: "a", valor: 100, escolhido: true }, { id: "b", valor: 300, escolhido: false }],
   proposta: null, contrato: null,
 };

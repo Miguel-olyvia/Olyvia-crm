@@ -13,11 +13,22 @@ describe("acaoDaTecla", () => {
     expect(acaoDaTecla({ key: "ArrowRight" }, corpo)).toBe("direita");
     expect(acaoDaTecla({ key: "/" }, corpo)).toBe("pesquisa");
     expect(acaoDaTecla({ key: "?" }, corpo)).toBe("ajuda");
-    expect(acaoDaTecla({ key: "x" }, corpo)).toBeNull();
+    expect(acaoDaTecla({ key: "x" }, corpo)).toBe("selecionar");
+    expect(acaoDaTecla({ key: "c" }, corpo)).toBe("comparar");
+    expect(acaoDaTecla({ key: "o" }, corpo)).toBe("abrir");
+    expect(acaoDaTecla({ key: "q" }, corpo)).toBeNull();
   });
   it("não dispara em campos, selects, separadores nem diálogos", () => {
     expect(acaoDaTecla({ key: "/" }, { tag: "INPUT", tipo: "search" })).toBeNull();
     expect(acaoDaTecla({ key: "j" }, { tag: "TEXTAREA" })).toBeNull();
+    for (const key of ["x", "c", "o"]) {
+      expect(acaoDaTecla({ key }, { tag: "INPUT", tipo: "search" })).toBeNull();
+      expect(acaoDaTecla({ key }, { tag: "DIV", bloqueado: true })).toBeNull();
+      expect(acaoDaTecla({ key, ctrl: true }, corpo)).toBeNull();
+    }
+    for (const papel of ["radio", "switch", "spinbutton"]) {
+      expect(acaoDaTecla({ key: "j" }, { tag: "DIV", papel })).toBeNull();
+    }
     expect(acaoDaTecla({ key: "ArrowDown" }, { tag: "SELECT" })).toBeNull();
     expect(acaoDaTecla({ key: "ArrowRight" }, { tag: "BUTTON", papel: "tab" })).toBeNull();
     expect(acaoDaTecla({ key: "ArrowDown" }, { tag: "BUTTON", bloqueado: true })).toBeNull();

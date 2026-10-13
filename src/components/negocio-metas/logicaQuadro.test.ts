@@ -1,61 +1,109 @@
 import { describe, expect, it } from "vitest";
 import {
-  SEM_FILTROS, alternarVista, filtrarNegocios, numerosDashboard, ordenarNegocios, proximaOrdem,
-  proximoPasso, resumoQuadro, totaisPorFase, vistasRapidas, type IdVista,
+  SEM_FILTROS, alternarFase, alternarParaTratar, chipsDeFase, filtrarNegocios, numerosDashboard,
+  proximoPasso, resumoQuadro, totaisPorFase,
 } from "./logicaQuadro";
-import { faseDoNegocio, valorDoNegocio, valorGanho } from "./negocioMetas";
-import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
+import { faseDoNegocio, valorDoNegocio, valorGanho, type NegocioMes } from "./negocioMetas";
+import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "./negocioMetasExemplo";
 
 const { negocios } = DADOS_EXEMPLO;
+const HOJE = HOJE_EXEMPLO;
 const ids = (ls: readonly { id: string }[]) => ls.map((n) => n.id);
+const filtrar = (f: Partial<typeof SEM_FILTROS>) => ids(filtrarNegocios(negocios, { ...SEM_FILTROS, ...f }, HOJE));
+const por = (id: string) => negocios.find((n) => n.id === id)!;
 
 describe("filtros", () => {
   it("sem filtros devolve tudo", () => {
-    expect(filtrarNegocios(negocios, SEM_FILTROS)).toHaveLength(10);
+    expect(filtrar({})).toHaveLength(10);
   });
   it("pesquisa por pessoa, serviço e comercial", () => {
-    expect(ids(filtrarNegocios(negocios, { ...SEM_FILTROS, q: "marta" }))).toEqual(["n1"]);
-    expect(filtrarNegocios(negocios, { ...SEM_FILTROS, q: "cozinha" })).toHaveLength(2);
-    expect(filtrarNegocios(negocios, { ...SEM_FILTROS, q: "diogo" })).toHaveLength(3);
-  });
-  it("fase, parados e atraso", () => {
-    expect(ids(filtrarNegocios(negocios, { ...SEM_FILTROS, fase: "orcamento" }))).toEqual(["n8"]);
-    expect(ids(filtrarNegocios(negocios, { ...SEM_FILTROS, parados: true }))).toEqual(["n6", "n8"]);
-    expect(ids(filtrarNegocios(negocios, { ...SEM_FILTROS, atraso: true }))).toEqual(["n6", "n8"]);
+    expect(filtrar({ q: "marta" })).toEqual(["n1"]);
+    expect(filtrar({ q: "cozinha" })).toHaveLength(2);
+    expect(filtrar({ q: "diogo" })).toHaveLength(3);
   });
   it("os filtros combinam", () => {
-    const r = filtrarNegocios(negocios, { ...SEM_FILTROS, comercial: "Diogo Lopes", fase: "proposta" });
-    expect(ids(r)).toEqual(["n9"]);
+    expect(filtrar({ comercial: "Diogo Lopes", fases: ["proposta"] })).toEqual(["n9"]);
   });
 });
 
-describe("chips de vista rápida", () => {
-  it("a contagem de cada chip é o número de linhas que o filtro dele mostra", () => {
-    const esperado: Record<IdVista, number> = { enviar: 1, espera: 2, assinar: 1, financeiro: 6, parados: 2, atraso: 2 };
-    for (const v of vistasRapidas(negocios, SEM_FILTROS)) {
-      expect(v.n).toBe(esperado[v.id]);
-      expect(v.ativo).toBe(false);
-      const aplicado = alternarVista(SEM_FILTROS, v.id);
-      expect(filtrarNegocios(negocios, aplicado)).toHaveLength(v.n);
-    }
+describe("filtro de fase: OU entre fases", () => {
+  it("fases vazio = todas", () => {
+    expect(filtrar({ fases: [] })).toHaveLength(10);
   });
-  it("ligar e desligar repõe os filtros", () => {
-    const ligado = alternarVista(SEM_FILTROS, "espera");
-    expect(ligado.fase).toBe("proposta");
-    expect(vistasRapidas(negocios, ligado).find((v) => v.id === "espera")?.ativo).toBe(true);
-    expect(alternarVista(ligado, "espera")).toEqual(SEM_FILTROS);
+  it("uma fase", () => {
+    expect(filtrar({ fases: ["orcamento"] })).toEqual(["n8"]);
   });
-  it("a contagem tem em conta os outros filtros", () => {
-    const f = { ...SEM_FILTROS, comercial: "Carla Mendes" };
-    const v = vistasRapidas(negocios, f);
-    expect(v.find((x) => x.id === "atraso")?.n).toBe(1);
-    expect(v.find((x) => x.id === "financeiro")?.n).toBe(1);
+  it("várias fases somam-se", () => {
+    expect(filtrar({ fases: ["orcamento", "proposta"] })).toEqual(["n6", "n8", "n9"]);
+    expect(filtrar({ fases: ["contrato", "orcamento"] })).toEqual(["n8", "n10"]);
+  });
+  it("alternarFase liga e desliga sem tocar nas outras", () => {
+    const a = alternarFase(SEM_FILTROS, "proposta");
+    const b = alternarFase(a, "contrato");
+    expect(b.fases).toEqual(["proposta", "contrato"]);
+    expect(alternarFase(b, "proposta").fases).toEqual(["contrato"]);
+    expect(SEM_FILTROS.fases).toEqual([]);
+  });
+});
+
+describe("Para tratar: atraso OU parado OU prazo hoje", () => {
+  const base = (id: string, extra: Partial<NegocioMes>): NegocioMes => ({
+    ...por("n10"), id, parado: null, proximoPrazo: "2026-10-30", ...extra,
+  });
+  const casos = [
+    base("atrasado", { proximoPrazo: "2026-10-10" }),
+    base("parado", { parado: 8 }),
+    base("hoje", { proximoPrazo: HOJE }),
+    base("amanha", { proximoPrazo: "2026-10-14" }),
+    base("emDia", {}),
+  ];
+  it("cada alerta basta, os outros ficam de fora", () => {
+    const r = filtrarNegocios(casos, { ...SEM_FILTROS, paraTratar: true }, HOJE);
+    expect(ids(r)).toEqual(["atrasado", "parado", "hoje"]);
+  });
+  it("nos dados de exemplo apanha os três a tratar", () => {
+    expect(filtrar({ paraTratar: true })).toEqual(["n6", "n8", "n9"]);
+  });
+  it("E entre grupos diferentes", () => {
+    expect(filtrar({ paraTratar: true, comercial: "Diogo Lopes" })).toEqual(["n8", "n9"]);
+    expect(filtrar({ paraTratar: true, fases: ["proposta"] })).toEqual(["n6", "n9"]);
+    expect(filtrar({ paraTratar: true, fases: ["proposta"], meus: true })).toEqual([]);
+  });
+  it("alternarParaTratar liga e desliga", () => {
+    expect(alternarParaTratar(SEM_FILTROS).paraTratar).toBe(true);
+    expect(alternarParaTratar({ ...SEM_FILTROS, paraTratar: true }).paraTratar).toBe(false);
+  });
+});
+
+describe("chips de fase", () => {
+  it("contam e somam o valor de cada fase", () => {
+    const { fases, paraTratar } = chipsDeFase(negocios, SEM_FILTROS, HOJE);
+    expect(fases.map((c) => [c.fase, c.n])).toEqual([
+      ["orcamento", 1], ["proposta", 2], ["contrato", 1], ["financeiro", 6],
+    ]);
+    expect(fases.find((c) => c.fase === "proposta")?.valor).toBe(8600 + 15200);
+    expect(fases.every((c) => !c.ativo)).toBe(true);
+    expect(paraTratar).toMatchObject({ n: 3, ativo: false });
+  });
+  it("as contagens ignoram o filtro de fase mas respeitam os outros", () => {
+    const f = { ...SEM_FILTROS, comercial: "Diogo Lopes", fases: ["financeiro" as const] };
+    const { fases } = chipsDeFase(negocios, f, HOJE);
+    expect(fases.map((c) => c.n)).toEqual([1, 1, 0, 1]);
+    expect(fases.find((c) => c.fase === "financeiro")?.ativo).toBe(true);
+    expect(fases.find((c) => c.fase === "proposta")?.ativo).toBe(false);
+  });
+  it("com Os meus só contam os meus", () => {
+    const { fases } = chipsDeFase(negocios, { ...SEM_FILTROS, meus: true }, HOJE);
+    expect(fases.map((c) => c.n)).toEqual([0, 0, 1, 2]);
+  });
+  it("o chip Para tratar conta com os outros filtros e fica ativo quando ligado", () => {
+    const f = { ...SEM_FILTROS, comercial: "Carla Mendes", paraTratar: true };
+    expect(chipsDeFase(negocios, f, HOJE).paraTratar).toMatchObject({ n: 1, ativo: true });
   });
 });
 
 describe("próximo passo e fase", () => {
   it("segue a cadeia", () => {
-    const por = (id: string) => negocios.find((n) => n.id === id)!;
     expect(proximoPasso(por("n8"))).toBe("escolherOrcamento");
     expect(proximoPasso(por("n9"))).toBe("enviarProposta");
     expect(proximoPasso(por("n6"))).toBe("esperarCliente");
@@ -65,38 +113,24 @@ describe("próximo passo e fase", () => {
   });
 });
 
-describe("ordenação", () => {
-  it("ordena por pessoa e inverte ao segundo clique", () => {
-    const o1 = proximaOrdem(null, "pessoa");
-    expect(o1).toEqual({ coluna: "pessoa", dir: "asc" });
-    expect(ids(ordenarNegocios(negocios, o1))[0]).toBe("n9");
-    const o2 = proximaOrdem(o1, "pessoa");
-    expect(o2.dir).toBe("desc");
-    expect(ids(ordenarNegocios(negocios, o2))[0]).toBe("n10");
-  });
-  it("o valor começa do maior e os sem valor ficam no fim", () => {
-    const r = ordenarNegocios(negocios, proximaOrdem(null, "valor"));
-    expect(r[0].id).toBe("n10");
-    expect(r[r.length - 1].id).toBe("n8");
-    const asc = ordenarNegocios(negocios, { coluna: "valor", dir: "asc" });
-    expect(asc[asc.length - 1].id).toBe("n8");
-  });
-  it("sem ordem mantém a ordem recebida", () => {
-    expect(ids(ordenarNegocios(negocios, null))).toEqual(ids(negocios));
-  });
-});
-
-describe("totais", () => {
-  it("a soma dos totais por fase é a soma dos negócios visíveis", () => {
-    const visiveis = filtrarNegocios(negocios, { ...SEM_FILTROS, q: "a" });
-    const totais = Object.values(totaisPorFase(visiveis));
+describe("totais por fase", () => {
+  it("a soma dos totais é a soma dos negócios filtrados", () => {
+    const f = { ...SEM_FILTROS, q: "a" };
+    const visiveis = filtrarNegocios(negocios, f, HOJE);
+    const totais = Object.values(totaisPorFase(negocios, f, HOJE));
     expect(totais.reduce((s, t) => s + t.n, 0)).toBe(visiveis.length);
-    expect(totais.reduce((s, t) => s + t.valor, 0)).toBe(
-      visiveis.reduce((s, n) => s + valorDoNegocio(n), 0),
-    );
+    expect(totais.reduce((s, t) => s + t.valor, 0)).toBe(visiveis.reduce((s, n) => s + valorDoNegocio(n), 0));
+  });
+  it("ignora o filtro de fase mas respeita os outros", () => {
+    const todas = totaisPorFase(negocios, SEM_FILTROS, HOJE);
+    const soFin = totaisPorFase(negocios, { ...SEM_FILTROS, fases: ["financeiro"] }, HOJE);
+    expect(soFin).toEqual(todas);
+    const diogo = totaisPorFase(negocios, { ...SEM_FILTROS, comercial: "Diogo Lopes", fases: ["financeiro"] }, HOJE);
+    expect(diogo.proposta.n).toBe(1);
+    expect(diogo.contrato.n).toBe(0);
   });
   it("Financeiro soma o valor ganho", () => {
-    expect(totaisPorFase(negocios).financeiro.valor).toBe(valorGanho(negocios));
+    expect(totaisPorFase(negocios, SEM_FILTROS, HOJE).financeiro.valor).toBe(valorGanho(negocios));
   });
   it("resumo do quadro", () => {
     expect(resumoQuadro(negocios)).toEqual({ n: 10, valorEmProposta: 8600 + 15200, porFechar: 4 });

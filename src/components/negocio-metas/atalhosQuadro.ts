@@ -1,7 +1,8 @@
-// Atalhos de teclado do Quadro e da Lista de "Negócio e metas", sem React: que
+// Atalhos de teclado do Quadro e da Lista de "Negócio e metas" (só com o foco dentro do quadro), sem React: que
 // ação faz cada tecla e para onde vai o foco. Nunca disparam num campo de texto,
 // num select, num separador, dentro de um diálogo ou popover, nem com Ctrl, Cmd ou Alt.
-export type AcaoTecla = "seguinte" | "anterior" | "esquerda" | "direita" | "pesquisa" | "ajuda";
+export type AcaoTecla =
+  | "seguinte" | "anterior" | "esquerda" | "direita" | "pesquisa" | "ajuda" | "selecionar" | "comparar" | "abrir";
 
 export interface Tecla { key: string; ctrl?: boolean; meta?: boolean; alt?: boolean }
 
@@ -23,8 +24,10 @@ export interface PosCartao { coluna: number; pos: number }
 const TECLAS: Record<string, AcaoTecla> = {
   ArrowDown: "seguinte", j: "seguinte", ArrowUp: "anterior", k: "anterior",
   ArrowLeft: "esquerda", ArrowRight: "direita", "/": "pesquisa", "?": "ajuda",
+  x: "selecionar", c: "comparar", o: "abrir",
 };
-const PAPEIS_PROPRIOS = ["tab", "combobox", "textbox", "option", "menuitem", "menuitemcheckbox", "menuitemradio", "slider"];
+const PAPEIS_PROPRIOS = ["tab", "combobox", "textbox", "option", "menuitem", "menuitemcheckbox", "menuitemradio", "slider",
+  "radio", "switch", "spinbutton"];
 const INPUTS_SEM_TEXTO = ["checkbox", "button", "submit", "reset", "color", "file", "image"];
 
 function emCampo(a: AlvoTecla): boolean {
