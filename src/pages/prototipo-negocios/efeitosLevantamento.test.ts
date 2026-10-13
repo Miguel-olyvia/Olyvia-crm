@@ -21,9 +21,8 @@ describe("efeitos do levantamento no orçamento", () => {
     expect(e.map((x) => [x.t, x.pct])).toEqual([["percent", 0.1], ["percent", 0.04], ["percent", 0.03]]);
   });
 
-  it("materiais do cliente tiram a linha de materiais", () => {
-    expect(efeitosDoCampo("materiais_cliente", { materiais_cliente: "Sim" })[0].fator).toBe(0);
-    expect(efeitosDoCampo("materiais_cliente", { materiais_cliente: "Não" })).toEqual([]);
+  it("materiais do cliente não mexem no levantamento: escolhem-se produto a produto no orçamento", () => {
+    expect(efeitosDoCampo("materiais_cliente", { materiais_cliente: "Sim" })).toEqual([]);
   });
 
   it("estacionamento pago usa a zona e o prazo", () => {

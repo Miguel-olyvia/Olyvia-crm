@@ -9,6 +9,8 @@ import { alertas, bloqueado, custoUn, eur, linhaCalc, nfmt, partes, pct, r2, tot
 import { numero, type Ctx } from "./pecas";
 import { CustoServico } from "./CustoServico";
 import { totais } from "./DocsCliente";
+import { ProdutosOrcamento, rotuloMat } from "./ProdutosOrcamento";
+import { PREFIXO_LEV } from "./efeitosLevantamento";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -118,7 +120,7 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
             const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-muted-foreground";
             if (l.t === "mat") return (
               <li key={i} className="flex min-h-16 items-center gap-4 py-3">
-                <span className="min-w-0 flex-1"><span className="block text-[15px]">Materiais</span><span className="block text-sm text-muted-foreground">{l.d} · do modelo</span></span>
+                <span className="min-w-0 flex-1"><span className="block text-[15px]">{rotuloMat(l.d, PREFIXO_LEV)[0]}</span><span className="block text-sm text-muted-foreground">{rotuloMat(l.d, PREFIXO_LEV)[1]}</span></span>
                 <span className="text-right"><span className="block text-[15px] tabular-nums">{eur(x.preco)} €</span><span className={cn("block text-sm", mc)}>margem {pct(m)}</span></span>
               </li>
             );
@@ -174,6 +176,7 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
             );
           })}
         </ul>
+        <div className="mt-6"><ProdutosOrcamento {...ctx} d={d} simples /></div>
       </section>
 
       {/* Desconto e tipo de venda */}

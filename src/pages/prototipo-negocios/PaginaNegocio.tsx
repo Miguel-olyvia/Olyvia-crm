@@ -18,6 +18,8 @@ import { VisitasLista } from "./Visitas";
 import { UsarLocalizacao } from "./Localizacao";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { OrcamentoSimples } from "./OrcamentoSimples";
+import { ProdutosOrcamento, rotuloMat } from "./ProdutosOrcamento";
+import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { DocumentosSimples, ObraSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
@@ -295,22 +297,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       ) },
       { id: "nec", titulo: "Serviços necessários", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed,
         resumo: orcLinhas(d, S).map((sid) => S.svc[sid].n), corpo: <ServicosCatalogo {...ctx} d={d} simples={simples} /> },
-      { ...g(ESCOLHAS, Sparkles), corpo: (
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Equipamentos pedidos</span>
-            <div className="flex flex-wrap gap-2">
-              {L.nec.map((x) => (
-                <button key={x} type="button" aria-pressed={v.nec.includes(x)} onClick={go(() => A.nec(d.id, x))}
-                  className={cn("rounded-full border px-3 py-1 text-sm transition-all duration-200", v.nec.includes(x) ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground")}>
-                  {v.nec.includes(x) && <Check className="mr-1 inline h-3.5 w-3.5" />}{x}
-                </button>
-              ))}
-            </div>
-          </div>
-          <Campos grupo={E(ESCOLHAS)} {...fx} />
-        </div>
-      ) },
+      g(ESCOLHAS, Sparkles),
       { id: "fotos", titulo: "Fotografias", icone: Camera, feito: v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim", resumo: [v.fotos + " fotos"], corpo: (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -525,7 +512,7 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
                 const m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
                 const cls = m < S.cfg.min / 100 ? "bad" : m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
                 if (l.t === "mat") return (
-                  <tr key={i}><td>Materiais<small>{l.d} · do modelo</small></td><td className="sub">—</td><td className="n">{eur(x.custo)}</td><td className="n">{eur(x.preco)}</td><td className="n"><span className={"pill " + cls}>{pct(m)}</span></td></tr>
+                  <tr key={i}><td>{rotuloMat(l.d, PREFIXO_LEV)[0]}<small>{rotuloMat(l.d, PREFIXO_LEV)[1]}</small></td><td className="sub">—</td><td className="n">{eur(x.custo)}</td><td className="n">{eur(x.preco)}</td><td className="n"><span className={"pill " + cls}>{pct(m)}</span></td></tr>
                 );
                 const s = x.s!, novo = r2(custoUn(s, S));
                 const mud = !locked && Math.abs(novo - l.cu) > 0.004;
@@ -549,6 +536,7 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
               <tr className="sum"><td>Total sem IVA</td><td>{nfmt(T.h)} h</td><td className="n">{eur(T.custo)}</td><td className="n">{eur(T.pf)}</td><td className="n">{pct(T.m)}</td></tr>
             </tbody>
           </table></div>
+          <ProdutosOrcamento S={S} run={run} d={d} />
           {o.verif && !locked && (
             <div className={"card " + (S.pulse === "verif" ? "sec pulse" : "")} id="verif" style={{ borderColor: "var(--pri-line)" }}>
               <h3>Verificar antes de enviar <span>{nX} bloqueio(s) · {nW} aviso(s)</span></h3>

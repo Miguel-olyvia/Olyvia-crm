@@ -65,7 +65,6 @@ export function efeitosDoLevantamento(f: Record<string, string>): Efeito[] {
   if (f.habitada_durante_obra === "Sim") e.push(pctEf("habitada_durante_obra", "Casa habitada: limpeza diária e arrumação (+4%)", 0.04));
   if (f.diag_janela === "Não") e.push(pctEf("diag_janela", "Sem janela: trabalhos com pó mais lentos (+3%)", 0.03));
   // Materiais
-  if (f.materiais_cliente === "Sim") e.push({ k: "materiais_cliente", t: "material", d: "Materiais fornecidos pelo cliente: sai a linha de materiais", custo: 0, preco: 0, fator: 0 });
   return e;
 }
 
@@ -75,5 +74,5 @@ export const efeitosDoCampo = (k: string, f: Record<string, string>): Efeito[] =
 /** Os campos que podem mexer no orçamento (para o aviso "mexe no orçamento" ao lado do campo). */
 export const CAMPOS_COM_EFEITO = new Set([
   "diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes", "estacionamento",
-  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", "materiais_cliente",
+  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", 
 ]);
