@@ -10,6 +10,7 @@ import type { Ctx } from "./pecas";
 import { totais } from "./DocsCliente";
 import { ProdutosOrcamento } from "./ProdutosOrcamento";
 import { LinhasOrcamento } from "./LinhasOrcamento";
+import { PrazoOrcamento } from "./PrazoOrcamento";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -115,6 +116,9 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
         <div className="mt-2"><LinhasOrcamento ctx={ctx} d={d} simples /></div>
         <div className="mt-6"><ProdutosOrcamento {...ctx} d={d} simples /></div>
       </section>
+
+      {/* O prazo previsto: as tarefas em sequência, sem técnicos */}
+      <PrazoOrcamento ctx={ctx} d={d} />
 
       {/* Desconto e tipo de venda */}
       <section aria-label="Desconto e venda" className="space-y-5">

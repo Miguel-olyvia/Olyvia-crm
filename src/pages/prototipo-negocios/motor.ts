@@ -9,6 +9,7 @@ import {
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
+import { ajustePrazo } from "./ganttOrcamento";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -130,6 +131,8 @@ export interface Orcamento {
   precosMan?: Record<string, number>;
   /** Demolição e entulho (orçamentos novos, com o Catálogo ligado): os artigos, os ajustes à mão e o último cálculo (entulho.ts). */
   demolicao?: { itens: ItemDem[]; aj: AjustesDem; r?: ResultadoDem };
+  /** O prazo previsto mudado à mão: os dias de cada tarefa (pelo id do serviço, ou "demolicao"); ganttOrcamento.ts. */
+  prazo?: Record<string, number>;
 }
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
 export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
@@ -578,6 +581,7 @@ export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: numbe
 export function tot(d: Negocio, S: Estado) {
   let c = 0, p = 0, h = 0;
   for (const l of d.orc!.linhas) { const x = linhaCalc(l, S); c += x.custo; p += x.preco; h += x.h; }
+  c += ajustePrazo(d, S); // os dias mudados à mão no prazo previsto
   const pf = p * (1 - (d.orc!.desconto || 0) / 100);
   return { custo: c, preco: p, pf, h, m: pf > 0 ? (pf - c) / pf : 0 };
 }
@@ -589,6 +593,7 @@ export function partes(d: Negocio, S: Estado) {
     o.mo += s.h * s.eh * l.q; o.eq += s.eq * l.q; o.cons += s.cons * l.q;
     if (S.cfg.estrutura) o.estr += s.h * ESTR * l.q;
   }
+  o.mo += ajustePrazo(d, S);
   return o;
 }
 
@@ -941,6 +946,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), o = d.orc!, l = o.linhas[i];
       if (l?.t !== "svc" || o.enviada || !(q >= 0)) return;
       l.q = r2(q); o.aprov = null; sincronizarDemolicao(d, S);
+    },
+    /** Os dias de uma tarefa do prazo previsto (null volta aos dias das horas do orçamento). */
+    prazoTarefa(id: number, chave: string, dias: number | null) {
+      const d = deal(id), o = d.orc!;
+      if (o.enviada) return;
+      if (dias == null) { if (o.prazo) delete o.prazo[chave]; }
+      else if (dias >= 0.5) (o.prazo ??= {})[chave] = Math.round(dias * 2) / 2;
+      else return;
+      if (o.prazo && !Object.keys(o.prazo).length) delete o.prazo;
+      o.aprov = null;
     },
     /** Liga (ou desliga) a demolição e entulho num orçamento (os de exemplo vêm sem ela). Desligar devolve as linhas de serviço. */
     demolicaoLigar(id: number, on: boolean) {
