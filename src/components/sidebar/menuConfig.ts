@@ -41,6 +41,7 @@ import {
   Sun,
   ScanBarcode,
   ArrowLeftRight,
+  TrendingUp,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -190,10 +191,12 @@ export const menuSections: MenuSection[] = [
     id: "acquisition",
     icon: Target,
     labelKey: "sidebar.acquisition",
-    paths: ["/deals", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/direct-sales", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
+    paths: ["/deals", "/negocio-metas", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/direct-sales", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
     permissions: ["deals.view", "proposals.view", "quotes.view", "direct_sales.view"],
     items: [
       { to: "/deals", icon: Handshake, labelKey: "sidebar.proposalRequests", permission: "deals.view" },
+      // Exemplo estático por agora; mesma permissão dos Pedidos de Proposta.
+      { to: "/negocio-metas", icon: TrendingUp, labelKey: "sidebar.businessGoals", permission: "deals.view" },
     ],
     subSections: [
       {
