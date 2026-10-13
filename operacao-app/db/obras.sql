@@ -742,9 +742,11 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_contrato_orcamento(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_contrato_orcamento(uuid) TO authenticated, service_role;
 
--- A ÚNICA função que diz que orçamentos tem um contrato (pós-contrato, 13/10;
--- espelho da fn_ec_orcamentos_do_contrato da Frente A — na junção passam a
--- uma só). Hoje devolve `origem = 'contrato'`; as ADENDAS (subproposta +
+-- A ÚNICA função que diz que orçamentos tem um contrato (pós-contrato, 13/10).
+-- A fn_ec_orcamentos_do_contrato das encomendas (migração
+-- 20261215100000_pos_contrato_encomendas.sql) chama ESTA quando ela existe,
+-- e sem obras.sql aplica as mesmas regras (mudar uma = mudar a outra; o
+-- validar-obra-arranque.mjs compara as duas). Hoje devolve `origem = 'contrato'`; as ADENDAS (subproposta +
 -- suborçamento ligados ao mesmo contrato, fluxo-encomendas.md 1.1b) entram
 -- aqui com `origem = 'adenda'`, e a obra ganha-as por
 -- ops_obra_acrescentar_orcamentos_impl sem mexer no que já está planeado.

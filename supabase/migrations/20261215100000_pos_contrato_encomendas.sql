@@ -279,13 +279,26 @@ GRANT ALL ON public.obra_encomenda_cliente, public.obra_encomenda_cliente_linha,
 -- 5. Funções internas (sem EXECUTE para authenticated)
 -- ============================================================
 
--- 5.1 Os orçamentos de um contrato — UMA função só (a Frente B tem a gémea
--- ops_contrato_orcamentos; na junção passam a uma, e as adendas assinadas
--- entram aqui com origem = 'adenda'). Devolve (quote_id, origem):
+-- 5.1 Os orçamentos de um contrato — UMA fonte só. Devolve (quote_id, origem).
+-- Com o SQL de Operações instalado (operacao-app/db/obras.sql), quem decide é
+-- ops_contrato_orcamentos(p_contract_id): esta função limita-se a chamá-la
+-- (to_regprocedure, à hora da chamada — por isso este ficheiro e obras.sql
+-- correm sozinhos e por qualquer ordem). Sem obras.sql, aplica AQUI as
+-- MESMAS regras, pela mesma ordem (tools/validar-obra-arranque.mjs prova que
+-- as duas dão o mesmo resultado):
 --   1. client_contracts.quote_id, se preenchido (o orçamento escolhido);
---   2. senão TODOS os orçamentos aceites da proposta (quotes.accepted_at);
---   3. senão o mais recente da proposta (o mesmo critério do gatilho).
--- Hoje origem = 'contrato' sempre.
+--   2. senão TODOS os orçamentos aceites da proposta (quotes.accepted_at),
+--      pela ordem em que foram aceites;
+--   3. senão "o mais recente" pelos caminhos de ops_contrato_orcamento: a
+--      seleção da proposta (proposal_quote_selections), o orçamento da
+--      proposta (aceite mais recente, depois o criado mais recente),
+--      pipeline_links.
+-- Sempre só orçamentos não apagados e da organização do contrato, sem
+-- repetidos. Hoje origem = 'contrato'; as adendas assinadas entram em
+-- ops_contrato_orcamentos com origem = 'adenda' (e chegam aqui sozinhas).
+-- A direção é esta (e não a inversa) porque ops_contrato_orcamentos é
+-- INVOKER e dada a authenticated, e esta é SECURITY DEFINER só para
+-- service_role: chamar esta a partir daquela falharia por permissões.
 CREATE OR REPLACE FUNCTION public.fn_ec_orcamentos_do_contrato(p_contract_id uuid)
 RETURNS TABLE (quote_id uuid, origem text)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -294,32 +307,59 @@ AS $$
 DECLARE
   v_quote    uuid;
   v_proposta uuid;
+  v_org      uuid;
+  v_ids      uuid[] := '{}';
 BEGIN
-  SELECT cc.quote_id, cc.proposal_id INTO v_quote, v_proposta
+  IF p_contract_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  IF to_regprocedure('public.ops_contrato_orcamentos(uuid)') IS NOT NULL THEN
+    RETURN QUERY EXECUTE
+      'SELECT c.quote_id, c.origem FROM public.ops_contrato_orcamentos($1) c ORDER BY c.ordem'
+      USING p_contract_id;
+    RETURN;
+  END IF;
+
+  SELECT cc.quote_id, cc.proposal_id, cc.organization_id INTO v_quote, v_proposta, v_org
     FROM public.client_contracts cc WHERE cc.id = p_contract_id;
 
   IF v_quote IS NOT NULL THEN
-    RETURN QUERY SELECT v_quote, 'contrato'::text;
-    RETURN;
-  END IF;
-  IF v_proposta IS NULL THEN
-    RETURN;
+    v_ids := ARRAY[v_quote];
+  ELSIF v_proposta IS NOT NULL THEN
+    SELECT COALESCE(array_agg(q.id ORDER BY q.accepted_at, q.quote_number NULLS LAST, q.id), '{}')
+      INTO v_ids
+      FROM public.quotes q
+     WHERE q.proposal_id = v_proposta AND q.accepted_at IS NOT NULL
+       AND q.deleted_at IS NULL AND q.organization_id = v_org;
+
+    IF cardinality(v_ids) = 0 AND to_regclass('public.proposal_quote_selections') IS NOT NULL THEN
+      EXECUTE 'SELECT quote_id FROM public.proposal_quote_selections
+                WHERE proposal_id = $1 AND selected AND quote_id IS NOT NULL LIMIT 1'
+         INTO v_quote USING v_proposta;
+    END IF;
+    IF cardinality(v_ids) = 0 AND v_quote IS NULL THEN
+      SELECT q.id INTO v_quote FROM public.quotes q
+       WHERE q.proposal_id = v_proposta
+       ORDER BY q.accepted_at DESC NULLS LAST, q.created_at DESC LIMIT 1;
+    END IF;
+    IF cardinality(v_ids) = 0 AND v_quote IS NULL AND to_regclass('public.pipeline_links') IS NOT NULL THEN
+      EXECUTE 'SELECT q.id FROM public.pipeline_links pl JOIN public.quotes q ON q.id = pl.quote_id
+                WHERE pl.proposal_id = $1 ORDER BY q.created_at DESC LIMIT 1'
+         INTO v_quote USING v_proposta;
+    END IF;
+    IF cardinality(v_ids) = 0 AND v_quote IS NOT NULL THEN
+      v_ids := ARRAY[v_quote];
+    END IF;
   END IF;
 
   RETURN QUERY
-    SELECT q.id, 'contrato'::text
-      FROM public.quotes q
-     WHERE q.proposal_id = v_proposta AND q.accepted_at IS NOT NULL AND q.deleted_at IS NULL;
-  IF FOUND THEN
-    RETURN;
-  END IF;
-
-  RETURN QUERY
-    SELECT q.id, 'contrato'::text
-      FROM public.quotes q
-     WHERE q.proposal_id = v_proposta
-     ORDER BY q.created_at DESC
-     LIMIT 1;
+    SELECT x.id, 'contrato'::text
+      FROM (SELECT DISTINCT ON (u.id) u.id, u.pos
+              FROM unnest(v_ids) WITH ORDINALITY AS u(id, pos)
+              JOIN public.quotes q ON q.id = u.id AND q.deleted_at IS NULL AND q.organization_id = v_org
+             ORDER BY u.id, u.pos) x
+     ORDER BY x.pos;
 END
 $$;
 
@@ -327,7 +367,8 @@ REVOKE ALL ON FUNCTION public.fn_ec_orcamentos_do_contrato(uuid) FROM PUBLIC, an
 GRANT EXECUTE ON FUNCTION public.fn_ec_orcamentos_do_contrato(uuid) TO service_role;
 
 COMMENT ON FUNCTION public.fn_ec_orcamentos_do_contrato(uuid) IS
-  'Os orçamentos de um contrato (quote_id, origem). Hoje origem = contrato; as adendas entram aqui com origem = adenda.';
+  'Os orçamentos de um contrato (quote_id, origem). Chama ops_contrato_orcamentos (operacao-app/db/obras.sql) se existir; '
+  'senão aplica as mesmas regras: quote_id do contrato; senão todos os aceites; senão o mais recente.';
 
 -- 5.2 Resolução do fornecedor de um produto, por esta ordem:
 --   preferido (item_suppliers.is_preferred) → o escolhido na linha do
