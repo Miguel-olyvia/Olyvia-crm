@@ -33,6 +33,10 @@ export interface TarefaPrevistaContrato {
   id: string;
   ordem: number;
   linha_id: string | null;
+  /** De que orçamento do contrato veio (pós-contrato: um contrato pode ter vários aceites). */
+  orcamento_id?: string | null;
+  /** Serviço dentro de um conjunto: a posição do componente (1..n). */
+  orcamento_componente?: number | null;
   servico_id: string | null;
   servico_tarefa_id: string | null;
   do_tipo: boolean;
@@ -74,6 +78,11 @@ export interface Ocupado {
 
 export interface ServicoContrato {
   linha_id: string;
+  /** Serviço dentro de um conjunto (bundle_components): a posição do componente; null = linha direta. */
+  componente?: number | null;
+  /** De que orçamento do contrato vem (o ecrã mostra o rótulo). */
+  orcamento_id?: string | null;
+  orcamento_rotulo?: string | null;
   servico_id: string;
   nome: string;
   descricao: string | null;
@@ -89,8 +98,16 @@ export interface ServicoContrato {
   tarefas: TarefaPrevistaContrato[];
 }
 
+export interface OrcamentoDoContrato {
+  id: string;
+  rotulo: string;
+  numero: string | null;
+}
+
 export interface PrevisaoContrato {
   orcamento_id: string | null;
+  /** Todos os orçamentos de onde a obra nasce (os aceites do contrato, ou o quote_id). */
+  orcamentos?: OrcamentoDoContrato[];
   inicio: string | null;
   servicos: ServicoContrato[];
   /** Produtos vendidos no contrato (linhas com produto). */
@@ -122,6 +139,8 @@ export interface TarefaParaCriar {
   skill_id: string | null;
   skill_nome: string | null;
   orcamento_linha_id: string | null;
+  orcamento_id?: string | null;
+  orcamento_componente?: number | null;
   servico_id: string | null;
   servico_tarefa_id: string | null;
   /** Posições (1..n) de outras tarefas desta lista. */
@@ -148,6 +167,8 @@ export interface TarefaEditavel {
   /** O id da pré-visualização, ou "nova-N" para as acrescentadas. */
   chave: string;
   linha_id: string | null;
+  orcamento_id?: string | null;
+  orcamento_componente?: number | null;
   servico_id: string | null;
   servico_tarefa_id: string | null;
   nome: string;
@@ -185,6 +206,9 @@ export interface TarefaEditavel {
 
 export interface ServicoEditavel {
   linha_id: string;
+  componente: number | null;
+  orcamento_id: string | null;
+  orcamento_rotulo: string | null;
   servico_id: string;
   nome: string;
   quantidade: number;
@@ -205,6 +229,8 @@ function editavel(t: TarefaPrevistaContrato): TarefaEditavel {
   return {
     chave: t.id,
     linha_id: t.linha_id,
+    orcamento_id: t.orcamento_id ?? null,
+    orcamento_componente: t.orcamento_componente ?? null,
     servico_id: t.servico_id,
     servico_tarefa_id: t.servico_tarefa_id,
     nome: t.nome,
@@ -264,6 +290,9 @@ export function servicosEditaveis(p: PrevisaoContrato): ServicoEditavel[] {
     }
     return {
       linha_id: s.linha_id,
+      componente: s.componente ?? null,
+      orcamento_id: s.orcamento_id ?? null,
+      orcamento_rotulo: s.orcamento_rotulo ?? null,
       servico_id: s.servico_id,
       nome: s.nome,
       quantidade: n(s.quantidade, 1),
@@ -286,6 +315,14 @@ export const minutosTotais = (servicos: readonly ServicoEditavel[]): number =>
 export const todasAsTarefas = (servicos: readonly ServicoEditavel[]): TarefaEditavel[] =>
   servicos.flatMap((s) => s.tarefas);
 
+/** A chave de um serviço no ecrã: a linha do orçamento e, num conjunto, o componente. */
+export const chaveServico = (s: Pick<ServicoEditavel, "linha_id" | "componente">): string =>
+  `${s.linha_id}:${s.componente ?? 0}`;
+
+/** Há mais de um orçamento na obra? (então vale a pena dizer de qual vem cada serviço) */
+export const variosOrcamentos = (servicos: readonly Pick<ServicoEditavel, "orcamento_id">[]): boolean =>
+  new Set(servicos.map((s) => s.orcamento_id).filter(Boolean)).size > 1;
+
 let contador = 0;
 
 /** Uma tarefa nova no serviço (fase da última, 60 min, 1 pessoa, sem ninguém escolhido). */
@@ -295,6 +332,8 @@ export function novaTarefa(s: ServicoEditavel): TarefaEditavel {
   return {
     chave: `nova-${Date.now().toString(36)}-${contador}`,
     linha_id: s.linha_id,
+    orcamento_id: s.orcamento_id,
+    orcamento_componente: s.componente,
     servico_id: s.servico_id,
     servico_tarefa_id: null,
     nome: `${s.nome}: `,
@@ -394,6 +433,8 @@ export function paraCriar(
       skill_id: t.skill_id,
       skill_nome: t.skill_id ? null : t.skill_nome,
       orcamento_linha_id: t.linha_id,
+      orcamento_id: t.orcamento_id ?? null,
+      orcamento_componente: t.orcamento_componente ?? null,
       servico_id: t.servico_id,
       servico_tarefa_id: t.servico_tarefa_id,
       depende: [...new Set(t.depende.map((d) => pos.get(d)).filter((p): p is number => p != null))],

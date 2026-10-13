@@ -63,6 +63,9 @@ import {
 import type { TarefaGantt } from "../domain/obras-gantt";
 import { rotuloOrigem } from "../domain/planeamento";
 import { data as formatarData } from "../lib/formatar";
+import ArranqueObra from "../components/arranque/ArranqueObra";
+import { obterArranque, type Arranque } from "../lib/arranque";
+import { mensagemFalta } from "../domain/arranque";
 
 /**
  * A ficha da obra: o Gantt do gestor, o previsto contra o real, os extras.
@@ -72,7 +75,7 @@ import { data as formatarData } from "../lib/formatar";
  * devolve os choques de agenda.
  */
 
-type Separador = "mapa" | "previsto" | "extras";
+type Separador = "mapa" | "arranque" | "previsto" | "extras";
 
 const TRANSICOES: Record<EstadoObra, { para: EstadoObra; rotulo: string; motivo: boolean }[]> = {
   planeada: [
@@ -117,6 +120,8 @@ export default function ObraDetalhe() {
   const [aviso, setAviso] = useState<{ texto: string; conflitos?: ConflitoRpc[] } | null>(null);
   const [transicao, setTransicao] = useState<{ para: EstadoObra; rotulo: string; motivo: boolean } | null>(null);
   const [motivo, setMotivo] = useState("");
+  // "Arrancar": o checklist de arranque (null = SQL por instalar, arranca como sempre).
+  const [arranque, setArranque] = useState<Arranque | null>(null);
   const [editar, setEditar] = useState(false);
   const [replanear, setReplanear] = useState(false);
   const [faseAEditar, setFaseAEditar] = useState<FaseObra | null>(null);
@@ -376,6 +381,12 @@ export default function ObraDetalhe() {
                   setTransicao(t);
                   setMotivo("");
                   setErroAcao(null);
+                  setArranque(null);
+                  if (t.para === "em_curso") {
+                    obterArranque(obra.id)
+                      .then(setArranque)
+                      .catch(() => setArranque(null));
+                  }
                 }}
               >
                 {t.rotulo}
@@ -452,6 +463,7 @@ export default function ObraDetalhe() {
         {(
           [
             ["mapa", "Mapa de atividades"],
+            ["arranque", "Arranque"],
             ["previsto", "Previsto vs real"],
             ["extras", `Trabalhos extra${extras.length ? ` (${extras.length})` : ""}`],
           ] as const
@@ -528,6 +540,16 @@ export default function ObraDetalhe() {
         </div>
       )}
 
+      {separador === "arranque" && (
+        <ArranqueObra
+          obraId={obra.id}
+          contratoId={obra.contrato_id}
+          podePlanear={planeia}
+          recarga={recarga}
+          aoMudar={recarregar}
+        />
+      )}
+
       {separador === "previsto" && <ObraPrevistoReal obraId={obra.id} recarga={recarga} />}
 
       {separador === "extras" && (
@@ -575,7 +597,10 @@ export default function ObraDetalhe() {
               </Button>
               <Button
                 variant={transicao.para === "cancelada" ? "danger" : "primary"}
-                disabled={transicao.motivo && !motivo.trim()}
+                disabled={
+                  (transicao.motivo && !motivo.trim()) ||
+                  (transicao.para === "em_curso" && !!arranque && !arranque.arrancou && !arranque.pode_arrancar)
+                }
                 onClick={() => void mudarEstado()}
               >
                 {transicao.rotulo}
@@ -584,6 +609,19 @@ export default function ObraDetalhe() {
           }
         >
           <div className="space-y-3">
+            {transicao.para === "em_curso" && arranque && !arranque.arrancou && (
+              <p
+                className={cx(
+                  "rounded-lg px-3 py-2 text-sm",
+                  arranque.pode_arrancar ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"
+                )}
+                data-testid="arrancar-falta"
+              >
+                {arranque.pode_arrancar
+                  ? "As 3 validações estão feitas: a obra pode arrancar."
+                  : `Ainda não pode arrancar. ${mensagemFalta(arranque)} Vê o separador "Arranque".`}
+              </p>
+            )}
             {transicao.para === "concluida" && (
               <p className="text-sm text-slate-600">Só se conclui com todas as tarefas validadas pelo supervisor.</p>
             )}
