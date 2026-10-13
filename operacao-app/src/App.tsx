@@ -24,6 +24,8 @@ const ObraModelos = lazy(() => import("./pages/ObraModelos"));
 const ObraMetricas = lazy(() => import("./pages/ObraMetricas"));
 const MinhasTarefas = lazy(() => import("./pages/MinhasTarefas"));
 const Validar = lazy(() => import("./pages/Validar"));
+// Encomendas pós-contrato: o que falta nos produtos/serviços vendidos.
+const DadosEmFalta = lazy(() => import("./pages/DadosEmFalta"));
 
 export default function App() {
   return (
@@ -141,6 +143,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar a fila…" />}>
               <Validar />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/dados-em-falta"
+          element={
+            <Suspense fallback={<Spinner label="A ler os dados em falta…" />}>
+              <DadosEmFalta />
             </Suspense>
           }
         />

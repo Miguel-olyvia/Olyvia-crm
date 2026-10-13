@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog, cx } from "./ui";
 import { ROTULO_FUNCAO } from "../domain/tipos";
 import {
+  AlertTriangle,
   Ajuda,
   Building,
   ChevronLeft,
@@ -70,6 +71,7 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
     itens: [
       { to: "/locais", rotulo: "Locais", Icone: Layers },
       { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
+      { to: "/dados-em-falta", rotulo: "Dados em falta", Icone: AlertTriangle, so: podePlanear },
     ],
   },
   {

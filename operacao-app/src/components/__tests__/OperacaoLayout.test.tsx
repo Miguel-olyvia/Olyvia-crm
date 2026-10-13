@@ -55,6 +55,7 @@ describe("OperacaoLayout — menu", () => {
     montar();
     const nav = screen.getByRole("navigation", { name: "Operações" });
     expect(within(nav).queryByText("Validar")).toBeNull();
+    expect(within(nav).queryByText("Dados em falta")).toBeNull();
     expect(within(nav).getByText("As minhas tarefas")).toBeInTheDocument();
   });
 
