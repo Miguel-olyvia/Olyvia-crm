@@ -150,7 +150,6 @@ export const AREA: Grupo = {
     { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "escolha", op: ["Casa de banho", "Cozinha", "Outra"], papel: "plano" },
     { k: "diag_intervencao_tipo", bloco: "A divisão", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
     { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "escolha", op: ["2,4 m", "2,5 m", "2,6 m", "2,7 m", "2,8 m", "3 m ou mais"], papel: "plano" },
-    { k: "diag_altura_revestimento", bloco: "A divisão", l: "Revestimento de parede até", t: "escolha", op: ["20 cm", "60 cm", "120 cm", "Ao teto"], papel: "plano" },
     { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "contador", min: 0, max: 30, papel: "plano" },
     { k: "diag_gas", bloco: "Instalações da divisão", l: "Gás na área", t: "escolha", op: ["Não há", "Manter", "Anular", "Instalar"], papel: "plano" },
     { k: "diag_toalheiro", bloco: "Instalações da divisão", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano" },

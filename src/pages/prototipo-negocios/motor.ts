@@ -326,7 +326,7 @@ const EXEMPLO_COMPLETO: Record<string, string> = {
   quadro_diferencial: "Não", canalizacao: "Ferro", gas: "Canalizado", amianto: "Não sei", habitada_durante_obra: "Sim", animais: "Sim",
   notas_interior: "Há um gato: manter a porta da cozinha fechada durante a obra.",
   // Visita · área
-  diag_tipo_area: "Casa de banho", diag_intervencao_tipo: "Remodelação total", diag_pe_direito_m: "2,7 m", diag_altura_revestimento: "Ao teto",
+  diag_tipo_area: "Casa de banho", diag_intervencao_tipo: "Remodelação total", diag_pe_direito_m: "2,7 m",
   diag_pontos_eletricos: "5", diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda",
   diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio", diag_portas_proteger: "3",
   diag_demolir_descricao: "Banheira, azulejo das paredes até ao teto e pavimento.",
@@ -367,7 +367,7 @@ function exemplo(d: Negocio): Record<string, string> {
   });
   if (d.fase >= 3) Object.assign(f, {
     n_divisoes: "6", ano_construcao: "1970 a 1990", pavimento: "Flutuante", eletrica: "Antiga", quadro_diferencial: "Sim", canalizacao: "Ferro", gas: "Canalizado",
-    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_altura_revestimento: "Ao teto", diag_pontos_eletricos: "4",
+    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_pontos_eletricos: "4",
     diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda", diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio",
     diag_portas_proteger: "3", gama: "Média", materiais_cliente: "Não",
     validade: "30 dias", prazo_exec: "8", pagamento: "50% + 50% no fim", garantia: "2 anos",
@@ -669,7 +669,6 @@ function preencher(d: Negocio, n: number) {
   }
   if (n === 2) {
     def({ diag_tipo_area: d.linha === "coz" ? "Cozinha" : "Casa de banho", diag_intervencao_tipo: "Remodelação total" });
-    if (d.linha === "wc") def({ diag_altura_revestimento: "Ao teto" });
     if (d.linha === "coz") def({ diag_toalheiro: "Não" });
     derivar(d, "fracao"); derivar(d, "localidade");
   }
