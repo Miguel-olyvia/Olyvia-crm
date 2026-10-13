@@ -293,7 +293,8 @@ BEGIN
     IF i = v_n THEN
       valor := v_total - v_acum;
     ELSE
-      valor := round(v_total * v_pcts[i] / 100, 2);
+      -- trunc, não round: os cêntimos que sobram vão todos para a última.
+      valor := trunc(v_total * v_pcts[i] / 100, 2);
       v_acum := v_acum + valor;
     END IF;
     RETURN NEXT;
