@@ -167,6 +167,7 @@ export const ESCOLHAS: Grupo = {
   campos: [
     { k: "gama", l: "Gama", t: "escolha", op: ["Económica", "Média", "Alta"], papel: "orcamento" },
     { k: "materiais_cliente", l: "O cliente fornece materiais", t: "sim_nao", papel: "orcamento" },
+    { k: "mobilidade_reduzida", l: "Mobilidade reduzida", t: "sim_nao", ajuda: "O cliente ou alguém da casa tem mobilidade reduzida (pesa nas escolhas: base de duche, barras, alturas)." },
     { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara", opcional: true },
   ],
 };

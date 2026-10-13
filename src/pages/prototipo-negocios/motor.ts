@@ -332,7 +332,7 @@ const EXEMPLO_COMPLETO: Record<string, string> = {
   diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio", diag_portas_proteger: "3",
   diag_demolir_descricao: "Banheira, azulejo das paredes até ao teto e pavimento.",
   // Visita · escolhas
-  gama: "Média", materiais_cliente: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
+  gama: "Média", materiais_cliente: "Não", mobilidade_reduzida: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
   // Negócio
   validade: "30 dias", prazo_exec: "8", inicio_prev: "2026-09-29", pagamento: "50% + 50% no fim", garantia: "2 anos",
   notas_cliente: "Inclui a remoção do entulho e a limpeza final.",
