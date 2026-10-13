@@ -356,3 +356,123 @@ O `README.md` dessa pasta explica cada forma.
   - os nomes das fases e as medidas configuráveis por setor;
   - modelos de documentos por setor;
   - ligar o protótipo à base de dados (tabelas de faturas, recibos, aprovações, receitas e campos por empresa).
+
+---
+
+## Definições (V2, 13/10/2026)
+
+Na **V2** e na **V2 funcional**, "Definições" é **uma só página** (`v2/DefinicoesV2.tsx`), sem separadores e sem diálogos; edita-se na própria linha e fica logo guardado. Responde ao lote 1, ponto 3, de `docs/melhorias-v2-2026-10-13/README.md` e à etapa 5 do `plano-execucao.md` (definições num só sítio com pesquisa, modelos de setor e arranque). A Atual continua com as Definições de sempre.
+
+- **Pesquisa em cima** ("/" em qualquer sítio vai para ela; Esc limpa; Enter vai ao primeiro resultado). Procura num **índice estático** (`v2/definicoesIndice.ts`: nome, sinónimos e âncora; os sinónimos incluem as palavras do antigo, como "etapas", "SMTP", "apagados", "funções"). Cada palavra tem de aparecer; os que começam pelo nome vêm primeiro. Por baixo, a lista "Nesta página" com as âncoras das secções.
+- **Secções:** **Arranque** · **Empresa e setor** (os nomes de Cliente/Local/Obra escolhidos em chips; os modelos de setor) · **Fases e campos** (as seis fases fixas com o nome editável; os campos de cada fase com o editor de campos embebido) · **Orçamento** (margem mínima e alvo da empresa, no motor; mínima e alvo por linha de serviço; estrutura, no motor; taxas de deslocação por zona; modelos de orçamento e PDF) · **Documentos** (modelos de proposta, contrato e email, com "Usado em") · **Email** (SMTP da empresa com porta e segurança em chips e "Testar a ligação"; falhas de envio com "Reenviar") · **Equipa e acessos** (utilizadores com o perfil num seletor; os cinco perfis fixos, Comercial, Direção, Financeiro, Armazém e Operações, com o que podem e não podem) · **Dados** (o Lixo com filtro por tipo em chips e "Restaurar") · **Aspeto e demonstração** (Leitura fácil, Ver o aspeto atual e Repor a demonstração, com as mesmas ações das Definições simples).
+- **"?" de ajuda** (`v2/Ajuda.tsx`): um botão de 44 px com `aria-expanded` e `aria-controls` que abre o texto de ajuda logo por baixo, na página. Há um no título e um em cada secção. Serve para as outras páginas da V2 (`<Ajuda titulo="…">texto</Ajuda>`, ou `ComAjuda` + `AjudaBotao` + `AjudaTexto` quando o botão vai no título).
+- **Arranque** (`v2/arranque.ts`, regras puras): cinco perguntas com chips (setor, serviços do setor, n.º de pessoas, como cobra, quantas empresas). Enquanto faltar alguma, diz o que falta; com tudo respondido mostra **o que vai ser aplicado** (modelo, nomes, linhas de serviço, margens, perfis ativos pelo tamanho da equipa, campos da visita novos e escondidos, e notas como a faturação recorrente). "Aplicar o modelo X" (o **único botão primário** da página) aplica os campos, o setor e as margens no motor, e os nomes e as margens por linha na store.
+- **Modelos de setor novos** (`v2/setoresV2.ts`): **Limpeza** e **Manutenção** (os do plano de 06/10), no mesmo formato de `setores.ts`, que não mudou. Cada modelo tem também um resumo (nomes, linhas de serviço, margens, como cobra). A V2 mostra os cinco.
+- **Onde vivem os dados:** o que o motor já tem (margens da empresa, estrutura, campos, setor, aspeto) lê-se e muda-se no `Estado`, como nas Definições simples. O resto (nomes, fases, margens por linha, deslocação, modelos, SMTP, falhas, equipa, Lixo) vive **só em memória**, numa store de módulo (`v2/definicoesDados.ts`, `useSyncExternalStore`, como o `diaADia.ts`): dura até recarregar. "Repor a demonstração" desta página volta-a ao início e chama a reposição de sempre. Não se tocou no `motor.ts`, no `seed()` nem na `VERSAO`.
+- **`CamposEditor.tsx` corrigido** (vale para todas as versões, na vista "campos"): a fase escolhe-se num grupo de rádios (`fieldset`) em vez de `tablist`; os modelos de setor são linhas de uma lista, não cartões; a confirmação do modelo é uma linha na página; o detalhe do campo e o "Novo campo" já não são cartões dentro do cartão do grupo; campos, botões de subir/descer, ícones e chips de 44 px; texto a 15 px; sem cor no texto ("campo da empresa" e o papel do campo a cinzento); "Usar este modelo" e "Criar o campo" passaram a secundários. Exporta `ModelosSetor` e `EditorFases`, que as Definições da V2 usam. Nenhum teste dependia da marcação antiga.
+- **Testes:** `v2/definicoes.test.ts` (índice da pesquisa, arranque, modelos novos) e `v2/DefinicoesV2.test.tsx` (página única com todas as âncoras e sem separadores nem diálogos, um só primário, "/" e resultados, "?", arranque aplicado, Lixo, Reenviar, perfis, margens no motor, nome da fase, Repor).
+- **Por fazer:** os nomes das fases e os nomes de Cliente/Local/Obra só se veem nesta página (não chegam a Negócios nem à ficha); as margens por linha e as taxas de deslocação não entram no cálculo do orçamento; os modelos de documentos não abrem; convidar utilizadores e criar modelos novos ficam para a app real.
+
+## Marketing (V2, 13/10/2026)
+
+Só na **V2** e na **V2 funcional** (o ecrã `v2/MarketingV2.tsx`). Na **Atual** fica o `MarketingSimples` de sempre (`OutrosSimples.tsx`, sem mudanças). Segue o lote 1, item 5, e a secção 4.3 de `docs/melhorias-v2-2026-10-13/README.md`.
+
+**Três conceitos distintos** (decisão 8, com a proposta do levantamento):
+- o **canal** é a categoria fixa da empresa (Redes sociais pagas, Pesquisa, Offline, Parcerias, Outros: `Canal` de `toquesDocs.ts`);
+- a **campanha** é o que se cria e se mede;
+- o **anúncio** é a colocação paga dentro da campanha (Meta Ads, Google Ads, Outdoor…), com o seu **investimento**.
+
+**A lista** (`MarketingV2.tsx`): uma tabela com Campanha (com o canal por baixo e "N por rever"), Leads, Ganhos, Receita, Investimento, Custo por lead e Custo por ganho. Os cabeçalhos ordenam (botão no cabeçalho, `aria-sort`); começa por **Ganhos**, do maior para o menor, e os vazios ("—") ficam sempre no fim. Há uma pesquisa (nome, canal ou onde anuncia, sem acentos). A linha toda abre a campanha. Por baixo diz-se quem ficou **sem campanha** (com os dados de exemplo, só a Ana Martins, com uma UTM do TikTok por mapear). Único primário: **Nova campanha**.
+
+**De onde vêm os números** (`v2/campanhas.ts`, funções puras): as leads são os negócios de exemplo (`dealsTodos`: a seed e as pessoas de exemplo), ligados à campanha pelo **primeiro toque** da pessoa (`toquesDe`): pela campanha do toque ou, sem campanha, pela origem. Cada negócio conta numa campanha no máximo. **A receita só vem dos negócios ganhos** (`ehGanho`: contrato assinado, ou proposta aceite numa venda direta) e é o total do orçamento (`tot().pf`); nunca se escreve à mão. O custo por lead e por ganho é o investimento a dividir; sem investimento, ou sem leads ou ganhos, é "—". Com a seed: Site 6 leads e 2 ganhos; Cozinhas outubro 3 leads, 1.130 € em dois anúncios; Chamadas diretas 4; Recomendações 3; Cozinhas setembro, Casa de banho outubro, Outdoor A1 e Feira Casa e Obra 1 cada. As oito campanhas, os anúncios, os investimentos e as submissões por rever são **de exemplo**.
+
+**Nova campanha** (na própria página, sem modal): Nome, Canal (chips) e Modelo de formulário (chips: Pedido de orçamento, Marcar visita, Contacto simples; vem escolhido o primeiro) → **Criar e abrir a campanha**. São 4 cliques e o nome. A campanha nova não tem anúncios nem leads.
+
+**A página da campanha** (`v2/CampanhaV2.tsx`), sem separadores, com âncoras no topo:
+- **Submissões por rever**, quando as há: um aviso com a contagem e, em cada linha, **Aceitar** (passa a lead da campanha, na fase Lead, e conta nas leads) e **Rejeitar** (sai e não conta).
+- **Resumo**: os seis números e o **funil** Lead → Contacto → Visita → Negócio → Ganho, em barras cinzentas com o número (um perdido conta até à fase onde ficou).
+- **Formulário**: os campos na linha, com o tipo escolhido numa lista, Obrigatório, Subir, Descer e Tirar; "Juntar campo" escolhe de uma lista de campos prontos (não se escreve). Por baixo, a **pré-visualização** como o cliente a vê.
+- **Onde anuncia**: os anúncios com o investimento editável na linha (grava ao sair do campo) e Tirar; "Juntar anúncio em" com chips das origens pagas.
+- **Leads**: a lista só de leitura das pessoas da campanha (nome, fase e valor). Faz as vezes do filtro "Campanha" em Pessoas, que **não** se juntou (a página Pessoas é de outro colega).
+- **Partilhar**: Link, No site (iframe) ou Pixel, em chips; o código num campo só de leitura e **Copiar** (o único primário da página; se a área de transferência recusar, o texto fica selecionado). O domínio `formularios.olyvia.pt` é de exemplo.
+
+**O limite.** As campanhas vivem **só em memória** (`v2/campanhasStore.ts`, `useSyncExternalStore`, como o `diaADia.ts`): duram até recarregar a página. Não tocam no `Estado`, no `motor.ts`, no `seed()` nem na `VERSAO`, e o "Repor a demonstração" não as apaga (o `repor` vive no `PrototipoNegocios.tsx`, que não se mexeu); recarregar a página volta aos exemplos. Peças comuns em `v2/pecasMarketing.tsx`. Testes: `v2/campanhas.test.ts` (contas, lista, formulário, partilha e store) e `v2/MarketingV2.test.tsx` (lista, nova campanha, página, por rever, editor e anúncios).
+
+## Catálogo e custos (V2, 13/10/2026)
+
+Na V2 e na V2 funcional, "Catálogo e custos" deixa de ser o `CatalogoSimples` (a Atual e o aspeto simples sem V2 ficam iguais). Tudo em `v2/`; o `motor.ts`, o `OutrosSimples.tsx` e o `CustoServico.tsx` não mudaram.
+
+**Uma só página, com âncoras:** Serviços · Parâmetros · Perfis · Equipamentos · Estrutura.
+
+- **Serviços** (`v2/CatalogoV2.tsx`): uma só tabela com os serviços em uso (`S.svc`) e o Catálogo real (`catalogo.ts`), sem repetir. Colunas: Serviço (e ofício), Uso ("Em uso" / "Não usado" e em quantos orçamentos), Medida, Custo por medida, Preço, Margem (sobre o preço) e Alertas (ícones com o nome para o leitor de ecrã). Começa ordenada por uso (os em uso primeiro, depois os mais pedidos); os cabeçalhos ordenam, com `aria-sort`. Pesquisa sem acentos e chips com contagem: Em uso, Sem receita, Margem abaixo do mínimo, Preço desatualizado.
+- **Ficha do serviço** (`v2/FichaServicoV2.tsx`): abre no lugar da lista, com "Voltar ao Catálogo" (o foco volta à linha). Não é modal. A receita em três listas editáveis na linha: mão de obra (passo, perfil, horas por medida × €/h do perfil), equipamentos (horas por medida × €/h do equipamento) e consumíveis (produto, quantidade por medida, unidade, preço e a data do preço; mudar o preço põe a data de hoje). O custo por medida soma-se sozinho (mais a estrutura, se as Definições a somarem). Preço "Tabela" ou "Custo + margem", com o único botão primário da página, "Guardar o preço", que fica no histórico de preços. Entre o mínimo e o alvo escolhe-se a justificação (lista, não se escreve).
+- **Custo sem modal** (`v2/CustoServicoInline.tsx`): o resumo do `CustoServico` (custo, preço, margem, as partes numa barra cinzenta e de onde vem o €/h) dentro da ficha. O salário só a Direção vê. O `CustoServico` (modal) continua na Atual e no orçamento.
+- **Custos** (`v2/CustosV2.tsx`): Parâmetros (meses de salário, TSU, seguros, horas produtivas do técnico e da empresa, meses até um preço ficar desatualizado, margem mínima por linha: Casa de banho e Cozinha); Perfis (salário → €/h = salário × 14 × (1 + TSU) + seguros, ÷ horas produtivas; o salário só a Direção vê e muda); Equipamentos (compra, vida útil, residual, manutenção/ano, uso/ano → €/h); Estrutura (custos do mês, categoria, conta ou não; taxa = Σ mensal ÷ horas produtivas). Retirar uma linha mostra "Anular" no aviso (região `aria-live`).
+
+**As contas** (`v2/custosModelo.ts`, funções puras) reutilizam `amortHora` e `consUn` de `receitas.ts`. No arranque batem com o motor: um técnico de 1.900 € dá 25,00 €/h, a estrutura (3.400 € ÷ 672 h) dá 5,06 €/h e os equipamentos dão a amortização de `receitas.ts`. O ladrilhador não tem salário: é o "Técnico sem custo/hora" do revestimento, e usa a média dos perfis.
+
+**Os alertas novos** (puros, em `custosModelo.ts`; o `alertas()` do motor não mudou):
+- `alertasServico`, no Catálogo: "Linha sem custo" quando o serviço não tem receita (só as horas do Catálogo, em vez dos 25 €/h inventados por `garantirServico`); "Técnico sem custo/hora"; "Preço desatualizado" pela data dos consumíveis, ao fim de N meses (6 por omissão, muda-se em Parâmetros); "Preço abaixo do custo"; "Margem abaixo do mínimo", com o mínimo por linha de serviço (o mais alto das linhas onde o serviço entra; Cozinha a 30%, Casa de banho usa a geral); "Falta a justificação" entre o mínimo e o alvo.
+- `alertasOrcamentoV2(d, S, custos, { justificacao })`, para o orçamento: os do motor, sem a frase fixa do "desatualizado", mais "Linha sem custo", o desatualizado com data, a margem mínima da linha do negócio e a justificação da margem total. Ainda não está ligado ao ecrã do orçamento (o `OrcamentoSimples` não se mexeu).
+
+**O limite.** Os custos, as receitas editadas e o histórico de preços vivem **só em memória** (`v2/custosStore.ts`, store de módulo com `useSyncExternalStore`): duram até recarregar, e "Repor a demonstração" não os apaga (o `repor` está no `PrototipoNegocios.tsx`, que não se mexeu). Ao editar, as horas, o €/h, os equipamentos, os consumíveis e o preço passam para `S.svc` (`aplicarTodos`), para o orçamento usar o mesmo custo; esses ficam guardados com o estado. O motor continua a somar a estrutura a 5,06 €/h fixos.
+
+Testes: `v2/custosModelo.test.ts` (contas, lista, alertas, passagem para o motor) e `v2/CatalogoV2.test.tsx` (lista, chips, ordenação, ficha sem modal, histórico, salário só para a Direção).
+
+## Hoje (V2, 13/10/2026)
+
+Com a **V2** ou a **V2 funcional** escolhida, o Hoje é `v2/HojeV2.tsx`; a **Atual** continua com o `HojeSimples` (aspeto simples) e o `Hoje` (aspeto atual), sem mudanças. O `HojeV2` já não desenha o `HojeSimples`. Segue a auditoria `docs/melhorias-v2-2026-10-13` (2 · lote 1 · item 2, e 4.1).
+
+- **Um só Hoje por papel**, uma lista "Para tratar" em que cada coisa aparece **uma vez**, com a razão em texto e por prioridade (regras puras em `v2/hojeV2Regras.ts`).
+  - **Comercial:** junta as quatro listas de Pessoas (`funcHoje.ts`) e as quatro de Negócios (`funcNegocios.ts`) numa linha por pessoa. A razão de maior prioridade manda (Tarefas para hoje, Contactar, Visitas, Orçamentos por enviar, À espera do cliente, Contratos por assinar, A faturar) e as outras ficam em "Também: …". Um negócio que só repete a lista da pessoa não se repete. Com a seed: 16 pessoas (Contactar 7, Visitas 2, Orçamentos 4, À espera 1, Contratos 1, A faturar 1).
+  - **Outros papéis:** os passos do motor (`minhas`) e a agenda de `Hoje.tsx` (`agenda`), uma linha por negócio, com o passo na linha. O **Financeiro** tem os contadores **Faturas por registar** e **Pagamentos por validar** (o passo diz "Registar fatura": a Olyvia regista, não emite). A **Direção** tem as exceções à margem (Aprovar, Recusar) e **A equipa**, uma tabela por comercial (por contactar, visitas, orçamentos por enviar, propostas à espera, por assinar, valor em proposta e atrasos), com "Ver os negócios" (Negócios com o filtro "Os meus"). O **Armazém** tem os números do Inventário (contagens abertas e paradas, stock baixo, saídas prontas, guias, encomendas atrasadas; `v2/hojeArmazem.ts`, a partir de `inventario/contadores.ts`) e "Abrir o Inventário".
+- **Contadores e alertas.** Os contadores são chips (`aria-pressed`) que filtram a lista no próprio Hoje, e o filtro é anunciado. Os alertas levam a outro ecrã: "Negócios com atraso" abre Negócios **já filtrado** (`A.filtro("atraso")`); "Propostas à espera do cliente" (Direção), "Planos de obra com conflitos" e "Encomendas por confirmar" só navegam, porque o filtro por fase de Negócios e o separador do Inventário vivem em ficheiros de outros (a memória das páginas e `PrototipoNegocios.tsx`). Na V2, "Abrir o Inventário" abre nas Encomendas, não nas Contagens.
+- **Marcar a visita na linha** (leads em Contactar): "Marcar visita" (`aria-expanded`) abre, por baixo da linha, os chips do dia (os 5 dias úteis a seguir a sáb 10/10) e da hora (09:30, 11:00, 14:30, 16:00) e "Guardar". Num negócio da seed em Contacto e com o Contacto completo usa a ação do motor `marcarVisita` (o negócio passa a Visita). Nos outros casos (pessoa de exemplo, negócio ainda em Lead, ou campos do Contacto em falta, que o texto nomeia: o Manuel Costa tem "Quem vai estar" por preencher) a visita fica **em memória** e o texto diz porquê. Em ambos a pessoa passa para Visitas e a visita entra na agenda.
+- **Tarefas sempre ligadas a uma pessoa** (e ao negócio, quando é da seed): "+ Tarefa" em cada linha, com o quê em chips (Ligar, Enviar orçamento, Confirmar visita, Outro…, que pede um texto curto com rótulo) e quando em chips (Hoje, Amanhã, Em 3 dias). A tarefa aparece na linha da pessoa, com "Feita", e na agenda; uma tarefa para hoje põe a pessoa em **Tarefas para hoje**, no topo (ou fá-la entrar, se não estava no Hoje).
+- **A semana:** chips com os 7 dias a partir de hoje e o número de compromissos de cada um; ao escolher um dia, a agenda mostra só esse dia ("Toda a semana" volta atrás). Só leitura.
+- **Só um editor aberto de cada vez:** o "Guardar" dele é o único botão primário do ecrã. Esc fecha e devolve o foco ao botão que o abriu; depois de guardar, o foco vai para o título da lista. Os avisos vão para uma região `aria-live` (`useAviso`).
+- **Onde vive o que se marca:** `v2/hojeV2Store.ts`, uma store de módulo **só em memória** (como `diaADia.ts`): dura até recarregar. Não toca no `Estado`, no `seed()` nem na `VERSAO`, e o `motor.ts` não mudou. **"Repor a demonstração" ainda não a apaga** (o botão vive em `PrototipoNegocios.tsx`, que não era deste trabalho): basta chamar `esquecerHojeV2()` lá.
+- **Datas:** o "hoje" é o mesmo da V2 funcional, sáb 10/10/2026 (`HOJE_FUNC`); a saudação usa a hora real.
+- **Testes:** `v2/hojeV2Regras.test.ts` (regras) e `v2/HojeV2.test.tsx` (ecrã, com as regras de desenho: texto ≥ 15 px, alvos de 44 px, cor só nos ícones, um só primário). Com eles, o protótipo tem 54 ficheiros e 880 testes.
+
+## Operações e Financeiro (V2, 13/10/2026)
+
+O lote 1, item 6, de `docs/melhorias-v2-2026-10-13/README.md` (secções 1, 3 e 4.5). Vale para a **V2** e a **V2 funcional**; a **Atual** fica como era. Tudo com dados de exemplo; não se mexeu na `VERSAO` nem no comportamento do `motor.ts`.
+
+### Operações (menu Operações, `v2/OperacoesV2.tsx`)
+
+- **No topo, o Hoje do supervisor:** as tarefas **por validar** e os **atrasos** das obras abertas, cada coisa uma só vez (`hojeSupervisor`); cada linha abre a obra.
+- **A lista das obras**, com o estado em texto e ícone (`v2/EstadoObra.tsx`: Plano por aprovar, Aprovado, Em curso, Concluída), as horas, quantas por validar e quantos atrasos.
+- **A página da obra** (`v2/ObraV2.tsx`), em secções seguidas, **sem separadores** e sem modais, com ligações "Nesta página":
+  - **Plano:** as tarefas com o técnico, as datas, as horas e o estado. Com o plano por aprovar, o **supervisor** e a **data de início** escolhem-se ali (botões; vêm sugeridos do negócio) e os conflitos resolvem-se na linha (Trocar técnico, Adiar). Um só botão primário, o do estado: **Aprovar plano** (escreve `responsavel` e `inicio` no negócio e chama `A.aprovarPlano`), **Arrancar a obra** ou **Registar o fim da obra**.
+  - **Validar:** as tarefas que os técnicos deram por feitas. **Validar** na linha; **Rejeitar** abre o motivo na própria linha (botões com os motivos comuns ou texto livre; sem motivo não rejeita). **Validar todas** quando há mais de uma.
+  - **Atrasos:** "Registar um atraso" abre na linha: a fase, os dias e o motivo em botões, e o interruptor **Cliente avisado** (que se pode ligar depois em cada atraso).
+  - **Previsto contra real:** mão de obra, equipamentos, consumíveis e estrutura. O previsto é a receita (`partes()` do orçamento); o real é **de exemplo** (`v2/realExemplo.ts`, fatores por obra) e o ecrã di-lo. Numa obra em curso compara só a parte feita. Barras cinzentas e números; o desvio em texto com ícone (até 2% é "dentro do previsto").
+  - **Materiais:** só leitura, com "Abrir no Inventário".
+- O que o supervisor faz (validações, rejeições, atrasos, supervisor e data) vive **em memória** em `v2/estadoV2.ts`, preso ao objeto `Estado` (um `WeakMap`): "Repor a demonstração" recomeça-o, e recarregar a página também. A obra em curso da Marta Lima traz um atraso **de exemplo**. As regras puras estão em `v2/operacoes.ts`.
+
+### Financeiro (fase Financeiro do negócio, `v2/FinanceiroV2.tsx`)
+
+- **A Olyvia não emite faturas** (certificação da AT): a fatura emite-se no programa certificado e **regista-se** aqui: tranche, número, data, valor (vem da tranche) e, opcional, o PDF. O ecrã diz isto numa frase.
+- **Várias faturas, uma por tranche** do plano de pagamento do contrato (campo `pagamento`): "50% + 50% no fim" dá **Adiantamento 50%** e **Final 50%**; "30% + 40% + 30%" dá Adiantamento, A meio e Final; "100% na adjudicação" dá uma só. A última tranche leva o resto, para a soma bater com o total com IVA.
+- **Validar pagamento** em cada fatura, na linha: a data (Hoje, Ontem ou o calendário), a conta (botões) e a referência. Sai o **recibo**.
+- **O disparo:** o pagamento da tranche que dispara chama a ação do motor de sempre (`A.validar`), que emite o recibo e põe a obra a andar (Inventário + plano por aprovar). Qual é a tranche está na constante `DISPARO` de `v2/financeiro.ts`, com um comentário: **hoje é a primeira** (o adiantamento), porque com "50% + 50% no fim" a final só se paga no fim da obra. É uma **decisão em aberto** (melhorias-v2, decisão 3; negócios de 08/10, secção 6): para mudar, troca-se para `"ultima"`.
+- As tranches que faltam depois do disparo (a final) registam-se e validam-se no fim da fase **Obra** do negócio ("Faturas e pagamentos").
+- A fatura única que o motor já tinha (a da demonstração, ou a criada pelo botão do fim da fase) conta como a 1.ª tranche; se o motor validou o pagamento por fora, essa fatura fica paga com o recibo dele.
+- Liga-se em `FasesSimples.tsx` (`DocumentosSimples` e `ObraSimples`) só quando `lerVersao()` não é a Atual. As faturas também vivem em memória em `v2/estadoV2.ts`; o motor só guarda a primeira em `fin.fatura` e o recibo do disparo em `fin.recibo`.
+
+### Regras de desenho corrigidas
+
+- `OperacoesSimples.tsx`: o "O que fazer" deixou de ser um cartão com cartões dentro; os dias da linha do tempo passaram de 12 px para 15 px; as barras são cinzentas e o estado (feito, conflito) diz-se com um ícone de cor e texto; o "conflito" da lista e o "faltam" do Inventário têm a cor só no ícone.
+- `FasesSimples.tsx`: as barras do previsto e real são cinzentas; a cor do "acima do previsto", dos materiais em falta e da receita atualizada passou para ícones; o texto pequeno passou a 15 px; "Atualizar a receita" deixou de ser um segundo botão primário.
+
+### Testes
+
+`v2/financeiro.test.ts` e `v2/operacoes.test.ts` (as regras), `v2/FinanceiroV2.test.tsx` e `v2/OperacoesV2.test.tsx` (os ecrãs, montados com `v2/testeV2.tsx`). O protótipo fica com 56 ficheiros e 884 testes.
+
+### O que ficou por fazer
+
+- O botão do fim da fase Financeiro (em `NegocioSimples` e `PaginaNegocio`, vem de `proximo()` no motor) ainda diz **"Emitir fatura"** na V2 antes de haver uma fatura registada. Não se mexeu, para não mudar o motor nem a página do negócio; registar a primeira fatura muda-o para "Validar pagamento".
+- O documento da fatura para o cliente (`FaturaDoc`, partilha no portal) não aparece no Financeiro V2, porque a fatura deixa de ser feita pela Olyvia.
+- Validações, atrasos e faturas não ficam guardados ao recarregar (estão em memória). Na app real: `client_invoices`, `client_receipts` e as tabelas da obra.
+- O real do "Previsto contra real" é de exemplo até haver `calculo_snapshot` e registos de horas.

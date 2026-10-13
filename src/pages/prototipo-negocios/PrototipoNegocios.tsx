@@ -23,12 +23,18 @@ import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
 import { PessoasFunc, esquecerPessoasFunc } from "./PessoasFunc";
 import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
 import { esquecerDiaADia } from "./diaADia";
+import { esquecerV2 } from "./v2/esquecerV2";
 import { SeletorVersao } from "./SeletorVersao";
 import { gravarVersao, lerVersao, vistaEquivalente, type VersaoProto } from "./versaoPrototipo";
 import { ICONE_NEGOCIO } from "./iconeNegocio";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
 import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
 import { CamposEditor } from "./CamposEditor";
+import { HojeV2 } from "./v2/HojeV2";
+import { CatalogoV2 } from "./v2/CatalogoV2";
+import { MarketingV2 } from "./v2/MarketingV2";
+import { DefinicoesV2 } from "./v2/DefinicoesV2";
+import { OperacoesV2 } from "./v2/OperacoesV2";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
@@ -118,6 +124,7 @@ export default function PrototipoNegocios() {
     esquecerPessoasFunc();
     esquecerNegociosFunc();
     esquecerDiaADia();
+    esquecerV2();
     avisar({ msg: "Demonstração reposta", sub: "Todos os negócios voltaram ao início", kind: "ok" });
   });
 
@@ -161,16 +168,16 @@ export default function PrototipoNegocios() {
     : <Negocios {...ctx} />;
   let corpo: ReactNode;
   switch (S.view) {
-    case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
+    case "hoje": corpo = v2 ? <HojeV2 {...ctx} /> : simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
     case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : listaNegocios; break;
     case "leads": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
     case "pessoas": corpo = simples ? (func ? <PessoasFunc {...ctx} alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
-    case "operacoes": corpo = simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
+    case "operacoes": corpo = v2 ? <OperacoesV2 {...ctx} /> : simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
     case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
-    case "catalogo": corpo = simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
+    case "catalogo": corpo = v2 ? <CatalogoV2 {...ctx} /> : simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
     case "clientes": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : <ClientesSimples {...ctx} />) : <Clientes {...ctx} />; break;
-    case "marketing": corpo = simples ? <MarketingSimples /> : <Marketing />; break;
-    case "definicoes": corpo = simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
+    case "marketing": corpo = v2 ? <MarketingV2 {...ctx} /> : simples ? <MarketingSimples /> : <Marketing />; break;
+    case "definicoes": corpo = v2 ? <DefinicoesV2 {...ctx} /> : simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
     case "campos": corpo = <CamposEditor {...ctx} />; break;
     default: corpo = listaNegocios;
   }
