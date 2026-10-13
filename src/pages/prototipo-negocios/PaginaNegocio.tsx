@@ -3,7 +3,7 @@
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  ArrowLeft, ArrowRight, Building2, CalendarClock, Camera, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer,
+  ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer,
   Home, Lock, MapPin, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { VisitasLista } from "./Visitas";
 import { UsarLocalizacao } from "./Localizacao";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
+import { FotosEtapa } from "./FotosEtapa";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { ProdutosOrcamento, rotuloMat } from "./ProdutosOrcamento";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
@@ -276,9 +277,11 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
             <div className="mt-3"><UsarLocalizacao ctx={ctx} d={d} texto="Estou no local: confirmar pela localização" /></div>
           </div>
           <Campos grupo={E(EXTERIOR)} {...fx} />
+          <FotosEtapa ctx={ctx} d={d} etapa="exterior" simples={simples} />
         </div>
       ) },
-      g(INTERIOR, Home), g(AREA, Wrench),
+      { ...g(INTERIOR, Home), corpo: <div className="space-y-6"><Campos grupo={E(INTERIOR)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="interior" simples={simples} /></div> },
+      { ...g(AREA, Wrench), corpo: <div className="space-y-6"><Campos grupo={E(AREA)} {...fx} /><FotosEtapa ctx={ctx} d={d} etapa="area" simples={simples} /></div> },
       { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: (Object.entries(L.med) as [MedKey, string][]).filter(([k]) => v.med[k] > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(v.med[k])}`), corpo: (
         <div className="space-y-2">
           <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. Todas são precisas para fechar o levantamento.</p>
@@ -299,23 +302,6 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length,
         resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> },
       g(ESCOLHAS, Sparkles),
-      { id: "fotos", titulo: "Fotografias", icone: Camera, feito: v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim", resumo: [v.fotos + " fotos"], corpo: (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex -space-x-2">
-              {Array.from({ length: Math.min(v.fotos, 6) }).map((_, i) => (
-                <span key={i} className="grid h-12 w-12 place-items-center rounded-lg border-2 border-card bg-gradient-to-br from-primary/20 to-accent/20 text-primary animate-in zoom-in-50"><Camera className="h-4 w-4" /></span>
-              ))}
-            </div>
-            <span className="text-sm text-muted-foreground">{v.fotos} fotos da área · no telemóvel tira-se com a câmara, antes de sentar com o cliente</span>
-            <Button variant="outline" size="sm" onClick={go(() => A.foto(d.id))}><Camera className="mr-1.5 h-4 w-4" />Tirar foto</Button>
-          </div>
-          {aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim" && (
-            <p className="text-[15px] font-medium text-destructive">Tire pelo menos uma fotografia, ou marque que o cliente não quis.</p>
-          )}
-          <Campos grupo={{ titulo: "", campos: [{ k: "diag_cliente_recusou_fotos", l: "O cliente não quis fotografias", t: "sim_nao", opcional: true }] }} {...fx} />
-        </div>
-      ) },
     ];
   } else if (d.fase === 3 && o) {
     passos = [
@@ -360,7 +346,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;
-    if (ps.id === "fotos" && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = 1;
+    // as fotografias contam no total; o aviso fica na área de intervenção (onde está "o cliente não quis")
+    if (ps.id === AREA.titulo && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = (ps.falta || 0) + 1;
   }
   return passos;
 }

@@ -14,7 +14,7 @@ import { DocumentosSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { NecessidadesCliente } from "./NecessidadesVisita";
 import { VisitasLista } from "./Visitas";
-import { nfmt, type MedKey } from "./motor";
+import { fotosPor, nfmt, type MedKey } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -129,7 +129,7 @@ export function NegocioSimples(ctx: Ctx) {
                   <div>
                     <h3 className="mb-3 text-base font-semibold">Medidas e fotografias</h3>
                     <p className="text-[15px]">
-                      {(Object.entries(LINHAS[d.linha].med) as [MedKey, string][]).map(([k, l]) => `${l} ${nfmt(d.visita.med[k] || 0)}`).join(" · ")} · {d.visita.fotos} fotos
+                      {(Object.entries(LINHAS[d.linha].med) as [MedKey, string][]).map(([k, l]) => `${l} ${nfmt(d.visita.med[k] || 0)}`).join(" · ")} · {d.visita.fotos} fotos (exterior {fotosPor(d.visita).exterior}, interior {fotosPor(d.visita).interior}, área {fotosPor(d.visita).area})
                     </p>
                   </div>
                 )}

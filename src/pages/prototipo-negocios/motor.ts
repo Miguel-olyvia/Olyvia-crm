@@ -155,7 +155,9 @@ export interface Negocio {
   vis?: number[];
   /** off: serviços das medidas que o cliente não quer; extra: serviços juntados à mão, com quantidade. */
   /** prod: produtos do Catálogo escolhidos na visita; manter / clienteCompra: as respostas por serviço que obriga a produto (produtosVisita.ts). */
-  visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean } & NecVisita;
+  visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean;
+    /** As fotografias por etapa da visita (fotos é o total). Em falta: reparte-se o total (fotosPor). */
+    fotosPor?: Partial<Record<"exterior" | "interior" | "area", number>> } & NecVisita;
   orc: Orcamento | null;
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean };
@@ -445,6 +447,16 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
   linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
   return o;
+}
+
+/** As fotografias da visita por etapa (13/10): exterior, interior e área de intervenção. visita.fotos fica o total. */
+export type EtapaFotos = "exterior" | "interior" | "area";
+export const ETAPAS_FOTOS: EtapaFotos[] = ["exterior", "interior", "area"];
+/** As fotografias por etapa; sem contagem guardada (negócios de antes), reparte o total: um terço ao exterior, um terço ao interior, o resto à área. */
+export function fotosPor(v: Negocio["visita"]): Record<EtapaFotos, number> {
+  if (v.fotosPor) return { exterior: v.fotosPor.exterior || 0, interior: v.fotosPor.interior || 0, area: v.fotosPor.area || 0 };
+  const t = Math.floor((v.fotos || 0) / 3);
+  return { exterior: t, interior: t, area: (v.fotos || 0) - 2 * t };
 }
 
 /** Todos os serviços da visita: do pacote (pelas medidas), postos à mão e trazidos pelos produtos escolhidos. */
@@ -966,7 +978,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id);
       if (q > 0) { garantirServico(S, sid); d.visita.extra[sid] = q; } else delete d.visita.extra[sid];
     },
-    foto(id: number) { deal(id).visita.fotos++; },
+    /** Uma fotografia numa etapa da visita (por omissão, a área); o total sobe também. */
+    foto(id: number, etapa: EtapaFotos = "area") { const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
     recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = r2(custoUn(S.svc[l.sid], S)); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
   };
   return A;
