@@ -31,7 +31,7 @@ describe("Hoje V2 · Comercial", () => {
   it("uma só lista, cada pessoa uma vez, com a razão em texto; o HojeSimples não aparece", () => {
     pagina();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/Rúben$/);
-    expect(screen.getByText("Tem 16 coisas para tratar, 1 com atraso.")).toBeInTheDocument();
+    expect(screen.getByText("Tem 16 coisas para tratar, 1 com atraso e 3 perguntas de clientes.")).toBeInTheDocument();
     expect(screen.queryByText("Comece por aqui")).not.toBeInTheDocument();
     expect(within(lista()).getAllByRole("listitem").filter((li) => li.parentElement === lista())).toHaveLength(16);
     expect(linhaDe("Ana Martins")).toHaveTextContent("Sem contacto há 10 dias");
@@ -43,7 +43,7 @@ describe("Hoje V2 · Comercial", () => {
     expect(chip(/^Contactar 7/)).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("list", { name: "Contactar" }).querySelectorAll(":scope > li")).toHaveLength(7);
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Lista filtrada por Contactar: 7"));
-    fireEvent.click(chip(/^Tudo 16/));
+    fireEvent.click(chip(/^Tudo 19/));
     expect(lista().querySelectorAll(":scope > li")).toHaveLength(16);
   });
   it("marcar a visita na linha: dia e hora em chips, Guardar; a pessoa passa a Visitas e entra na agenda", async () => {
@@ -168,5 +168,68 @@ describe("Hoje V2 · outros papéis", () => {
     pagina("operacoes");
     expect(chip(/^Obras em curso 1/)).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Agenda" })).toHaveTextContent("Marta Lima");
+  });
+});
+
+describe("Hoje V2 · perguntas do cliente", () => {
+  const perguntas = (): HTMLElement => screen.getByRole("list", { name: "Perguntas do cliente" });
+  const linhaP = (nome: string): HTMLElement => within(perguntas()).getAllByRole("listitem").find((li) => li.querySelector("p")?.textContent === nome)!;
+
+  it("o Comercial vê as perguntas com a mensagem inteira, de onde vieram e o contacto; o contador Perguntas filtra", async () => {
+    pagina();
+    expect(chip(/^Perguntas 3/)).toHaveAttribute("aria-pressed", "false");
+    const carla = linhaP("Carla Nunes");
+    expect(carla).toHaveTextContent("A bancada em pedra que está na proposta é em granito ou em quartzo? E o preço já inclui a retirada da bancada antiga?");
+    expect(carla).toHaveTextContent("Portal do cliente · Proposta");
+    expect(carla).toHaveTextContent("Email carla.nunes@exemplo.pt · WhatsApp 938 101 777");
+    fireEvent.click(chip(/^Perguntas 3/));
+    expect(within(perguntas()).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.queryByRole("list", { name: "Para tratar" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Lista filtrada por Perguntas: 3"));
+  });
+  it("2 cliques: uma resposta rápida e Enviar; a pergunta sai da lista e fica 'Respondida há instantes'", async () => {
+    const { container } = render(<Raiz S={(() => { const S = seed(); S.role = "comercial"; return S; })()} />);
+    fireEvent.click(within(linhaP("Sérgio Pinto")).getByRole("button", { name: "Vou confirmar e respondo hoje" }));
+    const editor = screen.getByRole("group", { name: "Responder a Sérgio Pinto" });
+    expect(within(editor).getByRole("button", { name: /^Email · sergio.pinto@exemplo.pt/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(editor).getByRole("button", { name: /^WhatsApp · 919 440 222/ })).toHaveAttribute("aria-pressed", "false");
+    expect(editor).toHaveTextContent("Vai enviar: “Olá Sérgio, obrigado pela pergunta.");
+    const prim = [...container.querySelectorAll("button")].filter((b) => /(^|\s)bg-primary(\s|$)/.test(b.className));
+    expect(prim.map((b) => b.textContent)).toEqual(["Enviar"]);
+    fireEvent.click(within(editor).getByRole("button", { name: "Enviar" }));
+    expect(within(perguntas()).queryByText("Sérgio Pinto")).toBeNull();
+    expect(screen.getByRole("list", { name: "Perguntas respondidas" })).toHaveTextContent("Sérgio Pinto · Respondida há instantes por Email (sergio.pinto@exemplo.pt)");
+    expect(chip(/^Perguntas 2/)).toBeInTheDocument();
+    expect(chip(/^Tudo 18/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Resposta enviada a Sérgio Pinto por Email"));
+  });
+  it("escrever outra: um texto curto, com rótulo; o canal muda para WhatsApp; Esc fecha e devolve o foco", () => {
+    pagina();
+    fireEvent.click(within(linhaP("Marta Lima")).getByRole("button", { name: "Escrever outra" }));
+    const editor = screen.getByRole("group", { name: "Responder a Marta Lima" });
+    const enviar = within(editor).getByRole("button", { name: "Enviar" });
+    expect(enviar).toBeDisabled();
+    fireEvent.change(within(editor).getByLabelText("A sua resposta (curta)"), { target: { value: "Deixe com a vizinha, nós passamos lá às 8h30." } });
+    fireEvent.click(within(editor).getByRole("button", { name: /^WhatsApp/ }));
+    expect(enviar).toBeEnabled();
+    fireEvent.keyDown(editor, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "Responder a Marta Lima" })).toBeNull();
+    expect(document.activeElement).toBe(within(linhaP("Marta Lima")).getByRole("button", { name: "Vou confirmar e respondo hoje" }));
+  });
+  it("só um editor aberto: abrir a resposta fecha a tarefa", () => {
+    pagina();
+    fireEvent.click(within(linhaDe("Ana Martins")).getByRole("button", { name: "Tarefa para Ana Martins" }));
+    expect(screen.getByRole("group", { name: "Nova tarefa: Ana Martins" })).toBeInTheDocument();
+    fireEvent.click(within(linhaP("Carla Nunes")).getByRole("button", { name: "Ligo-lhe para explicar" }));
+    expect(screen.queryByRole("group", { name: "Nova tarefa: Ana Martins" })).toBeNull();
+    expect(screen.getByRole("group", { name: "Responder a Carla Nunes" })).toBeInTheDocument();
+  });
+  it("a Direção também as vê; o Financeiro não", () => {
+    pagina("direcao");
+    expect(chip(/^Perguntas 3/)).toBeInTheDocument();
+    cleanup();
+    pagina("financeiro");
+    expect(screen.queryByRole("list", { name: "Perguntas do cliente" })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Mostrar na lista" })).queryByRole("button", { name: /^Perguntas/ })).toBeNull();
   });
 });
