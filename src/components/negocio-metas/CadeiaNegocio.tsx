@@ -4,8 +4,10 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { formatarMeta } from "./formatoMetas";
-import type { NegocioMes } from "./negocioMetas";
+import { faseDoNegocio, type NegocioMes } from "./negocioMetas";
 import { temValor } from "./logicaQuadro";
+import { useWorkflowExemplo } from "./useWorkflowExemplo";
+import { textoAoAceitar, traduzir } from "./workflowNegocio";
 
 interface CadeiaNegocioProps {
   negocio: NegocioMes;
@@ -90,7 +92,11 @@ function CadeiaHorizontal({ negocio, id }: Omit<CadeiaNegocioProps, "horizontal"
 export function CadeiaNegocio({ negocio, id, horizontal = false }: CadeiaNegocioProps) {
   const { t } = useTranslation();
   const { orcamentos, proposta, contrato } = negocio;
+  const { config } = useWorkflowExemplo();
   if (horizontal) return <CadeiaHorizontal negocio={negocio} id={id} />;
+  // "Ao aceitar: ..." só no passo ativo: Orçamento sem proposta, ou Proposta por aceitar.
+  const aoAceitar = textoAoAceitar(config, negocio);
+  const linhaAoAceitar = aoAceitar ? <p className="text-xs text-muted-foreground">{traduzir(t, aoAceitar)}</p> : null;
   return (
     <ol id={id} aria-label={t("businessGoals.panel.chain")}>
       <Passo numero={1} titulo={t("businessGoals.chain.quotes")} feito={temValor(negocio)} ultimo={false}>
@@ -102,6 +108,7 @@ export function CadeiaNegocio({ negocio, id, horizontal = false }: CadeiaNegocio
             </li>
           ))}
         </ul>
+        {faseDoNegocio(negocio) === "orcamento" && linhaAoAceitar}
       </Passo>
       <Passo numero={2} titulo={t("businessGoals.chain.proposal")} feito={proposta?.estado === "aceite"} ultimo={false}>
         {proposta ? (
@@ -109,6 +116,7 @@ export function CadeiaNegocio({ negocio, id, horizontal = false }: CadeiaNegocio
         ) : (
           <p className="text-sm text-muted-foreground">{t("businessGoals.chain.none")}</p>
         )}
+        {faseDoNegocio(negocio) === "proposta" && linhaAoAceitar}
       </Passo>
       <Passo numero={3} titulo={t("businessGoals.chain.contract")} feito={contrato?.estado === "assinado"} ultimo>
         {contrato ? (
