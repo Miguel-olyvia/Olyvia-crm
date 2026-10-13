@@ -1,21 +1,10 @@
 import { useId } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { DadosPessoaPainel } from "@/components/ficha-comum/dadosPessoaPainel";
-import { LinhaContacto, type CopiaContacto } from "@/components/ficha-comum/LinhaContacto";
+import { LinhaContacto } from "@/components/ficha-comum/LinhaContacto";
 import { ligacoes } from "@/components/ficha-comum/ligacoesContacto";
 import { TituloPainel } from "./CamposPainel";
 import { formatarData } from "./negocioPainel";
-
-type CampoCopiavel = "phone" | "email" | "address";
-
-/** O que acontece ao copiar um campo: o nome do botão e as duas mensagens (copiado, ou só selecionado). */
-function copiaDe(t: (chave: string) => string, campo: CampoCopiavel): CopiaContacto {
-  return {
-    rotulo: t(`businessGoals.painel.person.copy.${campo}`),
-    mensagemCopiado: t(`businessGoals.painel.person.copied.${campo}`),
-    mensagemSelecionado: t("businessGoals.painel.person.selected"),
-  };
-}
 
 function Dados({ pessoa }: { pessoa: DadosPessoaPainel }) {
   const { t } = useTranslation();
@@ -62,14 +51,13 @@ function Contacto({ pessoa }: { pessoa: DadosPessoaPainel }) {
               whatsapp={l.whatsapp ? {
                 href: l.whatsapp, rotulo: t("businessGoals.painel.person.whatsapp"), avisoNovoSeparador: t("businessGoals.painel.person.newTab"),
               } : undefined}
-              copia={copiaDe(t, "phone")}
             />
           )}
           {pessoa.email && (
-            <LinhaContacto rotulo={t("businessGoals.painel.person.label.email")} valor={pessoa.email} href={l.email} copia={copiaDe(t, "email")} />
+            <LinhaContacto rotulo={t("businessGoals.painel.person.label.email")} valor={pessoa.email} href={l.email} />
           )}
           {pessoa.morada && (
-            <LinhaContacto rotulo={t("businessGoals.painel.person.label.address")} valor={pessoa.morada} copia={copiaDe(t, "address")} />
+            <LinhaContacto rotulo={t("businessGoals.painel.person.label.address")} valor={pessoa.morada} />
           )}
           {pessoa.distrito && <LinhaContacto rotulo={t("businessGoals.painel.person.label.district")} valor={pessoa.distrito} />}
         </dl>
@@ -78,7 +66,7 @@ function Contacto({ pessoa }: { pessoa: DadosPessoaPainel }) {
   );
 }
 
-/** O separador Pessoa: os dados da ficha e o contacto, com ligações e botões de copiar de 44 px; sem ficha, um estado vazio. */
+/** O separador Pessoa: os dados da ficha e o contacto, com ligações; sem ficha, um estado vazio. */
 export function PessoaPainel({ pessoa }: { pessoa: DadosPessoaPainel | null }) {
   const { t } = useTranslation();
   if (!pessoa) return <p className="text-sm text-muted-foreground">{t("businessGoals.painel.person.empty")}</p>;

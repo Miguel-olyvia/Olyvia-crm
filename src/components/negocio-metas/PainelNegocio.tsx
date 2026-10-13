@@ -6,8 +6,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
-import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
-import { useAnunciosFicha } from "@/components/ficha-comum/useAnunciosFicha";
 import type { AcoesNegocio } from "./AcoesNegocio";
 import { CabecalhoPainel } from "./CabecalhoPainel";
 import { ContratoPainel } from "./ContratoPainel";
@@ -89,28 +87,23 @@ function SeparadoresPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: strin
 /**
  * O painel lateral de um negócio: cabeçalho e barra de ações fixos e, por baixo, os separadores. Cada negócio abre
  * no Resumo (a `key` repõe o separador ao trocar de negócio). Guarda o último negócio enquanto o painel fecha, para o
- * conteúdo (e o título) não desaparecerem durante a animação de saída. Inclui a região de anúncios (copiar, etc.).
- */
+ * conteúdo (e o título) não desaparecerem durante a animação de saída. */
 export function PainelNegocio({ negocio, hoje, acoes, aoFechar }: PainelNegocioProps) {
   const ultimo = useRef<NegocioMes | null>(negocio);
   if (negocio) ultimo.current = negocio;
   const mostrado = negocio ?? ultimo.current;
-  const { texto, anunciar } = useAnunciosFicha();
   return (
     <Sheet open={negocio !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
       <SheetContent
         className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl motion-reduce:!animate-none [@media(max-height:480px)]:overflow-y-auto [@media(max-height:480px)]:[&>*]:shrink-0"
       >
-        <AnuncioFichaContext.Provider value={anunciar}>
-          {mostrado && (
-            <>
-              <CabecalhoPainel negocio={mostrado} />
-              <BarraAcoes negocio={mostrado} acoes={acoes} />
-              <SeparadoresPainel key={mostrado.id} negocio={mostrado} hoje={hoje} />
-            </>
-          )}
-          <div role="status" className="sr-only">{texto}</div>
-        </AnuncioFichaContext.Provider>
+        {mostrado && (
+          <>
+            <CabecalhoPainel negocio={mostrado} />
+            <BarraAcoes negocio={mostrado} acoes={acoes} />
+            <SeparadoresPainel key={mostrado.id} negocio={mostrado} hoje={hoje} />
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );

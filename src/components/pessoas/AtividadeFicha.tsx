@@ -53,7 +53,7 @@ export function AtividadeFicha({ itens, hoje }: { itens: ItemAtividade[]; hoje: 
     );
   }
   return (
-    <div role="group" aria-label={t("pessoasPagina.activity.title")} className="space-y-6">
+    <div role="group" aria-label={t("pessoasPagina.activity.title")} className="space-y-4">
       {agruparPorDia(itens, hoje).map((g) => (
         <Seccao key={g.dia} titulo={tituloDoDia(t, g)}>
           <ol className="space-y-4">{g.itens.map((i) => <Item key={i.id} item={i} />)}</ol>
