@@ -85,7 +85,7 @@ export function FichaNegocios({ negocios, hoje, aoAbrir }: FichaNegociosProps) {
     { chave: "finished", itens: negocios.filter((n) => !estaAberto(n)) },
   ];
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {grupos.map((g) => g.itens.length > 0 && (
         <Seccao key={g.chave} titulo={`${t(`${P}dealsList.${g.chave}`)} (${g.itens.length})`}>
           <ul>{g.itens.map((n) => <LinhaNegocio key={n.id} negocio={n} hoje={hoje} aoAbrir={aoAbrir} />)}</ul>

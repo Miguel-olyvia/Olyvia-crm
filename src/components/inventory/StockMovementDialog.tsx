@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -17,26 +17,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   Command, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
-import { Plus, Trash2, AlertCircle, AlertTriangle, Check, ChevronsUpDown } from "lucide-react";
+import { Plus, Trash2, AlertCircle, AlertTriangle, Check, ChevronsUpDown, ChevronLeft, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  ADJUST_REASONS, LOSS_REASONS, OTHER_REASON, movementKind, type MovementType,
+} from "./movement/movementKinds";
+import { MovementTypeCards } from "./movement/MovementTypeCards";
+import { ProductPicker, type ProductOption } from "./movement/ProductPicker";
 
-type MovementType = "entrada" | "saida" | "transferencia" | "ajuste" | "devolucao" | "quebra";
-
-const MOVEMENT_LABELS: Record<MovementType, string> = {
-  entrada: "Entrada (compra)",
-  saida: "Saída (venda)",
-  transferencia: "Transferência entre armazéns",
-  ajuste: "Ajuste de inventário",
-  devolucao: "Devolução a fornecedor",
-  quebra: "Quebra / perda",
-};
+export type { MovementType } from "./movement/movementKinds";
 
 interface Warehouse {
-  id: string;
-  name: string;
-}
-
-interface ProductOption {
   id: string;
   name: string;
 }
@@ -164,11 +155,19 @@ export default function StockMovementDialog({
   const { toast } = useToast();
   const { t } = useTranslation();
 
+  // Dois passos, como no protótipo: 1 = escolher o tipo, 2 = formulário.
+  const [step, setStep] = useState<1 | 2>(defaultMovementType ? 2 : 1);
   const [movementType, setMovementType] = useState<MovementType>("entrada");
   const [warehouseId, setWarehouseId] = useState(defaultWarehouseId || "");
   const [toWarehouseId, setToWarehouseId] = useState("");
   const [direction, setDirection] = useState<"positivo" | "negativo">("positivo");
-  const [reason, setReason] = useState("");
+  // Motivo (ajuste/quebra): escolhido da lista do protótipo + descrição
+  // livre; "Outro" exige a descrição. Vai para p_reason como texto.
+  const [reasonChoice, setReasonChoice] = useState("");
+  const [reasonDetail, setReasonDetail] = useState("");
+  const [reasonError, setReasonError] = useState(false);
+  // Resultado da última submissão com falhas (as linhas falhadas ficam).
+  const [result, setResult] = useState<{ ok: number; failed: number } | null>(null);
   const [counterparty, setCounterparty] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -204,16 +203,50 @@ export default function StockMovementDialog({
   const isProductLocked = Boolean(defaultProductId);
   const isWarehouseLocked = Boolean(defaultWarehouseId) && movementType !== "transferencia";
   const needsSupplier = movementType === "entrada" || movementType === "devolucao";
+  const needsReason = movementType === "ajuste" || movementType === "quebra";
+  const kind = movementKind(movementType);
+
+  // Texto final do motivo: "Dano", "Dano: caiu da palete" ou, em "Outro",
+  // só a descrição. Vazio = motivo em falta.
+  const effectiveReason = (() => {
+    const detail = reasonDetail.trim();
+    if (!reasonChoice) return "";
+    if (reasonChoice === OTHER_REASON) return detail;
+    return detail ? `${reasonChoice}: ${detail}` : reasonChoice;
+  })();
+
+  const chooseType = (type: MovementType) => {
+    if (type !== movementType) {
+      setMovementType(type);
+      setReasonChoice("");
+      setReasonDetail("");
+      setReasonError(false);
+      // A Encomenda Cliente só se aplica à Saída.
+      if (type !== "saida") {
+        setClientOrderId("");
+        setSelectedClientOrder(null);
+        setClientOrderReservedByProduct({});
+      }
+    }
+    setResult(null);
+    setStep(2);
+  };
 
   // Reset the form each time the dialog opens, re-applying whatever context it
   // was opened with (produto/armazém pré-preenchidos a partir de uma linha).
   useEffect(() => {
     if (!open) return;
+    // Chamada com tipo indicado (ex. "ajuste" a partir de Existências) salta
+    // logo para o formulário; sem tipo começa pelos cartões.
+    setStep(defaultMovementType ? 2 : 1);
     setMovementType(defaultMovementType || "entrada");
     setWarehouseId(defaultWarehouseId || "");
     setToWarehouseId("");
     setDirection("positivo");
-    setReason("");
+    setReasonChoice("");
+    setReasonDetail("");
+    setReasonError(false);
+    setResult(null);
     setCounterparty("");
     setNotes("");
     setClientOrderId("");
@@ -227,21 +260,30 @@ export default function StockMovementDialog({
     setLines([makeEmptyLine(defaultProductId)]);
   }, [open, defaultProductId, defaultWarehouseId, defaultMovementType]);
 
+  // Troca de organização ativa: o catálogo em memória é de outra organização.
+  useEffect(() => {
+    setProducts([]);
+    setProductsLoaded(false);
+  }, [organizationId]);
+
   // Produtos — só carregado quando o diálogo abre (não em todo o carregamento
   // da página de Stocks), paginado.
   useEffect(() => {
     if (!open || productsLoaded || !organizationId) return;
+    // Pedido de uma organização entretanto trocada não pode escrever por cima.
+    let cancelled = false;
     (async () => {
       const { data, error } = await fetchAllRows(() =>
         (supabase as any)
           .from("products")
-          .select("id, name")
+          .select("id, name, sku, barcode")
           .eq("organization_id", organizationId)
           .eq("is_active", true)
           .is("deleted_at", null)
           .order("name", { ascending: true })
           .order("id", { ascending: true })
       );
+      if (cancelled) return;
       if (error) {
         toast({ title: "Erro ao carregar produtos", description: error.message, variant: "destructive" });
         return;
@@ -249,7 +291,29 @@ export default function StockMovementDialog({
       setProducts(data || []);
       setProductsLoaded(true);
     })();
+    return () => { cancelled = true; };
   }, [open, organizationId, productsLoaded, toast]);
+
+  // Produto bloqueado (aberto a partir de uma linha) que não está no catálogo
+  // ativo — p.ex. inativo: lê só o nome para o campo não parecer vazio.
+  const [lockedProductLabel, setLockedProductLabel] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setLockedProductLabel(undefined);
+    if (!open || !defaultProductId || !organizationId || !productsLoaded) return;
+    if (products.some((p) => p.id === defaultProductId)) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await (supabase as any)
+        .from("products")
+        .select("name, sku")
+        .eq("id", defaultProductId)
+        .eq("organization_id", organizationId)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      setLockedProductLabel(`${data.name}${data.sku ? ` · ${data.sku}` : ""} (inativo)`);
+    })();
+    return () => { cancelled = true; };
+  }, [open, defaultProductId, organizationId, productsLoaded, products]);
 
   // Debounce da pesquisa de Encomenda Cliente (pesquisa no servidor).
   useEffect(() => {
@@ -565,7 +629,7 @@ export default function StockMovementDialog({
           p_warehouse_id: warehouseId,
           p_qty: qty,
           p_direction: direction,
-          p_reason: reason.trim(),
+          p_reason: effectiveReason,
           p_notes: notes.trim() || null,
         });
       case "devolucao":
@@ -581,7 +645,7 @@ export default function StockMovementDialog({
           p_product_id: line.productId,
           p_warehouse_id: warehouseId,
           p_qty: qty,
-          p_reason: reason.trim(),
+          p_reason: effectiveReason,
           p_notes: notes.trim() || null,
         });
     }
@@ -603,8 +667,15 @@ export default function StockMovementDialog({
         return;
       }
     }
-    if ((movementType === "ajuste" || movementType === "quebra") && !reason.trim()) {
-      toast({ title: "Erro", description: movementType === "ajuste" ? "Indica o motivo do ajuste." : "Indica o motivo da quebra.", variant: "destructive" });
+    if (needsReason && !effectiveReason) {
+      setReasonError(true);
+      toast({
+        title: "Erro",
+        description: reasonChoice === OTHER_REASON
+          ? "Descreve o motivo."
+          : movementType === "ajuste" ? "Indica o motivo do ajuste." : "Indica o motivo da quebra.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -649,10 +720,13 @@ export default function StockMovementDialog({
       }
 
       if (failed.length === 0) {
-        toast({ title: "Movimento registado", description: `${MOVEMENT_LABELS[movementType]} — ${lines.length} produto(s).` });
+        toast({ title: "Movimento registado", description: `${kind.label} — ${lines.length} produto(s).` });
         onOpenChange(false);
         onSuccess();
-      } else if (succeededKeys.length === 0) {
+        return;
+      }
+      setResult((prev) => ({ ok: (prev?.ok ?? 0) + succeededKeys.length, failed: failed.length }));
+      if (succeededKeys.length === 0) {
         toast({ title: "Erro ao registar movimento", description: `Nenhuma linha foi registada (${failed.length} erro(s) — ver detalhe abaixo).`, variant: "destructive" });
         setLines(failed);
       } else {
@@ -669,307 +743,401 @@ export default function StockMovementDialog({
     }
   };
 
+  const reasonOptions = movementType === "ajuste" ? ADJUST_REASONS : LOSS_REASONS;
+  const fieldGrid = "grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3 [&>*]:min-w-0";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Registar movimento de stock</DialogTitle>
+          <DialogTitle>
+            {step === 1 ? "Registar movimento · 1 de 2" : `Registar movimento · 2 de 2 · ${kind.name}`}
+          </DialogTitle>
+          <DialogDescription>
+            {step === 1
+              ? "Que tipo de movimento? O stock só muda por movimentos e todos ficam no livro."
+              : kind.description}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div>
-            <Label>Tipo de movimento</Label>
-            <Select value={movementType} onValueChange={(v) => setMovementType(v as MovementType)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(MOVEMENT_LABELS) as MovementType[]).map((type) => (
-                  <SelectItem key={type} value={type}>{MOVEMENT_LABELS[type]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>{movementType === "transferencia" ? "Armazém origem" : "Armazém"}</Label>
-              <Select value={warehouseId} onValueChange={setWarehouseId} disabled={isWarehouseLocked}>
-                <SelectTrigger><SelectValue placeholder="Escolhe um armazém" /></SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {movementType === "transferencia" && (
-              <div>
-                <Label>Armazém destino</Label>
-                <Select value={toWarehouseId} onValueChange={setToWarehouseId}>
-                  <SelectTrigger><SelectValue placeholder="Escolhe um armazém" /></SelectTrigger>
+        {step === 1 ? (
+          <MovementTypeCards onChoose={chooseType} />
+        ) : (
+          <div className="space-y-4">
+            <div className={fieldGrid}>
+              <div className="space-y-1.5">
+                <Label htmlFor="smd-warehouse">
+                  {movementType === "transferencia" ? "Origem" : "Armazém"} <span className="text-destructive">*</span>
+                </Label>
+                <Select value={warehouseId} onValueChange={setWarehouseId} disabled={isWarehouseLocked}>
+                  <SelectTrigger id="smd-warehouse"><SelectValue placeholder="Escolher…" /></SelectTrigger>
                   <SelectContent>
-                    {warehouses.filter((w) => w.id !== warehouseId).map((w) => (
+                    {warehouses.map((w) => (
                       <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </div>
 
-          {movementType === "ajuste" && (
-            <div>
-              <Label>Direção</Label>
-              <Select value={direction} onValueChange={(v) => setDirection(v as "positivo" | "negativo")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="positivo">Positivo (encontrou mais do que o registado)</SelectItem>
-                  <SelectItem value="negativo">Negativo (encontrou menos do que o registado)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+              {movementType === "transferencia" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="smd-to-warehouse">Destino <span className="text-destructive">*</span></Label>
+                  <Select value={toWarehouseId} onValueChange={setToWarehouseId}>
+                    <SelectTrigger id="smd-to-warehouse"><SelectValue placeholder="Escolher…" /></SelectTrigger>
+                    <SelectContent>
+                      {warehouses.filter((w) => w.id !== warehouseId).map((w) => (
+                        <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-          {(movementType === "ajuste" || movementType === "quebra") && (
-            <div>
-              <Label>Motivo</Label>
-              <Input
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder={movementType === "ajuste" ? "ex.: contagem física trimestral" : "ex.: dano no transporte"}
-              />
-            </div>
-          )}
+              {movementType === "ajuste" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="smd-direction">Sentido</Label>
+                  <Select value={direction} onValueChange={(v) => setDirection(v as "positivo" | "negativo")}>
+                    <SelectTrigger id="smd-direction"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="positivo">Aumentar (+)</SelectItem>
+                      <SelectItem value="negativo">Diminuir (−)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-          {movementType === "saida" && (
-            <div>
-              <Label>Encomenda Cliente de origem (opcional)</Label>
-              {/* `modal` no Popover: o conteúdo vai para um portal fora do
-                  DialogContent e, sem isto, o focus trap do diálogo rouba o
-                  foco ao CommandInput e o dropdown fecha-se sozinho. */}
-              <Popover modal open={clientOrderPickerOpen} onOpenChange={setClientOrderPickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={clientOrderPickerOpen}
-                    className="w-full justify-between font-normal"
-                    disabled={clientOrderLoading}
-                  >
-                    <span className="truncate">
-                      {clientOrderId && selectedClientOrder
-                        ? formatClientOrderLabel(selectedClientOrder)
-                        : "Nenhuma — saída sem ligação a um contrato"}
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[24rem] p-0" align="start">
-                  <Command shouldFilter={false}>
-                    <CommandInput
-                      placeholder="Pesquisar por EC, contrato, VD ou cliente…"
-                      value={clientOrderSearch}
-                      onValueChange={setClientOrderSearch}
-                    />
-                    <CommandList className="max-h-72 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
-                      <CommandGroup>
-                        <CommandItem value="__none__" onSelect={() => selectClientOrder(null)}>
-                          <Check className={cn("mr-2 h-4 w-4 shrink-0", !clientOrderId ? "opacity-100" : "opacity-0")} />
-                          Nenhuma — saída sem ligação a um contrato
-                        </CommandItem>
-                        {clientOrderResults.map((o) => (
-                          <CommandItem key={o.contract_id} value={o.contract_id} onSelect={() => selectClientOrder(o)}>
-                            <Check className={cn("mr-2 h-4 w-4 shrink-0", clientOrderId === o.contract_id ? "opacity-100" : "opacity-0")} />
-                            <span className="truncate">{formatClientOrderLabel(o)}</span>
-                          </CommandItem>
+              {needsReason && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="smd-reason">Motivo <span className="text-destructive">*</span></Label>
+                    <Select
+                      value={reasonChoice}
+                      onValueChange={(v) => { setReasonChoice(v); setReasonError(false); }}
+                    >
+                      <SelectTrigger
+                        id="smd-reason"
+                        aria-invalid={reasonError && !reasonChoice ? true : undefined}
+                        className={cn(reasonError && !reasonChoice && "border-destructive")}
+                      >
+                        <SelectValue placeholder="Escolher…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {reasonOptions.map((r) => (
+                          <SelectItem key={r} value={r}>{r}</SelectItem>
                         ))}
-                      </CommandGroup>
-                      {(clientOrdersFetching || clientOrderResults.length === 0) && (
-                        <p className="py-3 text-center text-sm text-muted-foreground">
-                          {clientOrdersFetching ? "A pesquisar…" : "Nenhuma encomenda encontrada."}
-                        </p>
-                      )}
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              <p className="text-xs text-muted-foreground mt-1">
-                {clientOrderLoading
-                  ? "A carregar produtos da encomenda…"
-                  : "Liga esta saída à Encomenda Cliente que está a satisfazer — os produtos preenchem-se automaticamente abaixo (continua editável). Fica rastreável em \"Encomendas Clientes\" como prova."}
-              </p>
-            </div>
-          )}
+                      </SelectContent>
+                    </Select>
+                    {reasonError && !reasonChoice && (
+                      <p className="text-xs text-destructive">Motivo obrigatório.</p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="smd-reason-detail">
+                      {reasonChoice === OTHER_REASON
+                        ? <>Descrição do motivo <span className="text-destructive">*</span></>
+                        : "Descrição do motivo (opcional)"}
+                    </Label>
+                    <Input
+                      id="smd-reason-detail"
+                      value={reasonDetail}
+                      onChange={(e) => { setReasonDetail(e.target.value); setReasonError(false); }}
+                      placeholder={movementType === "ajuste" ? "ex.: contagem física trimestral" : "ex.: dano no transporte"}
+                      aria-invalid={reasonError && reasonChoice === OTHER_REASON && !reasonDetail.trim() ? true : undefined}
+                      className={cn(reasonError && reasonChoice === OTHER_REASON && !reasonDetail.trim() && "border-destructive")}
+                    />
+                  </div>
+                </>
+              )}
 
-          {/* Linhas de produto — múltiplos produtos por movimento */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>Produtos</Label>
+              {movementType === "saida" && (
+                <div className="col-span-full space-y-1.5">
+                  <Label htmlFor="smd-client-order">Encomenda Cliente de origem (opcional)</Label>
+                  {/* `modal` no Popover: o conteúdo vai para um portal fora do
+                      DialogContent e, sem isto, o focus trap do diálogo rouba o
+                      foco ao CommandInput e o dropdown fecha-se sozinho. */}
+                  <Popover modal open={clientOrderPickerOpen} onOpenChange={setClientOrderPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="smd-client-order"
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={clientOrderPickerOpen}
+                        className="w-full justify-between font-normal"
+                        disabled={clientOrderLoading}
+                      >
+                        <span className="truncate">
+                          {clientOrderId && selectedClientOrder
+                            ? formatClientOrderLabel(selectedClientOrder)
+                            : "Sem EC — saída sem ligação a uma encomenda"}
+                        </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[24rem] p-0" align="start">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Pesquisar por EC, contrato, VD ou cliente…"
+                          value={clientOrderSearch}
+                          onValueChange={setClientOrderSearch}
+                        />
+                        <CommandList className="max-h-72 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
+                          <CommandGroup>
+                            <CommandItem value="__none__" onSelect={() => selectClientOrder(null)}>
+                              <Check className={cn("mr-2 h-4 w-4 shrink-0", !clientOrderId ? "opacity-100" : "opacity-0")} />
+                              Sem EC — saída sem ligação a uma encomenda
+                            </CommandItem>
+                            {clientOrderResults.map((o) => (
+                              <CommandItem key={o.contract_id} value={o.contract_id} onSelect={() => selectClientOrder(o)}>
+                                <Check className={cn("mr-2 h-4 w-4 shrink-0", clientOrderId === o.contract_id ? "opacity-100" : "opacity-0")} />
+                                <span className="truncate">{formatClientOrderLabel(o)}</span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                          {(clientOrdersFetching || clientOrderResults.length === 0) && (
+                            <p className="py-3 text-center text-sm text-muted-foreground">
+                              {clientOrdersFetching ? "A pesquisar…" : "Nenhuma encomenda encontrada."}
+                            </p>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <p className="text-xs text-muted-foreground">
+                    {clientOrderLoading
+                      ? "A carregar produtos da encomenda…"
+                      : "Preenche as linhas com os produtos da encomenda (continua editável) e fica rastreável em \"Encomendas Clientes\"."}
+                  </p>
+                </div>
+              )}
+
+              {(movementType === "entrada" || movementType === "saida") && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="smd-counterparty">
+                    {movementType === "entrada" ? "Fornecedor (referência livre, opcional)" : "Cliente (opcional)"}
+                  </Label>
+                  <Input id="smd-counterparty" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
+                </div>
+              )}
+
+              <div className="col-span-full space-y-1.5">
+                <Label htmlFor="smd-notes">Notas</Label>
+                <Textarea id="smd-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              </div>
+            </div>
+
+            {/* Linhas de produto — múltiplos produtos por movimento */}
+            <div className="space-y-2">
+              {lines.map((line, index) => {
+                const supplier = line.itemSuppliers.find((s) => s.id === line.itemSupplierId);
+                const supplierPrice = supplier?.purchase_price ?? null;
+                const consumption = getReservedConsumption(line);
+                // Saída sem Encomenda Cliente escolhida sobre um produto com
+                // reservas: avisa sempre (mesmo com stock livre suficiente),
+                // para quem está a servir uma dessas encomendas a escolher
+                // acima. rpc_get_product_stock_reservations só devolve o total
+                // por produto e o nº de encomendas, não quais são.
+                const reservation = line.productId ? reservations[line.productId] : undefined;
+                const unlinkedReserved = movementType === "saida" && !clientOrderId && reservation && reservation.qty_reserved > 0
+                  ? reservation
+                  : null;
+                return (
+                  <div key={line.key} className="space-y-1.5 rounded-lg border bg-card p-2.5">
+                    <div className="flex flex-wrap items-end gap-1.5">
+                      <div className="min-w-[200px] flex-1 space-y-1">
+                        <Label htmlFor={`smd-p${index}`} className="text-xs">Produto</Label>
+                        <ProductPicker
+                          id={`smd-p${index}`}
+                          products={products}
+                          value={line.productId}
+                          onChange={(v) => handleProductChange(line.key, v)}
+                          disabled={isProductLocked}
+                          invalid={Boolean(line.error) && !line.productId}
+                          loading={!productsLoaded}
+                          fallbackLabel={isProductLocked && line.productId === defaultProductId ? lockedProductLabel : undefined}
+                        />
+                      </div>
+                      <div className="w-[110px] space-y-1">
+                        <Label htmlFor={`smd-q${index}`} className="text-xs">Quantidade</Label>
+                        <Input
+                          id={`smd-q${index}`}
+                          type="number"
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          value={line.quantity}
+                          onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                        />
+                      </div>
+                      {movementType === "entrada" && (
+                        <div className="w-[140px] space-y-1">
+                          <Label htmlFor={`smd-c${index}`} className="text-xs">Custo unitário</Label>
+                          <Input
+                            id={`smd-c${index}`}
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={line.unitCost}
+                            onChange={(e) => updateLine(line.key, { unitCost: e.target.value })}
+                          />
+                        </div>
+                      )}
+                      {!isProductLocked && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label="Remover linha"
+                          title={lines.length < 2 ? "É preciso pelo menos uma linha" : undefined}
+                          disabled={lines.length < 2}
+                          onClick={() => removeLine(line.key)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+
+                    {needsSupplier && (
+                      <div className="space-y-1">
+                        <Label htmlFor={`smd-s${index}`} className="text-xs">
+                          {movementType === "devolucao" ? "Fornecedor da devolução" : "Fornecedor"}
+                        </Label>
+                        <Select
+                          value={line.itemSupplierId}
+                          onValueChange={(v) => updateLine(line.key, { itemSupplierId: v })}
+                          disabled={!line.productId}
+                        >
+                          <SelectTrigger id={`smd-s${index}`}>
+                            <SelectValue placeholder={line.productId ? "Escolher…" : "Escolha primeiro o produto"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {line.itemSuppliers.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.suppliers?.name || "—"}
+                                {s.purchase_price != null ? ` · ${s.purchase_price.toFixed(2)}€` : ""}
+                                {s.supplier_sku ? ` · ${s.supplier_sku}` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {line.productId && line.itemSuppliersLoaded && line.itemSuppliers.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Este produto não tem nenhum fornecedor ativo associado — adiciona um em Produtos primeiro.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {movementType === "entrada" && line.productId && (
+                      <p className="text-xs text-muted-foreground">
+                        {supplierPrice != null ? (
+                          <>
+                            Preço do fornecedor: {supplierPrice.toFixed(2)}€/un ·{" "}
+                            <button
+                              type="button"
+                              className="font-medium text-primary underline-offset-2 hover:underline"
+                              onClick={() => updateLine(line.key, { unitCost: String(Math.round(supplierPrice * 100) / 100) })}
+                            >
+                              usar
+                            </button>{" "}
+                            ·{" "}
+                          </>
+                        ) : null}
+                        sem custo, o custo médio não muda.
+                      </p>
+                    )}
+
+                    {(line.sourceLineStatus === "servido_por_stock" || line.sourceLineStatus === "recebido") && (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+                        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span>
+                          Esta linha já consta como {line.sourceLineStatus === "servido_por_stock" ? "servida por stock" : "recebida"} na Encomenda Cliente — confirma que não é duplicação antes de registar.
+                        </span>
+                      </div>
+                    )}
+
+                    {(consumption || unlinkedReserved) && (
+                      <Alert className="border-amber-500/50 bg-amber-50 py-1.5 dark:bg-amber-950/20">
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                        <AlertDescription className="text-xs text-amber-900 dark:text-amber-200">
+                          {unlinkedReserved && (
+                            <span className="block">
+                              {t('inventory.movement.unlinkedReservedWarning', {
+                                qty: Math.round(unlinkedReserved.qty_reserved * 1e6) / 1e6,
+                                count: Math.max(1, unlinkedReserved.orders_count),
+                              })}
+                            </span>
+                          )}
+                          {consumption && (
+                            <span className={unlinkedReserved ? "block mt-1" : undefined}>
+                              {t('inventory.movement.reservedWarning', { qty: consumption.qty, count: consumption.orders })}
+                            </span>
+                          )}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {line.error && (
+                      <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
+                        <X className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span>{line.error}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {!isProductLocked && (
-                <Button type="button" variant="outline" size="sm" onClick={addLine}>
-                  <Plus className="w-4 h-4 mr-1" /> Adicionar produto
-                </Button>
+                <div>
+                  <Button type="button" variant="outline" size="sm" onClick={addLine}>
+                    <Plus className="mr-1 h-4 w-4" /> Adicionar linha
+                  </Button>
+                </div>
               )}
             </div>
 
-            {lines.map((line) => (
-              <div key={line.key} className="rounded-md border p-3 space-y-3">
-                <div className="flex items-start gap-2">
-                  <div className="flex-1">
-                    <Label className="text-xs">Produto</Label>
-                    <Select
-                      value={line.productId}
-                      onValueChange={(v) => handleProductChange(line.key, v)}
-                      disabled={isProductLocked}
-                    >
-                      <SelectTrigger><SelectValue placeholder="Escolhe um produto" /></SelectTrigger>
-                      <SelectContent>
-                        {products.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="w-28">
-                    <Label className="text-xs">Quantidade</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      step={1}
-                      inputMode="numeric"
-                      value={line.quantity}
-                      onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
-                    />
-                  </div>
-                  {!isProductLocked && lines.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="mt-5"
-                      onClick={() => removeLine(line.key)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
+            {result && (
+              <Alert
+                role="status"
+                className={cn(result.failed ? "border-amber-500/50 bg-amber-50 dark:bg-amber-950/20" : "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/20")}
+              >
+                {result.failed ? <AlertTriangle className="h-4 w-4 text-amber-600" /> : <Check className="h-4 w-4 text-emerald-600" />}
+                <AlertDescription className="text-sm">
+                  <b>{result.ok} de {result.ok + result.failed} registados</b>
+                  {result.failed ? "; linha(s) falhada(s) mantida(s) para corrigir." : "."}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        )}
 
-                {needsSupplier && (
-                  <div>
-                    <Label className="text-xs">Fornecedor</Label>
-                    <Select
-                      value={line.itemSupplierId}
-                      onValueChange={(v) => updateLine(line.key, { itemSupplierId: v })}
-                      disabled={!line.productId}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder={line.productId ? "Escolhe um fornecedor" : "Escolhe primeiro o produto"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {line.itemSuppliers.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.suppliers?.name || "—"}
-                            {s.purchase_price != null ? ` · ${s.purchase_price.toFixed(2)}€` : ""}
-                            {s.supplier_sku ? ` · ${s.supplier_sku}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {line.productId && line.itemSuppliersLoaded && line.itemSuppliers.length === 0 && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Este produto não tem nenhum fornecedor ativo associado — adiciona um em Produtos primeiro.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {movementType === "entrada" && (
-                  <div>
-                    <Label className="text-xs">Custo unitário (opcional)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder={
-                        line.itemSuppliers.find((s) => s.id === line.itemSupplierId)?.purchase_price != null
-                          ? `Preço do fornecedor: ${line.itemSuppliers.find((s) => s.id === line.itemSupplierId)!.purchase_price!.toFixed(2)}€`
-                          : "—"
-                      }
-                      value={line.unitCost}
-                      onChange={(e) => updateLine(line.key, { unitCost: e.target.value })}
-                    />
-                  </div>
-                )}
-
-                {(line.sourceLineStatus === "servido_por_stock" || line.sourceLineStatus === "recebido") && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    Esta linha já consta como {line.sourceLineStatus === "servido_por_stock" ? "servida por stock" : "recebida"} na Encomenda Cliente — confirma que não é duplicação antes de registar.
-                  </p>
-                )}
-
-                {(() => {
-                  const consumption = getReservedConsumption(line);
-                  // Saída sem Encomenda Cliente escolhida sobre um produto com
-                  // reservas: avisa sempre (mesmo com stock livre suficiente),
-                  // para quem está a servir uma dessas encomendas a escolher
-                  // acima. rpc_get_product_stock_reservations só devolve o total
-                  // por produto e o nº de encomendas, não quais são.
-                  const reservation = line.productId ? reservations[line.productId] : undefined;
-                  const unlinkedReserved = movementType === "saida" && !clientOrderId && reservation && reservation.qty_reserved > 0
-                    ? reservation
-                    : null;
-                  if (!consumption && !unlinkedReserved) return null;
-                  return (
-                    <Alert className="border-amber-500/50 bg-amber-50 py-2 dark:bg-amber-950/20">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" />
-                      <AlertDescription className="text-xs text-amber-900 dark:text-amber-200">
-                        {unlinkedReserved && (
-                          <span className="block">
-                            {t('inventory.movement.unlinkedReservedWarning', {
-                              qty: Math.round(unlinkedReserved.qty_reserved * 1e6) / 1e6,
-                              count: Math.max(1, unlinkedReserved.orders_count),
-                            })}
-                          </span>
-                        )}
-                        {consumption && (
-                          <span className={unlinkedReserved ? "block mt-1" : undefined}>
-                            {t('inventory.movement.reservedWarning', { qty: consumption.qty, count: consumption.orders })}
-                          </span>
-                        )}
-                      </AlertDescription>
-                    </Alert>
-                  );
-                })()}
-
-                {line.error && (
-                  <p className="text-xs text-destructive flex items-center gap-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> {line.error}
-                  </p>
-                )}
+        <DialogFooter className={cn(step === 2 && "sm:justify-between")}>
+          {step === 1 ? (
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          ) : (
+            <>
+              {/* Depois de um registo parcial (ok > 0) as linhas que ficaram são
+                  as que falharam com ESTE tipo — trocar de tipo gravá-las-ia
+                  como outro movimento. Para mudar de tipo, fechar e reabrir. */}
+              <span title={result?.ok ? "Já há linhas registadas com este tipo — feche e abra um novo movimento para mudar de tipo." : undefined}>
+                <Button
+                  variant="ghost"
+                  onClick={() => { setStep(1); setResult(null); }}
+                  disabled={submitting || Boolean(result?.ok)}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" /> Voltar
+                </Button>
+              </span>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+                  {result?.ok ? "Fechar" : "Cancelar"}
+                </Button>
+                <Button onClick={handleSubmit} disabled={submitting}>
+                  <Check className="mr-1 h-4 w-4" />
+                  {submitting ? "A registar..." : `Registar ${lines.length} linha(s)`}
+                </Button>
               </div>
-            ))}
-          </div>
-
-          {(movementType === "entrada" || movementType === "saida") && (
-            <div>
-              <Label>{movementType === "entrada" ? "Fornecedor (referência livre, opcional)" : "Cliente (opcional)"}</Label>
-              <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
-            </div>
+            </>
           )}
-
-          <div>
-            <Label>Notas (opcional)</Label>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancelar
-          </Button>
-          <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "A registar..." : `Registar movimento${lines.length > 1 ? ` (${lines.length} produtos)` : ""}`}
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

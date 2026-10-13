@@ -46,7 +46,7 @@ export function SeccaoPasso({ resumo, hoje }: { resumo: ResumoPessoa; hoje: stri
       step: t(`${P}journey.step${passoDaPerdida(resumo)}`),
     });
     conteudo = (
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
           <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           {t(`${P}sum.lostState`)}
@@ -58,7 +58,7 @@ export function SeccaoPasso({ resumo, hoje }: { resumo: ResumoPessoa; hoje: stri
     conteudo = <p className="text-[15px] text-muted-foreground">{t(`${P}sum.noNext`)}</p>;
   } else {
     conteudo = (
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
         <p className="text-[15px] text-muted-foreground">{t(`${P}next.${passo.id}.hint`)}</p>
         <Prazo prazo={passo.prazo} hoje={hoje} />
@@ -91,16 +91,16 @@ export function SeccaoAvisos({ resumo, voltou, podeVerSubmissoes, pendentes, aoV
   if (avisos.length === 0) return null;
   return (
     <Seccao titulo={t(`${P}sum.alerts`)}>
-      <ul className="space-y-2">
+      <ul className="space-y-1.5">
         {avisos.map((a) => {
           const Icone = ICONE_AVISO[a.tipo];
           const { titulo, dica } = textosDoAviso(t, a);
           return (
-            <li key={a.tipo} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-muted/60 p-3">
+            <li key={a.tipo} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md bg-muted/60 px-3 py-2">
               <Icone className="h-4 w-4 shrink-0 text-foreground" aria-hidden="true" />
-              <p className="min-w-0 flex-1 text-[15px] text-foreground"><strong className="font-semibold">{titulo}</strong> {dica}</p>
+              <p className="min-w-0 flex-1 text-sm text-foreground"><strong className="font-semibold">{titulo}</strong> {dica}</p>
               {a.tipo === "voltou" && pendentes > 0 && (
-                <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={aoVerSubmissoes}>
+                <Button type="button" variant="outline" className={cn("relative -my-1 h-8 px-3 after:absolute after:inset-x-0 after:-inset-y-1.5 after:content-['']", FOCO)} onClick={aoVerSubmissoes}>
                   {t(`${P}actions.submissions`, { count: pendentes })}
                 </Button>
               )}

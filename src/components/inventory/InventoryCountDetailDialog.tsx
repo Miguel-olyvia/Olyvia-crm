@@ -5,8 +5,9 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -16,16 +17,27 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { ArrowRightLeft, Check, Download, Info, Loader2, ScanLine, Upload } from "lucide-react";
+import { ArrowRightLeft, Camera, Check, ClipboardCheck, Download, Info, Loader2, Upload } from "lucide-react";
 import { Sheet } from "@/components/ui/sheet";
 import { DocInfoGrid, DocumentSheetContent, DOC_TABLE_WRAP_CLASS } from "@/components/inventory/DocumentSheet";
 import { InventoryStatusBadge, type InventoryTone } from "@/components/inventory/ui";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
-import * as XLSX from "xlsx";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import {
+  normalizeCodeKey,
+  parseCountImportFile,
+  type CountImportEntry,
+  type CountImportErrorRow,
+  type CountImportPreview,
+} from "@/components/inventory/counts/countImport";
+import { ReasonButton } from "@/components/inventory/counts/ReasonButton";
 import CategorySubcategoryFilter from "@/components/inventory/CategorySubcategoryFilter";
 import { productMatchesCategoryIds, useProductCategories } from "@/hooks/useProductCategories";
 
@@ -49,6 +61,7 @@ interface InventoryCountHeader {
   finalized_at: string | null;
   warehouse_id: string;
   category_id: string | null;
+  created_by: string | null;
   warehouses?: { name: string } | null;
   product_categories?: { name: string } | null;
 }
@@ -127,182 +140,32 @@ const CHUNK_SIZE = 200;
 const LINE_PAGE_SIZE = 200;
 const LINE_PAGINATION_THRESHOLD = 500;
 
-// Sem acentos, sem maiúsculas e sem pontuação — "Qtd. Contada", "qtd contada"
-// e "QTD CONTADA" colapsam todos para "qtd contada".
-const normalizeHeader = (value: unknown): string =>
-  String(value ?? "")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-// Aliases fixos (nas 5 línguas) para além do cabeçalho traduzido do idioma
-// ativo — o ficheiro pode ter sido exportado por um colega noutro idioma.
-const SKU_HEADER_ALIASES = new Set([
-  "sku", "codigo", "codigo do produto", "code", "product code",
-  "referencia", "reference", "artikelnummer", "ref",
-]);
-const COUNTED_HEADER_ALIASES = new Set([
-  "qtd contada", "qtd contada unid", "quantidade contada", "contada",
-  "counted qty", "counted quantity", "counted",
-  "cantidad contada", "cant contada",
-  "qte comptee", "quantite comptee", "comptee",
-  "gezahlte menge", "menge gezahlt", "gezahlt",
-]);
-
-// O separador NÃO pode ser assumido: o export do projeto produz ';', mas quem
-// abre o XLSX no Excel e faz "Guardar como CSV" obtém ';' ou ',' conforme o
-// locale do Windows, e há ainda quem exporte separado por tabulações. Um
-// separador errado dá UMA coluna só por linha, e o erro que chegava ao
-// utilizador era "Colunas em falta" — a apontar para o sítio errado.
-// Conta os candidatos na primeira linha não vazia (fora de aspas) e escolhe o
-// dominante; empate ou ficheiro de uma só coluna mantém ';'.
-const CSV_DELIMITER_CANDIDATES = [";", ",", "\t"] as const;
-
-const detectCsvDelimiter = (text: string): string => {
-  const counts: Record<string, number> = { ";": 0, ",": 0, "\t": 0 };
-  let inQuotes = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text[i];
-    if (char === '"') {
-      if (inQuotes && text[i + 1] === '"') { i += 1; continue; }
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if (inQuotes) continue;
-    if (char === "\n") {
-      // Linha vazia no topo do ficheiro não termina a deteção.
-      if (counts[";"] > 0 || counts[","] > 0 || counts["\t"] > 0) break;
-      continue;
-    }
-    if (char in counts) counts[char] += 1;
-  }
-  let best: string = ";";
-  for (const candidate of CSV_DELIMITER_CANDIDATES) {
-    if (counts[candidate] > counts[best]) best = candidate;
-  }
-  return counts[best] > 0 ? best : ";";
-};
-
-// Parser de CSV tolerante a campos entre aspas com o separador lá dentro e a
-// quebras de linha dentro das aspas.
-const parseCsvToMatrix = (text: string, delimiter: string): string[][] => {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-  // Tira o BOM: o carácter U+FEFF tal e qual (comparado por code point, para
-  // não deixar whitespace irregular no código) e também a versão já mal
-  // descodificada ("ï»¿"), que é o que sobra quando se relê um ficheiro
-  // UTF-8 como Windows-1252.
-  const source = (text.codePointAt(0) === 0xFEFF ? text.slice(1) : text).replace(/^ï»¿/, "");
-
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    if (inQuotes) {
-      if (char === '"') {
-        if (source[i + 1] === '"') { field += '"'; i += 1; } else { inQuotes = false; }
-      } else {
-        field += char;
-      }
-      continue;
-    }
-    if (char === '"') { inQuotes = true; continue; }
-    if (char === delimiter) { row.push(field); field = ""; continue; }
-    if (char === "\r") continue;
-    if (char === "\n") { row.push(field); rows.push(row); row = []; field = ""; continue; }
-    field += char;
-  }
-  if (field !== "" || row.length > 0) { row.push(field); rows.push(row); }
-  return rows;
-};
-
-const buildCsvMatrix = (text: string): string[][] => parseCsvToMatrix(text, detectCsvDelimiter(text));
-
-// O export do projeto (xlsxExport.normalizeExportCell) prefixa um apóstrofo a
-// qualquer texto começado por = + - @ — proteção contra injeção de fórmulas no
-// Excel. Um SKU como "-1234" volta do ficheiro como "'-1234" e deixava de
-// casar, com o utilizador a ver "Produto não encontrado nesta contagem" sem
-// perceber porquê. Ao ler, desfazemos esse escape.
-const stripSpreadsheetEscape = (value: unknown): string =>
-  String(value ?? "").trim().replace(/^'/, "");
-
-// Chave de comparação de SKU alinhada com a RPC (upper + btrim): é assim que
-// rpc_bulk_update_inventory_count_lines resolve o SKU dentro da contagem, por
-// isso é assim que temos de detetar duplicados no ficheiro.
-const normalizeSkuKey = (sku: string): string => sku.trim().toUpperCase();
-
-// Uma só forma (em vez de uma união discriminada): o tsconfig deste projeto
-// corre com strict: false, e nesse modo o narrowing por discriminante booleano
-// não é fiável.
-interface ImportColumnLookup {
-  status: "ok" | "empty" | "missingSku" | "missingCounted" | "missingBoth";
-  headerRowIndex: number;
-  skuIndex: number;
-  countedIndex: number;
-}
-
-// Localiza a linha de cabeçalho e as duas colunas obrigatórias. Devolve o
-// motivo em vez de lançar: quem chama pode tentar outra descodificação do
-// ficheiro antes de desistir.
-const locateImportColumns = (
-  matrix: unknown[][],
-  skuAliases: Set<string>,
-  countedAliases: Set<string>,
-): ImportColumnLookup => {
-  const headerRowIndex = matrix.findIndex(
-    (row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== ""),
-  );
-  if (headerRowIndex === -1) {
-    return { status: "empty", headerRowIndex: -1, skuIndex: -1, countedIndex: -1 };
-  }
-
-  const headerCells = (matrix[headerRowIndex] || []).map(normalizeHeader);
-  const skuIndex = headerCells.findIndex((cell) => skuAliases.has(cell));
-  const countedIndex = headerCells.findIndex((cell) => countedAliases.has(cell));
-
-  let status: ImportColumnLookup["status"] = "ok";
-  if (skuIndex === -1 && countedIndex === -1) status = "missingBoth";
-  else if (skuIndex === -1) status = "missingSku";
-  else if (countedIndex === -1) status = "missingCounted";
-
-  return { status, headerRowIndex, skuIndex, countedIndex };
-};
-
-// Devolve null quando o valor não é uma quantidade válida (inteiro >= 0).
-// Quem chama tem de tratar a célula vazia ANTES — vazia não é inválida, é uma
-// linha que o utilizador simplesmente não contou.
-const parseCountedQuantity = (raw: unknown): number | null => {
-  if (typeof raw === "number") {
-    return Number.isInteger(raw) && raw >= 0 ? raw : null;
-  }
-  // stripSpreadsheetEscape por simetria com o SKU: uma quantidade escrita à
-  // mão como "-1" chegaria aqui prefixada e tem de ser rejeitada como
-  // quantidade inválida, não confundida com texto.
-  const text = stripSpreadsheetEscape(raw).replace(/\s/g, "").replace(",", ".");
-  if (text === "") return null;
-  const parsed = Number(text);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) return null;
-  return parsed;
-};
-
-interface ImportErrorRow {
-  line: number;
-  sku: string;
-  reason: string;
-}
-
-interface ImportReport {
+// Resultado de uma gravação em massa (importar ou preencher = esperado).
+interface BulkWriteResult {
   updated: number;
-  skipped: number;
-  errors: ImportErrorRow[];
+  errors: CountImportErrorRow[];
   // true quando um lote falhou a meio: os lotes anteriores JÁ estão gravados
-  // (cada chamada RPC é a sua própria transação) e o resto do ficheiro nunca
-  // chegou a ser enviado.
+  // (cada chamada RPC é a sua própria transação) e o resto nunca foi enviado.
   incomplete: boolean;
   notSent: number;
 }
+
+interface ImportReport extends BulkWriteResult {
+  skipped: number;
+  /**
+   * Erros sem número de linha de ficheiro (Preencher = esperado): o relatório
+   * mostra só o SKU/código, não uma "Linha N" que não existe em lado nenhum.
+   */
+  withoutFileLines?: boolean;
+}
+
+// Motivo mostrado nos botões desativados.
+const NO_COUNT_PERMISSION = "Requer a permissão inventory.count";
+const NO_EDIT_PERMISSION = "Requer a permissão inventory.edit";
+// Não existe RPC de cancelamento (inventory_counts aceita o estado
+// 'cancelada', mas a RLS bloqueia UPDATE direto e nenhuma migration cria
+// rpc_cancel_inventory_count) — o botão fica visível e desativado.
+const CANCEL_UNAVAILABLE = "Ainda não disponível";
 
 interface InventoryCountDetailDialogProps {
   open: boolean;
@@ -330,6 +193,7 @@ export default function InventoryCountDetailDialog({
 
   const [loading, setLoading] = useState(false);
   const [header, setHeader] = useState<InventoryCountHeader | null>(null);
+  const [creatorName, setCreatorName] = useState<string | null>(null);
   const [lines, setLines] = useState<InventoryCountLineRow[]>([]);
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [savingLineId, setSavingLineId] = useState<string | null>(null);
@@ -344,6 +208,18 @@ export default function InventoryCountDetailDialog({
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  // Pré-visualização do ficheiro: lido e validado, ainda NADA gravado.
+  const [importPreview, setImportPreview] = useState<CountImportPreview | null>(null);
+  // Linhas já resolvidas (Ajustado / Aceite sem ajuste) cujo valor muda: por
+  // omissão NÃO são gravadas — gravar limpava a resolução sem ninguém notar.
+  const [includeResolved, setIncludeResolved] = useState(false);
+
+  // "Preencher contadas = esperado" (confirmação antes de gravar).
+  const [fillConfirmOpen, setFillConfirmOpen] = useState(false);
+  const [filling, setFilling] = useState(false);
+
+  // Leitor de mão (USB/Bluetooth) que escreve o código e Enter no campo.
+  const [manualCode, setManualCode] = useState("");
 
   // Página atual da tabela de linhas (só usada acima de LINE_PAGINATION_THRESHOLD).
   const [linePage, setLinePage] = useState(0);
@@ -395,6 +271,19 @@ export default function InventoryCountDetailDialog({
   const SCAN_COOLDOWN_MS = 1500;
   const lastScanAtRef = useRef(0);
 
+  // Gravação da contada por linha, em fila. Um leitor de mão dispara Enter
+  // várias vezes antes de o `lines` do render se atualizar — somar a partir
+  // dele gravava o mesmo valor N vezes (contada abaixo do real).
+  //  · requestedQtyRef: último valor PEDIDO por linha (as leituras somam a
+  //    partir daqui);
+  //  · confirmedQtyRef: último valor que o servidor confirmou;
+  //  · saveQueueRef: cauda da fila da linha — uma gravação de cada vez, e cada
+  //    uma envia o valor acumulado no momento em que arranca.
+  // Repostos sempre que as linhas são recarregadas do servidor.
+  const requestedQtyRef = useRef<Record<string, number>>({});
+  const confirmedQtyRef = useRef<Record<string, number | null>>({});
+  const saveQueueRef = useRef<Record<string, Promise<unknown>>>({});
+
   const isActive = header?.status === "em_contagem";
 
   // Paginação client-side da tabela de linhas. `safeLinePage` é derivado (não
@@ -415,11 +304,24 @@ export default function InventoryCountDetailDialog({
     try {
       const { data: headerData, error: headerError } = await supabase
         .from("inventory_counts")
-        .select("id, document_number, status, started_at, finalized_at, warehouse_id, category_id, warehouses(name), product_categories(name)")
+        .select("id, document_number, status, started_at, finalized_at, warehouse_id, category_id, created_by, warehouses(name), product_categories(name)")
         .eq("id", countId)
         .single();
       if (headerError) throw headerError;
-      setHeader(headerData as unknown as InventoryCountHeader);
+      const headerRow = headerData as unknown as InventoryCountHeader;
+      setHeader(headerRow);
+
+      // Nome de quem iniciou (grelha "Iniciada"). Só informativo: se a leitura
+      // falhar (RLS de anew_users), mostra-se só a data.
+      setCreatorName(null);
+      if (headerRow.created_by) {
+        supabase
+          .from("anew_users")
+          .select("name")
+          .eq("id", headerRow.created_by)
+          .maybeSingle()
+          .then(({ data }) => setCreatorName((data as { name?: string } | null)?.name || null));
+      }
 
       const { data: lineData, error: lineError } = await fetchAllRows(() =>
         supabase
@@ -430,6 +332,8 @@ export default function InventoryCountDetailDialog({
       );
       if (lineError) throw lineError;
       const rows = (lineData || []) as unknown as InventoryCountLineRow[];
+      requestedQtyRef.current = {};
+      confirmedQtyRef.current = {};
       setLines(rows);
       setQuantityDrafts(Object.fromEntries(rows.map((l) => [l.id, l.counted_quantity != null ? String(l.counted_quantity) : ""])));
       setResolutionDrafts({});
@@ -504,6 +408,8 @@ export default function InventoryCountDetailDialog({
       setScanOpen(false);
       setImportOpen(false);
       setImportReport(null);
+      setImportPreview(null);
+      setFillConfirmOpen(false);
     }
   }, [open]);
 
@@ -561,9 +467,43 @@ export default function InventoryCountDetailDialog({
     return result;
   }, [onChanged]);
 
-  const handleScanResult = useCallback((code: string) => {
+  // Põe na fila da linha uma gravação do valor PEDIDO (requestedQtyRef) no
+  // momento em que ela arranca. Várias leituras seguidas colapsam: se, quando
+  // a vez chega, o valor pedido já é o confirmado, não se grava nada
+  // (`saved: false`). Rejeita com o erro da RPC — quem chama repõe o ref.
+  const enqueueQuantitySave = useCallback((lineId: string): Promise<{ saved: boolean; qty: number | null }> => {
+    const previous = saveQueueRef.current[lineId] ?? Promise.resolve();
+    const job = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const target = requestedQtyRef.current[lineId];
+        // Ref limpo (linhas recarregadas, ou reposto depois de um erro).
+        if (target === undefined || confirmedQtyRef.current[lineId] === target) {
+          return { saved: false, qty: confirmedQtyRef.current[lineId] ?? null };
+        }
+        const result = await persistQuantity(lineId, target);
+        const qty = Number(result?.counted_quantity ?? target);
+        confirmedQtyRef.current[lineId] = qty;
+        return { saved: true, qty };
+      });
+    saveQueueRef.current[lineId] = job;
+    return job;
+  }, [persistQuantity]);
+
+  // Em erro: o ref volta ao último valor confirmado pelo servidor, e as
+  // gravações ainda na fila (que somavam a partir do valor falhado) já não
+  // gravam nada.
+  const resetRequestedQuantity = (lineId: string) => {
+    const confirmed = confirmedQtyRef.current[lineId];
+    if (confirmed == null) delete requestedQtyRef.current[lineId];
+    else requestedQtyRef.current[lineId] = confirmed;
+  };
+
+  // `manual`: código escrito por um leitor de mão (teclado + Enter) — cada
+  // Enter é uma leitura intencional, por isso não passa pelo cooldown da câmara.
+  const handleScanResult = useCallback((code: string, manual = false) => {
     const now = Date.now();
-    if (now - lastScanAtRef.current < SCAN_COOLDOWN_MS) return;
+    if (!manual && now - lastScanAtRef.current < SCAN_COOLDOWN_MS) return;
     lastScanAtRef.current = now;
 
     const match = findLineByCode(code);
@@ -593,21 +533,42 @@ export default function InventoryCountDetailDialog({
       setLinePage(0);
     }
 
-    const newQty = (match.counted_quantity ?? 0) + 1;
-    persistQuantity(match.id, newQty)
-      .then(() => {
+    // Soma a partir do último valor PEDIDO (não do `lines` deste render, que
+    // ainda não viu as gravações em curso).
+    const lineId = match.id;
+    if (!(lineId in confirmedQtyRef.current)) {
+      confirmedQtyRef.current[lineId] = match.counted_quantity;
+    }
+    const base = requestedQtyRef.current[lineId] ?? match.counted_quantity ?? 0;
+    const newQty = base + 1;
+    requestedQtyRef.current[lineId] = newQty;
+    const productLabel = match.products?.name || code;
+    enqueueQuantitySave(lineId)
+      .then(({ saved, qty }) => {
+        if (!saved) return; // já coberta por uma gravação acumulada
+        // Leva a linha lida para a vista (por baixo do painel do leitor).
+        requestAnimationFrame(() => {
+          rowRefs.current[lineId]?.scrollIntoView({ block: "nearest" });
+        });
         toast({
           title: t('stockCounts.scan.foundTitle'),
           description: t('stockCounts.scan.foundCountDescription', {
-            name: match.products?.name || code,
-            qty: newQty,
+            name: productLabel,
+            qty: qty ?? newQty,
           }),
         });
       })
       .catch((error: any) => {
-        toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
+        resetRequestedQuantity(lineId);
+        const confirmed = confirmedQtyRef.current[lineId];
+        toast({
+          title: t('stockCounts.toast.quantityError'),
+          description: `${error?.message ?? ""} — ${productLabel} ficou com ${confirmed ?? 0} no servidor; volte a ler as unidades que faltam.`,
+          variant: "destructive",
+        });
       });
-  }, [findLineByCode, lines, filteredLines, lineFilterActive, persistQuantity, t, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findLineByCode, lines, filteredLines, lineFilterActive, enqueueQuantitySave, t, toast]);
 
   // Mantido em ref para o efeito da câmara (abaixo) não precisar reiniciar o
   // stream sempre que `lines`/`t`/`toast` mudam — só quando scanOpen muda.
@@ -710,6 +671,7 @@ export default function InventoryCountDetailDialog({
     if (!scanOpen) {
       setVideoDevices([]);
       setSelectedDeviceId(undefined);
+      setManualCode("");
     }
   }, [scanOpen]);
 
@@ -729,11 +691,19 @@ export default function InventoryCountDetailDialog({
     if (line.counted_quantity === qty) return; // sem alteração
 
     setSavingLineId(lineId);
+    // Mesma fila das leituras: um valor escrito à mão não corre em paralelo
+    // com leituras ainda a gravar, e as leituras seguintes somam a partir dele.
+    if (!(lineId in confirmedQtyRef.current)) {
+      confirmedQtyRef.current[lineId] = line.counted_quantity;
+    }
+    requestedQtyRef.current[lineId] = qty;
     try {
-      await persistQuantity(lineId, qty);
+      await enqueueQuantitySave(lineId);
     } catch (error: any) {
+      resetRequestedQuantity(lineId);
+      const confirmed = confirmedQtyRef.current[lineId];
       toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
-      setQuantityDrafts((prev) => ({ ...prev, [lineId]: line.counted_quantity != null ? String(line.counted_quantity) : "" }));
+      setQuantityDrafts((prev) => ({ ...prev, [lineId]: confirmed != null ? String(confirmed) : "" }));
     } finally {
       setSavingLineId(null);
     }
@@ -799,10 +769,10 @@ export default function InventoryCountDetailDialog({
     }
   };
 
-  // Exporta as linhas já carregadas no diálogo para XLSX (helper partilhado
-  // do projeto — trata do anti-injeção de fórmulas e das larguras). "Qtd
-  // contada"/"Diferença" ficam VAZIAS enquanto a linha não foi contada: é
-  // este o ficheiro que o utilizador leva para o armazém e preenche.
+  // Exporta as linhas já carregadas para XLSX (helper partilhado do projeto —
+  // anti-injeção de fórmulas e larguras). "Contada"/"Diferença" ficam VAZIAS
+  // enquanto a linha não foi contada: é este o ficheiro que o utilizador leva
+  // para o armazém e devolve preenchido em Importar (lido por SKU ou EAN).
   const handleExport = () => {
     if (lines.length === 0) {
       toast({
@@ -818,8 +788,6 @@ export default function InventoryCountDetailDialog({
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0"),
       ].join("-");
-      // Prefixo traduzido (sem acentos nem espaços — é um nome de ficheiro):
-      // um utilizador DE recebia um ficheiro chamado "contagem_...".
       const prefix = (t('stockCounts.export.filenamePrefix') || "stocktake").replace(/[^\w.-]+/g, "_");
       const documentNumber = (header?.document_number || "").replace(/[^\w.-]+/g, "_") || prefix;
       const filename = `${prefix}_${documentNumber}_${stamp}.xlsx`;
@@ -828,24 +796,35 @@ export default function InventoryCountDetailDialog({
         {
           sheetName: t('stockCounts.export.sheetName'),
           columns: [
+            { key: "product", header: t('stockCounts.export.columnProduct'), type: "text" },
             { key: "sku", header: t('stockCounts.export.columnSku'), type: "text" },
             { key: "barcode", header: t('stockCounts.export.columnBarcode'), type: "text" },
-            { key: "product", header: t('stockCounts.export.columnProduct'), type: "text" },
             { key: "system_quantity", header: t('stockCounts.export.columnSystemQty'), type: "number" },
+            { key: "moved", header: "Movida durante", type: "text" },
+            { key: "expected", header: "Esperado", type: "number" },
             { key: "counted_quantity", header: t('stockCounts.export.columnCountedQty'), type: "number" },
             { key: "difference", header: t('stockCounts.export.columnDifference'), type: "number" },
+            { key: "resolution", header: "Resolução", type: "text" },
+            { key: "note", header: "Nota", type: "text" },
           ],
-          rows: lines.map((line) => ({
-            sku: line.products?.sku ?? "",
-            barcode: line.products?.barcode ?? "",
-            product: line.products?.name ?? "",
-            system_quantity: line.system_quantity_at_start,
-            // null (não 0) — normalizeExportCell devolve célula vazia.
-            counted_quantity: line.counted_quantity ?? null,
-            difference: line.counted_quantity == null
-              ? null
-              : line.counted_quantity - line.system_quantity_at_start,
-          })),
+          rows: lines.map((line) => {
+            const diff = getDiff(line);
+            return {
+              product: line.products?.name ?? "",
+              sku: line.products?.sku ?? "",
+              barcode: line.products?.barcode ?? "",
+              system_quantity: line.system_quantity_at_start,
+              moved: line.moved_during_count ? "Sim" : "",
+              expected: line.system_quantity_at_start,
+              // null (não 0) — normalizeExportCell devolve célula vazia.
+              counted_quantity: line.counted_quantity ?? null,
+              difference: diff,
+              resolution: line.discrepancy_resolution
+                ? getResolutionLabel(line.discrepancy_resolution)
+                : diff !== null && diff !== 0 ? "Por resolver" : "",
+              note: line.resolution_notes ?? "",
+            };
+          }),
         },
         filename,
       );
@@ -863,281 +842,228 @@ export default function InventoryCountDetailDialog({
     }
   };
 
+  // Grava N quantidades contadas pela MESMA via da edição manual:
+  //  · linhas com SKU único na contagem → rpc_bulk_update_inventory_count_lines
+  //    (réplica em lote de rpc_update_inventory_count_line_quantity, por SKU),
+  //    em lotes de CHUNK_SIZE;
+  //  · linhas sem SKU (ou SKU repetido na contagem, ambíguo para a RPC por SKU)
+  //    → rpc_update_inventory_count_line_quantity, uma a uma.
+  // Cada chamada é a sua própria transação: um lote que falhe NÃO desfaz os
+  // anteriores, por isso o erro é registado e devolvido, nunca lançado.
+  // `fromFile` = false (Preencher = esperado): não há linhas de ficheiro, por
+  // isso os erros de lote identificam-se pelos códigos, não por "linhas N–M".
+  const writeCountedQuantities = async (
+    entries: CountImportEntry[],
+    { fromFile = true }: { fromFile?: boolean } = {},
+  ): Promise<BulkWriteResult> => {
+    const errors: CountImportErrorRow[] = [];
+    let updated = 0;
+    let incomplete = false;
+    let notSent = 0;
+    if (!countId || entries.length === 0) return { updated, errors, incomplete, notSent };
+
+    // A RPC em lote resolve por SKU dentro da contagem — só é seguro para SKUs
+    // que pertencem a UM produto da contagem. O resto vai linha a linha, pelo
+    // id da linha (já resolvido sem ambiguidade em countImport).
+    const skuUse = new Map<string, number>();
+    for (const line of lines) {
+      const key = normalizeCodeKey(line.products?.sku ?? "");
+      if (key) skuUse.set(key, (skuUse.get(key) ?? 0) + 1);
+    }
+    const bySku = entries.filter((e) => e.sku && skuUse.get(normalizeCodeKey(e.sku)) === 1);
+    const bySkuSet = new Set(bySku);
+    const byLine = entries.filter((e) => !bySkuSet.has(e));
+
+    let done = 0;
+    setImportProgress({ current: 0, total: entries.length });
+
+    for (let i = 0; i < bySku.length; i += CHUNK_SIZE) {
+      const chunk = bySku.slice(i, i + CHUNK_SIZE);
+      // (supabase.rpc as any): a RPC ainda não está no types.ts gerado.
+      const { data, error } = await (supabase.rpc as any)('rpc_bulk_update_inventory_count_lines', {
+        p_inventory_count_id: countId,
+        p_lines: chunk.map((e) => ({ sku: e.sku, counted_quantity: e.counted_quantity, input_index: e.input_index })),
+      });
+      if (error) {
+        const fromLine = chunk[0]?.input_index ?? 0;
+        const toLine = chunk[chunk.length - 1]?.input_index ?? fromLine;
+        const errorText = error.message || t('stockCounts.import.unknownError');
+        errors.push(fromFile
+          ? {
+            line: fromLine,
+            code: "—",
+            reason: t('stockCounts.import.chunkFailed', { from: fromLine, to: toLine, error: errorText }),
+          }
+          : {
+            line: fromLine,
+            code: `${chunk[0]?.code ?? "—"} … ${chunk[chunk.length - 1]?.code ?? "—"}`,
+            reason: `Lote de ${chunk.length} produto(s) não gravado: ${errorText}`,
+          });
+        incomplete = true;
+        notSent = entries.length - done;
+        return { updated, errors, incomplete, notSent };
+      }
+      const result = (data || {}) as any;
+      const results = (result.results || []) as any[];
+      const okCount = results.filter((r) => r?.status === "ok").length;
+      updated += typeof result.updated === "number" ? result.updated : okCount;
+      for (const r of results) {
+        if (r?.status === "error") {
+          const source = chunk.find((e) => e.input_index === Number(r.input_index));
+          errors.push({
+            line: Number(r.input_index ?? 0),
+            code: r.sku || source?.code || "—",
+            reason: r.error || t('stockCounts.import.unknownError'),
+          });
+        }
+      }
+      done += chunk.length;
+      setImportProgress({ current: done, total: entries.length });
+    }
+
+    for (const entry of byLine) {
+      const { error } = await supabase.rpc('rpc_update_inventory_count_line_quantity', {
+        p_line_id: entry.lineId,
+        p_counted_quantity: entry.counted_quantity,
+      } as any);
+      if (error) {
+        errors.push({ line: entry.input_index, code: entry.code, reason: error.message });
+      } else {
+        updated += 1;
+      }
+      done += 1;
+      setImportProgress({ current: done, total: entries.length });
+    }
+
+    return { updated, errors, incomplete, notSent };
+  };
+
+  // Fase 1 do Importar — só LÊ e valida o ficheiro e mostra a pré-visualização.
+  // Nada é gravado até o utilizador confirmar.
   const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const inputEl = event.target;
     const file = inputEl.files?.[0];
     if (!file) return;
-    if (!countId) {
-      inputEl.value = "";
-      return;
-    }
-
     setImporting(true);
-    setImportProgress(null);
-
-    // Fase 1 — LEITURA E VALIDAÇÃO DO FICHEIRO. É só esta fase que o try/catch
-    // cobre: enquanto não se escreve nada na base, lançar e mostrar "erro ao
-    // importar" é honesto. A fase 2 (escrita em lotes) trata os erros dela
-    // própria, porque aí já pode haver linhas gravadas.
-    let parsed: {
-      payload: { sku: string; counted_quantity: number; input_index: number }[];
-      errors: ImportErrorRow[];
-      skipped: number;
-    };
     try {
-      const skuAliases = new Set([
-        ...SKU_HEADER_ALIASES,
-        normalizeHeader(t('stockCounts.export.columnSku')),
-      ]);
-      const countedAliases = new Set([
-        ...COUNTED_HEADER_ALIASES,
-        normalizeHeader(t('stockCounts.export.columnCountedQty')),
-      ]);
-
-      // Mesmo padrão de leitura do import de produtos (Products.tsx): XLSX/XLS
-      // pela biblioteca, CSV pelo parser próprio (separador detetado).
-      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
-      let matrix: unknown[][];
-      let located: ImportColumnLookup;
-      if (isExcel) {
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as unknown[][];
-        located = locateImportColumns(matrix, skuAliases, countedAliases);
-      } else {
-        const buffer = await file.arrayBuffer();
-        matrix = buildCsvMatrix(new TextDecoder("utf-8").decode(buffer));
-        located = locateImportColumns(matrix, skuAliases, countedAliases);
-        if (located.status !== "ok" && located.status !== "empty") {
-          // O Excel grava CSV em ANSI/Windows-1252 conforme o locale — lido
-          // como UTF-8, o cabeçalho "Qté comptée"/"Gezählte Menge" chega
-          // mojibake e nenhum alias casa. Segunda tentativa antes de desistir.
-          const ansiMatrix = buildCsvMatrix(new TextDecoder("windows-1252").decode(buffer));
-          const ansiLocated = locateImportColumns(ansiMatrix, skuAliases, countedAliases);
-          if (ansiLocated.status === "ok") {
-            matrix = ansiMatrix;
-            located = ansiLocated;
-          }
-        }
-      }
-
-      if (located.status !== "ok") {
-        if (located.status === "empty") {
-          throw new Error(t('stockCounts.import.emptyFile'));
-        }
-        const missingColumns: string[] = [];
-        if (located.status === "missingSku" || located.status === "missingBoth") {
-          missingColumns.push(t('stockCounts.export.columnSku'));
-        }
-        if (located.status === "missingCounted" || located.status === "missingBoth") {
-          missingColumns.push(t('stockCounts.export.columnCountedQty'));
-        }
-        throw new Error(t('stockCounts.import.missingColumns', { columns: missingColumns.join(", ") }));
-      }
-
-      const { headerRowIndex, skuIndex, countedIndex } = located;
-
-      const linesBySku = new Map<string, InventoryCountLineRow>();
-      for (const line of lines) {
-        const key = normalizeSkuKey(line.products?.sku ?? "");
-        if (key) linesBySku.set(key, line);
-      }
-
-      let payload: { sku: string; counted_quantity: number; input_index: number }[] = [];
-      const errors: ImportErrorRow[] = [];
-      let skipped = 0;
-
-      for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
-        const row = matrix[i] || [];
-        // Número da linha no ficheiro (1-based) — é o mesmo número que o
-        // utilizador vê na margem do Excel.
-        const inputIndex = i + 1;
-        const rawSku = stripSpreadsheetEscape(row[skuIndex]);
-        const rawQuantity = stripSpreadsheetEscape(row[countedIndex]);
-
-        if (rawSku === "" && rawQuantity === "") continue; // linha vazia do ficheiro
-        // Por contar: é o caso normal (só se preenche parte do ficheiro).
-        if (rawQuantity === "") { skipped += 1; continue; }
-
-        if (rawSku === "") {
-          errors.push({
-            line: inputIndex,
-            sku: t('stockCounts.import.unknownSku'),
-            reason: t('stockCounts.import.missingSku'),
-          });
-          continue;
-        }
-        const quantity = parseCountedQuantity(row[countedIndex]);
-        if (quantity === null) {
-          errors.push({
-            line: inputIndex,
-            sku: rawSku,
-            reason: t('stockCounts.import.invalidQuantity', { value: rawQuantity }),
-          });
-          continue;
-        }
-        if (!linesBySku.has(normalizeSkuKey(rawSku))) {
-          errors.push({
-            line: inputIndex,
-            sku: rawSku,
-            reason: t('stockCounts.import.productNotFound'),
-          });
-          continue;
-        }
-        payload.push({ sku: rawSku, counted_quantity: quantity, input_index: inputIndex });
-      }
-
-      // SKUs repetidos no ficheiro (a mesma prateleira contada em dois sítios):
-      // enviados tal e qual, venceria a última linha em silêncio e o relatório
-      // diria "2 atualizadas" para 1 produto. Quem decide qual vale é o
-      // utilizador — as linhas em conflito NÃO são enviadas, as outras seguem.
-      const occurrencesBySku = new Map<string, number[]>();
-      for (const entry of payload) {
-        const key = normalizeSkuKey(entry.sku);
-        const list = occurrencesBySku.get(key);
-        if (list) list.push(entry.input_index);
-        else occurrencesBySku.set(key, [entry.input_index]);
-      }
-      const duplicateKeys = new Set<string>();
-      for (const [key, occurrences] of occurrencesBySku) {
-        if (occurrences.length < 2) continue;
-        duplicateKeys.add(key);
-        const displaySku = payload.find((entry) => normalizeSkuKey(entry.sku) === key)?.sku ?? key;
-        const conflictLines = occurrences.join(", ");
-        for (const occurrence of occurrences) {
-          errors.push({
-            line: occurrence,
-            sku: displaySku,
-            reason: t('stockCounts.import.duplicateSku', { sku: displaySku, lines: conflictLines }),
-          });
-        }
-      }
-      if (duplicateKeys.size > 0) {
-        payload = payload.filter((entry) => !duplicateKeys.has(normalizeSkuKey(entry.sku)));
-      }
-
-      parsed = { payload, errors, skipped };
+      const preview = await parseCountImportFile(file, lines, {
+        skuHeader: t('stockCounts.export.columnSku'),
+        barcodeHeader: t('stockCounts.export.columnBarcode'),
+        countedHeader: t('stockCounts.export.columnCountedQty'),
+      });
+      setIncludeResolved(false);
+      setImportPreview(preview);
     } catch (error: any) {
+      setImportPreview(null);
       toast({
         title: t('stockCounts.import.errorTitle'),
         description: error?.message,
         variant: "destructive",
       });
+    } finally {
+      // SEMPRE — senão re-selecionar o mesmo ficheiro (corrigido) não dispara onChange.
       inputEl.value = "";
       setImporting(false);
+    }
+  };
+
+  // Entradas que a confirmação grava: sem as que perdem resolução, a não ser
+  // que o utilizador as inclua explicitamente.
+  const importEntriesToWrite = importPreview
+    ? (includeResolved ? importPreview.entries : importPreview.entries.filter((e) => !e.losesResolution))
+    : [];
+  const importExcludedResolved = importPreview ? importPreview.entries.length - importEntriesToWrite.length : 0;
+
+  // Fase 2 do Importar — grava as entradas da pré-visualização.
+  const handleConfirmImport = async () => {
+    if (!importPreview) return;
+    const preview = importPreview;
+    const toWrite = importEntriesToWrite;
+    // As já resolvidas deixadas de fora contam como ignoradas no resumo.
+    const skippedTotal = preview.skipped + importExcludedResolved;
+    setImporting(true);
+    let result: BulkWriteResult = { updated: 0, errors: [], incomplete: false, notSent: 0 };
+    try {
+      result = await writeCountedQuantities(toWrite);
+    } catch (error: any) {
+      // Rede de segurança: o que já foi gravado continua gravado.
+      result = { ...result, incomplete: true };
+      toast({ title: t('stockCounts.import.errorTitle'), description: error?.message, variant: "destructive" });
+    } finally {
+      setImporting(false);
       setImportProgress(null);
-      return;
     }
 
-    // Fase 2 — ESCRITA. Cada chamada RPC é a sua própria transação: se o lote
-    // 3 falhar, os lotes 1 e 2 JÁ estão gravados na base. Lançar daqui para um
-    // catch genérico deitava fora o `updated` acumulado e nunca corria o
-    // relatório nem o loadDetail — o utilizador via "Erro ao importar" e a
-    // tabela com as quantidades antigas, com meia contagem já escrita, e
-    // reimportava por cima. Por isso o erro é apanhado AQUI, registado como
-    // erro do lote (com o intervalo de linhas), e o fluxo segue normalmente.
-    const { payload, errors, skipped } = parsed;
-    let updated = 0;
-    let incomplete = false;
-    let notSent = 0;
-    try {
-      if (payload.length > 0) {
-        setImportProgress({ current: 0, total: payload.length });
-        for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
-          const chunk = payload.slice(i, i + CHUNK_SIZE);
-          // (supabase.rpc as any): a RPC é nova e ainda não está no
-          // types.ts gerado — mesmo padrão já usado noutras páginas.
-          const { data, error } = await (supabase.rpc as any)('rpc_bulk_update_inventory_count_lines', {
-            p_inventory_count_id: countId,
-            p_lines: chunk,
-          });
-          if (error) {
-            const fromLine = chunk[0]?.input_index ?? 0;
-            const toLine = chunk[chunk.length - 1]?.input_index ?? fromLine;
-            errors.push({
-              line: fromLine,
-              sku: t('stockCounts.import.unknownSku'),
-              reason: t('stockCounts.import.chunkFailed', {
-                from: fromLine,
-                to: toLine,
-                error: error.message || t('stockCounts.import.unknownError'),
-              }),
-            });
-            incomplete = true;
-            notSent = payload.length - i;
-            break;
-          }
-
-          const result = (data || {}) as any;
-          const results = (result.results || []) as any[];
-          const okCount = results.filter((r) => r?.status === "ok").length;
-          updated += typeof result.updated === "number" ? result.updated : okCount;
-          for (const line of results) {
-            if (line?.status === "error") {
-              errors.push({
-                line: Number(line.input_index ?? 0),
-                sku: line.sku || t('stockCounts.import.unknownSku'),
-                reason: line.error || t('stockCounts.import.unknownError'),
-              });
-            }
-          }
-          setImportProgress({ current: Math.min(i + chunk.length, payload.length), total: payload.length });
-        }
-      }
-
-      // Por número de linha do ficheiro: os erros de parsing vinham todos
-      // primeiro e os do servidor atrás, lote a lote — os números saltavam
-      // para trás e, com mais de 50 erros, as 50 mostradas podiam ser todas de
-      // parsing, escondendo por completo os do servidor.
-      errors.sort((a, b) => a.line - b.line);
-
-      if (incomplete) {
-        toast({
-          title: t('stockCounts.import.incompleteTitle'),
-          description: t('stockCounts.import.incompleteSummary', { updated, notSent }),
-          variant: "destructive",
-        });
-      } else if (payload.length === 0 && errors.length === 0) {
-        toast({ title: t('stockCounts.import.noValidRowsTitle'), description: t('stockCounts.import.noValidRows') });
-      } else {
-        toast({
-          title: t('stockCounts.import.successTitle'),
-          description: t('stockCounts.import.summary', { updated, skipped, failed: errors.length }),
-        });
-      }
-
-      setImportOpen(false);
-      if (errors.length > 0) {
-        setImportReport({ updated, skipped, errors, incomplete, notSent });
-      }
-
-      // `incomplete` recarrega mesmo com updated = 0: um timeout de rede pode
-      // ter deixado a escrita commitada do lado do servidor sem nós sabermos.
-      if (updated > 0 || incomplete) {
-        await loadDetail();
-        onChanged();
-      }
-    } catch (error: any) {
-      // Rede de segurança para o inesperado (a falha da RPC já é tratada lote
-      // a lote acima). Mesmo aqui o relatório é mostrado com o que foi
-      // gravado, para nunca dar a entender que nada foi escrito.
+    const errors = [...preview.errors, ...result.errors].sort((a, b) => a.line - b.line);
+    if (result.incomplete) {
       toast({
-        title: t('stockCounts.import.errorTitle'),
-        description: error?.message,
+        title: t('stockCounts.import.incompleteTitle'),
+        description: t('stockCounts.import.incompleteSummary', { updated: result.updated, notSent: result.notSent }),
         variant: "destructive",
       });
-      setImportOpen(false);
-      if (errors.length > 0 || updated > 0) {
-        errors.sort((a, b) => a.line - b.line);
-        setImportReport({ updated, skipped, errors, incomplete: true, notSent });
-      }
+    } else {
+      toast({
+        title: t('stockCounts.import.successTitle'),
+        description: t('stockCounts.import.summary', { updated: result.updated, skipped: skippedTotal, failed: errors.length }),
+      });
+    }
+    setImportPreview(null);
+    setImportOpen(false);
+    if (errors.length > 0) {
+      setImportReport({ ...result, errors, skipped: skippedTotal });
+    }
+    // `incomplete` recarrega mesmo com updated = 0: um timeout de rede pode
+    // ter deixado a escrita commitada do lado do servidor.
+    if (result.updated > 0 || result.incomplete) {
+      await loadDetail();
+      onChanged();
+    }
+  };
+
+  // "Preencher contadas = esperado": só as linhas AINDA VAZIAS, com o esperado
+  // (= sistema no início da contagem — é contra esse valor que a app calcula a
+  // diferença e que rpc_finalize_inventory_count valida). Nunca toca em linhas
+  // já contadas, por isso nunca limpa uma resolução. Inclui as linhas com
+  // recontagem pedida (a recontagem limpa a contada) — o texto de confirmação
+  // di-lo explicitamente.
+  const emptyLines = lines.filter((l) => l.counted_quantity == null);
+  const emptyRecountLines = emptyLines.filter((l) => l.discrepancy_resolution === "recontagem_pedida").length;
+  const handleFillExpected = async () => {
+    if (importing || filling) return;
+    const entries: CountImportEntry[] = emptyLines.map((line, index) => ({
+      lineId: line.id,
+      sku: line.products?.sku?.trim() || null,
+      productName: line.products?.name || "-",
+      code: line.products?.sku || line.products?.barcode || line.products?.name || "-",
+      previous: null,
+      counted_quantity: Math.max(0, line.system_quantity_at_start),
+      input_index: index + 1,
+    }));
+    setFilling(true);
+    let result: BulkWriteResult = { updated: 0, errors: [], incomplete: false, notSent: 0 };
+    try {
+      result = await writeCountedQuantities(entries, { fromFile: false });
+    } catch (error: any) {
+      result = { ...result, incomplete: true };
+      toast({ title: "Erro ao preencher", description: error?.message, variant: "destructive" });
     } finally {
-      // SEMPRE — sem isto, re-selecionar o mesmo ficheiro (corrigido entretanto)
-      // não volta a disparar o onChange e parece que a importação foi ignorada.
-      inputEl.value = "";
-      setImporting(false);
+      setFilling(false);
       setImportProgress(null);
+      setFillConfirmOpen(false);
+    }
+    if (result.errors.length > 0 || result.incomplete) {
+      toast({
+        title: "Preenchimento incompleto",
+        description: `${result.updated} linha(s) preenchida(s); ${result.errors.length} com erro${result.notSent ? `, ${result.notSent} por enviar` : ""}.`,
+        variant: "destructive",
+      });
+      setImportReport({ ...result, skipped: 0, withoutFileLines: true });
+    } else {
+      toast({ title: "Linhas por contar preenchidas com o esperado.", description: `${result.updated} linha(s).` });
+    }
+    if (result.updated > 0 || result.incomplete) {
+      await loadDetail();
+      onChanged();
     }
   };
 
@@ -1171,6 +1097,17 @@ export default function InventoryCountDetailDialog({
     return d !== null && d !== 0 && !l.discrepancy_resolution;
   }).length;
   const pendingLines = lines.length - countedLines + unresolvedLines;
+  // Última atividade: a contagem mais recente de uma linha (ou o início/fecho).
+  const lastActivity = [header?.started_at, header?.finalized_at, ...lines.map((l) => l.counted_at)]
+    .filter((d): d is string => !!d)
+    .reduce((max, d) => (new Date(d).getTime() > new Date(max).getTime() ? d : max), header?.started_at ?? new Date().toISOString());
+  // Câmara/leitor, Importar e Preencher escrevem quantidades contadas — mesma
+  // exigência das RPCs de contagem: inventory.count e sessão "em contagem".
+  const countBlockedReason: string | null = !isActive
+    ? "Contagem fechada: as quantidades corrigem-se com um ajuste em Movimentos"
+    : !canCount
+      ? NO_COUNT_PERMISSION
+      : null;
   const statusTone: InventoryTone = header?.status === "finalizada" ? "ok" : header?.status === "cancelada" ? "neutral" : "info";
 
   return (
@@ -1194,7 +1131,11 @@ export default function InventoryCountDetailDialog({
             <>
               <DocInfoGrid
                 items={[
-                  { label: t('stockCounts.detail.startedAt'), value: new Date(header.started_at).toLocaleString('pt-PT') },
+                  {
+                    label: "Iniciada",
+                    value: `${new Date(header.started_at).toLocaleString('pt-PT')}${creatorName ? ` · ${creatorName}` : ""}`,
+                  },
+                  { label: "Última atividade", value: new Date(lastActivity).toLocaleString('pt-PT') },
                   header.finalized_at
                     ? { label: t('stockCounts.detail.finalizedAt'), value: new Date(header.finalized_at).toLocaleString('pt-PT') }
                     : null,
@@ -1202,59 +1143,88 @@ export default function InventoryCountDetailDialog({
                   { label: "Por resolver", value: unresolvedLines },
                 ]}
               />
+              {/* Sempre visíveis (como no protótipo); desativados com o motivo
+                  quando a contagem está fechada ou falta inventory.count. */}
               <div className="mb-3 flex flex-wrap items-center gap-2">
-                {canCount && isActive && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => setScanOpen(true)}
-                  >
-                    <ScanLine className="w-4 h-4" />
-                    {t('stockCounts.scan.button')}
-                  </Button>
-                )}
-                {/* Sem PermissionGate próprio: quem consegue abrir o
-                    diálogo já pode ver estas mesmas linhas no ecrã. */}
+                <ReasonButton
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  reason={countBlockedReason}
+                  onClick={() => setScanOpen(true)}
+                >
+                  <Camera className="h-4 w-4" aria-hidden="true" />
+                  Câmara / leitor
+                </ReasonButton>
+                {/* Exportar não escreve nada: quem abre a folha já vê estas linhas. */}
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="gap-1.5"
+                  disabled={lines.length === 0}
                   onClick={handleExport}
                 >
-                  <Download className="w-4 h-4" />
-                  {t('stockCounts.export.button')}
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  Exportar
                 </Button>
-                {canCount && isActive && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => setImportOpen(true)}
-                  >
-                    <Upload className="w-4 h-4" />
-                    {t('stockCounts.import.button')}
-                  </Button>
-                )}
+                <ReasonButton
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  reason={countBlockedReason}
+                  disabled={filling}
+                  onClick={() => { setImportPreview(null); setImportOpen(true); }}
+                >
+                  <Upload className="h-4 w-4" aria-hidden="true" />
+                  Importar
+                </ReasonButton>
+                <ReasonButton
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  reason={countBlockedReason ?? (emptyLines.length === 0 ? "Não há linhas por contar" : null)}
+                  disabled={filling || importing}
+                  onClick={() => setFillConfirmOpen(true)}
+                >
+                  <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
+                  Preencher contadas = esperado
+                </ReasonButton>
               </div>
             </>
           ) : undefined
         }
         footer={
-          header && isActive && canEdit
+          header && isActive
             ? {
+                left: (
+                  <ReasonButton type="button" variant="ghost" reason={CANCEL_UNAVAILABLE}>
+                    Cancelar contagem
+                  </ReasonButton>
+                ),
                 right: (
                   <>
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-sm text-muted-foreground" aria-live="polite">
                       {pendingLines > 0 ? `${pendingLines} linha(s) por contar ou resolver` : "Pronta a finalizar"}
                     </span>
-                    <Button onClick={handleFinalize} disabled={finalizing || loading}>
+                    <ReasonButton
+                      type="button"
+                      reason={
+                        !canEdit
+                          ? NO_EDIT_PERMISSION
+                          : unresolvedLines > 0
+                            ? `Há ${unresolvedLines} diferença(s) por resolver`
+                            : null
+                      }
+                      onClick={handleFinalize}
+                      disabled={finalizing || loading}
+                    >
                       <Check className="mr-2 h-4 w-4" aria-hidden="true" />
                       {finalizing ? t('stockCounts.detail.finalizing') : t('stockCounts.detail.finalize')}
-                    </Button>
+                    </ReasonButton>
                   </>
                 ),
               }
@@ -1314,23 +1284,25 @@ export default function InventoryCountDetailDialog({
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t('stockCounts.detail.lines.product')}</TableHead>
-                    <TableHead className="text-right">{t('stockCounts.detail.lines.systemQty')}</TableHead>
-                    <TableHead className="text-right w-32">{t('stockCounts.detail.lines.countedQty')}</TableHead>
-                    <TableHead className="text-right">{t('stockCounts.detail.lines.difference')}</TableHead>
-                    <TableHead>{t('stockCounts.detail.lines.moved')}</TableHead>
-                    <TableHead className="min-w-[260px]">{t('stockCounts.detail.lines.resolution')}</TableHead>
+                    <TableHead className="text-right">Sistema</TableHead>
+                    <TableHead className="text-right">Movida durante</TableHead>
+                    <TableHead className="text-right">Esperado</TableHead>
+                    <TableHead className="text-right w-32">Contada</TableHead>
+                    <TableHead className="text-right">Diferença</TableHead>
+                    <TableHead className="min-w-[190px]">Resolução</TableHead>
+                    <TableHead className="min-w-[180px]">Nota</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center text-muted-foreground">
                         {t('stockCounts.detail.lines.noLines')}
                       </TableCell>
                     </TableRow>
                   ) : filteredLines.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center text-muted-foreground">
                         {t('stockCounts.detail.lines.noFilteredLines')}
                       </TableCell>
                     </TableRow>
@@ -1338,98 +1310,113 @@ export default function InventoryCountDetailDialog({
                     visibleLines.map((line) => {
                       const diff = getDiff(line);
                       const needsResolution = diff !== null && diff !== 0 && !line.discrepancy_resolution;
+                      const canResolveHere = needsResolution && canEdit && isActive;
                       const draft = resolutionDrafts[line.id] || { resolution: "" as const, notes: "" };
+                      const productName = line.products?.name || '-';
                       return (
                         <TableRow key={line.id} ref={(el) => { rowRefs.current[line.id] = el; }}>
                           <TableCell className="font-medium">
-                            <div>{line.products?.name || '-'}</div>
+                            <div>{productName}</div>
                             {line.products?.sku && (
-                              <div className="text-xs text-muted-foreground">{line.products.sku}</div>
+                              <div className="font-mono text-xs text-muted-foreground">{line.products.sku}</div>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">{line.system_quantity_at_start}</TableCell>
+                          <TableCell className="text-right tabular-nums">{line.system_quantity_at_start}</TableCell>
+                          <TableCell className="text-right">
+                            {line.moved_during_count ? (
+                              <Badge
+                                variant="outline"
+                                className="gap-1"
+                                title="Houve movimentos deste produto no armazém durante a contagem. “Ajustado” usa o saldo atual."
+                              >
+                                <ArrowRightLeft className="h-3 w-3" aria-hidden="true" /> {t('stockCounts.detail.lines.movedBadge')}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          {/* A app não guarda a quantidade movida durante a contagem
+                              (só a marca moved_during_count): o esperado é o
+                              sistema no início, que é o que a finalização valida. */}
+                          <TableCell className="text-right tabular-nums">{line.system_quantity_at_start}</TableCell>
                           <TableCell className="text-right">
                             {canCount && isActive ? (
                               <Input
                                 ref={(el) => { quantityInputRefs.current[line.id] = el; }}
                                 type="number"
                                 min={0}
+                                step={1}
+                                inputMode="numeric"
+                                aria-label={`Contada ${productName}`}
                                 className="w-24 ml-auto text-right"
                                 value={quantityDrafts[line.id] ?? ""}
                                 placeholder={t('stockCounts.detail.lines.countPlaceholder')}
-                                disabled={savingLineId === line.id}
+                                disabled={savingLineId === line.id || filling || importing}
                                 onChange={(e) => setQuantityDrafts((prev) => ({ ...prev, [line.id]: e.target.value }))}
                                 onBlur={() => handleSaveQuantity(line.id)}
+                                onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                               />
                             ) : (
-                              <span>{line.counted_quantity ?? t('stockCounts.detail.lines.notCounted')}</span>
+                              <span className="tabular-nums">{line.counted_quantity ?? "—"}</span>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
                             {diff === null ? (
-                              <span className="text-muted-foreground">-</span>
+                              <span className="text-muted-foreground">—</span>
                             ) : diff === 0 ? (
-                              <span className="text-success font-medium">0</span>
+                              <InventoryStatusBadge tone="ok">0</InventoryStatusBadge>
                             ) : (
-                              <span className={diff > 0 ? "text-warning font-medium" : "text-destructive font-medium"}>
-                                {diff > 0 ? `+${diff}` : diff}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {line.moved_during_count && (
-                              <Badge variant="outline" className="gap-1">
-                                <ArrowRightLeft className="w-3 h-3" /> {t('stockCounts.detail.lines.movedBadge')}
-                              </Badge>
+                              <InventoryStatusBadge tone="bad">{diff > 0 ? `+${diff}` : diff}</InventoryStatusBadge>
                             )}
                           </TableCell>
                           <TableCell>
                             {line.discrepancy_resolution ? (
-                              <div className="space-y-0.5">
-                                <Badge variant="secondary">{getResolutionLabel(line.discrepancy_resolution)}</Badge>
-                                {line.resolution_notes && (
-                                  <p className="text-xs text-muted-foreground">{line.resolution_notes}</p>
-                                )}
-                              </div>
-                            ) : needsResolution && canEdit && isActive ? (
-                              <div className="space-y-1.5">
+                              <Badge variant="secondary">{getResolutionLabel(line.discrepancy_resolution)}</Badge>
+                            ) : canResolveHere ? (
+                              <div className="flex items-center gap-1.5">
                                 <Select
-                                  value={draft.resolution}
-                                  onValueChange={(v) => updateResolutionDraft(line.id, { resolution: v as ResolutionType })}
+                                  value={draft.resolution || "pendente"}
+                                  onValueChange={(v) => updateResolutionDraft(line.id, { resolution: v === "pendente" ? "" : v as ResolutionType })}
                                 >
-                                  <SelectTrigger className="h-8 text-xs">
-                                    <SelectValue placeholder={t('stockCounts.detail.lines.selectResolution')} />
+                                  <SelectTrigger className="h-8 text-xs" aria-label={`Resolução ${productName}`}>
+                                    <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
+                                    <SelectItem value="pendente">Por resolver</SelectItem>
                                     <SelectItem value="ajustado">{t('stockCounts.detail.lines.resolutionAdjusted')}</SelectItem>
                                     <SelectItem value="aceite_sem_ajuste">{t('stockCounts.detail.lines.resolutionAccepted')}</SelectItem>
                                     <SelectItem value="recontagem_pedida">{t('stockCounts.detail.lines.resolutionRecount')}</SelectItem>
                                   </SelectContent>
                                 </Select>
-                                {(draft.resolution === "aceite_sem_ajuste" || draft.resolution === "ajustado") && (
-                                  <Textarea
-                                    className="text-xs"
-                                    rows={2}
-                                    placeholder={t('stockCounts.detail.lines.notesPlaceholder')}
-                                    value={draft.notes}
-                                    onChange={(e) => updateResolutionDraft(line.id, { notes: e.target.value })}
-                                  />
-                                )}
                                 {draft.resolution && (
                                   <Button
+                                    type="button"
                                     size="sm"
-                                    className="h-7 text-xs"
+                                    className="h-8 px-2 text-xs"
                                     disabled={resolvingLineId === line.id}
                                     onClick={() => handleResolveLine(line.id)}
                                   >
-                                    {resolvingLineId === line.id ? t('stockCounts.detail.finalizing') : t('stockCounts.detail.lines.confirm')}
+                                    {resolvingLineId === line.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : t('stockCounts.detail.lines.confirm')}
                                   </Button>
                                 )}
                               </div>
                             ) : needsResolution ? (
-                              <span className="text-xs text-muted-foreground">{t('stockCounts.detail.lines.selectResolution')}</span>
+                              <span className="text-xs text-muted-foreground" title={!canEdit ? NO_EDIT_PERMISSION : undefined}>Por resolver</span>
                             ) : (
-                              <span className="text-muted-foreground">-</span>
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {line.discrepancy_resolution || !canResolveHere ? (
+                              <span className="text-xs text-muted-foreground">{line.resolution_notes || "—"}</span>
+                            ) : (
+                              <Input
+                                className="h-8 text-xs"
+                                aria-label={`Nota ${productName}`}
+                                placeholder={draft.resolution === "aceite_sem_ajuste" ? "Motivo (obrigatório)" : "Nota"}
+                                value={draft.notes}
+                                onChange={(e) => updateResolutionDraft(line.id, { notes: e.target.value })}
+                              />
                             )}
                           </TableCell>
                         </TableRow>
@@ -1442,7 +1429,7 @@ export default function InventoryCountDetailDialog({
               <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>
-                  Diferença = contada − sistema no início da contagem. As diferenças resolvidas como “Ajustado” geram um movimento de ajuste ao finalizar.
+                  Diferença = contada − sistema no início da contagem (o esperado). “Ajustado” gera logo um movimento de ajuste contra o saldo atual; “Aceite sem ajuste” exige motivo na nota; “Recontagem” limpa a contada e a linha volta a ficar por contar. Só se finaliza sem diferenças por resolver.
                 </span>
               </p>
               {paginateLines && (
@@ -1530,9 +1517,34 @@ export default function InventoryCountDetailDialog({
       <Dialog open={scanOpen} onOpenChange={setScanOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{t('stockCounts.scan.title')}</DialogTitle>
+            <DialogTitle>Contar com leitor / câmara</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Cada leitura soma 1 à contada do produto (procura por SKU ou EAN).
+            </p>
+            {/* Leitor de mão (USB/Bluetooth): escreve o código e Enter. */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const code = manualCode.trim();
+                if (!code) return;
+                handleScanResult(code, true);
+                setManualCode("");
+              }}
+            >
+              <label htmlFor="count-scan-code" className="mb-1 block text-xs font-medium text-muted-foreground">
+                Código (leitor ou teclado)
+              </label>
+              <Input
+                id="count-scan-code"
+                autoFocus
+                autoComplete="off"
+                placeholder="Leia ou escreva o código e Enter"
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
+              />
+            </form>
             {scanError ? (
               <p className="text-sm text-destructive border rounded-md p-3 bg-destructive/10">
                 {scanError}
@@ -1542,6 +1554,8 @@ export default function InventoryCountDetailDialog({
                 <video
                   ref={videoRef}
                   className="w-full aspect-video"
+                  width={640}
+                  height={360}
                   muted
                   playsInline
                   autoPlay
@@ -1553,7 +1567,7 @@ export default function InventoryCountDetailDialog({
                 value={selectedDeviceId ?? videoDevices[0]?.deviceId}
                 onValueChange={setSelectedDeviceId}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-label={t('stockCounts.scan.cameraLabel')}>
                   <SelectValue placeholder={t('stockCounts.scan.cameraLabel')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1567,50 +1581,232 @@ export default function InventoryCountDetailDialog({
             )}
             <p className="text-xs text-muted-foreground">{t('stockCounts.scan.hint')}</p>
           </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setScanOpen(false)}>Concluir</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog
         open={importOpen}
         onOpenChange={(next) => {
-          // Enquanto a escrita está a decorrer, os lotes ainda estão a ser
-          // gravados — fechar aqui perdia o relatório e deixava o utilizador
-          // sem saber onde a importação parou.
+          // Enquanto a escrita decorre, fechar perdia o relatório.
           if (importing) return;
           setImportOpen(next);
+          if (!next) setImportPreview(null);
         }}
       >
         <DialogContent
-          className="max-w-md"
+          className="max-w-2xl max-h-[85vh] flex flex-col"
           hideClose={importing}
           onInteractOutside={(e) => { if (importing) e.preventDefault(); }}
           onEscapeKeyDown={(e) => { if (importing) e.preventDefault(); }}
         >
           <DialogHeader>
-            <DialogTitle>{t('stockCounts.import.title')}</DialogTitle>
+            <DialogTitle>Importar contagem</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">{t('stockCounts.import.description')}</p>
+          <div className="space-y-4 overflow-y-auto">
+            <p className="text-sm text-muted-foreground">
+              CSV ou Excel com uma coluna <strong>SKU</strong> (ou <strong>EAN</strong>/código de barras) e uma
+              coluna <strong>Qtd contada</strong> — o ficheiro de Exportar serve. Linhas sem quantidade ficam por
+              contar. Primeiro vê a pré-visualização; nada é gravado até confirmar.
+            </p>
             <Input
               type="file"
               accept=".xlsx,.xls,.csv"
+              aria-label="Ficheiro da contagem"
               onChange={handleImportFile}
               disabled={importing}
             />
             {importing && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 {importProgress
-                  ? t('stockCounts.import.progress', {
-                    current: importProgress.current,
-                    total: importProgress.total,
-                  })
+                  ? t('stockCounts.import.progress', { current: importProgress.current, total: importProgress.total })
                   : t('stockCounts.import.progressReading')}
               </div>
             )}
+            {importPreview && !importing && (
+              <div className="space-y-3">
+                <div className={cn(
+                  "grid grid-cols-2 gap-2 text-center",
+                  importPreview.losingResolution > 0 ? "sm:grid-cols-5" : "sm:grid-cols-4",
+                )}>
+                  <div className="rounded-md border p-2">
+                    <div className="text-xl font-semibold text-primary">{importEntriesToWrite.length}</div>
+                    <div className="text-xs text-muted-foreground">a gravar</div>
+                  </div>
+                  {importPreview.losingResolution > 0 && (
+                    <div className="rounded-md border border-amber-500/50 p-2">
+                      <div className="text-xl font-semibold text-amber-600">{importPreview.losingResolution}</div>
+                      <div className="text-xs text-muted-foreground">já resolvidas (perdem resolução)</div>
+                    </div>
+                  )}
+                  <div className="rounded-md border p-2">
+                    <div className="text-xl font-semibold">{importPreview.unchanged}</div>
+                    <div className="text-xs text-muted-foreground">iguais (não reenviadas)</div>
+                  </div>
+                  <div className="rounded-md border p-2">
+                    <div className="text-xl font-semibold">{importPreview.skipped}</div>
+                    <div className="text-xs text-muted-foreground">sem quantidade</div>
+                  </div>
+                  <div className="rounded-md border p-2">
+                    <div className="text-xl font-semibold text-destructive">{importPreview.errors.length}</div>
+                    <div className="text-xs text-muted-foreground">com erro</div>
+                  </div>
+                </div>
+                {importPreview.losingResolution > 0 && (
+                  <div className="rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm dark:bg-amber-950/20">
+                    <p className="mb-2">
+                      {importPreview.losingResolution} linha(s) já estão resolvidas (Ajustado / Aceite sem ajuste) e o
+                      ficheiro muda a contada — gravá-las limpa a resolução e a diferença volta a ficar por resolver.
+                      Por omissão ficam de fora.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="count-import-include-resolved"
+                        checked={includeResolved}
+                        onCheckedChange={(v) => setIncludeResolved(v === true)}
+                      />
+                      <label htmlFor="count-import-include-resolved" className="cursor-pointer">
+                        Incluir também as {importPreview.losingResolution} já resolvidas
+                      </label>
+                    </div>
+                  </div>
+                )}
+                {importPreview.entries.length > 0 && (
+                  <div className="rounded-md border max-h-56 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <caption className="sr-only">Linhas a gravar</caption>
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th scope="col" className="text-left p-2">Linha</th>
+                          <th scope="col" className="text-left p-2">Produto</th>
+                          <th scope="col" className="text-right p-2">Atual</th>
+                          <th scope="col" className="text-right p-2">Nova</th>
+                          {importPreview.losingResolution > 0 && (
+                            <th scope="col" className="text-left p-2">Perde resolução</th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.entries.slice(0, 100).map((entry) => {
+                          const excluded = entry.losesResolution && !includeResolved;
+                          return (
+                            <tr key={entry.lineId} className={cn("border-t", excluded && "text-muted-foreground")}>
+                              <td className="p-2">{entry.input_index}</td>
+                              <td className="p-2">
+                                {entry.productName}
+                                <span className="ml-1 font-mono text-muted-foreground">{entry.code}</span>
+                              </td>
+                              <td className="p-2 text-right">{entry.previous ?? "—"}</td>
+                              <td className={cn("p-2 text-right", excluded ? "line-through" : "font-medium")}>
+                                {entry.counted_quantity}
+                              </td>
+                              {importPreview.losingResolution > 0 && (
+                                <td className="p-2">
+                                  {entry.losesResolution && entry.previousResolution ? (
+                                    <span className="text-amber-700 dark:text-amber-400">
+                                      {getResolutionLabel(entry.previousResolution)}
+                                      {excluded ? " · não incluída" : ""}
+                                    </span>
+                                  ) : "—"}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {importPreview.entries.length > 100 && (
+                      <p className="p-2 text-xs text-muted-foreground">e mais {importPreview.entries.length - 100} linha(s).</p>
+                    )}
+                  </div>
+                )}
+                {importPreview.errors.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-sm font-medium">Linhas com erro (não são gravadas)</div>
+                    <div className="rounded-md border max-h-40 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <caption className="sr-only">Linhas com erro</caption>
+                        <thead className="bg-muted/50 sticky top-0">
+                          <tr>
+                            <th scope="col" className="text-left p-2">Linha</th>
+                            <th scope="col" className="text-left p-2">Código</th>
+                            <th scope="col" className="text-left p-2">Motivo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.errors.slice(0, 50).map((row, index) => (
+                            <tr key={`${row.line}-${index}`} className="border-t">
+                              <td className="p-2">{row.line}</td>
+                              <td className="p-2 font-mono">{row.code}</td>
+                              <td className="p-2">{row.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {importPreview.errors.length > 50 && (
+                      <p className="mt-1 text-xs text-muted-foreground">e mais {importPreview.errors.length - 50} erro(s).</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={importing}
+              onClick={() => { setImportOpen(false); setImportPreview(null); }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              disabled={importing || !importPreview || importEntriesToWrite.length === 0}
+              onClick={handleConfirmImport}
+            >
+              {importEntriesToWrite.length > 0
+                ? `Gravar ${importEntriesToWrite.length} linha(s)`
+                : "Gravar"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={fillConfirmOpen} onOpenChange={(next) => { if (!filling) setFillConfirmOpen(next); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Preencher contadas = esperado</AlertDialogTitle>
+            <AlertDialogDescription>
+              As {emptyLines.length} linha(s) ainda por contar ficam com a contada igual ao esperado (sistema no
+              início da contagem)
+              {emptyRecountLines > 0
+                ? <>, <strong>incluindo {emptyRecountLines} com recontagem pedida</strong></>
+                : null}
+              . As linhas já contadas não mudam. Use só se confirmou fisicamente esses produtos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {filling && importProgress && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              {importProgress.current} / {importProgress.total}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={filling}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={filling || importing || emptyLines.length === 0}
+              onClick={(e) => { e.preventDefault(); handleFillExpected(); }}
+            >
+              {filling ? "A preencher…" : `Preencher ${emptyLines.length} linha(s)`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={!!importReport} onOpenChange={(next) => { if (!next) setImportReport(null); }}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
@@ -1648,16 +1844,18 @@ export default function InventoryCountDetailDialog({
                   <table className="w-full text-xs">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr>
-                        <th className="text-left p-2">{t('stockCounts.import.reportLine')}</th>
-                        <th className="text-left p-2">{t('stockCounts.import.reportSku')}</th>
-                        <th className="text-left p-2">{t('stockCounts.import.reportReason')}</th>
+                        {!importReport.withoutFileLines && (
+                          <th scope="col" className="text-left p-2">{t('stockCounts.import.reportLine')}</th>
+                        )}
+                        <th scope="col" className="text-left p-2">{importReport.withoutFileLines ? "SKU / código" : "Código"}</th>
+                        <th scope="col" className="text-left p-2">{t('stockCounts.import.reportReason')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {importReport.errors.slice(0, 50).map((row, index) => (
-                        <tr key={`${row.line}-${row.sku}-${index}`} className="border-t">
-                          <td className="p-2">{row.line}</td>
-                          <td className="p-2 font-mono">{row.sku}</td>
+                        <tr key={`${row.line}-${row.code}-${index}`} className="border-t">
+                          {!importReport.withoutFileLines && <td className="p-2">{row.line}</td>}
+                          <td className="p-2 font-mono">{row.code}</td>
                           <td className="p-2">{row.reason}</td>
                         </tr>
                       ))}

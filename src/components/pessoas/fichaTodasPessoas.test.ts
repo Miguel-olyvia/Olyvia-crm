@@ -67,7 +67,7 @@ describe("a ficha de todas as pessoas de exemplo", () => {
   });
 
   it("o contacto: só as linhas que existem, sem valores vazios, todas com a mesma altura mínima", () => {
-    expect(GRELHA.ficha).toContain("min-h-11");
+    expect(GRELHA.ficha).toContain("min-h-10");
     for (const r of RESUMOS) {
       const { pessoa } = r;
       const campos = camposDeContacto(pessoa);

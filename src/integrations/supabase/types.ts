@@ -23739,12 +23739,15 @@ export type Database = {
           email: string | null
           id: string
           is_active: boolean
+          latitude: number | null
+          longitude: number | null
           manager_name: string | null
           name: string
           organization_id: string
           phone: string | null
           phone_country_code: string | null
           postal_code: string | null
+          serves_customers: boolean
           updated_at: string
         }
         Insert: {
@@ -23761,12 +23764,15 @@ export type Database = {
           email?: string | null
           id?: string
           is_active?: boolean
+          latitude?: number | null
+          longitude?: number | null
           manager_name?: string | null
           name: string
           organization_id: string
           phone?: string | null
           phone_country_code?: string | null
           postal_code?: string | null
+          serves_customers?: boolean
           updated_at?: string
         }
         Update: {
@@ -23783,12 +23789,15 @@ export type Database = {
           email?: string | null
           id?: string
           is_active?: boolean
+          latitude?: number | null
+          longitude?: number | null
           manager_name?: string | null
           name?: string
           organization_id?: string
           phone?: string | null
           phone_country_code?: string | null
           postal_code?: string | null
+          serves_customers?: boolean
           updated_at?: string
         }
         Relationships: [

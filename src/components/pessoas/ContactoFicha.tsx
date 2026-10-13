@@ -1,5 +1,5 @@
-// Os dados de contacto da ficha: rótulo e valor, com um botão de ícone "Copiar" ao lado (irmão do valor, nunca dentro
-// de um botão; ver `ficha-comum/LinhaContacto`). Telefone e email são ligações.
+// Os dados de contacto da ficha: rótulo e valor, sem botão de copiar (ver `ficha-comum/LinhaContacto`). Telefone e
+// email são ligações.
 import { useTranslation } from "@/hooks/useTranslation";
 import { LinhaContacto } from "@/components/ficha-comum/LinhaContacto";
 import { Seccao } from "@/components/ficha-comum/Seccao";
@@ -13,8 +13,6 @@ interface Campo {
   chave: ChaveCampo;
   valor: string;
   href?: string;
-  /** Sem cópia (o nome da empresa e o distrito só se leem). */
-  semCopia?: boolean;
 }
 
 /** Os campos que a pessoa tem, pela ordem em que se mostram. */
@@ -26,9 +24,9 @@ export function camposDeContacto(pessoa: Pessoa): Campo[] {
     telefone ? { chave: "telefone", valor: telefone, href: l.telefone } : null,
     email ? { chave: "email", valor: email, href: l.email } : null,
     m ? { chave: "morada", valor: `${m.linha}, ${m.cp} ${m.localidade}` } : null,
-    pessoa.distrito ? { chave: "distrito", valor: pessoa.distrito, semCopia: true } : null,
+    pessoa.distrito ? { chave: "distrito", valor: pessoa.distrito } : null,
     pessoa.nif ? { chave: "nif", valor: pessoa.nif } : null,
-    pessoa.empresa ? { chave: "empresa", valor: pessoa.empresa.nome, semCopia: true } : null,
+    pessoa.empresa ? { chave: "empresa", valor: pessoa.empresa.nome } : null,
     pessoa.empresa?.nif ? { chave: "nifEmpresa", valor: pessoa.empresa.nif } : null,
     pessoa.empresa?.contacto ? { chave: "contacto", valor: pessoa.empresa.contacto } : null,
   ];
@@ -40,11 +38,6 @@ function LinhaDoCampo({ campo }: { campo: Campo }) {
   return (
     <LinhaContacto
       variante="ficha" rotulo={t(`pessoasPagina.contact.label.${campo.chave}`)} valor={campo.valor} href={campo.href}
-      copia={campo.semCopia ? undefined : {
-        rotulo: t(`pessoasPagina.contact.copy.${campo.chave}`),
-        mensagemCopiado: t(`pessoasPagina.contact.copied.${campo.chave}`),
-        mensagemSelecionado: t("pessoasPagina.contact.selected"),
-      }}
     />
   );
 }
