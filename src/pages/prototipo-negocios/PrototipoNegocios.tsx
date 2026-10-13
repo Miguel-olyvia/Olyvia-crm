@@ -23,6 +23,7 @@ import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
 import { PessoasFunc, esquecerPessoasFunc } from "./PessoasFunc";
 import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
 import { esquecerDiaADia } from "./diaADia";
+import { esquecerV2 } from "./v2/esquecerV2";
 import { SeletorVersao } from "./SeletorVersao";
 import { gravarVersao, lerVersao, vistaEquivalente, type VersaoProto } from "./versaoPrototipo";
 import { ICONE_NEGOCIO } from "./iconeNegocio";
@@ -123,6 +124,7 @@ export default function PrototipoNegocios() {
     esquecerPessoasFunc();
     esquecerNegociosFunc();
     esquecerDiaADia();
+    esquecerV2();
     avisar({ msg: "Demonstração reposta", sub: "Todos os negócios voltaram ao início", kind: "ok" });
   });
 
