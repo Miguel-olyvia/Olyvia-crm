@@ -66,6 +66,7 @@ import {
   getLineUnitPrice,
   getLineSubtotal,
   markupFromCostAndPrice,
+  round2,
 } from "@/utils/quotes/quoteLinePricing";
 import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
 import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
@@ -1355,12 +1356,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 type: isProduct ? 'product' : 'service',
                 source_id: isProduct ? c.product_id : c.service_id,
                 quantity: c.quantity || 1,
-                unit_price: unitPrice,
+                // Fechado ao cêntimo: o preço do bundle é a soma destes × qtd.
+                unit_price: round2(unitPrice),
                 vat_rate: compVatRate(c),
               };
             });
 
-            const unitTotalPrice = components.reduce((s, c) => s + c.unit_price * c.quantity, 0);
+            const unitTotalPrice = round2(components.reduce((s, c) => s + c.unit_price * c.quantity, 0));
             // Custo real do kit = soma do custo de compra de cada componente
             // escolhido, quando conhecido — só sem ele é que se assume 30%.
             const unitTotalCost = allComps.reduce((s, c) => s + compCostPrice(c) * (c.quantity || 1), 0);
@@ -4893,7 +4895,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 product_name: opt.name,
                 name: opt.name,
                 sku: opt.sku,
-                unit_price: opt.unit_price,
+                unit_price: round2(Number(opt.unit_price) || 0),
                 vat_rate: opt.vat_rate,
                 quantity: opt.quantity ?? old.quantity ?? 1,
                 selected_attributes: {},
@@ -4903,8 +4905,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 ...(targetLine.selected_attributes || {}),
                 bundle_components: newComponents,
               };
-              // Recalculate bundle price from components
-              const newTotal = newComponents.reduce((sum: number, c: any) => sum + (Number(c.unit_price) || 0) * (Number(c.quantity) || 1), 0);
+              // Recalculate bundle price from components (cada preço fechado ao cêntimo)
+              const newTotal = round2(newComponents.reduce((sum: number, c: any) => sum + round2(Number(c.unit_price) || 0) * (Number(c.quantity) || 1), 0));
               const margin = targetLine.margem_percent || 30;
               const intPct = targetLine.int_percent || 0;
               targetLine.custo_material_unit = newTotal > 0

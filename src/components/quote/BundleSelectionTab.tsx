@@ -23,6 +23,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { formatCurrency } from "@/lib/utils";
+import { round2 } from "@/utils/quotes/quoteLinePricing";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
 
 interface BundleComponent {
@@ -644,7 +645,8 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         type: isProduct ? "product" : "service",
         source_id: sourceId,
         quantity: comp.quantity * choiceQty * quantity,
-        unit_price: unitPrice,
+        // Fechado ao cêntimo: o preço do bundle é a soma destes valores × qtd.
+        unit_price: round2(unitPrice),
         unit_cost: costMap[sourceId] || 0,
         vat_rate: getComponentVatRate(comp),
         bundle_id: bundle.id,
