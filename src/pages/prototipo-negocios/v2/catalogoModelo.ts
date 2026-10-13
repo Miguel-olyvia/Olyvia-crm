@@ -72,7 +72,7 @@ export const MEDIDAS: { k: MedKey; n: string; curto: string }[] = [
   { k: "pav", n: "m² de pavimento", curto: "m² pav." },
   { k: "par", n: "m² de paredes", curto: "m² par." },
   { k: "pts", n: "ponto de água", curto: "pontos" },
-  { k: "pcs", n: "peça", curto: "peças" },
+  { k: "pcs", n: "vaso sanitário", curto: "vasos sanit." },
 ];
 export const MED_NOME = Object.fromEntries(MEDIDAS.map((m) => [m.k, m.n])) as Record<MedKey, string>;
 export const EX0: Medidas = { pav: 4, par: 14, pts: 3, pcs: 3 };
@@ -87,7 +87,7 @@ export function quantidade(r: Regra, m: Medidas): number {
   const q = (m[r.med] || 0) * r.f;
   return r.arred ? Math.ceil(q - 1e-9) : r2(q);
 }
-/** A regra por omissão a partir da unidade: m² → pavimento, pt → pontos, pç/mód → peças, o resto fixo 1. */
+/** A regra por omissão a partir da unidade: m² → pavimento, pt → pontos, pç/mód → vasos sanitários (pcs), o resto fixo 1. */
 export function regraDaUnidade(un: string): Regra {
   if (un === "m²") return { k: "por", med: "pav", f: 1, arred: false };
   if (un === "pt") return { k: "por", med: "pts", f: 1, arred: false };

@@ -71,7 +71,7 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
     n: "Casa de banho", modelo: "WC com base de duche", nec: ["Base de duche", "Sanita suspensa", "Banheira", "Móvel 80 cm"],
     mat: { d: "cerâmico, louças, base, torneiras", custo: 1400, preco: 2168 },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["loucas", "pcs"]],
-    med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Peças" },
+    med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Vasos sanitários" },
     mats: [
       ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
       ["Pavimento cerâmico 60×60", "m²", (m) => Math.ceil(m.pav * 1.1), "pv"],
