@@ -156,8 +156,7 @@ describe("Hoje V2 · os outros papéis", () => {
     const S = seed(), d = S.deals.find((x) => x.id === 1031)!;
     d.orc!.aprov = "pedida";
     const itens = hojeV2(S, "direcao", [], VAZIO);
-    // 14/10: a encomenda de cliente do Tiago (gerada do contrato) também espera pela Direção
-    expect(itens.map((i) => [i.nome, i.cat, i.aprovar])).toEqual([["Carla Nunes", "aprovar", true], ["Tiago Almeida", "faturas", false]]);
+    expect(itens.map((i) => [i.nome, i.cat, i.aprovar])).toEqual([["Carla Nunes", "aprovar", true]]); // a encomenda de cliente aprova-a o comercial (14/10)
   });
   it("Direção: a equipa por comercial bate com as listas de Negócios", () => {
     const S = seed(), [ruben] = equipa(S);

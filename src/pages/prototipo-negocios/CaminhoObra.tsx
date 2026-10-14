@@ -188,7 +188,7 @@ function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
           </>
         )}
       </div>
-      {S.role !== "direcao" && ec.estado !== "aprovada" && <p className="text-sm text-muted-foreground lg:col-span-2">Quem aprova a encomenda de cliente é a Direção.</p>}
+      {S.role !== "comercial" && ec.estado !== "aprovada" && <p className="text-sm text-muted-foreground lg:col-span-2">Quem aprova a encomenda de cliente é o comercial: confirma que é isto que vendeu.</p>}
     </div>
   );
 }

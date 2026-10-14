@@ -28,7 +28,8 @@ describe("do contrato à obra", () => {
   it("cada papel vê no Hoje o seu passo, em paralelo", () => {
     const { S } = preparar();
     const de = (r: Parameters<typeof minhas>[1]) => minhas(S, r).filter((x) => x.d.id === 1027).map((x) => x.p.act);
-    expect(de("direcao")).toEqual(["aprovarEc"]);
+    expect(de("comercial")).toEqual(["aprovarEc"]);
+    expect(de("direcao")).toEqual([]);
     expect(de("operacoes")).toEqual(["aprovarPlano"]);
     expect(de("financeiro")).toEqual(["emitir"]);
   });

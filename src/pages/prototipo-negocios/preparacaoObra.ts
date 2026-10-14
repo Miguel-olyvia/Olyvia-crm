@@ -2,7 +2,7 @@
 // assinado, gera uma encomenda de cliente e o plano (que já está no orçamento); ambos têm de ser aprovados; se a
 // encomenda for aprovada, emite uma encomenda a fornecedor, que tem de ser validada".
 //   · Contrato assinado → Encomenda de cliente (EC, por aprovar) e Plano da obra (do plano do orçamento, por aprovar).
-//   · EC aprovada (Direção) → reserva o stock; o que falta vai numa Encomenda a fornecedor (EF, por validar).
+//   · EC aprovada (o comercial, que conhece o que vendeu) → reserva o stock; o que falta vai numa Encomenda a fornecedor (EF, por validar).
 //   · EF validada (Financeiro, que vê se o sinal já entrou) → encomendada → recebida (Armazém).
 //   · Plano aprovado (Operações), com os técnicos e as férias.
 //   · Pagamento: a fatura e o recibo (Financeiro), em paralelo; o recibo passa o negócio à Obra.
@@ -101,8 +101,8 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
   // a encomenda de cliente e a de fornecedor
   L.push({ id: "ec", trilho: "ec", estado: "feito", who: null, t: `Encomenda de cliente ${ec.n}`, sub: `Gerada do contrato a ${ec.criada} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"}${ec.valor ? ` · ${eur(ec.valor)} € na proposta` : ""}` });
   L.push(ec.estado === "aprovada"
-    ? { id: "ec-ok", trilho: "ec", estado: "feito", who: "direcao", t: "Encomenda de cliente aprovada", sub: `${ec.aprovada?.por ?? "Direção"} · ${ec.aprovada?.q ?? ""} · stock reservado` }
-    : { id: "ec-ok", trilho: "ec", estado: "agora", who: "direcao", t: "Aprovar a encomenda de cliente", sub: nFalta ? `Ao aprovar, reserva o stock e pede ao fornecedor ${nFalta} ${nFalta === 1 ? "linha" : "linhas"} em falta.` : "Ao aprovar, reserva o stock: está tudo em armazém.", act: "aprovarEc", btn: "Aprovar a encomenda" });
+    ? { id: "ec-ok", trilho: "ec", estado: "feito", who: "comercial", t: "Encomenda de cliente aprovada", sub: `${ec.aprovada?.por ?? "Comercial"} · ${ec.aprovada?.q ?? ""} · stock reservado` }
+    : { id: "ec-ok", trilho: "ec", estado: "agora", who: "comercial", t: "Aprovar a encomenda de cliente", sub: nFalta ? `Ao aprovar, reserva o stock e pede ao fornecedor ${nFalta} ${nFalta === 1 ? "linha" : "linhas"} em falta.` : "Ao aprovar, reserva o stock: está tudo em armazém.", act: "aprovarEc", btn: "Aprovar a encomenda" });
   if (ec.estado !== "aprovada") L.push({ id: "ef", trilho: "ec", estado: "espera", who: "financeiro", t: "Encomenda a fornecedor", sub: nFalta ? `Emite-se ao aprovar a encomenda de cliente (${nFalta} em falta).` : "Nada a encomendar: tudo em stock." });
   else if (!e) L.push({ id: "ef", trilho: "ec", estado: "feito", who: null, t: "Sem encomenda a fornecedor", sub: "Tudo em stock e reservado." });
   else {

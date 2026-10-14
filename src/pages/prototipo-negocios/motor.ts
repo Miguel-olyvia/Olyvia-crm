@@ -985,9 +985,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   };
   const prepararObra = (d: Negocio) => {
     prepararObraDe(d, S, agora());
-    log(d, "Encomenda de cliente " + d.obra.ec!.n + " gerada do contrato · por aprovar (Direção)");
+    log(d, "Encomenda de cliente " + d.obra.ec!.n + " gerada do contrato · por aprovar (comercial)");
     log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações)");
-    avisar({ msg: "Encomenda " + d.obra.ec!.n + " e plano da obra gerados", sub: "A Direção aprova a encomenda e as Operações o plano", kind: "auto", atraso: 500 });
+    avisar({ msg: "Encomenda " + d.obra.ec!.n + " e plano da obra gerados", sub: "O comercial aprova a encomenda e as Operações o plano", kind: "auto", atraso: 500 });
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
@@ -1201,7 +1201,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
     enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato enviado para assinatura"); avisar({ msg: "Contrato enviado", sub: "Gerado a partir da proposta aceite", kind: "ok" }); },
     assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
-    /** A Direção aprova a encomenda de cliente: reserva o stock (o de agora) e o que falta vai numa encomenda a fornecedor por validar. */
+    /** O comercial aprova a encomenda de cliente (14/10, decisão do Ruben): reserva o stock (o de agora) e o que falta vai numa encomenda a fornecedor por validar. */
     aprovarEc(id: number) {
       const d = deal(id), ec = d.obra.ec;
       if (!ec || ec.estado === "aprovada") return;
