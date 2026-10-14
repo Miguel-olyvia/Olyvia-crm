@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ARTIGOS_DEM0, F_EXTRA0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, contaArtigo, fatorAcesso, nBigbags, ocupacao, vSoltoDe, type ItemDem, type ParDem,
+  ARTIGOS_DEM0, ARTIGOS_DEM_TESTE, F_EXTRA0, LINHA_DEMOLICAO, PAR_DEM0, PAR_DEM_TESTE, calcularDemolicao, contaArtigo, fatorAcesso, nBigbags, ocupacao, vSoltoDe, type ItemDem, type ParDem,
 } from "./entulho";
 import { acoes, seed, tot } from "./motor";
 import { ligarCatalogo } from "./produtosVisita";
@@ -8,13 +8,13 @@ import { catalogo0 } from "./v2/catalogoModelo";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, type Grupo } from "./campos";
 
 // Os valores do documento fazem-se com markup de 35% (a opção que se mantém para os testes); por omissão é margem.
-const P: ParDem = { ...PAR_DEM0, modoPreco: "markup" };
-const art = (c: string) => ARTIGOS_DEM0.find((a) => a.codigo === c)!;
+const P: ParDem = PAR_DEM_TESTE;
+const art = (c: string) => ARTIGOS_DEM_TESTE.find((a) => a.codigo === c)!;
 const comElevador = { f: 1, origem: "com elevador" };
 
 // Resposta do Ricardo (14/10/2026): os consumíveis somam-se por artigo (só a sanita tem 3 €) e os 40 € de proteção
 // são da obra, à parte. O exemplo 2 passa a 1.043,28 € e a variante sem elevador a 1.103,69 €.
-const ARTIGOS_EX2 = ARTIGOS_DEM0;
+const ARTIGOS_EX2 = ARTIGOS_DEM_TESTE;
 const WC: ItemDem[] = [
   { codigo: "DEM-SAN-01", q: 1 }, { codigo: "DEM-BID-01", q: 1 }, { codigo: "DEM-LAV-01", q: 1 }, { codigo: "DEM-BAN-01", q: 1 },
   { codigo: "DEM-TOR-01", q: 1 }, { codigo: "DEM-AZU-01", q: 20 }, { codigo: "DEM-PAV-01", q: 5 },
@@ -24,7 +24,7 @@ describe("demolição e entulho: a fórmula da especificação", () => {
   it("exemplo 1: remover uma sanita dá 28,95 € de custo e 39,08 € de preço (sem proteção)", () => {
     const c = contaArtigo(art("DEM-SAN-01"), 1, P, 1);
     expect([c.demolicao, c.carga, c.deposicao, c.consumiveis].map((x) => Math.round(x * 100) / 100)).toEqual([18.75, 3, 4.2, 3]);
-    const r = calcularDemolicao([{ codigo: "DEM-SAN-01", q: 1 }], ARTIGOS_DEM0, { ...P, protecao: 0 }, comElevador);
+    const r = calcularDemolicao([{ codigo: "DEM-SAN-01", q: 1 }], ARTIGOS_DEM_TESTE, { ...P, protecao: 0 }, comElevador);
     expect(r.custo).toBe(28.95);
     expect(r.preco).toBe(39.08);
   });
@@ -60,34 +60,42 @@ describe("demolição e entulho: a fórmula da especificação", () => {
     expect(fatorAcesso({ andar: "5", tem_elevador: "Sim" }, P).f).toBe(1);
     expect(fatorAcesso({ andar: "2", tem_elevador: "Não" }, P).f).toBe(1.25);
   });
-  it("por omissão, margem sobre o preço com a alvo da Olyvia: Preço = Custo ÷ (1 − margem)", () => {
-    const r = calcularDemolicao(WC, ARTIGOS_EX2, PAR_DEM0, comElevador, {}, { min: 0.28, alvo: 0.35 });
-    expect(PAR_DEM0.modoPreco).toBe("margem");
-    expect(r.preco).toBe(1188.92); // 772,80 ÷ 0,65
-    expect([r.margemAlvo, r.margemMin, r.abaixoMin]).toEqual([0.35, 0.28, false]);
-    // a demolição com margem alvo própria ganha à geral
-    expect(calcularDemolicao(WC, ARTIGOS_EX2, { ...PAR_DEM0, margem: 0.25 }, comElevador).preco).toBe(1030.4);
+  it("valores de produção (secção 0): equipa a 36,90 €/h, tempos a metade, C_dep 380 ÷ 6, margem 30% → 602,49 € e 860,70 €", () => {
+    const r = calcularDemolicao(WC, ARTIGOS_DEM0, PAR_DEM0, comElevador);
+    expect(r.horas - r.horasCarga).toBeCloseTo(10.3, 6);
+    expect([r.demolicao, r.carga, r.deposicao, r.consumiveis, r.protecao]).toEqual([380.07, 66.05, 113.37, 3, 40]);
+    expect(r.custo).toBe(602.49);
+    expect(r.preco).toBe(860.7);
+    expect([r.margemAlvo, r.margemMin, r.abaixoMin]).toEqual([0.3, 0.28, false]);
+  });
+  it("margem sobre o preço: sem margem própria usa a alvo geral da Olyvia", () => {
+    const Q: ParDem = { ...P, modoPreco: "margem", margem: null };
+    expect(calcularDemolicao(WC, ARTIGOS_EX2, Q, comElevador, {}, { min: 0.28, alvo: 0.35 }).preco).toBe(1188.92); // 772,80 ÷ 0,65
+    expect(calcularDemolicao(WC, ARTIGOS_EX2, { ...Q, margem: 0.25 }, comElevador).preco).toBe(1030.4);
   });
   it("o preço mexido à mão abaixo da margem mínima fica marcado", () => {
-    const r = calcularDemolicao(WC, ARTIGOS_EX2, PAR_DEM0, comElevador, { preco: 900 });
+    const r = calcularDemolicao(WC, ARTIGOS_EX2, P, comElevador, { preco: 900 });
     expect(r.margem).toBeCloseTo((900 - 772.8) / 900, 6);
     expect(r.abaixoMin).toBe(true);
-    expect(calcularDemolicao(WC, ARTIGOS_EX2, { ...PAR_DEM0, margemMin: 0.1 }, comElevador, { preco: 900 }).abaixoMin).toBe(false);
+    expect(calcularDemolicao(WC, ARTIGOS_EX2, { ...P, margemMin: 0.1 }, comElevador, { preco: 900 }).abaixoMin).toBe(false);
   });
   it("à tonelada: C_dep × peso em vez de × volume", () => {
-    const r = calcularDemolicao([{ codigo: "DEM-SAN-01", q: 1 }], ARTIGOS_DEM0, { ...P, protecao: 0, unDep: "t" }, comElevador);
+    const r = calcularDemolicao([{ codigo: "DEM-SAN-01", q: 1 }], ARTIGOS_DEM_TESTE, { ...P, protecao: 0, unDep: "t" }, comElevador);
     expect(r.deposicao).toBe(1.75); // 0,025 t × 70 €
   });
   it("o meio é só logística: big bags por omissão; o contentor não mexe no preço (o C_dep é tudo incluído)", () => {
     const muito: ItemDem[] = [{ codigo: "DEM-PAV-01", q: 60 }]; // 5,04 m³
     const bb = calcularDemolicao(muito, ARTIGOS_EX2, P, comElevador);
-    expect(PAR_DEM0.contentor.ativo).toBe(false);
-    expect([bb.meio, bb.n]).toEqual(["bigbag", 6]);
-    const comCt: ParDem = { ...P, contentor: { ativo: true, m3: 6, t: 8 } };
-    expect(calcularDemolicao(muito, ARTIGOS_EX2, comCt, comElevador).meio).toBe("bigbag"); // nunca se escolhe sozinho
+    expect([bb.meio, bb.n, bb.propostaContentor]).toEqual(["bigbag", 6, null]); // contentor desligado nos testes
+    const comCt: ParDem = { ...P, contentor: { ativo: true, m3: 6, t: 8, preco: 380, proporM3: 3 } };
+    const pr = calcularDemolicao(muito, ARTIGOS_EX2, comCt, comElevador);
+    expect(pr.meio).toBe("bigbag"); // propõe, mas não escolhe sozinho
+    expect(pr.propostaContentor).toBe("1 contentor de 6 m³ (380 €) em vez de 6 big bags; o preço não muda");
+    expect(calcularDemolicao(WC, ARTIGOS_EX2, comCt, comElevador).propostaContentor).toBeNull(); // 1,79 m³ < 3 m³
     const ct = calcularDemolicao(muito, ARTIGOS_EX2, comCt, comElevador, { meio: "contentor" });
     expect(ct.n).toBe(1);
     expect([ct.deposicao, ct.custo, ct.preco]).toEqual([bb.deposicao, bb.custo, bb.preco]);
+    expect(PAR_DEM0.contentor).toMatchObject({ ativo: true, m3: 6, preco: 380 });
   });
   it("fatores de acesso extra (Direção): por omissão 1,0; quando mexidos, multiplicam o do andar", () => {
     const f = { andar: "3", tem_elevador: "Não", estacionamento: "Sem estacionamento", dist_entulho: "Mais de 30 m" };
