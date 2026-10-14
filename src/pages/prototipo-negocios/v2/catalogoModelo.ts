@@ -9,6 +9,7 @@ import { LINHAS, r2, type Estado, type MedKey, type Medidas, type SvcId } from "
 import { RECEITAS } from "../receitas";
 import { ARTIGOS_DEM0, PAR_DEM0, type ArtigoDem, type EntulhoProd, type EntulhoSvc, type MudancaDem, type ParDem } from "../entulho";
 import { aplicarEntulhoPadrao } from "../entulhoPadrao";
+import type { FaseObra } from "../fasesObra";
 import {
   HOJE, custoReceita, margemSobrePreco, mesesAntes, mesesEntre, precoReceita, receitaDe,
   type Custos, type ReceitaV2, type UsoCons,
@@ -86,6 +87,8 @@ export interface Catalogo {
   histDem?: MudancaDem[];
   /** Se cada serviço gera entulho e de onde vem (14/10; entulho.ts). Em falta = o por omissão (entulhoPadrao.ts). */
   entulhoServico?: Record<SvcId, EntulhoSvc>;
+  /** As fases da obra em que cada serviço acontece (14/10; fasesObra.ts), escolhidas na ficha. Em falta = as regras por omissão. */
+  fasesServico?: Record<SvcId, FaseObra[]>;
   unidades: string[];
   marcas: string[];
   fornecedores: string[];

@@ -29,6 +29,7 @@ import { ARTIGOS_DEM0, vSoltoDe, type ModoEntulho } from "./entulho";
 import { entulhoDoProduto, m3PadraoDoNome, tipoDoTexto } from "./entulhoPadrao";
 import { GatilhoCampo, NomeInline, NumeroInline, Segmentos, SeletorPesquisa } from "./pecasFicha";
 import { normal } from "./catalogo";
+import { FASES_OBRA, fasesDoServico, fasesPadrao, type FaseObra } from "./fasesObra";
 
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-6";
 const ROT = "text-[15px] font-medium";
@@ -175,6 +176,20 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
     });
     anunciar(`Entulho: ${MODOS.find((x) => x.k === mo)!.t.toLowerCase()}`);
   };
+  // as fases da obra (14/10): várias podem estar ligadas; sem escolha guardada, as das regras
+  const fasesGuardadas = K.fasesServico?.[sid];
+  const fases = fasesDoServico(K, sid, nome, oficio), sugeridas = fasesPadrao(nome, oficio);
+  const [avisoFase, setAvisoFase] = useState(false);
+  const mudarFase = (f: FaseObra) => {
+    const ligada = fases.includes(f);
+    if (ligada && fases.length === 1) { setAvisoFase(true); anunciar("Pelo menos uma fase fica ligada"); return; }
+    setAvisoFase(false);
+    const novas = (ligada ? fases.filter((x) => x !== f) : [...fases, f]).sort((a, b) => a - b);
+    mudarCatalogo((k) => { k.fasesServico = { ...(k.fasesServico ?? {}), [sid]: novas }; });
+    anunciar(`Fases: ${novas.join(", ")}`);
+  };
+  const reporFases = () => { setAvisoFase(false); mudarCatalogo((k) => { if (k.fasesServico) delete k.fasesServico[sid]; }); anunciar("Fases repostas: a sugestão pelo nome do serviço"); };
+  const fasesMudadas = !!fasesGuardadas?.length && fasesGuardadas.slice().sort((a, b) => a - b).join() !== sugeridas.join();
   const totalEntulho = ent.e.modo === "nao" || !ent.conta ? "não gera" : `${m3t(ent.conta.m3 / (ent.q || 1))} m³/${un}`;
 
   return (
@@ -238,6 +253,30 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         {doModelo && doModelo !== medida && (
           <p className={cn(NOTA, "mt-2")}>No modelo do pacote, este serviço ainda conta por {ORIGENS_MEDIDA.find((o) => o.k === doModelo)!.t.toLowerCase()}: a escolha vale para quando se junta à visita.</p>
         )}
+      </Seccao>
+
+      {/* ---------------------------------------------------------- fases da obra */}
+      <Seccao id="fa-t" titulo="Fases da obra" desc="Em que fases da obra este serviço acontece. Pode ser mais do que uma.">
+        <div role="group" aria-labelledby="fa-t" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {FASES_OBRA.map((f) => {
+            const on = fases.includes(f.n);
+            return (
+              <button key={f.n} type="button" aria-pressed={on} title={f.nome} onClick={() => mudarFase(f.n)}
+                className={cn("flex min-h-14 flex-col items-start justify-center rounded-xl border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                  on ? "border-primary bg-primary/[0.06]" : "border-input bg-card hover:bg-muted/60")}>
+                <span className={cn("text-[14px] tabular-nums", on ? "text-primary" : "text-muted-foreground")}>Fase {f.n}</span>
+                <span className={cn("text-[15px] leading-snug", on && "font-medium")}>{f.curto}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex min-h-11 flex-wrap items-center justify-between gap-x-4" aria-live="polite">
+          {avisoFase ? <p className="flex items-center gap-2 text-[15px]"><TriangleAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />Pelo menos uma fase fica ligada: o serviço tem de acontecer em alguma fase da obra.</p>
+            : !fasesGuardadas?.length ? <p className={cn(NOTA, "text-[14px]")} data-testid="fases-sugeridas">Sugerido pelo nome do serviço.</p> : <span />}
+          {fasesMudadas && (
+            <button type="button" onClick={reporFases} className="inline-flex min-h-11 items-center px-1 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Repor a sugestão</button>
+          )}
+        </div>
       </Seccao>
 
       {/* ---------------------------------------------------------- quem faz */}

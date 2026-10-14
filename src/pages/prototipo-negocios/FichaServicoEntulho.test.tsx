@@ -105,3 +105,31 @@ describe("a ficha do serviço: o entulho", () => {
     expect(screen.getAllByRole("button").filter((b) => /(^|\s)bg-primary(\s|$)/.test(b.className)).map((b) => b.textContent)).toEqual(["Guardar o preço"]);
   });
 });
+
+describe("a ficha do serviço: as fases da obra", () => {
+  const cartao = (n: number) => within(screen.getByRole("group", { name: "Fases da obra" })).getByRole("button", { name: new RegExp(`^Fase ${n}`) });
+  it("sem escolha, aparecem as das regras, com a nota «sugerido pelo nome do serviço»", () => {
+    pagina();
+    abrir(/^Canalização/);
+    expect([1, 2, 3, 4].map((n) => cartao(n).getAttribute("aria-pressed"))).toEqual(["false", "true", "false", "false"]);
+    expect(screen.getByTestId("fases-sugeridas")).toHaveTextContent(/sugerido pelo nome do serviço/i);
+    expect(screen.queryByRole("button", { name: "Repor a sugestão" })).toBeNull();
+  });
+  it("escolher várias fases guarda no Catálogo; não deixa ficar sem nenhuma; repor volta à sugestão", () => {
+    pagina();
+    abrir(/^Canalização/);
+    fireEvent.click(cartao(4));
+    expect(lerCatalogo().fasesServico!.canal).toEqual([2, 4]);
+    expect(cartao(4)).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(cartao(2));
+    expect(lerCatalogo().fasesServico!.canal).toEqual([4]);
+    fireEvent.click(cartao(4)); // a última: não deixa
+    expect(lerCatalogo().fasesServico!.canal).toEqual([4]);
+    expect(cartao(4)).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByRole("region", { name: "Fases da obra" })).getByText(/Pelo menos uma fase fica ligada/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Repor a sugestão" }));
+    expect(lerCatalogo().fasesServico?.canal).toBeUndefined();
+    expect(cartao(2)).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("fases-sugeridas")).toBeInTheDocument();
+  });
+});
