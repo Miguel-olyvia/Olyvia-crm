@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO } from "./catalogo";
-import { custoUn, eur, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
+import { custoUnLinha, eur, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
 import { CustoServico } from "./CustoServico";
 import { abrirFichaDepois } from "./fichaNav";
@@ -69,10 +69,10 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         const nome = l.t === "svc" ? x.s!.n : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
         const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s!.perfil) : O.ic;
         const dem = origem === "demolicao", veCusto = !dem || direcao; // o custo da demolição só a Direção o vê
-        const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
+        const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €${l.menos ? " · sem o fornecido pelo cliente" : ""}` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
         const ajustado = l.t === "mat" && o.precosMan?.[l.d] != null;
         const valorEditar = l.t === "svc" ? l.pu : l.preco;
-        const s = l.t === "svc" ? x.s! : null, novo = s ? r2(custoUn(s, S)) : 0, mud = !!s && !fechado && l.t === "svc" && Math.abs(novo - l.cu) > 0.004;
+        const s = l.t === "svc" ? x.s! : null, novo = s && l.t === "svc" ? custoUnLinha(l, s, S) : 0, mud = !!s && !fechado && l.t === "svc" && Math.abs(novo - l.cu) > 0.004;
         return (
           <li key={i} className="px-3 py-3 sm:px-4">
             <div className="flex items-start gap-3">

@@ -8,6 +8,7 @@
 import { CATALOGO, CATALOGO_TODO, itemCatalogo, normal, type ItemCatalogo, type LinhaCat } from "../catalogo";
 import { LINHAS, alertas, eur, pct, r2, type Alerta, type Estado, type MedKey, type Negocio, type Servico, type SvcId } from "../motor";
 import { RECEITAS, amortHora, consUn } from "../receitas";
+import type { ItemReceita } from "../forneceCliente";
 import { EQUIP_MUDELAR, PERFIL_DO_OFICIO_MUDELAR, PERFIS_MUDELAR, receitaMudelar } from "../dados/catalogoMudelar";
 
 /* ------------------------------------------------------------------ tipos */
@@ -239,6 +240,22 @@ export function custoReceita(rec: ReceitaV2, C: Custos, estrutura: boolean, o: {
   const cons = rec.cons.filter((c) => !c.opcional || o.opcionais).reduce((a, c) => a + un(c), 0);
   const estr = estrutura ? h * taxaEstrutura(C) : 0;
   return { h, mo, eq, cons, estr, total: mo + eq + cons + estr, eh: h > 0 ? mo / h : 0, semCustoHora, consOpc };
+}
+/**
+ * Os consumíveis (sem os opcionais, que não entram no custo) e os equipamentos da receita de um serviço, por unidade (14/10):
+ * o que o cliente pode fornecer, serviço a serviço (forneceCliente.ts). As receitas não mudam.
+ */
+export function itensDaReceita(C: Custos, sid: SvcId, s?: Servico | null): ItemReceita[] {
+  const rec = receitaDe(C, sid, s ?? null);
+  if (!rec) return [];
+  const cons = rec.cons.filter((c) => !c.opcional).map((c): ItemReceita => ({
+    k: "c:" + c.n, tipo: "cons", n: c.n, q: c.q, un: c.un, cu: consUn({ n: c.n, q: c.q, un: c.un, preco: c.preco, fornecedor: c.fornecedor }),
+  }));
+  const eq = rec.equip.flatMap((u): ItemReceita[] => {
+    const e = C.equip.find((x) => x.id === u.equip);
+    return e ? [{ k: "e:" + e.id, tipo: "equip", n: e.n, q: u.h, un: "h", cu: equipHora(e) * u.h }] : [];
+  });
+  return [...cons, ...eq];
 }
 export const precoReceita = (rec: ReceitaV2, custo: number) =>
   rec.modo === "tabela" ? rec.precoTabela : rec.margem < 100 ? custo / (1 - rec.margem / 100) : 0;

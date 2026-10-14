@@ -3,7 +3,8 @@
 // duram até recarregar. Não tocam no Estado; o que o orçamento precisa (horas, €/h,
 // equipamentos, consumíveis, preço) passa para S.svc com aplicarTodos, ao editar.
 import { useSyncExternalStore } from "react";
-import { custos0, type Custos } from "./custosModelo";
+import { custos0, itensDaReceita, type Custos } from "./custosModelo";
+import { ligarReceitas } from "../forneceCliente";
 import { reporCatalogo } from "./catalogoStore";
 
 let estado: Custos = custos0();
@@ -22,5 +23,7 @@ export function reporCustos(): void {
   reporCatalogo(); // pacotes, materiais e a árvore (catalogoStore.ts)
   ouvintes.forEach((o) => o());
 }
+// o motor lê os consumíveis e os equipamentos das receitas por aqui (o que o cliente fornece, forneceCliente.ts)
+ligarReceitas((sid, s) => itensDaReceita(estado, sid, s));
 const subscrever = (o: () => void) => { ouvintes.add(o); return () => { ouvintes.delete(o); }; };
 export const useCustos = (): Custos => useSyncExternalStore(subscrever, lerCustos, lerCustos);

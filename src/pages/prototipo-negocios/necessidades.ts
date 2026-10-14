@@ -6,7 +6,8 @@
 // · O resumo ("6 serviços · 3 produtos · 1.240 € estimado") e o que falta, em palavras.
 import { CATALOGO_TODO, normal, type LinhaCat } from "./catalogo";
 import { juntarDivisoes } from "./campos";
-import { LINHAS, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
+import { menosDaLinha } from "./forneceCliente";
+import { LINHAS, forneceDaVisita, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import { caminho, oficioDe, oficios, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
 import { ativosDoPacote, precoProduto, qtdSugerida, servicosTrazidos, type Obrigacao } from "./produtosVisita";
 import { iconeDoServico, ilustracaoDoProduto, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
@@ -264,6 +265,11 @@ export function obrigacoesAMostrar(obr: Obrigacao[], d: Negocio): Obrigacao[] {
 }
 
 /* ------------------------------------------------------------------ o resumo */
+/** A quantidade de um serviço na visita: a da medida (do pacote), a posta à mão, ou a que o produto traz. */
+export function qtdNaVisita(d: Negocio, sid: SvcId, ativos = ativosDoPacote(LINHAS[d.linha].map, d.visita.med, d.visita.off), tr = servicosTrazidos(d.visita.prod ?? [])): number {
+  const v = d.visita, k = LINHAS[d.linha].map.find(([x]) => x === sid)?.[1];
+  return ativos.includes(sid) && k ? v.med[k] || 0 : (v.extra[sid] || 0) > 0 ? v.extra[sid]! : tr[sid]?.q ?? 0;
+}
 export interface ResumoNec { servicos: number; produtos: number; total: number }
 /** Quantos serviços e produtos, e o valor estimado (serviços a preço de tabela e produtos ao preço de venda; o que o cliente fornece a zero). */
 export function resumoNecessidades(S: Estado, d: Negocio, sids: SvcId[]): ResumoNec {
@@ -274,9 +280,9 @@ export function resumoNecessidades(S: Estado, d: Negocio, sids: SvcId[]): Resumo
     const s = servicoLeitura(S, sid);
     if (!s) continue;
     servicos++;
-    const k = L.map.find(([x]) => x === sid)?.[1];
-    const q = ativos.includes(sid) && k ? v.med[k] || 0 : (v.extra[sid] || 0) > 0 ? v.extra[sid]! : tr[sid]?.q ?? 0;
-    total += q * s.preco;
+    const q = qtdNaVisita(d, sid, ativos, tr);
+    const menos = menosDaLinha(forneceDaVisita(d), sid, s); // o que o cliente fornece da receita sai do preço
+    total += q * Math.max(0, s.preco - menos.eq - menos.cons);
   }
   const ps = prod.filter((p) => p.q > 0);
   for (const p of ps) if (!p.cliente) total += precoProduto(p);

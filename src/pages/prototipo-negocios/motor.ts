@@ -9,6 +9,7 @@ import {
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
+import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
@@ -135,7 +136,9 @@ export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
 export type LinhaOrc =
-  | { t: "svc"; sid: SvcId; q: number; cu: number; pu: number }
+  | { t: "svc"; sid: SvcId; q: number; cu: number; pu: number;
+    /** O que o cliente fornece da receita (14/10), por unidade: sai do custo (cu) e do preço (pu); a mão de obra fica. */
+    menos?: { eq: number; cons: number } }
   | { t: "mat"; d: string; custo: number; preco: number };
 
 export interface Orcamento {
@@ -456,28 +459,42 @@ export const nfmt = (x: number) => String(r2(x)).replace(".", ",");
 export function custoUn(s: Servico, S: Estado): number {
   return s.h * s.eh + s.eq + s.cons + (S.cfg.estrutura ? s.h * ESTR : 0);
 }
+/** O custo por unidade de uma linha de serviço: o do serviço, menos o que o cliente fornece da receita (14/10). */
+export const custoUnLinha = (l: { menos?: { eq: number; cons: number } }, s: Servico, S: Estado) =>
+  r2(Math.max(0, custoUn(s, S) - (l.menos?.eq ?? 0) - (l.menos?.cons ?? 0)));
+/** Os consumíveis e os equipamentos que o cliente fornece só contam com "o cliente fornece materiais = Sim". */
+export const forneceDaVisita = (d: Negocio) => (d.f.materiais_cliente === "Sim" ? d.visita.fornece : undefined);
+/** Uma linha de serviço do orçamento: sem o que o cliente fornece da receita (sai do custo e, pelos mesmos euros, do preço). */
+function linhaSvc(d: Negocio, S: Estado, sid: SvcId, q: number, s: Servico): LinhaOrc {
+  const menos = menosDaLinha(forneceDaVisita(d), sid, s), tira = menos.eq + menos.cons;
+  return tira > 0
+    ? { t: "svc", sid, q, cu: custoUnLinha({ menos }, s, S), pu: r2(Math.max(0, s.preco - tira)), menos }
+    : { t: "svc", sid, q, cu: r2(custoUn(s, S)), pu: s.preco };
+}
 export function criarOrc(d: Negocio, S: Estado): Orcamento {
   const L = LINHAS[d.linha], m = d.visita.med, linhas: LinhaOrc[] = [];
   for (const [sid, k] of L.map) {
     const s = S.svc[sid];
     if (!(m[k] > 0) || d.visita.off.includes(sid)) continue;
-    linhas.push({ t: "svc", sid, q: m[k], cu: r2(custoUn(s, S)), pu: s.preco });
+    linhas.push(linhaSvc(d, S, sid, m[k], s));
   }
   // os juntados do Catálogo, pela ordem em que foram juntados
   for (const [sid, q] of Object.entries(d.visita.extra)) {
     const sv = garantirServico(S, sid);
-    if (sv && (q || 0) > 0) linhas.push({ t: "svc", sid, q: q!, cu: r2(custoUn(sv, S)), pu: sv.preco });
+    if (sv && (q || 0) > 0) linhas.push(linhaSvc(d, S, sid, q!, sv));
   }
   // os serviços trazidos pelos produtos escolhidos (os que não vêm do pacote nem foram postos à mão)
   const prod = d.visita.prod ?? [];
   for (const [sid, t] of trazidosParaOrc(prod, ativosDoPacote(L.map, m, d.visita.off), d.visita.extra)) {
     const sv = garantirServico(S, sid);
-    if (sv && t.q > 0) linhas.push({ t: "svc", sid, q: t.q, cu: r2(custoUn(sv, S)), pu: sv.preco });
+    if (sv && t.q > 0) linhas.push(linhaSvc(d, S, sid, t.q, sv));
   }
   // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais)
   const mm = materiaisDoModelo(L.mat, prod, d.visita.manter);
   if (mm) linhas.push({ t: "mat", d: L.mat.d, custo: mm.custo, preco: mm.preco });
   linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
+  // os consumíveis e os equipamentos que o cliente fornece, a zero, para se verem no orçamento
+  linhas.push(...linhasFornecidas(forneceDaVisita(d), linhas.flatMap((l) => (l.t === "svc" ? [l.sid] : [])), (sid) => S.svc[sid]?.n ?? sid, (sid) => S.svc[sid]));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
   return o;
 }
@@ -616,7 +633,7 @@ export function partes(d: Negocio, S: Estado) {
   for (const l of d.orc!.linhas) {
     if (l.t === "mat") { o.mat += l.custo; continue; }
     const s = S.svc[l.sid];
-    o.mo += s.h * s.eh * l.q; o.eq += s.eq * l.q; o.cons += s.cons * l.q;
+    o.mo += s.h * s.eh * l.q; o.eq += (s.eq - (l.menos?.eq ?? 0)) * l.q; o.cons += (s.cons - (l.menos?.cons ?? 0)) * l.q;
     if (S.cfg.estrutura) o.estr += s.h * ESTR * l.q;
   }
   o.mo += ajustePrazo(d, S);
@@ -968,6 +985,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     /** A resposta à pergunta de um serviço que obriga a produto (ex.: "O cliente mantém a sanita?"). */
     manter(id: number, sid: SvcId, r: "sim" | "nao" | null) { const v = deal(id).visita; v.manter ??= {}; if (r) v.manter[sid] = r; else delete v.manter[sid]; },
     /** O cliente compra o produto deste serviço (só quando o cliente fornece materiais): texto do que compra, ou null para desfazer. */
+    /** O cliente fornece um consumível ("c:<nome>") ou um equipamento ("e:<id>") da receita de um serviço (14/10): sai do custo dessa linha. */
+    forneceItem(id: number, sid: SvcId, k: string, on: boolean) { marcarItem(deal(id).visita, sid, k, on); },
     clienteCompra(id: number, sid: SvcId, texto: string | null) { const v = deal(id).visita; v.clienteCompra ??= {}; if (texto) v.clienteCompra[sid] = texto; else delete v.clienteCompra[sid]; },
     verificar(id: number) {
       const d = deal(id); d.orc!.verif = true; S.pulse = "verif";
@@ -1165,6 +1184,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (k === "materiais_cliente" && v !== "Sim") {
         if (d.visita.prod) d.visita.prod = d.visita.prod.map((p) => (p.cliente ? marcarCliente([p], p.id, false)[0] : p));
         delete d.visita.clienteCompra;
+        delete d.visita.fornece;
       }
       // a resposta mexe logo no orçamento, enquanto a proposta não foi enviada
       if (d.orc && !d.orc.enviada && (CAMPOS_COM_EFEITO.has(k) || CAMPOS_COM_EFEITO.has(chaveBase(k)) || k === "diag_tipo_area")) sincronizarEfeitos(d, S);
@@ -1187,7 +1207,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** Uma fotografia numa etapa da visita (por omissão, a área); o total sobe também. */
     foto(id: number, etapa: EtapaFotos = "area") { const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
-    recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = r2(custoUn(S.svc[l.sid], S)); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
+    recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = custoUnLinha(l, S.svc[l.sid], S); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
   };
   return A;
 }
