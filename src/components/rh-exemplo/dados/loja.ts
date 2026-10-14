@@ -42,10 +42,18 @@ export function atualizarFicha(pessoaId: string, alterar: (ficha: FichaRh) => Fi
   });
 }
 
+const aoReporOuvintes = new Set<() => void>();
+
+/** Para um store à parte (como o das admissões) voltar ao início sempre que `repor()` repõe as fichas. */
+export function registarAoRepor(ouvinte: () => void): void {
+  aoReporOuvintes.add(ouvinte);
+}
+
 /** Volta aos dados de exemplo originais. */
 export function repor(): void {
   estado = criarEstadoInicial();
   contador = 0;
+  aoReporOuvintes.forEach((ouvinte) => ouvinte());
   avisar();
 }
 

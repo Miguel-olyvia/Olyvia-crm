@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import { ORGANIZACAO_EXEMPLO_ID } from "@/components/rh-exemplo/dados/constantes";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { fichaDeEspec } from "@/components/rh-exemplo/dados/fichaExemplo";
+import { convidarPessoa } from "@/components/rh-exemplo/dados/accoesAdmissao";
 import { aplicarExtras, type ExtrasNovaPessoa } from "@/components/rh-exemplo/dados/fichaNovaPessoa";
 import { definirEstado, novoId, useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { derivarEstadoContrato } from "@/components/rh-exemplo/lib/estadoContrato";
@@ -111,6 +112,9 @@ export function usePessoas() {
       const ficha = x ? aplicarExtras(criada, x) : criada;
       return { ...e, ordem: [...e.ordem, id], fichas: { ...e.fichas, [id]: ficha } };
     });
+    // «Criar e enviar convite»: nasce a admissão (login temporário de 7 dias, role previsto escolhido pelo RH).
+    const convite = dados.extras?.convite;
+    if (convite) convidarPessoa(id, { email: convite.email ?? "", roleId: convite.roleId });
     return { id, falhas: [] };
   }, []);
 

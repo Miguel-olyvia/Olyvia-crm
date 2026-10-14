@@ -21,6 +21,7 @@ import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
+import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -95,6 +96,11 @@ Object.keys(rhExemploFluxosCTranslations).forEach((lang) => {
 // Frente B: horário por tipo e versões, picagem com localização, alertas do fim do dia e faltas (`rhExemplo.hor/pic/fal.*`).
 Object.keys(rhExemploFluxosBTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosBTranslations[lang as keyof typeof rhExemploFluxosBTranslations] };
+});
+
+// Fluxo de admissão: convite como login temporário de 7 dias, aprovação, contrato para assinar e credenciais (`rhAdm.*`).
+Object.keys(rhExemploAdmissaoTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAdmissaoTranslations[lang as keyof typeof rhExemploAdmissaoTranslations] };
 });
 
 // Frente D: banco de horas na ficha e horas extra pendentes na fila de trabalho (`rhFluxosD.*`).

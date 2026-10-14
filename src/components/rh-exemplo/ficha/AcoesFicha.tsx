@@ -14,6 +14,8 @@ const SALTOS = ["contratos", "planeamento", "documentos", "ausencias"] as const;
 
 interface AcoesFichaProps {
   temConta: boolean;
+  /** Em admissão, criar acesso e convidar são passos do cartão «Admissão» (o acesso só depois de o contrato estar assinado). */
+  emAdmissao?: boolean;
   /** Quantos campos faltam na admissão (bloqueia "Criar acesso"); 0 deixa o botão ativo. */
   pendencias: number;
   aoCriarAcesso: () => void;
@@ -21,14 +23,16 @@ interface AcoesFichaProps {
   aoAbrirAba: (aba: string) => void;
 }
 
-export function AcoesFicha({ temConta, pendencias, aoCriarAcesso, aoEnviarConvite, aoAbrirAba }: AcoesFichaProps) {
+export function AcoesFicha({ temConta, emAdmissao = false, pendencias, aoCriarAcesso, aoEnviarConvite, aoAbrirAba }: AcoesFichaProps) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-start gap-2 px-6 pb-4">
-      <PermissionGate permission="hr.pessoas.conta.criar">
-        <BotaoCriarAcesso reenviar={temConta} pendencias={pendencias} principal={!temConta} onClick={aoCriarAcesso} />
-      </PermissionGate>
-      {!temConta && (
+      {!emAdmissao && (
+        <PermissionGate permission="hr.pessoas.conta.criar">
+          <BotaoCriarAcesso reenviar={temConta} pendencias={pendencias} principal={!temConta} onClick={aoCriarAcesso} />
+        </PermissionGate>
+      )}
+      {!temConta && !emAdmissao && (
         <PermissionGate permission="hr.pessoas.convite.enviar">
           <Button type="button" variant="outline" className={cn("min-h-11 gap-2", FOCO)} onClick={aoEnviarConvite}>
             <Send className="h-4 w-4" aria-hidden="true" />

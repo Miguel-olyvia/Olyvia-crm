@@ -219,7 +219,7 @@ export function extrasDeValores(v: ValoresNovaPessoa, o: OpcoesGravar): ExtrasNo
     },
     criarAcesso: v.extra.criar_acesso,
     anexos: v.extra.anexos.map(({ tipo, nome, tamanho, mime }) => ({ tipo, nome, tamanho, mime })),
-    convite: o.comConvite ? { email: texto(v.pessoais.email_pessoal) } : null,
+    convite: o.comConvite ? { email: texto(v.pessoais.email_pessoal), roleId: texto(v.acesso.role_id) } : null,
     pendencias: pendenciasDaNova(v, o.config),
   };
 }

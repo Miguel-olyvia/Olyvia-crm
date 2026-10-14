@@ -28,10 +28,11 @@ describe("RH de exemplo: lista de pessoas", () => {
     renderEm("/rh-exemplo/pessoas");
     expect(screen.getByText("Dados de exemplo")).toBeInTheDocument();
     const tabela = screen.getByRole("table");
-    expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 13);
+    // 13 de sempre mais 5 em admissão (ver o separador Admissões).
+    expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 13 + 5);
     expect(within(tabela).getByText("Marta Figueiredo")).toBeInTheDocument();
     expect(within(tabela).getByText("Rui Amaral")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
   });
 
   it("filtra pela pesquisa", () => {
@@ -75,7 +76,7 @@ describe("RH de exemplo: ficha da pessoa (painel lateral)", () => {
   it("anterior e seguinte passam à pessoa vizinha e mostram n de N; Fechar fecha o painel", () => {
     renderEm("/rh-exemplo/pessoas/p-rui");
     const ficha = () => screen.getByRole("dialog");
-    expect(within(ficha()).getByText(/^\d+ de 13$/)).toBeInTheDocument();
+    expect(within(ficha()).getByText(/^\d+ de 18$/)).toBeInTheDocument();
     const antes = within(ficha()).getByRole("heading", { level: 1 }).textContent;
     const seguinte = within(ficha()).getByRole("button", { name: "Pessoa seguinte" });
     const anterior = within(ficha()).getByRole("button", { name: "Pessoa anterior" });

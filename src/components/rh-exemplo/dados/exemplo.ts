@@ -1,11 +1,12 @@
 /**
- * Dados de exemplo da apresentação de Recursos Humanos: 13 pessoas, com filiais,
+ * Dados de exemplo da apresentação de Recursos Humanos: 13 pessoas (mais 5 em admissão), com filiais,
  * cargos, contratos (alguns a terminar), retribuição, horários, ausências e
  * documentos. Tudo inventado e gerado em memória, com datas relativas a hoje para
  * a lista de "contratos a terminar" fazer sentido em qualquer dia.
  */
 import { ORGANIZACAO_EXEMPLO_ID as ORG } from "@/components/rh-exemplo/dados/constantes";
 import * as K from "@/components/rh-exemplo/dados/constantes";
+import { documentosDeAdmissao } from "@/components/rh-exemplo/dados/admissaoExemplo";
 import { catalogos } from "@/components/rh-exemplo/dados/catalogos";
 import { fichaDeEspec, type EspecPessoa } from "@/components/rh-exemplo/dados/fichaExemplo";
 import type { EstadoRh, FichaRh } from "@/components/rh-exemplo/dados/tiposLoja";
@@ -27,6 +28,12 @@ const ESPECS: EspecPessoa[] = [
   { id: "p-joana", nome: "Joana", apelido: "Barros", cargoId: "cg-vendedor", localId: K.LOCAL_BRAGA, filialId: K.FILIAL_BRAGA, tipo: "sem_termo", inicio: -480, fim: null, reportaA: "p-ines", conta: true, estado: "suspenso", genero: "feminino", nascimento: "1994-10-25", trabalho: "presencial", horas: 30, dias: TER_SAB, parcial: true },
   { id: "p-pedro", nome: "Pedro", apelido: "Nogueira", cargoId: "cg-vendedor", localId: K.LOCAL_FARO, filialId: K.FILIAL_FARO, tipo: "termo_certo", inicio: -400, fim: -40, reportaA: "p-ines", conta: false, estado: "terminado", genero: "masculino", nascimento: "1997-07-14", trabalho: "presencial", horas: 40, dias: TER_SAB, saida: -40 },
   { id: "p-lara", nome: "Lara", apelido: "Mendes", cargoId: "cg-vendedor", localId: K.LOCAL_FARO, filialId: K.FILIAL_FARO, tipo: "sem_termo", inicio: 20, fim: null, reportaA: "p-ines", conta: false, estado: "futuro", genero: "feminino", nascimento: "2001-01-19", trabalho: "presencial", horas: 40, dias: TER_SAB, pendencias: ["nif", "niss", "conta_numero", "tipo_documento"] },
+  // Em admissão (ver `admissaoExemplo.ts`): ainda sem assiduidade nem Cálculo de Setembro, como a Lara.
+  { id: "p-marco", nome: "Marco", apelido: "Ventura", cargoId: "cg-vendedor", localId: K.LOCAL_COLOMBO, filialId: K.FILIAL_LISBOA, tipo: "sem_termo", inicio: 27, fim: null, reportaA: "p-rui", conta: false, estado: "futuro", genero: "masculino", nascimento: "1997-03-14", trabalho: "presencial", horas: 40, dias: TER_SAB, pendencias: [] },
+  { id: "p-nadia", nome: "Nádia", apelido: "Coelho", cargoId: "cg-vendedor", localId: K.LOCAL_PORTO, filialId: K.FILIAL_PORTO, tipo: "termo_certo", inicio: 31, fim: 395, reportaA: "p-ines", conta: false, estado: "futuro", genero: "feminino", nascimento: "1999-11-02", trabalho: "presencial", horas: 40, dias: TER_SAB, pendencias: ["nif", "conta_numero"] },
+  { id: "p-vasco", nome: "Vasco", apelido: "Duarte", cargoId: "cg-armazem", localId: K.LOCAL_ARMAZEM, filialId: K.FILIAL_LISBOA, tipo: "sem_termo", inicio: 17, fim: null, reportaA: "p-marta", conta: false, estado: "futuro", genero: "masculino", nascimento: "1992-07-22", trabalho: "presencial", horas: 40, dias: SEG_SEX, pendencias: [] },
+  { id: "p-eva", nome: "Eva", apelido: "Tavares", cargoId: "cg-admin", localId: K.LOCAL_SEDE, filialId: K.FILIAL_SEDE, tipo: "termo_certo", inicio: 12, fim: 377, reportaA: "p-sofia", conta: false, estado: "futuro", genero: "feminino", nascimento: "1995-02-09", trabalho: "presencial", horas: 40, dias: SEG_SEX, pendencias: [] },
+  { id: "p-ruben", nome: "Rúben", apelido: "Faria", cargoId: "cg-vendedor", localId: K.LOCAL_BRAGA, filialId: K.FILIAL_BRAGA, tipo: "sem_termo", inicio: 35, fim: null, reportaA: "p-ines", conta: false, estado: "futuro", genero: "masculino", nascimento: "2000-09-30", trabalho: "presencial", horas: 40, dias: TER_SAB, pendencias: ["nif", "niss", "conta_numero"] },
 ];
 
 /** O estado inicial: chamado no arranque e por `repor()` nos testes. */
@@ -35,6 +42,9 @@ export function criarEstadoInicial(): EstadoRh {
   const fichas: Record<string, FichaRh> = {};
   for (const espec of ESPECS) {
     fichas[espec.id] = fichaDeEspec(espec, ESPECS.indexOf(espec), cat, ORG);
+  }
+  for (const [id, docs] of Object.entries(documentosDeAdmissao(ORG))) {
+    fichas[id] = { ...fichas[id], documentos: docs };
   }
   return {
     ordem: ESPECS.map((e) => e.id),

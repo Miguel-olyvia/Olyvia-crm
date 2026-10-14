@@ -20,10 +20,12 @@ describe("datas de exemplo", () => {
 });
 
 describe("dados de exemplo de Recursos Humanos", () => {
-  it("tem 13 pessoas com ficha completa e filiais", () => {
+  it("tem 13 pessoas com ficha completa e filiais, mais 5 em admissao", () => {
     const e = lerEstado();
-    expect(e.ordem).toHaveLength(13);
-    expect(Object.keys(e.fichas)).toHaveLength(13);
+    expect(e.ordem).toHaveLength(13 + 5);
+    expect(e.ordem.slice(0, 13)[0]).toBe("p-marta");
+    expect(e.ordem.slice(13)).toEqual(["p-marco", "p-nadia", "p-vasco", "p-eva", "p-ruben"]);
+    expect(Object.keys(e.fichas)).toHaveLength(13 + 5);
     expect(e.filiais.length).toBeGreaterThanOrEqual(4);
     expect(e.locais.length).toBeGreaterThanOrEqual(6);
     for (const id of e.ordem) {

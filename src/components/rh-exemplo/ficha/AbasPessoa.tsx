@@ -1,6 +1,7 @@
 // O conteúdo das três primeiras abas da ficha de RH (Visão geral, Detalhes laborais e Detalhes pessoais): os mesmos componentes
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
+import { CartaoAdmissao } from "@/components/rh-exemplo/admissao/CartaoAdmissao";
 import { PessoaLaboraisTab } from "@/components/rh-exemplo/PessoaLaboraisTab";
 import { PessoaOutrosDadosCard } from "@/components/rh-exemplo/PessoaOutrosDadosCard";
 import { PessoaPessoaisTab } from "@/components/rh-exemplo/PessoaPessoaisTab";
@@ -27,11 +28,14 @@ export function SemAcesso() {
 
 export function AbaVisaoGeral({ ficha, pessoa, ctx, aoAbrirAba }: AbaProps & { aoAbrirAba: (aba: string) => void }) {
   return (
-    <PessoaVisaoGeralTab
-      pessoa={pessoa} reportaANome={ctx.reportaANome} entidadeLegalNome={ctx.entidadeLegalNome} vinculos={ficha.vinculos}
-      horarioRealizado={ficha.horarioRealizado} retribuicao={ficha.retribuicao} podeVerRealizado={ctx.trabalho.podeVerRealizado}
-      podeVerAusencias={ctx.podeVerAusenciasResumo} podeVerRetribuicao={ctx.trabalho.podeVerRetribuicao} onAbrirSeparador={aoAbrirAba}
-    />
+    <div className="space-y-4">
+      <CartaoAdmissao pessoaId={pessoa.id} />
+      <PessoaVisaoGeralTab
+        pessoa={pessoa} reportaANome={ctx.reportaANome} entidadeLegalNome={ctx.entidadeLegalNome} vinculos={ficha.vinculos}
+        horarioRealizado={ficha.horarioRealizado} retribuicao={ficha.retribuicao} podeVerRealizado={ctx.trabalho.podeVerRealizado}
+        podeVerAusencias={ctx.podeVerAusenciasResumo} podeVerRetribuicao={ctx.trabalho.podeVerRetribuicao} onAbrirSeparador={aoAbrirAba}
+      />
+    </div>
   );
 }
 

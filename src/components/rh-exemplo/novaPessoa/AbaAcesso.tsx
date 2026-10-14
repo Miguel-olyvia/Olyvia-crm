@@ -49,6 +49,7 @@ function Convite() {
           <dd><code className="break-all rounded bg-muted px-1.5 py-0.5 text-xs">{LINK_CONVITE_EXEMPLO}</code></dd>
         </dl>
         <p className="text-xs text-muted-foreground">{t("rhNova.convite.exemplo")}</p>
+        <p className="text-xs text-muted-foreground">{t("rhAdm.nova.fluxo")}</p>
       </div>
     </SeccaoNova>
   );

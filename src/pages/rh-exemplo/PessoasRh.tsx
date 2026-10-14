@@ -3,7 +3,8 @@
  * linhas compactas, chips de filtro e um unico botao primario ("Nova pessoa"). Clicar numa linha abre a ficha num painel
  * lateral por cima da lista (nao muda de pagina); "Nova pessoa" abre outro painel lateral.
  *
- * Quatro sub-separadores: Pessoas, Organograma, Cargos e (com `hr.pessoas.vinculos.view`) Contratos a terminar.
+ * Cinco sub-separadores: Pessoas, Admissões (o pipeline de quem está a entrar), Organograma, Cargos e (com `hr.pessoas.vinculos.view`)
+ * Contratos a terminar.
  * O separador vive no URL (`?tab=`). A ficha vive no caminho (`/rh-exemplo/pessoas/:id`, que continua a ser uma ligacao
  * direta: abre a lista com a ficha aberta) e abrir, passar a outra pessoa ou fechar atualiza o endereco sem remontar a pagina.
  *
@@ -19,6 +20,8 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Aba, ListaAbas } from "@/components/ficha-comum/AbasSublinhadas";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
+import { PipelineAdmissoes } from "@/components/rh-exemplo/admissao/PipelineAdmissoes";
+import { useAdmissoes } from "@/components/rh-exemplo/dados/lojaAdmissao";
 import { ContratosATerminarTab } from "@/components/rh-exemplo/fimContrato/ContratosATerminarTab";
 import { FichaPessoaRh } from "@/components/rh-exemplo/ficha/FichaPessoaRh";
 import { BarraListaRh } from "@/components/rh-exemplo/lista/BarraListaRh";
@@ -38,6 +41,7 @@ import { cn } from "@/lib/utils";
 
 const SUBTABS = [
   { value: "pessoas", labelKey: "hr.subtabs.pessoas" },
+  { value: "admissoes", labelKey: "rhAdm.tab" },
   { value: "organograma", labelKey: "hr.subtabs.organograma" },
   { value: "cargos", labelKey: "hr.subtabs.cargos" },
   // So com hr.pessoas.vinculos.view: a lista de contratos a terminar le contratos.
@@ -109,6 +113,7 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
   const podeCriar = hasPermission("hr.pessoas.create");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
+  const porAprovar = useAdmissoes((e) => Object.values(e.porPessoa).filter((a) => a.estado === "submetida").length);
   // So para leitura: uma pessoa cujo local actual ja foi desactivado tem de continuar a mostrar o nome.
   const { locais } = useLocaisTrabalho({ apenasAtivos: false });
   const nomeDoLocal = (localId: string | null) => (localId ? (locais.find((l) => l.id === localId)?.nome ?? null) : null);
@@ -163,7 +168,10 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <ListaAbas>
           {SUBTABS.filter(({ value }) => value !== "contratos" || podeVerVinculos).map(({ value, labelKey }) => (
-            <Aba key={value} value={value} rotulo={t(labelKey)} />
+            <Aba
+              key={value} value={value} rotulo={t(labelKey)}
+              {...(value === "admissoes" && porAprovar > 0 ? { contador: porAprovar, contadorLeitor: t("rhAdm.tabPorAprovar", { n: porAprovar }) } : {})}
+            />
           ))}
         </ListaAbas>
 
@@ -188,6 +196,9 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
           )}
         </TabsContent>
 
+        <TabsContent value="admissoes" className="mt-0">
+          <PipelineAdmissoes aoAbrirFicha={abrirFicha} />
+        </TabsContent>
         <TabsContent value="organograma" className="mt-0">
           <PessoasOrganogramaTab pessoas={pessoas} loading={loading} error={error} />
         </TabsContent>

@@ -25,6 +25,12 @@
  * convite so aceita IBAN -- e o unico formato que a RPC sabe gravar -- e por
  * isso nao ha formato nenhum a escolher aqui.
  *
+ * O LINK E UM LOGIN TEMPORARIO
+ * -----------------------------
+ * O link vale 7 dias, sem conta nem palavra-passe, e mostra o que corresponde a fase da admissao (`ConvitePorEstado`):
+ * este formulario enquanto a ficha esta por preencher; so os campos devolvidos quando o RH devolveu; "recebemos a tua
+ * ficha" depois de submeter; o contrato para assinar depois de aprovada; e o aviso de login expirado ou link revogado.
+ *
  * LINGUA E ERROS
  * --------------
  * Quem abre o link nao tem sessao: a lingua escolhe-se pelo navegador (pt, es,
@@ -49,6 +55,7 @@ import { ConvitePagina1 } from "@/components/rh-exemplo/convite/ConvitePagina1";
 import { ConvitePagina2 } from "@/components/rh-exemplo/convite/ConvitePagina2";
 import { ConviteCartaoLinkInvalido } from "@/components/rh-exemplo/convite/ConviteCartaoLinkInvalido";
 import { ConviteSaudacao } from "@/components/rh-exemplo/convite/ConviteSaudacao";
+import { ConvitePorEstado } from "@/components/rh-exemplo/convite/ConvitePorEstado";
 import {
   CODIGOS_PAGINA_2,
   campoEhObrigatorio,
@@ -113,7 +120,8 @@ export default function RhConviteAdmissao() {
     () => (["pt", "es", "fr", "de", "en"].includes(language) ? (language as IdiomaConvite) : "pt"),
     [language],
   );
-  return <ConviteAdmissaoEcra idioma={idioma} />;
+  const { token } = useParams<{ token: string }>();
+  return <ConvitePorEstado token={token} formulario={<ConviteAdmissaoEcra idioma={idioma} />} />;
 }
 
 function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {

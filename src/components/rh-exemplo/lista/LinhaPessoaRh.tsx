@@ -4,6 +4,7 @@
 import { Badge } from "@/components/ui/badge";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
+import { EstadoAdmissaoDaPessoa } from "@/components/rh-exemplo/admissao/EstadoAdmissaoDaPessoa";
 import { iniciaisDoNome } from "@/components/rh-exemplo/lib/anexosAdmissao";
 import type { PessoaListItem } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -67,9 +68,12 @@ export function LinhaPessoaRh({ pessoa, local, comContrato, aberta, aoAbrir }: L
       <TableCell className={CELULA}>{local ?? pessoa.local_trabalho ?? vazio}</TableCell>
       <TableCell className={cn(CELULA, "tabular-nums")}>{pessoa.data_admissao ?? vazio}</TableCell>
       <TableCell className={CELULA}>
-        <Badge variant={pessoa.estadoAcesso === "ativo" ? "default" : "outline"} className="font-normal">
-          {t(`hr.estadoAcesso.${pessoa.estadoAcesso}`)}
-        </Badge>
+        <span className="flex flex-wrap items-center gap-1">
+          <Badge variant={pessoa.estadoAcesso === "ativo" ? "default" : "outline"} className="font-normal">
+            {t(`hr.estadoAcesso.${pessoa.estadoAcesso}`)}
+          </Badge>
+          <EstadoAdmissaoDaPessoa pessoaId={pessoa.id} />
+        </span>
       </TableCell>
       {comContrato && (
         <TableCell className={CELULA}>

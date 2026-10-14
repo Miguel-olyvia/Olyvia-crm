@@ -46,8 +46,8 @@ export interface ExtrasNovaPessoa {
   retribuicao: { subsidio: number | null; modo: SubsidioAlimentacaoModo | null; duodecimos: 0 | 50 | 100 };
   criarAcesso: boolean;
   anexos: AnexoDaNova[];
-  /** Com convite: o e-mail de destino (o pessoal) e o link vale 7 dias. */
-  convite: { email: string | null } | null;
+  /** Com convite: o e-mail de destino (o pessoal), o role previsto de acesso (escolhido pelo RH) e o login temporário vale 7 dias. */
+  convite: { email: string | null; roleId: string | null } | null;
   pendencias: Pendencia[];
 }
 

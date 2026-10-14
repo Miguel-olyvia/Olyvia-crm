@@ -48,11 +48,12 @@ describe("o gerador e puro e deterministico", () => {
   });
 });
 
-describe("Setembro de 2026 esta preenchido para as 13 pessoas", () => {
+describe("Setembro de 2026 esta preenchido para as 13 pessoas (e as 5 em admissao ainda nao comecaram)", () => {
   it("ha pelo menos uma pessoa de cada tipo de horario", () => {
     const tipos = new Set(lerEstado().ordem.map(tipoDe));
     for (const tipo of ["padrao", "repartido", "isencao", "livre", "banco"]) expect(tipos.has(tipo)).toBe(true);
-    expect(lerEstado().ordem).toHaveLength(13);
+    // As 13 de sempre mais as 5 que estao em admissao (so aparecem na lista; nao tem registos nem entram no Calculo).
+    expect(lerEstado().ordem).toHaveLength(13 + 5);
   });
 
   it("cada dia previsto tem exactamente um desfecho coerente: feito, falta, ausencia, folga do banco ou isencao", () => {
@@ -192,9 +193,11 @@ describe("o mapa da organizacao navega ate Setembro e mostra tudo preenchido", (
   it("quem pica tem o seu mes (a Marta e de isencao, a Joana esta de baixa e a Lara nao comecou), e o total do mapa e a soma do que foi feito", () => {
     const { result } = renderHook(() => useAssiduidadeDaOrganizacao({ de: "2026-09-01", ate: "2026-09-30" }));
     const estado = lerEstado();
-    for (const id of estado.ordem.filter((x) => !["p-marta", "p-joana", "p-lara"].includes(x))) {
+    const emAdmissao = ["p-marco", "p-nadia", "p-vasco", "p-eva", "p-ruben"];
+    for (const id of estado.ordem.filter((x) => !["p-marta", "p-joana", "p-lara", ...emAdmissao].includes(x))) {
       expect(result.current.pessoasComRegisto.has(id)).toBe(true);
     }
+    for (const id of emAdmissao) expect(result.current.pessoasComRegisto.has(id), id).toBe(false);
     const doMapa = [...result.current.celulas.values()].reduce((s, c) => s + c.minutosRealizados, 0);
     const dasFichas = Object.values(estado.fichas).flatMap((f) => f.horarioRealizado).filter((r) => r.data.startsWith("2026-09")).reduce((s, r) => s + r.minutos, 0);
     expect(doMapa).toBe(dasFichas);

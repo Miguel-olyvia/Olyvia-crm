@@ -4,11 +4,13 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SheetClose, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { FaixaProgressoAdmissao } from "@/components/rh-exemplo/admissao/FaixaProgressoAdmissao";
 import { CriarAcessoDialog } from "@/components/rh-exemplo/CriarAcessoDialog";
 import { EnviarConviteDialog } from "@/components/rh-exemplo/EnviarConviteDialog";
 import { PessoaAdmissaoPendencias } from "@/components/rh-exemplo/PessoaAdmissaoPendencias";
 import { PessoaConviteAdmissaoEstado } from "@/components/rh-exemplo/PessoaConviteAdmissaoEstado";
 import { useFichaRh } from "@/components/rh-exemplo/dados/loja";
+import { useAdmissao } from "@/components/rh-exemplo/dados/lojaAdmissao";
 import { useConviteAdmissaoResumo } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
 import { useFiliaisDaArvore } from "@/components/rh-exemplo/hooks/useFiliaisDaArvore";
 import { usePessoa } from "@/components/rh-exemplo/hooks/usePessoa";
@@ -84,6 +86,9 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa }: Ficha
   const dados = useFichaRh(pessoa.id);
   const fotografiaUrl = usePessoaFotografia(pessoa.fotografia_anexo_id);
   const dialogos = useDialogosFicha();
+  // Em admissão, o convite, a aprovação, o contrato e as credenciais andam todos pelo cartão «Admissão» (e a faixa de progresso).
+  const admissao = useAdmissao(pessoa.id);
+  const emAdmissao = admissao !== null && admissao.estado !== "acesso_ativo";
   const subtitulo = useSubtitulo(pessoa, ctx);
   const abaAtiva: AbaFicha = ehAbaFicha(aba) ? aba : "visaoGeral";
   const temConta = Boolean(ficha.conta);
@@ -102,16 +107,19 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa }: Ficha
         estadoContrato={ctx.estadoContratoDerivado} vizinhas={vizinhas} aoIr={aoIr}
       />
       <AcoesFicha
-        temConta={temConta} pendencias={pendencias} aoCriarAcesso={() => dialogos.setAcessoAberto(true)}
+        temConta={temConta} emAdmissao={emAdmissao} pendencias={pendencias} aoCriarAcesso={() => dialogos.setAcessoAberto(true)}
         aoEnviarConvite={() => dialogos.abrirConvite(modoDeEnvioDoConvite(convite.resumo))} aoAbrirAba={aoMudarAba}
       />
+      <FaixaProgressoAdmissao pessoaId={pessoa.id} />
       <Tabs value={abaAtiva} onValueChange={aoMudarAba} className="flex min-h-0 flex-1 flex-col">
         <ListaAbasFicha contadores={contadoresDaFicha(dados)} abaAtiva={abaAtiva} />
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
-          <PessoaConviteAdmissaoEstado
-            pessoaId={pessoa.id} estado={convite} podeEnviar={ctx.hasPermission("hr.pessoas.convite.enviar") && !temConta}
-            onReenviar={() => dialogos.abrirConvite("reenviar")}
-          />
+          {admissao === null && (
+            <PessoaConviteAdmissaoEstado
+              pessoaId={pessoa.id} estado={convite} podeEnviar={ctx.hasPermission("hr.pessoas.convite.enviar") && !temConta}
+              onReenviar={() => dialogos.abrirConvite("reenviar")}
+            />
+          )}
           <PessoaAdmissaoPendencias pessoaId={pessoa.id} estado={p} />
           <ConteudoAba ficha={ficha} pessoa={pessoa} ctx={ctx} aoMudarAba={aoMudarAba} aoMudarCargo={aoMudarCargo} />
         </div>
