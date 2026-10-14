@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
+import { NotaEncomendaDoc, Partilhar } from "./DocsCliente";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { FORNECEDORES, TRILHOS, faltaParaArrancar, passosPreparacao, totalEf, type PassoPrep, type Trilho } from "./preparacaoObra";
@@ -146,6 +147,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
 function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
   const { S, A, d, run } = ctx;
   const ec = d.obra.ec!, e = d.obra.enc;
+  const [nota, setNota] = useState(false);
   return (
     <div className="mt-4 grid gap-4 rounded-xl border border-border p-4 animate-in fade-in-0 slide-in-from-top-1 duration-200 lg:grid-cols-2">
       <div>
@@ -206,6 +208,18 @@ function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
         )}
       </div>
       {S.role !== "comercial" && ec.estado !== "aprovada" && <p className="text-sm text-muted-foreground lg:col-span-2">Quem aprova a encomenda de cliente é o comercial: confirma que é isto que vendeu.</p>}
+      {/* o documento do cliente: os preços (nunca os custos) e o estado de cada linha */}
+      <div className="lg:col-span-2">
+        <button type="button" onClick={() => setNota(!nota)} aria-expanded={nota} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
+          {nota ? "Fechar a nota de encomenda" : ec.estado === "aprovada" ? "Nota de encomenda no portal do cliente" : "Pré-visualizar a nota de encomenda do cliente"}
+          <ChevronDown className={cn("h-4 w-4 transition-transform", nota && "rotate-180")} aria-hidden="true" />
+        </button>
+        {nota && (
+          <div className="mt-3 animate-in fade-in-0 duration-200">
+            <Partilhar ctx={ctx} d={d} tipo="encomenda" estado={ec.estado === "aprovada" ? "no portal do cliente" : "rascunho: sai ao aprovar"}><NotaEncomendaDoc d={d} /></Partilhar>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

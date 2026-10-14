@@ -1,4 +1,4 @@
-// Os documentos que o cliente recebe: proposta, contrato e fatura.
+// Os documentos que o cliente recebe: proposta, contrato, nota de encomenda (14/10) e fatura.
 // Cada um aparece como uma folha, com o que é partilhável à volta:
 // o link do portal, email, WhatsApp, ver como o cliente e imprimir (PDF).
 import { useRef, useState, type ReactNode } from "react";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
+import { rotuloDia } from "./preparacaoObra";
 import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
 
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
@@ -224,6 +225,45 @@ export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
   );
 }
 
+/* ------------------------------------------------------------------ nota de encomenda (14/10) */
+/** O estado de cada linha, como o cliente o lê: a confirmar, reservado em armazém, a encomendar, encomendado, recebido. */
+function estadoLinha(d: Negocio, falta: number): { t: string; ok: boolean } {
+  const ec = d.obra.ec!, e = d.obra.enc;
+  if (ec.estado !== "aprovada") return { t: "a confirmar", ok: false };
+  if (falta <= 0) return { t: "reservado em armazém", ok: true };
+  if (!e || e.estado === "por confirmar") return { t: "a encomendar", ok: false };
+  return e.estado === "recebida" ? { t: "recebido", ok: true } : { t: "encomendado ao fornecedor", ok: false };
+}
+/** A nota de encomenda: os materiais e produtos da obra, com o preço (nunca o custo), o estado de cada um e quando estão em obra. */
+export function NotaEncomendaDoc({ d }: { d: Negocio }) {
+  const ec = d.obra.ec;
+  if (!ec) return null;
+  const p = d.obra.plano;
+  const prontos = ec.linhas.filter((x) => estadoLinha(d, x.falta).ok).length;
+  return (
+    <Folha titulo="Nota de encomenda" numero={ec.n} data={`de ${ec.criada}`} carimbo={ec.estado === "aprovada" ? "Confirmada" : undefined}>
+      <Cliente d={d} />
+      <p className="text-slate-700">Os materiais e produtos da obra de {d.servico.toLowerCase()}, conforme o contrato CT 2026/{d.id}. Estão incluídos no preço do contrato: <b>não se pagam à parte</b>.</p>
+      <ul className="divide-y divide-slate-200 border-y border-slate-200">
+        {ec.linhas.map((x) => {
+          const st = estadoLinha(d, x.falta);
+          return (
+            <li key={x.n} className="flex items-baseline justify-between gap-4 py-2.5">
+              <span className="min-w-0">{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} · {x.de === "produto" ? "escolhido na visita" : "do modelo"} · <span className={st.ok ? "text-emerald-700" : "text-slate-500"}>{st.t}</span></span></span>
+              <span className="shrink-0 tabular-nums">{eur((x.preco ?? 0) * x.q)} €</span>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex items-baseline justify-between"><span className="text-slate-600">Materiais, sem IVA (IVA a 23%)</span><span className="text-lg font-semibold tabular-nums">{eur(ec.valor)} €</span></div>
+      <section className="rounded-xl bg-slate-50 p-4">
+        <p className="font-medium">{prontos === ec.linhas.length ? "Tudo pronto para a obra." : `${prontos} de ${ec.linhas.length} prontos para a obra.`}</p>
+        <p className="text-slate-600">{p ? `Tudo em obra antes do início, a ${rotuloDia(p, 0)}.` : "A data de entrega segue o início da obra."} Avisamos no portal quando chegar.</p>
+      </section>
+    </Folha>
+  );
+}
+
 /* ------------------------------------------------------------------ partilhar */
 function imprimir(el: HTMLElement | null, titulo: string) {
   if (!el) return;
@@ -235,12 +275,12 @@ function imprimir(el: HTMLElement | null, titulo: string) {
   setTimeout(() => { w.focus(); w.print(); }, 600);
 }
 
-export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura"; children: ReactNode; estado: string }) {
+export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda"; children: ReactNode; estado: string }) {
   const link = `https://portal.olyvia-ai.com/${tipo}/${token(d, tipo)}`;
   const [copiado, setCopiado] = useState(false);
   const [ver, setVer] = useState(false);
   const doc = useRef<HTMLDivElement>(null);
-  const nome = { proposta: "a proposta", contrato: "o contrato", fatura: "a fatura" }[tipo];
+  const nome = { proposta: "a proposta", contrato: "o contrato", fatura: "a fatura", encomenda: "a nota de encomenda" }[tipo];
   const msg = `Olá ${d.nome.split(" ")[0]}, segue ${nome} da ${EMPRESA.nome}: ${link}`;
   const tel = d.tel.replace(/\D/g, "");
   const copiar = async () => {

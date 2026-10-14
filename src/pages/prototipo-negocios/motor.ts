@@ -275,7 +275,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
 // 9 (14/10/2026): a demolição de parede (c5) passa de ml a m², como diz o nome
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
-export const VERSAO = 12;
+export const VERSAO = 13;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -1214,6 +1214,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
       const falta = ec.linhas.filter((x) => x.falta > 0);
       d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: fornecedorSugerido(d), linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un, custo: x.custo })) } : null;
+      log(d, "Nota de encomenda " + ec.n + " no portal do cliente");
       log(d, "Encomenda de cliente " + ec.n + " aprovada · stock reservado" + (d.obra.enc ? " · " + d.obra.enc.n + " emitida, por validar" : " · nada a encomendar"));
       avisar(d.obra.enc
         ? { msg: ec.n + " aprovada", sub: "Encomenda a fornecedor " + d.obra.enc.n + " emitida: o Financeiro valida", kind: "ok", act: { label: "Ver como Financeiro", fn: () => run(() => { S.role = "financeiro"; }) } }
