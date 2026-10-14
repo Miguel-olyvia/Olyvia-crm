@@ -121,3 +121,17 @@ describe("previsto e real por fase", () => {
     expect(Math.abs(D!.euros)).toBeGreaterThan(0);
   });
 });
+
+describe("pagamentos a rever (Hoje)", () => {
+  it("na seed há orçamentos a descoberto; com 'Por fases' saem da lista", async () => {
+    const { aDescoberto } = await import("./planoObra");
+    const S = seed(), A = acoes(S, () => {}, (fn) => fn());
+    const lista = aDescoberto(S);
+    expect(lista.length).toBeGreaterThan(0);
+    expect(lista[0].pior).toBeGreaterThanOrEqual(lista[lista.length - 1].pior);
+    const d = lista[0].d;
+    d.orc!.enviada = null;
+    A.pagamentoPlano(d.id, "Por fases", sugerirPorFases(planoObra(d, S)));
+    expect(aDescoberto(S).map((x) => x.d.id)).not.toContain(d.id);
+  });
+});

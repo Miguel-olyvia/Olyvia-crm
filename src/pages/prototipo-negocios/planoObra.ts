@@ -294,3 +294,18 @@ export function maiorDesvio(R: ObraReal): { fase: FaseReal; tarefa: TarefaReal; 
   }
   return melhor;
 }
+
+/** Os orçamentos ainda não aceites que, com as condições de pagamento escolhidas, deixam a obra a descoberto
+ *  (para o Hoje: "Pagamentos a rever"), do maior buraco para o menor. */
+export function aDescoberto(S: Estado): { d: Negocio; pior: number; pagamento: string }[] {
+  const out: { d: Negocio; pior: number; pagamento: string }[] = [];
+  for (const d of S.deals) {
+    if (!d.orc || d.orc.aceite || d.perdido) continue;
+    const P = planoObra(d, S);
+    if (!P.tarefas.length) continue;
+    const pg = d.f.pagamento || "50% + 50% no fim";
+    const T = tesouraria(P, prestacoes(pg, d.orc.pagFases));
+    if (T.descoberto) out.push({ d, pior: r2(-T.pior.saldo), pagamento: pg });
+  }
+  return out.sort((a, b) => b.pior - a.pior);
+}

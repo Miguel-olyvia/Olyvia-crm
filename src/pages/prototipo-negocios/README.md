@@ -744,3 +744,9 @@ O pedido do Ruben: "o orçamento tem de ser dinâmico, interativo, com mapa de G
   - por baixo, a frase da fase que mais se afastou e porquê (ex.: "A fase 3 (revestimentos) foi a que mais se afastou: +110,02 € e +0,5 dias. Revestimento de parede levou 18,45 h em vez de 15 h (+23%)");
   - uma linha por fase: a barra tracejada é o previsto e a cheia é o real, na mesma régua; ao lado, os dias, o custo com a diferença e a margem contra a orçada;
   - o "Atualizar a receita" continua por baixo.
+
+### Pagamentos a rever, no Hoje (14/10/2026)
+- **O que mostra:** `HojeSimples.tsx` lista os orçamentos ainda não aceites que, com as condições de pagamento escolhidas, deixam a obra a descoberto (`aDescoberto` em `planoObra.ts`), do maior buraco para o menor.
+- **Cada linha:** "A descoberto até X €", o cliente, o serviço e as condições; tocar abre o negócio.
+- **Quem a vê:** o comercial, a Direção e o Financeiro, e só quando há algum orçamento nessa situação.
+- **Na seed:** o Sérgio Pinto (WC, 50% + 50%) fica a descoberto até 578,72 €.

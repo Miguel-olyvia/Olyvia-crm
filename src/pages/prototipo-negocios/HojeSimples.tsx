@@ -3,11 +3,12 @@
 // uma lista simples. Sem pastilhas, sem gradientes, sem maiúsculas.
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
 import { agenda } from "./Hoje";
 import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
+import { aDescoberto } from "./planoObra";
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
@@ -19,6 +20,7 @@ export function HojeSimples({ S, A, go }: Ctx) {
   const ag = agenda(S, r);
   const atrasados = L.filter((x) => x.d.atraso && x.d.fase === 0).length + ag.filter((x) => x.atrasado).length;
   const ab = aberto(S), emNeg = ab.filter((d) => d.fase === 3 && d.orc);
+  const descoberto = aDescoberto(S);
 
   const frase = L.length === 0
     ? "Não tem nada pendente. Mude de papel no menu para ver o trabalho dos outros."
@@ -76,6 +78,29 @@ export function HojeSimples({ S, A, go }: Ctx) {
                   <span className="min-w-0 flex-1">
                     <span className="block text-base font-medium text-foreground">{dir ? "Aprovar a exceção à margem" : p.t}</span>
                     <span className="block text-[15px] text-muted-foreground">{d.nome} · {d.servico}</span>
+                  </span>
+                  <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 14/10: os orçamentos que, com as condições de pagamento escolhidas, deixam a obra a descoberto */}
+      {(r === "comercial" || r === "direcao" || r === "financeiro") && descoberto.length > 0 && (
+        <section aria-labelledby="pag-rever" className="mt-12">
+          <h2 id="pag-rever" className="text-lg font-semibold">Pagamentos a rever</h2>
+          <p className="mt-1 text-[15px] text-muted-foreground">Com estas condições, a obra gasta antes de receber. "Por fases" resolve no plano da obra do orçamento.</p>
+          <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
+            {descoberto.map(({ d, pior, pagamento }) => (
+              <li key={d.id}>
+                <button type="button" onClick={go(() => A.abrir(d.id))}
+                  className="group flex min-h-16 w-full items-center gap-4 py-3 text-left transition-colors hover:bg-muted/50 sm:px-2">
+                  <AlertTriangle className="h-5 w-5 shrink-0 text-warning" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-base font-medium text-foreground">A descoberto até {eur(pior)} €</span>
+                    <span className="block text-[15px] text-muted-foreground">{d.nome} · {d.servico} · {pagamento}</span>
                   </span>
                   <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" aria-hidden="true" />
                 </button>
