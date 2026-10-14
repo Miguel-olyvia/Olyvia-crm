@@ -8,7 +8,7 @@ export function SeletorVersao({ versao, mudar }: { versao: VersaoProto; mudar: (
   return (
     <div className="grid gap-1.5">
       <span id={id} className="text-[15px] text-foreground">Versão</span>
-      <div role="group" aria-labelledby={id} className="grid grid-cols-3 overflow-hidden rounded-lg border border-[hsl(220_10%_45%)]">
+      <div role="group" aria-labelledby={id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1.4fr)] overflow-hidden rounded-lg border border-[hsl(220_10%_45%)]">
         {VERSOES.map((v, i) => (
           <button key={v.id} type="button" aria-pressed={versao === v.id} onClick={() => { if (v.id !== versao) mudar(v.id); }}
             className={cn("min-h-11 px-1 text-[15px] leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary",

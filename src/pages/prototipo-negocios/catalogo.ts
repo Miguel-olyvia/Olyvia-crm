@@ -39,7 +39,7 @@ const BASE: ItemCatalogo[] = [
   { id: "c2", n: "Supressão de ponto de água", cat: "Canalização", un: "un", hf: 0, hu: 1.5, qm: 1, usos: 101, linhas: ["wc"] },
   { id: "c3", n: "Mão de Obra Construção de Nicho (valor por unidade)", cat: "Revestimentos", un: "un", hf: 0, hu: 3, qm: 1, usos: 86, linhas: ["wc"] },
   { id: "c4", n: "Instalação de Revestimento m2", cat: "Revestimentos", un: "m²", hf: 0, hu: 1, qm: 8, usos: 46, linhas: ["wc"] },
-  { id: "c5", n: "Mão de Obra Demolição de parede m2", cat: "Demolições", un: "ml", hf: 0, hu: 0.8, qm: 3, usos: 110, linhas: ["wc", "coz"] },
+  { id: "c5", n: "Mão de Obra Demolição de parede m2", cat: "Demolições", un: "m²", hf: 0, hu: 0.8, qm: 3, usos: 110, linhas: ["wc", "coz"] },
   { id: "c6", n: "Instalação de Pavimento m2", cat: "Revestimentos", un: "m²", hf: 0, hu: 1, qm: 5, usos: 23, linhas: ["wc"] },
   { id: "c7", n: "Anulação de Ponto de Gás", cat: "Gás (ITG)", un: "un", hf: 2, hu: 0, qm: 1, usos: 64, linhas: ["wc", "coz"] },
   { id: "c8", n: "Mão de Obra Levantamento de parede em Alvenaria m2", cat: "Revestimentos", un: "m²", hf: 1, hu: 1.5, qm: 2, usos: 35, linhas: ["wc", "coz"] },

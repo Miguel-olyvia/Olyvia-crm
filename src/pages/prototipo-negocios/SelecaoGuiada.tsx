@@ -811,7 +811,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
             : <span aria-hidden="true" className="grid h-16 w-16 place-items-center rounded-full border-2 border-dashed border-destructive/60 text-xl font-semibold tabular-nums text-destructive">{faltas}</span>}
         </span>
         <div className="min-w-0">
-          <p className="text-[15px] font-medium text-foreground">{pronto ? "Tudo respondido" : `Falta ${faltas === 1 ? "1 resposta" : `${faltas} respostas`}`}</p>
+          <p className="text-[15px] font-medium text-foreground">{pronto ? "Tudo respondido" : (faltas === 1 ? "Falta 1 resposta" : `Faltam ${faltas} respostas`)}</p>
           <p className="text-[28px] font-semibold leading-tight tracking-[-0.01em] text-foreground" aria-label={`${eur(r.total)} € estimado`}>
             <Contagem valor={r.total} de={reduzir ? undefined : 0} realce={false} fmt={(x) => `${eur(x)} €`} />
           </p>
