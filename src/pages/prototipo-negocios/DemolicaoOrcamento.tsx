@@ -3,7 +3,7 @@
 // contentor) com a ocupação, e o preço. Cada valor pode ser mexido à mão ("ajustado", com "repor o cálculo").
 // O custo, o custo/hora, o C_dep e a margem só se mostram à Direção. O meio é só logística (o C_dep já inclui o
 // big bag ou o contentor); com o contentor ligado (6 m³ a 380 €, 14/10/2026), a Olyvia propõe-no a partir de 3 m³.
-import { Minus, Plus, RotateCcw } from "lucide-react";
+import { Minus, Plus, RotateCcw, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
@@ -142,6 +142,14 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
             {fechado && <span className="tabular-nums">{r.n}</span>}
             <Marca k="n" /><Repor k="n" />
           </div>
+        )}
+        {/* porque este meio (a visita, o volume ou à mão), e a licença na via pública */}
+        {r.porqueMeio && <p className="text-sm text-muted-foreground" data-testid="porque-meio">{r.porqueMeio}</p>}
+        {r.licenca && (
+          <p className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/[0.06] px-3 py-2 text-sm">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+            <span>Contentor na via pública: precisa de licença de ocupação da Câmara{r.licencaCusto > 0 ? ` (${eur(r.licencaCusto)} € no custo).` : ". O valor da licença não está configurado (Definições), por isso não entra no custo."}</span>
+          </p>
         )}
         {r.ocupacao && <OcupacaoMeio oc={r.ocupacao} />}
         {r.propostaContentor && !fechado && (

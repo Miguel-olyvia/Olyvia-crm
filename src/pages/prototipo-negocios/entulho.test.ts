@@ -83,15 +83,25 @@ describe("demolição e entulho: a fórmula da especificação", () => {
     const r = calcularDemolicao([{ codigo: "DEM-SAN-01", q: 1 }], ARTIGOS_DEM_TESTE, { ...P, protecao: 0, unDep: "t" }, comElevador);
     expect(r.deposicao).toBe(1.75); // 0,025 t × 70 €
   });
-  it("o meio é só logística: big bags por omissão; o contentor não mexe no preço (o C_dep é tudo incluído)", () => {
+  it("o meio é só logística e escolhe-se sozinho: contentor a partir de 3 m³; o contentor não mexe no preço (o C_dep é tudo incluído)", () => {
     const muito: ItemDem[] = [{ codigo: "DEM-PAV-01", q: 60 }]; // 5,04 m³
     const bb = calcularDemolicao(muito, ARTIGOS_EX2, P, comElevador);
     expect([bb.meio, bb.n, bb.propostaContentor]).toEqual(["bigbag", 6, null]); // contentor desligado nos testes
+    expect(bb.porqueMeio).toBe("Big bags (o contentor está desligado nas Definições).");
     const comCt: ParDem = { ...P, contentor: { ativo: true, m3: 6, t: 8, preco: 380, proporM3: 3 } };
     const pr = calcularDemolicao(muito, ARTIGOS_EX2, comCt, comElevador);
-    expect(pr.meio).toBe("bigbag"); // propõe, mas não escolhe sozinho
-    expect(pr.propostaContentor).toBe("1 contentor de 6 m³ (380 €) em vez de 6 big bags; o preço não muda");
-    expect(calcularDemolicao(WC, ARTIGOS_EX2, comCt, comElevador).propostaContentor).toBeNull(); // 1,79 m³ < 3 m³
+    expect([pr.meio, pr.n, pr.propostaContentor]).toEqual(["contentor", 1, null]); // 14/10: escolhe sozinho
+    expect(pr.porqueMeio).toBe("Automático: 5,04 m³ chegam para o contentor (a partir de 3 m³).");
+    const wc = calcularDemolicao(WC, ARTIGOS_EX2, comCt, comElevador);
+    expect([wc.meio, wc.propostaContentor]).toEqual(["bigbag", null]); // 1,79 m³ < 3 m³
+    // a visita manda: "Não" fica em big bags (com a proposta); pedir contentor usa-o mesmo com pouco entulho
+    const nao = calcularDemolicao(muito, ARTIGOS_EX2, comCt, { ...comElevador, contentor: "Não" });
+    expect([nao.meio, nao.porqueMeio]).toEqual(["bigbag", "A visita disse que não há contentor: big bags."]);
+    expect(nao.propostaContentor).toBeNull();
+    const via = calcularDemolicao(WC, ARTIGOS_EX2, { ...comCt, contentor: { ...comCt.contentor, licenca: 45 } }, { ...comElevador, contentor: "Na via pública (licença)" });
+    expect([via.meio, via.licenca, via.licencaCusto]).toEqual(["contentor", true, 45]);
+    expect(via.custo).toBeCloseTo(calcularDemolicao(WC, ARTIGOS_EX2, comCt, comElevador, { meio: "contentor" }).custo + 45, 2);
+    expect(calcularDemolicao(WC, ARTIGOS_EX2, comCt, { ...comElevador, contentor: "Em espaço privado" }).licenca).toBe(false);
     const ct = calcularDemolicao(muito, ARTIGOS_EX2, comCt, comElevador, { meio: "contentor" });
     expect(ct.n).toBe(1);
     expect([ct.deposicao, ct.custo, ct.preco]).toEqual([bb.deposicao, bb.custo, bb.preco]);

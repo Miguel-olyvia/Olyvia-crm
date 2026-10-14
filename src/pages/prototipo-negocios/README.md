@@ -820,3 +820,13 @@ Pedido do Ruben: "através da página de ligações, rapidamente adicionar e rem
 - **Anular:** uma faixa escura em baixo diz o que mudou ("Canalização deixa de usar Fita e vedante.") com "Anular" durante 7 s; repõe a receita e o produto como estavam.
 - **Valores por omissão:** técnico e equipamento entram com 0,5 h por unidade e o consumível com 1 por unidade; afinam-se na ficha. A receita passa a "editada" e os custos vão logo para os serviços em uso (o orçamento usa o mesmo custo).
 - Lógica sem React em `editarLigacoes.ts` (`candidatos`, `juntar`, `retirar`, `podeJuntar`, `podeRetirar`); testes em `editarLigacoes.test.ts`.
+
+## Contentor escolhido sozinho (14/10/2026)
+
+O Ruben não via o contentor a ser calculado no orçamento: o motor punha sempre big bags e só *propunha* o contentor (a partir de 3 m³, com um toque). Agora (`entulho.ts`, `calcularDemolicao`):
+- **A visita manda:** "Contentor de entulho" = "Na via pública (licença)" ou "Em espaço privado" → contentor, mesmo com pouco entulho; "Não" → big bags.
+- **Sem resposta:** contentor a partir de "Contentor · usar a partir de" (3 m³), senão big bags.
+- **Escolher à mão** continua a ganhar a tudo (com "repor o cálculo").
+- **O porquê** aparece por baixo do meio: "Automático: 5,04 m³ chegam para o contentor (a partir de 3 m³)", "A visita pediu contentor (na via pública (licença))", etc.
+- **Licença de via pública:** com o contentor na via pública aparece o aviso; o valor (por obra) configura-se nas Definições ("Contentor · licença de via pública") e entra no custo. Sem valor configurado, só o aviso (não se inventam preços).
+- O preço da deposição não muda com o meio (o C_dep é "tudo incluído").

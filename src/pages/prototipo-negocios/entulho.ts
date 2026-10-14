@@ -81,7 +81,9 @@ export interface ParDem {
    * Contentor: desligado até as Compras enviarem as capacidades do operador (3 a 6 m³); entretanto só big bags.
    * Não mexe no preço: o C_dep já inclui o big bag ou o contentor, o transporte, o operador e a e-GAR.
    */
-  contentor: { ativo: boolean; m3: number; t: number; preco: number; /** propõe-se a partir deste volume (m³) */ proporM3: number };
+  contentor: { ativo: boolean; m3: number; t: number; preco: number; /** escolhe-se sozinho a partir deste volume (m³) */ proporM3: number;
+    /** Licença de ocupação da via pública, por obra (€); entra no custo quando a visita diz "Na via pública". Sem valor = só o aviso. */
+    licenca?: number };
   /** C_protecao: proteção da zona, consumíveis e limpeza final; um custo da obra, à parte dos artigos. */
   protecao: number;
   /** Margem sobre o preço (por omissão, como no resto da Olyvia) ou markup sobre o custo (os valores do documento). */
@@ -124,7 +126,7 @@ export const MARGENS0: MargensOlyvia = { min: 0.28, alvo: 0.35 };
 export interface MudancaDem { quem: string; quando: string; campo: string; antes: string; depois: string }
 
 /** F_acesso a partir do levantamento: andar e elevador, vezes os fatores extra que se aplicam. Diz de onde veio. */
-export function fatorAcesso(f: Record<string, string>, P: ParDem): { f: number; origem: string } {
+export function fatorAcesso(f: Record<string, string>, P: ParDem): { f: number; origem: string; contentor?: string } {
   const andar = Number(f.andar) || 0, elevador = f.tem_elevador === "Sim";
   const [fa, onde]: [number, string] = andar <= 0 ? [P.fAcesso.base, "rés-do-chão"]
     : elevador ? [P.fAcesso.base, `${andar}.º andar, com elevador`]
@@ -132,7 +134,7 @@ export function fatorAcesso(f: Record<string, string>, P: ParDem): { f: number; 
   const extras = (P.fExtra ?? []).filter((x) => x.f !== 1 && x.valores.includes(f[x.campo]));
   const total = extras.reduce((s, x) => s * x.f, fa);
   const partes = [onde, ...extras.map((x) => `${x.rot.charAt(0).toLowerCase() + x.rot.slice(1)} ×${num(x.f)}`)];
-  return { f: total, origem: `${partes.join(" · ")} (do levantamento)` };
+  return { f: total, origem: `${partes.join(" · ")} (do levantamento)`, contentor: f.contentor || undefined };
 }
 
 /** Um artigo no orçamento: o código e a quantidade. */
@@ -209,6 +211,10 @@ export interface ResultadoDem {
   meio: Meio; n: number; nBigbags: number; nContentores: number;
   /** A sugestão de contentor (só logística: o preço não muda), ou null. */
   propostaContentor: string | null;
+  /** Porque se escolheu este meio (a visita, o volume ou à mão). */
+  porqueMeio: string;
+  /** Contentor na via pública: precisa de licença da Câmara (e o custo dela, se configurado). */
+  licenca: boolean; licencaCusto: number;
   custo: number; precoCalc: number; preco: number;
   /** A margem do preço final, a alvo e a mínima usadas (frações), e se o preço ficou abaixo da mínima. */
   margem: number; margemAlvo: number; margemMin: number; abaixoMin: boolean;
@@ -259,7 +265,7 @@ export function ocupacao(meio: Exclude<Meio, "nenhum">, m3: number, t: number, n
 }
 
 /** A conta da obra, com os ajustes à mão por cima. Arredonda-se só no fim. */
-export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: ParDem, acesso: { f: number; origem: string }, aj: AjustesDem = {}, olyvia: MargensOlyvia = MARGENS0, vols: ItemVol[] = []): ResultadoDem {
+export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: ParDem, acesso: { f: number; origem: string; contentor?: string }, aj: AjustesDem = {}, olyvia: MargensOlyvia = MARGENS0, vols: ItemVol[] = []): ResultadoDem {
   const contas = itens.flatMap((it) => {
     const a = artigos.find((x) => x.codigo === it.codigo && x.ativo);
     return a && it.q > 0 ? [contaArtigo(a, it.q, P, acesso.f)] : [];
@@ -281,17 +287,30 @@ export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: Par
   // a proteção da zona e a limpeza são da demolição: só com artigos (o entulho dos serviços sozinho não as traz)
   const protecao = contas.length ? P.protecao : 0;
 
-  // o meio (só logística): big bags; o contentor escolhe-se à mão, e só com as capacidades configuradas
+  // o meio (só logística), escolhido sozinho (14/10): o que a visita disse ("Contentor de entulho") manda; sem resposta,
+  // contentor a partir de proporM3 (com o contentor ligado e as capacidades configuradas), senão big bags. À mão ganha a tudo.
   const nBb = nBigbags(m3, t, P), nCt = P.contentor.m3 > 0 && P.contentor.t > 0 ? nContentores(m3, t, P) : 0;
-  const meio: Meio = aj.meio ?? (!contas.length && !volumes.length ? "nenhum" : "bigbag");
+  const pedido = acesso.contentor ?? "", querCt = /^(Na via|Em espa)/.test(pedido), naoCt = pedido === "Não";
+  const podeCt = P.contentor.ativo && nCt > 0, chega = m3 >= (P.contentor.proporM3 ?? 0) - 1e-9;
+  const vazio = !contas.length && !volumes.length;
+  const auto: Meio = vazio ? "nenhum" : podeCt && (querCt || (!naoCt && chega)) ? "contentor" : "bigbag";
+  const meio: Meio = aj.meio ?? auto;
+  const porqueMeio = aj.meio ? "Escolhido à mão."
+    : vazio ? "Sem entulho."
+    : auto === "contentor" ? (querCt ? `A visita pediu contentor (${pedido.toLowerCase()}).` : `Automático: ${num(m3)} m³ chegam para o contentor (a partir de ${num(P.contentor.proporM3)} m³).`)
+    : naoCt ? "A visita disse que não há contentor: big bags."
+    : querCt && !podeCt ? "A visita pediu contentor, mas o contentor está desligado nas Definições: big bags."
+    : P.contentor.ativo ? `Automático: ${num(m3)} m³ não chegam para o contentor (a partir de ${num(P.contentor.proporM3)} m³).` : "Big bags (o contentor está desligado nas Definições).";
   const n = meio === "nenhum" ? 0 : aj.n ?? (meio === "contentor" ? nCt : nBb);
   // "nenhum" (o cliente trata do entulho): sem deposição
   const deposicao = meio === "nenhum" ? 0 : deposicaoCalc;
   // com o contentor ligado e entulho que chegue para o justificar, a Olyvia propõe-no (o comercial decide)
-  const propostaContentor = meio === "bigbag" && P.contentor.ativo && nCt > 0 && m3 >= (P.contentor.proporM3 ?? 0) - 1e-9
+  const propostaContentor = meio === "bigbag" && !naoCt && podeCt && chega
     ? `${nCt} ${nCt === 1 ? "contentor" : "contentores"} de ${num(P.contentor.m3)} m³ (${num(nCt * (P.contentor.preco ?? 0))} €) em vez de ${nBb} big bags; o preço não muda` : null;
 
-  const custo = demolicao + carga + deposicao + consumiveis + protecao;
+  // na via pública, a licença de ocupação da Câmara (só com o contentor; o custo só se estiver configurado)
+  const licenca = meio === "contentor" && /^Na via/.test(pedido), licencaCusto = licenca ? P.contentor.licenca ?? 0 : 0;
+  const custo = demolicao + carga + deposicao + consumiveis + protecao + licencaCusto;
   const margemAlvo = P.margem ?? olyvia.alvo, margemMin = P.margemMin ?? olyvia.min;
   const precoCalc = custo > 0 ? (P.modoPreco === "margem" ? custo / (1 - margemAlvo) : custo * (1 + P.markup)) : 0;
   const preco = aj.preco ?? r2(precoCalc);
@@ -301,7 +320,7 @@ export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: Par
     artigos: contas, volumes, fAcesso: acesso.f, origemAcesso: acesso.origem,
     horas: r2(horas + horasCarga), horasCarga: r2(horasCarga), m3: r2(m3), t: Math.round(t * 1000) / 1000,
     demolicao: r2(demolicao), carga: r2(carga), deposicao: r2(deposicao), consumiveis: r2(consumiveis), protecao: r2(protecao),
-    meio, n, nBigbags: nBb, nContentores: nCt, propostaContentor,
+    meio, n, nBigbags: nBb, nContentores: nCt, propostaContentor, porqueMeio, licenca, licencaCusto: r2(licencaCusto),
     custo: r2(custo), precoCalc: r2(precoCalc), preco,
     margem, margemAlvo, margemMin, abaixoMin: custo > 0 && margem < margemMin - 1e-9,
     ajustados: (Object.keys(aj) as ChaveAjuste[]).filter((k) => aj[k] != null),
@@ -335,9 +354,10 @@ export const CAMPOS_PAR: { k: string; rot: string; un: string; ler: (P: ParDem) 
   { k: "bigbagM3", rot: "Big bag · volume", un: "m³", ler: (P) => P.bigbagM3, por: (P, v) => { P.bigbagM3 = v; } },
   { k: "bigbagT", rot: "Big bag · peso máximo", un: "t", ler: (P) => P.bigbagT, por: (P, v) => { P.bigbagT = v; } },
   { k: "contentor.preco", rot: "Contentor · preço (referência do C_dep)", un: "€", ler: (P) => P.contentor.preco, por: (P, v) => { P.contentor.preco = v; } },
-  { k: "contentor.proporM3", rot: "Contentor · propor a partir de", un: "m³", ler: (P) => P.contentor.proporM3, por: (P, v) => { P.contentor.proporM3 = v; } },
+  { k: "contentor.proporM3", rot: "Contentor · usar a partir de", un: "m³", ler: (P) => P.contentor.proporM3, por: (P, v) => { P.contentor.proporM3 = v; } },
   { k: "contentor.m3", rot: "Contentor · volume", un: "m³", ler: (P) => P.contentor.m3, por: (P, v) => { P.contentor.m3 = v; } },
   { k: "contentor.t", rot: "Contentor · peso máximo", un: "t", ler: (P) => P.contentor.t, por: (P, v) => { P.contentor.t = v; } },
+  { k: "contentor.licenca", rot: "Contentor · licença de via pública (por obra)", un: "€", ler: (P) => P.contentor.licenca ?? 0, por: (P, v) => { P.contentor.licenca = v; } },
   { k: "protecao", rot: "Proteção, consumíveis e limpeza (por obra)", un: "€", ler: (P) => P.protecao, por: (P, v) => { P.protecao = v; } },
   { k: "markup", rot: "Markup sobre o custo (alternativa)", un: "%", ler: (P) => Math.round(P.markup * 1000) / 10, por: (P, v) => { P.markup = v / 100; } },
 ];
