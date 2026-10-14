@@ -18,7 +18,7 @@ import type { AcaoFicha, AcoesFicha } from "./PainelBase";
 import { PainelAcaoFicha } from "./PainelAcaoFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
 import { IDS_NEGOCIOS_DO_QUADRO } from "./pessoasExemplo";
-import type { ItemAtividade, NotaPessoa, Pessoa, ResumoPessoa, Submissao } from "./pessoasTipos";
+import { ehHistorico, type ItemAtividade, type NotaPessoa, type Pessoa, type ResumoPessoa, type Submissao } from "./pessoasTipos";
 import { ResumoFicha } from "./ResumoFicha";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
 
@@ -39,6 +39,8 @@ export interface FichaInteriorProps {
   acoes: AcoesFicha;
   aoPedir: (submissaoId: string, pessoaId: string) => void;
   aoVerTodasSubmissoes: () => void;
+  /** "Criar negócio": a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
+  aoCriarNegocio: (pessoa: Pessoa) => void;
   /** Um anúncio vindo da página (resolver uma submissão a partir da ficha), para o leitor de ecrã o ouvir aqui. */
   anuncioExterno?: string;
   /** A ficha chama isto no Esc: fecha o painel aberto (e diz se havia um) em vez de fechar a ficha. */
@@ -60,7 +62,7 @@ interface AbasProps extends FichaInteriorProps {
 function ConteudoNegocios(p: AbasProps) {
   const aberto = p.resumo.negocios.find((n) => n.id === p.negocioAberto);
   if (!aberto) return <FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.aoAbrirNegocio} />;
-  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} noQuadro={IDS_NEGOCIOS_DO_QUADRO.has(aberto.id)} aoVoltar={p.aoVoltarNegocio} />;
+  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} noQuadro={!ehHistorico(aberto) && (IDS_NEGOCIOS_DO_QUADRO.has(aberto.id) || "novo" in aberto)} aoVoltar={p.aoVoltarNegocio} />;
 }
 
 /** As abas por esta ordem: Resumo, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */
@@ -122,6 +124,18 @@ function useNegocioAberto() {
   };
 }
 
+/** Quando a pessoa ganha um negócio (um "Criar negócio" que acaba de terminar), a ficha passa à aba Negócios para o mostrar. */
+function useAbrirNegociosAoCriar(resumo: ResumoPessoa, esquecer: () => void, irParaNegocios: () => void) {
+  const antes = useRef({ id: resumo.pessoa.id, n: resumo.negocios.length });
+  const n = resumo.negocios.length;
+  useEffect(() => {
+    const anterior = antes.current;
+    antes.current = { id: resumo.pessoa.id, n };
+    if (anterior.id === resumo.pessoa.id && n > anterior.n) { esquecer(); irParaNegocios(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage a mudar o número de negócios da mesma pessoa
+  }, [n, resumo.pessoa.id]);
+}
+
 export function FichaInterior(p: FichaInteriorProps) {
   const { t } = useTranslation();
   const [aba, setAba] = useState<AbaFicha>("resumo");
@@ -129,6 +143,7 @@ export function FichaInterior(p: FichaInteriorProps) {
   const painelId = useId();
   const { texto, anunciar } = useAnuncios(p.anuncioExterno);
   const { acao, visitados, abrir, fechar, mudarConteudo } = usePaineis(p.fecharPainel, anunciar);
+  useAbrirNegociosAoCriar(p.resumo, negocio.esquecer, () => setAba("negocios"));
   const reativar = () => {
     p.acoes.reativar(p.resumo.pessoa.id);
     anunciar(t("pessoasPagina.live.reactivated", { name: p.resumo.pessoa.nome }));
@@ -137,7 +152,10 @@ export function FichaInterior(p: FichaInteriorProps) {
     <AnuncioFichaContext.Provider value={anunciar}>
       <div className="flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto">
         <CabecalhoFicha resumo={p.resumo} vizinhas={p.vizinhas} aoIr={p.aoIr} />
-        <BarraAcoesFicha resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar} />
+        <BarraAcoesFicha
+          resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar}
+          aoCriarNegocio={() => p.aoCriarNegocio(p.resumo.pessoa)}
+        />
         <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
         {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("perder", origem)} />}
         {visitados.map((a) => (

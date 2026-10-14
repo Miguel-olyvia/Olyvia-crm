@@ -1,3 +1,4 @@
+import { pessoasAcoesTranslations } from "./pessoasAcoes";
 import { pessoasFichaTranslations } from "./pessoasFicha";
 import { pessoasFichaResumoTranslations } from "./pessoasFichaResumo";
 import { pessoasListaTranslations } from "./pessoasLista";
@@ -77,9 +78,8 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.match.openFile': 'Open {name}’s record',
     'pessoasPagina.conflict.hint': 'The email and the phone point to different people. Pick the right one.',
     'pessoasPagina.visit.warning': 'Asked for a visit for {service}, still to be booked',
-    'pessoasPagina.visit.book': 'Book meeting',
-    'pessoasPagina.visit.bookNamed': 'Book meeting for {name}',
-    'pessoasPagina.visit.toast': 'Sample action: a meeting would be booked for {name}',
+    'pessoasPagina.visit.book': 'Book visit',
+    'pessoasPagina.visit.bookNamed': 'Book visit for {name}',
     'pessoasPagina.fields.title': 'Submitted fields',
     'pessoasPagina.fields.none': 'No values submitted.',
     'pessoasPagina.action.register': 'Log on the record as a note',
@@ -112,6 +112,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasListaTranslations.en,
     ...pessoasFichaResumoTranslations.en,
     ...pessoasFichaTranslations.en,
+    ...pessoasAcoesTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -184,9 +185,8 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     'pessoasPagina.match.openFile': 'Abrir a ficha de {name}',
     'pessoasPagina.conflict.hint': 'O email e o telefone apontam a pessoas diferentes. Escolhe a pessoa certa.',
     'pessoasPagina.visit.warning': 'Pediu visita para {service}, ficou por marcar',
-    'pessoasPagina.visit.book': 'Marcar reunião',
-    'pessoasPagina.visit.bookNamed': 'Marcar reunião para {name}',
-    'pessoasPagina.visit.toast': 'Ação de exemplo: marcava uma reunião para {name}',
+    'pessoasPagina.visit.book': 'Marcar visita',
+    'pessoasPagina.visit.bookNamed': 'Marcar visita para {name}',
     'pessoasPagina.fields.title': 'Campos submetidos',
     'pessoasPagina.fields.none': 'Sem valores submetidos.',
     'pessoasPagina.action.register': 'Registar na ficha como nota',
@@ -219,5 +219,6 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasListaTranslations.pt,
     ...pessoasFichaResumoTranslations.pt,
     ...pessoasFichaTranslations.pt,
+    ...pessoasAcoesTranslations.pt,
   },
 };

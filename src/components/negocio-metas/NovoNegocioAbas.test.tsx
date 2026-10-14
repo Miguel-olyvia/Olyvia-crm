@@ -114,7 +114,7 @@ describe("aba Qualificação", () => {
     expect(aoCriar).not.toHaveBeenCalled();
   });
 
-  it("Usar a morada do contacto copia a morada da aba Geral; sem morada só avisa; a localização é só um aviso de exemplo", async () => {
+  it("Usar a morada do contacto copia a morada da aba Geral; sem morada só avisa; não há botão de localização (só a morada do contacto)", async () => {
     const { dialogo } = abrir();
     aba(dialogo, /^Qualificação/);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Usar a morada do contacto" }));
@@ -129,8 +129,7 @@ describe("aba Qualificação", () => {
     expect(within(dialogo).getByLabelText("Código postal")).toHaveValue("1000-001");
     expect(within(dialogo).getByLabelText("Localidade")).toHaveValue("Lisboa");
     expect(within(dialogo).getByLabelText("Andar / fração")).toHaveValue("3.º Esq.");
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Estou no local: usar a localização" }));
-    expect(info).toHaveBeenLastCalledWith("Localização usada (exemplo)");
+    expect(within(dialogo).queryByRole("button", { name: /Estou no local/ })).not.toBeInTheDocument();
     expect(within(dialogo).queryByRole("button", { name: /copiar/i })).not.toBeInTheDocument();
   });
 });

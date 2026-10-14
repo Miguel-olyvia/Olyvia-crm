@@ -1,9 +1,9 @@
 // O detalhe de um negócio dentro da ficha: "← Voltar aos negócios", o título, a ligação "Ver no quadro" (só para os
 // negócios do quadro) e secções (não abas): próximo passo e prazo, orçamentos e, se existirem, proposta e contrato. Reutiliza
 // os painéis de Negócio e metas, com os detalhes de exemplo (ou nenhuns).
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ExternalLink } from "lucide-react";
+import { ArrowLeft, ExternalLink, FilePlus2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,9 @@ import { Seccao } from "@/components/ficha-comum/Seccao";
 import { ContratoPainel } from "@/components/negocio-metas/ContratoPainel";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
-import { DETALHES_EXEMPLO } from "@/components/negocio-metas/negocioDetalhesExemplo";
+import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
+import { aceitaOrcamentos } from "@/components/negocio-metas/negocioAcoes";
+import { detalheDoNegocio } from "@/components/negocio-metas/negociosAlterados";
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { OrcamentosPainel } from "@/components/negocio-metas/OrcamentosPainel";
 import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
@@ -52,7 +54,9 @@ export function DetalheNegocioFicha({ negocio, hoje, noQuadro, aoVoltar }: Detal
   const titulo = useRef<HTMLHeadingElement>(null);
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
   useEffect(() => titulo.current?.focus(), []);
-  const detalhe = DETALHES_EXEMPLO[negocio.id] ?? null;
+  const detalhe = detalheDoNegocio(negocio.id);
+  const [criando, setCriando] = useState(false);
+  const podeCriar = estaAberto(negocio) && aceitaOrcamentos(negocio);
   return (
     <div className="space-y-6">
       <Button type="button" variant="ghost" className={cn("-ml-3 min-h-11 gap-2", FOCO)} onClick={aoVoltar}>
@@ -74,7 +78,16 @@ export function DetalheNegocioFicha({ negocio, hoje, noQuadro, aoVoltar }: Detal
         )}
       </div>
       {estaAberto(negocio) && <PassoDoNegocio negocio={negocio} hoje={hoje} />}
-      <Seccao titulo={t(`${P}deal.quotes`)} nivel={4}><OrcamentosPainel negocio={negocio} detalhe={detalhe} /></Seccao>
+      <Seccao titulo={t(`${P}deal.quotes`)} nivel={4}>
+        {podeCriar && (
+          <Button type="button" variant="outline" className={cn("mb-3 min-h-11 gap-2", FOCO)} onClick={() => setCriando(true)}>
+            <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+            {t("businessGoals.actions.createQuote")}
+          </Button>
+        )}
+        <OrcamentosPainel negocio={negocio} detalhe={detalhe} />
+      </Seccao>
+      <NovoOrcamentoDialogo negocio={criando ? negocio : null} hoje={hoje} aoFechar={() => setCriando(false)} />
       {negocio.proposta && <Seccao titulo={t(`${P}deal.proposal`)} nivel={4}><PropostaPainel negocio={negocio} detalhe={detalhe} hoje={hoje} /></Seccao>}
       {negocio.contrato && <Seccao titulo={t(`${P}deal.contract`)} nivel={4}><ContratoPainel negocio={negocio} detalhe={detalhe} /></Seccao>}
     </div>

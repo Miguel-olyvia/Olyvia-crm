@@ -1,9 +1,10 @@
 // Testes de arranque da página: a lista, a ficha do utilizador e a ficha da role abrem e mostram o essencial.
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import UtilizadoresPerfis from "./UtilizadoresPerfis";
 import { menuSections } from "@/components/sidebar/menuConfig";
+import { criarRole, repor } from "@/components/utilizadores-perfis/perfisStore";
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { utilizadoresPerfisTranslations } = await import("@/translations/utilizadoresPerfis");
@@ -18,6 +19,8 @@ vi.mock("@/hooks/useTranslation", async () => {
     }),
   };
 });
+
+beforeEach(repor);
 
 const renderPage = () => render(<MemoryRouter><UtilizadoresPerfis /></MemoryRouter>);
 
@@ -67,6 +70,17 @@ describe("UtilizadoresPerfis: ficha do utilizador", () => {
     expect(within(ficha).getByRole("button", { name: "Repor palavra-passe" })).toBeEnabled();
   });
 
+  it("repor a palavra-passe pede confirmação e fica registado na atividade", () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /Rui Pacheco/ }));
+    const ficha = screen.getByRole("dialog");
+    fireEvent.click(within(ficha).getByRole("button", { name: "Repor palavra-passe" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Pedir reposição" }));
+    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }));
+    fireEvent.click(within(ficha).getByRole("tab", { name: /Atividade/ }));
+    expect(within(ficha).getByText(/Reposição da palavra-passe pedida/)).toBeInTheDocument();
+  });
+
   it("o super administrador abre protegido, com as ações desligadas", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /Helena Marques/ }));
@@ -84,7 +98,22 @@ describe("UtilizadoresPerfis: roles", () => {
     fireEvent.click(screen.getByRole("button", { name: "Comercial" }));
     const ficha = screen.getByRole("dialog");
     expect(within(ficha).getByRole("heading", { name: "Comercial" })).toBeInTheDocument();
-    expect(within(ficha).getByRole("button", { name: "Eliminar" })).toBeEnabled();
+    // Uma role com utilizadores não se elimina: o botão fica desligado e a ficha diz porquê.
+    expect(within(ficha).getByRole("button", { name: "Eliminar" })).toBeDisabled();
+    expect(within(ficha).getByText(/tem utilizadores/)).toBeInTheDocument();
+  });
+
+  it("eliminar uma role sem utilizadores pede confirmação e tira-a da lista", () => {
+    criarRole({ nome: "Estagiários", codigo: "estagiarios", descricao: "d", podeAssinar: false, permissoes: [] });
+    renderPage();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Roles/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Estagiários" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Eliminar" }));
+    const pergunta = screen.getByRole("alertdialog");
+    expect(within(pergunta).getByText("Eliminar a role Estagiários?")).toBeInTheDocument();
+    fireEvent.click(within(pergunta).getByRole("button", { name: "Eliminar" }));
+    expect(screen.queryByRole("button", { name: "Estagiários" })).not.toBeInTheDocument();
   });
 
   it("a coluna chama-se Utilizadores e mostra a contagem de permissões e a marca de acesso total", () => {

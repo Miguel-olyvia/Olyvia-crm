@@ -109,6 +109,8 @@ interface FormularioProps {
   /** Avisa que há alterações por gravar. */
   aoSujar: () => void;
   aoConfirmar: (dados: DadosCriarNegocio) => void;
+  /** A pessoa já escolhida ao abrir (por exemplo a da ficha de onde se veio). */
+  pessoaInicialId?: string;
 }
 
 /**
@@ -117,13 +119,13 @@ interface FormularioProps {
  * perguntas e levantamento), as duas últimas opcionais e só exemplo. Um envio recusado leva para a primeira aba com
  * erros e põe o foco no primeiro campo errado.
  */
-export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar }: FormularioProps) {
+export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar, pessoaInicialId }: FormularioProps) {
   const { t } = useTranslation();
   const id = useId();
   const [aba, setAba] = useState<AbaNovoNegocio>("geral");
   const [tentou, setTentou] = useState(false);
   const pedirFoco = usePedidoFoco(id);
-  const { valores, acoes } = useCamposGerais(pessoas, aoSujar);
+  const { valores, acoes } = useCamposGerais(pessoas, aoSujar, pessoaInicialId);
   const lev = useLevantamentoForm(hoje, aoSujar);
   const resp = useRespostasForm(aoSujar);
   const morada = useMoradaForm(aoSujar);

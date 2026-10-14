@@ -14,6 +14,13 @@ interface NovoNegocioDialogoProps {
   pessoas: readonly PessoaOpcao[];
   /** Chamado ao confirmar, já com o painel a fechar. */
   aoCriar: (dados: DadosCriarNegocio) => void;
+  /** Controlo de fora (por exemplo a ficha de uma pessoa): sem isto o painel abre com o próprio botão. */
+  aberto?: boolean;
+  aoMudarAberto?: (aberto: boolean) => void;
+  /** Não mostra o botão "Novo negócio" (o painel abre só por `aberto`). */
+  semBotao?: boolean;
+  /** A pessoa já escolhida ao abrir (a ficha de onde se veio); ainda se pode mudar. */
+  pessoaInicialId?: string;
 }
 
 /** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
@@ -54,9 +61,13 @@ function CabecalhoNovo() {
  * escreveu); Esc e Cancelar fecham sem perguntar, como no Inventário. Ao criar, o foco não volta ao botão: quem cria
  * abre o painel do novo negócio e leva lá o foco. Só exemplo: nada é gravado.
  */
-export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps) {
+export function NovoNegocioDialogo({
+  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId,
+}: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
-  const [aberto, setAberto] = useState(false);
+  const [abertoProprio, setAbertoProprio] = useState(false);
+  const aberto = abertoDeFora ?? abertoProprio;
+  const setAberto = (valor: boolean) => { setAbertoProprio(valor); aoMudarAberto?.(valor); };
   const botao = useRef<HTMLButtonElement>(null);
   const primeiroCampo = useRef<HTMLButtonElement>(null);
   const criou = useRef(false);
@@ -75,10 +86,12 @@ export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps
 
   return (
     <>
-      <Button ref={botao} type="button" onClick={() => mudarAberto(true)} className={`min-h-11 ${FOCO}`}>
-        <Plus aria-hidden="true" />
-        {t("businessGoals.new.open")}
-      </Button>
+      {!semBotao && (
+        <Button ref={botao} type="button" onClick={() => mudarAberto(true)} className={`min-h-11 ${FOCO}`}>
+          <Plus aria-hidden="true" />
+          {t("businessGoals.new.open")}
+        </Button>
+      )}
       <Sheet open={aberto} onOpenChange={mudarAberto}>
         <SheetContent
           onOpenAutoFocus={(e) => { e.preventDefault(); primeiroCampo.current?.focus(); }}
@@ -92,7 +105,7 @@ export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps
         >
           <CabecalhoNovo />
           <FormularioNovoNegocio
-            pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo}
+            pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId}
             aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
           />
         </SheetContent>

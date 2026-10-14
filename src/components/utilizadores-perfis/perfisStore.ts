@@ -114,6 +114,24 @@ export function definirAtivo(id: string, ativo: boolean): Utilizador | null {
   return novo;
 }
 
+/** Elimina uma role personalizada. Uma role de sistema, ou com utilizadores, não se elimina (devolve `null`). */
+export function eliminarRole(id: string): Role | null {
+  const atual = estado.roles.find((r) => r.id === id);
+  const emUso = estado.utilizadores.some((u) => u.vinculos.some((v) => v.roleId === id));
+  if (!atual || atual.sistema || emUso) return null;
+  mudar({ ...estado, roles: estado.roles.filter((r) => r.id !== id) });
+  return atual;
+}
+
+/** Pede a reposição da palavra-passe: fica registada na atividade do utilizador (não se envia nenhum email). Um super administrador está protegido (devolve `null`). */
+export function pedirReposicaoPalavraPasse(id: string): Utilizador | null {
+  const atual = estado.utilizadores.find((u) => u.id === id);
+  if (!atual || ehProtegido(atual, estado.roles)) return null;
+  const novo: Utilizador = { ...atual, atividade: [atividade("Reposição da palavra-passe pedida (exemplo, nenhum email enviado)"), ...atual.atividade] };
+  mudar({ ...estado, utilizadores: estado.utilizadores.map((u) => (u.id === id ? novo : u)) });
+  return novo;
+}
+
 /** Muda a role de um utilizador numa organização (a escolha da aba Vínculos da ficha). */
 export function mudarRoleVinculo(id: string, organizacaoId: string, roleId: string): Utilizador | null {
   const atual = estado.utilizadores.find((u) => u.id === id);

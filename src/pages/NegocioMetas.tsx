@@ -5,41 +5,54 @@ import { toast } from "@/lib/toast";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { juntarPessoas } from "@/components/pessoas/juntarPessoas";
 import { paraPainelNegocio } from "@/components/pessoas/paraPainelNegocio";
-import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "@/components/pessoas/pessoasExemplo";
+import { PESSOAS_EXEMPLO } from "@/components/pessoas/pessoasExemplo";
+import { paraOpcao } from "@/components/pessoas/pessoaOpcao";
+import { usePessoasNovas } from "@/components/pessoas/pessoasNovas";
+import { useNegociosDasPessoas } from "@/components/pessoas/useNegociosDasPessoas";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { AbaQuadro } from "@/components/negocio-metas/AbaQuadro";
 import { BotaoWorkflow } from "@/components/negocio-metas/BotaoWorkflow";
 import { DashboardNegocios } from "@/components/negocio-metas/DashboardNegocios";
 import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
+import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
+import { detalheDoNegocio, negociosDoQuadro, useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
+import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { criarNegocioNovo, useNegociosNovos } from "@/components/negocio-metas/negociosNovos";
-import type { DadosCriarNegocio, PessoaOpcao } from "@/components/negocio-metas/novoNegocio";
+import type { DadosCriarNegocio } from "@/components/negocio-metas/novoNegocio";
 import { useParametroOpen } from "@/components/negocio-metas/useParametroOpen";
 import { SeletorModo } from "@/components/negocio-metas/SeletorModo";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
-import { DETALHES_EXEMPLO } from "@/components/negocio-metas/negocioDetalhesExemplo";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import {
   filtrarNegocios, numerosDashboard, resumoQuadro,
 } from "@/components/negocio-metas/logicaQuadro";
-import { useAcoesExemplo } from "@/components/negocio-metas/acoesExemplo";
+import { useAcoesNegocio } from "@/components/negocio-metas/useAcoesNegocio";
 import { useFiltrosPagina } from "@/components/negocio-metas/useFiltrosPagina";
 import { useAbrirWorkflow } from "@/components/negocio-metas/useAbrirWorkflow";
 import { usePreferenciasQuadro } from "@/components/negocio-metas/usePreferenciasQuadro";
 import { DadosPainelProvider } from "@/components/negocio-metas/useDadosPainel";
 import { WorkflowExemploProvider } from "@/components/negocio-metas/useWorkflowExemplo";
 
-/** A ficha de cada pessoa, no formato do painel do negócio (a página é quem junta Pessoas e Negócio e metas). */
-const PESSOAS_DO_PAINEL = new Map(
-  juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO).map((r) => [r.pessoa.id, paraPainelNegocio(r)]),
-);
-const pessoaDe = (pessoaId: string) => PESSOAS_DO_PAINEL.get(pessoaId) ?? null;
-/** As pessoas a escolher em "Novo negócio" (a página é quem lê Pessoas; Negócio e metas só recebe esta lista). */
-const PESSOAS_PARA_ESCOLHER: PessoaOpcao[] = PESSOAS_EXEMPLO.map((p) => ({
-  id: p.id, nome: p.nome, contacto: p.contacto, email: p.contacto.email ?? undefined,
-  morada: p.morada ? `${p.morada.linha}, ${p.morada.cp} ${p.morada.localidade}` : undefined,
-  distrito: p.distrito, nif: p.nif, empresa: p.empresa?.nome, nifEmpresa: p.empresa?.nif,
-}));
-const detalheDe = (negocioId: string) => DETALHES_EXEMPLO[negocioId] ?? null;
+/**
+ * As pessoas que a página conhece, no formato do painel do negócio e de "Novo negócio" (a página é quem junta Pessoas e
+ * Negócio e metas, que não se importam uma à outra): as de exemplo e as leads criadas em Pessoas nesta sessão, para que
+ * "Abrir pessoa" e "Novo negócio" também as encontrem.
+ */
+function usePessoasDaPagina() {
+  const novas = usePessoasNovas();
+  const negocios = useNegociosDasPessoas();
+  const pessoas = useMemo(() => [...PESSOAS_EXEMPLO, ...novas.pessoas], [novas]);
+  const doPainel = useMemo(
+    () => new Map(juntarPessoas(pessoas, negocios, HOJE_EXEMPLO).map((r) => [r.pessoa.id, paraPainelNegocio(r)])),
+    [pessoas, negocios],
+  );
+  return {
+    pessoaDe: useCallback((pessoaId: string) => doPainel.get(pessoaId) ?? null, [doPainel]),
+    paraEscolher: useMemo(() => pessoas.map(paraOpcao), [pessoas]),
+  };
+}
+
+const detalheDe = (negocioId: string) => detalheDoNegocio(negocioId);
 
 type Vista = "quadro" | "dashboard";
 
@@ -60,17 +73,22 @@ const ehVista = (valor: string): valor is Vista => valor === "quadro" || valor =
 const NegocioMetas = () => {
   const { t } = useTranslation();
   const novos = useNegociosNovos();
-  // Os negócios criados com "Novo negócio" entram em todas as vistas; sem nenhum, são exatamente os do exemplo.
+  const alteracoes = useAlteracoesNegocios();
+  const pessoasDaPagina = usePessoasDaPagina();
+  // Os negócios criados com "Novo negócio" entram em todas as vistas, com o que se mudou neles (um orçamento novo, um passo
+  // ganho) e sem os perdidos; sem nada disto, são exatamente os do exemplo.
   const dados = useMemo(
-    () => (novos.length === 0 ? DADOS_EXEMPLO : { ...DADOS_EXEMPLO, negocios: [...DADOS_EXEMPLO.negocios, ...novos] }),
-    [novos],
+    () => ({ ...DADOS_EXEMPLO, negocios: negociosDoQuadro([...DADOS_EXEMPLO.negocios, ...novos], alteracoes) }),
+    [novos, alteracoes],
   );
   const { negocios } = dados;
   const { abrir } = useParametroOpen();
   const [recemCriado, setRecemCriado] = useState<string | null>(null);
   const [anuncio, setAnuncio] = useState({ n: 0, texto: "" });
   const prefs = usePreferenciasQuadro();
-  const acoes = useAcoesExemplo();
+  const [orcamentoPara, setOrcamentoPara] = useState<string | null>(null);
+  const pedirOrcamento = useCallback((n: NegocioMes) => setOrcamentoPara(n.id), []);
+  const acoes = useAcoesNegocio(pedirOrcamento);
   const { filtros, mudarFiltros } = useFiltrosPagina(prefs);
   const [params, setParams] = useSearchParams();
   const [workflowAberto, mudarWorkflow] = useAbrirWorkflow();
@@ -112,7 +130,7 @@ const NegocioMetas = () => {
 
   return (
     <WorkflowExemploProvider>
-      <DadosPainelProvider pessoaDe={pessoaDe} detalheDe={detalheDe}>
+      <DadosPainelProvider pessoaDe={pessoasDaPagina.pessoaDe} detalheDe={detalheDe}>
         <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
           {/* Como no Inventário: a barra de abas no topo, com a linha fina por baixo, e só depois migalhas e título. */}
           <Tabs value={vista} onValueChange={(v) => { if (ehVista(v)) mudarVista(v); }} className="space-y-5">
@@ -126,7 +144,7 @@ const NegocioMetas = () => {
                 <>
                   {vista === "quadro" && <SeletorModo modo={prefs.modo} aoMudar={prefs.mudarModo} />}
                   <BotaoWorkflow aberto={workflowAberto} aoMudar={mudarWorkflow} />
-                  <NovoNegocioDialogo pessoas={PESSOAS_PARA_ESCOLHER} aoCriar={aoCriar} />
+                  <NovoNegocioDialogo pessoas={pessoasDaPagina.paraEscolher} aoCriar={aoCriar} />
                 </>
               )}
             />
@@ -140,6 +158,10 @@ const NegocioMetas = () => {
               <DashboardNegocios dados={dados} aoIrParaQuadro={() => mudarVista("quadro")} />
             </TabsContent>
           </Tabs>
+          <NovoOrcamentoDialogo
+            negocio={negocios.find((n) => n.id === orcamentoPara) ?? null} hoje={HOJE_EXEMPLO} aoFechar={() => setOrcamentoPara(null)}
+            aoCriar={(texto) => setAnuncio((a) => ({ n: a.n + 1, texto }))}
+          />
           {/* Região viva só para leitores de ecrã, no fim da página (o primeiro "status" continua a ser o do Quadro). */}
           <p role="status" className="sr-only"><span key={anuncio.n}>{anuncio.texto}</span></p>
         </div>

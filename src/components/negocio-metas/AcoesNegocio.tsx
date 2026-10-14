@@ -5,11 +5,11 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { FOCO } from "./estilos";
+import { aceitaOrcamentos } from "./negocioAcoes";
 import type { NegocioMes } from "./negocioMetas";
 
-/** As ações que se fazem a partir de um negócio. Quem usa a peça decide o que cada uma faz (na página de exemplo, só um aviso). */
+/** As ações que se fazem a partir de um negócio. Quem usa a peça decide o que cada uma faz. */
 export interface AcoesNegocio {
-  abrirNegocio: (negocio: NegocioMes) => void;
   abrirPessoa: (negocio: NegocioMes) => void;
   criarOrcamento: (negocio: NegocioMes) => void;
 }
@@ -28,9 +28,10 @@ interface BotoesAcoesNegocioProps {
  */
 export function BotoesAcoesNegocio({ negocio, acoes, className }: BotoesAcoesNegocioProps) {
   const { t } = useTranslation();
+  // Um negócio já ganho não recebe orçamentos novos: o botão não se mostra.
   const botoes: readonly { chave: string; Icone: LucideIcon; acao: () => void }[] = [
     { chave: "openPerson", Icone: UserRound, acao: () => acoes.abrirPessoa(negocio) },
-    { chave: "createQuote", Icone: FilePlus2, acao: () => acoes.criarOrcamento(negocio) },
+    ...(aceitaOrcamentos(negocio) ? [{ chave: "createQuote", Icone: FilePlus2, acao: () => acoes.criarOrcamento(negocio) }] : []),
   ];
   return (
     <TooltipProvider delayDuration={300}>

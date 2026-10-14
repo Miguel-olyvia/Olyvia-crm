@@ -4,6 +4,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { LinhaContacto } from "@/components/ficha-comum/LinhaContacto";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import { ligacoes } from "./acoesPessoa";
+import { textoMorada } from "./formatoPessoas";
 import { MarcaExemplo } from "./SelosPessoa";
 import type { Pessoa } from "./pessoasTipos";
 
@@ -23,7 +24,7 @@ export function camposDeContacto(pessoa: Pessoa): Campo[] {
   const campos: (Campo | null)[] = [
     telefone ? { chave: "telefone", valor: telefone, href: l.telefone } : null,
     email ? { chave: "email", valor: email, href: l.email } : null,
-    m ? { chave: "morada", valor: `${m.linha}, ${m.cp} ${m.localidade}` } : null,
+    m ? { chave: "morada", valor: textoMorada(m) } : null,
     pessoa.distrito ? { chave: "distrito", valor: pessoa.distrito } : null,
     pessoa.nif ? { chave: "nif", valor: pessoa.nif } : null,
     pessoa.empresa ? { chave: "empresa", valor: pessoa.empresa.nome } : null,

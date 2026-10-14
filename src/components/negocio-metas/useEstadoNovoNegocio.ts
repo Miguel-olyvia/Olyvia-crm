@@ -11,12 +11,15 @@ import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { alternarResposta } from "./respostasVisita";
 import { SECCOES_VISITA } from "./visitaExemplo";
 import {
-  COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, reporContacto, type ChaveContacto, type PessoaOpcao,
+  COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, preencherContactoDaPessoa, reporContacto, type ChaveContacto, type PessoaOpcao,
 } from "./novoNegocio";
 
-export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => void) {
-  const [valores, setValores] = useState<ValoresGeral>({
-    pessoaId: "", comercial: COMERCIAL_POR_OMISSAO, contacto: CONTACTO_VAZIO,
+export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => void, pessoaInicialId?: string) {
+  const [valores, setValores] = useState<ValoresGeral>(() => {
+    const inicial = pessoas.find((p) => p.id === pessoaInicialId);
+    return {
+      pessoaId: inicial?.id ?? "", comercial: COMERCIAL_POR_OMISSAO, contacto: inicial ? preencherContactoDaPessoa(inicial) : CONTACTO_VAZIO,
+    };
   });
   const [tocados, setTocados] = useState<ReadonlySet<ChaveContacto>>(new Set());
   const mudar = (parcial: Partial<ValoresGeral>) => { aoSujar(); setValores((v) => ({ ...v, ...parcial })); };

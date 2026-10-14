@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useRef, useState } from "react";
-import { ExternalLink, FilePlus2, UserRound } from "lucide-react";
+import { FilePlus2, UserRound } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/Abas
 import type { AcoesNegocio } from "./AcoesNegocio";
 import { CabecalhoPainel } from "./CabecalhoPainel";
 import { ContratoPainel } from "./ContratoPainel";
+import { aceitaOrcamentos } from "./negocioAcoes";
 import { OrcamentosPainel } from "./OrcamentosPainel";
 import { PessoaPainel } from "./PessoaPainel";
 import { PropostaPainel } from "./PropostaPainel";
@@ -16,6 +17,7 @@ import { ResumoPainel } from "./ResumoPainel";
 import { FOCO } from "./estilos";
 import type { NegocioMes } from "./negocioMetas";
 import { abasDoNegocio, ehAba } from "./negocioPainel";
+import { enderecoDaPessoa } from "./useAcoesNegocio";
 import { useDadosPainel } from "./useDadosPainel";
 
 interface PainelNegocioProps {
@@ -28,31 +30,26 @@ interface PainelNegocioProps {
 }
 
 /**
- * A barra de ações, fixa: Abrir negócio (a única principal), Abrir pessoa e Criar orçamento. Os dois primeiros são
- * ligações reais (/deals?open=, /pessoas?open=); "Criar orçamento" e as ações dos cartões e das linhas da Lista
- * ainda só mostram um aviso de exemplo (ver `acoesExemplo.ts`).
+ * A barra de ações, fixa: Abrir pessoa (uma ligação real a /pessoas?open=, que abre a ficha dela) e Criar orçamento
+ * (abre o diálogo da página, que acrescenta o orçamento ao negócio em memória; um negócio já ganho não o mostra).
  */
 function BarraAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegocio }) {
   const { t } = useTranslation();
   const botao = cn("min-h-11 gap-2", FOCO);
   return (
     <div role="group" aria-label={t("businessGoals.panel.actions")} className="flex flex-wrap gap-2 border-b border-border px-6 py-3">
-      <Button asChild className={botao}>
-        <Link to={`/deals?open=${encodeURIComponent(negocio.id)}`}>
-          <ExternalLink className="h-4 w-4" aria-hidden="true" />
-          {t("businessGoals.panel.open")}
-        </Link>
-      </Button>
       <Button asChild variant="outline" className={botao}>
-        <Link to={`/pessoas?open=${encodeURIComponent(negocio.pessoaId)}`}>
+        <Link to={enderecoDaPessoa(negocio.pessoaId)}>
           <UserRound className="h-4 w-4" aria-hidden="true" />
           {t("businessGoals.panel.openPerson")}
         </Link>
       </Button>
-      <Button type="button" variant="outline" className={botao} onClick={() => acoes.criarOrcamento(negocio)}>
-        <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-        {t("businessGoals.actions.createQuote")}
-      </Button>
+      {aceitaOrcamentos(negocio) && (
+        <Button type="button" className={botao} onClick={() => acoes.criarOrcamento(negocio)}>
+          <FilePlus2 className="h-4 w-4" aria-hidden="true" />
+          {t("businessGoals.actions.createQuote")}
+        </Button>
+      )}
     </div>
   );
 }

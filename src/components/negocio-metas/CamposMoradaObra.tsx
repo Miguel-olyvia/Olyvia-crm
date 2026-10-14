@@ -1,4 +1,4 @@
-import { Home, MapPin } from "lucide-react";
+import { Home } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
@@ -22,7 +22,7 @@ interface Props {
 
 const CAMPO = cn("min-h-11", FOCO);
 
-/** A morada da obra (fica no negócio, não na pessoa): rua, código postal 0000-000, localidade e andar, com dois atalhos. */
+/** A morada da obra (fica no negócio, não na pessoa): rua, código postal 0000-000, localidade e andar, com o atalho de usar a morada do contacto. */
 export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, aoMudar, aoPreencher }: Props) {
   const { t } = useTranslation();
   const usarContacto = () => {
@@ -41,10 +41,6 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, aoMu
         <Button type="button" variant="outline" onClick={usarContacto} className={cn("min-h-11 gap-2", FOCO)}>
           <Home className="h-4 w-4" aria-hidden="true" />
           {t(`${N}address.useContact`)}
-        </Button>
-        <Button type="button" variant="outline" onClick={() => toast.info(t(`${N}address.locate.toast`))} className={cn("min-h-11 gap-2", FOCO)}>
-          <MapPin className="h-4 w-4" aria-hidden="true" />
-          {t(`${N}address.locate`)}
         </Button>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

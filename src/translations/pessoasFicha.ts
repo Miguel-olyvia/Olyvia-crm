@@ -22,7 +22,6 @@ export const pessoasFichaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.bar.createDeal': 'Criar negócio',
     'pessoasPagina.bar.markLost': 'Marcar como perdida',
     'pessoasPagina.bar.newTab': '(abre noutro separador)',
-    'pessoasPagina.bar.createToast': 'Exemplo: abriria um novo negócio para {name} em Negócio e metas',
 
     'pessoasPagina.panel.save': 'Guardar',
     'pessoasPagina.panel.cancel': 'Cancelar',
@@ -124,7 +123,6 @@ export const pessoasFichaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.bar.createDeal': 'Create deal',
     'pessoasPagina.bar.markLost': 'Mark as lost',
     'pessoasPagina.bar.newTab': '(opens in a new tab)',
-    'pessoasPagina.bar.createToast': 'Sample: would open a new deal for {name} in Deals and goals',
 
     'pessoasPagina.panel.save': 'Save',
     'pessoasPagina.panel.cancel': 'Cancel',

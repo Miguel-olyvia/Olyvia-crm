@@ -125,7 +125,7 @@ export function AbaQuadro(props: AbaQuadroProps) {
     ajuda: () => setAjudaAberta((a) => !a),
     selecionar: sel.selecao.alternar,
     comparar: sel.comparar,
-    abrir: (id) => { const n = negocios.find((x) => x.id === id); if (n) acoes.abrirNegocio(n); },
+    abrir: (id) => { const n = negocios.find((x) => x.id === id); if (n) abrir(n); },
   });
   const mudarFiltros = (parcial: Partial<FiltrosQuadro>) => aoMudarFiltros({ ...filtros, ...parcial });
   const comSelecao = sel.selecao.ids.length > 0;

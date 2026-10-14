@@ -2,7 +2,7 @@
 // "jun/2026", "ontem às 18:40". Recebem `t` e o dia de hoje (nunca leem o relógio).
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { diasParaPrazo, type Traduzir } from "@/components/negocio-metas/saudeNegocio";
-import type { ResumoPessoa } from "./pessoasTipos";
+import type { Pessoa, ResumoPessoa } from "./pessoasTipos";
 
 const P = "pessoasPagina.";
 
@@ -102,4 +102,9 @@ export function textoLinhaCabecalho(t: Traduzir, r: ResumoPessoa): string {
   const vistos: string[] = [];
   for (const s of segmentos) if (s && !vistos.includes(s)) vistos.push(s);
   return vistos.join(" · ");
+}
+
+/** A morada numa linha: "Rua X, 1000-001 Lisboa"; uma lead criada só com a localidade fica "Sintra" (sem vírgulas soltas). */
+export function textoMorada(m: NonNullable<Pessoa["morada"]>): string {
+  return [m.linha, `${m.cp} ${m.localidade}`.trim()].filter(Boolean).join(", ");
 }

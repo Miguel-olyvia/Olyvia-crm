@@ -8,12 +8,14 @@ import { SheetClose, SheetDescription, SheetHeader, SheetTitle } from "@/compone
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AvatarPessoa } from "@/components/pessoas/AvatarPessoa";
+import { ConfirmarAcao } from "./ConfirmarAcao";
 import { FichaLateral } from "./FichaLateral";
 import { EDITOR_EXEMPLO, PERMISSOES } from "./catalogoExemplo";
 import { contarPermissoesPorRole, permissoesVisiveis, podeEliminarRole } from "./logica";
 import { SimNao } from "./AbaRoles";
 import { Linha } from "./SeparadoresSimples";
 import { MatrizPermissoes } from "./MatrizPermissoes";
+import { eliminarRole } from "./perfisStore";
 import { TagEstado } from "./pecas";
 import type { Role, Utilizador } from "./tipos";
 
@@ -67,7 +69,15 @@ function Interior(p: InteriorProps) {
   const { role } = p;
   const eliminavel = podeEliminarRole(role);
   const nPermissoes = contarPermissoesPorRole([role], permissoesVisiveis(PERMISSOES, EDITOR_EXEMPLO))[role.id];
-  const aviso = (chave: string) => toast.info(t(`usersProfiles.example.${chave}`, { name: role.nome }));
+  const [confirmar, setConfirmar] = useState(false);
+  // Uma role com utilizadores não se elimina: a ficha diz porquê em vez de deixar o botão sem explicação.
+  const emUso = p.utilizadores.length > 0;
+  const eliminar = () => {
+    setConfirmar(false);
+    if (!eliminarRole(role.id)) return;
+    toast.success(t("usersProfiles.roles.deleteConfirm.done", { name: role.nome }));
+    p.aoFechar();
+  };
   return (
     <>
       <SheetHeader className="flex-row flex-wrap items-start gap-x-3 gap-y-2 space-y-0 p-6 pb-4 text-left">
@@ -93,12 +103,18 @@ function Interior(p: InteriorProps) {
             <Copy className="mr-1.5 h-4 w-4" aria-hidden="true" />
             {t("usersProfiles.actions.duplicate")}
           </Button>
-          <Button type="button" variant="outline" className="min-h-11" disabled={!eliminavel} onClick={() => aviso("delete")}>
+          <Button type="button" variant="outline" className="min-h-11" disabled={!eliminavel || emUso} onClick={() => setConfirmar(true)}>
             <Trash2 className="mr-1.5 h-4 w-4" aria-hidden="true" />
             {t("usersProfiles.actions.delete")}
           </Button>
         </div>
         {!eliminavel && <p className="text-sm text-muted-foreground">{t("usersProfiles.roles.systemNote")}</p>}
+        {eliminavel && emUso && <p className="text-sm text-muted-foreground">{t("usersProfiles.roles.inUseNote")}</p>}
+        <ConfirmarAcao
+          aberto={confirmar} titulo={t("usersProfiles.roles.deleteConfirm.title", { name: role.nome })}
+          texto={t("usersProfiles.roles.deleteConfirm.text")} confirmar={t("usersProfiles.roles.deleteConfirm.yes")}
+          aoConfirmar={eliminar} aoCancelar={() => setConfirmar(false)}
+        />
       </div>
       <Tabs value={aba} onValueChange={(v) => setAba(v as AbaRole)} className="flex min-h-0 flex-1 flex-col">
         <ListaAbas aria-label={t("usersProfiles.sheet.tabs")} className="px-6">

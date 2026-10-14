@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ROLES_EXEMPLO } from "./catalogoExemplo";
 import { contarPermissoesPorRole, contarUtilizadoresPorRole, filtrarUtilizadores } from "./logica";
 import {
-  criarRole, criarUtilizador, definirAtivo, estadoDe, guardarRole, guardarUtilizador, mudarRoleVinculo, repor,
+  criarRole, criarUtilizador, definirAtivo, eliminarRole, estadoDe, guardarRole, guardarUtilizador, mudarRoleVinculo, pedirReposicaoPalavraPasse, repor,
   rolesAtuais, utilizadoresAtuais, type DadosRole, type DadosUtilizador,
 } from "./perfisStore";
 import { FILTROS_INICIAIS } from "./tipos";
@@ -101,6 +101,26 @@ describe("perfisStore: utilizadores", () => {
     const novo = mudarRoleVinculo("u-02", "o-grupo", "r-leitura");
     expect(novo?.vinculos.map((v) => v.roleId)).toEqual(["r-leitura", "r-comercial", "r-leitura"]);
     expect(mudarRoleVinculo("u-01", "o-grupo", "r-leitura")).toBeNull();
+  });
+
+  it("eliminar tira só uma role personalizada sem utilizadores", () => {
+    const criada = criarRole(ROLE);
+    expect(eliminarRole(criada.id)?.id).toBe(criada.id);
+    expect(rolesAtuais().some((r) => r.id === criada.id)).toBe(false);
+    expect(eliminarRole("r-comercial")).toBeNull();
+    expect(eliminarRole("r-super")).toBeNull();
+    expect(eliminarRole("nao-existe")).toBeNull();
+    expect(rolesAtuais()).toHaveLength(7);
+  });
+
+  it("pedir a reposição da palavra-passe regista-o na atividade e não mexe no resto", () => {
+    const antes = utilizadoresAtuais().find((u) => u.id === "u-04")!;
+    const depois = pedirReposicaoPalavraPasse("u-04")!;
+    expect(depois.atividade).toHaveLength(antes.atividade.length + 1);
+    expect(depois.atividade[0].texto).toMatch(/Reposição da palavra-passe pedida/);
+    expect({ ...depois, atividade: [] }).toEqual({ ...antes, atividade: [] });
+    expect(pedirReposicaoPalavraPasse("u-01")).toBeNull();
+    expect(pedirReposicaoPalavraPasse("nao-existe")).toBeNull();
   });
 
   it("repor volta aos dados de exemplo e recomeça a numeração", () => {

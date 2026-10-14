@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { KeyRound, Lock, Pencil, UserCheck, UserX } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
@@ -13,7 +12,7 @@ import { ConfirmarAcao } from "./ConfirmarAcao";
 import { FichaLateral } from "./FichaLateral";
 import type { ResultadoForm } from "./FormRole";
 import { ehProtegido } from "./logica";
-import { definirAtivo, mudarRoleVinculo } from "./perfisStore";
+import { definirAtivo, mudarRoleVinculo, pedirReposicaoPalavraPasse } from "./perfisStore";
 import { SeparadorAtividade, SeparadorResumo } from "./SeparadoresSimples";
 import { SeparadorPermissoesUtilizador } from "./SeparadorPermissoesUtilizador";
 import { SeparadorVinculos } from "./SeparadorVinculos";
@@ -46,12 +45,12 @@ interface AcoesProps {
   aoResultado: (r: ResultadoForm) => void;
 }
 
-/** Editar e Mudar role abrem o formulário; Desativar/Reativar pedem confirmação e mudam mesmo o estado (em memória). Repor a palavra-passe só avisa. Num super administrador ficam desligadas. */
+/** Editar e Mudar role abrem o formulário; Desativar/Reativar pedem confirmação e mudam mesmo o estado (em memória). Repor a palavra-passe pede confirmação e fica registado na atividade (não se envia email). Num super administrador ficam desligadas. */
 function Acoes({ u, protegido, aoEditar, aoResultado }: AcoesProps) {
   const { t } = useTranslation();
   const [confirmar, setConfirmar] = useState(false);
   const Estado = u.ativo ? UserX : UserCheck;
-  const aviso = (chave: string) => toast.info(t(`usersProfiles.example.${chave}`, { name: u.nome }));
+  const [reposicao, setReposicao] = useState(false);
   const chave = u.ativo ? "deactivate" : "reactivate";
   const mudarEstado = () => {
     setConfirmar(false);
@@ -59,6 +58,14 @@ function Acoes({ u, protegido, aoEditar, aoResultado }: AcoesProps) {
     aoResultado({
       aviso: t(`usersProfiles.form.toast.${u.ativo ? "deactivated" : "reactivated"}`, { name: u.nome }),
       anuncio: t(`usersProfiles.form.announce.${u.ativo ? "deactivated" : "reactivated"}`, { name: u.nome }),
+    });
+  };
+  const pedirReposicao = () => {
+    setReposicao(false);
+    if (!pedirReposicaoPalavraPasse(u.id)) return;
+    aoResultado({
+      aviso: t("usersProfiles.form.toast.resetPassword", { name: u.nome }),
+      anuncio: t("usersProfiles.form.announce.resetPassword", { name: u.nome }),
     });
   };
   return (
@@ -75,7 +82,7 @@ function Acoes({ u, protegido, aoEditar, aoResultado }: AcoesProps) {
           <Estado className="mr-1.5 h-4 w-4" aria-hidden="true" />
           {u.ativo ? t("usersProfiles.actions.deactivate") : t("usersProfiles.actions.reactivate")}
         </Button>
-        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={() => aviso("resetPassword")}>
+        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={() => setReposicao(true)}>
           <KeyRound className="mr-1.5 h-4 w-4" aria-hidden="true" />
           {t("usersProfiles.actions.resetPassword")}
         </Button>
@@ -90,6 +97,11 @@ function Acoes({ u, protegido, aoEditar, aoResultado }: AcoesProps) {
         aberto={confirmar} titulo={t(`usersProfiles.form.confirm.${chave}.title`, { name: u.nome })}
         texto={t(`usersProfiles.form.confirm.${chave}.text`)} confirmar={t(`usersProfiles.form.confirm.${chave}.yes`)}
         aoConfirmar={mudarEstado} aoCancelar={() => setConfirmar(false)}
+      />
+      <ConfirmarAcao
+        aberto={reposicao} titulo={t("usersProfiles.form.confirm.resetPassword.title", { name: u.nome })}
+        texto={t("usersProfiles.form.confirm.resetPassword.text")} confirmar={t("usersProfiles.form.confirm.resetPassword.yes")}
+        aoConfirmar={pedirReposicao} aoCancelar={() => setReposicao(false)}
       />
     </div>
   );

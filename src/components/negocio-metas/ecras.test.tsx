@@ -34,7 +34,7 @@ const { negocios } = DADOS_EXEMPLO;
 const hoje = HOJE_EXEMPLO;
 const ordenados = ordenarNegocios(negocios, null, hoje);
 const acoes: AcoesNegocio = {
-  abrirNegocio: vi.fn(), abrirPessoa: vi.fn(), criarOrcamento: vi.fn(),
+  abrirPessoa: vi.fn(), criarOrcamento: vi.fn(),
 };
 const noRouter = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
@@ -85,7 +85,7 @@ describe("arranque dos ecrãs", () => {
     expect(screen.getByRole("button", { name: "Expandir tudo" })).toBeInTheDocument();
   });
 
-  it("Painel aberto: cabeçalho, separadores, três ações (sem Copiar contacto) e a cadeia no Resumo", () => {
+  it("Painel aberto: cabeçalho, separadores, duas ações (sem Copiar contacto nem ligação à base) e a cadeia no Resumo", () => {
     noRouter(comDados(<PainelNegocio negocio={negocios[9]} hoje={hoje} acoes={acoes} aoFechar={vi.fn()} />));
     const painel = screen.getByRole("dialog", { name: "Vasco Pinto" });
     expect(within(painel).getByRole("heading", { name: "Vasco Pinto" })).toBeVisible();
@@ -95,10 +95,10 @@ describe("arranque dos ecrãs", () => {
     ]);
     expect(within(abas).getByRole("tab", { name: /^Resumo$/ })).toHaveAttribute("aria-selected", "true");
     const barra = within(painel).getByRole("group", { name: "Ações do negócio" });
-    expect(within(barra).getByRole("link", { name: "Abrir negócio" })).toHaveAttribute("href", "/deals?open=n10");
+    expect(within(barra).queryByRole("link", { name: "Abrir negócio" })).not.toBeInTheDocument();
     expect(within(barra).getByRole("link", { name: "Abrir pessoa" })).toHaveAttribute("href", "/pessoas?open=p-vasco");
     expect(within(barra).getByRole("button", { name: "Criar orçamento" })).toBeInTheDocument();
-    expect(within(barra).getAllByRole("link")).toHaveLength(2);
+    expect(within(barra).getAllByRole("link")).toHaveLength(1);
     expect(within(barra).getAllByRole("button")).toHaveLength(1);
     expect(within(painel).queryByRole("button", { name: "Copiar contacto" })).not.toBeInTheDocument();
     expect(within(painel).getByRole("list", { name: "Cadeia do negócio" })).toBeInTheDocument();

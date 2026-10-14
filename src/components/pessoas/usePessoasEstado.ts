@@ -3,26 +3,35 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { adiar, juntarNota, perder, reativar, registarChamada, type ContextoPerda, type DadosChamada } from "./acoesPessoa";
+import type { DadosNovaLead } from "./novaLead";
+import { pessoasNovas, registarLead } from "./pessoasNovas";
+import { marcarVisita, type DadosVisita } from "./visitaPessoa";
+import { useNegociosDasPessoas } from "./useNegociosDasPessoas";
 import { chipValido } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
-import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
+import { PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import { guardarPrefsPessoas, lerPrefsPessoas, type PreferenciasPessoas } from "./preferenciasPessoas";
 import type { ChipPessoa, EstadoPessoas, MotivoPerda, OrdemPessoa, TipoPessoa } from "./pessoasTipos";
 import { pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
 
-const ESTADO_INICIAL: EstadoPessoas = {
-  submissoes: SUBMISSOES_EXEMPLO, notas: [], pessoas: PESSOAS_EXEMPLO, atividade: [], contactadas: [],
-};
+/** O estado de partida: o exemplo e as leads criadas até agora (que sobrevivem à navegação, ver `pessoasNovas.ts`). */
+function estadoInicial(): EstadoPessoas {
+  const novas = pessoasNovas();
+  return {
+    submissoes: SUBMISSOES_EXEMPLO, notas: [], pessoas: [...PESSOAS_EXEMPLO, ...novas.pessoas], atividade: [...novas.atividade], contactadas: [],
+  };
+}
 
 /** Os dados da página e as ações que os mudam. `podeVerSubmissoes` esconde tudo o que vem de submissões. */
 export function usePessoasEstado(podeVerSubmissoes: boolean) {
-  const [estado, setEstado] = useState<EstadoPessoas>(ESTADO_INICIAL);
+  const [estado, setEstado] = useState<EstadoPessoas>(estadoInicial);
+  const negocios = useNegociosDasPessoas();
   const [prefs, setPrefs] = useState<PreferenciasPessoas>(lerPrefsPessoas);
   useEffect(() => guardarPrefsPessoas(prefs), [prefs]);
 
   const resumos = useMemo(
-    () => juntarPessoas(estado.pessoas, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO),
-    [estado.pessoas],
+    () => juntarPessoas(estado.pessoas, negocios, HOJE_EXEMPLO),
+    [estado.pessoas, negocios],
   );
   const submissoes = useMemo(() => (podeVerSubmissoes ? estado.submissoes : []), [podeVerSubmissoes, estado.submissoes]);
   const pendentes = useMemo(
@@ -56,13 +65,23 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
     (id: string, texto: string) => setEstado((atual) => juntarNota(atual, id, texto, HOJE_EXEMPLO)),
     [],
   );
+  /** Cria a lead (Por contactar), guarda-a e devolve-a, para a página lhe abrir a ficha. */
+  const criarLead = useCallback((dados: DadosNovaLead) => {
+    const lead = registarLead(dados, HOJE_EXEMPLO);
+    setEstado((atual) => ({ ...atual, pessoas: [...atual.pessoas, lead.pessoa], atividade: [...lead.atividade, ...atual.atividade] }));
+    return lead.pessoa;
+  }, []);
+  const marcarVisitaPedida = useCallback(
+    (id: string, dados: DadosVisita) => setEstado((atual) => marcarVisita(atual, id, dados, HOJE_EXEMPLO)),
+    [],
+  );
   const mudarOrdem = useCallback((ordem: OrdemPessoa) => setPrefs((p) => ({ ...p, ordem })), []);
   const mudarChip = useCallback((chip: ChipPessoa) => setPrefs((p) => ({ ...p, chip })), []);
   const mudarTipo = useCallback((tipo: TipoPessoa) => setPrefs((p) => ({ ...p, tipo, chip: chipValido(tipo, p.chip) })), []);
 
   return {
     resumos, submissoes, notas, pendentes, atividade: estado.atividade, prefs: prefsEfetivas, resolver,
-    registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual,
+    registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual, criarLead, marcarVisita: marcarVisitaPedida,
     mudarOrdem, mudarChip, mudarTipo,
   };
 }

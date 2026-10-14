@@ -1,12 +1,12 @@
 import { useId } from "react";
 import { AlertTriangle, CalendarClock } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { BlocoCandidata } from "./BlocoCandidata";
 import { CamposSubmetidos } from "./CamposSubmetidos";
+import { useMarcarVisita } from "./marcarVisitaContexto";
 import { textoData } from "./formatoPessoas";
 import type { CandidataSubmissao, Pessoa, Submissao } from "./pessoasTipos";
 
@@ -26,18 +26,27 @@ interface CartaoSubmissaoProps {
 
 const SELO = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium text-foreground";
 
-function AvisoVisita({ servico, nome }: { servico: string; nome: string }) {
+/**
+ * O aviso de que pediu uma visita ainda por marcar, com o botão que a marca (abre o diálogo da página). Sem uma pessoa a que a
+ * ligar (um conflito entre duas), ou se já tem visita marcada, não há botão: diz-se o que acontece.
+ */
+function AvisoVisita({ servico, nome, pessoa }: { servico: string; nome: string; pessoa: Pessoa | null }) {
   const { t } = useTranslation();
+  const marcar = useMarcarVisita();
+  const jaMarcada = pessoa?.etapa === "visitaMarcada" || (pessoa !== null && marcar?.marcadas.has(pessoa.id) === true);
   return (
     <div role="note" className="flex flex-wrap items-center gap-3 rounded-lg border border-warning bg-warning/15 p-3">
       <CalendarClock className="h-4 w-4 shrink-0 text-foreground" aria-hidden="true" />
       <p className="flex-1 text-sm text-foreground">{t("pessoasPagina.visit.warning", { service: servico })}</p>
-      <Button
-        type="button" variant="outline" className={cn("min-h-11", FOCO)} aria-label={t("pessoasPagina.visit.bookNamed", { name: nome })}
-        onClick={() => toast.info(t("pessoasPagina.visit.toast", { name: nome }))}
-      >
-        {t("pessoasPagina.visit.book")}
-      </Button>
+      {jaMarcada && <p className="text-sm font-medium text-foreground">{t("pessoasPagina.visit.booked")}</p>}
+      {marcar && pessoa && !jaMarcada && (
+        <Button
+          type="button" variant="outline" className={cn("min-h-11", FOCO)} aria-label={t("pessoasPagina.visit.bookNamed", { name: nome })}
+          onClick={() => marcar.pedir({ pessoaId: pessoa.id, nome, servico })}
+        >
+          {t("pessoasPagina.visit.book")}
+        </Button>
+      )}
     </div>
   );
 }
@@ -104,7 +113,7 @@ export function CartaoSubmissao(props: CartaoSubmissaoProps) {
         </p>
       </header>
       <Candidatas {...props} />
-      {s.visitaPedida && <AvisoVisita servico={s.visitaPedida} nome={nome} />}
+      {s.visitaPedida && <AvisoVisita servico={s.visitaPedida} nome={nome} pessoa={conflito ? null : candidatas[0]?.pessoa ?? null} />}
       <div role="group" aria-labelledby={idCampos} className="space-y-1">
         <h3 id={idCampos} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("pessoasPagina.fields.title")}</h3>
         <CamposSubmetidos campos={s.campos} />

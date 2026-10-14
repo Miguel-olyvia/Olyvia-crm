@@ -12,7 +12,6 @@ export const pessoasListaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.col.value': 'Valor',
     'pessoasPagina.shortcuts.nav': 'Pessoa anterior ou seguinte (na ficha)',
     'pessoasPagina.newLead': 'Nova lead',
-    'pessoasPagina.newLeadToast': 'Nova lead: exemplo, ainda não grava',
 
     'pessoasPagina.search.label': 'Procurar pessoas por nome, telefone ou localidade',
     'pessoasPagina.search.placeholder': 'Procurar nome, telefone ou localidade',
@@ -102,7 +101,6 @@ export const pessoasListaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.col.value': 'Value',
     'pessoasPagina.shortcuts.nav': 'Previous or next person (in the record)',
     'pessoasPagina.newLead': 'New lead',
-    'pessoasPagina.newLeadToast': 'New lead: sample, does not save yet',
 
     'pessoasPagina.search.label': 'Search people by name, phone or town',
     'pessoasPagina.search.placeholder': 'Search name, phone or town',

@@ -3,8 +3,6 @@
 import { useRef } from "react";
 import { ArrowRight, Mail, MessageCircle, MoreHorizontal, Phone } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { useAnunciar } from "./anuncioFicha";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +23,8 @@ interface BarraAcoesProps {
   /** `origem` é o botão a que o foco regressa quando o painel fecha. */
   aoAbrir: (acao: AcaoFicha, origem: HTMLElement | null) => void;
   aoReativar: () => void;
+  /** "Criar negócio": a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
+  aoCriarNegocio: () => void;
 }
 
 /** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. */
@@ -60,12 +60,15 @@ function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
  * "Mais": Nota, Adiar, Criar negócio e, no fim e separada, "Marcar como perdida" (uma lead, em qualquer passo antes de
  * cliente, mesmo com negócios abertos) ou, numa perdida, "Reativar lead". Um cliente não se perde.
  */
-function MenuMais({ resumo, aoAbrir, aoReativar }: BarraAcoesProps) {
+function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesProps) {
   const { t } = useTranslation();
-  const anunciar = useAnunciar();
   const gatilho = useRef<HTMLButtonElement>(null);
   const escolhida = useRef(false);
   const { pessoa, papel } = resumo;
+  const criarNegocio = () => {
+    escolhida.current = true;
+    aoCriarNegocio();
+  };
   const abrir = (acao: AcaoFicha) => {
     escolhida.current = true;
     aoAbrir(acao, gatilho.current);
@@ -84,7 +87,7 @@ function MenuMais({ resumo, aoAbrir, aoReativar }: BarraAcoesProps) {
       >
         <DropdownMenuItem className="min-h-11" onSelect={() => abrir("nota")}>{t("pessoasPagina.bar.note")}</DropdownMenuItem>
         <DropdownMenuItem className="min-h-11" onSelect={() => abrir("adiar")}>{t("pessoasPagina.bar.snooze")}</DropdownMenuItem>
-        <DropdownMenuItem className="min-h-11" onSelect={() => { const m = t("pessoasPagina.bar.createToast", { name: pessoa.nome }); toast.info(m); anunciar(m); }}>
+        <DropdownMenuItem className="min-h-11" onSelect={criarNegocio}>
           {t("pessoasPagina.bar.createDeal")}
         </DropdownMenuItem>
         {papel === "lead" && (

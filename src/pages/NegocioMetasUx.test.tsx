@@ -308,7 +308,7 @@ describe("Lista", () => {
 });
 
 describe("painel do negócio", () => {
-  it("mostra a cadeia por ordem e as ligações para o negócio e para a pessoa", () => {
+  it("mostra a cadeia por ordem e a ligação para a pessoa", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /^Rui Figueiredo · / }));
     const painel = screen.getByRole("dialog");
@@ -317,7 +317,7 @@ describe("painel do negócio", () => {
     expect(passos[0]).toHaveTextContent("Orçamentos");
     expect(passos[1]).toHaveTextContent("Proposta");
     expect(passos[2]).toHaveTextContent("Contrato");
-    expect(within(painel).getByRole("link", { name: "Abrir negócio" })).toHaveAttribute("href", "/deals?open=n2");
+    expect(within(painel).queryByRole("link", { name: "Abrir negócio" })).not.toBeInTheDocument();
     expect(within(painel).getByRole("link", { name: "Abrir pessoa" })).toHaveAttribute("href", "/pessoas?open=p-rui");
   });
 });
