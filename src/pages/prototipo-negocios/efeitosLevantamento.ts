@@ -78,5 +78,5 @@ export const efeitosDoCampo = (k: string, f: Record<string, string>): Efeito[] =
 /** Os campos que podem mexer no orçamento (para o aviso "mexe no orçamento" ao lado do campo). */
 export const CAMPOS_COM_EFEITO = new Set([
   "diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes", "estacionamento",
-  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", 
+  "zona_estacionamento", "amianto", "diag_gas", "impacto_percent", "habitada_durante_obra", "diag_janela", "dist_entulho",
 ]);
