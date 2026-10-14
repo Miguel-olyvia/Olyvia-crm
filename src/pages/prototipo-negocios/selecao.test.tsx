@@ -283,7 +283,7 @@ describe("a seleção guiada no ecrã", () => {
     expect(d.visita.extra.c3).toBe(1);
     // sem fila 1 · 2 · 3: a quantidade em texto ("1 un", não há medida) e um "Mudar" só no cartão escolhido
     const li = nicho.closest("li")!;
-    expect(nicho).toHaveTextContent("1 un");
+    expect(li).toHaveTextContent("1 un");
     expect(within(li).queryByRole("button", { name: "2" })).toBeNull();
     expect(within(li).queryByRole("button", { name: "3" })).toBeNull();
     expect(screen.getAllByRole("button", { name: /^Mudar a quantidade/ })).toHaveLength(1);
@@ -292,7 +292,7 @@ describe("a seleção guiada no ecrã", () => {
     fireEvent.change(campo, { target: { value: "2" } });
     fireEvent.keyDown(campo, { key: "Enter" });
     expect(d.visita.extra.c3).toBe(2);
-    expect(nicho).toHaveTextContent("2 un");
+    expect(li).toHaveTextContent("2 un");
     // pelo teclado: é um botão (Enter e Espaço ativam-no)
     nicho.focus();
     expect(document.activeElement).toBe(nicho);

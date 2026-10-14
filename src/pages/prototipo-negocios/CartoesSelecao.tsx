@@ -85,7 +85,11 @@ export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on,
  * A quantidade no cartão escolhido, sem fila de números: o texto ("12 m² · da visita", ou "1 un") e um "Mudar" discreto,
  * que abre um campo numérico pequeno (Enter ou sair do campo grava; Escape desiste). Só se põe no cartão escolhido.
  */
-export function QtdMudar({ id, valor, un, nome, texto, onMudar }: { id: string; valor: number; un: string; nome: string; texto?: string; onMudar: (n: number) => void }) {
+export function QtdMudar({ id, valor, un, nome, texto, onMudar, recuo }: {
+  id: string; valor: number; un: string; nome: string; texto?: string; onMudar: (n: number) => void;
+  /** Nos cartões de serviço: alinhado com o nome (depois do ícone), colado a ele, no lugar da 2.ª linha. */
+  recuo?: boolean;
+}) {
   const [aberto, setAberto] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -97,7 +101,7 @@ export function QtdMudar({ id, valor, un, nome, texto, onMudar }: { id: string; 
     setTimeout(() => btn.current?.focus(), 0);
   };
   return (
-    <div className="flex min-h-9 items-center justify-between gap-2 px-3 pb-2 animate-in fade-in-0 duration-150">
+    <div className={cn("flex min-h-9 items-center justify-between gap-2 pb-2 pr-3 animate-in fade-in-0 duration-150", recuo ? "-mt-3 pl-[64px]" : "pl-3")}>
       {aberto ? (
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="sr-only">Quantidade de {nome}</span>

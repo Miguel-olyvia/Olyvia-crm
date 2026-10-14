@@ -242,9 +242,9 @@ function PassoServicos({ ctx, K }: { ctx: P; K: Catalogo }) {
           const { nome, detalhe } = encurtar(t.n, { servico: true });
           return (
             <CartaoServico key={t.sid} nome={nome} nomeCompleto={t.n} icone={t.icone} on={t.on} so={!!t.de && !manual} desativado={t.semMedida}
-              linha2={linha2(t, daMedida, detalhe)} onTocar={() => run(() => { tocarServico(A, d, t, medidaDe(t.sid)); })}>
+              linha2={t.on && manual ? null : linha2(t, daMedida, detalhe)} onTocar={() => run(() => { tocarServico(A, d, t, medidaDe(t.sid)); })}>
               {t.on && manual && (
-                <QtdMudar id={`sq-${t.sid}-${d.id}`} valor={t.qt} un={t.un} nome={nome} onMudar={(x) => run(() => A.extra(d.id, t.sid, x))} />
+                <QtdMudar id={`sq-${t.sid}-${d.id}`} valor={t.qt} un={t.un} nome={nome} texto={linha2(t, daMedida, detalhe)} recuo onMudar={(x) => run(() => A.extra(d.id, t.sid, x))} />
               )}
             </CartaoServico>
           );
@@ -443,10 +443,12 @@ function BlocoServico({ ctx, K, b }: { ctx: P; K: Catalogo; b: BlocoFornece }) {
   };
   return (
     <section aria-label={titulo} className="space-y-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <h4 className="min-w-0 flex-1 text-base font-semibold text-foreground" title={b.titulo}>{titulo}</h4>
-        <Menos v={poupanca(b.itens)} />
-        <span className="flex" role="group" aria-label={`Atalhos de ${titulo}`}>
+      <div>
+        <div className="flex items-baseline gap-3">
+          <h4 className="min-w-0 flex-1 text-base font-semibold leading-snug text-foreground" title={b.titulo}>{titulo}</h4>
+          <Menos v={poupanca(b.itens)} />
+        </div>
+        <span className="-ml-3 flex" role="group" aria-label={`Atalhos de ${titulo}`}>
           <button type="button" aria-pressed={tudo} className={sec(tudo)} onClick={() => run(() => fornecerTodos(A, d, b.itens, true))}>Fornece tudo</button>
           <button type="button" aria-pressed={nada} className={sec(nada)} onClick={() => run(() => fornecerTodos(A, d, b.itens, false))}>Nenhum</button>
         </span>
