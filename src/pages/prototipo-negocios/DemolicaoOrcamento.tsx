@@ -3,12 +3,12 @@
 // contentor) com a ocupação, e o preço. Cada valor pode ser mexido à mão ("ajustado", com "repor o cálculo").
 // O custo, o custo/hora, o C_dep e a margem só se mostram à Direção. O meio é só logística (o C_dep já inclui o
 // big bag ou o contentor); com o contentor ligado (6 m³ a 380 €, 14/10/2026), a Olyvia propõe-no a partir de 3 m³.
-import { useState } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
 import { useCatalogo } from "./v2/catalogoStore";
+import { SeletorPesquisa } from "./pecasFicha";
 import { ARTIGOS_DEM0, PAR_DEM0, resumoDemolicao, type AjustesDem, type ChaveAjuste, type Meio, type Ocupacao } from "./entulho";
 
 const COR: Record<Ocupacao["cor"], string> = { ok: "bg-success", aviso: "bg-warning", mau: "bg-destructive" };
@@ -40,7 +40,6 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
   const K = useCatalogo();
   const o = d.orc!, dem = o.demolicao!, r = dem.r, fechado = !!o.enviada, direcao = S.role === "direcao";
   const artigos = K.artigosDem ?? ARTIGOS_DEM0, P = K.parDem ?? PAR_DEM0;
-  const [novo, setNovo] = useState("");
   if (!r) return null;
   const aj = (k: ChaveAjuste) => r.ajustados.includes(k);
   const ajustar = <C extends ChaveAjuste>(k: C, v: AjustesDem[C] | null) => run(() => A.demolicaoAjuste(d.id, k, v));
@@ -91,16 +90,11 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
           })}
         </ul>
         {!fechado && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <select aria-label="Juntar artigo de demolição" value={novo} onChange={(e) => setNovo(e.target.value)}
-              className="h-10 rounded-lg border border-input bg-card px-2 text-[15px]">
-              <option value="">Juntar artigo…</option>
-              {artigos.filter((a) => a.ativo && !dem.itens.some((x) => x.codigo === a.codigo)).map((a) => <option key={a.codigo} value={a.codigo}>{a.descricao} ({a.unidade})</option>)}
-            </select>
-            <button type="button" disabled={!novo} onClick={() => { run(() => A.demolicaoItem(d.id, novo, 1)); setNovo(""); }}
-              className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-input px-3 text-sm font-medium hover:border-primary hover:text-primary disabled:opacity-50">
-              <Plus className="h-4 w-4" aria-hidden="true" />Juntar
-            </button>
+          <div className="mt-2">
+            <SeletorPesquisa rotulo="Juntar artigo de demolição" placeholder="Procurar artigo…"
+              opcoes={artigos.filter((a) => a.ativo && !dem.itens.some((x) => x.codigo === a.codigo)).map((a) => ({ v: a.codigo, t: a.descricao, sub: a.codigo, valor: a.unidade, procura: a.codigo }))}
+              onEscolher={(codigo) => run(() => A.demolicaoItem(d.id, codigo, 1))}
+              gatilho={<span className="inline-flex min-h-11 items-center gap-1 rounded-lg px-1 text-sm font-medium text-primary"><Plus className="h-4 w-4" aria-hidden="true" />Juntar artigo</span>} />
           </div>
         )}
       </div>
