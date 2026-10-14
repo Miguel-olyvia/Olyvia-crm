@@ -28,8 +28,8 @@ interface Props {
 
 const SELECT = cn("min-h-11", FOCO);
 
-/** Data da visita, quem fez e estado do levantamento. */
-function CabecalhoLevantamento({ id, levantamento, acoes }: Pick<Props, "id" | "levantamento" | "acoes">) {
+/** Data da visita, quem fez e estado do levantamento: o que vai no topo da secção Visitas. */
+export function DadosDaVisita({ id, levantamento, acoes }: Pick<Props, "id" | "levantamento" | "acoes">) {
   const { t } = useTranslation();
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -96,17 +96,16 @@ function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
   );
 }
 
-/** A aba Levantamento (só exemplo): data, quem fez, estado, as linhas e as observações gerais. */
-export function AbaLevantamentoNovoNegocio(props: Props) {
+/** A secção Medidas da área: a ajuda, as linhas do levantamento e as observações gerais. */
+export function MedidasDaArea(props: Props) {
   const { t } = useTranslation();
   const { id, levantamento, acoes } = props;
   return (
     <div className="space-y-4">
       <p role="note" className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        {t(`${N}survey.help`)}
+        {t(`${N}survey.help`)} {t(`${N}visit.measures.help`)}
       </p>
-      <CabecalhoLevantamento id={id} levantamento={levantamento} acoes={acoes} />
       <ListaLinhas {...props} />
       <div className="space-y-1.5">
         <Rotulo para={`${id}-obs`} texto={t(`${N}survey.generalNotes`)} />

@@ -97,3 +97,34 @@ describe("Levantamento no painel do negócio criado", () => {
     expect(within(painel).queryByRole("heading", { name: "Levantamento" })).not.toBeInTheDocument();
   });
 });
+
+describe("Qualificação, morada da obra e visita no painel do negócio criado", () => {
+  const abrirPainel = (extra: Record<string, unknown>) => {
+    const criado = criarNegocioNovo({ pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro", ...extra }, HOJE_EXEMPLO);
+    render(<MemoryRouter initialEntries={[`/?open=${criado.id}`]}><NegocioMetas /></MemoryRouter>);
+    return screen.getByRole("dialog");
+  };
+
+  it("mostra Qualificação, Morada da obra e Visita no Resumo, só de leitura, com o que foi respondido", () => {
+    const painel = abrirPainel({
+      qualificacao: [{ pergunta: "Tipo de imóvel", resposta: "Apartamento" }],
+      moradaObra: { rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "3.º Esq." },
+      visita: [{ titulo: "Exterior do edifício", respostas: [{ pergunta: "Acesso", resposta: "Fácil" }] }],
+    });
+    const qualificacao = within(painel).getByRole("heading", { name: "Qualificação" }).closest("section")!;
+    expect(within(qualificacao).getByRole("listitem")).toHaveTextContent("Tipo de imóvel: Apartamento");
+    const morada = within(painel).getByRole("heading", { name: "Morada da obra" }).closest("section")!;
+    expect(within(morada).getByText("Rua A 1, 1000-001 Lisboa")).toBeInTheDocument();
+    expect(within(morada).getByText("3.º Esq.")).toBeInTheDocument();
+    const visita = within(painel).getByRole("heading", { level: 3, name: "Visita" }).closest("section")!;
+    expect(within(visita).getByRole("heading", { name: "Exterior do edifício" })).toBeInTheDocument();
+    expect(within(visita).getByRole("listitem")).toHaveTextContent("Acesso: Fácil");
+  });
+
+  it("sem respostas o Resumo não traz nenhuma das três secções", () => {
+    const painel = abrirPainel({});
+    for (const nome of ["Qualificação", "Morada da obra", "Visita"]) {
+      expect(within(painel).queryByRole("heading", { name: nome })).not.toBeInTheDocument();
+    }
+  });
+});

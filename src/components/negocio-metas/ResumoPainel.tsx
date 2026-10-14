@@ -4,6 +4,7 @@ import { AoMudarNegocio } from "./AoMudarNegocio";
 import { TituloPainel } from "./CamposPainel";
 import { CadeiaNegocio } from "./CadeiaNegocio";
 import { LevantamentoResumo } from "./LevantamentoResumo";
+import { MoradaObraResumo, QualificacaoResumo, VisitaResumo } from "./RespostasResumo";
 import { SaudeTag } from "./SaudeTag";
 import { proximoPasso } from "./logicaQuadro";
 import type { NegocioMes } from "./negocioMetas";
@@ -26,6 +27,9 @@ export function ResumoPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: str
         <TituloPainel id={`${id}-cadeia`}>{t("businessGoals.painel.summary.chain")}</TituloPainel>
         <CadeiaNegocio negocio={negocio} id={`cadeia-${negocio.id}`} />
       </section>
+      {negocio.qualificacao && <QualificacaoResumo respostas={negocio.qualificacao} />}
+      {negocio.moradaObra && <MoradaObraResumo morada={negocio.moradaObra} />}
+      {negocio.visita && <VisitaResumo seccoes={negocio.visita} />}
       {negocio.levantamento && <LevantamentoResumo levantamento={negocio.levantamento} />}
       <AoMudarNegocio negocio={negocio} />
       <p className="text-xs text-muted-foreground">{t("businessGoals.panel.note")}</p>

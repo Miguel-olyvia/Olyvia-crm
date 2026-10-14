@@ -1,9 +1,15 @@
-// O estado do formulário de "Novo negócio", em dois pedaços: os campos da aba Geral e o levantamento. Cada alteração
+// O estado do formulário de "Novo negócio", em pedaços: a aba Geral, as respostas (Qualificação e Visita), a morada da obra
+// e o levantamento. Cada alteração
 // avisa `aoSujar` (para o painel saber que há coisas por gravar). Nada aqui grava: é tudo exemplo, em memória.
 import { useRef, useState } from "react";
 import type { AcoesGeral, ValoresGeral } from "./AbaGeralNovoNegocio";
-import type { AcoesLevantamento } from "./AbaLevantamentoNovoNegocio";
+import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { adaptarLinhaADivisao, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
+import { MORADA_VAZIA, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
+import type { Respostas } from "./perguntasTipos";
+import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
+import { alternarResposta } from "./respostasVisita";
+import { SECCOES_VISITA } from "./visitaExemplo";
 import {
   COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, reporContacto, type ChaveContacto, type PessoaOpcao,
 } from "./novoNegocio";
@@ -52,4 +58,24 @@ export function useLevantamentoForm(hoje: string, aoSujar: () => void) {
     removerLinha: (id) => alterar((l) => ({ ...l, linhas: l.linhas.filter((x) => x.id !== id) })),
   };
   return { levantamento, acoes };
+}
+
+const TODOS_OS_BLOCOS = [BLOCO_QUALIFICACAO, ...SECCOES_VISITA.flatMap((s) => s.blocos)];
+
+/** As respostas de escolha rápida das duas abas (os ids das perguntas são únicos): escolher, ou retirar se já estava. */
+export function useRespostasForm(aoSujar: () => void) {
+  const [respostas, setRespostas] = useState<Respostas>({});
+  const escolher = (pergunta: string, opcao: string) => {
+    aoSujar();
+    setRespostas((r) => alternarResposta(TODOS_OS_BLOCOS, r, pergunta, opcao));
+  };
+  return { respostas, escolher };
+}
+
+/** A morada da obra; "preencher" traz rua, código postal e localidade e deixa o andar como estava. */
+export function useMoradaForm(aoSujar: () => void) {
+  const [morada, setMorada] = useState<MoradaObraForm>(MORADA_VAZIA);
+  const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setMorada((m) => ({ ...m, [chave]: valor })); };
+  const preencher = (nova: MoradaObraForm) => { aoSujar(); setMorada((m) => ({ ...nova, andar: m.andar })); };
+  return { morada, mudar, preencher };
 }

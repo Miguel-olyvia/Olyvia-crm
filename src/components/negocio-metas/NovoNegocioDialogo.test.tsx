@@ -1,5 +1,6 @@
 // Arranque do botão e do painel lateral "Novo negócio": abre com as duas abas, valida por campo (e aponta a aba com
-// erros), deixa fazer já o levantamento e devolve os dados ao confirmar.
+// erros), deixa fazer já o levantamento (dentro da aba Visita) e devolve os dados ao confirmar. As abas Qualificação e
+// Visita têm o seu ficheiro: `NovoNegocioAbas.test.tsx`.
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NovoNegocioDialogo } from "./NovoNegocioDialogo";
@@ -47,7 +48,10 @@ const escolher = async (dialogo: Dialogo, campo: RegExp | string, opcao: string)
   fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: campo }), { key: "Enter" });
   fireEvent.click(await screen.findByRole("option", { name: opcao }));
 };
-const irParaLevantamento = (dialogo: Dialogo) => fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Levantamento/ }));
+const irParaVisita = (dialogo: Dialogo, seccao: RegExp = /^Medidas da área/) => {
+  fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Visita/ }));
+  fireEvent.click(within(dialogo).getByRole("button", { name: seccao }));
+};
 const irParaGeral = (dialogo: Dialogo) => fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Geral/ }));
 const criar = (dialogo: Dialogo) => fireEvent.click(within(dialogo).getByRole("button", { name: "Criar negócio" }));
 const preencherGeral = async (dialogo: Dialogo) => {
@@ -55,7 +59,7 @@ const preencherGeral = async (dialogo: Dialogo) => {
 };
 
 describe("NovoNegocioDialogo: painel e aba Geral", () => {
-  it("fechado só tem o botão; abre num painel com cabeçalho, selo, duas abas e rodapé com Cancelar e Criar", () => {
+  it("fechado só tem o botão; abre num painel com cabeçalho, selo, três abas e rodapé com Cancelar e Criar", () => {
     render(<NovoNegocioDialogo pessoas={PESSOAS} aoCriar={vi.fn()} />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Novo negócio" }));
@@ -65,7 +69,7 @@ describe("NovoNegocioDialogo: painel e aba Geral", () => {
     expect(within(dialogo).getByText("Novo · por gravar")).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: "Fechar" })).toBeInTheDocument();
     const abas = within(dialogo).getAllByRole("tab");
-    expect(abas.map((a) => a.textContent)).toEqual(["Geral", "Levantamento0, 0 linhas"]);
+    expect(abas.map((a) => a.textContent)).toEqual(["Geral", "Qualificação0, 0 respostas", "Visita0, 0 respostas"]);
     expect(within(dialogo).getByRole("tab", { name: /^Geral/ })).toHaveAttribute("aria-selected", "true");
     expect(within(dialogo).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: "Criar negócio" })).toHaveAttribute("type", "submit");
@@ -133,7 +137,7 @@ describe("NovoNegocioDialogo: painel e aba Geral", () => {
     expect(within(dialogo).queryByText(/serviço/i)).not.toBeInTheDocument();
     await waitFor(() => expect(pessoa).toHaveFocus());
     expect(within(dialogo).getByRole("tab", { name: /^Geral.*com erros/ })).toBeInTheDocument();
-    expect(within(dialogo).getByRole("tab", { name: /^Levantamento(?!.*com erros)/ })).toBeInTheDocument();
+    expect(within(dialogo).getByRole("tab", { name: /^Visita(?!.*com erros)/ })).toBeInTheDocument();
     expect(aoCriar).not.toHaveBeenCalled();
   });
 
@@ -150,19 +154,23 @@ describe("NovoNegocioDialogo: painel e aba Geral", () => {
       levantamento: {
         data: HOJE_EXEMPLO, feitoPor: "Ana Ribeiro", estado: "porFazer", linhas: [], observacoes: "",
       },
+      qualificacao: [],
+      moradaObra: { rua: "", codigoPostal: "", localidade: "", andar: "" },
+      visita: [],
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });
 
-describe("NovoNegocioDialogo: aba Levantamento", () => {
-  it("mostra o aviso de ajuda, a data de hoje de exemplo, Por fazer, o total e nenhuma linha", () => {
+describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
+  it("a secção Visitas tem a data de hoje de exemplo, quem fez e Por fazer; as Medidas da área o aviso, o total e nenhuma linha", () => {
     const { dialogo } = abrir();
-    irParaLevantamento(dialogo);
-    expect(within(dialogo).getByText("O levantamento alimenta o primeiro orçamento.")).toBeInTheDocument();
+    irParaVisita(dialogo, /^Visitas/);
     expect(within(dialogo).getByLabelText("Data da visita")).toHaveValue(HOJE_EXEMPLO);
     expect(within(dialogo).getByRole("combobox", { name: "Feito por" })).toHaveTextContent("Ana Ribeiro");
     expect(within(dialogo).getByRole("combobox", { name: "Estado" })).toHaveTextContent("Por fazer");
+    irParaVisita(dialogo);
+    expect(within(dialogo).getByText(/O levantamento alimenta o primeiro orçamento\./)).toBeInTheDocument();
     expect(within(dialogo).getByText("Total: 0 linhas")).toBeInTheDocument();
     expect(within(dialogo).getByLabelText("Observações gerais")).toHaveValue("");
     expect(within(dialogo).getByRole("button", { name: "Adicionar linha" })).toBeInTheDocument();
@@ -170,11 +178,11 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
 
   it("Adicionar linha acrescenta uma linha e o contador da aba; Remover tira-a e devolve o foco a Adicionar", async () => {
     const { dialogo } = abrir();
-    irParaLevantamento(dialogo);
+    irParaVisita(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
     expect(within(dialogo).getByText("Total: 2 linhas")).toBeInTheDocument();
-    expect(within(dialogo).getByRole("tab", { name: /^Levantamento.*2 linhas/ })).toHaveTextContent("2");
+    expect(within(dialogo).getByRole("tab", { name: /^Visita.*2 respostas/ })).toHaveTextContent("2");
     expect(within(dialogo).getAllByRole("group", { name: /^Linha \d/ })).toHaveLength(2);
     const remover = within(dialogo).getByRole("button", { name: "Remover a linha 2" });
     expect(remover).toHaveTextContent("Remover");
@@ -185,7 +193,7 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
 
   it("os trabalhos sugeridos dependem só da divisão da linha", async () => {
     const { dialogo } = abrir();
-    irParaLevantamento(dialogo);
+    irParaVisita(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
     expect(within(dialogo).getByRole("combobox", { name: /^Divisão ou zona/ })).toHaveTextContent("Escolhe a divisão");
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Trabalho a fazer/ }), { key: "Enter" });
@@ -204,16 +212,16 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
     expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Trocar caixilharia", "Estores", "Paredes", "Teto", "Outro (escrever)"]);
   });
 
-  it("Feito sem linhas: leva para a aba Levantamento, avisa a aba, mostra o erro e põe o foco em Adicionar linha", async () => {
+  it("Feito sem linhas: leva para a aba Visita (Medidas da área), avisa a aba, mostra o erro e põe o foco em Adicionar linha", async () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
-    irParaLevantamento(dialogo);
+    irParaVisita(dialogo, /^Visitas/);
     await escolher(dialogo, "Estado", "Feito");
     irParaGeral(dialogo);
     criar(dialogo);
-    await waitFor(() => expect(within(dialogo).getByRole("tab", { name: /^Levantamento/ })).toHaveAttribute("aria-selected", "true"));
+    await waitFor(() => expect(within(dialogo).getByRole("tab", { name: /^Visita/ })).toHaveAttribute("aria-selected", "true"));
     expect(within(dialogo).getByText("Com o estado Feito, acrescenta pelo menos uma linha.")).toBeInTheDocument();
-    expect(within(dialogo).getByRole("tab", { name: /^Levantamento.*com erros/ })).toBeInTheDocument();
+    expect(within(dialogo).getByRole("tab", { name: /^Visita.*com erros/ })).toBeInTheDocument();
     await waitFor(() => expect(within(dialogo).getByRole("button", { name: "Adicionar linha" })).toHaveFocus());
     expect(aoCriar).not.toHaveBeenCalled();
   });
@@ -221,25 +229,26 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
   it("uma linha incompleta mostra erros por campo; medida 0 é recusada", async () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
-    irParaLevantamento(dialogo);
+    irParaVisita(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
-    fireEvent.change(within(dialogo).getByLabelText(/^Medida/), { target: { value: "0" } });
+    fireEvent.change(within(dialogo).getByLabelText(/^Medida(?!s)/), { target: { value: "0" } });
     criar(dialogo);
     expect(within(dialogo).getByRole("combobox", { name: /^Divisão ou zona/ })).toHaveAccessibleDescription("Escolhe a divisão.");
     expect(within(dialogo).getByRole("combobox", { name: /^Trabalho a fazer/ })).toHaveAccessibleDescription("Escolhe o trabalho.");
-    expect(within(dialogo).getByLabelText(/^Medida/)).toHaveAccessibleDescription("A medida tem de ser um número maior que 0.");
+    expect(within(dialogo).getByLabelText(/^Medida(?!s)/)).toHaveAccessibleDescription("A medida tem de ser um número maior que 0.");
     expect(aoCriar).not.toHaveBeenCalled();
   });
 
   it("cria com o levantamento: linhas em texto, medida em número e observações", async () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
-    irParaLevantamento(dialogo);
+    irParaVisita(dialogo, /^Visitas/);
     await escolher(dialogo, "Estado", "Feito");
+    irParaVisita(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
     await escolher(dialogo, /^Divisão ou zona/, "Cozinha");
     await escolher(dialogo, /^Trabalho a fazer/, "Bancada nova");
-    fireEvent.change(within(dialogo).getByLabelText(/^Medida/), { target: { value: "3.5" } });
+    fireEvent.change(within(dialogo).getByLabelText(/^Medida(?!s)/), { target: { value: "3.5" } });
     await escolher(dialogo, /^Unidade/, "m");
     fireEvent.change(within(dialogo).getByLabelText("Observações"), { target: { value: "Ver canos" } });
     fireEvent.change(within(dialogo).getByLabelText("Observações gerais"), { target: { value: "Cliente em casa de manhã" } });

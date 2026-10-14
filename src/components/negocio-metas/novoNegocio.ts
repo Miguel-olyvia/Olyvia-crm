@@ -1,6 +1,9 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
-import type { DadosContactoNegocio, LevantamentoNegocio, NegocioMes } from "./negocioMetas";
+import type {
+  DadosContactoNegocio, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
+} from "./negocioMetas";
+import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 import { temLevantamento, validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
 
@@ -57,14 +60,17 @@ export interface ValoresNovoNegocio {
 }
 
 export type ErroCampo = "obrigatorio" | "comprido" | "invalido";
-export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "email" | "nif" | "nifEmpresa", ErroCampo>>
+export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "email" | "nif" | "nifEmpresa" | "codigoPostal", ErroCampo>>
   & ErrosLevantamento;
 
-/** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, o Levantamento o que é dele. */
-export function abasComErros(erros: ErrosNovoNegocio): { geral: boolean; levantamento: boolean } {
+export type AbaNovoNegocio = "geral" | "qualificacao" | "visita";
+
+/** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, a Qualificação a morada, a Visita o levantamento. */
+export function abasComErros(erros: ErrosNovoNegocio): Record<AbaNovoNegocio, boolean> {
   return {
     geral: (["pessoaId", "email", "nif", "nifEmpresa"] as const).some((c) => !!erros[c]),
-    levantamento: !!erros.levantamento || !!erros.linhas,
+    qualificacao: !!erros.codigoPostal,
+    visita: !!erros.levantamento || !!erros.linhas,
   };
 }
 
@@ -79,9 +85,11 @@ export function validarNovoNegocio(
   valores: Pick<ValoresNovoNegocio, "pessoaId"> & {
     contacto?: Partial<DadosContactoNegocio>;
     levantamento?: LevantamentoForm;
+    moradaObra?: Pick<MoradaObraForm, "codigoPostal">;
   },
 ): ErrosNovoNegocio {
   const erros: ErrosNovoNegocio = { ...validarLevantamento(valores.levantamento) };
+  if (valores.moradaObra && validarCodigoPostal(valores.moradaObra.codigoPostal)) erros.codigoPostal = "invalido";
   if (!valores.pessoaId?.trim()) erros.pessoaId = "obrigatorio";
   // O contacto é opcional: só se valida o formato do que foi preenchido.
   const email = valores.contacto?.email?.trim();
@@ -102,13 +110,14 @@ const ORDEM_LINHA = ["divisao", "trabalho", "trabalhoOutro", "medida"] as const;
 /** Onde pôr o foco depois de um envio recusado: a aba e o fim do id do campo (`<id>-<campo>`); a Geral vem primeiro. */
 export function primeiroErro(
   erros: ErrosNovoNegocio, idsLinhas: readonly string[],
-): { aba: "geral" | "levantamento"; campo: string } | null {
+): { aba: AbaNovoNegocio; campo: string } | null {
   const geral = ORDEM_GERAL.find((c) => erros[c]);
   if (geral) return { aba: "geral", campo: CAMPO_GERAL[geral] };
-  if (erros.levantamento) return { aba: "levantamento", campo: "add" };
+  if (erros.codigoPostal) return { aba: "qualificacao", campo: "cp" };
+  if (erros.levantamento) return { aba: "visita", campo: "add" };
   for (const linha of idsLinhas) {
     const campo = ORDEM_LINHA.find((c) => erros.linhas?.[linha]?.[c]);
-    if (campo) return { aba: "levantamento", campo: `linha-${linha}-${campo}` };
+    if (campo) return { aba: "visita", campo: `linha-${linha}-${campo}` };
   }
   return null;
 }
@@ -132,6 +141,9 @@ export interface DadosCriarNegocio {
   comercial: string;
   contacto?: DadosContactoNegocio;
   levantamento?: LevantamentoNegocio;
+  qualificacao?: RespostaNegocio[];
+  moradaObra?: MoradaObraNegocio;
+  visita?: SeccaoVisitaNegocio[];
 }
 
 /**
@@ -151,6 +163,9 @@ export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequ
     contacto: dados.pessoa.contacto ?? { telefone: null, email: null },
     ...(dados.contacto ? { dadosContacto: aparar(dados.contacto) } : {}),
     ...(temLevantamento(dados.levantamento) ? { levantamento: dados.levantamento } : {}),
+    ...(dados.qualificacao?.length ? { qualificacao: dados.qualificacao } : {}),
+    ...(temMorada(dados.moradaObra) ? { moradaObra: moradaAparada(dados.moradaObra) } : {}),
+    ...(dados.visita?.length ? { visita: dados.visita } : {}),
     orcamentos: [],
     proposta: null,
     contrato: null,

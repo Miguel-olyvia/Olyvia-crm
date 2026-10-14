@@ -1,5 +1,7 @@
 // Textos do botão "Novo negócio" e do seu painel lateral ("Negócio e metas"). Juntam-se aos de `negocioMetas.ts`. Apenas
 // en/pt, como o resto da página. As chaves daqui levam o prefixo `businessGoals.new.`, posto por `comPrefixo`.
+import { negocioMetasVisitaTranslations } from "./negocioMetasVisita";
+
 const PREFIXO = "businessGoals.new.";
 
 const comPrefixo = (textos: Record<string, string>): Record<string, string> =>
@@ -13,9 +15,6 @@ const pt: Record<string, string> = {
   'close': 'Fechar',
   'tabs.label': 'Secções do novo negócio',
   'tab.general': 'Geral',
-  'tab.survey': 'Levantamento',
-  'tab.survey.count': ', {n} linhas',
-  'tab.survey.count.one': ', 1 linha',
   'tab.errors': ', com erros',
   'person': 'Pessoa',
   'person.placeholder': 'Escolhe uma pessoa',
@@ -105,9 +104,6 @@ const en: Record<string, string> = {
   'close': 'Close',
   'tabs.label': 'New deal sections',
   'tab.general': 'General',
-  'tab.survey': 'Site survey',
-  'tab.survey.count': ', {n} lines',
-  'tab.survey.count.one': ', 1 line',
   'tab.errors': ', with errors',
   'person': 'Person',
   'person.placeholder': 'Choose a person',
@@ -190,6 +186,6 @@ const en: Record<string, string> = {
 };
 
 export const negocioMetasNovoTranslations: Record<"en" | "pt", Record<string, string>> = {
-  en: comPrefixo(en),
-  pt: comPrefixo(pt),
+  en: { ...comPrefixo(en), ...negocioMetasVisitaTranslations.en },
+  pt: { ...comPrefixo(pt), ...negocioMetasVisitaTranslations.pt },
 };

@@ -44,6 +44,26 @@ export interface LevantamentoNegocio {
   observacoes: string;
 }
 
+/** Uma pergunta de escolha rápida e a opção escolhida, já em texto (na língua em que se criou o negócio). */
+export interface RespostaNegocio {
+  pergunta: string;
+  resposta: string;
+}
+
+/** A morada da obra (do negócio, não da pessoa), tal como foi escrita. */
+export interface MoradaObraNegocio {
+  rua: string;
+  codigoPostal: string;
+  localidade: string;
+  andar: string;
+}
+
+/** Uma secção da Visita com o que se respondeu nela. */
+export interface SeccaoVisitaNegocio {
+  titulo: string;
+  respostas: RespostaNegocio[];
+}
+
 export interface NegocioMes {
   id: string;
   /** A pessoa (lead/cliente) a que o negócio pertence; serve para a abrir. */
@@ -62,6 +82,12 @@ export interface NegocioMes {
   dadosContacto?: DadosContactoNegocio;
   /** Só nos negócios criados em "Novo negócio", e só se se escreveu alguma coisa na aba Levantamento. */
   levantamento?: LevantamentoNegocio;
+  /** Só nos negócios criados em "Novo negócio", e só se se respondeu a alguma pergunta da aba Qualificação. */
+  qualificacao?: RespostaNegocio[];
+  /** Só nos negócios criados em "Novo negócio", e só se se escreveu alguma coisa na Morada da obra. */
+  moradaObra?: MoradaObraNegocio;
+  /** Só nos negócios criados em "Novo negócio", e só se se respondeu a alguma pergunta da aba Visita. */
+  visita?: SeccaoVisitaNegocio[];
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;

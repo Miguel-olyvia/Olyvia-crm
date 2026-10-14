@@ -113,20 +113,60 @@ describe("validarNovoNegocio: levantamento", () => {
 });
 
 describe("abasComErros e primeiroErro", () => {
-  it("diz que aba tem erros: Geral nos campos do negócio, Levantamento nos do levantamento", () => {
-    expect(abasComErros({})).toEqual({ geral: false, levantamento: false });
-    expect(abasComErros({ pessoaId: "obrigatorio" })).toEqual({ geral: true, levantamento: false });
-    expect(abasComErros({ levantamento: "obrigatorio" })).toEqual({ geral: false, levantamento: true });
-    expect(abasComErros({ linhas: { l1: { medida: "invalido" } } })).toEqual({ geral: false, levantamento: true });
+  it("diz que aba tem erros: Geral nos campos do negócio, Qualificação na morada, Visita no levantamento", () => {
+    expect(abasComErros({})).toEqual({ geral: false, qualificacao: false, visita: false });
+    expect(abasComErros({ pessoaId: "obrigatorio" })).toEqual({ geral: true, qualificacao: false, visita: false });
+    expect(abasComErros({ codigoPostal: "invalido" })).toEqual({ geral: false, qualificacao: true, visita: false });
+    expect(abasComErros({ levantamento: "obrigatorio" })).toEqual({ geral: false, qualificacao: false, visita: true });
+    expect(abasComErros({ linhas: { l1: { medida: "invalido" } } })).toEqual({ geral: false, qualificacao: false, visita: true });
   });
 
-  it("o foco vai primeiro para a aba Geral, depois para o levantamento, linha a linha pela ordem do ecrã", () => {
+  it("o foco vai primeiro para a aba Geral, depois para o código postal, depois para o levantamento (linha a linha)", () => {
     expect(primeiroErro({}, [])).toBeNull();
     expect(primeiroErro({ pessoaId: "obrigatorio", levantamento: "obrigatorio" }, [])).toEqual({ aba: "geral", campo: "pessoa" });
-    expect(primeiroErro({ levantamento: "obrigatorio" }, [])).toEqual({ aba: "levantamento", campo: "add" });
+    expect(primeiroErro({ codigoPostal: "invalido", levantamento: "obrigatorio" }, [])).toEqual({ aba: "qualificacao", campo: "cp" });
+    expect(primeiroErro({ levantamento: "obrigatorio" }, [])).toEqual({ aba: "visita", campo: "add" });
     const erros = { linhas: { l2: { medida: "invalido" as const }, l1: { trabalho: "obrigatorio" as const } } };
-    expect(primeiroErro(erros, ["l1", "l2"])).toEqual({ aba: "levantamento", campo: "linha-l1-trabalho" });
-    expect(primeiroErro(erros, ["l2", "l1"])).toEqual({ aba: "levantamento", campo: "linha-l2-medida" });
+    expect(primeiroErro(erros, ["l1", "l2"])).toEqual({ aba: "visita", campo: "linha-l1-trabalho" });
+    expect(primeiroErro(erros, ["l2", "l1"])).toEqual({ aba: "visita", campo: "linha-l2-medida" });
+  });
+});
+
+describe("validarNovoNegocio: morada da obra", () => {
+  it("o código postal é opcional, mas escrito tem de ser 0000-000; só ele dá erro na morada", () => {
+    expect(validarNovoNegocio({ pessoaId: "p", moradaObra: { codigoPostal: "" } })).toEqual({});
+    expect(validarNovoNegocio({ pessoaId: "p", moradaObra: { codigoPostal: "1000-001" } })).toEqual({});
+    expect(validarNovoNegocio({ pessoaId: "p", moradaObra: { codigoPostal: "1000" } })).toEqual({ codigoPostal: "invalido" });
+    expect(validarNovoNegocio({ pessoaId: "", moradaObra: { codigoPostal: "x" } })).toEqual({ pessoaId: "obrigatorio", codigoPostal: "invalido" });
+  });
+});
+
+describe("criarNegocioExemplo: qualificação, morada da obra e visita", () => {
+  const base = { pessoa: marta, comercial: "Ana Ribeiro" };
+  const qualificacao = [{ pergunta: "Tipo de imóvel", resposta: "Apartamento" }];
+  const visita = [{ titulo: "Exterior do edifício", respostas: [{ pergunta: "Acesso", resposta: "Fácil" }] }];
+  const morada = { rua: " Rua A 1 ", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" };
+
+  it("guarda o que foi respondido, com a morada aparada", () => {
+    const criado = criarNegocioExemplo({ ...base, qualificacao, moradaObra: morada, visita }, HOJE_EXEMPLO, 1);
+    expect(criado.qualificacao).toEqual(qualificacao);
+    expect(criado.visita).toEqual(visita);
+    expect(criado.moradaObra).toEqual({ rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" });
+  });
+
+  it("sem nada escrito não deixa as propriedades (listas vazias e morada vazia não se guardam)", () => {
+    const criado = criarNegocioExemplo(
+      { ...base, qualificacao: [], visita: [], moradaObra: { rua: " ", codigoPostal: "", localidade: "", andar: "" } }, HOJE_EXEMPLO, 2,
+    );
+    for (const campo of ["qualificacao", "moradaObra", "visita"]) expect(campo in criado, campo).toBe(false);
+    expect("qualificacao" in criarNegocioExemplo(base, HOJE_EXEMPLO, 3)).toBe(false);
+  });
+
+  it("a morada e a qualificação ficam no negócio, nunca na pessoa", () => {
+    const criado = criarNegocioExemplo({ ...base, qualificacao, moradaObra: morada }, HOJE_EXEMPLO, 4);
+    expect(criado.pessoaId).toBe(marta.id);
+    expect(marta).not.toHaveProperty("moradaObra");
+    expect(marta).not.toHaveProperty("qualificacao");
   });
 });
 
