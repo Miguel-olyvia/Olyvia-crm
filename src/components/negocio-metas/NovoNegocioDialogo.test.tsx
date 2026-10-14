@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NovoNegocioDialogo } from "./NovoNegocioDialogo";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
-import type { PessoaOpcao } from "./novoNegocio";
+import { somarDias, type PessoaOpcao } from "./novoNegocio";
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");
@@ -52,6 +52,8 @@ const irParaVisita = (dialogo: Dialogo, seccao: RegExp = /^Medidas da área/) =>
   fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Visita/ }));
   fireEvent.click(within(dialogo).getByRole("button", { name: seccao }));
 };
+/** Na secção Visitas: acrescenta uma visita (abre já para editar). */
+const adicionarVisita = (dialogo: Dialogo) => fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar visita" }));
 const irParaGeral = (dialogo: Dialogo) => fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Geral/ }));
 const criar = (dialogo: Dialogo) => fireEvent.click(within(dialogo).getByRole("button", { name: "Criar negócio" }));
 const preencherGeral = async (dialogo: Dialogo) => {
@@ -157,18 +159,23 @@ describe("NovoNegocioDialogo: painel e aba Geral", () => {
       qualificacao: [],
       moradaObra: { rua: "", codigoPostal: "", localidade: "", andar: "" },
       visita: [],
+      visitas: [],
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });
 
 describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
-  it("a secção Visitas tem a data de hoje de exemplo, quem fez e Por fazer; as Medidas da área o aviso, o total e nenhuma linha", () => {
+  it("a secção Visitas começa sem visitas; Adicionar visita traz uma Por fazer, Revisita, daqui a 2 dias, com o comercial; as Medidas da área o aviso, o total e nenhuma linha", () => {
     const { dialogo } = abrir();
     irParaVisita(dialogo, /^Visitas/);
-    expect(within(dialogo).getByLabelText("Data da visita")).toHaveValue(HOJE_EXEMPLO);
+    expect(within(dialogo).getByText("Ainda sem visitas. Acrescenta a primeira.")).toBeInTheDocument();
+    adicionarVisita(dialogo);
+    expect(within(dialogo).queryByText("Ainda sem visitas. Acrescenta a primeira.")).not.toBeInTheDocument();
+    expect(within(dialogo).getByLabelText("Data da visita")).toHaveValue(somarDias(HOJE_EXEMPLO, 2));
     expect(within(dialogo).getByRole("combobox", { name: "Feito por" })).toHaveTextContent("Ana Ribeiro");
     expect(within(dialogo).getByRole("combobox", { name: "Estado" })).toHaveTextContent("Por fazer");
+    expect(within(dialogo).getByRole("radio", { name: "Revisita" })).toHaveAttribute("aria-checked", "true");
     irParaVisita(dialogo);
     expect(within(dialogo).getByText(/O levantamento alimenta o primeiro orçamento\./)).toBeInTheDocument();
     expect(within(dialogo).getByText("Total: 0 linhas")).toBeInTheDocument();
@@ -216,7 +223,8 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
     irParaVisita(dialogo, /^Visitas/);
-    await escolher(dialogo, "Estado", "Feito");
+    adicionarVisita(dialogo);
+    await escolher(dialogo, "Estado", "Feita");
     irParaGeral(dialogo);
     criar(dialogo);
     await waitFor(() => expect(within(dialogo).getByRole("tab", { name: /^Visita/ })).toHaveAttribute("aria-selected", "true"));
@@ -243,7 +251,8 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
     irParaVisita(dialogo, /^Visitas/);
-    await escolher(dialogo, "Estado", "Feito");
+    adicionarVisita(dialogo);
+    await escolher(dialogo, "Estado", "Feita");
     irParaVisita(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
     await escolher(dialogo, /^Divisão ou zona/, "Cozinha");
@@ -255,7 +264,7 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     criar(dialogo);
     expect(aoCriar).toHaveBeenCalledTimes(1);
     expect(aoCriar.mock.calls[0][0].levantamento).toEqual({
-      data: HOJE_EXEMPLO, feitoPor: "Ana Ribeiro", estado: "feito", observacoes: "Cliente em casa de manhã",
+      data: somarDias(HOJE_EXEMPLO, 2), feitoPor: "Ana Ribeiro", estado: "feito", observacoes: "Cliente em casa de manhã",
       linhas: [{ divisao: "Cozinha", trabalho: "Bancada nova", medida: 3.5, unidade: "m", observacoes: "Ver canos" }],
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

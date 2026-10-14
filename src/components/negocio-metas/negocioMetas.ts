@@ -64,6 +64,31 @@ export interface SeccaoVisitaNegocio {
   respostas: RespostaNegocio[];
 }
 
+export type EstadoVisitaNegocio = "porFazer" | "feita" | "cancelada";
+export type TipoVisitaNegocio = "levantamento" | "medicao" | "materiais" | "revisita";
+
+/**
+ * Uma visita do negócio (só exemplo, em memória). `tipo`, `quemVaiEstar` e `duracao` guardam a chave da opção (o texto
+ * vê-se pela tradução); `quemVaiEstar` e `duracao` ficam vazios sem escolha. `igualALead` diz se a morada da visita é a
+ * da lead (`true`), outra (`false`) ou foi escrita à mão (`null`); `veioDaPessoa` marca a visita concluída que veio de Pessoas.
+ */
+export interface VisitaNegocio {
+  id: string;
+  /** AAAA-MM-DD. */
+  data: string;
+  /** HH:MM; vazio = sem hora. */
+  hora: string;
+  feitoPor: string;
+  estado: EstadoVisitaNegocio;
+  tipo: TipoVisitaNegocio;
+  quemVaiEstar: string;
+  duracao: string;
+  morada: MoradaObraNegocio;
+  igualALead: boolean | null;
+  veioDaPessoa: boolean;
+  nota: string;
+}
+
 export interface NegocioMes {
   id: string;
   /** A pessoa (lead/cliente) a que o negócio pertence; serve para a abrir. */
@@ -88,6 +113,8 @@ export interface NegocioMes {
   moradaObra?: MoradaObraNegocio;
   /** Só nos negócios criados em "Novo negócio", e só se se respondeu a alguma pergunta da aba Visita. */
   visita?: SeccaoVisitaNegocio[];
+  /** As visitas do negócio, por ordem cronológica. Só nos negócios criados em "Novo negócio"; os de exemplo não as têm. */
+  visitas?: VisitaNegocio[];
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;

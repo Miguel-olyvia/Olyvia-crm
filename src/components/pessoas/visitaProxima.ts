@@ -49,6 +49,7 @@ export function valoresIniciaisDaVisita(pessoa: Pessoa, visita: VisitaPessoa): V
     comercial: visita.comercial,
     visita: {
       data: visita.data, quemFez: visita.comercial, estado: "feito", moradaObra: { ...visita.moradaVisita }, igualALead: visita.igualALead,
+      hora: visita.hora, nota: visita.notaAcesso,
     },
   };
 }

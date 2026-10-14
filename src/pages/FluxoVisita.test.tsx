@@ -125,7 +125,7 @@ describe("Ficha: Visita concluída → Criar negócio", () => {
     fireEvent.click(within(painel).getByRole("button", { name: /^Visitas/ }));
     expect(within(painel).getByLabelText("Data da visita")).toHaveValue("2026-10-15");
     expect(within(painel).getByRole("combobox", { name: "Feito por" })).toHaveTextContent("Bruno Costa");
-    expect(within(painel).getByRole("combobox", { name: "Estado" })).toHaveTextContent("Feito");
+    expect(within(painel).getByRole("combobox", { name: "Estado" })).toHaveTextContent("Feita");
     // Feito pede pelo menos uma linha de levantamento: sem ela não cria e a visita continua por concluir.
     fireEvent.click(within(painel).getByRole("button", { name: "Criar negócio" }));
     expect(negociosNovos()).toHaveLength(0);

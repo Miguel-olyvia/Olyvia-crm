@@ -2,6 +2,7 @@
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
 import type {
   DadosContactoNegocio, EstadoLevantamento, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
+  VisitaNegocio,
 } from "./negocioMetas";
 import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
@@ -69,6 +70,10 @@ export interface ValoresIniciaisNegocio {
     moradaObra: MoradaObraForm;
     /** A morada da visita é a que a lead indicou (só para dizer a origem na aba Qualificação). */
     igualALead: boolean;
+    /** HH:MM da visita; falta nas visitas sem hora. */
+    hora?: string;
+    /** A nota de acesso da visita, se a tinha. */
+    nota?: string;
   };
 }
 
@@ -163,6 +168,8 @@ export interface DadosCriarNegocio {
   qualificacao?: RespostaNegocio[];
   moradaObra?: MoradaObraNegocio;
   visita?: SeccaoVisitaNegocio[];
+  /** As visitas do negócio (já por ordem cronológica); o levantamento em `levantamento` deriva delas. */
+  visitas?: VisitaNegocio[];
 }
 
 /**
@@ -185,6 +192,7 @@ export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequ
     ...(dados.qualificacao?.length ? { qualificacao: dados.qualificacao } : {}),
     ...(temMorada(dados.moradaObra) ? { moradaObra: moradaAparada(dados.moradaObra) } : {}),
     ...(dados.visita?.length ? { visita: dados.visita } : {}),
+    ...(dados.visitas?.length ? { visitas: dados.visitas } : {}),
     orcamentos: [],
     proposta: null,
     contrato: null,

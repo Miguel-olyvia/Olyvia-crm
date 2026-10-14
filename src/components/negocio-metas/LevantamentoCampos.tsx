@@ -3,14 +3,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LinhaLevantamentoForm, MAX_OBSERVACOES } from "./LinhaLevantamentoForm";
-import { ErroDoCampo, ITEM, N, Rotulo } from "./PecasNovoNegocio";
+import { ErroDoCampo, N, Rotulo } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import type { ErrosNovoNegocio } from "./novoNegocio";
-import { COMERCIAIS_EXEMPLO } from "./novoNegocio";
 import type { LevantamentoForm, LinhaForm } from "./levantamento";
-import { ESTADOS_LEVANTAMENTO } from "./levantamentoExemplo";
 
 export interface AcoesLevantamento {
   mudar: (parcial: Partial<LevantamentoForm>) => void;
@@ -27,42 +24,6 @@ interface Props {
 }
 
 const SELECT = cn("min-h-11", FOCO);
-
-/** Data da visita, quem fez e estado do levantamento: o que vai no topo da secção Visitas. */
-export function DadosDaVisita({ id, levantamento, acoes }: Pick<Props, "id" | "levantamento" | "acoes">) {
-  const { t } = useTranslation();
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <div className="space-y-1.5">
-        <Rotulo para={`${id}-data`} texto={t(`${N}survey.date`)} />
-        <Input
-          id={`${id}-data`} type="date" value={levantamento.data} className={SELECT}
-          onChange={(e) => acoes.mudar({ data: e.target.value })}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Rotulo para={`${id}-feitoPor`} texto={t(`${N}survey.by`)} />
-        <Select value={levantamento.feitoPor} onValueChange={(feitoPor) => acoes.mudar({ feitoPor })}>
-          <SelectTrigger id={`${id}-feitoPor`} className={SELECT}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {COMERCIAIS_EXEMPLO.map((c) => <SelectItem key={c} value={c} className={ITEM}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Rotulo para={`${id}-estado`} texto={t(`${N}survey.status`)} />
-        <Select value={levantamento.estado} onValueChange={(estado) => acoes.mudar({ estado: estado as LevantamentoForm["estado"] })}>
-          <SelectTrigger id={`${id}-estado`} className={SELECT}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {ESTADOS_LEVANTAMENTO.map((e) => (
-              <SelectItem key={e} value={e} className={ITEM}>{t(`${N}survey.status.${e}`)}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-    </div>
-  );
-}
 
 /** A lista de linhas, o total, o botão Adicionar linha e o erro "Feito sem linhas". */
 function ListaLinhas({ id, levantamento, erros, acoes }: Props) {

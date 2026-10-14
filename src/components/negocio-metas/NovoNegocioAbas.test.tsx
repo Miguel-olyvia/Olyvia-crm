@@ -139,13 +139,15 @@ describe("aba Visita", () => {
     const { dialogo } = abrir();
     aba(dialogo, /^Visita/);
     const lista = within(dialogo).getByRole("navigation", { name: "Secções da visita" });
-    expect(within(lista).getAllByRole("button").map((b) => b.textContent?.replace(/(\d+ (de \d+ respondidas|linhas?)).*/, "").trim())).toEqual([
+    expect(within(lista).getAllByRole("button").map((b) => b.textContent?.replace(/(\d+ (de \d+ respondidas|linhas?|visitas?)).*/, "").trim())).toEqual([
       "Visitas", "Exterior do edifício", "Interior do espaço", "Área de intervenção", "Medidas da área", "Necessidades do cliente", "Escolhas do cliente",
     ]);
     expect(within(lista).getByRole("button", { name: /^Visitas/ })).toHaveAttribute("aria-current", "step");
     expect(within(dialogo).getByText(`Passo 1 de 7 · faltam ${TOTAL_PERGUNTAS} respostas`)).toBeInTheDocument();
     expect(within(dialogo).getByRole("heading", { level: 3, name: "Visitas" })).toBeInTheDocument();
-    expect(grupo(dialogo, "Tipo de visita")).toBeInTheDocument();
+    // A secção Visitas é a lista de visitas: começa vazia, com o contador «0 visitas · 0 feitas».
+    expect(within(dialogo).getByText("Ainda sem visitas. Acrescenta a primeira.")).toBeInTheDocument();
+    expect(within(lista).getByRole("button", { name: /^Visitas.*0 visitas · 0 feitas/ })).toBeInTheDocument();
   });
 
   it("Exterior do edifício: 0 de 4; Acesso Difícil abre o Impacto no preço, a secção passa a 1 de 5 e o passo é o 2", () => {

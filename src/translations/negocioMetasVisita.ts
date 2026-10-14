@@ -3,7 +3,8 @@
 // interface estão aqui. Todas as chaves levam o prefixo `businessGoals.new.`.
 import { BLOCO_QUALIFICACAO } from "@/components/negocio-metas/qualificacaoExemplo";
 import { chaveSeccao, textosDosBlocos } from "@/components/negocio-metas/respostasVisita";
-import { SECCOES_VISITA } from "@/components/negocio-metas/visitaExemplo";
+import { BLOCO_ESCOLHAS_VISITA, SECCOES_VISITA } from "@/components/negocio-metas/visitaExemplo";
+import { negocioMetasListaVisitasTranslations } from "./negocioMetasListaVisitas";
 
 const PREFIXO = "businessGoals.new.";
 
@@ -83,7 +84,7 @@ const en: Record<string, string> = {
   'qual.title': 'Qualification',
 };
 
-const blocos = [BLOCO_QUALIFICACAO, ...SECCOES_VISITA.flatMap((s) => s.blocos)];
+const blocos = [BLOCO_QUALIFICACAO, BLOCO_ESCOLHAS_VISITA, ...SECCOES_VISITA.flatMap((s) => s.blocos)];
 
 function dosPares(lingua: 0 | 1): Record<string, string> {
   const textos = Object.entries(textosDosBlocos(blocos)).map(([chave, par]) => [chave, par[lingua]] as const);
@@ -95,6 +96,6 @@ const comPrefixo = (textos: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(textos).map(([chave, texto]) => [PREFIXO + chave, texto]));
 
 export const negocioMetasVisitaTranslations: Record<"en" | "pt", Record<string, string>> = {
-  en: comPrefixo({ ...dosPares(1), ...en }),
-  pt: comPrefixo({ ...dosPares(0), ...pt }),
+  en: comPrefixo({ ...dosPares(1), ...en, ...negocioMetasListaVisitasTranslations.en }),
+  pt: comPrefixo({ ...dosPares(0), ...pt, ...negocioMetasListaVisitasTranslations.pt }),
 };

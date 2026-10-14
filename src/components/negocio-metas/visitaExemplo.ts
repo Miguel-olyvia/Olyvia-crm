@@ -2,36 +2,38 @@
 // existem (campos.ts: VISITA_BASE, EXTERIOR, INTERIOR, AREA, ESCOLHAS; PERGUNTA0 do catálogo), copiadas como constantes
 // de exemplo próprias. Ficam de fora as perguntas de número, contador, texto e escolha múltipla (as medidas e o texto
 // livre vivem nas linhas do levantamento). Só exemplo.
-import type { SeccaoDef } from "./perguntasTipos";
+import type { BlocoDef, PerguntaDef, SeccaoDef } from "./perguntasTipos";
 import { SIM_NAO, SIM_NAO_NAO_SEI } from "./perguntasTipos";
 
-const VISITAS: SeccaoDef = {
-  id: "visitas", titulo: ["Visitas", "Visits"], especial: "visitas",
-  blocos: [{
-    id: "visita",
-    perguntas: [
-      {
-        id: "tipoVisita", rotulo: ["Tipo de visita", "Visit type"],
-        opcoes: [
-          ["levantamento", "Levantamento", "Survey"], ["medicao", "Medição técnica", "Technical measurement"],
-          ["materiais", "Escolha de materiais", "Choice of materials"], ["revisita", "Revisita", "Revisit"],
-        ],
-      },
-      {
-        id: "hora", rotulo: ["Hora", "Time"],
-        opcoes: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"].map((h) => [`h${h.slice(0, 2)}`, h, h] as const),
-      },
-      {
-        id: "presentes", rotulo: ["Quem vai estar", "Who will be there"],
-        opcoes: [["cliente", "O cliente", "The client"], ["casal", "O casal", "The couple"], ["familia", "A família", "The family"], ["outra", "Outra pessoa", "Someone else"]],
-      },
-      {
-        id: "duracao", rotulo: ["Duração", "Duration"],
-        opcoes: [["m30", "30 min", "30 min"], ["h1", "1 h", "1 h"], ["h1m30", "1 h 30", "1 h 30"], ["h2", "2 h", "2 h"]],
-      },
-    ],
-  }],
+/** O tipo de visita (as chaves são as de `TipoVisitaNegocio`). */
+export const PERGUNTA_TIPO_VISITA: PerguntaDef = {
+  id: "tipoVisita", rotulo: ["Tipo de visita", "Visit type"],
+  opcoes: [
+    ["levantamento", "Levantamento", "Survey"], ["medicao", "Medição técnica", "Technical measurement"],
+    ["materiais", "Escolha de materiais", "Choice of materials"], ["revisita", "Revisita", "Revisit"],
+  ],
 };
+
+export const PERGUNTA_PRESENTES_VISITA: PerguntaDef = {
+  id: "presentes", rotulo: ["Quem vai estar", "Who will be there"],
+  opcoes: [["cliente", "O cliente", "The client"], ["casal", "O casal", "The couple"], ["familia", "A família", "The family"], ["outra", "Outra pessoa", "Someone else"]],
+};
+
+export const PERGUNTA_DURACAO_VISITA: PerguntaDef = {
+  id: "duracao", rotulo: ["Duração", "Duration"],
+  opcoes: [["m30", "30 min", "30 min"], ["h1", "1 h", "1 h"], ["h1m30", "1 h 30", "1 h 30"], ["h2", "2 h", "2 h"]],
+};
+
+/**
+ * As escolhas de cada visita da lista. Já não são perguntas da secção (cada visita leva as suas, e não contam para "n de m
+ * respondidas"); ficam aqui para os textos e as opções terem uma só fonte.
+ */
+export const BLOCO_ESCOLHAS_VISITA: BlocoDef = {
+  id: "visita", perguntas: [PERGUNTA_TIPO_VISITA, PERGUNTA_PRESENTES_VISITA, PERGUNTA_DURACAO_VISITA],
+};
+
+/** A lista de visitas do negócio: não tem perguntas de escolha rápida (ver `ListaVisitas`). */
+const VISITAS: SeccaoDef = { id: "visitas", titulo: ["Visitas", "Visits"], especial: "visitas", blocos: [] };
 
 const EXTERIOR: SeccaoDef = {
   id: "exterior", titulo: ["Exterior do edifício", "Building exterior"],

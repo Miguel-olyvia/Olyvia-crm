@@ -10,6 +10,8 @@ import type { Respostas } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { alternarResposta } from "./respostasVisita";
 import { SECCOES_VISITA } from "./visitaExemplo";
+import type { VisitaNegocio } from "./negocioMetas";
+import { ID_VISITA_DA_PESSOA, acrescentarVisita, alterarVisita, marcarFeita, novaVisita, ordenarVisitas, removerVisita, visitasIniciais } from "./visitasNegocio";
 import {
   COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, preencherContactoDaPessoa, reporContacto, type ChaveContacto,
   type PessoaOpcao, type ValoresIniciaisNegocio,
@@ -44,11 +46,12 @@ export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => 
   return { valores, acoes };
 }
 
-export function useLevantamentoForm(hoje: string, aoSujar: () => void, inicial?: ValoresIniciaisNegocio["visita"]) {
-  const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => {
-    const vazio = levantamentoVazio(inicial?.data ?? hoje, comercialValido(inicial?.quemFez));
-    return inicial ? { ...vazio, estado: inicial.estado } : vazio;
-  });
+/**
+ * As linhas e as observações do levantamento. A data, quem fez e o estado deixam de ser daqui: derivam da lista de
+ * visitas (ver `camposDoLevantamento`), por isso aqui ficam só com o valor de partida.
+ */
+export function useLevantamentoForm(hoje: string, aoSujar: () => void, comercial: string) {
+  const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => levantamentoVazio(hoje, comercial));
   const sequencia = useRef(0);
   const alterar = (f: (l: LevantamentoForm) => LevantamentoForm) => { aoSujar(); setLevantamento(f); };
   const acoes: AcoesLevantamento = {
@@ -70,6 +73,41 @@ export function useLevantamentoForm(hoje: string, aoSujar: () => void, inicial?:
     removerLinha: (id) => alterar((l) => ({ ...l, linhas: l.linhas.filter((x) => x.id !== id) })),
   };
   return { levantamento, acoes };
+}
+
+export interface AcoesVisitas {
+  /** Acrescenta uma visita (Por fazer, Revisita) e abre-a; devolve o id. */
+  adicionar: () => string;
+  alterar: (id: string, parcial: Partial<VisitaNegocio>) => void;
+  remover: (id: string) => void;
+  marcarFeita: (id: string) => void;
+  /** Abre a visita; se já estava aberta, fecha-a. */
+  alternar: (id: string) => void;
+}
+
+/**
+ * A lista de visitas do negócio: vazia, ou só com a visita concluída que veio de Pessoas (Feita, já aberta para se ver).
+ * Uma visita nova é Por fazer, Revisita, com o comercial do negócio.
+ */
+export function useVisitasForm(hoje: string, aoSujar: () => void, comercial: string, inicial?: ValoresIniciaisNegocio["visita"]) {
+  const [visitas, setVisitas] = useState<VisitaNegocio[]>(() => visitasIniciais(inicial));
+  const [aberta, setAberta] = useState<string | null>(inicial ? ID_VISITA_DA_PESSOA : null);
+  const sequencia = useRef(0);
+  const alterarLista = (f: (v: VisitaNegocio[]) => VisitaNegocio[]) => { aoSujar(); setVisitas(f); };
+  const acoes: AcoesVisitas = {
+    adicionar: () => {
+      sequencia.current += 1;
+      const id = `v${sequencia.current}`;
+      alterarLista((v) => acrescentarVisita(v, novaVisita(id, hoje, comercial, ordenarVisitas(v).slice(-1)[0])));
+      setAberta(id);
+      return id;
+    },
+    alterar: (id, parcial) => alterarLista((v) => alterarVisita(v, id, parcial)),
+    remover: (id) => { alterarLista((v) => removerVisita(v, id)); setAberta((a) => (a === id ? null : a)); },
+    marcarFeita: (id) => alterarLista((v) => marcarFeita(v, id)),
+    alternar: (id) => setAberta((a) => (a === id ? null : id)),
+  };
+  return { visitas, aberta, acoes };
 }
 
 const TODOS_OS_BLOCOS = [BLOCO_QUALIFICACAO, ...SECCOES_VISITA.flatMap((s) => s.blocos)];

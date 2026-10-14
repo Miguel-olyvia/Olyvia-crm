@@ -9,8 +9,6 @@ export const DIVISOES = ["casaDeBanho", "cozinha", "sala", "quarto", "exterior",
 export const UNIDADES = ["m2", "m", "un"] as const;
 export type ChaveUnidade = (typeof UNIDADES)[number];
 
-export const ESTADOS_LEVANTAMENTO = ["porFazer", "feito"] as const;
-
 /** Os trabalhos sugeridos de cada divisão (a lista de "Trabalho a fazer" adapta-se à divisão escolhida). */
 const TRABALHOS: Record<string, readonly string[]> = {
   casaDeBanho: ["bancaPorDuche", "sanita", "azulejos", "canalizacao"],

@@ -1,15 +1,19 @@
 import { Check, Circle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { DadosDaVisita, MedidasDaArea, type AcoesLevantamento } from "./LevantamentoCampos";
+import { MedidasDaArea, type AcoesLevantamento } from "./LevantamentoCampos";
+import { ListaVisitas } from "./ListaVisitas";
 import { BlocosPerguntas } from "./PerguntaEscolha";
 import { N } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import type { LevantamentoForm } from "./levantamento";
+import type { VisitaNegocio } from "./negocioMetas";
 import type { ErrosNovoNegocio } from "./novoNegocio";
 import type { Respostas, SeccaoDef } from "./perguntasTipos";
 import { chaveSeccao, contarSeccao, contarTotal, seccaoCompleta } from "./respostasVisita";
+import type { AcoesVisitas } from "./useEstadoNovoNegocio";
 import { SECCOES_VISITA } from "./visitaExemplo";
+import { contarVisitas } from "./visitasNegocio";
 
 interface Props {
   id: string;
@@ -21,26 +25,41 @@ interface Props {
   levantamento: LevantamentoForm;
   erros: ErrosNovoNegocio;
   acoesLevantamento: AcoesLevantamento;
+  visitas: readonly VisitaNegocio[];
+  /** O id da visita aberta (ou `null`). */
+  visitaAberta: string | null;
+  acoesVisitas: AcoesVisitas;
 }
 
-/** O texto curto de uma secção: "n de m respondidas", ou o número de linhas nas Medidas da área. */
-function useContador(): (s: SeccaoDef, respostas: Respostas, linhas: number) => string {
+const um = (n: number): string => (n === 1 ? ".one" : "");
+
+/** O texto curto de uma secção: "n visitas · m feitas", o número de linhas nas Medidas da área, ou "n de m respondidas". */
+function useContador(): (s: SeccaoDef, respostas: Respostas, linhas: number, visitas: readonly VisitaNegocio[]) => string {
   const { t } = useTranslation();
-  return (s, respostas, linhas) => {
-    if (s.especial === "medidas") return t(`${N}answered.lines${linhas === 1 ? ".one" : ""}`, { n: linhas });
+  return (s, respostas, linhas, visitas) => {
+    if (s.especial === "visitas") {
+      const { total, feitas } = contarVisitas(visitas);
+      return t(`${N}visits.counter`, { visitas: t(`${N}visits.n${um(total)}`, { n: total }), feitas: t(`${N}visits.done${um(feitas)}`, { n: feitas }) });
+    }
+    if (s.especial === "medidas") return t(`${N}answered.lines${um(linhas)}`, { n: linhas });
     const { respondidas, total } = contarSeccao(s, respostas);
     return t(`${N}answered`, { n: respondidas, m: total });
   };
 }
 
-const feita = (s: SeccaoDef, respostas: Respostas, linhas: number): boolean =>
-  s.especial === "medidas" ? linhas > 0 : seccaoCompleta(s, respostas);
+/** Uma secção está feita: as Visitas com alguma visita feita, as Medidas com linhas, as outras com tudo respondido. */
+const feita = (s: SeccaoDef, respostas: Respostas, linhas: number, visitas: readonly VisitaNegocio[]): boolean => {
+  if (s.especial === "visitas") return contarVisitas(visitas).feitas > 0;
+  return s.especial === "medidas" ? linhas > 0 : seccaoCompleta(s, respostas);
+};
 
 /**
  * A lista das secções da visita: à esquerda em ecrã largo, em pílulas em linha no estreito. Cada uma mostra o círculo
  * vazio ou o visto (e diz-se em texto), a atual está destacada e leva `aria-current`.
  */
-function ListaSeccoes({ ativa, aoMudar, respostas, linhas }: { ativa: string; aoMudar: (id: string) => void; respostas: Respostas; linhas: number }) {
+function ListaSeccoes({ ativa, aoMudar, respostas, linhas, visitas }: {
+  ativa: string; aoMudar: (id: string) => void; respostas: Respostas; linhas: number; visitas: readonly VisitaNegocio[];
+}) {
   const { t } = useTranslation();
   const contador = useContador();
   return (
@@ -48,7 +67,8 @@ function ListaSeccoes({ ativa, aoMudar, respostas, linhas }: { ativa: string; ao
       <ul className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
         {SECCOES_VISITA.map((s) => {
           const atual = s.id === ativa;
-          const feito = feita(s, respostas, linhas);
+          const feito = feita(s, respostas, linhas, visitas);
+          const chaveFeito = s.especial === "visitas" ? "visits.section" : "visit.section";
           return (
             <li key={s.id} className="shrink-0 lg:shrink">
               <button
@@ -61,9 +81,9 @@ function ListaSeccoes({ ativa, aoMudar, respostas, linhas }: { ativa: string; ao
                 {feito ? <Check className="h-4 w-4 shrink-0" aria-hidden="true" /> : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
                 <span className="min-w-0 flex-1">
                   <span className="block">{t(`${N}${chaveSeccao(s.id)}`)}</span>
-                  <span className="block text-xs font-normal tabular-nums text-muted-foreground">{contador(s, respostas, linhas)}</span>
+                  <span className="block text-xs font-normal tabular-nums text-muted-foreground">{contador(s, respostas, linhas, visitas)}</span>
                 </span>
-                <span className="sr-only">{t(`${N}visit.section.${feito ? "done" : "todo"}`)}</span>
+                <span className="sr-only">{t(`${N}${chaveFeito}.${feito ? "done" : "todo"}`)}</span>
               </button>
             </li>
           );
@@ -87,7 +107,9 @@ function PassoDaVisita({ indice, respostas }: { indice: number; respostas: Respo
 }
 
 /** A aba Visita (só exemplo): o passo, a lista de secções e a secção aberta, com as perguntas e, onde cabem, o levantamento. */
-export function AbaVisita({ id, seccaoAtiva, aoMudarSeccao, respostas, aoEscolher, levantamento, erros, acoesLevantamento }: Props) {
+export function AbaVisita({
+  id, seccaoAtiva, aoMudarSeccao, respostas, aoEscolher, levantamento, erros, acoesLevantamento, visitas, visitaAberta, acoesVisitas,
+}: Props) {
   const { t } = useTranslation();
   const contador = useContador();
   const indice = Math.max(0, SECCOES_VISITA.findIndex((s) => s.id === seccaoAtiva));
@@ -98,13 +120,13 @@ export function AbaVisita({ id, seccaoAtiva, aoMudarSeccao, respostas, aoEscolhe
       <PassoDaVisita indice={indice} respostas={respostas} />
       <p className="text-sm text-muted-foreground">{t(`${N}visit.help`)}</p>
       <div className="flex flex-col gap-6 lg:flex-row">
-        <ListaSeccoes ativa={seccao.id} aoMudar={aoMudarSeccao} respostas={respostas} linhas={linhas} />
+        <ListaSeccoes ativa={seccao.id} aoMudar={aoMudarSeccao} respostas={respostas} linhas={linhas} visitas={visitas} />
         <section aria-labelledby={`${id}-seccao`} className="min-w-0 flex-1 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 id={`${id}-seccao`} className="text-base font-semibold text-foreground">{t(`${N}${chaveSeccao(seccao.id)}`)}</h3>
-            <p className="text-sm tabular-nums text-muted-foreground">{contador(seccao, respostas, linhas)}</p>
+            <p className="text-sm tabular-nums text-muted-foreground">{contador(seccao, respostas, linhas, visitas)}</p>
           </div>
-          {seccao.especial === "visitas" && <DadosDaVisita id={id} levantamento={levantamento} acoes={acoesLevantamento} />}
+          {seccao.especial === "visitas" && <ListaVisitas id={id} visitas={visitas} aberta={visitaAberta} acoes={acoesVisitas} />}
           <BlocosPerguntas blocos={seccao.blocos} respostas={respostas} aoEscolher={aoEscolher} />
           {seccao.especial === "medidas" && <MedidasDaArea id={id} levantamento={levantamento} erros={erros} acoes={acoesLevantamento} />}
         </section>

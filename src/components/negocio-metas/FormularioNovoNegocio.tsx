@@ -19,8 +19,12 @@ import {
 import type { Respostas } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { contarRespostas, contarTotal, respostasEmTexto, visitaEmTexto } from "./respostasVisita";
-import { useCamposGerais, useLevantamentoForm, useMoradaForm, useRespostasForm, type OrigemMorada } from "./useEstadoNovoNegocio";
+import {
+  useCamposGerais, useLevantamentoForm, useMoradaForm, useRespostasForm, useVisitasForm, type AcoesVisitas, type OrigemMorada,
+} from "./useEstadoNovoNegocio";
+import type { VisitaNegocio } from "./negocioMetas";
 import { SECCOES_VISITA } from "./visitaExemplo";
+import { camposDoLevantamento, visitasParaGuardar } from "./visitasNegocio";
 
 const ABAS: readonly AbaNovoNegocio[] = ["geral", "qualificacao", "visita"];
 const SECCAO_DO_LEVANTAMENTO = "medidas";
@@ -54,6 +58,9 @@ interface CorpoProps {
   acoesGeral: AcoesGeral;
   acoesQualificacao: AcoesQualificacao;
   acoesLevantamento: AcoesLevantamento;
+  visitas: readonly VisitaNegocio[];
+  visitaAberta: string | null;
+  acoesVisitas: AcoesVisitas;
 }
 
 /** As três abas sublinhadas e o conteúdo de cada uma (a zona que rola); a aba com erros leva o aviso. */
@@ -95,6 +102,7 @@ function CorpoAbas(p: CorpoProps) {
           <AbaVisita
             id={p.id} seccaoAtiva={p.seccao} aoMudarSeccao={p.aoMudarSeccao} respostas={p.respostas}
             aoEscolher={p.acoesQualificacao.escolher} levantamento={p.levantamento} erros={p.erros} acoesLevantamento={p.acoesLevantamento}
+            visitas={p.visitas} visitaAberta={p.visitaAberta} acoesVisitas={p.acoesVisitas}
           />
         </TabsContent>
       </div>
@@ -130,12 +138,15 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
   const [tentou, setTentou] = useState(false);
   const pedirFoco = usePedidoFoco(id);
   const { valores, acoes } = useCamposGerais(pessoas, aoSujar, pessoaInicialId ?? valoresIniciais?.pessoaId, valoresIniciais?.comercial);
-  const lev = useLevantamentoForm(hoje, aoSujar, valoresIniciais?.visita);
+  const lev = useLevantamentoForm(hoje, aoSujar, valores.comercial);
+  const vis = useVisitasForm(hoje, aoSujar, valores.comercial, valoresIniciais?.visita);
   const resp = useRespostasForm(aoSujar);
   const morada = useMoradaForm(aoSujar, valoresIniciais?.visita);
   const [seccao, setSeccao] = useState(SECCOES_VISITA[0].id);
   const pessoa = pessoas.find((p) => p.id === valores.pessoaId);
-  const aValidar = { ...valores, pessoaId: pessoa ? valores.pessoaId : "", levantamento: lev.levantamento, moradaObra: morada.morada };
+  // A data, quem fez e o estado do levantamento derivam da lista de visitas; as linhas e as observações são do formulário.
+  const levantamento = { ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, valores.comercial) };
+  const aValidar = { ...valores, pessoaId: pessoa ? valores.pessoaId : "", levantamento, moradaObra: morada.morada };
 
   const enviar = (e: FormEvent) => {
     e.preventDefault();
@@ -150,10 +161,11 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
       const texto = (chave: string) => t(`${N}${chave}`);
       aoConfirmar({
         pessoa, comercial: valores.comercial, contacto: valores.contacto,
-        levantamento: paraLevantamentoNegocio(lev.levantamento, rotulo),
+        levantamento: paraLevantamentoNegocio(levantamento, rotulo),
         qualificacao: respostasEmTexto([BLOCO_QUALIFICACAO], resp.respostas, texto),
         moradaObra: morada.morada,
         visita: visitaEmTexto(SECCOES_VISITA, resp.respostas, texto),
+        visitas: visitasParaGuardar(vis.visitas),
       });
     }
   };
@@ -162,9 +174,9 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
     <form onSubmit={enviar} noValidate className="flex min-h-0 flex-1 flex-col">
       <CorpoAbas
         id={id} aba={aba} aoMudarAba={setAba} seccao={seccao} aoMudarSeccao={setSeccao} pessoas={pessoas} valores={valores}
-        respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={lev.levantamento}
+        respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={levantamento}
         erros={tentou ? validarNovoNegocio(aValidar) : {}} primeiroCampo={primeiroCampo}
-        acoesGeral={acoes} acoesLevantamento={lev.acoes}
+        acoesGeral={acoes} acoesLevantamento={lev.acoes} visitas={vis.visitas} visitaAberta={vis.aberta} acoesVisitas={vis.acoes}
         acoesQualificacao={{ escolher: resp.escolher, morada: morada.mudar, preencherMorada: morada.preencher }}
       />
       <SheetFooter className="shrink-0 gap-2 border-t border-border px-6 py-4 sm:space-x-0">

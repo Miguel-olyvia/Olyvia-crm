@@ -56,7 +56,7 @@ describe("valoresIniciaisDaVisita", () => {
     expect(v).toEqual({
       pessoaId: "a", comercial: "Bruno Costa",
       visita: {
-        data: "2026-10-20", quemFez: "Bruno Costa", estado: "feito", igualALead: false,
+        data: "2026-10-20", quemFez: "Bruno Costa", estado: "feito", igualALead: false, hora: "10:30",
         moradaObra: { rua: "Rua B 2", codigoPostal: "4700-010", localidade: "Braga", andar: "Loja" },
       },
     });

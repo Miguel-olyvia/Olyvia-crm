@@ -6,15 +6,18 @@ import { CadeiaNegocio } from "./CadeiaNegocio";
 import { LevantamentoResumo } from "./LevantamentoResumo";
 import { MoradaObraResumo, QualificacaoResumo, VisitaResumo } from "./RespostasResumo";
 import { SaudeTag } from "./SaudeTag";
+import { VisitasResumo } from "./VisitasResumo";
 import { proximoPasso } from "./logicaQuadro";
 import type { NegocioMes } from "./negocioMetas";
 import { rotuloPrazo } from "./saudeNegocio";
+import { visitasDoNegocio } from "./visitasNegocio";
 
 /** O separador Resumo: o próximo passo e o prazo, a saúde, a cadeia numa linha e o que o Workflow faz ao mudar. */
 export function ResumoPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: string }) {
   const { t } = useTranslation();
   const id = useId();
   const prazo = rotuloPrazo(negocio.proximoPrazo, hoje, t, true);
+  const visitas = visitasDoNegocio(negocio);
   return (
     <div className="space-y-5">
       <section aria-labelledby={`${id}-passo`} className="space-y-1.5">
@@ -30,7 +33,8 @@ export function ResumoPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: str
       {negocio.qualificacao && <QualificacaoResumo respostas={negocio.qualificacao} />}
       {negocio.moradaObra && <MoradaObraResumo morada={negocio.moradaObra} />}
       {negocio.visita && <VisitaResumo seccoes={negocio.visita} />}
-      {negocio.levantamento && <LevantamentoResumo levantamento={negocio.levantamento} />}
+      {visitas.length > 0 && <VisitasResumo visitas={visitas} />}
+      {negocio.levantamento && <LevantamentoResumo levantamento={negocio.levantamento} comResumo={!negocio.visitas?.length} />}
       <AoMudarNegocio negocio={negocio} />
       <p className="text-xs text-muted-foreground">{t("businessGoals.panel.note")}</p>
     </div>
