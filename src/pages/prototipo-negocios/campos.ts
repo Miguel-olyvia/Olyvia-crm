@@ -113,6 +113,7 @@ export const EXTERIOR: Grupo = {
     { k: "impacto_percent", bloco: "Acesso e estacionamento", l: "Impacto no preço", t: "escolha", op: ["5%", "10%", "15%", "20%"], ajuda: "Só com acesso difícil.", papel: "orcamento", se: { k: "acesso", v: ["Difícil"] } },
     { k: "estacionamento", bloco: "Acesso e estacionamento", l: "Estacionamento", t: "escolha", op: ["Pago", "Não pago", "Sem estacionamento"], papel: "sugestoes" },
     { k: "zona_estacionamento", bloco: "Acesso e estacionamento", l: "Zona de estacionamento", t: "escolha", op: ["Verde", "Amarela", "Vermelha"], papel: "sugestoes", se: { k: "estacionamento", v: ["Pago"] } },
+    { k: "dist_entulho", bloco: "Acesso e estacionamento", l: "Da porta ao big bag ou contentor", t: "escolha", op: ["Até 10 m", "10 a 30 m", "Mais de 30 m"], ajuda: "Entra no fator de acesso da demolição.", papel: "orcamento", opcional: true },
     { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano" },
     { k: "n_elevadores", bloco: "O prédio", l: "Nº de elevadores", t: "contador", min: 1, max: 6, se: { k: "tem_elevador", v: ["Sim"] } },
     { k: "n_andares", bloco: "O prédio", l: "Andares do prédio", t: "contador", min: 1, max: 40 },

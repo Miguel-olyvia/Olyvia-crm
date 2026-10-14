@@ -542,7 +542,8 @@ export function sincronizarDemolicao(d: Negocio, _S: Estado) {
   if (!o || !o.demolicao || !K || o.enviada) return;
   o.linhas = o.linhas.filter((l) => !(l.t === "mat" && l.d === LINHA_DEMOLICAO));
   const P = K.parDem ?? PAR_DEM0;
-  const r = calcularDemolicao(o.demolicao.itens, K.artigosDem ?? ARTIGOS_DEM0, P, fatorAcesso(d.f, P), o.demolicao.aj);
+  // sem margens próprias, a demolição usa a mínima e a alvo gerais da Olyvia
+  const r = calcularDemolicao(o.demolicao.itens, K.artigosDem ?? ARTIGOS_DEM0, P, fatorAcesso(d.f, P), o.demolicao.aj, { min: _S.cfg.min / 100, alvo: _S.cfg.alvo / 100 });
   o.demolicao.r = r;
   if (r.preco > 0 || r.custo > 0) o.linhas.push({ t: "mat", d: LINHA_DEMOLICAO, custo: r.custo, preco: r.preco });
   sugerirPrazo(d, _S); // as horas da demolição mexem no prazo
@@ -638,6 +639,9 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
   const oc = o.demolicao?.r?.ocupacao;
   if (oc?.falta && !vistos["enfalta"]) A.push({ k: "w", t: oc?.meio === "contentor" ? "Os contentores não chegam para o entulho" : "Os big bags não chegam para o entulho", d: `${oc.texto}. ${oc.falta.charAt(0).toUpperCase() + oc.falta.slice(1)}.`, key: "enfalta" });
   if (oc?.sugestao && !vistos["ensug"]) A.push({ k: "w", t: "Contentor quase vazio", d: oc.sugestao.charAt(0).toUpperCase() + oc.sugestao.slice(1) + ".", key: "ensug" });
+  // a demolição: o preço mexido à mão abaixo da margem mínima (da demolição ou, sem ela, a geral)
+  const rd = o.demolicao?.r;
+  if (rd?.abaixoMin) A.push({ k: "x", t: rd.preco < rd.custo ? "Preço da demolição abaixo do custo" : "Margem da demolição abaixo do mínimo", d: `${eur(rd.preco)} € dá ${pct(rd.margem)} de margem, com um mínimo de ${pct(rd.margemMin)}. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.`, aprov: rd.preco >= rd.custo });
   const T = tot(d, S);
   if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
   else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: `Margem total de ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });

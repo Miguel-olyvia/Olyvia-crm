@@ -1,7 +1,8 @@
 // O detalhe da linha "Demolição e remoção de entulho…" no orçamento (13/10/2026): os artigos e as quantidades
 // (o comercial escolhe), o fator de acesso que veio do levantamento, horas, m³, toneladas, o meio (big bags ou
 // contentor) com a ocupação, e o preço. Cada valor pode ser mexido à mão ("ajustado", com "repor o cálculo").
-// O custo, o custo/hora, o C_dep e o markup só se mostram à Direção.
+// O custo, o custo/hora, o C_dep e a margem só se mostram à Direção. O meio é só logística (o C_dep já inclui o
+// big bag ou o contentor); o contentor só aparece quando a Direção o liga (14/10/2026: à espera das Compras).
 import { useState } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,7 +50,7 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
     </button>
   ) : null);
   const Marca = ({ k }: { k: ChaveAjuste }) => (aj(k) ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">ajustado</span> : null);
-  const Numero = ({ k, v, rot, un, passo = 0.1 }: { k: "horas" | "toneladas" | "preco" | "precoContentor"; v: number; rot: string; un: string; passo?: number }) => (
+  const Numero = ({ k, v, rot, un, passo = 0.1 }: { k: "horas" | "toneladas" | "preco"; v: number; rot: string; un: string; passo?: number }) => (
     <label className="flex flex-wrap items-center gap-2 text-[15px]">
       <span className="min-w-36">{rot}</span>
       <input key={k + v} type="number" inputMode="decimal" min="0" step={passo} defaultValue={v} disabled={fechado}
@@ -107,7 +108,7 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-36 text-[15px]">Meio</span>
-          {(["bigbag", "contentor", "nenhum"] as Meio[]).map((m) => (
+          {(["bigbag", "contentor", "nenhum"] as Meio[]).filter((m) => m !== "contentor" || P.contentor.ativo || r.meio === "contentor").map((m) => (
             <button key={m} type="button" disabled={fechado} aria-pressed={r.meio === m} onClick={() => ajustar("meio", m)}
               className={cn("min-h-10 rounded-full border px-3 text-sm transition-colors disabled:opacity-60", r.meio === m ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40")}>
               {m === "bigbag" ? "Big bags" : m === "contentor" ? "Contentor" : "Nenhum (o cliente tem)"}
@@ -127,9 +128,7 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
             <Marca k="n" /><Repor k="n" />
           </div>
         )}
-        {r.meio === "contentor" && <Numero k="precoContentor" v={r.n ? Math.round((r.deposicao / r.n) * 100) / 100 : P.contentor.preco} rot="Preço do contentor" un="€" passo={10} />}
         {r.ocupacao && <OcupacaoMeio oc={r.ocupacao} />}
-        {r.propostaContentor && <p className="text-sm text-muted-foreground">Proposta: {r.propostaContentor}.</p>}
       </div>
 
       {/* horas, toneladas e preço */}
@@ -146,7 +145,7 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
             <div key={t}><dt className="text-muted-foreground">{t}</dt><dd className="tabular-nums">{eur(v)} €</dd></div>
           ))}
           <div className="col-span-full text-xs text-muted-foreground">
-            {eur(P.custoHora)} €/h · C_dep {eur(P.cDep)} €/{P.unDep} · {P.modoPreco === "markup" ? `markup ${Math.round(P.markup * 100)}%` : `margem ${Math.round(P.margem * 100)}%`} · preço calculado {eur(r.precoCalc)} €
+            {eur(P.custoHora)} €/h · C_dep {eur(P.cDep)} €/{P.unDep}, tudo incluído · {P.modoPreco === "markup" ? `markup ${nfmt(Math.round(P.markup * 1000) / 10)}%` : `margem alvo ${nfmt(Math.round(r.margemAlvo * 1000) / 10)}%`} · preço calculado {eur(r.precoCalc)} € · margem {nfmt(Math.round(r.margem * 1000) / 10)}% (mínimo {nfmt(Math.round(r.margemMin * 1000) / 10)}%)
           </div>
         </dl>
       ) : (

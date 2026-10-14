@@ -1,13 +1,15 @@
 // Demolição e entulho nas Definições da V2 (13/10/2026): os parâmetros e a tabela de artigos da especificação
 // da Mudelar. Só a Direção muda (os outros papéis veem os valores, sem os mexer); cada mudança fica no
 // histórico (quem, quando, valor antigo → novo). Vive no Catálogo (catalogoStore), que o motor lê.
+// 14/10/2026 (respostas do Ricardo): margem sobre o preço por omissão, com a alvo e a mínima próprias ou as gerais
+// da Olyvia; fatores de acesso extra; o contentor desligado até as Compras enviarem as capacidades.
 import { History, Lock, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, eur, nfmt, type Estado } from "../motor";
 import { numero } from "../pecas";
 import {
-  ARTIGOS_DEM0, CAMPOS_PAR, PAR_DEM0, UNS_DEM, registarMudanca, vSoltoDe, type ArtigoDem, type MudancaDem, type ParDem,
+  ARTIGOS_DEM0, CAMPOS_PAR, F_EXTRA0, PAR_DEM0, UNS_DEM, registarMudanca, vSoltoDe, type ArtigoDem, type MudancaDem, type ParDem,
 } from "../entulho";
 import { mudarCatalogo, useCatalogo } from "./catalogoStore";
 import { CARTAO, LINHA } from "./pecasDefinicoes";
@@ -19,6 +21,8 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
   const K = useCatalogo();
   const P = K.parDem ?? PAR_DEM0, artigos = K.artigosDem ?? ARTIGOS_DEM0, hist = K.histDem ?? [];
   const direcao = S.role === "direcao", quem = PAPEIS[S.role].nome;
+  const pc = (x: number | null) => (x == null ? undefined : Math.round(x * 1000) / 10);
+  const extras = P.fExtra ?? F_EXTRA0;
 
   const mudarPar = (rot: string, fn: (P: ParDem) => void, antes: unknown, depois: unknown) => mudarCatalogo((k) => {
     const p = structuredClone(k.parDem ?? PAR_DEM0); fn(p); k.parDem = p;
@@ -38,9 +42,9 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
     k.artigosDem = lista;
     k.histDem = registarMudanca("—", codigo, "Artigo novo", k.histDem ?? [], quem, agora());
   });
-  const numCel = (rot: string, v: number | undefined, onSet: (n: number | undefined) => void, w = "w-20", opcional = false) => (
+  const numCel = (rot: string, v: number | undefined, onSet: (n: number | undefined) => void, w = "w-20", opcional = false, vazio = "—") => (
     <input key={rot + String(v)} type="text" inputMode="decimal" aria-label={rot} disabled={!direcao} defaultValue={v == null ? "" : String(v).replace(".", ",")}
-      placeholder={opcional ? "—" : undefined} className={cn(CAMPO, w, "text-right tabular-nums")}
+      placeholder={opcional ? vazio : undefined} className={cn(CAMPO, w, "text-right tabular-nums")}
       onBlur={(e) => { const t = e.target.value.trim(); if (!t && opcional) { if (v != null) onSet(undefined); return; } const n = numero(t); if (!isNaN(n) && n >= 0 && n !== v) onSet(n); else e.target.value = v == null ? "" : String(v).replace(".", ","); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
   );
@@ -76,17 +80,43 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
         <div className={cn(LINHA, "justify-between")} role="group" aria-label="Como se chega ao preço">
           <span className="text-[15px] font-medium">Preço</span>
           <span className="flex gap-2">
-            {(["markup", "margem"] as const).map((m) => (
+            {(["margem", "markup"] as const).map((m) => (
               <button key={m} type="button" disabled={!direcao} aria-pressed={P.modoPreco === m} onClick={() => mudarPar("Preço", (p) => { p.modoPreco = m; }, P.modoPreco, m)}
                 className={cn("min-h-10 rounded-full border px-3 text-sm disabled:opacity-60", P.modoPreco === m ? "border-primary bg-primary text-primary-foreground" : "border-input")}>{m === "markup" ? "custo × (1 + markup)" : "custo ÷ (1 − margem)"}</button>
             ))}
           </span>
         </div>
+        {([["margem", "Margem alvo", S.cfg.alvo], ["margemMin", "Margem mínima", S.cfg.min]] as const).map(([k, rot, geral]) => (
+          <label key={k} className={cn(LINHA, "justify-between")}>
+            <span className="text-[15px] font-medium">{rot}<span className="block text-sm font-normal text-muted-foreground">Em branco usa a geral da Olyvia ({geral}%).</span></span>
+            <span className="flex items-center gap-2">
+              {numCel(rot, pc(P[k]), (n) => mudarPar(rot, (p) => { p[k] = n == null ? null : n / 100; }, pc(P[k]) ?? `geral ${geral}`, n ?? `geral ${geral}`), "w-20", true, String(geral))}
+              <span className="w-12 text-sm text-muted-foreground">%</span>
+            </span>
+          </label>
+        ))}
         <label className={cn(LINHA, "justify-between")}>
-          <span className="text-[15px] font-medium">Propor contentor (quando sair mais barato do que os big bags)</span>
+          <span className="text-[15px] font-medium">Contentor disponível<span className="block text-sm font-normal text-muted-foreground">Desligado até as Compras enviarem as capacidades. Não mexe no preço: o C_dep já o inclui.</span></span>
           <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" disabled={!direcao} checked={P.contentor.ativo}
             onChange={(e) => { const v = e.target.checked; mudarPar("Propor contentor", (p) => { p.contentor.ativo = v; }, P.contentor.ativo, v); }} />
         </label>
+      </div>
+
+      {/* fatores de acesso extra */}
+      <div>
+        <h4 className="text-[15px] font-semibold">Fatores de acesso extra</h4>
+        <p className="text-sm text-muted-foreground">Vêm do levantamento da visita e multiplicam o fator do andar. Com 1,0 não mexem no preço.</p>
+        <div className={cn(CARTAO, "mt-2")} aria-label="Fatores de acesso extra">
+          {extras.map((x, i) => (
+            <label key={x.k} className={cn(LINHA, "justify-between")}>
+              <span className="text-[15px] font-medium">{x.rot}</span>
+              <span className="flex items-center gap-2">
+                {numCel(x.rot, x.f, (n) => { if (n != null) mudarPar(`Fator · ${x.rot}`, (p) => { p.fExtra = structuredClone(extras); p.fExtra[i].f = n; }, x.f, n); }, "w-20")}
+                <span className="w-12 text-sm text-muted-foreground">×</span>
+              </span>
+            </label>
+          ))}
+        </div>
       </div>
 
       {/* artigos */}
@@ -142,7 +172,7 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
               <li key={i}><span className="text-muted-foreground">{h.quando} · {h.quem}:</span> {h.campo} <span className="tabular-nums">{h.antes} → {h.depois}</span></li>
             ))}
           </ol>
-        ) : <p className="mt-1 text-sm text-muted-foreground">Ainda sem alterações: os valores são os de teste da especificação ({eur(PAR_DEM0.custoHora)} €/h, {eur(PAR_DEM0.cDep)} €/m³, markup {Math.round(PAR_DEM0.markup * 100)}%).</p>}
+        ) : <p className="mt-1 text-sm text-muted-foreground">Ainda sem alterações: os valores são os de teste da especificação ({eur(PAR_DEM0.custoHora)} €/h, {eur(PAR_DEM0.cDep)} €/m³, margem alvo e mínima as gerais da Olyvia).</p>}
       </div>
     </div>
   );
