@@ -12,7 +12,7 @@ import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
-import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, planoDoOrcamento, type EncCliente } from "./preparacaoObra";
+import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -186,7 +186,7 @@ export interface Plano {
   origem?: "orcamento"; inicio?: string;
 }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
-export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "recebida"; forn?: string; linhas: { n: string; q: number; un: string }[];
+export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "recebida"; forn?: string; linhas: { n: string; q: number; un: string; /** custo por unidade (€) */ custo?: number }[];
   /** Quem validou a encomenda ao fornecedor e quando. */
   validada?: { por: string; q: string } }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
@@ -275,7 +275,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
 // 9 (14/10/2026): a demolição de parede (c5) passa de ml a m², como diz o nome
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
-export const VERSAO = 11;
+export const VERSAO = 12;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -1213,7 +1213,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       ec.estado = "aprovada"; ec.aprovada = { por: PAPEIS[S.role].n, q: agora() };
       d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
       const falta = ec.linhas.filter((x) => x.falta > 0);
-      d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: fornecedorSugerido(d), linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un })) } : null;
+      d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: fornecedorSugerido(d), linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un, custo: x.custo })) } : null;
       log(d, "Encomenda de cliente " + ec.n + " aprovada · stock reservado" + (d.obra.enc ? " · " + d.obra.enc.n + " emitida, por validar" : " · nada a encomendar"));
       avisar(d.obra.enc
         ? { msg: ec.n + " aprovada", sub: "Encomenda a fornecedor " + d.obra.enc.n + " emitida: o Financeiro valida", kind: "ok", act: { label: "Ver como Financeiro", fn: () => run(() => { S.role = "financeiro"; }) } }
@@ -1272,11 +1272,27 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), p = d.obra.plano!; const t = p.tasks[ti]; const tec = TECS.find((x) => x.id === t.tec)!;
       let nd = t.dia;
       while (tec.ferias.some((k) => k >= nd && k < nd + t.dur)) nd++;
-      nd = Math.max(nd, 5);
+      if (p.origem !== "orcamento") nd = Math.max(nd, 5); // o plano de exemplo: a fase seguinte não pode passar à frente
       const shift = nd - t.dia;
-      p.tasks.slice(ti).forEach((x) => (x.dia += shift));
-      log(d, `Plano: ${t.nome} adiado para ${DIAS[t.dia]}`);
-      avisar({ msg: "Fase adiada", sub: "A obra acaba a " + DIAS[Math.max(...p.tasks.map((x) => x.dia + x.dur - 1))], kind: "ok" });
+      // adia esta e as que começam depois dela (as anteriores ficam)
+      p.tasks.forEach((x, i) => { if (i === ti || (i > ti && x.dia >= t.dia)) x.dia += shift; });
+      log(d, `Plano: ${t.nome} adiado para ${rotuloDia(p, t.dia)}`);
+      avisar({ msg: "Tarefa adiada", sub: "A obra acaba a " + rotuloDia(p, Math.max(...p.tasks.map((x) => x.dia + x.dur - 1))), kind: "ok" });
+    },
+    /** As Operações escolhem o técnico de uma tarefa (do mesmo ofício). */
+    trocarTec(id: number, ti: number, tec: string) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti], novo = TECS.find((x) => x.id === tec);
+      if (!t || !novo || t.tec === tec) return;
+      const velho = TECS.find((x) => x.id === t.tec);
+      t.tec = tec; log(d, `Plano: ${t.nome} passa ${velho ? `de ${velho.n} ` : ""}para ${novo.n}`);
+      avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${novo.n}`, kind: "ok" });
+    },
+    /** O início do plano (as Operações confirmam ou mudam a data do orçamento; "aaaa-mm-dd"). */
+    inicioPlano(id: number, iso: string) {
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.origem !== "orcamento" || p.estado === "em curso" || p.estado === "concluída") return;
+      p.inicio = iso; log(d, `Plano: a obra começa a ${rotuloDia(p, 0)}`);
+      avisar({ msg: "Início mudado", sub: `${rotuloDia(p, 0)} · acaba a ${rotuloDia(p, Math.max(...p.tasks.map((x) => x.dia + x.dur - 1)))}`, kind: "ok" });
     },
     aprovarPlano(id: number) {
       const d = deal(id);

@@ -8,11 +8,11 @@ import { useState } from "react";
 import { CalendarRange, Check, ChevronDown, Euro, FileSignature, HardHat, Lock, Package, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PAPEIS, TECS, conflitos, nfmt, type Negocio, type Papel } from "./motor";
+import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { FORNECEDORES, TRILHOS, faltaParaArrancar, passosPreparacao, type PassoPrep, type Trilho } from "./preparacaoObra";
+import { FORNECEDORES, TRILHOS, faltaParaArrancar, passosPreparacao, totalEf, type PassoPrep, type Trilho } from "./preparacaoObra";
 
 const ICONE: Record<Trilho, typeof Package> = { ec: Package, plano: CalendarRange, pag: Euro, obra: HardHat };
 
@@ -152,16 +152,27 @@ function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
         <h4 className="text-[15px] font-semibold">Encomenda de cliente {ec.n} <span className="font-normal text-muted-foreground">· {ec.estado}</span></h4>
         <ul className="mt-2 divide-y divide-border">
           {ec.linhas.map((x) => (
-            <li key={x.n} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-[15px]">
-              <span className="min-w-0 flex-1">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}</span></span>
-              <span className="tabular-nums">{nfmt(x.q)} {x.un}</span>
-              <span className={cn("w-full text-sm tabular-nums sm:w-auto", x.falta > 0 ? "text-warning" : "text-success")}>
-                {x.falta > 0 ? (x.res > 0 ? `${nfmt(x.res)} em stock · faltam ${nfmt(x.falta)}` : `a encomendar ${nfmt(x.falta)}`) : "em stock"}
-              </span>
+            <li key={x.n} className="py-2 text-[15px]">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="min-w-0 flex-1">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}</span></span>
+                <span className="font-medium tabular-nums">{eur((x.custo ?? 0) * x.q)} €</span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm tabular-nums">
+                <span className="text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span>
+                <span className={x.falta > 0 ? "text-warning" : "text-success"}>
+                  {x.falta > 0 ? (x.res > 0 ? `${nfmt(x.res)} em stock · faltam ${nfmt(x.falta)}` : `a encomendar ${nfmt(x.falta)}`) : "em stock"}
+                </span>
+              </div>
             </li>
           ))}
         </ul>
-        {ec.estado !== "aprovada" && <p className="mt-2 text-sm text-muted-foreground">O stock confirma-se ao aprovar (pode ter mudado desde o contrato).</p>}
+        {/* o custo contra o que o cliente paga por estes materiais */}
+        <dl className="mt-2 grid grid-cols-3 gap-2 border-t border-border pt-3 text-sm">
+          <div><dt className="text-muted-foreground">Custo</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(ec.custo ?? 0)} €</dd></div>
+          <div><dt className="text-muted-foreground">Na proposta</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(ec.valor)} €</dd></div>
+          <div><dt className="text-muted-foreground">Margem</dt><dd className="text-[15px] font-semibold tabular-nums">{ec.valor > 0 ? pct((ec.valor - (ec.custo ?? 0)) / ec.valor) : "—"}</dd></div>
+        </dl>
+        <p className="mt-2 text-sm text-muted-foreground">Os custos repartem a estimativa de materiais do orçamento pelas linhas; os produtos têm o custo do Catálogo.{ec.estado !== "aprovada" ? " O stock confirma-se ao aprovar (pode ter mudado desde o contrato)." : ""}</p>
       </div>
       <div>
         <h4 className="text-[15px] font-semibold">Encomenda a fornecedor {e ? <span className="font-normal text-muted-foreground">{e.n} · {e.estado === "por confirmar" ? "por validar" : e.estado}</span> : null}</h4>
@@ -179,8 +190,14 @@ function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
               ))}
             </div>
             <ul className="mt-3 divide-y divide-border">
-              {e.linhas.map((x) => <li key={x.n} className="flex justify-between gap-3 py-2 text-[15px]"><span>{x.n}</span><span className="tabular-nums">{nfmt(x.q)} {x.un}</span></li>)}
+              {e.linhas.map((x) => (
+                <li key={x.n} className="py-2 text-[15px]">
+                  <div className="flex justify-between gap-3"><span>{x.n}</span><span className="font-medium tabular-nums">{eur((x.custo ?? 0) * x.q)} €</span></div>
+                  <div className="text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</div>
+                </li>
+              ))}
             </ul>
+            <p className="flex justify-between gap-3 border-t border-border pt-3 text-[15px]"><span className="font-medium">Total a pagar ao fornecedor</span><span className="font-semibold tabular-nums">{eur(totalEf(e))} €</span></p>
             {e.estado === "por confirmar" && !d.fin.pago && (
               <p className="mt-2 flex items-start gap-2 text-sm"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />O sinal ainda não entrou. Validar já compromete a compra antes de o cliente pagar.</p>
             )}
@@ -204,7 +221,7 @@ function DetalhePlano({ d }: { d: Negocio }) {
       <div className="mt-3 space-y-4">
         {fases.map((f) => (
           <div key={f}>
-            {f > 0 && <p className="mb-1 text-sm font-medium" style={{ color: COR_FASE[f] }}>Fase {f} · {FASES_OBRA[f - 1].curto}</p>}
+            {f > 0 && <p className="mb-1 inline-flex items-center gap-2 text-sm font-medium"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: COR_FASE[f] }} aria-hidden="true" />Fase {f} · {FASES_OBRA[f - 1].curto}</p>}
             <ul className="space-y-1.5">
               {p.tasks.filter((t) => (t.fase ?? 0) === f).map((t, i) => {
                 const tec = TECS.find((x) => x.id === t.tec), mau = C.has(t);

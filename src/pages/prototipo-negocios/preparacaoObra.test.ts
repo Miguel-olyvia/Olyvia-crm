@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { acoes, minhas, seed } from "./motor";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
-import { faltaParaArrancar, passosPreparacao, skDaTarefa } from "./preparacaoObra";
+import { custoFalta, faltaParaArrancar, inicioDoPlano, passosPreparacao, rotuloDia, skDaTarefa, tecnicosPara, totalEf } from "./preparacaoObra";
 
 const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
   for (let i = 0; i < 5; i++) {
@@ -76,5 +76,43 @@ describe("do contrato à obra", () => {
     expect(skDaTarefa("Canalização", "Canalização")).toBe("Canalizador");
     expect(skDaTarefa("Revestimentos", "Pavimento cerâmico")).toBe("Ladrilhador");
     expect(skDaTarefa("Carpintaria", "Montagem de móveis")).toBe("Montador");
+  });
+});
+
+describe("o plano nas Operações", () => {
+  it("datas reais a partir do início (dias úteis), técnicos do ofício e o início mudado", () => {
+    const { S, A, d } = preparar();
+    const p = d.obra.plano!;
+    expect(inicioDoPlano(p, new Date(2026, 9, 14))!.getDay()).toBe(1); // a próxima segunda-feira
+    A.inicioPlano(d.id, "2026-10-30"); // sexta
+    expect(rotuloDia(p, 0)).toBe("sex, 30 out");
+    expect(rotuloDia(p, 1)).toBe("seg, 2 nov"); // salta o fim de semana
+    const i = p.tasks.findIndex((t) => t.sk === "Ladrilhador");
+    expect(tecnicosPara(p.tasks[i]).map((x) => x.id)).toEqual(["sf", "hn"]);
+    A.trocarTec(d.id, i, "sf");
+    expect(p.tasks[i].tec).toBe("sf");
+    expect(d.hist[0].t).toMatch(/passa de .* para Sérgio Faria/);
+  });
+  it("os planos antigos continuam com os dias de exemplo", () => {
+    const S = seed(), m = S.deals.find((x) => x.id === 1022)!;
+    expect(inicioDoPlano(m.obra.plano!)).toBeNull();
+    expect(rotuloDia(m.obra.plano!, 0)).toBe("seg 13/10");
+  });
+});
+
+describe("os custos da encomenda", () => {
+  it("as linhas repartem a linha de materiais do orçamento (custo e preço batem); a encomenda a fornecedor leva o custo do que falta", () => {
+    const { A, d } = preparar();
+    const ec = d.obra.ec!, L = d.orc!.linhas.find((l) => l.t === "mat" && l.d === "móveis, bancada, torneira")!;
+    expect(ec.custo).toBeCloseTo(L.t === "mat" ? L.custo : 0, 2);
+    expect(ec.valor).toBeCloseTo(L.t === "mat" ? L.preco : 0, 2);
+    expect(ec.linhas.every((x) => x.custo > 0 && x.preco > x.custo)).toBe(true);
+    // móveis e bancada partilham a parte de 70%
+    const mov = ec.linhas.find((x) => /móveis/.test(x.n))!, banc = ec.linhas.find((x) => /Bancada/.test(x.n))!;
+    expect(mov.custo * mov.q).toBeCloseTo(banc.custo * banc.q, 2);
+    A.aprovarEc(d.id);
+    const e = d.obra.enc!;
+    expect(totalEf(e)).toBeCloseTo(custoFalta(ec), 2);
+    expect(e.linhas.every((x) => (x.custo ?? 0) > 0)).toBe(true);
   });
 });

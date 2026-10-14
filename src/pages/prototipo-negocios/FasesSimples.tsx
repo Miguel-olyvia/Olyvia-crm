@@ -80,7 +80,7 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
           <h3 id="plano-t" className="text-base font-semibold">Plano</h3>
           <Button variant="ghost" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </div>
-        <p className="mt-1 text-[15px]">{estado} <span className="text-muted-foreground">{pl.tasks.length} fases · {nfmt(horas)} h de equipa{nc ? ` · ${nc} conflito por resolver` : ""}</span></p>
+        <p className="mt-1 text-[15px]">{estado} <span className="text-muted-foreground">{pl.tasks.length} {pl.origem === "orcamento" ? "tarefas" : "fases"} · {nfmt(horas)} h de equipa{nc ? ` · ${nc} conflito por resolver` : ""}</span></p>
         <ol className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
           {pl.tasks.map((t, i) => {
             const tec = TECS.find((x) => x.id === t.tec);

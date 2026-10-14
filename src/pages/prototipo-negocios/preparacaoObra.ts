@@ -8,9 +8,9 @@
 //   · Pagamento: a fatura e o recibo (Financeiro), em paralelo; o recibo passa o negócio à Obra.
 //   · Arrancar a obra (Operações) só com tudo: EC aprovada, materiais recebidos, plano aprovado e sinal pago.
 import { normal } from "./catalogo";
-import { LINHAS, PAPEIS, TECS, calcMats, conflitos, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
-import { planoObra } from "./planoObra";
-import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
+import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra } from "./planoObra";
+import { precoProduto } from "./produtosVisita";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -20,12 +20,16 @@ export interface LinhaEc {
   k?: StockKey;
   /** Quanto há em stock para reservar e quanto falta (vai para o fornecedor). */
   res: number; falta: number;
+  /** Custo e preço por unidade (€, sem IVA): a estimativa de materiais do orçamento repartida pelas linhas; nos produtos, os do Catálogo. */
+  custo: number; preco: number;
 }
 export interface EncCliente {
   n: string; estado: "por aprovar" | "aprovada"; criada: string;
   linhas: LinhaEc[];
   /** O valor dos materiais e produtos na proposta (sem IVA). */
   valor: number;
+  /** O custo das linhas (o que a empresa paga). */
+  custo: number;
   aprovada?: { por: string; q: string };
 }
 
@@ -34,17 +38,52 @@ export const FORNECEDORES = ["Cerâmica do Centro (exemplo)", "Sanitários do Te
 export const fornecedorSugerido = (d: Negocio) => (d.linha === "coz" ? FORNECEDORES[2] : FORNECEDORES[0]);
 
 /** A encomenda de cliente: os materiais do modelo (pelas medidas) e os produtos escolhidos na visita (menos os que o cliente fornece). */
+/** O custo por unidade guarda 4 casas: os totais (custo × quantidade) batem com o orçamento ao cêntimo. */
+const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
+
+/** A parte da estimativa de materiais (LINHAS.mat.partes) a que um material pertence, pelo nome. */
+function parteDe(nome: string, partes: { d: string }[]): number {
+  const s = normal(nome);
+  const chave = /parede/.test(s) ? /parede/ : /pavimento/.test(s) ? /pavimento/ : /sanita|base de duche|louca|torneira/.test(s) ? /louca|torneira/ : /move|bancada/.test(s) ? /move|bancada/ : /cola|cimento/.test(s) ? /cola|pequeno/ : null;
+  const i = chave ? partes.findIndex((p) => chave.test(normal(p.d))) : -1;
+  return i >= 0 ? i : partes.findIndex((p) => /pequeno|cola/.test(normal(p.d)));
+}
+
+/** O custo e o preço por unidade dos materiais do modelo: a linha de materiais do orçamento (o que o cliente aceitou) repartida
+ *  pelas partes da estimativa e, dentro de cada parte, em partes iguais pelos materiais que lhe pertencem. */
+export function custosDosMateriais(d: Negocio, mats: { n: string; q: number }[]): { custo: number; preco: number }[] {
+  const L = LINHAS[d.linha], partes = L.mat.partes ?? [];
+  const linha = d.orc?.linhas.find((l) => l.t === "mat" && l.d === L.mat.d);
+  const custoTot = linha && linha.t === "mat" ? linha.custo : L.mat.custo, precoTot = linha && linha.t === "mat" ? linha.preco : L.mat.preco;
+  if (!partes.length) return mats.map((x) => ({ custo: r4(custoTot / mats.length / (x.q || 1)), preco: r4(precoTot / mats.length / (x.q || 1)) }));
+  const idx = mats.map((x) => parteDe(x.n, partes));
+  // as partes sem material nenhum (ex.: torneira e pequeno material sem linha própria) vão para as que têm, na proporção
+  const usadas = partes.map((_, i) => idx.includes(i));
+  const pesoUsado = partes.reduce((a, p, i) => a + (usadas[i] ? (p as { peso: number }).peso : 0), 0) || 1;
+  return mats.map((x, j) => {
+    const i = idx[j];
+    if (i < 0) return { custo: 0, preco: 0 };
+    const quota = (partes[i] as { peso: number }).peso / pesoUsado / idx.filter((y) => y === i).length;
+    return { custo: r4((custoTot * quota) / (x.q || 1)), preco: r4((precoTot * quota) / (x.q || 1)) };
+  });
+}
+
 export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string): EncCliente {
   const mats = calcMats(d, S, false).filter((x) => x.q > 0);
   const prods = (d.visita.prod ?? []).filter((p) => !p.cliente && p.q > 0);
+  const cm = custosDosMateriais(d, mats);
   const linhas: LinhaEc[] = [
-    ...mats.map((x) => ({ n: x.n, q: r2(x.q), un: x.un, de: "material" as const, k: x.k, res: r2(x.res), falta: r2(x.falta) })),
+    ...mats.map((x, j) => ({ n: x.n, q: r2(x.q), un: x.un, de: "material" as const, k: x.k, res: r2(x.res), falta: r2(x.falta), ...cm[j] })),
     // os produtos da visita compram-se para esta obra: não há stock deles
-    ...prods.map((p) => ({ n: p.n, q: p.q, un: p.un, de: "produto" as const, res: 0, falta: p.q })),
+    ...prods.map((p) => ({ n: p.n, q: p.q, un: p.un, de: "produto" as const, res: 0, falta: p.q, custo: r2(p.custo), preco: r2(precoProduto(p) / (p.q || 1)) })),
   ];
-  const valor = (d.orc?.linhas ?? []).reduce((a, l) => a + (l.t === "mat" && !l.d.startsWith(PREFIXO_CLIENTE) && (l.d === LINHAS[d.linha].mat.d || l.d.startsWith(PREFIXO_PROD)) ? l.preco : 0), 0);
-  return { n, estado: "por aprovar", criada: quando, linhas, valor: r2(valor) };
+  const valor = linhas.reduce((a, x) => a + x.preco * x.q, 0), custo = linhas.reduce((a, x) => a + x.custo * x.q, 0);
+  return { n, estado: "por aprovar", criada: quando, linhas, valor: r2(valor), custo: r2(custo) };
 }
+/** O total de uma encomenda a fornecedor (custo × quantidade). */
+export const totalEf = (e: { linhas: { q: number; custo?: number }[] }) => r2(e.linhas.reduce((a, x) => a + (x.custo ?? 0) * x.q, 0));
+/** O custo das linhas em falta (o que vai na encomenda a fornecedor). */
+export const custoFalta = (ec: EncCliente) => r2(ec.linhas.reduce((a, x) => a + x.custo * x.falta, 0));
 
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
 /** O ofício de uma tarefa → o tipo de técnico do RH (TECS.sk). */
@@ -99,7 +138,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
   const nFalta = ec.linhas.filter((x) => x.falta > 0).length;
 
   // a encomenda de cliente e a de fornecedor
-  L.push({ id: "ec", trilho: "ec", estado: "feito", who: null, t: `Encomenda de cliente ${ec.n}`, sub: `Gerada do contrato a ${ec.criada} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"}${ec.valor ? ` · ${eur(ec.valor)} € na proposta` : ""}` });
+  L.push({ id: "ec", trilho: "ec", estado: "feito", who: null, t: `Encomenda de cliente ${ec.n}`, sub: `Gerada do contrato a ${ec.criada} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · custo ${eur(ec.custo ?? 0)} € · ${eur(ec.valor)} € na proposta` });
   L.push(ec.estado === "aprovada"
     ? { id: "ec-ok", trilho: "ec", estado: "feito", who: "comercial", t: "Encomenda de cliente aprovada", sub: `${ec.aprovada?.por ?? "Comercial"} · ${ec.aprovada?.q ?? ""} · stock reservado` }
     : { id: "ec-ok", trilho: "ec", estado: "agora", who: "comercial", t: "Aprovar a encomenda de cliente", sub: nFalta ? `Ao aprovar, reserva o stock e pede ao fornecedor ${nFalta} ${nFalta === 1 ? "linha" : "linhas"} em falta.` : "Ao aprovar, reserva o stock: está tudo em armazém.", act: "aprovarEc", btn: "Aprovar a encomenda" });
@@ -107,7 +146,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
   else if (!e) L.push({ id: "ef", trilho: "ec", estado: "feito", who: null, t: "Sem encomenda a fornecedor", sub: "Tudo em stock e reservado." });
   else {
     L.push(e.estado === "por confirmar"
-      ? { id: "ef", trilho: "ec", estado: "agora", who: "financeiro", t: `Validar a encomenda ${e.n}`, sub: `${e.forn ?? "Fornecedor por escolher"} · ${e.linhas.length} ${e.linhas.length === 1 ? "linha" : "linhas"}${d.fin.pago ? " · sinal recebido" : " · atenção: o sinal ainda não entrou"}`, act: "validarEf", btn: "Validar e encomendar" }
+      ? { id: "ef", trilho: "ec", estado: "agora", who: "financeiro", t: `Validar a encomenda ${e.n}`, sub: `${e.forn ?? "Fornecedor por escolher"} · ${e.linhas.length} ${e.linhas.length === 1 ? "linha" : "linhas"} · ${eur(totalEf(e))} €${d.fin.pago ? " · sinal recebido" : " · atenção: o sinal ainda não entrou"}`, act: "validarEf", btn: "Validar e encomendar" }
       : { id: "ef", trilho: "ec", estado: "feito", who: "financeiro", t: `Encomenda ${e.n} validada`, sub: `${e.forn ?? ""}${e.validada ? ` · ${e.validada.por} · ${e.validada.q}` : ""}` });
     L.push(e.estado === "recebida"
       ? { id: "rec", trilho: "ec", estado: "feito", who: "armazem", t: "Materiais recebidos", sub: "Tudo reservado para a obra." }
@@ -143,3 +182,19 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
 export const passosAgora = (d: Negocio, S: Estado) => passosPreparacao(d, S).filter((x) => x.estado === "agora" && x.who);
 /** "Direção" / "Sandra · Financeiro". */
 export const quemE = (who: Papel | null) => (who ? PAPEIS[who].n : "");
+
+/* ------------------------------------------------------------------ as datas do plano */
+/** O início do plano: o escolhido (ou o do orçamento), senão a próxima segunda-feira. Null nos planos antigos (dias de exemplo). */
+export function inicioDoPlano(p: Plano, hoje = new Date()): Date | null {
+  if (p.origem !== "orcamento") return null;
+  return p.inicio ? deIso(p.inicio) : iniciosRapidos(hoje)[0].data;
+}
+/** O rótulo do dia `k` do plano: "seg, 19 out" (planos do orçamento) ou o dia de exemplo (DIAS). */
+export function rotuloDia(p: Plano, k: number, hoje = new Date()): string {
+  const i = inicioDoPlano(p, hoje);
+  return i ? dataCurta(diasDaObra(i, k + 1)[k]) : DIAS[k] ?? `dia ${k + 1}`;
+}
+/** Os técnicos que podem fazer a tarefa (do mesmo ofício), com se estão livres nesses dias. */
+export function tecnicosPara(t: Tarefa): { id: string; n: string; livre: boolean }[] {
+  return TECS.filter((x) => x.sk === t.sk).map((x) => ({ id: x.id, n: x.n, livre: !x.ferias.some((k) => k >= t.dia && k < t.dia + t.dur) }));
+}
