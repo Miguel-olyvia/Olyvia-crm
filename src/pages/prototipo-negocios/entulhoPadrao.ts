@@ -172,7 +172,8 @@ export function volumesDasLinhas(linhas: LinhaOrc[], K: Catalogo, v: NecVisita, 
     }
     if (e.modo !== "produto" || v.manter?.[l.sid] === "sim") continue;
     const no = K.exigeProduto?.[l.sid], ramo = no ? ramoDe(K, no) : null;
-    const saem = prod.filter((p) => !usados.has(p.id) && (p.svc === l.sid || (ramo && p.no && ramo.has(p.no))));
+    const deste = prod.filter((p) => p.svc === l.sid || (ramo && p.no && ramo.has(p.no)));
+    const saem = deste.filter((p) => !usados.has(p.id));
     for (const p of saem) {
       usados.add(p.id);
       const cat = K.produtos.find((x) => x.id === p.id) ?? { n: p.n };
@@ -181,7 +182,7 @@ export function volumesDasLinhas(linhas: LinhaOrc[], K: Catalogo, v: NecVisita, 
       const m3 = p.q * en.m3;
       out.push({ de: l.sid, m3, t: toneladas(m3, en.kg != null ? en.kg * p.q : undefined, P), origem: `${fmt(p.q)} × ${en.tipo} que sai` });
     }
-    if (!saem.length && v.manter?.[l.sid] === "nao") {
+    if (!deste.length && v.manter?.[l.sid] === "nao") {
       const t = tipoDoTexto(dadosServico(l.sid).n) ?? tipoDoTexto(no ? K.arvore.find((x) => x.id === no)?.n : null);
       if (t && t.e.m3 > 0) {
         const m3 = l.q * t.e.m3;
