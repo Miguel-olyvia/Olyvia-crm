@@ -47,7 +47,7 @@ export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps
             if (!criou.current) botao.current?.focus();
             criou.current = false;
           }}
-          className="max-w-md motion-reduce:!animate-none motion-reduce:!duration-0"
+          className="max-h-[90vh] max-w-2xl overflow-y-auto motion-reduce:!animate-none motion-reduce:!duration-0"
         >
           <DialogHeader>
             <DialogTitle>{t("businessGoals.new.title")}</DialogTitle>

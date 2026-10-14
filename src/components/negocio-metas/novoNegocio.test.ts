@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, MAX_SERVICO, criarNegocioExemplo, somarDias, validarNovoNegocio,
+  COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, MAX_SERVICO, criarNegocioExemplo, preencherContactoDaPessoa,
+  reporContacto, somarDias, validarNovoNegocio, type ChaveContacto,
   type PessoaOpcao,
 } from "./novoNegocio";
 import { verificarCoerencia, faseDoNegocio, isNegocioGanho, valorDoNegocio } from "./negocioMetas";
@@ -27,6 +28,60 @@ describe("validarNovoNegocio", () => {
   it("não rebenta com valores em falta", () => {
     const sem = { pessoaId: undefined, servico: undefined } as unknown as { pessoaId: string; servico: string };
     expect(validarNovoNegocio(sem)).toEqual({ pessoaId: "obrigatorio", servico: "obrigatorio" });
+  });
+});
+
+const completa: PessoaOpcao = {
+  id: "p-ana", nome: "Ana", email: "ana@exemplo.pt", morada: "Rua A, 1000-001 Lisboa", distrito: "Lisboa",
+  nif: "123456789", empresa: "Ana Lda", nifEmpresa: "987654321",
+};
+
+describe("preencherContactoDaPessoa", () => {
+  it("leva os seis campos da pessoa", () => {
+    expect(preencherContactoDaPessoa(completa)).toEqual({
+      email: "ana@exemplo.pt", morada: "Rua A, 1000-001 Lisboa", distrito: "Lisboa", nif: "123456789",
+      empresa: "Ana Lda", nifEmpresa: "987654321",
+    });
+  });
+  it("sem pessoa ou sem dados fica tudo vazio, e o email cai para o contacto da pessoa", () => {
+    expect(preencherContactoDaPessoa(undefined)).toEqual(CONTACTO_VAZIO);
+    expect(preencherContactoDaPessoa(null)).toEqual(CONTACTO_VAZIO);
+    expect(preencherContactoDaPessoa({ id: "x", nome: "X" })).toEqual(CONTACTO_VAZIO);
+    expect(preencherContactoDaPessoa(marta).email).toBe("marta.silveira@exemplo.pt");
+  });
+});
+
+describe("reporContacto", () => {
+  it("repõe os campos não tocados e mantém os tocados", () => {
+    const atual = { ...preencherContactoDaPessoa(completa), nif: "111111111" };
+    const tocados = new Set<ChaveContacto>(["nif"]);
+    const novo = reporContacto(atual, tocados, { id: "p-b", nome: "B", nif: "222222222", distrito: "Porto" });
+    expect(novo).toEqual({ ...CONTACTO_VAZIO, nif: "111111111", distrito: "Porto" });
+  });
+});
+
+describe("validarNovoNegocio: contacto", () => {
+  const base = { pessoaId: "p", servico: "Cozinha" };
+  it("tudo vazio ou válido passa", () => {
+    expect(validarNovoNegocio({ ...base, contacto: CONTACTO_VAZIO })).toEqual({});
+    expect(validarNovoNegocio({ ...base, contacto: preencherContactoDaPessoa(completa) })).toEqual({});
+  });
+  it("recusa email mal formado e NIF que não tenha 9 dígitos, cada um com o seu erro", () => {
+    const erros = validarNovoNegocio({ ...base, contacto: { email: "ana@", nif: "12345678", nifEmpresa: "12345678a" } });
+    expect(erros).toEqual({ email: "invalido", nif: "invalido", nifEmpresa: "invalido" });
+    expect(validarNovoNegocio({ ...base, contacto: { nif: "1234567890" } })).toEqual({ nif: "invalido" });
+    expect(validarNovoNegocio({ ...base, contacto: { email: "a b@c.pt" } })).toEqual({ email: "invalido" });
+  });
+  it("espaços à volta não contam", () => {
+    expect(validarNovoNegocio({ ...base, contacto: { email: " a@b.pt ", nif: " 123456789 " } })).toEqual({});
+  });
+});
+
+describe("criarNegocioExemplo: contacto", () => {
+  it("guarda o contacto aparado, e sem ele não deixa a propriedade", () => {
+    const c = criarNegocioExemplo({ pessoa: completa, servico: "Cozinha", comercial: "Ana Ribeiro", contacto: { ...preencherContactoDaPessoa(completa), distrito: " Porto " } }, HOJE_EXEMPLO, 1);
+    expect(c.dadosContacto?.distrito).toBe("Porto");
+    expect("dadosContacto" in criarNegocioExemplo({ pessoa: completa, servico: "X", comercial: "Ana Ribeiro" }, HOJE_EXEMPLO, 2)).toBe(false);
   });
 });
 

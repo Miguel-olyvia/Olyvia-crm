@@ -26,7 +26,10 @@ beforeAll(() => {
 });
 
 const PESSOAS: PessoaOpcao[] = [
-  { id: "p-marta", nome: "Marta Silveira", contacto: { telefone: "912 345 601", email: null } },
+  {
+    id: "p-marta", nome: "Marta Silveira", contacto: { telefone: "912 345 601", email: null }, email: "marta@exemplo.pt",
+    morada: "Rua A, 1000-001 Lisboa", distrito: "Lisboa", nif: "123456789", empresa: "Marta Lda", nifEmpresa: "987654321",
+  },
   { id: "p-rui", nome: "Rui Figueiredo" },
 ];
 
@@ -46,9 +49,42 @@ describe("NovoNegocioDialogo", () => {
     expect(within(dialogo).getByRole("combobox", { name: /^Pessoa/ })).toBeInTheDocument();
     expect(within(dialogo).getByRole("combobox", { name: /^Serviço/ })).toBeInTheDocument();
     expect(within(dialogo).getByRole("combobox", { name: "Comercial" })).toHaveTextContent("Ana Ribeiro");
+    const contacto = within(dialogo).getByRole("group", { name: "Contacto" });
+    ["Email", "Morada", "Distrito", "NIF", "Empresa", "NIF da empresa"].forEach((r) => {
+      expect(within(contacto).getByLabelText(r)).toHaveValue("");
+    });
     expect(within(dialogo).getByText("O negócio começa em Orçamento: o primeiro passo é fazer o levantamento.")).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: "Criar negócio" })).toHaveAttribute("type", "submit");
+  });
+
+  it("ao escolher a pessoa pré-preenche o contacto; o campo editado resiste a uma nova escolha", async () => {
+    const { dialogo } = abrir();
+    const escolher = async (nome: string) => {
+      fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Pessoa/ }), { key: "Enter" });
+      fireEvent.click(await screen.findByRole("option", { name: nome }));
+    };
+    await escolher("Marta Silveira");
+    expect(within(dialogo).getByLabelText("Email")).toHaveValue("marta@exemplo.pt");
+    expect(within(dialogo).getByLabelText("NIF da empresa")).toHaveValue("987654321");
+    fireEvent.change(within(dialogo).getByLabelText("Distrito"), { target: { value: "Porto" } });
+    await escolher("Rui Figueiredo");
+    expect(within(dialogo).getByLabelText("Email")).toHaveValue("");
+    expect(within(dialogo).getByLabelText("Distrito")).toHaveValue("Porto");
+  });
+
+  it("email e NIF inválidos mostram erro ligado ao campo e não criam", async () => {
+    const { aoCriar, dialogo } = abrir();
+    fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Pessoa/ }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Marta Silveira" }));
+    fireEvent.change(within(dialogo).getByRole("combobox", { name: /^Serviço/ }), { target: { value: "Cozinha" } });
+    fireEvent.change(within(dialogo).getByLabelText("Email"), { target: { value: "marta@" } });
+    fireEvent.change(within(dialogo).getByLabelText("NIF"), { target: { value: "123" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Criar negócio" }));
+    expect(within(dialogo).getByLabelText("Email")).toHaveAccessibleDescription(/email válido/);
+    expect(within(dialogo).getByLabelText("NIF")).toHaveAccessibleDescription("O NIF tem 9 dígitos.");
+    expect(within(dialogo).getByLabelText("Email")).toHaveFocus();
+    expect(aoCriar).not.toHaveBeenCalled();
   });
 
   it("o foco inicial vai para o primeiro campo e Cancelar devolve-o ao botão", async () => {
@@ -86,7 +122,13 @@ describe("NovoNegocioDialogo", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Marta Silveira" }));
     fireEvent.change(within(dialogo).getByRole("combobox", { name: /^Serviço/ }), { target: { value: "Cozinha" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Criar negócio" }));
-    expect(aoCriar).toHaveBeenCalledWith({ pessoa: PESSOAS[0], servico: "Cozinha", comercial: "Ana Ribeiro" });
+    expect(aoCriar).toHaveBeenCalledWith({
+      pessoa: PESSOAS[0], servico: "Cozinha", comercial: "Ana Ribeiro",
+      contacto: {
+        email: "marta@exemplo.pt", morada: "Rua A, 1000-001 Lisboa", distrito: "Lisboa", nif: "123456789",
+        empresa: "Marta Lda", nifEmpresa: "987654321",
+      },
+    });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });

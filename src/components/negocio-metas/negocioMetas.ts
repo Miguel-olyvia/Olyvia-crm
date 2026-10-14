@@ -12,6 +12,16 @@ export interface OrcamentoNegocio {
   escolhido: boolean;
 }
 
+/** Os dados de contacto escritos ao criar um negócio (todos opcionais; texto vazio quando não há). */
+export interface DadosContactoNegocio {
+  email: string;
+  morada: string;
+  distrito: string;
+  nif: string;
+  empresa: string;
+  nifEmpresa: string;
+}
+
 export interface NegocioMes {
   id: string;
   /** A pessoa (lead/cliente) a que o negócio pertence; serve para a abrir. */
@@ -26,6 +36,8 @@ export interface NegocioMes {
   /** Prazo do próximo passo (AAAA-MM-DD); `null` sem prazo. Estar em atraso deriva daqui (ver `saudeNegocio.ts`). */
   proximoPrazo: string | null;
   contacto: { telefone: string | null; email: string | null };
+  /** Só nos negócios criados em "Novo negócio": o contacto tal como foi escrito no formulário. */
+  dadosContacto?: DadosContactoNegocio;
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;

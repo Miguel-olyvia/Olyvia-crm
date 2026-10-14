@@ -34,7 +34,11 @@ const PESSOAS_DO_PAINEL = new Map(
 );
 const pessoaDe = (pessoaId: string) => PESSOAS_DO_PAINEL.get(pessoaId) ?? null;
 /** As pessoas a escolher em "Novo negócio" (a página é quem lê Pessoas; Negócio e metas só recebe esta lista). */
-const PESSOAS_PARA_ESCOLHER: PessoaOpcao[] = PESSOAS_EXEMPLO.map((p) => ({ id: p.id, nome: p.nome, contacto: p.contacto }));
+const PESSOAS_PARA_ESCOLHER: PessoaOpcao[] = PESSOAS_EXEMPLO.map((p) => ({
+  id: p.id, nome: p.nome, contacto: p.contacto, email: p.contacto.email ?? undefined,
+  morada: p.morada ? `${p.morada.linha}, ${p.morada.cp} ${p.morada.localidade}` : undefined,
+  distrito: p.distrito, nif: p.nif, empresa: p.empresa?.nome, nifEmpresa: p.empresa?.nif,
+}));
 const detalheDe = (negocioId: string) => DETALHES_EXEMPLO[negocioId] ?? null;
 
 type Vista = "quadro" | "dashboard";

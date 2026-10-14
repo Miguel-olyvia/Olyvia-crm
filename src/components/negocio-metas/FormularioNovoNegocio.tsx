@@ -8,9 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FOCO } from "./estilos";
+import { CamposContactoNegocio } from "./CamposContactoNegocio";
+import type { DadosContactoNegocio } from "./negocioMetas";
 import {
-  COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, SERVICOS_SUGERIDOS, validarNovoNegocio,
-  type DadosCriarNegocio, type ErroCampo, type ErrosNovoNegocio, type PessoaOpcao,
+  COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, SERVICOS_SUGERIDOS, CONTACTO_VAZIO, reporContacto,
+  validarNovoNegocio, type ChaveContacto, type DadosCriarNegocio, type ErroCampo, type ErrosNovoNegocio, type PessoaOpcao,
 } from "./novoNegocio";
 
 const N = "businessGoals.new.";
@@ -142,6 +144,8 @@ export function FormularioNovoNegocio({ pessoas, primeiroCampo, aoConfirmar }: F
   const [pessoaId, setPessoaId] = useState("");
   const [servico, setServico] = useState("");
   const [comercial, setComercial] = useState(COMERCIAL_POR_OMISSAO);
+  const [contacto, setContacto] = useState<DadosContactoNegocio>(CONTACTO_VAZIO);
+  const [tocados, setTocados] = useState<ReadonlySet<ChaveContacto>>(new Set());
   const [erros, setErros] = useState<ErrosNovoNegocio>({});
   const campoServico = useRef<HTMLInputElement>(null);
   const ids = {
@@ -152,24 +156,40 @@ export function FormularioNovoNegocio({ pessoas, primeiroCampo, aoConfirmar }: F
   const enviar = (e: FormEvent) => {
     e.preventDefault();
     const pessoa = pessoas.find((p) => p.id === pessoaId);
-    const encontrados = validarNovoNegocio({ pessoaId: pessoa ? pessoaId : "", servico });
+    const encontrados = validarNovoNegocio({ pessoaId: pessoa ? pessoaId : "", servico, contacto });
     setErros(encontrados);
     if (encontrados.pessoaId) primeiroCampo.current?.focus();
     else if (encontrados.servico) campoServico.current?.focus();
-    else if (pessoa) aoConfirmar({ pessoa, servico, comercial });
+    else if (encontrados.email || encontrados.nif || encontrados.nifEmpresa) {
+      const primeiro = (["email", "nif", "nifEmpresa"] as const).find((c) => encontrados[c]);
+      if (primeiro) document.getElementById(`${id}-${primeiro}`)?.focus();
+    } else if (pessoa) aoConfirmar({ pessoa, servico, comercial, contacto });
+  };
+
+  const mudarPessoa = (novaId: string) => {
+    setPessoaId(novaId);
+    setContacto((atual) => reporContacto(atual, tocados, pessoas.find((p) => p.id === novaId)));
+    setErros((x) => ({ ...x, pessoaId: undefined, email: undefined, nif: undefined, nifEmpresa: undefined }));
+  };
+
+  const mudarContacto = (chave: ChaveContacto, valor: string) => {
+    setTocados((antes) => new Set(antes).add(chave));
+    setContacto((c) => ({ ...c, [chave]: valor }));
+    setErros((x) => (chave === "email" || chave === "nif" || chave === "nifEmpresa" ? { ...x, [chave]: undefined } : x));
   };
 
   return (
     <form onSubmit={enviar} noValidate className="space-y-4">
       <CampoPessoa
         ids={ids} erros={erros} pessoas={pessoas} valor={pessoaId} campo={primeiroCampo}
-        aoMudar={(v) => { setPessoaId(v); setErros((x) => ({ ...x, pessoaId: undefined })); }}
+        aoMudar={mudarPessoa}
       />
       <CampoServico
         ids={ids} erros={erros} valor={servico} campo={campoServico}
         aoMudar={(v) => { setServico(v); setErros((x) => ({ ...x, servico: undefined })); }}
       />
       <CampoComercial id={ids.comercial} valor={comercial} aoMudar={setComercial} />
+      <CamposContactoNegocio idBase={id} valores={contacto} erros={erros} aoMudar={mudarContacto} />
       <PrimeiroPasso />
       <DialogFooter className="gap-2 sm:gap-0">
         <DialogClose asChild>
