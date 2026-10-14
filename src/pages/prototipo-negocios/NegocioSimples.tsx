@@ -2,10 +2,11 @@
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Euro, MapPin, Phone, Square, TrendingUp, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Euro, MapPin, Phone, RotateCcw, Square, TrendingUp, Volume2 } from "lucide-react";
+import { NovaVersao, VoltarVisita } from "./VoltarAtras";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, type Negocio } from "./motor";
+import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, versaoAtual, type Negocio } from "./motor";
 import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
@@ -42,6 +43,7 @@ export function NegocioSimples(ctx: Ctx) {
       faseAntes.current = d.fase;
       return () => clearTimeout(t);
     }
+    if (d.fase < faseAntes.current) setVer(null); // voltou atrás (à visita): mostra logo a fase aberta
     faseAntes.current = d.fase;
   }, [d.fase]);
   const local = d.f.localidade || d.local.split(",").pop()!.trim();
@@ -113,6 +115,23 @@ export function NegocioSimples(ctx: Ctx) {
         </div>
       )}
 
+      {/* De volta à visita com um orçamento já feito: diz o que fazer e como sair */}
+      {d.fase === 2 && d.orc && !d.perdido && (
+        <div role="status" className="mt-6 flex flex-col gap-3 rounded-xl border border-primary/25 bg-primary/[0.05] px-4 py-3 sm:flex-row sm:items-center sm:justify-between animate-in fade-in-0 slide-in-from-top-2 duration-500">
+          <span className="flex items-start gap-3 text-[15px]">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground" aria-hidden="true"><RotateCcw className="h-4 w-4" /></span>
+            <span>
+              <b className="font-semibold">De volta à visita{d.orc.versoes?.length ? `, para a versão ${versaoAtual(d.orc)} da proposta` : ""}.</b>
+              <span className="block text-muted-foreground">Escolha o passo que quer mudar. Ao fechar o levantamento, o orçamento refaz-se com o que mudou.</span>
+            </span>
+          </span>
+          <button type="button" onClick={go(() => A.desistirVisita(d.id))}
+            className="min-h-11 shrink-0 self-start px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:self-center">
+            Não mudar nada e voltar ao orçamento
+          </button>
+        </div>
+      )}
+
 
       <div className="mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_240px]">
         {ver === null
@@ -125,6 +144,15 @@ export function NegocioSimples(ctx: Ctx) {
               <p className="text-sm text-muted-foreground">Fase feita · só leitura</p>
               <h2 id="fase-lida" className="mt-1 text-2xl font-semibold">{FASES[ver]}</h2>
               <div className="mt-6 space-y-8">
+                {/* Na Visita já feita, a pergunta natural: "e se quiser mudar isto?" */}
+                {ver === 2 && d.fase === 3 && d.orc && !d.orc.aceite && (
+                  <div className="space-y-3 rounded-2xl border border-border bg-muted/40 p-4">
+                    <p className="text-[15px]">{d.orc.enviada
+                      ? "Precisa de mudar a visita? A proposta já está com o cliente: faz-se uma nova versão."
+                      : "Precisa de mudar alguma coisa? Volte à visita: o orçamento refaz-se quando a fechar."}</p>
+                    {d.orc.enviada ? <NovaVersao ctx={ctx} d={d} inicio="visita" /> : <VoltarVisita ctx={ctx} d={d} />}
+                  </div>
+                )}
                 {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Visitas</h3><VisitasLista ctx={ctx} d={d} simples /></div>}
                 {ver === 2 && (
                   <div>

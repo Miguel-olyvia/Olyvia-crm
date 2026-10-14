@@ -37,7 +37,8 @@ export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A"
       ) : (
         <p className={cn("mt-1 text-muted-foreground", t)}>Nenhum produto escolhido na visita: os materiais são a estimativa do modelo.</p>
       )}
-      {!o.enviada && <Reabrir A={A} run={run} d={d} />}
+      {/* na página simples, o "Voltar à visita" está no topo do orçamento (VoltarAtras.tsx) */}
+      {!o.enviada && !simples && <Reabrir A={A} run={run} d={d} />}
     </section>
   );
 }

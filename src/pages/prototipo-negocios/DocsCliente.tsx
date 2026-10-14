@@ -137,7 +137,7 @@ function ObraNaProposta({ S, d }: { S: Estado; d: Negocio }) {
 export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
   const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0;
   return (
-    <Folha titulo="Proposta" numero={`PR 2026/${d.id}`} data={o.enviada ? `enviada ${o.enviada}` : "rascunho"} carimbo={o.aceite ? "Aceite" : undefined}>
+    <Folha titulo="Proposta" numero={`PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`} data={(o.enviada ? `enviada ${o.enviada}` : "rascunho") + (o.versoes?.length ? ` · substitui a v${o.versoes.length}` : "")} carimbo={o.aceite ? "Aceite" : undefined}>
       <Cliente d={d} />
       <section>
         <h3 className="text-lg font-semibold">{d.servico}</h3>

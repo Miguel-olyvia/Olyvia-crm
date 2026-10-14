@@ -167,7 +167,15 @@ export interface Orcamento {
   pagFases?: { l: string; p: number; fase: 0 | 1 | 2 | 3 | 4 | "fim" }[];
   /** Pessoas por ofício no plano da obra (1 por omissão; 2 = reforço: menos dias, as mesmas horas). */
   equipa?: number;
+  /** As versões anteriores da proposta (14/10): enviadas ao cliente e substituídas a pedido dele. A atual é a versoes.length + 1. */
+  versoes?: VersaoProposta[];
 }
+/** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
+export interface VersaoProposta { n: number; enviada: string; substituida: string; total: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
+/** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
+export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
+/** O número da proposta que está em cima da mesa (1 se nunca se refez). */
+export const versaoAtual = (o: Orcamento) => (o.versoes?.length ?? 0) + 1;
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
 export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
@@ -608,6 +616,11 @@ export function preservarManuais(antes: Orcamento, novo: Orcamento, L: LinhaServ
   novo.desconto = antes.desconto; novo.vendaDireta = antes.vendaDireta; novo.avisosVistos = { ...antes.avisosVistos };
   if (antes.precosMan) { novo.precosMan = { ...antes.precosMan }; aplicarPrecosMan(novo); }
   if (antes.prazo) novo.prazo = { ...antes.prazo }; // os dias mudados à mão no prazo previsto (as tarefas que já não existem não contam)
+  // o plano da obra (início, reforço, prestações) e as versões já enviadas não se perdem ao refazer
+  if (antes.inicioObra) novo.inicioObra = antes.inicioObra;
+  if (antes.equipa) novo.equipa = antes.equipa;
+  if (antes.pagFases) novo.pagFases = antes.pagFases.map((p) => ({ ...p }));
+  if (antes.versoes?.length) novo.versoes = antes.versoes.map((v) => ({ ...v, motivos: [...v.motivos] }));
   return novo;
 }
 
@@ -781,15 +794,15 @@ export function proximo(d: Negocio, S: Estado): Proximo {
   switch (d.fase) {
     case 0: return { t: "Registar a chamada", sub: "Ligar ao cliente e anotar o resultado.", btn: "Registar chamada", act: "contactar", who: "comercial" };
     case 1: return { t: "Marcar a visita", sub: "Escolher uma vaga na agenda do comercial.", btn: "Marcar visita", act: "marcarVisita", who: "comercial" };
-    case 2: return { t: "Fechar o levantamento", sub: "Confirmar o local, as necessidades e as medidas.", btn: "Fechar levantamento", act: "fecharVisita", who: "comercial" };
+    case 2: return { t: "Fechar o levantamento", sub: d.orc ? "Mude o que precisa. Ao fechar, o orçamento refaz-se com o que mudou." : "Confirmar o local, as necessidades e as medidas.", btn: "Fechar levantamento", act: "fecharVisita", who: "comercial" };
     case 3:
       if (!o!.enviada) {
-        if (!o!.verif) return { t: "Verificar e enviar a proposta", sub: "A Olyvia verifica as margens e os custos antes de enviar.", btn: "Verificar", act: "verificar", who: "comercial" };
+        if (!o!.verif) return { t: o!.versoes?.length ? `Verificar e enviar a versão ${versaoAtual(o!)}` : "Verificar e enviar a proposta", sub: o!.versoes?.length ? `Substitui a v${versaoAtual(o!) - 1}, enviada a ${o!.versoes.at(-1)!.enviada}. A Olyvia verifica as margens antes de enviar.` : "A Olyvia verifica as margens e os custos antes de enviar.", btn: "Verificar", act: "verificar", who: "comercial" };
         if (bloqueado(d, S))
           return o!.aprov === "pedida"
             ? { t: "À espera da aprovação da Direção", sub: "Pedido de exceção à margem mínima.", who: "direcao", wait: true }
             : { t: "Resolver os bloqueios", sub: "Corrigir o preço ou pedir aprovação à Direção.", btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
-        return { t: "Enviar a proposta", sub: o!.vendaDireta ? "Venda direta: a proposta aceite dispensa o contrato." : "Vai para o portal do cliente.", btn: "Enviar proposta", act: "enviar", who: "comercial" };
+        return { t: o!.versoes?.length ? `Enviar a versão ${versaoAtual(o!)}` : "Enviar a proposta", sub: o!.vendaDireta ? "Venda direta: a proposta aceite dispensa o contrato." : "Vai para o portal do cliente.", btn: "Enviar proposta", act: "enviar", who: "comercial" };
       }
       if (!o!.aceite) return { t: "À espera do cliente", sub: "Proposta no portal desde " + o!.enviada + ".", who: "cliente", wait: true, sim: "aceitar" };
       if (!o!.vendaDireta && o!.contrato !== "assinado")
@@ -991,7 +1004,30 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (d.fase !== 3 || !d.orc || d.orc.enviada) { avisar({ msg: "Já não se pode reabrir", sub: "A proposta já foi enviada ao cliente", kind: "bad" }); return; }
       d.visita.fechada = false; d.fase = 2; d.valida = null; d.orc.verif = false; d.orc.aprov = null;
       log(d, "Levantamento reaberto", "w");
-      avisar({ msg: "Levantamento reaberto", sub: "Ao fechar de novo, o orçamento refaz-se: os preços e o desconto que mudou mantêm-se; quantidades mudadas à mão perdem-se", kind: "" });
+      avisar({ msg: "De volta à visita", sub: "Ao fechar o levantamento, o orçamento refaz-se: os preços e o desconto que mudou mantêm-se", kind: "" });
+    },
+    /** Voltou à visita mas afinal não muda nada: o orçamento fica exatamente como estava (sem o refazer nem pedir os campos). */
+    desistirVisita(id: number) {
+      const d = deal(id);
+      if (d.fase !== 2 || !d.orc) return;
+      d.visita.fechada = true; d.fase = 3; d.valida = null; S.pulse = null;
+      log(d, "Voltou ao orçamento sem mudar a visita");
+      avisar({ msg: "De volta ao orçamento", sub: "Ficou tudo como estava", kind: "" });
+    },
+    /** O cliente pediu alterações a uma proposta enviada (e ainda não aceite): a versão atual fica guardada como substituída
+     *  e abre-se a seguinte, para mexer só no orçamento ou também na visita (que então reabre). */
+    novaVersao(id: number, motivos: string[], nota: string, onde: "orcamento" | "visita") {
+      const d = deal(id), o = d.orc;
+      if (!o?.enviada || o.aceite) { avisar({ msg: "Não há proposta para refazer", sub: o?.aceite ? "O cliente já aceitou esta proposta" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
+      const n = versaoAtual(o);
+      (o.versoes ??= []).push({ n, enviada: o.enviada, substituida: agora(), total: tot(d, S).pf, motivos: [...motivos], nota: nota.trim() || undefined, onde });
+      o.enviada = null; o.verif = false; o.aprov = null;
+      const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
+      log(d, `Proposta v${n} substituída${porque ? ": o cliente pediu " + porque : ""}`, "w");
+      if (onde === "visita") {
+        d.visita.fechada = false; d.fase = 2; d.valida = null;
+        avisar({ msg: `A preparar a versão ${n + 1}`, sub: "De volta à visita. Ao fechar o levantamento, o orçamento refaz-se", kind: "" });
+      } else avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
     },
     /** Produtos do Catálogo na visita: escolher (com a quantidade sugerida), mudar a quantidade, "o cliente fornece", tirar. */
     produto(id: number, p: Produto, q: number) { const v = deal(id).visita; if (p.servico) garantirServico(S, p.servico); v.prod = juntarProduto(v.prod ?? [], fotografia(p, q)); },
@@ -1115,8 +1151,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     enviar(id: number) {
       const d = deal(id); if (!portao(d, [PROPOSTA[0]])) return;
       const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
-      log(d, "Proposta enviada ao portal do cliente" + (A2.length ? " · " + A2.length + " aviso(s) registados" : ""));
-      avisar({ msg: "Proposta enviada", sub: "Está no portal do cliente", kind: "ok" });
+      const v = d.orc!.versoes?.length ? ` v${versaoAtual(d.orc!)}` : "";
+      log(d, "Proposta" + v + " enviada ao portal do cliente" + (A2.length ? " · " + A2.length + " aviso(s) registados" : ""));
+      avisar({ msg: "Proposta" + v + " enviada", sub: v ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente", kind: "ok" });
     },
     aceitar(id: number) {
       const d = deal(id); d.orc!.aceite = "hoje"; log(d, "O cliente aceitou a proposta no portal");

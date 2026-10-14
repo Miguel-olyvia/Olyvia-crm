@@ -11,6 +11,7 @@ import { totais } from "./DocsCliente";
 import { ProdutosOrcamento } from "./ProdutosOrcamento";
 import { LinhasOrcamento } from "./LinhasOrcamento";
 import { PlanoObra } from "./PlanoObraOrcamento";
+import { CaminhoOrcamento, VersoesProposta } from "./VoltarAtras";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -30,6 +31,8 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
 
   return (
     <div className="max-w-5xl space-y-8">
+      {/* Em que ponto está a proposta, e como voltar atrás (à visita, ou uma nova versão se já foi enviada) */}
+      <CaminhoOrcamento ctx={ctx} d={d} />
       {/* Total e margem */}
       <section aria-label="Total" className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -49,8 +52,8 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
           <span className="absolute -top-1 h-4 w-0.5 bg-foreground/60" style={{ left: escala(alvo) }} />
         </div>
         <div className="relative mt-1 h-5 text-xs text-muted-foreground" aria-hidden="true">
-          <span className="absolute -translate-x-1/2" style={{ left: escala(min) }}>mín. {S.cfg.min}%</span>
-          <span className="absolute -translate-x-1/2" style={{ left: escala(alvo) }}>alvo {S.cfg.alvo}%</span>
+          <span className="absolute -translate-x-full whitespace-nowrap pr-1" style={{ left: escala(min) }}>mín. {S.cfg.min}%</span>
+          <span className="absolute whitespace-nowrap pl-1" style={{ left: escala(alvo) }}>alvo {S.cfg.alvo}%</span>
         </div>
         <p className={cn("mt-2 text-[15px]", cor)}>
           {estado === "ok" ? "Margem no alvo." : estado === "warn" ? "Margem abaixo do alvo, mas acima do mínimo." : "Margem abaixo do mínimo: não se envia sem aprovação."}
@@ -116,6 +119,8 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
         <div className="mt-2"><LinhasOrcamento ctx={ctx} d={d} simples /></div>
         <div className="mt-6"><ProdutosOrcamento {...ctx} d={d} simples /></div>
       </section>
+
+      <VersoesProposta ctx={ctx} d={d} />
 
       {/* O plano da obra: as fases, o Gantt em datas (arrasta-se para mudar os dias) e a curva do custo */}
       <PlanoObra ctx={ctx} d={d} />

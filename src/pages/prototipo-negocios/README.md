@@ -750,3 +750,14 @@ O pedido do Ruben: "o orçamento tem de ser dinâmico, interativo, com mapa de G
 - **Cada linha:** "A descoberto até X €", o cliente, o serviço e as condições; tocar abre o negócio.
 - **Quem a vê:** o comercial, a Direção e o Financeiro, e só quando há algum orçamento nessa situação.
 - **Na seed:** o Sérgio Pinto (WC, 50% + 50%) fica a descoberto até 578,72 €.
+
+## Voltar atrás e versões da proposta (14/10/2026, versão Atual)
+
+Pedido do Ruben: poder voltar do orçamento à Visita, "fluido, intuitivo, guiado e lindo". Código em `VoltarAtras.tsx`; ações `reabrirVisita`, `desistirVisita` e `novaVersao` em `motor.ts`; testes em `versoesProposta.test.ts`.
+
+- **Onde se procura:** no topo do orçamento há uma faixa com o estado da proposta e a ação do momento. A mesma pergunta aparece na Visita já feita (lista "Fases feitas"). O antigo "Reabrir levantamento", escondido nos produtos, sai da página simples.
+- **Antes de enviar → "Voltar à visita":** abre uma confirmação que diz o que fica (preços mudados, desconto, datas, equipa e pagamento do plano da obra) e o que se refaz (as quantidades; a verificação e a aprovação). Na Visita, uma faixa diz "De volta à visita" e tem "Não mudar nada e voltar ao orçamento", que desfaz sem pedir campos.
+- **Depois de enviar e antes de aceite → "O cliente pediu alterações":** dois passos. (1) O que pediu (outros materiais, juntar ou tirar trabalhos, baixar o preço, outras datas, outra forma de pagamento, e uma nota). (2) Onde se mexe: só no orçamento, ou na visita (sugerido quando o pedido são materiais ou trabalhos). A versão enviada fica guardada como substituída (`Orcamento.versoes`) e começa a seguinte.
+- **Versões:** linha do tempo com o total de cada versão e a diferença para a anterior. O Hoje e o histórico dizem "Verificar e enviar a versão 2", "Proposta v2 enviada"; a proposta leva "PR 2026/1031 · v2" e "substitui a v1".
+- **Refazer o orçamento** (fechar a visita outra vez) passa a guardar também o início da obra, a equipa, as prestações "Por fases" e as versões.
+- Depois de aceite não há nova versão: o contrato parte da proposta aceite.
