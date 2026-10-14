@@ -1,0 +1,159 @@
+import { describe, expect, it } from "vitest";
+import { seed } from "./motor";
+import { custos0, receitaDe, type Custos } from "./v2/custosModelo";
+import { catalogo0, type Catalogo, type Produto } from "./v2/catalogoModelo";
+import {
+  centroInicial, chaveRef, contarProblemas, ligacoesDe, montarCatalogo, problemasCatalogo, problemasPorNo, procurarNos, type Mapa,
+} from "./ligacoes";
+
+const montar = (fC?: (c: Custos) => void, fK?: (k: Catalogo) => void) => {
+  const S = seed(), C = custos0(), K = catalogo0();
+  fC?.(C); fK?.(K);
+  return montarCatalogo(S, C, K);
+};
+const grupo = (m: Mapa | null, id: string) => m!.grupos.find((g) => g.id === id)!;
+const nomes = (m: Mapa | null, id: string) => grupo(m, id).itens.map((l) => l.n);
+
+describe("ligacoes · o catálogo do mapa", () => {
+  it("junta serviços (em uso e do Catálogo real), produtos sem os consumíveis, equipamentos, técnicos e consumíveis", () => {
+    const K = montar();
+    expect(K.servicos.some((s) => s.id === "canal")).toBe(true);
+    expect(K.servicos.some((s) => s.id === "c13")).toBe(true);
+    expect(K.produtos.some((p) => p.n === "Sanita suspensa com estrutura")).toBe(true);
+    // a fita é consumível de uma receita: aparece como consumível, não como produto
+    expect(K.produtos.some((p) => p.n === "Fita e vedante")).toBe(false);
+    expect(K.consumiveis.some((c) => c.n === "Fita e vedante")).toBe(true);
+    expect(K.equip.find((e) => e.n === "Prensa de multicamada")!.eh).toBeCloseTo(0.85, 2);
+  });
+  it("o centro por omissão é um produto que traz um serviço", () => {
+    const K = montar();
+    const c = centroInicial(K)!;
+    expect(c.t).toBe("prod");
+    expect(K.produtos.find((p) => p.id === c.id)!.servico).toBeTruthy();
+  });
+});
+
+describe("ligacoes · ligacoesDe", () => {
+  it("serviço no centro: os produtos que o trazem (com o porquê) e os do ramo que exige, com a pergunta", () => {
+    const K = montar(), m = ligacoesDe({ t: "svc", id: "c13" }, K);
+    expect(m!.centro.n).toBe("Instalação de Sanita Compacta");
+    const P = grupo(m, "produtos");
+    expect(P.nota).toMatch(/^O cliente mantém a sanita\?/);
+    const sanita = P.itens.find((l) => l.n === "Sanita suspensa com estrutura")!;
+    expect(sanita.porque).toBe("1 un traz 1 × Instalação de Sanita Compacta");
+    expect(P.itens.find((l) => l.n === "Base de duche 80×120")!.porque).toBe("Pede um de Louças e torneiras · se o cliente não mantém");
+    expect(grupo(m, "tecnicos").itens).toEqual([expect.objectContaining({ n: "Canalizador", porque: "Execução: 2 h/un · 25,00 €/h" })]);
+  });
+  it("serviço com receita: equipamentos com €/h × h/un e consumíveis com a marca de opcional", () => {
+    const K = montar((c) => { c.receitas.canal = { ...receitaCanal(c), cons: receitaCanal(c).cons.map((x) => (x.n === "Fita e vedante" ? { ...x, opcional: true } : x)) }; });
+    const m = ligacoesDe({ t: "svc", id: "canal" }, K);
+    expect(grupo(m, "equipamentos").itens[0]).toMatchObject({ n: "Prensa de multicamada", porque: "0,85 €/h · 0,4 h/pt" });
+    const fita = grupo(m, "consumiveis").itens.find((l) => l.n === "Fita e vedante")!;
+    expect(fita.opcional).toBe(true);
+    expect(fita.porque).toMatch(/opcional$/);
+    expect(grupo(m, "consumiveis").itens.find((l) => l.n === "Tubo multicamada 16 mm")!.opcional).toBeUndefined();
+  });
+  it("produto no centro (o vice-versa): o serviço que traz, os que o pedem, as alternativas (as do mesmo serviço primeiro) e quem instala", () => {
+    const K = montar(), id = K.produtos.find((p) => p.n === "Sanita suspensa com estrutura")!.id;
+    const m = ligacoesDe({ t: "prod", id }, K);
+    expect(grupo(m, "traz").itens).toEqual([expect.objectContaining({ n: "Instalação de Sanita Compacta", porque: "traz 1 × Instalação de Sanita Compacta" })]);
+    expect(nomes(m, "pedem")).toContain("Montagem de louças");
+    expect(nomes(m, "alternativas")[0]).toBe("Sanita compacta");
+    expect(nomes(m, "alternativas")).toContain("Base de duche 80×120");
+    expect(grupo(m, "instala").itens[0]).toMatchObject({ n: "Canalizador", porque: "Instala · Execução: 2 h/un · 25,00 €/h" });
+  });
+  it("as alternativas são as da mesma subcategoria quando o produto a tem", () => {
+    const K = montar(undefined, (k) => {
+      const base = k.produtos.find((p) => p.n === "Sanita compacta")!;
+      k.produtos.push({ ...base, id: "t1", n: "Toalheiro A", sub: "Toalheiros", servico: undefined }, { ...base, id: "t2", n: "Toalheiro B", sub: "Toalheiros", servico: undefined });
+    });
+    const m = ligacoesDe({ t: "prod", id: "t1" }, K);
+    expect(nomes(m, "alternativas")).toEqual(["Toalheiro B"]);
+    expect(grupo(m, "alternativas").nota).toBe("Da mesma subcategoria: Toalheiros.");
+  });
+  it("técnico, equipamento e consumível no centro: os serviços que os usam", () => {
+    const K = montar();
+    expect(nomes(ligacoesDe({ t: "tec", id: "canalizador" }, K), "servicos")).toEqual(expect.arrayContaining(["Canalização", "Instalação de Sanita Compacta"]));
+    const prensa = K.equip.find((e) => e.n === "Prensa de multicamada")!.id;
+    expect(grupo(ligacoesDe({ t: "equip", id: prensa }, K), "servicos").itens).toEqual([expect.objectContaining({ n: "Canalização", porque: "0,85 €/h · 0,4 h/pt" })]);
+    const fita = K.consumiveis.find((c) => c.n === "Fita e vedante")!.k;
+    expect(nomes(ligacoesDe({ t: "cons", id: fita }, K), "servicos")).toEqual(["Canalização"]);
+  });
+  it("cada elemento aparece uma só vez e nunca o próprio centro; um elemento que já não existe dá null", () => {
+    const K = montar();
+    for (const r of [{ t: "svc" as const, id: "c13" }, { t: "prod" as const, id: centroInicial(K)!.id }, { t: "tec" as const, id: "canalizador" }]) {
+      const m = ligacoesDe(r, K)!, ks = m.grupos.flatMap((g) => g.itens.map((l) => chaveRef(l.ref)));
+      expect(new Set(ks).size).toBe(ks.length);
+      expect(ks).not.toContain(chaveRef(r));
+    }
+    expect(ligacoesDe({ t: "svc", id: "não-existe" }, K)).toBeNull();
+  });
+});
+
+describe("ligacoes · problemasCatalogo", () => {
+  it("com os dados de exemplo: serviços sem receita e produtos que se instalam sem serviço (os de um ramo exigido ficam de fora)", () => {
+    const K = montar(), P = problemasCatalogo(K), n = contarProblemas(P);
+    expect(n["svc-sem-receita"]).toBeGreaterThan(0);
+    const sem = P.filter((p) => p.tipo === "svc-sem-receita").map((p) => p.ref.id);
+    expect(sem).toContain("c13");
+    expect(sem).not.toContain("canal");
+    const prod = P.filter((p) => p.tipo === "prod-sem-servico").map((p) => p.n);
+    expect(prod).toEqual(expect.arrayContaining(["Espelho simples 60×80", "Conjunto de acessórios WC"]));
+    // a base de duche está no ramo que «Montagem de louças» exige: o serviço do pacote instala-a
+    expect(prod).not.toContain("Base de duche 80×120");
+    expect(prod).not.toContain("Sanita compacta");
+    expect(n["equip-sem-uso"]).toBe(0);
+    expect(n["cons-sem-uso"]).toBe(0);
+  });
+  it("equipamento e consumível que nenhum serviço usa, e serviço que exige um produto de um ramo vazio ou que não existe", () => {
+    const K = montar(
+      (c) => { c.equip.push({ id: "e-novo", n: "Aspirador industrial", compra: 300, vida: 1000, residual: 0, manutAno: 0, usoAno: 600 }); c.receitas.canal = { ...receitaCanal(c), cons: receitaCanal(c).cons.filter((x) => x.n !== "Fita e vedante") }; },
+      (k) => { const pint = k.arvore.find((x) => x.n === "Pintura")!.id; k.exigeProduto = { ...k.exigeProduto, c2: pint, c7: "nó-apagado" }; },
+    );
+    const P = problemasCatalogo(K), por = problemasPorNo(P);
+    expect(P.find((p) => p.tipo === "equip-sem-uso")).toMatchObject({ n: "Aspirador industrial", ref: { t: "equip", id: "e-novo" } });
+    expect(P.find((p) => p.tipo === "cons-sem-uso")).toMatchObject({ n: "Fita e vedante" });
+    const exige = P.filter((p) => p.tipo === "svc-exige-sem-produto");
+    expect(exige.map((p) => p.ref.id).sort()).toEqual(["c2", "c7"]);
+    expect(exige.find((p) => p.ref.id === "c2")!.t).toBe("Exige um produto de Pintura, mas não há nenhum.");
+    expect(por.get("svc:c2")!.map((p) => p.tipo)).toEqual(["svc-sem-receita", "svc-exige-sem-produto"]);
+  });
+  it("os irmãos com serviço dizem que o produto devia ter um", () => {
+    const K = montar(undefined, (k) => {
+      const base = k.produtos.find((p) => p.n === "Toalheiro elétrico")!;
+      k.produtos.push({ ...base, id: "x1", n: "Peça sem nome", sub: "Toalheiros", servico: undefined }, { ...base, id: "x2", n: "Outra peça", sub: "Toalheiros" });
+    });
+    expect(problemasCatalogo(K).filter((p) => p.tipo === "prod-sem-servico").map((p) => p.ref.id)).toContain("x1");
+  });
+});
+
+describe("ligacoes · escala e pesquisa", () => {
+  it("aguenta o catálogo real (360 serviços e 2.200 produtos) depressa", () => {
+    const t0 = performance.now();
+    const K = montar(undefined, (k) => {
+      const base = k.produtos.find((p) => p.n === "Sanita compacta")!;
+      for (let i = 0; i < 2200; i++) k.produtos.push({ ...base, id: `x${i}`, n: `Artigo ${i}`, sku: `SKU-${i}`, sub: `Sub ${i % 40}`, servico: i % 3 ? undefined : "c13" } as Produto);
+    });
+    for (let i = 0; i < 320; i++) K.servicos.push({ ...K.servicos.find((s) => s.id === "c13")!, id: `s${i}`, n: `Serviço ${i}` });
+    const m = ligacoesDe({ t: "svc", id: "c13" }, K)!, P = problemasCatalogo(K);
+    expect(K.servicos.length).toBeGreaterThanOrEqual(360);
+    expect(grupo(m, "produtos").itens.length).toBeGreaterThan(2000);
+    expect(P.length).toBeGreaterThan(0);
+    expect(performance.now() - t0).toBeLessThan(1500);
+  });
+  it("procura em tudo, sem acentos, serviços primeiro e produtos também pela referência", () => {
+    const K = montar(undefined, (k) => { k.produtos[2].sku = "ROCA-123"; });
+    const L = procurarNos(K, "sanita");
+    expect(L[0].ref.t).toBe("svc");
+    expect(L.some((x) => x.ref.t === "prod")).toBe(true);
+    expect(procurarNos(K, "roca-123").map((x) => x.n)).toEqual([K.produtos.find((p) => p.sku === "ROCA-123")!.n]);
+    expect(procurarNos(K, "canalizacao").some((x) => x.ref.t === "tec" || x.ref.t === "svc")).toBe(true);
+    expect(procurarNos(K, "  ")).toEqual([]);
+  });
+});
+
+/** A receita do «canal» como está no arranque (de receitas.ts), para a mexer num teste. */
+function receitaCanal(c: Custos) {
+  const S = seed();
+  return structuredClone(receitaDe({ ...c, receitas: {} }, "canal", S.svc.canal, S.cfg.alvo)!);
+}
