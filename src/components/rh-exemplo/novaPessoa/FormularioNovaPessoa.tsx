@@ -1,23 +1,27 @@
-// O corpo do painel "Nova pessoa": três abas sublinhadas (Dados pessoais, Contrato e local, Acesso), o aviso de erros por aba
-// e o rodapé fixo com Cancelar e "Criar pessoa" (o único botão primário). Os erros só aparecem depois de sair do campo ou
-// de tentar criar; ao tentar com erros, abre-se a aba do primeiro e o foco vai para esse campo.
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/button";
-import { FOCO } from "@/components/ficha-comum/estilosAbas";
+// O corpo do painel "Nova pessoa": seis abas sublinhadas (Dados pessoais, Contacto e morada, Contrato e local, Retribuição e
+// bancário, Outros dados, Acesso e convite), o contador de erros por aba e o rodapé fixo. Os erros só aparecem depois de sair do
+// campo ou de tentar criar; ao tentar com erros, abre-se a aba do primeiro e o foco vai para esse campo.
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { CamposTocadosProvider } from "@/components/rh-exemplo/form/Campos";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { useConfiguracaoObrigatoriosAdmissao } from "@/components/rh-exemplo/hooks/useConfiguracaoObrigatoriosAdmissao";
 import type { NovaPessoaExemplo } from "@/components/rh-exemplo/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
-import { cn } from "@/lib/utils";
+import { AbaAcesso } from "./AbaAcesso";
+import { AbaContacto } from "./AbaContacto";
+import { AbaContrato } from "./AbaContrato";
+import { AbaDados } from "./AbaDados";
+import { AbaOutros } from "./AbaOutros";
+import { AbaRetribuicao } from "./AbaRetribuicao";
 import { AbaComErros, ListaAbasNova, Tabs, TabsContent } from "./AbasNova";
-import { CamposAcesso } from "./CamposAcesso";
-import { CamposContrato } from "./CamposContrato";
-import { CamposDados } from "./CamposDados";
-import { idCampo, mensagemErro, type CamposNovaProps } from "./tiposCampos";
+import { ProvedorNova } from "./contextoNova";
+import { ABAS_NOVA, abaDoCampo, type AbaNova } from "./ids";
+import { paraNovaPessoa } from "./paraStore";
+import { RodapeNova } from "./RodapeNova";
+import { comPatch, valoresIniciais, type AlterarNova, type ValoresNovaPessoa } from "./tiposNova";
 import {
-  ABAS_NOVA, abaDoCampo, paraNovaPessoa, primeiroErro, resumoDeErros, validarNovaPessoa, valoresIniciais,
-  type AbaNova, type CampoNova, type ErrosNova, type ValoresNovaPessoa,
-} from "./valores";
+  idsObrigatorios, primeiroProblema, problemasDaNova, resumoDeProblemas, type ProblemaNova,
+} from "./validacao";
 
 interface FormularioNovaPessoaProps {
   colegas: ReadonlyArray<{ id: string; nome_completo: string }>;
@@ -28,50 +32,73 @@ interface FormularioNovaPessoaProps {
   aoSujar: () => void;
 }
 
-/** Só os erros que já se mostram: o campo foi tocado, ou já se tentou criar. */
-function errosVisiveis(erros: ErrosNova, tentou: boolean, tocados: ReadonlySet<string>): ErrosNova {
-  const visiveis: ErrosNova = {};
-  for (const campo of Object.keys(erros) as CampoNova[]) {
-    if (tentou || tocados.has(idCampo(campo))) visiveis[campo] = erros[campo];
-  }
-  return visiveis;
+const ABAS_CONTEUDO: Record<AbaNova, () => JSX.Element> = {
+  dados: AbaDados, contacto: AbaContacto, contrato: AbaContrato, retribuicao: AbaRetribuicao, outros: AbaOutros, acesso: AbaAcesso,
+};
+
+/** Só os problemas que já se mostram: o campo foi tocado, ou já se tentou criar. */
+function visiveisDe(problemas: readonly ProblemaNova[], tentou: boolean, tocados: ReadonlySet<string>): ProblemaNova[] {
+  return problemas.filter((p) => tentou || tocados.has(p.campoId));
 }
 
 export function FormularioNovaPessoa({ colegas, aoCriar, aoCancelar, aoSujar }: FormularioNovaPessoaProps) {
   const { t } = useTranslation();
   const hoje = useMemo(() => hojeIso(), []);
+  const { campos: config } = useConfiguracaoObrigatoriosAdmissao();
   const [valores, setValores] = useState<ValoresNovaPessoa>(() => valoresIniciais(hoje));
   const [aba, setAba] = useState<AbaNova>("dados");
   const [tentou, setTentou] = useState(false);
+  const [comConvite, setComConvite] = useState(false);
   const [tocados, setTocados] = useState<ReadonlySet<string>>(new Set());
-  const [focoPedido, setFocoPedido] = useState<CampoNova | null>(null);
+  const [focoPedido, setFocoPedido] = useState<string | null>(null);
 
-  const erros = useMemo(() => validarNovaPessoa(valores, hoje), [valores, hoje]);
-  const visiveis = errosVisiveis(erros, tentou, tocados);
-  const resumo = resumoDeErros(visiveis);
+  const opcoes = useMemo(() => ({ comConvite, config, hoje }), [comConvite, config, hoje]);
+  const problemas = useMemo(() => problemasDaNova(valores, opcoes), [valores, opcoes]);
+  const visiveis = visiveisDe(problemas, tentou, tocados);
+  const resumo = resumoDeProblemas(visiveis);
+  const obrigatorios = useMemo(() => idsObrigatorios(valores, opcoes), [valores, opcoes]);
 
   useEffect(() => {
     if (focoPedido === null) return;
-    document.getElementById(idCampo(focoPedido))?.focus();
-    setFocoPedido(null);
+    // O campo pode estar numa aba que acabou de abrir: tenta de novo nos quadros seguintes até existir.
+    let tentativas = 0;
+    let quadro = 0;
+    const focar = () => {
+      const controlo = document.getElementById(focoPedido);
+      if (controlo) {
+        controlo.focus();
+        setFocoPedido(null);
+      } else if (tentativas++ < 10) {
+        quadro = requestAnimationFrame(focar);
+      }
+    };
+    focar();
+    return () => cancelAnimationFrame(quadro);
   }, [focoPedido, aba]);
 
-  const definir = (alteracao: Partial<ValoresNovaPessoa>) => {
+  const alterar = useCallback<AlterarNova>((grupo, patch) => {
     aoSujar();
-    setValores((atual) => ({ ...atual, ...alteracao }));
+    setValores((atual) => comPatch(atual, grupo, patch));
+  }, [aoSujar]);
+
+  const erro = (campoId: string): string | null => {
+    const p = visiveis.find((x) => x.campoId === campoId);
+    return p ? t(p.mensagemKey) : null;
   };
-  const campos: CamposNovaProps = {
-    valores, definir,
-    erro: (campo) => (visiveis[campo] ? mensagemErro(t, campo, visiveis[campo]) : null),
+
+  const tentar = (convite: boolean) => {
+    setComConvite(convite);
+    setTentou(true);
+    const lista = problemasDaNova(valores, { comConvite: convite, config, hoje });
+    const primeiro = primeiroProblema(lista);
+    if (primeiro === null) return aoCriar(paraNovaPessoa(valores, { config, comConvite: convite }));
+    setAba(abaDoCampo(primeiro.campoId));
+    setFocoPedido(primeiro.campoId);
   };
 
   const submeter = (e: FormEvent) => {
     e.preventDefault();
-    setTentou(true);
-    const primeiro = primeiroErro(erros);
-    if (primeiro === null) return aoCriar(paraNovaPessoa(valores));
-    setAba(abaDoCampo(primeiro));
-    setFocoPedido(primeiro);
+    tentar(false);
   };
 
   return (
@@ -79,29 +106,26 @@ export function FormularioNovaPessoa({ colegas, aoCriar, aoCancelar, aoSujar }: 
       rotuloObrigatorio={t("hr.campos.obrigatorio")}
       onTocar={(id) => setTocados((atual) => (atual.has(id) ? atual : new Set(atual).add(id)))}
     >
-      <form noValidate onSubmit={submeter} className="flex min-h-0 flex-1 flex-col">
-        <Tabs value={aba} onValueChange={(v) => setAba(v as AbaNova)} className="flex min-h-0 flex-1 flex-col">
-          <ListaAbasNova aria-label={t("rhForm.nova.tabs.label")} className="shrink-0">
-            {ABAS_NOVA.map((id) => (
-              <AbaComErros key={id} value={id} rotulo={t(`rhForm.nova.tabs.${id}`)} erros={resumo.porAba[id]} />
-            ))}
-          </ListaAbasNova>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-            <TabsContent value="dados" className="mt-0"><CamposDados {...campos} /></TabsContent>
-            <TabsContent value="contrato" className="mt-0"><CamposContrato {...campos} colegas={colegas} /></TabsContent>
-            <TabsContent value="acesso" className="mt-0"><CamposAcesso {...campos} /></TabsContent>
-          </div>
-        </Tabs>
-        <footer className="flex flex-wrap items-center gap-3 border-t border-border p-4 px-6">
-          <p role="status" className="min-w-0 flex-1 text-sm text-destructive">
-            {resumo.total === 0 ? "" : t(resumo.total === 1 ? "rhForm.nova.erros.um" : "rhForm.nova.erros.varios", { n: resumo.total })}
-          </p>
-          <Button type="button" variant="outline" onClick={aoCancelar} className={cn("min-h-11", FOCO)}>
-            {t("rhForm.nova.cancel")}
-          </Button>
-          <Button type="submit" className={cn("min-h-11", FOCO)}>{t("rhForm.nova.create")}</Button>
-        </footer>
-      </form>
+      <ProvedorNova
+        valor={{ valores, alterar, erro, obrigatorio: (id) => obrigatorios.has(id), config, colegas }}
+      >
+        <form noValidate onSubmit={submeter} className="flex min-h-0 flex-1 flex-col">
+          <Tabs value={aba} onValueChange={(v) => setAba(v as AbaNova)} className="flex min-h-0 flex-1 flex-col">
+            <ListaAbasNova aria-label={t("rhForm.nova.tabs.label")} className="shrink-0">
+              {ABAS_NOVA.map((id) => (
+                <AbaComErros key={id} value={id} rotulo={t(`rhNova.tabs.${id}`)} erros={resumo.porAba[id]} />
+              ))}
+            </ListaAbasNova>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              {ABAS_NOVA.map((id) => {
+                const Conteudo = ABAS_CONTEUDO[id];
+                return <TabsContent key={id} value={id} className="mt-0"><Conteudo /></TabsContent>;
+              })}
+            </div>
+          </Tabs>
+          <RodapeNova erros={resumo.total} aoCancelar={aoCancelar} aoCriarEConvidar={() => tentar(true)} />
+        </form>
+      </ProvedorNova>
     </CamposTocadosProvider>
   );
 }

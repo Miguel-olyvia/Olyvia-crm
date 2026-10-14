@@ -1,6 +1,6 @@
 /**
  * "Nova pessoa" da apresentação, num painel lateral (Sheet) igual ao "Novo negócio" e à ficha de Pessoas: meio ecrã (todo
- * em ecrã estreito), cabeçalho com migalhas e selo "Novo · por gravar", três abas sublinhadas e rodapé fixo. Ao abrir, o foco
+ * em ecrã estreito), cabeçalho com migalhas e selo "Novo · por gravar", seis abas sublinhadas e rodapé fixo. Ao abrir, o foco
  * vai para o nome; Esc, Cancelar ou Fechar fecham e devolvem o foco a quem abriu. Com alterações por gravar, um clique fora
  * não fecha (para não perder o que se escreveu). Ao criar, a pessoa entra na memória e abre-se a ficha (que leva o foco).
  * Substitui o diálogo curto de antes; o assistente real de cinco passos continua a não existir aqui.
@@ -42,7 +42,7 @@ export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCria
           sujo.current = false;
           criou.current = false;
           origem.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          conteudo.current?.querySelector<HTMLElement>("#rh-nova-nome")?.focus();
+          conteudo.current?.querySelector<HTMLElement>("#hr-novo-primeiro-nome")?.focus();
         }}
         onInteractOutside={(e) => { if (sujo.current) e.preventDefault(); }}
         onCloseAutoFocus={(e) => {

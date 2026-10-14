@@ -12,10 +12,12 @@ import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
 import { utilizadoresPerfisTranslations } from "@/translations/utilizadoresPerfis";
 import { rhExemploTranslations } from "@/translations/rhExemplo";
 import { rhExemploFormTranslations } from "@/translations/rhExemploForm";
+import { rhExemploNovaPessoaTranslations } from "@/translations/rhExemploNovaPessoa";
 import { rhExemploMenuTranslations } from "@/translations/rhExemploMenu";
 import { rhExemploFluxosCTranslations } from "@/translations/rhExemploFluxosC";
 import { rhExemploFluxosATranslations } from "@/translations/rhExemploFluxosA";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
+import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -67,6 +69,11 @@ Object.keys(rhExemploFormTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFormTranslations[lang as keyof typeof rhExemploFormTranslations] };
 });
 
+// Painel "Nova pessoa" com todos os campos, em seis abas (`rhNova.*`).
+Object.keys(rhExemploNovaPessoaTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploNovaPessoaTranslations[lang as keyof typeof rhExemploNovaPessoaTranslations] };
+});
+
 // Menu e ecrãs de gestão de RH de exemplo (assiduidade, ausências, centros, modelos, processamento salarial, convite).
 Object.keys(rhExemploMenuTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploMenuTranslations[lang as keyof typeof rhExemploMenuTranslations] };
@@ -85,6 +92,11 @@ Object.keys(rhExemploFluxosCTranslations).forEach((lang) => {
 // Frente B: horário por tipo e versões, picagem com localização, alertas do fim do dia e faltas (`rhExemplo.hor/pic/fal.*`).
 Object.keys(rhExemploFluxosBTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosBTranslations[lang as keyof typeof rhExemploFluxosBTranslations] };
+});
+
+// Frente D: banco de horas na ficha e horas extra pendentes na fila de trabalho (`rhFluxosD.*`).
+Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosDTranslations[lang as keyof typeof rhExemploFluxosDTranslations] };
 });
 
 export const useTranslation = () => {

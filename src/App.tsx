@@ -101,7 +101,6 @@ const RhCentrosTrabalho = lazy(() => import("./pages/rh-exemplo/RhCentrosTrabalh
 const RhModelosDocumentos = lazy(() => import("./pages/rh-exemplo/RhModelosDocumentos"));
 const RhProcessamentoSalarial = lazy(() => import("./pages/rh-exemplo/RhProcessamentoSalarial"));
 const RhConfiguracaoAdmissao = lazy(() => import("./pages/rh-exemplo/RhConfiguracaoAdmissao"));
-const RhHorasExtra = lazy(() => import("./pages/rh-exemplo/RhHorasExtra"));
 const RhMinhasHorasExtra = lazy(() => import("./pages/rh-exemplo/RhMinhasHorasExtra"));
 const RhRegrasFimContrato = lazy(() => import("./pages/rh-exemplo/RhRegrasFimContrato"));
 const RhConviteAdmissao = lazy(() => import("./pages/rh-exemplo/RhConviteAdmissao"));
@@ -274,7 +273,6 @@ const App = () => (
                       <Route path="/rh-exemplo/centros" element={<ProtectedRoute permission="users.view"><RhCentrosTrabalho /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/documentos/modelos" element={<ProtectedRoute permission="users.view"><RhModelosDocumentos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/processamento-salarial" element={<ProtectedRoute permission="users.view"><RhProcessamentoSalarial /></ProtectedRoute>} />
-                      <Route path="/rh-exemplo/horas-extra" element={<ProtectedRoute permission="users.view"><RhHorasExtra /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/minhas-horas-extra" element={<ProtectedRoute permission="users.view"><RhMinhasHorasExtra /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />

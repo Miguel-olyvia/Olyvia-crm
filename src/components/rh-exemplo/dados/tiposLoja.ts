@@ -44,6 +44,8 @@ import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmi
 
 export interface FichaRh {
   pessoa: Pessoa;
+  /** Como a pessoa quer ser tratada (só as fichas criadas pelo painel "Nova pessoa" o têm). */
+  nomeTratamento?: string | null;
   dadosPessoais: PessoaDadosPessoais | null;
   identificacao: PessoaIdentificacao | null;
   morada: PessoaMorada | null;

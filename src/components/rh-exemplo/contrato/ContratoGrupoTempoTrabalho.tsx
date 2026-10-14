@@ -33,6 +33,7 @@ import {
   type PoliticaFeriados,
   type RegimeTrabalho,
 } from "@/components/rh-exemplo/tipos";
+import { InterruptorHorasExtra, usePodeHorasExtra } from "@/components/rh-exemplo/fluxosC/InterruptorHorasExtra";
 import { CAMPOS_NUMERICOS, type DefinirCampo, type RascunhoVinculo } from "./rascunhoVinculo";
 
 interface ContratoGrupoTempoTrabalhoProps {
@@ -41,6 +42,8 @@ interface ContratoGrupoTempoTrabalhoProps {
   podeEditar: boolean;
   /** Sem vinculo em vigor: as horas ainda se escrevem aqui. */
   criandoContrato: boolean;
+  /** Para o interruptor «pode fazer horas extra» (que activa os máximos). Sem ele o interruptor não aparece. */
+  pessoaId?: string;
   erroDe: (campoId: string) => string | null;
 }
 
@@ -49,9 +52,12 @@ export function ContratoGrupoTempoTrabalho({
   definir,
   podeEditar,
   criandoContrato,
+  pessoaId,
   erroDe,
 }: ContratoGrupoTempoTrabalhoProps) {
   const { t } = useTranslation();
+  const podeHorasExtra = usePodeHorasExtra(pessoaId);
+  const maximosAtivos = podeEditar && (pessoaId === undefined || podeHorasExtra);
 
   const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));
   const horasLegiveis = rascunho.horas_periodo.trim() !== "" && Number.isFinite(horasNumero);
@@ -161,7 +167,7 @@ export function ContratoGrupoTempoTrabalho({
           min={0}
           max={4000}
           valor={rascunho.horas_anuais_maximas}
-          disabled={!podeEditar}
+          disabled={!maximosAtivos}
           onChange={(v) => definir("horas_anuais_maximas", v)}
         />
         <CampoTexto
@@ -173,9 +179,10 @@ export function ContratoGrupoTempoTrabalho({
           max={80}
           step="0.5"
           valor={rascunho.horas_semanais_maximas}
-          disabled={!podeEditar}
+          disabled={!maximosAtivos}
           onChange={(v) => definir("horas_semanais_maximas", v)}
         />
+        {pessoaId && <InterruptorHorasExtra pessoaId={pessoaId} disabled={!podeEditar} />}
         <div className="flex items-center gap-2 self-end pb-2">
           {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
               <button>, e o nome acessivel de um botao NAO vem de uma

@@ -7,7 +7,6 @@ import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { InterruptorHorasExtra } from "@/components/rh-exemplo/fluxosC/InterruptorHorasExtra";
 import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
-import RhHorasExtra from "./RhHorasExtra";
 import RhMinhasHorasExtra from "./RhMinhasHorasExtra";
 import RhProcessamentoSalarial from "./RhProcessamentoSalarial";
 
@@ -32,45 +31,6 @@ beforeEach(() => {
   repor();
   reporGestao();
   reporFluxosC();
-});
-
-describe("Horas extra (lista do RH)", () => {
-  it("abre com as pendentes e sem chaves por traduzir", () => {
-    renderEm("/rh-exemplo/horas-extra", "/rh-exemplo/horas-extra", <RhHorasExtra />);
-    expect(screen.getByRole("heading", { level: 1, name: /Horas extra/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Confirmar:/ }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Acima do limite \(1\)/ })).toBeInTheDocument();
-    semChavesPorTraduzir();
-  });
-
-  it("confirmar uma pendente passa-a a confirmada", () => {
-    renderEm("/rh-exemplo/horas-extra", "/rh-exemplo/horas-extra", <RhHorasExtra />);
-    const antes = lerFluxosC().horasExtra.filter((h) => h.estado === "confirmada").length;
-    fireEvent.click(screen.getAllByRole("button", { name: /^Confirmar:/ })[0]);
-    const dialogo = screen.getByRole("dialog");
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
-    expect(lerFluxosC().horasExtra.filter((h) => h.estado === "confirmada").length).toBe(antes + 1);
-  });
-
-  it("rejeitar exige motivo de 3 caracteres e só depois rejeita", () => {
-    renderEm("/rh-exemplo/horas-extra", "/rh-exemplo/horas-extra", <RhHorasExtra />);
-    fireEvent.click(screen.getAllByRole("button", { name: /^Rejeitar:/ })[0]);
-    const dialogo = screen.getByRole("dialog");
-    fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "ab" } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Rejeitar" }));
-    expect(within(dialogo).getByRole("alert")).toHaveTextContent(/pelo menos 3/);
-    expect(lerFluxosC().horasExtra.filter((h) => h.estado === "rejeitada").length).toBe(2);
-    fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "não foi feita" } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Rejeitar" }));
-    expect(lerFluxosC().horasExtra.filter((h) => h.estado === "rejeitada").length).toBe(3);
-  });
-
-  it("filtrar por «Acima do limite» mostra só a marcada", () => {
-    renderEm("/rh-exemplo/horas-extra", "/rh-exemplo/horas-extra", <RhHorasExtra />);
-    fireEvent.click(screen.getByRole("button", { name: /Acima do limite \(1\)/ }));
-    const tabela = screen.getAllByRole("table")[0];
-    expect(within(tabela).getAllByRole("row")).toHaveLength(2);
-  });
 });
 
 describe("A minha área: as minhas horas extra", () => {

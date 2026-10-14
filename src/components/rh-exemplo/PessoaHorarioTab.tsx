@@ -50,6 +50,7 @@ import { toast } from "@/lib/toast";
 import { HorarioEditor, corDoLocal } from "@/components/rh-exemplo/HorarioEditor";
 import { CorrigirPlaneadoSheet } from "@/components/rh-exemplo/CorrigirPlaneadoSheet";
 import { HorarioTipoPainel } from "@/components/rh-exemplo/fluxosB/horario/HorarioTipoPainel";
+import { BancoHorasDaFicha } from "@/components/rh-exemplo/fluxosC/BancoHorasDaFicha";
 import { HistoricoCorreccoes } from "@/components/rh-exemplo/assiduidade/HistoricoCorreccoes";
 import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeTab";
 import { useFichaRh } from "@/components/rh-exemplo/dados/loja";
@@ -232,6 +233,7 @@ export function PessoaHorarioTab({
                     horasContratadasSemanais={horasContratadasSemanais}
                   />
                 )}
+                {pessoaId && <BancoHorasDaFicha pessoaId={pessoaId} podeAjustar={podeEditarPlaneado} />}
                 <h3 className="text-sm font-medium text-muted-foreground">{t("rhExemplo.hor.linhasTitulo")}</h3>
                 <HorarioEditor
                   valor={rascunho}

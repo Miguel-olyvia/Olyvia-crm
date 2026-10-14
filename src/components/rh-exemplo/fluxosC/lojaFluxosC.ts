@@ -5,11 +5,12 @@
 import { useSyncExternalStore } from "react";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { lerEstado } from "@/components/rh-exemplo/dados/loja";
+import { limiteAnualMin } from "./limitePessoa";
 import { validarMovimento, type MovimentoBanco, type ResultadoMovimento } from "./bancoHorasRegras";
 import { criarEstadoFluxosC, type EstadoFluxosC } from "./dadosFluxosC";
 import {
   avaliarCandidata, avaliarLimites, decidirHoraExtra, tempoAMaisPorTipo,
-  type EntradaTempoAMais, type HoraExtra, type LimitesHE, type ResultadoDecisao, type ResultadoPipeline,
+  type EntradaTempoAMais, type HoraExtra, type LimitesHE, type RegrasPagamentoHE, type ResultadoDecisao, type ResultadoPipeline,
 } from "./horasExtraRegras";
 import { fecharMes, reabrirMes, type FechoMes, type ReciboCongelado, type ResultadoReabrir } from "./salarioFecho";
 
@@ -52,6 +53,11 @@ export function definirLimitesHorasExtra(limites: LimitesHE): void {
   definir((e) => ({ ...e, limites }));
 }
 
+/** Os coeficientes de pagamento (Processamento salarial > Configuração): o cálculo do mês usa-os de imediato. */
+export function definirRegrasPagamentoHE(regras: RegrasPagamentoHE): void {
+  definir((e) => ({ ...e, regras }));
+}
+
 export function decidirHoraExtraNaLoja(id: string, decisao: "confirmar" | "rejeitar", motivo: string): ResultadoDecisao {
   const hora = estado.horasExtra.find((h) => h.id === id);
   if (!hora) return { ok: false, erro: "ja_decidida" };
@@ -87,7 +93,7 @@ export function registarTempoAMais(p: PedidoTempoAMais): RespostaTempoAMais {
   const ava = avaliarLimites(minutos, {
     jaNoDiaMin: dela.filter((h) => h.data === p.data).reduce((s, h) => s + h.minutos, 0),
     jaNoAnoMin: dela.filter((h) => h.data.slice(0, 4) === p.data.slice(0, 4)).reduce((s, h) => s + h.minutos, 0),
-  }, estado.limites);
+  }, { ...estado.limites, anoMin: limiteAnualMin(lerEstado().fichas[p.pessoaId], estado.limites.anoMin) });
   const nocNormal = Math.min(p.nocturnoMin, ava.normaisMin);
   const parte = (min: number, noc: number, acima: boolean): HoraExtra => ({
     id: novoIdC("he"), pessoaId: p.pessoaId, data: p.data, minutos: min, nocturnoMin: noc, origem,

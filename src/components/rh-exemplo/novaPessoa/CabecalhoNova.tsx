@@ -31,7 +31,7 @@ export function CabecalhoNova() {
           {t("rhForm.nova.badge")}
         </span>
       </div>
-      <SheetDescription>{t("rhForm.nova.description")}</SheetDescription>
+      <SheetDescription>{t("rhNova.description")}</SheetDescription>
       <p className="text-xs text-muted-foreground">{t("rhForm.nova.example")}</p>
     </SheetHeader>
   );

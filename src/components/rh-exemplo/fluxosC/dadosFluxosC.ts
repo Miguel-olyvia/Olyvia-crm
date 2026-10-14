@@ -62,6 +62,8 @@ function bancoInicial(): MovimentoBanco[] {
     m("bh-s-3", "p-sofia", -18, -60, "Dia com 7 h feitas (8 h planeadas)"),
     m("bh-s-4", "p-sofia", -10, -480, "Folga gozada por banco de horas"),
     m("bh-s-5", "p-sofia", -5, 60, "Dia com 9 h feitas (8 h planeadas)"),
+    m("bh-r-1", "p-rui", -25, 180, "Sábado de inventário"),
+    m("bh-r-2", "p-rui", -8, -60, "Saída mais cedo acordada"),
     m("bh-a-1", "p-andre", -30, 120, "Sábado de inventário"),
     m("bh-a-2", "p-andre", -10, -60, "Saída mais cedo acordada"),
   ];

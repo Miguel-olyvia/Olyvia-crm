@@ -2,6 +2,7 @@
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
 import { PessoaLaboraisTab } from "@/components/rh-exemplo/PessoaLaboraisTab";
+import { PessoaOutrosDadosCard } from "@/components/rh-exemplo/PessoaOutrosDadosCard";
 import { PessoaPessoaisTab } from "@/components/rh-exemplo/PessoaPessoaisTab";
 import { PessoaVisaoGeralTab } from "@/components/rh-exemplo/PessoaVisaoGeralTab";
 import type { usePessoa } from "@/components/rh-exemplo/hooks/usePessoa";
@@ -55,6 +56,7 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo }: AbaProps & { a
 
 export function AbaPessoais({ ficha, pessoa, ctx }: AbaProps) {
   return (
+    <div className="space-y-4">
     <PessoaPessoaisTab
       pessoaId={pessoa.id} organizationId={pessoa.organization_id} dadosPessoais={ficha.dadosPessoais}
       identificacao={ficha.identificacao} morada={ficha.morada} emergencia={ficha.emergencia} bancarios={ficha.bancarios}
@@ -65,5 +67,7 @@ export function AbaPessoais({ ficha, pessoa, ctx }: AbaProps) {
       onRevelarNiss={ficha.revelarNiss} onDefinirNiss={ficha.definirNiss} onDefinirConta={ficha.definirConta}
       onDefinirBic={ficha.definirBic}
     />
+    <PessoaOutrosDadosCard pessoaId={pessoa.id} />
+    </div>
   );
 }

@@ -344,7 +344,6 @@ export const menuSections: MenuSection[] = [
       "/rh-exemplo/centros",
       "/rh-exemplo/documentos/modelos",
       "/rh-exemplo/processamento-salarial",
-      "/rh-exemplo/horas-extra",
       "/rh-exemplo/admissao",
       "/rh-exemplo/contratos",
     ],
@@ -355,7 +354,6 @@ export const menuSections: MenuSection[] = [
       { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },
       { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
       { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
-      { to: "/rh-exemplo/horas-extra", icon: Hourglass, labelKey: "rhFluxosC.menu.horasExtra", permission: "users.view" },
       // «Campos de admissão» e «Regras de fim de contrato» não têm entrada no menu: abrem por dois botões no cabeçalho da
       // lista de Pessoas, como no ramo de RH real. Os caminhos continuam em `paths` para o grupo se manter aberto nesses ecrãs.
     ],

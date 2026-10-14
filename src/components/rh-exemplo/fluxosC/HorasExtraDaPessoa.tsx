@@ -8,6 +8,7 @@ import { EstadoHoraExtraBadge } from "./EstadoHoraExtraBadge";
 import { dataCurta, minutosEmHoras } from "./formatosC";
 import { estadoVisivel, saldoDeLimites } from "./horasExtraRegras";
 import { useFluxosC } from "./lojaFluxosC";
+import { useLimiteAnualMin } from "./limitePessoa";
 
 export function HorasExtraDaPessoa({ pessoaId }: { pessoaId: string }) {
   const { t } = useTranslation();
@@ -16,7 +17,8 @@ export function HorasExtraDaPessoa({ pessoaId }: { pessoaId: string }) {
   const pode = useFluxosC((e) => e.podeHE[pessoaId] === true);
   const ano = Number(hojeIso().slice(0, 4));
   const minhas = useMemo(() => todas.filter((h) => h.pessoaId === pessoaId).sort((a, b) => b.data.localeCompare(a.data)), [todas, pessoaId]);
-  const saldo = saldoDeLimites(todas, pessoaId, ano, limites);
+  const limiteAno = useLimiteAnualMin(pessoaId, limites.anoMin);
+  const saldo = saldoDeLimites(todas, pessoaId, ano, { ...limites, anoMin: limiteAno });
   const pct = Math.min(100, Math.round((saldo.anoMin / saldo.limiteAnoMin) * 100));
 
   return (

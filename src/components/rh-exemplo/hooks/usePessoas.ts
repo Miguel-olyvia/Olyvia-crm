@@ -18,7 +18,7 @@ export interface NovaPessoaExemplo {
   dataInicio: string;
   dataFim: string | null;
   reportaAId: string | null;
-  /** O que o painel lateral "Nova pessoa" recolhe além do essencial (contactos, NIF, morada, horas, retribuição, acesso). */
+  /** Tudo o que o painel lateral "Nova pessoa" recolhe, já normalizado (dados pessoais, contactos, morada, contrato, anexos...). */
   extras?: ExtrasNovaPessoa;
 }
 
@@ -96,12 +96,13 @@ export function usePessoas() {
           reportaA: dados.reportaAId,
           conta: x?.criarAcesso ?? false,
           estado: inicio > 0 ? "futuro" : "activo",
-          genero: x?.genero ?? "nao_divulgar",
-          nascimento: x?.dataNascimento ?? "1995-01-01",
-          trabalho: "presencial",
-          horas: x?.horasSemana ?? 40,
-          dias: ["seg", "ter", "qua", "qui", "sex"],
-          pendencias: ["nif", "niss", "conta_numero"],
+          genero: x?.dadosPessoais.genero ?? "nao_divulgar",
+          nascimento: x?.dadosPessoais.data_nascimento ?? "1995-01-01",
+          trabalho: x?.vinculo.tipo_trabalho ?? "presencial",
+          horas: x?.horas?.periodo ?? 40,
+          dias: x?.vinculo.dias_uteis ?? ["seg", "ter", "qua", "qui", "sex"],
+          parcial: x?.vinculo.regime === "tempo_parcial",
+          pendencias: x ? [] : ["nif", "niss", "conta_numero"],
         },
         e.ordem.length,
         e,

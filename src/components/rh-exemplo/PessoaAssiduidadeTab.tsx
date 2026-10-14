@@ -28,6 +28,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { BotaoPicar } from "@/components/rh-exemplo/assiduidade/BotaoPicar";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
+import { HorasExtraDaPessoa } from "@/components/rh-exemplo/fluxosC/HorasExtraDaPessoa";
 import { LocalEtiqueta } from "@/components/rh-exemplo/assiduidade/LocalEtiqueta";
 import { PainelDoDia } from "@/components/rh-exemplo/assiduidade/PainelDoDia";
 import { PessoaRelatorioAssiduidadeMensal } from "@/components/rh-exemplo/PessoaRelatorioAssiduidadeMensal";
@@ -274,6 +275,10 @@ export function PessoaAssiduidadeTab({
         dataAdmissao={dataAdmissao}
         permissoes={permissoes}
       />
+      <section aria-labelledby="rhd-he-ficha-titulo" className="space-y-3" data-testid="rhd-he-ficha">
+        <h3 id="rhd-he-ficha-titulo" className="text-base font-semibold">{t("rhFluxosD.ficha.horasExtra")}</h3>
+        <HorasExtraDaPessoa pessoaId={pessoaId} />
+      </section>
     </div>
   );
 }

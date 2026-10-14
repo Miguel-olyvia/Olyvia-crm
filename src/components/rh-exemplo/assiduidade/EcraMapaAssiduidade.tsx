@@ -25,6 +25,9 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
 import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
+import { HorasExtraNaFila, usePendentesHorasExtra } from "@/components/rh-exemplo/fluxosC/HorasExtraNaFila";
+import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
+import { alertasPorTratar } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { MapaAssiduidadeMes } from "@/components/rh-exemplo/assiduidade/MapaAssiduidadeMes";
 import { PainelDoDiaDePessoa } from "@/components/rh-exemplo/assiduidade/PainelDoDiaDePessoa";
 import { useAssiduidadeDaOrganizacao } from "@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao";
@@ -72,6 +75,9 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 
   const [aberto, setAberto] = useState<{ pessoaId: string; data: string } | null>(null);
+  const horasExtraPendentes = usePendentesHorasExtra();
+  const alertasPendentes = useFluxosB((e) => alertasPorTratar(e.alertas).length);
+  const porTratarNaFila = horasExtraPendentes + alertasPendentes;
 
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
@@ -112,7 +118,18 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
         <Tabs defaultValue="mapa" className="space-y-4">
           <TabsList>
             <TabsTrigger value="mapa">{t("hr.assiduidade.mapa.separador")}</TabsTrigger>
-            <TabsTrigger value="fila">{t("hr.assiduidade.desvios.separador")}</TabsTrigger>
+            <TabsTrigger value="fila" className="gap-2">
+              {t("hr.assiduidade.desvios.separador")}
+              {porTratarNaFila > 0 && (
+                <span
+                  data-testid="rhd-contador-fila"
+                  aria-label={t("rhFluxosD.fila.contadorSeparador", { n: String(porTratarNaFila) })}
+                  className="rounded-full border px-1.5 text-xs tabular-nums"
+                >
+                  {porTratarNaFila}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="faltas">{t("rhExemplo.fal.separador")}</TabsTrigger>
           </TabsList>
 
@@ -151,7 +168,8 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
             </Card>
           </TabsContent>
 
-          <TabsContent value="fila">
+          <TabsContent value="fila" className="space-y-4">
+            <HorasExtraNaFila />
             <FilaAlertasFimDoDia />
           </TabsContent>
 

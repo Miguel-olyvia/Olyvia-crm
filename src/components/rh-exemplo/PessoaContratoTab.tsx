@@ -397,6 +397,7 @@ export function PessoaContratoTab({
               definir={definir}
               podeEditar={podeEditar}
               criandoContrato={criandoContrato}
+              pessoaId={pessoaId}
               erroDe={erroDe}
             />
             {podeEditar && (

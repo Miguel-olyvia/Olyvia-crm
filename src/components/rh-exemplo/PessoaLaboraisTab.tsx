@@ -57,7 +57,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Briefcase, Loader2 } from "lucide-react";
-import { InterruptorHorasExtra } from "@/components/rh-exemplo/fluxosC/InterruptorHorasExtra";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { PessoaAfectacoesSeccao } from "@/components/rh-exemplo/PessoaAfectacoesSeccao";
@@ -345,8 +344,6 @@ export function PessoaLaboraisTab({
         )}
       </CardContent>
     </Card>
-
-    <InterruptorHorasExtra pessoaId={pessoa.id} />
 
     <PessoaCargoCard
       pessoaId={pessoa.id}

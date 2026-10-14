@@ -58,6 +58,7 @@ import type {
 } from "@/components/rh-exemplo/tipos";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { ConfiguracaoHorasExtra } from "@/components/rh-exemplo/fluxosC/ConfiguracaoHorasExtra";
 import { Ban, Loader2, Pencil, Plus, RotateCcw, Tag } from "lucide-react";
 
 /** Os 4 modos, na ordem em que aparecem no Select. */
@@ -682,6 +683,7 @@ export default function RhConfiguracaoVencimento() {
           {podeVerSubsidio && (
             <TabsTrigger value="subsidio">{t("hr.vencimento.abaSubsidio")}</TabsTrigger>
           )}
+          <TabsTrigger value="horas-extra">{t("rhFluxosD.cfg.aba")}</TabsTrigger>
         </TabsList>
 
         {podeVerCodigos && (
@@ -694,6 +696,10 @@ export default function RhConfiguracaoVencimento() {
             <SeccaoSubsidioAlimentacao podeGerir={podeGerirSubsidio} />
           </TabsContent>
         )}
+
+        <TabsContent value="horas-extra" className="mt-4">
+          <ConfiguracaoHorasExtra />
+        </TabsContent>
       </Tabs>
     </div>
   );
