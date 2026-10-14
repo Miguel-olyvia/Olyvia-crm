@@ -2,7 +2,7 @@
 // (o comercial escolhe), o fator de acesso que veio do levantamento, horas, m³, toneladas, o meio (big bags ou
 // contentor) com a ocupação, e o preço. Cada valor pode ser mexido à mão ("ajustado", com "repor o cálculo").
 // O custo, o custo/hora, o C_dep e a margem só se mostram à Direção. O meio é só logística (o C_dep já inclui o
-// big bag ou o contentor); o contentor só aparece quando a Direção o liga (14/10/2026: à espera das Compras).
+// big bag ou o contentor); com o contentor ligado (6 m³ a 380 €, 14/10/2026), a Olyvia propõe-no a partir de 3 m³.
 import { useState } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -129,6 +129,11 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
           </div>
         )}
         {r.ocupacao && <OcupacaoMeio oc={r.ocupacao} />}
+        {r.propostaContentor && !fechado && (
+          <button type="button" onClick={() => ajustar("meio", "contentor")} className="inline-flex min-h-11 items-center text-left text-sm font-medium text-primary">
+            Proposta: {r.propostaContentor}. Usar o contentor
+          </button>
+        )}
       </div>
 
       {/* horas, toneladas e preço */}

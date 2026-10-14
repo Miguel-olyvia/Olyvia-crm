@@ -4,6 +4,9 @@
 // são da obra, à parte); por omissão, margem sobre o preço (a alvo e a mínima da Olyvia), com o markup como
 // opção; o C_dep é "tudo incluído" por m³ e o n.º de big bags ou contentores é só logística; o contentor fica
 // desligado até as Compras enviarem as capacidades; fatores de acesso extra da Direção (por omissão 1,0).
+// Especificação de 14/10/2026 (secção 0): os valores de produção passam a ser os de arranque (PAR_DEM0 e
+// ARTIGOS_DEM0): equipa de 2 a 36,90 €/h, tempos de equipa (metade dos exemplos), contentor de 6 m³ a 380 €
+// (C_dep = 380 ÷ 6 €/m³) e margem de 30%. Os exemplos do documento ficam em PAR_DEM_TESTE e ARTIGOS_DEM_TESTE.
 //
 //   Por artigo:  Custo = Q × [ T_dem × C_h + V_solto × ( C_dep + t_carga × F_acesso × C_h ) ] + Q × C_cons
 //                V_solto = V_insitu × F_emp (ou indicado)
@@ -42,10 +45,10 @@ export const F_EMP0 = 1.4;
 export const vSoltoDe = (a: ArtigoDem) => a.vSolto ?? (a.vInsitu != null ? a.vInsitu * (a.fEmp ?? F_EMP0) : 0);
 
 /**
- * Os artigos de arranque: os 7 do exemplo 2 e a banheira de ferro fundido como artigo próprio.
- * Os consumíveis somam-se por artigo: por agora só a sanita tem 3 €; os outros ficam a 0 € até se afinarem.
+ * Os artigos dos exemplos do documento (tempos em horas por pessoa): os 7 do exemplo 2 e a banheira de ferro
+ * fundido como artigo próprio. Os consumíveis somam-se por artigo: por agora só a sanita tem 3 €.
  */
-export const ARTIGOS_DEM0: ArtigoDem[] = [
+export const ARTIGOS_DEM_TESTE: ArtigoDem[] = [
   { codigo: "DEM-SAN-01", descricao: "Remoção de sanita (inclui tamponamento do esgoto)", unidade: "un", tempo: 0.75, vSolto: 0.06, peso: 25, cons: 3, ativo: true },
   { codigo: "DEM-BID-01", descricao: "Remoção de bidé", unidade: "un", tempo: 0.6, vSolto: 0.05, cons: 0, ativo: true },
   { codigo: "DEM-LAV-01", descricao: "Remoção de lavatório com móvel", unidade: "un", tempo: 0.75, vSolto: 0.15, cons: 0, ativo: true },
@@ -55,6 +58,8 @@ export const ARTIGOS_DEM0: ArtigoDem[] = [
   { codigo: "DEM-PAV-01", descricao: "Pavimento com betonilha (5 cm)", unidade: "m²", tempo: 0.8, vInsitu: 0.06, fEmp: 1.4, cons: 0, ativo: true },
   { codigo: "DEM-BAF-01", descricao: "Remoção de banheira de ferro fundido", unidade: "un", tempo: 3, vSolto: 0.4, peso: 120, cons: 0, ativo: true },
 ];
+/** Os artigos de produção: os mesmos, com o tempo em horas de equipa (metade, até se afinar com obras reais). */
+export const ARTIGOS_DEM0: ArtigoDem[] = ARTIGOS_DEM_TESTE.map((a) => ({ ...a, tempo: a.tempo / 2 }));
 
 /** A tabela parametros_demolicao (só a Direção edita; com histórico). */
 export interface ParDem {
@@ -76,7 +81,7 @@ export interface ParDem {
    * Contentor: desligado até as Compras enviarem as capacidades do operador (3 a 6 m³); entretanto só big bags.
    * Não mexe no preço: o C_dep já inclui o big bag ou o contentor, o transporte, o operador e a e-GAR.
    */
-  contentor: { ativo: boolean; m3: number; t: number };
+  contentor: { ativo: boolean; m3: number; t: number; preco: number; /** propõe-se a partir deste volume (m³) */ proporM3: number };
   /** C_protecao: proteção da zona, consumíveis e limpeza final; um custo da obra, à parte dos artigos. */
   protecao: number;
   /** Margem sobre o preço (por omissão, como no resto da Olyvia) ou markup sobre o custo (os valores do documento). */
@@ -86,6 +91,14 @@ export interface ParDem {
   margem: number | null;
   margemMin: number | null;
 }
+/** Os parâmetros dos exemplos do documento (testes): 25 €/h, 2 h/m³, 70 €/m³ e markup de 35%. */
+export const PAR_DEM_TESTE: ParDem = {
+  custoHora: 25, tCarga: 2, cDep: 70, unDep: "m³", densidade: 1.4,
+  fAcesso: { base: 1, ate2: 1.25, mais3: 1.5 },
+  bigbagM3: 1, bigbagT: 1.2,
+  contentor: { ativo: false, m3: 6, t: 6, preco: 380, proporM3: 3 },
+  protecao: 40, modoPreco: "markup", markup: 0.35, margem: null, margemMin: null,
+};
 /** Um fator extra: aplica-se quando o campo do levantamento tem um destes valores. */
 export interface FatorExtra { k: string; rot: string; campo: string; valores: string[]; f: number }
 export const F_EXTRA0: FatorExtra[] = [
@@ -93,12 +106,16 @@ export const F_EXTRA0: FatorExtra[] = [
   { k: "dist_media", rot: "Big bag ou contentor a 10–30 m da porta", campo: "dist_entulho", valores: ["10 a 30 m"], f: 1 },
   { k: "dist_longa", rot: "Big bag ou contentor a mais de 30 m da porta", campo: "dist_entulho", valores: ["Mais de 30 m"], f: 1 },
 ];
+/**
+ * Os parâmetros de produção (especificação de 14/10, secção 0): equipa de 2 pessoas a 36,90 €/h (a confirmar pelos
+ * RH), carga de 1 h de equipa por m³, contentor de 6 m³ a 380 € (C_dep = 63,33 €/m³, tudo incluído) e margem de 30%.
+ */
 export const PAR_DEM0: ParDem = {
-  custoHora: 25, tCarga: 2, cDep: 70, unDep: "m³", densidade: 1.4,
+  custoHora: 36.9, tCarga: 1, cDep: 380 / 6, unDep: "m³", densidade: 1.4,
   fAcesso: { base: 1, ate2: 1.25, mais3: 1.5 }, fExtra: F_EXTRA0,
   bigbagM3: 1, bigbagT: 1.2,
-  contentor: { ativo: false, m3: 6, t: 6 },
-  protecao: 40, modoPreco: "margem", markup: 0.35, margem: null, margemMin: null,
+  contentor: { ativo: true, m3: 6, t: 6, preco: 380, proporM3: 3 },
+  protecao: 40, modoPreco: "margem", markup: 0.35, margem: 0.3, margemMin: null,
 };
 /** As margens gerais da Olyvia (frações), quando a demolição não tem as suas. */
 export interface MargensOlyvia { min: number; alvo: number }
@@ -145,6 +162,8 @@ export interface ResultadoDem {
   horas: number; horasCarga: number; m3: number; t: number;
   demolicao: number; carga: number; deposicao: number; consumiveis: number; protecao: number;
   meio: Meio; n: number; nBigbags: number; nContentores: number;
+  /** A sugestão de contentor (só logística: o preço não muda), ou null. */
+  propostaContentor: string | null;
   custo: number; precoCalc: number; preco: number;
   /** A margem do preço final, a alvo e a mínima usadas (frações), e se o preço ficou abaixo da mínima. */
   margem: number; margemAlvo: number; margemMin: number; abaixoMin: boolean;
@@ -220,6 +239,9 @@ export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: Par
   const n = meio === "nenhum" ? 0 : aj.n ?? (meio === "contentor" ? nCt : nBb);
   // "nenhum" (o cliente trata do entulho): sem deposição
   const deposicao = meio === "nenhum" ? 0 : deposicaoCalc;
+  // com o contentor ligado e entulho que chegue para o justificar, a Olyvia propõe-no (o comercial decide)
+  const propostaContentor = meio === "bigbag" && P.contentor.ativo && nCt > 0 && m3 >= (P.contentor.proporM3 ?? 0) - 1e-9
+    ? `${nCt} ${nCt === 1 ? "contentor" : "contentores"} de ${num(P.contentor.m3)} m³ (${num(nCt * (P.contentor.preco ?? 0))} €) em vez de ${nBb} big bags; o preço não muda` : null;
 
   const custo = demolicao + carga + deposicao + consumiveis + protecao;
   const margemAlvo = P.margem ?? olyvia.alvo, margemMin = P.margemMin ?? olyvia.min;
@@ -231,7 +253,7 @@ export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: Par
     artigos: contas, fAcesso: acesso.f, origemAcesso: acesso.origem,
     horas: r2(horas + horasCarga), horasCarga: r2(horasCarga), m3: r2(m3), t: Math.round(t * 1000) / 1000,
     demolicao: r2(demolicao), carga: r2(carga), deposicao: r2(deposicao), consumiveis: r2(consumiveis), protecao: r2(protecao),
-    meio, n, nBigbags: nBb, nContentores: nCt,
+    meio, n, nBigbags: nBb, nContentores: nCt, propostaContentor,
     custo: r2(custo), precoCalc: r2(precoCalc), preco,
     margem, margemAlvo, margemMin, abaixoMin: custo > 0 && margem < margemMin - 1e-9,
     ajustados: (Object.keys(aj) as ChaveAjuste[]).filter((k) => aj[k] != null),
@@ -264,6 +286,8 @@ export const CAMPOS_PAR: { k: string; rot: string; un: string; ler: (P: ParDem) 
   { k: "fAcesso.mais3", rot: "Fator de acesso · 3.º ou acima sem elevador", un: "×", ler: (P) => P.fAcesso.mais3, por: (P, v) => { P.fAcesso.mais3 = v; } },
   { k: "bigbagM3", rot: "Big bag · volume", un: "m³", ler: (P) => P.bigbagM3, por: (P, v) => { P.bigbagM3 = v; } },
   { k: "bigbagT", rot: "Big bag · peso máximo", un: "t", ler: (P) => P.bigbagT, por: (P, v) => { P.bigbagT = v; } },
+  { k: "contentor.preco", rot: "Contentor · preço (referência do C_dep)", un: "€", ler: (P) => P.contentor.preco, por: (P, v) => { P.contentor.preco = v; } },
+  { k: "contentor.proporM3", rot: "Contentor · propor a partir de", un: "m³", ler: (P) => P.contentor.proporM3, por: (P, v) => { P.contentor.proporM3 = v; } },
   { k: "contentor.m3", rot: "Contentor · volume", un: "m³", ler: (P) => P.contentor.m3, por: (P, v) => { P.contentor.m3 = v; } },
   { k: "contentor.t", rot: "Contentor · peso máximo", un: "t", ler: (P) => P.contentor.t, por: (P, v) => { P.contentor.t = v; } },
   { k: "protecao", rot: "Proteção, consumíveis e limpeza (por obra)", un: "€", ler: (P) => P.protecao, por: (P, v) => { P.protecao = v; } },
