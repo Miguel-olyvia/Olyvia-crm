@@ -13,23 +13,24 @@ import { aValidar } from "./CamposFase";
 import { eur, nfmt, servicosVisita, type Negocio, type SvcId } from "./motor";
 import { type Ctx } from "./pecas";
 import { useCatalogo } from "./v2/catalogoStore";
-import { caminho, type Catalogo, type Produto } from "./v2/catalogoModelo";
+import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { ContadorQtd } from "./ContadorQtd";
-import { Ilustracao, ilustracaoDe, ilustracaoDoProduto } from "./ilustracoes";
+import { Ilustracao, ilustracaoDe } from "./ilustracoes";
 import {
   nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
 } from "./produtosVisita";
 import {
-  categorias, faltaEmPalavras, filtrarProdutos, marcasDe, nomeCurto, objetoDaPergunta, ordenarParaObjeto, resumoNecessidades, tituloObrigacao,
+  categorias, faltaEmPalavras, filtrarProdutos, ilustracaoDoCatalogo, marcasDe, mostraCartoes, nomeCurto, objetoDaPergunta, ordenarParaObjeto, passoGuiado,
+  resumoNecessidades, tituloObrigacao, tocarProdutoGuiado,
 } from "./necessidades";
 
 const PAGINA = 12;
 type P = Ctx & { d: Negocio; simples?: boolean };
 
 const nomeSvc = (S: Ctx["S"], sid: SvcId) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
-const ilustracaoNo = (K: Catalogo, p: Produto) => ilustracaoDoProduto(p, caminho(K.arvore, p.no));
+const ilustracaoNo = (K: Catalogo, p: Produto) => ilustracaoDoCatalogo(K.arvore, p);
 
 /* ------------------------------------------------------------------ peças */
 /** Um produto do Catálogo para escolher: ilustração, nome, marca, preço por unidade e "traz instalação". */
@@ -155,8 +156,8 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
   const [aberto, setAberto] = useState(false);
   const [foco, setFoco] = useState<string | null>(null);
   const focoEscolher = useRef<HTMLParagraphElement>(null);
-  const precisa = !o.pergunta || resp === "nao";
-  const mostraEscolha = !ro && precisa && o.estado !== "cliente" && (!escolhidos.length || aberto);
+  const passo = passoGuiado(o);
+  const mostraEscolha = !ro && mostraCartoes(passo, aberto);
   const produtos = useMemo(() => ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS), obj?.comArtigo ?? null), [K, o.no, obj?.comArtigo]);
   const prodPorId = new Set((v.prod ?? []).map((p) => p.id));
   const primeiro = escolhidos[0] && K.produtos.find((x) => x.id === escolhidos[0].id);
@@ -177,14 +178,9 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
     if (r === "nao" && resp !== "nao") setFoco("escolher");
   };
   const tocar = (p: Produto) => {
-    if (prodPorId.has(p.id)) return run(() => A.tirarProduto(d.id, p.id));
-    run(() => {
-      A.produto(d.id, p, qtdSugerida(K, p, servicosVisita(d), v.med));
-      // escolher um produto para um serviço com pergunta por responder é dizer "não mantém"
-      if (o.pergunta && !v.manter?.[o.sid]) A.manter(d.id, o.sid, "nao");
-    });
-    setAberto(false);
-    setFoco(p.id);
+    const juntar = !prodPorId.has(p.id);
+    run(() => { tocarProdutoGuiado(A, K, d, o, p); });
+    if (juntar) { setAberto(false); setFoco(p.id); }
   };
 
   const estado = o.estado === "mantem" ? "Mantém o que tem: não entra produto."
@@ -193,7 +189,7 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
 
   return (
     <section id={`obr-${o.sid}-${d.id}`} aria-labelledby={hid}
-      className={cn("rounded-2xl border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5", erro ? "border-destructive" : "border-border")}>
+      className={cn("border-t border-border pt-5 first:border-t-0 first:pt-0", erro && "border-l-4 border-l-destructive pl-3")}>
       <div className="flex items-center gap-4">
         <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-muted/70"><Ilustracao k={img} className="h-12 w-12" /></span>
         <div className="min-w-0 flex-1">
@@ -232,21 +228,21 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
           rotulo={obj ? `Escolha ${obj.comArtigo}` : `Escolha o produto de ${(o.caminho.split(" › ").pop() ?? "").toLowerCase()}`} />
       )}
 
-      {!ro && precisa && o.estado !== "cliente" && (escolhidos.length > 0 || clienteFornece) && (
+      {!ro && (passo === "escolhido" || (passo === "escolher" && clienteFornece && !escolhidos.length)) && (
         <div className="mt-3 flex flex-wrap gap-x-5">
-          {escolhidos.length > 0 && (
+          {passo === "escolhido" && (
             <button type="button" aria-expanded={aberto} onClick={() => setAberto(!aberto)}
               className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
               {aberto ? "Fechar a escolha" : "Juntar ou trocar"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto && "rotate-180")} aria-hidden="true" />
             </button>
           )}
-          {clienteFornece && !escolhidos.length && (
+          {passo === "escolher" && clienteFornece && !escolhidos.length && (
             <button type="button" onClick={() => run(() => A.clienteCompra(d.id, o.sid, textoClienteCompra(o, nome)))}
               className="min-h-11 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Ou: o cliente compra</button>
           )}
         </div>
       )}
-      {!ro && o.estado === "cliente" && (
+      {!ro && passo === "cliente" && (
         <button type="button" onClick={() => run(() => A.clienteCompra(d.id, o.sid, null))}
           className="mt-2 min-h-11 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Afinal escolher do Catálogo</button>
       )}
@@ -281,7 +277,7 @@ function OutrosProdutos({ ctx, K }: { ctx: P; K: Catalogo }) {
     </button>
   );
   return (
-    <section id={`${uid}-g`} aria-labelledby={`${uid}-t`} className="rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5">
+    <section id={`${uid}-g`} aria-labelledby={`${uid}-t`} className="border-t border-border pt-5 animate-in fade-in-0 duration-150">
       <div className="flex items-center justify-between gap-3">
         <h4 id={`${uid}-t`} className="text-lg font-semibold">Outros produtos</h4>
         <button type="button" aria-expanded onClick={() => setAberto(false)} className="min-h-11 px-2 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Fechar</button>
@@ -325,13 +321,13 @@ export function ProdutosVisita(ctx: P) {
   const outros = prod.filter((p) => dono(p) < 0);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {obr.map((o, i) => (
         <BlocoObrigacao key={o.sid} o={o} ctx={ctx} K={K} clienteFornece={clienteFornece} escolhidos={prod.filter((p) => dono(p) === i)} />
       ))}
       {!obr.length && !prod.length && <p className="text-[15px] text-muted-foreground">Os serviços escolhidos não pedem produto.{ro ? "" : " Pode juntar outros abaixo."}</p>}
       {outros.length > 0 && (
-        <section aria-labelledby={`out-esc-${d.id}`} className="rounded-2xl border border-border bg-card px-4 pt-4 shadow-[var(--shadow-sm)] sm:px-5">
+        <section aria-labelledby={`out-esc-${d.id}`} className="border-t border-border pt-5">
           <h4 id={`out-esc-${d.id}`} className="text-lg font-semibold">Outros produtos escolhidos</h4>
           <ul className="mt-1 divide-y divide-border">
             {outros.map((p) => <Escolhido key={p.id} p={p} ctx={ctx} K={K} ro={ro} clienteFornece={clienteFornece} />)}

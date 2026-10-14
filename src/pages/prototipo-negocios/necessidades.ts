@@ -6,10 +6,10 @@
 // · O resumo ("6 serviços · 3 produtos · 1.240 € estimado") e o que falta, em palavras.
 import { CATALOGO, normal, type LinhaCat } from "./catalogo";
 import { juntarDivisoes } from "./campos";
-import { LINHAS, garantirServico, r2, type Estado, type MedKey, type Negocio, type Servico, type SvcId } from "./motor";
+import { LINHAS, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import { caminho, oficioDe, oficios, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
-import { ativosDoPacote, precoProduto, servicosTrazidos, type Obrigacao } from "./produtosVisita";
-import { iconeDoServico, type IconeServicoKey } from "./ilustracoes";
+import { ativosDoPacote, precoProduto, qtdSugerida, servicosTrazidos, type Obrigacao } from "./produtosVisita";
+import { iconeDoServico, ilustracaoDoProduto, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
 
 /* ------------------------------------------------------------------ textos */
 /** O nome do serviço sem o ruído da tabela: "Mão de Obra Construção de Nicho (valor por unidade)" → "Construção de nicho";
@@ -74,9 +74,9 @@ export interface TileServico {
   linhas: LinhaCat[];
 }
 
-/** Só para mostrar: um serviço do Catálogo ainda sem ficha em S.svc (não grava nada). */
+/** Só para mostrar: um serviço do Catálogo ainda sem ficha em S.svc (não grava nada nem copia o estado). */
 export function servicoLeitura(S: Estado, sid: SvcId): Servico | null {
-  return S.svc[sid] ?? garantirServico({ ...S, svc: { ...S.svc } }, sid);
+  return S.svc[sid] ?? garantirServico({ svc: {} } as unknown as Estado, sid);
 }
 
 /** A quantidade sugerida ao juntar um serviço do Catálogo: das medidas quando faz sentido, senão a habitual nos orçamentos. */
@@ -217,6 +217,41 @@ export function marcasDe(produtos: Produto[]): string[] {
   const m = new Map<string, number>();
   for (const p of produtos) if (p.marca) m.set(p.marca, (m.get(p.marca) ?? 0) + 1);
   return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt")).map(([n]) => n);
+}
+
+/** A ilustração de um produto do Catálogo: o img; senão a subcategoria, o nome e o ramo da árvore. */
+export const ilustracaoDoCatalogo = (arvore: No[], p: Produto): IlustracaoKey => ilustracaoDoProduto(p, caminho(arvore, p.no));
+
+/* ------------------------------------------------------------------ a escolha guiada */
+/**
+ * Em que passo está um serviço que pede produto ("Sanita"):
+ * perguntar ("O cliente mantém a sanita?") → mantem (Sim) | escolher (Não: os cartões das sanitas) → escolhido;
+ * ou cliente (o cliente compra, quando fornece materiais).
+ */
+export type PassoGuiado = "perguntar" | "mantem" | "escolher" | "escolhido" | "cliente";
+export function passoGuiado(o: Pick<Obrigacao, "estado">): PassoGuiado {
+  switch (o.estado) {
+    case "pergunta": return "perguntar";
+    case "mantem": return "mantem";
+    case "produto": return "escolhido";
+    case "cliente": return "cliente";
+    default: return "escolher";
+  }
+}
+/** Se os cartões dos produtos se mostram: só no passo "escolher", ou quando se pediu "Juntar ou trocar". */
+export const mostraCartoes = (passo: PassoGuiado, aberto: boolean) => passo === "escolher" || (passo === "escolhido" && aberto);
+
+type AcoesNec = Pick<ReturnType<typeof acoes>, "produto" | "tirarProduto" | "manter">;
+/**
+ * Tocar num cartão da escolha guiada: junta o produto com a quantidade sugerida (das medidas) ou, se já lá está, tira-o.
+ * Escolher com a pergunta por responder é o mesmo que dizer "Não, vai trocar". Devolve o que fez.
+ */
+export function tocarProdutoGuiado(A: AcoesNec, K: Catalogo, d: Negocio, o: Pick<Obrigacao, "sid" | "pergunta">, p: Produto): "juntou" | "tirou" {
+  const v = d.visita;
+  if ((v.prod ?? []).some((x) => x.id === p.id)) { A.tirarProduto(d.id, p.id); return "tirou"; }
+  A.produto(d.id, p, qtdSugerida(K, p, servicosVisita(d), v.med));
+  if (o.pergunta && !v.manter?.[o.sid]) A.manter(d.id, o.sid, "nao");
+  return "juntou";
 }
 
 /* ------------------------------------------------------------------ o resumo */
