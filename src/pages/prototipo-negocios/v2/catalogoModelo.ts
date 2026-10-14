@@ -7,7 +7,8 @@
 import { CATALOGO, CATALOGO_TODO, OFICIOS, itemCatalogo, normal, type LinhaCat } from "../catalogo";
 import { LINHAS, r2, type Estado, type MedKey, type Medidas, type SvcId } from "../motor";
 import { RECEITAS } from "../receitas";
-import { ARTIGOS_DEM0, PAR_DEM0, type ArtigoDem, type MudancaDem, type ParDem } from "../entulho";
+import { ARTIGOS_DEM0, PAR_DEM0, type ArtigoDem, type EntulhoProd, type EntulhoSvc, type MudancaDem, type ParDem } from "../entulho";
+import { aplicarEntulhoPadrao } from "../entulhoPadrao";
 import {
   HOJE, custoReceita, margemSobrePreco, mesesAntes, mesesEntre, precoReceita, receitaDe,
   type Custos, type ReceitaV2, type UsoCons,
@@ -41,6 +42,8 @@ export interface Produto {
   desc?: string;
   /** A subcategoria real (ex.: "Toalheiros"). */
   sub?: string;
+  /** O entulho que gera quando é retirado (volume solto e peso, por unidade; 14/10). Sem ele, o do tipo (entulhoPadrao.ts). */
+  entulho?: EntulhoProd;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };
@@ -81,6 +84,8 @@ export interface Catalogo {
   artigoDoServico?: Record<SvcId, string>;
   parDem?: ParDem;
   histDem?: MudancaDem[];
+  /** Se cada serviço gera entulho e de onde vem (14/10; entulho.ts). Em falta = o por omissão (entulhoPadrao.ts). */
+  entulhoServico?: Record<SvcId, EntulhoSvc>;
   unidades: string[];
   marcas: string[];
   fornecedores: string[];
@@ -524,7 +529,7 @@ export function catalogo0(): Catalogo {
     };
   });
   const uniq = (v: string[]) => [...new Set(v.filter(Boolean))];
-  return {
+  const K: Catalogo = {
     arvore, produtos, pacotes, classe, exigeProduto, qtdDe, perguntaManter,
     icone: { ...ICONE_PACOTE, ...ICONE_MUDELAR },
     artigosDem: structuredClone(ARTIGOS_DEM0), artigoDoServico: { ...ARTIGO_SVC0 }, parDem: structuredClone(PAR_DEM0), histDem: [],
@@ -532,6 +537,9 @@ export function catalogo0(): Catalogo {
     marcas: uniq(produtos.map((p) => p.marca)).sort((a, b) => a.localeCompare(b, "pt")),
     fornecedores: uniq(produtos.map((p) => p.fornecedor)).sort((a, b) => a.localeCompare(b, "pt")),
   };
+  // o entulho (14/10): o modo de cada serviço e o entulho de cada produto, por omissão
+  aplicarEntulhoPadrao(K);
+  return K;
 }
 
 /** O nó de um serviço: o da classificação, ou o ofício com o mesmo nome. */

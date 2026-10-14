@@ -8,6 +8,7 @@ import {
   mudarQtd, precoProduto, servicosDaVisita, textoFalta, textoProduto, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
+import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
@@ -153,6 +154,8 @@ export interface Orcamento {
   precosMan?: Record<string, number>;
   /** Demolição e entulho (orçamentos novos, com o Catálogo ligado): os artigos, os ajustes à mão e o último cálculo (entulho.ts). */
   demolicao?: { itens: ItemDem[]; aj: AjustesDem; r?: ResultadoDem };
+  /** A demolição foi desligada à mão: o entulho dos serviços já não a liga sozinho (14/10). */
+  semDemolicao?: true;
   /** O prazo previsto mudado à mão: os dias de cada tarefa (pelo id do serviço, ou "demolicao"); ganttOrcamento.ts. */
   prazo?: Record<string, number>;
 }
@@ -540,11 +543,15 @@ export function ligarDemolicao(o: Orcamento, antes?: Orcamento["demolicao"]) {
 /** Refaz a conta e a linha da demolição (só com a demolição ligada e o Catálogo ligado; antes de enviar). */
 export function sincronizarDemolicao(d: Negocio, _S: Estado) {
   const o = d.orc, K = catalogoLigado();
-  if (!o || !o.demolicao || !K || o.enviada) return;
-  o.linhas = o.linhas.filter((l) => !(l.t === "mat" && l.d === LINHA_DEMOLICAO));
+  if (!o || !K || o.enviada) return;
   const P = K.parDem ?? PAR_DEM0;
+  // o entulho dos serviços (entulhoPadrao.ts): sem a demolição ligada, liga-se sozinha (menos se a desligaram à mão)
+  if (!o.demolicao && !o.semDemolicao && volumesDasLinhas(o.linhas, K, d.visita, P).length) ligarDemolicao(o);
+  if (!o.demolicao) return;
+  const vols = volumesDasLinhas(o.linhas, K, d.visita, P);
+  o.linhas = o.linhas.filter((l) => !(l.t === "mat" && l.d === LINHA_DEMOLICAO));
   // sem margens próprias, a demolição usa a mínima e a alvo gerais da Olyvia
-  const r = calcularDemolicao(o.demolicao.itens, K.artigosDem ?? ARTIGOS_DEM0, P, fatorAcesso(d.f, P), o.demolicao.aj, { min: _S.cfg.min / 100, alvo: _S.cfg.alvo / 100 });
+  const r = calcularDemolicao(o.demolicao.itens, K.artigosDem ?? ARTIGOS_DEM0, P, fatorAcesso(d.f, P), o.demolicao.aj, { min: _S.cfg.min / 100, alvo: _S.cfg.alvo / 100 }, vols);
   o.demolicao.r = r;
   if (r.preco > 0 || r.custo > 0) o.linhas.push({ t: "mat", d: LINHA_DEMOLICAO, custo: r.custo, preco: r.preco });
   sugerirPrazo(d, _S); // as horas da demolição mexem no prazo
@@ -1010,8 +1017,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     demolicaoLigar(id: number, on: boolean) {
       const d = deal(id), o = d.orc!;
       if (o.enviada) return;
-      if (on) { ligarDemolicao(o); sincronizarDemolicao(d, S); }
+      if (on) { delete o.semDemolicao; ligarDemolicao(o); sincronizarDemolicao(d, S); }
       else if (o.demolicao) {
+        o.semDemolicao = true;
         for (const it of o.demolicao.itens) {
           const sv = it.de ? garantirServico(S, it.de) : null;
           if (it.de && sv) o.linhas.splice(Math.max(0, o.linhas.findIndex((l) => l.t === "mat")), 0, { t: "svc", sid: it.de, q: it.q, cu: r2(custoUn(sv, S)), pu: sv.preco });
