@@ -71,9 +71,10 @@ function fimPrevisto(inicio?: string, dias?: string): string {
   while (n > 1) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n--; }
   return d.toLocaleDateString("pt-PT");
 }
-const token = (d: Negocio, tipo: string) => (d.id * 7919 + tipo.length * 104729).toString(36).toUpperCase();
 /** Os tipos de documento com link do portal. */
 export const TIPOS_DOC = ["proposta", "contrato", "fatura", "encomenda", "adenda"] as const;
+// pelo lugar do tipo na lista (antes era pelo comprimento do nome: "proposta" e "contrato", ambos com 8 letras, davam o mesmo código)
+const token = (d: Negocio, tipo: string) => (d.id * 7919 + (TIPOS_DOC.indexOf(tipo as (typeof TIPOS_DOC)[number]) + 1) * 104729).toString(36).toUpperCase();
 /** O código do link de um documento (o negócio e o tipo). */
 export const tokenDoc = token;
 /** O link do portal do cliente. No protótipo abre o portal neste mesmo endereço (os dados vivem neste browser). */
