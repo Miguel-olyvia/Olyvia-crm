@@ -45,13 +45,14 @@ describe("RH de exemplo: lista de pessoas", () => {
 });
 
 describe("RH de exemplo: ficha da pessoa (painel lateral)", () => {
-  it("a ligação direta abre a lista com a ficha em painel, com o nome, a linha Filial · Cargo e as sete abas", () => {
+  it("a ligação direta abre a lista com a ficha em painel, com o nome, a linha Filial · Cargo e as oito abas (a última é o Custo)", () => {
     renderEm("/rh-exemplo/pessoas/p-rui");
     const ficha = screen.getByRole("dialog");
     expect(within(ficha).getByRole("heading", { level: 1, name: /Rui Amaral/ })).toBeInTheDocument();
     expect(within(ficha).getByText("Filial Lisboa · Gerente de Loja")).toBeInTheDocument();
     const abas = within(ficha).getAllByRole("tab");
-    expect(abas).toHaveLength(7);
+    expect(abas).toHaveLength(8);
+    expect(abas[7]).toHaveTextContent("Custo");
     expect(abas[0]).toHaveAttribute("aria-selected", "true");
   });
 

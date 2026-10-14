@@ -19,10 +19,11 @@
  * que e tambem o que a RPC vai ligar. Fica editavel porque quem trabalha em
  * dois sitios no mesmo dia e o caso central deste modulo, e nao a excepcao.
  *
- * NA APRESENTACAO NAO SE PEDE LOCALIZACAO
- * ----------------------------------------
- * No modulo real a picagem so fica registada com a localizacao do dispositivo. Aqui picar tem de funcionar sempre,
- * sem pedir permissoes ao navegador: a picagem fica sem coordenadas e o resto (sentido, local, hora) e igual.
+ * A LOCALIZACAO E SIMULADA, E EXIGIDA (fluxo 5)
+ * -------------------------------------------
+ * Picar exige dizer onde se esta: «Estou no local» ou «Estou fora do local», num seletor de exemplo (nunca se pede
+ * localizacao ao navegador). Sem escolher, o botao recusa. A mais de 200 m do local a picagem grava na mesma e
+ * fica marcada «fora do local» para o RH ver no alerta do fim do dia.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -37,7 +38,9 @@ import {
 import { LogIn, LogOut, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
+import { EscolhaDeLocalizacao } from "@/components/rh-exemplo/fluxosB/alertas/EscolhaDeLocalizacao";
 import { agoraHoraLocal, horaCurta, sentidoSeguinte } from "@/components/rh-exemplo/lib/assiduidade";
+import { avaliarPicagem, referenciaDoLocal, type EscolhaLocalizacao } from "@/components/rh-exemplo/lib/picagemLocal";
 import { planeadoQueContemHora } from "@/components/rh-exemplo/lib/planeadoDoDia";
 import type { Picagem, SentidoPicagem } from "@/components/rh-exemplo/tiposAssiduidade";
 import type { HorarioPlaneado, LocalTrabalho } from "@/components/rh-exemplo/tipos";
@@ -74,7 +77,8 @@ export function BotaoPicar({
   const [agora, setAgora] = useState(() => agoraHoraLocal());
   const [localEscolhido, setLocalEscolhido] = useState<string | null>(null);
   const [anuncio, setAnuncio] = useState("");
-  const [aLocalizar, setALocalizar] = useState(false);
+  const [onde, setOnde] = useState<EscolhaLocalizacao | null>(null);
+  const [ultimaForaDoLocal, setUltimaForaDoLocal] = useState<number | null>(null);
   const [alerta, setAlerta] = useState<{ texto: string; seq: number } | null>(null);
   const tocado = useRef(false);
 
@@ -98,26 +102,28 @@ export function BotaoPicar({
   const eEntrada = sentido === "entrada";
 
   const picar = async () => {
-    setALocalizar(true);
-    const resultado = await localizacaoActual().finally(() => setALocalizar(false));
-    if (resultado.estado !== "ok") {
-      const mensagem = t(CHAVE_ERRO_LOCALIZACAO[resultado.estado]);
+    const referencia = referenciaDoLocal(locais.find((local) => local.id === localEfectivo) ?? null);
+    const avaliacao = avaliarPicagem(onde, referencia);
+    if (avaliacao.ok === false) {
+      const mensagem = t(avaliacao.erro);
       setAlerta((anterior) => ({ texto: mensagem, seq: (anterior?.seq ?? 0) + 1 }));
       toast.error(mensagem);
       return;
     }
     setAlerta(null);
+    const { localizacao } = avaliacao;
     const erro = await onPicar({
       sentido,
       localId: localEfectivo,
-      latitude: resultado.posicao?.latitude ?? null,
-      longitude: resultado.posicao?.longitude ?? null,
-      precisaoMetros: resultado.posicao?.precisao ?? null,
+      latitude: localizacao.latitude,
+      longitude: localizacao.longitude,
+      precisaoMetros: null,
     });
     if (erro) {
       toast.error(t(erro));
       return;
     }
+    setUltimaForaDoLocal(localizacao.fora ? localizacao.distanciaM : null);
     const hora = agoraHoraLocal();
     const mensagem = eEntrada
       ? t("hr.assiduidade.picar.entradaRegistada", { hora })
@@ -132,25 +138,22 @@ export function BotaoPicar({
 
   return (
     <div className="space-y-3">
+      <EscolhaDeLocalizacao valor={onde} onChange={setOnde} idPrefixo={idPrefixo} />
       <Button
         type="button"
         size="lg"
         className="h-16 w-full text-base"
-        disabled={aGravar || aLocalizar}
+        disabled={aGravar}
         onClick={() => void picar()}
       >
-        {aGravar || aLocalizar ? (
+        {aGravar ? (
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
         ) : eEntrada ? (
           <LogIn className="mr-2 h-5 w-5" />
         ) : (
           <LogOut className="mr-2 h-5 w-5" />
         )}
-        {aLocalizar
-          ? t("hr.assiduidade.picar.aLocalizar")
-          : eEntrada
-            ? t("hr.assiduidade.picar.entrar")
-            : t("hr.assiduidade.picar.sair")}
+        {eEntrada ? t("hr.assiduidade.picar.entrar") : t("hr.assiduidade.picar.sair")}
       </Button>
 
       <p className="text-center text-sm text-muted-foreground tabular-nums">
@@ -192,39 +195,15 @@ export function BotaoPicar({
         {anuncio}
       </p>
       {alerta && (
-        <p key={alerta.seq} role="alert" className="sr-only">
+        <p key={alerta.seq} role="alert" className="text-sm font-medium text-destructive">
           {alerta.texto}
+        </p>
+      )}
+      {ultimaForaDoLocal !== null && (
+        <p className="rounded-md border border-amber-600 p-2 text-sm font-medium text-amber-800 dark:text-amber-300">
+          {t("rhExemplo.pic.marcadaForaDoLocal", { metros: String(ultimaForaDoLocal) })}
         </p>
       )}
     </div>
   );
-}
-
-interface Localizacao {
-  latitude: number;
-  longitude: number;
-  precisao: number | null;
-}
-
-type ResultadoLocalizacao =
-  | { estado: "ok"; posicao: Localizacao | null }
-  | { estado: "recusada" }
-  | { estado: "semSinal" }
-  | { estado: "indisponivel" };
-
-const CHAVE_ERRO_LOCALIZACAO: Record<
-  Exclude<ResultadoLocalizacao["estado"], "ok">,
-  string
-> = {
-  recusada: "hr.assiduidade.picar.localizacaoRecusada",
-  semSinal: "hr.assiduidade.picar.localizacaoSemSinal",
-  indisponivel: "hr.assiduidade.picar.localizacaoIndisponivel",
-};
-
-/**
- * A localizacao na apresentacao: nunca se pede ao navegador. Devolve sempre "ok", sem coordenadas, para o botao
- * de picar funcionar em qualquer dispositivo e sem janelas de permissao.
- */
-async function localizacaoActual(): Promise<ResultadoLocalizacao> {
-  return { estado: "ok", posicao: null };
 }

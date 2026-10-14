@@ -25,6 +25,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccaoFimContratoDialog } from "@/components/rh-exemplo/fimContrato/AccaoFimContratoDialog";
 import { ExcepcaoContratoDialog } from "@/components/rh-exemplo/fimContrato/ExcepcaoContratoDialog";
 import { FimContratoHistorico } from "@/components/rh-exemplo/fimContrato/FimContratoHistorico";
+import { IndicacaoDoResponsavel } from "@/components/rh-exemplo/fimContrato/IndicacaoDoResponsavel";
+import { SinoFimContrato } from "@/components/rh-exemplo/fimContrato/SinoFimContrato";
 import { usePessoaContratoFim } from "@/components/rh-exemplo/hooks/usePessoaContratoFim";
 import { useTranslation } from "@/hooks/useTranslation";
 import { duracaoIgualInicial } from "@/components/rh-exemplo/lib/fimContrato";
@@ -116,6 +118,8 @@ export function FimContratoCard({ organizationId, vinculo, podeEditar, onMudou }
           </Linha>
         </dl>
 
+        <IndicacaoDoResponsavel vinculoId={vinculo.id} />
+
         {podeEditar && (
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setARenovar(true)} disabled={fim.saving}>
@@ -145,6 +149,7 @@ export function FimContratoCard({ organizationId, vinculo, podeEditar, onMudou }
           {t("hr.fimContrato.card.titulo")}
         </CardTitle>
         <div className="flex flex-wrap items-center gap-2">
+          <SinoFimContrato />
           {regra && regra.no_ambito && (
             <Badge variant={regra.fonte === "personalizado" ? "default" : "secondary"} className="font-normal">
               {t("hr.fimContrato.card.fonte")}: {t(`hr.fimContrato.fonte.${regra.fonte}`)}

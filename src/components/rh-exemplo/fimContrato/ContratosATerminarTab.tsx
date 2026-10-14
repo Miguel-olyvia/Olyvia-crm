@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { SinoFimContrato } from "@/components/rh-exemplo/fimContrato/SinoFimContrato";
 import { useContratosATerminar } from "@/components/rh-exemplo/hooks/useContratosATerminar";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { OQueAcontece } from "@/components/rh-exemplo/lib/fimContrato";
@@ -58,6 +59,8 @@ export function ContratosATerminarTab({ organizationId }: ContratosATerminarTabP
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-3 pb-3">
         <CardTitle className="text-base">{t("hr.fimContrato.lista.titulo")}</CardTitle>
+        <div className="flex flex-wrap items-end gap-3">
+          <SinoFimContrato />
         <div className="space-y-1.5">
           <Label htmlFor="hr-fim-contrato-lista-dias" className="text-xs">
             {t("hr.fimContrato.lista.filtroDias")}
@@ -75,6 +78,7 @@ export function ContratosATerminarTab({ organizationId }: ContratosATerminarTabP
               ))}
             </SelectContent>
           </Select>
+        </div>
         </div>
       </CardHeader>
       <CardContent className={contratos.length > 0 ? "p-0" : undefined}>

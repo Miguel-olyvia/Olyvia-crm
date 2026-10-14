@@ -22,6 +22,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
+import { VoltarAPessoas } from "@/components/rh-exemplo/VoltarAPessoas";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -229,6 +230,7 @@ export default function RhConfiguracaoAdmissao() {
 
   return (
     <div className="space-y-6">
+      <VoltarAPessoas />
       <div>
         <h1 className="text-2xl font-bold">{t("hr.admissao.configTitulo")}</h1>
         <p className="text-muted-foreground">{t("hr.admissao.configSubtitulo")}</p>

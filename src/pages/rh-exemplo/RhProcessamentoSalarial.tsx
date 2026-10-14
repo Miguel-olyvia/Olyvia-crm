@@ -25,6 +25,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { ProcessamentoVisaoGeralTab } from "@/components/rh-exemplo/processamento/ProcessamentoVisaoGeralTab";
+import { ProcessamentoFluxoTab } from "@/components/rh-exemplo/fluxosC/ProcessamentoFluxoTab";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -66,11 +67,16 @@ export default function RhProcessamentoSalarial() {
       <Tabs value={abaActiva} onValueChange={mudarAba}>
         <TabsList>
           <TabsTrigger value="visao-geral">{t("hr.vencimento.abaVisaoGeral")}</TabsTrigger>
+          <TabsTrigger value="calculo">{t("rhFluxosC.proc.aba")}</TabsTrigger>
           <TabsTrigger value="configuracao">{t("hr.vencimento.abaConfiguracao")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="visao-geral" className="mt-4">
           <ProcessamentoVisaoGeralTab />
+        </TabsContent>
+
+        <TabsContent value="calculo" className="mt-4">
+          <ProcessamentoFluxoTab />
         </TabsContent>
 
         <TabsContent value="configuracao" className="mt-4">

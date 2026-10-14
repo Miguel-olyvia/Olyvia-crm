@@ -12,6 +12,9 @@ import { utilizadoresPerfisTranslations } from "@/translations/utilizadoresPerfi
 import { rhExemploTranslations } from "@/translations/rhExemplo";
 import { rhExemploFormTranslations } from "@/translations/rhExemploForm";
 import { rhExemploMenuTranslations } from "@/translations/rhExemploMenu";
+import { rhExemploFluxosCTranslations } from "@/translations/rhExemploFluxosC";
+import { rhExemploFluxosATranslations } from "@/translations/rhExemploFluxosA";
+import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -62,6 +65,21 @@ Object.keys(rhExemploFormTranslations).forEach((lang) => {
 // Menu e ecrãs de gestão de RH de exemplo (assiduidade, ausências, centros, modelos, processamento salarial, convite).
 Object.keys(rhExemploMenuTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploMenuTranslations[lang as keyof typeof rhExemploMenuTranslations] };
+});
+
+// Frente A dos fluxos de RH de exemplo: botões de configuração, Cargos, janela do responsável e separador Custo.
+Object.keys(rhExemploFluxosATranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosATranslations[lang as keyof typeof rhExemploFluxosATranslations] };
+});
+
+// Frente C: horas extra, banco de horas e cálculo do processamento salarial de exemplo (`rhFluxosC.*`).
+Object.keys(rhExemploFluxosCTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosCTranslations[lang as keyof typeof rhExemploFluxosCTranslations] };
+});
+
+// Frente B: horário por tipo e versões, picagem com localização, alertas do fim do dia e faltas (`rhExemplo.hor/pic/fal.*`).
+Object.keys(rhExemploFluxosBTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosBTranslations[lang as keyof typeof rhExemploFluxosBTranslations] };
 });
 
 export const useTranslation = () => {

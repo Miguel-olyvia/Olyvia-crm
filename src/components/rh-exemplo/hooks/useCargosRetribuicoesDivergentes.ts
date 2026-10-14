@@ -1,23 +1,19 @@
-/** Na apresentação as retribuições estão alinhadas com os cargos: nada diverge. */
-import type { Periodicidade } from "@/components/rh-exemplo/tipos";
+/** As retribuições em vigor que não batem com o salário do cargo, calculadas sobre os dados de exemplo (só leitura). */
+import { useMemo } from "react";
+import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
+import { retribuicoesDivergentes, type DivergenciaRetribuicao } from "@/components/rh-exemplo/lib/cargosDivergencias";
 
-export interface CargoRetribuicaoDivergente {
-  pessoa_id: string;
-  pessoa_nome: string;
-  cargo_id: string;
-  cargo_nome: string;
-  retribuicao_id: string;
-  valor_base: number;
-  periodicidade: Periodicidade;
-  valido_de: string;
-  esperado_valor_base: number;
-  esperado_periodicidade: Periodicidade;
-}
+export type CargoRetribuicaoDivergente = DivergenciaRetribuicao;
 
 export function useCargosRetribuicoesDivergentes(): {
   divergencias: CargoRetribuicaoDivergente[];
   isLoading: boolean;
   error: Error | null;
 } {
-  return { divergencias: [], isLoading: false, error: null };
+  const fichas = useEstadoRh((e) => e.fichas);
+  const cargos = useEstadoRh((e) => e.cargos);
+  const periodos = useEstadoRh((e) => e.cargosPeriodos);
+  const divergencias = useMemo(() => retribuicoesDivergentes(fichas, cargos, periodos, hojeIso()), [fichas, cargos, periodos]);
+  return { divergencias, isLoading: false, error: null };
 }

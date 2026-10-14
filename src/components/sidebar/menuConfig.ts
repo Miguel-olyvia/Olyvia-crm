@@ -48,6 +48,7 @@ import {
   Clock,
   FolderOpen,
   MapPin,
+  Hourglass,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -312,6 +313,7 @@ export const menuSections: MenuSection[] = [
       "/rh-exemplo/centros",
       "/rh-exemplo/documentos/modelos",
       "/rh-exemplo/processamento-salarial",
+      "/rh-exemplo/horas-extra",
       "/rh-exemplo/admissao",
       "/rh-exemplo/contratos",
     ],
@@ -322,10 +324,9 @@ export const menuSections: MenuSection[] = [
       { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },
       { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
       { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
-      // No ramo de RH real estes dois ecrãs abrem por botões dentro da lista de pessoas; aqui têm entrada própria
-      // para se chegar a eles sem mexer na lista.
-      { to: "/rh-exemplo/admissao/configuracao", icon: ClipboardCheck, labelKey: "sidebar.rhExemploAdmissao", permission: "users.view" },
-      { to: "/rh-exemplo/contratos/configuracao", icon: FileCheck, labelKey: "sidebar.rhExemploFimContrato", permission: "users.view" },
+      { to: "/rh-exemplo/horas-extra", icon: Hourglass, labelKey: "rhFluxosC.menu.horasExtra", permission: "users.view" },
+      // «Campos de admissão» e «Regras de fim de contrato» não têm entrada no menu: abrem por dois botões no cabeçalho da
+      // lista de Pessoas, como no ramo de RH real. Os caminhos continuam em `paths` para o grupo se manter aberto nesses ecrãs.
     ],
   },
   {
@@ -333,12 +334,13 @@ export const menuSections: MenuSection[] = [
     id: "rh-exemplo-eu",
     icon: CalendarDays,
     labelKey: "sidebar.rhExemploEu",
-    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos"],
+    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos", "/rh-exemplo/minhas-horas-extra"],
     permissions: ["users.view"],
     items: [
       { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
       { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
+      { to: "/rh-exemplo/minhas-horas-extra", icon: Hourglass, labelKey: "rhFluxosC.menu.minhasHorasExtra", permission: "users.view" },
     ],
   },
   {

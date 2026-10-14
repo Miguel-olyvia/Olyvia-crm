@@ -18,6 +18,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { Loader2 } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
+import { VoltarAPessoas } from "@/components/rh-exemplo/VoltarAPessoas";
 import { CamposRegraFimContrato } from "@/components/rh-exemplo/fimContrato/CamposRegraFimContrato";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { usePermissions } from "@/components/rh-exemplo/hooks/usePermissions";
@@ -86,6 +87,7 @@ export default function RhRegrasFimContrato() {
 
   return (
     <div className="space-y-6">
+      <VoltarAPessoas />
       <div>
         <h1 className="text-2xl font-bold">{t("hr.fimContrato.config.titulo")}</h1>
         <p className="text-muted-foreground">{t("hr.fimContrato.config.descricao")}</p>

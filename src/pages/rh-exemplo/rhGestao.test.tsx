@@ -104,8 +104,8 @@ describe("RH de exemplo: processamento salarial", () => {
     renderEm("/rh-exemplo/processamento-salarial", "/rh-exemplo/processamento-salarial", <RhProcessamentoSalarial />);
     expect(screen.getByRole("heading", { level: 1, name: "Processamento Salarial" })).toBeInTheDocument();
     const abas = screen.getAllByRole("tab");
-    expect(abas).toHaveLength(2);
-    fireEvent.mouseDown(abas[1], { button: 0 });
+    expect(abas).toHaveLength(3);
+    fireEvent.mouseDown(abas[2], { button: 0 });
     await waitFor(() => expect(screen.getAllByText("Prémio de assiduidade").length).toBeGreaterThan(0));
     semChavesPorTraduzir();
   });
@@ -146,13 +146,18 @@ describe("RH de exemplo: acções que escrevem em memória", () => {
     vi.restoreAllMocks();
   });
 
-  it("o botão de picar regista a picagem de hoje sem pedir localização ao navegador", async () => {
+  it("picar exige dizer onde se está (seletor de exemplo, sem pedir localização ao navegador)", async () => {
     renderEm("/rh-exemplo/assiduidade", "/rh-exemplo/assiduidade", <RhMeuPonto />);
     const antes = lerGestao().picagens.filter((p) => p.pessoa_id === "p-sofia").length;
-    fireEvent.click(screen.getByRole("button", { name: /Registar (entrada|saida|saída)/ }));
+    const picar = () => fireEvent.click(screen.getByRole("button", { name: /Registar (entrada|saida|saída)/ }));
+    picar();
+    expect(await screen.findByText("Escolha onde está para poder picar.")).toBeInTheDocument();
+    expect(lerGestao().picagens.filter((p) => p.pessoa_id === "p-sofia")).toHaveLength(antes);
+    fireEvent.click(screen.getByRole("radio", { name: "Estou no local" }));
+    picar();
     await waitFor(() => expect(lerGestao().picagens.filter((p) => p.pessoa_id === "p-sofia")).toHaveLength(antes + 1));
     const ultima = lerGestao().picagens.filter((p) => p.pessoa_id === "p-sofia").at(-1)!;
-    expect(ultima.latitude).toBeNull();
+    expect(ultima.latitude).not.toBeNull();
     expect(ultima.origem).toBe("web");
   });
 

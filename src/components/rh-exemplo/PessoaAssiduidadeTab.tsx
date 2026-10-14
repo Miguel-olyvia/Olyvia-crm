@@ -27,6 +27,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { BotaoPicar } from "@/components/rh-exemplo/assiduidade/BotaoPicar";
+import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
 import { LocalEtiqueta } from "@/components/rh-exemplo/assiduidade/LocalEtiqueta";
 import { PainelDoDia } from "@/components/rh-exemplo/assiduidade/PainelDoDia";
 import { PessoaRelatorioAssiduidadeMensal } from "@/components/rh-exemplo/PessoaRelatorioAssiduidadeMensal";
@@ -176,6 +177,8 @@ export function PessoaAssiduidadeTab({
           </CardContent>
         </Card>
       )}
+
+      {souAPessoa && <JustificarFalhaDeMarcacao pessoaId={pessoaId} />}
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">

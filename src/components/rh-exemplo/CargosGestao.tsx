@@ -393,6 +393,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
               {t("hr.cargos.tituloPagina")}
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">{t("hr.cargos.subtitulo")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("rhA.cargos.nuncaApaga")}</p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center gap-2">

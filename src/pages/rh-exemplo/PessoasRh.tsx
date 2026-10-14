@@ -3,7 +3,7 @@
  * linhas compactas, chips de filtro e um unico botao primario ("Nova pessoa"). Clicar numa linha abre a ficha num painel
  * lateral por cima da lista (nao muda de pagina); "Nova pessoa" abre outro painel lateral.
  *
- * Quatro sub-separadores: Pessoas, Organograma, Funcoes e (com `hr.pessoas.vinculos.view`) Contratos a terminar.
+ * Quatro sub-separadores: Pessoas, Organograma, Cargos e (com `hr.pessoas.vinculos.view`) Contratos a terminar.
  * O separador vive no URL (`?tab=`). A ficha vive no caminho (`/rh-exemplo/pessoas/:id`, que continua a ser uma ligacao
  * direta: abre a lista com a ficha aberta) e abrir, passar a outra pessoa ou fechar atualiza o endereco sem remontar a pagina.
  *
@@ -11,8 +11,8 @@
  * contrato" sao ciclos de vida separados. A coluna do contrato so se mostra a quem tem `hr.pessoas.vinculos.view`.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -39,7 +39,7 @@ import { cn } from "@/lib/utils";
 const SUBTABS = [
   { value: "pessoas", labelKey: "hr.subtabs.pessoas" },
   { value: "organograma", labelKey: "hr.subtabs.organograma" },
-  { value: "funcoes", labelKey: "hr.subtabs.funcoes" },
+  { value: "cargos", labelKey: "hr.subtabs.cargos" },
   // So com hr.pessoas.vinculos.view: a lista de contratos a terminar le contratos.
   { value: "contratos", labelKey: "hr.subtabs.contratos" },
 ] as const;
@@ -62,8 +62,15 @@ interface CabecalhoProps {
   aoCriar: () => void;
 }
 
+/** Os dois ecrãs de configuração que já não têm entrada no menu: abrem daqui, ao lado de «Nova pessoa». */
+const BOTOES_CONFIGURACAO = [
+  { caminho: "/rh-exemplo/admissao/configuracao", chave: "rhA.pessoas.camposAdmissao" },
+  { caminho: "/rh-exemplo/contratos/configuracao", chave: "rhA.pessoas.regrasFimContrato" },
+] as const;
+
 function CabecalhoPessoasRh({ podeCriar, resumo, aoCriar }: CabecalhoProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="space-y-1">
@@ -74,12 +81,20 @@ function CabecalhoPessoasRh({ podeCriar, resumo, aoCriar }: CabecalhoProps) {
         <p className="text-muted-foreground">{t("rhForm.lista.sub")}</p>
         <p className="text-sm tabular-nums text-muted-foreground">{resumo}</p>
       </div>
-      {podeCriar && (
-        <Button type="button" onClick={aoCriar} className={cn("min-h-11 gap-2", FOCO)}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          {t("hr.pessoas.new")}
-        </Button>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {BOTOES_CONFIGURACAO.map(({ caminho, chave }) => (
+          <Button key={caminho} type="button" variant="outline" onClick={() => navigate(caminho)} className={cn("min-h-11 gap-2", FOCO)}>
+            <Settings className="h-4 w-4" aria-hidden="true" />
+            {t(chave)}
+          </Button>
+        ))}
+        {podeCriar && (
+          <Button type="button" onClick={aoCriar} className={cn("min-h-11 gap-2", FOCO)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {t("hr.pessoas.new")}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -176,7 +191,7 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
         <TabsContent value="organograma" className="mt-0">
           <PessoasOrganogramaTab pessoas={pessoas} loading={loading} error={error} />
         </TabsContent>
-        <TabsContent value="funcoes" className="mt-0">
+        <TabsContent value="cargos" className="mt-0">
           <PessoasFuncoesTab pessoas={pessoas} loading={loading} />
         </TabsContent>
         {podeVerVinculos && (

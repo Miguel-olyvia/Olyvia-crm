@@ -16,6 +16,7 @@ import { usePessoaFotografia } from "@/components/rh-exemplo/hooks/usePessoaFoto
 import { modoDeEnvioDoConvite } from "@/components/rh-exemplo/modoEnvioConvite";
 import type { Pessoa } from "@/components/rh-exemplo/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
+import { AbaCusto } from "@/components/rh-exemplo/custo/AbaCusto";
 import { AbaAusencias, AbaContratos, AbaDocumentos, AbaPlaneamento } from "./AbasTempo";
 import { AbaLaborais, AbaPessoais, AbaVisaoGeral, type AbaProps } from "./AbasPessoa";
 import { AcoesFicha } from "./AcoesFicha";
@@ -132,6 +133,7 @@ function ConteudoAba(p: AbaProps & { aoMudarAba: (aba: string) => void; aoMudarC
       <TabsContent value="planeamento" className="mt-0"><AbaPlaneamento {...p} /></TabsContent>
       <TabsContent value="ausencias" className="mt-0"><AbaAusencias {...p} /></TabsContent>
       <TabsContent value="documentos" className="mt-0"><AbaDocumentos {...p} /></TabsContent>
+      <TabsContent value="custo" className="mt-0"><AbaCusto {...p} /></TabsContent>
     </>
   );
 }

@@ -23,7 +23,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
-import { FilaDesvios } from "@/components/rh-exemplo/assiduidade/FilaDesvios";
+import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
+import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
 import { MapaAssiduidadeMes } from "@/components/rh-exemplo/assiduidade/MapaAssiduidadeMes";
 import { PainelDoDiaDePessoa } from "@/components/rh-exemplo/assiduidade/PainelDoDiaDePessoa";
 import { useAssiduidadeDaOrganizacao } from "@/components/rh-exemplo/hooks/useAssiduidadeDaOrganizacao";
@@ -112,6 +113,7 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
           <TabsList>
             <TabsTrigger value="mapa">{t("hr.assiduidade.mapa.separador")}</TabsTrigger>
             <TabsTrigger value="fila">{t("hr.assiduidade.desvios.separador")}</TabsTrigger>
+            <TabsTrigger value="faltas">{t("rhExemplo.fal.separador")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="mapa">
@@ -150,11 +152,11 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
           </TabsContent>
 
           <TabsContent value="fila">
-            <FilaDesvios
-              desvios={organizacao.desvios}
-              nomePorPessoaId={nomePorPessoaId}
-              onAbrirDia={(pessoaId, data) => setAberto({ pessoaId, data })}
-            />
+            <FilaAlertasFimDoDia />
+          </TabsContent>
+
+          <TabsContent value="faltas">
+            <FaltasPainel />
           </TabsContent>
         </Tabs>
       )}

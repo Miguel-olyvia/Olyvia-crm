@@ -105,7 +105,7 @@ describe("RH de exemplo: Nova pessoa em painel lateral", () => {
     const titulo = await screen.findByRole("heading", { level: 1, name: "Teresa Nogueira" });
     const ficha = titulo.closest<HTMLElement>('[role="dialog"]');
     expect(ficha).not.toBeNull();
-    expect(within(ficha as HTMLElement).getAllByRole("tab")).toHaveLength(7);
+    expect(within(ficha as HTMLElement).getAllByRole("tab")).toHaveLength(8);
     expect(within(ficha as HTMLElement).getByText(/^.+ · Vendedor\/a$/)).toBeInTheDocument();
   });
 });
