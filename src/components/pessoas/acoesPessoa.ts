@@ -1,7 +1,9 @@
 // As ações da ficha da pessoa, em memória: funções puras e imutáveis. O dia de hoje (AAAA-MM-DD) chega sempre
 // por parâmetro e nada lê o relógio. Um id que não existe (ou uma ação que não se aplica) devolve o próprio estado.
+import { errosDiaHora, exigeDiaHora, textoAgenda } from "./chamadaPassos";
 import { indiceEtapa } from "./etapaPessoa";
 import { DIAS_DO_PASSO, RESULTADOS_ATENDIDOS } from "./opcoesPessoa";
+import { marcarVisita } from "./visitaPessoa";
 import type { EstadoPessoas, ItemAtividade, MotivoPerda, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto } from "./pessoasTipos";
 
 /** A parte do estado que as ações mudam. */
@@ -12,6 +14,14 @@ export interface DadosChamada {
   nota: string;
   passo: PassoChamada;
   hoje: string;
+  /** AAAA-MM-DD e HH:MM da visita ou da próxima chamada (só nos passos que os pedem). */
+  data?: string;
+  hora?: string;
+  /** Onde é a visita (opcional). */
+  onde?: string;
+  /** O motivo, no passo "perder"; o contexto diz o passo do percurso e o papel (como em `perder`). */
+  motivo?: MotivoPerda;
+  contexto?: ContextoPerda;
 }
 
 const MS_DIA = 86_400_000;
@@ -29,29 +39,67 @@ const existe = (estado: EstadoAcoes, id: string): boolean => estado.pessoas.some
 
 const novoId = (estado: EstadoAcoes, tipo: string): string => `novo-${tipo}-${estado.atividade.length + 1}`;
 
-/**
- * Regista uma chamada: zera os dias desde o último contacto e define o próximo. Só um resultado "atendeu" tira a pessoa
- * de "Voltou a contactar" (quem não atendeu, ou tinha o número errado, ainda não foi respondida).
- */
-export function registarChamada<E extends EstadoAcoes>(estado: E, id: string, dados: DadosChamada): E {
-  if (!existe(estado, id)) return estado;
-  const dias = DIAS_DO_PASSO[dados.passo];
-  const respondeu = RESULTADOS_ATENDIDOS.includes(dados.resultado);
+/** O dia (e a hora) do próximo contacto que a chamada deixa: o escolhido, ou hoje mais os dias do passo; sem nenhum, `null`. */
+function proximoDaChamada(d: DadosChamada): { dia: string | null; hora: string | undefined } {
+  if (d.passo === "ligarData") return { dia: d.data ?? null, hora: d.hora };
+  const dias = DIAS_DO_PASSO[d.passo];
+  return { dia: dias === null ? null : somarDias(d.hoje, dias), hora: undefined };
+}
+
+/** A chamada em si: o último contacto, o resultado, o próximo contacto e a linha na atividade. */
+function chamadaBase<E extends EstadoAcoes>(estado: E, id: string, d: DadosChamada): E {
+  const respondeu = RESULTADOS_ATENDIDOS.includes(d.resultado);
+  const proximo = proximoDaChamada(d);
   const item: ItemAtividade = {
-    id: novoId(estado, "chamada"), pessoaId: id, tipo: "chamada", titulo: "", chaveTitulo: `pessoasPagina.result.${dados.resultado}`,
-    detalhe: dados.nota.trim(), quando: dados.hoje, exemplo: false,
+    id: novoId(estado, "chamada"), pessoaId: id, tipo: "chamada", titulo: "", chaveTitulo: `pessoasPagina.result.${d.resultado}`,
+    detalhe: d.nota.trim(), quando: d.hoje, exemplo: false,
   };
   return {
     ...estado,
     pessoas: mudarPessoa(estado.pessoas, id, (p) => ({
-      ...p,
-      ultimoContactoDias: 0,
-      resultadoContacto: dados.resultado,
-      proximoContacto: dias === null ? null : somarDias(dados.hoje, dias),
+      ...p, ultimoContactoDias: 0, resultadoContacto: d.resultado, proximoContacto: proximo.dia, proximoHora: proximo.hora,
     })),
     atividade: [item, ...estado.atividade],
     contactadas: respondeu && !estado.contactadas.includes(id) ? [...estado.contactadas, id] : estado.contactadas,
   };
+}
+
+/** O passo só se aplica com o que pede: dia e hora válidos (a visita ainda não a uma perdida) e, para perder, o motivo. */
+function passoAplicavel(estado: EstadoAcoes, id: string, d: DadosChamada): boolean {
+  if (exigeDiaHora(d.passo)) {
+    const erros = errosDiaHora(d.data ?? "", d.hora ?? "", d.hoje);
+    if (erros.data || erros.hora) return false;
+  }
+  if (d.passo === "marcarVisita" && estado.pessoas.find((p) => p.id === id)?.perdida) return false;
+  return d.passo !== "perder" || d.motivo !== undefined;
+}
+
+/** O que o passo escolhido faz a seguir à chamada: marca a visita, agenda a chamada ou perde a pessoa. */
+function aplicarPasso<E extends EstadoAcoes>(estado: E, id: string, d: DadosChamada): E {
+  const quando = textoAgenda(d.data ?? "", d.hora ?? "");
+  if (d.passo === "marcarVisita") {
+    const detalhe = [quando, d.onde?.trim()].filter(Boolean).join(" · ");
+    return marcarVisita(estado, id, { data: d.data ?? "", hora: d.hora ?? "", nota: "", servico: "", detalhe }, d.hoje);
+  }
+  if (d.passo === "ligarData") {
+    const item: ItemAtividade = {
+      id: novoId(estado, "agenda"), pessoaId: id, tipo: "historico", titulo: "", chaveTitulo: "pessoasPagina.activity.callScheduled",
+      detalhe: quando, quando: d.hoje, exemplo: false,
+    };
+    return { ...estado, atividade: [item, ...estado.atividade] };
+  }
+  return d.passo === "perder" && d.motivo ? perder(estado, id, d.motivo, d.hoje, d.contexto) : estado;
+}
+
+/**
+ * Regista uma chamada: zera os dias desde o último contacto e define o próximo. Só um resultado "atendeu" tira a pessoa
+ * de "Voltou a contactar" (quem não atendeu, ou tinha o número errado, ainda não foi respondida). O passo escolhido
+ * acrescenta o seu efeito (visita marcada, chamada agendada ou perdida) e a sua linha na atividade; se não se aplica
+ * (falta o dia ou a hora, ou o motivo), o estado fica como está.
+ */
+export function registarChamada<E extends EstadoAcoes>(estado: E, id: string, dados: DadosChamada): E {
+  if (!existe(estado, id) || !passoAplicavel(estado, id, dados)) return estado;
+  return aplicarPasso(chamadaBase(estado, id, dados), id, dados);
 }
 
 /** Adia o próximo contacto: hoje mais 1, 3 ou 7 dias. */
@@ -92,7 +140,7 @@ export function perder<E extends EstadoAcoes>(estado: E, id: string, motivo: Mot
   };
   return {
     ...estado,
-    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, perdida: { motivo, data: hoje, passo: Math.max(0, indice) }, proximoContacto: null })),
+    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, perdida: { motivo, data: hoje, passo: Math.max(0, indice) }, proximoContacto: null, proximoHora: undefined })),
     atividade: [item, ...estado.atividade],
   };
 }

@@ -83,10 +83,57 @@ describe("registarChamada", () => {
   });
 
   it.each([
-    ["ligarAmanha", "2026-10-14"], ["ligarHoje", "2026-10-13"], ["visitaOuOrcamento", "2026-10-15"], ["nenhum", null],
+    ["ligarAmanha", "2026-10-14"], ["ligarHoje", "2026-10-13"], ["nenhum", null],
   ] as const)("o passo %s define o próximo contacto %s", (passo, esperado) => {
     const p = registarChamada(estado(), "a", { ...chamada, passo }).pessoas.find((x) => x.id === "a")!;
     expect(p.proximoContacto).toBe(esperado);
+    expect(p.proximoHora).toBeUndefined();
+  });
+
+  describe("passos com dia e hora", () => {
+    const visita = { ...chamada, passo: "marcarVisita", data: "2026-10-16", hora: "09:30", onde: " Rua A, Lisboa " } as const;
+
+    it("marcar visita: etapa Visita, dia e hora no próximo contacto, e duas linhas na atividade (visita à frente)", () => {
+      const novo = registarChamada(estado([pessoa("a", { etapa: "nova" })]), "a", visita);
+      expect(novo.pessoas[0]).toMatchObject({
+        etapa: "visitaMarcada", proximoContacto: "2026-10-16", proximoHora: "09:30", resultadoContacto: "atendeuInteressado", ultimoContactoDias: 0,
+      });
+      expect(novo.atividade).toHaveLength(2);
+      expect(novo.atividade[0]).toMatchObject({ chaveTitulo: "pessoasPagina.activity.visitBooked", detalhe: "16/10 · 09:30 · Rua A, Lisboa" });
+      expect(novo.atividade[1]).toMatchObject({ tipo: "chamada", detalhe: "Quer visita" });
+      expect(novo.contactadas).toEqual(["a"]);
+    });
+
+    it("marcar visita sem dia, com dia passado, sem hora ou numa perdida não grava nada", () => {
+      const antes = estado();
+      expect(registarChamada(antes, "a", { ...visita, data: "" })).toBe(antes);
+      expect(registarChamada(antes, "a", { ...visita, data: "2026-10-12" })).toBe(antes);
+      expect(registarChamada(antes, "a", { ...visita, hora: "" })).toBe(antes);
+      const perdida = estado([pessoa("a", { perdida: { motivo: "preco", data: "2026-10-01", passo: 1 } })]);
+      expect(registarChamada(perdida, "a", visita)).toBe(perdida);
+    });
+
+    it("ligar numa data e hora: guarda dia e hora e acrescenta a chamada agendada à atividade", () => {
+      const novo = registarChamada(estado(), "a", { ...chamada, resultado: "atendeuMaisTarde", passo: "ligarData", data: "2026-10-14", hora: "15:00" });
+      expect(novo.pessoas[0]).toMatchObject({ proximoContacto: "2026-10-14", proximoHora: "15:00", etapa: "emContacto" });
+      expect(novo.atividade[0]).toMatchObject({ chaveTitulo: "pessoasPagina.activity.callScheduled", detalhe: "14/10 · 15:00" });
+      expect(novo.atividade).toHaveLength(2);
+    });
+
+    it("sem interesse + perder: regista a chamada e perde a lead com o motivo; sem motivo não grava", () => {
+      const dados = { ...chamada, resultado: "semInteresse", passo: "perder", motivo: "preco", contexto: { passo: 0, papel: "lead" } } as const;
+      const novo = registarChamada(estado(), "a", dados);
+      expect(novo.pessoas[0].perdida).toMatchObject({ motivo: "preco", data: "2026-10-13", passo: 0 });
+      expect(novo.pessoas[0].proximoContacto).toBeNull();
+      expect(novo.atividade.map((i) => i.chaveTitulo)).toEqual(["pessoasPagina.activity.lost", "pessoasPagina.result.semInteresse"]);
+      const antes = estado();
+      expect(registarChamada(antes, "a", { ...dados, motivo: undefined })).toBe(antes);
+    });
+
+    it("a visita vale também para um cliente (continua cliente)", () => {
+      const novo = registarChamada(estado(), "c", visita);
+      expect(novo.pessoas.find((x) => x.id === "c")).toMatchObject({ proximoContacto: "2026-10-16", proximoHora: "09:30", etapa: "cliente" });
+    });
   });
 
   it("não altera o estado de entrada e ignora um id que não existe", () => {

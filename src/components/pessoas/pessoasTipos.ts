@@ -46,6 +46,8 @@ export interface Pessoa {
   resultadoContacto?: ResultadoContacto;
   /** AAAA-MM-DD. */
   proximoContacto?: string | null;
+  /** HH:MM do próximo contacto, quando foi marcado com hora (uma visita ou "ligar numa data"). */
+  proximoHora?: string;
   /** AAAA-MM-DD: cliente ou lead desde. */
   desde?: string;
   /** Marcada como perdida na ficha: o motivo, o dia e o passo. Só as leads se perdem. */
@@ -57,7 +59,8 @@ export type ResultadoContacto = "atendeuInteressado" | "atendeuMaisTarde" | "nao
 /** O resultado como se filtra e se mostra: os cinco da chamada e "Sem contacto" (nunca houve chamada). */
 export type ResultadoOuNenhum = ResultadoContacto | "semContacto";
 export type MotivoPerda = "preco" | "adiou" | "outraEmpresa" | "semResposta" | "naoProcurava";
-export type PassoChamada = "ligarAmanha" | "ligarHoje" | "visitaOuOrcamento" | "nenhum";
+/** O próximo passo depois de uma chamada. A visita e o "ligar numa data" pedem dia e hora; "perder" pede o motivo. */
+export type PassoChamada = "marcarVisita" | "ligarData" | "ligarAmanha" | "ligarHoje" | "perder" | "nenhum";
 
 export type TipoAtividade = "chamada" | "nota" | "email" | "historico";
 

@@ -2,7 +2,6 @@
 // passa à etapa Visita e a atividade regista-o). Um contexto liga o botão de cada cartão de submissão ao diálogo único da
 // página; sem o provider (outros usos do cartão) o botão não existe.
 import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
-import { AlertCircle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -11,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import { CamposDataHora, MensagemErro } from "./CamposDataHora";
 import { MarcarVisitaContext, type PedidoVisita } from "./marcarVisitaContexto";
 import { MAX_NOTA_VISITA, validarVisita, type DadosVisita, type ErroVisita } from "./visitaPessoa";
 
@@ -38,26 +38,11 @@ function CamposVisita({ id, campos, erro, hoje, campoData, aoMudar }: CamposVisi
   const erroData = erro === "dataVazia" || erro === "dataPassada";
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-data`}>{t(`${V}date`)}</Label>
-          <Input
-            ref={campoData} id={`${id}-data`} type="date" min={hoje} value={campos.data} aria-invalid={erroData ? true : undefined}
-            aria-describedby={erroData ? `${id}-data-erro` : undefined} className={cn("min-h-11", FOCO, erroData && "border-destructive")}
-            onChange={(e) => aoMudar({ data: e.target.value })}
-          />
-          {erroData && <MensagemErro id={`${id}-data-erro`} texto={t(`${V}error.${erro}`)} />}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`${id}-hora`}>{t(`${V}time`)}</Label>
-          <Input
-            id={`${id}-hora`} type="time" value={campos.hora} aria-invalid={erro === "horaInvalida" ? true : undefined}
-            aria-describedby={erro === "horaInvalida" ? `${id}-hora-erro` : undefined} className={cn("min-h-11", FOCO)}
-            onChange={(e) => aoMudar({ hora: e.target.value })}
-          />
-          {erro === "horaInvalida" && <MensagemErro id={`${id}-hora-erro`} texto={t(`${V}error.horaInvalida`)} />}
-        </div>
-      </div>
+      <CamposDataHora
+        id={id} data={campos.data} hora={campos.hora} hoje={hoje} campoData={campoData} rotuloData={t(`${V}date`)} rotuloHora={t(`${V}time`)}
+        erroData={erroData ? t(`${V}error.${erro}`) : null} erroHora={erro === "horaInvalida" ? t(`${V}error.horaInvalida`) : null}
+        aoMudar={aoMudar}
+      />
       <div className="space-y-1.5">
         <Label htmlFor={`${id}-nota`}>{t(`${V}note`)}</Label>
         <Input
@@ -96,15 +81,6 @@ function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita
         <Button type="submit" className={cn("min-h-11", FOCO)}>{t(`${V}submit`)}</Button>
       </DialogFooter>
     </form>
-  );
-}
-
-function MensagemErro({ id, texto }: { id: string; texto: string }) {
-  return (
-    <p id={id} className="flex items-center gap-1.5 text-sm text-destructive">
-      <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-      {texto}
-    </p>
   );
 }
 

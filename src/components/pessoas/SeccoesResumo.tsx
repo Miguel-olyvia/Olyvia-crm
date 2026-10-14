@@ -19,8 +19,8 @@ import { MarcaExemplo, SeloResultado } from "./SelosPessoa";
 
 const P = "pessoasPagina.";
 
-/** O prazo com ícone e texto: ultrapassado, hoje ou futuro; sem prazo, o texto a dizê-lo. */
-export function Prazo({ prazo, hoje }: { prazo: string | null; hoje: string }) {
+/** O prazo com ícone e texto: ultrapassado, hoje ou futuro (com a hora, se foi marcada); sem prazo, o texto a dizê-lo. */
+export function Prazo({ prazo, hoje, hora }: { prazo: string | null; hoje: string; hora?: string }) {
   const { t } = useTranslation();
   const texto = textoPrazoPasso(t, prazo, hoje);
   if (texto === null) return <p className="text-[15px] text-muted-foreground">{t(`${P}sum.noDeadline`)}</p>;
@@ -29,7 +29,7 @@ export function Prazo({ prazo, hoje }: { prazo: string | null; hoje: string }) {
   return (
     <p className={cn("inline-flex items-center gap-1.5 text-[15px] text-foreground", dias < 0 && "font-medium")}>
       <Icone className={cn("h-4 w-4 shrink-0", dias < 0 && "text-destructive")} aria-hidden="true" />
-      {texto}
+      {hora ? `${texto} · ${hora}` : texto}
     </p>
   );
 }
@@ -61,7 +61,7 @@ export function SeccaoPasso({ resumo, hoje }: { resumo: ResumoPessoa; hoje: stri
       <div className="space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
         <p className="text-[15px] text-muted-foreground">{t(`${P}next.${passo.id}.hint`)}</p>
-        <Prazo prazo={passo.prazo} hoje={hoje} />
+        <Prazo prazo={passo.prazo} hoje={hoje} hora={passo.prazo !== null && passo.prazo === pessoa.proximoContacto ? pessoa.proximoHora : undefined} />
       </div>
     );
   }

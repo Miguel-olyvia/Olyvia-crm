@@ -1,4 +1,5 @@
 import { pessoasAcoesTranslations } from "./pessoasAcoes";
+import { pessoasChamadaTranslations } from "./pessoasChamada";
 import { pessoasFichaTranslations } from "./pessoasFicha";
 import { pessoasFichaResumoTranslations } from "./pessoasFichaResumo";
 import { pessoasListaTranslations } from "./pessoasLista";
@@ -113,6 +114,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasFichaResumoTranslations.en,
     ...pessoasFichaTranslations.en,
     ...pessoasAcoesTranslations.en,
+    ...pessoasChamadaTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -220,5 +222,6 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasFichaResumoTranslations.pt,
     ...pessoasFichaTranslations.pt,
     ...pessoasAcoesTranslations.pt,
+    ...pessoasChamadaTranslations.pt,
   },
 };

@@ -14,11 +14,11 @@ export const RESULTADOS_FILTRO: readonly ResultadoOuNenhum[] = [...RESULTADOS_CO
 
 export const MOTIVOS_PERDA: readonly MotivoPerda[] = ["preco", "adiou", "outraEmpresa", "semResposta", "naoProcurava"];
 
-export const PASSOS_CHAMADA: readonly PassoChamada[] = ["ligarAmanha", "ligarHoje", "visitaOuOrcamento", "nenhum"];
+export const PASSOS_CHAMADA: readonly PassoChamada[] = ["marcarVisita", "ligarData", "ligarAmanha", "ligarHoje", "perder", "nenhum"];
 
-/** Quantos dias depois de hoje fica o próximo contacto, para cada passo (o da visita ou do orçamento é uma suposição). */
+/** Quantos dias depois de hoje fica o próximo contacto; `null` quando o dia vem de outro lado (o escolhido) ou não há. */
 export const DIAS_DO_PASSO: Record<PassoChamada, number | null> = {
-  ligarAmanha: 1, ligarHoje: 0, visitaOuOrcamento: 2, nenhum: null,
+  marcarVisita: null, ligarData: null, ligarAmanha: 1, ligarHoje: 0, perder: null, nenhum: null,
 };
 
 /** O máximo de caracteres da nota de uma chamada. */

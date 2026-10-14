@@ -15,6 +15,8 @@ export interface DadosVisita {
   nota: string;
   /** O serviço de que pediu a visita (para o registo). */
   servico: string;
+  /** O texto do registo, quando quem marca já o tem escrito (a chamada: "16/10 · 09:30 · morada"); senão compõe-se aqui. */
+  detalhe?: string;
 }
 
 export type ErroVisita = "dataVazia" | "dataPassada" | "horaInvalida" | "notaComprida";
@@ -44,12 +46,12 @@ export function marcarVisita<E extends EstadoAcoes>(estado: E, id: string, dados
   if (!alvo || alvo.perdida || validarVisita(dados, hoje)) return estado;
   const item: ItemAtividade = {
     id: `novo-visita-${estado.atividade.length + 1}`, pessoaId: id, tipo: "historico", titulo: "",
-    chaveTitulo: "pessoasPagina.activity.visitBooked", detalhe: detalheDaVisita(dados), quando: hoje, exemplo: false,
+    chaveTitulo: "pessoasPagina.activity.visitBooked", detalhe: dados.detalhe ?? detalheDaVisita(dados), quando: hoje, exemplo: false,
   };
   const etapa = indiceEtapa(alvo.etapa) < indiceEtapa("visitaMarcada") ? "visitaMarcada" : alvo.etapa;
   return {
     ...estado,
-    pessoas: estado.pessoas.map((p) => (p.id === id ? { ...p, etapa, ultimoContactoDias: 0, proximoContacto: dados.data } : p)),
+    pessoas: estado.pessoas.map((p) => (p.id === id ? { ...p, etapa, ultimoContactoDias: 0, proximoContacto: dados.data, proximoHora: dados.hora || undefined } : p)),
     atividade: [item, ...estado.atividade],
     contactadas: estado.contactadas.includes(id) ? estado.contactadas : [...estado.contactadas, id],
   };

@@ -1,0 +1,63 @@
+// Textos de "Registar chamada" (a vista de detalhe dentro da ficha da pessoa), em pt e en. Juntam-se aos de
+// `pessoasPagina.ts` (que os espalha), por isso as chaves continuam a ser `pessoasPagina.*`.
+const C = "pessoasPagina.call.";
+
+const pt: Record<string, string> = {
+  [`${C}back`]: "Voltar",
+  [`${C}subtitle`]: "Chamada para {name}",
+  [`${C}how`]: "Como correu?",
+  [`${C}next`]: "E agora?",
+  [`${C}nextWait`]: "Escolha como correu a chamada para ver o que fazer a seguir.",
+  [`${C}recommended`]: "Recomendado",
+  [`${C}whenVisit`]: "Quando é a visita?",
+  [`${C}whenCall`]: "Quando ligar?",
+  [`${C}date`]: "Dia",
+  [`${C}time`]: "Hora",
+  [`${C}where`]: "Onde (opcional)",
+  [`${C}reason`]: "Motivo da perda",
+  [`${C}reasonChoose`]: "Escolha o motivo",
+  [`${C}error.dataVazia`]: "Escolha o dia.",
+  [`${C}error.dataPassada`]: "O dia não pode ser anterior a hoje.",
+  [`${C}error.horaVazia`]: "Escolha a hora.",
+  [`${C}error.horaInvalida`]: "A hora tem de ser do tipo 10:30.",
+  [`${C}error.motivoVazio`]: "Escolha o motivo da perda.",
+  [`${C}done`]: "Chamada registada",
+  "pessoasPagina.step.marcarVisita": "Marcar visita",
+  "pessoasPagina.step.ligarData": "Ligar numa data e hora",
+  "pessoasPagina.step.perder": "Marcar como perdida",
+  "pessoasPagina.live.callVisit": "Chamada registada para {name}. Visita marcada para {when}.",
+  "pessoasPagina.live.callAgenda": "Chamada registada para {name}. Ligar a {when}.",
+  "pessoasPagina.live.callLost": "Chamada registada para {name}, marcada como perdida.",
+  "pessoasPagina.activity.callScheduled": "Chamada agendada",
+};
+
+const en: Record<string, string> = {
+  [`${C}back`]: "Back",
+  [`${C}subtitle`]: "Call with {name}",
+  [`${C}how`]: "How did it go?",
+  [`${C}next`]: "What now?",
+  [`${C}nextWait`]: "Choose how the call went to see what to do next.",
+  [`${C}recommended`]: "Recommended",
+  [`${C}whenVisit`]: "When is the visit?",
+  [`${C}whenCall`]: "When to call?",
+  [`${C}date`]: "Day",
+  [`${C}time`]: "Time",
+  [`${C}where`]: "Where (optional)",
+  [`${C}reason`]: "Reason it was lost",
+  [`${C}reasonChoose`]: "Choose the reason",
+  [`${C}error.dataVazia`]: "Choose the day.",
+  [`${C}error.dataPassada`]: "The day cannot be before today.",
+  [`${C}error.horaVazia`]: "Choose the time.",
+  [`${C}error.horaInvalida`]: "The time must look like 10:30.",
+  [`${C}error.motivoVazio`]: "Choose the reason it was lost.",
+  [`${C}done`]: "Call logged",
+  "pessoasPagina.step.marcarVisita": "Book a visit",
+  "pessoasPagina.step.ligarData": "Call on a day and time",
+  "pessoasPagina.step.perder": "Mark as lost",
+  "pessoasPagina.live.callVisit": "Call logged for {name}. Visit booked for {when}.",
+  "pessoasPagina.live.callAgenda": "Call logged for {name}. Call on {when}.",
+  "pessoasPagina.live.callLost": "Call logged for {name}, marked as lost.",
+  "pessoasPagina.activity.callScheduled": "Call scheduled",
+};
+
+export const pessoasChamadaTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

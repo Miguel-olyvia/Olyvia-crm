@@ -1,0 +1,72 @@
+// O que o passo escolhido ainda pede: o dia e a hora (visita e "ligar numa data"), mais o local na visita, ou o motivo ao
+// perder. Aparece logo por baixo do "E agora?", sem diálogo.
+import { useId } from "react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { FOCO } from "@/components/negocio-metas/estilos";
+import { CamposDataHora, MensagemErro } from "./CamposDataHora";
+import { type ErrosChamada } from "./chamadaPassos";
+import { MOTIVOS_PERDA } from "./opcoesPessoa";
+import type { CamposChamada } from "./useFormChamada";
+
+const C = "pessoasPagina.call.";
+/** O máximo de caracteres do local da visita. */
+const MAX_ONDE = 120;
+
+interface DetalhesPassoProps {
+  campos: CamposChamada;
+  erros: ErrosChamada;
+  hoje: string;
+  aoMudar: (parcial: Partial<CamposChamada>) => void;
+}
+
+function Motivo({ campos, erros, aoMudar }: Omit<DetalhesPassoProps, "hoje">) {
+  const { t } = useTranslation();
+  const id = useId();
+  const erro = erros.motivo ? t(`${C}error.${erros.motivo}`) : null;
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{t(`${C}reason`)}</Label>
+      <NativeSelect
+        id={id} value={campos.motivo} className={cn("min-h-11", erro && "border-destructive")} placeholder={t(`${C}reasonChoose`)}
+        aria-invalid={erro ? true : undefined} aria-describedby={erro ? `${id}-erro` : undefined}
+        options={MOTIVOS_PERDA.map((m) => ({ value: m, label: t(`pessoasPagina.lost.${m}`) }))}
+        onValueChange={(v) => aoMudar({ motivo: v as CamposChamada["motivo"] })}
+      />
+      {erro && <MensagemErro id={`${id}-erro`} texto={erro} />}
+    </div>
+  );
+}
+
+function Onde({ valor, aoMudar }: { valor: string; aoMudar: (v: string) => void }) {
+  const { t } = useTranslation();
+  const id = useId();
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{t(`${C}where`)}</Label>
+      <Input id={id} value={valor} maxLength={MAX_ONDE} autoComplete="off" className={cn("min-h-11", FOCO)} onChange={(e) => aoMudar(e.target.value)} />
+    </div>
+  );
+}
+
+export function DetalhesPasso({ campos, erros, hoje, aoMudar }: DetalhesPassoProps) {
+  const { t } = useTranslation();
+  const id = useId();
+  if (campos.passo === "perder") return <Motivo campos={campos} erros={erros} aoMudar={aoMudar} />;
+  if (campos.passo !== "marcarVisita" && campos.passo !== "ligarData") return null;
+  const visita = campos.passo === "marcarVisita";
+  return (
+    <div role="group" aria-labelledby={`${id}-titulo`} className="space-y-3 rounded-lg border border-border bg-muted/40 p-3">
+      <p id={`${id}-titulo`} className="text-sm font-semibold text-foreground">{t(visita ? `${C}whenVisit` : `${C}whenCall`)}</p>
+      <CamposDataHora
+        id={id} data={campos.data} hora={campos.hora} hoje={hoje} rotuloData={t(`${C}date`)} rotuloHora={t(`${C}time`)}
+        erroData={erros.data ? t(`${C}error.${erros.data}`) : null} erroHora={erros.hora ? t(`${C}error.${erros.hora}`) : null}
+        aoMudar={aoMudar}
+      />
+      {visita && <Onde valor={campos.onde} aoMudar={(onde) => aoMudar({ onde })} />}
+    </div>
+  );
+}

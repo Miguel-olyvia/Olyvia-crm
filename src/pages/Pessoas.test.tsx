@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import Pessoas from "./Pessoas";
 
@@ -78,5 +78,38 @@ describe("Submissões pendentes: arranque", () => {
     expect(cartoes).toHaveLength(6);
     expect(within(cartoes[0]).getByText("Conflito")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Submissões, 6 pendentes" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("Pessoas: Registar chamada é uma vista da ficha", () => {
+  it("abre dentro da ficha (sem abas), pede dia e hora na visita e a atividade mostra a chamada e a visita", () => {
+    renderPage("/pessoas?open=p-hugo");
+    const ficha = screen.getByRole("dialog");
+    const botao = within(ficha).getByRole("button", { name: /Registar chamada/ });
+    fireEvent.click(botao);
+    expect(botao).toHaveAttribute("aria-expanded", "true");
+    expect(within(ficha).getByRole("heading", { name: "Registar chamada", level: 3 })).toBeInTheDocument();
+    expect(within(ficha).getByRole("button", { name: "Voltar" })).toBeInTheDocument();
+    expect(within(ficha).queryByRole("tab", { name: /Atividade/ })).not.toBeInTheDocument();
+    expect(within(ficha).getByRole("button", { name: "Guardar" })).toHaveAttribute("aria-disabled", "true");
+
+    fireEvent.click(within(ficha).getByRole("radio", { name: /Atendeu · interessado/ }));
+    expect(within(ficha).getByRole("radio", { name: /Marcar visita/ })).toBeChecked();
+    expect(within(ficha).getByText("Recomendado")).toBeInTheDocument();
+    expect(within(ficha).getByLabelText("Dia")).toHaveValue("2026-10-14");
+    expect(within(ficha).getByLabelText("Hora")).toHaveValue("10:00");
+    expect(within(ficha).queryByText(/orçamento/i)).not.toBeInTheDocument();
+
+    fireEvent.change(within(ficha).getByLabelText("Dia"), { target: { value: "2026-10-16" } });
+    fireEvent.change(within(ficha).getByLabelText("Hora"), { target: { value: "09:30" } });
+    fireEvent.click(within(ficha).getByRole("button", { name: "Guardar" }));
+
+    expect(within(ficha).queryByRole("heading", { name: "Registar chamada", level: 3 })).not.toBeInTheDocument();
+    expect(within(ficha).getByRole("button", { name: /Registar chamada/ })).toHaveAttribute("aria-expanded", "false");
+    expect(within(ficha).getByText("Até 16/10 · 09:30")).toBeInTheDocument();
+    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }), { button: 0, ctrlKey: false });
+    expect(within(ficha).getByText("Chamada · Atendeu · interessado")).toBeInTheDocument();
+    expect(within(ficha).getByText("Histórico · Visita marcada")).toBeInTheDocument();
+    expect(within(ficha).getByText(/^16\/10 · 09:30 ·/)).toBeInTheDocument();
   });
 });

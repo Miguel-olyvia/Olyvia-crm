@@ -1,13 +1,15 @@
-// Escolhe o painel da ação aberta.
+// Escolhe o painel em linha da ação aberta (nota, adiar ou perder). "Registar chamada" não é um painel: é uma vista de
+// detalhe da ficha (ver `FormChamada`).
 import { useTranslation } from "@/hooks/useTranslation";
 import { PainelAdiar, PainelPerder } from "./PaineisAdiarPerder";
-import { PainelChamada, PainelNota } from "./PaineisChamadaNota";
+import { PainelNota } from "./PaineisChamadaNota";
 import type { AcaoFicha, PropsPainel } from "./PainelBase";
 
-export function PainelAcaoFicha({ acao, ...p }: PropsPainel & { acao: AcaoFicha }) {
+export type AcaoPainel = Exclude<AcaoFicha, "chamada">;
+
+export function PainelAcaoFicha({ acao, ...p }: PropsPainel & { acao: AcaoPainel }) {
   const { t } = useTranslation();
   switch (acao) {
-    case "chamada": return <PainelChamada {...p} titulo={t("pessoasPagina.panel.callTitle")} />;
     case "nota": return <PainelNota {...p} titulo={t("pessoasPagina.panel.noteTitle")} />;
     case "adiar": return <PainelAdiar {...p} titulo={t("pessoasPagina.panel.snoozeTitle")} />;
     case "perder": return <PainelPerder {...p} titulo={t("pessoasPagina.panel.lostTitle")} />;

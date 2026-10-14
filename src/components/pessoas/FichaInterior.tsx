@@ -15,7 +15,8 @@ import { FichaNotas, FichaSubmissoes } from "./FichaSubmissoesNotas";
 import { textoPendentes } from "./formatoPessoas";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
 import type { AcaoFicha, AcoesFicha } from "./PainelBase";
-import { PainelAcaoFicha } from "./PainelAcaoFicha";
+import { FormChamada } from "./FormChamada";
+import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
 import { IDS_NEGOCIOS_DO_QUADRO } from "./pessoasExemplo";
 import { ehHistorico, type ItemAtividade, type NotaPessoa, type Pessoa, type ResumoPessoa, type Submissao } from "./pessoasTipos";
@@ -158,17 +159,24 @@ export function FichaInterior(p: FichaInteriorProps) {
         />
         <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
         {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("perder", origem)} />}
-        {visitados.map((a) => (
+        {visitados.filter((a): a is AcaoPainel => a !== "chamada").map((a) => (
           <PainelAcaoFicha
             key={a} acao={a} id={`${painelId}-${a}`} ativo={a === acao} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes}
             aoFechar={() => fechar(true)} aoMudarConteudo={mudarConteudo(a)}
             aoConcluir={(mensagem) => { anunciar(mensagem); fechar(true); }}
           />
         ))}
-        <AbasFicha
-          {...p} aba={aba} aoMudar={(a) => { negocio.esquecer(); setAba(a); }} negocioAberto={negocio.aberto}
-          aoAbrirNegocio={negocio.abrir} aoVoltarNegocio={negocio.voltar}
-        />
+        {acao === "chamada" ? (
+          <FormChamada
+            id={`${painelId}-chamada`} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes} aoFechar={() => fechar(true)}
+            aoConcluir={(mensagem) => { anunciar(mensagem); negocio.esquecer(); setAba("resumo"); fechar(true); }}
+          />
+        ) : (
+          <AbasFicha
+            {...p} aba={aba} aoMudar={(a) => { negocio.esquecer(); setAba(a); }} negocioAberto={negocio.aberto}
+            aoAbrirNegocio={negocio.abrir} aoVoltarNegocio={negocio.voltar}
+          />
+        )}
       </div>
       <div role="status" className="sr-only">{texto}</div>
     </AnuncioFichaContext.Provider>
