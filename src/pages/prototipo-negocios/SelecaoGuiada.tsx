@@ -737,6 +737,8 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
   const r = resumoNecessidades(S, d, orcLinhas(d, S));
   const esc = efetivo(S.campos, ESCOLHAS);
   const nomeP = (id: string) => prod.find((p) => p.id === id);
+  // as instalações que vêm com um produto escolhido: no resumo vão no produto ("com instalação"), não numa linha à parte
+  const instalados = new Set(prod.filter((p) => p.q > 0).map((p) => K.produtos.find((x) => x.id === p.id)?.servico).filter((s): s is SvcId => !!s));
   const txtProd = (ids: string[]) => ids.map((id) => { const p = nomeP(id)!; return `${encurtar(p.n).nome}${p.q !== 1 ? ` × ${nfmt(p.q)}` : ""}${p.cliente ? " (fornecido pelo cliente)" : ""}`; }).join(", ");
   const ramos = obr.map((o) => nosAbaixo(K.arvore, o.no));
   const linha = (p: PassoSel): { t: string; falta?: boolean } => {
@@ -748,7 +750,8 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
       }
       case "servicos": {
         const sids = orcLinhas(d, S);
-        return sids.length ? { t: sids.map((s) => nomeCurto(nomeSvc(S, s))).join(", ") } : { t: "Falta escolher pelo menos um serviço", falta: true };
+        const proprios = sids.filter((s) => !instalados.has(s));
+        return sids.length ? { t: proprios.map((s) => nomeCurto(nomeSvc(S, s))).join(", ") || "Só as instalações dos produtos" } : { t: "Falta escolher pelo menos um serviço", falta: true };
       }
       case "pergunta": {
         const o = p.o!;
@@ -781,7 +784,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
     return j >= 0 ? "q:" + obr[j].sid : "outros";
   };
   const linhasCrono: (LinhaCrono & { f: FaseObra })[] = [
-    ...orcLinhas(d, S).map((sid) => {
+    ...orcLinhas(d, S).filter((sid) => !instalados.has(sid)).map((sid) => {
       const t = porSid.get(sid);
       const q = t?.qt ? `${nfmt(t.qt)} ${t.un}` : "";
       return { k: "s:" + sid, f: faseSvc(sid), nome: nomeCurto(nomeSvc(S, sid)), det: q, fig: <IconeServico k={t?.icone ?? "outro"} className="h-4 w-4" />, passo: "servicos" };
@@ -791,7 +794,8 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
       const img = doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(p.n);
       const sNome = doCat?.servico ? nomeSvc(S, doCat.servico) : undefined;
       const f = faseDoProduto(K as ComFases, { servico: doCat?.servico, img }, sNome ? { nome: sNome } : undefined);
-      return { k: "p:" + p.id, f, nome: encurtar(p.n).nome, det: [doCat?.marca, `${nfmt(p.q)} ${p.un}`, p.cliente ? "fornecido pelo cliente" : `${eur(precoProduto(p))} €`].filter(Boolean).join(" · "),
+      return { k: "p:" + p.id, f, nome: encurtar(p.n).nome, det: [doCat?.marca, `${nfmt(p.q)} ${p.un}`, p.cliente ? "fornecido pelo cliente" : `${eur(precoProduto(p))} €`,
+        doCat?.servico && instalados.has(doCat.servico) && orcLinhas(d, S).includes(doCat.servico) ? "com instalação" : null].filter(Boolean).join(" · "),
         fig: <Ilustracao k={img} className="h-6 w-6" />, passo: passoDoProduto(p.no ?? null) };
     }),
   ];
