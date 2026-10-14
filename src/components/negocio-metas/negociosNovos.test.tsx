@@ -3,7 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { criarNegocioNovo, negociosNovos, repor, useNegociosNovos } from "./negociosNovos";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
 
-const dados = { pessoa: { id: "p-rui", nome: "Rui Figueiredo" }, servico: "Cozinha", comercial: "Ana Ribeiro" };
+const dados = { pessoa: { id: "p-rui", nome: "Rui Figueiredo" }, comercial: "Ana Ribeiro" };
 
 afterEach(() => repor());
 

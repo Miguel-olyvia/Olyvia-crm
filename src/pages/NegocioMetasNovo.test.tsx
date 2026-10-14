@@ -52,17 +52,48 @@ describe("Novo negócio na página", () => {
 
   it("um negócio novo entra no Quadro, no resumo e na contagem do Dashboard, sem contar como ganho", () => {
     criarNegocioNovo(
-      { pessoa: { id: "p-marta", nome: "Marta Silveira" }, servico: "Cozinha", comercial: "Ana Ribeiro" }, HOJE_EXEMPLO,
+      { pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro" }, HOJE_EXEMPLO,
     );
     renderPage();
     verTodos();
     expect(estado()).toBe("11 negócios");
-    expect(screen.getByRole("button", { name: /^Marta Silveira · Cozinha/ })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("undefined");
+    expect(screen.getByRole("button", { name: /^Marta Silveira · Ana Ribeiro/ })).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Dashboard" }));
     // No Quadro 10 passam a 11 e Por fechar 4 passam a 5 (o novo está aberto).
     expect(numerosDoQuadro()).toEqual(["11", "5"]);
     const metas = screen.getByRole("heading", { name: "Metas do mês" }).closest("section")!;
     // O valor ganho não muda (77%), porque o novo não é ganho.
     expect(within(metas).getByText("77%")).toBeInTheDocument();
+  });
+});
+
+describe("Levantamento no painel do negócio criado", () => {
+  const levantamento = {
+    data: "2026-10-13", feitoPor: "Bruno Costa", estado: "feito" as const, observacoes: "Cliente em casa de manhã",
+    linhas: [{ divisao: "Cozinha", trabalho: "Bancada nova", medida: 3.5, unidade: "m", observacoes: "Ver canos" }],
+  };
+  const abrirPainel = (comLevantamento: boolean) => {
+    const criado = criarNegocioNovo(
+      {
+        pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro",
+        ...(comLevantamento ? { levantamento } : {}),
+      }, HOJE_EXEMPLO,
+    );
+    render(<MemoryRouter initialEntries={[`/?open=${criado.id}`]}><NegocioMetas /></MemoryRouter>);
+    return screen.getByRole("dialog");
+  };
+
+  it("mostra a secção Levantamento no Resumo, só de leitura, com o estado, a data, quem fez e as linhas", () => {
+    const painel = abrirPainel(true);
+    const secao = within(painel).getByRole("heading", { name: "Levantamento" }).closest("section")!;
+    expect(within(secao).getByText("Feito · 13/10/2026 · Bruno Costa")).toBeInTheDocument();
+    expect(within(secao).getByRole("listitem")).toHaveTextContent("Cozinha: Bancada nova, 3.5 m (Ver canos)");
+    expect(within(secao).getByText("Cliente em casa de manhã")).toBeInTheDocument();
+  });
+
+  it("sem levantamento o Resumo não traz a secção", () => {
+    const painel = abrirPainel(false);
+    expect(within(painel).queryByRole("heading", { name: "Levantamento" })).not.toBeInTheDocument();
   });
 });

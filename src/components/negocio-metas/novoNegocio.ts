@@ -1,7 +1,8 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
-import type { DadosContactoNegocio, NegocioMes } from "./negocioMetas";
+import type { DadosContactoNegocio, LevantamentoNegocio, NegocioMes } from "./negocioMetas";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
+import { temLevantamento, validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
 
 /** Uma pessoa a escolher no formulário. A página monta a lista (Negócio e metas não importa de Pessoas). */
 export interface PessoaOpcao {
@@ -46,37 +47,42 @@ export function reporContacto(
 export const COMERCIAIS_EXEMPLO: readonly string[] = DADOS_EXEMPLO.metasComerciais.map((m) => m.comercial);
 export const COMERCIAL_POR_OMISSAO: string = COMERCIAIS_EXEMPLO[0];
 
-/** Sugestões para o serviço (o campo é texto livre). */
-export const SERVICOS_SUGERIDOS: readonly string[] = [
-  "Casa de banho", "Cozinha", "Janelas", "Isolamento", "Remodelação total", "Outro",
-];
-
-export const MAX_SERVICO = 60;
 /** O primeiro prazo de um negócio novo: levantamento daqui a 2 dias. */
 export const DIAS_ATE_PRIMEIRO_PRAZO = 2;
 
 /** O que o formulário preenche. */
 export interface ValoresNovoNegocio {
   pessoaId: string;
-  servico: string;
   comercial: string;
 }
 
 export type ErroCampo = "obrigatorio" | "comprido" | "invalido";
-export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "servico" | "email" | "nif" | "nifEmpresa", ErroCampo>>;
+export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "email" | "nif" | "nifEmpresa", ErroCampo>>
+  & ErrosLevantamento;
+
+/** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, o Levantamento o que é dele. */
+export function abasComErros(erros: ErrosNovoNegocio): { geral: boolean; levantamento: boolean } {
+  return {
+    geral: (["pessoaId", "email", "nif", "nifEmpresa"] as const).some((c) => !!erros[c]),
+    levantamento: !!erros.levantamento || !!erros.linhas,
+  };
+}
 
 const FORMATO_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FORMATO_NIF = /^\d{9}$/;
 
-/** Pessoa e Serviço são obrigatórios (o serviço sem espaços à volta e com um máximo); vazio quando está tudo certo. */
+/**
+ * A Pessoa é obrigatória; o contacto só valida o formato do que foi preenchido. O levantamento valida-se em
+ * `validarLevantamento`; vazio quando está tudo certo.
+ */
 export function validarNovoNegocio(
-  valores: Pick<ValoresNovoNegocio, "pessoaId" | "servico"> & { contacto?: Partial<DadosContactoNegocio> },
+  valores: Pick<ValoresNovoNegocio, "pessoaId"> & {
+    contacto?: Partial<DadosContactoNegocio>;
+    levantamento?: LevantamentoForm;
+  },
 ): ErrosNovoNegocio {
-  const erros: ErrosNovoNegocio = {};
+  const erros: ErrosNovoNegocio = { ...validarLevantamento(valores.levantamento) };
   if (!valores.pessoaId?.trim()) erros.pessoaId = "obrigatorio";
-  const servico = (valores.servico ?? "").trim();
-  if (!servico) erros.servico = "obrigatorio";
-  else if (servico.length > MAX_SERVICO) erros.servico = "comprido";
   // O contacto é opcional: só se valida o formato do que foi preenchido.
   const email = valores.contacto?.email?.trim();
   if (email && !FORMATO_EMAIL.test(email)) erros.email = "invalido";
@@ -85,6 +91,26 @@ export function validarNovoNegocio(
   const nifEmpresa = valores.contacto?.nifEmpresa?.trim();
   if (nifEmpresa && !FORMATO_NIF.test(nifEmpresa)) erros.nifEmpresa = "invalido";
   return erros;
+}
+
+const ORDEM_GERAL = ["pessoaId", "email", "nif", "nifEmpresa"] as const;
+const CAMPO_GERAL: Record<(typeof ORDEM_GERAL)[number], string> = {
+  pessoaId: "pessoa", email: "email", nif: "nif", nifEmpresa: "nifEmpresa",
+};
+const ORDEM_LINHA = ["divisao", "trabalho", "trabalhoOutro", "medida"] as const;
+
+/** Onde pôr o foco depois de um envio recusado: a aba e o fim do id do campo (`<id>-<campo>`); a Geral vem primeiro. */
+export function primeiroErro(
+  erros: ErrosNovoNegocio, idsLinhas: readonly string[],
+): { aba: "geral" | "levantamento"; campo: string } | null {
+  const geral = ORDEM_GERAL.find((c) => erros[c]);
+  if (geral) return { aba: "geral", campo: CAMPO_GERAL[geral] };
+  if (erros.levantamento) return { aba: "levantamento", campo: "add" };
+  for (const linha of idsLinhas) {
+    const campo = ORDEM_LINHA.find((c) => erros.linhas?.[linha]?.[c]);
+    if (campo) return { aba: "levantamento", campo: `linha-${linha}-${campo}` };
+  }
+  return null;
 }
 
 /** Soma `dias` a um dia AAAA-MM-DD (em UTC, sem fuso nem horário de verão). */
@@ -103,13 +129,13 @@ export type NegocioNovo = NegocioMes & { novo: true };
 
 export interface DadosCriarNegocio {
   pessoa: PessoaOpcao;
-  servico: string;
   comercial: string;
   contacto?: DadosContactoNegocio;
+  levantamento?: LevantamentoNegocio;
 }
 
 /**
- * O negócio de exemplo: começa em Orçamento (sem orçamentos, por isso sem valor), com 0 dias, não parado e o primeiro
+ * O negócio de exemplo (sem serviço: fica vazio): começa em Orçamento (sem orçamentos, por isso sem valor), com 0 dias, não parado e o primeiro
  * prazo daqui a 2 dias. O id é `n-novo-<sequência>`; várias pessoas (e a mesma) podem ter vários negócios.
  */
 export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequencia: number): NegocioNovo {
@@ -117,13 +143,14 @@ export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequ
     id: `n-novo-${sequencia}`,
     pessoaId: dados.pessoa.id,
     pessoa: dados.pessoa.nome,
-    servico: dados.servico.trim(),
+    servico: "",
     comercial: dados.comercial,
     dias: 0,
     parado: 0,
     proximoPrazo: somarDias(hoje, DIAS_ATE_PRIMEIRO_PRAZO),
     contacto: dados.pessoa.contacto ?? { telefone: null, email: null },
     ...(dados.contacto ? { dadosContacto: aparar(dados.contacto) } : {}),
+    ...(temLevantamento(dados.levantamento) ? { levantamento: dados.levantamento } : {}),
     orcamentos: [],
     proposta: null,
     contrato: null,

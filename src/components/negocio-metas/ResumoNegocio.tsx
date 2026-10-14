@@ -34,7 +34,7 @@ export function ResumoNegocio({ negocio, hoje, ocultarComercial = false, classNa
         </span>
       </span>
       <span className="block truncate text-xs text-muted-foreground">
-        {ocultarComercial ? negocio.servico : `${negocio.servico} · ${negocio.comercial}`}
+        {(ocultarComercial ? [negocio.servico] : [negocio.servico, negocio.comercial]).filter(Boolean).join(" · ")}
       </span>
       <span className="flex items-start justify-between gap-2">
         <span className="flex items-center gap-1 text-sm font-semibold tabular-nums text-foreground">

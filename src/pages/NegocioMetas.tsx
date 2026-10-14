@@ -96,7 +96,7 @@ const NegocioMetas = () => {
     setRecemCriado(criado.id);
     abrir(criado.id);
     toast.success(t("businessGoals.new.created"));
-    setAnuncio((a) => ({ n: a.n + 1, texto: t("businessGoals.new.announce", { nome: criado.pessoa, servico: criado.servico }) }));
+    setAnuncio((a) => ({ n: a.n + 1, texto: t("businessGoals.new.announce", { nome: criado.pessoa }) }));
   };
 
   const visiveis = useMemo(() => filtrarNegocios(negocios, filtros, HOJE_EXEMPLO), [negocios, filtros]);

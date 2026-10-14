@@ -55,7 +55,7 @@ function naFaixa(n: NegocioMes, faixa: FaixaValor): boolean {
 
 /** Os serviços que existem nos negócios, sem repetir e por ordem alfabética. */
 export const servicosDe = (negocios: readonly NegocioMes[]): string[] =>
-  [...new Set(negocios.map((n) => n.servico))].sort((a, b) => a.localeCompare(b, "pt"));
+  [...new Set(negocios.map((n) => n.servico).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt"));
 
 /** Os comerciais que existem nos negócios, sem repetir e por ordem alfabética. */
 export const comerciaisDe = (negocios: readonly NegocioMes[]): string[] =>
