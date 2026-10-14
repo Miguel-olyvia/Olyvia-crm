@@ -22,6 +22,28 @@ export interface DadosContactoNegocio {
   nifEmpresa: string;
 }
 
+/** Uma linha do levantamento, já em texto (o que se escolheu no formulário, na língua em que foi criado). */
+export interface LinhaLevantamento {
+  divisao: string;
+  trabalho: string;
+  medida: number;
+  /** "m²", "m" ou "un". */
+  unidade: string;
+  observacoes: string;
+}
+
+export type EstadoLevantamento = "porFazer" | "feito";
+
+/** O levantamento escrito ao criar um negócio (só exemplo, em memória). */
+export interface LevantamentoNegocio {
+  /** AAAA-MM-DD. */
+  data: string;
+  feitoPor: string;
+  estado: EstadoLevantamento;
+  linhas: LinhaLevantamento[];
+  observacoes: string;
+}
+
 export interface NegocioMes {
   id: string;
   /** A pessoa (lead/cliente) a que o negócio pertence; serve para a abrir. */
@@ -38,6 +60,8 @@ export interface NegocioMes {
   contacto: { telefone: string | null; email: string | null };
   /** Só nos negócios criados em "Novo negócio": o contacto tal como foi escrito no formulário. */
   dadosContacto?: DadosContactoNegocio;
+  /** Só nos negócios criados em "Novo negócio", e só se se escreveu alguma coisa na aba Levantamento. */
+  levantamento?: LevantamentoNegocio;
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;

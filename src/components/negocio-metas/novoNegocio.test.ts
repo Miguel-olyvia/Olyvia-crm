@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, MAX_SERVICO, criarNegocioExemplo, preencherContactoDaPessoa,
-  reporContacto, somarDias, validarNovoNegocio, type ChaveContacto,
+  reporContacto, somarDias, validarNovoNegocio, abasComErros, primeiroErro, type ChaveContacto,
   type PessoaOpcao,
 } from "./novoNegocio";
-import { verificarCoerencia, faseDoNegocio, isNegocioGanho, valorDoNegocio } from "./negocioMetas";
+import { levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
+import { verificarCoerencia, faseDoNegocio, isNegocioGanho, valorDoNegocio, type LevantamentoNegocio } from "./negocioMetas";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "./negocioMetasExemplo";
 
 const marta: PessoaOpcao = { id: "p-marta", nome: "Marta Silveira", contacto: { telefone: "912 345 601", email: "marta.silveira@exemplo.pt" } };
@@ -13,16 +14,24 @@ describe("validarNovoNegocio", () => {
   it("pede a pessoa e o serviço, cada um com o seu erro", () => {
     expect(validarNovoNegocio({ pessoaId: "", servico: "" })).toEqual({ pessoaId: "obrigatorio", servico: "obrigatorio" });
     expect(validarNovoNegocio({ pessoaId: "p-marta", servico: "" })).toEqual({ servico: "obrigatorio" });
-    expect(validarNovoNegocio({ pessoaId: "", servico: "Cozinha" })).toEqual({ pessoaId: "obrigatorio" });
+    expect(validarNovoNegocio({ pessoaId: "", servico: "cozinha" })).toEqual({ pessoaId: "obrigatorio" });
   });
 
-  it("um serviço só com espaços é vazio", () => {
+  it("o serviço é uma lista fechada: um texto que não é uma chave da lista conta como não escolhido", () => {
+    expect(validarNovoNegocio({ pessoaId: "p-marta", servico: "Cozinha" })).toEqual({ servico: "obrigatorio" });
     expect(validarNovoNegocio({ pessoaId: "p-marta", servico: "   " })).toEqual({ servico: "obrigatorio" });
   });
 
-  it("aceita um serviço do tamanho máximo e recusa um a mais (contado sem os espaços à volta)", () => {
-    expect(validarNovoNegocio({ pessoaId: "p", servico: ` ${"a".repeat(MAX_SERVICO)} ` })).toEqual({});
-    expect(validarNovoNegocio({ pessoaId: "p", servico: "a".repeat(MAX_SERVICO + 1) })).toEqual({ servico: "comprido" });
+  it("em Outro, o texto Qual? é obrigatório (só espaços é vazio) e tem um máximo (contado sem os espaços à volta)", () => {
+    const base = { pessoaId: "p", servico: "outro" };
+    expect(validarNovoNegocio({ ...base })).toEqual({ servicoOutro: "obrigatorio" });
+    expect(validarNovoNegocio({ ...base, servicoOutro: "   " })).toEqual({ servicoOutro: "obrigatorio" });
+    expect(validarNovoNegocio({ ...base, servicoOutro: ` ${"a".repeat(MAX_SERVICO)} ` })).toEqual({});
+    expect(validarNovoNegocio({ ...base, servicoOutro: "a".repeat(MAX_SERVICO + 1) })).toEqual({ servicoOutro: "comprido" });
+  });
+
+  it("fora de Outro, o texto Qual? não conta", () => {
+    expect(validarNovoNegocio({ pessoaId: "p", servico: "janelas", servicoOutro: "a".repeat(500) })).toEqual({});
   });
 
   it("não rebenta com valores em falta", () => {
@@ -61,7 +70,7 @@ describe("reporContacto", () => {
 });
 
 describe("validarNovoNegocio: contacto", () => {
-  const base = { pessoaId: "p", servico: "Cozinha" };
+  const base = { pessoaId: "p", servico: "cozinha" };
   it("tudo vazio ou válido passa", () => {
     expect(validarNovoNegocio({ ...base, contacto: CONTACTO_VAZIO })).toEqual({});
     expect(validarNovoNegocio({ ...base, contacto: preencherContactoDaPessoa(completa) })).toEqual({});
@@ -82,6 +91,79 @@ describe("criarNegocioExemplo: contacto", () => {
     const c = criarNegocioExemplo({ pessoa: completa, servico: "Cozinha", comercial: "Ana Ribeiro", contacto: { ...preencherContactoDaPessoa(completa), distrito: " Porto " } }, HOJE_EXEMPLO, 1);
     expect(c.dadosContacto?.distrito).toBe("Porto");
     expect("dadosContacto" in criarNegocioExemplo({ pessoa: completa, servico: "X", comercial: "Ana Ribeiro" }, HOJE_EXEMPLO, 2)).toBe(false);
+  });
+});
+
+const linha = (parcial: Partial<LinhaForm> = {}): LinhaForm => ({
+  ...novaLinha("l1", "cozinha"), trabalho: "bancada", medida: "3", ...parcial,
+});
+const comLevantamento = (parcial: Partial<LevantamentoForm>) => ({
+  pessoaId: "p", servico: "cozinha", levantamento: { ...levantamentoVazio("2026-10-13", "Ana Ribeiro"), ...parcial },
+});
+
+describe("validarNovoNegocio: levantamento", () => {
+  it("um levantamento por fazer e sem linhas é válido (a aba é opcional)", () => {
+    expect(validarNovoNegocio(comLevantamento({}))).toEqual({});
+  });
+
+  it("Feito sem linhas pede pelo menos uma; com uma linha certa passa", () => {
+    expect(validarNovoNegocio(comLevantamento({ estado: "feito" }))).toEqual({ levantamento: "obrigatorio" });
+    expect(validarNovoNegocio(comLevantamento({ estado: "feito", linhas: [linha()] }))).toEqual({});
+  });
+
+  it("cada linha pede divisão, trabalho e uma medida maior que 0, com o erro no campo certo", () => {
+    const vazia = novaLinha("l2", "janelas");
+    expect(validarNovoNegocio(comLevantamento({ linhas: [vazia] })).linhas).toEqual({
+      l2: { divisao: "obrigatorio", trabalho: "obrigatorio", medida: "obrigatorio" },
+    });
+    for (const medida of ["0", "-2", "abc"]) {
+      expect(validarNovoNegocio(comLevantamento({ linhas: [linha({ medida })] })).linhas).toEqual({ l1: { medida: "invalido" } });
+    }
+    expect(validarNovoNegocio(comLevantamento({ linhas: [linha({ medida: "2,5" })] }))).toEqual({});
+  });
+
+  it("o trabalho Outro pede o texto, com máximo", () => {
+    expect(validarNovoNegocio(comLevantamento({ linhas: [linha({ trabalho: "outro" })] })).linhas).toEqual({ l1: { trabalhoOutro: "obrigatorio" } });
+    const comprido = linha({ trabalho: "outro", trabalhoOutro: "a".repeat(61) });
+    expect(validarNovoNegocio(comLevantamento({ linhas: [comprido] })).linhas).toEqual({ l1: { trabalhoOutro: "comprido" } });
+  });
+});
+
+describe("abasComErros e primeiroErro", () => {
+  it("diz que aba tem erros: Geral nos campos do negócio, Levantamento nos do levantamento", () => {
+    expect(abasComErros({})).toEqual({ geral: false, levantamento: false });
+    expect(abasComErros({ servicoOutro: "obrigatorio" })).toEqual({ geral: true, levantamento: false });
+    expect(abasComErros({ levantamento: "obrigatorio" })).toEqual({ geral: false, levantamento: true });
+    expect(abasComErros({ linhas: { l1: { medida: "invalido" } } })).toEqual({ geral: false, levantamento: true });
+  });
+
+  it("o foco vai primeiro para a aba Geral, depois para o levantamento, linha a linha pela ordem do ecrã", () => {
+    expect(primeiroErro({}, [])).toBeNull();
+    expect(primeiroErro({ servico: "obrigatorio", levantamento: "obrigatorio" }, [])).toEqual({ aba: "geral", campo: "servico" });
+    expect(primeiroErro({ levantamento: "obrigatorio" }, [])).toEqual({ aba: "levantamento", campo: "add" });
+    const erros = { linhas: { l2: { medida: "invalido" as const }, l1: { trabalho: "obrigatorio" as const } } };
+    expect(primeiroErro(erros, ["l1", "l2"])).toEqual({ aba: "levantamento", campo: "linha-l1-trabalho" });
+    expect(primeiroErro(erros, ["l2", "l1"])).toEqual({ aba: "levantamento", campo: "linha-l2-medida" });
+  });
+});
+
+describe("criarNegocioExemplo: levantamento", () => {
+  const lev: LevantamentoNegocio = {
+    data: "2026-10-13", feitoPor: "Ana Ribeiro", estado: "feito", observacoes: "",
+    linhas: [{ divisao: "Cozinha", trabalho: "Bancada nova", medida: 3, unidade: "m", observacoes: "" }],
+  };
+  const criar = (levantamento?: LevantamentoNegocio, n = 1) =>
+    criarNegocioExemplo({ pessoa: marta, servico: "Cozinha", comercial: "Ana Ribeiro", levantamento }, HOJE_EXEMPLO, n);
+
+  it("guarda o levantamento quando há linhas, e sem ele não deixa a propriedade", () => {
+    expect(criar(lev).levantamento).toEqual(lev);
+    expect("levantamento" in criar(undefined, 2)).toBe(false);
+  });
+
+  it("um levantamento por fazer, sem linhas e sem observações, não se guarda; só com observações guarda-se", () => {
+    const vazio: LevantamentoNegocio = { ...lev, estado: "porFazer", linhas: [] };
+    expect("levantamento" in criar(vazio, 3)).toBe(false);
+    expect(criar({ ...vazio, observacoes: "ver telhado" }, 4).levantamento?.observacoes).toBe("ver telhado");
   });
 });
 

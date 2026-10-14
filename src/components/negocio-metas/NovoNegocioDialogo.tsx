@@ -1,22 +1,57 @@
 import { useRef, useState } from "react";
-import { Plus } from "lucide-react";
+import { ChevronRight, Plus, Sparkles, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FormularioNovoNegocio } from "./FormularioNovoNegocio";
 import { FOCO } from "./estilos";
+import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
 import type { DadosCriarNegocio, PessoaOpcao } from "./novoNegocio";
 
 interface NovoNegocioDialogoProps {
   /** As pessoas a escolher; a página monta a lista (esta pasta não importa de Pessoas). */
   pessoas: readonly PessoaOpcao[];
-  /** Chamado ao confirmar, já com o diálogo a fechar. */
+  /** Chamado ao confirmar, já com o painel a fechar. */
   aoCriar: (dados: DadosCriarNegocio) => void;
 }
 
+/** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
+function CabecalhoNovo() {
+  const { t } = useTranslation();
+  return (
+    <SheetHeader className="space-y-2 border-b border-border p-6 text-left">
+      <div className="flex items-start justify-between gap-3">
+        <nav aria-label={t("businessGoals.breadcrumb.label")}>
+          <ol className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <li>{t("businessGoals.title")}</li>
+            <li aria-hidden="true"><ChevronRight className="h-3.5 w-3.5" /></li>
+            <li aria-current="page" className="font-medium text-foreground">{t("businessGoals.new.title")}</li>
+          </ol>
+        </nav>
+        <SheetClose asChild>
+          <Button type="button" variant="ghost" size="icon" aria-label={t("businessGoals.new.close")} className={cn("-mr-2 -mt-2 h-11 w-11", FOCO)}>
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </SheetClose>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <SheetTitle className="text-lg">{t("businessGoals.new.title")}</SheetTitle>
+        <span className="inline-flex items-center gap-1 rounded-sm border border-primary px-1.5 py-0.5 text-xs font-semibold text-primary dark:text-violet-300">
+          <Sparkles className="h-3 w-3" aria-hidden="true" />
+          {t("businessGoals.new.badge")}
+        </span>
+      </div>
+      <SheetDescription>{t("businessGoals.new.description")}</SheetDescription>
+    </SheetHeader>
+  );
+}
+
 /**
- * O botão "Novo negócio" (a única ação principal da página) e o diálogo com o formulário. Ao abrir, o foco vai para o
- * primeiro campo; Esc ou Cancelar fecham e devolvem o foco ao botão. Ao criar, o foco não volta ao botão: quem cria
+ * O botão "Novo negócio" (a única ação principal da página) e o painel lateral com o formulário, igual ao da ficha de
+ * Pessoas (meio ecrã, todo em ecrã estreito). Ao abrir, o foco vai para o primeiro campo; Esc, Cancelar ou Fechar
+ * fecham e devolvem o foco ao botão. Com alterações por gravar, um clique fora não fecha (para não perder o que se
+ * escreveu); Esc e Cancelar fecham sem perguntar, como no Inventário. Ao criar, o foco não volta ao botão: quem cria
  * abre o painel do novo negócio e leva lá o foco. Só exemplo: nada é gravado.
  */
 export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps) {
@@ -25,6 +60,12 @@ export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps
   const botao = useRef<HTMLButtonElement>(null);
   const primeiroCampo = useRef<HTMLButtonElement>(null);
   const criou = useRef(false);
+  const sujo = useRef(false);
+
+  const mudarAberto = (valor: boolean) => {
+    if (valor) sujo.current = false;
+    setAberto(valor);
+  };
 
   const confirmar = (dados: DadosCriarNegocio) => {
     criou.current = true;
@@ -34,28 +75,28 @@ export function NovoNegocioDialogo({ pessoas, aoCriar }: NovoNegocioDialogoProps
 
   return (
     <>
-      <Button ref={botao} type="button" onClick={() => setAberto(true)} className={`min-h-11 ${FOCO}`}>
+      <Button ref={botao} type="button" onClick={() => mudarAberto(true)} className={`min-h-11 ${FOCO}`}>
         <Plus aria-hidden="true" />
         {t("businessGoals.new.open")}
       </Button>
-      <Dialog open={aberto} onOpenChange={setAberto}>
-        <DialogContent
-          hideClose
+      <Sheet open={aberto} onOpenChange={mudarAberto}>
+        <SheetContent
           onOpenAutoFocus={(e) => { e.preventDefault(); primeiroCampo.current?.focus(); }}
+          onInteractOutside={(e) => { if (sujo.current) e.preventDefault(); }}
           onCloseAutoFocus={(e) => {
             e.preventDefault();
             if (!criou.current) botao.current?.focus();
             criou.current = false;
           }}
-          className="max-h-[90vh] max-w-2xl overflow-y-auto motion-reduce:!animate-none motion-reduce:!duration-0"
+          className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
         >
-          <DialogHeader>
-            <DialogTitle>{t("businessGoals.new.title")}</DialogTitle>
-            <DialogDescription>{t("businessGoals.new.description")}</DialogDescription>
-          </DialogHeader>
-          <FormularioNovoNegocio pessoas={pessoas} primeiroCampo={primeiroCampo} aoConfirmar={confirmar} />
-        </DialogContent>
-      </Dialog>
+          <CabecalhoNovo />
+          <FormularioNovoNegocio
+            pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo}
+            aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
+          />
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

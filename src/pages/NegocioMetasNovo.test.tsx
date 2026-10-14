@@ -66,3 +66,33 @@ describe("Novo negócio na página", () => {
     expect(within(metas).getByText("77%")).toBeInTheDocument();
   });
 });
+
+describe("Levantamento no painel do negócio criado", () => {
+  const levantamento = {
+    data: "2026-10-13", feitoPor: "Bruno Costa", estado: "feito" as const, observacoes: "Cliente em casa de manhã",
+    linhas: [{ divisao: "Cozinha", trabalho: "Bancada nova", medida: 3.5, unidade: "m", observacoes: "Ver canos" }],
+  };
+  const abrirPainel = (comLevantamento: boolean) => {
+    const criado = criarNegocioNovo(
+      {
+        pessoa: { id: "p-marta", nome: "Marta Silveira" }, servico: "Cozinha", comercial: "Ana Ribeiro",
+        ...(comLevantamento ? { levantamento } : {}),
+      }, HOJE_EXEMPLO,
+    );
+    render(<MemoryRouter initialEntries={[`/?open=${criado.id}`]}><NegocioMetas /></MemoryRouter>);
+    return screen.getByRole("dialog");
+  };
+
+  it("mostra a secção Levantamento no Resumo, só de leitura, com o estado, a data, quem fez e as linhas", () => {
+    const painel = abrirPainel(true);
+    const secao = within(painel).getByRole("heading", { name: "Levantamento" }).closest("section")!;
+    expect(within(secao).getByText("Feito · 13/10/2026 · Bruno Costa")).toBeInTheDocument();
+    expect(within(secao).getByRole("listitem")).toHaveTextContent("Cozinha: Bancada nova, 3.5 m (Ver canos)");
+    expect(within(secao).getByText("Cliente em casa de manhã")).toBeInTheDocument();
+  });
+
+  it("sem levantamento o Resumo não traz a secção", () => {
+    const painel = abrirPainel(false);
+    expect(within(painel).queryByRole("heading", { name: "Levantamento" })).not.toBeInTheDocument();
+  });
+});
