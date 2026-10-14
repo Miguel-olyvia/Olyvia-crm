@@ -42,6 +42,7 @@ import {
   ScanBarcode,
   ArrowLeftRight,
   TrendingUp,
+  IdCard,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -296,13 +297,15 @@ export const menuSections: MenuSection[] = [
     id: "users",
     icon: UserCog,
     labelKey: "sidebar.users",
-    paths: ["/users", "/roles", "/utilizadores-perfis", "/export-audit"],
+    paths: ["/users", "/roles", "/utilizadores-perfis", "/rh-exemplo/pessoas", "/export-audit"],
     permissions: ["users.view"],
     items: [
       { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
       { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
       // Exemplo estático por agora (junta Utilizadores e Roles); as páginas reais continuam acima.
       { to: "/utilizadores-perfis", icon: UserCog, labelKey: "sidebar.usersProfiles", permission: "users.view" },
+      // Exemplo estático dos Recursos Humanos (dados em memória, sem base).
+      { to: "/rh-exemplo/pessoas", icon: IdCard, labelKey: "sidebar.rhExemplo", permission: "users.view" },
       { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],
   },

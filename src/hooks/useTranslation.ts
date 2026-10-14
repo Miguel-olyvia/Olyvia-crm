@@ -9,6 +9,7 @@ import { inventoryNavTranslations } from "@/translations/inventoryNav";
 import { negocioMetasTranslations } from "@/translations/negocioMetas";
 import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
 import { utilizadoresPerfisTranslations } from "@/translations/utilizadoresPerfis";
+import { rhExemploTranslations } from "@/translations/rhExemplo";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -44,6 +45,11 @@ Object.keys(pessoasPaginaTranslations).forEach((lang) => {
 // Página "Utilizadores e perfis" — módulo próprio, mesmo padrão.
 Object.keys(utilizadoresPerfisTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...utilizadoresPerfisTranslations[lang as keyof typeof utilizadoresPerfisTranslations] };
+});
+
+// Ecrãs de Recursos Humanos de exemplo (/rh-exemplo) — módulo próprio, mesmo padrão.
+Object.keys(rhExemploTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploTranslations[lang as keyof typeof rhExemploTranslations] };
 });
 
 export const useTranslation = () => {

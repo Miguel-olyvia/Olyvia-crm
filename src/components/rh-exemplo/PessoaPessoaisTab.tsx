@@ -1,0 +1,1175 @@
+/**
+ * Detalhes pessoais: sete blocos, cada um com a sua permissao.
+ *
+ * A REGRA DE VISIBILIDADE
+ * -----------------------
+ * Um bloco sem permissao de leitura NAO aparece -- nao aparece vazio, nao
+ * aparece com "sem acesso". Mostrar sete molduras cinzentas a dizer que ha ali
+ * dados sensiveis ja e informacao a mais, e enche o ecra de quem so tem uma
+ * das permissoes. Quem tem `hr.pessoas.pessoais.view` mas nao
+ * `hr.pessoas.saude.view` ve seis blocos e nunca soube que o setimo existe.
+ *
+ * A base diz o mesmo por outra via: cada satelite tem a sua politica de SELECT
+ * e devolve zero linhas a quem nao tem a permissao. Esta camada e a cortesia
+ * visual; a garantia esta la.
+ *
+ * O NISS e o IBAN tem componentes proprios porque nao sao campos normais: um
+ * revela-se por RPC auditada, o outro nunca se revela.
+ *
+ * O BLOCO 1 GRAVA EM DUAS TABELAS. O e-mail pessoal mudou de dono: passou de
+ * `pessoas_dados_pessoais.email_comunicacoes` (largada em 20261122060000)
+ * para `pessoas.email_pessoal`, a mesma coluna que ja existia e que o
+ * separador de Detalhes laborais mostrava. As duas tabelas tem politicas de
+ * UPDATE com permissoes diferentes (`hr.pessoas.edit` para `pessoas`,
+ * `hr.pessoas.pessoais.edit` para `pessoas_dados_pessoais`), por isso
+ * `gravarGeral` so escreve a tabela cujos campos mudaram de facto -- nunca as
+ * duas incondicionalmente -- e para na primeira escrita que falhar: primeiro
+ * `pessoas_dados_pessoais`, depois `pessoas`.
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { CreditCard, IdCard, Loader2, MapPin, Phone, Receipt, User } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { usePessoaDuplicados } from "@/components/rh-exemplo/hooks/usePessoaDuplicados";
+import { nifValido, nissValido } from "@/components/rh-exemplo/lib/identificadoresPt";
+import { toast } from "@/lib/toast";
+import { PessoaContaBancariaField } from "@/components/rh-exemplo/PessoaContaBancariaField";
+import { CountrySelect } from "@/components/rh-exemplo/CountrySelect";
+import { PessoaNissField } from "@/components/rh-exemplo/PessoaNissField";
+import { PessoaSaudeCard } from "@/components/rh-exemplo/PessoaSaudeCard";
+import { PessoaFardamentoCard } from "@/components/rh-exemplo/PessoaFardamentoCard";
+import {
+  CONJUGE_SITUACOES_PROFISSIONAIS,
+  ESTADOS_CIVIS,
+  GENEROS,
+  HABILITACOES_ACADEMICAS,
+  TIPOS_DOCUMENTO,
+  type ConjugeSituacaoProfissional,
+  type EstadoCivil,
+  type Genero,
+  type HabilitacaoAcademica,
+  type PessoaContactoEmergencia,
+  type PessoaDadosBancarios,
+  type PessoaDadosPessoais,
+  type PessoaDadosSaude,
+  type PessoaFardamento,
+  type PessoaIdentificacao,
+  type FormatoConta,
+  type PessoaMorada,
+  type TipoDocumento,
+  type Pessoa,
+} from "@/components/rh-exemplo/tipos";
+
+const SEM_ESCOLHA = "__sem_escolha__";
+
+/** Permissoes que este separador consulta, todas resolvidas por quem o monta. */
+export interface PessoaPessoaisPermissoes {
+  pessoaisView: boolean;
+  pessoaisEdit: boolean;
+  identificacaoView: boolean;
+  identificacaoEdit: boolean;
+  identificacaoReveal: boolean;
+  moradaView: boolean;
+  moradaEdit: boolean;
+  emergenciaView: boolean;
+  emergenciaEdit: boolean;
+  bancariosView: boolean;
+  bancariosEdit: boolean;
+  saudeView: boolean;
+  saudeEdit: boolean;
+  /** `hr.pessoas.edit` -- o e-mail pessoal grava no nucleo `pessoas`, nao aqui. */
+  nucleoEdit: boolean;
+  /** `hr.pessoas.laborais.*` -- o fardamento reusa esta permissao, ver o
+   *  comentario do tipo `PessoaFardamento`. */
+  laboraisView: boolean;
+  laboraisEdit: boolean;
+}
+
+/**
+ * Erro inline de NIF/NISS: `ficha` so existe quando o numero ja esta noutra
+ * ficha da organizacao -- diz-se QUAL (nome e ligacao), porque e o RH quem
+ * decide se e a mesma pessoa duplicada ou uma gralha.
+ */
+interface ErroNumero {
+  texto: string;
+  ficha?: { id: string; nome: string };
+}
+
+function ErroDeNumero({ id, erro }: { id: string; erro: ErroNumero }) {
+  const { t } = useTranslation();
+  return (
+    // role=alert: o erro aparece depois de carregar em Gravar, e o leitor de
+    // ecra tem de o anunciar sem o RH o ir procurar.
+    <p id={id} role="alert" className="text-xs text-destructive">
+      {erro.texto}
+      {erro.ficha && (
+        <>
+          {" "}
+          <Link to={`/rh-exemplo/pessoas/${erro.ficha.id}`} className="font-medium underline underline-offset-2">
+            {t("hr.duplicados.abrirFicha")}
+          </Link>
+        </>
+      )}
+    </p>
+  );
+}
+
+interface PessoaPessoaisTabProps {
+  /**
+   * A ficha e a organizacao em causa, para verificar se um NIF/NISS novo ja
+   * esta noutra ficha antes de o gravar. Ausentes, essa verificacao nao se faz
+   * (a validacao do digito de controlo continua).
+   */
+  pessoaId?: string;
+  organizationId?: string;
+  dadosPessoais: PessoaDadosPessoais | null;
+  identificacao: PessoaIdentificacao | null;
+  morada: PessoaMorada | null;
+  emergencia: PessoaContactoEmergencia | null;
+  bancarios: PessoaDadosBancarios | null;
+  saude: PessoaDadosSaude | null;
+  fardamento: PessoaFardamento | null;
+  /** `pessoas.email_pessoal` -- vive no nucleo, nao em `pessoas_dados_pessoais`. */
+  emailPessoal: string | null;
+  permissoes: PessoaPessoaisPermissoes;
+  saving: boolean;
+  onGuardarDadosPessoais: (patch: Partial<PessoaDadosPessoais>) => Promise<string | null>;
+  onGuardarPessoa: (patch: Partial<Pessoa>) => Promise<string | null>;
+  onGuardarIdentificacao: (patch: Partial<PessoaIdentificacao>) => Promise<string | null>;
+  onGuardarMorada: (patch: Partial<PessoaMorada>) => Promise<string | null>;
+  onGuardarEmergencia: (patch: Partial<PessoaContactoEmergencia>) => Promise<string | null>;
+  onGuardarSaude: (patch: Partial<PessoaDadosSaude>) => Promise<string | null>;
+  onGuardarFardamento: (patch: Partial<PessoaFardamento>) => Promise<string | null>;
+  onRevelarNiss: () => Promise<string | null>;
+  onDefinirNiss: (niss: string) => Promise<string | null>;
+  onDefinirConta: (args: {
+    formato: FormatoConta;
+    conta: string;
+    titular?: string | null;
+    banco?: string | null;
+    swift?: string | null;
+  }) => Promise<string | null>;
+  /** Corrige so o BIC (`rpc_hr_definir_bic`); sem ela a ficha nao oferece a edicao isolada. */
+  onDefinirBic?: (bic: string | null) => Promise<string | null>;
+}
+
+/** Texto -> valor de coluna: string vazia e ausencia, nao string vazia. */
+function ouNull(valor: string): string | null {
+  return valor.trim() === "" ? null : valor.trim();
+}
+
+function numeroOuNull(valor: string): number | null {
+  if (valor.trim() === "") return null;
+  const numero = Number(valor);
+  return Number.isNaN(numero) ? null : numero;
+}
+
+/** Rodape com o botao de gravar, mostrado so quando ha algo por gravar. */
+function AccoesBloco({
+  visivel,
+  saving,
+  onGravar,
+  onCancelar,
+}: {
+  visivel: boolean;
+  saving: boolean;
+  onGravar: () => void;
+  onCancelar: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!visivel) return null;
+  return (
+    <div className="flex gap-2 pt-1">
+      <Button size="sm" onClick={onGravar} disabled={saving}>
+        {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+        {t("employees.form.update")}
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onCancelar} disabled={saving}>
+        {t("employees.form.cancel")}
+      </Button>
+    </div>
+  );
+}
+
+export function PessoaPessoaisTab({
+  dadosPessoais,
+  identificacao,
+  morada,
+  emergencia,
+  pessoaId,
+  organizationId,
+  bancarios,
+  saude,
+  fardamento,
+  emailPessoal,
+  permissoes,
+  saving,
+  onGuardarDadosPessoais,
+  onGuardarPessoa,
+  onGuardarIdentificacao,
+  onGuardarMorada,
+  onGuardarEmergencia,
+  onGuardarSaude,
+  onGuardarFardamento,
+  onRevelarNiss,
+  onDefinirNiss,
+  onDefinirConta,
+  onDefinirBic,
+}: PessoaPessoaisTabProps) {
+  const { t } = useTranslation();
+
+  // -- Bloco 1 e 7: dados pessoais (partilham a mesma linha na base) --------
+  const geralOriginal = useMemo(
+    () => ({
+      data_nascimento: dadosPessoais?.data_nascimento ?? "",
+      ocultar_aniversario: dadosPessoais?.ocultar_aniversario ?? false,
+      genero: dadosPessoais?.genero ?? SEM_ESCOLHA,
+      nacionalidade: dadosPessoais?.nacionalidade ?? "",
+      telefone_pessoal: dadosPessoais?.telefone_pessoal ?? "",
+      email_pessoal: emailPessoal ?? "",
+      estado_civil: dadosPessoais?.estado_civil ?? SEM_ESCOLHA,
+      dependentes:
+        dadosPessoais?.dependentes === null || dadosPessoais?.dependentes === undefined
+          ? ""
+          : String(dadosPessoais.dependentes),
+      irs:
+        dadosPessoais?.irs_retencao_percentagem === null ||
+        dadosPessoais?.irs_retencao_percentagem === undefined
+          ? ""
+          : String(dadosPessoais.irs_retencao_percentagem),
+      naturalidade_freguesia: dadosPessoais?.naturalidade_freguesia ?? "",
+      naturalidade_concelho: dadosPessoais?.naturalidade_concelho ?? "",
+      naturalidade_pais: dadosPessoais?.naturalidade_pais ?? "",
+      conjuge_situacao_profissional: dadosPessoais?.conjuge_situacao_profissional ?? SEM_ESCOLHA,
+      dependentes_deficientes:
+        dadosPessoais?.dependentes_deficientes === null ||
+        dadosPessoais?.dependentes_deficientes === undefined
+          ? ""
+          : String(dadosPessoais.dependentes_deficientes),
+      habilitacao_academica: dadosPessoais?.habilitacao_academica ?? SEM_ESCOLHA,
+      habilitacao_data_conclusao: dadosPessoais?.habilitacao_data_conclusao ?? "",
+    }),
+    [dadosPessoais, emailPessoal],
+  );
+  const [geral, setGeral] = useState(geralOriginal);
+  useEffect(() => setGeral(geralOriginal), [geralOriginal]);
+  const geralAlterado = useMemo(
+    () => JSON.stringify(geral) !== JSON.stringify(geralOriginal),
+    [geral, geralOriginal],
+  );
+
+  const gravarGeral = async () => {
+    // Duas tabelas, duas permissoes: so se escreve a que mudou de facto, e
+    // para-se na primeira que falhar. Dados pessoais primeiro, nucleo a seguir
+    // -- ver o cabecalho do ficheiro.
+    const mudouDadosPessoais =
+      geral.data_nascimento !== geralOriginal.data_nascimento ||
+      geral.ocultar_aniversario !== geralOriginal.ocultar_aniversario ||
+      geral.genero !== geralOriginal.genero ||
+      geral.nacionalidade !== geralOriginal.nacionalidade ||
+      geral.telefone_pessoal !== geralOriginal.telefone_pessoal ||
+      geral.estado_civil !== geralOriginal.estado_civil ||
+      geral.dependentes !== geralOriginal.dependentes ||
+      geral.irs !== geralOriginal.irs ||
+      geral.naturalidade_freguesia !== geralOriginal.naturalidade_freguesia ||
+      geral.naturalidade_concelho !== geralOriginal.naturalidade_concelho ||
+      geral.naturalidade_pais !== geralOriginal.naturalidade_pais ||
+      geral.conjuge_situacao_profissional !== geralOriginal.conjuge_situacao_profissional ||
+      geral.dependentes_deficientes !== geralOriginal.dependentes_deficientes ||
+      geral.habilitacao_academica !== geralOriginal.habilitacao_academica ||
+      geral.habilitacao_data_conclusao !== geralOriginal.habilitacao_data_conclusao;
+    const mudouEmail = ouNull(geral.email_pessoal) !== (emailPessoal ?? null);
+
+    if (mudouDadosPessoais) {
+      const erro = await onGuardarDadosPessoais({
+        data_nascimento: ouNull(geral.data_nascimento),
+        ocultar_aniversario: geral.ocultar_aniversario,
+        genero: geral.genero === SEM_ESCOLHA ? null : (geral.genero as Genero),
+        nacionalidade: ouNull(geral.nacionalidade)?.toUpperCase() ?? null,
+        telefone_pessoal: ouNull(geral.telefone_pessoal),
+        estado_civil: geral.estado_civil === SEM_ESCOLHA ? null : (geral.estado_civil as EstadoCivil),
+        dependentes: numeroOuNull(geral.dependentes),
+        irs_retencao_percentagem: numeroOuNull(geral.irs),
+        naturalidade_freguesia: ouNull(geral.naturalidade_freguesia),
+        naturalidade_concelho: ouNull(geral.naturalidade_concelho),
+        naturalidade_pais: ouNull(geral.naturalidade_pais)?.toUpperCase() ?? null,
+        conjuge_situacao_profissional:
+          geral.conjuge_situacao_profissional === SEM_ESCOLHA
+            ? null
+            : (geral.conjuge_situacao_profissional as ConjugeSituacaoProfissional),
+        dependentes_deficientes: numeroOuNull(geral.dependentes_deficientes),
+        habilitacao_academica:
+          geral.habilitacao_academica === SEM_ESCOLHA
+            ? null
+            : (geral.habilitacao_academica as HabilitacaoAcademica),
+        habilitacao_data_conclusao: ouNull(geral.habilitacao_data_conclusao),
+      });
+      if (erro) {
+        toast.error(erro);
+        return;
+      }
+    }
+
+    if (mudouEmail) {
+      const erro = await onGuardarPessoa({ email_pessoal: ouNull(geral.email_pessoal) });
+      if (erro) {
+        toast.error(erro);
+        return;
+      }
+    }
+
+    toast.success(t("hr.sucesso.guardado"));
+  };
+
+  // -- Bloco 2: identificacao ----------------------------------------------
+  const idOriginal = useMemo(
+    () => ({
+      tipo_documento: identificacao?.tipo_documento ?? SEM_ESCOLHA,
+      numero_documento: identificacao?.numero_documento ?? "",
+      validade_documento: identificacao?.validade_documento ?? "",
+      nif: identificacao?.nif ?? "",
+      carta_conducao_numero: identificacao?.carta_conducao_numero ?? "",
+      carta_conducao_categorias: identificacao?.carta_conducao_categorias ?? "",
+      carta_conducao_validade: identificacao?.carta_conducao_validade ?? "",
+    }),
+    [identificacao],
+  );
+  const [ident, setIdent] = useState(idOriginal);
+  useEffect(() => setIdent(idOriginal), [idOriginal]);
+  const identAlterado = useMemo(
+    () => JSON.stringify(ident) !== JSON.stringify(idOriginal),
+    [ident, idOriginal],
+  );
+  const [nissNovo, setNissNovo] = useState("");
+  const [erroNif, setErroNif] = useState<ErroNumero | null>(null);
+  const [erroNiss, setErroNiss] = useState<ErroNumero | null>(null);
+  const { verificar: verificarDuplicados } = usePessoaDuplicados();
+
+  /**
+   * Um numero novo so se grava se o digito de controlo bate e se nenhuma outra
+   * ficha da organizacao o tem -- a mesma regra do convite e do formulario de
+   * criar. Quem decide por ultimo e a base (trigger do digito de controlo e
+   * indices unicos por organizacao); isto e para o RH ver a razao junto do
+   * campo, com a ficha em causa, em vez de um erro seco depois de gravar.
+   *
+   * Se a verificacao de duplicados nao puder correr (sem permissao, travao de
+   * tentativas, falha de rede) nao se bloqueia a gravacao: os indices unicos
+   * apanham o resto.
+   */
+  const numeroBloqueado = async (
+    campo: "nif" | "niss",
+    valor: string,
+  ): Promise<ErroNumero | null> => {
+    const valido = campo === "nif" ? nifValido(valor) : nissValido(valor);
+    if (!valido) {
+      return {
+        texto: t(campo === "nif" ? "hr.convite.erro.nifInvalido" : "hr.convite.erro.nissInvalido"),
+      };
+    }
+    if (!pessoaId || !organizationId) return null;
+    const candidatos = await verificarDuplicados({
+      organizationId,
+      nif: campo === "nif" ? valor : null,
+      niss: campo === "niss" ? valor : null,
+      excluirPessoaId: pessoaId,
+    });
+    const travao = (candidatos ?? []).find(
+      (c) => c.forca === "travao" && c.campoCoincidente === campo,
+    );
+    if (!travao) return null;
+    return {
+      texto: t(campo === "nif" ? "hr.duplicados.nifNaFicha" : "hr.duplicados.nissNaFicha", {
+        nome: travao.nomeCompleto,
+      }),
+      ficha: { id: travao.pessoaId, nome: travao.nomeCompleto },
+    };
+  };
+
+  /**
+   * A verificacao (rede) e a gravacao a seguir correm uma de cada vez: o botao
+   * so ficava desactivado por `saving`, que nao cobre o `await` da verificacao,
+   * e um duplo clique disparava duas verificacoes e duas gravacoes.
+   */
+  const [aVerificarNumero, setAVerificarNumero] = useState(false);
+  const aVerificarRef = useRef(false);
+  const umaDeCadaVez = async (accao: () => Promise<void>) => {
+    if (aVerificarRef.current) return;
+    aVerificarRef.current = true;
+    setAVerificarNumero(true);
+    try {
+      await accao();
+    } finally {
+      aVerificarRef.current = false;
+      setAVerificarNumero(false);
+    }
+  };
+
+  const gravarIdent = () => umaDeCadaVez(gravarIdentificacao);
+  const gravarNiss = () => umaDeCadaVez(gravarNissNovo);
+
+  const gravarIdentificacao = async () => {
+    // So se valida o NIF quando mudou e nao ficou vazio: apagar um NIF e
+    // legitimo, e uma ficha antiga com NIF invalido continua editavel nos
+    // outros campos.
+    const nifNovo = ident.nif.replace(/\s+/g, "");
+    if (ident.nif.trim() !== idOriginal.nif.trim() && nifNovo !== "") {
+      const bloqueio = await numeroBloqueado("nif", nifNovo);
+      if (bloqueio) {
+        setErroNif(bloqueio);
+        // O leitor de ecra anuncia o erro (role=alert); o foco volta ao campo.
+        document.getElementById("hr-nif")?.focus();
+        return;
+      }
+    }
+    setErroNif(null);
+    const erro = await onGuardarIdentificacao({
+      tipo_documento:
+        ident.tipo_documento === SEM_ESCOLHA ? null : (ident.tipo_documento as TipoDocumento),
+      numero_documento: ouNull(ident.numero_documento),
+      validade_documento: ouNull(ident.validade_documento),
+      nif: ouNull(nifNovo),
+      carta_conducao_numero: ouNull(ident.carta_conducao_numero),
+      carta_conducao_categorias: ouNull(ident.carta_conducao_categorias),
+      carta_conducao_validade: ouNull(ident.carta_conducao_validade),
+    });
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    toast.success(t("hr.sucesso.guardado"));
+  };
+
+  const gravarNissNovo = async () => {
+    const nissLimpo = nissNovo.replace(/\s+/g, "");
+    const bloqueio = await numeroBloqueado("niss", nissLimpo);
+    if (bloqueio) {
+      setErroNiss(bloqueio);
+      document.getElementById("hr-niss-novo")?.focus();
+      return;
+    }
+    setErroNiss(null);
+    const erro = await onDefinirNiss(nissLimpo);
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    toast.success(t("hr.sucesso.guardado"));
+    setNissNovo("");
+  };
+
+  // -- Bloco 3: morada ------------------------------------------------------
+  const moradaOriginal = useMemo(
+    () => ({
+      linha1: morada?.linha1 ?? "",
+      linha2: morada?.linha2 ?? "",
+      codigo_postal: morada?.codigo_postal ?? "",
+      localidade: morada?.localidade ?? "",
+      distrito: morada?.distrito ?? "",
+      pais: morada?.pais ?? "PT",
+    }),
+    [morada],
+  );
+  const [moradaDraft, setMoradaDraft] = useState(moradaOriginal);
+  useEffect(() => setMoradaDraft(moradaOriginal), [moradaOriginal]);
+  const moradaAlterada = useMemo(
+    () => JSON.stringify(moradaDraft) !== JSON.stringify(moradaOriginal),
+    [moradaDraft, moradaOriginal],
+  );
+
+  const gravarMorada = async () => {
+    if (moradaDraft.linha1.trim() === "") {
+      toast.error(t("hr.campos.linha1"));
+      return;
+    }
+    const erro = await onGuardarMorada({
+      linha1: moradaDraft.linha1.trim(),
+      linha2: ouNull(moradaDraft.linha2),
+      codigo_postal: ouNull(moradaDraft.codigo_postal),
+      localidade: ouNull(moradaDraft.localidade),
+      distrito: ouNull(moradaDraft.distrito),
+      pais: (ouNull(moradaDraft.pais) ?? "PT").toUpperCase(),
+    });
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    toast.success(t("hr.sucesso.guardado"));
+  };
+
+  // -- Bloco 5: contacto de emergencia -------------------------------------
+  const emergenciaOriginal = useMemo(
+    () => ({
+      nome: emergencia?.nome ?? "",
+      relacao: emergencia?.relacao ?? "",
+      telefone: emergencia?.telefone ?? "",
+      telefone_alternativo: emergencia?.telefone_alternativo ?? "",
+      email: emergencia?.email ?? "",
+    }),
+    [emergencia],
+  );
+  const [emergenciaDraft, setEmergenciaDraft] = useState(emergenciaOriginal);
+  useEffect(() => setEmergenciaDraft(emergenciaOriginal), [emergenciaOriginal]);
+  const emergenciaAlterada = useMemo(
+    () => JSON.stringify(emergenciaDraft) !== JSON.stringify(emergenciaOriginal),
+    [emergenciaDraft, emergenciaOriginal],
+  );
+
+  const gravarEmergencia = async () => {
+    if (emergenciaDraft.nome.trim() === "" || emergenciaDraft.telefone.trim() === "") {
+      toast.error(t("hr.pessoais.emergencia"));
+      return;
+    }
+    const erro = await onGuardarEmergencia({
+      nome: emergenciaDraft.nome.trim(),
+      relacao: ouNull(emergenciaDraft.relacao),
+      telefone: emergenciaDraft.telefone.trim(),
+      telefone_alternativo: ouNull(emergenciaDraft.telefone_alternativo),
+      email: ouNull(emergenciaDraft.email),
+    });
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    toast.success(t("hr.sucesso.guardado"));
+  };
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-2">
+      {permissoes.pessoaisView && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <User className="h-4 w-4 text-muted-foreground" />
+              {t("hr.pessoais.geral")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-nascimento">{t("employees.form.birthDate")}</Label>
+                <Input
+                  id="hr-nascimento"
+                  type="date"
+                  value={geral.data_nascimento}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, data_nascimento: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-genero">{t("hr.campos.genero")}</Label>
+                <Select
+                  value={geral.genero}
+                  disabled={!permissoes.pessoaisEdit}
+                  onValueChange={(v) => setGeral({ ...geral, genero: v })}
+                >
+                  <SelectTrigger id="hr-genero">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {GENEROS.map((genero) => (
+                      <SelectItem key={genero} value={genero}>
+                        {t(`hr.genero.${genero}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-nacionalidade">{t("hr.campos.nacionalidade")}</Label>
+                {/* A mesma fonte e o mesmo componente do pais da morada: para
+                    a base ambos sao duas letras maiusculas. */}
+                <CountrySelect
+                  id="hr-nacionalidade"
+                  value={geral.nacionalidade}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(codigo) => setGeral({ ...geral, nacionalidade: codigo })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-telefone-pessoal">{t("hr.campos.telefonePessoal")}</Label>
+                <Input
+                  id="hr-telefone-pessoal"
+                  value={geral.telefone_pessoal}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, telefone_pessoal: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-email-pessoal">{t("hr.campos.emailPessoal")}</Label>
+                <Input
+                  id="hr-email-pessoal"
+                  type="email"
+                  value={geral.email_pessoal}
+                  disabled={!permissoes.nucleoEdit}
+                  onChange={(e) => setGeral({ ...geral, email_pessoal: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {/* Naturalidade: atributo de nascimento, singular -- nao vive na
+                tabela de moradas (essa e plural e tem tipo). */}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-naturalidade-freguesia">
+                  {t("hr.campos.naturalidadeFreguesia")}
+                </Label>
+                <Input
+                  id="hr-naturalidade-freguesia"
+                  value={geral.naturalidade_freguesia}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, naturalidade_freguesia: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-naturalidade-concelho">
+                  {t("hr.campos.naturalidadeConcelho")}
+                </Label>
+                <Input
+                  id="hr-naturalidade-concelho"
+                  value={geral.naturalidade_concelho}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, naturalidade_concelho: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-naturalidade-pais">{t("hr.campos.naturalidadePais")}</Label>
+                <CountrySelect
+                  id="hr-naturalidade-pais"
+                  value={geral.naturalidade_pais}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(codigo) => setGeral({ ...geral, naturalidade_pais: codigo })}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="hr-ocultar-aniversario"
+                checked={geral.ocultar_aniversario}
+                disabled={!permissoes.pessoaisEdit}
+                onCheckedChange={(v) => setGeral({ ...geral, ocultar_aniversario: v === true })}
+              />
+              <Label htmlFor="hr-ocultar-aniversario" className="font-normal">
+                {t("hr.campos.ocultarAniversario")}
+              </Label>
+            </div>
+
+            {/* Este bloco passou a ter campos de DUAS tabelas, com permissoes
+                diferentes: os dados gerais exigem hr.pessoas.pessoais.edit, o
+                e-mail pessoal exige hr.pessoas.edit. Exigir so a primeira
+                deixava quem tem a segunda a escrever no campo sem nunca lhe
+                aparecer o botao de gravar -- alteracao perdida, sem erro.
+                O bloco fiscal la em baixo NAO leva esta alternativa: os campos
+                dele sao todos de pessoais.edit, e um botao a aparecer sobre
+                campos desactivados seria pior do que nao aparecer. */}
+            <AccoesBloco
+              visivel={(permissoes.pessoaisEdit || permissoes.nucleoEdit) && geralAlterado}
+              saving={saving}
+              onGravar={gravarGeral}
+              onCancelar={() => setGeral(geralOriginal)}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {permissoes.identificacaoView && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <IdCard className="h-4 w-4 text-muted-foreground" />
+              {t("hr.pessoais.documento")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-tipo-documento">{t("hr.campos.tipoDocumento")}</Label>
+                <Select
+                  value={ident.tipo_documento}
+                  disabled={!permissoes.identificacaoEdit}
+                  onValueChange={(v) => setIdent({ ...ident, tipo_documento: v })}
+                >
+                  <SelectTrigger id="hr-tipo-documento">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {TIPOS_DOCUMENTO.map((tipo) => (
+                      <SelectItem key={tipo} value={tipo}>
+                        {t(`hr.tipoDocumento.${tipo}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-numero-documento">{t("hr.campos.numeroDocumento")}</Label>
+                <Input
+                  id="hr-numero-documento"
+                  value={ident.numero_documento}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) => setIdent({ ...ident, numero_documento: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-validade-documento">{t("hr.campos.validadeDocumento")}</Label>
+                <Input
+                  id="hr-validade-documento"
+                  type="date"
+                  value={ident.validade_documento}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) => setIdent({ ...ident, validade_documento: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-nif">{t("hr.campos.nif")}</Label>
+                <Input
+                  id="hr-nif"
+                  inputMode="numeric"
+                  maxLength={11}
+                  value={ident.nif}
+                  disabled={!permissoes.identificacaoEdit}
+                  aria-invalid={erroNif ? true : undefined}
+                  aria-describedby={erroNif ? "hr-nif-erro" : undefined}
+                  className={erroNif ? "border-destructive" : undefined}
+                  onChange={(e) => {
+                    setErroNif(null);
+                    setIdent({ ...ident, nif: e.target.value });
+                  }}
+                />
+                {erroNif && <ErroDeNumero id="hr-nif-erro" erro={erroNif} />}
+              </div>
+            </div>
+
+            <PessoaNissField
+              ultimos4={identificacao?.niss_ultimos4 ?? null}
+              podeRevelar={permissoes.identificacaoReveal}
+              onRevelar={onRevelarNiss}
+            />
+
+            {permissoes.identificacaoEdit && (
+              <div className="flex items-end gap-2">
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="hr-niss-novo">{t("hr.campos.niss")}</Label>
+                  <Input
+                    id="hr-niss-novo"
+                    inputMode="numeric"
+                    maxLength={11}
+                    placeholder="00000000000"
+                    value={nissNovo}
+                    aria-invalid={erroNiss ? true : undefined}
+                    aria-describedby={erroNiss ? "hr-niss-erro" : undefined}
+                    className={erroNiss ? "border-destructive" : undefined}
+                    onChange={(e) => {
+                      setErroNiss(null);
+                      setNissNovo(e.target.value);
+                    }}
+                  />
+                  {erroNiss && <ErroDeNumero id="hr-niss-erro" erro={erroNiss} />}
+                </div>
+                {/* Nao depende so de ter onze algarismos: um NISS com o digito
+                    de controlo errado tambem tem onze, e e a validacao ao
+                    clicar que diz porque nao serve. */}
+                <Button
+                  size="sm"
+                  onClick={gravarNiss}
+                  disabled={saving || aVerificarNumero || nissNovo.trim() === ""}
+                >
+                  {(saving || aVerificarNumero) && (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  )}
+                  {t("employees.form.update")}
+                </Button>
+              </div>
+            )}
+
+            {/* Carta de conducao: coexiste com o CC/passaporte acima, nao os
+                substitui -- por isso e um bloco proprio, nao um valor de
+                `tipo_documento`. */}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-carta-numero">{t("hr.campos.cartaConducaoNumero")}</Label>
+                <Input
+                  id="hr-carta-numero"
+                  value={ident.carta_conducao_numero}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) => setIdent({ ...ident, carta_conducao_numero: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-carta-categorias">
+                  {t("hr.campos.cartaConducaoCategorias")}
+                </Label>
+                <Input
+                  id="hr-carta-categorias"
+                  placeholder="B, B1"
+                  value={ident.carta_conducao_categorias}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) =>
+                    setIdent({ ...ident, carta_conducao_categorias: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-carta-validade">{t("hr.campos.cartaConducaoValidade")}</Label>
+                <Input
+                  id="hr-carta-validade"
+                  type="date"
+                  value={ident.carta_conducao_validade}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) =>
+                    setIdent({ ...ident, carta_conducao_validade: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+
+            <AccoesBloco
+              visivel={permissoes.identificacaoEdit && identAlterado}
+              saving={saving || aVerificarNumero}
+              onGravar={gravarIdent}
+              onCancelar={() => setIdent(idOriginal)}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {permissoes.moradaView && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MapPin className="h-4 w-4 text-muted-foreground" />
+              {t("hr.pessoais.morada")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="hr-linha1">{t("hr.campos.linha1")}</Label>
+              <Input
+                id="hr-linha1"
+                value={moradaDraft.linha1}
+                disabled={!permissoes.moradaEdit}
+                onChange={(e) => setMoradaDraft({ ...moradaDraft, linha1: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hr-linha2">{t("hr.campos.linha2")}</Label>
+              <Input
+                id="hr-linha2"
+                value={moradaDraft.linha2}
+                disabled={!permissoes.moradaEdit}
+                onChange={(e) => setMoradaDraft({ ...moradaDraft, linha2: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-codigo-postal">{t("employees.form.postalCode")}</Label>
+                <Input
+                  id="hr-codigo-postal"
+                  value={moradaDraft.codigo_postal}
+                  disabled={!permissoes.moradaEdit}
+                  onChange={(e) => setMoradaDraft({ ...moradaDraft, codigo_postal: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-localidade">{t("hr.campos.localidade")}</Label>
+                <Input
+                  id="hr-localidade"
+                  value={moradaDraft.localidade}
+                  disabled={!permissoes.moradaEdit}
+                  onChange={(e) => setMoradaDraft({ ...moradaDraft, localidade: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-distrito">{t("employees.form.district")}</Label>
+                <Input
+                  id="hr-distrito"
+                  value={moradaDraft.distrito}
+                  disabled={!permissoes.moradaEdit}
+                  onChange={(e) => setMoradaDraft({ ...moradaDraft, distrito: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-pais">{t("employees.form.country")}</Label>
+                <CountrySelect
+                  id="hr-pais"
+                  value={moradaDraft.pais}
+                  disabled={!permissoes.moradaEdit}
+                  onChange={(codigo) => setMoradaDraft({ ...moradaDraft, pais: codigo })}
+                />
+              </div>
+            </div>
+            <AccoesBloco
+              visivel={permissoes.moradaEdit && moradaAlterada}
+              saving={saving}
+              onGravar={gravarMorada}
+              onCancelar={() => setMoradaDraft(moradaOriginal)}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {permissoes.saudeView && (
+        <PessoaSaudeCard
+          saude={saude}
+          podeEditar={permissoes.saudeEdit}
+          saving={saving}
+          onGuardar={onGuardarSaude}
+        />
+      )}
+
+      {permissoes.emergenciaView && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Phone className="h-4 w-4 text-muted-foreground" />
+              {t("hr.pessoais.emergencia")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-emergencia-nome">{t("employees.form.emergencyContactName")}</Label>
+                <Input
+                  id="hr-emergencia-nome"
+                  value={emergenciaDraft.nome}
+                  disabled={!permissoes.emergenciaEdit}
+                  onChange={(e) => setEmergenciaDraft({ ...emergenciaDraft, nome: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-emergencia-relacao">{t("hr.campos.relacao")}</Label>
+                <Input
+                  id="hr-emergencia-relacao"
+                  value={emergenciaDraft.relacao}
+                  disabled={!permissoes.emergenciaEdit}
+                  onChange={(e) => setEmergenciaDraft({ ...emergenciaDraft, relacao: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-emergencia-telefone">
+                  {t("employees.form.emergencyContactPhone")}
+                </Label>
+                <Input
+                  id="hr-emergencia-telefone"
+                  value={emergenciaDraft.telefone}
+                  disabled={!permissoes.emergenciaEdit}
+                  onChange={(e) =>
+                    setEmergenciaDraft({ ...emergenciaDraft, telefone: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-emergencia-alternativo">
+                  {t("hr.campos.telefoneAlternativo")}
+                </Label>
+                <Input
+                  id="hr-emergencia-alternativo"
+                  value={emergenciaDraft.telefone_alternativo}
+                  disabled={!permissoes.emergenciaEdit}
+                  onChange={(e) =>
+                    setEmergenciaDraft({ ...emergenciaDraft, telefone_alternativo: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="hr-emergencia-email">{t("employees.form.email")}</Label>
+                <Input
+                  id="hr-emergencia-email"
+                  type="email"
+                  value={emergenciaDraft.email}
+                  disabled={!permissoes.emergenciaEdit}
+                  onChange={(e) => setEmergenciaDraft({ ...emergenciaDraft, email: e.target.value })}
+                />
+              </div>
+            </div>
+            <AccoesBloco
+              visivel={permissoes.emergenciaEdit && emergenciaAlterada}
+              saving={saving}
+              onGravar={gravarEmergencia}
+              onCancelar={() => setEmergenciaDraft(emergenciaOriginal)}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {permissoes.bancariosView && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="h-4 w-4 text-muted-foreground" />
+              {t("hr.pessoais.bancarios")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PessoaContaBancariaField
+              bancarios={bancarios}
+              podeEditar={permissoes.bancariosEdit}
+              saving={saving}
+              onDefinir={onDefinirConta}
+              onDefinirBic={onDefinirBic}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {permissoes.pessoaisView && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Receipt className="h-4 w-4 text-muted-foreground" />
+              {t("hr.pessoais.recibo")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-estado-civil">{t("hr.campos.estadoCivil")}</Label>
+                <Select
+                  value={geral.estado_civil}
+                  disabled={!permissoes.pessoaisEdit}
+                  onValueChange={(v) => setGeral({ ...geral, estado_civil: v })}
+                >
+                  <SelectTrigger id="hr-estado-civil">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {ESTADOS_CIVIS.map((estado) => (
+                      <SelectItem key={estado} value={estado}>
+                        {t(`hr.estadoCivil.${estado}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-dependentes">{t("hr.campos.dependentes")}</Label>
+                <Input
+                  id="hr-dependentes"
+                  type="number"
+                  min={0}
+                  max={30}
+                  value={geral.dependentes}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, dependentes: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-irs">{t("hr.campos.irs")}</Label>
+                <Input
+                  id="hr-irs"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={geral.irs}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, irs: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-conjuge-situacao">
+                  {t("hr.campos.conjugeSituacaoProfissional")}
+                </Label>
+                <Select
+                  value={geral.conjuge_situacao_profissional}
+                  disabled={!permissoes.pessoaisEdit}
+                  onValueChange={(v) => setGeral({ ...geral, conjuge_situacao_profissional: v })}
+                >
+                  <SelectTrigger id="hr-conjuge-situacao">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {CONJUGE_SITUACOES_PROFISSIONAIS.map((situacao) => (
+                      <SelectItem key={situacao} value={situacao}>
+                        {t(`hr.conjugeSituacaoProfissional.${situacao}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-dependentes-deficientes">
+                  {t("hr.campos.dependentesDeficientes")}
+                </Label>
+                <Input
+                  id="hr-dependentes-deficientes"
+                  type="number"
+                  min={0}
+                  max={30}
+                  value={geral.dependentes_deficientes}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, dependentes_deficientes: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-habilitacao">{t("hr.campos.habilitacaoAcademica")}</Label>
+                <Select
+                  value={geral.habilitacao_academica}
+                  disabled={!permissoes.pessoaisEdit}
+                  onValueChange={(v) => setGeral({ ...geral, habilitacao_academica: v })}
+                >
+                  <SelectTrigger id="hr-habilitacao">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {HABILITACOES_ACADEMICAS.map((habilitacao) => (
+                      <SelectItem key={habilitacao} value={habilitacao}>
+                        {t(`hr.habilitacaoAcademica.${habilitacao}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-habilitacao-data">
+                  {t("hr.campos.habilitacaoDataConclusao")}
+                </Label>
+                <Input
+                  id="hr-habilitacao-data"
+                  type="date"
+                  value={geral.habilitacao_data_conclusao}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) =>
+                    setGeral({ ...geral, habilitacao_data_conclusao: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <AccoesBloco
+              visivel={permissoes.pessoaisEdit && geralAlterado}
+              saving={saving}
+              onGravar={gravarGeral}
+              onCancelar={() => setGeral(geralOriginal)}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {permissoes.laboraisView && (
+        <PessoaFardamentoCard
+          fardamento={fardamento}
+          podeEditar={permissoes.laboraisEdit}
+          saving={saving}
+          onGuardar={onGuardarFardamento}
+        />
+      )}
+    </div>
+  );
+}
