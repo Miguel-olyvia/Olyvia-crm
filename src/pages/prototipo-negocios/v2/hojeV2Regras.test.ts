@@ -148,15 +148,16 @@ describe("Hoje V2 · os outros papéis", () => {
     const itens = hojeV2(S, "financeiro", [], VAZIO);
     expect(itens.map((i) => [i.nome, i.cat])).toEqual([["Tiago Almeida", "pagamentos"]]);
   });
-  it("Operações: a obra em curso, com o passo do motor", () => {
+  it("Operações: a obra em curso, com o passo do motor (e o plano do Tiago, gerado do contrato, por aprovar)", () => {
     const itens = hojeV2(seed(), "operacoes", [], VAZIO);
-    expect(itens.map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Marta Lima", "obras", "abrirPlano"]]);
+    expect(itens.map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Tiago Almeida", "faturas", "aprovarPlano"], ["Marta Lima", "obras", "abrirPlano"]]);
   });
   it("Direção: as exceções à margem pedidas aparecem para aprovar", () => {
     const S = seed(), d = S.deals.find((x) => x.id === 1031)!;
     d.orc!.aprov = "pedida";
     const itens = hojeV2(S, "direcao", [], VAZIO);
-    expect(itens.map((i) => [i.nome, i.cat, i.aprovar])).toEqual([["Carla Nunes", "aprovar", true]]);
+    // 14/10: a encomenda de cliente do Tiago (gerada do contrato) também espera pela Direção
+    expect(itens.map((i) => [i.nome, i.cat, i.aprovar])).toEqual([["Carla Nunes", "aprovar", true], ["Tiago Almeida", "faturas", false]]);
   });
   it("Direção: a equipa por comercial bate com as listas de Negócios", () => {
     const S = seed(), [ruben] = equipa(S);

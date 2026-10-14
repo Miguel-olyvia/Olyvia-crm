@@ -97,6 +97,7 @@ describe("Operações V2 · plano por aprovar", () => {
     const S = operacoes();
     const d = S.deals.find((x) => x.id === 1027)!;
     Object.assign(d.f, { conta: "Banco B · conta obras", comprovativo: "TRF 1" });
+    d.obra.ec = null; d.obra.plano = null; // o circuito antigo (o plano das 4 fases, com as férias do Sérgio)
     acoes(S, () => {}, (fn) => fn()).validar(1027); // o recibo põe a obra a andar: plano por aprovar
     expect(d.obra.plano!.estado).toBe("por aprovar");
     S.op = 1027;

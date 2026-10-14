@@ -62,7 +62,8 @@ describe("Financeiro V2 · validar pagamentos", () => {
     expect(d.fase).toBe(5);
     expect(d.fin.recibo).not.toBeNull();
     expect(d.obra.plano?.estado).toBe("por aprovar");
-    expect(d.obra.mats).not.toBeNull();
+    // 14/10: a encomenda de cliente e o plano vieram do contrato; os materiais reservam-se ao aprovar a encomenda
+    expect(d.obra.ec?.estado).toBe("por aprovar");
     const fs = faturasDe(S, d);
     expect(fs[0]).toMatchObject({ numero: "FT 2026/600", recibo: d.fin.recibo!.n, pagamento: { conta: "Banco B · conta obras", ref: "TRF 1013-221" } });
     expect(screen.getByText(/A obra está a andar/)).toBeInTheDocument();

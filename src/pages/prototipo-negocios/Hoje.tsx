@@ -125,9 +125,9 @@ export function Hoje({ S, A, go }: Ctx) {
           ) : (
             <>
               <TrackGroup label="Em atraso" count={atrasadas.length} tone="overdue">
-                <ul className="space-y-1">{atrasadas.map((x) => <LinhaTarefa key={x.d.id} x={x} ctx={{ A, go }} atraso />)}</ul>
+                <ul className="space-y-1">{atrasadas.map((x) => <LinhaTarefa key={x.d.id + ":" + x.p.t} x={x} ctx={{ A, go }} atraso />)}</ul>
               </TrackGroup>
-              {porFazer.length > 0 && <ul className="space-y-1">{porFazer.map((x) => <LinhaTarefa key={x.d.id} x={x} ctx={{ A, go }} />)}</ul>}
+              {porFazer.length > 0 && <ul className="space-y-1">{porFazer.map((x) => <LinhaTarefa key={x.d.id + ":" + x.p.t} x={x} ctx={{ A, go }} />)}</ul>}
             </>
           )}
         </DayTrack>

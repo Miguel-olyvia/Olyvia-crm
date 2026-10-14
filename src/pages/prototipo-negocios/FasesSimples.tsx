@@ -49,12 +49,14 @@ export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
         <ol className="mt-1 divide-y divide-border">
           <Passo feito={!!ft} titulo={ft ? `Fatura ${ft.n} emitida` : "Emitir a fatura"} texto={ft ? `A ${ft.q}, enviada ao portal do cliente.` : "Só o Financeiro emite. Vai para o portal do cliente."} />
           <Passo feito={d.fin.pago} titulo={d.fin.pago ? "Pagamento validado" : "Validar o pagamento"} texto={d.fin.pago ? `Confirmado${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""}${d.f.comprovativo ? " · " + d.f.comprovativo : ""}.` : "Confirmar que o valor entrou na conta. Por agora é à mão."} />
-          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n} emitido` : "Recibo"} texto="Sai sozinho ao validar o pagamento e põe a obra a andar:" />
+          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n} emitido` : "Recibo"} texto={d.obra.ec ? "Sai sozinho ao validar o pagamento:" : "Sai sozinho ao validar o pagamento e põe a obra a andar:"} />
         </ol>
+        {/* 14/10: com a encomenda de cliente (gerada do contrato), a encomenda e o plano já andam; o recibo libera o arranque */}
         <ul className="ml-9 mt-1 space-y-1.5 text-[15px] text-muted-foreground">
-          <li className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} Inventário confirma os materiais e encomenda o que falta</li>
-          <li className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} Operações recebem o plano da obra com os técnicos</li>
-          <li className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} O cliente recebe o recibo no portal</li>
+          {(d.obra.ec
+            ? ["O negócio passa à Obra", "O sinal pago é uma das condições para arrancar a obra", "O cliente recebe o recibo no portal"]
+            : ["Inventário confirma os materiais e encomenda o que falta", "Operações recebem o plano da obra com os técnicos", "O cliente recebe o recibo no portal"]
+          ).map((t) => <li key={t} className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} {t}</li>)}
         </ul>
       </section>
       <Partilhar ctx={ctx} d={d} tipo="fatura" estado={rc ? `paga · ${rc.n}` : ft ? `emitida ${ft.q} · por pagar` : "rascunho: ainda não emitida"}>

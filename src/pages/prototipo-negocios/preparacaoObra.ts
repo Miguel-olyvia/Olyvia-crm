@@ -1,0 +1,145 @@
+// Do contrato à obra (14/10/2026), sem React. Pedido do Ruben: "o orçamento gera o contrato; depois do contrato
+// assinado, gera uma encomenda de cliente e o plano (que já está no orçamento); ambos têm de ser aprovados; se a
+// encomenda for aprovada, emite uma encomenda a fornecedor, que tem de ser validada".
+//   · Contrato assinado → Encomenda de cliente (EC, por aprovar) e Plano da obra (do plano do orçamento, por aprovar).
+//   · EC aprovada (Direção) → reserva o stock; o que falta vai numa Encomenda a fornecedor (EF, por validar).
+//   · EF validada (Financeiro, que vê se o sinal já entrou) → encomendada → recebida (Armazém).
+//   · Plano aprovado (Operações), com os técnicos e as férias.
+//   · Pagamento: a fatura e o recibo (Financeiro), em paralelo; o recibo passa o negócio à Obra.
+//   · Arrancar a obra (Operações) só com tudo: EC aprovada, materiais recebidos, plano aprovado e sinal pago.
+import { normal } from "./catalogo";
+import { LINHAS, PAPEIS, TECS, calcMats, conflitos, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
+import { planoObra } from "./planoObra";
+import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
+
+/* ------------------------------------------------------------------ a encomenda de cliente */
+export interface LinhaEc {
+  n: string; q: number; un: string;
+  /** Material do modelo (com chave de stock) ou produto escolhido na visita. */
+  de: "material" | "produto";
+  k?: StockKey;
+  /** Quanto há em stock para reservar e quanto falta (vai para o fornecedor). */
+  res: number; falta: number;
+}
+export interface EncCliente {
+  n: string; estado: "por aprovar" | "aprovada"; criada: string;
+  linhas: LinhaEc[];
+  /** O valor dos materiais e produtos na proposta (sem IVA). */
+  valor: number;
+  aprovada?: { por: string; q: string };
+}
+
+/** Os fornecedores de exemplo (o real virá das Compras); o sugerido é pelo tipo de obra. */
+export const FORNECEDORES = ["Cerâmica do Centro (exemplo)", "Sanitários do Tejo (exemplo)", "Madeiras e Cozinhas (exemplo)"];
+export const fornecedorSugerido = (d: Negocio) => (d.linha === "coz" ? FORNECEDORES[2] : FORNECEDORES[0]);
+
+/** A encomenda de cliente: os materiais do modelo (pelas medidas) e os produtos escolhidos na visita (menos os que o cliente fornece). */
+export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string): EncCliente {
+  const mats = calcMats(d, S, false).filter((x) => x.q > 0);
+  const prods = (d.visita.prod ?? []).filter((p) => !p.cliente && p.q > 0);
+  const linhas: LinhaEc[] = [
+    ...mats.map((x) => ({ n: x.n, q: r2(x.q), un: x.un, de: "material" as const, k: x.k, res: r2(x.res), falta: r2(x.falta) })),
+    // os produtos da visita compram-se para esta obra: não há stock deles
+    ...prods.map((p) => ({ n: p.n, q: p.q, un: p.un, de: "produto" as const, res: 0, falta: p.q })),
+  ];
+  const valor = (d.orc?.linhas ?? []).reduce((a, l) => a + (l.t === "mat" && !l.d.startsWith(PREFIXO_CLIENTE) && (l.d === LINHAS[d.linha].mat.d || l.d.startsWith(PREFIXO_PROD)) ? l.preco : 0), 0);
+  return { n, estado: "por aprovar", criada: quando, linhas, valor: r2(valor) };
+}
+
+/* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
+/** O ofício de uma tarefa → o tipo de técnico do RH (TECS.sk). */
+export function skDaTarefa(perfil: string, nome: string): string {
+  const s = normal(`${perfil} ${nome}`);
+  if (/demol|servente|entulho|remoc/.test(s)) return "Servente · demolição";
+  if (/canaliz|louca|sanit|agua|esgoto|gas/.test(s)) return "Canalizador";
+  if (/revest|ladril|pavim|ceram|azulej/.test(s)) return "Ladrilhador";
+  return "Montador";
+}
+
+/** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias). */
+export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
+  const P = planoObra(d, S);
+  const tasks: Tarefa[] = P.tarefas.map((t) => {
+    const sk = skDaTarefa(t.perfil, t.nome);
+    const dia = Math.floor(t.inicio), dur = Math.max(1, Math.ceil(t.inicio + t.dias - 1e-9) - dia);
+    const doOficio = TECS.filter((x) => x.sk === sk);
+    const livre = doOficio.find((x) => !x.ferias.some((k) => k >= dia && k < dia + dur)) ?? doOficio[0];
+    return { nome: t.nome, svcs: t.chave === "demolicao" ? [] : [t.chave], dia, dur, sk, h: r2(t.h), tec: livre?.id ?? null, fase: t.fase };
+  });
+  return { tasks, estado: "por aprovar", dia: 0, origem: "orcamento", inicio: d.orc?.inicioObra };
+}
+
+/* ------------------------------------------------------------------ os passos, por trilho */
+export type Trilho = "ec" | "plano" | "pag" | "obra";
+export type EstadoPasso = "feito" | "agora" | "espera";
+export interface PassoPrep {
+  id: string; trilho: Trilho; t: string; sub: string; who: Papel | null; estado: EstadoPasso;
+  /** A ação (A[act](id)) e o texto do botão, para quem é a vez. */
+  act?: string; btn?: string;
+}
+export const TRILHOS: { k: Trilho; t: string }[] = [
+  { k: "ec", t: "Encomenda" }, { k: "plano", t: "Plano da obra" }, { k: "pag", t: "Pagamento" },
+];
+
+/** O que falta para arrancar a obra (vazio = pode arrancar). */
+export function faltaParaArrancar(d: Negocio): string[] {
+  const ec = d.obra.ec, e = d.obra.enc, p = d.obra.plano, F: string[] = [];
+  if (ec && ec.estado !== "aprovada") F.push("aprovar a encomenda de cliente");
+  if (e && e.estado !== "recebida") F.push(e.estado === "por confirmar" ? "validar a encomenda ao fornecedor" : "receber os materiais");
+  if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
+  if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "emitir a fatura e receber o pagamento");
+  return F;
+}
+
+/** Os passos do contrato à obra, com o estado de cada um e de quem é a vez. Só para os negócios com encomenda de cliente. */
+export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
+  const ec = d.obra.ec, e = d.obra.enc, p = d.obra.plano;
+  if (!ec || !p) return [];
+  const L: PassoPrep[] = [];
+  const nFalta = ec.linhas.filter((x) => x.falta > 0).length;
+
+  // a encomenda de cliente e a de fornecedor
+  L.push({ id: "ec", trilho: "ec", estado: "feito", who: null, t: `Encomenda de cliente ${ec.n}`, sub: `Gerada do contrato a ${ec.criada} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"}${ec.valor ? ` · ${eur(ec.valor)} € na proposta` : ""}` });
+  L.push(ec.estado === "aprovada"
+    ? { id: "ec-ok", trilho: "ec", estado: "feito", who: "direcao", t: "Encomenda de cliente aprovada", sub: `${ec.aprovada?.por ?? "Direção"} · ${ec.aprovada?.q ?? ""} · stock reservado` }
+    : { id: "ec-ok", trilho: "ec", estado: "agora", who: "direcao", t: "Aprovar a encomenda de cliente", sub: nFalta ? `Ao aprovar, reserva o stock e pede ao fornecedor ${nFalta} ${nFalta === 1 ? "linha" : "linhas"} em falta.` : "Ao aprovar, reserva o stock: está tudo em armazém.", act: "aprovarEc", btn: "Aprovar a encomenda" });
+  if (ec.estado !== "aprovada") L.push({ id: "ef", trilho: "ec", estado: "espera", who: "financeiro", t: "Encomenda a fornecedor", sub: nFalta ? `Emite-se ao aprovar a encomenda de cliente (${nFalta} em falta).` : "Nada a encomendar: tudo em stock." });
+  else if (!e) L.push({ id: "ef", trilho: "ec", estado: "feito", who: null, t: "Sem encomenda a fornecedor", sub: "Tudo em stock e reservado." });
+  else {
+    L.push(e.estado === "por confirmar"
+      ? { id: "ef", trilho: "ec", estado: "agora", who: "financeiro", t: `Validar a encomenda ${e.n}`, sub: `${e.forn ?? "Fornecedor por escolher"} · ${e.linhas.length} ${e.linhas.length === 1 ? "linha" : "linhas"}${d.fin.pago ? " · sinal recebido" : " · atenção: o sinal ainda não entrou"}`, act: "validarEf", btn: "Validar e encomendar" }
+      : { id: "ef", trilho: "ec", estado: "feito", who: "financeiro", t: `Encomenda ${e.n} validada`, sub: `${e.forn ?? ""}${e.validada ? ` · ${e.validada.por} · ${e.validada.q}` : ""}` });
+    L.push(e.estado === "recebida"
+      ? { id: "rec", trilho: "ec", estado: "feito", who: "armazem", t: "Materiais recebidos", sub: "Tudo reservado para a obra." }
+      : { id: "rec", trilho: "ec", estado: e.estado === "encomendada" ? "agora" : "espera", who: "armazem", t: "Receber os materiais", sub: e.estado === "encomendada" ? `${e.n} · conferir e dar entrada no armazém.` : "Depois de validada.", act: e.estado === "encomendada" ? "receberEnc" : undefined, btn: "Dar entrada" });
+  }
+
+  // o plano
+  const nc = conflitos(p).length, dias = p.tasks.length ? Math.max(...p.tasks.map((t) => t.dia + t.dur)) : 0;
+  L.push({ id: "pl", trilho: "plano", estado: "feito", who: null, t: "Plano gerado do orçamento", sub: `${p.tasks.length} ${p.tasks.length === 1 ? "tarefa" : "tarefas"} · ${nfmt(dias)} dias úteis${p.inicio ? ` · início ${p.inicio.split("-").reverse().slice(0, 2).join("/")}` : ""}` });
+  L.push(p.estado === "por aprovar"
+    ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
+    : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
+
+  // o pagamento
+  L.push(d.fin.fatura
+    ? { id: "ft", trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${d.fin.fatura.n}`, sub: `Emitida a ${d.fin.fatura.q}.` }
+    : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Emitir a fatura", sub: "Vai para o portal do cliente.", act: "emitir", btn: "Emitir a fatura" });
+  L.push(d.fin.pago
+    ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }
+    : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Validar o pagamento" });
+
+  // o arranque
+  const F = faltaParaArrancar(d);
+  L.push(p.estado === "em curso" || p.estado === "concluída"
+    ? { id: "go", trilho: "obra", estado: "feito", who: "operacoes", t: p.estado === "concluída" ? "Obra concluída" : "Obra em curso", sub: "" }
+    : F.length
+      ? { id: "go", trilho: "obra", estado: "espera", who: "operacoes", t: "Arrancar a obra", sub: `Falta ${F.join(", ")}.` }
+      : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
+  return L;
+}
+
+/** Os passos à espera de alguém (para o Hoje), pela ordem do circuito. */
+export const passosAgora = (d: Negocio, S: Estado) => passosPreparacao(d, S).filter((x) => x.estado === "agora" && x.who);
+/** "Direção" / "Sandra · Financeiro". */
+export const quemE = (who: Papel | null) => (who ? PAPEIS[who].n : "");

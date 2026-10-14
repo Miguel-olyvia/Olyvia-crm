@@ -71,7 +71,7 @@ export function HojeSimples({ S, A, go }: Ctx) {
           <h2 id="depois" className="text-lg font-semibold">Depois</h2>
           <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
             {resto.map(({ d, p, dir }) => (
-              <li key={d.id}>
+              <li key={d.id + ":" + p.t}>
                 <button type="button" onClick={go(() => A.abrir(d.id))}
                   className="group flex min-h-16 w-full items-center gap-4 py-3 text-left transition-colors hover:bg-muted/50 sm:px-2">
                   <IconeFase fase={d.fase} />

@@ -830,3 +830,16 @@ O Ruben não via o contentor a ser calculado no orçamento: o motor punha sempre
 - **O porquê** aparece por baixo do meio: "Automático: 5,04 m³ chegam para o contentor (a partir de 3 m³)", "A visita pediu contentor (na via pública (licença))", etc.
 - **Licença de via pública:** com o contentor na via pública aparece o aviso; o valor (por obra) configura-se nas Definições ("Contentor · licença de via pública") e entra no custo. Sem valor configurado, só o aviso (não se inventam preços).
 - O preço da deposição não muda com o meio (o C_dep é "tudo incluído").
+
+## Do contrato à obra (14/10/2026, versão Atual)
+
+Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, gera uma encomenda de cliente e o plano (que já está no orçamento); ambos têm de ser aprovados; se a encomenda for aprovada, emite uma encomenda a fornecedor, que tem de ser validada".
+- **Contrato assinado** (ou venda direta aceite) → `prepararObraDe`: a **encomenda de cliente** `EC 2026/001` (materiais do modelo pelas medidas, com o stock e a falta, e os produtos escolhidos na visita, menos os que o cliente fornece) e o **plano da obra** gerado do plano do orçamento (`planoDoOrcamento`: as tarefas por fase, em dias úteis, cada uma com um técnico do ofício que não está de férias). Ambos **por aprovar**.
+- **Encomenda de cliente aprovada (Direção)** → reserva o stock (o de agora) e o que falta vai numa **encomenda a fornecedor** `EF`, **por validar**, com o fornecedor sugerido pelo tipo de obra (muda-se com um toque).
+- **Encomenda a fornecedor validada (Financeiro)** → encomendada; o Financeiro vê se o sinal já entrou ("Validar já compromete a compra antes de o cliente pagar") e o histórico regista se foi antes do sinal. **Armazém** dá entrada quando chega.
+- **Plano aprovado (Operações)**.
+- **Pagamento** (fatura e recibo) em paralelo; o recibo passa o negócio à Obra (já não gera nada: a encomenda e o plano vieram do contrato).
+- **Arrancar a obra (Operações)** só com as quatro condições: encomenda aprovada, materiais recebidos, plano aprovado e sinal pago.
+- **Ecrã** (`CaminhoObra.tsx`), no negócio a partir do Financeiro: "Do contrato à obra", com a barra de progresso, o contrato em cima, três trilhos em paralelo (Encomenda, Plano da obra, Pagamento), cada passo com a bola de estado (feito, agora a pulsar, à espera), de quem é a vez e o botão para quem a tem ("Ver como …" para os outros), o detalhe da encomenda (linhas, stock, falta, fornecedor) e do plano (por fases, com as cores, a régua dos dias e os técnicos), e em baixo o arranque com as quatro condições.
+- **Hoje:** cada papel vê o seu passo, em paralelo (a Direção aprova a encomenda, as Operações o plano, o Financeiro valida a encomenda e emite a fatura).
+- **Exemplo:** Tiago Almeida (1027). Lógica sem React em `preparacaoObra.ts`; testes em `preparacaoObra.test.ts`. Os negócios sem encomenda de cliente (os antigos do exemplo) seguem o circuito de antes. VERSAO 11.

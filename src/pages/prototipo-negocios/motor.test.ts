@@ -69,20 +69,19 @@ describe("protótipo de Negócios", () => {
     expect(d().fase).toBe(4);
     expect(S.clientes.some((c) => c.deal === id)).toBe(true);
 
+    // 14/10: o contrato gera a encomenda de cliente e o plano (do orçamento), ambos por aprovar
+    expect(d().obra.ec?.estado).toBe("por aprovar");
+    expect(d().obra.plano?.origem).toBe("orcamento");
+    expect(conflitos(d().obra.plano!)).toHaveLength(0); // escolhe o técnico que não está de férias
+    A.aprovarEc(id);
+    expect(d().obra.mats).toBeTruthy();
+    A.aprovarPlano(id);
+    if (d().obra.enc) { A.validarEf(id); A.receberEnc(id); }
+
     preencher(d(), FINANCEIRO);
     A.emitir(id);
     A.validar(id);
     expect(d().fase).toBe(5);
-    expect(d().obra.plano).toBeTruthy();
-    expect(d().obra.mats).toBeTruthy();
-    expect(conflitos(d().obra.plano!)).toHaveLength(1); // férias do Sérgio
-
-    A.trocar(id, 2);
-    expect(conflitos(d().obra.plano!)).toHaveLength(0);
-
-    A.aprovarPlano(id);
-    A.confirmarEnc(id);
-    A.receberEnc(id);
     preencher(d(), [OBRA[0]]);
     A.arrancar(id);
     expect(d().obra.plano!.estado).toBe("em curso");

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Euro, MapPin, Phone, RotateCcw, Square, TrendingUp, Volume2 } from "lucide-react";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
+import { CaminhoObra } from "./CaminhoObra";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, versaoAtual, type Negocio } from "./motor";
@@ -114,6 +115,9 @@ export function NegocioSimples(ctx: Ctx) {
           <span><b className="font-semibold">{FASES[acabou]} concluída.</b> Agora: {FASES[d.fase]}.</span>
         </div>
       )}
+
+      {/* do contrato à obra (14/10): a encomenda, o plano e o pagamento em paralelo, até ao arranque */}
+      {d.fase >= 4 && d.obra.ec && !d.perdido && <CaminhoObra {...ctx} d={d} />}
 
       {/* De volta à visita com um orçamento já feito: diz o que fazer e como sair */}
       {d.fase === 2 && d.orc && !d.perdido && (

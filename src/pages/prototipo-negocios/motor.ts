@@ -12,6 +12,7 @@ import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
+import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, planoDoOrcamento, type EncCliente } from "./preparacaoObra";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -133,7 +134,9 @@ export const TECS: Tecnico[] = [
   { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [] },
 ];
 const REAL: Record<string, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02, eletr: 1, teto: 1.04, pint: 0.98 };
-export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17/10", "seg 20/10", "ter 21/10", "qua 22/10", "qui 23/10", "sex 24/10"];
+export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17/10", "seg 20/10", "ter 21/10", "qua 22/10", "qui 23/10", "sex 24/10",
+  // os planos do orçamento (14/10) podem passar das duas semanas: os dias úteis seguintes
+  ...Array.from({ length: 30 }, (_, k) => { const t = new Date(2026, 9, 27 + Math.floor(k / 5) * 7 + (k % 5)); return ["seg", "ter", "qua", "qui", "sex"][k % 5] + " " + t.getDate() + "/" + (t.getMonth() + 1); })];
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
 export type LinhaOrc =
@@ -176,10 +179,16 @@ export interface VersaoProposta { n: number; enviada: string; substituida: strin
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
 /** O número da proposta que está em cima da mesa (1 se nunca se refez). */
 export const versaoAtual = (o: Orcamento) => (o.versoes?.length ?? 0) + 1;
-export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
-export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
+export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null; /** a fase da obra (planos do orçamento) */ fase?: number }
+export interface Plano {
+  tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number;
+  /** Gerado do plano do orçamento (preparacaoObra.ts), com o início previsto ("aaaa-mm-dd"). */
+  origem?: "orcamento"; inicio?: string;
+}
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
-export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "recebida"; forn?: string; linhas: { n: string; q: number; un: string }[] }
+export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "recebida"; forn?: string; linhas: { n: string; q: number; un: string }[];
+  /** Quem validou a encomenda ao fornecedor e quando. */
+  validada?: { por: string; q: string } }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
 export interface Evento { t: string; q: string; k: "a" | "w" | "x" }
 
@@ -212,7 +221,9 @@ export interface Negocio {
     fotosPor?: Partial<Record<"exterior" | "interior" | "area", number>> } & NecVisita;
   orc: Orcamento | null;
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
-  obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean };
+  obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean;
+    /** A encomenda de cliente, gerada ao assinar o contrato (14/10; preparacaoObra.ts). Sem ela, o circuito antigo (tudo no recibo). */
+    ec?: EncCliente | null };
   hist: Evento[];
 }
 
@@ -241,6 +252,8 @@ export interface Estado {
   seq: number;
   ft: number;
   ef: number;
+  /** O contador das encomendas de cliente (EC 2026/001…). */
+  ec?: number;
   rc: number;
   clientes: { nome: string; tel: string; local: string; desde: string; deal: number }[];
   deals: Negocio[];
@@ -262,7 +275,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
 // 9 (14/10/2026): a demolição de parede (c5) passa de ml a m², como diz o nome
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
-export const VERSAO = 10;
+export const VERSAO = 11;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -330,6 +343,9 @@ export function seed(): Estado {
   by(1030).hist.push({ t: "Proposta enviada · venda direta", q: "07/10", k: "a" });
   Object.assign(by(1027).orc!, { verif: true, enviada: "01/10", aceite: "03/10", contrato: "assinado" });
   by(1027).hist.push({ t: "Contrato assinado · cliente criado", q: "08/10", k: "a" });
+  // o exemplo do circuito novo (14/10): contrato assinado → encomenda de cliente e plano por aprovar
+  prepararObraDe(by(1027), S, "08/10");
+  by(1027).hist.unshift({ t: "Encomenda de cliente " + by(1027).obra.ec!.n + " e plano da obra gerados · por aprovar", q: "08/10", k: "a" });
   {
     const j = by(1050);
     Object.assign(j.orc!, { verif: true, enviada: "19/09", aceite: "21/09", contrato: "assinado" });
@@ -749,6 +765,7 @@ export function realObra(d: Negocio, S: Estado): Real {
       const l = d.orc!.linhas.find((x) => x.t === "svc" && x.sid === sid);
       if (!l || l.t !== "svc") continue;
       const s = S.svc[sid];
+      if (!s) continue;
       const hp = s.h * l.q, h2 = hp * (REAL[sid] || 1);
       hr += h2;
       extra += (h2 - hp) * (s.eh + (S.cfg.estrutura ? ESTR : 0));
@@ -815,6 +832,11 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       return { t: "Validar o pagamento", sub: `Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
     case 5: {
       const p = d.obra.plano!, e = d.obra.enc;
+      // o circuito novo: o passo à espera, pela ordem (encomenda, plano, arranque)
+      if (d.obra.ec && (p.estado === "por aprovar" || p.estado === "aprovado")) {
+        const a = passosAgora(d, S)[0];
+        if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who! };
+      }
       if (p.estado === "por aprovar") return { t: conflitos(p).length ? "Operações: resolver um conflito e aprovar o plano" : "Operações: aprovar o plano", sub: "Plano gerado a partir do contrato.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (e && e.estado === "por confirmar") return { t: "Armazém: confirmar a encomenda ao fornecedor", sub: e.n + " · faltam materiais.", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
       if (e && e.estado === "encomendada") return { t: "Armazém: receber a encomenda", sub: e.n + " · entrega pedida até 12/10.", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
@@ -835,6 +857,10 @@ export function minhas(S: Estado, role: Papel) {
     const p = proximo(d, S);
     if (role === "direcao" && d.fase === 3 && d.orc && d.orc.aprov === "pedida")
       L.push({ d, p: { t: "Aprovar exceção à margem", sub: pct(tot(d, S).m) + " de margem · mínimo " + S.cfg.min + "%" }, dir: true });
+    // do contrato à obra: vários passos em paralelo (a encomenda, o plano, o pagamento), cada um de quem é
+    else if (d.fase >= 4 && d.obra.ec && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
+      for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
+    }
     else if (p.who === role && !p.wait && !p.done) L.push({ d, p });
   }
   return L;
@@ -850,6 +876,12 @@ const agora = () => {
   return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
 };
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
+/** Do contrato à obra (preparacaoObra.ts): a encomenda de cliente e o plano do orçamento, ambos por aprovar. */
+export function prepararObraDe(d: Negocio, S: Estado, quando: string) {
+  S.ec ??= 1;
+  d.obra.ec = gerarEncCliente(d, S, "EC 2026/" + String(S.ec++).padStart(3, "0"), quando);
+  d.obra.plano = planoDoOrcamento(d, S);
+}
 function fase(d: Negocio, n: number) { d.fase = n; d.valida = null; preencher(d, n); log(d, "Passou a " + FASES[n] + " · sozinho"); }
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
@@ -950,6 +982,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     S.view = "negocio"; S.deal = d.id; S.confirmPerda = null; S.pulse = "falta";
     avisar({ msg: faltam.length === 1 ? "Falta preencher 1 campo" : `Falta preencher ${faltam.length} campos`, sub: faltam.slice(0, 4).join(", ") + (faltam.length > 4 ? "…" : ""), kind: "bad" });
     return false;
+  };
+  const prepararObra = (d: Negocio) => {
+    prepararObraDe(d, S, agora());
+    log(d, "Encomenda de cliente " + d.obra.ec!.n + " gerada do contrato · por aprovar (Direção)");
+    log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações)");
+    avisar({ msg: "Encomenda " + d.obra.ec!.n + " e plano da obra gerados", sub: "A Direção aprova a encomenda e as Operações o plano", kind: "auto", atraso: 500 });
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
@@ -1157,12 +1195,40 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     aceitar(id: number) {
       const d = deal(id); d.orc!.aceite = "hoje"; log(d, "O cliente aceitou a proposta no portal");
-      if (d.orc!.vendaDireta) { criarCliente(S, d); fase(d, 4); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); }
+      if (d.orc!.vendaDireta) { criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); }
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta enviar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
     enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato enviado para assinatura"); avisar({ msg: "Contrato enviado", sub: "Gerado a partir da proposta aceite", kind: "ok" }); },
-    assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
+    assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
+    /** A Direção aprova a encomenda de cliente: reserva o stock (o de agora) e o que falta vai numa encomenda a fornecedor por validar. */
+    aprovarEc(id: number) {
+      const d = deal(id), ec = d.obra.ec;
+      if (!ec || ec.estado === "aprovada") return;
+      for (const x of ec.linhas) {
+        if (!x.k) continue;
+        const ha = Math.min(x.q, Math.max(0, S.stock[x.k] || 0));
+        x.res = r2(ha); x.falta = r2(x.q - ha); S.stock[x.k] = (S.stock[x.k] || 0) - ha;
+      }
+      ec.estado = "aprovada"; ec.aprovada = { por: PAPEIS[S.role].n, q: agora() };
+      d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
+      const falta = ec.linhas.filter((x) => x.falta > 0);
+      d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: fornecedorSugerido(d), linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un })) } : null;
+      log(d, "Encomenda de cliente " + ec.n + " aprovada · stock reservado" + (d.obra.enc ? " · " + d.obra.enc.n + " emitida, por validar" : " · nada a encomendar"));
+      avisar(d.obra.enc
+        ? { msg: ec.n + " aprovada", sub: "Encomenda a fornecedor " + d.obra.enc.n + " emitida: o Financeiro valida", kind: "ok", act: { label: "Ver como Financeiro", fn: () => run(() => { S.role = "financeiro"; }) } }
+        : { msg: ec.n + " aprovada", sub: "Tudo em stock e reservado", kind: "ok" });
+    },
+    /** O fornecedor da encomenda (antes de a validar). */
+    escolherForn(id: number, forn: string) { const e = deal(id).obra.enc; if (e && e.estado === "por confirmar") e.forn = forn; },
+    /** O Financeiro valida a encomenda ao fornecedor (vê se o sinal já entrou): passa a encomendada. */
+    validarEf(id: number) {
+      const d = deal(id), e = d.obra.enc;
+      if (!e || e.estado !== "por confirmar") return;
+      e.estado = "encomendada"; e.validada = { por: PAPEIS[S.role].n, q: agora() };
+      log(d, "Encomenda " + e.n + " validada e enviada a " + (e.forn ?? "fornecedor") + (d.fin.pago ? "" : " · antes de o sinal entrar"), d.fin.pago ? "a" : "w");
+      avisar({ msg: e.n + " enviada ao fornecedor", sub: (e.forn ?? "") + " · o Armazém dá entrada quando chegar", kind: "ok" });
+    },
     emitir(id: number) { const d = deal(id); if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return; d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
     validar(id: number) {
       const d = deal(id);
@@ -1171,6 +1237,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!portao(d, [FINANCEIRO[2]])) return;
       d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
       log(d, "Pagamento validado · " + d.fin.recibo.n + " emitido");
+      // o circuito novo (14/10): a encomenda e o plano já vieram do contrato; o recibo só passa o negócio à Obra
+      if (d.obra.ec) {
+        fase(d, 5);
+        const F = faltaParaArrancar(d);
+        avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: F.length ? "Passou a Obra · falta " + F.join(", ") : "Passou a Obra · pronta a arrancar", kind: "ok" });
+        return;
+      }
       // o recibo dispara o Inventário e as Operações
       const mats = calcMats(d, S, false);
       mats.forEach((x) => { S.stock[x.k] = (S.stock[x.k] || 0) - x.res; });
@@ -1212,6 +1285,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     arrancar(id: number) {
       const d = deal(id); const e = d.obra.enc;
+      if (d.obra.ec) { const F = faltaParaArrancar(d); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
       if (!portao(d, [OBRA[0]])) return;
       if (e && e.estado !== "recebida") { avisar({ msg: "Ainda faltam materiais", sub: e.n + " · " + e.estado, kind: "bad" }); return; }
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
@@ -1227,7 +1301,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, `Receita do revestimento atualizada: ${nfmt(old)} → ${nfmt(s.h)} h/m²`);
       avisar({ msg: "Receita atualizada no Catálogo", sub: `Revestimento: ${nfmt(old)} → ${nfmt(s.h)} h/m². Os próximos orçamentos já usam este valor.`, kind: "ok" });
     },
-    confirmarEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "encomendada"; log(d, "Encomenda " + d.obra.enc!.n + " confirmada pelo armazém"); avisar({ msg: "Encomenda enviada ao fornecedor", sub: d.obra.enc!.n + " · " + d.obra.enc!.forn, kind: "ok" }); },
+    confirmarEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "encomendada"; d.obra.enc!.validada = { por: PAPEIS[S.role].n, q: agora() }; log(d, "Encomenda " + d.obra.enc!.n + " confirmada pelo armazém"); avisar({ msg: "Encomenda enviada ao fornecedor", sub: d.obra.enc!.n + " · " + d.obra.enc!.forn, kind: "ok" }); },
     receberEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "recebida"; d.obra.mats!.forEach((x) => { x.res = x.q; x.falta = 0; }); log(d, "Encomenda " + d.obra.enc!.n + " recebida · materiais reservados"); avisar({ msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "auto" }); },
     vendaDireta(id: number, v: boolean) { const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
     perder(id: number) { S.confirmPerda = id; },
