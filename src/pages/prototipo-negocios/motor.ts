@@ -161,6 +161,8 @@ export interface Orcamento {
   semDemolicao?: true;
   /** O prazo previsto mudado à mão: os dias de cada tarefa (pelo id do serviço, ou "demolicao"); ganttOrcamento.ts. */
   prazo?: Record<string, number>;
+  /** O início previsto da obra ("aaaa-mm-dd"), para pôr o plano em datas (planoObra.ts). Sem ele, a próxima segunda-feira. */
+  inicioObra?: string;
 }
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
 export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
@@ -1030,6 +1032,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       o.aprov = null; sugerirPrazo(d, S);
     },
     /** O prazo de execução da proposta passa a ser o do prazo previsto (e volta a acompanhá-lo). */
+    /** O início previsto da obra (só muda as datas do plano: o custo e o preço não). */
+    inicioObra(id: number, iso: string | null) {
+      const o = deal(id).orc;
+      if (!o) return;
+      if (iso) o.inicioObra = iso; else delete o.inicioObra;
+    },
     usarPrazoPrevisto(id: number) {
       const d = deal(id);
       if (!d.orc || d.orc.enviada) return;

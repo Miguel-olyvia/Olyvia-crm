@@ -677,3 +677,32 @@ O pedido do Ruben: uma experiência de terreno com "WOW", guiada, com poucos toq
     - **A validar:** as janelas (caixilharia) estão na fase 4, mas numa remodelação podem entrar antes dos acabamentos.
 - **iPhone:** enquanto o protótipo está aberto, a meta viewport ganha `viewport-fit=cover`, e o menu de baixo, o "Mais" e o fundo do `<main>` somam `env(safe-area-inset-bottom)`. Os lados e o topo usam os `safe-area-inset` respetivos.
 - **Contraste (contas WCAG no tema `.calma`):** o acento `256 56% 48%` dá 7,7:1 sobre branco e 7,1:1 sobre o fundo. O texto secundário dá 7,6:1 e 7,0:1. O "Sugerido" (acento sobre o cartão) dá 7,7:1. O pior caso, texto secundário sobre o acento a 10%, dá 6,5:1: tudo AA com folga.
+
+## Plano da obra no orçamento (14/10/2026, versão Atual)
+
+O pedido do Ruben: "o orçamento tem de ser dinâmico, interativo, com mapa de Gantt com as fases e custos e previsão de duração, bonito mas útil". O "Prazo previsto" de 13/10 (`PrazoOrcamento.tsx`, apagado) deu lugar a `PlanoObraOrcamento.tsx`, com a lógica em `planoObra.ts` e `ganttOrcamento.ts`.
+- **As etapas seguem as fases da obra** (`ganttOrcamento.ts`). A ordem é a fase (1–4) e, dentro dela, a ordem dos ofícios: a pintura é da fase 3, depois do ladrilhador, e as louças, da 4, montam-se no fim. Um serviço com várias fases entra na primeira. Na mesma etapa, ofícios diferentes trabalham em simultâneo e o mesmo ofício faz uma tarefa de cada vez.
+- **Em datas reais** (`planoObra.ts`):
+  - só contam os dias úteis: saltam-se os fins de semana e os feriados nacionais (os fixos, a Sexta-feira Santa e o Corpo de Deus, com a Páscoa pelo algoritmo de Meeus), e a lista diz que feriados se saltaram;
+  - o início escolhe-se num toque ("Próxima segunda", "Daqui a 2 semanas", "Daqui a um mês" ou "Outra data") e guarda-se em `Orcamento.inicioObra`;
+  - mudar o início só mexe nas datas, nunca no custo nem no preço.
+- **As fases** (cartões):
+  - cada cartão mostra os dias, a data de início, o preço (com o desconto), a margem (a vermelho abaixo do mínimo), o custo e os materiais;
+  - tocar num cartão realça a fase no Gantt e na curva;
+  - o custo das fases com a demolição só a Direção o vê;
+  - **as contas das fases:**
+    - as linhas de materiais vão para a fase pela descrição (`faseDosMateriais`);
+    - o preço da linha da demolição fica na fase 1, e o custo dela está na tarefa;
+    - a soma das fases dá o custo e o preço do orçamento.
+- **O Gantt:**
+  - as colunas são os dias úteis com a data, e as barras usam uma rampa do acento, da fase 1 (clara) à 4 (escura), todas com contraste de pelo menos 3:1;
+  - o custo fica ao lado da barra, nunca por cima, e uma barra mudada à mão leva riscas;
+  - arrastar a ponta da barra muda os dias, de meio em meio dia, e tudo se atualiza ao vivo: as datas, o custo, a margem lá em cima e o aviso "os dias mudados à mão somam X € ao custo";
+  - cada barra é um `role="slider"`: ← → mudam meio dia, e Enter abre o detalhe da tarefa (o custo por partes, − / + e "Repor");
+  - com o orçamento enviado, as barras ficam paradas;
+  - no telemóvel, a grelha desliza na horizontal e os nomes ficam presos à esquerda.
+- **A curva do custo acumulado** está alinhada com os dias:
+  - a mão de obra entra ao ritmo de cada tarefa, e os materiais entram no dia em que a sua fase começa;
+  - uma linha tracejada marca o preço ao cliente, e ao lado aparece o lucro previsto;
+  - ao passar o rato, mostra a data e o que já se gastou.
+- **Testes:** `planoObra.test.ts` (a Páscoa, os feriados, os dias úteis, as fases a somar o orçamento, a curva e o desconto) e `PlanoObraOrcamento.test.tsx` (as barras, ← →, as fases, o início e o orçamento enviado). Em `ganttOrcamento.test.ts`, a pintura passa a vir antes das louças.

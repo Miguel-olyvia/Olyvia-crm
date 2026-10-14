@@ -55,12 +55,13 @@ describe("prazo previsto no orçamento", () => {
       demol: [0, 0.5],
       canal: [0.5, 1.5], eletr: [0.5, 1.5], // canalizador e eletricista ao mesmo tempo
       revest: [1.5, 3], pav: [3, 4], // o ladrilhador faz uma de cada vez
-      loucas: [4, 5], pint: [5, 6],
+      // fases da obra (14/10): a pintura é da fase 3 (depois do ladrilhador); as louças, da 4, montam-se no fim
+      pint: [4, 5], loucas: [5, 6],
     });
     expect(diasPrevistos(tarefasPrevistas(d, S))).toBe(6);
     // a canalização a durar 2 dias: o eletricista não muda, os revestimentos começam um dia depois
     A.prazoTarefa(d.id, "canal", 2);
-    expect(plano()).toMatchObject({ canal: [0.5, 2.5], eletr: [0.5, 1.5], revest: [2.5, 4], pint: [6, 7] });
+    expect(plano()).toMatchObject({ canal: [0.5, 2.5], eletr: [0.5, 1.5], revest: [2.5, 4], pint: [5, 6], loucas: [6, 7] });
     expect(diasPrevistos(tarefasPrevistas(d, S))).toBe(7);
   });
 

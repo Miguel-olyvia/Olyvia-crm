@@ -10,7 +10,7 @@ import type { Ctx } from "./pecas";
 import { totais } from "./DocsCliente";
 import { ProdutosOrcamento } from "./ProdutosOrcamento";
 import { LinhasOrcamento } from "./LinhasOrcamento";
-import { PrazoOrcamento } from "./PrazoOrcamento";
+import { PlanoObra } from "./PlanoObraOrcamento";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -29,7 +29,7 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
   const escala = (x: number) => `${Math.max(0, Math.min(1, x / 0.5)) * 100}%`; // a barra vai de 0% a 50% de margem
 
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="max-w-5xl space-y-8">
       {/* Total e margem */}
       <section aria-label="Total" className="rounded-2xl border border-border bg-card p-5">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -117,8 +117,8 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
         <div className="mt-6"><ProdutosOrcamento {...ctx} d={d} simples /></div>
       </section>
 
-      {/* O prazo previsto: as tarefas em sequência, sem técnicos */}
-      <PrazoOrcamento ctx={ctx} d={d} />
+      {/* O plano da obra: as fases, o Gantt em datas (arrasta-se para mudar os dias) e a curva do custo */}
+      <PlanoObra ctx={ctx} d={d} />
 
       {/* Desconto e tipo de venda */}
       <section aria-label="Desconto e venda" className="space-y-5">

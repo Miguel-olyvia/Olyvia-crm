@@ -4,9 +4,12 @@
 // técnicos, conta-se uma equipa por ofício). A duração vem das horas do orçamento
 // (8 h por dia, ao meio dia); mudá-la à mão passa as horas da tarefa a dias × 8 e o custo do orçamento muda
 // com elas (só a mão de obra; o equipamento e os consumíveis não). O preço ao cliente não muda.
+// 14/10: as etapas seguem as fases da obra (fasesObra.ts: 1 preparação, 2 infraestruturas, 3 revestimentos, 4 montagem);
+// dentro da fase, a ordem dos ofícios (o pintor depois do ladrilhador). Um serviço com várias fases entra na primeira.
 import { ESTR, r2, type Estado, type Negocio, type SvcId } from "./motor";
 import { catalogoLigado } from "./produtosVisita";
 import { PAR_DEM0 } from "./entulho";
+import { fasesDoServico, type ComFases, type FaseObra } from "./fasesObra";
 
 export const HORAS_DIA = 8;
 /** A chave da tarefa da demolição e entulho (as outras usam o id do serviço). */
@@ -33,6 +36,9 @@ export interface TarefaPrevista {
   chave: string;
   nome: string;
   perfil: string;
+  /** A fase da obra em que a tarefa entra (a primeira do serviço) e todas as do serviço. */
+  fase: FaseObra;
+  fases: FaseObra[];
   /** As horas que o orçamento conta. */
   hOrc: number;
   /** Os dias (os mudados à mão ou os das horas). */
@@ -55,6 +61,7 @@ export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
   if (!o) return [];
   const man = o.prazo ?? {};
   const base: Omit<TarefaPrevista, "dias" | "manual" | "h" | "inicio" | "custo" | "custoOrc" | "delta">[] = [];
+  const K = catalogoLigado() as ComFases | null;
   const extra: Record<string, { eq: number; cons: number; outros: number; custoOrc: number }> = {};
   for (const l of o.linhas) {
     if (l.t !== "svc") continue;
@@ -62,7 +69,8 @@ export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
     if (!s || !(l.q > 0)) continue;
     const custoHora = s.eh + (S.cfg.estrutura ? ESTR : 0);
     const custoOrc = l.cu * l.q, hOrc = s.h * l.q;
-    base.push({ chave: l.sid, nome: s.n, perfil: s.perfil, hOrc, custoHora });
+    const fases = fasesDoServico(K, l.sid, s.n, s.perfil);
+    base.push({ chave: l.sid, nome: s.n, perfil: s.perfil, fase: fases[0], fases, hOrc, custoHora });
     // o que o custo da linha tem além da mão de obra (equipamento, consumíveis; e o que o Catálogo mudou desde então)
     extra[l.sid] = { eq: s.eq * l.q, cons: s.cons * l.q, outros: custoOrc - hOrc * custoHora - s.eq * l.q - s.cons * l.q, custoOrc };
   }
@@ -70,16 +78,17 @@ export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
   if (r && r.horas + r.horasCarga > 0) {
     const P = catalogoLigado()?.parDem ?? PAR_DEM0;
     const hOrc = r.horas + r.horasCarga, mo = hOrc * P.custoHora;
-    base.push({ chave: TAREFA_DEMOLICAO, nome: "Demolição e entulho", perfil: "Demolição", hOrc, custoHora: P.custoHora });
+    base.push({ chave: TAREFA_DEMOLICAO, nome: "Demolição e entulho", perfil: "Demolição", fase: 1, fases: [1], hOrc, custoHora: P.custoHora });
     extra[TAREFA_DEMOLICAO] = { eq: 0, cons: r.consumiveis, outros: r.custo - mo - r.consumiveis, custoOrc: r.custo };
   }
-  // a ordem dos ofícios; dentro do mesmo ofício, a ordem das linhas
-  const ord = base.map((t, i) => ({ t, i })).sort((a, b) => ordemOficio(`${a.t.nome} ${a.t.perfil}`) - ordemOficio(`${b.t.nome} ${b.t.perfil}`) || a.i - b.i).map((x) => x.t);
+  // a etapa: a fase da obra e, dentro dela, a ordem dos ofícios; dentro da mesma etapa, a ordem das linhas
+  const etapaDe = (t: { nome: string; perfil: string; fase: FaseObra }) => t.fase * 10 + ordemOficio(`${t.nome} ${t.perfil}`);
+  const ord = base.map((t, i) => ({ t, i })).sort((a, b) => etapaDe(a.t) - etapaDe(b.t) || a.i - b.i).map((x) => x.t);
   // cada etapa começa quando a anterior acaba; dentro dela, cada ofício (perfil) vai na sua fila
   let etapa = -1, inicioEtapa = 0, fimEtapa = 0;
   const fila: Record<string, number> = {};
   return ord.map((t) => {
-    const e = ordemOficio(`${t.nome} ${t.perfil}`);
+    const e = etapaDe(t);
     if (e !== etapa) { etapa = e; inicioEtapa = fimEtapa; for (const k in fila) delete fila[k]; }
     const oficio = t.perfil.toLowerCase(), dia = fila[oficio] ?? inicioEtapa;
     const manual = man[t.chave] != null;
