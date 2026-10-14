@@ -2,14 +2,18 @@
 // Cada um aparece como uma folha, com o que é partilhável à volta:
 // o link do portal, email, WhatsApp, ver como o cliente e imprimir (PDF).
 import { useRef, useState, type ReactNode } from "react";
-import { Check, Copy, Eye, Mail, MessageCircle, Printer, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Check, Copy, Mail, Maximize2, MessageCircle, Minus, Plus, Printer, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
+import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
+import { FASES_OBRA, type FaseObra } from "./fasesObra";
+import { LINHA_DEMOLICAO } from "./entulho";
+import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
 import { diasAdenda, totalAdenda, type Adenda } from "./adendas";
-import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
+import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriais, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
 
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
 
@@ -136,44 +140,250 @@ function ObraNaProposta({ S, d }: { S: Estado; d: Negocio }) {
   );
 }
 
-/* ------------------------------------------------------------------ proposta */
-export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
-  const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0;
+/* ------------------------------------------------------------------ proposta (14/10: o documento formal, em páginas A4) */
+const MESES_LONGOS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const longa = (x: Date) => `${x.getDate()} de ${MESES_LONGOS[x.getMonth()]} de ${x.getFullYear()}`;
+/** "05/10" → 5 de outubro de 2026; "hoje…" ou vazio → hoje. */
+function dataDe(q: string | null | undefined): Date {
+  const m = q?.match(/^(\d{1,2})\/(\d{1,2})/);
+  return m ? new Date(2026, Number(m[2]) - 1, Number(m[1])) : new Date();
+}
+
+/** Uma página A4 (794 × 1123 px no ecrã); no telemóvel cresce com o conteúdo. */
+function Pagina({ n, total, numero, capa, children }: { n: number; total: number; numero: string; capa?: boolean; children: ReactNode }) {
   return (
-    <Folha titulo="Proposta" numero={`PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`} data={(o.enviada ? `enviada ${o.enviada}` : "rascunho") + (o.versoes?.length ? ` · substitui a v${o.versoes.length}` : "")} carimbo={o.aceite ? "Aceite" : undefined}>
-      <Cliente d={d} />
-      <section>
-        <h3 className="text-lg font-semibold">{d.servico}</h3>
-        <p className="mt-1 text-slate-600">{d.f.pedido || `Remodelação com o modelo "${L.modelo}".`}</p>
-      </section>
-      <section>
-        <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">O que está incluído</p>
-        <ul className="divide-y divide-slate-200 border-y border-slate-200">
-          {o.linhas.map((l, i) => {
-            const x = linhaCalc(l, S);
-            return (
-              <li key={i} className="flex items-baseline justify-between gap-4 py-2.5">
-                <span>{l.t === "mat" ? `Materiais: ${l.d}` : x.s!.n}{l.t === "svc" && <span className="text-slate-500"> · {nfmt(l.q)} {x.s!.un}</span>}</span>
-                <span className="tabular-nums">{eur(x.preco * (1 - desconto / 100))} €</span>
-              </li>
-            );
-          })}
-        </ul>
-        {d.visita.nec.length > 0 && <p className="mt-2 text-sm text-slate-600">Equipamentos escolhidos: {d.visita.nec.join(", ")}.</p>}
-      </section>
-      <Totais d={d} S={S} />
-      <ObraNaProposta S={S} d={d} />
-      <section className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2">
-        <div><p className="text-xs uppercase tracking-wider text-slate-500">Prazo</p><p>{d.f.prazo_exec ? `${d.f.prazo_exec} dias úteis` : "a definir"}{d.f.inicio_prev ? `, a começar a ${data(d.f.inicio_prev)}` : ""}</p></div>
-        <div><p className="text-xs uppercase tracking-wider text-slate-500">Validade</p><p>{d.f.validade || "30 dias"}</p></div>
-        <div><p className="text-xs uppercase tracking-wider text-slate-500">Pagamento</p><p>{tranches(d, T.total, S).map((t) => `${Math.round(t.p * 100)}% ${t.l.charAt(0).toLowerCase() + t.l.slice(1)}${t.quando ? `, ${t.quando}` : ""} (${eur(t.v)} €)`).join(" · ")}</p></div>
-        <div><p className="text-xs uppercase tracking-wider text-slate-500">Garantia</p><p>{d.f.garantia || "2 anos"} sobre a mão de obra</p></div>
-      </section>
-      {d.f.notas_cliente && <p className="text-slate-700">{d.f.notas_cliente}</p>}
-      <footer className="border-t border-slate-200 pt-4 text-sm text-slate-500">
-        {o.aceite ? `Aceite pelo cliente no portal a ${o.aceite}.` : "O cliente aceita esta proposta no portal, com um toque. Fica registado quem, quando e de onde."}
+    <article className="pagina relative mx-auto flex w-full max-w-[794px] flex-col overflow-hidden bg-white text-[15px] leading-relaxed text-slate-800 shadow-[0_12px_40px_rgb(16_24_40/0.14)] sm:min-h-[1123px]">
+      {!capa && (
+        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 text-xs text-slate-500 sm:px-12">
+          <span className="font-semibold tracking-[0.22em] text-slate-900">{EMPRESA.nome.toUpperCase()}</span>
+          <span>Proposta {numero}</span>
+        </header>
+      )}
+      <div className={cn("flex-1", !capa && "space-y-9 px-6 py-8 sm:px-12 sm:py-10")}>{children}</div>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-6 py-4 text-[11px] text-slate-500 sm:px-12">
+        <span>{EMPRESA.nome} · {EMPRESA.sub} · NIF {EMPRESA.nif} · {EMPRESA.morada}</span>
+        <span className="tabular-nums">Página {n} de {total}</span>
       </footer>
-    </Folha>
+    </article>
+  );
+}
+/** O título numerado de cada parte do documento (a ordem é a da leitura da proposta). */
+const Titulo = ({ n, children }: { n: number; children: ReactNode }) => (
+  <h2 className="flex items-baseline gap-3 border-b border-slate-900 pb-2 text-xl font-semibold tracking-tight text-slate-900">
+    <span className="text-sm font-semibold tabular-nums text-[#5a36bf]">{String(n).padStart(2, "0")}</span>{children}
+  </h2>
+);
+
+export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
+  const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0, k = 1 - desconto / 100;
+  const numero = `PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`;
+  const emitida = dataDe(o.enviada);
+  const dv = Number((d.f.validade || "30 dias").match(/\d+/)?.[0] ?? 30);
+  const ate = new Date(emitida); ate.setDate(ate.getDate() + dv);
+  const P = planoObra(d, S), dias = Math.max(1, Math.ceil(P.dias - 1e-9));
+  // o prazo que se promete ao cliente: o da proposta (o comercial pode dar folga); sem ele, o do plano
+  const prazo = Number(d.f.prazo_exec) || dias;
+  const inicio = o.inicioObra ? deIso(o.inicioObra) : iniciosRapidos(new Date())[0].data;
+  const cal = diasDaObra(inicio, dias);
+  const tr = tranches(d, T.total, S);
+  // as linhas por fase da obra (os serviços pela fase da tarefa; os materiais pela descrição; a demolição na 1)
+  const faseDe = new Map(P.tarefas.map((t) => [t.chave, t.fase]));
+  const linhas = o.linhas.map((l) => {
+    const x = linhaCalc(l, S), fase: FaseObra = l.t === "mat" ? (l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d)) : (faseDe.get(l.sid) ?? 4);
+    return l.t === "svc"
+      ? { fase, nome: x.s!.n, q: l.q, un: x.s!.un, pu: (x.preco * k) / (l.q || 1), total: x.preco * k, mat: false }
+      : { fase, nome: l.d === LINHA_DEMOLICAO ? "Demolição e remoção de entulho (operador licenciado, e-GAR)" : l.d.startsWith("Fornecido pelo cliente") ? l.d : `Materiais do modelo: ${l.d}`, q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
+  });
+  const fases = FASES_OBRA.filter((f) => linhas.some((x) => x.fase === f.n));
+  const mats = calcMats(d, S, true).filter((x) => x.q > 0);
+  const prods = (d.visita.prod ?? []).filter((p) => p.q > 0);
+  const escolhas = ESCOLHAS.campos.filter((c) => d.f[c.k] && c.k !== "materiais_cliente").map((c) => [c.l, d.f[c.k]] as const);
+  const comercial = PAPEIS.comercial.nome;
+  const total = 4;
+
+  return (
+    <div className="folha doc-paginas space-y-8">
+      {/* ---------------- 1. a capa */}
+      <Pagina n={1} total={total} numero={numero} capa>
+        <div className="bg-[#24204a] px-6 pb-12 pt-10 text-white sm:px-12">
+          <div className="flex items-start justify-between gap-6">
+            <div>
+              <p className="text-2xl font-semibold tracking-[0.18em]">{EMPRESA.nome.toUpperCase()}</p>
+              <p className="mt-1 text-sm text-white/70">{EMPRESA.sub}</p>
+            </div>
+            <div className="text-right text-sm text-white/80">
+              <p className="text-xs uppercase tracking-[0.2em] text-white/60">Proposta</p>
+              <p className="text-lg font-semibold tabular-nums text-white">{numero}</p>
+            </div>
+          </div>
+          <p className="mt-16 text-sm uppercase tracking-[0.2em] text-white/60">Proposta de remodelação</p>
+          <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">{d.servico}</h1>
+          <p className="mt-2 text-lg text-white/80">{[d.f.morada || d.local, d.f.localidade].filter(Boolean).join(", ")}</p>
+        </div>
+        <div className="space-y-10 px-6 py-10 sm:px-12">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Preparada para</p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">{d.f.nome_fiscal || d.nome}</p>
+              <p className="text-slate-600">{d.f.email || d.tel}{d.f.nif_fat || d.f.nif ? ` · NIF ${d.f.nif_fat || d.f.nif}` : ""}</p>
+            </div>
+            <div className="sm:text-right">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Data</p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">{longa(emitida)}</p>
+              <p className="text-slate-600">Válida até {longa(ate)}{o.versoes?.length ? ` · substitui a versão ${o.versoes.length}` : ""}</p>
+            </div>
+          </div>
+          {/* o essencial numa linha: o que o cliente procura primeiro */}
+          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-slate-200 sm:grid-cols-4">
+            {([["Total, com IVA", `${eur(T.total)} €`], ["Prazo", `${prazo} ${prazo === 1 ? "dia útil" : "dias úteis"}`], ["Início previsto", dataCurta(cal[0])], ["Garantia", `${d.f.garantia || "2 anos"}`]] as const).map(([t, v]) => (
+              <div key={t} className="bg-white p-4"><dt className="text-xs uppercase tracking-[0.14em] text-slate-500">{t}</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{v}</dd></div>
+            ))}
+          </dl>
+          {/* a carta */}
+          <div className="max-w-[60ch] space-y-3 text-slate-700">
+            <p>Olá, {d.nome.split(" ")[0]},</p>
+            <p>Obrigado por nos ter recebido{d.visita.slot ? ` (${d.visita.slot.split(" · ")[0]})` : ""}. Esta proposta foi preparada a partir do levantamento feito no local: as medidas, o que nos disse que queria mudar e o que escolheu manter.</p>
+            <p>Nas páginas seguintes está o que vamos fazer, fase a fase, o orçamento detalhado, as datas e as condições. Se quiser mudar alguma coisa, diga-nos: fazemos uma nova versão.</p>
+            <p className="pt-2">Com os melhores cumprimentos,<br /><span className="font-semibold text-slate-900">{comercial}</span>, {EMPRESA.nome}</p>
+          </div>
+          {o.aceite && <p className="inline-block -rotate-3 rounded-lg border-2 border-emerald-600 px-4 py-1.5 text-sm font-bold uppercase tracking-wider text-emerald-700">Aceite {o.aceite}</p>}
+        </div>
+      </Pagina>
+
+      {/* ---------------- 2. o que vamos fazer */}
+      <Pagina n={2} total={total} numero={numero}>
+        <section className="space-y-4">
+          <Titulo n={1}>O que vamos fazer</Titulo>
+          <p className="text-slate-600">{d.f.pedido || `Remodelação com o modelo "${L.modelo}".`} A obra divide-se em fases, pela ordem em que acontecem.</p>
+          <ol className="space-y-4">
+            {fases.map((f) => (
+              <li key={f.n} className="grid grid-cols-[14px_minmax(0,1fr)] gap-3">
+                <span className="mt-1.5 h-3 w-3 rounded-sm" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />
+                <div>
+                  <p className="font-semibold text-slate-900">Fase {f.n} · {f.nome}</p>
+                  <ul className="mt-1 text-slate-700">
+                    {linhas.filter((x) => x.fase === f.n && !x.mat).map((x) => <li key={x.nome}>{x.nome} <span className="text-slate-500">· {nfmt(x.q)} {x.un}</span></li>)}
+                    {linhas.filter((x) => x.fase === f.n && x.mat).map((x) => <li key={x.nome} className="text-slate-600">{x.nome}</li>)}
+                  </ul>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+        <section className="space-y-4">
+          <Titulo n={2}>Materiais e escolhas</Titulo>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Incluídos no modelo</p>
+              <ul className="mt-2 divide-y divide-slate-100">
+                {mats.map((x) => <li key={x.n} className="flex justify-between gap-3 py-1.5"><span>{x.n}</span><span className="tabular-nums text-slate-500">{nfmt(x.q)} {x.un}</span></li>)}
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Escolhidos consigo</p>
+              {prods.length ? (
+                <ul className="mt-2 divide-y divide-slate-100">
+                  {prods.map((p) => <li key={p.id} className="flex justify-between gap-3 py-1.5"><span>{p.n}{p.cliente ? <span className="text-slate-500"> · fornecido por si</span> : null}</span><span className="tabular-nums text-slate-500">{nfmt(p.q)} {p.un}</span></li>)}
+                </ul>
+              ) : <p className="mt-2 text-slate-600">{d.visita.nec.length ? d.visita.nec.join(", ") : "Os materiais do modelo, sem escolhas à parte."}</p>}
+              {escolhas.length > 0 && (
+                <dl className="mt-4 space-y-1">
+                  {escolhas.map(([l, v]) => <div key={l} className="flex justify-between gap-3"><dt className="text-slate-500">{l}</dt><dd>{v}</dd></div>)}
+                </dl>
+              )}
+            </div>
+          </div>
+        </section>
+      </Pagina>
+
+      {/* ---------------- 3. o orçamento detalhado */}
+      <Pagina n={3} total={total} numero={numero}>
+        <section className="space-y-4">
+          <Titulo n={3}>Orçamento detalhado</Titulo>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] border-collapse text-[14px]">
+              <thead>
+                <tr className="border-b border-slate-300 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
+                  <th className="py-2 pr-3 font-semibold">Descrição</th><th className="py-2 pr-3 text-right font-semibold">Qtd.</th><th className="py-2 pr-3 text-right font-semibold">Preço un.</th><th className="py-2 text-right font-semibold">Total</th>
+                </tr>
+              </thead>
+              {fases.map((f) => {
+                const L2 = linhas.filter((x) => x.fase === f.n), sub = L2.reduce((a, x) => a + x.total, 0);
+                return (
+                  <tbody key={f.n}>
+                    <tr><td colSpan={4} className="pb-1 pt-4 text-[13px] font-semibold text-slate-900"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />Fase {f.n} · {f.curto}</td></tr>
+                    {L2.map((x) => (
+                      <tr key={x.nome} className="border-b border-slate-100">
+                        <td className="py-1.5 pr-3">{x.nome}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{nfmt(x.q)} {x.un}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{eur(x.pu)} €</td>
+                        <td className="py-1.5 text-right tabular-nums">{eur(x.total)} €</td>
+                      </tr>
+                    ))}
+                    <tr><td colSpan={3} className="py-1.5 pr-3 text-right text-slate-500">Subtotal da fase {f.n}</td><td className="py-1.5 text-right font-medium tabular-nums">{eur(sub)} €</td></tr>
+                  </tbody>
+                );
+              })}
+            </table>
+          </div>
+          <div className="ml-auto w-full max-w-sm space-y-1.5 border-t border-slate-900 pt-3 text-[14px]">
+            {desconto > 0 && <div className="flex justify-between text-slate-600"><span>Desconto incluído nos preços</span><span className="tabular-nums">{desconto}%</span></div>}
+            <div className="flex justify-between"><span>Mão de obra, sem IVA</span><span className="tabular-nums">{eur(T.mo)} €</span></div>
+            <div className="flex justify-between"><span>Materiais, sem IVA</span><span className="tabular-nums">{eur(T.mat)} €</span></div>
+            <div className="flex justify-between text-slate-600"><span>IVA a 6% (mão de obra)</span><span className="tabular-nums">{eur(T.ivaMo)} €</span></div>
+            <div className="flex justify-between text-slate-600"><span>IVA a 23% (materiais)</span><span className="tabular-nums">{eur(T.ivaMat)} €</span></div>
+            <div className="flex justify-between border-t border-slate-300 pt-2 text-lg font-semibold text-slate-900"><span>Total</span><span className="tabular-nums">{eur(T.total)} €</span></div>
+          </div>
+        </section>
+      </Pagina>
+
+      {/* ---------------- 4. datas, pagamento, condições e aceitação */}
+      <Pagina n={4} total={total} numero={numero}>
+        <section className="space-y-4">
+          <Titulo n={4}>Planeamento</Titulo>
+          <ObraNaProposta S={S} d={d} />
+        </section>
+        <section className="space-y-4">
+          <Titulo n={5}>Pagamento</Titulo>
+          <table className="w-full border-collapse text-[14px]">
+            <tbody>
+              {tr.map((t) => (
+                <tr key={t.l} className="border-b border-slate-100">
+                  <td className="py-2 pr-3">{t.l}{t.quando ? <span className="text-slate-500"> · previsto {t.quando}</span> : null}</td>
+                  <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{Math.round(t.p * 100)}%</td>
+                  <td className="py-2 text-right font-medium tabular-nums">{eur(t.v)} €</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-sm text-slate-600">Por transferência bancária. Cada prestação tem a sua fatura, enviada para o portal.</p>
+        </section>
+        <section className="space-y-3">
+          <Titulo n={6}>Condições</Titulo>
+          <ul className="list-disc space-y-1 pl-5 text-slate-700">
+            <li>Prazo de execução: {prazo} {prazo === 1 ? "dia útil" : "dias úteis"}, a contar do início acordado, sem fins de semana nem feriados.</li>
+            <li>Garantia de {d.f.garantia || "2 anos"} sobre a mão de obra, a contar do auto de receção; os materiais têm a garantia do fabricante.</li>
+            <li>Proposta válida até {longa(ate)}.</li>
+            <li>Trabalhos que não estão descritos nesta proposta fazem-se só com o seu acordo, numa adenda com o preço e o prazo.</li>
+            {d.f.notas_cliente && <li>{d.f.notas_cliente}</li>}
+          </ul>
+        </section>
+        <section className="space-y-4">
+          <Titulo n={7}>Aceitação</Titulo>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {[["Pela " + EMPRESA.nome, comercial], ["O cliente", d.f.nome_fiscal || d.nome]].map(([q, nome]) => (
+              <div key={q} className="pt-10">
+                <div className="border-t border-slate-400 pt-2">
+                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{q}</p>
+                  <p className="font-medium text-slate-900">{nome}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-sm text-slate-600">{o.aceite ? `Aceite no portal do cliente a ${o.aceite}.` : "Pode aceitar no portal do cliente, com um toque: fica registado quem, quando e de onde."}</p>
+        </section>
+      </Pagina>
+    </div>
   );
 }
 
@@ -307,7 +517,7 @@ function imprimir(el: HTMLElement | null, titulo: string) {
   const w = window.open("", "_blank");
   if (!w) return;
   const estilos = [...document.querySelectorAll('link[rel="stylesheet"], style')].map((n) => n.outerHTML).join("");
-  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${titulo}</title>${estilos}<style>body{background:#fff;margin:0;padding:24px}.folha{box-shadow:none!important;border:0!important}</style></head><body class="calma">${el.outerHTML}</body></html>`);
+  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${titulo}</title>${estilos}<style>body{background:#fff;margin:0;padding:24px}.folha{box-shadow:none!important;border:0!important}.pagina{box-shadow:none!important;min-height:auto!important;break-after:page}.doc-paginas{display:block}</style></head><body class="calma">${el.outerHTML}</body></html>`);
   w.document.close();
   setTimeout(() => { w.focus(); w.print(); }, 600);
 }
@@ -316,7 +526,8 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
   const link = `https://portal.olyvia-ai.com/${tipo}/${token(d, tipo)}`;
   const [copiado, setCopiado] = useState(false);
   const [ver, setVer] = useState(false);
-  const doc = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const doc = useRef<HTMLDivElement>(null), leitor = useRef<HTMLDivElement>(null);
   const nome = { proposta: "a proposta", contrato: "o contrato", fatura: "a fatura", encomenda: "a nota de encomenda", adenda: "a adenda ao contrato" }[tipo];
   const msg = `Olá ${d.nome.split(" ")[0]}, segue ${nome} da ${EMPRESA.nome}: ${link}`;
   const tel = d.tel.replace(/\D/g, "");
@@ -339,20 +550,32 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="outline" asChild><a href={`mailto:${d.f.email || ""}?subject=${encodeURIComponent(`${EMPRESA.nome} · ${nome}`)}&body=${encodeURIComponent(msg)}`}><Mail className="mr-1.5 h-4 w-4" />Email</a></Button>
           <Button variant="outline" asChild><a href={`https://wa.me/351${tel}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer"><MessageCircle className="mr-1.5 h-4 w-4" />WhatsApp</a></Button>
-          <Button variant="outline" onClick={() => setVer(true)}><Eye className="mr-1.5 h-4 w-4" />Ver como o cliente</Button>
+          <Button variant="outline" onClick={() => setVer(true)}><Maximize2 className="mr-1.5 h-4 w-4" />Abrir em ecrã inteiro</Button>
           <Button variant="outline" onClick={() => imprimir(doc.current?.querySelector(".folha") as HTMLElement, `${EMPRESA.nome} · ${nome}`)}><Printer className="mr-1.5 h-4 w-4" />Imprimir ou PDF</Button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">Link de exemplo: no protótipo não abre o portal.</p>
       </div>
       <div ref={doc} className="rounded-2xl bg-muted/60 p-3 sm:p-6">{children}</div>
-      {ver && (
-        <div className="fixed inset-0 z-[90] overflow-y-auto bg-slate-100 animate-in fade-in-0" role="dialog" aria-modal="true" aria-label={`O cliente vê ${nome}`}>
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur">
-            <p className="text-sm text-slate-600">Portal do cliente · como {d.nome.split(" ")[0]} vê {nome}</p>
-            <button type="button" onClick={() => setVer(false)} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg hover:bg-slate-200"><X className="h-5 w-5" /></button>
+      {ver && createPortal(
+        // o leitor: o documento em ecrã inteiro, como o cliente o abre no portal, com zoom e imprimir (Escape fecha).
+        // Vai para o body: dentro do passo (animado, com transform) o "fixed" ficava preso ao passo e não cobria o ecrã.
+        <div className="fixed inset-0 z-[90] overflow-y-auto bg-[#e6e4ee] animate-in fade-in-0" role="dialog" aria-modal="true" aria-label={`O cliente vê ${nome}`}
+          onKeyDown={(e) => { if (e.key === "Escape") setVer(false); }}>
+          <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-slate-300 bg-white/95 px-4 py-2.5 backdrop-blur">
+            <p className="min-w-0 text-sm text-slate-600"><span className="font-semibold text-slate-900">{nome.replace(/^(a|o) /, "").replace(/^./, (c) => c.toUpperCase())}</span> · como {d.nome.split(" ")[0]} vê no portal · {estado}</p>
+            <div className="flex items-center gap-1">
+              <div className="hidden items-center rounded-lg border border-slate-300 sm:flex" role="group" aria-label="Zoom">
+                <button type="button" aria-label="Diminuir" disabled={zoom <= 0.6} onClick={() => setZoom((z) => Math.max(0.6, Math.round((z - 0.1) * 10) / 10))} className="grid h-10 w-10 place-items-center rounded-l-lg text-slate-700 hover:bg-slate-100 disabled:opacity-40"><Minus className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setZoom(1)} className="h-10 min-w-[4rem] px-2 text-sm tabular-nums text-slate-700 hover:bg-slate-100" aria-label="Repor o zoom">{Math.round(zoom * 100)}%</button>
+                <button type="button" aria-label="Aumentar" disabled={zoom >= 1.6} onClick={() => setZoom((z) => Math.min(1.6, Math.round((z + 0.1) * 10) / 10))} className="grid h-10 w-10 place-items-center rounded-r-lg text-slate-700 hover:bg-slate-100 disabled:opacity-40"><Plus className="h-4 w-4" /></button>
+              </div>
+              <button type="button" onClick={() => imprimir(leitor.current?.querySelector(".folha") as HTMLElement, `${EMPRESA.nome} · ${nome}`)} className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-slate-700 hover:bg-slate-100"><Printer className="h-4 w-4" />Imprimir ou PDF</button>
+              <button type="button" autoFocus onClick={() => setVer(false)} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
           </div>
-          <div className="px-3 py-6 sm:py-10">{children}</div>
-        </div>
+          <div ref={leitor} className="px-3 py-8 sm:py-12" style={{ zoom }}>{children}</div>
+        </div>,
+        document.body,
       )}
     </section>
   );

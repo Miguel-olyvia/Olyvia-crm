@@ -874,3 +874,10 @@ Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, ger
   - As ações são as do motor, por isso o resto do protótipo reage.
 - **Portal do fornecedor** (`PortalFornecedor.tsx`, no cartão da encomenda no Inventário): a encomenda com os preços do fornecedor e a escolha do dia da entrega entre os próximos dias úteis. Os dias no início da obra, ou depois, aparecem a avisar. Por omissão sugere o último dia útil antes do início. Ao confirmar, chama `A.confirmarEntrega(id, data)`.
 - **Toques nas Necessidades** (medido a 14/10, WC típico): 11 toques do primeiro ecrã ao fim do passo (detalhe em `docs/melhorias-v2-2026-10-13/toques-necessidades-2026-10-14.md`, local). GIF do percurso para a Mudelar: `docs/melhorias-v2-2026-10-13/percurso-mudelar-2026-10-14.gif` (11 ecrãs, do Hoje à obra concluída).
+- **A proposta formal** (`PropostaDoc` em `DocsCliente.tsx`, 14/10): quatro páginas A4, com o cabeçalho e o rodapé da empresa e a numeração das páginas.
+  - **Capa:** a marca, "Proposta de remodelação", a obra e a morada, para quem é, a data por extenso e a validade. Por baixo, o essencial: o total com IVA, o prazo da proposta, o início previsto e a garantia. Fecha com a carta de apresentação, assinada pelo comercial.
+  - **1. O que vamos fazer:** os trabalhos por fase da obra.
+  - **2. Materiais e escolhas:** os incluídos no modelo e os escolhidos com o cliente.
+  - **3. Orçamento detalhado:** por fase, com a quantidade, o preço unitário, o subtotal da fase, o desconto, a mão de obra e os materiais sem IVA, o IVA a 6% e a 23%, e o total.
+  - **4 a 7:** o planeamento, o pagamento (prestações com as datas), as condições e a aceitação, com as assinaturas.
+- **O leitor** ("Abrir em ecrã inteiro", em todos os documentos): fundo de secretária, as páginas com sombra, zoom de 60% a 160%, "Imprimir ou PDF" (uma página por folha) e Escape para fechar. Abre no `body`, por portal, para cobrir o ecrã todo mesmo dentro de um passo animado.
