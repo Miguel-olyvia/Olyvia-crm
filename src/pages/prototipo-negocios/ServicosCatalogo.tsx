@@ -5,7 +5,7 @@
 import { useId, useState } from "react";
 import { Check, Link2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CATALOGO } from "./catalogo";
+import { itemCatalogo } from "./catalogo";
 import { aValidar } from "./CamposFase";
 import { eur, nfmt, servicosVisita, type MedKey, type Negocio, type SvcId } from "./motor";
 import { obrigacoes } from "./produtosVisita";
@@ -22,7 +22,7 @@ const POR_PESQUISA = 24;
 /** Os serviços que vão para o orçamento, tirados da visita. */
 export function orcLinhas(d: Negocio, S: Ctx["S"]): SvcId[] {
   // do pacote, postos à mão e trazidos pelos produtos escolhidos
-  return servicosVisita(d).filter((sid) => !!S.svc[sid] || CATALOGO.some((c) => c.id === sid));
+  return servicosVisita(d).filter((sid) => !!S.svc[sid] || !!itemCatalogo(sid));
 }
 
 const MED_TXT: Record<MedKey, string> = { pav: "do pavimento", par: "das paredes", pts: "dos pontos de água", pcs: "das medidas" };
@@ -46,7 +46,7 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
   const tocar = (t: TileServico) => run(() => {
     if (t.origem === "pacote") return A.servico(d.id, t.sid);
     if ((v.extra[t.sid] || 0) > 0) return A.extra(d.id, t.sid, 0);
-    const c = CATALOGO.find((x) => x.id === t.sid) ?? { id: t.sid, n: t.n, un: t.un, qm: 1 };
+    const c = itemCatalogo(t.sid) ?? { id: t.sid, n: t.n, un: t.un, qm: 1 };
     A.extra(d.id, t.sid, sugestaoQtd(c, d, medidaDe(t.sid)));
   });
 

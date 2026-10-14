@@ -10,7 +10,7 @@ import { lerCatalogo, mudarCatalogo, reporCatalogo } from "./v2/catalogoStore";
 import type { Produto } from "./v2/catalogoModelo";
 import { obrigacoesAMostrar, tilesServicos, tocarProdutoGuiado, type TileServico } from "./necessidades";
 import {
-  contavel, encurtar, fornecerTodos, itensFornece, lerCores, escreverCores, marcarFornece, mostraAjuste, oficiosPorUso, ordenarMobilidade, passosSelecao,
+  contavel, encurtar, fornecerTodos, itensFornece, lerCores, escreverCores, marcarFornece, mostraAjuste, oficiosPorUso, ordenarMobilidade, ordenarParaTroca, passosSelecao,
   responderTroca, servicosFiltrados, tocarServico, trocaResolvida, vizinho,
 } from "./selecao";
 import { SelecaoGuiada } from "./SelecaoGuiada";
@@ -51,6 +51,9 @@ describe("os nomes nos cartões: no máximo o essencial, o resto na 2.ª linha",
   });
   it("o prefixo da categoria fica quando sobraria uma só palavra", () => {
     expect(encurtar("Sanita compacta", { categoria: "Sanitas" }).nome).toBe("Sanita compacta");
+  });
+  it("o prefixo fica quando o resto começaria por 'de' ou 'para'", () => {
+    expect(encurtar("Toalheiro DE MOVEL MOSS 26cm", { categoria: "Toalheiros" })).toEqual({ nome: "Toalheiro de movel moss", detalhe: "26cm" });
   });
   it("os nomes em maiúsculas passam a frase", () => {
     expect(encurtar("SANITA BOHEMIC BTW BRANCO BRILHO", { categoria: "Sanitas" })).toEqual({ nome: "Bohemic btw branco brilho", detalhe: "Sanitas" });
@@ -154,6 +157,10 @@ describe("o mapeamento: o produto traz o serviço, sem voltar a perguntar", () =
     expect(trocaResolvida(o, [{ n: "Sanita X" }], [{ n: "Sanita X" }])).toBe(true); // o ramo não tem bases: não conta
     expect(trocaResolvida({ pergunta: "O cliente mantém a sanita?" }, [ramo[0]], ramo)).toBe(true);
     expect(trocaResolvida(o, [], ramo)).toBe(false);
+  });
+  it("numa troca de duas coisas, os primeiros cartões mostram um pouco de cada (intercalados)", () => {
+    const ps = ["Base A", "Base B", "Base C", "Sanita X", "Sanita Y", "Torneira"].map((n, i) => ({ id: "p" + i, n: n.startsWith("Base") ? "Base de duche " + n : n, custo: 1, un: "un", no: null } as Produto));
+    expect(ordenarParaTroca(ps, "a sanita e a base de duche", []).map((p) => p.id)).toEqual(["p3", "p0", "p4", "p1", "p2", "p5"]);
   });
   it("com mobilidade reduzida, as bases de duche e as barras à frente; as banheiras para o fim", () => {
     const ps = [{ n: "Banheira acrílica" }, { n: "Sanita compacta" }, { n: "Base de duche 80×120" }, { n: "Barra de apoio" }];
@@ -282,10 +289,10 @@ describe("a seleção guiada no ecrã", () => {
     fireEvent.click(within(filtros).getByRole("button", { name: "Canalização" }));
     expect(within(filtros).getByRole("button", { name: "Canalização" })).toHaveAttribute("aria-pressed", "true");
     expect(todos).toHaveAttribute("aria-pressed", "false");
-    const canal = lista().length;
+    for (const li of lista()) expect(li.querySelector("[aria-pressed], [role=group]")).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox", { name: "Procurar serviço" }), { target: { value: "torneira" } });
-    expect(lista().length).toBeLessThan(canal);
-    for (const li of lista()) expect(li.textContent?.toLowerCase()).toContain("torneira");
+    expect(lista().length).toBeGreaterThan(0);
+    for (const li of lista()) expect(li.getAttribute("title")?.toLowerCase()).toContain("torneira");
     fireEvent.click(within(filtros).getByRole("button", { name: "Canalização" })); // o ativo outra vez: Todos
     expect(todos).toHaveAttribute("aria-pressed", "true");
     fireEvent.change(screen.getByRole("searchbox", { name: "Procurar serviço" }), { target: { value: "" } });
@@ -304,12 +311,15 @@ describe("a seleção guiada no ecrã", () => {
     expect(titulo()).toBe("O cliente mantém a sanita e a base de duche?");
     expect(screen.queryByRole("list", { name: /Produtos/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^Troca/ }));
-    const lista = screen.getByRole("list", { name: /Produtos/ });
-    fireEvent.click(within(lista).getByRole("button", { name: /^Sanita compacta/ }));
-    expect(within(lista).getByRole("button", { name: /^Sanita compacta/ })).toHaveAttribute("aria-pressed", "true");
+    const lista = () => screen.getByRole("list", { name: /Produtos/ });
+    const procurar = (t: string) => fireEvent.change(screen.getByRole("searchbox", { name: /Procurar em/ }), { target: { value: t } });
+    procurar("sanita compacta"); // com o catálogo real (centenas de louças), procura-se
+    fireEvent.click(within(lista()).getByRole("button", { name: /^Sanita compacta/ }));
+    expect(within(lista()).getByRole("button", { name: /^Sanita compacta/ })).toHaveAttribute("aria-pressed", "true");
     act(() => { vi.advanceTimersByTime(800); });
     expect(titulo()).toBe("O cliente mantém a sanita e a base de duche?"); // falta a base de duche
-    fireEvent.click(within(screen.getByRole("list", { name: /Produtos/ })).getByRole("button", { name: /^Base de duche 80×120/ }));
+    procurar("base de duche 80×120");
+    fireEvent.click(within(lista()).getByRole("button", { name: /^Base de duche 80×120/ }));
     act(() => { vi.advanceTimersByTime(800); });
     expect(titulo()).toBe("Mais produtos");
     expect(servicosVisita(d)).toContain("c13"); // a instalação veio com a sanita

@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CATALOGO } from "./catalogo";
+import { itemCatalogo } from "./catalogo";
 import { Campos, aValidar } from "./CamposFase";
 import { ESCOLHAS, efetivo, emFalta, visivel } from "./campos";
 import { eur, nfmt, servicosVisita, type MedKey, type Negocio, type SvcId } from "./motor";
@@ -26,7 +26,7 @@ import {
 } from "./necessidades";
 import {
   CORES, categoriaFiltro, categoriasDaLista, encurtar, escreverCores, fornecerTodos, itensFornece, lerCores, marcarFornece, quantidadeDaRegra,
-  mostraAjuste, notaNaLinha, oficiosPorUso, ordenarMobilidade, passosSelecao, responderTroca, servicosFiltrados, tocarProduto, tocarServico, trocaResolvida,
+  mostraAjuste, notaNaLinha, oficiosPorUso, ordenarMobilidade, ordenarParaTroca, passosSelecao, responderTroca, servicosFiltrados, tocarProduto, tocarServico, trocaResolvida,
   vizinho, type PassoSel,
 } from "./selecao";
 import { AjusteQtd, CartaoProduto, CartaoResposta, CartaoServico, FiltrosFila, Pesquisa } from "./CartoesSelecao";
@@ -37,7 +37,7 @@ const MED_TXT: Record<MedKey, string> = { pav: "do pavimento", par: "das paredes
 const PRIMEIROS_SVC = 6, PRIMEIROS_PROD = 6, MAIS = 12;
 const GRELHA_SVC = "grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]";
 const GRELHA_PROD = "grid items-start gap-2 grid-cols-[repeat(auto-fill,minmax(150px,1fr))]";
-const nomeSvc = (S: Ctx["S"], sid: SvcId) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
+const nomeSvc = (S: Ctx["S"], sid: SvcId) => S.svc[sid]?.n ?? itemCatalogo(sid)?.n ?? sid;
 const plural = (n: number, s: string, p: string) => `${n} ${n === 1 ? s : p}`;
 
 /* ================================================================== o passo guiado */
@@ -309,7 +309,7 @@ function PassoPergunta({ ctx, K, o, resolvido }: { ctx: P; K: Catalogo; o: Obrig
   const obj = objetoDaPergunta(o.pergunta);
   const mob = d.f.mobilidade_reduzida === "Sim";
   const produtos = useMemo(
-    () => ordenarMobilidade(ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS), obj?.comArtigo ?? null), mob),
+    () => ordenarMobilidade(ordenarParaTroca(ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS), obj?.comArtigo ?? null), obj?.comArtigo, K.arvore), mob),
     [K, o.no, obj?.comArtigo, mob],
   );
   const ramo = useMemo(() => nosAbaixo(K.arvore, o.no), [K.arvore, o.no]);

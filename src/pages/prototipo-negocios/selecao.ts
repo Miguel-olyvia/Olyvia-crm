@@ -76,7 +76,8 @@ export function encurtar(n: string, o: { categoria?: string | null; servico?: bo
       const w = normal(ws[i]).replace(/s$/, "");
       if (w === cat[c]) { c++; i++; } else if (["de", "do", "da", "para", "p/"].includes(normal(ws[i]))) i++; else break;
     }
-    if (c === cat.length && ws.length - i >= 2) { t = ws.slice(i).join(" "); det.unshift(o.categoria); }
+    const liga = ["de", "do", "da", "dos", "das", "para", "p/", "c/", "com", "em"].includes(normal(ws[i] ?? ""));
+    if (c === cat.length && ws.length - i >= 2 && !liga) { t = ws.slice(i).join(" "); det.unshift(o.categoria); }
   }
   t = semGritos(t);
   return { nome: t.charAt(0).toUpperCase() + t.slice(1), detalhe: det.map((x) => x.replace(/\s+/g, " ")).filter(Boolean).join(" · ") };
@@ -134,6 +135,26 @@ export function notaNaLinha(img: IlustracaoKey, linha: string): number {
   const l = DA_LINHA[linha] ?? [];
   const i = l.indexOf(img);
   return i >= 0 ? 100 - i : DE_OBRA.includes(img) ? -1 : 0;
+}
+
+/* ------------------------------------------------------------------ os mais prováveis numa troca */
+/**
+ * A ordem dos produtos de uma troca: os que respondem a cada parte da pergunta ("a sanita e a base de duche") primeiro,
+ * intercalados (uma base, uma sanita, uma base…), para que os primeiros cartões mostrem um pouco de cada; o resto depois (ordem estável).
+ */
+export function ordenarParaTroca(produtos: Produto[], objeto: string | null | undefined, arvore: No[]): Produto[] {
+  if (!objeto) return produtos;
+  const partes = objeto.split(/\s+e\s+/).map((x) => palavrasDe(x).map((w) => w.replace(/s$/, ""))).filter((w) => w.length);
+  if (!partes.length) return produtos;
+  const baldes: Produto[][] = partes.map(() => []), resto: Produto[] = [];
+  for (const p of produtos) {
+    const t = normal(`${p.n} ${p.sub ?? ""} ${categoriaFiltro(p, arvore)}`).replace(/s\b/g, "");
+    const i = partes.findIndex((ws) => ws.every((w) => t.includes(w)));
+    (i >= 0 ? baldes[i] : resto).push(p);
+  }
+  const out: Produto[] = [];
+  for (let j = 0; baldes.some((b) => j < b.length); j++) for (const b of baldes) if (j < b.length) out.push(b[j]);
+  return [...out, ...resto];
 }
 
 /* ------------------------------------------------------------------ mobilidade reduzida */

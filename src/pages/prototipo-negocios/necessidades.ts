@@ -4,7 +4,7 @@
 // · Produtos: a ordem dentro de um ramo (os que batem com a pergunta primeiro), a pesquisa e as categorias,
 //   prontas para os ~2200 produtos do Catálogo da Mudelar (texto de pesquisa guardado por produto).
 // · O resumo ("6 serviços · 3 produtos · 1.240 € estimado") e o que falta, em palavras.
-import { CATALOGO, normal, type LinhaCat } from "./catalogo";
+import { CATALOGO_TODO, normal, type LinhaCat } from "./catalogo";
 import { juntarDivisoes } from "./campos";
 import { LINHAS, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import { caminho, oficioDe, oficios, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
@@ -121,7 +121,7 @@ export function tilesServicos(S: Estado, K: Catalogo, d: Negocio): TileServico[]
       preco: s?.preco ?? 0, medida: null, de: mao > 0 ? undefined : t?.de, usos, linhas });
     vistos.add(sid);
   };
-  for (const c of CATALOGO) if (!vistos.has(c.id)) doCatalogo(c.id, c.n, c.un, c.cat, c.usos, c.linhas);
+  for (const c of CATALOGO_TODO) if (!vistos.has(c.id)) doCatalogo(c.id, c.n, c.un, c.cat, c.usos, c.linhas);
   // os serviços de S.svc que não são do pacote desta linha nem do Catálogo (ex.: o pacote da outra linha)
   for (const [sid, s] of Object.entries(S.svc)) if (!vistos.has(sid)) doCatalogo(sid, s.n, s.un, s.perfil, 0, []);
   return out;

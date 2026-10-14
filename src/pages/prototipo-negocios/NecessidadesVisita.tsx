@@ -8,7 +8,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Link2, Plus, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CATALOGO } from "./catalogo";
+import { itemCatalogo } from "./catalogo";
 import { aValidar } from "./CamposFase";
 import { eur, nfmt, servicosVisita, type Negocio, type SvcId } from "./motor";
 import { type Ctx } from "./pecas";
@@ -30,7 +30,7 @@ import {
 const PAGINA = 12;
 type P = Ctx & { d: Negocio; simples?: boolean };
 
-const nomeSvc = (S: Ctx["S"], sid: SvcId) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
+const nomeSvc = (S: Ctx["S"], sid: SvcId) => S.svc[sid]?.n ?? itemCatalogo(sid)?.n ?? sid;
 const ilustracaoNo = (K: Catalogo, p: Produto) => ilustracaoDoCatalogo(K.arvore, p);
 
 /* ------------------------------------------------------------------ peças */
