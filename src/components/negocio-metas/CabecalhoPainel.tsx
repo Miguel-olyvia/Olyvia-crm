@@ -18,7 +18,7 @@ export function CabecalhoPainel({ negocio }: { negocio: NegocioMes }) {
   const semValor = !temValor(negocio);
   return (
     <SheetHeader className="space-y-2 border-b border-border p-6 pr-12 text-left">
-      <SheetTitle className="text-lg">{negocio.pessoa}</SheetTitle>
+      <SheetTitle tabIndex={-1} data-titulo-painel="" className="text-lg outline-none">{negocio.pessoa}</SheetTitle>
       <SheetDescription>{negocio.servico} · {negocio.comercial}</SheetDescription>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-foreground">
         <span className="inline-flex items-center gap-1.5">

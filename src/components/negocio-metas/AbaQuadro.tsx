@@ -29,6 +29,8 @@ interface AbaQuadroProps {
   acoes: AcoesNegocio;
   aoMudarFiltros: (filtros: FiltrosQuadro) => void;
   aoMudarOrdem: (ordem: Ordem | null) => void;
+  /** O negócio acabado de criar: ao abrir o painel dele, o foco vai para o título. */
+  focarTituloDe?: string | null;
 }
 
 /** Tudo o que se calcula a partir dos negócios e dos filtros: linhas, chips e totais por fase. */
@@ -146,7 +148,10 @@ export function AbaQuadro(props: AbaQuadroProps) {
         p={props} dados={dados} selecionados={new Set(sel.selecao.ids)}
         aoAlternarSelecao={sel.selecao.alternar} aoAbrir={abrir}
       />
-      <PainelNegocio negocio={aberto} hoje={hoje} acoes={acoes} aoFechar={fechar} />
+      <PainelNegocio
+        negocio={aberto} hoje={hoje} acoes={acoes} aoFechar={fechar}
+        focarTitulo={aberto !== null && aberto.id === props.focarTituloDe}
+      />
       <BarraSelecao
         total={sel.selecao.ids.length} ocultos={sel.ocultos} recusado={sel.selecao.recusado}
         tentativas={sel.selecao.tentativas} dicaVez={sel.dicaVez} aoComparar={sel.comparar} aoLimpar={sel.limpar}

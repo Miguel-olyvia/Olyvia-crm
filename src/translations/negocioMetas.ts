@@ -2,6 +2,7 @@
 // `today.ts` e `directSales.ts`, juntado em `useTranslation.ts`. Apenas en/pt:
 // nas outras línguas o `t()` cai para `en`. Os textos do Quadro, da Lista, do painel e da
 // comparação estão em `negocioMetasQuadro.ts` (e os do painel de um negócio em `negocioMetasPainel.ts`) e juntam-se aqui (prevalecem sobre os daqui).
+import { negocioMetasNovoTranslations } from "./negocioMetasNovo";
 import { negocioMetasPainelTranslations } from "./negocioMetasPainel";
 import { negocioMetasQuadroTranslations } from "./negocioMetasQuadro";
 import { negocioMetasWorkflowTranslations } from "./negocioMetasWorkflow";
@@ -302,6 +303,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
 };
 
 export const negocioMetasTranslations: Record<string, Record<string, string>> = {
-  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en, ...negocioMetasPainelTranslations.en },
-  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt, ...negocioMetasPainelTranslations.pt },
+  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en, ...negocioMetasPainelTranslations.en, ...negocioMetasNovoTranslations.en },
+  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt, ...negocioMetasPainelTranslations.pt, ...negocioMetasNovoTranslations.pt },
 };

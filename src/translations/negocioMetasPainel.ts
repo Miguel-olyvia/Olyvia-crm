@@ -82,6 +82,26 @@ const pt: Record<string, string> = {
   'contract.signature': '{quem} · {como}',
   'contract.how.digital': 'digital',
   'contract.how.presencial': 'presencial',
+
+  'pdf.button': 'Descarregar PDF',
+  'pdf.orcamento.label': 'Descarregar PDF do orçamento de {valor}',
+  'pdf.proposta.label': 'Descarregar PDF da proposta',
+  'pdf.contrato.label': 'Descarregar PDF do contrato',
+  'pdf.draft': 'Minuta: o documento ainda não está fechado, por isso o PDF é uma pré-visualização.',
+  'pdf.done': 'PDF descarregado (exemplo)',
+  'pdf.error': 'Não foi possível gerar o PDF de exemplo.',
+  'pdf.title.quote': 'Orçamento',
+  'pdf.title.proposal': 'Proposta',
+  'pdf.title.contract': 'Contrato',
+  'pdf.draftMark': '(minuta)',
+  'pdf.field.person': 'Pessoa',
+  'pdf.field.service': 'Serviço',
+  'pdf.field.salesperson': 'Comercial',
+  'pdf.field.date': 'Data',
+  'pdf.field.chosen': 'Orçamento escolhido',
+  'pdf.field.validUntil': 'Válida até',
+  'pdf.yes': 'Sim',
+  'pdf.footer': 'Documento de exemplo, gerado sem ligação à base. Não tem valor contratual.',
 };
 
 const en: Record<string, string> = {
@@ -160,6 +180,26 @@ const en: Record<string, string> = {
   'contract.signature': '{quem} · {como}',
   'contract.how.digital': 'digital',
   'contract.how.presencial': 'in person',
+
+  'pdf.button': 'Download PDF',
+  'pdf.orcamento.label': 'Download PDF of the {valor} quote',
+  'pdf.proposta.label': 'Download PDF of the proposal',
+  'pdf.contrato.label': 'Download PDF of the contract',
+  'pdf.draft': 'Draft: the document is not final yet, so the PDF is a preview.',
+  'pdf.done': 'PDF downloaded (sample)',
+  'pdf.error': 'Could not generate the sample PDF.',
+  'pdf.title.quote': 'Quote',
+  'pdf.title.proposal': 'Proposal',
+  'pdf.title.contract': 'Contract',
+  'pdf.draftMark': '(draft)',
+  'pdf.field.person': 'Person',
+  'pdf.field.service': 'Service',
+  'pdf.field.salesperson': 'Salesperson',
+  'pdf.field.date': 'Date',
+  'pdf.field.chosen': 'Chosen quote',
+  'pdf.field.validUntil': 'Valid until',
+  'pdf.yes': 'Yes',
+  'pdf.footer': 'Sample document, generated without a database connection. It has no contractual value.',
 };
 
 export const negocioMetasPainelTranslations: Record<"en" | "pt", Record<string, string>> = {

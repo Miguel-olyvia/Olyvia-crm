@@ -1,5 +1,6 @@
 import { useTranslation } from "@/hooks/useTranslation";
 import { AoMudarNegocio } from "./AoMudarNegocio";
+import { BotaoPdf } from "./BotaoPdf";
 import { Campo, ListaCampos } from "./CamposPainel";
 import { formatarMeta } from "./formatoMetas";
 import type { DetalheNegocio } from "./negocioDetalhes";
@@ -32,6 +33,9 @@ export function PropostaPainel({ negocio, detalhe, hoje }: PropostaPainelProps) 
   const incluidos = negocio.orcamentos.filter((o) => d?.orcamentoIds.includes(o.id));
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <BotaoPdf documento={{ tipo: "proposta" }} negocio={negocio} detalhe={detalhe} />
+      </div>
       <ListaCampos>
         <Campo rotulo={t("businessGoals.painel.proposal.state")}>{t(`businessGoals.proposal.${proposta.estado}`)}</Campo>
         <Campo rotulo={t("businessGoals.painel.proposal.value")}>{formatarMeta("euro", valorDoNegocio(negocio))}</Campo>

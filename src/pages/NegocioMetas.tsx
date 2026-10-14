@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "@/hooks/useTranslation";
+import { toast } from "@/lib/toast";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { juntarPessoas } from "@/components/pessoas/juntarPessoas";
 import { paraPainelNegocio } from "@/components/pessoas/paraPainelNegocio";
@@ -9,6 +10,10 @@ import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { AbaQuadro } from "@/components/negocio-metas/AbaQuadro";
 import { BotaoWorkflow } from "@/components/negocio-metas/BotaoWorkflow";
 import { DashboardNegocios } from "@/components/negocio-metas/DashboardNegocios";
+import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
+import { criarNegocioNovo, useNegociosNovos } from "@/components/negocio-metas/negociosNovos";
+import type { DadosCriarNegocio, PessoaOpcao } from "@/components/negocio-metas/novoNegocio";
+import { useParametroOpen } from "@/components/negocio-metas/useParametroOpen";
 import { SeletorModo } from "@/components/negocio-metas/SeletorModo";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { DETALHES_EXEMPLO } from "@/components/negocio-metas/negocioDetalhesExemplo";
@@ -28,6 +33,8 @@ const PESSOAS_DO_PAINEL = new Map(
   juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO).map((r) => [r.pessoa.id, paraPainelNegocio(r)]),
 );
 const pessoaDe = (pessoaId: string) => PESSOAS_DO_PAINEL.get(pessoaId) ?? null;
+/** As pessoas a escolher em "Novo negócio" (a página é quem lê Pessoas; Negócio e metas só recebe esta lista). */
+const PESSOAS_PARA_ESCOLHER: PessoaOpcao[] = PESSOAS_EXEMPLO.map((p) => ({ id: p.id, nome: p.nome, contacto: p.contacto }));
 const detalheDe = (negocioId: string) => DETALHES_EXEMPLO[negocioId] ?? null;
 
 type Vista = "quadro" | "dashboard";
@@ -48,7 +55,16 @@ const ehVista = (valor: string): valor is Vista => valor === "quadro" || valor =
  */
 const NegocioMetas = () => {
   const { t } = useTranslation();
-  const { negocios } = DADOS_EXEMPLO;
+  const novos = useNegociosNovos();
+  // Os negócios criados com "Novo negócio" entram em todas as vistas; sem nenhum, são exatamente os do exemplo.
+  const dados = useMemo(
+    () => (novos.length === 0 ? DADOS_EXEMPLO : { ...DADOS_EXEMPLO, negocios: [...DADOS_EXEMPLO.negocios, ...novos] }),
+    [novos],
+  );
+  const { negocios } = dados;
+  const { abrir } = useParametroOpen();
+  const [recemCriado, setRecemCriado] = useState<string | null>(null);
+  const [anuncio, setAnuncio] = useState({ n: 0, texto: "" });
   const prefs = usePreferenciasQuadro();
   const acoes = useAcoesExemplo();
   const { filtros, mudarFiltros } = useFiltrosPagina(prefs);
@@ -69,6 +85,15 @@ const NegocioMetas = () => {
       return p;
     }, { replace: true });
   }, [setParams]);
+
+  /** Cria o negócio, avisa (toast e leitor de ecrã) e abre o painel dele, com o foco no título. */
+  const aoCriar = (dadosNovo: DadosCriarNegocio) => {
+    const criado = criarNegocioNovo(dadosNovo, HOJE_EXEMPLO);
+    setRecemCriado(criado.id);
+    abrir(criado.id);
+    toast.success(t("businessGoals.new.created"));
+    setAnuncio((a) => ({ n: a.n + 1, texto: t("businessGoals.new.announce", { nome: criado.pessoa, servico: criado.servico }) }));
+  };
 
   const visiveis = useMemo(() => filtrarNegocios(negocios, filtros, HOJE_EXEMPLO), [negocios, filtros]);
   const resumo = resumoQuadro(visiveis);
@@ -97,19 +122,22 @@ const NegocioMetas = () => {
                 <>
                   {vista === "quadro" && <SeletorModo modo={prefs.modo} aoMudar={prefs.mudarModo} />}
                   <BotaoWorkflow aberto={workflowAberto} aoMudar={mudarWorkflow} />
+                  <NovoNegocioDialogo pessoas={PESSOAS_PARA_ESCOLHER} aoCriar={aoCriar} />
                 </>
               )}
             />
             <TabsContent value="quadro" className="mt-0">
               <AbaQuadro
                 negocios={negocios} hoje={HOJE_EXEMPLO} filtros={filtros} modo={prefs.modo} ordem={prefs.ordem}
-                acoes={acoes} aoMudarFiltros={mudarFiltros} aoMudarOrdem={prefs.mudarOrdem}
+                acoes={acoes} aoMudarFiltros={mudarFiltros} aoMudarOrdem={prefs.mudarOrdem} focarTituloDe={recemCriado}
               />
             </TabsContent>
             <TabsContent value="dashboard" className="mt-0">
-              <DashboardNegocios dados={DADOS_EXEMPLO} aoIrParaQuadro={() => mudarVista("quadro")} />
+              <DashboardNegocios dados={dados} aoIrParaQuadro={() => mudarVista("quadro")} />
             </TabsContent>
           </Tabs>
+          {/* Região viva só para leitores de ecrã, no fim da página (o primeiro "status" continua a ser o do Quadro). */}
+          <p role="status" className="sr-only"><span key={anuncio.n}>{anuncio.texto}</span></p>
         </div>
       </DadosPainelProvider>
     </WorkflowExemploProvider>

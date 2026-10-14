@@ -4,20 +4,23 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { BotaoPdf } from "./BotaoPdf";
 import { FOCO } from "./estilos";
 import { formatarMeta } from "./formatoMetas";
-import type { DetalheNegocio, OrcamentoDetalhe } from "./negocioDetalhes";
+import type { DetalheNegocio } from "./negocioDetalhes";
 import type { NegocioMes, OrcamentoNegocio } from "./negocioMetas";
 import { formatarData } from "./negocioPainel";
 
 interface LinhaOrcamentoProps {
   orcamento: OrcamentoNegocio;
-  detalhe: OrcamentoDetalhe | undefined;
+  negocio: NegocioMes;
+  detalheNegocio: DetalheNegocio | null;
 }
 
-/** Um orçamento: valor, estado e data em texto, "Escolhido" num selo com texto, e o botão de expandir (irmão) com as linhas. */
-function LinhaOrcamento({ orcamento, detalhe }: LinhaOrcamentoProps) {
+/** Um orçamento: valor, estado e data em texto, "Escolhido" num selo com texto, e os botões Descarregar PDF e expandir (irmãos) com as linhas. */
+function LinhaOrcamento({ orcamento, negocio, detalheNegocio }: LinhaOrcamentoProps) {
   const { t } = useTranslation();
+  const detalhe = detalheNegocio?.orcamentos?.[orcamento.id];
   const id = useId();
   const [aberto, setAberto] = useState(false);
   const valor = formatarMeta("euro", orcamento.valor);
@@ -30,15 +33,19 @@ function LinhaOrcamento({ orcamento, detalhe }: LinhaOrcamentoProps) {
           {detalhe && <span className="text-muted-foreground">{formatarData(detalhe.data)}</span>}
           {orcamento.escolhido && <Badge variant="default">{t("businessGoals.chain.chosen")}</Badge>}
         </div>
-        {detalhe?.linhas && (
-          <Button
-            type="button" variant="ghost" className={cn("h-11 w-11 shrink-0 p-0", FOCO)} aria-expanded={aberto} aria-controls={id}
-            aria-label={t("businessGoals.painel.quotes.toggle", { valor })}
-            onClick={() => setAberto(!aberto)}
-          >
-            <ChevronDown aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", aberto && "rotate-180")} />
-          </Button>
-        )}
+        {/* O PDF e o botão de expandir são irmãos, nunca um dentro do outro. */}
+        <div className="flex shrink-0 items-center gap-1">
+          <BotaoPdf documento={{ tipo: "orcamento", orcamento }} negocio={negocio} detalhe={detalheNegocio} />
+          {detalhe?.linhas && (
+            <Button
+              type="button" variant="ghost" className={cn("h-11 w-11 shrink-0 p-0", FOCO)} aria-expanded={aberto} aria-controls={id}
+              aria-label={t("businessGoals.painel.quotes.toggle", { valor })}
+              onClick={() => setAberto(!aberto)}
+            >
+              <ChevronDown aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", aberto && "rotate-180")} />
+            </Button>
+          )}
+        </div>
       </div>
       {detalhe?.linhas && (
         <ul id={id} hidden={!aberto} aria-label={t("businessGoals.painel.quotes.lines")} className="space-y-1 border-t border-border px-3 py-2 text-sm">
@@ -63,7 +70,7 @@ export function OrcamentosPainel({ negocio, detalhe }: { negocio: NegocioMes; de
   return (
     <div className="space-y-2">
       <ul aria-label={t("businessGoals.painel.tabs.orcamentos")} className="space-y-2">
-        {negocio.orcamentos.map((o) => <LinhaOrcamento key={o.id} orcamento={o} detalhe={detalhe?.orcamentos?.[o.id]} />)}
+        {negocio.orcamentos.map((o) => <LinhaOrcamento key={o.id} orcamento={o} negocio={negocio} detalheNegocio={detalhe} />)}
       </ul>
       <p className="text-xs text-muted-foreground">{t("businessGoals.painel.quotes.example")}</p>
     </div>

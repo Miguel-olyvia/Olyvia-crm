@@ -23,6 +23,8 @@ interface PainelNegocioProps {
   hoje: string;
   acoes: AcoesNegocio;
   aoFechar: () => void;
+  /** Ao abrir, o foco vai para o título (um negócio acabado de criar) em vez do comportamento por omissão. */
+  focarTitulo?: boolean;
 }
 
 /**
@@ -88,13 +90,21 @@ function SeparadoresPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: strin
  * O painel lateral de um negócio: cabeçalho e barra de ações fixos e, por baixo, os separadores. Cada negócio abre
  * no Resumo (a `key` repõe o separador ao trocar de negócio). Guarda o último negócio enquanto o painel fecha, para o
  * conteúdo (e o título) não desaparecerem durante a animação de saída. */
-export function PainelNegocio({ negocio, hoje, acoes, aoFechar }: PainelNegocioProps) {
+export function PainelNegocio({ negocio, hoje, acoes, aoFechar, focarTitulo = false }: PainelNegocioProps) {
+  const conteudo = useRef<HTMLDivElement>(null);
   const ultimo = useRef<NegocioMes | null>(negocio);
   if (negocio) ultimo.current = negocio;
   const mostrado = negocio ?? ultimo.current;
   return (
     <Sheet open={negocio !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
       <SheetContent
+        ref={conteudo}
+        onOpenAutoFocus={(e) => {
+          const titulo = focarTitulo ? conteudo.current?.querySelector<HTMLElement>("[data-titulo-painel]") : null;
+          if (!titulo) return;
+          e.preventDefault();
+          titulo.focus();
+        }}
         className="flex w-full flex-col gap-0 p-0 sm:max-w-3xl motion-reduce:!animate-none [@media(max-height:480px)]:overflow-y-auto [@media(max-height:480px)]:[&>*]:shrink-0"
       >
         {mostrado && (
