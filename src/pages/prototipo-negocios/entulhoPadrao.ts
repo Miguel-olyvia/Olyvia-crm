@@ -80,6 +80,8 @@ const M3_POR_NOME: [RegExp, { m3: number; kg?: number }][] = [
   [/azulejo|revestimento/, { m3: 0.035 }], // (esp.)
   [/movel|moveis|mobiliario/, { m3: 0.3 }],
 ];
+/** O m³ (e kg) por unidade que o nome de um serviço sugere (0,05 m³ sem pista). */
+export const m3PadraoDoNome = (nome: string): { m3: number; kg?: number } => ({ ...(M3_POR_NOME.find(([re]) => re.test(normal(nome)))?.[1] ?? { m3: 0.05 }) });
 /**
  * O modo por omissão de um serviço, pelo nome e pelo ofício:
  *   · a própria remoção do entulho (vazadouro) → "nao";
@@ -95,7 +97,7 @@ export function entulhoPadraoServico(K: Pick<Catalogo, "artigoDoServico" | "exig
   if (RE_E_ENTULHO.test(n)) return { modo: "nao" };
   if (RE_REMOVER.test(n) || (RE_LEVANTAR.test(n) && of.startsWith("demoli"))) {
     if (K.artigoDoServico?.[sid]) return { modo: "artigo" };
-    const m = M3_POR_NOME.find(([re]) => re.test(n))?.[1] ?? { m3: 0.05 };
+    const m = m3PadraoDoNome(nome);
     return { modo: "m3", ...m };
   }
   const troca = RE_TROCAR.test(n) || (!!K.exigeProduto?.[sid] && !!K.perguntaManter?.[sid]?.trim());
