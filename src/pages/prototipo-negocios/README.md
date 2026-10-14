@@ -873,3 +873,4 @@ Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, ger
   - **Documentos:** proposta, contrato, nota de encomenda, adendas e fatura.
   - As ações são as do motor, por isso o resto do protótipo reage.
 - **Portal do fornecedor** (`PortalFornecedor.tsx`, no cartão da encomenda no Inventário): a encomenda com os preços do fornecedor e a escolha do dia da entrega entre os próximos dias úteis. Os dias no início da obra, ou depois, aparecem a avisar. Por omissão sugere o último dia útil antes do início. Ao confirmar, chama `A.confirmarEntrega(id, data)`.
+- **Toques nas Necessidades** (medido a 14/10, WC típico): 11 toques do primeiro ecrã ao fim do passo (detalhe em `docs/melhorias-v2-2026-10-13/toques-necessidades-2026-10-14.md`, local). GIF do percurso para a Mudelar: `docs/melhorias-v2-2026-10-13/percurso-mudelar-2026-10-14.gif` (11 ecrãs, do Hoje à obra concluída).
