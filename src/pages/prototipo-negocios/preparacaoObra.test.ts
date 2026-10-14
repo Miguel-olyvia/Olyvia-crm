@@ -19,7 +19,7 @@ const estados = (S: ReturnType<typeof seed>, d: ReturnType<typeof preparar>["d"]
 describe("do contrato à obra", () => {
   it("o contrato gera a encomenda de cliente (materiais e stock) e o plano do orçamento, ambos por aprovar", () => {
     const { S, d } = preparar();
-    expect(d.obra.ec).toMatchObject({ n: "EC 2026/001", estado: "por aprovar", criada: "08/10" });
+    expect(d.obra.ec).toMatchObject({ n: "EC 2026/003", estado: "por aprovar", criada: "08/10" });
     expect(d.obra.ec!.linhas.length).toBeGreaterThan(0);
     expect(d.obra.plano).toMatchObject({ estado: "por aprovar", origem: "orcamento" });
     expect(d.obra.plano!.tasks.every((t) => t.fase && t.tec)).toBe(true);

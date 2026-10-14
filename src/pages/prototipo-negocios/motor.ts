@@ -286,7 +286,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
 // 9 (14/10/2026): a demolição de parede (c5) passa de ml a m², como diz o nome
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
-export const VERSAO = 14;
+export const VERSAO = 15;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -355,6 +355,8 @@ export function seed(): Estado {
   Object.assign(by(1027).orc!, { verif: true, enviada: "01/10", aceite: "03/10", contrato: "assinado" });
   by(1027).hist.push({ t: "Contrato assinado · cliente criado", q: "08/10", k: "a" });
   // o exemplo do circuito novo (14/10): contrato assinado → encomenda de cliente e plano por aprovar
+  // (as EC 001 e 002 são as das obras antigas do exemplo, Marta e Joana, aprovadas em setembro)
+  S.ec = 3;
   prepararObraDe(by(1027), S, "08/10");
   by(1027).hist.unshift({ t: "Encomenda de cliente " + by(1027).obra.ec!.n + " e plano da obra gerados · por aprovar", q: "08/10", k: "a" });
   {
@@ -395,6 +397,14 @@ export function seed(): Estado {
   m.obra.mats = calcMats(m, S, true);
   m.f.valor_recebido = String(r2(tot(m, S).pf));
   m.hist.push({ t: "Obra em curso · dia 3 de 5", q: "hoje", k: "a" });
+  // 14/10: as obras antigas do exemplo também têm a encomenda de cliente (aprovada, tudo reservado): o circuito é o mesmo em todo o lado
+  const ecAntiga = (d: Negocio, n: string, quando: string) => {
+    const ec = gerarEncCliente(d, S, n, quando);
+    ec.linhas.forEach((x) => { x.res = x.q; x.falta = 0; });
+    d.obra.ec = { ...ec, estado: "aprovada", aprovada: { por: PAPEIS.comercial.n, q: quando } };
+  };
+  ecAntiga(m, "EC 2026/001", "17/09");
+  ecAntiga(by(1050), "EC 2026/002", "21/09");
   return S;
 }
 

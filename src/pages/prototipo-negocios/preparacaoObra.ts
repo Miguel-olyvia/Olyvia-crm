@@ -164,7 +164,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
 
   // o plano
   const nc = conflitos(p).length, dias = p.tasks.length ? Math.max(...p.tasks.map((t) => t.dia + t.dur)) : 0;
-  L.push({ id: "pl", trilho: "plano", estado: "feito", who: null, t: "Plano gerado do orçamento", sub: `${p.tasks.length} ${p.tasks.length === 1 ? "tarefa" : "tarefas"} · ${nfmt(dias)} dias úteis${p.inicio ? ` · início ${p.inicio.split("-").reverse().slice(0, 2).join("/")}` : ""}` });
+  L.push({ id: "pl", trilho: "plano", estado: "feito", who: null, t: p.origem === "orcamento" ? "Plano gerado do orçamento" : "Plano da obra", sub: `${p.tasks.length} ${p.tasks.length === 1 ? "tarefa" : "tarefas"} · ${nfmt(dias)} dias úteis${p.inicio ? ` · início ${p.inicio.split("-").reverse().slice(0, 2).join("/")}` : ""}` });
   L.push(p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
