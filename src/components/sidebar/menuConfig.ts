@@ -296,11 +296,13 @@ export const menuSections: MenuSection[] = [
     id: "users",
     icon: UserCog,
     labelKey: "sidebar.users",
-    paths: ["/users", "/roles", "/export-audit"],
+    paths: ["/users", "/roles", "/utilizadores-perfis", "/export-audit"],
     permissions: ["users.view"],
     items: [
       { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
       { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
+      // Exemplo estático por agora (junta Utilizadores e Roles); as páginas reais continuam acima.
+      { to: "/utilizadores-perfis", icon: UserCog, labelKey: "sidebar.usersProfiles", permission: "users.view" },
       { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],
   },
