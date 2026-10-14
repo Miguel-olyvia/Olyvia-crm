@@ -11,16 +11,16 @@ import { IconeServico, Ilustracao, type IconeServicoKey, type IlustracaoKey } fr
 import { MOLA, MOLA_CARTAO, VistoDesenho, cascata, useReduzir } from "./movimento";
 
 /** O visto do cartão escolhido (desenha-se ao ligar; o círculo vazio quando não está); "so" = vem com um produto. */
-function Visto({ on, so }: { on: boolean; so?: boolean }) {
+function Visto({ on, so, atraso }: { on: boolean; so?: boolean; atraso?: number }) {
   if (so) return <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center text-primary"><Link2 className="h-4 w-4" /></span>;
-  return <VistoDesenho on={on} />;
+  return <VistoDesenho on={on} atraso={atraso} />;
 }
 
 /** A camada do acento (borda de 2 px, fundo suave e sombra): aparece e some só com opacity, sem repintar a caixa. */
-function Acento({ on }: { on: boolean }) {
+function Acento({ on, atraso = 0 }: { on: boolean; atraso?: number }) {
   const reduzir = useReduzir();
   return (
-    <motion.span aria-hidden="true" initial={false} animate={{ opacity: on ? 1 : 0 }} transition={{ duration: reduzir ? 0 : 0.18 }}
+    <motion.span aria-hidden="true" initial={false} animate={{ opacity: on ? 1 : 0 }} transition={{ duration: reduzir ? 0 : 0.18, delay: reduzir ? 0 : atraso }}
       className="pointer-events-none absolute -inset-px rounded-xl border-2 border-primary bg-primary/[0.06] shadow-[0_8px_24px_-12px_hsl(var(--primary)/0.55)]" />
   );
 }
@@ -29,15 +29,15 @@ function Acento({ on }: { on: boolean }) {
  * A caixa do cartão. "animar" reorganiza a grelha com animação quando se filtra (layout, só nas listas curtas);
  * "entrada" é a cascata (movimento.tsx: cascata).
  */
-function Caixa({ on, falta, title, animar, entrada, children }: {
-  on: boolean; falta?: boolean; title: string; animar?: boolean; entrada?: ReturnType<typeof cascata>; children: ReactNode;
+function Caixa({ on, falta, title, animar, entrada, children, atraso }: {
+  atraso?: number; on: boolean; falta?: boolean; title: string; animar?: boolean; entrada?: ReturnType<typeof cascata>; children: ReactNode;
 }) {
   const reduzir = useReduzir();
   return (
     <motion.li layout={animar && !reduzir ? "position" : false} transition={MOLA} {...(entrada ?? { initial: false })}
       className={cn("relative flex flex-col rounded-xl border bg-card shadow-[0_1px_2px_hsl(var(--foreground)/0.05)]", falta ? "border-destructive" : "border-border")}
       title={title}>
-      <Acento on={on} />
+      <Acento on={on} atraso={atraso} />
       {children}
     </motion.li>
   );
@@ -47,13 +47,13 @@ const TOQUE = "relative flex w-full rounded-xl text-left outline-none focus-visi
 const PRESS = { whileTap: { scale: 0.97 }, transition: MOLA_CARTAO };
 
 /** A figura do cartão: no escolhido, o fundo passa ao acento suave e a figura cresce um pouco (realce subtil). */
-function Figura({ on, children, className }: { on: boolean; children: ReactNode; className: string }) {
+function Figura({ on, children, className, atraso = 0 }: { on: boolean; children: ReactNode; className: string; atraso?: number }) {
   const reduzir = useReduzir();
   return (
     <span className={cn("relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted/70", className)}>
-      <motion.span aria-hidden="true" className="absolute inset-0 bg-primary/[0.12]" initial={false} animate={{ opacity: on ? 1 : 0 }} transition={{ duration: reduzir ? 0 : 0.2 }} />
+      <motion.span aria-hidden="true" className="absolute inset-0 bg-primary/[0.12]" initial={false} animate={{ opacity: on ? 1 : 0 }} transition={{ duration: reduzir ? 0 : 0.2, delay: reduzir ? 0 : atraso }} />
       <motion.span className={cn("relative grid place-items-center transition-colors duration-200", on ? "text-primary" : "text-muted-foreground")} initial={false}
-        animate={{ scale: on && !reduzir ? 1.08 : 1, rotate: on && !reduzir ? -3 : 0 }} transition={MOLA_CARTAO}>
+        animate={{ scale: on && !reduzir ? 1.08 : 1, rotate: on && !reduzir ? -3 : 0 }} transition={{ ...MOLA_CARTAO, delay: reduzir ? 0 : atraso }}>
         {children}
       </motion.span>
     </span>
@@ -61,7 +61,7 @@ function Figura({ on, children, className }: { on: boolean; children: ReactNode;
 }
 
 /* ------------------------------------------------------------------ serviço */
-export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, so, desativado, onTocar, children, falta, compacto, animar, entrada }: {
+export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, so, desativado, onTocar, children, falta, compacto, animar, entrada, atraso }: {
   nome: string; nomeCompleto: string; linha2?: string | null; icone: IconeServicoKey; figura?: ReactNode; on: boolean; so?: boolean; desativado?: boolean;
   onTocar: () => void; children?: ReactNode; falta?: boolean;
   /** Mais baixo (o fornece por serviço): a figura de 32 px e menos espaço. */
@@ -69,20 +69,22 @@ export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, s
   /** Reorganiza-se com animação quando a grelha muda (listas curtas). */
   animar?: boolean;
   entrada?: ReturnType<typeof cascata>;
+  /** O atraso da mudança (s), quando muitos mudam de uma vez (os modelos rápidos): uma cascata. */
+  atraso?: number;
 }) {
   const corpo = (
     <>
-      <Figura on={on} className={compacto ? "h-8 w-8" : "h-10 w-10"}>{figura ?? <IconeServico k={icone} />}</Figura>
+      <Figura on={on} atraso={atraso} className={compacto ? "h-8 w-8" : "h-10 w-10"}>{figura ?? <IconeServico k={icone} />}</Figura>
       <span className="min-w-0 flex-1">
         <span className="line-clamp-2 text-[15px] font-medium leading-snug text-foreground">{nome}</span>
         {linha2 && <span className="mt-0.5 block truncate text-sm leading-snug text-muted-foreground">{linha2}</span>}
       </span>
-      <Visto on={on} so={so} />
+      <Visto on={on} so={so} atraso={atraso} />
     </>
   );
   const rotulo = [nomeCompleto, linha2].filter(Boolean).join(". ");
   return (
-    <Caixa on={on} falta={falta} title={nomeCompleto} animar={animar} entrada={entrada}>
+    <Caixa on={on} falta={falta} title={nomeCompleto} animar={animar} entrada={entrada} atraso={atraso}>
       {so ? (
         <div className="relative flex min-h-[64px] items-center gap-3 p-3" aria-label={rotulo} role="group">{corpo}</div>
       ) : (
@@ -164,14 +166,20 @@ export function QtdMudar({ id, valor, un, nome, texto, onMudar, recuo }: {
 }
 
 /* ------------------------------------------------------------------ respostas grandes */
-export function CartaoResposta({ on, onTocar, titulo, sub, disabled }: { on: boolean; onTocar: () => void; titulo: string; sub?: string; disabled?: boolean }) {
+export function CartaoResposta({ on, onTocar, titulo, sub, disabled, sugerido }: {
+  on: boolean; onTocar: () => void; titulo: string; sub?: string; disabled?: boolean;
+  /** A resposta mais provável (destacada, não escolhida): a razão, numa linha discreta, e a borda tracejada do acento. */
+  sugerido?: string;
+}) {
   return (
     <motion.button type="button" aria-pressed={on} onClick={onTocar} disabled={disabled} {...PRESS}
       className="relative flex min-h-16 w-full items-center gap-3 rounded-xl border border-input bg-card px-4 py-3 text-left shadow-[0_1px_2px_hsl(var(--foreground)/0.05)] outline-none transition-[border-color] duration-150 hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-70">
       <Acento on={on} />
+      {sugerido && !on && <span aria-hidden="true" className="pointer-events-none absolute -inset-px rounded-xl border-2 border-dashed border-primary/70" />}
       <span className="relative min-w-0 flex-1">
         <span className="block text-base font-semibold text-foreground">{titulo}</span>
         {sub && <span className="block text-sm text-muted-foreground">{sub}</span>}
+        {sugerido && !on && <span className="mt-1 block text-sm font-medium text-primary">Sugerido<span className="sr-only">: {sugerido}</span></span>}
       </span>
       <span className="relative"><Visto on={on} /></span>
     </motion.button>
@@ -196,7 +204,11 @@ export function Pesquisa({ valor, onMudar, rotulo, ph }: { valor: string; onMuda
  * desliza com o dedo (nativo), a arrastar com o rato (um arrasto de mais de 5 px não conta como clique) e com a roda
  * (o deslocamento vertical passa a horizontal). A ponta com mais filtros esbate-se; o filtro focado com o Tab fica à vista.
  */
-export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string[]; ativo: string | null; onMudar: (v: string | null) => void; rotulo: string }) {
+export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
+  opcoes: string[]; ativo: string | null; onMudar: (v: string | null) => void; rotulo: string;
+  /** Um seletor que vem primeiro na mesma fila e desliza com o resto (ex.: a fase da obra). */
+  prefixo?: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const idFila = useId();
   const reduzir = useReduzir();
@@ -229,7 +241,7 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string
     return () => { el.removeEventListener("wheel", roda); ro?.disconnect(); };
   }, [medir, opcoes.length]);
 
-  if (opcoes.length < 2) return null;
+  if (opcoes.length < 2 && !prefixo) return null;
   // o filtro ativo: o fundo do acento desliza de um filtro para o outro (layoutId), o texto muda de cor por baixo
   const b = (on: boolean) => cn("relative inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-4 text-[15px] transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     on ? "border-primary font-medium text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40");
@@ -241,7 +253,7 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string
     ? `linear-gradient(to right, ${pontas.esq ? "transparent 0, #000 32px" : "#000 0"}, ${pontas.dir ? "#000 calc(100% - 32px), transparent 100%" : "#000 100%"})`
     : undefined;
   return (
-    <div ref={ref} role="group" aria-label={rotulo} data-esq={pontas.esq || undefined} data-dir={pontas.dir || undefined}
+    <div ref={ref} role="group" aria-label={rotulo} data-sem-gesto="" data-esq={pontas.esq || undefined} data-dir={pontas.dir || undefined}
       style={{ maskImage: mascara, WebkitMaskImage: mascara, msOverflowStyle: "none", scrollbarWidth: "none" }}
       className={cn("-mx-1 flex min-w-0 select-none gap-2 overflow-x-auto overscroll-x-contain px-1 py-0.5 [&::-webkit-scrollbar]:hidden",
         aArrastar ? "cursor-grabbing" : "cursor-grab")}
@@ -272,10 +284,13 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string
       onClickCapture={(e) => { if (engolir.current) { e.preventDefault(); e.stopPropagation(); engolir.current = false; } }}
       onFocus={(e) => { if (e.target !== ref.current) (e.target as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}
       onDragStart={(e) => e.preventDefault()}>
+      {prefixo}
+      {opcoes.length >= 2 && <>
       <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>{fundo(!ativo)}<span className="relative">Todos</span></button>
       {opcoes.map((o) => (
         <button key={o} type="button" aria-pressed={ativo === o} onClick={() => onMudar(ativo === o ? null : o)} className={b(ativo === o)}>{fundo(ativo === o)}<span className="relative">{o}</span></button>
       ))}
+      </>}
     </div>
   );
 }

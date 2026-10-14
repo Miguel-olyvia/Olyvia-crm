@@ -41,7 +41,7 @@ function preparar() {
   preencher(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
   return { S, A, d };
 }
-beforeEach(() => { ligarCatalogo(lerCatalogo); ligarReceitas((sid, s) => itensDaReceita(lerCustos(), sid, s)); });
+beforeEach(() => { window.localStorage.clear(); ligarCatalogo(lerCatalogo); ligarReceitas((sid, s) => itensDaReceita(lerCustos(), sid, s)); });
 afterEach(() => { cleanup(); ligarCatalogo(null); ligarReceitas(null); reporCatalogo(); vi.useRealTimers(); });
 
 /* ------------------------------------------------------------------ nomes curtos */

@@ -49,20 +49,21 @@ export function cascata(i: number, reduzir: boolean, atraso = 0) {
 
 /* ------------------------------------------------------------------ o visto que se desenha */
 /** O visto: o círculo enche (scale) e o traço desenha-se (pathLength); ao desligar, o inverso. */
-export function VistoDesenho({ on, className, grande }: { on: boolean; className?: string; grande?: boolean }) {
+export function VistoDesenho({ on, className, grande, atraso = 0 }: { on: boolean; className?: string; grande?: boolean; atraso?: number }) {
   const reduzir = useReduzir();
   const t = reduzir ? { duration: 0 } : undefined;
+  const a = reduzir ? 0 : atraso;
   return (
     <span aria-hidden="true" className={cn("relative grid shrink-0 place-items-center rounded-full", grande ? "h-16 w-16" : "h-6 w-6", className)}>
       {/* o anel vazio, sempre lá (some quando o círculo enche) */}
       <motion.span className="absolute inset-0 rounded-full border border-input bg-card" initial={false}
-        animate={{ opacity: on ? 0 : 1 }} transition={t ?? { duration: 0.15 }} />
+        animate={{ opacity: on ? 0 : 1 }} transition={t ?? { duration: 0.15, delay: a }} />
       <motion.span className="absolute inset-0 rounded-full bg-primary" initial={false}
-        animate={{ scale: on ? 1 : 0.4, opacity: on ? 1 : 0 }} transition={t ?? { ...MOLA_CARTAO, opacity: { duration: 0.12 } }} />
+        animate={{ scale: on ? 1 : 0.4, opacity: on ? 1 : 0 }} transition={t ?? { ...MOLA_CARTAO, delay: a, opacity: { duration: 0.12, delay: a } }} />
       <svg viewBox="0 0 24 24" className={cn("relative", grande ? "h-9 w-9" : "h-3.5 w-3.5")} fill="none">
         <motion.path d="M5 12.5l4.5 4.5L19 7.5" stroke="hsl(var(--primary-foreground))" strokeWidth={grande ? 2.5 : 3.4} strokeLinecap="round" strokeLinejoin="round"
           initial={false} animate={{ pathLength: on ? 1 : 0, opacity: on ? 1 : 0 }}
-          transition={t ?? { pathLength: { duration: on ? 0.26 : 0.12, ease: SAIDA, delay: on ? 0.05 : 0 }, opacity: { duration: 0.05 } }} />
+          transition={t ?? { pathLength: { duration: on ? 0.26 : 0.12, ease: SAIDA, delay: a + (on ? 0.05 : 0) }, opacity: { duration: 0.05, delay: a } }} />
       </svg>
     </span>
   );
@@ -161,6 +162,12 @@ export function Brilho({ ativo }: { ativo: boolean }) {
       style={{ background: "radial-gradient(circle, hsl(var(--primary) / 0.28) 0%, hsl(var(--primary) / 0.08) 45%, transparent 70%)" }}
       initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: [0, 1, 0.35], scale: [0.5, 1.1, 1] }} transition={{ duration: 1.1, ease: SAIDA, times: [0, 0.45, 1] }} />
   );
+}
+
+/** O toque físico (quando o telemóvel o tem e sem movimento reduzido): 10 ms ao ligar, [10, 30, 10] ao completar. */
+export function vibrar(padrao: number | number[], reduzir: boolean) {
+  if (reduzir || typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  try { navigator.vibrate(padrao); } catch { /* sem vibração */ }
 }
 
 /** Para efeitos que só correm uma vez por montagem (a celebração do resumo). */
