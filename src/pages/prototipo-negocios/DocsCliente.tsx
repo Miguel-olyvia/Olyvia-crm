@@ -72,6 +72,12 @@ function fimPrevisto(inicio?: string, dias?: string): string {
   return d.toLocaleDateString("pt-PT");
 }
 const token = (d: Negocio, tipo: string) => (d.id * 7919 + tipo.length * 104729).toString(36).toUpperCase();
+/** Os tipos de documento com link do portal. */
+export const TIPOS_DOC = ["proposta", "contrato", "fatura", "encomenda", "adenda"] as const;
+/** O código do link de um documento (o negócio e o tipo). */
+export const tokenDoc = token;
+/** O link do portal do cliente. No protótipo abre o portal neste mesmo endereço (os dados vivem neste browser). */
+export const linkPortal = (d: Negocio, tipo: string) => `${typeof window !== "undefined" ? window.location.origin : ""}/prototipo/negocios?portal=${token(d, tipo)}`;
 
 /* ------------------------------------------------------------------ a folha */
 function Folha({ titulo, numero, data: dt, children, carimbo }: { titulo: string; numero: string; data: string; children: ReactNode; carimbo?: string }) {
@@ -523,7 +529,7 @@ function imprimir(el: HTMLElement | null, titulo: string) {
 }
 
 export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda" | "adenda"; children: ReactNode; estado: string }) {
-  const link = `https://portal.olyvia-ai.com/${tipo}/${token(d, tipo)}`;
+  const link = linkPortal(d, tipo);
   const [copiado, setCopiado] = useState(false);
   const [ver, setVer] = useState(false);
   const [zoom, setZoom] = useState(1);
@@ -544,7 +550,7 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
           <span className="rounded-full bg-muted px-2.5 py-0.5 text-sm text-muted-foreground">{estado}</span>
         </div>
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-input bg-background p-1 pl-3">
-          <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground" title={link}>{link}</span>
+          <a href={link} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sm text-primary underline-offset-4 hover:underline" title={link}>{link}</a>
           <Button size="sm" variant={copiado ? "secondary" : "default"} onClick={copiar}>{copiado ? <><Check className="mr-1.5 h-4 w-4" />Copiado</> : <><Copy className="mr-1.5 h-4 w-4" />Copiar link</>}</Button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -553,7 +559,7 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
           <Button variant="outline" onClick={() => setVer(true)}><Maximize2 className="mr-1.5 h-4 w-4" />Abrir em ecrã inteiro</Button>
           <Button variant="outline" onClick={() => imprimir(doc.current?.querySelector(".folha") as HTMLElement, `${EMPRESA.nome} · ${nome}`)}><Printer className="mr-1.5 h-4 w-4" />Imprimir ou PDF</Button>
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">Link de exemplo: no protótipo não abre o portal.</p>
+        <p className="mt-2 text-xs text-muted-foreground">No protótipo, o link abre o portal do cliente neste browser (os dados ficam neste computador). O link real será do portal da Olyvia.</p>
       </div>
       <div ref={doc} className="rounded-2xl bg-muted/60 p-3 sm:p-6">{children}</div>
       {ver && createPortal(

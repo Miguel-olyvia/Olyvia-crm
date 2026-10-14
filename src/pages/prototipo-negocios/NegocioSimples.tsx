@@ -419,7 +419,11 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
                 <button type="button" className="hidden min-h-11 px-2 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:block"
                   onClick={() => setAtivo(passos.length)}>Ir para "{p.btn}"</button>
               )}
-              <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>
+              {/* no passo Orçamento por verificar, o botão é verificar: sem bloqueios o passo fica feito e avança sozinho;
+                  com bloqueios, leva-os à vista (antes, o "Continuar" passava à Proposta com o orçamento por aprovar) */}
+              {atual?.id === "orc" && d.orc && !d.orc.enviada && !completo(atual)
+                ? <Button size="lg" className="w-full sm:w-auto" onClick={ctx.go(() => (d.orc!.verif ? ctx.A.irVerif() : ctx.A.verificar(d.id)))}>{d.orc.verif ? "Ver o que falta resolver" : "Verificar o orçamento"}</Button>
+                : <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>}
             </div>}
         </div>
         )}

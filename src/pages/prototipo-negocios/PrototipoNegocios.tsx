@@ -43,6 +43,8 @@ import PerfilSimulado from "./inventario/PerfilSimulado";
 import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
 import { esquecerFrota, type AbaFrota } from "./frota/loja";
 import { definirMolduraFrota, obrasDoEstado, tratarPedidoFrota, usePedidoFrota } from "./frota/pontes";
+import { PortalCliente } from "./PortalCliente";
+import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
 
 // O Inventário completo (nativo, só na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
@@ -83,6 +85,15 @@ export default function PrototipoNegocios() {
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
+
+  // o link do portal do cliente (?portal=<código>): abre o portal numa página própria (14/10)
+  const [portalTok, setPortalTok] = useState<string | null>(() => { try { return new URLSearchParams(window.location.search).get("portal"); } catch { return null; } });
+  // o que se faz noutro separador (o portal) chega aqui sem recarregar
+  useEffect(() => {
+    const f = (e: StorageEvent) => { if (e.key === CHAVE) { ref.current = ler(); redesenhar(); } };
+    window.addEventListener("storage", f);
+    return () => window.removeEventListener("storage", f);
+  }, []);
 
   const guardar = useCallback(() => {
     try { localStorage.setItem(CHAVE, JSON.stringify(ref.current)); } catch { /* ignora */ }
@@ -240,6 +251,23 @@ export default function PrototipoNegocios() {
     setFrotaPedido(pedidoFrota.vid ? { vid: pedidoFrota.vid, n: pedidoFrota.n } : null);
   }, [soV2, pedidoFrota]);
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
+
+  // o portal do cliente aberto pelo link de partilha
+  if (portalTok) {
+    const dp = S.deals.find((d) => TIPOS_DOC.some((t) => tokenDoc(d, t) === portalTok));
+    const sair = () => { window.history.replaceState(null, "", window.location.pathname); setPortalTok(null); };
+    return dp
+      ? <PortalCliente ctx={ctx} d={dp} fechar={sair} />
+      : (
+        <div className="grid min-h-screen place-items-center bg-slate-100 p-6 text-center text-slate-800">
+          <div>
+            <p className="text-lg font-semibold">Este link já não abre nenhum documento.</p>
+            <p className="mt-1 text-[15px] text-slate-600">Peça um link novo a quem lho enviou.</p>
+            <button type="button" onClick={sair} className="mt-4 min-h-11 rounded-xl bg-slate-900 px-4 text-[15px] font-semibold text-white">Ir para o protótipo</button>
+          </div>
+        </div>
+      );
+  }
 
   const icone = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
     <button key={v} type="button" onClick={go(() => A.nav(v))} aria-label={l} aria-current={cur === v ? "page" : undefined}

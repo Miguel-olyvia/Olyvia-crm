@@ -27,3 +27,14 @@ describe("portais do cliente e do fornecedor", () => {
     expect(d.obra.enc!.entregaIso).toBe("2026-10-22");
   });
 });
+
+describe("o link de partilha", () => {
+  it("cada documento de cada negócio tem um código só seu, e o link abre o portal no protótipo", async () => {
+    const { TIPOS_DOC, tokenDoc, linkPortal } = await import("./DocsCliente");
+    const S = seed();
+    const codigos = S.deals.flatMap((d) => TIPOS_DOC.map((t) => tokenDoc(d, t)));
+    expect(new Set(codigos).size).toBe(codigos.length);
+    const d = S.deals.find((x) => x.id === 1031)!;
+    expect(linkPortal(d, "proposta")).toMatch(/\/prototipo\/negocios\?portal=[0-9A-Z]+$/);
+  });
+});
