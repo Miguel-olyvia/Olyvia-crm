@@ -5,9 +5,10 @@
 // um técnico de 1.900 € dá 25,00 €/h, a estrutura dá 5,06 €/h e os equipamentos
 // têm a mesma amortização (preço ÷ vida útil) de receitas.ts.
 
-import { CATALOGO, normal, type ItemCatalogo, type LinhaCat } from "../catalogo";
+import { CATALOGO, CATALOGO_TODO, itemCatalogo, normal, type ItemCatalogo, type LinhaCat } from "../catalogo";
 import { LINHAS, alertas, eur, pct, r2, type Alerta, type Estado, type MedKey, type Negocio, type Servico, type SvcId } from "../motor";
 import { RECEITAS, amortHora, consUn } from "../receitas";
+import { EQUIP_MUDELAR, PERFIL_DO_OFICIO_MUDELAR, PERFIS_MUDELAR, receitaMudelar } from "../dados/catalogoMudelar";
 
 /* ------------------------------------------------------------------ tipos */
 export interface Parametros {
@@ -105,6 +106,8 @@ export const PERFIS0: Perfil[] = [
 export const PERFIL_DO_OFICIO: Record<string, string> = {
   "Demolições": "servente", "Canalização": "canalizador", "Revestimentos": "ladrilhador", "Carpintaria": "montador",
   "Gás (ITG)": "gas", "Eletricidade": "eletricista", "Pintura": "pintor",
+  // os ofícios novos do catálogo da Mudelar (14/10)
+  ...PERFIL_DO_OFICIO_MUDELAR,
 };
 
 const idEquip = (n: string) => "e-" + normal(n).replace(/[^a-z0-9]+/g, "-").replace(/-$/, "");
@@ -120,8 +123,10 @@ function equip0(): Equip[] {
 export function custos0(): Custos {
   return {
     par: { meses: 14, tsu: 23.75, segurosAno: 713, horasAno: 1345, horasMes: 672, mesesDesatualizado: 6 },
-    perfis: PERFIS0.map((p) => ({ ...p })),
-    equip: equip0(),
+    // + os perfis e os equipamentos do catálogo da Mudelar (14/10): a média dos salários novos é a de antes,
+    // por isso o custo/hora médio (o do ladrilhador, sem salário) não muda
+    perfis: [...PERFIS0, ...PERFIS_MUDELAR].map((p) => ({ ...p })),
+    equip: [...equip0(), ...EQUIP_MUDELAR.map((e) => ({ ...e }))],
     estrutura: [
       { id: "s1", n: "Renda do armazém e escritório", cat: "Renda", mensal: 900, ativo: true },
       { id: "s2", n: "Viaturas (2 carrinhas)", cat: "Viaturas", mensal: 1200, ativo: true },
@@ -163,7 +168,7 @@ export const taxaEstrutura = (C: Custos) => (C.par.horasMes > 0 ? totalEstrutura
 const linhasDe = (sid: SvcId): LinhaCat[] => {
   const s = new Set<LinhaCat>();
   for (const [l, L] of Object.entries(LINHAS) as [LinhaCat, (typeof LINHAS)["wc"]][]) if (L.map.some(([x]) => x === sid)) s.add(l);
-  for (const l of CATALOGO.find((c) => c.id === sid)?.linhas ?? []) s.add(l);
+  for (const l of itemCatalogo(sid)?.linhas ?? []) s.add(l);
   return [...s];
 };
 export const LINHA_NOME: Record<LinhaCat, string> = { wc: "Casa de banho", coz: "Cozinha" };
@@ -181,7 +186,16 @@ export function perfilDoServico(C: Custos, nome: string): string {
 /** A receita de um serviço: a mexida, ou a que se deriva de receitas.ts (completa) ou do Catálogo (só as horas). */
 export function receitaDe(C: Custos, sid: SvcId, s?: Servico | null, alvo = 35): ReceitaV2 | null {
   if (C.receitas[sid]) return C.receitas[sid];
-  const cat = CATALOGO.find((c) => c.id === sid);
+  // os serviços novos do catálogo da Mudelar (14/10) trazem a receita completa e o PVP real como preço de tabela
+  const mu = receitaMudelar(sid);
+  if (mu) {
+    return {
+      sid, origem: "catalogo", mo: structuredClone(mu.mo), equip: structuredClone(mu.equip), cons: structuredClone(mu.cons),
+      modo: "tabela", precoTabela: s?.preco ?? mu.pvp, margem: alvo, medida: mu.medida,
+      hist: [{ data: "2026-01-15", preco: mu.pvp, nota: "Tabela da Mudelar de 2026" }],
+    };
+  }
+  const cat = itemCatalogo(sid);
   if (!s && !cat) return null;
   const R = RECEITAS[sid];
   const perfil = perfilDoServico(C, s?.perfil ?? cat!.cat);
@@ -283,12 +297,16 @@ export interface ItemLista {
   alertas: AlertaCat[];
 }
 
-export function listaCatalogo(S: Estado, C: Custos, hoje = HOJE): ItemLista[] {
-  const ids = [...Object.keys(S.svc), ...CATALOGO.map((c) => c.id).filter((id) => !S.svc[id])];
+/**
+ * A lista única: os serviços em uso e os do Catálogo. Por omissão, o Catálogo de antes (CATALOGO, o que a V2 mostra);
+ * com `o.todo`, o Catálogo inteiro da Mudelar (CATALOGO_TODO, 14/10).
+ */
+export function listaCatalogo(S: Estado, C: Custos, hoje = HOJE, o: { todo?: boolean } = {}): ItemLista[] {
+  const ids = [...Object.keys(S.svc), ...(o.todo ? CATALOGO_TODO : CATALOGO).map((c) => c.id).filter((id) => !S.svc[id])];
   const usosProto = (sid: SvcId) => S.deals.filter((d) => d.orc?.linhas.some((l) => l.t === "svc" && l.sid === sid)).length;
   const out: ItemLista[] = [];
   for (const sid of ids) {
-    const s = S.svc[sid] ?? null, cat: ItemCatalogo | undefined = CATALOGO.find((x) => x.id === sid);
+    const s = S.svc[sid] ?? null, cat: ItemCatalogo | undefined = itemCatalogo(sid);
     const rec = receitaDe(C, sid, s, S.cfg.alvo);
     if (!rec) continue;
     const c = custoReceita(rec, C, S.cfg.estrutura), preco = precoReceita(rec, c.total), min = minimoServico(C, sid, S.cfg.min);
@@ -300,6 +318,9 @@ export function listaCatalogo(S: Estado, C: Custos, hoje = HOJE): ItemLista[] {
   }
   return out;
 }
+
+/** A lista única com o Catálogo inteiro da Mudelar (os 361 serviços; 14/10). */
+export const listaCatalogoCompleta = (S: Estado, C: Custos, hoje = HOJE) => listaCatalogo(S, C, hoje, { todo: true });
 
 export type Filtro = "uso" | "sem-receita" | "margem" | "desatualizado";
 export const FILTROS: { id: Filtro; t: string }[] = [

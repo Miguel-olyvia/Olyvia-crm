@@ -96,7 +96,7 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
           </label>
         ))}
         <label className={cn(LINHA, "justify-between")}>
-          <span className="text-[15px] font-medium">Contentor disponível<span className="block text-sm font-normal text-muted-foreground">Desligado até as Compras enviarem as capacidades. Não mexe no preço: o C_dep já o inclui.</span></span>
+          <span className="text-[15px] font-medium">Contentor disponível<span className="block text-sm font-normal text-muted-foreground">A Olyvia propõe-no a partir do volume indicado. Não mexe no preço: o C_dep já o inclui.</span></span>
           <input type="checkbox" className="h-5 w-5 accent-[hsl(var(--primary))]" disabled={!direcao} checked={P.contentor.ativo}
             onChange={(e) => { const v = e.target.checked; mudarPar("Propor contentor", (p) => { p.contentor.ativo = v; }, P.contentor.ativo, v); }} />
         </label>
@@ -172,7 +172,7 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
               <li key={i}><span className="text-muted-foreground">{h.quando} · {h.quem}:</span> {h.campo} <span className="tabular-nums">{h.antes} → {h.depois}</span></li>
             ))}
           </ol>
-        ) : <p className="mt-1 text-sm text-muted-foreground">Ainda sem alterações: os valores são os de teste da especificação ({eur(PAR_DEM0.custoHora)} €/h, {eur(PAR_DEM0.cDep)} €/m³, margem alvo e mínima as gerais da Olyvia).</p>}
+        ) : <p className="mt-1 text-sm text-muted-foreground">Ainda sem alterações: os valores são os de produção da especificação de 14/10 ({eur(PAR_DEM0.custoHora)} €/h, {eur(PAR_DEM0.cDep)} €/m³, margem de 30%; o custo/hora a confirmar pelos RH).</p>}
       </div>
     </div>
   );

@@ -3,6 +3,10 @@
 // os REAIS da Mudelar: vêm de operacao-app/tools/planeamento/dados.mjs (EXTRAS),
 // os serviços vendidos à parte dos pacotes. Os custos e preços são de exemplo:
 // mão de obra a 25 €/h e preço de tabela com 35% de margem.
+// 14/10/2026: o catálogo real da Mudelar inteiro (dados/catalogoMudelar.ts). Os c1..c41 ficam como estavam
+// e ganham o sku, o PVP e o custo reais; os outros 317 serviços da Mudelar ficam em CATALOGO_MUDELAR (id "s-<sku>").
+
+import { SERVICOS_MUDELAR, SERVICOS_NOVOS_MUDELAR } from "./dados/catalogoMudelar";
 
 export type LinhaCat = "wc" | "coz";
 export interface ItemCatalogo {
@@ -19,9 +23,18 @@ export interface ItemCatalogo {
   /** Em quantos orçamentos aparece: ordena os "mais pedidos". */
   usos: number;
   linhas: LinhaCat[];
+  /** Referência real da Mudelar (14/10). */
+  sku?: string;
+  /** Preço de venda e custo reais da Mudelar, € s/IVA por unidade (14/10). */
+  pvp?: number;
+  custoReal?: number;
+  /** O sub da árvore (ofício › sub) dos serviços da Mudelar. */
+  sub?: string;
+  /** O resumo da receita da Mudelar (por unidade, sem estrutura), para o motor criar o serviço com o custo certo. */
+  rs?: { h: number; eh: number; eq: number; cons: number };
 }
 
-export const CATALOGO: ItemCatalogo[] = [
+const BASE: ItemCatalogo[] = [
   { id: "c1", n: "Levantamento de Sanitários e Mobiliário", cat: "Demolições", un: "un", hf: 2, hu: 0, qm: 1, usos: 133, linhas: ["wc"] },
   { id: "c2", n: "Supressão de ponto de água", cat: "Canalização", un: "un", hf: 0, hu: 1.5, qm: 1, usos: 101, linhas: ["wc"] },
   { id: "c3", n: "Mão de Obra Construção de Nicho (valor por unidade)", cat: "Revestimentos", un: "un", hf: 0, hu: 3, qm: 1, usos: 86, linhas: ["wc"] },
@@ -68,7 +81,29 @@ export const CATALOGO: ItemCatalogo[] = [
   { id: "pint", n: "Pintura de tetos e paredes", cat: "Pintura", un: "m²", hf: 0, hu: 0.3, qm: 10, usos: 0, linhas: ["wc", "coz"] },
 ];
 
-export const OFICIOS = [...new Set(CATALOGO.map((c) => c.cat))];
+// os c1..c41 ligam-se ao sku real (sem duplicar o serviço); a receita deles continua a estimada
+const MUDELAR = new Map(SERVICOS_MUDELAR.map((s) => [s.id, s]));
+for (const c of BASE) { const m = MUDELAR.get(c.id); if (m) Object.assign(c, { sku: m.sku, pvp: m.pvp, custoReal: m.custoReal }); }
+
+/** Os serviços do Catálogo de antes (os c1..c41, agora com o sku, e os três do modelo). */
+export const CATALOGO: ItemCatalogo[] = BASE;
+
+/**
+ * Os outros 317 serviços da Mudelar (14/10), com id "s-<sku>". Ficam fora do CATALOGO para a V2, que mostra
+ * o CATALOGO inteiro numa só tabela, não mudar; o V1, a visita e o motor usam CATALOGO_TODO e itemCatalogo().
+ */
+export const CATALOGO_MUDELAR: ItemCatalogo[] = SERVICOS_NOVOS_MUDELAR.map((s): ItemCatalogo => ({
+  id: s.id, n: s.n, cat: s.oficio, ...(s.sub ? { sub: s.sub } : {}), un: s.un, hf: 0, hu: s.rs.h, qm: 1, usos: 0, linhas: s.linhas,
+  sku: s.sku, pvp: s.pvp, custoReal: s.custoReal, rs: s.rs,
+}));
+/** O Catálogo inteiro: o de antes e o resto do da Mudelar (361 serviços). */
+export const CATALOGO_TODO: ItemCatalogo[] = [...CATALOGO, ...CATALOGO_MUDELAR];
+const POR_ID = new Map(CATALOGO_TODO.map((c) => [c.id, c]));
+/** Um serviço do Catálogo inteiro pelo id (cN, s-<sku> ou os do modelo). */
+export const itemCatalogo = (sid: string): ItemCatalogo | undefined => POR_ID.get(sid);
+
+/** Os ofícios do Catálogo inteiro (os de antes primeiro, depois os novos da Mudelar). */
+export const OFICIOS = [...new Set(CATALOGO_TODO.map((c) => c.cat))];
 
 /** Sem acentos e em minúsculas, para a pesquisa. */
 export const normal = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();

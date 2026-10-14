@@ -7,7 +7,7 @@ import { Clock, PackagePlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CHIP } from "../FiltrosPopover";
-import { CATALOGO, normal } from "../catalogo";
+import { CATALOGO, itemCatalogo, normal } from "../catalogo";
 import { numero } from "../pecas";
 import { eur, type Estado } from "../motor";
 import { aplicarTodos, dataPT, listaCatalogo, type Custos } from "./custosModelo";
@@ -35,11 +35,13 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
   };
   const velho = (p: Produto) => produtoDesatualizado(p, C.par.mesesDesatualizado);
   const qq = normal(q.trim());
-  const pesquisados = K.produtos.filter((p) => !qq || [p.n, p.marca, p.fornecedor, caminho(K.arvore, p.no)].some((x) => normal(x).includes(qq)));
+  // os produtos do catálogo da Mudelar (com referência, 14/10) são milhares: só aparecem a pesquisar
+  const pesquisados = (qq ? K.produtos : K.produtos.filter((p) => !p.sku)).filter((p) => !qq || [p.n, p.marca, p.fornecedor, p.sku ?? "", caminho(K.arvore, p.no)].some((x) => normal(x).includes(qq)));
   const filtrados = pesquisados.filter((p) => !soVelhos || velho(p));
-  // sem pesquisa nem filtro mostram-se os primeiros 10 (a lista fica leve); "Mostrar todos" abre o resto
-  const curta = !todos && !qq && !soVelhos && filtrados.length > 10;
-  const lista = curta ? filtrados.slice(0, 10) : filtrados;
+  // sem pesquisa nem filtro mostram-se os primeiros 10 (a lista fica leve); a pesquisar, os primeiros 50; "Mostrar todos" abre o resto
+  const corte = qq ? 50 : 10;
+  const curta = !todos && !soVelhos && filtrados.length > corte;
+  const lista = curta ? filtrados.slice(0, corte) : filtrados;
 
   /** Muda um material; se mudou o custo, o nome ou a unidade, leva-o às receitas. Com "Anular". */
   const mudar = (id: string, fn: (p: Produto, k: Catalogo) => Produto, msg: string) => {
@@ -62,7 +64,7 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
   };
   const arvoreOp = [{ v: "", t: "Sem classificação" }, ...opcoesArvore(K.arvore)];
   // os serviços que um produto pode trazer: os em uso e os do Catálogo real
-  const nomeSvc = (sid: string) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
+  const nomeSvc = (sid: string) => S.svc[sid]?.n ?? itemCatalogo(sid)?.n ?? sid;
   const svcOp = [{ v: "", t: "Nenhum (só vendido)" }, ...[...Object.keys(S.svc), ...CATALOGO.map((c) => c.id).filter((id) => !S.svc[id])].map((sid) => ({ v: sid, t: nomeSvc(sid) }))];
   const nVelhos = pesquisados.filter(velho).length;
 
@@ -120,7 +122,7 @@ export const MateriaisV2 = memo(function MateriaisV2({ S, C, K, run, editor, set
                     {/* o serviço que o produto traz na visita (e quanto por unidade): um editor na linha de cada vez */}
                     {editor === `mat:svc:${p.id}`
                       ? <span className="flex items-center gap-2">
-                          <Escolha rotulo={`Serviço que ${p.n} traz`} w="w-56" v={p.servico ?? ""} opcoes={svcOp}
+                          <Escolha rotulo={`Serviço que ${p.n} traz`} w="w-56" v={p.servico ?? ""} opcoes={p.servico && !svcOp.some((o) => o.v === p.servico) ? [...svcOp, { v: p.servico, t: nomeSvc(p.servico) }] : svcOp}
                             onSet={(s) => mudar(p.id, (x) => { const y = { ...x }; if (s) { y.servico = s; y.fatorServico ??= 1; } else { delete y.servico; delete y.fatorServico; } return y; }, s ? `${p.n} traz ${nomeSvc(s)}` : `${p.n}: só o produto`)} />
                           {p.servico && <NumeroCelula rotulo={`Fator do serviço de ${p.n}`} w="w-16" v={p.fatorServico ?? 1} onSet={(f) => mudar(p.id, (x) => ({ ...x, fatorServico: f }), `${nomeSvc(p.servico!)} × ${String(f).replace(".", ",")} por ${p.un}`)} />}
                           <Button variant="ghost" className="min-h-11" onClick={() => setEditor(null)}>Feito</Button>
