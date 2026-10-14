@@ -41,7 +41,7 @@ function Seccao({ id, titulo, total, desc, children }: { id: string; titulo: str
   );
 }
 
-/** Escolha em botões (rádio com aspeto de pastilha), alvos de 44 px. */
+/** Escolha em botões (rádio), alvos de 44 px. */
 function Opcoes<T extends string | null>({ nome, rotulo, v, opcoes, onSet, desativado }: {
   nome: string; rotulo: string; v: T; opcoes: { k: T; t: string }[]; onSet: (k: T) => void; desativado?: boolean;
 }) {
@@ -50,7 +50,7 @@ function Opcoes<T extends string | null>({ nome, rotulo, v, opcoes, onSet, desat
       <legend className={ROT}>{rotulo}</legend>
       <div className="mt-2 flex flex-wrap gap-2">
         {opcoes.map((o) => (
-          <label key={String(o.k)} className={cn("inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 text-[15px] transition-colors",
+          <label key={String(o.k)} className={cn("inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-4 text-[15px] transition-colors",
             v === o.k ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted", desativado && "cursor-not-allowed opacity-60")}>
             <input type="radio" name={nome} checked={v === o.k} onChange={() => onSet(o.k)} className="sr-only" />{o.t}
           </label>

@@ -27,7 +27,7 @@ const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Pr
 const LISTA = "divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5";
 const NOTA = "text-[15px] text-muted-foreground";
 const POR_GRUPO = 8, POR_PAGINA = 40;
-const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted");
+const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center rounded-lg border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted");
 
 // a página lembra-se do separador enquanto a sessão dura (ex.: ao voltar de um orçamento)
 let ultimaSeccao: Seccao = "servicos";
