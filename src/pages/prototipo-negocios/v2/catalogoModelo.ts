@@ -4,7 +4,7 @@
 // o custo por medida da receita × a quantidade que sai da medida.
 // Os números são de EXEMPLO; os pacotes de arranque copiam os LINHAS do motor (só leitura).
 
-import { CATALOGO, OFICIOS, normal, type LinhaCat } from "../catalogo";
+import { CATALOGO, CATALOGO_TODO, OFICIOS, itemCatalogo, normal, type LinhaCat } from "../catalogo";
 import { LINHAS, r2, type Estado, type MedKey, type Medidas, type SvcId } from "../motor";
 import { RECEITAS } from "../receitas";
 import { ARTIGOS_DEM0, PAR_DEM0, type ArtigoDem, type MudancaDem, type ParDem } from "../entulho";
@@ -12,6 +12,8 @@ import {
   HOJE, custoReceita, margemSobrePreco, mesesAntes, mesesEntre, precoReceita, receitaDe,
   type Custos, type ReceitaV2, type UsoCons,
 } from "./custosModelo";
+import type { IconeServicoKey, IlustracaoKey } from "../ilustracoes";
+import { EXIGE_MUDELAR, ICONE_MUDELAR, OFICIOS_NOVOS_MUDELAR, PRODUTOS_MUDELAR, SUBS_NOVOS_MUDELAR, servicoMudelar } from "../dados/catalogoMudelar";
 
 /* ------------------------------------------------------------------ tipos */
 /** Um nó da árvore: ofício (pai null) ou sub (pai = id do ofício). Só dois níveis. */
@@ -29,6 +31,16 @@ export interface Produto {
   servico?: SvcId;
   /** Quantidade do serviço por unidade do produto (por omissão 1). */
   fatorServico?: number;
+  /** Referência do fornecedor (opcional, 14/10). */
+  sku?: string;
+  /** Preço de venda real (€ s/IVA, por unidade). Sem ele, o preço é o custo ÷ (1 − margem). */
+  pvp?: number;
+  /** A ilustração (ilustracoes.tsx). Sem ela, escolhe-se pelo nome. */
+  img?: IlustracaoKey;
+  /** Uma linha de descrição. */
+  desc?: string;
+  /** A subcategoria real (ex.: "Toalheiros"). */
+  sub?: string;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };
@@ -72,6 +84,8 @@ export interface Catalogo {
   unidades: string[];
   marcas: string[];
   fornecedores: string[];
+  /** O ícone de cada serviço (14/10). Sem ele, usa-se o do nome ou o do ofício (ilustracoes.tsx). */
+  icone?: Record<SvcId, IconeServicoKey>;
 }
 
 /* ------------------------------------------------------------------ medidas */
@@ -255,7 +269,7 @@ export interface ContaPacote { linhas: ContaLinha[]; custo: number; preco: numbe
 /** O nome de uma referência de linha (serviço ou material). */
 export function nomeRef(S: Estado, K: Catalogo, t: LinhaPacote["t"], ref: string): string {
   if (t === "mat") return K.produtos.find((p) => p.id === ref)?.n ?? "Material retirado";
-  return S.svc[ref]?.n ?? CATALOGO.find((c) => c.id === ref)?.n ?? "Serviço retirado";
+  return S.svc[ref]?.n ?? itemCatalogo(ref)?.n ?? "Serviço retirado";
 }
 /** Custo e preço de um pacote para umas medidas: serviços pela receita (custo por medida × quantidade), materiais pelo custo ÷ (1 − margem). */
 export function contaPacote(S: Estado, C: Custos, K: Catalogo, P: Pacote, m: Medidas = P.ex): ContaPacote {
@@ -263,7 +277,7 @@ export function contaPacote(S: Estado, C: Custos, K: Catalogo, P: Pacote, m: Med
   const linhas = P.linhas.map((l): ContaLinha => {
     const q = quantidade(l.regra, m);
     if (l.t === "svc") {
-      const s = S.svc[l.esc] ?? null, cat = CATALOGO.find((c) => c.id === l.esc);
+      const s = S.svc[l.esc] ?? null, cat = itemCatalogo(l.esc);
       const rec = receitaDe(C, l.esc, s, S.cfg.alvo);
       if (!rec) return { id: l.id, ref: l.esc, n: "Serviço retirado", un: "un", q, cu: 0, pu: 0, custo: 0, preco: 0, falta: true };
       const c = custoReceita(rec, C, S.cfg.estrutura), pu = precoReceita(rec, c.total);
@@ -420,9 +434,16 @@ const PERGUNTA0: Record<SvcId, string> = {
   pav: "O cliente mantém o pavimento?", c6: "O cliente mantém o pavimento?", moveis: "O cliente mantém os móveis?",
 };
 
+/** O ícone dos serviços dos pacotes (motor) e dos do Catálogo sem correspondência na Mudelar (14/10). */
+const ICONE_PACOTE: Record<SvcId, IconeServicoKey> = {
+  demol: "demolicao", canal: "canalizacao", revest: "revestimento", pav: "pavimento", loucas: "loucas", moveis: "moveis",
+  eletr: "eletricidade", teto: "pladur", pint: "pintura",
+};
+
 export function catalogo0(): Catalogo {
   let arvore: No[] = [];
-  for (const of of OFICIOS) {
+  const novos = new Map(OFICIOS_NOVOS_MUDELAR);
+  for (const of of OFICIOS.filter((o) => !novos.has(o))) {
     const r = juntarNo(arvore, of);
     if (!r.ok) continue;
     arvore = r.A;
@@ -430,6 +451,17 @@ export function catalogo0(): Catalogo {
   }
   // um sub juntado depois (13/10): fica no fim da Carpintaria, sem mudar os ids dos nós de antes
   { const carp = arvore.find((x) => x.pai == null && x.n === "Carpintaria"); const q = carp && juntarNo(arvore, "Acessórios WC", carp.id); if (q && q.ok) arvore = q.A; }
+  // o catálogo da Mudelar (14/10): subs novos nos ofícios de antes e os ofícios novos (pela ordem de OFICIOS), sem mudar os ids de antes
+  for (const [o, ss] of SUBS_NOVOS_MUDELAR) {
+    const of = arvore.find((x) => x.pai == null && x.n === o);
+    if (of) for (const s of ss) { const q = juntarNo(arvore, s, of.id); if (q.ok) arvore = q.A; }
+  }
+  for (const o of OFICIOS.filter((x) => novos.has(x))) {
+    const r = juntarNo(arvore, o);
+    if (!r.ok) continue;
+    arvore = r.A;
+    for (const s of novos.get(o) ?? []) { const q = juntarNo(arvore, s, r.id); if (q.ok) arvore = q.A; }
+  }
   const noDe = ([o, s]: [string, string?]) => {
     const of = arvore.find((x) => x.pai == null && x.n === o);
     if (!of) return null;
@@ -437,7 +469,12 @@ export function catalogo0(): Catalogo {
   };
   const classe: Record<SvcId, string> = {};
   for (const [sid, cl] of Object.entries(CLASSE_SVC0)) { const n = noDe(cl); if (n) classe[sid] = n; }
-  for (const c of CATALOGO) if (!classe[c.id]) { const n = noDe([c.cat]); if (n) classe[c.id] = n; }
+  // os serviços da Mudelar vão para o sub deles; os c1..c41 também, quando o ofício é o mesmo
+  for (const c of CATALOGO_TODO) if (!classe[c.id]) {
+    const m = servicoMudelar(c.id), sub = c.sub ?? (m && m.oficio === c.cat ? m.sub ?? undefined : undefined);
+    const n = noDe([c.cat, sub]);
+    if (n) classe[c.id] = n;
+  }
 
   const produtos: Produto[] = [];
   const juntar = (p: Omit<Produto, "id">) => { if (!produtos.some((x) => normal(x.n) === normal(p.n))) produtos.push({ ...p, id: "m" + (produtos.length + 1) }); };
@@ -448,10 +485,29 @@ export function catalogo0(): Catalogo {
   for (const p of PROD_SVC0) juntar({ n: p.n, custo: p.custo, un: p.un, marca: p.marca, fornecedor: p.fornecedor, data: mesesAntes(HOJE, 1), no: noDe(p.cl) });
   // produtos que trazem um serviço (quantidade do serviço = quantidade do produto × fator)
   for (const p of produtos) { const t = TRAZ0[p.n]; if (t) { p.servico = t[0]; p.fatorServico = t[1]; } }
+  // os produtos reais da Mudelar (14/10): no fim, para não mudar os ids de antes; nome repetido leva a referência
+  const nomes = new Set(produtos.map((p) => normal(p.n)));
+  for (const m of PRODUTOS_MUDELAR) {
+    const n = nomes.has(normal(m.n)) ? `${m.n} · ${m.sku}` : m.n;
+    nomes.add(normal(n));
+    produtos.push({
+      id: m.id, n, custo: m.custo, un: m.un, marca: m.marca, fornecedor: m.fornecedor, data: m.data, no: m.ramo ? noDe(m.ramo) : null,
+      sku: m.sku, pvp: m.pvp, img: m.img, desc: m.desc, ...(m.sub ? { sub: m.sub } : {}),
+      ...(m.servico ? { servico: m.servico, fatorServico: m.fatorServico ?? 1 } : {}),
+    });
+  }
   // serviços que obrigam a escolher um produto de um ramo, e a quantidade sugerida a partir das medidas
   const exigeProduto: Record<SvcId, string> = {}, qtdDe: Record<SvcId, Regra> = {};
   for (const [sid, [cl, r]] of Object.entries(EXIGE0)) { const n = noDe(cl); if (n) { exigeProduto[sid] = n; qtdDe[sid] = r; } }
   const perguntaManter = { ...PERGUNTA0 };
+  // + as do catálogo da Mudelar ("O cliente mantém…?"), sem mexer nas de antes
+  for (const e of EXIGE_MUDELAR) {
+    const n = noDe(e.ramo);
+    if (!n || exigeProduto[e.sid]) continue;
+    exigeProduto[e.sid] = n;
+    qtdDe[e.sid] = e.regra ? { k: "por", ...e.regra } : { k: "fixo", q: 1 };
+    perguntaManter[e.sid] = e.pergunta;
+  }
 
   const idProd = (n: string) => produtos.find((p) => p.n === n)!.id;
   const pacotes: Pacote[] = (Object.entries(LINHAS) as [LinhaCat, (typeof LINHAS)["wc"]][]).map(([lid, L], i) => {
@@ -470,6 +526,7 @@ export function catalogo0(): Catalogo {
   const uniq = (v: string[]) => [...new Set(v.filter(Boolean))];
   return {
     arvore, produtos, pacotes, classe, exigeProduto, qtdDe, perguntaManter,
+    icone: { ...ICONE_PACOTE, ...ICONE_MUDELAR },
     artigosDem: structuredClone(ARTIGOS_DEM0), artigoDoServico: { ...ARTIGO_SVC0 }, parDem: structuredClone(PAR_DEM0), histDem: [],
     unidades: uniq(["un", "m²", "ml", "m", "kg", "l", "kit", "tubo", "saco", "pç", ...produtos.map((p) => p.un)]),
     marcas: uniq(produtos.map((p) => p.marca)).sort((a, b) => a.localeCompare(b, "pt")),
