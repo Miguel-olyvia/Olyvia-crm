@@ -3,14 +3,20 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acoes, seed, servicosVisita, type Estado, type Negocio } from "./motor";
+import { acoes, criarOrc, partes, seed, servicosVisita, tot, type Estado, type LinhaOrc, type Negocio } from "./motor";
+import { ligarReceitas, itensReceita } from "./forneceCliente";
+import { itensDaReceita } from "./v2/custosModelo";
+import { lerCustos } from "./v2/custosStore";
+import { resumoNecessidades } from "./necessidades";
+import { FiltrosFila } from "./CartoesSelecao";
+import { itemCatalogo } from "./catalogo";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, type Grupo } from "./campos";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, ligarCatalogo, linhasDosProdutos, obrigacoes } from "./produtosVisita";
 import { lerCatalogo, mudarCatalogo, reporCatalogo } from "./v2/catalogoStore";
 import type { Produto } from "./v2/catalogoModelo";
 import { obrigacoesAMostrar, tilesServicos, tocarProdutoGuiado, type TileServico } from "./necessidades";
 import {
-  contavel, encurtar, fornecerTodos, itensFornece, lerCores, escreverCores, marcarFornece, mostraAjuste, oficiosPorUso, ordenarMobilidade, ordenarParaTroca, passosSelecao,
+  blocosFornece, contavel, encurtar, fornecerTodos, itensFornece, lerCores, escreverCores, marcarFornece, oficiosPorUso, poupanca, textoQtd, ordenarMobilidade, ordenarParaTroca, passosSelecao,
   responderTroca, servicosFiltrados, tocarServico, trocaResolvida, vizinho,
 } from "./selecao";
 import { SelecaoGuiada } from "./SelecaoGuiada";
@@ -31,8 +37,8 @@ function preparar() {
   preencher(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
   return { S, A, d };
 }
-beforeEach(() => ligarCatalogo(lerCatalogo));
-afterEach(() => { cleanup(); ligarCatalogo(null); reporCatalogo(); vi.useRealTimers(); });
+beforeEach(() => { ligarCatalogo(lerCatalogo); ligarReceitas((sid, s) => itensDaReceita(lerCustos(), sid, s)); });
+afterEach(() => { cleanup(); ligarCatalogo(null); ligarReceitas(null); reporCatalogo(); vi.useRealTimers(); });
 
 /* ------------------------------------------------------------------ nomes curtos */
 describe("os nomes nos cartões: no máximo o essencial, o resto na 2.ª linha", () => {
@@ -113,10 +119,10 @@ describe("os cartões ligam e desligam ao toque", () => {
     expect(c13.de).toEqual(["Sanita compacta"]);
     expect(tocarServico(A, d, c13)).toBeNull();
   });
-  it("o ajuste só aparece quando faz sentido", () => {
-    expect(mostraAjuste({ un: "un", q: 1, daMedida: false })).toBe(true);
-    expect(mostraAjuste({ un: "m²", q: 6, daMedida: true })).toBe(false);
-    expect(mostraAjuste({ un: "un", q: 3, daMedida: true })).toBe(true);
+  it("a quantidade em texto, sem fila de números: a da visita, senão 1 un", () => {
+    expect(textoQtd({ q: 12, un: "m²", daMedida: true })).toBe("12 m² · da visita");
+    expect(textoQtd({ q: 1, un: "un", daMedida: false })).toBe("1 un");
+    expect(textoQtd({ q: 2.5, un: "m²", daMedida: false })).toBe("2,5 m²");
     expect(contavel("un")).toBe(true);
     expect(contavel("m²")).toBe(false);
   });
@@ -169,10 +175,10 @@ describe("o mapeamento: o produto traz o serviço, sem voltar a perguntar", () =
   });
   it("o passo seguinte, mesmo quando a pergunta de onde se vinha saiu", () => {
     const ps = passosSelecao([], false);
-    expect(ps.map((p) => p.k)).toEqual(["escolhas", "servicos", "outros", "resumo"]);
+    expect(ps.map((p) => p.k)).toEqual(["servicos", "outros", "escolhas", "resumo"]);
     expect(vizinho(ps, "servicos", 1)).toBe("outros");
-    expect(vizinho(ps, "q:sai", 1, 2)).toBe("outros");
-    expect(vizinho(ps, "escolhas", -1)).toBeNull();
+    expect(vizinho(ps, "q:sai", 1, 1)).toBe("outros");
+    expect(vizinho(ps, "servicos", -1)).toBeNull();
   });
 });
 
@@ -237,22 +243,32 @@ const seguinte = () => fireEvent.click(screen.getByRole("button", { name: /^Segu
 const titulo = () => screen.getByRole("heading", { level: 3 }).textContent;
 
 describe("a seleção guiada no ecrã", () => {
-  it("começa nas Escolhas do cliente (Sim/Não com um toque) e o fornece só aparece com Sim", () => {
+  it("começa no que se faz; as Escolhas do cliente vêm depois de Mais produtos e o fornece só aparece com Sim", () => {
     const { S, d } = preparar();
     delete d.f.materiais_cliente; delete d.f.mobilidade_reduzida;
     const guia = { avancar: vi.fn(), recuar: vi.fn(), setGuiado: vi.fn() };
     render(<Montar S={S} d={d} guia={guia} />);
     expect(guia.setGuiado).toHaveBeenCalledWith(true);
+    expect(titulo()).toBe("O que se faz");
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+    expect(guia.recuar).toHaveBeenCalled();
+    seguinte(); seguinte(); seguinte(); // as duas trocas e Mais produtos
+    expect(titulo()).toBe("Mais produtos");
+    seguinte();
     expect(titulo()).toBe("Escolhas do cliente");
     const g = screen.getByRole("group", { name: /fornece materiais/i });
     fireEvent.click(within(g).getByRole("button", { name: "Sim" }));
     expect(d.f.materiais_cliente).toBe("Sim");
     expect(within(g).getByRole("button", { name: "Sim" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText(/de 7$/)).toBeInTheDocument(); // escolhas, serviços, 2 trocas, mais produtos, fornece, resumo
-    fireEvent.click(within(g).getByRole("button", { name: "Não" }));
-    expect(screen.getByText(/de 6$/)).toBeInTheDocument();
+    expect(screen.getByText(/de 7$/)).toBeInTheDocument(); // serviços, 2 trocas, mais produtos, escolhas, fornece, resumo
+    expect(screen.getByText(/^5 de 7$/)).toBeInTheDocument();
+    seguinte();
+    expect(titulo()).toBe("O que o cliente fornece"); // logo a seguir ao "Sim"
     fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
-    expect(guia.recuar).toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("group", { name: /fornece materiais/i })).getByRole("button", { name: "Não" }));
+    expect(screen.getByText(/de 6$/)).toBeInTheDocument();
+    seguinte();
+    expect(titulo()).toBe("Resumo");
   });
 
   it("os cartões dos serviços: aria-pressed, liga e desliga ao toque e pelo teclado; sem '+'", () => {
@@ -265,10 +281,18 @@ describe("a seleção guiada no ecrã", () => {
     fireEvent.click(nicho);
     expect(nicho).toHaveAttribute("aria-pressed", "true");
     expect(d.visita.extra.c3).toBe(1);
-    // o ajuste 1 · 2 · 3 · outro aparece dentro do cartão escolhido (não há medida)
-    const q = screen.getByRole("group", { name: /Quantidade de Construção de nicho/i });
-    fireEvent.click(within(q).getByRole("button", { name: "2" }));
+    // sem fila 1 · 2 · 3: a quantidade em texto ("1 un", não há medida) e um "Mudar" só no cartão escolhido
+    const li = nicho.closest("li")!;
+    expect(nicho).toHaveTextContent("1 un");
+    expect(within(li).queryByRole("button", { name: "2" })).toBeNull();
+    expect(within(li).queryByRole("button", { name: "3" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Mudar a quantidade/ })).toHaveLength(1);
+    fireEvent.click(within(li).getByRole("button", { name: /Mudar a quantidade de Construção de nicho/i }));
+    const campo = within(li).getByRole("textbox", { name: /Quantidade de Construção de nicho/i });
+    fireEvent.change(campo, { target: { value: "2" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
     expect(d.visita.extra.c3).toBe(2);
+    expect(nicho).toHaveTextContent("2 un");
     // pelo teclado: é um botão (Enter e Espaço ativam-no)
     nicho.focus();
     expect(document.activeElement).toBe(nicho);
@@ -355,5 +379,216 @@ describe("a seleção guiada no ecrã", () => {
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "sku-1999" } });
     expect(lista()).toHaveLength(1);
     expect(lista()[0]).toHaveAttribute("title", "Toalheiro modelo 1999"); // o nome completo no title; no cartão, "Modelo 1999"
+  });
+});
+
+/* ------------------------------------------------------------------ 2.ª volta (14/10): a ordem, as quantidades em texto e o fornece por serviço */
+describe("a ordem dos passos (Escolhas do cliente depois dos produtos)", () => {
+  it("O que se faz → trocas → Mais produtos → Escolhas → O que o cliente fornece → Resumo", () => {
+    const { d } = preparar();
+    const K = lerCatalogo();
+    const obr = obrigacoes(K, servicosVisita(d), d.visita, true);
+    expect(passosSelecao(obr, true).map((p) => p.tipo)).toEqual(["servicos", "pergunta", "pergunta", "outros", "escolhas", "fornece", "resumo"]);
+    expect(passosSelecao(obr, false).map((p) => p.tipo)).toEqual(["servicos", "pergunta", "pergunta", "outros", "escolhas", "resumo"]);
+  });
+  it("a mobilidade reduzida pergunta-se num cartão rápido na troca e muda logo a ordem dos produtos", () => {
+    const { S, d } = preparar();
+    delete d.f.mobilidade_reduzida;
+    d.visita.manter = { pav: "sim" };
+    d.visita.extra = { c3: 1 }; // já mexido: abre na troca das louças
+    render(<Montar S={S} d={d} />);
+    expect(titulo()).toBe("O cliente mantém a sanita e a base de duche?");
+    const mob = screen.getByRole("group", { name: /mobilidade reduzida/i });
+    fireEvent.click(screen.getByRole("button", { name: /^Troca/ }));
+    fireEvent.click(within(mob).getByRole("button", { name: "Sim" }));
+    expect(d.f.mobilidade_reduzida).toBe("Sim");
+    const primeiro = within(screen.getByRole("list", { name: /Produtos/ })).getAllByRole("listitem")[0];
+    expect(primeiro.getAttribute("title")?.toLowerCase()).toMatch(/base|barra|banco|apoio|suspens/) // as regras de ordenarMobilidade;
+  });
+});
+
+const comecaPor = (t: string) => new RegExp("^" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+describe("os serviços e os produtos sem '1 2 3'", () => {
+  it("o serviço em m² mostra a quantidade da visita ('16 m² · da visita'); mudada, deixa de dizer 'da visita'", () => {
+    const { S, d } = preparar();
+    render(<Montar S={S} d={d} />);
+    const n = itemCatalogo("c4")!.n;
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar serviço" }), { target: { value: n } });
+    fireEvent.click(screen.getByRole("button", { name: comecaPor(n) }));
+    expect(d.visita.extra.c4).toBe(16);
+    const li = screen.getByRole("button", { name: comecaPor(n) }).closest("li")!;
+    expect(li).toHaveTextContent("16 m² · da visita");
+    expect(within(li).queryAllByRole("button", { name: /^[123]$/ })).toHaveLength(0);
+    fireEvent.click(within(li).getByRole("button", { name: /^Mudar a quantidade/ }));
+    const campo = within(li).getByRole("textbox");
+    fireEvent.change(campo, { target: { value: "12,5" } });
+    fireEvent.blur(campo);
+    expect(d.visita.extra.c4).toBe(12.5);
+    expect(li).toHaveTextContent("12,5 m²");
+    expect(li).not.toHaveTextContent("da visita");
+  });
+  it("o produto escolhido mostra a quantidade em texto e 'Mudar' ajusta-a", () => {
+    const { S, d } = preparar();
+    d.visita.manter = { pav: "sim", loucas: "sim" };
+    render(<Montar S={S} d={d} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Mais produtos/ }));
+    const lista = screen.getByRole("list", { name: "Mais produtos" });
+    const b = within(lista).getAllByRole("button", { pressed: false })[0];
+    fireEvent.click(b);
+    const li = b.closest("li")!;
+    const p = d.visita.prod!.at(-1)!;
+    expect(li).toHaveTextContent(`${String(p.q).replace(".", ",")} ${p.un}`);
+    expect(within(li).queryByRole("group", { name: /Quantidade/ })).toBeNull();
+    fireEvent.click(within(li).getByRole("button", { name: /^Mudar a quantidade/ }));
+    const campo = within(li).getByRole("textbox");
+    fireEvent.change(campo, { target: { value: "3" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(d.visita.prod!.find((x) => x.id === p.id)!.q).toBe(3);
+  });
+});
+
+/** Hugo Matos com "fornece materiais = Sim", a sanita compacta escolhida e a troca do pavimento mantida. */
+function comFornece() {
+  const r = preparar();
+  const K = lerCatalogo();
+  r.A.campo(r.d.id, "materiais_cliente", "Sim");
+  r.d.visita.manter = { pav: "sim" };
+  tocarProdutoGuiado(r.A, K, r.d, obrigacoes(K, ["loucas"], r.d.visita)[0], prodN("Sanita compacta"));
+  const obr = () => obrigacoesAMostrar(obrigacoes(K, servicosVisita(r.d), r.d.visita, true), r.d);
+  const blocos = () => blocosFornece(r.d, obr(), servicosVisita(r.d), { arvore: K.arvore, exige: K.exigeProduto ?? {}, nomeSvc: (s) => r.S.svc[s]?.n ?? s, svc: (s) => r.S.svc[s] });
+  return { ...r, K, obr, blocos };
+}
+const linhaSvc = (ls: LinhaOrc[], sid: string) => ls.find((l): l is Extract<LinhaOrc, { t: "svc" }> => l.t === "svc" && l.sid === sid)!;
+
+describe("o que o cliente fornece, por serviço", () => {
+  it("um bloco por serviço com os produtos, os consumíveis e os equipamentos da receita, por ordem de custo", () => {
+    const { d, blocos } = comFornece();
+    const bs = blocos();
+    const canal = bs.find((b) => b.sid === "canal")!;
+    expect(canal.itens.map((x) => x.tipo).sort()).toEqual(["cons", "cons", "cons", "equip"]);
+    const tubo = canal.itens.find((x) => x.n === "Tubo multicamada 16 mm")!;
+    expect(tubo.q).toBe(3 * d.visita.med.pts); // 3 m por ponto × os pontos de água
+    expect(tubo.valor).toBeCloseTo(3 * 1.9 * d.visita.med.pts, 2);
+    const valores = canal.itens.map((x) => x.valor ?? 0);
+    expect([...valores].sort((a, b) => b - a)).toEqual(valores);
+    const loucas = bs.find((b) => b.sid === "loucas")!;
+    expect(loucas.itens.some((x) => x.tipo === "produto" && x.n === "Sanita compacta")).toBe(true);
+    expect(loucas.itens.some((x) => x.n === "Silicone sanitário")).toBe(true);
+  });
+
+  it("o produto, o consumível e o equipamento saem do custo; a mão de obra fica", () => {
+    const { S, A, d, blocos } = comFornece();
+    const antes = criarOrc(d, S), pAntes = partes({ ...d, orc: antes }, S);
+    const canal = blocos().find((b) => b.sid === "canal")!;
+    const prensa = canal.itens.find((x) => x.tipo === "equip")!, tubo = canal.itens.find((x) => x.n === "Tubo multicamada 16 mm")!;
+    const sanita = blocos().find((b) => b.sid === "loucas")!.itens.find((x) => x.tipo === "produto")!;
+    marcarFornece(A, d, prensa, true);
+    marcarFornece(A, d, tubo, true);
+    marcarFornece(A, d, sanita, true);
+    expect([...(d.visita.fornece?.canal ?? [])].sort()).toEqual(["c:Tubo multicamada 16 mm", prensa.id].sort());
+    const depois = criarOrc(d, S), pDepois = partes({ ...d, orc: depois }, S);
+    const la = linhaSvc(antes.linhas, "canal"), ld = linhaSvc(depois.linhas, "canal");
+    const porUn = itensReceita("canal", S.svc.canal).filter((x) => ["c:Tubo multicamada 16 mm", prensa.id].includes(x.k)).reduce((a, x) => a + x.cu, 0);
+    expect(ld.cu).toBeCloseTo(la.cu - porUn, 2);
+    expect(ld.pu).toBeCloseTo(la.pu - porUn, 2);
+    expect(pDepois.mo).toBeCloseTo(pAntes.mo, 6); // a mão de obra fica
+    expect(pDepois.cons).toBeLessThan(pAntes.cons);
+    expect(pDepois.eq).toBeLessThan(pAntes.eq);
+    // no orçamento, com a marca "fornecido pelo cliente"
+    const marcas = depois.linhas.filter((l) => l.t === "mat" && l.d.startsWith(PREFIXO_CLIENTE)).map((l) => (l as { d: string }).d);
+    expect(marcas).toEqual(expect.arrayContaining([PREFIXO_CLIENTE + "Sanita compacta", expect.stringContaining("Tubo multicamada 16 mm"), expect.stringContaining(prensa.n)]));
+    // o produto fica a zero e a instalação mantém-se
+    expect(servicosVisita(d)).toContain("c13");
+    expect(depois.linhas.some((l) => l.t === "mat" && l.d === PREFIXO_PROD + "Sanita compacta")).toBe(false);
+  });
+
+  it("o custo do orçamento bate certo: baixa exatamente o que o passo diz", () => {
+    const { S, A, d, blocos } = comFornece();
+    const antes = criarOrc(d, S), tAntes = tot({ ...d, orc: antes }, S), rAntes = resumoNecessidades(S, d, servicosVisita(d)).total;
+    const todos = blocos().flatMap((b) => b.itens);
+    fornecerTodos(A, d, todos, true);
+    const menos = poupanca(blocos().flatMap((b) => b.itens));
+    const depois = criarOrc(d, S), tDepois = tot({ ...d, orc: depois }, S);
+    expect(menos).toBeGreaterThan(0);
+    expect(tAntes.preco - tDepois.preco).toBeCloseTo(menos, 1);
+    expect(rAntes - resumoNecessidades(S, d, servicosVisita(d)).total).toBeCloseTo(menos, 1);
+    // o custo baixa pelo custo dos produtos (não pelo preço de venda) e pelos consumíveis e equipamentos
+    const custoProd = d.visita.prod!.reduce((a, p) => a + p.custo * p.q, 0);
+    const recDesc = todos.filter((x) => x.tipo === "cons" || x.tipo === "equip").reduce((a, x) => a + (x.valor ?? 0), 0);
+    expect(tAntes.custo - tDepois.custo).toBeCloseTo(custoProd + recDesc, 0);
+  });
+
+  it("os atalhos: 'Fornece tudo' e 'Nenhum', gerais e de um serviço", () => {
+    const { A, d, blocos } = comFornece();
+    const canal = blocos().find((b) => b.sid === "canal")!;
+    fornecerTodos(A, d, canal.itens, true);
+    expect(blocos().find((b) => b.sid === "canal")!.itens.every((x) => x.on)).toBe(true);
+    expect(blocos().filter((b) => b.sid !== "canal").flatMap((b) => b.itens).some((x) => x.on)).toBe(false);
+    fornecerTodos(A, d, blocos().flatMap((b) => b.itens), true);
+    expect(blocos().flatMap((b) => b.itens).every((x) => x.on)).toBe(true);
+    fornecerTodos(A, d, blocos().flatMap((b) => b.itens), false);
+    expect(blocos().flatMap((b) => b.itens).some((x) => x.on)).toBe(false);
+    expect(d.visita.fornece).toBeUndefined();
+  });
+
+  it("responder 'Não' a 'fornece materiais' limpa tudo (produtos, trocas, consumíveis e equipamentos)", () => {
+    const { S, A, d, blocos } = comFornece();
+    fornecerTodos(A, d, blocos().flatMap((b) => b.itens), true);
+    A.campo(d.id, "materiais_cliente", "Não");
+    expect(d.visita.fornece).toBeUndefined();
+    expect(d.visita.prod!.some((p) => p.cliente)).toBe(false);
+    expect(criarOrc(d, S).linhas.some((l) => l.t === "mat" && l.d.startsWith(PREFIXO_CLIENTE))).toBe(false);
+  });
+
+  it("no ecrã: um bloco por serviço, os 6 primeiros, os atalhos e o que baixa; sobrevive a voltar atrás", () => {
+    const { S, d } = comFornece();
+    d.visita.extra.c3 = 1;
+    render(<Montar S={S} d={d} />);
+    // tudo resolvido: abre no resumo; vai-se ao fornece
+    fireEvent.click(screen.getByRole("button", { name: /^O que o cliente fornece/ }));
+    expect(titulo()).toBe("O que o cliente fornece");
+    const canal = () => screen.getByRole("region", { name: /Canaliza/i });
+    const lista = within(canal()).getByRole("list");
+    expect(within(lista).getAllByRole("listitem").length).toBeLessThanOrEqual(6);
+    const prensa = within(lista).getByRole("button", { name: /^Prensa/ });
+    fireEvent.click(prensa);
+    expect(prensa).toHaveAttribute("aria-pressed", "true");
+    expect(within(canal()).getByLabelText(/^Baixa .* euros$/)).toBeInTheDocument();
+    // voltar atrás e regressar: o estado está na visita
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+    expect(titulo()).toBe("Escolhas do cliente");
+    seguinte();
+    expect(within(canal()).getByRole("button", { name: /^Prensa/ })).toHaveAttribute("aria-pressed", "true");
+    // o atalho do serviço e o geral
+    fireEvent.click(within(screen.getByRole("group", { name: /^Atalhos de Canaliza/ })).getByRole("button", { name: "Fornece tudo" }));
+    expect(d.visita.fornece?.canal?.length).toBe(4);
+    fireEvent.click(within(screen.getByRole("group", { name: "Atalhos para tudo" })).getByRole("button", { name: "Nenhum" }));
+    expect(d.visita.fornece).toBeUndefined();
+  });
+});
+
+describe("a fila de filtros arrasta-se com o rato", () => {
+  function Fila() {
+    const [a, setA] = useState<string | null>(null);
+    return <FiltrosFila opcoes={["Canalização", "Revestimentos", "Pintura", "Eletricidade"]} ativo={a} onMudar={setA} rotulo="Filtros" />;
+  }
+  it("um arrasto não ativa o filtro; o clique simples ativa", () => {
+    render(<Fila />);
+    const fila = screen.getByRole("group", { name: "Filtros" });
+    const pint = within(fila).getByRole("button", { name: "Pintura" });
+    // arrastar 40 px com o rato a partir do filtro: o clique que fecha o arrasto não conta
+    fireEvent.pointerDown(pint, { pointerType: "mouse", button: 0, clientX: 200, pointerId: 1 });
+    fireEvent.pointerMove(pint, { pointerType: "mouse", clientX: 160, pointerId: 1 });
+    fireEvent.pointerUp(pint, { pointerType: "mouse", clientX: 160, pointerId: 1 });
+    fireEvent.click(pint);
+    expect(pint).toHaveAttribute("aria-pressed", "false");
+    // um clique simples (menos de 5 px)
+    fireEvent.pointerDown(pint, { pointerType: "mouse", button: 0, clientX: 200, pointerId: 2 });
+    fireEvent.pointerMove(pint, { pointerType: "mouse", clientX: 203, pointerId: 2 });
+    fireEvent.pointerUp(pint, { pointerType: "mouse", clientX: 203, pointerId: 2 });
+    fireEvent.click(pint);
+    expect(pint).toHaveAttribute("aria-pressed", "true");
+    expect(fila.className).toContain("cursor-grab");
+    expect(fila.className).toContain("[&::-webkit-scrollbar]:hidden");
   });
 });

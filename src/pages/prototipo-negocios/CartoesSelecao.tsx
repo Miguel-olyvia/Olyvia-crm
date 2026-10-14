@@ -1,6 +1,7 @@
 // As peças da seleção guiada (14/10/2026): cartões que ligam e desligam ao toque (sem "+"), com o nome em 2 linhas no máximo,
-// o ajuste discreto da quantidade (1 · 2 · 3 · outro), os cartões grandes de resposta e a fila de filtros por baixo da pesquisa.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+// a quantidade escrita no cartão com um "Mudar" discreto, os cartões grandes de resposta e a fila de filtros por baixo da pesquisa
+// (desliza com o dedo, a arrastar com o rato e com a roda; sem barra visível).
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Link2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt } from "./motor";
@@ -22,13 +23,15 @@ const CAIXA = (on: boolean) => cn("relative flex flex-col rounded-xl border bg-c
 const TOQUE = "flex w-full rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 disabled:cursor-not-allowed";
 
 /* ------------------------------------------------------------------ serviço */
-export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, so, desativado, onTocar, children, falta }: {
+export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, so, desativado, onTocar, children, falta, compacto }: {
   nome: string; nomeCompleto: string; linha2?: string | null; icone: IconeServicoKey; figura?: ReactNode; on: boolean; so?: boolean; desativado?: boolean;
   onTocar: () => void; children?: ReactNode; falta?: boolean;
+  /** Mais baixo (o fornece por serviço): a figura de 32 px e menos espaço. */
+  compacto?: boolean;
 }) {
   const corpo = (
     <>
-      <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-lg transition-colors", on ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+      <span className={cn("grid shrink-0 place-items-center rounded-lg transition-colors", compacto ? "h-8 w-8" : "h-10 w-10", on ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
         {figura ?? <IconeServico k={icone} />}
       </span>
       <span className="min-w-0 flex-1">
@@ -45,7 +48,7 @@ export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, s
         <div className="flex min-h-[64px] items-center gap-3 p-3" aria-label={rotulo} role="group">{corpo}</div>
       ) : (
         <button type="button" aria-pressed={on} disabled={desativado} onClick={onTocar} aria-label={rotulo}
-          className={cn(TOQUE, "min-h-[64px] items-center gap-3 p-3")}>{corpo}</button>
+          className={cn(TOQUE, "items-center gap-3", compacto ? "min-h-[52px] px-3 py-2" : "min-h-[64px] p-3")}>{corpo}</button>
       )}
       {children}
     </li>
@@ -78,35 +81,40 @@ export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on,
 }
 
 /* ------------------------------------------------------------------ a quantidade */
-/** O ajuste discreto: 1 · 2 · 3 · outro (escreve-se só no "outro"). Em 4 colunas nos cartões largos, 2 × 2 nos estreitos. */
-export function AjusteQtd({ id, valor, un, nome, onMudar, estreito }: { id: string; valor: number; un: string; nome: string; onMudar: (n: number) => void; estreito?: boolean }) {
-  const rapido = [1, 2, 3].includes(valor);
-  const [outro, setOutro] = useState(!rapido);
+/**
+ * A quantidade no cartão escolhido, sem fila de números: o texto ("12 m² · da visita", ou "1 un") e um "Mudar" discreto,
+ * que abre um campo numérico pequeno (Enter ou sair do campo grava; Escape desiste). Só se põe no cartão escolhido.
+ */
+export function QtdMudar({ id, valor, un, nome, texto, onMudar }: { id: string; valor: number; un: string; nome: string; texto?: string; onMudar: (n: number) => void }) {
+  const [aberto, setAberto] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
-  const [focar, setFocar] = useState(false);
-  useEffect(() => { if (focar) { ref.current?.focus(); setFocar(false); } }, [focar]);
-  const btn = (on: boolean) => cn("min-h-11 rounded-lg border text-[15px] tabular-nums transition-colors duration-150",
-    on ? "border-primary bg-primary text-primary-foreground font-medium" : "border-input bg-card text-foreground hover:border-foreground/40");
+  const btn = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (aberto) ref.current?.select(); }, [aberto]);
+  const fechar = (gravar: boolean) => {
+    const n = numero(ref.current?.value ?? "");
+    if (gravar && !isNaN(n) && n > 0 && n !== valor) onMudar(Math.round(n * 100) / 100);
+    setAberto(false);
+    setTimeout(() => btn.current?.focus(), 0);
+  };
   return (
-    <div className="border-t border-primary/15 px-2.5 pb-2.5 pt-2 animate-in fade-in-0 duration-150">
-      <div role="group" aria-label={`Quantidade de ${nome} (${un})`} className={cn("grid gap-1.5", estreito ? "grid-cols-2" : "grid-cols-4")}>
-        {[1, 2, 3].map((n) => (
-          <button key={n} type="button" aria-pressed={!outro && valor === n} className={btn(!outro && valor === n)}
-            onClick={() => { setOutro(false); if (valor !== n) onMudar(n); }}>{n}</button>
-        ))}
-        <button type="button" aria-pressed={outro} aria-controls={id} className={btn(outro)} onClick={() => { setOutro(true); setFocar(true); }}>
-          {outro && !rapido ? nfmt(valor) : "Outro"}
-        </button>
-      </div>
-      {outro && (
-        <label className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="flex min-h-9 items-center justify-between gap-2 px-3 pb-2 animate-in fade-in-0 duration-150">
+      {aberto ? (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="sr-only">Quantidade de {nome}</span>
-          <input id={id} ref={ref} key={id + valor} inputMode="decimal" defaultValue={nfmt(valor)}
-            className="h-11 w-24 rounded-lg border border-input bg-card px-3 text-center text-[15px] tabular-nums text-foreground outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
-            onBlur={(e) => { const n = numero(e.target.value); if (!isNaN(n) && n > 0 && n !== valor) onMudar(Math.round(n * 100) / 100); }}
-            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          <input id={id} ref={ref} inputMode="decimal" defaultValue={nfmt(valor)} aria-label={`Quantidade de ${nome}`}
+            className="h-10 w-20 rounded-lg border border-input bg-card px-2 text-center text-[15px] tabular-nums text-foreground outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
+            onBlur={() => fechar(true)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); fechar(true); } if (e.key === "Escape") { e.preventDefault(); fechar(false); } }} />
           {un}
         </label>
+      ) : (
+        <span className="min-w-0 truncate text-sm tabular-nums text-muted-foreground">{texto}</span>
+      )}
+      {!aberto && (
+        <button ref={btn} type="button" aria-controls={id} aria-label={`Mudar a quantidade de ${nome}`} onClick={() => setAberto(true)}
+          className="-mr-1 min-h-9 shrink-0 rounded-md px-2 text-sm font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-primary/50">
+          Mudar
+        </button>
       )}
     </div>
   );
@@ -141,14 +149,80 @@ export function Pesquisa({ valor, onMudar, rotulo, ph }: { valor: string; onMuda
 
 /**
  * A fila de filtros por baixo da pesquisa: "Todos" e as opções, um ativo de cada vez (o ativo com o acento cheio).
- * Tocar no ativo volta a "Todos". No telemóvel desliza na horizontal, numa só linha, sem scroll na página.
+ * Tocar no ativo volta a "Todos". Numa só linha, sem barra de scroll visível e sem scroll na página:
+ * desliza com o dedo (nativo), a arrastar com o rato (um arrasto de mais de 5 px não conta como clique) e com a roda
+ * (o deslocamento vertical passa a horizontal). A ponta com mais filtros esbate-se; o filtro focado com o Tab fica à vista.
  */
 export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string[]; ativo: string | null; onMudar: (v: string | null) => void; rotulo: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const arrasto = useRef<{ x: number; sl: number; id: number; moveu: boolean } | null>(null);
+  const engolir = useRef(false);
+  const [pontas, setPontas] = useState({ esq: false, dir: false });
+  const [aArrastar, setAArrastar] = useState(false);
+
+  const medir = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const esq = el.scrollLeft > 2, dir = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setPontas((p) => (p.esq === esq && p.dir === dir ? p : { esq, dir }));
+  }, []);
+  useEffect(() => {
+    medir();
+    const el = ref.current;
+    if (!el) return;
+    // a roda: com a fila a transbordar, o deslocamento vertical passa a horizontal (listener não passivo, para o preventDefault)
+    const roda = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      const antes = el.scrollLeft;
+      el.scrollLeft += e.deltaY;
+      if (el.scrollLeft !== antes) e.preventDefault();
+      medir();
+    };
+    el.addEventListener("wheel", roda, { passive: false });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(medir) : null;
+    ro?.observe(el);
+    return () => { el.removeEventListener("wheel", roda); ro?.disconnect(); };
+  }, [medir, opcoes.length]);
+
   if (opcoes.length < 2) return null;
-  const b = (on: boolean) => cn("inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-4 text-[15px] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+  const b = (on: boolean) => cn("inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-4 text-[15px] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-inset",
     on ? "border-primary bg-primary font-medium text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40");
+  // o esbatimento só na ponta que tem mais conteúdo
+  const mascara = pontas.esq || pontas.dir
+    ? `linear-gradient(to right, ${pontas.esq ? "transparent 0, #000 32px" : "#000 0"}, ${pontas.dir ? "#000 calc(100% - 32px), transparent 100%" : "#000 100%"})`
+    : undefined;
   return (
-    <div role="group" aria-label={rotulo} className="-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div ref={ref} role="group" aria-label={rotulo} data-esq={pontas.esq || undefined} data-dir={pontas.dir || undefined}
+      style={{ maskImage: mascara, WebkitMaskImage: mascara, msOverflowStyle: "none", scrollbarWidth: "none" }}
+      className={cn("-mx-1 flex min-w-0 select-none gap-2 overflow-x-auto overscroll-x-contain px-1 py-0.5 [&::-webkit-scrollbar]:hidden",
+        aArrastar ? "cursor-grabbing" : "cursor-grab")}
+      onScroll={medir}
+      onPointerDown={(e) => {
+        if (e.pointerType !== "mouse" || e.button !== 0) return; // no toque, o scroll é o nativo
+        arrasto.current = { x: e.clientX, sl: ref.current!.scrollLeft, id: e.pointerId, moveu: false };
+      }}
+      onPointerMove={(e) => {
+        const a = arrasto.current;
+        if (!a || a.id !== e.pointerId) return;
+        const dx = e.clientX - a.x;
+        if (!a.moveu && Math.abs(dx) > 5) {
+          a.moveu = true; setAArrastar(true);
+          try { ref.current!.setPointerCapture(e.pointerId); } catch { /* jsdom */ }
+        }
+        if (a.moveu) { ref.current!.scrollLeft = a.sl - dx; medir(); }
+      }}
+      onPointerUp={(e) => {
+        const a = arrasto.current;
+        arrasto.current = null;
+        setAArrastar(false);
+        if (a?.moveu) { engolir.current = true; setTimeout(() => { engolir.current = false; }, 0); }
+        try { ref.current?.releasePointerCapture(e.pointerId); } catch { /* jsdom */ }
+      }}
+      onPointerCancel={() => { arrasto.current = null; setAArrastar(false); }}
+      // o clique que fecha um arrasto não ativa o filtro
+      onClickCapture={(e) => { if (engolir.current) { e.preventDefault(); e.stopPropagation(); engolir.current = false; } }}
+      onFocus={(e) => { if (e.target !== ref.current) (e.target as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}
+      onDragStart={(e) => e.preventDefault()}>
       <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>Todos</button>
       {opcoes.map((o) => (
         <button key={o} type="button" aria-pressed={ativo === o} onClick={() => onMudar(ativo === o ? null : o)} className={b(ativo === o)}>{o}</button>

@@ -1,9 +1,9 @@
 // A etapa "Necessidades do cliente" guiada (14/10/2026, versão Atual), para o comercial de pé, com o telemóvel numa mão:
 // um passo de cada vez, com uma barra de progresso compacta e o "Seguinte" fixo em baixo, ao alcance do polegar.
-//   Escolhas do cliente → O que se faz → uma pergunta por troca ("Mantém / Troca" e logo os produtos dessa troca;
-//   escolhido o produto, avança-se sozinho) → Mais produtos → O que o cliente fornece (só com "Sim") → Resumo.
-// Os cartões ligam e desligam ao toque (aria-pressed); a quantidade vem das medidas ou é 1, com o ajuste 1 · 2 · 3 · outro
-// só quando faz sentido. A lógica está em selecao.ts; o comportamento do motor é o de antes (produtosVisita.ts).
+//   O que se faz → uma pergunta por troca ("Mantém / Troca" e logo os produtos dessa troca; escolhido o produto, avança-se
+//   sozinho) → Mais produtos → Escolhas do cliente → O que o cliente fornece, por serviço (só com "Sim") → Resumo.
+// Os cartões ligam e desligam ao toque (aria-pressed); a quantidade vem das medidas ou é 1, escrita no cartão
+// ("12 m² · da visita"), com um "Mudar" discreto no cartão escolhido. A lógica está em selecao.ts e forneceCliente.ts.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,24 +18,24 @@ import { useCustos } from "./v2/custosStore";
 import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { orcLinhas } from "./ServicosCatalogo";
-import { Ilustracao, ilustracaoDe } from "./ilustracoes";
-import { nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, type Obrigacao } from "./produtosVisita";
+import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
+import { nosAbaixo, obrigacoes, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
 import {
   filtrarProdutos, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, obrigacoesAMostrar, ordenarParaObjeto, resumoNecessidades,
-  tilesServicos, tocarProdutoGuiado, type TileServico,
+  servicoLeitura, tilesServicos, tocarProdutoGuiado, type TileServico,
 } from "./necessidades";
 import {
-  CORES, categoriaFiltro, categoriasDaLista, encurtar, escreverCores, fornecerTodos, itensFornece, lerCores, marcarFornece, quantidadeDaRegra,
-  mostraAjuste, notaNaLinha, oficiosPorUso, ordenarMobilidade, ordenarParaTroca, passosSelecao, responderTroca, servicosFiltrados, tocarProduto, tocarServico, trocaResolvida,
-  vizinho, type PassoSel,
+  CORES, blocosFornece, categoriaFiltro, categoriasDaLista, contavel, encurtar, escreverCores, fornecerTodos, lerCores, marcarFornece, poupanca, quantidadeDaRegra,
+  notaNaLinha, oficiosPorUso, ordenarMobilidade, ordenarParaTroca, passosSelecao, qtdServicoAoEscolher, responderTroca, servicosFiltrados, textoQtd, tocarProduto,
+  tocarServico, trocaResolvida, vizinho, type BlocoFornece, type ItemFornece, type PassoSel,
 } from "./selecao";
-import { AjusteQtd, CartaoProduto, CartaoResposta, CartaoServico, FiltrosFila, Pesquisa } from "./CartoesSelecao";
+import { CartaoProduto, CartaoResposta, CartaoServico, FiltrosFila, Pesquisa, QtdMudar } from "./CartoesSelecao";
 import { useGuiaPasso } from "./guiaPasso";
 
 type P = Ctx & { d: Negocio; simples?: boolean };
-const MED_TXT: Record<MedKey, string> = { pav: "do pavimento", par: "das paredes", pts: "dos pontos de água", pcs: "das medidas" };
-const PRIMEIROS_SVC = 6, PRIMEIROS_PROD = 6, MAIS = 12;
+const PRIMEIROS_SVC = 6, PRIMEIROS_PROD = 6, PRIMEIROS_FORN = 6, MAIS = 12;
 const GRELHA_SVC = "grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,300px),1fr))]";
+const GRELHA_FORN = "grid gap-2 grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))]";
 const GRELHA_PROD = "grid items-start gap-2 grid-cols-[repeat(auto-fill,minmax(150px,1fr))]";
 const nomeSvc = (S: Ctx["S"], sid: SvcId) => S.svc[sid]?.n ?? itemCatalogo(sid)?.n ?? sid;
 const plural = (n: number, s: string, p: string) => `${n} ${n === 1 ? s : p}`;
@@ -53,13 +53,13 @@ export function SelecaoGuiada(ctx: P) {
   const passos = passosSelecao(obr, clienteFornece, comEscolhas);
   const faltaEscolhas = comEscolhas && emFalta([esc], d.f).length > 0;
 
+  // abre onde se ficou: nos serviços (nada mexido), na primeira troca por resolver, nas Escolhas por responder, ou no resumo
   const [k, setK] = useState(() => {
-    if (faltaEscolhas) return "escolhas";
     if (aValidar(d, "nec") || aValidar(d, ESCOLHAS.titulo)) return "resumo";
     const mexeu = Object.keys(v.manter ?? {}).length + (v.prod ?? []).length + Object.keys(v.extra).length;
     if (!mexeu) return "servicos";
     const q = obr.find((o) => !o.cumprida);
-    return q ? "q:" + q.sid : "resumo";
+    return q ? "q:" + q.sid : faltaEscolhas ? "escolhas" : "resumo";
   });
   const iAntes = useRef(0);
   let i = passos.findIndex((p) => p.k === k);
@@ -101,7 +101,7 @@ export function SelecaoGuiada(ctx: P) {
   const fim = atual.tipo === "resumo";
   const titulo = atual.tipo === "pergunta" && atual.o ? atual.o.pergunta ?? `Escolha ${atual.titulo.toLowerCase()}` : atual.titulo;
   const sub = atual.tipo === "pergunta" && atual.o ? `Para ${nomeCurto(nomeSvc(S, atual.o.sid)).toLowerCase()}`
-    : atual.tipo === "servicos" ? "Toque para ligar ou desligar." : atual.tipo === "fornece" ? "Toque no que o cliente fornece: sai do preço, a instalação fica." : null;
+    : atual.tipo === "servicos" ? "Toque para ligar ou desligar." : atual.tipo === "fornece" ? "Por serviço: toque no que o cliente traz. Sai do preço; a mão de obra e a instalação ficam." : null;
 
   return (
     <div ref={topo} className="scroll-mt-4" onPointerDownCapture={cancelar} onKeyDownCapture={cancelar}>
@@ -222,11 +222,12 @@ function PassoServicos({ ctx, K }: { ctx: P; K: Catalogo }) {
   const ordem = useMemo(() => servicosFiltrados(tiles, { q, oficio: of, linha: d.linha }).map((t) => t.sid), [q, of, d.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const lista = ordem.map((sid) => porSid.get(sid)).filter((t): t is TileServico => !!t);
 
+  // a quantidade em texto: "12 m² · da visita" (a da medida) ou "1 un"; mudada à mão, deixa de dizer "da visita"
   const linha2 = (t: TileServico, daMedida: MedKey | null, detalhe: string) => {
     const manual = (v.extra[t.sid] || 0) > 0;
-    if (t.origem === "pacote") return t.semMedida ? "Falta a medida" : t.on ? `${nfmt(t.qt)} ${t.un} ${MED_TXT[t.medida ?? "pcs"]}` : "Do pacote · não entra";
+    if (t.origem === "pacote") return t.semMedida ? "Falta a medida" : t.on ? textoQtd({ q: t.qt, un: t.un, daMedida: true }) : "Do pacote · não entra";
     if (t.de && !manual) return `Vem com ${t.de.join(", ")}`;
-    if (t.on && daMedida) return `${nfmt(t.qt)} ${t.un} ${MED_TXT[daMedida]}`;
+    if (t.on) return textoQtd({ q: t.qt, un: t.un, daMedida: !!daMedida && t.qt === qtdServicoAoEscolher({ id: t.sid, n: t.n, un: t.un, qm: 1 }, d, medidaDe(t.sid)) });
     return detalhe || `${eur(t.preco)} €/${t.un}`;
   };
   return (
@@ -242,8 +243,8 @@ function PassoServicos({ ctx, K }: { ctx: P; K: Catalogo }) {
           return (
             <CartaoServico key={t.sid} nome={nome} nomeCompleto={t.n} icone={t.icone} on={t.on} so={!!t.de && !manual} desativado={t.semMedida}
               linha2={linha2(t, daMedida, detalhe)} onTocar={() => run(() => { tocarServico(A, d, t, medidaDe(t.sid)); })}>
-              {t.on && manual && mostraAjuste({ un: t.un, q: t.qt, daMedida: !!daMedida }) && (
-                <AjusteQtd id={`sq-${t.sid}-${d.id}`} valor={t.qt} un={t.un} nome={nome} onMudar={(x) => run(() => A.extra(d.id, t.sid, x))} />
+              {t.on && manual && (
+                <QtdMudar id={`sq-${t.sid}-${d.id}`} valor={t.qt} un={t.un} nome={nome} onMudar={(x) => run(() => A.extra(d.id, t.sid, x))} />
               )}
             </CartaoServico>
           );
@@ -281,12 +282,13 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo }: { ctx: P; K: Catal
         {lista.slice(0, n).map((p) => {
           const ja = escolhido.get(p.id);
           const { nome, detalhe } = encurtar(p.n, { categoria: categoriaFiltro(p, K.arvore) });
-          const daMedida = quantidadeDaRegra(K, p, sids);
+          const daMedida = !!ja && quantidadeDaRegra(K, p, sids) && !contavel(p.un) && ja.q === qtdSugerida(K, p, sids, d.visita.med);
           return (
             <CartaoProduto key={p.id} nome={nome} nomeCompleto={p.n} detalhe={[detalhe, p.marca].filter(Boolean).join(" · ")} preco={precoUnitario(p)} un={p.un}
               img={ilustracaoDoCatalogo(K.arvore, p)} on={!!ja} trazInstalacao={!!p.servico} onTocar={() => onTocar(p)}>
-              {ja && mostraAjuste({ un: p.un, q: ja.q, daMedida }) && (
-                <AjusteQtd id={`pq-${p.id}-${d.id}`} valor={ja.q} un={p.un} nome={nome} estreito onMudar={(x) => run(() => A.produtoQtd(d.id, p.id, x))} />
+              {ja && (
+                <QtdMudar id={`pq-${p.id}-${d.id}`} valor={ja.q} un={p.un} nome={nome} texto={textoQtd({ q: ja.q, un: p.un, daMedida })}
+                  onMudar={(x) => run(() => A.produtoQtd(d.id, p.id, x))} />
               )}
             </CartaoProduto>
           );
@@ -315,6 +317,10 @@ function PassoPergunta({ ctx, K, o, resolvido }: { ctx: P; K: Catalogo; o: Obrig
   const ramo = useMemo(() => nosAbaixo(K.arvore, o.no), [K.arvore, o.no]);
   const troca = !o.pergunta || resp === "nao" || (resp !== "sim" && (v.prod ?? []).some((p) => p.no && ramo.has(p.no)));
   const listaRef = useRef<HTMLDivElement>(null);
+  // a mobilidade reduzida (das Escolhas, que agora vêm no fim) pergunta-se aqui, num cartão rápido, enquanto não tem resposta:
+  // muda a ordem dos produtos (bases de duche e barras à frente). Respondida, o cartão já não aparece nas trocas seguintes.
+  const campoMob = efetivo(ctx.S.campos, ESCOLHAS).campos.find((c) => c.k === "mobilidade_reduzida" && visivel(c, d.f));
+  const [pedeMob] = useState(() => !!campoMob && !d.f.mobilidade_reduzida);
 
   const responder = (r: "sim" | "nao") => {
     run(() => responderTroca(A, K, d, o, r));
@@ -331,6 +337,7 @@ function PassoPergunta({ ctx, K, o, resolvido }: { ctx: P; K: Catalogo; o: Obrig
 
   return (
     <div className="space-y-4">
+      {pedeMob && campoMob && <MobilidadeRapida ctx={ctx} rotulo={campoMob.l} />}
       {o.pergunta && (
         <div className="grid grid-cols-2 gap-2" role="group" aria-label={o.pergunta}>
           <CartaoResposta on={resp === "sim"} titulo="Mantém" sub="Sem produto" onTocar={() => responder("sim")} />
@@ -342,6 +349,24 @@ function PassoPergunta({ ctx, K, o, resolvido }: { ctx: P; K: Catalogo; o: Obrig
           <ListaProdutos ctx={ctx} K={K} produtos={produtos} onTocar={tocar} rotulo={obj ? `Produtos: ${obj.comArtigo}` : "Produtos"} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** A pergunta da mobilidade reduzida num cartão rápido (Sim / Não), no início das trocas. */
+function MobilidadeRapida({ ctx, rotulo }: { ctx: P; rotulo: string }) {
+  const { A, run, d } = ctx;
+  const val = d.f.mobilidade_reduzida;
+  const b = (on: boolean) => cn("min-h-11 min-w-16 rounded-lg border px-4 text-[15px] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+    on ? "border-primary bg-primary font-medium text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40");
+  return (
+    <div role="group" aria-label={rotulo} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-border bg-muted/40 px-3 py-2">
+      <span className="text-[15px] text-foreground">{rotulo}<span className="block text-sm text-muted-foreground">Muda a ordem dos produtos</span></span>
+      <span className="flex gap-2">
+        {(["Sim", "Não"] as const).map((x) => (
+          <button key={x} type="button" aria-pressed={val === x} className={b(val === x)} onClick={() => run(() => A.campo(d.id, "mobilidade_reduzida", val === x ? "" : x))}>{x}</button>
+        ))}
+      </span>
     </div>
   );
 }
@@ -363,36 +388,85 @@ function PassoOutros({ ctx, K, obr }: { ctx: P; K: Catalogo; obr: Obrigacao[] })
   return <ListaProdutos ctx={ctx} K={K} produtos={produtos} rotulo="Mais produtos" onTocar={(p) => run(() => { tocarProduto(A, K, d, p); })} />;
 }
 
-/* ================================================================== O que o cliente fornece */
+/* ================================================================== O que o cliente fornece, por serviço */
+/** Os blocos de "o que o cliente fornece" desta visita (selecao.ts: blocosFornece). */
+function blocosDaVisita(ctx: P, K: Catalogo, obr: Obrigacao[]): BlocoFornece[] {
+  const { S, d } = ctx;
+  return blocosFornece(d, obr, orcLinhas(d, S), { arvore: K.arvore, exige: K.exigeProduto ?? {}, nomeSvc: (sid) => nomeSvc(S, sid), svc: (sid) => servicoLeitura(S, sid) });
+}
+const ATALHO = "min-h-11 rounded-xl border px-4 text-[15px] font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
+const atalho = (on: boolean) => cn(ATALHO, on ? "border-primary bg-primary/[0.06] text-foreground ring-1 ring-primary" : "border-input bg-card text-foreground hover:border-foreground/40");
+/** "− 84,20 €", discreto (só quando baixa alguma coisa). */
+const Menos = ({ v, className }: { v: number; className?: string }) =>
+  v > 0 ? <span className={cn("shrink-0 text-sm tabular-nums text-muted-foreground", className)} aria-label={`Baixa ${eur(v)} euros`}>− {eur(v)} €</span> : null;
+
 function PassoFornece({ ctx, obr }: { ctx: P; obr: Obrigacao[] }) {
-  const { S, A, run, d } = ctx;
+  const { A, run, d } = ctx;
   const K = useCatalogo();
-  const itens = itensFornece(d, obr, (sid) => nomeSvc(S, sid));
-  if (!itens.length) return <p className="text-[15px] text-muted-foreground">Ainda não há produtos escolhidos.</p>;
-  const todos = itens.every((x) => x.on), nenhum = itens.every((x) => !x.on);
-  const sec = (on: boolean) => cn("min-h-11 rounded-xl border px-4 text-[15px] font-medium transition-colors duration-150",
-    on ? "border-primary bg-primary/[0.06] text-foreground ring-1 ring-primary" : "border-input bg-card text-foreground hover:border-foreground/40");
+  const blocos = blocosDaVisita(ctx, K, obr);
+  const todos = blocos.flatMap((b) => b.itens);
+  if (!todos.length) return <p className="text-[15px] text-muted-foreground">Ainda não há serviços nem produtos escolhidos.</p>;
+  const tudo = todos.every((x) => x.on), nada = todos.every((x) => !x.on);
   return (
-    <div className="space-y-3">
-      <div className="flex gap-2" role="group" aria-label="Atalhos">
-        <button type="button" aria-pressed={todos} className={sec(todos)} onClick={() => run(() => fornecerTodos(A, d, itens, true))}>Fornece tudo</button>
-        <button type="button" aria-pressed={nenhum} className={sec(nenhum)} onClick={() => run(() => fornecerTodos(A, d, itens, false))}>Nenhum</button>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Atalhos para tudo">
+        <button type="button" aria-pressed={tudo} className={atalho(tudo)} onClick={() => run(() => fornecerTodos(A, d, todos, true))}>Fornece tudo</button>
+        <button type="button" aria-pressed={nada} className={atalho(nada)} onClick={() => run(() => fornecerTodos(A, d, todos, false))}>Nenhum</button>
+        <Menos v={poupanca(todos)} className="ml-auto text-[15px]" />
       </div>
-      <ul className={GRELHA_SVC} aria-label="O que o cliente fornece">
-        {itens.map((it) => {
-          const pv = it.tipo === "produto" ? (d.visita.prod ?? []).find((p) => p.id === it.id) : undefined;
-          const doCat = pv && K.produtos.find((p) => p.id === pv.id);
-          const img = doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(it.n);
+      {blocos.map((b) => <BlocoServico key={b.sid ?? "outros"} ctx={ctx} K={K} b={b} />)}
+    </div>
+  );
+}
+
+const TIPO_TXT: Record<ItemFornece["tipo"], string> = { produto: "Produto", servico: "Material", cons: "Consumível", equip: "Equipamento" };
+const FIG: Record<"cons" | "equip", IlustracaoKey> = { cons: "material", equip: "ferramenta" };
+
+/** Um serviço: o nome, os atalhos dele, o que baixa, e os cartões (os 6 que mais pesam; o resto com "Ver mais"). */
+function BlocoServico({ ctx, K, b }: { ctx: P; K: Catalogo; b: BlocoFornece }) {
+  const { A, run, d } = ctx;
+  const [n, setN] = useState(PRIMEIROS_FORN);
+  const tudo = b.itens.every((x) => x.on), nada = b.itens.every((x) => !x.on);
+  const titulo = b.sid ? nomeCurto(b.titulo) : b.titulo;
+  const sec = (on: boolean) => cn("min-h-10 rounded-lg px-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+    on ? "bg-primary/10 text-foreground" : "text-primary hover:bg-muted");
+  const linha2 = (it: ItemFornece) => {
+    if (it.tipo === "servico") return it.on ? "O cliente compra" : "Material por escolher";
+    const qtd = it.q != null && it.un ? `${nfmt(it.q)} ${it.un}` : "";
+    if (it.on) return `Fornecido pelo cliente${it.valor ? ` · − ${eur(it.valor)} €` : ""}`;
+    return [TIPO_TXT[it.tipo], qtd, it.valor ? `${eur(it.valor)} €` : ""].filter(Boolean).join(" · ");
+  };
+  const figura = (it: ItemFornece) => {
+    if (it.tipo === "cons" || it.tipo === "equip") return FIG[it.tipo];
+    const doCat = it.tipo === "produto" ? K.produtos.find((p) => p.id === it.id) : undefined;
+    return doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(it.n);
+  };
+  return (
+    <section aria-label={titulo} className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h4 className="min-w-0 flex-1 text-base font-semibold text-foreground" title={b.titulo}>{titulo}</h4>
+        <Menos v={poupanca(b.itens)} />
+        <span className="flex" role="group" aria-label={`Atalhos de ${titulo}`}>
+          <button type="button" aria-pressed={tudo} className={sec(tudo)} onClick={() => run(() => fornecerTodos(A, d, b.itens, true))}>Fornece tudo</button>
+          <button type="button" aria-pressed={nada} className={sec(nada)} onClick={() => run(() => fornecerTodos(A, d, b.itens, false))}>Nenhum</button>
+        </span>
+      </div>
+      <ul className={GRELHA_FORN} aria-label={`O que o cliente fornece: ${titulo}`}>
+        {b.itens.slice(0, n).map((it) => {
           const { nome } = encurtar(it.n);
-          const linha2 = it.on ? (it.tipo === "produto" ? "Fornecido pelo cliente · 0,00 €" : "O cliente compra")
-            : pv ? `${eur(precoProduto(pv))} €${pv.svc ? " · com instalação" : ""}` : "Material por escolher";
           return (
-            <CartaoServico key={it.k} nome={nome} nomeCompleto={it.n} icone="outro" figura={<Ilustracao k={img} className="h-8 w-8" />} on={it.on} linha2={linha2}
-              onTocar={() => run(() => marcarFornece(A, d, it, !it.on))} />
+            <CartaoServico key={it.k} compacto nome={nome} nomeCompleto={it.n} icone="outro" figura={<Ilustracao k={figura(it)} className="h-7 w-7" />}
+              on={it.on} linha2={linha2(it)} onTocar={() => run(() => marcarFornece(A, d, it, !it.on))} />
           );
         })}
       </ul>
-    </div>
+      {b.itens.length > n && (
+        <button type="button" onClick={() => setN((x) => x + MAIS)}
+          className="min-h-11 w-full rounded-xl border border-input bg-card px-4 text-[15px] font-medium text-foreground transition-colors hover:border-foreground/40">
+          Ver mais {Math.min(MAIS, b.itens.length - n)}
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -429,8 +503,9 @@ function PassoResumo({ ctx, K, passos, obr, ir }: { ctx: P; K: Catalogo; passos:
         return { t: ids.length ? txtProd(ids) : "Nenhum" };
       }
       case "fornece": {
-        const f = [...prod.filter((x) => x.cliente).map((x) => encurtar(x.n).nome), ...Object.keys(v.clienteCompra ?? {}).map((s) => obr.find((o) => o.sid === s)?.caminho.split(" › ").pop() ?? s)];
-        return { t: f.length ? f.join(", ") : "Nada" };
+        const on = blocosDaVisita(ctx, K, obr).flatMap((b) => b.itens).filter((x) => x.on);
+        const menos = poupanca(on);
+        return { t: on.length ? `${on.map((x) => encurtar(x.n).nome).join(", ")}${menos > 0 ? ` (− ${eur(menos)} €)` : ""}` : "Nada" };
       }
       default: return { t: "" };
     }

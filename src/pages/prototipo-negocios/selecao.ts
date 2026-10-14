@@ -1,13 +1,14 @@
 // A seleção guiada das necessidades (14/10/2026, versão Atual): a lógica, sem React.
 // O comercial, de pé, com o telemóvel numa mão: um passo de cada vez, cartões que ligam e desligam ao toque,
-// a quantidade que vem das medidas (ou 1) e um ajuste discreto (1 · 2 · 3 · outro) só quando faz sentido.
-// Passos: Escolhas do cliente → O que se faz → uma pergunta por troca ("Mantém / Troca" e os produtos dessa troca)
-// → Mais produtos → O que o cliente fornece (só com "fornece materiais = Sim") → Resumo.
+// a quantidade que vem das medidas (ou 1), escrita no cartão ("12 m² · da visita"), e um "Mudar" discreto no cartão escolhido.
+// Passos (14/10, 2.ª volta): O que se faz → uma pergunta por troca ("Mantém / Troca" e os produtos dessa troca) → Mais produtos
+// → Escolhas do cliente → O que o cliente fornece, por serviço (só com "fornece materiais = Sim") → Resumo.
 import { normal } from "./catalogo";
-import { servicosVisita, type MedKey, type Negocio, type SvcId, type acoes } from "./motor";
+import { nfmt, servicosVisita, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import type { Catalogo, No, Produto } from "./v2/catalogoModelo";
-import { nosAbaixo, qtdSugerida, textoClienteCompra, type Obrigacao } from "./produtosVisita";
-import { categoriaDe, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, palavrasDe, procurarServicos, sugestaoQtd, tituloObrigacao, type TileServico } from "./necessidades";
+import { nosAbaixo, precoProduto, qtdSugerida, textoClienteCompra, type Obrigacao } from "./produtosVisita";
+import { categoriaDe, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, palavrasDe, procurarServicos, qtdNaVisita, sugestaoQtd, tituloObrigacao, type TileServico } from "./necessidades";
+import { itensReceita } from "./forneceCliente";
 import type { IlustracaoKey } from "./ilustracoes";
 
 type A = ReturnType<typeof acoes>;
@@ -16,13 +17,16 @@ type A = ReturnType<typeof acoes>;
 export type TipoPasso = "escolhas" | "servicos" | "pergunta" | "outros" | "fornece" | "resumo";
 export interface PassoSel { k: string; tipo: TipoPasso; titulo: string; o?: Obrigacao }
 
-/** Os passos da seleção, pela ordem: as perguntas saem das obrigações a mostrar; "O que o cliente fornece" só quando fornece materiais. */
+/**
+ * Os passos da seleção, pela ordem: primeiro o que se faz e os produtos; as Escolhas do cliente depois, porque o "Sim" a
+ * "fornece materiais" abre a seguir "O que o cliente fornece" (por serviço, já com os serviços e os produtos escolhidos).
+ */
 export function passosSelecao(obr: Obrigacao[], clienteFornece: boolean, comEscolhas = true): PassoSel[] {
   return [
-    ...(comEscolhas ? [{ k: "escolhas", tipo: "escolhas" as const, titulo: "Escolhas do cliente" }] : []),
     { k: "servicos", tipo: "servicos", titulo: "O que se faz" },
     ...obr.map((o): PassoSel => ({ k: "q:" + o.sid, tipo: "pergunta", titulo: tituloObrigacao(o), o })),
     { k: "outros", tipo: "outros", titulo: "Mais produtos" },
+    ...(comEscolhas ? [{ k: "escolhas", tipo: "escolhas" as const, titulo: "Escolhas do cliente" }] : []),
     ...(clienteFornece ? [{ k: "fornece", tipo: "fornece" as const, titulo: "O que o cliente fornece" }] : []),
     { k: "resumo", tipo: "resumo", titulo: "Resumo" },
   ];
@@ -188,11 +192,8 @@ export function quantidadeDaRegra(K: Catalogo, p: { no: string | null }, sids: S
 
 const CONTAVEIS = new Set(["un", "ud", "pç", "pc", "pcs", "conj", "cj", "kit", "par"]);
 export const contavel = (un: string) => CONTAVEIS.has(normal(un).replace(/\.$/, ""));
-/**
- * Se o cartão escolhido mostra o ajuste (1 · 2 · 3 · outro): quando a quantidade não vem de uma medida,
- * ou quando é contável e já passa de 1. O que vem das medidas (5 m² de pavimento) não se mexe aqui.
- */
-export const mostraAjuste = (o: { un: string; q: number; daMedida: boolean }) => !o.daMedida || (contavel(o.un) && o.q > 1);
+/** A quantidade escrita no cartão (sem fila de números): "12 m² · da visita" quando vem da medida, senão "1 un". */
+export const textoQtd = (o: { q: number; un: string; daMedida: boolean }) => `${nfmt(o.q)} ${o.un}${o.daMedida ? " · da visita" : ""}`;
 
 /* ------------------------------------------------------------------ tocar nos cartões */
 /** Tocar num cartão de serviço: liga ou desliga. O do pacote sem medida e o que só vem com um produto não se tocam. */
@@ -238,22 +239,67 @@ export function trocaResolvida(o: Pick<Obrigacao, "pergunta">, escolhidos: { n: 
 }
 
 /* ------------------------------------------------------------------ o que o cliente fornece */
-export interface ItemFornece { k: string; tipo: "produto" | "servico"; id: string; n: string; on: boolean; no?: string | null; texto?: string }
-/** Tudo o que pode ser fornecido pelo cliente: os produtos escolhidos e o material das trocas sem produto escolhido. */
+/**
+ * Um cartão de "o cliente fornece": um produto escolhido (fica a zero), o material de uma troca ainda sem produto
+ * ("o cliente compra"), ou um consumível ou um equipamento da receita de um serviço (sai do custo dessa linha).
+ * `valor`: quanto baixa no total quando está ligado (€); `q` e `un`: a quantidade, para a 2.ª linha.
+ */
+export interface ItemFornece {
+  k: string; tipo: "produto" | "servico" | "cons" | "equip"; id: string; n: string; on: boolean; no?: string | null; texto?: string;
+  sid?: SvcId; valor?: number; q?: number; un?: string;
+}
+/** Tudo o que pode ser fornecido pelo cliente fora das receitas: os produtos escolhidos e o material das trocas sem produto escolhido. */
 export function itensFornece(d: Negocio, obr: Obrigacao[], nomeSvc: (sid: SvcId) => string): ItemFornece[] {
   const v = d.visita;
-  const prods: ItemFornece[] = (v.prod ?? []).filter((p) => p.q > 0).map((p) => ({ k: "p:" + p.id, tipo: "produto", id: p.id, n: p.n, on: !!p.cliente, no: p.no }));
+  const prods: ItemFornece[] = (v.prod ?? []).filter((p) => p.q > 0).map((p) => ({
+    k: "p:" + p.id, tipo: "produto", id: p.id, n: p.n, on: !!p.cliente, no: p.no, valor: precoProduto(p), q: p.q, un: p.un,
+  }));
   const svcs: ItemFornece[] = obr.filter((o) => o.estado !== "mantem" && o.estado !== "produto").map((o) => ({
-    k: "s:" + o.sid, tipo: "servico", id: o.sid, n: tituloObrigacao(o), on: o.estado === "cliente", texto: textoClienteCompra(o, nomeSvc(o.sid)),
+    k: "s:" + o.sid, tipo: "servico", id: o.sid, sid: o.sid, n: tituloObrigacao(o), on: o.estado === "cliente", texto: textoClienteCompra(o, nomeSvc(o.sid)), valor: 0,
   }));
   return [...prods, ...svcs];
 }
-/** Liga ou desliga "o cliente fornece": o produto fica a zero (a instalação mantém-se); o serviço fica com "o cliente compra". */
-export function marcarFornece(A: Pick<A, "produtoCliente" | "clienteCompra">, d: Negocio, it: ItemFornece, on: boolean) {
-  if (it.tipo === "produto") A.produtoCliente(d.id, it.id, on);
-  else A.clienteCompra(d.id, it.id, on ? it.texto ?? it.n : null);
+
+export interface BlocoFornece { sid: SvcId | null; titulo: string; itens: ItemFornece[] }
+const r2 = (x: number) => Math.round(x * 100) / 100;
+/**
+ * "O que o cliente fornece" por serviço: um bloco por serviço escolhido, com os produtos escolhidos para ele (os do ramo
+ * que o serviço exige e os que o trazem), o material da troca ainda sem produto, e os consumíveis e os equipamentos da
+ * receita (quantidade por unidade × a quantidade do serviço). Em cada bloco, o que mais baixa o total vem primeiro.
+ * Os produtos que não são de nenhum serviço ficam num bloco "Outros produtos", no fim.
+ */
+export function blocosFornece(d: Negocio, obr: Obrigacao[], sids: SvcId[], o: {
+  arvore: No[]; exige: Partial<Record<SvcId, string>>; nomeSvc: (sid: SvcId) => string; svc: (sid: SvcId) => Servico | null | undefined;
+}): BlocoFornece[] {
+  const base = itensFornece(d, obr, o.nomeSvc), usados = new Set<string>(), fornece = d.visita.fornece ?? {};
+  const prod = new Map((d.visita.prod ?? []).map((p) => [p.id, p]));
+  const blocos = sids.map((sid): BlocoFornece => {
+    const no = o.exige[sid], ramo = no ? nosAbaixo(o.arvore, no) : null;
+    const ps = base.filter((it) => it.tipo === "produto" && !usados.has(it.k) && (prod.get(it.id)?.svc === sid || (!!ramo && !!it.no && ramo.has(it.no))));
+    ps.forEach((it) => usados.add(it.k));
+    const troca = base.filter((it) => it.tipo === "servico" && it.id === sid);
+    const q = qtdNaVisita(d, sid);
+    const rec = itensReceita(sid, o.svc(sid)).map((r): ItemFornece => ({
+      k: `${sid}|${r.k}`, tipo: r.tipo, id: r.k, sid, n: r.n, on: (fornece[sid] ?? []).includes(r.k), valor: r2(r.cu * q), q: r2(r.q * q), un: r.un,
+    }));
+    return { sid, titulo: o.nomeSvc(sid), itens: [...ps, ...troca, ...rec].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0)) };
+  }).filter((b) => b.itens.length);
+  const resto = base.filter((it) => it.tipo === "produto" && !usados.has(it.k)).sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0));
+  return resto.length ? [...blocos, { sid: null, titulo: "Outros produtos", itens: resto }] : blocos;
 }
-export function fornecerTodos(A: Pick<A, "produtoCliente" | "clienteCompra">, d: Negocio, itens: ItemFornece[], on: boolean) {
+/** Quanto baixa no total com o que está ligado (€). */
+export const poupanca = (itens: ItemFornece[]) => r2(itens.reduce((a, it) => a + (it.on ? it.valor ?? 0 : 0), 0));
+
+/**
+ * Liga ou desliga "o cliente fornece": o produto fica a zero (a instalação mantém-se); o serviço fica com "o cliente compra";
+ * o consumível e o equipamento saem do custo da linha do serviço (a mão de obra fica).
+ */
+export function marcarFornece(A: Pick<A, "produtoCliente" | "clienteCompra" | "forneceItem">, d: Negocio, it: ItemFornece, on: boolean) {
+  if (it.tipo === "produto") A.produtoCliente(d.id, it.id, on);
+  else if (it.tipo === "servico") A.clienteCompra(d.id, it.id, on ? it.texto ?? it.n : null);
+  else A.forneceItem(d.id, it.sid!, it.id, on);
+}
+export function fornecerTodos(A: Pick<A, "produtoCliente" | "clienteCompra" | "forneceItem">, d: Negocio, itens: ItemFornece[], on: boolean) {
   for (const it of itens) if (it.on !== on) marcarFornece(A, d, it, on);
 }
 
