@@ -19,9 +19,23 @@ const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCas
 const REGRAS: [RegExp, FaseObra[]][] = [
   // limpeza: a final é montagem; a de arranque é preparação
   [/limpeza (final|fina)|limpeza pos[- ]obra/, [4]],
+  // os modelos de obra atravessam a obra (remoção, infraestruturas, revestimento e montagem)
+  [/^mo modelo (\d|remodelacao completa)/, [1, 2, 3, 4]],
+  [/^mo modelo .*mobiliario/, [1, 4]],
+  // antes de a obra arrancar, ou durante toda ela: o projeto e a deslocação ao km
+  [/projeto|deslocacao fora|valor p\/km/, [1]],
+  // "levantamento de parede" é erguer a parede (não é remover): com as infraestruturas e fecha-se nos revestimentos
+  [/levantamento de (parede|alvenaria|muro)/, [2, 3]],
+  // os roços abrem-se para as infraestruturas; com o fecho e o acabamento, chegam aos revestimentos
+  [/fecho de roco/, [2, 3]],
+  [/roco/, [2]],
+  // mexer num ponto (luz, água, esgoto) é infraestrutura, mesmo quando o nome fala de eletrodomésticos
+  [/deslocacao de ponto|ponto de luz|ponto de agua|ponto de esgoto/, [2]],
+  [/la de rocha|isolamento (termico|acustico)/, [2, 3]],
+  [/pedra natural|painel acustico|sem pintura/, [3]],
   [/limpeza|protec|proteg|isolamento da zona|montagem de estaleiro|estaleiro/, [1]],
   // demolições e remoções
-  [/demol|remoc|remover|retirar|levantamento d|supress|anulac|desmont|picagem|picar|entulho|contentor|big ?bag|roco/, [1]],
+  [/demol|remoc|remover|retirar|levantamento d|supress|anulac|desmont|picagem|picar|entulho|contentor|big ?bag/, [1]],
   // as peças que se montam no fim ganham às palavras das infraestruturas e dos revestimentos
   // ("Instalação de sanita elétrica", "Lavatório cerâmica", "Porta revestida", "Estrutura para gaveta")
   [/louca|sanita|bide|lavatorio|torneira|misturadora|coluna de duche|resguardo|base de duche|banheira|movel|moveis|mobiliario|bancada|tampo|lava[- ]loica|eletrodomestic|exaustor|espelho|toalheiro|acessorio|porta|roupeiro|gaveta|gavetao|garrafeira|cristaleira|prateleira|dispenseiro|vista (superior|inferior|coluna)|banco|mesa |puxador|aplique|luminaria|candeeiro|janela|caixilh|estore|rede mosquiteira|vidro|serigrafia/, [4]],
@@ -30,7 +44,8 @@ const REGRAS: [RegExp, FaseObra[]][] = [
   // instalações técnicas
   [/canaliz|esgoto|ponto de agua|ponto de esgoto|tubagem|ppr|multicamada|\bgas\b|eletric|electric|quadro|disjunt|tomada|interruptor|ponto de luz|passagem de fio|cabo|avac|ar condicionado|pre[- ]instal|climatiz|ventilac|extrac|tela radiante|piso radiante|aquecimento|esquentador|termoacumul|caldeira|domotica|telecom|ited|rede de dados/, [2]],
   // pintura: a base com os revestimentos, a de acabamento no fim
-  [/pintura|pintar|tinta|envernizar|verniz|lacagem/, [3, 4]],
+  // com \b: "carpintaria" contém "pintar"
+  [/\bpintura|\bpintar|\btinta|envernizar|\bverniz|lacagem/, [3, 4]],
   // revestimentos e acabamentos base
   [/revest|azulej|ceramic|mosaico|pavimento|soalho|flutuante|vinilico|microcimento|betonilha|regulariz|autonivel|reboco|estuque|barramento|impermeabiliz|isolamento termico|isolamento acustico|cappoto|base de duche em obra|nicho/, [3]],
   // montagem final e acabamentos finos

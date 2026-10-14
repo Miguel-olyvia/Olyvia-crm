@@ -671,6 +671,9 @@ O pedido do Ruben: uma experiência de terreno com "WOW", guiada, com poucos toq
 - **As fases da obra** (`fasesObra.ts`): 1 Preparação e demolições · 2 Infraestruturas · 3 Revestimentos · 4 Montagem final.
   - **De onde vêm:** um serviço pode estar em várias fases; vale o que está na ficha (`Catalogo.fasesServico`) e, sem isso, as regras pelo nome e depois pelo ofício (`fasesPadrao`). Um produto fica na última fase do serviço que o instala ou, sem serviço, na do tipo de produto (`faseDoProduto`).
   - **Nas Necessidades:** serviços, Mais produtos, trocas e fornece agrupam-se por fase (`porFase`), com o seletor "Todas · 1 · 2 · 3 · 4", e o Resumo segue a cronologia.
-  - **A rever na ficha:** no catálogo real, cerca de 290 serviços caem na fase 4, porque quase todos são "Instalação de…".
+  - **No catálogo real:** fase 1 = 10 serviços, fase 2 = 24, fase 3 = 11, fase 4 = 286, mais 27 em várias fases.
+    - A fase 4 é quase toda certa: carpintaria (195 serviços, sobretudo armários e roupeiros), caixilharia (47), louças e torneiras, e bancadas.
+    - Regras corrigidas a 14/10: o "levantamento de parede" é erguer, não remover; os roços são da fase 2; "carpintaria" deixou de cair na pintura (a regra passou a usar limites de palavra); os pontos (luz, água, esgoto) são da fase 2; os Modelos 0–3 e a Remodelação completa ocupam as fases 1–4; o projeto 3D e a deslocação ao km ficam na fase 1.
+    - **A validar:** as janelas (caixilharia) estão na fase 4, mas numa remodelação podem entrar antes dos acabamentos.
 - **iPhone:** enquanto o protótipo está aberto, a meta viewport ganha `viewport-fit=cover`, e o menu de baixo, o "Mais" e o fundo do `<main>` somam `env(safe-area-inset-bottom)`. Os lados e o topo usam os `safe-area-inset` respetivos.
 - **Contraste (contas WCAG no tema `.calma`):** o acento `256 56% 48%` dá 7,7:1 sobre branco e 7,1:1 sobre o fundo. O texto secundário dá 7,6:1 e 7,0:1. O "Sugerido" (acento sobre o cartão) dá 7,7:1. O pior caso, texto secundário sobre o acento a 10%, dá 6,5:1: tudo AA com folga.
