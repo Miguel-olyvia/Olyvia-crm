@@ -859,3 +859,10 @@ Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, ger
   - VERSAO 14.
 - **Férias em datas reais** (14/10): os técnicos têm as férias no calendário (`Tecnico.feriasDatas`; o Sérgio, de exemplo, a 21–23 out). Nos planos do orçamento, os conflitos, o técnico escolhido sozinho, a troca e o "adiar" usam as datas reais (`diaDeFerias`); a escolha do técnico diz "de férias a qua, 21 out". Os planos de exemplo continuam pelo índice do dia.
 - **Entrega no dia do arranque:** se o fornecedor confirma a entrega para o dia em que a obra começa (ou depois), avisa no circuito, no Inventário e nas Operações, com um botão "Começar a {dia útil a seguir à entrega}" (`entregaTarde`).
+- **Mudar a proposta depois de aceite:** enquanto o contrato não está assinado, "O cliente pediu alterações" continua a funcionar. A versão aceite fica guardada como aceite e substituída, e o contrato enviado fica anulado.
+- **Trabalhos a mais (adenda)** (`adendas.ts`, `TrabalhosAMais.tsx`, `AdendaDoc`):
+  - **Quando:** depois do contrato assinado (ou da venda direta aceite) e antes do fim da obra.
+  - **Como se faz:** escolhe-se o porquê (o cliente pediu, surpresa em obra, erro de medição) e os serviços do Catálogo, com a quantidade. As contas aparecem ao vivo (+ € sem IVA, + € com IVA a 6%, + dias). Depois envia-se ao cliente.
+  - **O documento** `AD 2026/{negócio}-{n}` partilha-se como os outros.
+  - **Ao assinar** (no portal; aqui, simulado), as tarefas entram no plano no fim da fase de cada serviço e as das fases seguintes andam para a frente. Se o plano já estava aprovado, volta às Operações.
+  - **Pagamento:** com a última prestação.

@@ -13,6 +13,7 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil } from "./planoObra";
+import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
 import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
@@ -235,6 +236,8 @@ export interface Negocio {
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean;
     /** A encomenda de cliente, gerada ao assinar o contrato (14/10; preparacaoObra.ts). Sem ela, o circuito antigo (tudo no recibo). */
     ec?: EncCliente | null };
+  /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
+  adendas?: Adenda[];
   hist: Evento[];
 }
 
@@ -1266,6 +1269,32 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar(d.obra.enc
         ? { msg: ec.n + " aprovada", sub: "Encomenda a fornecedor " + d.obra.enc.n + " emitida: o Financeiro valida", kind: "ok", act: { label: "Ver como Financeiro", fn: () => run(() => { S.role = "financeiro"; }) } }
         : { msg: ec.n + " aprovada", sub: "Tudo em stock e reservado", kind: "ok" });
+    },
+    /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda vai ao cliente para assinar. */
+    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string) {
+      const d = deal(id);
+      if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return; }
+      if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return; }
+      const linhas = itens.filter((x) => x.q > 0).map((x) => linhaAdenda(S, x.sid, x.q)).filter((x): x is NonNullable<typeof x> => !!x);
+      if (!linhas.length) return;
+      const n = "AD 2026/" + d.id + "-" + ((d.adendas?.length ?? 0) + 1);
+      (d.adendas ??= []).push({ n, estado: "enviada", criada: agora(), motivo, linhas });
+      log(d, "Adenda " + n + " enviada ao cliente: " + linhas.map((x) => x.n.toLowerCase()).join(", ") + " · +" + eur(totalAdenda(linhas)) + " € · +" + diasAdenda(linhas) + " dias");
+      avisar({ msg: "Adenda " + n + " enviada", sub: "Está no portal do cliente para assinar", kind: "ok" });
+    },
+    /** O cliente assina a adenda (no portal): as tarefas entram no plano e o plano volta a aprovação, se já estava aprovado. */
+    assinarAdenda(id: number, n: string) {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n), p = d.obra.plano;
+      if (!a || a.estado !== "enviada") return;
+      a.estado = "assinada"; a.assinada = agora();
+      log(d, "Adenda " + n + " assinada pelo cliente");
+      if (p && p.estado !== "concluída") {
+        juntarAoPlano(p, a);
+        const voltou = p.estado === "aprovado";
+        if (voltou) p.estado = "por aprovar";
+        log(d, "Plano: " + a.linhas.length + " " + (a.linhas.length === 1 ? "tarefa" : "tarefas") + " da adenda juntas" + (voltou ? " · volta a aprovação das Operações" : ""), voltou ? "w" : "a");
+        avisar({ msg: "Adenda assinada", sub: voltou ? "As tarefas entraram no plano: as Operações aprovam de novo" : "As tarefas entraram no plano da obra", kind: "ok" });
+      } else avisar({ msg: "Adenda assinada", kind: "ok" });
     },
     /** O fornecedor da encomenda (antes de a validar). */
     escolherForn(id: number, forn: string) { const e = deal(id).obra.enc; if (e && e.estado === "por confirmar") e.forn = forn; },

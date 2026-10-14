@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { LINHAS, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
+import { diasAdenda, totalAdenda, type Adenda } from "./adendas";
 import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
 
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
@@ -206,6 +207,41 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
   );
 }
 
+/* ------------------------------------------------------------------ adenda (14/10) */
+/** A adenda ao contrato: os trabalhos a mais, o preço (IVA a 6%), os dias a mais e as assinaturas. */
+export function AdendaDoc({ d, a }: { d: Negocio; a: Adenda }) {
+  const base = totalAdenda(a.linhas), dias = diasAdenda(a.linhas);
+  return (
+    <Folha titulo="Adenda ao contrato" numero={a.n} data={a.estado === "assinada" ? "assinada" : "à espera da assinatura"} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
+      <Cliente d={d} />
+      <p className="text-slate-700">Trabalhos a mais na obra do contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}. O resto do contrato mantém-se.</p>
+      <ul className="divide-y divide-slate-200 border-y border-slate-200">
+        {a.linhas.map((x) => (
+          <li key={x.sid} className="flex items-baseline justify-between gap-4 py-2.5">
+            <span>{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} × {eur(x.pu)} € · IVA 6%</span></span>
+            <span className="tabular-nums">{eur(x.q * x.pu)} €</span>
+          </li>
+        ))}
+      </ul>
+      <div className="space-y-1">
+        <div className="flex justify-between text-slate-600"><span>Sem IVA</span><span className="tabular-nums">{eur(base)} €</span></div>
+        <div className="flex justify-between text-slate-600"><span>IVA (6%)</span><span className="tabular-nums">{eur(base * IVA_MO)} €</span></div>
+        <div className="flex justify-between text-lg font-semibold"><span>Total</span><span className="tabular-nums">{eur(base * (1 + IVA_MO))} €</span></div>
+      </div>
+      <p className="text-slate-700">Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}. Pagamento: com a última prestação do contrato.</p>
+      <section className="grid gap-6 pt-4 sm:grid-cols-2">
+        {[["Pela empresa", d.f.representante || "—", "Assinado"], ["O cliente", d.f.nome_fiscal || d.nome, a.estado === "assinada" ? "Assinado no portal" : "À espera"]].map(([q, nome, est]) => (
+          <div key={q} className="border-t border-slate-300 pt-2">
+            <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
+            <p className="font-medium">{nome}</p>
+            <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}</p>
+          </div>
+        ))}
+      </section>
+    </Folha>
+  );
+}
+
 /* ------------------------------------------------------------------ fatura */
 export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
   const T = totais(d, S), tr = tranches(d, T.total), t0 = tr[0], ft = d.fin.fatura;
@@ -276,12 +312,12 @@ function imprimir(el: HTMLElement | null, titulo: string) {
   setTimeout(() => { w.focus(); w.print(); }, 600);
 }
 
-export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda"; children: ReactNode; estado: string }) {
+export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda" | "adenda"; children: ReactNode; estado: string }) {
   const link = `https://portal.olyvia-ai.com/${tipo}/${token(d, tipo)}`;
   const [copiado, setCopiado] = useState(false);
   const [ver, setVer] = useState(false);
   const doc = useRef<HTMLDivElement>(null);
-  const nome = { proposta: "a proposta", contrato: "o contrato", fatura: "a fatura", encomenda: "a nota de encomenda" }[tipo];
+  const nome = { proposta: "a proposta", contrato: "o contrato", fatura: "a fatura", encomenda: "a nota de encomenda", adenda: "a adenda ao contrato" }[tipo];
   const msg = `Olá ${d.nome.split(" ")[0]}, segue ${nome} da ${EMPRESA.nome}: ${link}`;
   const tel = d.tel.replace(/\D/g, "");
   const copiar = async () => {
