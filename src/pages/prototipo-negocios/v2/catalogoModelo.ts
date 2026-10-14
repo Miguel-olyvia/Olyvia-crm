@@ -12,6 +12,7 @@ import {
   HOJE, custoReceita, margemSobrePreco, mesesAntes, mesesEntre, precoReceita, receitaDe,
   type Custos, type ReceitaV2, type UsoCons,
 } from "./custosModelo";
+import type { IconeServicoKey, IlustracaoKey } from "../ilustracoes";
 
 /* ------------------------------------------------------------------ tipos */
 /** Um nó da árvore: ofício (pai null) ou sub (pai = id do ofício). Só dois níveis. */
@@ -29,6 +30,16 @@ export interface Produto {
   servico?: SvcId;
   /** Quantidade do serviço por unidade do produto (por omissão 1). */
   fatorServico?: number;
+  /** Referência do fornecedor (14/10). */
+  sku?: string;
+  /** Preço de venda real, € sem IVA (14/10). */
+  pvp?: number;
+  /** A ilustração do produto (ilustracoes.tsx). */
+  img?: IlustracaoKey;
+  /** Uma linha de descrição. */
+  desc?: string;
+  /** Subcategoria real (ex.: "Toalheiros"). */
+  sub?: string;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };
@@ -72,6 +83,8 @@ export interface Catalogo {
   unidades: string[];
   marcas: string[];
   fornecedores: string[];
+  /** O ícone de cada serviço (14/10); sem ele, usa-se o do ofício. */
+  icone?: Record<SvcId, IconeServicoKey>;
 }
 
 /* ------------------------------------------------------------------ medidas */

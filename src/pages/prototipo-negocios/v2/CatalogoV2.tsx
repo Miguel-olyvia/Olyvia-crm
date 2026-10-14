@@ -21,6 +21,7 @@ import { useCatalogo } from "./catalogoStore";
 import { PacotesV2 } from "./PacotesV2";
 import { MateriaisV2 } from "./MateriaisV2";
 import { ClassificacaoV2 } from "./ClassificacaoV2";
+import { tomarFichaPendente } from "../fichaNav";
 
 const ANCORAS = [["cat-servicos", "Serviços"], ["cat-pacotes", "Pacotes"], ["cat-materiais", "Materiais"], ["cat-classificacao", "Classificação"], ["cat-parametros", "Parâmetros"], ["cat-perfis", "Perfis"], ["cat-equipamentos", "Equipamentos"], ["cat-estrutura", "Estrutura"]] as const;
 const ICONE_FILTRO: Record<Filtro, keyof typeof ICONE_ALERTA | null> = { uso: null, "sem-receita": "sem-receita", margem: "abaixo-minimo", desatualizado: "desatualizado" };
@@ -30,7 +31,7 @@ export function CatalogoV2({ S, run }: Ctx) {
   const K = useCatalogo();
   const [editor, setEditor] = useState<string | null>(null);
   const [oficio, setOficio] = useState<string | null>(null);
-  const [aberto, setAberto] = useState<SvcId | null>(null);
+  const [aberto, setAberto] = useState<SvcId | null>(() => tomarFichaPendente()); // vindo do orçamento ("Abrir a ficha do serviço")
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState<Filtro | null>(null);
   const [ord, setOrd] = useState<{ col: Coluna; asc: boolean }>({ col: "usos", asc: false });

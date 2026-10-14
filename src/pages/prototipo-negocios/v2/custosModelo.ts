@@ -6,7 +6,7 @@
 // têm a mesma amortização (preço ÷ vida útil) de receitas.ts.
 
 import { CATALOGO, normal, type ItemCatalogo, type LinhaCat } from "../catalogo";
-import { LINHAS, alertas, eur, pct, r2, type Alerta, type Estado, type Negocio, type Servico, type SvcId } from "../motor";
+import { LINHAS, alertas, eur, pct, r2, type Alerta, type Estado, type MedKey, type Negocio, type Servico, type SvcId } from "../motor";
 import { RECEITAS, amortHora, consUn } from "../receitas";
 
 /* ------------------------------------------------------------------ tipos */
@@ -32,7 +32,11 @@ export interface LinhaEstrutura { id: string; n: string; cat: CategoriaEstrutura
 
 export interface PassoMO { id: string; n: string; perfil: string; h: number }
 export interface UsoEquip { id: string; equip: string; h: number }
-export interface UsoCons { id: string; n: string; q: number; un: string; preco: number; fornecedor: string; data: string }
+export interface UsoCons {
+  id: string; n: string; q: number; un: string; preco: number; fornecedor: string; data: string;
+  /** Consumível opcional (14/10): não entra no custo por omissão; o técnico ou o comercial pode ligá-lo. */
+  opcional?: boolean;
+}
 export interface PrecoHist { data: string; preco: number; nota: string }
 export type ModoPreco = "tabela" | "margem";
 export const JUSTIFICACOES = ["Preço de mercado da zona", "Cliente ou obra estratégica", "Serviço de entrada (traz outros)", "Campanha em curso"] as const;
@@ -50,6 +54,12 @@ export interface ReceitaV2 {
   margem: number;
   hist: PrecoHist[];
   justificacao?: string;
+  /**
+   * De onde vem a quantidade do serviço na visita (14/10): pav (m² de pavimento), par (m² de paredes),
+   * pts (pontos de água), pcs (vasos sanitários); null = o comercial escreve a quantidade.
+   * Em falta (undefined) usa-se a do modelo (LINHAS) ou a que sai da unidade (fichaModelo.ts: medidaDe).
+   */
+  medida?: MedKey | null;
 }
 
 export interface Custos {
@@ -196,8 +206,11 @@ export interface CustoCalc {
   eh: number;
   /** Perfis da receita sem custo/hora (usaram a média). */
   semCustoHora: string[];
+  /** O custo dos consumíveis opcionais por unidade (14/10): fora de `cons` e do total, salvo com `opcionais`. */
+  consOpc: number;
 }
-export function custoReceita(rec: ReceitaV2, C: Custos, estrutura: boolean): CustoCalc {
+/** O custo por unidade de uma receita. Os consumíveis opcionais só entram com `o.opcionais` (por omissão ficam em `consOpc`). */
+export function custoReceita(rec: ReceitaV2, C: Custos, estrutura: boolean, o: { opcionais?: boolean } = {}): CustoCalc {
   const media = mediaHora(C), semCustoHora: string[] = [];
   let h = 0, mo = 0;
   for (const p of rec.mo) {
@@ -207,9 +220,11 @@ export function custoReceita(rec: ReceitaV2, C: Custos, estrutura: boolean): Cus
     h += p.h; mo += p.h * (eh ?? media);
   }
   const eq = rec.equip.reduce((a, u) => { const e = C.equip.find((x) => x.id === u.equip); return a + (e ? equipHora(e) * u.h : 0); }, 0);
-  const cons = rec.cons.reduce((a, c) => a + consUn({ n: c.n, q: c.q, un: c.un, preco: c.preco, fornecedor: c.fornecedor }), 0);
+  const un = (c: UsoCons) => consUn({ n: c.n, q: c.q, un: c.un, preco: c.preco, fornecedor: c.fornecedor });
+  const consOpc = rec.cons.filter((c) => c.opcional).reduce((a, c) => a + un(c), 0);
+  const cons = rec.cons.filter((c) => !c.opcional || o.opcionais).reduce((a, c) => a + un(c), 0);
   const estr = estrutura ? h * taxaEstrutura(C) : 0;
-  return { h, mo, eq, cons, estr, total: mo + eq + cons + estr, eh: h > 0 ? mo / h : 0, semCustoHora };
+  return { h, mo, eq, cons, estr, total: mo + eq + cons + estr, eh: h > 0 ? mo / h : 0, semCustoHora, consOpc };
 }
 export const precoReceita = (rec: ReceitaV2, custo: number) =>
   rec.modo === "tabela" ? rec.precoTabela : rec.margem < 100 ? custo / (1 - rec.margem / 100) : 0;

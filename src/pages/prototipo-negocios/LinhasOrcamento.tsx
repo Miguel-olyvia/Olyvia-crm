@@ -13,6 +13,7 @@ import { CATALOGO } from "./catalogo";
 import { custoUn, eur, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
 import { CustoServico } from "./CustoServico";
+import { abrirFichaDepois } from "./fichaNav";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, catalogoLigado } from "./produtosVisita";
 import { LINHA_DEMOLICAO, resumoDemolicao } from "./entulho";
@@ -153,6 +154,10 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                     {mud && <Button variant="outline" onClick={go(() => A.recalc(d.id, i))}>O Catálogo mudou: usar {eur(novo)} €</Button>}
                   </div>
                 </section>}
+                {/* a ficha do serviço (Catálogo): medida, quem faz, equipamentos, consumíveis e preço */}
+                <Button variant="outline" className="min-h-11 justify-self-start text-[15px]" onClick={() => { abrirFichaDepois(l.sid); setAberta(null); run(() => A.nav("catalogo")); }}>
+                  Abrir a ficha do serviço
+                </Button>
               </CustoServico>
             )}
           </li>

@@ -1,12 +1,10 @@
 // Catálogo, Clientes, Marketing e Definições na proposta simples.
-import { useMemo, useState } from "react";
-import { ArrowRight, ChevronDown, Minus, Plus, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CATALOGO, OFICIOS, normal } from "./catalogo";
-import { ESTR, custoUn, eur, nfmt, pct, type Servico } from "./motor";
-import { numero, type Ctx } from "./pecas";
-import { CustoServico } from "./CustoServico";
+import { ESTR, eur, pct } from "./motor";
+import type { Ctx } from "./pecas";
+import { CatalogoV1 } from "./CatalogoV1";
 import { DemolicaoV2 } from "./v2/DemolicaoV2";
 
 const Interruptor = ({ on, onClick, titulo, texto }: { on: boolean; onClick: () => void; titulo: string; texto: string }) => (
@@ -18,104 +16,9 @@ const Interruptor = ({ on, onClick, titulo, texto }: { on: boolean; onClick: () 
   </button>
 );
 
-function Numero({ id, rot, v, un, onSet }: { id: string; rot: string; v: number; un: string; onSet: (n: number) => void }) {
-  return (
-    <label className="grid gap-1.5">
-      <span className="text-sm font-medium">{rot}</span>
-      <span className="flex items-center gap-2">
-        <input id={id} key={v} type="number" inputMode="decimal" step="any" min="0" defaultValue={v}
-          className="h-11 w-28 rounded-lg border border-input bg-card px-3 text-right text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25"
-          onBlur={(e) => { const n = numero(e.target.value); if (!isNaN(n) && n >= 0 && n !== v) onSet(n); }}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-        <span className="text-sm text-muted-foreground">{un}</span>
-      </span>
-    </label>
-  );
-}
-
-export function CatalogoSimples({ S, run }: Ctx) {
-  const [aberto, setAberto] = useState<string | null>(null);
-  const [custo, setCusto] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const [of, setOf] = useState<string | null>(null);
-  const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
-  const outros = useMemo(() => {
-    const qq = normal(q.trim());
-    return CATALOGO.filter((c) => !S.svc[c.id] && (!of || c.cat === of) && (!qq || normal(c.n).includes(qq))).sort((a, b) => b.usos - a.usos);
-  }, [q, of, S.svc]);
-
-  return (
-    <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
-      <p className="mt-2 text-lg text-muted-foreground">A receita de cada serviço: horas, custo do técnico e consumíveis. É daqui que o orçamento tira o custo.</p>
-
-      <h2 className="mt-10 text-lg font-semibold">Serviços em uso</h2>
-      <p className="mt-1 text-[15px] text-muted-foreground">Mudar a receita avisa os orçamentos ainda não enviados ("O Catálogo mudou").</p>
-      <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-        {(Object.entries(S.svc) as [string, Servico][]).map(([k, s]) => {
-          const c = custoUn(s, S), m = (s.preco - c) / s.preco, ab = aberto === k;
-          const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-muted-foreground";
-          return (
-            <li key={k}>
-              <button type="button" onClick={() => setAberto(ab ? null : k)} aria-expanded={ab} className="flex min-h-16 w-full items-center gap-4 py-3 text-left">
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[15px]">{s.n}</span>
-                  <span className="block text-sm text-muted-foreground">
-                    {s.perfil} · {nfmt(s.h)} h/{s.un}
-                    {s.semCusto && <span className="text-warning"> · técnico sem custo por hora</span>}
-                    {s.stale && <span className="text-warning"> · consumível com preço antigo</span>}
-                  </span>
-                </span>
-                <span className="text-right">
-                  <span className="block text-[15px] tabular-nums">{eur(s.preco)} €/{s.un}</span>
-                  <span className={cn("block text-sm", mc)}>custo {eur(c)} € · margem {pct(m)}</span>
-                </span>
-                <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", ab && "rotate-180")} aria-hidden="true" />
-              </button>
-              {ab && (
-                <div className="mb-3 grid grid-cols-2 gap-4 rounded-xl bg-muted/50 p-4 sm:grid-cols-4 animate-in fade-in-0 slide-in-from-top-1">
-                  <Numero id={`h-${k}`} rot="Horas" v={s.h} un={`h/${s.un}`} onSet={(n) => run(() => { s.h = n; })} />
-                  <Numero id={`eh-${k}`} rot="Técnico" v={s.eh} un="€/h" onSet={(n) => run(() => { s.eh = n; s.semCusto = false; })} />
-                  <Numero id={`c-${k}`} rot="Consumíveis" v={s.cons} un={`€/${s.un}`} onSet={(n) => run(() => { s.cons = n; s.stale = null; })} />
-                  <Numero id={`p-${k}`} rot="Preço de tabela" v={s.preco} un={`€/${s.un}`} onSet={(n) => run(() => { s.preco = n; })} />
-                  <button type="button" onClick={() => setCusto(k)} className="col-span-full justify-self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline">Ver o custo em detalhe (técnico, equipamentos, consumíveis)</button>
-                  <p className="col-span-full text-sm text-muted-foreground">
-                    Custo = {nfmt(s.h)} h × {eur(s.eh)} € + {eur(s.eq)} € de equipamento + {eur(s.cons)} € de consumíveis{S.cfg.estrutura ? ` + ${nfmt(s.h)} h × ${eur(ESTR)} € de estrutura` : ""} = {eur(c)} €/{s.un}.
-                  </p>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-
-      {custo && S.svc[custo] && <CustoServico S={S} sid={custo} s={S.svc[custo]} onClose={() => setCusto(null)} />}
-
-      <h2 className="mt-12 text-lg font-semibold">Catálogo da Mudelar</h2>
-      <p className="mt-1 text-[15px] text-muted-foreground">Os serviços vendidos à parte dos pacotes, com as horas validadas. Entram em uso quando se juntam numa visita.</p>
-      <label className="relative mt-4 block">
-        <span className="sr-only">Procurar no Catálogo</span>
-        <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar serviço"
-          className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
-      </label>
-      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Ofício">
-        {[null, ...OFICIOS].map((o) => (
-          <button key={o || "t"} type="button" aria-pressed={of === o} onClick={() => setOf(o)}
-            className={cn("min-h-9 rounded-full border px-3 text-sm", of === o ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>{o || "Todos"}</button>
-        ))}
-      </div>
-      <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-        {outros.map((c) => (
-          <li key={c.id} className="flex min-h-14 items-center justify-between gap-3 py-2.5">
-            <span className="min-w-0"><span className="block text-[15px]">{c.n}</span><span className="block text-sm text-muted-foreground">{c.cat} · {nfmt(c.hu)} h/{c.un}{c.hf ? ` + ${nfmt(c.hf)} h fixas` : ""}</span></span>
-            {c.usos > 0 && <span className="shrink-0 text-sm text-muted-foreground">em {c.usos} orçamentos</span>}
-          </li>
-        ))}
-        {!outros.length && <li className="py-3 text-[15px] text-muted-foreground">Nada com esse nome.</li>}
-      </ul>
-    </div>
-  );
+/** O Catálogo do V1: desde 14/10/2026 é o CatalogoV1 (cinco secções e a ficha do serviço). */
+export function CatalogoSimples(ctx: Ctx) {
+  return <CatalogoV1 {...ctx} />;
 }
 
 export function ClientesSimples({ S, A, go }: Ctx) {
