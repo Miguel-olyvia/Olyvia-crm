@@ -254,6 +254,15 @@ export function tocarProdutoGuiado(A: AcoesNec, K: Catalogo, d: Negocio, o: Pick
   return "juntou";
 }
 
+/**
+ * Os blocos a mostrar: sai o serviço que só está porque um produto escolhido o traz e que esse produto já resolve
+ * (escolher a sanita traz a instalação da sanita; perguntar outra vez "O cliente mantém a sanita?" seria repetir).
+ */
+export function obrigacoesAMostrar(obr: Obrigacao[], d: Negocio): Obrigacao[] {
+  const v = d.visita, ativos = ativosDoPacote(LINHAS[d.linha].map, v.med, v.off), tr = servicosTrazidos(v.prod ?? []);
+  return obr.filter((o) => !(o.estado === "produto" && tr[o.sid] && !ativos.includes(o.sid) && !((v.extra[o.sid] || 0) > 0)));
+}
+
 /* ------------------------------------------------------------------ o resumo */
 export interface ResumoNec { servicos: number; produtos: number; total: number }
 /** Quantos serviços e produtos, e o valor estimado (serviços a preço de tabela e produtos ao preço de venda; o que o cliente fornece a zero). */

@@ -533,3 +533,14 @@ A estimativa de materiais do modelo (`LINHAS[…].mat` no `motor.ts`) está divi
 - Os **produtos escolhidos** (também os fornecidos pelo cliente) descem só a parte do seu ramo, até zero. Os produtos fora do modelo (espelho, toalheiro…) **não descem nada**, porque têm linha própria.
 - O preço desce na mesma proporção do custo. Se não sobrar nada, a linha sai.
 - Os pesos são um exemplo, a confirmar com a Mudelar.
+
+## Necessidades do cliente, visual e guiada (14/10/2026, versão Atual)
+
+A etapa "Necessidades do cliente" da visita deixou de ser texto e listas (o Ruben achou-a "complexa e chata"):
+- **Resumo** em cima, numa linha ("5 serviços · 1 produto · 1.476,02 € estimado"), e o que falta em palavras, cada parte com ligação ao sítio.
+- **Serviços** (`ServicosCatalogo.tsx`): mosaicos com ícone (`IconeServico`; `Catalogo.icone`, senão pelo nome, senão o do ofício), agrupados por ofício; os do pacote e os escolhidos à frente e depois os mais pedidos desta linha (`usos`); "Ver mais serviços" e uma pesquisa sem acentos. Os postos à mão têm o − 1 + (`ContadorQtd.tsx`).
+- **Produtos** (`NecessidadesVisita.tsx`): cada serviço que pede produto é uma escolha guiada: "O cliente mantém a sanita?" → Não → os cartões (ilustração, marca, preço `pvp` ou custo com margem, "traz instalação"); o escolhido fica com o − 1 +. Escolher sem responder conta como "Não". O serviço que um produto traz e que esse produto já resolve não volta a perguntar.
+- **Outros produtos**: grelha por categoria (`Produto.sub`, senão o nó), pesquisa (nome, marca, sku, ramo; texto guardado por produto) e "Mostrar mais" de 12 em 12. Testado com 2.200 produtos.
+- **`ilustracoes.tsx`** (dono: este trabalho): `Ilustracao` (32 desenhos SVG próprios, traço de 2 px, cinzento e o acento, `aria-hidden`) e `IconeServico` (lucide), com todas as chaves fixas do contrato de 14/10. A ilustração de um produto é o `img`; senão deduz-se da subcategoria, do nome e da categoria (contra os 2.159 produtos reais da Mudelar só 4 ficam "generico").
+- A lógica sem React está em `necessidades.ts` (`tilesServicos`, `gruposServicos`, `procurarServicos`, `filtrarProdutos`, `passoGuiado`, `tocarProdutoGuiado`, `obrigacoesAMostrar`, `resumoNecessidades`); testes em `necessidades.test.tsx`.
+- Modelo: `Produto` ganhou `sku`, `pvp`, `img`, `desc` e `sub` e `Catalogo` ganhou `icone` (todos opcionais, em `v2/catalogoModelo.ts`); `ProdVisita` guarda o `pvp`, que manda no preço da linha do produto.

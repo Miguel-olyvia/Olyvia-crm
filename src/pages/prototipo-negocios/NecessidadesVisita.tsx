@@ -22,7 +22,7 @@ import {
   nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
 } from "./produtosVisita";
 import {
-  categorias, faltaEmPalavras, filtrarProdutos, ilustracaoDoCatalogo, marcasDe, mostraCartoes, nomeCurto, objetoDaPergunta, ordenarParaObjeto, passoGuiado,
+  categorias, faltaEmPalavras, filtrarProdutos, ilustracaoDoCatalogo, marcasDe, obrigacoesAMostrar, mostraCartoes, nomeCurto, objetoDaPergunta, ordenarParaObjeto, passoGuiado,
   resumoNecessidades, tituloObrigacao, tocarProdutoGuiado,
 } from "./necessidades";
 
@@ -67,7 +67,7 @@ function Escolhido({ p, ctx, K, ro, clienteFornece }: { p: ProdVisita; ctx: P; K
         <span className="block text-sm text-muted-foreground">
           {[doCat?.marca, `${eur(p.pvp ?? precoUnitario(p))} € / ${p.un}`].filter(Boolean).join(" · ")}
         </span>
-        {p.svc && <span className="block text-sm text-muted-foreground"><Link2 className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />Traz {nomeCurto(nomeSvc(S, p.svc)).toLowerCase()} ({nfmt(p.q * (p.fator ?? 1))} {S.svc[p.svc]?.un ?? "un"})</span>}
+        {p.svc && <span className="block text-sm text-muted-foreground"><Link2 className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />Inclui a instalação · {nfmt(p.q * (p.fator ?? 1))} {S.svc[p.svc]?.un ?? "un"}</span>}
       </span>
       {!ro && (
         <button type="button" onClick={() => run(() => A.tirarProduto(d.id, p.id))} aria-label={`Retirar ${p.n}`}
@@ -314,7 +314,7 @@ export function ProdutosVisita(ctx: P) {
   const { d } = ctx;
   const v = d.visita, ro = v.fechada, prod = v.prod ?? [];
   const clienteFornece = d.f.materiais_cliente === "Sim";
-  const obr = obrigacoes(K, servicosVisita(d), v, clienteFornece);
+  const obr = obrigacoesAMostrar(obrigacoes(K, servicosVisita(d), v, clienteFornece), d);
   // cada produto escolhido mostra-se no primeiro serviço cujo ramo o contém; os outros ficam em "Outros produtos escolhidos"
   const ramos = obr.map((o) => nosAbaixo(K.arvore, o.no));
   const dono = (p: ProdVisita) => (p.no ? ramos.findIndex((r) => r.has(p.no!)) : -1);

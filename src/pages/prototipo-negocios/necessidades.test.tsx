@@ -9,7 +9,7 @@ import { PREFIXO_PROD, ligarCatalogo, obrigacoes } from "./produtosVisita";
 import { ICONES_SERVICO, ILUSTRACOES, IconeServico, Ilustracao, iconeDoServico, ilustracaoDe } from "./ilustracoes";
 import {
   categorias, filtrarProdutos, gruposServicos, ilustracaoDoCatalogo, mostraCartoes, nomeCurto, objetoDaPergunta, ordenarParaObjeto,
-  passoGuiado, procurarServicos, resumoNecessidades, tilesServicos, tocarProdutoGuiado, type TileServico,
+  obrigacoesAMostrar, passoGuiado, procurarServicos, resumoNecessidades, tilesServicos, tocarProdutoGuiado, type TileServico,
 } from "./necessidades";
 
 const K0 = catalogo0();
@@ -155,6 +155,15 @@ describe("a escolha guiada: \"Mantém a sanita?\" → Não → a sanita → as l
     expect(d.visita.prod?.map((p) => p.id)).toEqual([sanita.id]);
     expect(tocarProdutoGuiado(A, K0, d, o, sanita)).toBe("tirou");
     expect(d.visita.prod).toEqual([]);
+  });
+  it("o serviço trazido pela sanita não volta a perguntar pela sanita", () => {
+    const { A, d } = preparar();
+    tocarProdutoGuiado(A, K0, d, obrigacoes(K0, ["loucas"], d.visita)[0], prodN(K0, "Sanita compacta"));
+    const todas = obrigacoes(K0, ["loucas", "c13"], d.visita);
+    expect(todas.map((o) => o.sid)).toEqual(["loucas", "c13"]);
+    expect(obrigacoesAMostrar(todas, d).map((o) => o.sid)).toEqual(["loucas"]);
+    A.extra(d.id, "c13", 1); // posto à mão: volta a mostrar-se
+    expect(obrigacoesAMostrar(obrigacoes(K0, ["loucas", "c13"], d.visita), d).map((o) => o.sid)).toEqual(["loucas", "c13"]);
   });
   it("o produto escolhido gera a linha do produto (ao PVP) e a do serviço que traz", () => {
     const { S, A, d } = preparar();
