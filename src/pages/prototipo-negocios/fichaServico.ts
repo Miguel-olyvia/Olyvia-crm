@@ -4,7 +4,7 @@
 // Consumíveis, Técnicos) precisam a mais: a medida e o exemplo, a conta do €/h do equipamento,
 // os consumíveis de todas as receitas, os técnicos e o ícone de cada serviço.
 
-import { CATALOGO, normal } from "./catalogo";
+import { CATALOGO_TODO, normal } from "./catalogo";
 import { LINHAS, eur, nfmt, type Estado, type MedKey, type Medidas, type SvcId } from "./motor";
 import { EX0, type Catalogo, type Produto, type Regra } from "./v2/catalogoModelo";
 import {
@@ -176,7 +176,7 @@ export interface ConsCatalogo {
   desatualizado: boolean;
 }
 /** Todos os sids do Catálogo: os em uso (S.svc) e os do Catálogo real. */
-export const todosSids = (S: Estado): SvcId[] => [...Object.keys(S.svc), ...CATALOGO.map((c) => c.id).filter((id) => !S.svc[id])];
+export const todosSids = (S: Estado): SvcId[] => [...Object.keys(S.svc), ...CATALOGO_TODO.map((c) => c.id).filter((id) => !S.svc[id])];
 
 /** Os consumíveis de todas as receitas, um por nome, com o preço mais recente. */
 export function consumiveisCatalogo(S: Estado, C: Custos, hoje = HOJE): ConsCatalogo[] {

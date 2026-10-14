@@ -6,7 +6,7 @@
 //   · equipamento, consumível ou técnico → os serviços que os usam.
 // `montarCatalogo(S, C, K)` junta o que o mapa precisa num objeto simples (CatalogoLig); `ligacoesDe` e
 // `problemasCatalogo` só leem esse objeto, por isso os testes podem construí-lo à mão.
-import { CATALOGO, normal } from "./catalogo";
+import { CATALOGO_TODO, normal } from "./catalogo";
 import { eur, nfmt, type Estado, type SvcId } from "./motor";
 import { RECEITAS } from "./receitas";
 import { caminho, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
@@ -48,7 +48,7 @@ export interface CatalogoLig {
 
 /** Junta o que o mapa precisa: os serviços com a receita, os produtos, os equipamentos com o €/h, os técnicos e os consumíveis. */
 export function montarCatalogo(S: Estado, C: Custos, K: Catalogo): CatalogoLig {
-  const cat = new Map(CATALOGO.map((c) => [c.id, c]));
+  const cat = new Map(CATALOGO_TODO.map((c) => [c.id, c]));
   const servicos: SvcLig[] = [];
   const cons = new Map<string, ConsLig>(), datas = new Map<string, string>();
   for (const sid of todosSids(S)) {

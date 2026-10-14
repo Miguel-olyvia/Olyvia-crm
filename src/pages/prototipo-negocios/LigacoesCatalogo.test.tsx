@@ -1,14 +1,27 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed } from "./motor";
 import { CatalogoV1 } from "./CatalogoV1";
 import { reporCustos } from "./v2/custosStore";
-import { mudarCatalogo } from "./v2/catalogoStore";
+import { mudarCatalogo, reporCatalogo } from "./v2/catalogoStore";
 import type { Produto } from "./v2/catalogoModelo";
 import { abrirLigacoesEm } from "./LigacoesCatalogo";
+import { EXIGE_MUDELAR } from "./dados/catalogoMudelar";
 
 const mmOriginal = window.matchMedia;
-afterEach(() => { cleanup(); reporCustos(); window.matchMedia = mmOriginal; });
+// Estes testes usam só os dados de exemplo: sem os 317 serviços nem os produtos reais da Mudelar (14/10),
+// que têm os seus testes em dados/catalogoMudelar.test.ts.
+// as regras "exige produto" que vieram da Mudelar (as de exemplo, em EXIGE0, ganham-lhes)
+const daMudelarExige = new Set(EXIGE_MUDELAR.map((e) => e.sid).filter((sid) => !["loucas", "pav", "moveis", "c6", "c13", "c17"].includes(sid)));
+vi.mock("./catalogo", async (orig) => {
+  const m = await orig<typeof import("./catalogo")>();
+  return { ...m, CATALOGO_TODO: m.CATALOGO };
+});
+beforeEach(() => { mudarCatalogo((k) => {
+  k.produtos = k.produtos.filter((p) => !p.sku);
+  k.exigeProduto = Object.fromEntries(Object.entries(k.exigeProduto ?? {}).filter(([sid]) => !daMudelarExige.has(sid)));
+}); });
+afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); window.matchMedia = mmOriginal; });
 
 function pagina() {
   const S = seed(), run = (fn: () => void) => fn();

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
-import { aplicarTodos, dataPT, listaCatalogo, mediaHora, pesquisar, type Custos, type ItemLista } from "./v2/custosModelo";
+import { aplicarTodos, dataPT, listaCatalogoCompleta, mediaHora, pesquisar, type Custos, type ItemLista } from "./v2/custosModelo";
 import { lerCustos, mudarCustos, useCustos } from "./v2/custosStore";
 import { caminho, dentroDe, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { useCatalogo } from "./v2/catalogoStore";
@@ -304,7 +304,7 @@ export function CatalogoV1({ S, run }: Ctx) {
   // S muda no sítio: a chave do que as contas leem (serviços e regras), para o useMemo.
   const chave = JSON.stringify(S.svc) + S.cfg.min + ":" + S.cfg.alvo + ":" + S.cfg.estrutura + ":" + S.deals.length;
   const itens = useMemo(
-    () => listaCatalogo(S, C).map((i) => { const no = noDoServico(K, i.sid, i.oficio); return { ...i, no, caminho: no ? caminho(K.arvore, no) : i.oficio }; }),
+    () => listaCatalogoCompleta(S, C).map((i) => { const no = noDoServico(K, i.sid, i.oficio); return { ...i, no, caminho: no ? caminho(K.arvore, no) : i.oficio }; }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [chave, C, K],
   );

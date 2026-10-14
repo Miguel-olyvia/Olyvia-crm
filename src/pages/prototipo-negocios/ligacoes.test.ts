@@ -1,13 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { seed } from "./motor";
+import { EQUIP_MUDELAR, EXIGE_MUDELAR } from "./dados/catalogoMudelar";
 import { custos0, receitaDe, type Custos } from "./v2/custosModelo";
 import { catalogo0, type Catalogo, type Produto } from "./v2/catalogoModelo";
 import {
   centroInicial, chaveRef, contarProblemas, ligacoesDe, montarCatalogo, problemasCatalogo, problemasPorNo, procurarNos, type Mapa,
 } from "./ligacoes";
 
+// Estes testes usam só os dados de exemplo: sem os 317 serviços nem os produtos reais da Mudelar (14/10),
+// que têm os seus testes em dados/catalogoMudelar.test.ts.
+// as regras "exige produto" que vieram da Mudelar (as de exemplo, em EXIGE0, ganham-lhes)
+const daMudelarExige = new Set(EXIGE_MUDELAR.map((e) => e.sid).filter((sid) => !["loucas", "pav", "moveis", "c6", "c13", "c17"].includes(sid)));
+vi.mock("./catalogo", async (orig) => {
+  const m = await orig<typeof import("./catalogo")>();
+  return { ...m, CATALOGO_TODO: m.CATALOGO };
+});
 const montar = (fC?: (c: Custos) => void, fK?: (k: Catalogo) => void) => {
   const S = seed(), C = custos0(), K = catalogo0();
+  K.produtos = K.produtos.filter((p) => !p.sku);
+  K.exigeProduto = Object.fromEntries(Object.entries(K.exigeProduto ?? {}).filter(([sid]) => !daMudelarExige.has(sid)));
+  const daMudelar = new Set(EQUIP_MUDELAR.map((e) => e.id));
+  C.equip = C.equip.filter((e) => !daMudelar.has(e.id));
   fC?.(C); fK?.(K);
   return montarCatalogo(S, C, K);
 };

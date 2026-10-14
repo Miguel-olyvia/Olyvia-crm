@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Clock, Info, Plus, Search, TriangleAlert, UserX, Waypoints } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CATALOGO } from "./catalogo";
+import { itemCatalogo } from "./catalogo";
 import { eur, nfmt, pct, r2, type Estado, type SvcId } from "./motor";
 import {
   HOJE, JUSTIFICACOES, aplicarTodos, alertasServico, consumiveisDesatualizados, custoHoraPerfil, custoReceita, dataPT, margemSobrePreco,
@@ -126,7 +126,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
   const titulo = useRef<HTMLHeadingElement>(null);
   const K = useCatalogo();
   useEffect(() => { titulo.current?.focus(); }, [sid]);
-  const s = S.svc[sid] ?? null, cat = CATALOGO.find((x) => x.id === sid);
+  const s = S.svc[sid] ?? null, cat = itemCatalogo(sid);
   const rec = receitaDe(C, sid, s, S.cfg.alvo)!;
   const un = s?.un ?? cat?.un ?? "un", nome = s?.n ?? cat?.n ?? sid, oficio = cat?.cat ?? s?.perfil ?? "";
   const c = custoReceita(rec, C, S.cfg.estrutura), preco = precoReceita(rec, c.total), min = minimoServico(C, sid, S.cfg.min);
