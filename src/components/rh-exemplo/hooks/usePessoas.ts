@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import { ORGANIZACAO_EXEMPLO_ID } from "@/components/rh-exemplo/dados/constantes";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { fichaDeEspec } from "@/components/rh-exemplo/dados/fichaExemplo";
+import { aplicarExtras, type ExtrasNovaPessoa } from "@/components/rh-exemplo/dados/fichaNovaPessoa";
 import { definirEstado, novoId, useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { derivarEstadoContrato } from "@/components/rh-exemplo/lib/estadoContrato";
 import type { EstadoAcesso, PessoaListItem, TipoContrato } from "@/components/rh-exemplo/tipos";
@@ -17,6 +18,8 @@ export interface NovaPessoaExemplo {
   dataInicio: string;
   dataFim: string | null;
   reportaAId: string | null;
+  /** O que o painel lateral "Nova pessoa" recolhe além do essencial (contactos, NIF, morada, horas, retribuição, acesso). */
+  extras?: ExtrasNovaPessoa;
 }
 
 export interface ResultadoCriacao {
@@ -78,7 +81,8 @@ export function usePessoas() {
     const id = novoId("p");
     definirEstado((e) => {
       const inicio = diasAteHoje(dados.dataInicio);
-      const ficha = fichaDeEspec(
+      const x = dados.extras;
+      const criada = fichaDeEspec(
         {
           id,
           nome: dados.primeiro_nome,
@@ -90,12 +94,12 @@ export function usePessoas() {
           inicio,
           fim: dados.dataFim ? diasAteHoje(dados.dataFim) : null,
           reportaA: dados.reportaAId,
-          conta: false,
+          conta: x?.criarAcesso ?? false,
           estado: inicio > 0 ? "futuro" : "activo",
-          genero: "nao_divulgar",
-          nascimento: "1995-01-01",
+          genero: x?.genero ?? "nao_divulgar",
+          nascimento: x?.dataNascimento ?? "1995-01-01",
           trabalho: "presencial",
-          horas: 40,
+          horas: x?.horasSemana ?? 40,
           dias: ["seg", "ter", "qua", "qui", "sex"],
           pendencias: ["nif", "niss", "conta_numero"],
         },
@@ -103,6 +107,7 @@ export function usePessoas() {
         e,
         ORGANIZACAO_EXEMPLO_ID,
       );
+      const ficha = x ? aplicarExtras(criada, x) : criada;
       return { ...e, ordem: [...e.ordem, id], fichas: { ...e.fichas, [id]: ficha } };
     });
     return { id, falhas: [] };

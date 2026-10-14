@@ -10,6 +10,8 @@ import { negocioMetasTranslations } from "@/translations/negocioMetas";
 import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
 import { utilizadoresPerfisTranslations } from "@/translations/utilizadoresPerfis";
 import { rhExemploTranslations } from "@/translations/rhExemplo";
+import { rhExemploFormTranslations } from "@/translations/rhExemploForm";
+import { rhExemploMenuTranslations } from "@/translations/rhExemploMenu";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -50,6 +52,16 @@ Object.keys(utilizadoresPerfisTranslations).forEach((lang) => {
 // Ecrãs de Recursos Humanos de exemplo (/rh-exemplo) — módulo próprio, mesmo padrão.
 Object.keys(rhExemploTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploTranslations[lang as keyof typeof rhExemploTranslations] };
+});
+
+// Painel "Nova pessoa", ficha em painel lateral e lista compacta de RH de exemplo (`rhForm.*`).
+Object.keys(rhExemploFormTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFormTranslations[lang as keyof typeof rhExemploFormTranslations] };
+});
+
+// Menu e ecrãs de gestão de RH de exemplo (assiduidade, ausências, centros, modelos, processamento salarial, convite).
+Object.keys(rhExemploMenuTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploMenuTranslations[lang as keyof typeof rhExemploMenuTranslations] };
 });
 
 export const useTranslation = () => {

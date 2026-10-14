@@ -1,0 +1,64 @@
+// A ficha da pessoa de RH, num painel lateral (Sheet) que cobre metade do ecrã (no mínimo 640 px; em ecrã estreito, todo) por
+// cima da lista, como a ficha de Pessoas: cabeçalho com navegação "n de N", ações, sete abas sublinhadas fixas e conteúdo
+// que rola. [ e ] passam à pessoa anterior e seguinte. O "X" por defeito do Sheet esconde-se por classe: a ficha tem o seu
+// próprio Fechar. Ao fechar, o foco volta ao que abriu a ficha (ou, se já não existe, ao título da página).
+import { useRef, useState } from "react";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { ConteudoFichaRh } from "./ConteudoFichaRh";
+import { vizinhas } from "./navegacao";
+import { useTeclasFicha } from "./useTeclasFicha";
+
+interface FichaPessoaRhProps {
+  /** A pessoa da ficha; ao fechar fica a última, para o painel não deslizar vazio. `null` antes de abrir a primeira. */
+  id: string | null;
+  aberta: boolean;
+  aoFechar: () => void;
+  /** Os ids das pessoas visíveis na lista, pela ordem da lista. */
+  idsVisiveis: string[];
+  /** Passa à pessoa `id` sem fechar o painel. */
+  aoIrPara: (id: string) => void;
+}
+
+const ABA_INICIAL = "visaoGeral";
+
+/** O foco depois de fechar: o elemento que abriu a ficha; se já não existe, o título da página. */
+function focoDeRegresso(origem: HTMLElement | null): HTMLElement | null {
+  if (origem && origem.isConnected && origem !== document.body) return origem;
+  const titulo = document.querySelector<HTMLElement>("h1");
+  titulo?.setAttribute("tabindex", "-1");
+  return titulo;
+}
+
+export function FichaPessoaRh({ id, aberta, aoFechar, idsVisiveis, aoIrPara }: FichaPessoaRhProps) {
+  const origem = useRef<HTMLElement | null>(null);
+  const [aba, setAba] = useState(ABA_INICIAL);
+  const viz = vizinhas(idsVisiveis, id ?? "");
+  const ir = useTeclasFicha(aberta && id !== null, viz, id ?? undefined, aoIrPara);
+  const mudarAberto = (valor: boolean) => {
+    if (valor) return;
+    setAba(ABA_INICIAL);
+    aoFechar();
+  };
+  return (
+    <Sheet open={aberta && id !== null} onOpenChange={mudarAberto}>
+      <SheetContent
+        data-ficha-rh=""
+        className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
+        onOpenAutoFocus={(e) => {
+          origem.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          e.preventDefault();
+          const ficha = document.querySelector<HTMLElement>("[data-ficha-rh]");
+          (ficha?.querySelector<HTMLElement>("[data-titulo-ficha]") ?? ficha?.querySelector<HTMLElement>("button"))?.focus();
+        }}
+        onCloseAutoFocus={(e) => {
+          const alvo = focoDeRegresso(origem.current);
+          if (!alvo) return;
+          e.preventDefault();
+          alvo.focus();
+        }}
+      >
+        {id !== null && <ConteudoFichaRh key={id} id={id} vizinhas={viz} aoIr={ir} aba={aba} aoMudarAba={setAba} />}
+      </SheetContent>
+    </Sheet>
+  );
+}

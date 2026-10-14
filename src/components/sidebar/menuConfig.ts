@@ -43,6 +43,11 @@ import {
   ArrowLeftRight,
   TrendingUp,
   IdCard,
+  CalendarDays,
+  CalendarRange,
+  Clock,
+  FolderOpen,
+  MapPin,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -294,18 +299,59 @@ export const menuSections: MenuSection[] = [
     ],
   },
   {
+    // Recursos Humanos de exemplo (dados em memória, sem base): a gestão de toda a organização. Vem ANTES de
+    // "A minha área" porque a barra lateral escolhe o primeiro grupo cujo caminho é prefixo do URL, e
+    // `/rh-exemplo/documentos/modelos` e `/rh-exemplo/assiduidade-e-ausencias` começam pelos caminhos do outro grupo.
+    // Mesmo desenho do ramo de RH real (`rh`), com `users.view` no lugar das permissões `hr.*`.
+    id: "rh-exemplo",
+    icon: IdCard,
+    labelKey: "sidebar.rhExemploModulo",
+    paths: [
+      "/rh-exemplo/pessoas",
+      "/rh-exemplo/assiduidade-e-ausencias",
+      "/rh-exemplo/centros",
+      "/rh-exemplo/documentos/modelos",
+      "/rh-exemplo/processamento-salarial",
+      "/rh-exemplo/admissao",
+      "/rh-exemplo/contratos",
+    ],
+    permissions: ["users.view"],
+    items: [
+      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permission: "users.view" },
+      { to: "/rh-exemplo/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.rhExemploAssiduidadeEAusencias", permission: "users.view" },
+      { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },
+      { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
+      { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
+      // No ramo de RH real estes dois ecrãs abrem por botões dentro da lista de pessoas; aqui têm entrada própria
+      // para se chegar a eles sem mexer na lista.
+      { to: "/rh-exemplo/admissao/configuracao", icon: ClipboardCheck, labelKey: "sidebar.rhExemploAdmissao", permission: "users.view" },
+      { to: "/rh-exemplo/contratos/configuracao", icon: FileCheck, labelKey: "sidebar.rhExemploFimContrato", permission: "users.view" },
+    ],
+  },
+  {
+    // A minha área de exemplo: ausências, assiduidade e documentos da PRÓPRIA pessoa (a Sofia, nos dados de exemplo).
+    id: "rh-exemplo-eu",
+    icon: CalendarDays,
+    labelKey: "sidebar.rhExemploEu",
+    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos"],
+    permissions: ["users.view"],
+    items: [
+      { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
+      { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
+      { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
+    ],
+  },
+  {
     id: "users",
     icon: UserCog,
     labelKey: "sidebar.users",
-    paths: ["/users", "/roles", "/utilizadores-perfis", "/rh-exemplo/pessoas", "/export-audit"],
+    paths: ["/users", "/roles", "/utilizadores-perfis", "/export-audit"],
     permissions: ["users.view"],
     items: [
       { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
       { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
       // Exemplo estático por agora (junta Utilizadores e Roles); as páginas reais continuam acima.
       { to: "/utilizadores-perfis", icon: UserCog, labelKey: "sidebar.usersProfiles", permission: "users.view" },
-      // Exemplo estático dos Recursos Humanos (dados em memória, sem base).
-      { to: "/rh-exemplo/pessoas", icon: IdCard, labelKey: "sidebar.rhExemplo", permission: "users.view" },
       { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],
   },

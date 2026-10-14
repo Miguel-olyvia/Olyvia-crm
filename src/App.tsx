@@ -92,6 +92,16 @@ const Pessoas = lazy(() => import("./pages/Pessoas"));
 const UtilizadoresPerfis = lazy(() => import("./pages/UtilizadoresPerfis"));
 const PessoasRh = lazy(() => import("./pages/rh-exemplo/PessoasRh"));
 const PessoaRhDetalhe = lazy(() => import("./pages/rh-exemplo/PessoaRhDetalhe"));
+const RhAssiduidadeEAusencias = lazy(() => import("./pages/rh-exemplo/RhAssiduidadeEAusencias"));
+const RhMinhasAusencias = lazy(() => import("./pages/rh-exemplo/RhMinhasAusencias"));
+const RhMeuPonto = lazy(() => import("./pages/rh-exemplo/RhMeuPonto"));
+const RhMeusDocumentos = lazy(() => import("./pages/rh-exemplo/RhMeusDocumentos"));
+const RhCentrosTrabalho = lazy(() => import("./pages/rh-exemplo/RhCentrosTrabalho"));
+const RhModelosDocumentos = lazy(() => import("./pages/rh-exemplo/RhModelosDocumentos"));
+const RhProcessamentoSalarial = lazy(() => import("./pages/rh-exemplo/RhProcessamentoSalarial"));
+const RhConfiguracaoAdmissao = lazy(() => import("./pages/rh-exemplo/RhConfiguracaoAdmissao"));
+const RhRegrasFimContrato = lazy(() => import("./pages/rh-exemplo/RhRegrasFimContrato"));
+const RhConviteAdmissao = lazy(() => import("./pages/rh-exemplo/RhConviteAdmissao"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
 // AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
 const AnewClients = lazy(() => import("./pages/AnewClients"));
@@ -209,6 +219,8 @@ const App = () => (
                   <Route path="/booking/confirm" element={<BookingConfirm />} />
                   {/* Protótipo de Negócios (08/10/2026): dados de exemplo, sem sessão nem base de dados */}
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
+                  {/* Convite de admissão de exemplo (página pública, sem sessão; só o token "exemplo" abre um convite) */}
+                  <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
@@ -252,6 +264,15 @@ const App = () => (
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/pessoas" element={<ProtectedRoute permission="users.view"><PessoasRh /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/pessoas/:id" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/assiduidade-e-ausencias" element={<ProtectedRoute permission="users.view"><RhAssiduidadeEAusencias /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/ausencias" element={<ProtectedRoute permission="users.view"><RhMinhasAusencias /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/assiduidade" element={<ProtectedRoute permission="users.view"><RhMeuPonto /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/documentos" element={<ProtectedRoute permission="users.view"><RhMeusDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/centros" element={<ProtectedRoute permission="users.view"><RhCentrosTrabalho /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/documentos/modelos" element={<ProtectedRoute permission="users.view"><RhModelosDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/processamento-salarial" element={<ProtectedRoute permission="users.view"><RhProcessamentoSalarial /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
                       <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />

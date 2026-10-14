@@ -153,6 +153,8 @@ export function catalogos(): Catalogos {
       modelo("mod-contrato", "Contrato de trabalho sem termo", "contrato"),
       modelo("mod-adenda", "Adenda de alteração de horário", "adenda"),
       modelo("mod-declaracao", "Declaração de vínculo", "declaracao"),
+      modelo("mod-recibo", "Recibo de entrega de fardamento", "recibo"),
+      modelo("mod-outro", "Acordo de confidencialidade", "outro"),
     ],
     tiposAusencia: [
       tipo("FERIAS", "Férias", "ferias", { desconta_saldo: true, conta_minimo_legal: true, cor: "#2563eb" }),

@@ -1,5 +1,5 @@
 /**
- * O separador Horario da ficha: Planeado e Realizado (a aba Assiduidade nao vem na apresentacao).
+ * O separador Horario da ficha: Planeado, Realizado e Assiduidade.
  *
  * TRES ABAS, PORQUE SAO TRES COISAS
  * ---------------------------------
@@ -50,6 +50,10 @@ import { toast } from "@/lib/toast";
 import { HorarioEditor, corDoLocal } from "@/components/rh-exemplo/HorarioEditor";
 import { CorrigirPlaneadoSheet } from "@/components/rh-exemplo/CorrigirPlaneadoSheet";
 import { HistoricoCorreccoes } from "@/components/rh-exemplo/assiduidade/HistoricoCorreccoes";
+import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeTab";
+import { useFichaRh } from "@/components/rh-exemplo/dados/loja";
+import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
+import { usePermissoesAssiduidade } from "@/components/rh-exemplo/hooks/usePermissoesAssiduidade";
 import { cadeiaDeCorreccoes, emVigor, LEITOR_PLANEADO } from "@/components/rh-exemplo/lib/assiduidade";
 import {
   type HorarioRascunho,
@@ -94,6 +98,11 @@ interface PessoaHorarioTabProps {
    * mostra o aviso quando isto vem preenchido.
    */
   horasContratadasSemanais?: number | null;
+  /**
+   * A pessoa a que pertence a aba Assiduidade. Sem isto deduz-se das linhas de horario (planeado ou realizado); uma
+   * pessoa sem nenhuma linha fica sem a aba.
+   */
+  pessoaId?: string;
 }
 
 export function PessoaHorarioTab({
@@ -109,8 +118,14 @@ export function PessoaHorarioTab({
   onGuardarPlaneado,
   onCorrigirPlaneado,
   horasContratadasSemanais = null,
+  pessoaId: pessoaIdPedida,
 }: PessoaHorarioTabProps) {
   const { t } = useTranslation();
+  const pessoaId = pessoaIdPedida ?? planeado[0]?.pessoa_id ?? realizado[0]?.pessoa_id;
+  const fichaDaAssiduidade = useFichaRh(pessoaId);
+  const { pessoaId: minhaPessoaId } = useMinhaPessoa();
+  const { permissoes: permissoesAssiduidade } = usePermissoesAssiduidade();
+  const podeVerAssiduidade = Boolean(fichaDaAssiduidade) && permissoesAssiduidade.view;
 
   // Duas fatias do MESMO array: o que ainda se ALTERA (em vigor ou futuro,
   // vai para o rascunho editavel) e o que so se CORRIGE (janela ja
@@ -175,7 +190,7 @@ export function PessoaHorarioTab({
     linha.data ?? linha.valido_de ?? "—";
 
 
-  if (!podeVerPlaneado && !podeVerRealizado) {
+  if (!podeVerPlaneado && !podeVerRealizado && !podeVerAssiduidade) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
@@ -202,6 +217,7 @@ export function PessoaHorarioTab({
             <TabsTrigger value="realizado" disabled={!podeVerRealizado}>
               {t("hr.horario.realizado")}
             </TabsTrigger>
+            {podeVerAssiduidade && <TabsTrigger value="assiduidade">{t("hr.horario.assiduidade")}</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="planeado" className="space-y-4">
@@ -344,6 +360,18 @@ export function PessoaHorarioTab({
             )}
           </TabsContent>
 
+          {podeVerAssiduidade && pessoaId && fichaDaAssiduidade && (
+            <TabsContent value="assiduidade">
+              <PessoaAssiduidadeTab
+                pessoaId={pessoaId}
+                pessoaNome={fichaDaAssiduidade.pessoa.nome_completo}
+                souAPessoa={minhaPessoaId === pessoaId}
+                permissoes={permissoesAssiduidade}
+                cargo={fichaDaAssiduidade.pessoa.cargo}
+                dataAdmissao={fichaDaAssiduidade.pessoa.data_admissao}
+              />
+            </TabsContent>
+          )}
         </Tabs>
       </CardContent>
 

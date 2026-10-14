@@ -1,26 +1,15 @@
 /**
- * "Nova pessoa" da apresentação: uma versão curta do assistente real (que tem cinco passos, anexos e
- * verificação de duplicados). Recolhe o essencial, cria a ficha em memória e abre-a.
+ * "Nova pessoa" da apresentação, num painel lateral (Sheet) igual ao "Novo negócio" e à ficha de Pessoas: meio ecrã (todo
+ * em ecrã estreito), cabeçalho com migalhas e selo "Novo · por gravar", três abas sublinhadas e rodapé fixo. Ao abrir, o foco
+ * vai para o nome; Esc, Cancelar ou Fechar fecham e devolvem o foco a quem abriu. Com alterações por gravar, um clique fora
+ * não fecha (para não perder o que se escreveu). Ao criar, a pessoa entra na memória e abre-se a ficha (que leva o foco).
+ * Substitui o diálogo curto de antes; o assistente real de cinco passos continua a não existir aqui.
  */
-import { useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { hojeIso } from "@/components/rh-exemplo/dados/datas";
-import { useCargos } from "@/components/rh-exemplo/hooks/useCargos";
-import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
+import { useRef } from "react";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import type { NovaPessoaExemplo } from "@/components/rh-exemplo/hooks/usePessoas";
-import { TIPOS_CONTRATO, type TipoContrato } from "@/components/rh-exemplo/tipos";
-import { useTranslation } from "@/hooks/useTranslation";
+import { CabecalhoNova } from "@/components/rh-exemplo/novaPessoa/CabecalhoNova";
+import { FormularioNovaPessoa } from "@/components/rh-exemplo/novaPessoa/FormularioNovaPessoa";
 
 interface NovaPessoaDialogoProps {
   open: boolean;
@@ -30,172 +19,43 @@ interface NovaPessoaDialogoProps {
   onCriada: (id: string) => void;
 }
 
-const SEM_CHEFIA = "__nenhuma__";
-
 export function NovaPessoaDialogo({ open, onOpenChange, colegas, onCriar, onCriada }: NovaPessoaDialogoProps) {
-  const { t } = useTranslation();
-  const { cargos } = useCargos();
-  const { locais } = useLocaisTrabalho();
-  const [nome, setNome] = useState("");
-  const [apelido, setApelido] = useState("");
-  const [cargoId, setCargoId] = useState("");
-  const [localId, setLocalId] = useState("");
-  const [tipo, setTipo] = useState<TipoContrato>("sem_termo");
-  const [inicio, setInicio] = useState(hojeIso());
-  const [fim, setFim] = useState("");
-  const [chefia, setChefia] = useState(SEM_CHEFIA);
-  const [tentou, setTentou] = useState(false);
+  const conteudo = useRef<HTMLDivElement>(null);
+  const origem = useRef<HTMLElement | null>(null);
+  const criou = useRef(false);
+  const sujo = useRef(false);
 
-  const comTermo = tipo !== "sem_termo";
-  const cargosActivos = useMemo(() => cargos.filter((c) => c.activo), [cargos]);
-  const erros = {
-    nome: nome.trim() === "",
-    apelido: apelido.trim() === "",
-    cargo: cargoId === "",
-    local: localId === "",
-    fim: comTermo && (fim === "" || fim < inicio),
-  };
-  const invalido = Object.values(erros).some(Boolean);
-
-  const reiniciar = () => {
-    setNome("");
-    setApelido("");
-    setCargoId("");
-    setLocalId("");
-    setTipo("sem_termo");
-    setInicio(hojeIso());
-    setFim("");
-    setChefia(SEM_CHEFIA);
-    setTentou(false);
-  };
-
-  const criar = async () => {
-    setTentou(true);
-    if (invalido) return;
-    const { id } = await onCriar({
-      primeiro_nome: nome.trim(),
-      apelido: apelido.trim(),
-      cargoId,
-      localId,
-      tipoContrato: tipo,
-      dataInicio: inicio,
-      dataFim: comTermo ? fim : null,
-      reportaAId: chefia === SEM_CHEFIA ? null : chefia,
+  const criar = (dados: NovaPessoaExemplo) => {
+    criou.current = true;
+    void onCriar(dados).then(({ id }) => {
+      onOpenChange(false);
+      onCriada(id);
     });
-    reiniciar();
-    onOpenChange(false);
-    onCriada(id);
   };
-
-  const mensagemErro = (campo: keyof typeof erros) =>
-    tentou && erros[campo] ? (
-      <p role="alert" className="text-xs text-destructive">
-        {t("rhExemplo.novaPessoa.obrigatorio")}
-      </p>
-    ) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{t("hr.pessoas.new")}</DialogTitle>
-          <DialogDescription>{t("rhExemplo.novaPessoa.descricao")}</DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-nome">{t("rhExemplo.novaPessoa.nome")}</Label>
-            <Input id="rh-nova-nome" value={nome} onChange={(e) => setNome(e.target.value)} />
-            {mensagemErro("nome")}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-apelido">{t("rhExemplo.novaPessoa.apelido")}</Label>
-            <Input id="rh-nova-apelido" value={apelido} onChange={(e) => setApelido(e.target.value)} />
-            {mensagemErro("apelido")}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-cargo">{t("hr.columns.cargo")}</Label>
-            <Select value={cargoId} onValueChange={setCargoId}>
-              <SelectTrigger id="rh-nova-cargo">
-                <SelectValue placeholder={t("rhExemplo.novaPessoa.escolher")} />
-              </SelectTrigger>
-              <SelectContent>
-                {cargosActivos.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {mensagemErro("cargo")}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-local">{t("hr.columns.local")}</Label>
-            <Select value={localId} onValueChange={setLocalId}>
-              <SelectTrigger id="rh-nova-local">
-                <SelectValue placeholder={t("rhExemplo.novaPessoa.escolher")} />
-              </SelectTrigger>
-              <SelectContent>
-                {locais.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>
-                    {l.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {mensagemErro("local")}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-tipo">{t("rhExemplo.novaPessoa.tipoContrato")}</Label>
-            <Select value={tipo} onValueChange={(v) => setTipo(v as TipoContrato)}>
-              <SelectTrigger id="rh-nova-tipo">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TIPOS_CONTRATO.map((valor) => (
-                  <SelectItem key={valor} value={valor}>
-                    {t(`hr.tipoContrato.${valor}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-chefia">{t("hr.detalhes.reportaA")}</Label>
-            <Select value={chefia} onValueChange={setChefia}>
-              <SelectTrigger id="rh-nova-chefia">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={SEM_CHEFIA}>{t("rhExemplo.novaPessoa.semChefia")}</SelectItem>
-                {colegas.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.nome_completo}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="rh-nova-inicio">{t("hr.detalhes.dataInicio")}</Label>
-            <Input id="rh-nova-inicio" type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} />
-          </div>
-          {comTermo && (
-            <div className="space-y-1.5">
-              <Label htmlFor="rh-nova-fim">{t("rhExemplo.novaPessoa.dataFim")}</Label>
-              <Input id="rh-nova-fim" type="date" value={fim} onChange={(e) => setFim(e.target.value)} />
-              {mensagemErro("fim")}
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t("common.cancel")}
-          </Button>
-          <Button onClick={() => void criar()}>{t("rhExemplo.novaPessoa.criar")}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        ref={conteudo}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          sujo.current = false;
+          criou.current = false;
+          origem.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          conteudo.current?.querySelector<HTMLElement>("#rh-nova-nome")?.focus();
+        }}
+        onInteractOutside={(e) => { if (sujo.current) e.preventDefault(); }}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          if (!criou.current && origem.current?.isConnected) origem.current.focus();
+        }}
+        className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
+      >
+        <CabecalhoNova />
+        <FormularioNovaPessoa
+          colegas={colegas} aoCriar={criar} aoCancelar={() => onOpenChange(false)} aoSujar={() => { sujo.current = true; }}
+        />
+      </SheetContent>
+    </Sheet>
   );
 }
