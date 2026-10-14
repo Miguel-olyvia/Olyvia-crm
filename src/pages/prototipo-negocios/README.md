@@ -566,3 +566,30 @@ A etapa "Necessidades do cliente" da visita deixou de ser texto e listas (o Rube
 - **`ilustracoes.tsx`** (dono: este trabalho): `Ilustracao` (32 desenhos SVG próprios, traço de 2 px, cinzento e o acento, `aria-hidden`) e `IconeServico` (lucide), com todas as chaves fixas do contrato de 14/10. A ilustração de um produto é o `img`; senão deduz-se da subcategoria, do nome e da categoria (contra os 2.159 produtos reais da Mudelar só 4 ficam "generico").
 - A lógica sem React está em `necessidades.ts` (`tilesServicos`, `gruposServicos`, `procurarServicos`, `filtrarProdutos`, `passoGuiado`, `tocarProdutoGuiado`, `obrigacoesAMostrar`, `resumoNecessidades`); testes em `necessidades.test.tsx`.
 - Modelo: `Produto` ganhou `sku`, `pvp`, `img`, `desc` e `sub` e `Catalogo` ganhou `icone` (todos opcionais, em `v2/catalogoModelo.ts`); `ProdVisita` guarda o `pvp`, que manda no preço da linha do produto.
+
+## Ligações do Catálogo (14/10/2026, versão Atual)
+
+Um sexto separador, **Ligações**, no Catálogo do V1 (`LigacoesCatalogo.tsx`) serve para validar o modelo de dados do catálogo e para o mostrar à Mudelar:
+- **O mapa:** o elemento escolhido fica no centro e os grupos ligados ficam à volta:
+  - **serviço no centro:** os produtos que o trazem ou que ele exige (com a pergunta "O cliente mantém…?"), os técnicos (h/un e €/h), os equipamentos (€/h × h/un) e os consumíveis (com a marca de opcional);
+  - **produto no centro:** o serviço que traz, os serviços que o pedem, as alternativas (as da mesma subcategoria; sem ela, as do mesmo ramo) e quem o instala;
+  - **equipamento, consumível ou técnico no centro:** os serviços que os usam.
+- **Desenho:** no computador (≥ 1024 px) os grupos ficam em duas colunas, uma de cada lado do centro. No telemóvel ficam em camadas: o centro em cima e os grupos por baixo, com uma espinha vertical.
+- **Animação** (framer-motion), de 200 a 500 ms:
+  - as ligações são curvas SVG que se desenham do centro para fora (`pathLength`), com um pequeno escalonamento;
+  - ao tocar num nó, o desenho dele voa para o centro (`layoutId`);
+  - passar o rato ou o foco num nó ou numa ligação acende a ligação e mostra o porquê no nó (ex.: "traz 1 × Instalação de Sanita Compacta", "0,85 €/h · 0,4 h/pt"). No telemóvel, o porquê está sempre escrito;
+  - com `prefers-reduced-motion`, aparece tudo de imediato.
+- **Rasto** em cima (até 6 passos) para voltar atrás, e uma **pesquisa** para escolher o centro. No máximo aparecem 12 nós por grupo; o resto fica em "+ N", que abre uma lista com pesquisa e "Mostrar mais".
+- **Problemas:**
+  - avisos discretos no centro e nos nós;
+  - uma vista "Problemas" com a contagem por tipo, em que um toque abre o elemento no mapa;
+  - os tipos são: serviço sem receita, serviço que exige um produto de um ramo vazio (ou que já não existe), produto que se instala sem serviço de instalação, consumível sem uso e equipamento sem uso;
+  - um produto "devia ter" serviço quando a ilustração é de uma peça que se instala ou quando um irmão da mesma subcategoria tem serviço. Fica de fora quando está num ramo que um serviço exige, porque o serviço do pacote o instala.
+- **Na ficha do serviço:** "Ver ligações" abre o mapa centrado no serviço. Em "Produtos ligados", o nome do produto abre-o no mapa. No mapa, "Abrir a ficha" volta à ficha.
+- **Lógica sem React** em `ligacoes.ts`:
+  - `montarCatalogo(S, C, K)` junta tudo num objeto simples;
+  - `ligacoesDe(no, catalogo)`, `problemasCatalogo(catalogo)`, `procurarNos` e `centroInicial` trabalham sobre esse objeto.
+- **Testes:**
+  - `ligacoes.test.ts`, incluindo um catálogo com 360 serviços e 2.200 produtos;
+  - `LigacoesCatalogo.test.tsx`, que testa o separador, as camadas e as colunas, o "+ N", a pesquisa, os problemas e as ligações a partir da ficha.

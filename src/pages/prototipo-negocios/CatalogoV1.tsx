@@ -291,6 +291,9 @@ export function CatalogoV1({ S, run }: Ctx) {
     anunciar(msg);
   };
 
+  // o separador escolhido fica à vista na barra (no telemóvel a barra desliza)
+  useEffect(() => { document.getElementById(`tab-${seccao}`)?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }, [seccao, aberto]);
+
   // Ao voltar da ficha, o foco regressa ao serviço de onde se saiu.
   useEffect(() => {
     if (aberto || !voltarPara.current) return;

@@ -58,7 +58,11 @@ function No({ l, ativo, aviso, porqueVisivel, i, reduzir, regista, onIr, onAtivo
         <Desenho vis={l.vis} id={k} />
         <span className="min-w-0 flex-1">
           <span className="line-clamp-2 block text-[15px] font-medium leading-snug">{l.n}</span>
-          <span className={cn(NOTA, "block truncate")}>{porqueVisivel ? l.porque : l.det}</span>
+          {porqueVisivel || !ativo
+            ? <span className={cn(NOTA, "block", !porqueVisivel && "truncate")}>{porqueVisivel ? l.porque : l.det}</span>
+            // no computador, o porquê aparece no lugar da linha de baixo enquanto a ligação está ativa
+            : <motion.span key="porque" data-testid="porque" initial={reduzir ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}
+                className="block text-[15px] font-medium text-foreground">{l.porque}</motion.span>}
           <span className="sr-only">{porqueVisivel ? `, ${l.det}` : `, ${l.porque}`}{aviso ? `. Atenção: ${aviso.map((p) => p.t).join(" ")}` : ""}</span>
         </span>
         {l.opcional && <span className={cn(NOTA, "shrink-0")} aria-hidden="true">opcional</span>}
@@ -135,25 +139,22 @@ function MapaLigacoes({ mapa, desktop, reduzir, porNo, onIr, onMais, aberto, onA
   const linhas = C ? alvos.flatMap((a, i) => {
     const R = pos[a.k];
     if (!R) return [];
-    let d: string, mx: number, my: number, x1: number, y1: number;
+    let d: string, x1: number, y1: number;
     if (desktop) {
       const esq = a.lado === "esq", x0 = esq ? C.x : C.x + C.w, y0 = C.y + C.h / 2;
       x1 = esq ? R.x + R.w : R.x; y1 = R.y + R.h / 2;
       const meio = (x0 + x1) / 2;
       d = `M ${x0} ${y0} C ${meio} ${y0}, ${meio} ${y1}, ${x1} ${y1}`;
-      mx = meio; my = (y0 + y1) / 2;
     } else {
       // em camadas: uma espinha do centro para baixo e um ramo curvo para cada nó
       const sx = 20, y0 = C.y + C.h, r = 12;
       x1 = R.x; y1 = R.y + R.h / 2;
       d = `M ${sx} ${y0} L ${sx} ${y1 - r} Q ${sx} ${y1} ${sx + r} ${y1} L ${x1} ${y1}`;
-      mx = sx; my = y1;
     }
-    return [{ ...a, i, d, mx, my, x1, y1 }];
+    return [{ ...a, i, d, x1, y1 }];
   }) : [];
   // a ativa por cima
   linhas.sort((a, b) => Number(a.k === ativo) - Number(b.k === ativo));
-  const daAtiva = linhas.find((x) => x.k === ativo && x.l);
   const avisoCentro = porNo.get(kc);
   const total = mapa.grupos.reduce((a, g) => a + g.itens.length, 0);
 
@@ -227,14 +228,6 @@ function MapaLigacoes({ mapa, desktop, reduzir, porNo, onIr, onMais, aberto, onA
           <div className="space-y-6">{lados.esq.map(grupo)}</div>
           {centro}
           <div className="space-y-6">{lados.dir.map(grupo)}</div>
-          {daAtiva?.l && (
-            <div className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2" style={{ left: daAtiva.mx, top: daAtiva.my }} aria-hidden="true">
-              <motion.p key={ativo} initial={reduzir ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}
-                data-testid="porque" className="max-w-[17rem] rounded-lg border border-primary/40 bg-card px-3 py-1.5 text-center text-[15px] shadow-[var(--shadow-sm)]">
-                {daAtiva.l.porque}
-              </motion.p>
-            </div>
-          )}
         </>
       ) : (
         <>
