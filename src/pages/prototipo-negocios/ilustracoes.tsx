@@ -206,38 +206,38 @@ const escolher = <K,>(regras: Regra<K>[], texto: string | null | undefined): K |
 
 // A ordem conta: o mais específico primeiro ("espelho com LED" é espelho, não iluminação; "porta-rolos" é acessório, não porta).
 const REGRAS_ILUSTRACAO: Regra<IlustracaoKey>[] = [
-  [/porta[- ]?rolos?|saboneteira|cabide|piaçaba|piacaba|dispensador|acessorios? (de )?(wc|casa de banho)|barra de apoio|acessorio de seguranca|^acessorios?/, "acessorio-wc"],
+  [/porta[- ]?rolos?|saboneteira|cabide|piacaba|dispensador|acessorios? (de )?(wc|casa de banho)|barra de apoio|pega de seguranca|acessorio de seguranca/, "acessorio-wc"],
   [/espelho/, "espelho"],
   [/toalheiro/, "toalheiro"],
+  [/bases? (de )?duche|plato de duche/, "base-duche"],
+  [/colunas? (de )?duche|chuveiro|kit de duche|conjunto de duche/, "coluna-duche"],
+  [/torneira|misturadora|monocomando|bica\b/, "torneira"],
   [/bide/, "bide"],
-  [/sanita|autoclismo|louca sanitaria|vaso sanitario/, "sanita"],
-  [/base de duche|base duche|bases de duche/, "base-duche"],
-  [/banheira/, "banheira"],
-  [/coluna de duche|coluna duche|chuveiro|kit de duche/, "coluna-duche"],
-  [/resguardo|divisoria|vidro|serigrafia/, "resguardo"],
-  [/lava[- ]?loica|lava[- ]?louca/, "lava-loica"],
-  [/torneira|misturadora|monocomando|termostatica/, "torneira"],
+  [/sanita|autoclismo|louca sanitaria|loica sanitaria|vaso sanitario/, "sanita"],
+  [/banheira|bnaheira/, "banheira"],
+  [/resguardo|divisoria|serigrafia|lateral fixo|painel fixo|frontal (fixo|de correr)|porta de duche|cabine de duche/, "resguardo"],
+  [/lava[- ]?lo[iu]ca|cuba/, "lava-loica"],
+  [/(modulo|tampo|armario|movel) (para |de )?(movel|wc|casa de banho|lavatorio)|moveis? (de )?(wc|casa de banho|lavatorio)|^movel\b|^colunas?\b|movel suspenso/, "movel-wc"],
   [/lavatorio/, "lavatorio"],
-  [/movel (de )?(wc|casa de banho|lavatorio|suspenso)|moveis? de casa de banho|^movel\b|movel \d/, "movel-wc"],
   [/bancada|tampo/, "bancada"],
   [/exaustor|chamine|extrator/, "exaustor"],
-  [/forno|placa (de )?(inducao|vitro|gas|fogao)|fogao|frigorifico|micro[- ]?ondas|maquina de lavar|eletrodomestico|congelador/, "eletrodomestico"],
-  [/moveis? de cozinha|modulo|armario|cozinha/, "armario-cozinha"],
+  [/forno|placa (de )?(inducao|vitro|gas|fogao)|fogao|frigorifico|micro[- ]?ondas|maquinas? (de )?(lavar|secar)|placas?\b|eletrodomestico|congelador/, "eletrodomestico"],
   [/roupeiro/, "roupeiro"],
   [/janela|caixilh|estore/, "janela"],
-  [/\bporta/, "porta"],
+  [/^portas?\b|portas? (de |em )?(abrir|correr|interior|exterior|entrada|blindada|pivotante|servico|vidro)/, "porta"],
+  [/moveis? de cozinha|modulo|armario|cozinha/, "armario-cozinha"],
   [/esquentador|termoacumulador|caldeira|cilindro|bomba de calor/, "esquentador"],
   [/ar condicionado|avac|climatiza|split|ventax|ventila/, "avac"],
-  [/\bled\b|candeeiro|luminaria|foco|lampada|iluminacao|aplique|calha/, "iluminacao"],
-  [/tomada|interruptor|cabo|fio eletrico|disjuntor|quadro eletrico|eletric|eletrico/, "eletrico"],
-  [/cola|argamassa|cimento|betume|reboco|massa|junta/, "cola"],
+  [/\bled\b|candeeiro|luminaria|foco|lampada|iluminacao|aplique/, "iluminacao"],
+  [/tomada|interruptor|cabo|fio eletrico|disjuntor|quadro eletrico|eletric|electric/, "eletrico"],
+  [/cola\b|argamassa|cimento|betume|reboco|massa|junta|autonivelante|betonilha/, "cola"],
   [/pavimento|vinilico|flutuante|soalho|rodape|mosaico/, "pavimento"],
   [/revestimento|azulejo|ceramico|parede|pedra/, "revestimento"],
   [/primario|impermeabiliz|tinta|verniz|diluente|silicone|acido|quimico|selante/, "quimico"],
   [/limpeza|detergente|lixivia/, "limpeza"],
-  [/broca|disco|berbequim|serra|martelo|espatula|talocha|ferramenta|lamina|rebarbadora/, "ferramenta"],
-  [/tubo|abracadeira|parafuso|bucha|fita|saco|pequeno material|material|tijolo|placa de gesso|pladur|perfil/, "material"],
-  [/louca/, "sanita"],
+  [/broca|\bdisco\b|berbequim|\bserra\b|martelo|espatula|talocha|ferramenta|\blaminas?\b|rebarbadora/, "ferramenta"],
+  [/tubo|abracadeira|parafuso|bucha|fita|saco|pequeno material|material|tijolo|placa de gesso|pladur|perfil|calha|alvenaria|la de rocha|sanca|canalizacao|cartao/, "material"],
+  [/lo[iu]ca/, "sanita"],
   [/mobiliario|moveis/, "armario-cozinha"],
 ];
 
@@ -246,10 +246,10 @@ export function ilustracaoDe(texto: string | null | undefined): IlustracaoKey {
   return escolher(REGRAS_ILUSTRACAO, texto) ?? "generico";
 }
 
-/** A ilustração de um produto: a do Catálogo (img), senão pelo nome, pela subcategoria e pelo nó da árvore. */
+/** A ilustração de um produto: a do Catálogo (img); senão pela subcategoria real, pelo nome e pela categoria (o nó da árvore). */
 export function ilustracaoDoProduto(p: { n: string; img?: IlustracaoKey; sub?: string }, caminhoNo?: string | null): IlustracaoKey {
   if (p.img && (ILUSTRACOES as readonly string[]).includes(p.img)) return p.img;
-  for (const t of [p.n, p.sub, caminhoNo?.split(" › ").pop(), caminhoNo]) {
+  for (const t of [p.sub, p.n, caminhoNo?.split(" › ").pop(), caminhoNo]) {
     const k = escolher(REGRAS_ILUSTRACAO, t);
     if (k) return k;
   }

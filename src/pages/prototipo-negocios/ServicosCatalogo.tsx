@@ -53,7 +53,7 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
   const mosaico = (t: TileServico) => (
     <Mosaico key={t.sid} t={t} d={d} ro={ro} simples={simples} manual={(v.extra[t.sid] || 0) > 0}
       falta={validar && !!obr[t.sid] && !obr[t.sid].cumprida}
-      daMedida={t.origem === "catalogo" ? medidaDaSugestao(t, d, medidaDe(t.sid)) : null}
+      daMedida={t.origem === "catalogo" ? medidaDaSugestao({ id: t.sid, n: t.n, un: t.un }, d, medidaDe(t.sid)) : null}
       onTocar={() => tocar(t)} onQtd={(n) => run(() => A.extra(d.id, t.sid, n))} />
   );
 

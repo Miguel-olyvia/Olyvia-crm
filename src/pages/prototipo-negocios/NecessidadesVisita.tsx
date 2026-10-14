@@ -22,7 +22,7 @@ import {
   nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
 } from "./produtosVisita";
 import {
-  categorias, faltaEmPalavras, filtrarProdutos, juntarE, marcasDe, nomeCurto, objetoDaPergunta, ordenarParaObjeto, resumoNecessidades, tituloObrigacao,
+  categorias, faltaEmPalavras, filtrarProdutos, marcasDe, nomeCurto, objetoDaPergunta, ordenarParaObjeto, resumoNecessidades, tituloObrigacao,
 } from "./necessidades";
 
 const PAGINA = 12;
@@ -371,8 +371,7 @@ function Resumo(ctx: P) {
       </p>
       {faltas.length > 0 && !d.visita.fechada && (
         <p className={cn("text-[15px]", validar ? "font-medium text-destructive" : "text-muted-foreground")}>
-          Falta {juntarE(faltas.map((f, i) => (i === 0 ? f.t : f.t)))
-            .split(/(?=)/).length ? null : null}
+          Falta{" "}
           {faltas.map((f, i) => (
             <span key={f.alvo}>
               {i > 0 && (i === faltas.length - 1 ? " e " : ", ")}
