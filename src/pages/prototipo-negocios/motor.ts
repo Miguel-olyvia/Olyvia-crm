@@ -12,7 +12,8 @@ import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
-import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
+import { dataCurta, isoDia, prestacoes, proximoUtil } from "./planoObra";
+import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -186,7 +187,10 @@ export interface Plano {
   origem?: "orcamento"; inicio?: string;
 }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
-export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "recebida"; forn?: string; linhas: { n: string; q: number; un: string; /** custo por unidade (€) */ custo?: number }[];
+export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "parcial" | "recebida"; forn?: string;
+  linhas: { n: string; q: number; un: string; /** custo por unidade (€) */ custo?: number; /** quanto já chegou (conferência) */ recebido?: number }[];
+  /** A data de entrega que o fornecedor confirmou ("qui, 22 out"). */
+  entrega?: string;
   /** Quem validou a encomenda ao fornecedor e quando. */
   validada?: { por: string; q: string } }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
@@ -275,7 +279,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
 // 9 (14/10/2026): a demolição de parede (c5) passa de ml a m², como diz o nome
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
-export const VERSAO = 13;
+export const VERSAO = 14;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -660,6 +664,16 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
   }
   aplicarPrecosMan(o);
   sincronizarDemolicao(d, _S);
+}
+/** O IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%. */
+export const IVA_MO = 0.06, IVA_MAT = 0.23;
+/** O valor da primeira prestação (o sinal), com IVA: o que o Financeiro espera ver entrar (14/10). */
+export function valorSinal(d: Negocio, S: Estado): number {
+  if (!d.orc) return 0;
+  const k = 1 - (d.orc.desconto || 0) / 100;
+  let mo = 0, mat = 0;
+  for (const l of d.orc.linhas) { const p = linhaCalc(l, S).preco * k; if (l.t === "mat") mat += p; else mo += p; }
+  return r2((mo * (1 + IVA_MO) + mat * (1 + IVA_MAT)) * (prestacoes(d.f.pagamento, d.orc.pagFases)[0]?.p ?? 1));
 }
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
@@ -1233,7 +1247,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     emitir(id: number) { const d = deal(id); if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return; d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
     validar(id: number) {
       const d = deal(id);
-      if (!d.f.valor_recebido) d.f.valor_recebido = String(r2(tot(d, S).pf));
+      // o sinal (a primeira prestação), com IVA, como na fatura
+      if (!d.f.valor_recebido) d.f.valor_recebido = String(valorSinal(d, S));
       if (!d.f.data_pag) d.f.data_pag = new Date().toISOString().slice(0, 10);
       if (!portao(d, [FINANCEIRO[2]])) return;
       d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
@@ -1298,7 +1313,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     aprovarPlano(id: number) {
       const d = deal(id);
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
-      d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações"); avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
+      d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações");
+      // o início do plano passa para a preparação da obra (não se escreve duas vezes)
+      const p = d.obra.plano!;
+      if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
     },
     arrancar(id: number) {
       const d = deal(id); const e = d.obra.enc;
@@ -1319,7 +1337,39 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: "Receita atualizada no Catálogo", sub: `Revestimento: ${nfmt(old)} → ${nfmt(s.h)} h/m². Os próximos orçamentos já usam este valor.`, kind: "ok" });
     },
     confirmarEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "encomendada"; d.obra.enc!.validada = { por: PAPEIS[S.role].n, q: agora() }; log(d, "Encomenda " + d.obra.enc!.n + " confirmada pelo armazém"); avisar({ msg: "Encomenda enviada ao fornecedor", sub: d.obra.enc!.n + " · " + d.obra.enc!.forn, kind: "ok" }); },
-    receberEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "recebida"; d.obra.mats!.forEach((x) => { x.res = x.q; x.falta = 0; }); log(d, "Encomenda " + d.obra.enc!.n + " recebida · materiais reservados"); avisar({ msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "auto" }); },
+    receberEnc(id: number) {
+      const d = deal(id), e = d.obra.enc!;
+      e.estado = "recebida"; e.linhas.forEach((x) => { x.recebido = x.q; });
+      d.obra.mats?.forEach((x) => { x.res = x.q; x.falta = 0; });
+      d.obra.ec?.linhas.forEach((x) => { x.res = x.q; x.falta = 0; });
+      log(d, "Encomenda " + e.n + " recebida · materiais reservados"); avisar({ msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "auto" });
+    },
+    /** O fornecedor confirma a data de entrega (no portal do fornecedor; aqui, simulado). */
+    confirmarEntrega(id: number) {
+      const d = deal(id), e = d.obra.enc;
+      if (!e || e.estado !== "encomendada" || e.entrega) return;
+      const t = new Date(); t.setDate(t.getDate() + 3);
+      e.entrega = dataCurta(proximoUtil(t));
+      log(d, "O fornecedor " + (e.forn ?? "") + " confirmou a entrega para " + e.entrega);
+      avisar({ msg: "Entrega confirmada", sub: (e.forn ?? "Fornecedor") + " · " + e.entrega, kind: "ok" });
+    },
+    /** O Armazém confere a entrega linha a linha: com tudo, recebida; com menos, parcial (o que falta fica à espera). */
+    receberLinhas(id: number, chegou: number[]) {
+      const d = deal(id), e = d.obra.enc;
+      if (!e || (e.estado !== "encomendada" && e.estado !== "parcial")) return;
+      e.linhas.forEach((x, i) => { x.recebido = Math.min(x.q, r2((x.recebido ?? 0) + Math.max(0, chegou[i] ?? 0))); });
+      // o que chegou passa a reservado na obra (pelo nome do material)
+      for (const x of e.linhas) {
+        // a linha da encomenda a fornecedor é a falta da obra: o que ainda não chegou continua em falta
+        const em = (L?: { n: string; q: number; res: number; falta: number }[]) => L?.forEach((m) => { if (m.n === x.n) { m.falta = r2(Math.max(0, x.q - (x.recebido ?? 0))); m.res = r2(m.q - m.falta); } });
+        em(d.obra.mats ?? undefined); em(d.obra.ec?.linhas);
+      }
+      const tudo = e.linhas.every((x) => (x.recebido ?? 0) >= x.q - 1e-9);
+      e.estado = tudo ? "recebida" : "parcial";
+      const falta = e.linhas.filter((x) => (x.recebido ?? 0) < x.q).map((x) => nfmt(r2(x.q - (x.recebido ?? 0))) + " " + x.un + " de " + x.n.toLowerCase());
+      log(d, "Entrada de " + e.n + (tudo ? ": tudo recebido · materiais reservados" : ": parcial · faltam " + falta.join(", ")), tudo ? "a" : "w");
+      avisar(tudo ? { msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "ok" } : { msg: "Entrada parcial registada", sub: "Faltam " + falta.join(", "), kind: "" });
+    },
     vendaDireta(id: number, v: boolean) { const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
     perder(id: number) { S.confirmPerda = id; },
     perderSim(id: number) {
@@ -1353,6 +1403,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       }
       // a resposta mexe logo no orçamento, enquanto a proposta não foi enviada
       if (d.orc && !d.orc.enviada && (CAMPOS_COM_EFEITO.has(k) || CAMPOS_COM_EFEITO.has(chaveBase(k)) || k === "diag_tipo_area")) sincronizarEfeitos(d, S);
+      // o acesso e o contentor mexem na conta do entulho (o meio, o fator de acesso)
+      if (d.orc && !d.orc.enviada && ["contentor", "dist_entulho", "andar", "tem_elevador", "estacionamento"].includes(k)) sincronizarDemolicao(d, S);
     },
     confirmar(id: number, ks: string[]) { const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k]; },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {

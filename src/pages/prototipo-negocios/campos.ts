@@ -113,6 +113,8 @@ export const EXTERIOR: Grupo = {
     { k: "impacto_percent", bloco: "Acesso e estacionamento", l: "Impacto no preço", t: "escolha", op: ["5%", "10%", "15%", "20%"], ajuda: "Só com acesso difícil.", papel: "orcamento", se: { k: "acesso", v: ["Difícil"] } },
     { k: "estacionamento", bloco: "Acesso e estacionamento", l: "Estacionamento", t: "escolha", op: ["Pago", "Não pago", "Sem estacionamento"], papel: "sugestoes" },
     { k: "zona_estacionamento", bloco: "Acesso e estacionamento", l: "Zona de estacionamento", t: "escolha", op: ["Verde", "Amarela", "Vermelha"], papel: "sugestoes", se: { k: "estacionamento", v: ["Pago"] } },
+    // 14/10: na visita (antes estava em "Preparar a obra", tarde demais para o orçamento): decide o meio do entulho
+    { k: "contentor", bloco: "Acesso e estacionamento", l: "Contentor de entulho", t: "escolha", op: ["Não", "Na via pública (licença)", "Em espaço privado"], ajuda: "Decide o meio do entulho no orçamento. Sem resposta, a Olyvia escolhe pelo volume.", papel: "orcamento", opcional: true },
     { k: "dist_entulho", bloco: "Acesso e estacionamento", l: "Da porta ao big bag ou contentor", t: "escolha", op: ["Até 10 m", "10 a 30 m", "Mais de 30 m"], ajuda: "Entra no fator de acesso da demolição.", papel: "orcamento", opcional: true },
     { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano" },
     { k: "n_elevadores", bloco: "O prédio", l: "Nº de elevadores", t: "contador", min: 1, max: 6, se: { k: "tem_elevador", v: ["Sim"] } },
@@ -241,7 +243,6 @@ export const OBRA: Grupo[] = [
       { k: "chaves", l: "Acesso à casa", t: "escolha", op: ["O cliente abre", "Chave entregue", "Código", "Porteiro"] },
       { k: "contacto_local", l: "Contacto no local", t: "texto" },
       { k: "condominio", l: "Condomínio avisado", t: "sim_nao" },
-      { k: "contentor", l: "Contentor de entulho", t: "escolha", op: ["Não", "Na via pública (licença)", "Em espaço privado"] },
       { k: "protecoes", l: "Proteções", t: "texto_longo", ajuda: "Sugeridas a partir da ficha do local." },
     ],
   },

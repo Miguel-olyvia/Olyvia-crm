@@ -150,7 +150,14 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
       : { id: "ef", trilho: "ec", estado: "feito", who: "financeiro", t: `Encomenda ${e.n} validada`, sub: `${e.forn ?? ""}${e.validada ? ` · ${e.validada.por} · ${e.validada.q}` : ""}` });
     L.push(e.estado === "recebida"
       ? { id: "rec", trilho: "ec", estado: "feito", who: "armazem", t: "Materiais recebidos", sub: "Tudo reservado para a obra." }
-      : { id: "rec", trilho: "ec", estado: e.estado === "encomendada" ? "agora" : "espera", who: "armazem", t: "Receber os materiais", sub: e.estado === "encomendada" ? `${e.n} · conferir e dar entrada no armazém.` : "Depois de validada.", act: e.estado === "encomendada" ? "receberEnc" : undefined, btn: "Dar entrada" });
+      : e.estado === "por confirmar"
+        ? { id: "rec", trilho: "ec", estado: "espera", who: "armazem", t: "Receber os materiais", sub: "Depois de validada." }
+        // encomendada ou parcial: o Armazém confere no Inventário, linha a linha
+        : { id: "rec", trilho: "ec", estado: "agora", who: "armazem", t: e.estado === "parcial" ? "Receber o que falta" : "Receber os materiais",
+            sub: e.estado === "parcial"
+              ? `Entrada parcial: faltam ${e.linhas.filter((x) => (x.recebido ?? 0) < x.q).map((x) => `${nfmt(r2(x.q - (x.recebido ?? 0)))} ${x.un} de ${x.n.toLowerCase()}`).join(", ")}.`
+              : `${e.n} · ${e.entrega ? `entrega confirmada para ${e.entrega}` : "à espera da data do fornecedor"}; conferir e dar entrada.`,
+            act: "abrirInv", btn: "Conferir no Inventário" });
   }
 
   // o plano
@@ -162,7 +169,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
 
   // o pagamento
   L.push(d.fin.fatura
-    ? { id: "ft", trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${d.fin.fatura.n}`, sub: `Emitida a ${d.fin.fatura.q}.` }
+    ? { id: "ft", trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${d.fin.fatura.n}`, sub: `Emitida ${d.fin.fatura.q.startsWith("hoje") ? d.fin.fatura.q : "a " + d.fin.fatura.q}.` }
     : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Emitir a fatura", sub: "Vai para o portal do cliente.", act: "emitir", btn: "Emitir a fatura" });
   L.push(d.fin.pago
     ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }

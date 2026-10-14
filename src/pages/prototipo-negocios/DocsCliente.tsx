@@ -13,7 +13,8 @@ import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, iniciosRapidos,
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
 
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
-export const IVA_MO = 0.06, IVA_MAT = 0.23;
+export { IVA_MAT, IVA_MO } from "./motor";
+import { IVA_MAT, IVA_MO } from "./motor";
 export function totais(d: Negocio, S: Estado) {
   if (!d.orc) return { mo: 0, mat: 0, ivaMo: 0, ivaMat: 0, base: 0, iva: 0, total: 0 };
   const k = 1 - (d.orc.desconto || 0) / 100; // o desconto reparte-se pelas duas partes

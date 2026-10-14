@@ -27,8 +27,8 @@ export function agenda(S: Estado, r: Papel): Compromisso[] {
     }
     if (r === "operacoes" && d.fase === 5 && d.obra.plano?.estado === "em curso")
       L.push({ id: "o" + d.id, hora: "08:00", titulo: `Obra · dia ${d.obra.plano.dia + 1} de ${Math.max(...d.obra.plano.tasks.map((t) => t.dia + t.dur))}`, quem: d.nome, onde: loc, acao: "Abrir plano", d });
-    if (r === "armazem" && d.obra.enc && d.obra.enc.estado === "encomendada")
-      L.push({ id: "e" + d.id, hora: "—", titulo: "Receber " + d.obra.enc.n, quem: d.obra.enc.forn || "Fornecedor", acao: "Receber", d });
+    if (r === "armazem" && d.obra.enc && (d.obra.enc.estado === "encomendada" || d.obra.enc.estado === "parcial"))
+      L.push({ id: "e" + d.id, hora: "—", titulo: (d.obra.enc.estado === "parcial" ? "Receber o resto de " : "Receber ") + d.obra.enc.n + (d.obra.enc.entrega ? " · " + d.obra.enc.entrega : ""), quem: d.obra.enc.forn || "Fornecedor", acao: "Receber", d });
     if (r === "financeiro" && d.fin.fatura && !d.fin.pago)
       L.push({ id: "f" + d.id, hora: "—", titulo: d.fin.fatura.n + " · confirmar a transferência", quem: d.nome, acao: "Validar", d });
   }

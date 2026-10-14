@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { acoes, minhas, seed } from "./motor";
+import { acoes, minhas, seed, valorSinal } from "./motor";
+import { totais, tranches } from "./DocsCliente";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { custoFalta, faltaParaArrancar, inicioDoPlano, passosPreparacao, rotuloDia, skDaTarefa, tecnicosPara, totalEf } from "./preparacaoObra";
 
@@ -114,5 +115,34 @@ describe("os custos da encomenda", () => {
     const e = d.obra.enc!;
     expect(totalEf(e)).toBeCloseTo(custoFalta(ec), 2);
     expect(e.linhas.every((x) => (x.custo ?? 0) > 0)).toBe(true);
+  });
+});
+
+describe("a receção no Inventário", () => {
+  it("o fornecedor confirma a entrega; o Armazém confere: parcial, depois o resto; só então se pode arrancar", () => {
+    const { S, A, d } = preparar();
+    A.aprovarEc(d.id); A.validarEf(d.id);
+    const e = d.obra.enc!;
+    A.confirmarEntrega(d.id);
+    expect(e.entrega).toMatch(/^(seg|ter|qua|qui|sex), \d+ \w+$/);
+    // chega tudo menos 1 da primeira linha
+    A.receberLinhas(d.id, e.linhas.map((x, i) => (i === 0 ? x.q - 1 : x.q)));
+    expect(e.estado).toBe("parcial");
+    expect(faltaParaArrancar(d)).toContain("receber os materiais");
+    const linha = d.obra.ec!.linhas.find((x) => x.n === e.linhas[0].n)!;
+    expect(linha.falta).toBe(1);
+    expect(passosPreparacao(d, S).find((p) => p.id === "rec")).toMatchObject({ estado: "agora", t: "Receber o que falta", act: "abrirInv" });
+    A.receberLinhas(d.id, e.linhas.map((x) => x.q - (x.recebido ?? 0)));
+    expect(e.estado).toBe("recebida");
+    expect(d.obra.ec!.linhas.every((x) => x.falta === 0)).toBe(true);
+    expect(faltaParaArrancar(d)).not.toContain("receber os materiais");
+  });
+});
+
+describe("o sinal", () => {
+  it("o valor recebido por omissão é a primeira prestação com IVA, igual à da fatura", () => {
+    const { S, d } = preparar();
+    expect(valorSinal(d, S)).toBeCloseTo(tranches(d, totais(d, S).total)[0].v, 2);
+    expect(valorSinal(d, S)).toBeLessThan(totais(d, S).total);
   });
 });
