@@ -596,3 +596,80 @@ describe("a fila de filtros arrasta-se com o rato", () => {
     expect(fila.className).toContain("[&::-webkit-scrollbar]:hidden");
   });
 });
+
+/* ------------------------------------------------------------------ 14/10, 3.ª volta: o movimento, o preenchimento rápido e as fases da obra */
+describe("a experiência guiada: aria-live, foco, modelos rápidos, passo guardado e fases", () => {
+  it("o aria-live diz o passo, o foco vai para o título do passo novo e a ordem dos passos não muda", () => {
+    const { S, d } = preparar();
+    d.f.materiais_cliente = "Sim";
+    render(<Montar S={S} d={d} />);
+    const vivo = () => document.querySelector("p[aria-live][aria-atomic]")!.textContent;
+    expect(vivo()).toBe("Passo 1 de 7: O que se faz");
+    const titulos: string[] = [titulo()!];
+    for (let i = 0; i < 6; i++) { seguinte(); titulos.push(titulo()!); }
+    expect(titulos).toEqual(["O que se faz", "O cliente mantém o pavimento?", "O cliente mantém a sanita e a base de duche?", "Mais produtos", "Escolhas do cliente", "O que o cliente fornece", "Resumo"]);
+    expect(vivo()).toBe("Passo 7 de 7: Resumo");
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 3 }));
+  });
+
+  it("parte já preenchido: os serviços do pacote com medida vêm ligados; a troca mostra a resposta sugerida sem a escolher", () => {
+    const { S, d } = preparar();
+    render(<Montar S={S} d={d} />);
+    expect(screen.getByRole("button", { name: /^Demolição/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Remodelação completa" })).toHaveAttribute("aria-pressed", "true");
+    seguinte();
+    const troca = screen.getByRole("button", { name: /^Troca/ });
+    expect(troca).toHaveTextContent("Sugerido"); // com demolição, costuma trocar-se
+    expect(troca).toHaveAttribute("aria-pressed", "false");
+    expect(d.visita.manter?.pav).toBeUndefined();
+  });
+
+  it("os modelos rápidos ligam o conjunto e o 'Desfazer' repõe", () => {
+    const { S, d } = preparar();
+    render(<Montar S={S} d={d} />);
+    fireEvent.click(screen.getByRole("button", { name: "Só louças" }));
+    expect(screen.getByRole("button", { name: "Só louças" })).toHaveAttribute("aria-pressed", "true");
+    expect(d.visita.off).toEqual(expect.arrayContaining(["demol", "canal", "revest", "pav"]));
+    expect(d.visita.off).not.toContain("loucas");
+    expect(screen.getByRole("status")).toHaveTextContent("4 serviços mudaram");
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
+    expect(d.visita.off).toEqual([]);
+    expect(screen.getByRole("button", { name: "Remodelação completa" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("ao voltar à etapa, abre no passo onde se ficou", () => {
+    const { S, d } = preparar();
+    const { unmount } = render(<Montar S={S} d={d} />);
+    seguinte(); seguinte(); seguinte();
+    expect(titulo()).toBe("Mais produtos");
+    unmount();
+    render(<Montar S={S} d={d} />);
+    expect(titulo()).toBe("Mais produtos");
+  });
+
+  it("os serviços por fase da obra: um serviço só uma vez, e o seletor de fase cruza com a área", () => {
+    const { S, d } = preparar();
+    render(<Montar S={S} d={d} />);
+    const fases = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("list").map((l) => l.getAttribute("aria-label"));
+    expect(fases[0]).toMatch(/^Fase 1/);
+    expect([...fases].sort()).toEqual(fases); // pela ordem 1 → 4
+    const titulos = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("listitem").map((li) => li.getAttribute("title"));
+    expect(new Set(titulos).size).toBe(titulos.length);
+    fireEvent.click(screen.getByRole("button", { name: /^Fase 2/ }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Filtrar por área" })).getByRole("button", { name: "Canalização" }));
+    const grupos = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("list");
+    expect(grupos.every((g) => /^Fase 2/.test(g.getAttribute("aria-label")!))).toBe(true);
+  });
+
+  it("o resumo agrupa os serviços e os produtos por fase", () => {
+    const { S, d } = preparar();
+    d.visita.manter = { pav: "sim", loucas: "sim" };
+    render(<Montar S={S} d={d} />);
+    expect(titulo()).toBe("Resumo");
+    const crono = screen.getByRole("list", { name: "Por fase da obra" });
+    const nomes = within(crono).getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+    expect(nomes[0]).toMatch(/^Fase 1/);
+    expect(nomes).toEqual([...nomes].sort());
+    expect(within(crono).getByRole("button", { name: /^Demolição/ })).toBeInTheDocument();
+  });
+});

@@ -173,7 +173,7 @@ export function CartaoResposta({ on, onTocar, titulo, sub, disabled, sugerido }:
 }) {
   return (
     <motion.button type="button" aria-pressed={on} onClick={onTocar} disabled={disabled} {...PRESS}
-      className="relative flex min-h-16 w-full items-center gap-3 rounded-xl border border-input bg-card px-4 py-3 text-left shadow-[0_1px_2px_hsl(var(--foreground)/0.05)] outline-none transition-[border-color] duration-150 hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-70">
+      className="relative flex h-full min-h-16 w-full items-center gap-3 rounded-xl border border-input bg-card px-4 py-3 text-left shadow-[0_1px_2px_hsl(var(--foreground)/0.05)] outline-none transition-[border-color] duration-150 hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-70">
       <Acento on={on} />
       {sugerido && !on && <span aria-hidden="true" className="pointer-events-none absolute -inset-px rounded-xl border-2 border-dashed border-primary/70" />}
       <span className="relative min-w-0 flex-1">

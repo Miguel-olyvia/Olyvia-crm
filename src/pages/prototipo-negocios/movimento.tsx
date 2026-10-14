@@ -128,7 +128,7 @@ export function Progresso({ total, atual, feito, rotulo }: { total: number; atua
       <div className="flex flex-1 gap-1" role="progressbar" aria-label={rotulo} aria-valuemin={1} aria-valuemax={total} aria-valuenow={atual + 1}
         aria-valuetext={`${atual + 1} de ${total}`}>
         {Array.from({ length: total }, (_, j) => (
-          <span key={j} className="relative h-1.5 flex-1 rounded-full bg-muted">
+          <span key={j} className="relative h-1.5 flex-1 rounded-full bg-foreground/[0.09]">
             <motion.span className="absolute inset-0 origin-left rounded-full bg-primary" initial={false}
               animate={{ scaleX: j < atual || (j === atual && feito) ? 1 : 0 }} transition={t} />
             {j === atual && (

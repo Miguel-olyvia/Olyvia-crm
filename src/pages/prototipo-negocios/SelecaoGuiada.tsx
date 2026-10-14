@@ -6,7 +6,7 @@
 // ("12 m² · da visita"), com um "Mudar" discreto no cartão escolhido. A lógica está em selecao.ts e forneceCliente.ts.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, LayoutGroup, motion, useIsPresent } from "framer-motion";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { itemCatalogo } from "./catalogo";
@@ -300,7 +300,7 @@ function TituloFase({ nome, escolhidos }: { nome: string; escolhidos?: number })
   return (
     <div className="sticky top-0 z-10 -mx-4 flex min-h-10 items-baseline gap-3 bg-background/90 px-4 pb-2 pt-3 backdrop-blur-md md:mx-0 md:px-0">
       <h4 className="min-w-0 flex-1 text-[15px] font-semibold text-foreground">{nome}</h4>
-      {escolhidos != null && <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{escolhidos ? plural(escolhidos, "escolhido", "escolhidos") : "nenhum escolhido"}</span>}
+      {!!escolhidos && <span className="shrink-0 text-sm tabular-nums text-muted-foreground">{plural(escolhidos, "escolhido", "escolhidos")}</span>}
     </div>
   );
 }
@@ -327,14 +327,14 @@ function SeletorFase({ ativa, onMudar }: { ativa: FaseObra | null; onMudar: (f: 
     ...FASES_OBRA.map((x) => ({ f: x.n, t: String(x.n), l: `Fase ${x.n} · ${x.curto}` })),
   ];
   return (
-    <span role="group" aria-label="Filtrar por fase" className="mr-1 inline-flex shrink-0 items-center rounded-full border border-input bg-card p-0.5">
+    <span role="group" aria-label="Filtrar por fase" className="mr-1 inline-flex shrink-0 items-center rounded-full bg-foreground/[0.07] p-1">
       {ops.map((o) => {
         const on = ativa === o.f;
         return (
           <button key={o.t} type="button" aria-pressed={on} aria-label={o.l} title={o.l} onClick={() => onMudar(on && o.f != null ? null : o.f)}
-            className={cn("relative inline-flex h-10 min-w-11 items-center justify-center rounded-full px-3 text-[15px] tabular-nums outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
-              on ? "font-semibold text-primary-foreground" : "text-foreground hover:bg-muted")}>
-            {on && <motion.span layoutId="fase-ativa" aria-hidden="true" className="absolute inset-0 rounded-full bg-primary" transition={reduzir ? { duration: 0 } : MOLA} />}
+            className={cn("relative inline-flex h-10 min-w-11 items-center justify-center rounded-full px-3 text-[15px] tabular-nums outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary",
+              on ? "font-semibold text-foreground" : "text-muted-foreground hover:text-foreground")}>
+            {on && <motion.span layoutId="fase-ativa" aria-hidden="true" className="absolute inset-0 rounded-full bg-card shadow-[0_1px_3px_hsl(var(--foreground)/0.18)]" transition={reduzir ? { duration: 0 } : MOLA} />}
             <span className="relative">{o.t}</span>
           </button>
         );
@@ -379,7 +379,7 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
     const pos = new Map(visiveis.map((t, j) => [t.sid, j]));
     const ord = [...mudados].sort((a, b) => (pos.get(a) ?? 99) - (pos.get(b) ?? 99));
     setCascataDe(new Map(ord.map((sid, j) => [sid, j * 0.06])));
-    avisar(`${m.nome}: ${plural(mudados.length, "serviço mudou", "serviços mudaram")}`, () => {
+    avisar(plural(mudados.length, "serviço mudou", "serviços mudaram"), () => {
       run(() => desfazerModelo(A, d, mudados));
       setCascataDe(new Map(ord.map((sid, j) => [sid, j * 0.06])));
     });
@@ -398,13 +398,15 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
   return (
     <div className="space-y-4">
       {/* modelos rápidos: um toque liga o conjunto (e o aviso em baixo deixa desfazer) */}
-      <div role="group" aria-label="Modelos rápidos" className="grid grid-cols-3 gap-2">
+      <div role="group" aria-label="Modelos rápidos" className="flex flex-wrap items-center gap-2">
+        <span className="w-full text-sm text-muted-foreground">Começar com um modelo</span>
         {MODELOS_RAPIDOS.map((m) => {
           const on = atual === m.id;
           return (
             <motion.button key={m.id} type="button" aria-pressed={on} onClick={() => usarModelo(m)} title={m.desc} whileTap={{ scale: 0.96 }} transition={MOLA_CARTAO}
-              className={cn("relative flex min-h-[60px] items-center rounded-xl border px-3 py-2 text-left text-[15px] font-medium leading-snug outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                on ? "border-2 border-primary bg-primary/[0.06] text-foreground" : "border-input bg-card text-foreground hover:border-foreground/30")}>
+              className={cn("relative inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-[15px] font-medium outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                on ? "border-primary bg-primary/[0.08] text-foreground ring-1 ring-primary" : "border-input bg-card text-foreground hover:border-foreground/30")}>
+              {on && <Check className="-ml-1 h-4 w-4 text-primary" strokeWidth={3} aria-hidden="true" />}
               {m.nome}
             </motion.button>
           );
@@ -570,11 +572,11 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
         <LayoutGroup>
           <div className="flex gap-2" role="group" aria-label={o.pergunta}>
             {/* o escolhido expande-se (layout); o outro encolhe, sem sair do sítio */}
-            <motion.div layout transition={MOLA} className={cn("min-w-0", mantem ? "flex-[1.6]" : "flex-1")}>
+            <motion.div layout transition={MOLA} className={cn("flex min-w-0", mantem ? "flex-[1.6]" : "flex-1")}>
               <CartaoResposta on={mantem} titulo="Mantém" sub="Sem produto" sugerido={sug?.r === "sim" ? sug.porque : undefined} onTocar={() => responder("sim")} />
             </motion.div>
-            <motion.div layout transition={MOLA} className={cn("min-w-0", trocaOn ? "flex-[1.6]" : "flex-1")}>
-              <CartaoResposta on={trocaOn} titulo="Troca" sub={trocaOn ? "Escolha abaixo" : "Escolher abaixo"} sugerido={sug?.r === "nao" ? sug.porque : undefined} onTocar={() => responder("nao")} />
+            <motion.div layout transition={MOLA} className={cn("flex min-w-0", trocaOn ? "flex-[1.6]" : "flex-1")}>
+              <CartaoResposta on={trocaOn} titulo="Troca" sub="Novo produto" sugerido={sug?.r === "nao" ? sug.porque : undefined} onTocar={() => responder("nao")} />
             </motion.div>
           </div>
         </LayoutGroup>
@@ -789,7 +791,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
       const img = doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(p.n);
       const sNome = doCat?.servico ? nomeSvc(S, doCat.servico) : undefined;
       const f = faseDoProduto(K as ComFases, { servico: doCat?.servico, img }, sNome ? { nome: sNome } : undefined);
-      return { k: "p:" + p.id, f, nome: encurtar(p.n).nome, det: p.cliente ? "Fornecido pelo cliente" : `${p.q !== 1 ? `${nfmt(p.q)} × ` : ""}${eur(precoProduto(p))} €`,
+      return { k: "p:" + p.id, f, nome: encurtar(p.n).nome, det: [doCat?.marca, `${nfmt(p.q)} ${p.un}`, p.cliente ? "fornecido pelo cliente" : `${eur(precoProduto(p))} €`].filter(Boolean).join(" · "),
         fig: <Ilustracao k={img} className="h-6 w-6" />, passo: passoDoProduto(p.no ?? null) };
     }),
   ];
