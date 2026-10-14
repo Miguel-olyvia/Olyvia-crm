@@ -359,9 +359,9 @@ export function InventarioSimples(ctx: Ctx) {
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Inventário</h1>
       <p className="mt-2 text-lg text-muted-foreground">{frase ? frase + "." : "Nada pendente."} As encomendas de cliente nascem do contrato; o que falta em stock vai ao fornecedor.</p>
-      <div role="tablist" aria-label="Inventário" className="mt-6 flex gap-1 overflow-x-auto border-b border-border">
+      <div role="tablist" aria-label="Inventário" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {ABAS.map(([k, t, n]) => (
-          <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={() => setAba(k)}
+          <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={(ev) => { setAba(k); ev.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); }}
             className={cn("inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-[15px] font-medium transition-colors", aba === k ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
             {t}{n > 0 && <span className="rounded-full bg-primary px-1.5 text-xs font-semibold tabular-nums text-primary-foreground">{n}</span>}
           </button>
@@ -418,7 +418,7 @@ export function InventarioSimples(ctx: Ctx) {
                   <span className="min-w-0 flex-1 font-medium">{m.n}</span>
                   <span className="flex flex-wrap gap-x-4 text-sm tabular-nums">
                     <span className={cn(v <= 0 ? "text-warning" : "")}>{nfmt(Math.max(0, v))} {m.un} livres</span>
-                    {reservado[k] ? <span className="text-muted-foreground">{nfmt(reservado[k])} reservados</span> : null}
+                    {reservado[k] ? <span className="text-muted-foreground">{nfmt(reservado[k])} {reservado[k] === 1 ? "reservado" : "reservados"}</span> : null}
                     {aChegar[k] ? <span className="text-primary">{nfmt(aChegar[k])} a chegar</span> : null}
                   </span>
                 </li>
