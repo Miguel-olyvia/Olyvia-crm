@@ -85,7 +85,7 @@ export function NovaVersao({ ctx, d, inicio = "orcamento", ...c }: P & { inicio?
   const painel = useRef<HTMLDivElement>(null);
   useEffect(() => { if (passo) painel.current?.focus({ preventScroll: true }); }, [passo]);
   const o = d.orc;
-  if (d.fase !== 3 || !o?.enviada || o.aceite) return null;
+  if (d.fase !== 3 || !o?.enviada || o.contrato === "assinado") return null;
   const n = versaoAtual(o), total = tot(d, ctx.S).pf;
   const alternar = (m: string) => setMotivos((antes) => {
     const novo = antes.includes(m) ? antes.filter((x) => x !== m) : [...antes, m];
@@ -186,7 +186,7 @@ export function VersoesProposta({ ctx, d }: P) {
             <span className="min-w-0 text-[15px]">
               <span className="block"><span className="tabular-nums text-muted-foreground line-through decoration-muted-foreground/50">{eur(v.total)} €</span>
                 {i > 0 && <span className="text-muted-foreground"> · {dif(v.total, o.versoes![i - 1].total)}</span>}
-                <span className="text-muted-foreground"> · enviada {quando(v.enviada)}, substituída {quando(v.substituida)}</span></span>
+                <span className="text-muted-foreground"> · enviada {quando(v.enviada)}{v.aceite ? `, aceite ${quando(v.aceite)}` : ""}, substituída {quando(v.substituida)}</span></span>
               {(v.motivos.length > 0 || v.nota) && <span className="block text-muted-foreground">O cliente pediu: {[...v.motivos, v.nota].filter(Boolean).join(", ").toLowerCase()}</span>}
             </span>
           </li>
@@ -208,7 +208,7 @@ export function CaminhoOrcamento({ ctx, d }: P) {
   // o painel aberto é o do momento em que se abriu: ao começar a versão seguinte, não reabre o "Voltar à visita"
   const [abertoEm, setAberto] = useState<string | null>(null);
   const o = d.orc;
-  if (d.fase !== 3 || !o || o.aceite) return null;
+  if (d.fase !== 3 || !o || o.contrato === "assinado") return null;
   const n = versaoAtual(o), momento = `${n}:${o.enviada ? "enviada" : "rascunho"}`;
   const aberto = abertoEm === momento;
   if (aberto) return o.enviada
@@ -218,7 +218,9 @@ export function CaminhoOrcamento({ ctx, d }: P) {
     <section aria-label="Estado da proposta" className="flex flex-col gap-3 rounded-2xl border border-border bg-muted/40 p-4 sm:flex-row sm:items-center sm:justify-between">
       <p className="text-[15px]">
         {o.enviada
-          ? <>Proposta{n > 1 ? ` v${n}` : ""} no portal do cliente {o.enviada.startsWith("hoje") ? "desde hoje" : `desde ${o.enviada}`}. <span className="text-muted-foreground">Se ele pedir mudanças, faz-se uma nova versão.</span></>
+          ? o.aceite
+            ? <>Proposta{n > 1 ? ` v${n}` : ""} aceite pelo cliente {o.aceite.startsWith("hoje") ? "hoje" : `a ${o.aceite}`}. <span className="text-muted-foreground">O contrato ainda não está assinado: se o cliente mudar de ideias, faz-se uma nova versão{o.contrato === "enviado" ? " (o contrato enviado fica anulado)" : ""}.</span></>
+            : <>Proposta{n > 1 ? ` v${n}` : ""} no portal do cliente {o.enviada.startsWith("hoje") ? "desde hoje" : `desde ${o.enviada}`}. <span className="text-muted-foreground">Se ele pedir mudanças, faz-se uma nova versão.</span></>
           : <>{n > 1 ? <b className="font-semibold">Versão {n}, em preparação. </b> : null}<span className="text-muted-foreground">Faltou alguma coisa na visita? Pode voltar e o orçamento refaz-se.</span></>}
       </p>
       <Button variant="outline" onClick={() => setAberto(momento)} className="min-h-11 shrink-0 text-[15px]">

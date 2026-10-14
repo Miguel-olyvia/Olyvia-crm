@@ -182,7 +182,7 @@ export interface Orcamento {
   versoes?: VersaoProposta[];
 }
 /** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
-export interface VersaoProposta { n: number; enviada: string; substituida: string; total: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
+export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
 /** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
 /** O número da proposta que está em cima da mesa (1 se nunca se refez). */
@@ -1101,10 +1101,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
      *  e abre-se a seguinte, para mexer só no orçamento ou também na visita (que então reabre). */
     novaVersao(id: number, motivos: string[], nota: string, onde: "orcamento" | "visita") {
       const d = deal(id), o = d.orc;
-      if (!o?.enviada || o.aceite) { avisar({ msg: "Não há proposta para refazer", sub: o?.aceite ? "O cliente já aceitou esta proposta" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
+      // 14/10: também depois de aceite, enquanto o contrato não está assinado (o contrato enviado fica anulado)
+      if (!o?.enviada || o.contrato === "assinado" || d.fase !== 3) { avisar({ msg: "Não há proposta para refazer", sub: o?.contrato === "assinado" ? "O contrato já foi assinado" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
       const n = versaoAtual(o);
-      (o.versoes ??= []).push({ n, enviada: o.enviada, substituida: agora(), total: tot(d, S).pf, motivos: [...motivos], nota: nota.trim() || undefined, onde });
-      o.enviada = null; o.verif = false; o.aprov = null;
+      (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, motivos: [...motivos], nota: nota.trim() || undefined, onde });
+      if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
+      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
       log(d, `Proposta v${n} substituída${porque ? ": o cliente pediu " + porque : ""}`, "w");
       if (onde === "visita") {

@@ -71,7 +71,7 @@ describe("versões da proposta", () => {
     expect(d.hist[0].t).toMatch(/^Proposta v2 enviada/);
   });
 
-  it("não refaz uma proposta aceite nem uma por enviar", () => {
+  it("não refaz uma proposta com o contrato assinado nem uma por enviar", () => {
     const { S, A } = preparar();
     const aceite = S.deals.find((x) => x.id === 1027)!;
     A.novaVersao(aceite.id, ["Baixar o preço"], "", "orcamento");
@@ -80,5 +80,14 @@ describe("versões da proposta", () => {
     A.novaVersao(d.id, ["Baixar o preço"], "", "orcamento");
     A.novaVersao(d.id, ["Baixar o preço"], "", "orcamento"); // a v2 ainda não foi enviada: não há o que substituir
     expect(d.orc!.versoes).toHaveLength(1);
+  });
+
+  it("aceite mas sem contrato assinado: faz-se a versão seguinte e o contrato enviado fica anulado", () => {
+    const { A, d } = preparar();
+    Object.assign(d.orc!, { aceite: "13/10", contrato: "enviado" });
+    A.novaVersao(d.id, ["Outros materiais"], "", "orcamento");
+    expect(d.orc!).toMatchObject({ aceite: null, contrato: null, enviada: null });
+    expect(d.orc!.versoes![0]).toMatchObject({ n: 1, aceite: "13/10" });
+    expect(d.hist.some((h) => h.t.includes("Contrato CT 2026/1031 anulado"))).toBe(true);
   });
 });
