@@ -9,6 +9,9 @@ import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { diasPrevistos, tarefasPrevistas, type TarefaPrevista } from "./ganttOrcamento";
 import { LINHA_DEMOLICAO } from "./entulho";
 
+/** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). */
+export const COR_FASE: Record<number, string> = { 1: "#9074dc", 2: "#7452d1", 3: "#5a36bf", 4: "#432791" };
+
 /* ------------------------------------------------------------------ o calendário */
 const doisD = (n: number) => String(n).padStart(2, "0");
 /** A data local em "aaaa-mm-dd" (sem fuso: é um dia de obra, não um instante). */
@@ -112,10 +115,11 @@ export interface Plano {
 /** A fase de uma linha de materiais, pela descrição ("móveis, bancada, torneira" → 4; "cerâmica e cola" → 3). */
 export const faseDosMateriais = (descricao: string): FaseObra => fasesPadrao(descricao)[0];
 
-export function planoObra(d: Negocio, S: Estado): Plano {
+/** `equipa`: pessoas por ofício, para pré-ver o reforço (por omissão, as do orçamento). */
+export function planoObra(d: Negocio, S: Estado, equipa?: number): Plano {
   const o = d.orc;
   if (!o) return { tarefas: [], fases: [], dias: 0, custo: 0, preco: 0 };
-  const T = tarefasPrevistas(d, S);
+  const T = tarefasPrevistas(d, S, equipa);
   const desc = 1 - (o.desconto || 0) / 100;
   const fases: FasePlano[] = FASES_OBRA.map((f) => ({ n: f.n, nome: f.nome, curto: f.curto, inicio: 0, fim: 0, tarefas: [], custoTarefas: 0, custoMat: 0, custo: 0, preco: 0, margem: 0 }));
   const F = (n: FaseObra) => fases[n - 1];
@@ -158,4 +162,81 @@ export function curvaCusto(P: Plano): { x: number; c: number }[] {
   const out: { x: number; c: number }[] = [];
   for (let x = 0; x <= fim + 1e-9; x += 0.5) out.push({ x, c: custoAte(P, x) });
   return out;
+}
+
+/* ------------------------------------------------------------------ os pagamentos e a tesouraria */
+// O cliente paga em prestações (as condições de pagamento da proposta); a obra gasta ao ritmo da curva. A tesouraria
+// é o que já se recebeu menos o que já se gastou, sem IVA (o IVA não é da empresa). "Por fases" (14/10) é o plano
+// sugerido para a obra nunca ficar a descoberto: cada prestação paga o que se gasta até à seguinte.
+
+/** Uma prestação: a percentagem do total e quando se recebe. `fase`: 0 = na adjudicação; 1–3 = no fim dessa fase; "fim". */
+export interface Prestacao { l: string; p: number; fase: 0 | FaseObra | "fim" }
+
+export const PAGAMENTO_FASES = "Por fases";
+
+/** O dia (em dias úteis desde o início) em que a prestação se recebe. */
+export function diaDaPrestacao(P: Plano, x: Prestacao): number {
+  if (x.fase === 0) return 0;
+  if (x.fase === "fim") return P.dias;
+  return P.fases.find((f) => f.n === x.fase)?.fim ?? P.dias;
+}
+
+/** As prestações das condições de pagamento escolhidas (por omissão, 50% + 50% no fim). */
+export function prestacoes(pagamento: string | undefined, guardadas?: Prestacao[] | null): Prestacao[] {
+  const pg = pagamento || "50% + 50% no fim";
+  if (pg === PAGAMENTO_FASES && guardadas?.length) return guardadas;
+  if (pg.startsWith("100")) return [{ l: "Na adjudicação", p: 1, fase: 0 }];
+  if (pg.startsWith("30")) return [{ l: "Na adjudicação", p: 0.3, fase: 0 }, { l: "A meio da obra", p: 0.4, fase: 2 }, { l: "No fim da obra", p: 0.3, fase: "fim" }];
+  return [{ l: "Na adjudicação", p: 0.5, fase: 0 }, { l: "No fim da obra", p: 0.5, fase: "fim" }];
+}
+
+/** O que já se recebeu até ao dia `x` (sem IVA). */
+export function recebidoAte(P: Plano, prest: Prestacao[], x: number): number {
+  return r2(prest.reduce((a, t) => a + (diaDaPrestacao(P, t) <= x + 1e-9 ? t.p * P.preco : 0), 0));
+}
+
+export interface Tesouraria {
+  pontos: { x: number; gasto: number; recebido: number; saldo: number }[];
+  /** O pior momento: o saldo mais baixo e quando. */
+  pior: { x: number; saldo: number };
+  descoberto: boolean;
+}
+export function tesouraria(P: Plano, prest: Prestacao[]): Tesouraria {
+  const pontos = curvaCusto(P).map(({ x, c }) => { const rec = recebidoAte(P, prest, x); return { x, gasto: c, recebido: rec, saldo: r2(rec - c) }; });
+  // os pagamentos chegam no fim do dia da fase; o gasto desse dia já lá está: olha-se também mesmo antes de cada prestação
+  for (const t of prest) {
+    const x = diaDaPrestacao(P, t) - 0.01;
+    if (x > 0) { const c = custoAte(P, x), rec = recebidoAte(P, prest, x); pontos.push({ x, gasto: c, recebido: rec, saldo: r2(rec - c) }); }
+  }
+  pontos.sort((a, b) => a.x - b.x);
+  const pior = pontos.reduce((m, p) => (p.saldo < m.saldo ? { x: p.x, saldo: p.saldo } : m), { x: 0, saldo: Infinity });
+  return { pontos, pior, descoberto: pior.saldo < -0.5 };
+}
+
+/**
+ * O plano "Por fases": uma prestação na adjudicação, uma no fim de cada fase (menos a última) e a do fim da obra.
+ * Cada uma cobre o que se gasta até à seguinte (com 5% de folga), arredondada aos 5%; a do fim fica com o resto,
+ * e nunca menos de 10% (o cliente guarda uma parte para o fim). Como se faz no comércio: a adjudicação é pelo menos
+ * 25% (o sinal) e uma prestação a meio é pelo menos 10%; uma que não faz falta (o já recebido chega) sai.
+ */
+const SINAL = 0.25, MIN_PRESTACAO = 0.1;
+export function sugerirPorFases(P: Plano): Prestacao[] {
+  if (!(P.preco > 0)) return prestacoes(undefined);
+  const marcos: Prestacao[] = [{ l: "Na adjudicação", p: 0, fase: 0 }];
+  const comDias = P.fases.filter((f) => f.fim > f.inicio);
+  for (const f of comDias.slice(0, -1)) marcos.push({ l: `No fim da fase ${f.n} (${f.curto.toLowerCase()})`, p: 0, fase: f.n });
+  marcos.push({ l: "No fim da obra", p: 0, fase: "fim" });
+  let acum = 0;
+  for (let k = 0; k < marcos.length - 1; k++) {
+    const ate = diaDaPrestacao(P, marcos[k + 1]) - 0.01;
+    const precisa = (custoAte(P, ate) * 1.05) / P.preco;
+    let alvo = Math.ceil((precisa - 1e-9) * 20) / 20; // aos 5%
+    if (k === 0) alvo = Math.max(alvo, SINAL);
+    else if (alvo > acum + 1e-9) alvo = Math.max(alvo, acum + MIN_PRESTACAO);
+    alvo = Math.min(0.9, alvo); // deixa pelo menos 10% para o fim
+    const p = Math.max(0, r2(alvo - acum));
+    marcos[k].p = p; acum = r2(acum + p);
+  }
+  marcos[marcos.length - 1].p = r2(1 - acum);
+  return marcos.filter((m, i) => m.p > 0 || i === marcos.length - 1);
 }

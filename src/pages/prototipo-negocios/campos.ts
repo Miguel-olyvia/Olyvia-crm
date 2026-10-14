@@ -182,7 +182,7 @@ export const PROPOSTA: Grupo[] = [
       { k: "validade", l: "Validade", t: "escolha", op: ["15 dias", "30 dias", "60 dias"] },
       { k: "prazo_exec", l: "Prazo de execução", t: "contador", min: 1, max: 60, un: "dias úteis" },
       { k: "inicio_prev", l: "Início previsto", t: "data" },
-      { k: "pagamento", l: "Condições de pagamento", t: "escolha", op: ["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%"], papel: "fatura" },
+      { k: "pagamento", l: "Condições de pagamento", t: "escolha", op: ["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%", "Por fases"], papel: "fatura" },
       { k: "garantia", l: "Garantia", t: "escolha", op: ["1 ano", "2 anos", "5 anos"] },
       { k: "notas_cliente", l: "Notas para o cliente", t: "texto_longo" },
     ],

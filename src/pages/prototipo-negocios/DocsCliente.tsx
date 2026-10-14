@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
+import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
 
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
 
@@ -44,10 +45,17 @@ function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof to
     </div>
   );
 }
-export function tranches(d: Negocio, total: number): { l: string; p: number; v: number }[] {
-  const pg = d.f.pagamento || "50% + 50% no fim";
-  const ps = pg.startsWith("100") ? [[ "Na adjudicação", 1 ]] : pg.startsWith("30") ? [["Na adjudicação", 0.3], ["A meio da obra", 0.4], ["No fim da obra", 0.3]] : [["Na adjudicação", 0.5], ["No fim da obra", 0.5]];
-  return (ps as [string, number][]).map(([l, p]) => ({ l, p, v: total * p }));
+/** As prestações das condições de pagamento (com "Por fases", as guardadas no plano da obra: planoObra.ts). */
+export function tranches(d: Negocio, total: number, S?: Estado): { l: string; p: number; v: number; quando?: string }[] {
+  const pr = prestacoes(d.f.pagamento, d.orc?.pagFases);
+  // com o estado, a data prevista de cada prestação (o dia em que acaba a fase, pelo plano da obra)
+  let quando: ((t: (typeof pr)[number]) => string | undefined) | null = null;
+  if (S && d.orc) {
+    const P = planoObra(d, S), n = Math.max(1, Math.ceil(P.dias - 1e-9));
+    const cal = diasDaObra(d.orc.inicioObra ? deIso(d.orc.inicioObra) : iniciosRapidos(new Date())[0].data, n);
+    quando = (t) => (t.fase === 0 ? undefined : dataCurta(cal[Math.min(n - 1, Math.max(0, Math.ceil(diaDaPrestacao(P, t) - 1e-9) - 1))]));
+  }
+  return pr.map((t) => ({ l: t.l, p: t.p, v: total * t.p, quando: quando?.(t) }));
 }
 const data = (iso?: string) => (iso ? iso.split("-").reverse().join("/") : "a definir");
 function fimPrevisto(inicio?: string, dias?: string): string {
@@ -88,6 +96,43 @@ function Totais({ d, S }: { d: Negocio; S: Estado }) {
   return <QuadroIva T={totais(d, S)} />;
 }
 
+/* ------------------------------------------------------------------ como vai decorrer a obra (14/10) */
+/** Na proposta: as fases da obra com as datas (do plano da obra do orçamento) e quando se paga cada prestação. Sem custos. */
+function ObraNaProposta({ S, d }: { S: Estado; d: Negocio }) {
+  const P = planoObra(d, S);
+  const fases = P.fases.filter((f) => f.fim > f.inicio);
+  if (!fases.length) return null;
+  const n = Math.max(1, Math.ceil(P.dias - 1e-9));
+  const inicio = d.orc?.inicioObra ? deIso(d.orc.inicioObra) : iniciosRapidos(new Date())[0].data;
+  const cal = diasDaObra(inicio, n);
+  const dia = (x: number) => dataCurta(cal[Math.min(cal.length - 1, Math.max(0, x))]);
+  const periodo = (a: number, b: number) => { const i = Math.floor(a), j = Math.ceil(b - 1e-9) - 1; return j <= i ? dia(i) : `${dia(i)} a ${dia(j)}`; };
+  return (
+    <section aria-label="Como vai decorrer a obra">
+      <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">Como vai decorrer a obra</p>
+      {/* a obra numa barra: cada fase com a sua largura (os dias) */}
+      <div className="flex h-3 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+        {fases.map((f) => <span key={f.n} className="h-full border-r-2 border-white last:border-r-0" style={{ width: `${((f.fim - f.inicio) / P.dias) * 100}%`, background: COR_FASE[f.n] }} />)}
+      </div>
+      <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+        {fases.map((f) => (
+          <li key={f.n} className="flex gap-3 rounded-xl border border-slate-200 p-3">
+            <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />
+            <span className="min-w-0">
+              <span className="block font-medium">{f.n}. {f.nome}</span>
+              <span className="block text-sm text-slate-600">{periodo(f.inicio, f.fim)} · {nfmt(f.fim - f.inicio)} {f.fim - f.inicio === 1 ? "dia útil" : "dias úteis"}</span>
+              <span className="block text-sm text-slate-500">{f.tarefas.map((t) => t.nome).join(", ")}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-sm text-slate-600">
+        Início previsto a {dia(0)} e fim a {dia(n - 1)}, só em dias úteis (sem fins de semana nem feriados).
+      </p>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ proposta */
 export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
   const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0;
@@ -114,10 +159,11 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
         {d.visita.nec.length > 0 && <p className="mt-2 text-sm text-slate-600">Equipamentos escolhidos: {d.visita.nec.join(", ")}.</p>}
       </section>
       <Totais d={d} S={S} />
+      <ObraNaProposta S={S} d={d} />
       <section className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2">
         <div><p className="text-xs uppercase tracking-wider text-slate-500">Prazo</p><p>{d.f.prazo_exec ? `${d.f.prazo_exec} dias úteis` : "a definir"}{d.f.inicio_prev ? `, a começar a ${data(d.f.inicio_prev)}` : ""}</p></div>
         <div><p className="text-xs uppercase tracking-wider text-slate-500">Validade</p><p>{d.f.validade || "30 dias"}</p></div>
-        <div><p className="text-xs uppercase tracking-wider text-slate-500">Pagamento</p><p>{tranches(d, T.total).map((t) => `${Math.round(t.p * 100)}% ${t.l.toLowerCase()} (${eur(t.v)} €)`).join(" · ")}</p></div>
+        <div><p className="text-xs uppercase tracking-wider text-slate-500">Pagamento</p><p>{tranches(d, T.total, S).map((t) => `${Math.round(t.p * 100)}% ${t.l.charAt(0).toLowerCase() + t.l.slice(1)}${t.quando ? `, ${t.quando}` : ""} (${eur(t.v)} €)`).join(" · ")}</p></div>
         <div><p className="text-xs uppercase tracking-wider text-slate-500">Garantia</p><p>{d.f.garantia || "2 anos"} sobre a mão de obra</p></div>
       </section>
       {d.f.notas_cliente && <p className="text-slate-700">{d.f.notas_cliente}</p>}

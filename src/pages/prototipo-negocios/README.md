@@ -706,3 +706,28 @@ O pedido do Ruben: "o orçamento tem de ser dinâmico, interativo, com mapa de G
   - uma linha tracejada marca o preço ao cliente, e ao lado aparece o lucro previsto;
   - ao passar o rato, mostra a data e o que já se gastou.
 - **Testes:** `planoObra.test.ts` (a Páscoa, os feriados, os dias úteis, as fases a somar o orçamento, a curva e o desconto) e `PlanoObraOrcamento.test.tsx` (as barras, ← →, as fases, o início e o orçamento enviado). Em `ganttOrcamento.test.ts`, a pintura passa a vir antes das louças.
+
+### Pagamentos, tesouraria, reforço e a obra na proposta (14/10/2026)
+- **Tesouraria** (`planoObra.ts`: `prestacoes`, `recebidoAte`, `tesouraria`):
+  - cada prestação tem a percentagem e o momento em que se recebe: na adjudicação, no fim de uma fase ou no fim da obra;
+  - o saldo é o que se recebeu menos o que se gastou, sem IVA, e o pior momento diz quanto e quando a obra fica a descoberto;
+  - na curva, a linha cinzenta em degraus é o recebido, e os troços a descoberto ficam a vermelho claro.
+- **"Por fases"** (`sugerirPorFases`), uma 4.ª condição de pagamento (também no campo "Condições de pagamento"):
+  - há uma prestação na adjudicação, uma no fim de cada fase (menos a última) e uma no fim da obra;
+  - cada uma cobre o que se gasta até à seguinte, mais 5% de folga, arredondada aos 5%;
+  - o sinal é de pelo menos 25%, uma prestação intermédia de pelo menos 10%, e uma que não faz falta sai;
+  - o fim fica com pelo menos 10%.
+
+  Na cozinha da Carla Nunes, por exemplo: com 50% + 50%, a obra fica a descoberto até 1.762 €; "Por fases" dá 25% / 55% (no fim dos revestimentos, antes dos móveis) / 20%, sem nunca ficar a descoberto.
+- **O painel "Pagamentos e tesouraria":**
+  - as 4 condições aparecem em cartões, cada um com "sempre coberta" ou "a descoberto até X €";
+  - por baixo, as prestações com a data e o valor com IVA, e a frase do pior momento;
+  - escolher guarda `d.f.pagamento` e, com "Por fases", também `Orcamento.pagFases`;
+  - se o plano mudar depois, aparece "recalcular as prestações por fases".
+- **O reforço** (`Orcamento.equipa`): "1 pessoa / 2 pessoas" por ofício.
+  - Com 2 pessoas, as mesmas horas cabem em metade dos dias e o custo não muda. O botão mostra quantos dias se ganham.
+  - Os dias mudados à mão passam a contar com as horas das duas pessoas.
+  - A demolição tem equipa própria e fica de fora.
+- **Na proposta do cliente** (`DocsCliente.tsx`, "Como vai decorrer a obra"):
+  - uma barra com as fases e a sua largura em dias, e um cartão por fase com as datas e os trabalhos, sem custos;
+  - o pagamento leva as datas das prestações (`tranches(d, total, S)`).

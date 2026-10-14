@@ -8,19 +8,20 @@
 // Cores: uma rampa do acento, da fase 1 (clara) à 4 (escura); o texto nunca vai em cima das barras (contraste).
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, CalendarDays, Minus, Plus, RotateCcw } from "lucide-react";
+import { AlertTriangle, CalendarDays, CheckCircle2, Minus, Plus, RotateCcw, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { iconeOficio } from "./LinhasOrcamento";
 import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, prazoProposta, type TarefaPrevista } from "./ganttOrcamento";
 import {
-  curvaCusto, dataCurta, deIso, diaSemana, diasDaObra, feriadosSaltados, iniciosRapidos, isoDia, nomeMes, planoObra, type FasePlano,
+  COR_FASE, PAGAMENTO_FASES, curvaCusto, dataCurta, deIso, diaDaPrestacao, diaSemana, diasDaObra, feriadosSaltados, iniciosRapidos, isoDia, nomeMes, planoObra,
+  prestacoes, recebidoAte, sugerirPorFases, tesouraria, type FasePlano, type Plano, type Prestacao,
 } from "./planoObra";
+import { totais } from "./DocsCliente";
 import { Contagem, MOLA, useReduzir, vibrar } from "./movimento";
 
-/** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). */
-export const COR_FASE: Record<number, string> = { 1: "#9074dc", 2: "#7452d1", 3: "#5a36bf", 4: "#432791" };
+export { COR_FASE } from "./planoObra";
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
 const eur0 = (n: number) => `${eur(n)} €`;
 
@@ -29,6 +30,8 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const o = d.orc!, fechado = !!o.enviada, direcao = S.role === "direcao";
   const reduzir = useReduzir();
   const P = planoObra(d, S);
+  const equipa = o.equipa ?? 1;
+  const alternativa = planoObra(d, S, equipa === 1 ? 2 : 1); // para mostrar quantos dias se ganham (ou perdem)
   const [faseOn, setFaseOn] = useState<number | null>(null);
   const [aberta, setAberta] = useState<string | null>(null);
   const [arrasto, setArrasto] = useState<string | null>(null);
@@ -92,6 +95,8 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   };
 
   const tarefaAberta = P.tarefas.find((t) => t.chave === aberta) ?? null;
+  const sugerido = sugerirPorFases(P);
+  const prestAtual = d.f.pagamento === PAGAMENTO_FASES ? (o.pagFases?.length ? o.pagFases : sugerido) : prestacoes(d.f.pagamento);
 
   return (
     <section aria-labelledby={`plano-${d.id}`} className="space-y-4">
@@ -145,6 +150,26 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
       {delta !== 0 && (
         <p className="text-sm text-warning">Os dias mudados à mão {delta > 0 ? "somam" : "tiram"} {eur0(Math.abs(delta))} ao custo. O preço ao cliente não muda.</p>
       )}
+
+      {/* o reforço: mais gente por ofício, menos dias, as mesmas horas */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span id={`eq-${d.id}`} className="text-sm text-muted-foreground">Equipa por ofício</span>
+        <div role="group" aria-labelledby={`eq-${d.id}`} className="inline-flex rounded-full border border-input bg-card p-0.5">
+          {[1, 2].map((n) => {
+            const on = equipa === n, outroP = n === equipa ? P : alternativa;
+            const ganho = n !== equipa ? P.dias - outroP.dias : 0;
+            return (
+              <button key={n} type="button" aria-pressed={on} disabled={fechado} onClick={() => run(() => A.equipaObra(d.id, n))}
+                className={cn("min-h-10 rounded-full px-4 text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60",
+                  on ? "bg-foreground font-medium text-background" : "text-foreground hover:bg-muted")}>
+                {n === 1 ? "1 pessoa" : "2 pessoas"}
+                {ganho !== 0 && <span className={cn("ml-1.5 text-sm tabular-nums", ganho > 0 ? "text-success" : "text-muted-foreground")}>{ganho > 0 ? "−" : "+"}{dias(Math.abs(ganho))}</span>}
+              </button>
+            );
+          })}
+        </div>
+        <span className="text-sm text-muted-foreground">as mesmas horas: o custo não muda</span>
+      </div>
 
       {/* ------------------------------------------------ as fases */}
       <div role="group" aria-label="Fases da obra" className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:overflow-visible" style={{ gridTemplateColumns: `repeat(${P.fases.length}, minmax(0, 1fr))` }}>
@@ -247,9 +272,11 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
           </ul>
 
           {/* a curva do custo acumulado, alinhada com os dias */}
-          <CurvaCusto P={P} rotuloW={rotuloW} colW={colW} gradeW={gradeW} calendario={calendario} faseOn={faseOn} />
+          <CurvaCusto P={P} prest={prestAtual} rotuloW={rotuloW} colW={colW} gradeW={gradeW} calendario={calendario} faseOn={faseOn} />
         </div>
       </div>
+
+      <Pagamentos P={P} d={d} ctx={ctx} calendario={calendario} fechado={fechado} prest={prestAtual} sugerido={sugerido} />
 
       {!fechado && <p className="text-sm text-muted-foreground">Arraste a ponta de uma barra<span className="hidden sm:inline"> (ou use ← → com ela focada)</span> para mudar os dias; toque na tarefa para ver o custo.</p>}
 
@@ -260,8 +287,8 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
 }
 
 /* ================================================================== a curva */
-function CurvaCusto({ P, rotuloW, colW, gradeW, calendario, faseOn }: {
-  P: ReturnType<typeof planoObra>; rotuloW: number; colW: number; gradeW: number; calendario: Date[]; faseOn: number | null;
+function CurvaCusto({ P, prest, rotuloW, colW, gradeW, calendario, faseOn }: {
+  P: Plano; prest: Prestacao[]; rotuloW: number; colW: number; gradeW: number; calendario: Date[]; faseOn: number | null;
 }) {
   const C = curvaCusto(P);
   const [mira, setMira] = useState<number | null>(null);
@@ -272,6 +299,14 @@ function CurvaCusto({ P, rotuloW, colW, gradeW, calendario, faseOn }: {
   const linha = C.map((p, i) => `${i ? "L" : "M"}${X(p.x).toFixed(1)},${Y(p.c).toFixed(1)}`).join(" ");
   const area = `${linha} L${X(C[C.length - 1].x).toFixed(1)},${base} L0,${base} Z`;
   const ponto = mira != null ? C[mira] : null;
+  // o recebido (em degraus) e os troços a descoberto (gasto acima do recebido)
+  const TS = tesouraria(P, prest);
+  const fimX = C[C.length - 1].x;
+  const marcos = [...new Set([0, ...prest.map((t) => diaDaPrestacao(P, t))])].sort((a, b) => a - b);
+  let degraus = "";
+  marcos.forEach((x, i) => { const r = recebidoAte(P, prest, x); degraus += i === 0 ? `M0,${Y(r).toFixed(1)}` : ` H${X(x).toFixed(1)} V${Y(r).toFixed(1)}`; });
+  degraus += ` H${X(fimX).toFixed(1)}`;
+  const recFim = recebidoAte(P, prest, fimX);
   const lucro = P.preco - P.custo;
   const mover = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -300,6 +335,9 @@ function CurvaCusto({ P, rotuloW, colW, gradeW, calendario, faseOn }: {
           <text x={gradeW - 6} y={Y(P.preco) - 5} textAnchor="end" className="fill-muted-foreground text-[12px] tabular-nums">preço {eur(P.preco)} €</text>
           <line x1={0} x2={gradeW} y1={base} y2={base} stroke="hsl(var(--border))" strokeWidth={1} />
           <path d={area} fill="hsl(var(--primary))" fillOpacity={0.1} />
+          {TS.pontos.slice(0, -1).map((p, i) => { const q = TS.pontos[i + 1]; return p.saldo < -0.5 && q.x > p.x ? <rect key={i} x={X(p.x)} width={Math.max(1, X(q.x) - X(p.x))} y={Y(p.gasto)} height={Math.max(0, Y(p.recebido) - Y(p.gasto))} fill="hsl(var(--destructive))" fillOpacity={0.14} /> : null; })}
+          <path d={degraus} fill="none" stroke="hsl(var(--foreground))" strokeOpacity={0.7} strokeWidth={2} strokeLinejoin="round" />
+          <text x={X(fimX) + 8} y={Y(recFim) - 6} className="fill-muted-foreground text-[12px] tabular-nums">recebido</text>
           <path d={linha} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} strokeLinejoin="round" />
           <circle cx={X(C[C.length - 1].x)} cy={Y(C[C.length - 1].c)} r={4} fill="hsl(var(--primary))" stroke="hsl(var(--card))" strokeWidth={2} />
           <text x={X(C[C.length - 1].x) + 8} y={Y(C[C.length - 1].c) + 4} className="fill-foreground text-[12px] font-semibold tabular-nums">custo {eur(P.custo)} €</text>
@@ -315,6 +353,7 @@ function CurvaCusto({ P, rotuloW, colW, gradeW, calendario, faseOn }: {
             style={{ left: Math.min(Math.max(X(ponto.x), 90), gradeW - 90) }}>
             <span className="block text-muted-foreground">{diaTxt(ponto.x)}</span>
             <span className="block font-semibold tabular-nums">{eur(ponto.c)} € gastos</span>
+            <span className="block tabular-nums text-muted-foreground">{eur(recebidoAte(P, prest, ponto.x))} € recebidos</span>
           </div>
         )}
       </div>
@@ -363,5 +402,77 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio }: {
         </dl>
       ) : <p className="text-sm text-muted-foreground">O custo da demolição e entulho só a Direção o vê.</p>}
     </div>
+  );
+}
+
+/* ================================================================== os pagamentos e a tesouraria */
+const OPCOES_PAG = ["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%", PAGAMENTO_FASES];
+function Pagamentos({ P, d, ctx, calendario, fechado, prest, sugerido }: {
+  P: Plano; d: Negocio; ctx: Pick<Ctx, "S" | "A" | "run">; calendario: Date[]; fechado: boolean; prest: Prestacao[]; sugerido: Prestacao[];
+}) {
+  const { S, A, run } = ctx;
+  const o = d.orc!, atual = d.f.pagamento || "50% + 50% no fim";
+  const comIva = totais(d, S).total;
+  const TS = tesouraria(P, prest);
+  const desatualizado = atual === PAGAMENTO_FASES && !!o.pagFases?.length && JSON.stringify(o.pagFases) !== JSON.stringify(sugerido);
+  const quando = (t: Prestacao) => {
+    if (t.fase === 0) return "antes de começar";
+    const x = diaDaPrestacao(P, t);
+    return dataCurta(calendario[Math.max(0, Math.ceil(x - 1e-9) - 1)]);
+  };
+  const diaTxt = (x: number) => dataCurta(calendario[Math.min(calendario.length - 1, Math.max(0, Math.floor(x)))]);
+  return (
+    <section aria-labelledby={`pag-${d.id}`} className="rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 id={`pag-${d.id}`} className="flex items-center gap-2 text-[15px] font-semibold"><Wallet className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Pagamentos e tesouraria</h4>
+        <span className="text-sm text-muted-foreground">a tesouraria conta sem IVA</span>
+      </div>
+      <div role="group" aria-label="Condições de pagamento" className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {OPCOES_PAG.map((k) => {
+          const pr = k === PAGAMENTO_FASES ? (atual === k && o.pagFases?.length ? o.pagFases : sugerido) : prestacoes(k);
+          const t = tesouraria(P, pr), on = atual === k;
+          return (
+            <button key={k} type="button" aria-pressed={on} disabled={fechado}
+              onClick={() => run(() => A.pagamentoPlano(d.id, k, k === PAGAMENTO_FASES ? sugerido : undefined))}
+              className={cn("relative min-h-16 rounded-xl border p-3 text-left outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:opacity-70",
+                on ? "border-primary shadow-[0_6px_20px_-12px_hsl(var(--primary)/0.7)]" : "border-border hover:border-foreground/30")}>
+              <span className="block text-[15px] font-medium">{k}{k === PAGAMENTO_FASES && <span className="ml-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">sugerido</span>}</span>
+              {t.descoberto ? (
+                <span className="mt-1 flex items-center gap-1 text-sm text-warning"><AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />a descoberto até {eur0(-t.pior.saldo)}</span>
+              ) : (
+                <span className="mt-1 flex items-center gap-1 text-sm text-success"><CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />sempre coberta</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <ol className="mt-4 divide-y divide-border" aria-label="Prestações">
+        {prest.map((t, i) => (
+          <li key={i} className="flex items-baseline justify-between gap-x-4 py-2.5">
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-medium">{t.l}</span>
+              <span className="block text-sm text-muted-foreground">{quando(t)}</span>
+            </span>
+            <span className="shrink-0 text-right">
+              <span className="block whitespace-nowrap text-[15px] font-semibold tabular-nums">{eur0(comIva * t.p)}</span>
+              <span className="block text-sm tabular-nums text-muted-foreground">{Math.round(t.p * 100)}% · com IVA</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <p className={cn("mt-2 flex items-start gap-2 text-[15px]", TS.descoberto ? "text-warning" : "text-success")} aria-live="polite">
+        {TS.descoberto ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />}
+        <span>
+          {TS.descoberto
+            ? <>A obra fica a descoberto: no pior momento ({diaTxt(TS.pior.x)}) já se gastou mais {eur0(-TS.pior.saldo)} do que se recebeu.{atual !== PAGAMENTO_FASES && " “Por fases” resolve isto."}</>
+            : <>Com estas condições, o que se recebe cobre sempre o que se gasta (folga mínima de {eur0(TS.pior.saldo)}).</>}
+        </span>
+      </p>
+      {desatualizado && !fechado && (
+        <button type="button" onClick={() => run(() => A.pagamentoPlano(d.id, PAGAMENTO_FASES, sugerido))} className="mt-2 inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
+          <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />O plano mudou: recalcular as prestações por fases
+        </button>
+      )}
+    </section>
   );
 }

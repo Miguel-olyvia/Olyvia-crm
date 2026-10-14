@@ -56,10 +56,12 @@ export interface TarefaPrevista {
   delta: number;
 }
 
-export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
+/** `equipa`: pessoas por ofício (por omissão, as do orçamento, `Orcamento.equipa`, ou 1); serve para pré-ver o reforço. */
+export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): TarefaPrevista[] {
   const o = d.orc;
   if (!o) return [];
   const man = o.prazo ?? {};
+  const pessoas = Math.max(1, equipa ?? o.equipa ?? 1);
   const base: Omit<TarefaPrevista, "dias" | "manual" | "h" | "inicio" | "custo" | "custoOrc" | "delta">[] = [];
   const K = catalogoLigado() as ComFases | null;
   const extra: Record<string, { eq: number; cons: number; outros: number; custoOrc: number }> = {};
@@ -92,8 +94,10 @@ export function tarefasPrevistas(d: Negocio, S: Estado): TarefaPrevista[] {
     if (e !== etapa) { etapa = e; inicioEtapa = fimEtapa; for (const k in fila) delete fila[k]; }
     const oficio = t.perfil.toLowerCase(), dia = fila[oficio] ?? inicioEtapa;
     const manual = man[t.chave] != null;
-    const dias = manual ? man[t.chave] : diasDeHoras(t.hOrc);
-    const h = manual ? dias * HORAS_DIA : t.hOrc;
+    // o reforço: n pessoas por ofício fazem as mesmas horas em menos dias (a demolição tem a sua equipa própria)
+    const n = t.chave === TAREFA_DEMOLICAO ? 1 : pessoas;
+    const dias = manual ? man[t.chave] : diasDeHoras(t.hOrc / n);
+    const h = manual ? dias * HORAS_DIA * n : t.hOrc;
     const x = extra[t.chave];
     const mo = h * t.custoHora;
     const total = mo + x.eq + x.cons + x.outros;

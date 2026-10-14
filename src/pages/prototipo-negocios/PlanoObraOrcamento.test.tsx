@@ -65,4 +65,25 @@ describe("plano da obra no orçamento", () => {
     fireEvent.keyDown(screen.getAllByRole("slider")[0], { key: "ArrowRight" });
     expect(tot(d, S).custo).toBe(c0);
   });
+
+  it("pagamentos: 'Por fases' fica escolhido, guarda as prestações e a obra fica sempre coberta", () => {
+    const { d } = montar();
+    const grupo = screen.getByRole("group", { name: "Condições de pagamento" });
+    const fases = Array.from(grupo.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Por fases"))!;
+    fireEvent.click(fases);
+    expect(d.f.pagamento).toBe("Por fases");
+    expect(d.orc!.pagFases?.length).toBeGreaterThanOrEqual(2);
+    expect(fases.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(/cobre sempre o que se gasta/)).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Prestações" }).querySelectorAll("li").length).toBe(d.orc!.pagFases!.length);
+  });
+
+  it("2 pessoas por ofício: o plano encurta e o custo fica", () => {
+    const { d, S } = montar();
+    const c0 = tot(d, S).custo;
+    fireEvent.click(screen.getByRole("button", { name: /2 pessoas/ }));
+    expect(d.orc!.equipa).toBe(2);
+    expect(screen.getByRole("button", { name: /2 pessoas/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(tot(d, S).custo).toBeCloseTo(c0, 2);
+  });
 });

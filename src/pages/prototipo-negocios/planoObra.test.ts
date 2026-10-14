@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { acoes, seed, tot, type Negocio } from "./motor";
-import { curvaCusto, custoAte, dataCurta, diasDaObra, feriadosPT, feriadosSaltados, iniciosRapidos, isoDia, pascoa, planoObra, proximoUtil } from "./planoObra";
+import { curvaCusto, custoAte, dataCurta, diasDaObra, feriadosPT, feriadosSaltados, iniciosRapidos, isoDia, pascoa, planoObra, prestacoes, proximoUtil, recebidoAte, sugerirPorFases, tesouraria } from "./planoObra";
+import { tranches } from "./DocsCliente";
 
 const comOrcamento = () => {
   const S = seed();
@@ -68,5 +69,40 @@ describe("plano da obra por fases", () => {
     const { S, d } = comOrcamento();
     d.orc!.desconto = 10;
     expect(planoObra(d, S).preco).toBeCloseTo(tot(d, S).pf, 1);
+  });
+});
+
+describe("pagamentos e tesouraria", () => {
+  it("o plano por fases soma 100%, deixa pelo menos 10% para o fim e nunca fica a descoberto", () => {
+    const { S, d } = comOrcamento();
+    const P = planoObra(d, S), F = sugerirPorFases(P);
+    expect(F.reduce((a, t) => a + t.p, 0)).toBeCloseTo(1, 6);
+    expect(F[F.length - 1].fase).toBe("fim");
+    expect(F[F.length - 1].p).toBeGreaterThanOrEqual(0.1 - 1e-9);
+    expect(tesouraria(P, F).descoberto).toBe(false);
+  });
+  it("o que se recebe sobe em degraus nos dias das prestações", () => {
+    const { S, d } = comOrcamento();
+    const P = planoObra(d, S), pr = prestacoes("50% + 50% no fim");
+    expect(recebidoAte(P, pr, 0)).toBeCloseTo(P.preco / 2, 1);
+    expect(recebidoAte(P, pr, P.dias)).toBeCloseTo(P.preco, 1);
+  });
+  it("escolher 'Por fases' guarda as prestações, e a proposta passa a usá-las", () => {
+    const { S, d, A } = comOrcamento();
+    const F = sugerirPorFases(planoObra(d, S));
+    A.pagamentoPlano(d.id, "Por fases", F);
+    expect(d.f.pagamento).toBe("Por fases");
+    expect(d.orc!.pagFases).toEqual(F);
+    expect(tranches(d, 1000).map((t) => t.p)).toEqual(F.map((t) => t.p));
+    A.pagamentoPlano(d.id, "50% + 50% no fim");
+    expect(d.orc!.pagFases).toBeUndefined();
+  });
+  it("2 pessoas por ofício: menos dias e o mesmo custo", () => {
+    const { S, d, A } = comOrcamento();
+    const P1 = planoObra(d, S), c1 = tot(d, S).custo;
+    A.equipaObra(d.id, 2);
+    const P2 = planoObra(d, S);
+    expect(P2.dias).toBeLessThan(P1.dias);
+    expect(tot(d, S).custo).toBeCloseTo(c1, 2);
   });
 });

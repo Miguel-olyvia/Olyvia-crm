@@ -163,6 +163,10 @@ export interface Orcamento {
   prazo?: Record<string, number>;
   /** O início previsto da obra ("aaaa-mm-dd"), para pôr o plano em datas (planoObra.ts). Sem ele, a próxima segunda-feira. */
   inicioObra?: string;
+  /** As prestações do plano "Por fases" (planoObra.ts: sugerirPorFases), guardadas quando se escolhe. */
+  pagFases?: { l: string; p: number; fase: 0 | 1 | 2 | 3 | 4 | "fim" }[];
+  /** Pessoas por ofício no plano da obra (1 por omissão; 2 = reforço: menos dias, as mesmas horas). */
+  equipa?: number;
 }
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
 export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
@@ -1033,6 +1037,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** O prazo de execução da proposta passa a ser o do prazo previsto (e volta a acompanhá-lo). */
     /** O início previsto da obra (só muda as datas do plano: o custo e o preço não). */
+    /** As condições de pagamento escolhidas no plano da obra; "Por fases" guarda as prestações sugeridas. */
+    pagamentoPlano(id: number, pagamento: string, fases?: Orcamento["pagFases"]) {
+      const d = deal(id), o = d.orc;
+      if (!o || o.enviada) return;
+      if (fases?.length) o.pagFases = fases; else delete o.pagFases;
+      A.campo(id, "pagamento", pagamento);
+    },
+    /** O reforço no plano da obra: pessoas por ofício. Os dias mudados à mão mantêm-se (e contam com a equipa nova). */
+    equipaObra(id: number, n: number) {
+      const d = deal(id), o = d.orc;
+      if (!o || o.enviada) return;
+      if (n > 1) o.equipa = n; else delete o.equipa;
+      o.aprov = null; sugerirPrazo(d, S);
+    },
     inicioObra(id: number, iso: string | null) {
       const o = deal(id).orc;
       if (!o) return;
