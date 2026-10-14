@@ -3,7 +3,7 @@
 // e Custo e preço. As contas são as da V2 (v2/custosModelo.ts) e cada mudança passa para S.svc
 // (aplicarTodos), por isso o orçamento usa o mesmo custo. Um só botão primário: "Guardar o preço".
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Clock, Info, Plus, Search, TriangleAlert, UserX } from "lucide-react";
+import { ArrowLeft, Clock, Info, Plus, Search, TriangleAlert, UserX, Waypoints } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO } from "./catalogo";
@@ -102,7 +102,11 @@ function ProcurarProduto({ rotulo, produtos, onEscolher, margem }: { rotulo: str
   );
 }
 
-type PropsFicha = { S: Estado; C: Custos; run: (fn: () => void) => void; sid: SvcId; voltar: () => void; anunciar: (msg: string) => void };
+type PropsFicha = {
+  S: Estado; C: Custos; run: (fn: () => void) => void; sid: SvcId; voltar: () => void; anunciar: (msg: string) => void;
+  /** Abre o mapa das ligações (separador Ligações) centrado num serviço ou produto. Sem ele, não há o botão. */
+  verLigacoes?: (r: { t: "svc" | "prod"; id: string }) => void;
+};
 
 /** A ficha; sem receita (serviço que não está em uso nem no Catálogo) mostra só o aviso e o "Voltar". */
 export function FichaServicoSimples(p: PropsFicha) {
@@ -118,7 +122,7 @@ export function FichaServicoSimples(p: PropsFicha) {
   );
 }
 
-function Ficha({ S, C, run, sid, voltar, anunciar }: PropsFicha) {
+function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
   const titulo = useRef<HTMLHeadingElement>(null);
   const K = useCatalogo();
   useEffect(() => { titulo.current?.focus(); }, [sid]);
@@ -173,9 +177,16 @@ function Ficha({ S, C, run, sid, voltar, anunciar }: PropsFicha) {
 
   return (
     <article aria-labelledby="ficha-t">
-      <button type="button" onClick={voltar} className="inline-flex min-h-11 items-center gap-2 rounded-lg pr-3 text-[15px] font-medium text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-5 w-5" aria-hidden="true" />Voltar ao Catálogo
-      </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onClick={voltar} className="inline-flex min-h-11 items-center gap-2 rounded-lg pr-3 text-[15px] font-medium text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-5 w-5" aria-hidden="true" />Voltar ao Catálogo
+        </button>
+        {verLigacoes && (
+          <button type="button" onClick={() => verLigacoes({ t: "svc", id: sid })} className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-[15px] font-medium text-muted-foreground hover:text-foreground">
+            <Waypoints className="h-5 w-5" aria-hidden="true" />Ver ligações
+          </button>
+        )}
+      </div>
 
       {/* ---------------------------------------------------------- cabeçalho */}
       <header className="mt-3 flex items-start gap-4">
@@ -334,7 +345,9 @@ function Ficha({ S, C, run, sid, voltar, anunciar }: PropsFicha) {
               <li key={p.id} className="flex min-h-16 items-center gap-3 py-2">
                 <Ilustracao k={p.img ?? "generico"} />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[15px]">{p.n}</span>
+                  {verLigacoes
+                    ? <button type="button" onClick={() => verLigacoes({ t: "prod", id: p.id })} aria-label={`${p.n}: ver ligações`} className="block min-h-11 text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">{p.n}</button>
+                    : <span className="block text-[15px]">{p.n}</span>}
                   <span className={cn(NOTA, "block")}>{[p.marca, p.sku].filter(Boolean).join(" · ")}{p.marca || p.sku ? " · " : ""}1 {p.un} traz {nfmt(p.fatorServico ?? 1)} {un}</span>
                 </span>
                 <span className="shrink-0 text-[15px] tabular-nums">{eur(precoProduto(p, S.cfg.alvo))} €</span>

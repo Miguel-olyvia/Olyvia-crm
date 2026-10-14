@@ -15,11 +15,11 @@ function pagina(S: Estado = seed()) {
 }
 const abrirCanalizacao = () => { fireEvent.click(screen.getByRole("tab", { name: "Serviços" })); fireEvent.click(screen.getAllByRole("button", { name: /^Canalização/ })[0]); };
 
-describe("CatalogoV1 · os cinco separadores", () => {
-  it("tem Serviços, Produtos, Equipamentos, Consumíveis e Técnicos, cada um com o seu painel", () => {
+describe("CatalogoV1 · os seis separadores", () => {
+  it("tem Serviços, Produtos, Equipamentos, Consumíveis, Técnicos e Ligações, cada um com o seu painel", () => {
     pagina();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual(["Serviços", "Produtos", "Equipamentos", "Consumíveis", "Técnicos"]);
+    expect(tabs.map((t) => t.textContent)).toEqual(["Serviços", "Produtos", "Equipamentos", "Consumíveis", "Técnicos", "Ligações"]);
     for (const t of tabs) {
       fireEvent.click(t);
       expect(t).toHaveAttribute("aria-selected", "true");

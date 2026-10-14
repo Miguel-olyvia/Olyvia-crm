@@ -1,5 +1,5 @@
-// O Catálogo do V1 (14/10/2026): cinco secções em separadores (Serviços, Produtos, Equipamentos,
-// Consumíveis, Técnicos), com o modelo completo da V2 (custos, receitas, produtos), no aspeto
+// O Catálogo do V1 (14/10/2026): seis secções em separadores (Serviços, Produtos, Equipamentos,
+// Consumíveis, Técnicos e Ligações, o mapa das relações em LigacoesCatalogo.tsx), com o modelo completo da V2 (custos, receitas, produtos), no aspeto
 // simples. Tocar num serviço abre a ficha do serviço no lugar da lista (FichaServicoSimples).
 // Escala para centenas de serviços e milhares de produtos: as contas ficam em useMemo e as listas
 // mostram aos poucos ("Mostrar mais").
@@ -17,13 +17,15 @@ import { ICONE_ALERTA, NumeroCelula, TextoCelula, Escolha } from "./v2/pecasCust
 import { IconeServico, Ilustracao } from "./ilustracoes";
 import { FichaServicoSimples } from "./FichaServicoSimples";
 import { tomarFichaPendente } from "./fichaNav";
+import { montarCatalogo, type Ref } from "./ligacoes";
+import { LigacoesCatalogo, abrirLigacoesEm } from "./LigacoesCatalogo";
 import {
   FILTROS_V1, agruparPorOficio, consumiveisCatalogo, iconeDoServico, margemEmPalavras, passaFiltroV1, pesquisarProdutos, precoProduto,
   quebraEquip, tecnicosCatalogo, usosEquip, type ConsCatalogo, type FiltroV1,
 } from "./fichaServico";
 
-type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos";
-const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"]];
+type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
+const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
 const LISTA = "divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5";
 const NOTA = "text-[15px] text-muted-foreground";
 const POR_GRUPO = 8, POR_PAGINA = 40;
@@ -306,6 +308,10 @@ export function CatalogoV1({ S, run }: Ctx) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const consumiveis = useMemo(() => consumiveisCatalogo(S, C), [chave, C]);
   const nomes = useMemo(() => new Map(itens.map((i) => [i.sid, i.n])), [itens]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const catLig = useMemo(() => montarCatalogo(S, C, K), [chave, C, K]);
+  /** Abre o separador Ligações centrado num elemento (a partir da ficha). */
+  const verLigacoes = useCallback((r: Ref) => { abrirLigacoesEm(r); setSeccao("ligacoes"); setAberto(null); }, []);
   const nomeServico = useCallback((sid: SvcId) => nomes.get(sid) ?? sid, [nomes]);
 
   const regiao = (
@@ -317,7 +323,7 @@ export function CatalogoV1({ S, run }: Ctx) {
   if (aberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaServicoSimples key={aberto} S={S} C={C} run={run} sid={aberto} voltar={() => { voltarPara.current = aberto; setAberto(null); }} anunciar={anunciar} />
+        <FichaServicoSimples key={aberto} S={S} C={C} run={run} sid={aberto} voltar={() => { voltarPara.current = aberto; setAberto(null); }} anunciar={anunciar} verLigacoes={verLigacoes} />
         {regiao}
       </div>
     );
@@ -343,10 +349,11 @@ export function CatalogoV1({ S, run }: Ctx) {
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} />,
+    ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} />,
   };
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
+    <div className={cn("mx-auto w-full px-4 pb-24 pt-8 sm:px-8 sm:pt-12", seccao === "ligacoes" ? "max-w-6xl" : "max-w-3xl")}>
       <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
       <p className="mt-2 text-lg text-muted-foreground">Cada serviço com a sua ficha: medida, quem faz, equipamentos, consumíveis e preço. O orçamento tira daqui o custo.</p>
       <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border">
