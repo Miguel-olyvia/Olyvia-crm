@@ -8,8 +8,9 @@ import {
 } from "../v2/custosModelo";
 import {
   CONSUMIVEIS_MUDELAR, EQUIP_MUDELAR, EXCLUIDOS_MUDELAR, EXIGE_MUDELAR, PERFIS_MUDELAR, PRODUTOS_MUDELAR, RESUMO_MUDELAR,
-  SERVICOS_MUDELAR, SKU_DOS_C, servicoMudelar,
+  SEM_SERVICO_MUDELAR, SERVICOS_MUDELAR, SKU_DOS_C, servicoMudelar,
 } from "./catalogoMudelar";
+import { contarProblemas, montarCatalogo, problemasCatalogo } from "../ligacoes";
 
 const K = catalogo0();
 
@@ -25,12 +26,12 @@ describe("catálogo da Mudelar · os números", () => {
     // o c1 é o "Levantamento de Sanitários e Mobiliário" da Mudelar
     expect(itemCatalogo("c1")).toMatchObject({ sku: "MOLSM", pvp: 71.43, custoReal: 50 });
   });
-  it("2.159 produtos: 3 de teste ficam de fora; os outros entram no Catálogo, depois dos de antes", () => {
-    expect(PRODUTOS_MUDELAR).toHaveLength(2156);
+  it("2.159 produtos: 3 de teste ficam de fora, 20 passam a consumíveis; os outros entram no Catálogo, depois dos de antes", () => {
+    expect(PRODUTOS_MUDELAR).toHaveLength(2136);
     expect(EXCLUIDOS_MUDELAR.map((e) => e.sku).sort()).toEqual(["1234567teste", "Teste1", "teste2"]);
-    expect(RESUMO_MUDELAR).toMatchObject({ produtosEntrada: 2159, produtos: 2156, produtosExcluidos: 3 });
+    expect(RESUMO_MUDELAR).toMatchObject({ produtosEntrada: 2159, produtos: 2136, produtosExcluidos: 3, produtosParaConsumivel: 20 });
     expect(K.produtos.find((p) => p.id === "m1")!.n).toBe("Cerâmico de parede 30×60");
-    expect(K.produtos.filter((p) => p.sku)).toHaveLength(2156);
+    expect(K.produtos.filter((p) => p.sku)).toHaveLength(2136);
     expect(new Set(K.produtos.map((p) => p.id)).size).toBe(K.produtos.length);
     expect(new Set(K.produtos.map((p) => p.n)).size).toBe(K.produtos.length);
   });
@@ -64,9 +65,11 @@ describe("catálogo da Mudelar · perfis, equipamentos e consumíveis", () => {
     expect(EQUIP_MUDELAR.every((e) => e.compra > e.residual && e.vida > 0 && e.usoAno > 0)).toBe(true);
     for (const e of C.equip) { const h = equipHora(e); expect(h, e.n).toBeGreaterThan(0.02); expect(h, e.n).toBeLessThan(6); }
   });
-  it("entre 60 e 100 consumíveis, alguns opcionais, com datas de preço variadas", () => {
-    expect(CONSUMIVEIS_MUDELAR.length).toBeGreaterThanOrEqual(60);
-    expect(CONSUMIVEIS_MUDELAR.length).toBeLessThanOrEqual(100);
+  it("entre 60 e 100 consumíveis das receitas (mais os 20 que vieram dos produtos), alguns opcionais, com datas de preço variadas", () => {
+    const dasReceitas = CONSUMIVEIS_MUDELAR.filter((c) => !c.sku);
+    expect(dasReceitas.length).toBeGreaterThanOrEqual(60);
+    expect(dasReceitas.length).toBeLessThanOrEqual(100);
+    expect(CONSUMIVEIS_MUDELAR.filter((c) => c.sku)).toHaveLength(20);
     expect(CONSUMIVEIS_MUDELAR.filter((c) => c.opcional).length).toBeGreaterThanOrEqual(5);
     expect(new Set(CONSUMIVEIS_MUDELAR.map((c) => c.data)).size).toBeGreaterThanOrEqual(8);
   });
@@ -152,5 +155,43 @@ describe("catálogo da Mudelar · relações e árvore", () => {
   it("ícone de cada serviço só das chaves fixas", () => {
     const icones = new Set<string>(ICONES_SERVICO);
     for (const c of CATALOGO_TODO) expect(icones.has(K.icone![c.id]), c.id).toBe(true);
+  });
+});
+
+describe("catálogo da Mudelar · liga tudo (14/10)", () => {
+  it("os c1..c41 têm a receita da Mudelar: passos, equipamentos, consumíveis, medida e o PVP real como preço de tabela", () => {
+    const S = seed(), C = custos0();
+    for (let i = 1; i <= 41; i++) {
+      const sid = "c" + i, m = servicoMudelar(sid)!, rec = receitaDe(C, sid, null)!;
+      expect(rec, sid).toMatchObject({ origem: "catalogo", modo: "tabela", precoTabela: m.pvp, medida: m.medida });
+      expect(rec.mo.length, sid).toBeGreaterThan(0);
+      expect(rec.equip.length + rec.cons.length, sid).toBeGreaterThan(0);
+    }
+    // o motor cria-os com a receita e o PVP (e não com os 25 €/h inventados)
+    const s = garantirServico(S, "c13")!, c = custoReceita(receitaDe(C, "c13", s)!, C, false);
+    expect(s.preco).toBe(servicoMudelar("c13")!.pvp);
+    expect(s.h).toBeCloseTo(c.h, 2);
+    // a demolição do c1 continua ligada ao artigo dela
+    expect(K.artigoDoServico!.c1).toBe("DEM-SAN-01");
+  });
+  it("o material de consumo que vinha como produto é consumível (com marca, fornecedor, custo, unidade e data) e entra numa receita", () => {
+    const C = custos0(), deProduto = CONSUMIVEIS_MUDELAR.filter((c) => c.sku);
+    const skus = new Set(K.produtos.map((p) => p.sku));
+    const usados = new Set(SERVICOS_MUDELAR.flatMap((s) => (receitaDe(C, s.id, null)?.cons ?? []).map((u) => u.n)));
+    for (const c of deProduto) {
+      expect(skus.has(c.sku), c.n).toBe(false);
+      expect(c.marca && c.fornecedor && c.un && c.preco > 0 && c.data, c.n).toBeTruthy();
+      expect(usados.has(c.n), c.n).toBe(true);
+    }
+    expect(deProduto.map((c) => c.n)).toEqual(expect.arrayContaining(["BUCHA PLASTICA UNIVERSAL 6MM (TIJOLO)", "CABO ELECTRICO FLEXIVEL PRETO 4 x 1.5 (100mts)", "Eléctrodos c/abraçadeiras"]));
+    // a bomba de condensados fica produto e traz o técnico de AVAC
+    expect(K.produtos.find((p) => p.sku === "AVAC0007")!.servico).toBe("s-moavac");
+  });
+  it("Problemas no catálogo real: nenhum, salvo os 7 termoacumuladores (a Mudelar não tem serviço que os instale)", () => {
+    const S = seed(), L = montarCatalogo(S, custos0(), K), P = problemasCatalogo(L);
+    expect(contarProblemas(P)).toEqual({ "svc-sem-receita": 0, "svc-exige-sem-produto": 0, "prod-sem-servico": 7, "cons-sem-uso": 0, "equip-sem-uso": 0 });
+    const ids = new Set(K.produtos.filter((p) => SEM_SERVICO_MUDELAR.some((x) => x.sku === p.sku)).map((p) => p.id));
+    expect(P.every((p) => p.tipo === "prod-sem-servico" && ids.has(p.ref.id))).toBe(true);
+    expect(SEM_SERVICO_MUDELAR.every((x) => /^Termoacumulador/.test(x.n) && x.razao.length > 0)).toBe(true);
   });
 });

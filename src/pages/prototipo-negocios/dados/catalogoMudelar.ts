@@ -27,13 +27,16 @@ export interface BrutoServicos {
   resumo: Record<string, number | string>;
   perfis: [id: string, n: string, salario: number][];
   equip: [id: string, n: string, compra: number, vida: number, residual: number, manutAno: number, usoAno: number][];
-  cons: [id: string, n: string, un: string, preco: number, fornecedor: string, marca: string, data: string, opcional: 0 | 1][];
+  /** O 9.º campo (14/10) é o sku do artigo da Mudelar, quando o consumível vem da lista de produtos. */
+  cons: [id: string, n: string, un: string, preco: number, fornecedor: string, marca: string, data: string, opcional: 0 | 1, sku?: string][];
   subsNovos: [oficio: string, subs: string[]][];
   oficiosNovos: [oficio: string, subs: string[]][];
   perfilDoOficio: Record<string, string>;
   servicos: ServicoBruto[];
   exige: [sid: string, oficio: string, sub: string, pergunta: string, regra: [MedKey, number, boolean] | null][];
   excluidos: { sku: string; n: string; motivo: string }[];
+  /** Produtos que se instalam e ficam sem serviço, com a razão (14/10). */
+  semServico: { sku: string; n: string; razao: string }[];
 }
 export type ProdutoBruto = [
   id: string, sku: string, n: string, no: number, sub: number, marca: number, fornecedor: number, un: string, custo: number, pvp: number,
@@ -48,9 +51,15 @@ export const PERFIS_MUDELAR: Perfil[] = BRUTO_SERVICOS.perfis.map(([id, n, salar
 export const PERFIL_DO_OFICIO_MUDELAR: Record<string, string> = BRUTO_SERVICOS.perfilDoOficio;
 /** Os equipamentos novos (os 5 de receitas.ts continuam como estavam). */
 export const EQUIP_MUDELAR: Equip[] = BRUTO_SERVICOS.equip.map(([id, n, compra, vida, residual, manutAno, usoAno]) => ({ id, n, compra, vida, residual, manutAno, usoAno }));
-export interface ConsumivelMudelar { id: string; n: string; un: string; preco: number; fornecedor: string; marca: string; data: string; opcional: boolean }
+export interface ConsumivelMudelar {
+  id: string; n: string; un: string; preco: number; fornecedor: string; marca: string; data: string; opcional: boolean;
+  /** O artigo da Mudelar de onde veio (14/10: o material de consumo que estava na lista de produtos). */
+  sku?: string;
+}
 /** Os consumíveis das receitas (alguns opcionais por omissão; as datas do preço variam). */
-export const CONSUMIVEIS_MUDELAR: ConsumivelMudelar[] = BRUTO_SERVICOS.cons.map(([id, n, un, preco, fornecedor, marca, data, o]) => ({ id, n, un, preco, fornecedor, marca, data, opcional: o === 1 }));
+export const CONSUMIVEIS_MUDELAR: ConsumivelMudelar[] = BRUTO_SERVICOS.cons.map(([id, n, un, preco, fornecedor, marca, data, o, sku]) => ({
+  id, n, un, preco, fornecedor, marca, data, opcional: o === 1, ...(sku ? { sku } : {}),
+}));
 const CONS = new Map(CONSUMIVEIS_MUDELAR.map((c) => [c.id, c]));
 
 /* ------------------------------------------------------------------ árvore */
@@ -159,3 +168,5 @@ export const PRODUTOS_MUDELAR: ProdutoMudelar[] = BRUTO_PRODUTOS.produtos.map(
 export const RESUMO_MUDELAR = BRUTO_SERVICOS.resumo;
 /** Os produtos que ficaram de fora (artigos de teste e de outros negócios), com o motivo. */
 export const EXCLUIDOS_MUDELAR = BRUTO_SERVICOS.excluidos;
+/** Os produtos que se instalam e ficam sem serviço de instalação, com a razão (14/10: os termoacumuladores). */
+export const SEM_SERVICO_MUDELAR = BRUTO_SERVICOS.semServico;
