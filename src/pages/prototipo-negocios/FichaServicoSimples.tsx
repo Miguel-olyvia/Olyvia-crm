@@ -18,8 +18,8 @@ import { mudarCatalogo, useCatalogo } from "./v2/catalogoStore";
 import { Escolha, ListaAlertas, NumeroCelula, Retirar, TextoCelula } from "./v2/pecasCustos";
 import { ICONES_SERVICO, IconeServico, Ilustracao } from "./ilustracoes";
 import {
-  ORIGENS_MEDIDA, REGRAS_QTD, UNIDADES_SERVICO, avisoMedida, chaveRegra, exemploMedida, iconeDoServico, margemEmPalavras, medidaDe, medidaDoModelo,
-  perguntasPossiveis, pesquisarProdutos, precoProduto, produtosQueTrazem, quebraEquip,
+  ORIGENS_MEDIDA, REGRAS_QTD, UNIDADES_SERVICO, avisoMedida, chaveRegra, custoComOpcionais, exemploMedida, iconeDoServico, margemEmPalavras, medidaDe,
+  medidaDoModelo, partesCusto, perguntasPossiveis, pesquisarProdutos, precoProduto, produtosQueTrazem, quebraEquip,
 } from "./fichaServico";
 
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-6";
@@ -102,9 +102,23 @@ function ProcurarProduto({ rotulo, produtos, onEscolher, margem }: { rotulo: str
   );
 }
 
-export function FichaServicoSimples({ S, C, run, sid, voltar, anunciar }: {
-  S: Estado; C: Custos; run: (fn: () => void) => void; sid: SvcId; voltar: () => void; anunciar: (msg: string) => void;
-}) {
+type PropsFicha = { S: Estado; C: Custos; run: (fn: () => void) => void; sid: SvcId; voltar: () => void; anunciar: (msg: string) => void };
+
+/** A ficha; sem receita (serviço que não está em uso nem no Catálogo) mostra só o aviso e o "Voltar". */
+export function FichaServicoSimples(p: PropsFicha) {
+  if (receitaDe(p.C, p.sid, p.S.svc[p.sid] ?? null, p.S.cfg.alvo)) return <Ficha {...p} />;
+  return (
+    <article aria-labelledby="ficha-t">
+      <button type="button" onClick={p.voltar} className="inline-flex min-h-11 items-center gap-2 rounded-lg pr-3 text-[15px] font-medium text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="h-5 w-5" aria-hidden="true" />Voltar ao Catálogo
+      </button>
+      <h1 id="ficha-t" className="mt-3 text-3xl font-semibold tracking-tight">Serviço sem ficha</h1>
+      <p className={cn(NOTA, "mt-2")}>Este serviço ({p.sid}) já não está no Catálogo.</p>
+    </article>
+  );
+}
+
+function Ficha({ S, C, run, sid, voltar, anunciar }: PropsFicha) {
   const titulo = useRef<HTMLHeadingElement>(null);
   const K = useCatalogo();
   useEffect(() => { titulo.current?.focus(); }, [sid]);
@@ -151,10 +165,7 @@ export function FichaServicoSimples({ S, C, run, sid, voltar, anunciar }: {
   const media = mediaHora(C);
   const velhos = new Set(consumiveisDesatualizados(rec, C.par.mesesDesatualizado).map((x) => x.id));
   const ligados = produtosQueTrazem(K, sid);
-  const partes = [
-    { n: "Mão de obra", v: c.mo }, { n: "Equipamentos", v: c.eq }, { n: "Consumíveis", v: c.cons },
-    ...(S.cfg.estrutura ? [{ n: "Estrutura", v: c.estr }] : []),
-  ];
+  const partes = partesCusto(c, S.cfg.estrutura);
   const regraAtual = K.qtdDe?.[sid];
   const regras: { t: string; r: Regra }[] = regraAtual && !REGRAS_QTD.some((x) => chaveRegra(x.r) === chaveRegra(regraAtual)) ? [...REGRAS_QTD, { t: textoRegra(regraAtual), r: regraAtual }] : REGRAS_QTD;
   const ramo = K.exigeProduto?.[sid];
@@ -307,7 +318,7 @@ export function FichaServicoSimples({ S, C, run, sid, voltar, anunciar }: {
             })}
           </ul>
         ) : <p className={cn(NOTA, "mt-3")}>Sem consumíveis na receita.</p>}
-        {c.consOpc > 0 && <p className="mt-2 text-[15px]" data-testid="opcionais">Se usar os opcionais: mais {eur(c.consOpc)} €/{un} ({eur(c.total + c.consOpc)} € de custo).</p>}
+        {c.consOpc > 0 && <p className="mt-2 text-[15px]" data-testid="opcionais">Se usar os opcionais: mais {eur(c.consOpc)} €/{un} ({eur(custoComOpcionais(c))} € de custo).</p>}
         <ProcurarProduto rotulo="Juntar da lista de produtos" margem={S.cfg.alvo} produtos={K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n))}
           onEscolher={(p) => editar((r) => { r.cons.push(consumivelDe(p, nid("c", r.cons), 1)); }, `${p.n} juntado`)} />
         <Button variant="outline" className="mt-3 min-h-11 text-[15px]" onClick={() => editar((r) => { r.cons.push({ id: nid("c", r.cons), n: "Novo consumível", q: 1, un: "un", preco: 1, fornecedor: "Por escolher", data: HOJE }); }, "Consumível juntado")}>

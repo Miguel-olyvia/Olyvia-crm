@@ -9,7 +9,7 @@ import { LINHAS, eur, nfmt, type Estado, type MedKey, type Medidas, type SvcId }
 import { EX0, type Catalogo, type Produto, type Regra } from "./v2/catalogoModelo";
 import {
   HOJE, custoHoraPerfil, equipHora, mesesEntre, perfilDoServico, receitaDe,
-  type Custos, type Equip, type ItemLista, type Perfil, type ReceitaV2, type Filtro,
+  type CustoCalc, type Custos, type Equip, type ItemLista, type Perfil, type ReceitaV2, type Filtro,
 } from "./v2/custosModelo";
 import type { IconeServicoKey } from "./ilustracoes";
 
@@ -77,6 +77,18 @@ export function quebraEquip(e: Equip): QuebraEquip {
   const texto = `(${eur(e.compra)} € − ${eur(e.residual)} €) ÷ ${h(e.vida)} h + ${eur(e.manutAno)} € ÷ ${h(e.usoAno)} h/ano = ${eur(total)} €/h`;
   return { deprec, manut, total, texto };
 }
+
+/* ------------------------------------------------------------------ custo */
+export interface ParteCusto { n: string; v: number }
+/** As partes do custo por unidade, pela ordem da ficha (a estrutura só quando está ligada). Os opcionais ficam de fora. */
+export function partesCusto(c: CustoCalc, estrutura: boolean): ParteCusto[] {
+  return [
+    { n: "Mão de obra", v: c.mo }, { n: "Equipamentos", v: c.eq }, { n: "Consumíveis", v: c.cons },
+    ...(estrutura ? [{ n: "Estrutura", v: c.estr }] : []),
+  ];
+}
+/** O custo por unidade se se usarem também os consumíveis opcionais. */
+export const custoComOpcionais = (c: CustoCalc) => c.total + c.consOpc;
 
 /* ------------------------------------------------------------------ ícone */
 const POR_TEXTO: [RegExp, IconeServicoKey][] = [
