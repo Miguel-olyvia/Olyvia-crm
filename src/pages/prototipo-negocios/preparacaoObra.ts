@@ -8,8 +8,8 @@
 //   · Pagamento: a fatura e o recibo (Financeiro), em paralelo; o recibo passa o negócio à Obra.
 //   · Arrancar a obra (Operações) só com tudo: EC aprovada, materiais recebidos, plano aprovado e sinal pago.
 import { normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
-import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra } from "./planoObra";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
+import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
@@ -98,14 +98,16 @@ export function skDaTarefa(perfil: string, nome: string): string {
 /** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias). */
 export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
   const P = planoObra(d, S);
-  const tasks: Tarefa[] = P.tarefas.map((t) => {
+  const plano: Plano = { tasks: [], estado: "por aprovar", dia: 0, origem: "orcamento", inicio: d.orc?.inicioObra };
+  plano.tasks = P.tarefas.map((t) => {
     const sk = skDaTarefa(t.perfil, t.nome);
     const dia = Math.floor(t.inicio), dur = Math.max(1, Math.ceil(t.inicio + t.dias - 1e-9) - dia);
     const doOficio = TECS.filter((x) => x.sk === sk);
-    const livre = doOficio.find((x) => !x.ferias.some((k) => k >= dia && k < dia + dur)) ?? doOficio[0];
+    // o primeiro do ofício que não está de férias nesses dias (pelas datas reais)
+    const livre = doOficio.find((x) => diaDeFerias(x, plano, dia, dur) == null) ?? doOficio[0];
     return { nome: t.nome, svcs: t.chave === "demolicao" ? [] : [t.chave], dia, dur, sk, h: r2(t.h), tec: livre?.id ?? null, fase: t.fase };
   });
-  return { tasks, estado: "por aprovar", dia: 0, origem: "orcamento", inicio: d.orc?.inicioObra };
+  return plano;
 }
 
 /* ------------------------------------------------------------------ os passos, por trilho */
@@ -156,7 +158,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
         : { id: "rec", trilho: "ec", estado: "agora", who: "armazem", t: e.estado === "parcial" ? "Receber o que falta" : "Receber os materiais",
             sub: e.estado === "parcial"
               ? `Entrada parcial: faltam ${e.linhas.filter((x) => (x.recebido ?? 0) < x.q).map((x) => `${nfmt(r2(x.q - (x.recebido ?? 0)))} ${x.un} de ${x.n.toLowerCase()}`).join(", ")}.`
-              : `${e.n} · ${e.entrega ? `entrega confirmada para ${e.entrega}` : "à espera da data do fornecedor"}; conferir e dar entrada.`,
+              : `${e.n} · ${e.entrega ? `entrega confirmada para ${e.entrega}` : "à espera da data do fornecedor"}; conferir e dar entrada.${entregaTarde(d) ? " · atenção: chega no dia em que a obra começa (ou depois)" : ""}`,
             act: "abrirInv", btn: "Conferir no Inventário" });
   }
 
@@ -190,6 +192,19 @@ export const passosAgora = (d: Negocio, S: Estado) => passosPreparacao(d, S).fil
 /** "Direção" / "Sandra · Financeiro". */
 export const quemE = (who: Papel | null) => (who ? PAPEIS[who].n : "");
 
+/* ------------------------------------------------------------------ a entrega e o início */
+/** A entrega do fornecedor calha no dia em que a obra começa (ou depois)? Devolve as datas e o primeiro dia útil a seguir à entrega. */
+export function entregaTarde(d: Negocio): { entrega: Date; inicio: Date; depois: Date } | null {
+  const e = d.obra.enc, p = d.obra.plano;
+  if (!e?.entregaIso || e.estado === "recebida" || !p || p.estado === "em curso" || p.estado === "concluída") return null;
+  const inicio = inicioDoPlano(p);
+  if (!inicio) return null;
+  const entrega = deIso(e.entregaIso);
+  if (entrega < inicio) return null;
+  const a = new Date(entrega); a.setDate(a.getDate() + 1);
+  return { entrega, inicio, depois: proximoUtil(a) };
+}
+
 /* ------------------------------------------------------------------ as datas do plano */
 /** O início do plano: o escolhido (ou o do orçamento), senão a próxima segunda-feira. Null nos planos antigos (dias de exemplo). */
 export function inicioDoPlano(p: Plano, hoje = new Date()): Date | null {
@@ -202,6 +217,9 @@ export function rotuloDia(p: Plano, k: number, hoje = new Date()): string {
   return i ? dataCurta(diasDaObra(i, k + 1)[k]) : DIAS[k] ?? `dia ${k + 1}`;
 }
 /** Os técnicos que podem fazer a tarefa (do mesmo ofício), com se estão livres nesses dias. */
-export function tecnicosPara(t: Tarefa): { id: string; n: string; livre: boolean }[] {
-  return TECS.filter((x) => x.sk === t.sk).map((x) => ({ id: x.id, n: x.n, livre: !x.ferias.some((k) => k >= t.dia && k < t.dia + t.dur) }));
+export function tecnicosPara(t: Tarefa, p: Plano): { id: string; n: string; livre: boolean; ferias: string | null }[] {
+  return TECS.filter((x) => x.sk === t.sk).map((x) => {
+    const k = diaDeFerias(x, p, t.dia, t.dur);
+    return { id: x.id, n: x.n, livre: k == null, ferias: k == null ? null : rotuloDia(p, k) };
+  });
 }

@@ -5,10 +5,10 @@ import { useState } from "react";
 import { AlertTriangle, ArrowLeft, ArrowRight, Check, Circle, Minus, PackageCheck, Plus, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, PAPEIS, TECS, aberto, conflitos, eur, nfmt, r2, type Negocio, type Papel, type StockKey } from "./motor";
+import { LINHAS, PAPEIS, TECS, aberto, conflitos, diaDeFerias, eur, nfmt, r2, type Negocio, type Papel, type StockKey } from "./motor";
 import { COR_FASE, dataCurta, iniciosRapidos, isoDia } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara, totalEf } from "./preparacaoObra";
+import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara, totalEf } from "./preparacaoObra";
 import type { Ctx } from "./pecas";
 
 const ESTADO_PLANO: Record<string, string> = {
@@ -68,6 +68,7 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // do contrato à obra: as quatro condições; nos planos antigos, só os materiais
   const F = d.obra.ec ? faltaParaArrancar(d).filter((f) => !/plano/.test(f)) : (!e || e.estado === "recebida" ? [] : ["receber os materiais"]);
   const [tecDe, setTecDe] = useState<number | null>(null);
+  const tarde = entregaTarde(d);
   let frase = "", botao: React.ReactNode = null;
   if (p.estado === "por aprovar") {
     frase = C.length ? "Há um técnico de férias numa tarefa. Troque-o ou adie a tarefa antes de aprovar." : "O plano está pronto para aprovar. Confirme as datas e os técnicos.";
@@ -101,6 +102,16 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
       <section aria-label="O que fazer" className="mt-8 border-t border-border pt-6">
         <p className="text-lg">{frase}</p>
+        {/* a entrega do fornecedor calha no arranque (ou depois): propõe começar no dia útil a seguir */}
+        {tarde && (
+          <div className="mt-4 flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between animate-in fade-in-0">
+            <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <span>Os materiais chegam a {dataCurta(tarde.entrega)} e a obra começa a {dataCurta(tarde.inicio)}. Sem os materiais, a equipa fica parada.</span></p>
+            {pode
+              ? <Button variant="outline" className="min-h-11 shrink-0" onClick={go(() => A.inicioPlano(d.id, isoDia(tarde.depois)))}>Começar a {dataCurta(tarde.depois)}</Button>
+              : <Mudar ctx={ctx} papel="operacoes" />}
+          </div>
+        )}
         {d.obra.ec && p.estado !== "em curso" && p.estado !== "concluída" && (
           <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[15px]" aria-label="Condições para arrancar">
             {([["Encomenda aprovada", d.obra.ec.estado === "aprovada"], ["Materiais recebidos", d.obra.ec.estado === "aprovada" && (!e || e.estado === "recebida")], ["Plano aprovado", p.estado !== "por aprovar"], ["Sinal pago", d.fin.pago]] as [string, boolean][]).map(([t, ok]) => (
@@ -112,7 +123,7 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         )}
         {C.map((c) => {
           const ti = p.tasks.indexOf(c.t);
-          const alt = TECS.find((x) => x.sk === c.t.sk && x.id !== c.tec.id && !x.ferias.some((k) => k >= c.t.dia && k < c.t.dia + c.t.dur));
+          const alt = TECS.find((x) => x.sk === c.t.sk && x.id !== c.tec.id && diaDeFerias(x, p, c.t.dia, c.t.dur) == null);
           return (
             <div key={ti} className="mt-4 grid gap-3 sm:grid-cols-2">
               {alt && (
@@ -193,10 +204,10 @@ function PlanoSimples({ ctx, d }: { ctx: Ctx; d: Negocio }) {
                     ...(tecDe === i ? [
                       <div key={i + "t"} className="pb-2 animate-in fade-in-0 slide-in-from-top-1 duration-200" style={{ gridColumn: `1 / span ${nd + 1}` }}>
                         <div role="group" aria-label={`Técnico de ${t.nome}`} className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-3">
-                          {tecnicosPara(t).map((x) => (
+                          {tecnicosPara(t, p).map((x) => (
                             <button key={x.id} type="button" aria-pressed={t.tec === x.id} onClick={() => { run(() => A.trocarTec(d.id, i, x.id)); setTecDe(null); }}
                               className={cn("min-h-11 rounded-xl border px-4 text-left text-[15px] transition-colors", t.tec === x.id ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40")}>
-                              {x.n}<span className={cn("block text-sm", t.tec === x.id ? "text-primary-foreground/80" : x.livre ? "text-success" : "text-warning")}>{x.livre ? "livre nesses dias" : "de férias nesses dias"}</span>
+                              {x.n}<span className={cn("block text-sm", t.tec === x.id ? "text-primary-foreground/80" : x.livre ? "text-success" : "text-warning")}>{x.livre ? "livre nesses dias" : `de férias a ${x.ferias}`}</span>
                             </button>
                           ))}
                         </div>
@@ -297,6 +308,7 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           : e.estado === "recebida" ? "Tudo recebido e reservado para a obra."
           : e.entrega ? `Entrega confirmada pelo fornecedor para ${e.entrega}.` : "Enviada ao fornecedor, à espera da data de entrega."}
         {e.validada && <span className="text-muted-foreground"> Validada por {e.validada.por} · {e.validada.q}.</span>}
+        {entregaTarde(d) && <span className="mt-1 flex items-start gap-2 text-foreground"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />Chega no dia em que a obra começa (ou depois). As Operações podem passar o início para o dia útil seguinte.</span>}
       </p>
       <ul className="mt-3 divide-y divide-border">
         {e.linhas.map((x, i) => {

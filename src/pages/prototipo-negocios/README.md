@@ -857,3 +857,5 @@ Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, ger
   - a pergunta **"Contentor de entulho"** passa para a **visita** (Acesso e estacionamento); estava em "Preparar a obra", tarde demais para o orçamento. Mudar o acesso ou o contentor refaz a conta do entulho;
   - o **"Início"** da preparação da obra vem preenchido com o início do plano quando as Operações o aprovam;
   - VERSAO 14.
+- **Férias em datas reais** (14/10): os técnicos têm as férias no calendário (`Tecnico.feriasDatas`; o Sérgio, de exemplo, a 21–23 out). Nos planos do orçamento, os conflitos, o técnico escolhido sozinho, a troca e o "adiar" usam as datas reais (`diaDeFerias`); a escolha do técnico diz "de férias a qua, 21 out". Os planos de exemplo continuam pelo índice do dia.
+- **Entrega no dia do arranque:** se o fornecedor confirma a entrega para o dia em que a obra começa (ou depois), avisa no circuito, no Inventário e nas Operações, com um botão "Começar a {dia útil a seguir à entrega}" (`entregaTarde`).

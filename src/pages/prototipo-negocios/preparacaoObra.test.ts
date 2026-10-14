@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { acoes, minhas, seed, valorSinal } from "./motor";
+import { TECS, acoes, conflitos, diaDeFerias, minhas, seed, valorSinal } from "./motor";
+import { isoDia } from "./planoObra";
 import { totais, tranches } from "./DocsCliente";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
-import { custoFalta, faltaParaArrancar, inicioDoPlano, passosPreparacao, rotuloDia, skDaTarefa, tecnicosPara, totalEf } from "./preparacaoObra";
+import { custoFalta, entregaTarde, faltaParaArrancar, inicioDoPlano, passosPreparacao, rotuloDia, skDaTarefa, tecnicosPara, totalEf } from "./preparacaoObra";
 
 const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
   for (let i = 0; i < 5; i++) {
@@ -89,7 +90,7 @@ describe("o plano nas Operações", () => {
     expect(rotuloDia(p, 0)).toBe("sex, 30 out");
     expect(rotuloDia(p, 1)).toBe("seg, 2 nov"); // salta o fim de semana
     const i = p.tasks.findIndex((t) => t.sk === "Ladrilhador");
-    expect(tecnicosPara(p.tasks[i]).map((x) => x.id)).toEqual(["sf", "hn"]);
+    expect(tecnicosPara(p.tasks[i], p).map((x) => x.id)).toEqual(["sf", "hn"]);
     A.trocarTec(d.id, i, "sf");
     expect(p.tasks[i].tec).toBe("sf");
     expect(d.hist[0].t).toMatch(/passa de .* para Sérgio Faria/);
@@ -144,5 +145,34 @@ describe("o sinal", () => {
     const { S, d } = preparar();
     expect(valorSinal(d, S)).toBeCloseTo(tranches(d, totais(d, S).total)[0].v, 2);
     expect(valorSinal(d, S)).toBeLessThan(totais(d, S).total);
+  });
+});
+
+describe("férias em datas reais e a entrega antes do arranque", () => {
+  it("o técnico de férias a 21–23 out entra em conflito pelas datas; a troca e o adiar resolvem", () => {
+    const { A, d } = preparar();
+    const p = d.obra.plano!;
+    A.inicioPlano(d.id, "2026-10-19");
+    const i = p.tasks.findIndex((t) => t.sk === "Ladrilhador");
+    expect(p.tasks[i].tec).toBe("hn"); // o plano escolheu quem não está de férias
+    A.trocarTec(d.id, i, "sf"); // o Sérgio está de férias a 21–23 out
+    const di = diaDeFerias(TECS.find((x) => x.id === "sf")!, p, p.tasks[i].dia, p.tasks[i].dur);
+    expect(di).not.toBeNull();
+    expect(conflitos(p)).toHaveLength(1);
+    expect(tecnicosPara(p.tasks[i], p).find((x) => x.id === "sf")).toMatchObject({ livre: false, ferias: expect.stringMatching(/out$/) });
+    A.adiar(d.id, i);
+    expect(conflitos(p)).toHaveLength(0);
+    expect(rotuloDia(p, p.tasks[i].dia)).toBe("seg, 26 out"); // depois das férias
+  });
+  it("a entrega no dia do arranque avisa; começar no dia útil a seguir resolve", () => {
+    const { A, d } = preparar();
+    A.aprovarEc(d.id); A.validarEf(d.id);
+    const e = d.obra.enc!;
+    e.entrega = "seg, 19 out"; e.entregaIso = "2026-10-19";
+    A.inicioPlano(d.id, "2026-10-19");
+    const t = entregaTarde(d)!;
+    expect(isoDia(t.depois)).toBe("2026-10-20");
+    A.inicioPlano(d.id, isoDia(t.depois));
+    expect(entregaTarde(d)).toBeNull();
   });
 });

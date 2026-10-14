@@ -12,7 +12,7 @@ import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
-import { dataCurta, isoDia, prestacoes, proximoUtil } from "./planoObra";
+import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil } from "./planoObra";
 import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
@@ -125,12 +125,19 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
   },
 };
 
-export interface Tecnico { id: string; n: string; sk: string; ferias: number[] }
+export interface Tecnico {
+  id: string; n: string; sk: string;
+  /** Os dias de férias nos planos de exemplo (índice do dia, DIAS). */
+  ferias: number[];
+  /** As férias em datas reais ("aaaa-mm-dd"), para os planos do orçamento (14/10). */
+  feriasDatas?: string[];
+}
 export const TECS: Tecnico[] = [
   { id: "js", n: "João Silva", sk: "Servente · demolição", ferias: [] },
   { id: "ra", n: "Rui Alves", sk: "Servente · demolição", ferias: [] },
   { id: "ma", n: "Marco Antunes", sk: "Canalizador", ferias: [] },
-  { id: "sf", n: "Sérgio Faria", sk: "Ladrilhador", ferias: [3] },
+  // férias de exemplo: no plano de exemplo, o 4.º dia; em datas reais, 21 a 23 de outubro
+  { id: "sf", n: "Sérgio Faria", sk: "Ladrilhador", ferias: [3], feriasDatas: ["2026-10-21", "2026-10-22", "2026-10-23"] },
   { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", ferias: [] },
   { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [] },
 ];
@@ -189,8 +196,8 @@ export interface Plano {
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
 export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "parcial" | "recebida"; forn?: string;
   linhas: { n: string; q: number; un: string; /** custo por unidade (€) */ custo?: number; /** quanto já chegou (conferência) */ recebido?: number }[];
-  /** A data de entrega que o fornecedor confirmou ("qui, 22 out"). */
-  entrega?: string;
+  /** A data de entrega que o fornecedor confirmou ("qui, 22 out") e a mesma em "aaaa-mm-dd" (para comparar com o início da obra). */
+  entrega?: string; entregaIso?: string;
   /** Quem validou a encomenda ao fornecedor e quando. */
   validada?: { por: string; q: string } }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
@@ -762,12 +769,26 @@ export function gerarPlano(d: Negocio, S: Estado): Plano {
     });
   return { tasks: T, estado: "por aprovar", dia: 0 };
 }
+/** O primeiro dia (índice no plano) em que o técnico está de férias entre `dia` e `dia + dur`, ou null.
+ *  Nos planos do orçamento, pelas datas reais (os dias úteis desde o início); nos de exemplo, pelo índice. */
+export function diaDeFerias(tec: Tecnico, p: Plano, dia: number, dur: number): number | null {
+  if (p.origem === "orcamento") {
+    const i = inicioDoPlano(p);
+    if (!i || !tec.feriasDatas?.length) return null;
+    const ds = diasDaObra(i, dia + dur);
+    for (let k = dia; k < dia + dur; k++) if (tec.feriasDatas.includes(isoDia(ds[k]))) return k;
+    return null;
+  }
+  for (let k = dia; k < dia + dur; k++) if (tec.ferias.includes(k)) return k;
+  return null;
+}
 export function conflitos(p: Plano) {
   const C: { t: Tarefa; tec: Tecnico; dia: number }[] = [];
   for (const t of p.tasks) {
     const tec = TECS.find((x) => x.id === t.tec);
     if (!tec) continue;
-    for (let k = t.dia; k < t.dia + t.dur; k++) if (tec.ferias.includes(k)) { C.push({ t, tec, dia: k }); break; }
+    const k = diaDeFerias(tec, p, t.dia, t.dur);
+    if (k != null) C.push({ t, tec, dia: k });
   }
   return C;
 }
@@ -1280,14 +1301,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     trocar(id: number, ti: number) {
       const d = deal(id); const t = d.obra.plano!.tasks[ti];
       const old = TECS.find((x) => x.id === t.tec)!;
-      const alt = TECS.find((x) => x.sk === t.sk && x.id !== t.tec && !x.ferias.some((k) => k >= t.dia && k < t.dia + t.dur));
+      const alt = TECS.find((x) => x.sk === t.sk && x.id !== t.tec && diaDeFerias(x, d.obra.plano!, t.dia, t.dur) == null);
       if (!alt) return;
       t.tec = alt.id; log(d, `Plano: ${t.nome} passa de ${old.n} para ${alt.n}`); avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${alt.n}`, kind: "ok" });
     },
     adiar(id: number, ti: number) {
       const d = deal(id), p = d.obra.plano!; const t = p.tasks[ti]; const tec = TECS.find((x) => x.id === t.tec)!;
       let nd = t.dia;
-      while (tec.ferias.some((k) => k >= nd && k < nd + t.dur)) nd++;
+      while (diaDeFerias(tec, p, nd, t.dur) != null && nd < t.dia + 60) nd++;
       if (p.origem !== "orcamento") nd = Math.max(nd, 5); // o plano de exemplo: a fase seguinte não pode passar à frente
       const shift = nd - t.dia;
       // adia esta e as que começam depois dela (as anteriores ficam)
@@ -1349,7 +1370,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), e = d.obra.enc;
       if (!e || e.estado !== "encomendada" || e.entrega) return;
       const t = new Date(); t.setDate(t.getDate() + 3);
-      e.entrega = dataCurta(proximoUtil(t));
+      const dia = proximoUtil(t);
+      e.entrega = dataCurta(dia); e.entregaIso = isoDia(dia);
       log(d, "O fornecedor " + (e.forn ?? "") + " confirmou a entrega para " + e.entrega);
       avisar({ msg: "Entrega confirmada", sub: (e.forn ?? "Fornecedor") + " · " + e.entrega, kind: "ok" });
     },
