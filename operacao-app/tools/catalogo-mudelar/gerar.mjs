@@ -18,6 +18,14 @@
 // estrutura) ficar perto do custo real (a ±12%, de propósito, com uma variação fixa por serviço).
 //
 // Determinístico: semente fixa e variação tirada de um hash do sku (nada de Math.random).
+//
+// 14/10 ("liga tudo", a partir da vista Problemas das Ligações):
+//  · os c1..c41 passam a usar esta receita no protótipo (catalogoMudelar.ts, receitaMudelar);
+//  · o material de consumo que vinha como produto (AVAC e Elétrica) passa a consumível e entra nas receitas
+//    (eConsumivel; nas receitas pela chave "sku:<sku>"); a bomba de condensados, os focos, a tela radiante, as redes
+//    mosquiteiras e os roupeiros ganham o serviço de instalação (servicoDoProduto); os termoacumuladores ficam sem
+//    serviço, porque a Mudelar não tem nenhum que os instale (SEM_SERVICO);
+//  · os 4 equipamentos sem uso entram nas receitas a que pertencem (pintura, canalização, caixilharia, AVAC).
 
 import fs from "node:fs";
 import path from "node:path";
@@ -201,6 +209,31 @@ const CONS_DEF = [
 const CONS = CONS_DEF.map(([k, n, un, preco, fornecedor, marca, meses, opcional], i) => ({ k, id: "k" + (i + 1), n, un, preco, fornecedor, marca, data: mesesAntes(HOJE, meses), opcional: !!opcional }));
 const K = Object.fromEntries(CONS.map((c) => [c.k, c]));
 
+/* ------------------------------------------------------------------ produtos que são material de consumo */
+// Regra (14/10): estes artigos da base da Mudelar não se escolhem na visita nem se instalam um a um: gastam-se na obra.
+// Saem da lista de produtos e passam a consumíveis (com a marca, o fornecedor, o custo real, a unidade e a data do
+// preço do produto) e entram nas receitas pela chave "sku:<sku>" (ver T: avacHora, quadro, tomada, pontoLuz).
+//  · AVAC: tudo o que não é um aparelho. É o material da pré-instalação do ar condicionado: tubo de cobre isolado,
+//    tubo anelado, tubo de esgoto, calha, cabo, caixas e tabuleiros de pré-instalação, válvulas de carga, buchas,
+//    parafusos e fita. Fica produto a bomba de condensados (é uma peça que se instala).
+//  · Elétrica: o fio, o tubo e o material da terra de proteção (caixa de medição da terra, elétrodos). A aparelhagem,
+//    os focos e a tela radiante (TECNISIS) continuam produtos.
+function eConsumivel(p) {
+  const cat = normal(p.cat ?? ""), n = normal(p.name);
+  if (cat === "avac") return !/bomba/.test(n);
+  // o fio de 1,5 fica produto: traz a "Passagem de fio Eletrico" (MOME0003), que se vende ao metro com ele
+  if (cat === "eletrica") return /^fio |^tubo |caixa medi|el?ectrodo/.test(n) && !/^fio 1\.5/.test(n);
+  return false;
+}
+/** A unidade de compra do consumível, pelo nome do artigo (rolo, caixa, saco), senão a do produto. */
+function unidadeConsumivel(p) {
+  const n = normal(p.name);
+  if (/\(cx\s*\d+\s*rolos\)|\/cx\)/.test(n)) return "cx"; // "(cx12rolos)", "(24mts/cx)"
+  if (/rolo|\(\d+\s*mts\)/.test(n)) return "rolo"; // "(Rolo c/100mts)", "(100mts)"
+  if (/saco \d+ un/.test(n)) return "saco";
+  return unidadeProduto(p);
+}
+
 /* ------------------------------------------------------------------ a árvore (ofício › sub) */
 // Os ofícios e subs que o protótipo já tem não mudam (há testes que os comparam). Juntam-se subs a ofícios
 // existentes (menos a Revestimentos, que tem de ficar Parede · Pavimento · Colas e argamassas) e ofícios novos.
@@ -250,8 +283,9 @@ const T = {
   conjunto: { mat: 0.78, mo: [["Montagem do conjunto", "montador", 0.8], ["Transporte e arrumação", "ajudante", 0.2]], eq: [[E.aparaf, 0.5], [E.laser, 0.2]], cs: [["parafMoveis", 1], ["ferragens", 1]] },
   cozinhaCompleta: { mo: [["Montagem dos móveis", "montador", 0.6], ["Ligações de água e esgoto", "canalizador", 0.1], ["Ligações elétricas", "eletricista", 0.1], ["Transporte e apoio", "ajudante", 0.2]], eq: [[E.aparaf, 0.5], [E.laser, 0.2], [E.tico, 0.05], [E.caroteadora, 0.02]], cs: [["parafMoveis", 12], ["calcos", 6], ["ferragens", 4], ["siliconeSan", 2], ["flexivel", 2], ["ligadores", 2]] },
   roupeiro: { mo: [["Montagem do corpo e das prateleiras", "carpinteiro", 0.55], ["Portas, calhas e ferragens", "carpinteiro", 0.3], ["Transporte e arrumação", "ajudante", 0.15]], eq: [[E.aparaf, 0.6], [E.laser, 0.3], [E.esquadria, 0.1]], cs: [["parafMoveis", 2], ["ferragens", 1], ["calcos", 1]] },
-  janela: { mo: [["Assentamento e fixação do aro", "serralheiro", 0.45], ["Montagem das folhas e afinação", "serralheiro", 0.2], ["Vedação e remates", "ajudante", 0.35]], eq: [[E.perfurador, 0.3], [E.laser, 0.3], [E.ventosas, 0.3], [E.escadote, 0.5]], cs: [["espumaCaix", 1], ["siliconeCaix", 1], ["buchasCaix", 1], ["fitaExpansiva", 4, true], ["calcosCaix", 1]] },
-  rede: { mo: [["Montagem da rede no vão", "serralheiro", 1]], eq: [[E.berbequim, 0.4]], cs: [["buchasCaix", 0.5], ["siliconeCaix", 0.3]] },
+  // 14/10: a serra de esquadria para alumínio e PVC (acertos de perfis e remates; também nas redes)
+  janela: { mo: [["Assentamento e fixação do aro", "serralheiro", 0.45], ["Montagem das folhas e afinação", "serralheiro", 0.2], ["Vedação e remates", "ajudante", 0.35]], eq: [[E.perfurador, 0.3], [E.laser, 0.3], [E.ventosas, 0.3], [E.escadote, 0.5], [E.serraPvc, 0.15]], cs: [["espumaCaix", 1], ["siliconeCaix", 1], ["buchasCaix", 1], ["fitaExpansiva", 4, true], ["calcosCaix", 1]] },
+  rede: { mo: [["Montagem da rede no vão", "serralheiro", 1]], eq: [[E.berbequim, 0.4], [E.serraPvc, 0.2]], cs: [["buchasCaix", 0.5], ["siliconeCaix", 0.3]] },
   porta: { mo: [["Aro e guarnições", "carpinteiro", 0.6], ["Folha e ferragens", "carpinteiro", 0.3], ["Remates e limpeza", "ajudante", 0.1]], eq: [[E.esquadria, 0.2], [E.laser, 0.3], [E.aparaf, 0.4]], cs: [["espumaPu", 1], ["colaPu", 1], ["parafMoveis", 1]] },
   retirarPorta: { mo: [["Desmontagem da folha e do aro", "carpinteiro", 0.7], ["Remoção e arrumação", "ajudante", 0.3]], eq: [[E.reb125, 0.2], [E.perfurador, 0.2]], cs: [["sacosRafia", 2], ["discoCorte", 0.2]] },
   marmorBancada: { mo: [["Medição, corte e furação", "marmorista", 0.35], ["Assentamento e nivelamento", "marmorista", 0.4], ["Colagem, remates e silicone", "ajudante", 0.25]], eq: [[E.serraPedra, 0.3], [E.polidora, 0.2], [E.ventosas, 0.3], [E.caroteadora, 0.05]], cs: [["colaEpoxi", 0.6], ["siliconePedra", 1], ["discoDiam", 1]] },
@@ -259,16 +293,24 @@ const T = {
   marmorCuba: { mo: [["Abertura e colagem da cuba", "marmorista", 0.8], ["Acabamento", "ajudante", 0.2]], eq: [[E.serraPedra, 0.4], [E.polidora, 0.3], [E.caroteadora, 0.1]], cs: [["colaEpoxi", 0.5], ["siliconePedra", 1], ["discoDiam", 1]] },
   grua: { mat: 0.75, mo: [["Acompanhamento da descarga", "marmorista", 0.5], ["Apoio à grua", "ajudante", 0.5]], eq: [[E.ventosas, 1]], cs: [["protObra", 6]] },
   projeto: { mo: [["Modelação e imagens 3D", "projetista", 0.85], ["Reunião com o cliente", "projetista", 0.15]], eq: [[E.pc3d, 1]], cs: [["licenca3d", 1]] },
-  avacHora: { horas: true, mo: [["Técnico de AVAC", "tecnico-avac", 1], ["Ajudante", "ajudante", 1]], eq: [[E.vacuo, 0.3], [E.manifold, 0.3], [E.carrinha, 0.5]], cs: [["fitaIsol", 0.2]] },
+  // 14/10: o flangeador e cortador de tubo de cobre, e o material da pré-instalação que vinha como produto (por hora,
+  // a média de uma instalação de split de cerca de 6 h: ~3 m de cada tubo de cobre, 1 m de cabo, 0,5 m de calha…)
+  avacHora: { horas: true, mo: [["Técnico de AVAC", "tecnico-avac", 1], ["Ajudante", "ajudante", 1]], eq: [[E.vacuo, 0.3], [E.manifold, 0.3], [E.carrinha, 0.5], [E.flangeador, 0.2]],
+    cs: [["fitaIsol", 0.2], ["sku:AVAC0003", 0.01], ["sku:AVAC0004", 0.01], ["sku:AVAC0008", 0.01], ["sku:AVAC0006", 0.02], ["sku:AVAC0001", 0.01], ["sku:AVAC0002", 0.01],
+      ["sku:AVAC0010", 0.02], ["sku:AVAC0005", 0.05], ["sku:AVAC0009", 0.05], ["sku:AVAC0014", 0.05], ["sku:AVAC0011", 0.2], ["sku:AVAC0012", 0.2], ["sku:AVAC0013", 0.02]] },
   eletrHora: { horas: true, mo: [["Eletricista", "eletricista", 1]], eq: [], cs: [] },
   deslocacao: { mo: [["Condução (por km)", "motorista", 1]], eq: [[E.carrinha, 1]], cs: [["gasoleo", 0.08]] },
   pontoEletr: { mo: [["Montagem e ligação", "eletricista", 0.85], ["Ensaio", "eletricista", 0.15]], eq: [[E.multimetro, 0.15], [E.berbequim, 0.2]], cs: [["caixaApar", 1], ["ligadores", 0.3]] },
-  tomada: { mo: [["Abertura, enfiamento e montagem", "eletricista", 0.85], ["Ensaio", "eletricista", 0.15]], eq: [[E.multimetro, 0.15], [E.rocadeira, 0.15]], cs: [["caixaApar", 1], ["cabo25", 3], ["tuboVd", 1.5], ["ligadores", 0.3]] },
+  // 14/10: o fio 2,5 já enfiado no tubo da Mudelar (MGME0007) no lugar do cabo e do tubo VD
+  tomada: { mo: [["Abertura, enfiamento e montagem", "eletricista", 0.85], ["Ensaio", "eletricista", 0.15]], eq: [[E.multimetro, 0.15], [E.rocadeira, 0.15]], cs: [["caixaApar", 1], ["sku:MGME0007", 3], ["ligadores", 0.3]] },
   disjuntor: { mo: [["Montagem e ligação no quadro", "eletricista", 1]], eq: [[E.multimetro, 0.3]], cs: [["ligadores", 0.2]] },
-  quadro: { mo: [["Montagem e ligação do quadro", "eletricista", 0.7], ["Abertura e fecho de roços", "ajudante", 0.3]], eq: [[E.multimetro, 0.3], [E.perfurador, 0.2], [E.rocadeira, 0.1]], cs: [["disj16", 6], ["ligadores", 3], ["fitaIsol", 2], ["cabo25", 10]] },
+  // 14/10: a alimentação (fio de 6 mm em tubo de 25 mm) e a terra de proteção (fio verde-amarelo de 16 mm, elétrodo, caixa de medição) da Mudelar
+  quadro: { mo: [["Montagem e ligação do quadro", "eletricista", 0.7], ["Abertura e fecho de roços", "ajudante", 0.3]], eq: [[E.multimetro, 0.3], [E.perfurador, 0.2], [E.rocadeira, 0.1]],
+    cs: [["disj16", 6], ["ligadores", 3], ["fitaIsol", 2], ["cabo25", 10], ["sku:MGME0009", 10], ["sku:MGME0006", 5], ["sku:MGME0003", 5], ["sku:MGME0005", 1], ["sku:MGME0004", 1]] },
   fioMl: { mo: [["Enfiamento do cabo", "eletricista", 1]], eq: [], cs: [["cabo15", 2.1], ["tuboVd", 1.05]] },
   fitaLed: { mo: [["Montagem do perfil e da fita LED", "eletricista", 1]], eq: [[E.berbequim, 0.2], [E.esquadria, 0.05]], cs: [["fitaIsol", 0.2], ["ligadores", 0.1]] },
-  pontoLuz: { mo: [["Abertura de roço e nova linha", "eletricista", 0.8], ["Fecho do roço", "pedreiro", 0.2]], eq: [[E.rocadeira, 0.3], [E.multimetro, 0.1]], cs: [["cabo25", 6], ["tuboVd", 5], ["caixaApar", 1], ["argamassa", 0.2]] },
+  // 14/10: a linha nova em tubo de 25 mm da Mudelar (MGME0010) no lugar do tubo VD
+  pontoLuz: { mo: [["Abertura de roço e nova linha", "eletricista", 0.8], ["Fecho do roço", "pedreiro", 0.2]], eq: [[E.rocadeira, 0.3], [E.multimetro, 0.1]], cs: [["cabo25", 6], ["sku:MGME0010", 5], ["caixaApar", 1], ["argamassa", 0.2]] },
   aplique: { mo: [["Fixação e ligação", "eletricista", 1]], eq: [[E.berbequim, 0.3], [E.multimetro, 0.1]], cs: [["caixaDeriv", 1], ["ligadores", 0.3]] },
   ventax: { mo: [["Furação e montagem", "eletricista", 0.7], ["Remates", "pedreiro", 0.3]], eq: [[E.caroteadora, 0.3], [E.multimetro, 0.1]], cs: [["tuboExaust", 1], ["cabo15", 4], ["caixaApar", 1]] },
   chamine: { mo: [["Montagem da chaminé", "montador", 0.5], ["Ligação elétrica", "eletricista", 0.2], ["Furação e remates do teto", "pladurista", 0.3]], eq: [[E.caroteadora, 0.2], [E.escadote, 0.6], [E.berbequim, 0.3]], cs: [["tuboExaust", 3], ["parafMoveis", 1], ["cabo15", 4]] },
@@ -301,7 +343,8 @@ const T = {
   demolParede: { mo: [["Demolição", "servente", 0.8], ["Remoção do entulho", "ajudante", 0.2]], eq: [[E.martelo, 0.5], [E.carro, 0.3], [E.reb230, 0.1]], cs: [["sacosRafia", 2], ["discoCorte", 0.1]] },
   entulho: { mo: [["Carga do entulho", "ajudante", 0.5], ["Transporte ao vazadouro", "motorista", 0.5]], eq: [[E.basculante, 0.5], [E.carro, 0.4]], cs: [["taxaRcd", 0.5], ["sacosRafia", 4]] },
   limpeza: { mat: 0.86, mo: [["Verificação final com o cliente", "ajudante", 1]], eq: [], cs: [["detergente", 1]] },
-  desloAgua: { mo: [["Roço e tubagem", "canalizador", 0.7], ["Fecho do roço", "pedreiro", 0.3]], eq: [[E.rocadeira, 0.2], [E.perfurador, 0.2], [E.prensa, 0.2]], cs: [["multi16", 1.1], ["acessMulti", 0.3], ["argamassa", 0.2]] },
+  // 14/10: o soldador de tubo PPR (as ligações a redes antigas em PPR)
+  desloAgua: { mo: [["Roço e tubagem", "canalizador", 0.7], ["Fecho do roço", "pedreiro", 0.3]], eq: [[E.rocadeira, 0.2], [E.perfurador, 0.2], [E.prensa, 0.2], [E.ppr, 0.15]], cs: [["multi16", 1.1], ["acessMulti", 0.3], ["argamassa", 0.2]] },
   desloEsgoto: { mo: [["Roço e tubagem", "canalizador", 0.7], ["Fecho do roço", "pedreiro", 0.3]], eq: [[E.rocadeira, 0.2], [E.reb125, 0.1]], cs: [["pvc40", 1.1], ["curvasPvc", 0.3], ["colaPvc", 0.05], ["argamassa", 0.3]] },
   supressao: { mo: [["Corte e tamponamento", "canalizador", 1]], eq: [[E.prensa, 0.3]], cs: [["acessMulti", 0.5], ["teflon", 0.3]] },
   multicamada: { mo: [["Passagem da tubagem", "canalizador", 1]], eq: [[E.prensa, 0.3]], cs: [["multi16", 1.05], ["acessMulti", 0.2]] },
@@ -327,8 +370,9 @@ const T = {
   tetoFocos: { mo: [["Estrutura e placas", "pladurista", 0.7], ["Focos LED", "eletricista", 0.15], ["Juntas e acabamento", "ajudante", 0.15]], eq: [[E.elevador, 0.3], [E.aparafPladur, 0.6], [E.caroteadora, 0.05], [E.escadote, 0.5]], cs: [["parafPladur", 0.1], ["fitaMassa", 0.5], ["suspensoes", 0.5]] },
   tetoBloco: { mo: [["Estrutura e placas hidrófugas", "pladurista", 0.65], ["Focos LED e ligação", "eletricista", 0.15], ["Juntas, massa e pintura", "pintor", 0.2]], eq: [[E.elevador, 0.3], [E.aparafPladur, 0.6], [E.escadote, 0.6], [E.multimetro, 0.05]], cs: [["placaH", 4.2], ["perfis48", 10], ["parafPladur", 1], ["fitaMassa", 2], ["suspensoes", 2], ["focoLed", 2], ["cabo15", 6], ["tintaTeto", 1]] },
   sanca: { mo: [["Colagem e remates", "pladurista", 0.9], ["Apoio", "ajudante", 0.1]], eq: [[E.esquadria, 0.2], [E.escadote, 0.5]], cs: [["colaPu", 0.1], ["fitaMassa", 0.2]] },
-  pinturaPar: { mo: [["Preparação e proteção", "pintor", 0.25], ["Duas demãos", "pintor", 0.65], ["Limpeza", "ajudante", 0.1]], eq: [[E.escadote, 0.3], [E.orbital, 0.1]], cs: [["protecao", 0.1], ["lixa", 0.3], ["massaRep", 0.05]] },
-  pinturaTeto: { mo: [["Preparação e proteção", "pintor", 0.25], ["Duas demãos", "pintor", 0.65], ["Limpeza", "ajudante", 0.1]], eq: [[E.escadote, 0.5], [E.andaime, 0.2]], cs: [["protecao", 0.1], ["lixa", 0.3]] },
+  // 14/10: a máquina de pintura airless nas demãos (paredes e tetos)
+  pinturaPar: { mo: [["Preparação e proteção", "pintor", 0.25], ["Duas demãos", "pintor", 0.65], ["Limpeza", "ajudante", 0.1]], eq: [[E.escadote, 0.3], [E.orbital, 0.1], [E.airless, 0.3]], cs: [["protecao", 0.1], ["lixa", 0.3], ["massaRep", 0.05]] },
+  pinturaTeto: { mo: [["Preparação e proteção", "pintor", 0.25], ["Duas demãos", "pintor", 0.65], ["Limpeza", "ajudante", 0.1]], eq: [[E.escadote, 0.5], [E.andaime, 0.2], [E.airless, 0.3]], cs: [["protecao", 0.1], ["lixa", 0.3]] },
   pinturaRep: { mo: [["Reparação e massa", "pintor", 0.4], ["Lixagem", "pintor", 0.15], ["Duas demãos", "pintor", 0.35], ["Limpeza", "ajudante", 0.1]], eq: [[E.escadote, 0.5], [E.girafa, 0.3], [E.aspirador, 0.2]], cs: [["protecao", 0.15], ["massaRep", 0.4], ["lixa", 0.5], ["primAcril", 0.1]] },
   estuque: { mo: [["Estuque", "pintor", 0.5], ["Duas demãos", "pintor", 0.4], ["Limpeza", "ajudante", 0.1]], eq: [[E.escadote, 0.3], [E.girafa, 0.2], [E.misturador, 0.1]], cs: [["estuque", 0.2], ["protecao", 0.1], ["lixa", 0.3]] },
   modeloWc: { mo: [["Demolição e remoção", "servente", 0.15], ["Canalização", "canalizador", 0.18], ["Eletricidade", "eletricista", 0.07], ["Regularização e rebocos", "pedreiro", 0.1], ["Revestimento e pavimento", "ladrilhador", 0.3], ["Montagem de louças e móveis", "montador", 0.1], ["Pintura do teto", "pintor", 0.05], ["Apoio e limpeza", "ajudante", 0.05]], eq: [[E.martelo, 0.05], [E.carro, 0.05], [E.rocadeira, 0.03], [E.cortador, 0.08], [E.serraAgua, 0.03], [E.misturador, 0.05], [E.prensa, 0.03], [E.aspirador, 0.05]], cs: [["sacosRafia", 15], ["colaFlex", 60], ["juntas", 4], ["multi16", 8], ["acessMulti", 2], ["pvc40", 3], ["membrana", 6], ["cabo25", 15], ["siliconeSan", 2], ["protecao", 2]] },
@@ -652,6 +696,8 @@ function descricao(p, sub, marca, un) {
 /* ------------------------------------------------------------------ produto → serviço que o instala */
 function servicoDoProduto(p, svcPorSku, svcPorNome) {
   const n = normal(p.name), cat = normal(p.cat), sub = normal(p.sub ?? "");
+  // 14/10: a tela radiante da TECNISIS (a tela, o termóstato e a sonda) instala-se com o "Sistema Tela Radiante" (subempreitada)
+  if (normal(p.marca ?? "") === "tecnisis") return svcPorSku.get("MOISTR") ?? null;
   // 1) o serviço "Instalação <nome do produto>" (armários de cozinha, roupeiros, janelas, portas, acessórios)
   const nome = n.replace(/\s+/g, " ").trim();
   for (const pre of ["instalacao ", "instalacao de "]) { const s = svcPorNome.get(pre + nome); if (s) return s; }
@@ -710,23 +756,44 @@ function servicoDoProduto(p, svcPorSku, svcPorNome) {
     if (/termoacumulador/.test(sub)) return null;
     return S("MOIEC");
   }
-  if (cat === "janelas") return /rede/.test(n) ? null : S("MOIJAWC");
+  // as redes mosquiteiras: o serviço da Mudelar tem o mesmo nome do produto (14/10)
+  if (cat === "janelas") return /rede/.test(n) ? svcPorNome.get(nome) ?? null : S("MOIJAWC");
+  // os roupeiros de catálogo: a "Instalação de Roupeiros" com as mesmas portas e as mesmas medidas (14/10)
+  if (cat === "mobiliario de roupeiros") {
+    const portas = /(\d) portas de (correr|abrir)/.exec(n), dim = DIM.exec(p.name);
+    if (!portas || !dim) return null;
+    const medidas = [dim[1], dim[2], dim[3]].filter(Boolean).join("x");
+    const ok = [...svcPorNome].filter(([sn]) => sn.startsWith("instalacao de roupeiros") && sn.includes(portas[0]) && sn.includes(medidas));
+    return ok.length === 1 ? ok[0][1] : null;
+  }
+  // a bomba de condensados: o técnico de AVAC à hora (1 h por bomba; 14/10)
+  if (cat === "avac") return /bomba/.test(n) ? S("MOAVAC") : null;
   if (cat === "portas") return /vidro/.test(n) ? S("MOIPCVT") : /espelho/.test(n) ? S("IPCGE0001") : S("MOIPCPL");
   if (cat === "marmorista") return S("MOMC0001");
   if (cat === "materiais") {
     const M = [[/teto falso/, "MOITFP"], [/vinyl \+ primario\s+para teto/, "MOPT"], [/estuque para paredes/, "MOEPP"], [/tinta vinyl/, "MOPP"], [/reboco de parede/, "MORPSP"],
       [/reboco de teto/, "MORTSP"], [/betonilha/, "MOBP0001"], [/autonivelante/, "MOIAN1"], [/impermeabilizante/, "MOIKI"], [/la de rocha/, "MOILAR"], [/murete/, "MOMA"],
-      [/tijolo/, "MOLPA"], [/canalizacao multicamada/, "MOMGCM0001"], [/ponto de agua/, "MOGDPA"], [/ponto de esgoto/, "MODPE"], [/acabamento roco/, "MOAFRCA"], [/sanca/, "MOIS0001"], [/verniz/, "MOAE"]];
+      [/tijolo/, "MOLPA"], [/canalizacao multicamada/, "MOMGCM0001"], [/ponto de agua/, "MOGDPA"], [/ponto de esgoto/, "MODPE"], [/acabamento roco/, "MOAFRCA"], [/sanca/, "MOIS0001"], [/verniz/, "MOAE"],
+      [/^foco/, "MOIAL"]]; // 14/10: o foco LED solto instala-se como um aplique LED
     for (const [re, sku] of M) if (re.test(n)) return S(sku);
     return null;
   }
   if (cat === "eletrica") {
-    const M = [[/interruptor/, "MOME0004"], [/tomada/, "MOIET"], [/disjuntor/, "MOME0008"], [/quadro eletrico/, "MOME0002"], [/cablagem|^fio 1\.5/, "MOME0003"], [/fita led/, "MOME0001"]];
+    const M = [[/interruptor/, "MOME0004"], [/tomada/, "MOIET"], [/disjuntor/, "MOME0008"], [/quadro eletrico/, "MOME0002"], [/cablagem|^fio 1\.5/, "MOME0003"], [/fita led/, "MOME0001"],
+      [/^foco/, "MOIAL"]]; // 14/10: o foco LED solto instala-se como um aplique LED
     for (const [re, sku] of M) if (re.test(n)) return S(sku);
     return null;
   }
   return null;
 }
+
+/**
+ * Os produtos que se instalam mas ficam sem serviço, com a razão (14/10). Nos ramos que foram revistos (AVAC, Elétrica,
+ * Janelas, Roupeiros, Termoacumuladores), o gerador falha se aparecer um produto sem serviço que não esteja aqui.
+ */
+const SEM_SERVICO = [
+  [/^termoacumulador/, "A Mudelar não tem um serviço de instalação de termoacumulador (precisa de canalizador e de eletricista; o do esquentador é de gás). A pedir à Mudelar."],
+];
 
 /* ------------------------------------------------------------------ serviço que exige produto (com a pergunta) */
 // sku → [ofício, sub, pergunta, regra da quantidade (null = 1)]
@@ -761,6 +828,21 @@ function main() {
   const cProto = lerCatalogoProto();
   if (cProto.length !== 41) throw new Error(`Esperava 41 serviços c1..c41 em catalogo.ts e li ${cProto.length}.`);
 
+  // os produtos que são material de consumo passam a consumíveis (eConsumivel), antes das receitas, que os usam por "sku:<sku>"
+  const nomes = new Map();
+  for (const p of prodIn) { const k = normal(limpo(p.name)); nomes.set(k, (nomes.get(k) ?? 0) + 1); }
+  const consDeProduto = [];
+  for (const p of prodIn) {
+    if (motivoExclusao(p) || !eConsumivel(p)) continue;
+    const { marca, forn } = marcaFornecedor(p, classificarProduto(p));
+    let n = limpo(p.name);
+    if (nomes.get(normal(n)) > 1) n = `${n} · ${p.sku}`;
+    if (CONS.some((c) => normal(c.n) === normal(n))) throw new Error("consumível repetido: " + n);
+    const c = { k: "sku:" + p.sku, id: "k" + (CONS.length + 1), n, un: unidadeConsumivel(p), preco: num(p.custo), fornecedor: forn, marca,
+      data: mesesAntes(HOJE, Math.floor(aleatorio("prod:" + p.sku) * 6)), opcional: false, sku: p.sku };
+    CONS.push(c); K[c.k] = c; consDeProduto.push(c);
+  }
+
   // os c1..c41 ligam-se ao sku pelo nome (sem duplicar: o serviço da Mudelar fica com o id cN)
   const porNome = new Map(svcIn.map((s) => [normal(limpo(s.name)), s]));
   const cDoSku = new Map();
@@ -790,14 +872,14 @@ function main() {
   const marcas = [], forns = [], subsT = [], nos = [];
   const idx = (arr, v) => { const k = v ?? ""; let i = arr.indexOf(k); if (i < 0) { arr.push(k); i = arr.length - 1; } return i; };
   const idxNo = (of, sub) => { const k = `${of ?? ""}|${sub ?? ""}`; let i = nos.findIndex((x) => x.join("|") === k); if (i < 0) { nos.push([of ?? "", sub ?? ""]); i = nos.length - 1; } return i; };
-  const nomes = new Map();
-  for (const p of prodIn) { const k = normal(limpo(p.name)); nomes.set(k, (nomes.get(k) ?? 0) + 1); }
   const idsP = new Set();
   const produtos = [];
+  const semServico = [];
   let comServico = 0;
   for (const p of prodIn) {
     const motivo = motivoExclusao(p);
     if (motivo) { excluidos.push({ sku: p.sku, n: limpo(p.name), motivo }); continue; }
+    if (eConsumivel(p)) continue; // passou a consumível (acima)
     const cl = classificarProduto(p);
     if (cl.of && !temNo(cl.of, cl.sub)) throw new Error(`Nó por criar (produto): ${cl.of} › ${cl.sub}`);
     const { marca, forn } = marcaFornecedor(p, cl);
@@ -807,10 +889,23 @@ function main() {
     let id = "p-" + slug(p.sku); while (idsP.has(id)) id += "x"; idsP.add(id);
     const svc = servicoDoProduto(p, svcPorSku, svcPorNome);
     if (svc) comServico++;
+    else if (["avac", "eletrica", "janelas", "mobiliario de roupeiros"].includes(normal(p.cat)) || /termoacumulador/.test(normal(p.sub ?? ""))) {
+      // estes ramos ficam todos com serviço (14/10), salvo os de SEM_SERVICO, com a razão
+      const razao = SEM_SERVICO.find(([re]) => re.test(normal(p.name)));
+      if (!razao) throw new Error(`Produto sem serviço de instalação: ${p.sku} · ${p.name}`);
+      semServico.push({ sku: p.sku, n: limpo(p.name), razao: razao[1] });
+    }
     const sub = limpo(p.sub) ?? limpo(p.cat) ?? null;
     const meses = Math.floor(aleatorio("prod:" + p.sku) * 6); // 0 a 5 meses: a tabela de preços da Mudelar é recente
     produtos.push([id, p.sku, n, idxNo(cl.of, cl.sub), idx(subsT, sub), idx(marcas, marca), idx(forns, forn), un, num(p.custo), num(p.pvp), cl.img, descricao(p, sub, marca, un), mesesAntes(HOJE, meses), svc ?? "", svc ? 1 : 0]);
   }
+
+  // cada consumível vindo de um produto tem de entrar numa receita (senão seria "consumível sem uso" nas Ligações)
+  const consUsados = new Set(servicos.flatMap((s) => s.r.cs.filter((c) => c.length === 3).map((c) => c[0])));
+  for (const c of consDeProduto) if (!consUsados.has(c.id)) throw new Error(`Consumível sem uso: ${c.n} (${c.k})`);
+  // e cada equipamento novo numa receita (senão seria "equipamento sem uso")
+  const eqUsados = new Set(servicos.flatMap((s) => s.r.eq.map(([e]) => e)));
+  for (const e of EQUIP_NOVOS) if (!eqUsados.has(idEquip(e[0]))) throw new Error(`Equipamento sem uso: ${e[0]}`);
 
   // relações serviço → produto obrigatório
   const exige = [];
@@ -826,6 +921,7 @@ function main() {
   const resumo = {
     gerado: GERADO, semente: SEMENTE, servicos: servicos.length, ligadosAoC: cDoSku.size, servicosNovos: servicos.length - cDoSku.size,
     produtosEntrada: prodIn.length, produtos: produtos.length, produtosExcluidos: excluidos.length, produtosComServico: comServico,
+    produtosParaConsumivel: consDeProduto.length, produtosSemServicoJustificado: semServico.length,
     perfisNovos: PERFIS_NOVOS.length, equipamentos: EQUIP.length, equipamentosNovos: EQUIP_NOVOS.length, consumiveis: CONS.length,
     consumiveisOpcionais: CONS.filter((c) => c.opcional).length, receitasComCusto: comCusto.length, receitasDentro30: dentro.length,
   };
@@ -834,11 +930,12 @@ function main() {
     resumo,
     perfis: PERFIS_NOVOS,
     equip: EQUIP_NOVOS.map(([n, ...r]) => [idEquip(n), n, ...r]),
-    cons: CONS.map((c) => [c.id, c.n, c.un, c.preco, c.fornecedor, c.marca, c.data, c.opcional ? 1 : 0]),
+    cons: CONS.map((c) => [c.id, c.n, c.un, c.preco, c.fornecedor, c.marca, c.data, c.opcional ? 1 : 0, ...(c.sku ? [c.sku] : [])]),
     subsNovos: SUBS_NOVOS_EXISTENTES, oficiosNovos: OFICIOS_NOVOS, perfilDoOficio: PERFIL_DOS_OFICIOS_NOVOS,
     servicos: svcOrdenados.map((s) => [s.id, s.sku, s.n, s.of, s.sub ?? "", s.un, s.pvp, s.custo, s.med ?? "", s.ic, s.ln.join(","), s.cId ?? "", s.r.rs ?? [0, 0, 0, 0], s.r.mo, s.r.eq, s.r.cs]),
     exige,
     excluidos,
+    semServico,
   };
   const brutoP = { nos, subs: subsT, marcas, forns, produtos };
 
@@ -856,6 +953,8 @@ function main() {
   console.log(`Dentro de ±30%: ${dentro.length}/${comCusto.length} (${((100 * dentro.length) / comCusto.length).toFixed(1)}%)`);
   console.log(`mudelarServicos.ts ${tam("mudelarServicos.ts")} · mudelarProdutos.ts ${tam("mudelarProdutos.ts")}`);
   console.log(`Excluídos: ${excluidos.map((e) => `${e.sku} (${e.motivo})`).join(", ")}`);
+  console.log(`Produtos que passaram a consumível (${consDeProduto.length}): ${consDeProduto.map((c) => c.sku).join(", ")}`);
+  console.log(`Produtos sem serviço, com razão (${semServico.length}): ${semServico.map((x) => x.sku).join(", ")}`);
   const naoLigados = cProto.filter((c) => ![...cDoSku.values()].includes(c.id)).map((c) => c.id);
   if (naoLigados.length) console.log("c sem sku:", naoLigados.join(", "));
 }

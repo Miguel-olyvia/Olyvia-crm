@@ -242,7 +242,8 @@ function novoDeal(o: NovoNegocio): Negocio {
 }
 
 // 7 (14/10/2026): o catálogo real da Mudelar (358 serviços, os produtos, perfis, equipamentos e consumíveis)
-export const VERSAO = 7;
+// 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
+export const VERSAO = 8;
 
 export function seed(): Estado {
   const S: Estado = {

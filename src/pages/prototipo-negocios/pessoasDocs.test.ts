@@ -172,11 +172,12 @@ describe("pessoas · dados do cliente", () => {
   it("valor total dos negócios ganhos e n.º de contratos: a seed mais a venda direta aceite do Tiago", () => {
     expect(dadosCliente(S, por("Tiago Almeida"))).toMatchObject({ valorTotal: pf(1027) + 4200 + 2350, contratos: 2 });
     expect(dadosCliente(S, por("Marta Lima"))).toMatchObject({ valorTotal: pf(1022), contratos: 1 });
-    expect(dadosCliente(S, por("Joana Ribeiro"))).toMatchObject({ valorTotal: pf(1050), contratos: 1 });
+    expect(dadosCliente(S, por("Joana Ribeiro"))).toMatchObject({ contratos: 1 });
+    expect(dadosCliente(S, por("Joana Ribeiro")).valorTotal).toBeCloseTo(pf(1050), 6);
   });
   it("um negócio de exemplo ainda em curso, perdido ou à espera de assinatura não entra no valor dos contratos", () => {
     expect(dadosCliente(S, por("Marta Lima")).valorTotal).toBe(pf(1022));
-    expect(dadosCliente(S, por("Joana Ribeiro")).valorTotal).toBe(pf(1050));
+    expect(dadosCliente(S, por("Joana Ribeiro")).valorTotal).toBeCloseTo(pf(1050), 6);
   });
   it("o último negócio é o mais recente, os de exemplo incluídos e os perdidos não", () => {
     expect(dadosCliente(S, por("Marta Lima")).ultimo).toMatchObject({ servico: "Cozinha nova", quando: "08/10" });

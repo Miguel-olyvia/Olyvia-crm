@@ -53,7 +53,7 @@ describe("Pessoas · separadores Dashboard e Lista", () => {
     tab(/^Clientes/);
     const clientes = within(screen.getByRole("region", { name: "Números dos clientes" })).getAllByRole("button").map((c) => c.textContent);
     expect(clientes[0]).toContain("5");
-    expect(clientes[1]).toContain("39.992,66 €");
+    expect(clientes[1]).toContain("39.913,67 €");
     expect(clientes[3]).toContain("37.180 €");
     tab(/^Todos/);
     const todos = within(screen.getByRole("region", { name: "Números de todas as pessoas" })).getAllByRole("button").map((c) => c.textContent?.replace(SEM_ACAO, ""));

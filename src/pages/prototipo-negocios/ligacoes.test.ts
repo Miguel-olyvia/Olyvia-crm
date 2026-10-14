@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { seed } from "./motor";
+import { seed, type Estado } from "./motor";
 import { EQUIP_MUDELAR, EXIGE_MUDELAR } from "./dados/catalogoMudelar";
 import { custos0, receitaDe, type Custos } from "./v2/custosModelo";
 import { catalogo0, type Catalogo, type Produto } from "./v2/catalogoModelo";
@@ -15,8 +15,9 @@ vi.mock("./catalogo", async (orig) => {
   const m = await orig<typeof import("./catalogo")>();
   return { ...m, CATALOGO_TODO: m.CATALOGO };
 });
-const montar = (fC?: (c: Custos) => void, fK?: (k: Catalogo) => void) => {
+const montar = (fC?: (c: Custos) => void, fK?: (k: Catalogo) => void, fS?: (s: Estado) => void) => {
   const S = seed(), C = custos0(), K = catalogo0();
+  fS?.(S);
   K.produtos = K.produtos.filter((p) => !p.sku);
   K.exigeProduto = Object.fromEntries(Object.entries(K.exigeProduto ?? {}).filter(([sid]) => !daMudelarExige.has(sid)));
   const daMudelar = new Set(EQUIP_MUDELAR.map((e) => e.id));
@@ -24,6 +25,9 @@ const montar = (fC?: (c: Custos) => void, fK?: (k: Catalogo) => void) => {
   fC?.(C); fK?.(K);
   return montarCatalogo(S, C, K);
 };
+// Um serviço sem receita, criado no próprio teste: desde 14/10 os c1..c41 têm a receita da Mudelar.
+const SEM_RECEITA = "x-sem-receita";
+const comSemReceita = (S: Estado) => { S.svc[SEM_RECEITA] = { n: "Serviço de teste sem receita", un: "un", h: 1, eh: 25, eq: 0, cons: 0, preco: 46.25, perfil: "Canalização" }; };
 const grupo = (m: Mapa | null, id: string) => m!.grupos.find((g) => g.id === id)!;
 const nomes = (m: Mapa | null, id: string) => grupo(m, id).itens.map((l) => l.n);
 
@@ -55,7 +59,8 @@ describe("ligacoes · ligacoesDe", () => {
     const sanita = P.itens.find((l) => l.n === "Sanita suspensa com estrutura")!;
     expect(sanita.porque).toBe("1 un traz 1 × Instalação de Sanita Compacta");
     expect(P.itens.find((l) => l.n === "Base de duche 80×120")!.porque).toBe("Pede um de Louças e torneiras · se o cliente não mantém");
-    expect(grupo(m, "tecnicos").itens).toEqual([expect.objectContaining({ n: "Canalizador", porque: "Execução: 2 h/un · 25,00 €/h" })]);
+    // 14/10: a receita da Mudelar do c13 (dois passos do canalizador)
+    expect(grupo(m, "tecnicos").itens).toEqual([expect.objectContaining({ n: "Canalizador", porque: "2 passos: 0,87 h/un · 25,00 €/h" })]);
   });
   it("serviço com receita: equipamentos com €/h × h/un e consumíveis com a marca de opcional", () => {
     const K = montar((c) => { c.receitas.canal = { ...receitaCanal(c), cons: receitaCanal(c).cons.map((x) => (x.n === "Fita e vedante" ? { ...x, opcional: true } : x)) }; });
@@ -73,7 +78,7 @@ describe("ligacoes · ligacoesDe", () => {
     expect(nomes(m, "pedem")).toContain("Montagem de louças");
     expect(nomes(m, "alternativas")[0]).toBe("Sanita compacta");
     expect(nomes(m, "alternativas")).toContain("Base de duche 80×120");
-    expect(grupo(m, "instala").itens[0]).toMatchObject({ n: "Canalizador", porque: "Instala · Execução: 2 h/un · 25,00 €/h" });
+    expect(grupo(m, "instala").itens[0]).toMatchObject({ n: "Canalizador", porque: "Instala · 2 passos: 0,87 h/un · 25,00 €/h" });
   });
   it("as alternativas são as da mesma subcategoria quando o produto a tem", () => {
     const K = montar(undefined, (k) => {
@@ -88,7 +93,10 @@ describe("ligacoes · ligacoesDe", () => {
     const K = montar();
     expect(nomes(ligacoesDe({ t: "tec", id: "canalizador" }, K), "servicos")).toEqual(expect.arrayContaining(["Canalização", "Instalação de Sanita Compacta"]));
     const prensa = K.equip.find((e) => e.n === "Prensa de multicamada")!.id;
-    expect(grupo(ligacoesDe({ t: "equip", id: prensa }, K), "servicos").itens).toEqual([expect.objectContaining({ n: "Canalização", porque: "0,85 €/h · 0,4 h/pt" })]);
+    const usamPrensa = grupo(ligacoesDe({ t: "equip", id: prensa }, K), "servicos").itens;
+    expect(usamPrensa).toEqual(expect.arrayContaining([expect.objectContaining({ n: "Canalização", porque: "0,85 €/h · 0,4 h/pt" })]));
+    // 14/10: e os c1..c41 de canalização com a receita da Mudelar
+    expect(usamPrensa.map((l) => l.n)).toEqual(expect.arrayContaining(["Supressão de ponto de água", "Mão de Obra - Deslocação de Ponto de Água ML"]));
     const fita = K.consumiveis.find((c) => c.n === "Fita e vedante")!.k;
     expect(nomes(ligacoesDe({ t: "cons", id: fita }, K), "servicos")).toEqual(["Canalização"]);
   });
@@ -105,10 +113,10 @@ describe("ligacoes · ligacoesDe", () => {
 
 describe("ligacoes · problemasCatalogo", () => {
   it("com os dados de exemplo: serviços sem receita e produtos que se instalam sem serviço (os de um ramo exigido ficam de fora)", () => {
-    const K = montar(), P = problemasCatalogo(K), n = contarProblemas(P);
-    expect(n["svc-sem-receita"]).toBeGreaterThan(0);
+    const K = montar(undefined, undefined, comSemReceita), P = problemasCatalogo(K), n = contarProblemas(P);
+    expect(n["svc-sem-receita"]).toBe(1);
     const sem = P.filter((p) => p.tipo === "svc-sem-receita").map((p) => p.ref.id);
-    expect(sem).toContain("c13");
+    expect(sem).toEqual([SEM_RECEITA]);
     expect(sem).not.toContain("canal");
     const prod = P.filter((p) => p.tipo === "prod-sem-servico").map((p) => p.n);
     expect(prod).toEqual(expect.arrayContaining(["Espelho simples 60×80", "Conjunto de acessórios WC"]));
@@ -121,15 +129,16 @@ describe("ligacoes · problemasCatalogo", () => {
   it("equipamento e consumível que nenhum serviço usa, e serviço que exige um produto de um ramo vazio ou que não existe", () => {
     const K = montar(
       (c) => { c.equip.push({ id: "e-novo", n: "Aspirador industrial", compra: 300, vida: 1000, residual: 0, manutAno: 0, usoAno: 600 }); c.receitas.canal = { ...receitaCanal(c), cons: receitaCanal(c).cons.filter((x) => x.n !== "Fita e vedante") }; },
-      (k) => { const pint = k.arvore.find((x) => x.n === "Pintura")!.id; k.exigeProduto = { ...k.exigeProduto, c2: pint, c7: "nó-apagado" }; },
+      (k) => { const pint = k.arvore.find((x) => x.n === "Pintura")!.id; k.exigeProduto = { ...k.exigeProduto, [SEM_RECEITA]: pint, c7: "nó-apagado" }; },
+      comSemReceita,
     );
     const P = problemasCatalogo(K), por = problemasPorNo(P);
     expect(P.find((p) => p.tipo === "equip-sem-uso")).toMatchObject({ n: "Aspirador industrial", ref: { t: "equip", id: "e-novo" } });
     expect(P.find((p) => p.tipo === "cons-sem-uso")).toMatchObject({ n: "Fita e vedante" });
     const exige = P.filter((p) => p.tipo === "svc-exige-sem-produto");
-    expect(exige.map((p) => p.ref.id).sort()).toEqual(["c2", "c7"]);
-    expect(exige.find((p) => p.ref.id === "c2")!.t).toBe("Exige um produto de Pintura, mas não há nenhum.");
-    expect(por.get("svc:c2")!.map((p) => p.tipo)).toEqual(["svc-sem-receita", "svc-exige-sem-produto"]);
+    expect(exige.map((p) => p.ref.id).sort()).toEqual(["c7", SEM_RECEITA]);
+    expect(exige.find((p) => p.ref.id === SEM_RECEITA)!.t).toBe("Exige um produto de Pintura, mas não há nenhum.");
+    expect(por.get(`svc:${SEM_RECEITA}`)!.map((p) => p.tipo)).toEqual(["svc-sem-receita", "svc-exige-sem-produto"]);
   });
   it("os irmãos com serviço dizem que o produto devia ter um", () => {
     const K = montar(undefined, (k) => {

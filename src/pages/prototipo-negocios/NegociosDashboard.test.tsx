@@ -47,7 +47,7 @@ describe("Negócios V2 · separadores Quadro e Dashboard", () => {
     expect(c[0]).toContain("No Quadro14");
     expect(c[1]).toContain("Por fechar10no valor de 67.809,04 €");
     expect(c[2]).toContain("Ponderado40.492,33 €");
-    expect(c[3]).toBe("Ganhos6em todo o período, no valor de 39.992,66 €.");
+    expect(c[3]).toBe("Ganhos6em todo o período, no valor de 39.913,67 €.");
     expect(c[4]).toBe("Conversão60 %6 ganhos e 4 perdidos, em todo o período.");
     expect(c[5]).toContain("Com 2 ou mais orçamentos4");
     expect(desenhados()).toBe(0); // o Quadro só aparece no seu separador

@@ -65,8 +65,8 @@ describe("lista · etapa e valor por papel", () => {
     expect(v["Rita Sousa"]).toBeNull(); // o WC social perdido não conta
   });
   it("clientes: o valor contratado", () => {
-    // Os três contratos da seed (16.225,82) mais a venda direta aceite do Tiago (4.200 + 2.350); o resto está em curso, à espera de assinatura ou perdido.
-    expect(clientesApp(S).filter((p) => CLIENTES_SEED.includes(p.nome)).reduce((a, p) => a + (valorColuna(S, p) ?? 0), 0)).toBeCloseTo(16225.82 + 6550, 2);
+    // Os três contratos da seed (16.146,83; 14/10: a Joana com a receita da Mudelar nos extras) mais a venda direta aceite do Tiago (4.200 + 2.350); o resto está em curso, à espera de assinatura ou perdido.
+    expect(clientesApp(S).filter((p) => CLIENTES_SEED.includes(p.nome)).reduce((a, p) => a + (valorColuna(S, p) ?? 0), 0)).toBeCloseTo(16146.83 + 6550, 2);
   });
 });
 

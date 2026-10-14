@@ -7,7 +7,7 @@
 // a árvore ofício › sub, as receitas (calibradas para o custo do motor ficar perto do custo real), a medida da
 // visita, os ícones, as ilustrações, as marcas e os fornecedores em falta, a descrição e as relações.
 //
-// Quem usa: catalogo.ts (os serviços novos entram no CATALOGO; os c1..c41 ganham o sku), custosModelo.ts
+// Quem usa: catalogo.ts (os serviços novos entram no CATALOGO; os c1..c41 ganham o sku e a receita), custosModelo.ts
 // (perfis, equipamentos, a receita dos serviços novos), catalogoModelo.ts (árvore, produtos, relações, ícones)
 // e motor.ts (garantirServico usa o resumo da receita).
 import type { MedKey } from "../motor";
@@ -27,13 +27,16 @@ export interface BrutoServicos {
   resumo: Record<string, number | string>;
   perfis: [id: string, n: string, salario: number][];
   equip: [id: string, n: string, compra: number, vida: number, residual: number, manutAno: number, usoAno: number][];
-  cons: [id: string, n: string, un: string, preco: number, fornecedor: string, marca: string, data: string, opcional: 0 | 1][];
+  /** O 9.º campo (14/10) é o sku do artigo da Mudelar, quando o consumível vem da lista de produtos. */
+  cons: [id: string, n: string, un: string, preco: number, fornecedor: string, marca: string, data: string, opcional: 0 | 1, sku?: string][];
   subsNovos: [oficio: string, subs: string[]][];
   oficiosNovos: [oficio: string, subs: string[]][];
   perfilDoOficio: Record<string, string>;
   servicos: ServicoBruto[];
   exige: [sid: string, oficio: string, sub: string, pergunta: string, regra: [MedKey, number, boolean] | null][];
   excluidos: { sku: string; n: string; motivo: string }[];
+  /** Produtos que se instalam e ficam sem serviço, com a razão (14/10). */
+  semServico: { sku: string; n: string; razao: string }[];
 }
 export type ProdutoBruto = [
   id: string, sku: string, n: string, no: number, sub: number, marca: number, fornecedor: number, un: string, custo: number, pvp: number,
@@ -48,9 +51,15 @@ export const PERFIS_MUDELAR: Perfil[] = BRUTO_SERVICOS.perfis.map(([id, n, salar
 export const PERFIL_DO_OFICIO_MUDELAR: Record<string, string> = BRUTO_SERVICOS.perfilDoOficio;
 /** Os equipamentos novos (os 5 de receitas.ts continuam como estavam). */
 export const EQUIP_MUDELAR: Equip[] = BRUTO_SERVICOS.equip.map(([id, n, compra, vida, residual, manutAno, usoAno]) => ({ id, n, compra, vida, residual, manutAno, usoAno }));
-export interface ConsumivelMudelar { id: string; n: string; un: string; preco: number; fornecedor: string; marca: string; data: string; opcional: boolean }
+export interface ConsumivelMudelar {
+  id: string; n: string; un: string; preco: number; fornecedor: string; marca: string; data: string; opcional: boolean;
+  /** O artigo da Mudelar de onde veio (14/10: o material de consumo que estava na lista de produtos). */
+  sku?: string;
+}
 /** Os consumíveis das receitas (alguns opcionais por omissão; as datas do preço variam). */
-export const CONSUMIVEIS_MUDELAR: ConsumivelMudelar[] = BRUTO_SERVICOS.cons.map(([id, n, un, preco, fornecedor, marca, data, o]) => ({ id, n, un, preco, fornecedor, marca, data, opcional: o === 1 }));
+export const CONSUMIVEIS_MUDELAR: ConsumivelMudelar[] = BRUTO_SERVICOS.cons.map(([id, n, un, preco, fornecedor, marca, data, o, sku]) => ({
+  id, n, un, preco, fornecedor, marca, data, opcional: o === 1, ...(sku ? { sku } : {}),
+}));
 const CONS = new Map(CONSUMIVEIS_MUDELAR.map((c) => [c.id, c]));
 
 /* ------------------------------------------------------------------ árvore */
@@ -117,12 +126,11 @@ export const SERVICOS_NOVOS_MUDELAR = SERVICOS_MUDELAR.filter((s) => !s.cId);
 export const ICONE_MUDELAR: Record<string, IconeServicoKey> = Object.fromEntries(SERVICOS_MUDELAR.map((s) => [s.id, s.icone]));
 
 /**
- * A receita da Mudelar de um serviço NOVO (s-…), já com os ids de cada linha. Os c1..c41 mantêm a receita
- * estimada que tinham (há testes e ecrãs que contam com isso); a deles está em servicoMudelar(cN).
+ * A receita da Mudelar de um serviço (s-… ou um dos c1..c41), já com os ids de cada linha.
+ * 14/10: os c1..c41 também passam a usá-la (passos, equipamentos, consumíveis, medida e o PVP real como preço de tabela).
  */
 export function receitaMudelar(sid: string): ServicoMudelar | null {
-  const s = POR_ID.get(sid);
-  return s && !s.cId ? s : null;
+  return POR_ID.get(sid) ?? null;
 }
 
 /* ------------------------------------------------------------------ serviço que exige produto */
@@ -160,3 +168,5 @@ export const PRODUTOS_MUDELAR: ProdutoMudelar[] = BRUTO_PRODUTOS.produtos.map(
 export const RESUMO_MUDELAR = BRUTO_SERVICOS.resumo;
 /** Os produtos que ficaram de fora (artigos de teste e de outros negócios), com o motivo. */
 export const EXCLUIDOS_MUDELAR = BRUTO_SERVICOS.excluidos;
+/** Os produtos que se instalam e ficam sem serviço de instalação, com a razão (14/10: os termoacumuladores). */
+export const SEM_SERVICO_MUDELAR = BRUTO_SERVICOS.semServico;
