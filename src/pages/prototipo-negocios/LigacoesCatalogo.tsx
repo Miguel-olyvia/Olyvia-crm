@@ -6,11 +6,16 @@
 // fica tudo visível de imediato. A lógica está em ligacoes.ts (sem React).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LayoutGroup, MotionConfig, motion, useReducedMotion } from "framer-motion";
-import { ChevronRight, Search, TriangleAlert } from "lucide-react";
+import { ChevronRight, Plus, Search, TriangleAlert, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { normal } from "./catalogo";
-import type { SvcId } from "./motor";
+import type { Estado, SvcId } from "./motor";
+import { SeletorPesquisa, type OpcaoSeletor } from "./pecasFicha";
+import { candidatos, juntar, podeJuntar, podeRetirar, retirar, textoJuntar, type Edicao } from "./editarLigacoes";
+import { aplicarTodos } from "./v2/custosModelo";
+import { lerCustos, mudarCustos } from "./v2/custosStore";
+import { lerCatalogo, mudarCatalogo } from "./v2/catalogoStore";
 import { IconeServico, Ilustracao } from "./ilustracoes";
 import { useDesktop } from "./useDesktop";
 import {
@@ -45,16 +50,21 @@ function Desenho({ vis, id, grande, centro }: { vis: Visual; id: string; grande?
 interface PropsNo {
   l: Ligacao; ativo: boolean; aviso: Problema[] | undefined; porqueVisivel: boolean; i: number; reduzir: boolean;
   regista: (el: HTMLElement | null) => void; onIr: (r: Ref) => void; onAtivo: (k: string | null) => void;
+  /** Desligar do centro (só nas ligações diretas). */
+  onRetirar?: () => void; rotuloRetirar?: string;
+  /** Acabado de juntar: brilha um instante. */
+  novo?: boolean;
 }
-function No({ l, ativo, aviso, porqueVisivel, i, reduzir, regista, onIr, onAtivo }: PropsNo) {
+function No({ l, ativo, aviso, porqueVisivel, i, reduzir, regista, onIr, onAtivo, onRetirar, rotuloRetirar, novo }: PropsNo) {
   const k = chaveRef(l.ref);
   return (
-    <li>
+    <li className="group relative">
       <motion.button ref={regista} type="button" data-no={k}
         initial={reduzir ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25, delay: reduzir ? 0 : Math.min(i * 0.02, 0.15) + 0.1 }}
         onClick={() => onIr(l.ref)} onMouseEnter={() => onAtivo(k)} onMouseLeave={() => onAtivo(null)} onFocus={() => onAtivo(k)} onBlur={() => onAtivo(null)}
-        className={cn("flex min-h-14 w-full items-center gap-3 rounded-xl border bg-card px-3 py-2 text-left transition-colors",
-          ativo ? "border-primary" : "border-border hover:border-foreground/30")}>
+        className={cn("flex min-h-14 w-full items-center gap-3 rounded-xl border bg-card px-3 py-2 text-left transition-[border-color,background-color,box-shadow] duration-300",
+          onRetirar && "pr-12",
+          novo ? "border-primary bg-primary/[0.06] shadow-[0_0_0_4px_hsl(var(--primary)/0.12)]" : ativo ? "border-primary" : "border-border hover:border-foreground/30")}>
         <Desenho vis={l.vis} id={k} />
         <span className="min-w-0 flex-1">
           <span className="line-clamp-2 block text-[15px] font-medium leading-snug">{l.n}</span>
@@ -68,15 +78,34 @@ function No({ l, ativo, aviso, porqueVisivel, i, reduzir, regista, onIr, onAtivo
         {l.opcional && <span className={cn(NOTA, "shrink-0")} aria-hidden="true">opcional</span>}
         {aviso && <TriangleAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />}
       </motion.button>
+      {/* desligar: à vista no telemóvel; no computador aparece ao passar o rato ou com o foco */}
+      {onRetirar && (
+        <button type="button" onClick={onRetirar} aria-label={rotuloRetirar} title={rotuloRetirar}
+          onMouseEnter={() => onAtivo(k)} onFocus={() => onAtivo(k)} onBlur={() => onAtivo(null)}
+          className="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground transition-opacity duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100">
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
     </li>
   );
 }
 
 /* ------------------------------------------------------------------ o mapa */
 interface Caixa { x: number; y: number; w: number; h: number }
+/** Editar a partir do mapa (editarLigacoes.ts): o que se pode juntar e retirar em cada grupo. */
+export interface EdicaoMapa {
+  podeJuntar: (g: string) => boolean;
+  texto: (g: string) => string;
+  opcoes: (g: string) => OpcaoSeletor[];
+  onJuntar: (g: string, v: string) => void;
+  podeRetirar: (g: string, l: Ligacao) => boolean;
+  onRetirar: (g: string, l: Ligacao) => void;
+  novo: string | null;
+}
 interface PropsMapa {
   mapa: Mapa; desktop: boolean; reduzir: boolean; porNo: Map<string, Problema[]>;
   onIr: (r: Ref) => void; onMais: (g: string) => void; aberto: string | null; onAbrirFicha: (sid: SvcId) => void;
+  edicao?: EdicaoMapa;
 }
 type Lado = "esq" | "dir";
 
@@ -87,7 +116,7 @@ function repartir(G: GrupoMapa[]): Record<Lado, GrupoMapa[]> {
   return r;
 }
 
-function MapaLigacoes({ mapa, desktop, reduzir, porNo, onIr, onMais, aberto, onAbrirFicha }: PropsMapa) {
+function MapaLigacoes({ mapa, desktop, reduzir, porNo, onIr, onMais, aberto, onAbrirFicha, edicao }: PropsMapa) {
   const caixa = useRef<HTMLDivElement>(null);
   const els = useRef(new Map<string, HTMLElement>());
   const registos = useRef(new Map<string, (el: HTMLElement | null) => void>());
@@ -166,10 +195,17 @@ function MapaLigacoes({ mapa, desktop, reduzir, porNo, onIr, onMais, aberto, onA
         <ul className="mt-2 space-y-2">
           {g.itens.slice(0, MAX_POR_GRUPO).map((l, i) => {
             const k = chaveRef(l.ref);
-            return <No key={k} l={l} i={i} reduzir={reduzir} ativo={ativo === k} aviso={porNo.get(k)} porqueVisivel={!desktop} regista={regista(k)} onIr={onIr} onAtivo={setAtivo} />;
+            const tira = edicao?.podeRetirar(g.id, l);
+            return <No key={k} l={l} i={i} reduzir={reduzir} ativo={ativo === k} aviso={porNo.get(k)} porqueVisivel={!desktop} regista={regista(k)} onIr={onIr} onAtivo={setAtivo}
+              novo={edicao?.novo === k} onRetirar={tira ? () => edicao!.onRetirar(g.id, l) : undefined} rotuloRetirar={`Desligar ${l.n} de ${mapa.centro.n}`} />;
           })}
         </ul>
       ) : <p className={cn(NOTA, "mt-1")}>Nenhum.</p>}
+      {edicao?.podeJuntar(g.id) && (
+        <SeletorPesquisa rotulo={`${edicao.texto(g.id)} a ${mapa.centro.n}`} opcoes={edicao.opcoes(g.id)} onEscolher={(v) => edicao.onJuntar(g.id, v)} max={12}
+          placeholder="Procurar pelo nome" vazio="Já está tudo ligado ou nada com esse nome." className="mt-2 rounded-xl border border-dashed border-input bg-card px-3 hover:border-primary/60 hover:bg-primary/[0.03]"
+          gatilho={<span className="inline-flex items-center gap-1.5 font-medium text-primary"><Plus className="h-4 w-4" aria-hidden="true" />{edicao.texto(g.id)}</span>} />
+      )}
       {g.itens.length > MAX_POR_GRUPO && (
         <button ref={regista(`mais:${g.id}`)} type="button" aria-expanded={aberto === g.id} onClick={() => onMais(g.id)}
           className="mt-2 inline-flex min-h-11 items-center rounded-xl border border-dashed border-input bg-card px-4 text-[15px] font-medium hover:bg-muted">
@@ -343,7 +379,7 @@ function EscolherCentro({ K, onIr }: { K: CatalogoLig; onIr: (r: Ref) => void })
 }
 
 /* ------------------------------------------------------------------ o separador */
-export function LigacoesCatalogo({ K, onAbrirFicha }: { K: CatalogoLig; onAbrirFicha: (sid: SvcId) => void }) {
+export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; onAbrirFicha: (sid: SvcId) => void; S?: Estado; run?: (fn: () => void) => void }) {
   const desktop = useDesktop();
   const reduzir = !!useReducedMotion();
   const [rasto, setRastoE] = useState<Ref[]>(() => {
@@ -380,12 +416,48 @@ export function LigacoesCatalogo({ K, onAbrirFicha }: { K: CatalogoLig; onAbrirF
     document.getElementById("lig-centro")?.focus({ preventScroll: true });
   }, [centro]);
 
+  // editar a partir do mapa: cada mudança passa aos serviços em uso (o orçamento usa o mesmo custo) e pode anular-se
+  const [desfazer, setDesfazer] = useState<{ msg: string; n: number; fn: () => void } | null>(null);
+  const [novo, setNovo] = useState<string | null>(null);
+  useEffect(() => { if (!desfazer) return; const t = setTimeout(() => setDesfazer(null), 7000); return () => clearTimeout(t); }, [desfazer]);
+  useEffect(() => { if (!novo) return; const t = setTimeout(() => setNovo(null), 1600); return () => clearTimeout(t); }, [novo]);
+  const aplicar = (e: Edicao | null, destaque: string | null) => {
+    if (!e || !S || !run) return;
+    const r0 = lerCustos().receitas[e.sid], antesR = r0 ? structuredClone(r0) : undefined;
+    const p0 = e.prod ? lerCatalogo().produtos.find((p) => p.id === e.prod) : undefined, antesP = p0 ? structuredClone(p0) : undefined;
+    if (e.custos) mudarCustos(e.custos);
+    if (e.catalogo) mudarCatalogo(e.catalogo);
+    run(() => aplicarTodos(S, lerCustos()));
+    setNovo(destaque);
+    setDesfazer((d) => ({
+      msg: e.msg, n: (d?.n ?? 0) + 1,
+      fn: () => {
+        if (e.custos) mudarCustos((c) => { if (antesR) c.receitas[e.sid] = antesR; else delete c.receitas[e.sid]; });
+        if (antesP) mudarCatalogo((k) => { const i = k.produtos.findIndex((p) => p.id === antesP.id); if (i >= 0) k.produtos[i] = antesP; });
+        run(() => aplicarTodos(S, lerCustos()));
+        setDesfazer(null);
+      },
+    }));
+  };
+  const edicao: EdicaoMapa | undefined = S && run && centro ? {
+    podeJuntar: (g) => podeJuntar(centro, g),
+    texto: (g) => textoJuntar(centro, g),
+    opcoes: (g) => candidatos(centro, g, K).map((x) => ({
+      v: chaveRef(x.ref), t: x.n, sub: x.det,
+      icone: x.vis.k === "ilus" ? <Ilustracao k={x.vis.v} className="h-9 w-9" /> : <IconeServico k={x.vis.v} className="h-5 w-5" />,
+    })),
+    onJuntar: (g, v) => { const i = v.indexOf(":"), alvo = { t: v.slice(0, i), id: v.slice(i + 1) } as Ref; aplicar(juntar(centro, g, alvo, K, S), v); },
+    podeRetirar: (g, l) => podeRetirar(centro, g, l, K),
+    onRetirar: (g, l) => aplicar(retirar(centro, g, l.ref, K, S), null),
+    novo,
+  } : undefined;
+
   const grupoAberto = mapa?.grupos.find((g) => g.id === aberto) ?? null;
   const nomes = rasto.map((r) => noDe(r, K)?.n ?? "—");
 
   return (
     <MotionConfig reducedMotion="user">
-      <p className={NOTA}>Escolha um serviço, produto, equipamento, consumível ou técnico: fica no centro, com tudo o que está ligado a ele. Toque num elemento para o pôr no centro; passe o rato numa ligação para ver porquê.</p>
+      <p className={NOTA}>Escolha um serviço, produto, equipamento, consumível ou técnico: fica no centro, com tudo o que está ligado a ele. Toque num elemento para o pôr no centro; passe o rato numa ligação para ver porquê. Em cada grupo, «Juntar» liga mais um e o × desliga (com «Anular»).</p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <EscolherCentro K={K} onIr={ir} />
         <div role="group" aria-label="Vista" className="flex gap-2">
@@ -417,11 +489,22 @@ export function LigacoesCatalogo({ K, onAbrirFicha }: { K: CatalogoLig; onAbrirF
           </nav>
           <LayoutGroup>
             <MapaLigacoes mapa={mapa} desktop={desktop} reduzir={reduzir} porNo={porNo} onIr={ir} aberto={aberto}
-              onMais={(g) => setAberto((a) => (a === g ? null : g))} onAbrirFicha={onAbrirFicha} />
+              onMais={(g) => setAberto((a) => (a === g ? null : g))} onAbrirFicha={onAbrirFicha} edicao={edicao} />
           </LayoutGroup>
           {grupoAberto && <ListaGrupo g={grupoAberto} onIr={ir} onFechar={() => setAberto(null)} />}
         </>
       )}
+      {/* o que acabou de mudar, com "Anular" (7 s) */}
+      <div aria-live="polite" className="pointer-events-none sticky bottom-20 z-20 mt-6 flex justify-center lg:bottom-6">
+        {desfazer && (
+          <div key={desfazer.n} role="status" className="pointer-events-auto flex max-w-xl items-center gap-3 rounded-xl bg-foreground py-1.5 pl-4 pr-1.5 text-[15px] text-background shadow-lg animate-in fade-in-0 slide-in-from-bottom-2 duration-200">
+            <span className="min-w-0">{desfazer.msg}.</span>
+            <button type="button" onClick={desfazer.fn} className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 font-medium hover:bg-background/15">
+              <Undo2 className="h-4 w-4" aria-hidden="true" />Anular
+            </button>
+          </div>
+        )}
+      </div>
     </MotionConfig>
   );
 }

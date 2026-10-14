@@ -811,3 +811,12 @@ Pedido do Ruben: poder voltar do orçamento à Visita, "fluido, intuitivo, guiad
 - **Versões:** linha do tempo com o total de cada versão e a diferença para a anterior. O Hoje e o histórico dizem "Verificar e enviar a versão 2", "Proposta v2 enviada"; a proposta leva "PR 2026/1031 · v2" e "substitui a v1".
 - **Refazer o orçamento** (fechar a visita outra vez) passa a guardar também o início da obra, a equipa, as prestações "Por fases" e as versões.
 - Depois de aceite não há nova versão: o contrato parte da proposta aceite.
+
+## Editar as ligações no mapa (14/10/2026, versão Atual)
+
+Pedido do Ruben: "através da página de ligações, rapidamente adicionar e remover técnicos, consumíveis, equipamentos e produtos".
+- **Juntar:** cada grupo de ligações diretas tem um botão no fim ("Juntar técnico", "Juntar equipamento", "Juntar consumível", "Ligar um produto"; com um técnico, equipamento ou consumível no centro, "Juntar a um serviço" / "Usar num serviço"; com um produto, "Escolher o serviço"). Abre o seletor com pesquisa, só com o que ainda não está ligado. O nó novo aparece aceso e a ligação desenha-se.
+- **Retirar:** o × no nó (à vista no telemóvel; no computador ao passar o rato ou com o foco) desliga. Os produtos que o serviço só "pede" (pelo ramo), as alternativas e "quem instala" não se retiram daqui: não são ligações diretas.
+- **Anular:** uma faixa escura em baixo diz o que mudou ("Canalização deixa de usar Fita e vedante.") com "Anular" durante 7 s; repõe a receita e o produto como estavam.
+- **Valores por omissão:** técnico e equipamento entram com 0,5 h por unidade e o consumível com 1 por unidade; afinam-se na ficha. A receita passa a "editada" e os custos vão logo para os serviços em uso (o orçamento usa o mesmo custo).
+- Lógica sem React em `editarLigacoes.ts` (`candidatos`, `juntar`, `retirar`, `podeJuntar`, `podeRetirar`); testes em `editarLigacoes.test.ts`.

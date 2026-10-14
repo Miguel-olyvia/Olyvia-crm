@@ -352,7 +352,7 @@ export function CatalogoV1({ S, run }: Ctx) {
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} />,
-    ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} />,
+    ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} S={S} run={run} />,
   };
 
   return (
