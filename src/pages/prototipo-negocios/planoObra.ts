@@ -4,9 +4,9 @@
 // · as fases da obra (fasesObra.ts) com os dias, o custo, o preço e a margem de cada uma;
 // · a curva do custo acumulado: a mão de obra corre ao longo da tarefa, os materiais entram no início da sua fase.
 // Funções puras, sem React.
-import { linhaCalc, r2, type Estado, type Negocio } from "./motor";
+import { fatorReal, linhaCalc, r2, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
-import { diasPrevistos, tarefasPrevistas, type TarefaPrevista } from "./ganttOrcamento";
+import { TAREFA_DEMOLICAO, diasPrevistos, tarefasPrevistas, type TarefaPrevista } from "./ganttOrcamento";
 import { LINHA_DEMOLICAO } from "./entulho";
 
 /** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). */
@@ -239,4 +239,58 @@ export function sugerirPorFases(P: Plano): Prestacao[] {
   }
   marcos[marcos.length - 1].p = r2(1 - acum);
   return marcos.filter((m, i) => m.p > 0 || i === marcos.length - 1);
+}
+
+/* ------------------------------------------------------------------ o previsto contra o real, por fase (14/10) */
+// Na obra concluída: as horas reais de cada tarefa (o fator real do serviço, motor.ts: fatorReal) dão o custo real da
+// fase (o previsto + a diferença de horas × €/h) e os dias reais (os dias previstos na proporção das horas; as fases
+// continuam umas a seguir às outras). Serve para ver onde a obra se afastou do orçamento e o que corrigir no Catálogo.
+export interface TarefaReal { chave: string; nome: string; hPrev: number; hReal: number; fator: number }
+export interface FaseReal {
+  n: FaseObra; nome: string; curto: string;
+  prev: { inicio: number; dias: number; custo: number };
+  real: { inicio: number; dias: number; custo: number };
+  preco: number; margemPrev: number; margemReal: number;
+  tarefas: TarefaReal[];
+}
+export interface ObraReal { fases: FaseReal[]; diasPrev: number; diasReal: number; custoPrev: number; custoReal: number; preco: number }
+
+export function realPorFase(d: Negocio, S: Estado): ObraReal | null {
+  const P = planoObra(d, S);
+  if (!P.tarefas.length) return null;
+  let fimReal = 0;
+  const fases: FaseReal[] = P.fases.map((f) => {
+    const tarefas: TarefaReal[] = f.tarefas.map((t) => {
+      const fator = t.chave === TAREFA_DEMOLICAO ? 1 : fatorReal(t.chave);
+      return { chave: t.chave, nome: t.nome, hPrev: r2(t.h), hReal: r2(t.h * fator), fator };
+    });
+    const hPrev = tarefas.reduce((a, t) => a + t.hPrev, 0), hReal = tarefas.reduce((a, t) => a + t.hReal, 0);
+    const extra = f.tarefas.reduce((a, t, i) => a + (tarefas[i].hReal - t.h) * t.custoHora, 0);
+    const diasPrev = f.fim - f.inicio;
+    const diasReal = diasPrev > 0 ? Math.max(0.5, Math.round(diasPrev * (hPrev > 0 ? hReal / hPrev : 1) * 2) / 2) : 0;
+    const custoReal = r2(f.custo + extra);
+    const fr: FaseReal = {
+      n: f.n, nome: f.nome, curto: f.curto,
+      prev: { inicio: f.inicio, dias: diasPrev, custo: f.custo },
+      real: { inicio: fimReal, dias: diasReal, custo: custoReal },
+      preco: f.preco, margemPrev: f.margem, margemReal: f.preco > 0 ? (f.preco - custoReal) / f.preco : 0, tarefas,
+    };
+    fimReal += diasReal;
+    return fr;
+  });
+  return {
+    fases, diasPrev: P.dias, diasReal: fimReal, custoPrev: P.custo, custoReal: r2(fases.reduce((a, f) => a + f.real.custo, 0)), preco: P.preco,
+  };
+}
+
+/** A fase e a tarefa que mais se afastaram do previsto (em €), para dizer o que corrigir. */
+export function maiorDesvio(R: ObraReal): { fase: FaseReal; tarefa: TarefaReal; euros: number } | null {
+  let melhor: { fase: FaseReal; tarefa: TarefaReal; euros: number } | null = null;
+  for (const f of R.fases) {
+    const euros = f.real.custo - f.prev.custo;
+    if (Math.abs(euros) < 1) continue;
+    const tarefa = [...f.tarefas].sort((a, b) => Math.abs(b.hReal - b.hPrev) - Math.abs(a.hReal - a.hPrev))[0];
+    if (!melhor || Math.abs(euros) > Math.abs(melhor.euros)) melhor = { fase: f, tarefa, euros: r2(euros) };
+  }
+  return melhor;
 }

@@ -106,3 +106,18 @@ describe("pagamentos e tesouraria", () => {
     expect(tot(d, S).custo).toBeCloseTo(c1, 2);
   });
 });
+
+describe("previsto e real por fase", () => {
+  it("o real por fase soma o mesmo custo que a obra concluída (realObra) e aponta o maior desvio", async () => {
+    const { realObra } = await import("./motor");
+    const { maiorDesvio, realPorFase } = await import("./planoObra");
+    const S = seed();
+    const d = S.deals.find((x) => x.obra.real && x.orc) as Negocio;
+    const R = realPorFase(d, S)!;
+    expect(R.custoReal).toBeCloseTo(realObra(d, S).custoReal, 0);
+    expect(R.diasReal).toBeGreaterThan(0);
+    const D = maiorDesvio(R);
+    expect(D).not.toBeNull();
+    expect(Math.abs(D!.euros)).toBeGreaterThan(0);
+  });
+});

@@ -731,3 +731,16 @@ O pedido do Ruben: "o orçamento tem de ser dinâmico, interativo, com mapa de G
 - **Na proposta do cliente** (`DocsCliente.tsx`, "Como vai decorrer a obra"):
   - uma barra com as fases e a sua largura em dias, e um cartão por fase com as datas e os trabalhos, sem custos;
   - o pagamento leva as datas das prestações (`tranches(d, total, S)`).
+
+### Previsto e real por fase, na Obra (14/10/2026)
+- **Onde:** na fase Obra do negócio (V1, `FasesSimples.tsx` → `ObraPorFases.tsx`), com a obra concluída. Substitui as barras de horas por tarefa.
+- **As contas** (`planoObra.ts`: `realPorFase`, `maiorDesvio`):
+  - as horas reais de cada tarefa usam o fator real do serviço (`fatorReal`);
+  - o custo real da fase é o previsto mais a diferença de horas × €/h;
+  - os dias reais da fase são os previstos na proporção das horas, e as fases seguem umas atrás das outras;
+  - a soma dá o mesmo custo real da obra (`realObra`), e há um teste a garanti-lo.
+- **O ecrã:**
+  - em cima, os dias úteis, o custo e a margem: o real, o previsto e a diferença;
+  - por baixo, a frase da fase que mais se afastou e porquê (ex.: "A fase 3 (revestimentos) foi a que mais se afastou: +110,02 € e +0,5 dias. Revestimento de parede levou 18,45 h em vez de 15 h (+23%)");
+  - uma linha por fase: a barra tracejada é o previsto e a cheia é o real, na mesma régua; ao lado, os dias, o custo com a diferença e a margem contra a orçada;
+  - o "Atualizar a receita" continua por baixo.
