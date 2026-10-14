@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, PAPEIS, TECS, aberto, conflitos, diaDeFerias, eur, nfmt, r2, type Negocio, type Papel, type StockKey } from "./motor";
 import { COR_FASE, dataCurta, iniciosRapidos, isoDia } from "./planoObra";
+import { PortalFornecedor } from "./PortalFornecedor";
 import { FASES_OBRA } from "./fasesObra";
 import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara, totalEf } from "./preparacaoObra";
 import type { Ctx } from "./pecas";
@@ -271,6 +272,7 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go, run } = ctx;
   const e = d.obra.enc!, novo = !!d.obra.ec;
   const [conferir, setConferir] = useState(false);
+  const [portal, setPortal] = useState(false);
   const [chegou, setChegou] = useState<number[]>(() => e.linhas.map((x) => r2(x.q - (x.recebido ?? 0))));
   const est = ESTADO_EF[e.estado];
   const acao = (() => {
@@ -284,8 +286,8 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           {S.role === "armazem"
             ? <Button onClick={() => { setChegou(e.linhas.map((x) => r2(x.q - (x.recebido ?? 0)))); setConferir(!conferir); }} aria-expanded={conferir}>{e.estado === "parcial" ? "Conferir o resto" : "Conferir a entrega"}</Button>
             : <Mudar ctx={ctx} papel="armazem" />}
-          {e.estado === "encomendada" && !e.entrega && (
-            <button type="button" onClick={go(() => A.confirmarEntrega(d.id))} className="inline-flex min-h-11 items-center text-[15px] font-medium text-primary underline-offset-4 hover:underline">Simular: o fornecedor confirma a entrega</button>
+          {e.estado === "encomendada" && (
+            <button type="button" onClick={() => setPortal(true)} className="inline-flex min-h-11 items-center text-[15px] font-medium text-primary underline-offset-4 hover:underline">{e.entrega ? "Portal do fornecedor" : "Portal do fornecedor: confirmar a entrega"}</button>
           )}
         </div>
       );
@@ -334,6 +336,7 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
       )}
       {acao && !conferir && <div className="mt-4">{acao}</div>}
+      {portal && <PortalFornecedor ctx={ctx} d={d} fechar={() => setPortal(false)} />}
     </li>
   );
 }

@@ -866,3 +866,10 @@ Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, ger
   - **O documento** `AD 2026/{negócio}-{n}` partilha-se como os outros.
   - **Ao assinar** (no portal; aqui, simulado), as tarefas entram no plano no fim da fase de cada serviço e as das fases seguintes andam para a frente. Se o plano já estava aprovado, volta às Operações.
   - **Pagamento:** com a última prestação.
+- **Portal do cliente** (`PortalCliente.tsx`, botão "Portal do cliente" no negócio, a partir da proposta enviada): o que o cliente vê no telemóvel.
+  - **Em que ponto está:** Proposta → Contrato → Materiais → Obra.
+  - **"O que precisa de si":** ver e aceitar a proposta, ou "Gostava de mudar alguma coisa" (o pedido vai para o histórico do comercial); ler e assinar o contrato e as adendas; pagar a fatura, com "Já paguei" e a referência (o comprovativo fica para o Financeiro validar).
+  - **A sua obra:** as fases com as datas e os materiais.
+  - **Documentos:** proposta, contrato, nota de encomenda, adendas e fatura.
+  - As ações são as do motor, por isso o resto do protótipo reage.
+- **Portal do fornecedor** (`PortalFornecedor.tsx`, no cartão da encomenda no Inventário): a encomenda com os preços do fornecedor e a escolha do dia da entrega entre os próximos dias úteis. Os dias no início da obra, ou depois, aparecem a avisar. Por omissão sugere o último dia útil antes do início. Ao confirmar, chama `A.confirmarEntrega(id, data)`.

@@ -1296,6 +1296,22 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
         avisar({ msg: "Adenda assinada", sub: voltou ? "As tarefas entraram no plano: as Operações aprovam de novo" : "As tarefas entraram no plano da obra", kind: "ok" });
       } else avisar({ msg: "Adenda assinada", kind: "ok" });
     },
+    /** No portal do cliente: pede alterações à proposta (o comercial vê no histórico e faz uma nova versão). */
+    pedirAlteracoes(id: number, texto: string) {
+      const d = deal(id);
+      if (!d.orc?.enviada || d.orc.contrato === "assinado") return;
+      log(d, "O cliente pediu alterações no portal" + (texto.trim() ? ": " + texto.trim() : ""), "w");
+      avisar({ msg: "Pedido enviado ao comercial", sub: "Recebe uma nova versão da proposta no portal", kind: "ok" });
+    },
+    /** No portal do cliente: avisa que pagou, com a referência (o Financeiro confirma na conta e valida). */
+    avisarPagamento(id: number, ref: string) {
+      const d = deal(id);
+      if (!d.fin.fatura || d.fin.pago) return;
+      d.f.comprovativo = ref.trim() || "Comprovativo enviado no portal";
+      if (!d.f.data_pag) d.f.data_pag = new Date().toISOString().slice(0, 10);
+      log(d, "O cliente avisou no portal que pagou · " + d.f.comprovativo);
+      avisar({ msg: "Comprovativo enviado", sub: "O Financeiro confirma na conta e emite o recibo", kind: "ok" });
+    },
     /** O fornecedor da encomenda (antes de a validar). */
     escolherForn(id: number, forn: string) { const e = deal(id).obra.enc; if (e && e.estado === "por confirmar") e.forn = forn; },
     /** O Financeiro valida a encomenda ao fornecedor (vê se o sinal já entrou): passa a encomendada. */
@@ -1407,11 +1423,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, "Encomenda " + e.n + " recebida · materiais reservados"); avisar({ msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "auto" });
     },
     /** O fornecedor confirma a data de entrega (no portal do fornecedor; aqui, simulado). */
-    confirmarEntrega(id: number) {
+    confirmarEntrega(id: number, iso?: string) {
       const d = deal(id), e = d.obra.enc;
-      if (!e || e.estado !== "encomendada" || e.entrega) return;
+      if (!e || e.estado !== "encomendada") return;
+      // a data que o fornecedor escolhe no portal; sem ela, daqui a 3 dias (o primeiro útil)
       const t = new Date(); t.setDate(t.getDate() + 3);
-      const dia = proximoUtil(t);
+      const dia = iso ? proximoUtil(new Date(iso + "T12:00:00")) : proximoUtil(t);
       e.entrega = dataCurta(dia); e.entregaIso = isoDia(dia);
       log(d, "O fornecedor " + (e.forn ?? "") + " confirmou a entrega para " + e.entrega);
       avisar({ msg: "Entrega confirmada", sub: (e.forn ?? "Fornecedor") + " · " + e.entrega, kind: "ok" });

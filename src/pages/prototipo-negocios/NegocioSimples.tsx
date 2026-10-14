@@ -2,7 +2,8 @@
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Euro, MapPin, Phone, RotateCcw, Square, TrendingUp, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Euro, MapPin, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
+import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
 import { CaminhoObra } from "./CaminhoObra";
 import { TrabalhosAMais } from "./TrabalhosAMais";
@@ -35,6 +36,7 @@ export function NegocioSimples(ctx: Ctx) {
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
   const [ver, setVer] = useState<number | null>(null); // uma fase já feita, só para ler
+  const [portal, setPortal] = useState(false);
   // ao passar de fase: uma frase curta a dizer o que acabou e o que vem, que desaparece sozinha
   const faseAntes = useRef(d.fase);
   const [acabou, setAcabou] = useState<number | null>(null);
@@ -66,11 +68,19 @@ export function NegocioSimples(ctx: Ctx) {
               <p className="text-base text-muted-foreground">{d.servico}</p>
             </div>
           </div>
-          {d.fase < 4 && !d.perdido && (
-            <button type="button" onClick={go(() => A.perder(d.id))} className="min-h-11 self-start rounded-lg px-1 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-              Marcar como perdido
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-x-4 self-start">
+            {/* o que o cliente vê (e faz): aceitar, assinar, pagar, os documentos */}
+            {d.orc?.enviada || d.orc?.versoes?.length ? (
+              <button type="button" onClick={() => setPortal(true)} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+                <Smartphone className="h-4 w-4" aria-hidden="true" />Portal do cliente
+              </button>
+            ) : null}
+            {d.fase < 4 && !d.perdido && (
+              <button type="button" onClick={go(() => A.perder(d.id))} className="min-h-11 rounded-lg px-1 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                Marcar como perdido
+              </button>
+            )}
+          </div>
         </div>
         <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[15px]">
           <div className="inline-flex items-center gap-2"><dt><Phone className="h-4 w-4 text-muted-foreground" aria-label="Telefone" /></dt><dd>{d.tel}</dd></div>
@@ -117,6 +127,7 @@ export function NegocioSimples(ctx: Ctx) {
         </div>
       )}
 
+      {portal && <PortalCliente ctx={ctx} d={d} fechar={() => setPortal(false)} />}
       {/* do contrato à obra (14/10): a encomenda, o plano e o pagamento em paralelo, até ao arranque */}
       {d.fase >= 4 && d.obra.ec && !d.perdido && <CaminhoObra {...ctx} d={d} />}
       {/* trabalhos a mais depois do contrato (adendas) */}
