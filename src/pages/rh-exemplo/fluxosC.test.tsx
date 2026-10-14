@@ -39,8 +39,8 @@ describe("A minha área: as minhas horas extra", () => {
     expect(screen.getByRole("heading", { level: 1, name: /As minhas horas extra/ })).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
     expect(screen.getAllByRole("alert").length).toBeGreaterThan(0);
-    expect(screen.getByText("Banco de horas")).toBeInTheDocument();
-    expect(screen.getByText("+3 h")).toBeInTheDocument();
+    // A Sofia tem horario padrao: nao ha banco de horas, nem saldo nem movimentos.
+    expect(screen.queryByText("Banco de horas")).not.toBeInTheDocument();
     semChavesPorTraduzir();
   });
 
@@ -85,7 +85,7 @@ describe("Processamento salarial: cálculo do mês", () => {
     abrir();
     fireEvent.click(screen.getByRole("button", { name: "Fechar o mês" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Fechar o mês" }));
-    expect(Object.keys(lerFluxosC().fechos)).toHaveLength(1);
+    expect(Object.keys(lerFluxosC().fechos).sort()).toEqual(["2026-08", "2026-09"]);
     expect(screen.getByRole("status")).toHaveTextContent(/Mês fechado/);
     expect(screen.queryByRole("button", { name: /Acrescentar valor/ })).not.toBeInTheDocument();
 
@@ -100,7 +100,7 @@ describe("Processamento salarial: cálculo do mês", () => {
     expect(within(dialogo).getByRole("alert")).toHaveTextContent(/pelo menos 3/);
     fireEvent.change(within(dialogo).getByLabelText(/Motivo/), { target: { value: "prémio em falta" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Reabrir o mês" }));
-    expect(Object.keys(lerFluxosC().fechos)).toHaveLength(0);
+    expect(Object.keys(lerFluxosC().fechos)).toEqual(["2026-08"]);
     expect(lerFluxosC().reaberturas).toHaveLength(1);
     expect(lerFluxosC().reaberturas[0].motivo).toBe("prémio em falta");
   });

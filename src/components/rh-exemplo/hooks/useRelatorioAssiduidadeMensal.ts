@@ -31,6 +31,7 @@
  * da INSERT/UPDATE/DELETE directo a authenticated.
  */
 import { useCallback, useMemo } from "react";
+import { feriadosDoAno } from "@/components/rh-exemplo/calendarioPessoa/feriados";
 import { lerEstado, useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { definirGestao, novoIdGestao, useGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import type { ObraHorasExemplo } from "@/components/rh-exemplo/dados/tiposGestao";
@@ -286,7 +287,10 @@ export function useRelatorioAssiduidadeMensal(
     () => ({ linhas: todasObras.filter((o) => o.pessoa_id === pessoaId && o.data >= de && o.data <= ate), recusado: false }),
     [todasObras, pessoaId, de, ate],
   );
-  const feriados = useMemo<IndiceFeriados>(() => indexarFeriados([]), []);
+  const feriados = useMemo<IndiceFeriados>(
+    () => indexarFeriados([...feriadosDoAno(ano).keys()].map((holiday_date) => ({ holiday_date, is_recurring: false }))),
+    [ano],
+  );
   const scheduleSettings = { linhas: [] as Array<{ timezone: string | null }> };
 
   const categoriaPorTipoId = useMemo(() => {

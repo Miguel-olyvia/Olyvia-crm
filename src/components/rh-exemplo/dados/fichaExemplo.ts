@@ -151,10 +151,8 @@ export function fichaDeEspec(
   };
 
   const sat = { pessoa_id: e.id, organization_id: org };
-  const horariosEAusencias = {
-    ...horariosDeExemplo(e, org),
-    ausencias: ausenciasDeExemplo(e, org, cat),
-  };
+  const ausencias = ausenciasDeExemplo(e, org, cat);
+  const horariosEAusencias = { ...horariosDeExemplo(e, org, cat, ausencias), ausencias };
   const docs = documentosDeExemplo(e, org, cat);
   const convite = convitePendencias(e, pessoa.email_pessoal);
 

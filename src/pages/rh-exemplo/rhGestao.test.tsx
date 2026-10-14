@@ -183,8 +183,11 @@ describe("RH de exemplo: acções que escrevem em memória", () => {
 
   it("abrir o período do mês no processamento salarial deixa-o aberto", async () => {
     renderEm("/rh-exemplo/processamento-salarial", "/rh-exemplo/processamento-salarial", <RhProcessamentoSalarial />);
+    // Setembro ja vem aberto; Outubro (o mes corrente) ainda nao abriu.
+    expect(await screen.findByRole("button", { name: /Fechar período/ })).toBeInTheDocument();
+    fireEvent.change(document.getElementById("hr-processamento-mes") as HTMLInputElement, { target: { value: "2026-10" } });
     fireEvent.click(await screen.findByRole("button", { name: "Abrir período" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /Fechar período/ })).toBeInTheDocument());
-    expect(lerGestao().periodos.some((p) => p.estado === "aberto")).toBe(true);
+    expect(lerGestao().periodos.some((p) => p.ano === 2026 && p.mes === 10 && p.estado === "aberto")).toBe(true);
   });
 });

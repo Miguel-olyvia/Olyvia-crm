@@ -9,16 +9,31 @@ import {
   configInicial,
   diaPadraoVazio,
   type ConfigHorario,
+  type ExcecaoDia,
   type HorarioPessoa,
   type TipoHorario,
   type VersaoHorario,
 } from "@/components/rh-exemplo/lib/horarioTipos";
 import type { HorarioPlaneado } from "@/components/rh-exemplo/tipos";
 
+/** Uma excepcao de um dia que ja esta marcada: a Sofia entra mais tarde na sexta-feira, 16 de Outubro. */
+export const EXCECOES_EXEMPLO: Record<string, ExcecaoDia[]> = {
+  "p-sofia": [
+    {
+      id: "exc-sofia-1",
+      data: "2026-10-16",
+      dia: { trabalha: true, entrada: "10:00", saida: "15:00", pausaMin: 0 },
+      motivo: "Consulta de manhã",
+      autor: "Sofia Rebelo",
+      criadaEm: "2026-10-01T09:00:00.000Z",
+    },
+  ],
+};
+
 const TIPO_POR_PESSOA: Record<string, TipoHorario> = {
   "p-marta": "isencao",
   "p-rui": "banco",
-  "p-joana": "livre",
+  "p-ines": "livre",
   "p-hugo": "repartido",
 };
 
@@ -27,7 +42,7 @@ function diasDasLinhas(linhas: HorarioPlaneado[]): number[] {
   return [...new Set(dias)].sort((a, b) => a - b);
 }
 
-function configDaPessoa(pessoaId: string, linhas: HorarioPlaneado[], horasSemanais: number): ConfigHorario {
+export function configDaPessoa(pessoaId: string, linhas: HorarioPlaneado[], horasSemanais: number): ConfigHorario {
   const dias = diasDasLinhas(linhas);
   const base = configInicial(TIPO_POR_PESSOA[pessoaId] ?? "padrao");
   const usados = dias.length > 0 ? dias : base.isencao.dias;
@@ -74,7 +89,7 @@ export function horariosIniciais(estado: EstadoRh): Record<string, HorarioPessoa
             versao("hvb-sofia-2", config, { desde: diaIso(-60), motivo: "Passou a trabalhar no horário padrão das 09:00 às 18:00", anexoNome: "acordo-horario.pdf" }),
           ]
         : [versao(`hvb-${pessoaId}-1`, config, {})];
-    resultado[pessoaId] = { versoes, excecoes: [] };
+    resultado[pessoaId] = { versoes, excecoes: EXCECOES_EXEMPLO[pessoaId] ?? [] };
   }
   return resultado;
 }

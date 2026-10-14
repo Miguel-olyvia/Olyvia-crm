@@ -11,7 +11,9 @@ import { CAMPOS_OBRIGATORIOS_ADMISSAO } from "@/components/rh-exemplo/lib/admiss
 import { CAMPOS_RH_OBRIGATORIOS, CAMPOS_RH_OPCIONAIS } from "@/components/rh-exemplo/lib/admissaoCamposRh";
 import type { ConfiguracaoCampo } from "@/components/rh-exemplo/lib/admissaoObrigatorios";
 import type { HrCodigoProcessamento } from "@/components/rh-exemplo/tipos";
-import type { Desvio, Falta, MotivoFalta, Picagem } from "@/components/rh-exemplo/tiposAssiduidade";
+import { saidaGeradaDe, todasAsSaidasGeradas } from "@/components/rh-exemplo/dados/assiduidadeSetembro";
+import { localizacaoDeExemplo, referenciaDoLocal } from "@/components/rh-exemplo/lib/picagemLocal";
+import type { Desvio, Picagem } from "@/components/rh-exemplo/tiposAssiduidade";
 
 const CRIADO = "2024-01-02T09:00:00Z";
 
@@ -26,6 +28,7 @@ function picagem(base: {
   sentido: "entrada" | "saida";
   localId: string | null;
   realizadoId: string | null;
+  coordenadas?: { latitude: number; longitude: number } | null;
 }): Picagem {
   return {
     id: base.id,
@@ -39,9 +42,9 @@ function picagem(base: {
     vinculo_id: `vin-${base.pessoaId}`,
     planeado_id: null,
     origem: "web",
-    latitude: null,
-    longitude: null,
-    precisao_metros: null,
+    latitude: base.coordenadas?.latitude ?? null,
+    longitude: base.coordenadas?.longitude ?? null,
+    precisao_metros: base.coordenadas ? 20 : null,
     estado: "valida",
     realizado_id: base.realizadoId,
     corrige_picagem_id: null,
@@ -56,6 +59,7 @@ function picagem(base: {
 
 export function picagensDasFichas(estado: EstadoRh): Picagem[] {
   const resultado: Picagem[] = [];
+  const fora = new Set(todasAsSaidasGeradas().flatMap((s) => s.foraDoLocal));
   for (const id of estado.ordem) {
     for (const linha of estado.fichas[id]?.horarioRealizado ?? []) {
       if (linha.origem !== "picagem") continue;
@@ -68,6 +72,9 @@ export function picagensDasFichas(estado: EstadoRh): Picagem[] {
           sentido: "entrada",
           localId: linha.local_id,
           realizadoId: linha.id,
+          coordenadas: fora.has(linha.id)
+            ? localizacaoDeExemplo("fora_do_local", referenciaDoLocal(estado.locais.find((l) => l.id === linha.local_id)))
+            : null,
         }),
         picagem({
           id: `pg-${linha.id}-s`,
@@ -82,49 +89,6 @@ export function picagensDasFichas(estado: EstadoRh): Picagem[] {
     }
   }
   return resultado;
-}
-
-function falta(args: {
-  id: string;
-  pessoaId: string;
-  localId: string | null;
-  dias: number;
-  inicio: string;
-  fim: string;
-  minutos: number;
-  motivo: MotivoFalta;
-  estadoJustificacao: Falta["justificacao_estado"];
-  decididaPor?: string;
-}): Falta {
-  const data = diaIso(args.dias);
-  const justificada = args.estadoJustificacao === "justificada";
-  return {
-    id: args.id,
-    pessoa_id: args.pessoaId,
-    organization_id: ORG,
-    data,
-    planeado_id: null,
-    vinculo_id: `vin-${args.pessoaId}`,
-    local_id: args.localId,
-    hora_inicio: args.inicio,
-    hora_fim: args.fim,
-    minutos: args.minutos,
-    motivo_codigo: args.motivo,
-    justificacao_estado: args.estadoJustificacao,
-    justificada,
-    remunerada: justificada,
-    desconta_saldo: false,
-    justificacao_decidida_por: args.decididaPor ?? null,
-    justificacao_decidida_em: justificada ? `${data}T18:00:00Z` : null,
-    justificacao_motivo: null,
-    ausencia_dia_id: null,
-    corrige_falta_id: null,
-    correccao_motivo: null,
-    estado: "activa",
-    anulado_em: null,
-    anulacao_motivo: null,
-    created_at: `${data}T18:30:00Z`,
-  };
 }
 
 function desvio(args: Omit<Desvio, "organization_id" | "planeado_id" | "referencia_id" | "data"> & { dias: number }): Desvio {
@@ -196,16 +160,11 @@ export function mesAnterior(): { ano: number; mes: number } {
 }
 
 export function criarGestaoInicial(estado: EstadoRh): EstadoGestao {
-  const { ano, mes } = mesAnterior();
-  const periodoId = "per-anterior";
+  // Agosto ja foi processado e fechado; Setembro ja acabou e esta aberto, pronto a processar; Outubro ainda nao abriu.
+  const periodoId = "per-setembro";
   return {
     picagens: picagensDasFichas(estado),
-    faltas: [
-      falta({ id: "fa-tiago", pessoaId: "p-tiago", localId: "loc-colombo", dias: -6, inicio: "09:00", fim: "13:00", minutos: 240, motivo: "doenca", estadoJustificacao: "pendente_documento" }),
-      falta({ id: "fa-hugo", pessoaId: "p-hugo", localId: "loc-porto", dias: -4, inicio: "14:00", fim: "18:00", minutos: 240, motivo: "assuntos_pessoais", estadoJustificacao: "justificada", decididaPor: "p-ines" }),
-      falta({ id: "fa-carolina", pessoaId: "p-carolina", localId: "loc-colombo", dias: -9, inicio: "09:00", fim: "13:00", minutos: 240, motivo: "ausencia_nao_comunicada", estadoJustificacao: "sem_justificacao" }),
-      falta({ id: "fa-rui", pessoaId: "p-rui", localId: "loc-colombo", dias: -2, inicio: "09:00", fim: "09:20", minutos: 20, motivo: "atraso", estadoJustificacao: "sem_justificacao" }),
-    ],
+    faltas: estado.ordem.flatMap((id) => saidaGeradaDe(id).faltas),
     desvios: [
       desvio({ dias: -3, pessoa_id: "p-hugo", tipo: "planeado_sem_realizado", hora_inicio: "09:00", hora_fim: "13:00", minutos: 240, local_id: "loc-porto", detalhe: null }),
       desvio({ dias: -5, pessoa_id: "p-ines", tipo: "realizado_sem_planeado", hora_inicio: "18:00", hora_fim: "19:30", minutos: 90, local_id: "loc-porto", detalhe: null }),
@@ -229,7 +188,8 @@ export function criarGestaoInicial(estado: EstadoRh): EstadoGestao {
     ],
     minutosMinimosSubsidio: 240,
     periodos: [
-      { id: periodoId, organization_id: ORG, ano, mes, estado: "fechado", fechado_em: `${diaIso(-10)}T10:00:00Z`, fechado_por: "p-sofia", created_at: CRIADO, created_by: "p-sofia" },
+      { id: "per-agosto", organization_id: ORG, ano: 2026, mes: 8, estado: "fechado", fechado_em: "2026-09-03T10:00:00Z", fechado_por: "p-sofia", created_at: CRIADO, created_by: "p-sofia" },
+      { id: periodoId, organization_id: ORG, ano: 2026, mes: 9, estado: "aberto", fechado_em: null, fechado_por: null, created_at: CRIADO, created_by: "p-sofia" },
     ],
     lancamentos: [
       { id: "lan-1", periodo_id: periodoId, pessoa_id: "p-rui", organization_id: ORG, descricao: "Prémio de campanha", valor: 120, codigo_processamento_id: "cod-aj", anulado_em: null, anulado_por: null, anulado_motivo: null, created_at: CRIADO, created_by: "p-sofia", updated_at: CRIADO, updated_by: "p-sofia" },

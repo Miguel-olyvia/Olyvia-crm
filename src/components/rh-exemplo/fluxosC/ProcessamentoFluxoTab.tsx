@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
-import { mesAtual } from "./dadosFluxosC";
+import { MES_PROCESSAVEL } from "@/components/rh-exemplo/dados/assiduidadeSetembro";
 import { euros, dataCurta, nomeDoMes } from "./formatosC";
 import { FecharReabrirMes } from "./FecharReabrirMes";
 import { useFluxosC } from "./lojaFluxosC";
@@ -22,7 +22,7 @@ const somaLinhas = (r: ReciboCongelado, prefixo: string): number =>
 
 export function ProcessamentoFluxoTab() {
   const { t } = useTranslation();
-  const [mes, setMes] = useState(mesAtual());
+  const [mes, setMes] = useState(MES_PROCESSAVEL);
   const [ano, mesNum] = mes.split("-").map(Number);
   const fecho = useFluxosC((e) => e.fechos[mes]);
   const todasReaberturas = useFluxosC((e) => e.reaberturas);

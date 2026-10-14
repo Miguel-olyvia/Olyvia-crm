@@ -381,21 +381,23 @@ describe("processamento salarial", () => {
     expect(result.current.periodo?.fechado_em).not.toBeNull();
   });
 
-  it("fechar sem período devolve erro; o mês anterior já vem fechado", async () => {
+  it("fechar sem período devolve erro; Agosto já vem fechado e Setembro aberto", async () => {
     const { result } = renderHook(() => useProcessamentoPeriodo(1999, 1));
     let erro: string | null = null;
     await act(async () => {
       erro = await result.current.fechar();
     });
     expect(erro).not.toBeNull();
-    const { ano, mes } = mesAnterior();
-    const anterior = renderHook(() => useProcessamentoPeriodo(ano, mes));
-    expect(anterior.result.current.periodo?.estado).toBe("fechado");
+    const agosto = renderHook(() => useProcessamentoPeriodo(2026, 8));
+    expect(agosto.result.current.periodo?.estado).toBe("fechado");
+    const setembro = renderHook(() => useProcessamentoPeriodo(2026, 9));
+    expect(setembro.result.current.periodo?.estado).toBe("aberto");
+    const outubro = renderHook(() => useProcessamentoPeriodo(2026, 10));
+    expect(outubro.result.current.periodo).toBeNull();
   });
 
   it("lançamentos: lista os do período, cria e anula", async () => {
-    const { ano, mes } = mesAnterior();
-    const periodo = renderHook(() => useProcessamentoPeriodo(ano, mes)).result.current.periodo!;
+    const periodo = renderHook(() => useProcessamentoPeriodo(2026, 9)).result.current.periodo!;
     const { result } = renderHook(() => useProcessamentoLancamentos(periodo.id));
     expect(result.current.lancamentos).toHaveLength(2);
     await act(async () => {

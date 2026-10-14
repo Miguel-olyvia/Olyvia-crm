@@ -48,7 +48,7 @@ describe("banco de horas na ficha", () => {
   it("aparece para quem tem horário de banco de horas, com ajustes para o RH", () => {
     noRouter(<BancoHorasDaFicha pessoaId="p-rui" podeAjustar />);
     expect(screen.getByRole("heading", { name: /Banco de horas/i })).toBeInTheDocument();
-    expect(screen.getByText("Sábado de inventário")).toBeInTheDocument();
+    expect(screen.getByText("Folga gozada por banco de horas")).toBeInTheDocument();
     expect(screen.getAllByRole("button").length).toBeGreaterThanOrEqual(2);
   });
 
@@ -167,7 +167,7 @@ describe("horas extra: limites, configuração e histórico", () => {
       return calcularSalario(entradaSalarioDaFicha(ficha, lerFluxosC(), ano, mes)).totalBruto ?? 0;
     };
     const base = total();
-    decidirHoraExtraNaLoja("he-sofia-2", "confirmar", "");
+    decidirHoraExtraNaLoja("he-sofia-2026-10-06", "confirmar", "");
     const comUma = total();
     expect(comUma).toBeGreaterThan(base);
     definirRegrasPagamentoHE({ ...lerFluxosC().regras, primeiraHoraPct: 300 });

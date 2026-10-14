@@ -103,6 +103,8 @@ export interface EntradaSalario {
   regrasHE: RegrasPagamentoHE;
   subsidioFerias: number;
   pontuais: readonly Pontual[];
+  /** Contrato que comeca ou acaba a meio do mes: so os dias em vigor pagam base. Omisso = o mes inteiro. */
+  diasDeContrato?: { dias: number; doMes: number };
 }
 
 export interface ResultadoSalario {
@@ -149,7 +151,11 @@ export function calcularSalario(e: EntradaSalario): ResultadoSalario {
   if (r.duodecimosPct === null) avisos.push("duodecimos_por_decidir");
   if (vh === null) avisos.push("sem_horas_planeadas");
 
-  const linhas: LinhaSalario[] = [linha("base", 3, `${eur(mensal)} × ${12 + (2 * pctEfectiva(r.duodecimosPct)) / 100} ÷ 12`, base)];
+  const fracao = e.diasDeContrato && e.diasDeContrato.dias < e.diasDeContrato.doMes ? e.diasDeContrato : null;
+  const formulaBase = `${eur(mensal)} × ${12 + (2 * pctEfectiva(r.duodecimosPct)) / 100} ÷ 12`;
+  const linhas: LinhaSalario[] = [fracao
+    ? linha("base", 3, `${formulaBase} × ${fracao.dias} ÷ ${fracao.doMes}`, (base * fracao.dias) / fracao.doMes)
+    : linha("base", 3, formulaBase, base)];
   if (e.minutosEmFalta > 0 && vh !== null) linhas.push(linha("desconto", 5, `− ${hh(e.minutosEmFalta)} h × ${eur(vh)}`, -(e.minutosEmFalta / 60) * vh));
   linhas.push(...linhasDeHorasExtra(e, vh), ...linhasDeSubsidios(e, mensal, avisos));
   for (const p of e.pontuais) linhas.push(linha(`pontual_${p.id}`, 8, eur(p.valor), p.valor, p.descricao));

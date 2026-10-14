@@ -73,12 +73,13 @@ import {
   type ResultadoProcessamentoPessoa,
 } from "@/components/rh-exemplo/lib/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/components/rh-exemplo/tipos";
+import { MES_PROCESSAVEL } from "@/components/rh-exemplo/dados/assiduidadeSetembro";
 import { toast } from "@/lib/toast";
 import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
 
-function mesDeHoje(): string {
-  const hoje = new Date();
-  return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+/** Na apresentacao o periodo por omissao e Setembro de 2026: ja acabou, esta aberto e pode ser processado. */
+function mesPorOmissao(): string {
+  return MES_PROCESSAVEL;
 }
 
 /** Minutos -> horas com no maximo 2 casas decimais, sem zeros a mais. */
@@ -139,7 +140,7 @@ export function ProcessamentoVisaoGeralTab() {
   const podeGerirPeriodo = hasPermission("hr.processamento.periodo.gerir");
   const podeGerirLancamentos = hasPermission("hr.processamento.lancamentos.gerir");
 
-  const [mesSelecionado, setMesSelecionado] = useState(mesDeHoje);
+  const [mesSelecionado, setMesSelecionado] = useState(mesPorOmissao);
   const ano = Number(mesSelecionado.slice(0, 4));
   const mes = Number(mesSelecionado.slice(5, 7));
 

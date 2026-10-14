@@ -18,6 +18,7 @@ import { rhExemploFluxosCTranslations } from "@/translations/rhExemploFluxosC";
 import { rhExemploFluxosATranslations } from "@/translations/rhExemploFluxosA";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
+import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -97,6 +98,11 @@ Object.keys(rhExemploFluxosBTranslations).forEach((lang) => {
 // Frente D: banco de horas na ficha e horas extra pendentes na fila de trabalho (`rhFluxosD.*`).
 Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosDTranslations[lang as keyof typeof rhExemploFluxosDTranslations] };
+});
+
+// Calendário do mês da pessoa, na aba Assiduidade da ficha de RH de exemplo (`rhCal.*`).
+Object.keys(rhExemploCalendarioTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCalendarioTranslations[lang as keyof typeof rhExemploCalendarioTranslations] };
 });
 
 export const useTranslation = () => {

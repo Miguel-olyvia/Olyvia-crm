@@ -10,38 +10,28 @@
  * separador tem hook proprio, `useAssiduidadeDaPessoa`, e recarrega quando o
  * mes muda.
  *
- * A SEMANA E O MES NAO TEM GRELHA DE HORAS
- * ----------------------------------------
- * Uma grelha de altura fixa obriga a inventar um dia-padrao, e e exactamente
- * isso que falha em quem tem semanas irregulares. Aqui os dias empilham-se e
- * cada um ocupa o que precisa: um dia com tres intervalos ocupa tres linhas, e
- * um dia sem trabalho ocupa uma linha esbatida. Quem tem semanas irregulares
- * ve a irregularidade, que e o que se passa.
+ * O MES E UM CALENDARIO
+ * ---------------------
+ * Cada dia mostra o previsto (pelo tipo de horario em vigor), o feito e a diferenca (ver `calendarioPessoa/`). Clicar
+ * num dia abre o detalhe; dai chega-se ao registo do dia (`PainelDoDia`) para corrigir ou justificar. O mes visivel
+ * vive aqui porque tambem decide a janela de datas que este hook carrega.
  */
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { CalendarDays, Clock } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { BotaoPicar } from "@/components/rh-exemplo/assiduidade/BotaoPicar";
 import { JustificarFalhaDeMarcacao } from "@/components/rh-exemplo/fluxosB/alertas/JustificarFalhaDeMarcacao";
 import { HorasExtraDaPessoa } from "@/components/rh-exemplo/fluxosC/HorasExtraDaPessoa";
-import { LocalEtiqueta } from "@/components/rh-exemplo/assiduidade/LocalEtiqueta";
 import { PainelDoDia } from "@/components/rh-exemplo/assiduidade/PainelDoDia";
+import { CalendarioPessoa, type MesVisivel } from "@/components/rh-exemplo/calendarioPessoa/CalendarioPessoa";
 import { PessoaRelatorioAssiduidadeMensal } from "@/components/rh-exemplo/PessoaRelatorioAssiduidadeMensal";
 import { useAssiduidadeDaPessoa } from "@/components/rh-exemplo/hooks/useAssiduidadeDaPessoa";
 import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
-import {
-  LEITOR_FALTAS,
-  LEITOR_PICAGENS,
-  LEITOR_REALIZADO,
-  emVigor,
-  formatarDuracao,
-  hojeIso,
-} from "@/components/rh-exemplo/lib/assiduidade";
+import { LEITOR_PICAGENS, emVigor, hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { leituraDoPlaneado } from "@/components/rh-exemplo/lib/planeadoDoDia";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 
@@ -55,13 +45,13 @@ interface PessoaAssiduidadeTabProps {
   dataAdmissao?: string | null;
 }
 
-/** O primeiro e o ultimo dia de um mes, em ISO, sem passar por UTC. */
+/** O primeiro e o ultimo dia de um mes (1 a 12), em ISO, sem passar por UTC. */
 function limitesDoMes(ano: number, mes: number): { de: string; ate: string } {
   const doisDigitos = (valor: number) => String(valor).padStart(2, "0");
-  const ultimoDia = new Date(ano, mes + 1, 0).getDate();
+  const ultimoDia = new Date(ano, mes, 0).getDate();
   return {
-    de: `${ano}-${doisDigitos(mes + 1)}-01`,
-    ate: `${ano}-${doisDigitos(mes + 1)}-${doisDigitos(ultimoDia)}`,
+    de: `${ano}-${doisDigitos(mes)}-01`,
+    ate: `${ano}-${doisDigitos(mes)}-${doisDigitos(ultimoDia)}`,
   };
 }
 
@@ -73,12 +63,12 @@ export function PessoaAssiduidadeTab({
   cargo = null,
   dataAdmissao = null,
 }: PessoaAssiduidadeTabProps) {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const hoje = hojeIso();
 
-  const [mesVisivel, setMesVisivel] = useState(() => {
+  const [mesVisivel, setMesVisivel] = useState<MesVisivel>(() => {
     const agora = new Date();
-    return { ano: agora.getFullYear(), mes: agora.getMonth() };
+    return { ano: agora.getFullYear(), mes: agora.getMonth() + 1 };
   });
   const [relatorioAberto, setRelatorioAberto] = useState(false);
 
@@ -95,35 +85,6 @@ export function PessoaAssiduidadeTab({
 
   const podeVer = permissoes.view || permissoes.equipaView || (souAPessoa && permissoes.viewOwn);
 
-  /** Um resumo por dia do mes, com o que ha para ver de relance. */
-  const dias = useMemo(() => {
-    const realizadoEmVigor = emVigor(assiduidade.realizado, LEITOR_REALIZADO).filter(
-      (linha) => !linha.deleted_at,
-    );
-    const faltasEmVigor = emVigor(assiduidade.faltas, LEITOR_FALTAS);
-    const picagensEmVigor = emVigor(assiduidade.picagens, LEITOR_PICAGENS);
-
-    const ultimo = Number(janela.ate.slice(8, 10));
-    const linhas = [];
-    for (let dia = 1; dia <= ultimo; dia += 1) {
-      const iso = `${janela.de.slice(0, 8)}${String(dia).padStart(2, "0")}`;
-      const doDia = realizadoEmVigor.filter((linha) => linha.data === iso);
-      const faltasDoDia = faltasEmVigor.filter((falta) => falta.data === iso);
-      const planeado = leituraDoPlaneado(assiduidade.planeado, iso);
-      linhas.push({
-        iso,
-        minutos: doDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0),
-        locais: [...new Set(doDia.map((linha) => linha.local_id))],
-        faltas: faltasDoDia.length,
-        minutosEmFalta: faltasDoDia.reduce((soma, falta) => soma + (falta.minutos ?? 0), 0),
-        picagens: picagensEmVigor.filter((picagem) => picagem.data_local === iso).length,
-        planeados: planeado.intervalos.length,
-        naoTrabalha: planeado.naoTrabalha,
-      });
-    }
-    return linhas;
-  }, [assiduidade.realizado, assiduidade.faltas, assiduidade.picagens, assiduidade.planeado, janela]);
-
   const picagensDeHoje = useMemo(
     () => emVigor(assiduidade.picagens, LEITOR_PICAGENS).filter((p) => p.data_local === hoje),
     [assiduidade.picagens, hoje],
@@ -133,18 +94,8 @@ export function PessoaAssiduidadeTab({
     [assiduidade.planeado, hoje],
   );
 
-  const nomeDoMes = new Intl.DateTimeFormat(language, { month: "long", year: "numeric" }).format(
-    new Date(mesVisivel.ano, mesVisivel.mes, 1),
-  );
-
   if (!podeVer) return <SemAcessoCard />;
   if (assiduidade.loading) return <OlyviaLoader />;
-
-  const mudarMes = (passo: number) =>
-    setMesVisivel(({ ano, mes }) => {
-      const proximo = new Date(ano, mes + passo, 1);
-      return { ano: proximo.getFullYear(), mes: proximo.getMonth() };
-    });
 
   return (
     <div className="space-y-4">
@@ -182,74 +133,27 @@ export function PessoaAssiduidadeTab({
       {souAPessoa && <JustificarFalhaDeMarcacao pessoaId={pessoaId} />}
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="text-base capitalize">{nomeDoMes}</CardTitle>
-          <div className="flex gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("hr.assiduidade.mesAnterior")}
-              onClick={() => mudarMes(-1)}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("hr.assiduidade.mesSeguinte")}
-              onClick={() => mudarMes(1)}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setRelatorioAberto(true)}>
-              {t("rhExemplo.relatorio.abrir")}
-            </Button>
-          </div>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            {t("rhCal.titulo")}
+          </CardTitle>
         </CardHeader>
-
         <CardContent>
-          <ul className="divide-y">
-            {dias.map((dia) => (
-              <li key={dia.iso}>
-                <button
-                  type="button"
-                  onClick={() => setDiaAberto(dia.iso)}
-                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 py-2 text-left text-sm hover:bg-muted/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-                >
-                  <span className="w-24 tabular-nums text-muted-foreground">{dia.iso}</span>
-
-                  {dia.minutos > 0 ? (
-                    <span className="tabular-nums font-medium">{formatarDuracao(dia.minutos)}</span>
-                  ) : dia.naoTrabalha ? (
-                    <span className="text-muted-foreground">
-                      {t("hr.assiduidade.dia.naoTrabalha")}
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {t("hr.assiduidade.dia.semRegisto")}
-                    </span>
-                  )}
-
-                  {dia.locais.map((localId) => (
-                    <LocalEtiqueta
-                      key={localId ?? "sem-local"}
-                      locais={locais}
-                      localId={localId}
-                      className="text-xs text-muted-foreground"
-                    />
-                  ))}
-
-                  {dia.faltas > 0 && (
-                    <Badge variant="outline" className="font-normal">
-                      {t("hr.assiduidade.dia.faltaDe", {
-                        duracao: formatarDuracao(dia.minutosEmFalta),
-                      })}
-                    </Badge>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <CalendarioPessoa
+            pessoaId={pessoaId}
+            pessoaNome={pessoaNome}
+            mes={mesVisivel}
+            aoMudarMes={setMesVisivel}
+            souAPessoa={souAPessoa}
+            permissoes={permissoes}
+            aoAbrirRegisto={setDiaAberto}
+            acoes={
+              <Button type="button" variant="outline" className="min-h-11" onClick={() => setRelatorioAberto(true)}>
+                {t("rhExemplo.relatorio.abrir")}
+              </Button>
+            }
+          />
         </CardContent>
       </Card>
 

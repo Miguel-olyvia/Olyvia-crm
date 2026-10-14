@@ -8,13 +8,14 @@ import { lerEstado } from "@/components/rh-exemplo/dados/loja";
 import { limiteAnualMin } from "./limitePessoa";
 import { validarMovimento, type MovimentoBanco, type ResultadoMovimento } from "./bancoHorasRegras";
 import { criarEstadoFluxosC, type EstadoFluxosC } from "./dadosFluxosC";
+import { comFechoDeAgosto } from "./fechoAgostoExemplo";
 import {
   avaliarCandidata, avaliarLimites, decidirHoraExtra, tempoAMaisPorTipo,
   type EntradaTempoAMais, type HoraExtra, type LimitesHE, type RegrasPagamentoHE, type ResultadoDecisao, type ResultadoPipeline,
 } from "./horasExtraRegras";
 import { fecharMes, reabrirMes, type FechoMes, type ReciboCongelado, type ResultadoReabrir } from "./salarioFecho";
 
-let estado: EstadoFluxosC = criarEstadoFluxosC();
+let estado: EstadoFluxosC = comFechoDeAgosto(criarEstadoFluxosC());
 let contador = 0;
 const ouvintes = new Set<() => void>();
 
@@ -29,7 +30,7 @@ function definir(alterar: (e: EstadoFluxosC) => EstadoFluxosC): void {
   avisar();
 }
 export function reporFluxosC(): void {
-  estado = criarEstadoFluxosC();
+  estado = comFechoDeAgosto(criarEstadoFluxosC());
   contador = 0;
   avisar();
 }

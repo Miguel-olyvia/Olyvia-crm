@@ -64,7 +64,7 @@ function diaDeTrabalho(estado: EstadoRh, pessoaId: string, dias: number): number
 function alertasIniciais(estado: EstadoRh): AlertaDia[] {
   return [
     alerta("alb-sofia", "p-sofia", -1, { tipo: "pendente_par", horaInicio: "14:00:00" }),
-    alerta("alb-hugo", "p-hugo", diaDeTrabalho(estado, "p-hugo", -16), { tipo: "planeado_sem_realizado", horaInicio: "09:00:00", horaFim: "13:00:00", minutos: 240 }),
+    alerta("alb-hugo", "p-hugo", diaDeTrabalho(estado, "p-hugo", -16), { tipo: "planeado_sem_realizado", horaInicio: "11:00:00", horaFim: "15:00:00", minutos: 240 }),
     alerta("alb-ines", "p-ines", -5, { tipo: "realizado_sem_planeado", horaInicio: "18:00:00", horaFim: "19:30:00", minutos: 90 }),
     alerta("alb-rui", "p-rui", -1, { tipo: "pendente_par", horaInicio: "14:00:00" }),
     alerta("alb-carolina", "p-carolina", diaDeTrabalho(estado, "p-carolina", -15), { tipo: "parcialmente_realizado", horaInicio: "09:00:00", horaFim: "13:00:00", minutos: 75 }),

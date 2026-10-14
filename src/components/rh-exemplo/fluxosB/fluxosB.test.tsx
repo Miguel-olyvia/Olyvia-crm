@@ -109,7 +109,8 @@ describe("fluxo 4: horario por tipo", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("está no passado");
     fireEvent.change(screen.getByLabelText("Data"), { target: { value: "2099-01-05" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar exceção" }));
-    expect(lerFluxosB().horarios["p-sofia"].excecoes).toHaveLength(1);
+    // A excepcao ja marcada (16 de Outubro) mantem-se e a nova junta-se a ela.
+    expect(lerFluxosB().horarios["p-sofia"].excecoes.map((e) => e.data).sort()).toEqual(["2026-10-16", "2099-01-05"]);
   });
 });
 
@@ -223,6 +224,13 @@ describe("fluxo 5: alertas do fim do dia e justificacao", () => {
   });
 });
 
+/** A linha da lista de faltas de uma pessoa numa data (DD/MM/AAAA): a mesma pessoa tem varias faltas. */
+const linhaDaFalta = (nome: string, data: string): HTMLElement => {
+  const li = screen.getAllByText(nome).map((n) => n.closest("li") as HTMLElement).find((l) => l?.textContent?.includes(data));
+  if (!li) throw new Error(`Sem falta de ${nome} em ${data}`);
+  return li;
+};
+
 describe("fluxo 7: faltas", () => {
   it("lista as faltas com o estado da justificacao em texto e as sugestoes do sistema", () => {
     noLingua(<FaltasPainel />);
@@ -236,7 +244,7 @@ describe("fluxo 7: faltas", () => {
 
   it("o texto de justificacao so aparece com «Ver texto», que regista quem leu", () => {
     noLingua(<FaltasPainel />);
-    const linha = screen.getByText("Tiago Pinheiro").closest("li") as HTMLElement;
+    const linha = linhaDaFalta("Tiago Pinheiro", "08/10/2026");
     fireEvent.click(within(linha).getByRole("button", { name: "Ver detalhe" }));
     expect(screen.queryByTestId("rhb-texto-falta")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ver texto" }));
@@ -248,7 +256,7 @@ describe("fluxo 7: faltas", () => {
 
   it("justificada e paga nao desconta; o detalhe mostra a conta", () => {
     noLingua(<FaltasPainel />);
-    const linha = screen.getByText("Tiago Pinheiro").closest("li") as HTMLElement;
+    const linha = linhaDaFalta("Tiago Pinheiro", "08/10/2026");
     fireEvent.click(within(linha).getByRole("button", { name: "Ver detalhe" }));
     expect(screen.getByTestId("rhb-desconto")).toHaveTextContent("Pendente de documento: desconta por agora");
     fireEvent.click(screen.getByRole("button", { name: "Justificada, paga" }));
@@ -258,8 +266,7 @@ describe("fluxo 7: faltas", () => {
 
   it("recusar a justificacao exige motivo; sem justificacao a falta desconta (4 h x valor da hora)", () => {
     noLingua(<FaltasPainel />);
-    const lista = within(screen.getByRole("region", { name: "Faltas marcadas" }));
-    const linha = lista.getByText("Carolina Matos").closest("li") as HTMLElement;
+    const linha = linhaDaFalta("Carolina Matos", "06/10/2026");
     fireEvent.click(within(linha).getByRole("button", { name: "Ver detalhe" }));
     expect(screen.getByTestId("rhb-desconto")).toHaveTextContent(/4 h × .* = .* a descontar/);
     fireEvent.change(screen.getByLabelText(/Texto da justificação/), { target: { value: "Assistência à família" } });

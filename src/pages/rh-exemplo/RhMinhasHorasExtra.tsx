@@ -11,14 +11,14 @@ import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useMinhaPessoa } from "@/components/rh-exemplo/hooks/useMinhaPessoa";
 import { CartaoBancoHoras } from "@/components/rh-exemplo/fluxosC/CartaoBancoHoras";
 import { HorasExtraDaPessoa } from "@/components/rh-exemplo/fluxosC/HorasExtraDaPessoa";
-import { useFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { useEmBancoDeHoras } from "@/components/rh-exemplo/fluxosC/useEmBancoDeHoras";
 import { useTranslation } from "@/hooks/useTranslation";
 
 export default function RhMinhasHorasExtra() {
   const { t } = useTranslation();
   const { activeCompany, isLoading } = useCompany();
   const minha = useMinhaPessoa();
-  const temBanco = useFluxosC((e) => e.banco.some((m) => m.pessoaId === minha.pessoaId));
+  const temBanco = useEmBancoDeHoras(minha.pessoaId);
 
   if (isLoading || minha.loading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
