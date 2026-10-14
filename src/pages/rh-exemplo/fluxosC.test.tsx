@@ -1,4 +1,4 @@
-// Arranque dos ecrãs novos da frente C (horas extra, as minhas horas extra, cálculo do mês) e dos fluxos principais.
+// Arranque dos ecrãs novos da frente C (horas extra, cálculo do mês; as horas extra da pessoa são agora uma aba, ver abasAssiduidade.test.tsx) e dos fluxos principais.
 import { beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -7,7 +7,6 @@ import { repor } from "@/components/rh-exemplo/dados/loja";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { InterruptorHorasExtra } from "@/components/rh-exemplo/fluxosC/InterruptorHorasExtra";
 import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
-import RhMinhasHorasExtra from "./RhMinhasHorasExtra";
 import RhProcessamentoSalarial from "./RhProcessamentoSalarial";
 
 const renderEm = (caminho: string, padrao: string, elemento: JSX.Element) =>
@@ -31,23 +30,6 @@ beforeEach(() => {
   repor();
   reporGestao();
   reporFluxosC();
-});
-
-describe("A minha área: as minhas horas extra", () => {
-  it("mostra o limite anual com alerta, a lista e o banco de horas", () => {
-    renderEm("/rh-exemplo/minhas-horas-extra", "/rh-exemplo/minhas-horas-extra", <RhMinhasHorasExtra />);
-    expect(screen.getByRole("heading", { level: 1, name: /As minhas horas extra/ })).toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toBeInTheDocument();
-    expect(screen.getAllByRole("alert").length).toBeGreaterThan(0);
-    // A Sofia tem horario padrao: nao ha banco de horas, nem saldo nem movimentos.
-    expect(screen.queryByText("Banco de horas")).not.toBeInTheDocument();
-    semChavesPorTraduzir();
-  });
-
-  it("a vista da pessoa não oferece ajuste manual do banco", () => {
-    renderEm("/rh-exemplo/minhas-horas-extra", "/rh-exemplo/minhas-horas-extra", <RhMinhasHorasExtra />);
-    expect(screen.queryByRole("button", { name: /Crédito manual/ })).not.toBeInTheDocument();
-  });
 });
 
 describe("Marca «pode fazer horas extra»", () => {

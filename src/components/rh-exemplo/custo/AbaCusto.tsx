@@ -13,6 +13,7 @@ import { CustoAvulsos } from "./CustoAvulsos";
 import { CustoEncargos } from "./CustoEncargos";
 import { CustoResumo } from "./CustoResumo";
 import { useCustoDaPessoa } from "./useCustoDaPessoa";
+import { VisaoPessoaCusto } from "./VisaoPessoaCusto";
 
 type Visao = "rh" | "pessoa";
 
@@ -46,10 +47,15 @@ export function AbaCusto({ ficha, pessoa, ctx }: AbaProps) {
   return (
     <div className="space-y-4">
       <SeletorDeVisao visao={visao} aoMudar={setVisao} />
-      {!rh && <p className="rounded-md bg-muted/50 p-3 text-sm" role="status">{t("rhA.custo.visaoPessoaAjuda", { nome: pessoa.nome_completo })}</p>}
-      {rh && <CustoResumo custo={custo} />}
-      <CustoAvulsos pessoaId={pessoa.id} autor={autor} avulsos={custo.avulsos} podeGerir={rh} />
-      {rh && <CustoEncargos pessoaId={pessoa.id} />}
+      {rh ? (
+        <>
+          <CustoResumo custo={custo} />
+          <CustoAvulsos pessoaId={pessoa.id} autor={autor} avulsos={custo.avulsos} podeGerir />
+          <CustoEncargos pessoaId={pessoa.id} />
+        </>
+      ) : (
+        <VisaoPessoaCusto pessoaId={pessoa.id} nome={pessoa.nome_completo} avulsos={custo.avulsos} />
+      )}
     </div>
   );
 }

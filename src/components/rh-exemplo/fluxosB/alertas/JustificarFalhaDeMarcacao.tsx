@@ -14,7 +14,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { MessageSquareWarning } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { enviarJustificacaoDePicagem } from "@/components/rh-exemplo/dados/accoesAssiduidadeB";
 import { formatarData } from "@/components/rh-exemplo/fluxosB/horario/formatos";
 import {
@@ -22,9 +21,11 @@ import {
   prazoDaJustificacao,
   situacaoDoPrazo,
   type AlertaDia,
+  type JustificacaoPicagem,
 } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
+import { useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
 function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaDia; onFechar: () => void }) {
   const { t } = useTranslation();
@@ -74,16 +75,42 @@ function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaDia; onF
   );
 }
 
+function LinhaEnviada({ j }: { j: JustificacaoPicagem }) {
+  const { t } = useTranslation();
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <Badge variant="secondary" className="font-normal">
+        {t(`rhExemplo.pic.justEstado.${j.estado}`)}
+      </Badge>
+      <span className="tabular-nums">{t("rhExemplo.pic.justificacaoDe", { hora: j.horaReal })}</span>
+      <span className="text-muted-foreground">{j.motivo}</span>
+      {j.estado === "recusada" && j.motivoRecusa && (
+        <span className="text-destructive">{t("rhExemplo.pic.motivoRecusa", { motivo: j.motivoRecusa })}</span>
+      )}
+    </li>
+  );
+}
+
+/** Um grupo das justificações já enviadas (pendentes, aceites ou recusadas), com o número no título. */
+function GrupoEnviadas({ chave, itens }: { chave: "pendentes" | "aceites" | "recusadas"; itens: JustificacaoPicagem[] }) {
+  const { t } = useTranslation();
+  if (itens.length === 0) return null;
+  return (
+    <section aria-label={t(`rhAbas.just.${chave}`)} className="space-y-2 border-t pt-3 text-sm" data-testid={`rha-just-${chave}`}>
+      <h4 className="font-medium">
+        {t(`rhAbas.just.${chave}`)} <span className="tabular-nums text-muted-foreground">({itens.length})</span>
+      </h4>
+      <ul className="space-y-1">{itens.map((j) => <LinhaEnviada key={j.id} j={j} />)}</ul>
+    </section>
+  );
+}
+
 export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
   const { t } = useTranslation();
-  const alertas = useFluxosB((e) => e.alertas);
-  const justificacoes = useFluxosB((e) => e.justificacoesPicagem);
+  const { porJustificar: meus, menorPrazoDias, pendentes, aceites, recusadas } = useJustificacoesDaPessoa(pessoaId);
   const [aberto, setAberto] = useState<string | null>(null);
   const hoje = hojeIso();
-
-  const meus = alertas.filter((a) => a.pessoaId === pessoaId && (a.estado === "pendente" || a.estado === "justificacao_pedida"));
-  const enviadas = justificacoes.filter((j) => j.pessoaId === pessoaId);
-  if (meus.length === 0 && enviadas.length === 0) return null;
+  const semNada = meus.length === 0 && pendentes.length + aceites.length + recusadas.length === 0;
 
   return (
     <Card>
@@ -93,8 +120,14 @@ export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
           {t("rhExemplo.pic.justificarTitulo")}
         </CardTitle>
         <p className="text-sm text-muted-foreground">{t("rhExemplo.pic.justificarAjuda")}</p>
+        {menorPrazoDias !== null && (
+          <p role="status" className="text-sm font-medium" data-testid="rha-just-prazo">
+            {t("rhAbas.just.menorPrazo", { dias: String(menorPrazoDias) })}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
+        {semNada && <p className="py-6 text-center text-sm text-muted-foreground">{t("rhAbas.just.vazio")}</p>}
         <ul className="space-y-3">
           {meus.map((alerta) => {
             const dentro = situacaoDoPrazo(alerta, hoje) === "dentro_do_prazo";
@@ -131,22 +164,9 @@ export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
           })}
         </ul>
 
-        {enviadas.length > 0 && (
-          <ul className="space-y-1 border-t pt-3 text-sm">
-            {enviadas.map((j) => (
-              <li key={j.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <Badge variant="secondary" className="font-normal">
-                  {t(`rhExemplo.pic.justEstado.${j.estado}`)}
-                </Badge>
-                <span className="tabular-nums">{t("rhExemplo.pic.justificacaoDe", { hora: j.horaReal })}</span>
-                <span className="text-muted-foreground">{j.motivo}</span>
-                {j.estado === "recusada" && j.motivoRecusa && (
-                  <span className="text-destructive">{t("rhExemplo.pic.motivoRecusa", { motivo: j.motivoRecusa })}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+        <GrupoEnviadas chave="pendentes" itens={pendentes} />
+        <GrupoEnviadas chave="aceites" itens={aceites} />
+        <GrupoEnviadas chave="recusadas" itens={recusadas} />
       </CardContent>
     </Card>
   );

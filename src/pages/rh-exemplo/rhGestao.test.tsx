@@ -68,7 +68,7 @@ describe("RH de exemplo: a minha área", () => {
   });
 
   it("o meu ponto mostra o painel do dia e o mapa do mês", () => {
-    renderEm("/rh-exemplo/assiduidade", "/rh-exemplo/assiduidade", <RhMeuPonto />);
+    renderEm("/rh-exemplo/assiduidade?aba=calendario", "/rh-exemplo/assiduidade", <RhMeuPonto />);
     expect(screen.getByRole("heading", { level: 1, name: "O meu ponto" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Mês anterior|Mes anterior/i })).toBeInTheDocument();
     semChavesPorTraduzir();
@@ -165,7 +165,7 @@ describe("RH de exemplo: acções que escrevem em memória", () => {
     const abrir = vi.spyOn(window, "open").mockReturnValue(null);
     const criarUrl = vi.fn(() => "blob:relatorio-exemplo");
     Object.defineProperty(URL, "createObjectURL", { value: criarUrl, configurable: true, writable: true });
-    renderEm("/rh-exemplo/assiduidade", "/rh-exemplo/assiduidade", <RhMeuPonto />);
+    renderEm("/rh-exemplo/assiduidade?aba=calendario", "/rh-exemplo/assiduidade", <RhMeuPonto />);
     fireEvent.click(screen.getByRole("button", { name: "Relatório mensal" }));
     await waitFor(() => expect(abrir).toHaveBeenCalledWith("blob:relatorio-exemplo", "_blank", "noopener"), { timeout: 8000 });
     expect(criarUrl).toHaveBeenCalledTimes(1);

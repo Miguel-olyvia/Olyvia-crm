@@ -11,7 +11,12 @@
  *
  * O conteudo e O MESMO componente do separador da ficha: sao a mesma coisa
  * vista de dois sitios, e duas copias divergiriam ao segundo ajuste.
+ *
+ * Esta em abas (Picar, Calendario, Horas extra, Justificacoes) e a aba aberta vive
+ * no endereco (`?aba=`), para ligacoes directas. As horas extra da pessoa ja nao
+ * tem pagina propria: o link antigo redireciona para a aba `horas-extra`.
  */
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -26,6 +31,7 @@ export default function RhMeuPonto() {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { permissoes, loading: permissoesALoad } = usePermissoesAssiduidade();
   const minha = useMinhaPessoa();
+  const [params, setParams] = useSearchParams();
 
   // Nunca decidir o que mostrar com as permissoes ainda a carregar: o ecra
   // piscava entre "sem acesso" e o conteudo.
@@ -55,6 +61,8 @@ export default function RhMeuPonto() {
         permissoes={permissoes}
         cargo={minha.cargo}
         dataAdmissao={minha.dataAdmissao}
+        aba={params.get("aba")}
+        aoMudarAba={(aba) => setParams({ aba }, { replace: true })}
       />
     </div>
   );

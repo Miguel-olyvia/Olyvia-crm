@@ -7,7 +7,6 @@ export const rhExemploFluxosCTranslations: Record<"en" | "pt", Record<string, st
     "rhFluxosC.comum.cancelar": "Cancelar",
     "rhFluxosC.comum.fechar": "Fechar",
     "rhFluxosC.comum.guardar": "Guardar",
-    "rhFluxosC.menu.minhasHorasExtra": "As minhas horas extra",
 
     "rhFluxosC.he.estado.pendente": "Pendente",
     "rhFluxosC.he.estado.acima_limite": "Acima do limite",
@@ -77,8 +76,6 @@ export const rhExemploFluxosCTranslations: Record<"en" | "pt", Record<string, st
     "rhFluxosC.he.pagamento.regra.feriado": "Feriado trabalhado",
     "rhFluxosC.he.pagamento.regra.descanso": "Descanso trabalhado",
 
-    "rhFluxosC.minhas.titulo": "As minhas horas extra",
-    "rhFluxosC.minhas.semFicha": "Esta conta não tem ficha de RH, por isso não há horas extra para mostrar.",
     "rhFluxosC.pessoa.saldoTitulo": "O meu limite anual de horas extra em {ano}",
     "rhFluxosC.pessoa.semMarca": "Não tem a marca «pode fazer horas extra»: o tempo a mais fica só no relatório e não gera horas extra.",
     "rhFluxosC.pessoa.restante": "Faltam {t} até ao limite",
@@ -200,7 +197,6 @@ export const rhExemploFluxosCTranslations: Record<"en" | "pt", Record<string, st
     "rhFluxosC.comum.cancelar": "Cancel",
     "rhFluxosC.comum.fechar": "Close",
     "rhFluxosC.comum.guardar": "Save",
-    "rhFluxosC.menu.minhasHorasExtra": "My overtime",
     "rhFluxosC.he.estado.pendente": "Pending",
     "rhFluxosC.he.estado.acima_limite": "Over the limit",
     "rhFluxosC.he.estado.confirmada": "Confirmed",
@@ -265,8 +261,6 @@ export const rhExemploFluxosCTranslations: Record<"en" | "pt", Record<string, st
     "rhFluxosC.he.pagamento.regra.nocturno": "Night (on top)",
     "rhFluxosC.he.pagamento.regra.feriado": "Holiday worked",
     "rhFluxosC.he.pagamento.regra.descanso": "Rest day worked",
-    "rhFluxosC.minhas.titulo": "My overtime",
-    "rhFluxosC.minhas.semFicha": "This account has no HR record, so there is no overtime to show.",
     "rhFluxosC.pessoa.saldoTitulo": "My yearly overtime limit in {ano}",
     "rhFluxosC.pessoa.semMarca": "You do not have the overtime flag: extra time only shows in the report and creates no overtime.",
     "rhFluxosC.pessoa.restante": "{t} left until the limit",

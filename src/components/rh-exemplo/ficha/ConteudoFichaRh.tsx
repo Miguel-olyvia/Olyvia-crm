@@ -22,7 +22,7 @@ import { AbaLaborais, AbaPessoais, AbaVisaoGeral, type AbaProps } from "./AbasPe
 import { AcoesFicha } from "./AcoesFicha";
 import { CabecalhoFichaRh } from "./CabecalhoFichaRh";
 import { contadoresDaFicha } from "./contadores";
-import { ehAbaFicha } from "./abas";
+import { ehAbaFicha, type AbaFicha } from "./abas";
 import { ListaAbasFicha } from "./ListaAbasFicha";
 import type { TeclaNavegacao, Vizinhas } from "./navegacao";
 import { useContextoFicha, type ContextoFicha } from "./useContextoFicha";
@@ -85,6 +85,7 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa }: Ficha
   const fotografiaUrl = usePessoaFotografia(pessoa.fotografia_anexo_id);
   const dialogos = useDialogosFicha();
   const subtitulo = useSubtitulo(pessoa, ctx);
+  const abaAtiva: AbaFicha = ehAbaFicha(aba) ? aba : "visaoGeral";
   const temConta = Boolean(ficha.conta);
   const p = ctx.pendencias;
   // Se não se sabe o que falta (sem permissão para o ver, ou a leitura falhou) o botão fica ativo: quem decide é o servidor.
@@ -104,8 +105,8 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa }: Ficha
         temConta={temConta} pendencias={pendencias} aoCriarAcesso={() => dialogos.setAcessoAberto(true)}
         aoEnviarConvite={() => dialogos.abrirConvite(modoDeEnvioDoConvite(convite.resumo))} aoAbrirAba={aoMudarAba}
       />
-      <Tabs value={ehAbaFicha(aba) ? aba : "visaoGeral"} onValueChange={aoMudarAba} className="flex min-h-0 flex-1 flex-col">
-        <ListaAbasFicha contadores={contadoresDaFicha(dados)} />
+      <Tabs value={abaAtiva} onValueChange={aoMudarAba} className="flex min-h-0 flex-1 flex-col">
+        <ListaAbasFicha contadores={contadoresDaFicha(dados)} abaAtiva={abaAtiva} />
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <PessoaConviteAdmissaoEstado
             pessoaId={pessoa.id} estado={convite} podeEnviar={ctx.hasPermission("hr.pessoas.convite.enviar") && !temConta}

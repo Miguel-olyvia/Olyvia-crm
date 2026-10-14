@@ -19,6 +19,7 @@ import { rhExemploFluxosATranslations } from "@/translations/rhExemploFluxosA";
 import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
+import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -103,6 +104,11 @@ Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
 // Calendário do mês da pessoa, na aba Assiduidade da ficha de RH de exemplo (`rhCal.*`).
 Object.keys(rhExemploCalendarioTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCalendarioTranslations[lang as keyof typeof rhExemploCalendarioTranslations] };
+});
+
+// Abas da assiduidade, barra de abas da ficha e «Os meus custos» (`rhAbas.*`).
+Object.keys(rhExemploAbasTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAbasTranslations[lang as keyof typeof rhExemploAbasTranslations] };
 });
 
 export const useTranslation = () => {
