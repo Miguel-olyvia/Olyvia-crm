@@ -1155,6 +1155,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id); d.f[k] = v;
       if (d.sug) delete d.sug[k]; // mexido por alguém: deixa de ser sugestão
       derivar(d, k);
+      // o cliente deixa de fornecer materiais: saem as marcas "o cliente fornece" e "o cliente compra" (14/10/2026)
+      if (k === "materiais_cliente" && v !== "Sim") {
+        if (d.visita.prod) d.visita.prod = d.visita.prod.map((p) => (p.cliente ? marcarCliente([p], p.id, false)[0] : p));
+        delete d.visita.clienteCompra;
+      }
       // a resposta mexe logo no orçamento, enquanto a proposta não foi enviada
       if (d.orc && !d.orc.enviada && (CAMPOS_COM_EFEITO.has(k) || CAMPOS_COM_EFEITO.has(chaveBase(k)) || k === "diag_tipo_area")) sincronizarEfeitos(d, S);
     },

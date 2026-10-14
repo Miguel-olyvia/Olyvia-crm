@@ -1,7 +1,7 @@
 // Proposta de 09/10/2026: a página do negócio com menos ruído.
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Euro, MapPin, Phone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import { NecessidadesCliente } from "./NecessidadesVisita";
 import { VisitasLista } from "./Visitas";
 import { camposMedida, fotosPor, medida, nfmt } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
+import { GuiaPassoCtx } from "./guiaPasso";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -268,6 +269,9 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
   const [ativo, setAtivo] = useState(primeiro);
   const titulo = useRef<HTMLHeadingElement>(null);
   const montado = useRef(false);
+  // um passo com sub-passos (a seleção guiada das Necessidades) tem o seu "Seguinte": a fase esconde o "Continuar"
+  const [guiado, setGuiado] = useState(false);
+  const guia = useMemo(() => ({ avancar: () => setAtivo((a) => a + 1), recuar: () => setAtivo((a) => Math.max(0, a - 1)), setGuiado }), []);
 
   // tentou passar de fase com campos em falta: vai para o primeiro passo com falta e põe o cursor no campo
   // "Verificar" e "Ver bloqueios": abre o orçamento na parte "Antes de enviar"
@@ -291,11 +295,11 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
   useEffect(() => {
     const a = antes.current;
     antes.current = { i: ativo, ok };
-    if (a.i === ativo && !a.ok && ok && ativo < passos.length) {
+    if (a.i === ativo && !a.ok && ok && ativo < passos.length && !guiado) {
       const t = setTimeout(() => setAtivo(ativo + 1), 700);
       return () => clearTimeout(t);
     }
-  }, [ativo, ok, passos.length]);
+  }, [ativo, ok, passos.length, guiado]);
 
   // ao mudar de passo, o título recebe o foco (leitores de ecrã) sem saltar a página
   useEffect(() => {
@@ -338,7 +342,7 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
                 <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl [&_svg]:h-5 [&_svg]:w-5", FASE_COR[d.fase])} aria-hidden="true"><atual.icone /></span>
                 <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">{curto(atual)}</h2>
               </div>
-              <div id="passo-corpo" className="mt-6">{atual.corpo}</div>
+              <div id="passo-corpo" className="mt-6"><GuiaPassoCtx.Provider value={guia}>{atual.corpo}</GuiaPassoCtx.Provider></div>
             </>
           ) : (
             <>
@@ -352,7 +356,8 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
           )}
         </div>
 
-        {/* Um só botão primário: Continuar, ou o passo do negócio no fim */}
+        {/* Um só botão primário: Continuar, ou o passo do negócio no fim (o passo guiado tem o seu) */}
+        {!(guiado && !fim) && (
         <div className="mt-10 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center justify-between gap-3 sm:justify-start">
             <Button variant="ghost" size="lg" disabled={ativo === 0} onClick={() => setAtivo(Math.max(0, ativo - 1))}>Anterior</Button>
@@ -371,6 +376,7 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
               <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>
             </div>}
         </div>
+        )}
       </section>
     </>
   );

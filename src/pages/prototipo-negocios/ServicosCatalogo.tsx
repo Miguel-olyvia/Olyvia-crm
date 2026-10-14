@@ -3,7 +3,7 @@
 // Por omissão, cada ofício mostra os escolhidos e os mais pedidos desta linha; "Ver mais serviços" abre o resto,
 // e a pesquisa procura em todos (o Catálogo vai ter ~400 serviços).
 import { useId, useState } from "react";
-import { Check, Link2, Plus, Search } from "lucide-react";
+import { Check, Link2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATALOGO } from "./catalogo";
 import { aValidar } from "./CamposFase";
@@ -137,7 +137,7 @@ function Mosaico({ t, d, ro, simples, manual, falta, daMedida, onTocar, onQtd }:
         <IconeServico k={t.icone} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn("block font-medium leading-snug text-foreground", simples ? "text-[15px]" : "text-sm")}>{t.curto}</span>
+        <span className={cn("line-clamp-2 font-medium leading-snug text-foreground", simples ? "text-[15px]" : "text-sm")} title={t.n}>{t.curto}</span>
         {sub && <span className="mt-0.5 block text-sm leading-snug text-muted-foreground">{sub}</span>}
         {falta && <span className="mt-0.5 block text-sm font-medium text-destructive">Falta o produto, em Produtos</span>}
       </span>
@@ -146,7 +146,7 @@ function Mosaico({ t, d, ro, simples, manual, falta, daMedida, onTocar, onQtd }:
   const marca = (
     <span aria-hidden="true" className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full border transition-colors",
       so ? "border-transparent text-primary" : t.on ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground")}>
-      {so ? <Link2 className="h-4 w-4" /> : t.on ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : <Plus className="h-3.5 w-3.5" />}
+      {so ? <Link2 className="h-4 w-4" /> : t.on && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
     </span>
   );
   return (

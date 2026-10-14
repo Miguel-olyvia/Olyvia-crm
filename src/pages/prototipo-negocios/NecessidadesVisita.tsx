@@ -17,6 +17,7 @@ import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { ContadorQtd } from "./ContadorQtd";
+import { SelecaoGuiada } from "./SelecaoGuiada";
 import { Ilustracao, ilustracaoDe } from "./ilustracoes";
 import {
   nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
@@ -36,7 +37,7 @@ const ilustracaoNo = (K: Catalogo, p: Produto) => ilustracaoDoCatalogo(K.arvore,
 /** Um produto do Catálogo para escolher: ilustração, nome, marca, preço por unidade e "traz instalação". */
 function CartaoProduto({ p, K, ja, onTocar, compacto }: { p: Produto; K: Catalogo; ja: boolean; onTocar: () => void; compacto?: boolean }) {
   return (
-    <button type="button" aria-pressed={ja} onClick={onTocar}
+    <button type="button" aria-pressed={ja} onClick={onTocar} title={p.n}
       className={cn("relative flex h-full w-full flex-col rounded-xl border bg-card p-2.5 text-left transition-colors duration-150",
         ja ? "border-primary bg-primary/[0.04] ring-1 ring-primary" : "border-border hover:border-foreground/30")}>
       <span className={cn("grid place-items-center rounded-lg bg-muted/70", compacto ? "h-20" : "h-24")}>
@@ -48,7 +49,7 @@ function CartaoProduto({ p, K, ja, onTocar, compacto }: { p: Produto; K: Catalog
       {p.servico && <span className="mt-0.5 inline-flex items-center gap-1 text-sm text-muted-foreground"><Link2 className="h-3.5 w-3.5" aria-hidden="true" />traz instalação</span>}
       <span aria-hidden="true" className={cn("absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full border bg-card transition-colors",
         ja ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground")}>
-        {ja ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : <Plus className="h-3.5 w-3.5" />}
+        {ja && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
       </span>
     </button>
   );
@@ -382,6 +383,8 @@ function Resumo(ctx: P) {
 
 /** A etapa "Necessidades do cliente": o resumo, os serviços e os produtos. */
 export function NecessidadesCliente(ctx: P) {
+  // versão Atual, aspeto simples, levantamento aberto: a seleção guiada, um passo de cada vez (SelecaoGuiada.tsx)
+  if (ctx.simples && !ctx.d.visita.fechada) return <SelecaoGuiada {...ctx} />;
   const h = ctx.simples ? "text-xl font-semibold" : "text-base font-semibold";
   return (
     <div className="space-y-8">
