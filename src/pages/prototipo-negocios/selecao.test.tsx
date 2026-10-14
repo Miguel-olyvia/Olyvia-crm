@@ -167,6 +167,9 @@ describe("o mapeamento: o produto traz o serviço, sem voltar a perguntar", () =
     expect(trocaResolvida(o, [{ n: "Sanita X" }], [{ n: "Sanita X" }])).toBe(true); // o ramo não tem bases: não conta
     expect(trocaResolvida({ pergunta: "O cliente mantém a sanita?" }, [ramo[0]], ramo)).toBe(true);
     expect(trocaResolvida(o, [], ramo)).toBe(false);
+    // palavras inteiras: a estrutura do bidé ("Kit´s para Sanitários") não responde a "a sanita"
+    const estrutura = { n: "Estrutura para Bidé Suspenso", sub: "Kit´s para Sanitários" };
+    expect(trocaResolvida({ pergunta: "O cliente mantém a sanita?" }, [estrutura], [estrutura, ramo[0]])).toBe(false);
   });
   it("numa troca de duas coisas, os primeiros cartões mostram um pouco de cada (intercalados)", () => {
     const ps = ["Base A", "Base B", "Base C", "Sanita X", "Sanita Y", "Torneira"].map((n, i) => ({ id: "p" + i, n: n.startsWith("Base") ? "Base de duche " + n : n, custo: 1, un: "un", no: null } as Produto));

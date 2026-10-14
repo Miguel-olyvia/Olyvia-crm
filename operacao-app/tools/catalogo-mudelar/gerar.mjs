@@ -603,10 +603,11 @@ function classificarProduto(p) {
     return R("Carpintaria", "Resguardos", "resguardo");
   }
   if (cat === "loicas sanitarias") {
-    if (/sanita/.test(sub)) return R("Canalização", "Louças e torneiras", "sanita");
+    // palavra inteira: "Kit´s para Sanitários" contém "sanita" (as estruturas não são sanitas)
+    if (/\bsanitas?\b/.test(sub)) return R("Canalização", "Louças e torneiras", "sanita");
     if (/bide/.test(sub)) return R("Canalização", "Louças e torneiras", "bide");
     if (/lavatorio/.test(sub)) return R("Canalização", "Louças e torneiras", "lavatorio");
-    return R("Canalização", "Louças e torneiras", /placa de acionamento/.test(n) ? "acessorio-wc" : "sanita");
+    return R("Canalização", "Louças e torneiras", /placa de acionamento/.test(n) ? "acessorio-wc" : /bide/.test(n) ? "bide" : "sanita");
   }
   // as misturadoras monocomando são de cozinha: ficam com os lava-loiças (a escolha não mexe nas louças da casa de banho)
   if (cat === "torneiras & misturadoras") return R("Canalização", /misturadora/.test(sub) ? "Lava-loiças e torneiras de cozinha" : "Louças e torneiras", "torneira");
@@ -711,7 +712,7 @@ function servicoDoProduto(p, svcPorSku, svcPorNome) {
     return S("MOIRKENNAXXL");
   }
   if (cat === "loicas sanitarias") {
-    if (/sanita/.test(sub)) return /smart|wish|eletric/.test(n) ? S("MOISE") : /susp/.test(n) ? S("MOISSUSP") : S("MOISBTW");
+    if (/\bsanitas?\b/.test(sub)) return /smart|wish|eletric/.test(n) ? S("MOISE") : /susp/.test(n) ? S("MOISSUSP") : S("MOISBTW");
     if (/bide/.test(sub)) return /susp/.test(n) ? S("MOIBSUSP") : S("MOIBBTW");
     if (/lavatorio/.test(sub)) return S("MOIL");
     return null; // estruturas e placas de acionamento: entram na instalação da sanita suspensa

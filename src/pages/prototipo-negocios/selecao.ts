@@ -152,8 +152,9 @@ export function ordenarParaTroca(produtos: Produto[], objeto: string | null | un
   if (!partes.length) return produtos;
   const baldes: Produto[][] = partes.map(() => []), resto: Produto[] = [];
   for (const p of produtos) {
-    const t = normal(`${p.n} ${p.sub ?? ""} ${categoriaFiltro(p, arvore)}`).replace(/s\b/g, "");
-    const i = partes.findIndex((ws) => ws.every((w) => t.includes(w)));
+    // palavras inteiras: "sanitários" não responde a "a sanita"
+    const t = new Set(normal(`${p.n} ${p.sub ?? ""} ${categoriaFiltro(p, arvore)}`).replace(/s\b/g, "").split(/[^a-z0-9]+/));
+    const i = partes.findIndex((ws) => ws.every((w) => t.has(w)));
     (i >= 0 ? baldes[i] : resto).push(p);
   }
   const out: Produto[] = [];
@@ -230,10 +231,10 @@ export function trocaResolvida(o: Pick<Obrigacao, "pergunta">, escolhidos: { n: 
   if (!escolhidos.length) return false;
   const obj = objetoDaPergunta(o.pergunta);
   if (!obj) return true;
-  const txt = (p: { n: string; sub?: string }) => normal(p.n + " " + (p.sub ?? "")).replace(/s\b/g, "");
+  const txt = (p: { n: string; sub?: string }) => new Set(normal(p.n + " " + (p.sub ?? "")).replace(/s\b/g, "").split(/[^a-z0-9]+/));
   const partes = obj.comArtigo.split(/\s+e\s+/).map((x) => palavrasDe(x).map((w) => w.replace(/s$/, ""))).filter((w) => w.length);
   return partes.every((ws) => {
-    const bate = (p: { n: string; sub?: string }) => ws.every((w) => txt(p).includes(w));
+    const bate = (p: { n: string; sub?: string }) => { const t = txt(p); return ws.every((w) => t.has(w)); };
     return !doRamo.some(bate) || escolhidos.some(bate);
   });
 }
