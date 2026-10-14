@@ -30,6 +30,8 @@ export interface ProdVisita {
   /** O serviço que o produto traz e o fator (quantidade do serviço = q × fator). */
   svc?: SvcId;
   fator?: number;
+  /** O preço de venda real por unidade (do Catálogo, quando o tem): manda sobre a margem. */
+  pvp?: number;
 }
 
 /* ------------------------------------------------------------------ o Catálogo ligado */
@@ -172,6 +174,7 @@ export function fotografia(p: Produto, q: number, cliente = false): ProdVisita {
   const v: ProdVisita = { id: p.id, n: p.n, un: p.un, custo: p.custo, q, no: p.no };
   if (cliente) v.cliente = true;
   if (p.servico) { v.svc = p.servico; v.fator = p.fatorServico ?? 1; }
+  if (p.pvp != null && p.pvp > 0) v.pvp = p.pvp;
   return v;
 }
 /** Junta (ou substitui) um produto na lista. */
@@ -186,7 +189,9 @@ export const marcarCliente = (prod: ProdVisita[], id: string, cliente: boolean):
 /* ------------------------------------------------------------------ no orçamento */
 /** O texto de um produto numa linha: "Sanita suspensa com estrutura" ou "Pavimento cerâmico 60×60 · 6 m²". */
 export const textoProduto = (p: ProdVisita) => (p.q === 1 && p.un === "un" ? p.n : `${p.n} · ${String(p.q).replace(".", ",")} ${p.un}`);
-export const precoProduto = (p: ProdVisita) => r2((p.custo * p.q) / (1 - MARGEM_PROD));
+export const precoProduto = (p: ProdVisita) => (p.pvp != null ? r2(p.pvp * p.q) : r2((p.custo * p.q) / (1 - MARGEM_PROD)));
+/** O preço de venda por unidade de um produto do Catálogo: o PVP real, senão o custo com a margem. */
+export const precoUnitario = (p: { custo: number; pvp?: number }) => (p.pvp != null && p.pvp > 0 ? p.pvp : r2(p.custo / (1 - MARGEM_PROD)));
 
 /** As linhas de materiais dos produtos da visita: "Produto · …" (com custo e preço) ou "Fornecido pelo cliente · …" (a zero). */
 export function linhasDosProdutos(prod: ProdVisita[]): LinhaOrc[] {
