@@ -196,6 +196,23 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
     if (!d) return { success: false, message: "deal_id não encontrado nesta organização." };
   }
 
+  // Quadros de férias exigem um colaborador: sem user_id o item não ficaria ligado a ninguém.
+  if (!args.assigned_to) {
+    const { data: boardInfo, error: boardErr } = await supabase
+      .from("schedule_boards")
+      .select("board_type")
+      .eq("id", boardId)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (boardErr) throw boardErr;
+    if (boardInfo?.board_type === "time_off") {
+      return {
+        success: false,
+        message: "O quadro de destino é um quadro de férias: indica o colaborador (assigned_to, UUID do utilizador) para criar o item.",
+      };
+    }
+  }
+
   const metadata: Record<string, any> = {};
   if (args.item_type) metadata.item_type = args.item_type;
 

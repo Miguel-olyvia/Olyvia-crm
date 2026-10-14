@@ -23,6 +23,7 @@ import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
 import { haversineKm } from "../_shared/distance.ts";
 import { buildLunchBreakConfig } from "../_shared/travelFeasibility.ts";
 import { zonedDayBounds, zonedLocalToIso } from "../_shared/zonedTime.ts";
+import { findUserIdsOnTimeOff } from "../_shared/timeOffAvailability.ts";
 import {
   constrainAiSuggestion,
   isAssigneeSlotFeasible,
@@ -304,21 +305,51 @@ serve(async (req) => {
       }
     });
 
-    const uniqueAssignees = allAssignees.filter(a => a.user_id);
+    const allCandidates = allAssignees.filter(a => a.user_id);
+
+    // Limites do dia pedido (hora local da organizacao).
+    const { startIso: dateStart, endIso: dateEnd } = zonedDayBounds(requested_date, orgTimezone);
+
+    const requestedStart = requested_time
+      ? zonedLocalToIso(requested_date, requested_time, orgTimezone)
+      : null;
+    const requestedEnd = requestedStart 
+      ? new Date(new Date(requestedStart).getTime() + duration_minutes * 60000).toISOString()
+      : null;
+    const requestedRange = requestedStart && requestedEnd
+      ? { startIso: requestedStart, endIso: requestedEnd }
+      : null;
+
+    // Quem tem ferias/ausencia (pendente ou aprovada) a cobrir o dia sai da
+    // lista ANTES de contar carga e de montar o prompt da IA. So tira esses
+    // candidatos: o dia continua livre para os outros. Uma so consulta para
+    // todos, com service role e organization_id explicito (a RLS de quem pede
+    // pode esconder as ausencias dos colegas).
+    const onTimeOffUserIds = await findUserIdsOnTimeOff(
+      supabaseAdmin,
+      organization_id,
+      allCandidates.map(a => a.user_id as string),
+      dateStart,
+      dateEnd,
+      requestedRange,
+    );
+    const uniqueAssignees = allCandidates.filter(a => !onTimeOffUserIds.has(a.user_id as string));
 
     if (uniqueAssignees.length === 0) {
       return new Response(
         JSON.stringify({ 
           suggestions: [],
-          message: "Nenhum colaborador disponível encontrado nesta organização" 
+          message: allCandidates.length > 0
+            ? (requestedRange
+              ? "Todos os colaboradores estão ausentes neste dia ou nesta hora"
+              : "Todos os colaboradores têm ausência registada neste dia")
+            : "Nenhum colaborador disponível encontrado nesta organização"
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // 3. Get existing schedule items for the requested date
-    const { startIso: dateStart, endIso: dateEnd } = zonedDayBounds(requested_date, orgTimezone);
-
     const requestedDateObj = new Date(requested_date);
     const dayOfWeek = requestedDateObj.getDay();
     const weekStart = new Date(requestedDateObj);
@@ -404,15 +435,6 @@ serve(async (req) => {
     }
 
     // 5. Build context for each assignee
-    const requestedStart = requested_time
-      ? zonedLocalToIso(requested_date, requested_time, orgTimezone)
-      : null;
-    const requestedEnd = requestedStart 
-      ? new Date(new Date(requestedStart).getTime() + duration_minutes * 60000).toISOString()
-      : null;
-    const requestedRange = requestedStart && requestedEnd
-      ? { startIso: requestedStart, endIso: requestedEnd }
-      : null;
     const feasibilityCtx: AssigneeFeasibilityContext = {
       date: requested_date,
       timezone: orgTimezone,
