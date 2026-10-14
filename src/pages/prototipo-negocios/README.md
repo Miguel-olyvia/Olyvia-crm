@@ -115,7 +115,8 @@ No menu lateral, junto a "Comparar com o aspeto atual", e no menu "Mais" do tele
 | `DocsCliente.tsx` | A proposta, o contrato e a fatura como documentos, com o IVA a **6% na mão de obra e 23% nos materiais** (`totais()`). Também tem a partilha: link, email, WhatsApp, ver como o cliente e imprimir. |
 | `FasesSimples.tsx` | As fases Financeiro e Obra. |
 | `OperacoesSimples.tsx` | As Operações (o plano da obra) e o Inventário. |
-| `OutrosSimples.tsx` | Catálogo, Clientes, Marketing e Definições. |
+| `OutrosSimples.tsx` | Clientes, Marketing e Definições; o Catálogo passa para o `CatalogoV1.tsx` (14/10/2026). |
+| `CatalogoV1.tsx`, `FichaServicoSimples.tsx`, `fichaServico.ts`, `fichaNav.ts` | O Catálogo do V1 em cinco separadores e a ficha do serviço numa página (ver [Ficha do serviço no V1](#ficha-do-serviço-no-v1-14102026)). |
 | `CamposEditor.tsx` | O editor dos campos à medida, em Definições → Campos e formulários. |
 | `Localizacao.tsx` | A morada pela localização do dispositivo. Usa o OpenStreetMap/Nominatim. |
 | `pecas.tsx` | As peças comuns: `Ctx`, `IconeFase`, `Chip`, `Progresso`, `fazer`, e outras. |
@@ -533,3 +534,24 @@ A estimativa de materiais do modelo (`LINHAS[…].mat` no `motor.ts`) está divi
 - Os **produtos escolhidos** (também os fornecidos pelo cliente) descem só a parte do seu ramo, até zero. Os produtos fora do modelo (espelho, toalheiro…) **não descem nada**, porque têm linha própria.
 - O preço desce na mesma proporção do custo. Se não sobrar nada, a linha sai.
 - Os pesos são um exemplo, a confirmar com a Mudelar.
+
+## Ficha do serviço no V1 (14/10/2026)
+
+Na versão **Atual** (aspeto simples), "Catálogo e custos" é o `CatalogoV1.tsx`. Usa o mesmo modelo da V2 (`v2/custosModelo.ts`, `v2/catalogoModelo.ts` e as suas stores), por isso o orçamento tira dali o mesmo custo. A V2 continua com o `CatalogoV2`.
+- **Separadores:** Serviços · Produtos · Equipamentos · Consumíveis · Técnicos, cada um com uma lista simples e uma pesquisa. Para aguentar o catálogo real (cerca de 360 serviços e 2.200 produtos): os serviços aparecem por ofício, 8 de cada um, com "Mostrar mais"; os produtos e os consumíveis aparecem 40 de cada vez. As contas ficam em `useMemo`.
+- **A ficha** abre no lugar da lista (não é um modal), com "Voltar ao Catálogo", que devolve o foco à linha. Também se abre a partir da linha do orçamento ("Abrir a ficha do serviço", `fichaNav.ts`). Tem estas secções:
+  - **Medida:** a unidade e de onde vem a quantidade na visita (pav, par, pts, pcs, ou "O comercial escreve"), com um exemplo.
+  - **Quem faz:** os passos, o tipo de técnico e as h/un.
+  - **Equipamentos:** a conta do €/h, (compra − residual) ÷ vida + manutenção ÷ uso.
+  - **Consumíveis:** cada um tem o interruptor "Opcional". O opcional fica fora do custo, e a ficha diz quanto custaria com ele.
+  - **Produtos ligados:** os produtos que trazem o serviço e se a visita obriga a escolher um.
+  - **Custo e preço:** as partes, o modo (tabela ou custo + margem) e um só primário, **"Guardar o preço"**.
+- **Campos opcionais do contrato** (`contrato-catalogo-14-10.md`), todos com o caso em falta tratado:
+  - `ReceitaV2.medida`: em falta, usa a do modelo (`LINHAS`) ou a que sai da unidade (`medidaDe`).
+  - `UsoCons.opcional`: `custoReceita` deixa-os em `consOpc`, salvo com `{ opcionais: true }`.
+  - `Catalogo.icone`: em falta, o ícone sai do nome e depois do ofício (`iconeDoServico`).
+  - `Produto.sku/pvp/img/desc/sub`: sem `pvp`, o preço é o custo com a margem-alvo; sem `img`, usa-se a ilustração `generico`.
+- `ilustracoes.tsx` neste ramo é **um esboço** com a API do contrato. Na junção fica a versão do agente NECESSIDADES.
+- **Testes:**
+  - `fichaServico.test.ts`: o custo com e sem opcionais, a depreciação, a medida, o ícone, os produtos e os consumíveis.
+  - `CatalogoV1.test.tsx`: os separadores, 2.200 produtos com "Mostrar mais" e a pesquisa por SKU, a ficha com as seis secções, o "Opcional" a passar para o motor e "Guardar o preço".
