@@ -1,7 +1,7 @@
 /**
- * «Atribuir equipamento» (painel lateral): tipo, descrição, valor de aquisição e data de entrega. Na ficha a pessoa já vem
- * escolhida; no módulo «Custos» escolhe-se aqui. O valor amortiza-se por 36 meses a partir do mês da entrega e passa logo a
- * pesar no custo da pessoa e nos totais da organização. Tudo em memória.
+ * «Atribuir equipamento» (painel lateral): tipo, descrição, valor, data de entrega e «Como conta» (pago de uma vez, repartido
+ * por N meses — 36 por omissão, o do fluxo 11 — ou todos os meses). Na ficha a pessoa já vem escolhida; no módulo «Custos»
+ * escolhe-se aqui. Passa logo a contar no custo da pessoa e nos totais da organização. Tudo em memória.
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,12 @@ import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { atribuirEquipamento } from "@/components/rh-exemplo/dados/lojaCusto";
 import { CampoSelect, CampoTexto } from "@/components/rh-exemplo/form/Campos";
-import { equipamentoPorMes, mesDaData } from "@/components/rh-exemplo/lib/custo";
+import { ehErroConta } from "@/components/rh-exemplo/lib/comoConta";
 import { TIPOS_EQUIPAMENTO, type ErroEquipamento, type TipoEquipamento } from "@/components/rh-exemplo/lib/equipamentos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { euros, nomeDoMes } from "./formato";
+import { ComoContaCampos } from "./ComoContaCampos";
+import { contaDaEscolha, escolhaDe, type EscolhaConta } from "./escolhaConta";
 
 export interface PessoaEscolhivel {
   id: string;
@@ -35,18 +36,19 @@ interface Props {
 const numero = (texto: string): number => Number(texto.trim().replace(",", "."));
 
 function Formulario({ pessoaId, pessoas, autor, aoFechar, aoAtribuir }: Omit<Props, "aberto">) {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const [quem, setQuem] = useState(pessoaId ?? "");
   const [tipo, setTipo] = useState<TipoEquipamento>("portatil");
   const [descricao, setDescricao] = useState("");
   const [valor, setValor] = useState("");
   const [entrega, setEntrega] = useState(hojeIso());
+  const [escolha, setEscolha] = useState<EscolhaConta>(() => escolhaDe("repartido"));
   const [erro, setErro] = useState<ErroEquipamento | null>(null);
 
   const euro = numero(valor);
-  const valido = Number.isFinite(euro) && euro > 0;
   const guardar = () => {
-    const resultado = atribuirEquipamento({ pessoaId: quem, tipo, descricao, valor: Number.isFinite(euro) ? euro : 0, entrega, autor });
+    const conta = contaDaEscolha(escolha, entrega);
+    const resultado = atribuirEquipamento({ pessoaId: quem, tipo, descricao, valor: Number.isFinite(euro) ? euro : 0, entrega, autor, conta });
     setErro(resultado.erro);
     if (resultado.erro === null) {
       aoAtribuir?.(quem);
@@ -67,15 +69,16 @@ function Formulario({ pessoaId, pessoas, autor, aoFechar, aoAtribuir }: Omit<Pro
         opcoes={TIPOS_EQUIPAMENTO.map((x) => ({ value: x, label: t(`rhCustos.eq.tipo.${x}`) }))}
       />
       <CampoTexto id="rhCustos-eq-descricao" label={t("rhCustos.eq.descricao")} valor={descricao} onChange={setDescricao} obrigatorio />
-      <CampoTexto id="rhCustos-eq-valor" label={t("rhCustos.eq.campoValor")} tipo="number" min={0} step="0.01" valor={valor} onChange={setValor} obrigatorio />
+      <CampoTexto
+        id="rhCustos-eq-valor" label={t(escolha.modo === "todosMeses" ? "rhCustos.eq.campoValorMensal" : "rhCustos.eq.campoValor")}
+        tipo="number" min={0} step="0.01" valor={valor} onChange={setValor} obrigatorio
+      />
       <CampoTexto id="rhCustos-eq-entrega" label={t("rhCustos.eq.campoEntrega")} tipo="date" valor={entrega} onChange={setEntrega} obrigatorio />
-      <p role="status" className="rounded-md bg-muted/50 p-3 text-sm tabular-nums">
-        {t("rhCustos.eq.previa", {
-          valor: euros(valido ? equipamentoPorMes(euro) : 0, "—"),
-          mes: entrega ? nomeDoMes(mesDaData(entrega), language) : "—",
-        })}
-      </p>
-      {erro && <p role="alert" className="text-sm font-medium text-destructive">{t(`rhCustos.eq.erro.${erro}`)}</p>}
+      <ComoContaCampos
+        idBase="rhCustos-eq-conta" escolha={escolha} aoMudar={(p) => setEscolha((e) => ({ ...e, ...p }))}
+        valor={euro} data={entrega} comDevolucao erro={ehErroConta(erro) ? erro : null}
+      />
+      {erro && !ehErroConta(erro) && <p role="alert" className="text-sm font-medium text-destructive">{t(`rhCustos.eq.erro.${erro}`)}</p>}
       <SheetFooter className="gap-2 sm:gap-2">
         <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("common.cancel")}</Button>
         <Button type="submit" className={cn("min-h-11", FOCO)}>{t("rhCustos.eq.confirmarAtribuir")}</Button>

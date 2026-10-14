@@ -1,6 +1,6 @@
 /**
- * «Devolver» um equipamento: a data e o estado em que volta. A amortização pára depois do mês da devolução e o equipamento
- * fica na lista como devolvido, com a data e o estado. Só memória.
+ * «Devolver» um equipamento: a data e o estado em que volta. Deixa de contar a partir do mês seguinte
+ * ao da devolução e fica na lista como devolvido, com a data e o estado. Só memória.
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";

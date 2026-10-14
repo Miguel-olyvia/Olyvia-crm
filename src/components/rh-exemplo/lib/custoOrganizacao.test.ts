@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { contaRepartida, contaUmaVez } from "./comoConta";
 import type { AvulsoCusto } from "./custoMes";
 import {
   composicaoDoCusto, custoDaPessoaNoMes, filtrarLinhas, montarLinhaCusto, ordenarLinhas, SEM_FILTRO, totaisDaOrganizacao,
@@ -12,12 +13,12 @@ const pessoa = (parcial: Partial<PessoaParaCusto> = {}): PessoaParaCusto => ({
 });
 
 const km: AvulsoCusto = {
-  id: "a1", pessoaId: "p1", tipo: "km", data: "2026-09-09", mesContagem: "2026-09", dataReal: null, descricao: "Visita", quantidade: 120,
+  id: "a1", pessoaId: "p1", tipo: "km", data: "2026-09-09", conta: contaUmaVez(), descricao: "Visita", quantidade: 120,
   valorUnitario: 0.4, valor: 48, autor: "RH", criadoEm: "2026-09-09T10:00:00Z", anulado: null,
 };
 const ajuda: AvulsoCusto = { ...km, id: "a2", tipo: "ajuda", quantidade: 2, valorUnitario: 25, valor: 50 };
 const portatil: EquipamentoPessoa = {
-  id: "e1", pessoaId: "p1", tipo: "portatil", descricao: "Portátil", valor: 900, entrega: "2026-01-15", estado: "atribuido",
+  id: "e1", pessoaId: "p1", tipo: "portatil", descricao: "Portátil", valor: 900, entrega: "2026-01-15", conta: contaRepartida(), estado: "atribuido",
   devolucao: null, estadoDevolucao: null, autor: "RH",
 };
 

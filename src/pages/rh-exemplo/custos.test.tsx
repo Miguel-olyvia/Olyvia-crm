@@ -1,7 +1,7 @@
 // Arranque do módulo «Custos» do RH de exemplo: mostra as pessoas e os totais, ordena e filtra, abre a ficha já no separador
 // Custo e atribuir equipamento muda o custo da pessoa e o módulo. Tudo em memória, sem base. Data fixa (14/10/2026).
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { repor } from "@/components/rh-exemplo/dados/loja";
@@ -9,6 +9,7 @@ import { lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
+import { valorDoEquipamentoNoMes, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import RhCustos from "./RhCustos";
 
@@ -153,7 +154,7 @@ describe("atribuir equipamento e registar valor avulso, em memória", () => {
     expect(within(painel).getByRole("alert")).toHaveTextContent("O valor tem de ser maior que 0.");
     fireEvent.change(within(painel).getByLabelText(/Valor de aquisição/), { target: { value: "720" } });
     fireEvent.change(within(painel).getByLabelText(/Data de entrega/), { target: { value: "2026-09-02" } });
-    expect(within(painel).getByRole("status")).toHaveTextContent(/20,00.* por mês, durante 36 meses a partir de setembro de 2026/);
+    expect(within(painel).getByRole("status")).toHaveTextContent(/720,00.* repartidos por 36 meses = 20,00.* por mês, de setembro de 2026 até à devolução/);
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
     const ficha = screen.getByRole("dialog");
     expect(within(ficha).getByText("Tablet de loja")).toBeInTheDocument();
@@ -194,7 +195,7 @@ describe("atribuir equipamento e registar valor avulso, em memória", () => {
     expect(screen.getByText("Equipamento atribuído a Hugo Teixeira.")).toBeInTheDocument();
   });
 
-  it("registar valor avulso no topo escolhe a pessoa, regista e o mês passa a ser aquele em que o valor conta", () => {
+  it("registar valor avulso no topo escolhe a pessoa, regista e conta no mês visto (por omissão), sem saltar para outro", () => {
     noRouter();
     fireEvent.click(screen.getByRole("button", { name: "Registar valor avulso" }));
     const dialogo = screen.getByRole("dialog");
@@ -206,8 +207,9 @@ describe("atribuir equipamento e registar valor avulso, em memória", () => {
     fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "50" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
     expect(lerCusto().avulsos.at(-1)).toMatchObject({ pessoaId: "p-ines", valor: 20, descricao: "Visita a fornecedor" });
-    expect(screen.getByText(/Valor registado\. Conta em outubro de 2026\./)).toBeInTheDocument();
-    expect(screen.getByLabelText("Mês")).toHaveValue("2026-10");
+    expect(lerCusto().avulsos.at(-1)).toMatchObject({ data: "2026-09-01", conta: { modo: "umaVez" } });
+    expect(screen.getByText(/Valor registado\. Conta em setembro de 2026\./)).toBeInTheDocument();
+    expect(screen.getByLabelText("Mês")).toHaveValue("2026-09");
   });
 
   it("o seletor de mês e «Hoje» mudam o mês mostrado", () => {
@@ -217,5 +219,134 @@ describe("atribuir equipamento e registar valor avulso, em memória", () => {
     fireEvent.click(screen.getByRole("button", { name: "Hoje" }));
     expect(screen.getByLabelText("Mês")).toHaveValue("2026-10");
     expect(screen.getByRole("button", { name: "Hoje" })).toBeDisabled();
+  });
+});
+
+/** O valor em euros de um texto como «1 234,50 €» (os totais do cabeçalho). */
+const euroDe = (texto: string): number => Number(texto.replace(/[^\d,-]/g, "").replace(",", "."));
+const irParaMes = (mes: string) => fireEvent.change(screen.getByLabelText("Mês"), { target: { value: mes } });
+
+function atribuirNoTopo(valor: string, entrega: string): HTMLElement {
+  fireEvent.click(screen.getByRole("button", { name: "Atribuir equipamento" }));
+  const painel = screen.getByRole("dialog");
+  fireEvent.keyDown(within(painel).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
+  fireEvent.click(screen.getByRole("option", { name: "Hugo Teixeira" }));
+  fireEvent.change(within(painel).getByLabelText(/Descrição/), { target: { value: "Colete de teste" } });
+  fireEvent.change(within(painel).getByLabelText(/Valor de aquisição/), { target: { value: valor } });
+  fireEvent.change(within(painel).getByLabelText(/Data de entrega/), { target: { value: entrega } });
+  return painel;
+}
+
+describe("«Como conta» no painel de atribuir e na ficha", () => {
+  it("oferece três opções em linguagem simples, repartido por 36 meses por omissão, e a ajuda abre com texto visível", () => {
+    noRouter();
+    fireEvent.click(screen.getByRole("button", { name: "Atribuir equipamento" }));
+    const painel = screen.getByRole("dialog");
+    const grupo = within(painel).getByRole("radiogroup", { name: "Como conta" });
+    const opcoes = within(grupo).getAllByRole("radio");
+    expect(opcoes).toHaveLength(3);
+    expect(within(grupo).getByRole("radio", { name: /Pago de uma vez/ })).toHaveAttribute("aria-checked", "false");
+    expect(within(grupo).getByRole("radio", { name: /Repartido por N meses/ })).toHaveAttribute("aria-checked", "true");
+    expect(within(grupo).getByRole("radio", { name: /Todos os meses/ })).toBeInTheDocument();
+    expect(within(painel).getByLabelText(/Número de meses/)).toHaveValue(36);
+    const ajuda = within(painel).getByRole("button", { name: "O que quer dizer «repartido»?" });
+    expect(ajuda).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(ajuda);
+    expect(ajuda).toHaveAttribute("aria-expanded", "true");
+    expect(within(painel).getByText(/um portátil de 900 € repartido por 36 meses conta 25 € por mês/)).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/amortiza/i);
+  });
+
+  it("as setas mudam de opção, e escolher outra troca os campos e a frase de efeito", async () => {
+    noRouter();
+    atribuirNoTopo("360", "2026-09-10");
+    const painel = screen.getByRole("dialog");
+    const repartido = within(painel).getByRole("radio", { name: /Repartido por N meses/ });
+    repartido.focus();
+    fireEvent.keyDown(repartido, { key: "ArrowDown" });
+    await waitFor(() => expect(within(painel).getByRole("radio", { name: /Todos os meses/ })).toHaveAttribute("aria-checked", "true"));
+    expect(within(painel).getByLabelText("Conta desde o mês")).toHaveValue("2026-09");
+    expect(within(painel).getByLabelText(/Valor por mês/)).toBeInTheDocument();
+    expect(within(painel).getByRole("status")).toHaveTextContent(/360,00.* por mês desde setembro de 2026 até à devolução/);
+    fireEvent.click(within(painel).getByRole("radio", { name: /Pago de uma vez/ }));
+    expect(within(painel).getByRole("status")).toHaveTextContent(/360,00.* contam todos em setembro de 2026\./);
+    expect(within(painel).queryByLabelText(/Número de meses/)).not.toBeInTheDocument();
+  });
+
+  it("a frase de efeito atualiza com o número de meses e com a data de entrega", () => {
+    noRouter();
+    const painel = atribuirNoTopo("900", "2026-11-05");
+    expect(within(painel).getByRole("status")).toHaveTextContent(/900,00.* repartidos por 36 meses = 25,00.* por mês, de novembro de 2026/);
+    fireEvent.change(within(painel).getByLabelText(/Número de meses/), { target: { value: "12" } });
+    expect(within(painel).getByRole("status")).toHaveTextContent(/repartidos por 12 meses = 75,00.* por mês/);
+    fireEvent.change(within(painel).getByLabelText(/Data de entrega/), { target: { value: "2027-01-10" } });
+    expect(within(painel).getByRole("status")).toHaveTextContent(/de janeiro de 2027/);
+    fireEvent.change(within(painel).getByLabelText(/Número de meses/), { target: { value: "0" } });
+    expect(within(painel).getByRole("status")).toHaveTextContent("Preenche o valor e a data para ver como conta.");
+    fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
+    expect(within(painel).getByRole("alert")).toHaveTextContent("Indica um número inteiro de meses entre 1 e 120.");
+    expect(lerCusto().equipamentos.some((e) => e.descricao === "Colete de teste")).toBe(false);
+  });
+
+  it("pago de uma vez aparece só no mês da entrega; mudar para repartido por 12 aparece nos 12 meses", () => {
+    noRouter();
+    const set = totalDoCabecalho("equipamentos");
+    irParaMes("2026-10");
+    const out = totalDoCabecalho("equipamentos");
+    irParaMes("2026-09");
+    const painel = atribuirNoTopo("360", "2026-09-10");
+    fireEvent.click(within(painel).getByRole("radio", { name: /Pago de uma vez/ }));
+    fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
+    expect(lerCusto().equipamentos.at(-1)).toMatchObject({ descricao: "Colete de teste", conta: { modo: "umaVez" } });
+    expect(euroDe(totalDoCabecalho("equipamentos")) - euroDe(set)).toBeCloseTo(360, 2);
+    irParaMes("2026-10");
+    expect(totalDoCabecalho("equipamentos")).toBe(out);
+
+    fireEvent.click(within(linhaDe("Hugo Teixeira")).getByRole("button", { name: /Abrir a ficha de Hugo Teixeira/ }));
+    const ficha = screen.getByRole("dialog");
+    fireEvent.click(within(ficha).getByRole("button", { name: "Alterar como conta de Colete de teste" }));
+    const editar = screen.getAllByRole("dialog").at(-1) as HTMLElement;
+    fireEvent.click(within(editar).getByRole("radio", { name: /Repartido por N meses/ }));
+    fireEvent.change(within(editar).getByLabelText(/Número de meses/), { target: { value: "12" } });
+    expect(within(editar).getByRole("status")).toHaveTextContent(/360,00.* repartidos por 12 meses = 30,00.* por mês/);
+    fireEvent.click(within(editar).getByRole("button", { name: "Guardar" }));
+    expect(lerCusto().equipamentos.at(-1)?.conta).toMatchObject({ modo: "repartido", meses: 12 });
+    expect(euroDe(totalDoCabecalho("equipamentos")) - euroDe(out)).toBeCloseTo(30, 2);
+    const colete = lerCusto().equipamentos.at(-1) as EquipamentoPessoa;
+    expect(["2026-09", "2026-10", "2027-08", "2027-09"].map((m) => valorDoEquipamentoNoMes(colete, m))).toEqual([30, 30, 30, 0]);
+  });
+
+  it("a ficha mostra Como conta, o que conta no mês, o que já contou e o que falta; o módulo mostra-o na linha aberta", () => {
+    noRouter();
+    fireEvent.click(within(linhaDe("Hugo Teixeira")).getByRole("button", { name: /Ver composição de Hugo Teixeira/ }));
+    const itens = screen.getByRole("list", { name: /O que conta em setembro de 2026/ });
+    expect(itens).toHaveTextContent(/Como conta: Todos os meses, desde/);
+    expect(itens).toHaveTextContent(/Como conta: Repartido por 36 meses/);
+    fireEvent.click(within(linhaDe("Hugo Teixeira")).getByRole("button", { name: /Abrir a ficha de Hugo Teixeira/ }));
+    const tabela = within(screen.getByRole("dialog")).getByRole("table", { name: "Equipamentos atribuídos" });
+    const cabecalhos = within(tabela).getAllByRole("columnheader").map((c) => c.textContent);
+    for (const nome of ["Valor de aquisição", "Como conta", "Conta neste mês", "Já contou", "Falta contar"]) expect(cabecalhos).toContain(nome);
+    expect(within(tabela).getByText(/389,00.* por mês/)).toBeInTheDocument();
+  });
+
+  it("registar um avulso pede a data, por omissão no mês visto, e repartido por 2 meses conta em dois meses", () => {
+    noRouter();
+    irParaMes("2026-08");
+    fireEvent.click(screen.getByRole("button", { name: "Registar valor avulso" }));
+    const dialogo = screen.getByRole("dialog");
+    expect(within(dialogo).getByLabelText(/Data/)).toHaveValue("2026-08-01");
+    fireEvent.change(within(dialogo).getByLabelText(/Data/), { target: { value: "" } });
+    fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("option", { name: "Inês Cardoso" }));
+    fireEvent.change(within(dialogo).getByLabelText("Descrição"), { target: { value: "Formação" } });
+    fireEvent.change(within(dialogo).getByLabelText("Quilómetros"), { target: { value: "100" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
+    expect(within(dialogo).getByRole("alert")).toHaveTextContent("Indica a data (o valor conta no mês dela).");
+    fireEvent.change(within(dialogo).getByLabelText(/Data/), { target: { value: "2026-08-12" } });
+    fireEvent.click(within(dialogo).getByRole("radio", { name: /Repartido por N meses/ }));
+    fireEvent.change(within(dialogo).getByLabelText(/Número de meses/), { target: { value: "2" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Registar valor" }));
+    expect(lerCusto().avulsos.at(-1)).toMatchObject({ valor: 40, conta: { modo: "repartido", meses: 2 } });
+    expect(screen.getByLabelText("Mês")).toHaveValue("2026-08");
   });
 });

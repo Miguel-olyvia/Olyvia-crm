@@ -1,9 +1,20 @@
 /**
  * Os equipamentos atribuídos a uma pessoa (fluxo 11, separador Custo): telemóvel, portátil, viatura, fardamento, ferramentas.
- * Contas puras, sem dados de lado nenhum. O valor de aquisição amortiza-se por 36 meses (valor / 36 por mês), do mês da
- * entrega, enquanto o equipamento está atribuído; ao devolver, a amortização pára a partir do mês da devolução (exclusive).
+ * Contas puras, sem dados de lado nenhum. Cada equipamento tem o seu «como conta» (`comoConta.ts`): pago de uma vez, repartido
+ * por N meses (por omissão 36, o do fluxo 11: portátil de 900 € / 36 = 25 € por mês) ou todos os meses. Conta do mês da
+ * entrega e, ao devolver, deixa de contar a partir do mês seguinte ao da devolução.
  */
-import { MESES_EQUIPAMENTO, arredondar, equipamentoDoMes, equipamentoPorMes, mesDaData, type MesIso } from "./custo";
+import {
+  contaRepartida,
+  situacaoDoItem,
+  validarConta,
+  valorNoMes,
+  type ContaItem,
+  type ErroConta,
+  type ItemParaConta,
+  type SituacaoConta,
+} from "./comoConta";
+import type { MesIso } from "./custo";
 
 export const TIPOS_EQUIPAMENTO = ["telemovel", "portatil", "viatura", "fardamento", "ferramentas", "outro"] as const;
 export type TipoEquipamento = (typeof TIPOS_EQUIPAMENTO)[number];
@@ -16,65 +27,48 @@ export interface EquipamentoPessoa {
   pessoaId: string;
   tipo: TipoEquipamento;
   descricao: string;
-  /** Valor de aquisição, em euros. */
+  /** Valor de aquisição, em euros (no «todos os meses», o valor de cada mês). */
   valor: number;
   /** Data de entrega (AAAA-MM-DD). */
   entrega: string;
+  /** Como conta: de uma vez, repartido por N meses ou todos os meses. */
+  conta: ContaItem;
   estado: "atribuido" | "devolvido";
   devolucao: string | null;
   estadoDevolucao: EstadoDevolucao | null;
   autor: string;
 }
 
-export interface SituacaoEquipamento {
-  /** O que pesa no custo deste mês (0 fora dos 36 meses, antes da entrega ou depois da devolução). */
-  amortizacaoMes: number;
-  /** Meses já amortizados, até ao mês pedido inclusive (no máximo 36). */
-  mesesDecorridos: number;
-  /** Meses que faltam amortizar (0 se já está tudo amortizado ou se foi devolvido). */
-  mesesRestantes: number;
-  /** Valor de aquisição que ainda falta amortizar (0 se tudo amortizado ou devolvido). */
-  porAmortizar: number;
-  totalmenteAmortizado: boolean;
-}
+/** O equipamento visto como um valor que conta (para `comoConta.ts`). */
+export const itemDoEquipamento = (e: Pick<EquipamentoPessoa, "valor" | "entrega" | "conta" | "devolucao">): ItemParaConta => ({
+  valor: e.valor,
+  data: e.entrega,
+  conta: e.conta,
+  devolucao: e.devolucao,
+});
 
-const indice = (mes: MesIso): number => {
-  const [ano, m] = mes.split("-").map(Number);
-  return ano * 12 + (m - 1);
-};
+/** O estado do equipamento no mês `mes` («AAAA-MM»): o que conta no mês, o que já contou e o que falta. */
+export const situacaoDoEquipamento = (e: EquipamentoPessoa, mes: MesIso): SituacaoConta => situacaoDoItem(itemDoEquipamento(e), mes);
 
-/** O estado de amortização de um equipamento no mês `mes` («AAAA-MM»). */
-export function situacaoDoEquipamento(e: EquipamentoPessoa, mes: MesIso): SituacaoEquipamento {
-  const desde = indice(mesDaData(e.entrega));
-  const ate = e.devolucao === null ? Infinity : indice(mesDaData(e.devolucao));
-  const atual = indice(mes);
-  const decorridos = Math.max(0, Math.min(MESES_EQUIPAMENTO, atual - desde + 1, ate - desde + 1));
-  const devolvido = e.estado === "devolvido" && atual >= ate;
-  const restantes = devolvido ? 0 : MESES_EQUIPAMENTO - decorridos;
-  const amortizado = arredondar((e.valor * decorridos) / MESES_EQUIPAMENTO);
-  return {
-    amortizacaoMes: equipamentoDoMes({ entrega: e.entrega, devolucao: e.devolucao }, mes) ? equipamentoPorMes(e.valor) : 0,
-    mesesDecorridos: decorridos,
-    mesesRestantes: restantes,
-    porAmortizar: devolvido ? 0 : arredondar(e.valor - amortizado),
-    totalmenteAmortizado: !devolvido && decorridos >= MESES_EQUIPAMENTO,
-  };
-}
+/** O que o equipamento conta no mês (0 fora do período, antes da entrega ou depois da devolução). */
+export const valorDoEquipamentoNoMes = (e: EquipamentoPessoa, mes: MesIso): number => valorNoMes(itemDoEquipamento(e), mes);
 
-/** Os equipamentos que pesam neste mês no custo da pessoa. */
+/** Os equipamentos que contam neste mês no custo da pessoa. */
 export const equipamentosDoMes = (lista: readonly EquipamentoPessoa[], mes: MesIso): EquipamentoPessoa[] =>
-  lista.filter((e) => equipamentoDoMes({ entrega: e.entrega, devolucao: e.devolucao }, mes));
+  lista.filter((e) => valorDoEquipamentoNoMes(e, mes) > 0);
 
-export type ErroEquipamento = "semDescricao" | "valorZero" | "semData" | "semPessoa";
+export type ErroEquipamento = "semDescricao" | "valorZero" | "semData" | "semPessoa" | ErroConta;
 export type ErroDevolucao = "semData" | "antesDaEntrega" | "semEstado";
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 
-export function validarEquipamento(e: { pessoaId: string; descricao: string; valor: number; entrega: string }): ErroEquipamento | null {
+/** Sem `conta` vale o que o documento diz: repartido por 36 meses. */
+export function validarEquipamento(e: { pessoaId: string; descricao: string; valor: number; entrega: string; conta?: ContaItem }): ErroEquipamento | null {
   if (e.pessoaId === "") return "semPessoa";
   if (e.descricao.trim() === "") return "semDescricao";
   if (!Number.isFinite(e.valor) || e.valor <= 0) return "valorZero";
-  return DATA.test(e.entrega) ? null : "semData";
+  if (!DATA.test(e.entrega)) return "semData";
+  return validarConta(e.conta ?? contaRepartida());
 }
 
 export function validarDevolucao(e: EquipamentoPessoa, data: string, estado: string): ErroDevolucao | null {

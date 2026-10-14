@@ -1,6 +1,6 @@
 /**
  * O separador «Custo» da ficha (fluxo 11): quanto custa a pessoa à empresa, no mês escolhido. Mostra o quadro do mês (a
- * retribuição é a do «Cálculo do mês»), a composição, os equipamentos que a pessoa tem (amortização por 36 meses), os valores
+ * retribuição é a do «Cálculo do mês»), a composição, os equipamentos que a pessoa tem (cada um conta como foi escolhido), os valores
  * avulsos (quilómetros e ajudas de custo) e os encargos. Só para quem vê salários; a própria pessoa não vê o custo.
  * Tudo em memória, com os dados de exemplo.
  */
@@ -31,7 +31,7 @@ export function AbaCusto({ pessoa, ctx }: AbaProps) {
         <BarraComposicao partes={custo.composicao} titulo={t("rhCustos.comp.titulo", { nome: pessoa.nome_completo })} />
       </Seccao>
       <CustoEquipamentos pessoaId={pessoa.id} pessoaNome={pessoa.nome_completo} mes={mes} autor={autor} equipamentos={custo.equipamentos} />
-      <CustoAvulsos pessoaId={pessoa.id} autor={autor} avulsos={custo.avulsos} podeGerir />
+      <CustoAvulsos pessoaId={pessoa.id} autor={autor} avulsos={custo.avulsos} mes={mes} podeGerir />
       <CustoEncargos pessoaId={pessoa.id} />
     </div>
   );

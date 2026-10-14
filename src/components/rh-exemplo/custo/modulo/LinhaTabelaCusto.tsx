@@ -12,6 +12,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { BarraComposicao } from "@/components/rh-exemplo/custo/BarraComposicao";
 import { euros } from "@/components/rh-exemplo/custo/formato";
+import { ItensDoMes } from "./ItensDoMes";
 
 const CELULA = "px-3 py-1 align-middle text-sm";
 const NUMERO = `${CELULA} text-right tabular-nums`;
@@ -108,6 +109,7 @@ export function LinhaTabelaCusto({ linha, expandida, aoAbrir, aoAlternar }: Prop
           <TableCell colSpan={10} className="px-3 py-3">
             <p className="mb-2 text-xs font-medium text-muted-foreground">{t("rhCustos.comp.titulo", { nome: linha.nome })}</p>
             <BarraComposicao partes={linha.composicao} titulo={t("rhCustos.comp.titulo", { nome: linha.nome })} />
+            <ItensDoMes pessoaId={linha.pessoaId} />
           </TableCell>
         </TableRow>
       )}

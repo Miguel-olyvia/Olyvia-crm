@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { quotaMensal } from "./comoConta";
 import {
-  MESES_EQUIPAMENTO,
   anularAvulsoErro,
   arredondar,
   custoPorHora,
   custoRepartido14em12,
   custoTotalDoMes,
   encargosDaEmpresa,
-  equipamentoDoMes,
-  equipamentoPorMes,
   horasPrevistasDoMes,
-  mesDeContagem,
+  indiceDoMes,
+  mesDaData,
   saldoBancoEmEuros,
   salarioMensal,
   somarMeses,
@@ -26,22 +25,6 @@ describe("custo: valores avulsos", () => {
     expect(valorDeAjudaDeCusto(2, 25)).toBe(50);
   });
 
-  it("equipamento dividido por 36 meses (900 / 36 = 25)", () => {
-    expect(MESES_EQUIPAMENTO).toBe(36);
-    expect(equipamentoPorMes(900)).toBe(25);
-    expect(equipamentoPorMes(1000)).toBe(27.78);
-  });
-
-  it("o equipamento conta a partir do mês da entrega, por 36 meses, até à devolução", () => {
-    const e = { entrega: "2026-11-15", devolucao: null };
-    expect(equipamentoDoMes(e, "2026-10")).toBe(false);
-    expect(equipamentoDoMes(e, "2026-11")).toBe(true);
-    expect(equipamentoDoMes(e, "2029-10")).toBe(true);
-    expect(equipamentoDoMes(e, "2029-11")).toBe(false);
-    expect(equipamentoDoMes({ ...e, devolucao: "2027-02-03" }, "2027-02")).toBe(true);
-    expect(equipamentoDoMes({ ...e, devolucao: "2027-02-03" }, "2027-03")).toBe(false);
-  });
-
   it("recusa descrição em branco, valor 0 ou negativo e quem não pode processar salários", () => {
     const base = { descricao: "Visita a cliente", valor: 48, podeProcessar: true };
     expect(validarAvulso(base)).toBeNull();
@@ -52,6 +35,13 @@ describe("custo: valores avulsos", () => {
     expect(validarAvulso({ ...base, valor: Number.NaN })).toBe("valorZero");
   });
 
+  it("a data é obrigatória quando vem indicada: vazia ou mal escrita recusa-se", () => {
+    const base = { descricao: "Visita a cliente", valor: 48, podeProcessar: true };
+    expect(validarAvulso({ ...base, data: "2026-09-09" })).toBeNull();
+    expect(validarAvulso({ ...base, data: "" })).toBe("semData");
+    expect(validarAvulso({ ...base, data: "09/09/2026" })).toBe("semData");
+  });
+
   it("anular exige autorização e motivo com pelo menos 3 caracteres", () => {
     expect(anularAvulsoErro("Registado por engano", true)).toBeNull();
     expect(anularAvulsoErro("Registado por engano", false)).toBe("semAutorizacao");
@@ -59,10 +49,9 @@ describe("custo: valores avulsos", () => {
     expect(anularAvulsoErro("ab", true)).toBe("semMotivo");
   });
 
-  it("uma data num mês já fechado conta no primeiro mês aberto, com a nota da data real", () => {
-    expect(mesDeContagem("2026-10-20", "2026-11")).toEqual({ mes: "2026-11", dataReal: "2026-10-20" });
-    expect(mesDeContagem("2026-11-02", "2026-11")).toEqual({ mes: "2026-11", dataReal: null });
-    expect(mesDeContagem("2026-12-01", "2026-11")).toEqual({ mes: "2026-12", dataReal: null });
+  it("uma data conta no mês dela e nunca noutro (nenhum mês é «fechado» e salta para o seguinte)", () => {
+    expect(mesDaData("2026-09-30")).toBe("2026-09");
+    expect(indiceDoMes("2027-01") - indiceDoMes("2026-12")).toBe(1);
   });
 });
 
@@ -81,7 +70,7 @@ describe("custo: encargos e custo do mês (exemplos do fluxo 11)", () => {
   });
 
   it("Duarte: o portátil entra nos outros custos e não no bruto (1.582,82 + 25,00 = 1.607,82)", () => {
-    expect(custoTotalDoMes(1301.21, 281.61, equipamentoPorMes(900))).toBe(1607.82);
+    expect(custoTotalDoMes(1301.21, 281.61, quotaMensal(900, 36))).toBe(1607.82);
   });
 
   it("sem bruto o custo fica sem valor", () => {

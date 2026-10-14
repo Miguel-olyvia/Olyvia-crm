@@ -1,6 +1,6 @@
 // Arranque dos fluxos novos da frente A: botões de configuração e separador Cargos, janela do responsável (fim de contrato)
 // e separador Custo da ficha. Tudo em memória, sem base.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -25,6 +25,11 @@ const renderEm = (endereco: string) =>
       </MemoryRouter>
     </LanguageProvider>,
   );
+
+beforeAll(() => {
+  // O grupo de opções «Como conta» (Radix) mede-se com o ResizeObserver, que o jsdom não traz.
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} };
+});
 
 beforeEach(() => {
   window.localStorage.setItem("language", "pt");

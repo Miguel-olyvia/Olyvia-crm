@@ -1,6 +1,7 @@
 /**
- * Os valores avulsos da pessoa (fluxo 11): quilómetros, ajudas de custo e equipamento, com autor e data. O RH regista e anula
- * (a anulação pede motivo, e o valor continua visível mas deixa de contar). A própria pessoa vê só a lista, para conferir.
+ * Os valores avulsos da pessoa (fluxo 11): quilómetros e ajudas de custo, com autor, data e «Como conta» (por omissão, pago de
+ * uma vez, no mês da data). O RH regista, altera como conta e anula (a anulação pede motivo, e o valor continua visível mas deixa
+ * de contar). A própria pessoa vê só a lista, para conferir.
  */
 import { useState } from "react";
 import { Plus } from "lucide-react";
@@ -13,11 +14,13 @@ import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { anularAvulso } from "@/components/rh-exemplo/dados/lojaCusto";
 import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import type { ErroAnulacao } from "@/components/rh-exemplo/lib/custo";
-import type { AvulsoCusto } from "@/components/rh-exemplo/lib/custoMes";
+import { valorDoAvulsoNoMes, type AvulsoCusto } from "@/components/rh-exemplo/lib/custoMes";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { AvulsoDialog } from "./AvulsoDialog";
+import { EditarContaDialog, type AlvoConta } from "./EditarContaDialog";
 import { euros } from "./formato";
+import { rotuloDaConta } from "./rotuloConta";
 
 interface AnularProps {
   avulso: AvulsoCusto | null;
@@ -57,19 +60,21 @@ function AnularDialog({ avulso, autor, aoFechar }: AnularProps) {
 
 interface LinhaProps {
   a: AvulsoCusto;
+  mes: string;
   podeGerir: boolean;
   aoAnular: (a: AvulsoCusto) => void;
+  aoAlterar: (alvo: AlvoConta) => void;
 }
 
-function LinhaAvulso({ a, podeGerir, aoAnular }: LinhaProps) {
-  const { t } = useTranslation();
+function LinhaAvulso({ a, mes, podeGerir, aoAnular, aoAlterar }: LinhaProps) {
+  const { t, language } = useTranslation();
+  const doMes = a.anulado ? 0 : valorDoAvulsoNoMes(a, mes);
   return (
     <TableRow className={a.anulado ? "text-muted-foreground" : undefined}>
       <TableCell className="tabular-nums">{a.data}</TableCell>
       <TableCell>{t(`rhA.custo.tipo.${a.tipo}`)}</TableCell>
       <TableCell>
         <span className={a.anulado ? "line-through" : undefined}>{a.descricao}</span>
-        {a.dataReal && <span className="block text-xs">{t("rhA.custo.notaDataReal", { data: a.dataReal, mes: a.mesContagem })}</span>}
         {a.anulado && (
           <span className="block text-xs">
             <Badge variant="outline" className="mr-1 font-normal">{t("rhA.custo.anulado")}</Badge>
@@ -78,13 +83,20 @@ function LinhaAvulso({ a, podeGerir, aoAnular }: LinhaProps) {
         )}
       </TableCell>
       <TableCell className={cn("text-right tabular-nums", a.anulado && "line-through")}>{euros(a.valor, "—")}</TableCell>
+      <TableCell>{rotuloDaConta(t, a.conta, language)}</TableCell>
+      <TableCell className="text-right tabular-nums">{doMes === 0 ? t("rhCustos.eq.semValor") : euros(doMes, "—")}</TableCell>
       <TableCell className="text-xs">{a.autor}<span className="block tabular-nums">{a.criadoEm.slice(0, 10)}</span></TableCell>
       {podeGerir && (
         <TableCell>
           {!a.anulado && (
-            <Button type="button" size="sm" variant="outline" onClick={() => aoAnular(a)} className={cn("min-h-11", FOCO)}>
-              {t("rhA.custo.anular")}
-            </Button>
+            <div className="flex flex-wrap gap-1">
+              <Button type="button" size="sm" variant="outline" onClick={() => aoAlterar({ tipo: "avulso", item: a })} aria-label={t("rhCustos.conta.editarAria", { descricao: a.descricao })} className={cn("min-h-11", FOCO)}>
+                {t("rhCustos.conta.editar")}
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => aoAnular(a)} className={cn("min-h-11", FOCO)}>
+                {t("rhA.custo.anular")}
+              </Button>
+            </div>
           )}
         </TableCell>
       )}
@@ -96,14 +108,17 @@ interface CustoAvulsosProps {
   pessoaId: string;
   autor: string;
   avulsos: AvulsoCusto[];
+  /** O mês escolhido: a coluna «Conta neste mês» mostra o que cada valor conta nele. */
+  mes: string;
   /** `false` na visão da pessoa: só lê. */
   podeGerir: boolean;
 }
 
-export function CustoAvulsos({ pessoaId, autor, avulsos, podeGerir }: CustoAvulsosProps) {
+export function CustoAvulsos({ pessoaId, autor, avulsos, mes, podeGerir }: CustoAvulsosProps) {
   const { t } = useTranslation();
   const [aRegistar, setARegistar] = useState(false);
   const [aAnular, setAAnular] = useState<AvulsoCusto | null>(null);
+  const [aAlterar, setAAlterar] = useState<AlvoConta | null>(null);
   const ordenados = [...avulsos].sort((a, b) => b.data.localeCompare(a.data));
 
   return (
@@ -127,12 +142,14 @@ export function CustoAvulsos({ pessoaId, autor, avulsos, podeGerir }: CustoAvuls
                 <TableHead>{t("rhA.custo.tipo")}</TableHead>
                 <TableHead>{t("rhA.custo.descricao")}</TableHead>
                 <TableHead className="text-right">{t("rhA.custo.valor")}</TableHead>
+                <TableHead>{t("rhCustos.conta.titulo")}</TableHead>
+                <TableHead className="text-right">{t("rhCustos.avulso.contaMes")}</TableHead>
                 <TableHead>{t("rhA.custo.registadoPor")}</TableHead>
                 {podeGerir && <TableHead><span className="sr-only">{t("rhA.custo.acoes")}</span></TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ordenados.map((a) => <LinhaAvulso key={a.id} a={a} podeGerir={podeGerir} aoAnular={setAAnular} />)}
+              {ordenados.map((a) => <LinhaAvulso key={a.id} a={a} mes={mes} podeGerir={podeGerir} aoAnular={setAAnular} aoAlterar={setAAlterar} />)}
             </TableBody>
           </Table>
         </div>
@@ -141,6 +158,7 @@ export function CustoAvulsos({ pessoaId, autor, avulsos, podeGerir }: CustoAvuls
         <>
           <AvulsoDialog open={aRegistar} pessoaId={pessoaId} autor={autor} aoFechar={() => setARegistar(false)} />
           <AnularDialog key={aAnular?.id ?? "nenhum"} avulso={aAnular} autor={autor} aoFechar={() => setAAnular(null)} />
+          <EditarContaDialog alvo={aAlterar} aoFechar={() => setAAlterar(null)} />
         </>
       )}
     </Seccao>

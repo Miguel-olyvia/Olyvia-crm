@@ -7,8 +7,9 @@ import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { lerFluxosC, reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
 import { calcularMes, fichasDoCalculo } from "@/components/rh-exemplo/fluxosC/salarioEntrada";
+import { contaUmaVez } from "@/components/rh-exemplo/lib/comoConta";
 import { totaisDaOrganizacao } from "@/components/rh-exemplo/lib/custoOrganizacao";
-import { situacaoDoEquipamento } from "@/components/rh-exemplo/lib/equipamentos";
+import { situacaoDoEquipamento, valorDoEquipamentoNoMes, type EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos";
 import { custoLidoDaPessoa, linhasDaOrganizacao } from "./custoLido";
 
 const MES = "2026-09";
@@ -64,12 +65,12 @@ describe("o custo bate com o «Cálculo do mês» de Setembro", () => {
 describe("os dados de exemplo do custo", () => {
   const todos = () => lerCusto().equipamentos;
 
-  it("quase todas as pessoas têm equipamentos, e há viatura, ferramentas, fardamento, um totalmente amortizado e um devolvido", () => {
+  it("quase todas as pessoas têm equipamentos, e há viatura, ferramentas, fardamento, um totalmente repartido e um devolvido", () => {
     expect(new Set(todos().map((e) => e.pessoaId)).size).toBeGreaterThanOrEqual(11);
     for (const tipo of ["telemovel", "portatil", "viatura", "fardamento", "ferramentas"]) {
       expect(todos().some((e) => e.tipo === tipo)).toBe(true);
     }
-    expect(todos().some((e) => situacaoDoEquipamento(e, MES).totalmenteAmortizado)).toBe(true);
+    expect(todos().some((e) => e.conta.modo === "repartido" && situacaoDoEquipamento(e, MES).completo)).toBe(true);
     expect(todos().some((e) => e.estado === "devolvido" && e.devolucao !== null)).toBe(true);
     expect(todos().find((e) => e.tipo === "viatura")?.pessoaId).toBe("p-hugo");
   });
@@ -80,9 +81,54 @@ describe("os dados de exemplo do custo", () => {
   });
 
   it("há valores avulsos (km e ajudas de custo) em Setembro", () => {
-    const set = lerCusto().avulsos.filter((a) => a.mesContagem === MES);
+    const set = lerCusto().avulsos.filter((a) => a.data.startsWith(MES));
     expect(set.some((a) => a.tipo === "km")).toBe(true);
     expect(set.some((a) => a.tipo === "ajuda")).toBe(true);
+  });
+
+  it("os equipamentos de exemplo usam os três modos, e os avulsos são pagos de uma vez na sua data", () => {
+    const modos = new Set(todos().map((e) => e.conta.modo));
+    expect([...modos].sort()).toEqual(["repartido", "todosMeses", "umaVez"]);
+    expect(todos().some((e) => e.conta.modo === "repartido" && e.conta.meses === 36)).toBe(true);
+    expect(todos().some((e) => e.conta.modo === "repartido" && e.conta.meses === 12)).toBe(true);
+    expect(todos().find((e) => e.tipo === "viatura")?.conta.modo).toBe("todosMeses");
+    expect(todos().find((e) => e.tipo === "telemovel" && e.conta.modo === "umaVez")?.entrega.startsWith(MES)).toBe(true);
+    expect(todos().some((e) => e.tipo === "fardamento" && e.conta.modo === "umaVez")).toBe(true);
+    expect(lerCusto().avulsos.every((a) => a.conta.modo === "umaVez")).toBe(true);
+  });
+});
+
+describe("os totais batem mês a mês, qualquer que seja o «como conta»", () => {
+  const MESES = ["2026-08", "2026-09", "2026-10", "2026-11", "2027-03", "2028-09"];
+
+  it("o total do módulo é a soma das abas Custo das fichas, em cada mês", () => {
+    for (const mes of MESES) {
+      const linhas = linhasDaOrganizacao(mes);
+      const soma = linhas.reduce((s, l) => s + cent(custoLidoDaPessoa(l.pessoaId, mes)?.atual.total ?? null), 0);
+      const t = totaisDaOrganizacao(linhas);
+      expect(cent(t.total)).toBe(soma);
+      expect(cent(t.retribuicao) + cent(t.encargos) + cent(t.seguro) + cent(t.avulsos) + cent(t.equipamentos)).toBe(cent(t.total));
+    }
+  });
+
+  it("um pago de uma vez só aparece no mês da entrega, no módulo e na ficha", () => {
+    const telemovel = lerCusto().equipamentos.find((e) => e.pessoaId === "p-ines" && e.conta.modo === "umaVez");
+    expect(telemovel).toBeDefined();
+    const valor = telemovel?.valor ?? 0;
+    const mes = (telemovel?.entrega ?? "").slice(0, 7);
+    const naquele = linhasDaOrganizacao(mes).find((l) => l.pessoaId === "p-ines");
+    expect(cent(naquele?.equipamentosMes ?? null)).toBeGreaterThanOrEqual(cent(valor));
+    expect(cent(custoLidoDaPessoa("p-ines", mes)?.atual.outrosCustos ?? null)).toBe(cent(naquele?.equipamentosMes ?? null));
+    const conta = (m: string) => valorDoEquipamentoNoMes(telemovel as EquipamentoPessoa, m);
+    expect([conta("2026-08"), conta(mes), conta("2026-10")]).toEqual([0, valor, 0]);
+  });
+
+  it("um avulso de Setembro não conta em Outubro, na ficha nem no módulo", () => {
+    const set = linhasDaOrganizacao(MES).find((l) => l.pessoaId === "p-tiago");
+    const out = linhasDaOrganizacao("2026-10").find((l) => l.pessoaId === "p-tiago");
+    expect(set?.avulsosMes).toBeGreaterThan(0);
+    expect(out?.avulsosMes).toBe(0);
+    expect(custoLidoDaPessoa("p-tiago", "2026-10")?.atual.kmEAjudas).toBe(0);
   });
 });
 
@@ -101,6 +147,15 @@ describe("atribuir e devolver equipamento mexem no custo da pessoa e no módulo"
     expect(cent(totalDepois.equipamentos) - cent(totalAntes.equipamentos)).toBe(5000);
     expect(cent(totalDepois.total) - cent(totalAntes.total)).toBe(5000);
     expect(totalDepois.nEquipamentos).toBe(totalAntes.nEquipamentos + 1);
+  });
+
+  it("pago de uma vez conta o valor todo só no mês da entrega, na ficha e no módulo", () => {
+    expect(atribuirEquipamento({ ...novo, conta: contaUmaVez() }).erro).toBeNull();
+    const set = custoLidoDaPessoa("p-tiago", MES);
+    const out = custoLidoDaPessoa("p-tiago", "2026-10");
+    expect(cent(set?.atual.outrosCustos ?? null) - cent(out?.atual.outrosCustos ?? null)).toBeGreaterThanOrEqual(180000);
+    const doMes = linhasDaOrganizacao(MES).find((l) => l.pessoaId === "p-tiago");
+    expect(doMes?.equipamentosMes).toBe(set?.atual.outrosCustos);
   });
 
   it("recusa sem pessoa, sem descrição, com valor 0 e sem data, e não guarda nada", () => {

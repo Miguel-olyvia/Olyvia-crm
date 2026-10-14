@@ -1,6 +1,6 @@
 /**
  * «Custos» (módulo do RH de exemplo): o custo de cada pessoa num mês — retribuição do «Cálculo do mês», encargos, valores
- * avulsos e equipamentos amortizados —, com os totais da organização, filtros, ordenação e a composição de cada custo.
+ * avulsos e equipamentos, cada um contado como foi escolhido —, com os totais da organização, filtros, ordenação e a composição de cada custo.
  * Clicar numa pessoa abre a ficha dela já no separador Custo. Atribuir equipamento e registar um valor avulso funcionam
  * aqui, em memória, e mudam logo os totais. Só dados de exemplo: nada fala com base de dados.
  */

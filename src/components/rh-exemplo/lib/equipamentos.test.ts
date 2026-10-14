@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { contaRepartida, contaTodosMeses, contaUmaVez } from "./comoConta";
 import {
   situacaoDoEquipamento,
   validarDevolucao,
@@ -14,6 +15,7 @@ const equipamento = (parcial: Partial<EquipamentoPessoa> = {}): EquipamentoPesso
   descricao: "Portátil",
   valor: 900,
   entrega: "2026-01-15",
+  conta: contaRepartida(),
   estado: "atribuido",
   devolucao: null,
   estadoDevolucao: null,
@@ -21,42 +23,70 @@ const equipamento = (parcial: Partial<EquipamentoPessoa> = {}): EquipamentoPesso
   ...parcial,
 });
 
-describe("amortização do equipamento (valor / 36)", () => {
-  it("no mês da entrega pesa 25 (900 / 36), faltam 35 meses e 875 por amortizar", () => {
+describe("equipamento repartido por 36 meses (o do fluxo 11: valor / 36)", () => {
+  it("no mês da entrega conta 25 (900 / 36), faltam 35 meses e 875 por contar", () => {
     expect(situacaoDoEquipamento(equipamento(), "2026-01")).toEqual({
-      amortizacaoMes: 25, mesesDecorridos: 1, mesesRestantes: 35, porAmortizar: 875, totalmenteAmortizado: false,
+      doMes: 25, contado: 25, falta: 875, mesesContados: 1, mesesFalta: 35, completo: false,
     });
   });
 
-  it("nove meses depois já se amortizaram 225 e faltam 27 meses", () => {
+  it("nove meses depois já contaram 225 e faltam 27 meses", () => {
     const s = situacaoDoEquipamento(equipamento(), "2026-09");
-    expect(s).toMatchObject({ amortizacaoMes: 25, mesesDecorridos: 9, mesesRestantes: 27, porAmortizar: 675 });
+    expect(s).toMatchObject({ doMes: 25, contado: 225, mesesContados: 9, mesesFalta: 27, falta: 675 });
   });
 
-  it("o último mês conta, e a partir do 37.º não pesa nada: está totalmente amortizado", () => {
-    expect(situacaoDoEquipamento(equipamento(), "2028-12")).toMatchObject({ amortizacaoMes: 25, mesesDecorridos: 36, mesesRestantes: 0, porAmortizar: 0, totalmenteAmortizado: true });
-    expect(situacaoDoEquipamento(equipamento(), "2029-01")).toMatchObject({ amortizacaoMes: 0, mesesDecorridos: 36, mesesRestantes: 0, porAmortizar: 0, totalmenteAmortizado: true });
+  it("o último mês conta, e a partir do 37.º não conta nada: já contou tudo", () => {
+    expect(situacaoDoEquipamento(equipamento(), "2028-12")).toMatchObject({ doMes: 25, contado: 900, mesesContados: 36, mesesFalta: 0, falta: 0, completo: true });
+    expect(situacaoDoEquipamento(equipamento(), "2029-01")).toMatchObject({ doMes: 0, contado: 900, mesesContados: 36, mesesFalta: 0, falta: 0, completo: true });
   });
 
-  it("antes da entrega não pesa nada e ainda falta amortizar tudo", () => {
-    expect(situacaoDoEquipamento(equipamento(), "2025-12")).toMatchObject({ amortizacaoMes: 0, mesesDecorridos: 0, mesesRestantes: 36, porAmortizar: 900, totalmenteAmortizado: false });
+  it("antes da entrega não conta nada e ainda falta contar tudo", () => {
+    expect(situacaoDoEquipamento(equipamento(), "2025-12")).toMatchObject({ doMes: 0, contado: 0, mesesContados: 0, mesesFalta: 36, falta: 900, completo: false });
   });
 
-  it("arredonda ao cêntimo: 1000 / 36 = 27,78 e por amortizar 972,22", () => {
-    expect(situacaoDoEquipamento(equipamento({ valor: 1000 }), "2026-01")).toMatchObject({ amortizacaoMes: 27.78, porAmortizar: 972.22 });
+  it("arredonda ao cêntimo: 1000 / 36 = 27,78 e faltam 972,22", () => {
+    expect(situacaoDoEquipamento(equipamento({ valor: 1000 }), "2026-01")).toMatchObject({ doMes: 27.78, falta: 972.22 });
   });
 
-  it("devolvido: conta até ao mês da devolução (inclusive) e depois pára, sem meses nem valor por amortizar", () => {
+  it("devolvido: conta até ao mês da devolução (inclusive) e depois pára, sem meses nem valor por contar", () => {
     const devolvido = equipamento({ estado: "devolvido", devolucao: "2026-05-20", estadoDevolucao: "bom" });
-    expect(situacaoDoEquipamento(devolvido, "2026-03")).toMatchObject({ amortizacaoMes: 25, mesesRestantes: 33, porAmortizar: 825 });
-    expect(situacaoDoEquipamento(devolvido, "2026-05")).toMatchObject({ amortizacaoMes: 25, mesesDecorridos: 5, mesesRestantes: 0, porAmortizar: 0 });
-    expect(situacaoDoEquipamento(devolvido, "2026-06")).toMatchObject({ amortizacaoMes: 0, mesesDecorridos: 5, mesesRestantes: 0, porAmortizar: 0, totalmenteAmortizado: false });
+    expect(situacaoDoEquipamento(devolvido, "2026-03")).toMatchObject({ doMes: 25, mesesFalta: 33, falta: 825 });
+    expect(situacaoDoEquipamento(devolvido, "2026-05")).toMatchObject({ doMes: 25, mesesContados: 5, mesesFalta: 0, falta: 0 });
+    expect(situacaoDoEquipamento(devolvido, "2026-06")).toMatchObject({ doMes: 0, mesesContados: 5, mesesFalta: 0, falta: 0, completo: false });
   });
 
-  it("só os equipamentos que pesam no mês entram na lista do mês", () => {
+  it("só os equipamentos que contam no mês entram na lista do mês", () => {
     const lista = [equipamento(), equipamento({ id: "e2", entrega: "2022-01-10" }), equipamento({ id: "e3", estado: "devolvido", devolucao: "2026-02-02" })];
     expect(equipamentosDoMes(lista, "2026-09").map((e) => e.id)).toEqual(["e1"]);
     expect(equipamentosDoMes(lista, "2026-02").map((e) => e.id)).toEqual(["e1", "e3"]);
+  });
+});
+
+describe("equipamento pago de uma vez e todos os meses", () => {
+  it("pago de uma vez conta o valor todo só no mês da entrega, e entra na lista só nesse mês", () => {
+    const telemovel = equipamento({ valor: 600, entrega: "2026-09-10", conta: contaUmaVez() });
+    expect(situacaoDoEquipamento(telemovel, "2026-08")).toMatchObject({ doMes: 0, contado: 0, falta: 600 });
+    expect(situacaoDoEquipamento(telemovel, "2026-09")).toMatchObject({ doMes: 600, contado: 600, falta: 0, completo: true });
+    expect(situacaoDoEquipamento(telemovel, "2026-10")).toMatchObject({ doMes: 0, contado: 600, falta: 0 });
+    expect(equipamentosDoMes([telemovel], "2026-09")).toHaveLength(1);
+    expect(equipamentosDoMes([telemovel], "2026-10")).toHaveLength(0);
+  });
+
+  it("repartido por 12 meses conta 75 por mês durante 12 meses (900 / 12) e depois nada", () => {
+    const e = equipamento({ conta: contaRepartida(12) });
+    expect(situacaoDoEquipamento(e, "2026-01")).toMatchObject({ doMes: 75, falta: 825, mesesFalta: 11 });
+    expect(situacaoDoEquipamento(e, "2026-12")).toMatchObject({ doMes: 75, falta: 0, completo: true });
+    expect(situacaoDoEquipamento(e, "2027-01").doMes).toBe(0);
+  });
+
+  it("todos os meses conta o valor mensal do início ao fim, sem total, e a devolução corta", () => {
+    const viatura = equipamento({ valor: 389, conta: contaTodosMeses("2026-02") });
+    expect(situacaoDoEquipamento(viatura, "2026-01").doMes).toBe(0);
+    expect(situacaoDoEquipamento(viatura, "2026-02")).toMatchObject({ doMes: 389, contado: 389, falta: null, mesesFalta: null, completo: false });
+    expect(situacaoDoEquipamento(viatura, "2027-05")).toMatchObject({ doMes: 389, contado: 389 * 16 });
+    const devolvida = { ...viatura, estado: "devolvido" as const, devolucao: "2026-06-30" };
+    expect(situacaoDoEquipamento(devolvida, "2026-06").doMes).toBe(389);
+    expect(situacaoDoEquipamento(devolvida, "2026-07").doMes).toBe(0);
   });
 });
 
@@ -71,6 +101,14 @@ describe("validar um equipamento e uma devolução", () => {
     expect(validarEquipamento({ ...ok, valor: -5 })).toBe("valorZero");
     expect(validarEquipamento({ ...ok, valor: Number.NaN })).toBe("valorZero");
     expect(validarEquipamento({ ...ok, entrega: "" })).toBe("semData");
+  });
+
+  it("recusa um «como conta» inválido: meses fora de 1 a 120, sem mês de início ou com o fim antes do início", () => {
+    expect(validarEquipamento({ ...ok, conta: contaRepartida(12) })).toBeNull();
+    expect(validarEquipamento({ ...ok, conta: contaRepartida(0) })).toBe("mesesInvalidos");
+    expect(validarEquipamento({ ...ok, conta: contaRepartida(121) })).toBe("mesesInvalidos");
+    expect(validarEquipamento({ ...ok, conta: contaTodosMeses("") })).toBe("semInicio");
+    expect(validarEquipamento({ ...ok, conta: contaTodosMeses("2026-09", "2026-08") })).toBe("fimAntesInicio");
   });
 
   it("a devolução pede data, não pode ser antes da entrega e pede o estado em que volta", () => {

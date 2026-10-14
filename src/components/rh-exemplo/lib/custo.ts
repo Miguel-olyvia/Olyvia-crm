@@ -1,16 +1,15 @@
 /**
  * As contas do separador Custo da ficha (fluxo 11), todas puras e sem dados de lado nenhum.
  *
- * Custo total do mês = bruto + encargos da empresa + outros custos (o equipamento repartido por 36 meses).
+ * Custo total do mês = bruto + encargos da empresa + outros custos (o equipamento, conforme «como conta»: `comoConta.ts`).
  * Os valores avulsos (quilómetros, ajudas de custo) somam ao bruto; o equipamento nunca entra no bruto.
  * Os resultados em euros arredondam-se ao cêntimo; o valor da hora do banco de horas não se arredonda antes de multiplicar.
  * As taxas são de exemplo (a confirmar pela contabilidade).
  */
-export const MESES_EQUIPAMENTO = 36;
 /** Dois valores "AAAA-MM": o mês de contagem de um valor ou de uma linha do acumulado. */
 export type MesIso = string;
 
-export type ErroAvulso = "semAutorizacao" | "semDescricao" | "valorZero";
+export type ErroAvulso = "semAutorizacao" | "semDescricao" | "valorZero" | "semData";
 export type ErroAnulacao = "semAutorizacao" | "semMotivo";
 
 const MOTIVO_MINIMO = 3;
@@ -22,44 +21,29 @@ export function arredondar(valor: number): number {
 
 export const valorDeKm = (km: number, valorPorKm: number): number => arredondar(km * valorPorKm);
 export const valorDeAjudaDeCusto = (dias: number, valorDiario: number): number => arredondar(dias * valorDiario);
-export const equipamentoPorMes = (valorDeCompra: number): number => arredondar(valorDeCompra / MESES_EQUIPAMENTO);
 
-const indiceDoMes = (mes: MesIso): number => {
+/** O número de ordem de um mês («AAAA-MM»): serve para contar meses entre dois. */
+export const indiceDoMes = (mes: MesIso): number => {
   const [ano, m] = mes.split("-").map(Number);
   return ano * 12 + (m - 1);
 };
 
 export const mesDaData = (dataIso: string): MesIso => dataIso.slice(0, 7);
 
-export interface EquipamentoDatas {
-  entrega: string;
-  devolucao: string | null;
-}
+const DATA_ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-/** O equipamento pesa do mês da entrega, por 36 meses, e até ao mês da devolução (inclusive). */
-export function equipamentoDoMes(e: EquipamentoDatas, mes: MesIso): boolean {
-  const desde = indiceDoMes(mesDaData(e.entrega));
-  const agora = indiceDoMes(mes);
-  if (agora < desde || agora >= desde + MESES_EQUIPAMENTO) return false;
-  return e.devolucao === null || agora <= indiceDoMes(mesDaData(e.devolucao));
-}
-
-export function validarAvulso(entrada: { descricao: string; valor: number; podeProcessar: boolean }): ErroAvulso | null {
+/** A data é obrigatória quando vem indicada (o valor conta no mês dela, nunca noutro). */
+export function validarAvulso(entrada: { descricao: string; valor: number; podeProcessar: boolean; data?: string }): ErroAvulso | null {
   if (!entrada.podeProcessar) return "semAutorizacao";
   if (entrada.descricao.trim() === "") return "semDescricao";
   if (!Number.isFinite(entrada.valor) || entrada.valor <= 0) return "valorZero";
+  if (entrada.data !== undefined && !DATA_ISO.test(entrada.data)) return "semData";
   return null;
 }
 
 export function anularAvulsoErro(motivo: string, podeProcessar: boolean): ErroAnulacao | null {
   if (!podeProcessar) return "semAutorizacao";
   return motivo.trim().length >= MOTIVO_MINIMO ? null : "semMotivo";
-}
-
-/** Uma data num mês já fechado conta no primeiro mês aberto; `dataReal` guarda a data original para a nota. */
-export function mesDeContagem(dataIso: string, primeiroMesAberto: MesIso): { mes: MesIso; dataReal: string | null } {
-  const mes = mesDaData(dataIso);
-  return mes < primeiroMesAberto ? { mes: primeiroMesAberto, dataReal: dataIso } : { mes, dataReal: null };
 }
 
 /** A taxa da pessoa, quando tem exceção (regimes com taxa reduzida), senão a da empresa; em percentagem. */

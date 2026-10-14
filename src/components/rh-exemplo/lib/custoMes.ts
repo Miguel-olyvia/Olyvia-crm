@@ -3,7 +3,7 @@
  * do mês, os valores avulsos da pessoa e as definições da empresa, e devolve cada linha do quadro (fluxo 11).
  *
  * A parte sujeita a encargos é só o salário em si; os quilómetros e as ajudas de custo ficam de fora. O equipamento
- * (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, 1/36 por mês.
+ * (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, conforme «como conta».
  */
 import {
   arredondar,
@@ -11,14 +11,14 @@ import {
   custoRepartido14em12,
   custoTotalDoMes,
   encargosDaEmpresa,
-  equipamentoPorMes,
   horasPrevistasDoMes,
   saldoBancoEmEuros,
   somarMeses,
   taxaEfetiva,
   type MesIso,
 } from "./custo";
-import { equipamentosDoMes, type EquipamentoPessoa } from "./equipamentos";
+import { valorNoMes, type ContaItem, type ItemParaConta } from "./comoConta";
+import { equipamentosDoMes, valorDoEquipamentoNoMes, type EquipamentoPessoa } from "./equipamentos";
 
 export type TipoAvulso = "km" | "ajuda";
 
@@ -26,12 +26,10 @@ export interface AvulsoCusto {
   id: string;
   pessoaId: string;
   tipo: TipoAvulso;
-  /** A data que quem registou indicou. */
+  /** A data que quem registou indicou: o valor conta no mês dela, nunca noutro. */
   data: string;
-  /** O mês em que conta: o da data, ou o primeiro mês aberto se o da data já fechou. */
-  mesContagem: MesIso;
-  /** A data indicada, só quando o mês dela já estava fechado (para a nota). */
-  dataReal: string | null;
+  /** Como conta: de uma vez (por omissão nos avulsos), repartido por N meses ou todos os meses. */
+  conta: ContaItem;
   descricao: string;
   quantidade: number;
   valorUnitario: number;
@@ -54,7 +52,7 @@ export interface EntradaCustoMes {
   mes: MesIso;
   salarioMes: number | null;
   avulsos: readonly AvulsoCusto[];
-  /** Os equipamentos da pessoa (todos): só pesam os que estão dentro dos 36 meses e não devolvidos nesse mês. */
+  /** Os equipamentos da pessoa (todos): só contam os que, conforme «como conta», têm valor nesse mês. */
   equipamentos: readonly EquipamentoPessoa[];
   definicoes: DefinicoesCusto;
   excecaoTaxa: number | null;
@@ -75,7 +73,7 @@ export interface CustoDoMes {
   /** Só o seguro (acidentes de trabalho): `encargosTaxa + seguro = encargos`, sempre ao cêntimo. */
   seguro: number;
   encargosTaxa: number;
-  /** A amortização dos equipamentos do mês. */
+  /** O que os equipamentos contam no mês (conforme «como conta»). */
   outrosCustos: number;
   nEquipamentos: number;
   total: number | null;
@@ -90,10 +88,16 @@ export interface CustoDoMes {
 /** Os valores avulsos que contam: nunca os anulados. */
 export const avulsosAtivos = (avulsos: readonly AvulsoCusto[]): AvulsoCusto[] => avulsos.filter((a) => a.anulado === null);
 
+/** O valor avulso visto como um valor que conta (sem devolução). */
+export const itemDoAvulso = (a: Pick<AvulsoCusto, "valor" | "data" | "conta">): ItemParaConta => ({ valor: a.valor, data: a.data, conta: a.conta, devolucao: null });
+
+/** O que o valor avulso conta no mês. */
+export const valorDoAvulsoNoMes = (a: AvulsoCusto, mes: MesIso): number => valorNoMes(itemDoAvulso(a), mes);
+
 export function custoDoMes(e: EntradaCustoMes): CustoDoMes {
-  const kmEAjudas = somarMeses(avulsosAtivos(e.avulsos).filter((a) => a.mesContagem === e.mes).map((a) => a.valor));
+  const kmEAjudas = somarMeses(avulsosAtivos(e.avulsos).map((a) => valorDoAvulsoNoMes(a, e.mes)));
   const doMes = equipamentosDoMes(e.equipamentos, e.mes);
-  const outrosCustos = somarMeses(doMes.map((x) => equipamentoPorMes(x.valor)));
+  const outrosCustos = somarMeses(doMes.map((x) => valorDoEquipamentoNoMes(x, e.mes)));
   const bruto = e.salarioMes === null ? null : arredondar(e.salarioMes + kmEAjudas);
   const taxa = taxaEfetiva(e.definicoes.taxaEmpresa, e.excecaoTaxa);
   const encargos = e.salarioMes === null ? 0 : encargosDaEmpresa(e.salarioMes, taxa, e.definicoes.seguro);
