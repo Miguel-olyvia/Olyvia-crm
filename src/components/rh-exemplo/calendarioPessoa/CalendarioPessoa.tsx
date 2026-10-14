@@ -9,6 +9,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { permissoesDaVista } from "@/components/rh-exemplo/lib/vistaDaPessoa";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import { CabecalhoMes } from "./CabecalhoMes";
@@ -61,7 +62,8 @@ export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPe
     const hoje = hojeIso();
     aoMudarMes({ ano: Number(hoje.slice(0, 4)), mes: Number(hoje.slice(5, 7)) });
   };
-  const podeCorrigir = permissoes.corrigir || permissoes.faltasEdit || permissoes.justificacaoEdit;
+  const { corrigir, faltasEdit, justificacaoEdit } = permissoesDaVista(permissoes, souAPessoa);
+  const podeCorrigir = corrigir || faltasEdit || justificacaoEdit;
 
   return (
     <div className="space-y-4" data-testid="rhcal-calendario">
@@ -89,6 +91,8 @@ export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPe
         pessoaNome={pessoaNome}
         podeDecidir={permissoes.gerir && !souAPessoa}
         podeCorrigir={podeCorrigir}
+        souAPessoa={souAPessoa}
+        pessoaId={pessoaId}
         aoFechar={() => setDiaAberto(null)}
         aoAbrirRegisto={(data) => { setDiaAberto(null); aoAbrirRegisto(data); }}
       />

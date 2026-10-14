@@ -12,7 +12,7 @@ import { Seccao } from "@/components/ficha-comum/Seccao";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { anularAvulso } from "@/components/rh-exemplo/dados/lojaCusto";
 import { CampoTexto } from "@/components/rh-exemplo/form/Campos";
-import { equipamentoPorMes, type ErroAnulacao } from "@/components/rh-exemplo/lib/custo";
+import type { ErroAnulacao } from "@/components/rh-exemplo/lib/custo";
 import type { AvulsoCusto } from "@/components/rh-exemplo/lib/custoMes";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -69,7 +69,6 @@ function LinhaAvulso({ a, podeGerir, aoAnular }: LinhaProps) {
       <TableCell>{t(`rhA.custo.tipo.${a.tipo}`)}</TableCell>
       <TableCell>
         <span className={a.anulado ? "line-through" : undefined}>{a.descricao}</span>
-        {a.tipo === "equipamento" && !a.anulado && <span className="block text-xs">{t("rhA.custo.porMes", { valor: euros(equipamentoPorMes(a.valorUnitario), "—") })}</span>}
         {a.dataReal && <span className="block text-xs">{t("rhA.custo.notaDataReal", { data: a.dataReal, mes: a.mesContagem })}</span>}
         {a.anulado && (
           <span className="block text-xs">

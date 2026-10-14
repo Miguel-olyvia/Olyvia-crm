@@ -16,7 +16,6 @@ const base: NovoAvulso = {
   descricao: "Visita",
   quantidade: 100,
   valorUnitario: 0.4,
-  devolucao: null,
   autor: "Sofia Rebelo",
   podeProcessar: true,
 };
@@ -47,9 +46,9 @@ describe("store do custo", () => {
     expect(novo?.mesContagem).toBe(diaIso(0).slice(0, 7));
   });
 
-  it("o equipamento guarda o valor de compra e não multiplica", () => {
-    registarAvulso({ ...base, tipo: "equipamento", quantidade: 1, valorUnitario: 900, descricao: "Portátil" });
-    expect(lerCusto().avulsos.at(-1)?.valor).toBe(900);
+  it("uma ajuda de custo multiplica os dias pelo valor diário", () => {
+    registarAvulso({ ...base, tipo: "ajuda", quantidade: 2, valorUnitario: 25, descricao: "Feira" });
+    expect(lerCusto().avulsos.at(-1)).toMatchObject({ tipo: "ajuda", valor: 50 });
   });
 
   it("anular exige motivo, mantém o registo visível e marca quem anulou", () => {

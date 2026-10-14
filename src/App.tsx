@@ -101,7 +101,7 @@ const RhCentrosTrabalho = lazy(() => import("./pages/rh-exemplo/RhCentrosTrabalh
 const RhModelosDocumentos = lazy(() => import("./pages/rh-exemplo/RhModelosDocumentos"));
 const RhProcessamentoSalarial = lazy(() => import("./pages/rh-exemplo/RhProcessamentoSalarial"));
 const RhConfiguracaoAdmissao = lazy(() => import("./pages/rh-exemplo/RhConfiguracaoAdmissao"));
-const RhMeusCustos = lazy(() => import("./pages/rh-exemplo/RhMeusCustos"));
+const RhCustos = lazy(() => import("./pages/rh-exemplo/RhCustos"));
 const RhRegrasFimContrato = lazy(() => import("./pages/rh-exemplo/RhRegrasFimContrato"));
 const RhConviteAdmissao = lazy(() => import("./pages/rh-exemplo/RhConviteAdmissao"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
@@ -275,7 +275,7 @@ const App = () => (
                       <Route path="/rh-exemplo/processamento-salarial" element={<ProtectedRoute permission="users.view"><RhProcessamentoSalarial /></ProtectedRoute>} />
                       {/* Link antigo: as horas extra da pessoa passaram a ser uma aba de «O meu ponto». */}
                       <Route path="/rh-exemplo/minhas-horas-extra" element={<Navigate to="/rh-exemplo/assiduidade?aba=horas-extra" replace />} />
-                      <Route path="/rh-exemplo/meus-custos" element={<ProtectedRoute permission="users.view"><RhMeusCustos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/custos" element={<ProtectedRoute permission="users.view"><RhCustos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />

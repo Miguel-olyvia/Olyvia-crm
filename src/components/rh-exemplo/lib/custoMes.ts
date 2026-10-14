@@ -3,7 +3,7 @@
  * do mês, os valores avulsos da pessoa e as definições da empresa, e devolve cada linha do quadro (fluxo 11).
  *
  * A parte sujeita a encargos é só o salário em si; os quilómetros e as ajudas de custo ficam de fora. O equipamento
- * nunca entra no bruto: pesa só nos outros custos, 1/36 por mês.
+ * (lista própria, `equipamentos.ts`) nunca entra no bruto: pesa só nos outros custos, 1/36 por mês.
  */
 import {
   arredondar,
@@ -11,7 +11,6 @@ import {
   custoRepartido14em12,
   custoTotalDoMes,
   encargosDaEmpresa,
-  equipamentoDoMes,
   equipamentoPorMes,
   horasPrevistasDoMes,
   saldoBancoEmEuros,
@@ -19,14 +18,15 @@ import {
   taxaEfetiva,
   type MesIso,
 } from "./custo";
+import { equipamentosDoMes, type EquipamentoPessoa } from "./equipamentos";
 
-export type TipoAvulso = "km" | "ajuda" | "equipamento";
+export type TipoAvulso = "km" | "ajuda";
 
 export interface AvulsoCusto {
   id: string;
   pessoaId: string;
   tipo: TipoAvulso;
-  /** A data que quem registou indicou (a entrega, no equipamento). */
+  /** A data que quem registou indicou. */
   data: string;
   /** O mês em que conta: o da data, ou o primeiro mês aberto se o da data já fechou. */
   mesContagem: MesIso;
@@ -35,9 +35,8 @@ export interface AvulsoCusto {
   descricao: string;
   quantidade: number;
   valorUnitario: number;
-  /** km x valor por km, dias x valor diário, ou o valor de compra do equipamento. */
+  /** km x valor por km, ou dias x valor diário. */
   valor: number;
-  devolucao: string | null;
   autor: string;
   criadoEm: string;
   anulado: { motivo: string; por: string; em: string } | null;
@@ -55,6 +54,8 @@ export interface EntradaCustoMes {
   mes: MesIso;
   salarioMes: number | null;
   avulsos: readonly AvulsoCusto[];
+  /** Os equipamentos da pessoa (todos): só pesam os que estão dentro dos 36 meses e não devolvidos nesse mês. */
+  equipamentos: readonly EquipamentoPessoa[];
   definicoes: DefinicoesCusto;
   excecaoTaxa: number | null;
   horasSemanais: number;
@@ -69,8 +70,14 @@ export interface CustoDoMes {
   kmEAjudas: number;
   bruto: number | null;
   parteSujeita: number | null;
+  /** Encargos da empresa com o seguro incluído (taxa + seguro). */
   encargos: number;
+  /** Só o seguro (acidentes de trabalho): `encargosTaxa + seguro = encargos`, sempre ao cêntimo. */
+  seguro: number;
+  encargosTaxa: number;
+  /** A amortização dos equipamentos do mês. */
   outrosCustos: number;
+  nEquipamentos: number;
   total: number | null;
   repartido: number | null;
   horasPrevistas: number;
@@ -84,16 +91,13 @@ export interface CustoDoMes {
 export const avulsosAtivos = (avulsos: readonly AvulsoCusto[]): AvulsoCusto[] => avulsos.filter((a) => a.anulado === null);
 
 export function custoDoMes(e: EntradaCustoMes): CustoDoMes {
-  const ativos = avulsosAtivos(e.avulsos);
-  const kmEAjudas = somarMeses(ativos.filter((a) => a.tipo !== "equipamento" && a.mesContagem === e.mes).map((a) => a.valor));
-  const outrosCustos = somarMeses(
-    ativos
-      .filter((a) => a.tipo === "equipamento" && equipamentoDoMes({ entrega: a.data, devolucao: a.devolucao }, e.mes))
-      .map((a) => equipamentoPorMes(a.valorUnitario)),
-  );
+  const kmEAjudas = somarMeses(avulsosAtivos(e.avulsos).filter((a) => a.mesContagem === e.mes).map((a) => a.valor));
+  const doMes = equipamentosDoMes(e.equipamentos, e.mes);
+  const outrosCustos = somarMeses(doMes.map((x) => equipamentoPorMes(x.valor)));
   const bruto = e.salarioMes === null ? null : arredondar(e.salarioMes + kmEAjudas);
   const taxa = taxaEfetiva(e.definicoes.taxaEmpresa, e.excecaoTaxa);
   const encargos = e.salarioMes === null ? 0 : encargosDaEmpresa(e.salarioMes, taxa, e.definicoes.seguro);
+  const seguro = e.salarioMes === null ? 0 : arredondar((e.salarioMes * e.definicoes.seguro) / 100);
   const total = custoTotalDoMes(bruto, encargos, outrosCustos);
   const horasPrevistas = horasPrevistasDoMes(e.horasSemanais, e.mes);
   return {
@@ -102,7 +106,10 @@ export function custoDoMes(e: EntradaCustoMes): CustoDoMes {
     bruto,
     parteSujeita: e.salarioMes,
     encargos,
+    seguro,
+    encargosTaxa: arredondar(encargos - seguro),
     outrosCustos,
+    nEquipamentos: doMes.length,
     total,
     repartido: custoRepartido14em12(e.salarioMes, encargos),
     horasPrevistas,

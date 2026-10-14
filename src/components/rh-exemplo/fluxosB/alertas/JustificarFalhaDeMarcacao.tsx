@@ -27,7 +27,8 @@ import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
 import { useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
-function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaDia; onFechar: () => void }) {
+/** O formulário de justificação (hora real, motivo, anexo); usado aqui e no detalhe do dia do calendário. */
+export function FormularioDeJustificacao({ alerta, onFechar }: { alerta: AlertaDia; onFechar: () => void }) {
   const { t } = useTranslation();
   const [horaReal, setHoraReal] = useState("18:00");
   const [motivo, setMotivo] = useState("");

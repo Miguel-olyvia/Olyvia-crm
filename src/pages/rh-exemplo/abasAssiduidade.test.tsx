@@ -1,5 +1,5 @@
-// Arranque das abas da assiduidade («O meu ponto» e ficha de RH), da barra de abas da ficha (Custo sempre alcançável) e de
-// «Os meus custos». Tudo em memória, sem base. A data é fixa (14/10/2026) para os dados de exemplo serem os mesmos.
+// Arranque das abas da assiduidade («O meu ponto» e ficha de RH), da barra de abas da ficha (Custo sempre alcançável) e do
+// menu de «A minha área». Tudo em memória, sem base. A data é fixa (14/10/2026) para os dados de exemplo serem os mesmos.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -7,7 +7,7 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import { Tabs } from "@/components/ui/tabs";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import { repor } from "@/components/rh-exemplo/dados/loja";
-import { reporCusto, registarAvulso } from "@/components/rh-exemplo/dados/lojaCusto";
+import { reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { reporFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { reporGestao } from "@/components/rh-exemplo/dados/lojaGestao";
 import { reporFluxosC } from "@/components/rh-exemplo/fluxosC/lojaFluxosC";
@@ -17,7 +17,6 @@ import { PessoaAssiduidadeTab } from "@/components/rh-exemplo/PessoaAssiduidadeT
 import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssiduidade";
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import PessoaRhDetalhe from "./PessoaRhDetalhe";
-import RhMeusCustos from "./RhMeusCustos";
 import RhMeuPonto from "./RhMeuPonto";
 
 const TUDO: PermissoesAssiduidade = {
@@ -232,27 +231,20 @@ describe("a ficha: o separador Custo está sempre alcançável", () => {
   });
 });
 
-describe("A minha área: o menu e «Os meus custos»", () => {
+describe("A minha área: o menu", () => {
   const grupo = () => menuSections.find((s) => s.id === "rh-exemplo-eu");
+  const gestao = () => menuSections.find((s) => s.id === "rh-exemplo");
 
-  it("o menu já não tem «As minhas horas extra» e tem «Os meus custos»", () => {
+  it("o menu já não tem «As minhas horas extra» nem «Os meus custos» em A minha área", () => {
     expect(grupo()?.items?.some((i) => i.to === "/rh-exemplo/minhas-horas-extra")).toBe(false);
     expect(grupo()?.paths).not.toContain("/rh-exemplo/minhas-horas-extra");
-    expect(grupo()?.items?.some((i) => i.to === "/rh-exemplo/meus-custos")).toBe(true);
-    expect(grupo()?.paths).toContain("/rh-exemplo/meus-custos");
+    expect(grupo()?.items?.some((i) => i.to === "/rh-exemplo/meus-custos")).toBe(false);
+    expect(grupo()?.paths).not.toContain("/rh-exemplo/meus-custos");
+    expect(grupo()?.items?.map((i) => i.to)).toEqual(["/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade"]);
   });
 
-  it("«Os meus custos» mostra só os valores avulsos da própria pessoa, sem encargos nem custo da empresa", () => {
-    registarAvulso({
-      pessoaId: "p-sofia", tipo: "km", data: "2026-10-10", descricao: "Visita ao fornecedor", quantidade: 30, valorUnitario: 0.4,
-      devolucao: null, autor: "Sofia", podeProcessar: true,
-    });
-    noRouter("/rh-exemplo/meus-custos", "/rh-exemplo/meus-custos", <RhMeusCustos />);
-    expect(screen.getByRole("heading", { level: 1, name: /Os meus custos/ })).toBeInTheDocument();
-    expect(screen.getByText("Visita ao fornecedor")).toBeInTheDocument();
-    expect(screen.queryByText("Custo total do mês")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Registar valor" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Anular" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/rhA\.|rhAbas\./)).not.toBeInTheDocument();
+  it("o módulo «Custos» está no grupo de Recursos Humanos, com o caminho em `paths`", () => {
+    expect(gestao()?.items?.some((i) => i.to === "/rh-exemplo/custos" && i.labelKey === "rhCustos.menu")).toBe(true);
+    expect(gestao()?.paths).toContain("/rh-exemplo/custos");
   });
 });

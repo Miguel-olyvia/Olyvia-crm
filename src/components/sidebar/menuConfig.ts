@@ -344,6 +344,7 @@ export const menuSections: MenuSection[] = [
       "/rh-exemplo/centros",
       "/rh-exemplo/documentos/modelos",
       "/rh-exemplo/processamento-salarial",
+      "/rh-exemplo/custos",
       "/rh-exemplo/admissao",
       "/rh-exemplo/contratos",
     ],
@@ -354,6 +355,7 @@ export const menuSections: MenuSection[] = [
       { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },
       { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
       { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
+      { to: "/rh-exemplo/custos", icon: Coins, labelKey: "rhCustos.menu", permission: "users.view" },
       // «Campos de admissão» e «Regras de fim de contrato» não têm entrada no menu: abrem por dois botões no cabeçalho da
       // lista de Pessoas, como no ramo de RH real. Os caminhos continuam em `paths` para o grupo se manter aberto nesses ecrãs.
     ],
@@ -363,13 +365,12 @@ export const menuSections: MenuSection[] = [
     id: "rh-exemplo-eu",
     icon: CalendarDays,
     labelKey: "sidebar.rhExemploEu",
-    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos", "/rh-exemplo/meus-custos"],
+    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos"],
     permissions: ["users.view"],
     items: [
       { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
       { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
-      { to: "/rh-exemplo/meus-custos", icon: Coins, labelKey: "rhAbas.menu.meusCustos", permission: "users.view" },
     ],
   },
   {

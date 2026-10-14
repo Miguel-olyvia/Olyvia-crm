@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acumulados, custoDoMes, mesesEntre, type AvulsoCusto, type DefinicoesCusto } from "./custoMes";
+import type { EquipamentoPessoa } from "./equipamentos";
 
 const DEFINICOES: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 0, valorPorKm: 0.4, ajudaPorDia: 25 };
 
@@ -14,14 +15,28 @@ const avulso = (parcial: Partial<AvulsoCusto>): AvulsoCusto => ({
   quantidade: 120,
   valorUnitario: 0.4,
   valor: 48,
-  devolucao: null,
   autor: "RH",
   criadoEm: "2026-11-05T10:00:00Z",
   anulado: null,
   ...parcial,
 });
 
+const portatil = (parcial: Partial<EquipamentoPessoa> = {}): EquipamentoPessoa => ({
+  id: "e1",
+  pessoaId: "p1",
+  tipo: "portatil",
+  descricao: "Portátil",
+  valor: 900,
+  entrega: "2026-09-10",
+  estado: "atribuido",
+  devolucao: null,
+  estadoDevolucao: null,
+  autor: "RH",
+  ...parcial,
+});
+
 const base = {
+  equipamentos: [] as EquipamentoPessoa[],
   mes: "2026-11",
   salarioMes: 1200,
   definicoes: DEFINICOES,
@@ -35,11 +50,8 @@ describe("custoDoMes", () => {
   it("soma km e ajudas ao bruto mas não à parte sujeita; o equipamento só pesa nos outros custos", () => {
     const r = custoDoMes({
       ...base,
-      avulsos: [
-        avulso({}),
-        avulso({ id: "a2", tipo: "ajuda", valor: 50, quantidade: 2, valorUnitario: 25 }),
-        avulso({ id: "a3", tipo: "equipamento", data: "2026-09-10", mesContagem: "2026-09", valor: 900, valorUnitario: 900, quantidade: 1 }),
-      ],
+      avulsos: [avulso({}), avulso({ id: "a2", tipo: "ajuda", valor: 50, quantidade: 2, valorUnitario: 25 })],
+      equipamentos: [portatil()],
     });
     expect(r.kmEAjudas).toBe(98);
     expect(r.bruto).toBe(1298);

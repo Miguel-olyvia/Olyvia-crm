@@ -17,6 +17,8 @@ interface FichaPessoaRhProps {
   idsVisiveis: string[];
   /** Passa à pessoa `id` sem fechar o painel. */
   aoIrPara: (id: string) => void;
+  /** A aba que abre primeiro (por omissão a Visão geral); o módulo «Custos» abre a ficha logo no separador Custo. */
+  abaInicial?: string;
 }
 
 const ABA_INICIAL = "visaoGeral";
@@ -29,14 +31,14 @@ function focoDeRegresso(origem: HTMLElement | null): HTMLElement | null {
   return titulo;
 }
 
-export function FichaPessoaRh({ id, aberta, aoFechar, idsVisiveis, aoIrPara }: FichaPessoaRhProps) {
+export function FichaPessoaRh({ id, aberta, aoFechar, idsVisiveis, aoIrPara, abaInicial = ABA_INICIAL }: FichaPessoaRhProps) {
   const origem = useRef<HTMLElement | null>(null);
-  const [aba, setAba] = useState(ABA_INICIAL);
+  const [aba, setAba] = useState(abaInicial);
   const viz = vizinhas(idsVisiveis, id ?? "");
   const ir = useTeclasFicha(aberta && id !== null, viz, id ?? undefined, aoIrPara);
   const mudarAberto = (valor: boolean) => {
     if (valor) return;
-    setAba(ABA_INICIAL);
+    setAba(abaInicial);
     aoFechar();
   };
   return (

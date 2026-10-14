@@ -11,6 +11,7 @@ import { EstadoHoraExtraBadge } from "@/components/rh-exemplo/fluxosC/EstadoHora
 import { estadoVisivel, type HoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ChipDoDia } from "./ChipDoDia";
+import { JustificacaoDoDia } from "./JustificacaoDoDia";
 import { duracao, duracaoComSinal, textoFeito, textoPrevisto } from "./formatos";
 import type { DiaCalendario } from "./montarMes";
 
@@ -22,6 +23,9 @@ interface Props {
   podeDecidir: boolean;
   /** Pode corrigir ou justificar no registo do dia; senao so o consulta. */
   podeCorrigir: boolean;
+  /** Quem ve e a propria pessoa: nunca corrige, so justifica (dentro do prazo) e consulta. */
+  souAPessoa?: boolean;
+  pessoaId: string;
   aoFechar: () => void;
   aoAbrirRegisto: (data: string) => void;
 }
@@ -63,7 +67,7 @@ function LinhaHoraExtra({ hora, dataLonga, podeDecidir, aoDecidir }: {
   );
 }
 
-export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorrigir, aoFechar, aoAbrirRegisto }: Props) {
+export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorrigir, souAPessoa = false, pessoaId, aoFechar, aoAbrirRegisto }: Props) {
   const { t } = useTranslation();
   const [pedido, setPedido] = useState<PedidoDecisao | null>(null);
   if (!dia) return null;
@@ -120,9 +124,13 @@ export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorr
                 </ul>
               </Seccao>
             )}
-            <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => aoAbrirRegisto(dia.data)}>
-              {t(podeCorrigir ? "rhCal.detalhe.corrigir" : "rhCal.detalhe.verRegisto")}
-            </Button>
+            {souAPessoa ? (
+              <JustificacaoDoDia pessoaId={pessoaId} data={dia.data} />
+            ) : (
+              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => aoAbrirRegisto(dia.data)}>
+                {t(podeCorrigir ? "rhCal.detalhe.corrigir" : "rhCal.detalhe.verRegisto")}
+              </Button>
+            )}
           </div>
         </SheetContent>
       </Sheet>

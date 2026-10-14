@@ -42,6 +42,7 @@ import { JustificacaoFalta } from "@/components/rh-exemplo/assiduidade/Justifica
 import { MarcarFaltaSheet, type FaltaInicial } from "@/components/rh-exemplo/assiduidade/MarcarFaltaSheet";
 import { PicagemSheet } from "@/components/rh-exemplo/assiduidade/PicagemSheet";
 import { CorrigirRealizadoSheet } from "@/components/rh-exemplo/assiduidade/CorrigirRealizadoSheet";
+import { permissoesDaVista } from "@/components/rh-exemplo/lib/vistaDaPessoa";
 import {
   LEITOR_FALTAS,
   LEITOR_PICAGENS,
@@ -84,10 +85,12 @@ export function PainelDoDia({
   souAPessoa,
   assiduidade,
   locais,
-  permissoes,
+  permissoes: permissoesDaConta,
   onFechar,
 }: PainelDoDiaProps) {
   const { t } = useTranslation();
+  // Na vista da propria pessoa nao ha Corrigir, Marcar falta nem decisoes: so o RH as tem (fluxo 5).
+  const permissoes = permissoesDaVista(permissoesDaConta, souAPessoa);
 
   const [faltaInicial, setFaltaInicial] = useState<FaltaInicial | null>(null);
   const [picagemSheet, setPicagemSheet] = useState<

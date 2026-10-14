@@ -11,3 +11,14 @@ export function nomeDoMes(mes: string, lingua: string): string {
   const [ano, m] = mes.split("-").map(Number);
   return new Date(Date.UTC(ano, m - 1, 1)).toLocaleDateString(lingua === "pt" ? "pt-PT" : "en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 }
+
+/** 58.2 -> «58,2 %». */
+export function pct(valor: number): string {
+  return `${new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(valor)} %`;
+}
+
+/** AAAA-MM-DD -> DD/MM/AAAA. */
+export function dataPt(iso: string): string {
+  const [a, m, d] = iso.split("-");
+  return a && m && d ? `${d}/${m}/${a}` : iso;
+}

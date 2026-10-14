@@ -1,12 +1,16 @@
 /**
- * O store, em memória, do separador Custo da ficha (fluxo 11): valores avulsos (quilómetros, ajudas de custo, equipamento),
- * as definições da empresa (taxa, seguro, valor por km e por dia) e a exceção de taxa por pessoa. Nada aqui fala com lado
- * nenhum; recarregar a página repõe tudo. É um store próprio (não toca no `loja.ts`): `reporCusto()` volta ao início.
+ * O store, em memória, do custo (fluxo 11): valores avulsos (quilómetros, ajudas de custo), equipamentos atribuídos a cada
+ * pessoa, as definições da empresa (taxa, seguro, valor por km e por dia), a exceção de taxa por pessoa e o mês que o
+ * separador Custo da ficha e o módulo «Custos» mostram. Nada aqui fala com lado nenhum; recarregar a página repõe tudo.
+ * É um store próprio (não toca no `loja.ts`): `reporCusto()` volta ao início.
  *
- * O mês aberto é o mês de hoje; os anteriores contam-se como fechados (regra de exemplo, o fecho real é do fluxo 10).
+ * O mês aberto para os avulsos é o mês de hoje; os anteriores contam-se como fechados (regra de exemplo, o fecho real é do
+ * fluxo 10). O mês mostrado começa em Setembro de 2026, o mês do «Cálculo do mês».
  */
 import { useSyncExternalStore } from "react";
-import { diaIso, hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { avulsosIniciais, equipamentosIniciais } from "@/components/rh-exemplo/dados/custoExemplo";
+import { hojeIso } from "@/components/rh-exemplo/dados/datas";
+import { MES_PROCESSAVEL } from "@/components/rh-exemplo/dados/assiduidadeSetembro";
 import {
   anularAvulsoErro,
   mesDaData,
@@ -18,11 +22,23 @@ import {
   type ErroAvulso,
 } from "@/components/rh-exemplo/lib/custo";
 import type { AvulsoCusto, DefinicoesCusto, TipoAvulso } from "@/components/rh-exemplo/lib/custoMes";
+import {
+  validarDevolucao,
+  validarEquipamento,
+  type ErroDevolucao,
+  type ErroEquipamento,
+  type EquipamentoPessoa,
+  type EstadoDevolucao,
+  type TipoEquipamento,
+} from "@/components/rh-exemplo/lib/equipamentos";
 
 interface EstadoCusto {
   avulsos: AvulsoCusto[];
+  equipamentos: EquipamentoPessoa[];
   definicoes: DefinicoesCusto;
   excecoes: Record<string, number | null>;
+  /** O mês («AAAA-MM») que a aba Custo e o módulo «Custos» mostram. */
+  mes: string;
 }
 
 export interface NovoAvulso {
@@ -30,30 +46,32 @@ export interface NovoAvulso {
   tipo: TipoAvulso;
   data: string;
   descricao: string;
-  /** km, dias (ou 1 num valor único) ou, no equipamento, 1. */
+  /** km ou dias (1 num valor único). */
   quantidade: number;
-  /** Valor por km, por dia, valor único ou valor de compra: editável ao registar. */
+  /** Valor por km, por dia ou valor único: editável ao registar. */
   valorUnitario: number;
-  devolucao: string | null;
   autor: string;
   podeProcessar: boolean;
 }
 
-const DEFINICOES_INICIAIS: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 0, valorPorKm: 0.4, ajudaPorDia: 25 };
-
-const semanas = (n: number) => diaIso(-7 * n);
-
-function avulsosIniciais(): AvulsoCusto[] {
-  const mes = mesDaData(hojeIso());
-  const base = { dataReal: null, devolucao: null, autor: "Sofia Rebelo", criadoEm: new Date().toISOString(), anulado: null };
-  return [
-    { ...base, id: "cu-1", pessoaId: "p-tiago", tipo: "km", data: hojeIso(), mesContagem: mes, descricao: "Visita ao cliente do Porto", quantidade: 120, valorUnitario: 0.4, valor: 48 },
-    { ...base, id: "cu-2", pessoaId: "p-tiago", tipo: "ajuda", data: hojeIso(), mesContagem: mes, descricao: "Deslocação a feira", quantidade: 2, valorUnitario: 25, valor: 50 },
-    { ...base, id: "cu-3", pessoaId: "p-rui", tipo: "equipamento", data: semanas(9), mesContagem: mesDaData(semanas(9)), descricao: "Portátil", quantidade: 1, valorUnitario: 900, valor: 900 },
-  ];
+export interface NovoEquipamento {
+  pessoaId: string;
+  tipo: TipoEquipamento;
+  descricao: string;
+  valor: number;
+  entrega: string;
+  autor: string;
 }
 
-const estadoInicial = (): EstadoCusto => ({ avulsos: avulsosIniciais(), definicoes: DEFINICOES_INICIAIS, excecoes: {} });
+const DEFINICOES_INICIAIS: DefinicoesCusto = { taxaEmpresa: 23.75, seguro: 1.5, valorPorKm: 0.4, ajudaPorDia: 25 };
+
+const estadoInicial = (): EstadoCusto => ({
+  avulsos: avulsosIniciais(),
+  equipamentos: equipamentosIniciais(),
+  definicoes: DEFINICOES_INICIAIS,
+  excecoes: {},
+  mes: MES_PROCESSAVEL,
+});
 
 let estado: EstadoCusto = estadoInicial();
 let contador = 0;
@@ -81,9 +99,7 @@ export function useCusto<T>(selector: (e: EstadoCusto) => T): T {
 export const mesAbertoDoCusto = (): string => mesDaData(hojeIso());
 
 function valorDoAvulso(a: Pick<NovoAvulso, "tipo" | "quantidade" | "valorUnitario">): number {
-  if (a.tipo === "km") return valorDeKm(a.quantidade, a.valorUnitario);
-  if (a.tipo === "ajuda") return valorDeAjudaDeCusto(a.quantidade, a.valorUnitario);
-  return a.valorUnitario;
+  return a.tipo === "km" ? valorDeKm(a.quantidade, a.valorUnitario) : valorDeAjudaDeCusto(a.quantidade, a.valorUnitario);
 }
 
 /** Valida e guarda um valor avulso, com autor e data. Devolve o motivo da recusa, se houver. */
@@ -104,7 +120,6 @@ export function registarAvulso(novo: NovoAvulso): { erro: ErroAvulso | null } {
     quantidade: novo.quantidade,
     valorUnitario: novo.valorUnitario,
     valor,
-    devolucao: novo.tipo === "equipamento" ? novo.devolucao : null,
     autor: novo.autor,
     criadoEm: new Date().toISOString(),
     anulado: null,
@@ -125,6 +140,35 @@ export function anularAvulso(id: string, motivo: string, por: string, podeProces
   return { erro: null };
 }
 
+/** Atribui um equipamento à pessoa: passa a pesar no custo (valor / 36 por mês) a partir do mês da entrega. */
+export function atribuirEquipamento(novo: NovoEquipamento): { erro: ErroEquipamento | null; id: string | null } {
+  const erro = validarEquipamento(novo);
+  if (erro) return { erro, id: null };
+  contador += 1;
+  const id = `eq-novo-${contador}`;
+  const registo: EquipamentoPessoa = {
+    id, pessoaId: novo.pessoaId, tipo: novo.tipo, descricao: novo.descricao.trim(), valor: novo.valor, entrega: novo.entrega,
+    estado: "atribuido", devolucao: null, estadoDevolucao: null, autor: novo.autor,
+  };
+  definir({ ...estado, equipamentos: [...estado.equipamentos, registo] });
+  return { erro: null, id };
+}
+
+/** Devolve um equipamento atribuído: a amortização pára a partir do mês seguinte ao da devolução. */
+export function devolverEquipamento(id: string, data: string, estadoDevolucao: EstadoDevolucao | string): { erro: ErroDevolucao | null } {
+  const atual = estado.equipamentos.find((e) => e.id === id && e.estado === "atribuido");
+  if (!atual) return { erro: "semData" };
+  const erro = validarDevolucao(atual, data, estadoDevolucao);
+  if (erro) return { erro };
+  definir({
+    ...estado,
+    equipamentos: estado.equipamentos.map((e) =>
+      e.id === id ? { ...e, estado: "devolvido", devolucao: data, estadoDevolucao: estadoDevolucao as EstadoDevolucao } : e,
+    ),
+  });
+  return { erro: null };
+}
+
 export function definirDefinicoesCusto(definicoes: DefinicoesCusto): void {
   definir({ ...estado, definicoes });
 }
@@ -132,6 +176,11 @@ export function definirDefinicoesCusto(definicoes: DefinicoesCusto): void {
 /** `null` tira a exceção e volta à taxa da empresa. */
 export function definirExcecaoTaxa(pessoaId: string, taxa: number | null): void {
   definir({ ...estado, excecoes: { ...estado.excecoes, [pessoaId]: taxa } });
+}
+
+/** O mês («AAAA-MM») que a aba Custo e o módulo «Custos» mostram; um valor que não seja um mês é ignorado. */
+export function definirMesCusto(mes: string): void {
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) definir({ ...estado, mes });
 }
 
 export function reporCusto(): void {

@@ -20,6 +20,7 @@ import { rhExemploFluxosBTranslations } from "@/translations/rhExemploFluxosB";
 import { rhExemploFluxosDTranslations } from "@/translations/rhExemploFluxosD";
 import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalendario";
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
+import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -106,9 +107,14 @@ Object.keys(rhExemploCalendarioTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCalendarioTranslations[lang as keyof typeof rhExemploCalendarioTranslations] };
 });
 
-// Abas da assiduidade, barra de abas da ficha e «Os meus custos» (`rhAbas.*`).
+// Abas da assiduidade e barra de abas da ficha (`rhAbas.*`).
 Object.keys(rhExemploAbasTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAbasTranslations[lang as keyof typeof rhExemploAbasTranslations] };
+});
+
+// Módulo «Custos» do RH de exemplo e secção «Equipamentos» da aba Custo (`rhCustos.*`).
+Object.keys(rhExemploCustosTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCustosTranslations[lang as keyof typeof rhExemploCustosTranslations] };
 });
 
 export const useTranslation = () => {

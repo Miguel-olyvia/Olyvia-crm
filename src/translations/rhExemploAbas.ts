@@ -1,4 +1,4 @@
-// Textos das abas da assiduidade («O meu ponto» e ficha de RH), da barra de abas da ficha e de «Os meus custos» nos ecrãs
+// Textos das abas da assiduidade («O meu ponto» e ficha de RH), e da barra de abas da ficha nos ecrãs
 // de Recursos Humanos de exemplo (/rh-exemplo). Módulo próprio, juntado em `useTranslation.ts`.
 // Apenas en/pt: nas outras línguas o `t()` cai para `en`. Os marcadores {x} são substituídos por quem usa a chave.
 export const rhExemploAbasTranslations: Record<"en" | "pt", Record<string, string>> = {
@@ -18,9 +18,6 @@ export const rhExemploAbasTranslations: Record<"en" | "pt", Record<string, strin
     "rhAbas.just.menorPrazo": "Dias úteis que restam à justificação mais urgente: {dias}",
     "rhAbas.fichaAbas.anteriores": "Mostrar as abas anteriores",
     "rhAbas.fichaAbas.seguintes": "Mostrar as abas seguintes",
-    "rhAbas.menu.meusCustos": "Os meus custos",
-    "rhAbas.meusCustos.titulo": "Os meus custos",
-    "rhAbas.meusCustos.semFicha": "Esta conta não tem ficha de RH, por isso não há custos para mostrar.",
   },
   en: {
     "rhAbas.ass.label": "Attendance sections",
@@ -38,8 +35,5 @@ export const rhExemploAbasTranslations: Record<"en" | "pt", Record<string, strin
     "rhAbas.just.menorPrazo": "Working days left for the most urgent justification: {dias}",
     "rhAbas.fichaAbas.anteriores": "Show previous tabs",
     "rhAbas.fichaAbas.seguintes": "Show next tabs",
-    "rhAbas.menu.meusCustos": "My costs",
-    "rhAbas.meusCustos.titulo": "My costs",
-    "rhAbas.meusCustos.semFicha": "This account has no HR record, so there are no costs to show.",
   },
 };

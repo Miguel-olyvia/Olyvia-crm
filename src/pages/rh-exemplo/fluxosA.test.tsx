@@ -133,12 +133,10 @@ describe("frente A: separador Custo da ficha", () => {
     expect(within(depois).queryByRole("button", { name: "Anular" })).not.toBeInTheDocument();
   });
 
-  it("na visão da pessoa só se vêem os valores avulsos, sem encargos, custo total nem botões de registar", () => {
+  it("não há «visão da pessoa» do custo: a pessoa não vê o seu custo e a ficha só tem a vista do RH", () => {
     const ficha = abrirCusto();
-    fireEvent.click(within(ficha).getByRole("button", { name: "Visão da pessoa" }));
-    expect(within(ficha).queryByText("Custo total do mês")).not.toBeInTheDocument();
-    expect(within(ficha).queryByText("Encargos da empresa")).not.toBeInTheDocument();
-    expect(within(ficha).queryByRole("button", { name: "Registar valor" })).not.toBeInTheDocument();
-    expect(within(ficha).getByText("Visita ao cliente do Porto")).toBeInTheDocument();
+    expect(within(ficha).queryByRole("button", { name: "Visão da pessoa" })).not.toBeInTheDocument();
+    expect(within(ficha).getByRole("button", { name: "Registar valor" })).toBeInTheDocument();
+    expect(within(ficha).getByText("Custo total do mês")).toBeInTheDocument();
   });
 });

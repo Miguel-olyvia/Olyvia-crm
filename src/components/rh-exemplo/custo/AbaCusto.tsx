@@ -1,61 +1,38 @@
 /**
- * O separador «Custo» da ficha (fluxo 11): quanto custa a pessoa à empresa. Tudo em memória, com os dados de exemplo.
- * Há duas vistas: a do RH (quem vê salários: custo, encargos, valores avulsos) e a «visão da pessoa», em que a própria
- * pessoa vê só os seus valores avulsos, para conferir os quilómetros, sem encargos nem custo total.
+ * O separador «Custo» da ficha (fluxo 11): quanto custa a pessoa à empresa, no mês escolhido. Mostra o quadro do mês (a
+ * retribuição é a do «Cálculo do mês»), a composição, os equipamentos que a pessoa tem (amortização por 36 meses), os valores
+ * avulsos (quilómetros e ajudas de custo) e os encargos. Só para quem vê salários; a própria pessoa não vê o custo.
+ * Tudo em memória, com os dados de exemplo.
  */
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { FOCO } from "@/components/ficha-comum/estilosAbas";
+import { Seccao } from "@/components/ficha-comum/Seccao";
+import { useCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import type { AbaProps } from "@/components/rh-exemplo/ficha/AbasPessoa";
 import { useTranslation } from "@/hooks/useTranslation";
-import { cn } from "@/lib/utils";
+import { BarraComposicao } from "./BarraComposicao";
 import { CustoAvulsos } from "./CustoAvulsos";
 import { CustoEncargos } from "./CustoEncargos";
+import { CustoEquipamentos } from "./CustoEquipamentos";
 import { CustoResumo } from "./CustoResumo";
+import { SeletorMesCusto } from "./SeletorMesCusto";
 import { useCustoDaPessoa } from "./useCustoDaPessoa";
-import { VisaoPessoaCusto } from "./VisaoPessoaCusto";
 
-type Visao = "rh" | "pessoa";
-
-function SeletorDeVisao({ visao, aoMudar }: { visao: Visao; aoMudar: (v: Visao) => void }) {
+export function AbaCusto({ pessoa, ctx }: AbaProps) {
   const { t } = useTranslation();
-  return (
-    <div role="group" aria-label={t("rhA.custo.visao")} className="flex flex-wrap items-center gap-2">
-      <span className="text-sm text-muted-foreground">{t("rhA.custo.visao")}</span>
-      {(["rh", "pessoa"] as const).map((v) => (
-        <Button
-          key={v} type="button" size="sm" variant={visao === v ? "default" : "outline"} aria-pressed={visao === v}
-          onClick={() => aoMudar(v)} className={cn("min-h-11", FOCO)}
-        >
-          {visao === v && <span aria-hidden="true" className="mr-1">✓</span>}
-          {t(`rhA.custo.visao.${v}`)}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
-export function AbaCusto({ ficha, pessoa, ctx }: AbaProps) {
-  const { t } = useTranslation();
-  const [visao, setVisao] = useState<Visao>("rh");
-  const custo = useCustoDaPessoa({
-    pessoaId: pessoa.id, admissao: pessoa.data_admissao, retribuicao: ficha.retribuicao, horasSemanais: ctx.horasContratadasSemanais,
-  });
+  const mes = useCusto((e) => e.mes);
+  const custo = useCustoDaPessoa(pessoa.id, mes);
   const autor = ctx.nomePorPessoaId.get(ctx.minhaPessoaId ?? "") ?? t("rhA.custo.autorOmissao");
-  const rh = visao === "rh";
+  if (!custo) return null;
 
   return (
     <div className="space-y-4">
-      <SeletorDeVisao visao={visao} aoMudar={setVisao} />
-      {rh ? (
-        <>
-          <CustoResumo custo={custo} />
-          <CustoAvulsos pessoaId={pessoa.id} autor={autor} avulsos={custo.avulsos} podeGerir />
-          <CustoEncargos pessoaId={pessoa.id} />
-        </>
-      ) : (
-        <VisaoPessoaCusto pessoaId={pessoa.id} nome={pessoa.nome_completo} avulsos={custo.avulsos} />
-      )}
+      <SeletorMesCusto id="rhCustos-ficha-mes" rotulo={t("rhCustos.mesCusto")} />
+      <CustoResumo custo={custo} />
+      <Seccao titulo={t("rhCustos.comp.fichaTitulo")}>
+        <BarraComposicao partes={custo.composicao} titulo={t("rhCustos.comp.titulo", { nome: pessoa.nome_completo })} />
+      </Seccao>
+      <CustoEquipamentos pessoaId={pessoa.id} pessoaNome={pessoa.nome_completo} mes={mes} autor={autor} equipamentos={custo.equipamentos} />
+      <CustoAvulsos pessoaId={pessoa.id} autor={autor} avulsos={custo.avulsos} podeGerir />
+      <CustoEncargos pessoaId={pessoa.id} />
     </div>
   );
 }
