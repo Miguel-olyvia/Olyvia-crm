@@ -2,7 +2,7 @@
 // Sem React. Os valores dos formulários são texto (como no HTML). Cada `gravar*` volta a validar e recusa com ErroFrota: corre dentro de executar()
 // (loja.ts), numa cópia da base, por isso uma regra que recusa não deixa nada a meio.
 import { HOJE, addDias, addMeses, fData, fEur, fKm, falhar, uid } from "./base";
-import { PESSOA_TECNICO, lerPerfilFrota, pode, porqueNao, type AcaoFrota } from "./perfil";
+import { PESSOA_TECNICO, lerPerfilFrota, pode, porqueNao, type AcaoFrota, type PerfilFrota } from "./perfil";
 import { ESTADOS, VENC, atribEm, bloqueios, cartaOk, ocupada, pessoa, quemConduzia, revisao, viatura, viaturaDe } from "./regras";
 import { CENTROS, OFICINAS } from "./seed";
 import type { ChaveVenc, EstadoViatura, Frota, Ocorrencia, Viatura } from "./tipos";
@@ -10,9 +10,24 @@ import type { ChaveVenc, EstadoViatura, Frota, Ocorrencia, Viatura } from "./tip
 export type Vals = Record<string, string>;
 export type Erros = Record<string, string>;
 
-/** Recusa a ação se o perfil simulado não a pode fazer (o porquê é o do botão desativado). O técnico só age sobre a sua própria viatura (`vid`). */
-export function exigir(acao: AcaoFrota, F?: Frota, vid?: string): void {
-  const p = lerPerfilFrota();
+/**
+ * O perfil com que as ações correm quando quem as chama o fixa (comPerfilFrota): a Frota de exemplo da app real corre
+ * sempre como "gestor" — lá decide a permissão real — sem mexer no perfil simulado global do protótipo.
+ */
+let perfilFixo: PerfilFrota | null = null;
+/** Corre `fn` com as ações a verem o perfil `p` (em vez do perfil simulado do protótipo). O perfil do protótipo não muda. */
+export function comPerfilFrota<T>(p: PerfilFrota, fn: () => T): T {
+  const antes = perfilFixo;
+  perfilFixo = p;
+  try { return fn(); } finally { perfilFixo = antes; }
+}
+
+/**
+ * Recusa a ação se o perfil não a pode fazer (o porquê é o do botão desativado). O técnico só age sobre a sua própria viatura (`vid`).
+ * O perfil é, por esta ordem: o passado em `perfil`, o fixado por comPerfilFrota, ou o perfil simulado do protótipo.
+ */
+export function exigir(acao: AcaoFrota, F?: Frota, vid?: string, perfil: PerfilFrota = perfilFixo ?? lerPerfilFrota()): void {
+  const p = perfil;
   if (!pode(p, acao)) falhar(porqueNao(p));
   if (p === "tecnico" && F && vid) {
     const minha = viaturaDe(F, PESSOA_TECNICO);

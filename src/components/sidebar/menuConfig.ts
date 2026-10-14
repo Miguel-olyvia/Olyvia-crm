@@ -49,6 +49,12 @@ import {
   FolderOpen,
   MapPin,
   Hourglass,
+  KeyRound,
+  Fuel,
+  FileBadge,
+  TriangleAlert,
+  Waypoints,
+  CarFront,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -297,6 +303,31 @@ export const menuSections: MenuSection[] = [
           { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses", permission: "warehouses.view" },
         ],
       },
+    ],
+  },
+  {
+    // Frota de exemplo (dados de exemplo no navegador, sem tabelas até a migração ser aprovada), a seguir ao Inventário:
+    // as carrinhas são armazéns móveis. Sem permissões fleet.* ainda, usa a do Inventário (inventory.view), a mesma das
+    // rotas /frota/* em App.tsx. O Hoje é /frota/hoje (e /frota redireciona para lá): com "/frota" como item, a regra de
+    // item ativo do menu (pathname === to || startsWith(to + "/")) marcava o Hoje em todas as páginas da Frota.
+    // O grupo é escolhido pelo prefixo "/frota", que nenhum outro grupo usa.
+    id: "frota-exemplo",
+    // CarFront, para não repetir o Truck dos Fornecedores (Inventário › Compras).
+    icon: CarFront,
+    labelKey: "sidebar.frotaExemplo",
+    paths: ["/frota"],
+    permissions: ["inventory.view"],
+    items: [
+      { to: "/frota/hoje", icon: Sun, labelKey: "sidebar.frotaHoje", permission: "inventory.view" },
+      { to: "/frota/viaturas", icon: Truck, labelKey: "sidebar.frotaViaturas", permission: "inventory.view" },
+      { to: "/frota/atribuicoes", icon: KeyRound, labelKey: "sidebar.frotaAtribuicoes", permission: "inventory.view" },
+      { to: "/frota/condutores", icon: IdCard, labelKey: "sidebar.frotaCondutores", permission: "inventory.view" },
+      { to: "/frota/manutencao", icon: Wrench, labelKey: "sidebar.frotaManutencao", permission: "inventory.view" },
+      { to: "/frota/custos", icon: Fuel, labelKey: "sidebar.frotaCustos", permission: "inventory.view" },
+      { to: "/frota/ocorrencias", icon: TriangleAlert, labelKey: "sidebar.frotaOcorrencias", permission: "inventory.view" },
+      { to: "/frota/documentos", icon: FileBadge, labelKey: "sidebar.frotaDocumentos", permission: "inventory.view" },
+      { to: "/frota/relatorios", icon: BarChart3, labelKey: "sidebar.frotaRelatorios", permission: "inventory.view" },
+      { to: "/frota/ligacoes", icon: Waypoints, labelKey: "sidebar.frotaLigacoes", permission: "inventory.view" },
     ],
   },
   {

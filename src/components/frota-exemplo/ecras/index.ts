@@ -1,0 +1,10 @@
+export { HojeFrota } from "./HojeFrota";
+export { ViaturasFrota } from "./ViaturasFrota";
+export { AtribuicoesFrota } from "./AtribuicoesFrota";
+export { CondutoresFrota } from "./CondutoresFrota";
+export { ManutencaoFrota } from "./ManutencaoFrota";
+export { CustosFrota } from "./CustosFrota";
+export { OcorrenciasFrota } from "./OcorrenciasFrota";
+export { DocumentosFrota } from "./DocumentosFrota";
+export { RelatoriosFrota } from "./RelatoriosFrota";
+export { LigacoesFrota } from "./LigacoesFrota";

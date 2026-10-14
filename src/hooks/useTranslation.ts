@@ -6,6 +6,7 @@ import { priceContextsTranslations } from "@/translations/priceContexts";
 import { directSalesTranslations } from "@/translations/directSales";
 import { todayTranslations } from "@/translations/today";
 import { inventoryNavTranslations } from "@/translations/inventoryNav";
+import { frotaNavTranslations } from "@/translations/frotaNav";
 import { negocioMetasTranslations } from "@/translations/negocioMetas";
 import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
 import { utilizadoresPerfisTranslations } from "@/translations/utilizadoresPerfis";
@@ -37,6 +38,10 @@ Object.keys(todayTranslations).forEach((lang) => {
 // Menu do Inventário (Hoje · Compras · Armazém) — módulo próprio, mesmo padrão.
 Object.keys(inventoryNavTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...inventoryNavTranslations[lang as keyof typeof inventoryNavTranslations] };
+});
+// Menu da Frota de exemplo (/frota) e o selo "Dados de exemplo" — módulo próprio, mesmo padrão.
+Object.keys(frotaNavTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...frotaNavTranslations[lang as keyof typeof frotaNavTranslations] };
 });
 // Página "Negócio e metas" — módulo próprio, mesmo padrão.
 Object.keys(negocioMetasTranslations).forEach((lang) => {

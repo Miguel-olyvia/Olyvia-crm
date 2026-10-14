@@ -62,6 +62,7 @@ const Stocks = lazy(() => import("./pages/Stocks"));
 const InventoryToday = lazy(() => import("./pages/InventoryToday"));
 const StockMovements = lazy(() => import("./pages/StockMovements"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
+const FrotaExemplo = lazy(() => import("./pages/frota-exemplo/FrotaExemplo"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
 const Receiving = lazy(() => import("./pages/Receiving"));
 const ClientOrders = lazy(() => import("./pages/ClientOrders"));
@@ -313,6 +314,19 @@ const App = () => (
                       <Route path="/stock-movements" element={<ProtectedRoute permission="inventory.view"><StockMovements /></ProtectedRoute>} />
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
+                      {/* Frota de exemplo (dados em memória/localStorage, sem tabelas): ainda não há permissões fleet.*, por isso usa as do
+                          Inventário — inventory.view para ver (as carrinhas são armazéns móveis) e inventory.edit, dentro do ecrã, para registar. */}
+                      <Route path="/frota" element={<Navigate to="/frota/hoje" replace />} />
+                      <Route path="/frota/hoje" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="hoje" ecra="hoje" /></ProtectedRoute>} />
+                      <Route path="/frota/viaturas" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="viaturas" ecra="viaturas" /></ProtectedRoute>} />
+                      <Route path="/frota/atribuicoes" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="atribuicoes" ecra="atribuicoes" /></ProtectedRoute>} />
+                      <Route path="/frota/condutores" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="condutores" ecra="condutores" /></ProtectedRoute>} />
+                      <Route path="/frota/manutencao" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="manutencao" ecra="manutencao" /></ProtectedRoute>} />
+                      <Route path="/frota/custos" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="custos" ecra="custos" /></ProtectedRoute>} />
+                      <Route path="/frota/ocorrencias" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="ocorrencias" ecra="ocorrencias" /></ProtectedRoute>} />
+                      <Route path="/frota/documentos" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="documentos" ecra="documentos" /></ProtectedRoute>} />
+                      <Route path="/frota/relatorios" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="relatorios" ecra="relatorios" /></ProtectedRoute>} />
+                      <Route path="/frota/ligacoes" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="ligacoes" ecra="ligacoes" /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
                       {/* Receção por código (Fase 2): permissão própria receiving.view (categoria 'receiving'). O servidor exige ainda purchase_orders.view OU .receive para consultar (rpc_receiving_lookup) e receiving.receive + purchase_orders.receive + inventory.edit para receber (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}
                       <Route path="/receiving" element={<ProtectedRoute permission="receiving.view"><Receiving /></ProtectedRoute>} />
