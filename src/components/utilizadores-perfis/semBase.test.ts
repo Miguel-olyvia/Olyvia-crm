@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(process.cwd(), "src");
 const PASTAS = ["components/utilizadores-perfis"];
-const FICHEIROS = ["pages/UtilizadoresPerfis.tsx", "translations/utilizadoresPerfis.ts"];
+const FICHEIROS = ["pages/UtilizadoresPerfis.tsx", "translations/utilizadoresPerfis.ts", "translations/utilizadoresPerfisForm.ts"];
 
 const proibido: { nome: string; padrao: RegExp }[] = [
   { nome: "importação de @/integrations/supabase", padrao: /from\s+["']@\/integrations\/supabase/ },

@@ -1,5 +1,5 @@
 // Peças pequenas partilhadas pelos ecrãs: estado, marca de perigosa e o chip de organização e role (o mesmo de /users).
-import { CircleCheck, CircleOff, ShieldAlert } from "lucide-react";
+import { CircleCheck, CircleOff, MailCheck, ShieldAlert } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { badgeVariants } from "@/components/ui/badge";
@@ -7,14 +7,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { Organizacao, Role } from "./tipos";
 
-/** Ativo ou Inativo: ícone mais texto, nunca só cor. */
-export function TagEstado({ ativo }: { ativo: boolean }) {
+/** Ativo, Convidado (ativo mas ainda sem entrar) ou Inativo: ícone mais texto, nunca só cor. */
+export function TagEstado({ ativo, convidado }: { ativo: boolean; convidado?: boolean }) {
   const { t } = useTranslation();
-  const Icone = ativo ? CircleCheck : CircleOff;
+  const convite = ativo && !!convidado;
+  const Icone = convite ? MailCheck : ativo ? CircleCheck : CircleOff;
+  const texto = convite ? "usersProfiles.state.invited" : ativo ? "usersProfiles.state.active" : "usersProfiles.state.inactive";
   return (
     <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-sm", ativo ? "text-success" : "text-muted-foreground")}>
       <Icone className="h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="text-foreground">{ativo ? t("usersProfiles.state.active") : t("usersProfiles.state.inactive")}</span>
+      <span className="text-foreground">{t(texto)}</span>
     </span>
   );
 }

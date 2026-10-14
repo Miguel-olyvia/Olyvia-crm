@@ -39,6 +39,12 @@ export interface Utilizador {
   nome: string;
   email: string;
   ativo: boolean;
+  /** Convidado: criado com convite e ainda sem entrar. Só os utilizadores criados no formulário o têm. */
+  convidado?: boolean;
+  telefone?: string;
+  morada?: string;
+  /** Posição na PLATAFORMA (não é o cargo de RH). */
+  posicao?: string;
   /** Último acesso (AAAA-MM-DD) ou `null` se nunca entrou. */
   ultimoAcesso: string | null;
   vinculos: Vinculo[];
@@ -75,3 +81,14 @@ export const FILTROS_INICIAIS: FiltrosUtilizadores = { texto: "", estado: "ativo
 
 export type Separador = "utilizadores" | "roles" | "portal";
 export type Aberto = { tipo: "utilizador" | "role"; id: string } | null;
+
+/** A parte da chave de tradução do título de cada modo do formulário. */
+export const CHAVE_MODO = { criar: "create", editar: "edit", duplicar: "duplicate" } as const;
+
+export type AbaFormUtilizador = "dados" | "vinculos" | "permissoes";
+
+/** O formulário aberto: criar, editar ou duplicar uma role; convidar ou editar um utilizador. */
+export type FormAberto =
+  | { tipo: "role"; modo: "criar" | "editar" | "duplicar"; id?: string }
+  | { tipo: "utilizador"; modo: "criar" | "editar"; id?: string; aba?: AbaFormUtilizador }
+  | null;

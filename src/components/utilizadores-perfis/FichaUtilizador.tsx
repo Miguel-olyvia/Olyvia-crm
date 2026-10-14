@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { KeyRound, Lock, UserCheck, UserX } from "lucide-react";
+import { KeyRound, Lock, Pencil, UserCheck, UserX } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,15 @@ import { AvatarPessoa } from "@/components/pessoas/AvatarPessoa";
 import { BotoesNavegacao } from "@/components/pessoas/BotoesNavegacao";
 import { vizinhas } from "@/components/pessoas/navegacaoFicha";
 import { useTeclasFicha } from "@/components/pessoas/useTeclasFicha";
+import { ConfirmarAcao } from "./ConfirmarAcao";
 import { FichaLateral } from "./FichaLateral";
-import { aplicarEscolhas, ehProtegido } from "./logica";
+import type { ResultadoForm } from "./FormRole";
+import { ehProtegido } from "./logica";
+import { definirAtivo, mudarRoleVinculo } from "./perfisStore";
 import { SeparadorAtividade, SeparadorResumo } from "./SeparadoresSimples";
 import { SeparadorPermissoesUtilizador } from "./SeparadorPermissoesUtilizador";
 import { SeparadorVinculos } from "./SeparadorVinculos";
-import type { Organizacao, Role, Utilizador } from "./tipos";
+import type { AbaFormUtilizador, Organizacao, Role, Utilizador } from "./tipos";
 
 type AbaFicha = "resumo" | "vinculos" | "permissoes" | "atividade";
 
@@ -28,22 +31,47 @@ interface FichaUtilizadorProps {
   aoFechar: () => void;
   aoIrPara: (id: string) => void;
   aoAbrirRole: (id: string) => void;
+  /** Abre o formulário de edição, opcionalmente já numa aba. */
+  aoEditar: (id: string, aba?: AbaFormUtilizador) => void;
+  /** Aviso e anúncio de uma ação que acabou (desativar, reativar). */
+  aoResultado: (r: ResultadoForm) => void;
 }
 
 type InteriorProps = Omit<FichaUtilizadorProps, "utilizador" | "aberto" | "aoFechar"> & { utilizador: Utilizador };
 
-/** As três ações (só avisam: é um exemplo). Num super administrador ficam desligadas, com a razão por escrito. */
-function Acoes({ u, protegido, aoMudarRole }: { u: Utilizador; protegido: boolean; aoMudarRole: () => void }) {
+interface AcoesProps {
+  u: Utilizador;
+  protegido: boolean;
+  aoEditar: (aba?: AbaFormUtilizador) => void;
+  aoResultado: (r: ResultadoForm) => void;
+}
+
+/** Editar e Mudar role abrem o formulário; Desativar/Reativar pedem confirmação e mudam mesmo o estado (em memória). Repor a palavra-passe só avisa. Num super administrador ficam desligadas. */
+function Acoes({ u, protegido, aoEditar, aoResultado }: AcoesProps) {
   const { t } = useTranslation();
+  const [confirmar, setConfirmar] = useState(false);
   const Estado = u.ativo ? UserX : UserCheck;
   const aviso = (chave: string) => toast.info(t(`usersProfiles.example.${chave}`, { name: u.nome }));
+  const chave = u.ativo ? "deactivate" : "reactivate";
+  const mudarEstado = () => {
+    setConfirmar(false);
+    definirAtivo(u.id, !u.ativo);
+    aoResultado({
+      aviso: t(`usersProfiles.form.toast.${u.ativo ? "deactivated" : "reactivated"}`, { name: u.nome }),
+      anuncio: t(`usersProfiles.form.announce.${u.ativo ? "deactivated" : "reactivated"}`, { name: u.nome }),
+    });
+  };
   return (
     <div className="space-y-2 px-6 pb-3">
       <div role="group" aria-label={t("usersProfiles.actions.label")} className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={aoMudarRole}>
+        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={() => aoEditar()}>
+          <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
+          {t("usersProfiles.actions.editUser")}
+        </Button>
+        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={() => aoEditar("vinculos")}>
           {t("usersProfiles.actions.changeRole")}
         </Button>
-        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={() => aviso(u.ativo ? "deactivate" : "reactivate")}>
+        <Button type="button" variant="outline" className="min-h-11" disabled={protegido} onClick={() => setConfirmar(true)}>
           <Estado className="mr-1.5 h-4 w-4" aria-hidden="true" />
           {u.ativo ? t("usersProfiles.actions.deactivate") : t("usersProfiles.actions.reactivate")}
         </Button>
@@ -58,15 +86,19 @@ function Acoes({ u, protegido, aoMudarRole }: { u: Utilizador; protegido: boolea
           {t("usersProfiles.protectedNote")}
         </p>
       )}
+      <ConfirmarAcao
+        aberto={confirmar} titulo={t(`usersProfiles.form.confirm.${chave}.title`, { name: u.nome })}
+        texto={t(`usersProfiles.form.confirm.${chave}.text`)} confirmar={t(`usersProfiles.form.confirm.${chave}.yes`)}
+        aoConfirmar={mudarEstado} aoCancelar={() => setConfirmar(false)}
+      />
     </div>
   );
 }
 
-function Interior({ utilizador, roles, organizacoes, idsVisiveis, aoIrPara, aoAbrirRole }: InteriorProps) {
+function Interior({ utilizador, roles, organizacoes, idsVisiveis, aoIrPara, aoAbrirRole, aoEditar, aoResultado }: InteriorProps) {
   const { t } = useTranslation();
   const [aba, setAba] = useState<AbaFicha>("resumo");
-  const [escolhas, setEscolhas] = useState<Record<string, string>>({});
-  const u = aplicarEscolhas(utilizador, escolhas);
+  const u = utilizador;
   const protegido = ehProtegido(utilizador, roles);
   const viz = vizinhas(idsVisiveis, utilizador.id);
   const ir = useTeclasFicha(true, viz, utilizador.id, aoIrPara);
@@ -80,7 +112,7 @@ function Interior({ utilizador, roles, organizacoes, idsVisiveis, aoIrPara, aoAb
         </div>
         <BotoesNavegacao vizinhas={viz} aoIr={(id, qual) => ir(id, qual)} />
       </SheetHeader>
-      <Acoes u={u} protegido={protegido} aoMudarRole={() => setAba("vinculos")} />
+      <Acoes u={u} protegido={protegido} aoEditar={(aba) => aoEditar(u.id, aba)} aoResultado={aoResultado} />
       <Tabs value={aba} onValueChange={(v) => setAba(v as AbaFicha)} className="flex min-h-0 flex-1 flex-col">
         <ListaAbas aria-label={t("usersProfiles.sheet.tabs")} className="px-6">
           <Aba value="resumo" rotulo={t("usersProfiles.sheet.summary")} />
@@ -93,7 +125,7 @@ function Interior({ utilizador, roles, organizacoes, idsVisiveis, aoIrPara, aoAb
           <TabsContent value="vinculos" className="mt-0">
             <SeparadorVinculos
               utilizador={u} roles={roles} organizacoes={organizacoes} protegido={protegido}
-              aoEscolher={(org, roleId) => setEscolhas((e) => ({ ...e, [org]: roleId }))}
+              aoEscolher={(org, roleId) => mudarRoleVinculo(u.id, org, roleId)}
             />
           </TabsContent>
           <TabsContent value="permissoes" className="mt-0"><SeparadorPermissoesUtilizador utilizador={u} roles={roles} aoAbrirRole={aoAbrirRole} /></TabsContent>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Trash2, X } from "lucide-react";
+import { Copy, Pencil, Trash2, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,10 @@ interface FichaRoleProps {
   aoFechar: () => void;
   aoAbrirUtilizador: (id: string) => void;
   aoFiltrarUtilizadores: (roleId: string) => void;
+  /** Abre o formulário de edição (uma role de sistema abre só para ver). */
+  aoEditar: (roleId: string) => void;
+  /** Abre o formulário com os dados desta role e "(cópia)" no nome. */
+  aoDuplicar: (roleId: string) => void;
 }
 
 function SeparadorUtilizadores({ role, utilizadores, aoAbrirUtilizador, aoFiltrarUtilizadores }: Omit<InteriorProps, "aoFechar">) {
@@ -43,7 +47,7 @@ function SeparadorUtilizadores({ role, utilizadores, aoAbrirUtilizador, aoFiltra
                 <span className="block truncate text-sm font-medium text-foreground">{u.nome}</span>
                 <span className="block truncate text-xs text-muted-foreground">{u.email}</span>
               </span>
-              <TagEstado ativo={u.ativo} />
+              <TagEstado ativo={u.ativo} convidado={u.convidado} />
             </button>
           </li>
         ))}
@@ -81,7 +85,11 @@ function Interior(p: InteriorProps) {
       </SheetHeader>
       <div className="space-y-2 px-6 pb-3">
         <div role="group" aria-label={t("usersProfiles.actions.label")} className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="min-h-11" onClick={() => aviso("duplicate")}>
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => p.aoEditar(role.id)}>
+            <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
+            {t("usersProfiles.actions.edit")}
+          </Button>
+          <Button type="button" variant="outline" className="min-h-11" onClick={() => p.aoDuplicar(role.id)}>
             <Copy className="mr-1.5 h-4 w-4" aria-hidden="true" />
             {t("usersProfiles.actions.duplicate")}
           </Button>

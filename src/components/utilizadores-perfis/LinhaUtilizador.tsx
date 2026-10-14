@@ -64,7 +64,7 @@ export function LinhaUtilizador({ utilizador: u, roles, organizacoes, aoAbrir, a
         </div>
       </TableCell>
       <TableCell className={cn(CELULA, "hidden md:table-cell")}>{textoAmbito(t, resumoAmbito(u, roles))}</TableCell>
-      <TableCell className={CELULA}><TagEstado ativo={u.ativo} /></TableCell>
+      <TableCell className={CELULA}><TagEstado ativo={u.ativo} convidado={u.convidado} /></TableCell>
       <TableCell className={cn(CELULA, "hidden whitespace-nowrap text-muted-foreground lg:table-cell")}>
         {textoAcesso(t, u.ultimoAcesso)}
       </TableCell>

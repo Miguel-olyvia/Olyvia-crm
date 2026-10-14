@@ -1,6 +1,7 @@
 // A matriz de permissões, no mesmo desenho do ecrã de Roles atual: um Accordion por entrada do menu, categorias e subgrupos lá
 // dentro, e cada permissão com o seu distintivo de ação (Ver, Criar, Editar, Eliminar...) e a marca de perigosa.
-// Aqui é só leitura: cada linha diz "Tem" ou "Não tem" em texto e ícone, e o cabeçalho do grupo soma o que está concedido.
+// Por omissão é só leitura: cada linha diz "Tem" ou "Não tem" em texto e ícone, e o cabeçalho do grupo soma o que está concedido.
+// Com `edicao` cada linha passa a ter uma caixa de seleção e cada módulo "Marcar tudo" e "Limpar" (formulário de role).
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { Check, Minus } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -9,7 +10,9 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import { AcoesModulo } from "./AcoesModulo";
 import { agruparPorMenu, distintivoAcao, type BlocoCategoria, type GrupoMenu } from "./gruposPermissoes";
+import { LinhaPermissaoEditavel, type EdicaoMatriz } from "./LinhaPermissaoEditavel";
 import { normalizar } from "./logica";
 import { MarcaPerigosa } from "./pecas";
 import type { Permissao } from "./tipos";
@@ -20,6 +23,8 @@ interface ArvorePermissoesProps {
   concedida: (codigo: string) => boolean;
   /** Complemento à direita de cada permissão (por exemplo, de que role vem). */
   extra?: (p: Permissao) => ReactNode;
+  /** Torna a matriz editável (formulário de role). */
+  edicao?: EdicaoMatriz;
 }
 
 interface LinhaPermissaoProps {
@@ -62,10 +67,12 @@ interface ItemGrupoProps {
   /** Quantas das permissões da lista estão concedidas. */
   concedidas: (lista: Permissao[]) => number;
   linha: (p: Permissao) => ReactNode;
+  /** "Marcar tudo" e "Limpar" do módulo (só com edição). */
+  acoes?: ReactNode;
 }
 
 /** Um módulo do menu: cabeçalho com o total concedido, categorias diretas e subgrupos. */
-function ItemGrupo({ grupo: g, concedidas, linha }: ItemGrupoProps) {
+function ItemGrupo({ grupo: g, concedidas, linha, acoes }: ItemGrupoProps) {
   const { t } = useTranslation();
   const contagem = (lista: Permissao[]) => t("usersProfiles.matrix.count", { n: concedidas(lista), total: lista.length });
   return (
@@ -78,6 +85,7 @@ function ItemGrupo({ grupo: g, concedidas, linha }: ItemGrupoProps) {
       </AccordionTrigger>
       <AccordionContent>
         <div className="space-y-3 pl-1 sm:pl-3">
+          {acoes}
           {g.blocos.map((b) => <Bloco key={b.categoria} bloco={b} comTitulo={g.blocos.length > 1} linha={linha} />)}
           {g.subgrupos.map((s) => (
             <div key={s.rotulo} className="space-y-2 border-l-2 border-border pl-3">
@@ -95,7 +103,7 @@ function ItemGrupo({ grupo: g, concedidas, linha }: ItemGrupoProps) {
 }
 
 /** A árvore com pesquisa. Sem pesquisa os módulos estão fechados; com pesquisa abrem todos os que têm resultados. */
-export function ArvorePermissoes({ permissoes, concedida, extra }: ArvorePermissoesProps) {
+export function ArvorePermissoes({ permissoes, concedida, extra, edicao }: ArvorePermissoesProps) {
   const { t } = useTranslation();
   const idPesquisa = useId();
   const [texto, setTexto] = useState("");
@@ -107,7 +115,12 @@ export function ArvorePermissoes({ permissoes, concedida, extra }: ArvorePermiss
   );
   const grupos = useMemo(() => agruparPorMenu(filtradas), [filtradas]);
   const n = (lista: Permissao[]) => lista.filter((p) => concedida(p.codigo)).length;
-  const linha = (p: Permissao) => <LinhaPermissao key={p.codigo} permissao={p} concedida={concedida(p.codigo)} extra={extra?.(p)} />;
+  const linha = (p: Permissao) => (edicao
+    ? <LinhaPermissaoEditavel key={p.codigo} permissao={p} concedida={concedida(p.codigo)} edicao={edicao} />
+    : <LinhaPermissao key={p.codigo} permissao={p} concedida={concedida(p.codigo)} extra={extra?.(p)} />);
+  const acoes = (g: GrupoMenu) => (edicao && !edicao.desativada
+    ? <AcoesModulo modulo={g.rotulo} aoMarcar={() => edicao.aoModulo(g.permissoes, true)} aoLimpar={() => edicao.aoModulo(g.permissoes, false)} />
+    : undefined);
   return (
     <div className="space-y-3">
       <div className="space-y-1">
@@ -127,7 +140,7 @@ export function ArvorePermissoes({ permissoes, concedida, extra }: ArvorePermiss
           type="multiple" className="w-full" value={consulta ? grupos.map((g) => g.rotulo) : abertos}
           onValueChange={(v) => { if (!consulta) setAbertos(v); }}
         >
-          {grupos.map((g) => <ItemGrupo key={g.rotulo} grupo={g} concedidas={n} linha={linha} />)}
+          {grupos.map((g) => <ItemGrupo key={g.rotulo} grupo={g} concedidas={n} linha={linha} acoes={acoes(g)} />)}
         </Accordion>
       )}
     </div>

@@ -32,7 +32,7 @@ export function SeparadorResumo({ utilizador: u, roles, organizacoes, aoAbrirRol
   const rolesDoUtilizador = [...new Map(u.vinculos.flatMap((v) => roles.filter((r) => r.id === v.roleId).map((r) => [r.id, r] as const))).values()];
   return (
     <dl>
-      <Linha rotulo={t("usersProfiles.col.state")}><TagEstado ativo={u.ativo} /></Linha>
+      <Linha rotulo={t("usersProfiles.col.state")}><TagEstado ativo={u.ativo} convidado={u.convidado} /></Linha>
       <Linha rotulo={t("usersProfiles.summary.email")}>{u.email}</Linha>
       <Linha rotulo={t("usersProfiles.col.lastAccess")}>{textoAcesso(t, u.ultimoAcesso)}</Linha>
       <Linha rotulo={t("usersProfiles.summary.organizations")}>

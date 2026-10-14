@@ -1,7 +1,8 @@
-import { Check, Lock, Minus } from "lucide-react";
+import { Check, Lock, Minus, Pencil } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { Role } from "./tipos";
@@ -15,6 +16,8 @@ interface AbaRolesProps {
   aoAbrirRole: (id: string) => void;
   /** Filtra a lista de utilizadores por esta role e passa a essa aba. */
   aoVerUtilizadores: (id: string) => void;
+  /** Abre o formulário da role (as de sistema abrem só para ver). */
+  aoEditar: (id: string) => void;
 }
 
 const CABECA = "h-11 px-3 text-xs font-medium text-muted-foreground";
@@ -33,7 +36,7 @@ export function SimNao({ sim }: { sim: boolean }) {
 }
 
 /** A lista de roles: o nome abre a role; o número de utilizadores leva à lista de utilizadores já filtrada. */
-export function AbaRoles({ roles, utilizadores, permissoes, aoAbrirRole, aoVerUtilizadores }: AbaRolesProps) {
+export function AbaRoles({ roles, utilizadores, permissoes, aoAbrirRole, aoVerUtilizadores, aoEditar }: AbaRolesProps) {
   const { t } = useTranslation();
   return (
     <div className="overflow-x-auto rounded-md border">
@@ -46,6 +49,7 @@ export function AbaRoles({ roles, utilizadores, permissoes, aoAbrirRole, aoVerUt
             <TableHead className={`${CABECA} hidden md:table-cell`}>{t("usersProfiles.roles.col.permissions")}</TableHead>
             <TableHead className={CABECA}>{t("usersProfiles.roles.col.type")}</TableHead>
             <TableHead className={`${CABECA} hidden lg:table-cell`}>{t("usersProfiles.roles.col.signs")}</TableHead>
+            <TableHead className={CABECA}>{t("usersProfiles.roles.col.actions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -85,6 +89,15 @@ export function AbaRoles({ roles, utilizadores, permissoes, aoAbrirRole, aoVerUt
                 )}
               </TableCell>
               <TableCell className={cn(CELULA, "hidden lg:table-cell")}><SimNao sim={r.podeAssinar} /></TableCell>
+              <TableCell className={CELULA}>
+                <Button
+                  type="button" variant="outline" size="sm" className={cn("min-h-11", FOCO)}
+                  aria-label={t("usersProfiles.roles.row.edit", { name: r.nome })} onClick={() => aoEditar(r.id)}
+                >
+                  <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                  {t("usersProfiles.actions.edit")}
+                </Button>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

@@ -10,7 +10,8 @@ import type { Role, Utilizador } from "./tipos";
 interface SeparadorPermissoesUtilizadorProps {
   utilizador: Utilizador;
   roles: Role[];
-  aoAbrirRole: (id: string) => void;
+  /** Sem isto (no formulário) a role de origem é só texto, não um botão que abre outra ficha. */
+  aoAbrirRole?: (id: string) => void;
 }
 
 /** Todas as permissões, no mesmo desenho das roles; as que o utilizador tem dizem de que role vêm (a role abre-se ao clicar). */
@@ -31,14 +32,14 @@ export function SeparadorPermissoesUtilizador({ utilizador, roles, aoAbrirRole }
         extra={(p) => (
           <span className="flex flex-wrap items-center gap-x-1 text-muted-foreground">
             {efetivas.get(p.codigo) && t("usersProfiles.perms.from")}
-            {efetivas.get(p.codigo)?.map((r) => (
+            {efetivas.get(p.codigo)?.map((r) => (aoAbrirRole ? (
               <button
                 key={r.id} type="button" onClick={() => aoAbrirRole(r.id)}
                 className={cn("min-h-11 rounded-sm px-1.5 font-medium text-primary underline-offset-4 hover:underline dark:text-violet-300", FOCO)}
               >
                 {r.nome}
               </button>
-            ))}
+            ) : <span key={r.id} className="px-1.5 font-medium text-foreground">{r.nome}</span>))}
           </span>
         )}
       />
