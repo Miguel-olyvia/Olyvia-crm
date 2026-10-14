@@ -176,7 +176,7 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
 
 /* ------------------------------------------------------------------ contrato */
 export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
-  const o = d.orc!, T = totais(d, S), tr = tranches(d, T.total);
+  const o = d.orc!, T = totais(d, S), tr = tranches(d, T.total, S);
   const n = (k: number, titulo: string, corpo: ReactNode) => (
     <section key={k}><h3 className="font-semibold">Cláusula {k}.ª · {titulo}</h3><div className="mt-1 text-slate-700">{corpo}</div></section>
   );
@@ -187,7 +187,7 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
       </p>
       {n(1, "Objeto", <>Os trabalhos de {d.servico.toLowerCase()} em {d.f.morada || d.local}{d.f.localidade ? `, ${d.f.localidade}` : ""}: {o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.</>)}
       {n(2, "Preço", <>{eur(T.base)} € sem IVA: {eur(T.mo)} € de mão de obra, com IVA a 6% ({eur(T.ivaMo)} €), e {eur(T.mat)} € de materiais, com IVA a 23% ({eur(T.ivaMat)} €). Total com IVA: <b>{eur(T.total)} €</b>.</>)}
-      {n(3, "Pagamento", <ul className="list-disc pl-5">{tr.map((t) => <li key={t.l}>{t.l}: {Math.round(t.p * 100)}%, {eur(t.v)} €</li>)}</ul>)}
+      {n(3, "Pagamento", <ul className="list-disc pl-5">{tr.map((t) => <li key={t.l}>{t.l}{t.quando ? ` (previsto: ${t.quando})` : ""}: {Math.round(t.p * 100)}%, {eur(t.v)} €</li>)}</ul>)}
       {n(4, "Prazo", <>Início {d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com {d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a {fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.{d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}</>)}
       {n(5, "Garantia", <>{d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.</>)}
       {n(6, "Condições gerais", <>Fazem parte deste contrato as condições gerais da empresa, entregues ao cliente com a proposta.</>)}
