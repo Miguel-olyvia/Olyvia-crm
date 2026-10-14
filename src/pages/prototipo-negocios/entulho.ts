@@ -143,6 +143,49 @@ export interface ContaArtigo {
   demolicao: number; carga: number; deposicao: number; consumiveis: number; custo: number;
 }
 
+/* ------------------------------------------------------------------ entulho dos serviços (14/10/2026) */
+// O pedido do Ruben: "não falta na ficha do serviço se ele gera ou não entulho? e por m³ do produto associado e isto
+// ser dinamicamente calculado no serviço?" Cada serviço diz se gera entulho e de onde vem (Catalogo.entulhoServico):
+//   "nao"      não gera;
+//   "artigo"   usa o artigo de demolição (K.artigoDoServico): a conta é a da Mudelar, com T_dem;
+//   "produto"  vem do produto que sai na visita (ex.: "Mantém a sanita?" → Troca): Σ entulho do produto × quantidade;
+//   "m3"       m³ (e kg) por unidade do serviço, escritos na ficha.
+// Os modos "produto" e "m3" entram na demolição como volume (ItemVol): somam ao m³, às toneladas, à carga
+// (t_carga × F_acesso × C_h) e à deposição (C_dep), e contam para os big bags e o contentor. Não somam horas de
+// demolição: a mão de obra de tirar o que sai já está na receita do serviço.
+export type ModoEntulho = "nao" | "artigo" | "produto" | "m3";
+export const MODOS_ENTULHO: ModoEntulho[] = ["nao", "artigo", "produto", "m3"];
+/** O entulho de um serviço (Catalogo.entulhoServico): o modo e, no modo "m3", o volume e o peso por unidade. */
+export interface EntulhoSvc { modo: ModoEntulho; m3?: number; kg?: number }
+/** O entulho que um produto gera quando é retirado (Produto.entulho): volume solto e peso (opcional) por unidade. */
+export interface EntulhoProd { m3: number; kg?: number }
+/** Um item de volume: o entulho de uma linha de serviço, já com a quantidade; a origem diz de onde veio ("2 × sanita que sai"). */
+export interface ItemVol { de: SvcId; m3: number; t: number; origem: string }
+export interface ContaVol extends ItemVol { carga: number; deposicao: number }
+/** A carga e a deposição de um item de volume (sem horas de demolição). */
+export function contaVolume(v: ItemVol, P: ParDem, fAcesso: number): ContaVol {
+  return { ...v, carga: v.m3 * P.tCarga * fAcesso * P.custoHora, deposicao: (P.unDep === "t" ? v.t : v.m3) * P.cDep };
+}
+/** As toneladas de um volume: as do peso indicado (kg), ou o volume × densidade. */
+export const toneladas = (m3: number, kg: number | undefined, P: Pick<ParDem, "densidade">) => (kg != null ? kg / 1000 : m3 * P.densidade);
+
+/** A conta de exemplo da ficha do serviço: a quantidade × o volume por unidade, o peso, a deposição e a carga (e, com artigo, a demolição). */
+export interface ExemploEntulho { q: number; un: string; m3Un: number; kgUn?: number; horasUn?: number; consUn?: number }
+export interface ContaExemplo { m3: number; kg: number; carga: number; deposicao: number; demolicao: number; consumiveis: number; custo: number; texto: string }
+const eur2 = (x: number) => (Math.round(x * 100) / 100).toFixed(2).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+export function contaExemplo(e: ExemploEntulho, P: ParDem, fAcesso = P.fAcesso.base): ContaExemplo {
+  const m3 = e.q * e.m3Un, t = toneladas(m3, e.kgUn != null ? e.kgUn * e.q : undefined, P), kg = t * 1000;
+  const carga = m3 * P.tCarga * fAcesso * P.custoHora, deposicao = (P.unDep === "t" ? t : m3) * P.cDep;
+  const demolicao = e.q * (e.horasUn ?? 0) * P.custoHora, consumiveis = e.q * (e.consUn ?? 0);
+  const partes = [
+    ...(demolicao > 0 ? [`demolição ${eur2(demolicao)} €`] : []),
+    `deposição ${eur2(deposicao)} €`, `carga ${eur2(carga)} €`,
+    ...(consumiveis > 0 ? [`consumíveis ${eur2(consumiveis)} €`] : []),
+  ];
+  const texto = `${num(e.q)} ${e.un} × ${num(e.m3Un, 3)} m³ = ${num(m3, 3)} m³ · ≈ ${num(Math.round(kg))} kg → ${partes.join(" + ")}`;
+  return { m3, kg, carga, deposicao, demolicao, consumiveis, custo: demolicao + carga + deposicao + consumiveis, texto };
+}
+
 export type Meio = "bigbag" | "contentor" | "nenhum";
 /** O que se mexeu à mão neste orçamento (em falta = o cálculo). */
 export interface AjustesDem { meio?: Meio; n?: number; horas?: number; toneladas?: number; preco?: number }
@@ -158,6 +201,8 @@ export interface Ocupacao {
 }
 export interface ResultadoDem {
   artigos: ContaArtigo[];
+  /** O entulho dos serviços (modo "produto" ou "m3"): só volume e peso, sem horas de demolição. */
+  volumes: ContaVol[];
   fAcesso: number; origemAcesso: string;
   horas: number; horasCarga: number; m3: number; t: number;
   demolicao: number; carga: number; deposicao: number; consumiveis: number; protecao: number;
@@ -214,28 +259,31 @@ export function ocupacao(meio: Exclude<Meio, "nenhum">, m3: number, t: number, n
 }
 
 /** A conta da obra, com os ajustes à mão por cima. Arredonda-se só no fim. */
-export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: ParDem, acesso: { f: number; origem: string }, aj: AjustesDem = {}, olyvia: MargensOlyvia = MARGENS0): ResultadoDem {
+export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: ParDem, acesso: { f: number; origem: string }, aj: AjustesDem = {}, olyvia: MargensOlyvia = MARGENS0, vols: ItemVol[] = []): ResultadoDem {
   const contas = itens.flatMap((it) => {
     const a = artigos.find((x) => x.codigo === it.codigo && x.ativo);
     return a && it.q > 0 ? [contaArtigo(a, it.q, P, acesso.f)] : [];
   });
-  const m3 = contas.reduce((s, c) => s + c.m3, 0);
-  const tCalc = contas.reduce((s, c) => s + c.t, 0);
+  // o entulho dos serviços (14/10): soma ao volume, ao peso, à carga e à deposição; as horas de demolição não mexem
+  const volumes = vols.filter((v) => v.m3 > 0 || v.t > 0).map((v) => contaVolume(v, P, acesso.f));
+  const m3 = contas.reduce((s, c) => s + c.m3, 0) + volumes.reduce((s, v) => s + v.m3, 0);
+  const tCalc = contas.reduce((s, c) => s + c.t, 0) + volumes.reduce((s, v) => s + v.t, 0);
   const t = aj.toneladas ?? tCalc;
   const horasDem = contas.reduce((s, c) => s + c.horas, 0);
   const horasCarga = m3 * P.tCarga * acesso.f;
   // as horas mexidas à mão substituem as de demolição (as de carga continuam)
   const horas = aj.horas ?? horasDem;
   const demolicao = horas * P.custoHora;
-  const carga = contas.reduce((s, c) => s + c.carga, 0);
+  const carga = contas.reduce((s, c) => s + c.carga, 0) + volumes.reduce((s, v) => s + v.carga, 0);
   // o C_dep é "tudo incluído" (big bag ou contentor, transporte, operador e e-GAR): o meio não mexe no preço
   const deposicaoCalc = (P.unDep === "t" ? t : m3) * P.cDep;
   const consumiveis = contas.reduce((s, c) => s + c.consumiveis, 0);
+  // a proteção da zona e a limpeza são da demolição: só com artigos (o entulho dos serviços sozinho não as traz)
   const protecao = contas.length ? P.protecao : 0;
 
   // o meio (só logística): big bags; o contentor escolhe-se à mão, e só com as capacidades configuradas
   const nBb = nBigbags(m3, t, P), nCt = P.contentor.m3 > 0 && P.contentor.t > 0 ? nContentores(m3, t, P) : 0;
-  const meio: Meio = aj.meio ?? (!contas.length ? "nenhum" : "bigbag");
+  const meio: Meio = aj.meio ?? (!contas.length && !volumes.length ? "nenhum" : "bigbag");
   const n = meio === "nenhum" ? 0 : aj.n ?? (meio === "contentor" ? nCt : nBb);
   // "nenhum" (o cliente trata do entulho): sem deposição
   const deposicao = meio === "nenhum" ? 0 : deposicaoCalc;
@@ -250,7 +298,7 @@ export function calcularDemolicao(itens: ItemDem[], artigos: ArtigoDem[], P: Par
   const margem = preco > 0 ? (preco - r2(custo)) / preco : 0;
   const cap = meio === "contentor" ? { m3: P.contentor.m3, t: P.contentor.t } : { m3: P.bigbagM3, t: P.bigbagT };
   return {
-    artigos: contas, fAcesso: acesso.f, origemAcesso: acesso.origem,
+    artigos: contas, volumes, fAcesso: acesso.f, origemAcesso: acesso.origem,
     horas: r2(horas + horasCarga), horasCarga: r2(horasCarga), m3: r2(m3), t: Math.round(t * 1000) / 1000,
     demolicao: r2(demolicao), carga: r2(carga), deposicao: r2(deposicao), consumiveis: r2(consumiveis), protecao: r2(protecao),
     meio, n, nBigbags: nBb, nContentores: nCt, propostaContentor,

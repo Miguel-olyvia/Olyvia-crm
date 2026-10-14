@@ -12,6 +12,8 @@ import {
   type CustoCalc, type Custos, type Equip, type ItemLista, type Perfil, type ReceitaV2, type Filtro,
 } from "./v2/custosModelo";
 import type { IconeServicoKey } from "./ilustracoes";
+import { ARTIGOS_DEM0, PAR_DEM0, contaExemplo, vSoltoDe, type ArtigoDem, type ContaExemplo, type EntulhoSvc, type ParDem } from "./entulho";
+import { entulhoDoProduto, entulhoDoServico, tipoDoTexto } from "./entulhoPadrao";
 
 /* ------------------------------------------------------------------ medida */
 /** As unidades de um serviço, para escolher (não escrever). */
@@ -209,3 +211,40 @@ export function tecnicosCatalogo(S: Estado, C: Custos): TecnicoLinha[] {
 /** Quantas receitas (em uso) usam um equipamento. */
 export const usosEquip = (S: Estado, C: Custos, id: string) =>
   Object.keys(S.svc).filter((sid) => receitaDe(C, sid, S.svc[sid], S.cfg.alvo)?.equip.some((u) => u.equip === id)).length;
+
+/* ------------------------------------------------------------------ entulho (14/10) */
+/** A quantidade de exemplo da ficha: a da medida no exemplo (EX0), ou 2 quando o comercial a escreve. */
+export const qtdExemplo = (medida: MedKey | null, ex: Medidas = EX0) => (medida ? ex[medida] || 0 : 2);
+export interface EntulhoFicha {
+  e: EntulhoSvc; q: number;
+  /** O artigo (modo "artigo") ou o produto do exemplo (modo "produto"). */
+  artigo: ArtigoDem | null; produto: { n: string; m3: number; kg?: number; doTipo: boolean; tipo: string } | null;
+  conta: ContaExemplo | null;
+  /** A frase do exemplo ("Numa casa de banho com…"), a conta e o custo por unidade do serviço (só entulho). */
+  de: string; custoUn: number;
+}
+/** A conta do entulho na ficha, com a quantidade de exemplo e os parâmetros de produção (os do Catálogo). */
+export function entulhoFicha(K: Catalogo, sid: SvcId, nome: string, un: string, medida: MedKey | null): EntulhoFicha {
+  const e = entulhoDoServico(K, sid), q = qtdExemplo(medida), P: ParDem = K.parDem ?? PAR_DEM0;
+  const base = { e, q, artigo: null, produto: null, conta: null, de: "", custoUn: 0 } as EntulhoFicha;
+  if (e.modo === "artigo") {
+    const a = (K.artigosDem ?? ARTIGOS_DEM0).find((x) => x.codigo === K.artigoDoServico?.[sid]) ?? null;
+    if (!a) return base;
+    const conta = contaExemplo({ q, un, m3Un: vSoltoDe(a), kgUn: a.peso, horasUn: a.tempo, consUn: a.cons }, P);
+    return { ...base, artigo: a, conta, de: `Com o artigo ${a.codigo}`, custoUn: q ? conta.custo / q : 0 };
+  }
+  if (e.modo === "produto") {
+    const lig = produtosQueTrazem(K, sid).map((p) => ({ p, en: entulhoDoProduto(p) }));
+    const um = lig.find((x) => x.en.m3 > 0);
+    const t = tipoDoTexto(nome) ?? tipoDoTexto(K.arvore.find((x) => x.id === K.exigeProduto?.[sid])?.n);
+    const produto = um ? { n: um.p.n, ...um.en } : t && t.e.m3 > 0 ? { n: t.nome, ...t.e, doTipo: true, tipo: t.nome } : null;
+    if (!produto) return base;
+    const conta = contaExemplo({ q, un, m3Un: produto.m3, kgUn: produto.kg }, P);
+    return { ...base, produto, conta, de: um ? `Pelo produto «${um.p.n}»${produto.doTipo ? ` (valor do tipo ${produto.tipo})` : ""}` : `Pelo tipo ${produto.tipo} (sem produto ligado)`, custoUn: q ? conta.custo / q : 0 };
+  }
+  if (e.modo === "m3" && (e.m3 ?? 0) > 0) {
+    const conta = contaExemplo({ q, un, m3Un: e.m3 ?? 0, kgUn: e.kg }, P);
+    return { ...base, conta, de: `${nfmt(e.m3 ?? 0)} m³ por ${un}`, custoUn: q ? conta.custo / q : 0 };
+  }
+  return base;
+}

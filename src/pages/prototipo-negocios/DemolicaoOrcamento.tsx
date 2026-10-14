@@ -68,7 +68,8 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
       {/* os artigos */}
       <div>
         <h4 className="text-[15px] font-semibold">Artigos de demolição</h4>
-        <ul className="mt-2 divide-y divide-border rounded-xl border border-border bg-card">
+        {!dem.itens.length && <p className="mt-1 text-sm text-muted-foreground">Sem artigos: só o entulho dos serviços.</p>}
+        <ul className={cn("mt-2 divide-y divide-border rounded-xl border border-border bg-card", !dem.itens.length && "hidden")}>
           {dem.itens.map((it) => {
             const a = artigos.find((x) => x.codigo === it.codigo), c = r.artigos.find((x) => x.codigo === it.codigo);
             return (
@@ -103,6 +104,26 @@ export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"
           </div>
         )}
       </div>
+
+      {/* o entulho dos serviços (14/10): só volume e peso; a mão de obra já está na receita de cada serviço */}
+      {(r.volumes ?? []).length > 0 && (
+        <div data-testid="entulho-servicos">
+          <h4 className="text-[15px] font-semibold">Entulho dos serviços</h4>
+          <p className="text-sm text-muted-foreground">Soma ao volume, à carga e à deposição; as horas já estão nos serviços.</p>
+          <ul className="mt-2 divide-y divide-border rounded-xl border border-border bg-card">
+            {(r.volumes ?? []).map((v, k) => (
+              <li key={k} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px]">{v.origem}</span>
+                  <span className="block text-xs text-muted-foreground">{S.svc[v.de]?.n ?? v.de}</span>
+                </span>
+                <span className="text-sm tabular-nums">{nfmt(Math.round(v.m3 * 1000) / 1000)} m³ · {nfmt(Math.round(v.t * 1000) / 1000)} t</span>
+                {direcao && <span className="w-full text-right text-xs tabular-nums text-muted-foreground">carga {eur(v.carga)} € · deposição {eur(v.deposicao)} €</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* o meio */}
       <div className="space-y-2">
