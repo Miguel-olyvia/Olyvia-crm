@@ -277,6 +277,56 @@ Só na **V2** (na Atual e na V2 funcional ficam o item e a vista "Inventário" d
 
 ---
 
+## Frota (V2, 14/10/2026)
+
+O protótipo HTML aprovado `vault/frota-prototipo.html` passado a React, com a **UI do Inventário** (as classes de `inventario.css`, escopo `.inv-root`, e as peças genéricas do Inventário importadas sem mudanças: `Selo`, `Pesquisa`, `Texto`, `Lista`, `Notas`, `AbasFolha`, `useAvisoInv`). Só na **V2** (como o Inventário): um grupo **Frota** (ícone `Truck`) no menu lateral, a seguir ao Inventário, que se abre para os dez ecrãs com os contadores do HTML; a mesma entrada no **Mais** do telemóvel; o topo (pesquisa "Procurar matrícula, modelo ou condutor", "Mostrar fontes de dados" e "Repor dados de demonstração") desenha-se por portal no cabeçalho do protótipo (`alvoTopo`); o "Frota · a ver como" fica no rodapé do menu enquanto a Frota está aberta. **Abrir a Frota fecha o Inventário e vice-versa.** "Repor a demonstração" chama `esquecerFrota()`. Hoje fixo em **14/10/2026**; período dos custos 1/9 a 14/10.
+
+### Ficheiros (`frota/`)
+
+| Ficheiro | O que tem |
+|---|---|
+| `tipos.ts`, `base.ts` | Os tipos (Viatura, Pessoa, Atribuicao, Manutencao, Leitura, Custo, Ocorrencia, Compromisso, ObraRef) e o básico: `HOJE`, datas (`dias`, `addDias`, `addMeses`, `diasUteis`), formatos e `ErroFrota`. |
+| `seed.ts` | Os dados de exemplo (`seedFrota`, a `seed()` do HTML) já ligados ao protótipo (ver Ligações); `CENTROS`, `OFICINAS`, `POSTOS`, `TIPOS_CUSTO`; `centroObra`/`obraDoCentro` ("Obra #1022"). |
+| `regras.ts` | As regras puras: `revisao` (km ou data, a primeira), `vencimentos`/`tomData`/`textoData`, `alertas`, `cartaOk`, `cobre`/`atribEm` (com `devolvida`), `prazoMulta` (15 dias úteis), `quemConduzia`, `kmPeriodo`, `custoKm`, `consumo`, `utilizacao`, `custoKmMedio`, `bloqueios`/`ocupada` (o que ocupa a viatura num dia), `compromissos`, `viaturasDaObra`, `custoKmDeslocacao` (fallback 0,40 €/km). |
+| `acoes.ts` | Os 13 diálogos do objeto `DLG`: para cada um `ini*`, `validar*` (os mesmos textos do HTML) e `gravar*`, que volta a validar e recusa com `ErroFrota`; `exigir` recusa pelo perfil (não só o botão); `cancelarReserva`, `resolverOcorrencia`, `podeReservar`. |
+| `loja.ts` | A base própria (`useSyncExternalStore`), guardada no `localStorage` na chave **`olyvia-prototipo-frota`**; `executar` corre numa cópia (`structuredClone`) e um erro de regra não muda nada; `esquecerFrota()` apaga a chave, o ecrã e o perfil. |
+| `perfil.ts`, `PerfilFrotaSimulado.tsx` | Os perfis simulados (gestora Sofia Martins, técnico João Silva p1, financeiro) e `pode`/`porqueNao` do HTML. |
+| `ctxFrota.ts`, `itensMenuFrota.ts`, `MenuFrota.tsx` | O contexto dos ecrãs; o menu (`MENU_FROTA`, `contagem`, `visiveisDe`) e o grupo do menu lateral. O ficheiro do menu chama-se `itensMenuFrota.ts` e não `menuFrota.ts` porque, no Windows, colide com `MenuFrota.tsx` (o tsc recusa nomes só diferentes nas maiúsculas). |
+| `FrotaPagina.tsx` | A página (default export, carregada com `lazy`): ecrã do menu, pesquisa global, folha, diálogos, "Repor", "/" para a pesquisa. |
+| `HojeFrota.tsx`, `ViaturasFrota.tsx`, `AtribuicoesFrota.tsx`, `CondutoresFrota.tsx`, `ManutencaoFrota.tsx`, `CustosFrota.tsx`, `OcorrenciasFrota.tsx`, `DocumentosFrota.tsx`, `RelatoriosFrota.tsx`, `LigacoesFrota.tsx` | Os dez ecrãs. Viaturas em lista ou cartões; Atribuições com o calendário semanal e Em curso, Reservas e Histórico; Relatórios com barras feitas à mão e "Ver como tabela". |
+| `ViaturaFolha.tsx`, `DialogosFrota.tsx`, `pecasFrota.tsx` | A ficha (8 abas), os diálogos (moldura `.dlg` com o contexto da Frota, erro por campo e foco no primeiro) e as peças (matrícula `Placa`, `Src` nova/existe, `Cab`, `KpiF`, `ChipF`, `Btn` com permissão, `LigObra`). |
+| `pontes.ts`, `pontesInv.ts` | As ligações para fora: obras do Estado, recursos da Agenda, custo/km, pedido de navegação (`pedirFrota`/`usePedidoFrota`); e, à parte para não carregar o motor do Inventário no resto do protótipo, o stock das carrinhas e a reposição. |
+| `RecursosFrotaAgenda.tsx`, `ViaturasObra.tsx` | O que a Frota mostra noutros módulos: os veículos na Agenda (Definições) e as viaturas na página da obra. |
+| `frota.css` | Só os extras que o `inventario.css` não tem: matrícula, calendário (`.blk`), barras, `.two`, `.vlist`, cartões das ligações, `src.nova`. |
+
+### Ligações com os dados de exemplo do protótipo
+
+- **Pessoas:** os condutores técnicos são os técnicos do motor (`TECS`): João Silva, Rui Alves, Marco Antunes, Sérgio Faria, Hugo Neves e Paulo Mota (campo `tec`); o comercial é o Rúben e a gestora de frota a Sofia Martins (só da Frota). As regras de exemplo mantêm-se: carta a caducar (Rui Alves, 20/11), carta B+C (Marco Antunes), sem carta (Paulo Mota).
+- **Obras e ordens:** as obras são as do Estado de exemplo, **#1022 Marta Lima (WC, Odivelas, em curso)** e **#1050 Joana Ribeiro (Remodelação WC principal, Lisboa, concluída)**, lidas do Estado (`obrasDoEstado(S)`, passadas pela `PrototipoNegocios`); as "ordens" são as **tarefas do plano** (Demolição 13/10 com o João Silva, Canalização 14/10 e Louças 17/10 com o Marco Antunes, Revestimento 15–16/10 com o Hugo Neves, que reserva a partilhada BX-55-RT). A visita de 15/10 é a da Luísa Freitas (#1036). Os centros de custo das obras são "Obra #1022"/"Obra #1050". Clicar numa obra na Frota abre-a em **Operações** (`A.abrirPlano`); a **página da obra** (`ObraV2`) mostra as viaturas que lá foram, com o custo por km real e "Abrir na Frota". Um teste confirma que cada tarefa referida existe no plano da seed e com o mesmo técnico.
+- **Inventário:** cada carrinha com armazém é um **armazém do tipo "viatura"** no Inventário (`Armazem.tipo`/`matricula`, novos e opcionais; dados em `inventario/carrinhas.ts`; `criarSeedComCarrinhas()` em `inventario/seed.ts`), com o stock de exemplo do HTML a entrar por movimento ("Carga inicial", 01/09, arrumado junto dos saldos iniciais para não aparecer nos últimos movimentos), `serves: false` (não entra na reserva FIFO). A loja do Inventário usa esta base; **`criarSeed()` continua a ser a do mockup** (o `seed.test.ts` compara-a número a número e não mudou). A aba **Stock na carrinha** lê do Inventário e **"Pedir reposição ao armazém central"** cria pedidos de transferência reais (`criarPedidoTransf`, Armazém Central → carrinha, o que falta até ao mínimo; não repete artigos com pedido pendente). Uma viatura nova com "Criar armazém móvel" cria o armazém no Inventário. O cartão do armazém (Inventário › Armazéns) mostra "Armazém móvel · viatura AA-12-BC". Mudou um teste do Inventário: em `regrasCadastros.test.ts`, "repor volta aos dados de exemplo" passa a contar os 25 movimentos do mockup mais a carga das carrinhas.
+- **Agenda:** as viaturas ativas são os recursos **Veículo** (`recursosFrota`); a "Carrinha Renault Master" que já existia nos recursos é a **AA-12-BC** (`recursoAgenda`). Em **Definições › Agenda › Recursos** aparece a lista "Veículos da Frota" (só leitura), com os bloqueios dos próximos 7 dias e "Abrir na Frota"; os dados da Agenda (`agendaInicial`) não mudaram. **As reservas pontuais e as manutenções marcadas bloqueiam a viatura**: o calendário mostra-as, a atribuição pontual recusa um dia com manutenção marcada e a manutenção recusa um dia reservado. A ficha (aba Ligações) mostra os compromissos da agenda e tem "Ver na Agenda".
+- **Custos:** `custoKmFrota(vid?)` (em `pontes.ts`) dá o custo por km real da viatura, a média da frota, ou 0,40 €/km sem dados. **No protótipo não há nenhum cálculo com 0,40 €/km** (esse valor está em `sugestaoFichaLocal.ts`, da app), por isso nada foi substituído: a função fica pronta e a página da obra já mostra o €/km real de cada viatura. A categoria "Viaturas" dos custos V2 (`custosModelo.ts`) não foi ligada.
+
+### Fontes de dados ("Mostrar fontes de dados")
+
+Como no HTML: a **laranja** ("nova ·") as tabelas e funções que não existem (`fleet_vehicles`, `fleet_assignments`, `fleet_odometer_readings`, `fleet_maintenance_plans`, `fleet_maintenance_events`, `fleet_expenses`, `fleet_incidents`, `fleet_documents_due`, `rpc_fleet_assign`, `rpc_fleet_create_vehicle`, `rpc_fleet_cost_report`, a edge function `fleet-import-statement`); a **violeta** ("existe ·") o que já existe (`schedule_resources`/`schedule_items`, `warehouses`/`get_effective_stock`/`rpc_register_stock_transfer`, `pessoas_identificacao` do ramo RH, `ops_centro_custo`/`ops_obra`, `documents`). O ecrã **Ligações** junta-as por módulo e diz também o que já está ligado neste protótipo, com atalhos (Agenda, obra, Inventário).
+
+### Correções da revisão de código (14/10/2026)
+
+- **Armazém móvel nunca serve clientes:** `armazemServe` (reserva FIFO e saídas), `opcoesExpedicao`, o armazém por defeito e os interruptores recusam um armazém `tipo: "viatura"` (`MOVEL_NAO_SERVE` em `cadastros.ts`); no cartão do armazém o interruptor "Serve clientes" fica desativado com o porquê.
+- **Stock das carrinhas à parte:** conta no valor e nas existências do Inventário, mas não no "stock baixo / a encomendar" (`contadores.ts`: `low` e `estadoStock`) nem, por isso, no Hoje V2 e no menu; a falta nas carrinhas vê-se só na Frota. Com `criarSeedComCarrinhas()`: stock baixo 13 (igual ao mockup), valor 29 152,75 € (28 233,80 € sem carrinhas), 37 linhas com stock e 2291 unidades (17 e 1974 sem carrinhas).
+- **Atribuições:** a carta verifica-se no início e no último dia; a reserva pontual percorre todos os dias (`ocupada`/`bloqueios`), com as manutenções em curso até à data prevista.
+- **Ações:** devolver, abastecer e km recusam datas no futuro; não se devolve duas vezes; o extrato fica registado (`Frota.importados`) e não se importa duas vezes; concluir diz o estado real; o técnico só age sobre a sua viatura (`exigir(acao, F, vid)`).
+- **Nova viatura:** permissão e validações antes de criar o armazém; `criarArmazemCarrinha` reaproveita um armazém vazio da mesma matrícula (recriar depois de "Repor" funciona) e a cidade escolhe-se (campo opcional "Cidade da carrinha"); "Criar recurso na Agenda" grava `Viatura.agenda` e só essas viaturas são recursos (todas as da seed). `VERSAO_FROTA` passou a 2.
+- **Navegação:** "Abrir na Frota" só aparece quando a moldura a consegue abrir (`definirMolduraFrota(soV2)` em `PrototipoNegocios`, `useMolduraFrota`); a moldura trata o pedido logo e passa a viatura à Frota como propriedade, por isso um pedido antigo nunca é consumido mais tarde. A ficha devolve o foco a quem a abriu (ou a `#frota-h1`).
+- **Revisão:** quando a data chega antes dos km, o texto ("Faltam 10 d (até 24/10/2026)") e a percentagem seguem a data.
+
+### Testes (Frota)
+
+`frota/regras.test.ts` (revisão, vencimentos, alertas, carta, `cobre`, prazo da multa, sugestão do condutor, atribuição recusada, loja que não muda com erro, perfil, `localStorage`, custos, e as ligações: técnicos, obras e tarefas da seed, armazéns móveis, reserva FIFO igual, reposição, recursos da Agenda, bloqueios) e `frota/FrotaPagina.test.tsx` (só na V2, Frota fecha o Inventário e vice-versa, Hoje filtra, abrir a viatura e repor stock, atribuir recusando carta inválida, km que descem, perfil técnico, Agenda, página da obra e o pedido de fora a abrir a viatura).
+
+---
+
 ## Como funciona (o essencial)
 
 - **O estado é um objeto mutável.**

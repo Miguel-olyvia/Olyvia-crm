@@ -3,7 +3,7 @@
 // Não toca no Estado nem no motor.ts do protótipo, não grava no localStorage e "Repor inventário" apaga-o (esquecerInventario).
 import { useSyncExternalStore } from "react";
 import { ErroInv, mudou } from "./base";
-import { criarSeed } from "./seed";
+import { criarSeedComCarrinhas } from "./seed";
 import type { AbaInv } from "./ctxInv";
 import type { Inventario } from "./tipos";
 
@@ -16,7 +16,7 @@ const avisar = (): void => { for (const fn of ouvintes) fn(); };
 
 /** A base atual (criada com os dados de exemplo na primeira leitura). */
 export function lerInventario(): Inventario {
-  if (!base) base = criarSeed();
+  if (!base) base = criarSeedComCarrinhas();
   return base;
 }
 

@@ -22,6 +22,7 @@ import {
   type CampoLead, type Facto, type Operador,
 } from "./funil";
 import { BTN, CARTAO, Escolhas, INP, LINHA, Passo, Secao, Sub } from "./pecasDefinicoes";
+import { RecursosFrotaAgenda } from "../frota/RecursosFrotaAgenda";
 
 type Anunciar = (m: string) => void;
 
@@ -220,6 +221,7 @@ export function Agenda({ anunciar }: { anunciar: Anunciar }) {
           onClick={() => { mudarDefinicoes((d) => { d.recursos.push({ id: novoId("r", d.recursos), nome: "Recurso novo", tipo: "Pessoa", dias: [...d.marcacao.diasTrabalho] }); }); anunciar("Recurso novo juntado no fim da lista"); }}>
           <Plus className="h-4 w-4" aria-hidden="true" />Juntar recurso
         </Button>
+        <RecursosFrotaAgenda />
       </Sub>
 
       <Sub id="agenda-regras" titulo="Regras de marcação">

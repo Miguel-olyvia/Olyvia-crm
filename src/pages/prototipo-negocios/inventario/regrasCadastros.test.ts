@@ -6,6 +6,7 @@ import { alternarArmazem, decidirPreco, definirArmazemPorDefeito, definirPreferi
 import { cancelarContagem, contarLinha, criarContagem, estatisticasContagem, finalizarContagem, infoLinha, preencherEsperado, resolverLinha } from "./contagens";
 import { cancelarGuia, fecharGuia, guardarGuia, reabrirGuia, resumoGuia } from "./guias";
 import { esquecerInventario, executar, lerInventario } from "./loja";
+import { CARRINHAS } from "./seed";
 import { aplicarMovimentos, qtyAt } from "./stock";
 
 const contagem = (db: ReturnType<typeof fresca>, id: string) => contagemPorId(db, id)!;
@@ -189,7 +190,8 @@ describe("A loja em memória", () => {
   it("repor volta aos dados de exemplo", () => {
     executar((db) => aplicarMovimentos(db, [{ type: "out", sku: "CD-80", wh: "LIS", qty: 1 }]));
     esquecerInventario();
-    expect(lerInventario().moves).toHaveLength(25);
+    // a loja usa a seed do mockup (25 movimentos) mais a carga inicial das carrinhas da Frota (uma entrada por linha de stock de cada carrinha)
+    expect(lerInventario().moves).toHaveLength(25 + CARRINHAS.reduce((n, c) => n + c.stock.length, 0));
   });
 
   it("um erro que não é de uma regra não se engole", () => {

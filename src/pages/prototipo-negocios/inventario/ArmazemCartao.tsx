@@ -3,7 +3,7 @@
 import { Lock, Pencil, Trash2, Undo2 } from "lucide-react";
 import { eur, produto } from "./base";
 import { Fonte } from "./cabInv";
-import { definirCampoArmazem, restaurarArmazem, type DadosArmazem } from "./cadastros";
+import { MOVEL_NAO_SERVE, definirCampoArmazem, restaurarArmazem, type DadosArmazem } from "./cadastros";
 import { useCtxInv } from "./ctxInv";
 import { Ed, MenuMais } from "./mockPecas";
 import { Peq, Selo } from "./pecasInv";
@@ -43,8 +43,11 @@ export function ArmazemCartao({ w, aoEditar, aoEliminar, aoMovimento }: Props) {
         <MenuMais itens={itens} />
       </div>
       <div className="row" style={{ gap: 10 }}>
-        {w.deleted ? <Selo>Eliminado</Selo> : <>{W2("active", "bool", "Ativo")}{W2("serves", "bool", "Serve clientes")}</>}
+        {w.deleted ? <Selo>Eliminado</Selo> : <>{W2("active", "bool", "Ativo")}{w.tipo === "viatura"
+          ? <label className="switch" title={MOVEL_NAO_SERVE} style={{ opacity: 0.6, cursor: "not-allowed" }}><input type="checkbox" checked={false} disabled aria-label="Serve clientes" aria-describedby={`movel-${w.id}`} /><span className="sw" aria-hidden="true" /><span>Serve clientes</span><span id={`movel-${w.id}`} className="sr">{MOVEL_NAO_SERVE}</span></label>
+          : W2("serves", "bool", "Serve clientes")}</>}
         {db.settings.defaultWh === w.id && <Selo tom="info">Por defeito</Selo>}
+        {w.tipo === "viatura" && <Selo tom="violet">Armazém móvel · viatura {w.matricula}</Selo>}
       </div>
       <div className="dl" style={{ fontSize: 13, gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: "6px 12px" }}>
         {CAMPOS.map(([l, k]) => <div key={k}><span className="lbl">{l}</span>{W2(k, k === "email" ? "email" : k === "phone" ? "tel" : "text", l)}</div>)}

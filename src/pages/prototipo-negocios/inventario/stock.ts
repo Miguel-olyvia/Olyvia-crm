@@ -25,10 +25,12 @@ export function linhaStock(db: Inventario, sku: string, wh: string, criar = fals
 }
 export const qtyAt = (db: Inventario, sku: string, wh: string): number => linhaStock(db, sku, wh)?.qty ?? 0;
 export const totalQty = (db: Inventario, sku: string): number => db.stocks.filter((s) => s.sku === sku && !s.deleted).reduce((a, s) => a + s.qty, 0);
-/** Só um armazém ativo, que serve clientes e não eliminado entra na reserva e nas saídas. */
+/** Um armazém móvel (a carrinha de uma viatura da Frota): stock à parte, reposto por transferência e não por compra. */
+export const ehMovel = (db: Inventario, id: string): boolean => armazem(db, id)?.tipo === "viatura";
+/** Só um armazém ativo, que serve clientes e não eliminado entra na reserva e nas saídas. Um armazém móvel (viatura) nunca serve clientes. */
 export function armazemServe(db: Inventario, id: string): boolean {
   const w = armazem(db, id);
-  return !!(w && w.active && w.serves && !w.deleted);
+  return !!(w && w.active && w.serves && !w.deleted && w.tipo !== "viatura");
 }
 
 /** Valida tudo antes de escrever: se uma linha deixa o stock abaixo de zero, falha por inteiro e nada se regista. */

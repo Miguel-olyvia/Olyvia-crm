@@ -24,6 +24,7 @@ import { aplicarTodos, receitaDe, type ReceitaV2 } from "./custosModelo";
 import { lerCustos, mudarCustos, useCustos } from "./custosStore";
 import { confirmarHorasEquip, custoEquipamentos, equipamentosObra, horasReais, horasSugeridas, opcoesHoras, type LinhaEquipObra } from "./equipamentosObra";
 import { MIN_OBRAS, TOLERANCIA, comparacaoObra, podeUsarMediana, receitaComHoras, type ComparacaoReceita } from "./receitaReal";
+import { ViaturasObra } from "../frota/ViaturasObra";
 
 const horasTxt = (h: number) => `${nfmt(h)} h`;
 
@@ -64,6 +65,7 @@ export function ObraV2({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <p className="mt-1 flex flex-wrap items-center gap-x-2 text-base text-muted-foreground">
           <EstadoObra p={p} /> <span>· {d.servico} · {p.tasks.length} fases · {nfmt(horas)} h de equipa</span>
         </p>
+        <ViaturasObra obra={d.id} />
         {!pode && (
           <p className="mt-3 text-[15px] text-muted-foreground">
             Esta página é de {PAPEIS.operacoes.n}.{" "}

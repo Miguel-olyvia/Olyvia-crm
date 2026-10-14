@@ -8,9 +8,10 @@ import type { Inventario, LinhaStock } from "./tipos";
 export type EstadoStock = "low" | "ok" | "high";
 export const ESTADOS_STOCK: Record<EstadoStock, string> = { low: "Baixo", ok: "Normal", high: "Excesso" };
 
-/** Baixo: o stock livre (sem reservas) está abaixo do ponto de encomenda. Excesso: acima do máximo. */
+/** Baixo: o stock livre (sem reservas) está abaixo do ponto de encomenda. Excesso: acima do máximo.
+ *  As carrinhas (armazéns móveis da Frota) nunca ficam "baixo" aqui: repõem-se por transferência, não por compra; a falta delas vê-se na Frota. */
 export function estadoStock(db: Inventario, r: LinhaStock): EstadoStock {
-  if (r.rop > 0 && r.qty - reservadoEm(db, r.sku, r.wh) < r.rop) return "low";
+  if (r.rop > 0 && armazem(db, r.wh)?.tipo !== "viatura" && r.qty - reservadoEm(db, r.sku, r.wh) < r.rop) return "low";
   if (r.max > 0 && r.qty > r.max) return "high";
   return "ok";
 }
@@ -25,7 +26,8 @@ export function contadores(db: Inventario): Contadores {
   const pos = db.pos.filter((p) => !p.deleted);
   const ecs = db.ecs.filter((e) => !e.deleted);
   const fornAtivo = (sid: string): boolean => { const s = fornecedor(db, sid); return !!s && !s.deleted; };
-  const baixos = new Set(db.stocks.filter((s) => !s.deleted && armazem(db, s.wh) && !armazem(db, s.wh)?.deleted && s.rop > 0 && livreEm(db, s.sku, s.wh) < s.rop).map((s) => s.sku + "|" + s.wh));
+  // o stock baixo (a encomendar) não conta as carrinhas da Frota; o valor do stock conta-as (são inventário da empresa)
+  const baixos = new Set(db.stocks.filter((s) => !s.deleted && armazem(db, s.wh) && !armazem(db, s.wh)?.deleted && armazem(db, s.wh)?.tipo !== "viatura" && s.rop > 0 && livreEm(db, s.sku, s.wh) < s.rop).map((s) => s.sku + "|" + s.wh));
   const custo = (sku: string): number => produto(db, sku)?.avg || produto(db, sku)?.cost || 0;
   return {
     pending: pos.filter((p) => p.status === "pending").length,

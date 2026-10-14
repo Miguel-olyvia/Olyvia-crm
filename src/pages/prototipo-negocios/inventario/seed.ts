@@ -7,6 +7,7 @@ import { cancelarGuia, fecharGuia, guardarGuia } from "./guias";
 import { enviarPo, linhaDeArtigo, novaPo, portalConfirmar, portalVista } from "./po";
 import { receberLinhas } from "./receber";
 import { aplicarMovimentos, criarPedidoTransf, linhaStock } from "./stock";
+import { CARRINHAS } from "./carrinhas";
 import type { Ec, Fornecedor, Inventario, Po, Produto } from "./tipos";
 
 export function baseVazia(): Inventario {
@@ -221,7 +222,67 @@ function precosECatalogo(db: Inventario): void {
   ct("zeta", "ZS-BAT5", "Bateria lítio 5 kWh", 1650, 1, "Unidade", "unlinked", null);
 }
 
-/** A base de exemplo completa, no estado de 09/10/2026. */
+/** As carrinhas da Frota que são armazéns móveis (os dados estão em carrinhas.ts, sem o motor, para a Frota os ler sem carregar o Inventário). */
+export { CARRINHAS } from "./carrinhas";
+
+/** Os artigos que só andam nas carrinhas (o tubo multicamada TM-16 já existia). */
+function produtosCarrinha(db: Inventario): void {
+  const pr = (sku: string, name: string, cat: string, unit: string, sale: number, cost: number): void => {
+    db.products.push({ sku, ean: "", name, cat, sub: "Carrinha", unit, sale, cost, avg: 0, codes: [], deleted: false });
+  };
+  pr("VE-12", "Válvula de esfera 1/2\"", "Canalização", "un", 9.9, 5.4);
+  pr("FT-01", "Fita de teflon", "Canalização", "un", 1.5, 0.6);
+  pr("SIL-N", "Silicone neutro", "Ferragens", "un", 6.9, 3.2);
+  pr("ABR-48", "Abraçadeiras 4,8 × 200", "Elétrico", "un", 0.1, 0.04);
+  pr("TP-U", "Termopar universal", "Aquecimento", "un", 14.5, 7.9);
+  pr("KV-C", "Kit de vedantes de caldeira", "Aquecimento", "un", 12, 6.5);
+  pr("NTC-10", "Sonda NTC 10k", "Aquecimento", "un", 18, 9.6);
+  pr("FUS-3", "Fusíveis 3,15 A", "Elétrico", "un", 0.8, 0.3);
+  pr("TC-15", "Tubo de cobre 15 mm (metro)", "Canalização", "m", 8.4, 5.1);
+  pr("CC-15", "Curvas de cobre 15 mm", "Canalização", "un", 1.9, 0.9);
+  pr("SOL-K", "Solda e decapante", "Canalização", "kit", 24, 13.5);
+  pr("ISO-15", "Isolamento 15 mm (metro)", "Isolamento", "m", 1.6, 0.8);
+  pr("FAC-01", "Filtros de ar condicionado", "Climatização", "un", 9.5, 4.8);
+  pr("R32", "Gás R32 (garrafa)", "Climatização", "un", 129, 82);
+  pr("LIMP-B", "Spray de limpeza de baterias", "Climatização", "un", 8.5, 4.1);
+  pr("ESC-7", "Escadote 7 degraus", "Ferramentas", "un", 129, 79);
+  pr("SDS-K", "Berbequim e martelo SDS", "Ferramentas", "kit", 389, 245);
+}
+
+/** Os armazéns móveis das carrinhas e a carga inicial, com a data da abertura do inventário (01/09). Os movimentos ficam junto dos saldos iniciais no livro,
+ *  para não aparecerem como "últimos movimentos"; os ids seguem os de antes (nada do que já existia muda de número). */
+function carrinhas(db: Inventario): void {
+  produtosCarrinha(db);
+  CARRINHAS.forEach((c, i) => {
+    db.warehouses.push({ id: c.id, name: `Carrinha ${c.mat}`, code: `VIA-${String(i + 1).padStart(2, "0")}`, addr: "Armazém móvel (viatura)", cp: "", city: c.cidade, lat: null, lng: null,
+      manager: c.condutor, phone: "", email: "", cap: "Viatura", active: true, serves: false, deleted: false, tipo: "viatura", matricula: c.mat });
+  });
+  const carga: Parameters<typeof aplicarMovimentos>[1] = [];
+  for (const c of CARRINHAS) for (const [sku, qty, min] of c.stock) {
+    const r = linhaStock(db, sku, c.id, true);
+    if (r) Object.assign(r, { loc: "Carrinha", min, max: min * 2, rop: min });
+    carga.push({ type: "in", sku, wh: c.id, qty, doc: "Carga inicial", note: `Carga inicial da carrinha ${c.mat}`, cost: db.products.find((p) => p.sku === sku)?.cost, user: "Sofia Martins" });
+  }
+  const antes = db.moves.length;
+  db.relogio = "2026-09-01T08:30";
+  const novos = aplicarMovimentos(db, carga);
+  db.moves.splice(antes, novos.length);
+  const fimAbertura = db.moves.findIndex((m) => m.doc !== "Saldo inicial");
+  db.moves.splice(fimAbertura < 0 ? db.moves.length : fimAbertura, 0, ...novos);
+}
+
+/** A base do Inventário da V2: a do mockup (criarSeed) mais os armazéns móveis das carrinhas da Frota. É a que a loja usa. */
+export function criarSeedComCarrinhas(): Inventario {
+  return comoSistema(() => {
+    const db = construirSeed();
+    carrinhas(db);
+    db.relogio = null;
+    mudou(db);
+    return db;
+  });
+}
+
+/** A base de exemplo do mockup, no estado de 09/10/2026 (sem as carrinhas: é a que se compara número a número com o mockup em seed.test.ts). */
 export function criarSeed(): Inventario {
   return comoSistema(construirSeed);
 }

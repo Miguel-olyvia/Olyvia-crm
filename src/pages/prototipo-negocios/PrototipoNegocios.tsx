@@ -40,10 +40,16 @@ import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
 import PerfilSimulado from "./inventario/PerfilSimulado";
+import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
+import { esquecerFrota, type AbaFrota } from "./frota/loja";
+import { definirMolduraFrota, obrasDoEstado, tratarPedidoFrota, usePedidoFrota } from "./frota/pontes";
 
 // O Inventário completo (nativo, só na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
 const MenuInventario = lazy(() => import("./inventario/MenuInventario"));
+// A Frota (nativa, só na V2), com a UI do Inventário: também só se carrega quando se abre.
+const FrotaPagina = lazy(() => import("./frota/FrotaPagina"));
+const MenuFrota = lazy(() => import("./frota/MenuFrota"));
 
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
@@ -71,6 +77,8 @@ export default function PrototipoNegocios() {
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
   const [invMock, setInvMock] = useState(false); // um ecrã do Inventário (do menu lateral): só existe na V2 (não na Atual nem na V2 funcional) e vive fora do Estado
   const [invAba, setInvAba] = useState<AbaInv>("hoje"); // qual deles
+  const [frotaMock, setFrotaMock] = useState(false); // um ecrã da Frota (do menu lateral): como o Inventário, só na V2 e fora do Estado
+  const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   const mainRef = useRef<HTMLElement>(null);
@@ -134,6 +142,7 @@ export default function PrototipoNegocios() {
     esquecerNegociosFunc();
     esquecerDiaADia();
     esquecerV2();
+    esquecerFrota();
     avisar({ msg: "Demonstração reposta", sub: "Todos os negócios voltaram ao início", kind: "ok" });
   });
 
@@ -146,7 +155,7 @@ export default function PrototipoNegocios() {
     setVersao(nova);
     gravarVersao(nova);
     // Os ecrãs do Inventário só existem na V2: volta à vista equivalente (Negócios).
-    if (nova !== "v2" && invMock) { setInvMock(false); run(() => A.nav("negocios")); return; }
+    if (nova !== "v2" && (invMock || frotaMock)) { setInvMock(false); setFrotaMock(false); run(() => A.nav("negocios")); return; }
     // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
     run(() => {
       const vista = vistaEquivalente(ref.current.view, nova);
@@ -204,8 +213,9 @@ export default function PrototipoNegocios() {
   // nem Pessoas (mostra Negócios), por isso destaca Negócios. Com a V2, criar uma lead (S.novo) destaca Pessoas.
   const soV2 = versao === "v2" && simples; // o Inventário do mockup só aparece na V2 (um grupo do menu, no lugar do item antigo)
   const ativoInv = soV2 && (invMock || S.view === "inventario");
+  const ativoFrota = soV2 && frotaMock && !ativoInv; // abrir a Frota fecha o Inventário e vice-versa
   const itensMenu = soV2 ? itens.filter(([v]) => v !== "inventario") : itens;
-  const cur: Vista | "inv" = ativoInv ? "inv" : novaLeadV2 ? "pessoas"
+  const cur: Vista | "inv" | "frota" = ativoInv ? "inv" : ativoFrota ? "frota" : novaLeadV2 ? "pessoas"
     : S.view === "negocio" ? "negocios"
     : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
     : v2 && (S.view === "leads" || S.view === "clientes") ? "pessoas"
@@ -213,8 +223,22 @@ export default function PrototipoNegocios() {
   // Na V2 a vista antiga "Inventário" (o motor ainda a abre em "Abrir no Inventário") leva às Encomendas do novo inventário.
   useEffect(() => {
     if (!soV2 || S.view !== "inventario") return;
-    setInvAba("po"); setInvMock(true); run(() => A.nav("hoje"));
+    setInvAba("po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
   }, [soV2, S.view, run, A]);
+  // Outro módulo pediu para abrir a Frota (Definições › Agenda, a página da obra): abre-a (a viatura abre-se lá dentro).
+  // "Abrir na Frota" só aparece noutros módulos quando esta moldura a consegue abrir (a mesma condição do menu); o pedido trata-se logo,
+  // e a viatura passa à Frota como propriedade, para um pedido antigo nunca ser consumido mais tarde.
+  const [frotaPedido, setFrotaPedido] = useState<{ vid: string; n: number } | null>(null);
+  useEffect(() => { definirMolduraFrota(soV2); }, [soV2]);
+  useEffect(() => () => definirMolduraFrota(false), []);
+  const pedidoFrota = usePedidoFrota();
+  useEffect(() => {
+    if (!pedidoFrota) return;
+    tratarPedidoFrota();
+    if (!soV2) return;
+    setInvMock(false); setFrotaAba(pedidoFrota.aba ?? "viaturas"); setFrotaMock(true);
+    setFrotaPedido(pedidoFrota.vid ? { vid: pedidoFrota.vid, n: pedidoFrota.n } : null);
+  }, [soV2, pedidoFrota]);
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
 
   const icone = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
@@ -242,7 +266,7 @@ export default function PrototipoNegocios() {
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
-      <button key={v} type="button" onClick={go(() => { setInvMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
         className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
           cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
         <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
@@ -250,8 +274,17 @@ export default function PrototipoNegocios() {
         {c ? <span className="text-sm tabular-nums text-muted-foreground" aria-label={c + " por fazer"}>{c}</span> : null}
       </button>
     );
-    const abrirInv = (a: AbaInv): void => { setMais(false); setInvAba(a); setInvMock(true); };
+    const abrirInv = (a: AbaInv): void => { setMais(false); setFrotaMock(false); setInvAba(a); setInvMock(true); };
     const menuInv = (aberto: boolean) => (soV2 ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
+    const abrirFrota = (a: AbaFrota): void => { setMais(false); setInvMock(false); setFrotaAba(a); setFrotaMock(true); };
+    const menuFrota = (aberto: boolean) => (soV2 ? <Suspense fallback={null}><MenuFrota aba={ativoFrota ? frotaAba : null} aoIr={abrirFrota} iniciarAberto={aberto} /></Suspense> : null);
+    // As ligações da Frota para fora: a obra (Operações), a Agenda (Definições › Agenda › Recursos) e as carrinhas no Inventário (Armazéns).
+    const irObra = (id: number): void => { setFrotaMock(false); run(() => A.abrirPlano(id)); };
+    const irAgenda = (): void => {
+      setFrotaMock(false); run(() => A.nav("definicoes"));
+      setTimeout(() => document.getElementById("agenda-recursos")?.scrollIntoView({ block: "start" }), 80);
+    };
+    const irInventario = (): void => { setFrotaMock(false); setInvAba("wh"); setInvMock(true); };
     const papel = (
       <label className="grid gap-1.5 text-sm text-muted-foreground">
         A ver como
@@ -271,12 +304,13 @@ export default function PrototipoNegocios() {
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
           <nav className="flex flex-col gap-0.5" aria-label="Menu">
-            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? menuInv(false) : null}</Fragment>)}
+            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}</> : null}</Fragment>)}
           </nav>
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
             <div className="px-3">{papel}</div>
             {ativoInv && <div className="px-3"><PerfilSimulado /></div>}
+            {ativoFrota && <div className="px-3"><PerfilFrotaSimulado /></div>}
             <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
               className="mx-3 flex min-h-11 items-center justify-between gap-3 rounded-lg text-left text-[15px] text-foreground">
               <span>Leitura fácil<span className="block text-sm text-muted-foreground">letra maior, mais espaço</span></span>
@@ -293,7 +327,7 @@ export default function PrototipoNegocios() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {ativoInv && <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:px-6"><div ref={setAlvoTopo} className="flex min-w-0 flex-1" /></header>}
+          {(ativoInv || ativoFrota) && <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:px-6"><div ref={setAlvoTopo} className="flex min-w-0 flex-1" /></header>}
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:hidden">
             <img src={mascote} alt="" className="h-7 w-7 object-contain" />
             <span className="flex-1 text-base font-semibold">Olyvia</span>
@@ -307,6 +341,12 @@ export default function PrototipoNegocios() {
             {ativoInv ? (
               <div className="h-full animate-in fade-in-0 duration-200">
                 <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} alvoTopo={alvoTopo} /></Suspense>
+              </div>
+            ) : ativoFrota ? (
+              <div className="h-full animate-in fade-in-0 duration-200">
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir a frota…</p>}>
+                  <FrotaPagina leitura={!!S.leitura} aba={frotaAba} aoMudarAba={setFrotaAba} alvoTopo={alvoTopo} obras={obrasDoEstado(S)} irObra={irObra} irAgenda={irAgenda} irInventario={irInventario} pedido={frotaPedido} pedidoAberto={() => setFrotaPedido(null)} />
+                </Suspense>
               </div>
             ) : <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
 
@@ -322,6 +362,7 @@ export default function PrototipoNegocios() {
                   {item("definicoes", "Definições", Settings)}
                 </nav>
                 {soV2 && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
+                {soV2 && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
                   className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">
@@ -335,7 +376,7 @@ export default function PrototipoNegocios() {
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
             {((soV2 ? ["hoje", "negocios", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
-              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
@@ -348,7 +389,7 @@ export default function PrototipoNegocios() {
               </button>
             )}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
-              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "pessoas", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
+              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "pessoas", "catalogo", "marketing", "definicoes", "frota"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
             </button>
           </nav>

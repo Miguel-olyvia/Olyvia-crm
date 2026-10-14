@@ -35,6 +35,7 @@ export function guardarArmazem(db: Inventario, d: DadosArmazem, id: string | nul
   const e = Object.values(erosArmazem(db, d, id))[0];
   if (e) falhar(e);
   if (id && db.settings.defaultWh === id && (!d.active || !d.serves)) falhar("É o armazém por defeito: tem de estar ativo e servir clientes.");
+  if (id && d.serves && armazem(db, id)?.tipo === "viatura") falhar(MOVEL_NAO_SERVE);
   const geo = cpGeo(d.cp);
   const f = { ...d, name: d.name.trim(), code: d.code.trim(), lat: geo ? geo[0] : null, lng: geo ? geo[1] : null };
   const w0 = id ? armazem(db, id) : undefined;
@@ -44,11 +45,15 @@ export function guardarArmazem(db: Inventario, d: DadosArmazem, id: string | nul
   return w;
 }
 
+/** Um armazém móvel (viatura) não serve clientes: a carrinha repõe-se por transferência e não expede encomendas de cliente. */
+export const MOVEL_NAO_SERVE = "Um armazém móvel (viatura) não serve clientes: a carrinha repõe-se por transferência a partir do armazém central.";
+
 /** Desligar um armazém (ativo/serve clientes) respeita o por defeito e as encomendas clientes a expedir daí. */
 export function alternarArmazem(db: Inventario, id: string, k: "active" | "serves", v: boolean): void {
   exigir("inventory.manage", "editar armazéns");
   const w = armazem(db, id);
   if (!w) return falhar("Armazém inexistente.");
+  if (v && k === "serves" && w.tipo === "viatura") falhar(MOVEL_NAO_SERVE);
   if (!v && db.settings.defaultWh === id) falhar("É o armazém por defeito: escolha outro nas Definições primeiro.");
   if (!v && db.ecs.some((e) => !e.deleted && e.wh === id && ecEstado(db, e) !== "full")) falhar("Há encomendas clientes a expedir daqui: mude-lhes o armazém de expedição primeiro.");
   w[k] = v;
@@ -72,6 +77,7 @@ export function definirCampoArmazem(db: Inventario, id: string, k: keyof DadosAr
     w.lng = g ? g[1] : null;
   }
   if (k === "email" && v && !emailOk(String(v))) falhar("Email inválido.");
+  if (k === "serves" && v && w.tipo === "viatura") falhar(MOVEL_NAO_SERVE);
   if ((k === "active" || k === "serves") && !v) alternarArmazem(db, id, k, false);
   (w as unknown as Record<string, string | boolean>)[k] = v;
 }
@@ -94,7 +100,7 @@ export function restaurarArmazem(db: Inventario, id: string): void {
 }
 export function definirArmazemPorDefeito(db: Inventario, id: string): void {
   const w = armazem(db, id);
-  if (!w || !w.active || !w.serves || w.deleted) falhar("O armazém por defeito tem de estar ativo e servir clientes.");
+  if (!w || !w.active || !w.serves || w.deleted || w.tipo === "viatura") falhar("O armazém por defeito tem de estar ativo e servir clientes.");
   db.settings.defaultWh = id;
 }
 

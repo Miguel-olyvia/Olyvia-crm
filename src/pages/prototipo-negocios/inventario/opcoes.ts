@@ -8,7 +8,7 @@ export const opcoesProdutos = (db: Inventario, kits = true): Opcao[] => db.produ
 /** Os armazéns ativos; com `todos`, também os inativos (marcados) e nunca os eliminados. */
 export const opcoesArmazens = (db: Inventario, todos = false): Opcao[] => db.warehouses.filter((w) => !w.deleted && (todos || w.active)).map((w) => [w.id, w.name + (w.active ? "" : " (inativo)")] as const);
 /** Os armazéns que servem clientes (os de expedição). */
-export const opcoesExpedicao = (db: Inventario): Opcao[] => db.warehouses.filter((w) => !w.deleted && w.active && w.serves).map((w) => [w.id, w.name] as const);
+export const opcoesExpedicao = (db: Inventario): Opcao[] => db.warehouses.filter((w) => !w.deleted && w.active && w.serves && w.tipo !== "viatura").map((w) => [w.id, w.name] as const);
 export const opcoesFornecedores = (db: Inventario): Opcao[] => db.suppliers.filter((s) => !s.deleted).map((s) => [s.id, s.name] as const);
 /** Só os produtos que o fornecedor vende (os artigos ligados). */
 export const opcoesArtigosDe = (db: Inventario, sup: string): Opcao[] =>

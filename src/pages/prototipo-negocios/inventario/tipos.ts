@@ -14,6 +14,8 @@ export interface Produto {
 export interface Armazem {
   id: string; name: string; code: string; addr: string; cp: string; city: string; lat: number | null; lng: number | null;
   manager: string; phone: string; email: string; cap: string; active: boolean; serves: boolean; deleted: boolean;
+  /** Um armazém móvel: a carrinha de uma viatura da Frota (frota/), com a matrícula. Os armazéns fixos não têm tipo. */
+  tipo?: "viatura"; matricula?: string;
 }
 
 export interface LinhaStock { id: string; sku: string; wh: string; loc: string; min: number; max: number; rop: number; qty: number; deleted: boolean }
