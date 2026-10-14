@@ -53,7 +53,7 @@ export function SimuladorWorkflow({ eventos, negocios, negocioId, aoMudarNegocio
     () => negocios.map((n) => ({
       value: n.id,
       label: t("businessGoals.workflow.sim.dealOption", {
-        pessoa: n.pessoa, servico: n.servico, fase: t(`businessGoals.phase.${faseDoNegocio(n)}`),
+        pessoa: n.pessoa, servico: n.servico || "—", fase: t(`businessGoals.phase.${faseDoNegocio(n)}`),
       }),
     })),
     [negocios, t],

@@ -3,14 +3,14 @@
 import { useRef, useState } from "react";
 import type { AcoesGeral, ValoresGeral } from "./AbaGeralNovoNegocio";
 import type { AcoesLevantamento } from "./AbaLevantamentoNovoNegocio";
-import { adaptarLinhasAoServico, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
+import { adaptarLinhaADivisao, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
 import {
   COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, reporContacto, type ChaveContacto, type PessoaOpcao,
 } from "./novoNegocio";
 
 export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => void) {
   const [valores, setValores] = useState<ValoresGeral>({
-    pessoaId: "", servico: "", servicoOutro: "", comercial: COMERCIAL_POR_OMISSAO, contacto: CONTACTO_VAZIO,
+    pessoaId: "", comercial: COMERCIAL_POR_OMISSAO, contacto: CONTACTO_VAZIO,
   });
   const [tocados, setTocados] = useState<ReadonlySet<ChaveContacto>>(new Set());
   const mudar = (parcial: Partial<ValoresGeral>) => { aoSujar(); setValores((v) => ({ ...v, ...parcial })); };
@@ -19,8 +19,6 @@ export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => 
       aoSujar();
       setValores((v) => ({ ...v, pessoaId: id, contacto: reporContacto(v.contacto, tocados, pessoas.find((p) => p.id === id)) }));
     },
-    servico: (servico) => mudar({ servico }),
-    servicoOutro: (servicoOutro) => mudar({ servicoOutro }),
     comercial: (comercial) => mudar({ comercial }),
     contacto: (chave, valor) => {
       aoSujar();
@@ -31,7 +29,7 @@ export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => 
   return { valores, acoes };
 }
 
-export function useLevantamentoForm(hoje: string, servico: string, aoSujar: () => void) {
+export function useLevantamentoForm(hoje: string, aoSujar: () => void) {
   const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => levantamentoVazio(hoje, COMERCIAL_POR_OMISSAO));
   const sequencia = useRef(0);
   const alterar = (f: (l: LevantamentoForm) => LevantamentoForm) => { aoSujar(); setLevantamento(f); };
@@ -39,15 +37,19 @@ export function useLevantamentoForm(hoje: string, servico: string, aoSujar: () =
     mudar: (parcial) => alterar((l) => ({ ...l, ...parcial })),
     adicionarLinha: () => {
       sequencia.current += 1;
-      const linha = novaLinha(`l${sequencia.current}`, servico);
+      const linha = novaLinha(`l${sequencia.current}`);
       alterar((l) => ({ ...l, linhas: [...l.linhas, linha] }));
     },
     mudarLinha: (id: string, parcial: Partial<LinhaForm>) =>
-      alterar((l) => ({ ...l, linhas: l.linhas.map((x) => (x.id === id ? { ...x, ...parcial } : x)) })),
+      alterar((l) => ({
+        ...l,
+        linhas: l.linhas.map((x) => {
+          if (x.id !== id) return x;
+          const nova = { ...x, ...parcial };
+          return parcial.divisao === undefined ? nova : adaptarLinhaADivisao(nova, parcial.divisao);
+        }),
+      })),
     removerLinha: (id) => alterar((l) => ({ ...l, linhas: l.linhas.filter((x) => x.id !== id) })),
   };
-  /** Ao mudar o serviço, os trabalhos escolhidos que já não servem ficam por escolher. */
-  const adaptarAoServico = (novo: string) =>
-    setLevantamento((l) => ({ ...l, linhas: adaptarLinhasAoServico(l.linhas, novo) }));
-  return { levantamento, acoes, adaptarAoServico };
+  return { levantamento, acoes };
 }

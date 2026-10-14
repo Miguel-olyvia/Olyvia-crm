@@ -130,7 +130,7 @@ export function ComparacaoNegocios({ negocios, hoje, aberta, aoFechar }: Compara
               {comparacao.negocios.map((n) => (
                 <TableHead key={n.id} scope="col" className="px-3 font-semibold text-foreground">
                   {n.pessoa}
-                  <span className="block text-xs font-normal text-muted-foreground">{n.servico}</span>
+                  {n.servico && <span className="block text-xs font-normal text-muted-foreground">{n.servico}</span>}
                 </TableHead>
               ))}
             </TableRow>

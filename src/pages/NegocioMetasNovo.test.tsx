@@ -52,12 +52,13 @@ describe("Novo negócio na página", () => {
 
   it("um negócio novo entra no Quadro, no resumo e na contagem do Dashboard, sem contar como ganho", () => {
     criarNegocioNovo(
-      { pessoa: { id: "p-marta", nome: "Marta Silveira" }, servico: "Cozinha", comercial: "Ana Ribeiro" }, HOJE_EXEMPLO,
+      { pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro" }, HOJE_EXEMPLO,
     );
     renderPage();
     verTodos();
     expect(estado()).toBe("11 negócios");
-    expect(screen.getByRole("button", { name: /^Marta Silveira · Cozinha/ })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("undefined");
+    expect(screen.getByRole("button", { name: /^Marta Silveira · Ana Ribeiro/ })).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Dashboard" }));
     // No Quadro 10 passam a 11 e Por fechar 4 passam a 5 (o novo está aberto).
     expect(numerosDoQuadro()).toEqual(["11", "5"]);
@@ -75,7 +76,7 @@ describe("Levantamento no painel do negócio criado", () => {
   const abrirPainel = (comLevantamento: boolean) => {
     const criado = criarNegocioNovo(
       {
-        pessoa: { id: "p-marta", nome: "Marta Silveira" }, servico: "Cozinha", comercial: "Ana Ribeiro",
+        pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro",
         ...(comLevantamento ? { levantamento } : {}),
       }, HOJE_EXEMPLO,
     );

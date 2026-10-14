@@ -1,7 +1,7 @@
 // Lógica pura da aba "Levantamento" de "Novo negócio": o que o formulário guarda, a validação e a conversão para o
 // que o negócio de exemplo leva. Nada aqui lê o relógio: o dia de hoje chega por parâmetro.
 import type { EstadoLevantamento, LevantamentoNegocio } from "./negocioMetas";
-import { OUTRO, divisaoPorServico, trabalhosPorServico } from "./levantamentoExemplo";
+import { OUTRO, trabalhosPorDivisao } from "./levantamentoExemplo";
 
 /** Uma linha tal como está no formulário: chaves das listas e texto por converter. */
 export interface LinhaForm {
@@ -37,8 +37,8 @@ export function levantamentoVazio(hoje: string, feitoPor: string): LevantamentoF
   return { data: hoje, feitoPor, estado: "porFazer", linhas: [], observacoes: "" };
 }
 
-export function novaLinha(id: string, servico: string): LinhaForm {
-  return { id, divisao: divisaoPorServico(servico), trabalho: "", trabalhoOutro: "", medida: "", unidade: "m2", observacoes: "" };
+export function novaLinha(id: string): LinhaForm {
+  return { id, divisao: "", trabalho: "", trabalhoOutro: "", medida: "", unidade: "m2", observacoes: "" };
 }
 
 /** O número escrito (aceita vírgula decimal); NaN quando não é um número. */
@@ -47,10 +47,10 @@ export function lerMedida(texto: string): number {
   return limpo === "" ? Number.NaN : Number(limpo);
 }
 
-/** Ao mudar o serviço, o trabalho escolhido que já não está nas sugestões é limpo ("Outro" e o texto ficam). */
-export function adaptarLinhasAoServico(linhas: readonly LinhaForm[], servico: string): LinhaForm[] {
-  const validos = trabalhosPorServico(servico);
-  return linhas.map((l) => (l.trabalho === "" || l.trabalho === OUTRO || validos.includes(l.trabalho) ? l : { ...l, trabalho: "" }));
+/** Ao mudar a divisão, o trabalho escolhido que já não está nas sugestões é limpo ("Outro" e o texto ficam). */
+export function adaptarLinhaADivisao(linha: LinhaForm, divisao: string): LinhaForm {
+  const validos = trabalhosPorDivisao(divisao);
+  return linha.trabalho === "" || linha.trabalho === OUTRO || validos.includes(linha.trabalho) ? linha : { ...linha, trabalho: "" };
 }
 
 function validarLinha(l: LinhaForm): ErrosLinha {

@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ErroDoCampo, ITEM, N, Rotulo } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import type { ErrosLinha, LinhaForm } from "./levantamento";
-import { DIVISOES, OUTRO, UNIDADES, trabalhosPorServico } from "./levantamentoExemplo";
+import { DIVISOES, OUTRO, UNIDADES, trabalhosPorDivisao } from "./levantamentoExemplo";
 
 export const MAX_OBSERVACOES = 200;
 
@@ -17,7 +17,6 @@ interface Props {
   /** A posição da linha (a partir de 1), para o nome da linha e do botão Remover. */
   numero: number;
   linha: LinhaForm;
-  servico: string;
   erros: ErrosLinha | undefined;
   aoMudar: (parcial: Partial<LinhaForm>) => void;
   aoRemover: () => void;
@@ -48,11 +47,11 @@ function CampoLista(props: {
   );
 }
 
-/** Uma linha do levantamento: divisão, trabalho (da lista do serviço, ou "Outro"), medida e unidade, e observações. */
-export function LinhaLevantamentoForm({ id, numero, linha, servico, erros, aoMudar, aoRemover }: Props) {
+/** Uma linha do levantamento: divisão, trabalho (da lista da divisão, ou "Outro"), medida e unidade, e observações. */
+export function LinhaLevantamentoForm({ id, numero, linha, erros, aoMudar, aoRemover }: Props) {
   const { t } = useTranslation();
   const base = `${id}-linha-${linha.id}`;
-  const trabalhos = [...trabalhosPorServico(servico), OUTRO].map((w) => [w, t(`${N}work.${w}`)] as const);
+  const trabalhos = [...trabalhosPorDivisao(linha.divisao), OUTRO].map((w) => [w, t(`${N}work.${w}`)] as const);
   const erroMedida = erros?.medida;
   return (
     <fieldset className="space-y-3 rounded-md border border-border p-3">

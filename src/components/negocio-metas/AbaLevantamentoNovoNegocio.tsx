@@ -21,7 +21,6 @@ export interface AcoesLevantamento {
 
 interface Props {
   id: string;
-  servico: string;
   levantamento: LevantamentoForm;
   erros: ErrosNovoNegocio;
   acoes: AcoesLevantamento;
@@ -66,7 +65,7 @@ function CabecalhoLevantamento({ id, levantamento, acoes }: Pick<Props, "id" | "
 }
 
 /** A lista de linhas, o total, o botão Adicionar linha e o erro "Feito sem linhas". */
-function ListaLinhas({ id, servico, levantamento, erros, acoes }: Props) {
+function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
   const { t } = useTranslation();
   const n = levantamento.linhas.length;
   const erro = erros.levantamento;
@@ -79,7 +78,7 @@ function ListaLinhas({ id, servico, levantamento, erros, acoes }: Props) {
       {n === 0 && <p className="text-sm text-muted-foreground">{t(`${N}survey.empty`)}</p>}
       {levantamento.linhas.map((linha, i) => (
         <LinhaLevantamentoForm
-          key={linha.id} id={id} numero={i + 1} linha={linha} servico={servico} erros={erros.linhas?.[linha.id]}
+          key={linha.id} id={id} numero={i + 1} linha={linha} erros={erros.linhas?.[linha.id]}
           aoMudar={(parcial) => acoes.mudarLinha(linha.id, parcial)} aoRemover={() => { acoes.removerLinha(linha.id); document.getElementById(`${id}-add`)?.focus(); }}
         />
       ))}

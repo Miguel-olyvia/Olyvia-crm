@@ -19,7 +19,7 @@ export function CabecalhoPainel({ negocio }: { negocio: NegocioMes }) {
   return (
     <SheetHeader className="space-y-2 border-b border-border p-6 pr-12 text-left">
       <SheetTitle tabIndex={-1} data-titulo-painel="" className="text-lg outline-none">{negocio.pessoa}</SheetTitle>
-      <SheetDescription>{negocio.servico} · {negocio.comercial}</SheetDescription>
+      <SheetDescription>{[negocio.servico, negocio.comercial].filter(Boolean).join(" · ")}</SheetDescription>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-foreground">
         <span className="inline-flex items-center gap-1.5">
           <span aria-hidden="true" className={cn("h-2.5 w-2.5 rounded-full", COR_FASE[fase])} />

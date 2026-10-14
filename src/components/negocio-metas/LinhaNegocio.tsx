@@ -120,7 +120,7 @@ function CelulasDados({ n, aoAbrir, pos }: { n: NegocioMes; aoAbrir: (n: Negocio
           className={cn("min-h-11 scroll-mb-32 cursor-pointer rounded-sm text-left font-medium", FOCO)}
         >
           {n.pessoa}
-          <span className="block text-xs font-normal text-muted-foreground">{n.servico}</span>
+          {n.servico && <span className="block text-xs font-normal text-muted-foreground">{n.servico}</span>}
         </button>
       </TableHead>
       <TableCell className="px-3 py-2">

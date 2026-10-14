@@ -50,9 +50,8 @@ const escolher = async (dialogo: Dialogo, campo: RegExp | string, opcao: string)
 const irParaLevantamento = (dialogo: Dialogo) => fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Levantamento/ }));
 const irParaGeral = (dialogo: Dialogo) => fireEvent.mouseDown(within(dialogo).getByRole("tab", { name: /^Geral/ }));
 const criar = (dialogo: Dialogo) => fireEvent.click(within(dialogo).getByRole("button", { name: "Criar negócio" }));
-const preencherGeral = async (dialogo: Dialogo, servico = "Cozinha") => {
+const preencherGeral = async (dialogo: Dialogo) => {
   await escolher(dialogo, /^Pessoa/, "Marta Silveira");
-  await escolher(dialogo, /^Serviço/, servico);
 };
 
 describe("NovoNegocioDialogo: painel e aba Geral", () => {
@@ -72,39 +71,18 @@ describe("NovoNegocioDialogo: painel e aba Geral", () => {
     expect(within(dialogo).getByRole("button", { name: "Criar negócio" })).toHaveAttribute("type", "submit");
   });
 
-  it("a aba Geral tem pessoa, serviço (lista), comercial, contacto e o primeiro passo", () => {
+  it("a aba Geral tem pessoa, comercial, contacto e o primeiro passo, e não tem serviço", () => {
     const { dialogo } = abrir();
     expect(within(dialogo).getByRole("combobox", { name: /^Pessoa/ })).toBeInTheDocument();
-    expect(within(dialogo).getByRole("combobox", { name: /^Serviço/ })).toBeInTheDocument();
-    expect(within(dialogo).queryByRole("textbox", { name: /^Serviço/ })).not.toBeInTheDocument();
+    expect(within(dialogo).queryByRole("combobox", { name: /Serviço/ })).not.toBeInTheDocument();
+    expect(within(dialogo).queryByRole("textbox", { name: /Serviço|Qual\?/ })).not.toBeInTheDocument();
+    expect(within(dialogo).queryByText(/Serviço/)).not.toBeInTheDocument();
     expect(within(dialogo).getByRole("combobox", { name: "Comercial" })).toHaveTextContent("Ana Ribeiro");
     const contacto = within(dialogo).getByRole("group", { name: "Contacto" });
     ["Email", "Morada", "Distrito", "NIF", "Empresa", "NIF da empresa"].forEach((r) => {
       expect(within(contacto).getByLabelText(r)).toHaveValue("");
     });
     expect(within(dialogo).getByText("O negócio começa em Orçamento: o primeiro passo é fazer o levantamento.")).toBeInTheDocument();
-  });
-
-  it("o serviço escolhe-se de uma lista fechada de seis opções", async () => {
-    const { dialogo } = abrir();
-    fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Serviço/ }), { key: "Enter" });
-    const opcoes = (await screen.findAllByRole("option")).map((o) => o.textContent);
-    expect(opcoes).toEqual(["Casa de banho", "Cozinha", "Janelas", "Isolamento", "Remodelação total", "Outro"]);
-  });
-
-  it("Outro mostra o campo Qual?, obrigatório; trocar para outro serviço esconde-o", async () => {
-    const { aoCriar, dialogo } = abrir();
-    await preencherGeral(dialogo, "Outro");
-    const qual = within(dialogo).getByRole("textbox", { name: /^Qual\?/ });
-    expect(qual).toBeRequired();
-    criar(dialogo);
-    expect(qual).toHaveAccessibleDescription("Diz qual é o serviço.");
-    await waitFor(() => expect(qual).toHaveFocus());
-    expect(aoCriar).not.toHaveBeenCalled();
-    fireEvent.change(qual, { target: { value: " Telhado " } });
-    expect(within(dialogo).queryByText("Diz qual é o serviço.")).not.toBeInTheDocument();
-    criar(dialogo);
-    expect(aoCriar).toHaveBeenCalledWith(expect.objectContaining({ servico: "Telhado" }));
   });
 
   it("ao escolher a pessoa pré-preenche o contacto; o campo editado resiste a uma nova escolha", async () => {
@@ -146,35 +124,25 @@ describe("NovoNegocioDialogo: painel e aba Geral", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Novo negócio" })).toHaveFocus());
   });
 
-  it("sem nada preenchido mostra um erro por campo, ligado ao campo, avisa na aba Geral e não cria", async () => {
+  it("sem nada preenchido mostra o erro da pessoa, ligado ao campo, avisa na aba Geral e não cria", async () => {
     const { aoCriar, dialogo } = abrir();
     criar(dialogo);
     const pessoa = within(dialogo).getByRole("combobox", { name: /^Pessoa/ });
-    const servico = within(dialogo).getByRole("combobox", { name: /^Serviço/ });
     expect(pessoa).toHaveAttribute("aria-invalid", "true");
-    expect(servico).toHaveAttribute("aria-invalid", "true");
     expect(pessoa).toHaveAccessibleDescription("Escolhe a pessoa do negócio.");
-    expect(servico).toHaveAccessibleDescription(/Escolhe o serviço do negócio\./);
+    expect(within(dialogo).queryByText(/serviço/i)).not.toBeInTheDocument();
     await waitFor(() => expect(pessoa).toHaveFocus());
     expect(within(dialogo).getByRole("tab", { name: /^Geral.*com erros/ })).toBeInTheDocument();
     expect(within(dialogo).getByRole("tab", { name: /^Levantamento(?!.*com erros)/ })).toBeInTheDocument();
     expect(aoCriar).not.toHaveBeenCalled();
   });
 
-  it("escolher o serviço limpa o erro desse campo, e o da pessoa continua", async () => {
-    const { dialogo } = abrir();
-    criar(dialogo);
-    await escolher(dialogo, /^Serviço/, "Cozinha");
-    expect(within(dialogo).queryByText("Escolhe o serviço do negócio.")).not.toBeInTheDocument();
-    expect(within(dialogo).getByText("Escolhe a pessoa do negócio.")).toBeInTheDocument();
-  });
-
-  it("com pessoa e serviço, sem levantamento, devolve os dados (pessoa da lista, comercial por omissão) e fecha", async () => {
+  it("só com a pessoa, sem levantamento, devolve os dados (sem serviço) (pessoa da lista, comercial por omissão) e fecha", async () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
     criar(dialogo);
     expect(aoCriar).toHaveBeenCalledWith({
-      pessoa: PESSOAS[0], servico: "Cozinha", comercial: "Ana Ribeiro",
+      pessoa: PESSOAS[0], comercial: "Ana Ribeiro",
       contacto: {
         email: "marta@exemplo.pt", morada: "Rua A, 1000-001 Lisboa", distrito: "Lisboa", nif: "123456789",
         empresa: "Marta Lda", nifEmpresa: "987654321",
@@ -215,24 +183,25 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
     expect(within(dialogo).getByRole("button", { name: "Adicionar linha" })).toHaveFocus();
   });
 
-  it("os trabalhos sugeridos adaptam-se ao serviço escolhido na aba Geral", async () => {
+  it("os trabalhos sugeridos dependem só da divisão da linha", async () => {
     const { dialogo } = abrir();
-    await escolher(dialogo, /^Serviço/, "Casa de banho");
     irParaLevantamento(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
-    expect(within(dialogo).getByRole("combobox", { name: /^Divisão ou zona/ })).toHaveTextContent("Casa de banho");
+    expect(within(dialogo).getByRole("combobox", { name: /^Divisão ou zona/ })).toHaveTextContent("Escolhe a divisão");
+    fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Trabalho a fazer/ }), { key: "Enter" });
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Outro (escrever)"]);
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    await escolher(dialogo, /^Divisão ou zona/, "Casa de banho");
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Trabalho a fazer/ }), { key: "Enter" });
     expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual([
       "Substituir banheira por base de duche", "Trocar sanita", "Mudar azulejos", "Trocar canalização", "Outro (escrever)",
     ]);
     fireEvent.click(screen.getByRole("option", { name: "Trocar sanita" }));
-    // Mudar o serviço limpa o trabalho que já não faz parte das sugestões.
-    irParaGeral(dialogo);
-    await escolher(dialogo, /^Serviço/, "Janelas");
-    irParaLevantamento(dialogo);
+    // Mudar a divisão limpa o trabalho que já não faz parte das sugestões.
+    await escolher(dialogo, /^Divisão ou zona/, "Exterior");
     expect(within(dialogo).getByRole("combobox", { name: /^Trabalho a fazer/ })).toHaveTextContent("Escolhe o trabalho");
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /^Trabalho a fazer/ }), { key: "Enter" });
-    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Trocar caixilharia", "Estores", "Outro (escrever)"]);
+    expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Trocar caixilharia", "Estores", "Paredes", "Teto", "Outro (escrever)"]);
   });
 
   it("Feito sem linhas: leva para a aba Levantamento, avisa a aba, mostra o erro e põe o foco em Adicionar linha", async () => {
@@ -251,7 +220,7 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
 
   it("uma linha incompleta mostra erros por campo; medida 0 é recusada", async () => {
     const { aoCriar, dialogo } = abrir();
-    await preencherGeral(dialogo, "Janelas");
+    await preencherGeral(dialogo);
     irParaLevantamento(dialogo);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
     fireEvent.change(within(dialogo).getByLabelText(/^Medida/), { target: { value: "0" } });
@@ -268,6 +237,7 @@ describe("NovoNegocioDialogo: aba Levantamento", () => {
     irParaLevantamento(dialogo);
     await escolher(dialogo, "Estado", "Feito");
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
+    await escolher(dialogo, /^Divisão ou zona/, "Cozinha");
     await escolher(dialogo, /^Trabalho a fazer/, "Bancada nova");
     fireEvent.change(within(dialogo).getByLabelText(/^Medida/), { target: { value: "3.5" } });
     await escolher(dialogo, /^Unidade/, "m");

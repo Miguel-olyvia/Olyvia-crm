@@ -9,7 +9,6 @@ import { AbaNovo, ListaAbasNovo, Tabs, TabsContent } from "./AbasNovoNegocio";
 import { N } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import { paraLevantamentoNegocio, type LevantamentoForm } from "./levantamento";
-import { OUTRO } from "./levantamentoExemplo";
 import {
   abasComErros, primeiroErro, validarNovoNegocio, type DadosCriarNegocio, type ErrosNovoNegocio, type PessoaOpcao,
 } from "./novoNegocio";
@@ -64,7 +63,7 @@ function CorpoAbas(p: CorpoProps) {
         </TabsContent>
         <TabsContent value="levantamento" className={CONTEUDO}>
           <AbaLevantamentoNovoNegocio
-            id={p.id} servico={p.valores.servico} levantamento={p.levantamento} erros={p.erros} acoes={p.acoesLevantamento}
+            id={p.id} levantamento={p.levantamento} erros={p.erros} acoes={p.acoesLevantamento}
           />
         </TabsContent>
       </div>
@@ -84,8 +83,8 @@ interface FormularioProps {
 }
 
 /**
- * O formulário de "Novo negócio", com o rodapé fixo (Cancelar e Criar negócio) e duas abas: Geral (pessoa e serviço
- * obrigatórios, comercial, contacto, primeiro passo) e Levantamento (opcional, só exemplo). Um envio recusado leva
+ * O formulário de "Novo negócio", com o rodapé fixo (Cancelar e Criar negócio) e duas abas: Geral (pessoa
+ * obrigatória, comercial, contacto, primeiro passo) e Levantamento (opcional, só exemplo). Um envio recusado leva
  * para a primeira aba com erros e põe o foco no primeiro campo errado.
  */
 export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar }: FormularioProps) {
@@ -95,7 +94,7 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
   const [tentou, setTentou] = useState(false);
   const pedirFoco = usePedidoFoco(id);
   const { valores, acoes } = useCamposGerais(pessoas, aoSujar);
-  const lev = useLevantamentoForm(hoje, valores.servico, aoSujar);
+  const lev = useLevantamentoForm(hoje, aoSujar);
   const pessoa = pessoas.find((p) => p.id === valores.pessoaId);
   const aValidar = { ...valores, pessoaId: pessoa ? valores.pessoaId : "", levantamento: lev.levantamento };
 
@@ -108,9 +107,8 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
       pedirFoco(primeiro.campo);
     } else if (pessoa) {
       const rotulo = (grupo: "room" | "work" | "unit", chave: string) => t(`${N}${grupo}.${chave}`);
-      const servico = valores.servico === OUTRO ? valores.servicoOutro.trim() : t(`${N}service.opt.${valores.servico}`);
       aoConfirmar({
-        pessoa, servico, comercial: valores.comercial, contacto: valores.contacto,
+        pessoa, comercial: valores.comercial, contacto: valores.contacto,
         levantamento: paraLevantamentoNegocio(lev.levantamento, rotulo),
       });
     }
@@ -121,7 +119,7 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
       <CorpoAbas
         id={id} aba={aba} aoMudarAba={setAba} pessoas={pessoas} valores={valores} levantamento={lev.levantamento}
         erros={tentou ? validarNovoNegocio(aValidar) : {}} primeiroCampo={primeiroCampo}
-        acoesGeral={{ ...acoes, servico: (s) => { acoes.servico(s); lev.adaptarAoServico(s); } }}
+        acoesGeral={acoes}
         acoesLevantamento={lev.acoes}
       />
       <SheetFooter className="shrink-0 gap-2 border-t border-border px-6 py-4 sm:space-x-0">

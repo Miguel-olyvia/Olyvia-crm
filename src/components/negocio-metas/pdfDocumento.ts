@@ -48,7 +48,7 @@ type Campos = ConteudoPdf["campos"];
 
 const comum = (negocio: NegocioMes, t: Traduzir): Campos => [
   { rotulo: t(`${P}pdf.field.person`), valor: negocio.pessoa },
-  { rotulo: t(`${P}pdf.field.service`), valor: negocio.servico },
+  { rotulo: t(`${P}pdf.field.service`), valor: negocio.servico || "—" },
   { rotulo: t(`${P}pdf.field.salesperson`), valor: negocio.comercial },
 ];
 
