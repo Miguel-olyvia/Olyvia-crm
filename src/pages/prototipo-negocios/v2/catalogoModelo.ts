@@ -30,15 +30,15 @@ export interface Produto {
   servico?: SvcId;
   /** Quantidade do serviço por unidade do produto (por omissão 1). */
   fatorServico?: number;
-  /** Referência do fornecedor (14/10). */
+  /** Referência do fornecedor (opcional, 14/10). */
   sku?: string;
-  /** Preço de venda real, € sem IVA (14/10). */
+  /** Preço de venda real (€ s/IVA, por unidade). Sem ele, o preço é o custo ÷ (1 − margem). */
   pvp?: number;
-  /** A ilustração do produto (ilustracoes.tsx). */
+  /** A ilustração (ilustracoes.tsx). Sem ela, escolhe-se pelo nome. */
   img?: IlustracaoKey;
   /** Uma linha de descrição. */
   desc?: string;
-  /** Subcategoria real (ex.: "Toalheiros"). */
+  /** A subcategoria real (ex.: "Toalheiros"). */
   sub?: string;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
@@ -83,7 +83,7 @@ export interface Catalogo {
   unidades: string[];
   marcas: string[];
   fornecedores: string[];
-  /** O ícone de cada serviço (14/10); sem ele, usa-se o do ofício. */
+  /** O ícone de cada serviço (14/10). Sem ele, usa-se o do nome ou o do ofício (ilustracoes.tsx). */
   icone?: Record<SvcId, IconeServicoKey>;
 }
 
