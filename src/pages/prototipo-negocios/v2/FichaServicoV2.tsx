@@ -221,7 +221,7 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
         ) : <p className="mt-3 text-[15px] text-muted-foreground">Sem consumíveis na receita.</p>}
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {/* escolher da lista de Materiais e consumíveis (custo, unidade, fornecedor e data vêm de lá) */}
-          <Escolha rotulo="Juntar da lista de materiais" w="w-80" v="" opcoes={[{ v: "", t: "Juntar da lista de materiais…" }, ...K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: `${p.n} · ${eur(p.custo)} €/${p.un}` }))]}
+          <Escolha rotulo="Juntar da lista de materiais" w="w-80" v="" opcoes={[{ v: "", t: "Juntar da lista de materiais…" }, ...K.produtos.filter((p) => !p.sku && !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: `${p.n} · ${eur(p.custo)} €/${p.un}` }))]}
             onSet={(id) => { const p = K.produtos.find((x) => x.id === id); if (p) editar((r) => { r.cons.push(consumivelDe(p, nid("c", r.cons), 1)); }, `${p.n} juntado`); }} />
           <Button variant="outline" className="min-h-11 text-[15px]" onClick={() => editar((r) => { r.cons.push({ id: nid("c", r.cons), n: "Novo consumível", q: 1, un: "un", preco: 1, fornecedor: "Por escolher", data: HOJE }); }, "Consumível juntado")}>
             <Plus className="h-4 w-4" aria-hidden="true" />Juntar consumível

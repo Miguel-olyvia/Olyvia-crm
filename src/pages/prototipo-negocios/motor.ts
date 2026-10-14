@@ -2,7 +2,7 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
-import { CATALOGO } from "./catalogo";
+import { itemCatalogo } from "./catalogo";
 import {
   ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
   mudarQtd, precoProduto, servicosDaVisita, textoFalta, textoProduto, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
@@ -238,7 +238,8 @@ function novoDeal(o: NovoNegocio): Negocio {
   };
 }
 
-export const VERSAO = 6;
+// 7 (14/10/2026): o catálogo real da Mudelar (358 serviços, os produtos, perfis, equipamentos e consumíveis)
+export const VERSAO = 7;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -558,7 +559,7 @@ export function servicosVisita(d: Negocio): SvcId[] {
 export function faltaProdutosVisita(d: Negocio, S: Estado): { sid: SvcId; t: string }[] {
   const K = catalogoLigado();
   if (!K) return [];
-  const nome = (sid: SvcId) => S.svc[sid]?.n ?? CATALOGO.find((c) => c.id === sid)?.n ?? sid;
+  const nome = (sid: SvcId) => S.svc[sid]?.n ?? itemCatalogo(sid)?.n ?? sid;
   return emFaltaProdutos(K, servicosVisita(d), d.visita, d.f.materiais_cliente === "Sim").map((o) => ({ sid: o.sid, t: textoFalta(o, nome(o.sid)) }));
 }
 /** Ao fechar de novo um levantamento reaberto: o orçamento novo guarda os preços por serviço, o desconto,
@@ -717,8 +718,13 @@ export const fatorReal = (sid: SvcId) => REAL[sid] ?? 1;
 /** Um serviço do Catálogo passa a existir em S.svc quando se junta pela primeira vez. */
 export function garantirServico(S: Estado, sid: SvcId): Servico | null {
   if (S.svc[sid]) return S.svc[sid];
-  const c = CATALOGO.find((x) => x.id === sid);
+  const c = itemCatalogo(sid);
   if (!c) return null;
+  // os serviços novos do catálogo da Mudelar (14/10) entram com a receita deles e o PVP real
+  if (c.rs) {
+    S.svc[sid] = { n: c.n, un: c.un, h: c.rs.h, eh: c.rs.eh, eq: c.rs.eq, cons: c.rs.cons, preco: c.pvp ?? 0, perfil: c.cat };
+    return S.svc[sid];
+  }
   const h = r2(c.hu + c.hf / Math.max(1, c.qm)); // as horas fixas repartidas pela quantidade habitual
   const custo = h * (25 + ESTR);
   S.svc[sid] = { n: c.n, un: c.un, h, eh: 25, eq: 0, cons: 0, preco: r2(custo / (1 - 0.35)), perfil: c.cat };
