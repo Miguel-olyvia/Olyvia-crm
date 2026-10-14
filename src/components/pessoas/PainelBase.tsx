@@ -4,6 +4,7 @@
 import { useId, type ReactNode } from "react";
 import type { ContextoPerda, DadosChamada } from "./acoesPessoa";
 import type { MotivoPerda, Pessoa, ResumoPessoa } from "./pessoasTipos";
+import type { DadosAlterarVisita } from "./visitaPessoa";
 
 export type AcaoFicha = "chamada" | "nota" | "adiar" | "perder";
 
@@ -15,6 +16,8 @@ export interface AcoesFicha {
   perder: (id: string, motivo: MotivoPerda, contexto: ContextoPerda) => void;
   reativar: (id: string) => void;
   juntarNota: (id: string, texto: string) => void;
+  /** Muda o dia, a hora e a morada da visita já marcada. */
+  alterarVisita: (id: string, dados: DadosAlterarVisita) => void;
 }
 
 /** A moldura comum: título e conteúdo, ligados por `aria-labelledby`; escondida quando o painel não é o ativo. */

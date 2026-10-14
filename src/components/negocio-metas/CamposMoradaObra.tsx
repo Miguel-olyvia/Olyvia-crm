@@ -1,4 +1,4 @@
-import { Home } from "lucide-react";
+import { Home, MapPin } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { toast } from "@/lib/toast";
@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { ErroDoCampo, N, Rotulo } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import { moradaDoContacto, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
+import type { OrigemMorada } from "./useEstadoNovoNegocio";
 
 interface Props {
   /** A base dos ids dos campos (`<id>-rua`, `<id>-cp`, `<id>-localidade`, `<id>-andar`). */
@@ -16,6 +17,8 @@ interface Props {
   erroCodigoPostal: boolean;
   /** A morada escrita na aba Geral, para o atalho "Usar a morada do contacto". */
   moradaContacto: string;
+  /** Preenchida a partir da visita (igual à morada da lead ou outra): diz-se em texto. `null` = escrita à mão. */
+  origem?: OrigemMorada;
   aoMudar: (chave: ChaveMorada, valor: string) => void;
   aoPreencher: (morada: MoradaObraForm) => void;
 }
@@ -23,7 +26,7 @@ interface Props {
 const CAMPO = cn("min-h-11", FOCO);
 
 /** A morada da obra (fica no negócio, não na pessoa): rua, código postal 0000-000, localidade e andar, com o atalho de usar a morada do contacto. */
-export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, aoMudar, aoPreencher }: Props) {
+export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, origem = null, aoMudar, aoPreencher }: Props) {
   const { t } = useTranslation();
   const usarContacto = () => {
     if (moradaContacto.trim() === "") {
@@ -37,6 +40,12 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, aoMu
     <section aria-labelledby={`${id}-morada`} className="space-y-3">
       <h3 id={`${id}-morada`} className="text-sm font-semibold text-foreground">{t(`${N}address.title`)}</h3>
       <p className="text-sm text-muted-foreground">{t(`${N}address.note`)}</p>
+      {origem && (
+        <p role="note" className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-2 text-sm text-foreground">
+          <MapPin className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {t(`${N}address.fromVisit.${origem === "visitaIgual" ? "same" : "other"}`)}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={usarContacto} className={cn("min-h-11 gap-2", FOCO)}>
           <Home className="h-4 w-4" aria-hidden="true" />

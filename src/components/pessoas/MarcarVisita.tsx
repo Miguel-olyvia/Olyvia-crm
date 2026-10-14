@@ -1,4 +1,4 @@
-// "Marcar visita" nas submissões que a pedem: um diálogo curto (dia, hora e nota) que marca a visita EM MEMÓRIA (a pessoa
+// "Marcar visita" nas submissões que a pedem: um diálogo curto (dia, hora, nota e morada da visita) que marca a visita EM MEMÓRIA (a pessoa
 // passa à etapa Visita e a atividade regista-o). Um contexto liga o botão de cada cartão de submissão ao diálogo único da
 // página; sem o provider (outros usos do cartão) o botão não existe.
 import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
@@ -12,6 +12,9 @@ import { Label } from "@/components/ui/label";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { CamposDataHora, MensagemErro } from "./CamposDataHora";
 import { MarcarVisitaContext, type PedidoVisita } from "./marcarVisitaContexto";
+import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
+import { destinoInicial, validarDestino, type DestinoVisita } from "./moradaVisita";
+import type { ErroMoradaVisita } from "./moradaVisita";
 import { MAX_NOTA_VISITA, validarVisita, type DadosVisita, type ErroVisita } from "./visitaPessoa";
 
 const V = "pessoasPagina.visitDialog.";
@@ -30,10 +33,15 @@ interface CamposVisitaProps {
   hoje: string;
   campoData: Ref<HTMLInputElement>;
   aoMudar: (parcial: Partial<CamposVisitaProps["campos"]>) => void;
+  moradaLead: PedidoVisita["moradaLead"];
+  destino: DestinoVisita;
+  aoMudarDestino: (destino: DestinoVisita) => void;
 }
 
-/** Os campos da visita: dia, hora e nota. */
-function CamposVisita({ id, campos, erro, hoje, campoData, aoMudar }: CamposVisitaProps) {
+const ERROS_DA_MORADA: readonly ErroVisita[] = ["ruaVazia", "codigoPostalInvalido", "notaAcessoComprida"];
+
+/** Os campos da visita: dia, hora, nota e a morada da visita. */
+function CamposVisita({ id, campos, erro, hoje, campoData, aoMudar, moradaLead, destino, aoMudarDestino }: CamposVisitaProps) {
   const { t } = useTranslation();
   const erroData = erro === "dataVazia" || erro === "dataPassada";
   return (
@@ -52,6 +60,10 @@ function CamposVisita({ id, campos, erro, hoje, campoData, aoMudar }: CamposVisi
         />
         {erro === "notaComprida" && <MensagemErro id={`${id}-nota-erro`} texto={t(`${V}error.notaComprida`, { max: MAX_NOTA_VISITA })} />}
       </div>
+      <MoradaVisitaCampos
+        id={`${id}-morada`} moradaLead={moradaLead} valor={destino} aoMudar={aoMudarDestino}
+        erro={erro !== null && ERROS_DA_MORADA.includes(erro) ? (erro as ErroMoradaVisita) : null}
+      />
     </>
   );
 }
@@ -60,21 +72,29 @@ function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita
   const { t } = useTranslation();
   const id = useId();
   const [campos, setCampos] = useState({ data: "", hora: "", nota: "" });
+  const [destino, setDestino] = useState<DestinoVisita>(() => destinoInicial(pedido.moradaLead));
   const [tentou, setTentou] = useState(false);
   const campoData = useRef<HTMLInputElement>(null);
+  const formulario = useRef<HTMLFormElement>(null);
+  const erroAtual = validarVisita({ ...campos, destino }, hoje, pedido.moradaLead);
   const enviar = (e: FormEvent) => {
     e.preventDefault();
     setTentou(true);
-    if (validarVisita(campos, hoje)) { campoData.current?.focus(); return; }
-    aoMarcar(pedido.pessoaId, { ...campos, servico: pedido.servico });
+    if (erroAtual) {
+      // O foco vai para o primeiro campo com erro (o dia, a hora, a nota ou a morada), depois de o erro aparecer.
+      setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? campoData.current)?.focus(), 0);
+      return;
+    }
+    aoMarcar(pedido.pessoaId, { ...campos, servico: pedido.servico, destino });
     toast.success(t(`${V}done`, { name: pedido.nome }));
     aoFechar();
   };
   return (
-    <form onSubmit={enviar} noValidate className="space-y-4">
+    <form ref={formulario} onSubmit={enviar} noValidate className="space-y-4">
       <CamposVisita
-        id={id} campos={campos} erro={tentou ? validarVisita(campos, hoje) : null} hoje={hoje} campoData={campoData}
+        id={id} campos={campos} erro={tentou ? erroAtual : null} hoje={hoje} campoData={campoData}
         aoMudar={(parcial) => setCampos((c) => ({ ...c, ...parcial }))}
+        moradaLead={pedido.moradaLead} destino={destino} aoMudarDestino={setDestino}
       />
       <DialogFooter className="gap-2 sm:space-x-0">
         <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={aoFechar}>{t(`${V}cancel`)}</Button>

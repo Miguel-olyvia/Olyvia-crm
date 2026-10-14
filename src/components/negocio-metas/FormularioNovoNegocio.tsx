@@ -14,11 +14,12 @@ import { paraLevantamentoNegocio, type LevantamentoForm } from "./levantamento";
 import type { MoradaObraForm } from "./moradaObra";
 import {
   abasComErros, primeiroErro, validarNovoNegocio, type AbaNovoNegocio, type DadosCriarNegocio, type ErrosNovoNegocio, type PessoaOpcao,
+  type ValoresIniciaisNegocio,
 } from "./novoNegocio";
 import type { Respostas } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { contarRespostas, contarTotal, respostasEmTexto, visitaEmTexto } from "./respostasVisita";
-import { useCamposGerais, useLevantamentoForm, useMoradaForm, useRespostasForm } from "./useEstadoNovoNegocio";
+import { useCamposGerais, useLevantamentoForm, useMoradaForm, useRespostasForm, type OrigemMorada } from "./useEstadoNovoNegocio";
 import { SECCOES_VISITA } from "./visitaExemplo";
 
 const ABAS: readonly AbaNovoNegocio[] = ["geral", "qualificacao", "visita"];
@@ -46,6 +47,7 @@ interface CorpoProps {
   valores: ValoresGeral;
   respostas: Respostas;
   morada: MoradaObraForm;
+  origemMorada: OrigemMorada;
   levantamento: LevantamentoForm;
   erros: ErrosNovoNegocio;
   primeiroCampo: RefObject<HTMLButtonElement>;
@@ -85,7 +87,7 @@ function CorpoAbas(p: CorpoProps) {
         </TabsContent>
         <TabsContent value="qualificacao" className={CONTEUDO}>
           <AbaQualificacao
-            id={p.id} respostas={p.respostas} morada={p.morada} erroCodigoPostal={!!p.erros.codigoPostal}
+            id={p.id} respostas={p.respostas} morada={p.morada} erroCodigoPostal={!!p.erros.codigoPostal} origemMorada={p.origemMorada}
             moradaContacto={p.valores.contacto.morada} acoes={p.acoesQualificacao}
           />
         </TabsContent>
@@ -111,6 +113,8 @@ interface FormularioProps {
   aoConfirmar: (dados: DadosCriarNegocio) => void;
   /** A pessoa já escolhida ao abrir (por exemplo a da ficha de onde se veio). */
   pessoaInicialId?: string;
+  /** O que já vem preenchido (por exemplo a visita concluída de uma pessoa); sem isto o formulário abre vazio. */
+  valoresIniciais?: ValoresIniciaisNegocio;
 }
 
 /**
@@ -119,16 +123,16 @@ interface FormularioProps {
  * perguntas e levantamento), as duas últimas opcionais e só exemplo. Um envio recusado leva para a primeira aba com
  * erros e põe o foco no primeiro campo errado.
  */
-export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar, pessoaInicialId }: FormularioProps) {
+export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar, pessoaInicialId, valoresIniciais }: FormularioProps) {
   const { t } = useTranslation();
   const id = useId();
   const [aba, setAba] = useState<AbaNovoNegocio>("geral");
   const [tentou, setTentou] = useState(false);
   const pedirFoco = usePedidoFoco(id);
-  const { valores, acoes } = useCamposGerais(pessoas, aoSujar, pessoaInicialId);
-  const lev = useLevantamentoForm(hoje, aoSujar);
+  const { valores, acoes } = useCamposGerais(pessoas, aoSujar, pessoaInicialId ?? valoresIniciais?.pessoaId, valoresIniciais?.comercial);
+  const lev = useLevantamentoForm(hoje, aoSujar, valoresIniciais?.visita);
   const resp = useRespostasForm(aoSujar);
-  const morada = useMoradaForm(aoSujar);
+  const morada = useMoradaForm(aoSujar, valoresIniciais?.visita);
   const [seccao, setSeccao] = useState(SECCOES_VISITA[0].id);
   const pessoa = pessoas.find((p) => p.id === valores.pessoaId);
   const aValidar = { ...valores, pessoaId: pessoa ? valores.pessoaId : "", levantamento: lev.levantamento, moradaObra: morada.morada };
@@ -158,7 +162,7 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
     <form onSubmit={enviar} noValidate className="flex min-h-0 flex-1 flex-col">
       <CorpoAbas
         id={id} aba={aba} aoMudarAba={setAba} seccao={seccao} aoMudarSeccao={setSeccao} pessoas={pessoas} valores={valores}
-        respostas={resp.respostas} morada={morada.morada} levantamento={lev.levantamento}
+        respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={lev.levantamento}
         erros={tentou ? validarNovoNegocio(aValidar) : {}} primeiroCampo={primeiroCampo}
         acoesGeral={acoes} acoesLevantamento={lev.acoes}
         acoesQualificacao={{ escolher: resp.escolher, morada: morada.mudar, preencherMorada: morada.preencher }}

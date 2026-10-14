@@ -4,6 +4,7 @@ import { MoradaObra } from "./CamposMoradaObra";
 import { BlocosPerguntas } from "./PerguntaEscolha";
 import { N } from "./PecasNovoNegocio";
 import type { ChaveMorada, MoradaObraForm } from "./moradaObra";
+import type { OrigemMorada } from "./useEstadoNovoNegocio";
 import type { Respostas } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { contarRespostas } from "./respostasVisita";
@@ -19,13 +20,15 @@ interface Props {
   respostas: Respostas;
   morada: MoradaObraForm;
   erroCodigoPostal: boolean;
+  /** Quando a morada veio da visita, de onde: diz-se por baixo do título. */
+  origemMorada?: OrigemMorada;
   /** A morada da aba Geral, para o atalho da morada da obra. */
   moradaContacto: string;
   acoes: AcoesQualificacao;
 }
 
 /** A aba Qualificação (só exemplo): as seis perguntas de escolha rápida e a morada da obra. Tudo opcional. */
-export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, moradaContacto, acoes }: Props) {
+export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, origemMorada = null, moradaContacto, acoes }: Props) {
   const { t } = useTranslation();
   const { respondidas, total } = contarRespostas([BLOCO_QUALIFICACAO], respostas);
   return (
@@ -42,7 +45,7 @@ export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, morad
         <BlocosPerguntas blocos={[BLOCO_QUALIFICACAO]} respostas={respostas} aoEscolher={acoes.escolher} />
       </section>
       <MoradaObra
-        id={id} valores={morada} erroCodigoPostal={erroCodigoPostal} moradaContacto={moradaContacto}
+        id={id} valores={morada} erroCodigoPostal={erroCodigoPostal} moradaContacto={moradaContacto} origem={origemMorada}
         aoMudar={acoes.morada} aoPreencher={acoes.preencherMorada}
       />
     </div>

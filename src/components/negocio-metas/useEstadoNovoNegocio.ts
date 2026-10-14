@@ -11,14 +11,20 @@ import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { alternarResposta } from "./respostasVisita";
 import { SECCOES_VISITA } from "./visitaExemplo";
 import {
-  COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, preencherContactoDaPessoa, reporContacto, type ChaveContacto, type PessoaOpcao,
+  COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, preencherContactoDaPessoa, reporContacto, type ChaveContacto,
+  type PessoaOpcao, type ValoresIniciaisNegocio,
 } from "./novoNegocio";
 
-export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => void, pessoaInicialId?: string) {
+/** O comercial pedido, se for um dos que se podem escolher; senão o por omissão. */
+const comercialValido = (comercial?: string): string =>
+  comercial !== undefined && COMERCIAIS_EXEMPLO.includes(comercial) ? comercial : COMERCIAL_POR_OMISSAO;
+
+export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => void, pessoaInicialId?: string, comercialInicial?: string) {
   const [valores, setValores] = useState<ValoresGeral>(() => {
     const inicial = pessoas.find((p) => p.id === pessoaInicialId);
     return {
-      pessoaId: inicial?.id ?? "", comercial: COMERCIAL_POR_OMISSAO, contacto: inicial ? preencherContactoDaPessoa(inicial) : CONTACTO_VAZIO,
+      pessoaId: inicial?.id ?? "", comercial: comercialValido(comercialInicial),
+      contacto: inicial ? preencherContactoDaPessoa(inicial) : CONTACTO_VAZIO,
     };
   });
   const [tocados, setTocados] = useState<ReadonlySet<ChaveContacto>>(new Set());
@@ -38,8 +44,11 @@ export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => 
   return { valores, acoes };
 }
 
-export function useLevantamentoForm(hoje: string, aoSujar: () => void) {
-  const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => levantamentoVazio(hoje, COMERCIAL_POR_OMISSAO));
+export function useLevantamentoForm(hoje: string, aoSujar: () => void, inicial?: ValoresIniciaisNegocio["visita"]) {
+  const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => {
+    const vazio = levantamentoVazio(inicial?.data ?? hoje, comercialValido(inicial?.quemFez));
+    return inicial ? { ...vazio, estado: inicial.estado } : vazio;
+  });
   const sequencia = useRef(0);
   const alterar = (f: (l: LevantamentoForm) => LevantamentoForm) => { aoSujar(); setLevantamento(f); };
   const acoes: AcoesLevantamento = {
@@ -75,10 +84,17 @@ export function useRespostasForm(aoSujar: () => void) {
   return { respostas, escolher };
 }
 
-/** A morada da obra; "preencher" traz rua, código postal e localidade e deixa o andar como estava. */
-export function useMoradaForm(aoSujar: () => void) {
-  const [morada, setMorada] = useState<MoradaObraForm>(MORADA_VAZIA);
-  const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setMorada((m) => ({ ...m, [chave]: valor })); };
-  const preencher = (nova: MoradaObraForm) => { aoSujar(); setMorada((m) => ({ ...nova, andar: m.andar })); };
-  return { morada, mudar, preencher };
+/** De onde veio a morada da obra: da visita (igual à morada da lead, ou outra); `null` quando foi escrita à mão. */
+export type OrigemMorada = "visitaIgual" | "visitaOutra" | null;
+
+/**
+ * A morada da obra; "preencher" traz rua, código postal e localidade e deixa o andar como estava. Vinda da visita, guarda a
+ * origem para a dizer; ao escrever ou ao usar a morada do contacto, deixa de ser "da visita".
+ */
+export function useMoradaForm(aoSujar: () => void, inicial?: ValoresIniciaisNegocio["visita"]) {
+  const [morada, setMorada] = useState<MoradaObraForm>(inicial?.moradaObra ?? MORADA_VAZIA);
+  const [origem, setOrigem] = useState<OrigemMorada>(inicial ? (inicial.igualALead ? "visitaIgual" : "visitaOutra") : null);
+  const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setOrigem(null); setMorada((m) => ({ ...m, [chave]: valor })); };
+  const preencher = (nova: MoradaObraForm) => { aoSujar(); setOrigem(null); setMorada((m) => ({ ...nova, andar: m.andar })); };
+  return { morada, origem, mudar, preencher };
 }

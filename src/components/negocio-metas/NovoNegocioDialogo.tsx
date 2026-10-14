@@ -7,7 +7,7 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { FormularioNovoNegocio } from "./FormularioNovoNegocio";
 import { FOCO } from "./estilos";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
-import type { DadosCriarNegocio, PessoaOpcao } from "./novoNegocio";
+import type { DadosCriarNegocio, PessoaOpcao, ValoresIniciaisNegocio } from "./novoNegocio";
 
 interface NovoNegocioDialogoProps {
   /** As pessoas a escolher; a página monta a lista (esta pasta não importa de Pessoas). */
@@ -21,6 +21,8 @@ interface NovoNegocioDialogoProps {
   semBotao?: boolean;
   /** A pessoa já escolhida ao abrir (a ficha de onde se veio); ainda se pode mudar. */
   pessoaInicialId?: string;
+  /** O que já vem preenchido ao abrir (a visita concluída de uma pessoa: comercial, aba Visita e morada da obra). */
+  valoresIniciais?: ValoresIniciaisNegocio;
 }
 
 /** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
@@ -62,7 +64,7 @@ function CabecalhoNovo() {
  * abre o painel do novo negócio e leva lá o foco. Só exemplo: nada é gravado.
  */
 export function NovoNegocioDialogo({
-  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId,
+  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -105,7 +107,7 @@ export function NovoNegocioDialogo({
         >
           <CabecalhoNovo />
           <FormularioNovoNegocio
-            pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId}
+            pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
             aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
           />
         </SheetContent>

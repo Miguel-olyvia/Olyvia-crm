@@ -41,7 +41,7 @@ describe("etapaEfetiva", () => {
     expect(etapa("Marta Silveira")).toBe("cliente");
     expect(etapa("Nuno Barros")).toBe("qualificada");
     expect(etapa("Beatriz Sampaio")).toBe("nova");
-    expect(etapa("Gonçalo Matias")).toBe("emContacto");
+    expect(etapa("Gonçalo Matias")).toBe("visitaMarcada");
     expect(etapa("Rita Albuquerque")).toBe("visitaMarcada");
   });
 });

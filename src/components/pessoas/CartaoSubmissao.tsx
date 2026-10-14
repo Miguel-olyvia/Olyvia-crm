@@ -7,6 +7,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { BlocoCandidata } from "./BlocoCandidata";
 import { CamposSubmetidos } from "./CamposSubmetidos";
 import { useMarcarVisita } from "./marcarVisitaContexto";
+import { moradaDaLead } from "./moradaVisita";
 import { textoData } from "./formatoPessoas";
 import type { CandidataSubmissao, Pessoa, Submissao } from "./pessoasTipos";
 
@@ -42,7 +43,7 @@ function AvisoVisita({ servico, nome, pessoa }: { servico: string; nome: string;
       {marcar && pessoa && !jaMarcada && (
         <Button
           type="button" variant="outline" className={cn("min-h-11", FOCO)} aria-label={t("pessoasPagina.visit.bookNamed", { name: nome })}
-          onClick={() => marcar.pedir({ pessoaId: pessoa.id, nome, servico })}
+          onClick={() => marcar.pedir({ pessoaId: pessoa.id, nome, servico, moradaLead: moradaDaLead(pessoa) })}
         >
           {t("pessoasPagina.visit.book")}
         </Button>

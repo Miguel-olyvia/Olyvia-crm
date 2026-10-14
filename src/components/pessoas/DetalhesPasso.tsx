@@ -1,29 +1,31 @@
-// O que o passo escolhido ainda pede: o dia e a hora (visita e "ligar numa data"), mais o local na visita, ou o motivo ao
+// O que o passo escolhido ainda pede: o dia e a hora (visita e "ligar numa data"), mais a morada da visita, ou o motivo ao
 // perder. Aparece logo por baixo do "E agora?", sem diálogo.
 import { useId } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { FOCO } from "@/components/negocio-metas/estilos";
 import { CamposDataHora, MensagemErro } from "./CamposDataHora";
 import { type ErrosChamada } from "./chamadaPassos";
+import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
+import type { ErroMoradaVisita } from "./moradaVisita";
 import { MOTIVOS_PERDA } from "./opcoesPessoa";
+import type { MoradaVisita } from "./pessoasTipos";
 import type { CamposChamada } from "./useFormChamada";
 
 const C = "pessoasPagina.call.";
-/** O máximo de caracteres do local da visita. */
-const MAX_ONDE = 120;
 
 interface DetalhesPassoProps {
   campos: CamposChamada;
   erros: ErrosChamada;
+  /** A morada que a lead indicou (`null` sem morada) e o erro da morada da visita, depois de tentar guardar. */
+  moradaLead: MoradaVisita | null;
+  erroMorada: ErroMoradaVisita | null;
   hoje: string;
   aoMudar: (parcial: Partial<CamposChamada>) => void;
 }
 
-function Motivo({ campos, erros, aoMudar }: Omit<DetalhesPassoProps, "hoje">) {
+function Motivo({ campos, erros, aoMudar }: Pick<DetalhesPassoProps, "campos" | "erros" | "aoMudar">) {
   const { t } = useTranslation();
   const id = useId();
   const erro = erros.motivo ? t(`${C}error.${erros.motivo}`) : null;
@@ -41,18 +43,7 @@ function Motivo({ campos, erros, aoMudar }: Omit<DetalhesPassoProps, "hoje">) {
   );
 }
 
-function Onde({ valor, aoMudar }: { valor: string; aoMudar: (v: string) => void }) {
-  const { t } = useTranslation();
-  const id = useId();
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{t(`${C}where`)}</Label>
-      <Input id={id} value={valor} maxLength={MAX_ONDE} autoComplete="off" className={cn("min-h-11", FOCO)} onChange={(e) => aoMudar(e.target.value)} />
-    </div>
-  );
-}
-
-export function DetalhesPasso({ campos, erros, hoje, aoMudar }: DetalhesPassoProps) {
+export function DetalhesPasso({ campos, erros, moradaLead, erroMorada, hoje, aoMudar }: DetalhesPassoProps) {
   const { t } = useTranslation();
   const id = useId();
   if (campos.passo === "perder") return <Motivo campos={campos} erros={erros} aoMudar={aoMudar} />;
@@ -66,7 +57,11 @@ export function DetalhesPasso({ campos, erros, hoje, aoMudar }: DetalhesPassoPro
         erroData={erros.data ? t(`${C}error.${erros.data}`) : null} erroHora={erros.hora ? t(`${C}error.${erros.hora}`) : null}
         aoMudar={aoMudar}
       />
-      {visita && <Onde valor={campos.onde} aoMudar={(onde) => aoMudar({ onde })} />}
+      {visita && (
+        <MoradaVisitaCampos
+          id={`${id}-morada`} moradaLead={moradaLead} valor={campos.destino} erro={erroMorada} aoMudar={(destino) => aoMudar({ destino })}
+        />
+      )}
     </div>
   );
 }

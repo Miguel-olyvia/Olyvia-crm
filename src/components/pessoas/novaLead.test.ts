@@ -107,7 +107,9 @@ describe("validarVisita e marcarVisita", () => {
     expect(pessoa).toMatchObject({ etapa: "visitaMarcada", proximoContacto: "2026-10-20", ultimoContactoDias: 0 });
     expect(depois.contactadas).toEqual(["p-hugo"]);
     expect(depois.atividade[0]).toMatchObject({ pessoaId: "p-hugo", chaveTitulo: "pessoasPagina.activity.visitBooked", exemplo: false });
-    expect(depois.atividade[0].detalhe).toBe("2026-10-20 10:30 · Cozinha · Levar o catálogo");
+    // A linha da atividade diz também a morada da visita (sem escolha, a da lead).
+    expect(depois.atividade[0].detalhe).toBe("2026-10-20 10:30 · Cozinha · Levar o catálogo · Largo da Sé 5, 4700-010 Braga");
+    expect(pessoa.visita).toMatchObject({ igualALead: true, moradaVisita: { rua: "Largo da Sé 5", localidade: "Braga" } });
     expect(antes.etapa).not.toBe("visitaMarcada");
   });
 

@@ -2,6 +2,7 @@
 // por parâmetro e nada lê o relógio. Um id que não existe (ou uma ação que não se aplica) devolve o próprio estado.
 import { errosDiaHora, exigeDiaHora, textoAgenda } from "./chamadaPassos";
 import { indiceEtapa } from "./etapaPessoa";
+import { moradaDaLead, resolverDestino, textoMoradaVisita, validarDestino, type DestinoVisita } from "./moradaVisita";
 import { DIAS_DO_PASSO, RESULTADOS_ATENDIDOS } from "./opcoesPessoa";
 import { marcarVisita } from "./visitaPessoa";
 import type { EstadoPessoas, ItemAtividade, MotivoPerda, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto } from "./pessoasTipos";
@@ -17,7 +18,9 @@ export interface DadosChamada {
   /** AAAA-MM-DD e HH:MM da visita ou da próxima chamada (só nos passos que os pedem). */
   data?: string;
   hora?: string;
-  /** Onde é a visita (opcional). */
+  /** Onde é a visita, escolhido no formulário: a morada da lead ou outra (ver `moradaVisita.ts`). */
+  destinoVisita?: DestinoVisita;
+  /** Onde é a visita, em texto livre (só quando não há `destinoVisita`). */
   onde?: string;
   /** O motivo, no passo "perder"; o contexto diz o passo do percurso e o papel (como em `perder`). */
   motivo?: MotivoPerda;
@@ -70,7 +73,9 @@ function passoAplicavel(estado: EstadoAcoes, id: string, d: DadosChamada): boole
     const erros = errosDiaHora(d.data ?? "", d.hora ?? "", d.hoje);
     if (erros.data || erros.hora) return false;
   }
-  if (d.passo === "marcarVisita" && estado.pessoas.find((p) => p.id === id)?.perdida) return false;
+  const alvo = estado.pessoas.find((p) => p.id === id);
+  if (d.passo === "marcarVisita" && alvo?.perdida) return false;
+  if (d.passo === "marcarVisita" && d.destinoVisita && alvo && validarDestino(d.destinoVisita, moradaDaLead(alvo))) return false;
   return d.passo !== "perder" || d.motivo !== undefined;
 }
 
@@ -78,8 +83,11 @@ function passoAplicavel(estado: EstadoAcoes, id: string, d: DadosChamada): boole
 function aplicarPasso<E extends EstadoAcoes>(estado: E, id: string, d: DadosChamada): E {
   const quando = textoAgenda(d.data ?? "", d.hora ?? "");
   if (d.passo === "marcarVisita") {
-    const detalhe = [quando, d.onde?.trim()].filter(Boolean).join(" · ");
-    return marcarVisita(estado, id, { data: d.data ?? "", hora: d.hora ?? "", nota: "", servico: "", detalhe }, d.hoje);
+    const alvo = estado.pessoas.find((p) => p.id === id);
+    const lugar = d.destinoVisita && alvo
+      ? textoMoradaVisita(resolverDestino(d.destinoVisita, moradaDaLead(alvo)).moradaVisita) : d.onde?.trim();
+    const detalhe = [quando, lugar].filter(Boolean).join(" · ");
+    return marcarVisita(estado, id, { data: d.data ?? "", hora: d.hora ?? "", nota: "", servico: "", detalhe, destino: d.destinoVisita }, d.hoje);
   }
   if (d.passo === "ligarData") {
     const item: ItemAtividade = {
@@ -102,10 +110,14 @@ export function registarChamada<E extends EstadoAcoes>(estado: E, id: string, da
   return aplicarPasso(chamadaBase(estado, id, dados), id, dados);
 }
 
-/** Adia o próximo contacto: hoje mais 1, 3 ou 7 dias. */
+/** Adia o próximo contacto: hoje mais 1, 3 ou 7 dias. Se o contacto é a visita marcada, a visita muda de dia com ele. */
 export function adiar<E extends EstadoAcoes>(estado: E, id: string, dias: 1 | 3 | 7, hoje: string): E {
   if (!existe(estado, id)) return estado;
-  return { ...estado, pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, proximoContacto: somarDias(hoje, dias) })) };
+  const dia = somarDias(hoje, dias);
+  return {
+    ...estado,
+    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, proximoContacto: dia, ...(p.visita ? { visita: { ...p.visita, data: dia } } : {}) })),
+  };
 }
 
 /** Uma nota escrita à mão: entra na atividade. */

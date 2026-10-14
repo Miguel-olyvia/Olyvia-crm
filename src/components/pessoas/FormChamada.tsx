@@ -60,7 +60,9 @@ export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcl
         <OpcoesResultado valor={f.campos.resultado} aoEscolher={f.escolherResultado} />
         <NotaChamada nota={f.campos.nota} aoMudar={(nota) => f.mudar({ nota })} />
         <ProximoPassoChamada resultado={f.campos.resultado} passos={f.passos} valor={f.campos.passo} aoEscolher={(passo) => f.mudar({ passo })} />
-        <DetalhesPasso campos={f.campos} erros={f.erros} hoje={hoje} aoMudar={f.mudar} />
+        <DetalhesPasso
+          campos={f.campos} erros={f.erros} moradaLead={f.moradaLead} erroMorada={f.erroMorada} hoje={hoje} aoMudar={f.mudar}
+        />
       </div>
       <div className="sticky bottom-0 z-10 -mx-6 border-t border-border bg-background px-6 py-3">
         <BotoesPainel guardar={guardar} aoCancelar={aoFechar} desativado={f.campos.resultado === null} dica={t("pessoasPagina.panel.hintResult")} />

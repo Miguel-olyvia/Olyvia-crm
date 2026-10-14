@@ -34,8 +34,11 @@ export function Prazo({ prazo, hoje, hora }: { prazo: string | null; hoje: strin
   );
 }
 
-/** "Próximo passo e prazo": o título, a explicação de uma linha e o prazo; numa perdida, "Perdida" com motivo, data e passo. */
-export function SeccaoPasso({ resumo, hoje }: { resumo: ResumoPessoa; hoje: string }) {
+/**
+ * "Próximo passo e prazo": o título, a explicação de uma linha e o prazo; numa perdida, "Perdida" com motivo, data e passo.
+ * Quando o passo é a visita e o bloco "Próxima visita" está por cima (`comVisita`), o passo remete para ele em vez de repetir o dia.
+ */
+export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: ResumoPessoa; hoje: string; comVisita?: boolean }) {
   const { t } = useTranslation();
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
@@ -56,6 +59,13 @@ export function SeccaoPasso({ resumo, hoje }: { resumo: ResumoPessoa; hoje: stri
     );
   } else if (passo.id === "nenhum") {
     conteudo = <p className="text-[15px] text-muted-foreground">{t(`${P}sum.noNext`)}</p>;
+  } else if (comVisita && passo.id === "fecharLevantamento") {
+    conteudo = (
+      <div className="space-y-0.5">
+        <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
+        <p className="text-[15px] text-muted-foreground">{t(`${P}nextVisit.seeStep`)}</p>
+      </div>
+    );
   } else {
     conteudo = (
       <div className="space-y-0.5">

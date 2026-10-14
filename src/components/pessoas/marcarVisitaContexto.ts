@@ -1,11 +1,14 @@
 // O que o botão "Marcar visita" de cada cartão de submissão precisa de saber (ver `MarcarVisita.tsx`, que o provê).
 import { createContext, useContext } from "react";
 
-/** Quem pede a visita: a pessoa a que a submissão está ligada e o serviço de que pediu a visita. */
+import type { MoradaVisita } from "./pessoasTipos";
+
+/** Quem pede a visita: a pessoa a que a submissão está ligada, o serviço de que pediu a visita e a morada que a lead indicou (`null` sem morada). */
 export interface PedidoVisita {
   pessoaId: string;
   nome: string;
   servico: string;
+  moradaLead: MoradaVisita | null;
 }
 
 export interface MarcarVisitaValor {

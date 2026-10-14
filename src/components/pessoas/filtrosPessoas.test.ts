@@ -69,7 +69,8 @@ describe("filtros do popover", () => {
     );
   });
   it("Com visita: só quem está na etapa Visita e não está perdida", () => {
-    expect(nomes({ comVisita: true })).toEqual(["Rita Albuquerque"]);
+    // A Rita (visita hoje) e o Gonçalo (visita por concluir): as duas leads de exemplo com visita; a Clara tem negócio.
+    expect(nomes({ comVisita: true })).toEqual(["Gonçalo Matias", "Rita Albuquerque"]);
   });
   it("Só as minhas usa o comercial de exemplo", () => {
     expect(nomes({ soMinhas: true })).toEqual(["Beatriz Sampaio", "Marta Silveira", "Rita Albuquerque", "Rui Figueiredo", "Vasco Pinto"]);

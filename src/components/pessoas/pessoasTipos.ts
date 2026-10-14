@@ -18,6 +18,32 @@ export interface PerdidaPessoa {
   passo?: number;
 }
 
+/** A morada de uma visita: rua e número, código postal (0000-000), localidade e andar ou fração. */
+export interface MoradaVisita {
+  rua: string;
+  codigoPostal: string;
+  localidade: string;
+  andar: string;
+}
+
+/**
+ * A visita marcada a uma pessoa. A morada da lead (`Pessoa.morada`) é a que ela indicou; a da visita (`moradaVisita`) pode
+ * ser a mesma (`igualALead`) ou outra, e é a da visita que passa a Morada da obra ao criar o negócio.
+ */
+export interface VisitaPessoa {
+  /** AAAA-MM-DD. */
+  data: string;
+  /** HH:MM; vazio = sem hora. */
+  hora: string;
+  /** O comercial responsável pela visita. */
+  comercial: string;
+  servico?: string;
+  igualALead: boolean;
+  moradaVisita: MoradaVisita;
+  /** Uma nota de acesso (só quando a morada é outra). */
+  notaAcesso?: string;
+}
+
 export interface Pessoa {
   id: string;
   nome: string;
@@ -48,6 +74,8 @@ export interface Pessoa {
   proximoContacto?: string | null;
   /** HH:MM do próximo contacto, quando foi marcado com hora (uma visita ou "ligar numa data"). */
   proximoHora?: string;
+  /** A visita marcada e ainda por concluir (ver `visitaPessoa.ts`); some quando se cria o negócio a partir dela. */
+  visita?: VisitaPessoa;
   /** AAAA-MM-DD: cliente ou lead desde. */
   desde?: string;
   /** Marcada como perdida na ficha: o motivo, o dia e o passo. Só as leads se perdem. */

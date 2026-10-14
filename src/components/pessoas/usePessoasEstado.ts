@@ -5,7 +5,7 @@ import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { adiar, juntarNota, perder, reativar, registarChamada, type ContextoPerda, type DadosChamada } from "./acoesPessoa";
 import type { DadosNovaLead } from "./novaLead";
 import { pessoasNovas, registarLead } from "./pessoasNovas";
-import { marcarVisita, type DadosVisita } from "./visitaPessoa";
+import { alterarVisita, concluirVisita, marcarVisita, type DadosAlterarVisita, type DadosVisita } from "./visitaPessoa";
 import { useNegociosDasPessoas } from "./useNegociosDasPessoas";
 import { chipValido } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
@@ -75,6 +75,12 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
     (id: string, dados: DadosVisita) => setEstado((atual) => marcarVisita(atual, id, dados, HOJE_EXEMPLO)),
     [],
   );
+  const alterarVisitaMarcada = useCallback(
+    (id: string, dados: DadosAlterarVisita) => setEstado((atual) => alterarVisita(atual, id, dados, HOJE_EXEMPLO)),
+    [],
+  );
+  /** A visita acabou e o negócio foi criado a partir dela: sai da ficha e fica registado na atividade. */
+  const concluirVisitaFeita = useCallback((id: string) => setEstado((atual) => concluirVisita(atual, id, HOJE_EXEMPLO)), []);
   const mudarOrdem = useCallback((ordem: OrdemPessoa) => setPrefs((p) => ({ ...p, ordem })), []);
   const mudarChip = useCallback((chip: ChipPessoa) => setPrefs((p) => ({ ...p, chip })), []);
   const mudarTipo = useCallback((tipo: TipoPessoa) => setPrefs((p) => ({ ...p, tipo, chip: chipValido(tipo, p.chip) })), []);
@@ -82,6 +88,7 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
   return {
     resumos, submissoes, notas, pendentes, atividade: estado.atividade, prefs: prefsEfetivas, resolver,
     registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual, criarLead, marcarVisita: marcarVisitaPedida,
+    alterarVisita: alterarVisitaMarcada, concluirVisita: concluirVisitaFeita,
     mudarOrdem, mudarChip, mudarTipo,
   };
 }

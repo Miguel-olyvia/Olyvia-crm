@@ -12,6 +12,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { ligacoes } from "./acoesPessoa";
 import type { AcaoFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
+import { visitaDaPessoa } from "./visitaProxima";
 
 const BOTAO = cn("min-h-11 gap-2", FOCO);
 
@@ -25,6 +26,8 @@ interface BarraAcoesProps {
   aoReativar: () => void;
   /** "Criar negócio": a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
   aoCriarNegocio: () => void;
+  /** "Visita concluída → Criar negócio": só se a pessoa tem visita (marcada ou por concluir). */
+  aoConcluirVisita: () => void;
 }
 
 /** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. */
@@ -60,7 +63,7 @@ function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
  * "Mais": Nota, Adiar, Criar negócio e, no fim e separada, "Marcar como perdida" (uma lead, em qualquer passo antes de
  * cliente, mesmo com negócios abertos) ou, numa perdida, "Reativar lead". Um cliente não se perde.
  */
-function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesProps) {
+function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, aoConcluirVisita }: BarraAcoesProps) {
   const { t } = useTranslation();
   const gatilho = useRef<HTMLButtonElement>(null);
   const escolhida = useRef(false);
@@ -69,6 +72,11 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesPro
     escolhida.current = true;
     aoCriarNegocio();
   };
+  const concluirVisita = () => {
+    escolhida.current = true;
+    aoConcluirVisita();
+  };
+  const temVisita = visitaDaPessoa(pessoa, resumo.etapa) !== null;
   const abrir = (acao: AcaoFicha) => {
     escolhida.current = true;
     aoAbrir(acao, gatilho.current);
@@ -87,6 +95,9 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesPro
       >
         <DropdownMenuItem className="min-h-11" onSelect={() => abrir("nota")}>{t("pessoasPagina.bar.note")}</DropdownMenuItem>
         <DropdownMenuItem className="min-h-11" onSelect={() => abrir("adiar")}>{t("pessoasPagina.bar.snooze")}</DropdownMenuItem>
+        {temVisita && (
+          <DropdownMenuItem className="min-h-11" onSelect={concluirVisita}>{t("pessoasPagina.nextVisit.done")}</DropdownMenuItem>
+        )}
         <DropdownMenuItem className="min-h-11" onSelect={criarNegocio}>
           {t("pessoasPagina.bar.createDeal")}
         </DropdownMenuItem>

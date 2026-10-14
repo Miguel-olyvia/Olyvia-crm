@@ -8,7 +8,7 @@ import type {
 } from "./pessoasTipos";
 
 type Extra = Partial<Pick<Pessoa,
-  "empresa" | "morada" | "distrito" | "nif" | "qualificacao" | "resultadoContacto" | "proximoContacto" | "desde" | "perdida" |
+  "empresa" | "morada" | "distrito" | "nif" | "qualificacao" | "resultadoContacto" | "proximoContacto" | "desde" | "perdida" | "visita" |
   "canal" | "campanha" | "formulario" | "viaEntrada" | "saude">>;
 
 interface Dados {
@@ -24,6 +24,11 @@ interface Dados {
   empresa?: { nome: string; contacto: string; nif: string };
   /** Perdida há `dias` dias, no passo `passo` do percurso (0 a 3). */
   perdida?: { motivo: MotivoPerda; dias: number; passo: number };
+  /**
+   * A visita marcada (o dia é o do próximo contacto): `outra` é a morada da visita quando não é a da lead, e sem ela a visita
+   * é na morada da lead. Com o dia já passado, fica por concluir.
+   */
+  visita?: { hora: string; comercial: string; outra?: [rua: string, cp: string, localidade: string, andar: string]; acesso?: string };
 }
 
 const DADOS: Record<string, Dados> = {
@@ -36,6 +41,7 @@ const DADOS: Record<string, Dados> = {
   "p-paulo": {
     resultado: "atendeuInteressado", proximo: 2, desde: "2025-06-02", morada: ["Rua do Souto 51", "4700-329", "Braga"], distrito: "Braga",
     nif: "204 567 890", empresa: { nome: "Neves Climatização, Lda.", contacto: "Paulo Neves (sócio)", nif: "514 567 890" },
+    visita: { hora: "10:30", comercial: "Bruno Costa", outra: ["Zona Industrial, Lote 7", "4700-500", "Braga", "Armazém 2"], acesso: "Tocar à campainha da portaria." },
   },
   "p-sofia": { resultado: "naoAtendeu", proximo: -2, desde: "2024-11-18", morada: ["Rua Nova 3", "8000-123", "Faro"], distrito: "Faro", nif: "205 678 901" },
   "p-nuno": { resultado: "atendeuInteressado", proximo: 5, desde: "2026-05-14", morada: ["Rua da Fonte 15", "2900-210", "Setúbal"], distrito: "Setúbal", qualificacao: "SQL" },
@@ -51,11 +57,12 @@ const DADOS: Record<string, Dados> = {
   "p-lucia": { resultado: "naoAtendeu", proximo: -5, desde: "2026-09-22", morada: ["Rua de Avis 30", "7000-100", "Évora"], distrito: "Évora" },
   "p-rita": {
     resultado: "atendeuInteressado", proximo: 0, desde: "2026-10-01", morada: ["Rua dos Combatentes 12", "2710-100", "Sintra"], distrito: "Lisboa",
-    qualificacao: "SQL",
+    qualificacao: "SQL", visita: { hora: "15:00", comercial: "Ana Ribeiro" },
   },
   "p-goncalo": {
     resultado: "atendeuMaisTarde", proximo: -1, desde: "2026-10-07", morada: ["Av. do Mar 220", "2750-300", "Cascais"], distrito: "Lisboa",
     qualificacao: "MQL", empresa: { nome: "Matias Construções, Lda.", contacto: "Gonçalo Matias (sócio)", nif: "516 789 012" },
+    visita: { hora: "11:00", comercial: "Bruno Costa", outra: ["Rua das Oliveiras 14", "2750-100", "Cascais", "Moradia"] },
   },
   "p-joana": {
     resultado: "naoAtendeu", proximo: null, desde: "2026-09-18", morada: ["Rua do Giestal 4", "2000-250", "Santarém"], distrito: "Santarém",
@@ -66,6 +73,17 @@ const DADOS: Record<string, Dados> = {
     perdida: { motivo: "preco", dias: 20, passo: 3 },
   },
 };
+
+/** A visita de exemplo: no dia do próximo contacto, na morada da lead ou na outra que os dados indicam. */
+function visitaDeExemplo(d: Dados): Pessoa["visita"] {
+  if (!d.visita || d.proximo === null) return undefined;
+  const [rua, codigoPostal, localidade, andar] = d.visita.outra ?? [...d.morada, ""];
+  return {
+    data: somarDias(HOJE_EXEMPLO, d.proximo), hora: d.visita.hora, comercial: d.visita.comercial, igualALead: d.visita.outra === undefined,
+    moradaVisita: { rua, codigoPostal, localidade, andar },
+    ...(d.visita.acesso ? { notaAcesso: d.visita.acesso } : {}),
+  };
+}
 
 /** Os campos de exemplo da ficha de uma pessoa (vazio se o id não tem dados). */
 export function extrasExemplo(id: string): Extra {
@@ -81,6 +99,7 @@ export function extrasExemplo(id: string): Extra {
     qualificacao: d.qualificacao,
     empresa: d.empresa,
     perdida: d.perdida && { motivo: d.perdida.motivo, data: somarDias(HOJE_EXEMPLO, -d.perdida.dias), passo: d.perdida.passo },
+    visita: visitaDeExemplo(d),
     ...origemExemplo(id),
   };
 }

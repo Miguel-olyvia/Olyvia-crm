@@ -7,7 +7,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { criarNegocioNovo } from "@/components/negocio-metas/negociosNovos";
 import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
-import type { DadosCriarNegocio } from "@/components/negocio-metas/novoNegocio";
+import type { DadosCriarNegocio, ValoresIniciaisNegocio } from "@/components/negocio-metas/novoNegocio";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/pessoas/AbasSublinhadas";
@@ -27,6 +27,7 @@ import { ordenarSubmissoes } from "@/components/pessoas/resolverSubmissao";
 import { usePessoasEstado } from "@/components/pessoas/usePessoasEstado";
 import { usePessoasUrl, type SeparadorPagina } from "@/components/pessoas/usePessoasUrl";
 import { useResolucaoSubmissao } from "@/components/pessoas/useResolucaoSubmissao";
+import { valoresIniciaisDaVisita, type VisitaResolvida } from "@/components/pessoas/visitaProxima";
 
 /** A permissão que a página real de submissões pendentes exige (ver a rota em App.tsx). */
 const PERMISSAO_SUBMISSOES = "platform.pending_submissions.view";
@@ -48,7 +49,10 @@ const Pessoas = () => {
   const pessoas = useMemo(() => new Map(estado.resumos.map((r) => [r.pessoa.id, r.pessoa])), [estado.resumos]);
   const resolucao = useResolucaoSubmissao({ ordenadas, pessoas, resolver: estado.resolver });
   const [novaLeadAberta, setNovaLeadAberta] = useState(false);
-  const [negocioPara, setNegocioPara] = useState<Pessoa | null>(null);
+  // O painel "Novo negócio" aberto a partir da ficha: a pessoa e, se veio da visita concluída, os valores que a visita já traz.
+  const [negocioPara, setNegocioPara] = useState<{ pessoa: Pessoa; valores?: ValoresIniciaisNegocio } | null>(null);
+  // A pessoa cuja visita fica concluída quando o negócio for criado (lida ao criar; o painel já está a fechar nessa altura).
+  const visitaDoNegocio = useRef<string | null>(null);
   const [aviso, setAviso] = useState("");
   const opcoesPessoa = useMemo(() => estado.resumos.map((r) => paraOpcao(r.pessoa)), [estado.resumos]);
 
@@ -84,8 +88,17 @@ const Pessoas = () => {
   /** Cria o negócio da pessoa (o mesmo de "Novo negócio"): aparece na ficha, em Negócios, e no quadro de Negócio e metas. */
   const aoCriarNegocio = (dados: DadosCriarNegocio) => {
     criarNegocioNovo(dados, HOJE_EXEMPLO);
+    if (visitaDoNegocio.current === dados.pessoa.id) estado.concluirVisita(dados.pessoa.id);
+    visitaDoNegocio.current = null;
     toast.success(t("businessGoals.new.created"));
     setAviso(t("pessoasPagina.createDeal.announce", { name: dados.pessoa.nome }));
+  };
+
+  const abrirNegocio = (pessoa: Pessoa) => { visitaDoNegocio.current = null; setNegocioPara({ pessoa }); };
+  /** "Visita concluída → Criar negócio": o painel abre com a pessoa, o comercial, a visita e a morada da visita (a da obra). */
+  const abrirNegocioDaVisita = (pessoa: Pessoa, visita: VisitaResolvida) => {
+    visitaDoNegocio.current = pessoa.id;
+    setNegocioPara({ pessoa, valores: valoresIniciaisDaVisita(pessoa, visita) });
   };
 
   return (
@@ -134,12 +147,13 @@ const Pessoas = () => {
           voltou={idAberta !== undefined && estado.pendentes.has(idAberta)} acoes={estado} aoFechar={url.fechar}
           idsVisiveis={url.separador === "pessoas" ? visiveis : []} aoIrPara={url.abrir} pessoas={pessoas}
           aoPedir={(sid, pid) => resolucao.pedir(sid, pid, "ficha")} aoVerTodasSubmissoes={url.irParaSubmissoes}
-          aoCriarNegocio={setNegocioPara}
+          aoCriarNegocio={abrirNegocio} aoCriarNegocioDaVisita={abrirNegocioDaVisita}
         />
         <NovaLeadPainel aberto={novaLeadAberta} aoMudarAberto={setNovaLeadAberta} aoCriar={aoCriarLead} />
         <NovoNegocioDialogo
           pessoas={opcoesPessoa} aoCriar={aoCriarNegocio} semBotao aberto={negocioPara !== null}
-          aoMudarAberto={(aberto) => { if (!aberto) setNegocioPara(null); }} pessoaInicialId={negocioPara?.id}
+          aoMudarAberto={(aberto) => { if (!aberto) setNegocioPara(null); }} pessoaInicialId={negocioPara?.pessoa.id}
+          valoresIniciais={negocioPara?.valores}
         />
         <ConfirmarResolver
           pedido={resolucao.pedido} aoConfirmar={resolucao.confirmar} aoCancelar={resolucao.cancelar} aoFechar={resolucao.aoFechar}

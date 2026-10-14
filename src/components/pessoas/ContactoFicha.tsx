@@ -1,5 +1,5 @@
 // Os dados de contacto da ficha: rótulo e valor, sem botão de copiar (ver `ficha-comum/LinhaContacto`). Telefone e
-// email são ligações.
+// email são ligações. A morada daqui é a que a lead indicou (a da visita vê-se em "Próxima visita").
 import { useTranslation } from "@/hooks/useTranslation";
 import { LinhaContacto } from "@/components/ficha-comum/LinhaContacto";
 import { Seccao } from "@/components/ficha-comum/Seccao";

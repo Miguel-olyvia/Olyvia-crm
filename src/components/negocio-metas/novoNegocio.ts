@@ -1,7 +1,7 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
 import type {
-  DadosContactoNegocio, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
+  DadosContactoNegocio, EstadoLevantamento, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
 } from "./negocioMetas";
 import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
@@ -32,9 +32,10 @@ export function preencherContactoDaPessoa(pessoa: PessoaOpcao | undefined | null
     email: pessoa?.email ?? pessoa?.contacto?.email ?? "",
     morada: pessoa?.morada ?? "",
     distrito: pessoa?.distrito ?? "",
-    nif: pessoa?.nif ?? "",
+    // Os NIF da ficha podem vir escritos com espaços ("204 567 890"): sem os tirar, o formulário nunca os validava.
+    nif: (pessoa?.nif ?? "").replace(/\s+/g, ""),
     empresa: pessoa?.empresa ?? "",
-    nifEmpresa: pessoa?.nifEmpresa ?? "",
+    nifEmpresa: (pessoa?.nifEmpresa ?? "").replace(/\s+/g, ""),
   };
 }
 
@@ -52,6 +53,24 @@ export const COMERCIAL_POR_OMISSAO: string = COMERCIAIS_EXEMPLO[0];
 
 /** O primeiro prazo de um negócio novo: levantamento daqui a 2 dias. */
 export const DIAS_ATE_PRIMEIRO_PRAZO = 2;
+
+/**
+ * O que o painel "Novo negócio" já traz preenchido quando a página o abre a partir de outro sítio (hoje, a visita
+ * concluída de uma pessoa). Tudo opcional; sem isto o painel abre como sempre.
+ */
+export interface ValoresIniciaisNegocio {
+  pessoaId?: string;
+  comercial?: string;
+  /** A aba Visita: o dia, quem fez e o estado do levantamento, e a morada da obra, que vem da visita. */
+  visita?: {
+    data: string;
+    quemFez: string;
+    estado: EstadoLevantamento;
+    moradaObra: MoradaObraForm;
+    /** A morada da visita é a que a lead indicou (só para dizer a origem na aba Qualificação). */
+    igualALead: boolean;
+  };
+}
 
 /** O que o formulário preenche. */
 export interface ValoresNovoNegocio {

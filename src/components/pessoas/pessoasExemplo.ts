@@ -34,7 +34,11 @@ const doNegocio = (n: NegocioMes): Pessoa => ({
 
 const PESSOAS_COM_NEGOCIO: Pessoa[] = DADOS_EXEMPLO.negocios.map(doNegocio);
 
-/** Leads sem negócio no quadro do mês: três novas, uma com visita, uma com empresa e duas perdidas (a do Negócio tem um negócio histórico). */
+/**
+ * Leads sem negócio no quadro do mês: três novas, duas com visita (a da Rita é hoje, na morada da lead; a do Gonçalo ficou por
+ * concluir, noutra morada), uma com empresa e duas perdidas (a do Negócio tem um negócio histórico). O Paulo, cliente, também
+ * tem uma visita marcada (noutra morada).
+ */
 const LEADS_NOVAS: Pessoa[] = [
   {
     ...PADRAO, id: "p-beatriz", nome: "Beatriz Sampaio", comercial: "Ana Ribeiro", origem: "site", etapa: "nova", ultimoContactoDias: 2,
@@ -53,7 +57,7 @@ const LEADS_NOVAS: Pessoa[] = [
     contacto: { telefone: "924 567 813", email: "rita.albuquerque@exemplo.pt" },
   },
   {
-    ...PADRAO, id: "p-goncalo", nome: "Gonçalo Matias", comercial: "Bruno Costa", origem: "campanha", etapa: "emContacto", ultimoContactoDias: 6,
+    ...PADRAO, id: "p-goncalo", nome: "Gonçalo Matias", comercial: "Bruno Costa", origem: "campanha", etapa: "visitaMarcada", ultimoContactoDias: 6,
     contacto: { telefone: "925 678 914", email: "goncalo.matias@exemplo.pt" },
   },
   {

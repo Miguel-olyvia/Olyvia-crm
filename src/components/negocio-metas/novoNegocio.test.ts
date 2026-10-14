@@ -41,6 +41,12 @@ describe("preencherContactoDaPessoa", () => {
     expect(preencherContactoDaPessoa({ id: "x", nome: "X" })).toEqual(CONTACTO_VAZIO);
     expect(preencherContactoDaPessoa(marta).email).toBe("marta.silveira@exemplo.pt");
   });
+
+  it("tira os espaços dos NIF da ficha (204 567 890), que de outro modo nunca validavam", () => {
+    const c = preencherContactoDaPessoa({ id: "x", nome: "X", nif: "204 567 890", nifEmpresa: "514 567 890" });
+    expect(c).toMatchObject({ nif: "204567890", nifEmpresa: "514567890" });
+    expect(validarNovoNegocio({ pessoaId: "x", contacto: c })).toEqual({});
+  });
 });
 
 describe("reporContacto", () => {
