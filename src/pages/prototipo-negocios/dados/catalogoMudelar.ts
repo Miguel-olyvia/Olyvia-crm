@@ -7,7 +7,7 @@
 // a árvore ofício › sub, as receitas (calibradas para o custo do motor ficar perto do custo real), a medida da
 // visita, os ícones, as ilustrações, as marcas e os fornecedores em falta, a descrição e as relações.
 //
-// Quem usa: catalogo.ts (os serviços novos entram no CATALOGO; os c1..c41 ganham o sku), custosModelo.ts
+// Quem usa: catalogo.ts (os serviços novos entram no CATALOGO; os c1..c41 ganham o sku e a receita), custosModelo.ts
 // (perfis, equipamentos, a receita dos serviços novos), catalogoModelo.ts (árvore, produtos, relações, ícones)
 // e motor.ts (garantirServico usa o resumo da receita).
 import type { MedKey } from "../motor";
@@ -117,12 +117,11 @@ export const SERVICOS_NOVOS_MUDELAR = SERVICOS_MUDELAR.filter((s) => !s.cId);
 export const ICONE_MUDELAR: Record<string, IconeServicoKey> = Object.fromEntries(SERVICOS_MUDELAR.map((s) => [s.id, s.icone]));
 
 /**
- * A receita da Mudelar de um serviço NOVO (s-…), já com os ids de cada linha. Os c1..c41 mantêm a receita
- * estimada que tinham (há testes e ecrãs que contam com isso); a deles está em servicoMudelar(cN).
+ * A receita da Mudelar de um serviço (s-… ou um dos c1..c41), já com os ids de cada linha.
+ * 14/10: os c1..c41 também passam a usá-la (passos, equipamentos, consumíveis, medida e o PVP real como preço de tabela).
  */
 export function receitaMudelar(sid: string): ServicoMudelar | null {
-  const s = POR_ID.get(sid);
-  return s && !s.cId ? s : null;
+  return POR_ID.get(sid) ?? null;
 }
 
 /* ------------------------------------------------------------------ serviço que exige produto */

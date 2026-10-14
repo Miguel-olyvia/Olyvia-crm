@@ -1,10 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { CATALOGO } from "../catalogo";
-import { alertas, custoUn, seed } from "../motor";
+import { describe, expect, it, vi } from "vitest";
+import { CATALOGO, itemCatalogo, type ItemCatalogo } from "../catalogo";
+import { alertas, custoUn, seed, type Estado } from "../motor";
 import {
   HOJE, aplicarAoServico, alertasOrcamentoV2, alertasServico, custoHoraPerfil, custoReceita, custos0, equipHora, listaCatalogo, margemSobrePreco,
   mediaHora, mesesAntes, mesesEntre, minimoLinha, minimoServico, ordenar, passaFiltro, pesquisar, precoReceita, receitaDe, taxaEstrutura, totalEstrutura,
 } from "./custosModelo";
+
+// Um serviço do Catálogo sem receita, criado só para estes testes: desde 14/10 todos os do Catálogo (os c1..c41
+// incluídos) têm a receita da Mudelar, e os testes do "sem receita" precisam de um que não a tenha.
+const SEM_RECEITA: ItemCatalogo = { id: "x-sem-receita", n: "Serviço de teste sem receita", cat: "Canalização", un: "un", hf: 2, hu: 0.5, qm: 4, usos: 0, linhas: ["wc"] };
+vi.mock("../catalogo", async (orig) => {
+  const m = await orig<typeof import("../catalogo")>();
+  return { ...m, itemCatalogo: (sid: string) => (sid === SEM_RECEITA.id ? SEM_RECEITA : m.itemCatalogo(sid)) };
+});
+/** Põe o serviço sem receita em uso (como o motor faria ao juntá-lo a um orçamento: 25 €/h e margem de 35%). */
+const usarSemReceita = (S: Estado) => {
+  S.svc[SEM_RECEITA.id] = { n: SEM_RECEITA.n, un: "un", h: 1, eh: 25, eq: 0, cons: 0, preco: 46.25, perfil: "Canalização" };
+  return S.svc[SEM_RECEITA.id];
+};
 
 describe("custos · perfis, equipamentos e estrutura", () => {
   it("um técnico de 1.900 € dá 25,00 €/h (× 14, TSU 23,75%, seguros 713 €, 1.345 h), como receitas.ts", () => {
@@ -43,8 +56,8 @@ describe("custos · receita, preço e margem", () => {
     expect(c.total).toBeCloseTo(custoUn(S.svc.demol, S), 1);
   });
   it("um serviço só do Catálogo tem a receita estimada pelas horas (fixas repartidas) e preço = custo + margem-alvo", () => {
-    const C = custos0(), c1 = CATALOGO.find((x) => x.id === "c1")!;
-    const rec = receitaDe(C, "c1", null, 35)!;
+    const C = custos0(), c1 = itemCatalogo(SEM_RECEITA.id)!;
+    const rec = receitaDe(C, SEM_RECEITA.id, null, 35)!;
     expect(rec.origem).toBe("estimada");
     expect(rec.mo.reduce((a, p) => a + p.h, 0)).toBeCloseTo(c1.hu + c1.hf / c1.qm, 2);
     const c = custoReceita(rec, C, false);
@@ -72,8 +85,10 @@ describe("custos · alertas do Catálogo", () => {
   });
   it("'Linha sem custo' quando não há receita (e não os 25 €/h inventados)", () => {
     const S = seed(), C = custos0();
+    usarSemReceita(S);
     const L = listaCatalogo(S, C);
-    expect(L.find((i) => i.sid === "c1")!.alertas.some((a) => a.id === "sem-receita" && a.t === "Linha sem custo")).toBe(true);
+    expect(L.find((i) => i.sid === SEM_RECEITA.id)!.alertas.some((a) => a.id === "sem-receita" && a.t === "Linha sem custo")).toBe(true);
+    expect(L.find((i) => i.sid === "c1")!.alertas.some((a) => a.id === "sem-receita")).toBe(false); // 14/10: tem a receita da Mudelar
     expect(L.find((i) => i.sid === "demol")!.alertas.some((a) => a.id === "sem-receita")).toBe(false);
   });
   it("desatualizado pela data, com N meses configurável", () => {
@@ -132,6 +147,9 @@ describe("custos · passar para o motor e alertas do orçamento", () => {
   it("o alertas() do motor não muda; o da V2 junta 'Linha sem custo' e troca a frase fixa pelo desatualizado com data", () => {
     const S = seed(), C = custos0();
     const d = S.deals.find((x) => x.id === 1050)!;
+    // 14/10: os extras da Joana já têm receita; junta-se uma linha de um serviço sem receita
+    const sr = usarSemReceita(S);
+    d.orc!.linhas.push({ t: "svc", sid: SEM_RECEITA.id, q: 1, cu: custoUn(sr, S), pu: sr.preco });
     const antes = JSON.stringify(alertas(d, S));
     const A = alertasOrcamentoV2(d, S, C, { justificacao: "Preço de mercado da zona" });
     expect(JSON.stringify(alertas(d, S))).toBe(antes);

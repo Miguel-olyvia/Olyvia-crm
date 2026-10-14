@@ -25,9 +25,9 @@ describe("dashboard de Negócios · os cartões com os dados de exemplo (sem fil
     expect(cartao("porfechar").nota).toBe("no valor de 67.809,04 €: Orçamento, Proposta e Contrato por assinar");
     expect(cartao("ponderado").valor).toBeCloseTo(40492.328, 2); // 5 x 50 % + 4 x 70 % + 1 x 90 %, negócio a negócio (os 4 em Financeiro já não contam)
   });
-  it("6 ganhos (39.992,66 €), 4 perdidos e 60 % de conversão, os três em todo o período", () => {
+  it("6 ganhos (39.913,67 €), 4 perdidos e 60 % de conversão, os três em todo o período", () => {
     expect(cartao("ganhos").valor).toBe(6);
-    expect(cartao("ganhos").nota).toBe("em todo o período, no valor de 39.992,66 €.");
+    expect(cartao("ganhos").nota).toBe("em todo o período, no valor de 39.913,67 €.");
     expect(cartao("conversao").valor).toBe(60);
     expect(cartao("conversao").pct).toBe(true);
     expect(cartao("conversao").nota).toBe("6 ganhos e 4 perdidos, em todo o período.");

@@ -78,10 +78,8 @@ describe("catálogo da Mudelar · as receitas", () => {
     const comCusto = SERVICOS_MUDELAR.filter((s) => s.custoReal > 0);
     const fora: string[] = [];
     for (const s of comCusto) {
-      // os novos pela receitaDe (a do protótipo); os c1..c41 pela receita da Mudelar deles
-      const rec = s.cId
-        ? { sid: s.id, origem: "catalogo" as const, mo: s.mo, equip: s.equip, cons: s.cons, modo: "tabela" as const, precoTabela: s.pvp, margem: 35, hist: [] }
-        : receitaDe(C, s.id, null)!;
+      // todos pela receitaDe, a do protótipo (14/10: os c1..c41 também usam a receita da Mudelar)
+      const rec = receitaDe(C, s.id, null)!;
       const c = custoReceita(rec, C, true).total;
       if (Math.abs(c / s.custoReal - 1) > 0.3) fora.push(`${s.sku} ${c.toFixed(2)} vs ${s.custoReal}`);
     }
@@ -90,18 +88,18 @@ describe("catálogo da Mudelar · as receitas", () => {
     expect(fora, fora.join("; ")).toHaveLength(0);
     expect(comCusto.length).toBe(346); // os 12 de subempreitada sem preço (pedido por obra) ficam de fora
   });
-  it("cada serviço novo: árvore ofício › sub, unidade, medida, passos, ícone e o PVP como preço de tabela", () => {
+  it("cada serviço (novo ou c1..c41): unidade, medida, passos, ícone e o PVP como preço de tabela; os novos na árvore ofício › sub", () => {
     const C = custos0(), icones = new Set<string>(ICONES_SERVICO);
     for (const s of SERVICOS_MUDELAR) {
       expect(icones.has(s.icone), s.sku).toBe(true);
       expect([null, "pav", "par", "pts", "pcs"]).toContain(s.medida);
       if (s.custoReal > 0) expect(s.mo.length, s.sku).toBeGreaterThan(0);
-      if (s.cId) continue;
       const rec = receitaDe(C, s.id, null)!;
       expect(rec).toMatchObject({ origem: "catalogo", modo: "tabela", precoTabela: s.pvp, medida: s.medida });
-      expect(caminho(K.arvore, K.classe[s.id])).toBe(s.sub ? `${s.oficio} › ${s.sub}` : s.oficio);
       expect(rec.equip.every((u) => C.equip.some((e) => e.id === u.equip)), s.sku).toBe(true);
       expect(rec.mo.every((p) => C.perfis.some((x) => x.id === p.perfil)), s.sku).toBe(true);
+      if (s.cId) continue; // os c1..c41 ficam no ofício de antes
+      expect(caminho(K.arvore, K.classe[s.id])).toBe(s.sub ? `${s.oficio} › ${s.sub}` : s.oficio);
     }
     expect(SERVICOS_MUDELAR.filter((s) => s.medida).length).toBeGreaterThan(15);
     expect(SERVICOS_MUDELAR.some((s) => s.cons.some((c) => c.opcional))).toBe(true);

@@ -4,7 +4,7 @@
 // os serviços vendidos à parte dos pacotes. Os custos e preços são de exemplo:
 // mão de obra a 25 €/h e preço de tabela com 35% de margem.
 // 14/10/2026: o catálogo real da Mudelar inteiro (dados/catalogoMudelar.ts). Os c1..c41 ficam como estavam
-// e ganham o sku, o PVP e o custo reais; os outros 317 serviços da Mudelar ficam em CATALOGO_MUDELAR (id "s-<sku>").
+// e ganham o sku, o PVP, o custo reais e a receita da Mudelar; os outros 317 serviços da Mudelar ficam em CATALOGO_MUDELAR (id "s-<sku>").
 
 import { SERVICOS_MUDELAR, SERVICOS_NOVOS_MUDELAR } from "./dados/catalogoMudelar";
 
@@ -81,9 +81,10 @@ const BASE: ItemCatalogo[] = [
   { id: "pint", n: "Pintura de tetos e paredes", cat: "Pintura", un: "m²", hf: 0, hu: 0.3, qm: 10, usos: 0, linhas: ["wc", "coz"] },
 ];
 
-// os c1..c41 ligam-se ao sku real (sem duplicar o serviço); a receita deles continua a estimada
+// os c1..c41 ligam-se ao sku real (sem duplicar o serviço) e, desde 14/10, à receita da Mudelar: o resumo `rs`
+// faz o motor (garantirServico) criar o serviço com as horas, o custo e o PVP reais; hf, hu e qm ficam os de antes
 const MUDELAR = new Map(SERVICOS_MUDELAR.map((s) => [s.id, s]));
-for (const c of BASE) { const m = MUDELAR.get(c.id); if (m) Object.assign(c, { sku: m.sku, pvp: m.pvp, custoReal: m.custoReal }); }
+for (const c of BASE) { const m = MUDELAR.get(c.id); if (m) Object.assign(c, { sku: m.sku, pvp: m.pvp, custoReal: m.custoReal, rs: m.rs }); }
 
 /** Os serviços do Catálogo de antes (os c1..c41, agora com o sku, e os três do modelo). */
 export const CATALOGO: ItemCatalogo[] = BASE;

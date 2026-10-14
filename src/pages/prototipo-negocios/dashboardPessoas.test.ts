@@ -32,7 +32,7 @@ describe("dashboard de Pessoas · os cartões com os dados de exemplo", () => {
     expect(c.map((x) => x.id)).toEqual(["clientes", "contratado", "novo", "aberto", "novos30"]);
     expect(c.map((x) => x.valor).filter((_, i) => i !== 1 && i !== 3)).toEqual([5, 4, 3]);
     expect(c[1].euros && c[3].euros).toBe(true);
-    expect(c[1].valor).toBeCloseTo(39992.66, 1); // 15.334,10 + 8.432,74 + 4.045,21 + 3.396,51 + 8.784,10
+    expect(c[1].valor).toBeCloseTo(39913.67, 1); // 15.334,10 + 8.432,74 + 3.966,22 + 3.396,51 + 8.784,10 (14/10: a Joana, 1050, passou de 4.045,21 € a 3.966,22 €, com a receita da Mudelar nos c28, c3, c14 e c19)
     expect(c[3].valor).toBeCloseTo(37180, 1); // 5.600 + 18.900 + 5.230 + 7.450: os negócios novos em curso dos 4 clientes
   });
   it("Todos: 21 pessoas, 14 leads, 5 clientes, 3 empresas, 2 perdidas e o valor em jogo", () => {

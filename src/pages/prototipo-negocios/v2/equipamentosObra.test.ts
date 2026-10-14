@@ -45,7 +45,7 @@ describe("equipamentos na obra", () => {
     const S = seed(), d = deal(S, 1050), C = custos0();
     const f = fatoresDe(1050).eq;
     const antes = custoEquipamentos(equipamentosObra(d, S, C, regVazio()), f);
-    expect(antes.feitas).toBe(3);
+    expect(antes.feitas).toBe(11); // eram 3; 14/10: os extras da Joana (c28, c3, c14 e c19) trazem os equipamentos da receita da Mudelar
     expect(antes.confirmadas).toBe(0);
     expect(antes.real).toBeLessThan(antes.prev); // fator de exemplo 0,92
     const reg = confirmarHorasEquip(regVazio(), "0:e-martelo-demolidor", 4);
