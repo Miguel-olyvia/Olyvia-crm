@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import { agruparPorModulo, permissoesEfetivas, resumoAmbito } from "./logica";
+import { agruparPorMenu } from "./gruposPermissoes";
+import { permissoesEfetivas, resumoAmbito } from "./logica";
 import { TagEstado } from "./pecas";
 import { textoAcesso, textoAmbito } from "./textos";
 import type { Organizacao, Role, Utilizador } from "./tipos";
@@ -48,7 +49,7 @@ export function SeparadorResumo({ utilizador: u, roles, organizacoes, aoAbrirRol
       </Linha>
       <Linha rotulo={t("usersProfiles.col.scope")}>{textoAmbito(t, resumoAmbito(u, roles))}</Linha>
       <Linha rotulo={t("usersProfiles.summary.permissions")}>
-        {t("usersProfiles.summary.permissionsValue", { n: efetivas.length, modules: agruparPorModulo(efetivas).length, danger: perigosas })}
+        {t("usersProfiles.summary.permissionsValue", { n: efetivas.length, modules: agruparPorMenu(efetivas.map((e) => e.permissao)).length, danger: perigosas })}
       </Linha>
     </dl>
   );

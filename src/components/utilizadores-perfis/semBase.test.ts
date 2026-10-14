@@ -1,6 +1,6 @@
 // GUARDA: a página "Utilizadores e perfis" só usa dados de exemplo, sem ligação à base. Falha se aparecer uma importação do
 // Supabase ou do react-query, ou uma chamada a fetch, .rpc( ou .from("tabela"). Quem for ligar a página à base tem de
-// ALTERAR ESTE TESTE DE PROPÓSITO e dizê-lo na revisão. Mesmo padrão de `components/pessoas/semBase.test.ts`.
+// ALTERAR ESTE TESTE DE PROPÓSITO e dizê-lo na revisão. Mesmo padrão das outras páginas de exemplo da app.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";

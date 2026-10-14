@@ -1,8 +1,6 @@
 // Lógica pura da página "Utilizadores e perfis": filtros, contagens, permissões efetivas, âmbito e proteção.
-import { PERMISSOES } from "./catalogoExemplo";
-import type {
-  Ambito, FiltrosUtilizadores, ModuloId, Permissao, Role, Utilizador,
-} from "./tipos";
+import { PERMISSOES } from "./permissoesExemplo";
+import type { Ambito, FiltrosUtilizadores, Permissao, Role, Utilizador } from "./tipos";
 
 const ORDEM_AMBITO: Ambito[] = ["NONE", "OWNED", "TEAM", "ORG"];
 const AMBITO_PADRAO: Ambito = "OWNED";
@@ -23,13 +21,31 @@ export function filtrarUtilizadores(utilizadores: Utilizador[], f: FiltrosUtiliz
   });
 }
 
-/** Quem tem a role (em qualquer vínculo), sem repetir quem a tem em duas organizações. */
-export const pessoasDaRole = (utilizadores: Utilizador[], roleId: string): Utilizador[] =>
+/** Os utilizadores com a role (em qualquer vínculo), sem repetir quem a tem em duas organizações. */
+export const utilizadoresDaRole = (utilizadores: Utilizador[], roleId: string): Utilizador[] =>
   utilizadores.filter((u) => u.vinculos.some((v) => v.roleId === roleId));
 
-/** Quantas pessoas tem cada role (todas as roles aparecem, mesmo com zero). */
-export function contarPessoasPorRole(utilizadores: Utilizador[], roles: Role[]): Record<string, number> {
-  return Object.fromEntries(roles.map((r) => [r.id, pessoasDaRole(utilizadores, r.id).length]));
+/** Quantos utilizadores tem cada role (todas as roles aparecem, mesmo com zero). */
+export function contarUtilizadoresPorRole(utilizadores: Utilizador[], roles: Role[]): Record<string, number> {
+  return Object.fromEntries(roles.map((r) => [r.id, utilizadoresDaRole(utilizadores, r.id).length]));
+}
+
+export interface Editor {
+  administradorSistema: boolean;
+  codigos: string[];
+}
+
+/** Só se mostram as permissões que quem edita já tem; um administrador de sistema vê todas (regra de Roles.tsx). */
+export function permissoesVisiveis(catalogo: Permissao[], editor: Editor): Permissao[] {
+  if (editor.administradorSistema) return catalogo;
+  const dele = new Set(editor.codigos);
+  return catalogo.filter((p) => dele.has(p.codigo));
+}
+
+/** Quantas das permissões visíveis tem cada role. Códigos que a role guarda e que não estão no catálogo não contam. */
+export function contarPermissoesPorRole(roles: Role[], visiveis: Permissao[]): Record<string, number> {
+  const codigos = new Set(visiveis.map((p) => p.codigo));
+  return Object.fromEntries(roles.map((r) => [r.id, r.permissoes.filter((c) => codigos.has(c)).length]));
 }
 
 /** Um super administrador não se edita por esta página. */
@@ -58,13 +74,6 @@ export function permissoesEfetivas(
     const origens = unicas.filter((r) => r.permissoes.includes(permissao.codigo));
     return origens.length > 0 ? [{ permissao, origens }] : [];
   });
-}
-
-/** As permissões efetivas agrupadas por módulo, pela ordem do catálogo; módulos sem permissões não aparecem. */
-export function agruparPorModulo(efetivas: PermissaoEfetiva[]): { modulo: ModuloId; itens: PermissaoEfetiva[] }[] {
-  const grupos = new Map<ModuloId, PermissaoEfetiva[]>();
-  efetivas.forEach((e) => grupos.set(e.permissao.modulo, [...(grupos.get(e.permissao.modulo) ?? []), e]));
-  return [...grupos].map(([modulo, itens]) => ({ modulo, itens }));
 }
 
 const maisLargo = (a: Ambito, b: Ambito): Ambito => (ORDEM_AMBITO.indexOf(a) >= ORDEM_AMBITO.indexOf(b) ? a : b);

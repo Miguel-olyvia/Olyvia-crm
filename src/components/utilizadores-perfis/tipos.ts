@@ -1,14 +1,15 @@
 // Tipos da página "Utilizadores e perfis" (exemplo, sem base de dados).
 export type Ambito = "NONE" | "OWNED" | "TEAM" | "ORG";
-export type ModuloId = "clients" | "deals" | "contracts" | "hr" | "users" | "settings";
-export type AcaoId =
-  | "view" | "create" | "edit" | "delete" | "export" | "sign" | "sensitive" | "resetPassword" | "integrations";
+/** Quem tem a permissão acrescentada ao catálogo: migration, guarda de rota/menu, uso no código ou só nos docs. */
+export type FontePermissao = "migration" | "rota" | "codigo" | "docs";
 
 export interface Permissao {
   codigo: string;
-  modulo: ModuloId;
-  acao: AcaoId;
-  /** Assinalada como perigosa (exportar, assinar, dados sensíveis, eliminar utilizadores...). */
+  /** A categoria em anew_permissions (a que o ecrã de Roles agrupa por menu). */
+  categoria: string;
+  nome: string;
+  fonte: FontePermissao;
+  /** Assinalada como perigosa (eliminar, exportar dados sensíveis, aprovar, receber...). */
   perigosa: boolean;
   /** Tem âmbito configurável por vínculo (nenhum, só os meus, equipa, organização). */
   comAmbito: boolean;
@@ -44,9 +45,11 @@ export interface Utilizador {
   atividade: { data: string; texto: string }[];
 }
 
+/** Organização da PLATAFORMA (workorg) em que um utilizador tem vínculo e role; `pai` é o grupo a que pertence. */
 export interface Organizacao {
   id: string;
   nome: string;
+  pai?: string;
 }
 
 export interface ClientePortal {

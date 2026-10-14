@@ -7,11 +7,13 @@ import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { AbaPortal } from "@/components/utilizadores-perfis/AbaPortal";
 import { AbaRoles } from "@/components/utilizadores-perfis/AbaRoles";
 import { AbaUtilizadores } from "@/components/utilizadores-perfis/AbaUtilizadores";
-import { ORGANIZACOES_EXEMPLO, ROLES_EXEMPLO } from "@/components/utilizadores-perfis/catalogoExemplo";
+import { EDITOR_EXEMPLO, ORGANIZACOES_EXEMPLO, PERMISSOES, ROLES_EXEMPLO } from "@/components/utilizadores-perfis/catalogoExemplo";
 import { FichaRole } from "@/components/utilizadores-perfis/FichaRole";
 import { useUltimo } from "@/components/utilizadores-perfis/useUltimo";
 import { FichaUtilizador } from "@/components/utilizadores-perfis/FichaUtilizador";
-import { contarPessoasPorRole, filtrarUtilizadores, pessoasDaRole } from "@/components/utilizadores-perfis/logica";
+import {
+  contarPermissoesPorRole, contarUtilizadoresPorRole, filtrarUtilizadores, permissoesVisiveis, utilizadoresDaRole,
+} from "@/components/utilizadores-perfis/logica";
 import {
   FILTROS_INICIAIS, type Aberto, type FiltrosUtilizadores, type Separador,
 } from "@/components/utilizadores-perfis/tipos";
@@ -31,7 +33,10 @@ const UtilizadoresPerfis = () => {
 
   const visiveis = useMemo(() => filtrarUtilizadores(UTILIZADORES_EXEMPLO, filtros), [filtros]);
   const idsVisiveis = useMemo(() => visiveis.map((u) => u.id), [visiveis]);
-  const pessoasPorRole = useMemo(() => contarPessoasPorRole(UTILIZADORES_EXEMPLO, ROLES_EXEMPLO), []);
+  const utilizadoresPorRole = useMemo(() => contarUtilizadoresPorRole(UTILIZADORES_EXEMPLO, ROLES_EXEMPLO), []);
+  const permissoesPorRole = useMemo(
+    () => contarPermissoesPorRole(ROLES_EXEMPLO, permissoesVisiveis(PERMISSOES, EDITOR_EXEMPLO)), [],
+  );
 
   const utilizador = useUltimo(aberto?.tipo === "utilizador" ? UTILIZADORES_EXEMPLO.find((u) => u.id === aberto.id) ?? null : null);
   const role = useUltimo(aberto?.tipo === "role" ? ROLES_EXEMPLO.find((r) => r.id === aberto.id) ?? null : null);
@@ -40,14 +45,14 @@ const UtilizadoresPerfis = () => {
   const abrirRole = (id: string) => setAberto({ tipo: "role", id });
   const fechar = () => setAberto(null);
   /** Da aba Roles ou da ficha da role: mostra a lista de utilizadores já filtrada por essa role (todos os estados). */
-  const verPessoas = (roleId: string) => {
+  const verUtilizadores = (roleId: string) => {
     setFiltros({ ...FILTROS_INICIAIS, estado: "todos", roleId });
     setSeparador("utilizadores");
     fechar();
   };
 
   const subtitulo = t("usersProfiles.summary", {
-    users: UTILIZADORES_EXEMPLO.filter((u) => u.ativo).length, roles: ROLES_EXEMPLO.length,
+    users: UTILIZADORES_EXEMPLO.filter((u) => u.ativo).length, roles: ROLES_EXEMPLO.length, orgs: ORGANIZACOES_EXEMPLO.length,
   });
   const acaoPrimaria = separador === "utilizadores"
     ? { texto: t("usersProfiles.invite"), aviso: t("usersProfiles.example.invite") }
@@ -76,7 +81,10 @@ const UtilizadoresPerfis = () => {
           />
         </TabsContent>
         <TabsContent value="roles" className="mt-0">
-          <AbaRoles roles={ROLES_EXEMPLO} pessoas={pessoasPorRole} aoAbrirRole={abrirRole} aoVerPessoas={verPessoas} />
+          <AbaRoles
+            roles={ROLES_EXEMPLO} utilizadores={utilizadoresPorRole} permissoes={permissoesPorRole}
+            aoAbrirRole={abrirRole} aoVerUtilizadores={verUtilizadores}
+          />
         </TabsContent>
         <TabsContent value="portal" className="mt-0">
           <AbaPortal clientes={CLIENTES_PORTAL_EXEMPLO} organizacoes={ORGANIZACOES_EXEMPLO} />
@@ -87,8 +95,8 @@ const UtilizadoresPerfis = () => {
         idsVisiveis={idsVisiveis} aoFechar={fechar} aoIrPara={abrirUtilizador} aoAbrirRole={abrirRole}
       />
       <FichaRole
-        role={role} aberto={aberto?.tipo === "role"} pessoas={role ? pessoasDaRole(UTILIZADORES_EXEMPLO, role.id) : []}
-        aoFechar={fechar} aoAbrirUtilizador={abrirUtilizador} aoFiltrarPessoas={verPessoas}
+        role={role} aberto={aberto?.tipo === "role"} utilizadores={role ? utilizadoresDaRole(UTILIZADORES_EXEMPLO, role.id) : []}
+        aoFechar={fechar} aoAbrirUtilizador={abrirUtilizador} aoFiltrarUtilizadores={verUtilizadores}
       />
     </div>
   );

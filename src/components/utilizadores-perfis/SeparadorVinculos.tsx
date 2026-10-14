@@ -26,7 +26,7 @@ function AmbitosDoVinculo({ v, role }: { v: Vinculo; role: Role | undefined }) {
     <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
       {sensiveis.map((p) => (
         <div key={p.codigo} className="flex justify-between gap-3 border-b border-border/60 py-1">
-          <dt className="text-muted-foreground">{t(`usersProfiles.action.${p.acao}`)} · {t(`usersProfiles.module.${p.modulo}`)}</dt>
+          <dt className="text-muted-foreground">{p.nome}</dt>
           <dd className="font-medium text-foreground">{textoAmbito(t, v.ambitos[p.codigo] ?? "OWNED")}</dd>
         </div>
       ))}

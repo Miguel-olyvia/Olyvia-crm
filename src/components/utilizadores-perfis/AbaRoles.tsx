@@ -1,16 +1,20 @@
-import { Check, Minus } from "lucide-react";
+import { Check, Lock, Minus } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { Role } from "./tipos";
 
 interface AbaRolesProps {
   roles: Role[];
-  pessoas: Record<string, number>;
+  /** Quantos utilizadores tem cada role. */
+  utilizadores: Record<string, number>;
+  /** Quantas permissões (das visíveis) tem cada role. */
+  permissoes: Record<string, number>;
   aoAbrirRole: (id: string) => void;
   /** Filtra a lista de utilizadores por esta role e passa a essa aba. */
-  aoVerPessoas: (id: string) => void;
+  aoVerUtilizadores: (id: string) => void;
 }
 
 const CABECA = "h-11 px-3 text-xs font-medium text-muted-foreground";
@@ -28,8 +32,8 @@ export function SimNao({ sim }: { sim: boolean }) {
   );
 }
 
-/** A lista de roles: o nome abre a role; o número de pessoas leva à lista de utilizadores já filtrada. */
-export function AbaRoles({ roles, pessoas, aoAbrirRole, aoVerPessoas }: AbaRolesProps) {
+/** A lista de roles: o nome abre a role; o número de utilizadores leva à lista de utilizadores já filtrada. */
+export function AbaRoles({ roles, utilizadores, permissoes, aoAbrirRole, aoVerUtilizadores }: AbaRolesProps) {
   const { t } = useTranslation();
   return (
     <div className="overflow-x-auto rounded-md border">
@@ -38,7 +42,7 @@ export function AbaRoles({ roles, pessoas, aoAbrirRole, aoVerPessoas }: AbaRoles
           <TableRow>
             <TableHead className={CABECA}>{t("usersProfiles.roles.col.name")}</TableHead>
             <TableHead className={`${CABECA} hidden sm:table-cell`}>{t("usersProfiles.roles.col.code")}</TableHead>
-            <TableHead className={CABECA}>{t("usersProfiles.roles.col.people")}</TableHead>
+            <TableHead className={CABECA}>{t("usersProfiles.roles.col.users")}</TableHead>
             <TableHead className={`${CABECA} hidden md:table-cell`}>{t("usersProfiles.roles.col.permissions")}</TableHead>
             <TableHead className={CABECA}>{t("usersProfiles.roles.col.type")}</TableHead>
             <TableHead className={`${CABECA} hidden lg:table-cell`}>{t("usersProfiles.roles.col.signs")}</TableHead>
@@ -54,19 +58,32 @@ export function AbaRoles({ roles, pessoas, aoAbrirRole, aoVerPessoas }: AbaRoles
               </TableCell>
               <TableCell className={cn(CELULA, "hidden font-mono text-xs text-muted-foreground sm:table-cell")}>{r.codigo}</TableCell>
               <TableCell className={CELULA}>
-                {pessoas[r.id] > 0 ? (
+                {utilizadores[r.id] > 0 ? (
                   <button
-                    type="button" className={LIGACAO} onClick={() => aoVerPessoas(r.id)}
-                    aria-label={t("usersProfiles.roles.seePeople", { n: pessoas[r.id], name: r.nome })}
+                    type="button" className={LIGACAO} onClick={() => aoVerUtilizadores(r.id)}
+                    aria-label={t("usersProfiles.roles.seeUsers", { n: utilizadores[r.id], name: r.nome })}
                   >
-                    {pessoas[r.id]}
+                    {utilizadores[r.id]}
                   </button>
                 ) : (
                   <span className="px-2 tabular-nums text-muted-foreground">0</span>
                 )}
               </TableCell>
-              <TableCell className={cn(CELULA, "hidden tabular-nums md:table-cell")}>{r.permissoes.length}</TableCell>
-              <TableCell className={CELULA}>{r.sistema ? t("usersProfiles.roles.system") : t("usersProfiles.roles.custom")}</TableCell>
+              <TableCell className={cn(CELULA, "hidden md:table-cell")}>
+                {r.codigo === "super_admin"
+                  ? <Badge variant="default">{t("usersProfiles.roles.fullAccess")}</Badge>
+                  : <Badge variant="secondary" className="tabular-nums">{t("usersProfiles.roles.permissionsBadge", { n: permissoes[r.id] })}</Badge>}
+              </TableCell>
+              <TableCell className={CELULA}>
+                {r.sistema ? (
+                  <Badge variant="outline" className="gap-1">
+                    <Lock className="h-3 w-3" aria-hidden="true" />
+                    {t("usersProfiles.roles.system")}
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">{t("usersProfiles.roles.custom")}</Badge>
+                )}
+              </TableCell>
               <TableCell className={cn(CELULA, "hidden lg:table-cell")}><SimNao sim={r.podeAssinar} /></TableCell>
             </TableRow>
           ))}

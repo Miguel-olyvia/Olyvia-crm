@@ -5,7 +5,7 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AvatarPessoa } from "@/components/pessoas/AvatarPessoa";
 import { ehProtegido, resumoAmbito } from "./logica";
-import { ChipRole, TagEstado } from "./pecas";
+import { ChipVinculo, MaisVinculos, TagEstado, type VinculoVisivel } from "./pecas";
 import { textoAcesso, textoAmbito } from "./textos";
 import type { Organizacao, Role, Utilizador } from "./tipos";
 
@@ -20,15 +20,20 @@ interface LinhaUtilizadorProps {
 const CELULA = "px-3 py-0 align-middle text-sm";
 const MAX_CHIPS = 1;
 
-/** Uma linha compacta (cerca de 45 px). O nome é o botão que abre a ficha; os chips de role abrem a role. */
+/** Os vínculos ativos com organização e role conhecidas, pela ordem do utilizador (como /users, que só mostra os ativos). */
+function vinculosVisiveis(u: Utilizador, roles: Role[], organizacoes: Organizacao[]): VinculoVisivel[] {
+  return u.vinculos.flatMap((v) => {
+    const role = roles.find((r) => r.id === v.roleId);
+    const organizacao = organizacoes.find((o) => o.id === v.organizacaoId);
+    return v.ativo && role && organizacao ? [{ organizacao, role }] : [];
+  });
+}
+
+/** Uma linha compacta (cerca de 45 px). O nome é o botão que abre a ficha; o chip de organização e role abre a role. */
 export function LinhaUtilizador({ utilizador: u, roles, organizacoes, aoAbrir, aoAbrirRole }: LinhaUtilizadorProps) {
   const { t } = useTranslation();
-  const vinculos = u.vinculos.flatMap((v) => {
-    const role = roles.find((r) => r.id === v.roleId);
-    return role ? [{ v, role, org: organizacoes.find((o) => o.id === v.organizacaoId)?.nome ?? v.organizacaoId }] : [];
-  });
-  const visiveis = vinculos.slice(0, MAX_CHIPS);
-  const resto = vinculos.slice(MAX_CHIPS);
+  const vinculos = vinculosVisiveis(u, roles, organizacoes);
+  const resto = vinculos.length - MAX_CHIPS;
   return (
     <TableRow className="h-[45px] cursor-pointer" onClick={() => aoAbrir(u.id)}>
       <TableCell className={CELULA}>
@@ -52,19 +57,10 @@ export function LinhaUtilizador({ utilizador: u, roles, organizacoes, aoAbrir, a
         </button>
       </TableCell>
       <TableCell className={CELULA}>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {visiveis.map(({ v, role, org }) => (
-            <span key={v.organizacaoId} className="inline-flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">{org}</span>
-              <ChipRole role={role} aoAbrir={aoAbrirRole} />
-            </span>
-          ))}
-          {resto.length > 0 && (
-            <span className="text-xs font-medium text-foreground" title={resto.map((r) => `${r.org}: ${r.role.nome}`).join(", ")}>
-              <span aria-hidden="true">+{resto.length}</span>
-              <span className="sr-only">{t("usersProfiles.moreLinks", { n: resto.length })}</span>
-            </span>
-          )}
+        <div className="flex items-center gap-1">
+          {vinculos.slice(0, MAX_CHIPS).map((v) => <ChipVinculo key={v.organizacao.id} vinculo={v} aoAbrir={aoAbrirRole} />)}
+          {vinculos.length === 0 && <span className="text-muted-foreground">-</span>}
+          {resto > 0 && <MaisVinculos vinculos={vinculos} restantes={resto} />}
         </div>
       </TableCell>
       <TableCell className={cn(CELULA, "hidden md:table-cell")}>{textoAmbito(t, resumoAmbito(u, roles))}</TableCell>
