@@ -20,6 +20,10 @@ import {
   responderTroca, servicosFiltrados, tocarServico, trocaResolvida, vizinho,
 } from "./selecao";
 import { SelecaoGuiada } from "./SelecaoGuiada";
+import { MotionGlobalConfig } from "framer-motion";
+
+// as animações (framer-motion) acabam logo nos testes: o passo que sai não fica no DOM e os números não contam
+MotionGlobalConfig.skipAnimations = true;
 import { GuiaPassoCtx } from "./guiaPasso";
 
 const prodN = (n: string) => lerCatalogo().produtos.find((p) => p.n === n)!;

@@ -4,7 +4,8 @@
 //   sozinho) → Mais produtos → Escolhas do cliente → O que o cliente fornece, por serviço (só com "Sim") → Resumo.
 // Os cartões ligam e desligam ao toque (aria-pressed); a quantidade vem das medidas ou é 1, escrita no cartão
 // ("12 m² · da visita"), com um "Mudar" discreto no cartão escolhido. A lógica está em selecao.ts e forneceCliente.ts.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useIsPresent } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ import {
 } from "./selecao";
 import { CartaoProduto, CartaoResposta, CartaoServico, FiltrosFila, Pesquisa, QtdMudar } from "./CartoesSelecao";
 import { useGuiaPasso } from "./guiaPasso";
+import { Brilho, Contagem, MOLA_CARTAO, Progresso, VistoDesenho, cascata, deslize, useReduzir, useUmaVez, ANIMAR_ATE } from "./movimento";
 
 type P = Ctx & { d: Negocio; simples?: boolean };
 const PRIMEIROS_SVC = 6, PRIMEIROS_PROD = 6, PRIMEIROS_FORN = 6, MAIS = 12;
@@ -68,82 +70,113 @@ export function SelecaoGuiada(ctx: P) {
   const atual = passos[i];
   const passosRef = useRef(passos);
   passosRef.current = passos;
+  // a direção da passagem: 1 avança (o passo novo entra da direita), -1 volta (entra da esquerda)
+  const [dir, setDir] = useState(1);
+  const reduzir = useReduzir();
 
   // enquanto está aberto, o "Seguinte" é deste passo (a fase esconde o "Continuar" e não salta sozinha)
   useEffect(() => { guia?.setGuiado(true); return () => guia?.setGuiado(false); }, [guia]);
 
-  // avançar sozinho (depois de "Mantém" ou de escolher o produto da troca); qualquer outro toque cancela
+  // avançar sozinho (depois de "Mantém" ou de escolher o produto da troca): primeiro o sinal de "feito" (o visto no
+  // progresso, cerca de 0,6 s), depois o deslize. Qualquer outro toque cancela; o "Voltar" desfaz.
   const auto = useRef<number | undefined>();
-  const cancelar = () => { if (auto.current) { window.clearTimeout(auto.current); auto.current = undefined; } };
-  useEffect(() => cancelar, []);
+  const [feito, setFeito] = useState<string | null>(null);
+  const cancelar = () => { if (auto.current) { window.clearTimeout(auto.current); auto.current = undefined; setFeito(null); } };
+  useEffect(() => () => { if (auto.current) window.clearTimeout(auto.current); }, []);
   const avancarSozinho = (de: string) => {
     cancelar();
+    setFeito(de);
     auto.current = window.setTimeout(() => {
       auto.current = undefined;
+      setFeito(null);
+      setDir(1);
       setK((cur) => (cur === de ? vizinho(passosRef.current, de, 1) ?? cur : cur));
-    }, 550);
+    }, 620);
   };
-  const ir = (kk: string) => { cancelar(); setK(kk); };
+  const ir = (kk: string) => {
+    cancelar();
+    const j = passos.findIndex((p) => p.k === kk);
+    setDir(j >= 0 && j < i ? -1 : 1);
+    setK(kk);
+  };
   const seguinte = () => { const n = vizinho(passos, atual.k, 1); if (n) ir(n); else guia?.avancar(); };
   const anterior = () => { const n = vizinho(passos, atual.k, -1); if (n) ir(n); else guia?.recuar(); };
 
-  // ao mudar de passo: o topo do passo à vista e o foco no título
+  // ao mudar de passo: o topo do passo à vista (só se ficou acima do ecrã) e o foco no título do passo novo
   const topo = useRef<HTMLDivElement>(null);
-  const tit = useRef<HTMLHeadingElement>(null);
   const montado = useRef(false);
+  const idTit = (kk: string) => `passo-${d.id}-${kk.replace(/[^a-z0-9-]/gi, "_")}`;
   useEffect(() => {
     if (!montado.current) { montado.current = true; return; }
-    topo.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
-    tit.current?.focus({ preventScroll: true });
-  }, [atual.k]);
+    const caixa = topo.current?.getBoundingClientRect();
+    if (caixa && caixa.top < 0) topo.current?.scrollIntoView?.({ block: "start", behavior: reduzir ? "auto" : "smooth" });
+    document.getElementById(idTit(atual.k))?.focus({ preventScroll: true });
+  }, [atual.k]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const r = resumoNecessidades(S, d, orcLinhas(d, S));
   const fim = atual.tipo === "resumo";
   const titulo = atual.tipo === "pergunta" && atual.o ? atual.o.pergunta ?? `Escolha ${atual.titulo.toLowerCase()}` : atual.titulo;
   const sub = atual.tipo === "pergunta" && atual.o ? `Para ${nomeCurto(nomeSvc(S, atual.o.sid)).toLowerCase()}`
     : atual.tipo === "servicos" ? "Toque para ligar ou desligar." : atual.tipo === "fornece" ? "Por serviço: toque no que o cliente traz. Sai do preço; a mão de obra e a instalação ficam." : null;
+  const variantes = deslize(reduzir);
 
   return (
     <div ref={topo} className="scroll-mt-4" onPointerDownCapture={cancelar} onKeyDownCapture={cancelar}>
-      {/* progresso compacto */}
-      <div className="flex items-center gap-3">
-        <div className="flex flex-1 gap-1" aria-hidden="true">
-          {passos.map((p, j) => <span key={p.k} className={cn("h-1.5 flex-1 rounded-full transition-colors duration-300", j <= i ? "bg-primary" : "bg-muted")} />)}
-        </div>
-        <p className="shrink-0 text-sm tabular-nums text-muted-foreground">{i + 1} de {passos.length}</p>
+      <Progresso total={passos.length} atual={i} feito={feito === atual.k} rotulo="Passos das necessidades" />
+      {/* o nome do passo para o leitor de ecrã (o foco vai para o título; isto confirma onde se está) */}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{`Passo ${i + 1} de ${passos.length}: ${titulo}`}</p>
+
+      {/* os passos deslizam: avançar para a esquerda, voltar para a direita (o que sai fica inerte e escondido do leitor) */}
+      <div className="relative mt-5 [overflow-x:clip]">
+        <AnimatePresence initial={false} mode="popLayout" custom={dir}>
+          <motion.div key={atual.k} custom={dir} variants={variantes} initial="entra" animate="fica" exit="sai" className="w-full">
+            <Saindo>
+              <h3 id={idTit(atual.k)} tabIndex={-1}
+                className="rounded-md text-[22px] font-semibold leading-tight tracking-[-0.01em] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-4 focus-visible:ring-offset-background">
+                {titulo}
+              </h3>
+              {sub && <p className="mt-1.5 text-[15px] leading-snug text-muted-foreground">{sub}</p>}
+              <div className="mt-5">
+                {atual.tipo === "escolhas" && <PassoEscolhas ctx={ctx} />}
+                {atual.tipo === "servicos" && <PassoServicos ctx={ctx} K={K} />}
+                {atual.tipo === "pergunta" && atual.o && <PassoPergunta key={atual.o.sid} ctx={ctx} K={K} o={atual.o} resolvido={() => avancarSozinho(atual.k)} />}
+                {atual.tipo === "outros" && <PassoOutros ctx={ctx} K={K} obr={obr} />}
+                {atual.tipo === "fornece" && <PassoFornece ctx={ctx} obr={obr} />}
+                {atual.tipo === "resumo" && <PassoResumo ctx={ctx} K={K} passos={passos} obr={obr} ir={ir} />}
+              </div>
+            </Saindo>
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      <div key={atual.k} className="mt-4 animate-in fade-in-0 duration-200">
-        <h3 ref={tit} tabIndex={-1} className="text-xl font-semibold leading-snug text-foreground outline-none">{titulo}</h3>
-        {sub && <p className="mt-1 text-[15px] text-muted-foreground">{sub}</p>}
-        <div className="mt-4">
-          {atual.tipo === "escolhas" && <PassoEscolhas ctx={ctx} />}
-          {atual.tipo === "servicos" && <PassoServicos ctx={ctx} K={K} />}
-          {atual.tipo === "pergunta" && atual.o && <PassoPergunta key={atual.o.sid} ctx={ctx} K={K} o={atual.o} resolvido={() => avancarSozinho(atual.k)} />}
-          {atual.tipo === "outros" && <PassoOutros ctx={ctx} K={K} obr={obr} />}
-          {atual.tipo === "fornece" && <PassoFornece ctx={ctx} obr={obr} />}
-          {atual.tipo === "resumo" && <PassoResumo ctx={ctx} K={K} passos={passos} obr={obr} ir={ir} />}
-        </div>
-      </div>
-
-      {/* "Seguinte" fixo em baixo, ao alcance do polegar (no telemóvel, o padding do main já deixa o menu de fora) */}
-      <div className="sticky bottom-0 z-20 -mx-4 mt-6 flex items-center gap-2 border-t border-border bg-background/95 px-4 py-3 backdrop-blur md:mx-0 md:px-0">
-        <button type="button" onClick={anterior} aria-label="Voltar"
-          className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-input bg-card text-foreground transition-colors hover:border-foreground/40">
+      {/* "Seguinte" fixo em baixo, ao alcance do polegar (no telemóvel, o padding do main já deixa o menu de fora;
+          no tablet, a área segura do iPhone/iPad). O total conta até ao valor novo. */}
+      <div className="sticky bottom-0 z-20 -mx-4 mt-8 flex items-center gap-3 border-t border-border/70 bg-background/80 px-4 py-3 backdrop-blur-md backdrop-saturate-150 md:mx-0 md:px-0 md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <motion.button type="button" onClick={anterior} aria-label="Voltar" whileTap={{ scale: 0.94 }} transition={MOLA_CARTAO}
+          className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-input bg-card text-foreground shadow-[0_1px_2px_hsl(var(--foreground)/0.05)] outline-none transition-colors hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
           <ChevronLeft className="h-5 w-5" aria-hidden="true" />
-        </button>
-        <p className="min-w-0 flex-1 text-sm leading-tight text-muted-foreground" aria-live="polite">
-          <span className="block font-semibold tabular-nums text-foreground">{eur(r.total)} €</span>
-          <span className="block truncate">{plural(r.servicos, "serviço", "serviços")} · {plural(r.produtos, "produto", "produtos")}</span>
-        </p>
+        </motion.button>
+        <div className="min-w-0 flex-1 leading-tight">
+          <p className="sr-only" aria-live="polite">{`${eur(r.total)} € estimado, ${plural(r.servicos, "serviço", "serviços")}, ${plural(r.produtos, "produto", "produtos")}`}</p>
+          <p aria-hidden="true" className="text-[17px] font-semibold text-foreground"><Contagem valor={r.total} fmt={(x) => `${eur(x)} €`} /></p>
+          <p aria-hidden="true" className="truncate text-sm text-muted-foreground">{plural(r.servicos, "serviço", "serviços")} · {plural(r.produtos, "produto", "produtos")}</p>
+        </div>
         {(!fim || guia) && (
-          <Button size="lg" className="h-12 shrink-0 px-6" onClick={seguinte}>
+          <Button size="lg" className="h-12 shrink-0 rounded-xl px-5 text-[15px] shadow-[0_6px_16px_-6px_hsl(var(--primary)/0.6)]" onClick={seguinte}>
             {fim ? "Continuar" : "Seguinte"}<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
           </Button>
         )}
       </div>
     </div>
   );
+}
+
+/** O passo que está a sair: inerte e escondido do leitor de ecrã (e dos testes), enquanto desliza para fora. */
+function Saindo({ children }: { children: ReactNode }) {
+  const presente = useIsPresent();
+  // (React 18 não conhece o "inert": passa como atributo com o texto vazio)
+  const inerte = presente ? {} : ({ inert: "" } as Record<string, string>);
+  return <div aria-hidden={presente ? undefined : true} {...inerte} className={presente ? undefined : "pointer-events-none"}>{children}</div>;
 }
 
 /* ================================================================== Escolhas do cliente */

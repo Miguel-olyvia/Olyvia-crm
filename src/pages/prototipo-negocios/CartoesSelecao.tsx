@@ -1,39 +1,78 @@
 // As peças da seleção guiada (14/10/2026): cartões que ligam e desligam ao toque (sem "+"), com o nome em 2 linhas no máximo,
 // a quantidade escrita no cartão com um "Mudar" discreto, os cartões grandes de resposta e a fila de filtros por baixo da pesquisa
 // (desliza com o dedo, a arrastar com o rato e com a roda; sem barra visível).
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Link2, Search } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { motion } from "framer-motion";
+import { Link2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { eur, nfmt } from "./motor";
 import { numero } from "./pecas";
 import { IconeServico, Ilustracao, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
+import { MOLA, MOLA_CARTAO, VistoDesenho, cascata, useReduzir } from "./movimento";
 
-/** O visto do cartão escolhido (o círculo vazio quando não está). */
+/** O visto do cartão escolhido (desenha-se ao ligar; o círculo vazio quando não está); "so" = vem com um produto. */
 function Visto({ on, so }: { on: boolean; so?: boolean }) {
+  if (so) return <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center text-primary"><Link2 className="h-4 w-4" /></span>;
+  return <VistoDesenho on={on} />;
+}
+
+/** A camada do acento (borda de 2 px, fundo suave e sombra): aparece e some só com opacity, sem repintar a caixa. */
+function Acento({ on }: { on: boolean }) {
+  const reduzir = useReduzir();
   return (
-    <span aria-hidden="true" className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full border transition-colors duration-150",
-      so ? "border-transparent text-primary" : on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>
-      {so ? <Link2 className="h-4 w-4" /> : on && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+    <motion.span aria-hidden="true" initial={false} animate={{ opacity: on ? 1 : 0 }} transition={{ duration: reduzir ? 0 : 0.18 }}
+      className="pointer-events-none absolute -inset-px rounded-xl border-2 border-primary bg-primary/[0.06] shadow-[0_8px_24px_-12px_hsl(var(--primary)/0.55)]" />
+  );
+}
+
+/**
+ * A caixa do cartão. "animar" reorganiza a grelha com animação quando se filtra (layout, só nas listas curtas);
+ * "entrada" é a cascata (movimento.tsx: cascata).
+ */
+function Caixa({ on, falta, title, animar, entrada, children }: {
+  on: boolean; falta?: boolean; title: string; animar?: boolean; entrada?: ReturnType<typeof cascata>; children: ReactNode;
+}) {
+  const reduzir = useReduzir();
+  return (
+    <motion.li layout={animar && !reduzir ? "position" : false} transition={MOLA} {...(entrada ?? { initial: false })}
+      className={cn("relative flex flex-col rounded-xl border bg-card shadow-[0_1px_2px_hsl(var(--foreground)/0.05)]", falta ? "border-destructive" : "border-border")}
+      title={title}>
+      <Acento on={on} />
+      {children}
+    </motion.li>
+  );
+}
+const TOQUE = "relative flex w-full rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed";
+/** O "press": escala 0,97 ao tocar (a mola dos cartões). */
+const PRESS = { whileTap: { scale: 0.97 }, transition: MOLA_CARTAO };
+
+/** A figura do cartão: no escolhido, o fundo passa ao acento suave e a figura cresce um pouco (realce subtil). */
+function Figura({ on, children, className }: { on: boolean; children: ReactNode; className: string }) {
+  const reduzir = useReduzir();
+  return (
+    <span className={cn("relative grid shrink-0 place-items-center overflow-hidden rounded-lg bg-muted/70", className)}>
+      <motion.span aria-hidden="true" className="absolute inset-0 bg-primary/[0.12]" initial={false} animate={{ opacity: on ? 1 : 0 }} transition={{ duration: reduzir ? 0 : 0.2 }} />
+      <motion.span className={cn("relative grid place-items-center transition-colors duration-200", on ? "text-primary" : "text-muted-foreground")} initial={false}
+        animate={{ scale: on && !reduzir ? 1.08 : 1, rotate: on && !reduzir ? -3 : 0 }} transition={MOLA_CARTAO}>
+        {children}
+      </motion.span>
     </span>
   );
 }
 
-const CAIXA = (on: boolean) => cn("relative flex flex-col rounded-xl border bg-card transition-colors duration-150",
-  on ? "border-primary bg-primary/[0.06] ring-1 ring-primary" : "border-border");
-const TOQUE = "flex w-full rounded-xl text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 disabled:cursor-not-allowed";
-
 /* ------------------------------------------------------------------ serviço */
-export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, so, desativado, onTocar, children, falta, compacto }: {
+export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, so, desativado, onTocar, children, falta, compacto, animar, entrada }: {
   nome: string; nomeCompleto: string; linha2?: string | null; icone: IconeServicoKey; figura?: ReactNode; on: boolean; so?: boolean; desativado?: boolean;
   onTocar: () => void; children?: ReactNode; falta?: boolean;
   /** Mais baixo (o fornece por serviço): a figura de 32 px e menos espaço. */
   compacto?: boolean;
+  /** Reorganiza-se com animação quando a grelha muda (listas curtas). */
+  animar?: boolean;
+  entrada?: ReturnType<typeof cascata>;
 }) {
   const corpo = (
     <>
-      <span className={cn("grid shrink-0 place-items-center rounded-lg transition-colors", compacto ? "h-8 w-8" : "h-10 w-10", on ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
-        {figura ?? <IconeServico k={icone} />}
-      </span>
+      <Figura on={on} className={compacto ? "h-8 w-8" : "h-10 w-10"}>{figura ?? <IconeServico k={icone} />}</Figura>
       <span className="min-w-0 flex-1">
         <span className="line-clamp-2 text-[15px] font-medium leading-snug text-foreground">{nome}</span>
         {linha2 && <span className="mt-0.5 block truncate text-sm leading-snug text-muted-foreground">{linha2}</span>}
@@ -43,29 +82,29 @@ export function CartaoServico({ nome, nomeCompleto, linha2, icone, figura, on, s
   );
   const rotulo = [nomeCompleto, linha2].filter(Boolean).join(". ");
   return (
-    <li className={cn(CAIXA(on), falta && "border-destructive")} title={nomeCompleto}>
+    <Caixa on={on} falta={falta} title={nomeCompleto} animar={animar} entrada={entrada}>
       {so ? (
-        <div className="flex min-h-[64px] items-center gap-3 p-3" aria-label={rotulo} role="group">{corpo}</div>
+        <div className="relative flex min-h-[64px] items-center gap-3 p-3" aria-label={rotulo} role="group">{corpo}</div>
       ) : (
-        <button type="button" aria-pressed={on} disabled={desativado} onClick={onTocar} aria-label={rotulo}
-          className={cn(TOQUE, "items-center gap-3", compacto ? "min-h-[52px] px-3 py-2" : "min-h-[64px] p-3")}>{corpo}</button>
+        <motion.button type="button" aria-pressed={on} disabled={desativado} onClick={onTocar} aria-label={rotulo} {...(desativado ? {} : PRESS)}
+          className={cn(TOQUE, "items-center gap-3", compacto ? "min-h-[52px] px-3 py-2" : "min-h-[64px] p-3")}>{corpo}</motion.button>
       )}
-      {children}
-    </li>
+      {children && <div className="relative">{children}</div>}
+    </Caixa>
   );
 }
 
 /* ------------------------------------------------------------------ produto */
-export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on, trazInstalacao, onTocar, children }: {
+export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on, trazInstalacao, onTocar, children, animar, entrada }: {
   nome: string; nomeCompleto: string; detalhe?: string | null; preco: number; un: string; img: IlustracaoKey; on: boolean; trazInstalacao?: boolean;
-  onTocar: () => void; children?: ReactNode;
+  onTocar: () => void; children?: ReactNode; animar?: boolean; entrada?: ReturnType<typeof cascata>;
 }) {
   const rotulo = [nomeCompleto, detalhe, `${eur(preco)} € por ${un}`, trazInstalacao ? "traz a instalação" : null].filter(Boolean).join(". ");
   return (
-    <li className={CAIXA(on)} title={nomeCompleto}>
-      <button type="button" aria-pressed={on} onClick={onTocar} aria-label={rotulo} className={cn(TOQUE, "h-full flex-col gap-2 p-2.5")}>
+    <Caixa on={on} title={nomeCompleto} animar={animar} entrada={entrada}>
+      <motion.button type="button" aria-pressed={on} onClick={onTocar} aria-label={rotulo} {...PRESS} className={cn(TOQUE, "h-full flex-col gap-2 p-3")}>
         <span className="flex w-full items-start justify-between gap-2">
-          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-lg bg-muted/70"><Ilustracao k={img} className="h-11 w-11" /></span>
+          <Figura on={on} className="h-14 w-14"><Ilustracao k={img} className="h-11 w-11" /></Figura>
           <Visto on={on} />
         </span>
         <span className="line-clamp-2 w-full text-[15px] font-medium leading-snug text-foreground">{nome}</span>
@@ -74,9 +113,9 @@ export function CartaoProduto({ nome, nomeCompleto, detalhe, preco, un, img, on,
           <span>{eur(preco)} €<span className="text-sm text-muted-foreground"> / {un}</span></span>
           {trazInstalacao && <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
         </span>
-      </button>
-      {children}
-    </li>
+      </motion.button>
+      {children && <div className="relative">{children}</div>}
+    </Caixa>
   );
 }
 
@@ -127,15 +166,15 @@ export function QtdMudar({ id, valor, un, nome, texto, onMudar, recuo }: {
 /* ------------------------------------------------------------------ respostas grandes */
 export function CartaoResposta({ on, onTocar, titulo, sub, disabled }: { on: boolean; onTocar: () => void; titulo: string; sub?: string; disabled?: boolean }) {
   return (
-    <button type="button" aria-pressed={on} onClick={onTocar} disabled={disabled}
-      className={cn("flex min-h-16 w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 disabled:opacity-70",
-        on ? "border-primary bg-primary/[0.06] ring-1 ring-primary" : "border-input bg-card hover:border-foreground/40")}>
-      <span className="min-w-0 flex-1">
+    <motion.button type="button" aria-pressed={on} onClick={onTocar} disabled={disabled} {...PRESS}
+      className="relative flex min-h-16 w-full items-center gap-3 rounded-xl border border-input bg-card px-4 py-3 text-left shadow-[0_1px_2px_hsl(var(--foreground)/0.05)] outline-none transition-[border-color] duration-150 hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-70">
+      <Acento on={on} />
+      <span className="relative min-w-0 flex-1">
         <span className="block text-base font-semibold text-foreground">{titulo}</span>
         {sub && <span className="block text-sm text-muted-foreground">{sub}</span>}
       </span>
-      <Visto on={on} />
-    </button>
+      <span className="relative"><Visto on={on} /></span>
+    </motion.button>
   );
 }
 
@@ -159,6 +198,8 @@ export function Pesquisa({ valor, onMudar, rotulo, ph }: { valor: string; onMuda
  */
 export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string[]; ativo: string | null; onMudar: (v: string | null) => void; rotulo: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  const idFila = useId();
+  const reduzir = useReduzir();
   const arrasto = useRef<{ x: number; sl: number; id: number; moveu: boolean } | null>(null);
   const engolir = useRef(false);
   const [pontas, setPontas] = useState({ esq: false, dir: false });
@@ -189,8 +230,12 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string
   }, [medir, opcoes.length]);
 
   if (opcoes.length < 2) return null;
-  const b = (on: boolean) => cn("inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-4 text-[15px] transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-inset",
-    on ? "border-primary bg-primary font-medium text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40");
+  // o filtro ativo: o fundo do acento desliza de um filtro para o outro (layoutId), o texto muda de cor por baixo
+  const b = (on: boolean) => cn("relative inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-4 text-[15px] transition-colors duration-200 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    on ? "border-primary font-medium text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40");
+  const fundo = (on: boolean) => on && (
+    <motion.span layoutId={idFila} aria-hidden="true" className="absolute -inset-px rounded-full bg-primary" transition={reduzir ? { duration: 0 } : MOLA} />
+  );
   // o esbatimento só na ponta que tem mais conteúdo
   const mascara = pontas.esq || pontas.dir
     ? `linear-gradient(to right, ${pontas.esq ? "transparent 0, #000 32px" : "#000 0"}, ${pontas.dir ? "#000 calc(100% - 32px), transparent 100%" : "#000 100%"})`
@@ -227,9 +272,9 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo }: { opcoes: string
       onClickCapture={(e) => { if (engolir.current) { e.preventDefault(); e.stopPropagation(); engolir.current = false; } }}
       onFocus={(e) => { if (e.target !== ref.current) (e.target as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}
       onDragStart={(e) => e.preventDefault()}>
-      <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>Todos</button>
+      <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>{fundo(!ativo)}<span className="relative">Todos</span></button>
       {opcoes.map((o) => (
-        <button key={o} type="button" aria-pressed={ativo === o} onClick={() => onMudar(ativo === o ? null : o)} className={b(ativo === o)}>{o}</button>
+        <button key={o} type="button" aria-pressed={ativo === o} onClick={() => onMudar(ativo === o ? null : o)} className={b(ativo === o)}>{fundo(ativo === o)}<span className="relative">{o}</span></button>
       ))}
     </div>
   );
