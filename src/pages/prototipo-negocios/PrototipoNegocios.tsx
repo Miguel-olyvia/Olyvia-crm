@@ -5,6 +5,7 @@ import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, 
 import {
   Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import "./prototipo.css";
@@ -109,6 +110,14 @@ export default function PrototipoNegocios() {
     document.getElementById(alvo)?.scrollIntoView({ behavior: "smooth", block: alvo === "verif" ? "center" : "start" });
   });
   useEffect(() => { S.deals.forEach((d) => (d.fresh = false)); });
+  // iPhone: só com viewport-fit=cover é que env(safe-area-inset-*) tem valor; liga-se enquanto o protótipo está aberto
+  useEffect(() => {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    if (!meta) return;
+    const antes = meta.content;
+    if (!/viewport-fit/.test(antes)) meta.content = antes + ", viewport-fit=cover";
+    return () => { meta.content = antes; };
+  }, []);
 
   useEffect(() => {
     const prev = document.title;
@@ -255,7 +264,7 @@ export default function PrototipoNegocios() {
     const listaNova = true; // na proposta simples todos os ecrãs são novos
     const seletorVersao = <SeletorVersao versao={versao} mudar={mudarVersao} />;
     return (
-      <div className={cn("pn calma fixed inset-0 flex bg-background text-foreground", S.leitura && "leitura")}>
+      <div className={cn("pn calma fixed inset-0 flex bg-background pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-foreground", S.leitura && "leitura")}>
         <aside className="hidden w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-card px-3 py-5 md:flex">
           <div className="flex items-center gap-2.5 px-3 pb-6">
             <img src={mascote} alt="" className="h-8 w-8 object-contain" />
@@ -293,7 +302,8 @@ export default function PrototipoNegocios() {
               {(Object.keys(PAPEIS) as Papel[]).map((k) => <option key={k} value={k}>{PAPEIS[k].n}</option>)}
             </select>
           </header>
-          <main ref={mainRef} className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
+          {/* layoutScroll: as animações de layout (cartões ao filtrar) contam com o scroll deste contentor */}
+          <motion.main ref={mainRef} layoutScroll className="min-h-0 flex-1 overflow-auto pb-[calc(4rem_+_env(safe-area-inset-bottom))] md:pb-0">
             {ativoInv ? (
               <div className="h-full animate-in fade-in-0 duration-200">
                 <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} alvoTopo={alvoTopo} /></Suspense>
@@ -302,10 +312,10 @@ export default function PrototipoNegocios() {
 
               {antigo && !listaNova ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">{corpo}</div> : corpo}
             </div>}
-          </main>
+          </motion.main>
           {mais && (
             <div className="fixed inset-0 z-40 bg-foreground/20 md:hidden animate-in fade-in-0" onClick={() => setMais(false)}>
-              <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-16 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
+              <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-[calc(4rem_+_env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
                   {[...pessoas.map(([v]) => v), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
@@ -323,7 +333,7 @@ export default function PrototipoNegocios() {
               </div>
             </div>
           )}
-          <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">
+          <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
             {((soV2 ? ["hoje", "negocios", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
               <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>

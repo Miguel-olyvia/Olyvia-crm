@@ -423,7 +423,7 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
         <LayoutGroup>
           <ul className="space-y-1" aria-label="Serviços">
             {grupos.map((g) => (
-              <li key={g.fase} role="presentation">
+              <motion.li key={g.fase} role="presentation" layout={animar && !reduzir ? "position" : false} transition={MOLA}>
                 <TituloFase nome={g.nome} escolhidos={escolhidosNaFase(g.fase)} />
                 <ul className={GRELHA_SVC} role="list" aria-label={g.nome}>
                   {g.itens.map((t) => {
@@ -444,7 +444,7 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
                     );
                   })}
                 </ul>
-              </li>
+              </motion.li>
             ))}
           </ul>
         </LayoutGroup>
@@ -513,10 +513,10 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
         <LayoutGroup>
           <ul className="space-y-1" aria-label={rotulo}>
             {grupos.map((g) => (
-              <li key={g.fase} role="presentation">
+              <motion.li key={g.fase} role="presentation" layout={animar && !reduzir ? "position" : false} transition={MOLA}>
                 <TituloFase nome={g.nome} />
                 <ul className={GRELHA_PROD} role="list" aria-label={g.nome}>{g.itens.map(cartao)}</ul>
-              </li>
+              </motion.li>
             ))}
           </ul>
         </LayoutGroup>

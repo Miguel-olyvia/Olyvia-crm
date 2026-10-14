@@ -253,7 +253,8 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
     ? `linear-gradient(to right, ${pontas.esq ? "transparent 0, #000 32px" : "#000 0"}, ${pontas.dir ? "#000 calc(100% - 32px), transparent 100%" : "#000 100%"})`
     : undefined;
   return (
-    <div ref={ref} role="group" aria-label={rotulo} data-sem-gesto="" data-esq={pontas.esq || undefined} data-dir={pontas.dir || undefined}
+    // layoutScroll: o fundo do filtro ativo (layoutId) mede-se bem com a fila deslocada
+    <motion.div ref={ref} layoutScroll role="group" aria-label={rotulo} data-sem-gesto="" data-esq={pontas.esq || undefined} data-dir={pontas.dir || undefined}
       style={{ maskImage: mascara, WebkitMaskImage: mascara, msOverflowStyle: "none", scrollbarWidth: "none" }}
       className={cn("-mx-1 flex min-w-0 select-none gap-2 overflow-x-auto overscroll-x-contain px-1 py-0.5 [&::-webkit-scrollbar]:hidden",
         aArrastar ? "cursor-grabbing" : "cursor-grab")}
@@ -283,7 +284,7 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
       // o clique que fecha um arrasto não ativa o filtro
       onClickCapture={(e) => { if (engolir.current) { e.preventDefault(); e.stopPropagation(); engolir.current = false; } }}
       onFocus={(e) => { if (e.target !== ref.current) (e.target as HTMLElement).scrollIntoView?.({ block: "nearest", inline: "nearest" }); }}
-      onDragStart={(e) => e.preventDefault()}>
+      onDragStartCapture={(e) => e.preventDefault()}>
       {prefixo}
       {opcoes.length >= 2 && <>
       <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>{fundo(!ativo)}<span className="relative">Todos</span></button>
@@ -291,6 +292,6 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
         <button key={o} type="button" aria-pressed={ativo === o} onClick={() => onMudar(ativo === o ? null : o)} className={b(ativo === o)}>{fundo(ativo === o)}<span className="relative">{o}</span></button>
       ))}
       </>}
-    </div>
+    </motion.div>
   );
 }

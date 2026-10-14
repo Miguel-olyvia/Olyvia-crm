@@ -651,3 +651,26 @@ O pedido do Ruben: "não falta na ficha do serviço se ele gera ou não entulho?
 - **Ficha do serviço (V1):** secção **Entulho** (Não gera · Do artigo de demolição · Do produto que sai · m³ por unidade), com a conta de exemplo (`contaExemplo`, `entulhoFicha`): "2 un × 0,06 m³ = 0,12 m³ · ≈ 50 kg → deposição 7,60 € + carga 4,43 €", com os parâmetros de produção.
 - **Sem `<select>` na ficha (`pecasFicha.tsx`):** `Segmentos` (até 6 opções) e `SeletorPesquisa` (popover com pesquisa, ícone e o valor à direita; ↑ ↓ Enter Esc). Equipamentos e consumíveis numa linha cada, com a conta numa só linha, o "De onde vem o €/h" fechado, o `Switch` do opcional (esbatido, "fora do custo"), a data só quando está desatualizada e o total do bloco.
 - **Testes:** `entulhoServico.test.ts` (modos, volume sem horas, big bags, tipo por omissão, sanita trocada no `seed()`) e `FichaServicoEntulho.test.tsx` (sem `select`, juntar e tirar pelo seletor, opcional, a conta do entulho a atualizar). Os testes da demolição continuam iguais (39,08 / 1.043,28 / 1.103,69 € e 602,49 / 860,70 €).
+
+## Movimento, preenchimento rápido e fases nas Necessidades (14/10/2026, versão Atual)
+
+O pedido do Ruben: uma experiência de terreno com "WOW", guiada, com poucos toques e animações, sem dropdowns nem "+".
+- **O movimento** (`movimento.tsx`, framer-motion): só se anima `transform` e `opacity`; uma mola curta (`MOLA`, cerca de 300 ms) e outra para os cartões (`MOLA_CARTAO`).
+  - **A passagem entre passos** (`deslize`): avançar entra pela direita e voltar entra pela esquerda.
+  - **Os cartões** entram em cascata (`cascata`, 35 ms entre cada um) e reorganizam-se com `layout="position"` quando se filtra. Os títulos das fases também deslizam.
+  - **Listas compridas:** com mais de `ANIMAR_ATE` (40) itens, entram sem animação.
+  - **Medição com scroll:** o `<main>` do V1 e a fila de filtros têm `layoutScroll`, para que as medições do framer contem com o scroll.
+  - **Pequenos sinais:** o visto que se desenha (`VistoDesenho`), os totais que contam até ao valor novo (`Contagem`), a barra de passos com o indicador que desliza (`Progresso`, `layoutId`) e o "press" a 0,97.
+  - **Com `prefers-reduced-motion`** (ou `MotionGlobalConfig.skipAnimations` nos testes; `useReduzir`): não há deslizes, cascatas nem vibração, só um fade de 100 ms.
+- **O preenchimento rápido** (`rapido.ts`, funções puras):
+  - **Modelos rápidos** no primeiro passo ("Remodelação completa", "Só louças", "Só pavimento e paredes"): ligam e desligam os serviços do pacote que têm medida, e o aviso em baixo dá 5 s para "Desfazer" (`aplicarModelo`, `desfazerModelo`). O modelo aplicado aparece escolhido (`modeloAtual`).
+  - **Resposta sugerida nas trocas** (`sugestaoTroca`): com a demolição ligada sugere-se "Troca", sem ela "Mantém". A sugestão fica destacada (borda tracejada e "Sugerido") mas nunca escolhida. **A validar.**
+  - **O gesto:** deslizar o dedo na horizontal (mais de 70 px, em menos de 0,7 s, mais horizontal do que vertical) avança ou recua. A fila dos filtros e os campos de texto ficam de fora (`data-sem-gesto`).
+  - **A vibração** (`vibrar`): 10 ms ao ligar um cartão e 10-30-10 ms ao avançar sozinho, só onde o browser a suporta.
+  - **O passo onde se ficou** guarda-se no browser (`localStorage`, `olyvia.necessidades.passo.<id>`), e a etapa volta a abrir nele.
+- **As fases da obra** (`fasesObra.ts`): 1 Preparação e demolições · 2 Infraestruturas · 3 Revestimentos · 4 Montagem final.
+  - **De onde vêm:** um serviço pode estar em várias fases; vale o que está na ficha (`Catalogo.fasesServico`) e, sem isso, as regras pelo nome e depois pelo ofício (`fasesPadrao`). Um produto fica na última fase do serviço que o instala ou, sem serviço, na do tipo de produto (`faseDoProduto`).
+  - **Nas Necessidades:** serviços, Mais produtos, trocas e fornece agrupam-se por fase (`porFase`), com o seletor "Todas · 1 · 2 · 3 · 4", e o Resumo segue a cronologia.
+  - **A rever na ficha:** no catálogo real, cerca de 290 serviços caem na fase 4, porque quase todos são "Instalação de…".
+- **iPhone:** enquanto o protótipo está aberto, a meta viewport ganha `viewport-fit=cover`, e o menu de baixo, o "Mais" e o fundo do `<main>` somam `env(safe-area-inset-bottom)`. Os lados e o topo usam os `safe-area-inset` respetivos.
+- **Contraste (contas WCAG no tema `.calma`):** o acento `256 56% 48%` dá 7,7:1 sobre branco e 7,1:1 sobre o fundo. O texto secundário dá 7,6:1 e 7,0:1. O "Sugerido" (acento sobre o cartão) dá 7,7:1. O pior caso, texto secundário sobre o acento a 10%, dá 6,5:1: tudo AA com folga.
