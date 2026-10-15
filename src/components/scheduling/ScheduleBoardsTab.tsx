@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { ScheduleBoard, ScheduleItem, ScheduleResource } from '@/types/scheduling';
 import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
+import { isFleetScheduleItem } from '@/lib/agenda/fleet';
 import type { ScopeLevel } from '@/hooks/usePermissionScope';
 
 interface BoardStats {
@@ -160,12 +161,14 @@ export function ScheduleBoardsTab({
   }, [viewableUserIds, viewableResourceIds]);
 
   const canConfirm = useCallback((item: any): boolean => {
+    // Itens da Frota (quadro board_type 'fleet') são só de leitura na Agenda: nem o "Confirmar todos" lhes toca.
+    if (isFleetScheduleItem(item, boards)) return false;
     if (actionableUserIds === ALL_USERS) return true;
     if (setIncludes(actionableUserIds, item.created_by)) return true;
     if (setIncludes(actionableUserIds, item.user_id)) return true;
     const assignees = (item.assignees || []) as any[];
     return assignees.some(a => setIncludes(actionableResourceIds, a.resource_id));
-  }, [actionableUserIds, actionableResourceIds]);
+  }, [actionableUserIds, actionableResourceIds, boards]);
 
   // Fetch raw items for the company (one query). Filter is applied client-side per scope.
   const loadBoardStats = useCallback(async () => {

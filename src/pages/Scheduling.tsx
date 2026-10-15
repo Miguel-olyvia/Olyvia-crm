@@ -33,6 +33,8 @@ import { ScheduleBoardsTab } from '@/components/scheduling/ScheduleBoardsTab';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleFilters } from '@/types/scheduling';
 import { applyRescheduleToItem } from '@/lib/scheduling/clientConfirmation';
 import { PageFAQSheet } from "@/components/PageFAQSheet";
+import { FleetScheduleItemDialog } from '@/components/scheduling/FleetScheduleItem';
+import { FLEET_READ_ONLY_MESSAGE, isFleetScheduleItem } from '@/lib/agenda/fleet';
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 
 type ViewMode = 'month' | 'week' | 'day';
@@ -141,6 +143,8 @@ export default function Scheduling() {
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
   const [resourceDialogOpen, setResourceDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScheduleItem | null>(null);
+  // Itens da Frota: abrem só para consulta (com "Abrir na Frota"), nunca no diálogo de edição.
+  const [fleetItem, setFleetItem] = useState<ScheduleItem | null>(null);
   const [selectedBoard, setSelectedBoard] = useState<ScheduleBoard | null>(null);
   const [selectedResource, setSelectedResource] = useState<ScheduleResource | null>(null);
   const [defaultDate, setDefaultDate] = useState<Date | undefined>();
@@ -294,7 +298,11 @@ export default function Scheduling() {
     navigate(location.pathname, { replace: true, state: null });
   }, [dataReady, location.pathname, location.state, navigate]);
 
-  const handleItemClick = (item: ScheduleItem) => { setSelectedItem(item); setDefaultDate(undefined); setPrefill({}); setItemDialogOpen(true); };
+  const isFleetItemId = (id: string | undefined) => !!id && isFleetScheduleItem(items.find(i => i.id === id), boards);
+  const handleItemClick = (item: ScheduleItem) => {
+    if (isFleetScheduleItem(item, boards)) { setFleetItem(item); return; }
+    setSelectedItem(item); setDefaultDate(undefined); setPrefill({}); setItemDialogOpen(true);
+  };
   const handleAddClick = (date?: Date) => { setSelectedItem(null); setDefaultDate(date); setPrefill({}); setItemDialogOpen(true); };
 
   // Dispara o aviso ao cliente/lead, so para as mudancas cujo interruptor da
@@ -315,12 +323,14 @@ export default function Scheduling() {
 
   const handleItemDrop = async (itemId: string, newStart: Date, newEnd: Date) => {
     const prevItem = items.find(i => i.id === itemId);
+    if (isFleetScheduleItem(prevItem, boards)) { toast.info(FLEET_READ_ONLY_MESSAGE); return; }
     if (await rescheduleItem(itemId, newStart, newEnd)) {
       setItems(prev => prev.map(item => item.id === itemId ? applyRescheduleToItem(item, newStart, newEnd) : item));
       notifyIfEnabled(itemId, detectScheduleChanges(prevItem ?? null, { start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() }, null));
     }
   };
   const handleSaveItem = async (data: Partial<ScheduleItem>, assigneeIds: string[]) => {
+    if (isFleetItemId(data.id)) { toast.info(FLEET_READ_ONLY_MESSAGE); return; }
     // Build scope-aware filter (same logic as the useEffect that loads items)
     let scopeFilter: Partial<ScheduleFilters> = {};
     if (scheduleScope === 'mine' && currentUserId) {
@@ -370,7 +380,10 @@ export default function Scheduling() {
       if (newItem) setItems(prev => [...prev, newItem]);
     }
   };
-  const handleDeleteItem = async (id: string) => { if (await deleteItem(id)) setItems(prev => prev.filter(item => item.id !== id)); };
+  const handleDeleteItem = async (id: string) => {
+    if (isFleetItemId(id)) { toast.info(FLEET_READ_ONLY_MESSAGE); return; }
+    if (await deleteItem(id)) setItems(prev => prev.filter(item => item.id !== id));
+  };
   const handleSaveBoard = async (data: Partial<ScheduleBoard>) => {
     if (data.id) { if (await updateBoard(data.id, data)) setBoards(prev => prev.map(b => b.id === data.id ? { ...b, ...data } : b)); }
     else { const nb = await createBoard(data); if (nb) setBoards(prev => [...prev, nb]); }
@@ -683,6 +696,7 @@ export default function Scheduling() {
         contacts={contacts} employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
         defaultDate={defaultDate} defaultTitle={prefill.title} defaultClientId={prefill.clientId}
         companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
+      <FleetScheduleItemDialog item={fleetItem} boards={boards} onOpenChange={(open) => { if (!open) setFleetItem(null); }} />
       <ScheduleBoardDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} board={selectedBoard} onSave={handleSaveBoard} />
       <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={assignableUsers} allUsers={users} onSave={handleSaveResource} />
       <ScheduleSettingsDialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen} companyId={activeCompany?.id} />
