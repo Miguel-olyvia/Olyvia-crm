@@ -4,3 +4,4 @@ export * from "./rotulos";
 export * from "./regras";
 export * from "./api";
 export * from "./consultas";
+export * from "./documentos";

@@ -25,18 +25,36 @@ export const bd = {
     return { data: r.data ?? null, error: r.error ?? null };
   }),
   updates: [] as { tabela: string; valores: unknown; filtro: [string, unknown][] }[],
+  /** INSERTs (por exemplo a linha em documents do comprovativo) e DELETEs feitos pelo construtor de consultas. */
+  inserts: [] as { tabela: string; valores: Record<string, unknown> }[],
+  deletes: [] as { tabela: string; filtro: [string, unknown][] }[],
+  /** O Storage e a edge function validate-upload (o carregamento dos anexos). */
+  storage: {
+    upload: vi.fn(async (_balde: string, _caminho: string, _f: unknown) => ({ error: null as { message: string } | null })),
+    remove: vi.fn(async (_balde: string, _caminhos: string[]) => ({ error: null })),
+  },
+  invoke: vi.fn(async (_nome: string, _o: unknown) => ({ data: { ok: true } as unknown, error: null as unknown })),
 };
 
 function construtor(tabela: string) {
   const filtros: [string, string, unknown][] = [];
   let atualizar: unknown = undefined;
+  let inserir: Record<string, unknown> | undefined;
+  let apagar = false;
   const q: Record<string, unknown> = {};
   const encadear = (op: string) => (col: string, v: unknown) => { filtros.push([op, col, v]); return q; };
   for (const op of ["eq", "is", "neq", "in", "gte", "lte", "like"]) q[op] = encadear(op);
   for (const m of ["select", "order", "limit", "or"]) q[m] = () => q;
   q.update = (v: unknown) => { atualizar = v; return q; };
+  q.insert = (v: Record<string, unknown>) => { inserir = v; bd.inserts.push({ tabela, valores: v }); return q; };
+  q.delete = () => { apagar = true; return q; };
+  q.single = () => Promise.resolve(inserir ? { data: { id: `${tabela}-novo`, ...inserir }, error: null } : { data: (bd.tabelas[tabela] ?? [])[0] ?? null, error: null });
   q.maybeSingle = () => Promise.resolve({ data: (bd.tabelas[tabela] ?? [])[0] ?? null, error: null });
   q.then = (ok: (r: unknown) => unknown, falha?: (e: unknown) => unknown) => {
+    if (apagar) {
+      bd.deletes.push({ tabela, filtro: filtros.map(([, c, v]) => [c, v]) });
+      return Promise.resolve({ data: null, error: null }).then(ok, falha);
+    }
     if (atualizar !== undefined) {
       bd.updates.push({ tabela, valores: atualizar, filtro: filtros.map(([, c, v]) => [c, v]) });
       return Promise.resolve({ data: null, error: null }).then(ok, falha);
@@ -65,8 +83,14 @@ export const clienteFalso = {
       getSession: async () => ({ data: { session: { user: { id: "auth-1", email: "ana@teste.pt" } } } }),
       getUser: async () => ({ data: { user: { id: "auth-1" } } }),
     },
-    storage: { from: () => ({ upload: async () => ({ error: null }), remove: async () => ({ error: null }), createSignedUrl: async () => ({ data: null, error: null }) }) },
-    functions: { invoke: async () => ({ data: null, error: null }) },
+    storage: {
+      from: (balde: string) => ({
+        upload: (caminho: string, f: unknown) => bd.storage.upload(balde, caminho, f),
+        remove: (caminhos: string[]) => bd.storage.remove(balde, caminhos),
+        createSignedUrl: async () => ({ data: null, error: null }),
+      }),
+    },
+    functions: { invoke: (nome: string, o: unknown) => bd.invoke(nome, o) },
     channel: () => ({ on: () => ({ subscribe: () => ({}) }), subscribe: () => ({}) }),
     removeChannel: () => undefined,
   },

@@ -199,7 +199,7 @@ export function useReferenciaFrota<K extends keyof ReferenciasFrota>(k: K, enabl
 export type AcaoFrota =
   | "nova" | "estado" | "atribuir" | "devolver" | "cancelarReserva" | "km" | "abastecer" | "despesa" | "importar" | "manut" | "concluir"
   | "ocorrencia" | "identificar" | "resolver" | "renovar" | "minimo" | "pedirReposicao" | "satisfazerReposicao" | "cancelarReposicao"
-  | "ligar" | "lancarCusto" | "condutor";
+  | "ligar" | "lancarCusto" | "condutor" | "editar" | "rever";
 
 /**
  * As tabelas que cada RPC escreve (lidas do SQL). "atividade" vai em todas as que chamam fn_fleet_log. Invalidar estas
@@ -228,6 +228,10 @@ export const INVALIDA: Record<AcaoFrota, readonly TabelaFrota[]> = {
   ligar: ["ligacoes", "atividade"],
   lancarCusto: ["ligacoes", "atividade"],
   condutor: ["condutores", "viaturas", "atividade"],
+  // rpc_fleet_update_vehicle: a ficha (fleet_vehicles) e o plano de revisão, que a vista fleet_v_vehicles junta
+  editar: ["viaturas", "atividade"],
+  // rpc_fleet_review_expense (proposta): a linha do extrato, o contador da importação e, se os km subirem, a viatura
+  rever: ["custos", "importacoes", "viaturas", "leituras", "atividade"],
 };
 
 /** As chaves de outros módulos que cada ação mexe (Inventário, Notificações, Agenda/armazéns). */
@@ -236,7 +240,9 @@ export function chavesExternas(acao: AcaoFrota, org: string): readonly (readonly
   switch (acao) {
     case "nova": case "estado": return [...inv, frotaKeys.ref(org, "armazens")];
     case "satisfazerReposicao": return [...inv, ["stock-movements"]];
-    case "identificar": case "resolver": case "renovar": return [["notifications"], frotaKeys.alertas(org)];
+    case "identificar": case "resolver": return [["notifications"], frotaKeys.alertas(org)];
+    // o comprovativo anexado entra em documents (entity_type='vehicle'): a ficha › Documentos volta a ler
+    case "renovar": return [["notifications"], frotaKeys.alertas(org), ["documents", "vehicle"]];
     default: return [];
   }
 }

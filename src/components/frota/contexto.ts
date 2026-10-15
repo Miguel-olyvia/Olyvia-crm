@@ -7,9 +7,9 @@ export type EcraFrota = "hoje" | "viaturas" | "atribuicoes" | "condutores" | "ma
 export type AbaFicha = "resumo" | "atrib" | "manut" | "custos" | "ocorr" | "docs" | "stock" | "lig" | "hist";
 export type TipoDlg =
   | "atribuir" | "devolver" | "km" | "abastecer" | "despesa" | "importar" | "manut" | "concluir" | "estado" | "ocorrencia" | "identificar"
-  | "renovar" | "nova" | "condutor" | "ligar" | "reposicao" | "minimo";
-/** Os dados com que se abre um diálogo: viatura, condutor, atribuição, manutenção, ocorrência, documento, dia e artigo. */
-export interface DadosDlg { v?: string; p?: string; a?: string; m?: string; o?: string; k?: string; ini?: string; produto?: string }
+  | "renovar" | "nova" | "condutor" | "ligar" | "reposicao" | "minimo" | "editar" | "rever";
+/** Os dados com que se abre um diálogo: viatura, condutor, atribuição, manutenção, ocorrência, documento, dia, artigo e importação. */
+export interface DadosDlg { v?: string; p?: string; a?: string; m?: string; o?: string; k?: string; ini?: string; produto?: string; imp?: string }
 
 /** Uma ligação no aviso (por exemplo "Ver no calendário", na semana da manutenção agendada). */
 export interface LigacaoAviso { rotulo: string; para: string; externo?: boolean }

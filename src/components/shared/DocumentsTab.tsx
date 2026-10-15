@@ -84,7 +84,8 @@ const ALLOWED_UPLOAD_MIME_TYPES = [
 const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 const MAX_FILES_PER_BATCH = 10;
 
-function validateFile(file: File): string | null {
+/** Tipo e tamanho aceites num anexo (também usado pela Frota ao anexar o comprovativo de uma renovação). */
+export function validateFile(file: File): string | null {
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
   const isExtAllowed = ALLOWED_UPLOAD_EXTENSIONS.includes(ext);
   const isMimeAllowed = !file.type || ALLOWED_UPLOAD_MIME_TYPES.includes(file.type);

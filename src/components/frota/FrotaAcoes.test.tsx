@@ -72,6 +72,11 @@ beforeEach(() => {
   bd.falhar.clear();
   bd.rpc.mockClear();
   bd.updates = [];
+  bd.inserts = [];
+  bd.deletes = [];
+  bd.storage.upload.mockClear();
+  bd.storage.remove.mockClear();
+  bd.invoke.mockClear();
 });
 afterEach(() => cleanup());
 
@@ -464,6 +469,160 @@ describe("Condutores", () => {
     const dlg = await dialogo("Editar condutor");
     await preencher(dlg, { Equipa: "Sul" }, "Guardar");
     await waitFor(() => expect(bd.rpc).toHaveBeenCalledWith("rpc_fleet_upsert_driver", expect.objectContaining({ p_driver_id: "d1", p_data: expect.objectContaining({ team: "Sul", full_name: "Sofia Martins" }) })));
+  });
+});
+
+describe("Editar a ficha da viatura", () => {
+  it("editar: rpc_fleet_update_vehicle só com o que mudou (o VIN lido da tabela), a ficha e a lista atualizam", async () => {
+    bd.tabelas.fleet_vehicles = [{ id: "v1", vin: "VF1AAA", notes: null }];
+    bd.respostas.rpc_fleet_update_vehicle = () => {
+      Object.assign(bd.tabelas.fleet_v_vehicles[0], { model: "Master L3", vehicle_category: "light_passenger", service_every_km: 40000, cost_center_id: "cc1" });
+      return { data: null };
+    };
+    const f = await ficha("AA-12-BC");
+    fireEvent.click(within(f).getByRole("button", { name: "Editar" }));
+    const dlg = await dialogo("Editar viatura");
+    // a matrícula não se edita (a RPC não a aceita): não há campo
+    expect(within(dlg).queryByLabelText("Matrícula")).toBeNull();
+    await waitFor(() => expect(within(dlg).getByLabelText("VIN (n.º de quadro)")).toHaveValue("VF1AAA"));
+    await opcao(dlg, "Instalações");
+    await preencher(dlg, { Modelo: "Master L3", "Categoria (para a IPO)": "light_passenger", "Revisão a cada (km)": "40000", "VIN (n.º de quadro)": "vf1bbb", "Centro de custo": "cc1" }, "Guardar alterações");
+    await confirmar("editar", "rpc_fleet_update_vehicle", {
+      p_vehicle_id: "v1",
+      p_data: { model: "Master L3", vehicle_category: "light_passenger", service_every_km: 40000, vin: "VF1BBB", cost_center_id: "cc1", cost_center_label: "Instalações" },
+    });
+    await fechou("Editar viatura");
+    expect(aviso()).toHaveTextContent("Ficha da AA-12-BC gravada.");
+    await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("heading", { name: /Master L3/ })).toBeInTheDocument());
+  });
+
+  it("validação: sem alterações não grava; ano impossível fica no campo", async () => {
+    const f = await ficha("AA-12-BC");
+    fireEvent.click(within(f).getByRole("button", { name: "Editar" }));
+    const dlg = await dialogo("Editar viatura");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Guardar alterações" }));
+    expect(await within(dlg).findByText("Não alteraste nada.")).toBeInTheDocument();
+    await preencher(dlg, { Ano: "1800" }, "Guardar alterações");
+    expect(await within(dlg).findAllByText(/Indica um ano entre 1950 e/)).not.toHaveLength(0);
+    expect(bd.rpc).not.toHaveBeenCalledWith("rpc_fleet_update_vehicle", expect.anything());
+  });
+
+  it("erro da RPC: a mensagem em português fica no diálogo e nada muda", async () => {
+    bd.respostas.rpc_fleet_update_vehicle = () => ({ error: { message: "Sem permissão para gerir a Frota.", code: "42501" } });
+    const f = await ficha("AA-12-BC");
+    fireEvent.click(within(f).getByRole("button", { name: "Editar" }));
+    const dlg = await dialogo("Editar viatura");
+    await preencher(dlg, { Marca: "Renault Trucks" }, "Guardar alterações");
+    expect(await within(dlg).findByText("Sem permissão para gerir a Frota.")).toBeInTheDocument();
+  });
+
+  it("sem fleet.manage o Editar fica bloqueado", async () => {
+    estado.perms.delete("fleet.manage");
+    const f = await ficha("AA-12-BC");
+    expect(within(f).getByRole("button", { name: "Editar" })).toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+describe("Rever as linhas do extrato", () => {
+  const linhaRever = () => ({
+    id: "e2", vehicle_id: "v1", spent_on: dia(-3), category: "fuel", quantity: 30, unit: "L", amount: 50, odometer_km: 140000, driver_id: "d1", supplier_id: null,
+    supplier_label: "Cartão frota · Galp", cost_center_id: null, cost_center_label: null, ops_obra_id: null, ops_ordem_id: null, source: "statement", import_id: "imp-1",
+    needs_review: true, review_reason: "Km abaixo da última leitura (148230)", notes: null,
+  });
+  const rotulo = () => `Linha de ${dia(-3).split("-").reverse().join("/")} da AA-12-BC`;
+  beforeEach(() => {
+    bd.tabelas.fleet_expenses.push(linhaRever());
+    bd.tabelas.fleet_expense_imports = [{ id: "imp-1", file_name: "extrato.csv", file_sha256: "x", supplier_id: null, rows_total: 2, rows_imported: 2, rows_flagged: 1, rows_skipped: 0, imported_at: `${dia(-1)}T10:00:00Z` }];
+  });
+
+  it("aceitar com os km corrigidos: rpc_fleet_review_expense, a linha sai da lista e o contador desce", async () => {
+    bd.respostas.rpc_fleet_review_expense = () => {
+      Object.assign(bd.tabelas.fleet_expenses.find((e) => e.id === "e2")!, { needs_review: false, review_reason: null, odometer_km: 148500 });
+      bd.tabelas.fleet_expense_imports[0].rows_flagged = 0;
+      return { data: null };
+    };
+    await ir("/frota/custos");
+    fireEvent.click(await screen.findByRole("button", { name: "Rever as linhas de extrato.csv" }));
+    const dlg = await dialogo("Rever linhas do extrato");
+    const linha = within(dlg).getByRole("listitem", { name: rotulo() });
+    fireEvent.change(within(linha).getByLabelText("Km"), { target: { value: "148500" } });
+    fireEvent.click(within(linha).getByRole("button", { name: /^Aceitar a linha/ }));
+    await confirmar("rever", "rpc_fleet_review_expense", { p_expense_id: "e2", p_accept: true, p_vehicle_id: "v1", p_km: 148500, p_amount: 50 });
+    expect(await within(dlg).findByText("Não há linhas para rever nesta importação.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Rever linhas (1)" })).toBeNull());
+  });
+
+  it("rejeitar pede confirmação e chama a RPC com p_accept=false", async () => {
+    const f = await ficha("AA-12-BC", "Custos");
+    fireEvent.click(within(f).getByRole("button", { name: "Rever linhas" }));
+    const dlg = await dialogo("Rever linhas do extrato");
+    fireEvent.click(within(dlg).getByRole("button", { name: /^Rejeitar a linha/ }));
+    expect(bd.rpc).not.toHaveBeenCalledWith("rpc_fleet_review_expense", expect.anything());
+    fireEvent.click(within(dlg).getByRole("button", { name: /^Confirmar rejeição/ }));
+    await waitFor(() => expect(bd.rpc).toHaveBeenCalledWith("rpc_fleet_review_expense", { p_expense_id: "e2", p_accept: false, p_vehicle_id: null, p_km: null, p_amount: null }));
+  });
+
+  it("valor inválido não grava; RPC em falta na BD diz que ainda não está disponível", async () => {
+    bd.respostas.rpc_fleet_review_expense = () => ({ error: { message: "Could not find the function public.rpc_fleet_review_expense", code: "PGRST202" } });
+    await ir("/frota/custos");
+    fireEvent.click(screen.getByRole("button", { name: "Rever linhas (1)" }));
+    const dlg = await dialogo("Rever linhas do extrato");
+    fireEvent.change(within(dlg).getByLabelText("Valor (€)"), { target: { value: "0" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: /^Aceitar a linha/ }));
+    expect(await within(dlg).findByText("Não foi gravado: Indica o valor (maior do que 0).")).toBeInTheDocument();
+    expect(bd.rpc).not.toHaveBeenCalledWith("rpc_fleet_review_expense", expect.anything());
+    fireEvent.change(within(dlg).getByLabelText("Valor (€)"), { target: { value: "50" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: /^Aceitar a linha/ }));
+    expect(await within(dlg).findByText("Esta ação da Frota ainda não está disponível na base de dados.")).toBeInTheDocument();
+  });
+});
+
+describe("Renovar com comprovativo", () => {
+  const pdf = () => new File(["%PDF-1.4"], "ipo-2026.pdf", { type: "application/pdf" });
+  async function abrirRenovar(): Promise<HTMLElement> {
+    await ir("/frota/documentos");
+    fireEvent.click(screen.getByRole("button", { name: "Renovar Inspeção (IPO) da 45-XZ-78" }));
+    return dialogo("Renovar documento");
+  }
+
+  it("anexa o ficheiro (documents, entity_type='vehicle') e liga-o à renovação por p_document_id", async () => {
+    const dlg = await abrirRenovar();
+    await preencher(dlg, { "Nova validade": dia(365) });
+    fireEvent.change(within(dlg).getByLabelText("Comprovativo (PDF ou foto)"), { target: { files: [pdf()] } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Guardar" }));
+    await confirmar("renovar", "rpc_fleet_renew_compliance", {
+      p_vehicle_id: "v2", p_kind: "inspection", p_valid_until: dia(365), p_amount: null, p_supplier_id: null, p_reference: null, p_document_id: "documents-novo",
+    });
+    expect(bd.storage.upload).toHaveBeenCalledWith("documents-quarantine", expect.stringMatching(/^org-teste\/vehicle\/v2\/.+\.pdf$/), expect.any(File));
+    expect(bd.invoke).toHaveBeenCalledWith("validate-upload", expect.objectContaining({ body: expect.objectContaining({ finalBucket: "documents" }) }));
+    expect(bd.inserts).toEqual([expect.objectContaining({
+      tabela: "documents",
+      valores: expect.objectContaining({ organization_id: ORG, entity_type: "vehicle", entity_id: "v2", file_name: "ipo-2026.pdf", visible_to_client: false }),
+    })]);
+    // a ficha › Documentos (DocumentsTab, chave ["documents","vehicle",<id>]) volta a ler
+    expect(chavesInvalidadas(invalidar)).toContain(JSON.stringify(["documents", "vehicle"]));
+    expect(aviso()).toHaveTextContent("O comprovativo ficou na ficha › Documentos.");
+  });
+
+  it("ficheiro de tipo não aceite: erro no campo, nada é carregado nem gravado", async () => {
+    const dlg = await abrirRenovar();
+    await preencher(dlg, { "Nova validade": dia(365) });
+    fireEvent.change(within(dlg).getByLabelText("Comprovativo (PDF ou foto)"), { target: { files: [new File(["x"], "virus.exe", { type: "application/x-msdownload" })] } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Guardar" }));
+    expect(await within(dlg).findAllByText(/Tipo de ficheiro não permitido/)).not.toHaveLength(0);
+    expect(bd.storage.upload).not.toHaveBeenCalled();
+    expect(bd.rpc).not.toHaveBeenCalledWith("rpc_fleet_renew_compliance", expect.anything());
+  });
+
+  it("renovação recusada pela RPC: o anexo é desfeito (linha e ficheiro)", async () => {
+    bd.respostas.rpc_fleet_renew_compliance = () => ({ error: { message: "A nova validade tem de ser depois de hoje.", code: "23514" } });
+    const dlg = await abrirRenovar();
+    await preencher(dlg, { "Nova validade": dia(365) });
+    fireEvent.change(within(dlg).getByLabelText("Comprovativo (PDF ou foto)"), { target: { files: [pdf()] } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Guardar" }));
+    expect(await within(dlg).findByText("A nova validade tem de ser depois de hoje.")).toBeInTheDocument();
+    expect(bd.deletes).toEqual([{ tabela: "documents", filtro: [["id", "documents-novo"]] }]);
+    expect(bd.storage.remove).toHaveBeenCalledWith("documents", [expect.stringMatching(/^org-teste\/vehicle\/v2\//)]);
   });
 });
 

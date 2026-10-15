@@ -15,11 +15,12 @@ import { cn } from "@/lib/utils";
 import { PERM, useFrotaCtx, type CtxFrota, type DadosDlg, type LigacaoAviso, type Requisito, type ResultadoFrota, type TipoDlg } from "./contexto";
 import { Placa, SeloEstado } from "./pecas";
 import { DialogoImportar } from "./DialogoImportar";
+import { DialogoRever } from "./DialogoRever";
 import { Alerta, Campo, Nota } from "./campos";
 import {
   CATEGORIAS, CATEGORIAS_CUSTO, CATEGORIAS_DESPESA, COMBUSTIVEIS, ESTADOS, POSSES, TIPOS_MANUT, TIPOS_OCORR, VENC, addDias, atribEm, ativa, cartaProblema, condutor,
-  diaDe, eletrica, fData, fEur, fKm, linkCalendario, numero, opcoesDe, proximaIpo, quemConduzia, rpcFrota, stockDe, useReferenciaFrota, viatura,
-  type Frota, type ReferenciasFrota,
+  anexarDocumentoViatura, desfazerDocumentoViatura, diaDe, eletrica, fData, fEur, fKm, linkCalendario, numero, opcoesDe, problemaFicheiro, proximaIpo, quemConduzia,
+  rpcFrota, stockDe, tabela, useReferenciaFrota, viatura, type DocumentoAnexado, type Frota, type ReferenciasFrota,
 } from "./dados";
 import type {
   FleetAssignmentKind, FleetComplianceKind, FleetExpenseCategory, FleetFuelType, FleetIncidentKind, FleetMaintenanceKind, FleetOwnership, FleetVehicleStatus,
@@ -28,8 +29,11 @@ import type {
 export type Vals = Record<string, string>;
 export type Erros = Record<string, string>;
 
-/** O que a gravação precisa do ecrã: o retrato, como agir e a organização. */
-interface Gravar { F: Frota; agir: CtxFrota["agir"]; org: string; refs: Partial<ReferenciasFrota> }
+/**
+ * O que a gravação precisa do ecrã: o retrato, como agir, a organização, os valores com que o formulário abriu
+ * (`inicial`, para mandar só o que mudou) e o ficheiro escolhido (nos diálogos com `anexo`).
+ */
+interface Gravar { F: Frota; agir: CtxFrota["agir"]; org: string; refs: Partial<ReferenciasFrota>; inicial: Vals; ficheiro: File | null }
 
 interface Def {
   titulo: string; ok: string; largo?: boolean;
@@ -37,6 +41,10 @@ interface Def {
   /** As listas de outros módulos de que o formulário precisa. */
   refs?: (keyof ReferenciasFrota)[];
   ini: (F: Frota, d: DadosDlg) => Vals;
+  /** Valores que não estão no retrato e se leem ao abrir (juntam-se a `ini` e aos valores iniciais). */
+  carregar?: (d: DadosDlg) => Promise<Vals>;
+  /** O diálogo tem um campo de ficheiro opcional ("ficheiro"). */
+  anexo?: boolean;
   validar: (F: Frota, x: Vals) => Erros;
   gravar: (g: Gravar, x: Vals) => Promise<ResultadoFrota<unknown>>;
 }
@@ -59,7 +67,28 @@ function kmMin(F: Frota, vid: string | undefined, km: string | undefined, campo 
 const naoFuturo = (F: Frota, d: string | undefined, campo = "data"): Erros =>
   !d ? { [campo]: "Indica a data." } : d > F.hoje ? { [campo]: "Não pode ser no futuro." } : {};
 
-const DEFS: Record<Exclude<TipoDlg, "importar">, Def> = {
+/** O formulário "Editar viatura" nas chaves de p_data do rpc_fleet_update_vehicle (vazio → null; própria → sem renda nem locadora). */
+function dadosFicha(x: Vals): Record<string, unknown> {
+  const propria = x.posse === "owned";
+  const d: Record<string, unknown> = {
+    make: (x.marca ?? "").trim(), model: (x.modelo ?? "").trim(), vehicle_type: nulo(x.tipo), vehicle_category: nulo(x.categoria), first_registration_on: nulo(x.primeira),
+    fuel_type: x.comb, ownership: x.posse, lessor_supplier_id: propria ? null : nulo(x.locadora), monthly_rent: propria ? null : numero(x.renda),
+    model_year: inteiro(x.ano), required_licence: x.carta || "B", cost_center_id: nulo(x.centro), personal_use: !!x.usoPessoal, is_pool: !!x.pool,
+    service_every_km: inteiro(x.revKm), service_every_months: inteiro(x.revMeses),
+  };
+  // o VIN e as notas só vão se foram lidos da BD (senão um campo vazio apagava o que lá está)
+  if (x.extra) { d.vin = nulo(x.vin)?.toUpperCase() ?? null; d.notes = nulo(x.notas); }
+  return d;
+}
+/** Só as chaves que mudaram em relação ao que o formulário mostrou ao abrir (a RPC deixa como está o que não vier). */
+function alteracoes(x: Vals, inicial: Vals): Record<string, unknown> {
+  const a = dadosFicha(x), b = dadosFicha(inicial);
+  return Object.fromEntries(Object.entries(a).filter(([k, val]) => JSON.stringify(val) !== JSON.stringify(b[k])));
+}
+/** Os valores com que o formulário abriu, guardados nele próprio (chave "inicial"), para saber o que mudou. */
+const editarIni = (x: Vals): Vals => (x.inicial ? (JSON.parse(x.inicial) as Vals) : x);
+
+const DEFS: Record<Exclude<TipoDlg, "importar" | "rever">, Def> = {
   atribuir: {
     titulo: "Atribuir viatura", ok: "Atribuir", requer: "gerir", refs: ["obras", "ordens"],
     ini: (F, d) => {
@@ -269,7 +298,7 @@ const DEFS: Record<Exclude<TipoDlg, "importar">, Def> = {
     },
   },
   renovar: {
-    titulo: "Renovar documento", ok: "Guardar", requer: "gerirOuCustos", refs: ["fornecedores"],
+    titulo: "Renovar documento", ok: "Guardar", requer: "gerirOuCustos", refs: ["fornecedores"], anexo: true,
     ini: (F, d) => {
       const v = viatura(F, d.v), k = (d.k ?? "insurance") as FleetComplianceKind;
       const sug = k === "inspection" && v ? proximaIpo(v.vehicle_category, v.first_registration_on, F.hoje) : "";
@@ -277,10 +306,66 @@ const DEFS: Record<Exclude<TipoDlg, "importar">, Def> = {
     },
     validar: (F, x) => (!viatura(F, x.vid) ? { vid: "Viatura desconhecida." } : !x.data || x.data <= F.hoje ? { data: "A nova validade tem de ser depois de hoje." } : {}),
     gravar: (g, x) => {
-      const v = viatura(g.F, x.vid)!, k = x.k as FleetComplianceKind;
-      return g.agir("renovar", () => rpcFrota("rpc_fleet_renew_compliance", {
-        p_vehicle_id: x.vid, p_kind: k, p_valid_until: x.data, p_amount: numero(x.valor), p_supplier_id: nulo(x.fornecedor), p_reference: nulo(x.referencia), p_document_id: null,
-      }), { ok: `${VENC[k]} da ${v.plate} renovado até ${fData(x.data)}.`, link: { rotulo: "Ver nos Documentos", para: "/frota/documentos" } });
+      const v = viatura(g.F, x.vid)!, k = x.k as FleetComplianceKind, ficheiro = g.ficheiro;
+      return g.agir("renovar", async () => {
+        // o comprovativo entra primeiro (documents, entity_type='vehicle') e a renovação fica ligada a ele (p_document_id);
+        // se a renovação for recusada, o anexo é desfeito para não ficar um ficheiro solto
+        let doc: DocumentoAnexado | null = null;
+        if (ficheiro) doc = await anexarDocumentoViatura({ org: g.org, vid: x.vid, ficheiro, nota: `Comprovativo: ${VENC[k]} até ${fData(x.data)}` });
+        try {
+          return await rpcFrota("rpc_fleet_renew_compliance", {
+            p_vehicle_id: x.vid, p_kind: k, p_valid_until: x.data, p_amount: numero(x.valor), p_supplier_id: nulo(x.fornecedor), p_reference: nulo(x.referencia), p_document_id: doc?.id ?? null,
+          });
+        } catch (e) {
+          if (doc) await desfazerDocumentoViatura(doc);
+          throw e;
+        }
+      }, {
+        ok: `${VENC[k]} da ${v.plate} renovado até ${fData(x.data)}.` + (ficheiro ? " O comprovativo ficou na ficha › Documentos." : ""),
+        link: { rotulo: "Ver nos Documentos", para: "/frota/documentos" },
+      });
+    },
+  },
+  editar: {
+    titulo: "Editar viatura", ok: "Guardar alterações", largo: true, requer: "gerir", refs: ["fornecedores", "centros"],
+    ini: (F, d) => {
+      const v = viatura(F, d.v);
+      const t = (n: number | null | undefined): string => (n == null ? "" : String(n));
+      return {
+        vid: d.v ?? "", marca: v?.make ?? "", modelo: v?.model ?? "", tipo: v?.vehicle_type ?? "", categoria: v?.vehicle_category ?? "", primeira: v?.first_registration_on ?? "",
+        comb: v?.fuel_type ?? "diesel", posse: v?.ownership ?? "owned", renda: t(v?.monthly_rent), locadora: v?.lessor_supplier_id ?? "", ano: t(v?.model_year),
+        carta: v?.required_licence ?? "B", centro: v?.cost_center_id ?? "", revKm: t(v?.service_every_km), revMeses: t(v?.service_every_months),
+        usoPessoal: v?.personal_use ? "on" : "", pool: v?.is_pool ? "on" : "", vin: "", notas: "", extra: "",
+      };
+    },
+    // o VIN e as notas não estão na vista fleet_v_vehicles: leem-se da tabela ao abrir (sem eles, os campos não aparecem)
+    carregar: async (d) => {
+      const { data, error } = await tabela("fleet_vehicles").select("vin, notes").eq("id", d.v ?? "").maybeSingle();
+      if (error) throw error;
+      return { vin: data?.vin ?? "", notas: data?.notes ?? "", extra: "on" };
+    },
+    validar: (F, x) => {
+      const e: Erros = {};
+      if (!viatura(F, x.vid)) return { o: "Viatura desconhecida." };
+      if (!(x.marca ?? "").trim()) e.marca = "Indica a marca.";
+      if (!(x.modelo ?? "").trim()) e.modelo = "Indica o modelo.";
+      if (x.primeira && x.primeira > F.hoje) e.primeira = "A data da 1.ª matrícula não pode ser no futuro.";
+      const ano = inteiro(x.ano), anoMax = Number(F.hoje.slice(0, 4)) + 1;
+      if ((x.ano ?? "").trim() && (ano == null || ano < 1950 || ano > anoMax)) e.ano = `Indica um ano entre 1950 e ${anoMax}.`;
+      if (x.posse !== "owned" && (x.renda ?? "").trim() && !((numero(x.renda) ?? -1) >= 0)) e.renda = "A renda não pode ser negativa.";
+      const km = inteiro(x.revKm), meses = inteiro(x.revMeses);
+      if ((x.revKm ?? "").trim() && !(km != null && km > 0)) e.revKm = "Indica os km (maior do que 0).";
+      if ((x.revMeses ?? "").trim() && !(meses != null && meses > 0)) e.revMeses = "Indica os meses (maior do que 0).";
+      if (!e.revKm && !e.revMeses && km == null && meses == null) e.revKm = "A revisão precisa dos km ou dos meses (pelo menos um).";
+      if ((x.vin ?? "").trim() && !/^[A-Z0-9]{1,17}$/i.test(x.vin.trim())) e.vin = "O VIN tem até 17 letras e algarismos, sem espaços.";
+      if (!Object.keys(e).length && !Object.keys(alteracoes(x, editarIni(x))).length) e.nada = "Não alteraste nada.";
+      return e;
+    },
+    gravar: (g, x) => {
+      const v = viatura(g.F, x.vid)!;
+      const dados = alteracoes(x, g.inicial);
+      if ("cost_center_id" in dados) dados.cost_center_label = g.refs.centros?.find((c) => c.id === dados.cost_center_id)?.nome ?? null;
+      return g.agir("editar", () => rpcFrota("rpc_fleet_update_vehicle", { p_vehicle_id: x.vid, p_data: dados }), { ok: `Ficha da ${v.plate} gravada.` });
     },
   },
   nova: {
@@ -394,14 +479,17 @@ const DEFS: Record<Exclude<TipoDlg, "importar">, Def> = {
 };
 
 /** As chaves de erro que não são campos do formulário (vão para o aviso do diálogo). */
-const GERAIS = ["a", "m", "o"];
+const GERAIS = ["a", "m", "o", "nada"];
 
 export function DialogoFrota({ tipo, dados, aoFechar, aoCriar }: { tipo: TipoDlg; dados: DadosDlg; aoFechar: () => void; aoCriar?: (vid: string) => void }) {
   if (tipo === "importar") return <DialogoImportar aoFechar={aoFechar} />;
+  if (tipo === "rever") return <DialogoRever imp={dados.imp} vid={dados.v} aoFechar={aoFechar} />;
   return <DialogoForm tipo={tipo} dados={dados} aoFechar={aoFechar} aoCriar={aoCriar} />;
 }
 
-function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg, "importar">; dados: DadosDlg; aoFechar: () => void; aoCriar?: (vid: string) => void }) {
+type TipoForm = Exclude<TipoDlg, "importar" | "rever">;
+
+function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: TipoForm; dados: DadosDlg; aoFechar: () => void; aoCriar?: (vid: string) => void }) {
   const { F, agir, pode, dados: estado } = useFrotaCtx();
   const def = DEFS[tipo];
   const precisa = new Set(def.refs ?? []);
@@ -414,7 +502,8 @@ function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg
   const refs: Partial<ReferenciasFrota> = {
     fornecedores: fornecedores.dados, centros: centros.dados, obras: obras.dados, ordens: ordens.dados, armazens: armazens.dados, utilizadores: utilizadores.dados,
   };
-  const [x, setX] = useState<Vals>(() => def.ini(F, dados));
+  const [x, setX] = useState<Vals>(() => { const v = def.ini(F, dados); return { ...v, inicial: JSON.stringify(v) }; });
+  const [ficheiro, setFicheiro] = useState<File | null>(null);
   const [e, setE] = useState<Erros>({});
   const [erroGeral, setErroGeral] = useState("");
   const [focar, setFocar] = useState(0);
@@ -424,6 +513,20 @@ function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg
   useEffect(() => {
     if (focar) caixa.current?.querySelector<HTMLElement>("[aria-invalid=true]")?.focus();
   }, [focar]);
+  // os valores que não estão no retrato (por exemplo o VIN e as notas da viatura) leem-se ao abrir
+  useEffect(() => {
+    if (!def.carregar) return;
+    let vivo = true;
+    def.carregar(dados).then((extra) => {
+      if (!vivo) return;
+      setX((o) => {
+        const ini = { ...(JSON.parse(o.inicial ?? "{}") as Vals), ...extra };
+        return { ...o, ...extra, inicial: JSON.stringify(ini) };
+      });
+    }).catch(() => { /* sem estes campos o formulário continua a servir: só não os mostra */ });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const muda = (k: string) => (v: string): void => {
     setX((o) => {
       const n = { ...o, [k]: v };
@@ -435,10 +538,16 @@ function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg
     });
     setErroGeral("");
   };
+  const escolherFicheiro = (f: File | null): void => {
+    setFicheiro(f);
+    setE((o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== "ficheiro")));
+    setErroGeral("");
+  };
   const submeter = async (): Promise<void> => {
     if (aGravar) return;
     if (!perm.ok) { setErroGeral(perm.porque); return; }
     const erros = def.validar(F, x);
+    if (def.anexo && ficheiro) { const p = problemaFicheiro(ficheiro); if (p) erros.ficheiro = p; }
     setE(erros);
     // nenhuma recusa fica em silêncio: além do erro no campo, o resumo junto aos botões diz o que falta
     const chaves = Object.keys(erros);
@@ -447,7 +556,7 @@ function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg
     else if (chaves.length) setErroGeral(`Não foi gravado: ${erros[chaves[0]]}`);
     if (chaves.length) { setFocar((n) => n + 1); return; }
     setAGravar(true);
-    const r = await def.gravar({ F, agir, org: estado.org ?? "", refs }, x);
+    const r = await def.gravar({ F, agir, org: estado.org ?? "", refs, inicial: editarIni(x), ficheiro: def.anexo ? ficheiro : null }, x);
     setAGravar(false);
     if (!r.ok) { setErroGeral(r.erro); return; }
     aoFechar();
@@ -462,7 +571,7 @@ function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg
             <DialogDescription>Grava na base de dados da organização. A Frota volta a verificar tudo antes de gravar.</DialogDescription>
           </DialogHeader>
           <div ref={caixa} className="space-y-3">
-            <Corpo tipo={tipo} x={x} e={e} muda={muda} refs={refs} />
+            <Corpo tipo={tipo} x={x} e={e} muda={muda} refs={refs} ficheiro={{ valor: ficheiro, mudar: escolherFicheiro }} />
             {erroGeral ? <div role="alert"><Alerta tom="bad" icone={CircleAlert}>{erroGeral}</Alerta></div> : null}
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
@@ -475,7 +584,10 @@ function DialogoForm({ tipo, dados, aoFechar, aoCriar }: { tipo: Exclude<TipoDlg
   );
 }
 
-function Corpo({ tipo, x, e, muda, refs }: { tipo: Exclude<TipoDlg, "importar">; x: Vals; e: Erros; muda: (k: string) => (v: string) => void; refs: Partial<ReferenciasFrota> }) {
+function Corpo({ tipo, x, e, muda, refs, ficheiro }: {
+  tipo: TipoForm; x: Vals; e: Erros; muda: (k: string) => (v: string) => void; refs: Partial<ReferenciasFrota>;
+  ficheiro: { valor: File | null; mudar: (f: File | null) => void };
+}) {
   const { F, tem } = useFrotaCtx();
   const optsAtivas = () => F.viaturas.filter(ativa).map((v) => ({ value: v.id, label: `${v.plate} · ${v.make} ${v.model}` }));
   const optsDisponiveis = () => F.viaturas.filter((v) => v.status === "active").map((v) => ({ value: v.id, label: `${v.plate} · ${v.make} ${v.model}` }));
@@ -675,8 +787,43 @@ function Corpo({ tipo, x, e, muda, refs }: { tipo: Exclude<TipoDlg, "importar">;
             {num("valor", "Valor pago (€)", "Opcional. Entra nos custos.", "0.01")}
             {texto("referencia", k === "insurance" ? "Apólice" : "Referência")}
             {sel("fornecedor", k === "insurance" ? "Seguradora" : "Entidade (fornecedor)", optsFornecedores, { placeholder: "A de antes" })}
+            <Campo rotulo="Comprovativo (PDF ou foto)" erro={e.ficheiro} ajuda="Opcional. Fica na ficha da viatura › Documentos, ligado a esta renovação. Até 20 MB." largo>
+              {(p) => <Input {...p} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.doc,.docx,application/pdf,image/*" onChange={(ev) => ficheiro.mudar(ev.target.files?.[0] ?? null)} />}
+            </Campo>
           </>)}
-          <Nota>O comprovativo (PDF ou foto) junta-se na ficha da viatura › Documentos.</Nota>
+          {ficheiro.valor ? <Nota>Vai ser anexado: {ficheiro.valor.name}</Nota> : null}
+        </>
+      );
+    }
+    case "editar": {
+      if (!v) return <p>Viatura desconhecida.</p>;
+      const a = atribEm(F, v.id), p = a ? condutor(F, a.driver_id) : undefined;
+      const carta = p && x.carta !== v.required_licence ? cartaProblema(p, { ...v, required_licence: x.carta }, F.hoje) : null;
+      return (
+        <>
+          <p className="flex flex-wrap items-center gap-1.5 text-sm"><Placa mat={v.plate} /> · <SeloEstado v={v} /></p>
+          {grelha(<>
+            {texto("marca", "Marca")}
+            {texto("modelo", "Modelo")}
+            {sel("tipo", "Tipo", [...new Set(["Furgão compacto", "Furgão", "Furgão grande", "Ligeiro de passageiros", "Pesado de mercadorias", "Outro", ...(x.tipo ? [x.tipo] : [])])].map((t) => ({ value: t, label: t })), { placeholder: "Sem tipo" })}
+            {sel("categoria", "Categoria (para a IPO)", opcoesDe(CATEGORIAS), { placeholder: "Por preencher (IPO a +12 meses)" })}
+            {data("primeira", "Data da 1.ª matrícula", "Com a categoria, calcula a IPO pela regra legal")}
+            {sel("comb", "Combustível", opcoesDe(COMBUSTIVEIS))}
+            {sel("posse", "Posse", opcoesDe(POSSES))}
+            {x.posse !== "owned" ? <>{num("renda", "Renda mensal (€)", undefined, "0.01")}{sel("locadora", "Locadora", optsFornecedores, { placeholder: "Sem locadora" })}</> : null}
+            {num("ano", "Ano")}
+            {sel("carta", "Carta exigida", [...new Set(["B", "C1", "C", "D", "BE", "CE", x.carta].filter(Boolean))].map((c) => ({ value: c, label: `Categoria ${c}` })))}
+            {sel("centro", "Centro de custo", (refs.centros ?? []).map((c) => ({ value: c.id, label: c.nome })), { placeholder: "Sem centro de custo" })}
+            {num("revKm", "Revisão a cada (km)")}
+            {num("revMeses", "Ou a cada (meses)")}
+            {x.extra ? <>{texto("vin", "VIN (n.º de quadro)", { attrs: { autoComplete: "off", maxLength: 17 } })}{area("notas", "Notas")}</> : null}
+          </>)}
+          <div className="space-y-2">
+            {marcar("usoPessoal", "Uso pessoal autorizado")}
+            {marcar("pool", "Partilhada (livre para reservas)")}
+          </div>
+          {carta ? <Alerta tom="warn" icone={TriangleAlert}>Com a categoria {x.carta}: {carta} A atribuição atual mantém-se; revê-a nas Atribuições.</Alerta> : null}
+          <Nota>A matrícula não se altera aqui (a ficha não a aceita). Os vencimentos (seguro, IPO, IUC) mudam em Documentos › Renovar; a validade da IPO já registada não é recalculada.</Nota>
         </>
       );
     }

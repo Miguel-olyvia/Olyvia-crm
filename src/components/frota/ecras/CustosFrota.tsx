@@ -2,7 +2,7 @@
 // despesa imputada a um centro de custo ou a uma obra das Operações. Só com fleet.costs (o condutor vê os seus).
 // "Importar extrato" lê o CSV do cartão frota (rpc_fleet_import_statement).
 import { useState } from "react";
-import { FileUp, Plus, Search } from "lucide-react";
+import { FileUp, ListChecks, Plus, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -29,6 +29,7 @@ export function CustosFrota() {
     <div className="space-y-6">
       <Cabecalho titulo="Abastecimentos e custos" texto={`Combustível, carregamentos, portagens, estacionamento, oficina e rendas dos últimos ${DIAS_PERIODO} dias. Cada despesa fica imputada a um centro de custo ou a uma obra.`}
         acoes={<>
+          {rever.length ? <BotaoFrota requer="custos" icone={ListChecks} aoClicar={() => dlg("rever")}>{`Rever linhas (${rever.length})`}</BotaoFrota> : null}
           <BotaoFrota requer="custos" icone={FileUp} aoClicar={() => dlg("importar")}>Importar extrato</BotaoFrota>
           <BotaoFrota variant="default" requer="gerirOuCustos" icone={Plus} aoClicar={() => dlg("despesa")}>Registar despesa</BotaoFrota>
         </>} />
@@ -80,7 +81,12 @@ export function CustosFrota() {
       ) : todos.length ? <Vazio titulo="Sem despesas com estes filtros" texto="Muda o tipo ou a viatura." />
         : <Vazio titulo="Ainda não há custos" texto="Regista abastecimentos na ficha da viatura, despesas aqui, ou importa o extrato do cartão frota." />}
       {F.importacoes.length ? (
-        <p className="text-xs text-muted-foreground">Último extrato: {F.importacoes[0].file_name} ({F.importacoes[0].rows_imported} de {F.importacoes[0].rows_total} linhas{F.importacoes[0].rows_flagged ? `, ${F.importacoes[0].rows_flagged} para rever` : ""}).</p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>Último extrato: {F.importacoes[0].file_name} ({F.importacoes[0].rows_imported} de {F.importacoes[0].rows_total} linhas{F.importacoes[0].rows_flagged ? `, ${F.importacoes[0].rows_flagged} para rever` : ""}).</span>
+          {rever.some((c) => c.import_id === F.importacoes[0].id) ? (
+            <BotaoFrota requer="custos" aoClicar={() => dlg("rever", { imp: F.importacoes[0].id })} aria-label={`Rever as linhas de ${F.importacoes[0].file_name}`}>Rever estas linhas</BotaoFrota>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

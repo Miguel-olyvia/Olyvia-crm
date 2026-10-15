@@ -4,7 +4,7 @@
 // O rodapé tem as ações; sem a permissão real ficam desativadas e dizem porquê.
 import { useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, CalendarPlus, CircleAlert, Fuel, Gauge, Info, KeyRound, Link2, Package, PackageCheck, PackagePlus, Plus, TriangleAlert } from "lucide-react";
+import { CalendarDays, CalendarPlus, CircleAlert, Fuel, Gauge, Info, KeyRound, Link2, Package, PackageCheck, PackagePlus, Pencil, Plus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -254,6 +254,12 @@ function Corpo({ v, aba }: { v: FleetVehicleView; aba: AbaFicha }) {
     return (
       <>
         {!pode("custos").ok && !l.length ? <p className="text-sm text-muted-foreground">Os custos só se veem com a permissão fleet.costs (o condutor vê os que lhe estão imputados).</p> : null}
+        {l.some((x) => x.needs_review) ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>{l.filter((x) => x.needs_review).length} linha(s) do extrato por rever (km abaixo da última leitura).</span>
+            <BotaoFrota requer="custos" aoClicar={() => dlg("rever", { v: v.id })}>Rever linhas</BotaoFrota>
+          </div>
+        ) : null}
         <Linhas cab={["Data", "Tipo", "Origem", "Km", "Valor"]} vazio={l.length ? null : ["Sem custos", "Ainda não há despesas desta viatura."]}>
           {l.map((x) => (
             <TableRow key={x.id}>
@@ -356,6 +362,7 @@ export function ViaturaFicha({ vid, aba, mudarAba, aoFechar }: { vid: string; ab
         </>}
         footer={{
           left: <>
+            {v.status !== "sold" ? <BotaoFrota requer="gerir" icone={Pencil} aoClicar={() => dlg("editar", { v: v.id })}>Editar</BotaoFrota> : null}
             {ativa(v) || v.status === "inactive" || v.status === "sold" ? <BotaoFrota requer="gerir" aoClicar={() => dlg("estado", { v: v.id })}>Mudar estado</BotaoFrota> : null}
             {a ? <BotaoFrota requer="gerir" aoClicar={() => dlg("devolver", { a: a.id })}>Devolver</BotaoFrota> : null}
           </>,

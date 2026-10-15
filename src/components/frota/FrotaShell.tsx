@@ -28,6 +28,7 @@ import { AvisoRegiao, Carregando, ErroLeitura } from "./pecas";
 import { condutorEm, invalidarFrota, mensagemErroFrota, stockDe, useDadosFrota, viaturaDoCondutor } from "./dados";
 
 const A_CARREGAR = "A carregar permissões…";
+const ABAS_FICHA: readonly AbaFicha[] = ["resumo", "atrib", "manut", "custos", "ocorr", "docs", "stock", "lig", "hist"];
 const OPCAO = "flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none";
 
 /**
@@ -108,10 +109,11 @@ export function FrotaShell({ children }: { children: ReactNode }) {
   const soConsulta = !aCarregar && ![PERM.gerir, PERM.custos, PERM.self].some((p) => hasPermission(p));
 
   const [params] = useSearchParams();
-  // ?viatura=<id> abre a ficha logo ao entrar (ligação direta a uma viatura, por exemplo a partir de um aviso)
+  // ?viatura=<id> abre a ficha logo ao entrar (ligação direta a uma viatura, por exemplo a partir de um aviso ou da
+  // Agenda); &aba=<atrib|manut|…> abre-a já na aba certa
   const [folha, setFolha] = useState<{ vid: string; aba: AbaFicha } | null>(() => {
-    const vid = params.get("viatura");
-    return vid ? { vid, aba: "resumo" } : null;
+    const vid = params.get("viatura"), aba = params.get("aba") as AbaFicha | null;
+    return vid ? { vid, aba: aba && ABAS_FICHA.includes(aba) ? aba : "resumo" } : null;
   });
   const [dlgAberto, setDlg] = useState<{ tipo: TipoDlg; dados: DadosDlg; n: number } | null>(null);
   const [pedido, setPedido] = useState<PedidoConfirmacao | null>(null);
