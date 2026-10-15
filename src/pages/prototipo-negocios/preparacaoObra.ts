@@ -118,9 +118,12 @@ export interface PassoPrep {
   /** A ação (A[act](id)) e o texto do botão, para quem é a vez. */
   act?: string; btn?: string;
 }
+// 15/10 (Ruben): o pagamento vem primeiro; a encomenda e o plano só se aprovam depois de o pagamento estar confirmado
 export const TRILHOS: { k: Trilho; t: string }[] = [
-  { k: "ec", t: "Encomenda" }, { k: "plano", t: "Plano da obra" }, { k: "pag", t: "Pagamento" },
+  { k: "pag", t: "Pagamento" }, { k: "ec", t: "Encomenda" }, { k: "plano", t: "Plano da obra" },
 ];
+/** A encomenda e o plano esperam pelo pagamento confirmado. */
+export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
 
 /** O que falta para arrancar a obra (vazio = pode arrancar). */
 export function faltaParaArrancar(d: Negocio): string[] {
@@ -143,6 +146,8 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
   L.push({ id: "ec", trilho: "ec", estado: "feito", who: null, t: `Encomenda de cliente ${ec.n}`, sub: `Gerada do contrato a ${ec.criada} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · custo ${eur(ec.custo ?? 0)} € · ${eur(ec.valor)} € na proposta` });
   L.push(ec.estado === "aprovada"
     ? { id: "ec-ok", trilho: "ec", estado: "feito", who: "comercial", t: "Encomenda de cliente aprovada", sub: `${ec.aprovada?.por ?? "Comercial"} · ${ec.aprovada?.q ?? ""} · stock reservado` }
+    : !d.fin.pago
+    ? { id: "ec-ok", trilho: "ec", estado: "espera", who: "comercial", t: "Aprovar a encomenda de cliente", sub: SO_DEPOIS_DO_PAGAMENTO }
     : { id: "ec-ok", trilho: "ec", estado: "agora", who: "comercial", t: "Aprovar a encomenda de cliente", sub: nFalta ? `Ao aprovar, reserva o stock e pede ao fornecedor ${nFalta} ${nFalta === 1 ? "linha" : "linhas"} em falta.` : "Ao aprovar, reserva o stock: está tudo em armazém.", act: "aprovarEc", btn: "Aprovar a encomenda" });
   if (ec.estado !== "aprovada") L.push({ id: "ef", trilho: "ec", estado: "espera", who: "financeiro", t: "Encomenda a fornecedor", sub: nFalta ? `Emite-se ao aprovar a encomenda de cliente (${nFalta} em falta).` : "Nada a encomendar: tudo em stock." });
   else if (!e) L.push({ id: "ef", trilho: "ec", estado: "feito", who: null, t: "Sem encomenda a fornecedor", sub: "Tudo em stock e reservado." });
@@ -165,7 +170,9 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
   // o plano
   const nc = conflitos(p).length, dias = p.tasks.length ? Math.max(...p.tasks.map((t) => t.dia + t.dur)) : 0;
   L.push({ id: "pl", trilho: "plano", estado: "feito", who: null, t: p.origem === "orcamento" ? "Plano gerado do orçamento" : "Plano da obra", sub: `${p.tasks.length} ${p.tasks.length === 1 ? "tarefa" : "tarefas"} · ${nfmt(dias)} dias úteis${p.inicio ? ` · início ${p.inicio.split("-").reverse().slice(0, 2).join("/")}` : ""}` });
-  L.push(p.estado === "por aprovar"
+  L.push(p.estado === "por aprovar" && !d.fin.pago
+    ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
+    : p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
 

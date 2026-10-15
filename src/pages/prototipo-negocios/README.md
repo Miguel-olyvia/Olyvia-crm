@@ -881,3 +881,9 @@ Pedido do Ruben: "o orçamento gera o contrato; depois do contrato assinado, ger
   - **3. Orçamento detalhado:** por fase, com a quantidade, o preço unitário, o subtotal da fase, o desconto, a mão de obra e os materiais sem IVA, o IVA a 6% e a 23%, e o total.
   - **4 a 7:** o planeamento, o pagamento (prestações com as datas), as condições e a aceitação, com as assinaturas.
 - **O leitor** ("Abrir em ecrã inteiro", em todos os documentos): fundo de secretária, as páginas com sombra, zoom de 60% a 160%, "Imprimir ou PDF" (uma página por folha) e Escape para fechar. Abre no `body`, por portal, para cobrir o ecrã todo mesmo dentro de um passo animado.
+
+## O cliente fornece só produtos; o Catálogo virá do fornecedor (15/10/2026)
+
+- **O cliente fornece só produtos** (e o material das trocas sem produto escolhido). Os consumíveis e os equipamentos das receitas são sempre da empresa: saíram do passo "O cliente fornece", do orçamento e da proposta (`forneceCliente.ts` removido). Na proposta, "Fornecido por si" mostra quanto o cliente poupa em cada produto.
+- **Campos só de casa de banho** ("Toalheiro elétrico", "Mobilidade reduzida") não aparecem numa cozinha: `visivel()` em `campos.ts` aceita `se: { k: "@divisao" | "@divisoes", v: [...] }`.
+- **Para a migração (decisão do Ruben):** o Catálogo de produtos e os seus custos serão **inseridos pelo fornecedor, no portal do fornecedor** (nome, marca, referência, unidade, custo, disponibilidade, prazo, fotografias, com data de atualização). A empresa escolhe os fornecedores e produtos que usa, as margens/PVP e o serviço que instala cada produto. O orçamento guarda uma cópia do custo, por isso uma proposta enviada não muda com a atualização do fornecedor. No protótipo, o portal do fornecedor só escolhe o dia da entrega (`PortalFornecedor.tsx`) e o Catálogo é de exemplo.

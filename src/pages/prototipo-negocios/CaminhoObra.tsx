@@ -114,23 +114,20 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
 
       {/* o contrato, de onde tudo parte: com a assinatura do cliente (15/10), quem, quando e como, e o contrato à mão */}
       <ContratoAssinado ctx={ctx} d={d} />
-      {/* a ramificação: um traço que se abre para os três trilhos (só no computador) */}
-      <div className="ml-[17px] hidden h-5 w-0.5 bg-primary/60 lg:block" aria-hidden="true" />
-      <div className="relative hidden h-4 lg:block" aria-hidden="true">
-        <span className="absolute left-[16.66%] right-[16.66%] top-0 h-0.5 bg-primary/60" />
-        {[16.66, 50, 83.33].map((x) => <span key={x} className="absolute top-0 h-4 w-0.5 bg-primary/60" style={{ left: `${x}%` }} />)}
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:mt-0 lg:grid-cols-3">
-        {TRILHOS.map(({ k, t }) => {
+      {/* 15/10: o pagamento primeiro, a toda a largura; depois a ramificação para a encomenda e o plano, lado a lado,
+          bloqueados (com o cadeado) até o pagamento estar confirmado */}
+      {(() => {
+        const trilho = (k: Trilho, t: string) => {
           const L = P.filter((x) => x.trilho === k), Ico = ICONE[k], feito = L.every((x) => x.estado === "feito");
+          const preso = k !== "pag" && !d.fin.pago && !feito;
           return (
             <div key={k} className={cn("rounded-xl border p-4 transition-colors duration-500", feito ? "border-primary/30 bg-primary/[0.03]" : L.some((x) => x.estado === "agora") ? "border-border bg-card" : "border-border bg-muted/30")}>
               <div className="mb-4 flex items-center justify-between gap-2">
                 <h3 className="flex items-center gap-2 text-[15px] font-semibold"><Ico className="h-4 w-4 text-primary" aria-hidden="true" />{t}</h3>
                 {feito && <span className="inline-flex items-center gap-1 text-sm font-medium text-primary"><Check className="h-4 w-4" aria-hidden="true" />pronto</span>}
+                {preso && <span className="inline-flex items-center gap-1 text-sm text-muted-foreground"><Lock className="h-3.5 w-3.5" aria-hidden="true" />depois do pagamento</span>}
               </div>
-              <ol>{L.map((x, i) => passo(x, i === L.length - 1))}</ol>
+              <ol className={cn(preso && "opacity-70")}>{L.map((x, i) => passo(x, i === L.length - 1))}</ol>
               {k !== "pag" && (
                 <button type="button" onClick={() => setAberto(aberto === k ? null : k)} aria-expanded={aberto === k}
                   className="mt-3 inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
@@ -139,8 +136,21 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
               )}
             </div>
           );
-        })}
-      </div>
+        };
+        const [pag, ...resto] = TRILHOS;
+        return (
+          <>
+            <div className="mt-4">{trilho(pag.k, pag.t)}</div>
+            {/* a ramificação: um traço que se abre para os dois trilhos (só no computador) */}
+            <div className="relative hidden h-6 lg:block" aria-hidden="true">
+              <span className={cn("absolute left-1/2 top-0 h-3 w-0.5 transition-colors duration-500", d.fin.pago ? "bg-primary/60" : "bg-border")} />
+              <span className={cn("absolute left-1/4 right-1/4 top-3 h-0.5 transition-colors duration-500", d.fin.pago ? "bg-primary/60" : "bg-border")} />
+              {[25, 75].map((x) => <span key={x} className={cn("absolute top-3 h-3 w-0.5 transition-colors duration-500", d.fin.pago ? "bg-primary/60" : "bg-border")} style={{ left: `${x}%` }} />)}
+            </div>
+            <div className="mt-4 grid gap-4 lg:mt-0 lg:grid-cols-2">{resto.map(({ k, t }) => trilho(k, t))}</div>
+          </>
+        );
+      })()}
 
       {aberto === "ec" && <DetalheEncomenda ctx={ctx} />}
       {aberto === "plano" && <DetalhePlano d={d} ajustar={ctx.go(() => ctx.A.abrirPlano(d.id))} />}

@@ -14,6 +14,8 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 };
 // 1027 Tiago Almeida: contrato assinado a 08/10 → encomenda de cliente e plano por aprovar
 const preparar = () => { const S = seed(); return { S, A: acoes(S, () => {}, (fn) => fn()), d: S.deals.find((x) => x.id === 1027)! }; };
+// 15/10: a encomenda e o plano só se aprovam depois do pagamento confirmado
+const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.emitir(d.id); A.validar(d.id); };
 const estados = (S: ReturnType<typeof seed>, d: ReturnType<typeof preparar>["d"]) => Object.fromEntries(passosPreparacao(d, S).map((p) => [p.id, p.estado]));
 
 describe("do contrato à obra", () => {
@@ -23,21 +25,39 @@ describe("do contrato à obra", () => {
     expect(d.obra.ec!.linhas.length).toBeGreaterThan(0);
     expect(d.obra.plano).toMatchObject({ estado: "por aprovar", origem: "orcamento" });
     expect(d.obra.plano!.tasks.every((t) => t.fase && t.tec)).toBe(true);
-    expect(estados(S, d)).toMatchObject({ ec: "feito", "ec-ok": "agora", ef: "espera", pl: "feito", "pl-ok": "agora", ft: "agora", pg: "espera", go: "espera" });
+    // o pagamento vem primeiro: a encomenda e o plano esperam por ele
+    expect(estados(S, d)).toMatchObject({ ec: "feito", "ec-ok": "espera", ef: "espera", pl: "feito", "pl-ok": "espera", ft: "agora", pg: "espera", go: "espera" });
     expect(faltaParaArrancar(d)).toEqual(["aprovar a encomenda de cliente", "aprovar o plano", "emitir a fatura e receber o pagamento"]);
   });
 
+  it("antes do pagamento confirmado não se aprova a encomenda nem o plano; depois, sim", () => {
+    const { S, A, d } = preparar();
+    A.aprovarEc(d.id); A.aprovarPlano(d.id);
+    expect(d.obra.ec!.estado).toBe("por aprovar");
+    expect(d.obra.plano!.estado).toBe("por aprovar");
+    pagar(A, d);
+    expect(estados(S, d)).toMatchObject({ "ec-ok": "agora", "pl-ok": "agora", pg: "feito" });
+    A.aprovarEc(d.id); A.aprovarPlano(d.id);
+    expect(d.obra.ec!.estado).toBe("aprovada");
+    expect(d.obra.plano!.estado).toBe("aprovado");
+  });
+
   it("cada papel vê no Hoje o seu passo, em paralelo", () => {
-    const { S } = preparar();
+    const { S, A } = preparar();
     const de = (r: Parameters<typeof minhas>[1]) => minhas(S, r).filter((x) => x.d.id === 1027).map((x) => x.p.act);
+    // antes do pagamento, só o Financeiro tem um passo
+    expect(de("comercial")).toEqual([]);
+    expect(de("operacoes")).toEqual([]);
+    expect(de("financeiro")).toEqual(["emitir"]);
+    pagar(A, S.deals.find((x) => x.id === 1027)!);
     expect(de("comercial")).toEqual(["aprovarEc"]);
     expect(de("direcao")).toEqual([]);
     expect(de("operacoes")).toEqual(["aprovarPlano"]);
-    expect(de("financeiro")).toEqual(["emitir"]);
   });
 
   it("a encomenda aprovada reserva o stock e emite a encomenda a fornecedor; validada, encomendada; recebida", () => {
     const { S, A, d } = preparar();
+    pagar(A, d);
     const antes = { ...S.stock };
     A.aprovarEc(d.id);
     expect(d.obra.ec!.estado).toBe("aprovada");
@@ -47,12 +67,11 @@ describe("do contrato à obra", () => {
     const e = d.obra.enc!;
     expect(e).toMatchObject({ estado: "por confirmar", forn: "Madeiras e Cozinhas (exemplo)" });
     expect(e.linhas.map((x) => x.n)).toEqual(d.obra.ec!.linhas.filter((x) => x.falta > 0).map((x) => x.n));
-    expect(minhas(S, "financeiro").filter((x) => x.d.id === 1027).map((x) => x.p.act)).toEqual(["validarEf", "emitir"]);
+    expect(minhas(S, "financeiro").filter((x) => x.d.id === 1027).map((x) => x.p.act)).toEqual(["validarEf"]);
     A.escolherForn(d.id, "Cerâmica do Centro (exemplo)");
     S.role = "financeiro";
     A.validarEf(d.id);
     expect(e).toMatchObject({ estado: "encomendada", forn: "Cerâmica do Centro (exemplo)", validada: { por: "Sandra · Financeiro" } });
-    expect(d.hist[0].t).toMatch(/antes de o sinal entrar/);
     A.receberEnc(d.id);
     expect(estados(S, d).rec).toBe("feito");
   });
@@ -62,11 +81,10 @@ describe("do contrato à obra", () => {
     preencher(d, [OBRA[0]]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("por aprovar");
-    A.aprovarEc(d.id); A.validarEf(d.id); A.receberEnc(d.id); A.aprovarPlano(d.id);
-    expect(faltaParaArrancar(d)).toEqual(["emitir a fatura e receber o pagamento"]);
-    preencher(d, FINANCEIRO);
-    A.emitir(d.id); A.validar(d.id);
+    pagar(A, d);
     expect(d.fase).toBe(5);
+    expect(faltaParaArrancar(d)).toEqual(["aprovar a encomenda de cliente", "aprovar o plano"]);
+    A.aprovarEc(d.id); A.validarEf(d.id); A.receberEnc(d.id); A.aprovarPlano(d.id);
     expect(estados(S, d).go).toBe("agora");
     expect(minhas(S, "operacoes").filter((x) => x.d.id === 1027).map((x) => x.p.act)).toEqual(["arrancar"]);
     A.arrancar(d.id);
@@ -112,6 +130,7 @@ describe("os custos da encomenda", () => {
     // móveis e bancada partilham a parte de 70%
     const mov = ec.linhas.find((x) => /móveis/.test(x.n))!, banc = ec.linhas.find((x) => /Bancada/.test(x.n))!;
     expect(mov.custo * mov.q).toBeCloseTo(banc.custo * banc.q, 2);
+    pagar(A, d);
     A.aprovarEc(d.id);
     const e = d.obra.enc!;
     expect(totalEf(e)).toBeCloseTo(custoFalta(ec), 2);
@@ -122,6 +141,7 @@ describe("os custos da encomenda", () => {
 describe("a receção no Inventário", () => {
   it("o fornecedor confirma a entrega; o Armazém confere: parcial, depois o resto; só então se pode arrancar", () => {
     const { S, A, d } = preparar();
+    pagar(A, d);
     A.aprovarEc(d.id); A.validarEf(d.id);
     const e = d.obra.enc!;
     A.confirmarEntrega(d.id);
@@ -166,6 +186,7 @@ describe("férias em datas reais e a entrega antes do arranque", () => {
   });
   it("a entrega no dia do arranque avisa; começar no dia útil a seguir resolve", () => {
     const { A, d } = preparar();
+    pagar(A, d);
     A.aprovarEc(d.id); A.validarEf(d.id);
     const e = d.obra.enc!;
     e.entrega = "seg, 19 out"; e.entregaIso = "2026-10-19";

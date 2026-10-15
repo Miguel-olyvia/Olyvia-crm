@@ -74,15 +74,17 @@ describe("protótipo de Negócios", () => {
     expect(d().obra.ec?.estado).toBe("por aprovar");
     expect(d().obra.plano?.origem).toBe("orcamento");
     expect(conflitos(d().obra.plano!)).toHaveLength(0); // escolhe o técnico que não está de férias
+    // 15/10: o pagamento primeiro; só depois se aprovam a encomenda e o plano
     A.aprovarEc(id);
-    expect(d().obra.mats).toBeTruthy();
-    A.aprovarPlano(id);
-    if (d().obra.enc) { A.validarEf(id); A.receberEnc(id); }
-
+    expect(d().obra.ec?.estado).toBe("por aprovar");
     preencher(d(), FINANCEIRO);
     A.emitir(id);
     A.validar(id);
     expect(d().fase).toBe(5);
+    A.aprovarEc(id);
+    expect(d().obra.mats).toBeTruthy();
+    A.aprovarPlano(id);
+    if (d().obra.enc) { A.validarEf(id); A.receberEnc(id); }
     preencher(d(), [OBRA[0]]);
     A.arrancar(id);
     expect(d().obra.plano!.estado).toBe("em curso");

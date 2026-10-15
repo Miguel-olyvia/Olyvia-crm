@@ -1311,6 +1311,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     aprovarEc(id: number) {
       const d = deal(id), ec = d.obra.ec;
       if (!ec || ec.estado === "aprovada") return;
+      if (!d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "A encomenda aprova-se depois de o Financeiro confirmar o pagamento", kind: "bad" }); return; }
       for (const x of ec.linhas) {
         if (!x.k) continue;
         const ha = Math.min(x.q, Math.max(0, S.stock[x.k] || 0));
@@ -1565,6 +1566,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     aprovarPlano(id: number) {
       const d = deal(id);
+      if (d.obra.ec && !d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "O plano aprova-se depois de o Financeiro confirmar o pagamento", kind: "bad" }); return; }
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
       d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações");
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
