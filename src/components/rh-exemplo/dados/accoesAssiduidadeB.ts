@@ -43,19 +43,10 @@ export function contextoDaFalta(pessoaId: string): ContextoFalta {
   };
 }
 
-/** O RH MARCA a falta: valida o periodo e os cruzamentos e grava uma falta ativa, «sem justificacao». */
-export function marcarFaltaDoRh(
-  pessoaId: string,
-  periodo: PeriodoFalta,
-  motivo: string,
-  motivoCodigo: MotivoFalta,
-  /** Se a falta nasce de uma sugestao da fila, o alerta fica «falta marcada». */
-  alertaId: string | null = null,
-): ResultadoAccao {
-  const validacao = validarMarcacaoFalta(periodo, motivo, contextoDaFalta(pessoaId));
-  if (validacao.ok === false) return { erro: validacao.erro, detalhe: validacao.detalhe };
+/** Uma falta ativa «sem justificacao» no periodo dado (ainda nao guardada no store). */
+export function construirFalta(pessoaId: string, periodo: PeriodoFalta, motivoCodigo: MotivoFalta): Falta {
   const ficha = lerEstado().fichas[pessoaId];
-  const nova: Falta = {
+  return {
     id: novoIdGestao("fa"),
     pessoa_id: pessoaId,
     organization_id: ficha?.pessoa.organization_id ?? "",
@@ -82,6 +73,20 @@ export function marcarFaltaDoRh(
     anulacao_motivo: null,
     created_at: new Date().toISOString(),
   };
+}
+
+/** O RH MARCA a falta: valida o periodo e os cruzamentos e grava uma falta ativa, «sem justificacao». */
+export function marcarFaltaDoRh(
+  pessoaId: string,
+  periodo: PeriodoFalta,
+  motivo: string,
+  motivoCodigo: MotivoFalta,
+  /** Se a falta nasce de uma sugestao da fila, o alerta fica «falta marcada». */
+  alertaId: string | null = null,
+): ResultadoAccao {
+  const validacao = validarMarcacaoFalta(periodo, motivo, contextoDaFalta(pessoaId));
+  if (validacao.ok === false) return { erro: validacao.erro, detalhe: validacao.detalhe };
+  const nova = construirFalta(pessoaId, periodo, motivoCodigo);
   definirGestao((g) => ({ ...g, faltas: [...g.faltas, nova] }));
   if (alertaId) {
     const quem = nomeDeQuemUsa();

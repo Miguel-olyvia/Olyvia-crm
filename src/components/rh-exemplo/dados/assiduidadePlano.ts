@@ -54,6 +54,8 @@ export const PLANO_ASSIDUIDADE: PlanoDasPessoas = {
     "2026-09-11": [{ k: "fal", per: "t", motivo: "assuntos_pessoais", just: "jn", decididaPor: "p-marta" }],
     "2026-09-15": [{ k: "atr", min: 8, just: "sj" }],
     "2026-09-30": [{ k: "ext", min: 120, est: "p", origem: "fecho do mês, saiu às 20:00" }],
+    // Atraso de 14 min justificado (consulta médica) e aceite pelo RH como paga: a falta nasce justificada e paga.
+    "2026-10-06": [{ k: "atr", min: 14, just: "jp", id: "fa-andre-justificada" }],
     "2026-10-07": [{ k: "ext", min: 45, est: "p", origem: "descarga de camião fora de horas" }],
   },
   "p-rui": {
@@ -70,6 +72,8 @@ export const PLANO_ASSIDUIDADE: PlanoDasPessoas = {
   "p-ines": {
     "2026-09-17": [{ k: "ext", min: 150, est: "c", origem: "semana com 2 h 30 a mais" }],
     "2026-09-24": [{ k: "fal", per: "d", motivo: "ausencia_nao_comunicada", just: "sj" }],
+    // Atraso de 15 min sem falta marcada (falta sugerida): a Inês justificou e a justificação espera decisão do RH.
+    "2026-10-07": [{ k: "atr", min: 15, semFalta: true }],
     "2026-10-09": [{ k: "ext", min: 150, est: "p", origem: "semana com 2 h 30 a mais" }],
   },
   "p-tiago": {
@@ -97,6 +101,8 @@ export const PLANO_ASSIDUIDADE: PlanoDasPessoas = {
   "p-beatriz": {
     "2026-09-04": [{ k: "atr", min: 3 }],
     "2026-09-19": [{ k: "ext", min: 30, est: "p", origem: "saiu às 18:30" }],
+    // Atraso de 12 min sem falta marcada: a justificação da Beatriz foi recusada e ainda há prazo para voltar a enviar.
+    "2026-10-09": [{ k: "atr", min: 12, semFalta: true }],
   },
   "p-daniel": {
     "2026-09-16": [{ k: "fal", per: "d", motivo: "doenca", just: "pd" }],

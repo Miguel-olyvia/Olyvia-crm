@@ -7,10 +7,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DecidirHoraExtraDialog, type PedidoDecisao } from "@/components/rh-exemplo/fluxosC/DecidirHoraExtraDialog";
+import { JustificacaoDiaRh } from "@/components/rh-exemplo/fluxosB/justificacaoDia/JustificacaoDiaRh";
 import { EstadoHoraExtraBadge } from "@/components/rh-exemplo/fluxosC/EstadoHoraExtraBadge";
 import { estadoVisivel, type HoraExtra } from "@/components/rh-exemplo/fluxosC/horasExtraRegras";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ChipDoDia } from "./ChipDoDia";
+import { JustificacaoDeDiaPessoa } from "./JustificacaoDeDiaPessoa";
 import { JustificacaoDoDia } from "./JustificacaoDoDia";
 import { duracao, duracaoComSinal, textoFeito, textoPrevisto } from "./formatos";
 import type { DiaCalendario } from "./montarMes";
@@ -125,11 +127,17 @@ export function DetalheDoDia({ dia, dataLonga, pessoaNome, podeDecidir, podeCorr
               </Seccao>
             )}
             {souAPessoa ? (
-              <JustificacaoDoDia pessoaId={pessoaId} data={dia.data} />
+              <>
+                <JustificacaoDeDiaPessoa dia={dia} pessoaId={pessoaId} />
+                <JustificacaoDoDia pessoaId={pessoaId} data={dia.data} />
+              </>
             ) : (
-              <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => aoAbrirRegisto(dia.data)}>
-                {t(podeCorrigir ? "rhCal.detalhe.corrigir" : "rhCal.detalhe.verRegisto")}
-              </Button>
+              <>
+                <JustificacaoDiaRh pessoaId={pessoaId} pessoaNome={pessoaNome} data={dia.data} />
+                <Button type="button" variant="outline" className="min-h-11 w-full" onClick={() => aoAbrirRegisto(dia.data)}>
+                  {t(podeCorrigir ? "rhCal.detalhe.corrigir" : "rhCal.detalhe.verRegisto")}
+                </Button>
+              </>
             )}
           </div>
         </SheetContent>

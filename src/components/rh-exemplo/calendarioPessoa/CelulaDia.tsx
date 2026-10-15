@@ -4,7 +4,10 @@
  */
 import type { KeyboardEvent } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import type { EstadoDoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { ChipDoDia } from "./ChipDoDia";
+import { IndicadorJustificacao } from "./IndicadorJustificacao";
+import { textoDoIndicador } from "./aspectoDoIndicador";
 import { idDaCelula, textoFeito, textoPrevisto } from "./formatos";
 import { textoDoChip } from "./textosChips";
 import type { DiaCalendario } from "./montarMes";
@@ -33,15 +36,19 @@ interface Props {
   dataLonga: string;
   diaSemanaCurto: string;
   aoAbrir: (data: string) => void;
+  /** O estado da justificação do dia (falta sugerida ou atraso) e quem vê, para o indicador de texto. */
+  justificacao?: EstadoDoDia;
+  souAPessoa?: boolean;
 }
 
-export function CelulaDia({ dia, dataLonga, diaSemanaCurto, aoAbrir }: Props) {
+export function CelulaDia({ dia, dataLonga, diaSemanaCurto, aoAbrir, justificacao = "nao_aplica", souAPessoa = false }: Props) {
   const { t } = useTranslation();
   const previsto = textoPrevisto(dia.previsto, t);
   const feito = textoFeito({ previsto: dia.previsto, feitos: dia.feitos, feitoMin: dia.feitoMin, passado: dia.passado, hoje: dia.hoje }, t);
   const visiveis = dia.chips.slice(0, MAX_CHIPS);
   const resto = dia.chips.length - visiveis.length;
-  const falada = [dataLonga, previsto, feito, ...dia.chips.map((c) => textoDoChip(c, t))].filter(Boolean).join(". ");
+  const indicador = textoDoIndicador(justificacao, souAPessoa, t);
+  const falada = [dataLonga, previsto, feito, ...dia.chips.map((c) => textoDoChip(c, t)), indicador].filter(Boolean).join(". ");
   const apagado = SEM_HORARIO.has(dia.previsto.kind) && dia.feitos.length === 0;
 
   return (
@@ -63,6 +70,7 @@ export function CelulaDia({ dia, dataLonga, diaSemanaCurto, aoAbrir }: Props) {
       </span>
       <span className="leading-snug">{previsto}</span>
       {feito && <span className="font-medium leading-snug text-foreground">{feito}</span>}
+      {indicador && <IndicadorJustificacao estado={justificacao} souAPessoa={souAPessoa} />}
       {visiveis.length > 0 && (
         <span className="flex flex-col items-start gap-1">
           {visiveis.map((chip, i) => <ChipDoDia key={`${chip.tipo}-${chip.refId ?? i}`} chip={chip} />)}

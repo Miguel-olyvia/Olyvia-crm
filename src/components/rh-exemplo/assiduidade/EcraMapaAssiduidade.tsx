@@ -26,6 +26,8 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
 import { FilaAlertasFimDoDia } from "@/components/rh-exemplo/fluxosB/alertas/FilaAlertasFimDoDia";
 import { FaltasPainel } from "@/components/rh-exemplo/fluxosB/faltas/FaltasPainel";
+import { FilaJustificacoesDoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/FilaJustificacoesDoDia";
+import { usePendentesJustificacaoDia } from "@/components/rh-exemplo/fluxosB/justificacaoDia/usePendentesJustificacaoDia";
 import { HorasExtraNaFila, usePendentesHorasExtra } from "@/components/rh-exemplo/fluxosC/HorasExtraNaFila";
 import { useFluxosB } from "@/components/rh-exemplo/dados/lojaFluxosB";
 import { alertasPorTratar } from "@/components/rh-exemplo/lib/alertasFimDia";
@@ -78,7 +80,8 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
   const [aberto, setAberto] = useState<{ pessoaId: string; data: string } | null>(null);
   const horasExtraPendentes = usePendentesHorasExtra();
   const alertasPendentes = useFluxosB((e) => alertasPorTratar(e.alertas).length);
-  const porTratarNaFila = horasExtraPendentes + alertasPendentes;
+  const justificacoesPorDecidir = usePendentesJustificacaoDia();
+  const porTratarNaFila = horasExtraPendentes + alertasPendentes + justificacoesPorDecidir;
 
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
@@ -171,6 +174,7 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
 
           <TabsContent value="fila" className="space-y-4">
             <HorasExtraNaFila />
+            <FilaJustificacoesDoDia />
             <FilaAlertasFimDoDia />
           </TabsContent>
 

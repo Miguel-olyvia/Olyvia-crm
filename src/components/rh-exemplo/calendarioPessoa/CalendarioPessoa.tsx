@@ -15,6 +15,7 @@ import type { PermissoesAssiduidade } from "@/components/rh-exemplo/tiposAssidui
 import { CabecalhoMes } from "./CabecalhoMes";
 import { CelulaDia } from "./CelulaDia";
 import { DetalheDoDia } from "./DetalheDoDia";
+import { useSituacoesDoMes } from "./situacaoDoMes";
 import { useMesDaPessoa } from "./useMesDaPessoa";
 
 export interface MesVisivel {
@@ -43,6 +44,7 @@ export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPe
   const { t, language } = useTranslation();
   const dados = useMesDaPessoa(pessoaId, mes.ano, mes.mes);
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
+  const situacoes = useSituacoesDoMes(pessoaId, dados?.dias);
 
   const formatar = useMemo(() => ({
     mes: new Intl.DateTimeFormat(language, { month: "long", year: "numeric", timeZone: "UTC" }),
@@ -81,6 +83,8 @@ export function CalendarioPessoa({ pessoaId, pessoaNome, mes, aoMudarMes, souAPe
               dataLonga={formatar.dia.format(noDia(dia.data))}
               diaSemanaCurto={formatar.curto.format(noDia(dia.data))}
               aoAbrir={setDiaAberto}
+              justificacao={situacoes.get(dia.data)?.situacao.estado}
+              souAPessoa={souAPessoa}
             />
           </li>
         ))}

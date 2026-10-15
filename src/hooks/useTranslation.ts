@@ -25,6 +25,7 @@ import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao"
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
 import { rhExemploPortalTranslations } from "@/translations/rhExemploPortal";
 import { rhExemploOrganizacaoTranslations } from "@/translations/rhExemploOrganizacao";
+import { rhExemploJustificacoesTranslations } from "@/translations/rhExemploJustificacoes";
 import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
 import { canalDenunciasMinhaAreaTranslations } from "@/translations/canalDenunciasMinhaArea";
 
@@ -121,6 +122,11 @@ Object.keys(rhExemploPortalTranslations).forEach((lang) => {
 // Página «Organização» do RH de exemplo: grupo, empresas, filiais, centros e a ligação das pessoas (`rhOrg.*`).
 Object.keys(rhExemploOrganizacaoTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploOrganizacaoTranslations[lang as keyof typeof rhExemploOrganizacaoTranslations] };
+});
+
+// Justificar um dia com falta sugerida ou atraso: a pessoa envia, o RH decide (`rhJust.*`).
+Object.keys(rhExemploJustificacoesTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploJustificacoesTranslations[lang as keyof typeof rhExemploJustificacoesTranslations] };
 });
 
 // Frente D: banco de horas na ficha e horas extra pendentes na fila de trabalho (`rhFluxosD.*`).

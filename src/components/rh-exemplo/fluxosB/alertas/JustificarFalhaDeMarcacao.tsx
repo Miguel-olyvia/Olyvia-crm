@@ -25,6 +25,8 @@ import {
 } from "@/components/rh-exemplo/lib/alertasFimDia";
 import { hojeIso } from "@/components/rh-exemplo/lib/assiduidade";
 import { MOTIVO_MINIMO_CARACTERES } from "@/components/rh-exemplo/lib/horarioTipos";
+import { useJustificacoesDeDiaDaPessoa } from "@/components/rh-exemplo/calendarioPessoa/situacaoDoMes";
+import { ESTADO_DA_JUSTIFICACAO, type EstadoJustificacaoDia, type JustificacaoDia } from "@/components/rh-exemplo/lib/justificacaoDia";
 import { useJustificacoesDaPessoa } from "./useJustificacoesDaPessoa";
 
 /** O formulário de justificação (hora real, motivo, anexo); usado aqui e no detalhe do dia do calendário. */
@@ -92,16 +94,37 @@ function LinhaEnviada({ j }: { j: JustificacaoPicagem }) {
   );
 }
 
-/** Um grupo das justificações já enviadas (pendentes, aceites ou recusadas), com o número no título. */
-function GrupoEnviadas({ chave, itens }: { chave: "pendentes" | "aceites" | "recusadas"; itens: JustificacaoPicagem[] }) {
+/** Uma justificação de falta sugerida ou atraso, com os mesmos estados que as de picagem esquecida. */
+function LinhaEnviadaDia({ j }: { j: JustificacaoDia }) {
   const { t } = useTranslation();
-  if (itens.length === 0) return null;
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid={`rha-jd-${j.id}`}>
+      <Badge variant="secondary" className="font-normal">{t(`rhJust.estado.${ESTADO_DA_JUSTIFICACAO[j.estado]}`)}</Badge>
+      <span className="tabular-nums">{t("rhJust.aba.linha", { dia: formatarData(j.data), tipo: t(`rhJust.tipo.${j.tipo}`) })}</span>
+      <span className="text-muted-foreground">{j.motivo}</span>
+      {j.estado === "recusada" && j.motivoRecusa && <span className="text-destructive">{t("rhJust.motivoRH", { motivo: j.motivoRecusa })}</span>}
+    </li>
+  );
+}
+
+const GRUPO_DO_ESTADO: Record<EstadoJustificacaoDia, "pendentes" | "aceites" | "recusadas"> = {
+  pendente: "pendentes", aceite_paga: "aceites", aceite_nao_paga: "aceites", recusada: "recusadas",
+};
+
+/** Um grupo das justificações já enviadas (pendentes, aceites ou recusadas), com o número no título. */
+function GrupoEnviadas({ chave, itens, doDia }: { chave: "pendentes" | "aceites" | "recusadas"; itens: JustificacaoPicagem[]; doDia: JustificacaoDia[] }) {
+  const { t } = useTranslation();
+  const dia = doDia.filter((j) => GRUPO_DO_ESTADO[j.estado] === chave);
+  if (itens.length + dia.length === 0) return null;
   return (
     <section aria-label={t(`rhAbas.just.${chave}`)} className="space-y-2 border-t pt-3 text-sm" data-testid={`rha-just-${chave}`}>
       <h4 className="font-medium">
-        {t(`rhAbas.just.${chave}`)} <span className="tabular-nums text-muted-foreground">({itens.length})</span>
+        {t(`rhAbas.just.${chave}`)} <span className="tabular-nums text-muted-foreground">({itens.length + dia.length})</span>
       </h4>
-      <ul className="space-y-1">{itens.map((j) => <LinhaEnviada key={j.id} j={j} />)}</ul>
+      <ul className="space-y-1">
+        {itens.map((j) => <LinhaEnviada key={j.id} j={j} />)}
+        {dia.map((j) => <LinhaEnviadaDia key={j.id} j={j} />)}
+      </ul>
     </section>
   );
 }
@@ -109,9 +132,10 @@ function GrupoEnviadas({ chave, itens }: { chave: "pendentes" | "aceites" | "rec
 export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
   const { t } = useTranslation();
   const { porJustificar: meus, menorPrazoDias, pendentes, aceites, recusadas } = useJustificacoesDaPessoa(pessoaId);
+  const doDia = useJustificacoesDeDiaDaPessoa(pessoaId);
   const [aberto, setAberto] = useState<string | null>(null);
   const hoje = hojeIso();
-  const semNada = meus.length === 0 && pendentes.length + aceites.length + recusadas.length === 0;
+  const semNada = meus.length === 0 && pendentes.length + aceites.length + recusadas.length + doDia.length === 0;
 
   return (
     <Card>
@@ -165,9 +189,9 @@ export function JustificarFalhaDeMarcacao({ pessoaId }: { pessoaId: string }) {
           })}
         </ul>
 
-        <GrupoEnviadas chave="pendentes" itens={pendentes} />
-        <GrupoEnviadas chave="aceites" itens={aceites} />
-        <GrupoEnviadas chave="recusadas" itens={recusadas} />
+        <GrupoEnviadas chave="pendentes" itens={pendentes} doDia={doDia} />
+        <GrupoEnviadas chave="aceites" itens={aceites} doDia={doDia} />
+        <GrupoEnviadas chave="recusadas" itens={recusadas} doDia={doDia} />
       </CardContent>
     </Card>
   );
