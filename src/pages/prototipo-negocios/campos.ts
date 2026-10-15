@@ -19,6 +19,8 @@ export interface Def {
   se?: { k: string; v: string[] };
   /** Por defeito tudo é obrigatório para passar de fase, menos o texto livre (notas). */
   opcional?: boolean;
+  /** Escolha: a opção que é preciso marcar para avançar (ex.: a visita "Feita"). Enquanto não está escolhida, tem o contorno tracejado do acento. */
+  avanca?: string;
   /** Contador: limites e o nome do zero (ex.: andar 0 = "R/C"). */
   min?: number;
   max?: number;
@@ -297,7 +299,7 @@ export function emFalta(gs: Grupo[], v: Record<string, string>): Def[] {
 // materiais…). Os campos de cada uma guardam-se em d.f com o prefixo v{n}_.
 const VISITA_BASE: Def[] = [
   { k: "tipo", l: "Tipo de visita", t: "escolha", op: ["Levantamento", "Medição técnica", "Escolha de materiais", "Revisita"] },
-  { k: "estado", l: "Estado", t: "escolha", op: ["Marcada", "Feita", "Cancelada"] },
+  { k: "estado", l: "Estado", t: "escolha", op: ["Marcada", "Feita", "Cancelada"], avanca: "Feita" },
   { k: "data", l: "Dia", t: "data" },
   { k: "hora", l: "Hora", t: "escolha", op: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"] },
   { k: "quem", l: "Quem vai", t: "escolha", op: ["Rúben (comercial)", "Hugo (técnico)", "Filipe (Operações)"] },

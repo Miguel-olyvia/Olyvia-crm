@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, precoProduto, servicosTrazidos } from "./produtosVisita";
+import { Ilustracao, ilustracaoDe } from "./ilustracoes";
 
 export { PREFIXO_CLIENTE, PREFIXO_PROD };
 
@@ -16,6 +17,40 @@ export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A"
   const o = d.orc!, prod = d.visita.prod ?? [], compra = Object.values(d.visita.clienteCompra ?? {});
   const traz = Object.entries(servicosTrazidos(prod));
   const t = simples ? "text-[15px]" : "text-sm";
+  // 15/10, a página simples: uma lista limpa (a ilustração, o nome e a quantidade, o preço à direita); a instalação que o
+  // produto traz vai por baixo do próprio produto, e não numa frase à parte
+  if (simples) {
+    return (
+      <section aria-labelledby={`prod-${d.id}`}>
+        <h3 id={`prod-${d.id}`} className="flex items-center gap-2 text-base font-semibold">
+          <PackageCheck className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Produtos da visita
+          {prod.length > 0 && <span className="font-normal text-muted-foreground">· {prod.length}</span>}
+        </h3>
+        {prod.length || compra.length ? (
+          <ul className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)]">
+            {prod.map((p) => {
+              const inst = p.svc && p.q > 0 ? S.svc[p.svc] : null;
+              return (
+                <li key={p.id} className="flex items-center gap-3 py-3">
+                  <Ilustracao k={ilustracaoDe(p.n)} className="h-10 w-10 shrink-0" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[15px] font-medium leading-snug">{p.n}</span>
+                    <span className="block text-sm text-muted-foreground">
+                      {nfmt(p.q)} {p.un}{p.cliente ? " · o cliente fornece" : ""}{inst ? ` · com ${inst.n.toLowerCase()}` : ""}
+                    </span>
+                  </span>
+                  <span className={cn("shrink-0 whitespace-nowrap text-[15px] tabular-nums", p.cliente ? "text-muted-foreground" : "font-medium")}>{p.cliente ? "—" : `${eur(precoProduto(p))} €`}</span>
+                </li>
+              );
+            })}
+            {compra.map((c) => <li key={c} className="py-3 text-[15px]"><span className="text-muted-foreground">O cliente compra:</span> {c}</li>)}
+          </ul>
+        ) : (
+          <p className="mt-1 text-[15px] text-muted-foreground">Nenhum produto escolhido na visita: os materiais são a estimativa do modelo.</p>
+        )}
+      </section>
+    );
+  }
   return (
     <section aria-labelledby={`prod-${d.id}`} className={simples ? "" : "mt-4"}>
       <h3 id={`prod-${d.id}`} className={cn("flex items-center gap-2 font-semibold", simples ? "text-base" : "text-sm")}>

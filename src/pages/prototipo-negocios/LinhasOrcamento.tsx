@@ -166,9 +166,17 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
     </ul>
     {/* a demolição e entulho: nos orçamentos novos já vem ligada; nos outros liga-se aqui */}
     {!fechado && catalogoLigado() && (
-      <button type="button" onClick={() => run(() => A.demolicaoLigar(d.id, !o.demolicao))}
-        className="mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
-        <Hammer className="h-4 w-4" aria-hidden="true" />{o.demolicao ? "Não calcular a demolição e o entulho" : "Calcular a demolição e o entulho"}
+      // um interruptor com o estado à vista (antes era uma ligação que trocava de texto)
+      <button type="button" role="switch" aria-checked={!!o.demolicao} onClick={() => run(() => A.demolicaoLigar(d.id, !o.demolicao))}
+        className="mt-3 flex min-h-12 w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-2 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-primary">
+        <Hammer className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-medium">Calcular a demolição e o entulho</span>
+          <span className="block text-sm text-muted-foreground">{o.demolicao ? "Numa só linha, com o custo do Catálogo" : "Desligado: a demolição não entra no orçamento"}</span>
+        </span>
+        <span aria-hidden="true" className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", o.demolicao ? "bg-primary" : "bg-input")}>
+          <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", o.demolicao ? "left-[22px]" : "left-0.5")} />
+        </span>
       </button>
     )}
     </>

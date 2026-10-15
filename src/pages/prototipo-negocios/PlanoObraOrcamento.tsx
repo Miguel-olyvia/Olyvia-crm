@@ -57,13 +57,14 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
   const fimData = calendario[nDias - 1];
   if (!P.tarefas.length) return null;
 
-  const estreito = largura < 640;
-  const rotuloW = estreito ? 128 : 216;
-  const folga = 104; // à direita da grelha: o custo ao lado da última barra
-  const colW = Math.max(estreito ? 52 : 56, (largura - rotuloW - folga) / nDias);
+  // 15/10: uma coluna só, a pensar no telemóvel e na coluna estreita do computador. O nome de cada tarefa vai numa linha
+  // por cima da sua barra (nunca cortado), e a grelha dos dias usa a largura toda (abaixo do mínimo, desliza).
+  const PAD = 16;
+  const visivel = Math.max(240, largura - 2 * PAD);
+  const colW = Math.max(48, visivel / nDias);
   const gradeW = colW * nDias;
   const X = (dia: number) => dia * colW;
-
+  const linhaW = Math.min(visivel, gradeW); // a linha do nome fica parada ao deslizar a grelha
   const naProposta = Number(d.f.prazo_exec) || 0, doGantt = prazoProposta(P.tarefas);
   const delta = P.tarefas.reduce((a, t) => a + t.delta, 0);
   const temDem = (f: FasePlano) => f.tarefas.some((t) => t.chave === TAREFA_DEMOLICAO);
@@ -94,205 +95,213 @@ export function PlanoObra({ ctx, d }: { ctx: Pick<Ctx, "S" | "A" | "run">; d: Ne
     if (t.dias + passo >= 0.5) run(() => A.prazoTarefa(d.id, t.chave, t.dias + passo));
   };
 
-  const tarefaAberta = P.tarefas.find((t) => t.chave === aberta) ?? null;
   const sugerido = sugerirPorFases(P);
   const prestAtual = d.f.pagamento === PAGAMENTO_FASES ? (o.pagFases?.length ? o.pagFases : sugerido) : prestacoes(d.f.pagamento);
 
   return (
-    <section aria-labelledby={`plano-${d.id}`} className="space-y-4">
-      {/* ------------------------------------------------ cabeçalho: duração, datas e início */}
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <h3 id={`plano-${d.id}`} className="flex items-center gap-2 text-base font-semibold"><CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Plano da obra</h3>
-          <p className="mt-1 flex flex-wrap items-baseline gap-x-2">
-            <Contagem valor={P.dias} fmt={(n) => nfmt(Math.round(n * 2) / 2)} className="text-3xl font-semibold tracking-tight tabular-nums" />
-            <span className="text-[15px] text-muted-foreground">{P.dias === 1 ? "dia útil" : "dias úteis"}</span>
-          </p>
-          <p className="text-[15px] text-foreground">
-            {dataCurta(calendario[0])} <span aria-hidden="true" className="text-muted-foreground">→</span><span className="sr-only"> até </span> {dataCurta(fimData)}
-          </p>
-          {saltados.length > 0 && (
-            <p className="text-sm text-muted-foreground">Sem contar {saltados.map((s) => `${s.data.getDate()} ${nomeMes(s.data)} (${s.nome})`).join(", ")}.</p>
+    <section aria-labelledby={`plano-${d.id}`} className="space-y-6">
+      {/* ------------------------------------------------ cabeçalho: a duração e as datas */}
+      <div>
+        <h3 id={`plano-${d.id}`} className="flex items-center gap-2 text-base font-semibold"><CalendarDays className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Plano da obra</h3>
+        <p className="mt-2 flex flex-wrap items-baseline gap-x-2">
+          <Contagem valor={P.dias} fmt={(n) => nfmt(Math.round(n * 2) / 2)} className="text-3xl font-semibold tracking-tight tabular-nums" />
+          <span className="text-[15px] text-muted-foreground">{P.dias === 1 ? "dia útil" : "dias úteis"}</span>
+          <span className="text-[15px] text-foreground">
+            · {dataCurta(calendario[0])} <span aria-hidden="true" className="text-muted-foreground">→</span><span className="sr-only"> até </span> {dataCurta(fimData)}
+          </span>
+        </p>
+        {saltados.length > 0 && (
+          <p className="text-sm text-muted-foreground">Sem contar {saltados.map((s) => `${s.data.getDate()} ${nomeMes(s.data)} (${s.nome})`).join(", ")}.</p>
+        )}
+      </div>
+
+      {/* ------------------------------------------------ o início, num toque */}
+      <div className="space-y-2">
+        <p id={`ini-${d.id}`} className="text-[15px] font-medium">Começa</p>
+        <div role="group" aria-labelledby={`ini-${d.id}`} className="flex flex-wrap gap-2">
+          {rapidos.map((r) => {
+            const on = !outra && isoDia(inicio) === isoDia(r.data);
+            return (
+              <button key={r.k} type="button" aria-pressed={on} onClick={() => { setOutra(false); run(() => A.inicioObra(d.id, r.k === "seg" ? null : isoDia(r.data))); }}
+                className={cn("min-h-11 whitespace-nowrap rounded-full border px-4 text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+                  on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>
+                {r.nome}<span className={cn("ml-1.5 text-sm", on ? "text-primary-foreground/90" : "text-muted-foreground")}>{r.data.getDate()} {nomeMes(r.data)}</span>
+              </button>
+            );
+          })}
+          {outra ? (
+            <input type="date" aria-label="Data de início" value={isoDia(inicio)} autoFocus
+              onChange={(e) => e.target.value && run(() => A.inicioObra(d.id, e.target.value))}
+              className="min-h-11 rounded-full border border-primary bg-card px-4 text-[15px]" />
+          ) : (
+            <button type="button" onClick={() => setOutra(true)} className="min-h-11 whitespace-nowrap rounded-full px-3 text-[15px] font-medium text-primary hover:underline">Outra data</button>
           )}
-        </div>
-        <div className="grid gap-1.5">
-          <span id={`ini-${d.id}`} className="text-sm text-muted-foreground">Começa</span>
-          <div role="group" aria-labelledby={`ini-${d.id}`} className="-mx-1 flex gap-2 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible">
-            {rapidos.map((r) => {
-              const on = !outra && isoDia(inicio) === isoDia(r.data);
-              return (
-                <button key={r.k} type="button" aria-pressed={on} onClick={() => { setOutra(false); run(() => A.inicioObra(d.id, r.k === "seg" ? null : isoDia(r.data))); }}
-                  className={cn("min-h-11 shrink-0 whitespace-nowrap rounded-full border px-4 text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
-                    on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>
-                  {r.nome}<span className={cn("ml-1.5 text-sm", on ? "text-primary-foreground/90" : "text-muted-foreground")}>{r.data.getDate()} {nomeMes(r.data)}</span>
-                </button>
-              );
-            })}
-            {outra ? (
-              <input type="date" aria-label="Data de início" value={isoDia(inicio)} autoFocus
-                onChange={(e) => e.target.value && run(() => A.inicioObra(d.id, e.target.value))}
-                className="min-h-11 rounded-full border border-primary bg-card px-4 text-[15px]" />
-            ) : (
-              <button type="button" onClick={() => setOutra(true)} className="min-h-11 shrink-0 whitespace-nowrap rounded-full px-3 text-[15px] font-medium text-primary hover:underline">Outra data</button>
-            )}
-          </div>
         </div>
       </div>
 
-      <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-        Na proposta: <b className="font-semibold text-foreground tabular-nums">{naProposta ? `${naProposta} dias úteis` : "a definir"}</b>
-        {naProposta !== doGantt && !fechado && (
-          <button type="button" onClick={() => run(() => A.usarPrazoPrevisto(d.id))} className="inline-flex min-h-9 items-center font-medium text-primary underline-offset-4 hover:underline">
-            Usar {doGantt} dias na proposta
-          </button>
-        )}
-      </p>
+      {/* ------------------------------------------------ o prazo na proposta e o reforço da equipa: uma linha cada, com a sua escolha */}
+      <dl className="divide-y divide-border border-y border-border">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3">
+          <dt className="text-[15px]">Prazo na proposta</dt>
+          <dd className="flex flex-wrap items-center gap-x-3 text-[15px]">
+            <b className="font-semibold tabular-nums">{naProposta ? `${naProposta} dias úteis` : "a definir"}</b>
+            {naProposta !== doGantt && !fechado && (
+              <button type="button" onClick={() => run(() => A.usarPrazoPrevisto(d.id))} className="inline-flex min-h-9 items-center font-medium text-primary underline-offset-4 hover:underline">
+                Usar {doGantt} dias na proposta
+              </button>
+            )}
+          </dd>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+          <dt className="text-[15px]">Equipa por ofício<span className="block text-sm text-muted-foreground">as mesmas horas: o custo não muda</span></dt>
+          <dd>
+            <div role="group" aria-label="Equipa por ofício" className="inline-flex rounded-full border border-input bg-card p-0.5">
+              {[1, 2].map((n) => {
+                const on = equipa === n, outroP = n === equipa ? P : alternativa;
+                const ganho = n !== equipa ? P.dias - outroP.dias : 0;
+                return (
+                  <button key={n} type="button" aria-pressed={on} disabled={fechado} onClick={() => run(() => A.equipaObra(d.id, n))}
+                    className={cn("min-h-10 whitespace-nowrap rounded-full px-4 text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60",
+                      on ? "bg-foreground font-medium text-background" : "text-foreground hover:bg-muted")}>
+                    {n === 1 ? "1 pessoa" : "2 pessoas"}
+                    {ganho !== 0 && <span className={cn("ml-1.5 text-sm tabular-nums", ganho > 0 ? "text-success" : "text-muted-foreground")}>{ganho > 0 ? "−" : "+"}{dias(Math.abs(ganho))}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </dd>
+        </div>
+      </dl>
       {delta !== 0 && (
-        <p className="text-sm text-warning">Os dias mudados à mão {delta > 0 ? "somam" : "tiram"} {eur0(Math.abs(delta))} ao custo. O preço ao cliente não muda.</p>
+        <p className="-mt-3 flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />Os dias mudados à mão {delta > 0 ? "somam" : "tiram"} {eur0(Math.abs(delta))} ao custo. O preço ao cliente não muda.</p>
       )}
 
-      {/* o reforço: mais gente por ofício, menos dias, as mesmas horas */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span id={`eq-${d.id}`} className="text-sm text-muted-foreground">Equipa por ofício</span>
-        <div role="group" aria-labelledby={`eq-${d.id}`} className="inline-flex rounded-full border border-input bg-card p-0.5">
-          {[1, 2].map((n) => {
-            const on = equipa === n, outroP = n === equipa ? P : alternativa;
-            const ganho = n !== equipa ? P.dias - outroP.dias : 0;
+      {/* ------------------------------------------------ as fases: uma lista; o nome inteiro à esquerda, os números à direita */}
+      <div className="space-y-2">
+        <p className="text-[15px] font-medium">Fases <span className="font-normal text-muted-foreground">· toque para realçar as tarefas</span></p>
+        <div role="group" aria-label="Fases da obra" className="divide-y divide-border rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
+          {P.fases.map((f) => {
+            const on = faseOn === f.n, dur = f.fim - f.inicio, baixa = f.preco > 0 && f.margem < S.cfg.min / 100;
             return (
-              <button key={n} type="button" aria-pressed={on} disabled={fechado} onClick={() => run(() => A.equipaObra(d.id, n))}
-                className={cn("min-h-10 rounded-full px-4 text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60",
-                  on ? "bg-foreground font-medium text-background" : "text-foreground hover:bg-muted")}>
-                {n === 1 ? "1 pessoa" : "2 pessoas"}
-                {ganho !== 0 && <span className={cn("ml-1.5 text-sm tabular-nums", ganho > 0 ? "text-success" : "text-muted-foreground")}>{ganho > 0 ? "−" : "+"}{dias(Math.abs(ganho))}</span>}
+              <button key={f.n} type="button" aria-pressed={on} onClick={() => setFaseOn(on ? null : f.n)}
+                className={cn("flex w-full items-start gap-3 px-4 py-3 text-left outline-none transition-[background-color,opacity] first:rounded-t-2xl last:rounded-b-2xl focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary",
+                  on ? "bg-primary/[0.06]" : "hover:bg-muted/50", faseOn != null && !on && "opacity-50")}>
+                <span aria-hidden="true" className="mt-1 h-4 w-1.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-medium leading-snug"><span className="text-muted-foreground">{f.n} ·</span> {f.curto}</span>
+                  <span className="block text-sm text-muted-foreground">
+                    {dur > 0 ? `${dataCurta(calendario[Math.floor(f.inicio)])} · ${dias(dur)}` : "sem dias"}
+                    {veCustoFase(f) && <> · custo {eur0(f.custo)}{f.custoMat > 0 && <> (materiais {eur0(f.custoMat)})</>}</>}
+                  </span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="block whitespace-nowrap text-[15px] font-semibold tabular-nums">{eur0(f.preco)}</span>
+                  {veCustoFase(f) && f.preco > 0 && (
+                    <span className={cn("flex items-center justify-end gap-1 whitespace-nowrap text-sm tabular-nums", baixa ? "font-medium text-destructive" : "text-muted-foreground")}>
+                      {baixa && <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />}margem {pct(f.margem)}
+                    </span>
+                  )}
+                </span>
               </button>
             );
           })}
         </div>
-        <span className="text-sm text-muted-foreground">as mesmas horas: o custo não muda</span>
-      </div>
-
-      {/* ------------------------------------------------ as fases */}
-      <div role="group" aria-label="Fases da obra" className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:overflow-visible" style={{ gridTemplateColumns: `repeat(${P.fases.length}, minmax(0, 1fr))` }}>
-        {P.fases.map((f) => {
-          const on = faseOn === f.n, dur = f.fim - f.inicio;
-          return (
-            <button key={f.n} type="button" aria-pressed={on} onClick={() => setFaseOn(on ? null : f.n)}
-              className={cn("relative min-w-[172px] snap-start overflow-hidden rounded-xl border bg-card p-3 pt-4 text-left outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
-                on ? "border-primary shadow-[0_6px_20px_-12px_hsl(var(--primary)/0.7)]" : "border-border hover:border-foreground/30",
-                faseOn != null && !on && "opacity-60")}>
-              <span aria-hidden="true" className="absolute inset-x-0 top-0 h-1.5" style={{ background: COR_FASE[f.n] }} />
-              <span className="flex items-baseline gap-2">
-                <span className="text-sm font-semibold tabular-nums text-muted-foreground">Fase {f.n}</span>
-                <span className="ml-auto text-sm tabular-nums text-muted-foreground">{dur > 0 ? dias(dur) : "sem dias"}</span>
-              </span>
-              <span className="mt-0.5 block text-[15px] font-semibold leading-snug">{f.curto}</span>
-              {dur > 0 && <span className="block text-sm text-muted-foreground">{dataCurta(calendario[Math.floor(f.inicio)])}</span>}
-              <span className="mt-2 block whitespace-nowrap text-lg font-semibold tabular-nums">{eur0(f.preco)}</span>
-              {veCustoFase(f) && (
-                <span className="block text-sm tabular-nums text-muted-foreground">
-                  {f.preco > 0 && <><span className={cn(f.margem < S.cfg.min / 100 && "font-semibold text-destructive")}>margem {pct(f.margem)}</span> · </>}custo {eur0(f.custo)}
-                  {f.custoMat > 0 && <span className="block">dos quais materiais {eur0(f.custoMat)}</span>}
-                </span>
-              )}
-            </button>
-          );
-        })}
       </div>
 
       {/* ------------------------------------------------ o Gantt e a curva (a mesma grelha de dias) */}
-      <div ref={caixa} className="overflow-x-auto rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
-        <div style={{ width: rotuloW + gradeW + folga }} className="relative">
-          {/* os dias (só os úteis) */}
-          <div className="sticky top-0 z-10 flex border-b border-border bg-card" aria-hidden="true">
-            <div className="sticky left-0 z-10 shrink-0 bg-card" style={{ width: rotuloW }} />
-            <div className="relative h-12" style={{ width: gradeW }}>
+      <div className="space-y-2">
+        <p className="text-[15px] font-medium">Tarefas por dia <span className="font-normal text-muted-foreground">· {nomeMes(calendario[0])}{nomeMes(calendario[0]) !== nomeMes(fimData) ? ` a ${nomeMes(fimData)}` : ""}</span></p>
+        <div ref={caixa} className="overflow-x-auto rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]">
+          <div style={{ width: gradeW + 2 * PAD, paddingLeft: PAD, paddingRight: PAD }} className="relative">
+            {/* os dias (só os úteis) */}
+            <div className="relative h-11 border-b border-border" style={{ width: gradeW }} aria-hidden="true">
               {calendario.slice(0, nDias).map((dt, k) => {
                 const mudaMes = k === 0 || dt.getMonth() !== calendario[k - 1].getMonth();
                 return (
-                  <div key={k} className="absolute bottom-0 top-0 border-l border-border/70 pl-1.5 pt-1" style={{ left: X(k), width: colW }}>
-                    <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">{mudaMes ? nomeMes(dt) : " "}</span>
-                    <span className="block text-sm tabular-nums text-foreground"><span className="text-muted-foreground">{diaSemana(dt)}</span> {dt.getDate()}</span>
+                  // duas linhas curtas, centradas na coluna: o dia da semana (ou o mês, quando muda) e o número
+                  <div key={k} className="absolute bottom-0 top-0 pt-1 text-center" style={{ left: X(k), width: colW }}>
+                    <span className={cn("block text-[11px] leading-4", mudaMes && k > 0 ? "font-semibold uppercase text-foreground" : "text-muted-foreground")}>{mudaMes && k > 0 ? nomeMes(dt) : diaSemana(dt)}</span>
+                    <span className="block text-sm font-medium tabular-nums leading-5 text-foreground">{dt.getDate()}</span>
                   </div>
                 );
               })}
             </div>
+
+            {/* as linhas dos dias e as faixas das fases, por trás das barras */}
+            <div className="pointer-events-none absolute bottom-0 top-11" style={{ left: PAD, width: gradeW }} aria-hidden="true">
+              {calendario.slice(1, nDias).map((_, k) => <div key={k} className="absolute bottom-0 top-0 border-l border-border/50" style={{ left: X(k + 1) }} />)}
+              {P.fases.filter((f) => f.fim > f.inicio).map((f) => (
+                <div key={f.n} className="absolute bottom-0 top-0 transition-opacity" style={{ left: X(f.inicio), width: X(f.fim - f.inicio), background: COR_FASE[f.n], opacity: faseOn == null ? 0.05 : faseOn === f.n ? 0.1 : 0.02 }} />
+              ))}
+            </div>
+
+            <ul aria-label="Tarefas da obra" className="relative py-2">
+              {P.fases.flatMap((f) => f.tarefas).map((t, i) => {
+                const Ic = iconeOficio(t.perfil), apagada = faseOn != null && faseOn !== t.fase, aqui = aberta === t.chave;
+                const dem = t.chave === TAREFA_DEMOLICAO, veCusto = !dem || direcao;
+                const largo = X(t.dias);
+                return (
+                  <li key={t.chave} className={cn("py-1.5 transition-opacity", apagada && "opacity-30")}>
+                    {/* o nome, os dias e o custo por cima da barra (parados ao deslizar a grelha): nunca cortados */}
+                    <button type="button" onClick={() => setAberta(aqui ? null : t.chave)} aria-expanded={aqui}
+                      className={cn("sticky left-4 flex min-h-8 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary", aqui && "text-primary")}
+                      style={{ width: linhaW }}>
+                      <Ic className="h-4 w-4 shrink-0" style={{ color: COR_FASE[t.fase] }} aria-hidden="true" />
+                      <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">{t.nome}</span>
+                      <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-muted-foreground">
+                        {dias(t.dias)}{t.manual && " · mudado"}{veCusto && <> · {eur0(t.custo.total)}</>}
+                        {veCusto && t.delta !== 0 && <span className={t.delta > 0 ? "text-destructive" : "text-success"}> {t.delta > 0 ? "+" : "−"}{eur(Math.abs(t.delta))}</span>}
+                      </span>
+                    </button>
+                    <div className="relative h-8" style={{ width: gradeW }}>
+                      <motion.div
+                        role="slider" tabIndex={0} aria-label={`Dias de ${t.nome}`} aria-valuemin={0.5} aria-valuenow={t.dias}
+                        aria-valuetext={`${dias(t.dias)}, de ${dataCurta(calendario[Math.floor(t.inicio)])}`} aria-readonly={fechado || undefined}
+                        onKeyDown={teclas(t)} onClick={() => setAberta(aqui ? null : t.chave)}
+                        initial={reduzir ? false : { opacity: 0, scaleX: 0.2 }}
+                        animate={{ opacity: 1, scaleX: 1, left: X(t.inicio) + 2, width: Math.max(10, largo - 4) }}
+                        transition={reduzir ? { duration: 0 } : { ...MOLA, delay: arrasto ? 0 : Math.min(i, 12) * 0.03 }}
+                        className={cn("absolute top-1 h-6 origin-left cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+                          aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card", t.manual && "bg-[repeating-linear-gradient(135deg,transparent_0_6px,rgb(255_255_255/0.35)_6px_8px)]")}
+                        style={{ background: COR_FASE[t.fase] }}>
+                        {!fechado && (
+                          <span onPointerDown={arrastar(t)} aria-hidden="true" title="Arraste para mudar os dias"
+                            className={cn("absolute -right-2 top-1/2 flex h-10 w-5 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center", arrasto === t.chave && "scale-110")}>
+                            <span className="h-5 w-1.5 rounded-full bg-card shadow-[0_0_0_1.5px_rgba(0,0,0,0.25)]" />
+                          </span>
+                        )}
+                      </motion.div>
+                    </div>
+                    {/* o detalhe abre por baixo da própria tarefa */}
+                    {aqui && (
+                      <div className="sticky left-4 mt-2" style={{ width: linhaW }}>
+                        <DetalheTarefa t={t} d={d} ctx={ctx} fechado={fechado} direcao={direcao} inicio={dataCurta(calendario[Math.floor(t.inicio)])} />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* a curva do custo acumulado, alinhada com os dias */}
+            <CurvaCusto P={P} prest={prestAtual} linhaW={linhaW} colW={colW} gradeW={gradeW} calendario={calendario} faseOn={faseOn} />
           </div>
-
-          {/* as faixas das fases, por trás das linhas */}
-          <div className="pointer-events-none absolute bottom-0 top-12" style={{ left: rotuloW, width: gradeW }} aria-hidden="true">
-            {P.fases.filter((f) => f.fim > f.inicio).map((f) => (
-              <div key={f.n} className="absolute bottom-0 top-0 transition-opacity" style={{ left: X(f.inicio), width: X(f.fim - f.inicio), background: COR_FASE[f.n], opacity: faseOn == null ? 0.05 : faseOn === f.n ? 0.1 : 0.02 }} />
-            ))}
-          </div>
-
-          <ul aria-label="Tarefas da obra" className="relative py-1">
-            {P.fases.flatMap((f) => f.tarefas).map((t, i) => {
-              const Ic = iconeOficio(t.perfil), apagada = faseOn != null && faseOn !== t.fase, aqui = aberta === t.chave;
-              const dem = t.chave === TAREFA_DEMOLICAO, veCusto = !dem || direcao;
-              const largo = X(t.dias);
-              return (
-                <li key={t.chave} className={cn("flex items-center transition-opacity", apagada && "opacity-30")} style={{ height: 52 }}>
-                  <button type="button" onClick={() => setAberta(aqui ? null : t.chave)} aria-expanded={aqui}
-                    className={cn("sticky left-0 z-[5] flex h-full shrink-0 items-center gap-2 bg-card pl-3 pr-2 text-left outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", aqui && "bg-muted/60")}
-                    style={{ width: rotuloW }}>
-                    <span className="hidden h-8 w-8 shrink-0 place-items-center rounded-lg sm:grid" style={{ background: `${COR_FASE[t.fase]}1f`, color: COR_FASE[t.fase] }} aria-hidden="true"><Ic className="h-4 w-4" /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[15px] font-medium leading-tight" title={t.nome}>{t.nome}</span>
-                      <span className="block truncate whitespace-nowrap text-sm tabular-nums text-muted-foreground">{dias(t.dias)}{t.manual && " · mudado"}</span>
-                    </span>
-                  </button>
-                  <div className="relative h-full" style={{ width: gradeW }}>
-                    <motion.div
-                      role="slider" tabIndex={0} aria-label={`Dias de ${t.nome}`} aria-valuemin={0.5} aria-valuenow={t.dias}
-                      aria-valuetext={`${dias(t.dias)}, de ${dataCurta(calendario[Math.floor(t.inicio)])}`} aria-readonly={fechado || undefined}
-                      onKeyDown={teclas(t)} onClick={() => setAberta(aqui ? null : t.chave)}
-                      initial={reduzir ? false : { opacity: 0, scaleX: 0.2 }}
-                      animate={{ opacity: 1, scaleX: 1, left: X(t.inicio) + 2, width: Math.max(10, largo - 4) }}
-                      transition={reduzir ? { duration: 0 } : { ...MOLA, delay: arrasto ? 0 : Math.min(i, 12) * 0.03 }}
-                      className={cn("absolute h-7 origin-left cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
-                        aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card", t.manual && "bg-[repeating-linear-gradient(135deg,transparent_0_6px,rgb(255_255_255/0.35)_6px_8px)]")}
-                      style={{ background: COR_FASE[t.fase], top: 12 }}>
-                      {!fechado && (
-                        <span onPointerDown={arrastar(t)} aria-hidden="true" title="Arraste para mudar os dias"
-                          className={cn("absolute -right-2 top-1/2 flex h-10 w-5 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center", arrasto === t.chave && "scale-110")}>
-                          <span className="h-5 w-1.5 rounded-full bg-card shadow-[0_0_0_1.5px_rgba(0,0,0,0.25)]" />
-                        </span>
-                      )}
-                    </motion.div>
-                    {/* o texto ao lado da barra (nunca por cima: contraste) */}
-                    <span className="pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-sm tabular-nums text-muted-foreground transition-[left]"
-                      style={{ left: X(t.inicio) + largo + 12 }}>
-                      {veCusto ? eur0(t.custo.total) : ""}
-                      {veCusto && t.delta !== 0 && <span className={t.delta > 0 ? "text-destructive" : "text-success"}> {t.delta > 0 ? "+" : "−"}{eur(Math.abs(t.delta))}</span>}
-                    </span>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-
-          {/* a curva do custo acumulado, alinhada com os dias */}
-          <CurvaCusto P={P} prest={prestAtual} rotuloW={rotuloW} colW={colW} gradeW={gradeW} calendario={calendario} faseOn={faseOn} />
         </div>
+        {!fechado && <p className="text-sm text-muted-foreground">Arraste a ponta de uma barra<span className="hidden sm:inline"> (ou use ← → com ela focada)</span> para mudar os dias; toque na tarefa para ver o custo.</p>}
       </div>
 
       <Pagamentos P={P} d={d} ctx={ctx} calendario={calendario} fechado={fechado} prest={prestAtual} sugerido={sugerido} />
-
-      {!fechado && <p className="text-sm text-muted-foreground">Arraste a ponta de uma barra<span className="hidden sm:inline"> (ou use ← → com ela focada)</span> para mudar os dias; toque na tarefa para ver o custo.</p>}
-
-      {/* ------------------------------------------------ o detalhe da tarefa escolhida */}
-      {tarefaAberta && <DetalheTarefa t={tarefaAberta} d={d} ctx={ctx} fechado={fechado} direcao={direcao} inicio={dataCurta(calendario[Math.floor(tarefaAberta.inicio)])} />}
     </section>
   );
 }
 
 /* ================================================================== a curva */
-function CurvaCusto({ P, prest, rotuloW, colW, gradeW, calendario, faseOn }: {
-  P: Plano; prest: Prestacao[]; rotuloW: number; colW: number; gradeW: number; calendario: Date[]; faseOn: number | null;
+function CurvaCusto({ P, prest, linhaW, colW, gradeW, calendario, faseOn }: {
+  P: Plano; prest: Prestacao[]; linhaW: number; colW: number; gradeW: number; calendario: Date[]; faseOn: number | null;
 }) {
   const C = curvaCusto(P);
   const [mira, setMira] = useState<number | null>(null);
-  const H = 132, topo = 18, base = H - 22;
+  const H = 120, topo = 8, base = H - 18;
   const max = Math.max(P.preco, P.custo, 1);
   const Y = (v: number) => base - (v / max) * (base - topo);
   const X = (x: number) => Math.min(gradeW, x * colW);
@@ -306,7 +315,6 @@ function CurvaCusto({ P, prest, rotuloW, colW, gradeW, calendario, faseOn }: {
   let degraus = "";
   marcos.forEach((x, i) => { const r = recebidoAte(P, prest, x); degraus += i === 0 ? `M0,${Y(r).toFixed(1)}` : ` H${X(x).toFixed(1)} V${Y(r).toFixed(1)}`; });
   degraus += ` H${X(fimX).toFixed(1)}`;
-  const recFim = recebidoAte(P, prest, fimX);
   const lucro = P.preco - P.custo;
   const mover = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -315,11 +323,18 @@ function CurvaCusto({ P, prest, rotuloW, colW, gradeW, calendario, faseOn }: {
   };
   const diaTxt = (x: number) => { const k = Math.min(calendario.length - 1, Math.floor(x)); return x >= P.dias - 1e-9 ? `fim (${dataCurta(calendario[Math.max(0, Math.ceil(P.dias) - 1)])})` : dataCurta(calendario[k]); };
   return (
-    <div className="flex border-t border-border">
-      <div className="sticky left-0 z-[5] shrink-0 bg-card px-3 pt-3" style={{ width: rotuloW }}>
-        <p className="text-[15px] font-medium leading-tight">Custo acumulado</p>
-        <p className="hidden text-sm text-muted-foreground sm:block">quando sai o dinheiro</p>
-        <p className="mt-2 text-sm tabular-nums"><span className="block text-muted-foreground">lucro previsto</span><b className="font-semibold">{eur(lucro)} €</b></p>
+    <div className="border-t border-border pb-3 pt-3">
+      {/* o título, a legenda e o lucro por cima do gráfico (parados ao deslizar): nada de texto solto dentro do gráfico */}
+      <div className="sticky left-4 mb-2" style={{ width: linhaW }}>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+          <p className="text-[15px] font-medium">Custo acumulado <span className="font-normal text-muted-foreground">· quando sai o dinheiro</span></p>
+          <p className="text-sm tabular-nums"><span className="text-muted-foreground">lucro previsto </span><b className="font-semibold">{eur(lucro)} €</b></p>
+        </div>
+        <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums text-muted-foreground" aria-hidden="true">
+          <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full bg-primary" />custo {eur(P.custo)} €</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-full bg-foreground/70" />recebido</span>
+          <span className="inline-flex items-center gap-1.5"><span className="w-4 border-t border-dashed border-foreground/50" />preço {eur(P.preco)} €</span>
+        </p>
       </div>
       <div className="relative" style={{ width: gradeW }}>
         <svg width={gradeW} height={H} role="img" aria-label={`Custo acumulado: chega a ${eur(P.custo)} € no fim; o preço ao cliente é ${eur(P.preco)} €.`}
@@ -332,15 +347,12 @@ function CurvaCusto({ P, prest, rotuloW, colW, gradeW, calendario, faseOn }: {
           ))}
           {/* o preço ao cliente (referência) */}
           <line x1={0} x2={gradeW} y1={Y(P.preco)} y2={Y(P.preco)} stroke="hsl(var(--foreground))" strokeOpacity={0.35} strokeDasharray="4 4" strokeWidth={1} />
-          <text x={gradeW - 6} y={Y(P.preco) - 5} textAnchor="end" className="fill-muted-foreground text-[12px] tabular-nums">preço {eur(P.preco)} €</text>
           <line x1={0} x2={gradeW} y1={base} y2={base} stroke="hsl(var(--border))" strokeWidth={1} />
           <path d={area} fill="hsl(var(--primary))" fillOpacity={0.1} />
           {TS.pontos.slice(0, -1).map((p, i) => { const q = TS.pontos[i + 1]; return p.saldo < -0.5 && q.x > p.x ? <rect key={i} x={X(p.x)} width={Math.max(1, X(q.x) - X(p.x))} y={Y(p.gasto)} height={Math.max(0, Y(p.recebido) - Y(p.gasto))} fill="hsl(var(--destructive))" fillOpacity={0.14} /> : null; })}
           <path d={degraus} fill="none" stroke="hsl(var(--foreground))" strokeOpacity={0.7} strokeWidth={2} strokeLinejoin="round" />
-          <text x={X(fimX) + 8} y={Y(recFim) - 6} className="fill-muted-foreground text-[12px] tabular-nums">recebido</text>
           <path d={linha} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} strokeLinejoin="round" />
           <circle cx={X(C[C.length - 1].x)} cy={Y(C[C.length - 1].c)} r={4} fill="hsl(var(--primary))" stroke="hsl(var(--card))" strokeWidth={2} />
-          <text x={X(C[C.length - 1].x) + 8} y={Y(C[C.length - 1].c) + 4} className="fill-foreground text-[12px] font-semibold tabular-nums">custo {eur(P.custo)} €</text>
           {ponto && (
             <g>
               <line x1={X(ponto.x)} x2={X(ponto.x)} y1={topo - 6} y2={base} stroke="hsl(var(--foreground))" strokeOpacity={0.45} strokeWidth={1} />
@@ -350,7 +362,7 @@ function CurvaCusto({ P, prest, rotuloW, colW, gradeW, calendario, faseOn }: {
         </svg>
         {ponto && (
           <div className="pointer-events-none absolute top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm shadow-[var(--shadow-md)]"
-            style={{ left: Math.min(Math.max(X(ponto.x), 90), gradeW - 90) }}>
+            style={{ left: Math.min(Math.max(X(ponto.x), 80), gradeW - 80) }}>
             <span className="block text-muted-foreground">{diaTxt(ponto.x)}</span>
             <span className="block font-semibold tabular-nums">{eur(ponto.c)} € gastos</span>
             <span className="block tabular-nums text-muted-foreground">{eur(recebidoAte(P, prest, ponto.x))} € recebidos</span>
@@ -427,21 +439,27 @@ function Pagamentos({ P, d, ctx, calendario, fechado, prest, sugerido }: {
         <h4 id={`pag-${d.id}`} className="flex items-center gap-2 text-[15px] font-semibold"><Wallet className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Pagamentos e tesouraria</h4>
         <span className="text-sm text-muted-foreground">a tesouraria conta sem IVA</span>
       </div>
-      <div role="group" aria-label="Condições de pagamento" className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+      {/* as condições: uma lista de escolha (a opção à esquerda, se a obra fica coberta por baixo); cabe numa coluna estreita */}
+      <div role="group" aria-label="Condições de pagamento" className="mt-3 divide-y divide-border rounded-xl border border-border">
         {OPCOES_PAG.map((k) => {
           const pr = k === PAGAMENTO_FASES ? (atual === k && o.pagFases?.length ? o.pagFases : sugerido) : prestacoes(k);
           const t = tesouraria(P, pr), on = atual === k;
           return (
             <button key={k} type="button" aria-pressed={on} disabled={fechado}
               onClick={() => run(() => A.pagamentoPlano(d.id, k, k === PAGAMENTO_FASES ? sugerido : undefined))}
-              className={cn("relative min-h-16 rounded-xl border p-3 text-left outline-none transition-[border-color,box-shadow] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:opacity-70",
-                on ? "border-primary shadow-[0_6px_20px_-12px_hsl(var(--primary)/0.7)]" : "border-border hover:border-foreground/30")}>
-              <span className="block text-[15px] font-medium">{k}{k === PAGAMENTO_FASES && <span className="ml-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">sugerido</span>}</span>
-              {t.descoberto ? (
-                <span className="mt-1 flex items-center gap-1 text-sm text-warning"><AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />a descoberto até {eur0(-t.pior.saldo)}</span>
-              ) : (
-                <span className="mt-1 flex items-center gap-1 text-sm text-success"><CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />sempre coberta</span>
-              )}
+              className={cn("flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left outline-none transition-colors first:rounded-t-xl last:rounded-b-xl focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-70",
+                on ? "bg-primary/[0.06]" : "hover:bg-muted/50")}>
+              <span aria-hidden="true" className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-full border-2", on ? "border-primary" : "border-input")}>
+                {on && <span className="h-2.5 w-2.5 rounded-full bg-primary" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-x-2 text-[15px] font-medium">{k}{k === PAGAMENTO_FASES && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">sugerido</span>}</span>
+                {t.descoberto ? (
+                  <span className="flex items-center gap-1 text-sm text-warning"><AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />a descoberto até {eur0(-t.pior.saldo)}</span>
+                ) : (
+                  <span className="flex items-center gap-1 text-sm text-success"><CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />sempre coberta</span>
+                )}
+              </span>
             </button>
           );
         })}

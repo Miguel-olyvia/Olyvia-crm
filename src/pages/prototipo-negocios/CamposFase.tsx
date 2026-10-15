@@ -359,7 +359,7 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }
     // escolher é mais rápido do que escrever: botões sempre, nunca uma lista que abre
     const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
     largo = op.length > 3 || op.join("").length > 34;
-    ctl = <Botoes op={op} val={val} set={set} rot={rot} desc={desc} erro={erro} largo={largo} />;
+    ctl = <Botoes op={op} val={val} set={set} rot={rot} desc={desc} erro={erro} largo={largo} avanca={c.avanca} />;
   } else if (c.t === "contador") {
     ctl = <Contador c={c} val={val} set={set} rot={rot} desc={desc} erro={erro} />;
   } else if (c.t === "data") {
@@ -400,7 +400,7 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido, impacto }
 
 type Ctl = { val: string; set: (x: string) => void; rot: string; desc?: string; erro?: boolean };
 
-function Botoes({ op, val, set, rot, desc, erro, largo, multi }: Ctl & { op: string[]; largo?: boolean; multi?: boolean }) {
+function Botoes({ op, val, set, rot, desc, erro, largo, multi, avanca }: Ctl & { op: string[]; largo?: boolean; multi?: boolean; avanca?: string }) {
   // multi: escolha múltipla ("varios"), cada botão liga e desliga a sua opção
   const ligado = (x: string) => (multi ? listaVarios(val).includes(x) : val === x);
   return (
@@ -409,8 +409,12 @@ function Botoes({ op, val, set, rot, desc, erro, largo, multi }: Ctl & { op: str
         <button key={x} type="button" aria-pressed={ligado(x)} aria-invalid={erro || undefined}
           onClick={() => set(multi ? alternarVarios(op, val, x) : val === x ? "" : x)}
           className={cn("min-h-11 min-w-14 rounded-lg border px-4 text-[15px] transition-colors duration-150",
-            ligado(x) ? "border-primary bg-primary text-primary-foreground" : cn("bg-card text-foreground hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
+            ligado(x) ? "border-primary bg-primary text-primary-foreground"
+              // a opção que faz avançar (ex.: "Feita"), enquanto não está escolhida: tracejado do acento
+              : x === avanca ? "border-2 border-dashed border-primary bg-primary/[0.04] font-medium text-primary hover:bg-primary/10"
+              : cn("bg-card text-foreground hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
           {x}
+          {x === avanca && !ligado(x) && <span className="sr-only"> (marque para avançar)</span>}
         </button>
       ))}
     </div>
