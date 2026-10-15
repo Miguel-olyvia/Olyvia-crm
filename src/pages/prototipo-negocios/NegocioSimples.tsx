@@ -101,7 +101,7 @@ export function NegocioSimples(ctx: Ctx) {
             Fase {d.fase + 1} de 6: <span className="font-semibold text-foreground">{FASES[d.fase]}</span>{d.fase < 5 && <> · depois: {FASES[d.fase + 1]}</>}
           </p>
         {d.fase > 0 && (
-          <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden" aria-label="Fases feitas">
+          <div className="mt-3 flex flex-wrap gap-2 lg:hidden" aria-label="Fases feitas">
             {FASES.slice(0, d.fase).map((f, i) => (
               <button key={f} type="button" onClick={() => setVer(ver === i ? null : i)} aria-pressed={ver === i}
                 className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm", ver === i ? "border-foreground bg-foreground text-background" : "border-input text-foreground")}>
@@ -362,7 +362,7 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
       {lateral(passos, ativo, setAtivo)}
       <section className="min-w-0" aria-labelledby="passo-titulo">
         {/* Telemóvel: os passos numa linha (a lista completa fica no computador) */}
-        <ol className="-mx-4 mb-6 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden" aria-label="Passos desta fase">
+        <ol className="mb-6 flex flex-wrap gap-1.5 lg:hidden" aria-label="Passos desta fase">
           {passos.map((x, i) => (
             <li key={x.id}>
               <button type="button" onClick={() => setAtivo(i)} aria-current={i === ativo ? "step" : undefined} aria-label={curto(x)}

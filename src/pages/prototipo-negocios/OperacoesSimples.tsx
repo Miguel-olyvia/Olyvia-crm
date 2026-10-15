@@ -317,7 +317,7 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           const rec = x.recebido ?? 0;
           return (
             <li key={x.n} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2.5 text-[15px]">
-              <span className="min-w-0 flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un}{x.custo ? ` × ${eur(x.custo)} € = ${eur(x.custo * x.q)} €` : ""}</span></span>
+              <span className="min-w-[10rem] flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un}{x.custo ? ` × ${eur(x.custo)} € = ${eur(x.custo * x.q)} €` : ""}</span></span>
               {conferir && rec < x.q
                 ? <span className="flex items-center gap-2 text-sm text-muted-foreground">chegou <Passos v={chegou[i] ?? 0} max={r2(x.q - rec)} rot={`Quanto chegou de ${x.n}`} onSet={(v) => setChegou((c) => c.map((y, j) => (j === i ? v : y)))} /> {x.un}</span>
                 : <span className={cn("inline-flex items-center gap-1.5 text-sm tabular-nums", rec >= x.q ? "text-success" : rec > 0 ? "text-warning" : "text-muted-foreground")}>
@@ -374,7 +374,7 @@ export function InventarioSimples(ctx: Ctx) {
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Inventário</h1>
       <p className="mt-2 text-lg text-muted-foreground">{frase ? frase + "." : "Nada pendente."} As encomendas de cliente nascem do contrato; o que falta em stock vai ao fornecedor.</p>
-      <div role="tablist" aria-label="Inventário" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div role="tablist" aria-label="Inventário" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
         {ABAS.map(([k, t, n]) => (
           <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={(ev) => { setAba(k); ev.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); }}
             className={cn("inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-[15px] font-medium transition-colors", aba === k ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
@@ -407,7 +407,7 @@ export function InventarioSimples(ctx: Ctx) {
                 <ul className="mt-3 divide-y divide-border">
                   {ec.linhas.map((x) => (
                     <li key={x.n} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-[15px]">
-                      <span className="min-w-0 flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span></span>
+                      <span className="min-w-[10rem] flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span></span>
                       <span className={cn("text-sm", x.falta > 0 ? "text-warning" : "text-success")}>{ec.estado !== "aprovada" ? (x.falta > 0 ? `faltariam ${nfmt(x.falta)}` : "há em stock") : x.falta > 0 ? `${nfmt(x.res)} reservados · ${nfmt(x.falta)} a chegar` : "reservado"}</span>
                     </li>
                   ))}
@@ -430,7 +430,7 @@ export function InventarioSimples(ctx: Ctx) {
               const m = NOME_STOCK[k] ?? { n: k, un: "" }, v = S.stock[k];
               return (
                 <li key={k} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3 text-[15px]">
-                  <span className="min-w-0 flex-1 font-medium">{m.n}</span>
+                  <span className="min-w-[10rem] flex-1 font-medium">{m.n}</span>
                   <span className="flex flex-wrap gap-x-4 text-sm tabular-nums">
                     <span className={cn(v <= 0 ? "text-warning" : "")}>{nfmt(Math.max(0, v))} {m.un} livres</span>
                     {reservado[k] ? <span className="text-muted-foreground">{nfmt(reservado[k])} {reservado[k] === 1 ? "reservado" : "reservados"}</span> : null}

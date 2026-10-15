@@ -463,7 +463,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         <Segmentos nome={`ent-${sid}`} rotulo="De onde vem o entulho" oculto v={ent.e.modo} opcoes={MODOS} onSet={mudarEntulho} />
 
         {ent.e.modo === "artigo" && (
-          <div className="mt-4 grid max-w-xl gap-1">
+          <div className="mt-4 grid max-w-xl grid-cols-[minmax(0,1fr)] gap-1">
             <span className={ROT}>Artigo de demolição</span>
             <SeletorPesquisa rotulo="Artigo de demolição" atual={K.artigoDoServico?.[sid]} className="w-full" placeholder="Descrição ou código"
               gatilho={<GatilhoCampo>{ent.artigo ? `${ent.artigo.descricao} (${ent.artigo.unidade})` : "Escolher o artigo"}</GatilhoCampo>}

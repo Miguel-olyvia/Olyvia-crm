@@ -307,7 +307,7 @@ function ListaGrupo({ g, onIr, onFechar }: { g: GrupoMapa; onIr: (r: Ref) => voi
         ))}
         {!L.length && <li className={cn(NOTA, "py-3")}>Nada com esse nome.</li>}
       </ul>
-      {L.length > n && <Button variant="outline" className="mt-3 min-h-11 text-[15px]" onClick={() => setN(n + POR_PAGINA)}>Mostrar mais {Math.min(POR_PAGINA, L.length - n)} <span className="text-muted-foreground">(faltam {L.length - n})</span></Button>}
+      {L.length > n && <Button variant="outline" className="mt-3 h-auto min-h-11 max-w-full whitespace-normal text-left text-[15px]" onClick={() => setN(n + POR_PAGINA)}>Mostrar mais {Math.min(POR_PAGINA, L.length - n)} <span className="text-muted-foreground">(faltam {L.length - n})</span></Button>}
     </section>
   );
 }
@@ -340,7 +340,7 @@ function Problemas({ P, onIr }: { P: Problema[]; onIr: (r: Ref) => void }) {
                 </li>
               ))}
             </ul>
-            {L.length > ver && <Button variant="outline" className="mt-2 min-h-11 text-[15px]" onClick={() => setMais((m) => ({ ...m, [x.tipo]: ver + 20 }))}>Mostrar mais {Math.min(20, L.length - ver)} <span className="text-muted-foreground">(faltam {L.length - ver})</span></Button>}
+            {L.length > ver && <Button variant="outline" className="mt-2 h-auto min-h-11 max-w-full whitespace-normal text-left text-[15px]" onClick={() => setMais((m) => ({ ...m, [x.tipo]: ver + 20 }))}>Mostrar mais {Math.min(20, L.length - ver)} <span className="text-muted-foreground">(faltam {L.length - ver})</span></Button>}
           </section>
         );
       })}

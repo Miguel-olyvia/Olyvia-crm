@@ -28,6 +28,9 @@ type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnic
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
 const LISTA = "divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5";
 const NOTA = "text-[15px] text-muted-foreground";
+// Os valores à direita da linha (preço, custo, margem). No telemóvel passam para uma linha própria por baixo do nome, lado a lado,
+// para o nome não ficar espremido numa coluna estreita; a partir de sm voltam a ser a coluna da direita.
+const VALORES = "flex basis-full flex-wrap items-baseline gap-x-3 sm:block sm:basis-auto sm:shrink-0 sm:text-right";
 const POR_GRUPO = 8, POR_PAGINA = 40;
 const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center rounded-lg border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted");
 
@@ -47,7 +50,7 @@ function Procurar({ v, onChange, rotulo, ph }: { v: string; onChange: (s: string
 function MostrarMais({ faltam, passo, onClick, de }: { faltam: number; passo: number; onClick: () => void; de?: string }) {
   if (faltam <= 0) return null;
   return (
-    <Button variant="outline" className="mt-3 min-h-11 text-[15px]" onClick={onClick}>
+    <Button variant="outline" className="mt-3 h-auto min-h-11 max-w-full whitespace-normal text-left text-[15px]" onClick={onClick}>
       Mostrar mais {Math.min(passo, faltam)}{de ? ` de ${de}` : ""} <span className="text-muted-foreground">(faltam {faltam})</span>
     </Button>
   );
@@ -59,7 +62,7 @@ function LinhaServico({ i, K, onAbrir, min, alvo }: { i: ItemLista & { caminho: 
   const baixa = i.alertas.some((a) => a.id === "abaixo-minimo" || a.id === "abaixo-custo");
   return (
     <li>
-      <button id={`svc-${i.sid}`} type="button" onClick={() => onAbrir(i.sid)} className="group flex min-h-16 w-full items-center gap-3 py-3 text-left sm:gap-4">
+      <button id={`svc-${i.sid}`} type="button" onClick={() => onAbrir(i.sid)} className="group flex min-h-16 w-full flex-wrap items-center gap-x-3 gap-y-1 py-3 text-left sm:flex-nowrap sm:gap-4">
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-muted text-foreground/70"><IconeServico k={iconeDoServico(K, i.sid, i.n, i.oficio)} /></span>
         <span className="min-w-0 flex-1">
           <span className="block text-[15px] font-medium group-hover:underline">{i.n}</span>
@@ -70,10 +73,10 @@ function LinhaServico({ i, K, onAbrir, min, alvo }: { i: ItemLista & { caminho: 
             </span>
           )}
         </span>
-        <span className="shrink-0 text-right">
+        <span className={cn(VALORES, "pl-14 sm:pl-0")}>
           <span className="block text-[15px] font-medium tabular-nums">{eur(i.preco)} €/{i.un}</span>
           <span className={cn(NOTA, "block tabular-nums")}>custo {eur(i.c.total)} €</span>
-          <span className={cn("flex items-center justify-end gap-1 text-[15px] tabular-nums", baixa ? "text-foreground" : "text-muted-foreground")}>
+          <span className={cn("flex items-center gap-1 text-[15px] tabular-nums sm:justify-end", baixa ? "text-foreground" : "text-muted-foreground")}>
             {baixa && <TriangleAlert className="h-4 w-4 text-destructive" aria-hidden="true" />}margem {pct(i.m)}<span className="sr-only">, {margemEmPalavras(i.m, min, alvo)}</span>
           </span>
         </span>
@@ -141,7 +144,7 @@ function Produtos({ K, nomeServico, onAbrir, margem }: { K: Catalogo; nomeServic
       <p className={cn(NOTA, "mt-4")} aria-live="polite">{L.length === 1 ? "1 produto" : `${L.length} produtos`}</p>
       <ul className={cn(LISTA, "mt-2")}>
         {L.slice(0, n).map((p) => (
-          <li key={p.id} className="flex min-h-[4.5rem] items-center gap-3 py-3 sm:gap-4">
+          <li key={p.id} className="flex min-h-[4.5rem] flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4">
             <Ilustracao k={p.img ?? "generico"} />
             <span className="min-w-0 flex-1">
               <span className="block text-[15px] font-medium">{p.n}</span>
@@ -153,7 +156,7 @@ function Produtos({ K, nomeServico, onAbrir, margem }: { K: Catalogo; nomeServic
                 </button>
               )}
             </span>
-            <span className="shrink-0 text-right">
+            <span className={cn(VALORES, "pl-[4.75rem] sm:pl-0")}>
               <span className="block text-[15px] font-medium tabular-nums">{eur(precoProduto(p, margem))} €</span>
               <span className={cn(NOTA, "block")}>{p.pvp != null ? "PVP" : `custo ${eur(p.custo)} €`} / {p.un}</span>
             </span>
@@ -179,17 +182,17 @@ function Equipamentos({ S, C, mudar }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c:
           const q = quebraEquip(e), ab = aberto === e.id, u = usosEquip(S, C, e.id);
           return (
             <li key={e.id} className="py-3">
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15px] font-medium">{e.n}</span>
                   <span className={cn(NOTA, "block tabular-nums")}>compra {eur(e.compra)} € · vida útil {nfmt(e.vida)} h{u ? ` · em ${u} ${u === 1 ? "serviço" : "serviços"} em uso` : ""}</span>
                 </span>
-                <span className="shrink-0 text-right">
+                <span className={VALORES}>
                   <span className="block text-[15px] font-medium tabular-nums">{eur(q.total)} €/h</span>
                   <span className={cn(NOTA, "block tabular-nums")}>depreciação {eur(q.deprec)} + manutenção {eur(q.manut)}</span>
                 </span>
               </div>
-              <button type="button" aria-expanded={ab} onClick={() => setAberto(ab ? null : e.id)} className="mt-1 inline-flex min-h-11 items-center text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+              <button type="button" aria-expanded={ab} onClick={() => setAberto(ab ? null : e.id)} className="mt-1 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline">
                 {ab ? "Fechar" : `Mudar os números de ${e.n}`}
               </button>
               {ab && (
@@ -226,14 +229,14 @@ function Consumiveis({ todos, C, nomeServico }: { todos: ConsCatalogo[]; C: Cust
       <div className="mt-4"><Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar consumível" ph="Nome ou fornecedor" /></div>
       <ul className={cn(LISTA, "mt-4")}>
         {L.slice(0, n).map((x) => (
-          <li key={x.n} className="flex min-h-16 items-center gap-3 py-3">
+          <li key={x.n} className="flex min-h-16 flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap">
             <span className="min-w-0 flex-1">
               <span className="block text-[15px] font-medium">{x.n}</span>
               <span className={cn(NOTA, "block")}>{x.fornecedor} · em {x.servicos.length === 1 ? nomeServico(x.servicos[0]) : `${x.servicos.length} serviços`}{x.opcionalEm ? ` · opcional em ${x.opcionalEm}` : ""}</span>
             </span>
-            <span className="shrink-0 text-right">
+            <span className={VALORES}>
               <span className="block text-[15px] font-medium tabular-nums">{eur(x.preco)} €/{x.un}</span>
-              <span className={cn("flex items-center justify-end gap-1 text-[15px] tabular-nums", x.desatualizado ? "text-foreground" : "text-muted-foreground")}>
+              <span className={cn("flex items-center gap-1 sm:justify-end text-[15px] tabular-nums", x.desatualizado ? "text-foreground" : "text-muted-foreground")}>
                 {x.desatualizado && <Clock className="h-4 w-4 text-warning" aria-hidden="true" />}{dataPT(x.data)}{x.desatualizado ? " · desatualizado" : ""}
               </span>
             </span>
@@ -258,7 +261,7 @@ function Tecnicos({ S, C, mudar }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c: Cus
             <span className="min-w-0 flex-1">
               <span className="block text-[15px] font-medium">{p.n}</span>
               <span className={cn(NOTA, "block")}>{servicos ? `${servicos} ${servicos === 1 ? "serviço" : "serviços"} em uso` : "sem serviços em uso"}{direcao ? "" : " · o salário só a Direção vê"}</span>
-              {eh == null && <span className="mt-0.5 flex items-center gap-1.5 text-[15px]"><UserX className="h-4 w-4 text-warning" aria-hidden="true" />Técnico sem custo/hora: usa a média ({eur(media)} €/h).</span>}
+              {eh == null && <span className="mt-0.5 flex items-start gap-1.5 text-[15px]"><UserX className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />Técnico sem custo/hora: usa a média ({eur(media)} €/h).</span>}
             </span>
             {direcao && (
               <label className="flex items-center gap-2"><span className={NOTA}>Salário</span>
@@ -359,7 +362,7 @@ export function CatalogoV1({ S, run }: Ctx) {
     <div className={cn("mx-auto w-full px-4 pb-24 pt-8 sm:px-8 sm:pt-12", seccao === "ligacoes" ? "max-w-6xl" : "max-w-3xl")}>
       <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
       <p className="mt-2 text-lg text-muted-foreground">Cada serviço com a sua ficha: medida, quem faz, equipamentos, consumíveis e preço. O orçamento tira daqui o custo.</p>
-      <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border">
+      <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
         {SECCOES.map(([s, t]) => tab(s, t))}
       </div>
       <div id={`painel-${seccao}`} role="tabpanel" aria-labelledby={`tab-${seccao}`} className="pt-6">

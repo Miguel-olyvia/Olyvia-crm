@@ -21,9 +21,9 @@ export function ObraPorFases({ S, d }: { S: Estado; d: Negocio }) {
   return (
     <section aria-labelledby={`real-fases-${d.id}`} className="space-y-4">
       <h3 id={`real-fases-${d.id}`} className="text-base font-semibold">Previsto e real, por fase</h3>
-      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 [&>div]:min-w-0">
         <div><dt className="text-sm text-muted-foreground">Dias úteis</dt><dd className="text-xl font-semibold tabular-nums">{nfmt(R.diasReal)} <span className="text-[15px] font-normal text-muted-foreground">de {nfmt(R.diasPrev)} · {sinal(dDias, (x) => dias(x))}</span></dd></div>
-        <div><dt className="text-sm text-muted-foreground">Custo</dt><dd className="text-xl font-semibold tabular-nums">{eur(R.custoReal)} € <span className="block whitespace-nowrap text-[15px] font-normal text-muted-foreground">previsto {eur(R.custoPrev)} € · {sinal(dCusto, (x) => `${eur(x)} €`)}</span></dd></div>
+        <div><dt className="text-sm text-muted-foreground">Custo</dt><dd className="text-xl font-semibold tabular-nums">{eur(R.custoReal)} € <span className="block text-[15px] font-normal text-muted-foreground">previsto {eur(R.custoPrev)} € · {sinal(dCusto, (x) => `${eur(x)} €`)}</span></dd></div>
         <div><dt className="text-sm text-muted-foreground">Margem</dt><dd className="text-xl font-semibold tabular-nums">{pct(mReal)} <span className="block text-[15px] font-normal text-muted-foreground">orçada {pct(mPrev)}</span></dd></div>
       </dl>
 
