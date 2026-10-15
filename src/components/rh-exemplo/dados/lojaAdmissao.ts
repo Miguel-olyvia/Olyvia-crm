@@ -3,6 +3,7 @@
  * Recarregar a página repõe tudo e `repor()` das fichas repõe também este (registado em `registarAoRepor`); `reporAdmissao()`
  * repõe só este. Nada aqui fala com lado nenhum. As regras vivem em `lib/admissaoFluxo.ts` (puras); aqui só se guarda o resultado.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useSyncExternalStore } from "react";
 import { criarAdmissoesIniciais, type EstadoAdmissoes } from "@/components/rh-exemplo/dados/admissaoExemplo";
 import { lerEstado, registarAoRepor } from "@/components/rh-exemplo/dados/loja";
@@ -86,7 +87,7 @@ export function executarAdmissao(
 ): ResultadoAdmissao {
   const atual = estado.porPessoa[pessoaId];
   if (!atual) return { ok: false, erro: "transicao_invalida" };
-  const resultado = aplicar(atual, acao, entrada, { agora: new Date(), quem, novoToken: novoTokenAdmissao });
+  const resultado = aplicar(atual, acao, entrada, { agora: agoraExemplo(), quem, novoToken: novoTokenAdmissao });
   if (resultado.ok) gravarAdmissao(resultado.admissao);
   return resultado;
 }
@@ -94,5 +95,5 @@ export function executarAdmissao(
 /** O estado que se mostra de uma pessoa (com «expirado» derivado do prazo), ou `null` se não está em admissão. */
 export function useEstadoAdmissao(pessoaId: string | null | undefined): EstadoVisivel | null {
   const adm = useAdmissao(pessoaId);
-  return adm ? estadoVisivel(adm, new Date()) : null;
+  return adm ? estadoVisivel(adm, agoraExemplo()) : null;
 }

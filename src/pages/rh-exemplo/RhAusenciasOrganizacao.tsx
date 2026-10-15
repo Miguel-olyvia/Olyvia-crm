@@ -17,6 +17,7 @@
  * esconder tudo. Por isso o hook devolve `recusado` a parte, e o ecra mostra o
  * bloco de sem acesso em vez de "nao ha nada".
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
@@ -55,7 +56,7 @@ const ESTADOS: EstadoPedido[] = [
 ];
 
 function mesDeHoje(): string {
-  const hoje = new Date();
+  const hoje = agoraExemplo();
   return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-01`;
 }
 

@@ -30,6 +30,7 @@
  * (`rpc_hr_obra_horas_registar` / `rpc_hr_obra_horas_anular`): a tabela nao
  * da INSERT/UPDATE/DELETE directo a authenticated.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useCallback, useMemo } from "react";
 import { feriadosDoAno } from "@/components/rh-exemplo/calendarioPessoa/feriados";
 import { lerEstado, useEstadoRh } from "@/components/rh-exemplo/dados/loja";
@@ -192,7 +193,7 @@ function limitesDoMes(ano: number, mes: number): { de: string; ate: string; ulti
  * browser -- uma aproximacao aceite, nao ignorada em silencio.
  */
 function isoDeHoje(timezone?: string | null): string {
-  const agora = new Date();
+  const agora = agoraExemplo();
   if (timezone) {
     try {
       const partes = new Intl.DateTimeFormat("en-US", {

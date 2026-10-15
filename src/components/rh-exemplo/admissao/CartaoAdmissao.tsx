@@ -1,6 +1,7 @@
 // O cartão «Admissão» da Visão geral da ficha: o estado, o prazo do login temporário, o role previsto, o que o RH devolveu ou
 // a pessoa recusou, as ações certas para cada estado e o histórico. O botão de credenciais fica desligado, com a razão em
 // texto, até o contrato estar assinado. Nenhum e-mail sai: tudo é simulação, dita no próprio cartão. Só memória.
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -118,7 +119,7 @@ export function CartaoAdmissao({ pessoaId }: { pessoaId: string }) {
   const adm = useAdmissao(pessoaId);
   const { executar, dialogos, mensagem } = useAcoesAdmissao();
   if (!adm) return null;
-  const agora = new Date();
+  const agora = agoraExemplo();
 
   return (
     <Card aria-labelledby="rh-adm-cartao-titulo">

@@ -1,3 +1,4 @@
+import { HOJE_EXEMPLO_RH } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { beforeEach, describe, expect, it } from "vitest";
 import { hojeIso } from "@/components/rh-exemplo/dados/datas";
 import { repor } from "@/components/rh-exemplo/dados/loja";
@@ -35,7 +36,7 @@ describe("pipeline do fluxo 6 na loja", () => {
     expect(registarTempoAMais(pedido({ pessoaId: "p-marta" })).criadas).toBe(1);
   });
   it("3 h num dia divide em 2 h normais + 1 h acima do limite", () => {
-    const r = registarTempoAMais(pedido({ feitoMin: 660, data: `${new Date().getUTCFullYear()}-03-10`, nocturnoMin: 150 }));
+    const r = registarTempoAMais(pedido({ feitoMin: 660, data: `${HOJE_EXEMPLO_RH.slice(0, 4)}-03-10`, nocturnoMin: 150 }));
     expect(r).toMatchObject({ criadas: 2, acimaDoLimiteMin: 60 });
     const novas = lerFluxosC().horasExtra.slice(-2);
     expect(novas.map((h) => [h.minutos, h.acimaDoLimite])).toEqual([[120, false], [60, true]]);

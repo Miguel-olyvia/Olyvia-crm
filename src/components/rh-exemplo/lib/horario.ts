@@ -25,6 +25,7 @@
  *
  * Aqui nao ha acesso a base: sao formas e funcoes puras, testaveis sem rede.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { hojeIso, somarDias } from "@/components/rh-exemplo/lib/ausencias";
 import type { DiaSemana, HorarioPlaneado } from "@/components/rh-exemplo/tipos";
 
@@ -43,7 +44,7 @@ import type { DiaSemana, HorarioPlaneado } from "@/components/rh-exemplo/tipos";
  * `horario_planeado_fecha_no_passado` disparava num ALTERAR perfeitamente
  * normal.
  */
-export function hojeIsoServidor(agora: Date = new Date()): string {
+export function hojeIsoServidor(agora: Date = agoraExemplo()): string {
   return agora.toISOString().slice(0, 10);
 }
 

@@ -28,6 +28,7 @@
  * ao ultimo minuto planeado. Faltar so a manha de um 09:00-18:00 e
  * 09:00-13:00, e sao os 240 minutos que a coluna gerada vai calcular.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { minutosDe, formatarDuracao, chaveDoDia } from "@/components/rh-exemplo/lib/horario";
 import { dataDeIso, somarDias } from "@/components/rh-exemplo/lib/ausencias";
 import { horasContratadasSemanaisReais } from "@/components/rh-exemplo/lib/horas";
@@ -552,7 +553,7 @@ export function chaveDoErroDeAssiduidade(erro: unknown): string | null {
 }
 
 /** `YYYY-MM-DD` de hoje no fuso do browser, sem passar por UTC. */
-export function hojeIso(agora: Date = new Date()): string {
+export function hojeIso(agora: Date = agoraExemplo()): string {
   const ano = agora.getFullYear();
   const mes = String(agora.getMonth() + 1).padStart(2, "0");
   const dia = String(agora.getDate()).padStart(2, "0");

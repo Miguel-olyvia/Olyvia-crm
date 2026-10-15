@@ -16,6 +16,7 @@
  * O separador nao carrega a ficha: carrega o SEU modulo, pelo hook proprio, e
  * recebe da ficha so o que ja estava carregado (a pessoa e o nome).
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -79,13 +80,13 @@ export function PessoaAusenciasTab({
   const [aAjustar, setAAjustar] = useState(false);
   const [tipoDoAjuste, setTipoDoAjuste] = useState<string | null>(null);
   const [ajusteAAnular, setAjusteAAnular] = useState<string | null>(null);
-  const [ano, setAno] = useState(() => new Date().getFullYear());
+  const [ano, setAno] = useState(() => agoraExemplo().getFullYear());
 
   const podeVer = permissoes.view || souAPessoa || permissoes.aprovarChefia;
   const podePedir = permissoes.pedirOutros || (souAPessoa && permissoes.pedir);
 
   const periodoActual = useMemo(() => {
-    const hoje = new Date().toISOString().slice(0, 10);
+    const hoje = agoraExemplo().toISOString().slice(0, 10);
     const cobre = dados.direitos.find(
       (direito) => direito.periodo_inicio <= hoje && direito.periodo_fim >= hoje,
     );

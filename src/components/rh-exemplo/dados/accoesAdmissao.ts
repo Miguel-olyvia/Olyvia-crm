@@ -3,6 +3,7 @@
  * efeitos na ficha (o contrato gerado entra em Documentos, as credenciais criam o estado do acesso). Nenhum e-mail sai:
  * o que o RH vê são pré-visualizações. As do RH levam o nome de quem as faz; as da pessoa vêm pelo token do link.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { diaIso } from "@/components/rh-exemplo/dados/datas";
 import {
   admissaoPorToken, executarAdmissao, gravarAdmissao, lerAdmissoes, novoTokenAdmissao,
@@ -40,7 +41,7 @@ const nomeDa = (pessoaId: string): string => lerEstado().fichas[pessoaId]?.pesso
 
 /** Cria a admissão de quem acabou de ser criado com convite (role previsto escolhido pelo RH). */
 export function convidarPessoa(pessoaId: string, dados: { email: string; roleId: string | null }): void {
-  gravarAdmissao(criarAdmissao({ pessoaId, ...dados, token: novoTokenAdmissao() }, { agora: new Date(), quem: quemRh() }));
+  gravarAdmissao(criarAdmissao({ pessoaId, ...dados, token: novoTokenAdmissao() }, { agora: agoraExemplo(), quem: quemRh() }));
 }
 
 export const renovarLogin = (id: string): ResultadoAdmissao => executarAdmissao(id, "renovarLogin", {}, quemRh());
@@ -58,9 +59,9 @@ function documentoDoContrato(pessoaId: string, modeloId: string, titulo: string)
   return {
     id: novoId("doc"), pessoa_id: pessoaId, organization_id: f.pessoa.organization_id, vinculo_id: f.vinculos[0]?.id ?? null,
     modelo_id: modeloId, tipo: "contrato", titulo: `${titulo} — ${nomeDa(pessoaId)}`, estado: "a_aguardar_assinatura",
-    ficheiro_caminho: null, ficheiro_hash_sha256: null, ficheiro_anexado_em: null, emitido_em: new Date().toISOString(),
+    ficheiro_caminho: null, ficheiro_hash_sha256: null, ficheiro_anexado_em: null, emitido_em: agoraExemplo().toISOString(),
     emitido_por: lerEstado().minhaPessoaId ? `u-${lerEstado().minhaPessoaId}` : null, assinado_em: null, assinatura_origem: null,
-    anulado_em: null, anulado_motivo: null, created_at: new Date().toISOString(),
+    anulado_em: null, anulado_motivo: null, created_at: agoraExemplo().toISOString(),
   };
 }
 
@@ -96,7 +97,7 @@ export function anularContrato(pessoaId: string, motivo: string): ResultadoAdmis
   const resultado = executarAdmissao(pessoaId, "anularContrato", { motivo }, quemRh());
   if (resultado.ok) {
     alterarDocumento(pessoaId, documentoId, (d) => ({
-      ...d, estado: "anulado", anulado_em: new Date().toISOString(), anulado_motivo: motivo.trim(),
+      ...d, estado: "anulado", anulado_em: agoraExemplo().toISOString(), anulado_motivo: motivo.trim(),
     }));
   }
   return resultado;
@@ -110,7 +111,7 @@ export function enviarCredenciais(pessoaId: string, dados: { email: string; role
       ...f,
       pessoa: { ...f.pessoa, email_trabalho: dados.email.trim() },
       convite: {
-        conviteId: `cred-${pessoaId}`, estado: "pendente", emailDestino: dados.email.trim(), criadoEm: new Date().toISOString(),
+        conviteId: `cred-${pessoaId}`, estado: "pendente", emailDestino: dados.email.trim(), criadoEm: agoraExemplo().toISOString(),
         validUntil: `${diaIso(7)}T09:00:00Z`, usadoEm: null, emailEnviado: true, emailErro: null, ultimaRecusa: null,
       },
     }));
@@ -126,9 +127,9 @@ export function simularPrimeiroAcesso(pessoaId: string): ResultadoAdmissao {
       ...f,
       conta: {
         id: novoId("ct"), pessoa_id: pessoaId, organization_id: f.pessoa.organization_id, anew_user_id: `u-${pessoaId}`,
-        entity_id: null, estado: "activa", ligada_em: new Date().toISOString(), revogada_em: null,
+        entity_id: null, estado: "activa", ligada_em: agoraExemplo().toISOString(), revogada_em: null,
       },
-      convite: f.convite && { ...f.convite, estado: "usado", usadoEm: new Date().toISOString() },
+      convite: f.convite && { ...f.convite, estado: "usado", usadoEm: agoraExemplo().toISOString() },
       pendencias: [],
     }));
   }
@@ -157,7 +158,7 @@ export function gravarRascunhoDoLink(token: string | undefined, rascunho: Record
   if (!admissao || !atual) return;
   if (admissao.estado === "devolvida") daPessoa(token, "retomar", {});
   const corrente = admissaoPorToken(token).admissao;
-  if (corrente) gravarAdmissao(guardarRascunho(corrente, rascunho, new Date()));
+  if (corrente) gravarAdmissao(guardarRascunho(corrente, rascunho, agoraExemplo()));
 }
 
 export const submeterPeloLink = (token: string | undefined, dados: Record<string, unknown>): ResultadoAdmissao =>
@@ -168,7 +169,7 @@ export const assinarPeloLink = (token: string | undefined, nome: string, aceite:
   const resultado = daPessoa(token, "assinarContrato", { nome, aceite, nomeEsperado: admissao ? nomeDa(admissao.pessoaId) : "" });
   if (resultado.ok && admissao) {
     alterarDocumento(admissao.pessoaId, admissao.contrato?.documentoId ?? null, (d) => ({
-      ...d, estado: "assinado", assinado_em: new Date().toISOString(), assinatura_origem: "interna",
+      ...d, estado: "assinado", assinado_em: agoraExemplo().toISOString(), assinatura_origem: "interna",
     }));
   }
   return resultado;
@@ -180,5 +181,5 @@ export const recusarContratoPeloLink = (token: string | undefined, motivo: strin
 /** O que a página pública do link deve mostrar neste momento. */
 export function vistaDoLink(token: string | undefined) {
   const { admissao, atual } = admissaoPorToken(token);
-  return vistaPublica(admissao, atual, new Date());
+  return vistaPublica(admissao, atual, agoraExemplo());
 }

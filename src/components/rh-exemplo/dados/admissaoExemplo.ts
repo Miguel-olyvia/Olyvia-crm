@@ -4,6 +4,7 @@
  * («Expira em 2 dias», «Expirado») nunca envelhecer. Os tokens fixos servem a página pública: `exemplo` (a preencher),
  * `lara`, `submetida`, `devolvida`, `contrato`, `assinado`, `expirada` e `revogada` (o link antigo da Lara).
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { diaIso } from "@/components/rh-exemplo/dados/datas";
 import type { EstadoRh } from "@/components/rh-exemplo/dados/tiposLoja";
 import {
@@ -106,7 +107,7 @@ function esbocos(agora: Date): Esboco[] {
   ];
 }
 
-export function criarAdmissoesIniciais(e: EstadoRh, agora: Date = new Date()): EstadoAdmissoes {
+export function criarAdmissoesIniciais(e: EstadoRh, agora: Date = agoraExemplo()): EstadoAdmissoes {
   const porPessoa: Record<string, Admissao> = {};
   for (const x of esbocos(agora)) {
     const adm = construir(e, agora, x);

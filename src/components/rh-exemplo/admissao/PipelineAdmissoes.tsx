@@ -1,6 +1,7 @@
 // O separador «Admissões» de Pessoas: quem está em admissão, agrupado por estado, com contadores («Por aprovar» destacado) e,
 // em cada linha compacta (~45 px), a pessoa, o cargo, o role previsto, o estado (ícone + texto), o prazo do login temporário e
 // a ação certa para esse estado. Só memória; nenhum e-mail sai (as ações mostram o que aconteceria, em texto).
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
@@ -119,13 +120,13 @@ export function PipelineAdmissoes({ aoAbrirFicha }: { aoAbrirFicha: (id: string)
   const porPessoa = useAdmissoes((e) => e.porPessoa);
   const ordem = useAdmissoes((e) => e.ordem);
   const { executar, dialogos, mensagem } = useAcoesAdmissao();
-  const agora = new Date();
+  const agora = agoraExemplo();
 
   const itens = useMemo<Item[]>(
     () => ordem.flatMap((id) => {
       const adm = porPessoa[id];
       const pessoa = pessoas.find((p) => p.id === id);
-      return adm && pessoa ? [{ adm, visivel: estadoVisivel(adm, new Date()), nome: pessoa.nome_completo, cargo: pessoa.cargo }] : [];
+      return adm && pessoa ? [{ adm, visivel: estadoVisivel(adm, agoraExemplo()), nome: pessoa.nome_completo, cargo: pessoa.cargo }] : [];
     }),
     [ordem, porPessoa, pessoas],
   );

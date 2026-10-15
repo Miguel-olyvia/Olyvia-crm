@@ -22,6 +22,9 @@ import { rhExemploCalendarioTranslations } from "@/translations/rhExemploCalenda
 import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
+import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
+import { rhExemploOrganizacaoTranslations } from "@/translations/rhExemploOrganizacao";
+import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -103,6 +106,16 @@ Object.keys(rhExemploAdmissaoTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAdmissaoTranslations[lang as keyof typeof rhExemploAdmissaoTranslations] };
 });
 
+// Entradas «Admissões» e «Ver como a pessoa vê» do menu de RH de exemplo, e o índice dos estados do convite (`rhAdmIdx.*`).
+Object.keys(rhExemploAdmissaoMenuTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAdmissaoMenuTranslations[lang as keyof typeof rhExemploAdmissaoMenuTranslations] };
+});
+
+// Página «Organização» do RH de exemplo: grupo, empresas, filiais, centros e a ligação das pessoas (`rhOrg.*`).
+Object.keys(rhExemploOrganizacaoTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploOrganizacaoTranslations[lang as keyof typeof rhExemploOrganizacaoTranslations] };
+});
+
 // Frente D: banco de horas na ficha e horas extra pendentes na fila de trabalho (`rhFluxosD.*`).
 Object.keys(rhExemploFluxosDTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploFluxosDTranslations[lang as keyof typeof rhExemploFluxosDTranslations] };
@@ -121,6 +134,11 @@ Object.keys(rhExemploAbasTranslations).forEach((lang) => {
 // Módulo «Custos» do RH de exemplo e secção «Equipamentos» da aba Custo (`rhCustos.*`).
 Object.keys(rhExemploCustosTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCustosTranslations[lang as keyof typeof rhExemploCustosTranslations] };
+});
+
+// Canal de denúncias de exemplo (`cd.*`, `sidebar.canalDenuncias*`) — módulo próprio, mesmo padrão.
+Object.keys(canalDenunciasTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...canalDenunciasTranslations[lang as keyof typeof canalDenunciasTranslations] };
 });
 
 export const useTranslation = () => {

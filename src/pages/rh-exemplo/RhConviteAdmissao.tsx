@@ -56,6 +56,7 @@ import { ConvitePagina2 } from "@/components/rh-exemplo/convite/ConvitePagina2";
 import { ConviteCartaoLinkInvalido } from "@/components/rh-exemplo/convite/ConviteCartaoLinkInvalido";
 import { ConviteSaudacao } from "@/components/rh-exemplo/convite/ConviteSaudacao";
 import { ConvitePorEstado } from "@/components/rh-exemplo/convite/ConvitePorEstado";
+import { FaixaPreVisualizacao } from "@/components/rh-exemplo/convite/FaixaPreVisualizacao";
 import {
   CODIGOS_PAGINA_2,
   campoEhObrigatorio,
@@ -121,7 +122,13 @@ export default function RhConviteAdmissao() {
     [language],
   );
   const { token } = useParams<{ token: string }>();
-  return <ConvitePorEstado token={token} formulario={<ConviteAdmissaoEcra idioma={idioma} />} />;
+  // Só nesta apresentação de exemplo: a faixa de volta ao índice dos estados (não faz parte do que a pessoa vê de verdade).
+  return (
+    <>
+      <FaixaPreVisualizacao token={token} />
+      <ConvitePorEstado token={token} formulario={<ConviteAdmissaoEcra idioma={idioma} />} />
+    </>
+  );
 }
 
 function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {

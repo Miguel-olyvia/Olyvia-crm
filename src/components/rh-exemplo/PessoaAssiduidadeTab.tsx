@@ -14,6 +14,7 @@
  * A aba aberta: quem chama pode controla-la (`aba` + `aoMudarAba`, como «O meu ponto», que a guarda no endereco); sem isso
  * o componente guarda-a sozinho (na ficha).
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useMemo, useState } from "react";
 import { CartaoBancoHoras } from "@/components/rh-exemplo/fluxosC/CartaoBancoHoras";
 import { HorasExtraDaPessoa } from "@/components/rh-exemplo/fluxosC/HorasExtraDaPessoa";
@@ -58,7 +59,7 @@ function limitesDoMes(ano: number, mes: number): { de: string; ate: string } {
 /** O mes visivel (que e tambem a janela de datas a carregar). */
 function useMesVisivel() {
   const [mesVisivel, setMesVisivel] = useState<MesVisivel>(() => {
-    const agora = new Date();
+    const agora = agoraExemplo();
     return { ano: agora.getFullYear(), mes: agora.getMonth() + 1 };
   });
   const janela = useMemo(() => limitesDoMes(mesVisivel.ano, mesVisivel.mes), [mesVisivel.ano, mesVisivel.mes]);

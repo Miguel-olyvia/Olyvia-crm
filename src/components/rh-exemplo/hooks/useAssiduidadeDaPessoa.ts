@@ -4,6 +4,7 @@
  * As correcções empilham linhas novas que apontam a corrigida (`corrige_*`), como na base, e o valor em vigor
  * tira-se com `emVigor`, por isso o painel de histórico continua a ter o que mostrar.
  */
+import { momentoDePicagemAgora } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useCallback, useMemo } from "react";
 import { atualizarFicha, lerEstado, novoId, useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { definirGestao, lerGestao, novoIdGestao, useGestao } from "@/components/rh-exemplo/dados/lojaGestao";
@@ -170,7 +171,7 @@ export function useAssiduidadeDaPessoa(pessoaId: string | undefined, janela: Jan
       vinculoId?: string | null;
     }): Promise<string | null> => {
       if (!pessoaId || !ficha) return "rhExemplo.erro.semPessoa";
-      const momento = args.momento ?? new Date().toISOString();
+      const momento = args.momento ?? momentoDePicagemAgora();
       const { data, hora } = dataEHoraDe(momento);
       const nova: Picagem = {
         id: novoIdGestao("pg"),

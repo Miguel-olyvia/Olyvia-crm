@@ -56,6 +56,8 @@ import {
   Waypoints,
   CarFront,
   History as HistoryIcon,
+  UserPlus,
+  Eye,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -74,6 +76,12 @@ export interface MenuItem {
   counterKey?: InventoryCounterKey;
   /** Contador da Frota de exemplo (pílula no painel do menu), lido da base de exemplo da Frota (useContadoresFrota). */
   frotaCounterKey?: "hoje" | "viaturas" | "ocorrencias" | "manutencao";
+  /** Só o caminho exato realça a entrada (um ecrã filho com outra entrada, ou sem entrada, não a realça). */
+  exact?: boolean;
+  /** Nunca realça quando o endereço traz estes parâmetros (p.ex. `tab=admissoes`): pertencem a outra entrada. */
+  inactiveWhenSearch?: string;
+  /** Contador de texto (p.ex. «1 por aprovar»), alimentado por uma memória de exemplo e não pelo Inventário. */
+  textCounter?: "rhAdmissoesPorAprovar";
 }
 
 export interface MenuSubSection {
@@ -346,6 +354,7 @@ export const menuSections: MenuSection[] = [
       "/rh-exemplo/pessoas",
       "/rh-exemplo/assiduidade-e-ausencias",
       "/rh-exemplo/centros",
+      "/rh-exemplo/organizacao",
       "/rh-exemplo/documentos/modelos",
       "/rh-exemplo/processamento-salarial",
       "/rh-exemplo/custos",
@@ -354,12 +363,17 @@ export const menuSections: MenuSection[] = [
     ],
     permissions: ["users.view"],
     items: [
-      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permission: "users.view" },
+      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permission: "users.view", inactiveWhenSearch: "tab=admissoes" },
+      // Leva à mesma lista, já no separador «Admissões» (o separador vive em `?tab=`).
+      { to: "/rh-exemplo/pessoas?tab=admissoes", icon: UserPlus, labelKey: "sidebar.rhExemploAdmissoes", permission: "users.view", textCounter: "rhAdmissoesPorAprovar" },
+      { to: "/rh-exemplo/organizacao", icon: Network, labelKey: "sidebar.rhExemploOrganizacao", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.rhExemploAssiduidadeEAusencias", permission: "users.view" },
       { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },
       { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
       { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
       { to: "/rh-exemplo/custos", icon: Coins, labelKey: "rhCustos.menu", permission: "users.view" },
+      // Índice dos oito estados da página pública do convite; `exact` para não realçar em `/admissao/configuracao`.
+      { to: "/rh-exemplo/admissao", icon: Eye, labelKey: "sidebar.rhExemploVerComoPessoa", permission: "users.view", exact: true },
       // «Campos de admissão» e «Regras de fim de contrato» não têm entrada no menu: abrem por dois botões no cabeçalho da
       // lista de Pessoas, como no ramo de RH real. Os caminhos continuam em `paths` para o grupo se manter aberto nesses ecrãs.
     ],
@@ -375,6 +389,20 @@ export const menuSections: MenuSection[] = [
       { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
       { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
+    ],
+  },
+  {
+    // Canal de denúncias de exemplo (dados em memória, sem base). As duas primeiras entradas abrem as páginas PÚBLICAS
+    // (sem sessão) para ver o canal como a pessoa o vê; a gestão é só do responsável do canal.
+    id: "canal-denuncias",
+    icon: ShieldAlert,
+    labelKey: "sidebar.canalDenunciasModulo",
+    paths: ["/canal-denuncias"],
+    permissions: ["users.view"],
+    items: [
+      { to: "/canal-denuncias/nova", icon: Megaphone, labelKey: "sidebar.canalDenunciasNova", permission: "users.view" },
+      { to: "/canal-denuncias/acompanhar", icon: Eye, labelKey: "sidebar.canalDenunciasAcompanhar", permission: "users.view" },
+      { to: "/canal-denuncias/gestao", icon: ClipboardCheck, labelKey: "sidebar.canalDenunciasGestao", permission: "users.view" },
     ],
   },
   {

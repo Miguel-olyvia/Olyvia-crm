@@ -8,6 +8,8 @@ import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
 import { CounterPill } from "@/components/inventory/ui/CounterPill";
+import { ContadorAdmissoes } from "./sidebar/ContadorAdmissoes";
+import { itemAtivo, type ItemAtivavel } from "./sidebar/itemAtivo";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
 import { DICA_CONTADOR_FROTA, TOM_CONTADOR_FROTA, useContadoresFrota } from "@/components/frota-exemplo/useContadoresFrota";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
@@ -166,9 +168,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   };
 
   // Check if item is active
-  const isItemActive = (to: string) => {
-    return location.pathname === to || location.pathname.startsWith(to + "/");
-  };
+  const isItemActive = (item: ItemAtivavel) => itemAtivo(item, location.pathname, location.search);
 
   // Check if section is active
   const isSectionActive = (section: MenuSection) => {
@@ -215,7 +215,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
               {/* Top level items (Hoje, Dashboard, Atividades, Operações) */}
               {visibleTopLevel.map((item) => {
                 const Icon = item.icon;
-                const isActive = isItemActive(item.to);
+                const isActive = isItemActive(item);
                 return (
                   <Tooltip key={item.id}>
                     <TooltipTrigger asChild>
@@ -310,7 +310,7 @@ interface FlyoutPanelProps {
   canViewItem: (item: MenuItem) => boolean;
   onItemClick: (to: string) => void;
   onClose: () => void;
-  isItemActive: (to: string) => boolean;
+  isItemActive: (item: ItemAtivavel) => boolean;
 }
 
 const FlyoutPanel = memo(function FlyoutPanel({
@@ -343,7 +343,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
     if (section.subSections) {
       const newExpanded: Record<string, boolean> = {};
       for (const sub of section.subSections) {
-        if (sub.items.some((item) => isItemActive(item.to))) {
+        if (sub.items.some((item) => isItemActive(item))) {
           newExpanded[sub.key] = true;
         }
       }
@@ -358,7 +358,9 @@ const FlyoutPanel = memo(function FlyoutPanel({
         });
       }
     }
-  }, [location.pathname, section.subSections]);
+    // `isItemActive` é recriada em cada render: o que ela lê do endereço (caminho e `?tab=`) é que entra nas dependências.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, section.subSections]);
 
   const toggleSub = useCallback((key: string) => {
     setExpandedSubs((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -415,7 +417,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
         {/* Main items */}
         {visibleItems.map((item) => {
           const Icon = item.icon;
-          const isActive = isItemActive(item.to);
+          const isActive = isItemActive(item);
           return (
             <button
               key={item.to}
@@ -431,6 +433,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
               <Icon className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{t(item.labelKey)}</span>
               <CounterPill value={counterFor(item)} {...pillProps(item)} />
+              {item.textCounter === "rhAdmissoesPorAprovar" && <ContadorAdmissoes />}
             </button>
           );
         })}
@@ -455,7 +458,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
               <div className="mt-1 ml-2 space-y-0.5">
                 {sub.items.map((item) => {
                   const Icon = item.icon;
-                  const isActive = isItemActive(item.to);
+                  const isActive = isItemActive(item);
                   return (
                     <button
                       key={item.to}

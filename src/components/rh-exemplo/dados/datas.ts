@@ -1,9 +1,10 @@
 /** Datas relativas a hoje, para os dados de exemplo nunca "envelhecerem". */
+import { HOJE_EXEMPLO_RH } from "@/components/rh-exemplo/dados/hojeExemplo";
 const MS_DIA = 24 * 60 * 60 * 1000;
 
 /** Hoje em AAAA-MM-DD (UTC, como o resto do módulo). */
 export function hojeIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return HOJE_EXEMPLO_RH;
 }
 
 /** Hoje deslocado `dias` (negativo = passado). */

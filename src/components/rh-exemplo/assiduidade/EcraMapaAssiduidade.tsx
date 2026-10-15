@@ -16,6 +16,7 @@
  * picagens sao permissao-dependentes. Quando a leitura foi recusada mostra-se
  * o bloco de sem acesso, nunca uma grelha vazia nem um zero de horas.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,7 +57,7 @@ function limitesDoMes(ano: number, mes: number) {
 export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeProps) {
   const { t, language } = useTranslation();
   const [mesVisivel, setMesVisivel] = useState(() => {
-    const agora = new Date();
+    const agora = agoraExemplo();
     return { ano: agora.getFullYear(), mes: agora.getMonth() };
   });
 

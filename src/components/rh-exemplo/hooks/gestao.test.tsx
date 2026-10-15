@@ -1,5 +1,6 @@
 // Os hooks em memória da gestão de RH de exemplo: mesmas assinaturas dos reais, estado partilhado e acções que
 // escrevem de verdade (picar, marcar falta, aprovar pedidos, abrir períodos, configurar a admissão).
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { beforeEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { diaIso } from "@/components/rh-exemplo/dados/datas";
@@ -219,7 +220,7 @@ describe("assiduidade da organização", () => {
 
 describe("relatório mensal", () => {
   it("tem um dia por dia do mês e totais coerentes", () => {
-    const hoje = new Date();
+    const hoje = agoraExemplo();
     const { result } = renderHook(() => useRelatorioAssiduidadeMensal("p-rui", hoje.getFullYear(), hoje.getMonth()));
     const dias = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
     expect(result.current.dias).toHaveLength(dias);
@@ -228,7 +229,7 @@ describe("relatório mensal", () => {
   });
 
   it("registar e anular horas de obra", async () => {
-    const hoje = new Date();
+    const hoje = agoraExemplo();
     const { result } = renderHook(() => useRelatorioAssiduidadeMensal("p-rui", hoje.getFullYear(), hoje.getMonth()));
     const data = diaIso(0);
     await act(async () => {

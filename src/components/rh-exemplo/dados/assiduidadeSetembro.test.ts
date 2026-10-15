@@ -1,5 +1,6 @@
 // O gerador da assiduidade de exemplo: deterministico, um registo coerente por dia, e Setembro completo para
 // todas as pessoas, ligado aos stores que a interface usa (sem duplicar nem partir os totais).
+import { HOJE_EXEMPLO_RH } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { beforeEach, describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { feriadoDe } from "@/components/rh-exemplo/calendarioPessoa/feriados";
@@ -30,7 +31,7 @@ const tipoDe = (id: string): string | undefined => {
 };
 const mesDaPessoa = (id: string, ano: number, mes: number) => {
   const ficha = lerEstado().fichas[id];
-  const fonte = { gestao: lerGestao(), fluxosB: lerFluxosB(), fluxosC: lerFluxosC(), tiposAusencia: lerEstado().tiposAusencia, locais: lerEstado().locais, hoje: new Date().toISOString().slice(0, 10) };
+  const fonte = { gestao: lerGestao(), fluxosB: lerFluxosB(), fluxosC: lerFluxosC(), tiposAusencia: lerEstado().tiposAusencia, locais: lerEstado().locais, hoje: HOJE_EXEMPLO_RH };
   return montarMes(entradaMesDaFicha(ficha, ano, mes, fonte));
 };
 

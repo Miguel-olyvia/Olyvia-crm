@@ -1,5 +1,6 @@
 // A faixa do login temporário na página pública: o estado, o prazo que resta («O teu acesso temporário termina a dd/mm às
 // hh:mm») e, se a pessoa já guardou rascunho, a hora a que ficou guardado. É a mesma moldura em todos os estados do link.
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { Clock3 } from "lucide-react";
 import { EstadoAdmissaoChip } from "@/components/rh-exemplo/admissao/aspeto";
 import { dataEHora, textoPrazo } from "@/components/rh-exemplo/admissao/auxiliares";
@@ -9,7 +10,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 
 export function ConviteFaixaPrazo({ admissao, comRascunho = false }: { admissao: Admissao; comRascunho?: boolean }) {
   const { t } = useTranslation();
-  const agora = new Date();
+  const agora = agoraExemplo();
   const visivel = estadoVisivel(admissao, agora);
   const termina = dataEHora(admissao.login.expiraEm);
   return (

@@ -20,6 +20,7 @@
  * O sinal nunca se escreve: sao dois botoes, "acrescentar" e "retirar", e um
  * numero positivo. Um campo que aceita "-2,5" e um convite ao engano.
  */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useEffect, useMemo, useState } from "react";
 import {
   Sheet,
@@ -126,7 +127,7 @@ export function AjusteSaldoSheet({
       setPeriodoInicio(direitoDoTipo.periodo_inicio);
       setPeriodoFim(direitoDoTipo.periodo_fim);
     } else {
-      const ano = new Date().getFullYear();
+      const ano = agoraExemplo().getFullYear();
       setPeriodoInicio(`${ano}-01-01`);
       setPeriodoFim(`${ano}-12-31`);
     }

@@ -98,12 +98,17 @@ const RhMinhasAusencias = lazy(() => import("./pages/rh-exemplo/RhMinhasAusencia
 const RhMeuPonto = lazy(() => import("./pages/rh-exemplo/RhMeuPonto"));
 const RhMeusDocumentos = lazy(() => import("./pages/rh-exemplo/RhMeusDocumentos"));
 const RhCentrosTrabalho = lazy(() => import("./pages/rh-exemplo/RhCentrosTrabalho"));
+const RhOrganizacao = lazy(() => import("./pages/rh-exemplo/RhOrganizacao"));
 const RhModelosDocumentos = lazy(() => import("./pages/rh-exemplo/RhModelosDocumentos"));
 const RhProcessamentoSalarial = lazy(() => import("./pages/rh-exemplo/RhProcessamentoSalarial"));
 const RhConfiguracaoAdmissao = lazy(() => import("./pages/rh-exemplo/RhConfiguracaoAdmissao"));
 const RhCustos = lazy(() => import("./pages/rh-exemplo/RhCustos"));
 const RhRegrasFimContrato = lazy(() => import("./pages/rh-exemplo/RhRegrasFimContrato"));
 const RhConviteAdmissao = lazy(() => import("./pages/rh-exemplo/RhConviteAdmissao"));
+const RhAdmissaoIndice = lazy(() => import("./pages/rh-exemplo/RhAdmissaoIndice"));
+const NovaDenuncia = lazy(() => import("./pages/canal-denuncias/NovaDenuncia"));
+const AcompanharDenuncia = lazy(() => import("./pages/canal-denuncias/AcompanharDenuncia"));
+const GestaoDenuncias = lazy(() => import("./pages/canal-denuncias/GestaoDenuncias"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
 // AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
 const AnewClients = lazy(() => import("./pages/AnewClients"));
@@ -223,6 +228,9 @@ const App = () => (
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
                   {/* Convite de admissão de exemplo (página pública, sem sessão; só o token "exemplo" abre um convite) */}
                   <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
+                  {/* Canal de denúncias de exemplo: páginas públicas (sem sessão), dados em memória */}
+                  <Route path="/canal-denuncias/nova" element={<NovaDenuncia />} />
+                  <Route path="/canal-denuncias/acompanhar" element={<AcompanharDenuncia />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
@@ -271,13 +279,16 @@ const App = () => (
                       <Route path="/rh-exemplo/assiduidade" element={<ProtectedRoute permission="users.view"><RhMeuPonto /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/documentos" element={<ProtectedRoute permission="users.view"><RhMeusDocumentos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/centros" element={<ProtectedRoute permission="users.view"><RhCentrosTrabalho /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/organizacao" element={<ProtectedRoute permission="users.view"><RhOrganizacao /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/documentos/modelos" element={<ProtectedRoute permission="users.view"><RhModelosDocumentos /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/processamento-salarial" element={<ProtectedRoute permission="users.view"><RhProcessamentoSalarial /></ProtectedRoute>} />
                       {/* Link antigo: as horas extra da pessoa passaram a ser uma aba de «O meu ponto». */}
                       <Route path="/rh-exemplo/minhas-horas-extra" element={<Navigate to="/rh-exemplo/assiduidade?aba=horas-extra" replace />} />
                       <Route path="/rh-exemplo/custos" element={<ProtectedRoute permission="users.view"><RhCustos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/admissao" element={<ProtectedRoute permission="users.view"><RhAdmissaoIndice /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
+                      <Route path="/canal-denuncias/gestao" element={<ProtectedRoute permission="users.view"><GestaoDenuncias /></ProtectedRoute>} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
                       <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />

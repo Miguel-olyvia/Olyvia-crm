@@ -1,4 +1,5 @@
 /** Enviar o convite de admissão, na apresentação: regista o convite na ficha em memória (não envia e-mail nenhum). */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useCallback, useState } from "react";
 import { diaIso } from "@/components/rh-exemplo/dados/datas";
 import { atualizarFicha, novoId } from "@/components/rh-exemplo/dados/loja";
@@ -27,7 +28,7 @@ export function useEnviarConviteAdmissao() {
         conviteId,
         estado: "pendente",
         emailDestino: email,
-        criadoEm: new Date().toISOString(),
+        criadoEm: agoraExemplo().toISOString(),
         validUntil,
         usadoEm: null,
         emailEnviado: true,

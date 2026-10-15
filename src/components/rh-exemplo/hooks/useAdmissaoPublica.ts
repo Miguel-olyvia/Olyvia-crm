@@ -1,4 +1,5 @@
 /** O que a página pública do link precisa de saber: a admissão a que o token pertence e o que mostrar. Só memória. */
+import { agoraExemplo } from "@/components/rh-exemplo/dados/hojeExemplo";
 import { useFichaRh } from "@/components/rh-exemplo/dados/loja";
 import { procurarPorToken, useAdmissoes } from "@/components/rh-exemplo/dados/lojaAdmissao";
 import { vistaPublica, type Admissao, type VistaPublica } from "@/components/rh-exemplo/lib/admissaoFluxo";
@@ -15,5 +16,5 @@ export function useAdmissaoPublica(token: string | undefined): AdmissaoPublica {
   const admissao = useAdmissoes((e) => procurarPorToken(e, token).admissao);
   const atual = useAdmissoes((e) => procurarPorToken(e, token).atual);
   const ficha = useFichaRh(admissao?.pessoaId);
-  return { admissao, atual, vista: vistaPublica(admissao, atual, new Date()), nome: ficha?.pessoa.nome_completo ?? null };
+  return { admissao, atual, vista: vistaPublica(admissao, atual, agoraExemplo()), nome: ficha?.pessoa.nome_completo ?? null };
 }
