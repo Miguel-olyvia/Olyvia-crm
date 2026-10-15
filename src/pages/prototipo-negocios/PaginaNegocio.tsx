@@ -225,6 +225,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   const E = (gr: Grupo) => efetivo(S.campos, gr);
   const g = (gr: Grupo, ic: LucideIcon, ro = false) => { const e = E(gr); return passoDeGrupo(e, ic, <Campos grupo={e} {...fx} ro={ro} />, d.f); };
 
+  // 15/10: um passo cujo documento já saiu (a proposta enviada, o contrato gerado) está feito; os campos ficam só de leitura e
+  // já não contam como "falta 1 resposta" (senão o negócio abria nesse passo em vez de no que há a fazer, ex.: gerar o contrato)
+  const fechadoSe = (p: Passo, sim: boolean): Passo => (sim ? { ...p, conta: undefined, feito: true } : p);
   let passos: Passo[] = [];
   if (d.fase === 0) {
     passos = [
@@ -317,22 +320,22 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     passos = [
       { id: "orc", titulo: "Orçamento", icone: FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)), resumo: [eur(tot(d, S).pf) + " €", "margem " + pct(tot(d, S).m)],
         corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
-      simples ? { ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
+      simples ? fechadoSe({ ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
         <div className="space-y-10">
           <Campos grupo={E(PROPOSTA[0])} {...fx} ro={!!o.enviada} />
           <Partilhar ctx={ctx} d={d} tipo="proposta" estado={o.aceite ? `aceite ${o.aceite}` : o.enviada ? `enviada ${o.enviada} · à espera do cliente` : "ainda não enviada"}>
             <PropostaDoc S={S} d={d} />
           </Partilhar>
         </div>
-      ) } : g(PROPOSTA[0], FileSignature, !!o.enviada),
-      ...(o.vendaDireta ? [] : [simples ? { ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+      ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
+      ...(o.vendaDireta ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
         <div className="space-y-10">
           <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
-          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? "pronto a enviar" : "depois de a proposta ser aceite"}>
+          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
             <ContratoDoc S={S} d={d} />
           </Partilhar>
         </div>
-      ) } : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
+      ) }, !!o.contrato) : g(PROPOSTA[1], FileSignature, !!o.contrato)]),
     ];
   } else if (d.fase === 4) {
     passos = [

@@ -3,7 +3,7 @@
 // o link do portal, email, WhatsApp, ver como o cliente e imprimir (PDF).
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Check, Copy, Mail, Maximize2, MessageCircle, Minus, Plus, Printer, X } from "lucide-react";
+import { Armchair, Check, Copy, Grid3x3, Hammer, HardHat, Mail, Maximize2, MessageCircle, Minus, Package, Palette, Plug, Plus, Printer, ShieldCheck, UserRound, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
@@ -13,6 +13,8 @@ import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
 import { diasAdenda, totalAdenda, type Adenda } from "./adendas";
+import { porFase, linhaDeMaterial, quantidade, escolhasVisiveis, fornecidosPeloCliente, type Grupo } from "./propostaConteudo";
+import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriais, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
 
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
@@ -181,6 +183,78 @@ const Titulo = ({ n, children }: { n: number; children: ReactNode }) => (
   </h2>
 );
 
+/* Os ícones da proposta: uma cor, discretos. A fase leva a cor da fase (como no plano da obra). */
+const ICONE_FASE: Record<number, LucideIcon> = { 1: Hammer, 2: Plug, 3: Grid3x3, 4: Armchair };
+const ICONE_GRUPO: Record<Grupo, LucideIcon> = { trabalhos: HardHat, preparacao: ShieldCheck, materiais: Package, cliente: UserRound };
+/** O nome de uma linha de materiais na tabela do orçamento (sem prefixos técnicos). */
+function nomeNaTabela(dl: string): string {
+  const { grupo, item } = linhaDeMaterial(dl);
+  return grupo === "cliente" ? `${item.nome} (fornecido por si)` : item.det ? `${item.nome} (${item.det})` : item.nome;
+}
+const Rotulo = ({ ic: Ic, children }: { ic: LucideIcon; children: ReactNode }) => (
+  <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500"><Ic className="h-3.5 w-3.5" aria-hidden="true" />{children}</p>
+);
+type ItemMat = { k: string; nome: string; det: string; img?: IlustracaoKey };
+/** Uma lista de materiais com a ilustração, o nome e a quantidade por extenso. */
+function ListaMateriais({ titulo, itens }: { titulo: string; itens: ItemMat[] }) {
+  return (
+    <div>
+      <Rotulo ic={Package}>{titulo}</Rotulo>
+      <ul className="mt-1 grid gap-x-8 sm:grid-cols-2">
+        {itens.map((x) => (
+          <li key={x.k} className="flex items-center gap-3 border-b border-slate-100 py-2 text-[15px]">
+            <Ilustracao k={x.img ?? ilustracaoDe(x.nome)} className="h-9 w-9 text-slate-500" />
+            <span className="min-w-0 flex-1 leading-snug">{x.nome}</span>
+            {x.det && <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-slate-500">{x.det}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+/** "Materiais e escolhas" da proposta (e do portal): os do modelo, os escolhidos, o que o cliente fornece (com o que poupa) e as escolhas. */
+export function MateriaisEscolhas({ mats, escolhidos, fornecidos, escolhas, nec, n = 2 }: {
+  mats: ItemMat[]; escolhidos: ItemMat[]; fornecidos: { nome: string; det?: string; poupa: number }[]; escolhas: { l: string; v?: string }[]; nec: string[]; n?: number;
+}) {
+  return (
+    <section className="space-y-5">
+      <Titulo n={n}>Materiais e escolhas</Titulo>
+      {mats.length > 0 && <ListaMateriais titulo="Incluídos no modelo" itens={mats} />}
+      {escolhidos.length > 0 && <ListaMateriais titulo="Escolhidos consigo" itens={escolhidos} />}
+      {!escolhidos.length && nec.length > 0 && <ListaMateriais titulo="Escolhidos consigo" itens={nec.map((n) => ({ k: n, nome: n, det: "" }))} />}
+      {fornecidos.length > 0 && (
+        <div>
+          <Rotulo ic={UserRound}>Fornecido por si</Rotulo>
+          <ul className="mt-1 divide-y divide-slate-100">
+            {fornecidos.map((x) => (
+              <li key={x.nome} className="flex items-baseline justify-between gap-3 py-2 text-[15px]">
+                <span className="min-w-0">{x.nome}{x.det && <span className="block text-sm text-slate-500">{x.det}</span>}</span>
+                {x.poupa > 0 && <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-emerald-700">poupa {eur(x.poupa)} €</span>}
+              </li>
+            ))}
+          </ul>
+          {fornecidos.some((x) => x.poupa > 0) && (
+            <p className="mt-1 text-right text-sm text-slate-600">Ao todo, poupa <b className="font-semibold tabular-nums text-emerald-700">{eur(fornecidos.reduce((a, x) => a + x.poupa, 0))} €</b> sem IVA, já descontados no preço.</p>
+          )}
+        </div>
+      )}
+      {escolhas.length > 0 && (
+        <div>
+          <Rotulo ic={Palette}>As suas escolhas</Rotulo>
+          <dl className="mt-1 divide-y divide-slate-100">
+            {escolhas.map((x) => (
+              <div key={x.l} className="flex items-baseline justify-between gap-3 py-2 text-[15px]">
+                <dt className={x.v ? "text-slate-600" : "flex items-center gap-1.5 text-slate-800"}>{!x.v && <Check className="h-4 w-4 text-emerald-700" aria-hidden="true" />}{x.l}</dt>
+                {x.v && <dd className="text-right font-medium text-slate-900">{x.v}</dd>}
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
   const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0, k = 1 - desconto / 100;
   const numero = `PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`;
@@ -199,12 +273,19 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
     const x = linhaCalc(l, S), fase: FaseObra = l.t === "mat" ? (l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d)) : (faseDe.get(l.sid) ?? 4);
     return l.t === "svc"
       ? { fase, nome: x.s!.n, q: l.q, un: x.s!.un, pu: (x.preco * k) / (l.q || 1), total: x.preco * k, mat: false }
-      : { fase, nome: l.d === LINHA_DEMOLICAO ? "Demolição e remoção de entulho (operador licenciado, e-GAR)" : l.d.startsWith("Fornecido pelo cliente") ? l.d : `Materiais do modelo: ${l.d}`, q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
+      : { fase, nome: nomeNaTabela(l.d), q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
   });
+  // "O que vamos fazer": por fase, em grupos curtos e sem os prefixos técnicos das linhas (propostaConteudo.ts)
+  const conteudo = porFase(o.linhas.map((l) => {
+    if (l.t === "svc") { const x = linhaCalc(l, S); return { fase: faseDe.get(l.sid) ?? 4, t: "svc" as const, nome: x.s!.n, q: l.q, un: x.s!.un }; }
+    return { fase: l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d), t: "mat" as const, d: l.d };
+  }));
   const fases = FASES_OBRA.filter((f) => linhas.some((x) => x.fase === f.n));
   const mats = calcMats(d, S, true).filter((x) => x.q > 0);
   const prods = (d.visita.prod ?? []).filter((p) => p.q > 0);
-  const escolhas = ESCOLHAS.campos.filter((c) => d.f[c.k] && c.k !== "materiais_cliente").map((c) => [c.l, d.f[c.k]] as const);
+  const escolhas = escolhasVisiveis(ESCOLHAS.campos.filter((c) => d.f[c.k] && c.k !== "materiais_cliente").map((c) => [c.l, d.f[c.k]] as const));
+  const fornecidos = fornecidosPeloCliente(d, S);
+  const escolhidos = prods.filter((p) => !p.cliente);
   const comercial = PAPEIS.comercial.nome;
   const total = 4;
 
@@ -262,45 +343,35 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
         <section className="space-y-4">
           <Titulo n={1}>O que vamos fazer</Titulo>
           <p className="text-slate-600">{d.f.pedido || `Remodelação com o modelo "${L.modelo}".`} A obra divide-se em fases, pela ordem em que acontecem.</p>
-          <ol className="space-y-4">
-            {fases.map((f) => (
-              <li key={f.n} className="grid grid-cols-[14px_minmax(0,1fr)] gap-3">
-                <span className="mt-1.5 h-3 w-3 rounded-sm" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />
-                <div>
-                  <p className="font-semibold text-slate-900">Fase {f.n} · {f.nome}</p>
-                  <ul className="mt-1 text-slate-700">
-                    {linhas.filter((x) => x.fase === f.n && !x.mat).map((x) => <li key={x.nome}>{x.nome} <span className="text-slate-500">· {nfmt(x.q)} {x.un}</span></li>)}
-                    {linhas.filter((x) => x.fase === f.n && x.mat).map((x) => <li key={x.nome} className="text-slate-600">{x.nome}</li>)}
-                  </ul>
-                </div>
-              </li>
-            ))}
+          <ol className="space-y-6">
+            {conteudo.map((f) => {
+              const F = FASES_OBRA[f.fase - 1], Ic = ICONE_FASE[f.fase] ?? HardHat, cor = COR_FASE[f.fase as FaseObra];
+              return (
+                <li key={f.fase} className="break-inside-avoid">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: `${cor}1f`, color: cor }} aria-hidden="true"><Ic className="h-[18px] w-[18px]" /></span>
+                    <p className="min-w-0 text-[15px] font-semibold leading-snug text-slate-900"><span className="text-slate-500">Fase {f.fase} ·</span> {F.nome}</p>
+                  </div>
+                  <div className="ml-[18px] mt-2 space-y-3 border-l border-slate-200 pl-[29px]">
+                    {f.grupos.map((g) => {
+                      const Gi = ICONE_GRUPO[g.k];
+                      return (
+                        <div key={g.k}>
+                          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500"><Gi className="h-3.5 w-3.5" aria-hidden="true" />{g.t}</p>
+                          <ul className="mt-1 space-y-0.5 text-[15px] text-slate-800">
+                            {g.itens.map((x) => <li key={x.nome}>{x.nome}{x.det && <span className="text-slate-500"> · {x.det}</span>}</li>)}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         </section>
-        <section className="space-y-4">
-          <Titulo n={2}>Materiais e escolhas</Titulo>
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Incluídos no modelo</p>
-              <ul className="mt-2 divide-y divide-slate-100">
-                {mats.map((x) => <li key={x.n} className="flex justify-between gap-3 py-1.5"><span>{x.n}</span><span className="tabular-nums text-slate-500">{nfmt(x.q)} {x.un}</span></li>)}
-              </ul>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Escolhidos consigo</p>
-              {prods.length ? (
-                <ul className="mt-2 divide-y divide-slate-100">
-                  {prods.map((p) => <li key={p.id} className="flex justify-between gap-3 py-1.5"><span>{p.n}{p.cliente ? <span className="text-slate-500"> · fornecido por si</span> : null}</span><span className="tabular-nums text-slate-500">{nfmt(p.q)} {p.un}</span></li>)}
-                </ul>
-              ) : <p className="mt-2 text-slate-600">{d.visita.nec.length ? d.visita.nec.join(", ") : "Os materiais do modelo, sem escolhas à parte."}</p>}
-              {escolhas.length > 0 && (
-                <dl className="mt-4 space-y-1">
-                  {escolhas.map(([l, v]) => <div key={l} className="flex justify-between gap-3"><dt className="text-slate-500">{l}</dt><dd>{v}</dd></div>)}
-                </dl>
-              )}
-            </div>
-          </div>
-        </section>
+        <MateriaisEscolhas mats={mats.map((x) => ({ k: x.n, nome: x.n, det: quantidade(x.q, x.un) }))} escolhidos={escolhidos.map((p) => ({ k: p.id, nome: p.n, det: quantidade(p.q, p.un) }))}
+          fornecidos={fornecidos} escolhas={escolhas} nec={!prods.length ? d.visita.nec : []} />
       </Pagina>
 
       {/* ---------------- 3. o orçamento detalhado */}

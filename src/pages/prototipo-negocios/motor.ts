@@ -875,7 +875,8 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (!o!.vendaDireta && o!.contrato !== "assinado")
         return o!.contrato === "enviado"
           ? { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente.", who: "cliente", wait: true, sim: "assinar" }
-          : { t: "Enviar o contrato", sub: "Gerado a partir da proposta aceite.", btn: "Enviar contrato", act: "enviarContrato", who: "comercial" };
+          // 15/10 (Ruben): o cliente aceita no portal e é o comercial que gera o contrato; aparece no mesmo link, por assinar
+          : { t: "O cliente aceitou. Gerar o contrato", sub: `Aceite ${o!.aceite === "hoje" ? "hoje" : "a " + o!.aceite}, no portal. O contrato segue a proposta e aparece no mesmo link do cliente, por assinar.`, btn: "Gerar o contrato", act: "enviarContrato", who: "comercial" };
       return { t: "—" };
     case 4:
       if (!d.fin.fatura) return { t: "Emitir a fatura", sub: "Vai para o portal do cliente.", btn: "Emitir fatura", act: "emitir", who: "financeiro" };
@@ -1250,10 +1251,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     aceitar(id: number) {
       const d = deal(id); d.orc!.aceite = "hoje"; log(d, "O cliente aceitou a proposta no portal");
       if (d.orc!.vendaDireta) { criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); }
-      else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta enviar o contrato", kind: "ok" });
+      else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta o comercial gerar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
-    enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato enviado para assinatura"); avisar({ msg: "Contrato enviado", sub: "Gerado a partir da proposta aceite", kind: "ok" }); },
+    enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); },
     assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
     /** O comercial aprova a encomenda de cliente (14/10, decisão do Ruben): reserva o stock (o de agora) e o que falta vai numa encomenda a fornecedor por validar. */
     aprovarEc(id: number) {
