@@ -12,7 +12,7 @@ import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { linhasFornecidas, marcarItem, menosDaLinha } from "./forneceCliente";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
-import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil } from "./planoObra";
+import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil, realPorFase, type ObraReal } from "./planoObra";
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
 import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
@@ -235,7 +235,9 @@ export interface Negocio {
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean;
     /** A encomenda de cliente, gerada ao assinar o contrato (14/10; preparacaoObra.ts). Sem ela, o circuito antigo (tudo no recibo). */
-    ec?: EncCliente | null };
+    ec?: EncCliente | null;
+    /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
+    realFases?: ObraReal | null };
   /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
   adendas?: Adenda[];
   hist: Evento[];
@@ -1066,7 +1068,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const id = S.seq++;
       S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, linha: n.linha, servico: LINHAS[n.linha].n, local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone" }, hist: [{ t: "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
       S.novo = null;
-      avisar({ msg: "Negócio criado", sub: n.nome + " · fase Lead", kind: "ok", act: { label: "Abrir", fn: () => run(() => A.abrir(id)) } });
+      // abre logo o negócio novo: o próximo passo (registar a chamada) fica à vista, sem ter de o procurar na lista
+      S.view = "negocio"; S.deal = id; S.confirmPerda = null;
+      avisar({ msg: "Negócio criado", sub: n.nome + " · fase Lead", kind: "ok" });
     },
     contactar(id: number) { const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
     marcarVisita(id: number, slot?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
@@ -1405,7 +1409,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     fimObra(id: number) {
       const d = deal(id); if (!portao(d, [OBRA[1]])) return;
-      d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S);
+      d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S); d.obra.realFases = realPorFase(d, S);
       log(d, "Obra concluída · margem real " + pct(d.obra.real.m));
       avisar({ msg: "Obra concluída", sub: "Margem real " + pct(d.obra.real.m) + " · o comercial vê o resultado no negócio", kind: "ok", act: { label: "Ver negócio", fn: () => run(() => { A.abrir(id); A.irObra(); }) } });
     },
@@ -1448,7 +1452,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       e.estado = tudo ? "recebida" : "parcial";
       const falta = e.linhas.filter((x) => (x.recebido ?? 0) < x.q).map((x) => nfmt(r2(x.q - (x.recebido ?? 0))) + " " + x.un + " de " + x.n.toLowerCase());
       log(d, "Entrada de " + e.n + (tudo ? ": tudo recebido · materiais reservados" : ": parcial · faltam " + falta.join(", ")), tudo ? "a" : "w");
-      avisar(tudo ? { msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "ok" } : { msg: "Entrada parcial registada", sub: "Faltam " + falta.join(", "), kind: "" });
+      avisar(tudo ? { msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "ok", act: { label: "Ver a obra", fn: () => run(() => { A.abrir(id); A.irObra(); }) } }
+        : { msg: "Entrada parcial registada", sub: "Faltam " + falta.join(", "), kind: "" });
     },
     vendaDireta(id: number, v: boolean) { const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
     perder(id: number) { S.confirmPerda = id; },

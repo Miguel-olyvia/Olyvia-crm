@@ -2,7 +2,7 @@
 // escolha de materiais, revisita), cada uma com os seus campos. Um cartão por
 // visita; a que está marcada abre logo, as outras mostram o resumo.
 import { useState } from "react";
-import { CalendarClock, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { grupoVisita, emFalta } from "./campos";
@@ -23,6 +23,7 @@ export function VisitasLista({ ctx, d, simples }: { ctx: Ctx; d: Negocio; simple
   const { A, run } = ctx;
   const vs = visitas(d), ro = d.visita.fechada;
   const primeiraAberta = [...vs].reverse().find((n) => campoVisita(d, n, "estado") !== "Feita") ?? vs[vs.length - 1];
+  const marcada = vs.find((n) => (campoVisita(d, n, "estado") || "Marcada") === "Marcada"); // a primeira visita por fazer
   const [abertas, setAbertas] = useState<number[]>(primeiraAberta ? [primeiraAberta] : []);
   const alternar = (n: number) => setAbertas((a) => (a.includes(n) ? a.filter((x) => x !== n) : [...a, n]));
 
@@ -31,7 +32,18 @@ export function VisitasLista({ ctx, d, simples }: { ctx: Ctx; d: Negocio; simple
       <p className="text-[15px] text-muted-foreground">
         Um negócio pode ter várias visitas: o levantamento, uma medição técnica, a escolha de materiais… Para fechar a fase, pelo menos uma tem de estar feita.
       </p>
-      {aValidar(d, "visitas") && !visitaFeita(d) && <p className="text-[15px] font-medium text-destructive">Marque como feita pelo menos uma visita.</p>}
+      {/* Sem nenhuma visita feita, a ação vem logo aqui (e não escondida na escolha do estado dentro do cartão) */}
+      {!ro && !visitaFeita(d) && marcada && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className={cn("text-[15px]", aValidar(d, "visitas") ? "font-medium text-destructive" : "text-foreground")}>
+            {aValidar(d, "visitas") ? "Marque como feita pelo menos uma visita." : `A visita ${vs.indexOf(marcada) + 1} já foi feita?`}
+          </p>
+          <Button variant="outline" className="min-h-11 text-[15px]" onClick={() => run(() => A.campo(d.id, `v${marcada}_estado`, "Feita"))}>
+            <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Marcar a visita {vs.indexOf(marcada) + 1} como feita
+          </Button>
+        </div>
+      )}
+      {aValidar(d, "visitas") && !visitaFeita(d) && !marcada && <p className="text-[15px] font-medium text-destructive">Marque como feita pelo menos uma visita.</p>}
 
       {vs.map((n) => {
         const g = grupoVisita(n), aberta = abertas.includes(n);

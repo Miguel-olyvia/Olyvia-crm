@@ -552,7 +552,7 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
         </div>
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-input bg-background p-1 pl-3">
           <a href={link} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sm text-primary underline-offset-4 hover:underline" title={link}>{link}</a>
-          <Button size="sm" variant={copiado ? "secondary" : "default"} onClick={copiar}>{copiado ? <><Check className="mr-1.5 h-4 w-4" />Copiado</> : <><Copy className="mr-1.5 h-4 w-4" />Copiar link</>}</Button>
+          <Button size="sm" variant={copiado ? "secondary" : "outline"} onClick={copiar}>{copiado ? <><Check className="mr-1.5 h-4 w-4" />Copiado</> : <><Copy className="mr-1.5 h-4 w-4" />Copiar link</>}</Button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="outline" asChild><a href={`mailto:${d.f.email || ""}?subject=${encodeURIComponent(`${EMPRESA.nome} · ${nome}`)}&body=${encodeURIComponent(msg)}`}><Mail className="mr-1.5 h-4 w-4" />Email</a></Button>

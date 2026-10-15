@@ -327,6 +327,13 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
     if (i >= 0 && i !== ativo) setAtivo(i);
     setTimeout(() => document.getElementById("verif")?.scrollIntoView({ behavior: "smooth", block: "start" }), 350);
   });
+  // "Ver resultado" (a obra acabou): abre o passo da obra e desce até ao previsto e real
+  useEffect(() => {
+    if (S.pulse !== "sec-5") return;
+    const i = passos.findIndex((x) => x.id === "obra");
+    if (i >= 0 && i !== ativo) setAtivo(i);
+    setTimeout(() => document.getElementById(`real-fases-${d.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 800); // depois do foco no título do passo
+  });
   useEffect(() => {
     if (S.pulse !== "falta") return;
     const i = passos.findIndex((x) => (x.falta || 0) > 0);

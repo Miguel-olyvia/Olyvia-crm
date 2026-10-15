@@ -776,6 +776,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
   const revisao = passos.filter((p) => p.tipo !== "resumo").map((p) => ({ p, l: linha(p) }));
   const faltas = revisao.filter((x) => x.l.falta).length;
   const pronto = faltas === 0;
+  const primeiraFalta = revisao.find((x) => x.l.falta);
 
   // a cronologia por fase: os serviços (com o ícone) e os produtos (com a ilustração); cada linha volta ao seu passo
   const porSid = new Map(tiles.map((t) => [t.sid, t]));
@@ -822,6 +823,17 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
           <p className="text-sm text-muted-foreground">estimado · {plural(r.servicos, "serviço", "serviços")} · {plural(r.produtos, "produto", "produtos")}</p>
         </div>
       </div>
+      {/* o que falta, logo à vista: um toque leva à primeira pergunta por responder (a lista completa está em "Rever um passo") */}
+      {primeiraFalta && (
+        <button type="button" onClick={() => ir(primeiraFalta.p.k)}
+          className="-mt-4 flex min-h-12 w-full items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/[0.04] px-4 py-2 text-left outline-none transition-colors hover:bg-destructive/[0.08] focus-visible:ring-2 focus-visible:ring-primary">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium text-foreground">{primeiraFalta.p.titulo}</span>
+            <span className="block text-sm text-destructive">{primeiraFalta.l.t}</span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1 text-[15px] font-medium text-primary">Responder<ChevronRight className="h-4 w-4" aria-hidden="true" /></span>
+        </button>
+      )}
 
       {/* a cronologia por fase (1 → 4): a ligação entre as fases desenha-se em cascata */}
       {fases.length > 0 ? (

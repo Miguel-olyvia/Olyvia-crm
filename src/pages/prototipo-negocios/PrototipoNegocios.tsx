@@ -281,7 +281,8 @@ export default function PrototipoNegocios() {
 
   const toastsBase = (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => (
+      {/* no máximo dois avisos à vista (os mais recentes): uma ação em cadeia (ex.: assinar o contrato) dá vários e tapavam o ecrã no telemóvel */}
+      {toasts.slice(-2).map((t) => (
         <div key={t.id} className={"toast " + (t.kind || "")} role="status">
           <i>{t.kind === "ok" ? "✓" : t.kind === "auto" ? "⚡" : t.kind === "bad" ? "!" : "i"}</i>
           <div>{t.msg}{t.sub ? <small>{t.sub}</small> : null}</div>

@@ -256,6 +256,16 @@ export interface FaseReal {
 export interface ObraReal { fases: FaseReal[]; diasPrev: number; diasReal: number; custoPrev: number; custoReal: number; preco: number }
 
 export function realPorFase(d: Negocio, S: Estado): ObraReal | null {
+  // uma obra concluída tem o resultado congelado (no fim da obra, ou na primeira vez que se lê, nas obras do exemplo):
+  // mudar depois a receita no Catálogo não pode reescrever o previsto nem o real de uma obra fechada
+  const fechada = d.obra.plano?.estado === "concluída";
+  if (fechada && d.obra.realFases) return d.obra.realFases;
+  const R = calcularRealPorFase(d, S);
+  if (fechada && R) d.obra.realFases = R;
+  return R;
+}
+
+function calcularRealPorFase(d: Negocio, S: Estado): ObraReal | null {
   const P = planoObra(d, S);
   if (!P.tarefas.length) return null;
   let fimReal = 0;

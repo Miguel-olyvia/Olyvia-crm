@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
 import { totais } from "./DocsCliente";
+import { realPorFase } from "./planoObra";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { SETORES } from "./setores";
 import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
@@ -89,8 +90,11 @@ describe("protótipo de Negócios", () => {
     preencher(d(), [OBRA[1]]);
     A.fimObra(id);
     expect(d().obra.real!.m).toBeLessThan(T.m);
+    const antes = JSON.stringify(realPorFase(d(), S));
     A.aprender(id);
     expect(S.svc.revest.h).toBeGreaterThan(0.75);
+    // 15/10: a receita nova vale para os próximos orçamentos; o resultado desta obra (já fechada) não muda
+    expect(JSON.stringify(realPorFase(d(), S))).toBe(antes);
   });
 
   it("a Direção aprova uma exceção à margem", () => {
