@@ -64,6 +64,7 @@ import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHi
 import CategorySubcategoryFilter, { UNCATEGORIZED_CATEGORY_VALUE } from "@/components/inventory/CategorySubcategoryFilter";
 import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { PedidosCarrinhasPainel } from "@/components/frota/PedidosCarrinha";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string; sku?: string | null; barcode?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
@@ -650,7 +651,8 @@ const Stocks = () => {
     try {
       const { data, error } = await supabase
         .from("warehouses")
-        .select("id, name")
+        // is_vehicle: as carrinhas da Frota (armazém móvel) não têm ponto de encomenda (ver isVanWarehouse)
+        .select("id, name, is_vehicle" as "id, name")
         .eq("organization_id", activeCompany.id)
         .is("deleted_at", null)
         .order("name");
@@ -665,6 +667,15 @@ const Stocks = () => {
       });
     }
   };
+
+  // Carrinhas da Frota (warehouses.is_vehicle): o mínimo da carrinha vive em minimum_quantity e o ponto de encomenda fica
+  // sempre a 0, para a carrinha não entrar no "stock baixo" do Inventário (decisão 6 do plano da Frota). O campo do
+  // ponto de encomenda não aparece nestes armazéns e a gravação força-o a 0.
+  const vanWarehouseIds = useMemo(
+    () => new Set((warehouses as { id: string; is_vehicle?: boolean }[]).filter((w) => w.is_vehicle).map((w) => w.id)),
+    [warehouses],
+  );
+  const isVanWarehouse = (id: string | null | undefined): boolean => !!id && vanWarehouseIds.has(id);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -731,6 +742,8 @@ const Stocks = () => {
       // formulário: sem stock_movement não fica rasto (09-09: 0→1 sem
       // movimento). Mudar quantidade = Registar movimento → Ajuste.
       const { quantity: _quantity, product_id, warehouse_id, ...settings } = formData;
+      // Carrinha da Frota: sem ponto de encomenda (fica fora do stock baixo).
+      if (isVanWarehouse(warehouse_id)) settings.reorder_point = 0;
 
       if (editingStock) {
         // Só definições da linha (mín./máx./ponto de encomenda/localização).
@@ -1090,7 +1103,13 @@ const Stocks = () => {
           renderReservationCells(stock.product_id)
         )}
         <TableCell className="whitespace-nowrap text-right tabular-nums">
-          {stock.minimum_quantity} / {stock.maximum_quantity} / {stock.reorder_point}
+          {isVanWarehouse(stock.warehouse_id) ? (
+            <span title="Carrinha da Frota: mínimo da carrinha (sem ponto de encomenda, fora do stock baixo)">
+              {stock.minimum_quantity} mín. carrinha
+            </span>
+          ) : (
+            <>{stock.minimum_quantity} / {stock.maximum_quantity} / {stock.reorder_point}</>
+          )}
         </TableCell>
         <TableCell>{getStockStatus(stock)}</TableCell>
         <TableCell className="text-right">
@@ -1359,7 +1378,8 @@ const Stocks = () => {
           quantity: rawQty ?? (existing ? toNum(existing.quantity) : 0),
           minimum_quantity: rawMin ?? (existing ? toNum(existing.minimum_quantity) : 0),
           maximum_quantity: rawMax ?? (existing ? toNum(existing.maximum_quantity) : 0),
-          reorder_point: rawReorder ?? (existing ? toNum(existing.reorder_point) : 0),
+          // carrinha da Frota: o ponto de encomenda fica sempre a 0 (o mínimo da carrinha é a quantidade mínima)
+          reorder_point: (warehouse as { is_vehicle?: boolean }).is_vehicle ? 0 : rawReorder ?? (existing ? toNum(existing.reorder_point) : 0),
           location: rawLocation !== '' ? rawLocation : (existing?.location ?? ""),
         };
 
@@ -1813,22 +1833,31 @@ const Stocks = () => {
                   />
                   {fieldErrors.maximum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.maximum_quantity}</p>}
                 </div>
-                <div>
-                  <Label htmlFor="reorder_point">{t('stocks.form.reorderPoint')}</Label>
-                  <Input
-                    id="reorder_point"
-                    type="number"
-                    value={formData.reorder_point}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        reorder_point: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className={fieldErrors.reorder_point ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.reorder_point && <p className="text-sm text-destructive mt-1">{fieldErrors.reorder_point}</p>}
-                </div>
+                {isVanWarehouse(formData.warehouse_id) ? (
+                  <div>
+                    <Label>{t('stocks.form.reorderPoint')}</Label>
+                    <p className="text-sm text-muted-foreground mt-1" data-testid="reorder-point-van">
+                      Carrinha da Frota: sem ponto de encomenda (fica a 0 e a carrinha não entra no stock baixo). A quantidade mínima é o mínimo da carrinha, que a Frota usa para pedir reposição.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <Label htmlFor="reorder_point">{t('stocks.form.reorderPoint')}</Label>
+                    <Input
+                      id="reorder_point"
+                      type="number"
+                      value={formData.reorder_point}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          reorder_point: parseInt(e.target.value) || 0,
+                        })
+                      }
+                      className={fieldErrors.reorder_point ? "border-destructive" : ""}
+                    />
+                    {fieldErrors.reorder_point && <p className="text-sm text-destructive mt-1">{fieldErrors.reorder_point}</p>}
+                  </div>
+                )}
                 <div>
                   <Label htmlFor="location">{t('stocks.form.location')}</Label>
                   <Input
@@ -1860,6 +1889,9 @@ const Stocks = () => {
           </>
           }
         />
+
+        {/* Pedidos de reposição das carrinhas da Frota (passo 2: transferir), só com inventory.edit e com pedidos. */}
+        {activeCompany?.id ? <PedidosCarrinhasPainel organizationId={activeCompany.id} aoMudar={refresh} /> : null}
 
         {/* KPIs (rpc_inventory_today.stock) — só aparecem com a RPC aplicada;
             cada cartão some se o seu valor vier a null. */}

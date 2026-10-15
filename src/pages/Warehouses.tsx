@@ -878,6 +878,8 @@ const Warehouses = () => {
                     <Switch
                       id="serves_customers"
                       checked={formData.serves_customers}
+                      // carrinha da Frota (is_vehicle): nunca serve clientes (CHECK warehouses_vehicle_not_serving)
+                      disabled={!!(editingWarehouse as { is_vehicle?: boolean } | null)?.is_vehicle}
                       onCheckedChange={(next) => {
                         // Desligar num armazém que hoje serve clientes pede a
                         // mesma confirmação que o switch do cartão.
@@ -889,7 +891,7 @@ const Warehouses = () => {
                       }}
                     />
                     <Label htmlFor="serves_customers" className="cursor-pointer">
-                      Serve clientes
+                      {(editingWarehouse as { is_vehicle?: boolean } | null)?.is_vehicle ? "Serve clientes (carrinha da Frota: não)" : "Serve clientes"}
                     </Label>
                   </div>
                 </div>
@@ -1023,7 +1025,7 @@ const Warehouses = () => {
                         <Switch
                           id={servesSwitchId}
                           checked={warehouse.serves_customers}
-                          disabled={!editGate.allowed || togglingId === warehouse.id}
+                          disabled={!editGate.allowed || togglingId === warehouse.id || !!(warehouse as { is_vehicle?: boolean }).is_vehicle}
                           onCheckedChange={(next) =>
                             next
                               ? handleToggleFlag(warehouse, "serves_customers", true)
@@ -1037,6 +1039,9 @@ const Warehouses = () => {
                     )}
                     {defaultWarehouseId === warehouse.id ? (
                       <InventoryStatusBadge tone="info">Por defeito</InventoryStatusBadge>
+                    ) : null}
+                    {(warehouse as { is_vehicle?: boolean }).is_vehicle ? (
+                      <InventoryStatusBadge tone="neutral">Carrinha (Frota)</InventoryStatusBadge>
                     ) : null}
                   </div>
 
