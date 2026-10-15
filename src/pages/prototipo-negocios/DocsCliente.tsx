@@ -84,7 +84,7 @@ export const tokenDoc = token;
 export const linkPortal = (d: Negocio, tipo: string) => `${typeof window !== "undefined" ? window.location.origin : ""}/prototipo/negocios?portal=${token(d, tipo)}`;
 
 /* ------------------------------------------------------------------ a folha */
-function Folha({ titulo, numero, data: dt, children, carimbo }: { titulo: string; numero: string; data: string; children: ReactNode; carimbo?: string }) {
+export function Folha({ titulo, numero, data: dt, children, carimbo }: { titulo: string; numero: string; data: string; children: ReactNode; carimbo?: string }) {
   return (
     <article className="folha relative mx-auto w-full max-w-[760px] rounded-2xl border border-border bg-white p-6 text-[15px] text-slate-900 shadow-[0_8px_30px_rgb(16_24_40/0.08)] sm:p-10">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-5">
@@ -103,7 +103,7 @@ function Folha({ titulo, numero, data: dt, children, carimbo }: { titulo: string
     </article>
   );
 }
-const Cliente = ({ d }: { d: Negocio }) => (
+export const Cliente = ({ d }: { d: Negocio }) => (
   <section className="grid gap-4 sm:grid-cols-2">
     <div><p className="text-xs uppercase tracking-wider text-slate-500">Cliente</p><p className="font-medium">{d.f.nome_fiscal || d.nome}</p><p className="text-slate-600">{d.f.email || d.tel}{d.f.nif_fat || d.f.nif ? ` · NIF ${d.f.nif_fat || d.f.nif}` : ""}</p></div>
     <div><p className="text-xs uppercase tracking-wider text-slate-500">Local da obra</p><p className="font-medium">{d.f.morada || d.local}</p><p className="text-slate-600">{[d.f.cp, d.f.localidade].filter(Boolean).join(" ")}{d.f.fracao ? ` · ${d.f.fracao}` : ""}</p></div>
@@ -467,22 +467,39 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ contrato */
+/** As cláusulas do contrato, em texto (15/10): o modelo, ou o texto que o Jurídico reescreveu a pedido do cliente.
+ *  O "Pagamento" do modelo é uma lista (uma prestação por linha). O editor da revisão (RevisaoContrato.tsx) usa o mesmo texto. */
+export const TITULOS_CLAUSULAS = ["Objeto", "Preço", "Pagamento", "Prazo", "Garantia", "Condições gerais"] as const;
+export function clausulasContrato(d: Negocio, S: Estado): { titulo: string; texto: string; lista?: string[]; revista: boolean }[] {
+  const o = d.orc!, T = totais(d, S), tr = tranches(d, T.total, S), ed = o.clausulas ?? {};
+  const modelo: Record<string, string | string[]> = {
+    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
+    "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`,
+    Pagamento: tr.map((t) => `${t.l}${t.quando ? ` (previsto: ${t.quando})` : ""}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
+    Prazo: `Início ${d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com ${d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a ${fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.${d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}`,
+    Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.`,
+    "Condições gerais": "Fazem parte deste contrato as condições gerais da empresa, entregues ao cliente com a proposta.",
+  };
+  return TITULOS_CLAUSULAS.map((titulo) => {
+    if (ed[titulo]) return { titulo, texto: ed[titulo], revista: true };
+    const m = modelo[titulo];
+    return Array.isArray(m) ? { titulo, texto: m.join("\n"), lista: m, revista: false } : { titulo, texto: m, revista: false };
+  });
+}
+
 export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
-  const o = d.orc!, T = totais(d, S), tr = tranches(d, T.total, S);
-  const n = (k: number, titulo: string, corpo: ReactNode) => (
-    <section key={k}><h3 className="font-semibold">Cláusula {k}.ª · {titulo}</h3><div className="mt-1 text-slate-700">{corpo}</div></section>
+  const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1;
+  const n = (k: number, titulo: string, corpo: ReactNode, revista?: boolean) => (
+    <section key={k}><h3 className="font-semibold">Cláusula {k}.ª · {titulo}{revista && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 align-middle text-xs font-medium text-slate-600">revista</span>}</h3><div className="mt-1 whitespace-pre-line text-slate-700">{corpo}</div></section>
   );
   return (
     <Folha titulo={d.f.modelo_contrato || "Contrato de empreitada"} numero={`CT 2026/${d.id}`} data={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "rascunho"} carimbo={o.contrato === "assinado" ? "Assinado" : undefined}>
       <p className="text-slate-700">
         Entre <b>{EMPRESA.nome}</b>, NIF {EMPRESA.nif}, com sede em {EMPRESA.morada}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
       </p>
-      {n(1, "Objeto", <>Os trabalhos de {d.servico.toLowerCase()} em {d.f.morada || d.local}{d.f.localidade ? `, ${d.f.localidade}` : ""}: {o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.</>)}
-      {n(2, "Preço", <>{eur(T.base)} € sem IVA: {eur(T.mo)} € de mão de obra, com IVA a 6% ({eur(T.ivaMo)} €), e {eur(T.mat)} € de materiais, com IVA a 23% ({eur(T.ivaMat)} €). Total com IVA: <b>{eur(T.total)} €</b>.</>)}
-      {n(3, "Pagamento", <ul className="list-disc pl-5">{tr.map((t) => <li key={t.l}>{t.l}{t.quando ? ` (previsto: ${t.quando})` : ""}: {Math.round(t.p * 100)}%, {eur(t.v)} €</li>)}</ul>)}
-      {n(4, "Prazo", <>Início {d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com {d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a {fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.{d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}</>)}
-      {n(5, "Garantia", <>{d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.</>)}
-      {n(6, "Condições gerais", <>Fazem parte deste contrato as condições gerais da empresa, entregues ao cliente com a proposta.</>)}
+      {o.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({o.contratoRevisto.por}) a {o.contratoRevisto.q}, a pedido do cliente.</p>}
+      {clausulasContrato(d, S).map((c, i) => n(i + 1, c.titulo, c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto, c.revista))}
+      <AdendasDoContrato d={d} />
       {/* as assinaturas (15/10): por cima de cada nome, o desenho do cliente ou o selo digital; a empresa assina digitalmente ao gerar o contrato */}
       <section className="grid gap-8 pt-6 sm:grid-cols-2" aria-label="Assinaturas">
         {([
@@ -503,6 +520,33 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
         ))}
       </section>
     </Folha>
+  );
+}
+
+/** As adendas assinadas, anexas ao contrato (15/10): o que muda, o valor e o prazo, e a assinatura do cliente. */
+function AdendasDoContrato({ d }: { d: Negocio }) {
+  const as = (d.adendas ?? []).filter((a) => a.estado === "assinada");
+  if (!as.length) return null;
+  return (
+    <section aria-label="Adendas ao contrato" className="rounded-xl border border-slate-200 p-4">
+      <h3 className="font-semibold">Adendas ao contrato</h3>
+      <p className="text-sm text-slate-600">Fazem parte deste contrato. O resto mantém-se.</p>
+      <ul className="mt-3 divide-y divide-slate-200">
+        {as.map((a) => {
+          const base = totalAdenda(a.linhas), dias = diasAdenda(a.linhas);
+          return (
+            <li key={a.n} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">{a.n} · {a.linhas.map((x) => x.n).join(", ")}</p>
+                <p className="text-sm text-slate-600">+{eur(base * (1 + IVA_MO))} € com IVA · +{dias} {dias === 1 ? "dia útil" : "dias úteis"} · {a.motivo.toLowerCase()}</p>
+                <p className="text-sm text-emerald-700">Assinada{a.assinatura ? ` · ${a.assinatura.q}` : a.assinada ? ` · ${a.assinada}` : ""}</p>
+              </div>
+              {a.assinatura && <SeloAssinatura a={a.assinatura} compacto />}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -528,12 +572,21 @@ export function AdendaDoc({ d, a }: { d: Negocio; a: Adenda }) {
         <div className="flex justify-between text-lg font-semibold"><span>Total</span><span className="tabular-nums">{eur(base * (1 + IVA_MO))} €</span></div>
       </div>
       <p className="text-slate-700">Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}. Pagamento: com a última prestação do contrato.</p>
-      <section className="grid gap-6 pt-4 sm:grid-cols-2">
-        {[["Pela empresa", d.f.representante || "—", "Assinado"], ["O cliente", d.f.nome_fiscal || d.nome, a.estado === "assinada" ? "Assinado no portal" : "À espera"]].map(([q, nome, est]) => (
-          <div key={q} className="border-t border-slate-300 pt-2">
+      {/* as assinaturas (15/10), como no contrato: o selo digital da empresa e a do cliente (desenho ou Chave Móvel Digital) */}
+      <section className="grid gap-8 pt-4 sm:grid-cols-2" aria-label="Assinaturas">
+        {([
+          ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
+            { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: a.criada, id: `MDL-${a.n.replace(/\D+/g, "")}` } as Assinatura, "Assinado"],
+          ["O cliente", d.f.nome_fiscal || d.nome, a.assinatura ?? null,
+            a.estado === "assinada" ? (a.assinatura ? (a.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : "Assinado no ecrã, no portal") : "Assinado no portal") : "À espera da assinatura"],
+        ] as [string, string, Assinatura | null, string][]).map(([q, nome, as, est]) => (
+          <div key={q} className="flex flex-col">
             <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
-            <p className="font-medium">{nome}</p>
-            <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}</p>
+            <div className="flex min-h-[4.5rem] items-end pb-1 pt-2">{as ? <SeloAssinatura a={as} compacto meio={q === "Pela empresa" ? "Certificado qualificado" : undefined} /> : null}</div>
+            <div className="border-t border-slate-300 pt-2">
+              <p className="font-medium">{nome}</p>
+              <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}{as?.q && q === "O cliente" ? ` · ${as.q}` : ""}</p>
+            </div>
           </div>
         ))}
       </section>

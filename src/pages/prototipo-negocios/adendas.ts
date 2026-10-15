@@ -2,7 +2,7 @@
 // O comercial escolhe os serviços e as quantidades; a adenda vai ao cliente para assinar; assinada, as tarefas entram no
 // plano da obra (no fim da fase de cada serviço, ou no fim da obra) e o plano volta a aprovação das Operações, se já estava
 // aprovado. Fatura-se à parte (só mão de obra e consumíveis dos serviços: IVA a 6%).
-import { TECS, diaDeFerias, garantirServico, r2, IVA_MO, type Estado, type Plano, type Tarefa } from "./motor";
+import { TECS, diaDeFerias, garantirServico, r2, IVA_MO, type Assinatura, type Estado, type Plano, type Tarefa } from "./motor";
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa } from "./preparacaoObra";
@@ -11,6 +11,8 @@ export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu
 export interface Adenda {
   n: string; estado: "enviada" | "assinada"; criada: string; assinada?: string;
   motivo: string; linhas: LinhaAdenda[];
+  /** 15/10: a assinatura do cliente no portal (desenho ou Chave Móvel Digital), como no contrato. */
+  assinatura?: Assinatura;
 }
 export const MOTIVOS_ADENDA = ["O cliente pediu", "Surpresa em obra", "Erro de medição"] as const;
 

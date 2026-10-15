@@ -386,7 +386,7 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
       <span className="text-sm text-muted-foreground">Simular o cliente:</span>
       {p.sim === "aceitar"
         ? <><Button variant="outline" size={tamanho} onClick={go(() => A.recusar(d.id))}>Recusou</Button><Button size={tamanho} onClick={go(() => A.aceitar(d.id))}>Aceitou</Button></>
-        : <Button size={tamanho} onClick={go(() => A.assinar(d.id))}>Assinou</Button>}
+        : <Button size={tamanho} onClick={go(() => (p.sim === "auto" ? A.simularAuto(d.id) : A.assinar(d.id)))}>Assinou</Button>}
     </div>
   );
   if (p.wait && p.who === "direcao") return <Button variant="outline" size={tamanho} onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button>;

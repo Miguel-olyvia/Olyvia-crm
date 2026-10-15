@@ -12,6 +12,7 @@ import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } fro
 import { fazer, type Ctx } from "./pecas";
 import { ContratoDoc, NotaEncomendaDoc, Partilhar } from "./DocsCliente";
 import { SeloAssinatura } from "./AssinaturaContrato";
+import { AutoNoNegocio } from "./AutoRececao";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { FORNECEDORES, TRILHOS, faltaParaArrancar, passosPreparacao, totalEf, type PassoPrep, type Trilho } from "./preparacaoObra";
@@ -178,6 +179,9 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
           ? <Button className="min-h-11" variant={meu?.id === go1.id ? "default" : "outline"} onClick={go(() => fazer(A, "arrancar", d.id))}>Arrancar a obra</Button>
           : <button type="button" onClick={() => verComo("operacoes")} className="inline-flex min-h-11 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Ver como {PAPEIS.operacoes.nome}</button>)}
       </div>
+
+      {/* a obra concluída: o auto de receção (por assinar ou assinado, com a assinatura) e o relatório da obra */}
+      {d.obra.auto && <div className="mt-5"><AutoNoNegocio S={S} d={d} /></div>}
     </section>
   );
 }

@@ -21,6 +21,7 @@ import {
   iniciais, materiaisPorFase, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EstadoExec, type EstadoMat,
 } from "./obraOps";
 import type { Ctx } from "./pecas";
+import { AutoNoNegocio } from "./AutoRececao";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "plano por aprovar", aprovado: "pronta a arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -188,7 +189,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     botao = PV.length
       ? <Button size="lg" onClick={() => irPara("validar")}>Validar {PV.length === 1 ? "1 tarefa" : `${PV.length} tarefas`}<ArrowRight className="ml-2 h-4 w-4" /></Button>
       : <Button size="lg" onClick={go(() => A.fimObra(d.id))}>Registar o fim da obra</Button>;
-  } else frase = "Obra concluída.";
+  } else frase = d.obra.auto?.estado === "assinado" ? "Obra concluída e recebida pelo cliente." : d.obra.auto ? "Obra concluída. O auto de receção está no portal do cliente, para assinar." : "Obra concluída.";
 
   const secoes: [Seccao, string, boolean][] = [
     ["plano", "Plano", true], ["hoje", "Hoje na obra", p.estado === "em curso"], ["validar", "Por validar", p.estado === "em curso"],
@@ -257,6 +258,8 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         })}
         {p.estado !== "concluída" && <div className="mt-5 flex flex-wrap items-center gap-3">{pode ? botao : <Mudar ctx={ctx} papel="operacoes" />}</div>}
       </section>
+      {/* 15/10: com a obra concluída, o auto de receção (por assinar / assinado) e o relatório da obra */}
+      {p.estado === "concluída" && d.obra.auto && <div className="mt-4"><AutoNoNegocio S={ctx.S} d={d} /></div>}
 
       {/* ------------------------------------------------ as secções da obra, num toque */}
       <nav aria-label="Secções da obra" className="sticky top-0 z-10 -mx-4 mt-6 flex gap-2 overflow-x-auto bg-background/95 px-4 py-2 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:[mask-image:none]">

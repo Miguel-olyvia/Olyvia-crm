@@ -44,6 +44,7 @@ import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
 import { esquecerFrota, type AbaFrota } from "./frota/loja";
 import { definirMolduraFrota, obrasDoEstado, tratarPedidoFrota, usePedidoFrota } from "./frota/pontes";
 import { PortalCliente } from "./PortalCliente";
+import { RevisaoContrato } from "./RevisaoContrato";
 import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
 
 // O Inventário completo (nativo, só na V2) só se carrega quando se abre essa página.
@@ -292,6 +293,9 @@ export default function PrototipoNegocios() {
     </div>
   );
   const toastsEl = alvoAvisos ? createPortal(toastsBase, alvoAvisos) : toastsBase;
+  // 15/10: a revisão do contrato pelo Jurídico abre por cima da app (RevisaoContrato.tsx)
+  const dRev = S.revisao != null ? S.deals.find((x) => x.id === S.revisao) : undefined;
+  const revisaoEl = dRev ? <RevisaoContrato ctx={ctx} d={dRev} /> : null;
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
@@ -423,6 +427,7 @@ export default function PrototipoNegocios() {
             </button>
           </nav>
         </div>
+        {revisaoEl}
         {toastsEl}
       </div>
     );
@@ -495,6 +500,7 @@ export default function PrototipoNegocios() {
         ))}
       </nav>
 
+      {revisaoEl}
       {toastsEl}
     </div>
   );

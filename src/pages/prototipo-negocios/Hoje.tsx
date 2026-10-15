@@ -48,7 +48,7 @@ function alertasDia(S: Estado, A: Ctx["A"], r: Papel): Alerta[] {
     { id: "conf", n: ab.filter((d) => d.obra.plano?.estado === "por aprovar" && conflitos(d.obra.plano).length).length, t: "Planos de obra com conflitos", abrir: () => A.nav("operacoes") },
   ];
   const meus: Record<Papel, string[]> = {
-    comercial: ["lead", "prop"], direcao: ["lead", "prop", "aprov", "fat", "pag", "enc", "conf"], financeiro: ["fat", "pag"], armazem: ["enc"], operacoes: ["conf"],
+    comercial: ["lead", "prop"], direcao: ["lead", "prop", "aprov", "fat", "pag", "enc", "conf"], financeiro: ["fat", "pag"], armazem: ["enc"], operacoes: ["conf"], juridico: [],
   };
   return L.filter((a) => a.n > 0 && meus[r].includes(a.id));
 }

@@ -222,9 +222,13 @@ export type AssinaturaContratoProps = {
   contrato: string;
   onAssinar: (a: Assinatura) => void;
   onCancelar: () => void;
+  /** 15/10: o mesmo componente assina a adenda e o auto de receção: a frase do "Li e aceito", o botão e o "Voltar". */
+  aceito?: string;
+  acao?: string;
+  voltar?: string;
 };
 
-export function AssinaturaContrato({ nome, contrato, onAssinar, onCancelar }: AssinaturaContratoProps) {
+export function AssinaturaContrato({ nome, contrato, onAssinar, onCancelar, aceito: textoAceito, acao = "Assinar o contrato", voltar = "Voltar ao contrato" }: AssinaturaContratoProps) {
   const [forma, setForma] = useState<"desenho" | "digital" | null>(null);
   const [imagem, setImagem] = useState<string | null>(null);
   const [digital, setDigital] = useState<{ id: string; telemovel: string } | null>(null);
@@ -272,13 +276,13 @@ export function AssinaturaContrato({ nome, contrato, onAssinar, onCancelar }: As
       {forma && (
         <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-slate-50 p-3">
           <input type="checkbox" checked={aceito} onChange={(e) => setAceito(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-slate-900" />
-          <span className="text-[15px] text-slate-800">Li e aceito o contrato {contrato}.</span>
+          <span className="text-[15px] text-slate-800">{textoAceito ?? `Li e aceito o contrato ${contrato}.`}</span>
         </label>
       )}
 
       <div className="grid gap-2 sm:grid-cols-2">
-        {forma && <div className="sm:order-2"><Botao onClick={assinar} disabled={!pronto}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>}
-        <div className="sm:order-1"><Botao ghost onClick={onCancelar}>Voltar ao contrato</Botao></div>
+        {forma && <div className="sm:order-2"><Botao onClick={assinar} disabled={!pronto}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{acao}</span></Botao></div>}
+        <div className="sm:order-1"><Botao ghost onClick={onCancelar}>{voltar}</Botao></div>
       </div>
     </section>
   );

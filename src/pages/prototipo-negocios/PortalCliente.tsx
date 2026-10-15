@@ -6,30 +6,40 @@
 // · Assinado: o mesmo link mostra o plano da obra (fases e datas, sem custos nem margens).
 // As ações são as do motor, por isso o negócio no protótipo passa de fase como hoje (e o outro separador vê-o pelo storage).
 import { useState, type ReactNode } from "react";
-import { Armchair, Check, ChevronRight, Clock, Copy, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, X, XCircle, type LucideIcon } from "lucide-react";
+import { Armchair, Check, ChevronRight, ClipboardCheck, Clock, Copy, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, Scale, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MOTIVOS_RECUSA, MOTIVOS_VERSAO, eur, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { AdendaDoc, ContratoDoc, FaturaDoc, NotaEncomendaDoc, PropostaDoc, totais, tranches } from "./DocsCliente";
+import { AdendaDoc, ContratoDoc, FaturaDoc, NotaEncomendaDoc, PropostaDoc, TITULOS_CLAUSULAS, totais, tranches } from "./DocsCliente";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
-import { totalComIva } from "./adendas";
+import { diasAdenda, totalComIva } from "./adendas";
 import { AssinaturaContrato } from "./AssinaturaContrato";
+import { AutoRececaoDoc } from "./AutoRececao";
+import { RelatorioObra } from "./RelatorioObra";
 import { PAGAMENTO_EMPRESA, em3, referenciaMb, vencimento } from "./pagamentoCliente";
 
 /** Os passos do percurso, pela ordem. */
-export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar a obra"] as const;
-const CURTO = ["Proposta", "Aceitar", "Contrato", "Obra"];
+export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar a obra", "Receber a obra"] as const;
+const CURTO = ["Proposta", "Aceitar", "Contrato", "Obra", "Receção"];
 
-/** Em que passo está o cliente: 0 rever/aceitar, 2 contrato (a preparar ou por assinar), 3 obra. */
-export function passoPortal(d: Negocio): { i: number; estado: "rever" | "pedido" | "recusada" | "preparar" | "assinar" | "obra" | "sem" } {
+/** Em que passo está o cliente: 0 rever/aceitar, 2 contrato (a preparar ou por assinar), 3 obra (e as adendas por assinar),
+ *  4 receção (o auto por assinar e, depois, o relatório da obra). */
+export function passoPortal(d: Negocio): { i: number; estado: "rever" | "pedido" | "recusada" | "preparar" | "revisao" | "assinar" | "obra" | "adenda" | "auto" | "relatorio" | "sem" } {
   const o = d.orc;
   if (o?.recusada && d.perdido) return { i: 0, estado: "recusada" };
   if (!o?.enviada) return { i: 0, estado: "sem" };
   if (!o.aceite && o.pedidoCliente) return { i: 0, estado: "pedido" };
   if (!o.aceite) return { i: 0, estado: "rever" };
-  if (o.vendaDireta || o.contrato === "assinado") return { i: 3, estado: "obra" };
+  if (o.vendaDireta || o.contrato === "assinado") {
+    if ((d.adendas ?? []).some((a) => a.estado === "enviada")) return { i: 3, estado: "adenda" };
+    const au = d.obra.auto;
+    if (au?.estado === "assinado") return { i: 4, estado: "relatorio" };
+    if (au) return { i: 4, estado: "auto" };
+    return { i: 3, estado: "obra" };
+  }
+  if (o.contratoPedido) return { i: 2, estado: "revisao" };
   if (o.contrato === "enviado") return { i: 2, estado: "assinar" };
   return { i: 2, estado: "preparar" };
 }
@@ -98,7 +108,13 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   // a resposta à proposta (15/10): escolher entre pedir alterações e recusar; depois, os motivos e o texto
   const [resposta, setResposta] = useState<null | "escolher" | "alterar" | "recusar">(null);
   const [motivos, setMotivos] = useState<string[]>([]);
-  const [confirmar, setConfirmar] = useState<"aceitar" | "assinar" | null>(null);
+  const [confirmar, setConfirmar] = useState<"aceitar" | "assinar" | "adenda" | "auto" | null>(null);
+  // ao receber a obra (15/10): "está tudo bem" ou uma observação, antes de assinar o auto
+  const [receber, setReceber] = useState<null | "ok" | "obs">(null);
+  const [obs, setObs] = useState("");
+  // pedir alterações ao contrato (15/10): as cláusulas escolhidas e o que não agrada em cada uma
+  const [pedirContrato, setPedirContrato] = useState(false);
+  const [cls, setCls] = useState<Record<string, string>>({});
   const [texto, setTexto] = useState("");
   const [ref, setRef] = useState("");
   const [verProposta, setVerProposta] = useState(false);
@@ -110,8 +126,6 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
 
   // o que mais espera pelo cliente, depois do contrato: adendas e o pagamento
   const outros: { id: string; t: string; sub: string; corpo: ReactNode }[] = [];
-  for (const a of d.adendas ?? []) if (a.estado === "enviada")
-    outros.push({ id: a.n, t: "Assinar a adenda", sub: `${a.linhas.map((x) => x.n).join(", ")} · +${eur(totalComIva(a.linhas))} € com IVA`, corpo: <div className="space-y-2"><Botao ghost onClick={() => setDoc(a.n)}>Ler a adenda</Botao><Botao onClick={() => fazer(() => A.assinarAdenda(d.id, a.n))}>Assinar</Botao></div> });
   if (d.fin.fatura && !d.fin.pago && T) {
     // 15/10: a fatura à vista e os dados para pagar (Multibanco ou transferência), cada um com o botão de copiar
     const ft = d.fin.fatura, t0 = tranches(d, T.total)[0];
@@ -154,14 +168,20 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     });
   }
 
+  const adendasAssinadas = (d.adendas ?? []).filter((a) => a.estado === "assinada").length, au = d.obra.auto;
   const docs: [string, string, boolean][] = [
     ["proposta", `Proposta PR 2026/${d.id}`, !!o?.enviada],
-    ["contrato", `Contrato CT 2026/${d.id}`, !!o?.contrato],
+    // 15/10: as adendas assinadas juntam-se ao contrato (o documento do contrato mostra-as)
+    ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato],
     ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec && d.obra.ec.estado === "aprovada"],
-    ...(d.adendas ?? []).map((a) => [a.n, `Adenda ${a.n}`, true] as [string, string, boolean]),
     ["fatura", d.fin.fatura ? `Fatura ${d.fin.fatura.n}` : "", !!d.fin.fatura],
+    ["auto", au ? `Auto de receção ${au.n}` : "", !!au],
+    ["relatorio", "Relatório da obra", au?.estado === "assinado"],
   ];
-  const corpoDoc = (k: string) => k === "proposta" ? <PropostaDoc S={S} d={d} /> : k === "contrato" ? <ContratoDoc S={S} d={d} /> : k === "encomenda" ? <NotaEncomendaDoc d={d} /> : k === "fatura" ? <FaturaDoc S={S} d={d} /> : (() => { const a = d.adendas?.find((x) => x.n === k); return a ? <AdendaDoc d={d} a={a} /> : null; })();
+  const corpoDoc = (k: string) => k === "proposta" ? <PropostaDoc S={S} d={d} /> : k === "contrato" ? <ContratoDoc S={S} d={d} /> : k === "encomenda" ? <NotaEncomendaDoc d={d} /> : k === "fatura" ? <FaturaDoc S={S} d={d} />
+    : k === "auto" ? <AutoRececaoDoc d={d} /> : k === "relatorio" ? <div className="mx-auto max-w-3xl"><RelatorioObra S={S} d={d} /></div>
+    : (() => { const a = d.adendas?.find((x) => x.n === k); return a ? <AdendaDoc d={d} a={a} /> : null; })();
+  const adendaAgora = (d.adendas ?? []).find((a) => a.estado === "enviada");
 
   /* ---------------------------------------------- o plano da obra, como o cliente o vê (sem custos) */
   const fasesObra = p?.origem === "orcamento"
@@ -227,7 +247,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       </>
     ) : (
       <>
-        <p className="text-sm font-medium text-slate-500">Passo 1 de 4{o.versoes?.length ? ` · versão ${versaoAtual(o)}, com o que pediu` : ""}</p>
+        <p className="text-sm font-medium text-slate-500">Passo 1 de 5{o.versoes?.length ? ` · versão ${versaoAtual(o)}, com o que pediu` : ""}</p>
         <h2 className="mt-0.5 text-xl font-semibold">Reveja a sua proposta</h2>
         <p className="mt-1 text-[15px] text-slate-600">Está toda aqui em baixo: o que vamos fazer, fase a fase, os materiais, o preço e as condições.</p>
         <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
@@ -262,7 +282,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     agora = (
       <>
         <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Proposta aceite</p>
-        <h2 className="mt-2 text-xl font-semibold">O contrato está a ser preparado</h2>
+        <h2 className="mt-2 text-xl font-semibold">{o?.contratoVersoes?.length ? "A nova versão do contrato está quase pronta" : "O contrato está a ser preparado"}</h2>
         <p className="mt-1 text-[15px] text-slate-600">Segue a proposta que aceitou. Quando estiver pronto, aparece aqui, neste mesmo link, para assinar. Não precisa de fazer nada agora.</p>
         <p className="mt-3 flex items-center gap-2 text-sm text-slate-500"><Clock className="h-4 w-4" aria-hidden="true" />Normalmente fica pronto no mesmo dia.</p>
       </>
@@ -273,10 +293,96 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={`CT 2026/${d.id}`}
         onAssinar={(a) => fazer(() => A.assinarCom(d.id, a))} onCancelar={() => setConfirmar(null)} />
     ) : (
+      pedirContrato ? (
       <>
-        <p className="text-sm font-medium text-slate-500">Passo 3 de 4</p>
+        <h2 className="text-xl font-semibold">O que quer mudar no contrato?</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Escolha as cláusulas e diga o que não lhe agrada em cada uma. A nossa equipa jurídica revê e a nova versão aparece aqui.</p>
+        <div className="mt-4"><Chips rotulo="Cláusulas a mudar" opcoes={TITULOS_CLAUSULAS} on={Object.keys(cls)} mudar={(v) => setCls((a) => Object.fromEntries(v.map((c) => [c, a[c] ?? ""])))} /></div>
+        {Object.keys(cls).map((c) => (
+          <label key={c} className="mt-4 block animate-in fade-in-0">
+            <span className="text-[15px] font-medium">{c}: o que não lhe agrada</span>
+            <textarea value={cls[c]} rows={2} onChange={(ev) => setCls((a) => ({ ...a, [c]: ev.target.value }))}
+              className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
+          </label>
+        ))}
+        <div className="mt-4 grid gap-2">
+          <Botao disabled={!Object.keys(cls).length || Object.values(cls).some((x) => !x.trim())}
+            onClick={() => { fazer(() => A.pedirAlteracoesContrato(d.id, Object.entries(cls).map(([c, nota]) => ({ c, nota })))); setPedirContrato(false); setCls({}); }}>Enviar o pedido</Botao>
+          <Botao ghost onClick={() => { setPedirContrato(false); setCls({}); }}>Voltar ao contrato</Botao>
+        </div>
+      </>
+    ) : (
+      <>
+        <p className="text-sm font-medium text-slate-500">Passo 3 de 5{o?.contratoRevisto ? ` · versão ${(o.contratoVersoes?.length ?? 0) + 1}, revista a seu pedido` : ""}</p>
         <h2 className="mt-0.5 text-xl font-semibold">Assinar o contrato</h2>
         <p className="mt-1 text-[15px] text-slate-600">O contrato CT 2026/{d.id} segue a proposta que aceitou. Leia-o aqui em baixo e assine quando estiver pronto.</p>
+      </>
+    ));
+  } else if (P.estado === "revisao" && o?.contratoPedido) {
+    agora = (
+      <>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Pedido enviado</p>
+        <h2 className="mt-2 flex items-start gap-2 text-xl font-semibold"><Scale className="mt-1 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />O contrato está a ser revisto pela nossa equipa jurídica</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Quando estiver revisto, a nova versão aparece aqui, neste mesmo link, para assinar. Não precisa de fazer nada agora.</p>
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <p className="text-sm font-medium text-slate-500">O que pediu</p>
+          <ul className="mt-1 space-y-1">{o.contratoPedido.clausulas.map((x) => <li key={x.c} className="text-[15px]"><b className="font-medium">{x.c}:</b> <span className="text-slate-600">«{x.nota}»</span></li>)}</ul>
+        </div>
+      </>
+    );
+  } else if (P.estado === "adenda" && adendaAgora) {
+    const a = adendaAgora, dd = diasAdenda(a.linhas);
+    agora = confirmar === "adenda" ? (
+      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={a.n} aceito={`Li e aceito a adenda ${a.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
+        onAssinar={(as) => fazer(() => A.assinarAdendaCom(d.id, a.n, as))} onCancelar={() => setConfirmar(null)} />
+    ) : (
+      <>
+        <p className="text-sm font-medium text-slate-500">Trabalhos a mais</p>
+        <h2 className="mt-0.5 text-xl font-semibold">Assinar a adenda {a.n}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{a.linhas.map((x) => x.n).join(", ")}. Assinada, junta-se ao contrato e os trabalhos entram no plano da obra.</p>
+        <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">A mais, com IVA</dt><dd className="text-lg font-semibold tabular-nums">{eur(totalComIva(a.linhas))} €</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Prazo</dt><dd className="text-lg font-semibold tabular-nums">+{dd} {dd === 1 ? "dia útil" : "dias úteis"}</dd></div>
+        </dl>
+      </>
+    );
+  } else if (P.estado === "auto" && au) {
+    agora = confirmar === "auto" ? (
+      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={au.n} aceito={`Recebi a obra e li o auto de receção ${au.n}.`} acao="Assinar o auto" voltar="Voltar ao auto"
+        onAssinar={(as) => fazer(() => A.assinarAuto(d.id, as, receber === "obs" ? obs : undefined))} onCancelar={() => setConfirmar(null)} />
+    ) : (
+      <>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Obra concluída</p>
+        <h2 className="mt-2 text-xl font-semibold">Receber a obra</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Veja a obra com calma. Depois assine o auto de receção: a garantia começa nesse dia e recebe aqui o relatório da obra, com tudo o que fizemos.</p>
+        <fieldset className="mt-4 border-t border-slate-200 pt-4">
+          <legend className="text-[15px] font-medium">Como encontrou a obra?</legend>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {([["ok", "Está tudo bem"], ["obs", "Tenho uma observação"]] as const).map(([k, t]) => (
+              <button key={k} type="button" aria-pressed={receber === k} onClick={() => setReceber(k)}
+                className={cn("flex min-h-12 items-center gap-2 rounded-xl border px-4 text-left text-[15px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900",
+                  receber === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white hover:border-slate-500")}>
+                {receber === k && <Check className="h-4 w-4" aria-hidden="true" />}{t}
+              </button>
+            ))}
+          </div>
+          {receber === "obs" && (
+            <label className="mt-3 block animate-in fade-in-0">
+              <span className="text-[15px] font-medium">A sua observação</span>
+              <textarea value={obs} onChange={(ev) => setObs(ev.target.value)} rows={3} placeholder="Ex.: falta rejuntar um azulejo atrás da porta"
+                className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
+              <span className="text-sm text-slate-500">Fica escrita no auto; o responsável de obra resolve-a ao abrigo da garantia.</span>
+            </label>
+          )}
+        </fieldset>
+      </>
+    );
+  } else if (P.estado === "relatorio" && au) {
+    agora = (
+      <>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><ClipboardCheck className="h-5 w-5" aria-hidden="true" />Obra recebida · auto {au.n} assinado</p>
+        <h2 className="mt-2 text-xl font-semibold">O relatório da sua obra</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Tudo o que fizemos, com as fotografias, os materiais e a garantia. Fica sempre aqui, neste link. Obrigado pela confiança.</p>
       </>
     );
   } else if (P.estado === "obra") {
@@ -308,9 +414,23 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
         <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações ou recusar</button>
       </div>
     )
+  ) : P.estado === "adenda" ? (
+    confirmar === "adenda" ? null : (
+      <div className="sm:ml-auto sm:w-64"><Botao onClick={() => { setConfirmar("adenda"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar a adenda</span></Botao></div>
+    )
+  ) : P.estado === "auto" ? (
+    confirmar === "auto" ? null : (
+      <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
+        <div className="sm:w-72"><Botao disabled={!receber || (receber === "obs" && !obs.trim())} onClick={() => { setConfirmar("auto"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o auto de receção</span></Botao></div>
+        {!receber && <p className="text-center text-sm text-slate-500 sm:mr-auto sm:text-left">Diga primeiro como encontrou a obra.</p>}
+      </div>
+    )
   ) : P.estado === "assinar" ? (
-    confirmar === "assinar" ? null : (
-      <div className="sm:ml-auto sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>
+    confirmar === "assinar" || pedirContrato ? null : (
+      <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>
+        <button type="button" onClick={() => { setPedirContrato(true); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações ao contrato</button>
+      </div>
     )
   ) : null;
 
@@ -330,15 +450,15 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           </header>
 
           {/* o percurso: onde está e o que vem a seguir */}
-          <ol className="grid grid-cols-4 gap-1.5" aria-label="O seu percurso">
+          <ol className="grid grid-cols-5 gap-1.5" aria-label="O seu percurso">
             {PASSOS_PORTAL.map((t, i) => {
-              const feito = i < P.i || (P.estado === "obra" && i === 3 && p?.estado === "concluída");
+              const feito = i < P.i || (P.estado === "relatorio" && i === 4);
               const aqui = i === P.i && !feito;
               return (
                 <li key={t} aria-current={aqui ? "step" : undefined}>
                   <span className={cn("block h-1.5 rounded-full transition-colors duration-500", feito ? "bg-slate-900" : aqui ? "bg-[#5a36bf]" : "bg-slate-300")} aria-hidden="true" />
                   <span className={cn("mt-1.5 flex items-center gap-1 text-xs sm:text-sm", aqui ? "font-semibold text-slate-900" : feito ? "text-slate-700" : "text-slate-500")}>
-                    {feito && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                    {feito && <Check className="hidden h-3.5 w-3.5 shrink-0 sm:block" aria-hidden="true" />}
                     <span className="sm:hidden" aria-hidden="true">{CURTO[i]}</span><span className="sr-only sm:not-sr-only">{t}</span>
                     {feito && <span className="sr-only"> (feito)</span>}
                   </span>
@@ -395,6 +515,9 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           {/* o documento do passo de agora, inteiro: a proposta para aceitar, o contrato para assinar */}
           {P.estado === "rever" && <div className="-mx-4 sm:mx-0" aria-label="A proposta" role="region"><PropostaDoc S={S} d={d} /></div>}
           {P.estado === "assinar" && <div className="-mx-4 sm:mx-0" aria-label="O contrato" role="region"><ContratoDoc S={S} d={d} /></div>}
+          {P.estado === "adenda" && adendaAgora && <div className="-mx-4 sm:mx-0" aria-label="A adenda" role="region"><AdendaDoc d={d} a={adendaAgora} /></div>}
+          {P.estado === "auto" && <div className="-mx-4 sm:mx-0" aria-label="O auto de receção" role="region"><AutoRececaoDoc d={d} /></div>}
+          {P.estado === "relatorio" && <RelatorioObra S={S} d={d} docs={docs.filter(([k, t, ok]) => t && ok && k !== "relatorio").map(([k, t]) => [k, t])} abrirDoc={setDoc} />}
           {(P.estado === "preparar" || P.estado === "pedido") && (
             verProposta
               ? <div className="-mx-4 sm:mx-0" aria-label="A proposta" role="region"><PropostaDoc S={S} d={d} /></div>
@@ -403,7 +526,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           {P.estado === "sem" && <p className="rounded-2xl bg-white p-4 text-[15px] shadow-sm">{o?.versoes?.length ? `A nova versão da proposta (v${versaoAtual(o)}) está a ser preparada, com o que pediu.` : "A sua proposta está a ser preparada."} Avisamos aqui quando estiver pronta.</p>}
 
           {/* os documentos */}
-          {docs.some(([, t, ok]) => t && ok) && (
+          {P.estado !== "relatorio" && docs.some(([, t, ok]) => t && ok) && (
             <section aria-label="Documentos" className="rounded-2xl bg-white p-2 shadow-sm">
               <h2 className="px-2 pt-2 text-base font-semibold">Documentos</h2>
               <ul>

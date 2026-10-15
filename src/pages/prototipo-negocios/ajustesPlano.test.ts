@@ -10,6 +10,7 @@ function preparar(id = 1027) {
   const avisos: string[] = [];
   const A = acoes(S, (a) => avisos.push(a.msg + " · " + (a.sub ?? "")), (fn) => fn());
   const d = S.deals.find((x) => x.id === id) as Negocio;
+  d.fin.pago = true; // 15/10: o plano só se aprova com o pagamento confirmado (aqui interessam os ajustes)
   return { S, A, d, p: d.obra.plano!, avisos };
 }
 

@@ -148,9 +148,11 @@ describe("Hoje V2 · os outros papéis", () => {
     const itens = hojeV2(S, "financeiro", [], VAZIO);
     expect(itens.map((i) => [i.nome, i.cat])).toEqual([["Tiago Almeida", "pagamentos"]]);
   });
-  it("Operações: a obra em curso, com o passo do motor (e o plano do Tiago, gerado do contrato, por aprovar)", () => {
-    const itens = hojeV2(seed(), "operacoes", [], VAZIO);
-    expect(itens.map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Tiago Almeida", "faturas", "aprovarPlano"], ["Marta Lima", "obras", "abrirPlano"]]);
+  it("Operações: a obra em curso, com o passo do motor; o plano do Tiago só aparece depois de o pagamento estar confirmado", () => {
+    const S = seed();
+    expect(hojeV2(S, "operacoes", [], VAZIO).map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Marta Lima", "obras", "abrirPlano"]]);
+    S.deals.find((x) => x.id === 1027)!.fin.pago = true;
+    expect(hojeV2(S, "operacoes", [], VAZIO).map((i) => [i.nome, i.cat, i.acao?.act])).toEqual([["Tiago Almeida", "faturas", "aprovarPlano"], ["Marta Lima", "obras", "abrirPlano"]]);
   });
   it("Direção: as exceções à margem pedidas aparecem para aprovar", () => {
     const S = seed(), d = S.deals.find((x) => x.id === 1031)!;

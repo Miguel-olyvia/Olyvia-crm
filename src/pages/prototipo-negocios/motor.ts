@@ -22,13 +22,15 @@ import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivi
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
-export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes";
+export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes" | "juridico";
 export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
   comercial: { n: "Rúben · Comercial", av: "RB", nome: "Rúben" },
   direcao: { n: "Direção", av: "DI", nome: "Direção" },
   financeiro: { n: "Sandra · Financeiro", av: "SA", nome: "Sandra" },
   armazem: { n: "Nuno · Armazém", av: "NU", nome: "Nuno" },
   operacoes: { n: "Filipe · Operações", av: "FI", nome: "Filipe" },
+  // 15/10: revê e valida o contrato quando o cliente pede alterações a cláusulas (RevisaoContrato.tsx)
+  juridico: { n: "Inês · Jurídico", av: "IN", nome: "Inês" },
 };
 
 export const FASES = ["Lead", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
@@ -187,7 +189,17 @@ export interface Orcamento {
   pedidoCliente?: { motivos: string[]; nota?: string; q: string } | null;
   /** 15/10: o cliente recusou a proposta por completo no portal. */
   recusada?: { motivos: string[]; nota?: string; q: string } | null;
+  /** 15/10: o cliente pediu alterações a cláusulas do contrato no portal: espera pela revisão e validação do Jurídico. */
+  contratoPedido?: { clausulas: PedidoClausula[]; q: string } | null;
+  /** As versões do contrato substituídas a pedido do cliente (a atual é contratoVersoes.length + 1). */
+  contratoVersoes?: { n: number; substituido: string; pedido: PedidoClausula[]; revisto?: { por: string; q: string } }[];
+  /** O texto das cláusulas que o Jurídico reescreveu (pelo título da cláusula); as outras ficam as do modelo. */
+  clausulas?: Record<string, string>;
+  /** Quem do Jurídico reviu e validou a versão atual, e quando. */
+  contratoRevisto?: { por: string; q: string } | null;
 }
+/** O que o cliente pediu numa cláusula do contrato: o título da cláusula e o que não lhe agrada. */
+export interface PedidoClausula { c: string; nota: string }
 /** A assinatura do contrato pelo cliente (15/10): desenhada no ecrã (a imagem PNG) ou com a Chave Móvel Digital (simulada no protótipo). */
 export interface Assinatura {
   tipo: "desenho" | "digital";
@@ -200,6 +212,16 @@ export interface Assinatura {
   id?: string;
   /** digital: o telemóvel, mascarado (ex.: "9•• ••• 123") */
   telemovel?: string;
+}
+/** O auto de receção da obra (15/10): gera-se ao registar o fim da obra e o cliente assina-o no portal (AutoRececao.tsx).
+ *  Assinado, começa a garantia e o cliente recebe o relatório da obra. */
+export interface AutoRececao {
+  n: string; q: string; estado: "por assinar" | "assinado";
+  /** o que o cliente deixou como observação ao receber a obra (vazio: "está tudo bem") */
+  reservas?: string;
+  assinatura?: Assinatura;
+  /** quando foi assinado ("dd/mm/aaaa hh:mm") */
+  assinado?: string;
 }
 /** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
 export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
@@ -268,7 +290,9 @@ export interface Negocio {
     /** A encomenda de cliente, gerada ao assinar o contrato (14/10; preparacaoObra.ts). Sem ela, o circuito antigo (tudo no recibo). */
     ec?: EncCliente | null;
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
-    realFases?: ObraReal | null };
+    realFases?: ObraReal | null;
+    /** 15/10: o auto de receção (por assinar → assinado) */
+    auto?: AutoRececao | null };
   /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
   adendas?: Adenda[];
   hist: Evento[];
@@ -286,6 +310,8 @@ export interface Estado {
   novo: { nome: string; tel: string; linha: LinhaId; err: string } | null;
   confirmPerda: number | null;
   pulse?: string | null;
+  /** 15/10: o negócio cujo contrato o Jurídico está a rever (o editor abre por cima: RevisaoContrato.tsx). */
+  revisao?: number | null;
   cfg: { min: number; alvo: number; estrutura: boolean };
   /** "simples": a proposta de 09/10 com menos ruído; "atual": o aspeto de hoje da Olyvia, para comparar. */
   aspeto?: "simples" | "atual";
@@ -407,6 +433,8 @@ export function seed(): Estado {
     j.obra.enc = { estado: "recebida", n: "EF 2026/70", linhas: [] };
     j.obra.mats = calcMats(j, S, true);
     j.obra.real = realObra(j, S);
+    j.obra.auto = { n: "AR 2026/" + j.id, q: "08/10", estado: "assinado", assinado: "08/10/2026 17:40",
+      assinatura: { tipo: "digital", nome: j.nome, q: "08/10/2026 17:40", id: "CMD-4QX7T2", telemovel: "9•• ••• 213" } };
     j.hist = [
       { t: "Obra concluída · margem real " + pct(j.obra.real.m), q: "08/10", k: "a" },
       { t: "Vistoria final e auto de receção assinado", q: "08/10", k: "a" },
@@ -893,7 +921,7 @@ export interface Proximo {
   act?: string;
   who?: Papel | "cliente" | null;
   wait?: boolean;
-  sim?: "aceitar" | "assinar";
+  sim?: "aceitar" | "assinar" | "auto";
   done?: boolean;
 }
 export function proximo(d: Negocio, S: Estado): Proximo {
@@ -921,6 +949,10 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         return o!.contrato === "enviado"
           ? { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente.", who: "cliente", wait: true, sim: "assinar" }
           // 15/10 (Ruben): o cliente aceita no portal e é o comercial que gera o contrato; aparece no mesmo link, por assinar
+          : o!.contratoPedido
+          ? { t: "O cliente pediu alterações ao contrato", sub: `Cláusulas: ${o!.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(o!.contratoVersoes?.length ?? 0) + 1}.`, btn: "Rever o contrato", act: "abrirRevisao", who: "juridico" }
+          : o!.contratoRevisto
+          ? { t: `Enviar o contrato (versão ${(o!.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${o!.contratoRevisto.por}, ${o!.contratoRevisto.q}). Volta ao portal do cliente, por assinar.`, btn: "Enviar o contrato", act: "enviarContrato", who: "comercial" }
           : { t: "O cliente aceitou. Gerar o contrato", sub: `Aceite ${o!.aceite === "hoje" ? "hoje" : "a " + o!.aceite}, no portal. O contrato segue a proposta e aparece no mesmo link do cliente, por assinar.`, btn: "Gerar o contrato", act: "enviarContrato", who: "comercial" };
       return { t: "—" };
     case 4:
@@ -938,6 +970,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (e && e.estado === "encomendada") return { t: "Armazém: receber a encomenda", sub: e.n + " · entrega pedida até 12/10.", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
       if (p.estado === "aprovado") return { t: "Operações: arrancar a obra", sub: "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (p.estado === "em curso") return { t: "Obra em curso", sub: "As Operações registam o fim da obra.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+      if (d.obra.auto?.estado === "por assinar") return { t: "À espera do auto de receção", sub: `O ${d.obra.auto.n} está no portal do cliente para assinar. Assinado, começa a garantia e o cliente recebe o relatório da obra.`, who: "cliente", wait: true, sim: "auto" };
       if (!d.obra.aprendido) return { t: "Rever a margem real", sub: "A obra acabou. Comparar o previsto com o real.", btn: "Ver resultado", act: "irObra", who: "comercial" };
       return { t: "Negócio fechado", sub: "O cliente fica em Clientes, com o histórico.", done: true };
     }
@@ -1297,7 +1330,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta o comercial gerar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
-    enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); },
+    enviarContrato(id: number) { const d = deal(id); if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); },
     /** No portal (15/10): o cliente assina com o desenho ou a Chave Móvel Digital; guarda-se a assinatura e segue como "assinar". */
     assinarCom(id: number, a: Assinatura) {
       const d = deal(id), o = d.orc;
@@ -1584,7 +1617,66 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id); if (!portao(d, [OBRA[1]])) return;
       d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S); d.obra.realFases = realPorFase(d, S);
       log(d, "Obra concluída · margem real " + pct(d.obra.real.m));
+      A.enviarAuto(id); // 15/10: o auto de receção vai logo ao portal do cliente
       avisar({ msg: "Obra concluída", sub: "Margem real " + pct(d.obra.real.m) + " · o comercial vê o resultado no negócio", kind: "ok", act: { label: "Ver negócio", fn: () => run(() => { A.abrir(id); A.irObra(); }) } });
+    },
+    /* ---------------------------------------------- auto de receção e adendas assinadas no portal (15/10) */
+    /** O auto de receção da obra concluída vai ao portal do cliente (uma vez). */
+    enviarAuto(id: number) {
+      const d = deal(id);
+      if (d.obra.plano?.estado !== "concluída" || d.obra.auto) return;
+      d.obra.auto = { n: "AR 2026/" + d.id, q: agora(), estado: "por assinar" };
+      log(d, "Auto de receção " + d.obra.auto.n + " enviado ao portal do cliente");
+    },
+    /** O cliente assina o auto no portal (com observações ou "está tudo bem"): começa a garantia e recebe o relatório da obra. */
+    assinarAuto(id: number, a: Assinatura, reservas?: string) {
+      const d = deal(id), au = d.obra.auto;
+      if (!au || au.estado !== "por assinar") return;
+      const r = reservas?.trim();
+      Object.assign(au, { estado: "assinado", assinatura: { ...a }, assinado: a.q, reservas: r || undefined });
+      log(d, "Auto de receção " + au.n + " assinado pelo cliente" + (r ? ", com observações: " + r : " · está tudo bem"), r ? "w" : "a");
+      avisar({ msg: "Auto de receção assinado", sub: r ? "Com observações: o responsável de obra vê-as" : "Começa a garantia; o cliente recebeu o relatório da obra", kind: "ok" });
+    },
+    /** No protótipo, o comercial simula o cliente a assinar o auto (Chave Móvel Digital). */
+    simularAuto(id: number) {
+      const d = deal(id), t = new Date(), p = (n: number) => String(n).padStart(2, "0");
+      A.assinarAuto(id, { tipo: "digital", nome: d.f.nome_fiscal || d.nome, q: `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`, id: "CMD-SIM" + String(d.id).slice(-3) });
+    },
+    /** O cliente pede alterações a cláusulas do contrato no portal: o contrato enviado fica substituído e vai ao Jurídico. */
+    pedirAlteracoesContrato(id: number, clausulas: PedidoClausula[]) {
+      const d = deal(id), o = d.orc;
+      const cs = clausulas.map((x) => ({ c: x.c, nota: x.nota.trim() })).filter((x) => x.c);
+      if (!o || o.contrato !== "enviado" || !cs.length) return;
+      (o.contratoVersoes ??= []).push({ n: o.contratoVersoes.length + 1, substituido: agora(), pedido: cs, revisto: o.contratoRevisto ?? undefined });
+      o.contrato = null; o.contratoPedido = { clausulas: cs, q: agora() }; o.contratoRevisto = null;
+      log(d, "O cliente pediu alterações ao contrato: " + cs.map((x) => x.c + (x.nota ? " («" + x.nota + "»)" : "")).join(", ") + " · vai ao Jurídico", "w");
+      avisar({ msg: "Pedido enviado à equipa jurídica", sub: "O contrato volta ao portal depois de revisto", kind: "ok" });
+    },
+    /** O Jurídico abre (e fecha) o editor da revisão do contrato. */
+    abrirRevisao(id: number) { S.revisao = id; },
+    fecharRevisao() { S.revisao = null; },
+    /** O Jurídico reescreve uma cláusula (texto vazio: volta ao texto do modelo). */
+    reverClausula(id: number, c: string, texto: string) {
+      const o = deal(id).orc;
+      if (!o?.contratoPedido) return;
+      const t = texto.trim(), cl = (o.clausulas ??= {});
+      if (t) cl[c] = t; else delete cl[c];
+    },
+    /** O Jurídico valida o contrato revisto: só então o comercial o pode enviar outra vez ao cliente. */
+    validarContrato(id: number) {
+      const d = deal(id), o = d.orc;
+      if (!o?.contratoPedido) return;
+      o.contratoRevisto = { por: PAPEIS.juridico.nome, q: agora() };
+      o.contratoPedido = null; S.revisao = null;
+      log(d, `Contrato revisto e validado pelo Jurídico (${PAPEIS.juridico.nome}) · versão ${(o.contratoVersoes?.length ?? 0) + 1}`);
+      avisar({ msg: "Contrato validado", sub: "O comercial já o pode enviar ao cliente", kind: "ok", act: { label: "Mudar para Rúben", fn: () => run(() => { A.role("comercial"); }) } });
+    },
+    /** O cliente assina a adenda no portal (desenho ou Chave Móvel Digital); o resto é o de "assinarAdenda" (as tarefas entram no plano). */
+    assinarAdendaCom(id: number, n: string, a: Assinatura) {
+      const ad = deal(id).adendas?.find((x) => x.n === n);
+      if (!ad || ad.estado !== "enviada") return;
+      ad.assinatura = { ...a };
+      A.assinarAdenda(id, n);
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

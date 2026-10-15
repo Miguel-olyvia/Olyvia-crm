@@ -401,7 +401,7 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
             <>
               <p className="text-sm text-muted-foreground">{FASES[d.fase]}</p>
               <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="mt-1 text-2xl font-semibold tracking-tight outline-none">
-                {p.done ? "Negócio fechado" : p.wait || !passos.every(completo) ? p.t : "Está tudo. " + p.t + "."}
+                {p.done ? "Negócio fechado" : p.wait || !passos.every(completo) || /^(O cliente|À espera|O contrato)/.test(p.t) ? p.t : "Está tudo. " + p.t + "."}
               </h2>
               {p.sub && <p className="mt-2 text-base text-muted-foreground">{p.sub}</p>}
               {quem && <p className="mt-2 text-base text-muted-foreground">Este passo é de {quem}.</p>}

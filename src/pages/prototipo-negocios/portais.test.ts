@@ -20,6 +20,7 @@ describe("portais do cliente e do fornecedor", () => {
   it("o fornecedor escolhe o dia da entrega (o primeiro útil a partir dele)", () => {
     const { S, A } = preparar();
     const d = S.deals.find((x) => x.id === 1027)!;
+    d.fin.pago = true; // 15/10: a encomenda só se aprova com o pagamento confirmado
     A.aprovarEc(d.id); A.validarEf(d.id);
     A.confirmarEntrega(d.id, "2026-10-24"); // sábado → segunda
     expect(d.obra.enc).toMatchObject({ entrega: "seg, 26 out", entregaIso: "2026-10-26" });
