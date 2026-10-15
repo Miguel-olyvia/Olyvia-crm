@@ -44,6 +44,7 @@ import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { QuoteConditions } from "@/components/quote/QuoteConditions";
 import { QuotePdfPreviewDialog } from "@/components/quote/QuotePdfPreviewDialog";
+import { buildQuotePreviewData } from "@/utils/quotePreviewData";
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
 import { QuoteRejectReasonDialog } from "@/components/quotes/QuoteRejectReasonDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
@@ -4942,13 +4943,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       <QuotePdfPreviewDialog
         open={showPdfPreview}
         onOpenChange={setShowPdfPreview}
-        quoteData={{
-          ...formData,
-          quote_number: quoteNumber || autoReference,
-          created_at: new Date().toISOString(),
-          entity_id: resolvedQuoteEntityId,
-          obra_endereco: moradaEntregaTexto,
-        }}
+        quoteData={buildQuotePreviewData({
+          formData,
+          quoteId: effectiveQuoteId ?? savedQuoteData?.id ?? null,
+          quoteNumber,
+          autoReference,
+          entityId: resolvedQuoteEntityId,
+          obraEndereco: moradaEntregaTexto,
+        })}
         lines={lines}
         organizationId={formData.organization_id || selectedSource?.organization_id || activeCompany?.id || null}
         entityId={resolvedQuoteEntityId}

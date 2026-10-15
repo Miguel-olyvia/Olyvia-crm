@@ -26,6 +26,7 @@ import { runMarketingAttribution } from "../_shared/marketingAttribution.ts";
 import { sanitizeFieldValues, sanitizeEmail } from "../_shared/inputSanitizers.ts";
 import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from "../_shared/formEmails.ts";
 import { resolveCanonicalFormId, validateLocationDistrict } from "../_shared/leadsValidation.ts";
+import { pickExistingAddress } from "../_shared/addressLookup.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -562,14 +563,18 @@ Deno.serve(async (req) => {
             const createdBy = existingLead.created_by || null;
 
             let addressId: string | null = null;
-            const { data: existingAddress, error: existingAddressError } = await supabase
+            // address_key nao tem UNIQUE (edicao so de maiusculas cria duplicados):
+            // .maybeSingle() daria PGRST116 com 2+ linhas e criaria mais um duplicado.
+            const { data: existingAddressRows, error: existingAddressError } = await supabase
               .from("anew_addresses")
               .select("id")
               .eq("address_key", addressKey)
-              .maybeSingle();
+              .order("created_at", { ascending: true })
+              .limit(1);
             if (existingAddressError) {
               console.error("[update-lead] address_key lookup failed (continuing):", existingAddressError);
             }
+            const existingAddress = pickExistingAddress(existingAddressRows);
 
             if (existingAddress?.id) {
               addressId = existingAddress.id;

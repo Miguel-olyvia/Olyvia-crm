@@ -508,9 +508,9 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
       if (orgRes.data.entity_id) {
         const [orgFiscalEntity, orgPhoneRes, orgEmailRes, orgEntAddrRes] = await Promise.all([
           fetchPrimaryFiscalEntity(orgRes.data.entity_id),
-          (supabase as any).from("anew_entity_phones").select("phone_number").eq("entity_id", orgRes.data.entity_id).order("is_primary", { ascending: false }).limit(1),
-          (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", orgRes.data.entity_id).order("is_primary", { ascending: false }).limit(1),
-          (supabase as any).from("anew_entity_addresses").select("is_primary, anew_addresses(*)").eq("entity_id", orgRes.data.entity_id).order("is_primary", { ascending: false }).limit(1),
+          (supabase as any).from("anew_entity_phones").select("phone_number").eq("entity_id", orgRes.data.entity_id).order("is_primary", { ascending: false }).order("created_at", { ascending: false }).limit(1),
+          (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", orgRes.data.entity_id).order("is_primary", { ascending: false }).order("created_at", { ascending: false }).limit(1),
+          (supabase as any).from("anew_entity_addresses").select("is_primary, anew_addresses(*)").eq("entity_id", orgRes.data.entity_id).order("is_primary", { ascending: false }).order("created_at", { ascending: false }).limit(1),
         ]);
         const nif = orgFiscalEntity?.nif;
         if (nif) data.empresa_nif = nif;
@@ -553,9 +553,9 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
   if (contract.entity_id) {
     const [entityRes, emailRes, phoneRes, addrRes, fiscalEntity] = await Promise.all([
       (supabase as any).from("anew_entities").select("display_name, first_name, last_name").eq("id", contract.entity_id).single(),
-      (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", contract.entity_id).eq("is_primary", true).limit(1),
-      (supabase as any).from("anew_entity_phones").select("phone_number").eq("entity_id", contract.entity_id).eq("is_primary", true).limit(1),
-      (supabase as any).from("anew_entity_addresses").select("is_primary, anew_addresses(*)").eq("entity_id", contract.entity_id).order("is_primary", { ascending: false }).limit(1),
+      (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", contract.entity_id).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
+      (supabase as any).from("anew_entity_phones").select("phone_number").eq("entity_id", contract.entity_id).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
+      (supabase as any).from("anew_entity_addresses").select("is_primary, anew_addresses(*)").eq("entity_id", contract.entity_id).order("is_primary", { ascending: false }).order("created_at", { ascending: false }).limit(1),
       fetchPrimaryFiscalEntity(contract.entity_id),
     ]);
 

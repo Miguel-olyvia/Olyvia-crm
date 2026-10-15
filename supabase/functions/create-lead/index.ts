@@ -34,6 +34,7 @@ const requestSchema = z.object({
 import { runMarketingAttribution } from '../_shared/marketingAttribution.ts';
 import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from '../_shared/formEmails.ts';
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
+import { pickExistingAddress } from '../_shared/addressLookup.ts';
 import {
   findLocalEntityForOrg,
   collectDedupCandidatesForOrg,
@@ -861,14 +862,18 @@ Deno.serve(async (req) => {
             // 20260821020000_security_definer_identity_from_authuid_fix_record.sql:106.
             const addressKey = [backfillStreet, backfillPostal, backfillCity].join('|').toLowerCase();
             let backfillAddressId: string | null = null;
-            const { data: existingAddress, error: existingAddressError } = await supabase
+            // address_key nao tem UNIQUE (edicao so de maiusculas cria duplicados):
+            // .maybeSingle() daria PGRST116 com 2+ linhas e criaria mais um duplicado.
+            const { data: existingAddressRows, error: existingAddressError } = await supabase
               .from('anew_addresses')
               .select('id')
               .eq('address_key', addressKey)
-              .maybeSingle();
+              .order('created_at', { ascending: true })
+              .limit(1);
             if (existingAddressError) {
               console.error('[create-lead] reused-entity address_key lookup failed (continuing):', existingAddressError);
             }
+            const existingAddress = pickExistingAddress(existingAddressRows);
             if (existingAddress?.id) {
               // Reuse the existing address row instead of creating a duplicate.
               backfillAddressId = existingAddress.id;

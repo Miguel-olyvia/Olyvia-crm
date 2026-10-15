@@ -12,6 +12,21 @@ type QuotePdfClientInput = {
   leadId?: string | null;
 };
 
+type EntityAddressLink = { is_primary?: boolean | null; valid_to?: string | null; created_at?: string | null };
+
+/**
+ * Ordena as ligacoes entidade-morada: activas (sem valid_to) primeiro, depois
+ * primarias, depois a mais recente. Pura e sem mutar a entrada.
+ */
+export function sortEntityAddressLinks<T extends EntityAddressLink>(links: T[] | null | undefined): T[] {
+  const time = (v?: string | null) => (v ? new Date(v).getTime() || 0 : 0);
+  return [...(links || [])].sort((a, b) =>
+    (Number(!b.valid_to) - Number(!a.valid_to))
+    || (Number(!!b.is_primary) - Number(!!a.is_primary))
+    || (time(b.created_at) - time(a.created_at))
+  );
+}
+
 const firstValue = <T,>(rows: T[] | null | undefined): T | null => rows?.[0] ?? null;
 
 async function resolveLinkedEntity(table: "anew_leads" | "anew_contacts" | "anew_clients", id?: string | null) {
@@ -73,10 +88,10 @@ export async function resolveQuotePdfEntityId(input: QuotePdfClientInput) {
 async function buildEntityClientForPdf(entityId: string, quoteId?: string | null) {
   const [entityRes, emailsRes, phonesRes, fiscalRes, addressesRes] = await Promise.all([
     (supabase as any).from("anew_entities").select("id, display_name, first_name, last_name, type").eq("id", entityId).maybeSingle(),
-    (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).limit(1),
-    (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).limit(1),
+    (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
+    (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
     (supabase as any).from("anew_entity_fiscal_entities").select("fiscal_entity_id").eq("entity_id", entityId).eq("is_primary", true).limit(1),
-    (supabase as any).from("anew_entity_addresses").select("address_id, is_primary, address_type, valid_to, anew_addresses(*)").eq("entity_id", entityId),
+    (supabase as any).from("anew_entity_addresses").select("address_id, is_primary, address_type, valid_to, created_at, anew_addresses(*)").eq("entity_id", entityId),
   ]);
 
   const entity = entityRes.data;
@@ -88,10 +103,11 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
   // RPC SECURITY DEFINER confirma a visibilidade do orcamento e devolve
   // email/telefone primarios. Sem quoteId (pre-visualizacao de um rascunho
   // ainda por gravar) mantem-se a leitura directa, limitada ao ambito de quem
-  // esta a criar. (A morada/NIF nao viajam na RPC e ficam na leitura directa.)
+  // esta a criar. (O NIF nao viaja na RPC e fica na leitura directa.)
   let contactEmail = firstValue<any>(emailsRes.data)?.email || "";
   let contactPhone = firstValue<any>(phonesRes.data)?.phone_number || "";
   let contactCountryCode = firstValue<any>(phonesRes.data)?.country_code || "";
+  let rpcClientAddresses: any[] | null = null;
   if (quoteId) {
     const { data: contact } = await (supabase as any)
       .rpc("resolve_quote_contact", { _quote_id: quoteId })
@@ -100,6 +116,26 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
       contactEmail = contact.email || "";
       contactPhone = contact.phone_number || "";
       contactCountryCode = contact.country_code || "";
+    }
+    // Morada PELO documento, pela mesma razao (RLS de ambito de dono). Se a RPC
+    // devolver linhas (ja activas, nao-entrega, ordenadas) usam-se; se devolver
+    // vazio/null ou der erro, cai na leitura directa: quem e dono da lead le a
+    // morada por ai (nunca fica pior) e quem nao e so ganha com a RPC. O erro
+    // regista-se.
+    const { data: rpcAddresses, error: addressError } = await (supabase as any)
+      .rpc("resolve_quote_address", { _quote_id: quoteId });
+    if (addressError) {
+      console.error("resolve_quote_address falhou; a usar a leitura directa das moradas", addressError);
+    } else if (Array.isArray(rpcAddresses) && rpcAddresses.length > 0) {
+      rpcClientAddresses = (rpcAddresses as any[]).map((row: any) => ({
+        street: row.street || "",
+        number: row.number || "",
+        postal_code: row.postal_code || "",
+        city: row.city || "",
+        municipality: row.district || "",
+        district: row.district || "",
+        is_primary: row.is_primary || false,
+      }));
     }
   }
 
@@ -114,7 +150,7 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
   // moradas de entrega e as ligações já fechadas — senão, sem principal, o
   // fallback "primeira da lista" podia apanhar uma morada de entrega.
   const agora = Date.now();
-  const clientAddresses = (addressesRes.data || [])
+  const clientAddresses = rpcClientAddresses ?? sortEntityAddressLinks(addressesRes.data as any[])
     .filter((ea: any) => ea.address_type !== "delivery" && (!ea.valid_to || new Date(ea.valid_to).getTime() > agora))
     .map((ea: any) => ({
     street: ea.anew_addresses?.street || "",
