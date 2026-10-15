@@ -4,12 +4,12 @@
 import { FrotaShell } from "@/components/frota-exemplo/FrotaShell";
 import type { EcraFrota } from "@/components/frota-exemplo/contexto";
 import {
-  AtribuicoesFrota, CondutoresFrota, CustosFrota, DocumentosFrota, HojeFrota, LigacoesFrota, ManutencaoFrota, OcorrenciasFrota, RelatoriosFrota, ViaturasFrota,
+  AtividadeFrota, AtribuicoesFrota, CondutoresFrota, CustosFrota, DocumentosFrota, HojeFrota, LigacoesFrota, ManutencaoFrota, OcorrenciasFrota, RelatoriosFrota, ViaturasFrota,
 } from "@/components/frota-exemplo/ecras";
 
 const ECRAS: Record<EcraFrota, () => JSX.Element> = {
   hoje: HojeFrota, viaturas: ViaturasFrota, atribuicoes: AtribuicoesFrota, condutores: CondutoresFrota, manutencao: ManutencaoFrota,
-  custos: CustosFrota, ocorrencias: OcorrenciasFrota, documentos: DocumentosFrota, relatorios: RelatoriosFrota, ligacoes: LigacoesFrota,
+  custos: CustosFrota, ocorrencias: OcorrenciasFrota, documentos: DocumentosFrota, relatorios: RelatoriosFrota, atividade: AtividadeFrota, ligacoes: LigacoesFrota,
 };
 
 export default function FrotaExemplo({ ecra }: { ecra: EcraFrota }) {

@@ -55,6 +55,7 @@ import {
   TriangleAlert,
   Waypoints,
   CarFront,
+  History as HistoryIcon,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -71,6 +72,8 @@ export interface MenuItem {
    * useInventoryToday. Zero ou null = sem pílula. Não mexe no alerta do rail.
    */
   counterKey?: InventoryCounterKey;
+  /** Contador da Frota de exemplo (pílula no painel do menu), lido da base de exemplo da Frota (useContadoresFrota). */
+  frotaCounterKey?: "hoje" | "viaturas" | "ocorrencias" | "manutencao";
 }
 
 export interface MenuSubSection {
@@ -318,15 +321,16 @@ export const menuSections: MenuSection[] = [
     paths: ["/frota"],
     permissions: ["inventory.view"],
     items: [
-      { to: "/frota/hoje", icon: Sun, labelKey: "sidebar.frotaHoje", permission: "inventory.view" },
-      { to: "/frota/viaturas", icon: Truck, labelKey: "sidebar.frotaViaturas", permission: "inventory.view" },
+      { to: "/frota/hoje", icon: Sun, labelKey: "sidebar.frotaHoje", permission: "inventory.view", frotaCounterKey: "hoje" },
+      { to: "/frota/viaturas", icon: Truck, labelKey: "sidebar.frotaViaturas", permission: "inventory.view", frotaCounterKey: "viaturas" },
       { to: "/frota/atribuicoes", icon: KeyRound, labelKey: "sidebar.frotaAtribuicoes", permission: "inventory.view" },
       { to: "/frota/condutores", icon: IdCard, labelKey: "sidebar.frotaCondutores", permission: "inventory.view" },
-      { to: "/frota/manutencao", icon: Wrench, labelKey: "sidebar.frotaManutencao", permission: "inventory.view" },
+      { to: "/frota/manutencao", icon: Wrench, labelKey: "sidebar.frotaManutencao", permission: "inventory.view", frotaCounterKey: "manutencao" },
       { to: "/frota/custos", icon: Fuel, labelKey: "sidebar.frotaCustos", permission: "inventory.view" },
-      { to: "/frota/ocorrencias", icon: TriangleAlert, labelKey: "sidebar.frotaOcorrencias", permission: "inventory.view" },
+      { to: "/frota/ocorrencias", icon: TriangleAlert, labelKey: "sidebar.frotaOcorrencias", permission: "inventory.view", frotaCounterKey: "ocorrencias" },
       { to: "/frota/documentos", icon: FileBadge, labelKey: "sidebar.frotaDocumentos", permission: "inventory.view" },
       { to: "/frota/relatorios", icon: BarChart3, labelKey: "sidebar.frotaRelatorios", permission: "inventory.view" },
+      { to: "/frota/atividade", icon: HistoryIcon, labelKey: "sidebar.frotaAtividade", permission: "inventory.view" },
       { to: "/frota/ligacoes", icon: Waypoints, labelKey: "sidebar.frotaLigacoes", permission: "inventory.view" },
     ],
   },

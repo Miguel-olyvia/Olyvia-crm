@@ -4,7 +4,7 @@
 // exemplo da app real é outra (loja.ts, chave própria no localStorage).
 export type {
   Tom, EstadoViatura, Posse, TipoAtrib, EstadoManut, TipoOcorr, EstadoOcorr, ChaveVenc, Pessoa, Viatura, Atribuicao, Manutencao,
-  Leitura, Custo, Ocorrencia, Compromisso, Frota, LinhaCarrinha, ObraRef,
+  Leitura, Custo, Ocorrencia, Compromisso, Frota, LinhaCarrinha, ObraRef, EntradaLog, PedidoReposicao,
 } from "@/pages/prototipo-negocios/frota/tipos";
 export {
   HOJE, INICIO_PERIODO, ErroFrota, falhar, d2n, dias, addDias, addMeses, diasUteis,
@@ -17,7 +17,7 @@ export {
   FICHEIRO_EXTRATO, extratoImportado, validarImportar, LINHAS_EXTRATO, verificarLinha, gravarImportar,
   iniManut, validarManut, gravarManut, iniConcluir, validarConcluir, gravarConcluir, iniEstado, validarEstado, gravarEstado,
   iniOcorrencia, validarOcorrencia, gravarOcorrencia, iniIdentificar, validarIdentificar, gravarIdentificar, resolverOcorrencia,
-  iniRenovar, validarRenovar, gravarRenovar, iniNova, MATRICULA, validarNova, gravarNova, podeReservar,
+  iniRenovar, validarRenovar, gravarRenovar, iniNova, MATRICULA, validarNova, gravarNova, podeReservar, registar, comAutorFrota,
   type Vals, type Erros,
 } from "@/pages/prototipo-negocios/frota/acoes";
 export { seedFrota, VERSAO_FROTA, CENTROS, OFICINAS, POSTOS, TIPOS_CUSTO, centroObra, obraDoCentro } from "@/pages/prototipo-negocios/frota/seed";

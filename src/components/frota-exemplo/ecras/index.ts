@@ -8,3 +8,4 @@ export { OcorrenciasFrota } from "./OcorrenciasFrota";
 export { DocumentosFrota } from "./DocumentosFrota";
 export { RelatoriosFrota } from "./RelatoriosFrota";
 export { LigacoesFrota } from "./LigacoesFrota";
+export { AtividadeFrota } from "./AtividadeFrota";

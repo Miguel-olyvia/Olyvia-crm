@@ -1,13 +1,16 @@
 // O Hoje da Frota (pgHoje do protótipo): a fila do que precisa de atenção (cada cartão abre a lista já filtrada, por
-// URL), quem está na estrada hoje (a agenda de exemplo) e as próximas reservas.
+// URL), quem está na estrada hoje (a agenda de exemplo e as manutenções do dia), as próximas reservas e as próximas
+// manutenções (agendadas ou em curso, com a ligação para a semana no calendário).
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { CalendarClock, KeyRound, Route as RouteIcon } from "lucide-react";
+import { CalendarClock, KeyRound, Route as RouteIcon, Wrench } from "lucide-react";
+import { Link } from "react-router-dom";
+import { linkCalendario } from "../dados/acoesApp";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { WorkQueueCard } from "@/components/frota-exemplo/inventarioUi";
 import { ROTA_FROTA, useFrotaCtx, type EcraFrota } from "../contexto";
 import { BotaoFrota, Cabecalho, Cartao, LinhaClicavel, ListaV, Placa, RefObra, Seccao, Selo, Tabela, Vazio, tomInv } from "../pecas";
-import { HOJE, abaixoMin, atribEm, ativa, diaLongo, dias, fData, fDataC, multasPend, pessoa, prazoMulta, revisao, vencimentos, viatura, type Tom } from "../dados";
+import { HOJE, abaixoMin, atribEm, ativa, compromissos, diaLongo, dias, fData, fDataC, maiuscula, multasPend, pessoa, prazoMulta, revisao, vencimentos, viatura, type Compromisso, type Tom } from "../dados";
 
 interface CartaoFila { n: number; tom: Tom; t: string; d: string; dest: EcraFrota; vista: string }
 
@@ -33,7 +36,10 @@ export function HojeFrota() {
     { n: stockBaixo.length, tom: "warn", t: "Carrinhas com stock abaixo do mínimo", d: stockBaixo.map((v) => `${v.mat} (${abaixoMin(stock(v.id)).length})`).join(" · ") || "Tudo acima do mínimo", dest: "viaturas", vista: "stock" },
     { n: livres.length, tom: "ok", t: "Viaturas livres hoje", d: livres.map((v) => v.mat).join(" · ") || "Todas atribuídas", dest: "viaturas", vista: "livres" },
   ];
-  const hojeAg = F.agenda.filter((a) => a.data === HOJE).sort((a, b) => a.hora.localeCompare(b.hora));
+  // a agenda de hoje: os compromissos de exemplo e as manutenções marcadas (ou em curso) para hoje, de cada viatura
+  const hojeAg: Compromisso[] = F.viaturas.flatMap((v) => compromissos(F, v.id).filter((c) => c.data === HOJE))
+    .sort((a, b) => a.hora.localeCompare(b.hora));
+  const proxManut = F.manut.filter((m) => m.estado !== "concluída" && (m.prev ?? m.data) >= HOJE).sort((a, b) => a.data.localeCompare(b.data));
   const reservas = F.atrib.filter((a) => a.tipo === "pontual" && a.ini > HOJE).sort((a, b) => a.ini.localeCompare(b.ini));
   const nota = (texto: string | undefined, obra: number | undefined): ReactNode => (obra ? <RefObra id={obra}>{texto}</RefObra> : texto);
   return (
@@ -52,7 +58,7 @@ export function HojeFrota() {
               <TableHeader><TableRow><TableHead>Hora</TableHead><TableHead>Viatura</TableHead><TableHead>Condutor</TableHead><TableHead>Serviço</TableHead></TableRow></TableHeader>
               <TableBody>
                 {hojeAg.length ? hojeAg.map((a) => (
-                  <LinhaClicavel key={a.vid + a.hora} aoAbrir={() => abrir(a.vid)} rotulo={`Abrir a ${viatura(F, a.vid)?.mat ?? ""}`}>
+                  <LinhaClicavel key={a.vid + a.hora + a.ref} aoAbrir={() => abrir(a.vid)} rotulo={`Abrir a ${viatura(F, a.vid)?.mat ?? ""}`}>
                     <TableCell className="tabular-nums">{a.hora}</TableCell>
                     <TableCell><Placa mat={viatura(F, a.vid)?.mat ?? ""} /></TableCell>
                     <TableCell>{pessoa(F, a.pid)?.nome}</TableCell>
@@ -62,6 +68,26 @@ export function HojeFrota() {
               </TableBody>
             </Table>
           </Tabela>
+        </Seccao>
+        <Seccao titulo="Próximas manutenções" icone={Wrench}>
+          <Cartao>
+            {proxManut.length ? (
+              <ListaV>
+                {proxManut.map((m) => (
+                  <div key={m.id}>
+                    <span className="flex flex-col">
+                      <b>{viatura(F, m.vid)?.mat} · {m.tipo}</b>
+                      <span className="text-xs text-muted-foreground">{m.oficina} · {maiuscula(m.estado)}{m.prev ? `, prevista até ${fData(m.prev)}` : ""}</span>
+                    </span>
+                    <span className="flex flex-col items-end gap-1">
+                      <Selo tom={m.estado === "em curso" ? "warn" : "info"}>{fDataC(m.data)}</Selo>
+                      <Link to={linkCalendario(m.data)} className="text-xs font-medium text-primary underline-offset-2 hover:underline" aria-label={`Ver ${m.tipo} da ${viatura(F, m.vid)?.mat ?? ""} no calendário`}>Ver no calendário</Link>
+                    </span>
+                  </div>
+                ))}
+              </ListaV>
+            ) : <p className="text-sm text-muted-foreground">Sem manutenções marcadas.</p>}
+          </Cartao>
         </Seccao>
         <Seccao titulo="Próximas reservas" icone={CalendarClock}>
           <Cartao>

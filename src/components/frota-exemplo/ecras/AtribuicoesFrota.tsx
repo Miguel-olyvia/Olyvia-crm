@@ -1,6 +1,7 @@
 // As Atribuições (pgAtribuicoes do protótipo): o calendário semanal por viatura (permanentes, reservas pontuais, oficina e
 // manutenções marcadas, que bloqueiam a viatura) e as listas Em curso, Reservas e Histórico.
-import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { segundaFeira } from "../dados/acoesApp";
 import { ChevronLeft, ChevronRight, KeyRound, Plus } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DocSheetTabs, docTabId, docTabPanelId } from "@/components/inventory/DocumentSheet";
@@ -11,11 +12,7 @@ import { HOJE, addDias, ativa, bloqueios, cancelarReserva, cobre, diaSemana, fDa
 
 type Aba = "semana" | "curso" | "res" | "hist";
 
-/** A segunda-feira da semana de `d` (o calendário abre na semana de HOJE). */
-export function segundaFeira(d: string): string {
-  const w = new Date(d + "T00:00:00Z").getUTCDay();
-  return addDias(d, -((w + 6) % 7));
-}
+export { segundaFeira } from "../dados/acoesApp";
 const BLOCO = {
   perm: "border-primary/60 bg-primary/10 text-primary dark:text-violet-300",
   pont: "border-info/70 bg-info/15 text-sky-800 dark:text-info",
@@ -26,7 +23,14 @@ export function AtribuicoesFrota() {
   const { F, abrir, dlg, agir, podeAgir, confirmar } = useFrotaCtx();
   const [abaUrl, setAba] = useVista("semana");
   const aba = (["semana", "curso", "res", "hist"].includes(abaUrl) ? abaUrl : "semana") as Aba;
-  const [semana, setSemana] = useState(0);
+  // a semana do calendário vive no URL (?semana=1 = a próxima), para "Ver no calendário" abrir a semana certa
+  const [params, setParams] = useSearchParams();
+  const semana = Number(params.get("semana") || 0) || 0;
+  const setSemana = (n: number): void => {
+    const p = new URLSearchParams(params);
+    if (n) p.set("semana", String(n)); else p.delete("semana");
+    setParams(p, { replace: true });
+  };
   const ini = addDias(segundaFeira(HOJE), semana * 7), dd = Array.from({ length: 7 }, (_, i) => addDias(ini, i));
   const vs = F.viaturas.filter(ativa);
   const curso = F.atrib.filter((a) => cobre(a, HOJE));
@@ -78,7 +82,7 @@ export function AtribuicoesFrota() {
                     <TableCell key={d} className={cn("align-top", d === HOJE && "bg-primary/5")}>
                       <div className="flex flex-col gap-1">
                         {bl.map((b, i) => {
-                          if (b.tipo === "oficina" || b.tipo === "manutencao") return <span key={i} className={cn("rounded border px-1.5 py-0.5 text-xs font-medium", BLOCO.ofi)} title={b.manut ? `${b.manut.tipo} · ${b.manut.oficina}` : v.motivo}>{b.txt}</span>;
+                          if (b.tipo === "oficina" || b.tipo === "manutencao") return <span key={i} className={cn("rounded border px-1.5 py-0.5 text-xs font-medium", BLOCO.ofi)} title={b.manut ? `${b.manut.tipo} · ${b.manut.oficina}` : v.motivo}>{b.tipo === "oficina" ? "Oficina" : `Manutenção · ${b.txt}`}</span>;
                           const a = b.atrib!, nome = pessoa(F, a.pid)?.nome ?? "";
                           return (
                             <span key={i} className={cn("rounded border px-1.5 py-0.5 text-xs font-medium", a.tipo === "pontual" ? BLOCO.pont : BLOCO.perm)} title={nome + (a.nota ? " · " + a.nota : "")}>

@@ -8,7 +8,7 @@ import type { AbaFrota, Resultado } from "./loja";
 import type { PerfilFrota } from "./perfil";
 import type { Frota, LinhaCarrinha, ObraRef, Viatura } from "./tipos";
 
-export type AbaFolha = "resumo" | "atrib" | "manut" | "custos" | "ocorr" | "docs" | "stock" | "lig";
+export type AbaFolha = "resumo" | "atrib" | "manut" | "custos" | "ocorr" | "docs" | "stock" | "lig" | "hist";
 export type TipoDlg = "atribuir" | "devolver" | "km" | "abastecer" | "despesa" | "importar" | "manut" | "concluir" | "estado" | "ocorrencia" | "identificar" | "renovar" | "nova";
 /** Os dados com que se abre um diálogo (os data-* do protótipo HTML): viatura, pessoa, atribuição, manutenção, ocorrência, documento e dia. */
 export interface DadosDlg { v?: string; p?: string; a?: string; m?: string; o?: string; k?: string; ini?: string }

@@ -46,12 +46,15 @@ interface CounterPillProps {
   /** toned (menu, cor por urgência) · subtle (separadores: fundo muted, como .tab .pill). */
   variant?: CounterPillVariant;
   className?: string;
+  /** Tom e dica explícitos (para pílulas que não são do Inventário, como as da Frota); sobrepõem os do counterKey. */
+  tone?: "bad" | "warn" | "default";
+  hint?: string;
 }
 
-export function CounterPill({ value, counterKey, variant = "toned", className }: CounterPillProps) {
+export function CounterPill({ value, counterKey, variant = "toned", className, tone: toneProp, hint: hintProp }: CounterPillProps) {
   if (!value || value <= 0) return null;
-  const tone = (counterKey && COUNTER_PILL_TONE[counterKey]) || "default";
-  const hint = counterKey ? COUNTER_PILL_HINT[counterKey] : undefined;
+  const tone = toneProp ?? ((counterKey && COUNTER_PILL_TONE[counterKey]) || "default");
+  const hint = hintProp ?? (counterKey ? COUNTER_PILL_HINT[counterKey] : undefined);
   return (
     <span
       className={cn(

@@ -18,13 +18,15 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { permissionReason, usePermissionGate } from "@/components/frota-exemplo/inventarioUi";
 import {
-  ContextoFrotaExemplo, PERMISSAO_AGIR_FROTA, useFrotaCtx, type AbaFicha, type AvisoFrota, type CtxFrotaExemplo, type DadosDlg, type PedidoConfirmacao, type TipoDlg,
+  ContextoFrotaExemplo, PERMISSAO_AGIR_FROTA, useFrotaCtx, type AbaFicha, type AvisoFrota, type CtxFrotaExemplo, type DadosDlg, type LigacaoAviso, type PedidoConfirmacao, type TipoDlg,
 } from "./contexto";
 import { DialogoFrota } from "./DialogosFrota";
 import { ViaturaFicha } from "./ViaturaFicha";
 import { AvisoRegiao } from "./pecas";
 import { OBRAS_EXEMPLO, stockCarrinhaExemplo } from "./dados/exemplo";
-import { definirOrganizacaoFrotaExemplo, executarFrotaExemplo, reporFrotaExemplo, useFrotaExemplo } from "./dados/loja";
+import { AUTOR_POR_OMISSAO, definirOrganizacaoFrotaExemplo, executarFrotaExemplo, reporFrotaExemplo, useFrotaExemplo } from "./dados/loja";
+import { useNomeUtilizador } from "./useNomeUtilizador";
+import { toast } from "@/hooks/use-toast";
 import { condutor, viaturaDe } from "./dados";
 
 const A_CARREGAR = "A carregar permissões…";
@@ -132,18 +134,31 @@ export function FrotaShell({ children }: { children: ReactNode }) {
   const [pedido, setPedido] = useState<PedidoConfirmacao | null>(null);
   const [aviso, setAviso] = useState<AvisoFrota | null>(null);
 
-  const avisar = useCallback((texto: string, erro = false): void => setAviso((a) => ({ texto, erro, n: (a?.n ?? 0) + 1 })), []);
-  const agir = useCallback<CtxFrotaExemplo["agir"]>((fn, ok) => {
+  // quem assina o histórico: o utilizador com sessão iniciada (o nome do cabeçalho da app)
+  const autor = useNomeUtilizador() ?? AUTOR_POR_OMISSAO;
+  // o resultado de cada ação vê-se sempre: na região aria-live da página (e da ficha) e num toast, que se vê mesmo com
+  // a página deslocada ou com a ficha aberta
+  const avisar = useCallback((texto: string, erro = false, link?: LigacaoAviso): void => {
+    setAviso((a) => ({ texto, erro, link, n: (a?.n ?? 0) + 1 }));
+    toast({ title: erro ? "Não foi possível" : "Frota (exemplo)", description: texto, variant: erro ? "destructive" : "default" });
+  }, []);
+  const agir = useCallback<CtxFrotaExemplo["agir"]>((fn, ok, link) => {
     if (!podeAgir) {
       avisar(semPermissao, true);
       return { ok: false, valor: undefined as never, erro: semPermissao };
     }
-    const r = executarFrotaExemplo(fn);
-    if (r.ok) { const t = typeof ok === "function" ? ok(r.valor) : ok; if (t) avisar(t); } else avisar(r.erro, true);
+    const r = executarFrotaExemplo(fn, autor);
+    if (r.ok) {
+      const t = (typeof ok === "function" ? ok(r.valor) : ok) || "Registado no exemplo da Frota.";
+      avisar(t, false, typeof link === "function" ? link(r.valor) : link);
+    } else avisar(r.erro, true);
     return r;
-  }, [podeAgir, semPermissao, avisar]);
+  }, [podeAgir, semPermissao, avisar, autor]);
   const stock = useCallback((vid: string) => stockCarrinhaExemplo(F.viaturas.find((v) => v.id === vid)), [F]);
-  const repor = useCallback((): void => { reporFrotaExemplo(); setFolha(null); setDlg(null); avisar("Dados de exemplo repostos."); }, [avisar]);
+  const repor = useCallback((): void => {
+    if (!podeAgir) { avisar(semPermissao, true); return; }
+    reporFrotaExemplo(autor); setFolha(null); setDlg(null); avisar("Dados de exemplo repostos.");
+  }, [avisar, autor, podeAgir, semPermissao]);
 
   useEffect(() => { const antes = document.title; document.title = "Olyvia · Frota (exemplo)"; return () => { document.title = antes; }; }, []);
 

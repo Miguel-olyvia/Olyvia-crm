@@ -2,7 +2,7 @@
 // Sem React. Os valores dos formulários são texto (como no HTML). Cada `gravar*` volta a validar e recusa com ErroFrota: corre dentro de executar()
 // (loja.ts), numa cópia da base, por isso uma regra que recusa não deixa nada a meio.
 import { HOJE, addDias, addMeses, fData, fEur, fKm, falhar, uid } from "./base";
-import { PESSOA_TECNICO, lerPerfilFrota, pode, porqueNao, type AcaoFrota, type PerfilFrota } from "./perfil";
+import { PERFIS_FROTA, PESSOA_TECNICO, lerPerfilFrota, pode, porqueNao, type AcaoFrota, type PerfilFrota } from "./perfil";
 import { ESTADOS, VENC, atribEm, bloqueios, cartaOk, ocupada, pessoa, quemConduzia, revisao, viatura, viaturaDe } from "./regras";
 import { CENTROS, OFICINAS } from "./seed";
 import type { ChaveVenc, EstadoViatura, Frota, Ocorrencia, Viatura } from "./tipos";
@@ -34,6 +34,27 @@ export function exigir(acao: AcaoFrota, F?: Frota, vid?: string, perfil: PerfilF
     if (!minha || minha.id !== vid) falhar(`Como técnico, só podes agir sobre a tua viatura${minha ? ` (${minha.mat})` : ""}.`);
   }
 }
+/* ------------------------------------------------------------------ histórico */
+
+/** Quem faz as ações quando quem as chama o diz (comAutorFrota): na app real é o utilizador com sessão iniciada. */
+let autorFixo: string | null = null;
+/** Corre `fn` com as entradas do histórico assinadas por `autor`. */
+export function comAutorFrota<T>(autor: string, fn: () => T): T {
+  const antes = autorFixo;
+  autorFixo = autor;
+  try { return fn(); } finally { autorFixo = antes; }
+}
+/** Quem assina uma entrada: o autor fixado, ou o perfil simulado do protótipo ("Gestora de frota · Sofia Martins"). */
+export const autorAtual = (): string => autorFixo ?? PERFIS_FROTA[perfilFixo ?? lerPerfilFrota()];
+/**
+ * Grava uma entrada no histórico (mais recente primeiro): quando (hora real), quem, a viatura, o tipo de ação e o
+ * detalhe. Devolve `texto` (a mensagem da ação), para os gravar* terminarem com `return registar(...)`.
+ */
+export function registar(F: Frota, acao: string, vid: string | undefined, texto: string, det?: string): string {
+  F.log = [{ at: new Date().toISOString(), t: texto, quem: autorAtual(), vid, acao, det }, ...(F.log ?? [])];
+  return texto;
+}
+
 const noFuturo = (d: string): boolean => !!d && d.slice(0, 10) > HOJE;
 function semErros(e: Erros): void {
   const k = Object.keys(e);
@@ -88,7 +109,8 @@ export function gravarAtribuir(F: Frota, x: Vals): string {
   const v = V(F, x.vid);
   F.atrib.push({ id: uid("a"), vid: x.vid, pid: x.pid, tipo: x.tipo === "pontual" ? "pontual" : "permanente", ini: x.ini, fim: x.fim || null, kmIni: x.ini <= HOJE ? Number(x.km || v.km) : null, nota: x.nota, obra: obraDoMotivo(x.nota) });
   if (x.ini <= HOJE && Number(x.km) > v.km) { v.km = Number(x.km); F.leituras.push({ vid: v.id, data: HOJE, km: v.km, origem: "Entrega" }); }
-  return `${v.mat} atribuída a ${pessoa(F, x.pid)?.nome}.`;
+  return registar(F, x.tipo === "pontual" ? "Reserva" : "Atribuição", v.id, `${v.mat} atribuída a ${pessoa(F, x.pid)?.nome}.`,
+    `${x.tipo === "pontual" ? "Reserva" : "Permanente"} de ${fData(x.ini)}${x.fim ? " a " + fData(x.fim) : ", sem fim"}${x.nota ? " · " + x.nota : ""}`);
 }
 
 /* ------------------------------------------------------------------ devolver */
@@ -114,7 +136,7 @@ export function gravarDevolver(F: Frota, x: Vals): string {
   a.fim = x.data; a.devolvida = true; a.kmFim = Number(x.km); v.km = Number(x.km);
   F.leituras.push({ vid: v.id, data: x.data, km: v.km, origem: "Devolução" });
   if (x.danos) F.ocorr.push({ id: uid("o"), vid: v.id, tipo: "Sinistro", quando: x.data + "T18:00", local: "Na devolução", desc: "Danos detetados na devolução", pid: a.pid, estado: "registada" });
-  return `${v.mat} devolvida com ${fKm(v.km)}.`;
+  return registar(F, "Devolução", v.id, `${v.mat} devolvida com ${fKm(v.km)}.`, `${pessoa(F, a.pid)?.nome ?? ""} · ${fData(x.data)}${x.danos ? " · com danos (ocorrência aberta)" : ""}`);
 }
 
 /** Cancelar uma reserva futura: sai da Frota e liberta a viatura na Agenda. */
@@ -124,7 +146,7 @@ export function cancelarReserva(F: Frota, aid: string): string {
   if (!a) falhar("Reserva desconhecida.");
   if (a.ini <= HOJE) falhar("Só se cancelam reservas que ainda não começaram. Esta devolve-se.");
   F.atrib = F.atrib.filter((z) => z.id !== aid);
-  return "Reserva cancelada. A viatura ficou livre na Agenda.";
+  return registar(F, "Reserva cancelada", a.vid, "Reserva cancelada. A viatura ficou livre na Agenda.", `${pessoa(F, a.pid)?.nome ?? ""} · ${fData(a.ini)} a ${fData(a.fim)}`);
 }
 
 /* ------------------------------------------------------------------ km */
@@ -145,7 +167,7 @@ export function gravarKm(F: Frota, x: Vals): string {
   v.km = Number(x.km);
   F.leituras.push({ vid: v.id, data: x.data, km: v.km, origem: "Manual" });
   const r = revisao(v);
-  return `Km registados.${r.tom !== "ok" ? " Atenção: revisão " + r.txt.toLowerCase() + "." : ""}`;
+  return registar(F, "Km", v.id, `Km registados.${r.tom !== "ok" ? " Atenção: revisão " + r.txt.toLowerCase() + "." : ""}`, `${fKm(v.km)} a ${fData(x.data)}`);
 }
 
 /* ------------------------------------------------------------------ abastecer */
@@ -170,7 +192,7 @@ export function gravarAbastecer(F: Frota, x: Vals): string {
   F.custos.push({ id: uid("c"), vid: v.id, data: x.data, tipo: el ? "Carregamento" : "Combustível", qtd: Number(x.qtd), un: el ? "kWh" : "L", valor: Number(x.valor), km: Number(x.km), pid: a ? a.pid : null, fonte: x.fonte, centro: v.centro });
   v.km = Number(x.km);
   F.leituras.push({ vid: v.id, data: x.data, km: v.km, origem: "Abastecimento" });
-  return `Abastecimento de ${fEur(Number(x.valor))} registado na ${v.mat}.`;
+  return registar(F, el ? "Carregamento" : "Abastecimento", v.id, `Abastecimento de ${fEur(Number(x.valor))} registado na ${v.mat}.`, `${x.qtd} ${el ? "kWh" : "L"} · ${fEur(Number(x.valor))} · ${fKm(v.km)} · ${x.fonte}`);
 }
 
 /* ------------------------------------------------------------------ despesa */
@@ -188,7 +210,7 @@ export function gravarDespesa(F: Frota, x: Vals): string {
   semErros(validarDespesa(F, x));
   const v = V(F, x.vid);
   F.custos.push({ id: uid("c"), vid: v.id, data: x.data, tipo: x.tipo, valor: Number(x.valor), fonte: x.fonte, centro: x.centro || v.centro, nota: x.nota });
-  return `Despesa de ${fEur(Number(x.valor))} registada.`;
+  return registar(F, "Despesa", v.id, `Despesa de ${fEur(Number(x.valor))} registada.`, `${x.tipo} · ${fEur(Number(x.valor))} · ${x.fonte}${x.centro ? " · " + x.centro : ""}`);
 }
 
 /* ------------------------------------------------------------------ importar extrato */
@@ -223,7 +245,7 @@ export function gravarImportar(F: Frota): string {
     if (prob) rever++;
     n++;
   }
-  return `${n} abastecimentos importados.${rever ? ` ${rever} ficou para rever.` : ""}`;
+  return registar(F, "Importação", undefined, `${n} abastecimentos importados.${rever ? ` ${rever} ficou para rever.` : ""}`, FICHEIRO_EXTRATO);
 }
 
 /* ------------------------------------------------------------------ manutenção */
@@ -242,7 +264,7 @@ export function gravarManut(F: Frota, x: Vals): string {
   exigir("manut");
   semErros(validarManut(F, x));
   F.manut.push({ id: uid("m"), vid: x.vid, tipo: x.tipo, data: x.data, estado: "agendada", oficina: x.oficina, valor: Number(x.valor || 0) });
-  return `${x.tipo} da ${V(F, x.vid).mat} agendada para ${fData(x.data)}.`;
+  return registar(F, "Manutenção agendada", x.vid, `${x.tipo} da ${V(F, x.vid).mat} agendada para ${fData(x.data)}.`, `${x.tipo} · ${x.oficina} · ${fData(x.data)}`);
 }
 
 export function iniConcluir(F: Frota, mid: string): Vals {
@@ -267,7 +289,7 @@ export function gravarConcluir(F: Frota, x: Vals): string {
   const saiuDaOficina = v.estado === "oficina";
   if (saiuDaOficina) { v.estado = "ativa"; v.motivo = ""; }
   if (m.valor) F.custos.push({ id: uid("c"), vid: v.id, data: x.data, tipo: "Oficina", valor: m.valor, fonte: m.oficina, centro: v.centro, nota: m.tipo });
-  return `${m.tipo} concluída. ${saiuDaOficina ? `${v.mat} volta a estar ativa.` : `A ${v.mat} continua ${ESTADOS[v.estado][1].toLowerCase()}.`}`;
+  return registar(F, "Manutenção concluída", v.id, `${m.tipo} concluída. ${saiuDaOficina ? `${v.mat} volta a estar ativa.` : `A ${v.mat} continua ${ESTADOS[v.estado][1].toLowerCase()}.`}`, `${m.tipo} · ${m.oficina} · ${fEur(m.valor)} · ${fKm(v.km)}`);
 }
 
 /* ------------------------------------------------------------------ estado */
@@ -285,7 +307,7 @@ export function gravarEstado(F: Frota, x: Vals): string {
   const v = V(F, x.vid), novo = x.estado as EstadoViatura;
   v.estado = novo; v.motivo = x.motivo.trim();
   if (novo !== "ativa") { const a = atribEm(F, v.id); if (a) { a.fim = HOJE; a.devolvida = true; a.kmFim = v.km; } }
-  return `${v.mat} passou a “${ESTADOS[novo][1]}”.`;
+  return registar(F, "Estado", v.id, `${v.mat} passou a “${ESTADOS[novo][1]}”.`, v.motivo);
 }
 
 /* ------------------------------------------------------------------ ocorrências */
@@ -307,7 +329,7 @@ export function gravarOcorrencia(F: Frota, x: Vals): string {
   const o: Ocorrencia = { id: uid("o"), vid: x.vid, tipo: x.tipo as Ocorrencia["tipo"], quando: x.quando, local: x.local, desc: x.desc, valor: Number(x.valor || 0), estado: x.tipo === "Multa" ? "por identificar" : "registada" };
   if (x.tipo === "Multa") o.notificada = HOJE; else if (sug) o.pid = sug.id;
   F.ocorr.push(o);
-  return `${x.tipo} registada na ${V(F, x.vid).mat}.`;
+  return registar(F, "Ocorrência", x.vid, `${x.tipo} registada na ${V(F, x.vid).mat}.`, `${x.tipo} · ${x.local} · ${x.desc}`);
 }
 export function iniIdentificar(F: Frota, oid: string): Vals {
   const o = F.ocorr.find((z) => z.id === oid);
@@ -320,13 +342,13 @@ export function gravarIdentificar(F: Frota, x: Vals): string {
   semErros(validarIdentificar(F, x));
   const o = F.ocorr.find((z) => z.id === x.o) ?? falhar("Ocorrência desconhecida.");
   o.pid = x.pid; o.estado = "identificado";
-  return `Condutor identificado: ${pessoa(F, x.pid)?.nome}. Notificação enviada.`;
+  return registar(F, "Condutor identificado", o.vid, `Condutor identificado: ${pessoa(F, x.pid)?.nome}. Notificação enviada.`, `${o.tipo} de ${fData(o.quando.slice(0, 10))} · ${o.desc}`);
 }
 export function resolverOcorrencia(F: Frota, oid: string): string {
   exigir("identificar");
   const o = F.ocorr.find((z) => z.id === oid) ?? falhar("Ocorrência desconhecida.");
   o.estado = "resolvido";
-  return "Ocorrência marcada como resolvida.";
+  return registar(F, "Ocorrência resolvida", o.vid, "Ocorrência marcada como resolvida.", `${o.tipo} de ${fData(o.quando.slice(0, 10))} · ${o.desc}`);
 }
 
 /* ------------------------------------------------------------------ documentos */
@@ -342,7 +364,7 @@ export function gravarRenovar(F: Frota, x: Vals): string {
   const v = V(F, x.vid), k = x.k as ChaveVenc;
   v.venc[k] = x.data;
   if (Number(x.valor) > 0) F.custos.push({ id: uid("c"), vid: v.id, data: HOJE, tipo: k === "seguro" ? "Seguro" : k === "iuc" ? "IUC" : "Oficina", valor: Number(x.valor), fonte: k === "seguro" ? v.seguradora : k === "ipo" ? "Centro de Inspeções Lisboa Norte" : "Autoridade Tributária", centro: v.centro });
-  return `${VENC[k]} da ${v.mat} renovado até ${fData(x.data)}.`;
+  return registar(F, "Documento renovado", v.id, `${VENC[k]} da ${v.mat} renovado até ${fData(x.data)}.`, `${VENC[k]} até ${fData(x.data)}${Number(x.valor) > 0 ? " · " + fEur(Number(x.valor)) : ""}`);
 }
 
 /* ------------------------------------------------------------------ nova viatura */
@@ -370,6 +392,8 @@ export function gravarNova(F: Frota, x: Vals, armazemId: string | null): string 
     rev: { cadaKm: 30000, cadaMeses: 12, ultKm: km, ultData: HOJE }, armazem: !!x.armazem, armazemId, agenda: !!x.agenda,
   });
   F.leituras.push({ vid: id, data: HOJE, km, origem: "Criação" });
+  registar(F, "Nova viatura", id, `Viatura ${x.mat.trim().toUpperCase()} criada.`,
+    `${x.marca.trim()} ${x.modelo.trim()} · ${x.comb} · ${fKm(km)}${x.armazem ? " · armazém móvel" : ""}${x.agenda ? " · recurso da agenda" : ""}`);
   return id;
 }
 

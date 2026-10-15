@@ -82,7 +82,7 @@ describe("ecrãs da Frota", () => {
     const folha = await screen.findByRole("dialog");
     expect(within(folha).getByRole("heading", { name: "Renault Master 2.3 dCi Furgão L2H2" })).toBeInTheDocument();
     const abas = within(folha).getAllByRole("tab").map((t) => t.textContent);
-    expect(abas).toEqual(["Resumo", "Atribuições", "Manutenção", "Custos", "Ocorrências", "Documentos", "Stock na carrinha", "Ligações"]);
+    expect(abas).toEqual(["Resumo", "Atribuições", "Manutenção", "Custos", "Ocorrências", "Documentos", "Stock na carrinha", "Ligações", "Histórico"]);
     fireEvent.click(within(folha).getByRole("tab", { name: "Stock na carrinha" }));
     expect(within(folha).getByText("Silicone neutro")).toBeInTheDocument();
     const antes = lerInventario().transfers.length;

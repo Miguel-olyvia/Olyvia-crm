@@ -326,6 +326,7 @@ const App = () => (
                       <Route path="/frota/ocorrencias" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="ocorrencias" ecra="ocorrencias" /></ProtectedRoute>} />
                       <Route path="/frota/documentos" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="documentos" ecra="documentos" /></ProtectedRoute>} />
                       <Route path="/frota/relatorios" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="relatorios" ecra="relatorios" /></ProtectedRoute>} />
+                      <Route path="/frota/atividade" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="atividade" ecra="atividade" /></ProtectedRoute>} />
                       <Route path="/frota/ligacoes" element={<ProtectedRoute permission="inventory.view"><FrotaExemplo key="ligacoes" ecra="ligacoes" /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
                       {/* Receção por código (Fase 2): permissão própria receiving.view (categoria 'receiving'). O servidor exige ainda purchase_orders.view OU .receive para consultar (rpc_receiving_lookup) e receiving.receive + purchase_orders.receive + inventory.edit para receber (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}

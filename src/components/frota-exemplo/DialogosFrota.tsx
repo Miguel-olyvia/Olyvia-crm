@@ -12,7 +12,8 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { useFrotaCtx, type DadosDlg, type TipoDlg } from "./contexto";
+import { useFrotaCtx, type DadosDlg, type LigacaoAviso, type TipoDlg } from "./contexto";
+import { linkCalendario } from "./dados/acoesApp";
 import { Placa, Selo, SeloEstado, Tabela } from "./pecas";
 import { nomeObra } from "./dados/exemplo";
 import {
@@ -46,6 +47,21 @@ const DEFS: Record<TipoDlg, Def> = {
   // a viatura nova grava-se à parte (gravarNova recebe o armazém, que na app real ainda não existe)
   nova: { titulo: "Nova viatura", ok: "Criar viatura", largo: true, ini: () => iniNova(), validar: validarNova, gravar: () => "" },
 };
+/** Onde se vê o efeito de cada ação (a ligação do aviso de sucesso). */
+function ligacaoDepois(tipo: TipoDlg, x: Vals): LigacaoAviso | undefined {
+  switch (tipo) {
+    case "atribuir": return { rotulo: "Ver no calendário", para: linkCalendario(x.ini) };
+    case "manut": return { rotulo: "Ver no calendário", para: linkCalendario(x.data) };
+    case "devolver": return { rotulo: "Ver o histórico das atribuições", para: "/frota/atribuicoes?vista=hist" };
+    case "abastecer": case "despesa": case "importar": return { rotulo: "Ver nos custos", para: "/frota/custos" };
+    case "concluir": return { rotulo: "Ver na Manutenção", para: "/frota/manutencao" };
+    case "ocorrencia": case "identificar": return { rotulo: "Ver nas Ocorrências", para: "/frota/ocorrencias" };
+    case "renovar": return { rotulo: "Ver nos Documentos", para: "/frota/documentos" };
+    case "estado": case "km": return { rotulo: "Ver nas Viaturas", para: "/frota/viaturas" };
+    default: return undefined;
+  }
+}
+
 /** As chaves de erro que não são campos do formulário (vão para o aviso do diálogo). */
 const GERAIS = ["a", "m", "o", "extrato"];
 
@@ -99,18 +115,21 @@ export function DialogoFrota({ tipo, dados, aoFechar, aoCriar }: { tipo: TipoDlg
     if (!podeAgir) { setErroGeral(semPermissao); return; }
     const erros = def.validar(F, x);
     setE(erros);
-    const geral = Object.keys(erros).find((k) => GERAIS.includes(k));
+    // nenhuma recusa fica em silêncio: além do erro no campo, o resumo junto aos botões diz o que falta
+    const chaves = Object.keys(erros);
+    const geral = chaves.find((k) => GERAIS.includes(k));
     if (geral) setErroGeral(erros[geral]);
-    if (Object.keys(erros).length) { setFocar((n) => n + 1); return; }
+    else if (chaves.length) setErroGeral(`Não foi gravado: ${erros[chaves[0]]}`);
+    if (chaves.length) { setFocar((n) => n + 1); return; }
     if (tipo === "nova") {
       // na app real não se cria armazém: a viatura fica marcada como armazém móvel e o armazém nasce com as tabelas
-      const r = agir((G) => gravarNova(G, x, null), `Viatura ${x.mat.trim().toUpperCase()} criada (exemplo).`);
+      const r = agir((G) => gravarNova(G, x, null), `Viatura ${x.mat.trim().toUpperCase()} criada (exemplo).`, { rotulo: "Ver nas Viaturas", para: "/frota/viaturas" });
       if (!r.ok) { setErroGeral(r.erro); return; }
       aoFechar();
       aoCriar?.(r.valor);
       return;
     }
-    const r = agir((G) => def.gravar(G, x), (msg) => msg);
+    const r = agir((G) => def.gravar(G, x), (msg) => msg, ligacaoDepois(tipo, x));
     if (r.ok) aoFechar(); else setErroGeral(r.erro);
   };
   return (
@@ -215,8 +234,9 @@ function Corpo({ tipo, x, e, muda }: { tipo: TipoDlg; x: Vals; e: Erros; muda: (
       );
     case "abastecer": {
       const el = v?.comb === "Elétrico";
+      // as mesmas viaturas que mostram "Registar abastecimento" na ficha (também as que estão na oficina ou paradas)
       return grelha(<>
-        {sel("vid", "Viatura", optsViaturas(), { placeholder: "Escolher viatura" })}
+        {sel("vid", "Viatura", optsAtivas(), { placeholder: "Escolher viatura" })}
         {data("data", "Data")}
         {num("qtd", el ? "Energia (kWh)" : "Litros", undefined, "0.1")}
         {num("valor", "Valor com IVA (€)", undefined, "0.01")}
@@ -268,7 +288,7 @@ function Corpo({ tipo, x, e, muda }: { tipo: TipoDlg; x: Vals; e: Erros; muda: (
             {sel("oficina", "Oficina", opcoes(OFICINAS), { ajuda: "Fornecedores do Inventário (exemplo)" })}
             {num("valor", "Valor estimado (€)", undefined, "0.01")}
           </>)}
-          <Nota>A viatura fica bloqueada no dia marcado (nas reservas da Frota e, com as tabelas, na Agenda).</Nota>
+          <Nota>A viatura fica bloqueada no dia marcado: aparece no calendário das Atribuições, na ficha e no Hoje. Fica registado no exemplo da Frota; a Agenda real só a mostrará quando houver tabelas.</Nota>
         </>
       );
     case "concluir": {

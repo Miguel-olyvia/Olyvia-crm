@@ -152,6 +152,19 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFolha }) {
       </>
     );
   }
+  if (aba === "hist") {
+    // o histórico da viatura: as entradas do log de atividade (registar() em acoes.ts), mais recentes primeiro
+    const l = (F.log ?? []).filter((e) => e.vid === v.id);
+    return l.length ? (
+      <div className="tw"><table className="min-560">
+        <thead><tr><th>Quando</th><th>Quem</th><th>O quê</th><th>Detalhe</th></tr></thead>
+        <tbody>{l.map((e, i) => (
+          <tr key={e.at + i}><td>{new Date(e.at).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" })}</td><td>{e.quem ?? "—"}</td>
+            <td>{e.acao ? <><Selo tom="neu">{e.acao}</Selo><br /></> : null}{e.t}</td><td><small className="muted">{e.det ?? ""}</small></td></tr>
+        ))}</tbody>
+      </table></div>
+    ) : <VazioF titulo="Sem atividade" texto="Cada ação feita nesta viatura fica aqui: quando, quem e o quê." />;
+  }
   // ligações: a agenda (tarefas das obras do protótipo, visitas, manutenções), o recurso de agenda e o armazém móvel
   const ag = compromissos(F, v.id);
   const arm = inv.warehouses.find((w) => w.id === v.armazemId);
@@ -182,7 +195,7 @@ export function ViaturaFolha({ vid, aba, mudarAba, aoFechar }: { vid: string; ab
   if (!v) return null;
   const c = condutor(F, v.id), a = atribEm(F, v.id), r = revisao(v), al = alertas(F, v, stock(v.id)), k = custoKm(F, v.id);
   const abas: [AbaFolha, string][] = [["resumo", "Resumo"], ["atrib", "Atribuições"], ["manut", "Manutenção"], ["custos", "Custos"], ["ocorr", "Ocorrências"], ["docs", "Documentos"],
-    ...(v.armazem ? [["stock", "Stock na carrinha"] as [AbaFolha, string]] : []), ["lig", "Ligações"]];
+    ...(v.armazem ? [["stock", "Stock na carrinha"] as [AbaFolha, string]] : []), ["lig", "Ligações"], ["hist", "Histórico"]];
   const atual = abas.some((x) => x[0] === aba) ? aba : "resumo";
   const podeAtrib = v.estado === "ativa" && !a;
   return (

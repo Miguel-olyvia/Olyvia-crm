@@ -1,9 +1,10 @@
-// A ficha da viatura (folhaHtml do protótipo) numa folha lateral (DocumentSheet do Inventário real) com 8 abas: Resumo,
-// Atribuições, Manutenção, Custos, Ocorrências, Documentos, Stock na carrinha (só as que são armazém móvel) e Ligações.
+// A ficha da viatura (folhaHtml do protótipo) numa folha lateral (DocumentSheet do Inventário real) com 9 abas: Resumo,
+// Atribuições, Manutenção, Custos, Ocorrências, Documentos, Stock na carrinha (só as que são armazém móvel), Ligações e
+// Histórico (as entradas do log de atividade desta viatura).
 // O rodapé tem as ações; sem a permissão real ficam desativadas e dizem porquê.
 import { useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, CircleAlert, FileText, Fuel, Gauge, Info, KeyRound, Package, TriangleAlert } from "lucide-react";
+import { CalendarDays, CalendarPlus, CircleAlert, FileText, Fuel, Gauge, Info, KeyRound, Package, PackagePlus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,6 +15,8 @@ import { useFrotaCtx, type AbaFicha } from "./contexto";
 import { AvisoRegiao, BotaoFrota, Cartao, ListaV, Placa, Prog, RefObra, Selo, SeloEstado, Tabela, Vazio } from "./pecas";
 import { TOM_OCORR } from "./ecras/OcorrenciasFrota";
 import { PERMISSAO_AGENDA } from "./dados/exemplo";
+import { pedidosDaCarrinha, pedirReposicaoExemplo } from "./dados/acoesApp";
+import { ListaHistorico } from "./ecras/AtividadeFrota";
 import {
   abaixoMin, alertas, atribEm, ativa, compromissos, condutor, consumo, custoKm, custoTotal, custosV, fData, fEur, fKm, fNum, kmPeriodo, pessoa, revisao,
   soma, textoData, tomSelo, vencimentos, type Viatura,
@@ -87,7 +90,7 @@ const Linhas = ({ cab, vazio, children }: { cab: string[]; vazio: [string, strin
 );
 
 function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
-  const { F, stock, avisar } = useFrotaCtx();
+  const { F, stock, avisar, agir, dlg } = useFrotaCtx();
   const gate = usePermissionGate();
   if (aba === "resumo") return <Resumo v={v} />;
   if (aba === "atrib") {
@@ -110,7 +113,10 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
     const l = F.manut.filter((x) => x.vid === v.id).sort((x, y) => y.data.localeCompare(x.data));
     return (
       <>
-        <p className="text-sm text-muted-foreground">Regra: revisão a cada {fKm(v.rev.cadaKm)} ou {v.rev.cadaMeses} meses. Última aos {fKm(v.rev.ultKm)} em {fData(v.rev.ultData)}.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">Regra: revisão a cada {fKm(v.rev.cadaKm)} ou {v.rev.cadaMeses} meses. Última aos {fKm(v.rev.ultKm)} em {fData(v.rev.ultData)}.</p>
+          {ativa(v) ? <BotaoFrota escrita icone={CalendarPlus} aoClicar={() => dlg("manut", { v: v.id })}>Agendar manutenção</BotaoFrota> : null}
+        </div>
         <Linhas cab={["Data", "Intervenção", "Oficina", "Estado", "Valor"]} vazio={l.length ? null : ["Sem intervenções registadas", "Agenda a próxima revisão em Manutenção."]}>
           {l.map((m) => (
             <TableRow key={m.id}>
@@ -170,7 +176,7 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
     );
   }
   if (aba === "stock") {
-    const st = stock(v.id);
+    const st = stock(v.id), pend = pedidosDaCarrinha(F, v.id);
     return (
       <>
         <p className="text-sm text-muted-foreground">A carrinha é um armazém móvel do Inventário. Neste exemplo o stock é inventado; com as tabelas, lê-se do armazém da viatura e a reposição é um pedido de transferência a partir do armazém central.</p>
@@ -179,17 +185,34 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
             <TableRow key={s.sku}>
               <TableCell className="font-mono text-xs">{s.sku}</TableCell><TableCell>{s.nome}</TableCell>
               <TableCell className="tabular-nums">{fNum(s.qty)} {s.un}</TableCell><TableCell className="tabular-nums">{fNum(s.min)} {s.un}</TableCell>
-              <TableCell>{s.qty < s.min ? <Selo tom="warn">{`Repor ${fNum(s.min - s.qty)}`}</Selo> : <Selo tom="ok">OK</Selo>}</TableCell>
+              <TableCell><div className="flex flex-wrap gap-1">{s.qty < s.min ? <Selo tom="warn">{`Repor ${fNum(s.min - s.qty)}`}</Selo> : <Selo tom="ok">OK</Selo>}
+                {pend.some((p) => p.sku === s.sku) ? <Selo tom="info">Pedido</Selo> : null}</div></TableCell>
             </TableRow>
           ))}
         </Linhas>
         {abaixoMin(st).length ? <p className="text-sm">{abaixoMin(st).length} artigo(s) abaixo do mínimo.</p> : null}
-        {gate("warehouses.view").allowed ? (
-          <Button asChild size="sm" variant="outline" className="gap-1.5"><Link to="/warehouses"><Package className="h-4 w-4" aria-hidden="true" />Ver os armazéns no Inventário</Link></Button>
+        {pend.length ? (
+          <DocSection title="Pedidos de reposição">
+            <ListaV>{pend.map((p) => (
+              <div key={p.id}><span>{p.sku} · {p.nome} × {fNum(p.qty)} {p.un}<span className="block text-xs text-muted-foreground">Armazém central → carrinha {v.mat}</span></span><Selo tom="info">Pedido</Selo></div>
+            ))}</ListaV>
+          </DocSection>
         ) : null}
+        <div className="flex flex-wrap gap-2">
+          {st.length ? (
+            <BotaoFrota escrita icone={PackagePlus} aoClicar={() => agir((G) => pedirReposicaoExemplo(G, v.id), (m) => m)}>
+              Pedir reposição ao armazém central{abaixoMin(st).length ? ` (${abaixoMin(st).length})` : ""}
+            </BotaoFrota>
+          ) : null}
+          {gate("warehouses.view").allowed ? (
+            <Button asChild size="sm" variant="outline" className="gap-1.5"><Link to="/warehouses"><Package className="h-4 w-4" aria-hidden="true" />Ver os armazéns no Inventário</Link></Button>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground">O pedido fica registado no exemplo da Frota. A transferência real no Inventário só existe quando houver tabelas fleet_*.</p>
       </>
     );
   }
+  if (aba === "hist") return <ListaHistorico entradas={(F.log ?? []).filter((e) => e.vid === v.id)} semViatura />;
   const ag = compromissos(F, v.id);
   return (
     <div className="space-y-4">
@@ -232,6 +255,7 @@ export function ViaturaFicha({ vid, aba, mudarAba, aoFechar }: { vid: string; ab
   const abas: { id: AbaFicha; label: string; hidden?: boolean }[] = [
     { id: "resumo", label: "Resumo" }, { id: "atrib", label: "Atribuições" }, { id: "manut", label: "Manutenção" }, { id: "custos", label: "Custos" },
     { id: "ocorr", label: "Ocorrências" }, { id: "docs", label: "Documentos" }, { id: "stock", label: "Stock na carrinha", hidden: !v.armazem }, { id: "lig", label: "Ligações" },
+    { id: "hist", label: "Histórico" },
   ];
   const atual: AbaFicha = abas.some((x) => x.id === aba && !x.hidden) ? aba : "resumo";
   const podeAtrib = v.estado === "ativa" && !a;
@@ -269,8 +293,9 @@ export function ViaturaFicha({ vid, aba, mudarAba, aoFechar }: { vid: string; ab
           right: ativa(v) ? <>
             <BotaoFrota escrita icone={Fuel} aoClicar={() => dlg("abastecer", { v: v.id })}>{v.comb === "Elétrico" ? "Registar carregamento" : "Registar abastecimento"}</BotaoFrota>
             <BotaoFrota escrita icone={TriangleAlert} aoClicar={() => dlg("ocorrencia", { v: v.id })}>Ocorrência</BotaoFrota>
-            {podeAtrib ? <BotaoFrota variant="default" escrita icone={KeyRound} aoClicar={() => dlg("atribuir", { v: v.id })}>Atribuir</BotaoFrota>
-              : <BotaoFrota variant="default" escrita icone={Gauge} aoClicar={() => dlg("km", { v: v.id })}>Registar km</BotaoFrota>}
+            {/* os km registam-se sempre (também numa viatura livre); com a viatura livre, a ação principal é Atribuir */}
+            <BotaoFrota variant={podeAtrib ? "outline" : "default"} escrita icone={Gauge} aoClicar={() => dlg("km", { v: v.id })}>Registar km</BotaoFrota>
+            {podeAtrib ? <BotaoFrota variant="default" escrita icone={KeyRound} aoClicar={() => dlg("atribuir", { v: v.id })}>Atribuir</BotaoFrota> : null}
           </> : null,
         }}
       >

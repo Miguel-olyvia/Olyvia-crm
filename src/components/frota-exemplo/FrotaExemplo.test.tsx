@@ -1,4 +1,4 @@
-// A Frota de exemplo na app real (/frota/*): abre as viaturas e a ficha (8 abas), recusa uma atribuição a quem não tem
+// A Frota de exemplo na app real (/frota/*): abre as viaturas e a ficha (9 abas), recusa uma atribuição a quem não tem
 // carta, recusa km que descem, os cartões do Hoje abrem listas filtradas, sem inventory.edit fica só de consulta, a base
 // de exemplo é própria (não a do protótipo) e por organização, as ações não mexem no perfil simulado do protótipo, as obras
 // abrem nas Operações, cancelar/resolver pedem confirmação e o grupo Frota está no menu lateral a seguir ao Inventário.
@@ -28,8 +28,18 @@ vi.mock("@/hooks/usePermissions", () => ({
 }));
 const ORG = "org-teste";
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-teste" }, isLoading: false }) }));
+// o nome de quem assina o histórico (useNomeUtilizador) vem da sessão Supabase: no teste é a "Ana Teste"
+vi.mock("@/integrations/supabase/client", () => {
+  const consulta = { select: () => consulta, eq: () => consulta, maybeSingle: async () => ({ data: { name: "Ana Teste" }, error: null }) };
+  return {
+    supabase: {
+      auth: { getSession: async () => ({ data: { session: { user: { id: "u-teste", email: "ana@teste.pt" } } } }) },
+      from: () => consulta,
+    },
+  };
+});
 
-const ECRAS: EcraFrota[] = ["hoje", "viaturas", "atribuicoes", "condutores", "manutencao", "custos", "ocorrencias", "documentos", "relatorios", "ligacoes"];
+const ECRAS: EcraFrota[] = ["hoje", "viaturas", "atribuicoes", "condutores", "manutencao", "custos", "ocorrencias", "documentos", "relatorios", "atividade", "ligacoes"];
 const abrirEm = (caminho: string) =>
   render(
     <LanguageProvider>
@@ -64,14 +74,14 @@ describe("Frota de exemplo: ecrãs e ficha", () => {
     }
   });
 
-  it("abre /frota/viaturas, a ficha da AA-12-BC com 8 abas e o stock da carrinha", async () => {
+  it("abre /frota/viaturas, a ficha da AA-12-BC com 9 abas e o stock da carrinha", async () => {
     abrirEm("/frota/viaturas");
     expect(titulo()).toMatch(/^Viaturas/);
     fireEvent.click(screen.getByRole("row", { name: "Abrir a AA-12-BC" }));
     const ficha = await screen.findByRole("dialog");
     expect(within(ficha).getByRole("heading", { name: /AA-12-BC.*Renault Master 2\.3 dCi Furgão L2H2/ })).toBeInTheDocument();
     const abas = within(ficha).getAllByRole("tab");
-    expect(abas.map((a) => a.textContent)).toEqual(["Resumo", "Atribuições", "Manutenção", "Custos", "Ocorrências", "Documentos", "Stock na carrinha", "Ligações"]);
+    expect(abas.map((a) => a.textContent)).toEqual(["Resumo", "Atribuições", "Manutenção", "Custos", "Ocorrências", "Documentos", "Stock na carrinha", "Ligações", "Histórico"]);
     fireEvent.click(within(ficha).getByRole("tab", { name: "Stock na carrinha" }));
     expect(within(ficha).getByText("Tubo multicamada 16 mm (metro)")).toBeInTheDocument();
     expect(within(ficha).getByRole("link", { name: /Ver os armazéns no Inventário/ })).toHaveAttribute("href", "/warehouses");
@@ -113,7 +123,9 @@ describe("Frota de exemplo: ecrãs e ficha", () => {
     const dlg = await screen.findByRole("dialog", { name: "Registar km" });
     fireEvent.change(within(dlg).getByLabelText("Km no conta-quilómetros"), { target: { value: "1000" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Registar" }));
-    expect(await within(dlg).findByText(/Os km não podem descer\. Última leitura: 148.230 km\./)).toBeInTheDocument();
+    // o erro aparece no campo e no resumo junto aos botões ("Não foi gravado: …")
+    expect((await within(dlg).findAllByText(/Os km não podem descer\. Última leitura: 148.230 km\./)).length).toBeGreaterThan(0);
+    expect(within(dlg).getByText(/^Não foi gravado: Os km não podem descer/)).toBeInTheDocument();
     expect(lerFrotaExemplo().viaturas.find((v) => v.id === "v1")?.km).toBe(148230);
     fireEvent.change(within(dlg).getByLabelText("Km no conta-quilómetros"), { target: { value: "148500" } });
     fireEvent.click(within(dlg).getByRole("button", { name: "Registar" }));

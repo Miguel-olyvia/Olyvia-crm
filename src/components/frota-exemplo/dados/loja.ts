@@ -8,7 +8,7 @@
 // quem decide é a permissão real (ver FrotaShell) — por isso a ação corre com comPerfilFrota("gestor"), que fixa o
 // perfil só para essa ação, sem mexer no perfil global do protótipo.
 import { useSyncExternalStore } from "react";
-import { comPerfilFrota } from "@/pages/prototipo-negocios/frota/acoes";
+import { comAutorFrota, comPerfilFrota, registar } from "@/pages/prototipo-negocios/frota/acoes";
 import { ErroFrota, VERSAO_FROTA, seedFrota, type Frota } from "./index";
 
 export const CHAVE_FROTA_EXEMPLO = "olyvia-frota-exemplo";
@@ -66,11 +66,18 @@ export function subscreverFrotaExemplo(fn: () => void): () => void {
   };
 }
 
-/** Corre uma ação (como "gestor") sobre uma cópia; se acabar bem, a cópia passa a ser a base (e grava-se). Uma regra recusada devolve o erro. */
-export function executarFrotaExemplo<T>(fn: (F: Frota) => T): ResultadoFrota<T> {
+/** Quem assina o histórico quando não se sabe o nome do utilizador. */
+export const AUTOR_POR_OMISSAO = "Utilizador";
+
+/**
+ * Corre uma ação (como "gestor", assinada por `autor` no histórico) sobre uma cópia; se acabar bem, a cópia passa a ser
+ * a base (e grava-se). Uma regra recusada devolve o erro e não muda nada.
+ */
+export function executarFrotaExemplo<T>(fn: (F: Frota) => T, autor = AUTOR_POR_OMISSAO): ResultadoFrota<T> {
   const copia = structuredClone(lerFrotaExemplo());
+  if (!Array.isArray(copia.log)) copia.log = [];
   try {
-    const valor = comPerfilFrota("gestor", () => fn(copia));
+    const valor = comAutorFrota(autor, () => comPerfilFrota("gestor", () => fn(copia)));
     base = copia;
     gravar(copia);
     avisar();
@@ -81,10 +88,19 @@ export function executarFrotaExemplo<T>(fn: (F: Frota) => T): ResultadoFrota<T> 
   }
 }
 
-/** Volta aos dados de exemplo da organização ativa ("Repor dados de exemplo" e os testes). */
-export function reporFrotaExemplo(): void {
+/**
+ * Volta aos dados de exemplo da organização ativa. Com `autor` ("Repor dados de exemplo" no ecrã), o histórico novo
+ * começa com essa entrada; sem autor (os testes), fica só a base de exemplo, sem nada guardado.
+ */
+export function reporFrotaExemplo(autor?: string): void {
   try { localStorage.removeItem(chaveFrotaExemplo(org)); } catch { /* ignora */ }
   base = null;
+  if (autor) {
+    const F = seedFrota();
+    comAutorFrota(autor, () => registar(F, "Dados repostos", undefined, "Dados de exemplo repostos.", "Tudo o que estava registado neste navegador voltou aos dados de exemplo de 14/10/2026."));
+    base = F;
+    gravar(F);
+  }
   avisar();
 }
 

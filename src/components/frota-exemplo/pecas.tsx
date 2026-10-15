@@ -2,7 +2,7 @@
 // botão com permissão — sem o CSS do protótipo). Os tons vêm das peças do Inventário real (tones.ts).
 import { useId, type ReactNode } from "react";
 import { Inbox, Info, TriangleAlert, type LucideIcon } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { TableRow } from "@/components/ui/table";
 import { InventoryEmptyState, InventoryStatusBadge, usePermissionGate, type InventoryTone } from "@/components/frota-exemplo/inventarioUi";
@@ -81,7 +81,7 @@ interface BotaoProps extends Omit<ButtonProps, "onClick"> {
 }
 /** Um botão da Frota: com `escrita`, só a permissão real o ativa. */
 export function BotaoFrota({ aoClicar, escrita, icone: I, children, size = "sm", variant = "outline", className, ...resto }: BotaoProps) {
-  const { podeAgir, semPermissao } = useFrotaCtx();
+  const { podeAgir, semPermissao, avisar } = useFrotaCtx();
   const porque = useId();
   const bloqueado = !!escrita && !podeAgir;
   return (
@@ -94,7 +94,7 @@ export function BotaoFrota({ aoClicar, escrita, icone: I, children, size = "sm",
         aria-describedby={bloqueado ? porque : undefined}
         title={bloqueado ? semPermissao : undefined}
         className={cn("gap-1.5", bloqueado && "cursor-not-allowed opacity-50 hover:shadow-none", className)}
-        onClick={(e) => { e.stopPropagation(); if (!bloqueado) aoClicar(); }}
+        onClick={(e) => { e.stopPropagation(); if (bloqueado) avisar(semPermissao, true); else aoClicar(); }}
         {...resto}
       >
         {I ? <I className="h-4 w-4" aria-hidden="true" /> : null}
@@ -195,7 +195,10 @@ export function AvisoRegiao({ testId }: { testId?: string }) {
     <p role="status" aria-live="polite" aria-atomic="true" data-testid={testId}
       className={cn(aviso ? "flex items-start gap-2 rounded-md border bg-card px-3 py-2 text-sm shadow-sm" : "sr-only")}>
       {aviso ? <I className={cn("mt-0.5 h-4 w-4 shrink-0", aviso.erro ? "text-destructive" : "text-sky-700 dark:text-info")} aria-hidden="true" /> : null}
-      {aviso?.texto}
+      <span>
+        {aviso?.texto}
+        {aviso?.link ? <> <Link to={aviso.link.para} className="font-medium text-primary underline underline-offset-2">{aviso.link.rotulo}</Link></> : null}
+      </span>
     </p>
   );
 }

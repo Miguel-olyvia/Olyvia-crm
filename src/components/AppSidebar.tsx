@@ -9,6 +9,7 @@ import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
 import { CounterPill } from "@/components/inventory/ui/CounterPill";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
+import { DICA_CONTADOR_FROTA, TOM_CONTADOR_FROTA, useContadoresFrota } from "@/components/frota-exemplo/useContadoresFrota";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import {
@@ -328,7 +329,12 @@ const FlyoutPanel = memo(function FlyoutPanel({
   // verificar no servidor. Falha/ausência da RPC = sem pílulas.
   // Mesma lógica dos separadores da área (InventoryAreaTabs).
   const inventoryCounter = useInventoryCounters(section.id === "inventory");
-  const counterFor = (item: MenuItem): number | null => inventoryCounter(item.counterKey);
+  // Contadores da Frota de exemplo: lidos da base de exemplo (sem pedidos à BD), atualizam logo após cada ação.
+  const frotaCounter = useContadoresFrota();
+  const counterFor = (item: MenuItem): number | null =>
+    item.frotaCounterKey ? frotaCounter(item.frotaCounterKey) : inventoryCounter(item.counterKey);
+  const pillProps = (item: MenuItem) =>
+    item.frotaCounterKey ? { tone: TOM_CONTADOR_FROTA[item.frotaCounterKey], hint: DICA_CONTADOR_FROTA[item.frotaCounterKey] } : { counterKey: item.counterKey };
 
   // Auto-expand subsection that contains active item (e as marcadas com
   // defaultExpanded, só da primeira vez — se o utilizador as fechar, ficam
@@ -424,7 +430,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
             >
               <Icon className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{t(item.labelKey)}</span>
-              <CounterPill value={counterFor(item)} counterKey={item.counterKey} />
+              <CounterPill value={counterFor(item)} {...pillProps(item)} />
             </button>
           );
         })}
@@ -464,7 +470,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">{t(item.labelKey)}</span>
-                      <CounterPill value={counterFor(item)} counterKey={item.counterKey} />
+                      <CounterPill value={counterFor(item)} {...pillProps(item)} />
                     </button>
                   );
                 })}
