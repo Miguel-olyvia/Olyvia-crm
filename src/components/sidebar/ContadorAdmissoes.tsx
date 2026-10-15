@@ -4,14 +4,11 @@
  */
 import { useAdmissoes } from "@/components/rh-exemplo/dados/lojaAdmissao";
 import { useTranslation } from "@/hooks/useTranslation";
+import { PilulaTexto } from "./PilulaTexto";
 
 export function ContadorAdmissoes() {
   const { t } = useTranslation();
   const porAprovar = useAdmissoes((e) => Object.values(e.porPessoa).filter((a) => a.estado === "submetida").length);
   if (porAprovar <= 0) return null;
-  return (
-    <span className="ml-auto shrink-0 rounded-full bg-warning px-2 py-0.5 text-[11px] font-semibold leading-none text-amber-950 tabular-nums">
-      {t("sidebar.rhExemploAdmissoesPorAprovar", { n: porAprovar })}
-    </span>
-  );
+  return <PilulaTexto texto={t("sidebar.rhExemploAdmissoesPorAprovar", { n: porAprovar })} />;
 }

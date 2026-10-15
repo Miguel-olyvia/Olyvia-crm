@@ -57,12 +57,17 @@ describe("rh-exemplo: sem ligação à base de dados", () => {
       "pages/rh-exemplo/RhConfiguracaoAdmissao.tsx",
       "pages/rh-exemplo/RhRegrasFimContrato.tsx",
       "pages/rh-exemplo/RhConviteAdmissao.tsx",
+      "pages/rh-exemplo/RhPortalColaborador.tsx",
       "components/rh-exemplo/assiduidade/PainelDoDia.tsx",
       "components/rh-exemplo/convite/ConvitePagina1.tsx",
       "components/rh-exemplo/processamento/ProcessamentoVisaoGeralTab.tsx",
       "components/rh-exemplo/hooks/useAssiduidadeDaPessoa.ts",
       "components/rh-exemplo/hooks/useConviteAdmissaoPublico.ts",
       "components/rh-exemplo/dados/lojaGestao.ts",
+      "components/rh-exemplo/dados/lojaPortalDocumentos.ts",
+      "components/rh-exemplo/dados/accoesPortalDocumentos.ts",
+      "components/rh-exemplo/portal/PortalConectado.tsx",
+      "components/rh-exemplo/portal/PortalColaboradorRh.tsx",
     ]) {
       expect(nomes).toContain(esperado);
     }

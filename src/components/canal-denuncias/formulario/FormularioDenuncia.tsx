@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
+import { guardarCodigo } from "../dados/codigosGuardados";
 import { guardarRascunho, lerRascunho } from "../dados/rascunho";
 import { submeter } from "../dados/loja";
 import { FORMULARIO_VAZIO, PASSOS, passoValido, validarPasso, type DadosFormulario } from "../lib/formulario";
+import { aplicarAlteracao, chaveRascunho, type PessoaLigada } from "../lib/pessoaLigada";
 import { Confirmacao } from "./Confirmacao";
 import { PassoModo, type PassoProps } from "./PassoModo";
 import { PassoOQue } from "./PassoOQue";
@@ -17,20 +19,30 @@ import { ProgressoPassos } from "./ProgressoPassos";
 const ULTIMO = PASSOS - 1;
 const CHAVES_PASSO = ["cd.passo0", "cd.passo1", "cd.passo2", "cd.passo3", "cd.passo4"];
 
-export function FormularioDenuncia() {
+interface FormularioDenunciaProps {
+  /** A organização a que a denúncia pertence: a ativa, dentro da app; a da página, na pública. */
+  organizacaoId: string;
+  /** Dentro da app: quem tem a sessão. Identificada, o nome e o email vêm daqui e a denúncia fica ligada à pessoa. */
+  pessoa?: PessoaLigada;
+  /** Para onde leva «Acompanhar esta denúncia» (por omissão, o acompanhamento público). */
+  acompanharTo?: (anonima: boolean) => string;
+}
+
+export function FormularioDenuncia({ organizacaoId, pessoa, acompanharTo }: FormularioDenunciaProps) {
   const { t } = useTranslation();
-  const inicial = lerRascunho();
+  const chave = chaveRascunho(organizacaoId, pessoa);
+  const inicial = lerRascunho(chave);
   const [dados, setDados] = useState<DadosFormulario>(inicial?.dados ?? FORMULARIO_VAZIO);
   const [passo, setPasso] = useState(inicial?.passo ?? 0);
   const [tentou, setTentou] = useState(false);
   const [retorno, setRetorno] = useState<number | null>(null);
-  const [enviada, setEnviada] = useState<{ codigo: string; pin: string } | null>(null);
+  const [enviada, setEnviada] = useState<{ codigo: string; pin: string; anonima: boolean } | null>(null);
   const titulo = useRef<HTMLHeadingElement>(null);
   const primeira = useRef(true);
 
   useEffect(() => {
-    if (!enviada) guardarRascunho({ dados, passo });
-  }, [dados, passo, enviada]);
+    if (!enviada) guardarRascunho({ dados, passo, chave });
+  }, [dados, passo, enviada, chave]);
 
   useEffect(() => {
     if (primeira.current) primeira.current = false;
@@ -39,7 +51,7 @@ export function FormularioDenuncia() {
 
   const erros = tentou ? validarPasso(dados, passo) : {};
   const nErros = Object.keys(erros).length;
-  const mudar = (parcial: Partial<DadosFormulario>): void => setDados((d) => ({ ...d, ...parcial }));
+  const mudar = (parcial: Partial<DadosFormulario>): void => setDados((d) => aplicarAlteracao(d, parcial, pessoa));
 
   const irPara = (n: number): void => {
     setTentou(false);
@@ -59,7 +71,8 @@ export function FormularioDenuncia() {
       setTentou(true);
       return;
     }
-    setEnviada(submeter(dados));
+    const origem = { organizationId: organizacaoId, pessoaId: pessoa?.id ?? null };
+    setEnviada({ ...submeter(dados, origem), anonima: dados.anonima !== false });
   };
 
   const recomecar = (): void => {
@@ -69,7 +82,17 @@ export function FormularioDenuncia() {
     irPara(0);
   };
 
-  if (enviada) return <Confirmacao codigo={enviada.codigo} pin={enviada.pin} onNova={recomecar} />;
+  if (enviada) {
+    return (
+      <Confirmacao
+        codigo={enviada.codigo}
+        pin={enviada.pin}
+        acompanharTo={acompanharTo?.(enviada.anonima)}
+        onGuardarCodigo={pessoa && enviada.anonima ? () => guardarCodigo(enviada.codigo) : undefined}
+        onNova={recomecar}
+      />
+    );
+  }
 
   const props: PassoProps = { dados, erros, onChange: mudar };
   return (

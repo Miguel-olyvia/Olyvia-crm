@@ -9,7 +9,7 @@ import { lerGestao, reporGestao } from "@/components/rh-exemplo/dados/lojaGestao
 import RhAssiduidadeEAusencias from "./RhAssiduidadeEAusencias";
 import RhCentrosTrabalho from "./RhCentrosTrabalho";
 import RhConfiguracaoAdmissao from "./RhConfiguracaoAdmissao";
-import RhConviteAdmissao from "./RhConviteAdmissao";
+import RhPortalColaborador from "./RhPortalColaborador";
 import RhMeuPonto from "./RhMeuPonto";
 import RhMeusDocumentos from "./RhMeusDocumentos";
 import RhMinhasAusencias from "./RhMinhasAusencias";
@@ -125,16 +125,16 @@ describe("RH de exemplo: configuração", () => {
   });
 });
 
-describe("RH de exemplo: convite de admissão (página pública)", () => {
-  it("o token de exemplo abre o formulário, sem sessão", () => {
-    renderEm("/rh-exemplo/admissao/exemplo", "/rh-exemplo/admissao/:token", <RhConviteAdmissao />);
+describe("RH de exemplo: Portal do colaborador (página pública)", () => {
+  it("o token de exemplo abre o formulário na ficha de admissão, sem sessão", () => {
+    renderEm("/rh-exemplo/portal-colaborador/exemplo", "/rh-exemplo/portal-colaborador/:token", <RhPortalColaborador />);
     expect(screen.getAllByRole("textbox").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Seguinte" })).toBeInTheDocument();
     semChavesPorTraduzir();
   });
 
   it("um token desconhecido mostra o cartão de ligação inválida", () => {
-    renderEm("/rh-exemplo/admissao/outro", "/rh-exemplo/admissao/:token", <RhConviteAdmissao />);
+    renderEm("/rh-exemplo/portal-colaborador/outro", "/rh-exemplo/portal-colaborador/:token", <RhPortalColaborador />);
     expect(screen.queryByRole("button", { name: "Seguinte" })).not.toBeInTheDocument();
     expect(within(document.body).getAllByText(/./).length).toBeGreaterThan(0);
     semChavesPorTraduzir();

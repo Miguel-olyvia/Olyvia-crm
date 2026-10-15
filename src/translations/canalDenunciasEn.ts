@@ -1,7 +1,6 @@
 // Whistleblowing channel example texts, in English (`cd.*` keys). Merged in `canalDenuncias.ts`.
 export const canalDenunciasEn: Record<string, string> = {
   // Frame and shared
-  "cd.modulo": "Whistleblowing channel (example)",
   "cd.canal": "Whistleblowing channel",
   "cd.migalhas": "Breadcrumb",
   "cd.navPublica": "Whistleblowing channel",
@@ -16,10 +15,6 @@ export const canalDenunciasEn: Record<string, string> = {
   "cd.formulario": "Report form",
 
   // Sidebar
-  "sidebar.canalDenunciasModulo": "Whistleblowing channel (example)",
-  "sidebar.canalDenunciasNova": "New report (see it as the person does)",
-  "sidebar.canalDenunciasAcompanhar": "Follow up (see it as the person does)",
-  "sidebar.canalDenunciasGestao": "Report management",
 
   // Closed lists
   "cd.tipo.assedio": "Bullying or sexual harassment",
@@ -82,7 +77,7 @@ export const canalDenunciasEn: Record<string, string> = {
   "cd.ajuda.quando": "A date or a period, for example \"10/10/2026\" or \"between May and July\".",
   "cd.campo.aindaAcontece": "Is it still happening?",
   "cd.campo.onde": "Where did it happen",
-  "cd.ajuda.onde": "The place or area, for example \"warehouse\" or \"sales team\".",
+  "cd.ajuda.onde": "Optional. Free text, for example \"warehouse\" or \"sales team\".",
   "cd.campo.envolvidos": "People or areas involved",
   "cd.ajuda.envolvidos": "Optional. You can use roles or areas instead of names.",
   "cd.campo.testemunhas": "Are there witnesses?",
@@ -109,7 +104,6 @@ export const canalDenunciasEn: Record<string, string> = {
   "cd.erro.descricaoCurta": "Describe it in a little more detail (at least 30 characters).",
   "cd.erro.descricaoLonga": "The description is too long. Summarise it and attach the rest as a file.",
   "cd.erro.quando": "Say when it happened, even roughly.",
-  "cd.erro.onde": "Say where it happened.",
   "cd.erro.demasiadosFicheiros": "You can attach only 5 files.",
   "cd.erro.boaFe": "To send, confirm the good-faith declaration.",
   "cd.erro.mensagemVazia": "Write a message or attach a file.",
@@ -181,11 +175,9 @@ export const canalDenunciasEn: Record<string, string> = {
   "cd.filtros.pesquisa": "Search by code or text",
   "cd.filtros.estado": "Status",
   "cd.filtros.tipo": "Type",
-  "cd.filtros.origem": "Origin",
   "cd.filtros.responsavel": "Case handler",
   "cd.filtros.todosEstados": "All statuses",
   "cd.filtros.todosTipos": "All types",
-  "cd.filtros.todasOrigens": "Anonymous and identified",
   "cd.filtros.todosResponsaveis": "All case handlers",
   "cd.filtros.soPrazo": "Deadline approaching or overdue",
   "cd.filtros.limpar": "Clear filters",

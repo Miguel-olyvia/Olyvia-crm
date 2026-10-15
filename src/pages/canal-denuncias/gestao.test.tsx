@@ -1,20 +1,20 @@
-// Arranque da gestão de denúncias: a lista mostra as 10, abrir uma anónima não mostra identidade, confirmar a receção
-// muda o estado e o prazo, «Ver identidade» regista no histórico, e o menu leva às três entradas. Tudo em memória.
+// Arranque da gestão de denúncias da organização ativa: a lista mostra as 12 (anónimas e identificadas), abrir uma
+// anónima não mostra identidade, confirmar a receção muda o estado e o prazo e «Ver identidade» regista no histórico.
+// O menu, o isolamento por organização e «A minha área» estão em src/pages/rh-exemplo/denuncias.test.tsx. Tudo em memória.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { lerDenuncias, repor } from "@/components/canal-denuncias/dados/loja";
 import { denunciasDeExemplo } from "@/components/canal-denuncias/dados/exemplo";
-import { menuSections } from "@/components/sidebar/menuConfig";
-import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
-import GestaoDenuncias from "./GestaoDenuncias";
+import { ORG_ATIVA } from "@/components/canal-denuncias/dados/organizacoes";
+import { PaginaGestao } from "@/components/canal-denuncias/gestao/PaginaGestao";
 
 const mostrar = () =>
   render(
     <LanguageProvider>
       <MemoryRouter>
-        <GestaoDenuncias />
+        <PaginaGestao organizacaoId={ORG_ATIVA.id} organizacaoNome={ORG_ATIVA.nome} />
       </MemoryRouter>
     </LanguageProvider>,
   );
@@ -36,12 +36,12 @@ beforeEach(() => {
 });
 
 describe("lista da gestão", () => {
-  it("mostra as 10 denúncias, o aviso de acesso e os totais", () => {
+  it("mostra as 12 denúncias, o aviso de acesso e os totais", () => {
     mostrar();
     expect(screen.getByRole("heading", { level: 1, name: "Gestão de denúncias" })).toBeInTheDocument();
     expect(screen.getByText("Só o responsável do canal vê esta página.")).toBeInTheDocument();
-    expect(linhas()).toHaveLength(10);
-    for (const [rotulo, n] of [["Novas por confirmar", "2"], ["Em análise", "6"], ["A vencer prazo", "3"], ["Concluídas", "1"]]) {
+    expect(linhas()).toHaveLength(12);
+    for (const [rotulo, n] of [["Novas por confirmar", "2"], ["Em análise", "7"], ["A vencer prazo", "3"], ["Concluídas", "2"]]) {
       expect(within(screen.getByLabelText("Totais")).getByText(rotulo).previousElementSibling).toHaveTextContent(new RegExp(`^${n}$`));
     }
   });
@@ -72,12 +72,12 @@ describe("lista da gestão", () => {
 
   it("filtra por origem, estado, prazo e pesquisa, e limpa os filtros", () => {
     mostrar();
-    fireEvent.change(screen.getByLabelText("Origem"), { target: { value: "anonima" } });
+    aba("Anónimas");
     expect(linhas()).toHaveLength(5);
     fireEvent.change(screen.getByLabelText("Estado"), { target: { value: "recebida" } });
     expect(linhas()).toHaveLength(1);
     clicar("Limpar filtros");
-    expect(linhas()).toHaveLength(10);
+    expect(linhas()).toHaveLength(12);
     fireEvent.click(screen.getByRole("checkbox", { name: "Prazo a vencer ou atrasado" }));
     expect(linhas()).toHaveLength(3);
     clicar("Limpar filtros");
@@ -252,26 +252,5 @@ describe("painel de uma denúncia", () => {
     aba("Decisão");
     expect(screen.getByRole("button", { name: "Concluir denúncia" })).toBeDisabled();
     expect(within(painel()).getByText(/Confirma a receção e põe a denúncia em análise/)).toBeInTheDocument();
-  });
-});
-
-describe("menu do canal de denúncias", () => {
-  const grupo = () => menuSections.find((s) => s.id === "canal-denuncias")!;
-
-  it("tem um grupo próprio com as três entradas, todas com users.view", () => {
-    expect(grupo().items.map((i) => i.to)).toEqual(["/canal-denuncias/nova", "/canal-denuncias/acompanhar", "/canal-denuncias/gestao"]);
-    expect(grupo().items.every((i) => i.permission === "users.view")).toBe(true);
-    expect(grupo().permissions).toEqual(["users.view"]);
-    expect(grupo().paths).toEqual(["/canal-denuncias"]);
-  });
-
-  it("os textos do menu existem em pt e en", () => {
-    for (const chave of [grupo().labelKey, ...grupo().items.map((i) => i.labelKey)]) {
-      expect(canalDenunciasTranslations.pt[chave]).toBeTruthy();
-      expect(canalDenunciasTranslations.en[chave]).toBeTruthy();
-    }
-    expect(canalDenunciasTranslations.pt["sidebar.canalDenunciasNova"]).toBe("Nova denúncia (ver como a pessoa vê)");
-    expect(canalDenunciasTranslations.pt["sidebar.canalDenunciasAcompanhar"]).toBe("Acompanhar (ver como a pessoa vê)");
-    expect(canalDenunciasTranslations.pt["sidebar.canalDenunciasGestao"]).toBe("Gestão de denúncias");
   });
 });

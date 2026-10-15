@@ -45,7 +45,7 @@ export function PassoOQue({ dados, erros, onChange }: PassoProps) {
         opcoes={AINDA_ACONTECE.map((v) => ({ valor: v, rotulo: t(`cd.resposta.${v}`) }))}
         onChange={(v) => onChange({ aindaAcontece: v })}
       />
-      <Campo id="den-onde" rotulo={t("cd.campo.onde")} obrigatorio erro={erro("onde")} ajuda={t("cd.ajuda.onde")}>
+      <Campo id="den-onde" rotulo={t("cd.campo.onde")} ajuda={t("cd.ajuda.onde")}>
         {(a) => <Input {...a} value={dados.onde} onChange={(e) => onChange({ onde: e.target.value })} />}
       </Campo>
     </div>

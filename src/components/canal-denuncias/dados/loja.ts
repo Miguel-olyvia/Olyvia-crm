@@ -1,6 +1,6 @@
 // A loja em memória do canal de denúncias de exemplo (useSyncExternalStore). Nada aqui fala com lado nenhum: recarregar
 // a página, ou chamar `repor()`, volta aos dados de exemplo. O rascunho do formulário vive no módulo `rascunho.ts`.
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import {
   adicionarNota, alterarGravidade, arquivar, atribuirResponsavel, concluir, confirmarRececao, declararConflito,
   enviarMensagem, pedirInformacao, reabrir, responderDenunciante,
@@ -10,8 +10,11 @@ import { registarVerIdentidade } from "../lib/anonimizacao";
 import { gerarPin, proximoCodigo, type Aleatorio } from "../lib/codigos";
 import { HOJE_EXEMPLO } from "../lib/datas";
 import { construirDenuncia, type DadosFormulario } from "../lib/formulario";
+import { filtrarPorOrganizacao } from "../lib/organizacao";
 import type { Anexo, Denuncia, Gravidade, Identidade } from "../lib/tipos";
+import { esquecerCodigos } from "./codigosGuardados";
 import { denunciasDeExemplo, RESPONSAVEIS, RESPONSAVEL_ATUAL } from "./exemplo";
+import { ORG_ATIVA } from "./organizacoes";
 import { limparRascunho } from "./rascunho";
 
 let denuncias: Denuncia[] = denunciasDeExemplo();
@@ -32,12 +35,21 @@ const contexto = (quem: string): ContextoAcao => ({ quem, em: agora(), hoje: HOJ
 
 export const lerDenuncias = (): Denuncia[] => denuncias;
 
+/** O seletor por organização: só as denúncias da organização dada, nunca as de outra. */
+export const denunciasDaOrganizacao = (organizationId: string): Denuncia[] => filtrarPorOrganizacao(denuncias, organizationId);
+
 export function subscrever(ouvinte: () => void): () => void {
   ouvintes.add(ouvinte);
   return () => ouvintes.delete(ouvinte);
 }
 
 export const useDenuncias = (): Denuncia[] => useSyncExternalStore(subscrever, lerDenuncias, lerDenuncias);
+
+/** As denúncias da organização dada (a ativa), para a gestão e para «As minhas denúncias». */
+export function useDenunciasDaOrganizacao(organizationId: string): Denuncia[] {
+  const todas = useDenuncias();
+  return useMemo(() => filtrarPorOrganizacao(todas, organizationId), [todas, organizationId]);
+}
 
 export function useDenuncia(id: string | null): Denuncia | undefined {
   const todas = useDenuncias();
@@ -50,6 +62,7 @@ export function repor(): void {
   contadorId = 0;
   minutos = 9 * 60 + 30;
   limparRascunho();
+  esquecerCodigos();
   emitir();
 }
 
@@ -67,12 +80,22 @@ function atualizar(id: string, fazer: (d: Denuncia) => ResultadoAcao): Resultado
 const eu = (): string => RESPONSAVEL_ATUAL.nome;
 const responsavelPorId = (rid: string) => RESPONSAVEIS.find((r) => r.id === rid);
 
+/** De onde vem a denúncia: a organização (a ativa, ou a da página pública) e, dentro da app, a pessoa que a faz. */
+export interface OrigemDenuncia {
+  organizationId: string;
+  pessoaId?: string | null;
+}
+
 /** Cria a denúncia e devolve o código e o PIN, que só aparecem uma vez, no ecrã de confirmação. */
-export function submeter(f: DadosFormulario, aleatorio: Aleatorio = Math.random): { codigo: string; pin: string } {
+export function submeter(
+  f: DadosFormulario,
+  origem: OrigemDenuncia = { organizationId: ORG_ATIVA.id },
+  aleatorio: Aleatorio = Math.random,
+): { codigo: string; pin: string } {
   const codigo = proximoCodigo(denuncias.map((d) => d.codigo), Number(HOJE_EXEMPLO.slice(0, 4)));
   const pin = gerarPin(aleatorio);
   const c = contexto(eu());
-  const nova = construirDenuncia(f, { id: `d${codigo.slice(-4)}`, codigo, pin, hoje: HOJE_EXEMPLO, em: c.em, idEvento: novoId() });
+  const nova = construirDenuncia(f, { id: `d${codigo.slice(-4)}`, codigo, pin, hoje: HOJE_EXEMPLO, em: c.em, idEvento: novoId(), ...origem });
   denuncias = [nova, ...denuncias];
   limparRascunho();
   emitir();

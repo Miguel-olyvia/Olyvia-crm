@@ -1,7 +1,6 @@
 // Textos do canal de denúncias de exemplo, em português (chaves `cd.*`). Juntados em `canalDenuncias.ts`.
 export const canalDenunciasPt: Record<string, string> = {
   // Moldura e comuns
-  "cd.modulo": "Canal de denúncias (exemplo)",
   "cd.canal": "Canal de denúncias",
   "cd.migalhas": "Caminho de navegação",
   "cd.navPublica": "Canal de denúncias",
@@ -14,12 +13,6 @@ export const canalDenunciasPt: Record<string, string> = {
   "cd.nao": "Não",
   "cd.semResponsavel": "Sem responsável",
   "cd.formulario": "Formulário de denúncia",
-
-  // Menu lateral
-  "sidebar.canalDenunciasModulo": "Canal de denúncias (exemplo)",
-  "sidebar.canalDenunciasNova": "Nova denúncia (ver como a pessoa vê)",
-  "sidebar.canalDenunciasAcompanhar": "Acompanhar (ver como a pessoa vê)",
-  "sidebar.canalDenunciasGestao": "Gestão de denúncias",
 
   // Listas fechadas
   "cd.tipo.assedio": "Assédio moral ou sexual",
@@ -82,7 +75,7 @@ export const canalDenunciasPt: Record<string, string> = {
   "cd.ajuda.quando": "Uma data ou um período, por exemplo «10/10/2026» ou «entre Maio e Julho».",
   "cd.campo.aindaAcontece": "Ainda está a acontecer?",
   "cd.campo.onde": "Onde aconteceu",
-  "cd.ajuda.onde": "O local ou a área, por exemplo «armazém» ou «equipa de vendas».",
+  "cd.ajuda.onde": "Opcional. Texto livre, por exemplo «armazém» ou «equipa de vendas».",
   "cd.campo.envolvidos": "Pessoas ou áreas envolvidas",
   "cd.ajuda.envolvidos": "Opcional. Podes usar cargos ou áreas em vez de nomes.",
   "cd.campo.testemunhas": "Há testemunhas?",
@@ -109,7 +102,6 @@ export const canalDenunciasPt: Record<string, string> = {
   "cd.erro.descricaoCurta": "Descreve com um pouco mais de detalhe (pelo menos 30 caracteres).",
   "cd.erro.descricaoLonga": "A descrição é demasiado longa. Resume e junta o resto num ficheiro.",
   "cd.erro.quando": "Indica quando aconteceu, mesmo que seja aproximado.",
-  "cd.erro.onde": "Indica onde aconteceu.",
   "cd.erro.demasiadosFicheiros": "Só podes juntar 5 ficheiros.",
   "cd.erro.boaFe": "Para enviar, confirma a declaração de boa-fé.",
   "cd.erro.mensagemVazia": "Escreve uma mensagem ou junta um ficheiro.",
@@ -181,11 +173,9 @@ export const canalDenunciasPt: Record<string, string> = {
   "cd.filtros.pesquisa": "Pesquisar por código ou texto",
   "cd.filtros.estado": "Estado",
   "cd.filtros.tipo": "Tipo",
-  "cd.filtros.origem": "Origem",
   "cd.filtros.responsavel": "Responsável",
   "cd.filtros.todosEstados": "Todos os estados",
   "cd.filtros.todosTipos": "Todos os tipos",
-  "cd.filtros.todasOrigens": "Anónimas e identificadas",
   "cd.filtros.todosResponsaveis": "Todos os responsáveis",
   "cd.filtros.soPrazo": "Prazo a vencer ou atrasado",
   "cd.filtros.limpar": "Limpar filtros",

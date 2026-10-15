@@ -51,6 +51,48 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
+describe("página pública: a organização e a estrutura de RH", () => {
+  const mostrarEm = (endereco: string, pagina: JSX.Element) =>
+    render(
+      <LanguageProvider>
+        <MemoryRouter initialEntries={[endereco]}>{pagina}</MemoryRouter>
+      </LanguageProvider>,
+    );
+
+  it("sem parâmetro mostra a organização de exemplo; com ?org= mostra a escolhida e a denúncia fica dela", () => {
+    mostrarEm("/canal-denuncias/nova", <NovaDenuncia />);
+    expect(screen.getByText("Olyvia Retail (exemplo)")).toBeInTheDocument();
+    cleanup();
+    mostrarEm("/canal-denuncias/nova?org=org-exemplo-casa-aurora", <NovaDenuncia />);
+    expect(screen.getByText("Casa Aurora, Lda. (exemplo)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Acompanhar" })).toHaveAttribute("href", "/canal-denuncias/acompanhar?org=org-exemplo-casa-aurora");
+    irAteRever(ANONIMO);
+    fireEvent.click(screen.getByRole("checkbox", { name: /boa-fé/ }));
+    clicar("Enviar denúncia");
+    expect(lerDenuncias().find((d) => d.codigo === "DEN-2026-0042")?.organizationId).toBe("org-exemplo-casa-aurora");
+  });
+
+  it("um parâmetro ?org= desconhecido cai na organização de exemplo", () => {
+    mostrarEm("/canal-denuncias/nova?org=nao-existe", <NovaDenuncia />);
+    expect(screen.getByText("Olyvia Retail (exemplo)")).toBeInTheDocument();
+  });
+
+  it("o formulário não tem nenhum campo de filial ou centro: «onde» é texto livre e opcional", () => {
+    mostrarEm("/canal-denuncias/nova", <NovaDenuncia />);
+    escolherModo(ANONIMO);
+    clicar("Continuar");
+    expect(screen.queryByRole("combobox", { name: /filial|centro|local de trabalho/i })).not.toBeInTheDocument();
+    const onde = screen.getByLabelText(/Onde aconteceu/);
+    expect(onde.tagName).toBe("INPUT");
+    expect(onde).not.toHaveAttribute("aria-required");
+    escrever(/Tipo de denúncia/, "fraude");
+    escrever(/Descreve o que aconteceu/, "Há despesas lançadas duas vezes com a mesma fatura no departamento comercial.");
+    escrever(/Quando aconteceu/, "Em Setembro");
+    clicar("Continuar");
+    expect(screen.getByRole("heading", { name: "Quem está envolvido" })).toBeInTheDocument();
+  });
+});
+
 describe("formulário de denúncia", () => {
   it("o passo 0 pede a escolha e o modo anónimo e o identificado mostram campos diferentes", () => {
     mostrar(<NovaDenuncia />);
@@ -124,7 +166,9 @@ describe("formulário de denúncia", () => {
 
     const nova = lerDenuncias().find((d) => d.codigo === "DEN-2026-0042")!;
     expect(nova).toMatchObject({ anonima: true, identidade: null, estado: "recebida", pin: "500000", tipo: "fraude" });
-    expect(lerDenuncias()).toHaveLength(11);
+    expect(lerDenuncias()).toHaveLength(15);
+    expect(nova.organizationId).toBe("org-exemplo-olyvia-retail");
+    expect(nova.pessoaId).toBeNull();
   });
 
   it("enviar uma denúncia identificada guarda a identidade só nessa", () => {

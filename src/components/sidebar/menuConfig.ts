@@ -81,7 +81,7 @@ export interface MenuItem {
   /** Nunca realça quando o endereço traz estes parâmetros (p.ex. `tab=admissoes`): pertencem a outra entrada. */
   inactiveWhenSearch?: string;
   /** Contador de texto (p.ex. «1 por aprovar»), alimentado por uma memória de exemplo e não pelo Inventário. */
-  textCounter?: "rhAdmissoesPorAprovar";
+  textCounter?: "rhAdmissoesPorAprovar" | "rhDenunciasPorConfirmar";
 }
 
 export interface MenuSubSection {
@@ -360,6 +360,7 @@ export const menuSections: MenuSection[] = [
       "/rh-exemplo/custos",
       "/rh-exemplo/admissao",
       "/rh-exemplo/contratos",
+      "/rh-exemplo/denuncias",
     ],
     permissions: ["users.view"],
     items: [
@@ -372,6 +373,8 @@ export const menuSections: MenuSection[] = [
       { to: "/rh-exemplo/documentos/modelos", icon: FileText, labelKey: "sidebar.rhExemploModelos", permission: "users.view" },
       { to: "/rh-exemplo/processamento-salarial", icon: Receipt, labelKey: "sidebar.rhExemploProcessamento", permission: "users.view" },
       { to: "/rh-exemplo/custos", icon: Coins, labelKey: "rhCustos.menu", permission: "users.view" },
+      // A gestão do canal de denúncias da organização ativa (anónimas e identificadas), com o contador «N por confirmar».
+      { to: "/rh-exemplo/denuncias", icon: ShieldAlert, labelKey: "sidebar.rhExemploDenuncias", permission: "users.view", textCounter: "rhDenunciasPorConfirmar" },
       // Índice dos oito estados da página pública do convite; `exact` para não realçar em `/admissao/configuracao`.
       { to: "/rh-exemplo/admissao", icon: Eye, labelKey: "sidebar.rhExemploVerComoPessoa", permission: "users.view", exact: true },
       // «Campos de admissão» e «Regras de fim de contrato» não têm entrada no menu: abrem por dois botões no cabeçalho da
@@ -383,26 +386,15 @@ export const menuSections: MenuSection[] = [
     id: "rh-exemplo-eu",
     icon: CalendarDays,
     labelKey: "sidebar.rhExemploEu",
-    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos"],
+    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos", "/rh-exemplo/denunciar", "/rh-exemplo/minhas-denuncias"],
     permissions: ["users.view"],
     items: [
       { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
       { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
-    ],
-  },
-  {
-    // Canal de denúncias de exemplo (dados em memória, sem base). As duas primeiras entradas abrem as páginas PÚBLICAS
-    // (sem sessão) para ver o canal como a pessoa o vê; a gestão é só do responsável do canal.
-    id: "canal-denuncias",
-    icon: ShieldAlert,
-    labelKey: "sidebar.canalDenunciasModulo",
-    paths: ["/canal-denuncias"],
-    permissions: ["users.view"],
-    items: [
-      { to: "/canal-denuncias/nova", icon: Megaphone, labelKey: "sidebar.canalDenunciasNova", permission: "users.view" },
-      { to: "/canal-denuncias/acompanhar", icon: Eye, labelKey: "sidebar.canalDenunciasAcompanhar", permission: "users.view" },
-      { to: "/canal-denuncias/gestao", icon: ClipboardCheck, labelKey: "sidebar.canalDenunciasGestao", permission: "users.view" },
+      // Canal de denúncias, do lado de quem denuncia: o assistente (anónima ou identificada) e o acompanhamento.
+      { to: "/rh-exemplo/denunciar", icon: Megaphone, labelKey: "sidebar.rhExemploDenunciar", permission: "users.view" },
+      { to: "/rh-exemplo/minhas-denuncias", icon: ClipboardCheck, labelKey: "sidebar.rhExemploMinhasDenuncias", permission: "users.view" },
     ],
   },
   {

@@ -66,11 +66,11 @@ export function ConviteDevolvida({ token, admissao, nome }: ConviteDevolvidaProp
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4 py-10">
+    <div className="space-y-4">
       <ConviteFaixaPrazo admissao={admissao} comRascunho />
       <Card>
         <CardHeader>
-          <h1 className="text-2xl font-semibold leading-none tracking-tight">{t("rhAdm.pub.devolvida.titulo")}</h1>
+          <h2 className="text-2xl font-semibold leading-none tracking-tight">{t("rhAdm.pub.devolvida.titulo")}</h2>
           <CardDescription>{nome ? `${t("hr.convite.saudacao", { nome })} ` : ""}{t("rhAdm.pub.devolvida.texto")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">

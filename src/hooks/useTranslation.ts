@@ -23,8 +23,10 @@ import { rhExemploAbasTranslations } from "@/translations/rhExemploAbas";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import { rhExemploAdmissaoTranslations } from "@/translations/rhExemploAdmissao";
 import { rhExemploAdmissaoMenuTranslations } from "@/translations/rhExemploAdmissaoMenu";
+import { rhExemploPortalTranslations } from "@/translations/rhExemploPortal";
 import { rhExemploOrganizacaoTranslations } from "@/translations/rhExemploOrganizacao";
 import { canalDenunciasTranslations } from "@/translations/canalDenuncias";
+import { canalDenunciasMinhaAreaTranslations } from "@/translations/canalDenunciasMinhaArea";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -111,6 +113,11 @@ Object.keys(rhExemploAdmissaoMenuTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploAdmissaoMenuTranslations[lang as keyof typeof rhExemploAdmissaoMenuTranslations] };
 });
 
+// Portal do colaborador de exemplo: a página pública do link, a troca de documentos e o lado do RH (`rhPortal.*`).
+Object.keys(rhExemploPortalTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploPortalTranslations[lang as keyof typeof rhExemploPortalTranslations] };
+});
+
 // Página «Organização» do RH de exemplo: grupo, empresas, filiais, centros e a ligação das pessoas (`rhOrg.*`).
 Object.keys(rhExemploOrganizacaoTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploOrganizacaoTranslations[lang as keyof typeof rhExemploOrganizacaoTranslations] };
@@ -136,9 +143,14 @@ Object.keys(rhExemploCustosTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...rhExemploCustosTranslations[lang as keyof typeof rhExemploCustosTranslations] };
 });
 
-// Canal de denúncias de exemplo (`cd.*`, `sidebar.canalDenuncias*`) — módulo próprio, mesmo padrão.
+// Canal de denúncias de exemplo (`cd.*`) — módulo próprio, mesmo padrão.
 Object.keys(canalDenunciasTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...canalDenunciasTranslations[lang as keyof typeof canalDenunciasTranslations] };
+});
+
+// Canal de denúncias dentro da app (`cdm.*`, `sidebar.rhExemploDenunc*`, `sidebar.rhExemploMinhasDenuncias`) — A minha área e RH.
+Object.keys(canalDenunciasMinhaAreaTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...canalDenunciasMinhaAreaTranslations[lang as keyof typeof canalDenunciasMinhaAreaTranslations] };
 });
 
 export const useTranslation = () => {

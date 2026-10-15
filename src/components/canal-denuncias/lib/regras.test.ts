@@ -2,6 +2,7 @@
 // anonimização e o registo de «Ver identidade».
 import { describe, expect, it } from "vitest";
 import { denunciasDeExemplo, RESPONSAVEIS } from "../dados/exemplo";
+import { ORG_ATIVA, OUTRA_ORG, PESSOA_EXEMPLO_ID } from "../dados/organizacoes";
 import {
   adicionarNota, arquivar, atribuirResponsavel, concluir, confirmarRececao, declararConflito, pedirInformacao,
   reabrir, responderDenunciante, type ContextoAcao,
@@ -13,6 +14,7 @@ import { diasEntre, HOJE_EXEMPLO, somarDias, somarMeses } from "./datas";
 import { TRANSICOES, podeTransitar } from "./estados";
 import { filtrarDenuncias, SEM_FILTROS, totaisDaGestao } from "./filtros";
 import { formatoTamanho } from "./formato";
+import { filtrarPorOrganizacao } from "./organizacao";
 import { construirDenuncia, FORMULARIO_VAZIO, MIN_DESCRICAO, passoValido, validarPasso, type DadosFormulario } from "./formulario";
 import { prazoAtual, prazoConfirmacao, prazoResposta } from "./prazos";
 import { ESTADOS, type Denuncia } from "./tipos";
@@ -237,8 +239,9 @@ describe("formulário", () => {
     expect(validarPasso({ ...FORMULARIO_VAZIO, anonima: false, email: "isto-nao" }, 0).email).toBeDefined();
   });
 
-  it("o passo 1 exige tipo, descrição com o mínimo, quando e onde", () => {
-    expect(Object.keys(validarPasso(FORMULARIO_VAZIO, 1)).sort()).toEqual(["descricao", "onde", "quando", "tipo"]);
+  it("o passo 1 exige tipo, descrição com o mínimo e quando; «onde» é texto livre e opcional", () => {
+    expect(Object.keys(validarPasso(FORMULARIO_VAZIO, 1)).sort()).toEqual(["descricao", "quando", "tipo"]);
+    expect(passoValido({ ...preenchido, onde: "" }, 1)).toBe(true);
     expect(validarPasso({ ...preenchido, descricao: "x".repeat(MIN_DESCRICAO - 1) }, 1).descricao).toBe("cd.erro.descricaoCurta");
     expect(validarPasso({ ...preenchido, descricao: "x".repeat(4001) }, 1).descricao).toBe("cd.erro.descricaoLonga");
     expect(passoValido(preenchido, 1)).toBe(true);
@@ -252,33 +255,44 @@ describe("formulário", () => {
   });
 
   it("construir a denúncia anónima não leva identidade; sem escolha trata como anónima", () => {
-    const dados = { id: "d1", codigo: "DEN-2026-0042", pin: "123456", hoje: HOJE_EXEMPLO, em: "2026-10-15T09:30", idEvento: "e" };
+    const dados = { id: "d1", codigo: "DEN-2026-0042", pin: "123456", hoje: HOJE_EXEMPLO, em: "2026-10-15T09:30", idEvento: "e", organizationId: ORG_ATIVA.id };
     const anonima = construirDenuncia({ ...preenchido, nome: "Ana", email: "ana@exemplo.pt" }, dados);
     expect(anonima).toMatchObject({ anonima: true, identidade: null, estado: "recebida", confirmadaEm: null });
     expect(construirDenuncia({ ...preenchido, anonima: null, nome: "Ana" }, dados).identidade).toBeNull();
     const identificada = construirDenuncia({ ...preenchido, anonima: false, nome: "Ana" }, dados);
     expect(identificada.identidade?.nome).toBe("Ana");
   });
+
+  it("a denúncia fica da organização dada, e só a identificada fica ligada à pessoa", () => {
+    const dados = { id: "d1", codigo: "DEN-2026-0042", pin: "123456", hoje: HOJE_EXEMPLO, em: "2026-10-15T09:30", idEvento: "e", organizationId: OUTRA_ORG.id, pessoaId: PESSOA_EXEMPLO_ID };
+    expect(construirDenuncia({ ...preenchido, anonima: false, nome: "Ana" }, dados)).toMatchObject({ organizationId: OUTRA_ORG.id, pessoaId: PESSOA_EXEMPLO_ID });
+    expect(construirDenuncia({ ...preenchido, anonima: true }, dados)).toMatchObject({ organizationId: OUTRA_ORG.id, pessoaId: null });
+    expect(construirDenuncia({ ...preenchido, anonima: null }, dados).pessoaId).toBeNull();
+    expect(construirDenuncia({ ...preenchido, anonima: false }, { ...dados, pessoaId: undefined }).pessoaId).toBeNull();
+  });
 });
 
 describe("dados de exemplo, filtros e totais", () => {
-  const lista = denunciasDeExemplo();
+  const todas = denunciasDeExemplo();
+  const lista = filtrarPorOrganizacao(todas, ORG_ATIVA.id);
 
-  it("há 10 denúncias, com códigos e identificadores únicos e PIN de 6 dígitos", () => {
-    expect(lista).toHaveLength(10);
-    expect(new Set(lista.map((d) => d.codigo)).size).toBe(10);
-    expect(new Set(lista.map((d) => d.id)).size).toBe(10);
-    expect(lista.every((d) => /^\d{6}$/.test(d.pin))).toBe(true);
+  it("há 12 denúncias na organização ativa e 2 noutra, com códigos e identificadores únicos e PIN de 6 dígitos", () => {
+    expect(todas).toHaveLength(14);
+    expect(lista).toHaveLength(12);
+    expect(filtrarPorOrganizacao(todas, OUTRA_ORG.id)).toHaveLength(2);
+    expect(new Set(todas.map((d) => d.codigo)).size).toBe(14);
+    expect(new Set(todas.map((d) => d.id)).size).toBe(14);
+    expect(todas.every((d) => /^\d{6}$/.test(d.pin))).toBe(true);
     expect(proximoCodigo(lista.map((d) => d.codigo), 2026)).toBe("DEN-2026-0042");
   });
 
   it("os totais batem com os estados e os prazos de hoje", () => {
-    expect(totaisDaGestao(lista, HOJE_EXEMPLO)).toEqual({ novas: 2, emAnalise: 6, aVencer: 3, concluidas: 1 });
+    expect(totaisDaGestao(lista, HOJE_EXEMPLO)).toEqual({ novas: 2, emAnalise: 7, aVencer: 3, concluidas: 2 });
   });
 
   it("filtra por origem, estado, responsável, prazo e texto (sem olhar à identidade)", () => {
     const f = (parcial: Partial<typeof SEM_FILTROS>) => filtrarDenuncias(lista, { ...SEM_FILTROS, ...parcial }, HOJE_EXEMPLO);
-    expect(f({}).length).toBe(10);
+    expect(f({}).length).toBe(12);
     expect(f({ origem: "identificada" }).every((d) => !d.anonima)).toBe(true);
     expect(f({ origem: "anonima" }).every((d) => d.anonima)).toBe(true);
     expect(f({ estado: "arquivada" })).toHaveLength(1);
@@ -291,7 +305,7 @@ describe("dados de exemplo, filtros e totais", () => {
   it("a lista põe primeiro o que está atrasado e deixa os fechados no fim", () => {
     const ordem = filtrarDenuncias(lista, SEM_FILTROS, HOJE_EXEMPLO);
     expect(ordem[0].codigo).toBe("DEN-2026-0034");
-    expect(ordem.slice(-2).map((d) => d.estado).sort()).toEqual(["arquivada", "concluida"]);
+    expect(ordem.slice(-3).map((d) => d.estado).sort()).toEqual(["arquivada", "concluida", "concluida"]);
   });
 });
 

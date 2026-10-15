@@ -27,9 +27,10 @@
  *
  * O LINK E UM LOGIN TEMPORARIO
  * -----------------------------
- * O link vale 7 dias, sem conta nem palavra-passe, e mostra o que corresponde a fase da admissao (`ConvitePorEstado`):
- * este formulario enquanto a ficha esta por preencher; so os campos devolvidos quando o RH devolveu; "recebemos a tua
- * ficha" depois de submeter; o contrato para assinar depois de aprovada; e o aviso de login expirado ou link revogado.
+ * O link vale 7 dias, sem conta nem palavra-passe, e abre o PORTAL DO COLABORADOR (`RhPortalColaborador`): a secao "Ficha de
+ * admissao" mostra este formulario enquanto a ficha esta por preencher (ou so os campos devolvidos), e a secao "Documentos"
+ * o contrato por assinar e a troca de documentos com o RH. Esta pagina ja so redireciona o endereco antigo
+ * (`/rh-exemplo/admissao/:token`) para o do portal; o formulario (`ConviteAdmissaoEcra`) vive aqui e o portal reutiliza-o.
  *
  * LINGUA E ERROS
  * --------------
@@ -41,7 +42,7 @@
  * leitor de ecra (nao so a vermelho) -- ver `obrigatorio` em `form/Campos.tsx`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardDescription } from "@/components/ui/card";
 import { CheckCircle2, Loader2 } from "lucide-react";
@@ -55,8 +56,7 @@ import { ConvitePagina1 } from "@/components/rh-exemplo/convite/ConvitePagina1";
 import { ConvitePagina2 } from "@/components/rh-exemplo/convite/ConvitePagina2";
 import { ConviteCartaoLinkInvalido } from "@/components/rh-exemplo/convite/ConviteCartaoLinkInvalido";
 import { ConviteSaudacao } from "@/components/rh-exemplo/convite/ConviteSaudacao";
-import { ConvitePorEstado } from "@/components/rh-exemplo/convite/ConvitePorEstado";
-import { FaixaPreVisualizacao } from "@/components/rh-exemplo/convite/FaixaPreVisualizacao";
+import { CAMINHO_INDICE_CONVITES, caminhoDoConvite } from "@/components/rh-exemplo/convite/estadosConvite";
 import {
   CODIGOS_PAGINA_2,
   campoEhObrigatorio,
@@ -114,24 +114,14 @@ function rascunhoEstaVazio(r: Rascunho): boolean {
   );
 }
 
+/** O endereço antigo do link (`/rh-exemplo/admissao/:token`) passa a abrir o portal da pessoa; sem token volta à lista de estados. */
 export default function RhConviteAdmissao() {
-  // Na apresentacao a lingua do convite e a da propria aplicacao (en ou pt); as outras caem para ingles.
-  const { language } = useTranslation();
-  const idioma = useMemo<IdiomaConvite>(
-    () => (["pt", "es", "fr", "de", "en"].includes(language) ? (language as IdiomaConvite) : "pt"),
-    [language],
-  );
   const { token } = useParams<{ token: string }>();
-  // Só nesta apresentação de exemplo: a faixa de volta ao índice dos estados (não faz parte do que a pessoa vê de verdade).
-  return (
-    <>
-      <FaixaPreVisualizacao token={token} />
-      <ConvitePorEstado token={token} formulario={<ConviteAdmissaoEcra idioma={idioma} />} />
-    </>
-  );
+  return <Navigate to={token ? caminhoDoConvite(token) : CAMINHO_INDICE_CONVITES} replace />;
 }
 
-function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
+/** O formulario de duas paginas: a secao «Ficha de admissao» do portal mostra-o enquanto a ficha esta por preencher. */
+export function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
   const { t } = useTranslation();
   const { token } = useParams<{ token: string }>();
   const {
@@ -463,7 +453,7 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
   const propsPagina = { t, rascunho, definir, erroDe, obrigatorio };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-4 py-10">
+    <div className="space-y-6">
       {/* tabIndex -1: recebe o foco ao mudar de pagina, sem entrar na ordem de tabulacao. */}
       <div ref={topoRef} id="convite-topo" tabIndex={-1} className="outline-none">
         <ConviteSaudacao t={t} estado={estado} pagina={pagina} />

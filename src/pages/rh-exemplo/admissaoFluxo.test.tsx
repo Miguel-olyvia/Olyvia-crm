@@ -1,6 +1,6 @@
 // Arranque do fluxo de admissão de RH de exemplo: o pipeline por estados, rever e aprovar, devolver com comentário (que a pessoa
-// vê no link), gerar o contrato, a pessoa assinar na página pública, enviar credenciais com role e o botão de credenciais
-// desligado sem contrato assinado. Tudo em memória, sem base e sem e-mail.
+// vê no portal), gerar o contrato, a pessoa assinar em Documentos do portal, enviar credenciais com role e o botão de
+// credenciais desligado sem contrato assinado. Tudo em memória, sem base e sem e-mail.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -13,7 +13,7 @@ import { paraNovaPessoa } from "@/components/rh-exemplo/novaPessoa/paraStore";
 import { valoresIniciais } from "@/components/rh-exemplo/novaPessoa/tiposNova";
 import PessoaRhDetalhe from "./PessoaRhDetalhe";
 import PessoasRh from "./PessoasRh";
-import RhConviteAdmissao from "./RhConviteAdmissao";
+import RhPortalColaborador from "./RhPortalColaborador";
 
 const renderEm = (endereco: string) =>
   render(
@@ -22,14 +22,14 @@ const renderEm = (endereco: string) =>
         <Routes>
           <Route path="/rh-exemplo/pessoas" element={<PessoasRh />} />
           <Route path="/rh-exemplo/pessoas/:id" element={<PessoaRhDetalhe />} />
-          <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
+          <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
         </Routes>
       </MemoryRouter>
     </LanguageProvider>,
   );
 
 const pipeline = () => renderEm("/rh-exemplo/pessoas?tab=admissoes");
-const link = (token: string) => renderEm(`/rh-exemplo/admissao/${token}`);
+const link = (token: string) => renderEm(`/rh-exemplo/portal-colaborador/${token}`);
 const adm = (id: string) => lerAdmissoes().porPessoa[id];
 
 beforeAll(() => {
@@ -104,7 +104,7 @@ describe("pipeline de admissões", () => {
 
     cleanup();
     link("submetida");
-    expect(screen.getByRole("heading", { level: 1, name: "O RH devolveu a tua ficha" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "O RH devolveu a tua ficha" })).toBeInTheDocument();
     expect(screen.getByText("O NIF não bate com o cartão")).toBeInTheDocument();
     // Só se editam os campos devolvidos.
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
@@ -119,6 +119,7 @@ describe("pipeline de admissões", () => {
     fireEvent.click(screen.getByRole("button", { name: "Submeter de novo" }));
     expect(adm("p-nadia").estado).toBe("submetida");
     expect(adm("p-nadia").dadosSubmetidos.nif).toBe("245781960");
+    expect(screen.getByRole("heading", { level: 2, name: "À espera da decisão do RH" })).toBeInTheDocument();
     expect(screen.getByText(/Recebemos a tua ficha, o RH vai rever/)).toBeInTheDocument();
     expect(screen.queryAllByRole("textbox")).toHaveLength(0);
   });
@@ -180,7 +181,9 @@ describe("gerar contrato e assinatura", () => {
       dataAdmissao: "2026-11-10", cargoId: "cg-vendedor", tipoContrato: "sem_termo", retribuicao: 1000, subsidio: 7.63, duodecimos: 50,
     } }));
     link("submetida");
-    expect(screen.getByRole("heading", { level: 1, name: "O teu contrato" })).toBeInTheDocument();
+    // Com o contrato por assinar o portal abre direto em Documentos, com o contrato à cabeça de «Recebidos».
+    expect(screen.getByRole("heading", { level: 1, name: "Documentos" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Contrato de trabalho sem termo" })).toBeInTheDocument();
     expect(screen.getByText("Cláusula única.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Assinar" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Aceite o contrato");
@@ -192,6 +195,9 @@ describe("gerar contrato e assinatura", () => {
     fireEvent.change(screen.getByLabelText("Escreve o teu nome completo para assinar"), { target: { value: "Marco Ventura" } });
     fireEvent.click(screen.getByRole("button", { name: "Assinar" }));
     expect(adm("p-marco").estado).toBe("contrato_assinado");
+    expect(screen.getByText(/Assinado por Marco Ventura/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Assinar" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("portal-nav-ficha"));
     expect(screen.getByText("Contrato assinado. Vais receber as credenciais por email quando o RH as enviar.")).toBeInTheDocument();
     expect(lerEstado().fichas["p-marco"].documentos[0].estado).toBe("assinado");
   });
@@ -258,10 +264,11 @@ describe("enviar credenciais", () => {
     cleanup();
     link("assinado");
     expect(screen.getByRole("heading", { level: 1, name: "O acesso temporário terminou" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Secções do portal" })).not.toBeInTheDocument();
   });
 });
 
-describe("página pública do link", () => {
+describe("portal do colaborador (página pública do link)", () => {
   it("o link de exemplo mostra o prazo e o estado, e guarda o rascunho", () => {
     link("exemplo");
     expect(screen.getByText(/O teu acesso temporário termina a \d\d\/\d\d às \d\d:\d\d/)).toBeInTheDocument();
@@ -277,26 +284,26 @@ describe("página pública do link", () => {
     expect(adm("p-lara").historico.at(-1)).toMatchObject({ acao: "abrir", por: "Lara Mendes" });
   });
 
-  it("depois de submeter mostra «Recebemos a tua ficha, o RH vai rever» e a ficha fica bloqueada", () => {
+  it("depois de submeter mostra «À espera da decisão do RH» e a ficha fica bloqueada", () => {
     link("exemplo");
     act(() => void submeterPeloLink("exemplo", { nif: "123456789" }));
-    expect(screen.getByRole("heading", { level: 1, name: "Recebemos a tua ficha" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "À espera da decisão do RH" })).toBeInTheDocument();
     expect(screen.getByText(/Recebemos a tua ficha, o RH vai rever/)).toBeInTheDocument();
     expect(screen.queryAllByRole("textbox")).toHaveLength(0);
     expect(adm("p-beatriz").estado).toBe("submetida");
   });
 
   it.each([
-    ["submetida", "Recebemos a tua ficha"],
-    ["expirada", "O teu acesso temporário terminou"],
-    ["revogada", "Este link já não é válido"],
-    ["assinado", "Contrato assinado"],
-    ["contrato", "O teu contrato"],
-    ["devolvida", "O RH devolveu a tua ficha"],
-  ])("o token «%s» mostra o seu ecrã", (token, titulo) => {
+    ["submetida", 2, "À espera da decisão do RH"],
+    ["expirada", 1, "O teu acesso temporário terminou"],
+    ["revogada", 1, "Este link já não é válido"],
+    ["assinado", 2, "Contrato assinado"],
+    ["contrato", 1, "Documentos"],
+    ["devolvida", 2, "O RH devolveu a tua ficha"],
+  ])("o token «%s» mostra o seu ecrã", (token, nivel, titulo) => {
     link(token);
-    expect(screen.getByRole("heading", { level: 1, name: titulo })).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/\brhAdm\./);
+    expect(screen.getByRole("heading", { level: nivel, name: titulo })).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/\brh(?:Adm|Portal)\./);
   });
 
   it("um token desconhecido continua a mostrar o cartão de ligação inválida", () => {

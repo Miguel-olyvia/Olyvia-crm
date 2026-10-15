@@ -13,11 +13,21 @@ interface ConfirmacaoProps {
   codigo: string;
   pin: string;
   onNova: () => void;
+  /** Para onde leva «Acompanhar esta denúncia»; por omissão, o acompanhamento público. */
+  acompanharTo?: string;
+  /** Só dentro da app, numa denúncia anónima: guarda o CÓDIGO (nunca o PIN) em «As minhas denúncias», só nesta sessão. */
+  onGuardarCodigo?: () => void;
 }
 
-export function Confirmacao({ codigo, pin, onNova }: ConfirmacaoProps) {
+export function Confirmacao({ codigo, pin, onNova, acompanharTo = "/canal-denuncias/acompanhar", onGuardarCodigo }: ConfirmacaoProps) {
   const { t } = useTranslation();
   const [copiado, setCopiado] = useState(false);
+  const [guardado, setGuardado] = useState(false);
+
+  const guardar = (): void => {
+    onGuardarCodigo?.();
+    setGuardado(true);
+  };
 
   const copiar = async (): Promise<void> => {
     try {
@@ -60,14 +70,20 @@ export function Confirmacao({ codigo, pin, onNova }: ConfirmacaoProps) {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button asChild className="min-h-11">
-          <Link to="/canal-denuncias/acompanhar">{t("cd.conf.acompanhar")}</Link>
+          <Link to={acompanharTo}>{t("cd.conf.acompanhar")}</Link>
         </Button>
         <Button type="button" variant="outline" className="min-h-11" onClick={copiar}>{t("cd.conf.copiar")}</Button>
+        {onGuardarCodigo && (
+          <Button type="button" variant="outline" className="min-h-11" disabled={guardado} onClick={guardar}>
+            {guardado ? t("cdm.codigoGuardado") : t("cdm.guardarCodigo")}
+          </Button>
+        )}
         <button type="button" onClick={onNova} className={`min-h-11 rounded-sm px-2 text-sm underline underline-offset-2 ${FOCO}`}>
           {t("cd.conf.outra")}
         </button>
       </div>
       {copiado && <p role="status" className="text-sm text-muted-foreground">{t("cd.conf.copiado")}</p>}
+      {guardado && <p role="status" className="text-sm text-muted-foreground">{t("cdm.guardarCodigoNota")}</p>}
     </section>
   );
 }

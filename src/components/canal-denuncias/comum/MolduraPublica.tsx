@@ -5,11 +5,19 @@ import { FlaskConical, ShieldCheck } from "lucide-react";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { ORGANIZACAO_EXEMPLO } from "../dados/exemplo";
+import type { OrganizacaoExemplo } from "../dados/organizacoes";
 
 const LIGACAO = "inline-flex min-h-11 items-center rounded-md px-3 text-sm hover:bg-muted";
 
-export function MolduraPublica({ children }: { children: ReactNode }) {
+interface MolduraPublicaProps {
+  /** A organização da página (sem sessão): a do parâmetro `?org=` ou a organização de exemplo. */
+  organizacao: OrganizacaoExemplo;
+  /** Sufixo `?org=...` a manter nas ligações, quando a organização veio do endereço. */
+  sufixo?: string;
+  children: ReactNode;
+}
+
+export function MolduraPublica({ organizacao, sufixo = "", children }: MolduraPublicaProps) {
   const { t } = useTranslation();
   const classe = ({ isActive }: { isActive: boolean }) => cn(LIGACAO, FOCO, isActive ? "font-semibold text-primary dark:text-violet-300" : "text-foreground");
   return (
@@ -17,12 +25,12 @@ export function MolduraPublica({ children }: { children: ReactNode }) {
       <header className="border-b bg-background">
         <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-3">
           <div>
-            <p className="text-xs text-muted-foreground">{ORGANIZACAO_EXEMPLO}</p>
+            <p className="text-xs text-muted-foreground">{organizacao.nome}</p>
             <p className="font-semibold">{t("cd.canal")}</p>
           </div>
           <nav aria-label={t("cd.navPublica")} className="flex gap-1">
-            <NavLink to="/canal-denuncias/nova" className={classe}>{t("cd.nav.nova")}</NavLink>
-            <NavLink to="/canal-denuncias/acompanhar" className={classe}>{t("cd.nav.acompanhar")}</NavLink>
+            <NavLink to={`/canal-denuncias/nova${sufixo}`} className={classe}>{t("cd.nav.nova")}</NavLink>
+            <NavLink to={`/canal-denuncias/acompanhar${sufixo}`} className={classe}>{t("cd.nav.acompanhar")}</NavLink>
           </nav>
         </div>
       </header>

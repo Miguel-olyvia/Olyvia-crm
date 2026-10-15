@@ -2,6 +2,7 @@
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
 import { CartaoAdmissao } from "@/components/rh-exemplo/admissao/CartaoAdmissao";
+import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
 import { PessoaLaboraisTab } from "@/components/rh-exemplo/PessoaLaboraisTab";
 import { PessoaOutrosDadosCard } from "@/components/rh-exemplo/PessoaOutrosDadosCard";
 import { PessoaPessoaisTab } from "@/components/rh-exemplo/PessoaPessoaisTab";
@@ -30,6 +31,7 @@ export function AbaVisaoGeral({ ficha, pessoa, ctx, aoAbrirAba }: AbaProps & { a
   return (
     <div className="space-y-4">
       <CartaoAdmissao pessoaId={pessoa.id} />
+      <PortalColaboradorRh pessoaId={pessoa.id} compacto aoGerir={() => aoAbrirAba("documentos")} />
       <PessoaVisaoGeralTab
         pessoa={pessoa} reportaANome={ctx.reportaANome} entidadeLegalNome={ctx.entidadeLegalNome} vinculos={ficha.vinculos}
         horarioRealizado={ficha.horarioRealizado} retribuicao={ficha.retribuicao} podeVerRealizado={ctx.trabalho.podeVerRealizado}

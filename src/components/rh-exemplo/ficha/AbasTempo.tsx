@@ -5,6 +5,7 @@ import { PessoaAusenciasTab } from "@/components/rh-exemplo/PessoaAusenciasTab";
 import { PessoaContratoTab } from "@/components/rh-exemplo/PessoaContratoTab";
 import { PessoaDocumentosTab } from "@/components/rh-exemplo/PessoaDocumentosTab";
 import { PessoaHorarioTab } from "@/components/rh-exemplo/PessoaHorarioTab";
+import { PortalColaboradorRh } from "@/components/rh-exemplo/portal/PortalColaboradorRh";
 import { SemAcesso, type AbaProps } from "./AbasPessoa";
 
 export function AbaContratos({ ficha, pessoa, ctx }: AbaProps) {
@@ -50,6 +51,7 @@ export function AbaDocumentos({ ficha, pessoa, ctx }: AbaProps) {
   const souAPessoa = ctx.minhaPessoaId === pessoa.id;
   return (
     <div className="space-y-6">
+      <PortalColaboradorRh pessoaId={pessoa.id} />
       <PessoaAnexosCard
         pessoaId={pessoa.id} organizationId={pessoa.organization_id} souAPessoa={souAPessoa && ctx.hasPermission("hr.pessoas.view.own")}
         permissoes={ctx.permissoesAnexos} permissoesEscrita={ctx.permissoesEscritaAnexos}

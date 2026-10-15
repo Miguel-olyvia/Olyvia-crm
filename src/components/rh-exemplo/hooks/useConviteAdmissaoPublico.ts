@@ -1,7 +1,7 @@
 /**
  * O convite de admissão visto por quem o recebe (página pública), em memória. O token abre o formulário enquanto a
  * admissão a que pertence estiver «a preencher» e o login temporário (7 dias) servir; os outros estados (submetida,
- * contrato, expirada, revogada...) têm o seu ecrã (`ConvitePorEstado`). O rascunho guarda-se na admissão e a submissão
+ * contrato, expirada, revogada...) têm o seu ecrã no portal (`PortalFicha`, `PortalDocumentos`). O rascunho guarda-se na admissão e a submissão
  * não envia nada para lado nenhum: passa a admissão a «submetida» e a ficha fica bloqueada para a pessoa.
  */
 import { useCallback, useMemo, useState } from "react";

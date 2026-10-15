@@ -69,7 +69,6 @@ function validarPassoOQue(f: DadosFormulario): ErrosFormulario {
   if (tamanho < MIN_DESCRICAO) erros.descricao = "cd.erro.descricaoCurta";
   else if (tamanho > MAX_DESCRICAO) erros.descricao = "cd.erro.descricaoLonga";
   if (f.quando.trim().length < 2) erros.quando = "cd.erro.quando";
-  if (f.onde.trim().length < 2) erros.onde = "cd.erro.onde";
   return erros;
 }
 
@@ -98,6 +97,10 @@ export interface DadosNovaDenuncia {
   hoje: string;
   em: string;
   idEvento: string;
+  /** A organização a que a denúncia pertence (a ativa, dentro da app; a da página, na pública). */
+  organizationId: string;
+  /** A pessoa que denuncia dentro da app. Só fica na denúncia se esta for identificada. */
+  pessoaId?: string | null;
 }
 
 export function construirDenuncia(f: DadosFormulario, n: DadosNovaDenuncia): Denuncia {
@@ -105,6 +108,7 @@ export function construirDenuncia(f: DadosFormulario, n: DadosNovaDenuncia): Den
   const anonima = f.anonima !== false;
   return {
     id: n.id,
+    organizationId: n.organizationId,
     codigo: n.codigo,
     pin: n.pin,
     tipo: f.tipo === "" ? "outro" : f.tipo,
@@ -119,6 +123,7 @@ export function construirDenuncia(f: DadosFormulario, n: DadosNovaDenuncia): Den
     anexos: f.anexos.slice(0, MAX_FICHEIROS),
     anonima,
     identidade: identidadeAGuardar(anonima, f),
+    pessoaId: anonima ? null : (n.pessoaId ?? null),
     estado: "recebida",
     recebidaEm: n.hoje,
     confirmadaEm: null,

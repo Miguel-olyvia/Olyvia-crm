@@ -1,8 +1,7 @@
 // Dados de exemplo do canal de denúncias, relativos a «hoje» (15/10/2026). Tudo inventado; só vive em memória.
 import { QUEM_SISTEMA } from "../lib/formulario";
 import type { Denuncia, EventoHistorico, Identidade, Responsavel } from "../lib/tipos";
-
-export const ORGANIZACAO_EXEMPLO = "Casa Aurora, Lda. (exemplo)";
+import { ORG_ATIVA, OUTRA_ORG, PESSOA_EXEMPLO_ID } from "./organizacoes";
 
 export const RESPONSAVEIS: readonly Responsavel[] = [
   { id: "r1", nome: "Helena Matos", area: "Compliance" },
@@ -35,10 +34,12 @@ function denuncia(parcial: Partial<Denuncia> & Pick<Denuncia, "codigo" | "pin" |
   const seq = parcial.codigo.slice(-4);
   return {
     id: `d${seq}`,
+    organizationId: ORG_ATIVA.id,
+    pessoaId: null,
     resumo: parcial.descricao.split(". ")[0].slice(0, 90),
     quando: "Nas últimas semanas",
     aindaAcontece: "nao_sei",
-    onde: "Sede, Lisboa",
+    onde: "",
     envolvidos: "",
     testemunhas: "nao_sei",
     jaReportado: "",
@@ -125,7 +126,7 @@ export function denunciasDeExemplo(): Denuncia[] {
       codigo: "DEN-2026-0034", pin: "129047", tipo: "assedio", estado: "em_analise", recebidaEm: "2026-06-08",
       confirmadaEm: "2026-06-10", responsavelId: "r3", gravidade: "alta",
       descricao: "Um colega manda mensagens insistentes fora de horas e faz comentários de cariz sexual nas reuniões de equipa.",
-      quando: "Desde Maio", aindaAcontece: "sim", onde: "Loja do Porto", testemunhas: "sim",
+      quando: "Desde Maio", aindaAcontece: "sim", onde: "Equipa de vendas", testemunhas: "sim",
     }),
     denuncia({
       codigo: "DEN-2026-0033", pin: "846213", tipo: "seguranca", estado: "concluida", recebidaEm: "2026-07-06",
@@ -143,11 +144,64 @@ export function denunciasDeExemplo(): Denuncia[] {
       codigo: "DEN-2026-0032", pin: "097765", tipo: "outro", estado: "arquivada", recebidaEm: "2026-06-25",
       confirmadaEm: "2026-06-26", responsavelId: "r2",
       descricao: "Acho que alguém anda a usar o carro da empresa ao fim de semana, mas não sei quem.",
-      quando: "Não sei", onde: "Parque da sede", gravidade: "baixa",
+      quando: "Não sei", onde: "Parque de estacionamento", gravidade: "baixa",
       motivoArquivo: "Sem elementos suficientes e sem resposta ao pedido de informação em 30 dias.",
       mensagens: [msg("m32-1", "responsavel", "2026-06-27T09:00", "Consegues dizer que carro e em que fim de semana? Sem isso não conseguimos avançar.")],
     }),
+    ...denunciasDaSofia(),
+    ...denunciasDeOutraOrganizacao(),
   ].map((d) => ({ ...d, historico: [...d.historico, ...eventosFinais(d)] }));
+}
+
+const SOFIA = (): Identidade => pessoa("Sofia Rebelo", "sofia.rebelo@olyvia-exemplo.pt");
+
+/** As duas denúncias identificadas que a Sofia fez de dentro da app: uma em análise e uma concluída. */
+function denunciasDaSofia(): Denuncia[] {
+  const dela = { anonima: false, identidade: SOFIA(), pessoaId: PESSOA_EXEMPLO_ID } as const;
+  return [
+    denuncia({
+      ...dela, codigo: "DEN-2026-0031", pin: "315264", tipo: "dados", estado: "em_analise", recebidaEm: "2026-09-22",
+      confirmadaEm: "2026-09-24", responsavelId: "r1", gravidade: "media",
+      descricao: "Folhas de assiduidade com NIF e moradas foram enviadas por email a uma empresa externa sem pedido formal.",
+      quando: "Em Setembro", onde: "Gabinete de apoio administrativo", testemunhas: "nao_sei",
+      avaliacaoInicial: "Confirmar com a assessoria jurídica se havia contrato de tratamento de dados com a empresa.",
+      mensagens: [
+        msg("m31-1", "responsavel", "2026-09-24T10:40", "Recebemos a tua denúncia. Sabes dizer a que dia foi enviado o email e quem o enviou?"),
+        msg("m31-2", "denunciante", "2026-09-26T17:05", "Foi a 18 de Setembro, a partir da caixa partilhada do apoio. Não sei quem o enviou.", [{ nome: "email-18-setembro.pdf", tamanho: 98_000 }]),
+        msg("m31-3", "responsavel", "2026-10-02T09:15", "Obrigada. Já pedimos o registo da caixa partilhada ao departamento de sistemas e voltamos a escrever esta semana."),
+      ],
+    }),
+    denuncia({
+      ...dela, codigo: "DEN-2026-0030", pin: "752089", tipo: "seguranca", estado: "concluida", recebidaEm: "2026-06-15",
+      confirmadaEm: "2026-06-17", responsavelId: "r2", gravidade: "media",
+      descricao: "A porta corta-fogo do arquivo não fecha sozinha e está calçada com uma caixa de papel.",
+      quando: "Desde Maio", onde: "Arquivo, piso 1",
+      mensagens: [msg("m30-1", "responsavel", "2026-06-17T11:00", "Recebemos a tua denúncia e já pedimos uma inspeção à porta.")],
+      decisao: {
+        resultado: "procedente", em: "2026-08-20T15:00",
+        medidas: "A porta foi reparada a 02/07 e passou a constar da ronda mensal de segurança.",
+        fundamentacao: "A inspeção confirmou que o fecho automático estava avariado e a porta calçada.",
+      },
+    }),
+  ];
+}
+
+/** Duas denúncias de OUTRA organização: servem para provar que não aparecem na organização ativa. */
+function denunciasDeOutraOrganizacao(): Denuncia[] {
+  const outra = { organizationId: OUTRA_ORG.id } as const;
+  return [
+    denuncia({
+      ...outra, codigo: "DEN-2026-0008", pin: "603117", tipo: "fraude", estado: "recebida", recebidaEm: "2026-10-13",
+      descricao: "Faturas de um fornecedor de limpeza são pagas duas vezes ao mês, sempre com o mesmo valor.",
+      quando: "Desde Agosto", onde: "Contas a pagar", gravidade: "media",
+    }),
+    denuncia({
+      ...outra, codigo: "DEN-2026-0007", pin: "478250", tipo: "assedio", estado: "em_analise", recebidaEm: "2026-09-10",
+      confirmadaEm: "2026-09-12", responsavelId: "r3", anonima: false, identidade: SOFIA(), pessoaId: PESSOA_EXEMPLO_ID,
+      descricao: "Um superior imediato grita com a equipa em público quando as metas não são cumpridas.",
+      quando: "Desde Julho", onde: "Equipa comercial", gravidade: "media",
+    }),
+  ];
 }
 
 /** Os acontecimentos que explicam o estado em que cada denúncia de exemplo está. */

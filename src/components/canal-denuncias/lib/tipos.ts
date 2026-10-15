@@ -71,6 +71,8 @@ export interface Responsavel {
 
 export interface Denuncia {
   id: string;
+  /** A organização a que a denúncia pertence. É sempre a da organização, nunca a de uma filial ou de um centro. */
+  organizationId: string;
   codigo: string;
   pin: string;
   tipo: TipoDenuncia;
@@ -86,6 +88,8 @@ export interface Denuncia {
   anonima: boolean;
   /** Sempre null numa denúncia anónima: a identidade nunca chega a ser guardada. */
   identidade: Identidade | null;
+  /** A pessoa (ficha de RH) de quem fez a denúncia dentro da app. Sempre null numa anónima e nas feitas pela página pública. */
+  pessoaId: string | null;
   estado: EstadoDenuncia;
   /** AAAA-MM-DD */
   recebidaEm: string;

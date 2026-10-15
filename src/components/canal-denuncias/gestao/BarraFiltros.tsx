@@ -1,5 +1,6 @@
-// Filtros e pesquisa da lista: estado, tipo, origem, responsável, prazo a vencer e texto. Cada controlo tem etiqueta
-// (visível só para o leitor de ecrã, para a barra ficar compacta).
+// Filtros e pesquisa da lista: estado, tipo, responsável, prazo a vencer e texto. Cada controlo tem etiqueta
+// (visível só para o leitor de ecrã, para a barra ficar compacta). A origem (anónimas ou identificadas) escolhe-se nas
+// abas por cima da lista, que usam o mesmo filtro `origem`.
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -49,9 +50,6 @@ export function BarraFiltros({ filtros, onChange }: BarraFiltrosProps) {
       <Seletor id="den-f-tipo" rotulo={t("cd.filtros.tipo")} valor={filtros.tipo}
         opcoes={[todos("cd.filtros.todosTipos"), ...TIPOS.map((v) => ({ value: v, label: t(`cd.tipo.${v}`) }))]}
         onValor={(v) => mudar({ tipo: v as FiltrosGestao["tipo"] })} />
-      <Seletor id="den-f-origem" rotulo={t("cd.filtros.origem")} valor={filtros.origem}
-        opcoes={[todos("cd.filtros.todasOrigens"), { value: "anonima", label: t("cd.origem.anonima") }, { value: "identificada", label: t("cd.origem.identificada") }]}
-        onValor={(v) => mudar({ origem: v as FiltrosGestao["origem"] })} />
       <Seletor id="den-f-resp" rotulo={t("cd.filtros.responsavel")} valor={filtros.responsavel}
         opcoes={[todos("cd.filtros.todosResponsaveis"), { value: SEM_RESPONSAVEL, label: t("cd.semResponsavel") }, ...RESPONSAVEIS.map((r) => ({ value: r.id, label: r.nome }))]}
         onValor={(v) => mudar({ responsavel: v })} />

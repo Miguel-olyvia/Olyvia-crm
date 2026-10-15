@@ -240,7 +240,9 @@ describe("A minha área: o menu", () => {
     expect(grupo()?.paths).not.toContain("/rh-exemplo/minhas-horas-extra");
     expect(grupo()?.items?.some((i) => i.to === "/rh-exemplo/meus-custos")).toBe(false);
     expect(grupo()?.paths).not.toContain("/rh-exemplo/meus-custos");
-    expect(grupo()?.items?.map((i) => i.to)).toEqual(["/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade"]);
+    expect(grupo()?.items?.map((i) => i.to)).toEqual([
+      "/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/denunciar", "/rh-exemplo/minhas-denuncias",
+    ]);
   });
 
   it("o módulo «Custos» está no grupo de Recursos Humanos, com o caminho em `paths`", () => {

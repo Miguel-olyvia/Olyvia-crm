@@ -68,7 +68,7 @@ function Resposta({ d }: { d: Denuncia }) {
 
   return (
     <div className="space-y-3">
-      <Campo id="acomp-resposta" rotulo={t("cd.acomp.responder")} erro={erro ? t("cd.erro.mensagemVazia") : undefined} ajuda={t("cd.acomp.anonimaNota")}>
+      <Campo id="acomp-resposta" rotulo={t("cd.acomp.responder")} erro={erro ? t("cd.erro.mensagemVazia") : undefined} ajuda={d.anonima ? t("cd.acomp.anonimaNota") : undefined}>
         {(a) => <Textarea {...a} rows={4} value={texto} onChange={(e) => setTexto(e.target.value)} />}
       </Campo>
       <SeletorFicheiros idBase="acomp-anexos" max={3} anexos={anexos} onChange={setAnexos} />
@@ -77,18 +77,26 @@ function Resposta({ d }: { d: Denuncia }) {
   );
 }
 
-export function VistaAcompanhamento({ id, onSair }: { id: string; onSair: () => void }) {
+interface VistaAcompanhamentoProps {
+  id: string;
+  /** Sem isto não há botão «Sair»: é o caso do painel lateral de «As minhas denúncias», que fecha por si. */
+  onSair?: () => void;
+  /** Sem o título e o botão: o painel lateral já traz o código no seu cabeçalho. */
+  semCabecalho?: boolean;
+}
+
+export function VistaAcompanhamento({ id, onSair, semCabecalho = false }: VistaAcompanhamentoProps) {
   const { t } = useTranslation();
   const d = useDenuncia(id);
   if (!d) return null;
   return (
-    <section aria-labelledby="acomp-estado" className="space-y-5 rounded-lg border bg-card p-5">
+    <section aria-label={t("cd.acomp.denuncia", { codigo: d.codigo })} className="space-y-5 rounded-lg border bg-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="acomp-estado" className="text-xl font-semibold">{t("cd.acomp.denuncia", { codigo: d.codigo })}</h2>
+          {!semCabecalho && <h2 className="text-xl font-semibold">{t("cd.acomp.denuncia", { codigo: d.codigo })}</h2>}
           <div className="mt-1 flex items-center gap-2"><EstadoChip estado={d.estado} /></div>
         </div>
-        <Button type="button" variant="outline" className="min-h-11" onClick={onSair}>{t("cd.acomp.sair")}</Button>
+        {onSair && <Button type="button" variant="outline" className="min-h-11" onClick={onSair}>{t("cd.acomp.sair")}</Button>}
       </div>
       <p className="text-sm">{t(`cd.acomp.texto.${d.estado}`)}</p>
       <Datas d={d} />

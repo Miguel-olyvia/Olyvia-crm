@@ -1,5 +1,5 @@
 /**
- * Os oito estados da página pública do convite de admissão, pela ordem do fluxo, cada um com o token de demonstração que
+ * Os oito estados do portal do colaborador (a página pública do convite de admissão), pela ordem do fluxo, cada um com o token de demonstração que
  * o ilustra e a pessoa de exemplo a quem pertence. Os tokens são os de `admissaoExemplo.ts`. O texto de cada estado
  * (nome e o que a pessoa vê) vive em `rhAdmIdx.e.<chave>.*`.
  */
@@ -18,7 +18,10 @@ export type EstadoConvite = (typeof ESTADOS_CONVITE)[number];
 
 export const CAMINHO_INDICE_CONVITES = "/rh-exemplo/admissao";
 
-export const caminhoDoConvite = (token: string): string => `${CAMINHO_INDICE_CONVITES}/${token}`;
+/** O portal do colaborador de um link (a secção ativa e a aba vão em `?sec=` e `&aba=`). */
+export const CAMINHO_PORTAL = "/rh-exemplo/portal-colaborador";
+
+export const caminhoDoConvite = (token: string): string => `${CAMINHO_PORTAL}/${token}`;
 
 /** O estado de um token de demonstração, com o anterior e o seguinte (`null` nas pontas); `null` se o token não é de demonstração. */
 export function vizinhosDoEstado(token: string | undefined): { atual: EstadoConvite; anterior: EstadoConvite | null; seguinte: EstadoConvite | null; posicao: number } | null {

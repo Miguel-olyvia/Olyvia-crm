@@ -29,7 +29,7 @@ export function ConviteSaudacao({ t, estado, pagina }: ConviteSaudacaoProps) {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold">{t("hr.convite.tituloPagina")}</h1>
+      <h2 className="text-2xl font-bold">{t("hr.convite.tituloPagina")}</h2>
       <p className="text-muted-foreground">
         {estado.pessoa_nome
           ? t("hr.convite.saudacao", { nome: estado.pessoa_nome })

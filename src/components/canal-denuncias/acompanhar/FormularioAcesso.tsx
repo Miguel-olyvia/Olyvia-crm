@@ -5,17 +5,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Campo } from "../comum/Campo";
-import { lerDenuncias } from "../dados/loja";
+import { denunciasDaOrganizacao, lerDenuncias } from "../dados/loja";
 import { acederComCodigo } from "../lib/codigos";
 
-export function FormularioAcesso({ onAcesso }: { onAcesso: (id: string) => void }) {
+interface FormularioAcessoProps {
+  onAcesso: (id: string) => void;
+  /** Dentro da app: só se abrem denúncias desta organização (a ativa). Sem isto, vale qualquer código (página pública). */
+  organizacaoId?: string;
+  /** Um código já preenchido (p.ex. um dos guardados nesta sessão); o PIN escreve-se sempre à mão. */
+  codigoInicial?: string;
+}
+
+export function FormularioAcesso({ onAcesso, organizacaoId, codigoInicial = "" }: FormularioAcessoProps) {
   const { t } = useTranslation();
-  const [codigo, setCodigo] = useState("");
+  const [codigo, setCodigo] = useState(codigoInicial);
   const [pin, setPin] = useState("");
   const [falhou, setFalhou] = useState(false);
 
   const entrar = (): void => {
-    const d = acederComCodigo(lerDenuncias(), codigo, pin);
+    const d = acederComCodigo(organizacaoId ? denunciasDaOrganizacao(organizacaoId) : lerDenuncias(), codigo, pin);
     if (d) onAcesso(d.id);
     else setFalhou(true);
   };

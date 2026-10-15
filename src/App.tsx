@@ -105,10 +105,13 @@ const RhConfiguracaoAdmissao = lazy(() => import("./pages/rh-exemplo/RhConfigura
 const RhCustos = lazy(() => import("./pages/rh-exemplo/RhCustos"));
 const RhRegrasFimContrato = lazy(() => import("./pages/rh-exemplo/RhRegrasFimContrato"));
 const RhConviteAdmissao = lazy(() => import("./pages/rh-exemplo/RhConviteAdmissao"));
+const RhPortalColaborador = lazy(() => import("./pages/rh-exemplo/RhPortalColaborador"));
 const RhAdmissaoIndice = lazy(() => import("./pages/rh-exemplo/RhAdmissaoIndice"));
 const NovaDenuncia = lazy(() => import("./pages/canal-denuncias/NovaDenuncia"));
 const AcompanharDenuncia = lazy(() => import("./pages/canal-denuncias/AcompanharDenuncia"));
-const GestaoDenuncias = lazy(() => import("./pages/canal-denuncias/GestaoDenuncias"));
+const RhDenunciar = lazy(() => import("./pages/rh-exemplo/RhDenunciar"));
+const RhMinhasDenuncias = lazy(() => import("./pages/rh-exemplo/RhMinhasDenuncias"));
+const RhDenuncias = lazy(() => import("./pages/rh-exemplo/RhDenuncias"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
 // AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
 const AnewClients = lazy(() => import("./pages/AnewClients"));
@@ -226,7 +229,9 @@ const App = () => (
                   <Route path="/booking/confirm" element={<BookingConfirm />} />
                   {/* Protótipo de Negócios (08/10/2026): dados de exemplo, sem sessão nem base de dados */}
                   <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
-                  {/* Convite de admissão de exemplo (página pública, sem sessão; só o token "exemplo" abre um convite) */}
+                  {/* Portal do colaborador de exemplo (página pública, sem sessão: acesso temporário pelo link) */}
+                  <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
+                  {/* O endereço antigo do link de admissão redireciona para o portal */}
                   <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
                   {/* Canal de denúncias de exemplo: páginas públicas (sem sessão), dados em memória */}
                   <Route path="/canal-denuncias/nova" element={<NovaDenuncia />} />
@@ -288,7 +293,11 @@ const App = () => (
                       <Route path="/rh-exemplo/admissao" element={<ProtectedRoute permission="users.view"><RhAdmissaoIndice /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
-                      <Route path="/canal-denuncias/gestao" element={<ProtectedRoute permission="users.view"><GestaoDenuncias /></ProtectedRoute>} />
+                      {/* Canal de denúncias de exemplo, dentro da app: A minha área (denunciar e acompanhar) e a gestão no RH */}
+                      <Route path="/rh-exemplo/denunciar" element={<ProtectedRoute permission="users.view"><RhDenunciar /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/minhas-denuncias" element={<ProtectedRoute permission="users.view"><RhMinhasDenuncias /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/denuncias" element={<ProtectedRoute permission="users.view"><RhDenuncias /></ProtectedRoute>} />
+                      <Route path="/canal-denuncias/gestao" element={<Navigate to="/rh-exemplo/denuncias" replace />} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
                       <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />

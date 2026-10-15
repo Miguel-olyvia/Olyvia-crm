@@ -9,6 +9,7 @@ import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
 import { CounterPill } from "@/components/inventory/ui/CounterPill";
 import { ContadorAdmissoes } from "./sidebar/ContadorAdmissoes";
+import { ContadorDenuncias } from "./sidebar/ContadorDenuncias";
 import { itemAtivo, type ItemAtivavel } from "./sidebar/itemAtivo";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
 import { DICA_CONTADOR_FROTA, TOM_CONTADOR_FROTA, useContadoresFrota } from "@/components/frota-exemplo/useContadoresFrota";
@@ -434,6 +435,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
               <span className="truncate">{t(item.labelKey)}</span>
               <CounterPill value={counterFor(item)} {...pillProps(item)} />
               {item.textCounter === "rhAdmissoesPorAprovar" && <ContadorAdmissoes />}
+              {item.textCounter === "rhDenunciasPorConfirmar" && <ContadorDenuncias />}
             </button>
           );
         })}
