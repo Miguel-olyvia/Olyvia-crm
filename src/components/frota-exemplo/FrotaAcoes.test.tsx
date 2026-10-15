@@ -467,3 +467,189 @@ describe("Estado, ocorrências, documentos, viatura nova e carrinha", () => {
     expect(screen.queryByText(/^Km registados/)).toBeNull();
   });
 });
+
+// As ações que antes só existiam num ecrã e agora também estão na ficha da viatura. Os diálogos e as ações são os
+// mesmos dos ecrãs (DialogoFrota, AcaoAtribuicao, AcaoOcorrencia): aqui prova-se que, feitas pela ficha, chegam a
+// todos os ecrãs ligados e aos contadores do menu (useContadoresFrota, a mesma fonte do AppSidebar).
+describe("Ações feitas pela ficha da viatura", () => {
+  const sem = (n: number | null | undefined): number => n ?? 0;
+
+  it("concluir a IPO e a revisão pela ficha: aba Manutenção e Histórico, Manutenção, Documentos, Custos, Hoje, contadores do menu e Atividade", async () => {
+    const f = await ficha("12-TT-90", "Manutenção");
+    const antes = contadores();
+    // a 12-TT-90 tem a IPO vencida e a revisão passada (dois alertas graves, mas conta uma vez no Hoje)
+    fireEvent.click(within(f).getByRole("button", { name: "Concluir Inspeção periódica (IPO) de 16/10/2026" }));
+    const dlg = await screen.findByRole("dialog", { name: "Concluir intervenção" });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Concluir" }));
+    await fechou("Concluir intervenção");
+    expect(aviso()).toHaveTextContent("Inspeção periódica (IPO) concluída.");
+    expect(lerFrotaExemplo().viaturas.find((v) => v.id === "v4")?.venc.ipo).toBe("2027-10-14");
+    // só com a IPO feita, a revisão continua grave: os contadores ainda não descem
+    expect(contadores().hoje).toBe(antes.hoje);
+    expect(contadores().manutencao).toBe(antes.manutencao);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Concluir Revisão anual de 21/10/2026" }));
+    const dlg2 = await screen.findByRole("dialog", { name: "Concluir intervenção" });
+    await preencher(dlg2, { "Km à saída": "231500", "Valor final (€)": "310" }, "Concluir");
+    await fechou("Concluir intervenção");
+    expect(aviso()).toHaveTextContent("Revisão anual concluída.");
+    expect(lerFrotaExemplo().viaturas.find((v) => v.id === "v4")?.rev.ultKm).toBe(231500);
+    // a aba Manutenção da ficha: as duas concluídas e sem botão Concluir
+    const fa = screen.getByRole("dialog");
+    expect(within(fa).getAllByText("concluída").length).toBeGreaterThanOrEqual(2);
+    expect(within(fa).queryByRole("button", { name: /^Concluir / })).toBeNull();
+    // os contadores do menu: o Hoje e a Manutenção descem um (a 12-TT-90 deixou de ter alertas graves e revisão a fazer)
+    expect(sem(contadores().hoje)).toBe(sem(antes.hoje) - 1);
+    expect(sem(contadores().manutencao)).toBe(sem(antes.manutencao) - 1);
+    // a Manutenção: as duas intervenções concluídas e a 12-TT-90 já não pede revisão
+    ir("/frota/manutencao");
+    for (const t of ["Inspeção periódica (IPO)", "Revisão anual"]) {
+      const l = screen.getAllByRole("row").find((r) => within(r).queryByText(t));
+      expect(within(l!).getByText("Concluída")).toBeInTheDocument();
+      expect(within(l!).queryByRole("button", { name: "Concluir" })).toBeNull();
+    }
+    expect(screen.getAllByRole("row").some((r) => within(r).queryByText("12-TT-90") && within(r).queryByRole("button", { name: "Agendar" }))).toBe(false);
+    // os Documentos: a IPO deixou de estar vencida
+    ir("/frota/documentos?vista=vencidos");
+    expect(screen.queryByRole("button", { name: "Renovar Inspeção (IPO) da 12-TT-90" })).toBeNull();
+    // os Custos: os dois valores entram como Oficina
+    ir("/frota/custos");
+    expect(screen.getByRole("row", { name: /Abrir os custos da 12-TT-90: Oficina de 14\/10\/2026, 37,30/ })).toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Abrir os custos da 12-TT-90: Oficina de 14\/10\/2026, 310,00/ })).toBeInTheDocument();
+    // o Hoje: sai dos documentos vencidos, das revisões a fazer e das próximas manutenções
+    ir("/frota/hoje");
+    expect(screen.getByRole("button", { name: /Documentos vencidos/ })).not.toHaveTextContent("12-TT-90");
+    expect(screen.getByRole("button", { name: /Revisões a fazer/ })).not.toHaveTextContent("12-TT-90");
+    expect(within(screen.getByRole("region", { name: "Próximas manutenções" })).queryByText(/^12-TT-90 · /)).toBeNull();
+    // a ficha (Documentos e Histórico) e a Atividade
+    const fd = await ficha("12-TT-90", "Documentos");
+    expect(within(fd).getByText("Válido até 14/10/2027")).toBeInTheDocument();
+    await noHistorico("12-TT-90", "Manutenção concluída", /Inspeção periódica \(IPO\) concluída/);
+    await noHistorico("12-TT-90", "Manutenção concluída", /Revisão anual concluída/);
+    naAtividade("Manutenção concluída", /Inspeção periódica \(IPO\) concluída/, "12-TT-90");
+    naAtividade("Manutenção concluída", /Revisão anual concluída/, "12-TT-90");
+  });
+
+  it("concluir pela ficha a reparação em curso: a viatura sai da oficina (ficha, Viaturas, Hoje), Manutenção, Histórico e Atividade", async () => {
+    const f = await ficha("BR-03-QP", "Manutenção");
+    const antes = contadores();
+    fireEvent.click(within(f).getByRole("button", { name: "Concluir Reparação · embraiagem de 08/10/2026" }));
+    const dlg = await screen.findByRole("dialog", { name: "Concluir intervenção" });
+    await preencher(dlg, { "Km à saída": "203950" }, "Concluir");
+    await fechou("Concluir intervenção");
+    expect(aviso()).toHaveTextContent("Reparação · embraiagem concluída. BR-03-QP volta a estar ativa.");
+    expect(within(screen.getByRole("dialog")).getByText("concluída")).toBeInTheDocument();
+    // continua a contar como viatura da frota e não tinha alertas graves: os contadores ficam iguais
+    expect(contadores()).toEqual(antes);
+    ir("/frota/viaturas");
+    expect(screen.getByRole("row", { name: "Abrir a BR-03-QP" })).toHaveTextContent("Ativa");
+    ir("/frota/manutencao");
+    const l = screen.getAllByRole("row").find((r) => within(r).queryByText("Reparação · embraiagem"))!;
+    expect(within(l).getByText("Concluída")).toBeInTheDocument();
+    ir("/frota/hoje");
+    expect(screen.getByRole("button", { name: /Em oficina/ })).not.toHaveTextContent("BR-03-QP");
+    expect(within(screen.getByRole("region", { name: "Próximas manutenções" })).queryByText(/^BR-03-QP · /)).toBeNull();
+    await noHistorico("BR-03-QP", "Manutenção concluída", "Reparação · embraiagem concluída. BR-03-QP volta a estar ativa.");
+    naAtividade("Manutenção concluída", "Reparação · embraiagem concluída. BR-03-QP volta a estar ativa.", "BR-03-QP");
+  });
+
+  it("renovar a IPO vencida pela ficha: aba Documentos e Histórico, Documentos, Custos, Hoje, contadores do menu e Atividade", async () => {
+    const f = await ficha("12-TT-90", "Documentos");
+    const antes = contadores();
+    expect(within(f).getByText("Vencido há 9 d")).toBeInTheDocument();
+    fireEvent.click(within(f).getByRole("button", { name: "Renovar Inspeção (IPO) da 12-TT-90" }));
+    const dlg = await screen.findByRole("dialog", { name: "Renovar documento" });
+    await preencher(dlg, { "Nova validade": "2027-10-05", "Valor pago (€)": "37.3" }, "Guardar");
+    await fechou("Renovar documento");
+    expect(aviso()).toHaveTextContent("Inspeção (IPO) da 12-TT-90 renovado até 05/10/2027.");
+    // a ficha continua aberta, na aba Documentos, com a nova validade e sem o vencido
+    const fa = screen.getByRole("dialog");
+    expect(within(fa).getByText("Válido até 05/10/2027")).toBeInTheDocument();
+    expect(within(fa).queryByText("Vencido há 9 d")).toBeNull();
+    expect(within(fa).getByText("2 alertas")).toBeInTheDocument();
+    // a revisão da 12-TT-90 continua grave: o contador do Hoje fica igual (conta viaturas com alertas graves)
+    expect(contadores()).toEqual(antes);
+    ir("/frota/documentos?vista=vencidos");
+    expect(screen.queryByRole("button", { name: "Renovar Inspeção (IPO) da 12-TT-90" })).toBeNull();
+    ir("/frota/documentos");
+    const l = screen.getAllByRole("row").find((r) => within(r).queryByText("12-TT-90") && within(r).queryByText("Inspeção (IPO)"))!;
+    expect(within(l).getByText("05/10/2027")).toBeInTheDocument();
+    ir("/frota/custos");
+    expect(screen.getByRole("row", { name: /Abrir os custos da 12-TT-90: Oficina de 14\/10\/2026, 37,30/ })).toBeInTheDocument();
+    ir("/frota/hoje");
+    expect(screen.getByRole("button", { name: /Documentos vencidos/ })).not.toHaveTextContent("12-TT-90");
+    await noHistorico("12-TT-90", "Documento renovado", "Inspeção (IPO) da 12-TT-90 renovado até 05/10/2027.");
+    naAtividade("Documento renovado", "Inspeção (IPO) da 12-TT-90 renovado até 05/10/2027.", "12-TT-90");
+  });
+
+  it("renovar pela ficha o seguro a vencer em 30 dias: sai dos Vencimentos em 30 dias do Hoje e dos Documentos", async () => {
+    const f = await ficha("AA-12-BC", "Documentos");
+    fireEvent.click(within(f).getByRole("button", { name: "Renovar Seguro da AA-12-BC" }));
+    const dlg = await screen.findByRole("dialog", { name: "Renovar documento" });
+    expect(within(dlg).getByLabelText("Nova validade")).toHaveValue("2027-11-02");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Guardar" }));
+    await fechou("Renovar documento");
+    expect(within(screen.getByRole("dialog")).getByText("Válida até 02/11/2027")).toBeInTheDocument();
+    ir("/frota/hoje");
+    expect(screen.getByRole("button", { name: /Vencimentos em 30 dias/ })).not.toHaveTextContent("Seguro AA-12-BC");
+    ir("/frota/documentos?vista=30d");
+    expect(screen.queryByRole("button", { name: "Renovar Seguro da AA-12-BC" })).toBeNull();
+    naAtividade("Documento renovado", "Seguro da AA-12-BC renovado até 02/11/2027.", "AA-12-BC");
+  });
+
+  it("um IUC isento não tem Renovar na ficha (como no ecrã Documentos)", async () => {
+    const f = await ficha("AF-77-LM", "Documentos");
+    expect(within(f).getByText("Isento (elétrico)")).toBeInTheDocument();
+    expect(within(f).queryByRole("button", { name: "Renovar IUC da AF-77-LM" })).toBeNull();
+    expect(within(f).getByRole("button", { name: "Renovar Seguro da AF-77-LM" })).toBeInTheDocument();
+  });
+
+  it("registar despesa pela ficha (aba Custos): já com a viatura, Custos, ficha, Histórico e Atividade", async () => {
+    const f = await ficha("45-XZ-78", "Custos");
+    fireEvent.click(within(f).getByRole("button", { name: "Registar despesa" }));
+    const dlg = await screen.findByRole("dialog", { name: "Registar despesa" });
+    expect(within(dlg).getByLabelText("Viatura")).toHaveValue("v2");
+    await preencher(dlg, { "Valor com IVA (€)": "12.4", Fornecedor: "Via Verde" }, "Registar");
+    await fechou("Registar despesa");
+    expect(aviso()).toHaveTextContent("Despesa de 12,40 € registada.");
+    expect(within(screen.getByRole("dialog")).getAllByText("12,40 €").length).toBeGreaterThan(0);
+    ir("/frota/custos");
+    expect(screen.getByRole("row", { name: /Abrir os custos da 45-XZ-78: Portagens de 14\/10\/2026, 12,40/ })).toBeInTheDocument();
+    await noHistorico("45-XZ-78", "Despesa", "Despesa de 12,40 € registada.");
+    naAtividade("Despesa", "Despesa de 12,40 € registada.", "45-XZ-78");
+  });
+
+  it("identificar o condutor de uma multa e cancelar uma reserva pela ficha: Ocorrências, Atribuições, Hoje, contadores do menu e Atividade", async () => {
+    const f = await ficha("BX-55-RT", "Ocorrências");
+    const antes = contadores();
+    fireEvent.click(within(f).getByRole("button", { name: "Identificar condutor" }));
+    const dlg = await screen.findByRole("dialog", { name: "Identificar condutor" });
+    // a sugestão é quem tinha a viatura nesse dia (a reserva de 29/09 a 01/10)
+    expect(within(dlg).getByLabelText("Condutor")).toHaveValue("p1");
+    fireEvent.click(within(dlg).getByRole("button", { name: "Identificar e notificar" }));
+    await fechou("Identificar condutor");
+    expect(aviso()).toHaveTextContent("Condutor identificado: João Silva.");
+    expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Identificar condutor" })).toBeNull();
+    expect(sem(contadores().ocorrencias)).toBe(sem(antes.ocorrencias) - 1);
+    expect(sem(contadores().hoje)).toBe(sem(antes.hoje) - 1);
+    ir("/frota/ocorrencias");
+    const lo = screen.getAllByRole("row").find((r) => within(r).queryByText("Estacionamento em lugar proibido"))!;
+    expect(within(lo).getByText("João Silva")).toBeInTheDocument();
+    ir("/frota/hoje");
+    expect(screen.getByRole("button", { name: /Multas por identificar/ })).toHaveTextContent(String(sem(antes.ocorrencias) - 1));
+    naAtividade("Condutor identificado", "Condutor identificado: João Silva. Notificação enviada.", "BX-55-RT");
+    // cancelar a reserva de 20/10 pela aba Atribuições da ficha (com a mesma confirmação das Atribuições)
+    const fa = await ficha("BX-55-RT", "Atribuições");
+    const linha = within(fa).getAllByRole("row").find((r) => within(r).queryByText("Substituição temporária"))!;
+    fireEvent.click(within(linha).getByRole("button", { name: "Cancelar" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancelar reserva" }));
+    await waitFor(() => expect(aviso()).toHaveTextContent("Reserva cancelada."));
+    expect(within(screen.getByRole("dialog")).queryByText("Substituição temporária")).toBeNull();
+    expect(lerFrotaExemplo().atrib.some((a) => a.id === "a8")).toBe(false);
+    ir("/frota/atribuicoes?vista=res");
+    expect(screen.getAllByRole("row").some((r) => within(r).queryByText("Marco Antunes") && within(r).queryByText("BX-55-RT"))).toBe(false);
+    ir("/frota/hoje");
+    expect(within(screen.getByRole("region", { name: "Próximas reservas" })).queryByText(/Marco Antunes/)).toBeNull();
+    await noHistorico("BX-55-RT", "Reserva cancelada", "Reserva cancelada. A viatura ficou livre na Agenda.");
+    naAtividade("Reserva cancelada", "Reserva cancelada. A viatura ficou livre na Agenda.", "BX-55-RT");
+  });
+});

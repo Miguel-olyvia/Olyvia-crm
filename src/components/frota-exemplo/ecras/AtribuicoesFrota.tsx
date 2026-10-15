@@ -19,8 +19,25 @@ const BLOCO = {
   ofi: "border-warning/80 bg-warning/20 text-amber-800 dark:text-warning",
 } as const;
 
+/** A ação de uma atribuição aberta (a mesma nas listas das Atribuições e na ficha da viatura): em curso → Devolver;
+ *  reserva futura → Cancelar (com confirmação). Fechada → nada. */
+export function AcaoAtribuicao({ a }: { a: Atribuicao }) {
+  const { F, dlg, agir, confirmar } = useFrotaCtx();
+  const aberta = !a.devolvida && (!a.fim || a.fim >= HOJE);
+  if (!aberta) return null;
+  if (a.ini <= HOJE) return <BotaoFrota escrita aoClicar={() => dlg("devolver", { a: a.id })}>Devolver</BotaoFrota>;
+  const v = viatura(F, a.vid), p = pessoa(F, a.pid);
+  return (
+    <BotaoFrota escrita aoClicar={() => confirmar({
+      titulo: "Cancelar a reserva", ok: "Cancelar reserva", perigo: true,
+      texto: `A reserva da ${v?.mat ?? "viatura"} para ${p?.nome ?? "—"} (${fData(a.ini)} a ${a.fim ? fData(a.fim) : "sem fim"}) sai da Frota e a viatura fica livre nesses dias.`,
+      aoConfirmar: () => agir((G) => cancelarReserva(G, a.id), (m) => m),
+    })}>Cancelar</BotaoFrota>
+  );
+}
+
 export function AtribuicoesFrota() {
-  const { F, abrir, dlg, agir, podeAgir, confirmar } = useFrotaCtx();
+  const { F, abrir, dlg, podeAgir } = useFrotaCtx();
   const [abaUrl, setAba] = useVista("semana");
   const aba = (["semana", "curso", "res", "hist"].includes(abaUrl) ? abaUrl : "semana") as Aba;
   // a semana do calendário vive no URL (?semana=1 = a próxima), para "Ver no calendário" abrir a semana certa
@@ -113,7 +130,6 @@ export function AtribuicoesFrota() {
         <TableBody>
           {l.map((a) => {
             const v = viatura(F, a.vid), p = pessoa(F, a.pid);
-            const aberta = !a.devolvida && (!a.fim || a.fim >= HOJE);
             return (
               <TableRow key={a.id}>
                 <TableCell>{v ? <Placa mat={v.mat} /> : null}</TableCell>
@@ -125,13 +141,7 @@ export function AtribuicoesFrota() {
                   {a.kmFim != null && a.kmIni != null ? <div className="text-xs text-muted-foreground">{fKm(a.kmFim - a.kmIni)} feitos</div> : null}
                 </TableCell>
                 <TableCell>{a.obra ? <RefObra id={a.obra}>{a.nota}</RefObra> : a.nota ?? ""}</TableCell>
-                <TableCell className="text-right">{aberta ? (a.ini <= HOJE
-                  ? <BotaoFrota escrita aoClicar={() => dlg("devolver", { a: a.id })}>Devolver</BotaoFrota>
-                  : <BotaoFrota escrita aoClicar={() => confirmar({
-                    titulo: "Cancelar a reserva", ok: "Cancelar reserva", perigo: true,
-                    texto: `A reserva da ${v?.mat ?? "viatura"} para ${p?.nome ?? "—"} (${fData(a.ini)} a ${a.fim ? fData(a.fim) : "sem fim"}) sai da Frota e a viatura fica livre nesses dias.`,
-                    aoConfirmar: () => agir((G) => cancelarReserva(G, a.id), (m) => m),
-                  })}>Cancelar</BotaoFrota>) : null}</TableCell>
+                <TableCell className="text-right"><AcaoAtribuicao a={a} /></TableCell>
               </TableRow>
             );
           })}

@@ -4,7 +4,7 @@
 // O rodapé tem as ações; sem a permissão real ficam desativadas e dizem porquê.
 import { useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, CalendarPlus, CircleAlert, FileText, Fuel, Gauge, Info, KeyRound, Package, PackagePlus, TriangleAlert } from "lucide-react";
+import { CalendarDays, CalendarPlus, CircleAlert, FileText, Fuel, Gauge, Info, KeyRound, Package, PackagePlus, Plus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -13,13 +13,14 @@ import { usePermissionGate } from "@/components/frota-exemplo/inventarioUi";
 import { cn } from "@/lib/utils";
 import { useFrotaCtx, type AbaFicha } from "./contexto";
 import { AvisoRegiao, BotaoFrota, Cartao, ListaV, Placa, Prog, RefObra, Selo, SeloEstado, Tabela, Vazio } from "./pecas";
-import { TOM_OCORR } from "./ecras/OcorrenciasFrota";
+import { AcaoOcorrencia, TOM_OCORR } from "./ecras/OcorrenciasFrota";
+import { AcaoAtribuicao } from "./ecras/AtribuicoesFrota";
 import { PERMISSAO_AGENDA } from "./dados/exemplo";
 import { pedidosDaCarrinha, pedirReposicaoExemplo } from "./dados/acoesApp";
 import { ListaHistorico } from "./ecras/AtividadeFrota";
 import {
   abaixoMin, alertas, atribEm, ativa, compromissos, condutor, consumo, custoKm, custoTotal, custosV, fData, fEur, fKm, fNum, kmPeriodo, pessoa, revisao,
-  soma, textoData, tomSelo, vencimentos, type Viatura,
+  soma, textoData, tomSelo, vencimentos, VENC, type ChaveVenc, type Viatura,
 } from "./dados";
 
 const ID_BASE = "frota-ficha";
@@ -80,11 +81,15 @@ function Resumo({ v }: { v: Viatura }) {
   );
 }
 
-const Linhas = ({ cab, vazio, children }: { cab: string[]; vazio: [string, string] | null; children: ReactNode }) => (
+/** Uma tabela da ficha; com `acoes`, leva no fim a coluna das ações (cabeçalho só para leitores de ecrã, como nos ecrãs). */
+const Linhas = ({ cab, vazio, acoes, children }: { cab: string[]; vazio: [string, string] | null; acoes?: boolean; children: ReactNode }) => (
   <Tabela>
     <Table>
-      <TableHeader><TableRow>{cab.map((h, i) => <TableHead key={h} className={cn(i === cab.length - 1 && /Valor|Km/.test(h) && "text-right")}>{h}</TableHead>)}</TableRow></TableHeader>
-      <TableBody>{vazio ? <TableRow><TableCell colSpan={cab.length}><Vazio titulo={vazio[0]} texto={vazio[1]} /></TableCell></TableRow> : children}</TableBody>
+      <TableHeader><TableRow>
+        {cab.map((h, i) => <TableHead key={h} className={cn(i === cab.length - 1 && /Valor|Km/.test(h) && "text-right")}>{h}</TableHead>)}
+        {acoes ? <TableHead><span className="sr-only">Ações</span></TableHead> : null}
+      </TableRow></TableHeader>
+      <TableBody>{vazio ? <TableRow><TableCell colSpan={cab.length + (acoes ? 1 : 0)}><Vazio titulo={vazio[0]} texto={vazio[1]} /></TableCell></TableRow> : children}</TableBody>
     </Table>
   </Tabela>
 );
@@ -96,7 +101,7 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
   if (aba === "atrib") {
     const l = F.atrib.filter((x) => x.vid === v.id).sort((x, y) => y.ini.localeCompare(x.ini));
     return (
-      <Linhas cab={["Condutor", "Tipo", "Período", "Km", "Motivo"]} vazio={l.length ? null : ["Sem atribuições", "Esta viatura nunca foi entregue a ninguém."]}>
+      <Linhas cab={["Condutor", "Tipo", "Período", "Km", "Motivo"]} acoes vazio={l.length ? null : ["Sem atribuições", "Esta viatura nunca foi entregue a ninguém."]}>
         {l.map((x) => (
           <TableRow key={x.id}>
             <TableCell>{pessoa(F, x.pid)?.nome}</TableCell>
@@ -104,6 +109,8 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
             <TableCell className="whitespace-nowrap">{fData(x.ini)} → {x.fim ? fData(x.fim) : "sem fim"}</TableCell>
             <TableCell className="tabular-nums">{x.kmIni != null ? fNum(x.kmIni) : "—"}{x.kmFim != null ? " → " + fNum(x.kmFim) : ""}</TableCell>
             <TableCell>{x.obra ? <RefObra id={x.obra}>{x.nota}</RefObra> : x.nota ?? ""}</TableCell>
+            {/* a mesma ação das listas das Atribuições: Devolver (em curso) ou Cancelar (reserva futura) */}
+            <TableCell className="text-right"><AcaoAtribuicao a={x} /></TableCell>
           </TableRow>
         ))}
       </Linhas>
@@ -117,12 +124,14 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
           <p className="text-sm text-muted-foreground">Regra: revisão a cada {fKm(v.rev.cadaKm)} ou {v.rev.cadaMeses} meses. Última aos {fKm(v.rev.ultKm)} em {fData(v.rev.ultData)}.</p>
           {ativa(v) ? <BotaoFrota escrita icone={CalendarPlus} aoClicar={() => dlg("manut", { v: v.id })}>Agendar manutenção</BotaoFrota> : null}
         </div>
-        <Linhas cab={["Data", "Intervenção", "Oficina", "Estado", "Valor"]} vazio={l.length ? null : ["Sem intervenções registadas", "Agenda a próxima revisão em Manutenção."]}>
+        <Linhas cab={["Data", "Intervenção", "Oficina", "Estado", "Valor"]} acoes vazio={l.length ? null : ["Sem intervenções registadas", "Agenda a próxima revisão em Manutenção."]}>
           {l.map((m) => (
             <TableRow key={m.id}>
               <TableCell className="whitespace-nowrap">{fData(m.data)}</TableCell><TableCell>{m.tipo}</TableCell><TableCell>{m.oficina}</TableCell>
               <TableCell><Selo tom={m.estado === "concluída" ? "ok" : m.estado === "em curso" ? "warn" : "info"}>{m.estado}</Selo></TableCell>
               <TableCell className="text-right tabular-nums">{fEur(m.valor)}</TableCell>
+              {/* o mesmo diálogo "Concluir intervenção" da Manutenção */}
+              <TableCell className="text-right">{m.estado !== "concluída" ? <BotaoFrota escrita aoClicar={() => dlg("concluir", { m: m.id })} aria-label={`Concluir ${m.tipo} de ${fData(m.data)}`}>Concluir</BotaoFrota> : null}</TableCell>
             </TableRow>
           ))}
         </Linhas>
@@ -145,6 +154,8 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
           ))}
         </Linhas>
         <p className="flex justify-between text-sm"><span className="text-muted-foreground">{l.length} lançamento(s)</span><b>Total {fEur(soma(l, (x) => x.valor))}</b></p>
+        {/* o mesmo diálogo "Registar despesa" dos Custos, já com esta viatura */}
+        {ativa(v) ? <div className="flex justify-end"><BotaoFrota escrita icone={Plus} aoClicar={() => dlg("despesa", { v: v.id })}>Registar despesa</BotaoFrota></div> : null}
       </>
     );
   }
@@ -155,23 +166,37 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFicha }) {
         <Cartao key={o.id} className="space-y-1">
           <div className="flex flex-wrap items-center justify-between gap-2"><b>{o.tipo} · {fData(o.quando.slice(0, 10))} {o.quando.slice(11)}</b><Selo tom={TOM_OCORR[o.estado] ?? "warn"}>{o.estado}</Selo></div>
           <p className="text-sm">{o.desc}</p>
-          <p className="text-xs text-muted-foreground">{o.local}{o.pid ? " · " + pessoa(F, o.pid)?.nome : ""}</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">{o.local}{o.pid ? " · " + pessoa(F, o.pid)?.nome : ""}</p>
+            {/* a mesma ação da lista das Ocorrências: Identificar condutor ou Marcar resolvida */}
+            <AcaoOcorrencia o={o} />
+          </div>
         </Cartao>
       ))}</div>
     ) : <Vazio titulo="Sem ocorrências" texto="Nenhuma multa, sinistro ou avaria registada." />;
   }
   if (aba === "docs") {
-    const docs: [string, string][] = [["Documento único automóvel (DUA)", "Permanente"], ["Apólice de seguro", v.venc.seguro ? "Válida até " + fData(v.venc.seguro) : "—"],
-      ["Certificado de inspeção", v.venc.ipo ? "Válido até " + fData(v.venc.ipo) : "—"], ["Comprovativo IUC", v.venc.iuc ? "Até " + fData(v.venc.iuc) : "Isento (elétrico)"], ["Carta verde", "Com a apólice"],
+    // [título, validade, o vencimento que se renova (seguro, IPO, IUC)]
+    const docs: [string, string, ChaveVenc?][] = [["Documento único automóvel (DUA)", "Permanente"], ["Apólice de seguro", v.venc.seguro ? "Válida até " + fData(v.venc.seguro) : "—", "seguro"],
+      ["Certificado de inspeção", v.venc.ipo ? "Válido até " + fData(v.venc.ipo) : "—", "ipo"], ["Comprovativo IUC", v.venc.iuc ? "Até " + fData(v.venc.iuc) : "Isento (elétrico)", "iuc"], ["Carta verde", "Com a apólice"],
       ...(v.fimContrato ? [["Contrato de " + v.posse.toLowerCase(), "Até " + fData(v.fimContrato)] as [string, string]] : [])];
     return (
       <Cartao>
-        <ListaV>{docs.map(([t, d]) => (
-          <div key={t}>
-            <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" /><span className="flex flex-col"><span>{t}</span><span className="text-xs text-muted-foreground">{d}</span></span></span>
-            <BotaoFrota aoClicar={() => avisar("Os ficheiros da viatura ficarão em Documentos quando a Frota tiver tabelas (exemplo).")}>Abrir</BotaoFrota>
-          </div>
-        ))}</ListaV>
+        <ListaV>{docs.map(([t, d, k]) => {
+          // renova-se o mesmo que o ecrã Documentos: só em viaturas ativas e só vencimentos com data (o IUC isento não)
+          const data = k ? v.venc[k] : null, renova = k && data && ativa(v) ? k : null;
+          return (
+            <div key={t}>
+              <span className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" aria-hidden="true" /><span className="flex flex-col"><span>{t}</span><span className="text-xs text-muted-foreground">{d}</span></span></span>
+              <span className="flex flex-wrap items-center justify-end gap-2">
+                {renova && data ? <Selo tom={tomSelo(data)}>{textoData(data)}</Selo> : null}
+                <BotaoFrota aoClicar={() => avisar("Os ficheiros da viatura ficarão em Documentos quando a Frota tiver tabelas (exemplo).")}>Abrir</BotaoFrota>
+                {/* o mesmo diálogo "Renovar documento" do ecrã Documentos */}
+                {renova ? <BotaoFrota escrita aoClicar={() => dlg("renovar", { v: v.id, k: renova })} aria-label={`Renovar ${VENC[renova]} da ${v.mat}`}>Renovar</BotaoFrota> : null}
+              </span>
+            </div>
+          );
+        })}</ListaV>
       </Cartao>
     );
   }

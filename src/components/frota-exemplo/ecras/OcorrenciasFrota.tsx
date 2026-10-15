@@ -9,11 +9,27 @@ import { dias, fData, fEur, maiuscula, pessoa, prazoMulta, quemConduzia, resolve
 
 export const TOM_OCORR: Record<EstadoOcorr, Tom> = { "por identificar": "bad", identificado: "info", "em resolução": "warn", participado: "info", resolvido: "ok", registada: "neu" };
 
-export function OcorrenciasFrota() {
+const pend = (o: Ocorrencia): boolean => o.tipo === "Multa" && o.estado === "por identificar";
+
+/** A ação de uma ocorrência (a mesma na lista das Ocorrências e na ficha da viatura): multa por identificar →
+ *  Identificar condutor; outra por resolver → Marcar resolvida (com confirmação); resolvida → nada. */
+export function AcaoOcorrencia({ o }: { o: Ocorrencia }) {
   const { F, dlg, agir, confirmar } = useFrotaCtx();
+  if (pend(o)) return <BotaoFrota escrita aoClicar={() => dlg("identificar", { o: o.id })}>Identificar condutor</BotaoFrota>;
+  if (o.estado === "resolvido") return null;
+  return (
+    <BotaoFrota escrita aoClicar={() => confirmar({
+      titulo: "Marcar a ocorrência como resolvida", ok: "Marcar resolvida",
+      texto: `${o.tipo} da ${viatura(F, o.vid)?.mat ?? "viatura"} de ${fData(o.quando.slice(0, 10))}: ${o.desc}`,
+      aoConfirmar: () => agir((G) => resolverOcorrencia(G, o.id), (m) => m),
+    })}>Marcar resolvida</BotaoFrota>
+  );
+}
+
+export function OcorrenciasFrota() {
+  const { F, dlg } = useFrotaCtx();
   const [vista, setVista] = useVista();
   const base = F.ocorr;
-  const pend = (o: Ocorrencia) => o.tipo === "Multa" && o.estado === "por identificar";
   const l = base.filter((o) => vista === "todas" || (vista === "pend" ? pend(o) : o.tipo === vista)).sort((a, b) => b.quando.localeCompare(a.quando));
   return (
     <div className="space-y-6">
@@ -48,12 +64,7 @@ export function OcorrenciasFrota() {
                     <TableCell>{o.pid ? pessoa(F, o.pid)?.nome : <div className="flex flex-col items-start gap-1"><Selo tom="bad">Por identificar</Selo>{sug ? <span className="text-xs text-muted-foreground">Sugestão: {sug.nome}</span> : null}</div>}</TableCell>
                     <TableCell>{pz ? <div className="flex flex-col items-start gap-1"><span>{fData(pz)}</span><Selo tom={dias(pz) <= 7 ? "bad" : "warn"}>{`Faltam ${dias(pz)} d`}</Selo></div> : "—"}</TableCell>
                     <TableCell><Selo tom={TOM_OCORR[o.estado] ?? "neu"}>{maiuscula(o.estado)}</Selo></TableCell>
-                    <TableCell className="text-right">{pz ? <BotaoFrota escrita aoClicar={() => dlg("identificar", { o: o.id })}>Identificar condutor</BotaoFrota>
-                      : o.estado !== "resolvido" ? <BotaoFrota escrita aoClicar={() => confirmar({
-                        titulo: "Marcar a ocorrência como resolvida", ok: "Marcar resolvida",
-                        texto: `${o.tipo} da ${viatura(F, o.vid)?.mat ?? "viatura"} de ${fData(o.quando.slice(0, 10))}: ${o.desc}`,
-                        aoConfirmar: () => agir((G) => resolverOcorrencia(G, o.id), (m) => m),
-                      })}>Marcar resolvida</BotaoFrota> : null}</TableCell>
+                    <TableCell className="text-right"><AcaoOcorrencia o={o} /></TableCell>
                   </TableRow>
                 );
               })}
