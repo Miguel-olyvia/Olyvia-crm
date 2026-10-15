@@ -7,8 +7,6 @@ export const canalDenunciasPt: Record<string, string> = {
   "cd.nav.nova": "Denunciar",
   "cd.nav.acompanhar": "Acompanhar",
   "cd.confianca": "A tua denúncia é tratada com confidencialidade e sem retaliação.",
-  "cd.exemplo": "Dados de exemplo: nada é guardado nem enviado.",
-  "cd.exemploPublico": "Página de exemplo: nada do que escreves aqui é guardado nem enviado a ninguém.",
   "cd.sim": "Sim",
   "cd.nao": "Não",
   "cd.semResponsavel": "Sem responsável",

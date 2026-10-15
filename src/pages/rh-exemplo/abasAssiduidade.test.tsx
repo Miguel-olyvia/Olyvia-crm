@@ -241,7 +241,7 @@ describe("A minha área: o menu", () => {
     expect(grupo()?.items?.some((i) => i.to === "/rh-exemplo/meus-custos")).toBe(false);
     expect(grupo()?.paths).not.toContain("/rh-exemplo/meus-custos");
     expect(grupo()?.items?.map((i) => i.to)).toEqual([
-      "/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/denunciar", "/rh-exemplo/minhas-denuncias",
+      "/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/minhas-denuncias",
     ]);
   });
 

@@ -1,8 +1,9 @@
-// O canal de denúncias no menu lateral: «Denunciar» e «As minhas denúncias» em «A minha área», «Denúncias» em «Recursos
+// O canal de denúncias no menu lateral: UMA entrada «Denúncias» em «A minha área», «Denúncias» em «Recursos
 // Humanos» com o contador de texto «N por confirmar» (só da organização ativa), e já sem o grupo próprio de antes.
 // Tudo em memória; as dependências de permissões e contadores são simuladas.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { Megaphone } from "lucide-react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { AppSidebar } from "@/components/AppSidebar";
@@ -54,15 +55,23 @@ beforeEach(() => {
 });
 
 describe("o menu do canal de denúncias", () => {
-  it("«Denunciar» e «As minhas denúncias» aparecem em «A minha área», com as entradas de antes", () => {
+  it("«Denúncias» é UMA só entrada em «A minha área», com as entradas de antes; «Denunciar» e «As minhas denúncias» já não existem", () => {
     expect(grupo("rh-exemplo-eu").items.map((i) => i.to)).toEqual([
-      "/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/denunciar", "/rh-exemplo/minhas-denuncias",
+      "/rh-exemplo/documentos", "/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/minhas-denuncias",
     ]);
-    expect(grupo("rh-exemplo-eu").paths).toEqual(expect.arrayContaining(["/rh-exemplo/denunciar", "/rh-exemplo/minhas-denuncias"]));
+    expect(grupo("rh-exemplo-eu").paths).toContain("/rh-exemplo/minhas-denuncias");
+    expect(grupo("rh-exemplo-eu").paths).not.toContain("/rh-exemplo/denunciar");
+    const entrada = grupo("rh-exemplo-eu").items.find((i) => i.to === "/rh-exemplo/minhas-denuncias")!;
+    expect(entrada).toMatchObject({ labelKey: "sidebar.rhExemploMinhasDenuncias", permission: "users.view" });
+    expect(entrada.icon).toBe(Megaphone);
     mostrar("rh-exemplo-eu");
     expect(screen.getByText("A minha área (exemplo)")).toBeInTheDocument();
-    expect(botao("Denunciar")).toBeInTheDocument();
-    expect(botao("As minhas denúncias")).toBeInTheDocument();
+    expect(botao("Denúncias")).toBeInTheDocument();
+    expect(screen.queryByText("Denunciar")).not.toBeInTheDocument();
+    expect(screen.queryByText("As minhas denúncias")).not.toBeInTheDocument();
+    expect(tr.pt["sidebar.rhExemploMinhasDenuncias"]).toBe("Denúncias");
+    expect(tr.pt["sidebar.rhExemploDenunciar"]).toBeUndefined();
+    expect(tr.en["sidebar.rhExemploDenunciar"]).toBeUndefined();
   });
 
   it("o grupo separado «Canal de denúncias (exemplo)» desapareceu e nenhuma entrada leva às páginas públicas", () => {

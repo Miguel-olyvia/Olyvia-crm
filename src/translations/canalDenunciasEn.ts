@@ -7,8 +7,6 @@ export const canalDenunciasEn: Record<string, string> = {
   "cd.nav.nova": "Report",
   "cd.nav.acompanhar": "Follow up",
   "cd.confianca": "Your report is handled confidentially and without retaliation.",
-  "cd.exemplo": "Example data: nothing is saved or sent.",
-  "cd.exemploPublico": "Example page: nothing you write here is saved or sent to anyone.",
   "cd.sim": "Yes",
   "cd.nao": "No",
   "cd.semResponsavel": "No case handler",

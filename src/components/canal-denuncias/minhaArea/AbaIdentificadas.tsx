@@ -1,7 +1,7 @@
 // A aba «Identificadas» de «As minhas denúncias»: as denúncias identificadas da própria pessoa, na organização ativa, com
-// o estado, o prazo e o resumo. Clicar numa abre o painel lateral com a conversa. Sem nenhuma, um estado vazio útil.
+// o estado, o prazo e o resumo. Clicar numa abre o painel lateral com a conversa. Sem nenhuma, um estado vazio útil
+// com «Nova denúncia» (secundário: o botão principal da página é só um).
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -11,15 +11,13 @@ import { prazoAtual } from "../lib/prazos";
 import type { Denuncia } from "../lib/tipos";
 import { PainelMinhaDenuncia } from "./PainelMinhaDenuncia";
 
-function SemDenuncias() {
+function SemDenuncias({ onNova }: { onNova: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="space-y-3 rounded-lg border border-dashed bg-card p-6 text-center">
       <p className="font-medium">{t("cdm.identificadas.vazioTitulo")}</p>
       <p className="mx-auto max-w-md text-sm text-muted-foreground">{t("cdm.identificadas.vazioTexto")}</p>
-      <Button asChild className="min-h-11">
-        <Link to="/rh-exemplo/denunciar">{t("cdm.denunciar.botao")}</Link>
-      </Button>
+      <Button type="button" variant="outline" className="min-h-11" onClick={onNova}>{t("cdm.denunciar.botao")}</Button>
     </div>
   );
 }
@@ -46,14 +44,14 @@ function Cartao({ d, onAbrir }: { d: Denuncia; onAbrir: (id: string) => void }) 
   );
 }
 
-export function AbaIdentificadas({ denuncias }: { denuncias: readonly Denuncia[] }) {
+export function AbaIdentificadas({ denuncias, onNova }: { denuncias: readonly Denuncia[]; onNova: () => void }) {
   const { t } = useTranslation();
   const [aberta, setAberta] = useState<string | null>(null);
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{t("cdm.identificadas.intro")}</p>
       {denuncias.length === 0 ? (
-        <SemDenuncias />
+        <SemDenuncias onNova={onNova} />
       ) : (
         <ul aria-label={t("cdm.identificadas.lista")} className="space-y-2">
           {denuncias.map((d) => <Cartao key={d.id} d={d} onAbrir={setAberta} />)}

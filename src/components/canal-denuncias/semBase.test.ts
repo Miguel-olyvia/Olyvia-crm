@@ -51,8 +51,8 @@ describe("canal-denuncias: sem ligação à base de dados", () => {
       "pages/canal-denuncias/NovaDenuncia.tsx",
       "pages/canal-denuncias/AcompanharDenuncia.tsx",
       "components/canal-denuncias/gestao/PaginaGestao.tsx",
-      "components/canal-denuncias/minhaArea/PaginaMinhasDenuncias.tsx",
-      "components/canal-denuncias/minhaArea/PaginaDenunciar.tsx",
+      "components/canal-denuncias/minhaArea/PaginaDenuncias.tsx",
+      "components/canal-denuncias/minhaArea/PainelNovaDenuncia.tsx",
     ]) {
       expect(nomes).toContain(esperado);
     }

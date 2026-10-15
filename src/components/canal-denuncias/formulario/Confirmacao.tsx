@@ -17,9 +17,13 @@ interface ConfirmacaoProps {
   acompanharTo?: string;
   /** Só dentro da app, numa denúncia anónima: guarda o CÓDIGO (nunca o PIN) em «As minhas denúncias», só nesta sessão. */
   onGuardarCodigo?: () => void;
+  /** Dentro de um painel: «Acompanhar esta denúncia» é um botão que faz isto (p.ex. fechar o painel), em vez de uma ligação. */
+  onAcompanhar?: () => void;
+  /** Dentro da app, numa denúncia identificada: em vez do aviso das anónimas, diz que ficou ligada à conta da pessoa. */
+  ligadaAConta?: boolean;
 }
 
-export function Confirmacao({ codigo, pin, onNova, acompanharTo = "/canal-denuncias/acompanhar", onGuardarCodigo }: ConfirmacaoProps) {
+export function Confirmacao({ codigo, pin, onNova, acompanharTo = "/canal-denuncias/acompanhar", onGuardarCodigo, onAcompanhar, ligadaAConta }: ConfirmacaoProps) {
   const { t } = useTranslation();
   const [copiado, setCopiado] = useState(false);
   const [guardado, setGuardado] = useState(false);
@@ -59,7 +63,7 @@ export function Confirmacao({ codigo, pin, onNova, acompanharTo = "/canal-denunc
       </dl>
       <div role="note" className="flex items-start gap-2 rounded-md border border-border bg-muted p-3 text-sm">
         <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        <p>{t("cd.conf.aviso")}</p>
+        <p>{ligadaAConta ? t("cdm.conf.ligada") : t("cd.conf.aviso")}</p>
       </div>
       <div>
         <h3 className="text-sm font-semibold">{t("cd.conf.prazos")}</h3>
@@ -69,9 +73,13 @@ export function Confirmacao({ codigo, pin, onNova, acompanharTo = "/canal-denunc
         </ul>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button asChild className="min-h-11">
-          <Link to={acompanharTo}>{t("cd.conf.acompanhar")}</Link>
-        </Button>
+        {onAcompanhar ? (
+          <Button type="button" className="min-h-11" onClick={onAcompanhar}>{t("cd.conf.acompanhar")}</Button>
+        ) : (
+          <Button asChild className="min-h-11">
+            <Link to={acompanharTo}>{t("cd.conf.acompanhar")}</Link>
+          </Button>
+        )}
         <Button type="button" variant="outline" className="min-h-11" onClick={copiar}>{t("cd.conf.copiar")}</Button>
         {onGuardarCodigo && (
           <Button type="button" variant="outline" className="min-h-11" disabled={guardado} onClick={guardar}>

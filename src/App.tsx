@@ -109,7 +109,6 @@ const RhPortalColaborador = lazy(() => import("./pages/rh-exemplo/RhPortalColabo
 const RhAdmissaoIndice = lazy(() => import("./pages/rh-exemplo/RhAdmissaoIndice"));
 const NovaDenuncia = lazy(() => import("./pages/canal-denuncias/NovaDenuncia"));
 const AcompanharDenuncia = lazy(() => import("./pages/canal-denuncias/AcompanharDenuncia"));
-const RhDenunciar = lazy(() => import("./pages/rh-exemplo/RhDenunciar"));
 const RhMinhasDenuncias = lazy(() => import("./pages/rh-exemplo/RhMinhasDenuncias"));
 const RhDenuncias = lazy(() => import("./pages/rh-exemplo/RhDenuncias"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
@@ -293,8 +292,8 @@ const App = () => (
                       <Route path="/rh-exemplo/admissao" element={<ProtectedRoute permission="users.view"><RhAdmissaoIndice /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
-                      {/* Canal de denúncias de exemplo, dentro da app: A minha área (denunciar e acompanhar) e a gestão no RH */}
-                      <Route path="/rh-exemplo/denunciar" element={<ProtectedRoute permission="users.view"><RhDenunciar /></ProtectedRoute>} />
+                      {/* Canal de denúncias de exemplo, dentro da app: A minha área (Denúncias: denunciar num painel e acompanhar) e a gestão no RH */}
+                      <Route path="/rh-exemplo/denunciar" element={<Navigate to="/rh-exemplo/minhas-denuncias?nova=1" replace />} />
                       <Route path="/rh-exemplo/minhas-denuncias" element={<ProtectedRoute permission="users.view"><RhMinhasDenuncias /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/denuncias" element={<ProtectedRoute permission="users.view"><RhDenuncias /></ProtectedRoute>} />
                       <Route path="/canal-denuncias/gestao" element={<Navigate to="/rh-exemplo/denuncias" replace />} />

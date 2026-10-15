@@ -1,6 +1,6 @@
 // O assistente de denúncia: passo 0 (anónima ou identificada) e quatro passos, com progresso e rascunho em memória.
 // Enviar guarda a denúncia na loja de exemplo e mostra o código e o PIN; nada sai desta página.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { guardarCodigo } from "../dados/codigosGuardados";
@@ -26,9 +26,24 @@ interface FormularioDenunciaProps {
   pessoa?: PessoaLigada;
   /** Para onde leva «Acompanhar esta denúncia» (por omissão, o acompanhamento público). */
   acompanharTo?: (anonima: boolean) => string;
+  /** Num painel lateral: o corpo rola, o rodapé fica fixo e «Acompanhar» faz isto em vez de navegar. Sem isto, é a página inteira. */
+  painel?: { onCancelar: () => void; onAcompanhar: (anonima: boolean) => void };
 }
 
-export function FormularioDenuncia({ organizacaoId, pessoa, acompanharTo }: FormularioDenunciaProps) {
+/** A confirmação dentro do painel: o corpo rola e o rodapé fixo só tem «Fechar». */
+function ConfirmacaoNoPainel({ onFechar, children }: { onFechar: () => void; children: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-1 overflow-y-auto p-6">{children}</div>
+      <div className="flex justify-end border-t bg-background px-6 py-4">
+        <Button type="button" variant="outline" className="min-h-11" onClick={onFechar}>{t("cdm.painel.fechar")}</Button>
+      </div>
+    </div>
+  );
+}
+
+export function FormularioDenuncia({ organizacaoId, pessoa, acompanharTo, painel }: FormularioDenunciaProps) {
   const { t } = useTranslation();
   const chave = chaveRascunho(organizacaoId, pessoa);
   const inicial = lerRascunho(chave);
@@ -83,31 +98,44 @@ export function FormularioDenuncia({ organizacaoId, pessoa, acompanharTo }: Form
   };
 
   if (enviada) {
-    return (
+    const confirmacao = (
       <Confirmacao
         codigo={enviada.codigo}
         pin={enviada.pin}
         acompanharTo={acompanharTo?.(enviada.anonima)}
         onGuardarCodigo={pessoa && enviada.anonima ? () => guardarCodigo(enviada.codigo) : undefined}
+        onAcompanhar={painel ? () => painel.onAcompanhar(enviada.anonima) : undefined}
+        ligadaAConta={pessoa !== undefined && !enviada.anonima}
         onNova={recomecar}
       />
     );
+    return painel ? <ConfirmacaoNoPainel onFechar={painel.onCancelar}>{confirmacao}</ConfirmacaoNoPainel> : confirmacao;
   }
 
   const props: PassoProps = { dados, erros, onChange: mudar };
   return (
-    <form noValidate onSubmit={(e) => e.preventDefault()} className="space-y-5 rounded-lg border bg-card p-5" aria-label={t("cd.formulario")}>
-      <ProgressoPassos passo={passo} titulo={t(CHAVES_PASSO[passo])} />
-      <h2 ref={titulo} tabIndex={-1} className="text-xl font-semibold outline-none">{t(CHAVES_PASSO[passo])}</h2>
-      {nErros > 0 && <p role="alert" className="text-sm font-medium text-destructive">{t("cd.erro.resumo", { n: nErros })}</p>}
-      {passo === 0 && <PassoModo {...props} />}
-      {passo === 1 && <PassoOQue {...props} />}
-      {passo === 2 && <PassoQuem {...props} />}
-      {passo === 3 && <PassoProvas {...props} />}
-      {passo === ULTIMO && <PassoRever {...props} onIrPara={(n) => { setRetorno(ULTIMO); irPara(n); }} />}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+    <form
+      noValidate
+      onSubmit={(e) => e.preventDefault()}
+      className={painel ? "flex min-h-0 flex-1 flex-col" : "space-y-5 rounded-lg border bg-card p-5"}
+      aria-label={t("cd.formulario")}
+    >
+      <div className={painel ? "flex-1 space-y-5 overflow-y-auto p-6" : "space-y-5"}>
+        <ProgressoPassos passo={passo} titulo={t(CHAVES_PASSO[passo])} />
+        <h2 ref={titulo} tabIndex={-1} className="text-xl font-semibold outline-none">{t(CHAVES_PASSO[passo])}</h2>
+        {nErros > 0 && <p role="alert" className="text-sm font-medium text-destructive">{t("cd.erro.resumo", { n: nErros })}</p>}
+        {passo === 0 && <PassoModo {...props} />}
+        {passo === 1 && <PassoOQue {...props} />}
+        {passo === 2 && <PassoQuem {...props} />}
+        {passo === 3 && <PassoProvas {...props} />}
+        {passo === ULTIMO && <PassoRever {...props} onIrPara={(n) => { setRetorno(ULTIMO); irPara(n); }} />}
+      </div>
+      <div className={painel ? "flex flex-wrap items-center justify-between gap-3 border-t bg-background px-6 py-4" : "flex flex-wrap items-center justify-between gap-3 border-t pt-4"}>
         <p className="max-w-xs text-xs text-muted-foreground">{t("cd.rascunho")}</p>
         <div className="flex gap-2">
+          {painel && (
+            <Button type="button" variant="ghost" className="min-h-11" onClick={painel.onCancelar}>{t("cdm.painel.cancelar")}</Button>
+          )}
           {passo > 0 && (
             <Button type="button" variant="outline" className="min-h-11" onClick={() => irPara(passo - 1)}>{t("cd.anterior")}</Button>
           )}

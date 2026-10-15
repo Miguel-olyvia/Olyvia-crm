@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CabecalhoPagina } from "../comum/CabecalhoPagina";
-import { LigacaoPublica } from "../comum/LigacaoPublica";
 import { useDenunciasDaOrganizacao } from "../dados/loja";
 import { HOJE_EXEMPLO } from "../lib/datas";
 import { SEM_FILTROS, filtrarDenuncias, totaisDaGestao, type FiltrosGestao } from "../lib/filtros";
@@ -37,7 +36,6 @@ export function PaginaGestao({ organizacaoId, organizacaoNome }: PaginaGestaoPro
         subtitulo={t("cd.gestao.subtitulo", { n: denuncias.length })}
         raiz={{ rotulo: t("sidebar.rhExemploModulo"), to: "/rh-exemplo/pessoas" }}
         organizacao={organizacaoNome}
-        acoes={<LigacaoPublica />}
       />
       <FaixaResponsavel />
       <TotaisCabecalho totais={totais} />

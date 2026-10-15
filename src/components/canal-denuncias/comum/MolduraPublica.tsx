@@ -1,7 +1,7 @@
 // A moldura das páginas públicas (sem sessão): o nome da organização, duas ligações e o texto de confiança.
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { FlaskConical, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -41,12 +41,6 @@ export function MolduraPublica({ organizacao, sufixo = "", children }: MolduraPu
         </p>
         {children}
       </main>
-      <footer className="mx-auto max-w-3xl px-4 pb-8">
-        <p role="note" className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
-          {t("cd.exemploPublico")}
-        </p>
-      </footer>
     </div>
   );
 }

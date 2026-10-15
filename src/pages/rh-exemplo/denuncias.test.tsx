@@ -1,18 +1,17 @@
-// O canal de denúncias DENTRO da app: «Denunciar» e «As minhas denúncias» (A minha área) e a gestão no RH. Uma denúncia
+// O canal de denúncias DENTRO da app: a página «Denúncias» (A minha área; «Nova denúncia» abre o assistente num painel) e a gestão no RH. Uma denúncia
 // identificada feita na app aparece na lista da pessoa; uma anónima não (só pelo código e PIN); a gestão mostra anónimas
 // e identificadas, nunca a identidade de uma anónima; e tudo é da organização ativa (as de outra não aparecem).
 // Tudo em memória, sem base.
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { lerDenuncias, repor, submeter } from "@/components/canal-denuncias/dados/loja";
 import { ORG_ATIVA, OUTRA_ORG } from "@/components/canal-denuncias/dados/organizacoes";
-import { PaginaMinhasDenuncias } from "@/components/canal-denuncias/minhaArea/PaginaMinhasDenuncias";
+import { PaginaDenuncias } from "@/components/canal-denuncias/minhaArea/PaginaDenuncias";
 import { FORMULARIO_VAZIO } from "@/components/canal-denuncias/lib/formulario";
 import { repor as reporRh } from "@/components/rh-exemplo/dados/loja";
 import NovaDenuncia from "@/pages/canal-denuncias/NovaDenuncia";
-import RhDenunciar from "./RhDenunciar";
 import RhDenuncias from "./RhDenuncias";
 import RhMinhasDenuncias from "./RhMinhasDenuncias";
 
@@ -26,7 +25,7 @@ const mostrar = (endereco: string) =>
     <LanguageProvider>
       <MemoryRouter initialEntries={[endereco]}>
         <Routes>
-          <Route path="/rh-exemplo/denunciar" element={<RhDenunciar />} />
+          <Route path="/rh-exemplo/denunciar" element={<Navigate to="/rh-exemplo/minhas-denuncias?nova=1" replace />} />
           <Route path="/rh-exemplo/minhas-denuncias" element={<RhMinhasDenuncias />} />
           <Route path="/rh-exemplo/denuncias" element={<RhDenuncias />} />
         </Routes>
@@ -46,6 +45,12 @@ const ANONIMO = /Quero denunciar de forma anónima/;
 const IDENTIFICAR = /Quero identificar-me/;
 const SOFIA = "Sofia Rebelo";
 const EMAIL_SOFIA = "sofia.rebelo@olyvia-exemplo.pt";
+
+/** Abre o painel «Nova denúncia» pelo botão da página (o do cabeçalho, o único primário). */
+const abrirPainel = (): HTMLElement => {
+  fireEvent.click(screen.getAllByRole("button", { name: "Nova denúncia" })[0]);
+  return screen.getByRole("dialog");
+};
 
 function denunciarAteEnviar(modo: RegExp): void {
   escolherModo(modo);
@@ -74,19 +79,53 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("A minha área > Denunciar", () => {
-  it("é o mesmo assistente do público, com o nome da organização ativa e a ligação discreta à página pública", () => {
-    mostrar("/rh-exemplo/denunciar");
-    expect(screen.getByRole("heading", { level: 1, name: "Denunciar" })).toBeInTheDocument();
+describe("A minha área > Denúncias: a página", () => {
+  it("tem UM botão primário «Nova denúncia», as duas abas e a organização ativa", () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    expect(screen.getByRole("heading", { level: 1, name: "Denúncias" })).toBeInTheDocument();
     expect(screen.getByText("Organização: Olyvia Retail (exemplo)")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: ANONIMO })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: IDENTIFICAR })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Ver a página pública (como a vê quem não tem login)" })).toHaveAttribute("href", "/canal-denuncias/nova");
+    expect(screen.getByRole("tab", { name: /^As minhas \(identificadas\)/, selected: true })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Anónimas \(acompanhar com código\)/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "A minha área (exemplo)" })).toBeInTheDocument();
+    const primarios = screen.getAllByRole("button").filter((b) => b.className.includes("bg-primary"));
+    expect(primarios).toHaveLength(1);
+    expect(primarios[0]).toHaveAccessibleName("Nova denúncia");
+    expect(screen.queryByRole("heading", { level: 1, name: "Denunciar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("não anuncia a página pública: sem «como a vê quem não tem login», sem «dados de exemplo» e sem ligações para /canal-denuncias", () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    abrirPainel();
+    for (const texto of [/página pública/i, /sem login|como a vê/i, /Dados de exemplo/i]) expect(document.body).not.toHaveTextContent(texto);
+    expect(document.querySelector('a[href^="/canal-denuncias"]')).toBeNull();
+    cleanup();
+    mostrar("/rh-exemplo/denuncias");
+    for (const texto of [/página pública/i, /sem login|como a vê/i, /Dados de exemplo/i]) expect(document.body).not.toHaveTextContent(texto);
+    expect(document.querySelector('a[href^="/canal-denuncias"]')).toBeNull();
+  });
+
+  it("«Nova denúncia» abre o assistente num painel com migalhas, foco inicial, Cancelar; Esc fecha e devolve o foco ao botão", async () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    const botao = screen.getAllByRole("button", { name: "Nova denúncia" })[0];
+    botao.focus();
+    fireEvent.click(botao);
+    const painel = screen.getByRole("dialog", { name: "Nova denúncia" });
+    expect(within(painel).getByRole("navigation", { name: "Caminho de navegação" })).toHaveTextContent("Denúncias");
+    expect(within(painel).getByRole("navigation", { name: "Caminho de navegação" })).toHaveTextContent("Nova denúncia");
+    expect(within(painel).getByRole("radio", { name: ANONIMO })).toBeInTheDocument();
+    expect(within(painel).getByRole("radio", { name: IDENTIFICAR })).toBeInTheDocument();
+    expect(within(painel).getByRole("button", { name: "Cancelar" })).toBeInTheDocument();
+    expect(within(painel).getByRole("button", { name: "Continuar" })).toBeInTheDocument();
+    expect(painel).toContainElement(document.activeElement as HTMLElement);
+    fireEvent.keyDown(painel, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(botao).toHaveFocus());
   });
 
   it("identificada: o nome e o email vêm da pessoa com a sessão; voltar a anónima não deixa nada da pessoa", () => {
-    mostrar("/rh-exemplo/denunciar");
+    mostrar("/rh-exemplo/minhas-denuncias");
+    abrirPainel();
     escolherModo(IDENTIFICAR);
     expect(screen.getByLabelText(/^Nome/)).toHaveValue(SOFIA);
     expect(screen.getByLabelText(/^Email/)).toHaveValue(EMAIL_SOFIA);
@@ -96,31 +135,79 @@ describe("A minha área > Denunciar", () => {
     expect(screen.getByLabelText(/^Nome/)).toHaveValue(SOFIA);
   });
 
-  it("uma denúncia identificada fica ligada à pessoa e da organização ativa, e mostra o código e o PIN", () => {
-    mostrar("/rh-exemplo/denunciar");
+  it("Cancelar fecha o painel sem criar nenhuma denúncia", () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    const antes = lerDenuncias().length;
+    abrirPainel();
+    clicar("Cancelar");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(lerDenuncias()).toHaveLength(antes);
+  });
+
+  it("identificada: o painel mostra o código, o PIN e «ficou ligada à tua conta»; ao fechar aparece em «As minhas»", () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    expect(cartoes()).toHaveLength(2);
+    abrirPainel();
     denunciarAteEnviar(IDENTIFICAR);
-    expect(screen.getByText("Denúncia enviada")).toBeInTheDocument();
-    expect(screen.getByText("DEN-2026-0042")).toBeInTheDocument();
-    expect(screen.getByText("500000")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Acompanhar esta denúncia" })).toHaveAttribute("href", "/rh-exemplo/minhas-denuncias?aba=identificadas");
-    expect(screen.queryByRole("button", { name: "Guardar o código nesta sessão" })).not.toBeInTheDocument();
+    const painel = screen.getByRole("dialog");
+    expect(within(painel).getByText("Denúncia enviada")).toBeInTheDocument();
+    expect(within(painel).getByText("DEN-2026-0042")).toBeInTheDocument();
+    expect(within(painel).getByText("500000")).toBeInTheDocument();
+    expect(within(painel).getByText(/ficou ligada à tua conta/)).toBeInTheDocument();
+    expect(within(painel).queryByRole("button", { name: "Guardar o código nesta sessão" })).not.toBeInTheDocument();
     expect(lerDenuncias().find((d) => d.codigo === "DEN-2026-0042")).toMatchObject({
       anonima: false, pessoaId: "p-sofia", organizationId: ORG_ATIVA.id, identidade: { nome: SOFIA, email: EMAIL_SOFIA },
     });
+    clicar("Fechar");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(cartoes()).toHaveLength(3);
+    expect(screen.getByText("DEN-2026-0042")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^As minhas \(identificadas\)/ })).toHaveTextContent("3");
   });
 
-  it("uma denúncia anónima não fica ligada à pessoa e oferece guardar só o código", () => {
-    mostrar("/rh-exemplo/denunciar");
+  it("«Acompanhar esta denúncia» no painel fecha-o e leva à aba certa, sem sair da página", () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    abrirPainel();
+    denunciarAteEnviar(IDENTIFICAR);
+    clicar("Acompanhar esta denúncia");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("endereco").textContent).toBe("/rh-exemplo/minhas-denuncias?aba=identificadas");
+    expect(cartoes()).toHaveLength(3);
+  });
+
+  it("anónima: o painel devolve código e PIN, guarda só o código, e a denúncia não aparece em «As minhas»", () => {
+    mostrar("/rh-exemplo/minhas-denuncias");
+    abrirPainel();
     denunciarAteEnviar(ANONIMO);
-    expect(screen.getByRole("link", { name: "Acompanhar esta denúncia" })).toHaveAttribute("href", "/rh-exemplo/minhas-denuncias?aba=anonimas");
-    expect(screen.getByRole("button", { name: "Guardar o código nesta sessão" })).toBeInTheDocument();
+    const painel = screen.getByRole("dialog");
+    expect(within(painel).getByText("DEN-2026-0042")).toBeInTheDocument();
+    expect(within(painel).getByText("500000")).toBeInTheDocument();
+    expect(within(painel).queryByText(/ficou ligada à tua conta/)).not.toBeInTheDocument();
+    fireEvent.click(within(painel).getByRole("button", { name: "Guardar o código nesta sessão" }));
+    expect(within(painel).getByRole("button", { name: "Código guardado" })).toBeDisabled();
     expect(lerDenuncias().find((d) => d.codigo === "DEN-2026-0042")).toMatchObject({
       anonima: true, pessoaId: null, identidade: null, organizationId: ORG_ATIVA.id,
     });
+    clicar("Fechar");
+    expect(cartoes()).toHaveLength(2);
+    expect(screen.queryByText("DEN-2026-0042")).not.toBeInTheDocument();
+    aba(/^Anónimas/);
+    expect(screen.getByRole("button", { name: "Usar o código DEN-2026-0042" })).toBeInTheDocument();
+  });
+
+  it("/rh-exemplo/denunciar redireciona para a página e abre já o painel; ao fechar, o endereço fica limpo", () => {
+    mostrar("/rh-exemplo/denunciar");
+    expect(screen.getByRole("dialog", { name: "Nova denúncia" })).toBeInTheDocument();
+    expect(screen.getByTestId("endereco").textContent).toBe("/rh-exemplo/minhas-denuncias?nova=1");
+    clicar("Cancelar");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("endereco").textContent).toBe("/rh-exemplo/minhas-denuncias");
+    expect(screen.getByRole("heading", { level: 1, name: "Denúncias" })).toBeInTheDocument();
   });
 
   it("o rascunho de dentro da app nunca aparece na página pública", () => {
-    mostrar("/rh-exemplo/denunciar");
+    mostrar("/rh-exemplo/minhas-denuncias");
+    abrirPainel();
     escolherModo(IDENTIFICAR);
     expect(screen.getByLabelText(/^Nome/)).toHaveValue(SOFIA);
     cleanup();
@@ -138,11 +225,9 @@ describe("A minha área > Denunciar", () => {
   });
 });
 
-describe("A minha área > As minhas denúncias", () => {
-  it("«Identificadas» lista as da própria pessoa, com estado e prazo, sem anónimas nem as de outra organização", () => {
+describe("A minha área > Denúncias: as abas", () => {
+  it("«As minhas» lista as da própria pessoa, com estado e prazo, sem anónimas nem as de outra organização", () => {
     mostrar("/rh-exemplo/minhas-denuncias");
-    expect(screen.getByRole("heading", { level: 1, name: "As minhas denúncias" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /^Identificadas/, selected: true })).toBeInTheDocument();
     const itens = cartoes();
     expect(itens).toHaveLength(2);
     const analise = itens.find((c) => within(c).queryByText("DEN-2026-0031"))!;
@@ -152,27 +237,6 @@ describe("A minha área > As minhas denúncias", () => {
     const concluida = itens.find((c) => within(c).queryByText("DEN-2026-0030"))!;
     expect(within(concluida).getByText("Concluída")).toBeInTheDocument();
     for (const alheio of ["DEN-2026-0007", "DEN-2026-0039", "DEN-2026-0040"]) expect(screen.queryByText(alheio)).not.toBeInTheDocument();
-  });
-
-  it("uma denúncia identificada feita na app aparece na lista; uma anónima não, e só se acompanha pelo código e PIN", () => {
-    mostrar("/rh-exemplo/denunciar");
-    denunciarAteEnviar(IDENTIFICAR);
-    fireEvent.click(screen.getByRole("link", { name: "Acompanhar esta denúncia" }));
-    expect(screen.getByTestId("endereco").textContent).toBe("/rh-exemplo/minhas-denuncias?aba=identificadas");
-    expect(cartoes()).toHaveLength(3);
-    expect(screen.getByText("DEN-2026-0042")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /^Identificadas/ })).toHaveTextContent("3");
-
-    cleanup();
-    mostrar("/rh-exemplo/denunciar");
-    denunciarAteEnviar(ANONIMO);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar o código nesta sessão" }));
-    expect(screen.getByRole("button", { name: "Código guardado" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("link", { name: "Acompanhar esta denúncia" }));
-    expect(screen.getByTestId("endereco").textContent).toBe("/rh-exemplo/minhas-denuncias?aba=anonimas");
-    aba(/^Identificadas/);
-    expect(cartoes()).toHaveLength(3);
-    expect(screen.queryByText("DEN-2026-0043")).not.toBeInTheDocument();
   });
 
   it("«Anónimas» explica a ausência de ligação e abre a denúncia pelo código e PIN, com a conversa", () => {
@@ -207,7 +271,7 @@ describe("A minha área > As minhas denúncias", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Não encontrámos nenhuma denúncia com estes dados");
   });
 
-  it("o painel lateral tem o estado, os prazos e a conversa, onde ela responde, sem notas internas nem gestão", () => {
+  it("o painel lateral de uma denúncia tem o estado, os prazos e a conversa, onde ela responde, sem notas internas nem gestão", () => {
     mostrar("/rh-exemplo/minhas-denuncias");
     fireEvent.click(screen.getByRole("button", { name: "Abrir denúncia DEN-2026-0031" }));
     const painel = screen.getByRole("dialog");
@@ -234,13 +298,15 @@ describe("A minha área > As minhas denúncias", () => {
     expect(within(painel).queryByLabelText("A tua resposta")).not.toBeInTheDocument();
   });
 
-  it("sem denúncias identificadas na organização ativa, o estado vazio leva a «Denunciar»", () => {
+  it("sem denúncias identificadas, o estado vazio tem «Nova denúncia» (secundário) e abre o painel", () => {
     render(
       <LanguageProvider>
         <MemoryRouter initialEntries={["/rh-exemplo/minhas-denuncias"]}>
           <Routes>
-            <Route path="/rh-exemplo/minhas-denuncias" element={<PaginaMinhasDenuncias organizacaoId={ORG_ATIVA.id} organizacaoNome={ORG_ATIVA.nome} pessoaId="p-sem-denuncias" />} />
-            <Route path="/rh-exemplo/denunciar" element={<RhDenunciar />} />
+            <Route
+              path="/rh-exemplo/minhas-denuncias"
+              element={<PaginaDenuncias organizacaoId={ORG_ATIVA.id} organizacaoNome={ORG_ATIVA.nome} pessoa={{ id: "p-sem-denuncias", nome: "Sem Denúncias", email: "sd@olyvia-exemplo.pt" }} />}
+            />
           </Routes>
           <Endereco />
         </MemoryRouter>
@@ -248,9 +314,19 @@ describe("A minha área > As minhas denúncias", () => {
     );
     expect(screen.getByText("Ainda não fizeste nenhuma denúncia identificada")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "As minhas denúncias identificadas" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("link", { name: "Denunciar" }));
-    expect(screen.getByTestId("endereco").textContent).toBe("/rh-exemplo/denunciar");
-    expect(screen.getByRole("heading", { level: 1, name: "Denunciar" })).toBeInTheDocument();
+    const botoes = screen.getAllByRole("button", { name: "Nova denúncia" });
+    expect(botoes).toHaveLength(2);
+    expect(botoes.filter((b) => b.className.includes("bg-primary"))).toHaveLength(1);
+    fireEvent.click(botoes[1]);
+    expect(screen.getByRole("dialog", { name: "Nova denúncia" })).toBeInTheDocument();
+  });
+
+  it("uma denúncia de outra organização não aparece na lista da pessoa, mesmo feita pela mesma pessoa", () => {
+    submeter({ ...FORMULARIO_VAZIO, anonima: false, nome: SOFIA, tipo: "fraude", descricao: "x".repeat(40), quando: "Hoje", boaFe: true },
+      { organizationId: OUTRA_ORG.id, pessoaId: "p-sofia" });
+    mostrar("/rh-exemplo/minhas-denuncias");
+    expect(cartoes()).toHaveLength(2);
+    expect(screen.queryByText("DEN-2026-0042")).not.toBeInTheDocument();
   });
 });
 
@@ -259,7 +335,6 @@ describe("Recursos Humanos > Denúncias", () => {
     mostrar("/rh-exemplo/denuncias");
     expect(screen.getByRole("heading", { level: 1, name: "Gestão de denúncias" })).toBeInTheDocument();
     expect(screen.getByText("Organização: Olyvia Retail (exemplo)")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Ver a página pública (como a vê quem não tem login)" })).toHaveAttribute("href", "/canal-denuncias/nova");
     expect(screen.getByRole("tab", { name: /^Todas/ })).toHaveTextContent("12");
     expect(screen.getByRole("tab", { name: /^Anónimas/ })).toHaveTextContent("5");
     expect(screen.getByRole("tab", { name: /^Identificadas/ })).toHaveTextContent("7");

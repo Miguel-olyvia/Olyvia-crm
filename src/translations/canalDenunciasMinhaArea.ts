@@ -1,34 +1,34 @@
-// Textos do canal de denúncias DENTRO da app: «A minha área» (Denunciar, As minhas denúncias) e a entrada «Denúncias» do
+// Textos do canal de denúncias DENTRO da app: «A minha área» (Denúncias: denunciar e acompanhar) e a entrada «Denúncias» do
 // menu de RH (chaves `cdm.*` e `sidebar.rhExemplo...`). Módulo próprio, juntado em `useTranslation.ts`. Apenas en/pt:
 // nas outras línguas o `t()` cai para `en`.
 
 const pt: Record<string, string> = {
   // Menu lateral
-  "sidebar.rhExemploDenunciar": "Denunciar",
-  "sidebar.rhExemploMinhasDenuncias": "As minhas denúncias",
+  "sidebar.rhExemploMinhasDenuncias": "Denúncias",
   "sidebar.rhExemploDenuncias": "Denúncias",
   "sidebar.rhExemploDenunciasPorConfirmar": "{n} por confirmar",
 
   // Comuns às páginas dentro da app
   "cdm.organizacao": "Organização: {nome}",
-  "cdm.verPublica": "Ver a página pública (como a vê quem não tem login)",
   "cdm.guardarCodigo": "Guardar o código nesta sessão",
   "cdm.codigoGuardado": "Código guardado",
   "cdm.guardarCodigoNota": "O código ficou guardado só neste ecrã e esquece-se ao recarregar a página. O PIN não se guarda.",
   "cdm.semFicha.titulo": "Sem ficha ligada à tua sessão",
   "cdm.semFicha.texto": "Para denunciar ou acompanhar denúncias aqui, a tua sessão tem de estar ligada a uma ficha de Recursos Humanos.",
 
-  // Denunciar
-  "cdm.denunciar.titulo": "Denunciar",
+  // Nova denúncia (painel lateral)
   "cdm.denunciar.subtitulo": "Conta-nos o que se passa. Podes denunciar de forma anónima ou identificada: escolhes no primeiro passo.",
-  "cdm.denunciar.botao": "Denunciar",
+  "cdm.denunciar.botao": "Nova denúncia",
+  "cdm.painel.cancelar": "Cancelar",
+  "cdm.painel.fechar": "Fechar",
+  "cdm.conf.ligada": "Esta denúncia ficou ligada à tua conta: acompanha-a em «As minhas (identificadas)». O código e o PIN servem também para a seguires de fora da app.",
 
-  // As minhas denúncias
-  "cdm.minhas.titulo": "As minhas denúncias",
-  "cdm.minhas.subtitulo": "Acompanha as denúncias que fizeste identificado e as que fizeste de forma anónima.",
+  // Denúncias (a página)
+  "cdm.minhas.titulo": "Denúncias",
+  "cdm.minhas.subtitulo": "Denuncia o que se passa e acompanha as tuas denúncias: as identificadas aqui, as anónimas com o código e o PIN.",
   "cdm.minhas.abas": "Identificadas ou anónimas",
-  "cdm.minhas.identificadas": "Identificadas",
-  "cdm.minhas.anonimas": "Anónimas",
+  "cdm.minhas.identificadas": "As minhas (identificadas)",
+  "cdm.minhas.anonimas": "Anónimas (acompanhar com código)",
   "cdm.identificadas.intro": "As denúncias que fizeste identificado ficam ligadas à tua ficha. Só o responsável do canal as vê, e só ele pode ver quem és.",
   "cdm.identificadas.lista": "As minhas denúncias identificadas",
   "cdm.identificadas.recebidaEm": "Recebida a {data}",
@@ -50,31 +50,31 @@ const pt: Record<string, string> = {
 
 const en: Record<string, string> = {
   // Side menu
-  "sidebar.rhExemploDenunciar": "Report a concern",
-  "sidebar.rhExemploMinhasDenuncias": "My reports",
+  "sidebar.rhExemploMinhasDenuncias": "Reports",
   "sidebar.rhExemploDenuncias": "Reports",
   "sidebar.rhExemploDenunciasPorConfirmar": "{n} to confirm",
 
   // Common to the in-app pages
   "cdm.organizacao": "Organization: {nome}",
-  "cdm.verPublica": "See the public page (as someone without a login sees it)",
   "cdm.guardarCodigo": "Keep the code for this session",
   "cdm.codigoGuardado": "Code kept",
   "cdm.guardarCodigoNota": "The code is kept on this screen only and is forgotten when the page reloads. The PIN is never kept.",
   "cdm.semFicha.titulo": "No profile linked to your session",
   "cdm.semFicha.texto": "To report or follow reports here, your session must be linked to a Human Resources profile.",
 
-  // Report
-  "cdm.denunciar.titulo": "Report a concern",
+  // New report (side panel)
   "cdm.denunciar.subtitulo": "Tell us what is going on. You can report anonymously or with your name: you choose in the first step.",
-  "cdm.denunciar.botao": "Report a concern",
+  "cdm.denunciar.botao": "New report",
+  "cdm.painel.cancelar": "Cancel",
+  "cdm.painel.fechar": "Close",
+  "cdm.conf.ligada": "This report is now linked to your account: follow it under \"Mine (identified)\". The code and PIN also work to follow it from outside the app.",
 
-  // My reports
-  "cdm.minhas.titulo": "My reports",
-  "cdm.minhas.subtitulo": "Follow the reports you made with your name and the ones you made anonymously.",
+  // Reports (the page)
+  "cdm.minhas.titulo": "Reports",
+  "cdm.minhas.subtitulo": "Report what is going on and follow your reports: the identified ones here, the anonymous ones with the code and PIN.",
   "cdm.minhas.abas": "Identified or anonymous",
-  "cdm.minhas.identificadas": "Identified",
-  "cdm.minhas.anonimas": "Anonymous",
+  "cdm.minhas.identificadas": "Mine (identified)",
+  "cdm.minhas.anonimas": "Anonymous (follow with a code)",
   "cdm.identificadas.intro": "Reports you made with your name are linked to your profile. Only the channel manager sees them, and only they can see who you are.",
   "cdm.identificadas.lista": "My identified reports",
   "cdm.identificadas.recebidaEm": "Received on {data}",

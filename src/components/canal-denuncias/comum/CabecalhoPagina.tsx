@@ -1,8 +1,8 @@
-// Cabeçalho das páginas de gestão: migalhas, título, resumo numa linha e a faixa de «dados de exemplo». É uma cópia do
+// Cabeçalho das páginas de gestão: migalhas, título e resumo numa linha. É uma cópia do
 // padrão do módulo de negócios (sem o importar), com os textos do canal de denúncias.
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Building2, ChevronRight, FlaskConical } from "lucide-react";
+import { Building2, ChevronRight } from "lucide-react";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -40,10 +40,6 @@ export function CabecalhoPagina({ titulo, subtitulo, raiz, organizacao, acoes }:
             {t("cdm.organizacao", { nome: organizacao })}
           </p>
         )}
-        <p role="note" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-          <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
-          {t("cd.exemplo")}
-        </p>
       </div>
       {acoes && <div className="flex flex-wrap items-center gap-2">{acoes}</div>}
     </header>

@@ -386,15 +386,14 @@ export const menuSections: MenuSection[] = [
     id: "rh-exemplo-eu",
     icon: CalendarDays,
     labelKey: "sidebar.rhExemploEu",
-    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos", "/rh-exemplo/denunciar", "/rh-exemplo/minhas-denuncias"],
+    paths: ["/rh-exemplo/ausencias", "/rh-exemplo/assiduidade", "/rh-exemplo/documentos", "/rh-exemplo/minhas-denuncias"],
     permissions: ["users.view"],
     items: [
       { to: "/rh-exemplo/documentos", icon: FolderOpen, labelKey: "sidebar.rhExemploDocumentos", permission: "users.view" },
       { to: "/rh-exemplo/ausencias", icon: CalendarDays, labelKey: "sidebar.rhExemploAusencias", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade", icon: Clock, labelKey: "sidebar.rhExemploAssiduidade", permission: "users.view" },
-      // Canal de denúncias, do lado de quem denuncia: o assistente (anónima ou identificada) e o acompanhamento.
-      { to: "/rh-exemplo/denunciar", icon: Megaphone, labelKey: "sidebar.rhExemploDenunciar", permission: "users.view" },
-      { to: "/rh-exemplo/minhas-denuncias", icon: ClipboardCheck, labelKey: "sidebar.rhExemploMinhasDenuncias", permission: "users.view" },
+      // Canal de denúncias, do lado de quem denuncia: UMA entrada (denunciar num painel e acompanhar nas abas).
+      { to: "/rh-exemplo/minhas-denuncias", icon: Megaphone, labelKey: "sidebar.rhExemploMinhasDenuncias", permission: "users.view" },
     ],
   },
   {
