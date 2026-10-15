@@ -659,7 +659,7 @@ function PassoOutros({ ctx, K, obr }: { ctx: P; K: Catalogo; obr: Obrigacao[] })
 /** Os blocos de "o que o cliente fornece" desta visita (selecao.ts: blocosFornece). */
 function blocosDaVisita(ctx: P, K: Catalogo, obr: Obrigacao[]): BlocoFornece[] {
   const { S, d } = ctx;
-  return blocosFornece(d, obr, orcLinhas(d, S), { arvore: K.arvore, exige: K.exigeProduto ?? {}, nomeSvc: (sid) => nomeSvc(S, sid), svc: (sid) => servicoLeitura(S, sid) });
+  return blocosFornece(d, obr, orcLinhas(d, S), { arvore: K.arvore, exige: K.exigeProduto ?? {}, nomeSvc: (sid) => nomeSvc(S, sid) });
 }
 const ATALHO = "min-h-11 rounded-xl border px-4 text-[15px] font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 const atalho = (on: boolean) => cn(ATALHO, on ? "border-2 border-primary bg-primary/[0.06] text-foreground" : "border-input bg-card text-foreground hover:border-foreground/30");
@@ -691,8 +691,7 @@ function PassoFornece({ ctx, obr, faseSvc }: { ctx: P; obr: Obrigacao[]; faseSvc
   );
 }
 
-const TIPO_TXT: Record<ItemFornece["tipo"], string> = { produto: "Produto", servico: "Material", cons: "Consumível", equip: "Equipamento" };
-const FIG: Record<"cons" | "equip", IlustracaoKey> = { cons: "material", equip: "ferramenta" };
+const TIPO_TXT: Record<ItemFornece["tipo"], string> = { produto: "Produto", servico: "Material" };
 
 /** Um serviço: o nome, os atalhos dele, o que baixa, e os cartões (os 6 que mais pesam; o resto com "Ver mais"). */
 function BlocoServico({ ctx, K, b, fase }: { ctx: P; K: Catalogo; b: BlocoFornece; fase: FaseObra | null }) {
@@ -710,7 +709,6 @@ function BlocoServico({ ctx, K, b, fase }: { ctx: P; K: Catalogo; b: BlocoFornec
     return [TIPO_TXT[it.tipo], qtd, it.valor ? `${eur(it.valor)} €` : ""].filter(Boolean).join(" · ");
   };
   const figura = (it: ItemFornece) => {
-    if (it.tipo === "cons" || it.tipo === "equip") return FIG[it.tipo];
     const doCat = it.tipo === "produto" ? K.produtos.find((p) => p.id === it.id) : undefined;
     return doCat ? ilustracaoDoCatalogo(K.arvore, doCat) : ilustracaoDe(it.n);
   };

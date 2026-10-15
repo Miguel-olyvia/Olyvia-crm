@@ -6,8 +6,7 @@
 // · O resumo ("6 serviços · 3 produtos · 1.240 € estimado") e o que falta, em palavras.
 import { CATALOGO_TODO, normal, type LinhaCat } from "./catalogo";
 import { juntarDivisoes } from "./campos";
-import { menosDaLinha } from "./forneceCliente";
-import { LINHAS, forneceDaVisita, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
+import { LINHAS, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import { caminho, oficioDe, oficios, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
 import { ativosDoPacote, precoProduto, qtdSugerida, servicosTrazidos, type Obrigacao } from "./produtosVisita";
 import { iconeDoServico, ilustracaoDoProduto, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
@@ -281,8 +280,7 @@ export function resumoNecessidades(S: Estado, d: Negocio, sids: SvcId[]): Resumo
     if (!s) continue;
     servicos++;
     const q = qtdNaVisita(d, sid, ativos, tr);
-    const menos = menosDaLinha(forneceDaVisita(d), sid, s); // o que o cliente fornece da receita sai do preço
-    total += q * Math.max(0, s.preco - menos.eq - menos.cons);
+    total += q * s.preco;
   }
   const ps = prod.filter((p) => p.q > 0);
   for (const p of ps) if (!p.cliente) total += precoProduto(p);

@@ -160,7 +160,7 @@ export const AREA: Grupo = {
     { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "escolha", op: ["2,4 m", "2,5 m", "2,6 m", "2,7 m", "2,8 m", "3 m ou mais"], papel: "plano" },
     { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "contador", min: 0, max: 30, papel: "plano" },
     { k: "diag_gas", bloco: "Instalações da divisão", l: "Gás na área", t: "escolha", op: ["Não há", "Manter", "Anular", "Instalar"], papel: "plano" },
-    { k: "diag_toalheiro", bloco: "Instalações da divisão", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano" },
+    { k: "diag_toalheiro", bloco: "Instalações da divisão", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano", se: { k: "@divisao", v: ["Casa de banho"] } },
     { k: "diag_janela", bloco: "Instalações da divisão", l: "Janela na área", t: "sim_nao", ajuda: "Sem janela, os trabalhos com pó são mais lentos.", papel: "plano" },
     { k: "diag_local_cortes", bloco: "Trabalho e proteções", l: "Onde se fazem os cortes", t: "escolha", op: ["Na própria área", "Varanda", "Fora (garagem, rua)"], papel: "plano" },
     { k: "diag_distancia_entrada", bloco: "Trabalho e proteções", l: "Da entrada até à área", t: "escolha", op: ["Curta (até 5 m)", "Média (5–15 m)", "Longa (+15 m)"], papel: "sugestoes" },
@@ -174,7 +174,7 @@ export const ESCOLHAS: Grupo = {
   titulo: "Escolhas do cliente",
   campos: [
     { k: "materiais_cliente", l: "O cliente fornece materiais", t: "sim_nao", papel: "orcamento" },
-    { k: "mobilidade_reduzida", l: "Mobilidade reduzida", t: "sim_nao", ajuda: "O cliente ou alguém da casa tem mobilidade reduzida (pesa nas escolhas: base de duche, barras, alturas)." },
+    { k: "mobilidade_reduzida", l: "Mobilidade reduzida", t: "sim_nao", ajuda: "O cliente ou alguém da casa tem mobilidade reduzida (pesa nas escolhas: base de duche, barras, alturas).", se: { k: "@divisoes", v: ["Casa de banho"] } },
     { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara", opcional: true },
   ],
 };
@@ -275,7 +275,15 @@ export const alternarVarios = (op: string[], v: string, x: string): string => {
   return op.filter((o) => s.has(o)).join(", ");
 };
 
-export const visivel = (c: Def, v: Record<string, string>) => !c.se || c.se.v.includes(v[c.se.k] || "");
+export const visivel = (c: Def, v: Record<string, string>) => {
+  if (!c.se) return true;
+  // 15/10: duas condições especiais, pela divisão (um campo de casa de banho não aparece numa cozinha):
+  // "@divisao": a divisão principal (nas outras divisões, gruposArea já tira o campo); "@divisoes": alguma das escolhidas.
+  // Sem divisão escolhida, não aparecem (a divisão é a primeira pergunta da área).
+  if (c.se.k === "@divisao") { const dp = divisaoPrincipal(v); return !!dp && c.se.v.includes(dp); }
+  if (c.se.k === "@divisoes") return divisoesEscolhidas(v).some((x) => c.se!.v.includes(x));
+  return c.se.v.includes(v[c.se.k] || "");
+};
 
 /** Obrigatório para passar de fase: tudo, menos o texto livre e o que está marcado como opcional. */
 export const obrigatorio = (c: Def) => c.obrigatorio ?? (!c.opcional && c.t !== "texto_longo");
@@ -400,8 +408,9 @@ export function gruposArea(cfg: CfgCampos | undefined, f: Record<string, string>
   const ef = efetivo(cfg, AREA);
   const outros = ds.filter((x) => x !== princ).map((div): Grupo => {
     const p = prefixoDivisao(div);
-    const campos = camposPorDivisao(ef).map((c) => {
-      const se = c.se && c.se.k !== "diag_tipo_area" ? { k: p + c.se.k, v: c.se.v } : c.se;
+    // um campo só de outra divisão (ex.: o toalheiro, só de casa de banho) não entra nesta
+    const campos = camposPorDivisao(ef).filter((c) => c.se?.k !== "@divisao" || c.se.v.includes(div)).map((c) => {
+      const se = c.se?.k === "@divisao" ? undefined : c.se && c.se.k !== "diag_tipo_area" ? { k: p + c.se.k, v: c.se.v } : c.se;
       return comNome(div, { ...c, k: p + c.k, se });
     });
     return { titulo: `${AREA.titulo} · ${div}`, campos };

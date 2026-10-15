@@ -8,7 +8,6 @@ import { nfmt, servicosVisita, type MedKey, type Negocio, type Servico, type Svc
 import type { Catalogo, No, Produto } from "./v2/catalogoModelo";
 import { nosAbaixo, precoProduto, qtdSugerida, textoClienteCompra, type Obrigacao } from "./produtosVisita";
 import { categoriaDe, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, palavrasDe, procurarServicos, qtdNaVisita, sugestaoQtd, tituloObrigacao, type TileServico } from "./necessidades";
-import { itensReceita } from "./forneceCliente";
 import type { IlustracaoKey } from "./ilustracoes";
 
 type A = ReturnType<typeof acoes>;
@@ -246,7 +245,7 @@ export function trocaResolvida(o: Pick<Obrigacao, "pergunta">, escolhidos: { n: 
  * `valor`: quanto baixa no total quando está ligado (€); `q` e `un`: a quantidade, para a 2.ª linha.
  */
 export interface ItemFornece {
-  k: string; tipo: "produto" | "servico" | "cons" | "equip"; id: string; n: string; on: boolean; no?: string | null; texto?: string;
+  k: string; tipo: "produto" | "servico"; id: string; n: string; on: boolean; no?: string | null; texto?: string;
   sid?: SvcId; valor?: number; q?: number; un?: string;
 }
 /** Tudo o que pode ser fornecido pelo cliente fora das receitas: os produtos escolhidos e o material das trocas sem produto escolhido. */
@@ -270,20 +269,17 @@ const r2 = (x: number) => Math.round(x * 100) / 100;
  * Os produtos que não são de nenhum serviço ficam num bloco "Outros produtos", no fim.
  */
 export function blocosFornece(d: Negocio, obr: Obrigacao[], sids: SvcId[], o: {
-  arvore: No[]; exige: Partial<Record<SvcId, string>>; nomeSvc: (sid: SvcId) => string; svc: (sid: SvcId) => Servico | null | undefined;
+  arvore: No[]; exige: Partial<Record<SvcId, string>>; nomeSvc: (sid: SvcId) => string;
 }): BlocoFornece[] {
-  const base = itensFornece(d, obr, o.nomeSvc), usados = new Set<string>(), fornece = d.visita.fornece ?? {};
+  const base = itensFornece(d, obr, o.nomeSvc), usados = new Set<string>();
   const prod = new Map((d.visita.prod ?? []).map((p) => [p.id, p]));
   const blocos = sids.map((sid): BlocoFornece => {
     const no = o.exige[sid], ramo = no ? nosAbaixo(o.arvore, no) : null;
     const ps = base.filter((it) => it.tipo === "produto" && !usados.has(it.k) && (prod.get(it.id)?.svc === sid || (!!ramo && !!it.no && ramo.has(it.no))));
     ps.forEach((it) => usados.add(it.k));
     const troca = base.filter((it) => it.tipo === "servico" && it.id === sid);
-    const q = qtdNaVisita(d, sid);
-    const rec = itensReceita(sid, o.svc(sid)).map((r): ItemFornece => ({
-      k: `${sid}|${r.k}`, tipo: r.tipo, id: r.k, sid, n: r.n, on: (fornece[sid] ?? []).includes(r.k), valor: r2(r.cu * q), q: r2(r.q * q), un: r.un,
-    }));
-    return { sid, titulo: o.nomeSvc(sid), itens: [...ps, ...troca, ...rec].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0)) };
+    // 15/10: o cliente só fornece produtos (os consumíveis e os equipamentos das receitas são sempre da empresa)
+    return { sid, titulo: o.nomeSvc(sid), itens: [...ps, ...troca].sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0)) };
   }).filter((b) => b.itens.length);
   const resto = base.filter((it) => it.tipo === "produto" && !usados.has(it.k)).sort((a, b) => (b.valor ?? 0) - (a.valor ?? 0));
   return resto.length ? [...blocos, { sid: null, titulo: "Outros produtos", itens: resto }] : blocos;
@@ -295,12 +291,11 @@ export const poupanca = (itens: ItemFornece[]) => r2(itens.reduce((a, it) => a +
  * Liga ou desliga "o cliente fornece": o produto fica a zero (a instalação mantém-se); o serviço fica com "o cliente compra";
  * o consumível e o equipamento saem do custo da linha do serviço (a mão de obra fica).
  */
-export function marcarFornece(A: Pick<A, "produtoCliente" | "clienteCompra" | "forneceItem">, d: Negocio, it: ItemFornece, on: boolean) {
+export function marcarFornece(A: Pick<A, "produtoCliente" | "clienteCompra">, d: Negocio, it: ItemFornece, on: boolean) {
   if (it.tipo === "produto") A.produtoCliente(d.id, it.id, on);
-  else if (it.tipo === "servico") A.clienteCompra(d.id, it.id, on ? it.texto ?? it.n : null);
-  else A.forneceItem(d.id, it.sid!, it.id, on);
+  else A.clienteCompra(d.id, it.id, on ? it.texto ?? it.n : null);
 }
-export function fornecerTodos(A: Pick<A, "produtoCliente" | "clienteCompra" | "forneceItem">, d: Negocio, itens: ItemFornece[], on: boolean) {
+export function fornecerTodos(A: Pick<A, "produtoCliente" | "clienteCompra">, d: Negocio, itens: ItemFornece[], on: boolean) {
   for (const it of itens) if (it.on !== on) marcarFornece(A, d, it, on);
 }
 

@@ -8,9 +8,8 @@
 // E as escolhas do cliente (cores, mobilidade) à parte dos materiais; um "Não" não se mostra.
 import { LINHA_DEMOLICAO } from "./entulho";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
-import { PREFIXO_FORNECE, itensReceita } from "./forneceCliente";
 import type { Estado, Negocio } from "./motor";
-import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
+import { PREFIXO_CLIENTE, PREFIXO_PROD, precoProduto } from "./produtosVisita";
 
 const nfmt = (x: number) => String(Math.round(x * 100) / 100).replace(".", ",");
 
@@ -44,9 +43,9 @@ const limpar = (s: string) => s.replace(/\s*\([+−-]?\s*\d+(?:[,.]\d+)?\s*%\)/g
 export function linhaDeMaterial(d: string): { grupo: Grupo; item: Item } {
   if (d === LINHA_DEMOLICAO) return { grupo: "trabalhos", item: { nome: "Demolição e remoção de entulho", det: "operador licenciado, com e-GAR" } };
   if (d.startsWith(PREFIXO_LEV)) return { grupo: "preparacao", item: { nome: maiuscula(limpar(d.slice(PREFIXO_LEV.length))) } };
-  if (d.startsWith(PREFIXO_FORNECE) || d.startsWith(PREFIXO_CLIENTE)) {
+  if (d.startsWith(PREFIXO_CLIENTE)) {
     // "Sacos de entulho (Demolição e entulho)": o serviço entre parênteses diz para que é
-    const resto = limpar(d.slice(PREFIXO_FORNECE.length)), m = resto.match(/^(.*?)\s*\(([^()]+)\)$/);
+    const resto = limpar(d.slice(PREFIXO_CLIENTE.length)), m = resto.match(/^(.*?)\s*\(([^()]+)\)$/);
     return { grupo: "cliente", item: m ? { nome: maiuscula(m[1]), det: `para ${m[2].toLowerCase()}` } : { nome: maiuscula(resto) } };
   }
   if (d.startsWith(PREFIXO_PROD)) return { grupo: "materiais", item: { nome: maiuscula(limpar(d.slice(PREFIXO_PROD.length))) } };
@@ -104,15 +103,8 @@ export function fornecidosPeloCliente(d: Negocio, S: Estado): Fornecido[] {
   };
   const linhas = d.orc?.linhas ?? [];
   const sim = d.f.materiais_cliente === "Sim";
-  for (const l of linhas) {
-    if (l.t !== "svc" || !(l.q > 0) || !sim) continue;
-    const ks = d.visita.fornece?.[l.sid];
-    if (!ks?.length) continue;
-    const s = S.svc[l.sid];
-    for (const it of itensReceita(l.sid, s)) if (ks.includes(it.k)) juntar({ nome: maiuscula(it.n), det: s ? `para ${s.n.toLowerCase()}` : undefined, poupa: it.cu * l.q });
-  }
-  // sem as receitas ligadas (ou a mais): as linhas "Fornecido pelo cliente · …" do orçamento
+  // 15/10: o cliente só fornece produtos; as linhas "Fornecido pelo cliente · …" do orçamento e os produtos marcados como dele
   for (const l of linhas) if (l.t === "mat") { const { grupo, item } = linhaDeMaterial(l.d); if (grupo === "cliente") juntar({ ...item, poupa: 0 }); }
-  for (const p of d.visita.prod ?? []) if (p.cliente && p.q > 0) juntar({ nome: maiuscula(p.n), det: quantidade(p.q, p.un) || undefined, poupa: 0 });
+  for (const p of d.visita.prod ?? []) if (p.cliente && p.q > 0) juntar({ nome: maiuscula(p.n), det: quantidade(p.q, p.un) || undefined, poupa: precoProduto(p) });
   return [...out.values()];
 }

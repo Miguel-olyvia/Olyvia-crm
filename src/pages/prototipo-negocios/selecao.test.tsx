@@ -4,9 +4,6 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, criarOrc, partes, seed, servicosVisita, tot, type Estado, type LinhaOrc, type Negocio } from "./motor";
-import { ligarReceitas, itensReceita } from "./forneceCliente";
-import { itensDaReceita } from "./v2/custosModelo";
-import { lerCustos } from "./v2/custosStore";
 import { resumoNecessidades } from "./necessidades";
 import { FiltrosFila } from "./CartoesSelecao";
 import { itemCatalogo } from "./catalogo";
@@ -41,8 +38,8 @@ function preparar() {
   preencher(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
   return { S, A, d };
 }
-beforeEach(() => { window.localStorage.clear(); ligarCatalogo(lerCatalogo); ligarReceitas((sid, s) => itensDaReceita(lerCustos(), sid, s)); });
-afterEach(() => { cleanup(); ligarCatalogo(null); ligarReceitas(null); reporCatalogo(); vi.useRealTimers(); });
+beforeEach(() => { window.localStorage.clear(); ligarCatalogo(lerCatalogo); });
+afterEach(() => { cleanup(); ligarCatalogo(null); reporCatalogo(); vi.useRealTimers(); });
 
 /* ------------------------------------------------------------------ nomes curtos */
 describe("os nomes nos cartões: no máximo o essencial, o resto na 2.ª linha", () => {
@@ -462,115 +459,74 @@ function comFornece() {
   r.d.visita.manter = { pav: "sim" };
   tocarProdutoGuiado(r.A, K, r.d, obrigacoes(K, ["loucas"], r.d.visita)[0], prodN("Sanita compacta"));
   const obr = () => obrigacoesAMostrar(obrigacoes(K, servicosVisita(r.d), r.d.visita, true), r.d);
-  const blocos = () => blocosFornece(r.d, obr(), servicosVisita(r.d), { arvore: K.arvore, exige: K.exigeProduto ?? {}, nomeSvc: (s) => r.S.svc[s]?.n ?? s, svc: (s) => r.S.svc[s] });
+  const blocos = () => blocosFornece(r.d, obr(), servicosVisita(r.d), { arvore: K.arvore, exige: K.exigeProduto ?? {}, nomeSvc: (s) => r.S.svc[s]?.n ?? s });
   return { ...r, K, obr, blocos };
 }
 const linhaSvc = (ls: LinhaOrc[], sid: string) => ls.find((l): l is Extract<LinhaOrc, { t: "svc" }> => l.t === "svc" && l.sid === sid)!;
 
-describe("o que o cliente fornece, por serviço", () => {
-  it("um bloco por serviço com os produtos, os consumíveis e os equipamentos da receita, por ordem de custo", () => {
-    const { d, blocos } = comFornece();
+describe("o que o cliente fornece, por serviço (15/10: só produtos)", () => {
+  it("só aparecem produtos (e o material das trocas sem produto): nunca consumíveis nem equipamentos das receitas", () => {
+    const { blocos } = comFornece();
     const bs = blocos();
-    const canal = bs.find((b) => b.sid === "canal")!;
-    expect(canal.itens.map((x) => x.tipo).sort()).toEqual(["cons", "cons", "cons", "equip"]);
-    const tubo = canal.itens.find((x) => x.n === "Tubo multicamada 16 mm")!;
-    expect(tubo.q).toBe(3 * d.visita.med.pts); // 3 m por ponto × os pontos de água
-    expect(tubo.valor).toBeCloseTo(3 * 1.9 * d.visita.med.pts, 2);
-    const valores = canal.itens.map((x) => x.valor ?? 0);
-    expect([...valores].sort((a, b) => b - a)).toEqual(valores);
+    expect(bs.flatMap((b) => b.itens).every((x) => x.tipo === "produto" || x.tipo === "servico")).toBe(true);
+    expect(bs.some((b) => b.sid === "canal")).toBe(false); // a canalização não tem produto: não há nada a fornecer
     const loucas = bs.find((b) => b.sid === "loucas")!;
-    expect(loucas.itens.some((x) => x.tipo === "produto" && x.n === "Sanita compacta")).toBe(true);
-    expect(loucas.itens.some((x) => x.n === "Silicone sanitário")).toBe(true);
+    expect(loucas.itens.map((x) => x.n)).toEqual(["Sanita compacta"]);
   });
 
-  it("o produto, o consumível e o equipamento saem do custo; a mão de obra fica", () => {
+  it("o produto fornecido fica a zero e a instalação mantém-se; as linhas de serviço não mudam", () => {
     const { S, A, d, blocos } = comFornece();
-    const antes = criarOrc(d, S), pAntes = partes({ ...d, orc: antes }, S);
-    const canal = blocos().find((b) => b.sid === "canal")!;
-    const prensa = canal.itens.find((x) => x.tipo === "equip")!, tubo = canal.itens.find((x) => x.n === "Tubo multicamada 16 mm")!;
-    const sanita = blocos().find((b) => b.sid === "loucas")!.itens.find((x) => x.tipo === "produto")!;
-    marcarFornece(A, d, prensa, true);
-    marcarFornece(A, d, tubo, true);
+    const antes = criarOrc(d, S);
+    const sanita = blocos().find((b) => b.sid === "loucas")!.itens[0];
     marcarFornece(A, d, sanita, true);
-    expect([...(d.visita.fornece?.canal ?? [])].sort()).toEqual(["c:Tubo multicamada 16 mm", prensa.id].sort());
-    const depois = criarOrc(d, S), pDepois = partes({ ...d, orc: depois }, S);
-    const la = linhaSvc(antes.linhas, "canal"), ld = linhaSvc(depois.linhas, "canal");
-    const porUn = itensReceita("canal", S.svc.canal).filter((x) => ["c:Tubo multicamada 16 mm", prensa.id].includes(x.k)).reduce((a, x) => a + x.cu, 0);
-    expect(ld.cu).toBeCloseTo(la.cu - porUn, 2);
-    expect(ld.pu).toBeCloseTo(la.pu - porUn, 2);
-    expect(pDepois.mo).toBeCloseTo(pAntes.mo, 6); // a mão de obra fica
-    expect(pDepois.cons).toBeLessThan(pAntes.cons);
-    expect(pDepois.eq).toBeLessThan(pAntes.eq);
-    // no orçamento, com a marca "fornecido pelo cliente"
-    const marcas = depois.linhas.filter((l) => l.t === "mat" && l.d.startsWith(PREFIXO_CLIENTE)).map((l) => (l as { d: string }).d);
-    expect(marcas).toEqual(expect.arrayContaining([PREFIXO_CLIENTE + "Sanita compacta", expect.stringContaining("Tubo multicamada 16 mm"), expect.stringContaining(prensa.n)]));
-    // o produto fica a zero e a instalação mantém-se
-    expect(servicosVisita(d)).toContain("c13");
+    const depois = criarOrc(d, S);
+    for (const sid of ["canal", "loucas"]) {
+      const la = linhaSvc(antes.linhas, sid), ld = linhaSvc(depois.linhas, sid);
+      if (la) expect(ld).toEqual(la);
+    }
+    expect(depois.linhas.some((l) => l.t === "mat" && l.d === PREFIXO_CLIENTE + "Sanita compacta")).toBe(true);
     expect(depois.linhas.some((l) => l.t === "mat" && l.d === PREFIXO_PROD + "Sanita compacta")).toBe(false);
+    expect(servicosVisita(d)).toContain("c13");
   });
 
-  it("o custo do orçamento bate certo: baixa exatamente o que o passo diz", () => {
+  it("o total baixa exatamente o que o passo diz (o preço dos produtos)", () => {
     const { S, A, d, blocos } = comFornece();
-    const antes = criarOrc(d, S), tAntes = tot({ ...d, orc: antes }, S), rAntes = resumoNecessidades(S, d, servicosVisita(d)).total;
-    const todos = blocos().flatMap((b) => b.itens);
-    fornecerTodos(A, d, todos, true);
+    const tAntes = tot({ ...d, orc: criarOrc(d, S) }, S), rAntes = resumoNecessidades(S, d, servicosVisita(d)).total;
+    fornecerTodos(A, d, blocos().flatMap((b) => b.itens), true);
     const menos = poupanca(blocos().flatMap((b) => b.itens));
-    const depois = criarOrc(d, S), tDepois = tot({ ...d, orc: depois }, S);
+    const tDepois = tot({ ...d, orc: criarOrc(d, S) }, S);
     expect(menos).toBeGreaterThan(0);
     expect(tAntes.preco - tDepois.preco).toBeCloseTo(menos, 1);
     expect(rAntes - resumoNecessidades(S, d, servicosVisita(d)).total).toBeCloseTo(menos, 1);
-    // o custo baixa pelo custo dos produtos (não pelo preço de venda) e pelos consumíveis e equipamentos
     const custoProd = d.visita.prod!.reduce((a, p) => a + p.custo * p.q, 0);
-    const recDesc = todos.filter((x) => x.tipo === "cons" || x.tipo === "equip").reduce((a, x) => a + (x.valor ?? 0), 0);
-    expect(tAntes.custo - tDepois.custo).toBeCloseTo(custoProd + recDesc, 0);
+    expect(tAntes.custo - tDepois.custo).toBeCloseTo(custoProd, 0);
   });
 
-  it("os atalhos: 'Fornece tudo' e 'Nenhum', gerais e de um serviço", () => {
-    const { A, d, blocos } = comFornece();
-    const canal = blocos().find((b) => b.sid === "canal")!;
-    fornecerTodos(A, d, canal.itens, true);
-    expect(blocos().find((b) => b.sid === "canal")!.itens.every((x) => x.on)).toBe(true);
-    expect(blocos().filter((b) => b.sid !== "canal").flatMap((b) => b.itens).some((x) => x.on)).toBe(false);
+  it("os atalhos 'Fornece tudo' e 'Nenhum'; responder 'Não' limpa as marcas", () => {
+    const { S, A, d, blocos } = comFornece();
     fornecerTodos(A, d, blocos().flatMap((b) => b.itens), true);
     expect(blocos().flatMap((b) => b.itens).every((x) => x.on)).toBe(true);
     fornecerTodos(A, d, blocos().flatMap((b) => b.itens), false);
     expect(blocos().flatMap((b) => b.itens).some((x) => x.on)).toBe(false);
-    expect(d.visita.fornece).toBeUndefined();
-  });
-
-  it("responder 'Não' a 'fornece materiais' limpa tudo (produtos, trocas, consumíveis e equipamentos)", () => {
-    const { S, A, d, blocos } = comFornece();
     fornecerTodos(A, d, blocos().flatMap((b) => b.itens), true);
     A.campo(d.id, "materiais_cliente", "Não");
-    expect(d.visita.fornece).toBeUndefined();
     expect(d.visita.prod!.some((p) => p.cliente)).toBe(false);
     expect(criarOrc(d, S).linhas.some((l) => l.t === "mat" && l.d.startsWith(PREFIXO_CLIENTE))).toBe(false);
   });
 
-  it("no ecrã: um bloco por serviço, os 6 primeiros, os atalhos e o que baixa; sobrevive a voltar atrás", () => {
+  it("no ecrã: o produto liga e desliga, e o estado sobrevive a voltar atrás", () => {
     const { S, d } = comFornece();
-    d.visita.extra.c3 = 1;
     render(<Montar S={S} d={d} />);
-    // tudo resolvido: abre no resumo; vai-se ao fornece
     fireEvent.click(screen.getByRole("button", { name: /^O que o cliente fornece/ }));
     expect(titulo()).toBe("O que o cliente fornece");
-    const canal = () => screen.getByRole("region", { name: /Canaliza/i });
-    const lista = within(canal()).getByRole("list");
-    expect(within(lista).getAllByRole("listitem").length).toBeLessThanOrEqual(6);
-    const prensa = within(lista).getByRole("button", { name: /^Prensa/ });
-    fireEvent.click(prensa);
-    expect(prensa).toHaveAttribute("aria-pressed", "true");
-    expect(within(canal()).getByLabelText(/^Baixa .* euros$/)).toBeInTheDocument();
-    // voltar atrás e regressar: o estado está na visita
+    const sanita = () => screen.getByRole("button", { name: /^Sanita compacta/ });
+    fireEvent.click(sanita());
+    expect(sanita()).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText(/Consumível|Equipamento/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
     expect(titulo()).toBe("Escolhas do cliente");
     seguinte();
-    expect(within(canal()).getByRole("button", { name: /^Prensa/ })).toHaveAttribute("aria-pressed", "true");
-    // o atalho do serviço e o geral
-    fireEvent.click(within(screen.getByRole("group", { name: /^Atalhos de Canaliza/ })).getByRole("button", { name: "Fornece tudo" }));
-    expect(d.visita.fornece?.canal?.length).toBe(4);
-    fireEvent.click(within(screen.getByRole("group", { name: "Atalhos para tudo" })).getByRole("button", { name: "Nenhum" }));
-    expect(d.visita.fornece).toBeUndefined();
+    expect(sanita()).toHaveAttribute("aria-pressed", "true");
   });
 });
 

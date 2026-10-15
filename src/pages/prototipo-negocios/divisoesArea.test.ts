@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AREA, CHAVE_PRINCIPAL, gruposArea, juntarDivisoes, reorganizarDivisoes } from "./campos";
+import { AREA, CHAVE_PRINCIPAL, ESCOLHAS, gruposArea, juntarDivisoes, reorganizarDivisoes, visivel } from "./campos";
 import { efeitosDoLevantamento } from "./efeitosLevantamento";
 import { acoes, protecoesSugeridas, seed, tot } from "./motor";
 
@@ -44,5 +44,27 @@ describe("área de intervenção com várias divisões", () => {
     A.campo(d.id, "diag_tipo_area", "Casa de banho, Quarto");
     expect(d.f[CHAVE_PRINCIPAL]).toBe("Casa de banho");
     expect(S.deals.filter((x) => x.orc && x.id !== 1050).map((x) => tot(x, S).pf)).toEqual(antes.filter((_, i) => S.deals.filter((x) => x.orc)[i].id !== 1050));
+  });
+});
+
+describe("campos só de casa de banho (15/10)", () => {
+  const toalheiro = AREA.campos.find((c) => c.k === "diag_toalheiro")!;
+  const mob = ESCOLHAS.campos.find((c) => c.k === "mobilidade_reduzida")!;
+  it("numa cozinha não aparecem o toalheiro elétrico nem a mobilidade reduzida", () => {
+    const f = { diag_tipo_area: "Cozinha" };
+    expect(visivel(toalheiro, f)).toBe(false);
+    expect(visivel(mob, f)).toBe(false);
+  });
+  it("numa casa de banho aparecem", () => {
+    const f = { diag_tipo_area: "Casa de banho" };
+    expect(visivel(toalheiro, f)).toBe(true);
+    expect(visivel(mob, f)).toBe(true);
+  });
+  it("cozinha e casa de banho: o toalheiro só no grupo da casa de banho; a mobilidade pergunta-se", () => {
+    const f: Record<string, string> = { diag_tipo_area: "Cozinha, Casa de banho", [CHAVE_PRINCIPAL]: "Cozinha" };
+    const [base, wc] = gruposArea(undefined, f);
+    expect(base.campos.filter((c) => visivel(c, f)).some((c) => c.k === "diag_toalheiro")).toBe(false);
+    expect(wc.campos.some((c) => c.k.endsWith("diag_toalheiro") && visivel(c, f))).toBe(true);
+    expect(visivel(mob, f)).toBe(true);
   });
 });

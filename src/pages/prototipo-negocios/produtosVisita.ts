@@ -106,8 +106,6 @@ export interface NecVisita {
   manter?: Record<SvcId, "sim" | "nao">;
   /** O cliente compra o produto deste serviço: o texto do que compra (fica no orçamento a zero). */
   clienteCompra?: Record<SvcId, string>;
-  /** O que o cliente fornece da receita de cada serviço (14/10): "c:<consumível>" e "e:<equipamento>" (forneceCliente.ts). */
-  fornece?: Record<SvcId, string[]>;
 }
 
 /**
