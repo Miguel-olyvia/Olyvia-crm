@@ -5,12 +5,13 @@
 // Cada trilho abre o detalhe: as linhas da encomenda (stock e falta), o fornecedor, e o plano por fases com os técnicos.
 // A lógica está em preparacaoObra.ts; aqui só se desenha.
 import { useState } from "react";
-import { CalendarRange, Check, ChevronDown, Euro, FileSignature, HardHat, Lock, Package, TriangleAlert } from "lucide-react";
+import { ChevronRight, CalendarRange, Check, ChevronDown, Euro, FileSignature, HardHat, Lock, Package, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
-import { NotaEncomendaDoc, Partilhar } from "./DocsCliente";
+import { ContratoDoc, NotaEncomendaDoc, Partilhar } from "./DocsCliente";
+import { SeloAssinatura } from "./AssinaturaContrato";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { FORNECEDORES, TRILHOS, faltaParaArrancar, passosPreparacao, totalEf, type PassoPrep, type Trilho } from "./preparacaoObra";
@@ -34,6 +35,37 @@ function Quem({ who }: { who: Papel | null }) {
       <span className="grid h-5 w-5 place-items-center rounded-full bg-muted text-[10px] font-semibold text-foreground" aria-hidden="true">{PAPEIS[who].av}</span>
       {PAPEIS[who].n}
     </span>
+  );
+}
+
+/** O contrato assinado (15/10): a assinatura do cliente (o desenho ou o selo digital), quem, quando e como, e o contrato à mão. */
+export function ContratoAssinado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const [ver, setVer] = useState(false);
+  const o = d.orc;
+  if (!o || o.vendaDireta || o.contrato !== "assinado") return null;
+  const a = o.assinatura;
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-card p-4" data-testid="contrato-assinado">
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground" aria-hidden="true"><FileSignature className="h-4 w-4" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px]"><b className="font-semibold">Contrato CT 2026/{d.id} assinado</b> <span className="text-muted-foreground">· gerou a encomenda de cliente e o plano da obra</span></p>
+          <p className="text-sm text-muted-foreground">
+            {a ? <>{a.nome} · {a.tipo === "digital" ? `Chave Móvel Digital${a.telemovel ? ` (${a.telemovel})` : ""}` : "desenhada no ecrã, no portal"} · {a.q}</> : "No portal do cliente"}
+          </p>
+        </div>
+        {a && <div className="w-full sm:w-auto sm:max-w-[14rem]"><SeloAssinatura a={a} compacto /></div>}
+      </div>
+      <button type="button" aria-expanded={ver} onClick={() => setVer(!ver)}
+        className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+        {ver ? "Fechar o contrato" : "Ver o contrato assinado"}<ChevronDown className={cn("h-4 w-4 transition-transform", ver && "rotate-180")} aria-hidden="true" />
+      </button>
+      {ver && (
+        <div className="mt-3 animate-in fade-in-0 slide-in-from-top-1 duration-200">
+          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={a ? `assinado a ${a.q}` : "assinado"}><ContratoDoc S={ctx.S} d={d} /></Partilhar>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -80,11 +112,8 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         <div className="h-full rounded-full bg-primary transition-[width] duration-700 ease-out" style={{ width: `${(feitos / P.length) * 100}%` }} />
       </div>
 
-      {/* o contrato, de onde tudo parte */}
-      <div className="mt-6 flex items-center gap-3">
-        <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-primary-foreground" aria-hidden="true"><FileSignature className="h-4 w-4" /></span>
-        <p className="text-[15px]"><b className="font-semibold">Contrato assinado</b> <span className="text-muted-foreground">· gerou a encomenda de cliente e o plano da obra</span></p>
-      </div>
+      {/* o contrato, de onde tudo parte: com a assinatura do cliente (15/10), quem, quando e como, e o contrato à mão */}
+      <ContratoAssinado ctx={ctx} d={d} />
       {/* a ramificação: um traço que se abre para os três trilhos (só no computador) */}
       <div className="ml-[17px] hidden h-5 w-0.5 bg-primary/60 lg:block" aria-hidden="true" />
       <div className="relative hidden h-4 lg:block" aria-hidden="true">
@@ -114,7 +143,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
       </div>
 
       {aberto === "ec" && <DetalheEncomenda ctx={ctx} />}
-      {aberto === "plano" && <DetalhePlano d={d} />}
+      {aberto === "plano" && <DetalhePlano d={d} ajustar={ctx.go(() => ctx.A.abrirPlano(d.id))} />}
 
       {/* tudo converge no arranque */}
       <div className={cn("mt-5 flex flex-col gap-3 rounded-xl border-2 p-4 sm:flex-row sm:items-center sm:justify-between transition-colors duration-500",
@@ -225,13 +254,19 @@ function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
 }
 
 /** O plano por fases: uma barra por tarefa na régua dos dias úteis, com o técnico; as férias em conflito a laranja. */
-function DetalhePlano({ d }: { d: Negocio }) {
+function DetalhePlano({ d, ajustar }: { d: Negocio; ajustar?: () => void }) {
   const p = d.obra.plano!, dias = Math.max(1, ...p.tasks.map((t) => t.dia + t.dur));
   const C = new Set(conflitos(p).map((c) => c.t));
   const fases = [...new Set(p.tasks.map((t) => t.fase ?? 0))].sort();
   return (
     <div className="mt-4 rounded-xl border border-border p-4 animate-in fade-in-0 slide-in-from-top-1 duration-200">
-      <h4 className="text-[15px] font-semibold">Plano da obra <span className="font-normal text-muted-foreground">· {p.estado} · {nfmt(dias)} dias úteis{p.inicio ? ` desde ${p.inicio.split("-").reverse().join("/")}` : ""}</span></h4>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h4 className="text-[15px] font-semibold">Plano da obra <span className="font-normal text-muted-foreground">· {p.estado} · {nfmt(dias)} dias úteis{p.inicio ? ` desde ${p.inicio.split("-").reverse().join("/")}` : ""}</span></h4>
+        {/* 15/10: quem gere as Operações ajusta o plano (dias, início, técnico, nota) na página da obra */}
+        {ajustar && (p.estado === "por aprovar" || p.estado === "aprovado") && (
+          <button type="button" onClick={ajustar} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">Ajustar nas Operações<ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
+        )}
+      </div>
       <div className="mt-3 space-y-4">
         {fases.map((f) => (
           <div key={f}>

@@ -6,24 +6,28 @@
 // · Assinado: o mesmo link mostra o plano da obra (fases e datas, sem custos nem margens).
 // As ações são as do motor, por isso o negócio no protótipo passa de fase como hoje (e o outro separador vê-o pelo storage).
 import { useState, type ReactNode } from "react";
-import { Armchair, Check, ChevronRight, Clock, FileText, Grid3x3, Hammer, PenLine, Plug, X, type LucideIcon } from "lucide-react";
+import { Armchair, Check, ChevronRight, Clock, Copy, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { eur, type Negocio } from "./motor";
+import { MOTIVOS_RECUSA, MOTIVOS_VERSAO, eur, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { AdendaDoc, ContratoDoc, FaturaDoc, NotaEncomendaDoc, PropostaDoc, totais, tranches } from "./DocsCliente";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
 import { totalComIva } from "./adendas";
+import { AssinaturaContrato } from "./AssinaturaContrato";
+import { PAGAMENTO_EMPRESA, em3, referenciaMb, vencimento } from "./pagamentoCliente";
 
 /** Os passos do percurso, pela ordem. */
 export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar a obra"] as const;
 const CURTO = ["Proposta", "Aceitar", "Contrato", "Obra"];
 
 /** Em que passo está o cliente: 0 rever/aceitar, 2 contrato (a preparar ou por assinar), 3 obra. */
-export function passoPortal(d: Negocio): { i: number; estado: "rever" | "preparar" | "assinar" | "obra" | "sem" } {
+export function passoPortal(d: Negocio): { i: number; estado: "rever" | "pedido" | "recusada" | "preparar" | "assinar" | "obra" | "sem" } {
   const o = d.orc;
+  if (o?.recusada && d.perdido) return { i: 0, estado: "recusada" };
   if (!o?.enviada) return { i: 0, estado: "sem" };
+  if (!o.aceite && o.pedidoCliente) return { i: 0, estado: "pedido" };
   if (!o.aceite) return { i: 0, estado: "rever" };
   if (o.vendaDireta || o.contrato === "assinado") return { i: 3, estado: "obra" };
   if (o.contrato === "enviado") return { i: 2, estado: "assinar" };
@@ -31,12 +35,58 @@ export function passoPortal(d: Negocio): { i: number; estado: "rever" | "prepara
 }
 
 const ICONE_FASE: Record<number, LucideIcon> = { 1: Hammer, 2: Plug, 3: Grid3x3, 4: Armchair };
+/** Os motivos de alteração, nas palavras do cliente (por dentro guardam-se os mesmos da "Nova versão" do comercial). */
+const PARA_CLIENTE: Record<string, string> = {
+  "Outros materiais": "Materiais ou acabamentos", "Juntar ou tirar trabalhos": "Juntar ou tirar trabalhos", "Baixar o preço": "O preço",
+  "Outras datas": "As datas", "Outra forma de pagamento": "A forma de pagamento",
+};
+const doCliente = (m: string) => PARA_CLIENTE[m] ?? m;
 
-function Botao({ children, onClick, ghost }: { children: ReactNode; onClick: () => void; ghost?: boolean }) {
+/** Uma linha "rótulo · valor" com o botão de copiar (diz "Copiado" por um momento). */
+function Copiar({ rotulo, valor, mostrar }: { rotulo: string; valor: string; mostrar?: string }) {
+  const [ok, setOk] = useState(false);
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(valor); } catch { /* sem acesso à área de transferência */ }
+    setOk(true); setTimeout(() => setOk(false), 1600);
+  };
   return (
-    <button type="button" onClick={onClick}
-      className={cn("min-h-12 w-full rounded-xl px-4 text-[15px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2",
-        ghost ? "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50" : "bg-slate-900 text-white hover:bg-slate-800")}>
+    <div className="flex items-center justify-between gap-3 py-2">
+      <dt className="text-sm text-slate-500">{rotulo}</dt>
+      <dd className="flex min-w-0 items-center gap-1">
+        <span className="min-w-0 break-all text-right text-[15px] font-semibold tabular-nums">{mostrar ?? valor}</span>
+        <button type="button" onClick={copiar} aria-label={`Copiar ${rotulo.toLowerCase()}`}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-900">
+          {ok ? <Check className="h-4 w-4 text-emerald-700" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+        </button>
+        <span className="sr-only" aria-live="polite">{ok ? "Copiado" : ""}</span>
+      </dd>
+    </div>
+  );
+}
+
+/** Chips de escolha múltipla, no estilo do portal. */
+function Chips({ opcoes, on, mudar, rotulo, nome = (x: string) => x }: { opcoes: readonly string[]; on: string[]; mudar: (v: string[]) => void; rotulo: string; nome?: (x: string) => string }) {
+  return (
+    <div role="group" aria-label={rotulo} className="flex flex-wrap gap-2">
+      {opcoes.map((m) => {
+        const ligado = on.includes(m);
+        return (
+          <button key={m} type="button" aria-pressed={ligado} onClick={() => mudar(ligado ? on.filter((x) => x !== m) : [...on, m])}
+            className={cn("inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2",
+              ligado ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white hover:border-slate-500")}>
+            {ligado && <Check className="h-4 w-4" aria-hidden="true" />}{nome(m)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Botao({ children, onClick, ghost, perigo, disabled }: { children: ReactNode; onClick: () => void; ghost?: boolean; perigo?: boolean; disabled?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+      className={cn("min-h-12 w-full rounded-xl px-4 text-[15px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40",
+        ghost ? "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50" : perigo ? "bg-red-700 text-white hover:bg-red-800" : "bg-slate-900 text-white hover:bg-slate-800")}>
       {children}
     </button>
   );
@@ -45,7 +95,9 @@ function Botao({ children, onClick, ghost }: { children: ReactNode; onClick: () 
 export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
   const { S, A, run } = ctx;
   const [doc, setDoc] = useState<string | null>(null);
-  const [alterar, setAlterar] = useState(false);
+  // a resposta à proposta (15/10): escolher entre pedir alterações e recusar; depois, os motivos e o texto
+  const [resposta, setResposta] = useState<null | "escolher" | "alterar" | "recusar">(null);
+  const [motivos, setMotivos] = useState<string[]>([]);
   const [confirmar, setConfirmar] = useState<"aceitar" | "assinar" | null>(null);
   const [texto, setTexto] = useState("");
   const [ref, setRef] = useState("");
@@ -61,14 +113,43 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   for (const a of d.adendas ?? []) if (a.estado === "enviada")
     outros.push({ id: a.n, t: "Assinar a adenda", sub: `${a.linhas.map((x) => x.n).join(", ")} · +${eur(totalComIva(a.linhas))} € com IVA`, corpo: <div className="space-y-2"><Botao ghost onClick={() => setDoc(a.n)}>Ler a adenda</Botao><Botao onClick={() => fazer(() => A.assinarAdenda(d.id, a.n))}>Assinar</Botao></div> });
   if (d.fin.fatura && !d.fin.pago && T) {
-    const t0 = tranches(d, T.total)[0];
+    // 15/10: a fatura à vista e os dados para pagar (Multibanco ou transferência), cada um com o botão de copiar
+    const ft = d.fin.fatura, t0 = tranches(d, T.total)[0];
+    const ddmm = ft.q.match(/^(\d{2})\/(\d{2})/);
+    const emitida = ddmm ? new Date(new Date().getFullYear(), Number(ddmm[2]) - 1, Number(ddmm[1])) : new Date();
+    const montante = eur(t0.v), refMb = referenciaMb(d.id, ft.n);
     outros.push({
-      id: "pag", t: `Pagar a fatura ${d.fin.fatura.n}`, sub: `${t0.l}: ${eur(t0.v)} € · por transferência`,
+      id: "pag", t: `Pagar a fatura ${ft.n}`, sub: `${t0.l} · vence a ${vencimento(emitida, d.f.vencimento || "15 dias")}`,
       corpo: d.f.comprovativo
         ? <p className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />Comprovativo enviado ({d.f.comprovativo}). Estamos a confirmar.</p>
-        : <div className="space-y-2">
-            <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder="Referência da transferência" aria-label="Referência da transferência" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
-            <Botao onClick={() => fazer(() => A.avisarPagamento(d.id, ref))}>Já paguei</Botao>
+        : <div className="space-y-4">
+            <div className="flex items-end justify-between gap-3">
+              <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
+              <button type="button" onClick={() => setDoc("fatura")} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-slate-900 underline-offset-4 hover:underline">
+                <FileText className="h-4 w-4" aria-hidden="true" />Ver a fatura
+              </button>
+            </div>
+            <div className="rounded-xl border border-slate-200 px-4 py-1">
+              <p className="pt-2 text-sm font-semibold">Multibanco ou homebanking</p>
+              <dl className="divide-y divide-slate-100">
+                <Copiar rotulo="Entidade" valor={PAGAMENTO_EMPRESA.entidade} />
+                <Copiar rotulo="Referência" valor={refMb} mostrar={em3(refMb)} />
+                <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+              </dl>
+            </div>
+            <div className="rounded-xl border border-slate-200 px-4 py-1">
+              <p className="pt-2 text-sm font-semibold">Transferência bancária</p>
+              <dl className="divide-y divide-slate-100">
+                <Copiar rotulo="IBAN" valor={PAGAMENTO_EMPRESA.iban.replace(/\s/g, "")} mostrar={PAGAMENTO_EMPRESA.iban} />
+                <Copiar rotulo="Descritivo" valor={ft.n} />
+              </dl>
+              <p className="pb-2 text-sm text-slate-500">Titular: {PAGAMENTO_EMPRESA.titular}. Dados de exemplo neste protótipo.</p>
+            </div>
+            <div className="space-y-2 border-t border-slate-200 pt-4">
+              <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
+              <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder="Referência ou n.º da transferência (opcional)" aria-label="Referência do pagamento" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
+              <Botao onClick={() => fazer(() => A.avisarPagamento(d.id, ref))}>Já paguei</Botao>
+            </div>
           </div>,
     });
   }
@@ -93,23 +174,88 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
 
   /* ---------------------------------------------- o cartão do passo de agora (um só primário, na barra de baixo) */
   let agora: ReactNode = null;
+  const responder = (r: typeof resposta) => { setResposta(r); setMotivos([]); setTexto(""); topo(); };
   if (P.estado === "rever" && o && T) {
-    agora = alterar ? (
-      <div className="space-y-2">
-        <p className="text-[15px] font-semibold">O que gostava de mudar?</p>
-        <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={3} aria-label="O que gostava de mudar" placeholder="Ex.: outra cor de azulejo, começar mais tarde…" className="w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
-        <Botao onClick={() => { fazer(() => A.pedirAlteracoes(d.id, texto)); setAlterar(false); setTexto(""); }}>Enviar o pedido</Botao>
-        <Botao ghost onClick={() => setAlterar(false)}>Cancelar</Botao>
-      </div>
+    agora = resposta === "escolher" ? (
+      <>
+        <h2 className="text-xl font-semibold">O que prefere?</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Diga-nos o que não está bem. Respondemos neste mesmo link.</p>
+        <ul className="mt-4 grid gap-3">
+          {([
+            ["alterar", MessageSquareText, "Pedir alterações", "Diga o que mudaria. Preparamos uma nova proposta e recebe-a aqui."],
+            ["recusar", XCircle, "Recusar a proposta", "Não quer avançar com a obra."],
+          ] as const).map(([k, Ic, t, sub]) => (
+            <li key={k}><button type="button" onClick={() => responder(k)}
+              className="flex min-h-20 w-full items-start gap-3 rounded-xl border border-slate-300 bg-white p-4 text-left outline-none transition-colors hover:border-slate-500 focus-visible:ring-2 focus-visible:ring-slate-900">
+              <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-lg", k === "recusar" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700")} aria-hidden="true"><Ic className="h-5 w-5" /></span>
+              <span className="min-w-0 flex-1"><span className="block text-base font-semibold">{t}</span><span className="block text-[15px] text-slate-600">{sub}</span></span>
+              <ChevronRight className="mt-2.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+            </button></li>
+          ))}
+        </ul>
+        <div className="mt-3"><Botao ghost onClick={() => responder(null)}>Voltar à proposta</Botao></div>
+      </>
+    ) : resposta === "alterar" ? (
+      <>
+        <h2 className="text-xl font-semibold">O que gostava de mudar?</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Escolha o que se aplica. Pode escolher mais do que um.</p>
+        <div className="mt-4"><Chips rotulo="O que gostava de mudar" opcoes={MOTIVOS_VERSAO} on={motivos} mudar={setMotivos} nome={doCliente} /></div>
+        <label className="mt-4 block">
+          <span className="text-[15px] font-medium">Conte-nos o que mudaria</span>
+          <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={3} placeholder="Ex.: azulejo mais claro, começar em novembro…"
+            className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
+        </label>
+        <div className="mt-4 grid gap-2">
+          <Botao disabled={!motivos.length && !texto.trim()} onClick={() => { fazer(() => A.pedirAlteracoes(d.id, texto, motivos)); responder(null); }}>Enviar o pedido</Botao>
+          <Botao ghost onClick={() => responder("escolher")}>Voltar</Botao>
+        </div>
+      </>
+    ) : resposta === "recusar" ? (
+      <>
+        <h2 className="text-xl font-semibold">Porque não quer avançar?</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Ajuda-nos a melhorar. Se for só uma parte, <button type="button" onClick={() => responder("alterar")} className="font-medium text-slate-900 underline underline-offset-4">peça antes alterações</button>.</p>
+        <div className="mt-4"><Chips rotulo="Porque não quer avançar" opcoes={MOTIVOS_RECUSA} on={motivos} mudar={setMotivos} /></div>
+        <label className="mt-4 block">
+          <span className="text-[15px] font-medium">Quer acrescentar alguma coisa? <span className="font-normal text-slate-500">(opcional)</span></span>
+          <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={2}
+            className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
+        </label>
+        <div className="mt-4 grid gap-2">
+          <Botao perigo disabled={!motivos.length} onClick={() => { fazer(() => A.recusarProposta(d.id, motivos, texto)); responder(null); }}>Recusar a proposta</Botao>
+          <Botao ghost onClick={() => responder("escolher")}>Voltar</Botao>
+        </div>
+      </>
     ) : (
       <>
-        <p className="text-sm font-medium text-slate-500">Passo 1 de 4</p>
+        <p className="text-sm font-medium text-slate-500">Passo 1 de 4{o.versoes?.length ? ` · versão ${versaoAtual(o)}, com o que pediu` : ""}</p>
         <h2 className="mt-0.5 text-xl font-semibold">Reveja a sua proposta</h2>
         <p className="mt-1 text-[15px] text-slate-600">Está toda aqui em baixo: o que vamos fazer, fase a fase, os materiais, o preço e as condições.</p>
         <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
           <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Total, com IVA</dt><dd className="text-lg font-semibold tabular-nums">{eur(T.total)} €</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Prazo</dt><dd className="text-lg font-semibold tabular-nums">{d.f.prazo_exec ? `${d.f.prazo_exec} dias úteis` : "a combinar"}</dd></div>
         </dl>
+      </>
+    );
+  } else if (P.estado === "pedido" && o?.pedidoCliente) {
+    const pc = o.pedidoCliente;
+    agora = (
+      <>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Pedido enviado</p>
+        <h2 className="mt-2 text-xl font-semibold">Estamos a preparar uma nova proposta</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Recebe-a aqui, neste mesmo link. Não precisa de fazer nada agora.</p>
+        <div className="mt-4 border-t border-slate-200 pt-4">
+          <p className="text-sm font-medium text-slate-500">O que pediu</p>
+          {pc.motivos.length > 0 && <p className="mt-1 text-[15px]">{pc.motivos.map(doCliente).join(" · ")}</p>}
+          {pc.nota && <p className="mt-1 text-[15px] text-slate-600">«{pc.nota}»</p>}
+        </div>
+      </>
+    );
+  } else if (P.estado === "recusada") {
+    agora = (
+      <>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-slate-600"><XCircle className="h-5 w-5" aria-hidden="true" />Proposta recusada</p>
+        <h2 className="mt-2 text-xl font-semibold">Obrigado por nos dizer</h2>
+        <p className="mt-1 text-[15px] text-slate-600">Ficamos à disposição. Se mudar de ideias, fale connosco: preparamos uma nova proposta.</p>
       </>
     );
   } else if (P.estado === "preparar") {
@@ -122,7 +268,11 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       </>
     );
   } else if (P.estado === "assinar") {
-    agora = (
+    // 15/10: assinar abre aqui, no cartão do passo: desenhar no ecrã ou Chave Móvel Digital (AssinaturaContrato.tsx)
+    agora = confirmar === "assinar" ? (
+      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={`CT 2026/${d.id}`}
+        onAssinar={(a) => fazer(() => A.assinarCom(d.id, a))} onCancelar={() => setConfirmar(null)} />
+    ) : (
       <>
         <p className="text-sm font-medium text-slate-500">Passo 3 de 4</p>
         <h2 className="mt-0.5 text-xl font-semibold">Assinar o contrato</h2>
@@ -146,7 +296,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   }
 
   /* ---------------------------------------------- a barra fixa em baixo: o próximo passo sempre à mão */
-  const barra = P.estado === "rever" && !alterar ? (
+  const barra = P.estado === "rever" && !resposta ? (
     confirmar === "aceitar" ? (
       <div className="space-y-2">
         <p className="text-[15px]">Aceitar a proposta PR 2026/{d.id}, de <b className="tabular-nums">{T ? eur(T.total) : ""} €</b> com IVA?</p>
@@ -155,17 +305,12 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     ) : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
         <div className="sm:w-64"><Botao onClick={() => setConfirmar("aceitar")}>Aceitar a proposta</Botao></div>
-        <button type="button" onClick={() => setAlterar(true)} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Gostava de mudar alguma coisa</button>
+        <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações ou recusar</button>
       </div>
     )
   ) : P.estado === "assinar" ? (
-    confirmar === "assinar" ? (
-      <div className="space-y-2">
-        <p className="text-[15px]">Assinar digitalmente o contrato CT 2026/{d.id}? Fica com uma cópia aqui, em Documentos.</p>
-        <div className="grid grid-cols-2 gap-2"><Botao ghost onClick={() => setConfirmar(null)}>Voltar</Botao><Botao onClick={() => fazer(() => A.assinar(d.id))}>Assinar</Botao></div>
-      </div>
-    ) : (
-      <div className="sm:ml-auto sm:w-64"><Botao onClick={() => setConfirmar("assinar")}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>
+    confirmar === "assinar" ? null : (
+      <div className="sm:ml-auto sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>
     )
   ) : null;
 
@@ -250,12 +395,12 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           {/* o documento do passo de agora, inteiro: a proposta para aceitar, o contrato para assinar */}
           {P.estado === "rever" && <div className="-mx-4 sm:mx-0" aria-label="A proposta" role="region"><PropostaDoc S={S} d={d} /></div>}
           {P.estado === "assinar" && <div className="-mx-4 sm:mx-0" aria-label="O contrato" role="region"><ContratoDoc S={S} d={d} /></div>}
-          {P.estado === "preparar" && (
+          {(P.estado === "preparar" || P.estado === "pedido") && (
             verProposta
               ? <div className="-mx-4 sm:mx-0" aria-label="A proposta" role="region"><PropostaDoc S={S} d={d} /></div>
-              : <Botao ghost onClick={() => setVerProposta(true)}>Ver a proposta que aceitou</Botao>
+              : <Botao ghost onClick={() => setVerProposta(true)}>{P.estado === "pedido" ? "Ver a proposta atual" : "Ver a proposta que aceitou"}</Botao>
           )}
-          {P.estado === "sem" && <p className="rounded-2xl bg-white p-4 text-[15px] shadow-sm">A sua proposta está a ser preparada. Avisamos aqui quando estiver pronta.</p>}
+          {P.estado === "sem" && <p className="rounded-2xl bg-white p-4 text-[15px] shadow-sm">{o?.versoes?.length ? `A nova versão da proposta (v${versaoAtual(o)}) está a ser preparada, com o que pediu.` : "A sua proposta está a ser preparada."} Avisamos aqui quando estiver pronta.</p>}
 
           {/* os documentos */}
           {docs.some(([, t, ok]) => t && ok) && (

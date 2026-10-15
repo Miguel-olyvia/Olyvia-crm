@@ -2,6 +2,8 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
+import { diferencas, guardarBase, mudarDuracao, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
+import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { itemCatalogo } from "./catalogo";
 import {
   ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
@@ -164,6 +166,8 @@ export interface Orcamento {
   enviada: string | null;
   aceite: string | null;
   contrato: null | "enviado" | "assinado";
+  /** 15/10: como o cliente assinou o contrato no portal (desenho no ecrã ou Chave Móvel Digital). Os exemplos antigos não a têm. */
+  assinatura?: Assinatura | null;
   avisosVistos: Record<string, boolean>;
   /** Preços de linhas de materiais mudados à mão, pela descrição: as linhas refeitas (levantamento, modelo, produtos) guardam-nos. */
   precosMan?: Record<string, number>;
@@ -181,18 +185,44 @@ export interface Orcamento {
   equipa?: number;
   /** As versões anteriores da proposta (14/10): enviadas ao cliente e substituídas a pedido dele. A atual é a versoes.length + 1. */
   versoes?: VersaoProposta[];
+  /** 15/10: o cliente pediu alterações no portal (os motivos e o que mudaria). O comercial vê-o como próximo passo
+   *  e a nova versão começa já com isto; limpa-se quando a nova versão começa ou o cliente aceita. */
+  pedidoCliente?: { motivos: string[]; nota?: string; q: string } | null;
+  /** 15/10: o cliente recusou a proposta por completo no portal. */
+  recusada?: { motivos: string[]; nota?: string; q: string } | null;
+}
+/** A assinatura do contrato pelo cliente (15/10): desenhada no ecrã (a imagem PNG) ou com a Chave Móvel Digital (simulada no protótipo). */
+export interface Assinatura {
+  tipo: "desenho" | "digital";
+  /** desenho: a imagem (data URL PNG) */
+  imagem?: string;
+  nome: string;
+  /** quando, "dd/mm/aaaa hh:mm" */
+  q: string;
+  /** digital: o identificador da assinatura */
+  id?: string;
+  /** digital: o telemóvel, mascarado (ex.: "9•• ••• 123") */
+  telemovel?: string;
 }
 /** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
 export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
 /** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
+/** Porque o cliente recusa a proposta por completo (no portal). */
+export const MOTIVOS_RECUSA = ["O preço", "Escolhi outra empresa", "Já não vou fazer a obra", "O prazo", "Outro motivo"] as const;
+/** Os motivos de um pedido de alteração que mexem na visita (necessidades e produtos), e não só no orçamento. */
+export const MOTIVOS_DA_VISITA: readonly string[] = ["Outros materiais", "Juntar ou tirar trabalhos"];
 /** O número da proposta que está em cima da mesa (1 se nunca se refez). */
 export const versaoAtual = (o: Orcamento) => (o.versoes?.length ?? 0) + 1;
-export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null; /** a fase da obra (planos do orçamento) */ fase?: number }
+export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null; /** a fase da obra (planos do orçamento) */ fase?: number;
+  /** 15/10: uma nota das Operações para a equipa (ex.: "levar o andaime") */ nota?: string;
+  /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa }
 export interface Plano {
   tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number;
   /** Gerado do plano do orçamento (preparacaoObra.ts), com o início previsto ("aaaa-mm-dd"). */
   origem?: "orcamento"; inicio?: string;
+  /** 15/10: o plano como veio do orçamento, guardado antes do primeiro ajuste das Operações (ajustesPlano.ts) */
+  base?: BaseTarefa[];
 }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
 export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "parcial" | "recebida"; forn?: string;
@@ -216,6 +246,8 @@ export interface Negocio {
   dono: Papel;
   fase: number;
   perdido: boolean;
+  /** Porque se perdeu (ex.: o que o cliente disse ao recusar no portal). */
+  motivoPerda?: string;
   atraso?: boolean;
   fresh?: boolean;
   /** Valores dos campos de todas as fases (chaves em campos.ts). */
@@ -234,6 +266,8 @@ export interface Negocio {
   orc: Orcamento | null;
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean;
+    /** 15/10: o diário de obra (registos por dia) e a segurança tratada (chave → quando), obraOps.ts */
+    diario?: EntradaDiario[]; seg?: Record<string, string>;
     /** A encomenda de cliente, gerada ao assinar o contrato (14/10; preparacaoObra.ts). Sem ela, o circuito antigo (tudo no recibo). */
     ec?: EncCliente | null;
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
@@ -402,6 +436,24 @@ export function seed(): Estado {
   m.obra.mats = calcMats(m, S, true);
   m.f.valor_recebido = String(r2(tot(m, S).pf));
   m.hist.push({ t: "Obra em curso · dia 3 de 5", q: "hoje", k: "a" });
+  {
+    const pm = m.obra.plano, dias = ["seg 13/10", "ter 14/10"];
+    pm.tasks.forEach((t, i) => {
+      const tec = TECS.find((x) => x.id === t.tec)?.n ?? "Equipa";
+      if (t.dia + t.dur <= 1) t.exec = { estado: "validada", horas: Math.round(t.h * 1.05 * 2) / 2, fotos: [fotoExemplo(t.nome, "#8b6fe0", i), fotoExemplo(t.nome + " · fim", "#8b6fe0", i + 1)], nota: "Paredes picadas até ao tijolo. Entulho no contentor.", feita: dias[0], validada: dias[0] + " 18:10" };
+      else if (t.dia + t.dur <= 2) t.exec = { estado: "feita", horas: Math.round(t.h * 1.1 * 2) / 2, fotos: [fotoExemplo(t.nome, "#5a3fc0", i)], nota: "Ponto de água da base de duche mudado 20 cm.", feita: dias[1] + " 17:40" };
+      else if (t.dia <= 2 && 2 < t.dia + t.dur) t.exec = { estado: "em curso", horas: 0, fotos: [] };
+      void tec;
+    });
+    m.obra.diario = [
+      { q: "seg 13/10 08:05", quem: "Filipe Rocha", t: "Obra arrancou. Equipa no local, proteções colocadas no caminho e no elevador.", k: "marco" },
+      { q: "seg 13/10 17:50", quem: "João Silva", t: "Demolição feita: 8 h. Duas fotografias.", k: "horas", fotos: [fotoExemplo("Demolição", "#8b6fe0", 0)] },
+      { q: "seg 13/10 18:10", quem: "Filipe Rocha", t: "Validou a demolição.", k: "validacao" },
+      { q: "ter 14/10 11:20", quem: "Marco Antunes", t: "O tubo de esgoto antigo estava fissurado: trocado mais 1 m (sem custo para o cliente).", k: "ocorrencia" },
+      { q: "ter 14/10 17:40", quem: "Marco Antunes", t: "Canalização feita. Falta validar.", k: "horas", fotos: [fotoExemplo("Canalização", "#5a3fc0", 1)] },
+    ];
+    m.obra.seg = { pss: "seg 13/10", condominio: "sex 10/10" };
+  }
   // 14/10: as obras antigas do exemplo também têm a encomenda de cliente (aprovada, tudo reservado): o circuito é o mesmo em todo o lado
   const ecAntiga = (d: Negocio, n: string, quando: string) => {
     const ec = gerarEncCliente(d, S, n, quando);
@@ -871,6 +923,10 @@ export function proximo(d: Negocio, S: Estado): Proximo {
             : { t: "Resolver os bloqueios", sub: "Corrigir o preço ou pedir aprovação à Direção.", btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
         return { t: o!.versoes?.length ? `Enviar a versão ${versaoAtual(o!)}` : "Enviar a proposta", sub: o!.vendaDireta ? "Venda direta: a proposta aceite dispensa o contrato." : "Vai para o portal do cliente.", btn: "Enviar proposta", act: "enviar", who: "comercial" };
       }
+      if (!o!.aceite && o!.pedidoCliente) {
+        const pc = o!.pedidoCliente, pediu = [...pc.motivos, pc.nota ? "«" + pc.nota + "»" : ""].filter(Boolean).join(", ");
+        return { t: "O cliente pediu alterações", sub: `No portal, ${pc.q}: ${pediu || "sem detalhe"}. Faça a versão ${versaoAtual(o!) + 1}: a v${versaoAtual(o!)} fica guardada.`, btn: "Fazer a nova versão", act: "pedidoCliente", who: "comercial" };
+      }
       if (!o!.aceite) return { t: "À espera do cliente", sub: "Proposta no portal desde " + o!.enviada + ".", who: "cliente", wait: true, sim: "aceitar" };
       if (!o!.vendaDireta && o!.contrato !== "assinado")
         return o!.contrato === "enviado"
@@ -1114,7 +1170,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const n = versaoAtual(o);
       (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, motivos: [...motivos], nota: nota.trim() || undefined, onde });
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
-      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null;
+      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
       log(d, `Proposta v${n} substituída${porque ? ": o cliente pediu " + porque : ""}`, "w");
       if (onde === "visita") {
@@ -1249,12 +1305,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: "Proposta" + v + " enviada", sub: v ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente", kind: "ok" });
     },
     aceitar(id: number) {
-      const d = deal(id); d.orc!.aceite = "hoje"; log(d, "O cliente aceitou a proposta no portal");
+      const d = deal(id); d.orc!.aceite = "hoje"; d.orc!.pedidoCliente = null; log(d, "O cliente aceitou a proposta no portal");
       if (d.orc!.vendaDireta) { criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); }
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta o comercial gerar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
     enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); },
+    /** No portal (15/10): o cliente assina com o desenho ou a Chave Móvel Digital; guarda-se a assinatura e segue como "assinar". */
+    assinarCom(id: number, a: Assinatura) {
+      const d = deal(id), o = d.orc;
+      if (!o || o.contrato !== "enviado") return;
+      o.assinatura = { ...a };
+      log(d, "Assinatura do contrato: " + (a.tipo === "digital" ? "Chave Móvel Digital" + (a.id ? " (" + a.id + ")" : "") : "desenhada no ecrã") + " · " + a.q);
+      A.assinar(id);
+    },
     assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
     /** O comercial aprova a encomenda de cliente (14/10, decisão do Ruben): reserva o stock (o de agora) e o que falta vai numa encomenda a fornecedor por validar. */
     aprovarEc(id: number) {
@@ -1302,11 +1366,26 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       } else avisar({ msg: "Adenda assinada", kind: "ok" });
     },
     /** No portal do cliente: pede alterações à proposta (o comercial vê no histórico e faz uma nova versão). */
-    pedirAlteracoes(id: number, texto: string) {
-      const d = deal(id);
-      if (!d.orc?.enviada || d.orc.contrato === "assinado") return;
-      log(d, "O cliente pediu alterações no portal" + (texto.trim() ? ": " + texto.trim() : ""), "w");
+    pedirAlteracoes(id: number, texto: string, motivos: string[] = []) {
+      const d = deal(id), o = d.orc;
+      if (!o?.enviada || o.aceite || o.contrato === "assinado") return;
+      const nota = texto.trim();
+      o.pedidoCliente = { motivos: [...motivos], nota: nota || undefined, q: agora() };
+      const porque = [...motivos, nota].filter(Boolean);
+      log(d, "O cliente pediu alterações no portal" + (porque.length ? ": " + porque.join(", ") : ""), "w");
       avisar({ msg: "Pedido enviado ao comercial", sub: "Recebe uma nova versão da proposta no portal", kind: "ok" });
+    },
+    /** No portal do cliente (15/10): recusa a proposta por completo, com os motivos. O negócio fica perdido (o comercial pode anular). */
+    recusarProposta(id: number, motivos: string[], texto: string) {
+      const d = deal(id), o = d.orc;
+      if (!o?.enviada || o.aceite || o.contrato === "assinado") return;
+      const nota = texto.trim();
+      o.recusada = { motivos: [...motivos], nota: nota || undefined, q: agora() };
+      o.pedidoCliente = null;
+      d.perdido = true;
+      d.motivoPerda = [...motivos, nota].filter(Boolean).join(", ") || "Recusou a proposta";
+      log(d, "O cliente recusou a proposta no portal: " + d.motivoPerda, "x");
+      avisar({ msg: "O cliente recusou a proposta", sub: d.motivoPerda, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; o.recusada = null; log(d, "Recusa anulada pelo comercial"); }) } });
     },
     /** No portal do cliente: avisa que pagou, com a referência (o Financeiro confirma na conta e valida). */
     avisarPagamento(id: number, ref: string) {
@@ -1383,8 +1462,112 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), t = d.obra.plano?.tasks[ti], novo = TECS.find((x) => x.id === tec);
       if (!t || !novo || t.tec === tec) return;
       const velho = TECS.find((x) => x.id === t.tec);
+      guardarBase(d.obra.plano!);
       t.tec = tec; log(d, `Plano: ${t.nome} passa ${velho ? `de ${velho.n} ` : ""}para ${novo.n}`);
+      if (A.planoMudou(d)) return;
       avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${novo.n}`, kind: "ok" });
+    },
+    /* -------------------------------------------- 15/10: as Operações ajustam o plano antes de arrancar (ajustesPlano.ts) */
+    /** Um plano aprovado que muda volta a "por aprovar" (diz-o); devolve true se avisou. */
+    planoMudou(d: Negocio): boolean {
+      const p = d.obra.plano;
+      if (p?.estado !== "aprovado") return false;
+      p.estado = "por aprovar"; log(d, "Plano mudado depois de aprovado · volta a por aprovar", "w");
+      avisar({ msg: "O plano mudou", sub: "Volta a por aprovar. Aprove de novo para os técnicos receberem as tarefas", kind: "" });
+      return true;
+    },
+    /** A duração (dias úteis), o dia de início e a nota de uma tarefa. Só antes de a obra arrancar. */
+    ajustarTarefa(id: number, ti: number, m: { dur?: number; dia?: number; nota?: string }) {
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
+      const antes = JSON.stringify(p.tasks.map((x) => [x.dia, x.dur]));
+      if (m.dur != null) mudarDuracao(p, ti, m.dur);
+      if (m.dia != null) mudarInicio(p, ti, m.dia);
+      if (m.nota != null) { const n = m.nota.trim(); if ((t.nota ?? "") !== n) { t.nota = n || undefined; log(d, `Plano: nota em ${t.nome}${n ? ": " + n : " apagada"}`); } }
+      if (JSON.stringify(p.tasks.map((x) => [x.dia, x.dur])) === antes) return;
+      const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1, dif = diferencas(p).dias;
+      log(d, `Plano: ${t.nome} · ${t.dur} ${t.dur === 1 ? "dia" : "dias"} a partir de ${rotuloDia(p, t.dia)} · a obra acaba a ${rotuloDia(p, fim)}`);
+      if (A.planoMudou(d)) return;
+      avisar({ msg: "Plano ajustado", sub: `Acaba a ${rotuloDia(p, fim)}${dif ? ` · ${dif > 0 ? "+" : "−"}${Math.abs(dif)} ${Math.abs(dif) === 1 ? "dia" : "dias"} face ao orçamento` : ""}`, kind: "ok" });
+    },
+    /* -------------------------------------------- 15/10: o ciclo da tarefa na obra (obraOps.ts): técnico → fotografia → supervisor */
+    /** O técnico começa a tarefa (ou volta a ela depois de uma correção). */
+    comecarTarefa(id: number, ti: number) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t || d.obra.plano!.estado !== "em curso") return;
+      const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      e.estado = "em curso"; t.exec = e;
+    },
+    /** O técnico regista as horas, junta ou tira fotografias e escreve uma nota. */
+    registarTarefa(id: number, ti: number, m: { horas?: number; foto?: string; tirarFoto?: number; nota?: string }) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t || d.obra.plano!.estado !== "em curso") return;
+      const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      if (e.estado === "validada") return;
+      if (e.estado !== "feita") e.estado = "em curso";
+      if (m.horas != null) e.horas = Math.max(0, Math.round(m.horas * 2) / 2);
+      if (m.foto) e.fotos = [...e.fotos, m.foto].slice(-4);
+      if (m.tirarFoto != null) e.fotos = e.fotos.filter((_, i) => i !== m.tirarFoto);
+      if (m.nota != null) e.nota = m.nota.trim() || undefined;
+      t.exec = e;
+    },
+    /** O técnico marca como feita: precisa das horas e de uma fotografia; vai para o supervisor validar. */
+    marcarFeita(id: number, ti: number) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t || !t.exec || d.obra.plano!.estado !== "em curso") return;
+      const F = faltaParaFeita(t);
+      if (F.length) { avisar({ msg: "Ainda não dá para marcar como feita", sub: "Falta " + F.join(" e "), kind: "bad" }); return; }
+      t.exec.estado = "feita"; t.exec.feita = agora(); t.exec.motivo = undefined;
+      const quem = TECS.find((x) => x.id === t.tec)?.n ?? "Técnico";
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `${t.nome} feita: ${nfmt(t.exec.horas)} h${t.exec.nota ? `. ${t.exec.nota}` : ""}`, k: "horas", fotos: t.exec.fotos.slice(0, 2) });
+      log(d, `Obra: ${t.nome} feita por ${quem} · por validar`);
+      avisar({ msg: "Tarefa marcada como feita", sub: "O responsável de obra valida a seguir", kind: "ok" });
+    },
+    /** O supervisor valida: a tarefa fica com o visto no Gantt e as horas contam no previsto e real. */
+    validarTarefa(id: number, ti: number) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t?.exec || t.exec.estado !== "feita") return;
+      t.exec.estado = "validada"; t.exec.validada = agora();
+      (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Validou ${t.nome.toLowerCase()}.`, k: "validacao" });
+      log(d, `Obra: ${t.nome} validada`);
+      const falta = d.obra.plano!.tasks.filter((x) => x.exec?.estado !== "validada").length;
+      avisar({ msg: `${t.nome} validada`, sub: falta ? `${falta} ${falta === 1 ? "tarefa ainda não validada" : "tarefas ainda não validadas"}` : "Todas as tarefas validadas: pode registar o fim da obra", kind: "ok" });
+    },
+    /** O supervisor pede correção, com o motivo: volta ao técnico. */
+    pedirCorrecao(id: number, ti: number, motivo: string) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t?.exec || t.exec.estado !== "feita" || !motivo.trim()) return;
+      t.exec.estado = "corrigir"; t.exec.motivo = motivo.trim();
+      (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Pediu correção em ${t.nome.toLowerCase()}: ${motivo.trim()}`, k: "correcao" });
+      log(d, `Obra: correção pedida em ${t.nome} · ${motivo.trim()}`, "w");
+      avisar({ msg: "Correção pedida", sub: "Volta ao técnico, com o motivo", kind: "" });
+    },
+    /** O dia seguinte da obra (o protótipo não tem relógio): as tarefas de hoje mudam. */
+    diaSeguinte(id: number) {
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado !== "em curso") return;
+      const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur));
+      if (p.dia + 1 >= fim) { avisar({ msg: "É o último dia do plano", sub: "Registe o fim da obra quando estiver tudo validado", kind: "" }); return; }
+      p.dia += 1; log(d, `Obra: dia ${p.dia + 1} de ${fim}`);
+    },
+    /** Uma ocorrência no diário de obra (ex.: um imprevisto). */
+    ocorrencia(id: number, texto: string) {
+      const d = deal(id); if (!texto.trim()) return;
+      (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: texto.trim(), k: "ocorrencia" });
+      log(d, "Obra: ocorrência · " + texto.trim(), "w");
+    },
+    /** Segurança e licenças: marcar um ponto como tratado. */
+    tratarSeguranca(id: number, k: string) {
+      const d = deal(id); (d.obra.seg ??= {})[k] = agora();
+      log(d, "Obra: segurança · " + k + " tratado");
+    },
+    /** Volta ao plano que veio do orçamento (datas, dias e técnicos; as notas ficam). */
+    reporPlano(id: number) {
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "em curso" || p.estado === "concluída" || !reporBase(p)) return;
+      log(d, "Plano reposto como veio do orçamento");
+      if (A.planoMudou(d)) return;
+      avisar({ msg: "Plano reposto", sub: "Como veio do orçamento", kind: "ok" });
     },
     /** O início do plano (as Operações confirmam ou mudam a data do orçamento; "aaaa-mm-dd"). */
     inicioPlano(id: number, iso: string) {

@@ -15,6 +15,7 @@ import {
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
+import { NovaVersao } from "./VoltarAtras";
 import { UsarLocalizacao } from "./Localizacao";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -370,6 +371,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
 export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
   const { S, A, go } = ctx;
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
+  if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   if (p.btn) return meu
     ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
     : (

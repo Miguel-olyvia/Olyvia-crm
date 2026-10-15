@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Calculator, Check, ClipboardList, MessageSquareText, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { MOTIVOS_VERSAO, eur, tot, versaoAtual, type Negocio } from "./motor";
+import { MOTIVOS_DA_VISITA, MOTIVOS_VERSAO, eur, tot, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 
 type P = { ctx: Ctx; d: Negocio };
@@ -74,12 +74,15 @@ export function VoltarVisita({ ctx, d, texto = "Voltar à visita", ...c }: P & {
 }
 
 /** "O cliente pediu alterações": dois passos curtos e a versão seguinte começa. Só com a proposta enviada e não aceite. */
-export function NovaVersao({ ctx, d, inicio = "orcamento", ...c }: P & { inicio?: "orcamento" | "visita" } & Controlo) {
+export function NovaVersao({ ctx, d, inicio: inicio0 = "orcamento", texto = "O cliente pediu alterações", ...c }: P & { inicio?: "orcamento" | "visita"; texto?: string } & Controlo) {
+  // 15/10: se o cliente pediu alterações no portal, a nova versão começa com o que ele disse (e onde mexer sugere-se por isso)
+  const pc = d.orc?.pedidoCliente;
+  const inicio: "orcamento" | "visita" = pc ? (pc.motivos.some((m) => MOTIVOS_DA_VISITA.includes(m)) ? "visita" : "orcamento") : inicio0;
   const [interno, setInterno] = useState<0 | 1 | 2>(c.aberto ? 1 : 0);
   const passo = c.aberto && interno === 0 ? 1 : interno;
   const setPasso = (p: 0 | 1 | 2) => (p === 0 && c.onFechar ? c.onFechar() : setInterno(p));
-  const [motivos, setMotivos] = useState<string[]>([]);
-  const [nota, setNota] = useState("");
+  const [motivos, setMotivos] = useState<string[]>(() => pc?.motivos.filter((m) => (MOTIVOS_VERSAO as readonly string[]).includes(m)) ?? []);
+  const [nota, setNota] = useState(pc?.nota ?? "");
   const [onde, setOnde] = useState<"orcamento" | "visita">(inicio);
   const [escolheuOnde, setEscolheuOnde] = useState(false);
   const painel = useRef<HTMLDivElement>(null);
@@ -90,13 +93,13 @@ export function NovaVersao({ ctx, d, inicio = "orcamento", ...c }: P & { inicio?
   const alternar = (m: string) => setMotivos((antes) => {
     const novo = antes.includes(m) ? antes.filter((x) => x !== m) : [...antes, m];
     // sugere onde mexer pelo que o cliente pediu (materiais ou trabalhos mudam a visita), até a pessoa escolher
-    if (!escolheuOnde) setOnde(novo.some((x) => x === "Outros materiais" || x === "Juntar ou tirar trabalhos") ? "visita" : inicio);
+    if (!escolheuOnde) setOnde(novo.some((x) => MOTIVOS_DA_VISITA.includes(x)) ? "visita" : inicio0);
     return novo;
   });
 
   if (passo === 0) return (
     <Button variant="outline" onClick={() => setPasso(1)} className="min-h-11 text-[15px]">
-      <MessageSquareText className="mr-1.5 h-4 w-4" aria-hidden="true" />O cliente pediu alterações
+      <MessageSquareText className="mr-1.5 h-4 w-4" aria-hidden="true" />{texto}
     </Button>
   );
 
@@ -114,6 +117,7 @@ export function NovaVersao({ ctx, d, inicio = "orcamento", ...c }: P & { inicio?
         {passo === 1 ? (
           <fieldset className="space-y-4">
             <legend className="text-[15px] font-medium">O que pediu o cliente?</legend>
+            {pc && <p className="text-sm text-muted-foreground">Já vem do portal ({pc.q}). Pode juntar ou tirar.</p>}
             <div className="flex flex-wrap gap-2">
               {MOTIVOS_VERSAO.map((m) => {
                 const on = motivos.includes(m);

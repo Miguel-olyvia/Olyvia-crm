@@ -6,8 +6,9 @@ import { createPortal } from "react-dom";
 import { Armchair, Check, Copy, Grid3x3, Hammer, HardHat, Mail, Maximize2, MessageCircle, Minus, Package, Palette, Plug, Plus, Printer, ShieldCheck, UserRound, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Estado, type Negocio } from "./motor";
+import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
+import { SeloAssinatura } from "./AssinaturaContrato";
 import { LINHA_DEMOLICAO } from "./entulho";
 import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
@@ -482,12 +483,22 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
       {n(4, "Prazo", <>Início {d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com {d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a {fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.{d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}</>)}
       {n(5, "Garantia", <>{d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.</>)}
       {n(6, "Condições gerais", <>Fazem parte deste contrato as condições gerais da empresa, entregues ao cliente com a proposta.</>)}
-      <section className="grid gap-6 pt-4 sm:grid-cols-2">
-        {[["Pela empresa", d.f.representante || "—", o.contrato ? "Assinado" : ""], ["O cliente", d.f.nome_fiscal || d.nome, o.contrato === "assinado" ? "Assinado no portal" : o.contrato === "enviado" ? "À espera" : ""]].map(([q, nome, est]) => (
-          <div key={q} className="border-t border-slate-300 pt-2">
+      {/* as assinaturas (15/10): por cima de cada nome, o desenho do cliente ou o selo digital; a empresa assina digitalmente ao gerar o contrato */}
+      <section className="grid gap-8 pt-6 sm:grid-cols-2" aria-label="Assinaturas">
+        {([
+          ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
+            o.contrato ? { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: o.assinatura?.q ?? "", id: `MDL-${d.id}` } as Assinatura : null,
+            o.contrato ? "Assinado" : ""],
+          ["O cliente", d.f.nome_fiscal || d.nome, o.contrato === "assinado" ? o.assinatura ?? null : null,
+            o.contrato === "assinado" ? (o.assinatura ? (o.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : "Assinado no ecrã, no portal") : "Assinado no portal") : o.contrato === "enviado" ? "À espera da assinatura" : ""],
+        ] as [string, string, Assinatura | null, string][]).map(([q, nome, a, est]) => (
+          <div key={q} className="flex flex-col">
             <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
-            <p className="font-medium">{nome}</p>
-            {est && <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}{d.f.assinatura ? ` · ${d.f.assinatura.toLowerCase()}` : ""}</p>}
+            <div className="flex min-h-[4.5rem] items-end pb-1 pt-2">{a ? <SeloAssinatura a={a} compacto meio={q === "Pela empresa" ? "Certificado qualificado" : undefined} /> : null}</div>
+            <div className="border-t border-slate-300 pt-2">
+              <p className="font-medium">{nome}</p>
+              {est && <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}{a?.q ? ` · ${a.q}` : ""}</p>}
+            </div>
           </div>
         ))}
       </section>

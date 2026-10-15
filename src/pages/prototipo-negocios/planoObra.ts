@@ -265,13 +265,26 @@ export function realPorFase(d: Negocio, S: Estado): ObraReal | null {
   return R;
 }
 
+/** 15/10: as horas que os técnicos registaram e o supervisor validou, por tarefa do orçamento (a chave do serviço). */
+function horasValidadas(d: Negocio): Record<string, number> {
+  const R: Record<string, number> = {};
+  for (const t of d.obra.plano?.tasks ?? []) {
+    if (t.exec?.estado !== "validada") continue;
+    const ks = t.svcs.length ? t.svcs : [TAREFA_DEMOLICAO];
+    for (const k of ks) R[k] = (R[k] ?? 0) + t.exec.horas / ks.length;
+  }
+  return R;
+}
+
 function calcularRealPorFase(d: Negocio, S: Estado): ObraReal | null {
   const P = planoObra(d, S);
   if (!P.tarefas.length) return null;
+  const hv = horasValidadas(d);
   let fimReal = 0;
   const fases: FaseReal[] = P.fases.map((f) => {
     const tarefas: TarefaReal[] = f.tarefas.map((t) => {
-      const fator = t.chave === TAREFA_DEMOLICAO ? 1 : fatorReal(t.chave);
+      // as horas validadas na obra mandam; sem elas, o real de exemplo (fatorReal)
+      const fator = hv[t.chave] != null && t.h > 0 ? hv[t.chave] / t.h : t.chave === TAREFA_DEMOLICAO ? 1 : fatorReal(t.chave);
       return { chave: t.chave, nome: t.nome, hPrev: r2(t.h), hReal: r2(t.h * fator), fator };
     });
     const hPrev = tarefas.reduce((a, t) => a + t.hPrev, 0), hReal = tarefas.reduce((a, t) => a + t.hReal, 0);

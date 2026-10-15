@@ -59,8 +59,16 @@ describe("portal do cliente: o percurso guiado", () => {
     expect(screen.getByRole("heading", { name: "Assinar o contrato" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "O contrato" })).toBeTruthy();
     fireEvent.click(within(screen.getByRole("region", { name: "Próximo passo" })).getByRole("button", { name: /Assinar o contrato/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Assinar" }));
+    // assina com a Chave Móvel Digital (o desenho tem o seu teste em AssinaturaContrato.test.tsx)
+    fireEvent.click(screen.getByRole("button", { name: /Chave Móvel Digital/ }));
+    fireEvent.change(screen.getByLabelText("Telemóvel"), { target: { value: "912 345 678" } });
+    fireEvent.change(screen.getByLabelText(/PIN/), { target: { value: "1234" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pedir o código" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Li e aceito/ }));
+    fireEvent.change(screen.getByLabelText(/[Cc]ódigo/), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: /Assinar o contrato/ }));
     expect(d.orc!.contrato).toBe("assinado");
+    expect(d.orc!.assinatura).toMatchObject({ tipo: "digital" });
     expect(d.fase).toBe(4);
 
     // depois de assinado: o plano da obra, sem custos nem margens
@@ -70,12 +78,51 @@ describe("portal do cliente: o percurso guiado", () => {
     expect(within(plano).getAllByRole("listitem").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("pedir alterações em vez de aceitar", () => {
-    const { d } = montar();
-    fireEvent.click(screen.getByRole("button", { name: "Gostava de mudar alguma coisa" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "O que gostava de mudar" }), { target: { value: "Outra cor" } });
+  it("pedir alterações: escolhe os motivos e diz o que mudaria; o comercial vê-o como próximo passo e a nova versão consome-o", () => {
+    const { S, d, A } = montar();
+    fireEvent.click(screen.getByRole("button", { name: "Pedir alterações ou recusar" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Pedir alterações(?! ou)/ }));
+    const enviar = screen.getByRole("button", { name: "Enviar o pedido" });
+    expect((enviar as HTMLButtonElement).disabled).toBe(true); // sem motivo nem texto, não envia
+    fireEvent.click(within(screen.getByRole("group", { name: "O que gostava de mudar" })).getByRole("button", { name: /Materiais ou acabamentos/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Conte-nos o que mudaria/ }), { target: { value: "Azulejo mais claro" } });
     fireEvent.click(screen.getByRole("button", { name: "Enviar o pedido" }));
     expect(d.orc!.aceite).toBeFalsy();
-    expect(d.hist.some((h) => /pediu alterações/.test(h.t))).toBe(true);
+    expect(d.orc!.pedidoCliente).toMatchObject({ motivos: ["Outros materiais"], nota: "Azulejo mais claro" });
+    expect(passoPortal(d).estado).toBe("pedido");
+    expect(screen.getByText("Estamos a preparar uma nova proposta")).toBeTruthy();
+    // o comercial: o próximo passo é a nova versão, e mexe-se na visita (materiais)
+    const p = proximo(d, S);
+    expect(p).toMatchObject({ t: "O cliente pediu alterações", act: "pedidoCliente", who: "comercial" });
+    A.novaVersao(d.id, d.orc!.pedidoCliente!.motivos, d.orc!.pedidoCliente!.nota ?? "", "visita");
+    expect(d.orc!.pedidoCliente).toBeNull();
+    expect(d.orc!.versoes!.at(-1)).toMatchObject({ motivos: ["Outros materiais"], nota: "Azulejo mais claro", onde: "visita" });
+    expect(d.visita.fechada).toBe(false); // de volta à visita: necessidades e produtos
+  });
+
+  it("recusar por completo: pede os motivos e o negócio fica perdido, com o porquê", () => {
+    const { d } = montar();
+    fireEvent.click(screen.getByRole("button", { name: "Pedir alterações ou recusar" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Recusar a propostaNão/ }));
+    const recusar = screen.getByRole("button", { name: "Recusar a proposta" });
+    expect((recusar as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(screen.getByRole("group", { name: "Porque não quer avançar" })).getByRole("button", { name: /O preço/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Recusar a proposta" }));
+    expect(d.perdido).toBe(true);
+    expect(d.motivoPerda).toBe("O preço");
+    expect(passoPortal(d).estado).toBe("recusada");
+    expect(screen.getByText("Obrigado por nos dizer")).toBeTruthy();
+  });
+
+  it("a fatura por pagar: o valor, ver a fatura e a referência Multibanco para copiar", () => {
+    const { d, r } = montar();
+    d.orc!.aceite = "hoje"; d.orc!.contrato = "assinado";
+    d.fin.fatura = { n: "FT 2026/418", q: "15/10" };
+    r.unmount();
+    render(<Portal S={seed()} d={d} A={acoes(seed(), vi.fn(), (fn) => fn())} />);
+    expect(screen.getByText("Pagar a fatura FT 2026/418")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Ver a fatura/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copiar referência" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copiar iban" })).toBeTruthy();
   });
 });
