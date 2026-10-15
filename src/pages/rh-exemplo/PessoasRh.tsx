@@ -3,8 +3,9 @@
  * linhas compactas, chips de filtro e um unico botao primario ("Nova pessoa"). Clicar numa linha abre a ficha num painel
  * lateral por cima da lista (nao muda de pagina); "Nova pessoa" abre outro painel lateral.
  *
- * Cinco sub-separadores: Pessoas, Admissões (o pipeline de quem está a entrar), Organograma, Cargos e (com `hr.pessoas.vinculos.view`)
+ * Quatro sub-separadores: Pessoas, Admissões (o pipeline de quem está a entrar), Cargos e (com `hr.pessoas.vinculos.view`)
  * Contratos a terminar.
+ * O organograma de chefias vive na página Organização (`?vista=chefias`); o antigo `?tab=organograma` redireciona para lá.
  * O separador vive no URL (`?tab=`). A ficha vive no caminho (`/rh-exemplo/pessoas/:id`, que continua a ser uma ligacao
  * direta: abre a lista com a ficha aberta) e abrir, passar a outra pessoa ou fechar atualiza o endereco sem remontar a pagina.
  *
@@ -12,7 +13,7 @@
  * contrato" sao ciclos de vida separados. A coluna do contrato so se mostra a quem tem `hr.pessoas.vinculos.view`.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -30,7 +31,6 @@ import { TabelaPessoasRh } from "@/components/rh-exemplo/lista/TabelaPessoasRh";
 import { caminhoDaFicha } from "@/components/rh-exemplo/lista/urlFicha";
 import { NovaPessoaDialogo } from "@/components/rh-exemplo/NovaPessoaDialogo";
 import { PessoasFuncoesTab } from "@/components/rh-exemplo/PessoasFuncoesTab";
-import { PessoasOrganogramaTab } from "@/components/rh-exemplo/PessoasOrganogramaTab";
 import { SeloExemplo } from "@/components/rh-exemplo/SeloExemplo";
 import { useCompany } from "@/components/rh-exemplo/hooks/useCompany";
 import { useLocaisTrabalho } from "@/components/rh-exemplo/hooks/useLocaisTrabalho";
@@ -42,11 +42,13 @@ import { cn } from "@/lib/utils";
 const SUBTABS = [
   { value: "pessoas", labelKey: "hr.subtabs.pessoas" },
   { value: "admissoes", labelKey: "rhAdm.tab" },
-  { value: "organograma", labelKey: "hr.subtabs.organograma" },
   { value: "cargos", labelKey: "hr.subtabs.cargos" },
   // So com hr.pessoas.vinculos.view: a lista de contratos a terminar le contratos.
   { value: "contratos", labelKey: "hr.subtabs.contratos" },
 ] as const;
+
+/** O organograma de pessoas passou para a página Organização, na vista Chefias. */
+const CHEFIAS_URL = "/rh-exemplo/organizacao?vista=chefias";
 
 interface FichaAberta {
   id: string | null;
@@ -141,6 +143,7 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
     sincronizarEndereco(null);
   };
 
+  if (activeTab === "organograma") return <Navigate to={CHEFIAS_URL} replace />;
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
 
@@ -198,9 +201,6 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
 
         <TabsContent value="admissoes" className="mt-0">
           <PipelineAdmissoes aoAbrirFicha={abrirFicha} />
-        </TabsContent>
-        <TabsContent value="organograma" className="mt-0">
-          <PessoasOrganogramaTab pessoas={pessoas} loading={loading} error={error} />
         </TabsContent>
         <TabsContent value="cargos" className="mt-0">
           <PessoasFuncoesTab pessoas={pessoas} loading={loading} />

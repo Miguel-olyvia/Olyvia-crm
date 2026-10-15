@@ -1,5 +1,5 @@
 /**
- * O separador Organograma: a arvore de PESSOAS, construida sobre
+ * A vista Chefias da pagina Organizacao: a arvore de PESSOAS, construida sobre
  * `pessoas.reporta_a_pessoa_id`.
  *
  * PORQUE NAO SE REAPROVEITA O ORGANOGRAMA QUE JA EXISTE
@@ -11,8 +11,8 @@
  * nao serve: e uma lista plana de `anew_memberships`, cega a `pessoas` -- nao
  * mostra quem existe no RH sem conta de acesso.
  *
- * Por isso: arvore propria aqui, e um LINK para o organograma de empresas no
- * cabecalho, rotulado como tal, para os dois conceitos nao se confundirem.
+ * Por isso: arvore propria aqui. A estrutura (grupo, empresas, filiais, centros)
+ * vive ao lado, na vista Estrutura da mesma pagina.
  *
  * RAIZES ORFAS
  * ------------
@@ -23,10 +23,9 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { Building2, Network, User } from "lucide-react";
+import { Network, User } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { PessoaListItem } from "@/components/rh-exemplo/tipos";
 
@@ -150,12 +149,6 @@ export function PessoasOrganogramaTab({
           <Network className="h-4 w-4 text-muted-foreground" />
           {t("hr.organograma.titulo")}
         </CardTitle>
-        {/* Link, nao componente reaproveitado: sao dois conceitos diferentes e
-            o rotulo diz qual e qual. */}
-        <Button variant="link" size="sm" className="gap-1.5" onClick={() => navigate("/org-chart")}>
-          <Building2 className="h-4 w-4" />
-          {t("hr.organograma.verEmpresas")}
-        </Button>
       </CardHeader>
       <CardContent>
         {error && <p className="pb-3 text-sm text-destructive">{error}</p>}

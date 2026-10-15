@@ -2,6 +2,9 @@
 export const rhExemploOrganizacaoTranslations: Record<"en" | "pt", Record<string, string>> = {
   en: {
     "sidebar.rhExemploOrganizacao": "Organization",
+    "rhOrg.vistas": "Organization views",
+    "rhOrg.vista.estrutura": "Structure",
+    "rhOrg.vista.chefias": "Reporting lines",
     "rhOrg.titulo": "Organization",
     "rhOrg.sub": "The legal and physical structure of the group: companies, branches and work centres.",
     "rhOrg.pai": "Human Resources (example)",
@@ -98,6 +101,9 @@ export const rhExemploOrganizacaoTranslations: Record<"en" | "pt", Record<string
   },
   pt: {
     "sidebar.rhExemploOrganizacao": "Organização",
+    "rhOrg.vistas": "Vistas da organização",
+    "rhOrg.vista.estrutura": "Estrutura",
+    "rhOrg.vista.chefias": "Chefias",
     "rhOrg.titulo": "Organização",
     "rhOrg.sub": "A estrutura legal e física do grupo: empresas, filiais e centros de trabalho.",
     "rhOrg.pai": "Recursos Humanos (exemplo)",

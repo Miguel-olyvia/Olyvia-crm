@@ -32,7 +32,7 @@ describe("RH de exemplo: lista de pessoas", () => {
     expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 13 + 5);
     expect(within(tabela).getByText("Marta Figueiredo")).toBeInTheDocument();
     expect(within(tabela).getByText("Rui Amaral")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
   });
 
   it("filtra pela pesquisa", () => {
