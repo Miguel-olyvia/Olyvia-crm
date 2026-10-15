@@ -79,18 +79,50 @@ export interface PessoaOrg {
   id: string;
   nome: string;
   cargo: string | null;
+  /** A quem reporta («chefia»), quando alguém lhe está atribuído. */
+  reportaAId: string | null;
 }
 
+/** Um nó da estrutura (grupo, empresa, filial, centro). */
 export interface NoOrg {
   id: string;
   tipo: TipoNo;
   nome: string;
-  filhos: NoOrg[];
+  filhos: NoArvore[];
   /** Pessoas com vínculo legal neste nó (0 nos centros, que não são entidades legais). */
   legais: number;
   /** Pessoas que trabalham neste centro; `null` nos nós que não são centros. */
   locais: number | null;
 }
+
+/** A linha «Sem centro atribuído»: quem tem vínculo legal numa filial ou empresa mas ainda não tem centro. Sem nome próprio (o texto é traduzido no ecrã). */
+export interface NoSemCentro {
+  id: string;
+  tipo: "semCentro";
+  nome: "";
+  filhos: NoArvore[];
+  /** Quantas pessoas tem (contando as que estão por baixo de uma chefia). */
+  total: number;
+}
+
+/** Uma pessoa, como folha da árvore, debaixo do centro onde trabalha; os subordinados do mesmo centro ficam por baixo da chefia. */
+export interface NoPessoa {
+  id: string;
+  tipo: "pessoa";
+  pessoaId: string;
+  nome: string;
+  cargo: string | null;
+  /** Tem equipa: alguém reporta a esta pessoa. */
+  chefia: boolean;
+  reportaAId: string | null;
+  /** O nome de quem a pessoa reporta, quando se conhece. */
+  reportaA: string | null;
+  /** O nome da filial do vínculo legal, só quando difere da filial do centro onde trabalha. */
+  vinculo: string | null;
+  filhos: NoArvore[];
+}
+
+export type NoArvore = NoOrg | NoSemCentro | NoPessoa;
 
 export type ErroLigacao =
   | "pessoaEmFalta"

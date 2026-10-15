@@ -8,7 +8,6 @@ import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
 import { CounterPill } from "@/components/inventory/ui/CounterPill";
-import { ContadorAdmissoes } from "./sidebar/ContadorAdmissoes";
 import { ContadorDenuncias } from "./sidebar/ContadorDenuncias";
 import { itemAtivo, type ItemAtivavel } from "./sidebar/itemAtivo";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
@@ -434,7 +433,6 @@ const FlyoutPanel = memo(function FlyoutPanel({
               <Icon className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{t(item.labelKey)}</span>
               <CounterPill value={counterFor(item)} {...pillProps(item)} />
-              {item.textCounter === "rhAdmissoesPorAprovar" && <ContadorAdmissoes />}
               {item.textCounter === "rhDenunciasPorConfirmar" && <ContadorDenuncias />}
             </button>
           );

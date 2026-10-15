@@ -1,11 +1,11 @@
 /**
- * A lista de pessoas -- o ecra "Organizacao" do modulo de RH, no mesmo padrao da lista de Pessoas do resto da aplicacao:
+ * A lista de pessoas -- o ecra "Pessoas" do modulo de RH, no mesmo padrao da lista de Pessoas do resto da aplicacao:
  * linhas compactas, chips de filtro e um unico botao primario ("Nova pessoa"). Clicar numa linha abre a ficha num painel
  * lateral por cima da lista (nao muda de pagina); "Nova pessoa" abre outro painel lateral.
  *
  * Quatro sub-separadores: Pessoas, Admissões (o pipeline de quem está a entrar), Cargos e (com `hr.pessoas.vinculos.view`)
  * Contratos a terminar.
- * O organograma de chefias vive na página Organização (`?vista=chefias`); o antigo `?tab=organograma` redireciona para lá.
+ * O organograma (com as pessoas e as chefias) vive na página Organização; o antigo `?tab=organograma` redireciona para lá.
  * O separador vive no URL (`?tab=`). A ficha vive no caminho (`/rh-exemplo/pessoas/:id`, que continua a ser uma ligacao
  * direta: abre a lista com a ficha aberta) e abrir, passar a outra pessoa ou fechar atualiza o endereco sem remontar a pagina.
  *
@@ -47,8 +47,8 @@ const SUBTABS = [
   { value: "contratos", labelKey: "hr.subtabs.contratos" },
 ] as const;
 
-/** O organograma de pessoas passou para a página Organização, na vista Chefias. */
-const CHEFIAS_URL = "/rh-exemplo/organizacao?vista=chefias";
+/** O organograma de pessoas passou para a página Organização, que já mostra as pessoas dentro da estrutura. */
+const ORGANIZACAO_URL = "/rh-exemplo/organizacao";
 
 interface FichaAberta {
   id: string | null;
@@ -143,7 +143,7 @@ export default function PessoasRh({ pessoaIdInicial }: { pessoaIdInicial?: strin
     sincronizarEndereco(null);
   };
 
-  if (activeTab === "organograma") return <Navigate to={CHEFIAS_URL} replace />;
+  if (activeTab === "organograma") return <Navigate to={ORGANIZACAO_URL} replace />;
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
 

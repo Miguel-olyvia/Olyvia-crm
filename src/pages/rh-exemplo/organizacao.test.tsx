@@ -6,7 +6,10 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { menuSections } from "@/components/sidebar/menuConfig";
+import * as K from "@/components/rh-exemplo/dados/constantes";
 import { repor } from "@/components/rh-exemplo/dados/loja";
+import { ligacoesDoCentro } from "@/components/rh-exemplo/organizacao/arvore";
+import { lerOrganizacao } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
 import RhOrganizacao from "./RhOrganizacao";
 
 const renderPagina = () =>
@@ -42,7 +45,8 @@ describe("a árvore da organização", () => {
     expect(no(/^Grupo Aurora/).getAttribute("aria-expanded")).toBe("true");
     expect(no(/^Aurora Remodelações, Lda\./)).toBeTruthy();
     expect(no(/^Aurora Climatização, Lda\./)).toBeTruthy();
-    expect(screen.getAllByRole("treeitem")).toHaveLength(1 + 2 + 5 + 7);
+    // 15 nós da estrutura (1 grupo, 2 empresas, 5 filiais, 7 centros) e as 15 pessoas ligadas, uma folha cada.
+    expect(screen.getAllByRole("treeitem")).toHaveLength(1 + 2 + 5 + 7 + 15);
     expect(within(no(/^Filial Faro/)).getAllByText("Filial").length).toBeGreaterThan(0);
     expect(within(no(/^Loja Faro/)).getByText("Centro")).toBeTruthy();
     expect(no(/^Grupo Aurora/).textContent).toContain("15 pessoas");
@@ -56,7 +60,7 @@ describe("a árvore da organização", () => {
     expect(screen.getAllByRole("treeitem")).toHaveLength(1);
     expect(no(/^Grupo Aurora/).getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Expandir tudo" }));
-    expect(screen.getAllByRole("treeitem")).toHaveLength(15);
+    expect(screen.getAllByRole("treeitem")).toHaveLength(15 + 15);
     expect(screen.getByRole("tree").querySelectorAll("button")).toHaveLength(0);
   });
 
@@ -64,10 +68,13 @@ describe("a árvore da organização", () => {
     renderPagina();
     const campo = screen.getByRole("searchbox", { name: "Pesquisar por nome" });
     fireEvent.change(campo, { target: { value: "armazem" } });
-    expect(screen.getAllByRole("treeitem")).toHaveLength(4);
+    // O caminho (grupo, empresa, filial, centro) e, por baixo do centro que corresponde, as pessoas que lá trabalham.
+    const noArmazem = ligacoesDoCentro(K.LOCAL_ARMAZEM, lerOrganizacao().ligacoes).length;
+    expect(noArmazem).toBeGreaterThan(0);
+    expect(screen.getAllByRole("treeitem")).toHaveLength(4 + noArmazem);
     expect(no(/^Armazém Azambuja/)).toBeTruthy();
     fireEvent.change(campo, { target: { value: "zzzz" } });
-    expect(screen.getByText("Nenhum nó corresponde à pesquisa.")).toBeTruthy();
+    expect(screen.getByText("Nenhuma pessoa ou nó corresponde à pesquisa.")).toBeTruthy();
   });
 
   it("o teclado percorre a árvore: setas, Enter para abrir o painel e Esc para o fechar", () => {
@@ -78,7 +85,8 @@ describe("a árvore da organização", () => {
     expect(document.activeElement).toBe(no(/^Aurora Remodelações, Lda\./));
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowLeft" });
     expect(no(/^Aurora Remodelações, Lda\./).getAttribute("aria-expanded")).toBe("false");
-    expect(screen.getAllByRole("treeitem")).toHaveLength(1 + 2 + 4);
+    // Grupo, as 2 empresas e, da Climatização (aberta), 2 filiais, 2 centros e as 3 pessoas que lá trabalham (Braga 1, Faro 2).
+    expect(screen.getAllByRole("treeitem")).toHaveLength(1 + 2 + 4 + 3);
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowLeft" });
     expect(document.activeElement).toBe(no(/^Grupo Aurora/));
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Enter" });
@@ -202,11 +210,11 @@ describe("ligar, alterar e desligar a pessoa", () => {
 });
 
 describe("o menu", () => {
-  it("tem «Organização» no grupo de RH de exemplo, a seguir a Pessoas e Admissões, para users.view", () => {
+  it("tem «Organização» no grupo de RH de exemplo, logo a seguir a Pessoas, para users.view", () => {
     const grupo = menuSections.find((s) => s.id === "rh-exemplo")!;
     const destinos = grupo.items.map((i) => i.to);
-    expect(destinos.slice(0, 3)).toEqual(["/rh-exemplo/pessoas", "/rh-exemplo/pessoas?tab=admissoes", "/rh-exemplo/organizacao"]);
-    const item = grupo.items[2]!;
+    expect(destinos.slice(0, 2)).toEqual(["/rh-exemplo/pessoas", "/rh-exemplo/organizacao"]);
+    const item = grupo.items[1]!;
     expect(item.labelKey).toBe("sidebar.rhExemploOrganizacao");
     expect(item.permission).toBe("users.view");
   });

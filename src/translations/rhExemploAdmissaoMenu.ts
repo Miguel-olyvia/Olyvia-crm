@@ -1,9 +1,7 @@
-// Textos das entradas «Admissões» e «Ver o Portal do colaborador (exemplo)» do menu de RH de exemplo, do índice dos oito estados
+// Textos da entrada «Ver o Portal do colaborador (exemplo)» do menu de RH de exemplo, do índice dos oito estados
 // do portal (`rhAdmIdx.*`) e da faixa de pré-visualização no topo do portal. Apenas en/pt.
 export const rhExemploAdmissaoMenuTranslations: Record<"en" | "pt", Record<string, string>> = {
   en: {
-    "sidebar.rhExemploAdmissoes": "Admissions",
-    "sidebar.rhExemploAdmissoesPorAprovar": "{n} to approve",
     "sidebar.rhExemploVerComoPessoa": "See the Employee portal (example)",
     "rhAdmIdx.titulo": "See the Employee portal (example)",
     "rhAdmIdx.sub": "The eight states of the portal the person opens from the link, each with an example person. Open one to see exactly what they see.",
@@ -36,8 +34,6 @@ export const rhExemploAdmissaoMenuTranslations: Record<"en" | "pt", Record<strin
     "rhAdmIdx.e.revogada.ve": "The old link, replaced when HR resent the invitation: the access screen, with a notice to use the latest email.",
   },
   pt: {
-    "sidebar.rhExemploAdmissoes": "Admissões",
-    "sidebar.rhExemploAdmissoesPorAprovar": "{n} por aprovar",
     "sidebar.rhExemploVerComoPessoa": "Ver o Portal do colaborador (exemplo)",
     "rhAdmIdx.titulo": "Ver o Portal do colaborador (exemplo)",
     "rhAdmIdx.sub": "Os oito estados do portal que a pessoa abre pelo link, cada um com uma pessoa de exemplo. Abre um para ver exatamente o que ela vê.",

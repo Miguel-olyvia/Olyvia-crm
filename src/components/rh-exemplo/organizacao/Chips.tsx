@@ -1,5 +1,5 @@
-/** Os chips de texto da página «Organização»: o tipo do nó (com ícone) e o aviso «Trabalha noutro centro». */
-import { ArrowRightLeft } from "lucide-react";
+/** Os chips de texto da página «Organização»: o tipo do nó (com ícone), «Chefia», «Reporta a» e o aviso «Trabalha noutro centro». */
+import { ArrowRightLeft, CornerDownRight, Network } from "lucide-react";
 import { ICONE_TIPO } from "@/components/rh-exemplo/organizacao/iconesTipo";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TipoNo } from "@/components/rh-exemplo/organizacao/tipos";
@@ -33,6 +33,30 @@ export function ChipNoutroCentro({ texto }: { texto?: string }) {
     <span className={`${BASE} ${COR_NOUTRO}`}>
       <ArrowRightLeft className="h-3 w-3" aria-hidden="true" />
       {texto ?? t("rhOrg.noutroCentro")}
+    </span>
+  );
+}
+
+const COR_CHEFIA = "border-primary/40 bg-primary/10 text-foreground";
+
+/** «Chefia»: a pessoa tem equipa. Texto e ícone, nunca só cor. */
+export function ChipChefia() {
+  const { t } = useTranslation();
+  return (
+    <span className={`${BASE} ${COR_CHEFIA}`}>
+      <Network className="h-3 w-3" aria-hidden="true" />
+      {t("rhOrg.chefia")}
+    </span>
+  );
+}
+
+/** «Reporta a: Nome», num chip neutro. */
+export function ChipReportaA({ nome }: { nome: string }) {
+  const { t } = useTranslation();
+  return (
+    <span className={`${BASE} border-border bg-muted/60 text-muted-foreground`}>
+      <CornerDownRight className="h-3 w-3" aria-hidden="true" />
+      {t("rhOrg.reportaA", { nome })}
     </span>
   );
 }

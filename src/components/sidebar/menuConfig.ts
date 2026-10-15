@@ -56,7 +56,6 @@ import {
   Waypoints,
   CarFront,
   History as HistoryIcon,
-  UserPlus,
   Eye,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
@@ -78,10 +77,8 @@ export interface MenuItem {
   frotaCounterKey?: "hoje" | "viaturas" | "ocorrencias" | "manutencao";
   /** Só o caminho exato realça a entrada (um ecrã filho com outra entrada, ou sem entrada, não a realça). */
   exact?: boolean;
-  /** Nunca realça quando o endereço traz estes parâmetros (p.ex. `tab=admissoes`): pertencem a outra entrada. */
-  inactiveWhenSearch?: string;
   /** Contador de texto (p.ex. «1 por aprovar»), alimentado por uma memória de exemplo e não pelo Inventário. */
-  textCounter?: "rhAdmissoesPorAprovar" | "rhDenunciasPorConfirmar";
+  textCounter?: "rhDenunciasPorConfirmar";
 }
 
 export interface MenuSubSection {
@@ -364,9 +361,7 @@ export const menuSections: MenuSection[] = [
     ],
     permissions: ["users.view"],
     items: [
-      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permission: "users.view", inactiveWhenSearch: "tab=admissoes" },
-      // Leva à mesma lista, já no separador «Admissões» (o separador vive em `?tab=`).
-      { to: "/rh-exemplo/pessoas?tab=admissoes", icon: UserPlus, labelKey: "sidebar.rhExemploAdmissoes", permission: "users.view", textCounter: "rhAdmissoesPorAprovar" },
+      { to: "/rh-exemplo/pessoas", icon: Users, labelKey: "sidebar.rhExemploPessoas", permission: "users.view" },
       { to: "/rh-exemplo/organizacao", icon: Network, labelKey: "sidebar.rhExemploOrganizacao", permission: "users.view" },
       { to: "/rh-exemplo/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.rhExemploAssiduidadeEAusencias", permission: "users.view" },
       { to: "/rh-exemplo/centros", icon: MapPin, labelKey: "sidebar.rhExemploCentros", permission: "users.view" },

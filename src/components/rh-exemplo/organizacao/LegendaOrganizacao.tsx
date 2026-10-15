@@ -1,6 +1,6 @@
-/** A legenda das cores e dos ícones da página «Organização»: os quatro tipos de nó, o aviso de outro centro e os contadores. */
+/** A legenda das cores e dos ícones da página «Organização»: os quatro tipos de nó, «Chefia», o aviso de outro centro e os contadores. */
 import { Users } from "lucide-react";
-import { ChipNoutroCentro, ChipTipo } from "@/components/rh-exemplo/organizacao/Chips";
+import { ChipChefia, ChipNoutroCentro, ChipTipo } from "@/components/rh-exemplo/organizacao/Chips";
 import type { TipoNo } from "@/components/rh-exemplo/organizacao/tipos";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -15,6 +15,7 @@ export function LegendaOrganizacao() {
         {TIPOS.map((tipo) => (
           <li key={tipo}><ChipTipo tipo={tipo} /></li>
         ))}
+        <li className="flex items-center gap-1.5"><ChipChefia /> {t("rhOrg.legendaChefia")}</li>
         <li className="flex items-center gap-1.5"><ChipNoutroCentro /> {t("rhOrg.legendaNoutro")}</li>
       </ul>
       <span className="inline-flex items-center gap-1">

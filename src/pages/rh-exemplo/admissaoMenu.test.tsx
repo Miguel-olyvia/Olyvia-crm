@@ -1,13 +1,12 @@
-// Arranque do acesso às admissões de exemplo: a entrada «Admissões» do menu (e a ligação direta ao separador), o realce que
-// não deixa «Pessoas» e «Admissões» ativos ao mesmo tempo, o índice «Ver o Portal do colaborador (exemplo)» com os oito
-// estados, o endereço antigo que redireciona e a faixa de volta. Tudo em memória, sem base.
+// Arranque do acesso às admissões de exemplo: o menu sem entrada «Admissões» (o separador da lista de Pessoas continua a abrir
+// por `?tab=admissoes` e a mostrar o contador), o realce de «Pessoas», o índice «Ver o Portal do colaborador (exemplo)» com os
+// oito estados, o endereço antigo que redireciona e a faixa de volta. Tudo em memória, sem base.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { menuSections } from "@/components/sidebar/menuConfig";
 import { itemAtivo } from "@/components/sidebar/itemAtivo";
-import { ContadorAdmissoes } from "@/components/sidebar/ContadorAdmissoes";
 import { ESTADOS_CONVITE } from "@/components/rh-exemplo/convite/estadosConvite";
 import { aprovarFicha } from "@/components/rh-exemplo/dados/accoesAdmissao";
 import { repor } from "@/components/rh-exemplo/dados/loja";
@@ -46,20 +45,22 @@ beforeEach(() => {
 });
 
 describe("o menu de RH de exemplo", () => {
-  it("tem «Admissões» logo a seguir a «Pessoas» e «Ver o Portal do colaborador (exemplo)», sem perder as entradas de antes", () => {
+  it("não tem «Admissões»: Pessoas, Organização e as restantes entradas, com «Ver o Portal do colaborador (exemplo)» no fim", () => {
     const destinos = grupo().items.map((i) => i.to);
-    expect(destinos.slice(0, 2)).toEqual(["/rh-exemplo/pessoas", "/rh-exemplo/pessoas?tab=admissoes"]);
     expect(destinos).toEqual([
-      "/rh-exemplo/pessoas", "/rh-exemplo/pessoas?tab=admissoes", "/rh-exemplo/organizacao", "/rh-exemplo/assiduidade-e-ausencias", "/rh-exemplo/centros",
+      "/rh-exemplo/pessoas", "/rh-exemplo/organizacao", "/rh-exemplo/assiduidade-e-ausencias", "/rh-exemplo/centros",
       "/rh-exemplo/documentos/modelos", "/rh-exemplo/processamento-salarial", "/rh-exemplo/custos", "/rh-exemplo/denuncias", "/rh-exemplo/admissao",
     ]);
-    expect(entrada("/rh-exemplo/pessoas?tab=admissoes").labelKey).toBe("sidebar.rhExemploAdmissoes");
+    expect(destinos.some((d) => d.includes("tab=admissoes"))).toBe(false);
+    expect(grupo().items.some((i) => i.labelKey === "sidebar.rhExemploAdmissoes")).toBe(false);
+    expect(grupo().items.some((i) => (i.textCounter as string | undefined) === "rhAdmissoesPorAprovar")).toBe(false);
+    expect(entrada("/rh-exemplo/denuncias").textCounter).toBe("rhDenunciasPorConfirmar");
     expect(entrada("/rh-exemplo/admissao").labelKey).toBe("sidebar.rhExemploVerComoPessoa");
     expect(grupo().items.every((i) => i.permission === "users.view")).toBe(true);
   });
 
-  it("a ligação de «Admissões» abre a lista já no separador «Admissões», e a de «Pessoas» no separador Pessoas", () => {
-    renderEm(entrada("/rh-exemplo/pessoas?tab=admissoes").to);
+  it("a ligação direta ?tab=admissoes continua a abrir o separador «Admissões», e a de «Pessoas» o separador Pessoas", () => {
+    renderEm("/rh-exemplo/pessoas?tab=admissoes");
     expect(screen.getByRole("tab", { selected: true, name: /Admissões/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Por aprovar (1)" })).toBeInTheDocument();
     cleanup();
@@ -73,21 +74,21 @@ describe("o menu de RH de exemplo", () => {
     expect(screen.getByRole("tab", { selected: true, name: /Cargos/ })).toBeInTheDocument();
   });
 
-  it("«Pessoas» e «Admissões» nunca ficam ativos ao mesmo tempo", () => {
+  it("«Pessoas» realça em qualquer separador da lista e na ficha, sem lógica especial para as admissões", () => {
     const pessoas = entrada("/rh-exemplo/pessoas");
-    const admissoes = entrada("/rh-exemplo/pessoas?tab=admissoes");
-    const casos: Array<[string, string, boolean, boolean]> = [
-      ["/rh-exemplo/pessoas", "", true, false],
-      ["/rh-exemplo/pessoas", "?tab=pessoas", true, false],
-      ["/rh-exemplo/pessoas", "?tab=admissoes", false, true],
-      ["/rh-exemplo/pessoas/p-marco", "?tab=admissoes", false, true],
-      ["/rh-exemplo/pessoas/p-marco", "", true, false],
-      ["/rh-exemplo/pessoas", "?tab=cargos", true, false],
-      ["/rh-exemplo/centros", "", false, false],
+    expect("inactiveWhenSearch" in pessoas).toBe(false);
+    const casos: Array<[string, string, boolean]> = [
+      ["/rh-exemplo/pessoas", "", true],
+      ["/rh-exemplo/pessoas", "?tab=pessoas", true],
+      ["/rh-exemplo/pessoas", "?tab=admissoes", true],
+      ["/rh-exemplo/pessoas/p-marco", "?tab=admissoes", true],
+      ["/rh-exemplo/pessoas/p-marco", "", true],
+      ["/rh-exemplo/pessoas", "?tab=cargos", true],
+      ["/rh-exemplo/centros", "", false],
+      ["/rh-exemplo/organizacao", "", false],
     ];
-    for (const [caminho, pesquisa, quemPessoas, quemAdmissoes] of casos) {
-      expect(itemAtivo(pessoas, caminho, pesquisa), `Pessoas em ${caminho}${pesquisa}`).toBe(quemPessoas);
-      expect(itemAtivo(admissoes, caminho, pesquisa), `Admissões em ${caminho}${pesquisa}`).toBe(quemAdmissoes);
+    for (const [caminho, pesquisa, esperado] of casos) {
+      expect(itemAtivo(pessoas, caminho, pesquisa), `Pessoas em ${caminho}${pesquisa}`).toBe(esperado);
     }
   });
 
@@ -104,11 +105,12 @@ describe("o menu de RH de exemplo", () => {
     expect(itemAtivo(centros, "/rh-exemplo/centros-outros")).toBe(false);
   });
 
-  it("o contador de «Admissões» é texto e acompanha as admissões por aprovar", () => {
-    render(<LanguageProvider><ContadorAdmissoes /></LanguageProvider>);
-    expect(screen.getByText("1 por aprovar")).toBeInTheDocument();
+  it("o separador «Admissões» da lista de Pessoas mostra o contador em texto e acompanha as admissões por aprovar", () => {
+    renderEm("/rh-exemplo/pessoas?tab=admissoes");
+    const aba = () => screen.getByRole("tab", { name: /Admissões/ });
+    expect(within(aba()).getByText(", 1 por aprovar")).toBeInTheDocument();
     act(() => void aprovarFicha("p-marco"));
-    expect(screen.queryByText(/por aprovar/)).not.toBeInTheDocument();
+    expect(within(aba()).queryByText(/por aprovar/)).not.toBeInTheDocument();
   });
 });
 

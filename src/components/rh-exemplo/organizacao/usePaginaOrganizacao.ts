@@ -1,16 +1,18 @@
-/** O estado da página «Organização»: árvore, pesquisa, nó aberto, painel de ligação, confirmação de «Desligar» e aviso. */
+/** O estado da página «Organização»: árvore (com as pessoas), pesquisa, nó aberto, painel de ligação, confirmação de «Desligar» e aviso. */
 import { useMemo, useState } from "react";
 import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { desligarPessoa, guardarLigacao } from "@/components/rh-exemplo/organizacao/accoesOrganizacao";
-import { construirArvore, filtrarArvore, idsExpansiveis } from "@/components/rh-exemplo/organizacao/arvore";
+import { construirArvore, ehNoOrg, filtrarArvore, idsExpansiveis } from "@/components/rh-exemplo/organizacao/arvore";
 import { pessoasDoExemplo } from "@/components/rh-exemplo/organizacao/dadosOrganizacao";
 import { ESTRUTURA_ORGANIZACAO, useOrganizacao } from "@/components/rh-exemplo/organizacao/lojaOrganizacao";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { ErroLigacao, NoOrg, PedidoLigacao, Resultado } from "@/components/rh-exemplo/organizacao/tipos";
+import type { ErroLigacao, NoArvore, NoOrg, PedidoLigacao, Resultado } from "@/components/rh-exemplo/organizacao/tipos";
 
-function procurar(no: NoOrg, id: string | null): NoOrg | null {
+/** O nó da estrutura com este identificador (as pessoas e «Sem centro atribuído» não abrem painel). */
+function procurar(no: NoArvore, id: string | null): NoOrg | null {
   if (id === null) return null;
-  return no.id === id ? no : no.filhos.reduce<NoOrg | null>((achado, f) => achado ?? procurar(f, id), null);
+  if (no.id === id) return ehNoOrg(no) ? no : null;
+  return no.filhos.reduce<NoOrg | null>((achado, f) => achado ?? procurar(f, id), null);
 }
 
 export function usePaginaOrganizacao() {
@@ -19,10 +21,11 @@ export function usePaginaOrganizacao() {
   const rh = useEstadoRh((e) => e);
   const pessoas = useMemo(() => pessoasDoExemplo(rh), [rh]);
   const porId = useMemo(() => new Map(pessoas.map((p) => [p.id, p])), [pessoas]);
-  const arvore = useMemo(() => construirArvore(ESTRUTURA_ORGANIZACAO, estado.ligacoes), [estado.ligacoes]);
+  const arvore = useMemo(() => construirArvore(ESTRUTURA_ORGANIZACAO, estado.ligacoes, pessoas), [estado.ligacoes, pessoas]);
   const todos = useMemo(() => idsExpansiveis(arvore), [arvore]);
 
-  const [abertos, setAbertos] = useState<ReadonlySet<string>>(() => new Set(todos));
+  // Guardam-se os FECHADOS: um nó que passa a ter filhos (a primeira pessoa de um centro) nasce aberto.
+  const [fechados, setFechados] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [termo, setTermo] = useState("");
   const [seleccionado, setSeleccionado] = useState<string | null>(null);
   const [form, setForm] = useState<{ aberto: boolean; pessoaInicial: string | null }>({ aberto: false, pessoaInicial: null });
@@ -31,9 +34,9 @@ export function usePaginaOrganizacao() {
 
   const nomeDe = (id: string): string => porId.get(id)?.nome ?? id;
   const alternar = (id: string): void => {
-    const novo = new Set(abertos);
+    const novo = new Set(fechados);
     if (!novo.delete(id)) novo.add(id);
-    setAbertos(novo);
+    setFechados(novo);
   };
   const guardar = (pedido: PedidoLigacao): Resultado => {
     const r = guardarLigacao(pedido);
@@ -53,11 +56,11 @@ export function usePaginaOrganizacao() {
     estado, pessoas, porId, termo, setTermo, aviso, seleccionado, setSeleccionado, form, aDesligar, setADesligar,
     visivel: filtrarArvore(arvore, termo),
     noAberto: procurar(arvore, seleccionado),
-    abertos: pesquisando ? new Set(todos) : abertos,
+    abertos: pesquisando ? new Set(todos) : new Set(todos.filter((id) => !fechados.has(id))),
     pessoaADesligar: aDesligar ? { id: aDesligar, nome: nomeDe(aDesligar) } : null,
     alternar, guardar, desligar,
-    expandirTudo: () => setAbertos(new Set(todos)),
-    recolherTudo: () => setAbertos(new Set<string>()),
+    expandirTudo: () => setFechados(new Set<string>()),
+    recolherTudo: () => setFechados(new Set(todos)),
     abrirForm: (pessoaInicial: string | null) => setForm({ aberto: true, pessoaInicial }),
     fecharForm: () => setForm({ aberto: false, pessoaInicial: null }),
   };

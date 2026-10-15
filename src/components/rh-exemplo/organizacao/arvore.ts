@@ -1,5 +1,6 @@
-/** Funções puras da árvore da organização: construir, contar pessoas, comparar vínculo legal e centro, pesquisar. */
-import type { CentroOrg, EstruturaOrg, Ligacao, NoOrg } from "@/components/rh-exemplo/organizacao/tipos";
+/** Funções puras da árvore da organização: construir (com as pessoas dentro), contar, comparar vínculo legal e centro, pesquisar. */
+import { contarNos, idsDeChefias, noDaPessoa, organizarPorChefia } from "@/components/rh-exemplo/organizacao/arvorePessoas";
+import type { CentroOrg, EstruturaOrg, Ligacao, NoArvore, NoOrg, NoSemCentro, PessoaOrg } from "@/components/rh-exemplo/organizacao/tipos";
 
 export interface Contagem {
   legais: number;
@@ -23,20 +24,40 @@ export function contarPessoas(est: EstruturaOrg, ligs: readonly Ligacao[]): Map<
   return mapa;
 }
 
-/** A árvore de quatro níveis: Grupo > Empresas > Filiais > Centros, com os contadores já calculados. */
-export function construirArvore(est: EstruturaOrg, ligs: readonly Ligacao[]): NoOrg {
+/** Só os nós da estrutura (grupo, empresa, filial, centro) abrem painel; as pessoas abrem a ficha. */
+export const ehNoOrg = (no: NoArvore): no is NoOrg => no.tipo !== "pessoa" && no.tipo !== "semCentro";
+
+/** A ligação não tem centro: o centro não existe na estrutura (vínculo legal sem local de trabalho atribuído). */
+export const semCentro = (est: EstruturaOrg, lig: Ligacao): boolean => !est.centros.some((c) => c.id === lig.centroId);
+
+/**
+ * A árvore: Grupo > Empresas > Filiais > Centros, com os contadores já calculados e as PESSOAS como folhas debaixo do centro
+ * onde trabalham (chefia primeiro, subordinados por baixo). Quem tem vínculo mas nenhum centro fica numa linha «Sem centro
+ * atribuído» debaixo da filial (ou da empresa, se a filial não existir).
+ */
+export function construirArvore(est: EstruturaOrg, ligs: readonly Ligacao[], pessoas: readonly PessoaOrg[]): NoOrg {
   const n = contarPessoas(est, ligs);
   const cont = (id: string): Contagem => n.get(id) ?? { legais: 0, locais: 0 };
+  const porId = new Map(pessoas.map((p) => [p.id, p]));
+  const chefias = idsDeChefias(pessoas);
+  const gente = (lista: readonly Ligacao[]) => organizarPorChefia(lista.map((l) => noDaPessoa(est, l, porId, chefias)));
+  const semCentroDe = (paiId: string, lista: readonly Ligacao[]): NoSemCentro[] => {
+    const filhos = gente(lista.filter((l) => semCentro(est, l)));
+    return filhos.length === 0 ? [] : [{ id: `semcentro:${paiId}`, tipo: "semCentro", nome: "", filhos, total: contarNos(filhos) }];
+  };
   const centro = (c: CentroOrg): NoOrg => ({
-    id: c.id, tipo: "centro", nome: c.nome, filhos: [], legais: 0, locais: cont(c.id).locais,
+    id: c.id, tipo: "centro", nome: c.nome, filhos: gente(ligacoesDoCentro(c.id, ligs)), legais: 0, locais: cont(c.id).locais,
   });
   const filial = (id: string, nome: string): NoOrg => ({
     id, tipo: "filial", nome, legais: cont(id).legais, locais: null,
-    filhos: est.centros.filter((c) => c.filialId === id).map(centro),
+    filhos: [...est.centros.filter((c) => c.filialId === id).map(centro), ...semCentroDe(id, ligs.filter((l) => l.filialId === id))],
   });
   const empresas: NoOrg[] = est.empresas.map((e) => ({
     id: e.id, tipo: "empresa", nome: e.nome, legais: cont(e.id).legais, locais: null,
-    filhos: est.filiais.filter((f) => f.empresaId === e.id).map((f) => filial(f.id, f.nome)),
+    filhos: [
+      ...est.filiais.filter((f) => f.empresaId === e.id).map((f) => filial(f.id, f.nome)),
+      ...semCentroDe(e.id, ligs.filter((l) => l.empresaId === e.id && !est.filiais.some((f) => f.id === l.filialId))),
+    ],
   }));
   return { id: est.grupo.id, tipo: "grupo", nome: est.grupo.nome, filhos: empresas, legais: cont(est.grupo.id).legais, locais: null };
 }
@@ -65,26 +86,35 @@ export function ligacoesDoCentro(centroId: string, ligs: readonly Ligacao[]): Li
 
 const normalizar = (s: string): string => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
 
-/** Mantém os nós cujo nome contém o termo e os seus antepassados; `null` se nada corresponde. */
+function filtrarNo(no: NoArvore, alvo: string): NoArvore | null {
+  if (normalizar(no.nome).includes(alvo)) return no;
+  const filhos = no.filhos.map((f) => filtrarNo(f, alvo)).filter((f): f is NoArvore => f !== null);
+  return filhos.length > 0 ? { ...no, filhos } : null;
+}
+
+/**
+ * Mantém os nós (estrutura ou pessoas) cujo nome contém o termo, com tudo o que está por baixo, e os seus antepassados;
+ * `null` se nada corresponde. Sem termo devolve a árvore inteira.
+ */
 export function filtrarArvore(no: NoOrg, termo: string): NoOrg | null {
   const alvo = normalizar(termo);
   if (alvo === "") return no;
-  const filhos = no.filhos.map((f) => filtrarArvore(f, termo)).filter((f): f is NoOrg => f !== null);
-  return normalizar(no.nome).includes(alvo) || filhos.length > 0 ? { ...no, filhos } : null;
+  const r = filtrarNo(no, alvo);
+  return r !== null && ehNoOrg(r) ? r : null;
 }
 
 /** Os identificadores dos nós com filhos (os que se podem expandir). */
-export function idsExpansiveis(no: NoOrg): string[] {
+export function idsExpansiveis(no: NoArvore): string[] {
   return no.filhos.length === 0 ? [] : [no.id, ...no.filhos.flatMap(idsExpansiveis)];
 }
 
 export interface VisivelNo {
-  no: NoOrg;
+  no: NoArvore;
   paiId: string | null;
 }
 
 /** Os nós por ordem de apresentação, só os que se vêem (os filhos de um nó fechado ficam de fora). */
-export function listaVisivel(no: NoOrg, abertos: ReadonlySet<string>, paiId: string | null = null): VisivelNo[] {
+export function listaVisivel(no: NoArvore, abertos: ReadonlySet<string>, paiId: string | null = null): VisivelNo[] {
   const filhos = abertos.has(no.id) ? no.filhos.flatMap((f) => listaVisivel(f, abertos, no.id)) : [];
   return [{ no, paiId }, ...filhos];
 }

@@ -105,7 +105,7 @@ const SEM_LIGACAO = new Set(["p-pedro", "p-nadia", "p-ruben"]);
 export function pessoasDoExemplo(rh: EstadoRh): PessoaOrg[] {
   return rh.ordem.flatMap((id) => {
     const ficha = rh.fichas[id];
-    return ficha ? [{ id, nome: ficha.pessoa.nome_completo, cargo: ficha.pessoa.cargo }] : [];
+    return ficha ? [{ id, nome: ficha.pessoa.nome_completo, cargo: ficha.pessoa.cargo, reportaAId: ficha.pessoa.reporta_a_pessoa_id ?? null }] : [];
   });
 }
 
