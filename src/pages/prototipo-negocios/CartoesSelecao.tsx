@@ -204,8 +204,10 @@ export function Pesquisa({ valor, onMudar, rotulo, ph }: { valor: string; onMuda
  * desliza com o dedo (nativo), a arrastar com o rato (um arrasto de mais de 5 px não conta como clique) e com a roda
  * (o deslocamento vertical passa a horizontal). A ponta com mais filtros esbate-se; o filtro focado com o Tab fica à vista.
  */
-export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
+export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo, todos = "Todos" }: {
   opcoes: string[]; ativo: string | null; onMudar: (v: string | null) => void; rotulo: string;
+  /** O nome do primeiro filtro, o que mostra tudo (ex.: "Todas as fases"). */
+  todos?: string;
   /** Um seletor que vem primeiro na mesma fila e desliza com o resto (ex.: a fase da obra). */
   prefixo?: ReactNode;
 }) {
@@ -240,6 +242,15 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
     ro?.observe(el);
     return () => { el.removeEventListener("wheel", roda); ro?.disconnect(); };
   }, [medir, opcoes.length]);
+  // o filtro ativo fica à vista na fila (ex.: depois de "Limpar", o "Todos" volta a aparecer), só na horizontal
+  useEffect(() => {
+    const el = ref.current;
+    const b = el?.querySelector<HTMLElement>('button[aria-pressed="true"]');
+    if (!el || !b) return;
+    const esq = b.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft, dir = esq + b.offsetWidth;
+    if (esq < el.scrollLeft) el.scrollTo?.({ left: Math.max(0, esq - 8), behavior: reduzir ? "auto" : "smooth" });
+    else if (dir > el.scrollLeft + el.clientWidth) el.scrollTo?.({ left: dir - el.clientWidth + 8, behavior: reduzir ? "auto" : "smooth" });
+  }, [ativo, reduzir]);
 
   if (opcoes.length < 2 && !prefixo) return null;
   // o filtro ativo: o fundo do acento desliza de um filtro para o outro (layoutId), o texto muda de cor por baixo
@@ -287,7 +298,7 @@ export function FiltrosFila({ opcoes, ativo, onMudar, rotulo, prefixo }: {
       onDragStartCapture={(e) => e.preventDefault()}>
       {prefixo}
       {opcoes.length >= 2 && <>
-      <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>{fundo(!ativo)}<span className="relative">Todos</span></button>
+      <button type="button" aria-pressed={!ativo} onClick={() => onMudar(null)} className={b(!ativo)}>{fundo(!ativo)}<span className="relative">{todos}</span></button>
       {opcoes.map((o) => (
         <button key={o} type="button" aria-pressed={ativo === o} onClick={() => onMudar(ativo === o ? null : o)} className={b(ativo === o)}>{fundo(ativo === o)}<span className="relative">{o}</span></button>
       ))}

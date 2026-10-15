@@ -32,6 +32,7 @@ import {
 } from "./selecao";
 import { CartaoProduto, CartaoResposta, CartaoServico, FiltrosFila, Pesquisa, QtdMudar } from "./CartoesSelecao";
 import { useGuiaPasso } from "./guiaPasso";
+import { NOMES_FASES, faseDoNome, filtrarPorFase, filtroAtivo, nomeDaFase, textoResultados } from "./filtrosNecessidades";
 import { ANIMAR_ATE, Brilho, CASCATA, Contagem, MOLA, MOLA_CARTAO, Progresso, SAIDA, VistoDesenho, cascata, deslize, useReduzir, useUmaVez, vibrar } from "./movimento";
 import {
   FASES_OBRA, MODELOS_RAPIDOS, aplicarModelo, desfazerModelo, faseDoProduto, fasesDoServico, fasesDoTile, guardarPasso, lerPassoGuardado, modeloAtual, ordenarObrigacoesPorFase,
@@ -319,27 +320,35 @@ function Vazio({ texto, acao, onAcao, img = "generico" }: { texto: string; acao?
   );
 }
 
-/** O seletor rápido de fase ("Todas · 1 · 2 · 3 · 4"), o primeiro da fila de filtros; o ativo com o fundo a deslizar. */
-function SeletorFase({ ativa, onMudar }: { ativa: FaseObra | null; onMudar: (f: FaseObra | null) => void }) {
-  const reduzir = useReduzir();
-  const ops: { f: FaseObra | null; t: string; l: string }[] = [
-    { f: null, t: "Todas", l: "Todas as fases" },
-    ...FASES_OBRA.map((x) => ({ f: x.n, t: String(x.n), l: `Fase ${x.n} · ${x.curto}` })),
-  ];
+/**
+ * Os três filtros da etapa, separados (filtrosNecessidades.ts): a pesquisa, a fase da obra pelo nome e a tipologia.
+ * Combinam-se; com algum ligado, uma linha diz quantos há e deixa limpar tudo de uma vez.
+ */
+function Filtros({ q, setQ, fase, setFase, tipo, setTipo, tipos, n, nomes, pesquisa }: {
+  q: string; setQ: (v: string) => void; fase: FaseObra | null; setFase: (f: FaseObra | null) => void;
+  tipo: string | null; setTipo: (v: string | null) => void; tipos: string[]; n: number;
+  /** [singular, plural, nenhum]: "serviço", "serviços", "Nenhum serviço". */
+  nomes: [string, string, string];
+  /** A pesquisa (rótulo e exemplo); sem ela, a lista é curta e não precisa. */
+  pesquisa?: { rotulo: string; ph: string };
+}) {
+  const ativo = filtroAtivo({ q, fase, tipo });
   return (
-    <span role="group" aria-label="Filtrar por fase" className="mr-1 inline-flex shrink-0 items-center rounded-full bg-foreground/[0.07] p-1">
-      {ops.map((o) => {
-        const on = ativa === o.f;
-        return (
-          <button key={o.t} type="button" aria-pressed={on} aria-label={o.l} title={o.l} onClick={() => onMudar(on && o.f != null ? null : o.f)}
-            className={cn("relative inline-flex h-10 min-w-11 items-center justify-center rounded-full px-3 text-[15px] tabular-nums outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-primary",
-              on ? "font-semibold text-foreground" : "text-muted-foreground hover:text-foreground")}>
-            {on && <motion.span layoutId="fase-ativa" aria-hidden="true" className="absolute inset-0 rounded-full bg-card shadow-[0_1px_3px_hsl(var(--foreground)/0.18)]" transition={reduzir ? { duration: 0 } : MOLA} />}
-            <span className="relative">{o.t}</span>
+    <div className="space-y-2">
+      {pesquisa && <Pesquisa valor={q} onMudar={setQ} rotulo={pesquisa.rotulo} ph={pesquisa.ph} />}
+      <FiltrosFila opcoes={NOMES_FASES} ativo={nomeDaFase(fase)} onMudar={(x) => setFase(faseDoNome(x))} rotulo="Filtrar por fase" todos="Todas as fases" />
+      <FiltrosFila opcoes={tipos} ativo={tipo} onMudar={setTipo} rotulo="Filtrar por tipo" todos="Todos os tipos" />
+      {/* a contagem só com algum filtro ligado (sem filtros não ocupa espaço); a região viva fica sempre montada */}
+      <div className={cn("flex items-center justify-between gap-3", ativo && "min-h-8")}>
+        <p className="text-sm text-muted-foreground" aria-live="polite">{ativo ? textoResultados(n, ...nomes) : ""}</p>
+        {ativo && (
+          <button type="button" onClick={() => { setQ(""); setFase(null); setTipo(null); }}
+            className="-mr-2 min-h-8 shrink-0 rounded-lg px-2 text-sm font-medium text-primary outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary">
+            Limpar
           </button>
-        );
-      })}
-    </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -361,7 +370,7 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
   const ordem = useMemo(() => servicosFiltrados(tiles, { q, oficio: of, linha: d.linha }).map((t) => t.sid), [q, of, d.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const fasesDe = useMemo(() => new Map(tiles.map((t) => [t.sid, fasesDoTile(K as ComFases, t)])), [K, d.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const fasesDoSid = (sid: SvcId) => fasesDe.get(sid) ?? [4 as FaseObra];
-  const lista = ordem.map((sid) => porSid.get(sid)).filter((t): t is TileServico => !!t).filter((t) => !fase || fasesDoSid(t.sid).includes(fase));
+  const lista = filtrarPorFase(ordem.map((sid) => porSid.get(sid)).filter((t): t is TileServico => !!t), fase, (t) => fasesDoSid(t.sid));
   // um serviço de várias fases aparece uma vez: na primeira (ou na do seletor), com "também na fase 3"
   const grupoDe = (t: TileServico): FaseObra => (fase && fasesDoSid(t.sid).includes(fase) ? fase : fasesDoSid(t.sid)[0]);
   const visiveis = lista.slice(0, n);
@@ -412,12 +421,11 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
           );
         })}
       </div>
-      <Pesquisa valor={q} onMudar={(x) => { setQ(x); setN(PRIMEIROS_SVC); }} rotulo="Procurar serviço" ph="Procurar: nicho, toalheiro, gás…" />
-      <FiltrosFila opcoes={ofs} ativo={of} onMudar={(x) => { setOf(x); setN(PRIMEIROS_SVC); }} rotulo="Filtrar por área"
-        prefixo={<SeletorFase ativa={fase} onMudar={(f) => { setFase(f); setN(PRIMEIROS_SVC); }} />} />
-      {q.trim() && lista.length > 0 && <p className="text-sm text-muted-foreground" aria-live="polite">{plural(lista.length, "serviço", "serviços")}</p>}
+      <Filtros q={q} setQ={(x) => { setQ(x); setN(PRIMEIROS_SVC); }} fase={fase} setFase={(f) => { setFase(f); setN(PRIMEIROS_SVC); }}
+        tipo={of} setTipo={(x) => { setOf(x); setN(PRIMEIROS_SVC); }} tipos={ofs} n={lista.length} nomes={["serviço", "serviços", "Nenhum serviço"]}
+        pesquisa={{ rotulo: "Procurar serviço", ph: "Procurar: nicho, toalheiro, gás…" }} />
       {!lista.length ? (
-        <Vazio texto={q.trim() ? `Nenhum serviço com "${q.trim()}"${of || fase ? " nestes filtros" : ""}. Experimente outra palavra.` : "Nenhum serviço nesta área e nesta fase."}
+        <Vazio texto={q.trim() ? `Nenhum serviço com "${q.trim()}"${of || fase ? " nestes filtros" : ""}. Experimente outra palavra.` : "Nenhum serviço neste tipo e nesta fase."}
           acao="Limpar a pesquisa e os filtros" onAcao={limpar} img="ferramenta" />
       ) : (
         <LayoutGroup>
@@ -473,12 +481,15 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
   const reduzir = useReduzir();
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string | null>(null);
+  const [fase, setFase] = useState<FaseObra | null>(null);
   const [n, setN] = useState(PRIMEIROS_PROD);
   const cats = useMemo(() => categoriasDaLista(produtos, K.arvore), [produtos, K.arvore]);
   const lista = useMemo(() => {
     const f = filtrarProdutos(produtos, K.arvore, { q });
-    return cat ? f.filter((p) => categoriaFiltro(p, K.arvore) === cat) : f;
-  }, [produtos, K.arvore, q, cat]);
+    const t = cat ? f.filter((p) => categoriaFiltro(p, K.arvore) === cat) : f;
+    return faseDe ? filtrarPorFase(t, fase, (p) => [faseDe(p)]) : t;
+  }, [produtos, K.arvore, q, cat, fase]); // eslint-disable-line react-hooks/exhaustive-deps
+  const limpar = () => { setQ(""); setCat(null); setFase(null); setN(PRIMEIROS_PROD); };
   const escolhido = new Map((d.visita.prod ?? []).map((p) => [p.id, p]));
   const sids = servicosVisita(d);
   const visiveis = lista.slice(0, n);
@@ -503,12 +514,20 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
   };
   return (
     <div className="space-y-3">
-      {produtos.length > PRIMEIROS_PROD && <Pesquisa valor={q} onMudar={(x) => { setQ(x); setN(PRIMEIROS_PROD); }} rotulo={`Procurar em ${rotulo.toLowerCase()}`} ph="Procurar: nome, marca, referência…" />}
-      <FiltrosFila opcoes={cats} ativo={cat} onMudar={(x) => { setCat(x); setN(PRIMEIROS_PROD); }} rotulo="Filtrar por tipo" />
-      {q.trim() && lista.length > 0 && <p className="text-sm text-muted-foreground" aria-live="polite">{plural(lista.length, "produto", "produtos")}</p>}
+      {faseDe ? (
+        <Filtros q={q} setQ={(x) => { setQ(x); setN(PRIMEIROS_PROD); }} fase={fase} setFase={(f) => { setFase(f); setN(PRIMEIROS_PROD); }}
+          tipo={cat} setTipo={(x) => { setCat(x); setN(PRIMEIROS_PROD); }} tipos={cats} n={lista.length} nomes={["produto", "produtos", "Nenhum produto"]}
+          pesquisa={produtos.length > PRIMEIROS_PROD ? { rotulo: `Procurar em ${rotulo.toLowerCase()}`, ph: "Procurar: nome, marca, referência…" } : undefined} />
+      ) : (
+        <>
+          {produtos.length > PRIMEIROS_PROD && <Pesquisa valor={q} onMudar={(x) => { setQ(x); setN(PRIMEIROS_PROD); }} rotulo={`Procurar em ${rotulo.toLowerCase()}`} ph="Procurar: nome, marca, referência…" />}
+          <FiltrosFila opcoes={cats} ativo={cat} onMudar={(x) => { setCat(x); setN(PRIMEIROS_PROD); }} rotulo="Filtrar por tipo" />
+          {q.trim() && lista.length > 0 && <p className="text-sm text-muted-foreground" aria-live="polite">{plural(lista.length, "produto", "produtos")}</p>}
+        </>
+      )}
       {!lista.length ? (
-        <Vazio texto={q.trim() ? `Nada com "${q.trim()}". Procure pela marca ou pela referência, ou tire o filtro.` : "Não há produtos deste tipo."}
-          acao={q.trim() || cat ? "Limpar a pesquisa e o filtro" : undefined} onAcao={() => { setQ(""); setCat(null); setN(PRIMEIROS_PROD); }} img="generico" />
+        <Vazio texto={q.trim() ? `Nada com "${q.trim()}". Procure pela marca ou pela referência, ou tire o filtro.` : "Não há produtos com estes filtros."}
+          acao={q.trim() || cat || fase ? "Limpar a pesquisa e os filtros" : undefined} onAcao={limpar} img="generico" />
       ) : faseDe ? (
         <LayoutGroup>
           <ul className="space-y-1" aria-label={rotulo}>

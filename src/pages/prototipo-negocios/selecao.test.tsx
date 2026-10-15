@@ -282,7 +282,7 @@ describe("a seleção guiada no ecrã", () => {
     const { S, d } = preparar();
     render(<Montar S={S} d={d} />);
     expect(titulo()).toBe("O que se faz"); // as Escolhas já respondidas e nada mexido: abre nos serviços
-    fireEvent.click(screen.getByRole("button", { name: "Revestimentos" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Filtrar por tipo" })).getByRole("button", { name: "Revestimentos" }));
     const nicho = screen.getByRole("button", { name: /Construção de Nicho/i });
     expect(nicho).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(nicho);
@@ -313,8 +313,8 @@ describe("a seleção guiada no ecrã", () => {
   it("o filtro junta-se à pesquisa e tocar no ativo volta a 'Todos'", () => {
     const { S, d } = preparar();
     render(<Montar S={S} d={d} />);
-    const filtros = screen.getByRole("group", { name: "Filtrar por área" });
-    const todos = within(filtros).getByRole("button", { name: "Todos" });
+    const filtros = screen.getByRole("group", { name: "Filtrar por tipo" });
+    const todos = within(filtros).getByRole("button", { name: "Todos os tipos" });
     expect(todos).toHaveAttribute("aria-pressed", "true");
     const lista = () => within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("listitem");
     fireEvent.click(within(filtros).getByRole("button", { name: "Canalização" }));
@@ -650,6 +650,34 @@ describe("a experiência guiada: aria-live, foco, modelos rápidos, passo guarda
     expect(titulo()).toBe("Mais produtos");
   });
 
+  it("os três filtros separados: pesquisa, fase pelo nome e tipo; combinam-se, contam e limpam-se de uma vez", () => {
+    const { S, d } = preparar();
+    render(<Montar S={S} d={d} />);
+    const fases = screen.getByRole("group", { name: "Filtrar por fase" });
+    const tipos = screen.getByRole("group", { name: "Filtrar por tipo" });
+    // a fase pelo nome (não pelo número), com "Todas as fases" ligado ao início
+    expect(within(fases).getAllByRole("button").map((b) => b.textContent)).toEqual(["Todas as fases", "Preparação e demolições", "Infraestruturas", "Revestimentos", "Montagem final"]);
+    expect(within(fases).getByRole("button", { name: "Todas as fases" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(tipos).getByRole("button", { name: "Todos os tipos" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Limpar" })).toBeNull();
+    fireEvent.click(within(fases).getByRole("button", { name: "Preparação e demolições" }));
+    const grupos = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("list");
+    expect(grupos.every((g) => /^Fase 1/.test(g.getAttribute("aria-label")!))).toBe(true);
+    expect(screen.getByText(/^\d+ serviços?$|^Nenhum serviço$/)).toBeInTheDocument();
+    // tocar no ativo volta a "Todas as fases"
+    fireEvent.click(within(fases).getByRole("button", { name: "Preparação e demolições" }));
+    expect(within(fases).getByRole("button", { name: "Todas as fases" })).toHaveAttribute("aria-pressed", "true");
+    // pesquisa + fase + tipo; "Limpar" desliga os três
+    fireEvent.click(within(fases).getByRole("button", { name: "Infraestruturas" }));
+    fireEvent.click(within(tipos).getByRole("button", { name: "Canalização" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar serviço" }), { target: { value: "torneira" } });
+    fireEvent.click(screen.getByRole("button", { name: "Limpar" }));
+    expect(within(fases).getByRole("button", { name: "Todas as fases" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(tipos).getByRole("button", { name: "Todos os tipos" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("searchbox", { name: "Procurar serviço" })).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Limpar" })).toBeNull();
+  });
+
   it("os serviços por fase da obra: um serviço só uma vez, e o seletor de fase cruza com a área", () => {
     const { S, d } = preparar();
     render(<Montar S={S} d={d} />);
@@ -658,8 +686,8 @@ describe("a experiência guiada: aria-live, foco, modelos rápidos, passo guarda
     expect([...fases].sort()).toEqual(fases); // pela ordem 1 → 4
     const titulos = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("listitem").map((li) => li.getAttribute("title"));
     expect(new Set(titulos).size).toBe(titulos.length);
-    fireEvent.click(screen.getByRole("button", { name: /^Fase 2/ }));
-    fireEvent.click(within(screen.getByRole("group", { name: "Filtrar por área" })).getByRole("button", { name: "Canalização" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Filtrar por fase" })).getByRole("button", { name: "Infraestruturas" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Filtrar por tipo" })).getByRole("button", { name: "Canalização" }));
     const grupos = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("list");
     expect(grupos.every((g) => /^Fase 2/.test(g.getAttribute("aria-label")!))).toBe(true);
   });
