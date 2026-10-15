@@ -21,7 +21,10 @@ import { generateSecureFileName } from "@/utils/secureFileUpload";
 // "product": fichas técnicas, certificados e manuais do artigo. Fica fora do
 // alcance do portal do cliente sem ser preciso fazer nada — ver a nota de
 // segurança na migração 20261201100000.
-export type DocumentEntityType = "quote" | "proposal" | "contract" | "product";
+// "vehicle": DUA, apólice, certificado de inspeção e fotos da viatura da Frota
+// (migração 20261220110000: CHECK + ramo no gatilho documents_validate_entity).
+// Também fora do portal (não está em PORTAL_ENTITY_TYPES: grava sempre false).
+export type DocumentEntityType = "quote" | "proposal" | "contract" | "product" | "vehicle";
 
 // Lista branca das entidades que o portal do cliente lista
 // (ver ClientPortalDocuments.tsx). Só nestas é que faz sentido perguntar se o

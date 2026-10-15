@@ -73,7 +73,7 @@ export interface MenuItem {
    * useInventoryToday. Zero ou null = sem pílula. Não mexe no alerta do rail.
    */
   counterKey?: InventoryCounterKey;
-  /** Contador da Frota de exemplo (pílula no painel do menu), lido da base de exemplo da Frota (useContadoresFrota). */
+  /** Contador da Frota (pílula no painel do menu), lido da BD com as chaves dos ecrãs da Frota (useContadoresFrota). */
   frotaCounterKey?: "hoje" | "viaturas" | "ocorrencias" | "manutencao";
   /** Só o caminho exato realça a entrada (um ecrã filho com outra entrada, ou sem entrada, não a realça). */
   exact?: boolean;
@@ -314,29 +314,28 @@ export const menuSections: MenuSection[] = [
     ],
   },
   {
-    // Frota de exemplo (dados de exemplo no navegador, sem tabelas até a migração ser aprovada), a seguir ao Inventário:
-    // as carrinhas são armazéns móveis. Sem permissões fleet.* ainda, usa a do Inventário (inventory.view), a mesma das
-    // rotas /frota/* em App.tsx. O Hoje é /frota/hoje (e /frota redireciona para lá): com "/frota" como item, a regra de
-    // item ativo do menu (pathname === to || startsWith(to + "/")) marcava o Hoje em todas as páginas da Frota.
-    // O grupo é escolhido pelo prefixo "/frota", que nenhum outro grupo usa.
-    id: "frota-exemplo",
+    // Frota (tabelas fleet_*, RLS + RPCs), a seguir ao Inventário: as carrinhas são armazéns móveis. Abre com fleet.view
+    // (gestão) ou fleet.self (o condutor vê a sua viatura), as mesmas das rotas /frota/* em App.tsx. O Hoje é /frota/hoje
+    // (e /frota redireciona para lá): com "/frota" como item, a regra de item ativo do menu (pathname === to ||
+    // startsWith(to + "/")) marcava o Hoje em todas as páginas da Frota. O grupo é escolhido pelo prefixo "/frota".
+    id: "frota",
     // CarFront, para não repetir o Truck dos Fornecedores (Inventário › Compras).
     icon: CarFront,
-    labelKey: "sidebar.frotaExemplo",
+    labelKey: "sidebar.frota",
     paths: ["/frota"],
-    permissions: ["inventory.view"],
+    permissions: ["fleet.view", "fleet.self"],
     items: [
-      { to: "/frota/hoje", icon: Sun, labelKey: "sidebar.frotaHoje", permission: "inventory.view", frotaCounterKey: "hoje" },
-      { to: "/frota/viaturas", icon: Truck, labelKey: "sidebar.frotaViaturas", permission: "inventory.view", frotaCounterKey: "viaturas" },
-      { to: "/frota/atribuicoes", icon: KeyRound, labelKey: "sidebar.frotaAtribuicoes", permission: "inventory.view" },
-      { to: "/frota/condutores", icon: IdCard, labelKey: "sidebar.frotaCondutores", permission: "inventory.view" },
-      { to: "/frota/manutencao", icon: Wrench, labelKey: "sidebar.frotaManutencao", permission: "inventory.view", frotaCounterKey: "manutencao" },
-      { to: "/frota/custos", icon: Fuel, labelKey: "sidebar.frotaCustos", permission: "inventory.view" },
-      { to: "/frota/ocorrencias", icon: TriangleAlert, labelKey: "sidebar.frotaOcorrencias", permission: "inventory.view", frotaCounterKey: "ocorrencias" },
-      { to: "/frota/documentos", icon: FileBadge, labelKey: "sidebar.frotaDocumentos", permission: "inventory.view" },
-      { to: "/frota/relatorios", icon: BarChart3, labelKey: "sidebar.frotaRelatorios", permission: "inventory.view" },
-      { to: "/frota/atividade", icon: HistoryIcon, labelKey: "sidebar.frotaAtividade", permission: "inventory.view" },
-      { to: "/frota/ligacoes", icon: Waypoints, labelKey: "sidebar.frotaLigacoes", permission: "inventory.view" },
+      { to: "/frota/hoje", icon: Sun, labelKey: "sidebar.frotaHoje", permissions: ["fleet.view", "fleet.self"], frotaCounterKey: "hoje" },
+      { to: "/frota/viaturas", icon: Truck, labelKey: "sidebar.frotaViaturas", permissions: ["fleet.view", "fleet.self"], frotaCounterKey: "viaturas" },
+      { to: "/frota/atribuicoes", icon: KeyRound, labelKey: "sidebar.frotaAtribuicoes", permissions: ["fleet.view", "fleet.self"] },
+      { to: "/frota/condutores", icon: IdCard, labelKey: "sidebar.frotaCondutores", permissions: ["fleet.view", "fleet.self"] },
+      { to: "/frota/manutencao", icon: Wrench, labelKey: "sidebar.frotaManutencao", permissions: ["fleet.view", "fleet.self"], frotaCounterKey: "manutencao" },
+      { to: "/frota/custos", icon: Fuel, labelKey: "sidebar.frotaCustos", permissions: ["fleet.view", "fleet.self"] },
+      { to: "/frota/ocorrencias", icon: TriangleAlert, labelKey: "sidebar.frotaOcorrencias", permissions: ["fleet.view", "fleet.self"], frotaCounterKey: "ocorrencias" },
+      { to: "/frota/documentos", icon: FileBadge, labelKey: "sidebar.frotaDocumentos", permissions: ["fleet.view", "fleet.self"] },
+      { to: "/frota/relatorios", icon: BarChart3, labelKey: "sidebar.frotaRelatorios", permissions: ["fleet.view", "fleet.self"] },
+      { to: "/frota/atividade", icon: HistoryIcon, labelKey: "sidebar.frotaAtividade", permissions: ["fleet.view", "fleet.self"] },
+      { to: "/frota/ligacoes", icon: Waypoints, labelKey: "sidebar.frotaLigacoes", permissions: ["fleet.view", "fleet.self"] },
     ],
   },
   {

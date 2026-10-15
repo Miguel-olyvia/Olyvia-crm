@@ -1,9 +1,10 @@
-// Menu da Frota de exemplo (/frota/*) e o selo "Dados de exemplo". Módulo próprio, no mesmo padrão de `inventoryNav.ts`:
-// o merge é feito em `useTranslation.ts`. Apenas en/pt — o `t()` cai para `en` quando o idioma ativo não tem a chave.
-// Os textos dos ecrãs estão em português no próprio ecrã (como os do Inventário), até a Frota ter tabelas.
+// Menu da Frota (/frota/*) e o nome do quadro "Frota" da Agenda (schedule_boards.name_key = 'fleet.boardName', criado
+// por fn_fleet_board). Módulo próprio, no mesmo padrão de `inventoryNav.ts`: o merge é feito em `useTranslation.ts`.
+// Apenas en/pt — o `t()` cai para `en` quando o idioma ativo não tem a chave. Os textos dos ecrãs estão em português no
+// próprio ecrã (como os do Inventário).
 export const frotaNavTranslations: Record<string, Record<string, string>> = {
   en: {
-    'sidebar.frotaExemplo': 'Fleet (example)',
+    'sidebar.frota': 'Fleet',
     'sidebar.frotaHoje': 'Today',
     'sidebar.frotaViaturas': 'Vehicles',
     'sidebar.frotaAtribuicoes': 'Assignments',
@@ -15,11 +16,10 @@ export const frotaNavTranslations: Record<string, Record<string, string>> = {
     'sidebar.frotaRelatorios': 'Reports',
     'sidebar.frotaAtividade': 'Activity',
     'sidebar.frotaLigacoes': 'Connections',
-    'frotaExemplo.selo': 'Example data',
-    'frotaExemplo.selo.ajuda': 'The fleet has no database tables yet: these screens show made-up data, saved only in this browser. Nothing here touches real data.',
+    'fleet.boardName': 'Fleet',
   },
   pt: {
-    'sidebar.frotaExemplo': 'Frota (exemplo)',
+    'sidebar.frota': 'Frota',
     'sidebar.frotaHoje': 'Hoje',
     'sidebar.frotaViaturas': 'Viaturas',
     'sidebar.frotaAtribuicoes': 'Atribuições',
@@ -31,7 +31,6 @@ export const frotaNavTranslations: Record<string, Record<string, string>> = {
     'sidebar.frotaRelatorios': 'Relatórios',
     'sidebar.frotaAtividade': 'Atividade',
     'sidebar.frotaLigacoes': 'Ligações',
-    'frotaExemplo.selo': 'Dados de exemplo',
-    'frotaExemplo.selo.ajuda': 'A Frota ainda não tem tabelas na base de dados: estes ecrãs mostram dados inventados, guardados só neste navegador. Nada aqui toca em dados reais.',
+    'fleet.boardName': 'Frota',
   },
 };

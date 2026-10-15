@@ -11,7 +11,7 @@ import { CounterPill } from "@/components/inventory/ui/CounterPill";
 import { ContadorDenuncias } from "./sidebar/ContadorDenuncias";
 import { itemAtivo, type ItemAtivavel } from "./sidebar/itemAtivo";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
-import { DICA_CONTADOR_FROTA, TOM_CONTADOR_FROTA, useContadoresFrota } from "@/components/frota-exemplo/useContadoresFrota";
+import { DICA_CONTADOR_FROTA, TOM_CONTADOR_FROTA, useContadoresFrota } from "@/components/frota/useContadoresFrota";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import {
@@ -329,7 +329,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
   // verificar no servidor. Falha/ausência da RPC = sem pílulas.
   // Mesma lógica dos separadores da área (InventoryAreaTabs).
   const inventoryCounter = useInventoryCounters(section.id === "inventory");
-  // Contadores da Frota de exemplo: lidos da base de exemplo (sem pedidos à BD), atualizam logo após cada ação.
+  // Contadores da Frota: lidos da BD (mesmas chaves react-query dos ecrãs), atualizam logo após cada ação.
   const frotaCounter = useContadoresFrota();
   const counterFor = (item: MenuItem): number | null =>
     item.frotaCounterKey ? frotaCounter(item.frotaCounterKey) : inventoryCounter(item.counterKey);

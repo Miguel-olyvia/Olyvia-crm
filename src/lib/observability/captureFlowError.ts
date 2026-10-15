@@ -76,6 +76,10 @@ export type BusinessFlow =
   // (rpc_inventory_today). On failure every counter hides itself, so a
   // timeout/permission error would otherwise look like "nothing pending".
   | "inventory-today-load"
+  // Fleet screens (fleet_* tables, fleet_v_vehicles and the lists of other
+  // modules used by the fleet forms). A failed read shows an error banner with
+  // "try again", but RLS/timeouts must not look like "no vehicles".
+  | "fleet-load"
   // Remaining one-offs.
   | "ai-assistant"
   | "account-deletion-request"

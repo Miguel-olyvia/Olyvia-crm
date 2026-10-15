@@ -40,6 +40,9 @@ const entityLabels: Record<string, string> = {
   email_tracking: "Email",
   lead: "Leads",
   quote: "Pedidos",
+  // Frota: a única notificação (kind='notification') é a multa identificada (fleet_fine_identified, link /frota/ocorrencias);
+  // os avisos diários da Frota são kind='alert' e aparecem no Hoje da Frota.
+  fleet_incident: "Frota",
 };
 
 const actionLabels: Record<string, { label: string; icon: typeof Send }> = {
