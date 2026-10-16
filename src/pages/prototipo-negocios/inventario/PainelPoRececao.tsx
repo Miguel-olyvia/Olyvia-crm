@@ -37,7 +37,13 @@ export function PainelPoRececao({ aoNovaGuia }: { aoNovaGuia: () => void }) {
       if (n > poRem(l)) { setErro(`Nunca mais do que falta: ${nomeProd(db, l.sku)} tem ${poRem(l)} un por receber.`); return; }
     }
     if (!itens.length) { setErro("Indique pelo menos uma quantidade a receber."); return; }
-    const r = agir((d) => receberLinhas(d, poPorId(d, p.id) as Po, itens, d.rc.wh, d.rc.guia || null), (out) => {
+    const r = agir((d) => {
+      const po = poPorId(d, p.id) as Po;
+      const out = receberLinhas(d, po, itens, d.rc.wh, d.rc.guia || null);
+      // recebida por completo: sai da lista e o ecrã volta às encomendas por receber
+      if (!poRecebivel(po)) fixarRececao(d, { poFilter: "" });
+      return out;
+    }, (out) => {
       const ec = out.res.reduce((a, x) => a + x.toEC, 0), st = out.res.reduce((a, x) => a + x.toStock, 0);
       return `Receção registada: ${ec ? ec + " un servem Encomendas Clientes · " : ""}${st} un entraram no stock em ${nomeArm(db, rc.wh)} (custo médio atualizado).`;
     });
@@ -47,7 +53,7 @@ export function PainelPoRececao({ aoNovaGuia }: { aoNovaGuia: () => void }) {
     <section className="card pad" aria-label={`Encomenda ${p.id}`} style={{ marginBottom: 12 }}>
       <div className="row between">
         <h3 style={{ fontSize: 16 }}><PackageCheck className="ic" aria-hidden="true" /> Encomenda {p.id} · {nomeForn(db, p.sup)} <Selo tom={p.status === "pending" ? "warn" : "info"}>{poStatusLabel[poStatus(p)]}</Selo></h3>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={() => agir((d) => fixarRececao(d, { poFilter: "" }))}><X className="ic sm" aria-hidden="true" />Fechar encomenda</button>
+        <button type="button" className="btn btn-ghost btn-xs" onClick={() => agir((d) => fixarRececao(d, { poFilter: "" }))}><X className="ic sm" aria-hidden="true" />Voltar às encomendas por receber</button>
       </div>
       {p.status === "pending" && <Nota tom="warn">{p.id} ainda está pendente (não confirmada ao fornecedor). Pode receber-se; ao receber passa a Encomendado, sem envio ao fornecedor.</Nota>}
       {!recebivel && <Nota tom="info">Esta encomenda já não tem nada para receber ({poStatusLabel[poStatus(p)].toLowerCase()}).</Nota>}
