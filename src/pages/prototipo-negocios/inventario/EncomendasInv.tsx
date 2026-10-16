@@ -15,7 +15,7 @@ import { PoDialogos, type DlgPo } from "./PoDialogos";
 import { PoFiltros } from "./PoFiltros";
 import { PoLista } from "./PoLista";
 import { defPos } from "./poCsv";
-import { poPublished, poStatus } from "./po";
+import { poPublished, poStatus, poRecebivel } from "./po";
 
 const PM = "purchase_orders.manage";
 
@@ -39,7 +39,7 @@ export function EncomendasInv() {
   const [dlg, setDlg] = useState<{ id: string; d: DlgPo } | null>(null);
   const [abertos, setAbertos] = useState<Record<string, boolean>>({});
   const todas = db.pos.filter((p) => !p.deleted);
-  const n = (k: EstadoPoFiltro): number => (k === "all" ? todas.length : k === "late" ? c.late : k === "portal" ? todas.filter(poPublished).length : todas.filter((p) => poStatus(p) === k).length);
+  const n = (k: EstadoPoFiltro): number => (k === "all" ? todas.length : k === "late" ? c.late : k === "portal" ? todas.filter(poPublished).length : k === "receber" ? todas.filter(poRecebivel).length : todas.filter((p) => poStatus(p) === k).length);
   const def = defPos(db, () => lista);
   return (
     <>

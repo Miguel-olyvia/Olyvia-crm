@@ -303,16 +303,18 @@ describe("Encomendas", () => {
     expect(screen.getAllByRole("row", { name: /^Abrir PO-/ })).toHaveLength(1);
   });
 
-  it("receber a PO da Silva & Filhos: o diálogo mostra a repartição, confirma, avisa e a PO fica Recebida", async () => {
+  it("receber a PO da Silva & Filhos: \"Receber\" leva à Receção com a PO, o painel recebe o que falta, avisa e a PO fica Recebida", async () => {
     render(<Casa />);
     separador("Encomendas");
     fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
-    const dlg = await screen.findByRole("dialog", { name: "Receber PO-2026-0137" });
-    expect(within(dlg).getByText(/faltam 2 un/)).toBeInTheDocument();
-    expect(within(dlg).getByText(/2 → EC-0087/)).toBeInTheDocument();
-    fireEvent.click(within(dlg).getByRole("button", { name: "Confirmar receção" }));
+    // 16/10: vai direto para Armazém › Receção, com a PO escolhida (sem o diálogo)
+    const painel = await screen.findByRole("region", { name: "Encomenda PO-2026-0137" });
+    expect(lerInventario().rc.poFilter).toBe("PO-2026-0137");
+    fireEvent.click(within(painel).getByRole("button", { name: "Receber tudo o que falta" }));
+    expect(within(painel).getByRole("spinbutton", { name: /Receber agora/ })).toHaveValue(2);
+    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar receção" }));
     expect(await screen.findAllByText(/Receção registada: 2 un servem Encomendas Clientes/)).not.toHaveLength(0);
     const po = lerInventario().pos.find((p) => p.id === "PO-2026-0137")!;
     expect(po.lines[0].recv).toBe(10);
@@ -328,8 +330,8 @@ describe("Encomendas (continuação)", () => {
     fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
-    const dlg = await screen.findByRole("dialog", { name: "Receber PO-2026-0137" });
-    const campo = within(dlg).getByRole("spinbutton", { name: /Receber agora/ });
+    const painel = await screen.findByRole("region", { name: "Encomenda PO-2026-0137" });
+    const campo = within(painel).getByRole("spinbutton", { name: /Receber agora/ });
     fireEvent.change(campo, { target: { value: "9" } });
     expect(campo).toHaveValue(2);
   });

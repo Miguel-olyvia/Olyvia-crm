@@ -3,10 +3,10 @@ import { armazem, nomeForn, nomeProd, produto } from "./base";
 import { estadoStock, type EstadoStock } from "./contadores";
 import { ecEstado, ecProntas, origemTexto, type EstadoEc } from "./ec";
 import { resumoGuia } from "./guias";
-import { poLate, poPublished, poStatus, ultimaRececao } from "./po";
+import { poLate, poPublished, poRecebivel, poStatus, ultimaRececao } from "./po";
 import type { Ec, Fornecedor, Guia, Contagem, Inventario, LinhaStock, Movimento, Po, TipoMov } from "./tipos";
 
-export type EstadoPoFiltro = "all" | "pending" | "ordered" | "partial" | "received" | "cancelled" | "late" | "portal";
+export type EstadoPoFiltro = "all" | "pending" | "ordered" | "partial" | "received" | "cancelled" | "late" | "portal" | "receber";
 export interface FiltrosPo { q: string; status: EstadoPoFiltro; sup: string; campoData: "date" | "real"; de: string; ate: string; eliminadas: boolean; group: boolean }
 export interface FiltrosStock { q: string; cat: string; sub: string; wh: string; state: "" | EstadoStock; vista: "product" | "wh"; eliminadas: boolean; transferencias: boolean }
 export interface FiltrosMov { q: string; type: "" | TipoMov; wh: string; doc: string; de: string; ate: string; limite: number }
@@ -35,6 +35,7 @@ export function filtrarPos(db: Inventario, f: FiltrosPo): Po[] {
   let l = db.pos.filter((p) => (f.eliminadas ? true : !p.deleted));
   if (f.status === "late") l = l.filter(poLate);
   else if (f.status === "portal") l = l.filter((p) => !p.deleted && poPublished(p));
+  else if (f.status === "receber") l = l.filter(poRecebivel);
   else if (f.status !== "all") l = l.filter((p) => poStatus(p) === f.status);
   if (f.sup) l = l.filter((p) => p.sup === f.sup);
   if (q) l = l.filter((p) => tem([p.id, nomeForn(db, p.sup), p.origin.ref ?? "", p.origin.client ?? "", p.origin.ec ?? "", ...p.lines.map((x) => `${x.sku} ${nomeProd(db, x.sku)} ${produto(db, x.sku)?.ean ?? ""}`)], q));

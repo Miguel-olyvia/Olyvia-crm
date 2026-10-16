@@ -12,7 +12,7 @@ import { opcoesArmazens } from "./opcoes";
 import { Lista, Nota, Notas, Pri, Sec, Selo, Texto } from "./pecasInv";
 import { can, porqueNao } from "./perfil";
 import { poRem, poUnits } from "./po";
-import { fixarRececao } from "./rececao";
+import { fixarRececao, abrirRececaoDaPo } from "./rececao";
 import { MOTIVOS_RESTO, anularResto, receberLinhas, type ResultadoRececao } from "./receber";
 import { TabelaInv } from "./TabelaInv";
 import type { Po, PoLinha } from "./tipos";
@@ -104,7 +104,7 @@ export function ReceberDialogo({ aberto, aoFechar, id, soResto = false }: { aber
     }, (out) => textoRececao(out, ids.length > 0));
     if (r.ok) aoFechar(); else setF({ ...f, erro: r.erro });
   };
-  const porCodigo = (): void => { agir((d) => fixarRececao(d, { sup: p.sup, poFilter: id, wh: f.wh })); aoFechar(); ir({ aba: "guia" }); };
+  const porCodigo = (): void => { agir((d) => { abrirRececaoDaPo(d, poPorId(d, id) as Po); fixarRececao(d, { wh: f.wh }); }); aoFechar(); ir({ aba: "guia" }); };
   return (
     <Dlg aberto={aberto} aoFechar={aoFechar} largo titulo={(soResto ? "Não vou receber o resto — " : "Receber ") + p.id}
       rodape={<><span className="left muted">{soResto ? "" : `${tN} un a receber`}</span><Sec onClick={aoFechar}>Cancelar</Sec>

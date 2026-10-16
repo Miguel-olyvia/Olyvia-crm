@@ -5,7 +5,7 @@ import type { EstadoPoFiltro, FiltrosPo } from "./filtros";
 import { Chip, Check, Sw } from "./mockPecas";
 import { Pesquisa } from "./pecasInv";
 
-const ESTADOS: readonly (readonly [EstadoPoFiltro, string])[] = [["all", "Todas"], ["pending", "Pendente"], ["ordered", "Encomendado"], ["partial", "Parcialmente recebida"], ["received", "Recebida"], ["cancelled", "Cancelada"], ["late", "Atrasadas"], ["portal", "No portal"]];
+const ESTADOS: readonly (readonly [EstadoPoFiltro, string])[] = [["all", "Todas"], ["pending", "Pendente"], ["ordered", "Encomendado"], ["partial", "Parcialmente recebida"], ["received", "Recebida"], ["cancelled", "Cancelada"], ["late", "Atrasadas"], ["portal", "No portal"], ["receber", "Por receber"]];
 
 export function PoFiltros({ n }: { n: (k: EstadoPoFiltro) => number }) {
   const { db, filtros, setFiltros } = useCtxInv();

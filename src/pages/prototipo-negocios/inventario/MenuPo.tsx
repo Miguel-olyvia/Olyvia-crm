@@ -3,7 +3,8 @@ import { Eye, Pencil, Printer, Trash2, Truck, Undo2, X } from "lucide-react";
 import { useCtxInv } from "./ctxInv";
 import { MenuMais, type ItemMenu } from "./mockPecas";
 import { can } from "./perfil";
-import { restaurarPo, poOpen, poPublished, poStatus } from "./po";
+import { restaurarPo, poOpen, poPublished, poRecebivel, poStatus } from "./po";
+import { useIrReceber } from "./irReceber";
 import type { DlgPo } from "./PoDialogos";
 import type { Inventario, Po } from "./tipos";
 
@@ -11,12 +12,13 @@ interface Props { p: Po; rotulo?: string; abrir: (tab?: string) => void; dlg: (d
 
 export function MenuPo({ p, rotulo, abrir, dlg }: Props) {
   const { agir } = useCtxInv();
-  const st = poStatus(p), aberta = poOpen(p), pm = "purchase_orders.manage";
+  const irReceber = useIrReceber();
+  const st = poStatus(p), aberta = poOpen(p), recebivel = poRecebivel(p), pm = "purchase_orders.manage";
   const ic = "ic";
   const itens: (ItemMenu | "-")[] = [
     { label: "Abrir detalhe", icone: <Eye className={ic} aria-hidden="true" />, run: () => abrir() },
     { label: "PDF da encomenda", icone: <Printer className={ic} aria-hidden="true" />, fonte: "rpc_get_purchase_order_pdf (mockup)", run: () => dlg({ t: "pdf" }) },
-    { label: "Receber", icone: <Truck className={ic} aria-hidden="true" />, desativado: !aberta || !can("inventory.receive"), porque: !aberta ? "Só encomendas em aberto" : "Requer inventory.receive", run: () => dlg({ t: "receber" }) },
+    { label: "Receber", icone: <Truck className={ic} aria-hidden="true" />, desativado: !recebivel || !can("inventory.receive"), porque: !recebivel ? "Só encomendas pendentes, encomendadas ou parciais" : "Requer inventory.receive", run: () => irReceber(p.id) },
     { label: "Não vou receber o resto", icone: <X className={ic} aria-hidden="true" />, desativado: !aberta || !can(pm), porque: "Só encomendas em aberto", fonte: "rpc_cancel_po_remainder", run: () => dlg({ t: "resto" }) },
     { label: "Reverter receção", icone: <Undo2 className={ic} aria-hidden="true" />, desativado: !p.receipts.some((r) => r.state === "Ativa" && r.type === "Receção"), porque: "Sem receções ativas", fonte: "rpc_revert_purchase_order_receipt", run: () => abrir("rec") },
     { label: "Editar", icone: <Pencil className={ic} aria-hidden="true" />, desativado: p.deleted || !["pending", "ordered"].includes(st) || !can(pm), porque: poPublished(p) ? "Publicada no portal: retire-a primeiro" : "Só pendentes/encomendadas", run: () => abrir("lines") },

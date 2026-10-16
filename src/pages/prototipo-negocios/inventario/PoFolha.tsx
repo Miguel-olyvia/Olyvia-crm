@@ -12,6 +12,7 @@ import { can, porqueNao } from "./perfil";
 import { PoDialogos, type DlgPo } from "./PoDialogos";
 import { PoHdr, Timeline, poDe } from "./PoCab";
 import { PORTAL_FORN, duplicarPo, gravarPo, poLate, poOpen, restaurarPo } from "./po";
+import { useIrReceber } from "./irReceber";
 import { SeloEstadoPo, SeloPortal } from "./poPecas";
 import type { AcoesPo, EstadoPd, TabPo } from "./poTipos";
 import { PoTabs } from "./PoTabsSwitch";
@@ -22,6 +23,7 @@ export function PoFolha({ id, tabInicial, aoFechar }: { id: string; tabInicial?:
   const [tab, setTab] = useState<TabPo>((tabInicial as TabPo) || "lines");
   const [dlg, setDlg] = useState<DlgPo | null>(null);
   const [pd, setPd] = useState<EstadoPd>({ notesInt: p?.notesInt ?? "", notesSup: p?.notesSup ?? "", add: "", dirty: false });
+  const irReceber = useIrReceber();
   if (!p) return null;
   const restaurar = (): void => { agir((d) => restaurarPo(d, poDe(d, id)), `${id} restaurada.`); };
   const duplicar = (): void => {
@@ -39,7 +41,7 @@ export function PoFolha({ id, tabInicial, aoFechar }: { id: string; tabInicial?:
   const rodape = p.deleted ? <><Sec onClick={aoFechar}>Fechar</Sec><Pri onClick={restaurar}>Restaurar</Pri></>
     : p.status === "pending" ? <><div className="left"><Sec className="btn-ghost" onClick={() => setDlg({ t: "eliminar" })}><Trash2 className="ic" aria-hidden="true" />Eliminar</Sec></div><Sec onClick={() => gravar(false)}>Gravar{pd.dirty ? " *" : ""}</Sec>
       <Pri disabled={!aprova} title={aprova ? undefined : "Requer purchase_orders.approve"} onClick={() => gravar(true)}><Send className="ic" aria-hidden="true" />Gravar e encomendar</Pri></>
-    : poOpen(p) ? <>{pdf}<Sec onClick={() => gravar(false)}>Gravar{pd.dirty ? " *" : ""}</Sec><Pri disabled={!recebe} title={recebe ? undefined : porqueNao("inventory.receive")} onClick={() => setDlg({ t: "receber" })}><Truck className="ic" aria-hidden="true" />Receber</Pri></>
+    : poOpen(p) ? <>{pdf}<Sec onClick={() => gravar(false)}>Gravar{pd.dirty ? " *" : ""}</Sec><Pri disabled={!recebe} title={recebe ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}><Truck className="ic" aria-hidden="true" />Receber</Pri></>
     : <>{pdf}<Sec onClick={() => gravar(false)}>Gravar notas</Sec><Pri onClick={aoFechar}>Fechar</Pri></>;
   return (
     <Folha aberta aoFechar={aoFechar} chave={id} titulo={p.id} subtitulo="Compras › Encomenda a fornecedor" rodape={rodape}

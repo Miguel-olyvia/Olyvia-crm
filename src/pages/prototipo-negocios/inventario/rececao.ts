@@ -2,7 +2,7 @@
 // encher o cesto, repartir o que chega entre a EC e o stock, a fila sem rede e aprender códigos. Portado do mockup (RC, rcPlan, rcScan, rcAdd, rcConfirm, learnGo). Sem React.
 import { agora, eur, exigir, falhar, guiaPorId, nomeArm, nomeProd, produto, proximoId, ecPorId, poPorId } from "./base";
 import { repartirRececao } from "./ec";
-import { poOpen, poRem } from "./po";
+import { poRecebivel, poRem } from "./po";
 import { receberLinhas } from "./receber";
 import { can } from "./perfil";
 import type { Guia, Inventario, Po, PoLinha, Recepcao } from "./tipos";
@@ -41,13 +41,19 @@ export function fixarRececao(db: Inventario, o: Partial<Recepcao>): void {
   }
 }
 
+/** "Receber" numa PO (lista, folha, menu): a Receção com a PO escolhida, o fornecedor e o armazém dela; a guia só fica se for desse fornecedor. */
+export function abrirRececaoDaPo(db: Inventario, p: Po): void {
+  const g = db.rc.guia ? guiaPorId(db, db.rc.guia) : null;
+  fixarRececao(db, { sup: p.sup, poFilter: p.id, wh: p.wh, guia: g && g.sup === p.sup && g.state === "open" ? g.id : "" });
+}
+
 /** As linhas de PO abertas onde o produto cabe, da encomenda mais antiga para a mais recente (FIFO). */
 export function candidatas(db: Inventario, sku: string): [Po, PoLinha][] {
   const rc = db.rc;
   const g = rc.guia ? guiaPorId(db, rc.guia) : null;
   const sup = g ? g.sup : rc.sup;
   const out: [Po, PoLinha][] = [];
-  db.pos.filter((p) => poOpen(p) && (!sup || p.sup === sup) && (!rc.poFilter || p.id === rc.poFilter))
+  db.pos.filter((p) => poRecebivel(p) && (!sup || p.sup === sup) && (!rc.poFilter || p.id === rc.poFilter))
     .sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0))
     .forEach((p) => p.lines.forEach((l) => { if (l.sku === sku && poRem(l) > 0) out.push([p, l]); }));
   return out;

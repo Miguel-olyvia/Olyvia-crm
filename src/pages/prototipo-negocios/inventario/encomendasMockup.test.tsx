@@ -39,7 +39,7 @@ describe("Encomendas · cabeçalho, filtros e lista", () => {
     expect(within(filtros).getByLabelText("Ver eliminados")).not.toBeChecked();
     expect(within(filtros).getByLabelText("Agrupar por fornecedor")).not.toBeChecked();
     const chips = within(within(filtros).getByRole("group", { name: "Estado" })).getAllByRole("button").map((b) => b.textContent);
-    expect(chips.map((c) => c?.replace(/\d+$/, "").trim())).toEqual(["Todas", "Pendente", "Encomendado", "Parcialmente recebida", "Recebida", "Cancelada", "Atrasadas", "No portal"]);
+    expect(chips.map((c) => c?.replace(/\d+$/, "").trim())).toEqual(["Todas", "Pendente", "Encomendado", "Parcialmente recebida", "Recebida", "Cancelada", "Atrasadas", "No portal", "Por receber"]);
     expect(chips[0]).toBe("Todas 13");
     expect(chips[1]).toBe("Pendente 3");
     expect(document.querySelector(".tbl-foot")?.textContent).toMatch(/^13 encomenda\(s\)/);

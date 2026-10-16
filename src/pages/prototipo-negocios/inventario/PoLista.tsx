@@ -10,6 +10,7 @@ import { can, porqueNao } from "./perfil";
 import type { DlgPo } from "./PoDialogos";
 import { Dinheiro, OrigemChip, SeloEstadoPo, SeloPortal } from "./poPecas";
 import { poLate, poOpen, poStatus, poTotals, restaurarPo } from "./po";
+import { useIrReceber } from "./irReceber";
 import { TabelaInv, type Coluna } from "./TabelaInv";
 import type { Fornecedor, Po } from "./tipos";
 
@@ -18,10 +19,11 @@ type PedirDlg = (id: string, d: DlgPo) => void;
 /** O botão principal de cada linha: restaurar, aprovar e enviar, receber ou ver (act0 do mockup). */
 function AcaoLinha({ p, pedir }: { p: Po; pedir: PedirDlg }) {
   const { agir, abrir } = useCtxInv();
+  const irReceber = useIrReceber();
   const st = poStatus(p);
   if (p.deleted) return <Peq onClick={() => agir((d) => restaurarPo(d, d.pos.find((x) => x.id === p.id) as Po), `${p.id} restaurada.`)}>Restaurar</Peq>;
   if (st === "pending") { const pode = can("purchase_orders.approve"); return <Peq className="btn-p" disabled={!pode} title={pode ? undefined : porqueNao("purchase_orders.approve")} onClick={() => pedir(p.id, { t: "enviar" })}>Aprovar e enviar</Peq>; }
-  if (st === "ordered" || st === "partial") { const pode = can("inventory.receive"); return <Peq disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} onClick={() => pedir(p.id, { t: "receber" })}>Receber</Peq>; }
+  if (st === "ordered" || st === "partial") { const pode = can("inventory.receive"); return <Peq disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}>Receber</Peq>; }
   return <Peq onClick={() => abrir({ t: "po", id: p.id })}>Ver</Peq>;
 }
 

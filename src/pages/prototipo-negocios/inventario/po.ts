@@ -22,6 +22,9 @@ export function poStatus(p: Po): EstadoPo {
 }
 export const poOpen = (p: Po): boolean => !p.deleted && (poStatus(p) === "ordered" || poStatus(p) === "partial");
 export const poLate = (p: Po): boolean => poOpen(p) && p.due < HOJE;
+/** 16/10 (como na app): pode receber-se na Receção — pendente (ainda não confirmada ao fornecedor), encomendada ou parcial; nunca eliminada nem cancelada.
+ *  poOpen fica como estava (encomendas em aberto: atrasos, valor por receber, cadastros). */
+export const poRecebivel = (p: Po): boolean => !p.deleted && ["pending", "ordered", "partial"].includes(poStatus(p));
 export const poPublished = (p: Po): boolean => ["sent", "seen", "confirmed"].includes(p.portal.state);
 /** Publicada no portal e ainda em jogo: linhas, fornecedor, data e estado ficam bloqueados. */
 export const poLocked = (p: Po): boolean => poPublished(p) && (p.status === "pending" || poOpen(p));

@@ -1,7 +1,7 @@
 // A receção de mercadoria numa PO: parcial e com limites, repartida entre a EC e o stock; reverter, passar para stock e anular o resto. Portado do mockup.
 import { UTILIZADOR, agora, armazem, ecPorId, ehInteiro, exigir, exigirMotivo, falhar, guiaPorId, mudou, nomeArm, nomeProd, produto, proximoId } from "./base";
 import { ecDerivado, repartirRececao } from "./ec";
-import { poOpen, poRem, poStatus, poStatusLabel, poUnits } from "./po";
+import { poOpen, poRecebivel, poRem, poStatus, poStatusLabel, poUnits } from "./po";
 import { aplicarMovimentos, criarPedidoTransf } from "./stock";
 import type { Inventario, Po, PoLinha, PoRecibo } from "./tipos";
 
@@ -28,7 +28,7 @@ const notaMovimento = (x: Plano, guia: string | null): string =>
 export function receberLinhas(db: Inventario, p: Po, items: ItemReceber[], wh: string, guiaId: string | null, opts: { date?: string } = {}): ResultadoRececao {
   exigir("inventory.receive", "receber mercadoria");
   if (p.deleted) falhar("A encomenda está eliminada.");
-  if (!poOpen(p)) falhar(`${p.id} não está em aberto (estado: ${poStatusLabel[poStatus(p)]}).`);
+  if (!poRecebivel(p)) falhar(`${p.id} não está em aberto (estado: ${poStatusLabel[poStatus(p)]}).`);
   if (!armazem(db, wh) || armazem(db, wh)?.deleted) falhar("Escolha o armazém de destino.");
   const g = guiaId ? guiaPorId(db, guiaId) : null;
   if (g && g.state !== "open") falhar(`A guia ${g.id} não está aberta.`);
@@ -38,6 +38,12 @@ export function receberLinhas(db: Inventario, p: Po, items: ItemReceber[], wh: s
   const custoAntes: Record<string, number> = {};
   for (const x of planos) custoAntes[x.l.sku] = produto(db, x.l.sku)?.avg ?? 0;
   aplicarMovimentos(db, planos.map((x) => ({ type: "in" as const, sku: x.l.sku, wh, qty: x.qty, doc: p.id, note: notaMovimento(x, g?.id ?? null), cost: x.l.price / x.l.packN })));
+  // uma pendente recebida (ainda não confirmada ao fornecedor) passa a Encomendado, para o estado (parcial/recebida) se calcular como nas outras;
+  // não se publica no portal nem se envia email: a mercadoria já chegou
+  if (p.status === "pending") {
+    p.status = "ordered";
+    p.log.push({ at: agora(db), t: "Recebida ainda pendente (não confirmada ao fornecedor): passa a Encomendado sem envio ao fornecedor" });
+  }
   const at0 = opts.date ? opts.date + agora(db).slice(10) : agora(db);
   const res = planos.map((x) => registarRececao(db, p, x, wh, g?.id ?? null, at0));
   if (g && !g.pos.includes(p.id)) g.pos.push(p.id);

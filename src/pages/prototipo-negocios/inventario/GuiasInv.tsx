@@ -13,6 +13,7 @@ import { Chip } from "./mockPecas";
 import { Selo, Vazio } from "./pecasInv";
 import { can, porqueNao } from "./perfil";
 import { RececaoTelemovel } from "./RececaoTelemovel";
+import { PainelPoRececao } from "./PainelPoRececao";
 import { TabelaInv } from "./TabelaInv";
 
 const ESTADOS: readonly (readonly [FiltrosGuia["estado"], string])[] = [["all", "Todas"], ["open", "Abertas"], ["div", "Com divergências"], ["closed", "Fechadas"], ["cancelled", "Canceladas"]];
@@ -54,10 +55,10 @@ export function GuiasInv() {
     <>
       <AcoesCab>
         <button type="button" className="btn" disabled={ro} title={ro ? porqueNao("inventory.receive") : undefined} onClick={() => setNova(true)}><Plus className="ic" aria-hidden="true" />Nova guia</button>
-        <button type="button" className="btn" onClick={() => ir({ aba: "po", f: { status: "ordered" } })}><ShoppingCart className="ic" aria-hidden="true" />Receber numa encomenda</button>
+        <button type="button" className="btn" onClick={() => ir({ aba: "po", f: { status: "receber" } })}><ShoppingCart className="ic" aria-hidden="true" />Receber numa encomenda</button>
       </AcoesCab>
       <div className="recv-grid">
-        <div><RececaoTelemovel aoNovaGuia={() => setNova(true)} /><Fonte>rpc_receiving_lookup · rpc_receive_by_code · fn_receiving_open_lines · fn_po_receipt_allocation · receiving_scans · fn_receiving_scan_replay</Fonte></div>
+        <div><PainelPoRececao aoNovaGuia={() => setNova(true)} /><RececaoTelemovel aoNovaGuia={() => setNova(true)} /><Fonte>rpc_receiving_lookup · rpc_receive_by_code · fn_receiving_open_lines · fn_po_receipt_allocation · receiving_scans · fn_receiving_scan_replay</Fonte></div>
         <div><PainelGuias /></div>
       </div>
       {nova && <GuiaForm aoFechar={() => setNova(false)} />}
