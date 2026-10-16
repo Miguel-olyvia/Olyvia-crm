@@ -54,10 +54,37 @@ Os problemas que se repetem:
 - `src/pages/prototipo-negocios/pessoasV1Docs.ts`: a lógica, sem React. Testes em `pessoasV1Docs.test.ts`.
 - `src/pages/prototipo-negocios/PessoasV1.tsx`: a lista e a ficha.
 - `src/pages/prototipo-negocios/NegociosV1Docs.tsx`: o quadro por documento.
-- `PrototipoNegocios.tsx`: o interruptor (localStorage `olyvia-prototipo-v1-proposta`) e o encaminhamento. Só se acrescentou código.
+- `PrototipoNegocios.tsx`: o interruptor (localStorage `olyvia-prototipo-v1-proposta`), o encaminhamento e a barra de baixo no telemóvel. Só se acrescentou código.
+- `NegocioSimples.tsx`: o voltar regressa à pessoa quando o negócio se abriu a partir da ficha.
+
+## Auditoria e testes de A a Z (16/10, à tarde)
+
+Fiz o percurso no browser, em computador (1440 px) e telemóvel (390 px): lead nova, chamada, visita, levantamento, fatura e pagamento. Usei vários papéis (Comercial e Financeiro), pessoas de exemplo, perdidas e clientes com negócio novo. Também experimentei ligar e desligar o interruptor, trocar para a V2 e voltar, e "Repor a demonstração".
+
+O que se corrigiu:
+
+1. **"Nova lead" levava ao quadro antigo de 6 colunas**, que tinha outro primário ("Novo negócio"). Além disso, um formulário a meio (`S.novo`) ficava pendurado e tapava o quadro novo com o erro "Falta o nome.". Agora a lead cria-se na própria página Pessoas e a ficha abre logo. Com a proposta ligada, Negócios mostra sempre o quadro por documento.
+2. **Dentro da ficha, o menu "Pessoas" não voltava à lista**, e o utilizador ficava preso. Agora o menu e a barra de baixo levam sempre à lista.
+3. **O voltar da página do negócio dizia sempre "Negócios".** Quando se entra a partir da ficha, mostra agora o nome da pessoa e regressa à ficha (`pessoaDeOrigem`, em `NegocioSimples.tsx`).
+4. **Num cliente, o passo real pendente ficava escondido atrás de um negócio de exemplo.** Era o caso do Tiago Almeida, com "Emitir a fatura" por fazer. Agora o negócio principal manda enquanto não estiver concluído; só depois conta o negócio novo. A lista e a ficha usam a mesma regra.
+5. **Um cliente com o negócio antigo concluído mostrava "Novo negócio · Concluído".** Agora mostra o negócio novo e o seu estado.
+6. **Uma lead criada agora mostrava notas inventadas**, com data anterior a ela existir. Deixam de aparecer. A ordem errada vem de `minutosAtras` (`perfilDocs.ts`), que conta "10/10 15:08" como mais recente do que "hoje 10:34"; fica para o Miguel ver.
+7. **Pessoa de exemplo:** mostrava o passo sem botão e sem dizer porquê. Agora explica que não tem página própria.
+8. **Pormenores:**
+   - "é de o cliente" passou a "é do cliente";
+   - morada vazia mostra "Por indicar";
+   - o leitor de ecrã diz "1 pessoa", no singular;
+   - o erro só fica ligado ao campo em falta;
+   - com o formulário aberto há um só primário.
+9. **Telemóvel:** com a proposta, Pessoas passa para a barra de baixo e o Inventário vai para "Mais". É o ecrã que o comercial mais usa.
+
+Testes:
+- `pessoasV1Docs.test.ts` (10) testa a lógica;
+- `PessoasV1.test.tsx` (5) testa a app inteira: o interruptor, a nova lead, o voltar e o menu, e o passo de outro papel.
+
+A suite do protótipo tem 1444 testes. Na execução completa falham 2 da V2 (`CatalogoV2` e `DefinicoesV2`) por tempo (5 s); sozinhos passam.
 
 ## Fica por decidir
 
 - **Marcar como perdida na ficha.** Hoje faz-se na página do negócio.
-- **"Nova lead" em Pessoas.** Abre o formulário em Negócios, como na V2. O melhor seria criar a lead ali mesmo.
 - **Dashboards de Pessoas e Negócios.** Passam para uma página da Direção?

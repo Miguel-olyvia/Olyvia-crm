@@ -9,6 +9,7 @@ import { aberto, eur, proximo, tot, type Negocio } from "./motor";
 import type { DocFase } from "./negociosApp";
 import { COLUNAS_V1, colunasV1, foraDoQuadro } from "./pessoasV1Docs";
 import type { Ctx } from "./pecas";
+import { irParaLista, pedirNovaLead } from "./PessoasV1";
 
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
 
@@ -27,7 +28,7 @@ export function NegociosV1Docs({ S, A, go, q, setQ }: Ctx) {
     const p = proximo(d, S), loc = d.f.localidade || d.local.split(",").pop()!.trim();
     return (
       <li key={d.id}>
-        <button type="button" onClick={go(() => A.abrir(d.id))}
+        <button type="button" onClick={go(() => { irParaLista(); A.abrir(d.id); })}
           className="group block w-full rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]">
           <span className="block text-base font-semibold text-foreground">{d.nome}</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">{d.servico}{loc ? " · " + loc : ""}{d.orc ? ` · ${eur(tot(d, S).pf)} €` : ""}</span>
@@ -57,7 +58,7 @@ export function NegociosV1Docs({ S, A, go, q, setQ }: Ctx) {
           <h1 className="text-3xl font-semibold tracking-tight">Negócios</h1>
           <p className="mt-1 text-base text-muted-foreground">{COLUNAS_V1.reduce((a, c) => a + todas[c.id].length, 0)} em curso · {eur(emProposta)} € em proposta</p>
         </div>
-        <Button size="lg" onClick={go(() => A.novo())}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova lead</Button>
+        <Button size="lg" onClick={go(() => { pedirNovaLead(); A.nav("pessoas"); })}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova lead</Button>
       </header>
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -93,7 +94,7 @@ export function NegociosV1Docs({ S, A, go, q, setQ }: Ctx) {
 
       <p className="mt-8 text-[15px] text-muted-foreground">
         Antes do orçamento, a pessoa está em{" "}
-        <button type="button" onClick={go(() => A.nav("pessoas"))} className="font-medium text-primary underline-offset-4 hover:underline">Pessoas</button>
+        <button type="button" onClick={go(() => { irParaLista(); A.nav("pessoas"); })} className="font-medium text-primary underline-offset-4 hover:underline">Pessoas</button>
         {fora.antes ? ` (${fora.antes} em contacto ou visita)` : ""}. Depois do pagamento, a obra está em{" "}
         <button type="button" onClick={go(() => A.nav("operacoes"))} className="font-medium text-primary underline-offset-4 hover:underline">Operações</button>
         {fora.obra ? ` (${fora.obra} em obra)` : ""}. Os cartões não se arrastam: mudam de coluna quando o documento muda.

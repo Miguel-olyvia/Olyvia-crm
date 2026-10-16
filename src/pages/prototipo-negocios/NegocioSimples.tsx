@@ -2,6 +2,7 @@
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { pessoaDeOrigem } from "./PessoasV1";
 import { ArrowLeft, Check, Euro, MapPin, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -51,12 +52,14 @@ export function NegocioSimples(ctx: Ctx) {
     faseAntes.current = d.fase;
   }, [d.fase]);
   const local = d.f.localidade || d.local.split(",").pop()!.trim();
+  const origem = pessoaDeOrigem(S.deal);
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-      <button type="button" onClick={go(() => A.nav("negocios"))}
+      {/* aberto a partir da ficha de uma pessoa (proposta do V1, 16/10): o voltar leva de volta a ela */}
+      <button type="button" onClick={go(() => A.nav(origem ? "pessoas" : "negocios"))}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg text-[15px] text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Negócios
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> {origem ?? "Negócios"}
       </button>
 
       <header className="mt-2 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">

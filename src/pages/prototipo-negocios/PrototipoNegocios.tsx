@@ -23,7 +23,7 @@ import { NegociosV2 } from "./NegociosV2";
 import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
 import { PessoasFunc, esquecerPessoasFunc } from "./PessoasFunc";
 import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
-import { PessoasV1, esquecerPessoasV1 } from "./PessoasV1";
+import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
 import { NegociosV1Docs } from "./NegociosV1Docs";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
@@ -88,6 +88,7 @@ export default function PrototipoNegocios() {
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   // 16/10: a proposta para simplificar Pessoas e Negócios no V1 (PessoasV1.tsx, NegociosV1Docs.tsx). Preferência de quem vê, como a versão.
+  const [navPessoas, setNavPessoas] = useState(0); // o menu "Pessoas" volta a montar a página (vai à lista, mesmo com uma ficha aberta)
   const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) === "1"; } catch { return false; } });
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
@@ -197,9 +198,10 @@ export default function PrototipoNegocios() {
   }, []);
   // Com a V2 ligada a lista de Negócios é por documento. Enquanto se cria uma lead (S.novo) mostra-se a lista de sempre, que tem o formulário.
   // Com a V2 ligada, "Nova lead" é de Pessoas: o menu destaca Pessoas e uma frase avisa que a lead criada se vê lá.
-  const novaLeadV2 = (v2 || v1n) && !!S.novo;
+  const novaLeadV2 = v2 && !!S.novo;
+  // Com a proposta do V1 a lead cria-se em Pessoas: Negócios mostra sempre o quadro por documento (um S.novo antigo não o tapa).
   const listaNegocios = simples
-    ? (v1n && !S.novo ? <NegociosV1Docs {...ctx} /> : v2 && !S.novo ? (func ? <NegociosFunc {...ctx} /> : <NegociosV2 {...ctx} />) : novaLeadV2
+    ? (v1n ? <NegociosV1Docs {...ctx} /> : v2 && !S.novo ? (func ? <NegociosFunc {...ctx} /> : <NegociosV2 {...ctx} />) : novaLeadV2
       ? (
         <>
           <p className="mx-auto w-full max-w-3xl px-4 pt-6 text-[15px] text-muted-foreground sm:px-8">Nova lead: depois de criada, vê-se em Pessoas.</p>
@@ -223,7 +225,7 @@ export default function PrototipoNegocios() {
     case "campos": corpo = <CamposEditor {...ctx} />; break;
     default: corpo = listaNegocios;
   }
-  if (v1n && (S.view === "leads" || S.view === "clientes" || S.view === "pessoas")) corpo = <PessoasV1 {...ctx} />;
+  if (v1n && (S.view === "leads" || S.view === "clientes" || S.view === "pessoas")) corpo = <PessoasV1 key={navPessoas} {...ctx} />;
 
   const n = minhas(S, S.role).length;
   // Com a V2, Pessoas ocupa o lugar de Leads e Clientes.
@@ -312,7 +314,7 @@ export default function PrototipoNegocios() {
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
-      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
         className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
           cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
         <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
@@ -417,7 +419,7 @@ export default function PrototipoNegocios() {
               <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-[calc(4rem_+_env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
-                  {[...pessoas.map(([v]) => v), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {[...(v1n ? ["inventario"] : pessoas.map(([v]) => v)), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
                 {soV2 && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
@@ -434,8 +436,8 @@ export default function PrototipoNegocios() {
             </div>
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
-            {((soV2 ? ["hoje", "negocios", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
-              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+            {((soV2 ? ["hoje", "negocios", "operacoes"] : v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
+              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
@@ -448,7 +450,7 @@ export default function PrototipoNegocios() {
               </button>
             )}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
-              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "pessoas", "catalogo", "marketing", "definicoes", "frota"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
+              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || [...(v1n ? ["inventario"] : ["leads", "clientes", "pessoas"]), "catalogo", "marketing", "definicoes", "frota"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
             </button>
           </nav>

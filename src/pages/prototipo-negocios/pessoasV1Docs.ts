@@ -2,7 +2,7 @@
 // Só lógica, sem React e sem mudar o Estado: reaproveita as regras da V2 (pessoasDocs, negociosApp, perfilDocs) e junta-as
 // no que um comercial precisa de ver: quem tratar, o que fazer a seguir e em que documento está cada negócio.
 import { PAPEIS, aberto, eur, type Estado, type Negocio, type Papel } from "./motor";
-import { docFase, semPaginaPropria, type DocFase, type NegocioApp } from "./negociosApp";
+import { docFase, ehGanho, semPaginaPropria, type DocFase, type NegocioApp } from "./negociosApp";
 import { clientesApp, leadsApp, perdidasApp, proximoNegocio, type PessoaApp } from "./pessoasDocs";
 import { localDe } from "./leadsDocs";
 
@@ -38,11 +38,18 @@ function doGrupo(S: Estado, g: GrupoV1): PessoaApp[] {
   return [...leadsApp(S), ...clientesApp(S).filter((p) => p.novoNegocio)];
 }
 
+/** O negócio novo de um cliente: o primeiro aberto e ainda não ganho (a mesma regra de `novoNegocio` em pessoasDocs). */
+export const negocioNovo = (p: PessoaApp): NegocioApp | undefined =>
+  p.papel === "cliente" ? p.todos.find((n) => n.perdido === null && !ehGanho(n.deal)) : undefined;
+
 export function linhaV1(S: Estado, p: PessoaApp): LinhaV1 {
-  const d = p.principal;
+  const d = p.principal, nv = proximoNegocio(d, S).done ? negocioNovo(p) : undefined; // a mesma prioridade da ficha
   return {
     nome: p.nome, papel: papelDe(p), oQue: [d.servico, localDe(d)].filter(Boolean).join(" · "),
-    proximo: p.perdida !== null ? "Perdida · " + p.perdida : p.novoNegocio && p.papel === "cliente" ? "Novo negócio · " + proximoNegocio(d, S).t : proximoNegocio(d, S).t,
+    // num cliente com um negócio novo, conta o negócio novo (o antigo pode estar "Concluído")
+    proximo: p.perdida !== null ? "Perdida · " + p.perdida
+      : nv ? `Novo negócio · ${nv.titulo} · ${semPaginaPropria(nv) ? estadoDe(nv) : proximoNegocio(nv.deal, S).t}`
+      : proximoNegocio(d, S).t,
     atrasada: p.perdida === null && atrasada(p), exemplo: p.exemplo,
   };
 }
@@ -109,29 +116,33 @@ const temPagina = (S: Estado, id: number): boolean => S.deals.some((d) => d.id =
 
 export function fichaV1(S: Estado, p: PessoaApp): FichaV1 {
   const f = perfilDe(p, S), d = p.principal, pr = proximoNegocio(d, S), real = temPagina(S, d.id);
-  // Num cliente com um negócio novo, o que fazer agora é desse negócio (o principal pode já estar fechado).
-  const novo = p.papel === "cliente" ? p.todos.find((n) => n.perdido === null && !semPaginaPropria(n) && n.deal.fase < 5 && docFase(n.deal) !== "financeiro" && temPagina(S, n.deal.id) && n.deal.id !== d.id) : undefined;
+  // O principal manda enquanto não estiver concluído (ex.: a fatura por emitir). Concluído, e com um negócio novo, passa a ser desse.
+  const nv = pr.done ? negocioNovo(p) : undefined, novo = nv && !semPaginaPropria(nv) && temPagina(S, nv.deal.id) ? nv : undefined;
   const alvo = novo?.deal ?? d, prA = novo ? proximoNegocio(alvo, S) : pr;
   const perdida = p.perdida !== null;
+  // um negócio novo de exemplo não tem página: diz-se o que é, sem botão
+  const soExemplo = nv && !novo ? { t: "Novo negócio: " + nv.titulo, sub: estadoDe(nv) + " · exemplo, sem página própria", id: null, atrasada: false } : null;
+  // uma pessoa criada à mão nesta demonstração não tem as notas e chamadas inventadas (eram de antes de ela chegar)
+  const aMao = p.negocios.some((x) => x.hist.some((e) => e.t === "Negócio criado à mão"));
   return {
     nome: p.nome, papel: papelDe(p), sub: [papelDe(p), f.morada.localidade].filter(Boolean).join(" · "),
     tel: f.telefone, email: f.email,
     agora: perdida
       ? { t: "Perdida", sub: "Motivo: " + p.perdida, id: null, atrasada: false }
-      : {
-        t: prA.t, sub: prA.sub, act: prA.act, id: real ? alvo.id : null, atrasada: atrasada(p),
+      : soExemplo ?? {
+        t: prA.t, sub: real ? prA.sub : "Pessoa de exemplo, sem página própria: o passo vê-se, mas não se faz aqui.", act: prA.act, id: real ? alvo.id : null, atrasada: atrasada(p),
         // o botão só para quem faz o passo; de outro papel diz-se de quem é (guidelines C27)
         btn: real && !prA.wait && !prA.done && (!prA.who || prA.who === S.role) ? prA.btn : undefined,
-        de: prA.who && prA.who !== S.role && !prA.wait && !prA.done ? (prA.who === "cliente" ? "o cliente" : PAPEIS[prA.who as Papel].nome) : undefined,
+        de: prA.who && prA.who !== S.role && !prA.wait && !prA.done ? (prA.who === "cliente" ? "do cliente" : "de " + PAPEIS[prA.who as Papel].nome) : undefined,
       },
     negocios: p.todos.map((n) => ({
       id: n.id, titulo: n.titulo, estado: estadoDe(n) + (n.perdido ? " · " + n.perdido : ""), valor: valorAlternativas(n),
       nota: n.orcamentos.length > 1 ? `${n.orcamentos.length} orçamentos alternativos` : "",
       abre: semPaginaPropria(n) || !temPagina(S, n.deal.id) ? null : n.deal.id,
     })),
-    historico: atividadeDe(p, S, f),
+    historico: atividadeDe(p, S, f).filter((h) => !aMao || !h.exemplo),
     dados: [
-      { rotulo: "Morada", valor: f.morada.completa },
+      { rotulo: "Morada", valor: f.morada.completa.trim() || "Por indicar" },
       { rotulo: "Origem", valor: f.campanha ? `${f.origem} · ${f.campanha}` : f.origem },
       { rotulo: "Comercial", valor: f.comercial },
       { rotulo: "Chegou", valor: `${f.criada} (${f.criadaHa})` },
