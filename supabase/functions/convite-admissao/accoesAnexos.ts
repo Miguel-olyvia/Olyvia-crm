@@ -492,42 +492,6 @@ async function accaoRemover(p: PedidoAccaoAnexo): Promise<RespostaAccao> {
   return { status: 200, body: { ok: true } };
 }
 
-// -- a lista de ficheiros do convite (accao `estado`) -------------------------
-
-export interface ListaDeAnexos {
-  anexos: unknown[];
-  /** A lista nao se pode ler: o ecra tem de avisar e nao deixar enviar mais ficheiros. */
-  indisponiveis: boolean;
-}
-
-/**
- * Os ficheiros ja ligados ao convite, para o ecra os mostrar ao recarregar.
- * Nunca faz a abertura do convite falhar, mas tambem nunca finge que a lista
- * esta vazia: se nao a conseguiu ler, diz-o (`indisponiveis`).
- */
-export async function listarAnexosDoConvite(
-  svc: ClienteAnexos,
-  tokenHash: string,
-  registarErro?: RegistarErro,
-): Promise<ListaDeAnexos> {
-  try {
-    const { data, error } = await svc.rpc("rpc_hr_convite_anexos_listar", { p_token_hash: tokenHash });
-    if (error) {
-      registarErro?.(error);
-      return { anexos: [], indisponiveis: true };
-    }
-    const anexos = comoObjecto(data)?.anexos;
-    if (!Array.isArray(anexos)) {
-      registarErro?.(new Error("convite-admissao: listar anexos devolveu uma forma inesperada"));
-      return { anexos: [], indisponiveis: true };
-    }
-    return { anexos, indisponiveis: false };
-  } catch (e) {
-    registarErro?.(e);
-    return { anexos: [], indisponiveis: true };
-  }
-}
-
 // -- despacho ----------------------------------------------------------------
 
 export const ACCOES_ANEXO: readonly string[] = ["anexo_url", "anexo_confirmar", "anexo_remover"];

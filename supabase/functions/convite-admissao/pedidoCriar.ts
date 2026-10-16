@@ -20,6 +20,11 @@ export const EMAIL_MAX = 254;
 /** Um unico destinatario: sem espacos, virgulas, ponto e virgula, aspas nem parenteses. */
 const EMAIL = /^[^\s@,;<>()"'\\]+@[^\s@,;<>()"'\\]+\.[^\s@,;<>()"'\\]+$/;
 
+/** Um unico endereco valido (so formato): para o e-mail do convite que a base devolve ao correio. */
+export function emailValido(valor: unknown): valor is string {
+  return typeof valor === "string" && valor.length > 0 && valor.length <= EMAIL_MAX && EMAIL.test(valor);
+}
+
 /** Tectos por hora da accao "criar": por quem chama e por pessoa convidada. */
 export const LIMITE_CRIAR_POR_UTILIZADOR = 20;
 export const LIMITE_CRIAR_POR_PESSOA = 5;
@@ -29,18 +34,24 @@ export const EMAIL_ERRO_MAX = 500;
 
 export interface PedidoCriar {
   pessoaId: string;
+  /** A organizacao activa no ecra (activeCompany): so um seletor, a Edge e a RPC confirmam-na. */
+  organizationId: string;
   email: string;
 }
 
-/** `null` quando o pedido nao serve; nunca lanca. */
+/**
+ * `null` quando o pedido nao serve; nunca lanca. So le `pessoa_id`,
+ * `organization_id` e `email`: o actor NUNCA vem do corpo (deriva-se do JWT).
+ */
 export function validarPedidoCriar(payload: unknown): PedidoCriar | null {
   if (!payload || typeof payload !== "object") return null;
-  const { pessoa_id: pessoaId, email: bruto } = payload as Record<string, unknown>;
+  const { pessoa_id: pessoaId, organization_id: organizationId, email: bruto } = payload as Record<string, unknown>;
   if (typeof pessoaId !== "string" || !UUID.test(pessoaId)) return null;
+  if (typeof organizationId !== "string" || !UUID.test(organizationId)) return null;
   if (typeof bruto !== "string") return null;
   const email = bruto.trim();
   if (email.length === 0 || email.length > EMAIL_MAX || !EMAIL.test(email)) return null;
-  return { pessoaId, email };
+  return { pessoaId, organizationId, email };
 }
 
 /**
@@ -84,38 +95,58 @@ export function linkDoConvite(baseUrl: string, token: string): string {
 export interface ResultadoCriar {
   /** `null` quando a RPC nao devolveu um id valido: nada a registar. */
   conviteId: string | null;
-  /** `true` na duvida: so um `false` literal da base liberta o link. */
-  rascunhoHerdado: boolean;
 }
 
 /**
  * O retorno de `rpc_hr_convite_admissao_criar` e `TABLE (convite_id,
  * rascunho_herdado)`: o PostgREST devolve um ARRAY de uma linha. Aceita-se
- * tambem um objecto solto. Nunca lanca.
+ * tambem um objecto solto. `rascunho_herdado` e ignorado: desde a V2 nao ha
+ * heranca de rascunho. Nunca lanca.
  */
 export function lerResultadoCriar(data: unknown): ResultadoCriar {
   const linha: unknown = Array.isArray(data) ? data[0] : data;
   const obj = linha && typeof linha === "object" ? (linha as Record<string, unknown>) : {};
   const id = obj.convite_id;
-  return {
-    conviteId: typeof id === "string" && UUID.test(id) ? id : null,
-    rascunhoHerdado: obj.rascunho_herdado !== false,
-  };
+  return { conviteId: typeof id === "string" && UUID.test(id) ? id : null };
 }
 
 /**
  * O link que sai para quem criou o convite (RH), ou `null`. So sai quando o
- * e-mail NAO foi E o convite nao herdou um rascunho: com rascunho herdado, o
- * link abriria na mao do RH os dados (NIF, NISS, IBAN, morada) da pessoa.
+ * e-mail NAO foi: e a unica vez que o RH o pode ver. Nunca e gravado.
  */
-export function linkParaOCriador(args: {
-  emailEnviado: boolean;
-  rascunhoHerdado: boolean;
-  baseUrl: string;
-  token: string;
-}): string | null {
-  if (args.emailEnviado || args.rascunhoHerdado) return null;
+export function linkParaOCriador(args: { emailEnviado: boolean; baseUrl: string; token: string }): string | null {
+  if (args.emailEnviado) return null;
   return linkDoConvite(args.baseUrl, args.token);
+}
+
+/**
+ * A data (dd/mm/aaaa, fuso de Lisboa) ate quando o convite serve, a partir do
+ * `valid_until` que a base devolve. `null` quando falta ou nao e uma data: o
+ * e-mail omite entao a validade em vez de a inventar.
+ */
+export function formatarValidade(iso: unknown): string | null {
+  if (typeof iso !== "string" || iso === "") return null;
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return null;
+  return data.toLocaleDateString("pt-PT", {
+    timeZone: "Europe/Lisbon",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+/** O corpo do e-mail do convite. A validade e a que a base calculou, nunca um numero fixo. */
+export function htmlConvite(link: string, validade: string | null): string {
+  const prazo = validade ? ` (valido ate ${validade})` : "";
+  return `<p>Foi convidado a completar a sua admissao. Use o link${prazo}: </p>` +
+    `<p><a href="${link}">Completar admissao</a></p>`;
+}
+
+/** A versao em texto simples do e-mail do convite: so o link e a validade, sem dados pessoais. */
+export function textoConvite(link: string, validade: string | null): string {
+  const prazo = validade ? ` (válido até ${validade})` : "";
+  return `Foi convidado a completar a sua admissão${prazo}. Use este link: ${link}`;
 }
 
 /**

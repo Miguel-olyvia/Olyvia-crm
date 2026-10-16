@@ -11,7 +11,6 @@ import {
   BUCKET_QUARENTENA,
   copiarParaFinal,
   lerObjecto,
-  listarAnexosDoConvite,
   tratarAccaoAnexo,
   type ClienteAnexos,
   type RespostaAccao,
@@ -592,44 +591,6 @@ describe("anexo_remover", () => {
     const f = criarFalso();
     expect(await pedir(f.svc, "anexo_remover", { anexo_id: "x" })).toEqual({ status: 400, body: { error: "pedido_invalido" } });
     expect(f.chamadas).toHaveLength(0);
-  });
-});
-
-describe("listarAnexosDoConvite (accao estado)", () => {
-  const LISTA = [{ id: ANEXO, tipo: "cartao_cidadao", nome_original: "cc.pdf", tamanho_bytes: 10, mime_type: "application/pdf" }];
-
-  it("devolve os ficheiros ligados e diz que a lista esta disponivel", async () => {
-    const f = criarFalso({ rpcs: { rpc_hr_convite_anexos_listar: () => ({ data: { anexos: LISTA }, error: null }) } });
-    expect(await listarAnexosDoConvite(f.svc, HASH)).toEqual({ anexos: LISTA, indisponiveis: false });
-    expect(f.chamou("rpc_hr_convite_anexos_listar")[0].args).toEqual({ p_token_hash: HASH });
-  });
-
-  it("uma lista vazia verdadeira e vazia e disponivel", async () => {
-    const f = criarFalso({ rpcs: { rpc_hr_convite_anexos_listar: () => ({ data: { anexos: [] }, error: null }) } });
-    expect(await listarAnexosDoConvite(f.svc, HASH)).toEqual({ anexos: [], indisponiveis: false });
-  });
-
-  it.each([
-    ["erro da base", () => ({ data: null, error: { message: "boom" } })],
-    ["forma inesperada", () => ({ data: { anexos: "x" }, error: null })],
-    ["sem resposta", () => ({ data: null, error: null })],
-  ])("%s: nunca finge que esta vazia, diz que esta indisponivel e regista", async (_nome, manipulador) => {
-    const erros: unknown[] = [];
-    const f = criarFalso({ rpcs: { rpc_hr_convite_anexos_listar: manipulador as Manipulador } });
-    expect(await listarAnexosDoConvite(f.svc, HASH, (e) => erros.push(e))).toEqual({ anexos: [], indisponiveis: true });
-    expect(erros).toHaveLength(1);
-  });
-
-  it("uma excepcao tambem e indisponivel, nunca rebenta a abertura do convite", async () => {
-    const erros: unknown[] = [];
-    const svc = {
-      rpc: () => {
-        throw new Error("rede em baixo");
-      },
-      storage: { from: () => ({}) },
-    } as unknown as ClienteAnexos;
-    expect(await listarAnexosDoConvite(svc, HASH, (e) => erros.push(e))).toEqual({ anexos: [], indisponiveis: true });
-    expect(erros).toHaveLength(1);
   });
 });
 

@@ -5,7 +5,14 @@
  * que sai para o browser. O sufixo `.vitest.` e o que faz o vitest apanha-lo.
  */
 import { describe, expect, it } from "vitest";
-import { CODIGOS_PUBLICOS, CODIGOS_RECUSA_SUBMISSAO, mapearErroRpc, statusDoCodigo } from "./erros.ts";
+import {
+  CODIGOS_PUBLICOS,
+  CODIGOS_RECUSA_SUBMISSAO,
+  CODIGOS_V2,
+  eCodigoV2,
+  mapearErroRpc,
+  statusDoCodigo,
+} from "./erros.ts";
 
 const U1 = "11111111-1111-1111-1111-111111111111";
 const U2 = "22222222-2222-2222-2222-222222222222";
@@ -120,5 +127,91 @@ describe("statusDoCodigo", () => {
     for (const c of ["nif_invalido", "admissao_incompleta", "pedido_invalido", "assinatura_obrigatoria", "validade_invalida"]) {
       expect(statusDoCodigo(c)).toBe(400);
     }
+  });
+});
+
+describe("codigos da V2 (HRA31 a HRA39)", () => {
+  const POR_SQLSTATE: Array<[string, string, number]> = [
+    ["HRA31", "nao_encontrado", 404],
+    ["HRA32", "processo_aberto", 409],
+    ["HRA33", "organizacao_nao_empregadora", 403],
+    ["HRA34", "token_invalido", 500],
+    ["HRA35", "email_invalido", 400],
+    ["HRA36", "token_repetido", 500],
+    ["HRA37", "motivo_invalido", 400],
+    ["HRA38", "estado_invalido", 409],
+    ["HRA39", "dias_invalidos", 400],
+    ["HRA40", "prazo_excedido", 409],
+    ["HRA41", "limite_excedido", 429],
+  ];
+
+  it("mapeia cada um pela mensagem e pelo SQLSTATE, com o seu estado HTTP", () => {
+    for (const [sqlstate, codigo, status] of POR_SQLSTATE) {
+      expect(mapearErroRpc({ message: codigo }).codigo).toBe(codigo);
+      expect(mapearErroRpc({ message: "texto qualquer", code: sqlstate }).codigo).toBe(codigo);
+      expect(statusDoCodigo(codigo)).toBe(status);
+      expect(eCodigoV2(codigo)).toBe(true);
+      expect(CODIGOS_V2).toContain(codigo);
+    }
+  });
+
+  it("nunca devolve campos nem conflitos, mesmo com DETAIL", () => {
+    const r = mapearErroRpc({ message: "nao_encontrado", details: "Key (token_hash)=(abc) 11111111-1111-1111-1111-111111111111" });
+    expect(r).toEqual({ codigo: "nao_encontrado" });
+  });
+
+  it("rascunho_chave_invalida e codigo da V2 com 400", () => {
+    expect(eCodigoV2("rascunho_chave_invalida")).toBe(true);
+    expect(statusDoCodigo("rascunho_chave_invalida")).toBe(400);
+    expect(eCodigoV2("rascunho_valor_invalido")).toBe(true);
+    expect(statusDoCodigo("rascunho_valor_invalido")).toBe(400);
+  });
+
+  it("nao entram em CODIGOS_PUBLICOS (o catalogo do browser compara-se com essa lista)", () => {
+    for (const c of CODIGOS_V2) expect(CODIGOS_PUBLICOS as readonly string[]).not.toContain(c);
+  });
+});
+
+describe("codigos da V3a (HRA42 a HRA47, HRA51 a HRA53, HRA56)", () => {
+  const V3A: Array<[string, string, number]> = [
+    ["HRA42", "otp_espera", 429],
+    ["HRA43", "otp_limite_diario", 429],
+    ["HRA44", "otp_expirado", 410],
+    ["HRA45", "otp_bloqueado", 429],
+    ["HRA46", "otp_invalido", 401],
+    ["HRA47", "campo_bloqueado", 409],
+    ["HRA51", "sessao_ausente", 401],
+    ["HRA52", "sessao_expirada", 401],
+    ["HRA53", "sessao_substituida", 401],
+    ["HRA56", "link_indisponivel", 409],
+  ];
+
+  it("mapeia cada um pela mensagem e pelo SQLSTATE, com o seu estado HTTP", () => {
+    for (const [sqlstate, codigo, status] of V3A) {
+      expect(mapearErroRpc({ message: codigo }).codigo).toBe(codigo);
+      expect(mapearErroRpc({ message: "texto qualquer", code: sqlstate }).codigo).toBe(codigo);
+      expect(statusDoCodigo(codigo)).toBe(status);
+      expect(eCodigoV2(codigo)).toBe(true);
+      expect(CODIGOS_V2).toContain(codigo);
+    }
+  });
+
+  it("os limites de OTP respondem 429, o mesmo que os limites de pedidos", () => {
+    for (const c of ["otp_espera", "otp_limite_diario", "otp_bloqueado"]) expect(statusDoCodigo(c)).toBe(429);
+  });
+
+  it("os codigos so da Edge (sem SQLSTATE) tambem estao no catalogo, com o seu estado", () => {
+    expect(statusDoCodigo("otp_indisponivel")).toBe(503);
+    expect(statusDoCodigo("email_nao_enviado")).toBe(502);
+    for (const c of ["otp_indisponivel", "email_nao_enviado"]) expect(eCodigoV2(c)).toBe(true);
+  });
+
+  it("nunca traz campos, conflitos nem o DETAIL", () => {
+    const r = mapearErroRpc({ message: "sessao_expirada", details: "Key (sessao_hash)=(abc) 11111111-1111-1111-1111-111111111111" });
+    expect(r).toEqual({ codigo: "sessao_expirada" });
+  });
+
+  it("nao entram em CODIGOS_PUBLICOS (o catalogo do browser compara-se com essa lista)", () => {
+    for (const [, c] of V3A) expect(CODIGOS_PUBLICOS as readonly string[]).not.toContain(c);
   });
 });

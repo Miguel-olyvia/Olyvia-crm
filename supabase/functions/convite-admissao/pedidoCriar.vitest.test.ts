@@ -10,6 +10,8 @@ import {
   EMAIL_MAX,
   LIMITE_CRIAR_POR_PESSOA,
   LIMITE_CRIAR_POR_UTILIZADOR,
+  formatarValidade,
+  htmlConvite,
   lerResultadoCriar,
   linkDoConvite,
   linkParaOCriador,
@@ -19,11 +21,13 @@ import {
 } from "./pedidoCriar.ts";
 
 const PESSOA = "11111111-1111-4111-8111-111111111111";
+const ORG = "b6ffce4f-f630-4933-833a-008649757a33";
 
 describe("validarPedidoCriar", () => {
   it("aceita um pedido valido e apara o email", () => {
-    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: "  ana@exemplo.pt " })).toEqual({
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: "  ana@exemplo.pt " })).toEqual({
       pessoaId: PESSOA,
+      organizationId: ORG,
       email: "ana@exemplo.pt",
     });
   });
@@ -34,7 +38,18 @@ describe("validarPedidoCriar", () => {
     expect(validarPedidoCriar("x")).toBeNull();
     expect(validarPedidoCriar({})).toBeNull();
     expect(validarPedidoCriar({ pessoa_id: 1, email: "a@b.pt" })).toBeNull();
-    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: 5 })).toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: 5 })).toBeNull();
+  });
+
+  it("exige organization_id (a organizacao activa, activeCompany) e que seja UUID", () => {
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: "a@b.pt" })).toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: "x", email: "a@b.pt" })).toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: 7, email: "a@b.pt" })).toBeNull();
+  });
+
+  it("nunca devolve um p_actor vindo do corpo do pedido", () => {
+    const r = validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: "a@b.pt", p_actor: "x", actor: "y" });
+    expect(Object.keys(r ?? {}).sort()).toEqual(["email", "organizationId", "pessoaId"]);
   });
 
   it("recusa um pessoa_id que nao e UUID (evita o 22P02 da base)", () => {
@@ -56,7 +71,7 @@ describe("validarPedidoCriar", () => {
       "",
       "   ",
     ]) {
-      expect(validarPedidoCriar({ pessoa_id: PESSOA, email }), email).toBeNull();
+      expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email }), email).toBeNull();
     }
   });
 
@@ -65,13 +80,13 @@ describe("validarPedidoCriar", () => {
     const noLimite = "a".repeat(EMAIL_MAX - sufixo.length) + sufixo;
     const acima = "a".repeat(EMAIL_MAX - sufixo.length + 1) + sufixo;
     expect(noLimite).toHaveLength(EMAIL_MAX);
-    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: noLimite })).not.toBeNull();
-    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: acima })).toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: noLimite })).not.toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: acima })).toBeNull();
   });
 
   it("aceita unicode e sinais usuais na parte local", () => {
-    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: "joao.silva+rh@exemplo.pt" })).not.toBeNull();
-    expect(validarPedidoCriar({ pessoa_id: PESSOA, email: "jose@exemplo.com.pt" })).not.toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: "joao.silva+rh@exemplo.pt" })).not.toBeNull();
+    expect(validarPedidoCriar({ pessoa_id: PESSOA, organization_id: ORG, email: "jose@exemplo.com.pt" })).not.toBeNull();
   });
 });
 
@@ -158,35 +173,20 @@ describe("sanearEmailErro", () => {
 const CONVITE = "22222222-2222-4222-8222-222222222222";
 
 describe("lerResultadoCriar", () => {
-  it("le a linha unica do RETURNS TABLE (convite_id, rascunho_herdado)", () => {
-    expect(lerResultadoCriar([{ convite_id: CONVITE, rascunho_herdado: true }])).toEqual({
-      conviteId: CONVITE,
-      rascunhoHerdado: true,
-    });
-    expect(lerResultadoCriar([{ convite_id: CONVITE, rascunho_herdado: false }])).toEqual({
-      conviteId: CONVITE,
-      rascunhoHerdado: false,
-    });
+  it("le a linha unica do RETURNS TABLE (convite_id, rascunho_herdado) e ignora a heranca", () => {
+    expect(lerResultadoCriar([{ convite_id: CONVITE, rascunho_herdado: false }])).toEqual({ conviteId: CONVITE });
+    // A V2 devolve sempre false; um true nunca muda nada (nao ha heranca de rascunho).
+    expect(lerResultadoCriar([{ convite_id: CONVITE, rascunho_herdado: true }])).toEqual({ conviteId: CONVITE });
   });
 
   it("aceita tambem um objecto solto em vez de um array de uma linha", () => {
-    expect(lerResultadoCriar({ convite_id: CONVITE, rascunho_herdado: false })).toEqual({
-      conviteId: CONVITE,
-      rascunhoHerdado: false,
-    });
+    expect(lerResultadoCriar({ convite_id: CONVITE })).toEqual({ conviteId: CONVITE });
   });
 
   it("sem id valido o conviteId e null (nunca um id inventado)", () => {
     for (const mau of [null, undefined, [], {}, [{}], "x", 42, [{ convite_id: "nao-e-uuid" }], [{ convite_id: 7 }]]) {
       expect(lerResultadoCriar(mau).conviteId).toBeNull();
     }
-  });
-
-  it("na duvida assume que HOUVE heranca: so um false literal liberta o link", () => {
-    // Um valor ausente ou de tipo estranho nao pode abrir o link do RH.
-    expect(lerResultadoCriar([{ convite_id: CONVITE }]).rascunhoHerdado).toBe(true);
-    expect(lerResultadoCriar([{ convite_id: CONVITE, rascunho_herdado: "false" }]).rascunhoHerdado).toBe(true);
-    expect(lerResultadoCriar(null).rascunhoHerdado).toBe(true);
   });
 });
 
@@ -195,16 +195,33 @@ describe("linkParaOCriador", () => {
   const TOKEN = "abcdefghijklmnopqrstuvwxyz0123456789";
 
   it("com o email enviado nunca devolve o link", () => {
-    expect(linkParaOCriador({ emailEnviado: true, rascunhoHerdado: false, baseUrl: BASE, token: TOKEN })).toBeNull();
+    expect(linkParaOCriador({ emailEnviado: true, baseUrl: BASE, token: TOKEN })).toBeNull();
   });
 
-  it("com o email falhado e sem rascunho herdado devolve o link absoluto", () => {
-    expect(linkParaOCriador({ emailEnviado: false, rascunhoHerdado: false, baseUrl: BASE, token: TOKEN })).toBe(
-      `${BASE}/admissao/${TOKEN}`,
-    );
+  it("com o email falhado devolve o link absoluto (sem heranca de rascunho a reter)", () => {
+    expect(linkParaOCriador({ emailEnviado: false, baseUrl: BASE, token: TOKEN })).toBe(`${BASE}/admissao/${TOKEN}`);
+  });
+});
+
+describe("validade no email", () => {
+  it("formata a data de valid_until em pt-PT, no fuso de Lisboa", () => {
+    expect(formatarValidade("2026-10-30T12:00:00.000Z")).toBe("30/10/2026");
+    // Verao (WEST, UTC+1): 23:30 UTC de 14/07 ja e 15/07 em Lisboa; no inverno (WET) nao seria.
+    expect(formatarValidade("2026-07-14T23:30:00.000Z")).toBe("15/07/2026");
+    expect(formatarValidade("2026-12-14T23:30:00.000Z")).toBe("14/12/2026");
   });
 
-  it("com o email falhado E rascunho herdado NAO devolve o link (abriria o rascunho de outra pessoa na UI do RH)", () => {
-    expect(linkParaOCriador({ emailEnviado: false, rascunhoHerdado: true, baseUrl: BASE, token: TOKEN })).toBeNull();
+  it("devolve null para nulo, vazio ou data invalida (o email omite a validade)", () => {
+    for (const x of [null, undefined, "", "nao-e-data", 5]) expect(formatarValidade(x)).toBeNull();
+  });
+
+  it("o corpo do email diz a data recebida e nunca um numero fixo de dias", () => {
+    const com = htmlConvite("https://app.exemplo.pt/admissao/T", "30/10/2026");
+    expect(com).toContain("30/10/2026");
+    expect(com).toContain("https://app.exemplo.pt/admissao/T");
+    expect(com).not.toMatch(/7 dias/);
+    const sem = htmlConvite("https://app.exemplo.pt/admissao/T", null);
+    expect(sem).not.toMatch(/\d+ dias/);
+    expect(sem).not.toContain("valido ate");
   });
 });
