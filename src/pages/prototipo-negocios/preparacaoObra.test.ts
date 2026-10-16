@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { esquecerInventario, lerInventario, lerPedidoEcInv } from "./inventario/loja";
+import { esquecerInventario, executar, lerInventario, lerPedidoEcInv } from "./inventario/loja";
+import { enviarPo } from "./inventario/po";
 import { produto } from "./inventario/base";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, sincronizarEcsNegocios, textoResumoEc } from "./inventario/ponteNegocios";
 import { TECS, acoes, conflitos, diaDeFerias, minhas, seed, valorSinal } from "./motor";
@@ -59,7 +60,19 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     const r = resumoEcNegocio(db, "CT 2026/1027")!;
     expect(r.id).toBe("EC-1027");
     expect(r.tot.aFornecedor).toBeGreaterThan(0);
-    expect(textoResumoEc(r)).toMatch(/encomendada.*ao fornecedor/);
+    // a encomenda a fornecedor nasce Pendente (por aprovar), sem envio; o fornecedor das obras tem o portal ativo
+    expect(po.status).toBe("pending");
+    expect(po.portal.state).toBe("none");
+    expect(db.suppliers.find((s) => s.id === "madeir")!.portal).toBe("active");
+    expect(r.pos.find((x) => x.id === po.id)).toMatchObject({ fase: "por aprovar" });
+    expect(textoResumoEc(r)).toMatch(/encomenda a fornecedor por aprovar|encomendas a fornecedor por aprovar/);
+    expect(estadoLinhaNegocio(linhaDoResumo(r, "Conjunto de móveis de cozinha")!).t).toBe("encomenda a fornecedor por aprovar");
+    // aprovada no Inventário (a regra de sempre, enviarPo com purchase_orders.approve) segue pelo portal do fornecedor
+    expect(executar((x) => enviarPo(x, x.pos.find((y) => y.id === po.id)!)).ok).toBe(true);
+    const r2 = resumoEcNegocio(lerInventario(), "CT 2026/1027")!;
+    expect(lerInventario().pos.find((y) => y.id === po.id)!.portal.state).toBe("sent");
+    expect(r2.pos.find((x) => x.id === po.id)).toMatchObject({ fase: "no portal" });
+    expect(estadoLinhaNegocio(linhaDoResumo(r2, "Conjunto de móveis de cozinha")!).t).toBe("no portal do fornecedor");
     expect(estadoLinhaNegocio(linhaDoResumo(r, "Bancada em pedra")!)).toEqual({ t: "reservado em armazém", ok: true });
     expect(passosPreparacao(d, S, r).map((x) => x.id)).toContain("ec-inv");
     // depois do pagamento só pode faltar o plano
