@@ -71,9 +71,40 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Emitir fatura" })).toBeInTheDocument();
   });
 
+  it("marcar como perdida pede o motivo, diz a consequência e passa a pessoa para Perdidas", () => {
+    render(<PrototipoNegocios />);
+    irPara("Pessoas");
+    fireEvent.click(botao(/^Rita Sousa/));
+    fireEvent.click(botao("Marcar como perdida"));
+    const caixa = screen.getByRole("alertdialog", { name: /Marcar Rita Sousa como perdida/ });
+    expect(caixa).toHaveTextContent("O histórico fica");
+    fireEvent.click(within(caixa).getByRole("button", { name: "Marcar como perdida" }));
+    expect(within(caixa).getByRole("alert")).toHaveTextContent("Escolha o motivo");
+    fireEvent.click(within(caixa).getByRole("button", { name: "Adiou" }));
+    fireEvent.click(within(caixa).getByRole("button", { name: "Marcar como perdida" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Pessoas" })).toBeInTheDocument();
+    fireEvent.click(botao(/^Perdidas/));
+    expect(botao(/^Rita Sousa/)).toHaveTextContent("Perdida · Adiou");
+  });
+
+  it("o passo de outro papel oferece a troca de papel (C27)", () => {
+    render(<PrototipoNegocios />);
+    irPara("Pessoas");
+    fireEvent.click(botao(/^Clientes/));
+    fireEvent.click(botao(/^Tiago Almeida/));
+    fireEvent.click(botao(/^Mudar para Sandra/));
+    expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Emitir fatura" })).toBeInTheDocument();
+  });
+
+  it("é o V1 por defeito: sem preferência guardada, o menu já tem Pessoas", () => {
+    localStorage.removeItem("olyvia-prototipo-v1-proposta");
+    render(<PrototipoNegocios />);
+    expect(within(menu()).getByRole("button", { name: "Pessoas" })).toBeInTheDocument();
+  });
+
   it("desligar a proposta devolve Leads e Clientes", () => {
     render(<PrototipoNegocios />);
-    fireEvent.click(screen.getAllByRole("switch", { name: /Proposta nova/ })[0]);
+    fireEvent.click(screen.getAllByRole("switch", { name: /Pessoas numa página/ })[0]);
     expect(within(menu()).getByRole("button", { name: "Leads" })).toBeInTheDocument();
     expect(localStorage.getItem("olyvia-prototipo-v1-proposta")).toBe("0");
   });

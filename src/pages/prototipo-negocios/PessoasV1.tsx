@@ -6,7 +6,8 @@ import { AlertCircle, ArrowLeft, ArrowRight, Mail, MessageCircle, Phone, Plus, S
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { GRUPOS_V1, contagensV1, fichaV1, listaV1, pessoaV1, type GrupoV1, type LinhaV1 } from "./pessoasV1Docs";
-import type { LinhaId } from "./motor";
+import { PAPEIS, type LinhaId } from "./motor";
+import { MOTIVOS_PERDA, lembrarPerda } from "./perdaDocs";
 import { fazer, type Ctx } from "./pecas";
 
 /** O que a página lembra quando se abre um negócio e se volta (a página desmonta). */
@@ -36,7 +37,7 @@ export function PessoasV1({ S, A, go, run }: Ctx) {
   const setNova = (v: boolean) => { setNovaE(v); memoria = { ...memoria, nova: v }; };
 
   const p = sel ? pessoaV1(S, sel) : undefined;
-  if (p) return <FichaV1Pagina ctx={{ S, A, go }} nome={p.nome} voltar={() => setSel(null)} />;
+  if (p) return <FichaV1Pagina ctx={{ S, A, go, run }} nome={p.nome} voltar={() => setSel(null)} />;
 
   const n = contagensV1(S), linhas = listaV1(S, grupo, q), procura = q.trim() !== "";
   return (
@@ -101,7 +102,7 @@ function Linha({ l, procura, abrir }: { l: LinhaV1; procura: boolean; abrir: () 
   );
 }
 
-function FichaV1Pagina({ ctx: { S, A, go }, nome, voltar }: { ctx: Pick<Ctx, "S" | "A" | "go">; nome: string; voltar: () => void }) {
+function FichaV1Pagina({ ctx: { S, A, go, run }, nome, voltar }: { ctx: Pick<Ctx, "S" | "A" | "go" | "run">; nome: string; voltar: () => void }) {
   const p = pessoaV1(S, nome)!;
   const f = fichaV1(S, p);
   const [tudo, setTudo] = useState(false);
@@ -133,7 +134,12 @@ function FichaV1Pagina({ ctx: { S, A, go }, nome, voltar }: { ctx: Pick<Ctx, "S"
           {f.agora.t}{f.agora.atrasada && <span className="text-base font-normal text-destructive"> · atrasada</span>}
         </p>
         {f.agora.sub && <p className="mt-1 text-base text-muted-foreground">{f.agora.sub}</p>}
-        {f.agora.de && <p className="mt-1 text-base text-muted-foreground">Este passo é {f.agora.de}.</p>}
+        {f.agora.de && (
+          <p className="mt-1 text-base text-muted-foreground">
+            Este passo é {f.agora.de}.
+            {f.agora.quem && <>{" "}<button type="button" onClick={go(() => A.role(f.agora.quem!))} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Mudar para {PAPEIS[f.agora.quem].n}</button></>}
+          </p>
+        )}
         {f.agora.id !== null && (
           <div className="mt-5 flex flex-wrap items-center gap-3">
             {f.agora.btn && f.agora.act && <Button size="lg" onClick={go(() => { abrirDaFicha(f.agora.id!); fazer(A, f.agora.act!, f.agora.id!); })}>{f.agora.btn}</Button>}
@@ -203,6 +209,9 @@ function FichaV1Pagina({ ctx: { S, A, go }, nome, voltar }: { ctx: Pick<Ctx, "S"
           ))}
         </dl>
       </section>
+
+      {/* ação rara: ligação cinzenta; a confirmação aparece no sítio, com o motivo em botões (C1, C23, P5) */}
+      {f.perder.length > 0 && <Perder nome={f.nome} ids={f.perder} run={run} A={A} S={S} voltar={voltar} />}
     </div>
   );
 }
@@ -252,5 +261,57 @@ function NovaLead({ S, A, run, fechar, criada }: Pick<Ctx, "S" | "A" | "run"> & 
         </div>
       </form>
     </section>
+  );
+}
+
+/** Marcar a lead como perdida: pede o motivo (um toque) e diz o que acontece. Os negócios em curso dela ficam perdidos, com o motivo. */
+function Perder({ nome, ids, S, A, run, voltar }: Pick<Ctx, "S" | "A" | "run"> & { nome: string; ids: number[]; voltar: () => void }) {
+  const [aberto, setAberto] = useState(false);
+  const [motivo, setMotivo] = useState<string | null>(null);
+  const [falta, setFalta] = useState(false);
+  const caixa = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (aberto) caixa.current?.focus(); }, [aberto]);
+  const confirmar = () => {
+    if (!motivo) { setFalta(true); return; }
+    run(() => {
+      for (const id of ids) {
+        const d = S.deals.find((x) => x.id === id);
+        if (d) d.motivoPerda = motivo;
+        A.perderSim(id);
+      }
+      lembrarPerda(nome, motivo);
+      S.view = "pessoas"; S.deal = null; // fica em Pessoas
+    });
+    voltar();
+  };
+  if (!aberto) {
+    return (
+      <button type="button" onClick={() => setAberto(true)} className="mt-8 inline-flex min-h-11 items-center text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+        Marcar como perdida
+      </button>
+    );
+  }
+  return (
+    <div ref={caixa} tabIndex={-1} role="alertdialog" aria-labelledby="perder-t" aria-describedby="perder-d"
+      className="mt-8 rounded-2xl border border-destructive/30 bg-destructive/[0.05] p-5 outline-none animate-in fade-in-0">
+      <p id="perder-t" className="text-lg font-semibold">Marcar {nome} como perdida?</p>
+      <p id="perder-d" className="mt-1 text-[15px] text-muted-foreground">Sai de "Em curso" e passa para "Perdidas". O histórico fica.</p>
+      <div className="mt-4 grid gap-1.5">
+        <span id="perder-m" className="text-[15px] font-medium">Porquê?</span>
+        <div role="group" aria-labelledby="perder-m" aria-describedby={falta ? "perder-falta" : undefined} className="flex flex-wrap gap-2">
+          {MOTIVOS_PERDA.map((m) => (
+            <button key={m.nome} type="button" aria-pressed={motivo === m.nome} aria-invalid={falta || undefined} onClick={() => { setMotivo(motivo === m.nome ? null : m.nome); setFalta(false); }}
+              className={cn("min-h-11 rounded-lg border px-4 text-[15px] transition-colors", motivo === m.nome ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>
+              {m.nome}
+            </button>
+          ))}
+        </div>
+        {falta && <p id="perder-falta" role="alert" className="flex items-center gap-2 text-[15px] font-medium text-destructive"><AlertCircle className="h-4 w-4" aria-hidden="true" />Escolha o motivo.</p>}
+      </div>
+      <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        <Button variant="outline" size="lg" onClick={() => { setAberto(false); setMotivo(null); setFalta(false); }}>Cancelar</Button>
+        <Button variant="destructive" size="lg" onClick={confirmar}>Marcar como perdida</Button>
+      </div>
+    </div>
   );
 }

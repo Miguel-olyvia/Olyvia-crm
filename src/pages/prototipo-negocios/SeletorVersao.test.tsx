@@ -12,6 +12,7 @@ const CHAVE = "olyvia-prototipo-v2";
 const app = (guardado: string | null): void => {
   localStorage.clear();
   if (guardado !== null) localStorage.setItem(CHAVE, guardado);
+  localStorage.setItem("olyvia-prototipo-v1-proposta", "0"); // estes testes comparam as versões com o V1 de antes (Leads e Clientes); a proposta de 16/10 testa-se em PessoasV1.test.tsx
   render(<PrototipoNegocios />);
 };
 const seletor = (): HTMLElement => screen.getAllByRole("group", { name: "Versão" })[0];

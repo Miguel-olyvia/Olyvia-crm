@@ -87,9 +87,10 @@ export default function PrototipoNegocios() {
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
-  // 16/10: a proposta para simplificar Pessoas e Negócios no V1 (PessoasV1.tsx, NegociosV1Docs.tsx). Preferência de quem vê, como a versão.
+  // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). É o V1 por defeito desde 16/10 (o Ruben: "assume tu");
+  // o interruptor fica para comparar com o V1 de antes. Preferência de quem vê, como a versão: só "0" o desliga.
   const [navPessoas, setNavPessoas] = useState(0); // o menu "Pessoas" volta a montar a página (vai à lista, mesmo com uma ficha aberta)
-  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) === "1"; } catch { return false; } });
+  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) !== "0"; } catch { return true; } });
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
 
@@ -349,7 +350,7 @@ export default function PrototipoNegocios() {
         {versao === "atual" && (
           <button type="button" role="switch" aria-checked={propostaV1} onClick={() => mudarPropostaV1(!propostaV1)}
             className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 text-left text-[15px] text-foreground">
-            <span>Proposta nova<span className="block text-sm text-muted-foreground">Pessoas numa página, Negócios por documento</span></span>
+            <span>Pessoas numa página<span className="block text-sm text-muted-foreground">desligue para ver o V1 de antes, com Leads e Clientes</span></span>
             <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", propostaV1 ? "bg-primary" : "bg-input")}>
               <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", propostaV1 ? "left-[22px]" : "left-0.5")} />
             </span>

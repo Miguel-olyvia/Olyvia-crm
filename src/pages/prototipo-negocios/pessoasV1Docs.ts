@@ -47,7 +47,7 @@ export function linhaV1(S: Estado, p: PessoaApp): LinhaV1 {
   return {
     nome: p.nome, papel: papelDe(p), oQue: [d.servico, localDe(d)].filter(Boolean).join(" · "),
     // num cliente com um negócio novo, conta o negócio novo (o antigo pode estar "Concluído")
-    proximo: p.perdida !== null ? "Perdida · " + p.perdida
+    proximo: p.perdida !== null ? "Perdida · " + motivoDe(p)
       : nv ? `Novo negócio · ${nv.titulo} · ${semPaginaPropria(nv) ? estadoDe(nv) : proximoNegocio(nv.deal, S).t}`
       : proximoNegocio(d, S).t,
     atrasada: p.perdida === null && atrasada(p), exemplo: p.exemplo,
@@ -105,7 +105,9 @@ export interface FichaV1 {
   tel: string;
   email: string;
   /** O que fazer agora: a frase, a explicação e o botão (sem botão quando o passo é de espera ou de outro papel). */
-  agora: { t: string; sub?: string; btn?: string; act?: string; id: number | null; atrasada: boolean; de?: string };
+  agora: { t: string; sub?: string; btn?: string; act?: string; id: number | null; atrasada: boolean; de?: string; /** o papel de quem faz o passo (para "Mudar para …", C27) */ quem?: Papel };
+  /** Lead em curso com negócios reais: pode marcar-se como perdida aqui (os negócios em curso dela). */
+  perder: number[];
   negocios: NegocioFichaV1[];
   historico: ItemAtividade[];
   dados: { rotulo: string; valor: string }[];
@@ -128,12 +130,13 @@ export function fichaV1(S: Estado, p: PessoaApp): FichaV1 {
     nome: p.nome, papel: papelDe(p), sub: [papelDe(p), f.morada.localidade].filter(Boolean).join(" · "),
     tel: f.telefone, email: f.email,
     agora: perdida
-      ? { t: "Perdida", sub: "Motivo: " + p.perdida, id: null, atrasada: false }
+      ? { t: "Perdida", sub: "Motivo: " + motivoDe(p), id: null, atrasada: false }
       : soExemplo ?? {
         t: prA.t, sub: real ? prA.sub : "Pessoa de exemplo, sem página própria: o passo vê-se, mas não se faz aqui.", act: prA.act, id: real ? alvo.id : null, atrasada: atrasada(p),
         // o botão só para quem faz o passo; de outro papel diz-se de quem é (guidelines C27)
         btn: real && !prA.wait && !prA.done && (!prA.who || prA.who === S.role) ? prA.btn : undefined,
         de: prA.who && prA.who !== S.role && !prA.wait && !prA.done ? (prA.who === "cliente" ? "do cliente" : "de " + PAPEIS[prA.who as Papel].nome) : undefined,
+        quem: prA.who && prA.who !== "cliente" && prA.who !== S.role && !prA.wait && !prA.done && real ? prA.who as Papel : undefined,
       },
     negocios: p.todos.map((n) => ({
       id: n.id, titulo: n.titulo, estado: estadoDe(n) + (n.perdido ? " · " + n.perdido : ""), valor: valorAlternativas(n),
@@ -149,8 +152,12 @@ export function fichaV1(S: Estado, p: PessoaApp): FichaV1 {
       ...(f.nif ? [{ rotulo: "NIF", valor: f.nifExemplo ? `${f.nif} (exemplo)` : f.nif }] : []),
     ],
     exemplo: p.exemplo,
+    perder: p.papel === "lead" && !perdida ? p.negocios.filter((x) => !x.perdido && temPagina(S, x.id)).map((x) => x.id) : [],
   };
 }
+
+/** O motivo da perda: o guardado no negócio (sobrevive a recarregar a página) ou o que a camada da V2 sabe. */
+export const motivoDe = (p: PessoaApp): string => p.principal.motivoPerda ?? p.perdida ?? "";
 
 /* ---------------------------------------------------------------- Negócios por documento */
 
