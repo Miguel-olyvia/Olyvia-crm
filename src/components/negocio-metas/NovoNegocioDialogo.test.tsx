@@ -270,3 +270,66 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });
+
+describe("NovoNegocioDialogo: título, descrição e «Guardar o levantamento» quando o abre um passo", () => {
+  const abrirComoPasso = (extra: Partial<Parameters<typeof NovoNegocioDialogo>[0]> = {}) => {
+    const aoGuardar = vi.fn(() => true);
+    render(
+      <NovoNegocioDialogo
+        pessoas={PESSOAS} aoCriar={vi.fn()} semBotao aberto abaInicial="visita" guardarLevantamento={{ texto: "Guardar o levantamento", aoGuardar }} {...extra}
+      />,
+    );
+    return { aoGuardar, dialogo: screen.getByRole("dialog") };
+  };
+
+  it("sem título nem descrição próprios, o painel diz «Novo negócio» e a descrição de sempre", () => {
+    const { dialogo } = abrirComoPasso();
+    expect(dialogo).toHaveAccessibleName("Novo negócio");
+    expect(dialogo).toHaveAccessibleDescription("Só exemplo: o negócio fica nesta página e perde-se ao recarregar.");
+  });
+
+  it("com título e descrição próprios (o passo), o painel chama-se como o passo", () => {
+    const { dialogo } = abrirComoPasso({ titulo: "Levantamento de Marta Silveira", descricao: "Faça as medidas e guarde." });
+    expect(dialogo).toHaveAccessibleName("Levantamento de Marta Silveira");
+    expect(dialogo).toHaveAccessibleDescription("Faça as medidas e guarde.");
+    expect(within(dialogo).getByRole("heading", { name: "Levantamento de Marta Silveira" })).toBeInTheDocument();
+  });
+
+  it("«Guardar o levantamento» só mostra os erros do levantamento: sem pessoa escolhida, a aba Geral não leva aviso de erros", () => {
+    const { aoGuardar, dialogo } = abrirComoPasso();
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(aoGuardar).toHaveBeenCalledTimes(1);
+    expect(within(dialogo).getByRole("tab", { name: /^Geral/ })).not.toHaveTextContent("com erros");
+    expect(within(dialogo).getByRole("tab", { name: /^Qualificação/ })).not.toHaveTextContent("com erros");
+  });
+
+  it("«Guardar o levantamento» com linhas por acabar leva a aba Visita (só essa) a dizer que tem erros", () => {
+    const { aoGuardar, dialogo } = abrirComoPasso();
+    fireEvent.click(within(dialogo).getByRole("button", { name: /^Medidas da área/ }));
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(aoGuardar).not.toHaveBeenCalled();
+    expect(within(dialogo).getByRole("tab", { name: /^Visita/ })).toHaveTextContent("com erros");
+    expect(within(dialogo).getByRole("tab", { name: /^Geral/ })).not.toHaveTextContent("com erros");
+  });
+
+  it("«Criar negócio» continua a mostrar os erros de todas as abas (a pessoa em falta)", () => {
+    const { dialogo } = abrirComoPasso();
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Criar negócio" }));
+    expect(within(dialogo).getByRole("tab", { name: /^Geral/ })).toHaveTextContent("com erros");
+  });
+
+  it("o motivo que o passo devolve aparece dentro do painel, como alerta, e o painel fica aberto", () => {
+    const { dialogo } = abrirComoPasso({
+      guardarLevantamento: { texto: "Guardar o levantamento", aoGuardar: () => false, motivo: "Falta pelo menos uma linha de medidas." },
+    });
+    expect(within(dialogo).getByRole("alert")).toHaveTextContent("Falta pelo menos uma linha de medidas.");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(screen.getByRole("dialog")).toBe(dialogo);
+  });
+
+  it("sem motivo não há alerta no painel", () => {
+    const { dialogo } = abrirComoPasso();
+    expect(within(dialogo).queryByRole("alert")).not.toBeInTheDocument();
+  });
+});

@@ -5,7 +5,10 @@ import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { adiar, juntarNota, perder, reativar, registarChamada, type ContextoPerda, type DadosChamada } from "./acoesPessoa";
 import type { DadosNovaLead } from "./novaLead";
 import { pessoasNovas, registarLead } from "./pessoasNovas";
-import { alterarVisita, concluirVisita, marcarVisita, type DadosAlterarVisita, type DadosVisita } from "./visitaPessoa";
+import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
+import {
+  alterarVisita, concluirVisita, guardarLevantamento, marcarVisita, marcarVisitaFeita, type DadosAlterarVisita, type DadosVisita,
+} from "./visitaPessoa";
 import { useNegociosDasPessoas } from "./useNegociosDasPessoas";
 import { chipValido } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
@@ -79,6 +82,16 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
     (id: string, dados: DadosAlterarVisita) => setEstado((atual) => alterarVisita(atual, id, dados, HOJE_EXEMPLO)),
     [],
   );
+  /** A visita aconteceu (ainda sem negócio): fica na ficha como feita e o passo seguinte é o levantamento. */
+  const marcarVisitaComoFeita = useCallback(
+    (id: string, nota: string) => setEstado((atual) => marcarVisitaFeita(atual, id, nota, HOJE_EXEMPLO)),
+    [],
+  );
+  /** Guarda o levantamento feito na visita, antes de criar o negócio. */
+  const guardarLevantamentoFeito = useCallback(
+    (id: string, rascunho: RascunhoLevantamento) => setEstado((atual) => guardarLevantamento(atual, id, rascunho, HOJE_EXEMPLO)),
+    [],
+  );
   /** A visita acabou e o negócio foi criado a partir dela: sai da ficha e fica registado na atividade. */
   const concluirVisitaFeita = useCallback((id: string) => setEstado((atual) => concluirVisita(atual, id, HOJE_EXEMPLO)), []);
   const mudarOrdem = useCallback((ordem: OrdemPessoa) => setPrefs((p) => ({ ...p, ordem })), []);
@@ -89,7 +102,8 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
   return {
     resumos, submissoes, notas, pendentes, atividade: estado.atividade, prefs: prefsEfetivas, resolver,
     registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual, criarLead, marcarVisita: marcarVisitaPedida,
-    alterarVisita: alterarVisitaMarcada, concluirVisita: concluirVisitaFeita,
+    alterarVisita: alterarVisitaMarcada, concluirVisita: concluirVisitaFeita, marcarVisitaFeita: marcarVisitaComoFeita,
+    guardarLevantamento: guardarLevantamentoFeito,
     mudarOrdem, mudarChip, mudarTipo, mudarVista,
   };
 }

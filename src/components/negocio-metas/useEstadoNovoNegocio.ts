@@ -14,7 +14,7 @@ import type { VisitaNegocio } from "./negocioMetas";
 import { ID_VISITA_DA_PESSOA, acrescentarVisita, alterarVisita, marcarFeita, novaVisita, ordenarVisitas, removerVisita, visitasIniciais } from "./visitasNegocio";
 import {
   COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, preencherContactoDaPessoa, reporContacto, type ChaveContacto,
-  type PessoaOpcao, type ValoresIniciaisNegocio,
+  type PessoaOpcao, type RascunhoLevantamento, type ValoresIniciaisNegocio,
 } from "./novoNegocio";
 
 /** O comercial pedido, se for um dos que se podem escolher; senão o por omissão. */
@@ -50,9 +50,12 @@ export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => 
  * As linhas e as observações do levantamento. A data, quem fez e o estado deixam de ser daqui: derivam da lista de
  * visitas (ver `camposDoLevantamento`), por isso aqui ficam só com o valor de partida.
  */
-export function useLevantamentoForm(hoje: string, aoSujar: () => void, comercial: string) {
-  const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => levantamentoVazio(hoje, comercial));
-  const sequencia = useRef(0);
+export function useLevantamentoForm(hoje: string, aoSujar: () => void, comercial: string, inicial?: RascunhoLevantamento) {
+  const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => (
+    inicial ? { ...levantamentoVazio(hoje, comercial), linhas: inicial.linhas, observacoes: inicial.observacoes } : levantamentoVazio(hoje, comercial)
+  ));
+  // As linhas guardadas já trazem ids (l1, l2...): as novas continuam a numeração, sem repetir nenhum.
+  const sequencia = useRef(Math.max(0, ...(inicial?.linhas ?? []).map((l) => Number(l.id.slice(1)) || 0)));
   const alterar = (f: (l: LevantamentoForm) => LevantamentoForm) => { aoSujar(); setLevantamento(f); };
   const acoes: AcoesLevantamento = {
     mudar: (parcial) => alterar((l) => ({ ...l, ...parcial })),
@@ -113,8 +116,8 @@ export function useVisitasForm(hoje: string, aoSujar: () => void, comercial: str
 const TODOS_OS_BLOCOS = [BLOCO_QUALIFICACAO, ...SECCOES_VISITA.flatMap((s) => s.blocos)];
 
 /** As respostas de escolha rápida das duas abas (os ids das perguntas são únicos): escolher, ou retirar se já estava. */
-export function useRespostasForm(aoSujar: () => void) {
-  const [respostas, setRespostas] = useState<Respostas>({});
+export function useRespostasForm(aoSujar: () => void, inicial?: Respostas) {
+  const [respostas, setRespostas] = useState<Respostas>(inicial ?? {});
   const escolher = (pergunta: string, opcao: string) => {
     aoSujar();
     setRespostas((r) => alternarResposta(TODOS_OS_BLOCOS, r, pergunta, opcao));

@@ -3,6 +3,7 @@
 // página (origem, etapa, último contacto) são de exemplo e não existem noutro sítio.
 import type { FaseNegocio, NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import type { SaudeNegocio } from "@/components/negocio-metas/saudeNegocio";
+import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 
 export type PapelPessoa = "lead" | "cliente";
 /** Os 5 passos do percurso: Lead, Contacto, Visita, Negócio e Cliente (as chaves não mudam, só os textos). */
@@ -42,6 +43,10 @@ export interface VisitaPessoa {
   moradaVisita: MoradaVisita;
   /** Uma nota de acesso (só quando a morada é outra). */
   notaAcesso?: string;
+  /** A visita já aconteceu (ver `marcarVisitaFeita`): o passo seguinte é o levantamento. Falta enquanto está só marcada. */
+  feita?: boolean;
+  /** O levantamento guardado antes de criar o negócio (linhas de medidas, observações e respostas); some com a visita ao concluí-la. */
+  levantamento?: RascunhoLevantamento;
 }
 
 export interface Pessoa {

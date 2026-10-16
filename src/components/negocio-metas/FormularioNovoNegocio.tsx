@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type FormEvent, type RefObject } from "react";
+import { AlertCircle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -10,11 +11,11 @@ import { AbaVisita } from "./AbaVisita";
 import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { N } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
-import { paraLevantamentoNegocio, type LevantamentoForm } from "./levantamento";
+import { paraLevantamentoNegocio, validarLevantamento, type LevantamentoForm } from "./levantamento";
 import type { MoradaObraForm } from "./moradaObra";
 import {
   abasComErros, primeiroErro, validarNovoNegocio, type AbaNovoNegocio, type DadosCriarNegocio, type ErrosNovoNegocio, type PessoaOpcao,
-  type ValoresIniciaisNegocio,
+  type RascunhoLevantamento, type ValoresIniciaisNegocio,
 } from "./novoNegocio";
 import type { Respostas } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
@@ -123,7 +124,14 @@ interface FormularioProps {
   pessoaInicialId?: string;
   /** O que já vem preenchido (por exemplo a visita concluída de uma pessoa); sem isto o formulário abre vazio. */
   valoresIniciais?: ValoresIniciaisNegocio;
+  /** A aba com que abre (por omissão a Geral); a Visita abre já na secção das Medidas da área. */
+  abaInicial?: AbaNovoNegocio;
+  /** Com isto, o rodapé ganha um botão que guarda o levantamento (sem criar o negócio): o texto do botão e o que fazer. */
+  guardarLevantamento?: { texto: string; aoGuardar: (rascunho: RascunhoLevantamento) => void; motivo?: string | null };
 }
+
+/** Que erros se mostram: nenhuns, só os do levantamento (depois de "Guardar o levantamento") ou os de todas as abas (depois de criar). */
+type Tentativa = "nenhuma" | "levantamento" | "tudo";
 
 /**
  * O formulário de "Novo negócio", com o rodapé fixo (Cancelar e Criar negócio) e três abas: Geral (pessoa
@@ -131,26 +139,29 @@ interface FormularioProps {
  * perguntas e levantamento), as duas últimas opcionais e só exemplo. Um envio recusado leva para a primeira aba com
  * erros e põe o foco no primeiro campo errado.
  */
-export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar, pessoaInicialId, valoresIniciais }: FormularioProps) {
+export function FormularioNovoNegocio({
+  pessoas, hoje, primeiroCampo, aoSujar, aoConfirmar, pessoaInicialId, valoresIniciais, abaInicial = "geral", guardarLevantamento,
+}: FormularioProps) {
   const { t } = useTranslation();
   const id = useId();
-  const [aba, setAba] = useState<AbaNovoNegocio>("geral");
-  const [tentou, setTentou] = useState(false);
+  const [aba, setAba] = useState<AbaNovoNegocio>(abaInicial);
+  const [tentou, setTentou] = useState<Tentativa>("nenhuma");
   const pedirFoco = usePedidoFoco(id);
   const { valores, acoes } = useCamposGerais(pessoas, aoSujar, pessoaInicialId ?? valoresIniciais?.pessoaId, valoresIniciais?.comercial);
-  const lev = useLevantamentoForm(hoje, aoSujar, valores.comercial);
+  const lev = useLevantamentoForm(hoje, aoSujar, valores.comercial, valoresIniciais?.levantamento);
   const vis = useVisitasForm(hoje, aoSujar, valores.comercial, valoresIniciais?.visita);
-  const resp = useRespostasForm(aoSujar);
+  const resp = useRespostasForm(aoSujar, valoresIniciais?.levantamento?.respostas);
   const morada = useMoradaForm(aoSujar, valoresIniciais?.visita);
-  const [seccao, setSeccao] = useState(SECCOES_VISITA[0].id);
+  const [seccao, setSeccao] = useState(abaInicial === "visita" ? SECCAO_DO_LEVANTAMENTO : SECCOES_VISITA[0].id);
   const pessoa = pessoas.find((p) => p.id === valores.pessoaId);
   // A data, quem fez e o estado do levantamento derivam da lista de visitas; as linhas e as observações são do formulário.
   const levantamento = { ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, valores.comercial) };
   const aValidar = { ...valores, pessoaId: pessoa ? valores.pessoaId : "", levantamento, moradaObra: morada.morada };
+  const errosVisiveis: ErrosNovoNegocio = tentou === "tudo" ? validarNovoNegocio(aValidar) : tentou === "levantamento" ? validarLevantamento(levantamento) : {};
 
   const enviar = (e: FormEvent) => {
     e.preventDefault();
-    setTentou(true);
+    setTentou("tudo");
     const primeiro = primeiroErro(validarNovoNegocio(aValidar), lev.levantamento.linhas.map((l) => l.id));
     if (primeiro) {
       setAba(primeiro.aba);
@@ -170,19 +181,46 @@ export function FormularioNovoNegocio({ pessoas, hoje, primeiroCampo, aoSujar, a
     }
   };
 
+  /**
+   * Guarda o levantamento sem criar o negócio: as linhas têm de estar certas (e, com a visita feita, haver pelo menos uma). Só
+   * mostra os erros do levantamento: os das abas Geral e Qualificação não impedem de guardar e ficam para o "Criar negócio".
+   */
+  const guardar = () => {
+    if (!guardarLevantamento) return;
+    setTentou((antes) => (antes === "tudo" ? "tudo" : "levantamento"));
+    const primeiro = primeiroErro(validarLevantamento(levantamento), lev.levantamento.linhas.map((l) => l.id));
+    if (primeiro) {
+      setAba(primeiro.aba);
+      setSeccao(SECCAO_DO_LEVANTAMENTO);
+      pedirFoco(primeiro.campo);
+      return;
+    }
+    guardarLevantamento.aoGuardar({ linhas: lev.levantamento.linhas, observacoes: lev.levantamento.observacoes, respostas: resp.respostas });
+  };
+
   return (
     <form onSubmit={enviar} noValidate className="flex min-h-0 flex-1 flex-col">
       <CorpoAbas
         id={id} aba={aba} aoMudarAba={setAba} seccao={seccao} aoMudarSeccao={setSeccao} pessoas={pessoas} valores={valores}
         respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={levantamento}
-        erros={tentou ? validarNovoNegocio(aValidar) : {}} primeiroCampo={primeiroCampo}
+        erros={errosVisiveis} primeiroCampo={primeiroCampo}
         acoesGeral={acoes} acoesLevantamento={lev.acoes} visitas={vis.visitas} visitaAberta={vis.aberta} acoesVisitas={vis.acoes}
         acoesQualificacao={{ escolher: resp.escolher, morada: morada.mudar, preencherMorada: morada.preencher }}
       />
+      {guardarLevantamento?.motivo && (
+        // O passo recusou guardar: o motivo diz-se aqui, dentro do painel, porque o toast e a região live da página ficam fora do modal.
+        <p role="alert" className="flex shrink-0 items-start gap-1.5 border-t border-border px-6 py-3 text-sm text-foreground">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+          {guardarLevantamento.motivo}
+        </p>
+      )}
       <SheetFooter className="shrink-0 gap-2 border-t border-border px-6 py-4 sm:space-x-0">
         <SheetClose asChild>
           <Button type="button" variant="outline" className={cn("min-h-11", FOCO)}>{t(`${N}cancel`)}</Button>
         </SheetClose>
+        {guardarLevantamento && (
+          <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={guardar}>{guardarLevantamento.texto}</Button>
+        )}
         <Button type="submit" className={cn("min-h-11", FOCO)}>{t(`${N}submit`)}</Button>
       </SheetFooter>
     </form>

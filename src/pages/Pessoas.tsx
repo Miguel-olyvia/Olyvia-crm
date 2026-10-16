@@ -15,8 +15,9 @@ import { juntarAtividade } from "@/components/pessoas/acoesPessoa";
 import { textoPendentes } from "@/components/pessoas/formatoPessoas";
 import { ConfirmarResolver } from "@/components/pessoas/ConfirmarResolver";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
-import { MarcarVisitaProvider } from "@/components/pessoas/MarcarVisita";
 import { NovaLeadPainel } from "@/components/pessoas/NovaLeadPainel";
+import { useAvisoAlternado } from "@/components/pessoas/processo/avisoAlternado";
+import { ProcessoProvider } from "@/components/pessoas/processo/ProcessoProvider";
 import type { DadosNovaLead } from "@/components/pessoas/novaLead";
 import { paraOpcao } from "@/components/pessoas/pessoaOpcao";
 import type { Pessoa } from "@/components/pessoas/pessoasTipos";
@@ -53,7 +54,12 @@ const Pessoas = () => {
   const [negocioPara, setNegocioPara] = useState<{ pessoa: Pessoa; valores?: ValoresIniciaisNegocio } | null>(null);
   // A pessoa cuja visita fica concluída quando o negócio for criado (lida ao criar; o painel já está a fechar nessa altura).
   const visitaDoNegocio = useRef<string | null>(null);
+  // O aviso da página e dos passos do processo (uma região live) e o da resolução de submissões (outra): cada origem tem a sua, porque
+  // o anúncio da resolução fica guardado e, numa região partilhada, calava todos os avisos que viessem depois.
   const [aviso, setAviso] = useState("");
+  const alternarAviso = useAvisoAlternado();
+  /** Um aviso da própria página: o mesmo texto duas vezes seguidas (a mesma lead criada duas vezes) volta a ser anunciado. */
+  const anunciar = (texto: string) => setAviso(alternarAviso(texto));
   const opcoesPessoa = useMemo(() => estado.resumos.map((r) => paraOpcao(r.pessoa)), [estado.resumos]);
 
   const aberta = estado.resumos.find((r) => r.pessoa.id === url.abertaId) ?? null;
@@ -83,16 +89,21 @@ const Pessoas = () => {
     const criada = estado.criarLead(dados);
     url.abrir(criada.id);
     toast.success(t("pessoasPagina.newLead.created"));
-    setAviso(t("pessoasPagina.newLead.announce", { name: criada.nome }));
+    anunciar(t("pessoasPagina.newLead.announce", { name: criada.nome }));
   };
   /** Cria o negócio da pessoa (o mesmo de "Novo negócio"): aparece na ficha, em Negócios, e no quadro de Negócio e metas. */
-  const aoCriarNegocio = (dados: DadosCriarNegocio) => {
+  const criarNegocio = (dados: DadosCriarNegocio, concluirVisita: boolean) => {
     criarNegocioNovo(dados, HOJE_EXEMPLO);
-    if (visitaDoNegocio.current === dados.pessoa.id) estado.concluirVisita(dados.pessoa.id);
-    visitaDoNegocio.current = null;
+    if (concluirVisita) estado.concluirVisita(dados.pessoa.id);
     toast.success(t("businessGoals.new.created"));
-    setAviso(t("pessoasPagina.createDeal.announce", { name: dados.pessoa.nome }));
   };
+  const aoCriarNegocio = (dados: DadosCriarNegocio) => {
+    criarNegocio(dados, visitaDoNegocio.current === dados.pessoa.id);
+    visitaDoNegocio.current = null;
+    anunciar(t("pessoasPagina.createDeal.announce", { name: dados.pessoa.nome }));
+  };
+  /** O negócio criado pelo passo "Criar o negócio" (o aviso diz a fase: é do `ProcessoProvider`): a visita de onde veio fica concluída. */
+  const aoCriarNegocioDoPasso = (dados: DadosCriarNegocio) => criarNegocio(dados, true);
 
   const abrirNegocio = (pessoa: Pessoa) => { visitaDoNegocio.current = null; setNegocioPara({ pessoa }); };
   /** "Visita concluída → Criar negócio": o painel abre com a pessoa, o comercial, a visita e a morada da visita (a da obra). */
@@ -102,7 +113,10 @@ const Pessoas = () => {
   };
 
   return (
-    <MarcarVisitaProvider hoje={HOJE_EXEMPLO} aoMarcar={estado.marcarVisita}>
+    <ProcessoProvider
+      hoje={HOJE_EXEMPLO} resumos={estado.resumos} acoes={estado} opcoesPessoa={opcoesPessoa} aoCriarNegocio={aoCriarNegocioDoPasso}
+      aoAnunciar={setAviso}
+    >
       <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
         {/* Como no Inventário: a barra de abas no topo, com a linha fina por baixo, e só depois migalhas e título. */}
         <Tabs value={url.separador} onValueChange={(v) => url.mudarSeparador(v as SeparadorPagina)} className="space-y-5">
@@ -158,9 +172,10 @@ const Pessoas = () => {
         <ConfirmarResolver
           pedido={resolucao.pedido} aoConfirmar={resolucao.confirmar} aoCancelar={resolucao.cancelar} aoFechar={resolucao.aoFechar}
         />
-        <div role="status" aria-live="polite" className="sr-only">{resolucao.anuncio || aviso}</div>
+        <div role="status" aria-live="polite" className="sr-only">{aviso}</div>
+        <div role="status" aria-live="polite" className="sr-only">{resolucao.anuncio}</div>
       </div>
-    </MarcarVisitaProvider>
+    </ProcessoProvider>
   );
 };
 

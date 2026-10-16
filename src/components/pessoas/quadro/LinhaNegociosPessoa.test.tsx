@@ -19,7 +19,7 @@ vi.mock("@/hooks/useTranslation", async () => {
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
   id: "n1", pessoaId: "p1", tipo: "negocio", fase: "orcamento", trabalho: "Cozinha", valor: 9000, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, propostaRascunho: false, ...extra,
+  orcamentos: 0, orcamentoEscolhido: false, propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
 });
 
 const ITENS: ItemProcesso[] = [

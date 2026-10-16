@@ -33,6 +33,10 @@ export interface ItemProcesso {
   orcamentoEscolhido: boolean;
   /** A proposta do negócio existe e ainda é um rascunho (falso num pedido, ou sem proposta). */
   propostaRascunho: boolean;
+  /** Um pedido na fase Visita cuja visita já foi feita (falso num negócio). */
+  visitaFeita: boolean;
+  /** Quantas linhas de medidas tem o levantamento guardado da visita (0 num negócio, ou sem levantamento). */
+  levantamentoLinhas: number;
 }
 
 /** O próximo passo de um item e a chave do seu texto, para o ecrã traduzir (nunca texto solto). */

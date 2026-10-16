@@ -7,6 +7,8 @@ import {
   destinoInicial, moradaDaLead, resolverDestino, textoMoradaVisita, validarDestino, type DestinoVisita, type ErroMoradaVisita,
 } from "./moradaVisita";
 import type { ItemAtividade, Pessoa, VisitaPessoa } from "./pessoasTipos";
+import { visitaDaPessoa } from "./visitaProxima";
+import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 
 export const MAX_NOTA_VISITA = 140;
 
@@ -87,8 +89,8 @@ export interface DadosAlterarVisita {
 const temVisita = (p: Pessoa): boolean => !p.perdida && (p.visita !== undefined || p.etapa === "visitaMarcada");
 
 /**
- * Altera a visita já marcada (dia, hora e morada): a nova morada passa a valer, o próximo contacto acompanha o dia e a
- * atividade regista-o. Sem visita, perdida, ou dados inválidos, o estado fica como está.
+ * Altera a visita já marcada (dia, hora e morada): a nova morada passa a valer, o próximo contacto acompanha o dia (salvo numa
+ * visita já feita, que não o repõe) e a atividade regista-o. Sem visita, perdida, ou dados inválidos, o estado fica como está.
  */
 export function alterarVisita<E extends EstadoAcoes>(estado: E, id: string, dados: DadosAlterarVisita, hoje: string): E {
   const alvo = estado.pessoas.find((p) => p.id === id);
@@ -99,10 +101,55 @@ export function alterarVisita<E extends EstadoAcoes>(estado: E, id: string, dado
   const visita: VisitaPessoa = { ...alvo.visita, comercial: alvo.visita?.comercial ?? alvo.comercial, data: dados.data, hora: dados.hora, ...onde };
   if (!onde.notaAcesso) delete visita.notaAcesso;
   const detalhe = [dados.hora ? `${dados.data} ${dados.hora}` : dados.data, textoMoradaVisita(onde.moradaVisita)].filter(Boolean).join(" · ");
+  // Uma visita feita já aconteceu: o próximo contacto deixou de ser o dia dela (ver `marcarVisitaFeita`) e não volta a sê-lo.
+  const acompanhaODia = alvo.visita?.feita !== true;
   return {
     ...estado,
-    pessoas: estado.pessoas.map((p) => (p.id === id ? { ...p, visita, proximoContacto: dados.data, proximoHora: dados.hora || undefined } : p)),
+    pessoas: estado.pessoas.map((p) => {
+      if (p.id !== id) return p;
+      return { ...p, visita, ...(acompanhaODia ? { proximoContacto: dados.data, proximoHora: dados.hora || undefined } : {}) };
+    }),
     atividade: [registo(estado, id, "visita-alterada", "pessoasPagina.activity.visitChanged", detalhe, hoje), ...estado.atividade],
+  };
+}
+
+export const MAX_NOTA_VISITA_FEITA = 200;
+
+/**
+ * Marca a visita como feita (ela aconteceu, o negócio ainda não existe): a visita fica na ficha com `feita`, o próximo
+ * contacto que era o dia dela fica vazio, conta como contacto de hoje e a atividade regista-o, com a nota (opcional, até
+ * 200 caracteres). A pessoa continua na fase Visita: o passo seguinte é o levantamento. Sem visita, perdida, já feita ou com
+ * a nota comprida de mais, o estado fica como está. Uma ficha antiga (etapa "Com visita") passa a ter a visita guardada.
+ */
+export function marcarVisitaFeita<E extends EstadoAcoes>(estado: E, id: string, nota: string, hoje: string): E {
+  const alvo = estado.pessoas.find((p) => p.id === id);
+  if (!alvo || !temVisita(alvo) || nota.trim().length > MAX_NOTA_VISITA_FEITA) return estado;
+  const base = visitaDaPessoa(alvo, alvo.etapa);
+  if (!base || base.feita) return estado;
+  const detalhe = [base.hora ? `${base.data} ${base.hora}` : base.data, nota.trim()].filter(Boolean).join(" · ");
+  const eraOProximo = alvo.proximoContacto === base.data;
+  return {
+    ...estado,
+    pessoas: estado.pessoas.map((p) => (p.id === id
+      ? { ...p, visita: { ...base, feita: true }, ultimoContactoDias: 0, ...(eraOProximo ? { proximoContacto: null, proximoHora: undefined } : {}) }
+      : p)),
+    atividade: [registo(estado, id, "visita-feita", "pessoasPagina.process.activity.visitMarkedDone", detalhe, hoje), ...estado.atividade],
+    contactadas: estado.contactadas.includes(id) ? estado.contactadas : [...estado.contactadas, id],
+  };
+}
+
+/**
+ * Guarda o levantamento feito na visita, antes de criar o negócio: o passo seguinte passa a ser "Criar o negócio". Pede a
+ * visita feita e pelo menos uma linha de medidas; sem isso, perdida ou id desconhecido, o estado fica como está.
+ */
+export function guardarLevantamento<E extends EstadoAcoes>(estado: E, id: string, rascunho: RascunhoLevantamento, hoje: string): E {
+  const alvo = estado.pessoas.find((p) => p.id === id);
+  if (!alvo || alvo.perdida || !alvo.visita?.feita || rascunho.linhas.length === 0) return estado;
+  const visita: VisitaPessoa = { ...alvo.visita, levantamento: rascunho };
+  return {
+    ...estado,
+    pessoas: estado.pessoas.map((p) => (p.id === id ? { ...p, visita } : p)),
+    atividade: [registo(estado, id, "levantamento", "pessoasPagina.process.activity.surveySaved", "", hoje), ...estado.atividade],
   };
 }
 

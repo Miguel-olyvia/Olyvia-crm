@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { COR_FASE } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import type { ChipPessoa } from "../pessoasTipos";
+import type { ItemProcesso } from "../processo/tiposProcesso";
 import { CartaoPessoaQuadro } from "./CartaoPessoaQuadro";
 import { COLUNAS_QUADRO, type CartaoQuadro, type ColunaQuadro } from "./cartoesQuadroPessoas";
 
@@ -17,6 +18,8 @@ interface QuadroPessoasProps {
   aoAbrir: (pessoaId: string) => void;
   /** Limpa os filtros (a mesma saída da tabela vazia). */
   aoLimpar: () => void;
+  /** Os itens do processo dos cartões, pelo id do cartão (ver `itensDaPessoa`): com eles os botões dos passos executam-nos. */
+  itens?: ReadonlyMap<string, ItemProcesso>;
 }
 
 /** A faixa de cada coluna: as de negócio usam a cor da fase; as de pedido, tons do texto secundário (a fase diz-se sempre por texto). */
@@ -52,7 +55,7 @@ function AvisoQuadroVazio({ chip, aoLimpar }: Pick<QuadroPessoasProps, "chip" | 
  * O quadro por 6 fases. Em ecrã largo as colunas rolam na horizontal; em ecrã estreito empilham numa só coluna.
  * Cada coluna é uma secção com h3 (o h2 é o do separador, na página) e os cartões são uma lista de botões.
  */
-export function QuadroPessoas({ cartoes, hoje, chip, aoAbrir, aoLimpar }: QuadroPessoasProps) {
+export function QuadroPessoas({ cartoes, hoje, chip, aoAbrir, aoLimpar, itens }: QuadroPessoasProps) {
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
@@ -84,7 +87,7 @@ export function QuadroPessoas({ cartoes, hoje, chip, aoAbrir, aoLimpar }: Quadro
               )}
             </div>
             <ul role="list" className="min-h-[120px] flex-1 space-y-2 p-2">
-              {daColuna.map((c) => <CartaoPessoaQuadro key={c.id} cartao={c} hoje={hoje} aoAbrir={aoAbrir} />)}
+              {daColuna.map((c) => <CartaoPessoaQuadro key={c.id} cartao={c} hoje={hoje} item={itens?.get(c.id)} aoAbrir={aoAbrir} />)}
               {daColuna.length === 0 && <ColunaVazia />}
             </ul>
           </section>

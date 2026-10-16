@@ -9,6 +9,8 @@ const W = "pessoasPagina.weekday.";
 const pt: Record<string, string> = {
   [`${K}title`]: "Próxima visita",
   [`${K}titleOverdue`]: "Visita por concluir",
+  [`${K}titleDone`]: "Visita feita",
+  [`${K}doneHintDone`]: "A visita já foi feita. Cria o negócio com a pessoa, o comercial, a visita e a morada da visita já preenchidos, e com o levantamento, se já estiver guardado.",
   [`${K}overdueHint`]: "A visita era a {date} e ainda não foi concluída.",
   [`${K}address`]: "Morada da visita",
   [`${K}noAddress`]: "Sem morada indicada",
@@ -52,6 +54,8 @@ const pt: Record<string, string> = {
 const en: Record<string, string> = {
   [`${K}title`]: "Next visit",
   [`${K}titleOverdue`]: "Visit to complete",
+  [`${K}titleDone`]: "Visit already done",
+  [`${K}doneHintDone`]: "The visit has been done. Create the deal with the person, the salesperson, the visit and the visit address already filled in, and with the survey if it is already saved.",
   [`${K}overdueHint`]: "The visit was on {date} and has not been completed yet.",
   [`${K}address`]: "Visit address",
   [`${K}noAddress`]: "No address given",

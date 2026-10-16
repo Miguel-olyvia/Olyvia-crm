@@ -23,6 +23,8 @@ interface ProviderProps {
   /** O dia de hoje (AAAA-MM-DD): a data mínima da visita. */
   hoje: string;
   aoMarcar: (pessoaId: string, dados: DadosVisita) => void;
+  /** Ao fechar o diálogo: devolve o foco a quem o abriu e diz se o fez (o `ProcessoProvider` fá-lo para o "A fazer"); sem isto, o diálogo devolve-o por si. */
+  aoDevolverFoco?: () => boolean;
   children: ReactNode;
 }
 
@@ -104,7 +106,7 @@ function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita
   );
 }
 
-export function MarcarVisitaProvider({ hoje, aoMarcar, children }: ProviderProps) {
+export function MarcarVisitaProvider({ hoje, aoMarcar, aoDevolverFoco, children }: ProviderProps) {
   const { t } = useTranslation();
   const [pedido, setPedido] = useState<PedidoVisita | null>(null);
   const ultimo = useRef<PedidoVisita | null>(null);
@@ -120,10 +122,13 @@ export function MarcarVisitaProvider({ hoje, aoMarcar, children }: ProviderProps
     <MarcarVisitaContext.Provider value={valor}>
       {children}
       <Dialog open={pedido !== null} onOpenChange={(aberto) => { if (!aberto) setPedido(null); }}>
-        <DialogContent className="motion-reduce:!animate-none">
+        <DialogContent className="motion-reduce:!animate-none" onCloseAutoFocus={(e) => { if (aoDevolverFoco?.()) e.preventDefault(); }}>
           <DialogHeader>
             <DialogTitle>{t(`${V}title`)}</DialogTitle>
-            <DialogDescription>{t(`${V}description`, { name: mostrado?.nome ?? "", service: mostrado?.servico ?? "" })}</DialogDescription>
+            {/* Um pedido sem serviço (a lead que vem do "A fazer") não leva os dois pontos e o vazio. */}
+            <DialogDescription>
+              {t(mostrado?.servico ? `${V}description` : "pessoasPagina.process.visitDescription", { name: mostrado?.nome ?? "", service: mostrado?.servico ?? "" })}
+            </DialogDescription>
           </DialogHeader>
           {mostrado && <FormVisita key={mostrado.pessoaId} pedido={mostrado} hoje={hoje} aoMarcar={marcar} aoFechar={() => setPedido(null)} />}
         </DialogContent>

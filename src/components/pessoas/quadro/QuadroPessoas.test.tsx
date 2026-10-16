@@ -96,8 +96,21 @@ describe("QuadroPessoas", () => {
 
   it("nesta fase o botão do próximo passo só abre a ficha da pessoa", () => {
     const aoAbrir = mostrar();
-    fireEvent.click(screen.getByRole("button", { name: "Recolher a assinatura: Eva Costa" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recolher a assinatura: Telhado de Eva Costa (abre a ficha)" }));
     expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("e");
+  });
+
+  it("o nome do botão do passo é '{passo}: {trabalho} de {nome}', como na Lista: distingue os cartões da mesma pessoa e começa pelo texto visível", () => {
+    mostrar();
+    const duarte = within(coluna("Orçamento")).getAllByRole("button", { name: /de Duarte Melo \(abre a ficha\)$/ });
+    expect(duarte.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Criar a proposta: Cozinha de Duarte Melo (abre a ficha)", "Escolher o orçamento: Sala de Duarte Melo (abre a ficha)",
+    ]);
+    // Um pedido sem trabalho usa "Pedido novo".
+    expect(within(coluna("Por contactar")).getByRole("button", { name: "Registar a chamada: Pedido novo de Ana Lopes (abre a ficha)" })).toBeInTheDocument();
+    for (const b of screen.getAllByRole("button", { name: /\(abre a ficha\)$/ })) {
+      expect(b.getAttribute("aria-label")!.startsWith(b.textContent!)).toBe(true);
+    }
   });
 
   it("o texto do prazo ultrapassado não usa a cor destrutiva (só o ícone), por contraste", () => {
@@ -110,7 +123,7 @@ describe("QuadroPessoas", () => {
   it("o botão do nome leva data-linha-pessoa com o id da pessoa; o do passo deixa o texto quebrar", () => {
     mostrar();
     expect(screen.getByRole("button", { name: "Abrir a ficha de Clara Dias" })).toHaveAttribute("data-linha-pessoa", "c");
-    const passo = screen.getByRole("button", { name: "Fechar o levantamento: Clara Dias" });
+    const passo = screen.getByRole("button", { name: "Fechar o levantamento: Casa de banho de Clara Dias (abre a ficha)" });
     expect(passo.className).toContain("h-auto");
     expect(passo.className).toContain("py-2");
   });

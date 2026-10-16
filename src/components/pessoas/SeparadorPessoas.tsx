@@ -6,6 +6,7 @@ import {
   FILTROS_LOCAIS_INICIAIS, chipValido, contagensChips, contagensTipos, filtrarPessoas, ordenarPessoas, type FiltrosLocais,
 } from "./filtrosPessoas";
 import type { ChipPessoa, FiltrosPessoas, OrdemPessoa, ResumoPessoa, TipoPessoa, VistaPessoas } from "./pessoasTipos";
+import { itensDaPessoa } from "./processo/itensProcesso";
 import { QuadroPessoas } from "./quadro/QuadroPessoas";
 import { COLUNAS_QUADRO, cartoesDoQuadro } from "./quadro/cartoesQuadroPessoas";
 import { TabelaPessoas } from "./TabelaPessoas";
@@ -67,6 +68,10 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
   );
   const opcoes = useMemo(() => opcoesDe(resumos), [resumos]);
   const cartoes = useMemo(() => cartoesDoQuadro(visiveis, hoje), [visiveis, hoje]);
+  // Os itens do processo dos cartões (o mesmo id): é com eles que o botão do passo de cada cartão o executa.
+  const itensDosCartoes = useMemo(
+    () => new Map(visiveis.flatMap((r) => itensDaPessoa(r, hoje)).map((i) => [i.id, i])), [visiveis, hoje],
+  );
 
   const ids = visiveis.map((r) => r.pessoa.id).join("|");
   const avisar = useRef(p.aoMudarVisiveis);
@@ -100,7 +105,7 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
         {vista === "quadro" ? t("pessoasPagina.view.announce.board", { count: COLUNAS_QUADRO.length }) : t("pessoasPagina.view.announce.list")}
       </div>
       {vista === "quadro"
-        ? <QuadroPessoas cartoes={cartoes} hoje={hoje} chip={chip} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />
+        ? <QuadroPessoas cartoes={cartoes} hoje={hoje} chip={chip} itens={itensDosCartoes} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />
         : <TabelaPessoas resumos={visiveis} pendentes={pendentes} hoje={hoje} abertas={abertas} aoAlternar={alternar} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />}
     </div>
   );

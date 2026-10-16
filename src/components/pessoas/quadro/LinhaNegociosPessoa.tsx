@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { textoPrazoPasso } from "../formatoPessoas";
+import { ExplicacaoDoPasso } from "../processo/ExplicacaoDoPasso";
 import { passoDoItem } from "../processo/passosProcesso";
+import { useAcaoDoPasso } from "../processo/processoContexto";
 import type { ItemProcesso } from "../processo/tiposProcesso";
 
 interface LinhaNegociosPessoaProps {
@@ -14,13 +16,14 @@ interface LinhaNegociosPessoaProps {
   nome: string;
   itens: readonly ItemProcesso[];
   hoje: string;
-  /** Abre a ficha da pessoa (nesta fase, o botão do passo só abre a ficha; a Fase 3 passa a executar o passo). */
+  /** Abre a ficha da pessoa: o botão do passo só o faz quando o passo ainda não executa (Fases 4 e 5) ou não há `ProcessoProvider`. */
   aoAbrir: (pessoaId: string) => void;
 }
 
 /** Uma sub-linha: o trabalho e a etiqueta Pedido/Negócio, a fase, o valor, o prazo (se houver) e "A fazer:" com o botão do passo. */
 function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPessoaProps, "itens"> & { item: ItemProcesso }) {
   const { t } = useTranslation();
+  const acao = useAcaoDoPasso(item, () => aoAbrir(pessoaId));
   const passo = t(passoDoItem(item).chave);
   const prazo = textoPrazoPasso(t, item.prazo, hoje);
   const trabalho = item.trabalho ?? t("pessoasPagina.board.request");
@@ -54,14 +57,17 @@ function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPes
       <span className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">{t("pessoasPagina.todo.label")}</span>
         <Button
-          type="button" variant="outline" onClick={() => aoAbrir(pessoaId)}
-          // Começa pelo texto visível (WCAG 2.5.3) e diz de que trabalho é; "(abre a ficha)" sai quando o botão passar a executar o passo (Fase 3).
-          aria-label={t("pessoasPagina.deals.stepLabel", { step: passo, work: trabalho, name: nome })}
+          type="button" variant="outline" onClick={acao.aoClicar} {...acao.atributos}
+          // Começa pelo texto visível (WCAG 2.5.3) e diz de que trabalho é; "(abre a ficha)" só nos passos que ainda não executam (Fases 4 e 5).
+          aria-label={t(acao.executa ? "pessoasPagina.process.stepLabel" : "pessoasPagina.deals.stepLabel", { step: passo, work: trabalho, name: nome })}
           className={cn("h-auto min-h-11 whitespace-normal py-2 text-left motion-reduce:transition-none", FOCO)}
         >
           {passo}
         </Button>
       </span>
+      {acao.bloqueio && acao.idBloqueio && (
+        <div className="basis-full"><ExplicacaoDoPasso id={acao.idBloqueio} texto={acao.bloqueio} /></div>
+      )}
     </li>
   );
 }

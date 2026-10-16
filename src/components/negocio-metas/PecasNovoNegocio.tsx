@@ -7,13 +7,16 @@ export const N = "businessGoals.new.";
 /** Uma opção de lista com alvo de 44 px. */
 export const ITEM = "min-h-11 cursor-pointer";
 
-/** A mensagem de erro de um campo: ícone e texto (a cor nunca é o único sinal), ligada ao campo por aria-describedby. */
+/**
+ * A mensagem de erro de um campo: ícone e texto (a cor nunca é o único sinal), ligada ao campo por aria-describedby. O texto vai em
+ * `text-foreground` (a cor destrutiva em texto pequeno não chega a 4,5:1 de contraste) e a cor fica só no ícone.
+ */
 export function ErroDoCampo({ id, chave }: { id: string; chave: string | undefined }) {
   const { t } = useTranslation();
   if (!chave) return null;
   return (
-    <p id={id} className="flex items-center gap-1.5 text-sm text-destructive">
-      <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+    <p id={id} className="flex items-center gap-1.5 text-sm text-foreground">
+      <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
       {t(`${N}${chave}`)}
     </p>
   );

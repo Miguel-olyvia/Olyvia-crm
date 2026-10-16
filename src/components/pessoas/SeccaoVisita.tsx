@@ -1,6 +1,7 @@
 // "Próxima visita" no Resumo da ficha: o dia da semana, a data, a hora e a MORADA DA VISITA (com a indicação de que é igual à
 // morada da lead ou outra), mais as duas ações: "Visita concluída → Criar negócio" (a única ação principal do bloco) e
-// "Alterar visita". Uma visita cujo dia já passou diz "Visita por concluir". Sem visita, não há bloco.
+// "Alterar visita". Uma visita cujo dia já passou diz "Visita por concluir"; uma já marcada como feita diz "Visita feita" e deixa de
+// se poder alterar (só falta criar o negócio). Sem visita, não há bloco.
 import { useState } from "react";
 import { AlertCircle, CalendarClock, MapPin } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -50,8 +51,10 @@ export function SeccaoProximaVisita({ pessoa, visita, hoje, alterarVisita, aoCri
   const [aAlterar, setAAlterar] = useState(false);
   const quando = useQuando(visita.data, visita.hora);
   const porConcluir = visita.estado === "porConcluir";
+  // Uma visita feita já aconteceu: não se altera (o dia, a hora e a morada já não mudam nada) e só falta criar o negócio.
+  const feita = visita.estado === "feita";
   return (
-    <Seccao titulo={t(`${K}${porConcluir ? "titleOverdue" : "title"}`)} marca={<MarcaExemplo />}>
+    <Seccao titulo={t(`${K}${feita ? "titleDone" : porConcluir ? "titleOverdue" : "title"}`)} marca={<MarcaExemplo />}>
       <div className="space-y-2">
         <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
           <CalendarClock className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -76,14 +79,18 @@ export function SeccaoProximaVisita({ pessoa, visita, hoje, alterarVisita, aoCri
         </ListaCampos>
         <div className="flex flex-wrap gap-2 pt-1">
           <Button type="button" className={cn("min-h-11", FOCO)} onClick={aoCriarNegocio}>{t(`${K}done`)}</Button>
-          <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={() => setAAlterar(true)}>{t(`${K}change`)}</Button>
+          {!feita && (
+            <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={() => setAAlterar(true)}>{t(`${K}change`)}</Button>
+          )}
         </div>
-        <p className="text-sm text-muted-foreground">{t(`${K}doneHint`)}</p>
+        <p className="text-sm text-muted-foreground">{t(`${K}${feita ? "doneHintDone" : "doneHint"}`)}</p>
       </div>
-      <AlterarVisita
-        aberto={aAlterar} aoMudarAberto={setAAlterar} pessoa={pessoa} visita={visita} hoje={hoje}
-        aoGuardar={(dados) => alterarVisita(pessoa.id, dados)}
-      />
+      {!feita && (
+        <AlterarVisita
+          aberto={aAlterar} aoMudarAberto={setAAlterar} pessoa={pessoa} visita={visita} hoje={hoje}
+          aoGuardar={(dados) => alterarVisita(pessoa.id, dados)}
+        />
+      )}
     </Seccao>
   );
 }

@@ -7,7 +7,7 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { FormularioNovoNegocio } from "./FormularioNovoNegocio";
 import { FOCO } from "./estilos";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
-import type { DadosCriarNegocio, PessoaOpcao, ValoresIniciaisNegocio } from "./novoNegocio";
+import type { AbaNovoNegocio, DadosCriarNegocio, PessoaOpcao, RascunhoLevantamento, ValoresIniciaisNegocio } from "./novoNegocio";
 
 interface NovoNegocioDialogoProps {
   /** As pessoas a escolher; a página monta a lista (esta pasta não importa de Pessoas). */
@@ -23,10 +23,32 @@ interface NovoNegocioDialogoProps {
   pessoaInicialId?: string;
   /** O que já vem preenchido ao abrir (a visita concluída de uma pessoa: comercial, aba Visita e morada da obra). */
   valoresIniciais?: ValoresIniciaisNegocio;
+  /** A aba com que o painel abre (por omissão a Geral): o "A fazer" do levantamento abre na Visita. */
+  abaInicial?: AbaNovoNegocio;
+  /**
+   * Com isto o rodapé ganha um botão que guarda o levantamento e fecha o painel, sem criar o negócio. `aoGuardar` devolve
+   * `false` quando não pôde guardar: então o painel fica aberto, com o que se escreveu.
+   */
+  guardarLevantamento?: {
+    texto: string;
+    aoGuardar: (rascunho: RascunhoLevantamento) => boolean;
+    /** Porque é que o último `aoGuardar` não guardou: aparece dentro do painel, como alerta (o toast e a região live ficam fora do modal). */
+    motivo?: string | null;
+  };
+  /** O título do painel (por omissão "Novo negócio"): um passo do "A fazer" diz o que se faz, por exemplo "Levantamento de Ana". */
+  titulo?: string;
+  /** A descrição do painel (por omissão a de "Novo negócio"). */
+  descricao?: string;
+  /**
+   * Chamado ao fechar o painel (cancelando ou criando): devolve o foco a quem o abriu e diz se o fez. Sem isto, o foco volta
+   * ao botão "Novo negócio" (se o painel o tiver); com ele a quem chama cabe decidir, porque o botão que abriu o painel
+   * pode já não existir.
+   */
+  aoDevolverFoco?: () => boolean;
 }
 
 /** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
-function CabecalhoNovo() {
+function CabecalhoNovo({ titulo, descricao }: Pick<NovoNegocioDialogoProps, "titulo" | "descricao">) {
   const { t } = useTranslation();
   return (
     <SheetHeader className="space-y-2 border-b border-border p-6 text-left">
@@ -45,13 +67,13 @@ function CabecalhoNovo() {
         </SheetClose>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <SheetTitle className="text-lg">{t("businessGoals.new.title")}</SheetTitle>
+        <SheetTitle className="text-lg">{titulo ?? t("businessGoals.new.title")}</SheetTitle>
         <span className="inline-flex items-center gap-1 rounded-sm border border-primary px-1.5 py-0.5 text-xs font-semibold text-primary dark:text-violet-300">
           <Sparkles className="h-3 w-3" aria-hidden="true" />
           {t("businessGoals.new.badge")}
         </span>
       </div>
-      <SheetDescription>{t("businessGoals.new.description")}</SheetDescription>
+      <SheetDescription>{descricao ?? t("businessGoals.new.description")}</SheetDescription>
     </SheetHeader>
   );
 }
@@ -64,7 +86,8 @@ function CabecalhoNovo() {
  * abre o painel do novo negócio e leva lá o foco. Só exemplo: nada é gravado.
  */
 export function NovoNegocioDialogo({
-  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais,
+  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, guardarLevantamento,
+  aoDevolverFoco, titulo, descricao,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -72,6 +95,7 @@ export function NovoNegocioDialogo({
   const setAberto = (valor: boolean) => { setAbertoProprio(valor); aoMudarAberto?.(valor); };
   const botao = useRef<HTMLButtonElement>(null);
   const primeiroCampo = useRef<HTMLButtonElement>(null);
+  const conteudo = useRef<HTMLDivElement>(null);
   const criou = useRef(false);
   const sujo = useRef(false);
 
@@ -86,6 +110,24 @@ export function NovoNegocioDialogo({
     aoCriar(dados);
   };
 
+  const guardar = guardarLevantamento && {
+    texto: guardarLevantamento.texto,
+    motivo: guardarLevantamento.motivo,
+    aoGuardar: (rascunho: RascunhoLevantamento) => { if (guardarLevantamento.aoGuardar(rascunho)) setAberto(false); },
+  };
+
+  // Ao abrir, o foco vai para o primeiro campo da aba Geral; noutra aba (a Visita, no "A fazer") vai para a aba escolhida.
+  const focarAoAbrir = (e: Event) => {
+    e.preventDefault();
+    (primeiroCampo.current ?? conteudo.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus();
+  };
+  const devolverFoco = (e: Event) => {
+    e.preventDefault();
+    const tratado = aoDevolverFoco?.() === true;
+    if (!tratado && !criou.current) botao.current?.focus();
+    criou.current = false;
+  };
+
   return (
     <>
       {!semBotao && (
@@ -96,18 +138,15 @@ export function NovoNegocioDialogo({
       )}
       <Sheet open={aberto} onOpenChange={mudarAberto}>
         <SheetContent
-          onOpenAutoFocus={(e) => { e.preventDefault(); primeiroCampo.current?.focus(); }}
+          ref={conteudo} onOpenAutoFocus={focarAoAbrir}
           onInteractOutside={(e) => { if (sujo.current) e.preventDefault(); }}
-          onCloseAutoFocus={(e) => {
-            e.preventDefault();
-            if (!criou.current) botao.current?.focus();
-            criou.current = false;
-          }}
+          onCloseAutoFocus={devolverFoco}
           className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
         >
-          <CabecalhoNovo />
+          <CabecalhoNovo titulo={titulo} descricao={descricao} />
           <FormularioNovoNegocio
             pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
+            abaInicial={abaInicial} guardarLevantamento={guardar}
             aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
           />
         </SheetContent>

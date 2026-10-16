@@ -45,6 +45,14 @@ export function estaAtrasada({ pessoa, papel, abertos }: EntradaEtapa, hoje: str
   return !!pessoa.proximoContacto && pessoa.proximoContacto < hoje;
 }
 
+/**
+ * Os passos da coluna "Próximo passo". Um id tem sempre o mesmo texto ("Fazer o levantamento"), mas "fazerLevantamento" quer dizer
+ * duas coisas, e a divergência mantém-se de propósito (os ids do "A fazer", em `processo/tiposProcesso.ts`, são outros):
+ * - num negócio sem orçamentos é, no "A fazer", "criarOrcamento" (o negócio já existe);
+ * - num pedido com a visita já feita (ver `marcarVisitaFeita`) a coluna não tem "Criar o negócio": diz "fazerLevantamento" e o
+ *   "A fazer" distingue "fazerLevantamento" (sem linhas guardadas) de "criarNegocio" (com pelo menos uma).
+ * `passosProcesso.test.ts` ("coerência com a coluna") fixa estes casos com exatidão.
+ */
 export type IdPasso =
   | "registarChamada" | "marcarVisita" | "fecharLevantamento" | "fazerLevantamento" | "escolherOrcamento"
   | "criarProposta" | "enviarProposta" | "esperarCliente" | "recolherAssinatura" | "nenhum";
@@ -76,7 +84,8 @@ export function proximoPasso(r: Pick<ResumoPessoa, "pessoa" | "papel" | "abertos
   if (r.pessoa.perdida) return { id: "nenhum", prazo: null };
   const foco = negocioEmFoco(r.abertos);
   if (foco) return { id: passoDoNegocio(foco), prazo: foco.proximoPrazo };
-  const id = PASSO_DA_ETAPA[r.etapa];
+  // Com a visita já feita (ver `marcarVisitaFeita`) o que falta é o levantamento; a coluna não tem "Criar o negócio".
+  const id = r.etapa === "visitaMarcada" && r.pessoa.visita?.feita ? "fazerLevantamento" : PASSO_DA_ETAPA[r.etapa];
   return id ? { id, prazo: r.pessoa.proximoContacto ?? null } : { id: "nenhum", prazo: null };
 }
 

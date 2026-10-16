@@ -7,6 +7,7 @@ import type {
 import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 import { temLevantamento, validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
+import type { Respostas } from "./perguntasTipos";
 
 /** Uma pessoa a escolher no formulário. A página monta a lista (Negócio e metas não importa de Pessoas). */
 export interface PessoaOpcao {
@@ -55,6 +56,13 @@ export const COMERCIAL_POR_OMISSAO: string = COMERCIAIS_EXEMPLO[0];
 /** O primeiro prazo de um negócio novo: levantamento daqui a 2 dias. */
 export const DIAS_ATE_PRIMEIRO_PRAZO = 2;
 
+/** O levantamento a meio, guardado sem criar o negócio: o que o formulário precisa para voltar a abrir como estava. */
+export interface RascunhoLevantamento {
+  linhas: LevantamentoForm["linhas"];
+  observacoes: string;
+  respostas: Respostas;
+}
+
 /**
  * O que o painel "Novo negócio" já traz preenchido quando a página o abre a partir de outro sítio (hoje, a visita
  * concluída de uma pessoa). Tudo opcional; sem isto o painel abre como sempre.
@@ -62,6 +70,8 @@ export const DIAS_ATE_PRIMEIRO_PRAZO = 2;
 export interface ValoresIniciaisNegocio {
   pessoaId?: string;
   comercial?: string;
+  /** O levantamento já guardado (as linhas, as observações e as respostas das secções da visita); o formulário abre com ele. */
+  levantamento?: RascunhoLevantamento;
   /** A aba Visita: o dia, quem fez e o estado do levantamento, e a morada da obra, que vem da visita. */
   visita?: {
     data: string;

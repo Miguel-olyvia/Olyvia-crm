@@ -11,12 +11,15 @@ export const idPainelNegocios = (pessoaId: string): string => `negocios-${pessoa
 
 function itemDoCartao(c: CartaoQuadro, r: ResumoPessoa, hoje: string): ItemProcesso {
   const negocio: NegocioMes | undefined = r.abertos.find((n) => n.id === c.id);
-  // Um pedido numa visita sem próximo contacto mostra a data da visita como prazo (o texto do item diz quando é).
-  const prazo = c.prazo ?? (c.coluna === "visita" ? r.pessoa.visita?.data ?? null : null);
+  const visita = negocio ? undefined : r.pessoa.visita;
+  const visitaFeita = visita?.feita === true;
+  // Um pedido numa visita por fazer e sem próximo contacto mostra a data da visita como prazo (o texto do item diz quando é).
+  const prazo = c.prazo ?? (c.coluna === "visita" && !visitaFeita ? visita?.data ?? null : null);
   return {
     id: c.id, pessoaId: c.pessoaId, tipo: negocio ? "negocio" : "pedido", fase: c.coluna, trabalho: c.trabalho, valor: c.valor,
     prazo, atrasado: prazo !== null && prazo < hoje, orcamentos: negocio?.orcamentos.length ?? 0,
     orcamentoEscolhido: negocio?.orcamentos.some((o) => o.escolhido) ?? false, propostaRascunho: negocio?.proposta?.estado === "rascunho",
+    visitaFeita, levantamentoLinhas: visita?.levantamento?.linhas.length ?? 0,
   };
 }
 

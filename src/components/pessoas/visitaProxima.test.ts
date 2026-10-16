@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { novaLinha } from "@/components/negocio-metas/levantamento";
 import { MORADA_VISITA_VAZIA } from "./moradaVisita";
 import { PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import type { Pessoa, VisitaPessoa } from "./pessoasTipos";
@@ -35,6 +36,10 @@ describe("proximaVisita", () => {
     const sem = proximaVisita(pessoa({ etapa: "visitaMarcada", proximoContacto: "2026-10-15", morada: undefined }), "visitaMarcada", HOJE);
     expect(sem).toMatchObject({ igualALead: false, moradaVisita: MORADA_VISITA_VAZIA });
   });
+  it("uma visita feita fica «feita», mesmo com o dia já passado (não está «por concluir»)", () => {
+    expect(proximaVisita(pessoa({ visita: visita({ data: "2026-10-12", feita: true }) }), "visitaMarcada", HOJE)?.estado).toBe("feita");
+    expect(proximaVisita(pessoa({ visita: visita({ data: "2026-10-20", feita: true }) }), "visitaMarcada", HOJE)?.estado).toBe("feita");
+  });
   it("visitaDaPessoa dá a visita sem estado", () => {
     expect(visitaDaPessoa(pessoa({ visita: visita() }), "visitaMarcada")).toEqual(visita());
     expect(visitaDaPessoa(pessoa(), "emContacto")).toBeNull();
@@ -65,6 +70,17 @@ describe("valoresIniciaisDaVisita", () => {
   it("visita igual à da lead: a origem diz igual e a morada da obra é a da lead", () => {
     const v = valoresIniciaisDaVisita(pessoa(), visita({ igualALead: true, moradaVisita: { rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" } }));
     expect(v.visita).toMatchObject({ igualALead: true, moradaObra: { rua: "Rua A 1", codigoPostal: "1000-001" } });
+  });
+  it("leva o levantamento guardado (linhas, observações e respostas) e a visita continua «Feita»", () => {
+    const levantamento = {
+      linhas: [{ ...novaLinha("l1"), divisao: "cozinha", trabalho: "bancada", medida: "3.5" }], observacoes: "Parede com humidade", respostas: { p1: "sim" },
+    };
+    const v = valoresIniciaisDaVisita(pessoa(), visita({ feita: true, levantamento }));
+    expect(v.levantamento).toEqual(levantamento);
+    expect(v.visita?.estado).toBe("feito");
+  });
+  it("sem levantamento guardado, não traz a chave (o formulário abre vazio)", () => {
+    expect(valoresIniciaisDaVisita(pessoa(), visita())).not.toHaveProperty("levantamento");
   });
   it("não partilha o objeto da morada com a visita (copiar, não referir)", () => {
     const vis = visita();

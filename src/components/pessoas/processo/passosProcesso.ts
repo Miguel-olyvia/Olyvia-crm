@@ -5,15 +5,23 @@ export { PASSOS_PROCESSO };
 
 const doPasso = (id: PassoProcesso): PassoDoItem => ({ id, chave: `pessoasPagina.todo.step.${id}` });
 
-/** O passo de um pedido, pela fase em que está (Por contactar, Contactado ou Visita). */
+/** Os passos que o botão já executa (Fase 3); os outros continuam a abrir a ficha até às Fases 4 e 5. */
+export const PASSOS_EXECUTAVEIS = ["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"] as const;
+
+export type PassoExecutavel = (typeof PASSOS_EXECUTAVEIS)[number];
+
+export const ehExecutavel = (passo: PassoProcesso): passo is PassoExecutavel => (PASSOS_EXECUTAVEIS as readonly string[]).includes(passo);
+
+/**
+ * O passo de um pedido, pela fase em que está (Por contactar, Contactado ou Visita). Na fase Visita por fazer pede SEMPRE
+ * "marcar a visita como feita" (no passado, hoje, no futuro ou sem data: a data não decide nada, sai no prazo do item).
+ * Com a visita feita pede o levantamento e, com pelo menos uma linha de medidas guardada, criar o negócio.
+ */
 function passoDoPedido(item: ItemProcesso): PassoProcesso {
   if (item.fase === "porContactar") return "registarChamada";
   if (item.fase === "contactado") return "marcarVisita";
-  // Um pedido na fase Visita pede SEMPRE "marcar a visita como feita": no passado, hoje, no futuro ou sem data (como o
-  // protótipo, que mostra "Marcar a visita como feita · visita na sexta"; a data da visita sai no prazo do item). A data
-  // não decide nada porque a `VisitaPessoa` ainda não tem estado "feita". `fazerLevantamento` só ganha regra na Fase 3,
-  // quando a visita puder estar feita; `criarNegocio` entra depois do levantamento.
-  return "marcarVisitaFeita";
+  if (!item.visitaFeita) return "marcarVisitaFeita";
+  return item.levantamentoLinhas > 0 ? "criarNegocio" : "fazerLevantamento";
 }
 
 /**
