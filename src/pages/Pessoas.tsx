@@ -129,8 +129,8 @@ const Pessoas = () => {
             <h2 className="sr-only">{t("pessoasPagina.tabs.people")}</h2>
             <SeparadorPessoas
               resumos={estado.resumos} pendentes={estado.pendentes} tipo={estado.prefs.tipo} chip={estado.prefs.chip}
-              ordem={estado.prefs.ordem} comVoltou={podeVer} aoMudarTipo={estado.mudarTipo} aoMudarChip={estado.mudarChip}
-              aoMudarOrdem={estado.mudarOrdem} aoAbrir={url.abrir} aoMudarVisiveis={setVisiveis}
+              ordem={estado.prefs.ordem} vista={estado.prefs.vista} hoje={HOJE_EXEMPLO} comVoltou={podeVer} aoMudarTipo={estado.mudarTipo} aoMudarChip={estado.mudarChip}
+              aoMudarOrdem={estado.mudarOrdem} aoMudarVista={estado.mudarVista} aoAbrir={url.abrir} aoMudarVisiveis={setVisiveis}
             />
           </TabsContent>
           <TabsContent value="submissoes" className="mt-0">

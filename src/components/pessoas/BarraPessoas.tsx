@@ -6,12 +6,14 @@ import { Input } from "@/components/ui/input";
 import { FOCO, chip } from "@/components/negocio-metas/estilos";
 import { AjudaAtalhosPessoas } from "./AjudaAtalhosPessoas";
 import { PopoverFiltros, type OpcoesFiltros } from "./PopoverFiltros";
+import { SeletorVista } from "./quadro/SeletorVista";
 import { TIPOS, chipsDoTipo } from "./filtrosPessoas";
-import type { ChipPessoa, FiltrosPessoas as Filtros, OrdemPessoa, TipoPessoa } from "./pessoasTipos";
+import type { ChipPessoa, FiltrosPessoas as Filtros, OrdemPessoa, TipoPessoa, VistaPessoas } from "./pessoasTipos";
 
 export interface BarraPessoasProps {
   filtros: Filtros;
   ordem: OrdemPessoa;
+  vista: VistaPessoas;
   contagensTipo: Record<TipoPessoa, number>;
   contagensChip: Record<ChipPessoa, number>;
   total: number;
@@ -25,6 +27,7 @@ export interface BarraPessoasProps {
   aoMudarTipo: (tipo: TipoPessoa) => void;
   aoMudarChip: (chip: ChipPessoa) => void;
   aoMudarOrdem: (ordem: OrdemPessoa) => void;
+  aoMudarVista: (vista: VistaPessoas) => void;
   aoLimpar: () => void;
 }
 
@@ -65,6 +68,7 @@ function LinhaPesquisa(p: BarraPessoasProps) {
         />
       </div>
       <SeletorTipo tipo={p.filtros.tipo} contagens={p.contagensTipo} aoMudar={p.aoMudarTipo} />
+      <SeletorVista vista={p.vista} aoMudar={p.aoMudarVista} />
       <PopoverFiltros
         filtros={p.filtros} ordem={p.ordem} opcoes={p.opcoes} comVoltou={p.comVoltou} aoMudar={p.aoMudar}
         aoMudarChip={p.aoMudarChip} aoMudarOrdem={p.aoMudarOrdem} aoLimpar={p.aoLimpar}

@@ -1,7 +1,7 @@
 // Filtros, contagens e ordenação da lista de pessoas. Funções puras.
 import { ORDEM_SAUDE } from "@/components/negocio-metas/saudeNegocio";
 import type {
-  ChipPessoa, FiltrosPessoas, OrdemPessoa, Pessoa, ResultadoOuNenhum, ResumoPessoa, TipoPessoa,
+  ChipPessoa, FiltrosPessoas, OrdemPessoa, Pessoa, ResultadoOuNenhum, ResumoPessoa, TipoPessoa, VistaPessoas,
 } from "./pessoasTipos";
 
 /** "Sem contacto há N dias": há 7 ou mais dias sem contacto. */
@@ -16,6 +16,7 @@ export const FORMULARIO_MANUAL = "__manual__";
 export const TIPOS: readonly TipoPessoa[] = ["leads", "clientes", "todos"];
 export const CHIPS: readonly ChipPessoa[] = ["todas", "porContactar", "atrasadas", "perdidas"];
 export const ORDENS: readonly OrdemPessoa[] = ["urgencia", "recentes", "valor"];
+export const VISTAS: readonly VistaPessoas[] = ["lista", "quadro"];
 /** O que a lista só filtra nesta visita (não se guarda): a pesquisa, "Só as minhas" e os filtros do popover. */
 export type FiltrosLocais = Omit<FiltrosPessoas, "tipo" | "chip">;
 export const FILTROS_LOCAIS_INICIAIS: FiltrosLocais = {

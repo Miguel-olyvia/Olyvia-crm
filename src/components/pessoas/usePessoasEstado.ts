@@ -1,5 +1,5 @@
 // O estado local da página "Pessoas": as pessoas, as pendentes, as notas e a atividade vivem só em memória (nada
-// persiste, ao recarregar volta tudo ao exemplo) e as preferências de tipo, chip e ordem em localStorage.
+// persiste, ao recarregar volta tudo ao exemplo) e as preferências de tipo, chip, ordem e vista em localStorage.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { adiar, juntarNota, perder, reativar, registarChamada, type ContextoPerda, type DadosChamada } from "./acoesPessoa";
@@ -11,7 +11,7 @@ import { chipValido } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
 import { PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import { guardarPrefsPessoas, lerPrefsPessoas, type PreferenciasPessoas } from "./preferenciasPessoas";
-import type { ChipPessoa, EstadoPessoas, MotivoPerda, OrdemPessoa, TipoPessoa } from "./pessoasTipos";
+import type { ChipPessoa, EstadoPessoas, MotivoPerda, OrdemPessoa, TipoPessoa, VistaPessoas } from "./pessoasTipos";
 import { pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
 
 /** O estado de partida: o exemplo e as leads criadas até agora (que sobrevivem à navegação, ver `pessoasNovas.ts`). */
@@ -82,6 +82,7 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
   /** A visita acabou e o negócio foi criado a partir dela: sai da ficha e fica registado na atividade. */
   const concluirVisitaFeita = useCallback((id: string) => setEstado((atual) => concluirVisita(atual, id, HOJE_EXEMPLO)), []);
   const mudarOrdem = useCallback((ordem: OrdemPessoa) => setPrefs((p) => ({ ...p, ordem })), []);
+  const mudarVista = useCallback((vista: VistaPessoas) => setPrefs((p) => ({ ...p, vista })), []);
   const mudarChip = useCallback((chip: ChipPessoa) => setPrefs((p) => ({ ...p, chip })), []);
   const mudarTipo = useCallback((tipo: TipoPessoa) => setPrefs((p) => ({ ...p, tipo, chip: chipValido(tipo, p.chip) })), []);
 
@@ -89,6 +90,6 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
     resumos, submissoes, notas, pendentes, atividade: estado.atividade, prefs: prefsEfetivas, resolver,
     registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual, criarLead, marcarVisita: marcarVisitaPedida,
     alterarVisita: alterarVisitaMarcada, concluirVisita: concluirVisitaFeita,
-    mudarOrdem, mudarChip, mudarTipo,
+    mudarOrdem, mudarChip, mudarTipo, mudarVista,
   };
 }

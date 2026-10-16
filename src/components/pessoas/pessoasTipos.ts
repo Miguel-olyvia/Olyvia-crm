@@ -190,6 +190,8 @@ export interface EstadoPessoas {
 export type TipoPessoa = "leads" | "clientes" | "todos";
 export type ChipPessoa = "todas" | "porContactar" | "atrasadas" | "perdidas";
 export type OrdemPessoa = "urgencia" | "recentes" | "valor";
+/** A vista da página: a tabela ("lista") ou o quadro por 6 fases. */
+export type VistaPessoas = "lista" | "quadro";
 
 /** Os filtros da lista; `comercial`, `formulario` e `resultado` vazios querem dizer "todos". */
 export interface FiltrosPessoas {
