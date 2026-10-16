@@ -857,3 +857,141 @@ describe("usePessoas", () => {
     expect(resultado?.falhas.map((x) => x.seccao)).toEqual(["retribuicao"]);
   });
 });
+
+// -- Os extras do painel «Nova pessoa» --------------------------------------------------------------------------------
+// Campos opcionais do payload (retrocompatíveis: sem eles, nada muda). Cada um tem coluna real na base e grava-se pela
+// mesma lógica de falhas por secção: uma falha NÃO desfaz a ficha nem leva os outros satélites atrás.
+describe("usePessoas.criarPessoa: extras do painel «Nova pessoa»", () => {
+  const SAUDE = {
+    incapacidade_percentagem: 60,
+    incapacidade_comprovativo_valido_ate: "2027-01-01",
+    necessidades_adaptacao: "rampa",
+    observacoes: null,
+  };
+  const SINDICALIZACAO = { sindicalizado: true, sindicato: "SINTAP", quota_percentagem: 1.5 };
+  const BASE = {
+    pessoa_id: "pessoa-nova",
+    organization_id: ORG_ACTIVA,
+    created_by: "autor-1",
+    updated_by: "autor-1",
+  };
+
+  beforeEach(() => {
+    filtros = {};
+    isNulos = {};
+    inserts = {};
+    VINCULOS = [...VINCULOS_BASE];
+    chamadasRpc = [];
+    rpcImpl = () => Promise.resolve({ data: null, error: null });
+    falharVinculos = false;
+    ordem = [];
+    falharInsert = {};
+    captureFlowError.mockReset();
+  });
+
+  async function criar(payload: NovaPessoaPayload) {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+    await act(async () => {
+      resultado = await result.current.criarPessoa(payload);
+    });
+    return resultado!;
+  }
+
+  it("a saúde grava-se em pessoas_dados_saude, com a base do satélite (pessoa, organização e autor)", async () => {
+    const r = await criar(payloadMinimo({ saude: SAUDE }));
+    expect(inserts.pessoas_dados_saude).toEqual([{ ...BASE, ...SAUDE }]);
+    expect(r.falhas).toEqual([]);
+  });
+
+  it("a sindicalização grava-se em pessoas_sindicalizacao, com a base do satélite", async () => {
+    const r = await criar(payloadMinimo({ sindicalizacao: SINDICALIZACAO }));
+    expect(inserts.pessoas_sindicalizacao).toEqual([{ ...BASE, ...SINDICALIZACAO }]);
+    expect(r.falhas).toEqual([]);
+  });
+
+  it("a categoria, a categoria profissional, o renovável e a isenção entram no INSERT do vínculo", async () => {
+    const extra = { categoria_funcao: "tecnica_confianca", categoria_profissional: "Técnico", renovavel: true, isencao_horario: true };
+    await criar(
+      payloadMinimo({
+        vinculo: { tipo_contrato: "termo_certo", data_inicio: "2026-02-01" },
+        vinculoExtra: extra,
+      }),
+    );
+    expect(inserts.pessoas_vinculos).toHaveLength(1);
+    expect(inserts.pessoas_vinculos[0]).toMatchObject({
+      pessoa_id: "pessoa-nova",
+      tipo_contrato: "termo_certo",
+      data_inicio: "2026-02-01",
+      ...extra,
+    });
+  });
+
+  it("sem extras no payload, não toca em saúde nem sindicalização e o vínculo fica como estava", async () => {
+    await criar(payloadMinimo({ vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" } }));
+    expect(inserts.pessoas_dados_saude ?? []).toHaveLength(0);
+    expect(inserts.pessoas_sindicalizacao ?? []).toHaveLength(0);
+    expect(Object.keys(inserts.pessoas_vinculos[0] as object)).not.toContain("categoria_funcao");
+    expect(ordem.filter((o) => o.includes("saude") || o.includes("sindicalizacao"))).toEqual([]);
+  });
+
+  it("saúde recusada: a ficha fica criada, o resto segue e a falha volta em 'saude'", async () => {
+    falharInsert = { pessoas_dados_saude: { message: "permission denied", code: "42501" } };
+    const r = await criar(
+      payloadMinimo({
+        saude: SAUDE,
+        sindicalizacao: SINDICALIZACAO,
+        vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" },
+      }),
+    );
+    expect(r.id).toBe("pessoa-nova");
+    expect(r.falhas.map((f) => f.seccao)).toEqual(["saude"]);
+    expect(inserts.pessoas_sindicalizacao).toHaveLength(1);
+    expect(inserts.pessoas_vinculos).toHaveLength(1);
+    expect(captureFlowError).not.toHaveBeenCalled();
+  });
+
+  it("sindicalização recusada: a ficha fica criada e a falha volta em 'sindicalizacao'", async () => {
+    falharInsert = { pessoas_sindicalizacao: { message: "permission denied", code: "42501" } };
+    const r = await criar(payloadMinimo({ saude: SAUDE, sindicalizacao: SINDICALIZACAO }));
+    expect(r.id).toBe("pessoa-nova");
+    expect(r.falhas.map((f) => f.seccao)).toEqual(["sindicalizacao"]);
+    expect(inserts.pessoas_dados_saude).toHaveLength(1);
+  });
+
+  it("a agência segue como p_agencia em rpc_hr_definir_conta, e só quando existe", async () => {
+    await criar(
+      payloadMinimo({
+        conta: { formato: "iban", numero: "PT50000201231234567890154", swift: null, titular: null, banco: null, agencia: "0123" },
+      }),
+    );
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_conta")?.args).toEqual({
+      p_pessoa_id: "pessoa-nova",
+      p_formato: "iban",
+      p_conta: "PT50000201231234567890154",
+      p_titular: null,
+      p_banco: null,
+      p_swift: null,
+      p_agencia: "0123",
+    });
+    chamadasRpc = [];
+    await criar(
+      payloadMinimo({ conta: { formato: "iban", numero: "PT50000201231234567890154", swift: null, titular: null, banco: null } }),
+    );
+    expect(Object.keys(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_conta")?.args as object)).not.toContain("p_agencia");
+  });
+
+  it("o contacto de emergência leva o telefone alternativo e o e-mail no INSERT", async () => {
+    await criar(
+      payloadMinimo({
+        emergencia: { nome: "Rui", telefone: "+351912345678", telefone_alternativo: "+351922222222", email: "rui@x.pt", ordem: 1 },
+      }),
+    );
+    expect(inserts.pessoas_contactos_emergencia[0]).toMatchObject({
+      nome: "Rui",
+      telefone_alternativo: "+351922222222",
+      email: "rui@x.pt",
+    });
+  });
+});

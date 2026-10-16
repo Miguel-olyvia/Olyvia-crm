@@ -772,23 +772,118 @@ export interface PessoaSindicalizacao {
 }
 
 /**
- * O convite de admissao (`pessoas_convites_admissao`, 20261124120000).
- *
- * NUNCA traz `token_hash` nem `rascunho`: sao as duas colunas excluidas do
- * `GRANT SELECT` da migration -- a segunda porque pode conter, a meio do
- * preenchimento, a resposta de sindicalizacao. Ler estes dois campos por aqui
- * nao e um esquecimento do tipo; e a mesma garantia que a base impoe.
+ * Os 11 estados da admissao (CHECK `pessoas_convites_admissao_estado_valido`,
+ * 20261210420000). `terminado` NAO e um estado da tabela: e a mascara que
+ * `rpc_hr_convite_admissao_resumo` devolve a quem nao tem
+ * `hr.onboarding.restrito` quando o processo esta cancelado ou rejeitado.
  */
-export interface PessoaConviteAdmissao {
-  id: string;
+export type EstadoAdmissaoBase =
+  | "convidada"
+  | "em_preenchimento"
+  | "submetida"
+  | "devolvida"
+  | "aprovada"
+  | "a_aguardar_assinaturas"
+  | "assinaturas_concluidas"
+  | "a_aguardar_ativacao"
+  | "concluida"
+  | "rejeitada"
+  | "cancelada";
+
+/** O que o ecra conhece: os 11, a mascara `terminado` e `desconhecido` (valor que a V2 nao devolve). */
+export type EstadoAdmissao = EstadoAdmissaoBase | "terminado" | "desconhecido";
+
+/** O estado do portal, derivado na base: encerrado, revogado, expirado ou ativo. */
+export type EstadoPortalConvite = "ativo" | "expirado" | "revogado" | "encerrado" | "desconhecido";
+
+/**
+ * O que `rpc_hr_convite_admissao_resumo(p_pessoa_id)` devolve (jsonb). E a UNICA
+ * leitura do convite para o RH: `authenticated` ja nao le a tabela
+ * `pessoas_convites_admissao` (sem SELECT em nenhuma coluna). Nunca traz
+ * `token_hash`, rascunho, IP, user-agent, motivos internos, devolucao, sessao
+ * nem OTP. Mascarado (`estado: "terminado"`) so traz `existe`, `convite_id`,
+ * `estado` e `estado_portal`.
+ */
+export interface ConviteAdmissaoResumoRpc {
+  existe: boolean;
+  convite_id?: string;
+  estado?: EstadoAdmissaoBase | "terminado";
+  estado_portal?: Exclude<EstadoPortalConvite, "desconhecido">;
+  email_destino?: string | null;
+  criado_em?: string;
+  valid_until?: string;
+  portal_encerrado_em?: string | null;
+  cancelada_em?: string | null;
+  rejeitada_em?: string | null;
+  email_enviado?: boolean | null;
+  email_enviado_em?: string | null;
+  email_erro?: string | null;
+  aberturas_falhadas?: number;
+  bloqueado?: boolean;
+  usado_em?: string | null;
+  assinatura_nome?: string | null;
+  tem_rascunho?: boolean;
+  ultima_recusa?: { codigo: string | null; em: string | null; campos: string[] } | null;
+  tem_conflitos?: boolean;
+}
+
+/**
+ * `rpc_hr_admissao_listar(p_organization_id, p_estados, p_limite, p_apos_criado_em, p_apos_id)` (V3a, 20261210430000).
+ * Cada item e metadados; para quem nao tem `hr.onboarding.restrito`, um processo cancelado ou rejeitado traz so
+ * `convite_id, pessoa_id, nome, cargo, estado: "terminado"` e `estado_portal: "revogado"`. `contadores` nao depende do filtro
+ * nem do cursor (com `terminado` fundido para quem nao tem restrito). `seguinte` e `null` quando nao ha mais paginas.
+ */
+export interface AdmissaoListarRpc {
+  itens: Array<{
+    convite_id: string;
+    pessoa_id: string;
+    nome: string;
+    cargo: string | null;
+    estado: EstadoAdmissaoBase | "terminado";
+    estado_portal: Exclude<EstadoPortalConvite, "desconhecido">;
+    valid_until?: string;
+    submetido_em?: string | null;
+    devolvida_em?: string | null;
+    atualizado_em?: string;
+  }>;
+  contadores: Record<string, number>;
+  seguinte: { apos_criado_em: string; apos_id: string } | null;
+}
+
+/**
+ * `rpc_hr_admissao_rever_ler(p_organization_id, p_convite_id)` (V3a): o resumo mais `campos`, `anexos`, `devolucao` e
+ * `pendencias`. Num processo cancelado ou rejeitado os quatro vem vazios. Nunca traz o valor do NISS nem do IBAN.
+ */
+export interface AdmissaoReverLerRpc {
+  convite_id: string;
   pessoa_id: string;
-  organization_id: string;
-  email_destino: string;
+  estado: EstadoAdmissaoBase;
+  estado_portal: Exclude<EstadoPortalConvite, "desconhecido">;
   valid_until: string;
-  used_at: string | null;
-  revoked_at: string | null;
-  attempts: number;
-  created_at: string;
+  submetido_em: string | null;
+  cancelada_em: string | null;
+  rejeitada_em: string | null;
+  niss: { preenchido: boolean };
+  iban: { preenchido: boolean };
+  eventos: Array<{
+    acao: string;
+    ator_tipo: "rh" | "pessoa" | "sistema";
+    estado_anterior: EstadoAdmissaoBase | null;
+    estado_posterior: EstadoAdmissaoBase | null;
+    criado_em: string;
+  }>;
+  /** `visivel: false` (valores `null`) quando o RH nao tem a permissao do dominio da ficha. */
+  campos: Array<{ chave: string; visivel: boolean; submetido: unknown; ficha: unknown; difere: boolean }>;
+  /** Sem permissao do dominio do tipo: `id: null` e `visivel: false`. */
+  anexos: Array<{ id: string | null; tipo: string; criado_em: string; visivel: boolean }>;
+  /** `campos`: chave -> comentario, ou `null` quando o RH nao ve o dominio. `null` se nunca houve devolucao. */
+  devolucao: { campos: Record<string, string | null>; documentos: string[]; observacao: string | null } | null;
+  pendencias: Array<{ codigo: string; origem: "pessoa" | "rh"; posicao: "convite" | "ficha" | "rh" }>;
+}
+
+/** `rpc_hr_admissao_rever_sensivel(p_organization_id, p_convite_id, p_campo)`: `valor` e `null` se nao ha segredo. */
+export interface AdmissaoReverSensivelRpc {
+  valor: string | null;
 }
 
 export interface PessoaConta {

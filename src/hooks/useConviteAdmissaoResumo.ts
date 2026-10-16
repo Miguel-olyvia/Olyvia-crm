@@ -1,11 +1,12 @@
 /**
  * O estado do convite de admissao mais recente de uma pessoa, para a ficha.
  *
- * Chama `rpc_hr_convite_admissao_resumo(uuid)` (gate `hr.pessoas.convite.enviar`
- * OU `hr.pessoas.view` na organizacao da ficha). A funcao devolve so metadados
- * do convite -- NUNCA o token, o rascunho nem o IP -- e e isso que permite ao
- * RH ver "enviado, ainda por preencher" sem poder ler nada do que a pessoa
- * escreveu.
+ * Chama `rpc_hr_convite_admissao_resumo(uuid)` (V2, 20261210420000): e a UNICA
+ * leitura do convite, porque `authenticated` ja nao le a tabela. Exige
+ * `hr.pessoas.view` na organizacao da ficha. A funcao devolve so metadados --
+ * NUNCA o token, o rascunho nem o IP -- e dois estados: o da ADMISSAO (os 11
+ * estados, ou `terminado` mascarado para quem nao tem `hr.onboarding.restrito`)
+ * e o do PORTAL (ativo, expirado, revogado, encerrado).
  *
  * Quando a ultima tentativa de submissao foi recusada por NIF ou NISS ja
  * registados noutra ficha, le tambem `rpc_hr_convite_admissao_conflitos`, que
@@ -17,8 +18,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
-
-export type EstadoConvite = "pendente" | "usado" | "expirado" | "substituido" | "bloqueado" | "desconhecido";
+import { estadoAdmissaoDe, estadoPortalDe } from "@/lib/hr/estadoAdmissao";
+import type { EstadoAdmissao, EstadoPortalConvite } from "@/types/hr";
 
 export interface RecusaConvite {
   codigo: string;
@@ -28,14 +29,19 @@ export interface RecusaConvite {
 
 export interface ResumoConvite {
   conviteId: string | null;
-  estado: EstadoConvite;
+  /** O estado da admissao. */
+  estado: EstadoAdmissao;
+  /** O estado do portal (o link): derivado na base. */
+  estadoPortal: EstadoPortalConvite;
   emailDestino: string | null;
   criadoEm: string | null;
   validUntil: string | null;
-  usadoEm: string | null;
+  portalEncerradoEm: string | null;
   /** `null` = o convite e anterior ao registo do envio: nao se sabe. */
   emailEnviado: boolean | null;
   emailErro: string | null;
+  /** 10 ou mais aberturas falhadas do link. */
+  bloqueado: boolean;
   ultimaRecusa: RecusaConvite | null;
 }
 
@@ -71,26 +77,6 @@ function textoOuNull(valor: unknown): string | null {
   return typeof valor === "string" && valor !== "" ? valor : null;
 }
 
-function estadoDe(valor: unknown): EstadoConvite {
-  switch (valor) {
-    case "usado":
-    case "expirado":
-    case "bloqueado":
-      return valor;
-    // A base chama-lhe `revogado`; para quem olha e um convite substituido.
-    case "revogado":
-    case "substituido":
-      return "substituido";
-    case "pendente":
-      return "pendente";
-    default:
-      // Um valor novo ou ausente NAO e "pendente": deixava reenviar, e
-      // reenviar revoga um convite que pode estar a meio. Mostra-se como
-      // desconhecido e regista-se (ver `carregar`).
-      return "desconhecido";
-  }
-}
-
 function recusaDe(bruto: unknown): RecusaConvite | null {
   if (!bruto || typeof bruto !== "object") return null;
   const linha = bruto as { codigo?: unknown; em?: unknown; campos?: unknown };
@@ -112,13 +98,17 @@ export function resumoDaRpc(bruto: unknown): ResumoConvite | null {
   if (linha.existe === false) return null;
   return {
     conviteId: textoOuNull(linha.convite_id),
-    estado: estadoDe(linha.estado),
+    // Um valor que a V2 nao devolve (ou ausente) NAO e um estado aberto:
+    // mostra-se como desconhecido, sem accoes, e regista-se (ver `carregar`).
+    estado: estadoAdmissaoDe(linha.estado),
+    estadoPortal: estadoPortalDe(linha.estado_portal),
     emailDestino: textoOuNull(linha.email_destino),
     criadoEm: textoOuNull(linha.criado_em),
     validUntil: textoOuNull(linha.valid_until),
-    usadoEm: textoOuNull(linha.usado_em ?? linha.used_at),
+    portalEncerradoEm: textoOuNull(linha.portal_encerrado_em),
     emailEnviado: typeof linha.email_enviado === "boolean" ? linha.email_enviado : null,
     emailErro: textoOuNull(linha.email_erro),
+    bloqueado: linha.bloqueado === true,
     ultimaRecusa: recusaDe(linha.ultima_recusa),
   };
 }

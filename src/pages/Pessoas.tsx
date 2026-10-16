@@ -1,135 +1,229 @@
 /**
- * A lista de pessoas -- o ecra "Organizacao" do modulo de RH.
+ * A lista de pessoas -- o ecra "Pessoas" do modulo de RH: linhas compactas, chips de filtro e um unico botao primario
+ * ("Nova pessoa"). Clicar numa linha abre a ficha num painel lateral por cima da lista (nao muda de pagina); "Nova pessoa"
+ * abre outro painel lateral.
  *
- * Quatro sub-separadores: Pessoas, Organograma, Funcoes e (com `hr.pessoas.vinculos.view`)
- * Contratos a terminar -- a lista do RH dos contratos com prazo cujo fim vem ai.
+ * Cinco sub-separadores: Pessoas, Pipeline de admissoes (com `hr.pessoas.convite.enviar` ou `hr.onboarding.approve`: e o que
+ * a lista `rpc_hr_admissao_listar` exige), Organograma, Funcoes e (com `hr.pessoas.vinculos.view`) Contratos a terminar. O
+ * separador vive no URL (`?tab=`): recarregar a pagina ou partilhar o link nao o perde, e `/rh/cargos` redireciona para
+ * `?tab=funcoes`. Um `?tab=` que nao e um separador visivel para quem olha (desconhecido, ou `contratos` sem a permissao)
+ * cai em «Pessoas». A ficha vive no caminho (`/rh/pessoas/:id`, que continua a ser uma ligacao direta: abre a lista com a
+ * ficha aberta) e abrir, passar a outra pessoa ou fechar atualiza o endereco PELO ROUTER, sem remontar a pagina (a rota e uma
+ * so, `/rh/pessoas/:id?`).
  *
- * "Atividade" e "Equipas" NAO existem: nao foram pedidos e foram retirados.
- * Organograma e Funcoes deixaram de ser estados vazios -- o primeiro desenha a
- * arvore de chefia sobre `pessoas.reporta_a_pessoa_id` e remete para o
- * organograma de EMPRESAS que ja existe (`/org-chart`); o segundo gere o catalogo
- * de cargos (com contagem de pessoas) e remete para o ecra de Papeis que ja existe (`/roles`).
+ * A ABA DA FICHA vive no URL em `?aba=` (recarregar mantem-na) e sai de la ao fechar a ficha. LIGACOES ANTIGAS
+ * `/rh/pessoas/:id?tab=laborais`: a ficha era uma pagina e o `?tab=` era a sua aba. Com uma ficha no caminho, um `?tab=` que
+ * e uma aba da ficha, presente quando a pagina abre, escolhe a aba da ficha e passa a `?aba=` (e gasta-se: sai do URL, para nao
+ * pedir depois o separador de contratos da lista). Escolher depois o separador «Contratos» da lista nao e uma ligacao antiga.
  *
- * O separador vive no URL (`?tab=`), no padrao de CampaignDetail: recarregar a
- * pagina ou partilhar o link nao perde o separador aberto -- que e a regra de
- * URL-as-state deste projecto.
+ * Se a organizacao ativa muda, a ficha e o painel «Nova pessoa» fecham: uma ficha de outra organizacao nao fica aberta.
  *
- * DOIS ESTADOS INDEPENDENTES NA TABELA
- * ------------------------------------
- * "Estado do acesso" (tem conta ligada?) e "Estado do contrato" sao ciclos de
- * vida separados e vem de sitios diferentes: o primeiro de `pessoas_contas`, o
- * segundo DERIVADO de `pessoas_vinculos` (`usePessoas.ts`, uma so consulta
- * agregada). Uma pessoa com contrato em curso pode nao ter conta nenhuma, e
- * revogar a conta nao termina contrato nenhum.
- *
- * A COLUNA DE ESTADO DO CONTRATO SO SE MOSTRA A QUEM TEM `hr.pessoas.vinculos.view`
- * ------------------------------------------------------------------------
- * Cabecalho e celula desaparecem juntos sem essa permissao -- nao ha "Sem
- * contrato" a fingir resposta a quem nao pode mesmo ver vinculos.
+ * RH e a pessoa como TRABALHADORA (filial, contrato, horario); o "estado do acesso" (tem conta ligada?) e o "estado do
+ * contrato" sao ciclos de vida separados. A coluna do contrato so se mostra a quem tem `hr.pessoas.vinculos.view`.
  */
-import { useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Plus, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CalendarClock, IdCard, Network, Plus, Search, Settings, UserMinus, UserPlus, Users } from "lucide-react";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
+import { Aba, ListaAbas } from "@/components/ficha-comum/AbasSublinhadas";
+import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { ContratosATerminarTab } from "@/components/hr/fimContrato/ContratosATerminarTab";
-import { PessoaFormDialog } from "@/components/hr/PessoaFormDialog";
+import { ehAbaFicha } from "@/components/hr/ficha/abas";
+import { FichaPessoaRh } from "@/components/hr/ficha/FichaPessoaRh";
+import { BarraListaRh } from "@/components/hr/lista/BarraListaRh";
+import { contagens, filtrar, type FiltroAcesso } from "@/components/hr/lista/filtros";
+import { TabelaPessoasRh } from "@/components/hr/lista/TabelaPessoasRh";
+import { caminhoDaFicha } from "@/components/hr/lista/urlFicha";
+import { PipelineAdmissoes } from "@/components/hr/admissao/PipelineAdmissoes";
+import { NovaPessoaDialogo } from "@/components/hr/NovaPessoaDialogo";
 import { PessoasFuncoesTab } from "@/components/hr/PessoasFuncoesTab";
 import { PessoasOrganogramaTab } from "@/components/hr/PessoasOrganogramaTab";
 import { useCompany } from "@/contexts/CompanyContext";
-import { usePermissions } from "@/hooks/usePermissions";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
+import { usePermissions } from "@/hooks/usePermissions";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { PessoaListItem } from "@/types/hr";
+import { cn } from "@/lib/utils";
 
 const SUBTABS = [
-  { value: "pessoas", labelKey: "hr.subtabs.pessoas", icon: Users },
-  { value: "organograma", labelKey: "hr.subtabs.organograma", icon: Network },
-  { value: "funcoes", labelKey: "hr.subtabs.funcoes", icon: IdCard },
+  { value: "pessoas", labelKey: "hr.subtabs.pessoas" },
+  // So com hr.pessoas.convite.enviar ou hr.onboarding.approve: a lista de processos exige uma das duas.
+  { value: "admissoes", labelKey: "rhAdm.tab" },
+  { value: "organograma", labelKey: "hr.subtabs.organograma" },
+  { value: "funcoes", labelKey: "hr.subtabs.funcoes" },
   // So com hr.pessoas.vinculos.view: a lista de contratos a terminar le contratos.
-  { value: "contratos", labelKey: "hr.subtabs.contratos", icon: CalendarClock },
+  { value: "contratos", labelKey: "hr.subtabs.contratos" },
 ] as const;
 
-function EstadoAcessoBadge({ pessoa }: { pessoa: PessoaListItem }) {
+const SUBTAB_INICIAL = "pessoas";
+
+interface FichaAberta {
+  id: string | null;
+  aberta: boolean;
+}
+
+interface CabecalhoProps {
+  podeCriar: boolean;
+  podeGerirAdmissao: boolean;
+  podeGerirRegrasFimContrato: boolean;
+  resumo: string;
+  aoCriar: () => void;
+}
+
+function CabecalhoPessoas({ podeCriar, podeGerirAdmissao, podeGerirRegrasFimContrato, resumo, aoCriar }: CabecalhoProps) {
   const { t } = useTranslation();
-  const variante = pessoa.estadoAcesso === "ativo" ? "default" : "outline";
+  const navigate = useNavigate();
+  // «Campos de admissao» e «Regras de fim de contrato» nao tem entrada no menu: abrem daqui, ao lado de «Nova pessoa», atras
+  // da mesma permissao que protege cada rota. Navegam para a rota (em vez de abrir em dialogo): o link fica partilhavel.
+  const configuracoes = [
+    { mostrar: podeGerirAdmissao, caminho: "/rh/admissao/configuracao", chave: "sidebar.hrAdmissaoConfig" },
+    { mostrar: podeGerirRegrasFimContrato, caminho: "/rh/contratos/configuracao", chave: "hr.fimContrato.config.botao" },
+  ].filter((c) => c.mostrar);
   return (
-    <Badge variant={variante} className="font-normal">
-      {t(`hr.estadoAcesso.${pessoa.estadoAcesso}`)}
-    </Badge>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="space-y-1">
+        <h1 className="text-2xl font-bold">{t("hr.pessoas.title")}</h1>
+        <p className="text-muted-foreground">{t("rhForm.lista.sub")}</p>
+        <p className="text-sm tabular-nums text-muted-foreground">{resumo}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {configuracoes.map(({ caminho, chave }) => (
+          <Button key={caminho} type="button" variant="outline" onClick={() => navigate(caminho)} className={cn("min-h-11 gap-2", FOCO)}>
+            <Settings className="h-4 w-4" aria-hidden="true" />
+            {t(chave)}
+          </Button>
+        ))}
+        {podeCriar && (
+          <Button type="button" onClick={aoCriar} className={cn("min-h-11 gap-2", FOCO)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {t("hr.pessoas.new")}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
-export default function Pessoas() {
+export default function Pessoas({ pessoaIdInicial }: { pessoaIdInicial?: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") || "pessoas";
+  const tabDoUrl = searchParams.get("tab");
+  const abaDoUrl = searchParams.get("aba");
+
+  // Ligacao antiga com ficha no caminho: o ?tab= que e aba da ficha escolhe a aba da ficha, uma so vez (e passa a ?aba=).
+  const [abaLegada] = useState<string | undefined>(() =>
+    pessoaIdInicial !== undefined && tabDoUrl !== null && ehAbaFicha(tabDoUrl) ? tabDoUrl : undefined,
+  );
+  const abaGasta = useRef(false);
+  const aGastarAba = !abaGasta.current && abaLegada !== undefined && tabDoUrl === abaLegada;
+  useEffect(() => {
+    if (!aGastarAba) return;
+    abaGasta.current = true;
+    setSearchParams(
+      (anterior) => {
+        const proximos = new URLSearchParams(anterior);
+        proximos.delete("tab");
+        if (!proximos.has("aba") && abaLegada !== undefined) proximos.set("aba", abaLegada);
+        return proximos;
+      },
+      { replace: true },
+    );
+  }, [aGastarAba, abaLegada, setSearchParams]);
+  // A aba da ficha: a do URL se for uma aba da ficha; senao, a da ligacao antiga que se esta a gastar; senao, a omissao.
+  const abaDaFicha = abaDoUrl !== null && ehAbaFicha(abaDoUrl) ? abaDoUrl : aGastarAba ? abaLegada : undefined;
 
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const canCreate = hasPermission("hr.pessoas.create");
+  const podeCriar = hasPermission("hr.pessoas.create");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
-  // Campos obrigatorios de admissao (20261201050000): deixou de ter item
-  // proprio na barra lateral e passou a viver aqui, atras da mesma
-  // permissao que ja protegia a rota `/rh/admissao/configuracao`. Navega
-  // para a rota em vez de abrir em dialog -- mantem o link partilhavel e
-  // nao duplica o ecra existente.
-  const podeGerirAdmissaoObrigatorios = hasPermission("hr.admissao.obrigatorios.gerir");
-  // Regras de fim de contrato da organizacao: ecra proprio, atras desta permissao.
+  const podeVerAdmissoes = hasPermission("hr.pessoas.convite.enviar") || hasPermission("hr.onboarding.approve");
+  const podeGerirAdmissao = hasPermission("hr.admissao.obrigatorios.gerir");
   const podeGerirRegrasFimContrato = hasPermission("hr.contratos.regras.gerir");
-
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
-  // Lista so para leitura (nomeDoLocal, abaixo): uma pessoa cujo local actual
-  // ja foi desactivado tem de continuar a mostrar o nome, nao um "—".
+  // So para leitura: uma pessoa cujo local actual ja foi desactivado tem de continuar a mostrar o nome.
   const { locais } = useLocaisTrabalho({ apenasAtivos: false });
-  const nomeDoLocal = (localId: string | null) =>
-    localId ? (locais.find((local) => local.id === localId)?.nome ?? null) : null;
+  const nomeDoLocal = (localId: string | null) => (localId ? (locais.find((l) => l.id === localId)?.nome ?? null) : null);
+
+  // Os separadores que quem olha pode ver; um ?tab= fora deles (desconhecido, ou sem permissao) cai em «Pessoas».
+  const subtabsVisiveis = SUBTABS.filter(
+    ({ value }) => (value !== "contratos" || podeVerVinculos) && (value !== "admissoes" || podeVerAdmissoes),
+  );
+  const tabPedido = aGastarAba ? null : tabDoUrl;
+  const activeTab = subtabsVisiveis.some(({ value }) => value === tabPedido) ? (tabPedido as string) : SUBTAB_INICIAL;
+
   const [procura, setProcura] = useState("");
-  const [dialogoAberto, setDialogoAberto] = useState(false);
+  const [filtro, setFiltro] = useState<FiltroAcesso>("todas");
+  const [novaAberta, setNovaAberta] = useState(false);
+  const [ficha, setFicha] = useState<FichaAberta>({ id: pessoaIdInicial ?? null, aberta: pessoaIdInicial !== undefined });
 
-  const filtradas = useMemo(() => {
-    const termo = procura.trim().toLowerCase();
-    if (termo === "") return pessoas;
-    return pessoas.filter((pessoa) =>
-      [pessoa.nome_completo, pessoa.cargo, pessoa.numero_interno]
-        .filter(Boolean)
-        .some((campo) => (campo as string).toLowerCase().includes(termo)),
-    );
-  }, [pessoas, procura]);
+  // Uma ligacao direta para outra pessoa (mudou o :id do endereco) abre a ficha dela.
+  useEffect(() => {
+    if (pessoaIdInicial !== undefined) setFicha({ id: pessoaIdInicial, aberta: true });
+  }, [pessoaIdInicial]);
 
-  const cartoes = [
-    { key: "activos", labelKey: "hr.stats.activos", valor: stats.activos, icon: Users },
-    {
-      key: "entradas",
-      labelKey: "hr.stats.entradas90d",
-      valor: stats.entradas90d,
-      icon: UserPlus,
+  const filtradas = useMemo(() => filtrar(pessoas, procura, filtro), [pessoas, procura, filtro]);
+  const contagemDosChips = useMemo(() => contagens(pessoas, procura), [pessoas, procura]);
+  const idsVisiveis = useMemo(() => filtradas.map((p) => p.id), [filtradas]);
+  // Estavel entre renders: o painel «Nova pessoa» e a ficha recebem esta lista, e uma nova a cada render refazia-lhes o trabalho.
+  const colegas = useMemo(() => pessoas.map((p) => ({ id: p.id, nome_completo: p.nome_completo })), [pessoas]);
+
+  /**
+   * Acerta o endereco PELO ROUTER (sem history.replaceState): o caminho da ficha (`id`; `undefined` deixa-o como esta) e os
+   * parametros de pesquisa (`editar`). Substitui a entrada do historico: abrir e fechar a ficha nao enche o botao «voltar».
+   */
+  const atualizarUrl = useCallback(
+    (id: string | null | undefined, editar?: (parametros: URLSearchParams) => void) => {
+      const parametros = new URLSearchParams(location.search);
+      editar?.(parametros);
+      const pesquisa = parametros.toString();
+      navigate(
+        {
+          pathname: id === undefined ? location.pathname : caminhoDaFicha(location.pathname, id),
+          search: pesquisa === "" ? "" : `?${pesquisa}`,
+          hash: location.hash,
+        },
+        { replace: true },
+      );
     },
-    { key: "saidas", labelKey: "hr.stats.saidas90d", valor: stats.saidas90d, icon: UserMinus },
-  ] as const;
+    [location.pathname, location.search, location.hash, navigate],
+  );
 
-  if (companyLoading || permissionsLoading) {
-    return <OlyviaLoader />;
-  }
+  const abrirFicha = useCallback(
+    (id: string) => {
+      setFicha({ id, aberta: true });
+      atualizarUrl(id);
+    },
+    [atualizarUrl],
+  );
+  const fecharFicha = useCallback(() => {
+    setFicha((atual) => ({ ...atual, aberta: false }));
+    atualizarUrl(null, (parametros) => parametros.delete("aba"));
+  }, [atualizarUrl]);
+  const mudarAbaDaFicha = useCallback(
+    (aba: string) => atualizarUrl(undefined, (parametros) => parametros.set("aba", aba)),
+    [atualizarUrl],
+  );
 
-  if (!activeCompany) {
-    return <NoOrganizationState />;
-  }
+  // Mudou a organizacao ativa: a ficha e o painel «Nova pessoa» eram da anterior. A primeira organizacao a carregar (uma
+  // ligacao direta com ficha) nao fecha nada.
+  const organizacaoId = activeCompany?.id;
+  const organizacaoAnterior = useRef(organizacaoId);
+  useEffect(() => {
+    if (organizacaoAnterior.current === organizacaoId) return;
+    const haviaOrganizacao = organizacaoAnterior.current !== undefined;
+    organizacaoAnterior.current = organizacaoId;
+    if (!haviaOrganizacao) return;
+    setNovaAberta(false);
+    fecharFicha();
+  }, [organizacaoId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (companyLoading || permissionsLoading) return <OlyviaLoader />;
+  if (!activeCompany) return <NoOrganizationState />;
 
   const mudarTab = (valor: string) =>
     setSearchParams(
@@ -140,193 +234,77 @@ export default function Pessoas() {
       },
       { replace: true },
     );
+  const limpar = () => {
+    setProcura("");
+    setFiltro("todas");
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">{t("hr.pessoas.title")}</h1>
-          <p className="text-muted-foreground">{t("hr.pessoas.subtitle")}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {podeGerirAdmissaoObrigatorios && (
-            <Button
-              variant="outline"
-              onClick={() => navigate("/rh/admissao/configuracao")}
-              className="gap-2"
-            >
-              <Settings className="h-4 w-4" />
-              {t("sidebar.hrAdmissaoConfig")}
-            </Button>
-          )}
-          {podeGerirRegrasFimContrato && (
-            <Button
-              variant="outline"
-              onClick={() => navigate("/rh/contratos/configuracao")}
-              className="gap-2"
-            >
-              <Settings className="h-4 w-4" />
-              {t("hr.fimContrato.config.botao")}
-            </Button>
-          )}
-          {canCreate && (
-            <Button onClick={() => setDialogoAberto(true)} className="gap-2">
-              <Plus className="h-4 w-4" />
-              {t("hr.pessoas.new")}
-            </Button>
-          )}
-        </div>
-      </div>
+      <CabecalhoPessoas
+        podeCriar={podeCriar} podeGerirAdmissao={podeGerirAdmissao} podeGerirRegrasFimContrato={podeGerirRegrasFimContrato}
+        aoCriar={() => setNovaAberta(true)}
+        resumo={t("rhForm.lista.resumo", { activos: stats.activos, entradas: stats.entradas90d, saidas: stats.saidas90d })}
+      />
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
-        <TabsList>
-          {SUBTABS.filter(({ value }) => value !== "contratos" || podeVerVinculos).map(({ value, labelKey, icon: Icon }) => (
-            <TabsTrigger key={value} value={value} className="gap-2">
-              <Icon className="h-4 w-4" />
-              {t(labelKey)}
-            </TabsTrigger>
+        <ListaAbas>
+          {subtabsVisiveis.map(({ value, labelKey }) => (
+            <Aba key={value} value={value} rotulo={t(labelKey)} />
           ))}
-        </TabsList>
+        </ListaAbas>
 
-        <TabsContent value="pessoas" className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-3">
-            {cartoes.map(({ key, labelKey, valor, icon: Icon }) => (
-              <Card key={key}>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">{t(labelKey)}</CardTitle>
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold tabular-nums">{valor}</div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              value={procura}
-              onChange={(e) => setProcura(e.target.value)}
-              placeholder={t("hr.pessoas.search")}
-            />
-          </div>
-
-          {error && (
-            <Card className="border-destructive/40">
-              <CardContent className="py-4 text-sm text-destructive">
-                {t("hr.erros.carregarLista")} — {error}
-              </CardContent>
-            </Card>
-          )}
-
+        <TabsContent value="pessoas" className="mt-0 space-y-4">
+          <BarraListaRh
+            pesquisa={procura} aoPesquisar={setProcura} filtro={filtro} aoFiltrar={setFiltro}
+            contagens={contagemDosChips} total={filtradas.length}
+          />
+          {error && <p role="alert" className="text-sm text-destructive">{t("hr.erros.carregarLista")} — {error}</p>}
           {loading ? (
             <OlyviaLoader />
           ) : filtradas.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                {procura.trim() === "" ? t("employees.empty") : t("hr.pessoas.emptyFiltered")}
-              </CardContent>
-            </Card>
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border p-4">
+              <p className="text-sm text-foreground">{pessoas.length === 0 ? t("rhForm.lista.vazia") : t("hr.pessoas.emptyFiltered")}</p>
+              {pessoas.length > 0 && <Button type="button" className="min-h-11" onClick={limpar}>{t("rhForm.lista.limpar")}</Button>}
+            </div>
           ) : (
-            <Card>
-              <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>{t("hr.columns.colaborador")}</TableHead>
-                        <TableHead>{t("hr.columns.cargo")}</TableHead>
-                        <TableHead>{t("hr.columns.local")}</TableHead>
-                        <TableHead>{t("hr.columns.contratacao")}</TableHead>
-                        <TableHead>{t("hr.columns.estadoAcesso")}</TableHead>
-                        {podeVerVinculos && (
-                          <TableHead>{t("hr.columns.estadoContrato")}</TableHead>
-                        )}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filtradas.map((pessoa) => (
-                        <TableRow
-                          key={pessoa.id}
-                          className="cursor-pointer"
-                          onClick={() => navigate(`/rh/pessoas/${pessoa.id}`)}
-                        >
-                          <TableCell>
-                            <div className="font-medium">
-                              {pessoa.nome_completo}
-                            </div>
-                            {pessoa.email_trabalho && (
-                              <div className="text-xs text-muted-foreground">
-                                {pessoa.email_trabalho}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>{pessoa.cargo ?? "—"}</TableCell>
-                          {/* `local_id` e a fonte de verdade; `local_trabalho`
-                              e a legenda legada da ronda 1 e serve de recurso
-                              enquanto nao houver local escolhido. */}
-                          <TableCell>
-                            {nomeDoLocal(pessoa.local_id) ?? pessoa.local_trabalho ?? "—"}
-                          </TableCell>
-                          <TableCell className="tabular-nums">
-                            {pessoa.data_admissao ?? "—"}
-                          </TableCell>
-                          <TableCell>
-                            <EstadoAcessoBadge pessoa={pessoa} />
-                          </TableCell>
-                          {podeVerVinculos && (
-                            <TableCell>
-                              {pessoa.estado_contrato_derivado && (
-                                <Badge
-                                  variant={
-                                    pessoa.estado_contrato_derivado === "em_curso"
-                                      ? "secondary"
-                                      : "outline"
-                                  }
-                                  className="font-normal"
-                                >
-                                  {t(`hr.estadoContrato.${pessoa.estado_contrato_derivado}`)}
-                                </Badge>
-                              )}
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
+            <TabelaPessoasRh
+              pessoas={filtradas} nomeDoLocal={nomeDoLocal} comContrato={podeVerVinculos}
+              abertaId={ficha.aberta ? ficha.id : null} aoAbrir={abrirFicha}
+            />
           )}
         </TabsContent>
 
-        <TabsContent value="organograma">
+        {/* Com `key`: mudar de organizacao recomeca o filtro e fecha a revisao aberta (eram da anterior). */}
+        {podeVerAdmissoes && (
+          <TabsContent value="admissoes" className="mt-0">
+            <PipelineAdmissoes key={activeCompany.id} aoAbrirFicha={abrirFicha} />
+          </TabsContent>
+        )}
+
+        {/* O organograma de chefia vive aqui ate a pagina de Organizacao o absorver (outra etapa). */}
+        <TabsContent value="organograma" className="mt-0">
           <PessoasOrganogramaTab pessoas={pessoas} loading={loading} error={error} />
         </TabsContent>
-
-        <TabsContent value="funcoes">
+        <TabsContent value="funcoes" className="mt-0">
           <PessoasFuncoesTab pessoas={pessoas} loading={loading} />
         </TabsContent>
-
         {podeVerVinculos && (
-          <TabsContent value="contratos">
+          <TabsContent value="contratos" className="mt-0">
             <ContratosATerminarTab organizationId={activeCompany.id} />
           </TabsContent>
         )}
       </Tabs>
 
-      {canCreate && (
-        <PessoaFormDialog
-          open={dialogoAberto}
-          onOpenChange={setDialogoAberto}
-          colegas={pessoas.map((pessoa) => ({
-            id: pessoa.id,
-            nome_completo: pessoa.nome_completo,
-          }))}
-          onCriar={criarPessoa}
-          onCriada={(id) => navigate(`/rh/pessoas/${id}`)}
+      <FichaPessoaRh
+        id={ficha.id} aberta={ficha.aberta} aoFechar={fecharFicha} idsVisiveis={idsVisiveis} aoIrPara={abrirFicha}
+        aba={abaDaFicha} aoMudarAba={mudarAbaDaFicha} colegas={pessoas}
+      />
+
+      {podeCriar && (
+        <NovaPessoaDialogo
+          open={novaAberta} onOpenChange={setNovaAberta} colegas={colegas}
+          onCriar={criarPessoa} onCriada={abrirFicha}
         />
       )}
     </div>

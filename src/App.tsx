@@ -112,7 +112,6 @@ const DocsEmbedWidget = lazy(() => import("./pages/docs/DocsEmbedWidget"));
 const Landing = lazy(() => import("./pages/Landing"));
 const Organizations = lazy(() => import("./pages/Organizations"));
 const OrganizationDetail = lazy(() => import("./pages/OrganizationDetail"));
-const Pessoas = lazy(() => import("./pages/Pessoas"));
 const PessoaDetail = lazy(() => import("./pages/PessoaDetail"));
 const MeusDocumentosHR = lazy(() => import("./pages/MeusDocumentosHR"));
 const Ausencias = lazy(() => import("./pages/Ausencias"));
@@ -288,8 +287,9 @@ const App = () => (
                       <Route path="/marketing-help" element={<MarketingHelp />} />
                       {/* Recursos Humanos -- modulo 1 (Colaboradores). RH exige organizacao
                           activa, por isso NAO entra em NO_ORG_EXEMPT_ROUTES. */}
-                      <Route path="/rh/pessoas" element={<ProtectedRoute permission="hr.pessoas.view"><Pessoas /></ProtectedRoute>} />
-                      <Route path="/rh/pessoas/:id" element={<ProtectedRoute permission="hr.pessoas.view"><PessoaDetail /></ProtectedRoute>} />
+                      {/* A lista e a ficha sao UMA rota (`:id?`): abrir e fechar a ficha muda o endereco pelo router sem remontar a
+                          pagina (a pesquisa e os filtros da lista ficam como estao). */}
+                      <Route path="/rh/pessoas/:id?" element={<ProtectedRoute permission="hr.pessoas.view"><PessoaDetail /></ProtectedRoute>} />
                       {/* "Os meus documentos" -- so exige `view.own`, nunca `view`: e o
                           mesmo eixo de audiencia dos dois modulos abaixo. */}
                       <Route path="/rh/documentos" element={<ProtectedRoute permissions={["hr.pessoas.documentos.view.own", "hr.pessoas.documentos.view"]}><MeusDocumentosHR /></ProtectedRoute>} />

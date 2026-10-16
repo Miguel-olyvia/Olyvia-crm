@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccaoFimContratoDialog } from "@/components/hr/fimContrato/AccaoFimContratoDialog";
 import { ExcepcaoContratoDialog } from "@/components/hr/fimContrato/ExcepcaoContratoDialog";
 import { FimContratoHistorico } from "@/components/hr/fimContrato/FimContratoHistorico";
+import { IndicacaoDoResponsavel } from "@/components/hr/fimContrato/IndicacaoDoResponsavel";
 import { usePessoaContratoFim } from "@/hooks/usePessoaContratoFim";
 import { useTranslation } from "@/hooks/useTranslation";
 import { duracaoIgualInicial } from "@/lib/hr/fimContrato";
@@ -115,6 +116,8 @@ export function FimContratoCard({ organizationId, vinculo, podeEditar, onMudou }
             {t(`hr.fimContrato.limite.${regra.ao_atingir_limite}`)}
           </Linha>
         </dl>
+
+        <IndicacaoDoResponsavel vinculoId={vinculo.id} dataFim={vinculo.data_fim} indicacoes={fim.indicacoes} />
 
         {podeEditar && (
           <div className="flex flex-wrap gap-2">

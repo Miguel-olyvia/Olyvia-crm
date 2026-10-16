@@ -136,6 +136,36 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   pessoa_nao_encontrada: "hr.convite.erro.pessoaNaoEncontrada",
   validade_invalida: "hr.convite.erro.validadeInvalida",
   erro_inesperado: "hr.convite.erro.inesperado",
+  // V2 da admissao (CODIGOS_V2 e limite_excedido, HRA31 a HRA41): lado do RH.
+  nao_encontrado: "hr.convite.erro.naoEncontrado",
+  processo_aberto: "hr.convite.erro.processoAberto",
+  organizacao_nao_empregadora: "hr.convite.erro.organizacaoNaoEmpregadora",
+  email_invalido: "hr.convite.erroEmailInvalido",
+  motivo_invalido: "hr.convite.erro.motivoInvalido",
+  estado_invalido: "hr.convite.erro.estadoInvalido",
+  dias_invalidos: "hr.convite.erro.diasInvalidos",
+  prazo_excedido: "hr.convite.erro.prazoExcedido",
+  limite_excedido: "hr.convite.erro.limiteExcedido",
+  // V3a (reenviar o convite): HRA56, o portal ja nao tem link que se possa reenviar.
+  link_indisponivel: "hr.convite.erro.linkIndisponivel",
+  // O SMTP falhou ao reenviar (a accao do RH di-lo; o convite nao chegou).
+  email_nao_enviado: "hr.convite.erro.emailNaoEnviado",
+  // V3a (portal da pessoa): o codigo (OTP) enviado por e-mail e a sessao que ele abre. Os textos sao
+  // os de `portal.erro.*`, que falam com a pessoa; `otp_invalido` sem a contagem de tentativas (o
+  // portal acrescenta-a, ver `mensagemErroPortal`).
+  otp_espera: "portal.erro.otpEspera",
+  otp_limite_diario: "portal.erro.otpLimiteDiario",
+  otp_expirado: "portal.erro.otpExpirado",
+  otp_bloqueado: "portal.erro.otpBloqueado",
+  otp_invalido: "portal.erro.otpInvalidoSemContagem",
+  // Sem pepper de OTP ou sem correio configurado: para a pessoa e o mesmo que o e-mail nao sair.
+  otp_indisponivel: "portal.erro.emailNaoEnviado",
+  campo_bloqueado: "portal.erro.campoBloqueado",
+  sessao_ausente: "portal.erro.sessaoExpirada",
+  sessao_expirada: "portal.erro.sessaoExpirada",
+  sessao_substituida: "portal.erro.sessaoSubstituida",
+  // Entre a V3a e a V3b a Edge responde 410 as accoes que ainda nao exigem sessao.
+  portal_em_atualizacao: "portal.erro.emAtualizacao",
 };
 
 /**
@@ -150,6 +180,19 @@ export const CODIGOS_SEM_TEXTO_PROPRIO: readonly string[] = [
   "accao_desconhecida", // erro de programacao do cliente: texto generico
   "rascunho_nao_gravado", // nunca mostrado: o rascunho nao interrompe o preenchimento
   "rascunho_demasiado_grande", // idem
+];
+
+/**
+ * Os codigos da V2 (`CODIGOS_V2` na Edge Function) que NAO tem texto proprio,
+ * de proposito: os dois de token sao defeito do servidor (texto generico) e os
+ * do rascunho so existem no ecra publico, que nao os mostra. O teste exige que
+ * todo o codigo da V2 tenha chave em `CHAVE_POR_CODIGO` OU esteja aqui.
+ */
+export const CODIGOS_V2_SEM_TEXTO_PROPRIO: readonly string[] = [
+  "token_invalido",
+  "token_repetido",
+  "rascunho_chave_invalida",
+  "rascunho_valor_invalido",
 ];
 
 /** A chave de traducao do codigo, ou `null` quando nao ha texto proprio (pedido_invalido, desconhecido). */

@@ -565,6 +565,24 @@ export interface NovaPessoaPayload {
   emergencia: Record<string, unknown> | null;
   vinculo: Record<string, unknown> | null;
   /**
+   * OPCIONAL (o assistente de cinco passos nao o envia): as colunas de
+   * `pessoas_vinculos` que so o painel «Nova pessoa» recolhe -- categoria da
+   * funcao, categoria profissional, renovavel e isencao de horario. Juntam-se
+   * ao INSERT do vinculo; sem vinculo nao ha onde as gravar.
+   */
+  vinculoExtra?: Record<string, unknown> | null;
+  /**
+   * OPCIONAL: `pessoas_dados_saude`, satelite proprio com permissao propria
+   * (`hr.pessoas.saude.edit`). `null`/ausente quando nada foi escrito.
+   */
+  saude?: Record<string, unknown> | null;
+  /**
+   * OPCIONAL: `pessoas_sindicalizacao`, satelite proprio com permissao propria
+   * (`hr.pessoas.sindicalizacao.edit`, `is_dangerous`). `null`/ausente quando
+   * nada foi escrito.
+   */
+  sindicalizacao?: Record<string, unknown> | null;
+  /**
    * Versao inicial de `pessoas_vinculos_horas`, a par de `vinculo`. `null`
    * quando nao foram declaradas horas -- `pessoas_vinculos.horas_periodo` e
    * `horas_frequencia` sao DERIVADOS (20261130180000, trigger

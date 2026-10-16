@@ -1,10 +1,12 @@
 /**
  * Enviar o convite de admissao a uma pessoa -- o lado AUTENTICADO do fluxo.
  *
- * Chama a Edge Function `convite-admissao` (accao "criar"), que reencaminha a
- * sessao do chamador para `rpc_hr_convite_admissao_criar` -- a verificacao de
- * `hr.pessoas.convite.enviar` e a que ja existe na base, nao uma copia aqui.
- * "Reenviar" e a mesma accao: cria um convite novo, que substitui o anterior.
+ * Chama a Edge Function `convite-admissao` (accao "criar"), que valida o JWT e
+ * a permissao `hr.pessoas.convite.enviar` na organizacao do pedido e abre o
+ * processo na base. O pedido leva `organization_id` (a organizacao activa, so
+ * um seletor: a pessoa tem de ser dela). Desde a V2 so ha UM processo aberto
+ * por pessoa: enquanto houver um, a Edge Function recusa (`processo_aberto`).
+ * Substituir o link de um processo aberto e a etapa E3.
  *
  * O LINK
  * ------
@@ -30,6 +32,7 @@
  */
 import { useCallback, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/contexts/CompanyContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { chaveDeErroAdmissao, codigoDeErroEdge } from "@/lib/hr/errosAdmissao";
 import { getLocalizedFallback } from "@/utils/friendlyError";
@@ -85,6 +88,11 @@ const CODIGOS_COM_TEXTO_AO_ENVIAR: ReadonlySet<string> = new Set([
   "sem_sessao",
   "pessoa_nao_encontrada",
   "validade_invalida",
+  // V2: recusas de negocio da abertura do processo.
+  "nao_encontrado",
+  "processo_aberto",
+  "organizacao_nao_empregadora",
+  "email_invalido",
 ]);
 
 /**
@@ -102,13 +110,17 @@ function mensagemDoCodigo(codigo: string | null): string {
 
 export function useEnviarConviteAdmissao() {
   const [enviando, setEnviando] = useState(false);
+  const { activeCompany } = useCompany();
+  const organizationId = activeCompany?.id ?? null;
 
   const enviarConvite = useCallback(
     async (pessoaId: string, email: string): Promise<ResultadoConvite> => {
+      // O pedido exige a organizacao activa: sem ela nao ha o que enviar.
+      if (!organizationId) return { ...FALHA, erro: mensagemDoCodigo(null) };
       setEnviando(true);
       try {
         const { data, error } = await supabase.functions.invoke("convite-admissao", {
-          body: { action: "criar", pessoa_id: pessoaId, email },
+          body: { action: "criar", pessoa_id: pessoaId, organization_id: organizationId, email },
         });
         if (error || data?.error) {
           const codigo = await codigoDeErroEdge(error, data);
@@ -138,7 +150,7 @@ export function useEnviarConviteAdmissao() {
         setEnviando(false);
       }
     },
-    [],
+    [organizationId],
   );
 
   return { enviarConvite, enviando };

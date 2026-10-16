@@ -7,10 +7,11 @@
  * `pessoas.email_pessoal`, mas o convite pode ir para outro -- por exemplo,
  * antes de a pessoa ter e-mail pessoal registado).
  *
- * DOIS MODOS: `enviar` (primeiro convite) e `reenviar` (substitui o anterior,
- * que deixa de servir; o rascunho que a pessoa ja tinha escrito passa para o
- * novo se o e-mail for o mesmo). O e-mail do reenvio vem pre-preenchido com o
- * do convite actual.
+ * UM SO MODO (V2): abre o processo de admissao. Enquanto houver um processo
+ * aberto a Edge Function recusa outro (`processo_aberto`), por isso o botao que
+ * abre este dialogo so aparece sem processo aberto. O e-mail vem pre-preenchido
+ * com o sugerido, mas o RH pode escolher outro: fica registado no evento. O
+ * pedido leva a organizacao activa.
  *
  * O LINK SO SE MOSTRA UMA VEZ
  * ----------------------------
@@ -18,8 +19,8 @@
  * o link nessa resposta e em mais nenhuma. O dialogo NAO fecha: passa ao
  * estado `link`, com o texto em modo de leitura, "Copiar link" e um aviso de
  * que nao volta a aparecer. O link vive so neste estado local -- nunca em
- * estado global, storage, URL, log nem toast -- e perde-se ao fechar. Quem o
- * fechou sem o copiar tem "Reenviar", que gera outro.
+ * estado global, storage, URL, log nem toast -- e perde-se ao fechar. Nao ha
+ * "Reenviar" aqui: gerar outro link de um processo aberto e a etapa E3.
  *
  * O motivo tecnico do falhanco do e-mail aparece so ao RH, em letra pequena;
  * nunca chega a quem recebe o convite.
@@ -40,6 +41,7 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangle, Copy, Loader2, Send } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useEnviarConviteAdmissao } from "@/hooks/useEnviarConviteAdmissao";
+import { useDevolverFoco } from "@/components/hr/useDevolverFoco";
 import { toast } from "@/lib/toast";
 
 interface EnviarConviteDialogProps {
@@ -47,8 +49,6 @@ interface EnviarConviteDialogProps {
   onOpenChange: (aberto: boolean) => void;
   pessoaId: string;
   emailSugerido: string | null;
-  /** `reenviar` muda o titulo e assume o e-mail do convite actual em `emailSugerido`. */
-  modo?: "enviar" | "reenviar";
   /** Chamado quando o servidor aceitou o convite (com ou sem e-mail). */
   onEnviado?: () => void;
 }
@@ -72,17 +72,17 @@ export function EnviarConviteDialog({
   onOpenChange,
   pessoaId,
   emailSugerido,
-  modo = "enviar",
   onEnviado,
 }: EnviarConviteDialogProps) {
   const { t } = useTranslation();
   const { enviarConvite, enviando } = useEnviarConviteAdmissao();
+  const aoFechar = useDevolverFoco(open);
   const [email, setEmail] = useState(emailSugerido ?? "");
   const [tocado, setTocado] = useState(false);
   /** O link, so enquanto o dialogo esta no estado `link`. Nunca sai daqui. */
   const [mostrado, setMostrado] = useState<LinkMostrado | null>(null);
   const campoLinkRef = useRef<HTMLInputElement>(null);
-  const reenviarRef = useRef<HTMLButtonElement>(null);
+  const fecharRef = useRef<HTMLButtonElement>(null);
   /** O RH ja copiou o link? Se sim, fechar nao perde nada e nao se pergunta. */
   const [copiado, setCopiado] = useState(false);
   const [aConfirmarFecho, setAConfirmarFecho] = useState(false);
@@ -114,7 +114,7 @@ export function EnviarConviteDialog({
   // sem isto o foco cai para o corpo do dialogo e o leitor de ecra fica calado.
   useEffect(() => {
     if (!mostrado) return;
-    (campoLinkRef.current ?? reenviarRef.current)?.focus();
+    (campoLinkRef.current ?? fecharRef.current)?.focus();
   }, [mostrado]);
 
   const emailValido = /.+@.+\..+/.test(email.trim());
@@ -176,15 +176,13 @@ export function EnviarConviteDialog({
     fechar();
   };
 
-  const titulo = t(modo === "reenviar" ? "hr.convite.tituloReenviar" : "hr.convite.tituloDialogo");
-
   return (
     <Dialog open={open} onOpenChange={(aberto) => (aberto ? onOpenChange(true) : pedidoDeFecho())}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onCloseAutoFocus={aoFechar}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-4 w-4" />
-            {titulo}
+            {t("hr.convite.tituloDialogo")}
           </DialogTitle>
           <DialogDescription>{t("hr.convite.descricaoDialogo")}</DialogDescription>
         </DialogHeader>
@@ -278,15 +276,9 @@ export function EnviarConviteDialog({
 
         <DialogFooter>
           {mostrado ? (
-            <>
-              <Button ref={reenviarRef} variant="outline" onClick={enviar} disabled={enviando}>
-                {enviando && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                {t("hr.convite.reenviar")}
-              </Button>
-              <Button onClick={fechar} disabled={enviando}>
-                {t("common.close")}
-              </Button>
-            </>
+            <Button ref={fecharRef} onClick={fechar}>
+              {t("common.close")}
+            </Button>
           ) : (
             <>
               <Button variant="ghost" onClick={fechar} disabled={enviando}>
@@ -294,7 +286,7 @@ export function EnviarConviteDialog({
               </Button>
               <Button onClick={enviar} disabled={enviando}>
                 {enviando && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                {t(modo === "reenviar" ? "hr.convite.reenviar" : "hr.convite.enviar")}
+                {t("hr.convite.enviar")}
               </Button>
             </>
           )}

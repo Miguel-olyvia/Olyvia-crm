@@ -95,10 +95,18 @@ export type BusinessFlow =
   // token invalido/expirado/usado sao respostas legitimas e nao vem para
   // aqui -- so falha de rede, timeout ou erro de sintaxe.
   | "hr-convite-admissao-criar"
+  | "hr-convite-admissao-prolongar"
+  | "hr-convite-admissao-cancelar"
   | "hr-convite-admissao-publico"
   | "hr-convite-admissao-rascunho"
   | "hr-convite-admissao-resumo"
   | "hr-convite-admissao-conflitos"
+  | "hr-convite-admissao-reenviar"
+  // Pipeline e revisao do RH (V3a): a lista, a leitura da revisao e a segunda leitura (NISS/IBAN). So defeitos; o
+  // Error sintetico nunca leva corpo da base nem valores sensiveis.
+  | "hr-admissao-pipeline"
+  | "hr-admissao-revisao"
+  | "hr-admissao-revisao-sensivel"
   | "hr-admissao-posicoes-campos"
   | "hr-criar-acesso-pessoa"
   // Locais de trabalho e papeis de acesso, lidos pelo assistente de criacao de

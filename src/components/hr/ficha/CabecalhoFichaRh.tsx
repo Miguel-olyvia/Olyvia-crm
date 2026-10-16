@@ -1,0 +1,59 @@
+// O cabeçalho da ficha de RH, no padrão da ficha de Pessoas: avatar (fotografia ou iniciais), nome, a linha "Filial · Cargo",
+// os estados (acesso e contrato, sempre em texto), a navegação "n de N" e Fechar, e por baixo as ações.
+//
+// O título é um h2: o h1 da página é o de «Pessoas» (um só h1 por página). O cabeçalho (`data-cabecalho-ficha`) é a zona onde os
+// atalhos [ e ] valem: são atalhos de um carácter (WCAG 2.1.4), por isso só funcionam com o foco aqui dentro (ver `useTeclasFicha`).
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { iniciaisDoNome } from "@/lib/hr/anexosAdmissao";
+import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
+import type { Pessoa } from "@/types/hr";
+import { useTranslation } from "@/hooks/useTranslation";
+import { BotoesNavegacao } from "./BotoesNavegacao";
+import type { TeclaNavegacao, Vizinhas } from "./navegacao";
+
+interface CabecalhoFichaRhProps {
+  pessoa: Pessoa;
+  /** "Filial · Cargo", já montado. */
+  subtitulo: string;
+  fotografiaUrl: string | null | undefined;
+  temConta: boolean;
+  /** `null` quando quem olha não pode ver vínculos (não se inventa "Sem contrato"). */
+  estadoContrato: EstadoContratoDerivado | null;
+  vizinhas: Vizinhas;
+  aoIr: (id: string, qual: TeclaNavegacao) => void;
+}
+
+export function CabecalhoFichaRh({ pessoa, subtitulo, fotografiaUrl, temConta, estadoContrato, vizinhas, aoIr }: CabecalhoFichaRhProps) {
+  const { t } = useTranslation();
+  return (
+    <SheetHeader data-cabecalho-ficha="" className="flex-row flex-wrap items-start gap-x-3 gap-y-2 space-y-0 p-6 pb-3 text-left">
+      <Avatar className="h-12 w-12">
+        {/* Decorativa: o nome está no título logo a seguir. */}
+        {fotografiaUrl && <AvatarImage src={fotografiaUrl} alt="" />}
+        <AvatarFallback aria-hidden="true">{iniciaisDoNome(pessoa.nome_completo)}</AvatarFallback>
+      </Avatar>
+      <div className="min-w-40 flex-1 space-y-1.5">
+        <SheetTitle asChild className="text-xl">
+          <h2 tabIndex={-1} data-titulo-ficha className="outline-none">{pessoa.nome_completo}</h2>
+        </SheetTitle>
+        <SheetDescription className="text-[15px]">{subtitulo}</SheetDescription>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={temConta ? "default" : "outline"} className="font-normal">
+            {t(temConta ? "hr.estadoAcesso.ativo" : "hr.estadoAcesso.semConta")}
+          </Badge>
+          {estadoContrato && (
+            <Badge variant={estadoContrato === "em_curso" ? "secondary" : "outline"} className="font-normal">
+              {t(`hr.estadoContrato.${estadoContrato}`)}
+            </Badge>
+          )}
+          {pessoa.estado_registo === "arquivado" && (
+            <Badge variant="outline" className="font-normal">{t("hr.estadoRegisto.arquivado")}</Badge>
+          )}
+        </div>
+      </div>
+      <BotoesNavegacao vizinhas={vizinhas} aoIr={aoIr} />
+    </SheetHeader>
+  );
+}

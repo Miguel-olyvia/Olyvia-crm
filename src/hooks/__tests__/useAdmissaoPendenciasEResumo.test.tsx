@@ -37,6 +37,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({
 
 import { useAdmissaoPendencias } from "@/hooks/useAdmissaoPendencias";
 import { resumoDaRpc, useConviteAdmissaoResumo } from "@/hooks/useConviteAdmissaoResumo";
+import { ESTADOS_ADMISSAO } from "@/lib/hr/estadoAdmissao";
 
 function responder(indice: number, resposta: Resposta) {
   act(() => {
@@ -162,7 +163,8 @@ describe("useAdmissaoPendencias", () => {
 const RESUMO_BASE = {
   existe: true,
   convite_id: "c1",
-  estado: "pendente",
+  estado: "convidada",
+  estado_portal: "ativo",
   email_destino: "a@b.pt",
   email_enviado: true,
 };
@@ -173,7 +175,8 @@ describe("useConviteAdmissaoResumo", () => {
     await waitFor(() => expect(pendentes).toHaveLength(1));
     responder(0, { data: RESUMO_BASE, error: null });
     await waitFor(() => expect(result.current.carregando).toBe(false));
-    expect(result.current.resumo?.estado).toBe("pendente");
+    expect(result.current.resumo?.estado).toBe("convidada");
+    expect(result.current.resumo?.estadoPortal).toBe("ativo");
 
     act(() => result.current.recarregar());
     await waitFor(() => expect(pendentes).toHaveLength(2));
@@ -181,8 +184,8 @@ describe("useConviteAdmissaoResumo", () => {
     expect(result.current.recarregando).toBe(true);
     expect(result.current.resumo?.conviteId).toBe("c1");
 
-    responder(1, { data: { ...RESUMO_BASE, estado: "usado" }, error: null });
-    await waitFor(() => expect(result.current.resumo?.estado).toBe("usado"));
+    responder(1, { data: { ...RESUMO_BASE, estado: "submetida" }, error: null });
+    await waitFor(() => expect(result.current.resumo?.estado).toBe("submetida"));
     expect(result.current.recarregando).toBe(false);
   });
 
@@ -197,11 +200,11 @@ describe("useConviteAdmissaoResumo", () => {
     act(() => result.current.recarregar());
     await waitFor(() => expect(pendentes).toHaveLength(3));
 
-    responder(2, { data: { ...RESUMO_BASE, estado: "usado" }, error: null });
-    await waitFor(() => expect(result.current.resumo?.estado).toBe("usado"));
-    responder(1, { data: { ...RESUMO_BASE, estado: "expirado" }, error: null });
+    responder(2, { data: { ...RESUMO_BASE, estado: "submetida" }, error: null });
+    await waitFor(() => expect(result.current.resumo?.estado).toBe("submetida"));
+    responder(1, { data: { ...RESUMO_BASE, estado: "em_preenchimento" }, error: null });
     await new Promise((r) => setTimeout(r, 20));
-    expect(result.current.resumo?.estado).toBe("usado");
+    expect(result.current.resumo?.estado).toBe("submetida");
   });
 
   it("mudar de pessoa limpa o resumo da anterior", async () => {
@@ -226,7 +229,7 @@ describe("useConviteAdmissaoResumo", () => {
     expect(result.current.erro).toBe(false);
   });
 
-  it("estado desconhecido nao vira 'pendente': fica 'desconhecido' e regista", async () => {
+  it("estado desconhecido nao vira um estado aberto: fica 'desconhecido' e regista", async () => {
     const { result } = renderHook(() => useConviteAdmissaoResumo("A"));
     await waitFor(() => expect(pendentes).toHaveLength(1));
     responder(0, { data: { ...RESUMO_BASE, estado: "algo_novo" }, error: null });
@@ -236,11 +239,21 @@ describe("useConviteAdmissaoResumo", () => {
     expect((captureFlowError.mock.calls[0][0] as Error).message).not.toContain("algo_novo");
   });
 
-  it("os estados conhecidos mantem-se; 'revogado' da base e 'substituido' no ecra", () => {
-    for (const estado of ["pendente", "usado", "expirado", "bloqueado"] as const) {
+  it("os 11 estados da V2 e a mascara 'terminado' mantem-se; os da V1 valem desconhecido", () => {
+    for (const estado of [...ESTADOS_ADMISSAO, "terminado"]) {
       expect(resumoDaRpc({ ...RESUMO_BASE, estado })?.estado).toBe(estado);
     }
-    expect(resumoDaRpc({ ...RESUMO_BASE, estado: "revogado" })?.estado).toBe("substituido");
+    for (const estado of ["pendente", "usado", "expirado", "bloqueado", "revogado", "substituido"]) {
+      expect(resumoDaRpc({ ...RESUMO_BASE, estado })?.estado).toBe("desconhecido");
+    }
+  });
+
+  it("os quatro estados do portal mantem-se e o bloqueio vem de 'bloqueado'", () => {
+    for (const portal of ["ativo", "expirado", "revogado", "encerrado"]) {
+      expect(resumoDaRpc({ ...RESUMO_BASE, estado_portal: portal })?.estadoPortal).toBe(portal);
+    }
+    expect(resumoDaRpc({ ...RESUMO_BASE, bloqueado: true })?.bloqueado).toBe(true);
+    expect(resumoDaRpc({ ...RESUMO_BASE, aberturas_falhadas: 12 })?.bloqueado).toBe(false);
   });
 
   it("recusa por duplicado: le a ficha em conflito", async () => {

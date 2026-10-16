@@ -1,519 +1,141 @@
 /**
- * O formulario do convite de admissao -- pagina publica, SEM sessao, aberta
- * pelo link que o e-mail de convite leva. Duas paginas:
+ * O PORTAL temporario da admissao -- pagina PUBLICA (/admissao/:token), SEM sessao da app e
+ * fora do layout, aberta pelo link que o e-mail do convite leva. Substitui o formulario
+ * antigo, que gravava rascunho e submetia directo sem confirmar quem era a pessoa.
  *
- *  1. Dados pessoais, identificacao e morada (`ConvitePagina1`).
- *  2. Dados bancarios, fardamento e assinatura (`ConvitePagina2`).
+ * O PERCURSO (V3a)
+ *  1. Ao abrir o link so ha CONSULTA LIMITADA: organizacao, primeiro nome, estado do processo e
+ *     prazo. Nenhum dado pessoal. A Edge (`estado`) nao devolve mais do que isso sem sessao.
+ *  2. "Confirmar identidade para editar" pede um codigo de 6 algarismos ao e-mail do convite
+ *     (OTP) e abre o passo do codigo.
+ *  3. Com o codigo certo abre-se uma SESSAO (30 min sem actividade, 4 h no maximo): a pessoa ve
+ *     o que o estado permite, guarda o NISS e o IBAN e pode terminar a sessao.
+ *  4. Sem acesso (link invalido, revogado, encerrado, expirado, bloqueado) ou com o processo em
+ *     analise, a pessoa ve so o estado e e mandada contactar o RH.
  *
- * O QUE E OBRIGATORIO AQUI
- * ------------------------
- * So o que a organizacao pediu na posicao "convite": o servidor devolve essa
- * lista em `campos_obrigatorios` e e ela que decide o asterisco e o que trava o
- * avanco. Os campos de posicao "ficha" ou "opcional" nao travam nada -- ficam
- * para o RH completar. A assinatura e a declaracao de veracidade sao sempre
- * obrigatorias.
+ * O QUE FICA PARA A V3b (desenhado e desactivado, com a razao): gravar rascunho, submeter,
+ * corrigir campos devolvidos, documentos, contrato e assinatura, pedidos. Enquanto a Edge nao
+ * exigir sessao nessas accoes, o portal nao as liga.
  *
- * O QUE NAO SE PEDE AQUI
- * ------------------------
- * A filiacao sindical deixou de se pedir neste ecra e na ficha da pessoa
- * (decisao de produto) -- a tabela `pessoas_sindicalizacao` e os dados ja
- * recolhidos antes desta mudanca continuam na base, inertes, sem via de
- * escrita nem de leitura pela aplicacao.
+ * O token do link vem do caminho e nao se copia para outro sitio; a sessao so vive em MEMORIA (ver
+ * `lib/hr/portalSessao.ts`): recarregar ou fechar o separador pede o codigo de novo. A lingua escolhe-se
+ * pelo navegador (pt, es, fr, de ou en; portugues por omissao), so neste ecra: quem abre o link nao tem
+ * sessao nem preferencia.
  *
- * A conta bancaria JA e gravada (desde 28/11): o IBAN viaja dentro de `dados`
- * como qualquer outra chave do contrato, e a RPC guarda-o cifrado no Vault. O
- * convite so aceita IBAN -- e o unico formato que a RPC sabe gravar -- e por
- * isso nao ha formato nenhum a escolher aqui.
- *
- * LINGUA E ERROS
- * --------------
- * Quem abre o link nao tem sessao: a lingua escolhe-se pelo navegador (pt, es,
- * fr, de ou en; portugues por omissao), so neste ecra. Todo o erro que o
- * servidor devolve acaba num texto nessa lingua -- nunca o codigo em bruto.
- *
- * TODO O CAMPO TEM ETIQUETA ASSOCIADA, e os obrigatorios sao anunciados a
- * leitor de ecra (nao so a vermelho) -- ver `obrigatorio` em `form/Campos.tsx`.
+ * O QUE SE REUTILIZA DO CONVITE QUE JA EXISTIA: o formulario (`ConvitePagina1` e `ConvitePagina2`, dentro
+ * de `PortalFormulario`), a saudacao (`ConviteSaudacao`, dentro de `TopoPortal`) e o cartao de link
+ * invalido (`ConviteCartaoLinkInvalido`) para todas as vistas sem acesso, menos a de processo em analise.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardDescription } from "@/components/ui/card";
-import { CheckCircle2, Loader2 } from "lucide-react";
-import { useTranslation } from "@/hooks/useTranslation";
+import { Loader2 } from "lucide-react";
 import { IdiomaForcadoProvider } from "@/contexts/IdiomaForcadoContext";
-import {
-  useConviteAdmissaoPublico,
-  type DadosSubmissaoConvite,
-} from "@/hooks/useConviteAdmissaoPublico";
-import { CamposTocadosProvider } from "@/components/hr/form/Campos";
-import { ConvitePagina1 } from "@/components/hr/convite/ConvitePagina1";
-import { ConvitePagina2 } from "@/components/hr/convite/ConvitePagina2";
+import { useTranslation } from "@/hooks/useTranslation";
+import { useConviteAdmissaoPublico } from "@/hooks/useConviteAdmissaoPublico";
+import { idiomaDoNavegador, type IdiomaConvite } from "@/lib/hr/conviteAdmissaoEcra";
+import { motivoDaVista, vistaDoConvite } from "@/lib/hr/portalAdmissao";
 import { ConviteCartaoLinkInvalido } from "@/components/hr/convite/ConviteCartaoLinkInvalido";
-import { ConviteSaudacao } from "@/components/hr/convite/ConviteSaudacao";
-import {
-  CODIGOS_PAGINA_2,
-  campoEhObrigatorio,
-  obrigatoriosResolvidos,
-  pendenciasDoRascunho,
-  type CodigoCampoObrigatorioAdmissao,
-} from "@/lib/hr/admissaoObrigatorios";
-import {
-  RASCUNHO_CONVITE_VAZIO,
-  construirPayloadConvite,
-  type RascunhoConvite,
-} from "@/lib/hr/conviteAdmissaoPayload";
-import {
-  campoDoErroDeServidor,
-  errosDeFormato,
-  idiomaDoNavegador,
-  type CampoComFormato,
-  type IdiomaConvite,
-} from "@/lib/hr/conviteAdmissaoEcra";
-import {
-  camposDeAdmissaoIncompleta,
-  mensagemErroAdmissao,
-  motivoDoCodigo,
-} from "@/lib/hr/errosAdmissao";
-import { useConviteAnexos } from "@/hooks/useConviteAnexos";
-import { ConviteAnexosCard } from "@/components/hr/convite/ConviteAnexosCard";
-
-/** Um debounce generoso: nao vale a pena gravar a cada tecla. */
-const DEBOUNCE_RASCUNHO_MS = 3000;
-
-/**
- * O tipo do rascunho, a forma vazia e a construcao do payload vivem em
- * `conviteAdmissaoPayload.ts` -- e la que o contrato de chaves com a Edge
- * Function e com a RPC esta amarrado por teste.
- */
-type Rascunho = RascunhoConvite;
-const VAZIO: Rascunho = RASCUNHO_CONVITE_VAZIO;
-
-/** O `id` de cada campo com validacao de formato, para saber se ja foi tocado. */
-const ID_DOM_DO_CAMPO: Record<CampoComFormato, string> = {
-  nif: "convite-nif",
-  niss: "convite-niss",
-  conta_numero: "convite-conta-numero",
-  conta_bic: "convite-conta-bic",
-};
-
-const CAMPOS_COM_FORMATO: readonly string[] = ["nif", "niss", "conta_numero", "conta_bic"];
-
-/**
- * Nada preenchido nem herdado: nao ha rascunho a guardar. A declaracao de
- * veracidade (`aceite`) nao conta -- nunca viaja num rascunho.
- */
-function rascunhoEstaVazio(r: Rascunho): boolean {
-  return (Object.keys(VAZIO) as Array<keyof Rascunho>).every(
-    (campo) => campo === "aceite" || r[campo] === VAZIO[campo],
-  );
-}
+import { PortalConsulta } from "@/components/hr/portal/PortalConsulta";
+import { PortalMoldura } from "@/components/hr/portal/PortalMoldura";
+import { PortalOtpDialogo } from "@/components/hr/portal/PortalOtpDialogo";
+import { PortalEmAnalise } from "@/components/hr/portal/PortalSemAcesso";
+import { PortalSessaoAtiva } from "@/components/hr/portal/PortalSessaoAtiva";
 
 export default function ConviteAdmissao() {
-  // A lingua deste ecra vem do navegador; o resto da aplicacao nao a muda.
-  // O provider faz com que os componentes partilhados da arvore (que chamam
-  // useTranslation() sem argumento) usem a mesma lingua.
+  // O provider faz com que os componentes da arvore (que chamam useTranslation() sem
+  // argumento) usem a mesma lingua; o resto da aplicacao nao a muda.
   const idioma = useMemo(() => idiomaDoNavegador(), []);
   return (
     <IdiomaForcadoProvider idioma={idioma}>
-      <ConviteAdmissaoEcra idioma={idioma} />
+      <PortalEcra idioma={idioma} />
     </IdiomaForcadoProvider>
   );
 }
 
-function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
+function PortalEcra({ idioma }: { idioma: IdiomaConvite }) {
   const { t } = useTranslation(idioma);
   const { token } = useParams<{ token: string }>();
-  const {
-    estado,
-    loading,
-    erroInicial,
-    motivo,
-    submetendo,
-    submeter,
-    gravarRascunho,
-    gravarRascunhoAoFechar,
-  } = useConviteAdmissaoPublico(token);
+  const portal = useConviteAdmissaoPublico(token);
+  const { sessaoAtiva, otp, pedirCodigo } = portal;
 
-  // Os ficheiros (cartao de cidadao, comprovativo de IBAN, fotografia) vivem
-  // num hook proprio e NAO entram no rascunho nem nos `dados` da submissao.
-  // Fica aqui, antes de qualquer return antecipado, porque hooks nao podem vir
-  // depois deles; adopta os ficheiros que o estado trouxe quando este chega.
-  const anexosConvite = useConviteAnexos(token, estado?.anexos);
+  const [dialogoAberto, setDialogoAberto] = useState(false);
+  const tituloRef = useRef<HTMLDivElement>(null);
 
-  // Uma remocao pedida e ainda por terminar conta como "em curso": submeter
-  // antes dela acabar promovia a ficha o ficheiro que a pessoa quis apagar.
-  // Conta-se aqui (e nao no cartao) para sobreviver a mudar de pagina.
-  const [aRemoverAnexos, setARemoverAnexos] = useState(0);
-  const removerAnexo = anexosConvite.remover;
-  const removerAnexoRastreado = useCallback(
-    async (id: string): Promise<void> => {
-      setARemoverAnexos((n) => n + 1);
-      try {
-        await removerAnexo(id);
-      } finally {
-        setARemoverAnexos((n) => n - 1);
-      }
-    },
-    [removerAnexo],
-  );
-  const anexosEmCurso = anexosConvite.emCurso || aRemoverAnexos > 0;
-
-  const [pagina, setPagina] = useState<1 | 2>(1);
-  const [rascunho, setRascunho] = useState<Rascunho>(VAZIO);
-  const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
-  const [mostrarTodos, setMostrarTodos] = useState(false);
-  const [concluido, setConcluido] = useState<{ avisos: string[] } | null>(null);
-  const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
-  const [errosServidor, setErrosServidor] = useState<Partial<Record<CampoComFormato, string>>>({});
-  const [erroAssinatura, setErroAssinatura] = useState<string | null>(null);
-  const [erroAceite, setErroAceite] = useState<string | null>(null);
-  const [rascunhoRestaurado, setRascunhoRestaurado] = useState(false);
-
-  const tocar = (campoId: string) =>
-    setTocados((anteriores) => {
-      if (anteriores.has(campoId)) return anteriores;
-      return new Set(anteriores).add(campoId);
-    });
-
-  const definir = <K extends keyof Rascunho>(campo: K, valor: Rascunho[K]) => {
-    setRascunho((anterior) => ({ ...anterior, [campo]: valor }));
-    // Mexer num campo tira-lhe o erro que o servidor lhe tinha posto.
-    if (CAMPOS_COM_FORMATO.includes(campo)) {
-      setErrosServidor((anteriores) => {
-        if (!(campo in anteriores)) return anteriores;
-        const { [campo as CampoComFormato]: _removido, ...resto } = anteriores;
-        return resto;
-      });
-    }
-    if (campo === "assinatura_nome") setErroAssinatura(null);
-    if (campo === "aceite") setErroAceite(null);
-  };
-
-  // Restaura o rascunho gravado (herdado do convite anterior, se o houve)
-  // assim que o token e validado. Uma so vez: depois disso e o utilizador quem
-  // manda no estado.
+  // FOCO. Quando a sessao abre ou acaba, o botao que o tinha desaparece e o foco cairia para o
+  // corpo da pagina: leva-se ao topo (a saudacao, que e focavel sem entrar na ordem de tabulacao).
+  const primeira = useRef(true);
   useEffect(() => {
-    if (rascunhoRestaurado || !estado) return;
-    const bruto = estado.rascunho;
-    if (bruto && typeof bruto === "object") {
-      setRascunho((anterior) => {
-        const restaurado = { ...anterior };
-        (Object.keys(VAZIO) as Array<keyof Rascunho>).forEach((campo) => {
-          // A "aceite" (declaracao de veracidade) nunca se restaura: nao se
-          // pre-assinala uma declaracao legal a partir de um rascunho.
-          if (campo === "aceite") return;
-          const valor = (bruto as Record<string, unknown>)[campo];
-          if (valor === undefined || valor === null) return;
-          if (typeof VAZIO[campo] === "boolean") {
-            (restaurado as Record<string, unknown>)[campo] = Boolean(valor);
-          } else {
-            (restaurado as Record<string, unknown>)[campo] = String(valor);
-          }
-        });
-        return restaurado;
-      });
-    }
-    setRascunhoRestaurado(true);
-  }, [estado, rascunhoRestaurado]);
-
-  // O rascunho a gravar: tudo menos a declaracao de veracidade, que e o
-  // unico campo que nunca deve sobreviver entre visitas.
-  const paraGravar = (r: Rascunho): Record<string, unknown> => {
-    const { aceite: _aceite, ...resto } = r;
-    return resto;
-  };
-
-  // Grava, com debounce, sempre que o rascunho muda -- so depois de o
-  // restauro inicial acontecer, para nao gravar de volta o que acabou de
-  // ser lido.
-  const rascunhoRef = useRef(rascunho);
-  rascunhoRef.current = rascunho;
-  useEffect(() => {
-    if (!rascunhoRestaurado || concluido) return;
-    const id = setTimeout(() => {
-      void gravarRascunho(paraGravar(rascunhoRef.current));
-    }, DEBOUNCE_RASCUNHO_MS);
-    return () => clearTimeout(id);
-  }, [rascunho, rascunhoRestaurado, concluido, gravarRascunho]);
-
-  // E ao fechar a aba -- o debounce acima pode nunca chegar a disparar.
-  //
-  // So se regista DEPOIS do restauro do rascunho e com o convite valido. Antes
-  // disso o rascunho local e o vazio, e a gravacao substitui o rascunho inteiro
-  // na base: fechar a aba a meio do carregamento apagava o rascunho herdado do
-  // convite anterior. Pelo mesmo motivo, um rascunho igual ao vazio nunca se
-  // envia (nao ha nada de novo a guardar e pode haver algo de real la).
-  const conviteValido = Boolean(estado) && !erroInicial;
-  useEffect(() => {
-    if (concluido || !rascunhoRestaurado || !conviteValido) return;
-    const aoFechar = () => {
-      if (rascunhoEstaVazio(rascunhoRef.current)) return;
-      gravarRascunhoAoFechar(paraGravar(rascunhoRef.current));
-    };
-    const aoMudarVisibilidade = () => {
-      if (document.visibilityState === "hidden") aoFechar();
-    };
-    window.addEventListener("pagehide", aoFechar);
-    document.addEventListener("visibilitychange", aoMudarVisibilidade);
-    return () => {
-      window.removeEventListener("pagehide", aoFechar);
-      document.removeEventListener("visibilitychange", aoMudarVisibilidade);
-    };
-  }, [concluido, rascunhoRestaurado, conviteValido, gravarRascunhoAoFechar]);
-
-  // FOCO. Ao mudar de pagina o botao que tinha o foco desaparece e o foco cairia
-  // para o corpo da pagina: leva-se ao topo (saudacao). Declarado ANTES do foco
-  // no campo invalido, para este ganhar quando ha os dois pedidos.
-  const topoRef = useRef<HTMLDivElement>(null);
-  const formularioRef = useRef<HTMLDivElement>(null);
-  const [pedidoFoco, setPedidoFoco] = useState(0);
-  const pedirFocoNoErro = () => setPedidoFoco((n) => n + 1);
-  const primeiraPagina = useRef(true);
-  useEffect(() => {
-    if (primeiraPagina.current) {
-      primeiraPagina.current = false;
+    if (primeira.current) {
+      primeira.current = false;
       return;
     }
-    topoRef.current?.scrollIntoView?.();
-    topoRef.current?.focus({ preventScroll: true });
-  }, [pagina]);
-  // Com erros, o foco vai para o primeiro campo invalido: o erro pode estar
-  // fora do ecra (telemovel) e um leitor de ecra nao o anuncia sozinho.
-  useEffect(() => {
-    if (pedidoFoco === 0) return;
-    formularioRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
-  }, [pedidoFoco]);
+    setDialogoAberto(false);
+    tituloRef.current?.focus();
+  }, [sessaoAtiva]);
 
-  // Os obrigatorios REAIS desta organizacao, cruzados com a lista fixa do
-  // ecra: `estado.campos_obrigatorios` traz so os de posicao "convite". Um
-  // array VAZIO e uma resposta (a organizacao nao pos nenhum no convite) e vale
-  // "nada e obrigatorio"; so a chave ausente (convite antigo, falha) cai na
-  // lista estatica de sempre.
-  const camposObrigatorios = useMemo(
-    () => obrigatoriosResolvidos(estado?.campos_obrigatorios),
-    [estado],
-  );
-
-  // Os obrigatorios das DUAS paginas -- a lista partilhada com a base (ver
-  // `admissaoObrigatorios.ts`). A base aplica a mesma lista no fim da
-  // submissao, sobre a ficha ja escrita; isto aqui e so para a pessoa ver o
-  // que lhe falta antes de tentar.
-  const pendencias = useMemo(
-    () => pendenciasDoRascunho(rascunho, camposObrigatorios),
-    [rascunho, camposObrigatorios],
-  );
-  const pendenciasTodas = useMemo(() => new Set<string>(pendencias), [pendencias]);
-  const pendencias1 = useMemo(
-    () => new Set<string>(pendencias.filter((codigo) => !CODIGOS_PAGINA_2.has(codigo))),
-    [pendencias],
-  );
-
-  // Formato (digito de controlo do NIF/NISS, IBAN): tambem trava o avanco.
-  const errosFormato = useMemo(
-    () => errosDeFormato({ nif: rascunho.nif, niss: rascunho.niss, conta_numero: rascunho.conta_numero, conta_bic: rascunho.conta_bic }),
-    [rascunho.nif, rascunho.niss, rascunho.conta_numero, rascunho.conta_bic],
-  );
-  const formatoErradoNaPagina1 = Boolean(errosFormato.nif || errosFormato.niss);
-
-  const erroDe = (campoId: keyof Rascunho): string | null => {
-    if (CAMPOS_COM_FORMATO.includes(campoId)) {
-      const campo = campoId as CampoComFormato;
-      if (errosServidor[campo]) return errosServidor[campo] ?? null;
-      const chave = errosFormato[campo];
-      if (chave && (mostrarTodos || tocados.has(ID_DOM_DO_CAMPO[campo]))) return t(chave);
-    }
-    if (!mostrarTodos && !tocados.has(campoId)) return null;
-    return pendenciasTodas.has(campoId) ? t("hr.convite.erroObrigatorio") : null;
-  };
-
-  const obrigatorio = (codigo: CodigoCampoObrigatorioAdmissao): boolean =>
-    campoEhObrigatorio(rascunho, codigo, camposObrigatorios);
-
-  const avancar = () => {
-    if (pendencias1.size > 0 || formatoErradoNaPagina1) {
-      setMostrarTodos(true);
-      pedirFocoNoErro();
-      return;
-    }
-    setMostrarTodos(false);
-    setErroSubmissao(null);
-    void gravarRascunho(paraGravar(rascunho));
-    setPagina(2);
-  };
-
-  /** Voltar a pagina 1: o erro da recusa pertencia a pagina que se deixa. */
-  const voltar = () => {
-    setErroSubmissao(null);
-    setPagina(1);
-  };
-
-  /** Uma recusa do servidor: marca o campo, ou diz o que falta, e leva a pessoa onde ha trabalho. */
-  const tratarRecusa = (corpo: { error?: string; campos?: unknown }) => {
-    const codigo = corpo.error?.split(":")[0].trim();
-    const mensagem = mensagemErroAdmissao(t, corpo);
-    const campo = campoDoErroDeServidor(codigo);
-    if (campo) {
-      setErrosServidor((anteriores) => ({ ...anteriores, [campo]: mensagem }));
-      setPagina(campo === "conta_numero" || campo === "conta_bic" ? 2 : 1);
-      pedirFocoNoErro();
-      return;
-    }
-    setErroSubmissao(mensagem);
-    if (codigo === "admissao_incompleta") {
-      setMostrarTodos(true);
-      const primeiro = camposDeAdmissaoIncompleta(corpo)[0];
-      if (primeiro) {
-        setPagina(CODIGOS_PAGINA_2.has(primeiro as CodigoCampoObrigatorioAdmissao) ? 2 : 1);
-      }
-      pedirFocoNoErro();
-    }
-  };
-
-  const submeterFormulario = async () => {
-    // Ficheiros ainda a subir: submeter agora deixava-os de fora sem avisar.
-    if (submetendo || anexosEmCurso) return;
-
-    // A assinatura e a declaracao pedem-se sempre; falta-lhes o erro, junto do
-    // campo, em vez de um botao que nao carrega e nao diz porque.
-    const faltaAssinatura = rascunho.assinatura_nome.trim() === "";
-    const faltaAceite = !rascunho.aceite;
-    setErroAssinatura(faltaAssinatura ? t("hr.convite.erro.assinatura") : null);
-    setErroAceite(faltaAceite ? t("hr.convite.erroObrigatorio") : null);
-    if (faltaAssinatura || faltaAceite) {
-      pedirFocoNoErro();
-      return;
-    }
-
-    // Faltar um obrigatorio, ou um numero com formato errado, nao e erro de
-    // servidor: mostra-se onde falta e, se for na pagina 1, volta-se la --
-    // submeter assim so gastava uma ida a base para ser recusado.
-    if (pendenciasTodas.size > 0) {
-      setMostrarTodos(true);
-      setErroSubmissao(t("hr.convite.erroObrigatorio"));
-      if (pendencias1.size > 0) setPagina(1);
-      pedirFocoNoErro();
-      return;
-    }
-    if (Object.keys(errosFormato).length > 0) {
-      setMostrarTodos(true);
-      setErroSubmissao(null);
-      setPagina(formatoErradoNaPagina1 ? 1 : 2);
-      pedirFocoNoErro();
-      return;
-    }
-
-    // O payload sai inteiro do contrato partilhado, conta bancaria incluida --
-    // ver `conviteAdmissaoPayload.ts`.
-    const dados: DadosSubmissaoConvite = construirPayloadConvite(rascunho);
-
-    setErroSubmissao(null);
-    const resultado = await submeter(dados, rascunho.assinatura_nome.trim());
-    if (!resultado.ok) {
-      tratarRecusa(resultado.corpoErro);
-      return;
-    }
-    setConcluido({ avisos: resultado.avisos });
-  };
-
-  if (loading) {
+  if (portal.carregando) {
     return (
       <div role="status" className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
-        <span className="sr-only">{t("common.loading")}</span>
+        <span className="sr-only">{t("portal.carregando")}</span>
       </div>
     );
   }
 
-  // Um motivo de convite devolvido pelos anexos (link expirado a meio do
-  // envio) vale o mesmo que um devolvido pela submissao: o link ja nao serve.
-  if (erroInicial || anexosConvite.erroConvite || !estado) {
-    const motivoFinal =
-      motivo ?? (anexosConvite.erroConvite ? motivoDoCodigo(anexosConvite.erroConvite) : "inexistente");
-    return <ConviteCartaoLinkInvalido t={t} motivo={motivoFinal} />;
-  }
-
-  if (concluido) {
+  const { convite } = portal;
+  const vista = vistaDoConvite(portal.erroInicial, convite);
+  // Em analise: so o estado (sem dados nem nome), dentro da moldura do portal.
+  if (vista === "analise" && convite) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="items-center text-center">
-            <CheckCircle2 className="h-10 w-10 text-primary" />
-            {/* Titulo de nivel 1: e a unica coisa desta pagina e o leitor de ecra tem de a anunciar. */}
-            <h1 className="text-2xl font-semibold leading-none tracking-tight">
-              {t("hr.convite.sucessoTitulo")}
-            </h1>
-            <CardDescription>{t("hr.convite.sucessoDescricao")}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
+      <PortalMoldura organizacao={convite.organizacao_nome} nome={convite.primeiro_nome}>
+        <PortalEmAnalise estado={convite.estado} />
+      </PortalMoldura>
     );
   }
+  // Link invalido, revogado, encerrado, expirado ou bloqueado: o cartao que o convite ja tinha.
+  if (vista !== "consulta" || !convite) {
+    return <ConviteCartaoLinkInvalido t={t} motivo={motivoDaVista(vista === "consulta" || vista === "analise" ? "invalido" : vista)} />;
+  }
 
-  const propsPagina = { t, rascunho, definir, erroDe, obrigatorio };
+  const confirmarIdentidade = () => {
+    setDialogoAberto(true);
+    // Reabrir o dialogo depois de cancelar nao gasta outro pedido (so 1 por minuto, 10 por dia).
+    if (!otp.pedido) void pedirCodigo();
+  };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-4 py-10">
-      {/* tabIndex -1: recebe o foco ao mudar de pagina, sem entrar na ordem de tabulacao. */}
-      <div ref={topoRef} id="convite-topo" tabIndex={-1} className="outline-none">
-        <ConviteSaudacao t={t} estado={estado} pagina={pagina} />
-      </div>
-
-      <CamposTocadosProvider onTocar={tocar} rotuloObrigatorio={t("hr.campos.obrigatorio")}>
-        <div ref={formularioRef} className="space-y-6">
-          {pagina === 1 && <ConvitePagina1 {...propsPagina} />}
-          {pagina === 2 && (
-            <ConvitePagina2
-              {...propsPagina}
-              erroAssinatura={erroAssinatura}
-              erroAceite={erroAceite}
-              anexos={
-                <ConviteAnexosCard
-                  t={t}
-                  idioma={idioma}
-                  estado={{ ...anexosConvite, remover: removerAnexoRastreado }}
-                />
-              }
-            />
-          )}
-
-          {erroSubmissao && (
-            <p role="alert" className="text-sm text-destructive">
-              {erroSubmissao}
-            </p>
-          )}
-
-          {pagina === 1 ? (
-            <div className="flex justify-end">
-              <Button onClick={avancar}>{t("hr.convite.seguinte")}</Button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <Button variant="ghost" onClick={voltar} disabled={submetendo}>
-                  {t("hr.convite.anterior")}
-                </Button>
-                <Button
-                  onClick={submeterFormulario}
-                  disabled={submetendo || anexosEmCurso}
-                  aria-describedby={anexosEmCurso ? "convite-aguardar-envio" : undefined}
-                >
-                  {submetendo && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                  {t("hr.convite.submeter")}
-                </Button>
-              </div>
-              {anexosEmCurso && (
-                <p
-                  id="convite-aguardar-envio"
-                  role="status"
-                  className="text-right text-sm text-muted-foreground"
-                >
-                  {t("hr.convite.anexos.aguardarEnvio")}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </CamposTocadosProvider>
-    </div>
+    <>
+      <PortalMoldura
+        organizacao={convite.organizacao_nome}
+        nome={convite.primeiro_nome}
+        aoSair={sessaoAtiva ? () => void portal.terminarSessao() : undefined}
+      >
+        {sessaoAtiva ? (
+          <PortalSessaoAtiva
+            convite={convite}
+            dados={portal.dados}
+            erroLeitura={portal.erroLeitura}
+            sessaoAExpirar={portal.sessaoAExpirar}
+            aoManterSessao={() => void portal.manterSessao()}
+            aoGravarSensiveis={portal.gravarSensiveis}
+            tituloRef={tituloRef}
+          />
+        ) : (
+          <PortalConsulta
+            convite={convite}
+            aviso={portal.aviso}
+            aoConfirmarIdentidade={confirmarIdentidade}
+            tituloRef={tituloRef}
+          />
+        )}
+      </PortalMoldura>
+      <PortalOtpDialogo
+        aberto={dialogoAberto && !sessaoAtiva}
+        otp={otp}
+        aoFechar={() => setDialogoAberto(false)}
+        aoPedirNovo={() => void pedirCodigo()}
+        aoConfirmar={portal.verificarCodigo}
+      />
+    </>
   );
 }

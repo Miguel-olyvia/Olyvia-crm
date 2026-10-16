@@ -40,7 +40,10 @@ export function ConvitePagina2({
   erroAssinatura,
   erroAceite,
   anexos,
+  editavel,
+  aposCampo,
 }: ConvitePagina2Props) {
+  const pode = (campo: keyof ConvitePagina2Props["rascunho"]) => editavel?.(campo) ?? true;
   return (
     <div className="space-y-4">
       <Card>
@@ -60,8 +63,10 @@ export function ConvitePagina2({
             obrigatorio={obrigatorio("conta_numero")}
             erro={erroDe("conta_numero")}
             valor={rascunho.conta_numero}
+            disabled={!pode("conta_numero")}
             onChange={(v) => definir("conta_numero", v)}
           />
+          {aposCampo?.conta_numero && <div className="sm:col-span-6">{aposCampo.conta_numero}</div>}
           <CampoTexto
             id="convite-conta-bic"
             label={t("hr.campos.swift")}
@@ -70,6 +75,7 @@ export function ConvitePagina2({
             obrigatorio={obrigatorio("conta_bic")}
             erro={erroDe("conta_bic")}
             valor={rascunho.conta_bic}
+            disabled={!pode("conta_bic")}
             onChange={(v) => definir("conta_bic", normalizarBic(v).slice(0, 11))}
           />
           <CampoTexto
@@ -79,6 +85,7 @@ export function ConvitePagina2({
             obrigatorio={obrigatorio("conta_titular")}
             erro={erroDe("conta_titular")}
             valor={rascunho.conta_titular}
+            disabled={!pode("conta_titular")}
             onChange={(v) => definir("conta_titular", v)}
           />
           <CampoTexto
@@ -88,6 +95,7 @@ export function ConvitePagina2({
             obrigatorio={obrigatorio("conta_banco")}
             erro={erroDe("conta_banco")}
             valor={rascunho.conta_banco}
+            disabled={!pode("conta_banco")}
             onChange={(v) => definir("conta_banco", v)}
           />
         </CardContent>
@@ -109,6 +117,7 @@ export function ConvitePagina2({
               value: tm,
               label: t(`hr.tamanhoFardamento.${tm}`),
             }))}
+            disabled={!pode("tamanho_cima")}
             onChange={(v) => definir("tamanho_cima", v)}
           />
           {rascunho.tamanho_cima === "outro" && (
@@ -116,6 +125,7 @@ export function ConvitePagina2({
               id="convite-tamanho-cima-detalhe"
               label={t("hr.fardamento.detalhe")}
               valor={rascunho.tamanho_cima_detalhe}
+              disabled={!pode("tamanho_cima_detalhe")}
               onChange={(v) => definir("tamanho_cima_detalhe", v)}
             />
           )}
@@ -130,6 +140,7 @@ export function ConvitePagina2({
               value: tm,
               label: rotuloTamanho(t, tm),
             }))}
+            disabled={!pode("tamanho_baixo")}
             onChange={(v) => definir("tamanho_baixo", v)}
           />
           {rascunho.tamanho_baixo === "outro" && (
@@ -137,6 +148,7 @@ export function ConvitePagina2({
               id="convite-tamanho-baixo-detalhe"
               label={t("hr.fardamento.detalhe")}
               valor={rascunho.tamanho_baixo_detalhe}
+              disabled={!pode("tamanho_baixo_detalhe")}
               onChange={(v) => definir("tamanho_baixo_detalhe", v)}
             />
           )}
@@ -151,6 +163,7 @@ export function ConvitePagina2({
               value: tm,
               label: rotuloTamanho(t, tm),
             }))}
+            disabled={!pode("tamanho_calcado")}
             onChange={(v) => definir("tamanho_calcado", v)}
           />
           {rascunho.tamanho_calcado === "outro" && (
@@ -158,6 +171,7 @@ export function ConvitePagina2({
               id="convite-tamanho-calcado-detalhe"
               label={t("hr.fardamento.detalhe")}
               valor={rascunho.tamanho_calcado_detalhe}
+              disabled={!pode("tamanho_calcado_detalhe")}
               onChange={(v) => definir("tamanho_calcado_detalhe", v)}
             />
           )}
@@ -177,12 +191,14 @@ export function ConvitePagina2({
             obrigatorio
             erro={erroAssinatura}
             valor={rascunho.assinatura_nome}
+            disabled={!pode("assinatura_nome")}
             onChange={(v) => definir("assinatura_nome", v)}
           />
           <div className="flex items-start gap-2">
             <Checkbox
               id="convite-aceite"
               checked={rascunho.aceite}
+              disabled={!pode("aceite")}
               aria-required="true"
               aria-invalid={erroAceite ? true : undefined}
               aria-describedby={erroAceite ? "convite-aceite-erro" : undefined}

@@ -3,12 +3,13 @@ import {
   camposDeAdmissaoIncompleta,
   chaveDeErroAdmissao,
   CODIGOS_SEM_TEXTO_PROPRIO,
+  CODIGOS_V2_SEM_TEXTO_PROPRIO,
   codigoDeErroEdge,
   corpoDeErroEdge,
   mensagemErroAdmissao,
   motivoDoCodigo,
 } from "../errosAdmissao";
-import { CODIGOS_PUBLICOS } from "../../../../supabase/functions/convite-admissao/erros";
+import { CODIGOS_PUBLICOS, CODIGOS_V2 } from "../../../../supabase/functions/convite-admissao/erros";
 import { translations } from "@/translations/index";
 
 /**
@@ -63,6 +64,79 @@ describe("contrato com CODIGOS_PUBLICOS da Edge Function convite-admissao", () =
       expect(tabela.pt?.[entrada.chave], `pt: ${entrada.chave}`).toBeTruthy();
       expect(tabela.en?.[entrada.chave], `en: ${entrada.chave}`).toBeTruthy();
     }
+  });
+});
+
+/**
+ * Os codigos da V2 (HRA31 a HRA41): o ecra do RH diz-os em portugues claro, ou
+ * declara de proposito que nao tem texto proprio. `limite_excedido` (HRA41) e
+ * acrescentado a mao porque a Edge Function o passa a devolver (429) nas
+ * accoes cancelar e prolongar.
+ */
+describe("contrato com CODIGOS_V2 da Edge Function convite-admissao", () => {
+  const v2: readonly string[] = [...CODIGOS_V2, "limite_excedido"];
+
+  it.each(v2.map((c) => [c]))("%s tem chave de traducao ou excepcao explicita", (codigo) => {
+    const temChave = chaveDeErroAdmissao(codigo) !== null;
+    const eExcepcao = CODIGOS_V2_SEM_TEXTO_PROPRIO.includes(codigo);
+    expect(temChave || eExcepcao).toBe(true);
+    expect(temChave && eExcepcao).toBe(false);
+  });
+
+  it("as excepcoes da V2 sao codigos da V2 (nada de excepcoes mortas)", () => {
+    for (const codigo of CODIGOS_V2_SEM_TEXTO_PROPRIO) expect(v2).toContain(codigo);
+  });
+
+  it.each([
+    ["nao_encontrado", "hr.convite.erro.naoEncontrado"],
+    ["processo_aberto", "hr.convite.erro.processoAberto"],
+    ["organizacao_nao_empregadora", "hr.convite.erro.organizacaoNaoEmpregadora"],
+    ["email_invalido", "hr.convite.erroEmailInvalido"],
+    ["motivo_invalido", "hr.convite.erro.motivoInvalido"],
+    ["estado_invalido", "hr.convite.erro.estadoInvalido"],
+    ["dias_invalidos", "hr.convite.erro.diasInvalidos"],
+    ["prazo_excedido", "hr.convite.erro.prazoExcedido"],
+    ["limite_excedido", "hr.convite.erro.limiteExcedido"],
+    // V3a: o portal da pessoa (OTP e sessao).
+    ["otp_espera", "portal.erro.otpEspera"],
+    ["otp_limite_diario", "portal.erro.otpLimiteDiario"],
+    ["otp_expirado", "portal.erro.otpExpirado"],
+    ["otp_bloqueado", "portal.erro.otpBloqueado"],
+    ["otp_invalido", "portal.erro.otpInvalidoSemContagem"],
+    ["otp_indisponivel", "portal.erro.emailNaoEnviado"],
+    ["campo_bloqueado", "portal.erro.campoBloqueado"],
+    ["sessao_ausente", "portal.erro.sessaoExpirada"],
+    ["sessao_expirada", "portal.erro.sessaoExpirada"],
+    ["sessao_substituida", "portal.erro.sessaoSubstituida"],
+    ["portal_em_atualizacao", "portal.erro.emAtualizacao"],
+  ])("%s -> %s", (codigo, chave) => {
+    expect(chaveDeErroAdmissao(codigo)?.chave).toBe(chave);
+  });
+
+  it("o texto de cada codigo novo do portal diz-se em portugues e em ingles, sem o codigo em bruto", () => {
+    const tabela = translations as unknown as Record<string, Record<string, string>>;
+    for (const codigo of ["otp_espera", "otp_limite_diario", "otp_expirado", "otp_bloqueado", "otp_invalido", "otp_indisponivel", "campo_bloqueado", "sessao_ausente", "sessao_expirada", "sessao_substituida", "portal_em_atualizacao"]) {
+      const chave = chaveDeErroAdmissao(codigo)?.chave ?? "";
+      for (const lingua of ["pt", "en"]) {
+        expect(tabela[lingua][chave], `${lingua}/${codigo}`).toBeTruthy();
+        expect(tabela[lingua][chave], `${lingua}/${codigo}`).not.toContain(codigo);
+      }
+    }
+  });
+
+  it("cada chave da V2 existe em pt e en", () => {
+    const tabela = translations as unknown as Record<string, Record<string, string>>;
+    for (const codigo of v2) {
+      const entrada = chaveDeErroAdmissao(codigo);
+      if (!entrada) continue;
+      expect(tabela.pt?.[entrada.chave], `pt: ${entrada.chave}`).toBeTruthy();
+      expect(tabela.en?.[entrada.chave], `en: ${entrada.chave}`).toBeTruthy();
+    }
+  });
+
+  it("limite_excedido diz em portugues claro que se atingiu o limite de accoes por hora", () => {
+    const tabela = translations as unknown as Record<string, Record<string, string>>;
+    expect(tabela.pt["hr.convite.erro.limiteExcedido"]).toBe("Atingiu o limite de ações por hora, tente mais tarde.");
   });
 });
 

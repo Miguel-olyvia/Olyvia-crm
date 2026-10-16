@@ -15,6 +15,11 @@ vi.mock("@/lib/observability/captureFlowError", () => ({
   captureFlowError: (...args: unknown[]) => captureFlowError(...args),
 }));
 
+let companhiaActiva: { id: string } | null = { id: "org-nike" };
+vi.mock("@/contexts/CompanyContext", () => ({
+  useCompany: () => ({ activeCompany: companhiaActiva }),
+}));
+
 import { useEnviarConviteAdmissao } from "@/hooks/useEnviarConviteAdmissao";
 import { getLocalizedFallback } from "@/utils/friendlyError";
 
@@ -39,15 +44,24 @@ function erroHttp(corpo: unknown, status: number) {
 beforeEach(() => {
   invoke.mockReset();
   captureFlowError.mockReset();
+  companhiaActiva = { id: "org-nike" };
 });
 
 describe("useEnviarConviteAdmissao -- sucesso", () => {
-  it("chama a Edge Function com a accao criar, a pessoa e o email", async () => {
+  it("chama a Edge Function com a accao criar, a pessoa, a organizacao activa e o email", async () => {
     invoke.mockResolvedValue({ data: { email_enviado: true, convite_id: "c1" }, error: null });
     await enviar();
     expect(invoke).toHaveBeenCalledWith("convite-admissao", {
-      body: { action: "criar", pessoa_id: "pessoa-1", email: "ana@exemplo.pt" },
+      body: { action: "criar", pessoa_id: "pessoa-1", organization_id: "org-nike", email: "ana@exemplo.pt" },
     });
+  });
+
+  it("sem organizacao activa nao chama a Edge Function (o pedido exige organization_id)", async () => {
+    companhiaActiva = null;
+    const r = await enviar();
+    expect(r.ok).toBe(false);
+    expect(r.erro).toBe(GENERICO());
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("email enviado: sem link, sem semLink", async () => {
@@ -115,6 +129,27 @@ describe("useEnviarConviteAdmissao -- recusas de negocio", () => {
     expect(r.erro).not.toBe(GENERICO());
     expect(r.erro).not.toContain(codigo);
     expect(captureFlowError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["processo_aberto", 409, "hr.convite.erro.processoAberto"],
+    ["nao_encontrado", 404, "hr.convite.erro.naoEncontrado"],
+    ["organizacao_nao_empregadora", 403, "hr.convite.erro.organizacaoNaoEmpregadora"],
+    ["email_invalido", 400, "hr.convite.erroEmailInvalido"],
+  ])("%s: texto proprio da V2 (nunca o codigo) e nada vai para o Sentry", async (codigo, status, chave) => {
+    invoke.mockResolvedValue({ data: null, error: erroHttp({ error: codigo }, status) });
+    const r = await enviar();
+    expect(r.erro).toBe(getLocalizedFallback(chave));
+    expect(r.erro).not.toBe(GENERICO());
+    expect(r.erro).not.toContain(codigo);
+    expect(captureFlowError).not.toHaveBeenCalled();
+  });
+
+  it.each(["token_invalido", "token_repetido"])("%s e defeito do servidor: texto generico", async (codigo) => {
+    invoke.mockResolvedValue({ data: null, error: erroHttp({ error: codigo }, 500) });
+    const r = await enviar();
+    expect(r.erro).toBe(GENERICO());
+    expect(r.erro).not.toContain(codigo);
   });
 
   it.each(["pedido_invalido", "demasiadas_tentativas"])(

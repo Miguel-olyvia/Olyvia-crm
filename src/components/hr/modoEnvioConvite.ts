@@ -1,16 +1,15 @@
 /**
- * Em que modo abre o dialogo de envio a partir do botao de topo da ficha.
+ * Quando o botao de topo "Enviar convite" da ficha serve.
  *
- * Com um convite ainda PENDENTE, abrir em "enviar" com o e-mail pessoal da
- * ficha como sugestao deixava o RH confirmar um e-mail diferente do do convite
- * actual: o servidor so herda o rascunho com o MESMO e-mail, por isso a pessoa
- * perdia o que ja tinha escrito, sem aviso. Com convite pendente (e e-mail de
- * destino conhecido) abre-se em "reenviar", que parte do e-mail do convite.
+ * Com a V2 ha UM processo de admissao aberto por pessoa: a Edge Function
+ * recusa um segundo convite (`processo_aberto`). So se oferece enviar quando
+ * NAO ha processo aberto (nenhum convite, ou concluido, rejeitado, cancelado).
+ * Com processo aberto, as accoes sao Prolongar e Cancelar, no cartao do
+ * estado. Substituir o link de um processo aberto e a etapa E3.
  */
 import type { ResumoConvite } from "@/hooks/useConviteAdmissaoResumo";
+import { processoAberto } from "@/lib/hr/estadoAdmissao";
 
-export function modoDeEnvioDoConvite(
-  resumo: Pick<ResumoConvite, "estado" | "emailDestino"> | null | undefined,
-): "enviar" | "reenviar" {
-  return resumo?.estado === "pendente" && resumo.emailDestino ? "reenviar" : "enviar";
+export function podeEnviarNovoConvite(resumo: Pick<ResumoConvite, "estado"> | null | undefined): boolean {
+  return !resumo || !processoAberto(resumo.estado);
 }

@@ -20,14 +20,8 @@ const CHAVES_LADO_RH: readonly string[] = [
   "hr.convite.linkCopiado",
   "hr.convite.linkUmaVez",
   "hr.convite.linkDoConvite",
-  "hr.convite.reenviar",
-  "hr.convite.tituloReenviar",
   "hr.convite.emailNaoEnviadoBadge",
   "hr.convite.estado.titulo",
-  "hr.convite.estado.pendente",
-  "hr.convite.estado.pendenteSemEmail",
-  "hr.convite.estado.usado",
-  "hr.convite.estado.expirado",
   "hr.convite.estado.bloqueado",
   "hr.convite.estado.desconhecido",
   "hr.convite.estado.recusaDuplicado",
@@ -59,7 +53,6 @@ const CHAVES_LADO_RH: readonly string[] = [
   "hr.convite.erro.validadeInvalida",
   "hr.convite.erro.inesperado",
   // Formulario interno
-  "hr.form.camposFicamPendencia",
   "hr.form.avisoCampoRhPendente",
 ];
 
@@ -77,10 +70,6 @@ describe("traducoes do lado do RH da admissao", () => {
   it.each(LINGUAS)("%s: os textos com {{nome}} e companhia mantem os parametros", (lingua) => {
     const tabela = translations[lingua] as Record<string, string>;
     const esperados: Record<string, string[]> = {
-      "hr.convite.estado.pendente": ["email", "data"],
-      "hr.convite.estado.pendenteSemEmail": ["data"],
-      "hr.convite.estado.usado": ["data"],
-      "hr.convite.estado.expirado": ["data"],
       "hr.convite.estado.recusaDuplicado": ["campo", "nome"],
       "hr.convite.estado.ultimaRecusa": ["mensagem"],
       "hr.duplicados.nifNaFicha": ["nome"],

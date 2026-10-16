@@ -1,30 +1,39 @@
 /**
- * O botao de topo "Enviar convite" da ficha: com um convite ainda pendente para
- * OUTRO e-mail, abrir em modo "enviar" com o e-mail pessoal sugerido substituia
- * o convite antigo sem o rascunho (o servidor so o herda com o mesmo e-mail) e a
- * pessoa perdia o que tinha escrito, sem aviso. Com convite pendente, abre-se
- * em "reenviar", com o e-mail do convite actual.
+ * O botao de topo "Enviar convite" da ficha. Com a V2 ha UM processo de
+ * admissao aberto por pessoa e a Edge Function recusa um segundo convite
+ * (`processo_aberto`): so se oferece enviar quando nao ha processo aberto.
+ * Substituir o link de um processo aberto e a etapa E3, nao este botao.
  */
 import { describe, it, expect } from "vitest";
-import { modoDeEnvioDoConvite } from "@/components/hr/modoEnvioConvite";
+import { podeEnviarNovoConvite } from "@/components/hr/modoEnvioConvite";
 
-describe("modoDeEnvioDoConvite", () => {
-  it("sem convite, e o primeiro envio", () => {
-    expect(modoDeEnvioDoConvite(null)).toBe("enviar");
+describe("podeEnviarNovoConvite", () => {
+  it("sem convite nenhum, envia", () => {
+    expect(podeEnviarNovoConvite(null)).toBe(true);
+    expect(podeEnviarNovoConvite(undefined)).toBe(true);
   });
 
-  it("com um convite pendente com e-mail, reenvia (para nao perder o rascunho)", () => {
-    expect(modoDeEnvioDoConvite({ estado: "pendente", emailDestino: "outro@x.pt" })).toBe("reenviar");
+  it.each([
+    "convidada",
+    "em_preenchimento",
+    "submetida",
+    "devolvida",
+    "aprovada",
+    "a_aguardar_assinaturas",
+    "assinaturas_concluidas",
+    "a_aguardar_ativacao",
+  ] as const)("com o processo %s aberto, nao se envia outro", (estado) => {
+    expect(podeEnviarNovoConvite({ estado })).toBe(false);
   });
 
-  it("pendente sem e-mail de destino gravado nao tem para onde reenviar: envia", () => {
-    expect(modoDeEnvioDoConvite({ estado: "pendente", emailDestino: null })).toBe("enviar");
-  });
-
-  it.each(["usado", "expirado", "substituido", "bloqueado"] as const)(
-    "um convite %s nao conta como pendente: envia",
+  it.each(["concluida", "rejeitada", "cancelada", "terminado"] as const)(
+    "um processo %s ja nao esta aberto: envia",
     (estado) => {
-      expect(modoDeEnvioDoConvite({ estado, emailDestino: "a@b.pt" })).toBe("enviar");
+      expect(podeEnviarNovoConvite({ estado })).toBe(true);
     },
   );
+
+  it("estado desconhecido: nao se sabe se ha processo aberto, nao se oferece enviar", () => {
+    expect(podeEnviarNovoConvite({ estado: "desconhecido" })).toBe(false);
+  });
 });

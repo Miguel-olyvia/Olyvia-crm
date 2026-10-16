@@ -51,7 +51,7 @@ describe("useTranslation e a lingua forcada do ecra publico", () => {
         </IdiomaForcadoProvider>
       </LanguageProvider>,
     );
-    expect(screen.getByTestId("filho").textContent).toBe("pt|Obrigatorio");
+    expect(screen.getByTestId("filho").textContent).toBe("pt|Obrigatório");
   });
 
   it("nao grava a lingua forcada no armazenamento do visitante", () => {

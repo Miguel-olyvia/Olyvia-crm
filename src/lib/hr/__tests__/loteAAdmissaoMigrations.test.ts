@@ -602,7 +602,7 @@ describe("migration 20261210020000 -- as RPCs de configuracao", () => {
 // -----------------------------------------------------------------------------
 
 const EDGE_INDEX = Object.values(
-  import.meta.glob("../../../../supabase/functions/convite-admissao/index.ts", {
+  import.meta.glob("../../../../supabase/functions/convite-admissao/handler.ts", {
     query: "?raw",
     import: "default",
     eager: true,
@@ -612,12 +612,13 @@ const EDGE_INDEX = Object.values(
 describe("a Edge Function convite-admissao alinha com rpc_hr_convite_admissao_criar", () => {
   const edge = semComentarios(EDGE_INDEX);
 
-  it("passa p_actor com o id de auth.users de quem chamou, e nao um anew_users.id", () => {
-    expect(edge).toMatch(/p_actor:\s*authUidChamador/);
+  it("passa p_actor com o id de auth.users derivado do JWT, e nao um anew_users.id nem o do corpo", () => {
+    expect(edge).toMatch(/p_actor:\s*args\.actor/);
+    expect(edge).toMatch(/const actor = await utilizadorDoJwt\(svc, jwt\)/);
     expect(edge).not.toMatch(/p_actor_id/);
     expect(edge).not.toMatch(/from\("anew_users"\)/);
     // O mesmo uid que a Edge usa para verificar a permissao.
-    expect(edge).toMatch(/_auth_uid:\s*authUidChamador/);
+    expect(edge).toMatch(/_auth_uid:\s*actor/);
   });
 
   it("chama criar so com as cinco chaves que a assinatura da base tem", () => {
@@ -631,21 +632,21 @@ describe("a Edge Function convite-admissao alinha com rpc_hr_convite_admissao_cr
   });
 
   it("le o retorno (convite_id, rascunho_herdado) pela funcao pura e nao como um uuid solto", () => {
-    expect(edge).toMatch(/lerResultadoCriar\(resultadoCriar\)/);
+    expect(edge).toMatch(/lerResultadoCriar\(data\)/);
     expect(edge).not.toMatch(/data:\s*conviteId/);
   });
 
-  it("so devolve o link por linkParaOCriador (rascunho herdado nunca o mostra)", () => {
-    expect(edge).toMatch(/linkParaOCriador\(\{\s*emailEnviado,\s*rascunhoHerdado,/);
+  it("so devolve o link por linkParaOCriador (so quando o e-mail falha; a V2 nao herda rascunho)", () => {
+    expect(edge).toMatch(/linkParaOCriador\(\{\s*emailEnviado:\s*envio\.enviado,/);
+    expect(edge).not.toMatch(/rascunhoHerdado/);
     // O link no corpo do e-mail e legitimo; o da resposta ao RH nunca sai de `emailEnviado ? null : ...`.
     expect(edge).not.toMatch(/link\s*=\s*emailEnviado\s*\?/);
     expect(edge).toMatch(/\blink,\s*\}\);/);
   });
 
   it("salta o registo do envio sem convite_id e trata o false do boolean", () => {
-    expect(edge).toMatch(/if \(!conviteId\) \{[\s\S]*?\} else \{[\s\S]*?rpc_hr_convite_admissao_registar_envio/);
-    expect(edge).toMatch(/const \{ data: registado, error: erroRegisto \}/);
-    expect(edge).toMatch(/registado !== true/);
+    expect(edge).toMatch(/if \(!conviteId\) \{[\s\S]*?return;[\s\S]*?rpc_hr_convite_admissao_registar_envio/);
+    expect(edge).toMatch(/else if \(data !== true\)/);
   });
 });
 

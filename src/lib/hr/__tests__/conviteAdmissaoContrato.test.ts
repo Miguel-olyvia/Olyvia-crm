@@ -69,7 +69,7 @@ const MIGRATIONS = import.meta.glob("../../../../supabase/migrations/*.sql", {
 }) as Record<string, string>;
 
 const EDGE = Object.values(
-  import.meta.glob("../../../../supabase/functions/convite-admissao/index.ts", {
+  import.meta.glob("../../../../supabase/functions/convite-admissao/handler.ts", {
     query: "?raw",
     import: "default",
     eager: true,

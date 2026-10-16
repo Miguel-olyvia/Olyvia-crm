@@ -12,22 +12,12 @@ import { translations } from "@/translations/index";
 const LINGUAS = ["en", "pt", "es", "fr", "de"] as const;
 
 const CHAVES_NOVAS: readonly string[] = [
-  "hr.form.enviarConvite",
-  "hr.form.enviarConviteAjudaLigado",
-  "hr.form.enviarConviteAjudaDesligado",
-  "hr.form.criarEEnviarConvite",
-  "hr.form.ajudaTitularBanco",
-  "hr.form.semPermissaoBancarios",
   "hr.form.seccoes.fardamento",
-  "hr.form.camposFicamPendencia",
   "hr.form.conviteSemPermissao",
-  "hr.form.criarMotivo.nomes",
   "hr.form.criarMotivo.configuracao",
   "hr.form.criarMotivo.duplicado",
   "hr.form.criarMotivo.sinal",
   "hr.form.configuracaoSemAcesso",
-  "hr.form.semPermissaoFardamento",
-  "hr.form.semPermissaoIdentificacao",
 ];
 
 /** Reutilizadas do convite pelo formulario completo: tem de continuar a existir. */
@@ -64,6 +54,17 @@ const REMOVIDAS: readonly string[] = [
   // O aviso de "sem permissao" ao criar com convite deixou de existir: o
   // interruptor fica desactivado (hr.form.conviteSemPermissao).
   "hr.form.conviteNaoAberto.semPermissao",
+  // Eram do assistente antigo de 5 passos (apagado na E1b): ninguem as le.
+  "hr.form.enviarConvite",
+  "hr.form.enviarConviteAjudaLigado",
+  "hr.form.enviarConviteAjudaDesligado",
+  "hr.form.criarEEnviarConvite",
+  "hr.form.ajudaTitularBanco",
+  "hr.form.semPermissaoBancarios",
+  "hr.form.camposFicamPendencia",
+  "hr.form.criarMotivo.nomes",
+  "hr.form.semPermissaoFardamento",
+  "hr.form.semPermissaoIdentificacao",
 ];
 
 describe("traducoes do formulario Nova pessoa completo", () => {

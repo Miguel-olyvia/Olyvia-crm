@@ -36,24 +36,44 @@ interface ZonaAnexosNovaPessoaProps {
   permissoes: PermissoesEscritaAnexos;
   /** A ficha esta a ser criada: nada se escolhe nem se retira. */
   desactivado: boolean;
+  /**
+   * So estes tipos (por omissao, todos). O painel «Nova pessoa» poe o cartao e a fotografia na aba dos dados pessoais e o
+   * comprovativo de IBAN na do banco, cada um onde faz sentido.
+   */
+  tipos?: readonly TipoAnexoRh[];
+  /** Sem titulo, ajuda e moldura: quando quem a usa ja tem a sua propria seccao. */
+  semMoldura?: boolean;
 }
 
-export function ZonaAnexosNovaPessoa({ estado, permissoes, desactivado }: ZonaAnexosNovaPessoaProps) {
+export function ZonaAnexosNovaPessoa({
+  estado,
+  permissoes,
+  desactivado,
+  tipos: tiposPedidos = TIPOS_ANEXO_CONVITE,
+  semMoldura = false,
+}: ZonaAnexosNovaPessoaProps) {
   const { t, language } = useTranslation();
-  const tipos = TIPOS_ANEXO_CONVITE.filter((tipo) => podeAnexarTipo(tipo, permissoes));
+  const tipos = tiposPedidos.filter((tipo) => podeAnexarTipo(tipo, permissoes));
   if (tipos.length === 0) return null;
 
+  // O limite (4 ficheiros no total) conta TODOS os tipos, mesmo os que esta zona nao mostra.
   const total = TIPOS_ANEXO_CONVITE.reduce((soma, tipo) => soma + estado.ficheiros[tipo].length, 0);
 
   return (
-    <section aria-labelledby="hr-novo-anexos-titulo" className="space-y-2 border-t px-5 py-3">
-      <div>
-        <h3 id="hr-novo-anexos-titulo" className="text-sm font-medium">
-          {t("hr.anexos.novaPessoa.titulo")}
-        </h3>
-        <p className="text-xs text-muted-foreground">{t("hr.anexos.novaPessoa.ajuda")}</p>
-      </div>
-      <ul className="max-h-40 divide-y overflow-y-auto">
+    <section
+      aria-labelledby={semMoldura ? undefined : "hr-novo-anexos-titulo"}
+      aria-label={semMoldura ? t("hr.anexos.novaPessoa.titulo") : undefined}
+      className={semMoldura ? "space-y-2" : "space-y-2 border-t px-5 py-3"}
+    >
+      {!semMoldura && (
+        <div>
+          <h3 id="hr-novo-anexos-titulo" className="text-sm font-medium">
+            {t("hr.anexos.novaPessoa.titulo")}
+          </h3>
+          <p className="text-xs text-muted-foreground">{t("hr.anexos.novaPessoa.ajuda")}</p>
+        </div>
+      )}
+      <ul className={semMoldura ? "divide-y" : "max-h-40 divide-y overflow-y-auto"}>
         {tipos.map((tipo) => (
           <LinhaNova
             key={tipo}

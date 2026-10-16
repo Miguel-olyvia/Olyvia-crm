@@ -19,7 +19,8 @@ import {
 } from "@/types/hr";
 import type { PaginaConviteProps } from "@/components/hr/convite/tiposConvite";
 
-export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: PaginaConviteProps) {
+export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio, editavel, aposCampo }: PaginaConviteProps) {
+  const pode = (campo: keyof PaginaConviteProps["rascunho"]) => editavel?.(campo) ?? true;
   return (
     <div className="space-y-4">
       <Card>
@@ -34,6 +35,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("data_nascimento")}
             erro={erroDe("data_nascimento")}
             valor={rascunho.data_nascimento}
+            disabled={!pode("data_nascimento")}
             onChange={(v) => definir("data_nascimento", v)}
           />
           <CampoSelect
@@ -44,6 +46,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             valor={rascunho.genero}
             vazioLabel={t("hr.campos.semValor")}
             opcoes={GENEROS.map((g) => ({ value: g, label: t(`hr.genero.${g}`) }))}
+            disabled={!pode("genero")}
             onChange={(v) => definir("genero", v)}
           />
           <CampoPais
@@ -52,6 +55,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("nacionalidade")}
             erro={erroDe("nacionalidade")}
             valor={rascunho.nacionalidade}
+            disabled={!pode("nacionalidade")}
             onChange={(v) => definir("nacionalidade", v)}
           />
           <CampoTexto
@@ -60,6 +64,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("telefone_pessoal")}
             erro={erroDe("telefone_pessoal")}
             valor={rascunho.telefone_pessoal}
+            disabled={!pode("telefone_pessoal")}
             onChange={(v) => definir("telefone_pessoal", v)}
           />
           <CampoTexto
@@ -69,6 +74,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("email_pessoal")}
             erro={erroDe("email_pessoal")}
             valor={rascunho.email_pessoal}
+            disabled={!pode("email_pessoal")}
             onChange={(v) => definir("email_pessoal", v)}
           />
           <CampoSelect
@@ -79,6 +85,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             valor={rascunho.estado_civil}
             vazioLabel={t("hr.campos.semValor")}
             opcoes={ESTADOS_CIVIS.map((e) => ({ value: e, label: t(`hr.estadoCivil.${e}`) }))}
+            disabled={!pode("estado_civil")}
             onChange={(v) => definir("estado_civil", v)}
           />
           <CampoTexto
@@ -91,6 +98,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             erro={erroDe("dependentes")}
             ajuda={t("hr.convite.ajudaDependentesZero")}
             valor={rascunho.dependentes}
+            disabled={!pode("dependentes")}
             onChange={(v) => definir("dependentes", v)}
           />
           {rascunho.estado_civil === "casado" || rascunho.estado_civil === "uniao_de_facto" ? (
@@ -105,6 +113,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
                 value: s,
                 label: t(`hr.conjugeSituacaoProfissional.${s}`),
               }))}
+              disabled={!pode("conjuge_situacao_profissional")}
               onChange={(v) => definir("conjuge_situacao_profissional", v)}
             />
           ) : null}
@@ -118,6 +127,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             erro={erroDe("dependentes_deficientes")}
             ajuda={t("hr.convite.ajudaDependentesZero")}
             valor={rascunho.dependentes_deficientes}
+            disabled={!pode("dependentes_deficientes")}
             onChange={(v) => definir("dependentes_deficientes", v)}
           />
         </CardContent>
@@ -134,6 +144,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("naturalidade_freguesia")}
             erro={erroDe("naturalidade_freguesia")}
             valor={rascunho.naturalidade_freguesia}
+            disabled={!pode("naturalidade_freguesia")}
             onChange={(v) => definir("naturalidade_freguesia", v)}
           />
           <CampoTexto
@@ -142,6 +153,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("naturalidade_concelho")}
             erro={erroDe("naturalidade_concelho")}
             valor={rascunho.naturalidade_concelho}
+            disabled={!pode("naturalidade_concelho")}
             onChange={(v) => definir("naturalidade_concelho", v)}
           />
           <CampoPais
@@ -150,6 +162,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("naturalidade_pais")}
             erro={erroDe("naturalidade_pais")}
             valor={rascunho.naturalidade_pais}
+            disabled={!pode("naturalidade_pais")}
             onChange={(v) => definir("naturalidade_pais", v)}
           />
           <CampoSelect
@@ -163,6 +176,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
               value: h,
               label: t(`hr.habilitacaoAcademica.${h}`),
             }))}
+            disabled={!pode("habilitacao_academica")}
             onChange={(v) => definir("habilitacao_academica", v)}
           />
           <CampoTexto
@@ -172,6 +186,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("habilitacao_data_conclusao")}
             erro={erroDe("habilitacao_data_conclusao")}
             valor={rascunho.habilitacao_data_conclusao}
+            disabled={!pode("habilitacao_data_conclusao")}
             onChange={(v) => definir("habilitacao_data_conclusao", v)}
           />
         </CardContent>
@@ -193,6 +208,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
               value: tp,
               label: t(`hr.tipoDocumento.${tp}`),
             }))}
+            disabled={!pode("tipo_documento")}
             onChange={(v) => definir("tipo_documento", v)}
           />
           <CampoTexto
@@ -201,6 +217,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("numero_documento")}
             erro={erroDe("numero_documento")}
             valor={rascunho.numero_documento}
+            disabled={!pode("numero_documento")}
             onChange={(v) => definir("numero_documento", v)}
           />
           <CampoTexto
@@ -210,6 +227,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("validade_documento")}
             erro={erroDe("validade_documento")}
             valor={rascunho.validade_documento}
+            disabled={!pode("validade_documento")}
             onChange={(v) => definir("validade_documento", v)}
           />
           <CampoTexto
@@ -218,6 +236,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("nif")}
             erro={erroDe("nif")}
             valor={rascunho.nif}
+            disabled={!pode("nif")}
             onChange={(v) => definir("nif", v)}
           />
           <CampoTexto
@@ -226,12 +245,15 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("niss")}
             erro={erroDe("niss")}
             valor={rascunho.niss}
+            disabled={!pode("niss")}
             onChange={(v) => definir("niss", v.replace(/\s+/g, ""))}
           />
+          {aposCampo?.niss && <div className="sm:col-span-2">{aposCampo.niss}</div>}
           <CampoTexto
             id="convite-carta-numero"
             label={t("hr.campos.cartaConducaoNumero")}
             valor={rascunho.carta_conducao_numero}
+            disabled={!pode("carta_conducao_numero")}
             onChange={(v) => definir("carta_conducao_numero", v)}
           />
           <CampoTexto
@@ -239,6 +261,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             label={t("hr.campos.cartaConducaoCategorias")}
             placeholder="B, B1"
             valor={rascunho.carta_conducao_categorias}
+            disabled={!pode("carta_conducao_categorias")}
             onChange={(v) => definir("carta_conducao_categorias", v)}
           />
           <CampoTexto
@@ -246,6 +269,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             label={t("hr.campos.cartaConducaoValidade")}
             tipo="date"
             valor={rascunho.carta_conducao_validade}
+            disabled={!pode("carta_conducao_validade")}
             onChange={(v) => definir("carta_conducao_validade", v)}
           />
         </CardContent>
@@ -263,6 +287,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("linha1")}
             erro={erroDe("linha1")}
             valor={rascunho.linha1}
+            disabled={!pode("linha1")}
             onChange={(v) => definir("linha1", v)}
           />
           <CampoTexto
@@ -270,6 +295,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             label={t("hr.campos.linha2")}
             className="sm:col-span-2"
             valor={rascunho.linha2}
+            disabled={!pode("linha2")}
             onChange={(v) => definir("linha2", v)}
           />
           <CampoTexto
@@ -278,6 +304,7 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("codigo_postal")}
             erro={erroDe("codigo_postal")}
             valor={rascunho.codigo_postal}
+            disabled={!pode("codigo_postal")}
             onChange={(v) => definir("codigo_postal", v)}
           />
           <CampoTexto
@@ -286,18 +313,21 @@ export function ConvitePagina1({ t, rascunho, definir, erroDe, obrigatorio }: Pa
             obrigatorio={obrigatorio("localidade")}
             erro={erroDe("localidade")}
             valor={rascunho.localidade}
+            disabled={!pode("localidade")}
             onChange={(v) => definir("localidade", v)}
           />
           <CampoTexto
             id="convite-distrito"
             label={t("employees.form.district")}
             valor={rascunho.distrito}
+            disabled={!pode("distrito")}
             onChange={(v) => definir("distrito", v)}
           />
           <CampoPais
             id="convite-pais"
             label={t("employees.form.country")}
             valor={rascunho.pais}
+            disabled={!pode("pais")}
             onChange={(v) => definir("pais", v)}
           />
         </CardContent>

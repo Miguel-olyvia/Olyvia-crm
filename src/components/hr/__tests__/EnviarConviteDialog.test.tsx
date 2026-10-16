@@ -8,26 +8,27 @@
  *     "Copiar link"; copiar chama a area de transferencia;
  *  3. fechar e reabrir ja nao mostra o link (nunca fica guardado);
  *  4. o link nunca vai para o Sentry nem para o toast;
- *  5. no modo reenviar o e-mail vem pre-preenchido e o titulo muda.
+ *  5. o pedido leva a organizacao activa; sem ela nao se envia;
+ *  6. com a V2 ha um processo aberto por pessoa: o dialogo ja nao oferece
+ *     "Reenviar" (a Edge Function recusaria com processo_aberto); regenerar o
+ *     link de um processo aberto e a etapa E3.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 
 const TEXTOS: Record<string, string> = {
-  "hr.convite.emailNaoEnviado": "O email não foi enviado. Copie o link ou carregue em Reenviar.",
+  "hr.convite.emailNaoEnviado": "O email não foi enviado. Copie o link agora: não volta a aparecer.",
   "hr.convite.copiarLink": "Copiar link",
   "hr.convite.linkCopiado": "Link copiado.",
   "hr.convite.linkUmaVez": "Este link só é mostrado agora.",
   "hr.convite.linkDoConvite": "Link do convite",
-  "hr.convite.reenviar": "Reenviar",
-  "hr.convite.tituloReenviar": "Reenviar convite",
   "hr.convite.tituloDialogo": "Convidar a preencher a ficha",
   "hr.convite.enviar": "Enviar convite",
   "hr.convite.enviadoComSucesso": "Convite enviado.",
   "hr.convite.copiado": "Copiado",
   "hr.convite.copiarFalhou": "Não foi possível copiar automaticamente. Seleccione o texto e copie com Ctrl+C.",
-  "hr.convite.criadoSemLink": "O convite foi criado, mas o link não foi devolvido. Carregue em Reenviar para gerar outro.",
+  "hr.convite.criadoSemLink": "O convite foi criado, mas o link não foi devolvido e não volta a aparecer.",
   "hr.convite.fecharSemCopiar": "Ainda não copiou o link e ele não volta a aparecer. Fechar mesmo assim?",
   "hr.convite.fecharMesmoAssim": "Fechar mesmo assim",
   "hr.convite.voltarAoLink": "Voltar ao link",
@@ -44,6 +45,11 @@ vi.mock("@/hooks/useTranslation", () => ({
 const invoke = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: { functions: { invoke: (...args: unknown[]) => invoke(...args) } },
+}));
+
+let companhiaActiva: { id: string } | null = { id: "org-nike" };
+vi.mock("@/contexts/CompanyContext", () => ({
+  useCompany: () => ({ activeCompany: companhiaActiva }),
 }));
 
 const captureFlowError = vi.fn();
@@ -91,6 +97,7 @@ const respostaSemEmail = {
 describe("EnviarConviteDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    companhiaActiva = { id: "org-nike" };
     Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
 
@@ -108,8 +115,19 @@ describe("EnviarConviteDialog", () => {
     expect(toast.success).toHaveBeenCalledWith("Convite enviado.");
     expect(screen.queryByText(LINK)).not.toBeInTheDocument();
     expect(invoke).toHaveBeenCalledWith("convite-admissao", {
-      body: { action: "criar", pessoa_id: "pessoa-1", email: "ana@exemplo.pt" },
+      body: { action: "criar", pessoa_id: "pessoa-1", organization_id: "org-nike", email: "ana@exemplo.pt" },
     });
+  });
+
+  it("sem organizacao activa nao chama a Edge Function e avisa", async () => {
+    companhiaActiva = null;
+    const { onOpenChange } = montar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enviar convite" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(invoke).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("sem e-mail enviado NAO fecha e mostra o link uma vez, para copiar", async () => {
@@ -184,26 +202,32 @@ describe("EnviarConviteDialog", () => {
     expect(screen.getByLabelText(/hr.convite.email/)).toBeInTheDocument();
   });
 
-  it("Reenviar, no estado do link, repete o envio para o mesmo e-mail", async () => {
+  it("no estado do link nao ha Reenviar: so Fechar (um segundo convite seria recusado: processo aberto)", async () => {
     invoke.mockResolvedValue(respostaSemEmail);
     montar();
 
     fireEvent.click(screen.getByRole("button", { name: "Enviar convite" }));
     await screen.findByLabelText("Link do convite");
-    expect(invoke).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Reenviar" }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    expect(invoke).toHaveBeenLastCalledWith("convite-admissao", {
-      body: { action: "criar", pessoa_id: "pessoa-1", email: "ana@exemplo.pt" },
-    });
+    expect(screen.queryByRole("button", { name: /reenviar/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fechar" })).toBeInTheDocument();
+    expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("no modo reenviar muda o titulo e traz o e-mail do convite actual", () => {
-    montar({ modo: "reenviar", emailSugerido: "atual@exemplo.pt" });
+  it("o titulo e sempre o de enviar e o e-mail sugerido vem pre-preenchido, editavel pelo RH", async () => {
+    invoke.mockResolvedValue({ data: { ok: true, convite_id: "c1", email_enviado: true, link: null }, error: null });
+    montar({ emailSugerido: "pessoal@exemplo.pt" });
 
-    expect(screen.getByText("Reenviar convite")).toBeInTheDocument();
-    expect(screen.getByLabelText(/hr.convite.email/)).toHaveValue("atual@exemplo.pt");
+    expect(screen.getByText("Convidar a preencher a ficha")).toBeInTheDocument();
+    const campo = screen.getByLabelText(/hr.convite.email/);
+    expect(campo).toHaveValue("pessoal@exemplo.pt");
+
+    fireEvent.change(campo, { target: { value: "outro@exemplo.pt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar convite" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    expect(invoke).toHaveBeenCalledWith("convite-admissao", {
+      body: { action: "criar", pessoa_id: "pessoa-1", organization_id: "org-nike", email: "outro@exemplo.pt" },
+    });
   });
 
   it("um erro do servidor fica em toast, sem o codigo em bruto, e nao fecha", async () => {
@@ -224,31 +248,21 @@ describe("EnviarConviteDialog", () => {
       error: null,
     };
 
-    it("nao fecha: mostra um erro persistente com Reenviar, em vez de um toast que some", async () => {
+    it("nao fecha: mostra um erro persistente, sem Reenviar, em vez de um toast que some", async () => {
       invoke.mockResolvedValue(respostaSemLink);
       const { onOpenChange, onEnviado } = montar();
 
       fireEvent.click(screen.getByRole("button", { name: "Enviar convite" }));
 
       const alerta = await screen.findByRole("alert");
-      expect(alerta).toHaveTextContent("O convite foi criado, mas o link não foi devolvido.");
+      expect(alerta).toHaveTextContent("O convite foi criado, mas o link não foi devolvido");
       expect(onOpenChange).not.toHaveBeenCalled();
       // O convite existe: quem chamou tem de saber para actualizar o cartao.
       expect(onEnviado).toHaveBeenCalledTimes(1);
       expect(toast.warning).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Reenviar" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /reenviar/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Fechar" })).toBeInTheDocument();
       expect(screen.queryByLabelText("Link do convite")).not.toBeInTheDocument();
-    });
-
-    it("Reenviar volta a pedir o envio ao mesmo e-mail", async () => {
-      invoke.mockResolvedValue(respostaSemLink);
-      montar();
-
-      fireEvent.click(screen.getByRole("button", { name: "Enviar convite" }));
-      await screen.findByRole("alert");
-      fireEvent.click(screen.getByRole("button", { name: "Reenviar" }));
-
-      await waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
     });
   });
 

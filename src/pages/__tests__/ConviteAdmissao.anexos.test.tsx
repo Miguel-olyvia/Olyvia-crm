@@ -1,27 +1,22 @@
 /**
- * `ConviteAdmissao` e os anexos: a pagina so orquestra. O hook de anexos e
- * simulado (o seu comportamento tem teste proprio); aqui verifica-se o que a
- * pagina faz com ele -- onde poe o cartao, quando trava o Submeter, o que
- * acontece com um motivo de convite e que os ficheiros NUNCA entram nos dados
- * submetidos.
+ * `ConviteAdmissao`: os documentos (cartao de cidadao, comprovativo de IBAN, fotografia) no
+ * portal temporario da V3a. As accoes de anexos da Edge ainda nao exigem sessao (so a V3b as
+ * fecha), por isso o portal NAO as liga: a zona de documentos esta desenhada e desactivada,
+ * com a razao, e nunca chama `anexo_*`. Os anexos que a `ler` devolve mostram-se so como lista
+ * (so o nome), sem abrir nem descarregar nada.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import type { ResultadoConviteAnexos } from "@/hooks/useConviteAnexos";
-import type { AnexoConvite } from "@/lib/hr/conviteAnexos";
-
-const MOTIVO_EXPIRADO = "Este link expirou. Peça um novo link ao RH.";
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { translations } = await import("@/translations/index");
   const pt = (translations as unknown as Record<string, Record<string, string>>).pt;
   return {
-    useTranslation: (idioma?: string) => ({
-      language: idioma ?? "pt",
+    useTranslation: () => ({
+      language: "pt",
       t: (chave: string, params?: Record<string, string | number>) => {
-        let texto =
-          chave === "hr.convite.motivo.expirado" ? MOTIVO_EXPIRADO : (pt[chave] ?? chave);
+        let texto = pt[chave] ?? chave;
         Object.entries(params ?? {}).forEach(([k, v]) => {
           texto = texto.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), String(v));
         });
@@ -35,199 +30,141 @@ const invoke = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: { functions: { invoke: (...args: unknown[]) => invoke(...args) } },
 }));
-
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
-const argumentosDoHook: unknown[][] = [];
-let resultadoDoHook: ResultadoConviteAnexos;
-vi.mock("@/hooks/useConviteAnexos", () => ({
-  useConviteAnexos: (...args: unknown[]) => {
-    argumentosDoHook.push(args);
-    return resultadoDoHook;
-  },
-}));
-
 import ConviteAdmissao from "../ConviteAdmissao";
+import { translations } from "@/translations/index";
+import { limparSessao } from "@/lib/hr/portalSessao";
 
-const ANEXO: AnexoConvite = {
-  id: "A1",
-  tipo: "cartao_cidadao",
-  nome_original: "frente.pdf",
-  tamanho_bytes: 1000,
-  mime_type: "application/pdf",
-};
+const pt = (translations as unknown as Record<string, Record<string, string>>).pt;
+const SESSAO = "S".repeat(43);
 
-function resultado(extra: Partial<ResultadoConviteAnexos> = {}): ResultadoConviteAnexos {
-  return {
-    anexos: [],
-    envios: {},
-    emCurso: false,
-    removendo: new Set<string>(),
-    contagem: { total: 0, porTipo: {} },
-    erroConvite: null,
-    adicionar: vi.fn(),
-    remover: vi.fn(),
-    ...extra,
-  };
+const ANEXOS = [
+  { id: "a1", tipo: "cartao_cidadao", nome: "cartao.pdf", estado: "ligado" },
+  { id: "a2", tipo: "comprovativo_iban", nome: "iban.png", estado: "ligado" },
+];
+
+function ligar(anexos: unknown[]) {
+  invoke.mockImplementation(async (_n: string, o: { body: { action: string } }) => {
+    switch (o.body.action) {
+      case "estado":
+        return {
+          data: {
+            ok: true,
+            convite: {
+              existe: true,
+              estado: "em_preenchimento",
+              estado_portal: "ativo",
+              valid_until: "2099-10-30T10:00:00Z",
+              primeiro_nome: "Joana",
+              organizacao_nome: "Mudelar Teste",
+              bloqueado: false,
+              precisa_otp: true,
+            },
+          },
+          error: null,
+        };
+      case "otp_pedir":
+        return { data: { ok: true, expira_em: "2099-10-16T10:10:00Z" }, error: null };
+      case "otp_verificar":
+        return { data: { ok: true, sessao: SESSAO, sessao_expira_em: "2099-10-16T14:00:00Z" }, error: null };
+      case "ler":
+        return {
+          data: {
+            ok: true,
+            estado: "em_preenchimento",
+            rascunho: {},
+            campos_obrigatorios: [],
+            campos_editaveis: [],
+            documentos_editaveis: ["cartao_cidadao", "comprovativo_iban", "fotografia"],
+            niss_ultimos4: null,
+            iban_ultimos4: null,
+            devolucao: null,
+            anexos,
+            rejeicao_mensagem: null,
+          },
+          error: null,
+        };
+      default:
+        return { data: null, error: { message: "inesperado", context: new Response("{}", { status: 500 }) } };
+    }
+  });
 }
 
-function estadoOk(extra: Record<string, unknown> = {}) {
-  return {
-    data: {
-      convite: {
-        pessoa_nome: null,
-        email_pessoal: null,
-        nif: null,
-        niss_ultimos4: null,
-        conta_ultimos4: null,
-        formato_conta: null,
-        rascunho: null,
-        valid_until: "2026-10-20T12:00:00Z",
-        campos_obrigatorios: [],
-        ...extra,
-      },
-    },
-    error: null,
-  };
-}
-
-let estado: unknown;
-
-function renderConvite() {
-  return render(
-    <MemoryRouter initialEntries={["/admissao/token-de-teste"]}>
+async function entrar() {
+  render(
+    <MemoryRouter initialEntries={["/admissao/token-de-teste-com-mais-de-vinte-caracteres"]}>
       <Routes>
         <Route path="/admissao/:token" element={<ConviteAdmissao />} />
       </Routes>
     </MemoryRouter>,
   );
+  fireEvent.click(await screen.findByRole("button", { name: pt["portal.consulta.botao"] }));
+  const campo = await screen.findByLabelText(pt["portal.otp.rotulo"]);
+  await waitFor(() => expect(campo).toBeEnabled());
+  fireEvent.change(campo, { target: { value: "123456" } });
+  fireEvent.click(screen.getByRole("button", { name: pt["portal.otp.confirmar"] }));
+  await screen.findByRole("button", { name: pt["portal.sair"] });
+  // Os documentos ficam na pagina 2 do formulario do convite (o sitio que ja tinham: entre o fardamento e a assinatura).
+  fireEvent.click(screen.getByRole("button", { name: pt["hr.convite.seguinte"] }));
+  await screen.findByText(pt["hr.pessoais.bancarios"]);
 }
 
-async function irParaPagina2() {
-  await screen.findByText("Os seus dados");
-  fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
-  await screen.findByText("Assinatura");
-}
+const accoesChamadas = () => invoke.mock.calls.map(([, o]) => (o as { body: { action: string } }).body.action);
 
-function assinarEAceitar() {
-  fireEvent.change(document.getElementById("convite-assinatura-nome") as HTMLInputElement, {
-    target: { value: "Joana Pires" },
-  });
-  fireEvent.click(document.getElementById("convite-aceite") as HTMLElement);
-}
-
-describe("ConviteAdmissao: anexos", () => {
+describe("ConviteAdmissao: documentos no portal da V3a", () => {
   beforeEach(() => {
     invoke.mockReset();
-    argumentosDoHook.length = 0;
-    estado = estadoOk({ anexos: [ANEXO] });
-    resultadoDoHook = resultado({ anexos: [ANEXO], contagem: { total: 1, porTipo: { cartao_cidadao: 1 } } });
-    invoke.mockImplementation(async (_nome: string, opcoes: { body: { action: string } }) => {
-      if (opcoes.body.action === "estado") return estado;
-      return { data: { ok: true, avisos: [] }, error: null };
-    });
+    limparSessao();
+    sessionStorage.clear();
   });
 
-  it("chama o hook com o token da URL e os anexos que o estado trouxe", async () => {
-    renderConvite();
-    await irParaPagina2();
-    const comAnexos = argumentosDoHook.filter(([, iniciais]) => Array.isArray(iniciais));
-    expect(comAnexos.length).toBeGreaterThan(0);
-    expect(comAnexos[0][0]).toBe("token-de-teste");
-    expect(comAnexos[0][1]).toEqual([ANEXO]);
-    // Antes do estado chegar o hook ja foi chamado (nunca depois de um return antecipado).
-    expect(argumentosDoHook[0][0]).toBe("token-de-teste");
+  it("a zona de documentos esta desactivada e diz que fica para a proxima fase", async () => {
+    ligar([]);
+    await entrar();
+    const botao = screen.getByRole("button", { name: pt["portal.proxima.documentos"] });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAccessibleDescription(pt["portal.proxima.razao"]);
   });
 
-  it("mostra o cartao de anexos na pagina 2, entre o fardamento e a assinatura", async () => {
-    renderConvite();
-    await irParaPagina2();
-    const fardamento = screen.getByText("Fardamento");
-    const anexos = screen.getByText("Anexos");
-    const assinatura = screen.getByText("Assinatura");
-    expect(screen.getByText("frente.pdf")).toBeInTheDocument();
-    expect(fardamento.compareDocumentPosition(anexos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(anexos.compareDocumentPosition(assinatura) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  it("nao ha seletor de ficheiros no portal", async () => {
+    ligar([]);
+    await entrar();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
   });
 
-  it("nao mostra o cartao de anexos na pagina 1", async () => {
-    renderConvite();
-    await screen.findByText("Os seus dados");
-    expect(screen.queryByText("Anexos")).toBeNull();
+  it("os anexos que a leitura devolveu aparecem so como lista (nome e estado), sem ligacoes", async () => {
+    ligar(ANEXOS);
+    await entrar();
+    const lista = screen.getByRole("list", { name: pt["portal.documentos.titulo"] });
+    const itens = within(lista).getAllByRole("listitem");
+    expect(itens).toHaveLength(2);
+    expect(itens[0]).toHaveTextContent("cartao.pdf");
+    expect(itens[1]).toHaveTextContent("iban.png");
+    expect(within(lista).queryByRole("link")).toBeNull();
   });
 
-  it("com um envio em curso o Submeter fica desactivado e diz porque", async () => {
-    resultadoDoHook = resultado({
-      emCurso: true,
-      envios: {
-        "envio-1": { tipo: "fotografia", nome: "eu.png", fase: "a_enviar", progresso: 30, codigoErro: null },
-      },
-      contagem: { total: 1, porTipo: { fotografia: 1 } },
-    });
-    renderConvite();
-    await irParaPagina2();
-    const submeter = screen.getByRole("button", { name: "Submeter" });
-    expect(submeter).toBeDisabled();
-    expect(screen.getByText("Aguarde que os ficheiros terminem de ser enviados.")).toBeInTheDocument();
-    fireEvent.click(submeter);
-    expect(invoke.mock.calls.some(([, o]) => (o as { body: { action: string } }).body.action === "submeter")).toBe(false);
+  it("a zona de documentos esta entre o fardamento e a assinatura, onde o convite sempre a teve", async () => {
+    ligar(ANEXOS);
+    await entrar();
+    const fardamento = screen.getByText(pt["hr.fardamento.titulo"]);
+    const documentos = screen.getByText(pt["portal.documentos.titulo"]);
+    const assinatura = screen.getByText(pt["hr.convite.assinatura"]);
+    expect(fardamento.compareDocumentPosition(documentos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(documentos.compareDocumentPosition(assinatura) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("enquanto um ficheiro esta a ser removido o Submeter fica desactivado, e volta quando termina", async () => {
-    let terminar!: () => void;
-    const remover = vi.fn(() => new Promise<void>((resolve) => (terminar = resolve)));
-    resultadoDoHook = resultado({
-      anexos: [ANEXO],
-      contagem: { total: 1, porTipo: { cartao_cidadao: 1 } },
-      remover,
-    });
-    renderConvite();
-    await irParaPagina2();
-    expect(screen.getByRole("button", { name: "Submeter" })).toBeEnabled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Remover frente.pdf" }));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Submeter" })).toBeDisabled());
-    expect(screen.getByText("Aguarde que os ficheiros terminem de ser enviados.")).toBeInTheDocument();
-    expect(remover).toHaveBeenCalledWith("A1");
-    fireEvent.click(screen.getByRole("button", { name: "Submeter" }));
-    expect(invoke.mock.calls.some(([, o]) => (o as { body: { action: string } }).body.action === "submeter")).toBe(false);
-
-    terminar();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Submeter" })).toBeEnabled());
+  it("sem anexos diz que ainda nao ha documentos", async () => {
+    ligar([]);
+    await entrar();
+    expect(screen.getByText(pt["portal.documentos.vazio"])).toBeInTheDocument();
   });
 
-  it("sem envios em curso o Submeter esta activo e nao ha aviso", async () => {
-    renderConvite();
-    await irParaPagina2();
-    expect(screen.getByRole("button", { name: "Submeter" })).toBeEnabled();
-    expect(screen.queryByText("Aguarde que os ficheiros terminem de ser enviados.")).toBeNull();
-  });
-
-  it("os ficheiros nunca entram nos dados submetidos", async () => {
-    renderConvite();
-    await irParaPagina2();
-    assinarEAceitar();
-    fireEvent.click(screen.getByRole("button", { name: "Submeter" }));
-    await waitFor(() =>
-      expect(invoke.mock.calls.some(([, o]) => (o as { body: { action: string } }).body.action === "submeter")).toBe(true),
-    );
-    const submissao = invoke.mock.calls.find(
-      ([, o]) => (o as { body: { action: string } }).body.action === "submeter",
-    )![1] as { body: { dados: Record<string, unknown> } };
-    const chaves = Object.keys(submissao.body.dados);
-    expect(chaves.filter((c) => /anexo|fotografia|ficheiro/i.test(c))).toEqual([]);
-    expect(JSON.stringify(submissao.body)).not.toContain("frente.pdf");
-  });
-
-  it("um motivo convite_* vindo dos anexos leva ao cartao de link invalido", async () => {
-    renderConvite();
-    await irParaPagina2();
-    expect(screen.queryByText(MOTIVO_EXPIRADO)).toBeNull();
-
-    resultadoDoHook = resultado({ erroConvite: "convite_expirado" });
-    // Um novo render da pagina (o hook devolve agora o motivo).
-    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
-    expect(await screen.findByText(MOTIVO_EXPIRADO)).toBeInTheDocument();
+  it("nunca chama as accoes de anexos, mesmo clicando", async () => {
+    ligar(ANEXOS);
+    await entrar();
+    fireEvent.click(screen.getByRole("button", { name: pt["portal.proxima.documentos"] }));
+    expect(accoesChamadas().filter((a) => a.startsWith("anexo"))).toEqual([]);
+    expect(accoesChamadas()).toEqual(["estado", "otp_pedir", "otp_verificar", "ler"]);
   });
 });

@@ -22,17 +22,20 @@ interface BotaoCriarAcessoProps {
   reenviar: boolean;
   /** Quantos campos faltam. Zero (ou nao saber) deixa o botao activo. */
   pendencias: number;
+  /** O botao e a acao principal do cabecalho (preenchido); por omissao e de contorno. */
+  principal?: boolean;
   onClick: () => void;
 }
 
-export function BotaoCriarAcesso({ reenviar, pendencias, onClick }: BotaoCriarAcessoProps) {
+export function BotaoCriarAcesso({ reenviar, pendencias, principal = false, onClick }: BotaoCriarAcessoProps) {
   const { t } = useTranslation();
   const bloqueado = !reenviar && pendencias > 0;
 
   const botao = (
     <Button
-      variant="outline"
-      className={cn("gap-2", bloqueado && "cursor-not-allowed opacity-50")}
+      type="button"
+      variant={principal ? "default" : "outline"}
+      className={cn("min-h-11 gap-2", bloqueado && "cursor-not-allowed opacity-50")}
       aria-disabled={bloqueado || undefined}
       aria-describedby={bloqueado ? ID_RAZAO : undefined}
       onClick={() => {

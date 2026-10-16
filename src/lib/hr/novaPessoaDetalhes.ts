@@ -200,6 +200,8 @@ export interface ContaDoPayload {
   swift: string | null;
   titular: string | null;
   banco: string | null;
+  /** OPCIONAL: a agencia (em claro) tem argumento proprio em `rpc_hr_definir_conta` (`p_agencia`). */
+  agencia?: string | null;
 }
 
 /**

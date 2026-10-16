@@ -70,6 +70,11 @@ describe("BotaoCriarAcesso", () => {
     expect(container.querySelectorAll("[tabindex]")).toHaveLength(0);
   });
 
+  it("e sempre type=button: dentro de um formulario nao o submete", () => {
+    render(<BotaoCriarAcesso reenviar={false} pendencias={0} onClick={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Criar acesso" })).toHaveAttribute("type", "button");
+  });
+
   it("reenviar credenciais a quem ja tem conta nunca e travado pelas pendencias", () => {
     const onClick = vi.fn();
     render(<BotaoCriarAcesso reenviar pendencias={5} onClick={onClick} />);
@@ -78,5 +83,24 @@ describe("BotaoCriarAcesso", () => {
     expect(botao).not.toHaveAttribute("aria-disabled");
     fireEvent.click(botao);
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("BotaoCriarAcesso: a ação principal do cabeçalho da ficha", () => {
+  it("por omissão é de contorno; com «principal» é o botão preenchido (a única ação primária da ficha)", () => {
+    const { rerender } = render(<BotaoCriarAcesso reenviar={false} pendencias={0} onClick={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Criar acesso" })).not.toHaveClass("bg-primary");
+    rerender(<BotaoCriarAcesso reenviar={false} pendencias={0} principal onClick={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Criar acesso" })).toHaveClass("bg-primary");
+  });
+
+  it("tem o alvo de 44 px e continua bloqueado com pendências mesmo sendo o principal", () => {
+    const onClick = vi.fn();
+    render(<BotaoCriarAcesso reenviar={false} pendencias={2} principal onClick={onClick} />);
+    const botao = screen.getByRole("button", { name: "Criar acesso" });
+    expect(botao).toHaveClass("min-h-11");
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(botao);
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

@@ -12,11 +12,18 @@ interface OlyviaLoaderProps {
   inline?: boolean;
 }
 
+const TEXTO_PADRAO = "A carregar...";
+
+/**
+ * O carregamento é uma região de estado (`role="status"`): o leitor de ecrã anuncia o texto quando aparece. A imagem é só
+ * decorativa (`alt` vazio): o texto, visível ou só para leitores (`sr-only`), é o que se ouve, e não se ouve duas vezes.
+ */
 export function OlyviaLoader({ size = 32, text, className, inline = false }: OlyviaLoaderProps) {
   const img = (
     <img
       src={olyviaIcon}
-      alt="A carregar..."
+      alt=""
+      aria-hidden="true"
       width={size}
       height={size}
       className="animate-olyvia-shake select-none"
@@ -25,13 +32,18 @@ export function OlyviaLoader({ size = 32, text, className, inline = false }: Oly
   );
 
   if (inline) {
-    return img;
+    return (
+      <span role="status" className="inline-flex">
+        {img}
+        <span className="sr-only">{text ?? TEXTO_PADRAO}</span>
+      </span>
+    );
   }
 
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-2", className)}>
+    <div role="status" className={cn("flex flex-col items-center justify-center gap-2", className)}>
       {img}
-      {text && <p className="text-sm text-muted-foreground">{text}</p>}
+      {text ? <p className="text-sm text-muted-foreground">{text}</p> : <span className="sr-only">{TEXTO_PADRAO}</span>}
     </div>
   );
 }

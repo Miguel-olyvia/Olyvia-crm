@@ -66,6 +66,11 @@ export interface SeccaoFalhada {
     // permissao (`hr.pessoas.laborais.edit`). Falhar isto NAO desfaz a ficha.
     | "fardamento"
     | "emergencia"
+    // Os dados de saude (`pessoas_dados_saude`) e a filiacao sindical
+    // (`pessoas_sindicalizacao`): satelites proprios, art. 9.o do RGPD, cada um
+    // com a sua permissao de escrita. Falhar um NAO desfaz a ficha nem o outro.
+    | "saude"
+    | "sindicalizacao"
     | "vinculo"
     // A versao inicial de horas contratadas (`pessoas_vinculos_horas`),
     // 20261130180000. Falhar isto NAO desfaz o vinculo nem a ficha: a pessoa
@@ -381,6 +386,9 @@ export function usePessoas() {
             // titular e banco (a agencia nao se pede neste formulario).
             p_titular: conta.titular,
             p_banco: conta.banco,
+            // A agencia tem argumento proprio na RPC (7 argumentos); so segue
+            // quando foi escrita, para a chamada de sempre ficar igual.
+            ...(conta.agencia ? { p_agencia: conta.agencia } : {}),
             p_swift: conta.swift,
           }),
         );
@@ -408,13 +416,27 @@ export function usePessoas() {
           hrFrom("pessoas_contactos_emergencia").insert({ ...base, ...payload.emergencia }),
         );
       }
+      // Saude e sindicalizacao: opcionais, so seguem se o formulario as pediu
+      // (e ele so as pede a quem pode escreve-las). A RLS repete a decisao.
+      if (payload.saude) {
+        await gravar("saude", () =>
+          hrFrom("pessoas_dados_saude").insert({ ...base, ...payload.saude }),
+        );
+      }
+      if (payload.sindicalizacao) {
+        await gravar("sindicalizacao", () =>
+          hrFrom("pessoas_sindicalizacao").insert({ ...base, ...payload.sindicalizacao }),
+        );
+      }
 
       // O vinculo precisa de existir ANTES da retribuicao e do horario: as
       // duas penduram nele por chave estrangeira composta.
       let vinculoId: string | null = null;
       if (payload.vinculo) {
         const { data: linha, error: falha } = await hrFrom("pessoas_vinculos")
-          .insert({ ...base, ...payload.vinculo })
+          // `vinculoExtra`: categoria, categoria profissional, renovavel e isencao
+          // (colunas de `pessoas_vinculos` que o assistente de cinco passos nao pede).
+          .insert({ ...base, ...payload.vinculo, ...payload.vinculoExtra })
           .select("id")
           .single();
         if (falha) {

@@ -107,6 +107,17 @@ interface CampoBaseProps {
    * nao pode anunciar "obrigatorio" num campo que se pode deixar vazio.
    */
   recomendado?: boolean;
+  /**
+   * Ids de texto de FORA do campo que o descrevem (por exemplo, a posicao do campo na configuracao: «no convite», «na
+   * ficha»). Entram em `aria-describedby` antes da ajuda e do erro.
+   */
+  descritoPor?: string;
+}
+
+/** `aria-describedby` de um campo: o que vem de fora, a ajuda e o erro (a ajuda mantem-se quando ha erro). */
+function descricaoDoCampo(id: string, { ajuda, erro, descritoPor }: Pick<CampoBaseProps, "ajuda" | "erro" | "descritoPor">): string | undefined {
+  const ids = [descritoPor, ajuda ? `${id}-ajuda` : undefined, erro ? `${id}-erro` : undefined].filter(Boolean);
+  return ids.length > 0 ? ids.join(" ") : undefined;
 }
 
 function Envolvente({
@@ -148,7 +159,7 @@ function Envolvente({
         )}
       </Label>
       {children}
-      {ajuda && !erro && (
+      {ajuda && (
         <p id={`${id}-ajuda`} className="text-xs text-muted-foreground">
           {ajuda}
         </p>
@@ -183,6 +194,7 @@ export function CampoTexto({
   marcado,
   obrigatorio,
   recomendado,
+  descritoPor,
   valor,
   onChange,
   tipo = "text",
@@ -216,7 +228,7 @@ export function CampoTexto({
         required={obrigatorio}
         aria-required={obrigatorio || undefined}
         aria-invalid={erro ? true : undefined}
-        aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
+        aria-describedby={descricaoDoCampo(id, { ajuda, erro, descritoPor })}
         className={cn(erro && "border-destructive")}
         onChange={(e) => onChange(e.target.value)}
         onBlur={() => tocar(id)}
@@ -248,6 +260,7 @@ export function CampoSelect({
   className,
   obrigatorio,
   recomendado,
+  descritoPor,
   valor,
   onChange,
   opcoes,
@@ -276,7 +289,7 @@ export function CampoSelect({
           id={id}
           aria-required={obrigatorio || undefined}
           aria-invalid={erro ? true : undefined}
-          aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
+          aria-describedby={descricaoDoCampo(id, { ajuda, erro, descritoPor })}
           className={cn(erro && "border-destructive")}
           onBlur={() => tocar(id)}
         >
@@ -317,6 +330,7 @@ export function CampoPais({
   className,
   obrigatorio,
   recomendado,
+  descritoPor,
   valor,
   onChange,
   disabled,
@@ -338,7 +352,7 @@ export function CampoPais({
         disabled={disabled}
         aria-required={obrigatorio || undefined}
         aria-invalid={erro ? true : undefined}
-        aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
+        aria-describedby={descricaoDoCampo(id, { ajuda, erro, descritoPor })}
         className={cn(erro && "border-destructive")}
         onChange={onChange}
         onBlur={() => tocar(id)}
