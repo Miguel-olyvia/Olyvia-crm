@@ -14,6 +14,8 @@ const { en, pt } = pessoasProcessoTranslations;
 /** Tudo o que um portão pode dizer que falta (ver `portoesProcesso.ts`); o `Record` obriga a não esquecer nenhum. */
 const FALTAS = Object.keys({
   dataVisita: 0, visita: 0, visitaFeita: 0, linhas: 0, linhaInvalida: 0, pessoa: 0,
+  orcamentoLinhas: 0, orcamentoValor: 0, semOrcamento: 0, margem: 0, abaixoDoCusto: 0, semPedido: 0, porVerificar: 0, condicoes: 0,
+  orcamentoNaoGuardado: 0, negocioDesapareceu: 0, descontoInvalido: 0,
 } satisfies Record<FaltaProcesso, 0>);
 const marcas = (texto: string): string[] => (texto.match(/\{\w+\}/g) ?? []).sort();
 
@@ -22,8 +24,10 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(pt).sort());
   });
 
-  it("todas as chaves são view.*, board.*, deals.*, todo.*, process.*, gate.* ou done.*, com o prefixo da página", () => {
-    for (const chave of Object.keys(pt)) expect(chave).toMatch(/^pessoasPagina\.(view|board|deals|todo|process|gate|done)\./);
+  it("todas as chaves são view.*, board.*, deals.*, todo.*, process.*, gate.*, done.*, quote.*, verify.*, direction.* ou proposal.*, com o prefixo da página", () => {
+    for (const chave of Object.keys(pt)) {
+      expect(chave).toMatch(/^pessoasPagina\.(view|board|deals|todo|process|gate|done|quote|verify|direction|proposal)\./);
+    }
   });
 
   it("há um texto de passo (todo.step.<id>) para cada um dos 14 passos do processo, e nenhum a mais", () => {
@@ -112,6 +116,46 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     expect(marcas(pt["pessoasPagina.done.visitDone"])).toEqual(["{name}", "{phase}", "{step}"]);
     expect(marcas(pt["pessoasPagina.done.survey"])).toEqual(["{name}", "{step}"]);
     expect(marcas(pt["pessoasPagina.done.deal"])).toEqual(["{name}", "{phase}"]);
+    for (const chave of ["quote", "verified", "directionAsked", "directionApproved", "directionRefused"]) {
+      expect(marcas(pt[`pessoasPagina.done.${chave}`]), chave).toEqual(["{name}", "{step}"]);
+    }
+    expect(marcas(pt["pessoasPagina.done.proposal"])).toEqual(["{name}", "{phase}"]);
+  });
+
+  it("o editor do orçamento: o nome do serviço entra nos nomes dos campos e dos botões, para serem únicos por linha", () => {
+    for (const chave of ["quote.forWork", "quote.removeLabel", "quote.error.quantity", "quote.error.price"]) {
+      expect(marcas(pt[`pessoasPagina.${chave}`]), chave).toEqual(["{work}"]);
+    }
+    expect(marcas(pt["pessoasPagina.quote.title"])).toEqual(["{work}"]);
+    expect(marcas(pt["pessoasPagina.quote.titleVersion"])).toEqual(["{version}", "{work}"]);
+    expect(marcas(pt["pessoasPagina.quote.description"])).toEqual(["{name}"]);
+    expect(marcas(pt["pessoasPagina.quote.lineTotal"])).toEqual(["{value}"]);
+  });
+
+  it("a verificação diz a margem, o mínimo, o alvo e o preço sugerido, e o botão 'Usar' diz em que serviço", () => {
+    expect(marcas(pt["pessoasPagina.verify.description"])).toEqual(["{min}", "{name}", "{target}"]);
+    expect(marcas(pt["pessoasPagina.verify.block.belowCost"])).toEqual(["{cost}", "{price}", "{work}"]);
+    expect(marcas(pt["pessoasPagina.verify.block.lowMargin"])).toEqual(["{margin}", "{min}"]);
+    expect(marcas(pt["pessoasPagina.verify.block.discount"])).toEqual(["{margin}", "{min}"]);
+    expect(marcas(pt["pessoasPagina.verify.warn.target"])).toEqual(["{margin}", "{target}"]);
+    expect(marcas(pt["pessoasPagina.verify.usePrice"])).toEqual(["{price}"]);
+    expect(marcas(pt["pessoasPagina.verify.usePriceLabel"])).toEqual(["{price}", "{work}"]);
+    expect(marcas(pt["pessoasPagina.verify.summary.many"])).toEqual(["{count}", "{margin}"]);
+    // O nome acessível do botão começa pelo texto visível (WCAG 2.5.3).
+    expect(pt["pessoasPagina.verify.usePriceLabel"].startsWith("Usar {price}")).toBe(true);
+    expect(pt["pessoasPagina.verify.usePrice"]).toBe("Usar {price}");
+  });
+
+  it("a proposta tem as quatro formas de pagamento, as três validades e as garantias, nas duas línguas", () => {
+    for (const chave of ["adjudicacao", "metade", "tres", "fases"]) {
+      expect(pt[`pessoasPagina.proposal.payment.${chave}`], chave).toBeTruthy();
+      expect(en[`pessoasPagina.proposal.payment.${chave}`], chave).toBeTruthy();
+    }
+    expect(marcas(pt["pessoasPagina.proposal.validity.option"])).toEqual(["{days}"]);
+    expect(marcas(pt["pessoasPagina.proposal.warranty.many"])).toEqual(["{years}"]);
+    expect(marcas(pt["pessoasPagina.proposal.notes.count"])).toEqual(["{count}", "{max}"]);
+    expect(marcas(pt["pessoasPagina.proposal.notes.error"])).toEqual(["{max}"]);
+    expect(marcas(pt["pessoasPagina.proposal.description"])).toEqual(["{name}", "{total}"]);
   });
 
   it("o diálogo 'A visita já foi feita?' e a nota de 200 caracteres", () => {
@@ -121,7 +165,7 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     expect(marcas(pt["pessoasPagina.process.stepLabel"])).toEqual(["{name}", "{step}", "{work}"]);
   });
 
-  it("as chaves novas (process, gate, done) não colidem com as de outros módulos de Pessoas", () => {
+  it("as chaves novas (process, gate, done, quote, verify, direction, proposal) não colidem com as de outros módulos de Pessoas", () => {
     const modulos = [
       pessoasAcoesTranslations, pessoasChamadaTranslations, pessoasFichaTranslations, pessoasFichaResumoTranslations,
       pessoasListaTranslations, pessoasVisitaTranslations,
@@ -138,5 +182,24 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
       expect(pt[`pessoasPagina.board.col.${fase}`]).toBeTruthy();
       expect(en[`pessoasPagina.board.col.${fase}`]).toBeTruthy();
     }
+  });
+});
+
+describe("traduções dos achados da revisão da Fase 4", () => {
+  it("os textos novos existem nas duas línguas, com os mesmos marcadores", () => {
+    const chaves = [
+      "gate.orcamentoNaoGuardado", "gate.negocioDesapareceu", "gate.descontoInvalido", "quote.removed.none", "quote.removed.one",
+      "quote.removed.many", "quote.totals.announce", "verify.block.saleBelowCost", "verify.noQuote",
+    ];
+    for (const chave of chaves) {
+      const c = `pessoasPagina.${chave}`;
+      expect(pt[c], c).toBeTruthy();
+      expect(en[c], c).toBeTruthy();
+      expect(marcas(pt[c]), c).toEqual(marcas(en[c]));
+    }
+    expect(marcas(pt["pessoasPagina.quote.removed.many"])).toEqual(["{count}", "{work}"]);
+    expect(marcas(pt["pessoasPagina.quote.removed.one"])).toEqual(["{work}"]);
+    expect(marcas(pt["pessoasPagina.quote.totals.announce"])).toEqual(["{margin}", "{total}"]);
+    expect(marcas(pt["pessoasPagina.verify.block.saleBelowCost"])).toEqual(["{cost}", "{net}"]);
   });
 });

@@ -13,6 +13,8 @@ export type PassoProcesso = (typeof PASSOS_PROCESSO)[number];
 
 type TipoItemProcesso = "pedido" | "negocio";
 
+export type EstadoVerificacao = "semDetalhe" | "porVerificar" | "aguardaDirecao" | "verificado";
+
 /** Um pedido (lead sem negócio aberto) ou um negócio em curso de uma pessoa. A fase é a coluna do Quadro. */
 export interface ItemProcesso {
   /** O id do negócio, ou `pedido-<pessoa>` num pedido. */
@@ -31,12 +33,24 @@ export interface ItemProcesso {
   orcamentos: number;
   /** Algum dos orçamentos do negócio está escolhido (falso num pedido). */
   orcamentoEscolhido: boolean;
+  /**
+   * Onde está o orçamento detalhado do negócio: `semDetalhe` num pedido e num negócio sem orçamento detalhado guardado (os de exemplo);
+   * `porVerificar`, `aguardaDirecao` (pedido à Direção feito) ou `verificado` (também com a exceção aprovada).
+   */
+  verificacao: EstadoVerificacao;
   /** A proposta do negócio existe e ainda é um rascunho (falso num pedido, ou sem proposta). */
   propostaRascunho: boolean;
   /** Um pedido na fase Visita cuja visita já foi feita (falso num negócio). */
   visitaFeita: boolean;
   /** Quantas linhas de medidas tem o levantamento guardado da visita (0 num negócio, ou sem levantamento). */
   levantamentoLinhas: number;
+}
+
+/** O negócio a que um diálogo do orçamento ou da proposta se refere: o título diz o trabalho e a descrição diz a pessoa. */
+export interface NegocioDoPasso {
+  id: string;
+  nome: string;
+  trabalho: string;
 }
 
 /** O próximo passo de um item e a chave do seu texto, para o ecrã traduzir (nunca texto solto). */

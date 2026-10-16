@@ -7,6 +7,7 @@ import {
 } from "./filtrosPessoas";
 import type { ChipPessoa, FiltrosPessoas, OrdemPessoa, ResumoPessoa, TipoPessoa, VistaPessoas } from "./pessoasTipos";
 import { itensDaPessoa } from "./processo/itensProcesso";
+import { useExtrasProcesso } from "./processo/processoNegocios";
 import { QuadroPessoas } from "./quadro/QuadroPessoas";
 import { COLUNAS_QUADRO, cartoesDoQuadro } from "./quadro/cartoesQuadroPessoas";
 import { TabelaPessoas } from "./TabelaPessoas";
@@ -68,9 +69,10 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
   );
   const opcoes = useMemo(() => opcoesDe(resumos), [resumos]);
   const cartoes = useMemo(() => cartoesDoQuadro(visiveis, hoje), [visiveis, hoje]);
+  const extras = useExtrasProcesso();
   // Os itens do processo dos cartões (o mesmo id): é com eles que o botão do passo de cada cartão o executa.
   const itensDosCartoes = useMemo(
-    () => new Map(visiveis.flatMap((r) => itensDaPessoa(r, hoje)).map((i) => [i.id, i])), [visiveis, hoje],
+    () => new Map(visiveis.flatMap((r) => itensDaPessoa(r, hoje, extras)).map((i) => [i.id, i])), [visiveis, hoje, extras],
   );
 
   const ids = visiveis.map((r) => r.pessoa.id).join("|");

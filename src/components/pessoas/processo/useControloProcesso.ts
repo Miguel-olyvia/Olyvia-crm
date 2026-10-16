@@ -10,10 +10,13 @@ import { textoDoAviso, type TipoAviso } from "./anunciosProcesso";
 import { useAvisoAlternado } from "./avisoAlternado";
 import { devolverFoco, type OrigemFoco } from "./focoProcesso";
 import { itensDaPessoa } from "./itensProcesso";
+import { useExtrasProcesso } from "./processoNegocios";
 
 interface Pendente {
   tipo: TipoAviso;
   pessoaId: string;
+  /** O item do passo (os de orçamento e proposta: a pessoa pode ter vários negócios); sem ele vale o primeiro da pessoa. */
+  itemId?: string;
   /** A fase em que a pessoa estava antes do passo (`null` sem item). */
   antes: ColunaQuadro | null;
   /** A frase que o passo já traz escrita (a chamada: a visita marcada, a chamada agendada, a perdida); substitui a genérica. */
@@ -33,6 +36,7 @@ export function useControloProcesso({ resumos, hoje, aoAnunciar }: Entrada) {
   const anunciar = useRef(aoAnunciar);
   anunciar.current = aoAnunciar;
   const alternar = useAvisoAlternado();
+  const extras = useExtrasProcesso();
   // O aviso pronto que espera que o diálogo do passo acabe de sair, e se esse diálogo já acabou.
   const emEspera = useRef<string | null>(null);
   const dialogoFechado = useRef(true);
@@ -40,24 +44,27 @@ export function useControloProcesso({ resumos, hoje, aoAnunciar }: Entrada) {
   /** Diz uma frase ao leitor de ecrã; a mesma frase duas vezes seguidas volta a ser lida (o texto alterna um espaço inseparável). */
   const emitir = useCallback((texto: string) => anunciar.current(alternar(texto)), [alternar]);
 
-  const itensDe = (pessoaId: string) => {
+  /** O item do passo: o de `itemId`, ou o primeiro da pessoa (pela ordem do Quadro). */
+  const itemDe = useCallback((pessoaId: string, itemId?: string) => {
     const r = resumos.find((x) => x.pessoa.id === pessoaId);
-    return r ? itensDaPessoa(r, hoje) : [];
-  };
+    const itens = r ? itensDaPessoa(r, hoje, extras) : [];
+    return itens.find((i) => i.id === itemId) ?? itens[0] ?? null;
+  }, [resumos, hoje, extras]);
 
   /**
    * Chamado com o estado ainda por mudar (na mesma ação que o muda): o aviso sai depois, com a fase em que a pessoa ficou.
-   * `mensagem` é a frase que o passo já traz escrita e que vale mais do que a genérica.
+   * `mensagem` é a frase que o passo já traz escrita e que vale mais do que a genérica; `itemId` diz de que negócio é o passo
+   * (a fase e o próximo passo do aviso são os desse item).
    */
-  const registar = (tipo: TipoAviso, pessoaId: string, mensagem?: string) => {
+  const registar = (tipo: TipoAviso, pessoaId: string, mensagem?: string, itemId?: string) => {
     dialogoFechado.current = false;
-    setPendente({ tipo, pessoaId, antes: itensDe(pessoaId)[0]?.fase ?? null, mensagem });
+    setPendente({ tipo, pessoaId, itemId, antes: itemDe(pessoaId, itemId)?.fase ?? null, mensagem });
   };
 
   useEffect(() => {
     if (!pendente) return;
     const r = resumos.find((x) => x.pessoa.id === pendente.pessoaId);
-    const depois = r ? itensDaPessoa(r, hoje)[0] ?? null : null;
+    const depois = itemDe(pendente.pessoaId, pendente.itemId);
     // Um negócio criado entra pelo seu próprio store: espera até a pessoa o ter, para não dizer a fase de antes.
     if (pendente.tipo === "negocio" && depois?.tipo !== "negocio") return;
     setPendente(null);
@@ -66,7 +73,7 @@ export function useControloProcesso({ resumos, hoje, aoAnunciar }: Entrada) {
     // Com o diálogo ainda a sair, o resto da página está escondido do leitor de ecrã: guarda-se o aviso até ele desmontar.
     if (dialogoFechado.current) emitir(texto);
     else emEspera.current = texto;
-  }, [pendente, resumos, hoje, t, emitir]);
+  }, [pendente, resumos, itemDe, t, emitir]);
 
   const guardarFoco = (origem: OrigemFoco) => { foco.current = origem; };
   /**

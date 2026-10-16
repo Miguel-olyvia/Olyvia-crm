@@ -4,12 +4,21 @@ import { cartoesDoQuadro, type CartaoQuadro } from "../quadro/cartoesQuadroPesso
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { negocioEmFoco } from "../etapaPessoa";
 import type { ResumoPessoa } from "../pessoasTipos";
-import type { ItemProcesso } from "./tiposProcesso";
+import { orcamentoDoNegocio, SEM_EXTRAS, type ExtrasPorNegocio } from "./orcamentoDetalhado";
+import type { EstadoVerificacao, ItemProcesso } from "./tiposProcesso";
 
 /** O id do painel das sub-linhas de uma pessoa (o `aria-controls` do botão aponta para ele). */
 export const idPainelNegocios = (pessoaId: string): string => `negocios-${pessoaId}`;
 
-function itemDoCartao(c: CartaoQuadro, r: ResumoPessoa, hoje: string): ItemProcesso {
+/** Onde está o orçamento detalhado do negócio; sem ele (os negócios de exemplo, e os pedidos) é `semDetalhe`. */
+function verificacaoDo(negocio: NegocioMes | undefined, extras: ExtrasPorNegocio): EstadoVerificacao {
+  const orcamento = negocio && orcamentoDoNegocio(negocio, extras);
+  if (!orcamento) return "semDetalhe";
+  if (orcamento.direcao === "pedida") return "aguardaDirecao";
+  return orcamento.verificado ? "verificado" : "porVerificar";
+}
+
+function itemDoCartao(c: CartaoQuadro, r: ResumoPessoa, hoje: string, extras: ExtrasPorNegocio): ItemProcesso {
   const negocio: NegocioMes | undefined = r.abertos.find((n) => n.id === c.id);
   const visita = negocio ? undefined : r.pessoa.visita;
   const visitaFeita = visita?.feita === true;
@@ -18,14 +27,17 @@ function itemDoCartao(c: CartaoQuadro, r: ResumoPessoa, hoje: string): ItemProce
   return {
     id: c.id, pessoaId: c.pessoaId, tipo: negocio ? "negocio" : "pedido", fase: c.coluna, trabalho: c.trabalho, valor: c.valor,
     prazo, atrasado: prazo !== null && prazo < hoje, orcamentos: negocio?.orcamentos.length ?? 0,
-    orcamentoEscolhido: negocio?.orcamentos.some((o) => o.escolhido) ?? false, propostaRascunho: negocio?.proposta?.estado === "rascunho",
-    visitaFeita, levantamentoLinhas: visita?.levantamento?.linhas.length ?? 0,
+    orcamentoEscolhido: negocio?.orcamentos.some((o) => o.escolhido) ?? false, verificacao: verificacaoDo(negocio, extras),
+    propostaRascunho: negocio?.proposta?.estado === "rascunho", visitaFeita, levantamentoLinhas: visita?.levantamento?.linhas.length ?? 0,
   };
 }
 
-/** Os itens em curso de uma pessoa, pela ordem do Quadro; uma perdida, ou um cliente sem negócio aberto, não tem nenhum. */
-export function itensDaPessoa(r: ResumoPessoa, hoje: string): ItemProcesso[] {
-  return cartoesDoQuadro([r], hoje).map((c) => itemDoCartao(c, r, hoje));
+/**
+ * Os itens em curso de uma pessoa, pela ordem do Quadro; uma perdida, ou um cliente sem negócio aberto, não tem nenhum. `extras` são
+ * os orçamentos detalhados (ver `processoNegocios.ts`): sem eles todos os negócios ficam `semDetalhe`.
+ */
+export function itensDaPessoa(r: ResumoPessoa, hoje: string, extras: ExtrasPorNegocio = SEM_EXTRAS): ItemProcesso[] {
+  return cartoesDoQuadro([r], hoje).map((c) => itemDoCartao(c, r, hoje, extras));
 }
 
 /**

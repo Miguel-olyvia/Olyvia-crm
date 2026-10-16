@@ -3,8 +3,11 @@ import type { ItemProcesso, PassoDoItem, PassoProcesso } from "./tiposProcesso";
 
 const doPasso = (id: PassoProcesso): PassoDoItem => ({ id, chave: `pessoasPagina.todo.step.${id}` });
 
-/** Os passos que o botão já executa (Fase 3); os outros continuam a abrir a ficha até às Fases 4 e 5. */
-const PASSOS_EXECUTAVEIS = ["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"] as const;
+/** Os passos que o botão já executa (Fases 3 e 4); os outros continuam a abrir a ficha até à Fase 5. */
+const PASSOS_EXECUTAVEIS = [
+  "registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio", "criarOrcamento", "verificarOrcamento",
+  "aguardarDirecao", "enviarProposta",
+] as const;
 
 type PassoExecutavel = (typeof PASSOS_EXECUTAVEIS)[number];
 
@@ -26,14 +29,24 @@ function passoDoPedido(item: ItemProcesso): PassoProcesso {
  * O passo de um negócio, com o mesmo sentido da coluna "Próximo passo" (`passoDoNegocio` em `etapaPessoa.ts`):
  * Orçamento sem orçamentos: criá-lo (a coluna diz "fazer o levantamento"); com orçamentos e nenhum escolhido: escolher;
  * com um escolhido e sem proposta: criar a proposta. Proposta em rascunho: enviá-la; enviada: registar a resposta do cliente
- * (a coluna diz "à espera do cliente"). Contrato: registar a assinatura. Por ligar nas fases seguintes (ids e textos já
- * existem): `verificarOrcamento`, `aguardarDirecao` (aprovação antes do envio) e `gerarContrato`.
+ * (a coluna diz "à espera do cliente"). Contrato: registar a assinatura. Por ligar na fase seguinte (ids e textos já existem):
+ * `gerarContrato`.
+ * Um orçamento escolhido com detalhe guardado (Fase 4) tem de ser verificado antes da proposta: `verificarOrcamento`, depois
+ * `aguardarDirecao` (se se pediu aprovação) e, com tudo pronto, `enviarProposta`. A coluna continua a dizer "criar a proposta" (a
+ * página real só tem proposta depois de ela ser enviada): criar e enviar é um só gesto, por isso não há botão "criar" à parte.
+ * Sem detalhe (os negócios de exemplo) o passo é o da coluna.
  */
 function passoDoNegocio(item: ItemProcesso): PassoProcesso {
   if (item.fase === "contrato") return "registarAssinatura";
   if (item.fase === "proposta") return item.propostaRascunho ? "enviarProposta" : "registarRespostaCliente";
   if (item.orcamentos === 0) return "criarOrcamento";
-  return item.orcamentoEscolhido ? "criarProposta" : "escolherOrcamento";
+  if (!item.orcamentoEscolhido) return "escolherOrcamento";
+  switch (item.verificacao) {
+    case "porVerificar": return "verificarOrcamento";
+    case "aguardaDirecao": return "aguardarDirecao";
+    case "verificado": return "enviarProposta";
+    case "semDetalhe": return "criarProposta";
+  }
 }
 
 /** O próximo passo de um item, e a chave do texto. */

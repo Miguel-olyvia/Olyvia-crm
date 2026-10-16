@@ -6,6 +6,7 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { LinhaPessoa } from "./LinhaPessoa";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { idPainelNegocios, itensDaPessoa } from "./processo/itensProcesso";
+import { useExtrasProcesso } from "./processo/processoNegocios";
 import type { ItemProcesso } from "./processo/tiposProcesso";
 import { LinhaNegociosPessoa } from "./quadro/LinhaNegociosPessoa";
 
@@ -57,7 +58,8 @@ function EstadoVazioPessoas({ aoLimpar }: { aoLimpar: () => void }) {
 /** A tabela de pessoas, com cabeçalhos fixos ao rolar; o nome de cada uma abre a ficha. Abaixo de lg rola na horizontal. */
 export function TabelaPessoas({ resumos, pendentes, hoje, abertas, aoAlternar, aoAbrir, aoLimpar }: TabelaPessoasProps) {
   const { t } = useTranslation();
-  const itens = useMemo(() => new Map(resumos.map((r) => [r.pessoa.id, itensDaPessoa(r, hoje)])), [resumos, hoje]);
+  const extras = useExtrasProcesso();
+  const itens = useMemo(() => new Map(resumos.map((r) => [r.pessoa.id, itensDaPessoa(r, hoje, extras)])), [resumos, hoje, extras]);
   if (resumos.length === 0) return <EstadoVazioPessoas aoLimpar={aoLimpar} />;
   return (
     <div className="rounded-xl border border-border/70 bg-card">

@@ -8,13 +8,15 @@ import { passoDoNegocio as passoDoNegocioColuna, proximoPasso, type IdPasso } fr
 import { juntarPessoas } from "../juntarPessoas";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "../pessoasExemplo";
 import { itemEmFoco, itensDaPessoa } from "./itensProcesso";
+import { novaLinhaDoCatalogo } from "./catalogoTrabalhos";
 import { ehExecutavel, passoDoItem } from "./passosProcesso";
+import type { ExtrasNegocio, OrcamentoDetalhado } from "./orcamentoDetalhado";
 import { PASSOS_PROCESSO } from "./tiposProcesso";
 import type { ItemProcesso, PassoProcesso } from "./tiposProcesso";
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
   id: "pedido-a", pessoaId: "a", tipo: "pedido", fase: "porContactar", trabalho: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
+  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
 });
 
 const orc = (escolhido: boolean): NegocioMes["orcamentos"] => [{ id: "o", valor: 1000, escolhido }];
@@ -54,12 +56,16 @@ describe("passoDoItem: pedidos", () => {
   });
 });
 
-describe("ehExecutavel: os cinco passos desta fase", () => {
-  it("só estes executam; os das fases 4 e 5 continuam a abrir a ficha", () => {
+describe("ehExecutavel: os passos que o botão já executa (Fases 3 e 4)", () => {
+  it("só estes executam; os da Fase 5 (e escolher o orçamento) continuam a abrir a ficha", () => {
     const executaveis = PASSOS_PROCESSO.filter(ehExecutavel);
-    expect(executaveis).toEqual(["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"]);
-    expect(ehExecutavel("criarOrcamento")).toBe(false);
-    expect(ehExecutavel("registarAssinatura")).toBe(false);
+    expect(executaveis).toEqual([
+      "registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio", "criarOrcamento",
+      "verificarOrcamento", "aguardarDirecao", "enviarProposta",
+    ]);
+    for (const passo of ["escolherOrcamento", "criarProposta", "registarRespostaCliente", "gerarContrato", "registarAssinatura"] as const) {
+      expect(ehExecutavel(passo), passo).toBe(false);
+    }
   });
 });
 
@@ -73,6 +79,14 @@ describe("passoDoItem: negócios", () => {
     ["Proposta em rascunho", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true, propostaRascunho: true }, "enviarProposta"],
     ["Proposta enviada", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true }, "registarRespostaCliente"],
     ["Contrato", { fase: "contrato", orcamentos: 1, orcamentoEscolhido: true }, "registarAssinatura"],
+    // Fase 4: o orçamento detalhado (guardado pelo editor) é verificado antes de se enviar a proposta.
+    ["orçamento escolhido, por verificar", { fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, verificacao: "porVerificar" }, "verificarOrcamento"],
+    ["orçamento escolhido, à espera da Direção", { fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, verificacao: "aguardaDirecao" }, "aguardarDirecao"],
+    ["orçamento escolhido e verificado: enviar a proposta (criá-la e enviá-la é um só gesto)", { fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, verificacao: "verificado" }, "enviarProposta"],
+    ["orçamentos sem nenhum escolhido continuam a pedir para escolher, mesmo com a verificação por fazer", { fase: "orcamento", orcamentos: 2, verificacao: "porVerificar" }, "escolherOrcamento"],
+    ["sem orçamentos, o estado da verificação não conta", { fase: "orcamento", orcamentos: 0, verificacao: "verificado" }, "criarOrcamento"],
+    ["Proposta já enviada, a verificação já não conta", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true, verificacao: "verificado" }, "registarRespostaCliente"],
+    ["Proposta em rascunho (do exemplo, sem orçamento detalhado)", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true, propostaRascunho: true, verificacao: "semDetalhe" }, "enviarProposta"],
   ];
   it.each(casos)("%s", (_nome, extra, esperado) => {
     expect(passoDoItem(negocio(extra)).id).toBe(esperado);
@@ -147,6 +161,38 @@ describe("itensDaPessoa + passoDoItem", () => {
     const n = negocioBase("n1", { servico: "Cozinha", orcamentos: orc(true), proximoPrazo: "2026-10-01" });
     const [i] = itensDe(resumoBase(pessoaBase("a"), [n], HOJE_EXEMPLO));
     expect(i).toMatchObject({ tipo: "negocio", fase: "orcamento", trabalho: "Cozinha", valor: 1000, orcamentos: 1, prazo: "2026-10-01", atrasado: true });
+  });
+});
+
+describe("itensDaPessoa com o orçamento detalhado (Fase 4)", () => {
+  const orcamento = (extra: Partial<OrcamentoDetalhado> = {}): ExtrasNegocio => ({
+    orcamento: {
+      orcamentoId: "o", linhas: [novaLinhaDoCatalogo("pavimento", "l1")], desconto: 0, vendaDireta: false, verificado: false, direcao: null, versao: 1, ...extra,
+    },
+  });
+  const itemCom = (extras: Record<string, ExtrasNegocio>, negocio: Partial<NegocioMes> = { orcamentos: orc(true) }): ItemProcesso =>
+    itensDaPessoa(resumoBase(pessoaBase("a"), [negocioBase("n1", negocio)], HOJE_EXEMPLO), HOJE_EXEMPLO, extras)[0];
+
+  it("sem extras (o exemplo) a verificação é 'semDetalhe' e o passo é o da coluna: criar a proposta", () => {
+    expect(itemCom({})).toMatchObject({ verificacao: "semDetalhe" });
+    expect(passoDoItem(itemCom({})).id).toBe("criarProposta");
+  });
+
+  it("com o orçamento escolhido detalhado: por verificar, à espera da Direção, ou verificado", () => {
+    expect(itemCom({ n1: orcamento() }).verificacao).toBe("porVerificar");
+    expect(itemCom({ n1: orcamento({ direcao: "pedida" }) }).verificacao).toBe("aguardaDirecao");
+    expect(itemCom({ n1: orcamento({ verificado: true }) }).verificacao).toBe("verificado");
+    expect(itemCom({ n1: orcamento({ verificado: true, direcao: "aprovada" }) }).verificacao).toBe("verificado");
+  });
+
+  it("um detalhe de outro orçamento (o escolhido mudou) ou de outro negócio não conta", () => {
+    expect(itemCom({ n1: orcamento({ orcamentoId: "outro" }) }).verificacao).toBe("semDetalhe");
+    expect(itemCom({ n2: orcamento() }).verificacao).toBe("semDetalhe");
+  });
+
+  it("um pedido não tem verificação", () => {
+    const r = resumoBase(pessoaBase("a", { etapa: "nova" }), [], HOJE_EXEMPLO);
+    expect(itensDaPessoa(r, HOJE_EXEMPLO, { n1: orcamento() })[0].verificacao).toBe("semDetalhe");
   });
 });
 
@@ -259,6 +305,24 @@ describe("coerência com a coluna 'Próximo passo' nos dados de exemplo", () => 
   it.each(PEDIDOS_NA_VISITA)("pedido na fase Visita, %s: a coluna diz %s e o 'A fazer' diz %s", (_nome, r, colunaEsperada, passoEsperado) => {
     expect(proximoPasso(r).id).toBe(colunaEsperada);
     expect(passoDoItem(itensDe(r)[0]).id).toBe(passoEsperado);
+  });
+
+  // Fase 4: um negócio com orçamento detalhado. A coluna diz "Criar a proposta" (a página real só tem proposta depois de a enviar) e o
+  // "A fazer" diz o que falta antes (verificar, esperar a Direção) e, com tudo pronto, "Enviar a proposta" (criar e enviar num só gesto).
+  const detalhadoEm = (extra: Partial<OrcamentoDetalhado>): ExtrasNegocio => ({
+    orcamento: {
+      orcamentoId: "o", linhas: [novaLinhaDoCatalogo("pavimento", "l1")], desconto: 0, vendaDireta: false, verificado: false, direcao: null, versao: 1, ...extra,
+    },
+  });
+  const COM_DETALHE: [string, Partial<OrcamentoDetalhado>, PassoProcesso][] = [
+    ["por verificar", {}, "verificarOrcamento"],
+    ["à espera da Direção", { direcao: "pedida" }, "aguardarDirecao"],
+    ["verificado", { verificado: true }, "enviarProposta"],
+  ];
+  it.each(COM_DETALHE)("orçamento detalhado %s: a coluna diz 'criar a proposta' e o 'A fazer' diz %s", (_nome, extra, passoEsperado) => {
+    const r = resumoBase(pessoaBase("a"), [negocioBase("n1", { orcamentos: orc(true) })], HOJE_EXEMPLO);
+    expect(proximoPasso(r).id).toBe("criarProposta");
+    expect(passoDoItem(itensDaPessoa(r, HOJE_EXEMPLO, { n1: detalhadoEm(extra) })[0]).id).toBe(passoEsperado);
   });
 
   it("os exemplos cobrem pedidos de várias fases e negócios de várias fases", () => {

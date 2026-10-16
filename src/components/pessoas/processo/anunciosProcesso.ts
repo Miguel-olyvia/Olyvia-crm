@@ -5,7 +5,9 @@ import type { ColunaQuadro } from "../quadro/cartoesQuadroPessoas";
 import { passoDoItem } from "./passosProcesso";
 import type { ItemProcesso } from "./tiposProcesso";
 
-export type TipoAviso = "chamada" | "visita" | "visitaFeita" | "levantamento" | "negocio";
+export type TipoAviso =
+  | "chamada" | "visita" | "visitaFeita" | "levantamento" | "negocio"
+  | "orcamento" | "verificado" | "direcaoPedida" | "direcaoAprovada" | "direcaoRecusada" | "proposta";
 
 /**
  * O texto do aviso, ou "" quando não há nada a dizer (a pessoa já não tem item). `antes` é a fase em que estava (ou `null`);
@@ -21,5 +23,11 @@ export function textoDoAviso(t: Traduzir, tipo: TipoAviso, nome: string, antes: 
     case "visitaFeita": return t("pessoasPagina.done.visitDone", { name: nome, phase, step });
     case "levantamento": return t("pessoasPagina.done.survey", { name: nome, step });
     case "negocio": return t("pessoasPagina.done.deal", { name: nome, phase });
+    case "orcamento": return t("pessoasPagina.done.quote", { name: nome, step });
+    case "verificado": return t("pessoasPagina.done.verified", { name: nome, step });
+    case "direcaoPedida": return t("pessoasPagina.done.directionAsked", { name: nome, step });
+    case "direcaoAprovada": return t("pessoasPagina.done.directionApproved", { name: nome, step });
+    case "direcaoRecusada": return t("pessoasPagina.done.directionRefused", { name: nome, step });
+    case "proposta": return t("pessoasPagina.done.proposal", { name: nome, phase });
   }
 }

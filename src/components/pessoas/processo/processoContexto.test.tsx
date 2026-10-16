@@ -8,7 +8,7 @@ import type { ItemProcesso } from "./tiposProcesso";
 
 const item = (extra: Partial<ItemProcesso> = {}): ItemProcesso => ({
   id: "pedido-a", pessoaId: "a", tipo: "pedido", fase: "porContactar", trabalho: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
+  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
 });
 
 function Botao({ item: i, aoAbrir }: { item?: ItemProcesso; aoAbrir: () => void }) {
@@ -47,14 +47,30 @@ describe("useAcaoDoPasso", () => {
     expect(aoAbrir).toHaveBeenCalledOnce();
   });
 
-  it("com provider mas num passo das fases 4 e 5 (criar o orçamento), o clique abre a ficha e `executar` não é chamado", () => {
+  it("com provider mas num passo da Fase 5 (registar a assinatura), o clique abre a ficha e `executar` não é chamado", () => {
     const executar = vi.fn();
     const aoAbrir = vi.fn();
-    render(comProvider(executar, <Botao item={item({ tipo: "negocio", fase: "orcamento", id: "n1" })} aoAbrir={aoAbrir} />));
+    render(comProvider(executar, <Botao item={item({ tipo: "negocio", fase: "contrato", id: "n1" })} aoAbrir={aoAbrir} />));
     expect(screen.getByRole("button")).toHaveAttribute("data-executa", "false");
     fireEvent.click(screen.getByRole("button"));
     expect(aoAbrir).toHaveBeenCalledOnce();
     expect(executar).not.toHaveBeenCalled();
+  });
+
+  it("com provider, os passos do orçamento (Fase 4) executam: criar, verificar, aguardar a Direção e enviar a proposta", () => {
+    const negocio = { tipo: "negocio", fase: "orcamento", id: "n1", orcamentos: 1, orcamentoEscolhido: true } as const;
+    const casos: [string, Partial<ItemProcesso>][] = [
+      ["criar o orçamento", { orcamentos: 0, orcamentoEscolhido: false }],
+      ["verificar o orçamento", { verificacao: "porVerificar" }],
+      ["aguardar a Direção", { verificacao: "aguardaDirecao" }],
+      ["enviar a proposta", { verificacao: "verificado" }],
+    ];
+    for (const [nome, extra] of casos) {
+      const executar = vi.fn();
+      const { unmount } = render(comProvider(executar, <Botao item={item({ ...negocio, ...extra })} aoAbrir={vi.fn()} />));
+      expect(screen.getByRole("button"), nome).toHaveAttribute("data-executa", "true");
+      unmount();
+    }
   });
 
   it("sem item (um cartão sem processo), abre a ficha", () => {

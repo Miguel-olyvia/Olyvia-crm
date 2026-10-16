@@ -1,7 +1,8 @@
 // Executa os passos da lead até ao negócio (Fase 3), a partir dos botões do "A fazer" do Quadro e da Lista. Monta UMA vez, ao nível
 // da página, o que cada passo precisa: o diálogo da chamada, o de marcar a visita (o `MarcarVisitaProvider` que já existe), o
 // de "A visita já foi feita?" e o painel "Novo negócio" (levantamento e criar o negócio). Tudo em memória, pelo estado da página.
-// Os passos das Fases 4 e 5 (orçamento, proposta, contrato...) ainda não executam: os botões abrem a ficha.
+// Os passos do orçamento e da proposta (Fase 4: criar, verificar, a Direção simulada e enviar) têm os seus diálogos em
+// `useOrcamentoProcesso`; os da Fase 5 (escolher o orçamento, criar a proposta, contrato...) ainda não executam: os botões abrem a ficha.
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
@@ -16,11 +17,17 @@ import type { DadosVisita } from "../visitaPessoa";
 import { useAvisoAlternado } from "./avisoAlternado";
 import { DialogoChamada } from "./DialogoChamada";
 import { DialogoVisitaFeita } from "./DialogoVisitaFeita";
+import { orcamentoDoNegocio, type ExtrasPorNegocio } from "./orcamentoDetalhado";
 import { passoDoItem } from "./passosProcesso";
-import { portaoCriarNegocio, portaoFazerLevantamento, portaoLevantamento, portaoVisitaFeita, type Portao } from "./portoesProcesso";
+import {
+  portaoCriarNegocio, portaoEnviarProposta, portaoFazerLevantamento, portaoLevantamento, portaoVerificarOrcamento, portaoVisitaFeita,
+  type FaltaProcesso, type Portao,
+} from "./portoesProcesso";
 import { BloqueioContext, ProcessoContext, type BloqueioProcesso, type ProcessoValor } from "./processoContexto";
+import { useExtrasProcesso } from "./processoNegocios";
 import type { ItemProcesso, PassoProcesso } from "./tiposProcesso";
 import { useControloProcesso, type ControloProcesso } from "./useControloProcesso";
+import { ehPassoDoOrcamento, useOrcamentoProcesso } from "./useOrcamentoProcesso";
 
 /** O que os passos mudam no estado da página (o `usePessoasEstado`). */
 export interface AcoesProcesso extends AcoesFicha {
@@ -58,9 +65,16 @@ const PASSOS_COM_FRASE: readonly PassoChamada[] = ["marcarVisita", "ligarData", 
 
 type Interior = Omit<ProcessoProviderProps, "aoAnunciar"> & { controlo: ControloProcesso };
 
-/** O que falta para o passo avançar, olhando para a pessoa (os passos que não têm condições passam sempre). */
-function portaoDoPasso(passo: PassoProcesso, r: ResumoPessoa): Portao {
+/**
+ * O que falta para o passo avançar, olhando para a pessoa e para o orçamento do negócio (os passos que não têm condições passam
+ * sempre). Uma proposta que já estava em rascunho, sem orçamento detalhado (o exemplo), conta como já verificada.
+ */
+function portaoDoPasso(passo: PassoProcesso, r: ResumoPessoa, item: ItemProcesso, extras: ExtrasPorNegocio): Portao {
   const visita = visitaDaPessoa(r.pessoa, r.etapa);
+  const negocio = r.abertos.find((n) => n.id === item.id);
+  const orcamento = negocio && orcamentoDoNegocio(negocio, extras);
+  if (passo === "verificarOrcamento") return portaoVerificarOrcamento(orcamento);
+  if (passo === "enviarProposta") return portaoEnviarProposta({ verificado: orcamento?.verificado ?? true });
   if (passo === "marcarVisitaFeita") return portaoVisitaFeita(visita);
   if (passo === "fazerLevantamento") return portaoFazerLevantamento(visita);
   if (passo === "criarNegocio") {
@@ -82,20 +96,22 @@ function ProcessoInterior({ hoje, resumos, acoes, opcoesPessoa, aoCriarNegocio, 
   const [bloqueio, setBloqueio] = useState<BloqueioProcesso | null>(null);
   const [motivoLevantamento, setMotivoLevantamento] = useState<string | null>(null);
   const alternar = useAvisoAlternado();
+  const extras = useExtrasProcesso();
   const resumoDe = (id: string | null) => resumos.find((r) => r.pessoa.id === id) ?? null;
 
   /** O que falta para o passo avançar, numa frase: "Fazer o levantamento: ainda não é possível. Falta...". */
-  const textoDoBloqueio = (passo: PassoProcesso, portao: Portao): string => {
-    const reasons = portao.emFalta.map((falta) => t(`pessoasPagina.gate.${falta}`)).join(" ");
+  const textoDoBloqueio = (passo: PassoProcesso, faltas: FaltaProcesso[]): string => {
+    const reasons = faltas.map((falta) => t(`pessoasPagina.gate.${falta}`)).join(" ");
     return t("pessoasPagina.gate.blocked", { step: t(`pessoasPagina.todo.step.${passo}`), reasons });
   };
+  const orcamento = useOrcamentoProcesso({ hoje, resumos, controlo, textoDoBloqueio });
 
   /**
    * O botão não avança e nada abre: o que falta diz-se na região live (sem toast, que sumia em segundos) e fica escrito junto ao
    * botão até o utilizador agir.
    */
   const bloquear = (item: ItemProcesso, passo: PassoProcesso, portao: Portao) => {
-    const texto = textoDoBloqueio(passo, portao);
+    const texto = textoDoBloqueio(passo, portao.emFalta);
     setBloqueio({ itemId: item.id, passo, texto });
     controlo.avisar(texto);
   };
@@ -110,7 +126,7 @@ function ProcessoInterior({ hoje, resumos, acoes, opcoesPessoa, aoCriarNegocio, 
     const r = resumoDe(item.pessoaId);
     if (!r) return;
     const passo = passoDoItem(item).id;
-    const portao = portaoDoPasso(passo, r);
+    const portao = portaoDoPasso(passo, r, item, extras);
     if (!portao.ok) { bloquear(item, passo, portao); return; }
     controlo.guardarFoco({ itemId: item.id, pessoaId: item.pessoaId, origem });
     if (passo === "registarChamada") setChamada(r.pessoa.id);
@@ -118,6 +134,7 @@ function ProcessoInterior({ hoje, resumos, acoes, opcoesPessoa, aoCriarNegocio, 
       marcarVisita?.pedir({ pessoaId: r.pessoa.id, nome: r.pessoa.nome, servico: item.trabalho ?? "", moradaLead: moradaDaLead(r.pessoa) });
     } else if (passo === "marcarVisitaFeita") setVisitaFeita(r.pessoa.id);
     else if (passo === "fazerLevantamento" || passo === "criarNegocio") abrirNegocio(r, passo);
+    else if (ehPassoDoOrcamento(passo)) orcamento.abrir(item, passo);
   };
   // O valor do contexto é o mesmo a vida toda: abrir e fechar diálogos (estado deste componente) não re-renderiza os cartões.
   // O `executar` do render mais recente fica num ref, por isso lê sempre as pessoas e os estados de agora.
@@ -135,7 +152,7 @@ function ProcessoInterior({ hoje, resumos, acoes, opcoesPessoa, aoCriarNegocio, 
     const portao = portaoLevantamento({ visitaFeita: visitaDaPessoa(r.pessoa, r.etapa)?.feita === true, linhas: rascunho.linhas });
     if (!portao.ok) {
       // O texto alterna um espaço inseparável: um segundo clique com o mesmo motivo volta a ser anunciado.
-      setMotivoLevantamento(alternar(textoDoBloqueio("fazerLevantamento", portao)));
+      setMotivoLevantamento(alternar(textoDoBloqueio("fazerLevantamento", portao.emFalta)));
       return false;
     }
     setMotivoLevantamento(null);
@@ -165,6 +182,7 @@ function ProcessoInterior({ hoje, resumos, acoes, opcoesPessoa, aoCriarNegocio, 
         aoDevolverFoco={controlo.aoDevolverFoco}
         aoConfirmar={(id, nota) => { acoes.marcarVisitaFeita(id, nota); controlo.registar("visitaFeita", id); setVisitaFeita(null); }}
       />
+      {orcamento.dialogos}
       <NovoNegocioDialogo
         pessoas={opcoesPessoa} semBotao aberto={negocio !== null} abaInicial="visita" pessoaInicialId={negocio?.pessoaId}
         valoresIniciais={negocio?.valores} aoDevolverFoco={controlo.aoDevolverFoco}

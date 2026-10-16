@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { novaLinha, type LinhaForm } from "@/components/negocio-metas/levantamento";
+import { novaLinhaDoCatalogo } from "./catalogoTrabalhos";
+import { verificarOrcamento } from "./orcamentoCalculo";
 import {
-  portaoCriarNegocio, portaoFazerLevantamento, portaoLevantamento, portaoVisitaFeita,
+  portaoCriarNegocio, portaoEnviarProposta, portaoFazerLevantamento, portaoGuardarOrcamento, portaoLevantamento, portaoMargem,
+  portaoResponderDirecao, portaoValorOrcamento, portaoVerificarOrcamento, portaoVisitaFeita,
 } from "./portoesProcesso";
 
 const linha = (extra: Partial<LinhaForm> = {}): LinhaForm => ({ ...novaLinha("l1"), divisao: "cozinha", trabalho: "pintura", medida: "12", ...extra });
@@ -66,5 +69,68 @@ describe("portaoCriarNegocio (a pessoa; com visita feita, pelo menos uma linha)"
   });
   it("falta a pessoa e as linhas ao mesmo tempo", () => {
     expect(portaoCriarNegocio({ pessoaId: "", visitaFeita: true, linhas: [] }).emFalta).toEqual(["pessoa", "linhas"]);
+  });
+});
+
+describe("portaoGuardarOrcamento (pelo menos uma linha)", () => {
+  it("sem linhas falta uma linha", () => {
+    expect(portaoGuardarOrcamento([])).toEqual({ ok: false, emFalta: ["orcamentoLinhas"] });
+  });
+  it("com uma linha está tudo", () => {
+    expect(portaoGuardarOrcamento([novaLinhaDoCatalogo("pintura", "l1")])).toEqual({ ok: true, emFalta: [] });
+  });
+});
+
+describe("portaoValorOrcamento (o valor que um orçamento aceita)", () => {
+  it("aceita de 1 cêntimo a 10 milhões, e nada fora disso (nem zero, nem negativo, nem NaN)", () => {
+    expect(portaoValorOrcamento(0.01)).toEqual({ ok: true, emFalta: [] });
+    expect(portaoValorOrcamento(10_000_000)).toEqual({ ok: true, emFalta: [] });
+    for (const valor of [0, -5, 10_000_000.01, Number.NaN]) expect(portaoValorOrcamento(valor).emFalta, String(valor)).toEqual(["orcamentoValor"]);
+  });
+});
+
+describe("portaoVerificarOrcamento (só com orçamento)", () => {
+  it("sem orçamento detalhado falta o orçamento", () => {
+    expect(portaoVerificarOrcamento(undefined)).toEqual({ ok: false, emFalta: ["semOrcamento"] });
+  });
+  it("com o orçamento sem linhas faltam as linhas", () => {
+    expect(portaoVerificarOrcamento({ linhas: [] })).toEqual({ ok: false, emFalta: ["orcamentoLinhas"] });
+  });
+  it("com o orçamento e linhas pode verificar", () => {
+    expect(portaoVerificarOrcamento({ linhas: [novaLinhaDoCatalogo("pintura", "l1")] })).toEqual({ ok: true, emFalta: [] });
+  });
+});
+
+describe("portaoMargem (os bloqueios da verificação)", () => {
+  const com = (precoUnitario: number) => verificarOrcamento({ linhas: [{ ...novaLinhaDoCatalogo("pavimento", "l1"), quantidade: 10, precoUnitario }], desconto: 0 });
+  it("sem bloqueios passa", () => {
+    expect(portaoMargem(com(30))).toEqual({ ok: true, emFalta: [] });
+  });
+  it("um bloqueio mole diz que há margem por resolver", () => {
+    expect(portaoMargem(com(24))).toEqual({ ok: false, emFalta: ["margem"] });
+  });
+  it("um preço abaixo do custo diz que a Direção não o aprova (e não 'margem')", () => {
+    expect(portaoMargem(com(10))).toEqual({ ok: false, emFalta: ["abaixoDoCusto"] });
+  });
+});
+
+describe("portaoResponderDirecao", () => {
+  it("só há resposta a registar com o pedido feito", () => {
+    expect(portaoResponderDirecao("pedida")).toEqual({ ok: true, emFalta: [] });
+    for (const direcao of [null, undefined, "aprovada"] as const) expect(portaoResponderDirecao(direcao).emFalta, String(direcao)).toEqual(["semPedido"]);
+  });
+});
+
+describe("portaoEnviarProposta (orçamento verificado ou exceção aprovada, e condições completas)", () => {
+  it("por verificar não envia", () => {
+    expect(portaoEnviarProposta({ verificado: false })).toEqual({ ok: false, emFalta: ["porVerificar"] });
+  });
+  it("verificado envia; as condições só travam quando já se sabe que estão incompletas", () => {
+    expect(portaoEnviarProposta({ verificado: true })).toEqual({ ok: true, emFalta: [] });
+    expect(portaoEnviarProposta({ verificado: true, erros: {} })).toEqual({ ok: true, emFalta: [] });
+    expect(portaoEnviarProposta({ verificado: true, erros: { inicio: "obrigatorio" } })).toEqual({ ok: false, emFalta: ["condicoes"] });
+  });
+  it("falta o orçamento verificado e as condições ao mesmo tempo, por esta ordem", () => {
+    expect(portaoEnviarProposta({ verificado: false, erros: { prazo: "invalido" } }).emFalta).toEqual(["porVerificar", "condicoes"]);
   });
 });
