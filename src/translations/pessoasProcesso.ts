@@ -1,5 +1,7 @@
 // Textos do seletor Lista / Quadro e do Quadro de Pessoas por 6 fases (pt e en). Juntam-se aos de `pessoasPagina.ts`, por isso as
-// chaves continuam a ser `pessoasPagina.*` (view.* e board.*). Os nomes dos passos vêm de `pessoasLista.ts` (`pessoasPagina.next.*`).
+// chaves continuam a ser `pessoasPagina.*` (view.* e board.*), mais os negócios de cada pessoa na Lista (deals.*) e o "A fazer"
+// (todo.*, com os 14 passos em todo.step.<id>; `step.*` já é do próximo passo da chamada). Os nomes dos passos da coluna
+// "Próximo passo" vêm de `pessoasLista.ts` (`pessoasPagina.next.*`).
 export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, string>> = {
   en: {
     'pessoasPagina.view.label': 'View',
@@ -24,6 +26,39 @@ export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, str
     'pessoasPagina.board.request': 'New request',
     'pessoasPagina.board.open': 'Open the record of {name}',
     'pessoasPagina.board.step': '{step}: {name}',
+
+    'pessoasPagina.deals.col': 'Deals',
+    'pessoasPagina.deals.show': 'Show deals ({count})',
+    'pessoasPagina.deals.hide': 'Hide deals',
+    'pessoasPagina.deals.for': 'of {name}',
+    'pessoasPagina.deals.list': 'Deals of {name}',
+    'pessoasPagina.deals.none': 'Nothing to do right now',
+    'pessoasPagina.deals.summary.one': '1 in progress · To do: {step}',
+    'pessoasPagina.deals.summary.many': '{count} in progress · To do: {step}',
+    'pessoasPagina.deals.kind.request': 'Request',
+    'pessoasPagina.deals.kind.deal': 'Deal',
+    'pessoasPagina.deals.value.none': 'Value to be defined',
+    'pessoasPagina.deals.stepLabel': '{step}: {work} of {name} (opens the record)',
+    'pessoasPagina.deals.sr.phase': 'Stage:',
+    'pessoasPagina.deals.sr.value': 'Value:',
+    'pessoasPagina.deals.sr.deadline': 'Deadline:',
+
+    'pessoasPagina.todo.label': 'To do:',
+
+    'pessoasPagina.todo.step.registarChamada': 'Log the call',
+    'pessoasPagina.todo.step.marcarVisita': 'Book the visit',
+    'pessoasPagina.todo.step.marcarVisitaFeita': 'Mark the visit as done',
+    'pessoasPagina.todo.step.fazerLevantamento': 'Do the survey',
+    'pessoasPagina.todo.step.criarNegocio': 'Create the deal',
+    'pessoasPagina.todo.step.criarOrcamento': 'Create the quote',
+    'pessoasPagina.todo.step.verificarOrcamento': 'Check the quote',
+    'pessoasPagina.todo.step.aguardarDirecao': 'Wait for management approval',
+    'pessoasPagina.todo.step.escolherOrcamento': 'Choose the quote',
+    'pessoasPagina.todo.step.criarProposta': 'Create the proposal',
+    'pessoasPagina.todo.step.enviarProposta': 'Send the proposal',
+    'pessoasPagina.todo.step.registarRespostaCliente': 'Log the client reply',
+    'pessoasPagina.todo.step.gerarContrato': 'Generate the contract',
+    'pessoasPagina.todo.step.registarAssinatura': 'Log the signature',
   },
   pt: {
     'pessoasPagina.view.label': 'Vista',
@@ -48,5 +83,38 @@ export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, str
     'pessoasPagina.board.request': 'Pedido novo',
     'pessoasPagina.board.open': 'Abrir a ficha de {name}',
     'pessoasPagina.board.step': '{step}: {name}',
+
+    'pessoasPagina.deals.col': 'Negócios',
+    'pessoasPagina.deals.show': 'Ver negócios ({count})',
+    'pessoasPagina.deals.hide': 'Esconder negócios',
+    'pessoasPagina.deals.for': 'de {name}',
+    'pessoasPagina.deals.list': 'Negócios de {name}',
+    'pessoasPagina.deals.none': 'Nada a fazer neste momento',
+    'pessoasPagina.deals.summary.one': '1 em curso · A fazer: {step}',
+    'pessoasPagina.deals.summary.many': '{count} em curso · A fazer: {step}',
+    'pessoasPagina.deals.kind.request': 'Pedido',
+    'pessoasPagina.deals.kind.deal': 'Negócio',
+    'pessoasPagina.deals.value.none': 'Valor a definir',
+    'pessoasPagina.deals.stepLabel': '{step}: {work} de {name} (abre a ficha)',
+    'pessoasPagina.deals.sr.phase': 'Fase:',
+    'pessoasPagina.deals.sr.value': 'Valor:',
+    'pessoasPagina.deals.sr.deadline': 'Prazo:',
+
+    'pessoasPagina.todo.label': 'A fazer:',
+
+    'pessoasPagina.todo.step.registarChamada': 'Registar a chamada',
+    'pessoasPagina.todo.step.marcarVisita': 'Marcar a visita',
+    'pessoasPagina.todo.step.marcarVisitaFeita': 'Marcar a visita como feita',
+    'pessoasPagina.todo.step.fazerLevantamento': 'Fazer o levantamento',
+    'pessoasPagina.todo.step.criarNegocio': 'Criar o negócio',
+    'pessoasPagina.todo.step.criarOrcamento': 'Criar o orçamento',
+    'pessoasPagina.todo.step.verificarOrcamento': 'Verificar o orçamento',
+    'pessoasPagina.todo.step.aguardarDirecao': 'Aguardar a aprovação da direção',
+    'pessoasPagina.todo.step.escolherOrcamento': 'Escolher o orçamento',
+    'pessoasPagina.todo.step.criarProposta': 'Criar a proposta',
+    'pessoasPagina.todo.step.enviarProposta': 'Enviar a proposta',
+    'pessoasPagina.todo.step.registarRespostaCliente': 'Registar a resposta do cliente',
+    'pessoasPagina.todo.step.gerarContrato': 'Gerar o contrato',
+    'pessoasPagina.todo.step.registarAssinatura': 'Registar a assinatura',
   },
 };

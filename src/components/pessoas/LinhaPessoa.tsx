@@ -9,11 +9,18 @@ import { LIMITE_SEM_CONTACTO, resultadoEfetivo } from "./filtrosPessoas";
 import { textoEtapa, textoSemContacto, textoUltimoContacto, textoValor } from "./formatoPessoas";
 import { COR_ETAPA, COR_PERDIDA, ICONE_ETAPA } from "./iconesPessoa";
 import type { Pessoa, ResumoPessoa } from "./pessoasTipos";
+import type { ItemProcesso } from "./processo/tiposProcesso";
+import { BotaoNegocios, ResumoNegocios, SemNegocios } from "./quadro/ControloNegociosPessoa";
 import { SeloPerdida, SeloResultado, SeloVoltou } from "./SelosPessoa";
 
 interface LinhaPessoaProps {
   resumo: ResumoPessoa;
   voltou: boolean;
+  /** Os pedidos e negócios em curso da pessoa (ver `itensDaPessoa`); vazio = sem botão de negócios. */
+  itens: readonly ItemProcesso[];
+  /** As sub-linhas de negócios estão abertas. */
+  aberta: boolean;
+  aoAlternar: (id: string) => void;
   aoAbrir: (id: string) => void;
 }
 
@@ -86,8 +93,8 @@ function SemTexto({ rotulo }: { rotulo: string }) {
   );
 }
 
-/** Uma linha: o nome é o botão que abre a ficha (Enter), e a linha toda também abre ao clicar. */
-export function LinhaPessoa({ resumo, voltou, aoAbrir }: LinhaPessoaProps) {
+/** Uma linha: o nome é o botão que abre a ficha (Enter), e a linha toda também abre ao clicar. Na última célula, o botão dos negócios. */
+export function LinhaPessoa({ resumo, voltou, itens, aberta, aoAlternar, aoAbrir }: LinhaPessoaProps) {
   const { t } = useTranslation();
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
@@ -112,6 +119,7 @@ export function LinhaPessoa({ resumo, voltou, aoAbrir }: LinhaPessoaProps) {
               {pessoa.nome}
             </button>
             <Sublinha resumo={resumo} voltou={voltou} />
+            {!aberta && <ResumoNegocios resumo={resumo} itens={itens} />}
           </span>
         </span>
       </TableCell>
@@ -128,6 +136,11 @@ export function LinhaPessoa({ resumo, voltou, aoAbrir }: LinhaPessoaProps) {
       </TableCell>
       <TableCell className={cn(CELULA, "text-right tabular-nums")}>
         {valor ?? <SemTexto rotulo={t("pessoasPagina.value.none")} />}
+      </TableCell>
+      <TableCell className={CELULA}>
+        {itens.length === 0
+          ? <SemNegocios />
+          : <BotaoNegocios pessoaId={pessoa.id} nome={pessoa.nome} quantidade={itens.length} aberta={aberta} aoAlternar={aoAlternar} />}
       </TableCell>
     </TableRow>
   );

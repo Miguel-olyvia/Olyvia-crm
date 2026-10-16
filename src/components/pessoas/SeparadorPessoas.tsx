@@ -47,6 +47,9 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
   const { t } = useTranslation();
   const [locais, setLocais] = useState<FiltrosLocais>(LOCAIS_INICIAIS);
   const [ajudaAberta, setAjudaAberta] = useState(false);
+  // As pessoas com os negócios à vista na Lista: estado local desta visita, que não persiste (tudo fecha ao voltar).
+  const [abertas, setAbertas] = useState<ReadonlySet<string>>(new Set());
+  const alternar = (id: string) => setAbertas((atual) => (atual.has(id) ? new Set([...atual].filter((x) => x !== id)) : new Set([...atual, id])));
   const raiz = useRef<HTMLDivElement>(null);
   const pesquisaRef = useRef<HTMLInputElement>(null);
   const { resumos, pendentes, tipo, ordem, vista, hoje } = p;
@@ -98,7 +101,7 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
       </div>
       {vista === "quadro"
         ? <QuadroPessoas cartoes={cartoes} hoje={hoje} chip={chip} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />
-        : <TabelaPessoas resumos={visiveis} pendentes={pendentes} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />}
+        : <TabelaPessoas resumos={visiveis} pendentes={pendentes} hoje={hoje} abertas={abertas} aoAlternar={alternar} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />}
     </div>
   );
 }

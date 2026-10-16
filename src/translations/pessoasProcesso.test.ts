@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PASSOS_PROCESSO } from "@/components/pessoas/processo/passosProcesso";
 import { pessoasPaginaTranslations } from "./pessoasPagina";
 import { pessoasProcessoTranslations } from "./pessoasProcesso";
 
@@ -10,8 +11,29 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(pt).sort());
   });
 
-  it("todas as chaves são view.* ou board.*, com o prefixo da página", () => {
-    for (const chave of Object.keys(pt)) expect(chave).toMatch(/^pessoasPagina\.(view|board)\./);
+  it("todas as chaves são view.*, board.*, deals.* ou todo.*, com o prefixo da página", () => {
+    for (const chave of Object.keys(pt)) expect(chave).toMatch(/^pessoasPagina\.(view|board|deals|todo)\./);
+  });
+
+  it("há um texto de passo (todo.step.<id>) para cada um dos 14 passos do processo, e nenhum a mais", () => {
+    const ids = Object.keys(pt).filter((c) => c.startsWith("pessoasPagina.todo.step.")).map((c) => c.slice("pessoasPagina.todo.step.".length));
+    expect(ids.sort()).toEqual([...PASSOS_PROCESSO].sort());
+  });
+
+  it("os textos dos negócios da lista têm os marcadores certos", () => {
+    expect(marcas(pt["pessoasPagina.deals.show"])).toEqual(["{count}"]);
+    expect(marcas(pt["pessoasPagina.deals.for"])).toEqual(["{name}"]);
+    expect(marcas(pt["pessoasPagina.deals.list"])).toEqual(["{name}"]);
+    expect(marcas(pt["pessoasPagina.deals.summary.one"])).toEqual(["{step}"]);
+    expect(marcas(pt["pessoasPagina.deals.summary.many"])).toEqual(["{count}", "{step}"]);
+    expect(marcas(pt["pessoasPagina.deals.stepLabel"])).toEqual(["{name}", "{step}", "{work}"]);
+  });
+
+  it("os rótulos só para leitores de ecrã (fase, valor, prazo) existem nas duas línguas", () => {
+    for (const chave of ["deals.sr.phase", "deals.sr.value", "deals.sr.deadline"]) {
+      expect(pt[`pessoasPagina.${chave}`], chave).toMatch(/:$/);
+      expect(en[`pessoasPagina.${chave}`], chave).toMatch(/:$/);
+    }
   });
 
   it("nenhum texto está vazio e os marcadores {x} coincidem entre línguas", () => {

@@ -37,11 +37,11 @@ describe("Pessoas: arranque da lista", () => {
     expect(screen.getByRole("tab", { name: "Pessoas" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("tem as 7 colunas, o seletor abre em Todos e há o botão Nova lead", () => {
+  it("tem as 8 colunas (a última, a dos negócios), o seletor abre em Todos e há o botão Nova lead", () => {
     renderPage();
     const tabela = screen.getByRole("table");
     expect(within(tabela).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(
-      ["Pessoa", "Localidade", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Valor"],
+      ["Pessoa", "Localidade", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Valor", "Negócios"],
     );
     expect(screen.getByRole("button", { name: /Todos 17/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Leads 9/ })).toHaveAttribute("aria-pressed", "false");
