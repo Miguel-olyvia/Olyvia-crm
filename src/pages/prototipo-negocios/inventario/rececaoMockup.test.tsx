@@ -13,9 +13,13 @@ function Casa() {
   const [aba, setAba] = useState<AbaInv>("guia");
   return <><MenuInventario aba={aba} aoIr={setAba} /><InventarioPagina aba={aba} aoMudarAba={setAba} /></>;
 }
-const telemovel = (): HTMLElement => screen.getByLabelText("Receção no telemóvel");
 const acoesCab = (): HTMLElement => document.querySelector(".ph-actions") as HTMLElement;
+/** 16/10: o telemóvel da receção abre-se em "Ler códigos" (diálogo). */
+const abrirLeitor = (): void => { if (!screen.queryByLabelText("Receção no telemóvel")) fireEvent.click(within(acoesCab()).getByRole("button", { name: "Ler códigos" })); };
+const telemovel = (): HTMLElement => { abrirLeitor(); return screen.getByLabelText("Receção no telemóvel"); };
+const guias = (): void => { fireEvent.click(screen.getByRole("tab", { name: /^Guias/ })); };
 const ler = (code: string): void => {
+  abrirLeitor();
   const campo = document.getElementById("rc-scan") as HTMLInputElement;
   fireEvent.change(campo, { target: { value: code } });
   fireEvent.keyDown(campo, { key: "Enter" });
@@ -25,14 +29,19 @@ beforeEach(() => { esquecerPerfil(); esquecerInventario(); });
 afterEach(() => { cleanup(); esquecerPerfil(); });
 
 describe("Receção como no mockup", () => {
-  it("mostra o telemóvel ao lado das guias, com as ações no cabeçalho", () => {
+  it("separadores Por receber · Recebidas · Guias; o telemóvel abre em \"Ler códigos\" e as guias no seu separador", () => {
     render(<Casa />);
-    expect(within(acoesCab()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nova guia", "Receber numa encomenda"]);
-    expect(document.querySelector(".recv-grid .phone")).not.toBeNull();
+    expect(within(acoesCab()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Ler códigos", "Nova guia"]);
+    expect(within(screen.getByRole("tablist", { name: "Receção" })).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Por receber", "Recebidas", "Guias"]);
+    expect(screen.getByRole("tab", { name: /^Por receber/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByLabelText("Receção no telemóvel")).toBeNull();
     expect(within(telemovel()).getByText("Cesto (0)")).toBeInTheDocument();
     expect(within(telemovel()).getByText("3 pendente(s) ▸")).toBeInTheDocument();
-    // as guias têm os seus chips (as encomendas por receber, por cima, têm outros)
-    expect(within(document.querySelector(".recv-grid") as HTMLElement).getByRole("button", { name: /^Todas\s*\d+/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("dialog", { name: "Ler códigos" })).toBeInTheDocument();
+    cleanup();
+    render(<Casa />);
+    guias();
+    expect(screen.getByRole("button", { name: /^Todas\s*\d+/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("ler um código conhecido põe o produto no cesto", async () => {
@@ -77,14 +86,15 @@ describe("Receção como no mockup", () => {
   it("no perfil Só consulta a Receção fica em modo consulta", () => {
     mudarPerfil("consulta");
     render(<Casa />);
+    expect(within(acoesCab()).getByRole("button", { name: "Nova guia" })).toBeDisabled();
     expect(within(telemovel()).getByText("Modo consulta")).toBeInTheDocument();
     expect(document.getElementById("rc-scan")).toBeDisabled();
-    expect(acoesCab().querySelector("button")).toBeDisabled();
     expect(within(telemovel()).getByRole("button", { name: /Confirmar receção/ })).toBeDisabled();
   });
 
   it("a folha da guia tem os botões do mockup e desativa-os em modo consulta", async () => {
     render(<Casa />);
+    guias();
     fireEvent.click(screen.getByRole("row", { name: /^Abrir a guia GR 2026\/311/ }));
     const folha = await screen.findByRole("dialog", { name: "GR 2026/311" });
     const nomes = within(folha).getAllByRole("button").map((b) => b.textContent);
@@ -92,6 +102,7 @@ describe("Receção como no mockup", () => {
     cleanup();
     mudarPerfil("consulta");
     render(<Casa />);
+    guias();
     fireEvent.click(screen.getByRole("row", { name: /^Abrir a guia GR 2026\/311/ }));
     const f2 = await screen.findByRole("dialog", { name: "GR 2026/311" });
     expect(within(f2).getByRole("button", { name: "Editar" })).toBeDisabled();

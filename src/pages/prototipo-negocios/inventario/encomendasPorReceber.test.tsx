@@ -1,6 +1,6 @@
 // Armazém › Receção abre com as encomendas por receber (16/10): as POs do Tiago Almeida (CT 2026/1027) aparecem sem vir do botão Receber da PO,
 // a pesquisa filtra, "Receber" abre ali o painel, a receção total tira a PO da lista e a pendente aparece com aviso.
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { acoes, seed } from "../motor";
 import { FINANCEIRO, emFalta, type Grupo } from "../campos";
@@ -36,21 +36,40 @@ describe("Receção · Encomendas por receber", () => {
     expect(within(lista()).getAllByText(/CT 2026\/1027 · /).length).toBeGreaterThan(0);
     expect(within(lista()).getAllByText(/Pendente · não confirmada ao fornecedor/).length).toBeGreaterThan(0);
     fireEvent.change(within(lista()).getByRole("searchbox", { name: /Pesquisar/ }), { target: { value: "Tiago" } });
-    const linhas = within(lista()).getAllByRole("button", { name: /^Receber PO-/ }).map((b) => b.getAttribute("aria-label")!.replace("Receber ", ""));
+    const linhas = within(lista()).getAllByRole("button", { name: /^Dar entrada PO-/ }).map((b) => b.getAttribute("aria-label")!.replace("Dar entrada ", ""));
     expect(linhas.sort()).toEqual([...ids].sort());
   });
 
-  it("Receber abre o painel ali; receber tudo tira a PO da lista e volta à lista", () => {
+  it("\"Dar entrada\" abre o painel com a falta preenchida; confirmar avisa a reserva para o cliente, a PO sai de Por receber e aparece em Recebidas; reverter no histórico", async () => {
     const [id] = pagarTiago();
     render(<InventarioPagina aba="guia" />);
-    fireEvent.click(within(lista()).getByRole("button", { name: `Receber ${id}` }));
-    const painel = screen.getByRole("region", { name: `Encomenda ${id}` });
+    fireEvent.click(within(lista()).getByRole("button", { name: `Dar entrada ${id}` }));
+    const painel = screen.getByRole("dialog", { name: `Dar entrada · ${id}` });
     expect(within(painel).getByText(/ainda está pendente/)).toBeInTheDocument();
-    fireEvent.click(within(painel).getByRole("button", { name: "Receber tudo o que falta" }));
-    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar receção" }));
-    const po = lerInventario().pos.find((p) => p.id === id)!;
-    expect(poRecebivel(po)).toBe(false);
-    expect(screen.queryByRole("region", { name: `Encomenda ${id}` })).toBeNull();
+    const po0 = lerInventario().pos.find((p) => p.id === id)!;
+    within(painel).getAllByRole("spinbutton", { name: /Dar entrada/ }).forEach((c, i) => expect(c).toHaveValue(po0.lines[i].packs * po0.lines[i].packN - po0.lines[i].recv - po0.lines[i].cancelled));
+    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar entrada" }));
+    expect(await screen.findAllByText(/Entrou no .* un reservadas para Tiago Almeida/)).not.toHaveLength(0);
+    expect(poRecebivel(lerInventario().pos.find((p) => p.id === id)!)).toBe(false);
+    expect(screen.queryByRole("dialog", { name: `Dar entrada · ${id}` })).toBeNull();
     expect(within(lista()).queryByText(id)).toBeNull();
+    // Recebidas: o histórico das entradas, com Reverter
+    fireEvent.click(screen.getByRole("tab", { name: /^Recebidas/ }));
+    const hist = screen.getByRole("region", { name: "Receções feitas" });
+    expect(within(hist).getAllByText(id).length).toBeGreaterThan(0);
+    fireEvent.click(within(hist).getAllByRole("button", { name: new RegExp(`^Reverter a receção de ${id}`) })[0]);
+    const dlg = await screen.findByRole("dialog", { name: "Reverter receção" });
+    fireEvent.change(within(dlg).getByRole("textbox"), { target: { value: "Engano na contagem" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: "Reverter receção" }));
+    await waitFor(() => expect(lerInventario().pos.find((p) => p.id === id)!.receipts.some((r) => r.state === "Revertida")).toBe(true));
+    expect(poRecebivel(lerInventario().pos.find((p) => p.id === id)!)).toBe(true);
+  });
+
+  it("\"Ler códigos\" abre o leitor (o telemóvel da receção)", () => {
+    render(<InventarioPagina aba="guia" />);
+    expect(screen.queryByLabelText("Receção no telemóvel")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ler códigos" }));
+    expect(screen.getByRole("dialog", { name: "Ler códigos" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Receção no telemóvel")).toBeInTheDocument();
   });
 });

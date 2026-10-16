@@ -4,7 +4,6 @@
 // Atrasadas, Pendentes), pesquisa e filtros (fornecedor, armazém, cliente/obra). "Receber" abre o painel da PO; "Receber tudo" no bloco abre
 // a primeira e, a cada receção completa, o painel avança para a seguinte do bloco (lerFilaRececao). O negócio pode abrir a Receção já filtrada.
 import { useState } from "react";
-import { Truck, Warehouse } from "lucide-react";
 import { fmtD, nomeForn } from "./base";
 import { useCtxInv } from "./ctxInv";
 import { definirFilaRececao, tirarPedidoRececaoInv } from "./loja";
@@ -58,11 +57,12 @@ export function blocosRec(L: Po[]): BlocoRec[] {
   return [...B.filter((b) => b.chave).sort((a, b) => Number(b.atrasada) - Number(a.atrasada) || cedo(a).localeCompare(cedo(b))), ...B.filter((b) => !b.chave)];
 }
 
-const CHIPS: [ChipRec, string][] = [["todas", "Todas"], ["clientes", "Para clientes"], ["stock", "Para stock"], ["atrasadas", "Atrasadas"], ["pendentes", "Pendentes"]];
+// os atalhos (carregar outra vez no ativo volta a mostrar todas)
+const CHIPS: [ChipRec, string][] = [["clientes", "Para clientes"], ["stock", "Para stock"], ["atrasadas", "Atrasadas"], ["pendentes", "Pendentes"]];
 
 export function EncomendasPorReceber() {
   const { db, agir } = useCtxInv();
-  // aberta pelo negócio ("Abrir Receção"): já filtrada pelo cliente/obra
+  // aberta pelo negócio ("Abrir Receção"): já filtrada pelo cliente/obra (os separadores da Receção estão em GuiasInv.tsx)
   const [f, setF] = useState<FiltrosRec>(() => { const cli = tirarPedidoRececaoInv(); return cli ? { ...FILTROS_REC, cli } : FILTROS_REC; });
   const lista = porReceber(db, f), n = contagensRec(db, f), blocos = blocosRec(lista);
   const clientes = [...new Map(db.pos.filter(poRecebivel).filter((p) => chaveCliente(p)).map((p) => [chaveCliente(p), rotuloCliente(p)] as const)).entries()];
@@ -72,11 +72,9 @@ export function EncomendasPorReceber() {
     agir((d) => abrirRececaoDaPo(d, d.pos.find((x) => x.id === p.id) as Po));
   };
   return (
-    <section className="card pad" aria-labelledby="rec-por-receber" style={{ marginBottom: 12 }}>
-      <div className="row between" style={{ marginBottom: 4 }}><h2 id="rec-por-receber" style={{ fontSize: 16 }}><Truck className="ic" aria-hidden="true" /> Encomendas por receber <span className="muted">· {n.todas}</span></h2></div>
-      <p className="muted" style={{ marginBottom: 8 }}><Warehouse className="ic sm" aria-hidden="true" /> Aqui dá entrada no armazém a mercadoria que chega dos fornecedores.</p>
+    <section aria-label={`Encomendas por receber · ${n.todas}`} style={{ marginBottom: 12 }}>
       <div className="chips" role="group" aria-label="Ver" style={{ marginBottom: 8 }}>
-        {CHIPS.map(([k, t]) => <Chip key={k} ativo={f.chip === k} aoClicar={() => setF({ ...f, chip: k })} n={n[k]}>{t}</Chip>)}
+        {CHIPS.map(([k, t]) => <Chip key={k} ativo={f.chip === k} aoClicar={() => setF({ ...f, chip: f.chip === k ? "todas" : k })} n={n[k]}>{t}</Chip>)}
       </div>
       <div className="fg" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
         <label className="fl">Pesquisar<input type="search" value={f.q} placeholder="Nº da PO, fornecedor, cliente ou contrato" onChange={(e) => setF({ ...f, q: e.target.value })} /></label>
@@ -99,7 +97,7 @@ export function EncomendasPorReceber() {
               { id: "d", titulo: "Entrega prevista", classe: (p) => (poLate(p) ? "late" : ""), celula: (p) => poLate(p) ? <><b>{fmtD(p.due)}</b> <Selo tom="bad">Atrasada</Selo></> : fmtD(p.due) },
               { id: "x", titulo: "Falta", direita: true, celula: (p) => { const L = p.lines.filter((l) => poRem(l) > 0); return `${L.reduce((a, l) => a + poRem(l), 0)} un / ${L.length} ${L.length === 1 ? "linha" : "linhas"}`; } },
             ]}
-            acoes={(p) => <Peq disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} aria-label={`Receber ${p.id}`} onClick={() => receber(p)}>Receber</Peq>} />
+            acoes={(p) => <Peq disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} aria-label={`Dar entrada ${p.id}`} onClick={() => receber(p)}>Dar entrada</Peq>} />
         </div>
       ))}
     </section>

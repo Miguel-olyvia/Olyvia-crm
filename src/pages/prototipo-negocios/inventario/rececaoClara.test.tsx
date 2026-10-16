@@ -62,12 +62,11 @@ describe("Receção agrupada por cliente/obra", () => {
     render(<Casa inicio="guia" />);
     fireEvent.click(within(blocoTiago()).getByRole("button", { name: /^Receber tudo/ }));
     for (let k = 0; k < ids.length; k++) {
-      const painel = screen.getByRole("region", { name: /^Encomenda PO-/ });
-      fireEvent.click(within(painel).getByRole("button", { name: "Receber tudo o que falta" }));
-      fireEvent.click(within(painel).getByRole("button", { name: "Confirmar receção" }));
+      const painel = screen.getByRole("dialog", { name: /^Dar entrada · PO-/ });
+      fireEvent.click(within(painel).getByRole("button", { name: "Confirmar entrada" }));
     }
     expect(ids.every((id) => !poRecebivel(lerInventario().pos.find((p) => p.id === id)!))).toBe(true);
-    expect(screen.queryByRole("region", { name: /^Encomenda PO-/ })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /^Dar entrada · PO-/ })).toBeNull();
     expect(within(lista()).queryByRole("group", { name: /Tiago Almeida/ })).toBeNull();
   });
 
@@ -88,7 +87,7 @@ describe("Receção agrupada por cliente/obra", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Receber no armazém/ })[0]);
     const id = lerInventario().rc.poFilter;
     expect(id).toMatch(/^PO-/);
-    expect(screen.getByRole("region", { name: `Encomenda ${id}` })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: `Dar entrada · ${id}` })).toBeInTheDocument();
     void ids;
   });
 });

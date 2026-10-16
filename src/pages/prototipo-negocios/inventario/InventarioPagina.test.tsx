@@ -309,16 +309,15 @@ describe("Encomendas", () => {
     fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: /Receber no armazém/ }));
-    // 16/10: vai direto para Armazém › Receção, com a PO escolhida (sem o diálogo)
-    const painel = await screen.findByRole("region", { name: "Encomenda PO-2026-0137" });
+    // 16/10: vai para Armazém › Receção › Por receber, com o painel "Dar entrada" da PO aberto (a falta já preenchida)
+    const painel = await screen.findByRole("dialog", { name: "Dar entrada · PO-2026-0137" });
     expect(lerInventario().rc.poFilter).toBe("PO-2026-0137");
-    fireEvent.click(within(painel).getByRole("button", { name: "Receber tudo o que falta" }));
-    expect(within(painel).getByRole("spinbutton", { name: /Receber agora/ })).toHaveValue(2);
-    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar receção" }));
-    expect(await screen.findAllByText(/Receção registada: 2 un servem Encomendas Clientes/)).not.toHaveLength(0);
+    expect(within(painel).getByRole("spinbutton", { name: /Dar entrada/ })).toHaveValue(2);
+    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar entrada" }));
+    expect(await screen.findAllByText(/Entrou no .* · 2 un reservadas para/)).not.toHaveLength(0);
     const po = lerInventario().pos.find((p) => p.id === "PO-2026-0137")!;
     expect(po.lines[0].recv).toBe(10);
-    expect(screen.getAllByRole("status").some((s) => /Receção registada/.test(s.textContent ?? ""))).toBe(true);
+    expect(screen.getAllByRole("status").some((s) => /Entrou no/.test(s.textContent ?? ""))).toBe(true);
   });
 
 });
@@ -330,8 +329,8 @@ describe("Encomendas (continuação)", () => {
     fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: /Receber no armazém/ }));
-    const painel = await screen.findByRole("region", { name: "Encomenda PO-2026-0137" });
-    const campo = within(painel).getByRole("spinbutton", { name: /Receber agora/ });
+    const painel = await screen.findByRole("dialog", { name: "Dar entrada · PO-2026-0137" });
+    const campo = within(painel).getByRole("spinbutton", { name: /Dar entrada/ });
     fireEvent.change(campo, { target: { value: "9" } });
     expect(campo).toHaveValue(2);
   });
@@ -406,6 +405,7 @@ describe("Encomendas de cliente, guias e contagens", () => {
   it("fechar uma guia com divergências pede nota", async () => {
     render(<Casa />);
     separador("Guias");
+    fireEvent.click(screen.getByRole("tab", { name: /^Guias/ }));
     fireEvent.click(screen.getByRole("row", { name: /^Abrir a guia GR 2026\/311/ }));
     const folha = await screen.findByRole("dialog", { name: "GR 2026/311" });
     const fechar = within(folha).getAllByRole("button", { name: "Fechar" });

@@ -13,7 +13,7 @@ import { ReceberDialogo } from "./ReceberDialogo";
 import { reverterRececao } from "./receber";
 import type { Inventario, Po } from "./tipos";
 
-export type DlgPo = { t: "retirar" } | { t: "reverter"; rid: string } | { t: "receber" } | { t: "resto" } | { t: "enviar" } | { t: "eliminar" } | { t: "pdf" };
+export type DlgPo = { t: "retirar" } | { t: "reverter"; rid: string } | { t: "resto" } | { t: "enviar" } | { t: "eliminar" } | { t: "pdf" };
 
 interface Props { id: string; dlg: DlgPo | null; fechar: () => void; /** Chamado depois de eliminar (a folha fecha-se). */ aoEliminar?: () => void }
 const porId = (d: Inventario, id: string): Po => d.pos.find((x) => x.id === id) as Po;
@@ -70,7 +70,6 @@ export function PoDialogos({ id, dlg, fechar, aoEliminar }: Props) {
   const p = poPorId(db, id);
   if (!dlg || !p) return null;
   switch (dlg.t) {
-    case "receber": return <ReceberDialogo aberto aoFechar={fechar} id={id} />;
     case "resto": return <ReceberDialogo aberto aoFechar={fechar} id={id} soResto />;
     case "enviar": return <Aprovar p={p} fechar={fechar} />;
     case "eliminar": return <Eliminar p={p} fechar={fechar} aoEliminar={aoEliminar} />;
