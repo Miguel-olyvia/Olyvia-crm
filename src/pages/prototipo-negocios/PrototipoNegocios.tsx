@@ -88,10 +88,10 @@ export default function PrototipoNegocios() {
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
-  // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). É o V1 por defeito desde 16/10 (o Ruben: "assume tu");
-  // o interruptor fica para comparar com o V1 de antes. Preferência de quem vê, como a versão: só "0" o desliga.
+  // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). Neste ramo partilhado fica desligada por defeito
+  // (liga-se no interruptor "Pessoas numa página"); o V1 novo do Ruben segue no ramo feat/v1, onde está ligada. Preferência de quem vê, como a versão.
   const [navPessoas, setNavPessoas] = useState(0); // o menu "Pessoas" volta a montar a página (vai à lista, mesmo com uma ficha aberta)
-  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) !== "0"; } catch { return true; } });
+  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) === "1"; } catch { return false; } });
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
 

@@ -96,10 +96,10 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Emitir fatura" })).toBeInTheDocument();
   });
 
-  it("é o V1 por defeito: sem preferência guardada, o menu já tem Pessoas", () => {
+  it("neste ramo fica desligada por defeito: sem preferência guardada, o V1 de antes (Leads e Clientes)", () => {
     localStorage.removeItem("olyvia-prototipo-v1-proposta");
     render(<PrototipoNegocios />);
-    expect(within(menu()).getByRole("button", { name: "Pessoas" })).toBeInTheDocument();
+    expect(within(menu()).getByRole("button", { name: "Leads" })).toBeInTheDocument();
   });
 
   it("desligar a proposta devolve Leads e Clientes", () => {
