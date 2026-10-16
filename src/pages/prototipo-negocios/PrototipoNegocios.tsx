@@ -23,6 +23,8 @@ import { NegociosV2 } from "./NegociosV2";
 import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
 import { PessoasFunc, esquecerPessoasFunc } from "./PessoasFunc";
 import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
+import { PessoasV1, esquecerPessoasV1 } from "./PessoasV1";
+import { NegociosV1Docs } from "./NegociosV1Docs";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
 import { SeletorVersao } from "./SeletorVersao";
@@ -68,6 +70,7 @@ function ler(): Estado {
 }
 
 interface Toast extends Aviso { id: number }
+const CHAVE_PROPOSTA_V1 = "olyvia-prototipo-v1-proposta";
 
 export default function PrototipoNegocios() {
   const ref = useRef<Estado>(ler());
@@ -84,6 +87,8 @@ export default function PrototipoNegocios() {
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
+  // 16/10: a proposta para simplificar Pessoas e Negócios no V1 (PessoasV1.tsx, NegociosV1Docs.tsx). Preferência de quem vê, como a versão.
+  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) === "1"; } catch { return false; } });
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
 
@@ -151,6 +156,7 @@ export default function PrototipoNegocios() {
     esquecerLeads();
     esquecerPessoas();
     esquecerPessoasFunc();
+    esquecerPessoasV1();
     esquecerNegociosFunc();
     esquecerDiaADia();
     esquecerV2();
@@ -163,6 +169,12 @@ export default function PrototipoNegocios() {
   // A V2 (e a V2 funcional) só se aplicam ao aspeto simples: no aspeto atual o seletor nem aparece.
   const v2 = versao !== "atual" && simples;
   const func = versao === "funcional" && simples;
+  const v1n = propostaV1 && versao === "atual" && simples; // a proposta só se aplica ao V1
+  const mudarPropostaV1 = (sim: boolean) => {
+    setPropostaV1(sim);
+    try { localStorage.setItem(CHAVE_PROPOSTA_V1, sim ? "1" : "0"); } catch { /* sem storage: vale só nesta sessão */ }
+    run(() => { if (["leads", "clientes", "pessoas"].includes(ref.current.view)) A.nav(sim ? "pessoas" : "leads"); });
+  };
   const mudarVersao = (nova: VersaoProto) => {
     setVersao(nova);
     gravarVersao(nova);
@@ -185,9 +197,9 @@ export default function PrototipoNegocios() {
   }, []);
   // Com a V2 ligada a lista de Negócios é por documento. Enquanto se cria uma lead (S.novo) mostra-se a lista de sempre, que tem o formulário.
   // Com a V2 ligada, "Nova lead" é de Pessoas: o menu destaca Pessoas e uma frase avisa que a lead criada se vê lá.
-  const novaLeadV2 = v2 && !!S.novo;
+  const novaLeadV2 = (v2 || v1n) && !!S.novo;
   const listaNegocios = simples
-    ? (v2 && !S.novo ? (func ? <NegociosFunc {...ctx} /> : <NegociosV2 {...ctx} />) : novaLeadV2
+    ? (v1n && !S.novo ? <NegociosV1Docs {...ctx} /> : v2 && !S.novo ? (func ? <NegociosFunc {...ctx} /> : <NegociosV2 {...ctx} />) : novaLeadV2
       ? (
         <>
           <p className="mx-auto w-full max-w-3xl px-4 pt-6 text-[15px] text-muted-foreground sm:px-8">Nova lead: depois de criada, vê-se em Pessoas.</p>
@@ -211,10 +223,11 @@ export default function PrototipoNegocios() {
     case "campos": corpo = <CamposEditor {...ctx} />; break;
     default: corpo = listaNegocios;
   }
+  if (v1n && (S.view === "leads" || S.view === "clientes" || S.view === "pessoas")) corpo = <PessoasV1 {...ctx} />;
 
   const n = minhas(S, S.role).length;
   // Com a V2, Pessoas ocupa o lugar de Leads e Clientes.
-  const pessoas: [Vista, string, LucideIcon][] = v2 ? [["pessoas", "Pessoas", Users]] : [["leads", "Leads", Users], ["clientes", "Clientes", Building]];
+  const pessoas: [Vista, string, LucideIcon][] = v2 || v1n ? [["pessoas", "Pessoas", Users]] : [["leads", "Leads", Users], ["clientes", "Clientes", Building]];
   const itens: [Vista, string, LucideIcon, number?][] = [
     ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", ICONE_NEGOCIO], ...pessoas,
     ["operacoes", "Operações", Wrench], ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
@@ -230,8 +243,8 @@ export default function PrototipoNegocios() {
   const cur: Vista | "inv" | "frota" = ativoInv ? "inv" : ativoFrota ? "frota" : novaLeadV2 ? "pessoas"
     : S.view === "negocio" ? "negocios"
     : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
-    : v2 && (S.view === "leads" || S.view === "clientes") ? "pessoas"
-    : !v2 && S.view === "pessoas" ? "leads" : S.view;
+    : (v2 || v1n) && (S.view === "leads" || S.view === "clientes") ? "pessoas"
+    : !v2 && !v1n && S.view === "pessoas" ? "leads" : S.view;
   // Na V2 a vista antiga "Inventário" (o motor ainda a abre em "Abrir no Inventário") leva às Encomendas do novo inventário.
   useEffect(() => {
     if (!soV2 || S.view !== "inventario") return;
@@ -328,7 +341,20 @@ export default function PrototipoNegocios() {
       </label>
     );
     const listaNova = true; // na proposta simples todos os ecrãs são novos
-    const seletorVersao = <SeletorVersao versao={versao} mudar={mudarVersao} />;
+    const seletorVersao = (
+      <>
+        <SeletorVersao versao={versao} mudar={mudarVersao} />
+        {versao === "atual" && (
+          <button type="button" role="switch" aria-checked={propostaV1} onClick={() => mudarPropostaV1(!propostaV1)}
+            className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 text-left text-[15px] text-foreground">
+            <span>Proposta nova<span className="block text-sm text-muted-foreground">Pessoas numa página, Negócios por documento</span></span>
+            <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", propostaV1 ? "bg-primary" : "bg-input")}>
+              <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", propostaV1 ? "left-[22px]" : "left-0.5")} />
+            </span>
+          </button>
+        )}
+      </>
+    );
     return (
       <div className={cn("pn calma fixed inset-0 flex bg-background pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-foreground", S.leitura && "leitura")}>
         <aside className="hidden w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-card px-3 py-5 md:flex">
