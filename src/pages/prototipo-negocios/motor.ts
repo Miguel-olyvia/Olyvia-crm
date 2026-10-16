@@ -298,7 +298,7 @@ export interface Negocio {
   hist: Evento[];
 }
 
-export type Vista = "hoje" | "negocios" | "negocio" | "leads" | "pessoas" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes" | "campos";
+export type Vista = "hoje" | "negocios" | "negocio" | "leads" | "pessoas" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes" | "campos" | "numeros"; // "numeros": os Números do V1 (16/10)
 
 export interface Estado {
   v: number;

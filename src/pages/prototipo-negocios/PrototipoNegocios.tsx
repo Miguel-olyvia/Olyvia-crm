@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
+  BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import mascote from "@/assets/olyvia-mascot.png";
@@ -25,6 +25,7 @@ import { PessoasFunc, esquecerPessoasFunc } from "./PessoasFunc";
 import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
 import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
 import { NegociosV1Docs } from "./NegociosV1Docs";
+import { NumerosV1 } from "./NumerosV1";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
 import { SeletorVersao } from "./SeletorVersao";
@@ -175,7 +176,10 @@ export default function PrototipoNegocios() {
   const mudarPropostaV1 = (sim: boolean) => {
     setPropostaV1(sim);
     try { localStorage.setItem(CHAVE_PROPOSTA_V1, sim ? "1" : "0"); } catch { /* sem storage: vale só nesta sessão */ }
-    run(() => { if (["leads", "clientes", "pessoas"].includes(ref.current.view)) A.nav(sim ? "pessoas" : "leads"); });
+    run(() => {
+      if (["leads", "clientes", "pessoas"].includes(ref.current.view)) A.nav(sim ? "pessoas" : "leads");
+      else if (!sim && ref.current.view === "numeros") A.nav("negocios");
+    });
   };
   const mudarVersao = (nova: VersaoProto) => {
     setVersao(nova);
@@ -184,6 +188,7 @@ export default function PrototipoNegocios() {
     if (nova !== "v2" && (invMock || frotaMock)) { setInvMock(false); setFrotaMock(false); run(() => A.nav("negocios")); return; }
     // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
     run(() => {
+      if (ref.current.view === "numeros" && nova !== "atual") { A.nav("negocios"); return; } // os Números só existem no V1
       const vista = vistaEquivalente(ref.current.view, nova);
       if (vista !== ref.current.view) A.nav(vista);
     });
@@ -227,6 +232,7 @@ export default function PrototipoNegocios() {
     default: corpo = listaNegocios;
   }
   if (v1n && (S.view === "leads" || S.view === "clientes" || S.view === "pessoas")) corpo = <PessoasV1 key={navPessoas} {...ctx} />;
+  if (S.view === "numeros") corpo = v1n ? <NumerosV1 {...ctx} /> : listaNegocios; // os Números só existem no V1 com Pessoas numa página
 
   const n = minhas(S, S.role).length;
   // Com a V2, Pessoas ocupa o lugar de Leads e Clientes.
@@ -234,6 +240,7 @@ export default function PrototipoNegocios() {
   const itens: [Vista, string, LucideIcon, number?][] = [
     ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", ICONE_NEGOCIO], ...pessoas,
     ["operacoes", "Operações", Wrench], ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
+    ...(v1n ? [["numeros", "Números", BarChart3] as [Vista, string, LucideIcon]] : []), // 16/10: no lugar dos dashboards, para a Direção
   ];
   const itensAtual = itens.filter(([v]) => v !== "leads"); // o aspeto atual não tem a página de Leads
   const porVista = (v: Vista) => itens.find(([x]) => x === v)!;
@@ -420,7 +427,7 @@ export default function PrototipoNegocios() {
               <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-[calc(4rem_+_env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
-                  {[...(v1n ? ["inventario"] : pessoas.map(([v]) => v)), "catalogo", "marketing"].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {[...(v1n ? ["inventario"] : pessoas.map(([v]) => v)), "catalogo", "marketing", ...(v1n ? ["numeros"] : [])].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
                 {soV2 && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
@@ -451,7 +458,7 @@ export default function PrototipoNegocios() {
               </button>
             )}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
-              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || [...(v1n ? ["inventario"] : ["leads", "clientes", "pessoas"]), "catalogo", "marketing", "definicoes", "frota"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
+              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || [...(v1n ? ["inventario", "numeros"] : ["leads", "clientes", "pessoas"]), "catalogo", "marketing", "definicoes", "frota"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
             </button>
           </nav>
