@@ -1,14 +1,12 @@
 // A fonte única do "A fazer": dado um item, qual é o próximo passo e a chave do seu texto. Funções puras.
-import { PASSOS_PROCESSO, type ItemProcesso, type PassoDoItem, type PassoProcesso } from "./tiposProcesso";
-
-export { PASSOS_PROCESSO };
+import type { ItemProcesso, PassoDoItem, PassoProcesso } from "./tiposProcesso";
 
 const doPasso = (id: PassoProcesso): PassoDoItem => ({ id, chave: `pessoasPagina.todo.step.${id}` });
 
 /** Os passos que o botão já executa (Fase 3); os outros continuam a abrir a ficha até às Fases 4 e 5. */
-export const PASSOS_EXECUTAVEIS = ["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"] as const;
+const PASSOS_EXECUTAVEIS = ["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"] as const;
 
-export type PassoExecutavel = (typeof PASSOS_EXECUTAVEIS)[number];
+type PassoExecutavel = (typeof PASSOS_EXECUTAVEIS)[number];
 
 export const ehExecutavel = (passo: PassoProcesso): passo is PassoExecutavel => (PASSOS_EXECUTAVEIS as readonly string[]).includes(passo);
 

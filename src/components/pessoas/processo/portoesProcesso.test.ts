@@ -1,35 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { novaLinha, type LinhaForm } from "@/components/negocio-metas/levantamento";
-import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import {
-  portaoChamada, portaoCriarNegocio, portaoFazerLevantamento, portaoLevantamento, portaoVisita, portaoVisitaFeita,
+  portaoCriarNegocio, portaoFazerLevantamento, portaoLevantamento, portaoVisitaFeita,
 } from "./portoesProcesso";
 
 const linha = (extra: Partial<LinhaForm> = {}): LinhaForm => ({ ...novaLinha("l1"), divisao: "cozinha", trabalho: "pintura", medida: "12", ...extra });
 const visita = { data: "2026-10-12", feita: false };
-
-describe("portaoChamada", () => {
-  it("sem resultado falta o resultado", () => {
-    expect(portaoChamada({ resultado: null })).toEqual({ ok: false, emFalta: ["resultado"] });
-  });
-  it("com resultado está tudo", () => {
-    expect(portaoChamada({ resultado: "naoAtendeu" })).toEqual({ ok: true, emFalta: [] });
-  });
-});
-
-describe("portaoVisita", () => {
-  it("sem data (ou mal escrita) falta a data", () => {
-    expect(portaoVisita({ data: "" }, HOJE_EXEMPLO)).toEqual({ ok: false, emFalta: ["dataVisita"] });
-    expect(portaoVisita({ data: "13/10" }, HOJE_EXEMPLO).emFalta).toEqual(["dataVisita"]);
-  });
-  it("um dia que já passou não serve", () => {
-    expect(portaoVisita({ data: "2026-10-12" }, HOJE_EXEMPLO)).toEqual({ ok: false, emFalta: ["dataPassada"] });
-  });
-  it("hoje e o futuro servem", () => {
-    expect(portaoVisita({ data: HOJE_EXEMPLO }, HOJE_EXEMPLO).ok).toBe(true);
-    expect(portaoVisita({ data: "2026-10-20" }, HOJE_EXEMPLO)).toEqual({ ok: true, emFalta: [] });
-  });
-});
 
 describe("portaoVisitaFeita (marcar a visita como feita)", () => {
   it("sem visita falta a visita", () => {

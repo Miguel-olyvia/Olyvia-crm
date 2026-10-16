@@ -12,7 +12,7 @@ import { QuadroPessoas } from "../quadro/QuadroPessoas";
 import { pessoaBase, resumoBase } from "../fabricaTestes";
 import { MORADA_VISITA_VAZIA } from "../moradaVisita";
 import type { Pessoa, ResumoPessoa, VisitaPessoa } from "../pessoasTipos";
-import { simularSaidaAnimada } from "../saidaAnimadaTeste";
+import { simularSaidaAnimada } from "@/test/saidaAnimadaTeste";
 import { itensDaPessoa } from "./itensProcesso";
 import { passoDoItem } from "./passosProcesso";
 import { ProcessoProvider, type AcoesProcesso } from "./ProcessoProvider";

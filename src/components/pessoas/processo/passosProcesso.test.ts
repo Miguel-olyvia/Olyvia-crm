@@ -8,7 +8,8 @@ import { passoDoNegocio as passoDoNegocioColuna, proximoPasso, type IdPasso } fr
 import { juntarPessoas } from "../juntarPessoas";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "../pessoasExemplo";
 import { itemEmFoco, itensDaPessoa } from "./itensProcesso";
-import { PASSOS_EXECUTAVEIS, PASSOS_PROCESSO, ehExecutavel, passoDoItem } from "./passosProcesso";
+import { ehExecutavel, passoDoItem } from "./passosProcesso";
+import { PASSOS_PROCESSO } from "./tiposProcesso";
 import type { ItemProcesso, PassoProcesso } from "./tiposProcesso";
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
@@ -53,10 +54,10 @@ describe("passoDoItem: pedidos", () => {
   });
 });
 
-describe("PASSOS_EXECUTAVEIS: os cinco passos desta fase", () => {
+describe("ehExecutavel: os cinco passos desta fase", () => {
   it("só estes executam; os das fases 4 e 5 continuam a abrir a ficha", () => {
-    expect(PASSOS_EXECUTAVEIS).toEqual(["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"]);
-    for (const passo of PASSOS_PROCESSO) expect(ehExecutavel(passo)).toBe(PASSOS_EXECUTAVEIS.includes(passo as never));
+    const executaveis = PASSOS_PROCESSO.filter(ehExecutavel);
+    expect(executaveis).toEqual(["registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio"]);
     expect(ehExecutavel("criarOrcamento")).toBe(false);
     expect(ehExecutavel("registarAssinatura")).toBe(false);
   });

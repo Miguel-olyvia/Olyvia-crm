@@ -79,9 +79,7 @@ export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, str
     'pessoasPagina.process.activity.surveySaved': 'Survey saved',
 
     'pessoasPagina.gate.blocked': '{step}: not possible yet. {reasons}',
-    'pessoasPagina.gate.resultado': 'Choose how the call went.',
     'pessoasPagina.gate.dataVisita': 'The day of the visit is missing.',
-    'pessoasPagina.gate.dataPassada': 'The day of the visit cannot be before today.',
     'pessoasPagina.gate.visita': 'This person has no visit booked yet.',
     'pessoasPagina.gate.visitaFeita': 'Mark the visit as done first.',
     'pessoasPagina.gate.linhas': 'The survey needs at least one line of measurements.',
@@ -172,9 +170,7 @@ export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, str
     'pessoasPagina.process.activity.surveySaved': 'Levantamento guardado',
 
     'pessoasPagina.gate.blocked': '{step}: ainda não é possível. {reasons}',
-    'pessoasPagina.gate.resultado': 'Escolha como correu a chamada.',
     'pessoasPagina.gate.dataVisita': 'Falta o dia da visita.',
-    'pessoasPagina.gate.dataPassada': 'O dia da visita não pode ser anterior a hoje.',
     'pessoasPagina.gate.visita': 'Esta pessoa ainda não tem visita marcada.',
     'pessoasPagina.gate.visitaFeita': 'Marque primeiro a visita como feita.',
     'pessoasPagina.gate.linhas': 'Falta pelo menos uma linha de medidas no levantamento.',

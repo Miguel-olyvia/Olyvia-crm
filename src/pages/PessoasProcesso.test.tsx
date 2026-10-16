@@ -7,7 +7,7 @@ import { negociosNovos, repor } from "@/components/negocio-metas/negociosNovos";
 import { somarDias } from "@/components/negocio-metas/novoNegocio";
 import { repor as reporPessoas } from "@/components/pessoas/pessoasNovas";
 import { CHAVE_PREFS_PESSOAS } from "@/components/pessoas/preferenciasPessoas";
-import { simularSaidaAnimada, type SaidaAnimada } from "@/components/pessoas/saidaAnimadaTeste";
+import { simularSaidaAnimada, type SaidaAnimada } from "@/test/saidaAnimadaTeste";
 import Pessoas from "./Pessoas";
 
 const { sucesso, erro } = vi.hoisted(() => ({ sucesso: vi.fn(), erro: vi.fn() }));
@@ -60,11 +60,9 @@ beforeEach(() => {
 });
 afterEach(() => { saida?.restaurar(); saida = null; });
 
-/** O espaço inseparável que o aviso alterna para o leitor de ecrã repetir um texto igual. */
-const NBSP = String.fromCharCode(0xa0);
 
 /** Todo o texto das regiões live da página (e da ficha), mesmo as que o leitor de ecrã ainda não leu. */
-const textoLive = () => Array.from(document.querySelectorAll('[role="status"]')).map((e) => e.textContent ?? "").join(" | ").replaceAll(NBSP, "");
+const textoLive = () => Array.from(document.querySelectorAll('[role="status"]')).map((e) => e.textContent ?? "").join(" | ").replace(/\u00a0/g, "");
 
 /** Marca a visita como feita (diálogo) a partir do botão do Quadro. */
 const marcarFeita = async (nome: string) => {
@@ -404,7 +402,7 @@ describe("Avisos: uma região live por origem, e um texto igual seguido volta a 
     await criar();
     const segundo = regiao()?.textContent ?? "";
     expect(segundo).not.toBe(primeiro);
-    expect(segundo.replaceAll(NBSP, "")).toBe(primeiro.replaceAll(NBSP, ""));
+    expect(segundo.replace(/\u00a0/g, "")).toBe(primeiro.replace(/\u00a0/g, ""));
   }, TEMPO);
 });
 

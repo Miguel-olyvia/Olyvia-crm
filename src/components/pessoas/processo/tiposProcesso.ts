@@ -11,7 +11,7 @@ export const PASSOS_PROCESSO = [
 
 export type PassoProcesso = (typeof PASSOS_PROCESSO)[number];
 
-export type TipoItemProcesso = "pedido" | "negocio";
+type TipoItemProcesso = "pedido" | "negocio";
 
 /** Um pedido (lead sem negócio aberto) ou um negócio em curso de uma pessoa. A fase é a coluna do Quadro. */
 export interface ItemProcesso {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PASSOS_PROCESSO } from "@/components/pessoas/processo/passosProcesso";
+import { PASSOS_PROCESSO } from "@/components/pessoas/processo/tiposProcesso";
 import type { FaltaProcesso } from "@/components/pessoas/processo/portoesProcesso";
 import { pessoasAcoesTranslations } from "./pessoasAcoes";
 import { pessoasChamadaTranslations } from "./pessoasChamada";
@@ -13,7 +13,7 @@ import { pessoasVisitaTranslations } from "./pessoasVisita";
 const { en, pt } = pessoasProcessoTranslations;
 /** Tudo o que um portão pode dizer que falta (ver `portoesProcesso.ts`); o `Record` obriga a não esquecer nenhum. */
 const FALTAS = Object.keys({
-  resultado: 0, dataVisita: 0, dataPassada: 0, visita: 0, visitaFeita: 0, linhas: 0, linhaInvalida: 0, pessoa: 0,
+  dataVisita: 0, visita: 0, visitaFeita: 0, linhas: 0, linhaInvalida: 0, pessoa: 0,
 } satisfies Record<FaltaProcesso, 0>);
 const marcas = (texto: string): string[] => (texto.match(/\{\w+\}/g) ?? []).sort();
 

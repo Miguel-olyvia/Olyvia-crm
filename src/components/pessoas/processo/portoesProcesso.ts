@@ -1,14 +1,13 @@
 // Os portões dos passos da Fase 3: o que falta para cada um avançar. Funções puras que reaproveitam a validação que já existe
-// (`validarVisita`, `validarLevantamento`, `validarNovoNegocio`) em vez de a repetir; o ecrã traduz cada falta
+// (`validarLevantamento`, `validarNovoNegocio`) em vez de a repetir; o ecrã traduz cada falta
 // (`pessoasPagina.gate.<falta>`) para o botão explicar o que falta em vez de falhar em silêncio.
 import { validarLevantamento, type LevantamentoForm, type LinhaForm } from "@/components/negocio-metas/levantamento";
 import { validarNovoNegocio } from "@/components/negocio-metas/novoNegocio";
-import type { ResultadoContacto, VisitaPessoa } from "../pessoasTipos";
-import { validarVisita } from "../visitaPessoa";
+import type { VisitaPessoa } from "../pessoasTipos";
 
 /** O que pode faltar. Cada valor tem texto em `pessoasPagina.gate.<falta>`. */
 export type FaltaProcesso =
-  | "resultado" | "dataVisita" | "dataPassada" | "visita" | "visitaFeita" | "linhas" | "linhaInvalida" | "pessoa";
+  | "dataVisita" | "visita" | "visitaFeita" | "linhas" | "linhaInvalida" | "pessoa";
 
 export interface Portao {
   ok: boolean;
@@ -29,18 +28,6 @@ type ErrosDeLevantamento = ReturnType<typeof validarLevantamento>;
 const faltasDoLevantamento = (erros: ErrosDeLevantamento): FaltaProcesso[] => [
   ...(erros.levantamento ? (["linhas"] as const) : []), ...(erros.linhas ? (["linhaInvalida"] as const) : []),
 ];
-
-/** Registar a chamada: falta escolher o resultado. */
-export function portaoChamada(dados: { resultado: ResultadoContacto | null }): Portao {
-  return portao(dados.resultado === null ? ["resultado"] : []);
-}
-
-/** Marcar a visita: falta a data (ou já passou). A hora e a morada têm as suas próprias validações no diálogo. */
-export function portaoVisita(dados: { data: string }, hoje: string): Portao {
-  const erro = validarVisita({ data: dados.data, hora: "", nota: "" }, hoje);
-  if (erro === "dataVazia") return portao(["dataVisita"]);
-  return portao(erro === "dataPassada" ? ["dataPassada"] : []);
-}
 
 /** Marcar a visita como feita: tem de haver uma visita, com data (pode ser de um dia que já passou: é o caso normal). */
 export function portaoVisitaFeita(visita: Pick<VisitaPessoa, "data" | "feita"> | null): Portao {

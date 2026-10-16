@@ -5,7 +5,7 @@ import type { ValoresIniciaisNegocio } from "@/components/negocio-metas/novoNego
 import { MORADA_VISITA_VAZIA, moradaDaLead } from "./moradaVisita";
 import type { EtapaPessoa, Pessoa, VisitaPessoa } from "./pessoasTipos";
 
-export type EstadoVisita = "marcada" | "porConcluir" | "feita";
+type EstadoVisita = "marcada" | "porConcluir" | "feita";
 
 /**
  * A visita com o seu estado: marcada (hoje ou à frente), por concluir (o dia já passou e ninguém a marcou como feita) ou feita
