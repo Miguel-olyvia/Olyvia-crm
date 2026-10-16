@@ -6,13 +6,15 @@
 //   volta aos dados de exemplo; sincronizarEcsNegocios volta a emitir as encomendas que lá faltam).
 // · Os materiais das obras (cerâmico, sanitas, móveis...) e os três fornecedores de exemplo entram no Inventário da primeira vez que são precisos,
 //   com o stock de abertura do Armazém Central que o motor dos Negócios já tinha (garantirArtigosObra). Os produtos da visita entram como produtos novos.
+// · As encomendas a fornecedor do que falta nascem PENDENTES (rascunhos automáticos, por aprovar), seja qual for a definição de envio: aprova-as quem
+//   tem purchase_orders.approve, no Inventário (enviarPo), e como os fornecedores das obras têm o portal ativo seguem pelo portal do fornecedor.
 // Sem React (o cartão lê com useInventario). Só tipos do motor: o motor é que chama a ponte.
 import { comoSistema, nifCompleto, produto } from "./base";
 import { EC_ESTADOS, EC_LINHA_ESTADOS, criarEc, ecEstado, ecLinhaInfo, type EstadoEc, type EstadoLinhaEc } from "./ec";
 import { executar, lerInventario, type Resultado } from "./loja";
 import { poStatus, poStatusLabel } from "./po";
 import { aplicarMovimentos, linhaStock } from "./stock";
-import type { Ec, Fornecedor, Inventario } from "./tipos";
+import type { Ec, Fornecedor, Inventario, Po } from "./tipos";
 import type { Negocio, StockKey } from "../motor";
 import type { EncCliente } from "../preparacaoObra";
 
@@ -63,7 +65,9 @@ export function garantirArtigosObra(db: Inventario): void {
     const f: Fornecedor = {
       id, name, code, contact: "Departamento comercial", email: `encomendas@${id}.exemplo`, phone: "2" + nif.slice(-8), nif, company: "Empresa A (Lisboa)", sla,
       addr: "Zona Industrial", city, cp: "", country: "Portugal", web: "", notes: "Fornecedor das obras (protótipo de Negócios).", active: true, deleted: false,
-      portal: "none", portalUsers: 0, lastAccess: null, dataConfirmed: false, invitedAt: null, awaiting: false,
+      // o portal ativo, como os fornecedores com portal da seed: a encomenda aprovada publica-se no portal (enviarPo)
+      portal: "active", portalUsers: 1, lastAccess: "2026-10-08T17:40", dataConfirmed: true, invitedAt: null, awaiting: false,
+      invite: { email: `encomendas@${id}.exemplo`, name: "Departamento comercial", state: "active", at: "2026-10-01T10:00" },
     };
     db.suppliers.push(f);
   }
@@ -125,11 +129,15 @@ export function emitirEcNoInventario(db: Inventario, p: PedidoNeg): Ec {
     const n0 = db.n.ec, num = Number(p.id.replace(/\D/g, ""));
     const forcar = num > 0 && !db.ecs.some((x) => x.id === p.id);
     if (forcar) db.n.ec = num - 1;
+    // as encomendas a fornecedor ficam pendentes (por aprovar): o envio direto da definição não se aplica às que nascem do negócio
+    const envio = db.settings.autoPO;
+    db.settings.autoPO = "approval";
     let e: Ec;
     try {
       e = criarEc(db, { origin: { k: p.tipo, ref: p.ref, proforma: null }, client: p.cliente, addr: p.morada, wh: ARMAZEM_OBRAS, notes: p.notas, lines: linhas, diag: null });
     } finally {
       if (forcar) db.n.ec = n0;
+      db.settings.autoPO = envio;
     }
     if (p.tipo === "VD") db.vds.push({ ref: p.ref, state: "confirmed" });
     e.log.push({ at: e.log[0]?.at ?? "", t: "Emitida pelo Financeiro ao validar o pagamento do negócio" });
@@ -154,17 +162,31 @@ export function sincronizarEcsNegocios(deals: Negocio[]): number {
 }
 
 /* ------------------------------------------------------------------ ler o estado */
+/** Onde está a encomenda a fornecedor, para quem lê o negócio. */
+export type FasePo = "por aprovar" | "no portal" | "por email" | "parcial" | "recebida" | "cancelada";
+export interface PoResumoNeg { id: string; forn: string; estado: string; fase: FasePo; prometida: string | null }
+/** pending → por aprovar; encomendada → no portal do fornecedor (ou por email, sem portal); depois parcial / recebida. */
+export function fasePo(p: Po): FasePo {
+  const st = poStatus(p);
+  if (st === "pending") return "por aprovar";
+  if (st === "cancelled") return "cancelada";
+  if (st === "received") return "recebida";
+  if (st === "partial") return "parcial";
+  return p.portal.state === "email" || p.portal.state === "none" ? "por email" : "no portal";
+}
+const ROTULO_FASE: Record<FasePo, string> = { "por aprovar": "por aprovar", "no portal": "no portal do fornecedor", "por email": "enviada por email", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
+
 export interface LinhaResumoNeg {
   sku: string; n: string; q: number; un: string; st: EstadoLinhaEc; rotulo: string;
   /** já saiu para a obra, pronto a sair (reservado com stock), pedido ao fornecedor e ainda por chegar, sem fornecedor */
   saida: number; pronto: number; aChegar: number; semForn: number;
   /** as encomendas a fornecedor desta linha (id, fornecedor, estado e a data prometida no portal) */
-  pos: { id: string; forn: string; estado: string; prometida: string | null }[];
+  pos: PoResumoNeg[];
 }
 export interface ResumoEcNeg {
   id: string; eliminada: boolean; estado: EstadoEc; rotulo: string; linhas: LinhaResumoNeg[];
   tot: { linhas: number; servidas: number; prontas: number; aFornecedor: number; semForn: number };
-  pos: { id: string; forn: string; estado: string; prometida: string | null }[];
+  pos: PoResumoNeg[];
   /** tudo saiu para a obra ou está pronto a sair */
   pronta: boolean;
 }
@@ -178,7 +200,8 @@ export function resumoEcNegocio(db: Inventario, ref: string | null | undefined):
   const linhas: LinhaResumoNeg[] = e.lines.filter((l) => l.sku && !l.voided).map((l) => {
     const i = ecLinhaInfo(db, e, l);
     const lp = i.d.links.map(([p]) => {
-      const x = { id: p.id, forn: db.suppliers.find((s) => s.id === p.sup)?.name ?? p.sup, estado: poStatusLabel[poStatus(p)], prometida: p.portal.promised };
+      const fase = fasePo(p);
+      const x: PoResumoNeg = { id: p.id, forn: db.suppliers.find((s) => s.id === p.sup)?.name ?? p.sup, estado: `${poStatusLabel[poStatus(p)]} · ${ROTULO_FASE[fase]}`, fase, prometida: p.portal.promised };
       pos.set(p.id, x);
       return x;
     });
@@ -203,7 +226,10 @@ export function textoResumoEc(r: ResumoEcNeg): string {
   const partes = [
     r.tot.servidas ? p(r.tot.servidas, "linha já saiu para a obra", "linhas já saíram para a obra") : "",
     r.tot.prontas ? p(r.tot.prontas, "reservada em armazém", "reservadas em armazém") : "",
-    r.tot.aFornecedor ? p(r.tot.aFornecedor, "encomendada ao fornecedor", "encomendadas ao fornecedor") + (r.pos.length ? ` (${r.pos.map((x) => x.id).join(", ")})` : "") : "",
+    ...(["por aprovar", "no portal", "por email", "parcial"] as FasePo[]).map((f) => {
+      const L = r.pos.filter((x) => x.fase === f);
+      return L.length ? `${L.length === 1 ? "1 encomenda a fornecedor" : `${L.length} encomendas a fornecedor`} ${ROTULO_FASE[f]} (${L.map((x) => x.id).join(", ")})` : "";
+    }),
     r.tot.semForn ? p(r.tot.semForn, "sem fornecedor", "sem fornecedor") : "",
   ].filter(Boolean);
   return partes.length ? partes.join(" · ") : "Sem linhas com stock.";
@@ -215,7 +241,10 @@ export function estadoLinhaNegocio(l: LinhaResumoNeg): { t: string; ok: boolean 
   if (l.st === "ready" || l.st === "recvpo") return { t: "reservado em armazém", ok: true };
   if (l.aChegar > 0) {
     const pr = l.pos.find((x) => x.prometida)?.prometida;
-    return { t: pr ? `encomendado ao fornecedor · chega a ${pr.slice(8, 10)}/${pr.slice(5, 7)}` : "encomendado ao fornecedor", ok: false };
+    if (l.pos.length && l.pos.every((x) => x.fase === "por aprovar")) return { t: "encomenda a fornecedor por aprovar", ok: false };
+    const f = l.pos.find((x) => x.fase !== "por aprovar")?.fase;
+    const onde = f === "no portal" ? "no portal do fornecedor" : f === "parcial" ? "recebido em parte" : "encomendado ao fornecedor";
+    return { t: pr ? `${onde} · chega a ${pr.slice(8, 10)}/${pr.slice(5, 7)}` : onde, ok: false };
   }
   if (l.semForn > 0) return { t: "sem fornecedor", ok: false };
   if (l.st === "partial") return { t: "parcialmente reservado", ok: false };

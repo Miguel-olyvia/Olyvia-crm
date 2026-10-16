@@ -144,7 +144,8 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null): { fase: 
     if (li) {
       const pr = li.pos.find((p) => p.prometida)?.prometida ?? null;
       forn = li.pos[0]?.forn;
-      estado = li.st === "served" ? "na obra" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (pr ? "a chegar" : "encomendado") : "em falta";
+      const porAprovar = li.pos.length > 0 && li.pos.every((x) => x.fase === "por aprovar");
+      estado = li.st === "served" ? "na obra" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (porAprovar ? "por encomendar" : pr ? "a chegar" : "encomendado") : "em falta";
       quando = estado === "a chegar" && pr ? `${pr.slice(8, 10)}/${pr.slice(5, 7)}` : undefined;
     } else if (naEnc && e) {
       forn = e.forn;

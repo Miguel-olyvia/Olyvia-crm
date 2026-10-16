@@ -1437,7 +1437,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       fase(d, 5);
       const F = faltaParaArrancar(d);
       avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
-      if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta foi pedido ao fornecedor", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
+      if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta vai numa encomenda a fornecedor, por aprovar no Inventário", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
     },
     abrirPlano(id: number) { S.view = "operacoes"; S.op = id; S.deal = null; },
     /** Abre o Inventário; com um negócio, abre a encomenda de cliente dele (Saídas para clientes). */

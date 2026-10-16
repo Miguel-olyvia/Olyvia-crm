@@ -214,7 +214,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <p className="text-sm font-medium text-muted-foreground">Obra #{d.id} · {ESTADO_PLANO[p.estado]}</p>
         <h1 className="mt-0.5 text-3xl font-semibold tracking-tight">{d.nome}</h1>
         <p className="mt-1 text-base text-muted-foreground">{d.servico} · {p.tasks.length} {p.tasks.length === 1 ? "tarefa" : "tarefas"} · {nfmt(horas)} h de equipa{p.tasks.length ? ` · ${rotuloDia(p, 0)} a ${rotuloDia(p, ultimo)}` : ""}</p>
-        <ViaturasObra obra={d.id} />
+        <ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} />
         <dl className="mt-4 grid gap-x-6 gap-y-3 text-[15px] sm:grid-cols-3">
           <div className="min-w-0"><dt className="text-sm text-muted-foreground">Morada</dt>
             <dd><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex items-start gap-1.5 font-medium text-primary underline-offset-4 hover:underline"><MapPin className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />{morada}</a></dd></div>

@@ -17,6 +17,8 @@ import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { TRILHOS, faltaParaArrancar, passosPreparacao, type PassoPrep, type Trilho } from "./preparacaoObra";
 import { useInventario } from "./inventario/loja";
+import { useFrota } from "./frota/loja";
+import { ligacoesObra } from "./frota/transporteObra";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 
 const ICONE: Record<Trilho, typeof Package> = { ec: Package, plano: CalendarRange, pag: Euro, obra: HardHat };
@@ -79,6 +81,9 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : undefined;
   const P = passosPreparacao(d, S, inv);
+  // 16/10: a viatura ligada à obra na Frota (só informação: não bloqueia o arranque)
+  const Fr = useFrota();
+  const viaturas = ligacoesObra(Fr, d.id).map((x) => Fr.viaturas.find((v) => v.id === x.vid)?.mat).filter(Boolean);
   if (!P.length) return null;
   const feitos = P.filter((x) => x.estado === "feito").length;
   const falta = faltaParaArrancar(d);
@@ -184,6 +189,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
                 </li>
               ))}
             </ul>
+            <p className="mt-1 text-sm text-muted-foreground">{viaturas.length ? `Viatura ligada: ${viaturas.join(", ")} (Frota).` : "Sem viatura ligada: liga-se na Frota › viatura › Ligações."}</p>
           </div>
         </div>
         {go1.estado === "agora" && (go1.who === S.role

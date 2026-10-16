@@ -14,6 +14,7 @@ import { Btn, LigObra, Placa, Prog, SeloEstado, Src, VazioF } from "./pecasFrota
 import { pedidosPendentes, pedirReposicao } from "./pontesInv";
 import { abaixoMin, alertas, atribEm, ativa, compromissos, condutor, consumo, custoKm, custoTotal, custosV, kmPeriodo, pessoa, revisao, textoData, tomSelo, vencimentos } from "./regras";
 import { TOM_OCORR } from "./OcorrenciasFrota";
+import { OperacoesViatura } from "./OperacoesViatura";
 import type { Viatura } from "./tipos";
 
 const Dl = ({ itens }: { itens: readonly (readonly [string, React.ReactNode])[] }) => (
@@ -178,6 +179,7 @@ function Corpo({ v, aba }: { v: Viatura; aba: AbaFolha }) {
         )) : <div className="muted">Nada agendado com esta viatura.</div>}</div>
         <Src t="schedule_items · ops_ordem (viatura_id nova)" />
       </div>
+      <OperacoesViatura v={v} />
       <div className="card pad">
         <Dl itens={[["Recurso de agenda", v.agenda === false ? "Não é recurso da agenda" : `${v.recursoAgenda ? v.recursoAgenda + " · " : ""}${v.mat} · tipo veículo`], ["Armazém móvel", arm ? `${arm.name} (${arm.code})` : "—"],
           ["Centro de custo", v.centro], ["Seguradora (fornecedor)", v.seguradora]]} />

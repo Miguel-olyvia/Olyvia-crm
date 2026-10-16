@@ -56,13 +56,17 @@ export interface Frota {
   pedidos?: PedidoReposicao[];
   /** Os extratos já importados (o nome do ficheiro): importar outra vez duplicava os custos. */
   importados?: string[];
+  /** 16/10: as viaturas ligadas a obras do protótipo (Ligações › Operações). O transporte por fases lê-se no Inventário (transporteObra.ts). */
+  ligObras?: { vid: string; obra: number; at: string }[];
 }
 
 /** Uma linha de stock da carrinha, lida do Inventário (armazém do tipo "viatura"). */
 export interface LinhaCarrinha { sku: string; nome: string; qty: number; un: string; min: number }
 
 /** Uma obra do protótipo, como a Frota a vê (vem do Estado: os negócios em obra com plano). */
-export interface ObraRef { id: number; nome: string; servico: string; local: string; estado: string; tarefas: { nome: string; dia: number; dur: number; tec: string | null }[] }
+export interface ObraRef { id: number; nome: string; servico: string; local: string; estado: string; tarefas: { nome: string; dia: number; dur: number; tec: string | null }[];
+  /** A origem da encomenda de cliente no Inventário novo ("CT 2026/<id>"), quando já foi emitida. */
+  ec?: string | null }
 
 /** Uma entrada do histórico: quando (ISO, hora real), o texto, quem fez, a viatura, o tipo de ação e o detalhe. */
 export interface EntradaLog { at: string; t: string; quem?: string; vid?: string; acao?: string; det?: string }
