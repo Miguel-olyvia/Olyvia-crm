@@ -26,6 +26,7 @@ import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
 import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
 import { NegociosV1Docs } from "./NegociosV1Docs";
 import { NumerosV1 } from "./NumerosV1";
+import { RAMO_V1 } from "./ramoV1";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
 import { SeletorVersao } from "./SeletorVersao";
@@ -87,11 +88,12 @@ export default function PrototipoNegocios() {
   const [frotaMock, setFrotaMock] = useState(false); // um ecrã da Frota (do menu lateral): como o Inventário, só na V2 e fora do Estado
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
-  const [versao, setVersao] = useState<VersaoProto>(lerVersao);
-  // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). Neste ramo partilhado fica desligada por defeito
-  // (liga-se no interruptor "Pessoas numa página"); o V1 novo do Ruben segue no ramo feat/v1, onde está ligada. Preferência de quem vê, como a versão.
+  // no ramo feat/v1 a versão é sempre a Atual (o V1): a V2 não se vê (ramoV1.ts)
+  const [versao, setVersao] = useState<VersaoProto>(() => (RAMO_V1 ? "atual" : lerVersao()));
+  // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). No ramo feat/v1 está ligada por defeito; o interruptor
+  // "Pessoas numa página" fica para comparar com o V1 de antes (só "0" a desliga). No ramo partilhado fica desligada por defeito.
   const [navPessoas, setNavPessoas] = useState(0); // o menu "Pessoas" volta a montar a página (vai à lista, mesmo com uma ficha aberta)
-  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_PROPOSTA_V1) === "1"; } catch { return false; } });
+  const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { const g = localStorage.getItem(CHAVE_PROPOSTA_V1); return RAMO_V1 ? g !== "0" : g === "1"; } catch { return RAMO_V1; } });
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
 
@@ -353,7 +355,7 @@ export default function PrototipoNegocios() {
     const listaNova = true; // na proposta simples todos os ecrãs são novos
     const seletorVersao = (
       <>
-        <SeletorVersao versao={versao} mudar={mudarVersao} />
+        {!RAMO_V1 && <SeletorVersao versao={versao} mudar={mudarVersao} />}
         {versao === "atual" && (
           <button type="button" role="switch" aria-checked={propostaV1} onClick={() => mudarPropostaV1(!propostaV1)}
             className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 text-left text-[15px] text-foreground">

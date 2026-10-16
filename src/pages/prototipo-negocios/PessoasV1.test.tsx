@@ -1,8 +1,11 @@
 // A proposta do V1 (16/10) na app inteira: o interruptor, Pessoas (lista, nova lead, ficha), o voltar do negócio e Negócios por documento.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PrototipoNegocios from "./PrototipoNegocios";
 import { esquecerPessoasV1 } from "./PessoasV1";
+
+// estes testes são do ramo feat/v1: o protótipo é só o V1 (ver ramoV1.ts)
+vi.mock("./ramoV1", () => ({ RAMO_V1: true }));
 
 const menu = (): HTMLElement => screen.getAllByRole("navigation", { name: "Menu" })[0];
 const irPara = (nome: string): void => { fireEvent.click(within(menu()).getByRole("button", { name: new RegExp("^" + nome) })); };
@@ -96,10 +99,12 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     expect(within(screen.getByRole("region", { name: "O que fazer agora" })).getByRole("button", { name: "Emitir fatura" })).toBeInTheDocument();
   });
 
-  it("neste ramo fica desligada por defeito: sem preferência guardada, o V1 de antes (Leads e Clientes)", () => {
+  it("no ramo feat/v1 é o V1 por defeito: sem preferência guardada, o menu já tem Pessoas e não há seletor de versão", () => {
     localStorage.removeItem("olyvia-prototipo-v1-proposta");
+    localStorage.setItem("olyvia-prototipo-v2", "funcional"); // mesmo com a V2 guardada de antes, abre no V1
     render(<PrototipoNegocios />);
-    expect(within(menu()).getByRole("button", { name: "Leads" })).toBeInTheDocument();
+    expect(within(menu()).getByRole("button", { name: "Pessoas" })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Versão" })).toBeNull();
   });
 
   it("desligar a proposta devolve Leads e Clientes", () => {
