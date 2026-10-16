@@ -157,7 +157,7 @@ describe("Encomendas · permissões por perfil", () => {
   it("um perfil sem inventory.receive não recebe, e o de compras aprova mas não recebe", async () => {
     render(<Casa inicio="po" />);
     act(() => mudarPerfil("compras"));
-    const receber = screen.getAllByRole("button", { name: "Receber" })[0];
+    const receber = screen.getAllByRole("button", { name: /Receber no armazém/ })[0];
     expect(receber).toBeDisabled();
     expect(receber).toHaveAttribute("title", "Sem permissão: requer inventory.receive. Peça acesso a um administrador.");
     expect(screen.getAllByRole("button", { name: "Aprovar e enviar" })[0]).toBeEnabled();

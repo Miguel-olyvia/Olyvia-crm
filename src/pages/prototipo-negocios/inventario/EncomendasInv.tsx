@@ -1,7 +1,7 @@
 // Compras › Encomendas (scrPO do mockup): cabeçalho com Exportar, Importar e Nova encomenda, os quatro cartões, os filtros e a lista (normal ou agrupada por fornecedor).
 // A linha abre a folha lateral; o primeiro botão de cada linha faz a ação do estado (aprovar, receber, ver ou restaurar).
 import { useState } from "react";
-import { Plus, Upload } from "lucide-react";
+import { Plus, Upload, Warehouse } from "lucide-react";
 import { eur } from "./base";
 import { AcoesCab } from "./cabInv";
 import { contadores } from "./contadores";
@@ -31,7 +31,7 @@ function Acoes({ aoNova, aoImportar, exportar }: { aoNova: () => void; aoImporta
 }
 
 export function EncomendasInv() {
-  const { db, filtros, setFiltros } = useCtxInv();
+  const { db, filtros, setFiltros, ir } = useCtxInv();
   const f = filtros.po;
   const c = contadores(db);
   const lista = filtrarPos(db, f);
@@ -50,6 +50,7 @@ export function EncomendasInv() {
         <Kpi tom="bad" rotulo="Atrasadas" valor={String(c.late)} nota="entrega prevista ultrapassada" fonte="purchase_orders.expected_delivery_date" aoClicar={() => setFiltros("po", { status: "late" })} />
         <Kpi rotulo="Valor por receber" valor={can("purchase_orders.view_prices") ? eur(c.openValue) : "—"} nota="com IVA, só o que falta" fonte="purchase_order_items (quantidade − recebida − anulada)" />
       </div>
+      <div className="alert info" role="note" style={{ marginBottom: 10 }}><Warehouse className="ic" aria-hidden="true" />As encomendas a fornecedor recebem-se em Armazém › Receção (entrada no armazém).&nbsp;<button type="button" className="link" onClick={() => ir({ aba: "guia" })}>Abrir a Receção →</button></div>
       <PoFiltros n={n} />
       <PoLista lista={lista} abertos={abertos} alternar={(id) => setAbertos((x) => ({ ...x, [id]: !x[id] }))} pedir={(id, d) => setDlg({ id, d })} />
       {nova && <NovaPoDialogo aberto aoFechar={() => setNova(false)} />}

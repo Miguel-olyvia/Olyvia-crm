@@ -19,6 +19,7 @@ import { TRILHOS, faltaParaArrancar, passosPreparacao, type PassoPrep, type Tril
 import { useInventario } from "./inventario/loja";
 import { useFrota } from "./frota/loja";
 import { ligacoesObra } from "./frota/transporteObra";
+import { ProximoRececaoNegocio } from "./RececaoNegocio";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 
 const ICONE: Record<Trilho, typeof Package> = { ec: Package, plano: CalendarRange, pag: Euro, obra: HardHat };
@@ -169,6 +170,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         );
       })()}
 
+      {d.obra.ec?.ref && <ProximoRececaoNegocio d={d} A={A} go={go} />}
       {aberto === "ec" && d.obra.ec && <DetalheEncomenda ctx={ctx} inv={inv} />}
       {aberto === "plano" && <DetalhePlano d={d} ajustar={ctx.go(() => ctx.A.abrirPlano(d.id))} />}
 

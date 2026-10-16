@@ -25,6 +25,7 @@ import { lerCustos, mudarCustos, useCustos } from "./custosStore";
 import { confirmarHorasEquip, custoEquipamentos, equipamentosObra, horasReais, horasSugeridas, opcoesHoras, type LinhaEquipObra } from "./equipamentosObra";
 import { MIN_OBRAS, TOLERANCIA, comparacaoObra, podeUsarMediana, receitaComHoras, type ComparacaoReceita } from "./receitaReal";
 import { ViaturasObra } from "../frota/ViaturasObra";
+import { ProximoRececaoNegocio } from "../RececaoNegocio";
 
 const horasTxt = (h: number) => `${nfmt(h)} h`;
 
@@ -527,6 +528,7 @@ function SecMateriais({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   return (
     <Secao id="materiais" titulo="Materiais"
       extra={<Button variant="ghost" className={BOTAO} onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight aria-hidden="true" /></Button>}>
+      <ProximoRececaoNegocio d={d} A={A} go={go} />
       <p className="text-[15px]">{d.obra.ec?.ref ? `Encomenda de cliente ${d.obra.ec.n}, emitida ao validar o pagamento: o armazém trata no Inventário.` : !e ? "Tudo em stock e reservado." : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.` : `Encomenda ${e.n} ${e.estado}. O armazém trata no Inventário.`}</p>
       {(d.obra.mats || []).length > 0 && (
         <ul className="mt-3 divide-y divide-border">

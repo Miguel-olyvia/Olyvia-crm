@@ -1,7 +1,7 @@
 // A folha lateral de uma PO (poSheet do mockup): cabeçalho com estado, fornecedor, origem, entrega e linha temporal, sete separadores e o rodapé com a ação principal do estado
 // (gravar e encomendar, ou receber). Os campos editam-se na própria célula; os diálogos pedem motivo quando a regra o exige.
 import { useState } from "react";
-import { Printer, Send, Trash2, Truck } from "lucide-react";
+import { Printer, Send, Trash2, Warehouse } from "lucide-react";
 import { AbasFolha, Folha } from "./DialogosInv";
 import { nomeForn, poPorId } from "./base";
 import { Fonte } from "./cabInv";
@@ -13,6 +13,7 @@ import { PoDialogos, type DlgPo } from "./PoDialogos";
 import { PoHdr, Timeline, poDe } from "./PoCab";
 import { PORTAL_FORN, duplicarPo, gravarPo, poLate, poOpen, restaurarPo } from "./po";
 import { useIrReceber } from "./irReceber";
+import { ProximoRececao } from "./PoCab";
 import { SeloEstadoPo, SeloPortal } from "./poPecas";
 import type { AcoesPo, EstadoPd, TabPo } from "./poTipos";
 import { PoTabs } from "./PoTabsSwitch";
@@ -41,7 +42,7 @@ export function PoFolha({ id, tabInicial, aoFechar }: { id: string; tabInicial?:
   const rodape = p.deleted ? <><Sec onClick={aoFechar}>Fechar</Sec><Pri onClick={restaurar}>Restaurar</Pri></>
     : p.status === "pending" ? <><div className="left"><Sec className="btn-ghost" onClick={() => setDlg({ t: "eliminar" })}><Trash2 className="ic" aria-hidden="true" />Eliminar</Sec></div><Sec onClick={() => gravar(false)}>Gravar{pd.dirty ? " *" : ""}</Sec>
       <Pri disabled={!aprova} title={aprova ? undefined : "Requer purchase_orders.approve"} onClick={() => gravar(true)}><Send className="ic" aria-hidden="true" />Gravar e encomendar</Pri></>
-    : poOpen(p) ? <>{pdf}<Sec onClick={() => gravar(false)}>Gravar{pd.dirty ? " *" : ""}</Sec><Pri disabled={!recebe} title={recebe ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}><Truck className="ic" aria-hidden="true" />Receber</Pri></>
+    : poOpen(p) ? <>{pdf}<Sec onClick={() => gravar(false)}>Gravar{pd.dirty ? " *" : ""}</Sec><Pri disabled={!recebe} title={recebe ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}><Warehouse className="ic" aria-hidden="true" />Receber no armazém →</Pri></>
     : <>{pdf}<Sec onClick={() => gravar(false)}>Gravar notas</Sec><Pri onClick={aoFechar}>Fechar</Pri></>;
   return (
     <Folha aberta aoFechar={aoFechar} chave={id} titulo={p.id} subtitulo="Compras › Encomenda a fornecedor" rodape={rodape}
@@ -55,6 +56,7 @@ export function PoFolha({ id, tabInicial, aoFechar }: { id: string; tabInicial?:
           ["Data · entrega prevista", <span key="d"><PoHdr p={p} k="date" a={a} /> · <PoHdr p={p} k="due" a={a} /></span>],
         ]} />
         <Timeline p={p} />
+        <ProximoRececao p={p} aoIr={() => irReceber(p.id)} />
         <Fonte>purchase_orders · supplier_po_publications · purchase_order_receipts</Fonte>
         <AbasFolha<TabPo> rotulo="Partes da encomenda" atual={tab} escolher={setTab} abas={[["lines", "Linhas", p.lines.length], ["rec", "Receções", p.receipts.length], ["guias", "Guias", db.guias.filter((g) => g.pos.includes(id)).length], ["portal", "Portal"], ["ann", "Anulações", p.cancels.filter((c) => !c.undone).length], ["notes", "Notas"], ["hist", "Histórico"]]} />
       </>}>

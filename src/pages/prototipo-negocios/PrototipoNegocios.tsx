@@ -42,7 +42,7 @@ import { OperacoesV2 } from "./v2/OperacoesV2";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
-import { lerPedidoEcInv, subscrever as subscreverInv, tirarPedidoEcInv } from "./inventario/loja";
+import { lerPedidoEcInv, lerPedidoRececaoInv, subscrever as subscreverInv, tirarPedidoEcInv, tirarPedidoRececaoInv } from "./inventario/loja";
 import { sincronizarEcsNegocios } from "./inventario/ponteNegocios";
 import PerfilSimulado from "./inventario/PerfilSimulado";
 import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
@@ -262,8 +262,8 @@ export default function PrototipoNegocios() {
   // do negócio (Saídas para clientes), se foi pedida, senão às Encomendas a fornecedor.
   useEffect(() => {
     if (S.view !== "inventario") return;
-    if (!comInvFrota) { tirarPedidoEcInv(); return; }
-    setInvAba(lerPedidoEcInv() ? "ec" : "po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
+    if (!comInvFrota) { tirarPedidoEcInv(); tirarPedidoRececaoInv(); return; }
+    setInvAba(lerPedidoEcInv() ? "ec" : lerPedidoRececaoInv() ? "guia" : "po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
   }, [comInvFrota, S.view, run, A]);
   // 16/10: o Inventário novo vive em memória; ao recarregar (ou ao repor os dados dele) volta a emitir as encomendas dos negócios pagos que lá faltam
   useEffect(() => {

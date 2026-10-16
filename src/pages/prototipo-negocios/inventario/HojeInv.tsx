@@ -1,7 +1,8 @@
 // O Hoje do Inventário, igual ao do mockup (scrHoje): o fluxo em cinco passos (cartões numerados, a bifurcação "Sim / Não"), a fila de trabalho (cada cartão abre a lista
 // já filtrada), as POs automáticas e os últimos movimentos. Os números vêm do estado atual. O botão primário é só um: "Simular venda assinada".
 import { useState, type ReactNode } from "react";
-import { ArrowLeftRight, ArrowRight, GitFork, Play, Truck } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, GitFork, Play, Truck, Warehouse } from "lucide-react";
+import { poRecebivel } from "./po";
 import { cn } from "@/lib/utils";
 import { eur, fmtDT, N, nomeArm, nomeProd } from "./base";
 import { AcoesCab, Fonte } from "./cabInv";
@@ -14,7 +15,8 @@ import { VendaDialogo } from "./VendaDialogo";
 import type { Tom } from "./tipos";
 
 interface ItemFila { n: number; titulo: string; desc: string; tom: Tom; destino: Destino; fonte: string }
-const fila = (c: Contadores): ItemFila[] => [
+const fila = (c: Contadores, porReceber: number): ItemFila[] => [
+  { n: porReceber, titulo: "Encomendas por receber no armazém", desc: "Encomendas a fornecedor (pendentes, encomendadas ou parciais) à espera de entrada em Armazém › Receção.", tom: "info", destino: { aba: "guia" }, fonte: "purchase_orders (por receber)" },
   { n: c.pending, titulo: "POs por aprovar", desc: "Rascunhos (manuais ou automáticos, se a aprovação estiver ativa). Passar a Encomendado exige purchase_orders.approve.", tom: "warn", destino: { aba: "po", f: { status: "pending" } }, fonte: "purchase_orders.status = pending" },
   { n: c.late, titulo: "POs atrasadas", desc: "Entrega prevista ultrapassada sem receção completa.", tom: "bad", destino: { aba: "po", f: { status: "late" } }, fonte: "purchase_orders.expected_delivery_date" },
   { n: c.ecReady, titulo: "ECs prontas a expedir", desc: "Têm linhas com stock reservado (FIFO) à espera de saída.", tom: "ok", destino: { aba: "ec", f: { prontas: true } }, fonte: "fn_client_order_line_reservations" },
@@ -100,12 +102,12 @@ function Fluxo({ c }: { c: Contadores }) {
 }
 
 function Fila({ c }: { c: Contadores }) {
-  const { ir } = useCtxInv();
+  const { db, ir } = useCtxInv();
   return (
     <section aria-labelledby="h-q" style={{ marginBottom: 22 }}>
       <div className="row between" style={{ marginBottom: 10 }}><h2 id="h-q" style={{ fontSize: 16 }}>Fila de trabalho</h2><span className="muted" style={{ fontSize: 12.5 }}>Equivale aos alertas atuais do menu (alert_settings), agora com destino filtrado.</span></div>
       <div className="queue">
-        {fila(c).map((q) => (
+        {fila(c, db.pos.filter(poRecebivel).length).map((q) => (
           <button key={q.titulo} type="button" className={cn("qcard", `t-${q.tom}`, !q.n && "zero")} onClick={() => ir(q.destino)}>
             <span className="qn">{q.n}</span>
             <span><span className="qt">{q.titulo}</span><br /><span className="qd">{q.desc}</span><br /><span className="go">{q.n ? "Abrir lista filtrada" : "Nada pendente"}<ArrowRight className="ic sm" aria-hidden="true" /></span><Fonte>{q.fonte}</Fonte></span>
@@ -149,7 +151,7 @@ export function HojeInv() {
   const acoes = (
     <>
       <button type="button" className="btn" onClick={() => setDlg("mov")}><ArrowLeftRight className="ic" aria-hidden="true" />Registar movimento</button>
-      <button type="button" className="btn" onClick={() => ir({ aba: "guia" })}><Truck className="ic" aria-hidden="true" />Receber</button>
+      <button type="button" className="btn" onClick={() => ir({ aba: "guia" })}><Warehouse className="ic" aria-hidden="true" />Receber no armazém →</button>
       <button type="button" className="btn btn-p" onClick={() => setDlg("venda")}><Play className="ic" aria-hidden="true" />Simular venda assinada</button>
     </>
   );

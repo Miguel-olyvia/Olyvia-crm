@@ -70,10 +70,10 @@ describe("Hoje", () => {
     expect(valor()).toBe("—");
   });
 
-  it("tem as 11 cartas da fila e as três ações do cabeçalho", () => {
+  it("tem as 12 cartas da fila (11 do mockup + encomendas por receber no armazém) e as três ações do cabeçalho", () => {
     render(<Casa />);
-    expect(painel().querySelectorAll(".queue .qcard")).toHaveLength(11);
+    expect(painel().querySelectorAll(".queue .qcard")).toHaveLength(12);
     const acoes = painel().querySelector(".ph-actions")!;
-    expect(Array.from(acoes.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Registar movimento", "Receber", "Simular venda assinada"]);
+    expect(Array.from(acoes.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Registar movimento", "Receber no armazém →", "Simular venda assinada"]);
   });
 });

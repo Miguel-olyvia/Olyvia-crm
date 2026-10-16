@@ -228,9 +228,9 @@ describe("Hoje igual ao mockup", () => {
   it("a fila de trabalho tem os cartões do mockup (e o das guias) com número, barra de cor e 'Abrir lista filtrada'", () => {
     render(<Casa />);
     const fila = screen.getByRole("heading", { level: 2, name: "Fila de trabalho" }).closest("section")!;
-    const nomes = ["POs por aprovar", "POs atrasadas", "ECs prontas a expedir", "ECs sem fornecedor preferencial", "Pedidos de transferência", "Alterações de preço por aprovar", "Produtos abaixo do ponto de encomenda", "Contagem parada", "Fornecedores à espera da ficha", "Artigos do portal por ligar", "Guias abertas com divergências"];
+    const nomes = ["Encomendas por receber no armazém", "POs por aprovar", "POs atrasadas", "ECs prontas a expedir", "ECs sem fornecedor preferencial", "Pedidos de transferência", "Alterações de preço por aprovar", "Produtos abaixo do ponto de encomenda", "Contagem parada", "Fornecedores à espera da ficha", "Artigos do portal por ligar", "Guias abertas com divergências"];
     for (const n of nomes) expect(within(fila).getByRole("button", { name: new RegExp("^\\d+\\s*" + n) })).toBeInTheDocument();
-    expect(fila.querySelectorAll(".qcard")).toHaveLength(11);
+    expect(fila.querySelectorAll(".qcard")).toHaveLength(12);
     expect(fila.querySelector(".qcard.t-warn")).not.toBeNull();
     expect(within(fila).getAllByText("Abrir lista filtrada").length).toBeGreaterThan(0);
   });
@@ -308,7 +308,7 @@ describe("Encomendas", () => {
     separador("Encomendas");
     fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
-    fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
+    fireEvent.click(within(folha).getByRole("button", { name: /Receber no armazém/ }));
     // 16/10: vai direto para Armazém › Receção, com a PO escolhida (sem o diálogo)
     const painel = await screen.findByRole("region", { name: "Encomenda PO-2026-0137" });
     expect(lerInventario().rc.poFilter).toBe("PO-2026-0137");
@@ -329,7 +329,7 @@ describe("Encomendas (continuação)", () => {
     separador("Encomendas");
     fireEvent.click(screen.getByRole("row", { name: /^Abrir PO-2026-0137/ }));
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
-    fireEvent.click(within(folha).getByRole("button", { name: "Receber" }));
+    fireEvent.click(within(folha).getByRole("button", { name: /Receber no armazém/ }));
     const painel = await screen.findByRole("region", { name: "Encomenda PO-2026-0137" });
     const campo = within(painel).getByRole("spinbutton", { name: /Receber agora/ });
     fireEvent.change(campo, { target: { value: "9" } });

@@ -1,5 +1,5 @@
 // O menu "Mais ações" de uma PO (poMenu do mockup), na lista e no topo da folha: abrir, PDF, receber, não receber o resto, reverter, editar, eliminar ou restaurar.
-import { Eye, Pencil, Printer, Trash2, Truck, Undo2, X } from "lucide-react";
+import { Eye, Pencil, Printer, Trash2, Undo2, Warehouse, X } from "lucide-react";
 import { useCtxInv } from "./ctxInv";
 import { MenuMais, type ItemMenu } from "./mockPecas";
 import { can } from "./perfil";
@@ -18,7 +18,7 @@ export function MenuPo({ p, rotulo, abrir, dlg }: Props) {
   const itens: (ItemMenu | "-")[] = [
     { label: "Abrir detalhe", icone: <Eye className={ic} aria-hidden="true" />, run: () => abrir() },
     { label: "PDF da encomenda", icone: <Printer className={ic} aria-hidden="true" />, fonte: "rpc_get_purchase_order_pdf (mockup)", run: () => dlg({ t: "pdf" }) },
-    { label: "Receber", icone: <Truck className={ic} aria-hidden="true" />, desativado: !recebivel || !can("inventory.receive"), porque: !recebivel ? "Só encomendas pendentes, encomendadas ou parciais" : "Requer inventory.receive", run: () => irReceber(p.id) },
+    { label: "Receber no armazém →", icone: <Warehouse className={ic} aria-hidden="true" />, desativado: !recebivel || !can("inventory.receive"), porque: !recebivel ? "Só encomendas pendentes, encomendadas ou parciais" : "Requer inventory.receive", run: () => irReceber(p.id) },
     { label: "Não vou receber o resto", icone: <X className={ic} aria-hidden="true" />, desativado: !aberta || !can(pm), porque: "Só encomendas em aberto", fonte: "rpc_cancel_po_remainder", run: () => dlg({ t: "resto" }) },
     { label: "Reverter receção", icone: <Undo2 className={ic} aria-hidden="true" />, desativado: !p.receipts.some((r) => r.state === "Ativa" && r.type === "Receção"), porque: "Sem receções ativas", fonte: "rpc_revert_purchase_order_receipt", run: () => abrir("rec") },
     { label: "Editar", icone: <Pencil className={ic} aria-hidden="true" />, desativado: p.deleted || !["pending", "ordered"].includes(st) || !can(pm), porque: poPublished(p) ? "Publicada no portal: retire-a primeiro" : "Só pendentes/encomendadas", run: () => abrir("lines") },

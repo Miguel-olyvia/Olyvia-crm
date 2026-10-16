@@ -23,6 +23,7 @@ import {
 import type { Ctx } from "./pecas";
 import { AutoNoNegocio } from "./AutoRececao";
 import { ViaturasObra } from "./frota/ViaturasObra";
+import { ProximoRececaoNegocio } from "./RececaoNegocio";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 
@@ -766,6 +767,7 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           ))}
         </div>
       )}
+      <ProximoRececaoNegocio d={d} A={A} go={go} />
       <div className="mt-2 flex flex-wrap gap-x-5">
         {d.obra.ec?.ref && (
           <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">

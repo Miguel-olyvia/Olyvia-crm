@@ -31,7 +31,8 @@ describe("Receção como no mockup", () => {
     expect(document.querySelector(".recv-grid .phone")).not.toBeNull();
     expect(within(telemovel()).getByText("Cesto (0)")).toBeInTheDocument();
     expect(within(telemovel()).getByText("3 pendente(s) ▸")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Todas\s*\d+/ })).toHaveAttribute("aria-pressed", "true");
+    // as guias têm os seus chips (as encomendas por receber, por cima, têm outros)
+    expect(within(document.querySelector(".recv-grid") as HTMLElement).getByRole("button", { name: /^Todas\s*\d+/ })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("ler um código conhecido põe o produto no cesto", async () => {

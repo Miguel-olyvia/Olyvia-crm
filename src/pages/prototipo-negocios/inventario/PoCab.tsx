@@ -5,8 +5,8 @@ import { fmtD, nomeArm, nomeForn } from "./base";
 import { useCtxInv } from "./ctxInv";
 import { Ed } from "./mockPecas";
 import { opcoesArmazens, opcoesFornecedores } from "./opcoes";
-import { Selo } from "./pecasInv";
-import { editarCabecalhoPo, motivoBloqueioPo, percursoPo, poLate, poLocked, poOpen, poStatus, aceitarDataPrometida, type CampoCabPo } from "./po";
+import { Selo, Ligacao } from "./pecasInv";
+import { editarCabecalhoPo, motivoBloqueioPo, percursoPo, poLate, poLocked, poOpen, poStatus, aceitarDataPrometida, type CampoCabPo, poRecebivel } from "./po";
 import { Desbloquear, SeloEstadoPo } from "./poPecas";
 import type { AcoesPo } from "./poTipos";
 import type { Inventario, Po } from "./tipos";
@@ -56,6 +56,18 @@ export function PoHdr({ p, k, a }: { p: Po; k: "wh" | "date" | "due" | "sup" | "
 
 /** O bloqueio de edição da PO (texto e botão), ou nada se se pode editar. */
 export const bloqueioPo = (p: Po, a: AcoesPo): { msg: string; unlock: ReactNode } | null => { const msg = motivoBloqueioPo(p); return msg ? { msg, unlock: desbloqueioPo(p, a) } : null; };
+
+/** 16/10: o passo da receção no armazém, a seguir à linha temporal; com ligação quando é o passo atual (há o que receber). */
+export function ProximoRececao({ p, aoIr }: { p: Po; aoIr: () => void }) {
+  const st = poStatus(p);
+  if (p.deleted || st === "cancelled") return null;
+  const atual = poRecebivel(p);
+  return (
+    <p className="muted" style={{ margin: "-4px 0 12px" }}>
+      {st === "received" ? "Receção no armazém: feita." : <>Próximo passo: {atual ? <Ligacao aoClicar={aoIr}>Receção no armazém (Armazém › Receção) →</Ligacao> : "Receção no armazém"}{st === "pending" ? " · pode receber-se mesmo pendente" : ""}</>}
+    </p>
+  );
+}
 
 /** A linha temporal da PO (poTimeline do mockup). */
 export function Timeline({ p }: { p: Po }) {

@@ -17,7 +17,7 @@ import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil, realPorFase, ty
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
-import { lerInventario, pedirAbrirEcInv } from "./inventario/loja";
+import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./inventario/loja";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -1441,6 +1441,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     abrirPlano(id: number) { S.view = "operacoes"; S.op = id; S.deal = null; },
     /** Abre o Inventário; com um negócio, abre a encomenda de cliente dele (Saídas para clientes). */
+    /** Abre Armazém › Receção do Inventário, filtrada pelo cliente/obra deste negócio (as encomendas a fornecedor da EC dele). */
+    abrirRececao(id: number) { const ec = S.deals.find((x) => x.id === id)?.obra.ec; if (ec?.ref) pedirRececaoClienteInv(ec.ref); S.view = "inventario"; S.deal = null; },
     abrirInv(id?: number) { const ec = id != null ? S.deals.find((x) => x.id === id)?.obra.ec : null; if (ec?.ref) pedirAbrirEcInv(ec.n); S.view = "inventario"; S.deal = null; },
     irObra() { S.pulse = "sec-5"; },
     trocar(id: number, ti: number) {

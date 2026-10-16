@@ -52,11 +52,24 @@ export const lerPedidoEcInv = (): string | null => pedidoEc;
 /** Quem abre a encomenda tira o pedido (não volta a abrir mais tarde). */
 export function tirarPedidoEcInv(): string | null { const id = pedidoEc; pedidoEc = null; return id; }
 
+/** 16/10: abrir a Receção já filtrada por um cliente/obra (a origem da EC, ex. "CT 2026/1027"), pedido pelo negócio ("Abrir Receção"). */
+let pedidoRec: string | null = null;
+export function pedirRececaoClienteInv(ref: string): void { pedidoRec = ref; aba = "guia"; }
+export const lerPedidoRececaoInv = (): string | null => pedidoRec;
+export function tirarPedidoRececaoInv(): string | null { const r = pedidoRec; pedidoRec = null; return r; }
+
+/** A fila do "Receber tudo" de um bloco da Receção: as POs que faltam, pela ordem (o painel avança para a seguinte ao receber tudo). */
+let filaRec: string[] = [];
+export const lerFilaRececao = (): string[] => filaRec;
+export function definirFilaRececao(ids: string[]): void { filaRec = [...ids]; }
+
 /** Volta aos dados de exemplo (o botão "Repor inventário" e os testes). */
 export function esquecerInventario(): void {
   base = null;
   aba = "hoje";
   pedidoEc = null;
+  pedidoRec = null;
+  filaRec = [];
   avisar();
 }
 

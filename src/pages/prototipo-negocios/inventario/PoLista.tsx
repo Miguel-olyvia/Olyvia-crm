@@ -1,5 +1,5 @@
 // A lista das encomendas (poListHtml e poRows do mockup): a tabela normal com o rodapé "N encomenda(s)", ou a vista agrupada por fornecedor com os grupos expansíveis.
-import { ChevronDown, ChevronRight, Clock } from "lucide-react";
+import { ChevronDown, ChevronRight, Clock, Warehouse } from "lucide-react";
 import { HOJE, diasEntre, fmtD, nomeForn } from "./base";
 import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
@@ -23,7 +23,7 @@ function AcaoLinha({ p, pedir }: { p: Po; pedir: PedirDlg }) {
   const st = poStatus(p);
   if (p.deleted) return <Peq onClick={() => agir((d) => restaurarPo(d, d.pos.find((x) => x.id === p.id) as Po), `${p.id} restaurada.`)}>Restaurar</Peq>;
   if (st === "pending") { const pode = can("purchase_orders.approve"); return <Peq className="btn-p" disabled={!pode} title={pode ? undefined : porqueNao("purchase_orders.approve")} onClick={() => pedir(p.id, { t: "enviar" })}>Aprovar e enviar</Peq>; }
-  if (st === "ordered" || st === "partial") { const pode = can("inventory.receive"); return <Peq disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}>Receber</Peq>; }
+  if (st === "ordered" || st === "partial") { const pode = can("inventory.receive"); return <Peq disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}><Warehouse className="ic sm" aria-hidden="true" />Receber no armazém →</Peq>; }
   return <Peq onClick={() => abrir({ t: "po", id: p.id })}>Ver</Peq>;
 }
 
