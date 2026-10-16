@@ -1,9 +1,13 @@
 // Proposta de 16/10/2026 para simplificar Pessoas e Negócios no V1 (ver docs-design/proposta-v1-pessoas.md).
 // Só lógica, sem React e sem mudar o Estado: reaproveita as regras da V2 (pessoasDocs, negociosApp, perfilDocs) e junta-as
 // no que um comercial precisa de ver: quem tratar, o que fazer a seguir e em que documento está cada negócio.
-import { PAPEIS, aberto, eur, type Estado, type Negocio, type Papel } from "./motor";
+import { PAPEIS, aberto, eur, proximo, type Estado, type Negocio, type Papel } from "./motor";
 import { docFase, ehGanho, semPaginaPropria, type DocFase, type NegocioApp } from "./negociosApp";
-import { clientesApp, leadsApp, perdidasApp, proximoNegocio, type PessoaApp } from "./pessoasDocs";
+import { clientesApp, leadsApp, perdidasApp, type PessoaApp } from "./pessoasDocs";
+
+/** O passo do negócio, tal como o motor o diz, também na Obra (validação de 16/10). A camada de Pessoas da V2 (proximoNegocio) diz
+ *  "Concluído" a partir da Obra, o que escondia passos reais: aprovar o plano (Operações) e rever a margem real (o próprio comercial). */
+const proximoNegocio = (d: Negocio, S: Estado) => proximo(d, S);
 import { localDe } from "./leadsDocs";
 
 /** Atrasada como no Hoje e no quadro do V1: o atraso da seed só conta enquanto a lead está por contactar (registar a chamada resolve-o). */
@@ -139,7 +143,7 @@ export function fichaV1(S: Estado, p: PessoaApp): FichaV1 {
         quem: prA.who && prA.who !== "cliente" && prA.who !== S.role && !prA.wait && !prA.done && real ? prA.who as Papel : undefined,
       },
     negocios: p.todos.map((n) => ({
-      id: n.id, titulo: n.titulo, estado: estadoDe(n) + (n.perdido ? " · " + n.perdido : ""), valor: valorAlternativas(n),
+      id: n.id, titulo: n.titulo, estado: estadoV1(n) + (n.perdido ? " · " + n.perdido : ""), valor: valorAlternativas(n),
       nota: n.orcamentos.length > 1 ? `${n.orcamentos.length} orçamentos alternativos` : "",
       abre: semPaginaPropria(n) || !temPagina(S, n.deal.id) ? null : n.deal.id,
     })),
@@ -155,6 +159,10 @@ export function fichaV1(S: Estado, p: PessoaApp): FichaV1 {
     perder: p.papel === "lead" && !perdida ? p.negocios.filter((x) => !x.perdido && temPagina(S, x.id)).map((x) => x.id) : [],
   };
 }
+
+/** O estado do negócio em palavras. Na Obra: "Em obra" enquanto não acaba (estadoDe, da V2, dizia "Concluído" logo a partir do pagamento). */
+const estadoV1 = (n: NegocioApp): string =>
+  n.perdido === null && !semPaginaPropria(n) && n.deal.fase >= 5 && n.deal.obra?.plano?.estado !== "concluída" ? "Em obra" : estadoDe(n);
 
 /** O motivo da perda: o guardado no negócio (sobrevive a recarregar a página) ou o que a camada da V2 sabe. */
 export const motivoDe = (p: PessoaApp): string => p.principal.motivoPerda ?? p.perdida ?? "";
