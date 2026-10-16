@@ -31,10 +31,16 @@ beforeEach(() => { localStorage.clear(); esquecerFrota(); esquecerInventario(); 
 afterEach(() => { cleanup(); localStorage.clear(); });
 
 describe("Frota no menu lateral do protótipo", () => {
-  it("só aparece na V2, abre os ecrãs e abrir a Frota fecha o Inventário (e vice-versa)", async () => {
+  it("aparece na Atual e na V2 (não na V2 funcional), abre os ecrãs e abrir a Frota fecha o Inventário (e vice-versa)", async () => {
     localStorage.setItem("olyvia-prototipo-v2", "funcional");
     render(<PrototipoNegocios />);
     expect(screen.queryByTestId("menu-frota")).toBeNull();
+    cleanup();
+    // 16/10: a Atual tem os grupos Inventário e Frota, como a V2
+    localStorage.removeItem("olyvia-prototipo-v2");
+    render(<PrototipoNegocios />);
+    expect((await screen.findAllByTestId("menu-frota")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByTestId("menu-inventario")).length).toBeGreaterThan(0);
     cleanup();
     localStorage.setItem("olyvia-prototipo-v2", "1");
     render(<PrototipoNegocios />);

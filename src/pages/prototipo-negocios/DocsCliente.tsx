@@ -6,6 +6,8 @@ import { createPortal } from "react-dom";
 import { Armchair, Check, Copy, Grid3x3, Hammer, HardHat, Mail, Maximize2, MessageCircle, Minus, Package, Palette, Plug, Plus, Printer, ShieldCheck, UserRound, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useInventario } from "./inventario/loja";
+import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { SeloAssinatura } from "./AssinaturaContrato";
@@ -615,27 +617,27 @@ export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ nota de encomenda (14/10) */
-/** O estado de cada linha, como o cliente o lê: a confirmar, reservado em armazém, a encomendar, encomendado, recebido. */
-function estadoLinha(d: Negocio, falta: number): { t: string; ok: boolean } {
-  const ec = d.obra.ec!, e = d.obra.enc;
-  if (ec.estado !== "aprovada") return { t: "a confirmar", ok: false };
-  if (falta <= 0) return { t: "reservado em armazém", ok: true };
-  if (!e || e.estado === "por confirmar") return { t: "a encomendar", ok: false };
-  return e.estado === "recebida" ? { t: "recebido", ok: true } : { t: "encomendado ao fornecedor", ok: false };
+/** O estado de cada linha, como o cliente o lê (16/10: lido do Inventário novo): reservado em armazém, encomendado ao fornecedor, saiu para a obra. */
+function estadoLinha(d: Negocio, nome: string, inv: ResumoEcNeg | null): { t: string; ok: boolean } {
+  if (!d.obra.ec?.ref) return { t: "na obra", ok: true };
+  const l = linhaDoResumo(inv, nome);
+  return l ? estadoLinhaNegocio(l) : { t: "a preparar", ok: false };
 }
 /** A nota de encomenda: os materiais e produtos da obra, com o preço (nunca o custo), o estado de cada um e quando estão em obra. */
 export function NotaEncomendaDoc({ d }: { d: Negocio }) {
   const ec = d.obra.ec;
+  const db = useInventario();
   if (!ec) return null;
+  const inv = resumoEcNegocio(db, ec.ref);
   const p = d.obra.plano;
-  const prontos = ec.linhas.filter((x) => estadoLinha(d, x.falta).ok).length;
+  const prontos = ec.linhas.filter((x) => estadoLinha(d, x.n, inv).ok).length;
   return (
-    <Folha titulo="Nota de encomenda" numero={ec.n} data={`de ${ec.criada}`} carimbo={ec.estado === "aprovada" ? "Confirmada" : undefined}>
+    <Folha titulo="Nota de encomenda" numero={ec.n} data={`de ${ec.criada}`} carimbo="Confirmada">
       <Cliente d={d} />
       <p className="text-slate-700">Os materiais e produtos da obra de {d.servico.toLowerCase()}, conforme o contrato CT 2026/{d.id}. Estão incluídos no preço do contrato: <b>não se pagam à parte</b>.</p>
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
         {ec.linhas.map((x) => {
-          const st = estadoLinha(d, x.falta);
+          const st = estadoLinha(d, x.n, inv);
           return (
             <li key={x.n} className="flex items-baseline justify-between gap-4 py-2.5">
               <span className="min-w-0">{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} · {x.de === "produto" ? "escolhido na visita" : "do modelo"} · <span className={st.ok ? "text-emerald-700" : "text-slate-500"}>{st.t}</span></span></span>

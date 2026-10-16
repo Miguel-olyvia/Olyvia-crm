@@ -141,7 +141,8 @@ describe("a obra: técnico → fotografia → supervisor", () => {
   });
 
   it("equipa, equipamentos, materiais por fase e segurança têm dados coerentes", () => {
-    const { d, p } = preparar(1027);
+    const { A, d, p } = preparar(1027);
+    d.fin.pago = true; A.emitirEc(d.id); // 16/10: os materiais vêm da encomenda de cliente, emitida com o pagamento
     const eq = equipaDaObra(p);
     expect(eq.length).toBeGreaterThan(1);
     expect(eq.every((m) => m.tel && m.dias > 0)).toBe(true);

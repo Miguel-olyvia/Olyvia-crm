@@ -1,5 +1,5 @@
 /// <reference types="node" />
-// O Inventário nativo: o menu lateral só o mostra na V2 (um grupo expansível do menu único, com os subitens e os contadores do mockup), o Hoje, as listas com filtros, receber numa PO com diálogo próprio, o motivo exigido, o aviso aria-live,
+// O Inventário nativo: o menu lateral mostra-o na Atual e na V2 (16/10; não na V2 funcional), um grupo expansível do menu único, com os subitens e os contadores do mockup), o Hoje, as listas com filtros, receber numa PO com diálogo próprio, o motivo exigido, o aviso aria-live,
 // o teclado (/, setas, Enter, Esc) e "Repor inventário". Em jsdom (sem matchMedia) as listas mostram-se como cartões.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -49,9 +49,9 @@ beforeEach(() => { esquecerPerfil(); esquecerPessoas(); esquecerPessoasFunc(); e
 afterEach(() => { cleanup(); localStorage.clear(); });
 
 describe("Inventário no menu lateral", () => {
-  it("não aparece na Atual nem na V2 funcional; aparece só na V2", async () => {
+  it("aparece na Atual e na V2; não aparece na V2 funcional", async () => {
     app(null);
-    expect(menuInv()).toBeNull();
+    expect(await screen.findAllByTestId("menu-inventario")).not.toHaveLength(0);
     cleanup();
     app("funcional");
     expect(menuInv()).toBeNull();
@@ -60,16 +60,18 @@ describe("Inventário no menu lateral", () => {
     expect(await screen.findAllByTestId("menu-inventario")).not.toHaveLength(0);
   });
 
-  it("o item antigo desapareceu da V2 (só há o grupo Inventário, dentro do menu); a Atual e a V2 funcional mantêm o seu", async () => {
-    app("1");
-    await screen.findAllByTestId("menu-inventario");
-    const lateral = within(screen.getAllByRole("navigation", { name: "Menu" })[0]);
-    expect(lateral.getAllByRole("button", { name: "Inventário" })).toHaveLength(1);
-    expect(menuInv()!.contains(lateral.getByRole("button", { name: "Inventário" }))).toBe(true);
-    expect(screen.queryByRole("button", { name: /Inventário completo/ })).toBeNull();
-    // o painel roxo separado já não existe: nem a secção, nem o rodapé fora do menu
-    expect(document.querySelector(".inv-sbbox, .sb-sec")).toBeNull();
-    cleanup();
+  it("o item antigo desapareceu da Atual e da V2 (só há o grupo Inventário, dentro do menu); a V2 funcional mantém o seu", async () => {
+    for (const v of [null, "1"]) {
+      app(v);
+      await screen.findAllByTestId("menu-inventario");
+      const lateral = within(screen.getAllByRole("navigation", { name: "Menu" })[0]);
+      expect(lateral.getAllByRole("button", { name: "Inventário" })).toHaveLength(1);
+      expect(menuInv()!.contains(lateral.getByRole("button", { name: "Inventário" }))).toBe(true);
+      expect(screen.queryByRole("button", { name: /Inventário completo/ })).toBeNull();
+      // o painel roxo separado já não existe: nem a secção, nem o rodapé fora do menu
+      expect(document.querySelector(".inv-sbbox, .sb-sec")).toBeNull();
+      cleanup();
+    }
     app("funcional");
     expect(within(screen.getAllByRole("navigation", { name: "Menu" })[0]).getByRole("button", { name: "Inventário" })).toBeInTheDocument();
   });
@@ -172,8 +174,16 @@ describe("Inventário no menu lateral", () => {
     expect(document.querySelector("iframe")).toBeNull();
   });
 
-  it("ao mudar para a Atual ou para a V2 funcional com o Inventário aberto, volta a Negócios", async () => {
-    for (const nova of ["Atual", "V2 funcional"]) {
+  it("ao mudar para a V2 funcional com o Inventário aberto, volta a Negócios; para a Atual, o Inventário fica aberto", async () => {
+    app("1");
+    await screen.findAllByTestId("menu-inventario");
+    fireEvent.click(item("Existências"));
+    await screen.findByRole("heading", { level: 1, name: "Existências" });
+    fireEvent.click(within(screen.getAllByRole("group", { name: "Versão" })[0]).getByRole("button", { name: "Atual" }));
+    expect(menuInv()).not.toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Existências" })).toBeInTheDocument();
+    cleanup();
+    for (const nova of ["V2 funcional"]) {
       app("1");
       await screen.findAllByTestId("menu-inventario");
       fireEvent.click(item("Existências"));

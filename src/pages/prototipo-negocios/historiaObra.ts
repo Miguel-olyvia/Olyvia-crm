@@ -27,7 +27,8 @@ export function historiaDaObra(d: Negocio): Marco[] {
   if (o?.contrato === "assinado") m({ q: o.assinatura?.q ?? quando(d, /Contrato assinado|assinou o contrato/i) ?? "", t: `Contrato CT 2026/${d.id} assinado`, k: "contrato" });
   if (d.fin.fatura) m({ q: d.fin.fatura.q, t: `Fatura ${d.fin.fatura.n}`, k: "pagamento" });
   if (d.fin.recibo) m({ q: d.fin.recibo.q, t: `Pagamento confirmado · recibo ${d.fin.recibo.n}`, k: "pagamento" });
-  if (d.obra.enc?.estado === "recebida" || d.obra.ec?.estado === "aprovada") m({ q: quando(d, /recebida|Entrada de|reservad/i) ?? "", t: "Materiais prontos para a obra", k: "materiais" });
+  if (d.obra.enc?.estado === "recebida") m({ q: quando(d, /recebida|Entrada de|reservad/i) ?? "", t: "Materiais prontos para a obra", k: "materiais" });
+  else if (d.obra.ec) m({ q: d.obra.ec.emitida?.q ?? quando(d, /Encomenda de cliente .* emitida/i) ?? "", t: `Encomenda de cliente ${d.obra.ec.n} emitida no Inventário`, k: "materiais" });
   m(!!p && p.estado !== "por aprovar" && p.estado !== "aprovado" && { q: quando(d, /^Obra arrancou/) ?? (p.origem === "orcamento" ? rotuloDia(p, 0) : ""), t: "A obra começou", k: "obra" });
   // as adendas (trabalhos a mais) assinadas
   for (const a of d.adendas ?? []) if (a.estado === "assinada") m({ q: a.assinatura?.q ?? a.assinada ?? "", t: `Trabalhos a mais: adenda ${a.n}`, sub: `${a.linhas.map((x) => x.n).join(", ")} · +${eur(totalComIva(a.linhas))} € com IVA`, k: "adenda" });

@@ -1,5 +1,5 @@
-// As viaturas da obra, na página da obra (v2/ObraV2.tsx): as que a Frota reservou para a obra ou que levaram o técnico a uma tarefa do plano,
-// com o custo por km real (o que substitui os 0,40 €/km fixos na deslocação). "Abrir na Frota" só na V2, onde a Frota existe.
+// As viaturas da obra, na página da obra (v2/ObraV2.tsx e, na Atual, ObraOperacoes.tsx): as que a Frota reservou para a obra ou que levaram o técnico a uma tarefa do plano,
+// com o custo por km real (o que substitui os 0,40 €/km fixos na deslocação). "Abrir na Frota" onde a Frota existe (Atual e V2).
 import { Truck } from "lucide-react";
 import { fDataC, fEur } from "./base";
 import { useFrota } from "./loja";

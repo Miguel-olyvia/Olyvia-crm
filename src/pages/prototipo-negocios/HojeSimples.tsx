@@ -9,6 +9,23 @@ import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
 import { agenda } from "./Hoje";
 import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
 import { aDescoberto } from "./planoObra";
+import { useInventario } from "./inventario/loja";
+import { contadores as contadoresInv } from "./inventario/contadores";
+import { resumoInventario } from "./v2/hojeArmazem";
+
+/** 16/10: o que o Armazém tem no Inventário novo (o mesmo resumo do Hoje da V2). */
+function InventarioArmazem({ A, go }: Pick<Ctx, "A" | "go">) {
+  const linhas = resumoInventario(contadoresInv(useInventario()));
+  return (
+    <section aria-labelledby="hoje-inv" className="mt-12">
+      <h2 id="hoje-inv" className="text-lg font-semibold">Inventário</h2>
+      {linhas.length === 0
+        ? <p className="mt-3 text-[15px] text-muted-foreground">Nada pendente no Inventário.</p>
+        : <ul className="mt-3 grid gap-1">{linhas.map((l) => <li key={l.id} className="text-[15px]"><span className="font-semibold tabular-nums">{l.n}</span> {l.texto}</li>)}</ul>}
+      <Button variant="outline" className="mt-3 min-h-11" onClick={go(() => A.nav("inventario"))}>Abrir o Inventário</Button>
+    </section>
+  );
+}
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
@@ -109,6 +126,8 @@ export function HojeSimples({ S, A, go }: Ctx) {
           </ul>
         </section>
       )}
+
+      {r === "armazem" && <InventarioArmazem A={A} go={go} />}
 
       <section aria-labelledby="agenda" className="mt-12">
         <h2 id="agenda" className="text-lg font-semibold">Agenda</h2>

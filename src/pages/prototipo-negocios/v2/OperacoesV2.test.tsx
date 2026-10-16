@@ -1,7 +1,7 @@
 // O ecrã de Operações da V2: o Hoje do supervisor, a lista das obras e a página de uma obra (Plano, Validar, Atrasos, Previsto contra real, Materiais).
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { acoes, seed, type Estado } from "../motor";
+import { acoes, gerarPlano, seed, type Estado } from "../motor";
 import { OperacoesV2 } from "./OperacoesV2";
 import { Montar, primarios } from "./testeV2";
 
@@ -97,8 +97,8 @@ describe("Operações V2 · plano por aprovar", () => {
     const S = operacoes();
     const d = S.deals.find((x) => x.id === 1027)!;
     Object.assign(d.f, { conta: "Banco B · conta obras", comprovativo: "TRF 1" });
-    d.obra.ec = null; d.obra.plano = null; // o circuito antigo (o plano das 4 fases, com as férias do Sérgio)
-    acoes(S, () => {}, (fn) => fn()).validar(1027); // o recibo põe a obra a andar: plano por aprovar
+    acoes(S, () => {}, (fn) => fn()).validar(1027); // o recibo põe a obra a andar (e emite a encomenda no Inventário): plano por aprovar
+    d.obra.plano = gerarPlano(d, S); // o plano de exemplo das 4 fases, com as férias do Sérgio (o conflito que este ecrã resolve)
     expect(d.obra.plano!.estado).toBe("por aprovar");
     S.op = 1027;
     const { container } = montar(S);

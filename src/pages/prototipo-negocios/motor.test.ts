@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { esquecerInventario, lerInventario } from "./inventario/loja";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
 import { totais } from "./DocsCliente";
 import { realPorFase } from "./planoObra";
@@ -18,6 +19,7 @@ function preencher(d: Negocio, gs: Grupo[]) {
 
 // O fluxo da Ana Martins, da lead à obra (era o #teste do prototipo.html).
 describe("protótipo de Negócios", () => {
+  beforeEach(() => { esquecerInventario(); });
   it("leva a Ana Martins da Lead à Obra", () => {
     const S = seed();
     const A = acoes(S, () => {}, (fn) => fn());
@@ -70,21 +72,22 @@ describe("protótipo de Negócios", () => {
     expect(d().fase).toBe(4);
     expect(S.clientes.some((c) => c.deal === id)).toBe(true);
 
-    // 14/10: o contrato gera a encomenda de cliente e o plano (do orçamento), ambos por aprovar
-    expect(d().obra.ec?.estado).toBe("por aprovar");
+    // 16/10: o contrato gera só o plano (do orçamento), por aprovar; encomenda de cliente nenhuma
+    expect(d().obra.ec ?? null).toBeNull();
     expect(d().obra.plano?.origem).toBe("orcamento");
     expect(conflitos(d().obra.plano!)).toHaveLength(0); // escolhe o técnico que não está de férias
-    // 15/10: o pagamento primeiro; só depois se aprovam a encomenda e o plano
-    A.aprovarEc(id);
-    expect(d().obra.ec?.estado).toBe("por aprovar");
+    // o pagamento primeiro: o plano não se aprova antes dele
+    A.aprovarPlano(id);
+    expect(d().obra.plano!.estado).toBe("por aprovar");
     preencher(d(), FINANCEIRO);
     A.emitir(id);
     A.validar(id);
     expect(d().fase).toBe(5);
-    A.aprovarEc(id);
+    // validado o pagamento, a encomenda de cliente é emitida logo no Inventário novo (sem aprovação)
+    expect(d().obra.ec).toMatchObject({ n: "EC-" + id, estado: "emitida", ref: "CT 2026/" + id });
+    expect(lerInventario().ecs.some((e) => e.id === "EC-" + id && e.origin.ref === "CT 2026/" + id)).toBe(true);
     expect(d().obra.mats).toBeTruthy();
     A.aprovarPlano(id);
-    if (d().obra.enc) { A.validarEf(id); A.receberEnc(id); }
     preencher(d(), [OBRA[0]]);
     A.arrancar(id);
     expect(d().obra.plano!.estado).toBe("em curso");

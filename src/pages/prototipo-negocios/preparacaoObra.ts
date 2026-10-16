@@ -1,16 +1,15 @@
-// Do contrato à obra (14/10/2026), sem React. Pedido do Ruben: "o orçamento gera o contrato; depois do contrato
-// assinado, gera uma encomenda de cliente e o plano (que já está no orçamento); ambos têm de ser aprovados; se a
-// encomenda for aprovada, emite uma encomenda a fornecedor, que tem de ser validada".
-//   · Contrato assinado → Encomenda de cliente (EC, por aprovar) e Plano da obra (do plano do orçamento, por aprovar).
-//   · EC aprovada (o comercial, que conhece o que vendeu) → reserva o stock; o que falta vai numa Encomenda a fornecedor (EF, por validar).
-//   · EF validada (Financeiro, que vê se o sinal já entrou) → encomendada → recebida (Armazém).
-//   · Plano aprovado (Operações), com os técnicos e as férias.
-//   · Pagamento: a fatura e o recibo (Financeiro), em paralelo; o recibo passa o negócio à Obra.
-//   · Arrancar a obra (Operações) só com tudo: EC aprovada, materiais recebidos, plano aprovado e sinal pago.
+// Do contrato à obra (14/10/2026, refeito a 16/10). O circuito:
+//   · Contrato assinado (ou venda direta aceite) → só o Plano da obra (do plano do orçamento, por aprovar). Encomenda nenhuma.
+//   · Pagamento validado (Financeiro) → o recibo e, logo, a Encomenda de cliente, emitida sozinha no Inventário novo (inventario/ponteNegocios.ts):
+//     lá se reserva o stock (FIFO) e o que falta vai à encomenda ao fornecedor preferencial. Ninguém a aprova: já está paga.
+//   · Plano aprovado (Operações), com os técnicos e as férias: só depois do pagamento.
+//   · Arrancar a obra (Operações): com o pagamento validado (e a encomenda emitida), só pode faltar o plano.
+// O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
+import { textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -18,19 +17,25 @@ export interface LinhaEc {
   /** Material do modelo (com chave de stock) ou produto escolhido na visita. */
   de: "material" | "produto";
   k?: StockKey;
-  /** Quanto há em stock para reservar e quanto falta (vai para o fornecedor). */
+  /** Quanto o Inventário reservou do stock ao emitir e quanto faltava (foi ao fornecedor). O estado vivo lê-se no Inventário. */
   res: number; falta: number;
   /** Custo e preço por unidade (€, sem IVA): a estimativa de materiais do orçamento repartida pelas linhas; nos produtos, os do Catálogo. */
   custo: number; preco: number;
+  /** Produto da visita: o id no Catálogo (o produto no Inventário faz-se a partir dele). */
+  id?: string;
 }
 export interface EncCliente {
-  n: string; estado: "por aprovar" | "aprovada"; criada: string;
+  /** EC-<id do negócio>: o mesmo número no Inventário. As das obras antigas do exemplo têm o número de antes ("EC 2026/001"). */
+  n: string; estado: "emitida"; criada: string;
   linhas: LinhaEc[];
   /** O valor dos materiais e produtos na proposta (sem IVA). */
   valor: number;
   /** O custo das linhas (o que a empresa paga). */
   custo: number;
-  aprovada?: { por: string; q: string };
+  /** A origem no Inventário ("CT 2026/<id>" ou "VD 2026/<id>"): a encomenda vive lá. Sem ela, é de uma obra antiga do exemplo (antes do Inventário novo). */
+  ref?: string;
+  /** Quem a emitiu (ao validar o pagamento) e quando. */
+  emitida?: { por: string; q: string };
 }
 
 /** Os fornecedores de exemplo (o real virá das Compras); o sugerido é pelo tipo de obra. */
@@ -75,15 +80,13 @@ export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string
   const linhas: LinhaEc[] = [
     ...mats.map((x, j) => ({ n: x.n, q: r2(x.q), un: x.un, de: "material" as const, k: x.k, res: r2(x.res), falta: r2(x.falta), ...cm[j] })),
     // os produtos da visita compram-se para esta obra: não há stock deles
-    ...prods.map((p) => ({ n: p.n, q: p.q, un: p.un, de: "produto" as const, res: 0, falta: p.q, custo: r2(p.custo), preco: r2(precoProduto(p) / (p.q || 1)) })),
+    ...prods.map((p) => ({ n: p.n, q: p.q, un: p.un, de: "produto" as const, res: 0, falta: p.q, custo: r2(p.custo), preco: r2(precoProduto(p) / (p.q || 1)), id: p.id })),
   ];
   const valor = linhas.reduce((a, x) => a + x.preco * x.q, 0), custo = linhas.reduce((a, x) => a + x.custo * x.q, 0);
-  return { n, estado: "por aprovar", criada: quando, linhas, valor: r2(valor), custo: r2(custo) };
+  return { n, estado: "emitida", criada: quando, linhas, valor: r2(valor), custo: r2(custo) };
 }
 /** O total de uma encomenda a fornecedor (custo × quantidade). */
 export const totalEf = (e: { linhas: { q: number; custo?: number }[] }) => r2(e.linhas.reduce((a, x) => a + (x.custo ?? 0) * x.q, 0));
-/** O custo das linhas em falta (o que vai na encomenda a fornecedor). */
-export const custoFalta = (ec: EncCliente) => r2(ec.linhas.reduce((a, x) => a + x.custo * x.falta, 0));
 
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
 /** O ofício de uma tarefa → o tipo de técnico do RH (TECS.sk). */
@@ -118,53 +121,46 @@ export interface PassoPrep {
   /** A ação (A[act](id)) e o texto do botão, para quem é a vez. */
   act?: string; btn?: string;
 }
-// 15/10 (Ruben): o pagamento vem primeiro; a encomenda e o plano só se aprovam depois de o pagamento estar confirmado
+// 15/10 (Ruben): o pagamento vem primeiro. 16/10: a encomenda de cliente emite-se sozinha com o pagamento validado; o plano aprova-se depois dele
 export const TRILHOS: { k: Trilho; t: string }[] = [
   { k: "pag", t: "Pagamento" }, { k: "ec", t: "Encomenda" }, { k: "plano", t: "Plano da obra" },
 ];
-/** A encomenda e o plano esperam pelo pagamento confirmado. */
+/** O plano espera pelo pagamento confirmado. */
 export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
+/** A encomenda de cliente nasce do pagamento validado (no Inventário novo). */
+export const EC_NO_PAGAMENTO = "Emite-se quando o pagamento for validado.";
 
-/** O que falta para arrancar a obra (vazio = pode arrancar). */
+/** O que falta para arrancar a obra (vazio = pode arrancar). Com a encomenda emitida no pagamento, depois dele só pode faltar o plano. */
 export function faltaParaArrancar(d: Negocio): string[] {
-  const ec = d.obra.ec, e = d.obra.enc, p = d.obra.plano, F: string[] = [];
-  if (ec && ec.estado !== "aprovada") F.push("aprovar a encomenda de cliente");
-  if (e && e.estado !== "recebida") F.push(e.estado === "por confirmar" ? "validar a encomenda ao fornecedor" : "receber os materiais");
-  if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
+  const p = d.obra.plano, F: string[] = [];
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "emitir a fatura e receber o pagamento");
+  else if (!d.obra.ec) F.push("emitir a encomenda de cliente");
+  if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
   return F;
 }
 
-/** Os passos do contrato à obra, com o estado de cada um e de quem é a vez. Só para os negócios com encomenda de cliente. */
-export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
-  const ec = d.obra.ec, e = d.obra.enc, p = d.obra.plano;
-  if (!ec || !p) return [];
+/**
+ * Os passos do contrato à obra, com o estado de cada um e de quem é a vez (os negócios com plano da obra).
+ * `inv`: o estado da encomenda lido do Inventário (ponteNegocios.resumoEcNegocio). Só o cartão o passa; o Hoje não precisa dele
+ * (o passo do Inventário é só de leitura: quem lá trabalha é o Armazém, no próprio Inventário).
+ */
+export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null): PassoPrep[] {
+  const ec = d.obra.ec, p = d.obra.plano;
+  if (!p) return [];
   const L: PassoPrep[] = [];
-  const nFalta = ec.linhas.filter((x) => x.falta > 0).length;
 
-  // a encomenda de cliente e a de fornecedor
-  L.push({ id: "ec", trilho: "ec", estado: "feito", who: null, t: `Encomenda de cliente ${ec.n}`, sub: `Gerada do contrato a ${ec.criada} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · custo ${eur(ec.custo ?? 0)} € · ${eur(ec.valor)} € na proposta` });
-  L.push(ec.estado === "aprovada"
-    ? { id: "ec-ok", trilho: "ec", estado: "feito", who: "comercial", t: "Encomenda de cliente aprovada", sub: `${ec.aprovada?.por ?? "Comercial"} · ${ec.aprovada?.q ?? ""} · stock reservado` }
-    : !d.fin.pago
-    ? { id: "ec-ok", trilho: "ec", estado: "espera", who: "comercial", t: "Aprovar a encomenda de cliente", sub: SO_DEPOIS_DO_PAGAMENTO }
-    : { id: "ec-ok", trilho: "ec", estado: "agora", who: "comercial", t: "Aprovar a encomenda de cliente", sub: nFalta ? `Ao aprovar, reserva o stock e pede ao fornecedor ${nFalta} ${nFalta === 1 ? "linha" : "linhas"} em falta.` : "Ao aprovar, reserva o stock: está tudo em armazém.", act: "aprovarEc", btn: "Aprovar a encomenda" });
-  if (ec.estado !== "aprovada") L.push({ id: "ef", trilho: "ec", estado: "espera", who: "financeiro", t: "Encomenda a fornecedor", sub: nFalta ? `Emite-se ao aprovar a encomenda de cliente (${nFalta} em falta).` : "Nada a encomendar: tudo em stock." });
-  else if (!e) L.push({ id: "ef", trilho: "ec", estado: "feito", who: null, t: "Sem encomenda a fornecedor", sub: "Tudo em stock e reservado." });
-  else {
-    L.push(e.estado === "por confirmar"
-      ? { id: "ef", trilho: "ec", estado: "agora", who: "financeiro", t: `Validar a encomenda ${e.n}`, sub: `${e.forn ?? "Fornecedor por escolher"} · ${e.linhas.length} ${e.linhas.length === 1 ? "linha" : "linhas"} · ${eur(totalEf(e))} €${d.fin.pago ? " · sinal recebido" : " · atenção: o sinal ainda não entrou"}`, act: "validarEf", btn: "Validar e encomendar" }
-      : { id: "ef", trilho: "ec", estado: "feito", who: "financeiro", t: `Encomenda ${e.n} validada`, sub: `${e.forn ?? ""}${e.validada ? ` · ${e.validada.por} · ${e.validada.q}` : ""}` });
-    L.push(e.estado === "recebida"
-      ? { id: "rec", trilho: "ec", estado: "feito", who: "armazem", t: "Materiais recebidos", sub: "Tudo reservado para a obra." }
-      : e.estado === "por confirmar"
-        ? { id: "rec", trilho: "ec", estado: "espera", who: "armazem", t: "Receber os materiais", sub: "Depois de validada." }
-        // encomendada ou parcial: o Armazém confere no Inventário, linha a linha
-        : { id: "rec", trilho: "ec", estado: "agora", who: "armazem", t: e.estado === "parcial" ? "Receber o que falta" : "Receber os materiais",
-            sub: e.estado === "parcial"
-              ? `Entrada parcial: faltam ${e.linhas.filter((x) => (x.recebido ?? 0) < x.q).map((x) => `${nfmt(r2(x.q - (x.recebido ?? 0)))} ${x.un} de ${x.n.toLowerCase()}`).join(", ")}.`
-              : `${e.n} · ${e.entrega ? `entrega confirmada para ${e.entrega}` : "à espera da data do fornecedor"}; conferir e dar entrada.${entregaTarde(d) ? " · atenção: chega no dia em que a obra começa (ou depois)" : ""}`,
-            act: "abrirInv", btn: "Conferir no Inventário" });
+  // a encomenda de cliente: nasce do pagamento validado, no Inventário novo
+  if (!ec) {
+    L.push(d.fin.pago
+      ? { id: "ec", trilho: "ec", estado: "agora", who: "financeiro", t: "Emitir a encomenda de cliente", sub: "O pagamento está validado mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEc", btn: "Emitir no Inventário" }
+      : { id: "ec", trilho: "ec", estado: "espera", who: null, t: "Encomenda de cliente", sub: EC_NO_PAGAMENTO });
+  } else {
+    L.push({ id: "ec", trilho: "ec", estado: "feito", who: ec.ref ? "financeiro" : null, t: `Encomenda de cliente ${ec.n}`,
+      sub: `${ec.ref ? `Emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}` : `De ${ec.criada}`} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · ${eur(ec.valor)} € na proposta` });
+    if (!ec.ref) L.push({ id: "ec-inv", trilho: "ec", estado: "feito", who: null, t: "Materiais na obra", sub: "Obra do exemplo, de antes do Inventário novo." });
+    else if (inv !== undefined) L.push(!inv
+      ? { id: "ec-inv", trilho: "ec", estado: "espera", who: null, t: "No Inventário", sub: "A encomenda ainda não está no Inventário (os dados de exemplo foram repostos): volta a ser emitida sozinha." }
+      : { id: "ec-inv", trilho: "ec", estado: inv.pronta ? "feito" : "espera", who: null, t: inv.eliminada ? "Eliminada no Inventário" : `No Inventário: ${inv.rotulo.toLowerCase()}`, sub: textoResumoEc(inv) });
   }
 
   // o plano
@@ -182,7 +178,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
     : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Emitir a fatura", sub: "Vai para o portal do cliente.", act: "emitir", btn: "Emitir a fatura" });
   L.push(d.fin.pago
     ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }
-    : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Validar o pagamento" });
+    : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho e a encomenda de cliente vai para o Inventário." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Validar o pagamento" });
 
   // o arranque
   const F = faltaParaArrancar(d);
@@ -191,6 +187,7 @@ export function passosPreparacao(d: Negocio, S: Estado): PassoPrep[] {
     : F.length
       ? { id: "go", trilho: "obra", estado: "espera", who: "operacoes", t: "Arrancar a obra", sub: `Falta ${F.join(", ")}.` }
       : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
+  void S;
   return L;
 }
 

@@ -131,8 +131,8 @@ export function NegocioSimples(ctx: Ctx) {
       )}
 
       {portal && <PortalCliente ctx={ctx} d={d} fechar={() => setPortal(false)} />}
-      {/* do contrato à obra (14/10): a encomenda, o plano e o pagamento em paralelo, até ao arranque */}
-      {d.fase >= 4 && d.obra.ec && !d.perdido && <CaminhoObra {...ctx} d={d} />}
+      {/* do contrato à obra (16/10): o pagamento primeiro; com ele, a encomenda no Inventário; depois o plano e o arranque */}
+      {d.fase >= 4 && d.obra.plano && !d.perdido && <CaminhoObra {...ctx} d={d} />}
       {/* trabalhos a mais depois do contrato (adendas) */}
       {d.fase >= 4 && !d.perdido && <TrabalhosAMais {...ctx} d={d} />}
 

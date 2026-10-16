@@ -15,7 +15,9 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil, realPorFase, type ObraReal } from "./planoObra";
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
-import { faltaParaArrancar, fornecedorSugerido, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
+import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
+import { emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
+import { lerInventario, pedirAbrirEcInv } from "./inventario/loja";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
@@ -287,7 +289,7 @@ export interface Negocio {
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean;
     /** 15/10: o diário de obra (registos por dia) e a segurança tratada (chave → quando), obraOps.ts */
     diario?: EntradaDiario[]; seg?: Record<string, string>;
-    /** A encomenda de cliente, gerada ao assinar o contrato (14/10; preparacaoObra.ts). Sem ela, o circuito antigo (tudo no recibo). */
+    /** A encomenda de cliente (16/10): emitida ao validar o pagamento, no Inventário novo (inventario/ponteNegocios.ts). Antes do pagamento não há. */
     ec?: EncCliente | null;
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
@@ -325,8 +327,6 @@ export interface Estado {
   seq: number;
   ft: number;
   ef: number;
-  /** O contador das encomendas de cliente (EC 2026/001…). */
-  ec?: number;
   rc: number;
   clientes: { nome: string; tel: string; local: string; desde: string; deal: number }[];
   deals: Negocio[];
@@ -348,7 +348,8 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 8 (14/10/2026): os c1..c41 com a receita da Mudelar; 20 produtos passam a consumíveis; mais serviços de instalação
 // 9 (14/10/2026): a demolição de parede (c5) passa de ml a m², como diz o nome
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
-export const VERSAO = 15;
+// 16 (16/10/2026): a encomenda de cliente deixa de nascer no contrato; emite-se no Inventário novo ao validar o pagamento
+export const VERSAO = 16;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -416,11 +417,9 @@ export function seed(): Estado {
   by(1030).hist.push({ t: "Proposta enviada · venda direta", q: "07/10", k: "a" });
   Object.assign(by(1027).orc!, { verif: true, enviada: "01/10", aceite: "03/10", contrato: "assinado" });
   by(1027).hist.push({ t: "Contrato assinado · cliente criado", q: "08/10", k: "a" });
-  // o exemplo do circuito novo (14/10): contrato assinado → encomenda de cliente e plano por aprovar
-  // (as EC 001 e 002 são as das obras antigas do exemplo, Marta e Joana, aprovadas em setembro)
-  S.ec = 3;
-  prepararObraDe(by(1027), S, "08/10");
-  by(1027).hist.unshift({ t: "Encomenda de cliente " + by(1027).obra.ec!.n + " e plano da obra gerados · por aprovar", q: "08/10", k: "a" });
+  // o exemplo do circuito (16/10): contrato assinado → só o plano da obra, por aprovar; a encomenda de cliente vem com o pagamento validado
+  prepararPlanoDe(by(1027), S);
+  by(1027).hist.unshift({ t: "Plano da obra gerado do orçamento · aprova-se depois do pagamento", q: "08/10", k: "a" });
   {
     const j = by(1050);
     Object.assign(j.orc!, { verif: true, enviada: "19/09", aceite: "21/09", contrato: "assinado" });
@@ -479,11 +478,11 @@ export function seed(): Estado {
     ];
     m.obra.seg = { pss: "seg 13/10", condominio: "sex 10/10" };
   }
-  // 14/10: as obras antigas do exemplo também têm a encomenda de cliente (aprovada, tudo reservado): o circuito é o mesmo em todo o lado
+  // as obras antigas do exemplo (pagas em setembro, antes do Inventário novo) têm a encomenda de cliente já servida, sem origem no Inventário (ref)
   const ecAntiga = (d: Negocio, n: string, quando: string) => {
     const ec = gerarEncCliente(d, S, n, quando);
     ec.linhas.forEach((x) => { x.res = x.q; x.falta = 0; });
-    d.obra.ec = { ...ec, estado: "aprovada", aprovada: { por: PAPEIS.comercial.n, q: quando } };
+    d.obra.ec = { ...ec, emitida: { por: PAPEIS.financeiro.n, q: quando } };
   };
   ecAntiga(m, "EC 2026/001", "17/09");
   ecAntiga(by(1050), "EC 2026/002", "21/09");
@@ -960,8 +959,8 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       return { t: "Validar o pagamento", sub: `Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
     case 5: {
       const p = d.obra.plano!, e = d.obra.enc;
-      // o circuito novo: o passo à espera, pela ordem (encomenda, plano, arranque)
-      if (d.obra.ec && (p.estado === "por aprovar" || p.estado === "aprovado")) {
+      // do pagamento ao arranque: o passo à espera, pela ordem (encomenda, plano, arranque)
+      if (p.estado === "por aprovar" || p.estado === "aprovado") {
         const a = passosAgora(d, S)[0];
         if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who! };
       }
@@ -986,8 +985,8 @@ export function minhas(S: Estado, role: Papel) {
     const p = proximo(d, S);
     if (role === "direcao" && d.fase === 3 && d.orc && d.orc.aprov === "pedida")
       L.push({ d, p: { t: "Aprovar exceção à margem", sub: pct(tot(d, S).m) + " de margem · mínimo " + S.cfg.min + "%" }, dir: true });
-    // do contrato à obra: vários passos em paralelo (a encomenda, o plano, o pagamento), cada um de quem é
-    else if (d.fase >= 4 && d.obra.ec && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
+    // do contrato à obra: o pagamento primeiro; depois o plano (a encomenda emite-se sozinha com o pagamento), cada um de quem é
+    else if (d.fase >= 4 && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
       for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
     }
     else if (p.who === role && !p.wait && !p.done) L.push({ d, p });
@@ -1005,10 +1004,8 @@ const agora = () => {
   return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
 };
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
-/** Do contrato à obra (preparacaoObra.ts): a encomenda de cliente e o plano do orçamento, ambos por aprovar. */
-export function prepararObraDe(d: Negocio, S: Estado, quando: string) {
-  S.ec ??= 1;
-  d.obra.ec = gerarEncCliente(d, S, "EC 2026/" + String(S.ec++).padStart(3, "0"), quando);
+/** Do contrato à obra (preparacaoObra.ts): o plano do orçamento, por aprovar. A encomenda de cliente só nasce com o pagamento validado. */
+export function prepararPlanoDe(d: Negocio, S: Estado) {
   d.obra.plano = planoDoOrcamento(d, S);
 }
 function fase(d: Negocio, n: number) { d.fase = n; d.valida = null; preencher(d, n); log(d, "Passou a " + FASES[n] + " · sozinho"); }
@@ -1113,10 +1110,30 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     return false;
   };
   const prepararObra = (d: Negocio) => {
-    prepararObraDe(d, S, agora());
-    log(d, "Encomenda de cliente " + d.obra.ec!.n + " gerada do contrato · por aprovar (comercial)");
-    log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações)");
-    avisar({ msg: "Encomenda " + d.obra.ec!.n + " e plano da obra gerados", sub: "O comercial aprova a encomenda e as Operações o plano", kind: "auto", atraso: 500 });
+    prepararPlanoDe(d, S);
+    log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações, depois do pagamento)");
+    avisar({ msg: "Plano da obra gerado", sub: "A encomenda de cliente emite-se quando o pagamento for validado", kind: "auto", atraso: 500 });
+  };
+  /** A encomenda de cliente, emitida no Inventário novo (16/10): reserva FIFO do stock e encomenda ao fornecedor do que faltar.
+   *  Idempotente: se já existe, não faz nada. Devolve se a encomenda ficou emitida. */
+  const emitirEc = (d: Negocio): boolean => {
+    if (d.obra.ec) return true;
+    const ec = gerarEncCliente(d, S, idEcNegocio(d), agora());
+    ec.ref = refNegocio(d); ec.emitida = { por: PAPEIS[S.role].n, q: agora() };
+    const r = emitirNoInventario(pedidoDoNegocio(d, ec));
+    if (!r.ok) {
+      log(d, "Encomenda de cliente não emitida no Inventário: " + r.erro, "x");
+      avisar({ msg: "A encomenda de cliente não foi emitida", sub: r.erro, kind: "bad" });
+      return false;
+    }
+    // o que o Inventário reservou do stock ao emitir; o resto foi ao fornecedor (o estado vivo lê-se lá). As linhas seguem a mesma ordem.
+    const linhasInv = r.valor.lines.filter((l) => l.sku);
+    ec.linhas.forEach((x, i) => { const l = linhasInv[i]; if (l) { x.res = Math.min(x.q, l.stockQty); x.falta = r2(Math.max(0, x.q - l.stockQty)); } });
+    d.obra.ec = ec;
+    d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
+    const res = resumoEcNegocio(lerInventario(), ec.ref);
+    log(d, "Encomenda de cliente " + ec.n + " emitida no Inventário" + (res ? " · " + textoResumoEc(res) : ""));
+    return true;
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
@@ -1340,25 +1357,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       A.assinar(id);
     },
     assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
-    /** O comercial aprova a encomenda de cliente (14/10, decisão do Ruben): reserva o stock (o de agora) e o que falta vai numa encomenda a fornecedor por validar. */
-    aprovarEc(id: number) {
-      const d = deal(id), ec = d.obra.ec;
-      if (!ec || ec.estado === "aprovada") return;
-      if (!d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "A encomenda aprova-se depois de o Financeiro confirmar o pagamento", kind: "bad" }); return; }
-      for (const x of ec.linhas) {
-        if (!x.k) continue;
-        const ha = Math.min(x.q, Math.max(0, S.stock[x.k] || 0));
-        x.res = r2(ha); x.falta = r2(x.q - ha); S.stock[x.k] = (S.stock[x.k] || 0) - ha;
-      }
-      ec.estado = "aprovada"; ec.aprovada = { por: PAPEIS[S.role].n, q: agora() };
-      d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
-      const falta = ec.linhas.filter((x) => x.falta > 0);
-      d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: fornecedorSugerido(d), linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un, custo: x.custo })) } : null;
-      log(d, "Nota de encomenda " + ec.n + " no portal do cliente");
-      log(d, "Encomenda de cliente " + ec.n + " aprovada · stock reservado" + (d.obra.enc ? " · " + d.obra.enc.n + " emitida, por validar" : " · nada a encomendar"));
-      avisar(d.obra.enc
-        ? { msg: ec.n + " aprovada", sub: "Encomenda a fornecedor " + d.obra.enc.n + " emitida: o Financeiro valida", kind: "ok", act: { label: "Ver como Financeiro", fn: () => run(() => { S.role = "financeiro"; }) } }
-        : { msg: ec.n + " aprovada", sub: "Tudo em stock e reservado", kind: "ok" });
+    /** Volta a emitir a encomenda de cliente no Inventário (se não chegou lá ao validar o pagamento). */
+    emitirEc(id: number) {
+      const d = deal(id);
+      if (!d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "A encomenda de cliente emite-se quando o Financeiro valida o pagamento", kind: "bad" }); return; }
+      if (d.obra.ec) return;
+      if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " emitida", sub: "Já está no Inventário", kind: "ok" });
     },
     /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda vai ao cliente para assinar. */
     criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string) {
@@ -1417,16 +1421,6 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, "O cliente avisou no portal que pagou · " + d.f.comprovativo);
       avisar({ msg: "Comprovativo enviado", sub: "O Financeiro confirma na conta e emite o recibo", kind: "ok" });
     },
-    /** O fornecedor da encomenda (antes de a validar). */
-    escolherForn(id: number, forn: string) { const e = deal(id).obra.enc; if (e && e.estado === "por confirmar") e.forn = forn; },
-    /** O Financeiro valida a encomenda ao fornecedor (vê se o sinal já entrou): passa a encomendada. */
-    validarEf(id: number) {
-      const d = deal(id), e = d.obra.enc;
-      if (!e || e.estado !== "por confirmar") return;
-      e.estado = "encomendada"; e.validada = { por: PAPEIS[S.role].n, q: agora() };
-      log(d, "Encomenda " + e.n + " validada e enviada a " + (e.forn ?? "fornecedor") + (d.fin.pago ? "" : " · antes de o sinal entrar"), d.fin.pago ? "a" : "w");
-      avisar({ msg: e.n + " enviada ao fornecedor", sub: (e.forn ?? "") + " · o Armazém dá entrada quando chegar", kind: "ok" });
-    },
     emitir(id: number) { const d = deal(id); if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return; d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
     validar(id: number) {
       const d = deal(id);
@@ -1436,29 +1430,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!portao(d, [FINANCEIRO[2]])) return;
       d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
       log(d, "Pagamento validado · " + d.fin.recibo.n + " emitido");
-      // o circuito novo (14/10): a encomenda e o plano já vieram do contrato; o recibo só passa o negócio à Obra
-      if (d.obra.ec) {
-        fase(d, 5);
-        const F = faltaParaArrancar(d);
-        avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: F.length ? "Passou a Obra · falta " + F.join(", ") : "Passou a Obra · pronta a arrancar", kind: "ok" });
-        return;
-      }
-      // o recibo dispara o Inventário e as Operações
-      const mats = calcMats(d, S, false);
-      mats.forEach((x) => { S.stock[x.k] = (S.stock[x.k] || 0) - x.res; });
-      d.obra.mats = mats;
-      const falta = mats.filter((x) => x.falta > 0);
-      d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: "Cerâmica do Centro (exemplo)", linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un })) } : null;
-      d.obra.plano = gerarPlano(d, S); fase(d, 5);
-      log(d, "Inventário: " + (falta.length ? falta.length + " material(ais) em falta · " + d.obra.enc!.n + " por confirmar" : "tudo em stock e reservado"), falta.length ? "w" : "a");
-      const nc = conflitos(d.obra.plano).length;
-      log(d, "Operações: plano gerado com " + d.obra.plano.tasks.length + " fases" + (nc ? " · 1 conflito" : ""), nc ? "w" : "a");
-      avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: "Passou a Obra", kind: "ok" });
-      avisar({ msg: "Inventário", sub: "Materiais reservados" + (falta.length ? " · encomenda " + d.obra.enc!.n + " criada" : ""), kind: "auto", atraso: 500 });
-      avisar({ msg: "Operações", sub: "Plano da obra gerado com os técnicos do RH", kind: "auto", atraso: 1000 });
+      // 16/10: o pagamento validado emite logo a encomenda de cliente no Inventário novo (sem aprovação) e passa o negócio à Obra;
+      // o plano veio do contrato (o negócio que ainda não o tenha ganha-o aqui): depois disto só pode faltar aprová-lo
+      if (!d.obra.plano) d.obra.plano = planoDoOrcamento(d, S);
+      const ok = emitirEc(d);
+      fase(d, 5);
+      const F = faltaParaArrancar(d);
+      avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
+      if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta foi pedido ao fornecedor", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
     },
     abrirPlano(id: number) { S.view = "operacoes"; S.op = id; S.deal = null; },
-    abrirInv() { S.view = "inventario"; S.deal = null; },
+    /** Abre o Inventário; com um negócio, abre a encomenda de cliente dele (Saídas para clientes). */
+    abrirInv(id?: number) { const ec = id != null ? S.deals.find((x) => x.id === id)?.obra.ec : null; if (ec?.ref) pedirAbrirEcInv(ec.n); S.view = "inventario"; S.deal = null; },
     irObra() { S.pulse = "sec-5"; },
     trocar(id: number, ti: number) {
       const d = deal(id); const t = d.obra.plano!.tasks[ti];
@@ -1599,7 +1582,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     aprovarPlano(id: number) {
       const d = deal(id);
-      if (d.obra.ec && !d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "O plano aprova-se depois de o Financeiro confirmar o pagamento", kind: "bad" }); return; }
+      if (!d.fin.pago) { avisar({ msg: "Primeiro, o pagamento", sub: "O plano aprova-se depois de o Financeiro confirmar o pagamento", kind: "bad" }); return; }
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
       d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações");
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
@@ -1608,7 +1591,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     arrancar(id: number) {
       const d = deal(id); const e = d.obra.enc;
-      if (d.obra.ec) { const F = faltaParaArrancar(d); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
+      { const F = faltaParaArrancar(d); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
       if (!portao(d, [OBRA[0]])) return;
       if (e && e.estado !== "recebida") { avisar({ msg: "Ainda faltam materiais", sub: e.n + " · " + e.estado, kind: "bad" }); return; }
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });

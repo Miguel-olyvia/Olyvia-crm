@@ -1,11 +1,11 @@
-// "Do contrato à obra" (14/10/2026): o circuito depois do contrato assinado, num só cartão.
-// Em cima, o contrato; em baixo, o arranque da obra; no meio, três trilhos em paralelo, cada um com os seus passos:
-//   Encomenda (de cliente → a fornecedor → receção), Plano da obra (gerado do orçamento → aprovado), Pagamento (fatura → recibo).
+// "Do contrato à obra" (14/10/2026, refeito a 16/10): o circuito depois do contrato assinado, num só cartão.
+// Em cima, o contrato; em baixo, o arranque da obra; no meio, o Pagamento (fatura → recibo) e, depois dele, a Encomenda (emitida sozinha
+// no Inventário novo ao validar o pagamento; aqui só se lê o estado de lá) e o Plano da obra (gerado do orçamento → aprovado).
 // Cada passo diz de quem é a vez; quem tem a vez vê o botão; os outros veem "Ver como …" (o protótipo muda de papel).
-// Cada trilho abre o detalhe: as linhas da encomenda (stock e falta), o fornecedor, e o plano por fases com os técnicos.
+// Cada trilho abre o detalhe: as linhas da encomenda com o estado no Inventário (reservado, encomendado ao fornecedor, saiu), e o plano por fases.
 // A lógica está em preparacaoObra.ts; aqui só se desenha.
 import { useState } from "react";
-import { ChevronRight, CalendarRange, Check, ChevronDown, Euro, FileSignature, HardHat, Lock, Package, TriangleAlert } from "lucide-react";
+import { ArrowRight, ChevronRight, CalendarRange, Check, ChevronDown, Euro, FileSignature, HardHat, Lock, Package, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
@@ -15,7 +15,9 @@ import { SeloAssinatura } from "./AssinaturaContrato";
 import { AutoNoNegocio } from "./AutoRececao";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { FORNECEDORES, TRILHOS, faltaParaArrancar, passosPreparacao, totalEf, type PassoPrep, type Trilho } from "./preparacaoObra";
+import { TRILHOS, faltaParaArrancar, passosPreparacao, type PassoPrep, type Trilho } from "./preparacaoObra";
+import { useInventario } from "./inventario/loja";
+import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 
 const ICONE: Record<Trilho, typeof Package> = { ec: Package, plano: CalendarRange, pag: Euro, obra: HardHat };
 
@@ -50,7 +52,7 @@ export function ContratoAssinado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground" aria-hidden="true"><FileSignature className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
-          <p className="text-[15px]"><b className="font-semibold">Contrato CT 2026/{d.id} assinado</b> <span className="text-muted-foreground">· gerou a encomenda de cliente e o plano da obra</span></p>
+          <p className="text-[15px]"><b className="font-semibold">Contrato CT 2026/{d.id} assinado</b> <span className="text-muted-foreground">· gerou o plano da obra; a encomenda de cliente emite-se com o pagamento</span></p>
           <p className="text-sm text-muted-foreground">
             {a ? <>{a.nome} · {a.tipo === "digital" ? `Chave Móvel Digital${a.telemovel ? ` (${a.telemovel})` : ""}` : "desenhada no ecrã, no portal"} · {a.q}</> : "No portal do cliente"}
           </p>
@@ -73,14 +75,16 @@ export function ContratoAssinado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   const { S, A, d, run, go } = ctx;
   const [aberto, setAberto] = useState<Trilho | null>(null);
-  const P = passosPreparacao(d, S);
+  // o estado da encomenda vive no Inventário novo: o cartão redesenha quando lá muda alguma coisa
+  const db = useInventario();
+  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : undefined;
+  const P = passosPreparacao(d, S, inv);
   if (!P.length) return null;
   const feitos = P.filter((x) => x.estado === "feito").length;
   const falta = faltaParaArrancar(d);
   const go1 = P.find((x) => x.trilho === "obra")!;
   // um só botão primário: o primeiro passo que é do papel atual
   const meu = P.find((x) => x.estado === "agora" && x.who === S.role && x.act);
-  const ecOk = d.obra.ec?.estado === "aprovada";
   const verComo = (who: Papel) => run(() => { S.role = who; });
 
   const passo = (x: PassoPrep, ultimo: boolean) => (
@@ -129,11 +133,18 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
                 {preso && <span className="inline-flex items-center gap-1 text-sm text-muted-foreground"><Lock className="h-3.5 w-3.5" aria-hidden="true" />depois do pagamento</span>}
               </div>
               <ol className={cn(preso && "opacity-70")}>{L.map((x, i) => passo(x, i === L.length - 1))}</ol>
-              {k !== "pag" && (
-                <button type="button" onClick={() => setAberto(aberto === k ? null : k)} aria-expanded={aberto === k}
-                  className="mt-3 inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
-                  {k === "ec" ? "Ver a encomenda" : "Ver o plano"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto === k && "rotate-180")} aria-hidden="true" />
-                </button>
+              {(k === "plano" || (k === "ec" && d.obra.ec)) && (
+                <div className="mt-3 flex flex-wrap items-center gap-x-4">
+                  <button type="button" onClick={() => setAberto(aberto === k ? null : k)} aria-expanded={aberto === k}
+                    className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
+                    {k === "ec" ? "Ver a encomenda" : "Ver o plano"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto === k && "rotate-180")} aria-hidden="true" />
+                  </button>
+                  {k === "ec" && d.obra.ec?.ref && (
+                    <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
+                      Abrir no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           );
@@ -153,7 +164,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         );
       })()}
 
-      {aberto === "ec" && <DetalheEncomenda ctx={ctx} />}
+      {aberto === "ec" && d.obra.ec && <DetalheEncomenda ctx={ctx} inv={inv} />}
       {aberto === "plano" && <DetalhePlano d={d} ajustar={ctx.go(() => ctx.A.abrirPlano(d.id))} />}
 
       {/* tudo converge no arranque */}
@@ -166,7 +177,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
           <div>
             <p className="text-[15px] font-semibold">{go1.t}</p>
             <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Condições para arrancar">
-              {[["Encomenda aprovada", ecOk], ["Materiais recebidos", ecOk && (!d.obra.enc || d.obra.enc.estado === "recebida")], ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"], ["Sinal pago", d.fin.pago]].map(([t, ok]) => (
+              {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"]].map(([t, ok]) => (
                 <li key={t as string} className={cn("inline-flex items-center gap-1.5", ok ? "text-foreground" : "text-muted-foreground")}>
                   {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="h-3.5 w-3.5 rounded-full border-2 border-input" aria-hidden="true" />}{t as string}
                   <span className="sr-only">{ok ? " (feito)" : " (por fazer)"}</span>
@@ -186,30 +197,31 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   );
 }
 
-/** As linhas da encomenda de cliente (o que há em stock e o que falta) e a encomenda ao fornecedor, com a escolha do fornecedor. */
-function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
-  const { S, A, d, run } = ctx;
-  const ec = d.obra.ec!, e = d.obra.enc;
+/** As linhas da encomenda de cliente, com o estado de cada uma lido do Inventário (reservado, encomendado ao fornecedor, saiu), e as encomendas a fornecedor de lá. */
+function DetalheEncomenda({ ctx, inv }: { ctx: Ctx & { d: Negocio }; inv: ResumoEcNeg | null | undefined }) {
+  const { A, d, go } = ctx;
+  const ec = d.obra.ec!;
   const [nota, setNota] = useState(false);
   return (
     <div className="mt-4 grid gap-4 rounded-xl border border-border p-4 animate-in fade-in-0 slide-in-from-top-1 duration-200 lg:grid-cols-2">
       <div>
-        <h4 className="text-[15px] font-semibold">Encomenda de cliente {ec.n} <span className="font-normal text-muted-foreground">· {ec.estado}</span></h4>
+        <h4 className="text-[15px] font-semibold">Encomenda de cliente {ec.n} <span className="font-normal text-muted-foreground">· {inv ? inv.rotulo.toLowerCase() : ec.ref ? "emitida" : "servida"}</span></h4>
         <ul className="mt-2 divide-y divide-border">
-          {ec.linhas.map((x) => (
-            <li key={x.n} className="py-2 text-[15px]">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="min-w-0 flex-1">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}</span></span>
-                <span className="font-medium tabular-nums">{eur((x.custo ?? 0) * x.q)} €</span>
-              </div>
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm tabular-nums">
-                <span className="text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span>
-                <span className={x.falta > 0 ? "text-warning" : "text-success"}>
-                  {x.falta > 0 ? (x.res > 0 ? `${nfmt(x.res)} em stock · faltam ${nfmt(x.falta)}` : `a encomendar ${nfmt(x.falta)}`) : "em stock"}
-                </span>
-              </div>
-            </li>
-          ))}
+          {ec.linhas.map((x) => {
+            const l = linhaDoResumo(inv, x.n), st = l ? estadoLinhaNegocio(l) : ec.ref ? null : { t: "na obra", ok: true };
+            return (
+              <li key={x.n} className="py-2 text-[15px]">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="min-w-0 flex-1">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}</span></span>
+                  <span className="font-medium tabular-nums">{eur((x.custo ?? 0) * x.q)} €</span>
+                </div>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm tabular-nums">
+                  <span className="text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span>
+                  {st && <span className={st.ok ? "text-success" : "text-warning"}>{st.t}</span>}
+                </div>
+              </li>
+            );
+          })}
         </ul>
         {/* o custo contra o que o cliente paga por estes materiais */}
         <dl className="mt-2 grid grid-cols-3 gap-2 border-t border-border pt-3 text-sm">
@@ -217,49 +229,44 @@ function DetalheEncomenda({ ctx }: { ctx: Ctx & { d: Negocio } }) {
           <div><dt className="text-muted-foreground">Na proposta</dt><dd className="text-[15px] font-semibold tabular-nums">{eur(ec.valor)} €</dd></div>
           <div><dt className="text-muted-foreground">Margem</dt><dd className="text-[15px] font-semibold tabular-nums">{ec.valor > 0 ? pct((ec.valor - (ec.custo ?? 0)) / ec.valor) : "—"}</dd></div>
         </dl>
-        <p className="mt-2 text-sm text-muted-foreground">Os custos repartem a estimativa de materiais do orçamento pelas linhas; os produtos têm o custo do Catálogo.{ec.estado !== "aprovada" ? " O stock confirma-se ao aprovar (pode ter mudado desde o contrato)." : ""}</p>
+        <p className="mt-2 text-sm text-muted-foreground">Os custos repartem a estimativa de materiais do orçamento pelas linhas; os produtos têm o custo do Catálogo.</p>
       </div>
       <div>
-        <h4 className="text-[15px] font-semibold">Encomenda a fornecedor {e ? <span className="font-normal text-muted-foreground">{e.n} · {e.estado === "por confirmar" ? "por validar" : e.estado}</span> : null}</h4>
-        {!e ? (
-          <p className="mt-2 text-[15px] text-muted-foreground">{ec.estado === "aprovada" ? "Nada a encomendar: está tudo em stock." : "Emite-se sozinha ao aprovar a encomenda de cliente, com o que faltar."}</p>
+        <h4 className="text-[15px] font-semibold">No Inventário</h4>
+        {!ec.ref ? (
+          <p className="mt-2 text-[15px] text-muted-foreground">Obra do exemplo, paga antes do Inventário novo: os materiais já estão na obra.</p>
+        ) : !inv ? (
+          <p className="mt-2 text-[15px] text-muted-foreground">A encomenda ainda não está no Inventário (os dados de exemplo foram repostos). Volta a ser emitida sozinha.</p>
         ) : (
           <>
-            <p className="mt-2 text-sm text-muted-foreground">Fornecedor</p>
-            <div role="group" aria-label="Fornecedor" className="mt-1 flex flex-wrap gap-2">
-              {FORNECEDORES.map((f) => (
-                <button key={f} type="button" aria-pressed={e.forn === f} disabled={e.estado !== "por confirmar"} onClick={() => run(() => A.escolherForn(d.id, f))}
-                  className={cn("min-h-10 rounded-full border px-3 text-sm transition-colors disabled:cursor-default", e.forn === f ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40 disabled:opacity-50")}>
-                  {f.replace(" (exemplo)", "")}
-                </button>
-              ))}
-            </div>
-            <ul className="mt-3 divide-y divide-border">
-              {e.linhas.map((x) => (
-                <li key={x.n} className="py-2 text-[15px]">
-                  <div className="flex justify-between gap-3"><span>{x.n}</span><span className="font-medium tabular-nums">{eur((x.custo ?? 0) * x.q)} €</span></div>
-                  <div className="text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</div>
-                </li>
-              ))}
-            </ul>
-            <p className="flex justify-between gap-3 border-t border-border pt-3 text-[15px]"><span className="font-medium">Total a pagar ao fornecedor</span><span className="font-semibold tabular-nums">{eur(totalEf(e))} €</span></p>
-            {e.estado === "por confirmar" && !d.fin.pago && (
-              <p className="mt-2 flex items-start gap-2 text-sm"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />O sinal ainda não entrou. Validar já compromete a compra antes de o cliente pagar.</p>
-            )}
-            {e.validada && <p className="mt-2 text-sm text-muted-foreground">Validada por {e.validada.por} · {e.validada.q}</p>}
+            <p className="mt-2 text-[15px]">{inv.id} · {inv.rotulo}. <span className="text-muted-foreground">{textoResumoEc(inv)}.</span></p>
+            <p className="mt-2 text-sm text-muted-foreground">Encomendas a fornecedor</p>
+            {inv.pos.length ? (
+              <ul className="mt-1 divide-y divide-border">
+                {inv.pos.map((p) => (
+                  <li key={p.id} className="flex flex-wrap justify-between gap-x-3 py-2 text-[15px]">
+                    <span>{p.id} · {p.forn.replace(" (exemplo)", "")}</span>
+                    <span className="text-sm text-muted-foreground">{p.estado.toLowerCase()}{p.prometida ? ` · entrega ${p.prometida.slice(8, 10)}/${p.prometida.slice(5, 7)}` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="mt-1 text-[15px] text-muted-foreground">Nenhuma: havia tudo em stock.</p>}
+            <p className="mt-2 text-sm text-muted-foreground">O Armazém reserva, recebe e dá saída no Inventário. Aqui só se lê o estado.</p>
+            <button type="button" onClick={go(() => A.abrirInv(d.id))} className="mt-2 inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
+              Abrir {inv.id} no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </button>
           </>
         )}
       </div>
-      {S.role !== "comercial" && ec.estado !== "aprovada" && <p className="text-sm text-muted-foreground lg:col-span-2">Quem aprova a encomenda de cliente é o comercial: confirma que é isto que vendeu.</p>}
       {/* o documento do cliente: os preços (nunca os custos) e o estado de cada linha */}
       <div className="lg:col-span-2">
         <button type="button" onClick={() => setNota(!nota)} aria-expanded={nota} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary">
-          {nota ? "Fechar a nota de encomenda" : ec.estado === "aprovada" ? "Nota de encomenda no portal do cliente" : "Pré-visualizar a nota de encomenda do cliente"}
+          {nota ? "Fechar a nota de encomenda" : "Nota de encomenda no portal do cliente"}
           <ChevronDown className={cn("h-4 w-4 transition-transform", nota && "rotate-180")} aria-hidden="true" />
         </button>
         {nota && (
           <div className="mt-3 animate-in fade-in-0 duration-200">
-            <Partilhar ctx={ctx} d={d} tipo="encomenda" estado={ec.estado === "aprovada" ? "no portal do cliente" : "rascunho: sai ao aprovar"}><NotaEncomendaDoc d={d} /></Partilhar>
+            <Partilhar ctx={ctx} d={d} tipo="encomenda" estado="no portal do cliente"><NotaEncomendaDoc d={d} /></Partilhar>
           </div>
         )}
       </div>
