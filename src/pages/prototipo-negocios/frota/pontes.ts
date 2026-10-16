@@ -18,6 +18,7 @@ export function obrasDoEstado(S: Estado): ObraRef[] {
   return S.deals.filter((d) => d.fase === 5 && d.obra.plano).map((d) => ({
     id: d.id, nome: d.nome, servico: d.servico, local: d.f.localidade || d.local.split(",").pop()!.trim(), estado: d.obra.plano!.estado,
     tarefas: d.obra.plano!.tasks.map((t) => ({ nome: t.nome, dia: t.dia, dur: t.dur, tec: t.tec })),
+    ec: d.obra.ec?.ref ?? null,
   }));
 }
 /** "Obra #1022 · WC · Marta Lima, Odivelas". */
