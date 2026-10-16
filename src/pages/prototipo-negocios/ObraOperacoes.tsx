@@ -22,6 +22,9 @@ import {
 } from "./obraOps";
 import type { Ctx } from "./pecas";
 import { AutoNoNegocio } from "./AutoRececao";
+import { ViaturasObra } from "./frota/ViaturasObra";
+import { useInventario } from "./inventario/loja";
+import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "plano por aprovar", aprovado: "pronta a arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -88,7 +91,8 @@ function lerFoto(f: File): Promise<string> {
 /* ================================================================== a lista de obras */
 export function ListaObras(ctx: Ctx) {
   const { S, A, go } = ctx;
-  const obras = aberto(S).filter((x) => x.obra.plano && (x.fase === 5 || (x.fase === 4 && x.obra.ec)));
+  // 16/10: a obra aparece com o contrato assinado (o plano, por aprovar depois do pagamento)
+  const obras = aberto(S).filter((x) => x.obra.plano && x.fase >= 4);
   const grupos: [string, Negocio[]][] = [
     ["Em curso", obras.filter((o) => o.obra.plano!.estado === "em curso")],
     ["Por arrancar", obras.filter((o) => o.obra.plano!.estado === "por aprovar" || o.obra.plano!.estado === "aprovado")],
@@ -168,7 +172,8 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const fim = fimDe(p.tasks), ultimo = fim - 1;
   const horas = p.tasks.reduce((a, t) => a + t.h, 0);
   const PV = porValidar(p);
-  const F = d.obra.ec ? faltaParaArrancar(d).filter((f) => !/plano/.test(f)) : (!e || e.estado === "recebida" ? [] : ["receber os materiais"]);
+  const F = faltaParaArrancar(d).filter((f) => !/plano/.test(f));
+  void e;
   const tarde = entregaTarde(d);
   const muda = pode && (p.estado === "por aprovar" || p.estado === "aprovado");
   const [aberta, setAberta] = useState<number | null>(null);
@@ -209,6 +214,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <p className="text-sm font-medium text-muted-foreground">Obra #{d.id} · {ESTADO_PLANO[p.estado]}</p>
         <h1 className="mt-0.5 text-3xl font-semibold tracking-tight">{d.nome}</h1>
         <p className="mt-1 text-base text-muted-foreground">{d.servico} · {p.tasks.length} {p.tasks.length === 1 ? "tarefa" : "tarefas"} · {nfmt(horas)} h de equipa{p.tasks.length ? ` · ${rotuloDia(p, 0)} a ${rotuloDia(p, ultimo)}` : ""}</p>
+        <ViaturasObra obra={d.id} />
         <dl className="mt-4 grid gap-x-6 gap-y-3 text-[15px] sm:grid-cols-3">
           <div className="min-w-0"><dt className="text-sm text-muted-foreground">Morada</dt>
             <dd><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex items-start gap-1.5 font-medium text-primary underline-offset-4 hover:underline"><MapPin className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />{morada}</a></dd></div>
@@ -229,9 +235,9 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             {pode ? <Button variant="outline" className="min-h-11 shrink-0" onClick={go(() => A.inicioPlano(d.id, isoDia(tarde.depois)))}>Começar a {dataCurta(tarde.depois)}</Button> : <Mudar ctx={ctx} papel="operacoes" />}
           </div>
         )}
-        {d.obra.ec && p.estado !== "em curso" && p.estado !== "concluída" && (
+        {p.estado !== "em curso" && p.estado !== "concluída" && (
           <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[15px]" aria-label="Condições para arrancar">
-            {([["Encomenda aprovada", d.obra.ec.estado === "aprovada"], ["Materiais recebidos", d.obra.ec.estado === "aprovada" && (!e || e.estado === "recebida")], ["Plano aprovado", p.estado !== "por aprovar"], ["Sinal pago", d.fin.pago]] as [string, boolean][]).map(([t, ok]) => (
+            {([["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Plano aprovado", p.estado !== "por aprovar"]] as [string, boolean][]).map(([t, ok]) => (
               <li key={t} className={cn("inline-flex items-center gap-1.5", !ok && "text-muted-foreground")}>
                 {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <Circle className="h-4 w-4" aria-hidden="true" />}{t}<span className="sr-only">{ok ? " (feito)" : " (por fazer)"}</span>
               </li>
@@ -722,16 +728,19 @@ function EquipamentosObra({ d }: { d: Negocio }) {
 /* ------------------------------------------------------------------ os materiais por fase */
 const TOM_MAT: Record<EstadoMat, string> = {
   reservado: "bg-success/15", recebido: "bg-success/15", "a chegar": "bg-primary/10 text-primary", encomendado: "bg-primary/10 text-primary",
-  "por encomendar": "bg-warning/15", "em falta": "bg-destructive/10 text-destructive",
+  "por encomendar": "bg-warning/15", "em falta": "bg-destructive/10 text-destructive", "na obra": "bg-success/15",
 };
 function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, go } = ctx;
-  const G = materiaisPorFase(d), e = d.obra.enc;
+  const db = useInventario();
+  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const G = materiaisPorFase(d, inv), e = d.obra.enc;
   return (
     <section id="obra-mat" aria-labelledby="obra-mat-t" className="mt-10 scroll-mt-16">
       <h2 id="obra-mat-t" className={H2}>Materiais</h2>
       <p className="mt-1 text-[15px]">
-        {d.obra.ec && d.obra.ec.estado !== "aprovada" ? `Encomenda de cliente ${d.obra.ec.n} à espera do comercial.`
+        {!d.obra.ec && !d.fin.pago ? "A encomenda de cliente emite-se quando o pagamento for validado."
+          : d.obra.ec?.ref ? (inv ? `Encomenda de cliente ${inv.id} no Inventário: ${textoResumoEc(inv).toLowerCase()}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`)
           : !e ? "Tudo em stock e reservado para a obra."
           : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.`
           : e.estado === "por confirmar" ? `Encomenda ${e.n} a ${e.forn ?? "fornecedor"}, à espera da validação do Financeiro.`
@@ -757,9 +766,16 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           ))}
         </div>
       )}
-      <button type="button" onClick={go(() => A.abrir(d.id))} className="mt-2 inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
-        Ver o negócio, do contrato à obra<ArrowRight className="h-4 w-4" aria-hidden="true" />
-      </button>
+      <div className="mt-2 flex flex-wrap gap-x-5">
+        {d.obra.ec?.ref && (
+          <button type="button" onClick={go(() => A.abrirInv(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+            Abrir a encomenda no Inventário<ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
+        <button type="button" onClick={go(() => A.abrir(d.id))} className="inline-flex min-h-11 items-center gap-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+          Ver o negócio, do contrato à obra<ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
     </section>
   );
 }

@@ -20,8 +20,8 @@ describe("portais do cliente e do fornecedor", () => {
   it("o fornecedor escolhe o dia da entrega (o primeiro útil a partir dele)", () => {
     const { S, A } = preparar();
     const d = S.deals.find((x) => x.id === 1027)!;
-    d.fin.pago = true; // 15/10: a encomenda só se aprova com o pagamento confirmado
-    A.aprovarEc(d.id); A.validarEf(d.id);
+    // 16/10: o motor já não cria encomendas a fornecedor (vêm do Inventário novo); o portal do fornecedor da V2 funcional serve as que existem
+    d.obra.enc = { n: "EF 2026/90", estado: "encomendada", forn: "Cerâmica do Centro (exemplo)", linhas: [{ n: "Pavimento cerâmico 60×60", q: 10, un: "m²", custo: 16 }] };
     A.confirmarEntrega(d.id, "2026-10-24"); // sábado → segunda
     expect(d.obra.enc).toMatchObject({ entrega: "seg, 26 out", entregaIso: "2026-10-26" });
     A.confirmarEntrega(d.id, "2026-10-22"); // muda a data

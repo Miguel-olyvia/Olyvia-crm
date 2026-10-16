@@ -61,7 +61,9 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
         A.validar(d.id);
         if (!d.fin.recibo) { msg = "Faltam dados do pagamento no passo Pagamento."; return; }
         guardarFaturas(S, d.id, validarPagamento(fs, f.id, p, d.fin.recibo.n));
-        msg = `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: Inventário e plano.`;
+        msg = d.obra.ec
+          ? `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: encomenda ${d.obra.ec.n} no Inventário; falta aprovar o plano.`
+          : `Pagamento validado · recibo ${d.fin.recibo.n}. A encomenda de cliente não chegou ao Inventário: emita-a no negócio.`;
       } else {
         const rc = "RC 2026/" + S.rc++;
         guardarFaturas(S, d.id, validarPagamento(fs, f.id, p, rc));
@@ -225,7 +227,7 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
             {disparo ? ` (${nomeT(disparo.id)})` : ""}, sai o recibo e a obra põe-se a andar:
           </p>
           <ul className="mt-2 space-y-1.5 text-[15px]">
-            {["O Inventário reserva os materiais e encomenda o que falta", "As Operações recebem o plano da obra, por aprovar", "O cliente recebe o recibo no portal"].map((x) => (
+            {["A encomenda de cliente vai para o Inventário: reserva os materiais e encomenda o que falta", "As Operações aprovam o plano da obra", "O cliente recebe o recibo no portal"].map((x) => (
               <li key={x} className="flex items-center gap-2">
                 {d.fin.recibo ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden="true" /> : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
                 <span className={cn(!d.fin.recibo && "text-muted-foreground")}>{x}</span>

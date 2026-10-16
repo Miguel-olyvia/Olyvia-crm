@@ -1,4 +1,4 @@
-// Operações e Inventário na proposta simples. Cada ecrã diz numa frase em que
+// Operações e Inventário na proposta simples. 16/10: o Inventário daqui (InventarioSimples) só fica na V2 funcional; a Atual e a V2 usam o Inventário novo (inventario/). Cada ecrã diz numa frase em que
 // ponto está, mostra só o que é preciso e tem um botão principal, de quem tem
 // de agir. Os outros papéis veem o mesmo, com "Mudar para…".
 import { useState } from "react";
@@ -12,6 +12,8 @@ import { FASES_OBRA } from "./fasesObra";
 import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara, totalEf } from "./preparacaoObra";
 import type { Ctx } from "./pecas";
 import { ListaObras, PaginaObra } from "./ObraOperacoes";
+import { useInventario } from "./inventario/loja";
+import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio } from "./inventario/ponteNegocios";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "à espera de aprovação", aprovado: "aprovado, falta arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -59,14 +61,13 @@ function Passos({ v, max, rot, onSet }: { v: number; max: number; rot: string; o
 /** Uma encomenda a fornecedor: o fornecedor, a entrega, as linhas com o custo e o que já chegou, e a ação de quem tem a vez. */
 function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go, run } = ctx;
-  const e = d.obra.enc!, novo = !!d.obra.ec;
+  const e = d.obra.enc!;
   const [conferir, setConferir] = useState(false);
   const [portal, setPortal] = useState(false);
   const [chegou, setChegou] = useState<number[]>(() => e.linhas.map((x) => r2(x.q - (x.recebido ?? 0))));
   const est = ESTADO_EF[e.estado];
   const acao = (() => {
     if (e.estado === "por confirmar") {
-      if (novo) return S.role === "financeiro" ? <Button onClick={go(() => A.validarEf(d.id))}>Validar e encomendar</Button> : <Mudar ctx={ctx} papel="financeiro" />;
       return S.role === "armazem" ? <Button onClick={go(() => A.confirmarEnc(d.id))}>Confirmar e enviar ao fornecedor</Button> : <Mudar ctx={ctx} papel="armazem" />;
     }
     if (e.estado === "encomendada" || e.estado === "parcial") {
@@ -95,7 +96,7 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <span className={cn("rounded-full px-2.5 py-0.5 text-sm font-medium", est.tom)}>{est.t}</span>
       </div>
       <p className="mt-2 text-[15px]">
-        {e.estado === "por confirmar" ? (novo ? (d.fin.pago ? "O Financeiro valida (o sinal já entrou)." : "O Financeiro valida. Atenção: o sinal ainda não entrou.") : "O armazém confirma e envia ao fornecedor.")
+        {e.estado === "por confirmar" ? "O armazém confirma e envia ao fornecedor."
           : e.estado === "recebida" ? "Tudo recebido e reservado para a obra."
           : e.entrega ? `Entrega confirmada pelo fornecedor para ${e.entrega}.` : "Enviada ao fornecedor, à espera da data de entrega."}
         {e.validada && <span className="text-muted-foreground"> Validada por {e.validada.por} · {e.validada.q}.</span>}
@@ -132,6 +133,7 @@ function CartaoEf({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
 export function InventarioSimples(ctx: Ctx) {
   const { S, A, go } = ctx;
+  const db = useInventario();
   const [aba, setAba] = useState<AbaInvS>("ef");
   const comEf = aberto(S).filter((d) => d.obra.enc && (d.obra.enc.linhas.length || d.obra.enc.estado !== "recebida"));
   const aReceber = comEf.filter((d) => d.obra.enc!.estado === "encomendada" || d.obra.enc!.estado === "parcial");
@@ -142,16 +144,15 @@ export function InventarioSimples(ctx: Ctx) {
   const reservado: Record<string, number> = {}, aChegar: Record<string, number> = {};
   for (const d of aberto(S)) {
     if (d.obra.plano?.estado === "concluída") continue;
-    const linhas = d.obra.ec ? (d.obra.ec.estado === "aprovada" ? d.obra.ec.linhas : []) : d.obra.mats ?? [];
+    const linhas = d.obra.ec ? d.obra.ec.linhas : d.obra.mats ?? [];
     for (const x of linhas) if ("k" in x && x.k) reservado[x.k] = r2((reservado[x.k] ?? 0) + x.res);
     const e = d.obra.enc;
     if (e && (e.estado === "encomendada" || e.estado === "parcial"))
       for (const x of e.linhas) { const k = Object.keys(NOME_STOCK).find((c) => NOME_STOCK[c].n === x.n); if (k) aChegar[k] = r2((aChegar[k] ?? 0) + x.q - (x.recebido ?? 0)); }
   }
-  const ABAS: [AbaInvS, string, number][] = [["ef", "Encomendas a fornecedor", aReceber.length + porValidar.length], ["ec", "Encomendas de cliente", ecs.filter((d) => d.obra.ec!.estado !== "aprovada").length], ["stock", "Stock", 0]];
+  const ABAS: [AbaInvS, string, number][] = [["ef", "Encomendas a fornecedor", aReceber.length + porValidar.length], ["ec", "Encomendas de cliente", 0], ["stock", "Stock", 0]];
   const frase = [
     aReceber.length && `${aReceber.length} a receber`, porValidar.length && `${porValidar.length} por validar`,
-    ecs.filter((d) => d.obra.ec!.estado !== "aprovada").length && `${ecs.filter((d) => d.obra.ec!.estado !== "aprovada").length} encomenda de cliente por aprovar`,
   ].filter(Boolean).join(" · ");
   const grupo = (t: string, L: Negocio[], vazio?: string) => (
     <section aria-label={t} className="mt-8">
@@ -162,7 +163,7 @@ export function InventarioSimples(ctx: Ctx) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Inventário</h1>
-      <p className="mt-2 text-lg text-muted-foreground">{frase ? frase + "." : "Nada pendente."} As encomendas de cliente nascem do contrato; o que falta em stock vai ao fornecedor.</p>
+      <p className="mt-2 text-lg text-muted-foreground">{frase ? frase + "." : "Nada pendente."} As encomendas de cliente nascem do pagamento validado, no Inventário; o que falta em stock vai ao fornecedor.</p>
       <div role="tablist" aria-label="Inventário" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
         {ABAS.map(([k, t, n]) => (
           <button key={k} type="button" role="tab" aria-selected={aba === k} onClick={(ev) => { setAba(k); ev.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); }}
@@ -183,32 +184,32 @@ export function InventarioSimples(ctx: Ctx) {
       {aba === "ec" && (
         <ul className="mt-8 space-y-4 animate-in fade-in-0 duration-200">
           {ecs.map((d) => {
-            const ec = d.obra.ec!;
+            const ec = d.obra.ec!, inv = resumoEcNegocio(db, ec.ref);
             return (
               <li key={d.id} className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="flex items-center gap-2 text-base font-semibold"><PackageCheck className="h-4 w-4 text-muted-foreground" aria-hidden="true" />{ec.n} · {d.nome}</p>
-                    <p className="text-[15px] text-muted-foreground">{d.servico} · do contrato CT 2026/{d.id} · {ec.criada}</p>
+                    <p className="text-[15px] text-muted-foreground">{d.servico} · {ec.ref ?? "do contrato CT 2026/" + d.id} · {ec.criada}</p>
                   </div>
-                  <span className={cn("rounded-full px-2.5 py-0.5 text-sm font-medium", ec.estado === "aprovada" ? "bg-success/15" : "bg-warning/15")}>{ec.estado}</span>
+                  <span className={cn("rounded-full px-2.5 py-0.5 text-sm font-medium", !ec.ref || inv?.pronta ? "bg-success/15" : "bg-warning/15")}>{inv ? inv.rotulo.toLowerCase() : ec.ref ? "emitida" : "servida"}</span>
                 </div>
                 <ul className="mt-3 divide-y divide-border">
                   {ec.linhas.map((x) => (
                     <li key={x.n} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-[15px]">
                       <span className="min-w-[10rem] flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span></span>
-                      <span className={cn("text-sm", x.falta > 0 ? "text-warning" : "text-success")}>{ec.estado !== "aprovada" ? (x.falta > 0 ? `faltariam ${nfmt(x.falta)}` : "há em stock") : x.falta > 0 ? `${nfmt(x.res)} reservados · ${nfmt(x.falta)} a chegar` : "reservado"}</span>
+                      {(() => { const l = linhaDoResumo(inv, x.n), st = l ? estadoLinhaNegocio(l) : { t: ec.ref ? "a preparar" : "na obra", ok: !ec.ref }; return <span className={cn("text-sm", st.ok ? "text-success" : "text-warning")}>{st.t}</span>; })()}
                     </li>
                   ))}
                 </ul>
                 <p className="mt-2 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-[15px]">
                   <span className="text-muted-foreground">Custo {eur(ec.custo ?? 0)} € · na proposta {eur(ec.valor)} €</span>
-                  {ec.estado !== "aprovada" && (S.role === "comercial" ? <Button size="sm" onClick={go(() => A.aprovarEc(d.id))}>Aprovar a encomenda</Button> : <Mudar ctx={ctx} papel="comercial" />)}
+                  {ec.ref && <button type="button" onClick={go(() => A.abrirInv(d.id))} className="text-sm font-medium text-primary underline-offset-4 hover:underline">Lida do Inventário</button>}
                 </p>
               </li>
             );
           })}
-          {!ecs.length && <li className="text-[15px] text-muted-foreground">Ainda não há encomendas de cliente. Nascem quando o cliente assina o contrato.</li>}
+          {!ecs.length && <li className="text-[15px] text-muted-foreground">Ainda não há encomendas de cliente. Nascem quando o Financeiro valida o pagamento.</li>}
         </ul>
       )}
 
@@ -229,7 +230,7 @@ export function InventarioSimples(ctx: Ctx) {
               );
             })}
           </ul>
-          <p className="mt-2 text-[15px] text-muted-foreground">Livres: em armazém e sem obra. Reservados: para obras com a encomenda de cliente aprovada. A chegar: encomendados ao fornecedor.</p>
+          <p className="mt-2 text-[15px] text-muted-foreground">Livres: em armazém e sem obra. Reservados: para obras com a encomenda de cliente emitida. A chegar: encomendados ao fornecedor.</p>
         </div>
       )}
     </div>

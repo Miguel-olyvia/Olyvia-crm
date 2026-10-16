@@ -107,6 +107,16 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     expect(screen.queryByRole("group", { name: "Versão" })).toBeNull();
   });
 
+  it("no menu do V1 há uma só Frota (a do V1) e o Inventário novo, além dos Números", async () => {
+    render(<PrototipoNegocios />);
+    expect(within(menu()).getAllByRole("button", { name: /^Frota/ })).toHaveLength(1);
+    expect((await within(menu()).findAllByRole("button", { name: /Inventário/ }, { timeout: 4000 })).length).toBeGreaterThan(0); // o menu do Inventário carrega em diferido
+    expect(within(menu()).getAllByRole("button", { name: /^Frota/ })).toHaveLength(1);
+    irPara("Frota");
+    expect(screen.getByRole("heading", { level: 1, name: "Frota" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "O que fazer agora" })).toBeInTheDocument();
+  });
+
   it("desligar a proposta devolve Leads e Clientes", () => {
     render(<PrototipoNegocios />);
     fireEvent.click(screen.getAllByRole("switch", { name: /Pessoas numa página/ })[0]);

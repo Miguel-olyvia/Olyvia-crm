@@ -14,6 +14,8 @@ import { AdendaDoc, ContratoDoc, FaturaDoc, NotaEncomendaDoc, PropostaDoc, TITUL
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
+import { useInventario } from "./inventario/loja";
+import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import { diasAdenda, totalComIva } from "./adendas";
 import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
@@ -173,7 +175,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     ["proposta", `Proposta PR 2026/${d.id}`, !!o?.enviada],
     // 15/10: as adendas assinadas juntam-se ao contrato (o documento do contrato mostra-as)
     ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato],
-    ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec && d.obra.ec.estado === "aprovada"],
+    ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec],
     ["fatura", d.fin.fatura ? `Fatura ${d.fin.fatura.n}` : "", !!d.fin.fatura],
     ["auto", au ? `Auto de receção ${au.n}` : "", !!au],
     ["relatorio", "Relatório da obra", au?.estado === "assinado"],
@@ -493,9 +495,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
                   );
                 })}
               </ol>
-              {d.obra.ec?.estado === "aprovada" && (
-                <p className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600">Materiais: {d.obra.enc && d.obra.enc.estado !== "recebida" ? (d.obra.enc.entrega ? `chegam a ${d.obra.enc.entrega}.` : "encomendados.") : "todos prontos para a obra."}</p>
-              )}
+              {d.obra.ec && <MateriaisPortal d={d} />}
             </section>
           )}
 
@@ -550,4 +550,11 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       )}
     </div>
   );
+}
+
+/** 16/10: o que o cliente vê dos materiais, lido da encomenda no Inventário novo. */
+function MateriaisPortal({ d }: { d: Negocio }) {
+  const inv = resumoEcNegocio(useInventario(), d.obra.ec?.ref);
+  const texto = !d.obra.ec?.ref ? "todos prontos para a obra." : !inv ? "encomendados." : inv.pronta ? "todos prontos para a obra." : inv.tot.aFornecedor ? "uma parte já está reservada; o resto foi encomendado ao fornecedor." : "a preparar.";
+  return <p className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600">Materiais: {texto}</p>;
 }

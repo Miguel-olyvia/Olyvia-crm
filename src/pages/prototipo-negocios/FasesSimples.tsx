@@ -49,14 +49,11 @@ export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
         <ol className="mt-1 divide-y divide-border">
           <Passo feito={!!ft} titulo={ft ? `Fatura ${ft.n} emitida` : "Emitir a fatura"} texto={ft ? `A ${ft.q}, enviada ao portal do cliente.` : "Só o Financeiro emite. Vai para o portal do cliente."} />
           <Passo feito={d.fin.pago} titulo={d.fin.pago ? "Pagamento validado" : "Validar o pagamento"} texto={d.fin.pago ? `Confirmado${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""}${d.f.comprovativo ? " · " + d.f.comprovativo : ""}.` : "Confirmar que o valor entrou na conta. Por agora é à mão."} />
-          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n} emitido` : "Recibo"} texto={d.obra.ec ? "Sai sozinho ao validar o pagamento:" : "Sai sozinho ao validar o pagamento e põe a obra a andar:"} />
+          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n} emitido` : "Recibo"} texto="Sai sozinho ao validar o pagamento e põe a obra a andar:" />
         </ol>
-        {/* 14/10: com a encomenda de cliente (gerada do contrato), a encomenda e o plano já andam; o recibo libera o arranque */}
+        {/* 16/10: o pagamento validado emite a encomenda de cliente no Inventário e passa o negócio à Obra; depois só falta aprovar o plano */}
         <ul className="ml-9 mt-1 space-y-1.5 text-[15px] text-muted-foreground">
-          {(d.obra.ec
-            ? ["O negócio passa à Obra", "O sinal pago é uma das condições para arrancar a obra", "O cliente recebe o recibo no portal"]
-            : ["Inventário confirma os materiais e encomenda o que falta", "Operações recebem o plano da obra com os técnicos", "O cliente recebe o recibo no portal"]
-          ).map((t) => <li key={t} className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} {t}</li>)}
+          {["O negócio passa à Obra", "A encomenda de cliente vai para o Inventário: reserva o stock e encomenda ao fornecedor o que falta", "As Operações aprovam o plano da obra", "O cliente recebe o recibo no portal"].map((t) => <li key={t} className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} {t}</li>)}
         </ul>
       </section>
       <Partilhar ctx={ctx} d={d} tipo="fatura" estado={rc ? `paga · ${rc.n}` : ft ? `emitida ${ft.q} · por pagar` : "rascunho: ainda não emitida"}>
@@ -98,7 +95,7 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
       <section aria-labelledby="mat-t">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h3 id="mat-t" className="text-base font-semibold">Materiais</h3>
-          <Button variant="ghost" onClick={go(() => A.abrirInv())}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
+          <Button variant="ghost" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </div>
         <p className="mt-1 text-[15px]">{!e ? "Tudo em stock e reservado." : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.` : `Encomenda ${e.n} ${e.estado}.`}</p>
         <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">

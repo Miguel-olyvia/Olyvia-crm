@@ -45,10 +45,18 @@ let aba: AbaInv = "hoje";
 export const lerAba = (): AbaInv => aba;
 export function guardarAba(a: AbaInv): void { aba = a; }
 
+/** 16/10: outro módulo (o negócio) pediu para abrir uma encomenda de cliente: o Inventário abre-a em "Saídas para clientes" ao montar. */
+let pedidoEc: string | null = null;
+export function pedirAbrirEcInv(id: string): void { pedidoEc = id; aba = "ec"; }
+export const lerPedidoEcInv = (): string | null => pedidoEc;
+/** Quem abre a encomenda tira o pedido (não volta a abrir mais tarde). */
+export function tirarPedidoEcInv(): string | null { const id = pedidoEc; pedidoEc = null; return id; }
+
 /** Volta aos dados de exemplo (o botão "Repor inventário" e os testes). */
 export function esquecerInventario(): void {
   base = null;
   aba = "hoje";
+  pedidoEc = null;
   avisar();
 }
 

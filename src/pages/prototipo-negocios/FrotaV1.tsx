@@ -24,6 +24,8 @@ const ESCOLHA = (on: boolean): string => cn("min-h-11 rounded-lg border px-4 tex
 /** A viatura aberta (a página desmonta ao mudar de ecrã). */
 let aberta: string | null = null;
 export function esquecerFrotaV1(): void { aberta = null; }
+/** "Abrir na Frota" noutro módulo (a página da obra, Definições › Agenda): a Frota do V1 abre nessa viatura. */
+export function abrirViaturaFrotaV1(vid: string | null): void { aberta = vid; }
 
 /* ---------------------------------------------------------------- peças dos formulários */
 

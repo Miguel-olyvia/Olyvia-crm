@@ -26,7 +26,7 @@ import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
 import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
 import { NegociosV1Docs } from "./NegociosV1Docs";
 import { NumerosV1 } from "./NumerosV1";
-import { FrotaV1, esquecerFrotaV1 } from "./FrotaV1";
+import { FrotaV1, abrirViaturaFrotaV1, esquecerFrotaV1 } from "./FrotaV1";
 import { RAMO_V1 } from "./ramoV1";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
@@ -44,6 +44,8 @@ import { OperacoesV2 } from "./v2/OperacoesV2";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
+import { lerPedidoEcInv, subscrever as subscreverInv, tirarPedidoEcInv } from "./inventario/loja";
+import { sincronizarEcsNegocios } from "./inventario/ponteNegocios";
 import PerfilSimulado from "./inventario/PerfilSimulado";
 import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
 import { esquecerFrota, type AbaFrota } from "./frota/loja";
@@ -52,10 +54,10 @@ import { PortalCliente } from "./PortalCliente";
 import { RevisaoContrato } from "./RevisaoContrato";
 import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
 
-// O Inventário completo (nativo, só na V2) só se carrega quando se abre essa página.
+// O Inventário completo (nativo, na Atual e na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
 const MenuInventario = lazy(() => import("./inventario/MenuInventario"));
-// A Frota (nativa, só na V2), com a UI do Inventário: também só se carrega quando se abre.
+// A Frota (nativa, na Atual e na V2), com a UI do Inventário: também só se carrega quando se abre.
 const FrotaPagina = lazy(() => import("./frota/FrotaPagina"));
 const MenuFrota = lazy(() => import("./frota/MenuFrota"));
 
@@ -84,9 +86,9 @@ export default function PrototipoNegocios() {
   const [alvoAvisos, setAlvoAvisos] = useState<HTMLElement | null>(null);
   const [q, setQ] = useState("");
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
-  const [invMock, setInvMock] = useState(false); // um ecrã do Inventário (do menu lateral): só existe na V2 (não na Atual nem na V2 funcional) e vive fora do Estado
+  const [invMock, setInvMock] = useState(false); // um ecrã do Inventário (do menu lateral): existe na Atual e na V2 (não na V2 funcional) e vive fora do Estado
   const [invAba, setInvAba] = useState<AbaInv>("hoje"); // qual deles
-  const [frotaMock, setFrotaMock] = useState(false); // um ecrã da Frota (do menu lateral): como o Inventário, só na V2 e fora do Estado
+  const [frotaMock, setFrotaMock] = useState(false); // um ecrã da Frota (do menu lateral): como o Inventário, na Atual e na V2 e fora do Estado
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   // no ramo feat/v1 a versão é sempre a Atual (o V1): a V2 não se vê (ramoV1.ts)
@@ -188,8 +190,8 @@ export default function PrototipoNegocios() {
   const mudarVersao = (nova: VersaoProto) => {
     setVersao(nova);
     gravarVersao(nova);
-    // Os ecrãs do Inventário só existem na V2: volta à vista equivalente (Negócios).
-    if (nova !== "v2" && (invMock || frotaMock)) { setInvMock(false); setFrotaMock(false); run(() => A.nav("negocios")); return; }
+    // Os ecrãs do Inventário e da Frota não existem na V2 funcional: volta à vista equivalente (Negócios).
+    if (nova === "funcional" && (invMock || frotaMock)) { setInvMock(false); setFrotaMock(false); run(() => A.nav("negocios")); return; }
     // Leads e Clientes passam a Pessoas (e Pessoas a Leads): a vista atual segue para a equivalente.
     run(() => {
       if ((ref.current.view === "numeros" || ref.current.view === "frota") && nova !== "atual") { A.nav("negocios"); return; } // os Números e a Frota do V1 só existem no V1
@@ -251,34 +253,46 @@ export default function PrototipoNegocios() {
   const porVista = (v: Vista) => itens.find(([x]) => x === v)!;
   // A vista que o menu destaca: com a V2, Leads e Clientes são Pessoas (e sem ela Pessoas é Leads). O aspeto atual não tem Leads
   // nem Pessoas (mostra Negócios), por isso destaca Negócios. Com a V2, criar uma lead (S.novo) destaca Pessoas.
-  const soV2 = versao === "v2" && simples; // o Inventário do mockup só aparece na V2 (um grupo do menu, no lugar do item antigo)
-  const ativoInv = soV2 && (invMock || S.view === "inventario");
-  const ativoFrota = soV2 && frotaMock && !ativoInv; // abrir a Frota fecha o Inventário e vice-versa
-  const itensMenu = soV2 ? itens.filter(([v]) => v !== "inventario") : itens;
+  // 16/10: o Inventário e a Frota novos aparecem na Atual e na V2 (um grupo do menu cada, no lugar do item antigo "Inventário"); a V2 funcional fica com o seu
+  const comInvFrota = (versao === "atual" || versao === "v2") && simples;
+  const ativoInv = comInvFrota && (invMock || S.view === "inventario");
+  // feat/v1: com "Pessoas numa página", a Frota é a do V1 (FrotaV1.tsx, um item do menu); a do Rafael (frotaMock) não aparece, para não haver duas
+  const comFrotaMock = comInvFrota && !v1n;
+  const ativoFrota = comFrotaMock && frotaMock && !ativoInv; // abrir a Frota fecha o Inventário e vice-versa
+  const itensMenu = comInvFrota ? itens.filter(([v]) => v !== "inventario") : itens;
   const cur: Vista | "inv" | "frota" = ativoInv ? "inv" : ativoFrota ? "frota" : novaLeadV2 ? "pessoas"
     : S.view === "negocio" ? "negocios"
     : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
     : (v2 || v1n) && (S.view === "leads" || S.view === "clientes") ? "pessoas"
     : !v2 && !v1n && S.view === "pessoas" ? "leads" : S.view;
-  // Na V2 a vista antiga "Inventário" (o motor ainda a abre em "Abrir no Inventário") leva às Encomendas do novo inventário.
+  // Na Atual e na V2 a vista antiga "Inventário" (o motor abre-a em "Abrir no Inventário") leva ao Inventário novo: à encomenda de cliente
+  // do negócio (Saídas para clientes), se foi pedida, senão às Encomendas a fornecedor.
   useEffect(() => {
-    if (!soV2 || S.view !== "inventario") return;
-    setInvAba("po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
-  }, [soV2, S.view, run, A]);
+    if (S.view !== "inventario") return;
+    if (!comInvFrota) { tirarPedidoEcInv(); return; }
+    setInvAba(lerPedidoEcInv() ? "ec" : "po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
+  }, [comInvFrota, S.view, run, A]);
+  // 16/10: o Inventário novo vive em memória; ao recarregar (ou ao repor os dados dele) volta a emitir as encomendas dos negócios pagos que lá faltam
+  useEffect(() => {
+    const sinc = (): void => { sincronizarEcsNegocios(ref.current.deals); };
+    sinc();
+    return subscreverInv(sinc);
+  }, []);
   // Outro módulo pediu para abrir a Frota (Definições › Agenda, a página da obra): abre-a (a viatura abre-se lá dentro).
   // "Abrir na Frota" só aparece noutros módulos quando esta moldura a consegue abrir (a mesma condição do menu); o pedido trata-se logo,
   // e a viatura passa à Frota como propriedade, para um pedido antigo nunca ser consumido mais tarde.
   const [frotaPedido, setFrotaPedido] = useState<{ vid: string; n: number } | null>(null);
-  useEffect(() => { definirMolduraFrota(soV2); }, [soV2]);
+  useEffect(() => { definirMolduraFrota(comInvFrota); }, [comInvFrota]);
   useEffect(() => () => definirMolduraFrota(false), []);
   const pedidoFrota = usePedidoFrota();
   useEffect(() => {
     if (!pedidoFrota) return;
     tratarPedidoFrota();
-    if (!soV2) return;
+    if (!comInvFrota) return;
+    if (v1n) { abrirViaturaFrotaV1(pedidoFrota.vid ?? null); setInvMock(false); run(() => A.nav("frota")); return; } // abre na Frota do V1
     setInvMock(false); setFrotaAba(pedidoFrota.aba ?? "viaturas"); setFrotaMock(true);
     setFrotaPedido(pedidoFrota.vid ? { vid: pedidoFrota.vid, n: pedidoFrota.n } : null);
-  }, [soV2, pedidoFrota]);
+  }, [comInvFrota, pedidoFrota]); // eslint-disable-line react-hooks/exhaustive-deps
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
 
   // o portal do cliente aberto pelo link de partilha
@@ -336,9 +350,9 @@ export default function PrototipoNegocios() {
       </button>
     );
     const abrirInv = (a: AbaInv): void => { setMais(false); setFrotaMock(false); setInvAba(a); setInvMock(true); };
-    const menuInv = (aberto: boolean) => (soV2 ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
+    const menuInv = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
     const abrirFrota = (a: AbaFrota): void => { setMais(false); setInvMock(false); setFrotaAba(a); setFrotaMock(true); };
-    const menuFrota = (aberto: boolean) => (soV2 ? <Suspense fallback={null}><MenuFrota aba={ativoFrota ? frotaAba : null} aoIr={abrirFrota} iniciarAberto={aberto} /></Suspense> : null);
+    const menuFrota = (aberto: boolean) => (comFrotaMock ? <Suspense fallback={null}><MenuFrota aba={ativoFrota ? frotaAba : null} aoIr={abrirFrota} iniciarAberto={aberto} /></Suspense> : null);
     // As ligações da Frota para fora: a obra (Operações), a Agenda (Definições › Agenda › Recursos) e as carrinhas no Inventário (Armazéns).
     const irObra = (id: number): void => { setFrotaMock(false); run(() => A.abrirPlano(id)); };
     const irAgenda = (): void => {
@@ -432,11 +446,11 @@ export default function PrototipoNegocios() {
               <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-[calc(4rem_+_env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
-                  {[...(v1n ? ["inventario"] : pessoas.map(([v]) => v)), "catalogo", "marketing", ...(v1n ? ["frota", "numeros"] : [])].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {[...(v1n ? (comInvFrota ? [] : ["inventario"]) : pessoas.map(([v]) => v)), "catalogo", "marketing", ...(v1n ? ["frota", "numeros"] : [])].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
-                {soV2 && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
-                {soV2 && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
+                {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
+                {comFrotaMock && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
                   className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">
@@ -449,14 +463,14 @@ export default function PrototipoNegocios() {
             </div>
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
-            {((soV2 ? ["hoje", "negocios", "operacoes"] : v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
+            {((comInvFrota ? (v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes"]) : v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
               <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
               </button>
             ))}
-            {soV2 && (
+            {comInvFrota && !v1n && (
               <button type="button" onClick={() => setMais(true)} aria-haspopup="dialog" aria-current={cur === "inv" ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === "inv" ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <ShoppingCart className="h-5 w-5" aria-hidden="true" />Inventário

@@ -54,7 +54,7 @@ const ouvintes = new Set<() => void>();
 const avisar = (): void => { for (const fn of ouvintes) fn(); };
 const subscrever = (fn: () => void): (() => void) => { ouvintes.add(fn); return () => { ouvintes.delete(fn); }; };
 
-/** A moldura do protótipo diz se consegue abrir a Frota (só na V2 do aspeto simples: a mesma condição do menu). Ao deixar de conseguir, um pedido pendente cai. */
+/** A moldura do protótipo diz se consegue abrir a Frota (na Atual e na V2 do aspeto simples, 16/10: a mesma condição do menu). Ao deixar de conseguir, um pedido pendente cai. */
 export function definirMolduraFrota(pode: boolean): void {
   if (moldura === pode && (pode || !pedido)) return;
   moldura = pode;

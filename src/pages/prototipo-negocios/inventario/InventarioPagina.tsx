@@ -1,4 +1,4 @@
-// O Inventário nativo, só na V2 (e na V2 funcional), com o aspeto e a estrutura do mockup: o ecrã aberto vem do menu lateral (MenuInventario), sem separadores internos;
+// O Inventário nativo (na Atual e na V2; 16/10), com o aspeto e a estrutura do mockup: o ecrã aberto vem do menu lateral (MenuInventario), sem separadores internos;
 // pesquisa global no topo, as listas com pesquisa, filtros e ordenação, o detalhe numa folha lateral e as ações com diálogos próprios (nunca confirm()).
 // Vive numa base de exemplo em memória (loja.ts): não toca no Estado nem no localStorage e "Repor inventário" apaga-a. Dados inventados, a 09/10/2026.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +14,7 @@ import { AvisoCaixa } from "./AvisoCaixa";
 import { Contexto, useAvisoInv, type AbaInv, type CtxInv, type Destino, type Detalhe } from "./ctxInv";
 import { Confirmar } from "./DialogosInv";
 import { FILTROS_VAZIOS, type FiltrosInv } from "./filtros";
-import { esquecerInventario, executar, guardarAba, lerAba, useInventario } from "./loja";
+import { esquecerInventario, executar, guardarAba, lerAba, tirarPedidoEcInv, useInventario } from "./loja";
 import { Sec } from "./pecasInv";
 import { Cab } from "./cabInv";
 import { usePerfil } from "./perfil";
@@ -97,6 +97,8 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
   const painel = useRef<HTMLDivElement>(null), primeira = useRef(true), viaIr = useRef(false);
   useEffect(() => { guardarAba(aba); }, [aba]);
   useEffect(() => { if (primeira.current) { primeira.current = false; return; } if (viaIr.current) viaIr.current = false; else setDetalhe(null); painel.current?.focus({ preventScroll: true }); }, [aba]);
+  // 16/10: o negócio pediu para abrir a sua encomenda de cliente ("Ver no Inventário"): abre a folha dela
+  useEffect(() => { const id = tirarPedidoEcInv(); if (id && db.ecs.some((e) => e.id === id)) setDetalhe({ t: "ec", id }); }, [db]);
   useEffect(() => { const prev = document.title; document.title = "Olyvia · Protótipo · Inventário"; return () => { document.title = prev; }; }, []);
 
   const agir = useCallback<CtxInv["agir"]>((fn, ok) => {

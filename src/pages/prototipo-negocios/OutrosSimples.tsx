@@ -6,6 +6,7 @@ import { ESTR, eur, pct } from "./motor";
 import type { Ctx } from "./pecas";
 import { CatalogoV1 } from "./CatalogoV1";
 import { DemolicaoV2 } from "./v2/DemolicaoV2";
+import { RecursosFrotaAgenda } from "./frota/RecursosFrotaAgenda";
 
 const Interruptor = ({ on, onClick, titulo, texto }: { on: boolean; onClick: () => void; titulo: string; texto: string }) => (
   <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex w-full items-center justify-between gap-4 py-4 text-left">
@@ -101,6 +102,12 @@ export function DefinicoesSimples({ S, A, go, run, repor }: Ctx) {
       <p className="mt-1 text-[15px] text-muted-foreground">Os valores com que se calcula a demolição e a remoção de entulho no orçamento. Só a Direção os muda.</p>
       {/* a tabela dos artigos precisa de mais largura do que a coluna: no ecrã largo, o bloco alarga centrado */}
       <div className="relative mt-3 lg:left-1/2 lg:w-[min(64rem,calc(100vw-22rem))] lg:-translate-x-1/2"><DemolicaoV2 S={S} mudarPapel={() => run(() => A.role("direcao"))} /></div>
+
+      {/* 16/10: as viaturas da Frota como recursos da agenda (como em Definições › Agenda da V2); "Abrir na Frota" abre a viatura */}
+      <section id="agenda-recursos" aria-labelledby="def-agenda" className="scroll-mt-16">
+        <h2 id="def-agenda" className="mt-10 text-lg font-semibold">Agenda · Recursos</h2>
+        <RecursosFrotaAgenda />
+      </section>
 
       <h2 className="mt-10 text-lg font-semibold">Aspeto</h2>
       <div className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
