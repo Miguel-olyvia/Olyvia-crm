@@ -21,13 +21,15 @@ beforeEach(() => {
 afterEach(() => { cleanup(); localStorage.clear(); });
 
 describe("Proposta do V1 · Pessoas e Negócios", () => {
-  it("o menu tem Pessoas no lugar de Leads e Clientes, e Negócios tem quatro colunas por documento", () => {
+  it("o menu tem Pessoas no lugar de Leads e Clientes, e Negócios é o quadro de sempre, da lead à obra (aprovado a 16/10)", () => {
     render(<PrototipoNegocios />);
     expect(within(menu()).getByRole("button", { name: "Pessoas" })).toBeInTheDocument();
     expect(within(menu()).queryByRole("button", { name: "Leads" })).toBeNull();
     irPara("Negócios");
-    for (const c of ["Orçamento", "Proposta", "Contrato", "Pagamento"]) expect(within(main()).getAllByRole("heading", { level: 2, name: new RegExp("^" + c) }).length).toBeGreaterThan(0);
-    expect(within(main()).queryByRole("heading", { level: 2, name: /^Lead/ })).toBeNull();
+    for (const c of ["Lead", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"]) expect(within(main()).getAllByRole("heading", { level: 2, name: new RegExp("^" + c) }).length).toBeGreaterThan(0);
+    // o negócio novo também se cria no quadro, como antes
+    fireEvent.click(botao(/Novo negócio/));
+    expect(within(main()).getAllByRole("textbox", { name: /Nome/ }).length).toBeGreaterThan(0);
   });
 
   it("a nova lead cria-se em Pessoas: sem nome diz o que falta; com nome abre a ficha com o próximo passo", () => {
@@ -46,7 +48,7 @@ describe("Proposta do V1 · Pessoas e Negócios", () => {
     expect(botao("Registar chamada")).toBeInTheDocument();
     // as notas inventadas não aparecem numa pessoa criada agora
     expect(within(main()).queryByText(/Decide em conjunto/)).toBeNull();
-    // o formulário do motor não fica pendurado: Negócios mostra o quadro por documento
+    // o formulário do motor não fica pendurado: Negócios mostra o quadro sem o formulário aberto
     irPara("Negócios");
     expect(within(main()).queryByRole("textbox", { name: "Nome" })).toBeNull();
   });

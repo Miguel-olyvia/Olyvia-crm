@@ -24,7 +24,6 @@ import { PessoasSimples, esquecerPessoas } from "./PessoasSimples";
 import { PessoasFunc, esquecerPessoasFunc } from "./PessoasFunc";
 import { NegociosFunc, esquecerNegociosFunc } from "./NegociosFunc";
 import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
-import { NegociosV1Docs } from "./NegociosV1Docs";
 import { NumerosV1 } from "./NumerosV1";
 import { FrotaV1, abrirViaturaFrotaV1, esquecerFrotaV1 } from "./FrotaV1";
 import { RAMO_V1 } from "./ramoV1";
@@ -211,9 +210,10 @@ export default function PrototipoNegocios() {
   // Com a V2 ligada a lista de Negócios é por documento. Enquanto se cria uma lead (S.novo) mostra-se a lista de sempre, que tem o formulário.
   // Com a V2 ligada, "Nova lead" é de Pessoas: o menu destaca Pessoas e uma frase avisa que a lead criada se vê lá.
   const novaLeadV2 = v2 && !!S.novo;
-  // Com a proposta do V1 a lead cria-se em Pessoas: Negócios mostra sempre o quadro por documento (um S.novo antigo não o tapa).
+  // 16/10 (aprovado): com a proposta do V1, Negócios fica o quadro de sempre, da lead à obra (Pessoas e Negócios não se separam);
+  // o quadro só por documento (NegociosV1Docs.tsx) fica nos ficheiros, sem uso.
   const listaNegocios = simples
-    ? (v1n ? <NegociosV1Docs {...ctx} /> : v2 && !S.novo ? (func ? <NegociosFunc {...ctx} /> : <NegociosV2 {...ctx} />) : novaLeadV2
+    ? (v2 && !S.novo ? (func ? <NegociosFunc {...ctx} /> : <NegociosV2 {...ctx} />) : novaLeadV2
       ? (
         <>
           <p className="mx-auto w-full max-w-3xl px-4 pt-6 text-[15px] text-muted-foreground sm:px-8">Nova lead: depois de criada, vê-se em Pessoas.</p>

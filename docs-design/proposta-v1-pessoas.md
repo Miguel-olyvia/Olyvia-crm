@@ -35,7 +35,8 @@ Os problemas que se repetem:
      - o histórico;
      - os dados.
    - Se o passo é de outro papel, diz de quem é (guidelines C27) e não mostra o botão.
-2. **Negócios só por documento**, em quatro colunas: Orçamento, Proposta, Contrato e Pagamento.
+2. **Negócios fica o quadro de sempre, da lead à obra** (decisão aprovada a 16/10: Pessoas e Negócios não se separam). O quadro só por documento (quatro colunas, NegociosV1Docs.tsx) fica nos ficheiros, sem uso.
+   - Proposta original, posta de lado: quatro colunas, Orçamento, Proposta, Contrato e Pagamento.
    - Lead, contacto e visita são da pessoa e ficam em Pessoas; a obra fica nas Operações.
    - Por baixo do quadro, uma frase diz quantos estão antes e depois, com ligações.
    - O cartão, a pesquisa e os filtros são os do V1 de sempre.
