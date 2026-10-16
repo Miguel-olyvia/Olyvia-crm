@@ -26,11 +26,12 @@ export function FotosEtapa({ ctx, d, etapa, simples }: { ctx: Ctx; d: Negocio; e
           ))}
         </div>
         <span className="text-sm text-muted-foreground">{n} {n === 1 ? "fotografia" : "fotografias"} · {DICA[etapa]}</span>
-        <Button variant="outline" size="sm" disabled={v.fechada} onClick={go(() => A.foto(d.id, etapa))}><Camera className="mr-1.5 h-4 w-4" />Tirar foto</Button>
+        {/* sem fotografias no fecho da visita: o "Tirar foto" fica inválido e ligado ao aviso, para a validação (R6) trazer o foco aqui */}
+        <Button variant="outline" size="sm" disabled={v.fechada} aria-invalid={(etapa === "area" && aValidar(d, "fotos") && semFotos) || undefined} aria-describedby={etapa === "area" && aValidar(d, "fotos") && semFotos ? "fotos-falta" : undefined} onClick={go(() => A.foto(d.id, etapa))}><Camera className="mr-1.5 h-4 w-4" />Tirar foto</Button>
       </div>
       {etapa === "area" && (
         <>
-          {aValidar(d, "fotos") && semFotos && <p className="text-[15px] font-medium text-destructive">Tire pelo menos uma fotografia (em qualquer etapa), ou marque que o cliente não quis.</p>}
+          {aValidar(d, "fotos") && semFotos && <p id="fotos-falta" className="text-[15px] font-medium text-destructive">Tire pelo menos uma fotografia (em qualquer etapa), ou marque que o cliente não quis.</p>}
           <Campos grupo={{ titulo: "", campos: [{ k: "diag_cliente_recusou_fotos", l: "O cliente não quis fotografias", t: "sim_nao", opcional: true }] }} d={d} A={A} run={run} simples={simples} ro={v.fechada} />
         </>
       )}

@@ -366,6 +366,27 @@ describe("a seleção guiada no ecrã", () => {
     expect(titulo()).toBe("O cliente mantém a sanita e a base de duche?");
   });
 
+  it("no resumo com respostas em falta, o primário de baixo é 'Responder o que falta' e leva lá; com tudo respondido, 'Continuar' (robô Q2, 16/10)", () => {
+    const { S, d } = preparar();
+    const guia = { avancar: vi.fn(), recuar: vi.fn(), setGuiado: vi.fn() };
+    render(<Montar S={S} d={d} guia={guia} />);
+    for (let i = 0; i < 10 && titulo() !== "Resumo"; i++) seguinte();
+    expect(titulo()).toBe("Resumo");
+    expect(screen.queryByRole("button", { name: /^Continuar/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Responder o que falta/ }));
+    expect(titulo()).not.toBe("Resumo");
+    expect(guia.avancar).not.toHaveBeenCalled();
+    cleanup();
+    const r = preparar(), K = lerCatalogo();
+    r.d.visita.manter = { pav: "sim" };
+    tocarProdutoGuiado(acoes(r.S, vi.fn(), (fn) => fn()), K, r.d, obrigacoes(K, ["loucas"], r.d.visita)[0], prodN("Sanita compacta"));
+    render(<Montar S={r.S} d={r.d} guia={guia} />);
+    for (let i = 0; i < 10 && titulo() !== "Resumo"; i++) seguinte(); // a seleção lembra o último passo do negócio
+    expect(titulo()).toBe("Resumo");
+    fireEvent.click(screen.getByRole("button", { name: /^Continuar/ }));
+    expect(guia.avancar).toHaveBeenCalled();
+  });
+
   it("aguenta 2.200 produtos: mostra os primeiros 6 e o resto com 'Ver mais' ou a pesquisa", () => {
     mudarCatalogo((k) => {
       for (let i = 0; i < 2200; i++) k.produtos.push({ id: `x${i}`, n: `Toalheiro modelo ${i}`, sub: "Toalheiros", custo: 10, un: "un", no: null, sku: `SKU-${i}` } as Produto);

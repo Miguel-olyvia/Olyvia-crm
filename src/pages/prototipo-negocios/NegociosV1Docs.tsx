@@ -94,9 +94,9 @@ export function NegociosV1Docs({ S, A, go, q, setQ }: Ctx) {
 
       <p className="mt-8 text-[15px] text-muted-foreground">
         Antes do orçamento, a pessoa está em{" "}
-        <button type="button" onClick={go(() => { irParaLista(); A.nav("pessoas"); })} className="font-medium text-primary underline-offset-4 hover:underline">Pessoas</button>
+        <button type="button" onClick={go(() => { irParaLista(); A.nav("pessoas"); })} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Pessoas</button>
         {fora.antes ? ` (${fora.antes} em contacto ou visita)` : ""}. Depois do pagamento, a obra está em{" "}
-        <button type="button" onClick={go(() => A.nav("operacoes"))} className="font-medium text-primary underline-offset-4 hover:underline">Operações</button>
+        <button type="button" onClick={go(() => A.nav("operacoes"))} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Operações</button>
         {fora.obra ? ` (${fora.obra} em obra)` : ""}. Os cartões não se arrastam: mudam de coluna quando o documento muda.
       </p>
     </div>

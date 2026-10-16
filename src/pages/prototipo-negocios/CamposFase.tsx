@@ -433,7 +433,8 @@ function Contador({ c, val, set, rot, desc, erro }: Ctl & { c: Def }) {
         className={cn("inline-flex items-center rounded-lg border bg-card p-0.5", erro ? "border-destructive" : "border-input")}>
         <button type="button" className={btn} aria-label="Menos" disabled={n !== null && n <= min} onClick={() => set(String(n === null ? min : Math.max(min, n - 1)))}><Minus className="h-4 w-4" /></button>
         <output aria-live="polite" className="w-14 text-center text-[17px] font-medium tabular-nums">{txt}</output>
-        <button type="button" className={btn} aria-label="Mais" disabled={n !== null && n >= max} onClick={() => set(String(n === null ? Math.max(min, 1) : Math.min(max, n + 1)))}><Plus className="h-4 w-4" /></button>
+        {/* aria-invalid no "Mais" (o primeiro toque que responde): o leitor de ecrã sabe que falta e o foco da validação (R6) vem cá parar */}
+        <button type="button" className={btn} aria-label="Mais" aria-invalid={erro || undefined} disabled={n !== null && n >= max} onClick={() => set(String(n === null ? Math.max(min, 1) : Math.min(max, n + 1)))}><Plus className="h-4 w-4" /></button>
       </div>
       {c.un && <span className="text-[15px] text-muted-foreground">{c.un}</span>}
     </div>
@@ -454,7 +455,7 @@ function DataRapida({ c, id, val, set, rot, desc, erro }: Ctl & { c: Def; id: st
     <div className="grid gap-2 sm:justify-items-end">
       <div role="group" aria-labelledby={rot} aria-describedby={desc} className="flex flex-wrap gap-2 sm:justify-end">
         {op.map(([l, v]) => (
-          <button key={l} type="button" aria-pressed={val === v && !outra} onClick={() => { setOutra(false); set(val === v ? "" : v); }}
+          <button key={l} type="button" aria-pressed={val === v && !outra} aria-invalid={erro || undefined} onClick={() => { setOutra(false); set(val === v ? "" : v); }}
             className={cn("min-h-11 rounded-lg border px-4 text-[15px] transition-colors",
               val === v && !outra ? "border-primary bg-primary text-primary-foreground" : cn("bg-card hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
             {l}
@@ -465,7 +466,7 @@ function DataRapida({ c, id, val, set, rot, desc, erro }: Ctl & { c: Def; id: st
           Outra data
         </button>
       </div>
-      {outra && <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} aria-labelledby={rot} className={cn(INPUT_G, "w-52 animate-in fade-in-0")} />}
+      {outra && <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} aria-labelledby={rot} aria-describedby={desc} aria-invalid={erro || undefined} className={cn(INPUT_G, "w-52 animate-in fade-in-0")} />}
       {val && <span className="text-sm text-muted-foreground">{mostra(c, val)}</span>}
     </div>
   );

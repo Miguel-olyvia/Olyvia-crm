@@ -1,4 +1,6 @@
-# Proposta: Pessoas e Negócios mais simples, no V1 (16/10/2026)
+# O V1 do Ruben: Pessoas, Negócios, Números e Frota (16/10/2026)
+
+> **Ramo `feat/v1`** (desde 16/10). O protótipo é só o V1: não há seletor de versão e "Pessoas numa página" vem ligada por defeito (`src/pages/prototipo-negocios/ramoV1.ts`). A V2 e a V2 funcional continuam nos ficheiros, para os merges do ramo partilhado `feat/negocios-prototipo` serem fáceis. No ramo partilhado, a proposta fica desligada por defeito.
 
 Para o Rafael e o Miguel. A proposta parte do que fizeram na V2 e na V2 funcional: aproveita a lógica e corta na interface.
 
@@ -83,6 +85,32 @@ Testes:
 - `PessoasV1.test.tsx` (5) testa a app inteira: o interruptor, a nova lead, o voltar e o menu, e o passo de outro papel.
 
 A suite do protótipo tem 1444 testes. Na execução completa falham 2 da V2 (`CatalogoV2` e `DefinicoesV2`) por tempo (5 s); sozinhos passam.
+
+## 16/10, à tarde: o V1 assumido ("assume tu")
+
+Decisões tomadas sozinho, para o Ruben validar:
+
+1. **Ramo próprio.** Ver o aviso no topo. Nos testes, `RAMO_V1` vale `false`, para os testes dos colegas continuarem a valer sem lhes mexer; os testes do ramo forçam-no com `vi.mock`.
+2. **Ficha da pessoa:**
+   - "Marcar como perdida" é uma ligação cinzenta (C1). A confirmação abre no sítio (C23), pede o motivo em botões (P5) e diz a consequência. O motivo fica no negócio (`motivoPerda`) e sobrevive a recarregar a página.
+   - Num passo de outro papel aparece "Mudar para …" (C27).
+3. **Números** (menu, só no V1): o que a Direção vem ver, no lugar dos dashboards que saíram do ecrã do comercial.
+   - Primeiro o que pede uma decisão (exceções à margem), com o único primário.
+   - Depois quatro números: em proposta, ganho, conversão e margem média com o mínimo.
+   - Depois as etapas a que os negócios chegam, de onde vêm e porque se perdem.
+   - Só dados do Estado, nada inventado. Barras de uma só cor, com o valor escrito ao lado.
+4. **Frota** (menu, só no V1). A Frota do Rafael tem 10 ecrãs, 9 separadores e 13 diálogos. Aqui são dois ecrãs, com as regras e as ações dele sem mudar (`frota/`):
+   - **Frota:** "O que fazer agora" com a tarefa mais urgente e o formulário dela ali mesmo. As tarefas são: manutenção a dar como feita, documento a renovar, revisão a marcar e multa a identificar (com o condutor sugerido, marcado como tal). Depois vêm as outras tarefas e as viaturas.
+   - **Viatura:** uma página com o que fazer agora, "Registar" (km, abastecimento, avaria, multa ou sinistro), datas, esta semana, custos e histórico. Com um registo aberto, o primário passa a ser o desse registo (P1).
+   - Os erros das regras aparecem no campo, com o foco lá (R6). As datas escolhem-se num toque (C7).
+   - Ficheiros: `frotaV1Docs.ts` (lógica e testes) e `FrotaV1.tsx` (testes de interface).
+5. **Robô do botão principal (Q2)** a 390 px, do Hoje em diante. Em cada ecrã toca no primário, responde ao que está marcado em falta e troca de papel quando o passo é de outro. Encontrou três coisas, já corrigidas:
+   - **Perguntas sem marca.** O contador e as datas rápidas em falta só tinham a borda vermelha: sem `aria-invalid`, o leitor de ecrã não dizia nada e o foco da validação (R6) não chegava lá. Agora o "Mais" do contador e as datas rápidas ficam marcados (`CamposFase.tsx`, teste `camposInvalidos.test.tsx`).
+   - **"Completo" com uma falta por resolver.** Um passo dizia "completo" com a fotografia ainda em falta. Agora diz "falta 1 coisa, em baixo" (`NegocioSimples.tsx`). Além disso, o "Tirar foto" fica marcado e ligado ao aviso (`FotosEtapa.tsx`).
+   - **O resumo das Necessidades fazia andar em círculos.** Com respostas em falta, o primário era "Continuar": levava ao "Fim", o portão falhava e voltava-se aqui. Agora, com faltas, o primário é "Responder o que falta" e leva à primeira resposta em falta; com tudo respondido, volta a "Continuar" (`SelecaoGuiada.tsx`, teste em `selecao.test.tsx`).
+
+   Na Frota, o robô chega a "Nada por fazer" em 7 toques, sem becos.
+6. **Margens (Q1)** a 360, 390 e 1280 px (emulação de dispositivo, com o movimento reduzido ligado) em Pessoas, ficha, perda, Negócios, Frota, viatura, Números e Hoje: nada sai das margens. Os únicos alvos abaixo de 44 px eram as ligações "Pessoas" e "Operações" no rodapé de Negócios, já corrigidas.
 
 ## Fica por decidir
 

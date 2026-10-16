@@ -158,6 +158,8 @@ export function SelecaoGuiada(ctx: P) {
 
   const r = resumoNecessidades(S, d, orcLinhas(d, S));
   const fim = atual.tipo === "resumo";
+  // no resumo, a primeira resposta em falta (vem do PassoResumo): o primário de baixo passa a "Responder o que falta" (robô Q2, 16/10)
+  const [faltaK, setFaltaK] = useState<string | null>(null);
   const titulo = atual.tipo === "pergunta" && atual.o ? atual.o.pergunta ?? `Escolha ${atual.titulo.toLowerCase()}` : atual.titulo;
   const sub = atual.tipo === "pergunta" && atual.o ? `Para ${nomeCurto(nomeSvc(S, atual.o.sid)).toLowerCase()}`
     : atual.tipo === "servicos" ? "Toque para ligar ou desligar." : atual.tipo === "fornece" ? "Por serviço: toque no que o cliente traz. Sai do preço; a mão de obra e a instalação ficam." : null;
@@ -185,7 +187,7 @@ export function SelecaoGuiada(ctx: P) {
                 {atual.tipo === "pergunta" && atual.o && <PassoPergunta key={atual.o.sid} ctx={ctx} K={K} o={atual.o} tiles={tiles} resolvido={() => avancarSozinho(atual.k)} />}
                 {atual.tipo === "outros" && <PassoOutros ctx={ctx} K={K} obr={obr} />}
                 {atual.tipo === "fornece" && <PassoFornece ctx={ctx} obr={obr} faseSvc={faseSvc} />}
-                {atual.tipo === "resumo" && <PassoResumo ctx={ctx} K={K} passos={passos} obr={obr} ir={ir} tiles={tiles} faseSvc={faseSvc} />}
+                {atual.tipo === "resumo" && <PassoResumo ctx={ctx} K={K} passos={passos} obr={obr} ir={ir} tiles={tiles} faseSvc={faseSvc} aoFaltar={setFaltaK} />}
               </div>
             </Saindo>
           </motion.div>
@@ -218,8 +220,8 @@ export function SelecaoGuiada(ctx: P) {
           <p aria-hidden="true" className="truncate text-sm text-muted-foreground">{plural(r.servicos, "serviço", "serviços")} · {plural(r.produtos, "produto", "produtos")}</p>
         </div>
         {(!fim || guia) && (
-          <Button size="lg" className="h-12 shrink-0 rounded-xl px-5 text-[15px] shadow-[0_6px_16px_-6px_hsl(var(--primary)/0.6)]" onClick={seguinte}>
-            {fim ? "Continuar" : "Seguinte"}<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+          <Button size="lg" className="h-12 shrink-0 rounded-xl px-5 text-[15px] shadow-[0_6px_16px_-6px_hsl(var(--primary)/0.6)]" onClick={fim && faltaK ? () => ir(faltaK) : seguinte}>
+            {fim ? (faltaK ? "Responder o que falta" : "Continuar") : "Seguinte"}<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
           </Button>
         )}
       </div>
@@ -744,8 +746,10 @@ function BlocoServico({ ctx, K, b, fase }: { ctx: P; K: Catalogo; b: BlocoFornec
 /* ================================================================== o Resumo */
 interface LinhaCrono { k: string; nome: string; det: string; fig: ReactNode; passo: string }
 
-function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
+function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc, aoFaltar }: {
   ctx: P; K: Catalogo; passos: PassoSel[]; obr: Obrigacao[]; ir: (k: string) => void; tiles: TileServico[]; faseSvc: (sid: SvcId) => FaseObra;
+  /** Diz à barra de baixo qual é a primeira resposta em falta (ou null). */
+  aoFaltar?: (k: string | null) => void;
 }) {
   const { S, d } = ctx;
   const reduzir = useReduzir();
@@ -794,6 +798,8 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
   const faltas = revisao.filter((x) => x.l.falta).length;
   const pronto = faltas === 0;
   const primeiraFalta = revisao.find((x) => x.l.falta);
+  const kFalta = primeiraFalta?.p.k ?? null;
+  useEffect(() => { aoFaltar?.(kFalta); return () => aoFaltar?.(null); }, [kFalta, aoFaltar]);
 
   // a cronologia por fase: os serviços (com o ícone) e os produtos (com a ilustração); cada linha volta ao seu passo
   const porSid = new Map(tiles.map((t) => [t.sid, t]));

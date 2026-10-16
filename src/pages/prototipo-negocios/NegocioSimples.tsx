@@ -228,7 +228,8 @@ export function NegocioSimples(ctx: Ctx) {
 function tempo(p: Passo): string {
   if (!p.conta) return completo(p) ? "feito" : "por fazer";
   const f = p.conta.n - p.conta.f;
-  if (f <= 0) return "completo";
+  // as perguntas estão respondidas, mas o portão ainda aponta uma falta (ex.: as fotografias): não se diz "completo" (robô Q2, 16/10)
+  if (f <= 0) return p.falta ? `falta${p.falta > 1 ? "m" : ""} ${p.falta} ${p.falta > 1 ? "coisas" : "coisa"}, em baixo` : "completo";
   const min = Math.ceil((f * 6) / 60);
   return `falta${f > 1 ? "m" : ""} ${f} ${f === 1 ? "resposta" : "respostas"} · ${min <= 1 ? "menos de 1 minuto" : `cerca de ${min} minutos`}`;
 }
