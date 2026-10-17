@@ -47,7 +47,7 @@ describe("SeparadorPessoas: negócios de cada pessoa na Lista", () => {
     render(<Arnes />);
     const linhas = screen.getAllByRole("row").slice(1);
     const semBotao = linhas.filter((l) => within(l).queryByRole("button", { name: /^(Ver|Esconder) negócios/ }) === null);
-    expect(semBotao.length + botoesVer().length).toBe(17);
+    expect(semBotao.length + botoesVer().length).toBe(34);
     for (const l of semBotao) expect(within(l).getByText("Nada a fazer neste momento")).toBeInTheDocument();
   });
 

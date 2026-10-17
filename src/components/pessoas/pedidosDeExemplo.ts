@@ -4,6 +4,7 @@ import type { NegocioMes, VisitaNegocio } from "@/components/negocio-metas/negoc
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { NEGOCIOS_PESSOAS_EXEMPLO, SEMENTES_EXEMPLO } from "./pessoasExemplo";
 import { papelEAbertos } from "./juntarPessoas";
+import { PEDIDOS_VARIADO } from "./pedidosExemploVariado";
 import { MORADA_VISITA_VAZIA, moradaDaLead } from "./moradaVisita";
 import type { PessoaSemente, VisitaSemente } from "./pessoaSemente";
 import type { PapelPessoa, PedidoNegocio } from "./pessoasTipos";
@@ -60,8 +61,11 @@ export function pedidosDeExemplo(entradas: readonly EntradaPedido[], hoje: strin
   });
 }
 
-/** Os pedidos das pessoas de exemplo (as leads sem negócio aberto e quem tem uma visita marcada). */
-export const PEDIDOS_EXEMPLO: PedidoNegocio[] = pedidosDeExemplo(
-  SEMENTES_EXEMPLO.map((pessoa) => ({ pessoa, ...papelEAbertos(NEGOCIOS_PESSOAS_EXEMPLO.filter((n) => n.pessoaId === pessoa.id)) })),
-  HOJE_EXEMPLO,
-);
+/** Os pedidos das pessoas de exemplo (as leads sem negócio aberto e quem tem uma visita marcada) e os dos exemplos variados (`pd-101` em diante). */
+export const PEDIDOS_EXEMPLO: PedidoNegocio[] = [
+  ...pedidosDeExemplo(
+    SEMENTES_EXEMPLO.map((pessoa) => ({ pessoa, ...papelEAbertos(NEGOCIOS_PESSOAS_EXEMPLO.filter((n) => n.pessoaId === pessoa.id)) })),
+    HOJE_EXEMPLO,
+  ),
+  ...PEDIDOS_VARIADO,
+];

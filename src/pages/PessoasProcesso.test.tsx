@@ -250,7 +250,7 @@ describe("Quadro: da visita feita ao negócio", () => {
     const painel = await abrirPainelVisita("Rita Albuquerque");
     fireEvent.click(within(painel).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(within(coluna("Visita")).queryByRole("button", { name: /^Criar o negócio/ })).not.toBeInTheDocument();
+    expect(within(coluna("Visita")).queryByRole("button", { name: /^Criar o negócio: .* Rita Albuquerque/ })).not.toBeInTheDocument();
     expect(botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque")).toBeInTheDocument();
   }, TEMPO);
 });

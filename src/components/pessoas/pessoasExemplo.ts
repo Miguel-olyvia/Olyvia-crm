@@ -6,6 +6,8 @@ import { DADOS_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { paraPessoa, type PessoaSemente } from "./pessoaSemente";
 import { atividadeExemplo, extrasExemplo } from "./pessoasExemploFicha";
+import { NEGOCIOS_VARIADO } from "./negociosExemploVariado";
+import { PESSOAS_VARIADO } from "./pessoasExemploVariado";
 import type {
   CodigoMatch, EtapaPessoa, ItemAtividade, NegocioHistorico, NegocioPessoa, OrigemPessoa, Pessoa, Submissao, TipoSubmissao,
 } from "./pessoasTipos";
@@ -78,7 +80,7 @@ export const SEMENTES_EXEMPLO: PessoaSemente[] = [
 ];
 
 /** As pessoas de exemplo: as sementes sem a etapa nem a visita (que são dos pedidos). */
-export const PESSOAS_EXEMPLO: Pessoa[] = SEMENTES_EXEMPLO.map(paraPessoa);
+export const PESSOAS_EXEMPLO: Pessoa[] = [...SEMENTES_EXEMPLO.map(paraPessoa), ...PESSOAS_VARIADO];
 
 /** A atividade de exemplo (chamadas, emails e registo da ficha), gerada a partir do último contacto de cada pessoa. */
 export const ATIVIDADE_EXEMPLO: ItemAtividade[] = atividadeExemplo(PESSOAS_EXEMPLO);
@@ -141,7 +143,9 @@ const HISTORICO_FABIO: NegocioHistorico = {
 /** Os ids dos negócios que estão no quadro de Negócio e metas (só esses se abrem lá). */
 export const IDS_NEGOCIOS_DO_QUADRO: ReadonlySet<string> = new Set(DADOS_EXEMPLO.negocios.map((n) => n.id));
 
-export const NEGOCIOS_PESSOAS_EXEMPLO: NegocioPessoa[] = [...DADOS_EXEMPLO.negocios, ...ABERTOS_EXTRA, ...HISTORICOS, HISTORICO_FABIO];
+export const NEGOCIOS_PESSOAS_EXEMPLO: NegocioPessoa[] = [
+  ...DADOS_EXEMPLO.negocios, ...ABERTOS_EXTRA, ...HISTORICOS, HISTORICO_FABIO, ...NEGOCIOS_VARIADO,
+];
 
 /**
  * A distribuição dos códigos 01 a 06: a ÚNICA tabela a mudar quando os utilizadores

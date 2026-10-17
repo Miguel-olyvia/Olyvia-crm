@@ -28,11 +28,11 @@ const renderPage = (endereco = "/pessoas") =>
 beforeEach(() => window.localStorage.clear());
 
 describe("Pessoas: arranque da lista", () => {
-  it("mostra o resumo, a tabela com 17 linhas e o separador de submissões com (6)", () => {
+  it("mostra o resumo, a tabela com 34 linhas e o separador de submissões com (6)", () => {
     renderPage();
-    expect(screen.getByText("17 pessoas · 6 clientes · 6 sem negócio")).toBeInTheDocument();
+    expect(screen.getByText("34 pessoas · 15 clientes · 13 sem negócio")).toBeInTheDocument();
     const tabela = screen.getByRole("table");
-    expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 17);
+    expect(within(tabela).getAllByRole("row")).toHaveLength(1 + 34);
     expect(screen.getByRole("tab", { name: "Submissões, 6 pendentes" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Pessoas" })).toHaveAttribute("aria-selected", "true");
   });
@@ -43,8 +43,8 @@ describe("Pessoas: arranque da lista", () => {
     expect(within(tabela).getAllByRole("columnheader").map((c) => c.textContent)).toEqual(
       ["Pessoa", "Localidade", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Valor", "Negócios"],
     );
-    expect(screen.getByRole("button", { name: /Todos 17/ })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /Leads 9/ })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: /Todos 34/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Leads 17/ })).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Nova lead" })).toBeInTheDocument();
     expect(screen.queryByText(/Serviço/)).not.toBeInTheDocument();
   });

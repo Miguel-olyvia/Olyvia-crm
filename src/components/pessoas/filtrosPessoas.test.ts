@@ -7,11 +7,14 @@ import {
 import { pedidoBase, pessoaBase, resumoBase, visitaBase } from "./fabricaTestes";
 import { juntarPessoas } from "./juntarPessoas";
 import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
+import { NEGOCIOS_ANTIGOS, PEDIDOS_ANTIGOS, PESSOAS_ANTIGAS } from "./exemploAntigoParaTestes";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import type { FiltrosPessoas } from "./pessoasTipos";
 import { pessoasComPendentes } from "./resolverSubmissao";
 
-const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
+// As listas e contagens exatas abaixo são as das 17 pessoas de antes; os exemplos variados (17 pessoas a mais) contam no último describe.
+const todos = juntarPessoas(PESSOAS_ANTIGAS, NEGOCIOS_ANTIGOS, HOJE_EXEMPLO, PEDIDOS_ANTIGOS);
+const comVariados = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
 const pendentes = pessoasComPendentes(SUBMISSOES_EXEMPLO);
 const nomes = (f: Partial<FiltrosPessoas>) =>
   filtrarPessoas(todos, { ...FILTROS_INICIAIS, ...f }, pendentes).map((r) => r.pessoa.nome).sort();
@@ -167,5 +170,18 @@ describe("ordenação", () => {
     ordenarPessoas(todos, "valor", pendentes);
     expect(todos.map((r) => r.pessoa.id)).toEqual(antes);
     expect(ordenarPessoas([], "urgencia", new Set())).toEqual([]);
+  });
+});
+
+describe("com os exemplos variados (34 pessoas)", () => {
+  it("os totais do seletor e dos chips somam as 8 leads e os 9 clientes novos (só o Vítor atrasa e só a Ema está por contactar)", () => {
+    expect(contagensTipos(comVariados, FILTROS_INICIAIS, pendentes)).toEqual({ leads: 17, clientes: 15, todos: 34 });
+    expect(contagensChips(comVariados, FILTROS_INICIAIS, pendentes)).toEqual({ todas: 34, porContactar: 3, atrasadas: 5, perdidas: 2 });
+  });
+
+  it("Com visita passa a incluir as leads e os clientes com um pedido em Visita", () => {
+    const nomesComVisita = filtrarPessoas(comVariados, { ...FILTROS_INICIAIS, comVisita: true }, pendentes).map((r) => r.pessoa.nome).sort();
+    expect(nomesComVisita).toEqual(expect.arrayContaining(["Filipa Azevedo", "Gaspar Loureiro", "Helga Brandão", "Ivo Carneiro", "Jaime Serrano", "Pascoal Rebelo"]));
+    expect(nomesComVisita).not.toContain("Ema Cardoso");
   });
 });

@@ -19,8 +19,8 @@ const item = (id: string, quando: string): ItemAtividade => ({
 const chamada = { resultado: "atendeuInteressado", nota: "Quer visita", passo: "ligarAmanha", hoje: "2026-10-13" } as const;
 
 describe("dados de exemplo da ficha", () => {
-  it("preenche os campos novos nas 17 pessoas e gera 1 a 3 itens de atividade por pessoa", () => {
-    expect(PESSOAS_EXEMPLO).toHaveLength(17);
+  it("preenche os campos novos nas 34 pessoas (17 de antes e 17 variadas) e gera 1 a 3 itens de atividade por pessoa", () => {
+    expect(PESSOAS_EXEMPLO).toHaveLength(34);
     expect(PESSOAS_EXEMPLO.filter((p) => p.empresa)).toHaveLength(4);
     expect(PESSOAS_EXEMPLO.filter((p) => p.qualificacao)).toHaveLength(6);
     expect(SEMENTES_EXEMPLO.filter((p) => p.etapa === "cliente").every((p) => p.nif)).toBe(true);
@@ -33,8 +33,8 @@ describe("dados de exemplo da ficha", () => {
     expect(ATIVIDADE_EXEMPLO.every((i) => i.exemplo)).toBe(true);
   });
 
-  it("só as pessoas sem chamada ficam sem resultado (Sem contacto) e as duas perdidas têm passo", () => {
-    expect(PESSOAS_EXEMPLO.filter((p) => !p.resultadoContacto).map((p) => p.id).sort()).toEqual(["p-beatriz", "p-hugo"]);
+  it("só as pessoas sem chamada ficam sem resultado (Sem contacto, a Ema e o Rodrigo são as novas) e as duas perdidas têm passo", () => {
+    expect(PESSOAS_EXEMPLO.filter((p) => !p.resultadoContacto).map((p) => p.id).sort()).toEqual(["p-beatriz", "p-hugo", "pv-ema", "pv-rodrigo"]);
     expect(PESSOAS_EXEMPLO.filter((p) => p.perdida).map((p) => [p.id, p.perdida?.passo])).toEqual([["p-joana", 1], ["p-fabio", 3]]);
   });
 });

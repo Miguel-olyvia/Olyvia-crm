@@ -6,6 +6,7 @@ import { negocioBase, sementeBase } from "./fabricaTestes";
 import { PEDIDOS_EXEMPLO, pedidosDeExemplo } from "./pedidosDeExemplo";
 import type { PessoaSemente, VisitaSemente } from "./pessoaSemente";
 import { SEMENTES_EXEMPLO } from "./pessoasExemplo";
+import { PEDIDOS_ANTIGOS } from "./exemploAntigoParaTestes";
 
 const HOJE = "2026-10-13";
 const gerar = (pessoa: PessoaSemente, abertos = [] as ReturnType<typeof negocioBase>[], papel: "lead" | "cliente" = "lead") =>
@@ -121,7 +122,7 @@ describe("PEDIDOS_EXEMPLO: nenhum caso de exemplo se perde", () => {
   });
 
   it("as sete leads sem negócio aberto têm um pedido, e o único outro é o do Paulo (tem visita)", () => {
-    const ids = PEDIDOS_EXEMPLO.map((p) => p.pessoaId).sort();
+    const ids = PEDIDOS_ANTIGOS.map((p) => p.pessoaId).sort();
     expect(ids).toEqual(["p-beatriz", "p-fabio", "p-goncalo", "p-hugo", "p-joana", "p-lucia", "p-paulo", "p-rita"]);
   });
 

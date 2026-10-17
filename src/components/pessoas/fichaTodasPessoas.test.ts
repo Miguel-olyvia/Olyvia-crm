@@ -17,8 +17,8 @@ const t = (chave: string, params?: Record<string, string | number>) =>
 const RESUMOS = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, "2026-10-13", PEDIDOS_EXEMPLO);
 
 describe("a ficha de todas as pessoas de exemplo", () => {
-  it("há as 17 pessoas", () => {
-    expect(RESUMOS).toHaveLength(17);
+  it("há as 34 pessoas (17 de antes e 17 variadas) e todas passam nas verificações abaixo", () => {
+    expect(RESUMOS).toHaveLength(34);
   });
 
   it("a linha do cabeçalho nunca repete um segmento nem deixa um separador solto", () => {

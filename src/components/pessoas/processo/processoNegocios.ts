@@ -5,10 +5,12 @@
 import { useSyncExternalStore } from "react";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { alteracoesAtuais, guardarNegocio, proximaSequenciaOrcamento } from "@/components/negocio-metas/negociosAlterados";
+import { EXTRAS_VARIADO } from "./extrasExemploVariado";
 import { SEM_EXTRAS, type ExtrasNegocio, type ExtrasPorNegocio } from "./orcamentoDetalhado";
 import type { EstadoTransicao, Transicao } from "./transicoes";
 
-let estado: ExtrasPorNegocio = SEM_EXTRAS;
+/** Arranca com os orçamentos detalhados dos exemplos variados (só em memória); `repor()` esquece-os, tal como o resto. */
+let estado: ExtrasPorNegocio = EXTRAS_VARIADO;
 const ouvintes = new Set<() => void>();
 
 const mudar = (seguinte: ExtrasPorNegocio): void => {

@@ -37,9 +37,9 @@ const botoesDeFicha = () => screen.queryAllByRole("button", { name: /^Abrir a fi
 beforeEach(() => window.localStorage.clear());
 
 describe("SeparadorPessoas: Lista", () => {
-  it("por defeito mostra a tabela com as 17 pessoas e nenhum quadro", () => {
+  it("por defeito mostra a tabela com as 34 pessoas e nenhum quadro", () => {
     render(<Arnes />);
-    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(1 + 17);
+    expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(1 + 34);
     expect(screen.queryByRole("group", { name: "Pessoas por fase" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Lista" })).toHaveAttribute("aria-pressed", "true");
   });

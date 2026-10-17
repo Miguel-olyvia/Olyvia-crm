@@ -3,10 +3,12 @@ import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "@/components/negocio-metas/negocioM
 import { pedidoBase, pessoaBase } from "./fabricaTestes";
 import { juntarPessoas, papelEAbertos } from "./juntarPessoas";
 import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
+import { NEGOCIOS_ANTIGOS, PEDIDOS_ANTIGOS, PESSOAS_ANTIGAS } from "./exemploAntigoParaTestes";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import { ehHistorico, type ResumoPessoa } from "./pessoasTipos";
 
-const resumos = () => juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
+// As contagens e listas abaixo são as das 17 pessoas de antes; os exemplos variados (mais 17) têm o seu teste e a sua matriz.
+const resumos = () => juntarPessoas(PESSOAS_ANTIGAS, NEGOCIOS_ANTIGOS, HOJE_EXEMPLO, PEDIDOS_ANTIGOS);
 const de = (nome: string): ResumoPessoa => {
   const r = resumos().find((x) => x.pessoa.nome === nome);
   if (!r) throw new Error(`sem ${nome}`);
@@ -24,6 +26,15 @@ describe("dados de exemplo das pessoas", () => {
     expect(todos.filter((r) => r.pessoa.perdida).map((r) => r.pessoa.nome)).toEqual(["Joana Bastos", "Fábio Lemos"]);
   });
 
+  it("com os exemplos variados há 34 pessoas: 15 clientes e 19 leads (2 perdidas), e 14 negócios terminados", () => {
+    const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
+    expect(todos).toHaveLength(34);
+    expect(todos.filter((r) => r.papel === "cliente")).toHaveLength(15);
+    expect(todos.filter((r) => r.papel === "lead")).toHaveLength(19);
+    expect(todos.filter((r) => r.pessoa.perdida)).toHaveLength(2);
+    expect(NEGOCIOS_PESSOAS_EXEMPLO.filter(ehHistorico)).toHaveLength(14);
+  });
+
   it("a relação pessoa-negócio é a de Negócios: os 10 pessoaId vêm de DADOS_EXEMPLO", () => {
     const idsNegocios = DADOS_EXEMPLO.negocios.map((n) => n.pessoaId);
     const ids = PESSOAS_EXEMPLO.map((p) => p.id);
@@ -34,7 +45,7 @@ describe("dados de exemplo das pessoas", () => {
   });
 
   it("os negócios históricos são três e ficam fora do mês", () => {
-    const historicos = NEGOCIOS_PESSOAS_EXEMPLO.filter(ehHistorico);
+    const historicos = NEGOCIOS_ANTIGOS.filter(ehHistorico);
     expect(historicos.map((h) => [h.pessoa, h.mes, h.resultado])).toEqual([
       ["Marta Silveira", "2026-06", "ganho"],
       ["Nuno Barros", "2026-08", "perdido"],

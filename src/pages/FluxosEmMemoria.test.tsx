@@ -45,7 +45,7 @@ const abrirMenuMais = (ficha: HTMLElement) => fireEvent.keyDown(within(ficha).ge
 describe("Pessoas: Nova lead", () => {
   it("abre o painel, cria a pessoa em Por contactar e abre-lhe a ficha", async () => {
     render(aplicacao("/pessoas"));
-    expect(screen.getByText("17 pessoas · 6 clientes · 6 sem negócio")).toBeInTheDocument();
+    expect(screen.getByText("34 pessoas · 15 clientes · 13 sem negócio")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Nova lead" }));
     const painel = await screen.findByRole("dialog", { name: "Nova lead" });
     fireEvent.change(within(painel).getByLabelText(/^Nome/), { target: { value: "Teresa Lobo" } });
@@ -55,7 +55,7 @@ describe("Pessoas: Nova lead", () => {
     fireEvent.click(within(painel).getByRole("button", { name: "Criar lead" }));
     expect(await screen.findByRole("heading", { name: "Teresa Lobo", level: 2 })).toBeInTheDocument();
     expect(screen.getByText(/Lead · Por contactar · Sintra/)).toBeInTheDocument();
-    expect(screen.getByText("18 pessoas · 6 clientes · 7 sem negócio")).toBeInTheDocument();
+    expect(screen.getByText("35 pessoas · 15 clientes · 14 sem negócio")).toBeInTheDocument();
     // A atividade da lead nova: a criação e a nota escrita no painel.
     expect(screen.getByRole("tab", { name: /Atividade/ })).toHaveTextContent("2");
   });
@@ -68,7 +68,7 @@ describe("Pessoas: Nova lead", () => {
     fireEvent.click(within(painel).getByRole("button", { name: "Criar lead" }));
     expect(within(painel).getByText("Escreva o nome.")).toBeInTheDocument();
     expect(within(painel).getByText(/não parece válido/)).toBeInTheDocument();
-    expect(screen.getByText("17 pessoas · 6 clientes · 6 sem negócio")).toBeInTheDocument();
+    expect(screen.getByText("34 pessoas · 15 clientes · 13 sem negócio")).toBeInTheDocument();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 });
