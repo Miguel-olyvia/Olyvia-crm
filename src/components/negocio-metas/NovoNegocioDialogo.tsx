@@ -7,6 +7,7 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { FormularioNovoNegocio } from "./FormularioNovoNegocio";
 import { FOCO } from "./estilos";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
+import type { VisitaNegocio } from "./negocioMetas";
 import type { AbaNovoNegocio, DadosCriarNegocio, PessoaOpcao, RascunhoLevantamento, ValoresIniciaisNegocio } from "./novoNegocio";
 
 interface NovoNegocioDialogoProps {
@@ -19,21 +20,26 @@ interface NovoNegocioDialogoProps {
   aoMudarAberto?: (aberto: boolean) => void;
   /** Não mostra o botão "Novo negócio" (o painel abre só por `aberto`). */
   semBotao?: boolean;
-  /** A pessoa já escolhida ao abrir (a ficha de onde se veio); ainda se pode mudar. */
+  /** A pessoa já escolhida ao abrir (a ficha de onde se veio): o seletor fica desativado, a pessoa não se muda. */
   pessoaInicialId?: string;
   /** O que já vem preenchido ao abrir (a visita concluída de uma pessoa: comercial, aba Visita e morada da obra). */
   valoresIniciais?: ValoresIniciaisNegocio;
   /** A aba com que o painel abre (por omissão a Geral): o "A fazer" do levantamento abre na Visita. */
   abaInicial?: AbaNovoNegocio;
+  /** A secção da aba Visita com que abre (o id, por exemplo `visitas`); sem isto vale a das Medidas da área. */
+  seccaoInicial?: string;
   /**
-   * Com isto o rodapé ganha um botão que guarda o levantamento e fecha o painel, sem criar o negócio. `aoGuardar` devolve
-   * `false` quando não pôde guardar: então o painel fica aberto, com o que se escreveu.
+   * Com isto o rodapé ganha um botão que guarda o levantamento e as visitas e fecha o painel, sem criar o negócio. `aoGuardar`
+   * recebe o rascunho (com a morada da obra), a lista de visitas e o comercial escolhido, e devolve `false` quando não pôde guardar:
+   * então o painel fica aberto, com o que se escreveu.
    */
   guardarLevantamento?: {
     texto: string;
-    aoGuardar: (rascunho: RascunhoLevantamento) => boolean;
+    aoGuardar: (rascunho: RascunhoLevantamento, visitas: VisitaNegocio[], comercial: string) => boolean;
     /** Porque é que o último `aoGuardar` não guardou: aparece dentro do painel, como alerta (o toast e a região live ficam fora do modal). */
     motivo?: string | null;
+    /** Cresce a cada recusa: o alerta remonta (e volta a ser lido, mesmo com o mesmo texto) e esconde-se quando o rascunho muda. */
+    tentativa?: number;
   };
   /** O título do painel (por omissão "Novo negócio"): um passo do "A fazer" diz o que se faz, por exemplo "Levantamento de Ana". */
   titulo?: string;
@@ -42,9 +48,9 @@ interface NovoNegocioDialogoProps {
   /**
    * Chamado ao fechar o painel (cancelando ou criando): devolve o foco a quem o abriu e diz se o fez. Sem isto, o foco volta
    * ao botão "Novo negócio" (se o painel o tiver); com ele a quem chama cabe decidir, porque o botão que abriu o painel
-   * pode já não existir.
+   * pode já não existir. `criou` diz se o painel fechou por ter criado o negócio (então o ponto de partida mudou).
    */
-  aoDevolverFoco?: () => boolean;
+  aoDevolverFoco?: (criou: boolean) => boolean;
 }
 
 /** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
@@ -86,7 +92,7 @@ function CabecalhoNovo({ titulo, descricao }: Pick<NovoNegocioDialogoProps, "tit
  * abre o painel do novo negócio e leva lá o foco. Só exemplo: nada é gravado.
  */
 export function NovoNegocioDialogo({
-  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, guardarLevantamento,
+  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial, guardarLevantamento,
   aoDevolverFoco, titulo, descricao,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
@@ -113,17 +119,25 @@ export function NovoNegocioDialogo({
   const guardar = guardarLevantamento && {
     texto: guardarLevantamento.texto,
     motivo: guardarLevantamento.motivo,
-    aoGuardar: (rascunho: RascunhoLevantamento) => { if (guardarLevantamento.aoGuardar(rascunho)) setAberto(false); },
+    tentativa: guardarLevantamento.tentativa,
+    aoGuardar: (rascunho: RascunhoLevantamento, visitas: VisitaNegocio[], comercial: string) => {
+      if (guardarLevantamento.aoGuardar(rascunho, visitas, comercial)) setAberto(false);
+    },
   };
 
   // Ao abrir, o foco vai para o primeiro campo da aba Geral; noutra aba (a Visita, no "A fazer") vai para a aba escolhida.
   const focarAoAbrir = (e: Event) => {
     e.preventDefault();
-    (primeiroCampo.current ?? conteudo.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus();
+    // O primeiro campo pode estar desativado (a pessoa que vem da ficha): então o foco vai para o separador escolhido.
+    // Um passo que abre numa secção (as Visitas) leva o foco para o título dela.
+    const campo = primeiroCampo.current;
+    const seccao = seccaoInicial ? conteudo.current?.querySelector<HTMLElement>("[data-foco-seccao]") : null;
+    const separador = conteudo.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    (seccao ?? (campo && !campo.disabled ? campo : separador))?.focus();
   };
   const devolverFoco = (e: Event) => {
     e.preventDefault();
-    const tratado = aoDevolverFoco?.() === true;
+    const tratado = aoDevolverFoco?.(criou.current) === true;
     if (!tratado && !criou.current) botao.current?.focus();
     criou.current = false;
   };
@@ -146,7 +160,7 @@ export function NovoNegocioDialogo({
           <CabecalhoNovo titulo={titulo} descricao={descricao} />
           <FormularioNovoNegocio
             pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
-            abaInicial={abaInicial} guardarLevantamento={guardar}
+            abaInicial={abaInicial} seccaoInicial={seccaoInicial} guardarLevantamento={guardar}
             aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
           />
         </SheetContent>

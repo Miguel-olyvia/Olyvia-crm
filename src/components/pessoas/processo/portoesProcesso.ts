@@ -2,18 +2,19 @@
 // (`validarLevantamento`, `validarNovoNegocio`) em vez de a repetir; o ecrã traduz cada falta
 // (`pessoasPagina.gate.<falta>`) para o botão explicar o que falta em vez de falhar em silêncio.
 import { validarLevantamento, type LevantamentoForm, type LinhaForm } from "@/components/negocio-metas/levantamento";
+import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import { VALOR_MAXIMO_ORCAMENTO } from "@/components/negocio-metas/negocioAcoes";
 import { validarNovoNegocio } from "@/components/negocio-metas/novoNegocio";
-import type { VisitaPessoa } from "../pessoasTipos";
+import { proximaVisitaDoNegocio } from "@/components/negocio-metas/visitasNegocio";
 import type { ErrosCondicoes } from "./condicoesProposta";
 import { DESCONTO_MAXIMO, type Verificacao } from "./orcamentoCalculo";
 import type { DirecaoOrcamento } from "./orcamentoDetalhado";
 
 /** O que pode faltar. Cada valor tem texto em `pessoasPagina.gate.<falta>`. */
 export type FaltaProcesso =
-  | "dataVisita" | "visita" | "visitaFeita" | "linhas" | "linhaInvalida" | "pessoa"
+  | "dataVisita" | "visita" | "linhaInvalida" | "pessoa"
   | "orcamentoLinhas" | "orcamentoValor" | "semOrcamento" | "margem" | "abaixoDoCusto" | "semPedido" | "porVerificar" | "condicoes"
-  | "orcamentoNaoGuardado" | "negocioDesapareceu" | "descontoInvalido";
+  | "orcamentoNaoGuardado" | "negocioDesapareceu" | "descontoInvalido" | "pessoaPerdida" | "pedidoDesapareceu";
 
 export interface Portao {
   ok: boolean;
@@ -30,35 +31,41 @@ const levantamentoDeLinhas = (linhas: readonly LinhaForm[], estado: Levantamento
 
 type ErrosDeLevantamento = ReturnType<typeof validarLevantamento>;
 
-/** Os erros do levantamento como faltas: nenhuma linha, ou linhas por acabar. */
-const faltasDoLevantamento = (erros: ErrosDeLevantamento): FaltaProcesso[] => [
-  ...(erros.levantamento ? (["linhas"] as const) : []), ...(erros.linhas ? (["linhaInvalida"] as const) : []),
-];
+/** Os erros do levantamento como faltas: só há linhas por acabar (haver linhas é opcional). */
+const faltasDoLevantamento = (erros: ErrosDeLevantamento): FaltaProcesso[] => (erros.linhas ? ["linhaInvalida"] : []);
 
-/** Marcar a visita como feita: tem de haver uma visita, com data (pode ser de um dia que já passou: é o caso normal). */
-export function portaoVisitaFeita(visita: Pick<VisitaPessoa, "data" | "feita"> | null): Portao {
-  if (visita === null) return portao(["visita"]);
-  return portao(visita.data.trim() === "" ? ["dataVisita"] : []);
-}
+type VisitasDoPedido = readonly Pick<VisitaNegocio, "estado">[];
 
-/** Abrir o levantamento: a visita tem de estar feita. */
-export function portaoFazerLevantamento(visita: Pick<VisitaPessoa, "feita"> | null): Portao {
-  return portao(visita?.feita === true ? [] : ["visitaFeita"]);
-}
+const haVisitaFeita = (visitas: VisitasDoPedido): boolean => visitas.some((v) => v.estado === "feita");
+const haVisita = (visitas: VisitasDoPedido): boolean => visitas.some((v) => v.estado !== "cancelada");
 
-/** O levantamento está feito: a visita feita e pelo menos uma linha de medidas, todas completas. */
-export function portaoLevantamento(dados: { visitaFeita: boolean; linhas: readonly LinhaForm[] }): Portao {
-  const faltas = faltasDoLevantamento(validarLevantamento(levantamentoDeLinhas(dados.linhas, "feito")));
-  return portao([...(dados.visitaFeita ? [] : (["visitaFeita"] as const)), ...faltas]);
+/**
+ * Marcar a visita como feita (abrir o painel de visita e levantamento do pedido): tem de haver uma visita, e a próxima por fazer
+ * com data (pode ser de um dia que já passou: é o caso normal). Com todas as visitas já feitas o painel abre na mesma (faltam as medidas).
+ */
+export function portaoVisitaFeita(pedido: { visitas: readonly VisitaNegocio[] } | null): Portao {
+  if (pedido === null || !haVisita(pedido.visitas)) return portao(["visita"]);
+  const proxima = proximaVisitaDoNegocio(pedido.visitas);
+  return portao(proxima && proxima.data.trim() === "" ? ["dataVisita"] : []);
 }
 
 /**
- * Criar o negócio: a pessoa e, se a visita está feita, pelo menos uma linha de medidas (a regra de `validarNovoNegocio`,
- * que pede o levantamento quando o estado é "feito").
+ * Guardar a visita e o levantamento numa só gravação: o levantamento é opcional, mas as linhas que existirem têm de estar completas. Num
+ * pedido novo (`exigirVisita`) tem de haver pelo menos uma visita que não esteja cancelada.
  */
-export function portaoCriarNegocio(dados: { pessoaId: string; visitaFeita: boolean; linhas: readonly LinhaForm[] }): Portao {
+export function portaoLevantamento(dados: { visitas: VisitasDoPedido; linhas: readonly LinhaForm[]; exigirVisita?: boolean }): Portao {
+  const estado = haVisitaFeita(dados.visitas) ? "feito" : "porFazer";
+  const faltas = faltasDoLevantamento(validarLevantamento(levantamentoDeLinhas(dados.linhas, estado)));
+  return portao([...(dados.exigirVisita && !haVisita(dados.visitas) ? (["visita"] as const) : []), ...faltas]);
+}
+
+/**
+ * Criar o negócio: só a pessoa é obrigatória (e as linhas de medidas que existirem têm de estar completas). A visita e o levantamento
+ * são opcionais: sem visita, com visitas por fazer ou com uma feita e sem linhas, nada mais se exige.
+ */
+export function portaoCriarNegocio(dados: { pessoaId: string; visitas: VisitasDoPedido; linhas: readonly LinhaForm[] }): Portao {
   const erros = validarNovoNegocio({
-    pessoaId: dados.pessoaId, levantamento: levantamentoDeLinhas(dados.linhas, dados.visitaFeita ? "feito" : "porFazer"),
+    pessoaId: dados.pessoaId, levantamento: levantamentoDeLinhas(dados.linhas, haVisitaFeita(dados.visitas) ? "feito" : "porFazer"),
   });
   return portao([...(erros.pessoaId ? (["pessoa"] as const) : []), ...faltasDoLevantamento(erros)]);
 }

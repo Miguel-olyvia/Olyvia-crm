@@ -6,11 +6,14 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Dialog, DialogContent, DialogDescription } from "@/components/ui/dialog";
 import { FormChamada } from "../FormChamada";
 import type { AcoesFicha } from "../PainelBase";
+import { nomeComPedido } from "../pedidoNegocio";
 import type { PassoChamada, ResumoPessoa } from "../pessoasTipos";
 
 interface DialogoChamadaProps {
   /** A pessoa a quem se regista a chamada; `null` com o diálogo fechado. */
   resumo: ResumoPessoa | null;
+  /** O pedido do item de onde veio a chamada: a visita marcada na chamada vai para ele. Sem ele, o formulário escolhe (ou pergunta). */
+  pedidoId?: string;
   hoje: string;
   acoes: AcoesFicha;
   aoFechar: () => void;
@@ -23,12 +26,13 @@ interface DialogoChamadaProps {
   aoDevolverFoco: () => boolean;
 }
 
-export function DialogoChamada({ resumo, hoje, acoes, aoFechar, aoConcluir, aoDevolverFoco }: DialogoChamadaProps) {
+export function DialogoChamada({ resumo, pedidoId, hoje, acoes, aoFechar, aoConcluir, aoDevolverFoco }: DialogoChamadaProps) {
   const { t } = useTranslation();
   const id = useId();
-  const ultimo = useRef(resumo);
-  if (resumo) ultimo.current = resumo;
-  const mostrado = resumo ?? ultimo.current;
+  // Enquanto o diálogo sai, continua a mostrar a última pessoa e o último pedido (o formulário não se remonta a meio da saída).
+  const ultimo = useRef({ resumo, pedidoId });
+  if (resumo) ultimo.current = { resumo, pedidoId };
+  const { resumo: mostrado, pedidoId: pedidoMostrado } = resumo ? { resumo, pedidoId } : ultimo.current;
   const idTitulo = `${id}-titulo`;
   return (
     <Dialog open={resumo !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
@@ -37,10 +41,11 @@ export function DialogoChamada({ resumo, hoje, acoes, aoFechar, aoConcluir, aoDe
         hideClose aria-labelledby={idTitulo} className="max-w-xl gap-0 p-0 motion-reduce:!animate-none"
         onCloseAutoFocus={(e) => { if (aoDevolverFoco()) e.preventDefault(); }}
       >
-        <DialogDescription className="sr-only">{t("pessoasPagina.call.subtitle", { name: mostrado?.pessoa.nome ?? "" })}</DialogDescription>
+        <DialogDescription className="sr-only">{t("pessoasPagina.call.subtitle", { name: mostrado ? nomeComPedido(t, mostrado.pessoa.nome, pedidoMostrado, mostrado.pedidos) : "" })}</DialogDescription>
         {mostrado && (
           <FormChamada
-            key={mostrado.pessoa.id} id={`${id}-chamada`} idTitulo={idTitulo} pessoa={mostrado.pessoa} resumo={mostrado} hoje={hoje} acoes={acoes} semVoltar
+            key={`${mostrado.pessoa.id}-${pedidoMostrado ?? ""}`} id={`${id}-chamada`} idTitulo={idTitulo} pessoa={mostrado.pessoa} resumo={mostrado}
+            hoje={hoje} acoes={acoes} pedidoId={pedidoMostrado} semVoltar
             aoFechar={aoFechar} aoConcluir={(mensagem, passo) => { aoConcluir(mostrado.pessoa.id, mensagem, passo); }}
           />
         )}

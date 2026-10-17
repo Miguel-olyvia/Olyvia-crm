@@ -11,6 +11,11 @@ export interface ProcessoValor {
    * O valor é o mesmo durante toda a vida do provider (abrir e fechar diálogos não re-renderiza os cartões).
    */
   executar: (item: ItemProcesso, origem: HTMLElement | null) => void;
+  /**
+   * "Novo negócio com visita" (um cliente): abre o painel de visita e levantamento para um pedido novo, que só se cria ao guardar.
+   * `origem` é o botão que o abriu (o foco volta para ele, ou para os botões da pessoa).
+   */
+  abrirNovoPedido: (pessoaId: string, origem: HTMLElement | null) => void;
 }
 
 export const ProcessoContext = createContext<ProcessoValor | null>(null);

@@ -1,8 +1,9 @@
-// "Nova lead" e "Marcar visita": a validação e a pessoa (ou o estado) que saem delas, em memória.
+// "Nova lead": a validação e a pessoa, o pedido e a atividade que saem dela, em memória.
 import { afterEach, describe, expect, it } from "vitest";
+import { marcarVisitaDoPedido } from "./acoesPedido";
 import { montarLead, validarNovaLead, type DadosNovaLead } from "./novaLead";
+import { faseDoPedido } from "./pedidoNegocio";
 import { pessoasNovas, registarLead, repor } from "./pessoasNovas";
-import { marcarVisita, validarVisita, type DadosVisita } from "./visitaPessoa";
 import { juntarPessoas } from "./juntarPessoas";
 import { PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import { textoMorada } from "./formatoPessoas";
@@ -41,12 +42,14 @@ describe("montarLead", () => {
   it("cria uma lead por contactar, com o contacto aparado e o primeiro contacto para hoje", () => {
     const { pessoa } = montarLead(DADOS, HOJE, 3);
     expect(pessoa).toMatchObject({
-      id: "p-novo-3", nome: "Teresa Lobo", contacto: { telefone: "912 345 678", email: "teresa@exemplo.pt" }, etapa: "nova",
+      id: "p-novo-3", nome: "Teresa Lobo", contacto: { telefone: "912 345 678", email: "teresa@exemplo.pt" },
       origem: "indicacao", viaEntrada: "manual", proximoContacto: HOJE, desde: HOJE, comercial: "Ana Ribeiro",
     });
     expect(pessoa.morada).toEqual({ linha: "", cp: "", localidade: "Sintra" });
     expect(textoMorada(pessoa.morada!)).toBe("Sintra");
     expect(pessoa.formulario).toBeUndefined();
+    // A etapa deriva dos pedidos: a pessoa não a guarda.
+    expect(pessoa).not.toHaveProperty("etapa");
   });
 
   it("o contacto que não se escreveu fica a null, e sem localidade não há morada", () => {
@@ -64,8 +67,9 @@ describe("montarLead", () => {
   });
 
   it("uma lead nova aparece na lista como lead sem negócio, e por contactar", () => {
-    const { pessoa } = montarLead(DADOS, HOJE, 1);
-    const resumo = juntarPessoas([...PESSOAS_EXEMPLO, pessoa], NEGOCIOS_PESSOAS_EXEMPLO, HOJE).at(-1)!;
+    const { pessoa, pedido } = montarLead(DADOS, HOJE, 1);
+    const resumos = juntarPessoas([...PESSOAS_EXEMPLO, pessoa], NEGOCIOS_PESSOAS_EXEMPLO, HOJE, [pedido]);
+    const resumo = resumos[resumos.length - 1];
     expect(resumo).toMatchObject({ papel: "lead", etapa: "nova", semNegocio: true });
   });
 });
@@ -84,40 +88,34 @@ describe("pessoasNovas (o store)", () => {
   });
 });
 
-describe("validarVisita e marcarVisita", () => {
-  const visita: DadosVisita = { data: "2026-10-20", hora: "10:30", nota: " Levar o catálogo ", servico: "Cozinha" };
-  const estado = {
-    pessoas: PESSOAS_EXEMPLO.filter((p) => p.id === "p-hugo" || p.id === "p-fabio"), atividade: [], contactadas: [] as string[],
-  };
+describe("marcar a visita à lead nova", () => {
+  it("a visita vai para o pedido por contactar com que a lead nasce: passa a Visita, na morada da lead", () => {
+    const { pessoa, pedido } = montarLead({ ...DADOS, localidade: "Braga" }, HOJE, 1);
+    const comMorada = { ...pessoa, morada: { linha: "Largo da Sé 5", cp: "4700-010", localidade: "Braga" } };
+    const estado = { pessoas: [comMorada], pedidos: [pedido], atividade: [], contactadas: [] as string[] };
+    const depois = marcarVisitaDoPedido(estado, pedido.id, { data: "2026-10-20", hora: "10:30", nota: "" }, HOJE);
+    expect(faseDoPedido(depois.pedidos[0])).toBe("visita");
+    expect(depois.pedidos[0].visitas[0]).toMatchObject({ igualALead: true, morada: { rua: "Largo da Sé 5", localidade: "Braga" } });
+    expect(depois.contactadas).toEqual([pessoa.id]);
+  });
+});
 
-  it("o dia é obrigatório e não pode ser anterior a hoje; a hora, se houver, é HH:MM", () => {
-    expect(validarVisita({ ...visita, data: "" }, HOJE)).toBe("dataVazia");
-    expect(validarVisita({ ...visita, data: "2026-10-12" }, HOJE)).toBe("dataPassada");
-    expect(validarVisita({ ...visita, data: HOJE }, HOJE)).toBeNull();
-    expect(validarVisita({ ...visita, hora: "25:00" }, HOJE)).toBe("horaInvalida");
-    expect(validarVisita({ ...visita, hora: "" }, HOJE)).toBeNull();
-    expect(validarVisita({ ...visita, nota: "x".repeat(141) }, HOJE)).toBe("notaComprida");
+describe("a lead nova leva o pedido por contactar", () => {
+  it("montarLead devolve também o pedido: por contactar, sem visitas, com o comercial e a data de hoje", () => {
+    const { pessoa, pedido } = montarLead(DADOS, HOJE, 3);
+    expect(pedido).toEqual({
+      id: "pd-novo-3", pessoaId: pessoa.id, servico: "", comercial: "Ana Ribeiro", criadoEm: HOJE, contactado: false, visitas: [],
+    });
+    expect(faseDoPedido(pedido)).toBe("porContactar");
   });
 
-  it("passa a pessoa à etapa Visita, põe o contacto no dia da visita e regista-o na atividade", () => {
-    const antes = estado.pessoas.find((p) => p.id === "p-hugo")!;
-    expect(["nova", "emContacto"]).toContain(antes.etapa);
-    const depois = marcarVisita(estado, "p-hugo", visita, HOJE);
-    const pessoa = depois.pessoas.find((p) => p.id === "p-hugo")!;
-    expect(pessoa).toMatchObject({ etapa: "visitaMarcada", proximoContacto: "2026-10-20", ultimoContactoDias: 0 });
-    expect(depois.contactadas).toEqual(["p-hugo"]);
-    expect(depois.atividade[0]).toMatchObject({ pessoaId: "p-hugo", chaveTitulo: "pessoasPagina.activity.visitBooked", exemplo: false });
-    // A linha da atividade diz também a morada da visita (sem escolha, a da lead).
-    expect(depois.atividade[0].detalhe).toBe("2026-10-20 10:30 · Cozinha · Levar o catálogo · Largo da Sé 5, 4700-010 Braga");
-    expect(pessoa.visita).toMatchObject({ igualALead: true, moradaVisita: { rua: "Largo da Sé 5", localidade: "Braga" } });
-    expect(antes.etapa).not.toBe("visitaMarcada");
+  it("o store guarda os pedidos ao lado das pessoas, e repor esquece-os", () => {
+    expect(pessoasNovas().pedidos).toEqual([]);
+    const primeira = registarLead(DADOS, HOJE);
+    registarLead({ ...DADOS, nome: "Outra" }, HOJE);
+    expect(pessoasNovas().pedidos.map((p) => p.id)).toEqual(["pd-novo-1", "pd-novo-2"]);
+    expect(pessoasNovas().pedidos[0]).toBe(primeira.pedido);
+    repor();
+    expect(pessoasNovas().pedidos).toEqual([]);
   });
-
-  it("ids que não existem, pessoas perdidas e dados inválidos deixam o estado como está", () => {
-    expect(marcarVisita(estado, "nao-existe", visita, HOJE)).toBe(estado);
-    expect(marcarVisita(estado, "p-hugo", { ...visita, data: "" }, HOJE)).toBe(estado);
-    const perdida = { ...estado, pessoas: [{ ...estado.pessoas[0], perdida: { motivo: "preco" as const, data: HOJE } }] };
-    expect(marcarVisita(perdida, perdida.pessoas[0].id, visita, HOJE)).toBe(perdida);
-  });
-
 });

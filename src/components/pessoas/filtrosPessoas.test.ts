@@ -4,12 +4,14 @@ import {
   FILTROS_INICIAIS, FORMULARIO_MANUAL, LIMITE_SEM_CONTACTO, chipsDoTipo, chipValido, contagensChips, contagensTipos, filtrarPessoas,
   filtrosAtivos, ordenarPessoas, pesquisaCorresponde, resultadoEfetivo,
 } from "./filtrosPessoas";
+import { pedidoBase, pessoaBase, resumoBase, visitaBase } from "./fabricaTestes";
 import { juntarPessoas } from "./juntarPessoas";
+import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import type { FiltrosPessoas } from "./pessoasTipos";
 import { pessoasComPendentes } from "./resolverSubmissao";
 
-const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO);
+const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
 const pendentes = pessoasComPendentes(SUBMISSOES_EXEMPLO);
 const nomes = (f: Partial<FiltrosPessoas>) =>
   filtrarPessoas(todos, { ...FILTROS_INICIAIS, ...f }, pendentes).map((r) => r.pessoa.nome).sort();
@@ -68,9 +70,20 @@ describe("filtros do popover", () => {
       ["Clara Dias", "Helena Tavares", "Hugo Teixeira", "Marta Silveira", "Paulo Neves", "Rui Figueiredo", "Sofia Matos"],
     );
   });
-  it("Com visita: só quem está na etapa Visita e não está perdida", () => {
-    // A Rita (visita hoje) e o Gonçalo (visita por concluir): as duas leads de exemplo com visita; a Clara tem negócio.
-    expect(nomes({ comVisita: true })).toEqual(["Gonçalo Matias", "Rita Albuquerque"]);
+  it("Com visita: quem tem algum pedido em Visita e não está perdida", () => {
+    // A Rita (visita hoje) e o Gonçalo (visita por concluir) são leads; o Paulo é cliente com um pedido com visita marcada.
+    expect(nomes({ comVisita: true })).toEqual(["Gonçalo Matias", "Paulo Neves", "Rita Albuquerque"]);
+  });
+  it("Com visita: basta um dos pedidos estar em Visita; uma visita só cancelada não conta, nem a de uma perdida", () => {
+    const pedidos = (id: string) => [pedidoBase("pd-1", { pessoaId: id }), pedidoBase("pd-2", { pessoaId: id, visitas: [visitaBase("v")] })];
+    const cancelada = [pedidoBase("pd-3", { pessoaId: "b", visitas: [visitaBase("w", { estado: "cancelada" })] })];
+    const perdida = { perdida: { motivo: "preco" as const, data: "2026-10-01" } };
+    const resumos = [
+      resumoBase(pessoaBase("a"), [], HOJE_EXEMPLO, "lead", pedidos("a")), resumoBase(pessoaBase("b"), [], HOJE_EXEMPLO, "lead", cancelada),
+      resumoBase(pessoaBase("c", perdida), [], HOJE_EXEMPLO, "lead", pedidos("c")),
+    ];
+    const filtrados = filtrarPessoas(resumos, { ...FILTROS_INICIAIS, comVisita: true }, pendentes);
+    expect(filtrados.map((r) => r.pessoa.id)).toEqual(["a"]);
   });
   it("Só as minhas usa o comercial de exemplo", () => {
     expect(nomes({ soMinhas: true })).toEqual(["Beatriz Sampaio", "Marta Silveira", "Rita Albuquerque", "Rui Figueiredo", "Vasco Pinto"]);

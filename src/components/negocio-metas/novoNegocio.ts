@@ -1,7 +1,7 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
 import type {
-  DadosContactoNegocio, EstadoLevantamento, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
+  DadosContactoNegocio, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
   VisitaNegocio,
 } from "./negocioMetas";
 import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
@@ -61,30 +61,23 @@ export interface RascunhoLevantamento {
   linhas: LevantamentoForm["linhas"];
   observacoes: string;
   respostas: Respostas;
+  /** A morada da obra escrita no painel (a que não está nas visitas); falta nos rascunhos antigos. */
+  moradaObra?: MoradaObraForm;
 }
 
 /**
- * O que o painel "Novo negócio" já traz preenchido quando a página o abre a partir de outro sítio (hoje, a visita
- * concluída de uma pessoa). Tudo opcional; sem isto o painel abre como sempre.
+ * O que o painel "Novo negócio" já traz preenchido quando a página o abre a partir de um pedido (a pessoa, o comercial, as visitas e
+ * o levantamento dele). Tudo opcional; sem isto o painel abre como sempre.
  */
 export interface ValoresIniciaisNegocio {
   pessoaId?: string;
   comercial?: string;
   /** O levantamento já guardado (as linhas, as observações e as respostas das secções da visita); o formulário abre com ele. */
   levantamento?: RascunhoLevantamento;
-  /** A aba Visita: o dia, quem fez e o estado do levantamento, e a morada da obra, que vem da visita. */
-  visita?: {
-    data: string;
-    quemFez: string;
-    estado: EstadoLevantamento;
-    moradaObra: MoradaObraForm;
-    /** A morada da visita é a que a lead indicou (só para dizer a origem na aba Qualificação). */
-    igualALead: boolean;
-    /** HH:MM da visita; falta nas visitas sem hora. */
-    hora?: string;
-    /** A nota de acesso da visita, se a tinha. */
-    nota?: string;
-  };
+  /** As visitas do pedido (a lista inteira). */
+  visitas?: VisitaNegocio[];
+  /** A morada da obra já guardada no pedido; sem ela vale a das visitas. */
+  moradaObra?: MoradaObraForm;
 }
 
 /** O que o formulário preenche. */
@@ -99,12 +92,12 @@ export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "email" | "nif" | "ni
 
 export type AbaNovoNegocio = "geral" | "qualificacao" | "visita";
 
-/** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, a Qualificação a morada, a Visita o levantamento. */
+/** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, a Qualificação a morada, a Visita as linhas do levantamento. */
 export function abasComErros(erros: ErrosNovoNegocio): Record<AbaNovoNegocio, boolean> {
   return {
     geral: (["pessoaId", "email", "nif", "nifEmpresa"] as const).some((c) => !!erros[c]),
     qualificacao: !!erros.codigoPostal,
-    visita: !!erros.levantamento || !!erros.linhas,
+    visita: !!erros.linhas,
   };
 }
 
@@ -112,8 +105,8 @@ const FORMATO_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FORMATO_NIF = /^\d{9}$/;
 
 /**
- * A Pessoa é obrigatória; o contacto só valida o formato do que foi preenchido. O levantamento valida-se em
- * `validarLevantamento`; vazio quando está tudo certo.
+ * A Pessoa é obrigatória; o contacto só valida o formato do que foi preenchido. A visita é opcional: o levantamento valida-se em
+ * `validarLevantamento` (havendo uma visita feita, pede pelo menos uma linha de medidas); vazio quando está tudo certo.
  */
 export function validarNovoNegocio(
   valores: Pick<ValoresNovoNegocio, "pessoaId"> & {
@@ -148,7 +141,6 @@ export function primeiroErro(
   const geral = ORDEM_GERAL.find((c) => erros[c]);
   if (geral) return { aba: "geral", campo: CAMPO_GERAL[geral] };
   if (erros.codigoPostal) return { aba: "qualificacao", campo: "cp" };
-  if (erros.levantamento) return { aba: "visita", campo: "add" };
   for (const linha of idsLinhas) {
     const campo = ORDEM_LINHA.find((c) => erros.linhas?.[linha]?.[c]);
     if (campo) return { aba: "visita", campo: `linha-${linha}-${campo}` };
@@ -180,10 +172,12 @@ export interface DadosCriarNegocio {
   visita?: SeccaoVisitaNegocio[];
   /** As visitas do negócio (já por ordem cronológica); o levantamento em `levantamento` deriva delas. */
   visitas?: VisitaNegocio[];
+  /** O serviço, herdado do pedido (o negócio nasce sem ele quando falta). */
+  servico?: string;
 }
 
 /**
- * O negócio de exemplo (sem serviço: fica vazio): começa em Orçamento (sem orçamentos, por isso sem valor), com 0 dias, não parado e o primeiro
+ * O negócio de exemplo (o serviço é o do pedido, ou vazio): começa em Orçamento (sem orçamentos, por isso sem valor), com 0 dias, não parado e o primeiro
  * prazo daqui a 2 dias. O id é `n-novo-<sequência>`; várias pessoas (e a mesma) podem ter vários negócios.
  */
 export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequencia: number): NegocioNovo {
@@ -191,7 +185,7 @@ export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequ
     id: `n-novo-${sequencia}`,
     pessoaId: dados.pessoa.id,
     pessoa: dados.pessoa.nome,
-    servico: "",
+    servico: dados.servico ?? "",
     comercial: dados.comercial,
     dias: 0,
     parado: 0,

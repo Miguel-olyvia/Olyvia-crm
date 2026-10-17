@@ -2,16 +2,19 @@
 // persiste, ao recarregar volta tudo ao exemplo) e as preferências de tipo, chip, ordem e vista em localStorage.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
+import {
+  alterarVisitaDoPedido, criarPedidoGuardado, guardarPedido, marcarVisitaDaPessoa, removerPedido, type DadosGuardarPedido,
+  type DadosVisitaPedido, type EscolhaPedido,
+} from "./acoesPedido";
 import { adiar, juntarNota, perder, reativar, registarChamada, type ContextoPerda, type DadosChamada } from "./acoesPessoa";
 import type { DadosNovaLead } from "./novaLead";
+import type { DadosPedido } from "./pedidoNegocio";
 import { pessoasNovas, registarLead } from "./pessoasNovas";
-import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
-import {
-  alterarVisita, concluirVisita, guardarLevantamento, marcarVisita, marcarVisitaFeita, type DadosAlterarVisita, type DadosVisita,
-} from "./visitaPessoa";
+import type { DadosAlterarVisita } from "./visitaPessoa";
 import { useNegociosDasPessoas } from "./useNegociosDasPessoas";
 import { chipValido } from "./filtrosPessoas";
 import { juntarPessoas } from "./juntarPessoas";
+import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
 import { PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import { guardarPrefsPessoas, lerPrefsPessoas, type PreferenciasPessoas } from "./preferenciasPessoas";
 import type { ChipPessoa, EstadoPessoas, MotivoPerda, OrdemPessoa, TipoPessoa, VistaPessoas } from "./pessoasTipos";
@@ -22,6 +25,7 @@ function estadoInicial(): EstadoPessoas {
   const novas = pessoasNovas();
   return {
     submissoes: SUBMISSOES_EXEMPLO, notas: [], pessoas: [...PESSOAS_EXEMPLO, ...novas.pessoas], atividade: [...novas.atividade], contactadas: [],
+    pedidos: [...PEDIDOS_EXEMPLO, ...novas.pedidos],
   };
 }
 
@@ -33,8 +37,8 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
   useEffect(() => guardarPrefsPessoas(prefs), [prefs]);
 
   const resumos = useMemo(
-    () => juntarPessoas(estado.pessoas, negocios, HOJE_EXEMPLO),
-    [estado.pessoas, negocios],
+    () => juntarPessoas(estado.pessoas, negocios, HOJE_EXEMPLO, estado.pedidos),
+    [estado.pessoas, estado.pedidos, negocios],
   );
   const submissoes = useMemo(() => (podeVerSubmissoes ? estado.submissoes : []), [podeVerSubmissoes, estado.submissoes]);
   const pendentes = useMemo(
@@ -71,39 +75,44 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
   /** Cria a lead (Por contactar), guarda-a e devolve-a, para a página lhe abrir a ficha. */
   const criarLead = useCallback((dados: DadosNovaLead) => {
     const lead = registarLead(dados, HOJE_EXEMPLO);
-    setEstado((atual) => ({ ...atual, pessoas: [...atual.pessoas, lead.pessoa], atividade: [...lead.atividade, ...atual.atividade] }));
+    setEstado((atual) => ({
+      ...atual, pessoas: [...atual.pessoas, lead.pessoa], atividade: [...lead.atividade, ...atual.atividade], pedidos: [...atual.pedidos, lead.pedido],
+    }));
     return lead.pessoa;
   }, []);
+  /** Marca uma visita à pessoa: no pedido indicado, no primeiro ainda sem visita, ou num pedido novo (ver `marcarVisitaDaPessoa`). */
   const marcarVisitaPedida = useCallback(
-    (id: string, dados: DadosVisita) => setEstado((atual) => marcarVisita(atual, id, dados, HOJE_EXEMPLO)),
+    (pessoaId: string, escolha: EscolhaPedido, dados: DadosVisitaPedido) =>
+      setEstado((atual) => marcarVisitaDaPessoa(atual, pessoaId, escolha, dados, HOJE_EXEMPLO)),
     [],
   );
+  /** Muda o dia, a hora e a morada de uma visita de um pedido. */
   const alterarVisitaMarcada = useCallback(
-    (id: string, dados: DadosAlterarVisita) => setEstado((atual) => alterarVisita(atual, id, dados, HOJE_EXEMPLO)),
+    (pedidoId: string, visitaId: string, dados: DadosAlterarVisita) =>
+      setEstado((atual) => alterarVisitaDoPedido(atual, pedidoId, visitaId, dados, HOJE_EXEMPLO)),
     [],
   );
-  /** A visita aconteceu (ainda sem negócio): fica na ficha como feita e o passo seguinte é o levantamento. */
-  const marcarVisitaComoFeita = useCallback(
-    (id: string, nota: string) => setEstado((atual) => marcarVisitaFeita(atual, id, nota, HOJE_EXEMPLO)),
+  /** Guarda as visitas e o levantamento de um pedido numa só gravação (uma visita feita pede linhas de medidas). */
+  const guardarPedidoFeito = useCallback(
+    (pedidoId: string, dados: DadosGuardarPedido) => setEstado((atual) => guardarPedido(atual, pedidoId, dados, HOJE_EXEMPLO)),
     [],
   );
-  /** Guarda o levantamento feito na visita, antes de criar o negócio. */
-  const guardarLevantamentoFeito = useCallback(
-    (id: string, rascunho: RascunhoLevantamento) => setEstado((atual) => guardarLevantamento(atual, id, rascunho, HOJE_EXEMPLO)),
+  /** Cria o pedido da pessoa já com as visitas e o levantamento (só fica criado se se guardam). */
+  const criarPedidoComVisitas = useCallback(
+    (dados: DadosPedido, guardar: DadosGuardarPedido) => setEstado((atual) => criarPedidoGuardado(atual, dados, guardar, HOJE_EXEMPLO)),
     [],
   );
-  /** A visita acabou e o negócio foi criado a partir dela: sai da ficha e fica registado na atividade. */
-  const concluirVisitaFeita = useCallback((id: string) => setEstado((atual) => concluirVisita(atual, id, HOJE_EXEMPLO)), []);
+  /** O negócio criado a partir do pedido substitui-o: o pedido sai. */
+  const removerPedidoFeito = useCallback((pedidoId: string) => setEstado((atual) => removerPedido(atual, pedidoId)), []);
   const mudarOrdem = useCallback((ordem: OrdemPessoa) => setPrefs((p) => ({ ...p, ordem })), []);
   const mudarVista = useCallback((vista: VistaPessoas) => setPrefs((p) => ({ ...p, vista })), []);
   const mudarChip = useCallback((chip: ChipPessoa) => setPrefs((p) => ({ ...p, chip })), []);
   const mudarTipo = useCallback((tipo: TipoPessoa) => setPrefs((p) => ({ ...p, tipo, chip: chipValido(tipo, p.chip) })), []);
 
   return {
-    resumos, submissoes, notas, pendentes, atividade: estado.atividade, prefs: prefsEfetivas, resolver,
+    resumos, submissoes, notas, pendentes, atividade: estado.atividade, pedidos: estado.pedidos, prefs: prefsEfetivas, resolver,
     registarChamada: chamar, adiar: adiarContacto, perder: perderLead, reativar: reativarLead, juntarNota: juntarNotaManual, criarLead, marcarVisita: marcarVisitaPedida,
-    alterarVisita: alterarVisitaMarcada, concluirVisita: concluirVisitaFeita, marcarVisitaFeita: marcarVisitaComoFeita,
-    guardarLevantamento: guardarLevantamentoFeito,
+    alterarVisita: alterarVisitaMarcada, guardarPedido: guardarPedidoFeito, criarPedidoComVisitas, removerPedido: removerPedidoFeito,
     mudarOrdem, mudarChip, mudarTipo, mudarVista,
   };
 }

@@ -19,7 +19,10 @@ export const pessoasFichaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.bar.more': 'Mais',
     'pessoasPagina.bar.note': 'Nota',
     'pessoasPagina.bar.snooze': 'Adiar',
+    'pessoasPagina.bar.snoozeVisit': 'O próximo contacto é uma visita: altere-a em «Alterar visita».',
     'pessoasPagina.bar.createDeal': 'Criar negócio',
+    'pessoasPagina.bar.dealWithVisit': 'Novo negócio com visita',
+    'pessoasPagina.bar.dealWithoutVisit': 'Novo negócio sem visita',
     'pessoasPagina.bar.markLost': 'Marcar como perdida',
     'pessoasPagina.bar.newTab': '(abre noutro separador)',
 
@@ -117,7 +120,10 @@ export const pessoasFichaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.bar.more': 'More',
     'pessoasPagina.bar.note': 'Note',
     'pessoasPagina.bar.snooze': 'Postpone',
+    'pessoasPagina.bar.snoozeVisit': 'The next contact is a visit: change it with "Change visit".',
     'pessoasPagina.bar.createDeal': 'Create deal',
+    'pessoasPagina.bar.dealWithVisit': 'New deal with a visit',
+    'pessoasPagina.bar.dealWithoutVisit': 'New deal without a visit',
     'pessoasPagina.bar.markLost': 'Mark as lost',
     'pessoasPagina.bar.newTab': '(opens in a new tab)',
 

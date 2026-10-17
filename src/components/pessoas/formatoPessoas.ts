@@ -108,3 +108,9 @@ export function textoLinhaCabecalho(t: Traduzir, r: ResumoPessoa): string {
 export function textoMorada(m: NonNullable<Pessoa["morada"]>): string {
   return [m.linha, `${m.cp} ${m.localidade}`.trim()].filter(Boolean).join(", ");
 }
+
+/** O dia da semana de um dia AAAA-MM-DD: 0 (domingo) a 6 (sábado), sem fusos nem relógio. */
+export function diaDaSemana(dia: string): number {
+  const [ano, mes, d] = dia.split("-").map(Number);
+  return new Date(Date.UTC(ano, mes - 1, d)).getUTCDay();
+}

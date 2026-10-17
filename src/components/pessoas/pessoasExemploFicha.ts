@@ -3,13 +3,14 @@
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { somarDias } from "./acoesPessoa";
 import { origemExemplo } from "./pessoasExemploOrigem";
+import type { VisitaSemente } from "./pessoaSemente";
 import type {
   ItemAtividade, MotivoPerda, Pessoa, QualificacaoPessoa, ResultadoContacto,
 } from "./pessoasTipos";
 
 type Extra = Partial<Pick<Pessoa,
-  "empresa" | "morada" | "distrito" | "nif" | "qualificacao" | "resultadoContacto" | "proximoContacto" | "desde" | "perdida" | "visita" |
-  "canal" | "campanha" | "formulario" | "viaEntrada" | "saude">>;
+  "empresa" | "morada" | "distrito" | "nif" | "qualificacao" | "resultadoContacto" | "proximoContacto" | "desde" | "perdida" |
+  "canal" | "campanha" | "formulario" | "viaEntrada" | "saude">> & { visita?: VisitaSemente };
 
 interface Dados {
   /** `null`: nunca houve uma chamada ("Sem contacto"). */
@@ -75,7 +76,7 @@ const DADOS: Record<string, Dados> = {
 };
 
 /** A visita de exemplo: no dia do próximo contacto, na morada da lead ou na outra que os dados indicam. */
-function visitaDeExemplo(d: Dados): Pessoa["visita"] {
+function visitaDeExemplo(d: Dados): VisitaSemente | undefined {
   if (!d.visita || d.proximo === null) return undefined;
   const [rua, codigoPostal, localidade, andar] = d.visita.outra ?? [...d.morada, ""];
   return {

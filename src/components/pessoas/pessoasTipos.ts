@@ -1,7 +1,8 @@
 // Tipos da página "Pessoas" (só dados de exemplo). O papel (lead ou cliente) NÃO é
-// guardado: deriva dos negócios (ver `juntarPessoas.ts`). Os campos próprios desta
-// página (origem, etapa, último contacto) são de exemplo e não existem noutro sítio.
-import type { FaseNegocio, NegocioMes } from "@/components/negocio-metas/negocioMetas";
+// guardado: deriva dos negócios (ver `juntarPessoas.ts`), e a etapa deriva dos pedidos
+// (ver `etapaPessoa.ts`). Os campos próprios desta página (origem, último contacto)
+// são de exemplo e não existem noutro sítio.
+import type { FaseNegocio, NegocioMes, VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import type { SaudeNegocio } from "@/components/negocio-metas/saudeNegocio";
 import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 
@@ -27,28 +28,6 @@ export interface MoradaVisita {
   andar: string;
 }
 
-/**
- * A visita marcada a uma pessoa. A morada da lead (`Pessoa.morada`) é a que ela indicou; a da visita (`moradaVisita`) pode
- * ser a mesma (`igualALead`) ou outra, e é a da visita que passa a Morada da obra ao criar o negócio.
- */
-export interface VisitaPessoa {
-  /** AAAA-MM-DD. */
-  data: string;
-  /** HH:MM; vazio = sem hora. */
-  hora: string;
-  /** O comercial responsável pela visita. */
-  comercial: string;
-  servico?: string;
-  igualALead: boolean;
-  moradaVisita: MoradaVisita;
-  /** Uma nota de acesso (só quando a morada é outra). */
-  notaAcesso?: string;
-  /** A visita já aconteceu (ver `marcarVisitaFeita`): o passo seguinte é o levantamento. Falta enquanto está só marcada. */
-  feita?: boolean;
-  /** O levantamento guardado antes de criar o negócio (linhas de medidas, observações e respostas); some com a visita ao concluí-la. */
-  levantamento?: RascunhoLevantamento;
-}
-
 export interface Pessoa {
   id: string;
   nome: string;
@@ -63,8 +42,6 @@ export interface Pessoa {
   viaEntrada: ViaEntrada;
   /** Saúde da pessoa, de 0 a 100 (campo de exemplo). */
   saude: number;
-  /** Campo de exemplo, só desta página. Só vale a etapa efetiva (ver `etapaPessoa.ts`). */
-  etapa: EtapaPessoa;
   /** Campo de exemplo: dias desde o último contacto. */
   ultimoContactoDias: number;
   /** Campos de exemplo da ficha (todos opcionais): a empresa, a morada, o NIF e o resto. */
@@ -79,8 +56,6 @@ export interface Pessoa {
   proximoContacto?: string | null;
   /** HH:MM do próximo contacto, quando foi marcado com hora (uma visita ou "ligar numa data"). */
   proximoHora?: string;
-  /** A visita marcada e ainda por concluir (ver `visitaPessoa.ts`); some quando se cria o negócio a partir dela. */
-  visita?: VisitaPessoa;
   /** AAAA-MM-DD: cliente ou lead desde. */
   desde?: string;
   /** Marcada como perdida na ficha: o motivo, o dia e o passo. Só as leads se perdem. */
@@ -134,7 +109,9 @@ export interface ResumoPessoa {
   atrasada: boolean;
   /** O formulário de onde veio; `null` quando foi registada à mão. */
   formulario: string | null;
-  /** A etapa efetiva (ver `etapaEfetiva`); uma perdida é um estado à parte, por cima desta. */
+  /** Os pedidos da pessoa (ver `PedidoNegocio`): a visita e o levantamento são de cada um. */
+  pedidos: PedidoNegocio[];
+  /** A etapa efetiva, do pedido mais avançado (ver `etapaEfetiva`); uma perdida é um estado à parte, por cima desta. */
   etapa: EtapaPessoa;
   /** A fase do negócio aberto mais avançado; `null` sem negócio aberto. */
   faseEtapa: FaseNegocio | null;
@@ -181,6 +158,29 @@ export interface NotaPessoa {
   campos: { rotulo: string; valor: string }[];
 }
 
+/** A fase de um pedido; deriva dos dados (ver `faseDoPedido`), nunca se guarda. */
+export type FasePedido = "porContactar" | "contactado" | "visita";
+
+/**
+ * Um pedido de orçamento de uma pessoa (lead ou cliente). A visita e o levantamento pertencem ao pedido, não à pessoa: uma
+ * pessoa pode ter vários pedidos (e negócios) em paralelo, cada um com as suas visitas, ou nenhuma. As visitas são as mesmas
+ * do negócio (`VisitaNegocio`), por isso passam sem conversão ao criar o negócio.
+ */
+export interface PedidoNegocio {
+  /** `pd-<n>`. */
+  id: string;
+  pessoaId: string;
+  servico: string;
+  comercial: string;
+  /** AAAA-MM-DD. */
+  criadoEm: string;
+  /** Já houve uma chamada a falar deste pedido. */
+  contactado: boolean;
+  visitas: VisitaNegocio[];
+  /** O levantamento feito nas visitas (linhas, observações, respostas e morada da obra); falta antes de haver linhas guardadas. */
+  levantamento?: RascunhoLevantamento;
+}
+
 export interface EstadoPessoas {
   submissoes: Submissao[];
   notas: NotaPessoa[];
@@ -189,6 +189,8 @@ export interface EstadoPessoas {
   atividade: ItemAtividade[];
   /** Quem foi contactada nesta sessão: deixa de contar como "Voltou a contactar". */
   contactadas: string[];
+  /** Os pedidos de todas as pessoas (ver `PedidoNegocio`). */
+  pedidos: PedidoNegocio[];
 }
 
 /** O seletor "Leads, Clientes, Todos": as perdidas só contam em "Todos". */

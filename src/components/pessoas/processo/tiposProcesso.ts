@@ -1,10 +1,11 @@
 // Os tipos do processo da lead ao negócio: um item (um pedido, ou um negócio em curso, de uma pessoa) e os passos que o
 // fazem avançar. Os itens saem de `cartoesDoQuadro` (Quadro), por isso a regra pedido/negócio e as fases são as mesmas.
+import type { RotuloPedido } from "../pedidoNegocio";
 import type { ColunaQuadro } from "../quadro/cartoesQuadroPessoas";
 
 /** Os passos do processo, pela ordem em que acontecem (o texto de cada um é `pessoasPagina.todo.step.<id>`). */
 export const PASSOS_PROCESSO = [
-  "registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio", "criarOrcamento",
+  "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "criarOrcamento",
   "verificarOrcamento", "aguardarDirecao", "escolherOrcamento", "criarProposta", "enviarProposta", "registarRespostaCliente",
   "gerarContrato", "registarAssinatura",
 ] as const;
@@ -17,13 +18,17 @@ export type EstadoVerificacao = "semDetalhe" | "porVerificar" | "aguardaDirecao"
 
 /** Um pedido (lead sem negócio aberto) ou um negócio em curso de uma pessoa. A fase é a coluna do Quadro. */
 export interface ItemProcesso {
-  /** O id do negócio, ou `pedido-<pessoa>` num pedido. */
+  /** O id do negócio, ou `pedido-<id do pedido>` num pedido. */
   id: string;
   pessoaId: string;
+  /** O id do pedido (`pd-<n>`); `null` num negócio. */
+  pedidoId: string | null;
   tipo: TipoItemProcesso;
   fase: ColunaQuadro;
-  /** O serviço do negócio, ou o da visita num pedido; `null` quando não há. */
+  /** O serviço do negócio ou do pedido; `null` quando não há. */
   trabalho: string | null;
+  /** O que identifica o pedido ao utilizador (ver `nomeDoPedido`); `null` num negócio. */
+  rotuloPedido: RotuloPedido | null;
   /** O valor do orçamento escolhido; `null` num pedido. */
   valor: number | null;
   /** AAAA-MM-DD; `null` sem prazo. */
@@ -40,10 +45,8 @@ export interface ItemProcesso {
   verificacao: EstadoVerificacao;
   /** A proposta do negócio existe e ainda é um rascunho (falso num pedido, ou sem proposta). */
   propostaRascunho: boolean;
-  /** Um pedido na fase Visita cuja visita já foi feita (falso num negócio). */
+  /** Um pedido na fase Visita com pelo menos uma visita feita (falso num negócio). */
   visitaFeita: boolean;
-  /** Quantas linhas de medidas tem o levantamento guardado da visita (0 num negócio, ou sem levantamento). */
-  levantamentoLinhas: number;
 }
 
 /** O negócio a que um diálogo do orçamento ou da proposta se refere: o título diz o trabalho e a descrição diz a pessoa. */

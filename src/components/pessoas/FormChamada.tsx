@@ -15,6 +15,7 @@ import { DetalhesPasso } from "./DetalhesPasso";
 import { NotaChamada } from "./NotaChamada";
 import { OpcoesResultado } from "./OpcoesResultado";
 import type { AcoesFicha, PropsPainel } from "./PainelBase";
+import { nomeComPedido } from "./pedidoNegocio";
 import type { PassoChamada } from "./pessoasTipos";
 import { ProximoPassoChamada } from "./ProximoPassoChamada";
 import { useFormChamada } from "./useFormChamada";
@@ -27,6 +28,8 @@ export type PropsFormChamada = Pick<PropsPainel, "id" | "pessoa" | "resumo" | "h
   aoConcluir: (mensagem: string, passo?: PassoChamada) => void;
   /** O id do título visível: um diálogo à volta do formulário liga-se a ele com `aria-labelledby`. Sem isto, o formulário gera um. */
   idTitulo?: string;
+  /** O pedido do item de onde veio a chamada: a visita vai para ele e o seletor de pedido não se mostra. */
+  pedidoId?: string;
 };
 
 /** A frase para o leitor de ecrã: a chamada e, se houve, a visita, a chamada agendada ou a perda. */
@@ -37,9 +40,9 @@ function mensagemChamada(t: ReturnType<typeof useTranslation>["t"], nome: string
   return t(d.passo === "perder" ? "pessoasPagina.live.callLost" : "pessoasPagina.live.call", { name: nome });
 }
 
-export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora }: PropsFormChamada) {
+export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora, pedidoId }: PropsFormChamada) {
   const { t } = useTranslation();
-  const f = useFormChamada(resumo, hoje);
+  const f = useFormChamada(resumo, hoje, pedidoId);
   const secao = useRef<HTMLElement>(null);
   const titulo = useRef<HTMLHeadingElement>(null);
   const idGerado = useId();
@@ -66,12 +69,15 @@ export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcl
       )}
       <div className={cn("mb-5 space-y-0.5", semVoltar ? "mt-0" : "mt-1")}>
         <h3 id={idTitulo} ref={titulo} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">{t("pessoasPagina.panel.callTitle")}</h3>
-        <p className="text-sm text-muted-foreground">{t("pessoasPagina.call.subtitle", { name: pessoa.nome })}</p>
+        <p className="text-sm text-muted-foreground">{t("pessoasPagina.call.subtitle", { name: nomeComPedido(t, pessoa.nome, pedidoId, resumo.pedidos) })}</p>
       </div>
       <div className="space-y-5 pb-6">
         <OpcoesResultado valor={f.campos.resultado} aoEscolher={f.escolherResultado} />
         <NotaChamada nota={f.campos.nota} aoMudar={(nota) => f.mudar({ nota })} />
-        <ProximoPassoChamada resultado={f.campos.resultado} passos={f.passos} valor={f.campos.passo} aoEscolher={(passo) => f.mudar({ passo })} />
+        <ProximoPassoChamada
+          resultado={f.campos.resultado} passos={f.passos} valor={f.campos.passo} aoEscolher={(passo) => f.mudar({ passo })}
+          candidatos={f.candidatos} todos={resumo.pedidos} pedidoId={f.campos.pedidoId} aoEscolherPedido={(escolhido) => f.mudar({ pedidoId: escolhido })}
+        />
         <DetalhesPasso
           campos={f.campos} erros={f.erros} moradaLead={f.moradaLead} erroMorada={f.erroMorada} hoje={hoje} aoMudar={f.mudar}
         />

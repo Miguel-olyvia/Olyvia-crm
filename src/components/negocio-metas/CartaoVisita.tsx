@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, Circle, Info, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronRight, Circle, Trash2, XCircle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,16 +25,11 @@ interface Props {
   aoRemover: () => void;
 }
 
-/** «Veio da pessoa» (texto, não só cor), «Marcar como feita» e «Remover» (esta não existe na visita que veio de Pessoas). */
+/** «Marcar como feita» (só numa visita por fazer) e «Remover». */
 function AcoesDaVisita({ visita, dia, aoMarcarFeita, aoRemover }: Pick<Props, "visita" | "aoMarcarFeita" | "aoRemover"> & { dia: string }) {
   const { t } = useTranslation();
   return (
     <>
-      {visita.veioDaPessoa && (
-        <span className="inline-flex items-center gap-1 rounded-sm border border-primary px-1.5 py-0.5 text-xs font-semibold text-primary dark:text-violet-300">
-          {t(`${N}visits.fromPerson`)}
-        </span>
-      )}
       {visita.estado === "porFazer" && (
         <Button
           type="button" variant="outline" onClick={aoMarcarFeita} aria-label={t(`${N}visits.markDone.label`, { data: dia })}
@@ -44,22 +39,20 @@ function AcoesDaVisita({ visita, dia, aoMarcarFeita, aoRemover }: Pick<Props, "v
           {t(`${N}visits.markDone`)}
         </Button>
       )}
-      {!visita.veioDaPessoa && (
-        <Button
-          type="button" variant="outline" onClick={aoRemover} aria-label={t(`${N}visits.remove.label`, { data: dia })}
-          className={cn("min-h-11 min-w-11 gap-2", FOCO)}
-        >
-          <Trash2 className="h-4 w-4" aria-hidden="true" />
-          {t(`${N}visits.remove`)}
-        </Button>
-      )}
+      <Button
+        type="button" variant="outline" onClick={aoRemover} aria-label={t(`${N}visits.remove.label`, { data: dia })}
+        className={cn("min-h-11 min-w-11 gap-2", FOCO)}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+        {t(`${N}visits.remove`)}
+      </Button>
     </>
   );
 }
 
 /**
  * Uma visita como cartão compacto: o resumo («Feita · 15/10/2026 · 10:00 · Bruno Costa · Levantamento») é o botão que abre e
- * fecha os campos. «Marcar como feita» e «Remover» ficam ao lado (nunca dentro do botão); a visita que veio de Pessoas só se edita.
+ * fecha os campos. «Marcar como feita» e «Remover» ficam ao lado (nunca dentro do botão).
  */
 export function CartaoVisita({ id, numero, visita, aberta, aoAlternar, aoMudar, aoMarcarFeita, aoRemover }: Props) {
   const { t } = useTranslation();
@@ -87,12 +80,6 @@ export function CartaoVisita({ id, numero, visita, aberta, aoAlternar, aoMudar, 
       </div>
       {aberta && (
         <div id={`${base}-corpo`} className="space-y-4 border-t border-border p-3">
-          {visita.veioDaPessoa && (
-            <p role="note" className="flex items-start gap-2 text-sm text-muted-foreground">
-              <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              {t(`${N}visits.fromPerson.hint`)}
-            </p>
-          )}
           <CamposVisita base={base} visita={visita} aoMudar={aoMudar} />
         </div>
       )}

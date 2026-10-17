@@ -7,24 +7,26 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import { CamposDataHora } from "./CamposDataHora";
 import { MORADA_VISITA_VAZIA, moradaDaLead, type DestinoVisita } from "./moradaVisita";
 import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
-import type { Pessoa, VisitaPessoa } from "./pessoasTipos";
+import type { Pessoa } from "./pessoasTipos";
 import { validarVisita, type DadosAlterarVisita } from "./visitaPessoa";
 
 const V = "pessoasPagina.visitDialog.";
 const C = "pessoasPagina.changeVisit.";
 
 /** A escolha de partida: a da visita atual (a morada da lead só conta se a ficha ainda a tiver). */
-function destinoDaVisita(visita: VisitaPessoa, temMoradaLead: boolean): DestinoVisita {
+function destinoDaVisita(visita: VisitaNegocio, temMoradaLead: boolean): DestinoVisita {
   const naLead = visita.igualALead && temMoradaLead;
-  return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : visita.moradaVisita, notaAcesso: visita.notaAcesso ?? "" };
+  return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : { ...visita.morada }, notaAcesso: visita.nota };
 }
 
 interface FormAlterarProps {
   pessoa: Pessoa;
-  visita: VisitaPessoa;
+  /** A visita a alterar (uma visita de um pedido). */
+  visita: VisitaNegocio;
   hoje: string;
   aoGuardar: (dados: DadosAlterarVisita) => void;
   aoFechar: () => void;
@@ -69,18 +71,20 @@ function FormAlterar({ pessoa, visita, hoje, aoGuardar, aoFechar }: FormAlterarP
 }
 
 interface AlterarVisitaProps extends Omit<FormAlterarProps, "aoFechar"> {
+  /** O nome do pedido a que a visita pertence: diz-se na descrição do diálogo. */
+  pedidoNome: string;
   aberto: boolean;
   aoMudarAberto: (aberto: boolean) => void;
 }
 
-export function AlterarVisita({ aberto, aoMudarAberto, ...resto }: AlterarVisitaProps) {
+export function AlterarVisita({ aberto, aoMudarAberto, pedidoNome, ...resto }: AlterarVisitaProps) {
   const { t } = useTranslation();
   return (
     <Dialog open={aberto} onOpenChange={aoMudarAberto}>
       <DialogContent className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none">
         <DialogHeader>
           <DialogTitle>{t(`${C}title`)}</DialogTitle>
-          <DialogDescription>{t(`${C}description`, { name: resto.pessoa.nome })}</DialogDescription>
+          <DialogDescription>{t(`${C}description`, { name: `${resto.pessoa.nome} · ${pedidoNome}` })}</DialogDescription>
         </DialogHeader>
         <FormAlterar {...resto} aoFechar={() => aoMudarAberto(false)} />
       </DialogContent>

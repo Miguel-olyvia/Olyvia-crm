@@ -22,7 +22,6 @@ import { IDS_NEGOCIOS_DO_QUADRO } from "./pessoasExemplo";
 import { ehHistorico, type ItemAtividade, type NotaPessoa, type Pessoa, type ResumoPessoa, type Submissao } from "./pessoasTipos";
 import { ResumoFicha } from "./ResumoFicha";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
-import { proximaVisita, type VisitaResolvida } from "./visitaProxima";
 
 type AbaFicha = "resumo" | "negocios" | "submissoes" | "notas" | "atividade";
 
@@ -41,12 +40,15 @@ export interface FichaInteriorProps {
   acoes: AcoesFicha;
   aoPedir: (submissaoId: string, pessoaId: string) => void;
   aoVerTodasSubmissoes: () => void;
-  /** "Criar negócio": a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
+  /**
+   * "Criar negócio" (uma lead, ligado ao pedido dela) e "Novo negócio sem visita" (um cliente): a página abre o painel "Novo negócio"
+   * com esta pessoa já escolhida. O "Novo negócio com visita" de um cliente não passa por aqui: abre o painel de visita e levantamento.
+   */
   aoCriarNegocio: (pessoa: Pessoa) => void;
-  /** "Visita concluída → Criar negócio": a página abre o mesmo painel com a pessoa e a visita (morada incluída) já preenchidas. */
-  aoCriarNegocioDaVisita: (pessoa: Pessoa, visita: VisitaResolvida) => void;
   /** Um anúncio vindo da página (resolver uma submissão a partir da ficha), para o leitor de ecrã o ouvir aqui. */
   anuncioExterno?: string;
+  /** O aviso de um passo do processo feito com a ficha aberta: a região da página está escondida, por isso diz-se aqui dentro. */
+  anuncioProcesso?: string;
   /** A ficha chama isto no Esc: fecha o painel aberto (e diz se havia um) em vez de fechar a ficha. */
   fecharPainel: MutableRefObject<(() => boolean) | null>;
   /** A anterior e a seguinte na lista visível, e como passar a elas. */
@@ -60,12 +62,6 @@ interface AbasProps extends FichaInteriorProps {
   negocioAberto: string | null;
   aoAbrirNegocio: (id: string) => void;
   aoVoltarNegocio: () => void;
-}
-
-/** Abre "Novo negócio" com a visita da pessoa (se a tiver): quem chama garante que há visita. */
-function abrirNegocioDaVisita(p: FichaInteriorProps, resumo: ResumoPessoa) {
-  const visita = proximaVisita(resumo.pessoa, resumo.etapa, p.hoje);
-  if (visita) p.aoCriarNegocioDaVisita(resumo.pessoa, visita);
 }
 
 /** A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). */
@@ -100,7 +96,6 @@ function AbasFicha(p: AbasProps) {
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={submissoes.length}
             aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.alterarVisita}
-            aoCriarNegocioDaVisita={() => abrirNegocioDaVisita(p, resumo)}
           />
         </TabsContent>
         <TabsContent value="negocios" className="mt-0 pt-4"><ConteudoNegocios {...p} /></TabsContent>
@@ -153,6 +148,7 @@ export function FichaInterior(p: FichaInteriorProps) {
   const negocio = useNegocioAberto();
   const painelId = useId();
   const { texto, anunciar } = useAnuncios(p.anuncioExterno);
+  useEffect(() => { if (p.anuncioProcesso) anunciar(p.anuncioProcesso); }, [p.anuncioProcesso, anunciar]);
   const { acao, visitados, abrir, fechar, mudarConteudo } = usePaineis(p.fecharPainel, anunciar);
   useAbrirNegociosAoCriar(p.resumo, negocio.esquecer, () => setAba("negocios"));
   const reativar = () => {
@@ -165,7 +161,7 @@ export function FichaInterior(p: FichaInteriorProps) {
         <CabecalhoFicha resumo={p.resumo} vizinhas={p.vizinhas} aoIr={p.aoIr} />
         <BarraAcoesFicha
           resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar}
-          aoCriarNegocio={() => p.aoCriarNegocio(p.resumo.pessoa)} aoConcluirVisita={() => abrirNegocioDaVisita(p, p.resumo)}
+          aoCriarNegocio={() => p.aoCriarNegocio(p.resumo.pessoa)}
         />
         <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
         {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("perder", origem)} />}

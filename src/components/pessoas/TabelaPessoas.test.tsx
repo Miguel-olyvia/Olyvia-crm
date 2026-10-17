@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { negocioBase, pessoaBase, resumoBase } from "./fabricaTestes";
+import { negocioBase, pedidoBase, pessoaBase, resumoBase } from "./fabricaTestes";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { COLUNAS, TabelaPessoas } from "./TabelaPessoas";
 
@@ -28,7 +28,7 @@ const ANA = comNegocios("ana", "Ana Lopes", [
   negocioBase("n1", { servico: "Cozinha", orcamentos: escolhido }),
   negocioBase("n2", { servico: "Sala", orcamentos: escolhido, proposta: { estado: "enviada" } }),
 ]);
-const BRUNO = resumoBase(pessoaBase("bruno", { nome: "Bruno Reis", etapa: "nova" }), [], HOJE_EXEMPLO);
+const BRUNO = resumoBase(pessoaBase("bruno", { nome: "Bruno Reis" }), [], HOJE_EXEMPLO, "lead", [pedidoBase("pd-1", { pessoaId: "bruno" })]);
 const CLARA = resumoBase(pessoaBase("clara", { nome: "Clara Dias", perdida: { motivo: "preco", data: "2026-10-01" } }), [], HOJE_EXEMPLO);
 
 function Arnes({ resumos = [ANA, BRUNO, CLARA], aoAbrir = vi.fn() }: { resumos?: ResumoPessoa[]; aoAbrir?: (id: string) => void }) {
@@ -172,6 +172,22 @@ describe("TabelaPessoas: coluna de negócios", () => {
     const linha = linhaDe("Dora Pinto");
     expect(within(linha).getByText("2 em curso · A fazer: Registar a resposta do cliente")).toBeInTheDocument();
     expect(within(linha).getByText("À espera do cliente")).toBeInTheDocument();
+  });
+
+  it("uma pessoa com dois pedidos e um negócio em paralelo tem três itens, cada um com o seu passo, e o resumo segue o negócio", () => {
+    const eva = resumoBase(
+      pessoaBase("eva", { nome: "Eva Costa" }), [negocioBase("n1", { pessoaId: "eva", servico: "Cozinha", orcamentos: escolhido })], HOJE_EXEMPLO, "lead",
+      [pedidoBase("pd-1", { pessoaId: "eva", servico: "Janelas" }), pedidoBase("pd-2", { pessoaId: "eva", servico: "Portão", contactado: true })],
+    );
+    render(<Arnes resumos={[eva]} />);
+    expect(botaoVer("Eva Costa")).toHaveTextContent("Ver negócios (3)");
+    expect(within(linhaDe("Eva Costa")).getByText("3 em curso · A fazer: Criar a proposta")).toBeInTheDocument();
+    fireEvent.click(botaoVer("Eva Costa"));
+    const lista = screen.getByRole("list", { name: "Negócios de Eva Costa" });
+    expect(within(lista).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(lista).getByRole("button", { name: /^Registar a chamada: Janelas de Eva Costa/ })).toBeInTheDocument();
+    expect(within(lista).getByRole("button", { name: /^Marcar a visita: Portão de Eva Costa/ })).toBeInTheDocument();
+    expect(within(lista).getByRole("button", { name: /^Criar a proposta: Cozinha de Eva Costa/ })).toBeInTheDocument();
   });
 
   it("sem pessoas mostra o estado vazio com 'Limpar filtros'", () => {

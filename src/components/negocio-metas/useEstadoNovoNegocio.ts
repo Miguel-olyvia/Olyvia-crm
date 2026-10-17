@@ -11,7 +11,10 @@ import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
 import { alternarResposta } from "./respostasVisita";
 import { SECCOES_VISITA } from "./visitaExemplo";
 import type { VisitaNegocio } from "./negocioMetas";
-import { ID_VISITA_DA_PESSOA, acrescentarVisita, alterarVisita, marcarFeita, novaVisita, ordenarVisitas, removerVisita, visitasIniciais } from "./visitasNegocio";
+import {
+  acrescentarVisita, alterarVisita, marcarFeita, moradaDasVisitas, novaVisita, ordenarVisitas, removerVisita, visitaParaAbrir,
+  visitasIniciais,
+} from "./visitasNegocio";
 import {
   COMERCIAIS_EXEMPLO, COMERCIAL_POR_OMISSAO, CONTACTO_VAZIO, preencherContactoDaPessoa, reporContacto, type ChaveContacto,
   type PessoaOpcao, type RascunhoLevantamento, type ValoresIniciaisNegocio,
@@ -88,14 +91,17 @@ export interface AcoesVisitas {
   alternar: (id: string) => void;
 }
 
+const ID_DA_LISTA = /^v(\d+)$/;
+
 /**
- * A lista de visitas do negócio: vazia, ou só com a visita concluída que veio de Pessoas (Feita, já aberta para se ver).
- * Uma visita nova é Por fazer, Revisita, com o comercial do negócio.
+ * A lista de visitas do negócio: a do pedido (a primeira Feita já aberta para se ver); sem pedido, vazia. Uma visita nova é Por fazer,
+ * Revisita, com o comercial do negócio, e o seu id `v<n>` continua a numeração das que a lista já traz (um pedido guardado antes não
+ * fica com ids repetidos).
  */
-export function useVisitasForm(hoje: string, aoSujar: () => void, comercial: string, inicial?: ValoresIniciaisNegocio["visita"]) {
-  const [visitas, setVisitas] = useState<VisitaNegocio[]>(() => visitasIniciais(inicial));
-  const [aberta, setAberta] = useState<string | null>(inicial ? ID_VISITA_DA_PESSOA : null);
-  const sequencia = useRef(0);
+export function useVisitasForm(hoje: string, aoSujar: () => void, comercial: string, doPedido?: readonly VisitaNegocio[]) {
+  const [visitas, setVisitas] = useState<VisitaNegocio[]>(() => visitasIniciais(doPedido));
+  const [aberta, setAberta] = useState<string | null>(() => (doPedido ? visitaParaAbrir(doPedido) : null));
+  const sequencia = useRef(Math.max(0, ...(doPedido ?? []).map((v) => Number(ID_DA_LISTA.exec(v.id)?.[1] ?? 0))));
   const alterarLista = (f: (v: VisitaNegocio[]) => VisitaNegocio[]) => { aoSujar(); setVisitas(f); };
   const acoes: AcoesVisitas = {
     adicionar: () => {
@@ -128,13 +134,24 @@ export function useRespostasForm(aoSujar: () => void, inicial?: Respostas) {
 /** De onde veio a morada da obra: da visita (igual à morada da lead, ou outra); `null` quando foi escrita à mão. */
 export type OrigemMorada = "visitaIgual" | "visitaOutra" | null;
 
+/** De onde vem a morada de uma visita: igual à da lead, outra, ou escrita à mão (`null`). */
+const origemDaVisita = (igualALead: boolean | null): OrigemMorada => (igualALead === null ? null : igualALead ? "visitaIgual" : "visitaOutra");
+
+/** De onde parte a morada da obra quando há um pedido: a que já tinha guardada e/ou as visitas. */
+export interface PartidaMorada {
+  visitas?: readonly VisitaNegocio[];
+  moradaObra?: MoradaObraForm;
+}
+
 /**
- * A morada da obra; "preencher" traz rua, código postal e localidade e deixa o andar como estava. Vinda da visita, guarda a
- * origem para a dizer; ao escrever ou ao usar a morada do contacto, deixa de ser "da visita".
+ * A morada da obra; "preencher" traz rua, código postal e localidade e deixa o andar como estava. Parte da guardada no pedido ou, sem
+ * ela, da visita que representa o levantamento. Vinda da visita, guarda a origem para a dizer; ao escrever ou ao usar a morada do
+ * contacto, deixa de ser "da visita".
  */
-export function useMoradaForm(aoSujar: () => void, inicial?: ValoresIniciaisNegocio["visita"]) {
-  const [morada, setMorada] = useState<MoradaObraForm>(inicial?.moradaObra ?? MORADA_VAZIA);
-  const [origem, setOrigem] = useState<OrigemMorada>(inicial ? (inicial.igualALead ? "visitaIgual" : "visitaOutra") : null);
+export function useMoradaForm(aoSujar: () => void, partida?: PartidaMorada) {
+  const dasVisitas = partida?.visitas ? moradaDasVisitas(partida.visitas) : undefined;
+  const [morada, setMorada] = useState<MoradaObraForm>(partida?.moradaObra ?? dasVisitas?.moradaObra ?? MORADA_VAZIA);
+  const [origem, setOrigem] = useState<OrigemMorada>(() => (partida?.moradaObra || !dasVisitas ? null : origemDaVisita(dasVisitas.igualALead)));
   const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setOrigem(null); setMorada((m) => ({ ...m, [chave]: valor })); };
   const preencher = (nova: MoradaObraForm) => { aoSujar(); setOrigem(null); setMorada((m) => ({ ...nova, andar: m.andar })); };
   return { morada, origem, mudar, preencher };

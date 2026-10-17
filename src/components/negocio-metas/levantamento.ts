@@ -25,8 +25,6 @@ export interface LevantamentoForm {
 export type ErroLevantamento = "obrigatorio" | "comprido" | "invalido";
 export type ErrosLinha = Partial<Record<"divisao" | "trabalho" | "trabalhoOutro" | "medida", ErroLevantamento>>;
 export interface ErrosLevantamento {
-  /** Estado Feito sem nenhuma linha. */
-  levantamento?: ErroLevantamento;
   /** Os erros de cada linha, pelo id da linha. */
   linhas?: Record<string, ErrosLinha>;
 }
@@ -68,11 +66,10 @@ function validarLinha(l: LinhaForm): ErrosLinha {
   return erros;
 }
 
-/** Feito exige pelo menos uma linha; cada linha pede divisão, trabalho (e o texto, se "Outro") e uma medida maior que 0. */
+/** O levantamento é opcional (nem com a visita feita se exigem linhas); se houver linhas, cada uma pede divisão, trabalho (e o texto, se "Outro") e uma medida maior que 0. */
 export function validarLevantamento(l: LevantamentoForm | undefined): ErrosLevantamento {
   if (!l) return {};
   const erros: ErrosLevantamento = {};
-  if (l.estado === "feito" && l.linhas.length === 0) erros.levantamento = "obrigatorio";
   const porLinha = Object.fromEntries(l.linhas.map((x) => [x.id, validarLinha(x)]).filter(([, e]) => Object.keys(e as object).length > 0));
   if (Object.keys(porLinha).length > 0) erros.linhas = porLinha as Record<string, ErrosLinha>;
   return erros;

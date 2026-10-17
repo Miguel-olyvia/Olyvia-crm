@@ -14,6 +14,7 @@ import { avisosPessoa, type AvisoPessoa } from "./avisosPessoa";
 import { passoDaPerdida, proximoPasso } from "./etapaPessoa";
 import { resultadoEfetivo } from "./filtrosPessoas";
 import { faixaSaude, textoDiaCompleto, textoPrazoPasso, textoUltimoContacto } from "./formatoPessoas";
+import { horaDoProximoContacto, proximoContactoDaPessoa } from "./pedidoNegocio";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { MarcaExemplo, SeloResultado } from "./SelosPessoa";
 
@@ -42,6 +43,7 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: Resum
   const { t } = useTranslation();
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
+  const proximoContacto = proximoContactoDaPessoa(pessoa, resumo.pedidos);
   let conteudo;
   if (pessoa.perdida) {
     const detalhe = t(`${P}sum.lostDetail`, {
@@ -71,7 +73,7 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: Resum
       <div className="space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
         <p className="text-[15px] text-muted-foreground">{t(`${P}next.${passo.id}.hint`)}</p>
-        <Prazo prazo={passo.prazo} hoje={hoje} hora={passo.prazo !== null && passo.prazo === pessoa.proximoContacto ? pessoa.proximoHora : undefined} />
+        <Prazo prazo={passo.prazo} hoje={hoje} hora={passo.prazo !== null && passo.prazo === proximoContacto ? horaDoProximoContacto(pessoa, resumo.pedidos) : undefined} />
       </div>
     );
   }

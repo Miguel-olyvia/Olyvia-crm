@@ -18,14 +18,14 @@ vi.mock("@/hooks/useTranslation", async () => {
 });
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
-  id: "n1", pessoaId: "p1", tipo: "negocio", fase: "orcamento", trabalho: "Cozinha", valor: 9000, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
+  id: "n1", pessoaId: "p1", pedidoId: null, tipo: "negocio", fase: "orcamento", trabalho: "Cozinha", rotuloPedido: null, valor: 9000, prazo: null, atrasado: false,
+  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 const ITENS: ItemProcesso[] = [
   item({}),
   item({ id: "n2", trabalho: "Sala", fase: "proposta", valor: 3000, orcamentos: 1, orcamentoEscolhido: true }),
-  item({ id: "pedido-p1", tipo: "pedido", fase: "porContactar", trabalho: null, valor: null }),
+  item({ id: "pedido-pd-1", pedidoId: "pd-1", tipo: "pedido", fase: "porContactar", trabalho: null, valor: null }),
 ];
 
 const mostrar = (itens = ITENS, aoAbrir = vi.fn()) => {

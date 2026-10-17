@@ -7,8 +7,8 @@ import { ATRIBUTO_ITEM, ATRIBUTO_PESSOA, BloqueioContext, ProcessoContext, useAc
 import type { ItemProcesso } from "./tiposProcesso";
 
 const item = (extra: Partial<ItemProcesso> = {}): ItemProcesso => ({
-  id: "pedido-a", pessoaId: "a", tipo: "pedido", fase: "porContactar", trabalho: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
+  id: "pedido-pd-a", pessoaId: "a", pedidoId: "pd-a", tipo: "pedido", fase: "porContactar", trabalho: null, rotuloPedido: null, valor: null, prazo: null, atrasado: false,
+  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 function Botao({ item: i, aoAbrir }: { item?: ItemProcesso; aoAbrir: () => void }) {
@@ -17,7 +17,7 @@ function Botao({ item: i, aoAbrir }: { item?: ItemProcesso; aoAbrir: () => void 
 }
 
 const comProvider = (executar: () => void, filhos: ReactNode) => (
-  <ProcessoContext.Provider value={{ executar }}>{filhos}</ProcessoContext.Provider>
+  <ProcessoContext.Provider value={{ executar, abrirNovoPedido: vi.fn() }}>{filhos}</ProcessoContext.Provider>
 );
 
 describe("useAcaoDoPasso", () => {
@@ -87,19 +87,19 @@ describe("useAcaoDoPasso", () => {
       const acao = useAcaoDoPasso(i, vi.fn());
       return <button type="button" {...acao.atributos}>{acao.bloqueio ?? "livre"}</button>;
     }
-    const bloqueio = { itemId: "pedido-a", passo: "registarChamada" as const, texto: "Falta o resultado." };
+    const bloqueio = { itemId: "pedido-pd-a", passo: "registarChamada" as const, texto: "Falta o resultado." };
     render(
-      <ProcessoContext.Provider value={{ executar: vi.fn() }}>
+      <ProcessoContext.Provider value={{ executar: vi.fn(), abrirNovoPedido: vi.fn() }}>
         <BloqueioContext.Provider value={bloqueio}>
           <Visivel i={item()} />
-          <Visivel i={item({ id: "pedido-b" })} />
+          <Visivel i={item({ id: "pedido-pd-b" })} />
           <Visivel i={item({ fase: "contactado" })} />
         </BloqueioContext.Provider>
       </ProcessoContext.Provider>,
     );
     const [bloqueado, outroItem, outroPasso] = screen.getAllByRole("button");
     expect(bloqueado).toHaveTextContent("Falta o resultado.");
-    expect(bloqueado).toHaveAttribute("aria-describedby", "explicacao-passo-pedido-a");
+    expect(bloqueado).toHaveAttribute("aria-describedby", "explicacao-passo-pedido-pd-a");
     expect(outroItem).toHaveTextContent("livre");
     expect(outroItem).not.toHaveAttribute("aria-describedby");
     expect(outroPasso).toHaveTextContent("livre");

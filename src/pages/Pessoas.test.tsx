@@ -107,7 +107,7 @@ describe("Pessoas: Registar chamada é uma vista da ficha", () => {
     expect(within(ficha).queryByRole("heading", { name: "Registar chamada", level: 3 })).not.toBeInTheDocument();
     expect(within(ficha).getByRole("button", { name: /Registar chamada/ })).toHaveAttribute("aria-expanded", "false");
     // A visita passa a ver-se no bloco «Próxima visita», com a morada da lead (igual); o passo remete para ele.
-    const visita = within(ficha).getByRole("heading", { name: "Próxima visita" }).closest("section")!;
+    const visita = within(ficha).getByRole("heading", { name: /^Próxima visita · / }).closest("section")!;
     expect(within(visita).getByText("sexta-feira, 16/10/2026 · 09:30")).toBeInTheDocument();
     expect(within(visita).getByText("Igual à da lead")).toBeInTheDocument();
     fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }), { button: 0, ctrlKey: false });

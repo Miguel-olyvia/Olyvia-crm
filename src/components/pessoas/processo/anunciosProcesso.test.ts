@@ -7,8 +7,8 @@ import type { ItemProcesso } from "./tiposProcesso";
 const t: Traduzir = (chave, params) => `${chave}${params ? JSON.stringify(params) : ""}`;
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
-  id: "pedido-a", pessoaId: "a", tipo: "pedido", fase: "contactado", trabalho: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, levantamentoLinhas: 0, ...extra,
+  id: "pedido-pd-1", pessoaId: "a", pedidoId: "pd-1", tipo: "pedido", fase: "contactado", trabalho: null, rotuloPedido: null, valor: null, prazo: null, atrasado: false,
+  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 describe("textoDoAviso", () => {
@@ -31,14 +31,14 @@ describe("textoDoAviso", () => {
       .toBe('pessoasPagina.done.visitBooked{"name":"Ana","phase":"pessoasPagina.board.col.visita"}');
   });
 
-  it("visita feita: a fase e o novo A fazer", () => {
+  it("visita feita (e levantamento guardado): a fase e o novo A fazer, que é criar o negócio", () => {
     expect(textoDoAviso(t, "visitaFeita", "Ana", "visita", item({ fase: "visita", visitaFeita: true })))
-      .toBe('pessoasPagina.done.visitDone{"name":"Ana","phase":"pessoasPagina.board.col.visita","step":"pessoasPagina.todo.step.fazerLevantamento"}');
+      .toBe('pessoasPagina.done.visitDone{"name":"Ana","phase":"pessoasPagina.board.col.visita","step":"pessoasPagina.todo.step.criarNegocio"}');
   });
 
-  it("levantamento guardado: o novo A fazer é criar o negócio", () => {
-    expect(textoDoAviso(t, "levantamento", "Ana", "visita", item({ fase: "visita", visitaFeita: true, levantamentoLinhas: 2 })))
-      .toBe('pessoasPagina.done.survey{"name":"Ana","step":"pessoasPagina.todo.step.criarNegocio"}');
+  it("visita guardada sem ficar feita: a fase e o A fazer, que continua a ser marcar a visita como feita", () => {
+    expect(textoDoAviso(t, "visitaGuardada", "Ana", "visita", item({ fase: "visita" })))
+      .toBe('pessoasPagina.done.visitSaved{"name":"Ana","phase":"pessoasPagina.board.col.visita","step":"pessoasPagina.todo.step.marcarVisitaFeita"}');
   });
 
   it("negócio criado: 'passa a Orçamento'", () => {
@@ -80,7 +80,7 @@ describe("textoDoAviso", () => {
 
   it("sem item depois, só a chamada tem aviso; os outros passos não dizem nada", () => {
     const outros = [
-      "visita", "visitaFeita", "levantamento", "negocio", "orcamento", "verificado", "direcaoPedida", "direcaoAprovada", "direcaoRecusada", "proposta",
+      "visita", "visitaFeita", "visitaGuardada", "negocio", "orcamento", "verificado", "direcaoPedida", "direcaoAprovada", "direcaoRecusada", "proposta",
     ] as const;
     for (const tipo of outros) expect(textoDoAviso(t, tipo, "Ana", "visita", null)).toBe("");
   });

@@ -5,7 +5,7 @@ import type { EstadoPessoas } from "./pessoasTipos";
 import { idDaMaisRecente, ordenarSubmissoes, pessoasComPendentes, pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
 
 const inicial = (): EstadoPessoas => ({
-  submissoes: [...SUBMISSOES_EXEMPLO], notas: [], pessoas: [], atividade: [], contactadas: [],
+  submissoes: [...SUBMISSOES_EXEMPLO], notas: [], pessoas: [], atividade: [], contactadas: [], pedidos: [],
 });
 
 describe("submissões de exemplo", () => {

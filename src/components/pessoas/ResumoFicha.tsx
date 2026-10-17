@@ -1,13 +1,14 @@
-// A aba "Resumo" da ficha, em secções por esta ordem: próxima visita (só com visita), próximo passo e prazo, avisos, contacto,
-// origem e sobre a pessoa.
+// A aba "Resumo" da ficha, em secções por esta ordem: as visitas de cada pedido que as tem (uma secção por pedido), próximo passo e
+// prazo, avisos, contacto, origem e sobre a pessoa.
 // A marca "exemplo" vai por secção.
 import { ContactoFicha } from "./ContactoFicha";
 import type { AcoesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
+import { itensDaPessoa } from "./processo/itensProcesso";
+import { useExtrasProcesso } from "./processo/processoNegocios";
 import { SeccaoOrigem } from "./SeccaoOrigem";
 import { SeccaoAvisos, SeccaoPasso, SeccaoSobre } from "./SeccoesResumo";
-import { SeccaoProximaVisita } from "./SeccaoVisita";
-import { proximaVisita } from "./visitaProxima";
+import { SeccaoPedidoVisita } from "./SeccaoVisita";
 
 interface ResumoFichaProps {
   resumo: ResumoPessoa;
@@ -18,21 +19,23 @@ interface ResumoFichaProps {
   pendentes: number;
   aoVerSubmissoes: () => void;
   alterarVisita: AcoesFicha["alterarVisita"];
-  /** "Visita concluída → Criar negócio": a página abre o painel "Novo negócio" com a visita já preenchida. */
-  aoCriarNegocioDaVisita: () => void;
 }
 
 export function ResumoFicha(p: ResumoFichaProps) {
   const { resumo } = p;
-  const visita = proximaVisita(resumo.pessoa, resumo.etapa, p.hoje);
+  const extras = useExtrasProcesso();
+  // Uma perdida não tem visitas à vista; os outros mostram uma secção por pedido com visitas (as canceladas não contam).
+  const comVisitas = resumo.pessoa.perdida ? [] : resumo.pedidos.filter((d) => d.visitas.some((v) => v.estado !== "cancelada"));
+  const itens = itensDaPessoa(resumo, p.hoje, extras);
   return (
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
-      {visita && (
-        <SeccaoProximaVisita
-          pessoa={resumo.pessoa} visita={visita} hoje={p.hoje} alterarVisita={p.alterarVisita} aoCriarNegocio={p.aoCriarNegocioDaVisita}
+      {comVisitas.map((pedido) => (
+        <SeccaoPedidoVisita
+          key={pedido.id} pessoa={resumo.pessoa} pedido={pedido} pedidos={resumo.pedidos} item={itens.find((i) => i.pedidoId === pedido.id)} hoje={p.hoje}
+          alterarVisita={p.alterarVisita}
         />
-      )}
-      <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={visita !== null} />
+      ))}
+      <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas.length > 0} />
       <SeccaoAvisos
         resumo={resumo} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={p.pendentes}
         aoVerSubmissoes={p.aoVerSubmissoes}

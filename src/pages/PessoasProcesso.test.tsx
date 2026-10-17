@@ -64,38 +64,42 @@ afterEach(() => { saida?.restaurar(); saida = null; });
 /** Todo o texto das regiões live da página (e da ficha), mesmo as que o leitor de ecrã ainda não leu. */
 const textoLive = () => Array.from(document.querySelectorAll('[role="status"]')).map((e) => e.textContent ?? "").join(" | ").replace(/\u00a0/g, "");
 
-/** Marca a visita como feita (diálogo) a partir do botão do Quadro. */
-const marcarFeita = async (nome: string) => {
-  fireEvent.click(botao(`Marcar a visita como feita: Pedido novo de ${nome}`));
-  fireEvent.click(within(await screen.findByRole("dialog", { name: "A visita já foi feita?" })).getByRole("button", { name: "Marcar como feita" }));
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+/** O dia em que foi criado o pedido de cada lead de exemplo (o «desde» da ficha): é o nome do pedido, que não tem serviço. */
+const DIA_DO_PEDIDO: Record<string, string> = { "Rita Albuquerque": "01/10/2026", "Gonçalo Matias": "07/10/2026" };
+const pedidoDe = (nome: string) => `Pedido de ${DIA_DO_PEDIDO[nome]}`;
+
+/** Abre o painel de visita e levantamento do pedido da pessoa (botão do Quadro); devolve o painel. */
+const abrirPainelVisita = async (nome: string) => {
+  fireEvent.click(botao(`Marcar a visita como feita: ${pedidoDe(nome)} de ${nome}`));
+  return screen.findByRole("dialog", { name: `Visita e levantamento de ${nome} · ${pedidoDe(nome)}` });
 };
 
-/** Abre o painel do levantamento (Quadro) e acrescenta uma linha completa; devolve o painel. */
-const preencherLevantamento = async (nome: string) => {
-  fireEvent.click(botao(`Fazer o levantamento: Pedido novo de ${nome}`));
-  const painel = await screen.findByRole("dialog");
+/** No painel, marca a visita como feita (o botão da própria visita). */
+const marcarFeitaNoPainel = (painel: HTMLElement) =>
+  fireEvent.click(within(painel).getByRole("button", { name: /^Marcar como feita a visita de/ }));
+
+/** No painel, acrescenta uma linha de medidas completa. */
+const preencherLinha = async (painel: HTMLElement) => {
   fireEvent.click(within(painel).getByRole("button", { name: /^Medidas da área/ }));
   fireEvent.click(within(painel).getByRole("button", { name: "Adicionar linha" }));
   await escolher(painel, /^Divisão ou zona/, "Cozinha");
   await escolher(painel, /^Trabalho a fazer/, "Bancada nova");
   fireEvent.change(within(painel).getByLabelText(/^Medida(?!s)/), { target: { value: "3.5" } });
-  return painel;
 };
 
-/** Marca a visita como feita e guarda um levantamento de uma linha, tudo a partir dos botões do Quadro. */
-const marcarFeitaEGuardarLevantamento = async (nome: string) => {
-  await marcarFeita(nome);
-  const painel = await preencherLevantamento(nome);
-  fireEvent.click(within(painel).getByRole("button", { name: "Guardar o levantamento" }));
+/** O passo todo a partir do Quadro: abre o painel do pedido, marca a visita como feita, tira uma medida e guarda (uma só gravação). */
+const marcarFeitaEGuardar = async (nome: string) => {
+  const painel = await abrirPainelVisita(nome);
+  marcarFeitaNoPainel(painel);
+  await preencherLinha(painel);
+  fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 };
-
 describe("Quadro: registar a chamada", () => {
   it("abre o diálogo da chamada; guardar leva o cartão de Por contactar a Contactado e avisa", async () => {
     abrirPagina("quadro");
     expect(within(coluna("Por contactar")).getByText("Hugo Teixeira")).toBeInTheDocument();
-    fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+    fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     expect(within(dialogo).queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
     expect(within(dialogo).getByRole("button", { name: "Guardar" })).toHaveAttribute("aria-disabled", "true");
@@ -105,28 +109,28 @@ describe("Quadro: registar a chamada", () => {
     expect(within(coluna("Contactado")).getByText("Hugo Teixeira")).toBeInTheDocument();
     expect(within(coluna("Por contactar")).queryByText("Hugo Teixeira")).not.toBeInTheDocument();
     await waitFor(() => expect(avisos()).toContain("Chamada registada: Hugo Teixeira passa a Contactado."));
-    expect(botao("Marcar a visita: Pedido novo de Hugo Teixeira")).toBeInTheDocument();
+    expect(botao("Marcar a visita: Pedido de 12/10/2026 de Hugo Teixeira")).toBeInTheDocument();
   });
 
   it("cancelar não muda nada e o foco volta ao botão do passo", async () => {
     abrirPagina("quadro");
-    const gatilho = botao("Registar a chamada: Pedido novo de Hugo Teixeira");
+    const gatilho = botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira");
     gatilho.focus();
     fireEvent.click(gatilho);
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(within(coluna("Por contactar")).getByText("Hugo Teixeira")).toBeInTheDocument();
-    await waitFor(() => expect(botao("Registar a chamada: Pedido novo de Hugo Teixeira")).toHaveFocus());
+    await waitFor(() => expect(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira")).toHaveFocus());
   });
 
   it("depois de guardar, o foco vai para o botão do novo passo do mesmo cartão (o antigo já não existe)", async () => {
     abrirPagina("quadro");
-    fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+    fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     fireEvent.click(within(dialogo).getByRole("radio", { name: /Não atendeu/ }));
     fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(botao("Marcar a visita: Pedido novo de Hugo Teixeira")).toHaveFocus());
+    await waitFor(() => expect(botao("Marcar a visita: Pedido de 12/10/2026 de Hugo Teixeira")).toHaveFocus());
   });
 });
 
@@ -134,82 +138,69 @@ describe("Quadro: marcar a visita", () => {
   it("abre o diálogo de marcar visita; marcar leva o cartão de Contactado a Visita e avisa", async () => {
     abrirPagina("quadro");
     expect(within(coluna("Contactado")).getByText("Lúcia Faria")).toBeInTheDocument();
-    fireEvent.click(botao("Marcar a visita: Pedido novo de Lúcia Faria"));
+    fireEvent.click(botao("Marcar a visita: Pedido de 22/09/2026 de Lúcia Faria"));
     const dialogo = await screen.findByRole("dialog", { name: "Marcar visita" });
     fireEvent.change(within(dialogo).getByLabelText("Dia"), { target: { value: "2026-10-20" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Marcar visita" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(within(coluna("Visita")).getByText("Lúcia Faria")).toBeInTheDocument();
     expect(within(coluna("Contactado")).queryByText("Lúcia Faria")).not.toBeInTheDocument();
-    await waitFor(() => expect(avisos()).toContain("Visita marcada: Lúcia Faria passa a Visita."));
-    await waitFor(() => expect(botao("Marcar a visita como feita: Pedido novo de Lúcia Faria")).toHaveFocus());
+    await waitFor(() => expect(avisos()).toContain("Visita marcada: Lúcia Faria (Pedido de 22/09/2026) passa a Visita."));
+    await waitFor(() => expect(botao("Marcar a visita como feita: Pedido de 22/09/2026 de Lúcia Faria")).toHaveFocus());
   });
 });
 
 describe("Quadro: da visita feita ao negócio", () => {
-  it("'A visita já foi feita?': cancelar não muda nada", async () => {
+  it("«Marcar a visita como feita» abre o painel de visita e levantamento na secção Visitas, com as 7 secções e a visita do pedido", async () => {
     abrirPagina("quadro");
-    fireEvent.click(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque"));
-    const dialogo = await screen.findByRole("dialog", { name: "A visita já foi feita?" });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque")).toBeInTheDocument();
-  });
+    const painel = await abrirPainelVisita("Rita Albuquerque");
+    expect(within(painel).getByRole("tab", { name: /^Visita/ })).toHaveAttribute("aria-selected", "true");
+    const seccoes = within(painel).getByRole("navigation", { name: "Secções da visita" });
+    expect(within(seccoes).getAllByRole("listitem")).toHaveLength(7);
+    expect(within(seccoes).getByRole("button", { name: /^Visitas/ })).toHaveAttribute("aria-current", "step");
+    // A visita da Rita (hoje, às 15:00, por fazer) está na lista do painel, com o botão para a marcar como feita.
+    expect(within(painel).getByText(/Por fazer · 13\/10\/2026 · 15:00/)).toBeInTheDocument();
+    expect(within(painel).getByRole("button", { name: /^Marcar como feita a visita de/ })).toBeInTheDocument();
+  }, TEMPO);
 
-  it("a nota tem 200 caracteres no máximo e o erro diz-se por texto", async () => {
+  it("cancelar o painel não muda nada e o foco volta ao botão do passo", async () => {
     abrirPagina("quadro");
-    fireEvent.click(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque"));
-    const dialogo = await screen.findByRole("dialog", { name: "A visita já foi feita?" });
-    const nota = within(dialogo).getByLabelText("Nota (opcional)");
-    fireEvent.change(nota, { target: { value: "x".repeat(201) } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Marcar como feita" }));
-    expect(within(dialogo).getByText("A nota não pode ter mais de 200 caracteres.")).toBeInTheDocument();
-    expect(nota).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("dialog", { name: "A visita já foi feita?" })).toBeInTheDocument();
-    fireEvent.change(nota, { target: { value: "x".repeat(200) } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Marcar como feita" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  });
-
-  it("marcar a visita como feita muda o 'A fazer' para fazer o levantamento, na mesma fase, e avisa", async () => {
-    abrirPagina("quadro");
-    fireEvent.click(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque"));
-    const dialogo = await screen.findByRole("dialog", { name: "A visita já foi feita?" });
-    fireEvent.change(within(dialogo).getByLabelText("Nota (opcional)"), { target: { value: "Cliente simpática" } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Marcar como feita" }));
+    const gatilho = botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque");
+    gatilho.focus();
+    const painel = await abrirPainelVisita("Rita Albuquerque");
+    fireEvent.click(within(painel).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(within(coluna("Visita")).getByText("Rita Albuquerque")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Marcar a visita como feita: Pedido novo de Rita Albuquerque" })).not.toBeInTheDocument();
-    await waitFor(() => expect(avisos()).toContain("Visita feita: Rita Albuquerque continua em Visita. A fazer: Fazer o levantamento."));
+    await waitFor(() => expect(botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque")).toHaveFocus());
+  }, TEMPO);
+
+  it("marcar a visita como feita e guardar (uma só gravação) muda o 'A fazer' para criar o negócio, na mesma fase, e avisa", async () => {
+    abrirPagina("quadro");
+    await marcarFeitaEGuardar("Rita Albuquerque");
+    expect(within(coluna("Visita")).getByText("Rita Albuquerque")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque" })).not.toBeInTheDocument();
+    await waitFor(() => expect(avisos()).toContain("Visita feita: Rita Albuquerque (Pedido de 01/10/2026) continua em Visita. A fazer: Criar o negócio."));
     // A região live diz tudo: não há toast a repetir o mesmo texto.
     expect(sucesso).not.toHaveBeenCalledWith(expect.stringContaining("Visita feita"));
-    await waitFor(() => expect(botao("Fazer o levantamento: Pedido novo de Rita Albuquerque")).toHaveFocus());
-  });
+    await waitFor(() => expect(botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque")).toHaveFocus());
+  }, TEMPO);
 
-  it("fazer o levantamento, guardá-lo e criar o negócio leva o cartão a Orçamento, com a visita concluída", async () => {
+  it("guardar só a visita (por fazer, sem medidas) fica no pedido: continua por marcar como feita", async () => {
     abrirPagina("quadro");
-    await marcarFeita("Rita Albuquerque");
-
-    // Fazer o levantamento: o painel abre na aba Visita, com a pessoa e a visita já preenchidas, e o título diz o passo.
-    fireEvent.click(botao("Fazer o levantamento: Pedido novo de Rita Albuquerque"));
-    let painel = await screen.findByRole("dialog", { name: "Levantamento de Rita Albuquerque" });
-    expect(within(painel).getByRole("tab", { name: /^Visita/ })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(within(painel).getByRole("button", { name: /^Medidas da área/ }));
-    fireEvent.click(within(painel).getByRole("button", { name: "Adicionar linha" }));
-    await escolher(painel, /^Divisão ou zona/, "Cozinha");
-    await escolher(painel, /^Trabalho a fazer/, "Bancada nova");
-    fireEvent.change(within(painel).getByLabelText(/^Medida(?!s)/), { target: { value: "3.5" } });
-    fireEvent.click(within(painel).getByRole("button", { name: "Guardar o levantamento" }));
+    const painel = await abrirPainelVisita("Rita Albuquerque");
+    fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(within(coluna("Visita")).getByText("Rita Albuquerque")).toBeInTheDocument();
-    await waitFor(() => expect(avisos()).toContain("Levantamento guardado: Rita Albuquerque. A fazer: Criar o negócio."));
-    // A região live diz tudo: não há toast a repetir o mesmo texto.
-    expect(sucesso).not.toHaveBeenCalledWith(expect.stringContaining("Levantamento guardado"));
-    await waitFor(() => expect(botao("Criar o negócio: Pedido novo de Rita Albuquerque")).toHaveFocus());
+    await waitFor(() => expect(avisos()).toContain("Visita guardada: Rita Albuquerque (Pedido de 01/10/2026) continua em Visita. A fazer: Marcar a visita como feita."));
+    expect(botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque")).toBeInTheDocument();
+  }, TEMPO);
+
+  it("criar o negócio leva o cartão a Orçamento: o pedido sai e a visita e o levantamento ficam no negócio", async () => {
+    abrirPagina("quadro");
+    await marcarFeitaEGuardar("Rita Albuquerque");
 
     // Criar o negócio: abre com o levantamento guardado e cria.
-    fireEvent.click(botao("Criar o negócio: Pedido novo de Rita Albuquerque"));
-    painel = await screen.findByRole("dialog", { name: "Novo negócio de Rita Albuquerque" });
+    fireEvent.click(botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque"));
+    const painel = await screen.findByRole("dialog", { name: "Novo negócio de Rita Albuquerque" });
     fireEvent.click(within(painel).getByRole("button", { name: /^Medidas da área.*1 linha/ }));
     expect(within(painel).getByRole("combobox", { name: /^Divisão ou zona/ })).toHaveTextContent("Cozinha");
     fireEvent.click(within(painel).getByRole("button", { name: "Criar negócio" }));
@@ -217,56 +208,52 @@ describe("Quadro: da visita feita ao negócio", () => {
     expect(within(coluna("Orçamento")).getByText("Rita Albuquerque")).toBeInTheDocument();
     expect(within(coluna("Visita")).queryByText("Rita Albuquerque")).not.toBeInTheDocument();
     await waitFor(() => expect(avisos()).toContain("Negócio criado: Rita Albuquerque passa a Orçamento."));
+    expect(negociosNovos()).toHaveLength(1);
+    expect(negociosNovos()[0]).toMatchObject({ pessoaId: "p-rita", levantamento: { estado: "feito", linhas: [{ divisao: "Cozinha", medida: 3.5 }] } });
+    expect(negociosNovos()[0].visitas?.map((v) => v.estado)).toEqual(["feita"]);
 
-    // A visita ficou concluída: a atividade da ficha regista-o e já não há "Próxima visita".
+    // O pedido saiu: a ficha já não tem as visitas dele, e a atividade guarda o que se fez.
     fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
     const ficha = await screen.findByRole("dialog");
-    expect(within(ficha).queryByRole("heading", { name: "Próxima visita" })).not.toBeInTheDocument();
+    expect(within(ficha).queryByRole("heading", { name: /^(Próxima visita|Visita feita|Visita por concluir)/ })).not.toBeInTheDocument();
     fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }), { button: 0, ctrlKey: false });
-    expect(within(ficha).getByText("Histórico · Visita concluída · negócio criado")).toBeInTheDocument();
     expect(within(ficha).getByText("Histórico · Visita feita")).toBeInTheDocument();
-  });
+  }, TEMPO);
 
-  it("guardar o levantamento sem linhas (visita feita) mostra o erro das linhas no painel e não guarda nada", async () => {
+  it("guardar com a visita feita e sem linhas guarda na mesma (o levantamento é opcional): o painel fecha e o cartão passa a «Criar o negócio»", async () => {
     abrirPagina("quadro");
-    await marcarFeita("Rita Albuquerque");
-    fireEvent.click(botao("Fazer o levantamento: Pedido novo de Rita Albuquerque"));
-    const painel = await screen.findByRole("dialog");
-    fireEvent.click(within(painel).getByRole("button", { name: "Guardar o levantamento" }));
-    expect(await within(painel).findByText("Com o estado Feito, acrescenta pelo menos uma linha.")).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    fireEvent.click(within(painel).getByRole("button", { name: "Cancelar" }));
+    const painel = await abrirPainelVisita("Rita Albuquerque");
+    marcarFeitaNoPainel(painel);
+    fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(within(coluna("Visita")).getByText("Rita Albuquerque")).toBeInTheDocument();
-    expect(botao("Fazer o levantamento: Pedido novo de Rita Albuquerque")).toBeInTheDocument();
-  });
+    expect(botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque" })).not.toBeInTheDocument();
+  }, TEMPO);
 
-  it("fechar o painel do levantamento sem guardar não muda a fase nem o botão, e o foco volta ao botão do passo", async () => {
+  it("fechar o painel sem guardar não muda a fase nem o botão, e o foco volta ao botão do passo", async () => {
     abrirPagina("quadro");
-    await marcarFeita("Gonçalo Matias");
-    fireEvent.click(botao("Fazer o levantamento: Pedido novo de Gonçalo Matias"));
-    const painel = await screen.findByRole("dialog");
+    const painel = await abrirPainelVisita("Gonçalo Matias");
     fireEvent.click(within(painel).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(within(coluna("Visita")).getByText("Gonçalo Matias")).toBeInTheDocument();
-    await waitFor(() => expect(botao("Fazer o levantamento: Pedido novo de Gonçalo Matias")).toHaveFocus());
-  });
+    await waitFor(() => expect(botao("Marcar a visita como feita: Pedido de 07/10/2026 de Gonçalo Matias")).toHaveFocus());
+  }, TEMPO);
 
-  it("um pedido SEM a visita feita só oferece «Marcar a visita como feita»: nem o levantamento nem o negócio avançam", async () => {
+  it("um pedido SEM a visita feita só oferece «Marcar a visita como feita»: o negócio não avança", async () => {
     abrirPagina("quadro");
     const visita = within(coluna("Visita"));
-    expect(visita.getByRole("button", { name: "Marcar a visita como feita: Pedido novo de Rita Albuquerque" })).toBeInTheDocument();
-    expect(visita.queryByRole("button", { name: /^Fazer o levantamento: .* Rita Albuquerque/ })).not.toBeInTheDocument();
+    expect(visita.getByRole("button", { name: "Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque" })).toBeInTheDocument();
+    expect(visita.queryByRole("button", { name: /^Fazer o levantamento/ })).not.toBeInTheDocument();
     expect(visita.queryByRole("button", { name: /^Criar o negócio: .* Rita Albuquerque/ })).not.toBeInTheDocument();
-    // Abrir e cancelar o diálogo da visita feita não adianta o pedido.
-    fireEvent.click(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque"));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "A visita já foi feita?" })).getByRole("button", { name: "Cancelar" }));
+    // Abrir e cancelar o painel não adianta o pedido.
+    const painel = await abrirPainelVisita("Rita Albuquerque");
+    fireEvent.click(within(painel).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(within(coluna("Visita")).queryByRole("button", { name: /^Fazer o levantamento/ })).not.toBeInTheDocument();
-    expect(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque")).toBeInTheDocument();
-  });
+    expect(within(coluna("Visita")).queryByRole("button", { name: /^Criar o negócio/ })).not.toBeInTheDocument();
+    expect(botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque")).toBeInTheDocument();
+  }, TEMPO);
 });
-
 describe("Lista: o mesmo passo, a partir da sub-linha", () => {
   /** A linha da tabela da pessoa (o botão dos negócios vive nela). */
   const linhaDe = (nome: string) => screen.getByRole("button", { name: new RegExp(`^(Ver|Esconder) negócios.*${nome}$`) }).closest("tr")!;
@@ -275,28 +262,31 @@ describe("Lista: o mesmo passo, a partir da sub-linha", () => {
   it("registar a chamada na sub-linha atualiza o 'A fazer' e o resumo da linha", async () => {
     abrirPagina("lista");
     abrirSublinhas("Hugo Teixeira");
-    fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+    fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     fireEvent.click(within(dialogo).getByRole("radio", { name: /Não atendeu/ }));
     fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(botao("Marcar a visita: Pedido novo de Hugo Teixeira")).toBeInTheDocument();
+    expect(botao("Marcar a visita: Pedido de 12/10/2026 de Hugo Teixeira")).toBeInTheDocument();
     await waitFor(() => expect(avisos()).toContain("Chamada registada: Hugo Teixeira passa a Contactado."));
-    await waitFor(() => expect(botao("Marcar a visita: Pedido novo de Hugo Teixeira")).toHaveFocus());
+    await waitFor(() => expect(botao("Marcar a visita: Pedido de 12/10/2026 de Hugo Teixeira")).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: /^Esconder negócios/ }));
     expect(within(linhaDe("Hugo Teixeira")).getByText("1 em curso · A fazer: Marcar a visita")).toBeInTheDocument();
   });
 
-  it("marcar a visita como feita na sub-linha passa a pedir o levantamento", async () => {
+  it("marcar a visita como feita e guardar na sub-linha passa a pedir o negócio", async () => {
     abrirPagina("lista");
     abrirSublinhas("Rita Albuquerque");
-    fireEvent.click(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque"));
-    fireEvent.click(within(await screen.findByRole("dialog", { name: "A visita já foi feita?" })).getByRole("button", { name: "Marcar como feita" }));
+    fireEvent.click(botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque"));
+    const painel = await screen.findByRole("dialog", { name: "Visita e levantamento de Rita Albuquerque · Pedido de 01/10/2026" });
+    marcarFeitaNoPainel(painel);
+    await preencherLinha(painel);
+    fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(botao("Fazer o levantamento: Pedido novo de Rita Albuquerque")).toBeInTheDocument();
+    expect(botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Esconder negócios/ }));
-    expect(within(linhaDe("Rita Albuquerque")).getByText("1 em curso · A fazer: Fazer o levantamento")).toBeInTheDocument();
-  });
+    expect(within(linhaDe("Rita Albuquerque")).getByText("1 em curso · A fazer: Criar o negócio")).toBeInTheDocument();
+  }, TEMPO);
 
   it("os passos das fases 4 e 5 continuam a abrir a ficha, sem diálogo de passo", () => {
     abrirPagina("lista");
@@ -309,29 +299,29 @@ describe("Lista: o mesmo passo, a partir da sub-linha", () => {
   });
 });
 
-describe("Ficha: depois de marcar a visita como feita no Quadro", () => {
+describe("Ficha: as visitas de cada pedido, e o mesmo caminho dos botões do Quadro", () => {
   it.each(["Rita Albuquerque", "Gonçalo Matias"])(
-    "%s: a ficha diz «Visita feita» (mesmo com o dia já passado) e não oferece «Alterar visita»", async (nome) => {
+    "%s: depois de marcar a visita como feita, a ficha diz «Visita feita» (mesmo com o dia já passado), sem «Alterar visita», e o botão é o do passo", async (nome) => {
       abrirPagina("quadro");
-      await marcarFeita(nome);
+      await marcarFeitaEGuardar(nome);
       fireEvent.click(botao(`Abrir a ficha de ${nome}`));
       const ficha = await screen.findByRole("dialog");
-      const visita = within(ficha).getByRole("heading", { name: "Visita feita" }).closest("section")!;
-      expect(within(ficha).queryByRole("heading", { name: "Próxima visita" })).not.toBeInTheDocument();
-      expect(within(ficha).queryByRole("heading", { name: "Visita por concluir" })).not.toBeInTheDocument();
+      const visita = within(ficha).getByRole("heading", { name: /^Visita feita · / }).closest("section")!;
+      expect(within(ficha).queryByRole("heading", { name: /^Próxima visita · / })).not.toBeInTheDocument();
+      expect(within(ficha).queryByRole("heading", { name: /^Visita por concluir · / })).not.toBeInTheDocument();
       expect(within(visita).queryByText(/ainda não foi concluída/)).not.toBeInTheDocument();
-      expect(within(visita).queryByRole("button", { name: "Alterar visita" })).not.toBeInTheDocument();
-      expect(within(visita).getByRole("button", { name: "Visita concluída → Criar negócio" })).toBeInTheDocument();
+      expect(within(visita).queryByRole("button", { name: /^Alterar visita/ })).not.toBeInTheDocument();
+      expect(within(visita).getByRole("button", { name: `Criar o negócio: ${pedidoDe(nome)} de ${nome}` })).toBeInTheDocument();
     }, TEMPO,
   );
 
-  it("com o levantamento guardado: «Visita concluída → Criar negócio» abre com as linhas guardadas e, ao criar o negócio, a visita e o levantamento saem", async () => {
+  it("«Criar o negócio» na ficha é o mesmo caminho do Quadro: abre com as linhas guardadas e, ao criar o negócio, o pedido sai", async () => {
     abrirPagina("quadro");
-    await marcarFeitaEGuardarLevantamento("Rita Albuquerque");
+    await marcarFeitaEGuardar("Rita Albuquerque");
     fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
     const ficha = await screen.findByRole("dialog");
-    fireEvent.click(within(ficha).getByRole("button", { name: "Visita concluída → Criar negócio" }));
-    const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
+    fireEvent.click(within(ficha).getByRole("button", { name: "Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque" }));
+    const painel = await screen.findByRole("dialog", { name: "Novo negócio de Rita Albuquerque" });
     fireEvent.mouseDown(within(painel).getByRole("tab", { name: /^Visita/ }), { button: 0, ctrlKey: false });
     fireEvent.click(within(painel).getByRole("button", { name: /^Medidas da área.*1 linha/ }));
     expect(within(painel).getByRole("combobox", { name: /^Divisão ou zona/ })).toHaveTextContent("Cozinha");
@@ -341,23 +331,21 @@ describe("Ficha: depois de marcar a visita como feita no Quadro", () => {
     expect(negociosNovos()[0]).toMatchObject({
       pessoaId: "p-rita", levantamento: { estado: "feito", linhas: [{ divisao: "Cozinha", medida: 3.5 }] },
     });
-    // A ficha passa a Negócios; a visita (e com ela o levantamento guardado) sai do Resumo e a atividade regista-o.
+    // A ficha passa a Negócios; as visitas do pedido saem do Resumo (o pedido foi substituído pelo negócio).
     expect(await screen.findByRole("tab", { name: /Negócios/ })).toHaveAttribute("aria-selected", "true");
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Resumo" }), { button: 0, ctrlKey: false });
-    expect(screen.queryByRole("heading", { name: "Visita feita" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Próxima visita" })).not.toBeInTheDocument();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: /Atividade/ }), { button: 0, ctrlKey: false });
-    expect(screen.getByText(/Visita concluída · negócio criado/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Visita feita · / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Próxima visita · / })).not.toBeInTheDocument();
   }, TEMPO);
 
-  it("sem o levantamento guardado, o painel da ficha abre sem linhas (como sempre)", async () => {
+  it("com a visita por fazer, o botão da ficha («Marcar a visita como feita») abre o painel de visita e levantamento, sem linhas", async () => {
     abrirPagina("quadro");
-    await marcarFeita("Rita Albuquerque");
     fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
     const ficha = await screen.findByRole("dialog");
-    fireEvent.click(within(ficha).getByRole("button", { name: "Visita concluída → Criar negócio" }));
-    const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
-    fireEvent.mouseDown(within(painel).getByRole("tab", { name: /^Visita/ }), { button: 0, ctrlKey: false });
+    expect(within(ficha).getByRole("heading", { name: /^Próxima visita · / })).toBeInTheDocument();
+    fireEvent.click(within(ficha).getByRole("button", { name: "Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque" }));
+    const painel = await screen.findByRole("dialog", { name: "Visita e levantamento de Rita Albuquerque · Pedido de 01/10/2026" });
+    fireEvent.click(within(painel).getByRole("button", { name: /^Medidas da área/ }));
     expect(within(painel).getByRole("button", { name: /^Medidas da área/ })).toHaveTextContent("0 linhas");
   }, TEMPO);
 });
@@ -376,7 +364,7 @@ describe("Avisos: uma região live por origem, e um texto igual seguido volta a 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(textoLive()).toContain("Submissões pendentes: 5.");
     fireEvent.mouseDown(screen.getByRole("tab", { name: /^Pessoas/ }), { button: 0, ctrlKey: false });
-    fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+    fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     fireEvent.click(within(dialogo).getByRole("radio", { name: /Não atendeu/ }));
     fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
@@ -404,6 +392,31 @@ describe("Avisos: uma região live por origem, e um texto igual seguido volta a 
     expect(segundo).not.toBe(primeiro);
     expect(segundo.replace(/\u00a0/g, "")).toBe(primeiro.replace(/\u00a0/g, ""));
   }, TEMPO);
+
+  it("um passo feito a partir da ficha anuncia o aviso na região live DENTRO da ficha (a página fica escondida) e não o repete na da página", async () => {
+    abrirComRota("/pessoas");
+    fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
+    const ficha = await screen.findByRole("dialog");
+    fireEvent.click(within(ficha).getByRole("button", { name: "Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque" }));
+    const painel = await screen.findByRole("dialog", { name: "Visita e levantamento de Rita Albuquerque · Pedido de 01/10/2026" });
+    fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Visita e levantamento de Rita Albuquerque · Pedido de 01/10/2026" })).not.toBeInTheDocument());
+    const regioes = () => Array.from(document.querySelectorAll('[role="status"]'));
+    const aviso = "Visita guardada: Rita Albuquerque (Pedido de 01/10/2026) continua em Visita.";
+    await waitFor(() => expect(regioes().filter((r) => ficha.contains(r)).map((r) => r.textContent).join("|")).toContain(aviso));
+    expect(regioes().filter((r) => !ficha.contains(r)).map((r) => r.textContent).join("|")).not.toContain(aviso);
+  }, TEMPO);
+
+  it("um passo feito a partir da página (a ficha fechada) anuncia só na região da página, e ao abrir a ficha depois o aviso não se repete lá dentro", async () => {
+    abrirComRota("/pessoas");
+    const painel = await abrirPainelVisita("Rita Albuquerque");
+    fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
+    const aviso = "Visita guardada: Rita Albuquerque (Pedido de 01/10/2026) continua em Visita.";
+    await waitFor(() => expect(textoLive()).toContain(aviso));
+    fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
+    const ficha = await screen.findByRole("dialog");
+    expect(Array.from(ficha.querySelectorAll('[role="status"]')).map((r) => r.textContent).join("|")).not.toContain(aviso);
+  }, TEMPO);
 });
 
 describe("Chamada a partir do «A fazer»: o aviso diz o que a chamada fez", () => {
@@ -417,7 +430,7 @@ describe("Chamada a partir do «A fazer»: o aviso diz o que a chamada fez", () 
 
   it.each(CASOS)("%s", async (nome, resultado, esperado) => {
     abrirPagina("quadro");
-    fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+    fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     fireEvent.click(within(dialogo).getByRole("radio", { name: resultado }));
     if (nome === "marcar a pessoa como perdida") {
@@ -435,7 +448,7 @@ describe("O aviso do passo só sai depois de o diálogo desmontar (a página fic
   const FLUXOS: [string, () => Promise<string>][] = [
     ["registar a chamada", async () => {
       saida = simularSaidaAnimada();
-      fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+      fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
       const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
       fireEvent.click(within(dialogo).getByRole("radio", { name: /Não atendeu/ }));
       fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar" }));
@@ -443,30 +456,24 @@ describe("O aviso do passo só sai depois de o diálogo desmontar (a página fic
     }],
     ["marcar a visita", async () => {
       saida = simularSaidaAnimada();
-      fireEvent.click(botao("Marcar a visita: Pedido novo de Lúcia Faria"));
+      fireEvent.click(botao("Marcar a visita: Pedido de 22/09/2026 de Lúcia Faria"));
       const dialogo = await screen.findByRole("dialog", { name: "Marcar visita" });
       fireEvent.change(within(dialogo).getByLabelText("Dia"), { target: { value: "2026-10-20" } });
       fireEvent.click(within(dialogo).getByRole("button", { name: "Marcar visita" }));
-      return "Visita marcada: Lúcia Faria passa a Visita.";
+      return "Visita marcada: Lúcia Faria (Pedido de 22/09/2026) passa a Visita.";
     }],
-    ["marcar a visita como feita", async () => {
+    ["guardar a visita e o levantamento", async () => {
       saida = simularSaidaAnimada();
-      fireEvent.click(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque"));
-      const dialogo = await screen.findByRole("dialog", { name: "A visita já foi feita?" });
-      fireEvent.click(within(dialogo).getByRole("button", { name: "Marcar como feita" }));
-      return "Visita feita: Rita Albuquerque continua em Visita. A fazer: Fazer o levantamento.";
-    }],
-    ["guardar o levantamento", async () => {
-      await marcarFeita("Rita Albuquerque");
-      saida = simularSaidaAnimada();
-      const painel = await preencherLevantamento("Rita Albuquerque");
-      fireEvent.click(within(painel).getByRole("button", { name: "Guardar o levantamento" }));
-      return "Levantamento guardado: Rita Albuquerque. A fazer: Criar o negócio.";
+      const painel = await abrirPainelVisita("Rita Albuquerque");
+      marcarFeitaNoPainel(painel);
+      await preencherLinha(painel);
+      fireEvent.click(within(painel).getByRole("button", { name: "Guardar a visita e o levantamento" }));
+      return "Visita feita: Rita Albuquerque (Pedido de 01/10/2026) continua em Visita. A fazer: Criar o negócio.";
     }],
     ["criar o negócio", async () => {
-      await marcarFeitaEGuardarLevantamento("Rita Albuquerque");
+      await marcarFeitaEGuardar("Rita Albuquerque");
       saida = simularSaidaAnimada();
-      fireEvent.click(botao("Criar o negócio: Pedido novo de Rita Albuquerque"));
+      fireEvent.click(botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque"));
       const painel = await screen.findByRole("dialog");
       fireEvent.click(within(painel).getByRole("button", { name: "Criar negócio" }));
       return "Negócio criado: Rita Albuquerque passa a Orçamento.";
@@ -501,38 +508,39 @@ describe("Esc nos diálogos dos passos: fecha sem mudar nada e o foco volta ao b
   };
 
   it("registar a chamada", async () => {
-    await comEsc("Registar a chamada: Pedido novo de Hugo Teixeira", "Registar chamada");
+    await comEsc("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira", "Registar chamada");
     expect(within(coluna("Por contactar")).getByText("Hugo Teixeira")).toBeInTheDocument();
   });
 
   it("marcar a visita", async () => {
-    await comEsc("Marcar a visita: Pedido novo de Lúcia Faria", "Marcar visita");
+    await comEsc("Marcar a visita: Pedido de 22/09/2026 de Lúcia Faria", "Marcar visita");
     expect(within(coluna("Contactado")).getByText("Lúcia Faria")).toBeInTheDocument();
   });
 
-  it("«A visita já foi feita?»", async () => {
-    await comEsc("Marcar a visita como feita: Pedido novo de Rita Albuquerque", "A visita já foi feita?");
-    expect(botao("Marcar a visita como feita: Pedido novo de Rita Albuquerque")).toBeInTheDocument();
-  });
+  it("o painel de visita e levantamento (marcar a visita como feita)", async () => {
+    await comEsc("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque", "Visita e levantamento de Rita Albuquerque · Pedido de 01/10/2026");
+    expect(botao("Marcar a visita como feita: Pedido de 01/10/2026 de Rita Albuquerque")).toBeInTheDocument();
+  }, TEMPO);
 
-  it("o painel do levantamento", async () => {
+  it("o painel de criar o negócio", async () => {
     abrirPagina("quadro");
-    await marcarFeita("Rita Albuquerque");
-    const gatilho = botao("Fazer o levantamento: Pedido novo de Rita Albuquerque");
+    await marcarFeitaEGuardar("Rita Albuquerque");
+    const gatilho = botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque");
     gatilho.focus();
     fireEvent.click(gatilho);
-    const painel = await screen.findByRole("dialog");
+    const painel = await screen.findByRole("dialog", { name: "Novo negócio de Rita Albuquerque" });
     fireEvent.keyDown(painel, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    await waitFor(() => expect(botao("Fazer o levantamento: Pedido novo de Rita Albuquerque")).toHaveFocus());
+    await waitFor(() => expect(botao("Criar o negócio: Pedido de 01/10/2026 de Rita Albuquerque")).toHaveFocus());
     expect(within(coluna("Visita")).getByText("Rita Albuquerque")).toBeInTheDocument();
   }, TEMPO);
 });
 
+
 describe("Diálogos dos passos: títulos", () => {
   it("o diálogo da chamada tem um só título, o visível, e é por ele que o diálogo se chama", async () => {
     abrirPagina("quadro");
-    fireEvent.click(botao("Registar a chamada: Pedido novo de Hugo Teixeira"));
+    fireEvent.click(botao("Registar a chamada: Pedido de 12/10/2026 de Hugo Teixeira"));
     const dialogo = await screen.findByRole("dialog", { name: "Registar chamada" });
     const titulos = within(dialogo).getAllByText("Registar chamada");
     expect(titulos).toHaveLength(1);

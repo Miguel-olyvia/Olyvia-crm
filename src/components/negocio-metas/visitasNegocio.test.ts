@@ -1,62 +1,39 @@
 // Lógica pura das Visitas de "Novo negócio": migrar a visita única para lista, adicionar, remover, marcar feita, a
-// próxima visita, a visita concluída que vem de Pessoas e o levantamento que se deriva da lista.
+// próxima visita, as visitas de um pedido e o levantamento que se deriva da lista.
 import { describe, expect, it } from "vitest";
 import type { NegocioMes, VisitaNegocio } from "./negocioMetas";
 import { MORADA_VAZIA } from "./moradaObra";
 import {
   acrescentarVisita, alterarVisita, camposDoLevantamento, contarVisitas, marcarFeita, migrarVisitaUnica, novaVisita, ordenarVisitas,
-  proximaVisitaDoNegocio, removerVisita, resumoDaVisita, visitaDaPessoa, visitasDoNegocio, visitasIniciais, visitasParaGuardar,
+  moradaDasVisitas, proximaVisitaDoNegocio, removerVisita, resumoDaVisita, visitaParaAbrir, visitasDoNegocio, visitasIniciais,
+  visitasParaGuardar,
 } from "./visitasNegocio";
 
 const HOJE = "2026-10-13";
 const visita = (id: string, parcial: Partial<VisitaNegocio> = {}): VisitaNegocio => ({
   id, data: "2026-10-15", hora: "10:00", feitoPor: "Bruno Costa", estado: "porFazer", tipo: "revisita", quemVaiEstar: "", duracao: "",
-  morada: MORADA_VAZIA, igualALead: false, veioDaPessoa: false, nota: "", ...parcial,
+  morada: MORADA_VAZIA, igualALead: false, nota: "", ...parcial,
 });
-const DA_PESSOA = {
-  data: "2026-10-15", hora: "10:00", quemFez: "Bruno Costa", estado: "feito" as const, igualALead: false, nota: "Tocar à campainha",
-  moradaObra: { rua: "Rua B 2", codigoPostal: "4700-010", localidade: "Braga", andar: "Loja" },
-};
+const MORADA_B = { rua: "Rua B 2", codigoPostal: "4700-010", localidade: "Braga", andar: "Loja" };
 
 describe("novaVisita", () => {
   it("nasce Por fazer, do tipo Revisita, daqui a 2 dias, com o comercial pedido e sem hora", () => {
     expect(novaVisita("v1", HOJE, "Ana Ribeiro")).toMatchObject({
-      id: "v1", data: "2026-10-15", hora: "", feitoPor: "Ana Ribeiro", estado: "porFazer", tipo: "revisita", veioDaPessoa: false, nota: "",
+      id: "v1", data: "2026-10-15", hora: "", feitoPor: "Ana Ribeiro", estado: "porFazer", tipo: "revisita", nota: "",
     });
   });
   it("passa o mês e o ano ao somar os 2 dias", () => {
     expect(novaVisita("v1", "2026-12-31", "Ana Ribeiro").data).toBe("2027-01-02");
   });
   it("copia a morada da visita anterior, sem partilhar o objeto", () => {
-    const anterior = visita("v0", { morada: { ...DA_PESSOA.moradaObra }, igualALead: true });
+    const anterior = visita("v0", { morada: { ...MORADA_B }, igualALead: true });
     const nova = novaVisita("v1", HOJE, "Ana Ribeiro", anterior);
-    expect(nova.morada).toEqual(DA_PESSOA.moradaObra);
+    expect(nova.morada).toEqual(MORADA_B);
     expect(nova.morada).not.toBe(anterior.morada);
     expect(nova.igualALead).toBe(true);
   });
   it("sem visita anterior a morada fica vazia e deixa de ser a da lead", () => {
     expect(novaVisita("v1", HOJE, "Ana Ribeiro")).toMatchObject({ morada: MORADA_VAZIA, igualALead: false });
-  });
-});
-
-describe("visitas que vêm de Pessoas", () => {
-  it("a visita concluída chega como Feita, Levantamento, marcada «veio da pessoa», com hora, quem fez, morada e origem", () => {
-    expect(visitaDaPessoa("v-pessoa", DA_PESSOA)).toEqual({
-      id: "v-pessoa", data: "2026-10-15", hora: "10:00", feitoPor: "Bruno Costa", estado: "feita", tipo: "levantamento", quemVaiEstar: "",
-      duracao: "", morada: DA_PESSOA.moradaObra, igualALead: false, veioDaPessoa: true, nota: "Tocar à campainha",
-    });
-  });
-  it("sem hora nem nota, ficam vazias; a morada é uma cópia", () => {
-    const { hora: _h, nota: _n, ...semExtras } = DA_PESSOA;
-    const v = visitaDaPessoa("v-pessoa", semExtras);
-    expect(v).toMatchObject({ hora: "", nota: "" });
-    expect(v.morada).not.toBe(DA_PESSOA.moradaObra);
-  });
-  it("visitasIniciais: sem valores iniciais a lista começa vazia; com a visita concluída, com uma Feita", () => {
-    expect(visitasIniciais(undefined)).toEqual([]);
-    const lista = visitasIniciais(DA_PESSOA);
-    expect(lista).toHaveLength(1);
-    expect(lista[0]).toMatchObject({ estado: "feita", tipo: "levantamento", veioDaPessoa: true });
   });
 });
 
@@ -83,10 +60,11 @@ describe("ordem, adicionar, alterar e remover", () => {
     expect(nova.map((v) => v.hora)).toEqual(["10:00", "15:00"]);
     expect(alterarVisita(lista, "zz", { hora: "15:00" })).toEqual(lista);
   });
-  it("remover tira a visita; a que veio de Pessoas não se remove", () => {
-    const lista = [visita("a"), visita("p", { veioDaPessoa: true, estado: "feita" })];
+  it("remover tira a visita pedida, seja qual for (também uma já feita); um id desconhecido deixa tudo igual", () => {
+    const lista = [visita("a"), visita("p", { estado: "feita" })];
     expect(removerVisita(lista, "a").map((v) => v.id)).toEqual(["p"]);
-    expect(removerVisita(lista, "p")).toBe(lista);
+    expect(removerVisita(lista, "p").map((v) => v.id)).toEqual(["a"]);
+    expect(removerVisita(lista, "zz").map((v) => v.id)).toEqual(["a", "p"]);
   });
   it("editar a morada de uma visita deixa-a sem origem (escrita à mão)", () => {
     const lista = [visita("a", { igualALead: true })];
@@ -156,7 +134,7 @@ describe("migrar a visita única para a lista", () => {
     });
     expect(v).toMatchObject({
       id: "v1", data: "2026-10-13", feitoPor: "Ana Ribeiro", estado: "feita", tipo: "medicao", hora: "14:00", quemVaiEstar: "casal",
-      duracao: "h1m30", morada: { rua: "Rua A" }, veioDaPessoa: false,
+      duracao: "h1m30", morada: { rua: "Rua A" }, 
     });
   });
   it("sem os campos de escolha, usa Levantamento e vazios; porFazer continua Por fazer; hora já em HH:MM mantém-se", () => {
@@ -187,5 +165,40 @@ describe("visitasParaGuardar", () => {
     expect(guardadas[1].nota).toBe("portão azul");
     expect(guardadas[1].morada).toEqual({ rua: "Rua A", codigoPostal: "1000-001", localidade: "", andar: "" });
     expect(lista[0].nota).toBe("  portão azul  ");
+  });
+});
+
+describe("a lista de visitas de um pedido", () => {
+  const lista = [
+    visita("pd-1-v1", { estado: "feita", tipo: "levantamento", morada: MORADA_B, igualALead: true }),
+    visita("pd-1-v2", { data: "2026-10-20" }),
+  ];
+
+  it("visitasIniciais: a lista do pedido chega como cópia (as moradas também), na mesma ordem", () => {
+    const iniciais = visitasIniciais(lista);
+    expect(iniciais).toEqual(lista);
+    expect(iniciais[0]).not.toBe(lista[0]);
+    expect(iniciais[0].morada).not.toBe(lista[0].morada);
+  });
+
+  it("visitasIniciais: sem pedido, ou com uma lista vazia, a lista começa vazia", () => {
+    expect(visitasIniciais(undefined)).toEqual([]);
+    expect(visitasIniciais([])).toEqual([]);
+  });
+
+  it("visitaParaAbrir: a primeira Feita por ordem cronológica; sem nenhuma Feita, nenhuma", () => {
+    expect(visitaParaAbrir(lista)).toBe("pd-1-v1");
+    const duas = [visita("a", { estado: "feita", data: "2026-10-20" }), visita("b", { estado: "feita", data: "2026-10-16" })];
+    expect(visitaParaAbrir(duas)).toBe("b");
+    expect(visitaParaAbrir([visita("c")])).toBeNull();
+    expect(visitaParaAbrir([])).toBeNull();
+  });
+
+  it("moradaDasVisitas: a da visita que representa o levantamento, com a origem; sem morada escrita, nenhuma", () => {
+    expect(moradaDasVisitas(lista)).toEqual({ moradaObra: MORADA_B, igualALead: true });
+    const so = [visita("x", { morada: MORADA_VAZIA }), visita("y", { estado: "feita", morada: { ...MORADA_B }, igualALead: null })];
+    expect(moradaDasVisitas(so)).toEqual({ moradaObra: MORADA_B, igualALead: null });
+    expect(moradaDasVisitas([visita("z", { morada: MORADA_VAZIA })])).toBeUndefined();
+    expect(moradaDasVisitas([])).toBeUndefined();
   });
 });

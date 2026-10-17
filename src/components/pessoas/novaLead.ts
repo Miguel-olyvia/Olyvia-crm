@@ -1,6 +1,7 @@
 // "Nova lead": o que o formulário pede, a validação e a pessoa (e a atividade) que saem dele. Funções puras: o dia de
 // hoje e o número de série chegam por parâmetro. O que se guarda vive em `pessoasNovas.ts`.
-import type { ItemAtividade, OrigemPessoa, Pessoa } from "./pessoasTipos";
+import { pedidoNovo } from "./pedidoNegocio";
+import type { ItemAtividade, OrigemPessoa, PedidoNegocio, Pessoa } from "./pessoasTipos";
 
 export const ORIGENS_LEAD: readonly OrigemPessoa[] = ["site", "formulario", "campanha", "indicacao", "telefone"];
 export const MAX_NOME_LEAD = 80;
@@ -48,11 +49,13 @@ export interface LeadMontada {
   pessoa: Pessoa;
   /** A atividade com que a lead nasce: "Lead criada" e, se se escreveu, a nota (a mais recente primeiro). */
   atividade: ItemAtividade[];
+  /** O pedido com que a lead nasce: por contactar, sem visitas. O id é `pd-novo-<sequência>`. */
+  pedido: PedidoNegocio;
 }
 
 /**
- * A pessoa nova: uma lead na etapa "Por contactar" (etapa "nova"), com o primeiro contacto para hoje. O id é
- * `p-novo-<sequência>`. Quem a cria não a tem em lado nenhum, por isso fica só em memória.
+ * A pessoa nova: uma lead por contactar (o pedido com que nasce é por contactar), com o primeiro contacto para hoje. O id é
+ * `p-novo-<sequência>`, e leva um pedido por contactar. Quem a cria não a tem em lado nenhum, por isso fica só em memória.
  */
 export function montarLead(dados: DadosNovaLead, hoje: string, sequencia: number): LeadMontada {
   const id = `p-novo-${sequencia}`;
@@ -60,7 +63,7 @@ export function montarLead(dados: DadosNovaLead, hoje: string, sequencia: number
   const formulario = dados.formulario.trim();
   const pessoa: Pessoa = {
     id, nome: dados.nome.trim(), contacto: { telefone: ouNulo(dados.telefone), email: ouNulo(dados.email) },
-    comercial: dados.comercial, origem: dados.origem, viaEntrada: "manual", saude: 50, etapa: "nova", ultimoContactoDias: 0,
+    comercial: dados.comercial, origem: dados.origem, viaEntrada: "manual", saude: 50, ultimoContactoDias: 0,
     desde: hoje, proximoContacto: hoje,
     ...(localidade ? { morada: { linha: "", cp: "", localidade } } : {}),
     ...(formulario ? { formulario } : {}),
@@ -76,5 +79,6 @@ export function montarLead(dados: DadosNovaLead, hoje: string, sequencia: number
       detalhe: nota, quando: hoje, exemplo: false,
     }]
     : [];
-  return { pessoa, atividade: [...itemNota, criada] };
+  const pedido = pedidoNovo({ pessoaId: id, servico: "", comercial: dados.comercial }, hoje, `pd-novo-${sequencia}`);
+  return { pessoa, atividade: [...itemNota, criada], pedido };
 }

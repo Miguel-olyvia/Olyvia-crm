@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
-import { faixaSaude, textoDataCompleta, textoHaQuanto, textoPrazoPasso } from "./formatoPessoas";
+import { diaDaSemana, faixaSaude, textoDataCompleta, textoHaQuanto, textoPrazoPasso } from "./formatoPessoas";
 
 const textos = pessoasPaginaTranslations.pt;
 const t = (chave: string, params?: Record<string, string | number>) =>
@@ -36,5 +36,13 @@ describe("textoPrazoPasso", () => {
 describe("faixaSaude", () => {
   it("baixa até 33, média até 66 e alta acima; nos limites 0 e 100", () => {
     expect([0, 33, 34, 45, 66, 67, 100].map(faixaSaude)).toEqual(["baixa", "baixa", "media", "media", "media", "alta", "alta"]);
+  });
+});
+
+describe("diaDaSemana", () => {
+  it("0 é domingo e 6 é sábado, sem depender do fuso", () => {
+    expect(diaDaSemana("2026-10-13")).toBe(2);
+    expect(diaDaSemana("2026-10-18")).toBe(0);
+    expect(diaDaSemana("2026-10-17")).toBe(6);
   });
 });

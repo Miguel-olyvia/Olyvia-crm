@@ -1,14 +1,15 @@
 // As ações da ficha da pessoa, em memória: funções puras e imutáveis. O dia de hoje (AAAA-MM-DD) chega sempre
 // por parâmetro e nada lê o relógio. Um id que não existe (ou uma ação que não se aplica) devolve o próprio estado.
+import { marcarContactados, marcarVisitaDaPessoa, type EstadoPedidos } from "./acoesPedido";
 import { errosDiaHora, exigeDiaHora, textoAgenda } from "./chamadaPassos";
 import { indiceEtapa } from "./etapaPessoa";
-import { moradaDaLead, resolverDestino, textoMoradaVisita, validarDestino, type DestinoVisita } from "./moradaVisita";
+import { destinoInicial, moradaDaLead, resolverDestino, textoMoradaVisita, validarDestino, type DestinoVisita } from "./moradaVisita";
 import { DIAS_DO_PASSO, RESULTADOS_ATENDIDOS } from "./opcoesPessoa";
-import { marcarVisita } from "./visitaPessoa";
-import type { EstadoPessoas, ItemAtividade, MotivoPerda, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto } from "./pessoasTipos";
+import { proximoContactoVemDeVisita } from "./pedidoNegocio";
+import type { ItemAtividade, MotivoPerda, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto } from "./pessoasTipos";
 
-/** A parte do estado que as ações mudam. */
-export type EstadoAcoes = Pick<EstadoPessoas, "pessoas" | "atividade" | "contactadas">;
+/** A parte do estado que as ações mudam (os pedidos incluídos: uma chamada fala deles e a visita marca-se num). */
+export type EstadoAcoes = EstadoPedidos;
 
 export interface DadosChamada {
   resultado: ResultadoContacto;
@@ -20,8 +21,11 @@ export interface DadosChamada {
   hora?: string;
   /** Onde é a visita, escolhido no formulário: a morada da lead ou outra (ver `moradaVisita.ts`). */
   destinoVisita?: DestinoVisita;
-  /** Onde é a visita, em texto livre (só quando não há `destinoVisita`). */
-  onde?: string;
+  /**
+   * O pedido a que a visita vai (só no passo "marcarVisita"): o do item de onde veio a chamada, ou o escolhido na ficha. Sem ele, vale o
+   * único pedido da pessoa ainda sem visita; sem nenhum, cria-se um (ver `marcarVisitaDaPessoa`).
+   */
+  pedidoId?: string;
   /** O motivo, no passo "perder"; o contexto diz o passo do percurso e o papel (como em `perder`). */
   motivo?: MotivoPerda;
   contexto?: ContextoPerda;
@@ -49,7 +53,7 @@ function proximoDaChamada(d: DadosChamada): { dia: string | null; hora: string |
   return { dia: dias === null ? null : somarDias(d.hoje, dias), hora: undefined };
 }
 
-/** A chamada em si: o último contacto, o resultado, o próximo contacto e a linha na atividade. */
+/** A chamada em si: o último contacto, o resultado, o próximo contacto, a linha na atividade e os pedidos dela contactados. */
 function chamadaBase<E extends EstadoAcoes>(estado: E, id: string, d: DadosChamada): E {
   const respondeu = RESULTADOS_ATENDIDOS.includes(d.resultado);
   const proximo = proximoDaChamada(d);
@@ -57,26 +61,35 @@ function chamadaBase<E extends EstadoAcoes>(estado: E, id: string, d: DadosChama
     id: novoId(estado, "chamada"), pessoaId: id, tipo: "chamada", titulo: "", chaveTitulo: `pessoasPagina.result.${d.resultado}`,
     detalhe: d.nota.trim(), quando: d.hoje, exemplo: false,
   };
-  return {
+  return marcarContactados({
     ...estado,
     pessoas: mudarPessoa(estado.pessoas, id, (p) => ({
       ...p, ultimoContactoDias: 0, resultadoContacto: d.resultado, proximoContacto: proximo.dia, proximoHora: proximo.hora,
     })),
     atividade: [item, ...estado.atividade],
     contactadas: respondeu && !estado.contactadas.includes(id) ? [...estado.contactadas, id] : estado.contactadas,
-  };
+  }, id);
 }
 
-/** O passo só se aplica com o que pede: dia e hora válidos (a visita ainda não a uma perdida) e, para perder, o motivo. */
+/**
+ * A visita pede um sítio (a morada da lead, ou a que se escolheu) e, se se indicou o pedido, que seja um da pessoa; a visita ainda
+ * não a uma perdida.
+ */
+function visitaAplicavel(estado: EstadoAcoes, alvo: Pessoa | undefined, d: DadosChamada): boolean {
+  if (!alvo || alvo.perdida) return false;
+  if (d.pedidoId !== undefined && !estado.pedidos.some((p) => p.id === d.pedidoId && p.pessoaId === alvo.id)) return false;
+  const lead = moradaDaLead(alvo);
+  return validarDestino(d.destinoVisita ?? destinoInicial(lead), lead) === null;
+}
+
+/** O passo só se aplica com o que pede: dia e hora válidos, a visita com sítio e, para perder, o motivo e o passo do percurso. */
 function passoAplicavel(estado: EstadoAcoes, id: string, d: DadosChamada): boolean {
   if (exigeDiaHora(d.passo)) {
     const erros = errosDiaHora(d.data ?? "", d.hora ?? "", d.hoje);
     if (erros.data || erros.hora) return false;
   }
-  const alvo = estado.pessoas.find((p) => p.id === id);
-  if (d.passo === "marcarVisita" && alvo?.perdida) return false;
-  if (d.passo === "marcarVisita" && d.destinoVisita && alvo && validarDestino(d.destinoVisita, moradaDaLead(alvo))) return false;
-  return d.passo !== "perder" || d.motivo !== undefined;
+  if (d.passo === "marcarVisita") return visitaAplicavel(estado, estado.pessoas.find((p) => p.id === id), d);
+  return d.passo !== "perder" || (d.motivo !== undefined && d.contexto !== undefined);
 }
 
 /** O que o passo escolhido faz a seguir à chamada: marca a visita, agenda a chamada ou perde a pessoa. */
@@ -84,10 +97,11 @@ function aplicarPasso<E extends EstadoAcoes>(estado: E, id: string, d: DadosCham
   const quando = textoAgenda(d.data ?? "", d.hora ?? "");
   if (d.passo === "marcarVisita") {
     const alvo = estado.pessoas.find((p) => p.id === id);
-    const lugar = d.destinoVisita && alvo
-      ? textoMoradaVisita(resolverDestino(d.destinoVisita, moradaDaLead(alvo)).moradaVisita) : d.onde?.trim();
+    const lead = alvo ? moradaDaLead(alvo) : null;
+    const lugar = textoMoradaVisita(resolverDestino(d.destinoVisita ?? destinoInicial(lead), lead).moradaVisita);
     const detalhe = [quando, lugar].filter(Boolean).join(" · ");
-    return marcarVisita(estado, id, { data: d.data ?? "", hora: d.hora ?? "", nota: "", servico: "", detalhe, destino: d.destinoVisita }, d.hoje);
+    const dados = { data: d.data ?? "", hora: d.hora ?? "", nota: "", detalhe, destino: d.destinoVisita };
+    return marcarVisitaDaPessoa(estado, id, { pedidoId: d.pedidoId }, dados, d.hoje);
   }
   if (d.passo === "ligarData") {
     const item: ItemAtividade = {
@@ -96,7 +110,7 @@ function aplicarPasso<E extends EstadoAcoes>(estado: E, id: string, d: DadosCham
     };
     return { ...estado, atividade: [item, ...estado.atividade] };
   }
-  return d.passo === "perder" && d.motivo ? perder(estado, id, d.motivo, d.hoje, d.contexto) : estado;
+  return d.passo === "perder" && d.motivo && d.contexto ? perder(estado, id, d.motivo, d.hoje, d.contexto) : estado;
 }
 
 /**
@@ -110,13 +124,17 @@ export function registarChamada<E extends EstadoAcoes>(estado: E, id: string, da
   return aplicarPasso(chamadaBase(estado, id, dados), id, dados);
 }
 
-/** Adia o próximo contacto: hoje mais 1, 3 ou 7 dias. Se o contacto é a visita marcada, a visita muda de dia com ele. */
+/**
+ * Adia a chamada agendada: o próximo contacto passa a hoje mais 1, 3 ou 7 dias. As visitas dos pedidos não se mexem (têm o seu ecrã,
+ * «Alterar visita»): quando o próximo contacto é uma visita não há nada a adiar, e não se cria uma chamada agendada que ninguém marcou.
+ */
 export function adiar<E extends EstadoAcoes>(estado: E, id: string, dias: 1 | 3 | 7, hoje: string): E {
-  if (!existe(estado, id)) return estado;
+  const pessoa = estado.pessoas.find((p) => p.id === id);
+  if (!pessoa || proximoContactoVemDeVisita(pessoa, estado.pedidos)) return estado;
   const dia = somarDias(hoje, dias);
   return {
     ...estado,
-    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, proximoContacto: dia, ...(p.visita ? { visita: { ...p.visita, data: dia } } : {}) })),
+    pessoas: mudarPessoa(estado.pessoas, id, (p) => ({ ...p, proximoContacto: dia })),
   };
 }
 
@@ -133,18 +151,18 @@ export function juntarNota<E extends EstadoAcoes>(estado: E, id: string, texto: 
 
 /**
  * Marca uma lead como perdida, em qualquer passo do percurso antes de cliente (Lead, Contacto, Visita ou Negócio), e
- * guarda o passo (índice 0 a 3). `contexto` vem de quem chama e conhece os negócios: `passo` é o índice da etapa efetiva
- * na altura (sem ele vale a etapa guardada) e `papel` diz se é cliente. Um cliente (pelo papel, ou pelo passo 4) e uma
- * lead já perdida ficam como estão, sem alterações.
+ * guarda o passo (índice 0 a 3). `contexto` vem de quem chama e conhece os pedidos e os negócios: `passo` é o índice da etapa
+ * efetiva na altura e `papel` diz se é cliente. Um cliente (pelo papel, ou pelo passo 4) e uma lead já perdida ficam como estão,
+ * sem alterações.
  */
 export interface ContextoPerda {
-  passo?: number;
+  passo: number;
   papel?: PapelPessoa;
 }
 
-export function perder<E extends EstadoAcoes>(estado: E, id: string, motivo: MotivoPerda, hoje: string, contexto: ContextoPerda = {}): E {
+export function perder<E extends EstadoAcoes>(estado: E, id: string, motivo: MotivoPerda, hoje: string, contexto: ContextoPerda): E {
   const alvo = estado.pessoas.find((p) => p.id === id);
-  const indice = contexto.passo ?? (alvo ? indiceEtapa(alvo.etapa) : 0);
+  const indice = contexto.passo;
   if (!alvo || alvo.perdida || contexto.papel === "cliente" || indice >= indiceEtapa("cliente")) return estado;
   const item: ItemAtividade = {
     id: novoId(estado, "perda"), pessoaId: id, tipo: "historico", titulo: "", chaveTitulo: "pessoasPagina.activity.lost",

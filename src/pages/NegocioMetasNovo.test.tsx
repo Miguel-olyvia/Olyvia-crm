@@ -132,7 +132,7 @@ describe("Qualificação, morada da obra e visita no painel do negócio criado",
 describe("Visitas no painel do negócio criado", () => {
   const visita = (id: string, parcial: Record<string, unknown> = {}) => ({
     id, data: "2026-10-15", hora: "10:00", feitoPor: "Bruno Costa", estado: "feita", tipo: "levantamento", quemVaiEstar: "", duracao: "",
-    morada: { rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" }, igualALead: false, veioDaPessoa: false, nota: "", ...parcial,
+    morada: { rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" }, igualALead: false, nota: "", ...parcial,
   });
   const abrirPainel = (visitas: unknown[]) => {
     const criado = criarNegocioNovo(
@@ -145,12 +145,12 @@ describe("Visitas no painel do negócio criado", () => {
   it("lista as visitas por ordem, com o estado em texto, e destaca a «Próxima visita» quando há uma Por fazer", () => {
     const painel = abrirPainel([
       visita("v2", { estado: "porFazer", tipo: "revisita", data: "2026-10-22", hora: "" }),
-      visita("v1", { veioDaPessoa: true }),
+      visita("v1"),
     ]);
     const secao = within(painel).getByRole("heading", { name: "Visitas" }).closest("section")!;
     const itens = within(secao).getAllByRole("listitem");
     expect(itens[0]).toHaveTextContent("1.ª visita · Feita · 15/10/2026 · 10:00 · Bruno Costa · Levantamento");
-    expect(itens[0]).toHaveTextContent("Veio da pessoa");
+    expect(itens[0]).not.toHaveTextContent("Veio da pessoa");
     expect(itens[1]).toHaveTextContent("2.ª visita · Por fazer · 22/10/2026 · Bruno Costa · Revisita");
     expect(within(secao).getByText("Próxima visita").closest("div")).toHaveTextContent("2.ª visita · Por fazer · 22/10/2026");
   });

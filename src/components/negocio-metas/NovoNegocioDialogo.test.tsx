@@ -2,10 +2,11 @@
 // erros), deixa fazer já o levantamento (dentro da aba Visita) e devolve os dados ao confirmar. As abas Qualificação e
 // Visita têm o seu ficheiro: `NovoNegocioAbas.test.tsx`.
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NovoNegocioDialogo } from "./NovoNegocioDialogo";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
-import { somarDias, type PessoaOpcao } from "./novoNegocio";
+import type { VisitaNegocio } from "./negocioMetas";
+import { somarDias, type PessoaOpcao, type RascunhoLevantamento } from "./novoNegocio";
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");
@@ -59,6 +60,41 @@ const criar = (dialogo: Dialogo) => fireEvent.click(within(dialogo).getByRole("b
 const preencherGeral = async (dialogo: Dialogo) => {
   await escolher(dialogo, /^Pessoa/, "Marta Silveira");
 };
+
+describe("NovoNegocioDialogo: a pessoa já escolhida (a da ficha de onde se veio) não se muda", () => {
+  const abrirDaFicha = () => {
+    const aoCriar = vi.fn();
+    render(<NovoNegocioDialogo pessoas={PESSOAS} aoCriar={aoCriar} semBotao aberto pessoaInicialId="p-rui" />);
+    return { aoCriar, dialogo: screen.getByRole("dialog", { name: "Novo negócio" }) };
+  };
+
+  it("o seletor mostra a pessoa, fica desativado e diz porquê (em texto, ligado ao campo)", () => {
+    const { dialogo } = abrirDaFicha();
+    const campo = within(dialogo).getByRole("combobox", { name: /^Pessoa/ });
+    expect(campo).toHaveTextContent("Rui Figueiredo");
+    expect(campo).toBeDisabled();
+    const motivo = within(dialogo).getByText("A pessoa é a da ficha de onde veio: não se pode mudar aqui.");
+    expect(campo).toHaveAccessibleDescription(motivo.textContent ?? "");
+  });
+
+  it("criar o negócio leva a pessoa da ficha, e só ela", () => {
+    const { aoCriar, dialogo } = abrirDaFicha();
+    criar(dialogo);
+    expect(aoCriar).toHaveBeenCalledTimes(1);
+    expect(aoCriar.mock.calls[0][0].pessoa).toMatchObject({ id: "p-rui" });
+  });
+
+  it("sem pessoa inicial (o botão do Negócio e metas) o seletor continua a deixar escolher", () => {
+    const { dialogo } = abrir();
+    expect(within(dialogo).getByRole("combobox", { name: /^Pessoa/ })).not.toBeDisabled();
+    expect(within(dialogo).queryByText(/não se pode mudar aqui/)).not.toBeInTheDocument();
+  });
+
+  it("o foco abre no separador quando o primeiro campo está desativado (nada de foco perdido)", async () => {
+    const { dialogo } = abrirDaFicha();
+    await waitFor(() => expect(within(dialogo).getByRole("tab", { name: /^Geral/ })).toHaveFocus());
+  });
+});
 
 describe("NovoNegocioDialogo: painel e aba Geral", () => {
   it("fechado só tem o botão; abre num painel com cabeçalho, selo, três abas e rodapé com Cancelar e Criar", () => {
@@ -177,7 +213,7 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     expect(within(dialogo).getByRole("combobox", { name: "Estado" })).toHaveTextContent("Por fazer");
     expect(within(dialogo).getByRole("radio", { name: "Revisita" })).toHaveAttribute("aria-checked", "true");
     irParaVisita(dialogo);
-    expect(within(dialogo).getByText(/O levantamento alimenta o primeiro orçamento\./)).toBeInTheDocument();
+    expect(within(dialogo).getByText(/O levantamento é opcional: se o preencheres, as medidas passam para o orçamento\./)).toBeInTheDocument();
     expect(within(dialogo).getByText("Total: 0 linhas")).toBeInTheDocument();
     expect(within(dialogo).getByLabelText("Observações gerais")).toHaveValue("");
     expect(within(dialogo).getByRole("button", { name: "Adicionar linha" })).toBeInTheDocument();
@@ -219,7 +255,7 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     expect((await screen.findAllByRole("option")).map((o) => o.textContent)).toEqual(["Trocar caixilharia", "Estores", "Paredes", "Teto", "Outro (escrever)"]);
   });
 
-  it("Feito sem linhas: leva para a aba Visita (Medidas da área), avisa a aba, mostra o erro e põe o foco em Adicionar linha", async () => {
+  it("Feito sem linhas cria o negócio na mesma: o levantamento é opcional, nada é recusado nem avisado", async () => {
     const { aoCriar, dialogo } = abrir();
     await preencherGeral(dialogo);
     irParaVisita(dialogo, /^Visitas/);
@@ -227,11 +263,9 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
     await escolher(dialogo, "Estado", "Feita");
     irParaGeral(dialogo);
     criar(dialogo);
-    await waitFor(() => expect(within(dialogo).getByRole("tab", { name: /^Visita/ })).toHaveAttribute("aria-selected", "true"));
-    expect(within(dialogo).getByText("Com o estado Feito, acrescenta pelo menos uma linha.")).toBeInTheDocument();
-    expect(within(dialogo).getByRole("tab", { name: /^Visita.*com erros/ })).toBeInTheDocument();
-    await waitFor(() => expect(within(dialogo).getByRole("button", { name: "Adicionar linha" })).toHaveFocus());
-    expect(aoCriar).not.toHaveBeenCalled();
+    expect(aoCriar).toHaveBeenCalledTimes(1);
+    expect(aoCriar.mock.calls[0][0].visitas?.map((v: { estado: string }) => v.estado)).toEqual(["feita"]);
+    expect(aoCriar.mock.calls[0][0].levantamento).toMatchObject({ estado: "feito", linhas: [] });
   });
 
   it("uma linha incompleta mostra erros por campo; medida 0 é recusada", async () => {
@@ -273,7 +307,7 @@ describe("NovoNegocioDialogo: levantamento dentro da aba Visita", () => {
 
 describe("NovoNegocioDialogo: título, descrição e «Guardar o levantamento» quando o abre um passo", () => {
   const abrirComoPasso = (extra: Partial<Parameters<typeof NovoNegocioDialogo>[0]> = {}) => {
-    const aoGuardar = vi.fn(() => true);
+    const aoGuardar = vi.fn((_rascunho: RascunhoLevantamento, _visitas: VisitaNegocio[]) => true);
     render(
       <NovoNegocioDialogo
         pessoas={PESSOAS} aoCriar={vi.fn()} semBotao aberto abaInicial="visita" guardarLevantamento={{ texto: "Guardar o levantamento", aoGuardar }} {...extra}
@@ -281,6 +315,15 @@ describe("NovoNegocioDialogo: título, descrição e «Guardar o levantamento» 
     );
     return { aoGuardar, dialogo: screen.getByRole("dialog") };
   };
+
+  it("a aba Visita abre nas Medidas da área; com seccaoInicial abre na secção pedida (as Visitas, no passo de marcar a visita como feita)", () => {
+    const { dialogo } = abrirComoPasso();
+    expect(within(dialogo).getByRole("button", { name: /^Medidas da área/ })).toHaveAttribute("aria-current", "step");
+    cleanup();
+    const { dialogo: comSeccao } = abrirComoPasso({ seccaoInicial: "visitas" });
+    expect(within(comSeccao).getByRole("button", { name: /^Visitas/ })).toHaveAttribute("aria-current", "step");
+    expect(within(comSeccao).getByRole("button", { name: /^Medidas da área/ })).not.toHaveAttribute("aria-current");
+  });
 
   it("sem título nem descrição próprios, o painel diz «Novo negócio» e a descrição de sempre", () => {
     const { dialogo } = abrirComoPasso();
@@ -301,6 +344,79 @@ describe("NovoNegocioDialogo: título, descrição e «Guardar o levantamento» 
     expect(aoGuardar).toHaveBeenCalledTimes(1);
     expect(within(dialogo).getByRole("tab", { name: /^Geral/ })).not.toHaveTextContent("com erros");
     expect(within(dialogo).getByRole("tab", { name: /^Qualificação/ })).not.toHaveTextContent("com erros");
+  });
+
+  it("«Guardar o levantamento» entrega o rascunho (com a morada da obra) e as visitas do painel", () => {
+    const morada = { rua: "Rua B 2", codigoPostal: "4700-010", localidade: "Braga", andar: "" };
+    const visita: VisitaNegocio = {
+      id: "pd-1-v1", data: "2026-10-15", hora: "10:00", feitoPor: "Bruno Costa", estado: "feita", tipo: "levantamento", quemVaiEstar: "", duracao: "",
+      morada, igualALead: true, nota: "  portão azul  ",
+    };
+    const linha = { id: "l1", divisao: "cozinha", trabalho: "outro", trabalhoOutro: "Bancada", medida: "3,5", unidade: "m2", observacoes: "" };
+    const { aoGuardar, dialogo } = abrirComoPasso({
+      valoresIniciais: { visitas: [visita], moradaObra: morada, levantamento: { linhas: [linha], observacoes: "Ver canos", respostas: {} } },
+    });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(aoGuardar).toHaveBeenCalledTimes(1);
+    const [rascunho, visitas] = aoGuardar.mock.calls[0];
+    expect(rascunho).toEqual({ linhas: [linha], observacoes: "Ver canos", respostas: {}, moradaObra: morada });
+    expect(visitas).toEqual([{ ...visita, nota: "portão azul" }]);
+  });
+
+  it("«Guardar o levantamento» entrega também o comercial escolhido no painel (o da aba Geral, mesmo mudado)", async () => {
+    const aoGuardar = vi.fn((_rascunho: RascunhoLevantamento, _visitas: VisitaNegocio[], _comercial: string) => true);
+    render(
+      <NovoNegocioDialogo
+        pessoas={PESSOAS} aoCriar={vi.fn()} semBotao aberto abaInicial="visita" guardarLevantamento={{ texto: "Guardar o levantamento", aoGuardar }}
+        valoresIniciais={{ pessoaId: "p-marta", comercial: "Bruno Costa" }}
+      />,
+    );
+    const dialogo = screen.getByRole("dialog");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(aoGuardar.mock.calls[0][2]).toBe("Bruno Costa");
+    irParaGeral(dialogo);
+    await escolher(dialogo, /^Comercial/, "Carla Mendes");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(aoGuardar.mock.calls[1][2]).toBe("Carla Mendes");
+  });
+
+  it("o motivo de uma recusa é um alerta ligado ao botão «Guardar» por aria-describedby; a mesma recusa outra vez remonta o alerta; mexer no rascunho tira-o", () => {
+    const aoGuardar = vi.fn(() => false);
+    const montar = (tentativa: number) => (
+      <NovoNegocioDialogo
+        pessoas={PESSOAS} aoCriar={vi.fn()} semBotao aberto abaInicial="visita" seccaoInicial="visitas"
+        guardarLevantamento={{ texto: "Guardar o levantamento", aoGuardar, motivo: "Falta a visita.", tentativa }}
+      />
+    );
+    const { rerender } = render(montar(1));
+    const dialogo = screen.getByRole("dialog");
+    const primeiro = within(dialogo).getByRole("alert");
+    expect(primeiro).toHaveTextContent("Falta a visita.");
+    expect(within(dialogo).getByRole("button", { name: "Guardar o levantamento" })).toHaveAttribute("aria-describedby", primeiro.id);
+    rerender(montar(2));
+    const segundo = within(dialogo).getByRole("alert");
+    expect(segundo).not.toBe(primeiro);
+    expect(segundo.textContent).toBe("Falta a visita.");
+    adicionarVisita(dialogo);
+    expect(within(dialogo).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(dialogo).getByRole("button", { name: "Guardar o levantamento" })).not.toHaveAttribute("aria-describedby");
+    rerender(montar(3));
+    expect(within(dialogo).getByRole("alert")).toHaveTextContent("Falta a visita.");
+  });
+
+  it("com secção inicial (um passo do «A fazer»), o foco abre no título da secção; sem ela, no separador", async () => {
+    const { dialogo } = abrirComoPasso({ seccaoInicial: "visitas" });
+    await waitFor(() => expect(within(dialogo).getByRole("heading", { name: /^Visitas/, level: 3 })).toHaveFocus());
+    cleanup();
+    const { dialogo: semSeccao } = abrirComoPasso();
+    await waitFor(() => expect(within(semSeccao).getByRole("tab", { name: /^Visita/ })).toHaveFocus());
+  });
+
+  it("a lista de secções da aba Visita quebra linha (flex-wrap) em vez de rolar na horizontal", () => {
+    const { dialogo } = abrirComoPasso();
+    const lista = within(dialogo).getByRole("navigation", { name: "Secções da visita" }).querySelector("ul")!;
+    expect(lista.className).toContain("flex-wrap");
+    expect(lista.className).not.toContain("overflow-x-auto");
   });
 
   it("«Guardar o levantamento» com linhas por acabar leva a aba Visita (só essa) a dizer que tem erros", () => {

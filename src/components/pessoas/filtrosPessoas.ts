@@ -1,5 +1,6 @@
 // Filtros, contagens e ordenação da lista de pessoas. Funções puras.
 import { ORDEM_SAUDE } from "@/components/negocio-metas/saudeNegocio";
+import { faseDoPedido } from "./pedidoNegocio";
 import type {
   ChipPessoa, FiltrosPessoas, OrdemPessoa, Pessoa, ResultadoOuNenhum, ResumoPessoa, TipoPessoa, VistaPessoas,
 } from "./pessoasTipos";
@@ -73,7 +74,7 @@ export function passaOutros(r: ResumoPessoa, f: FiltrosPessoas, pendentes: Reado
   return pesquisaCorresponde(pessoa, f.pesquisa)
     && (!f.soMinhas || pessoa.comercial === COMERCIAL_EXEMPLO)
     && (!f.voltou || pendentes.has(pessoa.id))
-    && (!f.comVisita || (r.etapa === "visitaMarcada" && !pessoa.perdida))
+    && (!f.comVisita || (r.pedidos.some((p) => faseDoPedido(p) === "visita") && !pessoa.perdida))
     && (f.comercial === "" || pessoa.comercial === f.comercial)
     && passaFormulario(r, f.formulario)
     && (f.resultado === "" || resultadoEfetivo(pessoa) === f.resultado);

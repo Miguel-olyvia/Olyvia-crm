@@ -13,9 +13,9 @@ import { pessoasVisitaTranslations } from "./pessoasVisita";
 const { en, pt } = pessoasProcessoTranslations;
 /** Tudo o que um portão pode dizer que falta (ver `portoesProcesso.ts`); o `Record` obriga a não esquecer nenhum. */
 const FALTAS = Object.keys({
-  dataVisita: 0, visita: 0, visitaFeita: 0, linhas: 0, linhaInvalida: 0, pessoa: 0,
+  dataVisita: 0, visita: 0, linhaInvalida: 0, pessoa: 0,
   orcamentoLinhas: 0, orcamentoValor: 0, semOrcamento: 0, margem: 0, abaixoDoCusto: 0, semPedido: 0, porVerificar: 0, condicoes: 0,
-  orcamentoNaoGuardado: 0, negocioDesapareceu: 0, descontoInvalido: 0,
+  orcamentoNaoGuardado: 0, negocioDesapareceu: 0, descontoInvalido: 0, pessoaPerdida: 0, pedidoDesapareceu: 0,
 } satisfies Record<FaltaProcesso, 0>);
 const marcas = (texto: string): string[] => (texto.match(/\{\w+\}/g) ?? []).sort();
 
@@ -30,7 +30,7 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     }
   });
 
-  it("há um texto de passo (todo.step.<id>) para cada um dos 14 passos do processo, e nenhum a mais", () => {
+  it("há um texto de passo (todo.step.<id>) para cada um dos 13 passos do processo, e nenhum a mais", () => {
     const ids = Object.keys(pt).filter((c) => c.startsWith("pessoasPagina.todo.step.")).map((c) => c.slice("pessoasPagina.todo.step.".length));
     expect(ids.sort()).toEqual([...PASSOS_PROCESSO].sort());
   });
@@ -56,13 +56,13 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
   });
 
   it("o painel aberto por um passo tem título e descrição próprios, com o nome da pessoa, nas duas línguas", () => {
-    for (const chave of ["process.survey.title", "process.survey.description", "process.deal.title", "process.deal.description"]) {
+    for (const chave of ["process.visitSurvey.title", "process.visitSurvey.description", "process.visitSurvey.save", "process.deal.title", "process.deal.description"]) {
       expect(pt[`pessoasPagina.${chave}`], chave).toBeTruthy();
       expect(en[`pessoasPagina.${chave}`], chave).toBeTruthy();
     }
-    expect(marcas(pt["pessoasPagina.process.survey.title"])).toEqual(["{name}"]);
+    expect(marcas(pt["pessoasPagina.process.visitSurvey.title"])).toEqual(["{name}"]);
     expect(marcas(pt["pessoasPagina.process.deal.title"])).toEqual(["{name}"]);
-    expect(pt["pessoasPagina.process.survey.title"]).toBe("Levantamento de {name}");
+    expect(pt["pessoasPagina.process.visitSurvey.title"]).toBe("Visita e levantamento de {name}");
   });
 
   it("os rótulos só para leitores de ecrã (fase, valor, prazo) existem nas duas línguas", () => {
@@ -114,7 +114,7 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     expect(marcas(pt["pessoasPagina.done.callNoPhase"])).toEqual(["{name}"]);
     expect(marcas(pt["pessoasPagina.done.visitBooked"])).toEqual(["{name}", "{phase}"]);
     expect(marcas(pt["pessoasPagina.done.visitDone"])).toEqual(["{name}", "{phase}", "{step}"]);
-    expect(marcas(pt["pessoasPagina.done.survey"])).toEqual(["{name}", "{step}"]);
+    expect(marcas(pt["pessoasPagina.done.visitSaved"])).toEqual(["{name}", "{phase}", "{step}"]);
     expect(marcas(pt["pessoasPagina.done.deal"])).toEqual(["{name}", "{phase}"]);
     for (const chave of ["quote", "verified", "directionAsked", "directionApproved", "directionRefused"]) {
       expect(marcas(pt[`pessoasPagina.done.${chave}`]), chave).toEqual(["{name}", "{step}"]);
@@ -158,11 +158,47 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     expect(marcas(pt["pessoasPagina.proposal.description"])).toEqual(["{name}", "{total}"]);
   });
 
-  it("o diálogo 'A visita já foi feita?' e a nota de 200 caracteres", () => {
-    expect(pt["pessoasPagina.process.visitDone.title"]).toBe("A visita já foi feita?");
-    expect(marcas(pt["pessoasPagina.process.visitDone.noteError"])).toEqual(["{max}"]);
-    expect(marcas(pt["pessoasPagina.process.visitDone.count"])).toEqual(["{count}", "{max}"]);
+  it("já não há texto do diálogo 'A visita já foi feita?' nem do painel só do levantamento (passaram a um só painel)", () => {
+    const orfas = Object.keys(pt).filter((c) => /process\.(visitDone|survey)\.|todo\.step\.fazerLevantamento|done\.survey$/.test(c));
+    expect(orfas).toEqual([]);
     expect(marcas(pt["pessoasPagina.process.stepLabel"])).toEqual(["{name}", "{step}", "{work}"]);
+  });
+
+  it("«pedido» não se confunde: um é o pedido do cliente (serviço), outro o pedido de aprovação à Direção", () => {
+    expect(pt["pessoasPagina.done.directionAsked"]).toContain("Pedido de aprovação");
+    expect(en["pessoasPagina.done.directionAsked"]).toContain("Approval request");
+    expect(pessoasVisitaTranslations.pt["pessoasPagina.nextVisit.request"]).toContain("Visitas do pedido");
+  });
+
+  it("os textos novos do pedido (seletor da chamada, menu «Novo negócio» e visitas do pedido) existem nas duas línguas, com os mesmos marcadores", () => {
+    const novos = [
+      pessoasChamadaTranslations, pessoasFichaTranslations, pessoasVisitaTranslations,
+    ];
+    const chaves = [
+      ["pessoasPagina.call.request", 0], ["pessoasPagina.call.visitGoes", 0], ["pessoasPagina.bar.dealWithVisit", 1],
+      ["pessoasPagina.bar.dealWithoutVisit", 1], ["pessoasPagina.nextVisit.request", 2],
+      ["pessoasPagina.nextVisit.state.porFazer", 2], ["pessoasPagina.nextVisit.state.feita", 2], ["pessoasPagina.nextVisit.changeLabel", 2],
+    ] as const;
+    for (const [chave, i] of chaves) {
+      expect(novos[i].pt[chave], chave).toBeTruthy();
+      expect(novos[i].en[chave], chave).toBeTruthy();
+      expect(marcas(novos[i].en[chave]), chave).toEqual(marcas(novos[i].pt[chave]));
+    }
+    expect(marcas(pessoasVisitaTranslations.pt["pessoasPagina.nextVisit.request"])).toEqual(["{service}"]);
+    expect(marcas(pessoasChamadaTranslations.pt["pessoasPagina.call.visitGoes"])).toEqual(["{request}"]);
+    // Um pedido sem serviço já não é «sem serviço indicado»: tem nome (o dia de criação, e a numeração se houver repetidos).
+    expect(pessoasChamadaTranslations.pt["pessoasPagina.call.requestNone"]).toBeUndefined();
+    expect(pessoasVisitaTranslations.pt["pessoasPagina.nextVisit.requestNone"]).toBeUndefined();
+    for (const lingua of [pt, en]) {
+      expect(marcas(lingua["pessoasPagina.process.requestName.date"])).toEqual(["{date}"]);
+      expect(marcas(lingua["pessoasPagina.process.requestName.ofTotal"])).toEqual(["{name}", "{n}", "{total}"]);
+      expect(marcas(lingua["pessoasPagina.process.visitSurvey.description"])).toEqual(["{request}"]);
+    }
+    expect(marcas(pessoasVisitaTranslations.pt["pessoasPagina.nextVisit.changeLabel"])).toEqual(["{when}", "{work}"]);
+    expect(pessoasVisitaTranslations.pt["pessoasPagina.nextVisit.done"]).toBeUndefined();
+    expect(pessoasVisitaTranslations.pt["pessoasPagina.activity.visitDone"]).toBeUndefined();
+    expect(pessoasVisitaTranslations.en["pessoasPagina.activity.visitDone"]).toBeUndefined();
+    expect(pessoasVisitaTranslations.pt["pessoasPagina.nextVisit.changeLabel"].startsWith("Alterar visita")).toBe(true);
   });
 
   it("as chaves novas (process, gate, done, quote, verify, direction, proposal) não colidem com as de outros módulos de Pessoas", () => {

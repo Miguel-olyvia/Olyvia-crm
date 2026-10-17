@@ -8,12 +8,13 @@ import { camposDeContacto } from "./ContactoFicha";
 import { ETAPAS, indiceEtapa, passoDaPerdida } from "./etapaPessoa";
 import { textoLinhaCabecalho } from "./formatoPessoas";
 import { juntarPessoas } from "./juntarPessoas";
+import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 
 const textos = pessoasPaginaTranslations.pt;
 const t = (chave: string, params?: Record<string, string | number>) =>
   Object.entries(params ?? {}).reduce((texto, [k, v]) => texto.replace(`{${k}}`, String(v)), textos[chave] ?? chave);
-const RESUMOS = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, "2026-10-13");
+const RESUMOS = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, "2026-10-13", PEDIDOS_EXEMPLO);
 
 describe("a ficha de todas as pessoas de exemplo", () => {
   it("há as 17 pessoas", () => {

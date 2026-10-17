@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LinhaLevantamentoForm, MAX_OBSERVACOES } from "./LinhaLevantamentoForm";
-import { ErroDoCampo, N, Rotulo } from "./PecasNovoNegocio";
+import { N, Rotulo } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import type { ErrosNovoNegocio } from "./novoNegocio";
 import type { LevantamentoForm, LinhaForm } from "./levantamento";
@@ -25,11 +25,10 @@ interface Props {
 
 const SELECT = cn("min-h-11", FOCO);
 
-/** A lista de linhas, o total, o botão Adicionar linha e o erro "Feito sem linhas". */
+/** A lista de linhas, o total e o botão Adicionar linha. */
 function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
   const { t } = useTranslation();
   const n = levantamento.linhas.length;
-  const erro = erros.levantamento;
   return (
     <section aria-labelledby={`${id}-linhas`} className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -43,16 +42,10 @@ function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
           aoMudar={(parcial) => acoes.mudarLinha(linha.id, parcial)} aoRemover={() => { acoes.removerLinha(linha.id); document.getElementById(`${id}-add`)?.focus(); }}
         />
       ))}
-      <div className="space-y-1.5">
-        <Button
-          id={`${id}-add`} type="button" variant="outline" onClick={acoes.adicionarLinha} className={cn("min-h-11 gap-2", FOCO)}
-          aria-describedby={erro ? `${id}-add-erro` : undefined}
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          {t(`${N}survey.add`)}
-        </Button>
-        <ErroDoCampo id={`${id}-add-erro`} chave={erro && `error.survey.${erro}`} />
-      </div>
+      <Button id={`${id}-add`} type="button" variant="outline" onClick={acoes.adicionarLinha} className={cn("min-h-11 gap-2", FOCO)}>
+        <Plus className="h-4 w-4" aria-hidden="true" />
+        {t(`${N}survey.add`)}
+      </Button>
     </section>
   );
 }

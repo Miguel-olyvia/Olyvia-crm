@@ -4,6 +4,7 @@
 // próprios desta página, de exemplo.
 import { DADOS_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { paraPessoa, type PessoaSemente } from "./pessoaSemente";
 import { atividadeExemplo, extrasExemplo } from "./pessoasExemploFicha";
 import type {
   CodigoMatch, EtapaPessoa, ItemAtividade, NegocioHistorico, NegocioPessoa, OrigemPessoa, Pessoa, Submissao, TipoSubmissao,
@@ -28,18 +29,18 @@ const PROPRIOS: Record<string, CamposProprios> = {
 /** Valores por defeito dos campos obrigatórios; os dados de exemplo de cada pessoa sobrepõem-nos. */
 const PADRAO = { viaEntrada: "manual", saude: 50 } as const;
 
-const doNegocio = (n: NegocioMes): Pessoa => ({
+const doNegocio = (n: NegocioMes): PessoaSemente => ({
   ...PADRAO, id: n.pessoaId, nome: n.pessoa, contacto: n.contacto, comercial: n.comercial, ...PROPRIOS[n.pessoaId], ...extrasExemplo(n.pessoaId),
 });
 
-const PESSOAS_COM_NEGOCIO: Pessoa[] = DADOS_EXEMPLO.negocios.map(doNegocio);
+const PESSOAS_COM_NEGOCIO: PessoaSemente[] = DADOS_EXEMPLO.negocios.map(doNegocio);
 
 /**
  * Leads sem negócio no quadro do mês: três novas, duas com visita (a da Rita é hoje, na morada da lead; a do Gonçalo ficou por
  * concluir, noutra morada), uma com empresa e duas perdidas (a do Negócio tem um negócio histórico). O Paulo, cliente, também
  * tem uma visita marcada (noutra morada).
  */
-const LEADS_NOVAS: Pessoa[] = [
+const LEADS_NOVAS: PessoaSemente[] = [
   {
     ...PADRAO, id: "p-beatriz", nome: "Beatriz Sampaio", comercial: "Ana Ribeiro", origem: "site", etapa: "nova", ultimoContactoDias: 2,
     contacto: { telefone: "921 234 510", email: "beatriz.sampaio@exemplo.pt" },
@@ -70,10 +71,14 @@ const LEADS_NOVAS: Pessoa[] = [
   },
 ];
 
-export const PESSOAS_EXEMPLO: Pessoa[] = [
+/** As sementes: a pessoa com a etapa e a visita do exemplo, de onde saem os pedidos de exemplo (ver `pedidosDeExemplo.ts`). */
+export const SEMENTES_EXEMPLO: PessoaSemente[] = [
   ...PESSOAS_COM_NEGOCIO,
   ...LEADS_NOVAS.map((p) => ({ ...p, ...extrasExemplo(p.id) })),
 ];
+
+/** As pessoas de exemplo: as sementes sem a etapa nem a visita (que são dos pedidos). */
+export const PESSOAS_EXEMPLO: Pessoa[] = SEMENTES_EXEMPLO.map(paraPessoa);
 
 /** A atividade de exemplo (chamadas, emails e registo da ficha), gerada a partir do último contacto de cada pessoa. */
 export const ATIVIDADE_EXEMPLO: ItemAtividade[] = atividadeExemplo(PESSOAS_EXEMPLO);

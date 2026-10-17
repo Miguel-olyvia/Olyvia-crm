@@ -1,4 +1,3 @@
-import { MapPin } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -58,20 +57,13 @@ function DadosBase({ base, visita, aoMudar }: Props) {
   );
 }
 
-/** A morada da visita: os quatro campos; ao escrever, deixa de se dizer que veio da lead (fica "escrita à mão"). */
+/** A morada da visita: os quatro campos; ao escrever, a visita deixa de ter a origem "igual à da lead" (fica "escrita à mão"). */
 function MoradaDaVisita({ base, visita, aoMudar }: Props) {
   const { t } = useTranslation();
-  const origem = visita.veioDaPessoa && visita.igualALead !== null ? (visita.igualALead ? "same" : "other") : null;
   const mudar = (chave: ChaveMorada, valor: string) => aoMudar({ morada: { ...visita.morada, [chave]: valor }, igualALead: null });
   return (
     <fieldset className="space-y-3 rounded-md border border-border p-3">
       <legend className="px-1 text-sm font-semibold text-foreground">{t(`${N}visits.address.title`)}</legend>
-      {origem && (
-        <p role="note" className="flex items-start gap-2 text-sm text-foreground">
-          <MapPin className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          {t(`${N}visits.address.${origem}`)}
-        </p>
-      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {CHAVES_MORADA.map((chave) => (
           <div key={chave} className={cn("space-y-1.5", chave === "rua" && "sm:col-span-2")}>

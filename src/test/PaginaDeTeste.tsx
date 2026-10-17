@@ -16,7 +16,7 @@ import { HOJE } from "./fabricaProcessoTestes";
 
 const SEM_ACOES: AcoesProcesso = {
   registarChamada: () => {}, adiar: () => {}, perder: () => {}, reativar: () => {}, juntarNota: () => {}, alterarVisita: () => {},
-  marcarVisita: () => {}, marcarVisitaFeita: () => {}, guardarLevantamento: () => {},
+  marcarVisita: () => {}, guardarPedido: () => {}, criarPedidoComVisitas: () => {}, removerPedido: () => {},
 };
 
 interface PaginaDeTesteProps {

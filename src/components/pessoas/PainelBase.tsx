@@ -16,8 +16,8 @@ export interface AcoesFicha {
   perder: (id: string, motivo: MotivoPerda, contexto: ContextoPerda) => void;
   reativar: (id: string) => void;
   juntarNota: (id: string, texto: string) => void;
-  /** Muda o dia, a hora e a morada da visita já marcada. */
-  alterarVisita: (id: string, dados: DadosAlterarVisita) => void;
+  /** Muda o dia, a hora e a morada de uma visita de um pedido. */
+  alterarVisita: (pedidoId: string, visitaId: string, dados: DadosAlterarVisita) => void;
 }
 
 /** A moldura comum: título e conteúdo, ligados por `aria-labelledby`; escondida quando o painel não é o ativo. */

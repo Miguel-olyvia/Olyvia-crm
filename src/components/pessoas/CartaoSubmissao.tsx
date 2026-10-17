@@ -34,7 +34,8 @@ const SELO = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 tex
 function AvisoVisita({ servico, nome, pessoa }: { servico: string; nome: string; pessoa: Pessoa | null }) {
   const { t } = useTranslation();
   const marcar = useMarcarVisita();
-  const jaMarcada = pessoa?.etapa === "visitaMarcada" || (pessoa !== null && marcar?.marcadas.has(pessoa.id) === true);
+  // `marcadas`: quem já tem um pedido em Visita ou a quem se marcou uma visita neste ecrã.
+  const jaMarcada = pessoa !== null && marcar?.marcadas.has(pessoa.id) === true;
   return (
     <div role="note" className="flex flex-wrap items-center gap-3 rounded-lg border border-warning bg-warning/15 p-3">
       <CalendarClock className="h-4 w-4 shrink-0 text-foreground" aria-hidden="true" />

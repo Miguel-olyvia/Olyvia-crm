@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
-import { juntarPessoas } from "./juntarPessoas";
+import { pedidoBase, pessoaBase } from "./fabricaTestes";
+import { juntarPessoas, papelEAbertos } from "./juntarPessoas";
+import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import { ehHistorico, type ResumoPessoa } from "./pessoasTipos";
 
-const resumos = () => juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO);
+const resumos = () => juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
 const de = (nome: string): ResumoPessoa => {
   const r = resumos().find((x) => x.pessoa.nome === nome);
   if (!r) throw new Error(`sem ${nome}`);
@@ -121,5 +123,41 @@ describe("juntarPessoas", () => {
 
   it("lista vazia dá lista vazia", () => {
     expect(juntarPessoas([], [], HOJE_EXEMPLO)).toEqual([]);
+  });
+});
+
+describe("juntarPessoas: pedidos", () => {
+  it("cada resumo leva só os pedidos da sua pessoa, pela ordem recebida", () => {
+    const pedidos = [pedidoBase("pd-1", { pessoaId: "b" }), pedidoBase("pd-2", { pessoaId: "a" }), pedidoBase("pd-3", { pessoaId: "a" })];
+    const [a, b, c] = juntarPessoas([pessoaBase("a"), pessoaBase("b"), pessoaBase("c")], [], HOJE_EXEMPLO, pedidos);
+    expect(a.pedidos.map((p) => p.id)).toEqual(["pd-2", "pd-3"]);
+    expect(b.pedidos.map((p) => p.id)).toEqual(["pd-1"]);
+    expect(c.pedidos).toEqual([]);
+  });
+
+  it("sem pedidos, ninguém os tem", () => {
+    expect(juntarPessoas([pessoaBase("a")], [], HOJE_EXEMPLO)[0].pedidos).toEqual([]);
+  });
+
+  it("as leads sem negócio aberto e quem tem visita têm pedidos de exemplo", () => {
+    expect(de("Beatriz Sampaio").pedidos).toHaveLength(1);
+    expect(de("Rita Albuquerque").pedidos[0].visitas).toHaveLength(1);
+    expect(de("Paulo Neves").pedidos).toHaveLength(1);
+    expect(de("Nuno Barros").pedidos).toEqual([]);
+  });
+
+  it("uma pessoa com visita de exemplo deixa de ter próximo contacto próprio: a visita é a do pedido", () => {
+    expect(PESSOAS_EXEMPLO.find((p) => p.id === "p-rita")!.proximoContacto).toBeNull();
+    expect(de("Rita Albuquerque").etapa).toBe("visitaMarcada");
+  });
+});
+
+describe("papelEAbertos", () => {
+  it("é cliente com um negócio ganho (também do histórico) e lead sem ele; os abertos são os do quadro sem contrato assinado", () => {
+    const doNuno = NEGOCIOS_PESSOAS_EXEMPLO.filter((n) => n.pessoaId === "p-nuno");
+    expect(papelEAbertos(doNuno).papel).toBe("lead");
+    expect(papelEAbertos(doNuno).abertos.length).toBeGreaterThan(0);
+    expect(papelEAbertos(NEGOCIOS_PESSOAS_EXEMPLO.filter((n) => n.pessoaId === "p-marta")).papel).toBe("cliente");
+    expect(papelEAbertos([])).toEqual({ papel: "lead", abertos: [] });
   });
 });

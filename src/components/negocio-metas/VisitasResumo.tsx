@@ -51,7 +51,6 @@ export function VisitasResumo({ visitas }: { visitas: readonly VisitaNegocio[] }
         {ordenadas.map((v, i) => (
           <li key={v.id}>
             <span className="tabular-nums">{t(`${N}visits.nth`, { n: i + 1 })} · {resumo(v)}</span>
-            {v.veioDaPessoa && <span className="ml-2 rounded-sm border border-primary px-1.5 py-0.5 text-xs font-semibold text-primary dark:text-violet-300">{t(`${N}visits.fromPerson`)}</span>}
             {moradaEmTexto(v) && <span className="block text-muted-foreground">{t(`${N}visits.resumo.address`, { morada: moradaEmTexto(v) })}</span>}
             {v.nota.trim() && <span className="block text-muted-foreground">{t(`${N}visits.resumo.note`, { nota: v.nota.trim() })}</span>}
           </li>

@@ -10,6 +10,7 @@ import { LINHA_PESSOA } from "../useAtalhosPessoas";
 import { ExplicacaoDoPasso } from "../processo/ExplicacaoDoPasso";
 import { passoDoItem } from "../processo/passosProcesso";
 import { useAcaoDoPasso } from "../processo/processoContexto";
+import { trabalhoDoItem } from "../processo/trabalhoDoItem";
 import type { ItemProcesso } from "../processo/tiposProcesso";
 import type { CartaoQuadro } from "./cartoesQuadroPessoas";
 
@@ -34,7 +35,7 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
   const acao = useAcaoDoPasso(item, () => aoAbrir(cartao.pessoaId));
   const passo = cartao.passo === "nenhum" ? null : t(item ? passoDoItem(item).chave : `pessoasPagina.next.${cartao.passo}`);
   const prazo = textoPrazoPasso(t, cartao.prazo, hoje);
-  const trabalho = cartao.trabalho ?? t("pessoasPagina.board.request");
+  const trabalho = trabalhoDoItem(t, cartao);
   return (
     <li className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">

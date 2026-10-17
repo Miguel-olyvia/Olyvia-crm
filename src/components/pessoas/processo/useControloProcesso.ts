@@ -66,7 +66,7 @@ export function useControloProcesso({ resumos, hoje, aoAnunciar }: Entrada) {
     const r = resumos.find((x) => x.pessoa.id === pendente.pessoaId);
     const depois = itemDe(pendente.pessoaId, pendente.itemId);
     // Um negócio criado entra pelo seu próprio store: espera até a pessoa o ter, para não dizer a fase de antes.
-    if (pendente.tipo === "negocio" && depois?.tipo !== "negocio") return;
+    if (pendente.tipo === "negocio" && (depois?.tipo !== "negocio" || (pendente.itemId !== undefined && depois.id !== pendente.itemId))) return;
     setPendente(null);
     const texto = pendente.mensagem ?? (r ? textoDoAviso(t, pendente.tipo, r.pessoa.nome, pendente.antes, depois) : "");
     if (!texto) { dialogoFechado.current = true; return; }

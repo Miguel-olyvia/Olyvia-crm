@@ -70,7 +70,7 @@ export type TipoVisitaNegocio = "levantamento" | "medicao" | "materiais" | "revi
 /**
  * Uma visita do negócio (só exemplo, em memória). `tipo`, `quemVaiEstar` e `duracao` guardam a chave da opção (o texto
  * vê-se pela tradução); `quemVaiEstar` e `duracao` ficam vazios sem escolha. `igualALead` diz se a morada da visita é a
- * da lead (`true`), outra (`false`) ou foi escrita à mão (`null`); `veioDaPessoa` marca a visita concluída que veio de Pessoas.
+ * da lead (`true`), outra (`false`) ou foi escrita à mão (`null`).
  */
 export interface VisitaNegocio {
   id: string;
@@ -85,7 +85,6 @@ export interface VisitaNegocio {
   duracao: string;
   morada: MoradaObraNegocio;
   igualALead: boolean | null;
-  veioDaPessoa: boolean;
   nota: string;
 }
 

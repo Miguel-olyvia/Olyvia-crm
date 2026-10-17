@@ -20,17 +20,17 @@ vi.mock("@/hooks/useTranslation", async () => {
 });
 
 const cartao = (extra: Partial<CartaoQuadro>): CartaoQuadro => ({
-  id: "pedido-a", pessoaId: "a", nome: "Ana Lopes", papel: "lead", coluna: "porContactar", trabalho: null, valor: null,
+  id: "pedido-pd-a", pedidoId: "pd-a", pessoaId: "a", nome: "Ana Lopes", papel: "lead", coluna: "porContactar", trabalho: null, rotuloPedido: null, valor: null,
   passo: "registarChamada", prazo: null, atrasado: false, ...extra,
 });
 
 const CARTOES: CartaoQuadro[] = [
   cartao({}),
-  cartao({ id: "pedido-b", pessoaId: "b", nome: "Bruno Reis", coluna: "porContactar" }),
-  cartao({ id: "pedido-c", pessoaId: "c", nome: "Clara Dias", coluna: "visita", passo: "fecharLevantamento", trabalho: "Casa de banho" }),
-  cartao({ id: "n1", pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Cozinha", valor: 9000, passo: "criarProposta" }),
-  cartao({ id: "n2", pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Sala", valor: 3000, passo: "escolherOrcamento" }),
-  cartao({ id: "n3", pessoaId: "e", nome: "Eva Costa", coluna: "contrato", trabalho: "Telhado", valor: 7000, passo: "recolherAssinatura", prazo: "2026-10-01", atrasado: true }),
+  cartao({ id: "pedido-pd-b", pedidoId: "pd-b", pessoaId: "b", nome: "Bruno Reis", coluna: "porContactar" }),
+  cartao({ id: "pedido-pd-c", pedidoId: "pd-c", pessoaId: "c", nome: "Clara Dias", coluna: "visita", passo: "fecharLevantamento", trabalho: "Casa de banho" }),
+  cartao({ id: "n1", pedidoId: null, pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Cozinha", valor: 9000, passo: "criarProposta" }),
+  cartao({ id: "n2", pedidoId: null, pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Sala", valor: 3000, passo: "escolherOrcamento" }),
+  cartao({ id: "n3", pedidoId: null, pessoaId: "e", nome: "Eva Costa", coluna: "contrato", trabalho: "Telhado", valor: 7000, passo: "recolherAssinatura", prazo: "2026-10-01", atrasado: true }),
 ];
 
 const mostrar = (cartoes = CARTOES, aoAbrir = vi.fn(), chip: ChipPessoa = "todas", aoLimpar = vi.fn()) => {
@@ -123,7 +123,7 @@ describe("QuadroPessoas", () => {
   it("o botão do nome leva data-linha-pessoa com o id da pessoa; o do passo deixa o texto quebrar", () => {
     mostrar();
     expect(screen.getByRole("button", { name: "Abrir a ficha de Clara Dias" })).toHaveAttribute("data-linha-pessoa", "c");
-    const passo = screen.getByRole("button", { name: "Fechar o levantamento: Casa de banho de Clara Dias (abre a ficha)" });
+    const passo = screen.getByRole("button", { name: "Marcar a visita como feita: Casa de banho de Clara Dias (abre a ficha)" });
     expect(passo.className).toContain("h-auto");
     expect(passo.className).toContain("py-2");
   });

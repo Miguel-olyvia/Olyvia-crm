@@ -3,18 +3,24 @@ import { createContext, useContext } from "react";
 
 import type { MoradaVisita } from "./pessoasTipos";
 
-/** Quem pede a visita: a pessoa a que a submissão está ligada, o serviço de que pediu a visita e a morada que a lead indicou (`null` sem morada). */
+/**
+ * Quem pede a visita: a pessoa, o pedido a que a visita vai, o serviço dele e a morada que a lead indicou (`null` sem morada). Sem
+ * `pedidoId` (uma submissão que pede visita) vale o primeiro pedido da pessoa ainda sem visita, ou cria-se um com este serviço.
+ */
 export interface PedidoVisita {
   pessoaId: string;
+  pedidoId?: string;
   nome: string;
   servico: string;
+  /** O nome do pedido (ver `nomeDoPedido`), quando o pedido já existe: diz-se na descrição do diálogo. */
+  pedidoNome?: string;
   moradaLead: MoradaVisita | null;
 }
 
 export interface MarcarVisitaValor {
   /** Abre o diálogo para esta pessoa. */
   pedir: (pedido: PedidoVisita) => void;
-  /** As pessoas a quem já se marcou uma visita nesta sessão (o botão deixa de se mostrar). */
+  /** As pessoas que já têm uma visita marcada (a deste ecrã ou a de um pedido): o botão "Marcar visita" deixa de se mostrar. */
   marcadas: ReadonlySet<string>;
 }
 

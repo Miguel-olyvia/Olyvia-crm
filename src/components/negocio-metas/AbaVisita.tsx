@@ -64,13 +64,13 @@ function ListaSeccoes({ ativa, aoMudar, respostas, linhas, visitas }: {
   const contador = useContador();
   return (
     <nav aria-label={t(`${N}visit.sections.label`)} className="lg:w-60 lg:shrink-0">
-      <ul className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+      <ul className="flex flex-wrap gap-2 lg:flex-col lg:flex-nowrap">
         {SECCOES_VISITA.map((s) => {
           const atual = s.id === ativa;
           const feito = feita(s, respostas, linhas, visitas);
           const chaveFeito = s.especial === "visitas" ? "visits.section" : "visit.section";
           return (
-            <li key={s.id} className="shrink-0 lg:shrink">
+            <li key={s.id}>
               <button
                 type="button" onClick={() => aoMudar(s.id)} aria-current={atual ? "step" : undefined}
                 className={cn(
@@ -123,7 +123,9 @@ export function AbaVisita({
         <ListaSeccoes ativa={seccao.id} aoMudar={aoMudarSeccao} respostas={respostas} linhas={linhas} visitas={visitas} />
         <section aria-labelledby={`${id}-seccao`} className="min-w-0 flex-1 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 id={`${id}-seccao`} className="text-base font-semibold text-foreground">{t(`${N}${chaveSeccao(seccao.id)}`)}</h3>
+            <h3 id={`${id}-seccao`} tabIndex={-1} data-foco-seccao className="text-base font-semibold text-foreground outline-none">
+              {t(`${N}${chaveSeccao(seccao.id)}`)}
+            </h3>
             <p className="text-sm tabular-nums text-muted-foreground">{contador(seccao, respostas, linhas, visitas)}</p>
           </div>
           {seccao.especial === "visitas" && <ListaVisitas id={id} visitas={visitas} aberta={visitaAberta} acoes={acoesVisitas} />}

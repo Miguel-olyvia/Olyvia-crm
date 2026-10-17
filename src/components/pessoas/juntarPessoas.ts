@@ -4,7 +4,7 @@
 import { faseDoNegocio, isNegocioGanho, valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { ORDEM_SAUDE, saudeDoNegocio } from "@/components/negocio-metas/saudeNegocio";
 import { estaAtrasada, etapaEfetiva, negocioEmFoco } from "./etapaPessoa";
-import { ehHistorico, type NegocioPessoa, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
+import { ehHistorico, type NegocioPessoa, type PapelPessoa, type PedidoNegocio, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
 
 /** Ganho: contrato assinado no quadro do mês, ou resultado "ganho" num histórico. */
 export const estaGanho = (n: NegocioPessoa): boolean => (ehHistorico(n) ? n.resultado === "ganho" : isNegocioGanho(n));
@@ -26,16 +26,22 @@ function piorAberto(abertos: NegocioMes[], hoje: string): NegocioMes | null {
   return pior;
 }
 
-function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], hoje: string): ResumoPessoa {
-  const abertos = negocios.filter(estaAberto);
+/** O papel (cliente se tem um negócio ganho) e os negócios abertos de uma pessoa, a partir dos negócios dela. */
+export function papelEAbertos(negocios: readonly NegocioPessoa[]): { papel: PapelPessoa; abertos: NegocioMes[] } {
+  return { papel: negocios.some(estaGanho) ? "cliente" : "lead", abertos: negocios.filter(estaAberto) };
+}
+
+function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], pedidos: PedidoNegocio[], hoje: string): ResumoPessoa {
+  const { papel, abertos } = papelEAbertos(negocios);
   const pior = piorAberto(abertos, hoje);
-  const entrada = { pessoa, papel: negocios.some(estaGanho) ? ("cliente" as const) : ("lead" as const), abertos };
+  const entrada = { pessoa, papel, abertos, pedidos };
   const foco = negocioEmFoco(abertos);
   return {
     pessoa,
-    papel: entrada.papel,
+    papel,
     negocios,
     abertos,
+    pedidos,
     emJogo: abertos.reduce((soma, n) => soma + valorDoNegocio(n), 0),
     atrasada: estaAtrasada(entrada, hoje),
     formulario: pessoa.formulario ?? null,
@@ -48,8 +54,12 @@ function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], hoje: string): Resum
   };
 }
 
+/**
+ * Junta cada pessoa com os seus negócios e os seus pedidos (a etapa, o "atrasada" e o próximo passo dependem deles). Sem `pedidos`,
+ * ninguém tem pedidos.
+ */
 export function juntarPessoas(
-  pessoas: readonly Pessoa[], negocios: readonly NegocioPessoa[], hoje: string,
+  pessoas: readonly Pessoa[], negocios: readonly NegocioPessoa[], hoje: string, pedidos: readonly PedidoNegocio[] = [],
 ): ResumoPessoa[] {
-  return pessoas.map((p) => resumir(p, negocios.filter((n) => n.pessoaId === p.id), hoje));
+  return pessoas.map((p) => resumir(p, negocios.filter((n) => n.pessoaId === p.id), pedidos.filter((d) => d.pessoaId === p.id), hoje));
 }

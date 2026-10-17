@@ -47,7 +47,7 @@ describe("pedir a aprovação à Direção e a resposta (simulada)", () => {
     fireEvent.click(within(dialogo).getByRole("button", { name: "Pedir aprovação à Direção" }));
     await esperarSemDialogo();
     expect(extrasAtuais().n1.orcamento).toMatchObject({ direcao: "pedida", verificado: false });
-    await waitFor(() => expect(aviso()).toHaveTextContent("Pedido enviado à Direção: a. A fazer: Aguardar a aprovação da direção."));
+    await waitFor(() => expect(aviso()).toHaveTextContent("Pedido de aprovação enviado à Direção: a. A fazer: Aguardar a aprovação da direção."));
     expect(botao("Aguardar a aprovação da direção")).toHaveFocus();
   });
 

@@ -5,8 +5,7 @@ const doPasso = (id: PassoProcesso): PassoDoItem => ({ id, chave: `pessoasPagina
 
 /** Os passos que o botão já executa (Fases 3 e 4); os outros continuam a abrir a ficha até à Fase 5. */
 const PASSOS_EXECUTAVEIS = [
-  "registarChamada", "marcarVisita", "marcarVisitaFeita", "fazerLevantamento", "criarNegocio", "criarOrcamento", "verificarOrcamento",
-  "aguardarDirecao", "enviarProposta",
+  "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "criarOrcamento", "verificarOrcamento", "aguardarDirecao", "enviarProposta",
 ] as const;
 
 type PassoExecutavel = (typeof PASSOS_EXECUTAVEIS)[number];
@@ -15,14 +14,14 @@ export const ehExecutavel = (passo: PassoProcesso): passo is PassoExecutavel => 
 
 /**
  * O passo de um pedido, pela fase em que está (Por contactar, Contactado ou Visita). Na fase Visita por fazer pede SEMPRE
- * "marcar a visita como feita" (no passado, hoje, no futuro ou sem data: a data não decide nada, sai no prazo do item).
- * Com a visita feita pede o levantamento e, com pelo menos uma linha de medidas guardada, criar o negócio.
+ * "marcar a visita como feita" (no passado, hoje, no futuro ou sem data: a data não decide nada, sai no prazo do item). Abre o
+ * painel de visita e levantamento do pedido, onde se marca a visita como feita e, se se quiser, se tiram as medidas (o levantamento
+ * é opcional) numa só gravação. Com uma visita feita, o passo é criar o negócio, com ou sem linhas de medidas.
  */
 function passoDoPedido(item: ItemProcesso): PassoProcesso {
   if (item.fase === "porContactar") return "registarChamada";
   if (item.fase === "contactado") return "marcarVisita";
-  if (!item.visitaFeita) return "marcarVisitaFeita";
-  return item.levantamentoLinhas > 0 ? "criarNegocio" : "fazerLevantamento";
+  return item.visitaFeita ? "criarNegocio" : "marcarVisitaFeita";
 }
 
 /**

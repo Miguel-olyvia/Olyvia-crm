@@ -20,7 +20,9 @@ import { useAvisoAlternado } from "@/components/pessoas/processo/avisoAlternado"
 import { ProcessoProvider } from "@/components/pessoas/processo/ProcessoProvider";
 import type { DadosNovaLead } from "@/components/pessoas/novaLead";
 import { paraOpcao } from "@/components/pessoas/pessoaOpcao";
-import type { Pessoa } from "@/components/pessoas/pessoasTipos";
+import { valoresIniciaisDoPedido } from "@/components/pessoas/painelDoPedido";
+import { pedidoMaisAvancado } from "@/components/pessoas/etapaPessoa";
+import type { PedidoNegocio, Pessoa } from "@/components/pessoas/pessoasTipos";
 import { SeparadorPessoas } from "@/components/pessoas/SeparadorPessoas";
 import { SeparadorSubmissoes } from "@/components/pessoas/SeparadorSubmissoes";
 import { ATIVIDADE_EXEMPLO } from "@/components/pessoas/pessoasExemplo";
@@ -28,7 +30,6 @@ import { ordenarSubmissoes } from "@/components/pessoas/resolverSubmissao";
 import { usePessoasEstado } from "@/components/pessoas/usePessoasEstado";
 import { usePessoasUrl, type SeparadorPagina } from "@/components/pessoas/usePessoasUrl";
 import { useResolucaoSubmissao } from "@/components/pessoas/useResolucaoSubmissao";
-import { valoresIniciaisDaVisita, type VisitaResolvida } from "@/components/pessoas/visitaProxima";
 
 /** A permissão que a página real de submissões pendentes exige (ver a rota em App.tsx). */
 const PERMISSAO_SUBMISSOES = "platform.pending_submissions.view";
@@ -50,16 +51,17 @@ const Pessoas = () => {
   const pessoas = useMemo(() => new Map(estado.resumos.map((r) => [r.pessoa.id, r.pessoa])), [estado.resumos]);
   const resolucao = useResolucaoSubmissao({ ordenadas, pessoas, resolver: estado.resolver });
   const [novaLeadAberta, setNovaLeadAberta] = useState(false);
-  // O painel "Novo negócio" aberto a partir da ficha: a pessoa e, se veio da visita concluída, os valores que a visita já traz.
-  const [negocioPara, setNegocioPara] = useState<{ pessoa: Pessoa; valores?: ValoresIniciaisNegocio } | null>(null);
-  // A pessoa cuja visita fica concluída quando o negócio for criado (lida ao criar; o painel já está a fechar nessa altura).
-  const visitaDoNegocio = useRef<string | null>(null);
+  // O painel "Novo negócio" aberto a partir da ficha: a pessoa e, numa lead, o pedido a que o negócio fica ligado (com os valores dele).
+  const [negocioPara, setNegocioPara] = useState<{ pessoa: Pessoa; valores?: ValoresIniciaisNegocio; pedido?: PedidoNegocio } | null>(null);
   // O aviso da página e dos passos do processo (uma região live) e o da resolução de submissões (outra): cada origem tem a sua, porque
   // o anúncio da resolução fica guardado e, numa região partilhada, calava todos os avisos que viessem depois.
   const [aviso, setAviso] = useState("");
   const alternarAviso = useAvisoAlternado();
   /** Um aviso da própria página: o mesmo texto duas vezes seguidas (a mesma lead criada duas vezes) volta a ser anunciado. */
   const anunciar = (texto: string) => setAviso(alternarAviso(texto));
+  // Com a ficha aberta (um painel modal), a região da página fica escondida do leitor de ecrã: o aviso dos passos feitos a partir da
+  // ficha vai para a região live DENTRO dela (`anuncioProcesso`); com a ficha fechada vai para a da página. Nunca para as duas.
+  const [avisoFicha, setAvisoFicha] = useState("");
   const opcoesPessoa = useMemo(() => estado.resumos.map((r) => paraOpcao(r.pessoa)), [estado.resumos]);
 
   const aberta = estado.resumos.find((r) => r.pessoa.id === url.abertaId) ?? null;
@@ -71,6 +73,11 @@ const Pessoas = () => {
   if (aberta) ultimoId.current = aberta.pessoa.id;
   const daFicha = aberta ?? estado.resumos.find((r) => r.pessoa.id === ultimoId.current) ?? null;
   const idAberta = daFicha?.pessoa.id;
+  const fichaAberta = aberta !== null;
+  /** Um aviso do processo (um passo) ou da ficha: vai para a região que o leitor de ecrã consegue ouvir agora. */
+  const anunciarNoSitio = (texto: string) => (fichaAberta ? setAvisoFicha(texto) : setAviso(texto));
+  // Ao fechar a ficha esquece-se o aviso dela: ao abrir outra vez não se repete.
+  useEffect(() => { if (!fichaAberta) setAvisoFicha(""); }, [fichaAberta]);
   const atividadeAberta = useMemo(
     () => juntarAtividade(
       ATIVIDADE_EXEMPLO.filter((i) => i.pessoaId === idAberta), estado.atividade.filter((i) => i.pessoaId === idAberta),
@@ -91,31 +98,48 @@ const Pessoas = () => {
     toast.success(t("pessoasPagina.newLead.created"));
     anunciar(t("pessoasPagina.newLead.announce", { name: criada.nome }));
   };
-  /** Cria o negócio da pessoa (o mesmo de "Novo negócio"): aparece na ficha, em Negócios, e no quadro de Negócio e metas. */
-  const criarNegocio = (dados: DadosCriarNegocio, concluirVisita: boolean) => {
-    criarNegocioNovo(dados, HOJE_EXEMPLO);
-    if (concluirVisita) estado.concluirVisita(dados.pessoa.id);
+  /**
+   * Cria o negócio da pessoa (o mesmo de "Novo negócio"): aparece na ficha, em Negócios, e no quadro de Negócio e metas. Devolve o id.
+   * Quando o cria o `ProcessoProvider` (os passos), é ele que trata do pedido: tirá-lo e dar o serviço ao negócio.
+   */
+  const criarNegocio = (dados: DadosCriarNegocio): string => {
+    const criado = criarNegocioNovo(dados, HOJE_EXEMPLO);
     toast.success(t("businessGoals.new.created"));
+    return criado.id;
   };
+  /** O negócio criado a partir da ficha: o de uma lead substitui o pedido a que estava ligado (e herda o serviço dele). */
   const aoCriarNegocio = (dados: DadosCriarNegocio) => {
-    criarNegocio(dados, visitaDoNegocio.current === dados.pessoa.id);
-    visitaDoNegocio.current = null;
-    anunciar(t("pessoasPagina.createDeal.announce", { name: dados.pessoa.nome }));
+    // O pedido só conta se o negócio é da pessoa da ficha (a pessoa já não se muda no painel, mas a defesa fica).
+    const pedido = negocioPara?.pessoa.id === dados.pessoa.id ? negocioPara.pedido : undefined;
+    criarNegocio(pedido?.servico ? { ...dados, servico: pedido.servico } : dados);
+    if (pedido) estado.removerPedido(pedido.id);
+    anunciarNoSitio(alternarAviso(t("pessoasPagina.createDeal.announce", { name: dados.pessoa.nome })));
   };
-  /** O negócio criado pelo passo "Criar o negócio" (o aviso diz a fase: é do `ProcessoProvider`): a visita de onde veio fica concluída. */
-  const aoCriarNegocioDoPasso = (dados: DadosCriarNegocio) => criarNegocio(dados, true);
 
-  const abrirNegocio = (pessoa: Pessoa) => { visitaDoNegocio.current = null; setNegocioPara({ pessoa }); };
-  /** "Visita concluída → Criar negócio": o painel abre com a pessoa, o comercial, a visita e a morada da visita (a da obra). */
-  const abrirNegocioDaVisita = (pessoa: Pessoa, visita: VisitaResolvida) => {
-    visitaDoNegocio.current = pessoa.id;
-    setNegocioPara({ pessoa, valores: valoresIniciaisDaVisita(pessoa, visita) });
+  /**
+   * O painel «Novo negócio» abriu-se a partir do menu «Mais» da ficha: ao fechar, o foco volta ao «Mais» (se se cancelou) ou ao nome da
+   * pessoa (se criou: a ficha passou a mostrar o negócio, e o ponto de partida já não é o mesmo).
+   */
+  const devolverFocoNaFicha = (criou: boolean): boolean => {
+    const alvo = document.querySelector<HTMLElement>(criou ? "[data-ficha-nome]" : "[data-ficha-mais]");
+    alvo?.focus();
+    return alvo !== null;
+  };
+
+  /**
+   * "Criar negócio" de uma lead (ligado ao pedido mais avançado dela, com as visitas e o levantamento que ele já tem) e "Novo negócio
+   * sem visita" de um cliente (o painel como sempre, sem pedido: o negócio nasce em Orçamento, sem exigir levantamento).
+   */
+  const abrirNegocio = (pessoa: Pessoa) => {
+    const resumo = estado.resumos.find((r) => r.pessoa.id === pessoa.id);
+    const pedido = resumo?.papel === "lead" ? pedidoMaisAvancado(resumo.pedidos) : null;
+    setNegocioPara(pedido ? { pessoa, pedido, valores: valoresIniciaisDoPedido(pessoa, pedido) } : { pessoa });
   };
 
   return (
     <ProcessoProvider
-      hoje={HOJE_EXEMPLO} resumos={estado.resumos} acoes={estado} opcoesPessoa={opcoesPessoa} aoCriarNegocio={aoCriarNegocioDoPasso}
-      aoAnunciar={setAviso}
+      hoje={HOJE_EXEMPLO} resumos={estado.resumos} acoes={estado} opcoesPessoa={opcoesPessoa} aoCriarNegocio={criarNegocio}
+      aoAnunciar={anunciarNoSitio}
     >
       <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
         {/* Como no Inventário: a barra de abas no topo, com a linha fina por baixo, e só depois migalhas e título. */}
@@ -156,18 +180,18 @@ const Pessoas = () => {
           </TabsContent>
         </Tabs>
         <FichaPessoa
-          resumo={daFicha} aberto={aberta !== null} anuncioExterno={resolucao.anuncio} hoje={HOJE_EXEMPLO} submissoes={ordenadas.filter(daAberta)} podeVerSubmissoes={podeVer}
+          resumo={daFicha} aberto={aberta !== null} anuncioExterno={resolucao.anuncio} anuncioProcesso={avisoFicha} hoje={HOJE_EXEMPLO} submissoes={ordenadas.filter(daAberta)} podeVerSubmissoes={podeVer}
           notas={estado.notas.filter((n) => n.pessoaId === idAberta)} atividade={atividadeAberta}
           voltou={idAberta !== undefined && estado.pendentes.has(idAberta)} acoes={estado} aoFechar={url.fechar}
           idsVisiveis={url.separador === "pessoas" ? visiveis : []} aoIrPara={url.abrir} pessoas={pessoas}
           aoPedir={(sid, pid) => resolucao.pedir(sid, pid, "ficha")} aoVerTodasSubmissoes={url.irParaSubmissoes}
-          aoCriarNegocio={abrirNegocio} aoCriarNegocioDaVisita={abrirNegocioDaVisita}
+          aoCriarNegocio={abrirNegocio}
         />
         <NovaLeadPainel aberto={novaLeadAberta} aoMudarAberto={setNovaLeadAberta} aoCriar={aoCriarLead} />
         <NovoNegocioDialogo
           pessoas={opcoesPessoa} aoCriar={aoCriarNegocio} semBotao aberto={negocioPara !== null}
           aoMudarAberto={(aberto) => { if (!aberto) setNegocioPara(null); }} pessoaInicialId={negocioPara?.pessoa.id}
-          valoresIniciais={negocioPara?.valores}
+          valoresIniciais={negocioPara?.valores} aoDevolverFoco={devolverFocoNaFicha}
         />
         <ConfirmarResolver
           pedido={resolucao.pedido} aoConfirmar={resolucao.confirmar} aoCancelar={resolucao.cancelar} aoFechar={resolucao.aoFechar}

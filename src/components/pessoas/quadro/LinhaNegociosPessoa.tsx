@@ -9,6 +9,7 @@ import { textoPrazoPasso } from "../formatoPessoas";
 import { ExplicacaoDoPasso } from "../processo/ExplicacaoDoPasso";
 import { passoDoItem } from "../processo/passosProcesso";
 import { useAcaoDoPasso } from "../processo/processoContexto";
+import { trabalhoDoItem } from "../processo/trabalhoDoItem";
 import type { ItemProcesso } from "../processo/tiposProcesso";
 
 interface LinhaNegociosPessoaProps {
@@ -26,7 +27,7 @@ function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPes
   const acao = useAcaoDoPasso(item, () => aoAbrir(pessoaId));
   const passo = t(passoDoItem(item).chave);
   const prazo = textoPrazoPasso(t, item.prazo, hoje);
-  const trabalho = item.trabalho ?? t("pessoasPagina.board.request");
+  const trabalho = trabalhoDoItem(t, item);
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-sm">
       <span className="flex min-w-0 flex-1 basis-48 flex-wrap items-center gap-2">

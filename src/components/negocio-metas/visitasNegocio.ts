@@ -1,10 +1,10 @@
-// Lógica pura das Visitas de "Novo negócio": o negócio tem uma LISTA de visitas (a visita concluída que vem de Pessoas
-// chega como Feita). Nada aqui lê o relógio: o dia de hoje chega por parâmetro. Só exemplo, em memória.
+// Lógica pura das Visitas de "Novo negócio": o negócio tem uma LISTA de visitas (as do pedido de onde vem, se vier de um). Nada
+// aqui lê o relógio: o dia de hoje chega por parâmetro. Só exemplo, em memória.
 import type {
   EstadoLevantamento, EstadoVisitaNegocio, MoradaObraNegocio, NegocioMes, TipoVisitaNegocio, VisitaNegocio,
 } from "./negocioMetas";
-import { MORADA_VAZIA, moradaAparada } from "./moradaObra";
-import { somarDias, type ValoresIniciaisNegocio } from "./novoNegocio";
+import { MORADA_VAZIA, moradaAparada, temMorada } from "./moradaObra";
+import { somarDias } from "./novoNegocio";
 import { formatarData } from "./negocioPainel";
 
 export const TIPOS_VISITA = ["levantamento", "medicao", "materiais", "revisita"] as const satisfies readonly TipoVisitaNegocio[];
@@ -13,33 +13,23 @@ export const ESTADOS_VISITA = ["porFazer", "feita", "cancelada"] as const satisf
 /** A nova visita fica daqui a 2 dias (como o primeiro prazo de um negócio novo). */
 export const DIAS_ATE_NOVA_VISITA = 2;
 
-/** O id da visita que vem de Pessoas (só há uma). */
-export const ID_VISITA_DA_PESSOA = "v-pessoa";
-
-type VisitaInicial = NonNullable<ValoresIniciaisNegocio["visita"]>;
-
 /** Uma visita Por fazer do tipo Revisita, daqui a 2 dias; a morada (e a origem) é a da visita anterior, se a houver. */
 export function novaVisita(id: string, hoje: string, comercial: string, anterior?: VisitaNegocio): VisitaNegocio {
   return {
     id, data: somarDias(hoje, DIAS_ATE_NOVA_VISITA), hora: "", feitoPor: comercial, estado: "porFazer", tipo: "revisita",
     quemVaiEstar: "", duracao: "", morada: anterior ? { ...anterior.morada } : { ...MORADA_VAZIA },
-    igualALead: anterior ? anterior.igualALead : false, veioDaPessoa: false, nota: "",
+    igualALead: anterior ? anterior.igualALead : false, nota: "",
   };
 }
 
-/** A visita concluída de uma pessoa: Feita, do tipo Levantamento, marcada como vinda da pessoa; a morada é uma cópia. */
-export function visitaDaPessoa(id: string, inicial: VisitaInicial): VisitaNegocio {
-  return {
-    id, data: inicial.data, hora: inicial.hora ?? "", feitoPor: inicial.quemFez, estado: "feita", tipo: "levantamento",
-    quemVaiEstar: "", duracao: "", morada: { ...inicial.moradaObra }, igualALead: inicial.igualALead, veioDaPessoa: true,
-    nota: inicial.nota ?? "",
-  };
+/** A lista com que o painel abre: a do pedido (uma cópia, moradas incluídas); sem pedido, vazia. */
+export function visitasIniciais(doPedido?: readonly VisitaNegocio[]): VisitaNegocio[] {
+  return doPedido ? doPedido.map((v) => ({ ...v, morada: { ...v.morada } })) : [];
 }
 
-/** A lista com que o painel abre: vazia, ou só com a visita concluída que veio de Pessoas. */
-export function visitasIniciais(inicial: VisitaInicial | undefined): VisitaNegocio[] {
-  return inicial ? [visitaDaPessoa(ID_VISITA_DA_PESSOA, inicial)] : [];
-}
+/** A visita que abre aberta para se ver: a primeira Feita, por ordem cronológica; `null` sem nenhuma. */
+export const visitaParaAbrir = (visitas: readonly VisitaNegocio[]): string | null =>
+  ordenarVisitas(visitas).find((v) => v.estado === "feita")?.id ?? null;
 
 const SEM_DATA = "9999-99-99";
 const SEM_HORA = "99:99";
@@ -58,11 +48,8 @@ export const acrescentarVisita = (visitas: readonly VisitaNegocio[], nova: Visit
 export const alterarVisita = (visitas: readonly VisitaNegocio[], id: string, parcial: Partial<VisitaNegocio>): VisitaNegocio[] =>
   visitas.map((v) => (v.id === id ? { ...v, ...parcial } : v));
 
-/** Tira a visita; a que veio de Pessoas só se edita (devolve a mesma lista). */
-export function removerVisita(visitas: readonly VisitaNegocio[], id: string): VisitaNegocio[] {
-  if (visitas.some((v) => v.id === id && v.veioDaPessoa)) return visitas as VisitaNegocio[];
-  return visitas.filter((v) => v.id !== id);
-}
+/** Tira a visita (qualquer uma: nenhuma visita é obrigatória). */
+export const removerVisita = (visitas: readonly VisitaNegocio[], id: string): VisitaNegocio[] => visitas.filter((v) => v.id !== id);
 
 /** Marca como Feita só uma visita Por fazer (as Canceladas e as Feitas ficam como estavam). */
 export function marcarFeita(visitas: readonly VisitaNegocio[], id: string): VisitaNegocio[] {
@@ -101,6 +88,15 @@ export function camposDoLevantamento(
   return { data: principal.data, feitoPor: principal.feitoPor, estado: principal.estado === "feita" ? "feito" : "porFazer" };
 }
 
+/**
+ * A morada da obra que as visitas sugerem: a da visita que representa o levantamento (a primeira com morada escrita, pelo mesmo
+ * critério de `camposDoLevantamento`) e a sua origem. `undefined` quando nenhuma tem morada.
+ */
+export function moradaDasVisitas(visitas: readonly VisitaNegocio[]): { moradaObra: MoradaObraNegocio; igualALead: boolean | null } | undefined {
+  const [principal] = [...ordenarVisitas(visitas)].filter((v) => temMorada(v.morada)).sort((a, b) => pesoDoLevantamento(a) - pesoDoLevantamento(b));
+  return principal ? { moradaObra: { ...principal.morada }, igualALead: principal.igualALead } : undefined;
+}
+
 /** A visita única de antes: os campos do levantamento e as escolhas da secção Visitas (chaves das opções). */
 export interface VisitaUnica {
   data: string;
@@ -125,7 +121,7 @@ export function migrarVisitaUnica(id: string, u: VisitaUnica): VisitaNegocio {
   return {
     id, data: u.data, hora: horaEmTexto(u.hora), feitoPor: u.feitoPor, estado: u.estado === "feito" ? "feita" : "porFazer",
     tipo: u.tipo ?? "levantamento", quemVaiEstar: u.quemVaiEstar ?? "", duracao: u.duracao ?? "",
-    morada: u.morada ? { ...u.morada } : { ...MORADA_VAZIA }, igualALead: false, veioDaPessoa: false, nota: "",
+    morada: u.morada ? { ...u.morada } : { ...MORADA_VAZIA }, igualALead: false, nota: "",
   };
 }
 

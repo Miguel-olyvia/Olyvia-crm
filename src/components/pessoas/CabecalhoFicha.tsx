@@ -21,7 +21,7 @@ export function CabecalhoFicha({ resumo, vizinhas, aoIr }: CabecalhoFichaProps) 
     <SheetHeader className="flex-row flex-wrap items-start gap-x-3 gap-y-2 space-y-0 p-6 pb-4 text-left">
       <AvatarPessoa nome={pessoa.nome} />
       <div className="min-w-40 flex-1 space-y-1.5">
-        <SheetTitle tabIndex={-1} className="text-xl outline-none">{pessoa.nome}</SheetTitle>
+        <SheetTitle tabIndex={-1} data-ficha-nome className="text-xl outline-none">{pessoa.nome}</SheetTitle>
         <SheetDescription className="text-[15px]">{textoLinhaCabecalho(t, resumo)}</SheetDescription>
         {(pessoa.empresa || pessoa.perdida) && (
           <div className="flex flex-wrap gap-1.5">

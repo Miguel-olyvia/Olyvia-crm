@@ -29,20 +29,22 @@ interface Props {
   acoes: AcoesGeral;
   /** Recebe o foco quando o painel abre: o primeiro campo. */
   primeiroCampo: RefObject<HTMLButtonElement>;
+  /** A pessoa já vem escolhida (a ficha de onde se veio) e não se muda: o seletor fica desativado e diz porquê. */
+  pessoaBloqueada?: boolean;
 }
 
 const trigger = (invalido: boolean) => cn("min-h-11", FOCO, invalido && "border-destructive");
 
-function CampoPessoa({ id, pessoas, valores, erros, acoes, primeiroCampo }: Props) {
+function CampoPessoa({ id, pessoas, valores, erros, acoes, primeiroCampo, pessoaBloqueada = false }: Props) {
   const { t } = useTranslation();
   const erro = erros.pessoaId;
   return (
     <div className="space-y-1.5">
       <Rotulo para={`${id}-pessoa`} texto={t(`${N}person`)} obrigatorio />
-      <Select value={valores.pessoaId} onValueChange={acoes.pessoa}>
+      <Select value={valores.pessoaId} onValueChange={acoes.pessoa} disabled={pessoaBloqueada}>
         <SelectTrigger
           id={`${id}-pessoa`} ref={primeiroCampo} aria-required="true" aria-invalid={erro ? true : undefined}
-          aria-describedby={erro ? `${id}-pessoa-erro` : undefined} className={trigger(!!erro)}
+          aria-describedby={erro ? `${id}-pessoa-erro` : pessoaBloqueada ? `${id}-pessoa-fixa` : undefined} className={trigger(!!erro)}
         >
           <SelectValue placeholder={t(`${N}person.placeholder`)} />
         </SelectTrigger>
@@ -50,6 +52,7 @@ function CampoPessoa({ id, pessoas, valores, erros, acoes, primeiroCampo }: Prop
           {pessoas.map((p) => <SelectItem key={p.id} value={p.id} className={ITEM}>{p.nome}</SelectItem>)}
         </SelectContent>
       </Select>
+      {pessoaBloqueada && <p id={`${id}-pessoa-fixa`} className="text-sm text-muted-foreground">{t(`${N}person.locked`)}</p>}
       <ErroDoCampo id={`${id}-pessoa-erro`} chave={erro && `error.person.${erro}`} />
     </div>
   );

@@ -1,8 +1,9 @@
-// O Quadro de Pessoas: 6 fases, um cartão por pedido (lead sem negócio aberto) ou por negócio em curso. Funções puras:
-// o dia de hoje chega por parâmetro. Perdidos e ganhos não têm cartão; pessoa perdida não tem nenhum. Pessoa com negócio aberto não mostra o pedido ao lado.
+// O Quadro de Pessoas: 6 fases, um cartão por pedido e um por negócio em curso (uma pessoa pode ter vários de cada, em paralelo).
+// Funções puras: o dia de hoje chega por parâmetro. Perdidos e ganhos não têm cartão; pessoa perdida não tem nenhum.
 import { faseDoNegocio, valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { passoDoNegocio, proximoPasso, type IdPasso } from "../etapaPessoa";
-import type { EtapaPessoa, PapelPessoa, ResumoPessoa } from "../pessoasTipos";
+import { passoDoNegocio, passoDoPedidoNaColuna, type IdPasso } from "../etapaPessoa";
+import { faseDoPedido, prazoDoPedido, rotuloDoPedido, type RotuloPedido } from "../pedidoNegocio";
+import type { FasePedido, PapelPessoa, PedidoNegocio, ResumoPessoa } from "../pessoasTipos";
 
 export type ColunaQuadro = "porContactar" | "contactado" | "visita" | "orcamento" | "proposta" | "contrato";
 
@@ -22,14 +23,18 @@ export const COLUNAS_QUADRO: readonly DefColuna[] = [
 ];
 
 export interface CartaoQuadro {
-  /** O id do negócio, ou `pedido-<pessoa>` num pedido. */
+  /** O id do negócio, ou `pedido-<id do pedido>` num pedido. */
   id: string;
   pessoaId: string;
+  /** O id do pedido (`pd-<n>`); `null` num negócio. */
+  pedidoId: string | null;
   nome: string;
   papel: PapelPessoa;
   coluna: ColunaQuadro;
-  /** O serviço do negócio, ou o da visita num pedido; `null` quando não há. */
+  /** O serviço do negócio ou do pedido; `null` quando não há. */
   trabalho: string | null;
+  /** O que identifica o pedido ao utilizador (serviço ou dia de criação, e a posição entre repetidos); `null` num negócio. */
+  rotuloPedido: RotuloPedido | null;
   /** O valor do orçamento escolhido; `null` num pedido. */
   valor: number | null;
   passo: IdPasso;
@@ -39,9 +44,7 @@ export interface CartaoQuadro {
   atrasado: boolean;
 }
 
-const COLUNA_DA_ETAPA: Partial<Record<EtapaPessoa, ColunaQuadro>> = {
-  nova: "porContactar", emContacto: "contactado", visitaMarcada: "visita",
-};
+const COLUNA_DA_FASE_PEDIDO: Record<FasePedido, ColunaQuadro> = { porContactar: "porContactar", contactado: "contactado", visita: "visita" };
 
 const COLUNA_DA_FASE: Partial<Record<ReturnType<typeof faseDoNegocio>, ColunaQuadro>> = {
   orcamento: "orcamento", proposta: "proposta", contrato: "contrato",
@@ -53,18 +56,21 @@ function cartaoDoNegocio(r: ResumoPessoa, n: NegocioMes, hoje: string): CartaoQu
   const coluna = COLUNA_DA_FASE[faseDoNegocio(n)];
   if (!coluna) return null;
   return {
-    id: n.id, pessoaId: r.pessoa.id, nome: r.pessoa.nome, papel: r.papel, coluna, trabalho: n.servico,
-    valor: valorDoNegocio(n), passo: passoDoNegocio(n), prazo: n.proximoPrazo, atrasado: passou(n.proximoPrazo, hoje),
+    id: n.id, pessoaId: r.pessoa.id, pedidoId: null, nome: r.pessoa.nome, papel: r.papel, coluna, trabalho: n.servico,
+    rotuloPedido: null, valor: valorDoNegocio(n), passo: passoDoNegocio(n), prazo: n.proximoPrazo, atrasado: passou(n.proximoPrazo, hoje),
   };
 }
 
-function cartaoDoPedido(r: ResumoPessoa, hoje: string): CartaoQuadro | null {
-  const coluna = COLUNA_DA_ETAPA[r.etapa];
-  if (!coluna) return null;
-  const { id, prazo } = proximoPasso(r);
+/**
+ * O cartão de um pedido: a coluna é a sua fase. O prazo é o da sua próxima visita por fazer (um pedido em Visita) ou a chamada
+ * agendada da pessoa (um pedido antes da visita).
+ */
+function cartaoDoPedido(r: ResumoPessoa, p: PedidoNegocio, hoje: string): CartaoQuadro {
+  const fase = faseDoPedido(p);
+  const prazo = fase === "visita" ? prazoDoPedido(p) : r.pessoa.proximoContacto ?? null;
   return {
-    id: `pedido-${r.pessoa.id}`, pessoaId: r.pessoa.id, nome: r.pessoa.nome, papel: r.papel, coluna,
-    trabalho: r.pessoa.visita?.servico ?? null, valor: null, passo: id, prazo, atrasado: passou(prazo, hoje),
+    id: `pedido-${p.id}`, pessoaId: r.pessoa.id, pedidoId: p.id, nome: r.pessoa.nome, papel: r.papel, coluna: COLUNA_DA_FASE_PEDIDO[fase],
+    trabalho: p.servico || null, rotuloPedido: rotuloDoPedido(p, r.pedidos), valor: null, passo: passoDoPedidoNaColuna(p), prazo, atrasado: passou(prazo, hoje),
   };
 }
 
@@ -73,7 +79,6 @@ export function cartoesDoQuadro(resumos: readonly ResumoPessoa[], hoje: string):
   return resumos.flatMap((r) => {
     // Quem está perdida não tem cartões, mesmo com negócios abertos: fica na ficha e na lista.
     if (r.pessoa.perdida) return [];
-    if (r.abertos.length > 0) return r.abertos.flatMap((n) => cartaoDoNegocio(r, n, hoje) ?? []);
-    return cartaoDoPedido(r, hoje) ?? [];
+    return [...r.pedidos.map((p) => cartaoDoPedido(r, p, hoje)), ...r.abertos.flatMap((n) => cartaoDoNegocio(r, n, hoje) ?? [])];
   });
 }

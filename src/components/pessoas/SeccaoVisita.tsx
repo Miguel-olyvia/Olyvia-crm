@@ -1,96 +1,75 @@
-// "Próxima visita" no Resumo da ficha: o dia da semana, a data, a hora e a MORADA DA VISITA (com a indicação de que é igual à
-// morada da lead ou outra), mais as duas ações: "Visita concluída → Criar negócio" (a única ação principal do bloco) e
-// "Alterar visita". Uma visita cujo dia já passou diz "Visita por concluir"; uma já marcada como feita diz "Visita feita" e deixa de
-// se poder alterar (só falta criar o negócio). Sem visita, não há bloco.
-import { useState } from "react";
-import { AlertCircle, CalendarClock, MapPin } from "lucide-react";
+// As visitas de um pedido no Resumo da ficha: uma secção por pedido com visitas (a pessoa pode ter vários pedidos em paralelo, cada um com
+// as suas visitas). Diz de que pedido são, lista as visitas e tem o botão do passo do pedido: "Marcar a visita como feita" (que abre o
+// painel de visita e levantamento) ou, com a visita feita e as medidas guardadas, "Criar o negócio". É o MESMO caminho dos botões do
+// Quadro e da Lista (`useProcesso().executar`). Uma visita cujo dia já passou diz "Visita por concluir"; sem visitas, não há secção.
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { LinhaCampo, ListaCampos } from "@/components/ficha-comum/ListaCampos";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import { AlterarVisita } from "./AlterarVisita";
-import { textoDiaCompleto } from "./formatoPessoas";
-import { textoMoradaVisita } from "./moradaVisita";
-import type { Pessoa } from "./pessoasTipos";
-import { MarcaExemplo } from "./SelosPessoa";
+import { ordenarVisitas } from "@/components/negocio-metas/visitasNegocio";
+import { nomeDoPedido, prazoDoPedido } from "./pedidoNegocio";
 import type { AcoesFicha } from "./PainelBase";
-import { diaDaSemana, type VisitaResolvida } from "./visitaProxima";
+import type { PedidoNegocio, Pessoa } from "./pessoasTipos";
+import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
+import { passoDoItem } from "./processo/passosProcesso";
+import { useAcaoDoPasso } from "./processo/processoContexto";
+import type { ItemProcesso } from "./processo/tiposProcesso";
+import { MarcaExemplo } from "./SelosPessoa";
+import { VisitaDoPedido } from "./VisitaDoPedido";
 
 const K = "pessoasPagina.nextVisit.";
 
 interface SeccaoVisitaProps {
   pessoa: Pessoa;
-  visita: VisitaResolvida;
+  pedido: PedidoNegocio;
+  /** Todos os pedidos da pessoa: o nome do pedido distingue-se dos outros (ver `nomeDoPedido`). */
+  pedidos: readonly PedidoNegocio[];
+  /** O item do processo deste pedido: o botão do passo executa-o; sem ele (ou sem `ProcessoProvider`) não há botão. */
+  item: ItemProcesso | undefined;
   hoje: string;
   alterarVisita: AcoesFicha["alterarVisita"];
-  /** "Visita concluída → Criar negócio": a página abre o painel "Novo negócio" com a visita já preenchida. */
-  aoCriarNegocio: () => void;
 }
 
-/** "domingo, 12/10/2026 · 15:00" a partir do dia e da hora da visita. */
-function useQuando(data: string, hora: string): string {
+/** O botão do passo do pedido, com a explicação do portão (se o passo não puder avançar) a seguir. */
+function BotaoDoPasso({ item, trabalho, nome }: { item: ItemProcesso; trabalho: string; nome: string }) {
   const { t } = useTranslation();
-  const dia = `${t(`pessoasPagina.weekday.${diaDaSemana(data)}`)}, ${textoDiaCompleto(data)}`;
-  return hora ? `${dia} · ${hora}` : dia;
-}
-
-/** A indicação em texto de que a morada da visita é a da lead ou outra (a cor não é o único sinal). */
-function ChipOrigem({ igual }: { igual: boolean }) {
-  const { t } = useTranslation();
+  const acao = useAcaoDoPasso(item, () => {});
+  if (!acao.executa) return null;
+  const passo = t(passoDoItem(item).chave);
   return (
-    <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-xs font-medium text-foreground">
-      {t(`${K}${igual ? "chip.same" : "chip.other"}`)}
-    </span>
+    <>
+      <Button
+        type="button" className={cn("min-h-11", FOCO)} aria-label={t("pessoasPagina.process.stepLabel", { step: passo, work: trabalho, name: nome })}
+        onClick={acao.aoClicar} {...acao.atributos}
+      >
+        {passo}
+      </Button>
+      {acao.bloqueio && acao.idBloqueio && <ExplicacaoDoPasso id={acao.idBloqueio} texto={acao.bloqueio} />}
+    </>
   );
 }
 
-export function SeccaoProximaVisita({ pessoa, visita, hoje, alterarVisita, aoCriarNegocio }: SeccaoVisitaProps) {
+export function SeccaoPedidoVisita({ pessoa, pedido, pedidos, item, hoje, alterarVisita }: SeccaoVisitaProps) {
   const { t } = useTranslation();
-  const [aAlterar, setAAlterar] = useState(false);
-  const quando = useQuando(visita.data, visita.hora);
-  const porConcluir = visita.estado === "porConcluir";
-  // Uma visita feita já aconteceu: não se altera (o dia, a hora e a morada já não mudam nada) e só falta criar o negócio.
-  const feita = visita.estado === "feita";
+  const visitas = ordenarVisitas(pedido.visitas).filter((v) => v.estado !== "cancelada");
+  const feita = visitas.some((v) => v.estado === "feita");
+  const proxima = prazoDoPedido(pedido);
+  const porConcluir = proxima !== null && proxima < hoje;
+  const titulo = t(`${K}${feita ? "titleDone" : porConcluir ? "titleOverdue" : "title"}`);
+  const trabalho = nomeDoPedido(t, pedido, pedidos);
   return (
-    <Seccao titulo={t(`${K}${feita ? "titleDone" : porConcluir ? "titleOverdue" : "title"}`)} marca={<MarcaExemplo />}>
+    <Seccao titulo={`${titulo} · ${trabalho}`} marca={<MarcaExemplo />}>
       <div className="space-y-2">
-        <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
-          <CalendarClock className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {quando}
-        </p>
-        {porConcluir && (
-          <p className="flex items-center gap-1.5 text-[15px] text-foreground">
-            <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-            {t(`${K}overdueHint`, { date: textoDiaCompleto(visita.data) })}
-          </p>
-        )}
-        <ListaCampos>
-          <LinhaCampo rotulo={t(`${K}address`)}>
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span>{textoMoradaVisita(visita.moradaVisita) || t(`${K}noAddress`)}</span>
-              <ChipOrigem igual={visita.igualALead} />
-            </span>
-          </LinhaCampo>
-          {visita.notaAcesso && <LinhaCampo rotulo={t(`${K}access`)}>{visita.notaAcesso}</LinhaCampo>}
-          <LinhaCampo rotulo={t(`${K}rep`)}>{visita.comercial}</LinhaCampo>
-        </ListaCampos>
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button type="button" className={cn("min-h-11", FOCO)} onClick={aoCriarNegocio}>{t(`${K}done`)}</Button>
-          {!feita && (
-            <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={() => setAAlterar(true)}>{t(`${K}change`)}</Button>
-          )}
-        </div>
+        <p className="text-[15px] text-foreground">{t(`${K}request`, { service: trabalho })}</p>
+        <ul role="list" className="list-none divide-y divide-border p-0">
+          {visitas.map((v) => (
+            <VisitaDoPedido key={v.id} pessoa={pessoa} pedidoId={pedido.id} visita={v} trabalho={trabalho} hoje={hoje} alterarVisita={alterarVisita} />
+          ))}
+        </ul>
+        <div className="flex flex-wrap gap-2 pt-1">{item && <BotaoDoPasso item={item} trabalho={trabalho} nome={pessoa.nome} />}</div>
         <p className="text-sm text-muted-foreground">{t(`${K}${feita ? "doneHintDone" : "doneHint"}`)}</p>
       </div>
-      {!feita && (
-        <AlterarVisita
-          aberto={aAlterar} aoMudarAberto={setAAlterar} pessoa={pessoa} visita={visita} hoje={hoje}
-          aoGuardar={(dados) => alterarVisita(pessoa.id, dados)}
-        />
-      )}
     </Seccao>
   );
 }

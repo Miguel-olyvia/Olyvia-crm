@@ -95,8 +95,8 @@ describe("validarNovoNegocio: levantamento", () => {
     expect(validarNovoNegocio(comLevantamento({}))).toEqual({});
   });
 
-  it("Feito sem linhas pede pelo menos uma; com uma linha certa passa", () => {
-    expect(validarNovoNegocio(comLevantamento({ estado: "feito" }))).toEqual({ levantamento: "obrigatorio" });
+  it("Feito sem linhas é válido (o levantamento nunca é obrigatório); com uma linha certa também", () => {
+    expect(validarNovoNegocio(comLevantamento({ estado: "feito" }))).toEqual({});
     expect(validarNovoNegocio(comLevantamento({ estado: "feito", linhas: [linha()] }))).toEqual({});
   });
 
@@ -123,15 +123,13 @@ describe("abasComErros e primeiroErro", () => {
     expect(abasComErros({})).toEqual({ geral: false, qualificacao: false, visita: false });
     expect(abasComErros({ pessoaId: "obrigatorio" })).toEqual({ geral: true, qualificacao: false, visita: false });
     expect(abasComErros({ codigoPostal: "invalido" })).toEqual({ geral: false, qualificacao: true, visita: false });
-    expect(abasComErros({ levantamento: "obrigatorio" })).toEqual({ geral: false, qualificacao: false, visita: true });
     expect(abasComErros({ linhas: { l1: { medida: "invalido" } } })).toEqual({ geral: false, qualificacao: false, visita: true });
   });
 
   it("o foco vai primeiro para a aba Geral, depois para o código postal, depois para o levantamento (linha a linha)", () => {
     expect(primeiroErro({}, [])).toBeNull();
-    expect(primeiroErro({ pessoaId: "obrigatorio", levantamento: "obrigatorio" }, [])).toEqual({ aba: "geral", campo: "pessoa" });
-    expect(primeiroErro({ codigoPostal: "invalido", levantamento: "obrigatorio" }, [])).toEqual({ aba: "qualificacao", campo: "cp" });
-    expect(primeiroErro({ levantamento: "obrigatorio" }, [])).toEqual({ aba: "visita", campo: "add" });
+    expect(primeiroErro({ pessoaId: "obrigatorio", linhas: { l1: { medida: "invalido" } } }, ["l1"])).toEqual({ aba: "geral", campo: "pessoa" });
+    expect(primeiroErro({ codigoPostal: "invalido", linhas: { l1: { medida: "invalido" } } }, ["l1"])).toEqual({ aba: "qualificacao", campo: "cp" });
     const erros = { linhas: { l2: { medida: "invalido" as const }, l1: { trabalho: "obrigatorio" as const } } };
     expect(primeiroErro(erros, ["l1", "l2"])).toEqual({ aba: "visita", campo: "linha-l1-trabalho" });
     expect(primeiroErro(erros, ["l2", "l1"])).toEqual({ aba: "visita", campo: "linha-l2-medida" });
@@ -246,5 +244,32 @@ describe("criarNegocioExemplo", () => {
     expect(COMERCIAIS_EXEMPLO).toEqual(["Ana Ribeiro", "Bruno Costa", "Carla Mendes", "Diogo Lopes"]);
     expect(COMERCIAL_POR_OMISSAO).toBe("Ana Ribeiro");
     expect(verificarCoerencia({ ...DADOS_EXEMPLO, negocios: [...DADOS_EXEMPLO.negocios, criado] })).toEqual([]);
+  });
+});
+
+describe("validarNovoNegocio: só a pessoa é obrigatória (a visita e o levantamento são opcionais)", () => {
+  it("sem visita, com uma por fazer ou com uma feita e sem nenhuma linha de medidas, é válido", () => {
+    expect(validarNovoNegocio({ pessoaId: "p-marta" })).toEqual({});
+    expect(validarNovoNegocio(comLevantamento({ estado: "porFazer" }))).toEqual({});
+    expect(validarNovoNegocio(comLevantamento({ estado: "feito" }))).toEqual({});
+    expect(abasComErros(validarNovoNegocio(comLevantamento({ estado: "feito" }))).visita).toBe(false);
+  });
+
+  it("se alguém escreve linhas, o formato vê-se: uma linha por acabar mostra o erro da linha, esteja a visita feita ou não", () => {
+    expect(validarNovoNegocio(comLevantamento({ estado: "feito", linhas: [linha()] }))).toEqual({});
+    const erros = validarNovoNegocio(comLevantamento({ estado: "feito", linhas: [linha({ medida: "0" })] }));
+    expect(erros).toEqual({ linhas: { l1: { medida: "invalido" } } });
+    expect(validarNovoNegocio(comLevantamento({ linhas: [linha({ medida: "0" })] }))).toEqual(erros);
+  });
+
+  it("a pessoa continua a ser obrigatória", () => {
+    expect(validarNovoNegocio({ ...comLevantamento({ estado: "feito" }), pessoaId: "" })).toEqual({ pessoaId: "obrigatorio" });
+  });
+});
+
+describe("criarNegocioExemplo: serviço herdado do pedido", () => {
+  it("leva o serviço dado; sem ele fica vazio como sempre", () => {
+    expect(criarNegocioExemplo({ pessoa: marta, comercial: "Ana Ribeiro", servico: "Cozinha" }, HOJE_EXEMPLO, 1).servico).toBe("Cozinha");
+    expect(criarNegocioExemplo({ pessoa: marta, comercial: "Ana Ribeiro" }, HOJE_EXEMPLO, 1).servico).toBe("");
   });
 });
