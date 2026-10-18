@@ -7,7 +7,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { criarNegocioNovo } from "@/components/negocio-metas/negociosNovos";
 import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
-import type { DadosCriarNegocio, ValoresIniciaisNegocio } from "@/components/negocio-metas/novoNegocio";
+import type { DadosCriarNegocio } from "@/components/negocio-metas/novoNegocio";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/pessoas/AbasSublinhadas";
@@ -20,9 +20,7 @@ import { useAvisoAlternado } from "@/components/pessoas/processo/avisoAlternado"
 import { ProcessoProvider } from "@/components/pessoas/processo/ProcessoProvider";
 import type { DadosNovaLead } from "@/components/pessoas/novaLead";
 import { paraOpcao } from "@/components/pessoas/pessoaOpcao";
-import { valoresIniciaisDoPedido } from "@/components/pessoas/painelDoPedido";
-import { pedidoMaisAvancado } from "@/components/pessoas/etapaPessoa";
-import type { PedidoNegocio, Pessoa } from "@/components/pessoas/pessoasTipos";
+import type { Pessoa } from "@/components/pessoas/pessoasTipos";
 import { SeparadorPessoas } from "@/components/pessoas/SeparadorPessoas";
 import { SeparadorSubmissoes } from "@/components/pessoas/SeparadorSubmissoes";
 import { ATIVIDADE_EXEMPLO } from "@/components/pessoas/pessoasExemplo";
@@ -37,7 +35,8 @@ const PERMISSAO_SUBMISSOES = "platform.pending_submissions.view";
 /**
  * "Pessoas" (CRM): a lista de leads e clientes e, num separador, as submissões pendentes. Só
  * conteúdo de exemplo, sem leitura nem escrita à base: ver `components/pessoas/`. Resolver uma
- * submissão, criar uma lead, registar uma chamada ou criar um negócio acontecem só em memória: ao recarregar volta o exemplo.
+ * submissão, criar uma lead, registar uma chamada ou criar um negócio acontecem só em memória: ao recarregar volta o exemplo. A chamada, a visita
+ * e o levantamento são REGISTOS da pessoa; o negócio cria-se à mão e liga registos que já existem (nada se copia).
  */
 const Pessoas = () => {
   const { t } = useTranslation();
@@ -51,8 +50,8 @@ const Pessoas = () => {
   const pessoas = useMemo(() => new Map(estado.resumos.map((r) => [r.pessoa.id, r.pessoa])), [estado.resumos]);
   const resolucao = useResolucaoSubmissao({ ordenadas, pessoas, resolver: estado.resolver });
   const [novaLeadAberta, setNovaLeadAberta] = useState(false);
-  // O painel "Novo negócio" aberto a partir da ficha: a pessoa e, numa lead, o pedido a que o negócio fica ligado (com os valores dele).
-  const [negocioPara, setNegocioPara] = useState<{ pessoa: Pessoa; valores?: ValoresIniciaisNegocio; pedido?: PedidoNegocio } | null>(null);
+  // O painel "Novo negócio" aberto a partir da ficha: a pessoa, já escolhida (os registos por ligar são os dela).
+  const [negocioPara, setNegocioPara] = useState<Pessoa | null>(null);
   // O aviso da página e dos passos do processo (uma região live) e o da resolução de submissões (outra): cada origem tem a sua, porque
   // o anúncio da resolução fica guardado e, numa região partilhada, calava todos os avisos que viessem depois.
   const [aviso, setAviso] = useState("");
@@ -99,20 +98,17 @@ const Pessoas = () => {
     anunciar(t("pessoasPagina.newLead.announce", { name: criada.nome }));
   };
   /**
-   * Cria o negócio da pessoa (o mesmo de "Novo negócio"): aparece na ficha, em Negócios, e no quadro de Negócio e metas. Devolve o id.
-   * Quando o cria o `ProcessoProvider` (os passos), é ele que trata do pedido: tirá-lo e dar o serviço ao negócio.
+   * Cria o negócio da pessoa (o mesmo de "Novo negócio"): aparece na ficha, em Negócios, e no quadro de Negócio e metas, e liga-lhe os registos
+   * escolhidos (contactos, visitas e levantamento: nada se copia). Devolve o id.
    */
   const criarNegocio = (dados: DadosCriarNegocio): string => {
     const criado = criarNegocioNovo(dados, HOJE_EXEMPLO);
     toast.success(t("businessGoals.new.created"));
     return criado.id;
   };
-  /** O negócio criado a partir da ficha: o de uma lead substitui o pedido a que estava ligado (e herda o serviço dele). */
+  /** O negócio criado a partir da ficha. */
   const aoCriarNegocio = (dados: DadosCriarNegocio) => {
-    // O pedido só conta se o negócio é da pessoa da ficha (a pessoa já não se muda no painel, mas a defesa fica).
-    const pedido = negocioPara?.pessoa.id === dados.pessoa.id ? negocioPara.pedido : undefined;
-    criarNegocio(pedido?.servico ? { ...dados, servico: pedido.servico } : dados);
-    if (pedido) estado.removerPedido(pedido.id);
+    criarNegocio(dados);
     anunciarNoSitio(alternarAviso(t("pessoasPagina.createDeal.announce", { name: dados.pessoa.nome })));
   };
 
@@ -126,15 +122,8 @@ const Pessoas = () => {
     return alvo !== null;
   };
 
-  /**
-   * "Criar negócio" de uma lead (ligado ao pedido mais avançado dela, com as visitas e o levantamento que ele já tem) e "Novo negócio
-   * sem visita" de um cliente (o painel como sempre, sem pedido: o negócio nasce em Orçamento, sem exigir levantamento).
-   */
-  const abrirNegocio = (pessoa: Pessoa) => {
-    const resumo = estado.resumos.find((r) => r.pessoa.id === pessoa.id);
-    const pedido = resumo?.papel === "lead" ? pedidoMaisAvancado(resumo.pedidos) : null;
-    setNegocioPara(pedido ? { pessoa, pedido, valores: valoresIniciaisDoPedido(pessoa, pedido) } : { pessoa });
-  };
+  /** "Criar negócio" de uma lead e "Novo negócio" de um cliente: abre o painel com a pessoa escolhida e os registos dela por ligar. */
+  const abrirNegocio = (pessoa: Pessoa) => setNegocioPara(pessoa);
 
   return (
     <ProcessoProvider
@@ -190,8 +179,8 @@ const Pessoas = () => {
         <NovaLeadPainel aberto={novaLeadAberta} aoMudarAberto={setNovaLeadAberta} aoCriar={aoCriarLead} />
         <NovoNegocioDialogo
           pessoas={opcoesPessoa} aoCriar={aoCriarNegocio} semBotao aberto={negocioPara !== null}
-          aoMudarAberto={(aberto) => { if (!aberto) setNegocioPara(null); }} pessoaInicialId={negocioPara?.pessoa.id}
-          valoresIniciais={negocioPara?.valores} aoDevolverFoco={devolverFocoNaFicha}
+          aoMudarAberto={(aberto) => { if (!aberto) setNegocioPara(null); }} pessoaInicialId={negocioPara?.id}
+          valoresIniciais={negocioPara ? { pessoaId: negocioPara.id, comercial: negocioPara.comercial } : undefined} aoDevolverFoco={devolverFocoNaFicha}
         />
         <ConfirmarResolver
           pedido={resolucao.pedido} aoConfirmar={resolucao.confirmar} aoCancelar={resolucao.cancelar} aoFechar={resolucao.aoFechar}

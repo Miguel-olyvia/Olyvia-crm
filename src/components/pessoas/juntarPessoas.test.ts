@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
-import { pedidoBase, pessoaBase } from "./fabricaTestes";
+import { registosBase, contactoBase, pessoaBase, visitaPessoaBase } from "./fabricaTestes";
 import { juntarPessoas, papelEAbertos } from "./juntarPessoas";
-import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
-import { NEGOCIOS_ANTIGOS, PEDIDOS_ANTIGOS, PESSOAS_ANTIGAS } from "./exemploAntigoParaTestes";
+import { NEGOCIOS_ANTIGOS, PESSOAS_ANTIGAS, REGISTOS_ANTIGOS } from "./exemploAntigoParaTestes";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import { ehHistorico, type ResumoPessoa } from "./pessoasTipos";
+import { REGISTOS_EXEMPLO } from "./registosExemplo";
 
 // As contagens e listas abaixo são as das 17 pessoas de antes; os exemplos variados (mais 17) têm o seu teste e a sua matriz.
-const resumos = () => juntarPessoas(PESSOAS_ANTIGAS, NEGOCIOS_ANTIGOS, HOJE_EXEMPLO, PEDIDOS_ANTIGOS);
+const resumos = () => juntarPessoas(PESSOAS_ANTIGAS, NEGOCIOS_ANTIGOS, HOJE_EXEMPLO, REGISTOS_ANTIGOS);
 const de = (nome: string): ResumoPessoa => {
   const r = resumos().find((x) => x.pessoa.nome === nome);
   if (!r) throw new Error(`sem ${nome}`);
@@ -27,7 +27,7 @@ describe("dados de exemplo das pessoas", () => {
   });
 
   it("com os exemplos variados há 34 pessoas: 15 clientes e 19 leads (2 perdidas), e 14 negócios terminados", () => {
-    const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
+    const todos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, REGISTOS_EXEMPLO);
     expect(todos).toHaveLength(34);
     expect(todos.filter((r) => r.papel === "cliente")).toHaveLength(15);
     expect(todos.filter((r) => r.papel === "lead")).toHaveLength(19);
@@ -137,27 +137,31 @@ describe("juntarPessoas", () => {
   });
 });
 
-describe("juntarPessoas: pedidos", () => {
-  it("cada resumo leva só os pedidos da sua pessoa, pela ordem recebida", () => {
-    const pedidos = [pedidoBase("pd-1", { pessoaId: "b" }), pedidoBase("pd-2", { pessoaId: "a" }), pedidoBase("pd-3", { pessoaId: "a" })];
-    const [a, b, c] = juntarPessoas([pessoaBase("a"), pessoaBase("b"), pessoaBase("c")], [], HOJE_EXEMPLO, pedidos);
-    expect(a.pedidos.map((p) => p.id)).toEqual(["pd-2", "pd-3"]);
-    expect(b.pedidos.map((p) => p.id)).toEqual(["pd-1"]);
-    expect(c.pedidos).toEqual([]);
+describe("juntarPessoas: registos", () => {
+  it("cada resumo leva só os registos da sua pessoa", () => {
+    const registos = registosBase({
+      contactos: [contactoBase("rc-1", { pessoaId: "b" }), contactoBase("rc-2", { pessoaId: "a" })],
+      visitas: [visitaPessoaBase("rv-1", { pessoaId: "a" })],
+    });
+    const [a, b, c] = juntarPessoas([pessoaBase("a"), pessoaBase("b"), pessoaBase("c")], [], HOJE_EXEMPLO, registos);
+    expect([a.registos.contactos.map((r) => r.id), a.registos.visitas.map((r) => r.id)]).toEqual([["rc-2"], ["rv-1"]]);
+    expect(b.registos.contactos.map((r) => r.id)).toEqual(["rc-1"]);
+    expect(c.registos).toEqual({ contactos: [], visitas: [], levantamentos: [] });
   });
 
-  it("sem pedidos, ninguém os tem", () => {
-    expect(juntarPessoas([pessoaBase("a")], [], HOJE_EXEMPLO)[0].pedidos).toEqual([]);
+  it("sem registos, ninguém os tem", () => {
+    expect(juntarPessoas([pessoaBase("a")], [], HOJE_EXEMPLO)[0].registos).toEqual({ contactos: [], visitas: [], levantamentos: [] });
   });
 
-  it("as leads sem negócio aberto e quem tem visita têm pedidos de exemplo", () => {
-    expect(de("Beatriz Sampaio").pedidos).toHaveLength(1);
-    expect(de("Rita Albuquerque").pedidos[0].visitas).toHaveLength(1);
-    expect(de("Paulo Neves").pedidos).toHaveLength(1);
-    expect(de("Nuno Barros").pedidos).toEqual([]);
+  it("as leads sem negócio aberto e quem tem visita têm registos de exemplo", () => {
+    expect(de("Beatriz Sampaio").registos.contactos).toEqual([]);
+    expect(de("Lúcia Faria").registos.contactos).toHaveLength(1);
+    expect(de("Rita Albuquerque").registos.visitas).toHaveLength(1);
+    expect(de("Paulo Neves").registos.visitas).toHaveLength(1);
+    expect(de("Nuno Barros").registos.visitas).toEqual([]);
   });
 
-  it("uma pessoa com visita de exemplo deixa de ter próximo contacto próprio: a visita é a do pedido", () => {
+  it("uma pessoa com visita de exemplo deixa de ter próximo contacto próprio: a visita é a dos registos", () => {
     expect(PESSOAS_EXEMPLO.find((p) => p.id === "p-rita")!.proximoContacto).toBeNull();
     expect(de("Rita Albuquerque").etapa).toBe("visitaMarcada");
   });

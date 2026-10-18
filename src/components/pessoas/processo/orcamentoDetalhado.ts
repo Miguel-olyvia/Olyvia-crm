@@ -35,10 +35,15 @@ export type ExtrasPorNegocio = Readonly<Record<string, ExtrasNegocio>>;
 
 export const SEM_EXTRAS: ExtrasPorNegocio = {};
 
-/** O orçamento detalhado, mas só se for o do orçamento ESCOLHIDO (um detalhe de outro orçamento já não vale). */
+/** O orçamento de que o processo trata: o escolhido, ou, sem nenhum escolhido (já não há passo de escolher), o último. */
+export function orcamentoDoPasso(negocio: NegocioMes): NegocioMes["orcamentos"][number] | undefined {
+  return negocio.orcamentos.find((o) => o.escolhido) ?? negocio.orcamentos[negocio.orcamentos.length - 1];
+}
+
+/** O orçamento detalhado, mas só se for o do orçamento do passo (um detalhe de outro orçamento já não vale). */
 export function orcamentoEscolhidoDetalhado(negocio: NegocioMes, extras: ExtrasNegocio | undefined): OrcamentoDetalhado | undefined {
-  const escolhido = negocio.orcamentos.find((o) => o.escolhido);
-  return escolhido !== undefined && extras?.orcamento?.orcamentoId === escolhido.id ? extras.orcamento : undefined;
+  const alvo = orcamentoDoPasso(negocio);
+  return alvo !== undefined && extras?.orcamento?.orcamentoId === alvo.id ? extras.orcamento : undefined;
 }
 
 export const orcamentoDoNegocio = (negocio: NegocioMes, todos: ExtrasPorNegocio): OrcamentoDetalhado | undefined =>

@@ -20,17 +20,19 @@ vi.mock("@/hooks/useTranslation", async () => {
 });
 
 const cartao = (extra: Partial<CartaoQuadro>): CartaoQuadro => ({
-  id: "pedido-pd-a", pedidoId: "pd-a", pessoaId: "a", nome: "Ana Lopes", papel: "lead", coluna: "porContactar", trabalho: null, rotuloPedido: null, valor: null,
+  id: "pessoa-a", tipo: "pessoa", pessoaId: "a", nome: "Ana Lopes", papel: "lead", coluna: "porContactar", trabalho: null, valor: null,
   passo: "registarChamada", prazo: null, atrasado: false, ...extra,
 });
+const deNegocio = (extra: Partial<CartaoQuadro>): CartaoQuadro => cartao({ tipo: "negocio", ...extra });
 
 const CARTOES: CartaoQuadro[] = [
   cartao({}),
-  cartao({ id: "pedido-pd-b", pedidoId: "pd-b", pessoaId: "b", nome: "Bruno Reis", coluna: "porContactar" }),
-  cartao({ id: "pedido-pd-c", pedidoId: "pd-c", pessoaId: "c", nome: "Clara Dias", coluna: "visita", passo: "fecharLevantamento", trabalho: "Casa de banho" }),
-  cartao({ id: "n1", pedidoId: null, pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Cozinha", valor: 9000, passo: "criarProposta" }),
-  cartao({ id: "n2", pedidoId: null, pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Sala", valor: 3000, passo: "escolherOrcamento" }),
-  cartao({ id: "n3", pedidoId: null, pessoaId: "e", nome: "Eva Costa", coluna: "contrato", trabalho: "Telhado", valor: 7000, passo: "recolherAssinatura", prazo: "2026-10-01", atrasado: true }),
+  cartao({ id: "pessoa-b", pessoaId: "b", nome: "Bruno Reis", coluna: "porContactar" }),
+  cartao({ id: "pessoa-c", pessoaId: "c", nome: "Clara Dias", coluna: "visita", passo: "fecharLevantamento" }),
+  deNegocio({ id: "n0", pessoaId: "f", nome: "Filipa Reis", coluna: "levantamento", trabalho: "Janelas", passo: "fazerLevantamento" }),
+  deNegocio({ id: "n1", pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Cozinha", valor: 9000, passo: "criarProposta" }),
+  deNegocio({ id: "n2", pessoaId: "d", nome: "Duarte Melo", papel: "cliente", coluna: "orcamento", trabalho: "Sala", valor: 3000, passo: "enviarProposta" }),
+  deNegocio({ id: "n3", pessoaId: "e", nome: "Eva Costa", coluna: "contrato", trabalho: "Telhado", valor: 7000, passo: "recolherAssinatura", prazo: "2026-10-01", atrasado: true }),
 ];
 
 const mostrar = (cartoes = CARTOES, aoAbrir = vi.fn(), chip: ChipPessoa = "todas", aoLimpar = vi.fn()) => {
@@ -38,17 +40,29 @@ const mostrar = (cartoes = CARTOES, aoAbrir = vi.fn(), chip: ChipPessoa = "todas
   return aoAbrir;
 };
 
-const coluna = (titulo: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
+const coluna = (titulo: string) => screen.getByRole("heading", { level: 4, name: new RegExp(`^${titulo}`) }).closest("section")!;
 
 describe("QuadroPessoas", () => {
-  it("renderiza as 6 colunas pela ordem, cada uma com h3 e a contagem certa", () => {
+  it("renderiza duas partes (Abordagem e Negócios) e as 7 colunas pela ordem, cada uma com h4 e a contagem certa", () => {
     mostrar();
     expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
-    const titulos = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Abordagem", "Negócios"]);
+    const titulos = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
     expect(titulos).toEqual([
-      "Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão", "Orçamento, 2 cartões", "Proposta, 0 cartões", "Contrato, 1 cartão",
+      "Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão",
+      "Levantamento, 1 cartão", "Orçamento, 2 cartões", "Proposta, 0 cartões", "Contrato, 1 cartão",
     ]);
-    expect(screen.getAllByRole("region")).toHaveLength(6);
+    expect(screen.getAllByRole("region")).toHaveLength(9);
+  });
+
+  it("a Parte 1 só tem as colunas da abordagem e a Parte 2 as dos negócios: a mesma pessoa não está nas duas", () => {
+    mostrar();
+    const parte1 = screen.getByRole("heading", { level: 3, name: "Abordagem" }).closest("section")!;
+    const parte2 = screen.getByRole("heading", { level: 3, name: "Negócios" }).closest("section")!;
+    expect(within(parte1).getAllByRole("heading", { level: 4 }).map((h) => h.textContent?.split(",")[0])).toEqual(["Por contactar", "Contactado", "Visita"]);
+    expect(within(parte2).getAllByRole("heading", { level: 4 }).map((h) => h.textContent?.split(",")[0])).toEqual(["Levantamento", "Orçamento", "Proposta", "Contrato"]);
+    expect(within(parte1).queryByText("Duarte Melo")).not.toBeInTheDocument();
+    expect(within(parte2).queryByText("Ana Lopes")).not.toBeInTheDocument();
   });
 
   it("cada coluna sem nada diz 'Nada nesta fase'", () => {
@@ -58,12 +72,20 @@ describe("QuadroPessoas", () => {
     expect(within(coluna("Visita")).queryByText("Nada nesta fase")).not.toBeInTheDocument();
   });
 
-  it("o quadro vazio mostra o estado vazio nas 6 colunas", () => {
-    mostrar([]);
-    expect(screen.getAllByText("Nada nesta fase")).toHaveLength(6);
+  it("um negócio em Levantamento mostra-se na coluna Levantamento, com o passo de fazer o levantamento e sem valor (ainda não há orçamento)", () => {
+    mostrar();
+    const lev = within(coluna("Levantamento"));
+    expect(lev.getByText("Janelas")).toBeInTheDocument();
+    expect(lev.getByRole("button", { name: /Fazer o levantamento/ })).toBeInTheDocument();
+    expect(lev.getByText(formatarMeta("euro", 0))).toBeInTheDocument();
   });
 
-  it("as colunas de negócio somam o valor; as de pedido não mostram valor", () => {
+  it("o quadro vazio mostra o estado vazio nas 7 colunas", () => {
+    mostrar([]);
+    expect(screen.getAllByText("Nada nesta fase")).toHaveLength(7);
+  });
+
+  it("as colunas de negócio somam o valor; as da abordagem não mostram valor", () => {
     mostrar();
     expect(within(coluna("Orçamento")).getByText(formatarMeta("euro", 12000))).toBeInTheDocument();
     // Um só cartão de 7000: o valor aparece no cartão e na soma da coluna.
@@ -80,7 +102,8 @@ describe("QuadroPessoas", () => {
     expect(orc.getByText(formatarMeta("euro", 9000))).toBeInTheDocument();
     expect(orc.getByRole("button", { name: /Criar a proposta/ })).toBeInTheDocument();
     expect(within(coluna("Por contactar")).getAllByText("Lead")).toHaveLength(2);
-    expect(within(coluna("Por contactar")).getAllByText("Pedido novo")).toHaveLength(2);
+    // Uma pessoa em abordagem não tem trabalho: o cartão diz «Abordagem».
+    expect(within(coluna("Por contactar")).getAllByText("Abordagem")).toHaveLength(2);
   });
 
   it("um prazo ultrapassado diz-se por texto, não só por cor", () => {
@@ -104,10 +127,10 @@ describe("QuadroPessoas", () => {
     mostrar();
     const duarte = within(coluna("Orçamento")).getAllByRole("button", { name: /de Duarte Melo \(abre a ficha\)$/ });
     expect(duarte.map((b) => b.getAttribute("aria-label"))).toEqual([
-      "Criar a proposta: Cozinha de Duarte Melo (abre a ficha)", "Escolher o orçamento: Sala de Duarte Melo (abre a ficha)",
+      "Criar a proposta: Cozinha de Duarte Melo (abre a ficha)", "Enviar a proposta: Sala de Duarte Melo (abre a ficha)",
     ]);
-    // Um pedido sem trabalho usa "Pedido novo".
-    expect(within(coluna("Por contactar")).getByRole("button", { name: "Registar a chamada: Pedido novo de Ana Lopes (abre a ficha)" })).toBeInTheDocument();
+    // Uma pessoa em abordagem usa «Abordagem» no lugar do trabalho.
+    expect(within(coluna("Por contactar")).getByRole("button", { name: "Registar a chamada: Abordagem de Ana Lopes (abre a ficha)" })).toBeInTheDocument();
     for (const b of screen.getAllByRole("button", { name: /\(abre a ficha\)$/ })) {
       expect(b.getAttribute("aria-label")!.startsWith(b.textContent!)).toBe(true);
     }
@@ -123,14 +146,14 @@ describe("QuadroPessoas", () => {
   it("o botão do nome leva data-linha-pessoa com o id da pessoa; o do passo deixa o texto quebrar", () => {
     mostrar();
     expect(screen.getByRole("button", { name: "Abrir a ficha de Clara Dias" })).toHaveAttribute("data-linha-pessoa", "c");
-    const passo = screen.getByRole("button", { name: "Marcar a visita como feita: Casa de banho de Clara Dias (abre a ficha)" });
+    const passo = screen.getByRole("button", { name: "Marcar a visita como feita: Abordagem de Clara Dias (abre a ficha)" });
     expect(passo.className).toContain("h-auto");
     expect(passo.className).toContain("py-2");
   });
 
   it("as colunas quebram o título em vez de o cortar, e o separador da contagem vem das traduções", () => {
     mostrar();
-    const h = screen.getByRole("heading", { level: 3, name: /^Visita/ });
+    const h = screen.getByRole("heading", { level: 4, name: /^Visita/ });
     expect(h.className).toContain("break-words");
     expect(h.className).not.toContain("truncate");
     expect(h.querySelector(".sr-only")?.textContent).toBe(", 1 cartão");

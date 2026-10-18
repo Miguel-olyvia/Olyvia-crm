@@ -3,6 +3,7 @@
 // de uma pessoa NÃO os lê (continua nos dados estáticos): ligar as duas é uma decisão por tomar.
 import { useSyncExternalStore } from "react";
 import { criarNegocioExemplo, type DadosCriarNegocio, type NegocioNovo } from "./novoNegocio";
+import { ligarRegistosEscolhidos } from "./registosPessoa";
 
 const SEM_NEGOCIOS: readonly NegocioNovo[] = [];
 
@@ -22,11 +23,15 @@ export function negociosNovos(): readonly NegocioNovo[] {
   return negocios;
 }
 
-/** Cria o negócio, guarda-o e devolve-o. */
+/**
+ * Cria o negócio, guarda-o e devolve-o. Os registos da pessoa que se escolheram (`dados.ligar`) ligam-se ao negócio, por id: nada se copia
+ * e um registo só se liga a um negócio.
+ */
 export function criarNegocioNovo(dados: DadosCriarNegocio, hoje: string): NegocioNovo {
   sequencia += 1;
   const criado = criarNegocioExemplo(dados, hoje, sequencia);
   negocios = [...negocios, criado];
+  if (dados.ligar) ligarRegistosEscolhidos(criado.id, dados.pessoa.id, dados.ligar);
   avisar();
   return criado;
 }

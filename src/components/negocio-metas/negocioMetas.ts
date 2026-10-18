@@ -2,6 +2,8 @@
 // negócios e as metas e devolve totais e percentagens, para que os números do
 // ecrã nunca sejam escritos à mão.
 
+import type { DecisaoLevantamento } from "./registosTipos";
+
 export type FaseNegocio = "orcamento" | "proposta" | "contrato" | "ganho";
 export type EstadoProposta = "rascunho" | "enviada" | "aceite";
 export type EstadoContrato = "pendente" | "assinado";
@@ -114,6 +116,11 @@ export interface NegocioMes {
   visita?: SeccaoVisitaNegocio[];
   /** As visitas do negócio, por ordem cronológica. Só nos negócios criados em "Novo negócio"; os de exemplo não as têm. */
   visitas?: VisitaNegocio[];
+  /**
+   * O que o negócio decidiu do levantamento (por decidir, ligado ou dispensado). Falta nos negócios antigos, que contam como
+   * Orçamento. Não confundir com `levantamento` acima, que é o texto escrito ao criar o negócio (passa a derivado na F7).
+   */
+  decisaoLevantamento?: DecisaoLevantamento;
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;

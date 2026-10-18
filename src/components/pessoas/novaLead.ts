@@ -1,7 +1,6 @@
 // "Nova lead": o que o formulário pede, a validação e a pessoa (e a atividade) que saem dele. Funções puras: o dia de
 // hoje e o número de série chegam por parâmetro. O que se guarda vive em `pessoasNovas.ts`.
-import { pedidoNovo } from "./pedidoNegocio";
-import type { ItemAtividade, OrigemPessoa, PedidoNegocio, Pessoa } from "./pessoasTipos";
+import type { ItemAtividade, OrigemPessoa, Pessoa } from "./pessoasTipos";
 
 export const ORIGENS_LEAD: readonly OrigemPessoa[] = ["site", "formulario", "campanha", "indicacao", "telefone"];
 export const MAX_NOME_LEAD = 80;
@@ -49,13 +48,11 @@ export interface LeadMontada {
   pessoa: Pessoa;
   /** A atividade com que a lead nasce: "Lead criada" e, se se escreveu, a nota (a mais recente primeiro). */
   atividade: ItemAtividade[];
-  /** O pedido com que a lead nasce: por contactar, sem visitas. O id é `pd-novo-<sequência>`. */
-  pedido: PedidoNegocio;
 }
 
 /**
- * A pessoa nova: uma lead por contactar (o pedido com que nasce é por contactar), com o primeiro contacto para hoje. O id é
- * `p-novo-<sequência>`, e leva um pedido por contactar. Quem a cria não a tem em lado nenhum, por isso fica só em memória.
+ * A pessoa nova: uma lead por contactar (sem registos: ainda não houve contacto, visita nem levantamento), com o primeiro contacto para
+ * hoje. O id é `p-novo-<sequência>`. Quem a cria não a tem em lado nenhum, por isso fica só em memória.
  */
 export function montarLead(dados: DadosNovaLead, hoje: string, sequencia: number): LeadMontada {
   const id = `p-novo-${sequencia}`;
@@ -79,6 +76,5 @@ export function montarLead(dados: DadosNovaLead, hoje: string, sequencia: number
       detalhe: nota, quando: hoje, exemplo: false,
     }]
     : [];
-  const pedido = pedidoNovo({ pessoaId: id, servico: "", comercial: dados.comercial }, hoje, `pd-novo-${sequencia}`);
-  return { pessoa, atividade: [...itemNota, criada], pedido };
+  return { pessoa, atividade: [...itemNota, criada] };
 }

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { ATIVIDADE_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import type { EstadoPessoas } from "./pessoasTipos";
-import { idDaMaisRecente, ordenarSubmissoes, pessoasComPendentes, pessoasQueVoltaram, resolverSubmissao } from "./resolverSubmissao";
+import {
+  idDaMaisRecente, marcarVoltaAAbordagem, ordenarSubmissoes, pessoaDaSubmissao, pessoasComPendentes, pessoasQueVoltaram, resolverSubmissao,
+} from "./resolverSubmissao";
 
 const inicial = (): EstadoPessoas => ({
-  submissoes: [...SUBMISSOES_EXEMPLO], notas: [], pessoas: [], atividade: [], contactadas: [], pedidos: [],
+  submissoes: [...SUBMISSOES_EXEMPLO], notas: [], pessoas: [], atividade: [], contactadas: [],
 });
 
 describe("submissões de exemplo", () => {
@@ -143,5 +145,33 @@ describe("idDaMaisRecente", () => {
     expect(idDaMaisRecente(SUBMISSOES_EXEMPLO)).toBe("s2");
     expect(idDaMaisRecente([SUBMISSOES_EXEMPLO[0], SUBMISSOES_EXEMPLO[3]])).toBe("s1");
     expect(idDaMaisRecente([])).toBeNull();
+  });
+});
+
+describe("resolverSubmissao: a pessoa volta à abordagem (Parte 1 do Quadro)", () => {
+  const comPessoas = (): EstadoPessoas => ({ ...inicial(), pessoas: PESSOAS_EXEMPLO.filter((p) => p.id === "p-clara" || p.id === "p-hugo") });
+
+  it("marca a pessoa com o dia da submissão (`abordagemDesde`) e não mexe nas outras", () => {
+    const s3 = SUBMISSOES_EXEMPLO.find((s) => s.id === "s3")!;
+    const novo = marcarVoltaAAbordagem(comPessoas(), pessoaDaSubmissao(s3)!, s3.data.slice(0, 10));
+    expect(novo.pessoas.find((p) => p.id === "p-clara")!.abordagemDesde).toBe(s3.data.slice(0, 10));
+    expect(novo.pessoas.find((p) => p.id === "p-hugo")!.abordagemDesde).toBeUndefined();
+  });
+
+  it("num conflito a pessoa é a escolhida, e sem escolha válida não há pessoa", () => {
+    const s1 = SUBMISSOES_EXEMPLO.find((s) => s.id === "s1")!;
+    expect(pessoaDaSubmissao(s1, "p-paulo")).toBe("p-paulo");
+    expect(pessoaDaSubmissao(s1)).toBeNull();
+    expect(pessoaDaSubmissao(s1, "p-outra")).toBeNull();
+  });
+
+  it("um id que não existe deixa as pessoas como estão (o mesmo objeto)", () => {
+    const estado = comPessoas();
+    expect(marcarVoltaAAbordagem(estado, "nao-existe", "2026-10-12")).toBe(estado);
+  });
+
+  it("resolver a submissão continua a não mexer nas pessoas: a marca é um passo à parte", () => {
+    const estado = comPessoas();
+    expect(resolverSubmissao(estado, "s3").pessoas).toBe(estado.pessoas);
   });
 });

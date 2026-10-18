@@ -32,7 +32,7 @@ interface TabelaPessoasProps {
 
 const textoColuna = (id: (typeof COLUNAS)[number]["id"]): string => (id === "deals" ? "pessoasPagina.deals.col" : `pessoasPagina.col.${id}`);
 
-/** A linha extra com os pedidos e negócios de uma pessoa, por baixo da linha dela (só existe aberta). */
+/** A linha extra com os itens em curso de uma pessoa (a abordagem ou os negócios), por baixo da linha dela (só existe aberta). */
 function FilaNegocios({ resumo, itens, hoje, aoAbrir }: { resumo: ResumoPessoa; itens: readonly ItemProcesso[]; hoje: string; aoAbrir: (id: string) => void }) {
   const { pessoa } = resumo;
   return (

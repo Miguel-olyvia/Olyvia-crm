@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { negocioBase, pedidoBase, pessoaBase, resumoBase, visitaBase } from "../fabricaTestes";
+import { contactoBase, levantamentoBase, negocioBase, pessoaBase, registosBase, resumoBase, visitaPessoaBase } from "../fabricaTestes";
 import { novaLinha } from "@/components/negocio-metas/levantamento";
-import type { PedidoNegocio, ResumoPessoa } from "../pessoasTipos";
+import type { RegistosDaPessoa } from "@/components/negocio-metas/registosTipos";
+import type { ResumoPessoa } from "../pessoasTipos";
 import { passoDoNegocio as passoDoNegocioColuna, proximoPasso, type IdPasso } from "../etapaPessoa";
 import { juntarPessoas } from "../juntarPessoas";
-import { PEDIDOS_EXEMPLO } from "../pedidosDeExemplo";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "../pessoasExemplo";
+import { REGISTOS_EXEMPLO } from "../registosExemplo";
 import { itemEmFoco, itensDaPessoa } from "./itensProcesso";
 import { novaLinhaDoCatalogo } from "./catalogoTrabalhos";
 import { ehExecutavel, passoDoItem } from "./passosProcesso";
@@ -16,33 +17,32 @@ import { PASSOS_PROCESSO } from "./tiposProcesso";
 import type { ItemProcesso, PassoProcesso } from "./tiposProcesso";
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
-  id: "pedido-pd-1", pessoaId: "a", pedidoId: "pd-1", tipo: "pedido", fase: "porContactar", trabalho: null, rotuloPedido: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
+  id: "pessoa-a", pessoaId: "a", tipo: "pessoa", fase: "porContactar", trabalho: null, valor: null, prazo: null, atrasado: false,
+  orcamentos: 0, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 const orc = (escolhido: boolean): NegocioMes["orcamentos"] => [{ id: "o", valor: 1000, escolhido }];
-/** Um pedido contactado com uma visita por fazer (ou feita) no dia dado. */
-const comVisita = (data: string, estado: "porFazer" | "feita" = "porFazer", extra: Partial<PedidoNegocio> = {}): PedidoNegocio =>
-  pedidoBase("pd-1", { contactado: true, visitas: [visitaBase("pd-1-v1", { data, estado })], ...extra });
-const comPedidos = (pedidos: PedidoNegocio[], abertos: ReturnType<typeof negocioBase>[] = [], papel: "lead" | "cliente" = "lead") =>
-  resumoBase(pessoaBase("a"), abertos, HOJE_EXEMPLO, papel, pedidos);
+/** Os registos de uma pessoa contactada com uma visita por fazer (ou feita) no dia dado. */
+const comVisita = (data: string, estado: "porFazer" | "feita" = "porFazer"): RegistosDaPessoa =>
+  registosBase({ contactos: [contactoBase()], visitas: [visitaPessoaBase("rv-1", { data, estado })] });
+const comRegistos = (registos: RegistosDaPessoa, abertos: ReturnType<typeof negocioBase>[] = [], papel: "lead" | "cliente" = "lead") =>
+  resumoBase(pessoaBase("a"), abertos, HOJE_EXEMPLO, papel, registos);
 const itensDe = (r: ReturnType<typeof resumoBase>): ItemProcesso[] => itensDaPessoa(r, HOJE_EXEMPLO);
 
 describe("PASSOS_PROCESSO", () => {
-  it("tem os 13 passos, pela ordem do processo (marcar a visita como feita e fazer o levantamento são um só passo)", () => {
+  it("tem os 12 passos (sem escolher o orçamento nem gerar o contrato à parte), pela ordem do processo (marcar a visita como feita e fazer o levantamento da pessoa são um só passo)", () => {
     expect(PASSOS_PROCESSO).toEqual([
-      "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "criarOrcamento",
-      "verificarOrcamento", "aguardarDirecao", "escolherOrcamento", "criarProposta", "enviarProposta", "registarRespostaCliente",
-      "gerarContrato", "registarAssinatura",
+      "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "fazerLevantamento", "criarOrcamento",
+      "verificarOrcamento", "aguardarDirecao", "criarProposta", "enviarProposta", "registarRespostaCliente", "registarAssinatura",
     ]);
   });
 });
 
-describe("passoDoItem: pedidos", () => {
+describe("passoDoItem: pessoas em abordagem", () => {
   const casos: [string, Partial<ItemProcesso>, PassoProcesso][] = [
     ["etapa nova (Por contactar)", { fase: "porContactar" }, "registarChamada"],
     ["emContacto (Contactado)", { fase: "contactado" }, "marcarVisita"],
-    // Um pedido na fase Visita por fazer pede SEMPRE "marcar a visita como feita": a data não decide nada.
+    // Uma pessoa na fase Visita por fazer pede SEMPRE "marcar a visita como feita": a data não decide nada.
     ["visitaMarcada (a data não decide o passo)", { fase: "visita" }, "marcarVisitaFeita"],
     // O levantamento é opcional: com a visita feita o passo é criar o negócio, com ou sem linhas de medidas.
     ["visita feita (o levantamento é opcional)", { fase: "visita", visitaFeita: true }, "criarNegocio"],
@@ -51,42 +51,50 @@ describe("passoDoItem: pedidos", () => {
     expect(passoDoItem(item(extra)).id).toBe(esperado);
   });
 
-  it("'visitaFeita' só mexe na fase Visita: um pedido contactado continua a marcar a visita", () => {
+  it("'visitaFeita' só mexe na fase Visita: uma pessoa contactada continua a marcar a visita", () => {
     expect(passoDoItem(item({ fase: "contactado", visitaFeita: true })).id).toBe("marcarVisita");
   });
 });
 
-describe("ehExecutavel: os passos que o botão já executa (Fases 3 e 4)", () => {
-  it("só estes executam; os da Fase 5 (e escolher o orçamento) continuam a abrir a ficha", () => {
-    const executaveis = PASSOS_PROCESSO.filter(ehExecutavel);
-    expect(executaveis).toEqual([
-      "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "criarOrcamento",
-      "verificarOrcamento", "aguardarDirecao", "enviarProposta",
-    ]);
-    for (const passo of ["escolherOrcamento", "criarProposta", "registarRespostaCliente", "gerarContrato", "registarAssinatura"] as const) {
-      expect(ehExecutavel(passo), passo).toBe(false);
+describe("ehExecutavel: nenhum passo do processo é um botão que só abre a ficha", () => {
+  it("todos os passos do processo executam", () => {
+    for (const passo of PASSOS_PROCESSO) expect(ehExecutavel(passo), passo).toBe(true);
+  });
+
+  it("o passo que o processo dá a qualquer item (pessoa ou negócio, em qualquer fase) executa", () => {
+    const fases = ["porContactar", "contactado", "visita", "levantamento", "orcamento", "proposta", "contrato"] as const;
+    const verificacoes = ["semDetalhe", "porVerificar", "aguardaDirecao", "verificado"] as const;
+    let vistos = 0;
+    for (const tipo of ["pessoa", "negocio"] as const) for (const fase of fases) for (const verificacao of verificacoes) {
+      for (const extra of [{}, { orcamentos: 2 }, { propostaRascunho: true, orcamentos: 1 }, { visitaFeita: true }]) {
+        const passo = passoDoItem(item({ tipo, fase, verificacao, ...extra })).id;
+        expect(ehExecutavel(passo), `${tipo}/${fase}/${verificacao}/${passo}`).toBe(true);
+        vistos++;
+      }
     }
+    expect(vistos).toBeGreaterThan(100);
   });
 });
 
 describe("passoDoItem: negócios", () => {
   const negocio = (extra: Partial<ItemProcesso>): ItemProcesso => item({ id: "n", tipo: "negocio", ...extra });
   const casos: [string, Partial<ItemProcesso>, PassoProcesso][] = [
-    ["Orçamento sem orçamentos", { fase: "orcamento", orcamentos: 0 }, "criarOrcamento"],
-    ["Orçamento com 1 orçamento, nenhum escolhido", { fase: "orcamento", orcamentos: 1 }, "escolherOrcamento"],
-    ["Orçamento com 3 orçamentos, nenhum escolhido", { fase: "orcamento", orcamentos: 3 }, "escolherOrcamento"],
-    ["Orçamento com um escolhido e sem proposta", { fase: "orcamento", orcamentos: 3, orcamentoEscolhido: true }, "criarProposta"],
-    ["Proposta em rascunho", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true, propostaRascunho: true }, "enviarProposta"],
-    ["Proposta enviada", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true }, "registarRespostaCliente"],
-    ["Contrato", { fase: "contrato", orcamentos: 1, orcamentoEscolhido: true }, "registarAssinatura"],
+    ["Levantamento (por decidir, ou por fazer)", { fase: "levantamento", orcamentos: 0 }, "fazerLevantamento"],
+    ["Orçamento sem orçamentos (o levantamento já está ligado ou dispensado)", { fase: "orcamento", orcamentos: 0 }, "criarOrcamento"],
+    ["Orçamento com 1 orçamento (sem escolher nenhum: usa-se o último)", { fase: "orcamento", orcamentos: 1 }, "criarProposta"],
+    ["Orçamento com 3 orçamentos (sem escolher nenhum: usa-se o último)", { fase: "orcamento", orcamentos: 3 }, "criarProposta"],
+    ["Orçamento com um escolhido e sem proposta", { fase: "orcamento", orcamentos: 3 }, "criarProposta"],
+    ["Proposta em rascunho", { fase: "proposta", orcamentos: 1, propostaRascunho: true }, "enviarProposta"],
+    ["Proposta enviada", { fase: "proposta", orcamentos: 1 }, "registarRespostaCliente"],
+    ["Contrato", { fase: "contrato", orcamentos: 1 }, "registarAssinatura"],
     // Fase 4: o orçamento detalhado (guardado pelo editor) é verificado antes de se enviar a proposta.
-    ["orçamento escolhido, por verificar", { fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, verificacao: "porVerificar" }, "verificarOrcamento"],
-    ["orçamento escolhido, à espera da Direção", { fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, verificacao: "aguardaDirecao" }, "aguardarDirecao"],
-    ["orçamento escolhido e verificado: enviar a proposta (criá-la e enviá-la é um só gesto)", { fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, verificacao: "verificado" }, "enviarProposta"],
-    ["orçamentos sem nenhum escolhido continuam a pedir para escolher, mesmo com a verificação por fazer", { fase: "orcamento", orcamentos: 2, verificacao: "porVerificar" }, "escolherOrcamento"],
+    ["orçamento escolhido, por verificar", { fase: "orcamento", orcamentos: 1, verificacao: "porVerificar" }, "verificarOrcamento"],
+    ["orçamento escolhido, à espera da Direção", { fase: "orcamento", orcamentos: 1, verificacao: "aguardaDirecao" }, "aguardarDirecao"],
+    ["orçamento escolhido e verificado: enviar a proposta (criá-la e enviá-la é um só gesto)", { fase: "orcamento", orcamentos: 1, verificacao: "verificado" }, "enviarProposta"],
+    ["vários orçamentos e nenhum escolhido: a verificação segue pelo último, sem passo de escolher", { fase: "orcamento", orcamentos: 2, verificacao: "porVerificar" }, "verificarOrcamento"],
     ["sem orçamentos, o estado da verificação não conta", { fase: "orcamento", orcamentos: 0, verificacao: "verificado" }, "criarOrcamento"],
-    ["Proposta já enviada, a verificação já não conta", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true, verificacao: "verificado" }, "registarRespostaCliente"],
-    ["Proposta em rascunho (do exemplo, sem orçamento detalhado)", { fase: "proposta", orcamentos: 1, orcamentoEscolhido: true, propostaRascunho: true, verificacao: "semDetalhe" }, "enviarProposta"],
+    ["Proposta já enviada, a verificação já não conta", { fase: "proposta", orcamentos: 1, verificacao: "verificado" }, "registarRespostaCliente"],
+    ["Proposta em rascunho (do exemplo, sem orçamento detalhado)", { fase: "proposta", orcamentos: 1, propostaRascunho: true, verificacao: "semDetalhe" }, "enviarProposta"],
   ];
   it.each(casos)("%s", (_nome, extra, esperado) => {
     expect(passoDoItem(negocio(extra)).id).toBe(esperado);
@@ -116,54 +124,53 @@ describe("itensDaPessoa + passoDoItem", () => {
     expect(passoDoItem(itensDe(r)[0]).id).toBe("criarOrcamento");
   });
 
-  it("um pedido novo dá 1 item 'registarChamada'; sem serviço, o trabalho é nulo", () => {
-    const itens = itensDe(comPedidos([pedidoBase("pd-1", { servico: "" })]));
+  it("uma pessoa nova dá 1 item 'registarChamada'; o trabalho é nulo", () => {
+    const itens = itensDe(comRegistos(registosBase()));
     expect(itens).toHaveLength(1);
-    expect(itens[0]).toMatchObject({
-      tipo: "pedido", fase: "porContactar", trabalho: null, valor: null, pedidoId: "pd-1",
-      rotuloPedido: { servico: "", criadoEm: "2026-10-01", posicao: 1, total: 1 },
-    });
+    expect(itens[0]).toMatchObject({ tipo: "pessoa", fase: "porContactar", trabalho: null, valor: null, id: "pessoa-a" });
     expect(passoDoItem(itens[0]).id).toBe("registarChamada");
   });
 
   it("visita marcada: SEMPRE 'marcar a visita como feita', seja no passado, hoje, no futuro ou sem data", () => {
-    const com = (data: string): ItemProcesso => itensDe(comPedidos([comVisita(data)]))[0];
+    const com = (data: string): ItemProcesso => itensDe(comRegistos(comVisita(data)))[0];
     for (const data of ["2026-10-12", HOJE_EXEMPLO, "2026-10-20", ""]) expect(passoDoItem(com(data)).id).toBe("marcarVisitaFeita");
   });
 
-  it("uma pessoa com vários pedidos tem um item e um passo por pedido, cada um no seu", () => {
-    const r = comPedidos([pedidoBase("pd-1"), pedidoBase("pd-2", { contactado: true }), comVisita("2026-10-20", "porFazer", { id: "pd-3" })]);
-    expect(itensDe(r).map((i) => [i.pedidoId, passoDoItem(i).id])).toEqual([
-      ["pd-1", "registarChamada"], ["pd-2", "marcarVisita"], ["pd-3", "marcarVisitaFeita"],
-    ]);
+  it("uma pessoa contactada pede 'marcar a visita'", () => {
+    expect(passoDoItem(itensDe(comRegistos(registosBase({ contactos: [contactoBase()] })))[0]).id).toBe("marcarVisita");
   });
 
   it("o item de uma visita leva a data da próxima visita por fazer como prazo; feita, sem prazo", () => {
-    expect(itensDe(comPedidos([comVisita("2026-10-20")]))[0].prazo).toBe("2026-10-20");
-    expect(itensDe(comPedidos([comVisita("2026-10-12", "feita")]))[0].prazo).toBeNull();
+    expect(itensDe(comRegistos(comVisita("2026-10-20")))[0].prazo).toBe("2026-10-20");
+    const feita = resumoBase(pessoaBase("a", { proximoContacto: null }), [], HOJE_EXEMPLO, "lead", comVisita("2026-10-12", "feita"));
+    expect(itensDe(feita)[0].prazo).toBeNull();
   });
 
-  it("o negócio traz se há orçamento escolhido e se a proposta é um rascunho", () => {
+  it("o negócio traz se a proposta é um rascunho (já não há 'orçamento escolhido' no item)", () => {
     const itemDe = (extra: Partial<NegocioMes>): ItemProcesso => itensDe(resumoBase(pessoaBase("a"), [negocioBase("n1", extra)], HOJE_EXEMPLO))[0];
-    expect(itemDe({ orcamentos: orc(false) })).toMatchObject({ orcamentoEscolhido: false, propostaRascunho: false });
-    expect(itemDe({ orcamentos: orc(true) })).toMatchObject({ orcamentoEscolhido: true, propostaRascunho: false });
-    expect(itemDe({ orcamentos: orc(true), proposta: { estado: "rascunho" } })).toMatchObject({ orcamentoEscolhido: true, propostaRascunho: true });
+    expect(itemDe({ orcamentos: orc(false) })).toMatchObject({ propostaRascunho: false });
+    expect(itemDe({ orcamentos: orc(true) })).toMatchObject({ propostaRascunho: false });
+    expect(itemDe({ orcamentos: orc(true), proposta: { estado: "rascunho" } })).toMatchObject({ propostaRascunho: true });
     expect(itemDe({ orcamentos: orc(true), proposta: { estado: "enviada" } })).toMatchObject({ propostaRascunho: false });
   });
 
-  it("os pedidos ficam ao lado dos negócios abertos: um item por pedido e um por negócio", () => {
-    const r = comPedidos([pedidoBase("pd-1")], [negocioBase("n1")]);
-    expect(itensDe(r).map((i) => i.tipo)).toEqual(["pedido", "negocio"]);
+  it("com um negócio aberto a pessoa já não está em abordagem: só o item do negócio", () => {
+    const r = comRegistos(registosBase({ contactos: [contactoBase()] }), [negocioBase("n1")]);
+    expect(itensDe(r).map((i) => i.tipo)).toEqual(["negocio"]);
   });
 
-  it("perdida, ou quem não tem pedidos nem negócio aberto, não tem itens", () => {
+  it("perdida, ou quem não tem registos por ligar nem negócio aberto, não tem itens", () => {
     const perdida = { motivo: "preco" as const, data: "2026-10-01" };
-    expect(itensDe(resumoBase(pessoaBase("a", { perdida }), [negocioBase("n1")], HOJE_EXEMPLO, "lead", [pedidoBase("pd-1")]))).toEqual([]);
-    expect(itensDe(resumoBase(pessoaBase("b"), [], HOJE_EXEMPLO, "cliente"))).toEqual([]);
+    expect(itensDe(resumoBase(pessoaBase("a", { perdida }), [negocioBase("n1")], HOJE_EXEMPLO, "lead", registosBase()))).toEqual([]);
+    const ganho = { ...negocioBase("g", { orcamentos: orc(true), proposta: { estado: "aceite" }, contrato: { estado: "assinado" }, dias: 60 }), pessoaId: "b" };
+    const [cliente] = juntarPessoas([pessoaBase("b")], [ganho], HOJE_EXEMPLO, registosBase());
+    expect(itensDe(cliente)).toEqual([]);
   });
 
-  it("um cliente com um pedido tem um item de pedido", () => {
-    expect(itensDe(comPedidos([pedidoBase("pd-1", { contactado: true })], [], "cliente")).map((i) => passoDoItem(i).id)).toEqual(["marcarVisita"]);
+  it("um cliente com um contacto novo por ligar tem um item de pessoa (volta à abordagem)", () => {
+    const ganho = { ...negocioBase("g", { orcamentos: orc(true), proposta: { estado: "aceite" }, contrato: { estado: "assinado" }, dias: 60 }), pessoaId: "a" };
+    const [r] = juntarPessoas([pessoaBase("a")], [ganho], HOJE_EXEMPLO, registosBase({ contactos: [contactoBase("rc-1", { data: "2026-10-12" })] }));
+    expect(itensDe(r).map((i) => passoDoItem(i).id)).toEqual(["marcarVisita"]);
   });
 
   it("o negócio traz trabalho, valor do orçamento escolhido, fase e prazo em atraso", () => {
@@ -194,47 +201,59 @@ describe("itensDaPessoa com o orçamento detalhado (Fase 4)", () => {
     expect(itemCom({ n1: orcamento({ verificado: true, direcao: "aprovada" }) }).verificacao).toBe("verificado");
   });
 
+  it("sem nenhum orçamento escolhido vale o último: o detalhe dele conta e o passo é verificá-lo", () => {
+    const doisSemEscolha = { orcamentos: [{ id: "x", valor: 500, escolhido: false }, { id: "o", valor: 1000, escolhido: false }] };
+    const comUltimo = itemCom({ n1: orcamento({ orcamentoId: "o" }) }, doisSemEscolha);
+    expect(comUltimo.verificacao).toBe("porVerificar");
+    expect(passoDoItem(comUltimo).id).toBe("verificarOrcamento");
+    expect(itemCom({ n1: orcamento({ orcamentoId: "x" }) }, doisSemEscolha).verificacao).toBe("semDetalhe");
+  });
+
   it("um detalhe de outro orçamento (o escolhido mudou) ou de outro negócio não conta", () => {
     expect(itemCom({ n1: orcamento({ orcamentoId: "outro" }) }).verificacao).toBe("semDetalhe");
     expect(itemCom({ n2: orcamento() }).verificacao).toBe("semDetalhe");
   });
 
-  it("um pedido não tem verificação", () => {
-    const r = comPedidos([pedidoBase("pd-1")]);
+  it("uma pessoa em abordagem não tem verificação", () => {
+    const r = comRegistos(registosBase());
     expect(itensDaPessoa(r, HOJE_EXEMPLO, { n1: orcamento() })[0].verificacao).toBe("semDetalhe");
   });
 });
 
-describe("pedido com a visita feita", () => {
-  const feita = (extra: Partial<PedidoNegocio> = {}): ResumoPessoa => comPedidos([comVisita("2026-10-12", "feita", extra)]);
-  const linhas = (n: number) => ({ linhas: Array.from({ length: n }, (_, i) => novaLinha(`l${i + 1}`)), observacoes: "", respostas: {} });
+describe("pessoa com a visita feita", () => {
+  const feita = (extra: Partial<RegistosDaPessoa> = {}): ResumoPessoa => comRegistos({ ...comVisita("2026-10-12", "feita"), ...extra });
+  const linhas = (n: number) => ({
+    ...levantamentoBase(),
+    rascunho: { linhas: Array.from({ length: n }, (_, i) => novaLinha(`l${i + 1}`)), observacoes: "", respostas: {} },
+  });
 
   it("o item traz se há uma visita feita", () => {
-    expect(itensDe(comPedidos([comVisita("2026-10-12")]))[0]).toMatchObject({ visitaFeita: false });
+    expect(itensDe(comRegistos(comVisita("2026-10-12")))[0]).toMatchObject({ visitaFeita: false });
     expect(itensDe(feita())[0]).toMatchObject({ visitaFeita: true });
-    expect(itensDe(feita({ levantamento: linhas(3) }))[0]).toMatchObject({ visitaFeita: true });
+    expect(itensDe(feita({ levantamentos: [linhas(3)] }))[0]).toMatchObject({ visitaFeita: true });
   });
 
   it("com a visita feita → 'criarNegocio', com ou sem linhas guardadas (o levantamento é opcional)", () => {
-    expect(passoDoItem(itensDe(feita({ levantamento: linhas(1) }))[0]).id).toBe("criarNegocio");
+    expect(passoDoItem(itensDe(feita({ levantamentos: [linhas(1)] }))[0]).id).toBe("criarNegocio");
     expect(passoDoItem(itensDe(feita())[0]).id).toBe("criarNegocio");
   });
 
-  it("uma de duas visitas feita já basta para o pedido poder criar o negócio, cada pedido com a sua visita", () => {
-    const duas = pedidoBase("pd-1", {
-      contactado: true, levantamento: linhas(1), visitas: [visitaBase("v1", { estado: "feita" }), visitaBase("v2", { estado: "porFazer", data: "2026-10-30" })],
+  it("uma de duas visitas feita já basta para a pessoa poder criar o negócio", () => {
+    const duas = registosBase({
+      contactos: [contactoBase()], levantamentos: [linhas(1)],
+      visitas: [visitaPessoaBase("rv-1", { estado: "feita" }), visitaPessoaBase("rv-2", { estado: "porFazer", data: "2026-10-30" })],
     });
-    const outro = comVisita("2026-10-20", "porFazer", { id: "pd-2" });
-    expect(itensDe(comPedidos([duas, outro])).map((i) => passoDoItem(i).id)).toEqual(["criarNegocio", "marcarVisitaFeita"]);
+    expect(itensDe(comRegistos(duas)).map((i) => passoDoItem(i).id)).toEqual(["criarNegocio"]);
   });
 
   it("a data da visita feita já não serve de prazo (a visita aconteceu)", () => {
-    expect(itensDe(feita())[0].prazo).toBeNull();
-    expect(itensDe(feita())[0].atrasado).toBe(false);
+    const r = resumoBase(pessoaBase("a", { proximoContacto: null }), [], HOJE_EXEMPLO, "lead", comVisita("2026-10-12", "feita"));
+    expect(itensDe(r)[0].prazo).toBeNull();
+    expect(itensDe(r)[0].atrasado).toBe(false);
   });
 
   it("a coluna 'Próximo passo' e o 'A fazer' dizem os dois 'Criar o negócio' (não há passo obrigatório de levantamento), com ou sem linhas", () => {
-    for (const r of [feita(), feita({ levantamento: linhas(2) })]) {
+    for (const r of [feita(), feita({ levantamentos: [linhas(2)] })]) {
       expect(proximoPasso(r).id).toBe("criarNegocio");
       expect(passoDoItem(itensDe(r)[0]).id).toBe("criarNegocio");
     }
@@ -259,16 +278,13 @@ describe("itemEmFoco (o critério do resumo é o da coluna 'Próximo passo': o n
     expect(itemEmFoco(r, itensDe(r))?.id).toBe("a");
   });
 
-  it("um pedido sem negócios: o único item", () => {
-    const r = comPedidos([pedidoBase("pd-1")]);
-    expect(itemEmFoco(r, itensDe(r))?.id).toBe("pedido-pd-1");
+  it("uma pessoa em abordagem sem negócios: o único item", () => {
+    const r = comRegistos(registosBase());
+    expect(itemEmFoco(r, itensDe(r))?.id).toBe("pessoa-a");
   });
 
-  it("vários pedidos sem negócios: o mais avançado; com um negócio aberto, o negócio", () => {
-    const pedidos = [pedidoBase("pd-1"), comVisita("2026-10-20", "porFazer", { id: "pd-2" })];
-    const r = comPedidos(pedidos);
-    expect(itemEmFoco(r, itensDe(r))?.id).toBe("pedido-pd-2");
-    const comNegocio = comPedidos(pedidos, [negocioBase("n1")]);
+  it("com um negócio aberto, o negócio (a pessoa já não está em abordagem)", () => {
+    const comNegocio = comRegistos(comVisita("2026-10-20"), [negocioBase("n1")]);
     expect(itemEmFoco(comNegocio, itensDe(comNegocio))?.id).toBe("n1");
   });
 });
@@ -281,19 +297,21 @@ describe("itemEmFoco (o critério do resumo é o da coluna 'Próximo passo': o n
  */
 const PASSO_DA_COLUNA: Record<IdPasso, PassoProcesso | null> = {
   registarChamada: "registarChamada", marcarVisita: "marcarVisita", fecharLevantamento: "marcarVisitaFeita",
-  criarNegocio: "criarNegocio", fazerLevantamento: "criarOrcamento", escolherOrcamento: "escolherOrcamento", criarProposta: "criarProposta",
+  criarNegocio: "criarNegocio", fazerLevantamento: "criarOrcamento", criarProposta: "criarProposta",
   enviarProposta: "enviarProposta", esperarCliente: "registarRespostaCliente", recolherAssinatura: "registarAssinatura", nenhum: null,
 };
 
 describe("coerência com a coluna 'Próximo passo' nos dados de exemplo", () => {
-  const resumos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
+  const resumos = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, REGISTOS_EXEMPLO);
 
   it("cada negócio aberto de exemplo: o passo do item é o mesmo da coluna para esse negócio", () => {
     let conferidos = 0;
     for (const r of resumos) {
       for (const item of itensDe(r).filter((i) => i.tipo === "negocio")) {
         const negocio = r.abertos.find((n) => n.id === item.id)!;
-        expect(passoDoItem(item).id, `${r.pessoa.nome} / ${negocio.id}`).toBe(PASSO_DA_COLUNA[passoDoNegocioColuna(negocio)]);
+        // Em Levantamento a coluna e o "A fazer" dizem o mesmo (fazer o levantamento); em Orçamento sem orçamentos o "A fazer" diz criá-lo.
+        const esperado = item.fase === "levantamento" ? "fazerLevantamento" : PASSO_DA_COLUNA[passoDoNegocioColuna(negocio)];
+        expect(passoDoItem(item).id, `${r.pessoa.nome} / ${negocio.id}`).toBe(esperado);
         conferidos++;
       }
     }
@@ -313,16 +331,16 @@ describe("coerência com a coluna 'Próximo passo' nos dados de exemplo", () => 
     expect(conferidas).toBe(resumos.length);
   });
 
-  // Os dados de exemplo não têm visitas feitas, por isso o caso fica aqui explícito (coluna, e o que o "A fazer" diz para cada estado do pedido).
-  const pedidoNaVisita = (feita: boolean, extra: Partial<PedidoNegocio> = {}): ResumoPessoa =>
-    comPedidos([comVisita("2026-10-12", feita ? "feita" : "porFazer", extra)]);
-  const duasLinhas = { linhas: [novaLinha("l1"), novaLinha("l2")], observacoes: "", respostas: {} };
-  const PEDIDOS_NA_VISITA: [string, ResumoPessoa, IdPasso, PassoProcesso][] = [
-    ["visita por fazer", pedidoNaVisita(false), "fecharLevantamento", "marcarVisitaFeita"],
-    ["visita feita, com linhas guardadas", pedidoNaVisita(true, { levantamento: duasLinhas }), "criarNegocio", "criarNegocio"],
-    ["visita feita, sem levantamento", pedidoNaVisita(true), "criarNegocio", "criarNegocio"],
+  // O caso fica aqui explícito: o que a coluna diz e o que o "A fazer" diz para cada estado da pessoa na fase Visita.
+  const pessoaNaVisita = (feita: boolean, extra: Partial<RegistosDaPessoa> = {}): ResumoPessoa =>
+    comRegistos({ ...comVisita("2026-10-12", feita ? "feita" : "porFazer"), ...extra });
+  const duasLinhas = { ...levantamentoBase(), rascunho: { linhas: [novaLinha("l1"), novaLinha("l2")], observacoes: "", respostas: {} } };
+  const PESSOAS_NA_VISITA: [string, ResumoPessoa, IdPasso, PassoProcesso][] = [
+    ["visita por fazer", pessoaNaVisita(false), "fecharLevantamento", "marcarVisitaFeita"],
+    ["visita feita, com linhas guardadas", pessoaNaVisita(true, { levantamentos: [duasLinhas] }), "criarNegocio", "criarNegocio"],
+    ["visita feita, sem levantamento", pessoaNaVisita(true), "criarNegocio", "criarNegocio"],
   ];
-  it.each(PEDIDOS_NA_VISITA)("pedido na fase Visita, %s: a coluna diz %s e o 'A fazer' diz %s", (_nome, r, colunaEsperada, passoEsperado) => {
+  it.each(PESSOAS_NA_VISITA)("pessoa na fase Visita, %s: a coluna diz %s e o 'A fazer' diz %s", (_nome, r, colunaEsperada, passoEsperado) => {
     expect(proximoPasso(r).id).toBe(colunaEsperada);
     expect(passoDoItem(itensDe(r)[0]).id).toBe(passoEsperado);
   });
@@ -345,7 +363,7 @@ describe("coerência com a coluna 'Próximo passo' nos dados de exemplo", () => 
     expect(passoDoItem(itensDaPessoa(r, HOJE_EXEMPLO, { n1: detalhadoEm(extra) })[0]).id).toBe(passoEsperado);
   });
 
-  it("os exemplos cobrem pedidos de várias fases e negócios de várias fases", () => {
+  it("os exemplos cobrem pessoas de várias fases e negócios de várias fases", () => {
     const itens = resumos.flatMap((r) => itensDe(r));
     expect(new Set(itens.map((i) => i.fase)).size).toBeGreaterThanOrEqual(4);
     expect(new Set(itens.map((i) => passoDoItem(i).id)).size).toBeGreaterThanOrEqual(5);

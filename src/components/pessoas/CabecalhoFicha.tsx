@@ -5,7 +5,7 @@ import { textoLinhaCabecalho } from "./formatoPessoas";
 import { BotoesNavegacao } from "./BotoesNavegacao";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
 import type { ResumoPessoa } from "./pessoasTipos";
-import { SeloEmpresa, SeloPerdida } from "./SelosPessoa";
+import { SeloEmpresa, SeloEncerrada, SeloPerdida } from "./SelosPessoa";
 
 interface CabecalhoFichaProps {
   resumo: ResumoPessoa;
@@ -23,10 +23,11 @@ export function CabecalhoFicha({ resumo, vizinhas, aoIr }: CabecalhoFichaProps) 
       <div className="min-w-40 flex-1 space-y-1.5">
         <SheetTitle tabIndex={-1} data-ficha-nome className="text-xl outline-none">{pessoa.nome}</SheetTitle>
         <SheetDescription className="text-[15px]">{textoLinhaCabecalho(t, resumo)}</SheetDescription>
-        {(pessoa.empresa || pessoa.perdida) && (
+        {(pessoa.empresa || pessoa.perdida || pessoa.encerrada) && (
           <div className="flex flex-wrap gap-1.5">
             {pessoa.empresa && <SeloEmpresa />}
             {pessoa.perdida && <SeloPerdida />}
+            {pessoa.encerrada && <SeloEncerrada />}
           </div>
         )}
       </div>

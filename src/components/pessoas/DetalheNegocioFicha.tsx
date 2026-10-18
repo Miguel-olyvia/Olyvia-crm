@@ -8,12 +8,13 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Seccao } from "@/components/ficha-comum/Seccao";
+import { BotaoAnularPerda, BotaoPerderNegocio } from "@/components/negocio-metas/BotoesPerda";
 import { ContratoPainel } from "@/components/negocio-metas/ContratoPainel";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
 import { aceitaOrcamentos } from "@/components/negocio-metas/negocioAcoes";
-import { detalheDoNegocio } from "@/components/negocio-metas/negociosAlterados";
+import { detalheDoNegocio, useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { OrcamentosPainel } from "@/components/negocio-metas/OrcamentosPainel";
 import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
@@ -49,11 +50,32 @@ function PassoDoNegocio({ negocio, hoje }: { negocio: NegocioMes; hoje: string }
   );
 }
 
+/** Um negócio perdido: em que fase e porquê, e o botão que anula a perda (o negócio volta ao quadro). */
+function PerdaDoNegocio({ negocio, fase, motivo }: { negocio: NegocioMes; fase: string; motivo: string }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
+      <p className="text-[15px] font-medium text-foreground">
+        {t("businessGoals.lose.lostIn", { phase: t(`businessGoals.lose.phase.${fase}`), reason: motivo })}
+      </p>
+      <BotaoAnularPerda negocio={negocio} />
+    </div>
+  );
+}
+
 export function DetalheNegocioFicha({ negocio, hoje, noQuadro, aoVoltar }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   const titulo = useRef<HTMLHeadingElement>(null);
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
   useEffect(() => titulo.current?.focus(), []);
+  const perda = useAlteracoesNegocios().perdidos[negocio.id];
+  // Perder (ou anular a perda) troca o botão que tinha o foco: o foco passa para o título, em vez de se perder.
+  const estavaPerdido = useRef(perda !== undefined);
+  useEffect(() => {
+    if (estavaPerdido.current === (perda !== undefined)) return;
+    estavaPerdido.current = perda !== undefined;
+    titulo.current?.focus();
+  }, [perda]);
   const detalhe = detalheDoNegocio(negocio.id);
   const [criando, setCriando] = useState(false);
   const podeCriar = estaAberto(negocio) && aceitaOrcamentos(negocio);
@@ -77,6 +99,8 @@ export function DetalheNegocioFicha({ negocio, hoje, noQuadro, aoVoltar }: Detal
           </Link>
         )}
       </div>
+      {estaAberto(negocio) && !perda && <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />}
+      {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} />}
       {estaAberto(negocio) && <PassoDoNegocio negocio={negocio} hoje={hoje} />}
       <Seccao titulo={t(`${P}deal.quotes`)} nivel={4}>
         {podeCriar && (

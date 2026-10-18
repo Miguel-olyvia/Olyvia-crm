@@ -1,20 +1,19 @@
 // O ProcessoProvider: os portões (quando o passo não pode avançar, o botão explica o que falta, na região live e junto ao botão, sem
 // toast), o painel de visita e levantamento aberto pelo passo certo, o momento do aviso (só depois de o diálogo desmontar) e o valor
-// do contexto (estável). Guardar o painel e criar o negócio estão em `ProcessoPainel.test.tsx`.
+// do contexto (estável). Guardar o painel e criar o negócio estão em `ProcessoPainel.test.tsx`. Os passos são da PESSOA: não há pedidos.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
-import { novaLinha } from "@/components/negocio-metas/levantamento";
+import { repor as reporRegistos } from "@/components/negocio-metas/registosPessoa";
 import { cartoesDoQuadro } from "../quadro/cartoesQuadroPessoas";
 import { LinhaNegociosPessoa } from "../quadro/LinhaNegociosPessoa";
 import { QuadroPessoas } from "../quadro/QuadroPessoas";
-import { pedidoBase, visitaBase } from "../fabricaTestes";
 import { simularSaidaAnimada } from "@/test/saidaAnimadaTeste";
 import { passoDoItem } from "./passosProcesso";
 import { useProcesso } from "./processoContexto";
 import type { ItemProcesso } from "./tiposProcesso";
 import {
-  Gatilho, GatilhoDoCartao, GUARDAR, PAINEL, comVisitas, feitaComLinhas, itemDe, itensDe, levantamento, montar, renderizar, resumoCom, visita,
+  Gatilho, GatilhoDoCartao, GUARDAR, PAINEL, comVisitas, feitaComLinhas, itemDe, itensDe, montar, renderizar, resumoCom, visita,
 } from "./arnesProcesso";
 
 const { erro, sucesso } = vi.hoisted(() => ({ erro: vi.fn(), sucesso: vi.fn() }));
@@ -40,20 +39,21 @@ vi.mock("@/hooks/useTranslation", async () => {
   };
 });
 
-const SEM_VISITA = "Marcar a visita como feita: ainda não é possível. Este pedido ainda não tem visita marcada.";
+const SEM_VISITA = "Marcar a visita como feita: ainda não é possível. Esta pessoa ainda não tem visita marcada.";
 const SEM_DATA = "Marcar a visita como feita: ainda não é possível. Falta o dia da visita.";
 
-beforeEach(() => { erro.mockClear(); sucesso.mockClear(); });
+beforeEach(() => { erro.mockClear(); sucesso.mockClear(); reporRegistos(); });
+afterEach(() => { cleanup(); reporRegistos(); });
 
 describe("ProcessoProvider: portões", () => {
-  it("defesa: marcar como feita num item da fase Visita cujo pedido não tem visitas explica que falta a visita e não abre nada", () => {
-    const { r, item } = itemDe(pedidoBase("pd-1", { contactado: true }));
+  it("defesa: marcar como feita num item da fase Visita cuja pessoa não tem visitas explica que falta a visita e não abre nada", () => {
+    const { r, item } = itemDe(comVisitas([]));
     const naVisita: ItemProcesso = { ...item, fase: "visita" };
     expect(passoDoItem(naVisita).id).toBe("marcarVisitaFeita");
     const { aoAnunciar, a } = montar(r, naVisita);
     expect(aoAnunciar).toHaveBeenCalledWith(SEM_VISITA);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(a.guardarPedido).not.toHaveBeenCalled();
+    expect(a.guardarRegistos).not.toHaveBeenCalled();
   });
 
   it("uma visita sem dia não abre o painel: explica que falta o dia", () => {
@@ -64,47 +64,34 @@ describe("ProcessoProvider: portões", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("marcar a visita como feita abre o painel de visita e levantamento, na secção Visitas, com as visitas do pedido certo e não as de outro", async () => {
-    const outra = pedidoBase("pd-2", { contactado: true, visitas: [visitaBase("pd-2-v1", { data: "2026-11-05" })], servico: "Janelas" });
-    const r = resumoCom([comVisitas([visita({ data: "2026-10-20" })], { servico: "Cozinha" }), outra]);
-    const [, itemDoSegundo] = itensDe(r);
-    expect(itemDoSegundo.pedidoId).toBe("pd-2");
-    const resultado = renderizar(r, <Gatilho item={itemDoSegundo} />);
+  it("marcar a visita como feita abre o painel de visita e levantamento da pessoa, na secção Visitas, com as visitas dela", async () => {
+    const r = resumoCom(comVisitas([visita({ data: "2026-10-20" }), visita({ data: "2026-11-05" })].map((v, i) => ({ ...v, id: `rv-${i + 1}` }))));
+    const [item] = itensDe(r);
+    expect(item).toMatchObject({ id: "pessoa-a", tipo: "pessoa" });
+    const resultado = renderizar(r, <Gatilho item={item} />);
     fireEvent.click(screen.getByRole("button", { name: "executar" }));
     const painel = await screen.findByRole("dialog", { name: PAINEL });
     expect(within(painel).getByRole("button", { name: /^Visitas/ })).toHaveAttribute("aria-current", "step");
-    expect(within(painel).getByText(/05\/11\/2026/)).toBeInTheDocument();
-    expect(within(painel).queryByText(/20\/10\/2026/)).not.toBeInTheDocument();
+    expect(within(painel).getAllByText(/20\/10\/2026/).length).toBeGreaterThan(0);
+    expect(within(painel).getAllByText(/05\/11\/2026/).length).toBeGreaterThan(0);
     expect(resultado.aoAnunciar).not.toHaveBeenCalled();
   });
 
-  it("o levantamento é opcional: um pedido com a visita feita e sem nenhuma linha abre o painel de criar o negócio, sem avisar de nada em falta, e cria-o", async () => {
+  it("o levantamento é opcional: uma pessoa com a visita feita e sem nenhuma linha abre o painel de criar o negócio, sem avisar de nada em falta", async () => {
     const { r, item } = itemDe(comVisitas([visita({ estado: "feita" })]));
     expect(passoDoItem(item).id).toBe("criarNegocio");
-    const { aoAnunciar, aoCriarNegocio, a } = montar(r, item);
-    const painel = await screen.findByRole("dialog", { name: "Novo negócio de a" });
+    const { aoAnunciar } = montar(r, item);
+    expect(await screen.findByRole("dialog", { name: "Novo negócio de a" })).toBeInTheDocument();
     expect(aoAnunciar).not.toHaveBeenCalled();
-    fireEvent.click(within(painel).getByRole("button", { name: "Criar negócio" }));
-    expect(aoCriarNegocio).toHaveBeenCalledTimes(1);
-    expect((aoCriarNegocio.mock.calls[0] as unknown[])[0]).toMatchObject({ servico: "Cozinha", pessoa: { id: "a" } });
-    expect(a.removerPedido).toHaveBeenCalledExactlyOnceWith("pd-1");
   });
 
-  it("a visita é opcional: um item de «Criar o negócio» cujas visitas do pedido estão por fazer abre o painel, sem avisar de nada em falta", async () => {
-    const { r, item } = itemDe(comVisitas([visita()], { levantamento: levantamento() }));
+  it("a visita é opcional: um item de «Criar o negócio» com as visitas por fazer abre o painel, sem avisar de nada em falta", async () => {
+    const { r, item } = itemDe(comVisitas([visita()]));
     const doItem: ItemProcesso = { ...item, visitaFeita: true };
     expect(passoDoItem(doItem).id).toBe("criarNegocio");
     const { aoAnunciar } = montar(r, doItem);
     expect(await screen.findByRole("dialog", { name: "Novo negócio de a" })).toBeInTheDocument();
     expect(aoAnunciar).not.toHaveBeenCalled();
-  });
-
-  it("criar o negócio com linhas guardadas por acabar: o aviso diz que há linhas por acabar", () => {
-    const porAcabar = { ...novaLinha("l1"), divisao: "cozinha" };
-    const { r, item } = itemDe(comVisitas([visita({ estado: "feita" })], { levantamento: levantamento([porAcabar]) }));
-    expect(passoDoItem(item).id).toBe("criarNegocio");
-    const { aoAnunciar } = montar(r, item);
-    expect(aoAnunciar).toHaveBeenCalledWith("Criar o negócio: ainda não é possível. Há linhas de medidas por acabar.");
   });
 
   it("criar o negócio com a visita feita e linhas completas: abre o painel e não avisa de nada em falta", async () => {
@@ -118,13 +105,13 @@ describe("ProcessoProvider: portões", () => {
 
   it("um passo das fases 4 e 5 não faz nada aqui (os botões abrem a ficha)", () => {
     const { r, item } = itemDe(comVisitas());
-    const { aoAnunciar } = montar(r, { ...item, tipo: "negocio", fase: "orcamento", orcamentos: 0 });
+    const { aoAnunciar } = montar(r, { ...item, tipo: "negocio", fase: "orcamento", orcamentos: 0, id: "n9" });
     expect(aoAnunciar).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("um item de uma pessoa que já não existe não faz nada", () => {
-    const { r, item } = itemDe(pedidoBase("pd-1"));
+    const { r, item } = itemDe(comVisitas());
     const { aoAnunciar } = montar(r, { ...item, pessoaId: "x" });
     expect(aoAnunciar).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -149,7 +136,7 @@ describe("ProcessoProvider: a explicação do portão (região live e junto ao b
     const { mudarResumo } = renderizar(r, <GatilhoDoCartao item={item} />);
     fireEvent.click(screen.getByRole("button", { name: "passo" }));
     expect(screen.getByTestId("explicacao")).toBeInTheDocument();
-    // O pedido ganha o dia da visita: o mesmo passo já pode avançar.
+    // A visita ganha o dia: o mesmo passo já pode avançar.
     mudarResumo(itemDe(comVisitas()).r);
     expect(screen.getByTestId("explicacao")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "passo" }));
@@ -202,13 +189,13 @@ describe("ProcessoProvider: o aviso do passo só sai depois de o diálogo desmon
     saida.acabar();
     await waitFor(() => expect(aoAnunciar).toHaveBeenCalledTimes(1));
     expect(noAviso).toEqual({ dialogos: 0, escondidos: 0 });
-    expect(aoAnunciar.mock.calls[0][0]).toMatch(/^Visita guardada: a \(Cozinha\) continua em Visita\./);
+    expect(aoAnunciar.mock.calls[0][0]).toMatch(/^Visita guardada: a continua em Visita\./);
     // A região live diz tudo: o toast com o mesmo texto não se repete.
     expect(sucesso).not.toHaveBeenCalled();
   });
 
   it("registar a chamada: o aviso espera pelo fim da saída do diálogo", async () => {
-    const { r, item } = itemDe(pedidoBase("pd-1"));
+    const { r, item } = itemDe({ contactos: [], visitas: [], levantamentos: [] });
     const { aoAnunciar } = renderizar(r, <Gatilho item={item} />);
     saida = simularSaidaAnimada();
     fireEvent.click(screen.getByRole("button", { name: "executar" }));
@@ -241,7 +228,7 @@ describe("ProcessoProvider: o valor do contexto é estável", () => {
     expect(renders).toBe(antes);
   });
 
-  it("o `executar` continua a usar os dados mais recentes (o pedido que muda entre renders)", async () => {
+  it("o `executar` continua a usar os dados mais recentes (a pessoa que muda entre renders)", async () => {
     const semDia = itemDe(comVisitas([visita({ data: "" })]));
     const { aoAnunciar, mudarResumo } = renderizar(semDia.r, <Gatilho item={semDia.item} />);
     mudarResumo(itemDe(comVisitas()).r);
@@ -252,7 +239,7 @@ describe("ProcessoProvider: o valor do contexto é estável", () => {
 });
 
 describe("ProcessoProvider: a explicação do portão junto aos cartões do Quadro e às sub-linhas da Lista", () => {
-  const NOME_DO_BOTAO = "Marcar a visita como feita: Cozinha de a";
+  const NOME_DO_BOTAO = "Marcar a visita como feita: Abordagem de a";
 
   it("Quadro: o cartão do botão bloqueado mostra a explicação, ligada ao botão (aria-describedby), e fica até o utilizador agir", () => {
     const { r } = itemDe(comVisitas([visita({ data: "" })]));

@@ -21,7 +21,7 @@ interface LinhaNegociosPessoaProps {
   aoAbrir: (pessoaId: string) => void;
 }
 
-/** Uma sub-linha: o trabalho e a etiqueta Pedido/Negócio, a fase, o valor, o prazo (se houver) e "A fazer:" com o botão do passo. */
+/** Uma sub-linha: o trabalho e a etiqueta Abordagem/Negócio, a fase, o valor, o prazo (se houver) e "A fazer:" com o botão do passo. */
 function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPessoaProps, "itens"> & { item: ItemProcesso }) {
   const { t } = useTranslation();
   const acao = useAcaoDoPasso(item, () => aoAbrir(pessoaId));
@@ -33,7 +33,7 @@ function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPes
       <span className="flex min-w-0 flex-1 basis-48 flex-wrap items-center gap-2">
         <span className="font-medium text-foreground">{trabalho}</span>
         <Badge variant="outline" className="shrink-0">
-          {t(item.tipo === "pedido" ? "pessoasPagina.deals.kind.request" : "pessoasPagina.deals.kind.deal")}
+          {t(item.tipo === "pessoa" ? "pessoasPagina.deals.kind.person" : "pessoasPagina.deals.kind.deal")}
         </Badge>
       </span>
       {/* Fase, valor e prazo levam um rótulo só para leitores de ecrã e um separador, para não se lerem como texto solto. */}
@@ -73,7 +73,7 @@ function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPes
   );
 }
 
-/** Os itens em curso de uma pessoa, um por linha (pedidos e negócios). Sem itens não desenha nada. */
+/** Os itens em curso de uma pessoa, um por linha (ela em abordagem, ou os negócios). Sem itens não desenha nada. */
 export function LinhaNegociosPessoa({ pessoaId, nome, itens, hoje, aoAbrir }: LinhaNegociosPessoaProps) {
   const { t } = useTranslation();
   if (itens.length === 0) return null;

@@ -51,7 +51,7 @@ export function SemNegocios() {
  * Com as sub-linhas fechadas: "2 em curso · A fazer: Registar a chamada". O passo é o do negócio mais avançado, o mesmo
  * critério da coluna "Próximo passo" (`itemEmFoco`), para as duas dizerem a mesma coisa da mesma pessoa.
  */
-export function ResumoNegocios({ resumo, itens }: { resumo: Pick<ResumoPessoa, "abertos" | "pedidos">; itens: readonly ItemProcesso[] }) {
+export function ResumoNegocios({ resumo, itens }: { resumo: Pick<ResumoPessoa, "abertos">; itens: readonly ItemProcesso[] }) {
   const { t } = useTranslation();
   const emFoco = itemEmFoco(resumo, itens);
   if (emFoco === null) return null;

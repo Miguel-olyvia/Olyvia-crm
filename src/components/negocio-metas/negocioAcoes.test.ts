@@ -4,8 +4,8 @@ import {
   acrescentarOrcamento, aplicarEvento, aceitaOrcamentos, escolhasDaPergunta, lerValor, validarOrcamento,
 } from "./negocioAcoes";
 import {
-  alteracoesAtuais, detalheDoNegocio, guardarNegocio, negociosComPerdidos, negociosDoQuadro, perderNegocio, proximaSequenciaOrcamento,
-  repor,
+  alteracoesAtuais, anularPerda, detalheDoNegocio, gravarAplicacao, guardarNegocio, negociosComPerdidos, negociosDoQuadro, perdaDoNegocio, perderNegocio,
+  proximaSequenciaOrcamento, repor,
 } from "./negociosAlterados";
 import { faseDoNegocio, isNegocioGanho, valorDoNegocio, type NegocioMes } from "./negocioMetas";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "./negocioMetasExemplo";
@@ -156,5 +156,29 @@ describe("negociosAlterados", () => {
     repor();
     expect(alteracoesAtuais().editados).toEqual({});
     expect(proximaSequenciaOrcamento()).toBe(1);
+  });
+});
+
+describe("gravarAplicacao e anularPerda", () => {
+  it("um evento em curso ou ganho grava a nova versão do negócio; um perdido grava a perda com a fase e o motivo", () => {
+    const curso = aplicarEvento(PREDEFINICAO, "aceitarOrcamento", emOrcamento, { hoje: HOJE })!;
+    gravarAplicacao(curso, HOJE);
+    expect(alteracoesAtuais().editados[emOrcamento.id]).toBe(curso.negocio);
+    expect(perdaDoNegocio(emOrcamento.id)).toBeUndefined();
+
+    gravarAplicacao({ tipo: "perdido", negocio: curso.negocio, motivo: "Preço" }, HOJE);
+    expect(perdaDoNegocio(emOrcamento.id)).toEqual({ motivo: "Preço", mes: "2026-10", data: HOJE, fase: "proposta" });
+    expect(negociosDoQuadro(negocios, alteracoesAtuais()).some((n) => n.id === emOrcamento.id)).toBe(false);
+  });
+
+  it("anular a perda devolve o negócio ao quadro, na fase em que estava, e não mexe noutros negócios", () => {
+    perderNegocio(emProposta, "Adiou", HOJE);
+    perderNegocio(emContrato, "Preço", HOJE);
+    anularPerda(emProposta.id);
+    expect(perdaDoNegocio(emProposta.id)).toBeUndefined();
+    expect(perdaDoNegocio(emContrato.id)).toMatchObject({ fase: "contrato" });
+    const noQuadro = negociosDoQuadro(negocios, alteracoesAtuais()).find((n) => n.id === emProposta.id);
+    expect(noQuadro && faseDoNegocio(noQuadro)).toBe("proposta");
+    expect(() => anularPerda("nao-existe")).not.toThrow();
   });
 });

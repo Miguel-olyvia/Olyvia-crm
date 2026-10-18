@@ -1,10 +1,11 @@
 // Tipos da página "Pessoas" (só dados de exemplo). O papel (lead ou cliente) NÃO é
-// guardado: deriva dos negócios (ver `juntarPessoas.ts`), e a etapa deriva dos pedidos
-// (ver `etapaPessoa.ts`). Os campos próprios desta página (origem, último contacto)
+// guardado: deriva dos negócios (ver `juntarPessoas.ts`), e a etapa deriva dos registos
+// da pessoa (ver `etapaPessoa.ts`). Os campos próprios desta página (origem, último contacto)
 // são de exemplo e não existem noutro sítio.
-import type { FaseNegocio, NegocioMes, VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
+import type { FaseNegocio, NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import type { SaudeNegocio } from "@/components/negocio-metas/saudeNegocio";
-import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
+import type { RegistosDaPessoa } from "@/components/negocio-metas/registosTipos";
+import type { ColunaAbordagem, ProximoPasso } from "./etapaPessoa";
 
 export type PapelPessoa = "lead" | "cliente";
 /** Os 5 passos do percurso: Lead, Contacto, Visita, Negócio e Cliente (as chaves não mudam, só os textos). */
@@ -58,8 +59,25 @@ export interface Pessoa {
   proximoHora?: string;
   /** AAAA-MM-DD: cliente ou lead desde. */
   desde?: string;
-  /** Marcada como perdida na ficha: o motivo, o dia e o passo. Só as leads se perdem. */
+  /** Marcada como perdida na ficha: o motivo, o dia e o passo. Só as leads se perdem. (Sai na limpeza: ver `encerrada`.) */
   perdida?: PerdidaPessoa;
+  /** A abordagem terminou sem negócio (sem interesse, ou obra inviável): resultado e motivo ficam na pessoa. Reativável. */
+  encerrada?: EncerramentoPessoa;
+  /** AAAA-MM-DD: a submissão resolvida (ou o pedido novo) que fez a pessoa voltar à Parte 1 do Quadro. */
+  abordagemDesde?: string;
+}
+
+/** Como termina uma abordagem sem negócio. */
+export type ResultadoEncerramento = "semInteresse" | "obraInviavel";
+/** Os motivos de encerramento: a lista fixa de `MotivoPerda` mais "outro" (texto livre em `motivoOutro`). */
+export type MotivoEncerramento = MotivoPerda | "outro";
+
+/** A abordagem encerrada: o resultado, o motivo (e o texto, quando o motivo é "outro") e o dia (AAAA-MM-DD). Não se cria negócio. */
+export interface EncerramentoPessoa {
+  resultado: ResultadoEncerramento;
+  motivo: MotivoEncerramento;
+  motivoOutro?: string;
+  data: string;
 }
 
 export type QualificacaoPessoa = "MQL" | "SQL";
@@ -109,9 +127,7 @@ export interface ResumoPessoa {
   atrasada: boolean;
   /** O formulário de onde veio; `null` quando foi registada à mão. */
   formulario: string | null;
-  /** Os pedidos da pessoa (ver `PedidoNegocio`): a visita e o levantamento são de cada um. */
-  pedidos: PedidoNegocio[];
-  /** A etapa efetiva, do pedido mais avançado (ver `etapaEfetiva`); uma perdida é um estado à parte, por cima desta. */
+  /** A etapa efetiva, lida dos negócios e dos registos (ver `etapaDosRegistos`); uma perdida é um estado à parte, por cima desta. */
   etapa: EtapaPessoa;
   /** A fase do negócio aberto mais avançado; `null` sem negócio aberto. */
   faseEtapa: FaseNegocio | null;
@@ -121,7 +137,26 @@ export interface ResumoPessoa {
   semNegocio: boolean;
   /** Tem negócios, mas nenhum aberto nem ganho. */
   soHistorico: boolean;
+  /** Os registos da pessoa (contactos, visitas e levantamentos), ligados ou não. */
+  registos: RegistosDaPessoa;
+  /** Os registos por ligar posteriores ao último negócio: são o que a abordagem (Parte 1) mostra. */
+  porLigar: RegistosDaPessoa;
+  /** A Parte do Quadro: abordagem (Parte 1), negócios (Parte 2, com um negócio aberto) ou nenhuma. */
+  parte: ParteQuadro;
+  /** A coluna da Parte 1; `null` fora da abordagem. */
+  coluna: ColunaAbordagem | null;
+  /** O próximo passo lido dos registos e dos negócios (ver `proximoPasso`). */
+  proximo: ProximoPasso;
+  /** O dia (AAAA-MM-DD) do próximo contacto: o mais cedo entre a chamada agendada e as visitas por fazer; `null` sem nenhum. */
+  proximoContacto: string | null;
+  /** HH:MM do próximo contacto, quando tem hora. */
+  proximoHora?: string;
+  /** O próximo contacto é uma visita por fazer (então «Adiar» não tem nada a mover). */
+  proximoDeVisita: boolean;
 }
+
+/** Em que parte do Quadro a pessoa está: Parte 1 (abordagem), Parte 2 (negócios) ou em nenhuma. */
+export type ParteQuadro = "abordagem" | "negocios" | "nenhuma";
 
 export type CodigoMatch = "CONFLITO" | "MATCH_FORTE" | "MATCH_EMAIL" | "MATCH_TELEFONE";
 export type TipoSubmissao = "lead" | "contacto" | "cliente";
@@ -158,29 +193,6 @@ export interface NotaPessoa {
   campos: { rotulo: string; valor: string }[];
 }
 
-/** A fase de um pedido; deriva dos dados (ver `faseDoPedido`), nunca se guarda. */
-export type FasePedido = "porContactar" | "contactado" | "visita";
-
-/**
- * Um pedido de orçamento de uma pessoa (lead ou cliente). A visita e o levantamento pertencem ao pedido, não à pessoa: uma
- * pessoa pode ter vários pedidos (e negócios) em paralelo, cada um com as suas visitas, ou nenhuma. As visitas são as mesmas
- * do negócio (`VisitaNegocio`), por isso passam sem conversão ao criar o negócio.
- */
-export interface PedidoNegocio {
-  /** `pd-<n>`. */
-  id: string;
-  pessoaId: string;
-  servico: string;
-  comercial: string;
-  /** AAAA-MM-DD. */
-  criadoEm: string;
-  /** Já houve uma chamada a falar deste pedido. */
-  contactado: boolean;
-  visitas: VisitaNegocio[];
-  /** O levantamento feito nas visitas (linhas, observações, respostas e morada da obra); falta antes de haver linhas guardadas. */
-  levantamento?: RascunhoLevantamento;
-}
-
 export interface EstadoPessoas {
   submissoes: Submissao[];
   notas: NotaPessoa[];
@@ -189,8 +201,6 @@ export interface EstadoPessoas {
   atividade: ItemAtividade[];
   /** Quem foi contactada nesta sessão: deixa de contar como "Voltou a contactar". */
   contactadas: string[];
-  /** Os pedidos de todas as pessoas (ver `PedidoNegocio`). */
-  pedidos: PedidoNegocio[];
 }
 
 /** O seletor "Leads, Clientes, Todos": as perdidas só contam em "Todos". */

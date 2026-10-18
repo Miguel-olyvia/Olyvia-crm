@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { FOCO } from "./estilos";
 import { aplicarEvento, escolhasDaPergunta, type Aplicacao } from "./negocioAcoes";
-import { guardarNegocio, perderNegocio } from "./negociosAlterados";
+import { gravarAplicacao } from "./negociosAlterados";
 import { faseDoNegocio, type NegocioMes } from "./negocioMetas";
 import { acaoDe, capitalizar, traduzir, type ConfigWorkflow } from "./workflowNegocio";
 import { simularEvento, type EventoWorkflow } from "./workflowSimulacao";
@@ -27,8 +27,7 @@ interface MudarEstadoDialogoProps {
 
 /** Grava o resultado e avisa. Um negócio perdido sai do quadro; um ganho ou em curso fica com a fase nova. */
 function gravar(resultado: Aplicacao, hoje: string, t: (chave: string, params?: Record<string, string | number>) => string): void {
-  if (resultado.tipo === "perdido") perderNegocio(resultado.negocio, resultado.motivo, hoje);
-  else guardarNegocio(resultado.negocio);
+  gravarAplicacao(resultado, hoje);
   const fase = resultado.tipo === "curso" ? t(`businessGoals.workflow.no.${faseDoNegocio(resultado.negocio)}`) : "";
   toast.success(t(`${A}state.done.${resultado.tipo}`, { fase }));
 }

@@ -1,11 +1,20 @@
 // "Registar chamada": que próximos passos cabem a cada resultado e como se valida o dia e a hora. Funções puras, sem
-// relógio: o dia de hoje (AAAA-MM-DD) chega por parâmetro. Nada aqui importa de outros ficheiros de Pessoas além dos tipos.
-import type { MotivoPerda, PapelPessoa, PassoChamada, ResultadoContacto } from "./pessoasTipos";
+// relógio: o dia de hoje (AAAA-MM-DD) chega por parâmetro. No fim, os registos que a chamada deixa na pessoa (contacto e visita).
+import type { ContactoPessoa, VisitaPessoa } from "@/components/negocio-metas/registosTipos";
+import type { DadosChamada } from "./acoesPessoa";
+import { destinoInicial, moradaDaLead, resolverDestino, textoMoradaVisita } from "./moradaVisita";
+import type { MotivoEncerramento, PapelPessoa, PassoChamada, Pessoa, ResultadoContacto } from "./pessoasTipos";
+import { visitaNova, type VisitaPorRegistar } from "./visitaDaPessoa";
 
-/** O que decide quais os passos que cabem: um cliente não se perde e uma perdida não leva visita. */
+/**
+ * O que decide quais os passos que cabem: um cliente não encerra a abordagem, e uma pessoa com a abordagem encerrada (ou perdida) não leva
+ * visita nem se volta a encerrar. Com um negócio aberto também não há abordagem a encerrar.
+ */
 export interface ContextoChamada {
   papel: PapelPessoa;
+  /** A pessoa está perdida, ou com a abordagem encerrada. */
   perdida: boolean;
+  comNegocioAberto?: boolean;
 }
 
 const PASSOS_DO_RESULTADO: Record<ResultadoContacto, readonly PassoChamada[]> = {
@@ -19,7 +28,7 @@ const PASSOS_DO_RESULTADO: Record<ResultadoContacto, readonly PassoChamada[]> = 
 /** Os passos que cabem a um resultado, pela ordem em que se mostram (o primeiro é o recomendado). */
 export function passosDisponiveis(resultado: ResultadoContacto, ctx: ContextoChamada): PassoChamada[] {
   return PASSOS_DO_RESULTADO[resultado].filter((p) => {
-    if (p === "perder") return ctx.papel === "lead" && !ctx.perdida;
+    if (p === "perder") return ctx.papel === "lead" && !ctx.perdida && !ctx.comNegocioAberto;
     if (p === "marcarVisita") return !ctx.perdida;
     return true;
   });
@@ -44,7 +53,8 @@ export type ErroHora = "horaVazia" | "horaInvalida";
 export interface ErrosChamada {
   data: ErroData | null;
   hora: ErroHora | null;
-  motivo: "motivoVazio" | null;
+  /** Falta o motivo, ou o texto do motivo «outro». */
+  motivo: "motivoVazio" | "outroVazio" | null;
 }
 
 const FORMATO_DATA = /^\d{4}-\d{2}-\d{2}$/;
@@ -61,13 +71,22 @@ export interface EntradaErros {
   passo: PassoChamada;
   data: string;
   hora: string;
-  motivo: MotivoPerda | "";
+  motivo: MotivoEncerramento | "";
+  /** O texto do motivo «outro». */
+  motivoOutro?: string;
 }
 
-/** Só valida o que o passo escolhido pede: dia e hora para a visita e o "ligar numa data", o motivo para perder. */
+/** O erro do motivo ao encerrar: falta escolher um, ou o «outro» está sem texto. */
+function erroDoMotivo(e: EntradaErros): ErrosChamada["motivo"] {
+  if (e.passo !== "perder") return null;
+  if (e.motivo === "") return "motivoVazio";
+  return e.motivo === "outro" && (e.motivoOutro ?? "").trim() === "" ? "outroVazio" : null;
+}
+
+/** Só valida o que o passo escolhido pede: dia e hora para a visita e o "ligar numa data", o motivo para encerrar a abordagem. */
 export function errosChamada(e: EntradaErros, hoje: string): ErrosChamada {
   const diaHora = exigeDiaHora(e.passo) ? errosDiaHora(e.data, e.hora, hoje) : { data: null, hora: null };
-  return { ...diaHora, motivo: e.passo === "perder" && e.motivo === "" ? "motivoVazio" : null };
+  return { ...diaHora, motivo: erroDoMotivo(e) };
 }
 
 export const temErros = (e: ErrosChamada): boolean => e.data !== null || e.hora !== null || e.motivo !== null;
@@ -75,3 +94,27 @@ export const temErros = (e: ErrosChamada): boolean => e.data !== null || e.hora 
 /** "16/10 · 09:30" (ou só "16/10" sem hora), a partir de AAAA-MM-DD e HH:MM. */
 export const textoAgenda = (dia: string, hora: string): string =>
   [`${dia.slice(8, 10)}/${dia.slice(5, 7)}`, hora].filter(Boolean).join(" · ");
+
+/** O contacto da chamada: o dia de hoje, o resultado e a nota aparada. O formulário que a pessoa preencheu não conta como contacto. */
+export const contactoDaChamada = (
+  pessoaId: string, d: Pick<DadosChamada, "resultado" | "nota" | "hoje">,
+): Omit<ContactoPessoa, "id" | "negocioId"> => ({ pessoaId, data: d.hoje, resultado: d.resultado, nota: d.nota.trim() });
+
+/** O texto da atividade da visita marcada na chamada: "16/10 · 09:30 · Rua A 1, 1000-001 Lisboa". */
+export function detalheDaVisitaDaChamada(pessoa: Pick<Pessoa, "morada">, d: Pick<DadosChamada, "data" | "hora" | "destinoVisita">): string {
+  const lead = moradaDaLead(pessoa);
+  const lugar = textoMoradaVisita(resolverDestino(d.destinoVisita ?? destinoInicial(lead), lead).moradaVisita);
+  return [textoAgenda(d.data ?? "", d.hora ?? ""), lugar].filter(Boolean).join(" · ");
+}
+
+/** A visita que a chamada marca (só no passo `marcarVisita`), ou `null`: outro passo, ou dados que não servem. */
+export function visitaDaChamada(
+  pessoa: Pick<Pessoa, "id" | "morada" | "comercial">, d: DadosChamada, existentes: readonly Pick<VisitaPessoa, "estado">[],
+): VisitaPorRegistar | null {
+  if (d.passo !== "marcarVisita") return null;
+  const r = visitaNova(
+    pessoa, { data: d.data ?? "", hora: d.hora ?? "", nota: "", destino: d.destinoVisita, detalhe: detalheDaVisitaDaChamada(pessoa, d) },
+    existentes, d.hoje,
+  );
+  return r && { ...r, visita: { ...r.visita, pessoaId: pessoa.id } };
+}

@@ -6,6 +6,7 @@ import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/Abas
 import { juntarPessoas } from "@/components/pessoas/juntarPessoas";
 import { paraPainelNegocio } from "@/components/pessoas/paraPainelNegocio";
 import { PESSOAS_EXEMPLO } from "@/components/pessoas/pessoasExemplo";
+import { REGISTOS_EXEMPLO } from "@/components/pessoas/registosExemplo";
 import { paraOpcao } from "@/components/pessoas/pessoaOpcao";
 import { usePessoasNovas } from "@/components/pessoas/pessoasNovas";
 import { useNegociosDasPessoas } from "@/components/pessoas/useNegociosDasPessoas";
@@ -13,11 +14,13 @@ import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { AbaQuadro } from "@/components/negocio-metas/AbaQuadro";
 import { BotaoWorkflow } from "@/components/negocio-metas/BotaoWorkflow";
 import { DashboardNegocios } from "@/components/negocio-metas/DashboardNegocios";
+import { funilDaAbordagem, negociosParaMetas } from "@/components/negocio-metas/percursoNegocio";
 import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
 import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
 import { detalheDoNegocio, negociosDoQuadro, useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { criarNegocioNovo, useNegociosNovos } from "@/components/negocio-metas/negociosNovos";
+import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import type { DadosCriarNegocio } from "@/components/negocio-metas/novoNegocio";
 import { useParametroOpen } from "@/components/negocio-metas/useParametroOpen";
 import { SeletorModo } from "@/components/negocio-metas/SeletorModo";
@@ -41,12 +44,12 @@ import { WorkflowExemploProvider } from "@/components/negocio-metas/useWorkflowE
 function usePessoasDaPagina() {
   const novas = usePessoasNovas();
   const negocios = useNegociosDasPessoas();
+  const registos = useRegistosPessoa(REGISTOS_EXEMPLO);
   const pessoas = useMemo(() => [...PESSOAS_EXEMPLO, ...novas.pessoas], [novas]);
-  const doPainel = useMemo(
-    () => new Map(juntarPessoas(pessoas, negocios, HOJE_EXEMPLO).map((r) => [r.pessoa.id, paraPainelNegocio(r)])),
-    [pessoas, negocios],
-  );
+  const resumos = useMemo(() => juntarPessoas(pessoas, negocios, HOJE_EXEMPLO, registos), [pessoas, negocios, registos]);
+  const doPainel = useMemo(() => new Map(resumos.map((r) => [r.pessoa.id, paraPainelNegocio(r)])), [resumos]);
   return {
+    registos, resumos,
     pessoaDe: useCallback((pessoaId: string) => doPainel.get(pessoaId) ?? null, [doPainel]),
     paraEscolher: useMemo(() => pessoas.map(paraOpcao), [pessoas]),
   };
@@ -82,6 +85,10 @@ const NegocioMetas = () => {
     [novos, alteracoes],
   );
   const { negocios } = dados;
+  // As metas contam a partir do Orçamento: um negócio em Levantamento fica de fora e a abordagem conta à parte, num funil.
+  const { registos, resumos } = pessoasDaPagina;
+  const dadosMetas = useMemo(() => ({ ...dados, negocios: negociosParaMetas(dados.negocios, registos) }), [dados, registos]);
+  const funil = useMemo(() => funilDaAbordagem(resumos.map((r) => r.coluna), negocios, registos), [resumos, negocios, registos]);
   const { abrir } = useParametroOpen();
   const [recemCriado, setRecemCriado] = useState<string | null>(null);
   const [anuncio, setAnuncio] = useState({ n: 0, texto: "" });
@@ -155,7 +162,7 @@ const NegocioMetas = () => {
               />
             </TabsContent>
             <TabsContent value="dashboard" className="mt-0">
-              <DashboardNegocios dados={dados} aoIrParaQuadro={() => mudarVista("quadro")} />
+              <DashboardNegocios dados={dadosMetas} funil={funil} aoIrParaQuadro={() => mudarVista("quadro")} />
             </TabsContent>
           </Tabs>
           <NovoOrcamentoDialogo

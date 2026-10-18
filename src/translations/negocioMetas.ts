@@ -5,6 +5,8 @@
 import { negocioMetasAcoesTranslations } from "./negocioMetasAcoes";
 import { negocioMetasNovoTranslations } from "./negocioMetasNovo";
 import { negocioMetasPainelTranslations } from "./negocioMetasPainel";
+import { negocioMetasPercursoTranslations } from "./negocioMetasPercurso";
+import { negocioMetasPerdaTranslations } from "./negocioMetasPerda";
 import { negocioMetasQuadroTranslations } from "./negocioMetasQuadro";
 import { negocioMetasWorkflowTranslations } from "./negocioMetasWorkflow";
 
@@ -101,7 +103,7 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.list.caption': 'Deals, one per row. Choose one to open it.',
     'businessGoals.deals.next': 'Next step',
     'businessGoals.phase.ganho': 'Won',
-    'businessGoals.step.escolherOrcamento': 'Choose a quote',
+    'businessGoals.step.criarOrcamento': 'Create the quote',
     'businessGoals.step.criarProposta': 'Create the proposal',
     'businessGoals.step.enviarProposta': 'Send the proposal',
     'businessGoals.step.esperarCliente': 'Wait for the customer',
@@ -247,7 +249,7 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
     'businessGoals.list.caption': 'Negócios: um por linha. Escolhe um para o abrir.',
     'businessGoals.deals.next': 'Próximo passo',
     'businessGoals.phase.ganho': 'Ganho',
-    'businessGoals.step.escolherOrcamento': 'Escolher orçamento',
+    'businessGoals.step.criarOrcamento': 'Criar o orçamento',
     'businessGoals.step.criarProposta': 'Criar a proposta',
     'businessGoals.step.enviarProposta': 'Enviar a proposta',
     'businessGoals.step.esperarCliente': 'Esperar pelo cliente',
@@ -304,6 +306,6 @@ const textosBase: Record<"en" | "pt", Record<string, string>> = {
 };
 
 export const negocioMetasTranslations: Record<string, Record<string, string>> = {
-  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en, ...negocioMetasPainelTranslations.en, ...negocioMetasNovoTranslations.en, ...negocioMetasAcoesTranslations.en },
-  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt, ...negocioMetasPainelTranslations.pt, ...negocioMetasNovoTranslations.pt, ...negocioMetasAcoesTranslations.pt },
+  en: { ...textosBase.en, ...negocioMetasQuadroTranslations.en, ...negocioMetasWorkflowTranslations.en, ...negocioMetasPainelTranslations.en, ...negocioMetasNovoTranslations.en, ...negocioMetasAcoesTranslations.en, ...negocioMetasPerdaTranslations.en, ...negocioMetasPercursoTranslations.en },
+  pt: { ...textosBase.pt, ...negocioMetasQuadroTranslations.pt, ...negocioMetasWorkflowTranslations.pt, ...negocioMetasPainelTranslations.pt, ...negocioMetasNovoTranslations.pt, ...negocioMetasAcoesTranslations.pt, ...negocioMetasPerdaTranslations.pt, ...negocioMetasPercursoTranslations.pt },
 };

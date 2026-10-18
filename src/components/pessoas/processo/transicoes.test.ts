@@ -256,6 +256,15 @@ describe("enviarProposta", () => {
     expect(ok(enviarProposta(estado, item, CONDICOES, HOJE)).negocio.proposta).toEqual({ estado: "enviada" });
   });
 
+  it("o passo «criar a proposta» (orçamento sem detalhe, os de exemplo) também envia: passa a Proposta enviada, sem extras de orçamento", () => {
+    const { item, estado } = cenario(comOrcamento());
+    expect(passoDoItem(item).id).toBe("criarProposta");
+    const r = ok(enviarProposta(estado, item, CONDICOES, HOJE));
+    expect(r.negocio.proposta).toEqual({ estado: "enviada" });
+    expect(r.extras.orcamento).toBeUndefined();
+    expect(r.extras.condicoes?.garantia).toBe(2);
+  });
+
   it("uma proposta que já estava em rascunho (sem orçamento detalhado) passa a enviada, e só as condições vão para os extras", () => {
     const rascunho = comOrcamento(5600, { proposta: { estado: "rascunho" } });
     const { item, estado } = cenario(rascunho);

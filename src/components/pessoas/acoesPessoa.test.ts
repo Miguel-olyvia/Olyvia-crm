@@ -2,17 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   adiar, juntarAtividade, juntarNota, ligacoes, perder, reativar, registarChamada, somarDias, type EstadoAcoes,
 } from "./acoesPessoa";
-import { pedidoBase, visitaBase } from "./fabricaTestes";
 import { ATIVIDADE_EXEMPLO, PESSOAS_EXEMPLO, SEMENTES_EXEMPLO } from "./pessoasExemplo";
-import type { ItemAtividade, PedidoNegocio, Pessoa } from "./pessoasTipos";
+import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 
 const pessoa = (id: string, extra: Partial<Pessoa> = {}): Pessoa => ({
   id, nome: id, contacto: { telefone: null, email: null }, comercial: "Ana", origem: "site", viaEntrada: "formulario", saude: 50,
   ultimoContactoDias: 9, ...extra,
 });
-const estado = (pessoas: Pessoa[] = [pessoa("a"), pessoa("c")], pedidos: PedidoNegocio[] = []): EstadoAcoes => ({
-  pessoas, atividade: [], contactadas: [], pedidos,
-});
+const estado = (pessoas: Pessoa[] = [pessoa("a"), pessoa("c")]): EstadoAcoes => ({ pessoas, atividade: [], contactadas: [] });
 const item = (id: string, quando: string): ItemAtividade => ({
   id, pessoaId: "a", tipo: "nota", titulo: id, detalhe: "", quando, exemplo: true,
 });
@@ -133,26 +130,16 @@ describe("adiar", () => {
     expect(adiar(e, "x", 3, "2026-10-13")).toBe(e);
   });
 
-  it("quando o próximo contacto é uma visita, não adia nada nem cria uma chamada agendada que ninguém marcou (o estado fica como está)", () => {
-    const pedidos = [pedidoBase("pd-1", { pessoaId: "a", contactado: true, visitas: [visitaBase("pd-1-v1", { data: "2026-10-16" })] })];
-    const base = estado(undefined, pedidos);
-    expect(adiar(base, "a", 7, "2026-10-13")).toBe(base);
+  it("quando o próximo contacto é uma visita (quem chama sabe pelos registos), não adia nada nem cria uma chamada agendada que ninguém marcou", () => {
+    const base = estado();
+    expect(adiar(base, "a", 7, "2026-10-13", true)).toBe(base);
     expect(base.pessoas[0].proximoContacto).toBeUndefined();
   });
 
-  it("se a chamada agendada é mais cedo do que a visita, adia só a chamada: as visitas ficam nos dias em que foram marcadas", () => {
-    const pedidos = [pedidoBase("pd-1", { pessoaId: "a", contactado: true, visitas: [visitaBase("pd-1-v1", { data: "2026-10-20" })] })];
-    const base = estado([pessoa("a", { proximoContacto: "2026-10-14" }), pessoa("c")], pedidos);
-    const novo = adiar(base, "a", 3, "2026-10-13");
+  it("se a chamada agendada é mais cedo do que a visita, adia só a chamada: quem chama diz que o próximo contacto não vem da visita", () => {
+    const base = estado([pessoa("a", { proximoContacto: "2026-10-14" }), pessoa("c")]);
+    const novo = adiar(base, "a", 3, "2026-10-13", false);
     expect(novo.pessoas[0].proximoContacto).toBe("2026-10-16");
-    expect(novo.pedidos).toBe(pedidos);
-  });
-
-  it("uma visita já feita, ou cancelada, não é próximo contacto: adia-se a chamada como sempre", () => {
-    const pedidos = [pedidoBase("pd-1", { pessoaId: "a", contactado: true, visitas: [
-      visitaBase("pd-1-v1", { data: "2026-10-16", estado: "feita" }), visitaBase("pd-1-v2", { data: "2026-10-15", estado: "cancelada" }),
-    ] })];
-    expect(adiar(estado(undefined, pedidos), "a", 7, "2026-10-13").pessoas[0].proximoContacto).toBe("2026-10-20");
   });
 });
 

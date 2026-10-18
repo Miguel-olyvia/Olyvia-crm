@@ -73,13 +73,13 @@ const LEADS_NOVAS: PessoaSemente[] = [
   },
 ];
 
-/** As sementes: a pessoa com a etapa e a visita do exemplo, de onde saem os pedidos de exemplo (ver `pedidosDeExemplo.ts`). */
+/** As sementes: a pessoa com a etapa e a visita do exemplo, de onde saem os registos de exemplo (ver `registosExemplo.ts`). */
 export const SEMENTES_EXEMPLO: PessoaSemente[] = [
   ...PESSOAS_COM_NEGOCIO,
   ...LEADS_NOVAS.map((p) => ({ ...p, ...extrasExemplo(p.id) })),
 ];
 
-/** As pessoas de exemplo: as sementes sem a etapa nem a visita (que são dos pedidos). */
+/** As pessoas de exemplo: as sementes sem a etapa nem a visita (que são registos da pessoa). */
 export const PESSOAS_EXEMPLO: Pessoa[] = [...SEMENTES_EXEMPLO.map(paraPessoa), ...PESSOAS_VARIADO];
 
 /** A atividade de exemplo (chamadas, emails e registo da ficha), gerada a partir do último contacto de cada pessoa. */

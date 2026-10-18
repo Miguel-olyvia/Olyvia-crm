@@ -151,7 +151,7 @@ describe("Negócio e metas: orçamento e mudança de passo", () => {
     const dialogo = await screen.findByRole("dialog", { name: "Proposta recusada" });
     fireEvent.change(within(dialogo).getByLabelText("Motivo da perda"), { target: { value: "Concorrência" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Confirmar" }));
-    expect(alteracoesAtuais().perdidos[negocio.id]).toEqual({ motivo: "Concorrência", mes: "2026-10" });
+    expect(alteracoesAtuais().perdidos[negocio.id]).toMatchObject({ motivo: "Concorrência", mes: "2026-10", fase: "proposta" });
     expect(screen.queryByRole("button", { name: new RegExp(`^${negocio.pessoa} · `) })).not.toBeInTheDocument();
   });
 });

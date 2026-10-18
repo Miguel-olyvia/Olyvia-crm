@@ -127,7 +127,9 @@ export function responderDirecao(estado: EstadoTransicao, item: ItemProcesso, da
  */
 export function enviarProposta(estado: EstadoTransicao, item: ItemProcesso, condicoes: CondicoesForm, hoje: string): Transicao {
   const orcamento = orcamentoEscolhidoDetalhado(estado.negocio, estado.extras);
-  const noPasso = passoDoItem(item).id === "enviarProposta";
+  // «Criar a proposta» (o orçamento não tem detalhe: os negócios de exemplo) e «enviar a proposta» são o mesmo gesto.
+  const passo = passoDoItem(item).id;
+  const noPasso = passo === "enviarProposta" || passo === "criarProposta";
   const portao = portaoEnviarProposta({ verificado: noPasso && (orcamento?.verificado ?? true), erros: validarCondicoes(condicoes, hoje) });
   if (!portao.ok) return recusar(portao);
   return {

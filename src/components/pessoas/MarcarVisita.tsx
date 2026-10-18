@@ -1,5 +1,5 @@
-// "Marcar visita" nas submissões que a pedem: um diálogo curto (dia, hora, nota e morada da visita) que marca a visita EM MEMÓRIA (a pessoa
-// passa à etapa Visita e a atividade regista-o). Um contexto liga o botão de cada cartão de submissão ao diálogo único da
+// "Marcar visita" nas submissões que a pedem e no "A fazer": um diálogo curto (dia, hora, nota e morada da visita) que marca a visita da
+// PESSOA EM MEMÓRIA (a pessoa passa à etapa Visita e a atividade regista-o). Um contexto liga o botão de cada cartão de submissão ao diálogo único da
 // página; sem o provider (outros usos do cartão) o botão não existe.
 import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -11,11 +11,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { CamposDataHora, MensagemErro } from "./CamposDataHora";
-import { MarcarVisitaContext, type PedidoVisita } from "./marcarVisitaContexto";
+import { MarcarVisitaContext, type AberturaVisita } from "./marcarVisitaContexto";
 import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
 import { destinoInicial, validarDestino, type DestinoVisita } from "./moradaVisita";
 import type { ErroMoradaVisita } from "./moradaVisita";
-import type { DadosVisitaPedido, EscolhaPedido } from "./acoesPedido";
+import type { DadosVisitaPessoa } from "./visitaDaPessoa";
 import { MAX_NOTA_VISITA, validarVisita, type ErroVisita } from "./visitaPessoa";
 
 const V = "pessoasPagina.visitDialog.";
@@ -23,9 +23,9 @@ const V = "pessoasPagina.visitDialog.";
 interface ProviderProps {
   /** O dia de hoje (AAAA-MM-DD): a data mínima da visita. */
   hoje: string;
-  /** Marca a visita: `escolha` diz o pedido (e o serviço de um pedido novo), `dados` o dia, a hora, a nota e a morada. */
-  aoMarcar: (pessoaId: string, escolha: EscolhaPedido, dados: DadosVisitaPedido) => void;
-  /** As pessoas que já têm uma visita marcada em algum pedido (juntam-se às marcadas neste ecrã). */
+  /** Marca a visita da pessoa: `dados` são o dia, a hora, a nota e a morada. */
+  aoMarcar: (pessoaId: string, dados: DadosVisitaPessoa) => void;
+  /** As pessoas que já têm uma visita por ligar (juntam-se às marcadas neste ecrã). */
   jaComVisita?: ReadonlySet<string>;
   /** Ao fechar o diálogo: devolve o foco a quem o abriu e diz se o fez (o `ProcessoProvider` fá-lo para o "A fazer"); sem isto, o diálogo devolve-o por si. */
   aoDevolverFoco?: () => boolean;
@@ -39,7 +39,7 @@ interface CamposVisitaProps {
   hoje: string;
   campoData: Ref<HTMLInputElement>;
   aoMudar: (parcial: Partial<CamposVisitaProps["campos"]>) => void;
-  moradaLead: PedidoVisita["moradaLead"];
+  moradaLead: AberturaVisita["moradaLead"];
   destino: DestinoVisita;
   aoMudarDestino: (destino: DestinoVisita) => void;
 }
@@ -74,15 +74,15 @@ function CamposVisita({ id, campos, erro, hoje, campoData, aoMudar, moradaLead, 
   );
 }
 
-function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita; hoje: string; aoMarcar: ProviderProps["aoMarcar"]; aoFechar: () => void }) {
+function FormVisita({ pessoa, hoje, aoMarcar, aoFechar }: { pessoa: AberturaVisita; hoje: string; aoMarcar: ProviderProps["aoMarcar"]; aoFechar: () => void }) {
   const { t } = useTranslation();
   const id = useId();
   const [campos, setCampos] = useState({ data: "", hora: "", nota: "" });
-  const [destino, setDestino] = useState<DestinoVisita>(() => destinoInicial(pedido.moradaLead));
+  const [destino, setDestino] = useState<DestinoVisita>(() => destinoInicial(pessoa.moradaLead));
   const [tentou, setTentou] = useState(false);
   const campoData = useRef<HTMLInputElement>(null);
   const formulario = useRef<HTMLFormElement>(null);
-  const erroAtual = validarVisita({ ...campos, destino }, hoje, pedido.moradaLead);
+  const erroAtual = validarVisita({ ...campos, destino }, hoje, pessoa.moradaLead);
   const enviar = (e: FormEvent) => {
     e.preventDefault();
     setTentou(true);
@@ -91,8 +91,8 @@ function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita
       setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? campoData.current)?.focus(), 0);
       return;
     }
-    aoMarcar(pedido.pessoaId, { pedidoId: pedido.pedidoId, servico: pedido.servico }, { ...campos, destino });
-    toast.success(t(`${V}done`, { name: pedido.nome }));
+    aoMarcar(pessoa.pessoaId, { ...campos, destino });
+    toast.success(t(`${V}done`, { name: pessoa.nome }));
     aoFechar();
   };
   return (
@@ -100,7 +100,7 @@ function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita
       <CamposVisita
         id={id} campos={campos} erro={tentou ? erroAtual : null} hoje={hoje} campoData={campoData}
         aoMudar={(parcial) => setCampos((c) => ({ ...c, ...parcial }))}
-        moradaLead={pedido.moradaLead} destino={destino} aoMudarDestino={setDestino}
+        moradaLead={pessoa.moradaLead} destino={destino} aoMudarDestino={setDestino}
       />
       <DialogFooter className="gap-2 sm:space-x-0">
         <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={aoFechar}>{t(`${V}cancel`)}</Button>
@@ -112,32 +112,29 @@ function FormVisita({ pedido, hoje, aoMarcar, aoFechar }: { pedido: PedidoVisita
 
 export function MarcarVisitaProvider({ hoje, aoMarcar, aoDevolverFoco, jaComVisita, children }: ProviderProps) {
   const { t } = useTranslation();
-  const [pedido, setPedido] = useState<PedidoVisita | null>(null);
-  const ultimo = useRef<PedidoVisita | null>(null);
-  if (pedido) ultimo.current = pedido;
-  const mostrado = pedido ?? ultimo.current;
+  const [aberta, setAberta] = useState<AberturaVisita | null>(null);
+  const ultimo = useRef<AberturaVisita | null>(null);
+  if (aberta) ultimo.current = aberta;
+  const mostrado = aberta ?? ultimo.current;
   const [marcadas, setMarcadas] = useState<ReadonlySet<string>>(new Set());
   const valor = useMemo(
-    () => ({ pedir: (p: PedidoVisita) => setPedido(p), marcadas: jaComVisita ? new Set([...marcadas, ...jaComVisita]) : marcadas }),
+    () => ({ pedir: (p: AberturaVisita) => setAberta(p), marcadas: jaComVisita ? new Set([...marcadas, ...jaComVisita]) : marcadas }),
     [marcadas, jaComVisita],
   );
-  const marcar: ProviderProps["aoMarcar"] = (pessoaId, escolha, dados) => {
-    aoMarcar(pessoaId, escolha, dados);
+  const marcar: ProviderProps["aoMarcar"] = (pessoaId, dados) => {
+    aoMarcar(pessoaId, dados);
     setMarcadas((antes) => new Set(antes).add(pessoaId));
   };
   return (
     <MarcarVisitaContext.Provider value={valor}>
       {children}
-      <Dialog open={pedido !== null} onOpenChange={(aberto) => { if (!aberto) setPedido(null); }}>
+      <Dialog open={aberta !== null} onOpenChange={(aberto) => { if (!aberto) setAberta(null); }}>
         <DialogContent className="motion-reduce:!animate-none" onCloseAutoFocus={(e) => { if (aoDevolverFoco?.()) e.preventDefault(); }}>
           <DialogHeader>
             <DialogTitle>{t(`${V}title`)}</DialogTitle>
-            {/* A visita é de um pedido: a descrição diz qual (uma pessoa pode ter vários, também sem serviço). */}
-            <DialogDescription>
-              {t("pessoasPagina.process.visitDescription", { name: mostrado?.pedidoNome ? `${mostrado.nome} · ${mostrado.pedidoNome}` : mostrado?.nome ?? "" })}
-            </DialogDescription>
+            <DialogDescription>{t("pessoasPagina.process.visitDescription", { name: mostrado?.nome ?? "" })}</DialogDescription>
           </DialogHeader>
-          {mostrado && <FormVisita key={mostrado.pessoaId} pedido={mostrado} hoje={hoje} aoMarcar={marcar} aoFechar={() => setPedido(null)} />}
+          {mostrado && <FormVisita key={mostrado.pessoaId} pessoa={mostrado} hoje={hoje} aoMarcar={marcar} aoFechar={() => setAberta(null)} />}
         </DialogContent>
       </Dialog>
     </MarcarVisitaContext.Provider>

@@ -14,7 +14,7 @@ import type { DirecaoOrcamento } from "./orcamentoDetalhado";
 export type FaltaProcesso =
   | "dataVisita" | "visita" | "linhaInvalida" | "pessoa"
   | "orcamentoLinhas" | "orcamentoValor" | "semOrcamento" | "margem" | "abaixoDoCusto" | "semPedido" | "porVerificar" | "condicoes"
-  | "orcamentoNaoGuardado" | "negocioDesapareceu" | "descontoInvalido" | "pessoaPerdida" | "pedidoDesapareceu";
+  | "escolhaEmFalta" | "motivoEmFalta" | "orcamentoNaoGuardado" | "negocioDesapareceu" | "descontoInvalido" | "pessoaPerdida" | "semLevantamento";
 
 export interface Portao {
   ok: boolean;
@@ -34,40 +34,44 @@ type ErrosDeLevantamento = ReturnType<typeof validarLevantamento>;
 /** Os erros do levantamento como faltas: só há linhas por acabar (haver linhas é opcional). */
 const faltasDoLevantamento = (erros: ErrosDeLevantamento): FaltaProcesso[] => (erros.linhas ? ["linhaInvalida"] : []);
 
-type VisitasDoPedido = readonly Pick<VisitaNegocio, "estado">[];
+type VisitasDaPessoa = readonly Pick<VisitaNegocio, "estado">[];
 
-const haVisitaFeita = (visitas: VisitasDoPedido): boolean => visitas.some((v) => v.estado === "feita");
-const haVisita = (visitas: VisitasDoPedido): boolean => visitas.some((v) => v.estado !== "cancelada");
+const haVisitaFeita = (visitas: VisitasDaPessoa): boolean => visitas.some((v) => v.estado === "feita");
+const haVisita = (visitas: VisitasDaPessoa): boolean => visitas.some((v) => v.estado !== "cancelada");
 
 /**
- * Marcar a visita como feita (abrir o painel de visita e levantamento do pedido): tem de haver uma visita, e a próxima por fazer
+ * Marcar a visita como feita (abrir o painel de visita e levantamento da pessoa): tem de haver uma visita, e a próxima por fazer
  * com data (pode ser de um dia que já passou: é o caso normal). Com todas as visitas já feitas o painel abre na mesma (faltam as medidas).
  */
-export function portaoVisitaFeita(pedido: { visitas: readonly VisitaNegocio[] } | null): Portao {
-  if (pedido === null || !haVisita(pedido.visitas)) return portao(["visita"]);
-  const proxima = proximaVisitaDoNegocio(pedido.visitas);
+export function portaoVisitaFeita(pessoa: { visitas: readonly VisitaNegocio[] } | null): Portao {
+  if (pessoa === null || !haVisita(pessoa.visitas)) return portao(["visita"]);
+  const proxima = proximaVisitaDoNegocio(pessoa.visitas);
   return portao(proxima && proxima.data.trim() === "" ? ["dataVisita"] : []);
 }
 
 /**
- * Guardar a visita e o levantamento numa só gravação: o levantamento é opcional, mas as linhas que existirem têm de estar completas. Num
- * pedido novo (`exigirVisita`) tem de haver pelo menos uma visita que não esteja cancelada.
+ * Guardar a visita e o levantamento da pessoa numa só gravação: nem a visita nem o levantamento são obrigatórios, mas as linhas que existirem
+ * têm de estar completas.
  */
-export function portaoLevantamento(dados: { visitas: VisitasDoPedido; linhas: readonly LinhaForm[]; exigirVisita?: boolean }): Portao {
+export function portaoLevantamento(dados: { visitas: VisitasDaPessoa; linhas: readonly LinhaForm[] }): Portao {
   const estado = haVisitaFeita(dados.visitas) ? "feito" : "porFazer";
-  const faltas = faltasDoLevantamento(validarLevantamento(levantamentoDeLinhas(dados.linhas, estado)));
-  return portao([...(dados.exigirVisita && !haVisita(dados.visitas) ? (["visita"] as const) : []), ...faltas]);
+  return portao(faltasDoLevantamento(validarLevantamento(levantamentoDeLinhas(dados.linhas, estado))));
 }
 
 /**
- * Criar o negócio: só a pessoa é obrigatória (e as linhas de medidas que existirem têm de estar completas). A visita e o levantamento
- * são opcionais: sem visita, com visitas por fazer ou com uma feita e sem linhas, nada mais se exige.
+ * Fazer o levantamento de um negócio em Levantamento: tem de haver um levantamento para ligar ao negócio (linhas, observações, ou um
+ * que a pessoa já tenha por ligar), e as linhas que existirem têm de estar completas. Uma linha por acabar diz só isso.
  */
-export function portaoCriarNegocio(dados: { pessoaId: string; visitas: VisitasDoPedido; linhas: readonly LinhaForm[] }): Portao {
-  const erros = validarNovoNegocio({
-    pessoaId: dados.pessoaId, levantamento: levantamentoDeLinhas(dados.linhas, haVisitaFeita(dados.visitas) ? "feito" : "porFazer"),
-  });
-  return portao([...(erros.pessoaId ? (["pessoa"] as const) : []), ...faltasDoLevantamento(erros)]);
+export function portaoFazerLevantamento(dados: { linhas: readonly LinhaForm[]; observacoes: string; temPorLigar: boolean }): Portao {
+  const faltas = faltasDoLevantamento(validarLevantamento(levantamentoDeLinhas(dados.linhas, "feito")));
+  if (faltas.length > 0) return portao(faltas);
+  const haConteudo = dados.linhas.length > 0 || dados.observacoes.trim() !== "";
+  return portao(haConteudo || dados.temPorLigar ? [] : ["semLevantamento"]);
+}
+
+/** Criar o negócio: só a pessoa é obrigatória. A visita e o levantamento são opcionais e ligam-se (não se escrevem aqui). */
+export function portaoCriarNegocio(dados: { pessoaId: string }): Portao {
+  return portao(validarNovoNegocio({ pessoaId: dados.pessoaId }).pessoaId ? ["pessoa"] : []);
 }
 
 /** Guardar o orçamento: pelo menos uma linha. */

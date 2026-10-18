@@ -1,5 +1,6 @@
 // Textos do botão "Novo negócio" e do seu painel lateral ("Negócio e metas"). Juntam-se aos de `negocioMetas.ts`. Apenas
 // en/pt, como o resto da página. As chaves daqui levam o prefixo `businessGoals.new.`, posto por `comPrefixo`.
+import { negocioMetasRegistosTranslations } from "./negocioMetasRegistos";
 import { negocioMetasVisitaTranslations } from "./negocioMetasVisita";
 
 const PREFIXO = "businessGoals.new.";
@@ -21,7 +22,7 @@ const pt: Record<string, string> = {
   'person.locked': 'A pessoa é a da ficha de onde veio: não se pode mudar aqui.',
   'salesperson': 'Comercial',
   'first': 'Primeiro passo',
-  'first.text': 'O negócio começa em Orçamento: o primeiro passo é fazer o levantamento.',
+  'first.text': 'O negócio começa em Levantamento ou em Orçamento, conforme escolheres na aba Registos.',
   'contact': 'Contacto',
   'contact.hint': 'Opcional. Vem da ficha da pessoa e podes alterá-lo.',
   'contact.email': 'Email',
@@ -110,7 +111,7 @@ const en: Record<string, string> = {
   'person.locked': 'The person is the one from the record you came from: it cannot be changed here.',
   'salesperson': 'Salesperson',
   'first': 'First step',
-  'first.text': 'The deal starts in Quote: the first step is to survey the site.',
+  'first.text': 'The deal starts in Survey or in Quote, depending on what you choose in the Records tab.',
   'contact': 'Contact',
   'contact.hint': 'Optional. It comes from the person’s record and you can change it.',
   'contact.email': 'Email',
@@ -186,6 +187,6 @@ const en: Record<string, string> = {
 };
 
 export const negocioMetasNovoTranslations: Record<"en" | "pt", Record<string, string>> = {
-  en: { ...comPrefixo(en), ...negocioMetasVisitaTranslations.en },
-  pt: { ...comPrefixo(pt), ...negocioMetasVisitaTranslations.pt },
+  en: { ...comPrefixo(en), ...negocioMetasVisitaTranslations.en, ...negocioMetasRegistosTranslations.en },
+  pt: { ...comPrefixo(pt), ...negocioMetasVisitaTranslations.pt, ...negocioMetasRegistosTranslations.pt },
 };

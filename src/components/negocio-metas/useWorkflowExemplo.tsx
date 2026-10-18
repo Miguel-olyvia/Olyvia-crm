@@ -35,6 +35,16 @@ export function useWorkflowExemplo(): WorkflowExemplo {
   return useContext(WorkflowExemploContext) ?? SEM_PROVIDER;
 }
 
+/**
+ * A configuração que as ações de um negócio usam: a do provider da página «Negócio e metas»; fora dele (a página de Pessoas) a que ficou
+ * guardada neste navegador, ou a predefinição. Lê-se uma só vez por montagem.
+ */
+export function useConfigWorkflow(): ConfigWorkflow {
+  const doProvider = useContext(WorkflowExemploContext);
+  const guardada = useMemo(() => (doProvider ? null : lerWorkflow()), [doProvider]);
+  return doProvider?.config ?? guardada ?? PREDEFINICAO;
+}
+
 export function useEstadoWorkflowExemplo(): WorkflowExemplo {
   const [config, setConfig] = useState<ConfigWorkflow>(lerWorkflow);
   const [avisos, setAvisos] = useState<AvisoWorkflow[]>([]);

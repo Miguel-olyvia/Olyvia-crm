@@ -1,9 +1,11 @@
-// Arranque das abas Qualificação e Visita do painel "Novo negócio": perguntas de escolha rápida acessíveis, morada da
-// obra, contadores, passo da visita e o que se devolve ao criar.
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+// Arranque das abas Qualificação (do painel "Novo negócio") e Visita (do painel «Visita e levantamento» da pessoa, o modo `registos`):
+// perguntas de escolha rápida acessíveis, morada da obra, contadores, passo da visita e o que se devolve ao criar ou ao guardar.
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { NovoNegocioDialogo } from "./NovoNegocioDialogo";
-import type { PessoaOpcao } from "./novoNegocio";
+import { repor as reporRegistos } from "./registosPessoa";
+import type { VisitaNegocio } from "./negocioMetas";
+import type { PessoaOpcao, RascunhoLevantamento } from "./novoNegocio";
 import { contarTotal } from "./respostasVisita";
 import { SECCOES_VISITA } from "./visitaExemplo";
 
@@ -30,6 +32,7 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => {};
 });
 beforeEach(() => info.mockClear());
+afterEach(reporRegistos);
 
 const PESSOAS: PessoaOpcao[] = [
   { id: "p-marta", nome: "Marta Silveira", morada: "Rua A, 1000-001 Lisboa" },
@@ -42,6 +45,13 @@ const abrir = () => {
   render(<NovoNegocioDialogo pessoas={PESSOAS} aoCriar={aoCriar} />);
   fireEvent.click(screen.getByRole("button", { name: "Novo negócio" }));
   return { aoCriar, dialogo: screen.getByRole("dialog", { name: "Novo negócio" }) };
+};
+/** O painel «Visita e levantamento» da pessoa (modo `registos`): guarda nos registos, nunca cria um negócio. */
+const abrirRegistos = () => {
+  const aoGuardar = vi.fn((_rascunho: RascunhoLevantamento, _visitas: VisitaNegocio[], _comercial: string) => true);
+  render(<NovoNegocioDialogo pessoas={PESSOAS} modo="registos" guardarLevantamento={{ texto: "Guardar o levantamento", aoGuardar }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Novo negócio" }));
+  return { aoGuardar, dialogo: screen.getByRole("dialog", { name: "Novo negócio" }) };
 };
 type Dialogo = HTMLElement;
 const aba = (d: Dialogo, nome: RegExp) => fireEvent.mouseDown(within(d).getByRole("tab", { name: nome }));
@@ -134,9 +144,31 @@ describe("aba Qualificação", () => {
   });
 });
 
+describe("criar o negócio leva a qualificação e a morada da obra", () => {
+  it("ao criar leva a qualificação e a morada, só do que foi respondido, e nada da visita (que é da pessoa)", async () => {
+    const { aoCriar, dialogo } = abrir();
+    await escolherPessoa(dialogo, "Rui Figueiredo");
+    aba(dialogo, /^Qualificação/);
+    fireEvent.click(opcao(dialogo, "Tipo de imóvel", "Apartamento"));
+    fireEvent.click(opcao(dialogo, "Para quando", "1 a 3 meses"));
+    fireEvent.change(within(dialogo).getByLabelText("Rua e número"), { target: { value: " Rua B 2 " } });
+    fireEvent.change(within(dialogo).getByLabelText("Código postal"), { target: { value: "4000-123" } });
+    criar(dialogo);
+    expect(aoCriar).toHaveBeenCalledTimes(1);
+    const dados = aoCriar.mock.calls[0][0];
+    expect(dados.qualificacao).toEqual([
+      { pergunta: "Tipo de imóvel", resposta: "Apartamento" }, { pergunta: "Para quando", resposta: "1 a 3 meses" },
+    ]);
+    expect(dados.moradaObra).toEqual({ rua: " Rua B 2 ", codigoPostal: "4000-123", localidade: "", andar: "" });
+    expect(dados).not.toHaveProperty("visita");
+    expect(dados.pessoa).toBe(PESSOAS[1]);
+    expect(dados.pessoa).not.toHaveProperty("moradaObra");
+  });
+});
+
 describe("aba Visita", () => {
   it("mostra as sete secções, o passo 1 de 7 com as respostas em falta e a primeira secção aberta", () => {
-    const { dialogo } = abrir();
+    const { dialogo } = abrirRegistos();
     aba(dialogo, /^Visita/);
     const lista = within(dialogo).getByRole("navigation", { name: "Secções da visita" });
     expect(within(lista).getAllByRole("button").map((b) => b.textContent?.replace(/(\d+ (de \d+ respondidas|linhas?|visitas?)).*/, "").trim())).toEqual([
@@ -151,7 +183,7 @@ describe("aba Visita", () => {
   });
 
   it("Exterior do edifício: 0 de 4; Acesso Difícil abre o Impacto no preço, a secção passa a 1 de 5 e o passo é o 2", () => {
-    const { dialogo } = abrir();
+    const { dialogo } = abrirRegistos();
     aba(dialogo, /^Visita/);
     seccao(dialogo, /^Exterior do edifício/);
     expect(within(dialogo).getByRole("heading", { level: 3, name: "Exterior do edifício" })).toBeInTheDocument();
@@ -169,7 +201,7 @@ describe("aba Visita", () => {
   });
 
   it("a secção completa leva o visto (dito em texto) e as perguntas trazem as opções do protótipo", () => {
-    const { dialogo } = abrir();
+    const { dialogo } = abrirRegistos();
     aba(dialogo, /^Visita/);
     seccao(dialogo, /^Escolhas do cliente/);
     fireEvent.click(opcao(dialogo, "O cliente fornece materiais", "Sim"));
@@ -180,7 +212,7 @@ describe("aba Visita", () => {
   });
 
   it("as Medidas da área levam as linhas do levantamento e o contador mostra as linhas", () => {
-    const { dialogo } = abrir();
+    const { dialogo } = abrirRegistos();
     aba(dialogo, /^Visita/);
     seccao(dialogo, /^Medidas da área/);
     fireEvent.click(within(dialogo).getByRole("button", { name: "Adicionar linha" }));
@@ -189,30 +221,16 @@ describe("aba Visita", () => {
     expect(within(dialogo).getByText("Total: 1 linha")).toBeInTheDocument();
   });
 
-  it("ao criar leva a qualificação, a morada e a visita em texto, só do que foi respondido", async () => {
-    const { aoCriar, dialogo } = abrir();
-    await escolherPessoa(dialogo, "Rui Figueiredo");
-    aba(dialogo, /^Qualificação/);
-    fireEvent.click(opcao(dialogo, "Tipo de imóvel", "Apartamento"));
-    fireEvent.click(opcao(dialogo, "Para quando", "1 a 3 meses"));
-    fireEvent.change(within(dialogo).getByLabelText("Rua e número"), { target: { value: " Rua B 2 " } });
-    fireEvent.change(within(dialogo).getByLabelText("Código postal"), { target: { value: "4000-123" } });
+  it("ao guardar leva as respostas da visita (só as respondidas) no rascunho, e as visitas", () => {
+    const { aoGuardar, dialogo } = abrirRegistos();
     aba(dialogo, /^Visita/);
     seccao(dialogo, /^Exterior do edifício/);
     fireEvent.click(opcao(dialogo, "Estacionamento", "Pago"));
     fireEvent.click(opcao(dialogo, "Zona de estacionamento", "Verde"));
-    criar(dialogo);
-    expect(aoCriar).toHaveBeenCalledTimes(1);
-    const dados = aoCriar.mock.calls[0][0];
-    expect(dados.qualificacao).toEqual([
-      { pergunta: "Tipo de imóvel", resposta: "Apartamento" }, { pergunta: "Para quando", resposta: "1 a 3 meses" },
-    ]);
-    expect(dados.moradaObra).toEqual({ rua: " Rua B 2 ", codigoPostal: "4000-123", localidade: "", andar: "" });
-    expect(dados.visita).toEqual([{
-      titulo: "Exterior do edifício",
-      respostas: [{ pergunta: "Estacionamento", resposta: "Pago" }, { pergunta: "Zona de estacionamento", resposta: "Verde" }],
-    }]);
-    expect(dados.pessoa).toBe(PESSOAS[1]);
-    expect(dados.pessoa).not.toHaveProperty("moradaObra");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar o levantamento" }));
+    expect(aoGuardar).toHaveBeenCalledTimes(1);
+    const [rascunho, visitas] = aoGuardar.mock.calls[0];
+    expect(Object.keys(rascunho.respostas)).toHaveLength(2);
+    expect(visitas).toEqual([]);
   });
 });

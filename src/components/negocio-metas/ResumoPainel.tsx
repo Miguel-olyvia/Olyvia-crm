@@ -1,6 +1,9 @@
-import { useId } from "react";
+import { useId, useMemo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { AoMudarNegocio } from "./AoMudarNegocio";
+import { registosDoNegocio } from "./acoesRegistos";
+import { levantamentoDerivado, visitasDerivadas } from "./derivadosDoNegocio";
+import { useRegistosPessoa } from "./registosPessoa";
 import { TituloPainel } from "./CamposPainel";
 import { CadeiaNegocio } from "./CadeiaNegocio";
 import { LevantamentoResumo } from "./LevantamentoResumo";
@@ -10,14 +13,20 @@ import { VisitasResumo } from "./VisitasResumo";
 import { proximoPasso } from "./logicaQuadro";
 import type { NegocioMes } from "./negocioMetas";
 import { rotuloPrazo } from "./saudeNegocio";
-import { visitasDoNegocio } from "./visitasNegocio";
+import { N } from "./PecasNovoNegocio";
 
-/** O separador Resumo: o próximo passo e o prazo, a saúde, a cadeia numa linha e o que o Workflow faz ao mudar. */
+/**
+ * O separador Resumo: o próximo passo e o prazo, a saúde, a cadeia numa linha e o que o Workflow faz ao mudar. As visitas e o levantamento
+ * derivam dos registos da pessoa ligados ao negócio (nada se copia); um negócio de exemplo antigo mostra o que trazia.
+ */
 export function ResumoPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: string }) {
   const { t } = useTranslation();
   const id = useId();
   const prazo = rotuloPrazo(negocio.proximoPrazo, hoje, t, true);
-  const visitas = visitasDoNegocio(negocio);
+  const registos = useRegistosPessoa();
+  const ligados = useMemo(() => registosDoNegocio(registos, negocio.id), [registos, negocio.id]);
+  const visitas = visitasDerivadas(negocio, ligados);
+  const levantamento = levantamentoDerivado(negocio, ligados, (grupo, chave) => t(`${N}${grupo}.${chave}`));
   return (
     <div className="space-y-5">
       <section aria-labelledby={`${id}-passo`} className="space-y-1.5">
@@ -34,7 +43,7 @@ export function ResumoPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: str
       {negocio.moradaObra && <MoradaObraResumo morada={negocio.moradaObra} />}
       {negocio.visita && <VisitaResumo seccoes={negocio.visita} />}
       {visitas.length > 0 && <VisitasResumo visitas={visitas} />}
-      {negocio.levantamento && <LevantamentoResumo levantamento={negocio.levantamento} comResumo={!negocio.visitas?.length} />}
+      {levantamento && <LevantamentoResumo levantamento={levantamento} comResumo={visitas.length === 0} />}
       <AoMudarNegocio negocio={negocio} />
       <p className="text-xs text-muted-foreground">{t("businessGoals.panel.note")}</p>
     </div>

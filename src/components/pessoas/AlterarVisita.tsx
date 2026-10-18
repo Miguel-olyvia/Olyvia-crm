@@ -25,7 +25,7 @@ function destinoDaVisita(visita: VisitaNegocio, temMoradaLead: boolean): Destino
 
 interface FormAlterarProps {
   pessoa: Pessoa;
-  /** A visita a alterar (uma visita de um pedido). */
+  /** A visita a alterar (uma visita da pessoa). */
   visita: VisitaNegocio;
   hoje: string;
   aoGuardar: (dados: DadosAlterarVisita) => void;
@@ -71,20 +71,18 @@ function FormAlterar({ pessoa, visita, hoje, aoGuardar, aoFechar }: FormAlterarP
 }
 
 interface AlterarVisitaProps extends Omit<FormAlterarProps, "aoFechar"> {
-  /** O nome do pedido a que a visita pertence: diz-se na descrição do diálogo. */
-  pedidoNome: string;
   aberto: boolean;
   aoMudarAberto: (aberto: boolean) => void;
 }
 
-export function AlterarVisita({ aberto, aoMudarAberto, pedidoNome, ...resto }: AlterarVisitaProps) {
+export function AlterarVisita({ aberto, aoMudarAberto, ...resto }: AlterarVisitaProps) {
   const { t } = useTranslation();
   return (
     <Dialog open={aberto} onOpenChange={aoMudarAberto}>
       <DialogContent className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none">
         <DialogHeader>
           <DialogTitle>{t(`${C}title`)}</DialogTitle>
-          <DialogDescription>{t(`${C}description`, { name: `${resto.pessoa.nome} · ${pedidoNome}` })}</DialogDescription>
+          <DialogDescription>{t(`${C}description`, { name: resto.pessoa.nome })}</DialogDescription>
         </DialogHeader>
         <FormAlterar {...resto} aoFechar={() => aoMudarAberto(false)} />
       </DialogContent>

@@ -78,7 +78,7 @@ describe("do orçamento à proposta: um negócio em Orçamento percorre os três
     expect(colunaDe("quadro-pessoas", "Orçamento").queryByText("€265")).not.toBeInTheDocument();
     expect(colunaDe("quadro-negocios", "Orçamento").queryByText("€265")).not.toBeInTheDocument();
     await waitFor(() => expect(aviso()).toHaveTextContent("Proposta enviada: a passa a Proposta."));
-    expect(botao("Registar a resposta do cliente", true)).toBeInTheDocument();
+    expect(botao("Registar a resposta do cliente")).toBeInTheDocument();
   });
 
   it("o editor abre com as linhas do levantamento da visita (os trabalhos iguais somam, o texto livre fica como 'Outro')", async () => {
@@ -154,7 +154,7 @@ describe("uma proposta em rascunho do exemplo (sem orçamento detalhado)", () =>
     expect(negocioAtual().proposta).toEqual({ estado: "enviada" });
     expect(valorDoNegocio(negocioAtual())).toBe(5600);
     expect(extrasAtuais().n1.orcamento).toBeUndefined();
-    expect(botao("Registar a resposta do cliente", true)).toBeInTheDocument();
+    expect(botao("Registar a resposta do cliente")).toBeInTheDocument();
   });
 });
 

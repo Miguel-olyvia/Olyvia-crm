@@ -1,5 +1,5 @@
-// A validação e o texto da visita: o que se pede para marcar ou alterar uma visita. Marcá-la, alterá-la e guardá-la são ações do
-// pedido (ver `acoesPedido.test.ts`).
+// A validação e o texto da visita: o que se pede para marcar ou alterar uma visita. Marcá-la, alterá-la e guardá-la são ações da
+// pessoa (ver `acoesVisitaPessoa.test.ts`).
 import { describe, expect, it } from "vitest";
 import { MORADA_VISITA_VAZIA } from "./moradaVisita";
 import { MAX_NOTA_VISITA, detalheDaVisita, validarVisita, type DadosVisita } from "./visitaPessoa";

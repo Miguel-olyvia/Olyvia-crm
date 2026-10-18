@@ -18,8 +18,9 @@ export function textoEtapaBase(t: Traduzir, r: ResumoPessoa): string {
   return t(`${P}stage.${r.etapa}`);
 }
 
-/** Como `textoEtapaBase`; numa perdida, "Perdida · Preço". */
+/** Como `textoEtapaBase`; numa perdida, "Perdida · Preço"; numa abordagem encerrada, "Encerrada · Sem interesse". */
 export function textoEtapa(t: Traduzir, r: ResumoPessoa): string {
+  if (r.pessoa.encerrada) return t(`${P}close.stage`, { result: t(`${P}close.result.${r.pessoa.encerrada.resultado}`) });
   if (r.pessoa.perdida) return t(`${P}stage.lost`, { reason: t(`${P}lost.${r.pessoa.perdida.motivo}`) });
   return textoEtapaBase(t, r);
 }

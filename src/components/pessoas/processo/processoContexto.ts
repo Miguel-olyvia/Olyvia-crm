@@ -12,10 +12,11 @@ export interface ProcessoValor {
    */
   executar: (item: ItemProcesso, origem: HTMLElement | null) => void;
   /**
-   * "Novo negócio com visita" (um cliente): abre o painel de visita e levantamento para um pedido novo, que só se cria ao guardar.
-   * `origem` é o botão que o abriu (o foco volta para ele, ou para os botões da pessoa).
+   * "Visita e levantamento" (o menu «Mais» da ficha): abre o painel de visita e levantamento da pessoa, onde se marcam visitas, se
+   * marcam como feitas e se tiram as medidas. Tudo fica nos registos da pessoa. `origem` é o botão que o abriu (o foco volta para
+   * ele, ou para os botões da pessoa).
    */
-  abrirNovoPedido: (pessoaId: string, origem: HTMLElement | null) => void;
+  abrirVisitaLevantamento: (pessoaId: string, origem: HTMLElement | null) => void;
 }
 
 export const ProcessoContext = createContext<ProcessoValor | null>(null);

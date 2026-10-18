@@ -1,19 +1,16 @@
 // "Registar a chamada" a partir do "A fazer": o mesmo `FormChamada` da ficha (resultado, nota, próximo passo), num diálogo
-// montado uma vez ao nível da página. O formulário não depende da ficha (só de `registarChamada`), por isso reaproveita-se
+// montado uma vez ao nível da página. O contacto é da pessoa (não há pedidos). O formulário não depende da ficha (só de `registarChamada`), por isso reaproveita-se
 // tal e qual, sem o "← Voltar" (que só faz sentido na vista da ficha): fica o "Cancelar".
 import { useId, useRef } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Dialog, DialogContent, DialogDescription } from "@/components/ui/dialog";
 import { FormChamada } from "../FormChamada";
 import type { AcoesFicha } from "../PainelBase";
-import { nomeComPedido } from "../pedidoNegocio";
 import type { PassoChamada, ResumoPessoa } from "../pessoasTipos";
 
 interface DialogoChamadaProps {
   /** A pessoa a quem se regista a chamada; `null` com o diálogo fechado. */
   resumo: ResumoPessoa | null;
-  /** O pedido do item de onde veio a chamada: a visita marcada na chamada vai para ele. Sem ele, o formulário escolhe (ou pergunta). */
-  pedidoId?: string;
   hoje: string;
   acoes: AcoesFicha;
   aoFechar: () => void;
@@ -26,13 +23,13 @@ interface DialogoChamadaProps {
   aoDevolverFoco: () => boolean;
 }
 
-export function DialogoChamada({ resumo, pedidoId, hoje, acoes, aoFechar, aoConcluir, aoDevolverFoco }: DialogoChamadaProps) {
+export function DialogoChamada({ resumo, hoje, acoes, aoFechar, aoConcluir, aoDevolverFoco }: DialogoChamadaProps) {
   const { t } = useTranslation();
   const id = useId();
-  // Enquanto o diálogo sai, continua a mostrar a última pessoa e o último pedido (o formulário não se remonta a meio da saída).
-  const ultimo = useRef({ resumo, pedidoId });
-  if (resumo) ultimo.current = { resumo, pedidoId };
-  const { resumo: mostrado, pedidoId: pedidoMostrado } = resumo ? { resumo, pedidoId } : ultimo.current;
+  // Enquanto o diálogo sai, continua a mostrar a última pessoa (o formulário não se remonta a meio da saída).
+  const ultimo = useRef(resumo);
+  if (resumo) ultimo.current = resumo;
+  const mostrado = resumo ?? ultimo.current;
   const idTitulo = `${id}-titulo`;
   return (
     <Dialog open={resumo !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
@@ -41,11 +38,11 @@ export function DialogoChamada({ resumo, pedidoId, hoje, acoes, aoFechar, aoConc
         hideClose aria-labelledby={idTitulo} className="max-w-xl gap-0 p-0 motion-reduce:!animate-none"
         onCloseAutoFocus={(e) => { if (aoDevolverFoco()) e.preventDefault(); }}
       >
-        <DialogDescription className="sr-only">{t("pessoasPagina.call.subtitle", { name: mostrado ? nomeComPedido(t, mostrado.pessoa.nome, pedidoMostrado, mostrado.pedidos) : "" })}</DialogDescription>
+        <DialogDescription className="sr-only">{t("pessoasPagina.call.subtitle", { name: mostrado?.pessoa.nome ?? "" })}</DialogDescription>
         {mostrado && (
           <FormChamada
-            key={`${mostrado.pessoa.id}-${pedidoMostrado ?? ""}`} id={`${id}-chamada`} idTitulo={idTitulo} pessoa={mostrado.pessoa} resumo={mostrado}
-            hoje={hoje} acoes={acoes} pedidoId={pedidoMostrado} semVoltar
+            key={mostrado.pessoa.id} id={`${id}-chamada`} idTitulo={idTitulo} pessoa={mostrado.pessoa} resumo={mostrado}
+            hoje={hoje} acoes={acoes} semVoltar
             aoFechar={aoFechar} aoConcluir={(mensagem, passo) => { aoConcluir(mostrado.pessoa.id, mensagem, passo); }}
           />
         )}

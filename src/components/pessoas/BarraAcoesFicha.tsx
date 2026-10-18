@@ -11,7 +11,6 @@ import {
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ligacoes } from "./acoesPessoa";
 import type { AcaoFicha } from "./PainelBase";
-import { proximoContactoVemDeVisita } from "./pedidoNegocio";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { useProcesso } from "./processo/processoContexto";
 
@@ -25,7 +24,7 @@ interface BarraAcoesProps {
   /** `origem` é o botão a que o foco regressa quando o painel fecha. */
   aoAbrir: (acao: AcaoFicha, origem: HTMLElement | null) => void;
   aoReativar: () => void;
-  /** "Criar negócio" (uma lead) ou "Novo negócio sem visita" (um cliente): a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
+  /** "Criar negócio" (uma lead) ou "Novo negócio" (um cliente): a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
   aoCriarNegocio: () => void;
 }
 
@@ -59,10 +58,11 @@ function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
 }
 
 /**
- * "Mais": Nota, Adiar e o negócio e, no fim e separada, "Marcar como perdida" (uma lead, em qualquer passo antes de cliente, mesmo
- * com negócios abertos) ou, numa perdida, "Reativar lead". Um cliente não se perde. O negócio, para leads e clientes e em qualquer fase:
- * "Novo negócio com visita" (começa em Visita, com um pedido novo) ou sem visita: a lead tem "Criar negócio" (ligado ao pedido mais
- * avançado dela, que sai: corta o resto do percurso) e o cliente "Novo negócio sem visita". A visita e o levantamento são opcionais.
+ * "Mais": Nota, Adiar, Visita e levantamento (o painel dos registos da pessoa), o negócio e, no fim e separada, "Encerrar abordagem"
+ * (uma lead sem negócio aberto: sem interesse, ou obra inviável, e não se cria negócio) ou, numa abordagem encerrada (ou numa lead perdida
+ * do exemplo antigo), "Reativar abordagem". Um cliente não encerra a abordagem. O negócio cria-se à mão, para leads e clientes e em
+ * qualquer fase, e liga registos existentes da pessoa: a lead tem "Criar negócio" e o cliente "Novo negócio". A visita e o levantamento
+ * são opcionais.
  */
 function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesProps) {
   const { t } = useTranslation();
@@ -70,14 +70,16 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesPro
   const gatilho = useRef<HTMLButtonElement>(null);
   const escolhida = useRef(false);
   const { pessoa, papel } = resumo;
-  const adiarSemEfeito = proximoContactoVemDeVisita(pessoa, resumo.pedidos);
+  const adiarSemEfeito = resumo.proximoDeVisita;
+  const fechada = !!pessoa.encerrada || !!pessoa.perdida;
+  const podeEncerrar = papel === "lead" && !fechada && resumo.abertos.length === 0;
   const criarNegocio = () => {
     escolhida.current = true;
     aoCriarNegocio();
   };
-  const negocioComVisita = () => {
+  const visitaELevantamento = () => {
     escolhida.current = true;
-    processo?.abrirNovoPedido(pessoa.id, gatilho.current);
+    processo?.abrirVisitaLevantamento(pessoa.id, gatilho.current);
   };
   const abrir = (acao: AcaoFicha) => {
     escolhida.current = true;
@@ -101,20 +103,20 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesPro
           {t("pessoasPagina.bar.snooze")}
           {adiarSemEfeito && <span className="text-xs font-normal">{t("pessoasPagina.bar.snoozeVisit")}</span>}
         </DropdownMenuItem>
-        {processo && !pessoa.perdida && (
-          <DropdownMenuItem className="min-h-11" onSelect={negocioComVisita}>{t("pessoasPagina.bar.dealWithVisit")}</DropdownMenuItem>
+        {processo && !fechada && (
+          <DropdownMenuItem className="min-h-11" onSelect={visitaELevantamento}>{t("pessoasPagina.bar.visitSurvey")}</DropdownMenuItem>
         )}
         <DropdownMenuItem className="min-h-11" onSelect={criarNegocio}>
-          {t(papel === "cliente" ? "pessoasPagina.bar.dealWithoutVisit" : "pessoasPagina.bar.createDeal")}
+          {t(papel === "cliente" ? "pessoasPagina.bar.newDeal" : "pessoasPagina.bar.createDeal")}
         </DropdownMenuItem>
-        {papel === "lead" && (
+        {(fechada || podeEncerrar) && (
           <>
             <DropdownMenuSeparator />
-            {pessoa.perdida ? (
-              <DropdownMenuItem className="min-h-11" onSelect={aoReativar}>{t("pessoasPagina.bar.reactivate")}</DropdownMenuItem>
+            {fechada ? (
+              <DropdownMenuItem className="min-h-11" onSelect={aoReativar}>{t("pessoasPagina.close.bar.reopen")}</DropdownMenuItem>
             ) : (
-              <DropdownMenuItem className="min-h-11 text-destructive focus:text-destructive" onSelect={() => abrir("perder")}>
-                {t("pessoasPagina.bar.markLost")}
+              <DropdownMenuItem className="min-h-11 text-destructive focus:text-destructive" onSelect={() => abrir("encerrar")}>
+                {t("pessoasPagina.close.bar.close")}
               </DropdownMenuItem>
             )}
           </>

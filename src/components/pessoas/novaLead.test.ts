@@ -1,11 +1,11 @@
-// "Nova lead": a validação e a pessoa, o pedido e a atividade que saem dela, em memória.
+// "Nova lead": a validação e a pessoa e a atividade que saem dela, em memória. Não nasce com pedido: a abordagem lê os registos da pessoa.
 import { afterEach, describe, expect, it } from "vitest";
-import { marcarVisitaDoPedido } from "./acoesPedido";
 import { montarLead, validarNovaLead, type DadosNovaLead } from "./novaLead";
-import { faseDoPedido } from "./pedidoNegocio";
 import { pessoasNovas, registarLead, repor } from "./pessoasNovas";
 import { juntarPessoas } from "./juntarPessoas";
 import { PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO } from "./pessoasExemplo";
+import { visitaNova } from "./visitaDaPessoa";
+import { REGISTOS_VAZIOS } from "@/components/negocio-metas/registosTipos";
 import { textoMorada } from "./formatoPessoas";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 
@@ -48,7 +48,7 @@ describe("montarLead", () => {
     expect(pessoa.morada).toEqual({ linha: "", cp: "", localidade: "Sintra" });
     expect(textoMorada(pessoa.morada!)).toBe("Sintra");
     expect(pessoa.formulario).toBeUndefined();
-    // A etapa deriva dos pedidos: a pessoa não a guarda.
+    // A etapa deriva dos registos: a pessoa não a guarda.
     expect(pessoa).not.toHaveProperty("etapa");
   });
 
@@ -67,10 +67,10 @@ describe("montarLead", () => {
   });
 
   it("uma lead nova aparece na lista como lead sem negócio, e por contactar", () => {
-    const { pessoa, pedido } = montarLead(DADOS, HOJE, 1);
-    const resumos = juntarPessoas([...PESSOAS_EXEMPLO, pessoa], NEGOCIOS_PESSOAS_EXEMPLO, HOJE, [pedido]);
+    const { pessoa } = montarLead(DADOS, HOJE, 1);
+    const resumos = juntarPessoas([...PESSOAS_EXEMPLO, pessoa], NEGOCIOS_PESSOAS_EXEMPLO, HOJE, REGISTOS_VAZIOS);
     const resumo = resumos[resumos.length - 1];
-    expect(resumo).toMatchObject({ papel: "lead", etapa: "nova", semNegocio: true });
+    expect(resumo).toMatchObject({ papel: "lead", etapa: "nova", semNegocio: true, parte: "abordagem", coluna: "porContactar" });
   });
 });
 
@@ -88,34 +88,22 @@ describe("pessoasNovas (o store)", () => {
   });
 });
 
-describe("marcar a visita à lead nova", () => {
-  it("a visita vai para o pedido por contactar com que a lead nasce: passa a Visita, na morada da lead", () => {
-    const { pessoa, pedido } = montarLead({ ...DADOS, localidade: "Braga" }, HOJE, 1);
+describe("a lead nova não leva pedido", () => {
+  it("montarLead devolve só a pessoa e a atividade", () => {
+    expect(Object.keys(montarLead(DADOS, HOJE, 3)).sort()).toEqual(["atividade", "pessoa"]);
+  });
+
+  it("o store só guarda pessoas e atividade", () => {
+    registarLead(DADOS, HOJE);
+    expect(Object.keys(pessoasNovas()).sort()).toEqual(["atividade", "pessoas"]);
+  });
+
+  it("a visita marca-se na pessoa, na morada da lead (a ficha só tem a localidade: falta a rua e não se marca sem outra morada)", () => {
+    const { pessoa } = montarLead({ ...DADOS, localidade: "Braga" }, HOJE, 1);
+    expect(visitaNova(pessoa, { data: "2026-10-20", hora: "10:30", nota: "" }, [], HOJE)).not.toBeNull();
     const comMorada = { ...pessoa, morada: { linha: "Largo da Sé 5", cp: "4700-010", localidade: "Braga" } };
-    const estado = { pessoas: [comMorada], pedidos: [pedido], atividade: [], contactadas: [] as string[] };
-    const depois = marcarVisitaDoPedido(estado, pedido.id, { data: "2026-10-20", hora: "10:30", nota: "" }, HOJE);
-    expect(faseDoPedido(depois.pedidos[0])).toBe("visita");
-    expect(depois.pedidos[0].visitas[0]).toMatchObject({ igualALead: true, morada: { rua: "Largo da Sé 5", localidade: "Braga" } });
-    expect(depois.contactadas).toEqual([pessoa.id]);
-  });
-});
-
-describe("a lead nova leva o pedido por contactar", () => {
-  it("montarLead devolve também o pedido: por contactar, sem visitas, com o comercial e a data de hoje", () => {
-    const { pessoa, pedido } = montarLead(DADOS, HOJE, 3);
-    expect(pedido).toEqual({
-      id: "pd-novo-3", pessoaId: pessoa.id, servico: "", comercial: "Ana Ribeiro", criadoEm: HOJE, contactado: false, visitas: [],
+    expect(visitaNova(comMorada, { data: "2026-10-20", hora: "10:30", nota: "" }, [], HOJE)?.visita).toMatchObject({
+      igualALead: true, morada: { rua: "Largo da Sé 5", localidade: "Braga" },
     });
-    expect(faseDoPedido(pedido)).toBe("porContactar");
-  });
-
-  it("o store guarda os pedidos ao lado das pessoas, e repor esquece-os", () => {
-    expect(pessoasNovas().pedidos).toEqual([]);
-    const primeira = registarLead(DADOS, HOJE);
-    registarLead({ ...DADOS, nome: "Outra" }, HOJE);
-    expect(pessoasNovas().pedidos.map((p) => p.id)).toEqual(["pd-novo-1", "pd-novo-2"]);
-    expect(pessoasNovas().pedidos[0]).toBe(primeira.pedido);
-    repor();
-    expect(pessoasNovas().pedidos).toEqual([]);
   });
 });

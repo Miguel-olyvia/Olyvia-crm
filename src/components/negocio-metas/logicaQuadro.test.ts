@@ -104,7 +104,8 @@ describe("chips de fase", () => {
 
 describe("próximo passo e fase", () => {
   it("segue a cadeia", () => {
-    expect(proximoPasso(por("n8"))).toBe("escolherOrcamento");
+    expect(proximoPasso(por("n8"))).toBe("criarProposta");
+    expect(proximoPasso({ ...por("n8"), orcamentos: [] })).toBe("criarOrcamento");
     expect(proximoPasso(por("n9"))).toBe("enviarProposta");
     expect(proximoPasso(por("n6"))).toBe("esperarCliente");
     expect(proximoPasso(por("n10"))).toBe("pedirAssinatura");

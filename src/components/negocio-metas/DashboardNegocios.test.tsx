@@ -135,3 +135,19 @@ describe("evolução mensal", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe("funil da abordagem", () => {
+  const funil = { porContactar: 4, contactado: 3, visita: 2, levantamento: 1 };
+
+  it("com o funil, aparece à parte, depois das Metas do mês e dos Números do Quadro", () => {
+    render(<DashboardNegocios dados={DADOS_EXEMPLO} hoje={MEIO} funil={funil} />);
+    const abordagem = secao("Abordagem");
+    expect(secao("Números do Quadro").compareDocumentPosition(abordagem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(abordagem).getAllByRole("listitem")).toHaveLength(4);
+  });
+
+  it("sem o funil, não há secção Abordagem", () => {
+    mostrar();
+    expect(screen.queryByRole("heading", { level: 2, name: "Abordagem" })).not.toBeInTheDocument();
+  });
+});

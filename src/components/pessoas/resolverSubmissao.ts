@@ -32,6 +32,19 @@ export function pessoasQueVoltaram(
   return ids;
 }
 
+/**
+ * Marca que a pessoa volta à abordagem (Parte 1 do Quadro) por causa de uma submissão resolvida no dia `dia` (AAAA-MM-DD): só
+ * conta se o último negócio dela é anterior (ver `etapaRegistos.ts`). Quem resolve a submissão chama isto a seguir a `resolverSubmissao`,
+ * com a pessoa de `pessoaDaSubmissao`; um id que não existe deixa o estado como está.
+ */
+export function marcarVoltaAAbordagem<E extends Pick<EstadoPessoas, "pessoas">>(estado: E, pessoaId: string, dia: string): E {
+  if (!estado.pessoas.some((p) => p.id === pessoaId)) return estado;
+  return { ...estado, pessoas: estado.pessoas.map((p) => (p.id === pessoaId ? { ...p, abordagemDesde: dia } : p)) };
+}
+
+/** A pessoa a quem a submissão vai: a escolhida (obrigatória num conflito) ou a única candidata; `null` se não for válida. */
+export const pessoaDaSubmissao = (s: Submissao, escolhida?: string): string | null => pessoaDaNota(s, escolhida);
+
 /** A pessoa a quem a nota vai: a escolhida (obrigatória num conflito) ou a única candidata; `null` se não for válida. */
 function pessoaDaNota(s: Submissao, escolhida?: string): string | null {
   const ids = s.candidatas.map((c) => c.pessoaId);

@@ -32,7 +32,7 @@ type Dialogo = "editor" | "verificar" | "direcao" | "proposta";
 
 /** Que diálogo abre cada passo do orçamento e da proposta. */
 const DIALOGO_DO_PASSO = {
-  criarOrcamento: "editor", verificarOrcamento: "verificar", aguardarDirecao: "direcao", enviarProposta: "proposta",
+  criarOrcamento: "editor", verificarOrcamento: "verificar", aguardarDirecao: "direcao", criarProposta: "proposta", enviarProposta: "proposta",
 } as const satisfies Partial<Record<PassoProcesso, Dialogo>>;
 
 type PassoDoOrcamento = keyof typeof DIALOGO_DO_PASSO;

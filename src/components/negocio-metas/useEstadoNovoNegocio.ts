@@ -1,13 +1,16 @@
 // O estado do formulário de "Novo negócio", em pedaços: a aba Geral, as respostas (Qualificação e Visita), a morada da obra
 // e o levantamento. Cada alteração
 // avisa `aoSujar` (para o painel saber que há coisas por gravar). Nada aqui grava: é tudo exemplo, em memória.
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AcoesGeral, ValoresGeral } from "./AbaGeralNovoNegocio";
+import { registosPorLigar } from "./acoesRegistos";
+import { ligarInicial, type LigarRegistos } from "./ligarNegocio";
 import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { adaptarLinhaADivisao, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
 import { MORADA_VAZIA, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
 import type { Respostas } from "./perguntasTipos";
 import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
+import { useRegistosPessoa } from "./registosPessoa";
 import { alternarResposta } from "./respostasVisita";
 import { SECCOES_VISITA } from "./visitaExemplo";
 import type { VisitaNegocio } from "./negocioMetas";
@@ -119,6 +122,25 @@ export function useVisitasForm(hoje: string, aoSujar: () => void, comercial: str
   return { visitas, aberta, acoes };
 }
 
+/**
+ * O que se liga ao negócio novo: os registos por ligar da pessoa escolhida (do store dos registos) e a escolha feita (marcados e levantamento).
+ * Ao escolher outra pessoa a escolha recomeça, com os registos dela marcados. Cada alteração avisa `aoSujar`.
+ */
+export function useLigarRegistosForm(pessoaId: string, aoSujar: () => void) {
+  const estado = useRegistosPessoa();
+  const porLigar = useMemo(() => registosPorLigar(estado, pessoaId), [estado, pessoaId]);
+  const [valor, setValor] = useState<LigarRegistos>(() => ligarInicial(porLigar));
+  const [paraPessoa, setParaPessoa] = useState(pessoaId);
+  // Outra pessoa, outros registos: a escolha de partida é a dela (a escolha da anterior não vale para ela).
+  useEffect(() => {
+    if (paraPessoa === pessoaId) return;
+    setParaPessoa(pessoaId);
+    setValor(ligarInicial(porLigar));
+  }, [pessoaId, paraPessoa, porLigar]);
+  const mudar = (novo: LigarRegistos) => { aoSujar(); setValor(novo); };
+  return { porLigar, valor, mudar };
+}
+
 const TODOS_OS_BLOCOS = [BLOCO_QUALIFICACAO, ...SECCOES_VISITA.flatMap((s) => s.blocos)];
 
 /** As respostas de escolha rápida das duas abas (os ids das perguntas são únicos): escolher, ou retirar se já estava. */
@@ -150,9 +172,11 @@ export interface PartidaMorada {
  */
 export function useMoradaForm(aoSujar: () => void, partida?: PartidaMorada) {
   const dasVisitas = partida?.visitas ? moradaDasVisitas(partida.visitas) : undefined;
-  const [morada, setMorada] = useState<MoradaObraForm>(partida?.moradaObra ?? dasVisitas?.moradaObra ?? MORADA_VAZIA);
-  const [origem, setOrigem] = useState<OrigemMorada>(() => (partida?.moradaObra || !dasVisitas ? null : origemDaVisita(dasVisitas.igualALead)));
-  const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setOrigem(null); setMorada((m) => ({ ...m, [chave]: valor })); };
-  const preencher = (nova: MoradaObraForm) => { aoSujar(); setOrigem(null); setMorada((m) => ({ ...nova, andar: m.andar })); };
+  // A morada deriva das visitas de agora (as marcadas, no painel «Novo negócio»): enquanto ninguém a escreveu, acompanha-as; escrita à mão, manda.
+  const [escrita, setEscrita] = useState<MoradaObraForm | null>(null);
+  const morada = escrita ?? partida?.moradaObra ?? dasVisitas?.moradaObra ?? MORADA_VAZIA;
+  const origem: OrigemMorada = escrita || partida?.moradaObra || !dasVisitas ? null : origemDaVisita(dasVisitas.igualALead);
+  const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setEscrita({ ...morada, [chave]: valor }); };
+  const preencher = (nova: MoradaObraForm) => { aoSujar(); setEscrita({ ...nova, andar: morada.andar }); };
   return { morada, origem, mudar, preencher };
 }

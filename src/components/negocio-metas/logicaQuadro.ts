@@ -153,7 +153,7 @@ export function chipsDosFiltros(f: FiltrosQuadro): ChipFiltro[] {
 /* ------------------------------------------------------------ próximo passo */
 
 export type PassoKey =
-  | "escolherOrcamento" | "criarProposta" | "enviarProposta" | "esperarCliente"
+  | "criarOrcamento" | "criarProposta" | "enviarProposta" | "esperarCliente"
   | "criarContrato" | "pedirAssinatura" | "concluido";
 
 export function proximoPasso(n: NegocioMes): PassoKey {
@@ -162,7 +162,7 @@ export function proximoPasso(n: NegocioMes): PassoKey {
     if (n.proposta.estado === "rascunho") return "enviarProposta";
     return n.proposta.estado === "enviada" ? "esperarCliente" : "criarContrato";
   }
-  return temValor(n) ? "criarProposta" : "escolherOrcamento";
+  return n.orcamentos.length > 0 ? "criarProposta" : "criarOrcamento";
 }
 
 /* ------------------------------------------------------------ totais */

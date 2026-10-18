@@ -1,32 +1,25 @@
-// A etapa de uma pessoa, o "atrasada" e o próximo passo. Funções puras: o dia de hoje chega por parâmetro.
-// Os 5 passos do percurso (Lead, Contacto, Visita, Negócio, Cliente) mantêm as chaves de `EtapaPessoa`; uma perdida
-// é um estado à parte, por cima do passo em que estava.
+// A etapa, o próximo passo, o "atrasada" e a Parte do Quadro de uma pessoa, lidos dos REGISTOS dela (contactos, visitas, levantamentos) e dos
+// negócios. Funções puras: o dia de hoje (AAAA-MM-DD) chega sempre por parâmetro. O formulário NÃO conta como contacto. Os 5 passos do
+// percurso (Lead, Contacto, Visita, Negócio, Cliente) mantêm as chaves de `EtapaPessoa`; uma perdida ou encerrada é um estado à parte.
+//
+// Decisões por defeito (o utilizador não respondeu; reversíveis):
+// 1. A pessoa volta à Parte 1 (abordagem) quando tem registos POR LIGAR posteriores ao último negócio, ou uma submissão resolvida
+//    depois dele (`Pessoa.abordagemDesde`), ou é nova (nunca teve negócio).
+// 2. Com um negócio aberto, a pessoa aparece só na Parte 2; os registos por ligar vêem-se na ficha.
+// 3. Os registos feitos depois de o negócio existir ficam por ligar (ligam-se à mão na ficha do negócio).
 import { faseDoNegocio, type FaseNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { somarDias } from "@/components/negocio-metas/novoNegocio";
+import type { RegistosDaPessoa } from "@/components/negocio-metas/registosTipos";
 import { emAtraso } from "@/components/negocio-metas/saudeNegocio";
-import { faseDoPedido, proximoContactoDaPessoa } from "./pedidoNegocio";
-import { ehHistorico, type EtapaPessoa, type FasePedido, type PedidoNegocio, type ResumoPessoa } from "./pessoasTipos";
+import { ordenarVisitas } from "@/components/negocio-metas/visitasNegocio";
+import { ehHistorico, type EtapaPessoa, type NegocioPessoa, type PapelPessoa, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
 
 export const ETAPAS: readonly EtapaPessoa[] = ["nova", "emContacto", "visitaMarcada", "qualificada", "cliente"];
 
 /** A posição no percurso, de 0 (Lead) a 4 (Cliente). */
 export const indiceEtapa = (etapa: EtapaPessoa): number => ETAPAS.indexOf(etapa);
 
-/** O que a etapa e o "atrasada" precisam de saber de uma pessoa: os pedidos são os dela. */
-export type EntradaEtapa = Pick<ResumoPessoa, "pessoa" | "papel" | "abertos" | "pedidos">;
-
 const ORDEM_FASE: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato", "ganho"];
-const ORDEM_FASE_PEDIDO: readonly FasePedido[] = ["porContactar", "contactado", "visita"];
-const ETAPA_DO_PEDIDO: Record<FasePedido, EtapaPessoa> = { porContactar: "nova", contactado: "emContacto", visita: "visitaMarcada" };
-
-const temVisitaFeita = (pedido: PedidoNegocio): boolean => pedido.visitas.some((v) => v.estado === "feita");
-
-/** Quão à frente está um pedido: a fase e, na fase Visita, se já há uma visita feita (falta só criar o negócio). */
-const avanco = (pedido: PedidoNegocio): number => ORDEM_FASE_PEDIDO.indexOf(faseDoPedido(pedido)) * 2 + (temVisitaFeita(pedido) ? 1 : 0);
-
-/** O pedido mais à frente (em empate, o primeiro); `null` sem pedidos. */
-export function pedidoMaisAvancado(pedidos: readonly PedidoNegocio[]): PedidoNegocio | null {
-  return pedidos.reduce<PedidoNegocio | null>((melhor, p) => (melhor === null || avanco(p) > avanco(melhor) ? p : melhor), null);
-}
 
 /** O negócio aberto mais avançado (em empate, o primeiro); `null` sem negócios abertos. */
 export function negocioEmFoco(abertos: readonly NegocioMes[]): NegocioMes | null {
@@ -37,37 +30,15 @@ export function negocioEmFoco(abertos: readonly NegocioMes[]): NegocioMes | null
 }
 
 /**
- * Cliente se tem negócio ganho; senão "Negócio" se tem um aberto; senão a do pedido mais avançado (Lead, Contacto ou Visita).
- * Sem negócio aberto nem pedidos (uma lead que só tem negócios terminados) fica em Contacto.
- */
-export function etapaEfetiva({ papel, abertos, pedidos }: EntradaEtapa): EtapaPessoa {
-  if (papel === "cliente") return "cliente";
-  if (abertos.length > 0) return "qualificada";
-  const pedido = pedidoMaisAvancado(pedidos);
-  return pedido ? ETAPA_DO_PEDIDO[faseDoPedido(pedido)] : "emContacto";
-}
-
-/**
- * Lead: o próximo contacto (a chamada agendada ou a visita por fazer mais cedo, ver `proximoContactoDaPessoa`) é anterior a hoje.
- * Cliente: só com um negócio em curso (aberto) com o prazo anterior a hoje. Uma perdida nunca está atrasada.
- */
-export function estaAtrasada({ pessoa, papel, abertos, pedidos }: EntradaEtapa, hoje: string): boolean {
-  if (pessoa.perdida) return false;
-  if (papel === "cliente") return abertos.some((n) => emAtraso(n, hoje));
-  const dia = proximoContactoDaPessoa(pessoa, pedidos);
-  return dia !== null && dia < hoje;
-}
-
-/**
  * Os passos da coluna "Próximo passo". Um id tem sempre o mesmo texto, e a divergência com o "A fazer" (`processo/tiposProcesso.ts`)
  * mantém-se de propósito: num negócio sem orçamentos a coluna diz "fazerLevantamento" e o "A fazer" "criarOrcamento" (o negócio já
- * existe). Num pedido com visitas por fazer a coluna diz "fecharLevantamento" (o texto é «Marcar a visita como feita») e o "A fazer"
- * "marcarVisitaFeita" (abre o painel de visita e levantamento do pedido, onde o levantamento é opcional); com uma visita feita, os dois
- * dizem "criarNegocio". Não há passo obrigatório de levantamento.
+ * existe). Numa pessoa com visitas por fazer a coluna diz "fecharLevantamento" (o texto é «Marcar a visita como feita») e o "A fazer"
+ * "marcarVisitaFeita" (abre o painel de visita e levantamento, onde o levantamento é opcional); com uma visita feita, os dois dizem
+ * "criarNegocio". Não há passo obrigatório de levantamento.
  * `passosProcesso.test.ts` ("coerência com a coluna") fixa estes casos com exatidão.
  */
 export type IdPasso =
-  | "registarChamada" | "marcarVisita" | "fecharLevantamento" | "criarNegocio" | "fazerLevantamento" | "escolherOrcamento"
+  | "registarChamada" | "marcarVisita" | "fecharLevantamento" | "criarNegocio" | "fazerLevantamento"
   | "criarProposta" | "enviarProposta" | "esperarCliente" | "recolherAssinatura" | "nenhum";
 
 export interface ProximoPasso {
@@ -82,26 +53,11 @@ export function passoDoNegocio(n: NegocioMes): IdPasso {
   if (fase === "contrato") return "recolherAssinatura";
   if (fase === "proposta") return n.proposta?.estado === "rascunho" ? "enviarProposta" : "esperarCliente";
   if (n.orcamentos.length === 0) return "fazerLevantamento";
-  return n.orcamentos.some((o) => o.escolhido) ? "criarProposta" : "escolherOrcamento";
+  return "criarProposta";
 }
 
-const PASSO_DA_FASE: Record<FasePedido, IdPasso> = { porContactar: "registarChamada", contactado: "marcarVisita", visita: "fecharLevantamento" };
-
-/** O passo de um pedido na coluna "Próximo passo": pela fase e, na fase Visita, por já haver uma visita feita (então, criar o negócio). */
-export const passoDoPedidoNaColuna = (pedido: PedidoNegocio): IdPasso => (temVisitaFeita(pedido) ? "criarNegocio" : PASSO_DA_FASE[faseDoPedido(pedido)]);
-
-/**
- * O próximo passo para a coluna da lista e para o Resumo. Uma perdida, ou quem não tem negócio aberto nem pedidos, não tem
- * nenhum ("—"). Com negócio aberto manda o mais avançado e o prazo é o dele; senão manda o pedido mais avançado e o prazo é o
- * próximo contacto da pessoa.
- */
-export function proximoPasso(r: Pick<ResumoPessoa, "pessoa" | "papel" | "abertos" | "pedidos">): ProximoPasso {
-  if (r.pessoa.perdida) return { id: "nenhum", prazo: null };
-  const foco = negocioEmFoco(r.abertos);
-  if (foco) return { id: passoDoNegocio(foco), prazo: foco.proximoPrazo };
-  const pedido = pedidoMaisAvancado(r.pedidos);
-  return pedido ? { id: passoDoPedidoNaColuna(pedido), prazo: proximoContactoDaPessoa(r.pessoa, r.pedidos) } : { id: "nenhum", prazo: null };
-}
+/** O próximo passo para a coluna da lista e o Resumo: o que `juntarPessoas` leu dos registos (ver `proximoPassoRegistos`). */
+export const proximoPasso = (r: Pick<ResumoPessoa, "proximo">): ProximoPasso => r.proximo;
 
 /** O índice (0 a 3) do passo em que uma lead está (o passo em que se perderia agora). */
 export const passoAtual = (r: Pick<ResumoPessoa, "etapa">): number => Math.min(indiceEtapa(r.etapa), 3);
@@ -112,4 +68,140 @@ export const passoDaPerdida = (r: Pick<ResumoPessoa, "pessoa" | "etapa">): numbe
 /** Uma lead em curso cujos negócios estão todos perdidos: a ficha avisa e oferece "Marcar como perdida". */
 export function todosNegociosPerdidos(r: Pick<ResumoPessoa, "pessoa" | "papel" | "negocios">): boolean {
   return r.papel === "lead" && !r.pessoa.perdida && r.negocios.length > 0 && r.negocios.every((n) => ehHistorico(n) && n.resultado === "perdido");
+}
+
+/** O que a etapa e a Parte do Quadro precisam de saber de uma pessoa. */
+export interface EntradaRegistos {
+  pessoa: Pessoa;
+  papel: PapelPessoa;
+  /** Todos os negócios da pessoa (do quadro e históricos). */
+  negocios: readonly NegocioPessoa[];
+  abertos: readonly NegocioMes[];
+  /** Todos os registos da pessoa (ligados e por ligar). */
+  registos: RegistosDaPessoa;
+}
+
+/** As colunas da Parte 1 do Quadro (a abordagem). */
+export type ColunaAbordagem = "porContactar" | "contactado" | "visita";
+
+/** O dia (AAAA-MM-DD) em que o negócio foi criado: hoje menos os dias desde que entrou. */
+export const criadoEmDoNegocio = (negocio: NegocioMes, hoje: string): string => somarDias(hoje, -negocio.dias);
+
+/** O dia em que foi criado o negócio mais recente; `null` sem negócios. */
+function criadoEmDoUltimo(negocios: readonly NegocioPessoa[], hoje: string): string | null {
+  return negocios.reduce<string | null>((m, n) => {
+    const dia = criadoEmDoNegocio(n, hoje);
+    return m === null || dia > m ? dia : m;
+  }, null);
+}
+
+/**
+ * Os registos que contam para a abordagem: por ligar a nenhum negócio e posteriores (dia estritamente depois) ao último negócio. Um
+ * registo deixado por ligar antes de o negócio existir foi deixado de fora de propósito e não faz a pessoa voltar.
+ */
+export function registosParaAbordagem(registos: RegistosDaPessoa, negocios: readonly NegocioPessoa[], hoje: string): RegistosDaPessoa {
+  const limite = criadoEmDoUltimo(negocios, hoje);
+  const conta = (r: { negocioId: string | null; data: string }): boolean => r.negocioId === null && (limite === null || r.data > limite);
+  return {
+    contactos: registos.contactos.filter(conta), visitas: registos.visitas.filter(conta), levantamentos: registos.levantamentos.filter(conta),
+  };
+}
+
+const visitasValidas = (r: RegistosDaPessoa) => r.visitas.filter((v) => v.estado !== "cancelada");
+const fechada = (p: Pessoa): boolean => p.encerrada !== undefined || p.perdida !== undefined;
+
+/** Há alguma coisa a fazer com a pessoa (um registo por ligar, ou uma submissão, ou ainda nada)? Decisão 1. */
+function voltouAAbordagem(e: EntradaRegistos, hoje: string): boolean {
+  if (e.negocios.length === 0) return true;
+  const limite = criadoEmDoUltimo(e.negocios, hoje);
+  const submissao = e.pessoa.abordagemDesde;
+  if (submissao !== undefined && limite !== null && submissao > limite) return true;
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  return r.contactos.length + r.visitas.length + r.levantamentos.length > 0;
+}
+
+/** Parte 1: a pessoa está em abordagem (sem negócio aberto, não encerrada nem perdida, e é nova ou voltou). */
+export function emAbordagem(e: EntradaRegistos, hoje: string): boolean {
+  if (fechada(e.pessoa) || e.abertos.length > 0) return false;
+  return voltouAAbordagem(e, hoje);
+}
+
+/** A coluna da Parte 1 em que a pessoa cai; `null` fora da abordagem (então está na Parte 2, ou em nenhuma). */
+export function colunaDaPessoa(e: EntradaRegistos, hoje: string): ColunaAbordagem | null {
+  if (!emAbordagem(e, hoje)) return null;
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  if (visitasValidas(r).length > 0) return "visita";
+  return r.contactos.length > 0 ? "contactado" : "porContactar";
+}
+
+/**
+ * Cliente se tem negócio ganho; "Negócio" se tem um aberto; senão Lead, Contacto ou Visita pelos registos por ligar. Uma pessoa sem
+ * nada de novo que só tem negócios terminados fica em Contacto (a menos que tenha voltado: submissão resolvida).
+ */
+export function etapaDosRegistos(e: EntradaRegistos, hoje: string): EtapaPessoa {
+  if (e.papel === "cliente") return "cliente";
+  if (e.abertos.length > 0) return "qualificada";
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  if (visitasValidas(r).length > 0) return "visitaMarcada";
+  if (r.contactos.length > 0) return "emContacto";
+  return voltouAAbordagem(e, hoje) ? "nova" : "emContacto";
+}
+
+/** O dia mais cedo entre a chamada agendada e as visitas por fazer (as que contam para a abordagem); `null` sem nenhum. */
+export function proximoContactoRegistos(e: EntradaRegistos, hoje: string): string | null {
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  const dias = [e.pessoa.proximoContacto, ...r.visitas.filter((v) => v.estado === "porFazer").map((v) => v.data || null)]
+    .filter((d): d is string => typeof d === "string" && d !== "");
+  return dias.length === 0 ? null : dias.reduce((cedo, d) => (d < cedo ? d : cedo));
+}
+
+/** A primeira visita por fazer que conta para a abordagem, por ordem cronológica; `undefined` sem nenhuma. */
+function primeiraVisitaPorFazer(e: EntradaRegistos, hoje: string) {
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  return ordenarVisitas(r.visitas).find((v) => v.estado === "porFazer");
+}
+
+/**
+ * O próximo contacto vem de uma visita por fazer (e não de uma chamada agendada): há uma visita no dia mais cedo, que pode ser também
+ * o dia da chamada. É o caso em que «Adiar» não tem nada a mover (as visitas têm o seu ecrã, «Alterar visita»).
+ */
+export function proximoContactoVemDeVisitaRegistos(e: EntradaRegistos, hoje: string): boolean {
+  const dia = proximoContactoRegistos(e, hoje);
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  return dia !== null && r.visitas.some((v) => v.estado === "porFazer" && v.data === dia);
+}
+
+/** A hora do próximo contacto: a da chamada agendada, se é ela o dia mais cedo, ou a da primeira visita por fazer desse dia; senão `undefined`. */
+export function horaDoProximoContactoRegistos(e: EntradaRegistos, hoje: string): string | undefined {
+  const dia = proximoContactoRegistos(e, hoje);
+  if (dia === null) return undefined;
+  if (e.pessoa.proximoContacto === dia && e.pessoa.proximoHora) return e.pessoa.proximoHora;
+  const visita = primeiraVisitaPorFazer(e, hoje);
+  return visita?.data === dia && visita.hora !== "" ? visita.hora : undefined;
+}
+
+/** Lead: o próximo contacto anterior a hoje. Cliente: só com um negócio aberto em atraso. Quem está encerrada ou perdida, nunca. */
+export function estaAtrasadaRegistos(e: EntradaRegistos, hoje: string): boolean {
+  if (fechada(e.pessoa)) return false;
+  if (e.papel === "cliente") return e.abertos.some((n) => emAtraso(n, hoje));
+  const dia = proximoContactoRegistos(e, hoje);
+  return dia !== null && dia < hoje;
+}
+
+/**
+ * O próximo passo para a coluna da lista e o Resumo. Encerrada ou perdida, ou fora da abordagem e sem negócio, não tem nenhum.
+ * Com negócio aberto manda o mais avançado; senão manda o registo mais avançado: visita feita (criar o negócio), visita por fazer
+ * (fechar o levantamento), contacto (marcar a visita) ou nada (registar a chamada).
+ */
+export function proximoPassoRegistos(e: EntradaRegistos, hoje: string): ProximoPasso {
+  const nenhum: ProximoPasso = { id: "nenhum", prazo: null };
+  if (fechada(e.pessoa)) return nenhum;
+  const foco = negocioEmFoco(e.abertos as NegocioMes[]);
+  if (foco) return { id: passoDoNegocio(foco), prazo: foco.proximoPrazo };
+  if (!emAbordagem(e, hoje)) return nenhum;
+  const r = registosParaAbordagem(e.registos, e.negocios, hoje);
+  const prazo = proximoContactoRegistos(e, hoje);
+  if (r.visitas.some((v) => v.estado === "feita")) return { id: "criarNegocio", prazo };
+  if (r.visitas.some((v) => v.estado === "porFazer")) return { id: "fecharLevantamento", prazo };
+  return { id: r.contactos.length > 0 ? "marcarVisita" : "registarChamada", prazo };
 }

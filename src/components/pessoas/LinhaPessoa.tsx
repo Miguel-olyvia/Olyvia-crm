@@ -11,12 +11,12 @@ import { COR_ETAPA, COR_PERDIDA, ICONE_ETAPA } from "./iconesPessoa";
 import type { Pessoa, ResumoPessoa } from "./pessoasTipos";
 import type { ItemProcesso } from "./processo/tiposProcesso";
 import { BotaoNegocios, ResumoNegocios, SemNegocios } from "./quadro/ControloNegociosPessoa";
-import { SeloPerdida, SeloResultado, SeloVoltou } from "./SelosPessoa";
+import { SeloEncerrada, SeloPerdida, SeloResultado, SeloVoltou } from "./SelosPessoa";
 
 interface LinhaPessoaProps {
   resumo: ResumoPessoa;
   voltou: boolean;
-  /** Os pedidos e negócios em curso da pessoa (ver `itensDaPessoa`); vazio = sem botão de negócios. */
+  /** Os itens em curso da pessoa: ela em abordagem, ou os negócios (ver `itensDaPessoa`); vazio = sem botão de negócios. */
   itens: readonly ItemProcesso[];
   /** As sub-linhas de negócios estão abertas. */
   aberta: boolean;
@@ -47,6 +47,7 @@ function Sublinha({ resumo, voltou }: { resumo: ResumoPessoa; voltou: boolean })
       <span>{t("pessoasPagina.head.example")}</span>
       {voltou && <SeloVoltou />}
       {pessoa.perdida && <SeloPerdida />}
+      {pessoa.encerrada && <SeloEncerrada />}
     </span>
   );
 }
@@ -54,11 +55,12 @@ function Sublinha({ resumo, voltou }: { resumo: ResumoPessoa; voltou: boolean })
 /** A etapa, com ícone e texto; uma perdida mostra "Perdida · motivo" com o ícone de perda. */
 function Etapa({ resumo }: { resumo: ResumoPessoa }) {
   const { t } = useTranslation();
-  const Icone = resumo.pessoa.perdida ? XCircle : ICONE_ETAPA[resumo.etapa];
+  const fechada = !!resumo.pessoa.perdida || !!resumo.pessoa.encerrada;
+  const Icone = fechada ? XCircle : ICONE_ETAPA[resumo.etapa];
   return (
     <span className="inline-flex items-center gap-2">
       <span
-        className={cn("grid size-6 shrink-0 place-items-center rounded-full", resumo.pessoa.perdida ? COR_PERDIDA : COR_ETAPA[resumo.etapa])}
+        className={cn("grid size-6 shrink-0 place-items-center rounded-full", fechada ? COR_PERDIDA : COR_ETAPA[resumo.etapa])}
         aria-hidden="true"
       >
         <Icone className="h-3.5 w-3.5" />

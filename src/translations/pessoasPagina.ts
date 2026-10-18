@@ -1,9 +1,12 @@
 import { pessoasAcoesTranslations } from "./pessoasAcoes";
 import { pessoasChamadaTranslations } from "./pessoasChamada";
+import { pessoasContratoTranslations } from "./pessoasContrato";
+import { pessoasEncerrarTranslations } from "./pessoasEncerrar";
 import { pessoasFichaTranslations } from "./pessoasFicha";
 import { pessoasFichaResumoTranslations } from "./pessoasFichaResumo";
 import { pessoasListaTranslations } from "./pessoasLista";
 import { pessoasProcessoTranslations } from "./pessoasProcesso";
+import { pessoasRegistosTranslations } from "./pessoasRegistos";
 import { pessoasVisitaTranslations } from "./pessoasVisita";
 
 // Página "Pessoas" (/pessoas) — módulo próprio, mesmo padrão de `negocioMetas.ts` e `today.ts`,
@@ -119,6 +122,9 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasChamadaTranslations.en,
     ...pessoasVisitaTranslations.en,
     ...pessoasProcessoTranslations.en,
+    ...pessoasEncerrarTranslations.en,
+    ...pessoasRegistosTranslations.en,
+    ...pessoasContratoTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -229,5 +235,8 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasChamadaTranslations.pt,
     ...pessoasVisitaTranslations.pt,
     ...pessoasProcessoTranslations.pt,
+    ...pessoasEncerrarTranslations.pt,
+    ...pessoasRegistosTranslations.pt,
+    ...pessoasContratoTranslations.pt,
   },
 };

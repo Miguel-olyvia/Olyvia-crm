@@ -165,7 +165,7 @@ function comProvider(item: ItemProcesso) {
 // Defesa em profundidade: um item só diz "verificar" ou "enviar" se o negócio o tiver, por isso o contraste constrói-se à mão.
 describe("os portões dos passos do orçamento dizem o que falta e não abrem nada", () => {
   it("verificar sem orçamento detalhado: 'Crie primeiro o orçamento'", () => {
-    const item: ItemProcesso = { ...itemDoNegocio(), orcamentos: 1, orcamentoEscolhido: true, verificacao: "porVerificar" };
+    const item: ItemProcesso = { ...itemDoNegocio(), orcamentos: 1, verificacao: "porVerificar" };
     expect(passoDoItem(item).id).toBe("verificarOrcamento");
     expect(comProvider(item)).toHaveBeenCalledWith("Verificar o orçamento: ainda não é possível. Crie primeiro o orçamento.");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

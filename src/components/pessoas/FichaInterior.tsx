@@ -8,6 +8,7 @@ import { AtividadeFicha } from "./AtividadeFicha";
 import { AvisoNegociosPerdidos } from "./AvisoNegociosPerdidos";
 import { BarraAcoesFicha } from "./BarraAcoesFicha";
 import { CabecalhoFicha } from "./CabecalhoFicha";
+import { DialogoResultadoVisita } from "./DialogoResultadoVisita";
 import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 import { todosNegociosPerdidos } from "./etapaPessoa";
 import { FichaNegocios, LINHA_NEGOCIO } from "./FichaNegocios";
@@ -62,6 +63,8 @@ interface AbasProps extends FichaInteriorProps {
   negocioAberto: string | null;
   aoAbrirNegocio: (id: string) => void;
   aoVoltarNegocio: () => void;
+  /** Abre o diálogo do resultado de uma visita. */
+  aoRegistarResultado: (visitaId: string) => void;
 }
 
 /** A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). */
@@ -95,7 +98,7 @@ function AbasFicha(p: AbasProps) {
         <TabsContent value="resumo" className="mt-0">
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={submissoes.length}
-            aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.alterarVisita}
+            aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.alterarVisita} aoRegistarResultado={p.aoRegistarResultado}
           />
         </TabsContent>
         <TabsContent value="negocios" className="mt-0 pt-4"><ConteudoNegocios {...p} /></TabsContent>
@@ -148,6 +151,9 @@ export function FichaInterior(p: FichaInteriorProps) {
   const negocio = useNegocioAberto();
   const painelId = useId();
   const { texto, anunciar } = useAnuncios(p.anuncioExterno);
+  // A visita a que se regista o resultado (o diálogo vive aqui, dentro da ficha, para o aviso sair na região da ficha).
+  const [visitaDoResultado, setVisitaDoResultado] = useState<string | null>(null);
+  const visitaAberta = p.resumo.registos.visitas.find((v) => v.id === visitaDoResultado) ?? null;
   useEffect(() => { if (p.anuncioProcesso) anunciar(p.anuncioProcesso); }, [p.anuncioProcesso, anunciar]);
   const { acao, visitados, abrir, fechar, mudarConteudo } = usePaineis(p.fecharPainel, anunciar);
   useAbrirNegociosAoCriar(p.resumo, negocio.esquecer, () => setAba("negocios"));
@@ -164,7 +170,7 @@ export function FichaInterior(p: FichaInteriorProps) {
           aoCriarNegocio={() => p.aoCriarNegocio(p.resumo.pessoa)}
         />
         <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
-        {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("perder", origem)} />}
+        {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("encerrar", origem)} />}
         {visitados.filter((a): a is AcaoPainel => a !== "chamada").map((a) => (
           <PainelAcaoFicha
             key={a} acao={a} id={`${painelId}-${a}`} ativo={a === acao} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes}
@@ -180,10 +186,14 @@ export function FichaInterior(p: FichaInteriorProps) {
         ) : (
           <AbasFicha
             {...p} aba={aba} aoMudar={(a) => { negocio.esquecer(); setAba(a); }} negocioAberto={negocio.aberto}
-            aoAbrirNegocio={negocio.abrir} aoVoltarNegocio={negocio.voltar}
+            aoAbrirNegocio={negocio.abrir} aoVoltarNegocio={negocio.voltar} aoRegistarResultado={setVisitaDoResultado}
           />
         )}
       </div>
+      <DialogoResultadoVisita
+        visita={visitaAberta} pessoa={p.resumo.pessoa} comNegocioAberto={p.resumo.abertos.length > 0} aoGuardar={p.acoes.registarResultadoVisita}
+        aoFechar={() => setVisitaDoResultado(null)} aoAnunciar={anunciar}
+      />
       <div role="status" className="sr-only">{texto}</div>
     </AnuncioFichaContext.Provider>
   );

@@ -29,7 +29,7 @@ afterEach(() => { reporNegocios(); reporNegociosNovos(); reporPessoas(); reporEx
 
 const abrirPagina = () => render(<MemoryRouter initialEntries={["/pessoas"]}><Pessoas /></MemoryRouter>);
 const botao = (nome: string) => screen.getByRole("button", { name: nome });
-const coluna = (titulo: string) => within(screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section") as HTMLElement);
+const coluna = (titulo: string) => within(screen.getByRole("heading", { level: 4, name: new RegExp(`^${titulo}`) }).closest("section") as HTMLElement);
 const semDialogo = () => waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 const textoLive = () => Array.from(document.querySelectorAll('[role="status"]')).map((e) => e.textContent ?? "").join(" | ").replace(/\u00a0/g, "");
 
@@ -65,7 +65,7 @@ describe("Pessoas: o orçamento e a proposta a partir do Quadro", () => {
     expect(faseDoNegocio(negocio)).toBe("proposta");
     expect(valorDoNegocio(negocio)).toBeCloseTo(541.2, 9);
     expect(extrasAtuais().x3.condicoes).toMatchObject({ inicio: "2026-11-16", pagamento: "metade" });
-    expect(coluna("Proposta").getByRole("button", { name: "Registar a resposta do cliente: Casa de banho de Vasco Pinto (abre a ficha)" })).toBeInTheDocument();
+    expect(coluna("Proposta").getByRole("button", { name: "Registar a resposta do cliente: Casa de banho de Vasco Pinto" })).toBeInTheDocument();
     expect(coluna("Orçamento").queryByRole("button", { name: /Casa de banho de Vasco Pinto/ })).not.toBeInTheDocument();
     await waitFor(() => expect(textoLive()).toContain("Proposta enviada: Vasco Pinto passa a Proposta."));
   }, TEMPO);
@@ -82,8 +82,8 @@ describe("Pessoas: o orçamento e a proposta a partir do Quadro", () => {
     expect(valorDoNegocio(alteracoesAtuais().editados.x4)).toBe(5600);
   }, TEMPO);
 
-  it("um negócio de exemplo com orçamento escolhido e sem detalhe (Marta Silveira) continua a abrir a ficha: criar a proposta é da Fase 5", () => {
+  it("um negócio de exemplo com orçamento escolhido e sem detalhe (Marta Silveira) também executa o passo: nenhum botão se limita a abrir a ficha", () => {
     abrirPagina();
-    expect(botao("Criar a proposta: Cozinha de Marta Silveira (abre a ficha)")).toBeInTheDocument();
+    expect(botao("Criar a proposta: Cozinha de Marta Silveira")).toBeInTheDocument();
   });
 });

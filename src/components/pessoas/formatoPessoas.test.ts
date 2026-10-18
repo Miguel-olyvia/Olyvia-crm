@@ -1,11 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
-import { diaDaSemana, faixaSaude, textoDataCompleta, textoHaQuanto, textoPrazoPasso } from "./formatoPessoas";
+import { pessoaBase, registosBase, resumoBase } from "./fabricaTestes";
+import { diaDaSemana, faixaSaude, textoDataCompleta, textoEtapa, textoHaQuanto, textoPrazoPasso } from "./formatoPessoas";
 
 const textos = pessoasPaginaTranslations.pt;
 const t = (chave: string, params?: Record<string, string | number>) =>
   Object.entries(params ?? {}).reduce((texto, [k, v]) => texto.replace(`{${k}}`, String(v)), textos[chave] ?? chave);
 const HOJE = "2026-10-13";
+
+describe("textoEtapa: uma abordagem encerrada", () => {
+  const encerrada = (extra = {}) => resumoBase(
+    pessoaBase("a", { encerrada: { resultado: "obraInviavel", motivo: "preco", data: "2026-10-10" }, ...extra }), [], HOJE, "lead", registosBase(),
+  );
+
+  it("diz «Encerrada» e o resultado, em vez da etapa", () => {
+    expect(textoEtapa(t, encerrada())).toBe("Encerrada · Obra inviável");
+  });
+
+  it("uma pessoa que não está encerrada continua a dizer a etapa", () => {
+    expect(textoEtapa(t, resumoBase(pessoaBase("a"), [], HOJE, "lead", registosBase()))).toBe("Por contactar");
+  });
+});
 
 describe("textoDataCompleta", () => {
   it("hoje e ontem por extenso, e as outras com dia, mês, ano e hora", () => {

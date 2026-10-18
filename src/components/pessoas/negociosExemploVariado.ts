@@ -68,7 +68,7 @@ export const NEGOCIOS_VARIADO: NegocioPessoa[] = [
       }),
     ],
   }),
-  // Cliente com um negócio em Proposta e um pedido novo em Visita (ver os pedidos).
+  // Cliente com um negócio em Proposta e uma abordagem nova em Visita (ver `registosExemplo.ts`).
   negocio("vn-pascoal-prop", "pv-pascoal", "Climatização", { dias: 14, parado: 5, proximoPrazo: dia(3), orcamentos: [orc("vn-pascoal-prop-o1", 4600, true)], proposta: { estado: "enviada" } }),
   // Clientes com o orçamento detalhado: verificado, com bloqueio de margem e com a Direção pedida.
   negocio(ID_ORCAMENTO_VERIFICADO, "pv-sara", "Cozinha", { dias: 9, parado: 3, proximoPrazo: dia(2), orcamentos: doDetalhado(ID_ORCAMENTO_VERIFICADO) }),

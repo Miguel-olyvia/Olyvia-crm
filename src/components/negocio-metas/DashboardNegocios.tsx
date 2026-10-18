@@ -4,9 +4,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { DashboardCarregando, DashboardErro, DashboardVazio } from "./EstadosDashboard";
 import { EvolucaoMensal } from "./EvolucaoMensal";
+import { FunilAbordagem } from "./FunilAbordagem";
 import { MetasComerciais } from "./MetasComerciais";
 import { MetasMes } from "./MetasMes";
 import { NumerosQuadro } from "./NumerosQuadro";
+import type { DadosFunil } from "./percursoNegocio";
 import { filtrarPorComercial } from "./comparativoComerciais";
 import { ritmoEsperado } from "./estadoMeta";
 import { FOCO } from "./estilos";
@@ -24,13 +26,15 @@ interface DashboardNegociosProps {
   estado?: EstadoDashboard;
   aoTentarDeNovo?: () => void;
   aoIrParaQuadro?: () => void;
+  /** O funil da abordagem, à parte das metas; sem ele, a secção não aparece. */
+  funil?: DadosFunil;
   /** Dia de hoje, para o ritmo esperado do mês (por omissão, a data atual). */
   hoje?: Date;
 }
 
 /** Aba Dashboard: metas do mês em foco, comparativo por comercial, números do Quadro e evolução. */
 export function DashboardNegocios({
-  dados, estado = "pronto", aoTentarDeNovo, aoIrParaQuadro, hoje,
+  dados, estado = "pronto", aoTentarDeNovo, aoIrParaQuadro, hoje, funil,
 }: DashboardNegociosProps) {
   const { t } = useTranslation();
   const [comercial, setComercial] = useState<string | null>(null);
@@ -77,6 +81,7 @@ export function DashboardNegocios({
         totais={totais} ritmo={ritmo} selecionado={comercial} aoSelecionar={setComercial}
       />
       <NumerosQuadro numeros={numeros} comValor={comercial !== null} />
+      {funil && <FunilAbordagem funil={funil} />}
       <EvolucaoMensal meses={evolucao} />
     </div>
   );

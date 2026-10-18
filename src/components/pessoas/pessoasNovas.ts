@@ -3,17 +3,15 @@
 // páginas: "Abrir pessoa" a partir de um negócio dessa pessoa (/pessoas?open=p-novo-1) ainda a encontra.
 import { useSyncExternalStore } from "react";
 import { montarLead, type DadosNovaLead, type LeadMontada } from "./novaLead";
-import type { ItemAtividade, PedidoNegocio, Pessoa } from "./pessoasTipos";
+import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 
 export interface PessoasNovas {
   pessoas: readonly Pessoa[];
   /** A atividade com que nasceram, a mais recente primeiro. */
   atividade: readonly ItemAtividade[];
-  /** Os pedidos por contactar com que nasceram, pela mesma ordem das pessoas. */
-  pedidos: readonly PedidoNegocio[];
 }
 
-const NENHUMA: PessoasNovas = { pessoas: [], atividade: [], pedidos: [] };
+const NENHUMA: PessoasNovas = { pessoas: [], atividade: [] };
 
 let estado: PessoasNovas = NENHUMA;
 let sequencia = 0;
@@ -31,9 +29,7 @@ export const pessoasNovas = (): PessoasNovas => estado;
 export function registarLead(dados: DadosNovaLead, hoje: string): LeadMontada {
   sequencia += 1;
   const lead = montarLead(dados, hoje, sequencia);
-  estado = {
-    pessoas: [...estado.pessoas, lead.pessoa], atividade: [...lead.atividade, ...estado.atividade], pedidos: [...estado.pedidos, lead.pedido],
-  };
+  estado = { pessoas: [...estado.pessoas, lead.pessoa], atividade: [...lead.atividade, ...estado.atividade] };
   ouvintes.forEach((ouvinte) => ouvinte());
   return lead;
 }

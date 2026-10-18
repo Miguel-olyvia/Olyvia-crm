@@ -5,7 +5,7 @@ import { visitaBase } from "../fabricaTestes";
 import { novaLinhaDoCatalogo } from "./catalogoTrabalhos";
 import { verificarOrcamento } from "./orcamentoCalculo";
 import {
-  portaoCriarNegocio, portaoEnviarProposta, portaoGuardarOrcamento, portaoLevantamento, portaoMargem,
+  portaoCriarNegocio, portaoEnviarProposta, portaoFazerLevantamento, portaoGuardarOrcamento, portaoLevantamento, portaoMargem,
   portaoResponderDirecao, portaoValorOrcamento, portaoVerificarOrcamento, portaoVisitaFeita,
 } from "./portoesProcesso";
 
@@ -14,8 +14,8 @@ const porFazer = (extra: Partial<VisitaNegocio> = {}) => visitaBase("v1", { data
 const feita = (extra: Partial<VisitaNegocio> = {}) => visitaBase("v2", { estado: "feita", ...extra });
 const cancelada = visitaBase("v3", { estado: "cancelada" });
 
-describe("portaoVisitaFeita (marcar a visita como feita: abrir o painel de visita e levantamento do pedido)", () => {
-  it("sem pedido, sem visitas, ou só com visitas canceladas, falta a visita", () => {
+describe("portaoVisitaFeita (marcar a visita como feita: abrir o painel de visita e levantamento da pessoa)", () => {
+  it("sem pessoa, sem visitas, ou só com visitas canceladas, falta a visita", () => {
     expect(portaoVisitaFeita(null)).toEqual({ ok: false, emFalta: ["visita"] });
     expect(portaoVisitaFeita({ visitas: [] })).toEqual({ ok: false, emFalta: ["visita"] });
     expect(portaoVisitaFeita({ visitas: [cancelada] })).toEqual({ ok: false, emFalta: ["visita"] });
@@ -52,32 +52,32 @@ describe("portaoLevantamento (guardar a visita e o levantamento numa só gravaç
   it("uma visita cancelada não conta como feita nem como visita", () => {
     expect(portaoLevantamento({ visitas: [cancelada], linhas: [] }).ok).toBe(true);
   });
-  it("num pedido novo (exigirVisita) falta pelo menos uma visita por fazer ou feita", () => {
-    expect(portaoLevantamento({ visitas: [], linhas: [], exigirVisita: true })).toEqual({ ok: false, emFalta: ["visita"] });
-    expect(portaoLevantamento({ visitas: [cancelada], linhas: [], exigirVisita: true }).emFalta).toEqual(["visita"]);
-    expect(portaoLevantamento({ visitas: [porFazer()], linhas: [], exigirVisita: true }).ok).toBe(true);
+  it("não exige visita nenhuma: nem a visita nem o levantamento são obrigatórios", () => {
+    expect(portaoLevantamento({ visitas: [], linhas: [] })).toEqual({ ok: true, emFalta: [] });
   });
 });
 
-describe("portaoCriarNegocio (só a pessoa é obrigatória; visita e levantamento são opcionais)", () => {
+describe("portaoFazerLevantamento (o passo de um negócio em Levantamento: tem de haver um levantamento para ligar)", () => {
+  it("sem linhas, sem observações e sem nenhum levantamento por ligar, falta o levantamento", () => {
+    expect(portaoFazerLevantamento({ linhas: [], observacoes: "  ", temPorLigar: false })).toEqual({ ok: false, emFalta: ["semLevantamento"] });
+  });
+  it("com linhas, ou observações, ou um levantamento já por ligar, está tudo", () => {
+    expect(portaoFazerLevantamento({ linhas: [linha()], observacoes: "", temPorLigar: false })).toEqual({ ok: true, emFalta: [] });
+    expect(portaoFazerLevantamento({ linhas: [], observacoes: "Ver telhado", temPorLigar: false }).ok).toBe(true);
+    expect(portaoFazerLevantamento({ linhas: [], observacoes: "", temPorLigar: true }).ok).toBe(true);
+  });
+  it("uma linha por acabar não conta (a validação é a do levantamento) e não se diz «falta o levantamento»", () => {
+    expect(portaoFazerLevantamento({ linhas: [linha({ medida: "0" })], observacoes: "", temPorLigar: false })).toEqual({ ok: false, emFalta: ["linhaInvalida"] });
+  });
+});
+
+describe("portaoCriarNegocio (só a pessoa é obrigatória; visita e levantamento são opcionais e ligam-se, não se escrevem aqui)", () => {
   it("sem pessoa falta a pessoa", () => {
-    expect(portaoCriarNegocio({ pessoaId: "", visitas: [feita()], linhas: [linha()] })).toEqual({ ok: false, emFalta: ["pessoa"] });
-    expect(portaoCriarNegocio({ pessoaId: "  ", visitas: [feita()], linhas: [linha()] }).emFalta).toEqual(["pessoa"]);
+    expect(portaoCriarNegocio({ pessoaId: "" })).toEqual({ ok: false, emFalta: ["pessoa"] });
+    expect(portaoCriarNegocio({ pessoaId: "  " }).emFalta).toEqual(["pessoa"]);
   });
-  it("sem visita, ou só com visitas por fazer ou canceladas, nada mais se exige: a visita é opcional", () => {
-    expect(portaoCriarNegocio({ pessoaId: "a", visitas: [], linhas: [] })).toEqual({ ok: true, emFalta: [] });
-    expect(portaoCriarNegocio({ pessoaId: "a", visitas: [porFazer()], linhas: [] })).toEqual({ ok: true, emFalta: [] });
-    expect(portaoCriarNegocio({ pessoaId: "a", visitas: [cancelada], linhas: [] }).ok).toBe(true);
-  });
-  it("com uma visita feita e sem nenhuma linha cria-se na mesma", () => {
-    expect(portaoCriarNegocio({ pessoaId: "a", visitas: [feita()], linhas: [] })).toEqual({ ok: true, emFalta: [] });
-  });
-  it("se há linhas, o formato vê-se: uma por acabar não serve; uma válida serve", () => {
-    expect(portaoCriarNegocio({ pessoaId: "a", visitas: [feita()], linhas: [linha({ trabalho: "" })] }).emFalta).toEqual(["linhaInvalida"]);
-    expect(portaoCriarNegocio({ pessoaId: "a", visitas: [feita()], linhas: [linha()] })).toEqual({ ok: true, emFalta: [] });
-  });
-  it("falta a pessoa, e nada mais, mesmo com uma visita feita e sem linhas", () => {
-    expect(portaoCriarNegocio({ pessoaId: "", visitas: [feita()], linhas: [] }).emFalta).toEqual(["pessoa"]);
+  it("com a pessoa está tudo: nada mais se exige", () => {
+    expect(portaoCriarNegocio({ pessoaId: "a" })).toEqual({ ok: true, emFalta: [] });
   });
 });
 

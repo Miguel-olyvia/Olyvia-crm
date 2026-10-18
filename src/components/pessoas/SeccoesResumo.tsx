@@ -14,8 +14,7 @@ import { avisosPessoa, type AvisoPessoa } from "./avisosPessoa";
 import { passoDaPerdida, proximoPasso } from "./etapaPessoa";
 import { resultadoEfetivo } from "./filtrosPessoas";
 import { faixaSaude, textoDiaCompleto, textoPrazoPasso, textoUltimoContacto } from "./formatoPessoas";
-import { horaDoProximoContacto, proximoContactoDaPessoa } from "./pedidoNegocio";
-import type { ResumoPessoa } from "./pessoasTipos";
+import type { MotivoEncerramento, ResumoPessoa } from "./pessoasTipos";
 import { MarcaExemplo, SeloResultado } from "./SelosPessoa";
 
 const P = "pessoasPagina.";
@@ -35,17 +34,31 @@ export function Prazo({ prazo, hoje, hora }: { prazo: string | null; hoje: strin
   );
 }
 
+/** O motivo de encerrar, em texto: o escrito à mão no «Outro», ou o da lista. */
+const textoDoMotivo = (t: ReturnType<typeof useTranslation>["t"], motivo: MotivoEncerramento, outro?: string): string =>
+  motivo === "outro" ? outro ?? t(`${P}close.reason.other`) : t(`${P}lost.${motivo}`);
+
 /**
- * "Próximo passo e prazo": o título, a explicação de uma linha e o prazo; numa perdida, "Perdida" com motivo, data e passo.
- * Quando o passo é a visita e o bloco "Próxima visita" está por cima (`comVisita`), o passo remete para ele em vez de repetir o dia.
+ * "Próximo passo e prazo": o título, a explicação de uma linha e o prazo; numa abordagem encerrada, o resultado, o motivo e o dia; numa
+ * perdida (exemplo antigo), "Perdida" com motivo, data e passo. Quando o passo é a visita e o bloco "Visitas" está por cima (`comVisita`),
+ * o passo remete para ele em vez de repetir o dia.
  */
 export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: ResumoPessoa; hoje: string; comVisita?: boolean }) {
   const { t } = useTranslation();
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
-  const proximoContacto = proximoContactoDaPessoa(pessoa, resumo.pedidos);
   let conteudo;
-  if (pessoa.perdida) {
+  if (pessoa.encerrada) {
+    const e = pessoa.encerrada;
+    conteudo = (
+      <div className="space-y-0.5">
+        <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
+          <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {t(`${P}close.summary`, { result: t(`${P}close.result.${e.resultado}`), reason: textoDoMotivo(t, e.motivo, e.motivoOutro), date: textoDiaCompleto(e.data) })}
+        </p>
+      </div>
+    );
+  } else if (pessoa.perdida) {
     const detalhe = t(`${P}sum.lostDetail`, {
       reason: t(`${P}lost.${pessoa.perdida.motivo}`), date: textoDiaCompleto(pessoa.perdida.data),
       step: t(`${P}journey.step${passoDaPerdida(resumo)}`),
@@ -73,7 +86,7 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: Resum
       <div className="space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
         <p className="text-[15px] text-muted-foreground">{t(`${P}next.${passo.id}.hint`)}</p>
-        <Prazo prazo={passo.prazo} hoje={hoje} hora={passo.prazo !== null && passo.prazo === proximoContacto ? horaDoProximoContacto(pessoa, resumo.pedidos) : undefined} />
+        <Prazo prazo={passo.prazo} hoje={hoje} hora={passo.prazo !== null && passo.prazo === resumo.proximoContacto ? resumo.proximoHora : undefined} />
       </div>
     );
   }

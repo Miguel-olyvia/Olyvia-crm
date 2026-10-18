@@ -7,8 +7,8 @@ import { ATRIBUTO_ITEM, ATRIBUTO_PESSOA, BloqueioContext, ProcessoContext, useAc
 import type { ItemProcesso } from "./tiposProcesso";
 
 const item = (extra: Partial<ItemProcesso> = {}): ItemProcesso => ({
-  id: "pedido-pd-a", pessoaId: "a", pedidoId: "pd-a", tipo: "pedido", fase: "porContactar", trabalho: null, rotuloPedido: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
+  id: "pessoa-a", pessoaId: "a", tipo: "pessoa", fase: "porContactar", trabalho: null, valor: null, prazo: null, atrasado: false,
+  orcamentos: 0, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 function Botao({ item: i, aoAbrir }: { item?: ItemProcesso; aoAbrir: () => void }) {
@@ -17,19 +17,19 @@ function Botao({ item: i, aoAbrir }: { item?: ItemProcesso; aoAbrir: () => void 
 }
 
 const comProvider = (executar: () => void, filhos: ReactNode) => (
-  <ProcessoContext.Provider value={{ executar, abrirNovoPedido: vi.fn() }}>{filhos}</ProcessoContext.Provider>
+  <ProcessoContext.Provider value={{ executar, abrirVisitaLevantamento: vi.fn() }}>{filhos}</ProcessoContext.Provider>
 );
 
 describe("useAcaoDoPasso", () => {
   it("com provider e um passo que já executa, o clique chama `executar` com o item e o botão, e não abre a ficha", () => {
     const executar = vi.fn();
     const aoAbrir = vi.fn();
-    const pedido = item();
-    render(comProvider(executar, <Botao item={pedido} aoAbrir={aoAbrir} />));
+    const doItem = item();
+    render(comProvider(executar, <Botao item={doItem} aoAbrir={aoAbrir} />));
     const botao = screen.getByRole("button", { name: "passo" });
     expect(botao).toHaveAttribute("data-executa", "true");
     fireEvent.click(botao);
-    expect(executar).toHaveBeenCalledExactlyOnceWith(pedido, botao);
+    expect(executar).toHaveBeenCalledExactlyOnceWith(doItem, botao);
     expect(aoAbrir).not.toHaveBeenCalled();
   });
 
@@ -47,23 +47,26 @@ describe("useAcaoDoPasso", () => {
     expect(aoAbrir).toHaveBeenCalledOnce();
   });
 
-  it("com provider mas num passo da Fase 5 (registar a assinatura), o clique abre a ficha e `executar` não é chamado", () => {
+  it("com provider, o último passo do percurso (registar a assinatura) também executa: chama `executar` e não abre a ficha", () => {
     const executar = vi.fn();
     const aoAbrir = vi.fn();
-    render(comProvider(executar, <Botao item={item({ tipo: "negocio", fase: "contrato", id: "n1" })} aoAbrir={aoAbrir} />));
-    expect(screen.getByRole("button")).toHaveAttribute("data-executa", "false");
+    const contrato = item({ tipo: "negocio", fase: "contrato", id: "n1" });
+    render(comProvider(executar, <Botao item={contrato} aoAbrir={aoAbrir} />));
+    expect(screen.getByRole("button")).toHaveAttribute("data-executa", "true");
     fireEvent.click(screen.getByRole("button"));
-    expect(aoAbrir).toHaveBeenCalledOnce();
-    expect(executar).not.toHaveBeenCalled();
+    expect(executar).toHaveBeenCalledOnce();
+    expect(aoAbrir).not.toHaveBeenCalled();
   });
 
   it("com provider, os passos do orçamento (Fase 4) executam: criar, verificar, aguardar a Direção e enviar a proposta", () => {
-    const negocio = { tipo: "negocio", fase: "orcamento", id: "n1", orcamentos: 1, orcamentoEscolhido: true } as const;
+    const negocio = { tipo: "negocio", fase: "orcamento", id: "n1", orcamentos: 1 } as const;
     const casos: [string, Partial<ItemProcesso>][] = [
-      ["criar o orçamento", { orcamentos: 0, orcamentoEscolhido: false }],
+      ["criar o orçamento", { orcamentos: 0 }],
       ["verificar o orçamento", { verificacao: "porVerificar" }],
       ["aguardar a Direção", { verificacao: "aguardaDirecao" }],
       ["enviar a proposta", { verificacao: "verificado" }],
+      ["criar a proposta (sem orçamento detalhado)", { verificacao: "semDetalhe" }],
+      ["registar a resposta do cliente", { fase: "proposta" }],
     ];
     for (const [nome, extra] of casos) {
       const executar = vi.fn();
@@ -87,19 +90,19 @@ describe("useAcaoDoPasso", () => {
       const acao = useAcaoDoPasso(i, vi.fn());
       return <button type="button" {...acao.atributos}>{acao.bloqueio ?? "livre"}</button>;
     }
-    const bloqueio = { itemId: "pedido-pd-a", passo: "registarChamada" as const, texto: "Falta o resultado." };
+    const bloqueio = { itemId: "pessoa-a", passo: "registarChamada" as const, texto: "Falta o resultado." };
     render(
-      <ProcessoContext.Provider value={{ executar: vi.fn(), abrirNovoPedido: vi.fn() }}>
+      <ProcessoContext.Provider value={{ executar: vi.fn(), abrirVisitaLevantamento: vi.fn() }}>
         <BloqueioContext.Provider value={bloqueio}>
           <Visivel i={item()} />
-          <Visivel i={item({ id: "pedido-pd-b" })} />
+          <Visivel i={item({ id: "pessoa-b" })} />
           <Visivel i={item({ fase: "contactado" })} />
         </BloqueioContext.Provider>
       </ProcessoContext.Provider>,
     );
     const [bloqueado, outroItem, outroPasso] = screen.getAllByRole("button");
     expect(bloqueado).toHaveTextContent("Falta o resultado.");
-    expect(bloqueado).toHaveAttribute("aria-describedby", "explicacao-passo-pedido-pd-a");
+    expect(bloqueado).toHaveAttribute("aria-describedby", "explicacao-passo-pessoa-a");
     expect(outroItem).toHaveTextContent("livre");
     expect(outroItem).not.toHaveAttribute("aria-describedby");
     expect(outroPasso).toHaveTextContent("livre");

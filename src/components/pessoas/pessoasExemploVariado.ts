@@ -1,5 +1,5 @@
 // DADOS DE EXEMPLO variados da página "Pessoas": 17 pessoas inventadas (8 leads e 9 clientes), para o utilizador testar o fluxo com
-// pedidos e negócios em fases diferentes (ver `pedidosExemploVariado.ts` e `negociosExemploVariado.ts`). Nomes, moradas e contactos
+// registos e negócios em fases diferentes (ver `registosExemplo.ts` e `negociosExemploVariado.ts`). Nomes, moradas e contactos
 // são inventados; nada vem da base de dados. O papel (lead ou cliente) não é guardado: deriva dos negócios.
 import { dia } from "./exemploVariadoApoio";
 import type { OrigemPessoa, Pessoa, ResultadoContacto, ViaEntrada } from "./pessoasTipos";
@@ -25,6 +25,8 @@ interface Dados {
   resultado?: ResultadoContacto;
   /** Dias de hoje até à próxima chamada; falta quando a pessoa não tem chamada agendada. */
   proxima?: number;
+  /** Dias de hoje até à submissão (ou pedido novo) que a fez voltar à abordagem (negativo); falta nas outras. */
+  abordagem?: number;
   nif?: string;
   campanha?: string;
 }
@@ -34,6 +36,7 @@ const FORMULARIO = "Pedido de orçamento";
 const pessoa = (d: Dados): Pessoa => ({
   id: d.id, nome: d.nome, comercial: d.comercial, origem: d.origem, canal: d.canal, viaEntrada: d.via, saude: d.saude,
   contacto: { telefone: d.telefone, email: d.email },
+  ...(d.abordagem === undefined ? {} : { abordagemDesde: dia(d.abordagem) }),
   ultimoContactoDias: d.contacto, desde: dia(-d.desde), resultadoContacto: d.resultado, nif: d.nif, campanha: d.campanha,
   formulario: d.via === "formulario" ? FORMULARIO : undefined,
   proximoContacto: d.proxima === undefined ? null : dia(d.proxima),
@@ -102,7 +105,7 @@ const CLIENTES: Dados[] = [
   {
     id: "pv-rodrigo", nome: "Rodrigo Valadares", comercial: "Diogo Lopes", morada: ["Rua Dr. Parreira 15", "8800-390", "Tavira", "Faro"],
     telefone: "933 404 212", email: null, origem: "telefone", canal: "Chamada recebida", via: "telefone", saude: 58, contacto: 1,
-    desde: 500, nif: "209 111 304",
+    desde: 500, nif: "209 111 304", abordagem: -1,
   },
   {
     id: "pv-sara", nome: "Sara Bettencourt", comercial: "Ana Ribeiro", morada: ["Rua Capitão Leitão 7", "2710-540", "Sintra", "Lisboa"],

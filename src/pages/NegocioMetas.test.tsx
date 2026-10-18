@@ -162,8 +162,9 @@ describe("Quadro", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Rui Figueiredo · / }));
     const painel = screen.getByRole("dialog");
     // O Resumo abre primeiro, com a cadeia numa linha; o orçamento escolhido está no separador Orçamentos.
-    expect(within(painel).getByText("Aceite")).toBeInTheDocument();
-    expect(within(painel).getByText("Assinado")).toBeInTheDocument();
+    // O estado aparece na cadeia e no percurso do negócio (dois sítios).
+    expect(within(painel).getAllByText("Aceite")).toHaveLength(2);
+    expect(within(painel).getAllByText("Assinado")).toHaveLength(2);
     fireEvent.mouseDown(within(painel).getByRole("tab", { name: /^Orçamentos/ }));
     expect(within(painel).getByText("Escolhido")).toBeInTheDocument();
   });
@@ -239,7 +240,7 @@ describe("Quadro | Lista", () => {
     window.localStorage.setItem(CHAVE_VISTA, "lista");
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: /^Vasco Pinto/ }));
-    expect(within(screen.getByRole("dialog")).getByText("Por assinar")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getAllByText("Por assinar").length).toBeGreaterThan(0);
   });
 });
 

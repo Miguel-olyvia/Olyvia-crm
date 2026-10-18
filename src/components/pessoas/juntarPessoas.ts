@@ -3,8 +3,13 @@
 // tem um negócio ganho, e lead quem não tem.
 import { faseDoNegocio, isNegocioGanho, valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { ORDEM_SAUDE, saudeDoNegocio } from "@/components/negocio-metas/saudeNegocio";
-import { estaAtrasada, etapaEfetiva, negocioEmFoco } from "./etapaPessoa";
-import { ehHistorico, type NegocioPessoa, type PapelPessoa, type PedidoNegocio, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
+import { registosDaPessoa } from "@/components/negocio-metas/acoesRegistos";
+import { REGISTOS_VAZIOS, type EstadoRegistos, type RegistosDaPessoa } from "@/components/negocio-metas/registosTipos";
+import {
+  colunaDaPessoa, estaAtrasadaRegistos, etapaDosRegistos, horaDoProximoContactoRegistos, negocioEmFoco, proximoContactoRegistos,
+  proximoContactoVemDeVisitaRegistos, proximoPassoRegistos, registosParaAbordagem,
+} from "./etapaPessoa";
+import { ehHistorico, type NegocioPessoa, type PapelPessoa, type ParteQuadro, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
 
 /** Ganho: contrato assinado no quadro do mês, ou resultado "ganho" num histórico. */
 export const estaGanho = (n: NegocioPessoa): boolean => (ehHistorico(n) ? n.resultado === "ganho" : isNegocioGanho(n));
@@ -31,21 +36,32 @@ export function papelEAbertos(negocios: readonly NegocioPessoa[]): { papel: Pape
   return { papel: negocios.some(estaGanho) ? "cliente" : "lead", abertos: negocios.filter(estaAberto) };
 }
 
-function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], pedidos: PedidoNegocio[], hoje: string): ResumoPessoa {
+/** O que a etapa, o atraso, o próximo passo e a Parte do Quadro valem, lidos dos registos e dos negócios da pessoa. */
+export function derivar(pessoa: Pessoa, papel: PapelPessoa, negocios: NegocioPessoa[], abertos: NegocioMes[], registos: RegistosDaPessoa, hoje: string) {
+  const entrada = { pessoa, papel, negocios, abertos, registos };
+  const coluna = colunaDaPessoa(entrada, hoje);
+  return {
+    atrasada: estaAtrasadaRegistos(entrada, hoje), etapa: etapaDosRegistos(entrada, hoje), porLigar: registosParaAbordagem(registos, negocios, hoje),
+    parte: (coluna !== null ? "abordagem" : abertos.length > 0 ? "negocios" : "nenhuma") as ParteQuadro, coluna,
+    proximo: proximoPassoRegistos(entrada, hoje),
+    proximoContacto: proximoContactoRegistos(entrada, hoje), proximoHora: horaDoProximoContactoRegistos(entrada, hoje),
+    proximoDeVisita: proximoContactoVemDeVisitaRegistos(entrada, hoje),
+  };
+}
+
+function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], registos: RegistosDaPessoa, hoje: string): ResumoPessoa {
   const { papel, abertos } = papelEAbertos(negocios);
   const pior = piorAberto(abertos, hoje);
-  const entrada = { pessoa, papel, abertos, pedidos };
   const foco = negocioEmFoco(abertos);
   return {
     pessoa,
     papel,
     negocios,
     abertos,
-    pedidos,
+    registos,
+    ...derivar(pessoa, papel, negocios, abertos, registos, hoje),
     emJogo: abertos.reduce((soma, n) => soma + valorDoNegocio(n), 0),
-    atrasada: estaAtrasada(entrada, hoje),
     formulario: pessoa.formulario ?? null,
-    etapa: etapaEfetiva(entrada),
     faseEtapa: foco ? faseDoNegocio(foco) : null,
     piorAberto: pior,
     saude: pior ? saudeDoNegocio(pior, hoje) : null,
@@ -55,11 +71,11 @@ function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], pedidos: PedidoNegoc
 }
 
 /**
- * Junta cada pessoa com os seus negócios e os seus pedidos (a etapa, o "atrasada" e o próximo passo dependem deles). Sem `pedidos`,
- * ninguém tem pedidos.
+ * Junta cada pessoa com os seus negócios e os REGISTOS dela (contactos, visitas, levantamentos): a etapa, o "atrasada", o próximo passo
+ * e a Parte do Quadro saem daí. Sem `registos`, ninguém tem nenhum.
  */
 export function juntarPessoas(
-  pessoas: readonly Pessoa[], negocios: readonly NegocioPessoa[], hoje: string, pedidos: readonly PedidoNegocio[] = [],
+  pessoas: readonly Pessoa[], negocios: readonly NegocioPessoa[], hoje: string, registos: EstadoRegistos = REGISTOS_VAZIOS,
 ): ResumoPessoa[] {
-  return pessoas.map((p) => resumir(p, negocios.filter((n) => n.pessoaId === p.id), pedidos.filter((d) => d.pessoaId === p.id), hoje));
+  return pessoas.map((p) => resumir(p, negocios.filter((n) => n.pessoaId === p.id), registosDaPessoa(registos, p.id), hoje));
 }

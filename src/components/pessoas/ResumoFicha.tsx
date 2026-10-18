@@ -1,14 +1,16 @@
-// A aba "Resumo" da ficha, em secções por esta ordem: as visitas de cada pedido que as tem (uma secção por pedido), próximo passo e
-// prazo, avisos, contacto, origem e sobre a pessoa.
-// A marca "exemplo" vai por secção.
+// A aba "Resumo" da ficha, em secções por esta ordem: as visitas da pessoa (uma só secção), próximo passo e prazo, avisos, os registos por
+// ligar (chamadas e levantamentos), contacto, origem e sobre a pessoa. A marca "exemplo" vai por secção.
+import { useMemo } from "react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { ContactoFicha } from "./ContactoFicha";
 import type { AcoesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { itensDaPessoa } from "./processo/itensProcesso";
 import { useExtrasProcesso } from "./processo/processoNegocios";
 import { SeccaoOrigem } from "./SeccaoOrigem";
+import { SeccaoRegistos } from "./SeccaoRegistos";
 import { SeccaoAvisos, SeccaoPasso, SeccaoSobre } from "./SeccoesResumo";
-import { SeccaoPedidoVisita } from "./SeccaoVisita";
+import { SeccaoVisitas } from "./SeccaoVisitas";
 
 interface ResumoFichaProps {
   resumo: ResumoPessoa;
@@ -19,27 +21,35 @@ interface ResumoFichaProps {
   pendentes: number;
   aoVerSubmissoes: () => void;
   alterarVisita: AcoesFicha["alterarVisita"];
+  /** Abre o diálogo do resultado de uma visita. */
+  aoRegistarResultado: (visitaId: string) => void;
 }
 
 export function ResumoFicha(p: ResumoFichaProps) {
+  const { t } = useTranslation();
   const { resumo } = p;
   const extras = useExtrasProcesso();
-  // Uma perdida não tem visitas à vista; os outros mostram uma secção por pedido com visitas (as canceladas não contam).
-  const comVisitas = resumo.pessoa.perdida ? [] : resumo.pedidos.filter((d) => d.visitas.some((v) => v.estado !== "cancelada"));
-  const itens = itensDaPessoa(resumo, p.hoje, extras);
+  // O nome de cada negócio: os registos ligados dizem a que negócio pertencem.
+  const negocios = useMemo(
+    () => new Map(resumo.negocios.map((n) => [n.id, n.servico || t("pessoasPagina.board.dealName")])),
+    [resumo.negocios, t],
+  );
+  // Uma perdida não tem visitas à vista; os outros mostram uma só secção com as visitas da pessoa (as canceladas não contam).
+  const visitas = resumo.pessoa.perdida ? [] : resumo.registos.visitas;
+  const comVisitas = visitas.some((v) => v.estado !== "cancelada");
+  const item = itensDaPessoa(resumo, p.hoje, extras).find((i) => i.tipo === "pessoa");
   return (
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
-      {comVisitas.map((pedido) => (
-        <SeccaoPedidoVisita
-          key={pedido.id} pessoa={resumo.pessoa} pedido={pedido} pedidos={resumo.pedidos} item={itens.find((i) => i.pedidoId === pedido.id)} hoje={p.hoje}
-          alterarVisita={p.alterarVisita}
-        />
-      ))}
-      <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas.length > 0} />
+      <SeccaoVisitas
+        pessoa={resumo.pessoa} visitas={visitas} item={item} hoje={p.hoje} negocios={negocios} alterarVisita={p.alterarVisita}
+        aoRegistarResultado={p.aoRegistarResultado}
+      />
+      <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas} />
       <SeccaoAvisos
         resumo={resumo} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={p.pendentes}
         aoVerSubmissoes={p.aoVerSubmissoes}
       />
+      <SeccaoRegistos contactos={resumo.registos.contactos} levantamentos={resumo.registos.levantamentos} negocios={negocios} />
       <ContactoFicha pessoa={resumo.pessoa} />
       <SeccaoOrigem pessoa={resumo.pessoa} />
       <SeccaoSobre resumo={resumo} hoje={p.hoje} />

@@ -1,27 +1,27 @@
 // O arnês dos testes do `ProcessoProvider` (nenhum código da página o importa): as ações simuladas, os botões que executam um passo, o
-// `ProcessoProvider` montado à volta de uma pessoa e as fábricas de pedidos, visitas e levantamentos que os testes partilham.
+// `ProcessoProvider` montado à volta de uma pessoa e as fábricas de registos (contactos, visitas e levantamentos da pessoa) que os testes partilham.
 /* eslint-disable react-refresh/only-export-components -- ficheiro só de testes: não há "fast refresh" a proteger. */
 import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { novaLinha } from "@/components/negocio-metas/levantamento";
 import type { DadosCriarNegocio } from "@/components/negocio-metas/novoNegocio";
-import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
+import type { RegistosDaPessoa, VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
-import { pedidoBase, pessoaBase, resumoBase, visitaBase } from "../fabricaTestes";
+import { contactoBase, levantamentoBase, pessoaBase, registosBase, resumoBase, visitaPessoaBase } from "../fabricaTestes";
 import { paraOpcao } from "../pessoaOpcao";
-import type { PedidoNegocio, ResumoPessoa } from "../pessoasTipos";
+import type { ResumoPessoa } from "../pessoasTipos";
 import { itensDaPessoa } from "./itensProcesso";
 import { ProcessoProvider, type AcoesProcesso } from "./ProcessoProvider";
 import { useAcaoDoPasso, useProcesso } from "./processoContexto";
 import type { ItemProcesso } from "./tiposProcesso";
 
-export const PAINEL = /^Visita e levantamento de a( · .+)?$/;
+export const PAINEL = /^Visita e levantamento de a$/;
 export const GUARDAR = "Guardar a visita e o levantamento";
 
 export const acoes = (): AcoesProcesso => ({
-  registarChamada: vi.fn(), adiar: vi.fn(), perder: vi.fn(), reativar: vi.fn(), juntarNota: vi.fn(), alterarVisita: vi.fn(),
-  marcarVisita: vi.fn(), guardarPedido: vi.fn(), criarPedidoComVisitas: vi.fn(), removerPedido: vi.fn(),
+  registarChamada: vi.fn(), adiar: vi.fn(), encerrar: vi.fn(), reativar: vi.fn(), juntarNota: vi.fn(), alterarVisita: vi.fn(),
+  registarResultadoVisita: vi.fn(), marcarVisita: vi.fn(), guardarRegistos: vi.fn(),
 });
 
 export function Gatilho({ item }: { item: ItemProcesso }) {
@@ -29,9 +29,10 @@ export function Gatilho({ item }: { item: ItemProcesso }) {
   return <button type="button" onClick={(e) => processo?.executar(item, e.currentTarget)}>executar</button>;
 }
 
-export function GatilhoNovoPedido() {
+/** O botão «Visita e levantamento» do menu «Mais» da ficha. */
+export function GatilhoVisitaLevantamento() {
   const processo = useProcesso();
-  return <button type="button" onClick={(e) => processo?.abrirNovoPedido("a", e.currentTarget)}>novo pedido</button>;
+  return <button type="button" onClick={(e) => processo?.abrirVisitaLevantamento("a", e.currentTarget)}>visita e levantamento</button>;
 }
 
 /** Um botão feito com o mesmo gancho dos cartões do Quadro e da Lista: mostra a explicação do portão junto a si. */
@@ -70,11 +71,16 @@ export const montar = (resumo: ResumoPessoa, item: ItemProcesso) => {
   return resultado;
 };
 
-export const visita = (extra: Partial<VisitaNegocio> = {}) => visitaBase("pd-1-v1", { data: "2026-10-12", ...extra });
-export const comVisitas = (visitas = [visita()], extra: Partial<PedidoNegocio> = {}) => pedidoBase("pd-1", { contactado: true, visitas, ...extra });
-export const resumoCom = (pedidos: PedidoNegocio[]): ResumoPessoa => resumoBase(pessoaBase("a"), [], HOJE_EXEMPLO, "lead", pedidos);
+/** Uma visita da pessoa «a», por fazer, de um dia que já passou (o caso normal do passo «marcar como feita»). */
+export const visita = (extra: Partial<VisitaPessoa> = {}): VisitaPessoa => visitaPessoaBase("rv-1", { data: "2026-10-12", ...extra });
+/** Os registos de uma pessoa contactada, com as visitas dadas e o que mais se queira. */
+export const comVisitas = (visitas: VisitaPessoa[] = [visita()], extra: Partial<RegistosDaPessoa> = {}): RegistosDaPessoa =>
+  registosBase({ contactos: [contactoBase()], visitas, ...extra });
+export const resumoCom = (registos: RegistosDaPessoa): ResumoPessoa => resumoBase(pessoaBase("a"), [], HOJE_EXEMPLO, "lead", registos);
 export const itensDe = (r: ResumoPessoa): ItemProcesso[] => itensDaPessoa(r, HOJE_EXEMPLO);
-export const itemDe = (pedido: PedidoNegocio) => { const r = resumoCom([pedido]); return { r, item: itensDe(r)[0] }; };
+export const itemDe = (registos: RegistosDaPessoa) => { const r = resumoCom(registos); return { r, item: itensDe(r)[0] }; };
 export const linha = { ...novaLinha("l1"), divisao: "cozinha", trabalho: "bancada", medida: "3.5" };
 export const levantamento = (linhas = [linha]) => ({ linhas, observacoes: "", respostas: {} });
-export const feitaComLinhas = () => comVisitas([visita({ estado: "feita" })], { levantamento: levantamento(), servico: "Cozinha" });
+/** Uma visita feita e um levantamento com linhas completas, ambos por ligar. */
+export const feitaComLinhas = (): RegistosDaPessoa =>
+  comVisitas([visita({ estado: "feita" })], { levantamentos: [{ ...levantamentoBase("rl-1"), rascunho: levantamento() }] });

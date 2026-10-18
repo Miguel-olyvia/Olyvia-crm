@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 
-/** "Todos os negócios desta lead estão perdidos", com o botão "Marcar como perdida" (abre o painel de perder). */
+/** "Todos os negócios desta lead estão perdidos", com o botão "Encerrar abordagem" (abre o painel de encerrar). */
 export function AvisoNegociosPerdidos({ aoMarcar }: { aoMarcar: (origem: HTMLElement) => void }) {
   const { t } = useTranslation();
   return (
@@ -14,7 +14,7 @@ export function AvisoNegociosPerdidos({ aoMarcar }: { aoMarcar: (origem: HTMLEle
         <strong className="font-semibold">{t("pessoasPagina.alert.allLost")}</strong> {t("pessoasPagina.alert.allLostHint")}
       </p>
       <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={(e) => aoMarcar(e.currentTarget)}>
-        {t("pessoasPagina.bar.markLost")}
+        {t("pessoasPagina.close.bar.close")}
       </Button>
     </div>
   );

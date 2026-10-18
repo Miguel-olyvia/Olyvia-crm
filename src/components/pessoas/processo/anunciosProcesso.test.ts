@@ -7,8 +7,8 @@ import type { ItemProcesso } from "./tiposProcesso";
 const t: Traduzir = (chave, params) => `${chave}${params ? JSON.stringify(params) : ""}`;
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
-  id: "pedido-pd-1", pessoaId: "a", pedidoId: "pd-1", tipo: "pedido", fase: "contactado", trabalho: null, rotuloPedido: null, valor: null, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
+  id: "pessoa-a", pessoaId: "a", tipo: "pessoa", fase: "contactado", trabalho: null, valor: null, prazo: null, atrasado: false,
+  orcamentos: 0, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 describe("textoDoAviso", () => {
@@ -47,7 +47,7 @@ describe("textoDoAviso", () => {
   });
 
   describe("os passos do orçamento e da proposta (Fase 4)", () => {
-    const negocio = (extra: Partial<ItemProcesso>) => item({ id: "n1", tipo: "negocio", fase: "orcamento", orcamentos: 1, orcamentoEscolhido: true, ...extra });
+    const negocio = (extra: Partial<ItemProcesso>) => item({ id: "n1", tipo: "negocio", fase: "orcamento", orcamentos: 1, ...extra });
     const passo = (chave: string) => `"step":"pessoasPagina.todo.step.${chave}"`;
 
     it("orçamento guardado: diz o que há a fazer a seguir (verificá-lo)", () => {
@@ -78,9 +78,31 @@ describe("textoDoAviso", () => {
     });
   });
 
-  it("sem item depois, só a chamada tem aviso; os outros passos não dizem nada", () => {
+  describe("a resposta do cliente, a assinatura e a recusa", () => {
+    const negocio = (extra: Partial<ItemProcesso>) => item({ id: "n1", tipo: "negocio", orcamentos: 1, ...extra });
+
+    it("proposta aceite com contrato: 'passa a Contrato' e o que há a fazer a seguir (registar a assinatura)", () => {
+      expect(textoDoAviso(t, "resposta", "Ana", "proposta", negocio({ fase: "contrato" })))
+        .toBe('pessoasPagina.done.reply{"name":"Ana","phase":"pessoasPagina.board.col.contrato","step":"pessoasPagina.todo.step.registarAssinatura"}');
+    });
+
+    it("proposta aceite sem contrato: o negócio ficou ganho e já não há item, mas o aviso diz-o", () => {
+      expect(textoDoAviso(t, "resposta", "Ana", "proposta", null)).toBe('pessoasPagina.done.replyWon{"name":"Ana"}');
+    });
+
+    it("assinatura: o negócio está ganho, haja ou não outro item da pessoa", () => {
+      expect(textoDoAviso(t, "assinatura", "Ana", "contrato", null)).toBe('pessoasPagina.done.signed{"name":"Ana"}');
+      expect(textoDoAviso(t, "assinatura", "Ana", "contrato", negocio({ fase: "orcamento" }))).toBe('pessoasPagina.done.signed{"name":"Ana"}');
+    });
+
+    it("recusa: o texto vem escrito pelo passo (leva o motivo), por isso aqui não há nenhum", () => {
+      expect(textoDoAviso(t, "recusa", "Ana", "proposta", null)).toBe("");
+    });
+  });
+
+  it("sem item depois, só a chamada, a resposta aceite e a assinatura têm aviso; os outros passos não dizem nada", () => {
     const outros = [
-      "visita", "visitaFeita", "visitaGuardada", "negocio", "orcamento", "verificado", "direcaoPedida", "direcaoAprovada", "direcaoRecusada", "proposta",
+      "visita", "visitaFeita", "visitaGuardada", "negocio", "orcamento", "verificado", "direcaoPedida", "direcaoAprovada", "direcaoRecusada", "proposta", "recusa",
     ] as const;
     for (const tipo of outros) expect(textoDoAviso(t, tipo, "Ana", "visita", null)).toBe("");
   });

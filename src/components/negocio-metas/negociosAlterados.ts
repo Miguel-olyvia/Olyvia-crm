@@ -3,14 +3,21 @@
 // testes). A página de Negócio e metas e a ficha de Pessoas leem-no, por isso as duas mostram o mesmo. As funções
 // `negociosDoQuadro` e `negociosComPerdidos` aplicam o que está guardado a uma lista de negócios (puras).
 import { useSyncExternalStore } from "react";
+import type { Aplicacao } from "./negocioAcoes";
 import { DETALHES_EXEMPLO } from "./negocioDetalhesExemplo";
 import type { DetalheNegocio, OrcamentoDetalhe } from "./negocioDetalhes";
 import type { NegocioMes } from "./negocioMetas";
+import { faseNaPerda, type FaseNaPerda } from "./percursoNegocio";
+import { registosAtuais } from "./registosPessoa";
 
 export interface PerdaNegocio {
   motivo: string;
   /** AAAA-MM. */
   mes: string;
+  /** AAAA-MM-DD. */
+  data: string;
+  /** A fase em que o negócio estava quando se perdeu (conta para as metas conforme esta fase, ver `contaParaMetas`). */
+  fase: FaseNaPerda;
 }
 
 export interface Alteracoes {
@@ -25,7 +32,7 @@ export interface Alteracoes {
 }
 
 /** Um negócio perdido tal como a ficha de uma pessoa o conta (um terminado de um mês). */
-export type NegocioPerdido = NegocioMes & { mes: string; resultado: "perdido"; motivoPerda: string };
+export type NegocioPerdido = NegocioMes & { mes: string; resultado: "perdido"; motivoPerda: string; faseDaPerda?: FaseNaPerda };
 
 const SEM_ALTERACOES: Alteracoes = { editados: {}, perdidos: {}, detalhes: {}, sequencia: 0 };
 
@@ -59,12 +66,29 @@ export function guardarNegocio(negocio: NegocioMes, orcamento?: { id: string; de
   });
 }
 
-/** Marca o negócio como perdido, com o motivo, no mês de `hoje`. */
+/** Marca o negócio como perdido (em qualquer fase), com o motivo, no dia `hoje`; guarda a fase em que estava. */
 export function perderNegocio(negocio: NegocioMes, motivo: string, hoje: string): void {
+  const perda: PerdaNegocio = { motivo, mes: hoje.slice(0, 7), data: hoje, fase: faseNaPerda(negocio, registosAtuais()) };
   mudar({
     ...estado, editados: { ...estado.editados, [negocio.id]: negocio },
-    perdidos: { ...estado.perdidos, [negocio.id]: { motivo, mes: hoje.slice(0, 7) } },
+    perdidos: { ...estado.perdidos, [negocio.id]: perda },
   });
+}
+
+/** Grava o resultado de um evento do Workflow: um perdido guarda a perda (com motivo e fase); um em curso ou ganho guarda a versão nova. */
+export function gravarAplicacao(resultado: Aplicacao, hoje: string): void {
+  if (resultado.tipo === "perdido") perderNegocio(resultado.negocio, resultado.motivo, hoje);
+  else guardarNegocio(resultado.negocio);
+}
+
+/** A perda guardada de um negócio; `undefined` se não está perdido. */
+export const perdaDoNegocio = (negocioId: string, a: Alteracoes = estado): PerdaNegocio | undefined => a.perdidos[negocioId];
+
+/** Anula a perda: o negócio volta ao quadro, na fase em que estava. Um negócio que não está perdido fica como está. */
+export function anularPerda(negocioId: string): void {
+  if (!estado.perdidos[negocioId]) return;
+  const { [negocioId]: _anulada, ...resto } = estado.perdidos;
+  mudar({ ...estado, perdidos: resto });
 }
 
 /** Esquece tudo (para os testes e para repor o exemplo). */
@@ -87,7 +111,7 @@ export function negociosComPerdidos<T extends NegocioMes>(negocios: readonly T[]
   return negocios.map((n) => {
     const perda = a.perdidos[n.id];
     const atual = a.editados[n.id] ?? n;
-    return perda ? { ...atual, mes: perda.mes, resultado: "perdido" as const, motivoPerda: perda.motivo } : atual;
+    return perda ? { ...atual, mes: perda.mes, resultado: "perdido" as const, motivoPerda: perda.motivo, faseDaPerda: perda.fase } : atual;
   });
 }
 

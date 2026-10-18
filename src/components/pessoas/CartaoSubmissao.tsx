@@ -34,7 +34,7 @@ const SELO = "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 tex
 function AvisoVisita({ servico, nome, pessoa }: { servico: string; nome: string; pessoa: Pessoa | null }) {
   const { t } = useTranslation();
   const marcar = useMarcarVisita();
-  // `marcadas`: quem já tem um pedido em Visita ou a quem se marcou uma visita neste ecrã.
+  // `marcadas`: quem já tem uma visita por ligar nos registos ou a quem se marcou uma visita neste ecrã.
   const jaMarcada = pessoa !== null && marcar?.marcadas.has(pessoa.id) === true;
   return (
     <div role="note" className="flex flex-wrap items-center gap-3 rounded-lg border border-warning bg-warning/15 p-3">
@@ -44,7 +44,7 @@ function AvisoVisita({ servico, nome, pessoa }: { servico: string; nome: string;
       {marcar && pessoa && !jaMarcada && (
         <Button
           type="button" variant="outline" className={cn("min-h-11", FOCO)} aria-label={t("pessoasPagina.visit.bookNamed", { name: nome })}
-          onClick={() => marcar.pedir({ pessoaId: pessoa.id, nome, servico, moradaLead: moradaDaLead(pessoa) })}
+          onClick={() => marcar.pedir({ pessoaId: pessoa.id, nome, moradaLead: moradaDaLead(pessoa) })}
         >
           {t("pessoasPagina.visit.book")}
         </Button>

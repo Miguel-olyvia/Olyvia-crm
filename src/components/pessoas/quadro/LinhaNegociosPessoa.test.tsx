@@ -18,14 +18,15 @@ vi.mock("@/hooks/useTranslation", async () => {
 });
 
 const item = (extra: Partial<ItemProcesso>): ItemProcesso => ({
-  id: "n1", pessoaId: "p1", pedidoId: null, tipo: "negocio", fase: "orcamento", trabalho: "Cozinha", rotuloPedido: null, valor: 9000, prazo: null, atrasado: false,
-  orcamentos: 0, orcamentoEscolhido: false, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
+  id: "n1", pessoaId: "p1", tipo: "negocio", fase: "orcamento", trabalho: "Cozinha", valor: 9000, prazo: null, atrasado: false,
+  orcamentos: 0, verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
 });
 
 const ITENS: ItemProcesso[] = [
   item({}),
-  item({ id: "n2", trabalho: "Sala", fase: "proposta", valor: 3000, orcamentos: 1, orcamentoEscolhido: true }),
-  item({ id: "pedido-pd-1", pedidoId: "pd-1", tipo: "pedido", fase: "porContactar", trabalho: null, valor: null }),
+  item({ id: "n2", trabalho: "Sala", fase: "proposta", valor: 3000, orcamentos: 1 }),
+  item({ id: "pessoa-p1", tipo: "pessoa", fase: "porContactar", trabalho: null, valor: null }),
+  item({ id: "n3", trabalho: "Janelas", fase: "levantamento", valor: null }),
 ];
 
 const mostrar = (itens = ITENS, aoAbrir = vi.fn()) => {
@@ -37,36 +38,39 @@ const linhas = () => within(screen.getByRole("list", { name: "Negócios de Ana L
 describe("LinhaNegociosPessoa", () => {
   it("é uma lista com nome (role=list) e uma linha por item, sem headings", () => {
     mostrar();
-    expect(linhas()).toHaveLength(3);
+    expect(linhas()).toHaveLength(4);
     expect(screen.queryAllByRole("heading")).toHaveLength(0);
   });
 
   it("cada linha mostra o trabalho, a etiqueta, a fase e o valor", () => {
     mostrar();
-    const [negocio, , pedido] = linhas();
+    const [negocio, , pessoa] = linhas();
     expect(within(negocio).getByText("Cozinha")).toBeInTheDocument();
     expect(within(negocio).getByText("Negócio")).toBeInTheDocument();
     expect(within(negocio).getByText("Orçamento")).toBeInTheDocument();
     expect(within(negocio).getByText(formatarMeta("euro", 9000))).toBeInTheDocument();
-    expect(within(pedido).getByText("Pedido novo")).toBeInTheDocument();
-    expect(within(pedido).getByText("Pedido")).toBeInTheDocument();
-    expect(within(pedido).getByText("Por contactar")).toBeInTheDocument();
-    expect(within(pedido).getByText("Valor a definir")).toBeInTheDocument();
+    // Uma pessoa em abordagem não tem trabalho nem é um negócio: diz «Abordagem» (no trabalho e na etiqueta).
+    expect(within(pessoa).getAllByText("Abordagem")).toHaveLength(2);
+    expect(within(pessoa).queryByText("Negócio")).not.toBeInTheDocument();
+    expect(within(pessoa).getByText("Por contactar")).toBeInTheDocument();
+    expect(within(pessoa).getByText("Valor a definir")).toBeInTheDocument();
   });
 
   it("cada linha diz 'A fazer:' e tem o botão do passo certo para a sua fase", () => {
     mostrar();
-    const [orcamento, proposta, pedido] = linhas();
-    for (const l of [orcamento, proposta, pedido]) expect(within(l).getByText("A fazer:")).toBeInTheDocument();
+    const [orcamento, proposta, pessoa, levantamento] = linhas();
+    for (const l of [orcamento, proposta, pessoa, levantamento]) expect(within(l).getByText("A fazer:")).toBeInTheDocument();
     expect(within(orcamento).getByRole("button", { name: /^Criar o orçamento/ })).toBeInTheDocument();
     expect(within(proposta).getByRole("button", { name: /^Registar a resposta do cliente/ })).toBeInTheDocument();
-    expect(within(pedido).getByRole("button", { name: /^Registar a chamada/ })).toBeInTheDocument();
+    expect(within(pessoa).getByRole("button", { name: /^Registar a chamada/ })).toBeInTheDocument();
+    expect(within(levantamento).getByRole("button", { name: /^Fazer o levantamento/ })).toBeInTheDocument();
+    expect(within(levantamento).getByText("Levantamento")).toBeInTheDocument();
   });
 
   it("o botão do passo abre a ficha da pessoa (não há botões mortos nesta fase)", () => {
     const aoAbrir = mostrar();
     for (const botao of screen.getAllByRole("button")) fireEvent.click(botao);
-    expect(aoAbrir).toHaveBeenCalledTimes(3);
+    expect(aoAbrir).toHaveBeenCalledTimes(4);
     expect(aoAbrir).toHaveBeenCalledWith("p1");
   });
 
@@ -79,13 +83,14 @@ describe("LinhaNegociosPessoa", () => {
 
   it("o nome acessível é '{passo}: {trabalho} de {nome} (abre a ficha)', começa pelo texto visível, e distingue sub-linhas da mesma pessoa", () => {
     mostrar();
-    const [orcamento, proposta, pedido] = linhas();
-    const nomes = [orcamento, proposta, pedido].map((l) => within(l).getByRole("button"));
+    const [orcamento, proposta, pessoa, levantamento] = linhas();
+    const nomes = [orcamento, proposta, pessoa, levantamento].map((l) => within(l).getByRole("button"));
     expect(nomes[0]).toHaveAccessibleName("Criar o orçamento: Cozinha de Ana Lopes (abre a ficha)");
     expect(nomes[1]).toHaveAccessibleName("Registar a resposta do cliente: Sala de Ana Lopes (abre a ficha)");
-    expect(nomes[2]).toHaveAccessibleName("Registar a chamada: Pedido novo de Ana Lopes (abre a ficha)");
+    expect(nomes[2]).toHaveAccessibleName("Registar a chamada: Abordagem de Ana Lopes (abre a ficha)");
+    expect(nomes[3]).toHaveAccessibleName("Fazer o levantamento: Janelas de Ana Lopes (abre a ficha)");
     for (const b of nomes) expect(b.getAttribute("aria-label")!.startsWith(b.textContent!)).toBe(true);
-    expect(new Set(nomes.map((b) => b.getAttribute("aria-label"))).size).toBe(3);
+    expect(new Set(nomes.map((b) => b.getAttribute("aria-label"))).size).toBe(4);
   });
 
   it("fase, valor e prazo levam um rótulo só para leitores de ecrã, e o texto lido não fica solto", () => {

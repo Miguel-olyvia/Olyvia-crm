@@ -5,6 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import NegocioMetas from "./NegocioMetas";
 import { criarNegocioNovo, repor } from "@/components/negocio-metas/negociosNovos";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
+import { registarLevantamento, registarVisita, repor as reporRegistos } from "@/components/negocio-metas/registosPessoa";
+import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 
 vi.mock("@/hooks/useTranslation", async () => {
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");
@@ -34,7 +36,7 @@ const numerosDoQuadro = () => {
 };
 
 beforeEach(() => window.localStorage.clear());
-afterEach(() => repor());
+afterEach(() => { repor(); reporRegistos(); });
 
 describe("Novo negócio na página", () => {
   it("tem o botão primário Novo negócio no cabeçalho, ao lado do Workflow", () => {
@@ -68,16 +70,19 @@ describe("Novo negócio na página", () => {
   });
 });
 
-describe("Levantamento no painel do negócio criado", () => {
+describe("Levantamento no painel do negócio criado (deriva do registo ligado)", () => {
   const levantamento = {
-    data: "2026-10-13", feitoPor: "Bruno Costa", estado: "feito" as const, observacoes: "Cliente em casa de manhã",
-    linhas: [{ divisao: "Cozinha", trabalho: "Bancada nova", medida: 3.5, unidade: "m", observacoes: "Ver canos" }],
+    linhas: [{ id: "l1", divisao: "cozinha", trabalho: "outro", trabalhoOutro: "Bancada nova", medida: "3,5", unidade: "m2", observacoes: "Ver canos" }],
+    observacoes: "Cliente em casa de manhã", respostas: {},
   };
   const abrirPainel = (comLevantamento: boolean) => {
+    const registo = comLevantamento
+      ? registarLevantamento({ pessoaId: "p-marta", visitaId: null, data: "2026-10-13", feitoPor: "Bruno Costa", rascunho: levantamento })
+      : null;
     const criado = criarNegocioNovo(
       {
         pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro",
-        ...(comLevantamento ? { levantamento } : {}),
+        ligar: registo ? { registos: [], levantamento: { tipo: "existente", id: registo.id } } : { registos: [], levantamento: { tipo: "dispensar" } },
       }, HOJE_EXEMPLO,
     );
     render(<MemoryRouter initialEntries={[`/?open=${criado.id}`]}><NegocioMetas /></MemoryRouter>);
@@ -88,7 +93,7 @@ describe("Levantamento no painel do negócio criado", () => {
     const painel = abrirPainel(true);
     const secao = within(painel).getByRole("heading", { name: "Levantamento" }).closest("section")!;
     expect(within(secao).getByText("Feito · 13/10/2026 · Bruno Costa")).toBeInTheDocument();
-    expect(within(secao).getByRole("listitem")).toHaveTextContent("Cozinha: Bancada nova, 3.5 m (Ver canos)");
+    expect(within(secao).getByRole("listitem")).toHaveTextContent("Cozinha: Bancada nova, 3.5 m² (Ver canos)");
     expect(within(secao).getByText("Cliente em casa de manhã")).toBeInTheDocument();
   });
 
@@ -98,30 +103,26 @@ describe("Levantamento no painel do negócio criado", () => {
   });
 });
 
-describe("Qualificação, morada da obra e visita no painel do negócio criado", () => {
+describe("Qualificação e morada da obra no painel do negócio criado", () => {
   const abrirPainel = (extra: Record<string, unknown>) => {
     const criado = criarNegocioNovo({ pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro", ...extra }, HOJE_EXEMPLO);
     render(<MemoryRouter initialEntries={[`/?open=${criado.id}`]}><NegocioMetas /></MemoryRouter>);
     return screen.getByRole("dialog");
   };
 
-  it("mostra Qualificação, Morada da obra e Visita no Resumo, só de leitura, com o que foi respondido", () => {
+  it("mostra Qualificação e Morada da obra no Resumo, só de leitura, com o que foi respondido", () => {
     const painel = abrirPainel({
       qualificacao: [{ pergunta: "Tipo de imóvel", resposta: "Apartamento" }],
       moradaObra: { rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "3.º Esq." },
-      visita: [{ titulo: "Exterior do edifício", respostas: [{ pergunta: "Acesso", resposta: "Fácil" }] }],
     });
     const qualificacao = within(painel).getByRole("heading", { name: "Qualificação" }).closest("section")!;
     expect(within(qualificacao).getByRole("listitem")).toHaveTextContent("Tipo de imóvel: Apartamento");
     const morada = within(painel).getByRole("heading", { name: "Morada da obra" }).closest("section")!;
     expect(within(morada).getByText("Rua A 1, 1000-001 Lisboa")).toBeInTheDocument();
     expect(within(morada).getByText("3.º Esq.")).toBeInTheDocument();
-    const visita = within(painel).getByRole("heading", { level: 3, name: "Visita" }).closest("section")!;
-    expect(within(visita).getByRole("heading", { name: "Exterior do edifício" })).toBeInTheDocument();
-    expect(within(visita).getByRole("listitem")).toHaveTextContent("Acesso: Fácil");
   });
 
-  it("sem respostas o Resumo não traz nenhuma das três secções", () => {
+  it("sem respostas o Resumo não traz nenhuma das secções", () => {
     const painel = abrirPainel({});
     for (const nome of ["Qualificação", "Morada da obra", "Visita"]) {
       expect(within(painel).queryByRole("heading", { name: nome })).not.toBeInTheDocument();
@@ -129,14 +130,18 @@ describe("Qualificação, morada da obra e visita no painel do negócio criado",
   });
 });
 
-describe("Visitas no painel do negócio criado", () => {
-  const visita = (id: string, parcial: Record<string, unknown> = {}) => ({
+describe("Visitas no painel do negócio criado (derivam dos registos ligados)", () => {
+  const visita = (id: string, parcial: Partial<VisitaNegocio> = {}): VisitaNegocio => ({
     id, data: "2026-10-15", hora: "10:00", feitoPor: "Bruno Costa", estado: "feita", tipo: "levantamento", quemVaiEstar: "", duracao: "",
     morada: { rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" }, igualALead: false, nota: "", ...parcial,
   });
-  const abrirPainel = (visitas: unknown[]) => {
+  const abrirPainel = (visitas: VisitaNegocio[]) => {
+    const registadas = visitas.map((v) => registarVisita({ ...v, pessoaId: "p-marta" }));
     const criado = criarNegocioNovo(
-      { pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro", visitas } as Parameters<typeof criarNegocioNovo>[0], HOJE_EXEMPLO,
+      {
+        pessoa: { id: "p-marta", nome: "Marta Silveira" }, comercial: "Ana Ribeiro",
+        ligar: { registos: registadas.map((v) => ({ tipo: "visita" as const, id: v.id })), levantamento: { tipo: "dispensar" } },
+      }, HOJE_EXEMPLO,
     );
     render(<MemoryRouter initialEntries={[`/?open=${criado.id}`]}><NegocioMetas /></MemoryRouter>);
     return screen.getByRole("dialog");

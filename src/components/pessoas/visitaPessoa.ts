@@ -1,5 +1,5 @@
 // O que se pede para marcar ou alterar uma visita e a sua validação, em funções puras (o dia de hoje chega por parâmetro). A visita
-// em si é do pedido (ver `acoesPedido.ts`).
+// em si é da pessoa (ver `acoesVisitaPessoa.ts`).
 import { validarDestino, type DestinoVisita, type ErroMoradaVisita } from "./moradaVisita";
 
 export const MAX_NOTA_VISITA = 140;

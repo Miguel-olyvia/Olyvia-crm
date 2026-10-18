@@ -1,12 +1,10 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
-import type {
-  DadosContactoNegocio, LevantamentoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, SeccaoVisitaNegocio,
-  VisitaNegocio,
-} from "./negocioMetas";
+import type { DadosContactoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, VisitaNegocio } from "./negocioMetas";
 import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
-import { temLevantamento, validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
+import { validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
+import { decisaoDaEscolha, type LigarRegistos } from "./ligarNegocio";
 import type { Respostas } from "./perguntasTipos";
 
 /** Uma pessoa a escolher no formulário. A página monta a lista (Negócio e metas não importa de Pessoas). */
@@ -90,10 +88,11 @@ export type ErroCampo = "obrigatorio" | "comprido" | "invalido";
 export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "email" | "nif" | "nifEmpresa" | "codigoPostal", ErroCampo>>
   & ErrosLevantamento;
 
-export type AbaNovoNegocio = "geral" | "qualificacao" | "visita";
+/** As abas do painel: «visita» é a dos registos da pessoa (visitas e levantamento); «registos» é a de ligar registos ao negócio novo. */
+export type AbaNovoNegocio = "geral" | "qualificacao" | "visita" | "registos";
 
 /** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, a Qualificação a morada, a Visita as linhas do levantamento. */
-export function abasComErros(erros: ErrosNovoNegocio): Record<AbaNovoNegocio, boolean> {
+export function abasComErros(erros: ErrosNovoNegocio): Record<Exclude<AbaNovoNegocio, "registos">, boolean> {
   return {
     geral: (["pessoaId", "email", "nif", "nifEmpresa"] as const).some((c) => !!erros[c]),
     qualificacao: !!erros.codigoPostal,
@@ -169,16 +168,19 @@ export interface DadosCriarNegocio {
   levantamento?: LevantamentoNegocio;
   qualificacao?: RespostaNegocio[];
   moradaObra?: MoradaObraNegocio;
-  visita?: SeccaoVisitaNegocio[];
-  /** As visitas do negócio (já por ordem cronológica); o levantamento em `levantamento` deriva delas. */
-  visitas?: VisitaNegocio[];
-  /** O serviço, herdado do pedido (o negócio nasce sem ele quando falta). */
+  /**
+   * Os registos da pessoa que o negócio liga (contactos e visitas marcados) e o que faz do levantamento (usar um existente, fazer um novo
+   * ou dispensar). Nada se copia: o negócio lê os registos que tem ligados, e quem o cria liga-os (ver `criarNegocioNovo`).
+   */
+  ligar?: LigarRegistos;
+  /** O serviço (o negócio nasce sem ele quando falta). */
   servico?: string;
 }
 
 /**
- * O negócio de exemplo (o serviço é o do pedido, ou vazio): começa em Orçamento (sem orçamentos, por isso sem valor), com 0 dias, não parado e o primeiro
- * prazo daqui a 2 dias. O id é `n-novo-<sequência>`; várias pessoas (e a mesma) podem ter vários negócios.
+ * O negócio de exemplo (o serviço, ou vazio): sem orçamentos (por isso sem valor), com 0 dias, não parado e o primeiro prazo daqui a 2 dias.
+ * Começa em Orçamento, ou em Levantamento se se escolheu fazer um levantamento novo (ver `faseDoPercurso`). O id é `n-novo-<sequência>`;
+ * várias pessoas (e a mesma) podem ter vários negócios.
  */
 export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequencia: number): NegocioNovo {
   return {
@@ -192,11 +194,9 @@ export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequ
     proximoPrazo: somarDias(hoje, DIAS_ATE_PRIMEIRO_PRAZO),
     contacto: dados.pessoa.contacto ?? { telefone: null, email: null },
     ...(dados.contacto ? { dadosContacto: aparar(dados.contacto) } : {}),
-    ...(temLevantamento(dados.levantamento) ? { levantamento: dados.levantamento } : {}),
     ...(dados.qualificacao?.length ? { qualificacao: dados.qualificacao } : {}),
     ...(temMorada(dados.moradaObra) ? { moradaObra: moradaAparada(dados.moradaObra) } : {}),
-    ...(dados.visita?.length ? { visita: dados.visita } : {}),
-    ...(dados.visitas?.length ? { visitas: dados.visitas } : {}),
+    ...(dados.ligar ? { decisaoLevantamento: decisaoDaEscolha(dados.ligar.levantamento) } : {}),
     orcamentos: [],
     proposta: null,
     contrato: null,

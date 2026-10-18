@@ -85,7 +85,7 @@ describe("arranque dos ecrãs", () => {
     expect(screen.getByRole("button", { name: "Expandir tudo" })).toBeInTheDocument();
   });
 
-  it("Painel aberto: cabeçalho, separadores, duas ações (sem Copiar contacto nem ligação à base) e a cadeia no Resumo", () => {
+  it("Painel aberto: cabeçalho, separadores, as ações (abrir a pessoa, criar orçamento e perder; sem Copiar contacto nem ligação à base) e a cadeia no Resumo", () => {
     noRouter(comDados(<PainelNegocio negocio={negocios[9]} hoje={hoje} acoes={acoes} aoFechar={vi.fn()} />));
     const painel = screen.getByRole("dialog", { name: "Vasco Pinto" });
     expect(within(painel).getByRole("heading", { name: "Vasco Pinto" })).toBeVisible();
@@ -99,7 +99,8 @@ describe("arranque dos ecrãs", () => {
     expect(within(barra).getByRole("link", { name: "Abrir pessoa" })).toHaveAttribute("href", "/pessoas?open=p-vasco");
     expect(within(barra).getByRole("button", { name: "Criar orçamento" })).toBeInTheDocument();
     expect(within(barra).getAllByRole("link")).toHaveLength(1);
-    expect(within(barra).getAllByRole("button")).toHaveLength(1);
+    expect(within(barra).getByRole("button", { name: "Perder negócio" })).toBeInTheDocument();
+    expect(within(barra).getAllByRole("button")).toHaveLength(2);
     expect(within(painel).queryByRole("button", { name: "Copiar contacto" })).not.toBeInTheDocument();
     expect(within(painel).getByRole("list", { name: "Cadeia do negócio" })).toBeInTheDocument();
     expect(within(painel).getByText(/^Se ganho:/)).toBeInTheDocument();

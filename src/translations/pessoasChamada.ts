@@ -11,8 +11,6 @@ const pt: Record<string, string> = {
   [`${C}recommended`]: "Recomendado",
   [`${C}whenVisit`]: "Quando é a visita?",
   [`${C}whenCall`]: "Quando ligar?",
-  [`${C}request`]: "A que pedido se refere a visita?",
-  [`${C}visitGoes`]: "A visita fica no pedido {request}",
   [`${C}date`]: "Dia",
   [`${C}time`]: "Hora",
   [`${C}reason`]: "Motivo da perda",
@@ -25,10 +23,10 @@ const pt: Record<string, string> = {
   [`${C}done`]: "Chamada registada",
   "pessoasPagina.step.marcarVisita": "Marcar visita",
   "pessoasPagina.step.ligarData": "Ligar numa data e hora",
-  "pessoasPagina.step.perder": "Marcar como perdida",
+  "pessoasPagina.step.perder": "Encerrar a abordagem",
   "pessoasPagina.live.callVisit": "Chamada registada para {name}. Visita marcada para {when}.",
   "pessoasPagina.live.callAgenda": "Chamada registada para {name}. Ligar a {when}.",
-  "pessoasPagina.live.callLost": "Chamada registada para {name}, marcada como perdida.",
+  "pessoasPagina.live.callLost": "Chamada registada para {name}: a abordagem foi encerrada.",
   "pessoasPagina.activity.callScheduled": "Chamada agendada",
 };
 
@@ -41,8 +39,6 @@ const en: Record<string, string> = {
   [`${C}recommended`]: "Recommended",
   [`${C}whenVisit`]: "When is the visit?",
   [`${C}whenCall`]: "When to call?",
-  [`${C}request`]: "Which request is the visit for?",
-  [`${C}visitGoes`]: "The visit goes on the request {request}",
   [`${C}date`]: "Day",
   [`${C}time`]: "Time",
   [`${C}reason`]: "Reason it was lost",
@@ -55,10 +51,10 @@ const en: Record<string, string> = {
   [`${C}done`]: "Call logged",
   "pessoasPagina.step.marcarVisita": "Book a visit",
   "pessoasPagina.step.ligarData": "Call on a day and time",
-  "pessoasPagina.step.perder": "Mark as lost",
+  "pessoasPagina.step.perder": "Close the approach",
   "pessoasPagina.live.callVisit": "Call logged for {name}. Visit booked for {when}.",
   "pessoasPagina.live.callAgenda": "Call logged for {name}. Call on {when}.",
-  "pessoasPagina.live.callLost": "Call logged for {name}, marked as lost.",
+  "pessoasPagina.live.callLost": "Call logged for {name}: the approach was closed.",
   "pessoasPagina.activity.callScheduled": "Call scheduled",
 };
 

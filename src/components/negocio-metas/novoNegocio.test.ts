@@ -5,8 +5,10 @@ import {
   type PessoaOpcao,
 } from "./novoNegocio";
 import { levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
-import { verificarCoerencia, faseDoNegocio, isNegocioGanho, valorDoNegocio, type LevantamentoNegocio } from "./negocioMetas";
+import { verificarCoerencia, faseDoNegocio, isNegocioGanho, valorDoNegocio } from "./negocioMetas";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "./negocioMetasExemplo";
+import type { LigarRegistos } from "./ligarNegocio";
+import { faseDoPercurso } from "./percursoNegocio";
 
 const marta: PessoaOpcao = { id: "p-marta", nome: "Marta Silveira", contacto: { telefone: "912 345 601", email: "marta.silveira@exemplo.pt" } };
 
@@ -145,24 +147,22 @@ describe("validarNovoNegocio: morada da obra", () => {
   });
 });
 
-describe("criarNegocioExemplo: qualificação, morada da obra e visita", () => {
+describe("criarNegocioExemplo: qualificação e morada da obra", () => {
   const base = { pessoa: marta, comercial: "Ana Ribeiro" };
   const qualificacao = [{ pergunta: "Tipo de imóvel", resposta: "Apartamento" }];
-  const visita = [{ titulo: "Exterior do edifício", respostas: [{ pergunta: "Acesso", resposta: "Fácil" }] }];
   const morada = { rua: " Rua A 1 ", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" };
 
   it("guarda o que foi respondido, com a morada aparada", () => {
-    const criado = criarNegocioExemplo({ ...base, qualificacao, moradaObra: morada, visita }, HOJE_EXEMPLO, 1);
+    const criado = criarNegocioExemplo({ ...base, qualificacao, moradaObra: morada }, HOJE_EXEMPLO, 1);
     expect(criado.qualificacao).toEqual(qualificacao);
-    expect(criado.visita).toEqual(visita);
     expect(criado.moradaObra).toEqual({ rua: "Rua A 1", codigoPostal: "1000-001", localidade: "Lisboa", andar: "" });
   });
 
   it("sem nada escrito não deixa as propriedades (listas vazias e morada vazia não se guardam)", () => {
     const criado = criarNegocioExemplo(
-      { ...base, qualificacao: [], visita: [], moradaObra: { rua: " ", codigoPostal: "", localidade: "", andar: "" } }, HOJE_EXEMPLO, 2,
+      { ...base, qualificacao: [], moradaObra: { rua: " ", codigoPostal: "", localidade: "", andar: "" } }, HOJE_EXEMPLO, 2,
     );
-    for (const campo of ["qualificacao", "moradaObra", "visita"]) expect(campo in criado, campo).toBe(false);
+    for (const campo of ["qualificacao", "moradaObra"]) expect(campo in criado, campo).toBe(false);
     expect("qualificacao" in criarNegocioExemplo(base, HOJE_EXEMPLO, 3)).toBe(false);
   });
 
@@ -174,23 +174,30 @@ describe("criarNegocioExemplo: qualificação, morada da obra e visita", () => {
   });
 });
 
-describe("criarNegocioExemplo: levantamento", () => {
-  const lev: LevantamentoNegocio = {
-    data: "2026-10-13", feitoPor: "Ana Ribeiro", estado: "feito", observacoes: "",
-    linhas: [{ divisao: "Cozinha", trabalho: "Bancada nova", medida: 3, unidade: "m", observacoes: "" }],
-  };
-  const criar = (levantamento?: LevantamentoNegocio, n = 1) =>
-    criarNegocioExemplo({ pessoa: marta, comercial: "Ana Ribeiro", levantamento }, HOJE_EXEMPLO, n);
+describe("criarNegocioExemplo: levantamento e registos ligados", () => {
+  const criar = (ligar?: LigarRegistos, n = 1) => criarNegocioExemplo({ pessoa: marta, comercial: "Ana Ribeiro", ligar }, HOJE_EXEMPLO, n);
 
-  it("guarda o levantamento quando há linhas, e sem ele não deixa a propriedade", () => {
-    expect(criar(lev).levantamento).toEqual(lev);
-    expect("levantamento" in criar(undefined, 2)).toBe(false);
+  it("nada se copia para o negócio: nem visitas, nem levantamento, nem respostas da visita (são registos da pessoa, ligados por id)", () => {
+    const criado = criar({ registos: [{ tipo: "visita", id: "rv-1" }], levantamento: { tipo: "existente", id: "rl-1" } });
+    for (const campo of ["levantamento", "visitas", "visita"]) expect(campo in criado, campo).toBe(false);
   });
 
-  it("um levantamento por fazer, sem linhas e sem observações, não se guarda; só com observações guarda-se", () => {
-    const vazio: LevantamentoNegocio = { ...lev, estado: "porFazer", linhas: [] };
-    expect("levantamento" in criar(vazio, 3)).toBe(false);
-    expect(criar({ ...vazio, observacoes: "ver telhado" }, 4).levantamento?.observacoes).toBe("ver telhado");
+  it("o que se escolheu para o levantamento fica como decisão do negócio", () => {
+    expect(criar({ registos: [], levantamento: { tipo: "existente", id: "rl-1" } }).decisaoLevantamento).toBe("ligado");
+    expect(criar({ registos: [], levantamento: { tipo: "novo" } }, 2).decisaoLevantamento).toBe("ligado");
+    expect(criar({ registos: [], levantamento: { tipo: "dispensar" } }, 3).decisaoLevantamento).toBe("dispensado");
+  });
+
+  it("sem escolha (um negócio criado por outra via) não leva decisão: conta como Orçamento, o que sempre foi", () => {
+    expect("decisaoLevantamento" in criar(undefined, 4)).toBe(false);
+  });
+
+  it("fazer um novo levantamento põe o negócio em Levantamento; usar um existente ou dispensar, em Orçamento (com os registos à mão)", () => {
+    const semNada = { contactos: [], visitas: [], levantamentos: [] };
+    const comRegistos = { ...semNada, levantamentos: [{ id: "rl-1", pessoaId: marta.id, visitaId: null, data: "2026-10-10", feitoPor: "Ana", rascunho: { linhas: [], observacoes: "", respostas: {} }, negocioId: "n-novo-1" }] };
+    expect(faseDoPercurso(criar({ registos: [], levantamento: { tipo: "novo" } }), { registos: semNada })).toBe("levantamento");
+    expect(faseDoPercurso(criar({ registos: [], levantamento: { tipo: "existente", id: "rl-1" } }), { registos: comRegistos })).toBe("orcamento");
+    expect(faseDoPercurso(criar({ registos: [], levantamento: { tipo: "dispensar" } }, 2), { registos: comRegistos })).toBe("orcamento");
   });
 });
 
@@ -267,7 +274,7 @@ describe("validarNovoNegocio: só a pessoa é obrigatória (a visita e o levanta
   });
 });
 
-describe("criarNegocioExemplo: serviço herdado do pedido", () => {
+describe("criarNegocioExemplo: serviço", () => {
   it("leva o serviço dado; sem ele fica vazio como sempre", () => {
     expect(criarNegocioExemplo({ pessoa: marta, comercial: "Ana Ribeiro", servico: "Cozinha" }, HOJE_EXEMPLO, 1).servico).toBe("Cozinha");
     expect(criarNegocioExemplo({ pessoa: marta, comercial: "Ana Ribeiro" }, HOJE_EXEMPLO, 1).servico).toBe("");

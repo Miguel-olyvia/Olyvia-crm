@@ -72,6 +72,11 @@ describe("dia e hora", () => {
     expect(errosChamada({ ...vazio, passo: "marcarVisita" }, HOJE)).toEqual({ data: "dataVazia", hora: "horaVazia", motivo: null });
     expect(errosChamada({ ...vazio, passo: "perder" }, HOJE).motivo).toBe("motivoVazio");
     expect(temErros(errosChamada({ passo: "perder", data: "", hora: "", motivo: "preco" }, HOJE))).toBe(false);
+    // O motivo «outro» pede o texto (e o texto aparado não pode ficar vazio).
+    expect(errosChamada({ ...vazio, passo: "perder", motivo: "outro" }, HOJE).motivo).toBe("outroVazio");
+    expect(errosChamada({ ...vazio, passo: "perder", motivo: "outro", motivoOutro: "   " }, HOJE).motivo).toBe("outroVazio");
+    expect(errosChamada({ ...vazio, passo: "perder", motivo: "outro", motivoOutro: "Mudou de casa" }, HOJE).motivo).toBeNull();
+    expect(errosChamada({ ...vazio, passo: "ligarAmanha", motivo: "outro" }, HOJE).motivo).toBeNull();
     expect(temErros(errosChamada({ passo: "ligarData", data: "2026-10-14", hora: "15:00", motivo: "" }, HOJE))).toBe(false);
   });
 

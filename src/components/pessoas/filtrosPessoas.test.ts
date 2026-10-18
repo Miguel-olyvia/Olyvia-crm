@@ -4,17 +4,17 @@ import {
   FILTROS_INICIAIS, FORMULARIO_MANUAL, LIMITE_SEM_CONTACTO, chipsDoTipo, chipValido, contagensChips, contagensTipos, filtrarPessoas,
   filtrosAtivos, ordenarPessoas, pesquisaCorresponde, resultadoEfetivo,
 } from "./filtrosPessoas";
-import { pedidoBase, pessoaBase, resumoBase, visitaBase } from "./fabricaTestes";
+import { pessoaBase, registosBase, resumoBase, visitaPessoaBase } from "./fabricaTestes";
 import { juntarPessoas } from "./juntarPessoas";
-import { PEDIDOS_EXEMPLO } from "./pedidosDeExemplo";
-import { NEGOCIOS_ANTIGOS, PEDIDOS_ANTIGOS, PESSOAS_ANTIGAS } from "./exemploAntigoParaTestes";
+import { NEGOCIOS_ANTIGOS, PESSOAS_ANTIGAS, REGISTOS_ANTIGOS } from "./exemploAntigoParaTestes";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SUBMISSOES_EXEMPLO } from "./pessoasExemplo";
 import type { FiltrosPessoas } from "./pessoasTipos";
+import { REGISTOS_EXEMPLO } from "./registosExemplo";
 import { pessoasComPendentes } from "./resolverSubmissao";
 
 // As listas e contagens exatas abaixo são as das 17 pessoas de antes; os exemplos variados (17 pessoas a mais) contam no último describe.
-const todos = juntarPessoas(PESSOAS_ANTIGAS, NEGOCIOS_ANTIGOS, HOJE_EXEMPLO, PEDIDOS_ANTIGOS);
-const comVariados = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, PEDIDOS_EXEMPLO);
+const todos = juntarPessoas(PESSOAS_ANTIGAS, NEGOCIOS_ANTIGOS, HOJE_EXEMPLO, REGISTOS_ANTIGOS);
+const comVariados = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEMPLO, REGISTOS_EXEMPLO);
 const pendentes = pessoasComPendentes(SUBMISSOES_EXEMPLO);
 const nomes = (f: Partial<FiltrosPessoas>) =>
   filtrarPessoas(todos, { ...FILTROS_INICIAIS, ...f }, pendentes).map((r) => r.pessoa.nome).sort();
@@ -73,17 +73,17 @@ describe("filtros do popover", () => {
       ["Clara Dias", "Helena Tavares", "Hugo Teixeira", "Marta Silveira", "Paulo Neves", "Rui Figueiredo", "Sofia Matos"],
     );
   });
-  it("Com visita: quem tem algum pedido em Visita e não está perdida", () => {
-    // A Rita (visita hoje) e o Gonçalo (visita por concluir) são leads; o Paulo é cliente com um pedido com visita marcada.
-    expect(nomes({ comVisita: true })).toEqual(["Gonçalo Matias", "Paulo Neves", "Rita Albuquerque"]);
+  it("Com visita: quem está em abordagem com uma visita e não está perdida", () => {
+    // A Rita (visita hoje) e o Gonçalo (visita por concluir) são leads em abordagem; o Paulo tem a visita ao lado de um negócio aberto (Parte 2).
+    expect(nomes({ comVisita: true })).toEqual(["Gonçalo Matias", "Rita Albuquerque"]);
   });
-  it("Com visita: basta um dos pedidos estar em Visita; uma visita só cancelada não conta, nem a de uma perdida", () => {
-    const pedidos = (id: string) => [pedidoBase("pd-1", { pessoaId: id }), pedidoBase("pd-2", { pessoaId: id, visitas: [visitaBase("v")] })];
-    const cancelada = [pedidoBase("pd-3", { pessoaId: "b", visitas: [visitaBase("w", { estado: "cancelada" })] })];
+  it("Com visita: uma visita só cancelada não conta, nem a de uma perdida", () => {
+    const comVisita = (id: string) => registosBase({ visitas: [visitaPessoaBase(`rv-${id}`, { pessoaId: id })] });
+    const cancelada = registosBase({ visitas: [visitaPessoaBase("rv-w", { pessoaId: "b", estado: "cancelada" })] });
     const perdida = { perdida: { motivo: "preco" as const, data: "2026-10-01" } };
     const resumos = [
-      resumoBase(pessoaBase("a"), [], HOJE_EXEMPLO, "lead", pedidos("a")), resumoBase(pessoaBase("b"), [], HOJE_EXEMPLO, "lead", cancelada),
-      resumoBase(pessoaBase("c", perdida), [], HOJE_EXEMPLO, "lead", pedidos("c")),
+      resumoBase(pessoaBase("a"), [], HOJE_EXEMPLO, "lead", comVisita("a")), resumoBase(pessoaBase("b"), [], HOJE_EXEMPLO, "lead", cancelada),
+      resumoBase(pessoaBase("c", perdida), [], HOJE_EXEMPLO, "lead", comVisita("c")),
     ];
     const filtrados = filtrarPessoas(resumos, { ...FILTROS_INICIAIS, comVisita: true }, pendentes);
     expect(filtrados.map((r) => r.pessoa.id)).toEqual(["a"]);
@@ -179,9 +179,10 @@ describe("com os exemplos variados (34 pessoas)", () => {
     expect(contagensChips(comVariados, FILTROS_INICIAIS, pendentes)).toEqual({ todas: 34, porContactar: 3, atrasadas: 5, perdidas: 2 });
   });
 
-  it("Com visita passa a incluir as leads e os clientes com um pedido em Visita", () => {
+  it("Com visita passa a incluir as leads variadas em abordagem com uma visita (o Pascoal, com negócio aberto, está na Parte 2)", () => {
     const nomesComVisita = filtrarPessoas(comVariados, { ...FILTROS_INICIAIS, comVisita: true }, pendentes).map((r) => r.pessoa.nome).sort();
-    expect(nomesComVisita).toEqual(expect.arrayContaining(["Filipa Azevedo", "Gaspar Loureiro", "Helga Brandão", "Ivo Carneiro", "Jaime Serrano", "Pascoal Rebelo"]));
+    expect(nomesComVisita).toEqual(expect.arrayContaining(["Filipa Azevedo", "Gaspar Loureiro", "Helga Brandão", "Ivo Carneiro", "Jaime Serrano"]));
+    expect(nomesComVisita).not.toContain("Pascoal Rebelo");
     expect(nomesComVisita).not.toContain("Ema Cardoso");
   });
 });

@@ -9,13 +9,15 @@ import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/Abas
 import type { AcoesNegocio } from "./AcoesNegocio";
 import { CabecalhoPainel } from "./CabecalhoPainel";
 import { ContratoPainel } from "./ContratoPainel";
+import { BotaoPerderNegocio } from "./BotoesPerda";
 import { aceitaOrcamentos } from "./negocioAcoes";
 import { OrcamentosPainel } from "./OrcamentosPainel";
+import { PercursoNegocio } from "./PercursoPainel";
 import { PessoaPainel } from "./PessoaPainel";
 import { PropostaPainel } from "./PropostaPainel";
 import { ResumoPainel } from "./ResumoPainel";
 import { FOCO } from "./estilos";
-import type { NegocioMes } from "./negocioMetas";
+import { isNegocioGanho, type NegocioMes } from "./negocioMetas";
 import { abasDoNegocio, ehAba } from "./negocioPainel";
 import { enderecoDaPessoa } from "./useAcoesNegocio";
 import { useDadosPainel } from "./useDadosPainel";
@@ -31,9 +33,10 @@ interface PainelNegocioProps {
 
 /**
  * A barra de ações, fixa: Abrir pessoa (uma ligação real a /pessoas?open=, que abre a ficha dela) e Criar orçamento
- * (abre o diálogo da página, que acrescenta o orçamento ao negócio em memória; um negócio já ganho não o mostra).
+ * (abre o diálogo da página, que acrescenta o orçamento ao negócio em memória; um negócio já ganho não o mostra) e Perder negócio (em
+ * qualquer fase, com motivo; um negócio já ganho não o mostra).
  */
-function BarraAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegocio }) {
+function BarraAcoes({ negocio, acoes, hoje }: { negocio: NegocioMes; acoes: AcoesNegocio; hoje: string }) {
   const { t } = useTranslation();
   const botao = cn("min-h-11 gap-2", FOCO);
   return (
@@ -50,6 +53,7 @@ function BarraAcoes({ negocio, acoes }: { negocio: NegocioMes; acoes: AcoesNegoc
           {t("businessGoals.actions.createQuote")}
         </Button>
       )}
+      {!isNegocioGanho(negocio) && <BotaoPerderNegocio negocio={negocio} hoje={hoje} />}
     </div>
   );
 }
@@ -73,7 +77,10 @@ function SeparadoresPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: strin
       </ListaAbas>
       {/* Com pouca altura (zoom a 400 %) a zona dos separadores deixa de rolar sozinha: o painel inteiro rola. */}
       <div className="flex-1 overflow-y-auto p-6 [@media(max-height:480px)]:flex-none [@media(max-height:480px)]:overflow-visible">
-        <TabsContent value="resumo" className={conteudo}><ResumoPainel negocio={negocio} hoje={hoje} /></TabsContent>
+        <TabsContent value="resumo" className={conteudo}>
+          <ResumoPainel negocio={negocio} hoje={hoje} />
+          <PercursoNegocio negocio={negocio} detalhe={detalhe} />
+        </TabsContent>
         <TabsContent value="pessoa" className={conteudo}><PessoaPainel pessoa={pessoaDe(negocio.pessoaId)} /></TabsContent>
         <TabsContent value="orcamentos" className={conteudo}><OrcamentosPainel negocio={negocio} detalhe={detalhe} /></TabsContent>
         <TabsContent value="proposta" className={conteudo}><PropostaPainel negocio={negocio} detalhe={detalhe} hoje={hoje} /></TabsContent>
@@ -107,7 +114,7 @@ export function PainelNegocio({ negocio, hoje, acoes, aoFechar, focarTitulo = fa
         {mostrado && (
           <>
             <CabecalhoPainel negocio={mostrado} />
-            <BarraAcoes negocio={mostrado} acoes={acoes} />
+            <BarraAcoes negocio={mostrado} acoes={acoes} hoje={hoje} />
             <SeparadoresPainel key={mostrado.id} negocio={mostrado} hoje={hoje} />
           </>
         )}

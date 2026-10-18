@@ -28,6 +28,17 @@ export function SeloPerdida() {
   );
 }
 
+/** "Abordagem encerrada": sem interesse, ou obra inviável (ícone e texto). */
+export function SeloEncerrada() {
+  const { t } = useTranslation();
+  return (
+    <span className={cn(SELO, "border-border bg-muted")}>
+      <XCircle className="h-3 w-3" aria-hidden="true" />
+      {t("pessoasPagina.close.badge")}
+    </span>
+  );
+}
+
 /** "Empresa": a pessoa tem uma empresa. */
 export function SeloEmpresa() {
   const { t } = useTranslation();

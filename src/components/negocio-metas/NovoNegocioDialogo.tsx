@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FormularioNovoNegocio } from "./FormularioNovoNegocio";
+import { FormularioRegistos } from "./FormularioRegistos";
 import { FOCO } from "./estilos";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
 import type { VisitaNegocio } from "./negocioMetas";
@@ -13,8 +14,13 @@ import type { AbaNovoNegocio, DadosCriarNegocio, PessoaOpcao, RascunhoLevantamen
 interface NovoNegocioDialogoProps {
   /** As pessoas a escolher; a página monta a lista (esta pasta não importa de Pessoas). */
   pessoas: readonly PessoaOpcao[];
-  /** Chamado ao confirmar, já com o painel a fechar. */
-  aoCriar: (dados: DadosCriarNegocio) => void;
+  /**
+   * O que o painel faz: `negocio` (por omissão) cria um negócio à mão e liga registos da pessoa; `registos` é o painel «Visita e
+   * levantamento» da pessoa, que guarda as visitas e o levantamento nos registos dela (precisa de `guardarLevantamento`) e nunca cria negócio.
+   */
+  modo?: "negocio" | "registos";
+  /** Chamado ao confirmar, já com o painel a fechar (no modo `negocio`). */
+  aoCriar?: (dados: DadosCriarNegocio) => void;
   /** Controlo de fora (por exemplo a ficha de uma pessoa): sem isto o painel abre com o próprio botão. */
   aberto?: boolean;
   aoMudarAberto?: (aberto: boolean) => void;
@@ -24,14 +30,14 @@ interface NovoNegocioDialogoProps {
   pessoaInicialId?: string;
   /** O que já vem preenchido ao abrir (a visita concluída de uma pessoa: comercial, aba Visita e morada da obra). */
   valoresIniciais?: ValoresIniciaisNegocio;
-  /** A aba com que o painel abre (por omissão a Geral): o "A fazer" do levantamento abre na Visita. */
+  /** A aba com que o painel abre (por omissão a Geral): o "A fazer" do levantamento abre na Visita (modo `registos`). */
   abaInicial?: AbaNovoNegocio;
   /** A secção da aba Visita com que abre (o id, por exemplo `visitas`); sem isto vale a das Medidas da área. */
   seccaoInicial?: string;
   /**
-   * Com isto o rodapé ganha um botão que guarda o levantamento e as visitas e fecha o painel, sem criar o negócio. `aoGuardar`
-   * recebe o rascunho (com a morada da obra), a lista de visitas e o comercial escolhido, e devolve `false` quando não pôde guardar:
-   * então o painel fica aberto, com o que se escreveu.
+   * No modo `registos`, o botão que guarda o levantamento e as visitas e fecha o painel. `aoGuardar` recebe o rascunho (com a morada da
+   * obra), a lista de visitas e o comercial escolhido, e devolve `false` quando não pôde guardar: então o painel fica aberto, com o que se
+   * escreveu.
    */
   guardarLevantamento?: {
     texto: string;
@@ -92,8 +98,8 @@ function CabecalhoNovo({ titulo, descricao }: Pick<NovoNegocioDialogoProps, "tit
  * abre o painel do novo negócio e leva lá o foco. Só exemplo: nada é gravado.
  */
 export function NovoNegocioDialogo({
-  pessoas, aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial, guardarLevantamento,
-  aoDevolverFoco, titulo, descricao,
+  pessoas, modo = "negocio", aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial,
+  guardarLevantamento, aoDevolverFoco, titulo, descricao,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -113,7 +119,7 @@ export function NovoNegocioDialogo({
   const confirmar = (dados: DadosCriarNegocio) => {
     criou.current = true;
     setAberto(false);
-    aoCriar(dados);
+    aoCriar?.(dados);
   };
 
   const guardar = guardarLevantamento && {
@@ -158,11 +164,17 @@ export function NovoNegocioDialogo({
           className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
         >
           <CabecalhoNovo titulo={titulo} descricao={descricao} />
-          <FormularioNovoNegocio
-            pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
-            abaInicial={abaInicial} seccaoInicial={seccaoInicial} guardarLevantamento={guardar}
-            aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
-          />
+          {modo === "registos" && guardar ? (
+            <FormularioRegistos
+              pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
+              abaInicial={abaInicial} seccaoInicial={seccaoInicial} guardarLevantamento={guardar} aoSujar={() => { sujo.current = true; }}
+            />
+          ) : (
+            <FormularioNovoNegocio
+              pessoas={pessoas} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
+              aoSujar={() => { sujo.current = true; }} aoConfirmar={confirmar}
+            />
+          )}
         </SheetContent>
       </Sheet>
     </>
