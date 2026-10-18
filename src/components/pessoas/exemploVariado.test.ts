@@ -17,6 +17,7 @@ import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO } from "./pessoasExemplo";
 import { NEGOCIOS_VARIADO } from "./negociosExemploVariado";
 import { PESSOAS_VARIADO } from "./pessoasExemploVariado";
 import { REGISTOS_EXEMPLO } from "./registosExemplo";
+import { REGISTOS_LIGADOS_EXEMPLO } from "./registosLigadosExemplo";
 import { extrasAtuais } from "./processo/processoNegocios";
 import { EXTRAS_VARIADO } from "./processo/extrasExemploVariado";
 import { orcamentoDoNegocio } from "./processo/orcamentoDetalhado";
@@ -33,7 +34,10 @@ const OPCOES_PRESENTES = ["", "cliente", "casal", "familia", "outra"];
 const OPCOES_DURACAO = ["", "m30", "h1", "h1m30", "h2"];
 
 const visitasDe = (n: NegocioPessoa): VisitaNegocio[] => n.visitas ?? [];
-const dosVariados = <T extends { pessoaId: string }>(registos: readonly T[]): T[] => registos.filter((r) => IDS_PESSOAS.has(r.pessoaId));
+// A matriz das abordagens (registos por ligar). Os já ligados a negócios têm a sua prova em `registosExemplo.test.ts`.
+const IDS_LIGADOS = new Set([...REGISTOS_LIGADOS_EXEMPLO.contactos, ...REGISTOS_LIGADOS_EXEMPLO.visitas, ...REGISTOS_LIGADOS_EXEMPLO.levantamentos].map((r) => r.id));
+const dosVariados = <T extends { id: string; pessoaId: string }>(registos: readonly T[]): T[] =>
+  registos.filter((r) => IDS_PESSOAS.has(r.pessoaId) && !IDS_LIGADOS.has(r.id));
 const CONTACTOS_VARIADO = dosVariados(REGISTOS_EXEMPLO.contactos);
 const VISITAS_VARIADO = dosVariados(REGISTOS_EXEMPLO.visitas);
 const LEVANTAMENTOS_VARIADO = dosVariados(REGISTOS_EXEMPLO.levantamentos);

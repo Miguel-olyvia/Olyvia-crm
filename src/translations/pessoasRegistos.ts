@@ -47,6 +47,23 @@ const pt: Record<string, string> = {
   "pessoasPagina.reg.item.linkedCall": "Ligada ao negócio {deal}",
   "pessoasPagina.reg.item.linkedSurvey": "Ligado ao negócio {deal}",
   "pessoasPagina.reg.item.unlinked": "Por ligar a um negócio",
+
+  "pessoasPagina.linked.title": "Registos ligados",
+  "pessoasPagina.linked.hint": "Contactos, visitas e levantamentos da pessoa que pertencem a este negócio. Nada se copia: continuam na ficha da pessoa.",
+  "pessoasPagina.linked.none": "Ainda não há nada ligado a este negócio.",
+  "pessoasPagina.linked.toLink": "Por ligar a este negócio",
+  "pessoasPagina.linked.toLinkNone": "A pessoa não tem mais nada por ligar.",
+  "pessoasPagina.linked.closed": "O negócio já terminou: as ligações já não se alteram.",
+  "pessoasPagina.linked.kind.contact": "Contacto",
+  "pessoasPagina.linked.kind.visit": "Visita",
+  "pessoasPagina.linked.kind.survey": "Levantamento",
+  "pessoasPagina.linked.what": "{kind} de {date}",
+  "pessoasPagina.linked.link": "Ligar",
+  "pessoasPagina.linked.unlink": "Desligar",
+  "pessoasPagina.linked.linkLabel": "Ligar a este negócio: {what}",
+  "pessoasPagina.linked.unlinkLabel": "Desligar do negócio: {what}",
+  "pessoasPagina.linked.live.linked": "{what} ligado ao negócio.",
+  "pessoasPagina.linked.live.unlinked": "{what} desligado do negócio.",
 };
 
 const en: Record<string, string> = {
@@ -95,6 +112,23 @@ const en: Record<string, string> = {
   "pessoasPagina.reg.item.linkedCall": "Linked to the deal {deal}",
   "pessoasPagina.reg.item.linkedSurvey": "Linked to the deal {deal}",
   "pessoasPagina.reg.item.unlinked": "Not linked to a deal yet",
+
+  "pessoasPagina.linked.title": "Linked records",
+  "pessoasPagina.linked.hint": "Calls, visits and surveys of the person that belong to this deal. Nothing is copied: they stay on the person's record.",
+  "pessoasPagina.linked.none": "Nothing is linked to this deal yet.",
+  "pessoasPagina.linked.toLink": "Not linked to this deal yet",
+  "pessoasPagina.linked.toLinkNone": "The person has nothing else to link.",
+  "pessoasPagina.linked.closed": "The deal is over: its links can no longer be changed.",
+  "pessoasPagina.linked.kind.contact": "Call",
+  "pessoasPagina.linked.kind.visit": "Visit",
+  "pessoasPagina.linked.kind.survey": "Survey",
+  "pessoasPagina.linked.what": "{kind} on {date}",
+  "pessoasPagina.linked.link": "Link",
+  "pessoasPagina.linked.unlink": "Unlink",
+  "pessoasPagina.linked.linkLabel": "Link to this deal: {what}",
+  "pessoasPagina.linked.unlinkLabel": "Unlink from the deal: {what}",
+  "pessoasPagina.linked.live.linked": "{what} linked to the deal.",
+  "pessoasPagina.linked.live.unlinked": "{what} unlinked from the deal.",
 };
 
 export const pessoasRegistosTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

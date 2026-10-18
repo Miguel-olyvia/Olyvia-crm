@@ -1,6 +1,7 @@
 // Os registos de exemplo (contactos, visitas e levantamentos das pessoas): nascem das sementes (a etapa e a visita que cada pessoa traz em
 // `pessoasExemploFicha.ts`) e dos exemplos variados (`pessoasExemploVariado.ts`), porque o contacto, a visita e o levantamento são da
-// PESSOA e nenhum negócio os tem ligados à partida. Só em memória, sem Supabase.
+// PESSOA: os das abordagens ficam por ligar, e alguns negócios já têm registos ligados de várias formas (`registosLigadosExemplo.ts`).
+// Só em memória, sem Supabase.
 import type { NegocioMes, VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import { somarDias, type RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
@@ -13,6 +14,7 @@ import type { PessoaSemente, VisitaSemente } from "./pessoaSemente";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SEMENTES_EXEMPLO } from "./pessoasExemplo";
 import { pessoaVariado } from "./pessoasExemploVariado";
 import type { PapelPessoa, Pessoa } from "./pessoasTipos";
+import { REGISTOS_LIGADOS_EXEMPLO } from "./registosLigadosExemplo";
 
 /** O que uma pessoa já tinha feito de uma abordagem (as visitas por ordem cronológica). */
 export interface AbordagemExemplo {
@@ -175,8 +177,8 @@ const LINHAS: Linha[] = [
   { pessoaId: "pv-rodrigo", criado: -1, contactado: false },
 ];
 
-/** Os registos das pessoas de exemplo: os das sementes (leads sem negócio aberto e quem tem visita marcada) e os dos exemplos variados. */
-export const REGISTOS_EXEMPLO: EstadoRegistos = registosDeAbordagens(
+/** Os registos das abordagens: os das sementes (leads sem negócio aberto e quem tem visita marcada) e os dos exemplos variados; nenhum ligado. */
+const REGISTOS_DAS_ABORDAGENS: EstadoRegistos = registosDeAbordagens(
   [
     ...abordagensDeSementes(
       SEMENTES_EXEMPLO.map((pessoa) => ({ pessoa, ...papelEAbertos(NEGOCIOS_PESSOAS_EXEMPLO.filter((n) => n.pessoaId === pessoa.id)) })),
@@ -186,3 +188,10 @@ export const REGISTOS_EXEMPLO: EstadoRegistos = registosDeAbordagens(
   ],
   PESSOAS_EXEMPLO, HOJE_EXEMPLO,
 );
+
+/** Os registos das pessoas de exemplo: os das abordagens (por ligar) e os que já estão ligados a negócios (ver `registosLigadosExemplo.ts`). */
+export const REGISTOS_EXEMPLO: EstadoRegistos = {
+  contactos: [...REGISTOS_DAS_ABORDAGENS.contactos, ...REGISTOS_LIGADOS_EXEMPLO.contactos],
+  visitas: [...REGISTOS_DAS_ABORDAGENS.visitas, ...REGISTOS_LIGADOS_EXEMPLO.visitas],
+  levantamentos: [...REGISTOS_DAS_ABORDAGENS.levantamentos, ...REGISTOS_LIGADOS_EXEMPLO.levantamentos],
+};

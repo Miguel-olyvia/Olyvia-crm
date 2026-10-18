@@ -9,6 +9,8 @@ import { proximoPasso } from "./etapaPessoa";
 import { juntarPessoas } from "./juntarPessoas";
 import type { PessoaSemente, VisitaSemente } from "./pessoaSemente";
 import { NEGOCIOS_PESSOAS_EXEMPLO, PESSOAS_EXEMPLO, SEMENTES_EXEMPLO } from "./pessoasExemplo";
+import { NEGOCIOS_VARIADO } from "./negociosExemploVariado";
+import { ID_ORCAMENTO_BLOQUEADO, ID_ORCAMENTO_DIRECAO, ID_ORCAMENTO_VERIFICADO } from "./processo/extrasExemploVariado";
 import { abordagensDeSementes, REGISTOS_EXEMPLO } from "./registosExemplo";
 
 const HOJE = "2026-10-13";
@@ -16,18 +18,20 @@ const NOVOS = juntarPessoas(PESSOAS_EXEMPLO, NEGOCIOS_PESSOAS_EXEMPLO, HOJE_EXEM
 const novoDe = (id: string) => NOVOS.find((r) => r.pessoa.id === id)!;
 
 describe("os registos de exemplo", () => {
-  it("só existem registos de pessoas de exemplo, sem ids repetidos e sem nada ligado a negócios", () => {
+  it("só existem registos de pessoas de exemplo, sem ids repetidos; os das abordagens ficam por ligar e só os de registosLigadosExemplo estão ligados", () => {
     const ids = new Set(PESSOAS_EXEMPLO.map((p) => p.id));
     const todos = [...REGISTOS_EXEMPLO.contactos, ...REGISTOS_EXEMPLO.visitas, ...REGISTOS_EXEMPLO.levantamentos];
     expect(todos.length).toBeGreaterThan(0);
-    expect(todos.every((r) => ids.has(r.pessoaId) && r.negocioId === null)).toBe(true);
+    expect(todos.every((r) => ids.has(r.pessoaId))).toBe(true);
+    // Os ids dos registos ligados de exemplo são rcl-, rvl- e rll-: nenhum outro está ligado a um negócio.
+    expect(todos.filter((r) => r.negocioId !== null).every((r) => /^r[cvl]l-/.test(r.id))).toBe(true);
     for (const lista of [REGISTOS_EXEMPLO.contactos, REGISTOS_EXEMPLO.visitas, REGISTOS_EXEMPLO.levantamentos]) {
       expect(new Set(lista.map((r) => r.id)).size).toBe(lista.length);
     }
   });
 
-  it("há no máximo um contacto de exemplo por pessoa e cada levantamento aponta para uma visita da mesma pessoa", () => {
-    const porPessoa = REGISTOS_EXEMPLO.contactos.map((c) => c.pessoaId);
+  it("há no máximo um contacto de exemplo por pessoa por ligar e cada levantamento aponta para uma visita da mesma pessoa", () => {
+    const porPessoa = REGISTOS_EXEMPLO.contactos.filter((c) => c.negocioId === null).map((c) => c.pessoaId);
     expect(new Set(porPessoa).size).toBe(porPessoa.length);
     for (const l of REGISTOS_EXEMPLO.levantamentos) {
       if (l.visitaId !== null) expect(REGISTOS_EXEMPLO.visitas.find((v) => v.id === l.visitaId)?.pessoaId).toBe(l.pessoaId);
@@ -40,6 +44,40 @@ describe("os registos de exemplo", () => {
     expect(REGISTOS_EXEMPLO.visitas.some((v) => v.estado === "porFazer")).toBe(true);
     expect(REGISTOS_EXEMPLO.visitas.some((v) => v.estado === "cancelada")).toBe(true);
     expect(REGISTOS_EXEMPLO.levantamentos.length).toBeGreaterThan(0);
+  });
+});
+
+describe("os registos de exemplo ligados a negócios: cada negócio tem só o que aconteceu", () => {
+  const ligados = (id: string) => ({
+    contactos: REGISTOS_EXEMPLO.contactos.filter((r) => r.negocioId === id).length,
+    visitas: REGISTOS_EXEMPLO.visitas.filter((r) => r.negocioId === id).length,
+    levantamentos: REGISTOS_EXEMPLO.levantamentos.filter((r) => r.negocioId === id).length,
+  });
+  it.each([
+    ["só falado: um contacto", "vn-leonor-orc", { contactos: 1, visitas: 0, levantamentos: 0 }],
+    ["contacto e visita, sem levantamento", "vn-vitor-prop", { contactos: 1, visitas: 1, levantamentos: 0 }],
+    ["só levantamento, sem visita nem contacto", ID_ORCAMENTO_VERIFICADO, { contactos: 0, visitas: 0, levantamentos: 1 }],
+    ["só visita, sem contacto nem levantamento", ID_ORCAMENTO_BLOQUEADO, { contactos: 0, visitas: 1, levantamentos: 0 }],
+    ["contacto e levantamento, sem visita", ID_ORCAMENTO_DIRECAO, { contactos: 1, visitas: 0, levantamentos: 1 }],
+    ["contacto, visita e levantamento", "vn-zita-con", { contactos: 1, visitas: 1, levantamentos: 1 }],
+    ["nada ligado (criado sem abordagem)", "vn-otilia-orc", { contactos: 0, visitas: 0, levantamentos: 0 }],
+    ["nada ligado, com registos da abordagem por ligar", "vn-pascoal-prop", { contactos: 0, visitas: 0, levantamentos: 0 }],
+  ])("%s", (_nome, id, esperado) => {
+    expect(ligados(id)).toEqual(esperado);
+  });
+
+  it("a Zita tem um contacto novo por ligar ao lado do negócio, e a Pascoal tem visitas por ligar", () => {
+    expect(REGISTOS_EXEMPLO.contactos.filter((c) => c.pessoaId === "pv-zita" && c.negocioId === null)).toHaveLength(1);
+    expect(REGISTOS_EXEMPLO.visitas.filter((v) => v.pessoaId === "pv-pascoal" && v.negocioId === null).length).toBeGreaterThan(0);
+  });
+
+  it("cada registo ligado aponta para um negócio da mesma pessoa, e um levantamento ligado a uma visita fica no mesmo negócio que ela", () => {
+    const donoDe = new Map(NEGOCIOS_VARIADO.map((n) => [n.id, n.pessoaId]));
+    const todos = [...REGISTOS_EXEMPLO.contactos, ...REGISTOS_EXEMPLO.visitas, ...REGISTOS_EXEMPLO.levantamentos];
+    for (const r of todos) if (r.negocioId !== null) expect(donoDe.get(r.negocioId), r.id).toBe(r.pessoaId);
+    for (const l of REGISTOS_EXEMPLO.levantamentos) {
+      if (l.visitaId !== null) expect(REGISTOS_EXEMPLO.visitas.find((v) => v.id === l.visitaId)?.negocioId, l.id).toBe(l.negocioId);
+    }
   });
 });
 

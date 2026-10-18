@@ -21,6 +21,7 @@ import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { passoDoNegocio } from "./etapaPessoa";
 import { estaAberto } from "./juntarPessoas";
+import { RegistosLigadosNegocio } from "./RegistosLigadosNegocio";
 import { Prazo } from "./SeccoesResumo";
 
 const P = "pessoasPagina.";
@@ -92,6 +93,7 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar }: DetalheNegocioF
       {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} />}
       {estaAberto(negocio) && <PassoDoNegocio negocio={negocio} hoje={hoje} />}
       <Seccao titulo={t("businessGoals.journey.title")} nivel={4}><PercursoNegocio negocio={negocio} detalhe={detalhe} /></Seccao>
+      <Seccao titulo={t(`${P}linked.title`)} nivel={4}><RegistosLigadosNegocio negocio={negocio} aberto={estaAberto(negocio)} /></Seccao>
       <Seccao titulo={t(`${P}deal.quotes`)} nivel={4}>
         {podeCriar && (
           <Button type="button" variant="outline" className={cn("mb-3 min-h-11 gap-2", FOCO)} onClick={() => setCriando(true)}>

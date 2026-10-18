@@ -14,7 +14,7 @@ describe("traduções dos registos da pessoa", () => {
 
   it("todas as chaves levam o prefixo da página e nenhum texto está vazio", () => {
     for (const [chave, texto] of [...Object.entries(pt), ...Object.entries(en)]) {
-      expect(chave).toMatch(/^pessoasPagina\.(bar|board|deals|survey|visitResult|reg)\./);
+      expect(chave).toMatch(/^pessoasPagina\.(bar|board|deals|survey|visitResult|reg|linked)\./);
       expect(texto.trim(), chave).not.toBe("");
     }
   });
