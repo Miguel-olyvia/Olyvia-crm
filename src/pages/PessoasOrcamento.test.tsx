@@ -29,7 +29,7 @@ afterEach(() => { reporNegocios(); reporNegociosNovos(); reporPessoas(); reporEx
 
 const abrirPagina = () => render(<MemoryRouter initialEntries={["/pessoas"]}><Pessoas /></MemoryRouter>);
 const botao = (nome: string) => screen.getByRole("button", { name: nome });
-const coluna = (titulo: string) => within(screen.getByRole("heading", { level: 4, name: new RegExp(`^${titulo}`) }).closest("section") as HTMLElement);
+const coluna = (titulo: string) => within(screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section") as HTMLElement);
 const semDialogo = () => waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 const textoLive = () => Array.from(document.querySelectorAll('[role="status"]')).map((e) => e.textContent ?? "").join(" | ").replace(/\u00a0/g, "");
 

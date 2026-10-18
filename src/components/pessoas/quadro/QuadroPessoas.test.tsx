@@ -40,29 +40,25 @@ const mostrar = (cartoes = CARTOES, aoAbrir = vi.fn(), chip: ChipPessoa = "todas
   return aoAbrir;
 };
 
-const coluna = (titulo: string) => screen.getByRole("heading", { level: 4, name: new RegExp(`^${titulo}`) }).closest("section")!;
+const coluna = (titulo: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
 
 describe("QuadroPessoas", () => {
-  it("renderiza duas partes (Abordagem e Negócios) e as 7 colunas pela ordem, cada uma com h4 e a contagem certa", () => {
+  it("renderiza um só quadro com as 7 colunas pela ordem, cada uma com h3 e a contagem certa, sem títulos de partes", () => {
     mostrar();
     expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Abordagem", "Negócios"]);
-    const titulos = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+    const titulos = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(titulos).toEqual([
       "Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão",
       "Levantamento, 1 cartão", "Orçamento, 2 cartões", "Proposta, 0 cartões", "Contrato, 1 cartão",
     ]);
-    expect(screen.getAllByRole("region")).toHaveLength(9);
+    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(screen.getAllByRole("group", { name: "Pessoas por fase" })).toHaveLength(1);
   });
 
-  it("a Parte 1 só tem as colunas da abordagem e a Parte 2 as dos negócios: a mesma pessoa não está nas duas", () => {
+  it("a pessoa em abordagem só está nas três primeiras colunas e o negócio nas outras: a mesma pessoa não está nas duas", () => {
     mostrar();
-    const parte1 = screen.getByRole("heading", { level: 3, name: "Abordagem" }).closest("section")!;
-    const parte2 = screen.getByRole("heading", { level: 3, name: "Negócios" }).closest("section")!;
-    expect(within(parte1).getAllByRole("heading", { level: 4 }).map((h) => h.textContent?.split(",")[0])).toEqual(["Por contactar", "Contactado", "Visita"]);
-    expect(within(parte2).getAllByRole("heading", { level: 4 }).map((h) => h.textContent?.split(",")[0])).toEqual(["Levantamento", "Orçamento", "Proposta", "Contrato"]);
-    expect(within(parte1).queryByText("Duarte Melo")).not.toBeInTheDocument();
-    expect(within(parte2).queryByText("Ana Lopes")).not.toBeInTheDocument();
+    for (const c of ["Por contactar", "Contactado", "Visita"]) expect(within(coluna(c)).queryByText("Duarte Melo")).not.toBeInTheDocument();
+    for (const c of ["Levantamento", "Orçamento", "Proposta", "Contrato"]) expect(within(coluna(c)).queryByText("Ana Lopes")).not.toBeInTheDocument();
   });
 
   it("cada coluna sem nada diz 'Nada nesta fase'", () => {
@@ -153,7 +149,7 @@ describe("QuadroPessoas", () => {
 
   it("as colunas quebram o título em vez de o cortar, e o separador da contagem vem das traduções", () => {
     mostrar();
-    const h = screen.getByRole("heading", { level: 4, name: /^Visita/ });
+    const h = screen.getByRole("heading", { level: 3, name: /^Visita/ });
     expect(h.className).toContain("break-words");
     expect(h.className).not.toContain("truncate");
     expect(h.querySelector(".sr-only")?.textContent).toBe(", 1 cartão");

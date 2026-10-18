@@ -5,10 +5,6 @@ const pt: Record<string, string> = {
   "pessoasPagina.bar.visitSurvey": "Visita e levantamento",
   "pessoasPagina.bar.newDeal": "Novo negócio",
 
-  "pessoasPagina.board.part.approach": "Abordagem",
-  "pessoasPagina.board.part.approachHint": "Pessoas ainda sem negócio: um cartão por pessoa.",
-  "pessoasPagina.board.part.deals": "Negócios",
-  "pessoasPagina.board.part.dealsHint": "Um cartão por negócio aberto.",
   "pessoasPagina.deals.kind.person": "Abordagem",
 
   "pessoasPagina.survey.title": "Levantamento de {name}",
@@ -57,10 +53,6 @@ const en: Record<string, string> = {
   "pessoasPagina.bar.visitSurvey": "Visit and survey",
   "pessoasPagina.bar.newDeal": "New deal",
 
-  "pessoasPagina.board.part.approach": "Approach",
-  "pessoasPagina.board.part.approachHint": "People with no deal yet: one card per person.",
-  "pessoasPagina.board.part.deals": "Deals",
-  "pessoasPagina.board.part.dealsHint": "One card per open deal.",
   "pessoasPagina.deals.kind.person": "Approach",
 
   "pessoasPagina.survey.title": "Survey for {name}",

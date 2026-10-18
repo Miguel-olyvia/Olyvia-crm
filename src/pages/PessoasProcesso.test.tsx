@@ -45,7 +45,7 @@ const abrirPagina = (vista: "quadro" | "lista") => {
   window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ vista }));
   render(<MemoryRouter initialEntries={["/pessoas"]}><Pessoas /></MemoryRouter>);
 };
-const coluna = (titulo: string) => screen.getByRole("heading", { level: 4, name: new RegExp(`^${titulo}`) }).closest("section")!;
+const coluna = (titulo: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
 const avisos = () => screen.getAllByRole("status").map((s) => s.textContent).join(" | ");
 const botao = (nome: string) => screen.getByRole("button", { name: nome });
 const escolher = async (dialogo: HTMLElement, campo: RegExp | string, opcao: string) => {
