@@ -1,6 +1,6 @@
 // O interior da ficha da pessoa: cabeçalho, barra de ações, percurso, os painéis de ação (em linha) e as abas fixas. Tudo
 // vai num único contentor que rola, para o painel de chamada e o "Guardar" ficarem alcançáveis com zoom ou em ecrãs baixos.
-import { useEffect, useId, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
@@ -19,6 +19,8 @@ import type { AcaoFicha, AcoesFicha } from "./PainelBase";
 import { FormChamada } from "./FormChamada";
 import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
+import { itensDaPessoa } from "./processo/itensProcesso";
+import { useExtrasProcesso } from "./processo/processoNegocios";
 import type { ItemAtividade, NotaPessoa, Pessoa, ResumoPessoa, Submissao } from "./pessoasTipos";
 import { ResumoFicha } from "./ResumoFicha";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
@@ -71,8 +73,14 @@ interface AbasProps extends FichaInteriorProps {
 /** A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). */
 function ConteudoNegocios(p: AbasProps) {
   const aberto = p.resumo.negocios.find((n) => n.id === p.negocioAberto);
+  // O item do processo do negócio aberto (o mesmo do Quadro): dá ao passo seguinte o botão que o executa.
+  const extras = useExtrasProcesso();
+  const item = useMemo(
+    () => itensDaPessoa(p.resumo, p.hoje, extras).find((i) => i.id === p.negocioAberto),
+    [p.resumo, p.hoje, extras, p.negocioAberto],
+  );
   if (!aberto) return <FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.aoAbrirNegocio} />;
-  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} />;
+  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} />;
 }
 
 /** As abas por esta ordem: Resumo, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */

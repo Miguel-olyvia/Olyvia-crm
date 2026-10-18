@@ -63,6 +63,18 @@ describe("Pessoas: abrir um negócio a partir do Quadro", () => {
     expect(screen.getByRole("heading", { level: 4, name: /percurso/i })).toBeInTheDocument();
   }, TEMPO);
 
+  it("o negócio aberto mostra as fases (a atual e as que faltam) e o botão do passo seguinte, como no Quadro", async () => {
+    abrirQuadro();
+    abrirPrimeiroCartao("Proposta");
+    await screen.findByRole("button", { name: /voltar aos negócios/i });
+    const fases = screen.getByRole("heading", { level: 4, name: /fases do negócio/i }).closest("section")!;
+    const itens = within(fases).getAllByRole("listitem").map((i) => i.textContent ?? "");
+    // Orçamento já passou, a Proposta é a atual e o Contrato ainda falta.
+    expect(itens).toEqual(expect.arrayContaining(["Orçamento, concluída", "Proposta, atual", "Contrato, por fazer"]));
+    const passo = screen.getByRole("heading", { level: 4, name: /próximo passo/i }).closest("section")!;
+    expect(within(passo).getAllByRole("button").length).toBeGreaterThan(0);
+  }, TEMPO);
+
   it("o cartão de um negócio em Orçamento também abre a ficha no negócio certo", async () => {
     abrirQuadro();
     abrirPrimeiroCartao("Orçamento");

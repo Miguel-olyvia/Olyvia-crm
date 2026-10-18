@@ -64,6 +64,21 @@ const pt: Record<string, string> = {
   "pessoasPagina.linked.unlinkLabel": "Desligar do negócio: {what}",
   "pessoasPagina.linked.live.linked": "{what} ligado ao negócio.",
   "pessoasPagina.linked.live.unlinked": "{what} desligado do negócio.",
+
+  "pessoasPagina.phases.title": "Fases do negócio",
+  "pessoasPagina.phases.contacto": "Contacto",
+  "pessoasPagina.phases.visita": "Visita",
+  "pessoasPagina.phases.levantamento": "Levantamento",
+  "pessoasPagina.phases.orcamento": "Orçamento",
+  "pessoasPagina.phases.proposta": "Proposta",
+  "pessoasPagina.phases.contrato": "Contrato",
+  "pessoasPagina.phases.ganho": "Ganho",
+  "pessoasPagina.phases.state.feita": "concluída",
+  "pessoasPagina.phases.state.atual": "atual",
+  "pessoasPagina.phases.state.porFazer": "por fazer",
+  "pessoasPagina.phases.state.perdida": "perdida",
+  "pessoasPagina.detail.value": "Valor",
+  "pessoasPagina.detail.rep": "Comercial",
 };
 
 const en: Record<string, string> = {
@@ -129,6 +144,21 @@ const en: Record<string, string> = {
   "pessoasPagina.linked.unlinkLabel": "Unlink from the deal: {what}",
   "pessoasPagina.linked.live.linked": "{what} linked to the deal.",
   "pessoasPagina.linked.live.unlinked": "{what} unlinked from the deal.",
+
+  "pessoasPagina.phases.title": "Deal phases",
+  "pessoasPagina.phases.contacto": "Call",
+  "pessoasPagina.phases.visita": "Visit",
+  "pessoasPagina.phases.levantamento": "Survey",
+  "pessoasPagina.phases.orcamento": "Quote",
+  "pessoasPagina.phases.proposta": "Proposal",
+  "pessoasPagina.phases.contrato": "Contract",
+  "pessoasPagina.phases.ganho": "Won",
+  "pessoasPagina.phases.state.feita": "done",
+  "pessoasPagina.phases.state.atual": "current",
+  "pessoasPagina.phases.state.porFazer": "to do",
+  "pessoasPagina.phases.state.perdida": "lost",
+  "pessoasPagina.detail.value": "Value",
+  "pessoasPagina.detail.rep": "Sales rep",
 };
 
 export const pessoasRegistosTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };
