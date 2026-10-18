@@ -79,6 +79,13 @@ const pt: Record<string, string> = {
   "pessoasPagina.phases.state.perdida": "perdida",
   "pessoasPagina.detail.value": "Valor",
   "pessoasPagina.detail.rep": "Comercial",
+  "pessoasPagina.detail.more": "Detalhes",
+  "pessoasPagina.detail.journeyHint": "Contactos, visitas e levantamento, por ordem",
+  "pessoasPagina.detail.linkedSummary": "{linked} ligados · {toLink} por ligar",
+  "pessoasPagina.detail.linkedSummaryClosed": "{linked} ligados",
+  "pessoasPagina.detail.quotes.none": "Ainda sem orçamentos",
+  "pessoasPagina.detail.quotes.one": "1 orçamento · {value}",
+  "pessoasPagina.detail.quotes.many": "{count} orçamentos · {value}",
 };
 
 const en: Record<string, string> = {
@@ -159,6 +166,13 @@ const en: Record<string, string> = {
   "pessoasPagina.phases.state.perdida": "lost",
   "pessoasPagina.detail.value": "Value",
   "pessoasPagina.detail.rep": "Sales rep",
+  "pessoasPagina.detail.more": "Details",
+  "pessoasPagina.detail.journeyHint": "Calls, visits and survey, in order",
+  "pessoasPagina.detail.linkedSummary": "{linked} linked · {toLink} to link",
+  "pessoasPagina.detail.linkedSummaryClosed": "{linked} linked",
+  "pessoasPagina.detail.quotes.none": "No quotes yet",
+  "pessoasPagina.detail.quotes.one": "1 quote · {value}",
+  "pessoasPagina.detail.quotes.many": "{count} quotes · {value}",
 };
 
 export const pessoasRegistosTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

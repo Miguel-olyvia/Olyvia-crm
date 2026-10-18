@@ -1,6 +1,6 @@
 // O detalhe de um negócio dentro da ficha: «Perder negócio» num negócio em curso, «Anular perda» num negócio perdido, e nenhum dos dois num ganho.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { faseDoNegocio, isNegocioGanho } from "@/components/negocio-metas/negocioMetas";
 import { DADOS_EXEMPLO, HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
@@ -38,8 +38,8 @@ describe("DetalheNegocioFicha: perder e anular a perda", () => {
     expect(perdaDoNegocio(emProposta.id)?.fase).toBe("proposta");
     const [perdido] = negociosComPerdidos([emProposta], alteracoesAtuais());
     rerender(<MemoryRouter><DetalheNegocioFicha negocio={perdido} hoje={HOJE_EXEMPLO} aoVoltar={vi.fn()} /></MemoryRouter>);
-    // Duas vezes: no aviso da perda e como o último evento do percurso do negócio.
-    expect(screen.getAllByText("Perdido em Proposta: Preço")).toHaveLength(2);
+    // Uma vez, no aviso da perda: o percurso (onde a perda também aparece) está fechado, porque o negócio estava em Proposta ao abrir.
+    expect(screen.getAllByText("Perdido em Proposta: Preço")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Anular perda" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
   });
@@ -56,6 +56,40 @@ describe("DetalheNegocioFicha: perder e anular a perda", () => {
     abrir(ganho);
     expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Anular perda" })).toBeNull();
+  });
+});
+
+describe("DetalheNegocioFicha: o estado em cima e os detalhes recolhidos", () => {
+  /** O botão do título de uma secção de detalhes (o que a abre e fecha), e não outros botões do seu conteúdo. */
+  const detalhe = (nome: RegExp) => within(screen.getAllByRole("heading", { level: 4, name: nome })[0]).getByRole("button");
+
+  it("os detalhes têm uma linha de resumo e só vem aberto o da fase em que o negócio está (Proposta)", () => {
+    abrir(emProposta);
+    expect(detalhe(/^Proposta/)).toHaveAttribute("aria-expanded", "true");
+    for (const fechado of [/^Percurso/, /^Registos ligados/, /^Orçamentos/]) expect(detalhe(fechado)).toHaveAttribute("aria-expanded", "false");
+    // O resumo diz o essencial sem abrir: quantos orçamentos e quantos registos.
+    expect(detalhe(/^Orçamentos/)).toHaveTextContent(/orçamento/i);
+    expect(detalhe(/^Registos ligados/)).toHaveTextContent(/ligados/);
+  });
+
+  it("abrir um detalhe fechado mostra-o, e voltar a carregar fecha-o", () => {
+    abrir(emProposta);
+    fireEvent.click(detalhe(/^Percurso/));
+    expect(detalhe(/^Percurso/)).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(detalhe(/^Percurso/));
+    expect(detalhe(/^Percurso/)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("um negócio ganho vem com o percurso aberto", () => {
+    abrir(ganho);
+    expect(detalhe(/^Percurso/)).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("o estado (fases e passo seguinte) vem antes dos detalhes", () => {
+    abrir(emProposta);
+    const fases = screen.getByRole("heading", { level: 4, name: /fases do negócio/i });
+    const percurso = detalhe(/^Percurso/);
+    expect(fases.compareDocumentPosition(percurso) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
