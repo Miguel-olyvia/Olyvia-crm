@@ -52,11 +52,11 @@ describe("SeparadorPessoas: Lista", () => {
 });
 
 describe("SeparadorPessoas: Quadro", () => {
-  it("trocar para Quadro mostra as duas partes e as 7 colunas e tira a tabela", () => {
+  it("trocar para Quadro mostra as 7 colunas numa só linha e tira a tabela", () => {
     render(<Arnes />);
     abrirQuadro();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("region")).toHaveLength(9);
+    expect(screen.getAllByRole("region")).toHaveLength(7);
     expect(screen.getByRole("button", { name: "Quadro" })).toHaveAttribute("aria-pressed", "true");
     expect(botoesDeFicha().length).toBeGreaterThan(0);
   });
@@ -64,7 +64,7 @@ describe("SeparadorPessoas: Quadro", () => {
   it("abre na vista guardada", () => {
     window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ vista: "quadro" }));
     render(<Arnes />);
-    expect(screen.getAllByRole("region")).toHaveLength(9);
+    expect(screen.getAllByRole("region")).toHaveLength(7);
   });
 
   it("a pesquisa filtra o quadro: só ficam os cartões de quem coincide", () => {

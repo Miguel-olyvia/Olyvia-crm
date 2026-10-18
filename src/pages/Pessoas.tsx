@@ -172,7 +172,7 @@ const Pessoas = () => {
           resumo={daFicha} aberto={aberta !== null} anuncioExterno={resolucao.anuncio} anuncioProcesso={avisoFicha} hoje={HOJE_EXEMPLO} submissoes={ordenadas.filter(daAberta)} podeVerSubmissoes={podeVer}
           notas={estado.notas.filter((n) => n.pessoaId === idAberta)} atividade={atividadeAberta}
           voltou={idAberta !== undefined && estado.pendentes.has(idAberta)} acoes={estado} aoFechar={url.fechar}
-          idsVisiveis={url.separador === "pessoas" ? visiveis : []} aoIrPara={url.abrir} pessoas={pessoas}
+          idsVisiveis={url.separador === "pessoas" ? visiveis : []} aoIrPara={(id) => url.abrir(id)} negocioInicial={url.negocioId} pessoas={pessoas}
           aoPedir={(sid, pid) => resolucao.pedir(sid, pid, "ficha")} aoVerTodasSubmissoes={url.irParaSubmissoes}
           aoCriarNegocio={abrirNegocio}
         />

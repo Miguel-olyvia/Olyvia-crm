@@ -54,6 +54,8 @@ export interface FichaInteriorProps {
   /** A anterior e a seguinte na lista visível, e como passar a elas. */
   vizinhas: Vizinhas;
   aoIr: (id: string, qual: TeclaNavegacao) => void;
+  /** O negócio a abrir logo à entrada (vindo do Quadro ou da Lista, `?negocio=`): a ficha abre na aba Negócios com ele aberto. */
+  negocioInicial?: string | null;
 }
 
 interface AbasProps extends FichaInteriorProps {
@@ -156,6 +158,13 @@ export function FichaInterior(p: FichaInteriorProps) {
   useEffect(() => { if (p.anuncioProcesso) anunciar(p.anuncioProcesso); }, [p.anuncioProcesso, anunciar]);
   const { acao, visitados, abrir, fechar, mudarConteudo } = usePaineis(p.fecharPainel, anunciar);
   useAbrirNegociosAoCriar(p.resumo, negocio.esquecer, () => setAba("negocios"));
+  // Vindo de um cartão do Quadro ou de uma linha da Lista: abre já a aba Negócios com ESSE negócio aberto, e não só a pessoa.
+  useEffect(() => {
+    if (!p.negocioInicial) return;
+    setAba("negocios");
+    negocio.abrir(p.negocioInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage a mudar o negócio pedido pelo endereço
+  }, [p.negocioInicial]);
   const reativar = () => {
     p.acoes.reativar(p.resumo.pessoa.id);
     anunciar(t("pessoasPagina.live.reactivated", { name: p.resumo.pessoa.nome }));

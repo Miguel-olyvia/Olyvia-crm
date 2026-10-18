@@ -19,10 +19,14 @@ export function usePessoasUrl(podeVerSubmissoes: boolean) {
       }, { replace: true }),
     [setParams],
   );
+  const negocioId = params.get("negocio");
   return {
     separador,
     abertaId: aberta.id,
-    abrir: aberta.abrir,
+    /** O negócio a abrir dentro da ficha (`?negocio=`); só vale com uma ficha aberta. */
+    negocioId: aberta.id === null ? null : negocioId,
+    /** Abre a ficha da pessoa; com `negocioId`, abre-a já com esse negócio aberto. */
+    abrir: useCallback((pessoaId: string, negocioId?: string) => aberta.abrir(pessoaId, { negocio: negocioId ?? null }), [aberta]),
     fechar: aberta.fechar,
     limpar: aberta.limpar,
     mudarSeparador: useCallback(

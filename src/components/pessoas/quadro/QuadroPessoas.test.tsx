@@ -110,13 +110,15 @@ describe("QuadroPessoas", () => {
   it("clicar no nome abre a ficha dessa pessoa", () => {
     const aoAbrir = mostrar();
     fireEvent.click(screen.getByRole("button", { name: "Abrir a ficha de Clara Dias" }));
-    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("c");
+    // Um cartão de pessoa em abordagem abre só a pessoa: sem negócio.
+    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("c", undefined);
   });
 
   it("nesta fase o botão do próximo passo só abre a ficha da pessoa", () => {
     const aoAbrir = mostrar();
     fireEvent.click(screen.getByRole("button", { name: "Recolher a assinatura: Telhado de Eva Costa (abre a ficha)" }));
-    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("e");
+    // O cartão de um negócio abre a pessoa com ESSE negócio (n3), e não só a pessoa.
+    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("e", "n3");
   });
 
   it("o nome do botão do passo é '{passo}: {trabalho} de {nome}', como na Lista: distingue os cartões da mesma pessoa e começa pelo texto visível", () => {

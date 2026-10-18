@@ -20,7 +20,7 @@ interface CartaoPessoaQuadroProps {
   /** O item do processo deste cartão (ver `itensDaPessoa`): com ele o botão do passo diz o passo do "A fazer" e, se já executa, executa-o. */
   item?: ItemProcesso;
   /** Abre a ficha da pessoa: o nome abre-a sempre; o botão do passo só quando o passo ainda não executa (Fases 4 e 5). */
-  aoAbrir: (pessoaId: string) => void;
+  aoAbrir: (pessoaId: string, negocioId?: string) => void;
 }
 
 /**
@@ -32,7 +32,9 @@ interface CartaoPessoaQuadroProps {
  */
 export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoaQuadroProps) {
   const { t } = useTranslation();
-  const acao = useAcaoDoPasso(item, () => aoAbrir(cartao.pessoaId));
+  // Um cartão de negócio abre a pessoa com ESSE negócio aberto; um de pessoa em abordagem abre só a pessoa.
+  const negocioId = cartao.tipo === "negocio" ? cartao.id : undefined;
+  const acao = useAcaoDoPasso(item, () => aoAbrir(cartao.pessoaId, negocioId));
   const passo = cartao.passo === "nenhum" ? null : t(item ? passoDoItem(item).chave : `pessoasPagina.next.${cartao.passo}`);
   const prazo = textoPrazoPasso(t, cartao.prazo, hoje);
   const trabalho = trabalhoDoItem(t, cartao);
@@ -40,7 +42,7 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
     <li className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
         <button
-          type="button" {...{ [LINHA_PESSOA]: cartao.pessoaId }} aria-label={t("pessoasPagina.board.open", { name: cartao.nome })} onClick={() => aoAbrir(cartao.pessoaId)}
+          type="button" {...{ [LINHA_PESSOA]: cartao.pessoaId }} aria-label={t("pessoasPagina.board.open", { name: cartao.nome })} onClick={() => aoAbrir(cartao.pessoaId, negocioId)}
           className={cn("min-h-11 min-w-11 cursor-pointer rounded-md text-left font-medium text-foreground hover:underline motion-reduce:transition-none", FOCO)}
         >
           {cartao.nome}

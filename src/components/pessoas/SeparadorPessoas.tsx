@@ -27,7 +27,7 @@ interface SeparadorPessoasProps {
   aoMudarChip: (chip: ChipPessoa) => void;
   aoMudarOrdem: (ordem: OrdemPessoa) => void;
   aoMudarVista: (vista: VistaPessoas) => void;
-  aoAbrir: (id: string) => void;
+  aoAbrir: (id: string, negocioId?: string) => void;
   /** Os ids das pessoas visíveis, pela ordem da lista: a ficha usa-os para passar à anterior e à seguinte. */
   aoMudarVisiveis: (ids: string[]) => void;
 }

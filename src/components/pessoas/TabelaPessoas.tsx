@@ -26,14 +26,14 @@ interface TabelaPessoasProps {
   /** Os ids das pessoas com as sub-linhas de negócios abertas. */
   abertas: ReadonlySet<string>;
   aoAlternar: (id: string) => void;
-  aoAbrir: (id: string) => void;
+  aoAbrir: (id: string, negocioId?: string) => void;
   aoLimpar: () => void;
 }
 
 const textoColuna = (id: (typeof COLUNAS)[number]["id"]): string => (id === "deals" ? "pessoasPagina.deals.col" : `pessoasPagina.col.${id}`);
 
 /** A linha extra com os itens em curso de uma pessoa (a abordagem ou os negócios), por baixo da linha dela (só existe aberta). */
-function FilaNegocios({ resumo, itens, hoje, aoAbrir }: { resumo: ResumoPessoa; itens: readonly ItemProcesso[]; hoje: string; aoAbrir: (id: string) => void }) {
+function FilaNegocios({ resumo, itens, hoje, aoAbrir }: { resumo: ResumoPessoa; itens: readonly ItemProcesso[]; hoje: string; aoAbrir: (id: string, negocioId?: string) => void }) {
   const { pessoa } = resumo;
   return (
     <TableRow className="bg-muted/30 hover:bg-muted/30" data-negocios-de={pessoa.id}>

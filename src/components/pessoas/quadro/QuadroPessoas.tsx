@@ -15,7 +15,7 @@ interface QuadroPessoasProps {
   hoje: string;
   /** O chip activo: com "Perdidas" um quadro vazio explica que as perdidas não têm cartão. */
   chip: ChipPessoa;
-  aoAbrir: (pessoaId: string) => void;
+  aoAbrir: (pessoaId: string, negocioId?: string) => void;
   /** Limpa os filtros (a mesma saída da tabela vazia). */
   aoLimpar: () => void;
   /** Os itens do processo dos cartões, pelo id do cartão (ver `itensDaPessoa`): com eles os botões dos passos executam-nos. */
@@ -53,7 +53,7 @@ function AvisoQuadroVazio({ chip, aoLimpar }: Pick<QuadroPessoasProps, "chip" | 
 }
 
 /** Uma coluna: faixa de cor, título (h3, a contagem em texto só para o leitor), a soma do valor nas de negócio e os cartões. */
-function Coluna({ def, cartoes, hoje, itens, aoAbrir }: { def: DefColuna; cartoes: readonly CartaoQuadro[]; hoje: string; itens?: ReadonlyMap<string, ItemProcesso>; aoAbrir: (pessoaId: string) => void }) {
+function Coluna({ def, cartoes, hoje, itens, aoAbrir }: { def: DefColuna; cartoes: readonly CartaoQuadro[]; hoje: string; itens?: ReadonlyMap<string, ItemProcesso>; aoAbrir: (pessoaId: string, negocioId?: string) => void }) {
   const { t } = useTranslation();
   const soma = cartoes.reduce((s, c) => s + (c.valor ?? 0), 0);
   const total = formatarMeta("euro", soma);

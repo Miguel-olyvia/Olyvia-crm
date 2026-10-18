@@ -221,6 +221,9 @@ describe("Quadro: da visita feita ao negócio", () => {
     // A ficha mostra as visitas dela, agora ligadas ao negócio, e a atividade guarda o que se fez.
     fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
     const ficha = await screen.findByRole("dialog");
+    // O cartão do negócio abre a ficha já no negócio (aba Negócios); as visitas ligadas vêem-se no Resumo.
+    expect(within(ficha).getByRole("button", { name: /voltar aos negócios/i })).toBeInTheDocument();
+    fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Resumo/ }), { button: 0, ctrlKey: false });
     expect(within(ficha).getAllByText(/^Ligada ao negócio /).length).toBeGreaterThan(0);
     fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }), { button: 0, ctrlKey: false });
     expect(within(ficha).getByText("Histórico · Visita feita")).toBeInTheDocument();

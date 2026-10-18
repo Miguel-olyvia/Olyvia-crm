@@ -18,13 +18,13 @@ interface LinhaNegociosPessoaProps {
   itens: readonly ItemProcesso[];
   hoje: string;
   /** Abre a ficha da pessoa: o botão do passo só o faz quando o passo ainda não executa (Fases 4 e 5) ou não há `ProcessoProvider`. */
-  aoAbrir: (pessoaId: string) => void;
+  aoAbrir: (pessoaId: string, negocioId?: string) => void;
 }
 
 /** Uma sub-linha: o trabalho e a etiqueta Abordagem/Negócio, a fase, o valor, o prazo (se houver) e "A fazer:" com o botão do passo. */
 function SubLinha({ item, pessoaId, nome, hoje, aoAbrir }: Omit<LinhaNegociosPessoaProps, "itens"> & { item: ItemProcesso }) {
   const { t } = useTranslation();
-  const acao = useAcaoDoPasso(item, () => aoAbrir(pessoaId));
+  const acao = useAcaoDoPasso(item, () => aoAbrir(pessoaId, item.tipo === "negocio" ? item.id : undefined));
   const passo = t(passoDoItem(item).chave);
   const prazo = textoPrazoPasso(t, item.prazo, hoje);
   const trabalho = trabalhoDoItem(t, item);

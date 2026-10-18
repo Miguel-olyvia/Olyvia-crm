@@ -15,12 +15,17 @@ export function useParametroOpen() {
     if (id === null) criada.current = false;
   }, [id]);
 
-  const abrir = useCallback((novo: string) => {
+  /** `extra` muda outros parâmetros na MESMA alteração de endereço (`null` apaga): duas chamadas seguidas ao `setParams` não se acumulam. */
+  const abrir = useCallback((novo: string, extra?: Readonly<Record<string, string | null>>) => {
     const jaAberto = id !== null;
     if (!jaAberto) criada.current = true;
     setParams((atual) => {
       const p = new URLSearchParams(atual);
       p.set("open", novo);
+      for (const [chave, valor] of Object.entries(extra ?? {})) {
+        if (valor === null) p.delete(chave);
+        else p.set(chave, valor);
+      }
       return p;
     }, { replace: jaAberto });
   }, [id, setParams]);
@@ -31,6 +36,7 @@ export function useParametroOpen() {
     setParams((atual) => {
       const p = new URLSearchParams(atual);
       p.delete("open");
+      p.delete("negocio");
       return p;
     }, { replace: true });
   }, [setParams]);

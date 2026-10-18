@@ -79,7 +79,9 @@ describe("SeparadorPessoas: negócios de cada pessoa na Lista", () => {
     expect(aoAbrir).not.toHaveBeenCalled();
     const id = linha.getAttribute("data-pessoa-id");
     fireEvent.click(within(listas()[0]).getAllByRole("button")[0]);
-    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith(id);
+    // Abre a pessoa certa; o 2.º argumento é o negócio da sub-linha (vazio numa linha de pessoa em abordagem), coberto nos testes de LinhaNegociosPessoa.
+    expect(aoAbrir).toHaveBeenCalledOnce();
+    expect(aoAbrir.mock.calls[0][0]).toBe(id);
   });
 
   it("os atalhos da lista não cancelam o keydown de Enter nem de Espaço no botão (o clique nativo não é simulado)", () => {

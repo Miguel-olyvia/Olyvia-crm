@@ -124,7 +124,8 @@ describe("TabelaPessoas: coluna de negócios", () => {
     render(<Arnes aoAbrir={aoAbrir} />);
     fireEvent.click(botaoVer("Ana Lopes"));
     fireEvent.click(screen.getByRole("button", { name: /^Criar a proposta/ }));
-    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("ana");
+    // O botão do passo de um negócio abre a pessoa com esse negócio (o id vem do item da sub-linha).
+    expect(aoAbrir).toHaveBeenCalledExactlyOnceWith("ana", expect.any(String));
   });
 
   it("teclado: é um botão nativo focável e a linha não cancela o keydown de Enter nem de Espaço (o clique nativo do navegador não é simulado)", () => {

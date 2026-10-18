@@ -70,8 +70,8 @@ describe("LinhaNegociosPessoa", () => {
   it("o botão do passo abre a ficha da pessoa (não há botões mortos nesta fase)", () => {
     const aoAbrir = mostrar();
     for (const botao of screen.getAllByRole("button")) fireEvent.click(botao);
-    expect(aoAbrir).toHaveBeenCalledTimes(4);
-    expect(aoAbrir).toHaveBeenCalledWith("p1");
+    // Cada negócio abre a pessoa com ESSE negócio; a linha da pessoa em abordagem abre só a pessoa.
+    expect(aoAbrir.mock.calls).toEqual([["p1", "n1"], ["p1", "n2"], ["p1", undefined], ["p1", "n3"]]);
   });
 
   it("o botão é do tipo button e tem alvo de 44 px", () => {
