@@ -1,10 +1,8 @@
 // A aba "Negócios" da ficha: duas secções, "Em curso" e "Terminados", com os negócios em linhas separadas por um traço
 // (sem cartões). Cada linha é um botão inteiro que abre o negócio dentro da ficha (ver `DetalheNegocioFicha`).
-import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
@@ -62,16 +60,13 @@ interface FichaNegociosProps {
   aoAbrir: (negocioId: string) => void;
 }
 
-/** Sem negócios: diz-o e leva ao quadro. */
+/** Sem negócios: diz-o e diz onde se cria (o botão "Novo negócio" da barra da ficha). */
 function SemNegocios() {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col items-start gap-3 rounded-xl border border-dashed border-border p-4">
       <p className="text-sm font-semibold text-foreground">{t(`${P}deals.emptyTitle`)}</p>
       <p className="text-sm text-muted-foreground">{t(`${P}deals.emptyHint`)}</p>
-      <Button asChild className={cn("min-h-11", FOCO)}>
-        <Link to="/negocio-metas">{t(`${P}deals.emptyAction`)}</Link>
-      </Button>
     </div>
   );
 }

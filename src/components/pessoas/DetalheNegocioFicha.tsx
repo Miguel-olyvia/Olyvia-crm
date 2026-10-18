@@ -1,9 +1,8 @@
-// O detalhe de um negócio dentro da ficha: "← Voltar aos negócios", o título, a ligação "Ver no quadro" (só para os
-// negócios do quadro) e secções (não abas): próximo passo e prazo, orçamentos e, se existirem, proposta e contrato. Reutiliza
-// os painéis de Negócio e metas, com os detalhes de exemplo (ou nenhuns).
+// O detalhe de um negócio dentro da ficha: "← Voltar aos negócios", o título e secções (não abas): próximo passo e prazo,
+// o percurso (contactos, visitas, levantamento), orçamentos e, se existirem, proposta e contrato. Tudo na página de Pessoas, sem
+// ir à de Negócio e metas: só reutiliza os seus painéis, com os detalhes de exemplo (ou nenhuns).
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { ArrowLeft, ExternalLink, FilePlus2 } from "lucide-react";
+import { ArrowLeft, FilePlus2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +16,7 @@ import { aceitaOrcamentos } from "@/components/negocio-metas/negocioAcoes";
 import { detalheDoNegocio, useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { OrcamentosPainel } from "@/components/negocio-metas/OrcamentosPainel";
+import { PercursoNegocio } from "@/components/negocio-metas/PercursoPainel";
 import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { passoDoNegocio } from "./etapaPessoa";
@@ -28,8 +28,6 @@ const P = "pessoasPagina.";
 interface DetalheNegocioFichaProps {
   negocio: NegocioMes;
   hoje: string;
-  /** O negócio existe no quadro de Negócio e metas: só então há "Ver no quadro". */
-  noQuadro: boolean;
   aoVoltar: () => void;
 }
 
@@ -63,7 +61,7 @@ function PerdaDoNegocio({ negocio, fase, motivo }: { negocio: NegocioMes; fase: 
   );
 }
 
-export function DetalheNegocioFicha({ negocio, hoje, noQuadro, aoVoltar }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio, hoje, aoVoltar }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   const titulo = useRef<HTMLHeadingElement>(null);
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
@@ -89,19 +87,11 @@ export function DetalheNegocioFicha({ negocio, hoje, noQuadro, aoVoltar }: Detal
         <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">
           {negocio.servico} · {formatarMeta("euro", valorDoNegocio(negocio))}
         </h3>
-        {noQuadro && (
-          <Link
-            to={`/negocio-metas?open=${encodeURIComponent(negocio.id)}`}
-            className={cn("inline-flex min-h-11 items-center gap-1.5 rounded-sm text-[15px] text-primary underline underline-offset-2 dark:text-violet-300", FOCO)}
-          >
-            <ExternalLink className="h-4 w-4" aria-hidden="true" />
-            {t(`${P}deal.board`)}
-          </Link>
-        )}
       </div>
       {estaAberto(negocio) && !perda && <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />}
       {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} />}
       {estaAberto(negocio) && <PassoDoNegocio negocio={negocio} hoje={hoje} />}
+      <Seccao titulo={t("businessGoals.journey.title")} nivel={4}><PercursoNegocio negocio={negocio} detalhe={detalhe} /></Seccao>
       <Seccao titulo={t(`${P}deal.quotes`)} nivel={4}>
         {podeCriar && (
           <Button type="button" variant="outline" className={cn("mb-3 min-h-11 gap-2", FOCO)} onClick={() => setCriando(true)}>

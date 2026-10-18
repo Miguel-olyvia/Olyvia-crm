@@ -19,8 +19,7 @@ import type { AcaoFicha, AcoesFicha } from "./PainelBase";
 import { FormChamada } from "./FormChamada";
 import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
-import { IDS_NEGOCIOS_DO_QUADRO } from "./pessoasExemplo";
-import { ehHistorico, type ItemAtividade, type NotaPessoa, type Pessoa, type ResumoPessoa, type Submissao } from "./pessoasTipos";
+import type { ItemAtividade, NotaPessoa, Pessoa, ResumoPessoa, Submissao } from "./pessoasTipos";
 import { ResumoFicha } from "./ResumoFicha";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
 
@@ -71,7 +70,7 @@ interface AbasProps extends FichaInteriorProps {
 function ConteudoNegocios(p: AbasProps) {
   const aberto = p.resumo.negocios.find((n) => n.id === p.negocioAberto);
   if (!aberto) return <FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.aoAbrirNegocio} />;
-  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} noQuadro={!ehHistorico(aberto) && (IDS_NEGOCIOS_DO_QUADRO.has(aberto.id) || "novo" in aberto)} aoVoltar={p.aoVoltarNegocio} />;
+  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} />;
 }
 
 /** As abas por esta ordem: Resumo, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */
