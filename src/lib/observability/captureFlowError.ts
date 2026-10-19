@@ -91,7 +91,9 @@ export type BusinessFlow =
   // which of the ~500 uninstrumented toast sites still leak technical text,
   // instead of someone having to guess or grep for it. See
   // vault/ficheiros/infraestrutura-seguranca/classificacao-erros-toast.md.
-  | "db-error-leaked-to-ui";
+  | "db-error-leaked-to-ui"
+  // Funções neg_* da página Pessoas: só os erros inesperados (os códigos NG são esperados).
+  | "pessoas-neg";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
