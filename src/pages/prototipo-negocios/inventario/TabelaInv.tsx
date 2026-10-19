@@ -28,6 +28,12 @@ interface Props<T> {
   extra?: (t: T) => ReactNode;
   /** O que se mostra numa linha única quando não há linhas (o `empty()` dentro de `<td colspan>` do mockup). */
   vazio?: ReactNode;
+  /** 19/10: uma linha antes desta (por exemplo o cabeçalho de um grupo, dentro da mesma tabela, como na Receção). */
+  antes?: (t: T, i: number) => ReactNode;
+  /** O id da linha no DOM (para lá rolar e a destacar). */
+  idLinha?: (t: T) => string | undefined;
+  /** A classe da tabela (por exemplo o desenho em cartões no telemóvel). */
+  classeTabela?: string;
 }
 
 function Cabecalho<T>({ c, ordem, ordenar }: { c: Coluna<T>; ordem: Ordem | null; ordenar: (id: string) => void }) {
@@ -39,12 +45,13 @@ function Cabecalho<T>({ c, ordem, ordenar }: { c: Coluna<T>; ordem: Ordem | null
   );
 }
 
-function Linha<T>({ t, p }: { t: T; p: Props<T> }) {
+function Linha<T>({ t, p, i }: { t: T; p: Props<T>; i: number }) {
   const k = p.chave(t);
   const abre = p.abrir;
   return (
     <>
-      <tr className={cn(abre && "click", p.classeLinha?.(t))} tabIndex={abre ? 0 : undefined} data-linha-func={abre ? "" : undefined} data-chave={abre ? k : undefined}
+      {p.antes?.(t, i)}
+      <tr id={p.idLinha?.(t)} className={cn(abre && "click", p.classeLinha?.(t))} tabIndex={abre ? 0 : undefined} data-linha-func={abre ? "" : undefined} data-chave={abre ? k : undefined}
         aria-label={abre ? p.rotuloAbrir?.(t) : undefined} aria-haspopup={abre ? "dialog" : undefined}
         onClick={abre ? () => abre(t) : undefined} onKeyDown={abre ? (e) => { if (e.key === "Enter" && e.target === e.currentTarget) abre(t); } : undefined}>
         {p.colunas.map((c) => <td key={c.id} className={cn(c.direita && "num", c.classe?.(t))} style={c.largura || c.estilo ? { minWidth: c.largura, ...c.estilo } : undefined}>{c.celula(t)}</td>)}
@@ -62,7 +69,7 @@ export function TabelaInv<T>(p: Props<T>) {
   const ordenar = (id: string): void => setOrdem((o) => (o?.col === id ? { col: id, dir: o.dir === "asc" ? "desc" : "asc" } : { col: id, dir: "asc" }));
   return (
     <div className="tw">
-      <table className={p.minimo ? `min-${p.minimo}` : undefined}>
+      <table className={cn(p.minimo && `min-${p.minimo}`, p.classeTabela) || undefined}>
         <caption className="sr">{p.titulo}. Os cabeçalhos com botão ordenam a lista.</caption>
         <thead>
           <tr>
@@ -70,7 +77,7 @@ export function TabelaInv<T>(p: Props<T>) {
             {p.acoes && <th scope="col" className="acth"><span className="sr">Ações</span></th>}
           </tr>
         </thead>
-        <tbody>{linhas.length === 0 && p.vazio ? <tr><td colSpan={p.colunas.length + (p.acoes ? 1 : 0)}>{p.vazio}</td></tr> : linhas.map((t) => <Linha key={p.chave(t)} t={t} p={p} />)}</tbody>
+        <tbody>{linhas.length === 0 && p.vazio ? <tr><td colSpan={p.colunas.length + (p.acoes ? 1 : 0)}>{p.vazio}</td></tr> : linhas.map((t, i) => <Linha key={p.chave(t)} t={t} p={p} i={i} />)}</tbody>
       </table>
     </div>
   );

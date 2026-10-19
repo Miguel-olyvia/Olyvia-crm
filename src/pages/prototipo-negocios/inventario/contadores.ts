@@ -2,7 +2,8 @@
 import { HOJE, armazem, diasEntre, fornecedor, produto } from "./base";
 import { ecEstado, ecProntas, livreEm, reservadoEm, reservas } from "./ec";
 import { resumoGuia } from "./guias";
-import { poLate, poOpen, poOpenValue, poStatus } from "./po";
+import { poLate, poOpen, poOpenValue, poRecebivel, poStatus } from "./po";
+import { grupoRececao } from "./rececaoLista";
 import type { Inventario, LinhaStock } from "./tipos";
 
 export type EstadoStock = "low" | "ok" | "high";
@@ -20,6 +21,8 @@ export interface Contadores {
   pending: number; ordered: number; partialPO: number; late: number; portalUnseen: number; portalConfirmed: number; openValue: number;
   ecOpen: number; ecReady: number; ecNoSup: number; ecWaiting: number; ecPartial: number; transfers: number; awaiting: number; catUnlinked: number; prices: number;
   low: number; stalled: number; countsOpen: number; guiasOpen: number; guiasDiv: number; reservedUnits: number; stockValue: number; excess: number;
+  /** 19/10: as POs por receber na Receção (poRecebivel) e as que chegam hoje/amanhã (o grupo 0 da Receção). */
+  porReceber: number; chegamHoje: number;
 }
 
 export function contadores(db: Inventario): Contadores {
@@ -54,5 +57,7 @@ export function contadores(db: Inventario): Contadores {
     reservedUnits: Object.values(reservas(db).res).reduce((a, b) => a + b, 0),
     stockValue: db.stocks.filter((s) => !s.deleted).reduce((a, s) => a + s.qty * custo(s.sku), 0),
     excess: db.stocks.filter((s) => !s.deleted && s.max > 0 && s.qty > s.max).length,
+    porReceber: db.pos.filter(poRecebivel).length,
+    chegamHoje: db.pos.filter((p) => poRecebivel(p) && grupoRececao(p) === 0).length,
   };
 }

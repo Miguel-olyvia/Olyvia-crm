@@ -3,6 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { ArrowLeftRight, ArrowRight, GitFork, Play, Truck, Warehouse } from "lucide-react";
 import { poRecebivel } from "./po";
+import { useIrReceber } from "./irReceber";
+import { chegamHojePos } from "./rececaoLista";
 import { cn } from "@/lib/utils";
 import { eur, fmtDT, N, nomeArm, nomeProd } from "./base";
 import { AcoesCab, Fonte } from "./cabInv";
@@ -147,12 +149,16 @@ function Ultimos() {
 
 export function HojeInv() {
   const { db, ir } = useCtxInv();
+  const irReceber = useIrReceber();
   const c = contadores(db);
   const [dlg, setDlg] = useState<"venda" | "mov" | null>(null);
+  // 19/10: se só uma encomenda chega hoje/amanhã, vai direto ao painel dela; senão abre a lista por ordem de chegada
+  const chegam = chegamHojePos(db.pos);
+  const receber = (): void => { if (chegam.length === 1) irReceber(chegam[0].id); else ir({ aba: "guia" }); };
   const acoes = (
     <>
       <button type="button" className="btn" onClick={() => setDlg("mov")}><ArrowLeftRight className="ic" aria-hidden="true" />Registar movimento</button>
-      <button type="button" className="btn" onClick={() => ir({ aba: "guia" })}><Warehouse className="ic" aria-hidden="true" />Receber no armazém →</button>
+      <button type="button" className="btn" onClick={receber}><Warehouse className="ic" aria-hidden="true" />Receber no armazém →</button>
       <button type="button" className="btn btn-p" onClick={() => setDlg("venda")}><Play className="ic" aria-hidden="true" />Simular venda assinada</button>
     </>
   );

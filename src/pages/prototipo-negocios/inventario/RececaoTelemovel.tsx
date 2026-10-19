@@ -6,11 +6,11 @@ import { nomeForn, utilizadorAtual, guiaPorId } from "./base";
 import { useCtxInv } from "./ctxInv";
 import { AprenderDlg, CameraDlg, EscolherProdutoDlg } from "./GuiaDialogo";
 import { resumoGuia } from "./guias";
-import { opcoesArmazens, opcoesFornecedores } from "./opcoes";
+import { opcoesArmazens } from "./opcoes";
 import { Ligacao, Rotulo, Selo } from "./pecasInv";
 import { can } from "./perfil";
 import { Cesto, Pendentes, bloqueio, useRecAcao } from "./RececaoCesto";
-import { confirmarCesto, fixarRececao, lerCodigo, planoRececao, textoAnunciado } from "./rececao";
+import { confirmarCesto, fixarRececao, fornecedorDaRececao, lerCodigo, planoRececao, textoAnunciado } from "./rececao";
 import type { Recepcao } from "./tipos";
 
 type Dialogo = { t: "camera" } | { t: "aprender"; k: number } | { t: "varios"; code: string; skus: string[] };
@@ -32,12 +32,14 @@ function Escolhas({ rc, ro, aoNovaGuia }: { rc: Recepcao; ro: boolean; aoNovaGui
   const { db } = useCtxInv();
   const correr = useRecAcao();
   const dis = bloqueio(ro);
-  const guias = db.guias.filter((x) => x.state === "open" && (!rc.sup || x.sup === rc.sup));
+  // 19/10: o fornecedor não se escolhe à parte (ficava preso de uma receção anterior): vem da guia ou da PO escolhida; sem elas, todos
+  const guias = db.guias.filter((x) => x.state === "open");
+  const forn = fornecedorDaRececao(db);
   return (
     <>
       <div className="fg" style={{ gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Rotulo rotulo="Armazém">{(id) => <select id={id} {...dis} value={rc.wh} onChange={(e) => correr((d) => fixarRececao(d, { wh: e.target.value }))}>{opcoesArmazens(db).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>}</Rotulo>
-        <Rotulo rotulo="Fornecedor">{(id) => <select id={id} {...dis} value={rc.sup} onChange={(e) => correr((d) => fixarRececao(d, { sup: e.target.value, guia: "" }))}><option value="">Todos</option>{opcoesFornecedores(db).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>}</Rotulo>
+        <div className="fl"><span>Fornecedor</span><span className="rc-forn" style={{ fontWeight: 400, minHeight: 36, display: "flex", alignItems: "center" }}>{forn.sup ? `${nomeForn(db, forn.sup)} (${forn.de === "guia" ? "da guia" : "da " + rc.poFilter})` : "Todos"}</span></div>
         <Rotulo rotulo="Guia (opcional)" className="span2">{(id) => (
           <select id={id} {...dis} value={rc.guia} onChange={(e) => { if (e.target.value === "__new") aoNovaGuia(); else correr((d) => fixarRececao(d, { guia: e.target.value })); }}>
             <option value="">Sem guia</option>{guias.map((x) => <option key={x.id} value={x.id}>{x.id} · {nomeForn(db, x.sup)}</option>)}<option value="__new">+ Nova guia…</option>

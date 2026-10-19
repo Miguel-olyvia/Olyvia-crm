@@ -1,6 +1,7 @@
 // Os separadores da folha de uma PO que não são as Linhas (poTab do mockup): Receções, Guias, Portal, Anulações, Notas e Histórico.
 import { useState } from "react";
-import { Play, RefreshCw, Send, Undo2 } from "lucide-react";
+import { CheckCircle2, Play, RefreshCw, Send, Undo2 } from "lucide-react";
+import { useIrReceber } from "./irReceber";
 import { ecPorId, fmtD, fmtDT, nomeArm, nomeProd, somarDias } from "./base";
 import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
@@ -8,7 +9,7 @@ import { GUIA_ESTADOS, resumoGuia } from "./guias";
 import { Ligacao, Notas, Peq, Selo, Vazio } from "./pecasInv";
 import { can, porqueNao } from "./perfil";
 import { poDe } from "./PoCab";
-import { PORTAL_FORN, poOpen, poPublished, portalConfirmar, portalVista, republicarPo } from "./po";
+import { PORTAL_FORN, poOpen, poPublished, poRecebivel, portalConfirmar, portalVista, republicarPo } from "./po";
 import type { AcoesPo, EstadoPd } from "./poTipos";
 import { desfazerAnulacao, passarParaStock } from "./receber";
 import { TabelaInv } from "./TabelaInv";
@@ -77,7 +78,7 @@ function Simulacao({ p }: { p: Po }) {
       <div className="row">
         {p.portal.state === "sent" && <Peq onClick={() => agir((d) => portalVista(d, poDe(d, p.id)), "Fornecedor abriu a encomenda.")}>Fornecedor abre a encomenda</Peq>}
         <label className="inl">Data prometida <input id="sim-prom" type="date" value={prom} onChange={(e) => setProm(e.target.value)} /></label>
-        <Peq onClick={() => agir((d) => portalConfirmar(d, poDe(d, p.id), prom, "Confirmado pelo portal (simulação)."), "Fornecedor confirmou.")}>Fornecedor confirma</Peq>
+        <Peq onClick={() => agir((d) => portalConfirmar(d, poDe(d, p.id), prom, "Confirmado pelo portal (simulação)."), "Fornecedor confirmou: já aparece na Receção.")}>Fornecedor confirma</Peq>
       </div>
       <Fonte>sp_confirm_order · fn_po_notify_supplier_confirmed</Fonte>
     </div>
@@ -86,6 +87,7 @@ function Simulacao({ p }: { p: Po }) {
 
 export function TabPortal({ p, a }: P) {
   const { db, agir } = useCtxInv();
+  const irReceber = useIrReceber();
   const x = p.portal, s = db.suppliers.find((y) => y.id === p.sup);
   const emails = (x.emails ?? []).slice().reverse();
   const pares: [string, React.ReactNode][] = [["Estado no portal", ESTADO_PORTAL[x.state]], ["Enviada", fmtDT(x.sent || p.sentAt)], ["Vista", fmtDT(x.seen)], ["Confirmada", fmtDT(x.confirmed)],
@@ -100,6 +102,13 @@ export function TabPortal({ p, a }: P) {
         {x.state === "withdrawn" && poOpen(p) && s?.portal === "active" && <button type="button" className="btn" onClick={() => agir((d) => republicarPo(d, poDe(d, p.id)), "Republicada no portal.")}><Send className="ic" aria-hidden="true" />Publicar de novo</button>}
       </div>
       {poOpen(p) && s?.portal === "active" && ["sent", "seen"].includes(x.state) && <Simulacao p={p} />}
+      {/* 19/10: confirmada pelo fornecedor e ainda por receber: vai direto ao painel "Dar entrada" na Receção */}
+      {x.state === "confirmed" && poRecebivel(p) && (
+        <div className="alert ok rec-confirmada" style={{ marginBottom: 10 }}><CheckCircle2 className="ic" aria-hidden="true" />
+          <div className="row between grow"><span>Confirmada pelo fornecedor{x.promised ? ` · entrega a ${fmtD(x.promised)}` : ""}. Já aparece na Receção.</span>
+            <button type="button" className="btn btn-sm" disabled={!can("inventory.receive")} title={can("inventory.receive") ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}>Receber agora →</button></div>
+        </div>
+      )}
       <h3 style={{ margin: "14px 0 8px" }}>Emails</h3>
       {emails.length ? (
         <TabelaInv titulo="Emails da encomenda" minimo={560} chave={(m) => m.at + m.t} linhas={emails} colunas={[

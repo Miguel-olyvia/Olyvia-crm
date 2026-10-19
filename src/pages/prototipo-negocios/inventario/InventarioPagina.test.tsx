@@ -154,7 +154,7 @@ describe("Inventário no menu lateral", () => {
     expect(pil("Fornecedores")).toBe(String(c.prices + c.awaiting));
     expect(pil("Stock")).toBe(String(c.low));
     expect(pil("Encomendas de cliente")).toBe(String(c.ecReady));
-    expect(pil("Guias")).toBe(String(c.guiasOpen));
+    expect(pil("Guias")).toBe(String(c.porReceber));
     expect(pil("Contagens")).toBe(String(c.stalled));
     expect(total).toBeGreaterThan(0);
   });
@@ -312,12 +312,12 @@ describe("Encomendas", () => {
     // 16/10: vai para Armazém › Receção › Por receber, com o painel "Dar entrada" da PO aberto (a falta já preenchida)
     const painel = await screen.findByRole("dialog", { name: "Dar entrada · PO-2026-0137" });
     expect(lerInventario().rc.poFilter).toBe("PO-2026-0137");
-    expect(within(painel).getByRole("spinbutton", { name: /Dar entrada/ })).toHaveValue(2);
-    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar entrada" }));
+    expect(within(painel).getByText(/^Vai entrar 2 un/)).toBeInTheDocument();
+    fireEvent.click(within(painel).getByRole("button", { name: "Receber tudo · 2 un" }));
     expect(await screen.findAllByText(/Entrou no .* · 2 un reservadas para/)).not.toHaveLength(0);
     const po = lerInventario().pos.find((p) => p.id === "PO-2026-0137")!;
     expect(po.lines[0].recv).toBe(10);
-    expect(screen.getAllByRole("status").some((s) => /Entrou no/.test(s.textContent ?? ""))).toBe(true);
+    await waitFor(() => expect(screen.getAllByRole("status").some((s) => /Entrou no/.test(s.textContent ?? ""))).toBe(true));
   });
 
 });
@@ -330,6 +330,7 @@ describe("Encomendas (continuação)", () => {
     const folha = await screen.findByRole("dialog", { name: "PO-2026-0137" });
     fireEvent.click(within(folha).getByRole("button", { name: /Receber no armazém/ }));
     const painel = await screen.findByRole("dialog", { name: "Dar entrada · PO-2026-0137" });
+    fireEvent.click(within(painel).getByRole("button", { name: /Conferir linha a linha/ }));
     const campo = within(painel).getByRole("spinbutton", { name: /Dar entrada/ });
     fireEvent.change(campo, { target: { value: "9" } });
     expect(campo).toHaveValue(2);

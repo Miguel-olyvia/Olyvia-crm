@@ -64,9 +64,11 @@ interface FolhaProps {
   acoesTopo?: ReactNode;
   /** Uma classe para o título (por exemplo `mono` nos números de documento). */
   tituloClasse?: string;
+  /** Uma classe extra da folha (por exemplo `rec-painel`, que ocupa o ecrã todo no telemóvel). */
+  classe?: string;
 }
 /** A folha lateral de um detalhe (largura min(720px, 100vw)): cabeçalho fixo, corpo que rola, rodapé fixo. Ao fechar, o foco volta à linha de onde se abriu. */
-export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, children, rodape, abas, acoesTopo, tituloClasse }: FolhaProps) {
+export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, children, rodape, abas, acoesTopo, tituloClasse, classe }: FolhaProps) {
   useCtxInv(); // o perfil muda → redesenha
   const conteudo = useRef<HTMLDivElement>(null);
   const voltar = (e: Event): void => {
@@ -77,7 +79,7 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
     <Sheet open={aberta} onOpenChange={(a) => { if (!a) aoFechar(); }}>
       <SheetContent ref={conteudo} side="right" onCloseAutoFocus={voltar}
         onOpenAutoFocus={(e) => { e.preventDefault(); conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']")?.focus(); }}
-        className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 sm:!max-w-none [&>button.absolute]:hidden")}>
+        className={cn("inv-root sheet flex flex-col gap-0 border-0 p-0 sm:!max-w-none [&>button.absolute]:hidden", classe)}>
         <div className="sh-head">
           <div className="sh-top">
             <div style={{ minWidth: 0 }}>
@@ -97,7 +99,7 @@ export function Folha({ aberta, aoFechar, titulo, subtitulo, selos, chave, child
 }
 
 /** As abas de uma folha (`.tabs` e `.tab` do mockup): botões com role=tab e as setas a mudar de aba. */
-export function AbasFolha<T extends string>({ rotulo, abas, atual, escolher }: { rotulo: string; abas: readonly (readonly [T, string, number?])[]; atual: T; escolher: (a: T) => void }) {
+export function AbasFolha<T extends string>({ rotulo, abas, atual, escolher }: { rotulo: string; abas: readonly (readonly [T, string, (number | string)?])[]; atual: T; escolher: (a: T) => void }) {
   const ids = abas.map((a) => a[0]);
   return (
     <div role="tablist" aria-label={rotulo} className="tabs">

@@ -41,7 +41,8 @@ export function pilulas(db: Inventario): Partial<Record<AbaInv, Pilula>> {
     sup: { n: c.prices + c.awaiting, tom: "warn", dica: "Preços por aprovar e fornecedores à espera da ficha" },
     stock: { n: c.low, tom: "bad", dica: "Abaixo do ponto de encomenda" },
     ec: { n: c.ecReady, tom: "", dica: "Prontas a expedir" },
-    guia: { n: c.guiasOpen, tom: "", dica: "Guias abertas" },
+    // 19/10: a Receção conta as encomendas por receber (antes as guias abertas); fica a avisar quando há o que chega hoje/amanhã
+    guia: { n: c.porReceber, tom: c.chegamHoje > 0 ? "warn" : "", dica: `${c.porReceber} por receber · ${c.chegamHoje} chegam hoje/amanhã` },
     cont: { n: c.stalled, tom: "warn", dica: "Contagem parada" },
   };
   return Object.fromEntries(Object.entries(todas).filter(([, p]) => p && p.n > 0)) as Partial<Record<AbaInv, Pilula>>;

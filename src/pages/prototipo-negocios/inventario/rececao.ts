@@ -1,6 +1,6 @@
 // A receção por código no telemóvel (rpc_receiving_lookup · rpc_receive_by_code · fn_receiving_open_lines · fn_po_receipt_allocation): ler um código, escolher a guia e a PO,
 // encher o cesto, repartir o que chega entre a EC e o stock, a fila sem rede e aprender códigos. Portado do mockup (RC, rcPlan, rcScan, rcAdd, rcConfirm, learnGo). Sem React.
-import { agora, eur, exigir, falhar, guiaPorId, nomeArm, nomeProd, produto, proximoId, ecPorId, poPorId } from "./base";
+import { agora, eur, exigir, falhar, guiaPorId, nomeArm, nomeForn, nomeProd, produto, proximoId, ecPorId, poPorId } from "./base";
 import { repartirRececao } from "./ec";
 import { poRecebivel, poRem } from "./po";
 import { receberLinhas } from "./receber";
@@ -47,11 +47,22 @@ export function abrirRececaoDaPo(db: Inventario, p: Po): void {
   fixarRececao(db, { sup: p.sup, poFilter: p.id, wh: p.wh, guia: g && g.sup === p.sup && g.state === "open" ? g.id : "" });
 }
 
+/** 19/10: fechar o painel ou abrir o leitor deixa a Receção limpa (sem fornecedor, guia nem PO presos de uma receção anterior). */
+export function limparRececao(db: Inventario): void { fixarRececao(db, { sup: "", guia: "", poFilter: "" }); }
+
+/** O fornecedor que limita a receção por código: o da guia ou o da PO escolhida (19/10: nunca um rc.sup antigo). */
+export function fornecedorDaRececao(db: Inventario): { sup: string; de: "guia" | "po" | "" } {
+  const rc = db.rc;
+  const g = rc.guia ? guiaPorId(db, rc.guia) : null;
+  if (g) return { sup: g.sup, de: "guia" };
+  const p = rc.poFilter ? poPorId(db, rc.poFilter) : undefined;
+  return p ? { sup: p.sup, de: "po" } : { sup: "", de: "" };
+}
+
 /** As linhas de PO abertas onde o produto cabe, da encomenda mais antiga para a mais recente (FIFO). */
 export function candidatas(db: Inventario, sku: string): [Po, PoLinha][] {
   const rc = db.rc;
-  const g = rc.guia ? guiaPorId(db, rc.guia) : null;
-  const sup = g ? g.sup : rc.sup;
+  const sup = fornecedorDaRececao(db).sup;
   const out: [Po, PoLinha][] = [];
   db.pos.filter((p) => poRecebivel(p) && (!sup || p.sup === sup) && (!rc.poFilter || p.id === rc.poFilter))
     .sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0))
@@ -87,7 +98,7 @@ export function planoRececao(db: Inventario): PlanoRececao {
       rest -= n;
       allocs.push({ p, l, qty: n, toEC: sp.toEC, toStock: sp.toStock, ec: sp.ec, inactive: sp.inactive });
     }
-    if (rest > 0) errors.push(`Sem encomenda aberta para ${rest} un de ${nomeProd(db, it.sku)}${cands.length ? " (nunca mais do que falta)" : g || rc.sup ? " deste fornecedor" : ""}. Reduza a quantidade.`);
+    if (rest > 0) errors.push(`Sem encomenda aberta para ${rest} un de ${nomeProd(db, it.sku)}${cands.length ? " (nunca mais do que falta)" : g || rc.poFilter ? " deste fornecedor" : ""}. Reduza a quantidade.`);
     allocs.filter((a) => a.inactive).forEach((a) => warns.push(`EC ${a.ec} inativa: ${a.qty} un de ${nomeProd(db, it.sku)} entram como stock livre.`));
     if (g && !g.ann.some((a) => a.sku === it.sku)) warns.push(`${nomeProd(db, it.sku)} não está anunciado na guia ${g.id}.`);
     allocs.filter((a) => a.toEC && a.ec && ecPorId(db, a.ec) && ecPorId(db, a.ec)?.wh !== rc.wh)
@@ -172,6 +183,59 @@ export function aprenderCodigo(db: Inventario, code: string, sku: string, k: num
   if (!p.codes.includes(code)) p.codes.push(code);
   if (k != null) db.rc.rejected.splice(k, 1);
   if (k != null) adicionarAoCesto(db, sku);
+}
+
+/* ------------------------------------------------------------------ a barra de leitura (19/10) */
+/** O que um texto lido ou escrito na barra da Receção quer dizer: uma PO (abre o painel), uma guia, um artigo, um fornecedor ou nada. */
+export type LeituraRec =
+  | { t: "po"; po: string; sku?: string }
+  | { t: "guia"; guia: string; pos: string[] }
+  | { t: "skus"; skus: string[]; pos: string[] }
+  | { t: "pos"; pos: string[] }
+  | { t: "forn"; sup: string }
+  | { t: "nada"; aviso?: string };
+
+const recebiveisCom = (db: Inventario, skus: readonly string[], sup?: string): Po[] =>
+  db.pos.filter((p) => poRecebivel(p) && (!sup || p.sup === sup) && p.lines.some((l) => skus.includes(l.sku) && poRem(l) > 0));
+
+/** As POs por receber de uma guia aberta: as do fornecedor com os artigos anunciados (ou todas do fornecedor, se nada bater). */
+export function posDaGuia(db: Inventario, g: Guia): Po[] {
+  const doForn = db.pos.filter((p) => poRecebivel(p) && p.sup === g.sup);
+  const comArtigos = g.ann.length ? recebiveisCom(db, g.ann.map((a) => a.sku), g.sup) : [];
+  return comArtigos.length ? comArtigos : doForn;
+}
+
+/** Resolve o que se leu na barra da Receção: nº da PO (inteiro ou os últimos dígitos), nº de uma guia, EAN/SKU/código aprendido/ref. do
+ *  fornecedor (de QUALQUER fornecedor) ou o nome/código do fornecedor. Reaproveita poPorId, guiaPorId, procurarCodigo e nomeForn. */
+export function resolverCodigoRececao(db: Inventario, texto: string): LeituraRec {
+  const t = String(texto ?? "").trim();
+  if (!t) return { t: "nada" };
+  const lc = t.toLowerCase();
+  // o número da PO, inteiro
+  const p0 = poPorId(db, t.toUpperCase()) ?? db.pos.find((p) => p.id.toLowerCase() === lc);
+  if (p0 && !p0.deleted) return poRecebivel(p0) ? { t: "po", po: p0.id } : { t: "nada", aviso: `${p0.id} já não está por receber.` };
+  // a guia do fornecedor
+  const g = guiaPorId(db, t) ?? db.guias.find((x) => x.id.toLowerCase() === lc);
+  if (g) return g.state === "open" ? { t: "guia", guia: g.id, pos: posDaGuia(db, g).map((p) => p.id) } : { t: "nada", aviso: `A guia ${g.id} não está aberta.` };
+  // os últimos dígitos do número da PO ("0146")
+  if (/^\d{2,6}$/.test(t)) {
+    const L = db.pos.filter((p) => poRecebivel(p) && p.id.replace(/\D/g, "").endsWith(t));
+    if (L.length === 1) return { t: "po", po: L[0].id };
+    if (L.length > 1) return { t: "pos", pos: L.map((p) => p.id) };
+  }
+  // um artigo: de qualquer fornecedor
+  const skus = procurarCodigo(db, t);
+  if (skus.length) {
+    const L = recebiveisCom(db, skus);
+    if (L.length === 1) return { t: "po", po: L[0].id, sku: skus.find((s) => L[0].lines.some((l) => l.sku === s && poRem(l) > 0)) };
+    if (L.length > 1) return { t: "skus", skus, pos: L.map((p) => p.id) };
+    return { t: "nada", aviso: `«${t}» é ${skus.map((s) => nomeProd(db, s)).join(" ou ")}, mas não há encomendas por receber com esse artigo.` };
+  }
+  // o fornecedor (nome, código ou id)
+  const F = db.suppliers.filter((s) => !s.deleted && (s.id.toLowerCase() === lc || s.code.toLowerCase() === lc || (lc.length >= 3 && nomeForn(db, s.id).toLowerCase().includes(lc))));
+  if (F.length === 1) return { t: "forn", sup: F[0].id };
+  if (F.length > 1) return { t: "nada", aviso: `«${t}» serve ${F.length} fornecedores: escreva mais do nome.` };
+  return { t: "nada" };
 }
 
 /** O que a guia diz de si na receção: anunciado × recebido e a lista do que veio anunciado. */

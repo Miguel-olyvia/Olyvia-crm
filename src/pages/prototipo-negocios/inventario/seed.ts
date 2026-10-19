@@ -14,7 +14,7 @@ export function baseVazia(): Inventario {
   return {
     v: 0, seq: 0, n: { po: 131, ec: 84, tr: 6, inv: 11 }, settings: { autoPO: "direct", deduction: "contract", defaultWh: "LIS" },
     products: [], warehouses: [], stocks: [], suppliers: [], items: [], catalog: [], prices: [], pos: [], ecs: [], guias: [], counts: [], transfers: [], moves: [], vds: [], relogio: null,
-    rc: { wh: "LIS", guia: "GR 2026/312", sup: "zeta", poFilter: "", mode: "scanner", basket: [], rejected: [{ code: "7790001112223", at: "2026-10-09T08:41" }], queued: [], toSend: [{ sku: "KF-10", qty: 2, at: "2026-10-08T18:02" }], toConfirm: [{ items: [{ sku: "CS-6", qty: 100 }], at: "2026-10-08T17:55", err: "Sem rede ao confirmar" }], session: [], ack: false, net: true, result: null },
+    rc: { wh: "LIS", guia: "", sup: "", poFilter: "", mode: "scanner", basket: [], rejected: [{ code: "7790001112223", at: "2026-10-09T08:41" }], queued: [], toSend: [{ sku: "KF-10", qty: 2, at: "2026-10-08T18:02" }], toConfirm: [{ items: [{ sku: "CS-6", qty: 100 }], at: "2026-10-08T17:55", err: "Sem rede ao confirmar" }], session: [], ack: false, net: true, result: null },
   };
 }
 

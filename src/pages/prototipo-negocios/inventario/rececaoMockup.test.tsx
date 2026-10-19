@@ -15,7 +15,7 @@ function Casa() {
 }
 const acoesCab = (): HTMLElement => document.querySelector(".ph-actions") as HTMLElement;
 /** 16/10: o telemóvel da receção abre-se em "Ler códigos" (diálogo). */
-const abrirLeitor = (): void => { if (!screen.queryByLabelText("Receção no telemóvel")) fireEvent.click(within(acoesCab()).getByRole("button", { name: "Ler códigos" })); };
+const abrirLeitor = (): void => { if (!screen.queryByLabelText("Receção no telemóvel")) fireEvent.click(within(acoesCab()).getByRole("button", { name: "Ler artigo a artigo" })); };
 const telemovel = (): HTMLElement => { abrirLeitor(); return screen.getByLabelText("Receção no telemóvel"); };
 const guias = (): void => { fireEvent.click(screen.getByRole("tab", { name: /^Guias/ })); };
 const ler = (code: string): void => {
@@ -31,13 +31,14 @@ afterEach(() => { cleanup(); esquecerPerfil(); });
 describe("Receção como no mockup", () => {
   it("separadores Por receber · Recebidas · Guias; o telemóvel abre em \"Ler códigos\" e as guias no seu separador", () => {
     render(<Casa />);
-    expect(within(acoesCab()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Ler códigos", "Nova guia"]);
-    expect(within(screen.getByRole("tablist", { name: "Receção" })).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+$/, ""))).toEqual(["Por receber", "Recebidas", "Guias"]);
+    expect(within(acoesCab()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Ler artigo a artigo", "Nova guia"]);
+    expect(within(screen.getByRole("tablist", { name: "Receção" })).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+( abertas?)?$/, ""))).toEqual(["Por receber", "Recebidas", "Guias"]);
+    expect(screen.getByRole("tab", { name: /^Guias/ })).toHaveTextContent(/^Guias3 abertas$/);
     expect(screen.getByRole("tab", { name: /^Por receber/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByLabelText("Receção no telemóvel")).toBeNull();
     expect(within(telemovel()).getByText("Cesto (0)")).toBeInTheDocument();
     expect(within(telemovel()).getByText("3 pendente(s) ▸")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Ler códigos" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Ler artigo a artigo" })).toBeInTheDocument();
     cleanup();
     render(<Casa />);
     guias();

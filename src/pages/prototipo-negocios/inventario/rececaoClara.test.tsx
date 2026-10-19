@@ -30,6 +30,8 @@ function Casa({ inicio }: { inicio: AbaInv }) {
   return <InventarioPagina aba={aba} aoMudarAba={setAba} />;
 }
 const lista = (): HTMLElement => screen.getByRole("region", { name: /Encomendas por receber/ });
+/** 19/10: os blocos por cliente/obra são "Agrupar: Cliente" (por omissão a lista é por ordem de chegada). */
+const agruparCliente = (): void => { fireEvent.change(within(lista()).getByRole("combobox", { name: /Agrupar/ }), { target: { value: "cli" } }); };
 const blocoTiago = (): HTMLElement => within(lista()).getByRole("group", { name: /Tiago Almeida · CT 2026\/1027/ });
 
 beforeEach(() => { localStorage.clear(); esquecerInventario(); esquecerPerfil(); });
@@ -48,11 +50,14 @@ describe("Receção agrupada por cliente/obra", () => {
     const n = contagensRec(db, {});
     expect(n.todas).toBe(db.pos.filter(poRecebivel).length);
     expect(n.clientes + n.stock).toBe(n.todas);
-    expect(n.pendentes).toBeGreaterThanOrEqual(2);
+    expect(n.hoje + n.atrasadas).toBeLessThanOrEqual(n.todas);
     expect(porReceber(db, { cli: REF }).map((p) => p.id).sort()).toEqual([...ids].sort());
     render(<Casa inicio="guia" />);
+    agruparCliente();
     expect(within(blocoTiago()).getByText(/falta \d+ un · 2 encomendas/)).toBeInTheDocument();
-    expect(within(lista()).getByRole("button", { name: /^Pendentes/ })).toHaveTextContent(String(n.pendentes));
+    expect(within(lista()).queryByRole("button", { name: /^Pendentes/ })).toBeNull();
+    expect(within(lista()).getByRole("button", { name: /^Hoje\/amanhã/ })).toHaveTextContent(String(n.hoje));
+    fireEvent.click(within(lista()).getByRole("button", { name: /^Filtros/ }));
     fireEvent.change(within(lista()).getByRole("combobox", { name: /Cliente\/obra/ }), { target: { value: REF } });
     expect(within(lista()).getAllByRole("group").filter((g) => g.getAttribute("aria-label") !== "Ver")).toHaveLength(1);
   });
@@ -60,12 +65,15 @@ describe("Receção agrupada por cliente/obra", () => {
   it("\"Receber tudo\" abre a 1.ª PO do bloco e, ao receber tudo, passa à seguinte até acabar", () => {
     const { ids } = pagarTiago();
     render(<Casa inicio="guia" />);
+    agruparCliente();
     fireEvent.click(within(blocoTiago()).getByRole("button", { name: /^Receber tudo/ }));
     for (let k = 0; k < ids.length; k++) {
       const painel = screen.getByRole("dialog", { name: /^Dar entrada · PO-/ });
-      fireEvent.click(within(painel).getByRole("button", { name: "Confirmar entrada" }));
+      fireEvent.click(within(painel).getByRole("button", { name: /^Receber tudo · \d+ un$/ }));
     }
     expect(ids.every((id) => !poRecebivel(lerInventario().pos.find((p) => p.id === id)!))).toBe(true);
+    // a última fica a mostrar o que entrou; "Concluir" fecha
+    fireEvent.click(within(screen.getByRole("dialog", { name: /^Dar entrada · PO-/ })).getByRole("button", { name: "Concluir" }));
     expect(screen.queryByRole("dialog", { name: /^Dar entrada · PO-/ })).toBeNull();
     expect(within(lista()).queryByRole("group", { name: /Tiago Almeida/ })).toBeNull();
   });
@@ -77,6 +85,7 @@ describe("Receção agrupada por cliente/obra", () => {
     expect(lerPedidoRececaoInv()).toBe(REF);
     render(<Casa inicio="guia" />);
     expect(within(lista()).getByRole("combobox", { name: /Cliente\/obra/ })).toHaveValue(REF);
+    agruparCliente();
     expect(blocoTiago()).toBeInTheDocument();
   });
 

@@ -34,7 +34,8 @@ describe("Receção · Encomendas por receber", () => {
     render(<InventarioPagina aba="guia" />);
     for (const id of ids) expect(within(lista()).getByText(id)).toBeInTheDocument();
     expect(within(lista()).getAllByText(/CT 2026\/1027 · /).length).toBeGreaterThan(0);
-    expect(within(lista()).getAllByText(/Pendente · não confirmada ao fornecedor/).length).toBeGreaterThan(0);
+    expect(within(lista()).getAllByText(/Por enviar ao fornecedor/).length).toBeGreaterThan(0);
+    fireEvent.click(within(lista()).getByRole("button", { name: /^Filtros/ }));
     fireEvent.change(within(lista()).getByRole("searchbox", { name: /Pesquisar/ }), { target: { value: "Tiago" } });
     const linhas = within(lista()).getAllByRole("button", { name: /^Dar entrada PO-/ }).map((b) => b.getAttribute("aria-label")!.replace("Dar entrada ", ""));
     expect(linhas.sort()).toEqual([...ids].sort());
@@ -47,10 +48,16 @@ describe("Receção · Encomendas por receber", () => {
     const painel = screen.getByRole("dialog", { name: `Dar entrada · ${id}` });
     expect(within(painel).getByText(/ainda está pendente/)).toBeInTheDocument();
     const po0 = lerInventario().pos.find((p) => p.id === id)!;
+    const falta = po0.lines.reduce((a, l) => a + l.packs * l.packN - l.recv - l.cancelled, 0);
+    expect(within(painel).getByText(new RegExp(`^Vai entrar ${falta} un`))).toBeInTheDocument();
+    // a conferência linha a linha vem com a falta preenchida
+    fireEvent.click(within(painel).getByRole("button", { name: /Conferir linha a linha/ }));
     within(painel).getAllByRole("spinbutton", { name: /Dar entrada/ }).forEach((c, i) => expect(c).toHaveValue(po0.lines[i].packs * po0.lines[i].packN - po0.lines[i].recv - po0.lines[i].cancelled));
-    fireEvent.click(within(painel).getByRole("button", { name: "Confirmar entrada" }));
+    fireEvent.click(within(painel).getByRole("button", { name: /Voltar ao resumo/ }));
+    fireEvent.click(within(painel).getByRole("button", { name: `Receber tudo · ${falta} un` }));
     expect(await screen.findAllByText(/Entrou no .* un reservadas para Tiago Almeida/)).not.toHaveLength(0);
     expect(poRecebivel(lerInventario().pos.find((p) => p.id === id)!)).toBe(false);
+    fireEvent.click(within(screen.getByRole("dialog", { name: `Dar entrada · ${id}` })).getByRole("button", { name: "Concluir" }));
     expect(screen.queryByRole("dialog", { name: `Dar entrada · ${id}` })).toBeNull();
     expect(within(lista()).queryByText(id)).toBeNull();
     // Recebidas: o histórico das entradas, com Reverter
@@ -65,11 +72,11 @@ describe("Receção · Encomendas por receber", () => {
     expect(poRecebivel(lerInventario().pos.find((p) => p.id === id)!)).toBe(true);
   });
 
-  it("\"Ler códigos\" abre o leitor (o telemóvel da receção)", () => {
+  it("\"Ler artigo a artigo\" abre o leitor (o telemóvel da receção)", () => {
     render(<InventarioPagina aba="guia" />);
     expect(screen.queryByLabelText("Receção no telemóvel")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Ler códigos" }));
-    expect(screen.getByRole("dialog", { name: "Ler códigos" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ler artigo a artigo" }));
+    expect(screen.getByRole("dialog", { name: "Ler artigo a artigo" })).toBeInTheDocument();
     expect(screen.getByLabelText("Receção no telemóvel")).toBeInTheDocument();
   });
 });
