@@ -10,6 +10,7 @@ import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { PessoasRota } from "@/components/pessoas-lista/PessoasRota";
 import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/components/ClientRouteGuard";
 import { LayoutRoute } from "@/components/Layout";
 
@@ -274,7 +275,7 @@ const App = () => (
                       <Route path="/contacts" element={<Navigate to="/leads" replace />} />
                       <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view"><Atividades /></ProtectedRoute>} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
-                      <Route path="/pessoas" element={<ProtectedRoute permission="leads.view"><Pessoas /></ProtectedRoute>} />
+                      <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><Pessoas /></PessoasRota></ProtectedRoute>} />
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/pessoas" element={<ProtectedRoute permission="users.view"><PessoasRh /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/pessoas/:id" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />

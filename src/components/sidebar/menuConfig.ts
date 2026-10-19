@@ -68,6 +68,8 @@ export interface MenuItem {
   permissions?: string[];
   /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
   requireAll?: boolean;
+  /** Só aparece nas organizações com o interruptor dos negócios ligado (useNegociosAtivos); falha fechada. */
+  requiresNegociosAtivos?: boolean;
   /**
    * Contador opcional (pílula no painel do menu), alimentado por
    * useInventoryToday. Zero ou null = sem pílula. Não mexe no alerta do rail.
@@ -203,7 +205,7 @@ export const menuSections: MenuSection[] = [
     paths: ["/pessoas", "/leads", "/leads/pending-submissions", "/clients"],
     permissions: ["leads.view", "clients.view"],
     items: [
-      { to: "/pessoas", icon: UsersRound, labelKey: "sidebar.people", permission: "leads.view" },
+      { to: "/pessoas", icon: UsersRound, labelKey: "sidebar.people", permission: "pessoas.view", requiresNegociosAtivos: true },
       { to: "/leads", icon: Target, labelKey: "sidebar.leads", permission: "leads.view" },
       { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "platform.pending_submissions.view" },
       { to: "/clients", icon: Building, labelKey: "sidebar.clients", permission: "clients.view" },

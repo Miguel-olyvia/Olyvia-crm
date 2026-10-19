@@ -21,6 +21,12 @@ vi.mock("@/contexts/SidebarContext", () => ({
 vi.mock("@/hooks/useSidebarAlertCounts", () => ({ useSidebarAlertCounts: () => ({ sectionCounts: {} }) }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: null }) }));
 vi.mock("@/components/inventory/ui/useInventoryCounters", () => ({ useInventoryCounters: () => () => null }));
+vi.mock("@/hooks/pessoas/useNegociosAtivos", () => ({ useNegociosAtivos: () => ({ ativo: true, momentoGanho: null, isLoading: false, isError: false }) }));
+vi.mock("@/components/frota/useContadoresFrota", () => ({
+  DICA_CONTADOR_FROTA: { hoje: "", viaturas: "", ocorrencias: "", manutencao: "" },
+  TOM_CONTADOR_FROTA: { hoje: "bad", viaturas: "default", ocorrencias: "warn", manutencao: "warn" },
+  useContadoresFrota: () => () => null,
+}));
 
 function Endereco() {
   const { pathname, search } = useLocation();

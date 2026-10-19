@@ -9,7 +9,8 @@ interface CabecalhoPaginaProps {
   /** Título, migalha de origem e aviso de exemplo; sem eles, os de "Negócio e metas". */
   titulo?: string;
   pai?: { to: string; texto: string };
-  aviso?: string;
+  aviso?: string | null;
+  // `null` esconde o aviso (páginas ligadas à base); sem valor, mostra o de exemplo.
   /** Ações à direita do título (por exemplo, o botão "Workflow"). */
   acoes?: ReactNode;
 }
@@ -37,10 +38,12 @@ export function CabecalhoPagina({ subtitulo, titulo, pai, aviso, acoes }: Cabeca
           {tituloFinal}
         </h1>
         <p className="text-sm text-foreground/80">{subtitulo}</p>
-        <p role="note" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-          <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
-          {aviso ?? t("businessGoals.sample")}
-        </p>
+        {aviso !== null && (
+          <p role="note" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+            {aviso ?? t("businessGoals.sample")}
+          </p>
+        )}
       </div>
       {acoes && <div className="flex flex-wrap items-center gap-2">{acoes}</div>}
     </header>

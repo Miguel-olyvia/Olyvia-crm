@@ -53,7 +53,9 @@ describe("useNegociosAtivos", () => {
     resposta({ data: { momento_ganho: "contrato_assinado" }, error: null });
     const { result } = montar();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current).toEqual({ ativo: true, momentoGanho: "contrato_assinado", isLoading: false, isError: false });
+    expect(result.current).toEqual({
+      ativo: true, momentoGanho: "contrato_assinado", isLoading: false, isError: false, erroSemResposta: false, aRepetir: false,
+    });
   });
 
   it("lê negocio_workflow_config da organização do contexto", async () => {
@@ -69,7 +71,9 @@ describe("useNegociosAtivos", () => {
     resposta({ data: null, error: null });
     const { result } = montar();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current).toEqual({ ativo: false, momentoGanho: null, isLoading: false, isError: false });
+    expect(result.current).toEqual({
+      ativo: false, momentoGanho: null, isLoading: false, isError: false, erroSemResposta: false, aRepetir: false,
+    });
   });
 
   it("42501 é um resultado válido: inativo, sem isError e sem Sentry", async () => {

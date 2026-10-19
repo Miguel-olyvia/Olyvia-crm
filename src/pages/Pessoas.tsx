@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { criarNegocioNovo } from "@/components/negocio-metas/negociosNovos";
@@ -38,7 +39,7 @@ const PERMISSAO_SUBMISSOES = "platform.pending_submissions.view";
  * submissão, criar uma lead, registar uma chamada ou criar um negócio acontecem só em memória: ao recarregar volta o exemplo. A chamada, a visita
  * e o levantamento são REGISTOS da pessoa; o negócio cria-se à mão e liga registos que já existem (nada se copia).
  */
-const Pessoas = () => {
+const PessoasExemplo = () => {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
   const podeVer = hasPermission(PERMISSAO_SUBMISSOES);
@@ -191,5 +192,13 @@ const Pessoas = () => {
     </ProcessoProvider>
   );
 };
+
+/** Em modo real (rota guardada por PessoasRota) mostra a Lista ligada à base; por omissão, o exemplo. */
+// Carregada só em modo real: o exemplo (e os seus testes) não puxam a ligação à base.
+const PessoasReal = lazy(() => import("@/components/pessoas-lista/PessoasReal").then((m) => ({ default: m.PessoasReal })));
+
+const Pessoas = () => (
+  useFontePessoas().modo === "real" ? <Suspense fallback={null}><PessoasReal /></Suspense> : <PessoasExemplo />
+);
 
 export default Pessoas;

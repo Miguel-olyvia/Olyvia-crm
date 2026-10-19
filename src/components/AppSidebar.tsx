@@ -7,6 +7,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useNegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";
 import { CounterPill } from "@/components/inventory/ui/CounterPill";
 import { ContadorDenuncias } from "./sidebar/ContadorDenuncias";
 import { itemAtivo, type ItemAtivavel } from "./sidebar/itemAtivo";
@@ -44,6 +45,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   const { openSectionId, setOpenSectionId, closeSubmenu, isManuallyClosedRef } = useSidebarExpand();
   const { activeCompany } = useCompany();
   const { sectionCounts } = useSidebarAlertCounts(activeCompany?.id);
+  // O interruptor só se lê para quem já tem as permissões carregadas e pode ver Pessoas.
+  const negocios = useNegociosAtivos({ habilitado: !permissionsLoading && hasPermission("pessoas.view") });
   
   // Show skeleton while loading permissions (first load only)
   const [showSkeleton, setShowSkeleton] = useState(true);
@@ -54,6 +57,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
 
   const canViewItem = useCallback(
     (item: MenuItem): boolean => {
+      // Falha fechada: a carregar, em erro ou sem interruptor, o item não aparece (antes do atalho das permissões).
+      if (item.requiresNegociosAtivos && (negocios.isLoading || !negocios.ativo)) return false;
       if (permissionsLoading) return true;
       // Páginas ainda não prontas para toda a gente: nem aparecem a quem não
       // pode entrar, em vez de aparecerem e negarem o acesso ao clique.
@@ -71,7 +76,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
       }
       return true;
     },
-    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode]
+    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode, negocios.ativo, negocios.isLoading]
   );
 
   const canViewTopLevel = useCallback(
