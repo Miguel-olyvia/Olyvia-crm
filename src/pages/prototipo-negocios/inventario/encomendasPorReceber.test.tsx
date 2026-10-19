@@ -19,7 +19,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 /** Paga o negócio do Tiago Almeida: a EC-1027 vai ao Inventário e o que falta fica em POs (pendentes) aos fornecedores das obras. */
 function pagarTiago(): string[] {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); A.emitir(d.id); A.validar(d.id);
+  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id);
   return lerInventario().pos.filter((p) => p.originKey === "CT 2026/1027").map((p) => p.id);
 }
 const lista = (): HTMLElement => screen.getByRole("region", { name: /Encomendas por receber/ });

@@ -188,7 +188,7 @@ export function VersoesProposta({ ctx, d }: P) {
             <span className="absolute left-[13px] top-7 h-[calc(100%-1.5rem)] w-px bg-border" aria-hidden="true" />
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-input bg-card text-xs font-semibold text-muted-foreground">v{v.n}</span>
             <span className="min-w-0 text-[15px]">
-              <span className="block"><span className="tabular-nums text-muted-foreground line-through decoration-muted-foreground/50">{eur(v.total)} €</span>
+              <span className="block"><span className="tabular-nums text-muted-foreground line-through decoration-muted-foreground/50">{eur(v.total)} € s/ IVA</span>
                 {i > 0 && <span className="text-muted-foreground"> · {dif(v.total, o.versoes![i - 1].total)}</span>}
                 <span className="text-muted-foreground"> · enviada {quando(v.enviada)}{v.aceite ? `, aceite ${quando(v.aceite)}` : ""}, substituída {quando(v.substituida)}</span></span>
               {(v.motivos.length > 0 || v.nota) && <span className="block text-muted-foreground">O cliente pediu: {[...v.motivos, v.nota].filter(Boolean).join(", ").toLowerCase()}</span>}
@@ -198,7 +198,7 @@ export function VersoesProposta({ ctx, d }: P) {
         <li className="flex gap-3">
           <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">v{atual.n}</span>
           <span className="text-[15px]">
-            <b className="font-semibold tabular-nums">{eur(atual.total)} €</b>
+            <b className="font-semibold tabular-nums">{eur(atual.total)} € s/ IVA</b>
             <span className="text-muted-foreground"> · {dif(atual.total, o.versoes.at(-1)!.total)} · {o.enviada ? `enviada ${quando(o.enviada)}` : "em preparação"}</span>
           </span>
         </li>

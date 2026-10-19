@@ -87,7 +87,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   const viaturas = ligacoesObra(Fr, d.id).map((x) => Fr.viaturas.find((v) => v.id === x.vid)?.mat).filter(Boolean);
   if (!P.length) return null;
   const feitos = P.filter((x) => x.estado === "feito").length;
-  const falta = faltaParaArrancar(d);
+  const falta = faltaParaArrancar(d, db);
   const go1 = P.find((x) => x.trilho === "obra")!;
   // um só botão primário: o primeiro passo que é do papel atual
   const meu = P.find((x) => x.estado === "agora" && x.who === S.role && x.act);
@@ -184,7 +184,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
           <div>
             <p className="text-[15px] font-semibold">{go1.t}</p>
             <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Condições para arrancar">
-              {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"]].map(([t, ok]) => (
+              {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)], ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"]].map(([t, ok]) => (
                 <li key={t as string} className={cn("inline-flex items-center gap-1.5", ok ? "text-foreground" : "text-muted-foreground")}>
                   {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="h-3.5 w-3.5 rounded-full border-2 border-input" aria-hidden="true" />}{t as string}
                   <span className="sr-only">{ok ? " (feito)" : " (por fazer)"}</span>

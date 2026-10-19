@@ -22,7 +22,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 };
 function pagarTiago() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); A.emitir(d.id); A.validar(d.id);
+  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id);
   return { S, A, ids: lerInventario().pos.filter((p) => p.originKey === REF).map((p) => p.id) };
 }
 function Casa({ inicio }: { inicio: AbaInv }) {

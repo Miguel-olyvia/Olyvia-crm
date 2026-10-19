@@ -22,6 +22,7 @@ import { VisitasLista } from "./Visitas";
 import { camposMedida, fotosPor, medida, nfmt } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 import { GuiaPassoCtx } from "./guiaPasso";
+import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -38,6 +39,7 @@ export function NegocioSimples(ctx: Ctx) {
   const T = d.orc ? tot(d, S) : null;
   const [ver, setVer] = useState<number | null>(null); // uma fase já feita, só para ler
   const [portal, setPortal] = useState(false);
+  const [anular, setAnular] = useState(false);
   // ao passar de fase: uma frase curta a dizer o que acabou e o que vem, que desaparece sozinha
   const faseAntes = useRef(d.fase);
   const [acabou, setAcabou] = useState<number | null>(null);
@@ -83,12 +85,18 @@ export function NegocioSimples(ctx: Ctx) {
                 Marcar como perdido
               </button>
             )}
+            {/* 19/10: com contrato, já não se "perde": a Direção anula o contrato (a encomenda no Inventário vai com ele) */}
+            {podeAnular(d) && (
+              <button type="button" onClick={() => setAnular(!anular)} aria-expanded={anular} className="min-h-11 rounded-lg px-1 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                Anular {oQueAnular(d)}
+              </button>
+            )}
           </div>
         </div>
         <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[15px]">
           <div className="inline-flex items-center gap-2"><dt><Phone className="h-4 w-4 text-muted-foreground" aria-label="Telefone" /></dt><dd>{d.tel}</dd></div>
           {local && <div className="inline-flex items-center gap-2"><dt><MapPin className="h-4 w-4 text-muted-foreground" aria-label="Local" /></dt><dd>{local}</dd></div>}
-          {T && <div className="inline-flex items-center gap-2"><dt><Euro className="h-4 w-4 text-muted-foreground" aria-label="Total" /></dt><dd className="font-semibold tabular-nums">{eur(T.pf)} €</dd></div>}
+          {T && <div className="inline-flex items-center gap-2"><dt><Euro className="h-4 w-4 text-muted-foreground" aria-label="Total sem IVA" /></dt><dd className="font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</dd></div>}
           {T && <div className="inline-flex items-center gap-2"><dt><TrendingUp className="h-4 w-4 text-muted-foreground" aria-label="Margem" /></dt><dd className={cn("tabular-nums", T.m < S.cfg.min / 100 ? "text-destructive" : T.m < S.cfg.alvo / 100 - 0.005 ? "text-warning" : "text-success")}>margem {pct(T.m)}</dd></div>}
         </dl>
         <div className="mt-6">
@@ -120,6 +128,14 @@ export function NegocioSimples(ctx: Ctx) {
           <p className="flex-1 text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>
           <Button variant="outline" onClick={go(() => A.perderNao())}>Cancelar</Button>
           <Button variant="destructive" onClick={go(() => A.perderSim(d.id))}>Marcar como perdido</Button>
+        </div>
+      )}
+      {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
+      {d.anulado && (
+        <div role="status" className="mt-4 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4 text-[15px]">
+          <b className="font-semibold">{d.orc?.vendaDireta ? "Venda anulada" : "Contrato anulado"}</b>
+          <span className="text-muted-foreground"> · {d.anulado.origem === "inventario" ? "a encomenda de cliente foi eliminada no Inventário" : d.anulado.por} · {d.anulado.q}</span>
+          <span className="block">{d.anulado.motivo}</span>
         </div>
       )}
 

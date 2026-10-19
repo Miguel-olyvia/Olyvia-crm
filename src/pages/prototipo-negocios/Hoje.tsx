@@ -27,8 +27,6 @@ export function agenda(S: Estado, r: Papel): Compromisso[] {
     }
     if (r === "operacoes" && d.fase === 5 && d.obra.plano?.estado === "em curso")
       L.push({ id: "o" + d.id, hora: "08:00", titulo: `Obra · dia ${d.obra.plano.dia + 1} de ${Math.max(...d.obra.plano.tasks.map((t) => t.dia + t.dur))}`, quem: d.nome, onde: loc, acao: "Abrir plano", d });
-    if (r === "armazem" && d.obra.enc && (d.obra.enc.estado === "encomendada" || d.obra.enc.estado === "parcial"))
-      L.push({ id: "e" + d.id, hora: "—", titulo: (d.obra.enc.estado === "parcial" ? "Receber o resto de " : "Receber ") + d.obra.enc.n + (d.obra.enc.entrega ? " · " + d.obra.enc.entrega : ""), quem: d.obra.enc.forn || "Fornecedor", acao: "Receber", d });
     if (r === "financeiro" && d.fin.fatura && !d.fin.pago)
       L.push({ id: "f" + d.id, hora: "—", titulo: d.fin.fatura.n + " · confirmar a transferência", quem: d.nome, acao: "Validar", d });
   }
@@ -44,11 +42,10 @@ function alertasDia(S: Estado, A: Ctx["A"], r: Papel): Alerta[] {
     { id: "aprov", n: ab.filter((d) => d.orc?.aprov === "pedida").length, t: "Exceções à margem por aprovar", abrir: () => A.nav("hoje") },
     { id: "fat", n: ab.filter((d) => d.fase === 4 && !d.fin.fatura).length, t: "Faturas por emitir", abrir: filtro("todos") },
     { id: "pag", n: ab.filter((d) => d.fin.fatura && !d.fin.pago).length, t: "Pagamentos por validar", abrir: filtro("todos") },
-    { id: "enc", n: ab.filter((d) => d.obra.enc?.estado === "por confirmar").length, t: "Encomendas ao fornecedor por confirmar", abrir: () => A.nav("inventario") },
     { id: "conf", n: ab.filter((d) => d.obra.plano?.estado === "por aprovar" && conflitos(d.obra.plano).length).length, t: "Planos de obra com conflitos", abrir: () => A.nav("operacoes") },
   ];
   const meus: Record<Papel, string[]> = {
-    comercial: ["lead", "prop"], direcao: ["lead", "prop", "aprov", "fat", "pag", "enc", "conf"], financeiro: ["fat", "pag"], armazem: ["enc"], operacoes: ["conf"], juridico: [],
+    comercial: ["lead", "prop"], direcao: ["lead", "prop", "aprov", "fat", "pag", "conf"], financeiro: ["fat", "pag"], armazem: [], operacoes: ["conf"], juridico: [],
   };
   return L.filter((a) => a.n > 0 && meus[r].includes(a.id));
 }
@@ -93,7 +90,7 @@ export function Hoje({ S, A, go }: Ctx) {
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[
             ["Negócios abertos", String(ab.length)],
-            ["Em fase Negócio", eur(emNeg.reduce((a, d) => a + tot(d, S).pf, 0)) + " €"],
+            ["Em fase Negócio (s/ IVA)", eur(emNeg.reduce((a, d) => a + tot(d, S).pf, 0)) + " €"],
             ["Margem média prevista", pct(emNeg.length ? emNeg.reduce((a, d) => a + tot(d, S).m, 0) / emNeg.length : 0)],
             ["Obras em curso", String(ab.filter((d) => d.fase === 5 && d.obra.plano?.estado === "em curso").length)],
           ].map(([l, v], i) => (

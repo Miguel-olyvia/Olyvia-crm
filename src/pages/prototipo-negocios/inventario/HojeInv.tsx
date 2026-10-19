@@ -44,7 +44,8 @@ function Etapas12({ c }: { c: Contadores }) {
   return (
     <>
       <div className="stage"><h3><span className="no">1</span>Vendas assinadas</h3>
-        <Cnt r="Contratos" n={por("CT")} ir={() => ir({ aba: "ec", f: { q: "CT-" } })} /><Cnt r="Vendas diretas" n={por("VD")} ir={() => ir({ aba: "ec", f: { q: "VD-" } })} /><Cnt r="Encomendas manuais" n={por("manual")} ir={() => ir({ aba: "ec", f: { q: "Manual" } })} />
+        {/* 19/10: pela origem (antes pesquisava "CT-" e falhava as dos negócios, "CT 2026/1027") */}
+        <Cnt r="Contratos" n={por("CT")} ir={() => ir({ aba: "ec", f: { origem: "CT", q: "" } })} /><Cnt r="Vendas diretas" n={por("VD")} ir={() => ir({ aba: "ec", f: { origem: "VD", q: "" } })} /><Cnt r="Encomendas manuais" n={por("manual")} ir={() => ir({ aba: "ec", f: { origem: "manual", q: "" } })} />
         <small className="muted">Baixa no momento definido: <b>{ded}</b> (nunca os dois).</small>
         <Fonte>client_contracts · proposals · direct_sales · organization_inventory_settings.stock_deduction_trigger</Fonte><Seta /></div>
       <div className="stage"><h3><span className="no">2</span>Encomendas Clientes</h3>

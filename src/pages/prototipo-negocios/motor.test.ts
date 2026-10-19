@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { esquecerInventario, lerInventario } from "./inventario/loja";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
 import { totais } from "./DocsCliente";
+import { receberTudo } from "./testeObra";
 import { realPorFase } from "./planoObra";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { SETORES } from "./setores";
@@ -80,6 +81,8 @@ describe("protótipo de Negócios", () => {
     A.aprovarPlano(id);
     expect(d().obra.plano!.estado).toBe("por aprovar");
     preencher(d(), FINANCEIRO);
+    // 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
+    S.role = "financeiro";
     A.emitir(id);
     A.validar(id);
     expect(d().fase).toBe(5);
@@ -89,6 +92,8 @@ describe("protótipo de Negócios", () => {
     expect(d().obra.mats).toBeTruthy();
     A.aprovarPlano(id);
     preencher(d(), [OBRA[0]]);
+    // 19/10: só arranca com os materiais no armazém (as encomendas a fornecedor aprovadas e recebidas no Inventário)
+    expect(receberTudo("CT 2026/" + id)).toBe("");
     A.arrancar(id);
     expect(d().obra.plano!.estado).toBe("em curso");
 

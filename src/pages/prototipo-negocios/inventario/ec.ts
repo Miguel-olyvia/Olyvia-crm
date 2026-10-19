@@ -242,6 +242,8 @@ export function reverterSaida(db: Inventario, e: Ec, l: EcLinha): void {
 /** Elimina (manual ou venda direta) ou anula o contrato: estorna saídas, anula as POs ligadas e cancela as transferências pendentes. */
 export function eliminarEc(db: Inventario, e: Ec, motivo: string, opts: { contrato?: boolean } = {}): void {
   exigir("inventory.manage");
+  // 19/10: anular o contrato é de quem pode anular contratos (o perfil Administrador tem tudo); os Negócios chamam isto como o sistema
+  if (opts.contrato) exigir("contracts.cancel", "anular contratos");
   if (!opts.contrato && !["manual", "VD"].includes(e.origin.k)) falhar("Só se eliminam encomendas manuais ou de venda direta. Para contratos, anule o contrato.");
   exigirMotivo(motivo);
   if (e.deleted) falhar("Já eliminada.");

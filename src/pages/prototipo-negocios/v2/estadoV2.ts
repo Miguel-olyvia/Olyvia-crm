@@ -39,7 +39,8 @@ export function regObra(S: Estado, d: Negocio): RegObra {
 export function guardarObra(S: Estado, id: number, r: RegObra): void { loja(S).obras.set(id, r); }
 
 export const totalComIva = (S: Estado, d: Negocio): number => totais(d, S).total;
-export const tranchesDe = (d: Negocio) => tranchesDoPlano(d.f.pagamento);
+/** 19/10: as mesmas prestações da proposta e do portal ("Por fases" com as guardadas no orçamento). */
+export const tranchesDe = (d: Negocio) => tranchesDoPlano(d.f.pagamento, d.orc?.pagFases);
 
 /**
  * As faturas registadas do negócio. Se o motor já tem a fatura única (a demonstração, ou o botão do passo "Emitir fatura"),

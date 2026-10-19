@@ -3,13 +3,18 @@
 //   · Pagamento validado (Financeiro) → o recibo e, logo, a Encomenda de cliente, emitida sozinha no Inventário novo (inventario/ponteNegocios.ts):
 //     lá se reserva o stock (FIFO) e o que falta vai à encomenda ao fornecedor preferencial. Ninguém a aprova: já está paga.
 //   · Plano aprovado (Operações), com os técnicos e as férias: só depois do pagamento.
-//   · Arrancar a obra (Operações): com o pagamento validado (e a encomenda emitida), só pode faltar o plano.
+//   · Arrancar a obra (Operações), 19/10: com o pagamento validado, o plano aprovado e os materiais garantidos no Inventário: a encomenda de cliente
+//     emitida e não eliminada, nenhuma linha sem fornecedor, nenhuma encomenda a fornecedor por aprovar ou por receber, e cada linha saída, pronta a
+//     sair no armazém ou a bordo da carrinha (o critério da Frota para carregar). As obras antigas do exemplo (encomenda sem ref) não bloqueiam.
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
-import { textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
+import { faltaMateriais, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
+import { lerInventario } from "./inventario/loja";
+import { lerVersao } from "./versaoPrototipo";
+import type { Inventario } from "./inventario/tipos";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -85,8 +90,6 @@ export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string
   const valor = linhas.reduce((a, x) => a + x.preco * x.q, 0), custo = linhas.reduce((a, x) => a + x.custo * x.q, 0);
   return { n, estado: "emitida", criada: quando, linhas, valor: r2(valor), custo: r2(custo) };
 }
-/** O total de uma encomenda a fornecedor (custo × quantidade). */
-export const totalEf = (e: { linhas: { q: number; custo?: number }[] }) => r2(e.linhas.reduce((a, x) => a + (x.custo ?? 0) * x.q, 0));
 
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
 /** O ofício de uma tarefa → o tipo de técnico do RH (TECS.sk). */
@@ -130,13 +133,22 @@ export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
 /** A encomenda de cliente nasce do pagamento validado (no Inventário novo). */
 export const EC_NO_PAGAMENTO = "Emite-se quando o pagamento for validado.";
 
-/** O que falta para arrancar a obra (vazio = pode arrancar). Com a encomenda emitida no pagamento, depois dele só pode faltar o plano. */
-export function faltaParaArrancar(d: Negocio): string[] {
+/** O que falta para arrancar a obra (vazio = pode arrancar): o pagamento, a encomenda de cliente, os materiais garantidos no Inventário
+ *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
+export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
   const p = d.obra.plano, F: string[] = [];
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "emitir a fatura e receber o pagamento");
   else if (!d.obra.ec) F.push("emitir a encomenda de cliente");
+  else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
   return F;
+}
+
+/** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
+export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
+  if (!d.obra.ec) return d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.";
+  if (!d.obra.ec.ref) return "Obra do exemplo: os materiais já estão na obra.";
+  return r ? `Encomenda de cliente ${r.id}: ${textoResumoEc(r)}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`;
 }
 
 /**
@@ -175,6 +187,9 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // o pagamento
   L.push(d.fin.fatura
     ? { id: "ft", trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${d.fin.fatura.n}`, sub: `Emitida ${d.fin.fatura.q.startsWith("hoje") ? d.fin.fatura.q : "a " + d.fin.fatura.q}.` }
+    // 19/10: na V2 a Olyvia não emite faturas: regista-se a do programa certificado no Financeiro do negócio (sem botão aqui)
+    : lerVersao() !== "atual"
+    ? { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Registar a fatura", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio." }
     : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Emitir a fatura", sub: "Vai para o portal do cliente.", act: "emitir", btn: "Emitir a fatura" });
   L.push(d.fin.pago
     ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }
@@ -197,16 +212,21 @@ export const passosAgora = (d: Negocio, S: Estado) => passosPreparacao(d, S).fil
 export const quemE = (who: Papel | null) => (who ? PAPEIS[who].n : "");
 
 /* ------------------------------------------------------------------ a entrega e o início */
-/** A entrega do fornecedor calha no dia em que a obra começa (ou depois)? Devolve as datas e o primeiro dia útil a seguir à entrega. */
-export function entregaTarde(d: Negocio): { entrega: Date; inicio: Date; depois: Date } | null {
-  const e = d.obra.enc, p = d.obra.plano;
-  if (!e?.entregaIso || e.estado === "recebida" || !p || p.estado === "em curso" || p.estado === "concluída") return null;
+/** As encomendas a fornecedor da encomenda de cliente (no Inventário) chegam no dia em que a obra começa (ou depois)? Pela data prometida no
+ *  portal ou, sem ela, a prevista; a mais tarde das que estão por receber. Devolve as datas, o primeiro dia útil a seguir e as encomendas. */
+export function entregaTarde(d: Negocio, db?: Inventario | null): { entrega: Date; inicio: Date; depois: Date; pos: string[] } | null {
+  const ref = d.obra.ec?.ref, p = d.obra.plano;
+  if (!ref || !p || p.estado === "em curso" || p.estado === "concluída") return null;
+  const r = resumoEcNegocio(db ?? lerInventario(), ref);
+  if (!r || r.eliminada) return null;
+  const abertas = r.pos.filter((x) => x.fase !== "recebida" && x.fase !== "cancelada" && x.prevista);
+  if (!abertas.length) return null;
   const inicio = inicioDoPlano(p);
   if (!inicio) return null;
-  const entrega = deIso(e.entregaIso);
+  const entrega = deIso(abertas.map((x) => x.prevista).sort().at(-1)!);
   if (entrega < inicio) return null;
   const a = new Date(entrega); a.setDate(a.getDate() + 1);
-  return { entrega, inicio, depois: proximoUtil(a) };
+  return { entrega, inicio, depois: proximoUtil(a), pos: abertas.map((x) => x.id) };
 }
 
 /* ------------------------------------------------------------------ as datas do plano */

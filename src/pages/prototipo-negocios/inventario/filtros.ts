@@ -10,7 +10,9 @@ export type EstadoPoFiltro = "all" | "pending" | "ordered" | "partial" | "receiv
 export interface FiltrosPo { q: string; status: EstadoPoFiltro; sup: string; campoData: "date" | "real"; de: string; ate: string; eliminadas: boolean; group: boolean }
 export interface FiltrosStock { q: string; cat: string; sub: string; wh: string; state: "" | EstadoStock; vista: "product" | "wh"; eliminadas: boolean; transferencias: boolean }
 export interface FiltrosMov { q: string; type: "" | TipoMov; wh: string; doc: string; de: string; ate: string; limite: number }
-export interface FiltrosEc { q: string; status: "" | EstadoEc; wh: string; de: string; ate: string; prontas: boolean; eliminadas: boolean }
+/** A origem da encomenda de cliente (Ec.origin.k): contrato, venda direta, proposta ou manual; "" = todas. */
+export type OrigemEc = "" | "CT" | "VD" | "PR" | "manual";
+export interface FiltrosEc { q: string; status: "" | EstadoEc; wh: string; de: string; ate: string; prontas: boolean; eliminadas: boolean; origem: OrigemEc }
 export interface FiltrosForn { q: string; estado: "" | "active" | "inactive"; empresa: string; precos: boolean; aguardam: boolean; catalogo: boolean; eliminados: boolean }
 export interface FiltrosGuia { estado: "all" | "open" | "closed" | "cancelled" | "div" }
 export interface FiltrosCont { estado: "" | "open" | "final" | "cancelled" }
@@ -20,7 +22,7 @@ export const FILTROS_VAZIOS: FiltrosInv = {
   po: { q: "", status: "all", sup: "", campoData: "date", de: "", ate: "", eliminadas: false, group: false },
   stock: { q: "", cat: "", sub: "", wh: "", state: "", vista: "product", eliminadas: false, transferencias: false },
   mov: { q: "", type: "", wh: "", doc: "", de: "", ate: "", limite: 40 },
-  ec: { q: "", status: "", wh: "", de: "", ate: "", prontas: false, eliminadas: false },
+  ec: { q: "", status: "", wh: "", de: "", ate: "", prontas: false, eliminadas: false, origem: "" },
   forn: { q: "", estado: "", empresa: "", precos: false, aguardam: false, catalogo: false, eliminados: false },
   guia: { estado: "all" },
   cont: { estado: "" },
@@ -70,7 +72,7 @@ export function filtrarMovs(db: Inventario, f: FiltrosMov): Movimento[] {
 export function filtrarEcs(db: Inventario, f: FiltrosEc): Ec[] {
   const q = norm(f.q);
   return db.ecs
-    .filter((e) => (f.eliminadas || !e.deleted) && (!f.status || ecEstado(db, e) === f.status) && (!f.wh || e.wh === f.wh) && (!f.prontas || ecProntas(db, e) > 0) && (!f.de || e.date >= f.de) && (!f.ate || e.date <= f.ate)
+    .filter((e) => (f.eliminadas || !e.deleted) && (!f.status || ecEstado(db, e) === f.status) && (!f.wh || e.wh === f.wh) && (!f.prontas || ecProntas(db, e) > 0) && (!f.origem || e.origin.k === f.origem) && (!f.de || e.date >= f.de) && (!f.ate || e.date <= f.ate)
       && (!q || tem([e.id, e.client, e.origin.ref ?? "", origemTexto(e), e.addr, ...e.lines.map((l) => (l.sku ?? "") + " " + (l.sku ? nomeProd(db, l.sku) : l.desc))], q)))
     .sort((a, b) => b.seq - a.seq);
 }

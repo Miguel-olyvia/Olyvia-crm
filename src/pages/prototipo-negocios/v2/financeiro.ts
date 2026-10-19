@@ -3,6 +3,7 @@
 // (número, data, valor, tranche e, se houver, o PDF). Ver docs/melhorias-v2-2026-10-13/README.md, ponto 1.5.
 // O contrato diz como se paga ("50% + 50% no fim"): cada parte é uma tranche, com a sua fatura, o seu pagamento e o seu recibo.
 import { r2 } from "../motor";
+import { prestacoes, type Prestacao } from "../planoObra";
 
 export interface Tranche { id: string; nome: string; pct: number }
 
@@ -32,14 +33,18 @@ export interface FaturaReg {
 export type RegraDisparo = "primeira" | "ultima";
 export const DISPARO: RegraDisparo = "primeira";
 
-/** As tranches do plano de pagamento do contrato (o campo "pagamento" do negócio). */
-export function tranchesDoPlano(pagamento: string | undefined): Tranche[] {
-  const p = (pagamento || "").trim();
-  if (!p || /^100\s*%/.test(p)) return [{ id: "unica", nome: "Única 100%", pct: 100 }];
-  const pcts = [...p.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)].map((m) => Number(m[1].replace(",", ".")));
-  if (pcts.length < 2) return [{ id: "unica", nome: "Única 100%", pct: 100 }];
-  return pcts.map((pct, i) => {
-    const nome = i === 0 ? "Adiantamento" : i === pcts.length - 1 ? "Final" : pcts.length === 3 ? "A meio" : `${i + 1}.ª tranche`;
+/**
+ * As tranches do plano de pagamento do contrato (o campo "pagamento" do negócio). 19/10: a fonte é a mesma da proposta, do contrato e do
+ * portal (planoObra.ts: prestacoes), com as prestações "Por fases" guardadas no orçamento; sem condições, 50% + 50% no fim (como lá).
+ */
+export function tranchesDoPlano(pagamento?: string, guardadas?: Prestacao[] | null): Tranche[] {
+  const P = prestacoes(pagamento?.trim() || undefined, guardadas);
+  if (P.length === 1) return [{ id: "unica", nome: "Única 100%", pct: 100 }];
+  return P.map((x, i) => {
+    const pct = r2(x.p * 100);
+    // a do meio: o rótulo da prestação guardada ("No fim da fase 2 (canalização)" → "Fim da fase 2 (canalização)"), senão "A meio"
+    const meio = /^No fim da fase/.test(x.l) ? x.l.replace(/^No f/, "F") : "A meio";
+    const nome = i === 0 ? "Adiantamento" : i === P.length - 1 ? "Final" : meio;
     return { id: `t${i + 1}`, nome: `${nome} ${String(pct).replace(".", ",")}%`, pct };
   });
 }

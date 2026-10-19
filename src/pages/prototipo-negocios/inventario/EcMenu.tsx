@@ -8,6 +8,7 @@ import { EcEliminar, EcPdf } from "./EcDialogos";
 import { useAbrirEc } from "./ecAbrir";
 import { EcFormDialogo } from "./EcFormDialogo";
 import { MenuMais } from "./mockPecas";
+import { can, porqueNao, usePerfil } from "./perfil";
 import type { Ec } from "./tipos";
 
 type Dlg = "editar" | "eliminar" | "pdf" | null;
@@ -29,11 +30,14 @@ export function AcoesLinhaEc({ id }: { id: string }) {
 
 export function MenuEc({ id }: { id: string }) {
   const { db, agir } = useCtxInv();
+  usePerfil(); // redesenha quando o perfil simulado muda
   const abrirEc = useAbrirEc();
   const [dlg, setDlg] = useState<Dlg>(null);
   const e = ecPorId(db, id);
   if (!e) return null;
   const ct = e.origin.k === "CT", eliminavel = ["manual", "VD"].includes(e.origin.k);
+  // 19/10: anular o contrato pede contracts.cancel ao perfil (ec.ts: eliminarEc); sem ele, o item fica desativado com o porquê
+  const semPerm = ct && !can("contracts.cancel");
   const pedir = (): void => { agir((d) => pedirEmFalta(d, ecPorId(d, id) as Ec), (r) => (r.pos.length ? "Pedido: " + r.pos.join(", ") : "Nada novo a pedir (sem fornecedor preferencial ou já pedido).")); };
   return (
     <>
@@ -43,7 +47,7 @@ export function MenuEc({ id }: { id: string }) {
         { label: "Editar", icone: <Pencil className={I} aria-hidden="true" />, desativado: e.origin.k !== "manual" || e.deleted, porque: "Só encomendas manuais", run: () => setDlg("editar"), fonte: "rpc_get_manual_client_order_edit · rpc_update_manual_client_order" },
         { label: "Pedir em falta ao fornecedor", icone: <ShoppingCart className={I} aria-hidden="true" />, desativado: e.deleted, run: pedir },
         "-",
-        { label: ct ? "Simular: anular contrato" : "Eliminar", icone: <Trash2 className={I} aria-hidden="true" />, perigo: true, desativado: e.deleted || (!eliminavel && !ct), porque: "Só manuais ou venda direta", run: () => setDlg("eliminar"), fonte: ct ? "cancel_and_replace_contract → estorno" : "rpc_delete_client_order" },
+        { label: ct ? "Simular: anular contrato" : "Eliminar", icone: <Trash2 className={I} aria-hidden="true" />, perigo: true, desativado: e.deleted || (!eliminavel && !ct) || semPerm, porque: semPerm ? porqueNao("contracts.cancel") : "Só manuais ou venda direta", run: () => setDlg("eliminar"), fonte: ct ? "cancel_and_replace_contract → estorno" : "rpc_delete_client_order" },
       ]} />
       {dlg === "pdf" && <EcPdf id={id} aoFechar={() => setDlg(null)} />}
       {dlg === "editar" && <EcFormDialogo aberto aoFechar={() => setDlg(null)} id={id} />}

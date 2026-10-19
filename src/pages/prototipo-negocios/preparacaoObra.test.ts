@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { esquecerInventario, executar, lerInventario, lerPedidoEcInv } from "./inventario/loja";
 import { enviarPo } from "./inventario/po";
 import { produto } from "./inventario/base";
-import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, sincronizarEcsNegocios, textoResumoEc } from "./inventario/ponteNegocios";
-import { TECS, acoes, conflitos, diaDeFerias, minhas, seed, valorSinal } from "./motor";
+import { anularEcNoInventario, estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, sincronizarEcsNegocios, textoResumoEc } from "./inventario/ponteNegocios";
+import { TECS, acoes, conflitos, diaDeFerias, minhas, proximo, seed, valorSinal } from "./motor";
+import { aprovarPos, posDe, receberTudo } from "./testeObra";
+
+const REF = "CT 2026/1027";
 import { isoDia } from "./planoObra";
 import { totais, tranches } from "./DocsCliente";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
@@ -19,7 +22,8 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 // 1027 Tiago Almeida: contrato assinado a 08/10 → plano por aprovar (a encomenda de cliente vem com o pagamento)
 const preparar = () => { const S = seed(); return { S, A: acoes(S, () => {}, (fn) => fn()), d: S.deals.find((x) => x.id === 1027)! }; };
 // o pagamento validado emite a encomenda de cliente no Inventário novo; o plano aprova-se depois
-const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.emitir(d.id); A.validar(d.id); };
+// 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
+const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); };
 const estados = (S: ReturnType<typeof seed>, d: ReturnType<typeof preparar>["d"]) => Object.fromEntries(passosPreparacao(d, S).map((p) => [p.id, p.estado]));
 
 describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Inventário novo)", () => {
@@ -75,8 +79,12 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     expect(estadoLinhaNegocio(linhaDoResumo(r2, "Conjunto de móveis de cozinha")!).t).toBe("no portal do fornecedor");
     expect(estadoLinhaNegocio(linhaDoResumo(r, "Bancada em pedra")!)).toEqual({ t: "reservado em armazém", ok: true });
     expect(passosPreparacao(d, S, r).map((x) => x.id)).toContain("ec-inv");
-    // depois do pagamento só pode faltar o plano
-    expect(faltaParaArrancar(d)).toEqual(["aprovar o plano"]);
+    // 19/10: depois do pagamento, faltam os materiais garantidos (uma encomenda a fornecedor por aprovar, a outra aprovada aqui em cima e por receber) e o plano
+    expect(faltaParaArrancar(d)).toEqual([
+      expect.stringMatching(/^aprovar a encomenda a fornecedor PO-\S+ no Inventário \(Compras\)$/),
+      expect.stringMatching(/^receber no armazém a encomenda PO-\S+ \(prevista a \d\d\/\d\d\)$/),
+      "aprovar o plano",
+    ]);
     expect(estados(S, d)).toMatchObject({ ec: "feito", "pl-ok": "agora", pg: "feito" });
   });
 
@@ -119,8 +127,9 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     expect("validarEf" in A).toBe(false);
   });
 
-  it("só arranca com o pagamento e o plano aprovado (os materiais tratam-se no Inventário)", () => {
-    const { S, A, d } = preparar();
+  it("só arranca com o pagamento, o plano aprovado e os materiais no armazém (19/10: as encomendas a fornecedor aprovadas e recebidas)", () => {
+    const avisos: string[] = [];
+    const S = seed(), A = acoes(S, (a) => avisos.push(`${a.msg} · ${a.sub ?? ""}`), (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
     preencher(d, [OBRA[0]]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("por aprovar");
@@ -128,10 +137,38 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
     expect(d.obra.plano!.estado).toBe("por aprovar"); // antes do pagamento não se aprova
     pagar(A, d);
     A.aprovarPlano(d.id);
+    // as encomendas a fornecedor por aprovar seguram o arranque (e dizem onde se aprovam)
+    expect(estados(S, d).go).toBe("espera");
+    expect(minhas(S, "operacoes").filter((x) => x.d.id === 1027)).toEqual([]);
+    A.arrancar(d.id);
+    expect(d.obra.plano!.estado).toBe("aprovado");
+    expect(avisos.at(-1)).toMatch(/^Ainda não dá para arrancar · Falta aprovar as encomendas a fornecedor PO-.* no Inventário \(Compras\)$/);
+    expect(proximo(d, S)).toMatchObject({ t: "À espera dos materiais", act: "abrirInv" });
+    // aprovadas (no portal do fornecedor), ainda por receber: continuam a segurar
+    expect(aprovarPos(REF)).toBe("");
+    A.arrancar(d.id);
+    expect(d.obra.plano!.estado).toBe("aprovado");
+    expect(avisos.at(-1)).toMatch(/Falta receber no armazém as encomendas PO-.* \(prevista a \d\d\/\d\d\)$/);
+    // recebidas no armazém: tudo reservado, arranca
+    expect(receberTudo(REF)).toBe("");
+    expect(resumoEcNegocio(lerInventario(), REF)!.pronta).toBe(true);
+    expect(faltaParaArrancar(d)).toEqual([]);
     expect(estados(S, d).go).toBe("agora");
     expect(minhas(S, "operacoes").filter((x) => x.d.id === 1027).map((x) => x.p.act)).toEqual(["arrancar"]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("em curso");
+  });
+
+  it("a encomenda eliminada no Inventário ou uma linha sem fornecedor também seguram o arranque", () => {
+    const { A, d } = preparar();
+    pagar(A, d);
+    executar((db) => { const l = db.ecs.find((e) => e.id === "EC-1027")!.lines.find((x) => x.sku === "OB-BANC")!; l.stockQty = 0; l.nosupQty = l.qty; });
+    expect(faltaParaArrancar(d)[0]).toBe("escolher o fornecedor de 1 material no Inventário");
+    expect(anularEcNoInventario(REF, "teste").ok).toBe(true);
+    expect(faltaParaArrancar(d)).toEqual(["uma encomenda de cliente válida: a EC-1027 foi eliminada no Inventário", "aprovar o plano"]);
+    // as obras antigas do exemplo (sem origem no Inventário) não ficam presas
+    const S2 = seed(), m = S2.deals.find((x) => x.id === 1022)!;
+    expect(faltaParaArrancar(m)).toEqual([]);
   });
 
   it("\"Abrir no Inventário\" a partir do negócio pede a encomenda dele", () => {
@@ -150,7 +187,15 @@ describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Invent�
   });
 });
 
+// estes exemplos foram escritos a 14/10/2026: o plano começa na segunda seguinte (19/10), com o Sérgio de férias a 21–23 out.
+// 19/10: o relógio fica nesse dia (só a data), senão o resultado mudava com o dia em que se correm.
+const relogio14 = () => {
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 9, 14, 10)); });
+  afterEach(() => { vi.useRealTimers(); });
+};
+
 describe("o plano nas Operações", () => {
+  relogio14();
   it("datas reais a partir do início (dias úteis), técnicos do ofício e o início mudado", () => {
     const { S, A, d } = preparar();
     const p = d.obra.plano!;
@@ -197,6 +242,7 @@ describe("o sinal", () => {
 });
 
 describe("férias em datas reais e a entrega antes do arranque", () => {
+  relogio14();
   it("o técnico de férias a 21–23 out entra em conflito pelas datas; a troca e o adiar resolvem", () => {
     const { A, d } = preparar();
     const p = d.obra.plano!;
@@ -212,14 +258,22 @@ describe("férias em datas reais e a entrega antes do arranque", () => {
     expect(conflitos(p)).toHaveLength(0);
     expect(rotuloDia(p, p.tasks[i].dia)).toBe("seg, 26 out"); // depois das férias
   });
-  it("a entrega no dia do arranque avisa; começar no dia útil a seguir resolve (encomendas a fornecedor que existam, V2 funcional)", () => {
+  it("a entrega no dia do arranque avisa; começar no dia útil a seguir resolve (19/10: as encomendas a fornecedor do Inventário)", () => {
+    esquecerInventario();
     const { A, d } = preparar();
     pagar(A, d);
-    d.obra.enc = { n: "EF 2026/90", estado: "encomendada", linhas: [], entrega: "seg, 19 out", entregaIso: "2026-10-19" };
-    A.inicioPlano(d.id, "2026-10-19");
+    // a data mais tarde das encomendas a fornecedor ainda por receber (a prometida no portal ou a prevista)
+    const tarde = posDe(REF).map((p) => p.portal.promised ?? p.due).sort().at(-1)!;
+    A.inicioPlano(d.id, tarde);
     const t = entregaTarde(d)!;
-    expect(isoDia(t.depois)).toBe("2026-10-20");
+    expect(isoDia(t.entrega)).toBe(tarde);
+    expect(t.pos.sort()).toEqual(posDe(REF).map((p) => p.id).sort());
+    expect(t.depois.getTime()).toBeGreaterThan(t.entrega.getTime());
     A.inicioPlano(d.id, isoDia(t.depois));
+    expect(entregaTarde(d)).toBeNull();
+    // recebidas, já não avisa
+    A.inicioPlano(d.id, tarde);
+    expect(receberTudo(REF)).toBe("");
     expect(entregaTarde(d)).toBeNull();
   });
 });

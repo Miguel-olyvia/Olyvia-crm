@@ -13,7 +13,7 @@ beforeEach(() => localStorage.setItem(CHAVE_VERSAO, "1"));
 afterEach(() => { cleanup(); localStorage.clear(); });
 
 const deal = (S: Estado, id: number) => S.deals.find((d) => d.id === id)!;
-const financeiro = (S: Estado, id: number) => render(<Montar S={S}>{(ctx) => <FinanceiroV2 {...ctx} d={deal(S, id)} />}</Montar>);
+const financeiro = (S: Estado, id: number) => { S.role = "financeiro"; return render(<Montar S={S}>{(ctx) => <FinanceiroV2 {...ctx} d={deal(S, id)} />}</Montar>); };
 const tranches = () => screen.getByRole("region", { name: "Tranches" });
 const registar = () => screen.getByRole("region", { name: "Registar fatura" });
 
@@ -91,7 +91,7 @@ describe("Financeiro V2 · validar pagamentos", () => {
 });
 
 describe("Financeiro V2 · ligado só na V2 e na V2 funcional", () => {
-  const docs = (S: Estado, id: number) => render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={deal(S, id)} />}</Montar>);
+  const docs = (S: Estado, id: number) => { S.role = "financeiro"; return render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={deal(S, id)} />}</Montar>); };
   it("V2 e V2 funcional: registar; Atual: emitir, como antes", () => {
     for (const [v, novo] of [["1", true], ["funcional", true], ["0", false]] as const) {
       localStorage.setItem(CHAVE_VERSAO, v);

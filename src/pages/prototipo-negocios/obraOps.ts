@@ -123,7 +123,7 @@ export const quandoEquip = (p: Plano, e: { dia: number; fim: number }) =>
   `${rotuloDia(p, e.dia)}${e.fim - e.dia > 1 ? ` a ${rotuloDia(p, e.fim - 1)}` : ""} · ${e.fim - e.dia} ${e.fim - e.dia === 1 ? "dia" : "dias"}`;
 
 /* ------------------------------------------------------------------ os materiais, por fase */
-export type EstadoMat = "na obra" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";
+export type EstadoMat = "na obra" | "na carrinha" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";
 export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string }
 /** A fase em que o material entra (pelo nome). */
 export function faseDoMaterial(n: string): number {
@@ -135,23 +135,16 @@ export function faseDoMaterial(n: string): number {
 }
 /** Os materiais da obra por fase. `inv`: o estado da encomenda no Inventário novo (16/10); sem ele, o das obras antigas do exemplo. */
 export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null): { fase: number; itens: Mat[] }[] {
-  const e = d.obra.enc;
   const linhas = d.obra.ec?.linhas.map((x) => ({ n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? d.obra.mats?.map((x) => ({ n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
   const itens: (Mat & { fase: number })[] = linhas.map((x) => {
-    const naEnc = e?.linhas.find((l) => l.n === x.n);
     let estado: EstadoMat = "reservado", quando: string | undefined, forn: string | undefined;
     const li = linhaDoResumo(inv, x.n);
     if (li) {
       const pr = li.pos.find((p) => p.prometida)?.prometida ?? null;
       forn = li.pos[0]?.forn;
       const porAprovar = li.pos.length > 0 && li.pos.every((x) => x.fase === "por aprovar");
-      estado = li.st === "served" ? "na obra" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (porAprovar ? "por encomendar" : pr ? "a chegar" : "encomendado") : "em falta";
+      estado = li.st === "served" ? "na obra" : li.aBordo ? "na carrinha" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (porAprovar ? "por encomendar" : pr ? "a chegar" : "encomendado") : "em falta";
       quando = estado === "a chegar" && pr ? `${pr.slice(8, 10)}/${pr.slice(5, 7)}` : undefined;
-    } else if (naEnc && e) {
-      forn = e.forn;
-      const chegou = (naEnc.recebido ?? 0) >= naEnc.q - 1e-9;
-      estado = e.estado === "recebida" || chegou ? "recebido" : e.estado === "por confirmar" ? "por encomendar" : e.entrega ? "a chegar" : "encomendado";
-      quando = estado === "a chegar" ? e.entrega : undefined;
     } else if (x.falta > 0) estado = d.obra.ec?.ref ? "por encomendar" : "em falta";
     return { n: x.n, q: x.q, un: x.un, estado, quando, forn, fase: faseDoMaterial(x.n) };
   });

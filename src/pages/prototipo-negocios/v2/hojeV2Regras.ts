@@ -225,8 +225,6 @@ export function categoriaDe(d: Negocio): CatV2 {
   if (d.fase === 4 && !d.fin.fatura) return "faturas";
   if (d.fin.fatura && !d.fin.pago) return "pagamentos";
   if (d.obra.plano?.estado === "por aprovar") return "planos";
-  if (d.obra.enc?.estado === "por confirmar") return "encomendas";
-  if (d.obra.enc?.estado === "encomendada") return "receber";
   if (d.obra.plano?.estado === "aprovado") return "arrancar";
   if (d.obra.plano?.estado === "em curso") return "obras";
   return "fazer";
@@ -318,7 +316,6 @@ export function alertasV2(S: Estado, r: Papel): AlertaV2[] {
     // Negócios não tem um filtro por fase que se possa ligar daqui (a memória da página é do Rafael/Miguel): só navega.
     { id: "prop", n: ab.filter((d) => d.fase === 3 && d.orc?.enviada && !d.orc.aceite).length, texto: "Propostas à espera do cliente", destino: "negocios", filtrado: false, papeis: ["direcao"] },
     { id: "conf", n: ab.filter((d) => d.obra.plano?.estado === "por aprovar" && conflitos(d.obra.plano).length > 0).length, texto: "Planos de obra com conflitos", destino: "operacoes", filtrado: false, papeis: ["direcao", "operacoes"] },
-    { id: "enc", n: ab.filter((d) => d.obra.enc?.estado === "por confirmar").length, texto: "Encomendas ao fornecedor por confirmar", destino: "inventario", filtrado: false, papeis: ["direcao"] },
   ];
   return todos.filter((a) => a.n > 0 && a.papeis.includes(r)).map(({ papeis: _p, ...a }) => a);
 }

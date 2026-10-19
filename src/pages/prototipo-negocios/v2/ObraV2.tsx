@@ -26,6 +26,9 @@ import { confirmarHorasEquip, custoEquipamentos, equipamentosObra, horasReais, h
 import { MIN_OBRAS, TOLERANCIA, comparacaoObra, podeUsarMediana, receitaComHoras, type ComparacaoReceita } from "./receitaReal";
 import { ViaturasObra } from "../frota/ViaturasObra";
 import { ProximoRececaoNegocio } from "../RececaoNegocio";
+import { useInventario } from "../inventario/loja";
+import { estadoLinhaNegocio, resumoEcNegocio } from "../inventario/ponteNegocios";
+import { faltaParaArrancar, textoMateriais } from "../preparacaoObra";
 
 const horasTxt = (h: number) => `${nfmt(h)} h`;
 
@@ -97,7 +100,9 @@ type Props = { d: Negocio; reg: RegObra; pode: boolean; mudar: (fn: (r: RegObra)
 
 function SecPlano({ ctx, d, reg, pode, mudar }: Props & { ctx: Ctx }) {
   const { A, go, run } = ctx;
-  const p = d.obra.plano!, C = conflitos(p), e = d.obra.enc, matsOk = !e || e.estado === "recebida";
+  // 19/10: o arranque espera pelos materiais garantidos no Inventário (lidos ao vivo)
+  const db = useInventario();
+  const p = d.obra.plano!, C = conflitos(p), F = faltaParaArrancar(d, db).filter((x) => !/plano/.test(x)), matsOk = !F.length;
   const falta = faltaAprovar(p, reg);
   let frase = "", botao: React.ReactNode = null;
   if (p.estado === "por aprovar") {
@@ -110,7 +115,7 @@ function SecPlano({ ctx, d, reg, pode, mudar }: Props & { ctx: Ctx }) {
       })}>Aprovar plano</Button>
     );
   } else if (p.estado === "aprovado") {
-    frase = matsOk ? "Plano aprovado e materiais garantidos. Pode arrancar." : "Plano aprovado. A obra só arranca com os materiais garantidos.";
+    frase = matsOk ? "Plano aprovado e materiais garantidos. Pode arrancar." : `Plano aprovado. Para arrancar, falta ${F.join(", ")}.`;
     botao = <Button size="lg" className={BOTAO} disabled={!pode || !matsOk} onClick={go(() => A.arrancar(d.id))}>Arrancar a obra</Button>;
   } else if (p.estado === "em curso") {
     frase = `Obra em curso, no dia ${p.dia + 1}.`;
@@ -524,21 +529,23 @@ function Desvio({ prev, real }: { prev: number; real: number }) {
 
 function SecMateriais({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, go } = ctx;
-  const e = d.obra.enc;
+  // o estado vivo da encomenda de cliente, no Inventário (as obras antigas do exemplo não têm lá encomenda)
+  const db = useInventario();
+  const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const linhas = r ? r.linhas.map((l) => ({ k: l.id, n: l.n, q: l.q, un: l.un, ...estadoLinhaNegocio(l) }))
+    : (d.obra.ec?.linhas ?? []).map((x) => ({ k: x.n, n: x.n, q: x.q, un: x.un, t: d.obra.ec?.ref ? "a preparar" : "na obra", ok: !d.obra.ec?.ref }));
   return (
     <Secao id="materiais" titulo="Materiais"
       extra={<Button variant="ghost" className={BOTAO} onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight aria-hidden="true" /></Button>}>
       <ProximoRececaoNegocio d={d} A={A} go={go} />
-      <p className="text-[15px]">{d.obra.ec?.ref ? `Encomenda de cliente ${d.obra.ec.n}, emitida ao validar o pagamento: o armazém trata no Inventário.` : !e ? "Tudo em stock e reservado." : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.` : `Encomenda ${e.n} ${e.estado}. O armazém trata no Inventário.`}</p>
-      {(d.obra.mats || []).length > 0 && (
+      <p className="text-[15px]">{textoMateriais(d, r)}</p>
+      {linhas.length > 0 && (
         <ul className="mt-3 divide-y divide-border">
-          {d.obra.mats!.map((x) => (
-            <li key={x.n} className="flex min-h-11 flex-wrap items-center justify-between gap-2 py-2 text-[15px]">
+          {linhas.map((x) => (
+            <li key={x.k} className="flex min-h-11 flex-wrap items-center justify-between gap-2 py-2 text-[15px]">
               <span>{x.n}</span>
               <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
-                {x.falta > 0
-                  ? <><AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />faltam {nfmt(x.falta)} de {nfmt(x.q)} {x.un}</>
-                  : <><Check className="h-4 w-4 text-success" aria-hidden="true" />{nfmt(x.q)} {x.un} reservados</>}
+                {x.ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />}{nfmt(x.q)} {x.un} · {x.t}
               </span>
             </li>
           ))}

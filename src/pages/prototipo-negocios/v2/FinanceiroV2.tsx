@@ -12,6 +12,7 @@ import type { Ctx } from "../pecas";
 import { DISPARO, dataPT, disparaObra, errosPagamento, errosRegisto, registarFatura, resumoFin, trancheDoDisparo, validarPagamento, valorTranche, type FaturaReg, type Tranche } from "./financeiro";
 import { faturasDe, guardarFaturas, hojeISO, totalComIva, tranchesDe } from "./estadoV2";
 import { BOTAO, CHIP, INPUT } from "./estilo";
+import { SEM_PERM, podeNeg } from "../permissoes";
 
 const CONTAS = FINANCEIRO[2].campos.find((c) => c.k === "conta")?.op ?? ["Banco A · conta à ordem", "Banco B · conta obras"];
 
@@ -46,6 +47,8 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
   const [erros, setErros] = useState<string[]>([]);
   const idRef = useId();
   const confirmar = () => {
+    // 19/10: só quem tem finance.validate_payment (o motor volta a verificar)
+    if (!podeNeg(S.role, "finance.validate_payment")) { setErros([SEM_PERM["finance.validate_payment"].sub]); return; }
     const p = { data, conta, ref };
     const e = errosPagamento(p);
     setErros(e);
@@ -65,12 +68,13 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
           ? `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: encomenda ${d.obra.ec.n} no Inventário; falta aprovar o plano.`
           : `Pagamento validado · recibo ${d.fin.recibo.n}. A encomenda de cliente não chegou ao Inventário: emita-a no negócio.`;
       } else {
-        const rc = "RC 2026/" + S.rc++;
+        const rc = A.reciboTranche(d.id, f.numero);
+        if (!rc) return;
         guardarFaturas(S, d.id, validarPagamento(fs, f.id, p, rc));
-        d.hist.unshift({ t: `Pagamento da ${f.numero} validado · ${rc} emitido`, q: "hoje", k: "a" });
         msg = `Pagamento validado · recibo ${rc}.`;
       }
     });
+    if (!msg) return;
     avisar(msg);
     fechar();
   };
@@ -97,7 +101,7 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
 }
 
 function FormRegistar({ ctx, d, fs, tranches, total, avisar }: { ctx: Ctx; d: Negocio; fs: FaturaReg[]; tranches: Tranche[]; total: number; avisar: (m: string) => void }) {
-  const { S, run } = ctx;
+  const { S, A, run } = ctx;
   const livres = tranches.filter((t) => !fs.some((f) => f.tranche === t.id));
   const [tranche, setTranche] = useState(livres[0]?.id ?? "");
   const [numero, setNumero] = useState("");
@@ -108,16 +112,19 @@ function FormRegistar({ ctx, d, fs, tranches, total, avisar }: { ctx: Ctx; d: Ne
   const idNum = useId(), idValor = useId(), idPdf = useId();
   const escolher = (id: string) => { setTranche(id); setValor(String(valorTranche(total, tranches, id))); };
   const registar = () => {
+    // 19/10: só quem tem finance.invoice (o motor volta a verificar)
+    if (!podeNeg(S.role, "finance.invoice")) { setErros([SEM_PERM["finance.invoice"].sub]); return; }
     const n = { numero, data, valor: Number(valor.replace(",", ".")), tranche, pdf: pdf || undefined };
     const e = errosRegisto(n, fs, tranches);
     setErros(e);
     if (e.length) return;
     const t = tranches.find((x) => x.id === tranche)!;
+    let ok = false;
     run(() => {
-      guardarFaturas(S, d.id, registarFatura(fs, n));
-      if (!d.fin.fatura) d.fin.fatura = { n: numero.trim(), q: dataPT(data).slice(0, 5) };
-      d.hist.unshift({ t: `Fatura ${numero.trim()} registada · ${t.nome} · emitida no programa certificado`, q: "hoje", k: "a" });
+      ok = A.registarFatura(d.id, numero, dataPT(data), t.nome);
+      if (ok) guardarFaturas(S, d.id, registarFatura(fs, n));
     });
+    if (!ok) return;
     avisar(`Fatura ${numero.trim()} registada (${t.nome}).`);
     const prox = livres.find((x) => x.id !== tranche);
     setNumero(""); setPdf(""); setTranche(prox?.id ?? ""); setValor(prox ? String(valorTranche(total, tranches, prox.id)) : "");
@@ -161,6 +168,8 @@ function FormRegistar({ ctx, d, fs, tranches, total, avisar }: { ctx: Ctx; d: Ne
 
 export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
   const { S, d, compacto } = ctx;
+  // 19/10: registar faturas e validar pagamentos é do Financeiro (ou da Direção); os outros papéis só leem
+  const podeValidar = podeNeg(S.role, "finance.validate_payment"), podeRegistar = podeNeg(S.role, "finance.invoice");
   const [aberta, setAberta] = useState<string | null>(null);
   const [aviso, setAviso] = useState("");
   const tranches = tranchesDe(d), total = totalComIva(S, d), fs = faturasDe(S, d);
@@ -200,11 +209,11 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
                       {disparo?.id === t.id && !f?.pagamento && !d.fin.recibo ? " · ao ser paga, a obra arranca" : ""}
                     </span>
                   </span>
-                  {f && !f.pagamento && aberta !== f.id && (
+                  {f && !f.pagamento && aberta !== f.id && podeValidar && (
                     <Button variant="outline" className={BOTAO} onClick={() => setAberta(f.id)}>Validar pagamento</Button>
                   )}
                 </div>
-                {f && !f.pagamento && aberta === f.id && (
+                {f && !f.pagamento && aberta === f.id && podeValidar && (
                   <FormPagamento ctx={ctx} d={d} f={f} fs={fs} tranches={tranches} fechar={() => setAberta(null)} avisar={setAviso} />
                 )}
               </li>
@@ -216,7 +225,14 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
         </p>
       </section>
 
-      {R.porFaturar.length > 0 && <FormRegistar key={fs.length} ctx={ctx} d={d} fs={fs} tranches={tranches} total={total} avisar={setAviso} />}
+      {(!podeValidar || !podeRegistar) && !R.completo && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] text-muted-foreground">
+          <Info className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+          Só o Financeiro ou a Direção registam faturas e validam pagamentos.
+          <button type="button" onClick={ctx.go(() => ctx.A.role("financeiro"))} className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">Mudar para Sandra</button>
+        </p>
+      )}
+      {R.porFaturar.length > 0 && podeRegistar && <FormRegistar key={fs.length} ctx={ctx} d={d} fs={fs} tranches={tranches} total={total} avisar={setAviso} />}
       {R.completo && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Todas as tranches faturadas e pagas.</p>}
 
       {!compacto && (

@@ -11,10 +11,12 @@ import { lerVersao } from "./versaoPrototipo";
 import { FinanceiroV2 } from "./v2/FinanceiroV2";
 import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
 import { resumoFin } from "./v2/financeiro";
+import { useInventario } from "./inventario/loja";
+import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
+import { textoMateriais } from "./preparacaoObra";
 
 /** A V2 e a V2 funcional registam faturas (com tranches); a Atual fica como era. */
 const ehV2 = () => lerVersao() !== "atual";
-
 function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto: string }) {
   return (
     <li className="flex gap-3 py-3">
@@ -67,7 +69,10 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
   const { S, A, go, d } = ctx;
   // V2: as tranches que faltam (a final, por exemplo) registam-se e validam-se aqui, já com a obra a andar
   const finV2 = ehV2() && !resumoFin(totalComIva(S, d), tranchesDe(d), faturasDe(S, d)).completo;
-  const pl = d.obra.plano!, e = d.obra.enc, R = d.obra.real, T = tot(d, S);
+  // os materiais lidos ao vivo do Inventário (16/10: a encomenda de cliente vive lá)
+  const db = useInventario();
+  const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const pl = d.obra.plano!, R = d.obra.real, T = tot(d, S);
   const horas = pl.tasks.reduce((a, t) => a + t.h, 0), nc = conflitos(pl).length;
   const estado = { "por aprovar": "O plano está à espera das Operações.", aprovado: "Plano aprovado. Falta arrancar.", "em curso": `Obra em curso: dia ${pl.dia + 1}.`, "concluída": "Obra concluída." }[pl.estado];
   return (
@@ -97,14 +102,24 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
           <h3 id="mat-t" className="text-base font-semibold">Materiais</h3>
           <Button variant="ghost" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </div>
-        <p className="mt-1 text-[15px]">{!e ? "Tudo em stock e reservado." : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.` : `Encomenda ${e.n} ${e.estado}.`}</p>
+        <p className="mt-1 text-[15px]">{textoMateriais(d, r)}</p>
         <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-          {(d.obra.mats || []).map((x) => (
+          {r ? r.linhas.map((l) => {
+            const st = estadoLinhaNegocio(l);
+            return (
+              <li key={l.id} className="flex min-h-12 items-center justify-between gap-3 py-2 text-[15px]">
+                <span>{l.n}</span>
+                <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
+                  {st.ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />}{nfmt(l.q)} {l.un} · {st.t}
+                </span>
+              </li>
+            );
+          }) : (d.obra.ec?.linhas || []).map((x) => (
             <li key={x.n} className="flex min-h-12 items-center justify-between gap-3 py-2 text-[15px]">
               <span>{x.n}</span>
               <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
-                {x.falta > 0
-                  ? <><AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />faltam {nfmt(x.falta)} {x.un}</>
+                {d.obra.ec?.ref
+                  ? <><Circle className="h-3 w-3" aria-hidden="true" />{nfmt(x.q)} {x.un}</>
                   : <><Check className="h-4 w-4 text-success" aria-hidden="true" />{nfmt(x.q)} {x.un}</>}
               </span>
             </li>

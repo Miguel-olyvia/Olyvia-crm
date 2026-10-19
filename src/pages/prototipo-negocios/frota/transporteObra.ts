@@ -9,7 +9,7 @@ import { FASES_OBRA } from "../fasesObra";
 import { faseDoMaterial } from "../obraOps";
 import { nomeProd, produto } from "../inventario/base";
 import { ecLinhaInfo, sairLinha } from "../inventario/ec";
-import { ecDoNegocio, resumoEcNegocio } from "../inventario/ponteNegocios";
+import { docFase, ecDoNegocio, resumoEcNegocio } from "../inventario/ponteNegocios";
 import { transferir } from "../inventario/stock";
 import { falhar as falharInv } from "../inventario/base";
 import type { Ec, EcLinha, Inventario } from "../inventario/tipos";
@@ -20,8 +20,8 @@ export type EstadoFase = "por carregar" | "na carrinha" | "entregue";
 export interface LinhaFase { lineId: string; sku: string; n: string; qty: number; un: string; falta: number }
 export interface FaseTransporte { fase: number; nome: string; linhas: LinhaFase[]; estado: EstadoFase; carrinha: string | null }
 
-/** A etiqueta dos movimentos de uma fase (doc dos movimentos no Inventário): "EC-1027 · fase 3". */
-export const docFase = (ec: string, fase: number): string => `${ec} · fase ${fase}`;
+/** A etiqueta dos movimentos de uma fase (doc dos movimentos no Inventário): "EC-1027 · fase 3". Mora na ponte (a ponte lê-a, sem ciclo). */
+export { docFase };
 
 /** As ligações de uma viatura ou de uma obra. */
 export const ligacoesViatura = (F: Frota, vid: string) => (F.ligObras ?? []).filter((x) => x.vid === vid);
@@ -58,12 +58,8 @@ export function faltaParaCarregar(inv: Inventario, o: Pick<ObraRef, "ec" | "esta
   const F: string[] = [];
   const r = o.ec ? resumoEcNegocio(inv, o.ec) : null, e = ecDaObra(inv, o);
   if (!r || r.eliminada || !e) F.push("a encomenda de cliente no Inventário (emite-se ao validar o pagamento)");
-  else {
-    // cada linha: já saiu, está pronta a sair no armazém, ou vai numa fase já carregada
-    const aBordo = new Set(fasesTransporte(inv, o).filter((f) => f.estado !== "por carregar").flatMap((f) => f.linhas.map((l) => l.lineId)));
-    const ok = e.lines.filter((l) => l.sku && !l.voided).every((l) => l.served >= l.qty || aBordo.has(l.id) || ecLinhaInfo(inv, e, l).ready >= l.qty - l.served);
-    if (!ok) F.push("receber no armazém todos os materiais da encomenda de cliente");
-  }
+  // cada linha: já saiu, está pronta a sair no armazém, ou vai numa fase já carregada (o mesmo critério do arranque da obra: ponteNegocios.ts)
+  else if (!r.pronta) F.push("receber no armazém todos os materiais da encomenda de cliente");
   if (o.estado === "por aprovar") F.push("aprovar o plano da obra");
   return F;
 }

@@ -92,6 +92,8 @@ function lerFoto(f: File): Promise<string> {
 /* ================================================================== a lista de obras */
 export function ListaObras(ctx: Ctx) {
   const { S, A, go } = ctx;
+  // os materiais vivem no Inventário: a lista redesenha quando lá muda alguma coisa
+  const db = useInventario();
   // 16/10: a obra aparece com o contrato assinado (o plano, por aprovar depois do pagamento)
   const obras = aberto(S).filter((x) => x.obra.plano && x.fase >= 4);
   const grupos: [string, Negocio[]][] = [
@@ -111,16 +113,19 @@ export function ListaObras(ctx: Ctx) {
             {L.map((o) => {
               const p = o.obra.plano!, fim = fimDe(p.tasks), eq = equipaDaObra(p), pv = porValidar(p).length;
               const corr = p.tasks.filter((t) => estadoDe(t) === "corrigir").length, nc = conflitos(p).length;
-              const e = o.obra.enc, faltaMat = !!e && e.estado !== "recebida";
+              const r = o.obra.ec?.ref ? resumoEcNegocio(db, o.obra.ec.ref) : null, faltaMat = !!r && !r.pronta;
+              // a data mais tarde das encomendas a fornecedor ainda por receber
+              const prev = r?.pos.filter((x) => x.fase !== "recebida" && x.fase !== "cancelada").map((x) => x.prevista).filter(Boolean).sort().at(-1);
               const tHoje = p.estado === "em curso" ? p.tasks.find((t) => t.dia <= p.dia && p.dia < t.dia + t.dur) : null;
               const fase = tHoje?.fase ?? p.tasks[0]?.fase;
               const pr = progresso(p);
+              const F = faltaParaArrancar(o, db);
               const marco = p.estado === "por aprovar" ? "Aprovar o plano"
-                : p.estado === "aprovado" ? (faltaParaArrancar(o).length ? `Para arrancar falta ${faltaParaArrancar(o).filter((f) => !/plano/.test(f)).join(", ")}` : `Arrancar a ${rotuloDia(p, 0)}`)
+                : p.estado === "aprovado" ? (F.length ? `Para arrancar falta ${F.filter((f) => !/plano/.test(f)).join(", ")}` : `Arrancar a ${rotuloDia(p, 0)}`)
                 : p.estado === "em curso" ? `Dia ${p.dia + 1} de ${fim} · acaba a ${rotuloDia(p, fim - 1)}` : "Obra concluída";
               const alertas: [ReactNode, string][] = [
                 ...(nc ? [[<AlertTriangle key="c" className="h-4 w-4 text-warning" aria-hidden="true" />, `${nc} conflito de férias`] as [ReactNode, string]] : []),
-                ...(faltaMat && p.estado !== "concluída" ? [[<Truck key="m" className="h-4 w-4 text-warning" aria-hidden="true" />, e!.entrega ? `material chega a ${e!.entrega}` : "material por chegar"] as [ReactNode, string]] : []),
+                ...(faltaMat && p.estado !== "concluída" ? [[<Truck key="m" className="h-4 w-4 text-warning" aria-hidden="true" />, prev ? `material previsto a ${prev.slice(8, 10)}/${prev.slice(5, 7)}` : "material por chegar"] as [ReactNode, string]] : []),
                 ...(pv ? [[<ClipboardCheck key="v" className="h-4 w-4 text-primary" aria-hidden="true" />, `${pv} por validar`] as [ReactNode, string]] : []),
                 ...(corr ? [[<FileWarning key="r" className="h-4 w-4 text-destructive" aria-hidden="true" />, `${corr} a corrigir`] as [ReactNode, string]] : []),
               ];
@@ -169,13 +174,14 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go } = ctx;
   const p = d.obra.plano!, C = conflitos(p), pode = S.role === "operacoes", direcao = S.role === "direcao";
   const novo = p.origem === "orcamento";
-  const e = d.obra.enc;
+  // 19/10: os materiais lidos ao vivo do Inventário (o arranque espera por eles)
+  const db = useInventario();
+  const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   const fim = fimDe(p.tasks), ultimo = fim - 1;
   const horas = p.tasks.reduce((a, t) => a + t.h, 0);
   const PV = porValidar(p);
-  const F = faltaParaArrancar(d).filter((f) => !/plano/.test(f));
-  void e;
-  const tarde = entregaTarde(d);
+  const F = faltaParaArrancar(d, db).filter((f) => !/plano/.test(f));
+  const tarde = entregaTarde(d, db);
   const muda = pode && (p.estado === "por aprovar" || p.estado === "aprovado");
   const [aberta, setAberta] = useState<number | null>(null);
   const irPara = (s: Seccao) => document.getElementById(`obra-${s}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -232,13 +238,13 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {tarde && (
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-              <span>Os materiais chegam a {dataCurta(tarde.entrega)} e a obra começa a {dataCurta(tarde.inicio)}. Sem os materiais, a equipa fica parada.</span></p>
+              <span>Os materiais ({tarde.pos.join(", ")}) chegam a {dataCurta(tarde.entrega)} e a obra começa a {dataCurta(tarde.inicio)}. Sem os materiais, a equipa fica parada.</span></p>
             {pode ? <Button variant="outline" className="min-h-11 shrink-0" onClick={go(() => A.inicioPlano(d.id, isoDia(tarde.depois)))}>Começar a {dataCurta(tarde.depois)}</Button> : <Mudar ctx={ctx} papel="operacoes" />}
           </div>
         )}
         {p.estado !== "em curso" && p.estado !== "concluída" && (
           <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[15px]" aria-label="Condições para arrancar">
-            {([["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Plano aprovado", p.estado !== "por aprovar"]] as [string, boolean][]).map(([t, ok]) => (
+            {([["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", !!r?.pronta || (!!d.obra.ec && !d.obra.ec.ref)], ["Plano aprovado", p.estado !== "por aprovar"]] as [string, boolean][]).map(([t, ok]) => (
               <li key={t} className={cn("inline-flex items-center gap-1.5", !ok && "text-muted-foreground")}>
                 {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <Circle className="h-4 w-4" aria-hidden="true" />}{t}<span className="sr-only">{ok ? " (feito)" : " (por fazer)"}</span>
               </li>
@@ -729,23 +735,22 @@ function EquipamentosObra({ d }: { d: Negocio }) {
 /* ------------------------------------------------------------------ os materiais por fase */
 const TOM_MAT: Record<EstadoMat, string> = {
   reservado: "bg-success/15", recebido: "bg-success/15", "a chegar": "bg-primary/10 text-primary", encomendado: "bg-primary/10 text-primary",
-  "por encomendar": "bg-warning/15", "em falta": "bg-destructive/10 text-destructive", "na obra": "bg-success/15",
+  "por encomendar": "bg-warning/15", "em falta": "bg-destructive/10 text-destructive", "na obra": "bg-success/15", "na carrinha": "bg-success/15",
 };
+/** "Eliminada…" → "eliminada…": só a primeira letra (os números das encomendas ficam como são). */
+const minuscula = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, go } = ctx;
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
-  const G = materiaisPorFase(d, inv), e = d.obra.enc;
+  const G = materiaisPorFase(d, inv);
   return (
     <section id="obra-mat" aria-labelledby="obra-mat-t" className="mt-10 scroll-mt-16">
       <h2 id="obra-mat-t" className={H2}>Materiais</h2>
       <p className="mt-1 text-[15px]">
-        {!d.obra.ec && !d.fin.pago ? "A encomenda de cliente emite-se quando o pagamento for validado."
-          : d.obra.ec?.ref ? (inv ? `Encomenda de cliente ${inv.id} no Inventário: ${textoResumoEc(inv).toLowerCase()}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`)
-          : !e ? "Tudo em stock e reservado para a obra."
-          : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.`
-          : e.estado === "por confirmar" ? `Encomenda ${e.n} a ${e.forn ?? "fornecedor"}, à espera da validação do Financeiro.`
-          : `Encomenda ${e.n} enviada a ${e.forn ?? "fornecedor"}${e.entrega ? `; chega a ${e.entrega}` : ""}. O Armazém dá entrada quando chegar.`}
+        {!d.obra.ec ? (d.fin.pago ? "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio." : "A encomenda de cliente emite-se quando o pagamento for validado.")
+          : d.obra.ec.ref ? (inv ? `Encomenda de cliente ${inv.id} no Inventário: ${minuscula(textoResumoEc(inv))}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`)
+          : "Obra do exemplo: os materiais já estão na obra."}
       </p>
       {G.length > 0 && (
         <div className="mt-3 space-y-4">

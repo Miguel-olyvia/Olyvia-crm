@@ -42,8 +42,9 @@ import { OperacoesV2 } from "./v2/OperacoesV2";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
-import { lerPedidoEcInv, lerPedidoRececaoInv, subscrever as subscreverInv, tirarPedidoEcInv, tirarPedidoRececaoInv } from "./inventario/loja";
-import { sincronizarEcsNegocios } from "./inventario/ponteNegocios";
+import { lerInventario, lerPedidoEcInv, lerPedidoRececaoInv, subscrever as subscreverInv, tirarPedidoEcInv, tirarPedidoRececaoInv, useInventario } from "./inventario/loja";
+import { ecsEliminadasDeNegocios, sincronizarEcsNegocios } from "./inventario/ponteNegocios";
+import { faltaParaArrancar } from "./preparacaoObra";
 import PerfilSimulado from "./inventario/PerfilSimulado";
 import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
 import { esquecerFrota, type AbaFrota } from "./frota/loja";
@@ -266,11 +267,21 @@ export default function PrototipoNegocios() {
     setInvAba(lerPedidoEcInv() ? "ec" : lerPedidoRececaoInv() ? "guia" : "po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
   }, [comInvFrota, S.view, run, A]);
   // 16/10: o Inventário novo vive em memória; ao recarregar (ou ao repor os dados dele) volta a emitir as encomendas dos negócios pagos que lá faltam
+  // 19/10: e uma encomenda de cliente eliminada lá anula o negócio dela (perdido, com o motivo). O motor marca primeiro o negócio que ele próprio
+  // anula (anularContrato), por isso aqui só chegam as eliminadas no Inventário; sem negócios com encomenda lá, nem se lê a base.
+  const refA = useRef(A);
+  refA.current = A;
   useEffect(() => {
-    const sinc = (): void => { sincronizarEcsNegocios(ref.current.deals); };
+    const sinc = (): void => {
+      const deals = ref.current.deals;
+      sincronizarEcsNegocios(deals);
+      if (!deals.some((d) => !d.perdido && d.obra.ec?.ref)) return;
+      const L = ecsEliminadasDeNegocios(deals, lerInventario());
+      if (L.length) run(() => L.forEach((x) => refA.current.ecEliminadaNoInventario(x.id, x.motivo)));
+    };
     sinc();
     return subscreverInv(sinc);
-  }, []);
+  }, [run]);
   // Outro módulo pediu para abrir a Frota (Definições › Agenda, a página da obra): abre-a (a viatura abre-se lá dentro).
   // "Abrir na Frota" só aparece noutros módulos quando esta moldura a consegue abrir (a mesma condição do menu); o pedido trata-se logo,
   // e a viatura passa à Frota como propriedade, para um pedido antigo nunca ser consumido mais tarde.
@@ -567,7 +578,7 @@ function Negocios({ S, A, go, run, q }: Ctx) {
   return (
     <>
       <div className="row">
-        <div><h1 className="h1">Negócios</h1><div className="sub">{aberto(S).length} abertos · {eur(totalProp)} € em fase Negócio</div></div>
+        <div><h1 className="h1">Negócios</h1><div className="sub">{aberto(S).length} abertos · {eur(totalProp)} € s/ IVA em fase Negócio</div></div>
         <Btn onClick={go(() => A.novo())}>+ Novo negócio</Btn>
       </div>
       <div className="chips">{chip("meus", "Os meus")}{chip("todos", "Todos")}{chip("wc", "Casa de banho")}{chip("coz", "Cozinha")}{chip("atraso", "Com atraso")}</div>
@@ -582,7 +593,7 @@ function Negocios({ S, A, go, run, q }: Ctx) {
               {nv}
               {cards.map((d) => {
                 const p = proximo(d, S);
-                const val = d.orc ? ` · ${eur(tot(d, S).pf)} €` : "";
+                const val = d.orc ? ` · ${eur(tot(d, S).pf)} € s/ IVA` : "";
                 const vd = d.orc && d.orc.vendaDireta ? " · venda direta" : "";
                 const cls = d.atraso && d.fase === 0 ? "late" : p.wait ? "wait" : "";
                 return (
@@ -628,11 +639,14 @@ function NovoCartao({ S, A, run }: Pick<Ctx, "S" | "A" | "run">) {
 
 /* ------------------------------------------------------------------ Operações */
 function Operacoes({ S, A, go }: Ctx) {
-  const obras = aberto(S).filter((d) => d.fase === 5);
+  // os materiais vivem no Inventário: redesenha quando lá muda alguma coisa
+  const db = useInventario();
+  // como em ListaObras (ObraOperacoes.tsx): a obra aparece com o contrato assinado, com o plano por aprovar
+  const obras = aberto(S).filter((x) => x.obra.plano && x.fase >= 4);
   const d = S.op ? S.deals.find((x) => x.id === S.op) : null;
   if (d && d.obra.plano) {
     const p = d.obra.plano, C = conflitos(p), nd = Math.max(5, ...p.tasks.map((t) => t.dia + t.dur));
-    const e = d.obra.enc, matsOk = !e || e.estado === "recebida";
+    const F = faltaParaArrancar(d, db).filter((x) => !/plano/.test(x)), matsOk = !F.length;
     let acao: ReactNode = null;
     if (p.estado === "por aprovar") acao = <Btn cls={C.length ? "sec" : ""} onClick={go(() => A.aprovarPlano(d.id))}>Aprovar plano</Btn>;
     else if (p.estado === "aprovado") acao = <Btn cls={matsOk ? "" : "sec"} onClick={go(() => A.arrancar(d.id))}>Arrancar obra</Btn>;
@@ -702,7 +716,7 @@ function Operacoes({ S, A, go }: Ctx) {
                 </div>
               );
             })}
-            <span className="sub">Materiais: {!e ? "tudo em stock, reservado" : e.estado === "recebida" ? "encomenda recebida, tudo reservado ✓" : e.n + " " + e.estado + " · o armazém trata no Inventário"}</span>
+            <span className="sub">Materiais: {matsOk ? "prontos no armazém" : "falta " + F.join(", ")}</span>
             {!matsOk && p.estado === "aprovado" && <span className="err">A obra só arranca com os materiais garantidos.</span>}
           </div>
         </div>
@@ -711,7 +725,7 @@ function Operacoes({ S, A, go }: Ctx) {
   }
   return (
     <>
-      <div><h1 className="h1">Operações</h1><div className="sub">As obras chegam aqui sozinhas quando o Financeiro emite o recibo.</div></div>
+      <div><h1 className="h1">Operações</h1><div className="sub">As obras chegam aqui com o contrato assinado (ou a venda direta aceite), com o plano do orçamento por aprovar depois do pagamento.</div></div>
       <div className="tw"><table>
         <thead><tr><th>Obra</th><th>Plano</th><th>Conflitos</th><th className="n">Horas previstas</th></tr></thead>
         <tbody>
@@ -725,7 +739,7 @@ function Operacoes({ S, A, go }: Ctx) {
                 <td className="n">{nfmt(p.tasks.reduce((a, t) => a + t.h, 0))} h</td>
               </tr>
             );
-          }) : <tr><td colSpan={4} className="empty">Sem obras. Valide um pagamento no Financeiro para gerar uma.</td></tr>}
+          }) : <tr><td colSpan={4} className="empty">Sem obras. Aparecem quando o cliente assina o contrato.</td></tr>}
         </tbody>
       </table></div>
     </>
@@ -739,19 +753,13 @@ const NOMES_STOCK: Record<string, string> = {
 };
 function Inventario({ S, A, go }: Ctx) {
   const obras = aberto(S).filter((d) => d.fase === 5 && d.obra.mats);
-  const pode = S.role === "armazem";
-  const mudar = <button className="link" onClick={go(() => A.role("armazem"))}>Mudar para Armazém</button>;
   return (
     <>
-      <div><h1 className="h1">Inventário · materiais por obra</h1><div className="sub">A lista vem do orçamento de cada obra. Aparece aqui quando o Financeiro emite o recibo.</div></div>
+      <div><h1 className="h1">Inventário · materiais por obra</h1><div className="sub">A lista vem do orçamento de cada obra. Aparece aqui quando o Financeiro valida o pagamento (a encomenda de cliente vai para o Inventário).</div></div>
       {obras.length ? obras.map((d) => {
-        const e = d.obra.enc;
-        let act: ReactNode = null;
-        if (e && e.estado === "por confirmar") act = pode ? <Btn onClick={go(() => A.confirmarEnc(d.id))}>Confirmar encomenda</Btn> : mudar;
-        if (e && e.estado === "encomendada") act = pode ? <Btn onClick={go(() => A.receberEnc(d.id))}>Marcar como recebida (simular)</Btn> : mudar;
         return (
           <div className="card" key={d.id}>
-            <h3>{d.nome} · {d.servico} <span>{e ? e.n + " · " + e.estado : "tudo em stock"}</span></h3>
+            <h3>{d.nome} · {d.servico} <span>{d.obra.ec ? d.obra.ec.n : "sem encomenda"}</span></h3>
             <div className="tw"><table style={{ minWidth: 520 }}>
               <thead><tr><th>Material</th><th className="n">Precisa</th><th className="n">Reservado</th><th>Estado</th></tr></thead>
               <tbody>
@@ -763,16 +771,8 @@ function Inventario({ S, A, go }: Ctx) {
                 ))}
               </tbody>
             </table></div>
-            {e && e.estado !== "recebida" && (
-              <div className="next">
-                <div>
-                  <small>Encomenda ao fornecedor</small>
-                  <b>{e.n} · {e.forn} · {e.linhas.length} linha(s)</b>
-                  <span className="sub">{e.linhas.map((l) => nfmt(l.q) + " " + l.un + " " + l.n.toLowerCase()).join(" · ")} · entrega pedida até 12/10</span>
-                </div>
-                {act}
-              </div>
-            )}
+            {/* as encomendas a fornecedor do que falta aprovam-se e recebem-se no Inventário (já não há encomenda no motor) */}
+            {d.obra.ec?.ref && <Btn cls="sec sm" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário</Btn>}
           </div>
         );
       }) : <p className="empty">Ainda não há obras com materiais. Valide um pagamento no Financeiro.</p>}

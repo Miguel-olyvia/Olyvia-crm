@@ -125,7 +125,7 @@ function dealDeExemplo(base: Negocio, ex: ExemploNegocio): Negocio {
   return {
     ...structuredClone(base), id: ex.id, linha: ex.linhas[0] ?? base.linha, servico: ex.titulo, quando: ex.quando, atraso: false, valida: null,
     fase: ganho ? 4 : 3, perdido: ex.perdido !== undefined, orc, hist: [],
-    fin: { fatura: null, pago: false, recibo: null }, obra: { plano: null, enc: null, mats: null, real: null, aprendido: false },
+    fin: { fatura: null, pago: false, recibo: null }, obra: { plano: null, mats: null, real: null, aprendido: false },
   };
 }
 

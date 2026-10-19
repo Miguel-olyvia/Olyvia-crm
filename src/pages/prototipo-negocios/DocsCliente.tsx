@@ -24,15 +24,9 @@ const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozi
 
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
 export { IVA_MAT, IVA_MO } from "./motor";
-import { IVA_MAT, IVA_MO } from "./motor";
-export function totais(d: Negocio, S: Estado) {
-  if (!d.orc) return { mo: 0, mat: 0, ivaMo: 0, ivaMat: 0, base: 0, iva: 0, total: 0 };
-  const k = 1 - (d.orc.desconto || 0) / 100; // o desconto reparte-se pelas duas partes
-  let mo = 0, mat = 0;
-  for (const l of d.orc.linhas) { const p = linhaCalc(l, S).preco * k; if (l.t === "mat") mat += p; else mo += p; }
-  const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
-  return { mo, mat, ivaMo, ivaMat, base: mo + mat, iva: ivaMo + ivaMat, total: mo + mat + ivaMo + ivaMat };
-}
+import { IVA_MAT, IVA_MO, totaisIva } from "./motor";
+/** Os totais com IVA (19/10: a fonte única está no motor, totaisIva; o sinal do Financeiro usa a mesma conta). */
+export const totais = totaisIva;
 /** As linhas de IVA de um valor (o total ou uma tranche), na proporção do orçamento. */
 function linhasIva(T: ReturnType<typeof totais>, parte = 1) {
   return [

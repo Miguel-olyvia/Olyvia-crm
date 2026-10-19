@@ -12,6 +12,8 @@ import { esquecerFrota, executar as executarFrota, lerFrota } from "./loja";
 import { obrasDoEstado } from "./pontes";
 import { carregarFase, desligarObra, entregarFase, fasesTransporte, faltaParaCarregar, ligacoesObra, ligarObra } from "./transporteObra";
 import { ViaturasObra } from "./ViaturasObra";
+import { resumoEcNegocio, textoResumoEc } from "../inventario/ponteNegocios";
+import { faltaParaArrancar } from "../preparacaoObra";
 
 const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
   for (let i = 0; i < 5; i++) {
@@ -23,7 +25,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 /** 1027 (Tiago Almeida) pago: a EC está no Inventário, com móveis a encomendar ao fornecedor; o plano por aprovar. */
 function obraPaga() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
-  preencher(d, FINANCEIRO); A.emitir(d.id); A.validar(d.id);
+  preencher(d, FINANCEIRO); S.role = "financeiro"; A.emitir(d.id); A.validar(d.id);
   const o = () => obrasDoEstado(S).find((x) => x.id === 1027)!;
   return { S, A, d, o };
 }
@@ -58,7 +60,7 @@ describe("viatura ligada a uma obra e transporte por fases", () => {
   });
 
   it("obra pronta: carregar move armazém → carrinha; entregar move carrinha → obra; desligar não perde stock", () => {
-    const { A, o } = obraPaga();
+    const { A, d, o } = obraPaga();
     const v = carrinha();
     executarFrota((F) => ligarObra(F, v.id, 1027));
     receberTudo();
@@ -74,6 +76,12 @@ describe("viatura ligada a uma obra e transporte por fases", () => {
     expect(fasesTransporte(lerInventario(), o())[0].estado).toBe("na carrinha");
     // a carregar a fase seguinte, a primeira (já a bordo) não conta como falta
     expect(faltaParaCarregar(lerInventario(), o())).toEqual([]);
+    // 19/10: o mesmo critério no arranque da obra: o material a bordo conta como garantido
+    const r = resumoEcNegocio(lerInventario(), "CT 2026/1027")!;
+    expect(r.pronta).toBe(true);
+    expect(r.tot.aBordo).toBeGreaterThan(0);
+    expect(textoResumoEc(r)).toMatch(/na carrinha/);
+    expect(faltaParaArrancar(d, lerInventario())).toEqual([]);
     // com material da obra na carrinha não se desliga (não fica stock perdido)
     const des = executarFrota((F) => desligarObra(F, lerInventario(), v.id, o()));
     expect(des.ok).toBe(false);

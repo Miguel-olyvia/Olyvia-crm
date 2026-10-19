@@ -5,6 +5,7 @@ import { useCtxInv } from "./ctxInv";
 import { Confirmar, Dlg } from "./DialogosInv";
 import { EC_LINHA_ESTADOS, ecLinhaInfo, eliminarEc, origemTexto } from "./ec";
 import { desfazerSaida } from "./ecAcoes";
+import { ehRefNegocio } from "./ponteNegocios";
 import { Nota, Pri, Sec } from "./pecasInv";
 import type { Ec, EcLinha } from "./tipos";
 
@@ -14,10 +15,13 @@ export function EcEliminar({ id, aoFechar }: { id: string; aoFechar: () => void 
   const e = ecPorId(db, id);
   if (!e) return null;
   const ct = e.origin.k === "CT";
+  // 19/10: a encomenda de um negócio do protótipo: o negócio anula-se sozinho (ecsEliminadasDeNegocios → motor: ecEliminadaNoInventario)
+  const neg = ehRefNegocio(e.origin.ref) ? e.origin.ref!.split("/")[1] : null;
   return (
     <Confirmar aberto aoFechar={aoFechar} titulo={ct ? `Anular contrato ${e.origin.ref}` : `Eliminar ${id}`} ok={ct ? "Anular contrato" : "Eliminar encomenda"} perigo motivo="Motivo"
       texto={<>
         <p>{ct ? "Simula a anulação do contrato: " : ""}Estorna as saídas já feitas (entradas no livro), liberta as reservas, anula o resto das encomendas a fornecedor ligadas{e.origin.k === "VD" ? ` e cancela a venda direta ${e.origin.ref}` : ""}.</p>
+        {neg && <Nota>Vem do negócio #{neg}: o negócio fica anulado (perdido), com este motivo.</Nota>}
         <Nota tom="warn">Esta ação fica registada e não apaga movimentos.</Nota>
       </>}
       aoConfirmar={(m) => agir((d) => eliminarEc(d, ecPorId(d, id) as Ec, m, { contrato: ct }))} />

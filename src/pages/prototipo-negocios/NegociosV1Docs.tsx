@@ -31,7 +31,7 @@ export function NegociosV1Docs({ S, A, go, q, setQ }: Ctx) {
         <button type="button" onClick={go(() => { irParaLista(); A.abrir(d.id); })}
           className="group block w-full rounded-xl border border-border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]">
           <span className="block text-base font-semibold text-foreground">{d.nome}</span>
-          <span className="mt-0.5 block text-sm text-muted-foreground">{d.servico}{loc ? " · " + loc : ""}{d.orc ? ` · ${eur(tot(d, S).pf)} €` : ""}</span>
+          <span className="mt-0.5 block text-sm text-muted-foreground">{d.servico}{loc ? " · " + loc : ""}{d.orc ? ` · ${eur(tot(d, S).pf)} € s/ IVA` : ""}</span>
           <span className={cn("mt-2 block text-sm font-medium", p.wait || p.done ? "text-muted-foreground" : "text-primary")}>
             {p.t}{!p.wait && !p.done && <ArrowRight className="ml-1 inline h-3.5 w-3.5 align-[-2px] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />}
           </span>

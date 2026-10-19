@@ -53,7 +53,7 @@ export function HojeSimples({ S, A, go }: Ctx) {
       </button>
       {r === "direcao" && (
         <p className="mt-2 text-[15px] text-muted-foreground">
-          {ab.length} negócios abertos · {eur(emNeg.reduce((a, d) => a + tot(d, S).pf, 0))} € em proposta · margem média {pct(emNeg.length ? emNeg.reduce((a, d) => a + tot(d, S).m, 0) / emNeg.length : 0)}
+          {ab.length} negócios abertos · {eur(emNeg.reduce((a, d) => a + tot(d, S).pf, 0))} € s/ IVA em proposta · margem média {pct(emNeg.length ? emNeg.reduce((a, d) => a + tot(d, S).m, 0) / emNeg.length : 0)}
         </p>
       )}
 

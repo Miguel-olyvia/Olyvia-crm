@@ -16,8 +16,16 @@ describe("tranches do plano de pagamento", () => {
   it("30% + 40% + 30% dá Adiantamento, A meio e Final", () => {
     expect(tranchesDoPlano("30% + 40% + 30%").map((t) => t.nome)).toEqual(["Adiantamento 30%", "A meio 40%", "Final 30%"]);
   });
-  it("100% na adjudicação, vazio ou desconhecido: uma só tranche", () => {
-    for (const p of ["100% na adjudicação", "", undefined, "à vista"]) expect(tranchesDoPlano(p)).toEqual([{ id: "unica", nome: "Única 100%", pct: 100 }]);
+  it("100% na adjudicação: uma só tranche", () => {
+    expect(tranchesDoPlano("100% na adjudicação")).toEqual([{ id: "unica", nome: "Única 100%", pct: 100 }]);
+  });
+  it("19/10: vazio ou desconhecido dá 50% + 50% no fim, como a proposta e o portal (prestacoes)", () => {
+    for (const p of ["", undefined, "à vista"]) expect(tranchesDoPlano(p)).toEqual(T50);
+  });
+  it("19/10: \"Por fases\" usa as prestações guardadas, com o nome da fase nas do meio; sem elas, 50% + 50%", () => {
+    const fases = [{ l: "Na adjudicação", p: 0.3, fase: 0 as const }, { l: "No fim da fase 2 (canalização)", p: 0.45, fase: 2 as const }, { l: "No fim da obra", p: 0.25, fase: "fim" as const }];
+    expect(tranchesDoPlano("Por fases", fases).map((t) => [t.nome, t.pct])).toEqual([["Adiantamento 30%", 30], ["Fim da fase 2 (canalização) 45%", 45], ["Final 25%", 25]]);
+    expect(tranchesDoPlano("Por fases")).toEqual(T50);
   });
   it("os valores das tranches somam o total ao cêntimo (a última leva o resto)", () => {
     const T = tranchesDoPlano("30% + 40% + 30%"), total = 1000.01;

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, SLOTS, visitaFeita, visitas,
-  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
+  alertas, bloqueado, camposMedida, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
@@ -27,6 +27,9 @@ import { DocumentosSimples, ObraSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
+import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
+import { useInventario } from "./inventario/loja";
+import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -39,6 +42,7 @@ export function PaginaNegocio(ctx: Ctx) {
   const T = o ? tot(d, S) : null;
   const cli = S.clientes.find((c) => c.deal === d.id);
   const [abertaFeita, setAbertaFeita] = useState<number | null>(null);
+  const [anular, setAnular] = useState(false);
   const atualRef = useRef<HTMLDivElement>(null);
   const faseAntes = useRef(d.fase);
 
@@ -71,10 +75,13 @@ export function PaginaNegocio(ctx: Ctx) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} €</span>· margem {pct(T.m)}</span>}
+          {T && <span key={eur(T.pf)} className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm text-primary animate-in fade-in-0 zoom-in-95"><span className="font-mono font-semibold tabular-nums">{eur(T.pf)} € s/ IVA</span>· margem {pct(T.m)}</span>}
           {d.fase < 4 && !d.perdido && <Button variant="outline" size="sm" onClick={go(() => A.perder(d.id))}>Marcar perdido</Button>}
+          {/* 19/10: com contrato, a Direção anula o contrato (a encomenda no Inventário vai com ele) */}
+          {podeAnular(d) && <Button variant="outline" size="sm" aria-expanded={anular} onClick={() => setAnular(!anular)}>Anular {oQueAnular(d)}</Button>}
         </div>
       </header>
+      {anular && podeAnular(d) && <ConfirmarAnulacao ctx={ctx} d={d} fechar={() => setAnular(false)} />}
       {S.confirmPerda === d.id && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/[0.06] p-3 text-sm animate-in fade-in-0 slide-in-from-top-2">
           <b>Marcar como perdido?</b><span className="text-muted-foreground">Sai do quadro, mas fica no histórico.</span>
@@ -181,7 +188,7 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
   if (i === 0) resumo = [d.f.origem || d.origem, d.f.email || "", d.f.tipo_cliente || ""].filter(Boolean);
   if (i === 1) resumo = [d.f.resultado || "", d.f.orc_cliente || "", d.visita.slot ? "visita " + d.visita.slot : ""].filter(Boolean);
   if (i === 2) resumo = [d.f.tipologia || "", d.f.andar ? d.f.andar + ".º andar" : "", d.f.tem_elevador === "Sim" ? "com elevador" : "", orcLinhas(d, S).length + " serviços", d.visita.fotos + " fotos"].filter(Boolean);
-  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " €", "margem " + pct(T.m), d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")]; }
+  if (i === 3 && d.orc) { const T = tot(d, S); resumo = [eur(T.pf) + " € s/ IVA", "margem " + pct(T.m), d.orc.vendaDireta ? "venda direta" : "contrato " + (d.orc.contrato || "por enviar")]; }
   if (i === 4) resumo = [d.fin.fatura?.n || "", d.fin.recibo?.n || "", d.f.metodo || ""].filter(Boolean);
   return (
     <section id={"sec-" + i} className="scroll-mt-4 overflow-hidden rounded-xl border border-border/70 bg-card animate-in fade-in-0 slide-in-from-top-2 duration-500">
@@ -319,7 +326,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     ];
   } else if (d.fase === 3 && o) {
     passos = [
-      { id: "orc", titulo: "Orçamento", icone: FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)), resumo: [eur(tot(d, S).pf) + " €", "margem " + pct(tot(d, S).m)],
+      { id: "orc", titulo: "Orçamento", icone: FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)), resumo: [eur(tot(d, S).pf) + " € s/ IVA", "margem " + pct(tot(d, S).m)],
         corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
       simples ? fechadoSe({ ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
         <div className="space-y-10">
@@ -460,26 +467,27 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
 /* ------------------------------------------------------------------ peças da fase */
 export function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const T = d.orc ? tot(d, ctx.S) : null;
+  // 19/10: os documentos levam IVA (a fatura é da 1.ª tranche, o sinal, como no portal); os ecrãs internos é que mostram sem IVA
+  const sinal = d.orc ? valorSinal(d, ctx.S) : null, tranche = `${d.f.tranche || "1.ª tranche"} · com IVA`;
   return (
     <div className="withside">
-      <div className="tw"><table><thead><tr><th>Documento</th><th>Estado</th><th className="n">Valor s/ IVA</th></tr></thead><tbody>
+      <div className="tw"><table><thead><tr><th>Documento</th><th>Estado</th><th className="n">Valor c/ IVA</th></tr></thead><tbody>
         <tr>
           <td>{d.fin.fatura ? d.fin.fatura.n : "Fatura"}<small>{d.fin.fatura ? "emitida " + d.fin.fatura.q + " · enviada ao portal do cliente" : "por emitir · só o Financeiro emite"}</small></td>
           <td>{d.fin.pago ? <span className="pill ok">Paga</span> : d.fin.fatura ? <span className="pill warn">Por pagar</span> : <span className="pill mut">Por emitir</span>}</td>
-          <td className="n">{T ? eur(T.pf) : ""}</td>
+          <td className="n">{sinal != null ? <>{eur(sinal)}<small>{tranche}</small></> : ""}</td>
         </tr>
         <tr>
           <td>{d.fin.recibo ? d.fin.recibo.n : "Recibo"}<small>{d.fin.recibo ? "emitido " + d.fin.recibo.q : "emitido ao validar o pagamento"}</small></td>
           <td>{d.fin.recibo ? <span className="pill ok">Emitido</span> : <span className="pill mut">Ainda não</span>}</td>
-          <td className="n" />
+          <td className="n">{d.fin.pago && sinal != null ? <>{eur(sinal)}<small>{tranche}</small></> : ""}</td>
         </tr>
       </tbody></table></div>
       <div className="card">
-        <h3>Ao emitir o recibo</h3>
+        <h3>Ao validar o pagamento</h3>
         <div className="trig">
-          <div><i className={d.fin.recibo ? "on" : ""}>1</i><span><b>Inventário</b><small>confirma os materiais e cria a encomenda ao fornecedor, se faltar algo</small></span></div>
-          <div><i className={d.fin.recibo ? "on" : ""}>2</i><span><b>Operações</b><small>gera o plano da obra com os técnicos do RH</small></span></div>
+          <div><i className={d.fin.recibo ? "on" : ""}>1</i><span><b>Inventário</b><small>a encomenda de cliente é emitida sozinha: reserva o stock (FIFO) e o que falta vai numa encomenda ao fornecedor, por aprovar</small></span></div>
+          <div><i className={d.fin.recibo ? "on" : ""}>2</i><span><b>Operações</b><small>aprovam o plano da obra (gerado no contrato) e arrancam com os materiais no armazém</small></span></div>
           <div><i className={d.fin.recibo ? "on" : ""}>3</i><span><b>Cliente</b><small>recebe o recibo no portal</small></span></div>
         </div>
         <span className="sub">Por agora a validação é interna. Quando o portal aceitar pagamentos, passa a ser automática.</span>
@@ -573,7 +581,11 @@ export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
 }
 
 function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
-  const pl = d.obra.plano!, e = d.obra.enc, T = tot(d, S);
+  const pl = d.obra.plano!, T = tot(d, S);
+  // os materiais lidos ao vivo do Inventário (as obras antigas do exemplo já os têm na obra)
+  const db = useInventario();
+  const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const matOk = !!r?.pronta || (!!d.obra.ec && !d.obra.ec.ref);
   const est = { "por aprovar": "warn", aprovado: "pri", "em curso": "pri", "concluída": "ok" }[pl.estado];
   const R = d.obra.real;
   const mx = R ? Math.max(...R.tasks.map((t) => Math.max(t.prev, t.real))) : 1;
@@ -586,11 +598,12 @@ function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
           <Btn cls="sec sm" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações</Btn>
         </div>
         <div className="card">
-          <h3>Materiais <span className={"pill " + (!e || e.estado === "recebida" ? "ok" : "warn")}>{!e ? "em stock" : e.estado === "recebida" ? "reservados" : e.n + " · " + e.estado}</span></h3>
+          <h3>Materiais <span className={"pill " + (matOk ? "ok" : "warn")}>{r ? (r.pronta ? "prontos" : r.rotulo.toLowerCase()) : d.obra.ec ? "na obra" : "—"}</span></h3>
           <div className="kv">
-            {(d.obra.mats || []).slice(0, 4).map((x) => <Fragment key={x.n}><span>{x.n}</span><b>{x.falta > 0 ? "faltam " + nfmt(x.falta) + " " + x.un : "✓ " + nfmt(x.q) + " " + x.un}</b></Fragment>)}
+            {r ? r.linhas.slice(0, 4).map((l) => { const st = estadoLinhaNegocio(l); return <Fragment key={l.id}><span>{l.n}</span><b>{(st.ok ? "✓ " : "") + nfmt(l.q) + " " + l.un + " · " + st.t}</b></Fragment>; })
+              : (d.obra.mats || []).slice(0, 4).map((x) => <Fragment key={x.n}><span>{x.n}</span><b>{"✓ " + nfmt(x.q) + " " + x.un}</b></Fragment>)}
           </div>
-          <Btn cls="sec sm" onClick={go(() => A.abrirInv())}>Abrir no Inventário</Btn>
+          <Btn cls="sec sm" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário</Btn>
         </div>
       </div>
       {R && (

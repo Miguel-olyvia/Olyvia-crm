@@ -23,7 +23,8 @@ import { TabelaInv, type Coluna } from "./TabelaInv";
 import type { Ec, Tom } from "./tipos";
 
 const TOM: Record<EstadoEc, Tom> = { full: "ok", partial: "warn", waiting: "info", nosup: "bad", deleted: "neu" };
-const ESTADOS: readonly (readonly [EstadoEc, string])[] = [["full", "Totalmente servido"], ["partial", "Parcialmente pendente"], ["waiting", "A aguardar encomenda"], ["nosup", "Sem fornecedor"]];
+const ORIGENS: Record<string, string> = { CT: "Contratos", VD: "Vendas diretas", PR: "Propostas", manual: "Encomendas manuais" };
+const ESTADOS: readonly (readonly [EstadoEc, string])[] =[["full", "Totalmente servido"], ["partial", "Parcialmente pendente"], ["waiting", "A aguardar encomenda"], ["nosup", "Sem fornecedor"]];
 
 export function EcInv() {
   const { db, filtros, setFiltros } = useCtxInv();
@@ -69,6 +70,8 @@ export function EcInv() {
           {estado("", "Todas", db.ecs.filter((e) => !e.deleted).length)}
           <Chip ativo={f.prontas} n={c.ecReady} aoClicar={() => setFiltros("ec", { prontas: !f.prontas, status: "" })}>Prontas a expedir</Chip>
           {ESTADOS.map(([k, t]) => estado(k, t))}
+          {/* a origem escolhida no Hoje (Contratos, Vendas diretas, Encomendas manuais): carregar limpa-a */}
+          {f.origem && <Chip ativo aoClicar={() => setFiltros("ec", { origem: "" })}>Origem: {ORIGENS[f.origem]}</Chip>}
         </div>
         <div className="legend"><span><i className="s-served" />Servido</span><span><i className="s-stock" />Em stock (reservado, pronto)</span><span><i className="s-po" />A aguardar PO</span><span><i className="s-miss" />Em falta / sem fornecedor</span></div>
       </div>
