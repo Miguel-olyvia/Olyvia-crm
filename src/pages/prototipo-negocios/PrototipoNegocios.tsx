@@ -27,6 +27,8 @@ import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
 import { NumerosV1 } from "./NumerosV1";
 import { FrotaV1, abrirViaturaFrotaV1, esquecerFrotaV1 } from "./FrotaV1";
 import { RAMO_V1 } from "./ramoV1";
+import { InventarioV1, esquecerInventarioV1 } from "./InventarioV1";
+import { criarSeedV1 } from "./inventarioV1Seed";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
 import { SeletorVersao } from "./SeletorVersao";
@@ -43,7 +45,7 @@ import { OperacoesV2 } from "./v2/OperacoesV2";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
-import { lerPedidoEcInv, subscrever as subscreverInv, tirarPedidoEcInv } from "./inventario/loja";
+import { esquecerInventario, lerPedidoEcInv, subscrever as subscreverInv, tirarPedidoEcInv, usarSeed } from "./inventario/loja";
 import { sincronizarEcsNegocios } from "./inventario/ponteNegocios";
 import PerfilSimulado from "./inventario/PerfilSimulado";
 import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
@@ -52,6 +54,9 @@ import { definirMolduraFrota, obrasDoEstado, tratarPedidoFrota, usePedidoFrota }
 import { PortalCliente } from "./PortalCliente";
 import { RevisaoContrato } from "./RevisaoContrato";
 import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
+
+// 19/10 (feat/v1-inventario): no ramo do V1 o Inventário usa os dados de exemplo da Mudelar (inventarioV1Seed.ts)
+if (RAMO_V1) usarSeed(criarSeedV1);
 
 // O Inventário completo (nativo, na Atual e na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
@@ -95,6 +100,7 @@ export default function PrototipoNegocios() {
   // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). No ramo feat/v1 está ligada por defeito; o interruptor
   // "Pessoas numa página" fica para comparar com o V1 de antes (só "0" a desliga). No ramo partilhado fica desligada por defeito.
   const [navPessoas, setNavPessoas] = useState(0); // o menu "Pessoas" volta a montar a página (vai à lista, mesmo com uma ficha aberta)
+  const [navInv, setNavInv] = useState(0); // 19/10: o menu "Inventário" do V1 também (vai à lista, mesmo com uma obra aberta)
   const [propostaV1, setPropostaV1] = useState<boolean>(() => { try { const g = localStorage.getItem(CHAVE_PROPOSTA_V1); return RAMO_V1 ? g !== "0" : g === "1"; } catch { return RAMO_V1; } });
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
@@ -165,6 +171,8 @@ export default function PrototipoNegocios() {
     esquecerPessoasFunc();
     esquecerPessoasV1();
     esquecerFrotaV1();
+    esquecerInventarioV1();
+    if (RAMO_V1) esquecerInventario();
     esquecerNegociosFunc();
     esquecerDiaADia();
     esquecerV2();
@@ -229,7 +237,7 @@ export default function PrototipoNegocios() {
     case "leads": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
     case "pessoas": corpo = simples ? (func ? <PessoasFunc {...ctx} alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
     case "operacoes": corpo = v2 ? <OperacoesV2 {...ctx} /> : simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
-    case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
+    case "inventario": corpo = v1n ? <InventarioV1 key={navInv} {...ctx} /> : simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
     case "catalogo": corpo = v2 ? <CatalogoV2 {...ctx} /> : simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
     case "clientes": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : <ClientesSimples {...ctx} />) : <Clientes {...ctx} />; break;
     case "marketing": corpo = v2 ? <MarketingV2 {...ctx} /> : simples ? <MarketingSimples /> : <Marketing />; break;
@@ -255,11 +263,13 @@ export default function PrototipoNegocios() {
   // nem Pessoas (mostra Negócios), por isso destaca Negócios. Com a V2, criar uma lead (S.novo) destaca Pessoas.
   // 16/10: o Inventário e a Frota novos aparecem na Atual e na V2 (um grupo do menu cada, no lugar do item antigo "Inventário"); a V2 funcional fica com o seu
   const comInvFrota = (versao === "atual" || versao === "v2") && simples;
-  const ativoInv = comInvFrota && (invMock || S.view === "inventario");
+  // 19/10 (feat/v1-inventario): no V1 o Inventário é um item do menu (InventarioV1.tsx), como a Frota; o do Rafael (submenu) não aparece
+  const comInvMock = comInvFrota && !v1n;
+  const ativoInv = comInvMock && (invMock || S.view === "inventario");
   // feat/v1: com "Pessoas numa página", a Frota é a do V1 (FrotaV1.tsx, um item do menu); a do Rafael (frotaMock) não aparece, para não haver duas
   const comFrotaMock = comInvFrota && !v1n;
   const ativoFrota = comFrotaMock && frotaMock && !ativoInv; // abrir a Frota fecha o Inventário e vice-versa
-  const itensMenu = comInvFrota ? itens.filter(([v]) => v !== "inventario") : itens;
+  const itensMenu = comInvMock ? itens.filter(([v]) => v !== "inventario") : itens;
   const cur: Vista | "inv" | "frota" = ativoInv ? "inv" : ativoFrota ? "frota" : novaLeadV2 ? "pessoas"
     : S.view === "negocio" ? "negocios"
     : !simples && (S.view === "leads" || S.view === "pessoas") ? "negocios"
@@ -269,9 +279,10 @@ export default function PrototipoNegocios() {
   // do negócio (Saídas para clientes), se foi pedida, senão às Encomendas a fornecedor.
   useEffect(() => {
     if (S.view !== "inventario") return;
+    if (v1n) return; // o Inventário do V1 lê o pedido ele próprio (abre na obra)
     if (!comInvFrota) { tirarPedidoEcInv(); return; }
     setInvAba(lerPedidoEcInv() ? "ec" : "po"); setInvMock(true); setFrotaMock(false); run(() => A.nav("hoje"));
-  }, [comInvFrota, S.view, run, A]);
+  }, [comInvFrota, v1n, S.view, run, A]);
   // 16/10: o Inventário novo vive em memória; ao recarregar (ou ao repor os dados dele) volta a emitir as encomendas dos negócios pagos que lá faltam
   useEffect(() => {
     const sinc = (): void => { sincronizarEcsNegocios(ref.current.deals); };
@@ -341,7 +352,7 @@ export default function PrototipoNegocios() {
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
-      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v1n && v === "inventario") { esquecerInventarioV1(true); setNavInv((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
         className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
           cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
         <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
@@ -350,7 +361,7 @@ export default function PrototipoNegocios() {
       </button>
     );
     const abrirInv = (a: AbaInv): void => { setMais(false); setFrotaMock(false); setInvAba(a); setInvMock(true); };
-    const menuInv = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
+    const menuInv = (aberto: boolean) => (comInvMock ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
     const abrirFrota = (a: AbaFrota): void => { setMais(false); setInvMock(false); setFrotaAba(a); setFrotaMock(true); };
     const menuFrota = (aberto: boolean) => (comFrotaMock ? <Suspense fallback={null}><MenuFrota aba={ativoFrota ? frotaAba : null} aoIr={abrirFrota} iniciarAberto={aberto} /></Suspense> : null);
     // As ligações da Frota para fora: a obra (Operações), a Agenda (Definições › Agenda › Recursos) e as carrinhas no Inventário (Armazéns).
@@ -446,10 +457,10 @@ export default function PrototipoNegocios() {
               <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-[calc(4rem_+_env(safe-area-inset-bottom))] max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
-                  {[...(v1n ? (comInvFrota ? [] : ["inventario"]) : pessoas.map(([v]) => v)), "catalogo", "marketing", ...(v1n ? ["frota", "numeros"] : [])].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {[...(v1n ? (comInvMock ? [] : ["inventario"]) : pessoas.map(([v]) => v)), "catalogo", "marketing", ...(v1n ? ["frota", "numeros"] : [])].map((v) => porVista(v as Vista)).map(([v, l, Ic, c]) => item(v, l, Ic, c))}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
-                {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
+                {comInvMock && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
                 {comFrotaMock && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
@@ -464,7 +475,7 @@ export default function PrototipoNegocios() {
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
             {((comInvFrota ? (v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes"]) : v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
-              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v1n && v === "inventario") { esquecerInventarioV1(true); setNavInv((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}

@@ -16,6 +16,7 @@ import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { dataCurta, diasDaObra, isoDia, prestacoes, proximoUtil, realPorFase, type ObraReal } from "./planoObra";
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
+import { pedirObraInv } from "./pedidoInvV1";
 import { emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { lerInventario, pedirAbrirEcInv } from "./inventario/loja";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
@@ -1441,7 +1442,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     abrirPlano(id: number) { S.view = "operacoes"; S.op = id; S.deal = null; },
     /** Abre o Inventário; com um negócio, abre a encomenda de cliente dele (Saídas para clientes). */
-    abrirInv(id?: number) { const ec = id != null ? S.deals.find((x) => x.id === id)?.obra.ec : null; if (ec?.ref) pedirAbrirEcInv(ec.n); S.view = "inventario"; S.deal = null; },
+    // 19/10: no V1 o Inventário abre na obra do negócio (pedidoInvV1.ts); no do Rafael, na encomenda de cliente
+    abrirInv(id?: number) { const ec = id != null ? S.deals.find((x) => x.id === id)?.obra.ec : null; if (ec?.ref) pedirAbrirEcInv(ec.n); if (id != null) pedirObraInv(id); S.view = "inventario"; S.deal = null; },
     irObra() { S.pulse = "sec-5"; },
     trocar(id: number, ti: number) {
       const d = deal(id); const t = d.obra.plano!.tasks[ti];

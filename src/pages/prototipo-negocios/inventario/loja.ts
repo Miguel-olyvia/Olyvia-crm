@@ -13,10 +13,14 @@ export interface Resultado<T> { ok: boolean; valor: T; erro: string }
 let base: Inventario | null = null;
 const ouvintes = new Set<() => void>();
 const avisar = (): void => { for (const fn of ouvintes) fn(); };
+/** De onde vêm os dados de exemplo. 19/10 (feat/v1-inventario): o V1 usa os da Mudelar (inventarioV1Seed.ts); o resto, os do mockup. */
+let fabrica: () => Inventario = criarSeedComCarrinhas;
+/** Troca os dados de exemplo (e volta a eles na próxima leitura). */
+export function usarSeed(f: () => Inventario): void { fabrica = f; base = null; avisar(); }
 
 /** A base atual (criada com os dados de exemplo na primeira leitura). */
 export function lerInventario(): Inventario {
-  if (!base) base = criarSeedComCarrinhas();
+  if (!base) base = fabrica();
   return base;
 }
 

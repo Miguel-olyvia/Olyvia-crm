@@ -158,9 +158,24 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     L.push({ id: "ec", trilho: "ec", estado: "feito", who: ec.ref ? "financeiro" : null, t: `Encomenda de cliente ${ec.n}`,
       sub: `${ec.ref ? `Emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}` : `De ${ec.criada}`} · ${ec.linhas.length} ${ec.linhas.length === 1 ? "linha" : "linhas"} · ${eur(ec.valor)} € na proposta` });
     if (!ec.ref) L.push({ id: "ec-inv", trilho: "ec", estado: "feito", who: null, t: "Materiais na obra", sub: "Obra do exemplo, de antes do Inventário novo." });
-    else if (inv !== undefined) L.push(!inv
-      ? { id: "ec-inv", trilho: "ec", estado: "espera", who: null, t: "No Inventário", sub: "A encomenda ainda não está no Inventário (os dados de exemplo foram repostos): volta a ser emitida sozinha." }
-      : { id: "ec-inv", trilho: "ec", estado: inv.pronta ? "feito" : "espera", who: null, t: inv.eliminada ? "Eliminada no Inventário" : `No Inventário: ${inv.rotulo.toLowerCase()}`, sub: textoResumoEc(inv) });
+    else if (inv !== undefined) {
+      if (!inv) L.push({ id: "ec-inv", trilho: "ec", estado: "espera", who: null, t: "No Inventário", sub: "A encomenda ainda não está no Inventário (os dados de exemplo foram repostos): volta a ser emitida sozinha." });
+      else if (inv.eliminada) L.push({ id: "ec-inv", trilho: "ec", estado: "espera", who: null, t: "Eliminada no Inventário", sub: textoResumoEc(inv) });
+      else {
+        // 19/10 (feat/v1-inventario): os passos do material, de quem é a vez, e a ligação ao Inventário (abre na obra)
+        const porAprovar = inv.pos.filter((x) => x.fase === "por aprovar");
+        if (porAprovar.length) L.push({ id: "ec-po", trilho: "ec", estado: "agora", who: "armazem", t: porAprovar.length === 1 ? "Aprovar a encomenda ao fornecedor" : `Aprovar ${porAprovar.length} encomendas a fornecedores`,
+          sub: `${[...new Set(porAprovar.map((x) => x.forn))].join(", ")} · o que falta no armazém para esta obra.`, act: "abrirInv", btn: "Abrir no Inventário" });
+        const aChegar = inv.pos.filter((x) => x.fase !== "por aprovar" && x.fase !== "recebida" && x.fase !== "cancelada");
+        const pr = aChegar.map((x) => x.prometida).filter(Boolean).sort().pop();
+        L.push(inv.pronta
+          ? { id: "ec-inv", trilho: "ec", estado: "feito", who: "armazem", t: "Material pronto no armazém", sub: `${inv.tot.linhas} ${inv.tot.linhas === 1 ? "material guardado" : "materiais guardados"} para esta obra.` }
+          : { id: "ec-inv", trilho: "ec", estado: "espera", who: "armazem", t: aChegar.length || porAprovar.length ? "Material a chegar" : "Material no armazém",
+            sub: aChegar.length ? (pr ? `O fornecedor entrega a ${pr.slice(8, 10)}/${pr.slice(5, 7)}. O Armazém dá entrada quando chegar.` : "À espera da data do fornecedor.")
+              : porAprovar.length ? "Depois de aprovada a encomenda, o fornecedor confirma a data de entrega."
+              : `${inv.tot.prontas + inv.tot.servidas} de ${inv.tot.linhas} materiais guardados para esta obra.` });
+      }
+    }
   }
 
   // o plano

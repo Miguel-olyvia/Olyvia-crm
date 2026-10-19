@@ -18,13 +18,14 @@ import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara
 import { diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
 import {
   RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, custosObra, equipaDaObra, equipamentosDaObra, estadoDe, faltaParaFeita, fotoExemplo,
-  iniciais, materiaisPorFase, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EstadoExec, type EstadoMat,
+  iniciais, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EstadoExec, type EstadoMat,
 } from "./obraOps";
 import type { Ctx } from "./pecas";
 import { AutoNoNegocio } from "./AutoRececao";
 import { ViaturasObra } from "./frota/ViaturasObra";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
+import { fasesDaObra } from "./inventarioV1Docs";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "plano por aprovar", aprovado: "pronta a arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -734,7 +735,7 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { A, go } = ctx;
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
-  const G = materiaisPorFase(d, inv), e = d.obra.enc;
+  const G = fasesDaObra(db, d, inv), e = d.obra.enc;
   return (
     <section id="obra-mat" aria-labelledby="obra-mat-t" className="mt-10 scroll-mt-16">
       <h2 id="obra-mat-t" className={H2}>Materiais</h2>
@@ -750,7 +751,7 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="mt-3 space-y-4">
           {G.map((g) => (
             <div key={g.fase}>
-              <p className="inline-flex items-center gap-2 text-sm font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g.fase] }} aria-hidden="true" />Fase {g.fase} · {FASES_OBRA[g.fase - 1].curto}</p>
+              <p className="inline-flex items-center gap-2 text-sm font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g.fase] }} aria-hidden="true" />Fase {g.fase} · {g.nome}{g.quando ? <span className="font-normal text-muted-foreground"> · começa {g.quando}</span> : null}</p>
               <ul className={cn(CARTAO, "mt-2 divide-y divide-border px-4 sm:px-5")}>
                 {g.itens.map((m) => (
                   <li key={m.n} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-3">

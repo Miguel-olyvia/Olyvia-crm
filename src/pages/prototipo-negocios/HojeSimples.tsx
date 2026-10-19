@@ -10,19 +10,27 @@ import { agenda } from "./Hoje";
 import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
 import { aDescoberto } from "./planoObra";
 import { useInventario } from "./inventario/loja";
-import { contadores as contadoresInv } from "./inventario/contadores";
-import { resumoInventario } from "./v2/hojeArmazem";
+import { tarefasInv } from "./inventarioV1Docs";
 
-/** 16/10: o que o Armazém tem no Inventário novo (o mesmo resumo do Hoje da V2). */
-function InventarioArmazem({ A, go }: Pick<Ctx, "A" | "go">) {
-  const linhas = resumoInventario(contadoresInv(useInventario()));
+/** 19/10 (feat/v1-inventario): o que o Armazém tem para fazer no Inventário do V1 (as mesmas tarefas do "O que fazer agora" de lá). */
+function InventarioArmazem({ S, A, go }: Pick<Ctx, "S" | "A" | "go">) {
+  const T = tarefasInv(S, useInventario());
   return (
     <section aria-labelledby="hoje-inv" className="mt-12">
       <h2 id="hoje-inv" className="text-lg font-semibold">Inventário</h2>
-      {linhas.length === 0
+      {T.length === 0
         ? <p className="mt-3 text-[15px] text-muted-foreground">Nada pendente no Inventário.</p>
-        : <ul className="mt-3 grid gap-1">{linhas.map((l) => <li key={l.id} className="text-[15px]"><span className="font-semibold tabular-nums">{l.n}</span> {l.texto}</li>)}</ul>}
-      <Button variant="outline" className="mt-3 min-h-11" onClick={go(() => A.nav("inventario"))}>Abrir o Inventário</Button>
+        : (
+          <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
+            {T.slice(0, 3).map((t) => (
+              <li key={t.id} className="flex min-h-16 items-center gap-3 py-3">
+                {t.urgente ? <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" aria-hidden="true" /> : <span className="h-5 w-5 shrink-0" aria-hidden="true" />}
+                <span className="min-w-0 flex-1"><span className="block text-base font-medium">{t.t}{t.urgente && <span className="sr-only"> (urgente)</span>}</span><span className="block text-[15px] text-muted-foreground">{t.sub}</span></span>
+              </li>
+            ))}
+          </ul>
+        )}
+      <Button variant="outline" className="mt-3 min-h-11" onClick={go(() => A.nav("inventario"))}>{T.length > 3 ? `Abrir o Inventário (mais ${T.length - 3})` : "Abrir o Inventário"}</Button>
     </section>
   );
 }
@@ -127,7 +135,7 @@ export function HojeSimples({ S, A, go }: Ctx) {
         </section>
       )}
 
-      {r === "armazem" && <InventarioArmazem A={A} go={go} />}
+      {r === "armazem" && <InventarioArmazem S={S} A={A} go={go} />}
 
       <section aria-labelledby="agenda" className="mt-12">
         <h2 id="agenda" className="text-lg font-semibold">Agenda</h2>

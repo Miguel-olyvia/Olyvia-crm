@@ -128,9 +128,10 @@ export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quan
 /** A fase em que o material entra (pelo nome). */
 export function faseDoMaterial(n: string): number {
   const s = n.toLowerCase();
+  // 19/10: os revestimentos primeiro ("Cimento-cola · saco 25 kg" é da fase 3, não dos sacos de entulho da fase 1)
+  if (/cerâm|ceram|azulej|pavimento|cola|junta|argamassa|revest/.test(s)) return 3;
   if (/saco|prote|plást|cartão|entulho/.test(s)) return 1;
   if (/tubo|vál|valv|torneira de corte|multicamada|cabo|caixa/.test(s)) return 2;
-  if (/cerâm|ceram|azulej|pavimento|cola|junta|argamassa|revest/.test(s)) return 3;
   return 4;
 }
 /** Os materiais da obra por fase. `inv`: o estado da encomenda no Inventário novo (16/10); sem ele, o das obras antigas do exemplo. */

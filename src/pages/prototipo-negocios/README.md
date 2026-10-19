@@ -887,3 +887,28 @@ Pedido original do Ruben (14/10): "o orçamento gera o contrato; depois do contr
 - **O cliente fornece só produtos** (e o material das trocas sem produto escolhido). Os consumíveis e os equipamentos das receitas são sempre da empresa: saíram do passo "O cliente fornece", do orçamento e da proposta (`forneceCliente.ts` removido). Na proposta, "Fornecido por si" mostra quanto o cliente poupa em cada produto.
 - **Campos só de casa de banho** ("Toalheiro elétrico", "Mobilidade reduzida") não aparecem numa cozinha: `visivel()` em `campos.ts` aceita `se: { k: "@divisao" | "@divisoes", v: [...] }`.
 - **Para a migração (decisão do Ruben):** o Catálogo de produtos e os seus custos serão **inseridos pelo fornecedor, no portal do fornecedor** (nome, marca, referência, unidade, custo, disponibilidade, prazo, fotografias, com data de atualização). A empresa escolhe os fornecedores e produtos que usa, as margens/PVP e o serviço que instala cada produto. O orçamento guarda uma cópia do custo, por isso uma proposta enviada não muda com a atualização do fornecedor. No protótipo, o portal do fornecedor só escolhe o dia da entrega (`PortalFornecedor.tsx`) e o Catálogo é de exemplo.
+
+## Inventário do V1, refeito à volta das obras (19/10/2026, ramo feat/v1-inventario)
+
+O Inventário do Rafael (`inventario/`) tinha um submenu de 9 ecrãs, separadores por cima, tabelas de 9 colunas, listas que abrem, cartões de números e palavras como FIFO, PO, EC e SKU. No V1 passa a ser um item do menu, como a Frota, com quatro ecrãs:
+
+- **Inventário** (`InventarioV1.tsx`): "O que fazer agora" com um só primário (aprovar uma encomenda, dar entrada do que chegou com − / +, levar à obra o material de uma fase, encomendar um consumível abaixo do mínimo), "Depois" e três separadores: **Obras**, **Encomendas** (por aprovar, a caminho, recebidas, fornecedores) e **Armazém** (Armazém Central com pesquisa e filtros, e as carrinhas da Frota com "Repor").
+- **A obra**: os materiais por fase da obra, com o dia em que cada fase começa (do plano da obra) e o estado em palavras ("pronto no armazém", "a chegar ter, 13 out", "encomenda por aprovar", "já na obra").
+- **A encomenda a fornecedor**: o percurso (aprovada, no portal, data confirmada, recebida), o que se pediu e o histórico em palavras.
+- **O material**: no armazém, para obras, livre e a chegar; para que obras está guardado; "Corrigir a quantidade" com o motivo; os movimentos em palavras.
+
+As regras são as do Rafael, sem mudanças (reserva, encomendas, receção, saídas, ajustes): `inventarioV1Acoes.ts` só as chama. O que mostrar está em `inventarioV1Docs.ts` (funções puras, testadas em `inventarioV1.test.tsx`).
+
+**Ligado à fase de Obra do negócio:**
+- No cartão "Do contrato à obra", o trilho Encomenda tem agora os passos do material, de quem é a vez (Nuno · Armazém): "Aprovar a encomenda ao fornecedor" com "Abrir no Inventário", "Material a chegar" (com a data do fornecedor) e "Material pronto no armazém".
+- "Abrir no Inventário" (no negócio, no aviso do pagamento e na secção Materiais da obra) abre o Inventário **na obra** (`pedidoInvV1.ts`).
+- Os Materiais da obra (Operações) mostram o dia em que cada fase começa, a mesma conta do Inventário (`fasesDaObra`).
+- O Hoje do Armazém mostra as três primeiras tarefas do Inventário.
+
+**Decisões tomadas sozinho, para validar:**
+1. **Dados de exemplo da Mudelar** (`inventarioV1Seed.ts`): os do mockup eram de climatização e solar, com clientes que não existem nos Negócios. No V1: o Armazém Central, os materiais das obras, consumíveis, as carrinhas da Frota, uma encomenda recebida e uma a caminho. Fora do V1 (e nos testes dos colegas) continuam os do mockup (`usarSeed` em `inventario/loja.ts`).
+2. **Os materiais das obras não têm mínimo de stock**: compram-se por obra (a encomenda de cliente pede o que falta). Só os consumíveis pedem "Encomendar" quando ficam abaixo do mínimo.
+3. **Quem trata do Inventário é o Armazém**, também a aprovação das encomendas a fornecedor (no negócio aparece como passo do Nuno).
+4. **"Encomendar" um consumível cria e envia logo** (quem decide é quem aprova). As encomendas das obras nascem por aprovar, como antes.
+5. **Contagens, guias de remessa, preços dos fornecedores e o portal do fornecedor** ficam de fora do V1 por agora: a correção da quantidade cobre o dia a dia. A resposta do fornecedor simula-se na encomenda ("Protótipo: simular a resposta do fornecedor").
+6. "Cimento-cola · saco 25 kg" passava para a fase 1 por ter "saco" no nome; agora os revestimentos contam primeiro (`obraOps.faseDoMaterial`).
