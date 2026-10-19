@@ -9,11 +9,12 @@
 import { FASES_OBRA } from "./fasesObra";
 import { HOJE, nomeForn, produto } from "./inventario/base";
 import { ecLinhaInfo, livreEm, reservadoEm } from "./inventario/ec";
+import { infoLinha } from "./inventario/contagens";
 import { estadoStock } from "./inventario/contadores";
 import { ARMAZEM_OBRAS, ecDoNegocio, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { artigoPreferido, poOpen, poRem, poStatus, poTotals, poUnits } from "./inventario/po";
 import { qtyAt } from "./inventario/stock";
-import type { Ec, Inventario, Movimento, Po } from "./inventario/tipos";
+import type { Contagem, Ec, Inventario, Movimento, Po } from "./inventario/tipos";
 import { aberto, eur as eurMotor, nfmt, type Estado, type Negocio } from "./motor";
 import { materiaisPorFase, type EstadoMat } from "./obraOps";
 import { dataCurta, deIso, diasDaObra } from "./planoObra";
@@ -24,6 +25,10 @@ import { inicioDoPlano } from "./preparacaoObra";
 export const plural = (n: number, um: string, varios: string): string => `${nfmt(n)} ${n === 1 ? um : varios}`;
 /** "m²", "un", "sacos": a unidade do produto no Inventário. */
 export const unidade = (db: Inventario, sku: string): string => produto(db, sku)?.unit ?? "un";
+/** A unidade no singular, para os preços: "6,40 €/saco" (não "/sacos"). */
+export const porUn = (un: string): string => ({ sacos: "saco", rolos: "rolo" } as Record<string, string>)[un] ?? un;
+/** "+6", "−2" (com o sinal do movimento). */
+export const nfmtSinal = (n: number): string => (n > 0 ? "+" : n < 0 ? "−" : "") + nfmt(Math.abs(n));
 /** "12 m²", "1 un". */
 export const qtd = (n: number, un: string): string => `${nfmt(n)} ${un}`;
 /** "seg, 12 out" a partir de "aaaa-mm-dd". */
@@ -77,6 +82,8 @@ export interface ObraInv {
   quando: string;
   /** O material desta obra pede atenção (falta encomendar, ou está em falta, e a obra está perto). */
   atencao: boolean;
+  /** Quantos materiais faltam sem nenhuma encomenda a fornecedor (recusada, anulada ou sem fornecedor): pedem "Pedir o que falta". */
+  semEncomenda: number;
 }
 
 const PRONTOS: EstadoMat[] = ["reservado", "recebido"];
@@ -114,6 +121,13 @@ export function fasesDaObra(db: Inventario, d: Negocio, inv?: ResumoEcNeg | null
   })).map((f) => ({ ...f, aSair: f.itens.filter((m) => m.pronto > 0 && m.linhaEc).length }));
 }
 
+/** Os materiais da obra que faltam e não têm encomenda a fornecedor nenhuma (nem fornecedor que os tenha). */
+function semEncomenda(db: Inventario, d: Negocio): number {
+  const e = d.obra.ec?.ref ? ecDoNegocio(db, d.obra.ec.ref) : undefined;
+  if (!e || e.deleted) return 0;
+  return e.lines.filter((l) => l.sku && !l.voided && l.served < l.qty).filter((l) => { const i = ecLinhaInfo(db, e, l); return i.missing + i.nosup > 0; }).length;
+}
+
 export function obraInv(db: Inventario, d: Negocio): ObraInv {
   const p = d.obra.plano;
   const fases = fasesDaObra(db, d);
@@ -137,6 +151,7 @@ export function obraInv(db: Inventario, d: Negocio): ObraInv {
   return {
     id: d.id, nome: d.nome, sub: [d.servico, d.local.split(",").pop()?.trim()].filter(Boolean).join(" · "), estado, ec: d.obra.ec?.n ?? null, fases, tot, frase, quando,
     atencao: estado !== "concluida" && estado !== "pagamento" && tot.porEncomendar > 0,
+    semEncomenda: semEncomenda(db, d),
   };
 }
 
@@ -268,7 +283,11 @@ export function reposicaoCarrinha(db: Inventario, carrinha: string, sku: string)
 }
 
 /** O livro de um material, em palavras: "Saiu 6 sacos para a obra de Marta Lima · qui, 9 out". Os mais recentes primeiro. */
-export interface MovInv { id: number; t: string; q: string; entrada: boolean }
+export interface MovInv {
+  id: number; t: string; q: string; entrada: boolean;
+  /** Para as tabelas: o tipo, o material, a quantidade com sinal, a origem ou o destino, o armazém, o saldo depois e o dia ("aaaa-mm-dd"). */
+  tipo: TipoLivro; rotulo: string; n: string; sku: string; qtd: number; un: string; onde: string; local: string; saldo: number; iso: string;
+}
 export type TipoLivro = "entradas" | "saidas" | "correcoes";
 const TIPO_LIVRO: Record<Movimento["type"], TipoLivro> = { in: "entradas", tin: "entradas", out: "saidas", tout: "saidas", ret: "saidas", adjp: "correcoes", adjm: "correcoes", loss: "correcoes" };
 /** O livro de movimentos de um material (`sku`) ou de todos (null, com o nome do material na frase), os mais recentes primeiro. */
@@ -290,7 +309,12 @@ export function movimentosInv(S: Estado, db: Inventario, sku: string | null, n =
     const [um, varios, entrada] = verbo[m.type], v = Math.abs(m.qty) === 1 ? um : varios;
     const armazem = db.warehouses.find((w) => w.id === m.wh);
     const nome = sku === null ? ` de ${minuscula(produto(db, m.sku)?.name ?? m.sku)}` : "";
-    return { id: m.id, t: `${v} ${qtd(Math.abs(m.qty), unidade(db, m.sku))}${nome}${onde(m)}${armazem?.tipo === "viatura" ? " · " + armazem.name : ""}`, q: diaRelativo(m.at), entrada };
+    const o = onde(m);
+    return {
+      id: m.id, t: `${v} ${qtd(Math.abs(m.qty), unidade(db, m.sku))}${nome}${o}${armazem?.tipo === "viatura" ? " · " + armazem.name : ""}`, q: diaRelativo(m.at), entrada,
+      tipo: TIPO_LIVRO[m.type], rotulo: um, n: produto(db, m.sku)?.name ?? m.sku, sku: m.sku, qtd: m.qty, un: unidade(db, m.sku),
+      onde: o.trim().replace(/^\((.*)\)$/, "$1").replace(/^./, (c) => c.toUpperCase()), local: armazem?.name ?? m.wh, saldo: m.bal, iso: m.at.slice(0, 10),
+    };
   });
 }
 /** Quantos movimentos há no livro (de um tipo, ou todos). */
@@ -307,7 +331,10 @@ export type AcaoInv =
   | { k: "aprovar"; po: string }
   | { k: "receber"; po: string }
   | { k: "sair"; deal: number; fase: number }
-  | { k: "encomendar"; sku: string; q: number; sup: string };
+  | { k: "encomendar"; sku: string; q: number; sup: string }
+  | { k: "pedir"; deal: number; ec: string }
+  | { k: "preco"; id: string; sup: string }
+  | { k: "contar"; id: string };
 export interface TarefaInv {
   id: string; t: string; sub: string; btn: string; acao: AcaoInv; urgente: boolean;
   /** A obra (o negócio) a que a tarefa diz respeito, para a ligação "Ver a obra". */
@@ -329,8 +356,30 @@ export function tarefasInv(S: Estado, db: Inventario): TarefaInv[] {
     t: `Dar entrada da encomenda de ${p.forn}`,
     sub: `${p.para} · ${resumoLinhas(p.linhas.filter((l) => l.falta > 0))} · ${p.atrasada ? `atrasada: era para ${dia(p.prometida ?? p.prevista)}` : p.prometida ? `chega ${diaRelativo(p.prometida)}` : `prevista para ${dia(p.prevista)}`}`,
   });
+  const c = contagemAberta(db);
+  if (c) {
+    const st = linhasContagem(db, c), feitas = st.filter((l) => l.contado != null).length;
+    L.push({
+      id: "contar-" + c.id, ordem: 0, data: "", urgente: false, acao: { k: "contar", id: c.id }, btn: "Continuar a contagem",
+      t: "Acabar a contagem do armazém", sub: `${c.cat || "Todos os materiais"} · ${feitas} de ${st.length} contados · começada ${diaRelativo(c.started)}`,
+    });
+  }
+  for (const pc of db.prices.filter((x) => x.state === "pending" && db.suppliers.some((s) => s.id === x.sup && !s.deleted))) {
+    const it = db.items.find((i) => i.id === pc.itemId);
+    if (!it) continue;
+    const un = unidade(db, it.sku), dif = pc.cur ? ((pc.nw - pc.cur) / pc.cur) * 100 : 0;
+    L.push({
+      id: "preco-" + pc.id, ordem: 1.5, data: pc.at, urgente: false, acao: { k: "preco", id: pc.id, sup: pc.sup }, btn: "Aceitar o preço novo",
+      t: `Rever o preço novo de ${nomeForn(db, pc.sup)}`,
+      sub: `${produto(db, it.sku)?.name ?? it.sku}: de ${eur(pc.cur / it.packN)} para ${eur(pc.nw / it.packN)} por ${porUn(un)} (${dif >= 0 ? "+" : "−"}${nfmt(Math.abs(Math.round(dif * 10) / 10))}%)`,
+    });
+  }
   for (const o of obrasInv(S, db)) {
     if (o.estado === "concluida" || o.estado === "pagamento") continue;
+    if (o.semEncomenda && o.ec) L.push({
+      id: "pedir-" + o.id, ordem: 0.5, data: "", urgente: true, obra: o.id, acao: { k: "pedir", deal: o.id, ec: o.ec }, btn: "Pedir o que falta",
+      t: `Falta material para a obra de ${o.nome}`, sub: `${plural(o.semEncomenda, "material sem encomenda", "materiais sem encomenda")} a fornecedor · ${o.quando}`,
+    });
     for (const f of o.fases) if (f.aSair) L.push({
       id: `sair-${o.id}-${f.fase}`, ordem: o.estado === "em curso" ? 0 : 3, data: "", urgente: o.estado === "em curso", obra: o.id, acao: { k: "sair", deal: o.id, fase: f.fase },
       btn: "Dar saída para a obra", t: `Levar o material da fase ${f.fase} à obra de ${o.nome}`,
@@ -371,6 +420,52 @@ export function textoHistorico(db: Inventario, t: string): string {
     .replace(/Admin Demo|Armazém Demo|Comprador Demo/g, "Nuno")
     .replace(/ → Parcialmente recebida/, " (chegou uma parte)").replace(/ → Recebida/, " (tudo recebido)").replace(/ → Encomendado/, "");
 }
+
+/* ---------------------------------------------------------------- as contagens */
+
+/** A contagem em curso no Armazém Central (só há uma de cada vez). */
+export const contagemAberta = (db: Inventario): Contagem | undefined => db.counts.find((c) => c.wh === ARMAZEM_OBRAS && c.state === "open");
+export interface LinhaContagemInv { idx: number; sku: string; n: string; un: string; loc: string; esperado: number; contado: number | null; dif: number | null }
+/** As linhas da contagem em palavras: o que o sistema espera (com o que se mexeu entretanto) e o que se contou. */
+export function linhasContagem(db: Inventario, c: Contagem): LinhaContagemInv[] {
+  return c.lines.map((l, idx) => {
+    const i = infoLinha(db, c, l);
+    return { idx, sku: l.sku, n: produto(db, l.sku)?.name ?? l.sku, un: unidade(db, l.sku), loc: db.stocks.find((s) => s.sku === l.sku && s.wh === c.wh)?.loc ?? "", esperado: i.exp, contado: l.counted, dif: i.diff };
+  });
+}
+/** As categorias do Armazém Central (para contar só uma). */
+export const categoriasArmazem = (db: Inventario): string[] =>
+  [...new Set(db.stocks.filter((s) => s.wh === ARMAZEM_OBRAS && !s.deleted).map((s) => produto(db, s.sku)?.cat ?? ""))].filter(Boolean).sort();
+/** O nome da categoria no V1 ("Obras" são os materiais das obras). */
+export const nomeCategoria = (cat: string): string => (cat === "Obras" ? "Materiais das obras" : cat);
+
+/* ---------------------------------------------------------------- o fornecedor */
+
+export interface ArtigoInv { id: string; sku: string; n: string; un: string; preco: number; pref: boolean; emb: string }
+export interface FornecedorInv {
+  id: string; nome: string; cidade: string; email: string; telefone: string; prazo: number; portal: boolean;
+  artigos: ArtigoInv[];
+  precos: { id: string; n: string; de: number; para: number; un: string }[];
+  abertas: PoInv[]; recebidas: number;
+}
+export function fornecedorInv(S: Estado, db: Inventario, id: string): FornecedorInv | null {
+  const s = db.suppliers.find((x) => x.id === id && !x.deleted);
+  if (!s) return null;
+  const P = db.pos.filter((p) => !p.deleted && p.sup === id).map((p) => poInv(S, db, p));
+  return {
+    id, nome: s.name, cidade: s.city, email: s.email, telefone: s.phone, prazo: s.sla, portal: s.portal === "active",
+    artigos: db.items.filter((i) => i.sup === id).map((i) => ({ id: i.id, sku: i.sku, n: produto(db, i.sku)?.name ?? i.sku, un: unidade(db, i.sku), preco: i.price / i.packN, pref: i.pref, emb: i.packN > 1 ? `${i.unitLabel} (${i.packN} ${unidade(db, i.sku)})` : "" }))
+      .sort((a, b) => a.n.localeCompare(b.n)),
+    precos: db.prices.filter((c) => c.sup === id && c.state === "pending").map((c) => {
+      const it = db.items.find((i) => i.id === c.itemId);
+      return { id: c.id, n: it ? produto(db, it.sku)?.name ?? it.sku : "", de: c.cur / (it?.packN ?? 1), para: c.nw / (it?.packN ?? 1), un: it ? unidade(db, it.sku) : "un" };
+    }),
+    abertas: P.filter((p) => ["por aprovar", "no fornecedor", "confirmada", "chegou em parte"].includes(p.estado)), recebidas: P.filter((p) => p.estado === "recebida").length,
+  };
+}
+/** Os fornecedores ativos, por nome. */
+export const fornecedoresInv = (S: Estado, db: Inventario): FornecedorInv[] =>
+  db.suppliers.filter((s) => !s.deleted && s.active).map((s) => fornecedorInv(S, db, s.id)!).sort((a, b) => a.nome.localeCompare(b.nome));
 
 /** A encomenda de cliente de uma obra, no Inventário. */
 export const ecDaObra = (db: Inventario, d: Negocio): Ec | undefined => (d.obra.ec?.ref ? ecDoNegocio(db, d.obra.ec.ref) : undefined);

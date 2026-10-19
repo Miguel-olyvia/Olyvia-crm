@@ -914,5 +914,16 @@ As regras são as do Rafael, sem mudanças (reserva, encomendas, receção, saí
 2. **Os materiais das obras não têm mínimo de stock**: compram-se por obra (a encomenda de cliente pede o que falta). Só os consumíveis pedem "Encomendar" quando ficam abaixo do mínimo.
 3. **Quem trata do Inventário é o Armazém**, também a aprovação das encomendas a fornecedor (no negócio aparece como passo do Nuno).
 4. **"Encomendar" um consumível cria e envia logo** (quem decide é quem aprova). As encomendas das obras nascem por aprovar, como antes.
-5. **Contagens, guias de remessa, preços dos fornecedores e o portal do fornecedor** ficam de fora do V1 por agora: a correção da quantidade cobre o dia a dia. A resposta do fornecedor simula-se na encomenda ("Protótipo: simular a resposta do fornecedor").
+5. **Guias de remessa, o catálogo do portal e o convite ao portal do fornecedor** ficam de fora do V1 por agora. A resposta do fornecedor simula-se na encomenda ("Protótipo: simular a resposta do fornecedor").
 6. "Cimento-cola · saco 25 kg" passava para a fase 1 por ter "saco" no nome; agora os revestimentos contam primeiro (`obraOps.faseDoMaterial`).
+7. **Na contagem, o contador começa no que o sistema diz** (acerta-se só o que for diferente): é mais rápido, mas quem conta pode confirmar sem contar. Se preferirem contagem cega, é uma linha (`ContagemV1`).
+8. **Um fornecedor novo recebe as encomendas por email**; o convite ao portal fica para depois.
+
+**A lógica toda do V1 (19/10, segunda parte), sempre com as regras do Rafael** (`inventarioV1Acoes.ts`, testes em `inventarioV1.test.tsx`):
+- **Contar o armazém** (Stock › Contar o armazém): tudo ou uma categoria; um material de cada vez com − / +; no fim, as diferenças e "Corrigir o stock e acabar" (as correções ficam no livro). Pode parar e continuar: aparece em "O que fazer agora".
+- **Encomendas**: nova encomenda a um fornecedor (os materiais abaixo do mínimo já com a quantidade sugerida e o total em baixo); "Não aprovar esta encomenda" e "O fornecedor não vai entregar o resto", com o motivo e a confirmação no sítio.
+- **Obras**: se uma encomenda de uma obra é recusada ou anulada, aparece "Falta material para a obra de …" com "Pedir o que falta"; numa saída enganada, "Voltou ao armazém?" desfaz-a.
+- **Material**: "Entrou sem encomenda" (com o custo), "Corrigir a quantidade", "Levar para uma carrinha" (só o livre), "Devolver ao fornecedor", "Mudar o mínimo"; quem vende e a que preço; o livro do material.
+- **Fornecedores**: cartões com o prazo, as encomendas em aberto e os materiais; a ficha com os contactos, o que vende (preço e preferido), "Juntar um material" e "Fazer uma encomenda"; os **preços novos** pedidos pelo fornecedor aceitam-se ou recusam-se (aceite, passa a ser o custo).
+- **Novo material** e **novo fornecedor**, com os erros no campo.
+- **Ecrãs mais largos** (19/10, pedido do Ruben: "uma coluna estreita só com texto fica tão feio"): as secções usam a largura toda; Stock, Encomendas, Movimentos e o que o fornecedor vende são tabelas no computador; Fornecedores, Obras e Carrinhas em cartões; o livro de movimentos agrupado por dia, com o ícone de entrada, saída ou correção.

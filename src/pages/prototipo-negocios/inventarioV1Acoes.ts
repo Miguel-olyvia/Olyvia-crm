@@ -1,13 +1,16 @@
 // As ações do Inventário no V1 (19/10/2026): cada uma chama as regras do Inventário do Rafael (inventario/), dentro de executar
 // (tudo ou nada: uma regra que recusa não deixa nada a meio). Devolvem a frase do que ficou feito, para o aviso.
-import { HOJE, ecPorId, falhar, nomeForn, nomeProd, poPorId, produto, somarDias } from "./inventario/base";
-import { sairLinha } from "./inventario/ec";
+import { HOJE, contagemPorId, ecPorId, falhar, nomeForn, nomeProd, poPorId, somarDias } from "./inventario/base";
+import { adicionarArtigo, decidirPreco } from "./inventario/cadastros";
+import { cancelarContagem, contarLinha, criarContagem, finalizarContagem, infoLinha, resolverLinha } from "./inventario/contagens";
+import { livreEm, pedirEmFalta, reverterSaida, sairLinha } from "./inventario/ec";
 import { executar, type Resultado } from "./inventario/loja";
 import { registarMovimento } from "./inventario/movimentos";
 import { ARMAZEM_OBRAS } from "./inventario/ponteNegocios";
-import { criarPoManual, enviarPo, portalConfirmar } from "./inventario/po";
-import { receberLinhas, type ItemReceber } from "./inventario/receber";
-import { qtyAt, transferir } from "./inventario/stock";
+import { criarPoManual, eliminarPo, enviarPo, poRem, portalConfirmar } from "./inventario/po";
+import { MOTIVOS_RESTO, anularResto, receberLinhas, type ItemReceber } from "./inventario/receber";
+import { errosFicha, gravarFicha, proximoCodigoForn } from "./inventario/regrasForn";
+import { adicionarStock, editarLinhaStock, qtyAt, transferir } from "./inventario/stock";
 import type { Inventario } from "./inventario/tipos";
 import { dia, plural, qtd, unidade, type MatInv } from "./inventarioV1Docs";
 
@@ -84,4 +87,166 @@ export const simularConfirmacao = (id: string): Resultado<string> => executar((d
   return `${nomeForn(db, p.sup)} confirmou a entrega para ${dia(data)}.`;
 });
 
-export const temProduto = (db: Inventario, sku: string): boolean => !!produto(db, sku);
+/* ---------------------------------------------------------------- encomendas a fornecedor */
+
+/** Não aprovar uma encomenda (fica no histórico como eliminada, com o motivo). Se era de uma obra, o material volta a faltar e pede-se de novo na obra. */
+export const recusar = (id: string, motivo: string): Resultado<string> => executar((db) => {
+  const p = po(db, id);
+  if (p.status !== "pending") falhar("Só uma encomenda por aprovar se pode recusar.");
+  eliminarPo(db, p, motivo);
+  return `Encomenda a ${nomeForn(db, p.sup)} recusada.`;
+});
+
+/** Os motivos para não receber o resto (os do Inventário, sem "Outro", que pede uma nota). */
+export const MOTIVOS_RESTO_V1: string[] = MOTIVOS_RESTO.filter((m) => m !== "Outro");
+/** "O fornecedor não vai entregar o resto": anula o que falta em todas as linhas. Se era de uma obra, essa parte volta a faltar lá. */
+export const anularOResto = (id: string, motivo: string): Resultado<string> => executar((db) => {
+  const p = po(db, id);
+  anularResto(db, p, p.lines.filter((l) => poRem(l) > 0).map((l) => l.id), motivo, "");
+  return `Encomenda a ${nomeForn(db, p.sup)} fechada: o resto já não vem.`;
+});
+
+/** Uma encomenda nova, feita à mão: o fornecedor e os materiais dele com a quantidade (em unidades). Segue logo para o fornecedor. */
+export const novaEncomenda = (sup: string, linhas: { sku: string; q: number }[]): Resultado<string> => executar((db) => {
+  const L = linhas.filter((l) => l.q > 0);
+  if (!sup) falhar("Escolha o fornecedor.");
+  if (!L.length) falhar("Escolha pelo menos um material e a quantidade.");
+  const p = criarPoManual(db, { sup, wh: ARMAZEM_OBRAS, linhas: L.map((l) => {
+    const it = db.items.find((i) => i.sup === sup && i.sku === l.sku) ?? falhar("O fornecedor não tem este material.");
+    return { sku: l.sku, packs: Math.ceil(l.q / it.packN) };
+  }) });
+  enviarPo(db, p);
+  return `Encomenda enviada a ${nomeForn(db, sup)}: ${plural(L.length, "material", "materiais")}.`;
+});
+
+/* ---------------------------------------------------------------- obras */
+
+/** Pedir o que falta a uma obra (o material sem encomenda): uma encomenda ao fornecedor preferido, por aprovar. */
+export const pedirOQueFalta = (ec: string): Resultado<string> => executar((db) => {
+  const e = ecPorId(db, ec) ?? falhar("A encomenda de cliente já não existe.");
+  const r = pedirEmFalta(db, e);
+  if (!r.pos.length) falhar("Nenhum fornecedor tem estes materiais. Junte-os a um fornecedor (em Fornecedores) e peça outra vez.");
+  return `Pedido o que falta: ${plural(r.pos.length, "encomenda", "encomendas")} por aprovar.`;
+});
+
+/** Desfazer a última saída de um material para a obra (saiu por engano ou voltou): volta ao armazém, guardado para a obra. */
+export const desfazerSaida = (ec: string, linhaEc: string): Resultado<string> => executar((db) => {
+  const e = ecPorId(db, ec) ?? falhar("A encomenda de cliente já não existe.");
+  const l = e.lines.find((x) => x.id === linhaEc) ?? falhar("O material já não está na encomenda.");
+  reverterSaida(db, e, l);
+  return `${nomeProd(db, l.sku!)} voltou ao armazém, guardado para a obra.`;
+});
+
+/* ---------------------------------------------------------------- o material */
+
+/** Entrada sem encomenda (comprado ao balcão, oferta, sobra de uma obra), com o fornecedor e o custo, se se souberem. */
+export const entradaAvulsa = (sku: string, q: number, sup: string, custo: number | null): Resultado<string> => executar((db) => {
+  const r = registarMovimento(db, { type: "in", wh: ARMAZEM_OBRAS, from: "", to: "", supplier: sup || undefined, note: "Entrada sem encomenda", lines: [{ sku, qty: q, cost: custo }] });
+  if (r.failed.length) falhar(r.failed[0].msg);
+  return `Entrada de ${qtd(q, unidade(db, sku))} de ${nomeProd(db, sku).toLowerCase()}.`;
+});
+/** Devolver ao fornecedor (defeito, engano no envio). */
+export const devolver = (sku: string, q: number, sup: string): Resultado<string> => executar((db) => {
+  if (!sup) falhar("Escolha o fornecedor.");
+  if (q > qtyAt(db, sku, ARMAZEM_OBRAS)) falhar("Não há tanto no armazém.");
+  const r = registarMovimento(db, { type: "ret", wh: ARMAZEM_OBRAS, from: "", to: "", supplier: sup, lines: [{ sku, qty: q }] });
+  if (r.failed.length) falhar(r.failed[0].msg);
+  return `Devolvidos ${qtd(q, unidade(db, sku))} a ${nomeForn(db, sup)}.`;
+});
+/** Levar para uma carrinha (transferência a partir do Armazém Central). */
+export const levarParaCarrinha = (sku: string, q: number, carrinha: string): Resultado<string> => executar((db) => {
+  if (!carrinha) falhar("Escolha a carrinha.");
+  if (q > livreEm(db, sku, ARMAZEM_OBRAS)) falhar("Só se leva o que está livre (o resto está guardado para obras).");
+  transferir(db, sku, ARMAZEM_OBRAS, carrinha, q, { note: "Levado para a carrinha" });
+  return `${qtd(q, unidade(db, sku))} na ${db.warehouses.find((w) => w.id === carrinha)?.name ?? "carrinha"}.`;
+});
+/** Mudar o mínimo: abaixo dele, o Inventário pede para encomendar (o máximo passa a ser pelo menos o dobro). */
+export const mudarMinimo = (sku: string, minimo: number): Resultado<string> => executar((db) => {
+  const r = db.stocks.find((s) => s.sku === sku && s.wh === ARMAZEM_OBRAS && !s.deleted) ?? falhar("O material não está no armazém.");
+  editarLinhaStock(db, r.id, { min: minimo, rop: minimo, max: Math.max(r.max, minimo * 2) });
+  return minimo ? `Mínimo de ${nomeProd(db, sku).toLowerCase()}: ${qtd(minimo, unidade(db, sku))}.` : `${nomeProd(db, sku)} fica sem mínimo.`;
+});
+
+export interface DadosMaterial { nome: string; cat: string; un: string; sup: string; preco: number | null; minimo: number; qty: number }
+export type ErrosMaterial = Partial<Record<"nome" | "cat" | "un" | "sup" | "preco", string>>;
+export function validarMaterial(db: Inventario, d: DadosMaterial): ErrosMaterial {
+  const e: ErrosMaterial = {};
+  if (!d.nome.trim()) e.nome = "Escreva o nome do material.";
+  else if (db.products.some((p) => !p.deleted && p.name.toLowerCase() === d.nome.trim().toLowerCase())) e.nome = "Já existe um material com este nome.";
+  if (!d.cat) e.cat = "Escolha a categoria.";
+  if (!d.un) e.un = "Escolha a unidade.";
+  if (!d.sup) e.sup = "Escolha o fornecedor.";
+  if (d.preco == null || Number.isNaN(d.preco) || d.preco < 0) e.preco = "Escreva o preço de compra.";
+  return e;
+}
+/** Um material novo: o produto, o artigo do fornecedor (preferido) e a linha no Armazém Central, com a quantidade que já lá está. Devolve o código. */
+export const novoMaterial = (d: DadosMaterial): Resultado<string> => executar((db) => {
+  const e = validarMaterial(db, d);
+  if (Object.keys(e).length) falhar(Object.values(e)[0]!);
+  const sku = "MAT-" + String(db.products.filter((p) => p.sku.startsWith("MAT-")).length + 1).padStart(3, "0");
+  db.products.push({ sku, ean: "", name: d.nome.trim(), cat: d.cat, sub: "Armazém", unit: d.un, sale: 0, cost: d.preco!, avg: 0, codes: [], deleted: false });
+  adicionarArtigo(db, d.sup, { sku, ref: sku, packN: 1, unitLabel: d.un === "un" ? "Unidade" : d.un, price: d.preco, moq: 1, lead: 0 });
+  adicionarStock(db, { sku, wh: ARMAZEM_OBRAS, loc: "", min: d.minimo, max: d.minimo * 2, rop: d.minimo, qty: d.qty, cost: d.preco });
+  return sku;
+});
+
+/* ---------------------------------------------------------------- fornecedores */
+
+/** Aceitar ou recusar um preço novo que o fornecedor pediu (aceite, passa a ser o custo do material). */
+export const decidirPrecoNovo = (id: string, aceitar: boolean): Resultado<string> => executar((db) => {
+  const c = db.prices.find((x) => x.id === id) ?? falhar("O pedido já não existe.");
+  const it = db.items.find((i) => i.id === c.itemId);
+  decidirPreco(db, id, aceitar, aceitar ? "" : "Recusado no Inventário");
+  return `${aceitar ? "Preço novo aceite" : "Preço novo recusado"}: ${it ? nomeProd(db, it.sku).toLowerCase() : "material"} de ${nomeForn(db, c.sup)}.`;
+});
+
+export interface DadosFornV1 { nome: string; email: string; telefone: string; cidade: string; prazo: number }
+export type ErrosFornV1 = Partial<Record<"nome" | "email" | "prazo", string>>;
+const fichaDe = (db: Inventario, d: DadosFornV1) => ({
+  company: "Mudelar", name: d.nome.trim(), code: proximoCodigoForn(db), contact: "", email: d.email.trim(), phone: d.telefone.trim(), nif: "", sla: d.prazo,
+  addr: "", city: d.cidade.trim(), cp: "", country: "Portugal", web: "", notes: "", active: true,
+});
+export function validarFornecedor(db: Inventario, d: DadosFornV1): ErrosFornV1 {
+  const e = errosFicha(db, fichaDe(db, d), null, false), out: ErrosFornV1 = {};
+  if (e.name) out.nome = "Escreva o nome do fornecedor.";
+  if (e.email) out.email = e.email === "Email inválido." ? "O email não está bem escrito." : e.email;
+  if (e.sla) out.prazo = "Escolha o prazo de entrega.";
+  return out;
+}
+/** Um fornecedor novo (recebe as encomendas por email; o portal convida-se depois). Devolve o id. */
+export const novoFornecedor = (d: DadosFornV1): Resultado<string> => executar((db) => {
+  const e = validarFornecedor(db, d);
+  if (Object.keys(e).length) falhar(Object.values(e)[0]!);
+  return gravarFicha(db, fichaDe(db, d), null, { items: [], enviar: false }).id;
+});
+/** Juntar um material a um fornecedor (o preço dele por unidade). */
+export const juntarArtigo = (sup: string, sku: string, preco: number | null): Resultado<string> => executar((db) => {
+  if (!sku) falhar("Escolha o material.");
+  if (preco == null || Number.isNaN(preco) || preco < 0) falhar("Escreva o preço por unidade.");
+  adicionarArtigo(db, sup, { sku, ref: `${db.suppliers.find((s) => s.id === sup)?.code ?? sup}-${sku}`, packN: 1, unitLabel: unidade(db, sku) === "un" ? "Unidade" : unidade(db, sku), price: preco, moq: 1, lead: 0 });
+  return `${nomeProd(db, sku)} junto a ${nomeForn(db, sup)}.`;
+});
+
+/* ---------------------------------------------------------------- contagens */
+
+/** Começar a contar o Armazém Central (tudo, ou uma categoria). Devolve o número da contagem. */
+export const comecarContagem = (cat: string): Resultado<string> => executar((db) => criarContagem(db, { wh: ARMAZEM_OBRAS, cat, init: "blank" }).id);
+/** Quanto se contou de um material (a linha `idx` da contagem). */
+export const contar = (id: string, idx: number, v: number): Resultado<string> => executar((db) => {
+  const c = contagemPorId(db, id) ?? falhar("A contagem já não existe.");
+  contarLinha(db, c, idx, v);
+  return "";
+});
+/** Acabar a contagem: as diferenças corrigem o stock (ficam no livro como correções da contagem). */
+export const acabarContagem = (id: string): Resultado<string> => executar((db) => {
+  const c = contagemPorId(db, id) ?? falhar("A contagem já não existe.");
+  c.lines.forEach((l, i) => { if (infoLinha(db, c, l).diff) resolverLinha(db, c, i, "adjusted"); });
+  const n = finalizarContagem(db, c);
+  return n ? `Contagem acabada: ${plural(n, "material corrigido", "materiais corrigidos")} no stock.` : "Contagem acabada: tudo certo, nada a corrigir.";
+});
+/** Desistir da contagem: o stock não muda. */
+export const desistirContagem = (id: string): Resultado<string> => executar((db) => {
+  const c = contagemPorId(db, id) ?? falhar("A contagem já não existe.");
+  cancelarContagem(db, c, "Desistiu da contagem");
+  return "Contagem cancelada: o stock não mudou.";
+});

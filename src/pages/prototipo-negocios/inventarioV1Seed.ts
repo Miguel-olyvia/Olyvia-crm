@@ -105,6 +105,13 @@ function historia(db: Inventario): void {
   const bases = po("sanit", "2026-10-06", [["OB-BD80", 2], ["OB-SANS", 2]]);
   db.relogio = "2026-10-06T16:40"; portalVista(db, bases);
   db.relogio = "2026-10-07T09:05"; portalConfirmar(db, bases, "2026-10-13", "Saem do nosso armazém na sexta; entregamos na terça de manhã.");
+  // dois preços novos pedidos pelos fornecedores, por rever (aceites, passam a ser o custo do material)
+  const preco = (sku: string, sup: string, nw: number, at: string) => {
+    const it = db.items.find((i) => i.sup === sup && i.sku === sku);
+    if (it) db.prices.push({ id: "PC" + (db.prices.length + 1), sup, itemId: it.id, cur: it.price, nw, state: "pending", at, note: "" });
+  };
+  preco("SIL-N", "consum", 3.6, "2026-10-08T11:00");
+  preco("OB-CP3060", "ceram", 14.9, "2026-10-07T15:20");
   // as saídas da obra da Marta Lima (WC, em curso): o livro mostra para onde foi o material
   db.relogio = "2026-10-09T08:15";
   aplicarMovimentos(db, [
