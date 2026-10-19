@@ -4,15 +4,19 @@ import { MIN_PESQUISA, type FiltrosLista } from "@/hooks/pessoas/listaPessoasTip
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useListaPessoas, type ListaPessoas } from "@/hooks/pessoas/useListaPessoas";
 import { Button } from "@/components/ui/button";
+import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { usePessoasUrl } from "@/components/pessoas/usePessoasUrl";
 import { BarraListaReal } from "./BarraListaReal";
 import { BarraProgresso } from "./BarraProgresso";
+import { DialogoColunasPessoas } from "./DialogoColunasPessoas";
 import { FichaReal } from "./FichaReal";
 import type { AoAbrirPessoa } from "./LinhaListaReal";
 import { RodapeListaReal } from "./RodapeListaReal";
 import { TabelaListaReal } from "./TabelaListaReal";
+import { TabelaListaRealComDados } from "./TabelaListaRealComDados";
+import { useColunasPessoas } from "./useColunasPessoas";
 import { useFiltrosLista } from "./useFiltrosLista";
 import { useFocoRodape } from "./useFocoRodape";
 
@@ -36,10 +40,14 @@ interface CorpoProps {
   aoLimpar: () => void;
   /** Abre a ficha de uma pessoa; sem isto (fora do modo real) o nome das linhas é texto simples. */
   aoAbrir?: AoAbrirPessoa;
+  /** As colunas visíveis, por ordem. Deve ser estável (useMemo): a tabela e as linhas estão em memória. */
+  colunas: readonly IdColuna[];
+  /** Em modo real: lê, por página, os contactos e os nomes dos comerciais das colunas visíveis. */
+  comDados: boolean;
 }
 
 // Os avisos visíveis não levam role: as mesmas mensagens são anunciadas pelo contentor live da página.
-function Corpo({ lista, filtros, tabelaRef, aoLimpar, aoAbrir }: CorpoProps) {
+function Corpo({ lista, filtros, tabelaRef, aoLimpar, aoAbrir, colunas, comDados }: CorpoProps) {
   const { t } = useTranslation();
   if (lista.erroSemDados) {
     return (
@@ -70,7 +78,11 @@ function Corpo({ lista, filtros, tabelaRef, aoLimpar, aoAbrir }: CorpoProps) {
           <BotaoRepetir aoRepetir={lista.recarregar} />
         </div>
       )}
-      <TabelaListaReal ref={tabelaRef} linhas={lista.linhas} ocupada={lista.aMostrarAnterior} aoAbrir={aoAbrir} />
+      {comDados ? (
+        <TabelaListaRealComDados ref={tabelaRef} linhas={lista.linhas} ocupada={lista.aMostrarAnterior} aoAbrir={aoAbrir} colunas={colunas} />
+      ) : (
+        <TabelaListaReal ref={tabelaRef} linhas={lista.linhas} ocupada={lista.aMostrarAnterior} aoAbrir={aoAbrir} colunas={colunas} />
+      )}
     </div>
   );
 }
@@ -91,7 +103,9 @@ function textoEstado(t: ReturnType<typeof useTranslation>["t"], lista: ListaPess
  */
 export function PessoasReal() {
   const { t } = useTranslation();
-  const comFicha = useFontePessoas().modo === "real";
+  const fonte = useFontePessoas();
+  const comFicha = fonte.modo === "real";
+  const colunas = useColunasPessoas(fonte.modo === "real" ? fonte.organizationId : null);
   const url = usePessoasUrl(false);
   const f = useFiltrosLista();
   const lista = useListaPessoas(f.filtros);
@@ -138,9 +152,17 @@ export function PessoasReal() {
         pesquisa={f.pesquisa} papel={f.filtros.papel} etapa={f.filtros.etapa} ordem={f.filtros.ordem}
         aoMudarPesquisa={f.mudarPesquisa} aoMudarPapel={f.mudarPapel} aoMudarEtapa={f.mudarEtapa} aoMudarOrdem={f.mudarOrdem}
       />
+      <div className="flex justify-end">
+        <DialogoColunasPessoas
+          escolha={colunas.escolha} aoAlternar={colunas.alternar} aoMover={colunas.mover} aoMoverPara={colunas.moverPara} aoRepor={colunas.repor}
+        />
+      </div>
       {/* Sempre montado: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{anuncio}</div>
-      <Corpo lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined} />
+      <Corpo
+        lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined}
+        colunas={colunas.visiveis} comDados={comFicha}
+      />
       <RodapeListaReal lista={lista} botaoMaisRef={botaoMaisRef} repetirRef={repetirRef} aoPedirMais={aoPedirMais} />
       {comFicha && (
         <FichaReal

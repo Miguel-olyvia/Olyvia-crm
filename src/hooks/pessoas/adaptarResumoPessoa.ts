@@ -2,6 +2,7 @@
 import type { FaseNegocio } from "@/components/negocio-metas/negocioMetas";
 import type { EtapaPessoa, ResultadoEncerramento } from "@/components/pessoas/pessoasTipos";
 import type { LinhaResumoDb, PessoaDaLista } from "./listaPessoasTipos";
+import { passoDaLista } from "./passoDaLista";
 
 const ETAPAS: readonly EtapaPessoa[] = ["nova", "emContacto", "visitaMarcada", "qualificada", "cliente"];
 const FASES: readonly FaseNegocio[] = ["orcamento", "proposta", "contrato"];
@@ -44,6 +45,11 @@ function numero(valor: number | string | null): number {
 }
 
 export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista {
+  const encerrada = escolher(linha.closure_result, ENCERRAMENTOS);
+  const faseEtapa = escolher(linha.fase_mais_avancada, FASES);
+  const porLigarContactos = numero(linha.por_ligar_contactos);
+  const porLigarVisitas = numero(linha.por_ligar_visitas);
+  const porLigarLevantamentos = numero(linha.por_ligar_levantamentos);
   return {
     id: linha.entity_id,
     nome: linha.nome?.trim() ?? "",
@@ -52,8 +58,8 @@ export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista
     clienteId: linha.client_id,
     responsavelId: linha.assigned_to,
     etapa: escolher(linha.etapa, ETAPAS) ?? "nova",
-    faseEtapa: escolher(linha.fase_mais_avancada, FASES),
-    encerrada: escolher(linha.closure_result, ENCERRAMENTOS),
+    faseEtapa,
+    encerrada,
     abertos: linha.negocios_abertos,
     ganhos: linha.negocios_ganhos,
     perdidos: linha.negocios_perdidos,
@@ -62,5 +68,16 @@ export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista
     ultimoContactoEm: linha.ultimo_contacto_em,
     diasSemContacto: diasEntre(linha.ultimo_contacto_em, hoje),
     proximaVisitaEm: linha.proxima_visita_em,
+    leadStatus: linha.lead_status ?? null,
+    ultimaVisitaFeitaEm: linha.ultima_visita_feita_em ?? null,
+    ultimoNegocioEm: linha.ultimo_negocio_em ?? null,
+    porLigarContactos,
+    porLigarVisitas,
+    porLigarLevantamentos,
+    passo: passoDaLista({
+      encerrada, abertos: linha.negocios_abertos, ganhos: linha.negocios_ganhos, perdidos: linha.negocios_perdidos, faseEtapa,
+      prontoAGanhar: linha.pronto_a_ganhar, ultimaVisitaFeitaEm: linha.ultima_visita_feita_em ?? null,
+      ultimoNegocioEm: linha.ultimo_negocio_em ?? null, porLigarContactos, porLigarVisitas, porLigarLevantamentos,
+    }),
   };
 }

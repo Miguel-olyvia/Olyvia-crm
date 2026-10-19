@@ -67,6 +67,14 @@ describe("adaptarResumo", () => {
       ultimoContactoEm: "2026-07-10T09:00:00Z",
       diasSemContacto: 5,
       proximaVisitaEm: "2026-07-20T10:00:00Z",
+      // Lote A: os 6 campos que a função já devolvia e a lista deitava fora, mais o passo calculado com eles.
+      leadStatus: "open",
+      ultimaVisitaFeitaEm: null,
+      ultimoNegocioEm: null,
+      porLigarContactos: 0,
+      porLigarVisitas: 0,
+      porLigarLevantamentos: 0,
+      passo: "ganharNegocio",
     });
   });
 

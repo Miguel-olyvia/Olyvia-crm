@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { BarraListaReal } from "./BarraListaReal";
 import type { OrdemLista } from "@/hooks/pessoas/listaPessoasTipos";
 import type { EtapaPessoa, PapelPessoa } from "@/components/pessoas/pessoasTipos";
@@ -78,18 +78,25 @@ describe("BarraListaReal", () => {
   it.each([
     ["Todas", null],
     ["Por contactar", "nova"],
-    ["Em contacto", "emContacto"],
-    ["Visita marcada", "visitaMarcada"],
-    ["Qualificada", "qualificada"],
+    ["Contacto", "emContacto"],
+    ["Visita", "visitaMarcada"],
+    ["Negócio", "qualificada"],
   ])("o chip «%s» pede a etapa %s", (nome, etapa) => {
     const { aoMudarEtapa } = desenhar({ etapa: etapa === null ? "nova" : null });
     fireEvent.click(screen.getByRole("button", { name: nome }));
     expect(aoMudarEtapa).toHaveBeenCalledWith(etapa);
   });
 
+  it("os chips são as etapas atuais do protótipo e «Cliente» não é uma etapa (é o papel, no interruptor Todos, Leads e Clientes)", () => {
+    desenhar();
+    const grupo = within(screen.getByRole("group", { name: "Filtrar por etapa" }));
+    expect(grupo.getAllByRole("button").map((b) => b.textContent)).toEqual(["Todas", "Por contactar", "Contacto", "Visita", "Negócio"]);
+    expect(grupo.queryByRole("button", { name: "Cliente" })).toBeNull();
+  });
+
   it("o chip ativo está aria-pressed", () => {
     desenhar({ etapa: "emContacto" });
-    expect(screen.getByRole("button", { name: "Em contacto" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Contacto" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Todas" })).toHaveAttribute("aria-pressed", "false");
   });
 

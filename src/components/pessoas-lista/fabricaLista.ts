@@ -7,6 +7,8 @@ export function pessoaLista(id: string, sobre: Partial<PessoaDaLista> = {}): Pes
     id, nome: `Pessoa ${id}`, papel: "lead", leadId: null, clienteId: null, responsavelId: null,
     etapa: "nova", faseEtapa: null, encerrada: null, abertos: 0, ganhos: 0, perdidos: 0,
     prontoAGanhar: false, valorEmJogo: 0, ultimoContactoEm: null, diasSemContacto: null, proximaVisitaEm: null,
+    leadStatus: null, ultimaVisitaFeitaEm: null, ultimoNegocioEm: null, porLigarContactos: 0, porLigarVisitas: 0,
+    porLigarLevantamentos: 0, passo: "registarChamada",
     ...sobre,
   };
 }

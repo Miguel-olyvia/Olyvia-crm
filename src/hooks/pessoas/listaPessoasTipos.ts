@@ -1,5 +1,6 @@
 // Tipos da Lista real das Pessoas (função neg_resumo_pessoas).
 import type { FaseNegocio } from "@/components/negocio-metas/negocioMetas";
+import type { IdPasso } from "@/components/pessoas/etapaPessoa";
 import type { EtapaPessoa, PapelPessoa, ResultadoEncerramento } from "@/components/pessoas/pessoasTipos";
 
 /** Linhas por página (o máximo que a função aceita). */
@@ -51,6 +52,12 @@ export interface CursorLista {
   id: string;
 }
 
+/** O telefone e o email principais de uma pessoa; null quando se leu e não há. */
+export interface ContactoDaLista {
+  telefone: string | null;
+  email: string | null;
+}
+
 export interface PessoaDaLista {
   id: string;
   /** Vazio quando a base não dá o nome: a UI mostra «Sem nome». */
@@ -71,4 +78,13 @@ export interface PessoaDaLista {
   /** Dias de calendário de Lisboa desde o último contacto; null se nunca houve. */
   diasSemContacto: number | null;
   proximaVisitaEm: string | null;
+  /** O estado da lead de referência, tal como a base o devolve (texto livre; a UI não o interpreta). */
+  leadStatus: string | null;
+  ultimaVisitaFeitaEm: string | null;
+  ultimoNegocioEm: string | null;
+  porLigarContactos: number;
+  porLigarVisitas: number;
+  porLigarLevantamentos: number;
+  /** O próximo passo reconstruído com os campos acima; `null` quando a lista não o sabe (ver `passoDaLista`). */
+  passo: IdPasso | null;
 }

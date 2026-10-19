@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { pessoaLista } from "./fabricaLista";
+import { COLUNAS_POR_OMISSAO } from "./colunasPessoas";
 import { LinhaListaReal } from "./LinhaListaReal";
 import { TabelaListaReal } from "./TabelaListaReal";
 
@@ -22,7 +23,7 @@ describe("LinhaListaReal com aoAbrir", () => {
     const cabecalho = screen.getByRole("rowheader");
     expect(cabecalho).toHaveAttribute("scope", "row");
     expect(within(cabecalho).getByRole("button", { name: "Ana Lopes" })).toBeInTheDocument();
-    expect(screen.getAllByRole("cell")).toHaveLength(5);
+    expect(screen.getAllByRole("cell")).toHaveLength(COLUNAS_POR_OMISSAO.length - 1);
   });
 
   it("anuncia que abre um diálogo, leva o id da pessoa e tem área de toque de 44 px", () => {

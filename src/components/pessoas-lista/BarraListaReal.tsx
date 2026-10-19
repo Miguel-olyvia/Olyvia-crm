@@ -12,7 +12,13 @@ const R = "pessoasPagina.real.";
 const TIPOS: readonly { papel: PapelPessoa | null; chave: string }[] = [
   { papel: null, chave: "todos" }, { papel: "lead", chave: "leads" }, { papel: "cliente", chave: "clientes" },
 ];
-const ETAPAS: readonly EtapaPessoa[] = ["nova", "emContacto", "visitaMarcada", "qualificada"];
+// Os chips são as etapas ATUAIS do protótipo (Por contactar, Contacto, Visita, Negócio) e filtram pela etapa exata. «Cliente» não é uma
+// etapa: é o papel, e filtra-se com o interruptor Todos, Leads e Clientes.
+const CHIP_DA_ETAPA: Partial<Record<EtapaPessoa, string>> = {
+  nova: "pessoasPagina.chip.porContactar", emContacto: "pessoasPagina.journey.step1",
+  visitaMarcada: "pessoasPagina.journey.step2", qualificada: "pessoasPagina.journey.step3",
+};
+const ETAPAS = Object.keys(CHIP_DA_ETAPA) as readonly EtapaPessoa[];
 const ORDENS: readonly OrdemLista[] = ["recentes", "nome"];
 
 interface BarraListaRealProps {
@@ -88,7 +94,7 @@ export function BarraListaReal(p: BarraListaRealProps) {
         {ETAPAS.map((e) => (
           <button key={e} type="button" aria-pressed={p.etapa === e} className={chip(p.etapa === e)} onClick={() => p.aoMudarEtapa(e)}>
             <Marca ativo={p.etapa === e} />
-            {t(`${R}stage.${e}`)}
+            {t(CHIP_DA_ETAPA[e] ?? "")}
           </button>
         ))}
       </div>

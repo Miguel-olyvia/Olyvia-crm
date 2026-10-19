@@ -16,7 +16,7 @@ const avatarMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
 vi.mock("@/components/pessoas/AvatarPessoa", () => ({ AvatarPessoa: (p: unknown) => { avatarMock(p); return null; } }));
 
-const CAPTION = "Pessoas: etapa, último contacto, próxima visita, valor e negócios";
+const CAPTION = "Pessoas, com as colunas escolhidas";
 const REGIAO = "Lista de pessoas";
 const DUAS = [pessoaLista("a", { nome: "Ana Lopes" }), pessoaLista("b", { nome: "Bruno Reis" })];
 const ultimosFiltros = (): FiltrosLista => listaMock.mock.calls[listaMock.mock.calls.length - 1][0];
@@ -36,10 +36,12 @@ beforeEach(() => { listaMock.mockReset(); avatarMock.mockReset(); });
 afterEach(() => vi.useRealTimers());
 
 describe("PessoasReal: o que mostra", () => {
-  it("tem exatamente as 6 colunas e nenhuma de Localidade nem Formulário", () => {
+  it("tem as colunas por omissão do Lote A e nenhuma de Localidade nem Formulário (ainda sem dado)", () => {
     desenhar();
     const nomes = screen.getAllByRole("columnheader").map((c) => c.textContent);
-    expect(nomes).toEqual(["Pessoa", "Etapa", "Último contacto", "Próxima visita", "Valor", "Negócios"]);
+    expect(nomes).toEqual([
+      "Pessoa", "Etapa", "Último contacto", "Próximo passo", "Próxima visita", "Valor", "Negócios", "Atribuído a", "Telefone", "Email", "WhatsApp",
+    ]);
     expect(screen.queryByText("Localidade")).toBeNull();
     expect(screen.queryByText("Formulário")).toBeNull();
     screen.getAllByRole("columnheader").forEach((c) => expect(c).toHaveAttribute("scope", "col"));
@@ -47,7 +49,7 @@ describe("PessoasReal: o que mostra", () => {
 
   it("uma linha por pessoa, mesmo com nomes iguais, e o nome é o cabeçalho da linha", () => {
     desenhar({ linhas: [pessoaLista("a", { nome: "Ana" }), pessoaLista("b", { nome: "Ana" })] });
-    expect(screen.getAllByRole("rowheader", { name: "Ana" })).toHaveLength(2);
+    expect(screen.getAllByRole("rowheader", { name: /^Ana/ })).toHaveLength(2);
     screen.getAllByRole("rowheader").forEach((c) => expect(c).toHaveAttribute("scope", "row"));
   });
 
@@ -109,7 +111,7 @@ describe("PessoasReal: o que mostra", () => {
 
   it("vazio com uma etapa ativa também diz que nada corresponde", () => {
     desenhar({ linhas: [] });
-    fireEvent.click(screen.getByRole("button", { name: "Em contacto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Contacto" }));
     expect(screen.getByText("Nenhuma pessoa corresponde aos filtros.")).toBeInTheDocument();
   });
 

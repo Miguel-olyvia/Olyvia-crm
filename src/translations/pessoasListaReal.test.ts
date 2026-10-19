@@ -15,6 +15,11 @@ const CHAVES_USADAS = [
   "won.one", "won.other", "lost.one", "lost.other",
   "searchLabel", "searchPlaceholder", "orderLabel", "caption", "loading", "refreshWarn", "loadMoreError", "routeError",
   "regionLabel", "stageFilterLabel", "updating", "orderAnnounce", "emptyFiltered", "clearFilters", "deals.none",
+  // Lote A: colunas novas, sem dado e diálogo de colunas.
+  "columns.next", "columns.assigned", "columns.phone", "columns.email", "columns.whatsapp", "columns.place", "columns.form",
+  "columns.created", "columns.origin", "columns.campaign", "noData", "noStage", "nextUnknown", "noAssigned", "noPhone", "noEmail",
+  "noDate", "whatsappFor", "cols.button", "cols.title", "cols.help", "cols.up", "cols.down", "cols.drag", "cols.reset", "cols.close",
+  "cols.fixed", "cols.moved", "cols.listLabel", "cols.down",
 ].map((c) => `pessoasPagina.real.${c}`);
 
 describe("traduções da Lista real das Pessoas", () => {
@@ -41,6 +46,9 @@ describe("traduções da Lista real das Pessoas", () => {
   it("os textos com contagens levam os marcadores esperados", () => {
     expect(marcas(pt["pessoasPagina.real.subtitle"])).toEqual(["{n}"]);
     expect(marcas(pt["pessoasPagina.real.closed"])).toEqual(["{result}"]);
+    expect(marcas(pt["pessoasPagina.real.whatsappFor"])).toEqual(["{name}"]);
+    for (const c of ["up", "down", "drag"]) expect(marcas(pt[`pessoasPagina.real.cols.${c}`])).toEqual(["{name}"]);
+    expect(marcas(pt["pessoasPagina.real.cols.moved"])).toEqual(["{name}", "{n}", "{total}"]);
     expect(marcas(pt["pessoasPagina.real.deals"])).toEqual(["{abertos}", "{ganhos}", "{perdidos}"]);
   });
 

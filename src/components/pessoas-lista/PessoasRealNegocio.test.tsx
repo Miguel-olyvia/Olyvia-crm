@@ -12,6 +12,10 @@ import { PessoasReal } from "./PessoasReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+// Estes testes são do foco, do endereço e da ficha, não das leituras em lote por página (têm o seu ficheiro: PessoasRealColunas.test.tsx).
+const semLeituras = vi.hoisted(() => new Map());
+vi.mock("@/hooks/pessoas/useContactosPessoas", () => ({ useContactosPessoas: () => semLeituras }));
+vi.mock("@/hooks/pessoas/useNomesResponsaveis", () => ({ useNomesResponsaveis: () => semLeituras }));
 const listaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
 const fichaProps = vi.hoisted(() => ({ atual: null as null | { aoAbrirNegocio?: (negocioId: string, pessoaId: string) => void } }));

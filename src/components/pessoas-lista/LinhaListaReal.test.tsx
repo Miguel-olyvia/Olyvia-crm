@@ -5,13 +5,17 @@ import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { pessoaLista } from "./fabricaLista";
 import { LinhaListaReal } from "./LinhaListaReal";
 import type { PessoaDaLista } from "@/hooks/pessoas/listaPessoasTipos";
+import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+
+// As seis colunas que esta linha tinha antes do Lote A (as novas têm o seu ficheiro: LinhaListaRealVista.test.tsx).
+const SEIS: readonly IdColuna[] = ["person", "stage", "lastContact", "nextVisit", "value", "deals"];
 
 function desenhar(sobre: Partial<PessoaDaLista> = {}) {
   render(
     <MemoryRouter>
-      <table><tbody><LinhaListaReal pessoa={pessoaLista("p1", { nome: "Ana Lopes", ...sobre })} /></tbody></table>
+      <table><tbody><LinhaListaReal pessoa={pessoaLista("p1", { nome: "Ana Lopes", ...sobre })} colunas={SEIS} /></tbody></table>
     </MemoryRouter>,
   );
   return [screen.getByRole("rowheader"), ...screen.getAllByRole("cell")];
@@ -32,21 +36,23 @@ describe("LinhaListaReal", () => {
     expect(within(celulas[0]).getByText("Sem nome")).toBeInTheDocument();
   });
 
-  it("encerrada leva o selo «Encerrada · resultado»", () => {
+  it("encerrada diz «Encerrada · resultado» na coluna Etapa (como o protótipo) e leva o selo por baixo do nome", () => {
     const celulas = desenhar({ encerrada: "semInteresse" });
-    expect(within(celulas[0]).getByText("Encerrada · Sem interesse")).toBeInTheDocument();
+    expect(within(celulas[1]).getByText("Encerrada · Sem interesse")).toBeInTheDocument();
+    expect(within(celulas[0]).getByText("Abordagem encerrada")).toBeInTheDocument();
   });
 
-  it("sem encerramento não há selo", () => {
+  it("sem encerramento não há selo nem texto de encerrada", () => {
     const celulas = desenhar();
-    expect(within(celulas[0]).queryByText(/Encerrada/)).toBeNull();
+    expect(within(celulas[0]).queryByText(/ncerrada/)).toBeNull();
+    expect(within(celulas[1]).queryByText(/ncerrada/)).toBeNull();
   });
 
   it.each([
     ["nova", null, "Por contactar"],
-    ["emContacto", null, "Em contacto"],
-    ["visitaMarcada", null, "Visita marcada"],
-    ["qualificada", null, "Qualificada"],
+    ["emContacto", null, "Contactada"],
+    ["visitaMarcada", null, "Com visita"],
+    ["qualificada", null, "Negócio"],
     ["qualificada", "proposta", "Negócio · Proposta"],
     ["cliente", null, "Cliente"],
   ] as const)("etapa %s com fase %s diz «%s»", (etapa, faseEtapa, texto) => {
@@ -65,9 +71,9 @@ describe("LinhaListaReal", () => {
     expect(within(celulas[2]).getByText(texto)).toBeInTheDocument();
   });
 
-  it("nunca houve contacto: «Sem contacto»", () => {
-    const celulas = desenhar({ diasSemContacto: null });
-    expect(within(celulas[2]).getByText("Sem contacto")).toBeInTheDocument();
+  it("nunca houve contacto: «Sem contacto» (o texto e o selo do protótipo)", () => {
+    const celulas = desenhar({ diasSemContacto: null, ultimoContactoEm: null });
+    expect(within(celulas[2]).getAllByText("Sem contacto")).toHaveLength(2);
   });
 
   it("próxima visita mostra a data, em <time>", () => {

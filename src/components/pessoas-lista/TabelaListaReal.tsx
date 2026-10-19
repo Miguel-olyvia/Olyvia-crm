@@ -1,17 +1,23 @@
-import { forwardRef, memo } from "react";
+import { forwardRef, memo, useMemo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import type { PessoaDaLista } from "@/hooks/pessoas/listaPessoasTipos";
+import type { ContactoDaLista, PessoaDaLista } from "@/hooks/pessoas/listaPessoasTipos";
 import { Table, TableBody, TableCaption, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 import { BarraProgresso } from "./BarraProgresso";
+import { COLUNAS_POR_OMISSAO, larguras } from "./colunasPessoas";
 import { LinhaListaReal, type AoAbrirPessoa } from "./LinhaListaReal";
 
-/** As 6 colunas, com a largura em percentagem (somam 100). */
-const COLUNAS = [
-  { id: "person", largura: 26 }, { id: "stage", largura: 16 }, { id: "lastContact", largura: 15 },
-  { id: "nextVisit", largura: 15 }, { id: "value", largura: 10 }, { id: "deals", largura: 18 },
-] as const;
+/** Largura mínima da tabela: 960 px, e mais quando há muitas colunas (a região rola na horizontal). */
+const LARGURA_MINIMA = 960;
+const LARGURA_POR_COLUNA = 120;
+
+/** O que as leituras em lote deram, por id (da pessoa, ou do comercial); sem a entrada, ainda se não sabe. */
+export interface DadosDaTabela {
+  comerciais?: ReadonlyMap<string, string>;
+  contactos?: ReadonlyMap<string, ContactoDaLista>;
+}
 
 interface TabelaListaRealProps {
   linhas: readonly PessoaDaLista[];
@@ -19,6 +25,9 @@ interface TabelaListaRealProps {
   ocupada: boolean;
   /** Abre a ficha da pessoa (o nome da linha passa a botão). Deve ser estável (useCallback): as linhas estão em memória. */
   aoAbrir?: AoAbrirPessoa;
+  /** As colunas visíveis, por ordem; sem isto, as por omissão. Deve ser estável (useMemo). */
+  colunas?: readonly IdColuna[];
+  dados?: DadosDaTabela;
 }
 
 /**
@@ -26,10 +35,12 @@ interface TabelaListaRealProps {
  * de ecrã) dá o nome à tabela; a região leva um rótulo curto, diferente. Em memória: só se redesenha se as linhas mudam.
  */
 export const TabelaListaReal = memo(forwardRef<HTMLDivElement, TabelaListaRealProps>(function TabelaListaReal(
-  { linhas, ocupada, aoAbrir },
+  { linhas, ocupada, aoAbrir, colunas = COLUNAS_POR_OMISSAO, dados },
   ref,
 ) {
   const { t } = useTranslation();
+  const ordem = useMemo(() => ["person" as IdColuna, ...colunas.filter((c) => c !== "person")], [colunas]);
+  const largura = useMemo(() => larguras(ordem), [ordem]);
   return (
     <div>
       {ocupada && <BarraProgresso />}
@@ -37,28 +48,37 @@ export const TabelaListaReal = memo(forwardRef<HTMLDivElement, TabelaListaRealPr
         ref={ref} role="region" aria-label={t("pessoasPagina.real.regionLabel")} aria-busy={ocupada} tabIndex={0}
         className={cn("max-h-[max(70vh,24rem)] overflow-auto rounded-xl border border-border/70 bg-card", FOCO)}
       >
-        <Table className="min-w-[960px] table-fixed text-sm" containerClassName="overflow-visible">
+        <Table
+          className="table-fixed text-sm" containerClassName="overflow-visible"
+          style={{ minWidth: Math.max(LARGURA_MINIMA, ordem.length * LARGURA_POR_COLUNA) }}
+        >
           <colgroup>
-            {COLUNAS.map((c) => <col key={c.id} style={{ width: `${c.largura}%` }} />)}
+            {ordem.map((c) => <col key={c} style={{ width: `${largura[c]}%` }} />)}
           </colgroup>
           <TableCaption className="sr-only">{t("pessoasPagina.real.caption")}</TableCaption>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {COLUNAS.map((c) => (
+              {ordem.map((c) => (
                 <TableHead
-                  key={c.id} scope="col"
+                  key={c} scope="col"
                   className={cn(
                     "sticky top-0 z-10 h-9 bg-card px-3 text-xs font-semibold text-muted-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]",
-                    c.id === "value" && "text-right",
+                    c === "value" && "text-right",
                   )}
                 >
-                  {t(`pessoasPagina.real.columns.${c.id}`)}
+                  {t(`pessoasPagina.real.columns.${c}`)}
                 </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {linhas.map((pessoa) => <LinhaListaReal key={pessoa.id} pessoa={pessoa} aoAbrir={aoAbrir} />)}
+            {linhas.map((pessoa) => (
+              <LinhaListaReal
+                key={pessoa.id} pessoa={pessoa} aoAbrir={aoAbrir} colunas={ordem}
+                comercial={pessoa.responsavelId ? dados?.comerciais?.get(pessoa.responsavelId) : undefined}
+                contacto={dados?.contactos?.get(pessoa.id)}
+              />
+            ))}
           </TableBody>
         </Table>
       </div>
