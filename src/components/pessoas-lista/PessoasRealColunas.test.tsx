@@ -1,4 +1,4 @@
-// A Lista real com colunas à escolha e leituras em lote: telefone, email e WhatsApp (uma chamada por página) e o nome do comercial
+// A Lista real com colunas à escolha e leituras em lote: telefone, email e WhatsApp (dois pedidos por página, como em Leads) e o nome do comercial
 // (uma consulta por página), só quando essas colunas estão visíveis, e a escolha de colunas por organização.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -12,10 +12,10 @@ import { listaBase, pessoaLista } from "./fabricaLista";
 import { PessoasReal } from "./PessoasReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
-const rpcMock = vi.hoisted(() => vi.fn());
+const contactosMock = vi.hoisted(() => vi.fn());
 const inMock = vi.hoisted(() => vi.fn());
 const fromMock = vi.hoisted(() => vi.fn());
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: rpcMock, from: fromMock } }));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { from: fromMock } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 const listaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", async (original) => ({
@@ -51,10 +51,18 @@ const sem = (...ids: string[]) => escolhaPorOmissao().map((c) => (ids.includes(c
 
 beforeEach(() => {
   window.localStorage.clear();
-  [rpcMock, inMock, fromMock, listaMock].forEach((m) => m.mockReset());
-  fromMock.mockReturnValue({ select: () => ({ in: inMock }) });
-  rpcMock.mockReturnValue(Promise.resolve({
-    data: [{ entity_id: A, display_name: "Ana Lopes", email: "ana@exemplo.pt", phone_number: "912345678", last_interaction_at: null }], error: null,
+  [contactosMock, inMock, fromMock, listaMock].forEach((m) => m.mockReset());
+  // Comerciais: from("anew_users").select().in(). Contactos, como em Leads: from(tabela).select().in("entity_id", ids).eq("is_primary", true).
+  fromMock.mockImplementation((tabela: string) => ({
+    select: () => ({
+      in: tabela === "anew_users" ? inMock : (coluna: string, ids: string[]) => ({ eq: () => contactosMock(tabela, coluna, ids) }),
+    }),
+  }));
+  contactosMock.mockImplementation((tabela: string) => Promise.resolve({
+    data: tabela === "anew_entity_emails"
+      ? [{ entity_id: A, email: "ana@exemplo.pt" }]
+      : [{ entity_id: A, phone_number: "912345678" }],
+    error: null,
   }));
   inMock.mockReturnValue(Promise.resolve({ data: [{ id: "u-rui", name: "Rui Dias" }], error: null }));
 });
@@ -76,16 +84,17 @@ describe("PessoasReal: colunas por omissão", () => {
   });
   it("em modo exemplo não há leituras à base", () => {
     desenhar({ modo: "exemplo" });
-    expect(rpcMock).not.toHaveBeenCalled();
+    expect(contactosMock).not.toHaveBeenCalled();
     expect(fromMock).not.toHaveBeenCalled();
   });
 });
 
 describe("PessoasReal: leituras em lote por página", () => {
-  it("uma chamada de contactos com os ids das linhas e uma consulta de comerciais com os responsáveis", async () => {
+  it("dois pedidos de contactos (emails e telefones) com os ids das linhas e uma consulta de comerciais com os responsáveis", async () => {
     desenhar();
-    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
-    expect(rpcMock).toHaveBeenCalledWith("get_entity_contact_summary", { _entity_ids: [A, B] });
+    await waitFor(() => expect(contactosMock).toHaveBeenCalledTimes(2));
+    expect(contactosMock).toHaveBeenCalledWith("anew_entity_emails", "entity_id", [A, B]);
+    expect(contactosMock).toHaveBeenCalledWith("anew_entity_phones", "entity_id", [A, B]);
     await waitFor(() => expect(inMock).toHaveBeenCalledTimes(1));
     expect(fromMock).toHaveBeenCalledWith("anew_users");
     expect(inMock).toHaveBeenCalledWith("id", ["u-rui"]);
@@ -103,19 +112,19 @@ describe("PessoasReal: leituras em lote por página", () => {
     desenhar();
     await Promise.resolve();
     await Promise.resolve();
-    expect(rpcMock).not.toHaveBeenCalled();
+    expect(contactosMock).not.toHaveBeenCalled();
     expect(fromMock).not.toHaveBeenCalled();
   });
-  it("com só uma das colunas de contacto visível, lê os contactos (uma vez)", async () => {
+  it("com só uma das colunas de contacto visível, lê os contactos (uma vez: dois pedidos)", async () => {
     guardar("org-1", sem("email", "whatsapp", "assigned"));
     desenhar();
-    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(1));
-    expect(fromMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(contactosMock).toHaveBeenCalledTimes(2));
+    expect(fromMock).not.toHaveBeenCalledWith("anew_users");
   });
   it("uma falha nos contactos não derruba a lista: as linhas ficam e a célula diz «Sem dado»", async () => {
-    rpcMock.mockReturnValue(Promise.resolve({ data: null, error: { code: "57014", message: "timeout" } }));
+    contactosMock.mockReturnValue(Promise.resolve({ data: null, error: { code: "57014", message: "timeout" } }));
     desenhar();
-    await waitFor(() => expect(rpcMock).toHaveBeenCalled());
+    await waitFor(() => expect(contactosMock).toHaveBeenCalled());
     expect(screen.getAllByRole("rowheader")).toHaveLength(2);
     expect(screen.queryByText("912345678")).toBeNull();
     expect(screen.getAllByText("Sem dado").length).toBeGreaterThan(0);

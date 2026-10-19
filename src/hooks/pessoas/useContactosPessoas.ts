@@ -11,9 +11,13 @@ const MAX_REPETICOES = 1;
 
 type Entrada = readonly [string, ContactoDaLista];
 
-interface LinhaContacto {
+interface LinhaEmail {
   entity_id: string;
   email: string | null;
+}
+
+interface LinhaTelefone {
+  entity_id: string;
   phone_number: string | null;
 }
 
@@ -22,27 +26,39 @@ const limpo = (valor: string | null | undefined): string | null => {
   return aparado === "" ? null : aparado;
 };
 
+/** O primeiro valor de cada entidade, como em Leads (`find` por entity_id). */
+function primeiroPorEntidade<T extends { entity_id: string }>(linhas: readonly T[], valor: (l: T) => string | null): Map<string, string | null> {
+  const mapa = new Map<string, string | null>();
+  for (const l of linhas) if (!mapa.has(l.entity_id)) mapa.set(l.entity_id, limpo(valor(l)));
+  return mapa;
+}
+
 /**
- * Lê o telefone e o email principais de um lote de pessoas com `get_entity_contact_summary` (SECURITY INVOKER: a RLS aplica-se),
- * UMA chamada por lote. Todos os ids do lote voltam com entrada: quem a função não devolve (sem contactos, ou escondido pela
- * RLS) fica com null e null. Um erro é reportado e lançado: só as pessoas desse lote ficam por saber.
+ * Lê o email e o telefone principais de um lote de pessoas pela mesma via que a página de Leads: dois pedidos diretos
+ * `.in("entity_id", lote).eq("is_primary", true)` (emails e telefones), a RLS aplica-se. Todos os ids do lote voltam com entrada:
+ * quem não tem contacto principal (ou a RLS esconde) fica com null e null. Um erro em QUALQUER dos dois pedidos é reportado e
+ * lançado, para a coluna não mostrar um valor falso: só as pessoas desse lote ficam por saber.
  */
 async function lerLote(lote: readonly string[]): Promise<Entrada[]> {
-  let erro: unknown = null;
-  let linhas: LinhaContacto[] = [];
+  const ids = [...lote];
+  let emails: LinhaEmail[] = [];
+  let telefones: LinhaTelefone[] = [];
   try {
-    const resposta = await supabase.rpc("get_entity_contact_summary", { _entity_ids: [...lote] });
-    erro = resposta.error ?? null;
-    linhas = (resposta.data ?? []) as LinhaContacto[];
+    const [respEmails, respTelefones] = await Promise.all([
+      supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", ids).eq("is_primary", true),
+      supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", ids).eq("is_primary", true),
+    ]);
+    const erro = respEmails.error ?? respTelefones.error ?? null;
+    if (erro) throw erro;
+    emails = (respEmails.data ?? []) as LinhaEmail[];
+    telefones = (respTelefones.data ?? []) as LinhaTelefone[];
   } catch (excecao) {
-    erro = excecao;
+    captureFlowError(excecao, "pessoas-neg");
+    throw excecao;
   }
-  if (erro) {
-    captureFlowError(erro, "pessoas-neg");
-    throw erro;
-  }
-  const porId = new Map(linhas.map((l) => [l.entity_id, l]));
-  return lote.map((id) => [id, { telefone: limpo(porId.get(id)?.phone_number), email: limpo(porId.get(id)?.email) }] as const);
+  const emailPorId = primeiroPorEntidade(emails, (l) => l.email);
+  const telefonePorId = primeiroPorEntidade(telefones, (l) => l.phone_number);
+  return lote.map((id) => [id, { telefone: telefonePorId.get(id) ?? null, email: emailPorId.get(id) ?? null }] as const);
 }
 
 function juntar(resultados: readonly UseQueryResult<Entrada[]>[]): ReadonlyMap<string, ContactoDaLista> {
@@ -52,8 +68,8 @@ function juntar(resultados: readonly UseQueryResult<Entrada[]>[]): ReadonlyMap<s
 }
 
 /**
- * O telefone e o email de cada pessoa visível, por id. Uma chamada por lote de 100 (uma página); sem `ativo` (as colunas estão
- * escondidas), em modo exemplo ou sem ids, não há chamadas. Quem não está no mapa ainda se não sabe (a carregar, ou em erro).
+ * O telefone e o email de cada pessoa visível, por id. Dois pedidos por lote de 100 (uma página); sem `ativo` (as colunas estão
+ * escondidas), em modo exemplo ou sem ids, não há pedidos. Quem não está no mapa ainda se não sabe (a carregar, ou em erro).
  */
 export function useContactosPessoas(ids: readonly string[], ativo: boolean): ReadonlyMap<string, ContactoDaLista> {
   const fonte = useFontePessoas();
