@@ -27,7 +27,7 @@ import { PessoasV1, esquecerPessoasV1, irParaLista } from "./PessoasV1";
 import { NumerosV1 } from "./NumerosV1";
 import { FrotaV1, abrirViaturaFrotaV1, esquecerFrotaV1 } from "./FrotaV1";
 import { RAMO_V1 } from "./ramoV1";
-import { InventarioV1, esquecerInventarioV1 } from "./InventarioV1";
+import { InventarioV1, MenuInventarioV1, abrirSecaoInv, esquecerInventarioV1 } from "./InventarioV1";
 import { criarSeedV1 } from "./inventarioV1Seed";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
@@ -352,7 +352,7 @@ export default function PrototipoNegocios() {
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
-      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v1n && v === "inventario") { esquecerInventarioV1(true); setNavInv((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v1n && v === "inventario") { esquecerInventarioV1(); setNavInv((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
         className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
           cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
         <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
@@ -403,7 +403,7 @@ export default function PrototipoNegocios() {
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
           <nav className="flex flex-col gap-0.5" aria-label="Menu">
-            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}</> : null}</Fragment>)}
+            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}</> : null}{v === "inventario" && v1n && S.view === "inventario" ? <MenuInventarioV1 aoAbrir={abrirSecaoInv} /> : null}</Fragment>)}
           </nav>
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
@@ -475,7 +475,7 @@ export default function PrototipoNegocios() {
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
             {((comInvFrota ? (v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes"]) : v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
-              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v1n && v === "inventario") { esquecerInventarioV1(true); setNavInv((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v1n && v === "inventario") { esquecerInventarioV1(); setNavInv((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}

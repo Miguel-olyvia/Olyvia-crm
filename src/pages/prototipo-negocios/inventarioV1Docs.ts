@@ -39,6 +39,8 @@ function somar(iso: string, n: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 /** "2.337,00 €" (E7: ponto nos milhares também com 4 algarismos). */
+/** A primeira letra em minúscula, salvo siglas ("Gás R32" → "gás R32", "SDS" fica). */
+export const minuscula = (s: string): string => (/^[A-Z]{2}/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
 export const eur = (n: number): string => `${eurMotor(n)} €`;
 
 /** O negócio de uma origem do Inventário ("CT 2026/1027", "VD 2026/1030"). */
@@ -267,8 +269,10 @@ export function reposicaoCarrinha(db: Inventario, carrinha: string, sku: string)
 
 /** O livro de um material, em palavras: "Saiu 6 sacos para a obra de Marta Lima · qui, 9 out". Os mais recentes primeiro. */
 export interface MovInv { id: number; t: string; q: string; entrada: boolean }
-export function movimentosInv(S: Estado, db: Inventario, sku: string, n = 8): MovInv[] {
-  const un = unidade(db, sku);
+export type TipoLivro = "entradas" | "saidas" | "correcoes";
+const TIPO_LIVRO: Record<Movimento["type"], TipoLivro> = { in: "entradas", tin: "entradas", out: "saidas", tout: "saidas", ret: "saidas", adjp: "correcoes", adjm: "correcoes", loss: "correcoes" };
+/** O livro de movimentos de um material (`sku`) ou de todos (null, com o nome do material na frase), os mais recentes primeiro. */
+export function movimentosInv(S: Estado, db: Inventario, sku: string | null, n = 8, tipo?: TipoLivro): MovInv[] {
   const onde = (m: Movimento): string => {
     const e = db.ecs.find((x) => x.id === m.doc);
     if (e) { const d = negocioDaRef(S, e.origin.ref); return ` para a obra de ${d?.nome ?? e.client}`; }
@@ -277,15 +281,24 @@ export function movimentosInv(S: Estado, db: Inventario, sku: string, n = 8): Mo
     if (m.doc === "Saldo inicial" || m.doc === "Carga inicial") return " (abertura do inventário)";
     return m.note ? ` (${m.note})` : "";
   };
-  const verbo: Record<Movimento["type"], [string, boolean]> = {
-    in: ["Entrou", true], out: ["Saiu", false], tin: ["Chegou de outro armazém", true], tout: ["Foi para outro armazém", false],
-    adjp: ["Corrigido para mais", true], adjm: ["Corrigido para menos", false], ret: ["Devolvido ao fornecedor", false], loss: ["Partiu ou perdeu-se", false],
+  // o verbo concorda com a quantidade: "Saiu 1 saco", "Saíram 6 sacos"
+  const verbo: Record<Movimento["type"], [string, string, boolean]> = {
+    in: ["Entrou", "Entraram", true], out: ["Saiu", "Saíram", false], tin: ["Chegou de outro armazém", "Chegaram de outro armazém", true], tout: ["Foi para outro armazém", "Foram para outro armazém", false],
+    adjp: ["Corrigido para mais", "Corrigidos para mais", true], adjm: ["Corrigido para menos", "Corrigidos para menos", false], ret: ["Devolvido ao fornecedor", "Devolvidos ao fornecedor", false], loss: ["Partiu ou perdeu-se", "Partiram ou perderam-se", false],
   };
-  return db.moves.filter((m) => m.sku === sku).slice(-n).reverse().map((m) => {
-    const [v, entrada] = verbo[m.type];
+  return db.moves.filter((m) => (sku === null || m.sku === sku) && (!tipo || TIPO_LIVRO[m.type] === tipo)).slice(-n).reverse().map((m) => {
+    const [um, varios, entrada] = verbo[m.type], v = Math.abs(m.qty) === 1 ? um : varios;
     const armazem = db.warehouses.find((w) => w.id === m.wh);
-    return { id: m.id, t: `${v} ${qtd(Math.abs(m.qty), un)}${onde(m)}${armazem?.tipo === "viatura" ? " · " + armazem.name : ""}`, q: diaRelativo(m.at), entrada };
+    const nome = sku === null ? ` de ${minuscula(produto(db, m.sku)?.name ?? m.sku)}` : "";
+    return { id: m.id, t: `${v} ${qtd(Math.abs(m.qty), unidade(db, m.sku))}${nome}${onde(m)}${armazem?.tipo === "viatura" ? " · " + armazem.name : ""}`, q: diaRelativo(m.at), entrada };
   });
+}
+/** Quantos movimentos há no livro (de um tipo, ou todos). */
+export const contarMovimentos = (db: Inventario, tipo?: TipoLivro): number => db.moves.filter((m) => !tipo || TIPO_LIVRO[m.type] === tipo).length;
+
+/** O valor do stock do Armazém Central (pelo custo médio, ou o de compra se ainda não há média). */
+export function valorStock(db: Inventario): number {
+  return db.stocks.filter((s) => s.wh === ARMAZEM_OBRAS && !s.deleted).reduce((a, s) => { const p = produto(db, s.sku); return a + s.qty * (p?.avg || p?.cost || 0); }, 0);
 }
 
 /* ---------------------------------------------------------------- o que fazer agora */

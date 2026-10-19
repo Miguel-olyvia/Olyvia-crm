@@ -31,7 +31,7 @@ const preparar = () => {
 const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d, FINANCEIRO); A.emitir(d.id); A.validar(d.id); };
 const ctxDe = (S: ReturnType<typeof seed>, A: ReturnType<typeof acoes>): Ctx => ({ S, A, run: (fn) => fn(), go: (fn) => () => fn(), q: "", repor: () => {} });
 /** Os botões primários à vista (o Button do shadcn por defeito tem bg-primary; as escolhas ligadas têm aria-pressed). */
-const primarios = (): HTMLElement[] => screen.getAllByRole("button").filter((b) => /\bbg-primary\b/.test(b.className) && !b.hasAttribute("aria-pressed") && b.getAttribute("role") !== "tab");
+const primarios = (): HTMLElement[] => screen.getAllByRole("button").filter((b) => /\bbg-primary\b/.test(b.className) && !b.hasAttribute("aria-pressed") && !b.hasAttribute("aria-current") && b.getAttribute("role") !== "tab");
 
 beforeEach(() => { usarSeed(criarSeedV1); esquecerInventario(); esquecerInventarioV1(); });
 afterEach(() => { cleanup(); });
@@ -133,16 +133,32 @@ describe("o ecrã do Inventário no V1", () => {
     expect(within(agora).getByText(t2.t)).toBeInTheDocument();
   });
 
-  it("três separadores com setas; o Armazém procura sem acentos e diz quantos há", () => {
+  it("o Início explica o caminho do material e leva às secções; o Stock tem a lista toda, procura sem acentos", () => {
     const { S, A } = preparar();
     render(<InventarioV1 {...ctxDe(S, A)} />);
-    const obras = screen.getByRole("tab", { name: "Obras" });
-    expect(obras).toHaveAttribute("aria-selected", "true");
-    fireEvent.keyDown(obras, { key: "End" });
-    expect(screen.getByRole("tab", { name: "Armazém" })).toHaveAttribute("aria-selected", "true");
+    const caminho = screen.getByRole("heading", { name: "O caminho do material" }).parentElement!;
+    for (const t of ["Fornecedores", "Armazém", "Obras"]) expect(within(caminho).getByRole("button", { name: new RegExp("^" + t) })).toBeInTheDocument();
+    fireEvent.click(within(caminho).getByRole("button", { name: /^Armazém/ }));
+    expect(screen.getByRole("heading", { level: 1, name: "Stock" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Silicone/ }).length).toBeGreaterThan(0);
     fireEvent.change(screen.getByRole("searchbox", { name: "Procurar" }), { target: { value: "ceramico" } });
     expect(screen.getAllByRole("button", { name: /Cerâmico de parede/ }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Silicone/ })).toBeNull();
+  });
+
+  it("as secções têm o seu ecrã: movimentos com filtros, fornecedores, carrinhas", () => {
+    const { S, A } = preparar();
+    render(<InventarioV1 {...ctxDe(S, A)} />);
+    const nav = screen.getByRole("navigation", { name: "Secções do Inventário" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Movimentos" }));
+    expect(screen.getByRole("heading", { level: 1, name: "Movimentos" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Saídas/ }));
+    expect(screen.getAllByText(/^(Saiu|Saíram) /).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^(Entrou|Entraram) /)).toBeNull();
+    fireEvent.click(within(nav).getByRole("button", { name: "Fornecedores" }));
+    expect(screen.getByText("Cerâmica do Centro (exemplo)")).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Carrinhas" }));
+    expect(screen.getAllByRole("heading", { level: 2, name: /^Carrinha / }).length).toBeGreaterThan(0);
   });
 
   it("\"Abrir no Inventário\" no negócio abre a obra; o material da obra mostra o estado em palavras", () => {

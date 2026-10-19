@@ -890,12 +890,16 @@ Pedido original do Ruben (14/10): "o orçamento gera o contrato; depois do contr
 
 ## Inventário do V1, refeito à volta das obras (19/10/2026, ramo feat/v1-inventario)
 
-O Inventário do Rafael (`inventario/`) tinha um submenu de 9 ecrãs, separadores por cima, tabelas de 9 colunas, listas que abrem, cartões de números e palavras como FIFO, PO, EC e SKU. No V1 passa a ser um item do menu, como a Frota, com quatro ecrãs:
+O Inventário do Rafael (`inventario/`) tinha um submenu de 9 ecrãs, separadores por cima, tabelas de 9 colunas, listas que abrem, cartões de números e palavras como FIFO, PO, EC e SKU. No V1 (`InventarioV1.tsx`) as mesmas áreas têm nomes claros e um ecrã simples cada; o menu lateral mostra-as debaixo de "Inventário" (no telemóvel, uma fila no topo da página):
 
-- **Inventário** (`InventarioV1.tsx`): "O que fazer agora" com um só primário (aprovar uma encomenda, dar entrada do que chegou com − / +, levar à obra o material de uma fase, encomendar um consumível abaixo do mínimo), "Depois" e três separadores: **Obras**, **Encomendas** (por aprovar, a caminho, recebidas, fornecedores) e **Armazém** (Armazém Central com pesquisa e filtros, e as carrinhas da Frota com "Repor").
-- **A obra**: os materiais por fase da obra, com o dia em que cada fase começa (do plano da obra) e o estado em palavras ("pronto no armazém", "a chegar ter, 13 out", "encomenda por aprovar", "já na obra").
-- **A encomenda a fornecedor**: o percurso (aprovada, no portal, data confirmada, recebida), o que se pediu e o histórico em palavras.
-- **O material**: no armazém, para obras, livre e a chegar; para que obras está guardado; "Corrigir a quantidade" com o motivo; os movimentos em palavras.
+- **Início**: o caminho do material (Fornecedores → Armazém → Obras) com o número de cada passo e o que pede atenção; "O que fazer agora" com um só primário (aprovar uma encomenda, dar entrada do que chegou com − / +, levar à obra o material de uma fase, encomendar um consumível abaixo do mínimo); "Depois".
+- **Stock**: tudo o que há no Armazém Central, por categoria, com pesquisa e filtros (abaixo do mínimo, guardados para obras); a quantidade e o livre à direita.
+- **Obras**: o material de cada obra por fase, com o dia em que cada fase começa e o estado em palavras.
+- **Encomendas a fornecedores**: por aprovar, a caminho e recebidas, com o percurso de cada uma.
+- **Fornecedores**, **Movimentos** (o livro, com filtros Entradas, Saídas, Correções) e **Carrinhas** (com "Repor").
+- Três fichas: a obra, a encomenda e o material (para que obras está guardado, "Corrigir a quantidade", os movimentos).
+
+(19/10, depois da primeira versão: o Ruben não encontrava a lista de stock, escondida num separador no fundo, e não percebia o ecrã de entrada. Daí as secções no menu e o caminho do material no Início.)
 
 As regras são as do Rafael, sem mudanças (reserva, encomendas, receção, saídas, ajustes): `inventarioV1Acoes.ts` só as chama. O que mostrar está em `inventarioV1Docs.ts` (funções puras, testadas em `inventarioV1.test.tsx`).
 
