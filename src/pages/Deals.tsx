@@ -1082,8 +1082,8 @@ const Deals = () => {
           if (lead.entity_id) {
             const [entRes, emRes, phRes] = await Promise.all([
               supabase.from("anew_entities").select("display_name").eq("id", lead.entity_id).single(),
-              supabase.from("anew_entity_emails").select("email").eq("entity_id", lead.entity_id).eq("is_primary", true).limit(1),
-              supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", lead.entity_id).eq("is_primary", true).limit(1),
+              supabase.from("anew_entity_emails").select("email").eq("entity_id", lead.entity_id).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
+              supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", lead.entity_id).eq("is_primary", true).order("created_at", { ascending: false }).limit(1),
             ]);
             leadName = entRes.data?.display_name || leadName;
             leadEmail = emRes.data?.[0]?.email;

@@ -74,6 +74,17 @@ export function computeLineVatAmount(line: any, lineBase: number): number {
   return computeLineVatBuckets(line, lineBase).reduce((s, b) => s + b.vat, 0);
 }
 
+/**
+ * Rótulo da coluna IVA de uma linha, coerente com `computeLineVatBuckets`:
+ * `iva_override` manda; bundles com componentes a taxas diferentes → 'Mista';
+ * caso contrário a única taxa aplicada (ex.: '23%').
+ */
+export function getLineVatLabel(line: any): string {
+  const rates = Array.from(new Set(computeLineVatBuckets(line, 1).map((b) => b.rate)));
+  if (rates.length > 1) return 'Mista';
+  return `${Number(rates[0] ?? 0).toFixed(0)}%`;
+}
+
 export function computeQuoteTotals(lines: any[], fees: any[] = [], descontoPercent = 0): QuoteTotals {
   const subtotalBruto = lines.reduce((sum, line) => {
     return sum + (parseFloat(String(line.total_sem_iva || 0)));

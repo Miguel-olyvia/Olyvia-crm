@@ -13,6 +13,7 @@ import {
   assertExists,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { resolveCanonicalFormId } from "../_shared/leadsValidation.ts";
+import { pickExistingAddress } from "../_shared/addressLookup.ts";
 
 // ---- Helpers replicated from index.ts ----------------------------------
 
@@ -256,7 +257,7 @@ function makeBackfillMockSupabase(opts: {
   emailCount?: number;
   phoneCount?: number;
   addressCount?: number;
-  existingAddressByKey?: Record<string, { id: string }>;
+  existingAddressByKey?: Record<string, { id: string } | { id: string }[]>;
 }) {
   const inserted: Record<string, any[]> = {
     anew_entity_emails: [],
@@ -280,13 +281,17 @@ function makeBackfillMockSupabase(opts: {
           builder._filters[col] = val;
           return builder;
         },
-        maybeSingle: () => {
+        order: (_col: string, _o?: unknown) => builder,
+        // Real PostgREST: .limit(1) returns an array (here: the first row,
+        // already ordered by created_at ascending). A 2+-row key must NOT error.
+        limit: (n: number) => {
           if (table === "anew_addresses") {
             const key = builder._filters["address_key"];
             const found = existingAddressByKey[key as string];
-            return Promise.resolve({ data: found ?? null, error: null });
+            const rows = found === undefined ? [] : Array.isArray(found) ? found : [found];
+            return Promise.resolve({ data: rows.slice(0, n), error: null });
           }
-          return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: [], error: null });
         },
         insert: (row: any) => {
           inserted[table]?.push(row);
@@ -386,11 +391,13 @@ async function runReusedEntityBackfill(
     if (!addressCount) {
       const addressKey = computeAddressKey(street, postal, city);
       let addressId: string | null = null;
-      const { data: existingAddress } = await supabase
+      const { data: existingAddressRows } = await supabase
         .from("anew_addresses")
         .select("id")
         .eq("address_key", addressKey)
-        .maybeSingle();
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const existingAddress = pickExistingAddress(existingAddressRows);
       if (existingAddress?.id) {
         addressId = existingAddress.id;
       } else {
@@ -495,6 +502,30 @@ Deno.test("reused-entity backfill — matching address_key already exists: reuse
   assertEquals(inserted.anew_addresses.length, 0);
   assertEquals(inserted.anew_entity_addresses.length, 1);
   assertEquals(inserted.anew_entity_addresses[0].address_id, "existing-address-9");
+});
+
+Deno.test("reused-entity backfill — TWO rows share the address_key: first (oldest) reused, no third row created", async () => {
+  const key = computeAddressKey("Rua Duplicada", "5000-005", "Vila Real");
+  const { supabase, inserted } = makeBackfillMockSupabase({
+    emailCount: 1,
+    phoneCount: 1,
+    addressCount: 0,
+    existingAddressByKey: { [key]: [{ id: "oldest-address" }, { id: "dup-address" }] },
+  });
+
+  await runReusedEntityBackfill(supabase, {
+    entityId: "entity-5",
+    leadEmail: null,
+    leadPhone: null,
+    street: "Rua Duplicada",
+    postal: "5000-005",
+    city: "Vila Real",
+    createdBy: "admin-1",
+  });
+
+  assertEquals(inserted.anew_addresses.length, 0);
+  assertEquals(inserted.anew_entity_addresses.length, 1);
+  assertEquals(inserted.anew_entity_addresses[0].address_id, "oldest-address");
 });
 
 Deno.test("reused-entity backfill — incomplete address (missing postal_code) is skipped, email/phone still processed", async () => {

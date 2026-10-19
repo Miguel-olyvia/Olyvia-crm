@@ -240,7 +240,7 @@ export async function loadProposalPortalData(
         // `iva_percent` flat da linha — era isso que fazia as secções somarem
         // mais do que o total do orçamento mostrado logo abaixo. O PDF já lê os
         // componentes e mostra-os ao cliente, por isso nada aqui é novo para ele.
-        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent, selected_attributes")
+        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent, selected_attributes, retail_price_unit")
         .in("quote_id", quoteIds)
         .eq("visible_to_client", true)
         .order("ordem", { ascending: true }),

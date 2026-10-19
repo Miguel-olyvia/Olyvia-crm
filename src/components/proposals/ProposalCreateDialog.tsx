@@ -30,7 +30,8 @@ import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualI
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
-import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { computeInlineLinePersistTotals } from "@/utils/quotes/inlineLinePersistTotals";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -478,12 +479,15 @@ export function ProposalCreateDialog({
         if (validLines.length === 0) continue;
 
         const linesToInsert = validLines.map(l => {
-          // Subtotal gravado pela fonte única do preço da linha.
+          // Subtotal pela fonte única do preço da linha; IVA repartido por
+          // componente nos bundles (6% mão de obra / 23% material) e
+          // iva_override respeitado — igual ao QuoteBuilder e ao portal.
           const lineDiscount = l.discount_percent || 0;
-          const precoSemIva = getLineSubtotal(l);
-          const ivaValor = precoSemIva * (l.iva_percent / 100);
-          const totalComIva = precoSemIva + ivaValor;
-          const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
+          const {
+            total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva,
+            total_com_desconto: totalComDesconto,
+          } = computeInlineLinePersistTotals(l, iq.desconto_global_percent);
           return {
             catalog_item_id: l.catalog_item_id || null,
             product_id: l.product_id || null, service_id: l.service_id || null,

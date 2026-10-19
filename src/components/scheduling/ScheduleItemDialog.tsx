@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { format, setHours, setMinutes, addHours } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -68,6 +68,7 @@ export function ScheduleItemDialog({
   const { userType } = useCompany();
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const userSelectRef = useRef<HTMLButtonElement>(null);
   const [inviteesOpen, setInviteesOpen] = useState(false);
   const [addressOptions, setAddressOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [showAddressPicker, setShowAddressPicker] = useState(false);
@@ -225,10 +226,11 @@ export function ScheduleItemDialog({
     return companyUsers;
   }, [companyUsers, isSelfOnly, currentUserId]);
 
-  // Auto-set user_id for self-only users when creating new items on time-off boards
+  // Auto-set user_id for self-only users on time-off boards (new items, or existing items
+  // without a user_id). Never overwrites a user_id the item already has.
   useEffect(() => {
-    if (open && isTimeOffBoard && isSelfOnly && currentUserId && !item) {
-      setFormData(f => ({ ...f, user_id: currentUserId }));
+    if (open && isTimeOffBoard && isSelfOnly && currentUserId && !item?.user_id) {
+      setFormData(f => (f.user_id === currentUserId ? f : { ...f, user_id: currentUserId }));
     }
   }, [open, isTimeOffBoard, isSelfOnly, currentUserId, item]);
 
@@ -269,7 +271,16 @@ export function ScheduleItemDialog({
     if (!formData.board_id || !formData.start_datetime || !formData.end_datetime) {
       return;
     }
-    
+
+    // Em quadros de férias o Colaborador é obrigatório (sem ele o item ficava ligado a quem o cria)
+    if (isTimeOffBoard && !formData.user_id) {
+      const message = t('scheduling.timeOff.employeeRequired');
+      setFieldErrors(prev => ({ ...prev, user_id: message }));
+      toast.error(message);
+      userSelectRef.current?.focus();
+      return;
+    }
+
     // For time-off boards, title can be auto-generated
     let title = formData.title;
     if (isTimeOffBoard && !title && formData.time_off_type) {
@@ -468,13 +479,22 @@ export function ScheduleItemDialog({
 
                 {/* User selector (Colaborador) */}
                 <div className="col-span-2 space-y-2">
-                  <Label>{t('scheduling.timeOff.employee')} *</Label>
+                  <Label htmlFor="time-off-user">{t('scheduling.timeOff.employee')} *</Label>
                   <Select
                     value={formData.user_id}
-                    onValueChange={(value) => setFormData(f => ({ ...f, user_id: value }))}
+                    onValueChange={(value) => {
+                      setFormData(f => ({ ...f, user_id: value }));
+                      setFieldErrors(({ user_id: _cleared, ...rest }) => rest);
+                    }}
                     disabled={isSelfOnly}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger
+                      id="time-off-user"
+                      ref={userSelectRef}
+                      aria-required="true"
+                      aria-invalid={!!fieldErrors.user_id}
+                      aria-describedby={fieldErrors.user_id ? 'time-off-user-error' : undefined}
+                    >
                       <SelectValue placeholder={t('scheduling.timeOff.selectEmployee')} />
                     </SelectTrigger>
                     <SelectContent>
@@ -485,6 +505,9 @@ export function ScheduleItemDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.user_id && (
+                    <p id="time-off-user-error" role="alert" className="text-sm text-destructive">{fieldErrors.user_id}</p>
+                  )}
                 </div>
 
                 {/* Approval status display */}

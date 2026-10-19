@@ -15,6 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 import { cooldownLabel } from "@/hooks/useCooldown";
 import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { computeQuoteTotals, computeLineVatAmount, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
+import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
 
 /**
  * Total c/IVA de uma linha, calculado como o PDF o calcula: num bundle o IVA é
@@ -360,7 +361,7 @@ export function ProposalPortalDocument({
                                         </td>
                                         <td className="px-2 py-3 text-center">{item.qt || 1}</td>
                                         <td className="px-2 py-3 text-right">
-                                          {item.qt && item.total_sem_iva ? formatCurrency(item.total_sem_iva / item.qt) : "—"}
+                                          {item.qt ? formatCurrency(getLineDisplayUnitPrice(item)) : "—"}
                                         </td>
                                         <td className="py-3 pl-2 text-right font-medium">{formatCurrency(item.total_sem_iva || 0)}</td>
                                       </tr>
@@ -539,7 +540,7 @@ export function ProposalPortalDocument({
                                     </td>
                                     <td className="px-2 py-3 text-center">{item.qt || 1}</td>
                                     <td className="px-2 py-3 text-right">
-                                      {item.qt && item.total_sem_iva ? formatCurrency(item.total_sem_iva / item.qt) : "—"}
+                                      {item.qt ? formatCurrency(getLineDisplayUnitPrice(item)) : "—"}
                                     </td>
                                     <td className="py-3 pl-2 text-right font-medium">{formatCurrency(item.total_sem_iva || 0)}</td>
                                   </tr>

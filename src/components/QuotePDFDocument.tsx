@@ -3,8 +3,8 @@ import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/
 import { resolveField, type RenderContext } from '@/utils/documentVariables';
 import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
 import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
-import { computeQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
-import { getLineUnitPrice } from '@/utils/quotes/quoteLinePricing';
+import { computeQuoteTotals, getLineVatLabel, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
+import { getLineDisplayUnitPrice } from '@/utils/quotes/quoteLinePricing';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -390,7 +390,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
 
   // Preço unitário pela fonte única: o preço de venda definido manda mesmo
   // quando a linha tem custo, e o valor vem fechado ao cêntimo.
-  const calculateUnitPrice = (line: any) => getLineUnitPrice(line);
+  // Numa linha gravada: preço de venda gravado, senão soma dos componentes do
+  // bundle, senão total ÷ quantidade — o total da linha é sempre unit × qtd.
+  const calculateUnitPrice = (line: any) => getLineDisplayUnitPrice(line);
 
   // Format client address
   const primaryAddress = client?.client_addresses?.find((addr: any) => addr.is_primary) 
@@ -568,19 +570,13 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                 const unitPrice = calculateUnitPrice(line);
                 const quantity = parseFloat(String(line.qt || 0));
                 const lineTotal = parseFloat(String(line.total_sem_iva || 0));
-                const lineIva = parseFloat(String(line.iva_percent || 0));
                 const lineAttrs = getLineAttributes(line);
                 const bundleComponents = getBundleComponents(line);
                 const showBundleBadge = isBundleLine(line) || bundleComponents.length > 0;
                 const unidade = line.unidade || 'UN';
-                const uniqueComponentRates = Array.from(new Set(bundleComponents.map(c => c.vat_rate)));
                 const lineIvaOverride = (line as any)?.selected_attributes?.iva_override;
                 const hasLineIvaOverride = typeof lineIvaOverride === "number" && !Number.isNaN(lineIvaOverride);
-                const ivaDisplay = hasLineIvaOverride
-                  ? `${Number(lineIvaOverride).toFixed(0)}%`
-                  : (bundleComponents.length > 0 && uniqueComponentRates.length > 1
-                      ? 'Mista'
-                      : `${(bundleComponents.length > 0 ? uniqueComponentRates[0] : lineIva).toFixed(0)}%`);
+                const ivaDisplay = getLineVatLabel(line);
 
                 return (
                   <View key={line.id} wrap={false}>
@@ -610,7 +606,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                         <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 4, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>Componentes do bundle:</Text>
                         {bundleComponents.map((component, idx) => {
                           const effectiveQty = component.quantity * (quantity || 1);
-                          const componentTotal = component.unit_price * effectiveQty;
+                          const componentTotal = round2(component.unit_price) * effectiveQty;
                           return (
                             <View key={`${component.name}-${idx}`} style={{ marginBottom: 4, paddingBottom: 4, borderBottom: idx === bundleComponents.length - 1 ? 'none' : '1 solid #e5e7eb' }}>
                               <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 1 }}>
