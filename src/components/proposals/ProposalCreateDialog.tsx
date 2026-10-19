@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
@@ -30,6 +30,7 @@ import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualI
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
+import { caminhoVoltarSeguro, ligacaoComVoltar } from "@/lib/voltarParaPessoas";
 import { markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 import { computeInlineLinePersistTotals } from "@/utils/quotes/inlineLinePersistTotals";
 
@@ -112,6 +113,11 @@ interface ProposalCreateDialogProps {
   editingId?: string | null;
   /** Called after a successful create/update with the proposal id. */
   onSaved?: (proposalId: string) => void;
+  /**
+   * Só a ficha da pessoa (P3): orçamentos já escolhidos, carregados por id (a pesquisa normal nunca oferece os que estão em rascunho). Só vale
+   * ao criar. Sem isto nada muda.
+   */
+  presetQuoteIds?: string[];
 }
 
 export function ProposalCreateDialog({
@@ -120,6 +126,7 @@ export function ProposalCreateDialog({
   presetEntityId,
   editingId = null,
   onSaved,
+  presetQuoteIds,
 }: ProposalCreateDialogProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -127,6 +134,7 @@ export function ProposalCreateDialog({
   const { isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds } = usePermissionScope();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [savingProposal, setSavingProposal] = useState(false);
   const submitLockRef = useRef(false);
@@ -212,6 +220,33 @@ export function ProposalCreateDialog({
     })();
     return () => { cancelled = true; };
   }, [open, presetEntityId]);
+
+  // Só a ficha da pessoa (P3): os orçamentos já escolhidos (a chave evita voltar a pedir a cada render por a lista ser nova).
+  const presetQuoteKey = presetQuoteIds?.join(",") ?? "";
+  const [presetQuotesFailed, setPresetQuotesFailed] = useState(false);
+  useEffect(() => {
+    setPresetQuotesFailed(false);
+    if (!open || editingId || presetQuoteKey === "") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("quotes").select("id, quote_number, total, estado").in("id", presetQuoteKey.split(","));
+        if (cancelled) return;
+        if (error || !data) { setPresetQuotesFailed(true); return; }
+        setSelectedQuotes(data.map((q) => ({ id: q.id, quote_number: q.quote_number, total: q.total, estado: q.estado })));
+      } catch {
+        if (!cancelled) setPresetQuotesFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, editingId, presetQuoteKey]);
+
+  // Só a ficha da pessoa (P3): o «Criar orçamento aqui» leva o `?voltar=` para o orçamento poder voltar à ficha. Sem a prop do P3 nada muda.
+  const quotesUrl = (proposalId: string, dealId: string): string => {
+    const destino = `/quotes?new=1&proposal_id=${proposalId}${dealId ? `&deal_id=${dealId}` : ""}`;
+    const regresso = presetQuoteIds ? caminhoVoltarSeguro(`${location.pathname}${location.search}`) : null;
+    return regresso ? ligacaoComVoltar(destino, regresso) : destino;
+  };
 
   // Load workflow stages + templates
   const loadStagesAndTemplates = useCallback(async () => {
@@ -324,7 +359,7 @@ export function ProposalCreateDialog({
     // Editing existing proposal — just navigate.
     if (editingId) {
       onOpenChange(false);
-      navigate(`/quotes?new=1&proposal_id=${editingId}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
+      navigate(quotesUrl(editingId, formData.deal_id));
       return;
     }
 
@@ -393,7 +428,7 @@ export function ProposalCreateDialog({
       onOpenChange(false);
       resetForm();
       onSaved?.(data.id);
-      navigate(`/quotes?new=1&proposal_id=${data.id}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
+      navigate(quotesUrl(data.id, formData.deal_id));
     } catch (err: any) {
       captureFlowError(err, "proposal-lifecycle");
       toast({ title: "Erro ao criar proposta", description: err.message, variant: "destructive" });
@@ -1013,6 +1048,10 @@ export function ProposalCreateDialog({
                   </Button>
                 </div>
               </div>
+
+              {presetQuotesFailed && (
+                <p role="alert" className="text-sm font-medium text-destructive">{t("pessoasPagina.neg.process.quotes.preset.error")}</p>
+              )}
 
               {selectedQuotes.length > 0 && (
                 <div className="flex flex-wrap gap-2">

@@ -6,7 +6,8 @@ import { TIPOS_SECCAO, type FichaDb, type SeccaoDb, type TipoSeccao } from "./fi
 import { comoErroNeg, repetir } from "./useListaPessoas";
 import { useFontePessoas } from "./useFontePessoas";
 
-const STALE_TIME_MS = 15_000;
+// A ficha refaz-se sempre que se volta a ela (propostas, contratos e orçamentos criados noutros ecrãs): nada de cache fresca.
+const STALE_TIME_MS = 0;
 /** Itens por página de cada secção (a função aceita de 1 a 100). */
 const LIMITE_FICHA = 30;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -136,6 +137,7 @@ export function useFichaPessoa(pessoaId: string | null): FichaPessoaLida {
     ),
     enabled: ativo,
     staleTime: STALE_TIME_MS,
+    refetchOnMount: "always",
     retry: repetir,
   });
 

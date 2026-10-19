@@ -10,10 +10,11 @@ import type {
 import { diasEntre } from "./adaptarResumoPessoa";
 import { escolher, textoOuNull } from "./adaptarComum";
 import type { FichaDb, MoradaFichaDb } from "./fichaTipos";
+import { leadDaAbordagem, RESULTADOS_DE_ENCERRAMENTO } from "./leadDaAbordagem";
 import { diaLisboa, horaDoProximoContacto } from "./tempoLisboa";
 
 const QUALIFICACOES: readonly QualificacaoPessoa[] = ["MQL", "SQL"];
-const ENCERRAMENTOS: readonly ResultadoEncerramento[] = ["semInteresse", "obraInviavel"];
+const ENCERRAMENTOS: readonly ResultadoEncerramento[] = RESULTADOS_DE_ENCERRAMENTO;
 
 function adaptarMorada(m: MoradaFichaDb | null): Pessoa["morada"] {
   if (!m) return undefined;
@@ -30,16 +31,39 @@ const empresaDe = (nome: string | null): Pessoa["empresa"] => {
   return limpo ? { nome: limpo } : undefined;
 };
 
-/** O encerramento da abordagem. Motivo da lista, «outro» com texto, ou nulo (encerrada pelo resultado da visita) que vira «outro». */
+/**
+ * O encerramento da abordagem. Motivo da lista, «outro» com texto, ou nulo (encerrada pelo resultado da visita) que vira «outro».
+ * Quando a lead mais recente da ficha está morta, a abordagem é a da aberta mais recente: se essa está encerrada só se sabe o resultado
+ * (`closure_result`), por isso o motivo é «outro» sem texto e o dia é hoje.
+ */
 function adaptarEncerramento(ficha: FichaDb, hoje: string): EncerramentoPessoa | undefined {
   const e = ficha.lead?.encerramento;
   const resultado = escolher(e?.resultado, ENCERRAMENTOS);
-  if (!e || !resultado) return undefined;
+  if (!e || !resultado) return encerramentoDeLeadAberta(ficha, hoje);
   const data = diaLisboa(e.em) ?? hoje;
   const daLista = escolher(e.motivo, MOTIVOS_PERDA);
   if (daLista) return { resultado, motivo: daLista, data };
   const motivo: MotivoEncerramento = "outro";
   return { resultado, motivo, motivoOutro: textoOuNull(e.motivo_outro) ?? undefined, data };
+}
+
+function encerramentoDeLeadAberta(ficha: FichaDb, hoje: string): EncerramentoPessoa | undefined {
+  const certa = leadDaAbordagem(ficha);
+  if (!certa?.encerrada || certa.id === ficha.lead?.id) return undefined;
+  const fecho = ficha.leads_abertas.find((l) => l.id === certa.id)?.closure_result;
+  const resultado = escolher(fecho?.trim(), ENCERRAMENTOS) ?? "semInteresse";
+  return { resultado, motivo: "outro", data: hoje };
+}
+
+const QUALIFICACOES_TEXTO = (valor: unknown): QualificacaoPessoa | undefined =>
+  typeof valor === "string" ? escolher(valor.trim().toUpperCase(), QUALIFICACOES) ?? undefined : undefined;
+
+/**
+ * MQL ou SQL. `pessoa.qualificacao` chega da função como o OBJETO das respostas da aba Qualificação: nunca é MQL nem SQL, e ler-lhe o texto
+ * rebentava a ficha. O tipo vem à parte, em `qualificacao_tipo` (migration futura); um texto em `qualificacao` (uma leitura antiga) ainda se lê.
+ */
+function qualificacaoDe(pessoa: FichaDb["pessoa"]): QualificacaoPessoa | undefined {
+  return QUALIFICACOES_TEXTO(pessoa.qualificacao_tipo) ?? QUALIFICACOES_TEXTO(pessoa.qualificacao);
 }
 
 /** A pessoa da ficha. `hoje` é o dia de Lisboa (AAAA-MM-DD). */
@@ -55,7 +79,7 @@ export function adaptarPessoa(ficha: FichaDb, hoje: string): Pessoa {
     ultimoContactoDias: diasEntre(agregados.ultimo_contacto_em, hoje),
     morada,
     distrito: textoOuNull(pessoa.morada?.distrito) ?? undefined,
-    qualificacao: escolher(pessoa.qualificacao?.trim().toUpperCase(), QUALIFICACOES) ?? undefined,
+    qualificacao: qualificacaoDe(pessoa),
     campanha: textoOuNull(pessoa.origem?.campanha) ?? undefined,
     formulario: textoOuNull(pessoa.origem?.formulario) ?? undefined,
     nif: textoOuNull(pessoa.nif) ?? undefined,

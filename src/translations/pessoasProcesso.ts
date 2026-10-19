@@ -1,6 +1,6 @@
 // Textos do seletor Lista / Quadro e do Quadro de Pessoas por 6 fases (pt e en). Juntam-se aos de `pessoasPagina.ts`, por isso as
 // chaves continuam a ser `pessoasPagina.*` (view.* e board.*), mais os negócios de cada pessoa na Lista (deals.*) e o "A fazer"
-// (todo.*, com os 12 passos em todo.step.<id>; `step.*` já é do próximo passo da chamada). Os nomes dos passos da coluna
+// (todo.*, com os 14 passos em todo.step.<id>; `step.*` já é do próximo passo da chamada). Os nomes dos passos da coluna
 // "Próximo passo" vêm de `pessoasLista.ts` (`pessoasPagina.next.*`). Os diálogos do orçamento e da proposta (Fase 4) têm as suas
 // chaves: quote.* (editor), verify.* (verificação das margens), direction.* (a Direção, simulada) e proposal.* (enviar a proposta).
 export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, string>> = {
@@ -60,6 +60,8 @@ export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, str
     'pessoasPagina.todo.step.enviarProposta': 'Send the proposal',
     'pessoasPagina.todo.step.registarRespostaCliente': 'Log the client reply',
     'pessoasPagina.todo.step.registarAssinatura': 'Log the signature',
+    'pessoasPagina.todo.step.criarContrato': 'Create the contract',
+    'pessoasPagina.todo.step.ganharNegocio': 'Mark the deal as won',
 
     'pessoasPagina.process.stepLabel': '{step}: {work} of {name}',
     'pessoasPagina.process.visitDescription': 'Visit for {name}. Sample only: kept in memory.',
@@ -253,6 +255,8 @@ export const pessoasProcessoTranslations: Record<"en" | "pt", Record<string, str
     'pessoasPagina.todo.step.enviarProposta': 'Enviar a proposta',
     'pessoasPagina.todo.step.registarRespostaCliente': 'Registar a resposta do cliente',
     'pessoasPagina.todo.step.registarAssinatura': 'Registar a assinatura',
+    'pessoasPagina.todo.step.criarContrato': 'Criar o contrato',
+    'pessoasPagina.todo.step.ganharNegocio': 'Dar o negócio como ganho',
 
     'pessoasPagina.process.stepLabel': '{step}: {work} de {name}',
     'pessoasPagina.process.visitDescription': 'Visita para {name}. Só exemplo: fica em memória.',

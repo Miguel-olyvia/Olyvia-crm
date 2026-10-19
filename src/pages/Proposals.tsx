@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
@@ -3018,6 +3019,7 @@ const Proposals = () => {
   return (
     <>
       <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
+        <BarraVoltar />
         {/* Header */}
         <div className="flex-shrink-0 px-4 md:px-6 pt-4 pb-2">
           <ModuleAlertsBanner alerts={proposalAlerts} onDismiss={dismissProposalAlert} onAction={(alert) => {

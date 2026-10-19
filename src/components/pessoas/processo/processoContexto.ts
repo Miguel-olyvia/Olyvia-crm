@@ -17,6 +17,13 @@ export interface ProcessoValor {
    * ele, ou para os botões da pessoa).
    */
   abrirVisitaLevantamento: (pessoaId: string, origem: HTMLElement | null) => void;
+  /**
+   * Só a ficha real: diz se este item tem um passo que a ficha sabe executar (o levantamento, por exemplo, é do P5). Sem isto (o exemplo)
+   * tudo executa. Um passo que não executa não tem botão: só o texto do que falta fazer.
+   */
+  podeExecutar?: (item: ItemProcesso) => boolean;
+  /** Só a ficha real: abre o ecrã da app de um documento do negócio (o orçamento, a proposta ou o contrato), com `?voltar=` para regressar. */
+  abrirDocumento?: (tipo: "orcamento" | "proposta" | "contrato", negocioId: string) => void;
 }
 
 export const ProcessoContext = createContext<ProcessoValor | null>(null);
@@ -50,7 +57,7 @@ export function useAcaoDoPasso(item: ItemProcesso | undefined, aoAbrir: () => vo
   const processo = useProcesso();
   const travado = useContext(BloqueioContext);
   const passo = item ? passoDoItem(item).id : null;
-  const executa = processo !== null && item !== undefined && passo !== null && ehExecutavel(passo);
+  const executa = processo !== null && item !== undefined && passo !== null && ehExecutavel(passo) && (processo.podeExecutar?.(item) ?? true);
   const bloqueio = item && travado && travado.itemId === item.id && travado.passo === passo ? travado.texto : null;
   return {
     executa,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isNegocioGanho, valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { ehHistorico } from "@/components/pessoas/pessoasTipos";
+import { podeGanhar } from "@/components/pessoas/podeGanhar";
 import { adaptarNegocios, estadoContratoDeDb, estadoPropostaDeDb } from "./adaptarNegociosFicha";
 import type { ContratoDb, NegocioFichaDb, PropostaDb } from "./fichaTipos";
 import { fichaDb, negocioDb, PESSOA_ID } from "./fichaFabrica";
@@ -67,6 +68,18 @@ describe("adaptarNegocios: aberto com contrato assinado continua aberto", () => 
   });
 });
 
+describe("adaptarNegocios: o pronto_a_ganhar da base", () => {
+  it("passa ao negócio como prontoAGanhar, verdadeiro ou falso", () => {
+    expect((adaptar(negocioDb({ pronto_a_ganhar: true }))[0] as NegocioMes).prontoAGanhar).toBe(true);
+    expect((adaptar(negocioDb({ pronto_a_ganhar: false }))[0] as NegocioMes).prontoAGanhar).toBe(false);
+  });
+
+  it("um valor que não é verdadeiro conta como falso (nunca se oferece o ganho por engano)", () => {
+    const sujo = { ...negocioDb(), pronto_a_ganhar: undefined } as unknown as NegocioFichaDb;
+    expect((adaptar(sujo)[0] as NegocioMes).prontoAGanhar).toBe(false);
+  });
+});
+
 describe("adaptarNegocios: ganho e perdido viram histórico", () => {
   it("ganho: mês de Lisboa do ganho_em, valor e estado real", () => {
     const [n] = adaptar(negocioDb({ estado: "ganho", ganho_em: "2026-08-31T23:30:00Z", valor: 2000 }));
@@ -126,5 +139,37 @@ describe("estadoContratoDeDb: um caso por valor", () => {
   it("um contrato cancelado não aparece no negócio", () => {
     const [n] = adaptar(negocioDb({ contratos: [contrato({ status: "cancelled" })] })) as NegocioMes[];
     expect(n.contrato).toBeNull();
+  });
+});
+
+describe("adaptarNegocios: uma só regra de proposta (a viva)", () => {
+  const antes = "2026-10-01T09:00:00Z";
+  const depois = "2026-10-15T09:00:00Z";
+
+  it("uma proposta rejeitada mais recente não esconde a que ainda vale", () => {
+    const [n] = adaptar(negocioDb({
+      propostas: [proposta({ id: "a", status: "draft", criado_em: antes }), proposta({ id: "b", status: "rejected", enviada_em: depois, criado_em: depois })],
+    })) as NegocioMes[];
+    expect(n.proposta).toEqual({ estado: "rascunho" });
+  });
+
+  it("só com propostas rejeitadas o negócio fica sem proposta: rejeitada não conta como «enviada»", () => {
+    for (const status of ["rejected", "declined"]) {
+      const [n] = adaptar(negocioDb({ propostas: [proposta({ status, enviada_em: depois, criado_em: depois })] })) as NegocioMes[];
+      expect(n.proposta).toBeNull();
+    }
+  });
+
+  it("a regra «proposta aceite» do ganho vê a aceite mesmo com uma rejeitada mais recente", () => {
+    const [n] = adaptar(negocioDb({
+      propostas: [proposta({ id: "a", status: "accepted", criado_em: antes }), proposta({ id: "b", status: "rejected", criado_em: depois })],
+    })) as NegocioMes[];
+    expect(n.proposta).toEqual({ estado: "aceite" });
+    expect(podeGanhar({ ...n, prontoAGanhar: undefined }, "proposta_aceite").pode).toBe(true);
+  });
+
+  it("com só rejeitadas a regra «proposta aceite» não deixa ganhar", () => {
+    const [n] = adaptar(negocioDb({ propostas: [proposta({ status: "rejected", criado_em: depois })] })) as NegocioMes[];
+    expect(podeGanhar({ ...n, prontoAGanhar: undefined }, "proposta_aceite")).toEqual({ pode: false, motivo: "semProposta" });
   });
 });

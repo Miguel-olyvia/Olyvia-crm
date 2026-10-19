@@ -1,6 +1,7 @@
 // O detalhe de um negócio dentro da ficha: "← Voltar aos negócios", o título e secções (não abas): próximo passo e prazo,
 // o percurso (contactos, visitas, levantamento), orçamentos e, se existirem, proposta e contrato. Tudo na página de Pessoas, sem
-// ir à de Negócio e metas: só reutiliza os seus painéis, com os detalhes de exemplo (ou nenhuns).
+// ir à de Negócio e metas: só reutiliza os seus painéis, com os detalhes de exemplo (ou nenhuns). Na ficha real (com `DadosNegocio` e as
+// mutações por contexto) lê os documentos da base, perde, anula a perda e dá como ganho contra a base, só com permissão de editar.
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, FilePlus2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -11,17 +12,20 @@ import { Seccao } from "@/components/ficha-comum/Seccao";
 import { registosDoNegocio, registosPorLigar, totalDeRegistos } from "@/components/negocio-metas/acoesRegistos";
 import { BotaoAnularPerda, BotaoPerderNegocio } from "@/components/negocio-metas/BotoesPerda";
 import { ContratoPainel } from "@/components/negocio-metas/ContratoPainel";
+import { useDadosNegocio } from "@/components/negocio-metas/costuraNegocio";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
 import { aceitaOrcamentos } from "@/components/negocio-metas/negocioAcoes";
-import { detalheDoNegocio, useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
+import { useAlteracoesNegocios, useDetalheDoNegocio } from "@/components/negocio-metas/negociosAlterados";
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { OrcamentosPainel } from "@/components/negocio-metas/OrcamentosPainel";
 import { PercursoNegocio } from "@/components/negocio-metas/PercursoPainel";
 import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
+import { AbrirDocumento } from "./AbrirDocumento";
+import { BotaoGanharNegocio } from "./BotaoGanharNegocio";
 import { passoDoNegocio } from "./etapaPessoa";
 import { fasesDoNegocio, type IdFase } from "./fasesDoNegocio";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
@@ -79,14 +83,14 @@ function PassoDoNegocio({ negocio, hoje, item }: { negocio: NegocioMes; hoje: st
 }
 
 /** Um negócio perdido: em que fase e porquê, e o botão que anula a perda (o negócio volta ao quadro). */
-function PerdaDoNegocio({ negocio, fase, motivo }: { negocio: NegocioMes; fase: string; motivo: string }) {
+function PerdaDoNegocio({ negocio, fase, motivo, podeAnular }: { negocio: NegocioMes; fase: string; motivo: string; podeAnular: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/40 p-3">
       <p className="text-[15px] font-medium text-foreground">
         {t("businessGoals.lose.lostIn", { phase: t(`businessGoals.lose.phase.${fase}`), reason: motivo })}
       </p>
-      <BotaoAnularPerda negocio={negocio} />
+      {podeAnular && <BotaoAnularPerda negocio={negocio} />}
     </div>
   );
 }
@@ -109,16 +113,21 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
   useEffect(() => titulo.current?.focus(), []);
   const perda = useAlteracoesNegocios().perdidos[negocio.id];
-  // Perder (ou anular a perda) troca o botão que tinha o foco: o foco passa para o título, em vez de se perder.
-  const estavaPerdido = useRef(perda !== undefined);
+  // Sem os dados da ficha real (o exemplo) pode-se sempre agir; na ficha real, só com `pessoas.edit`.
+  const podeEditar = useDadosNegocio()?.podeEditar ?? true;
+  // Perder, anular a perda ou ganhar troca o botão que tinha o foco: o foco passa para o título, em vez de se perder.
+  const situacao = `${perda !== undefined}:${negocio.estadoReal ?? ""}`;
+  const situacaoAnterior = useRef(situacao);
   useEffect(() => {
-    if (estavaPerdido.current === (perda !== undefined)) return;
-    estavaPerdido.current = perda !== undefined;
+    if (situacaoAnterior.current === situacao) return;
+    situacaoAnterior.current = situacao;
     titulo.current?.focus();
-  }, [perda]);
-  const detalhe = detalheDoNegocio(negocio.id);
+  }, [situacao]);
+  const detalhe = useDetalheDoNegocio(negocio.id);
   const [criando, setCriando] = useState(false);
-  const podeCriar = estaAberto(negocio) && aceitaOrcamentos(negocio);
+  // Só o exemplo tem «Criar orçamento»: o diálogo grava em memória. Na ficha real o orçamento cria-se pelo passo do processo (editor real).
+  const emExemplo = useDadosNegocio() === null;
+  const podeCriar = emExemplo && estaAberto(negocio) && aceitaOrcamentos(negocio);
   // As fases deste negócio (as da abordagem só aparecem quando existem) e a atual, que é a etiqueta do cabeçalho.
   const registos = useRegistosPessoa();
   const perdidoAntigo = (negocio as { resultado?: string }).resultado === "perdido";
@@ -154,9 +163,14 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
           </dl>
         </div>
         <Seccao titulo={t(`${P}phases.title`)} nivel={4}><FasesDoNegocioLista fases={fases} /></Seccao>
-        {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} />}
+        {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
         {estaAberto(negocio) && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
-        {estaAberto(negocio) && !perda && <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />}
+        {estaAberto(negocio) && !perda && podeEditar && (
+          <div className="flex flex-wrap items-start gap-3">
+            <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
+            <BotaoGanharNegocio negocio={negocio} />
+          </div>
+        )}
       </div>
       <div className="space-y-2">
         <p className="text-sm font-semibold text-muted-foreground">{t(`${P}detail.more`)}</p>
@@ -173,20 +187,23 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
               {t("businessGoals.actions.createQuote")}
             </Button>
           )}
+          {nOrcamentos > 0 && <AbrirDocumento tipo="orcamento" negocioId={negocio.id} />}
           <OrcamentosPainel negocio={negocio} detalhe={detalhe} />
         </SeccaoRecolhivel>
         {negocio.proposta && (
           <SeccaoRecolhivel titulo={t(`${P}deal.proposal`)} resumo={t(`businessGoals.proposal.${negocio.proposta.estado}`)} aberta={aberta === "proposta"}>
+            <AbrirDocumento tipo="proposta" negocioId={negocio.id} />
             <PropostaPainel negocio={negocio} detalhe={detalhe} hoje={hoje} />
           </SeccaoRecolhivel>
         )}
         {negocio.contrato && (
           <SeccaoRecolhivel titulo={t(`${P}deal.contract`)} resumo={t(`businessGoals.contract.${negocio.contrato.estado}`)} aberta={aberta === "contrato"}>
+            <AbrirDocumento tipo="contrato" negocioId={negocio.id} />
             <ContratoPainel negocio={negocio} detalhe={detalhe} />
           </SeccaoRecolhivel>
         )}
       </div>
-      <NovoOrcamentoDialogo negocio={criando ? negocio : null} hoje={hoje} aoFechar={() => setCriando(false)} />
+      {emExemplo && <NovoOrcamentoDialogo negocio={criando ? negocio : null} hoje={hoje} aoFechar={() => setCriando(false)} />}
     </div>
   );
 }

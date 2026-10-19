@@ -39,7 +39,7 @@ export function negocioEmFoco(abertos: readonly NegocioMes[]): NegocioMes | null
  */
 export type IdPasso =
   | "registarChamada" | "marcarVisita" | "fecharLevantamento" | "criarNegocio" | "fazerLevantamento"
-  | "criarProposta" | "enviarProposta" | "esperarCliente" | "recolherAssinatura" | "nenhum";
+  | "criarProposta" | "enviarProposta" | "esperarCliente" | "recolherAssinatura" | "criarContrato" | "ganharNegocio" | "nenhum";
 
 export interface ProximoPasso {
   id: IdPasso;
@@ -47,8 +47,21 @@ export interface ProximoPasso {
   prazo: string | null;
 }
 
-/** O passo de um negócio aberto. Uma proposta aceite sem contrato (não existe nos dados) conta como "à espera". */
+/** Só nos negócios da base (com `estadoReal`): a proposta está aceite e ainda não há contrato, por isso o passo é criá-lo. */
+export const propostaAceiteSemContrato = (n: NegocioMes): boolean =>
+  n.estadoReal === "aberto" && n.proposta?.estado === "aceite" && n.contrato === null;
+
+/** Só nos negócios da base: o contrato está assinado, o negócio está aberto e a base diz que está pronto, por isso o passo é ganhá-lo. */
+export const contratoAssinadoPronto = (n: NegocioMes): boolean =>
+  n.estadoReal === "aberto" && n.contrato?.estado === "assinado" && n.prontoAGanhar === true;
+
+/**
+ * O passo de um negócio aberto. Nos negócios de exemplo, uma proposta aceite sem contrato (não existe nos dados) conta como "à espera";
+ * nos da base, pede o contrato, e um contrato assinado e pronto pede o ganho.
+ */
 export function passoDoNegocio(n: NegocioMes): IdPasso {
+  if (contratoAssinadoPronto(n)) return "ganharNegocio";
+  if (propostaAceiteSemContrato(n)) return "criarContrato";
   const fase = faseDoNegocio(n);
   if (fase === "contrato") return "recolherAssinatura";
   if (fase === "proposta") return n.proposta?.estado === "rascunho" ? "enviarProposta" : "esperarCliente";

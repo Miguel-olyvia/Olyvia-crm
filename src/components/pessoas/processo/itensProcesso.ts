@@ -2,7 +2,7 @@
 // a regra dos passos precisa. Funções puras: o dia de hoje chega por parâmetro.
 import { cartoesDoQuadro, type CartaoQuadro } from "../quadro/cartoesQuadroPessoas";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { negocioEmFoco } from "../etapaPessoa";
+import { contratoAssinadoPronto, negocioEmFoco, propostaAceiteSemContrato } from "../etapaPessoa";
 import type { ResumoPessoa } from "../pessoasTipos";
 import { orcamentoDoNegocio, SEM_EXTRAS, type ExtrasPorNegocio } from "./orcamentoDetalhado";
 import type { EstadoVerificacao, ItemProcesso } from "./tiposProcesso";
@@ -26,6 +26,9 @@ function itemDoCartao(c: CartaoQuadro, r: ResumoPessoa, extras: ExtrasPorNegocio
     verificacao: verificacaoDo(negocio, extras),
     propostaRascunho: negocio?.proposta?.estado === "rascunho",
     visitaFeita: c.tipo === "pessoa" && r.porLigar.visitas.some((v) => v.estado === "feita"),
+    // O fim do percurso só existe nos negócios da base (os de exemplo continuam a acabar no contrato assinado).
+    propostaAceite: negocio !== undefined && propostaAceiteSemContrato(negocio),
+    prontoAGanhar: negocio !== undefined && contratoAssinadoPronto(negocio),
   };
 }
 

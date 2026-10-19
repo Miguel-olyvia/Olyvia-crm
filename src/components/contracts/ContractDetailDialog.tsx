@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useTranslation } from "@/hooks/useTranslation";
 import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,10 @@ interface ContractDetailDialogProps {
   onSave: (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string }) => void;
   saving: boolean;
   isNew?: boolean;
+  /** Só a ficha da pessoa (P3): a proposta com que um contrato NOVO abre já escolhida. Sem isto nada muda. */
+  presetProposalId?: string | null;
+  /** Só com `presetProposalId`: a lista de propostas já chegou (antes disso não se diz que a pedida falta). Por omissão sim. */
+  proposalsLoaded?: boolean;
   getProposalName: (p: any) => string;
   getProposalTotal: (p: any) => number;
   formatCurrency: (v: number | null, c: string | null) => string;
@@ -50,10 +55,13 @@ const statusConfig: Record<string, { color: string; icon: React.ReactNode; bg: s
 };
 
 export function ContractDetailDialog({
-  open, onOpenChange, contract, proposals, templates, onSave, saving, isNew,
+  open, onOpenChange, contract, proposals, templates, onSave, saving, isNew, presetProposalId = null, proposalsLoaded = true,
   getProposalName, getProposalTotal, formatCurrency, getTranslatedStatus,
 }: ContractDetailDialogProps) {
   const { activeCompany } = useCompany();
+  const { t } = useTranslation();
+  // Só a ficha da pessoa (P3): a proposta pedida pode não estar na lista (o filtro de estados e as permissões da página não a deixam passar).
+  const presetMissing = !!isNew && !!presetProposalId && proposalsLoaded && !proposals.some((p) => p.id === presetProposalId);
   const [formData, setFormData] = useState({
     proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "",
   });
@@ -74,12 +82,12 @@ export function ContractDetailDialog({
         });
         setActiveTab("detalhes");
       } else {
-        setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
+        setFormData({ proposal_id: presetProposalId ?? "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
         setActiveTab("detalhes");
       }
       setPromptValues(contract?.prompt_values && typeof contract.prompt_values === "object" ? { ...contract.prompt_values } : {});
     }
-  }, [open, contract]);
+  }, [open, contract, presetProposalId]);
 
   // Carrega variáveis customizadas em modo "Preencher no contrato" (sem default e sem linked field)
   const { data: promptCustomVarsRaw } = useQuery({
@@ -451,6 +459,7 @@ export function ContractDetailDialog({
                     )}
                   </SelectContent>
                 </Select>
+                {presetMissing && <p role="alert" className="text-xs font-medium text-destructive">{t("pessoasPagina.neg.contract.presetMissing")}</p>}
               </div>
 
               <div className="space-y-2">

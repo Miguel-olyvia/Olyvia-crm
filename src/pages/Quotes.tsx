@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
 import { AUTO_IMPORT_PARAM, readAutoImportParam } from "@/lib/quotes/dealQuoteLink";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -1579,6 +1580,7 @@ export default function Quotes() {
   return (
     <>
       <div className="flex flex-col h-[calc(100vh-4rem)]">
+        <BarraVoltar />
         {/* Header */}
         <div className="flex-shrink-0 p-4 md:p-6 border-b bg-background">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

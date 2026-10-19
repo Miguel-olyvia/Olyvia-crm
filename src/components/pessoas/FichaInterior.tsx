@@ -183,13 +183,15 @@ export function FichaInterior(p: FichaInteriorProps) {
   useEffect(() => { if (p.anuncioProcesso) anunciar(p.anuncioProcesso); }, [p.anuncioProcesso, anunciar]);
   const { acao, visitados, abrir, fechar, mudarConteudo } = usePaineis(p.fecharPainel, anunciar);
   useAbrirNegociosAoCriar(p.resumo, negocio.esquecer, () => setAba("negocios"));
-  // Vindo de um cartão do Quadro ou de uma linha da Lista: abre já a aba Negócios com ESSE negócio aberto, e não só a pessoa.
+  // Vindo de um cartão do Quadro ou de uma linha da Lista: abre já a aba Negócios com ESSE negócio aberto, e não só a pessoa. Um negócio que
+  // acabou de se criar só chega à ficha depois de ela se refazer: quando aparece, abre-se (depois de `useAbrirNegociosAoCriar`, que fecha o aberto).
+  const negocioPedidoExiste = !!p.negocioInicial && p.resumo.negocios.some((n) => n.id === p.negocioInicial);
   useEffect(() => {
     if (!p.negocioInicial) return;
     setAba("negocios");
     negocio.abrir(p.negocioInicial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage a mudar o negócio pedido pelo endereço
-  }, [p.negocioInicial]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage a mudar o negócio pedido, ou a passar a existir
+  }, [p.negocioInicial, negocioPedidoExiste]);
   // Reativar espera pela ação (na base pode demorar ou falhar): só anuncia no fim, e uma falha fica à vista em role=alert.
   const reabrir = useExecutarAcao(anunciar);
   const reativar = () => {

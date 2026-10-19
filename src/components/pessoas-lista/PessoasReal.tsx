@@ -99,8 +99,10 @@ export function PessoasReal() {
   // `abrir` muda sempre que o ?open= muda; as linhas e a tabela estão em memória e só valem se o que lhes damos não mudar. Por isso o que
   // se passa é uma função estável que chama sempre o `abrir` mais recente (guardado depois de cada render, nunca durante).
   const abrirRef = useRef(abrir);
+  const abertaRef = useRef(abertaId);
   useEffect(() => {
     abrirRef.current = abrir;
+    abertaRef.current = abertaId;
   });
   // O botão clicado fica guardado AQUI, no clique: a ficha só abre quando os dados chegam e o foco já pode estar noutro sítio.
   const origemFoco = useRef<HTMLElement | null>(null);
@@ -109,6 +111,11 @@ export function PessoasReal() {
     abrirRef.current(id);
   }, []);
   const aoIrPara = useCallback((id: string) => abrirRef.current(id), []);
+  // Depois de criar um negócio na ficha: o negócio novo vai para o endereço (`?negocio=`), na pessoa que está aberta.
+  // Só se a pessoa aberta ainda é a do negócio (a gravação pode acabar depois de se trocar de pessoa).
+  const aoAbrirNegocio = useCallback((negocioId: string, pessoaId: string) => {
+    if (abertaRef.current === pessoaId) abrirRef.current(pessoaId, negocioId);
+  }, []);
   const idsVisiveis = useMemo(() => lista.linhas.map((l) => l.id), [lista.linhas]);
   const tabelaRef = useRef<HTMLDivElement>(null);
   const botaoMaisRef = useRef<HTMLButtonElement>(null);
@@ -136,7 +143,10 @@ export function PessoasReal() {
       <Corpo lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined} />
       <RodapeListaReal lista={lista} botaoMaisRef={botaoMaisRef} repetirRef={repetirRef} aoPedirMais={aoPedirMais} />
       {comFicha && (
-        <FichaReal pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={url.fechar} aoIrPara={aoIrPara} aoLimpar={url.limpar} origemFoco={origemFoco} />
+        <FichaReal
+          pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={url.fechar} aoIrPara={aoIrPara} aoLimpar={url.limpar} origemFoco={origemFoco}
+          negocioInicial={url.negocioId} aoAbrirNegocio={aoAbrirNegocio}
+        />
       )}
     </div>
   );

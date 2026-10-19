@@ -6,6 +6,8 @@ import type { ColunaQuadro } from "../quadro/cartoesQuadroPessoas";
 export const PASSOS_PROCESSO = [
   "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "fazerLevantamento", "criarOrcamento",
   "verificarOrcamento", "aguardarDirecao", "criarProposta", "enviarProposta", "registarRespostaCliente", "registarAssinatura",
+  // Só nos negócios da base (P3): a proposta aceite pede o contrato; o contrato assinado e pronto pede o ganho.
+  "criarContrato", "ganharNegocio",
 ] as const;
 
 export type PassoProcesso = (typeof PASSOS_PROCESSO)[number];
@@ -39,6 +41,10 @@ export interface ItemProcesso {
   propostaRascunho: boolean;
   /** Uma pessoa em Visita com pelo menos uma visita feita por ligar (falso num negócio). */
   visitaFeita: boolean;
+  /** Só nos negócios da base: a proposta está aceite e ainda não há contrato (o passo é criá-lo). */
+  propostaAceite?: boolean;
+  /** Só nos negócios da base: o contrato está assinado e a base diz que o negócio está pronto a ganhar (o passo é ganhá-lo). */
+  prontoAGanhar?: boolean;
 }
 
 /** O negócio a que um diálogo do orçamento ou da proposta se refere: o título diz o trabalho e a descrição diz a pessoa. */

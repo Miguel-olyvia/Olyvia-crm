@@ -30,10 +30,12 @@ const comRegistos = (registos: RegistosDaPessoa, abertos: ReturnType<typeof nego
 const itensDe = (r: ReturnType<typeof resumoBase>): ItemProcesso[] => itensDaPessoa(r, HOJE_EXEMPLO);
 
 describe("PASSOS_PROCESSO", () => {
-  it("tem os 12 passos (sem escolher o orçamento nem gerar o contrato à parte), pela ordem do processo (marcar a visita como feita e fazer o levantamento da pessoa são um só passo)", () => {
+  // ALTERADO no P3 (a lista tinha 12 passos): acrescentam-se `criarContrato` e `ganharNegocio`, só usados nos negócios da base.
+  it("tem os 14 passos, pela ordem do processo (marcar a visita como feita e fazer o levantamento da pessoa são um só passo; criar o contrato e ganhar vêm no fim)", () => {
     expect(PASSOS_PROCESSO).toEqual([
       "registarChamada", "marcarVisita", "marcarVisitaFeita", "criarNegocio", "fazerLevantamento", "criarOrcamento",
       "verificarOrcamento", "aguardarDirecao", "criarProposta", "enviarProposta", "registarRespostaCliente", "registarAssinatura",
+      "criarContrato", "ganharNegocio",
     ]);
   });
 });
@@ -98,6 +100,34 @@ describe("passoDoItem: negócios", () => {
   ];
   it.each(casos)("%s", (_nome, extra, esperado) => {
     expect(passoDoItem(negocio(extra)).id).toBe(esperado);
+  });
+});
+
+describe("passoDoItem: o fim do percurso de um negócio da base", () => {
+  const negocio = (extra: Partial<ItemProcesso>): ItemProcesso => item({ id: "n", tipo: "negocio", orcamentos: 1, ...extra });
+
+  it("proposta aceite e sem contrato: criar o contrato", () => {
+    expect(passoDoItem(negocio({ fase: "proposta", propostaAceite: true })).id).toBe("criarContrato");
+  });
+
+  it("contrato assinado e pronto a ganhar: dar o negócio como ganho", () => {
+    expect(passoDoItem(negocio({ fase: "contrato", prontoAGanhar: true })).id).toBe("ganharNegocio");
+  });
+
+  it("contrato por assinar: continua a ser registar a assinatura, mesmo que o resto venha preenchido", () => {
+    expect(passoDoItem(negocio({ fase: "contrato" })).id).toBe("registarAssinatura");
+    expect(passoDoItem(negocio({ fase: "contrato", propostaAceite: true })).id).toBe("registarAssinatura");
+  });
+
+  it("proposta enviada ou em rascunho (sem aceite) não muda", () => {
+    expect(passoDoItem(negocio({ fase: "proposta", propostaAceite: false })).id).toBe("registarRespostaCliente");
+    expect(passoDoItem(negocio({ fase: "proposta", propostaRascunho: true })).id).toBe("enviarProposta");
+  });
+
+  it("os dois passos novos executam e têm o texto pessoasPagina.todo.step.<id>", () => {
+    expect(ehExecutavel("criarContrato") && ehExecutavel("ganharNegocio")).toBe(true);
+    expect(passoDoItem(negocio({ fase: "proposta", propostaAceite: true })).chave).toBe("pessoasPagina.todo.step.criarContrato");
+    expect(passoDoItem(negocio({ fase: "contrato", prontoAGanhar: true })).chave).toBe("pessoasPagina.todo.step.ganharNegocio");
   });
 });
 
@@ -299,6 +329,8 @@ const PASSO_DA_COLUNA: Record<IdPasso, PassoProcesso | null> = {
   registarChamada: "registarChamada", marcarVisita: "marcarVisita", fecharLevantamento: "marcarVisitaFeita",
   criarNegocio: "criarNegocio", fazerLevantamento: "criarOrcamento", criarProposta: "criarProposta",
   enviarProposta: "enviarProposta", esperarCliente: "registarRespostaCliente", recolherAssinatura: "registarAssinatura", nenhum: null,
+  // Acrescentados no P3 (só os negócios da base os dão; os de exemplo nunca chegam aqui).
+  criarContrato: "criarContrato", ganharNegocio: "ganharNegocio",
 };
 
 describe("coerência com a coluna 'Próximo passo' nos dados de exemplo", () => {

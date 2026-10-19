@@ -37,6 +37,8 @@ export function useParametroOpen() {
       const p = new URLSearchParams(atual);
       p.delete("open");
       p.delete("negocio");
+      // O contrato que voltou de outro ecrã só vale com a ficha aberta: não fica preso no endereço.
+      p.delete("novoContrato");
       return p;
     }, { replace: true });
   }, [setParams]);

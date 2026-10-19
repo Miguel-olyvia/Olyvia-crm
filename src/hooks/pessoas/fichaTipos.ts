@@ -23,7 +23,13 @@ export interface PessoaFichaDb {
   desde: string | null;
   contacto: { telefone: string | null; email: string | null } | null;
   morada: MoradaFichaDb | null;
-  qualificacao: string | null;
+  /**
+   * As RESPOSTAS da aba Qualificação (um objeto jsonb), nunca «MQL» ou «SQL». Vem como `unknown`: a ficha não pode contar com a forma.
+   * (A fábrica de testes e uma leitura antiga podem dar texto; o adaptador lê só o que reconhece.)
+   */
+  qualificacao: unknown;
+  /** O tipo de qualificação («MQL» ou «SQL»), numa migration futura; opcional enquanto a função não o devolve. */
+  qualificacao_tipo?: unknown;
   origem: { origin: string | null; source: string | null; campanha: string | null; formulario: string | null } | null;
   nif: string | null;
   empresa: string | null;

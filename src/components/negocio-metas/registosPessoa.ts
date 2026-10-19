@@ -3,6 +3,7 @@
 // a um só negócio, desfazer) estão em `acoesRegistos.ts`; aqui só se guarda o resultado.
 import { useSyncExternalStore } from "react";
 import { desligarDoNegocio, ligarAoNegocio } from "./acoesRegistos";
+import { useDadosNegocio } from "./costuraNegocio";
 import { guardarRegistosDaPessoa, type DadosGuardarRegistos, type ResultadoGuardar } from "./guardarRegistos";
 import { ligarRegistosDaPessoa, type LigarRegistos } from "./ligarNegocio";
 import {
@@ -131,6 +132,9 @@ export function repor(): void {
 
 /** Os registos, atualizados sempre que se muda um. Com `semente`, semeia o store na primeira chamada (ver `iniciarRegistos`). */
 export function useRegistosPessoa(semente?: EstadoRegistos): EstadoRegistos {
-  if (semente) iniciarRegistos(semente);
-  return useSyncExternalStore(subscrever, registosAtuais, registosAtuais);
+  // Na ficha real (com `DadosNegocio`) os registos são os da base: a semente de exemplo não se usa nem polui o store.
+  const dados = useDadosNegocio();
+  if (semente && !dados) iniciarRegistos(semente);
+  const doStore = useSyncExternalStore(subscrever, registosAtuais, registosAtuais);
+  return dados?.registos ?? doStore;
 }

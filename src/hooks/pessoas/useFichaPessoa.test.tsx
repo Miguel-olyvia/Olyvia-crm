@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { atividadeDb, fichaDb, pessoaDb, PESSOA_ID, seccaoDb } from "./fichaFabrica";
 import {
-  captureMock, fonteReal, montarHook, nomeChamado, parametros, respostaErro, respostaOk, rpcMock,
+  captureMock, criarCliente, fonteReal, montarHook, nomeChamado, parametros, respostaErro, respostaOk, rpcMock,
 } from "./fichaTestUtil";
 import { fichaPessoaQueryKey, useFichaPessoa } from "./useFichaPessoa";
 
@@ -162,5 +162,20 @@ describe("useFichaPessoa: carregar mais", () => {
     expect(result.current.ficha?.atividade?.itens).toHaveLength(2);
     expect(result.current.erroAoCarregarMais?.codigo).toBe("NG009");
     expect(result.current.estado).toBe("ok");
+  });
+});
+
+describe("useFichaPessoa: o regresso refaz a leitura", () => {
+  it("ao voltar à ficha (propostas, contratos e orçamentos criados noutros ecrãs) lê outra vez, mesmo com a leitura anterior recente", async () => {
+    rpcMock.mockReturnValue(respostaOk(fichaDb()));
+    const client = criarCliente();
+    const primeira = montarHook((i: string | null) => useFichaPessoa(i), PESSOA_ID, { fonte: fonteReal(), client });
+    await waitFor(() => expect(primeira.result.current.estado).toBe("ok"));
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    primeira.unmount();
+    const segunda = montarHook((i: string | null) => useFichaPessoa(i), PESSOA_ID, { fonte: fonteReal(), client });
+    // Mostra já o que tinha em cache e refaz a leitura por baixo.
+    expect(segunda.result.current.ficha).not.toBeNull();
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(2));
   });
 });

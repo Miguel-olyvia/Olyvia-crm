@@ -131,6 +131,16 @@ interface QuoteBuilderProps {
   initialDealId?: string | null;
   /** Com initialDealId: importa logo as necessidades do pedido (uma só vez). */
   autoImportFromDeal?: boolean;
+  /**
+   * Só a ficha da pessoa (P3): a pessoa a que o orçamento NOVO fica ligado, já escolhida. Sem isto nada muda (o orçamento escolhe a pessoa
+   * como sempre). Ao editar um orçamento já gravado não vale: a pessoa lê-se do próprio orçamento.
+   */
+  initialEntity?: { kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null;
+  /**
+   * Só a ficha da pessoa (P3): chamado com o id do orçamento logo depois de guardado e ANTES de fechar; o editor espera que acabe (a ficha liga
+   * o orçamento ao negócio). Nunca deve lançar: o orçamento já existe. Sem isto nada muda.
+   */
+  onSaved?: (quoteId: string) => void | Promise<void>;
 }
 
 interface Client {
@@ -273,7 +283,7 @@ interface QuoteLine {
 const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
   quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
-export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null, autoImportFromDeal = false }: QuoteBuilderProps) {
+export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null, autoImportFromDeal = false, initialEntity = null, onSaved }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   // `effectiveQuoteId` é o id do orçamento a usar em todo o componente: só
   // existe quando se está a EDITAR um orçamento já gravado. "Novo Orçamento"
@@ -354,7 +364,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     loadMore: loadMoreDeals,
   } = useScopedEntitySearch({ kinds: ["deal"] });
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
+  const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(initialEntity);
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
   // Morada de entrega escolhida (anew_addresses.id) e a entidade a que
   // pertence: ao trocar de lead/cliente a escolha anterior deixa de valer.
@@ -2531,6 +2541,16 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         title: t('quoteBuilder.toast.quoteSaved'),
         description: t('quoteBuilder.toast.quoteSavedDesc'),
       });
+
+      // Só a ficha da pessoa: liga o orçamento ao negócio antes de fechar (sem `onSaved` não faz nada). O orçamento já existe: se isto lançar,
+      // regista-se mas não se diz que a gravação falhou (quem chama diz o que for preciso) e o editor fecha na mesma.
+      if (onSaved && savedQuoteId) {
+        try {
+          await onSaved(savedQuoteId);
+        } catch (falha) {
+          captureFlowError(falha, "quote-lifecycle");
+        }
+      }
 
       // Check if we have a post-save action
       const action = postSaveActionRef.current;

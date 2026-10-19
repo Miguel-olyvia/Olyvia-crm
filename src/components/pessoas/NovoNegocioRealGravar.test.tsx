@@ -1,0 +1,185 @@
+// «Novo negócio» na ficha REAL: os documentos (só com a M6) e o ciclo de gravação (a guardar, erro dentro do painel, só fecha em sucesso,
+// id estável entre reenvios e novo depois de um sucesso). O resto está em NovoNegocioReal.test.tsx.
+import { useState } from "react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
+import { ComCostura, dadosFalsos, erroNegFalso, mutacoesFalsas, pendente } from "@/components/negocio-metas/costuraTestUtil";
+import type { DadosNegocio } from "@/components/negocio-metas/costuraNegocio";
+import type { MutacoesNegocio, ResultadoCriar } from "@/components/negocio-metas/mutacoesNegocio";
+import { registosAtuais, repor } from "@/components/negocio-metas/registosPessoa";
+import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import { contactoBase, levantamentoBase, registosBase, visitaPessoaBase } from "./fabricaTestes";
+import { NovoNegocioReal } from "./NovoNegocioReal";
+
+vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+const { sucesso, info } = vi.hoisted(() => ({ sucesso: vi.fn(), info: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast: { info, error: vi.fn(), success: sucesso } }));
+
+let contador = 0;
+beforeAll(prepararRadixNoJsdom);
+beforeEach(() => {
+  contador = 0;
+  vi.stubGlobal("crypto", { randomUUID: () => `id-${++contador}` });
+});
+afterEach(() => { cleanup(); repor(); sucesso.mockReset(); info.mockReset(); vi.unstubAllGlobals(); });
+
+const registos = registosBase({
+  contactos: [contactoBase("c1", { data: "2026-10-10" }), contactoBase("c2", { data: "2026-10-12", negocioId: "outro" })],
+  visitas: [visitaPessoaBase("v1", { data: "2026-10-11" })],
+  levantamentos: [levantamentoBase("l1", { data: "2026-10-11" })],
+});
+
+function Harness(p: { aoCriado?: (id: string) => void; aoMudar?: (a: boolean) => void }) {
+  const [aberto, setAberto] = useState(true);
+  return (
+    <NovoNegocioReal
+      pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={p.aoCriado ?? vi.fn()}
+      aoMudarAberto={(v) => { p.aoMudar?.(v); setAberto(v); }}
+    />
+  );
+}
+
+function montar(mutacoes: MutacoesNegocio = mutacoesFalsas(), dados: Partial<DadosNegocio> = {}, extra: Parameters<typeof Harness>[0] = {}) {
+  const anunciar = vi.fn();
+  render(
+    <AnuncioFichaContext.Provider value={anunciar}>
+      <ComCostura mutacoes={mutacoes} dados={dadosFalsos({ registos, ...dados })}><Harness {...extra} /></ComCostura>
+    </AnuncioFichaContext.Provider>,
+  );
+  return { mutacoes, anunciar };
+}
+const titulo = () => screen.getByRole("textbox", { name: /^Título do negócio/ });
+const criar = () => screen.getByRole("button", { name: /^(Criar o negócio|A guardar…)$/ });
+const escrever = (texto: string) => fireEvent.change(titulo(), { target: { value: texto } });
+const aba = (nome: string) => fireEvent.mouseDown(screen.getByRole("tab", { name: new RegExp(`^${nome}`) }), { button: 0 });
+
+describe("NovoNegocioReal: documentos (a bandeira da M6)", () => {
+  const documentosPorLigar: DadosNegocio["documentosPorLigar"] = [
+    { tipo: "orcamento", id: "o1", numero: "O-1", temBase: true },
+    { tipo: "contrato", id: "k1", numero: "C-9", temBase: true },
+    { tipo: "contrato", id: "k2", numero: "C-10", temBase: false },
+  ];
+
+  it("com a bandeira desligada não se oferecem documentos", () => {
+    montar(mutacoesFalsas({ criarComDocumentos: false }), { documentosPorLigar });
+    aba("Registos");
+    expect(screen.queryByRole("group", { name: "Documentos a ligar" })).toBeNull();
+  });
+
+  it("com a bandeira ligada oferecem-se, sem o contrato sem base, e os marcados vão em registos", () => {
+    const { mutacoes } = montar(mutacoesFalsas({ criarComDocumentos: true }), { documentosPorLigar });
+    escrever("Sala");
+    aba("Registos");
+    const grupo = screen.getByRole("group", { name: "Documentos a ligar" });
+    expect(within(grupo).queryByRole("checkbox", { name: "Contrato C-10" })).toBeNull();
+    fireEvent.click(within(grupo).getByRole("checkbox", { name: "Orçamento O-1" }));
+    fireEvent.click(within(grupo).getByRole("checkbox", { name: "Contrato C-9" }));
+    fireEvent.click(criar());
+    expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({
+      registos: expect.arrayContaining([{ tipo: "orcamento", id: "o1" }, { tipo: "contrato", id: "k1" }]),
+    }));
+  });
+});
+
+describe("NovoNegocioReal: gravar", () => {
+  it("a guardar: o botão fica aria-disabled e aria-busy (com o nome de sempre), «A guardar…» só na região de estado, um segundo clique não repete e nada fecha", () => {
+    const acao = pendente<ResultadoCriar>();
+    const { mutacoes } = montar(mutacoesFalsas({ criar: vi.fn(() => acao.promessa) }));
+    escrever("Sala");
+    fireEvent.click(criar());
+    const botao = criar();
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    expect(botao).toHaveAttribute("aria-busy", "true");
+    // O nome do botão não muda (o «A guardar…» só se anuncia na região de estado, senão leria-se duas vezes) e o aria-disabled tem pista visual.
+    expect(botao).toHaveTextContent("Criar o negócio");
+    expect(botao).not.toHaveTextContent("A guardar…");
+    expect(botao.className).toMatch(/aria-disabled:/);
+    expect(screen.getByRole("status")).toHaveTextContent("A guardar…");
+    fireEvent.click(botao);
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(mutacoes.criar).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("em sucesso fecha, abre o negócio novo e avisa (toast e anúncio da ficha)", async () => {
+    const aoCriado = vi.fn();
+    const { anunciar } = montar(mutacoesFalsas(), {}, { aoCriado });
+    escrever("Sala");
+    fireEvent.click(criar());
+    await waitFor(() => expect(aoCriado).toHaveBeenCalledWith("id-1"));
+    expect(sucesso).toHaveBeenCalledWith("Negócio «Sala» criado para Ana.");
+    expect(anunciar).toHaveBeenCalledWith("Negócio «Sala» criado para Ana.");
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it("registos recusados avisam no ecrã e no anúncio e ficam por ligar", async () => {
+    const criarMock = vi.fn(async (p: { id: string }): Promise<ResultadoCriar> => ({
+      negocioId: p.id, mudou: true, recusados: [{ tipo: "contacto", id: "c1" }, { tipo: "visita", id: "v1" }],
+    }));
+    const { anunciar } = montar(mutacoesFalsas({ criar: criarMock as MutacoesNegocio["criar"] }));
+    escrever("Sala");
+    fireEvent.click(criar());
+    await waitFor(() => expect(info).toHaveBeenCalledWith("2 registos não puderam ser ligados e ficam por ligar na ficha."));
+    expect(anunciar).toHaveBeenCalledWith("2 registos não puderam ser ligados e ficam por ligar na ficha.");
+  });
+
+  it("mudou: false (reenvio do mesmo id) é sucesso e não repete avisos de recusados", async () => {
+    const aoCriado = vi.fn();
+    montar(mutacoesFalsas({ criar: vi.fn(async (p) => ({ negocioId: p.id, mudou: false, recusados: [{ tipo: "contacto" as const, id: "c1" }] })) }), {}, { aoCriado });
+    escrever("Sala");
+    fireEvent.click(criar());
+    await waitFor(() => expect(aoCriado).toHaveBeenCalledTimes(1));
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it("um erro traduz-se pelo código em role=alert dentro do painel; fica aberto e o reenvio usa o MESMO id", async () => {
+    const acao = pendente<ResultadoCriar>();
+    const criarMock = vi.fn()
+      .mockReturnValueOnce(acao.promessa)
+      .mockImplementationOnce(async (p: { id: string }) => ({ negocioId: p.id, mudou: true, recusados: [] }));
+    const aoCriado = vi.fn();
+    montar(mutacoesFalsas({ criar: criarMock }), {}, { aoCriado });
+    escrever("Sala");
+    fireEvent.click(criar());
+    await acao.falhar(erroNegFalso("pessoasPagina.erroNeg.ng002", "NG002"));
+    const alerta = screen.getByRole("alert");
+    expect(alerta).toHaveTextContent("O estado atual não permite esta ação.");
+    expect(screen.getByRole("dialog")).toContainElement(alerta);
+    expect(aoCriado).not.toHaveBeenCalled();
+    fireEvent.click(criar());
+    await waitFor(() => expect(aoCriado).toHaveBeenCalledTimes(1));
+    expect(criarMock.mock.calls.map((c) => c[0].id)).toEqual(["id-1", "id-1"]);
+  });
+
+  it("depois de um sucesso, abrir outra vez gera um id novo", async () => {
+    const criarMock = vi.fn(async (p: { id: string }): Promise<ResultadoCriar> => ({ negocioId: p.id, mudou: true, recusados: [] }));
+    function Dois() {
+      const [aberto, setAberto] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setAberto(true)}>reabrir</button>
+          <NovoNegocioReal pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={setAberto} />
+        </>
+      );
+    }
+    render(<ComCostura mutacoes={mutacoesFalsas({ criar: criarMock as MutacoesNegocio["criar"] })} dados={dadosFalsos({ registos })}><Dois /></ComCostura>);
+    escrever("Sala");
+    fireEvent.click(criar());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "reabrir" }));
+    escrever("Quarto");
+    fireEvent.click(criar());
+    await waitFor(() => expect(criarMock).toHaveBeenCalledTimes(2));
+    expect(criarMock.mock.calls.map((c) => c[0].id)).toEqual(["id-1", "id-2"]);
+  });
+
+  it("o store do exemplo fica intacto", async () => {
+    const aoCriado = vi.fn();
+    montar(mutacoesFalsas(), {}, { aoCriado });
+    escrever("Sala");
+    fireEvent.click(criar());
+    await waitFor(() => expect(aoCriado).toHaveBeenCalled());
+    expect(registosAtuais().contactos).toHaveLength(0);
+  });
+});

@@ -76,6 +76,14 @@ describe("proximoPasso", () => {
     const n = { ...emContrato, proximoPrazo: "2026-10-16" };
     expect(passo(pessoaBase(), [n])).toEqual({ id: "recolherAssinatura", prazo: "2026-10-16" });
   });
+  it("num negócio da base (estadoReal): proposta aceite pede o contrato; contrato assinado pronto pede o ganho; o de exemplo não muda", () => {
+    const daBase = (extra: Partial<ReturnType<typeof negocioBase>>) => negocioBase("n", { estadoReal: "aberto", orcamentos: [orc("a", true)], ...extra });
+    expect(passo(pessoaBase(), [daBase({ proposta: { estado: "aceite" } })]).id).toBe("criarContrato");
+    expect(passo(pessoaBase(), [daBase({ proposta: { estado: "aceite" }, contrato: { estado: "pendente" } })]).id).toBe("recolherAssinatura");
+    expect(passo(pessoaBase(), [daBase({ contrato: { estado: "assinado" }, prontoAGanhar: true })]).id).toBe("ganharNegocio");
+    expect(passo(pessoaBase(), [daBase({ contrato: { estado: "assinado" }, prontoAGanhar: false })]).id).toBe("recolherAssinatura");
+    expect(passo(pessoaBase(), [negocioBase("n", { orcamentos: [orc("a", true)], proposta: { estado: "aceite" } })]).id).toBe("esperarCliente");
+  });
   it("com um negócio aberto manda o negócio em foco, mesmo com registos por ligar ao lado", () => {
     expect(passo(pessoaBase(), [emOrcamento], "lead", registosBase({ contactos: [contactoBase()] })).id).toBe("criarProposta");
     expect(passo(pessoaBase(), [emOrcamento], "cliente", registosBase({ visitas: [visitaPessoaBase()] })).id).toBe("criarProposta");

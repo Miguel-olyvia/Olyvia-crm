@@ -5,6 +5,9 @@ import type { FaseNegocio } from "./negocioMetas";
 /** Anel de foco visível, o mesmo em todos os controlos da página (vive em `ficha-comum`, partilhado com as fichas). */
 export { FOCO };
 
+/** A pista visual de um botão `aria-disabled` (que continua focável): opaco e com o cursor de «não». Local: nunca em `ui/button.tsx`, que é de toda a app. */
+export const PISTA_DESATIVADO = "aria-disabled:cursor-not-allowed aria-disabled:opacity-60";
+
 /** Chip de filtro: 44 px de altura; o ativo troca de cor e ganha uma marca (✓) que o chip mostra à parte. */
 export const chip = (ativo: boolean): string =>
   cn(

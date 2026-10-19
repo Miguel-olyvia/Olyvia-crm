@@ -89,6 +89,10 @@ export const pessoasListaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.next.esperarCliente.hint': 'A proposta já seguiu: falta a resposta da pessoa.',
     'pessoasPagina.next.recolherAssinatura': 'Recolher a assinatura',
     'pessoasPagina.next.recolherAssinatura.hint': 'O contrato está pronto: falta a assinatura.',
+    'pessoasPagina.next.criarContrato': 'Criar o contrato',
+    'pessoasPagina.next.criarContrato.hint': 'A proposta foi aceite: falta o contrato.',
+    'pessoasPagina.next.ganharNegocio': 'Dar o negócio como ganho',
+    'pessoasPagina.next.ganharNegocio.hint': 'O contrato está assinado: o negócio está pronto a ganhar.',
   },
   en: {
     'pessoasPagina.caption': 'People: stage, form, last contact, next step and value at stake (sample)',
@@ -178,5 +182,9 @@ export const pessoasListaTranslations: Record<"en" | "pt", Record<string, string
     'pessoasPagina.next.esperarCliente.hint': 'The proposal is out: the person has yet to answer.',
     'pessoasPagina.next.recolherAssinatura': 'Collect the signature',
     'pessoasPagina.next.recolherAssinatura.hint': 'The contract is ready: the signature is missing.',
+    'pessoasPagina.next.criarContrato': 'Create the contract',
+    'pessoasPagina.next.criarContrato.hint': 'The proposal was accepted: the contract is missing.',
+    'pessoasPagina.next.ganharNegocio': 'Mark the deal as won',
+    'pessoasPagina.next.ganharNegocio.hint': 'The contract is signed: the deal is ready to be won.',
   },
 };

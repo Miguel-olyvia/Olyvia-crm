@@ -30,7 +30,7 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
     }
   });
 
-  it("há um texto de passo (todo.step.<id>) para cada um dos 12 passos do processo, e nenhum a mais", () => {
+  it("há um texto de passo (todo.step.<id>) para cada um dos passos do processo (agora 14), e nenhum a mais", () => {
     const ids = Object.keys(pt).filter((c) => c.startsWith("pessoasPagina.todo.step.")).map((c) => c.slice("pessoasPagina.todo.step.".length));
     expect(ids.sort()).toEqual([...PASSOS_PROCESSO].sort());
   });

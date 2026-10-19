@@ -108,3 +108,33 @@ describe("useAcaoDoPasso", () => {
     expect(outroPasso).toHaveTextContent("livre");
   });
 });
+
+describe("useAcaoDoPasso: `podeExecutar` (a ficha real só executa o que sabe executar)", () => {
+  const negocio = item({ tipo: "negocio", fase: "levantamento", id: "n1" });
+  const com = (podeExecutar: (i: ItemProcesso) => boolean) => (
+    <ProcessoContext.Provider value={{ executar: vi.fn(), abrirVisitaLevantamento: vi.fn(), podeExecutar }}>
+      <Botao item={negocio} aoAbrir={vi.fn()} />
+    </ProcessoContext.Provider>
+  );
+
+  it("um passo que o provider diz que não executa deixa o botão a dizer que não executa (e a ficha não mostra um botão morto)", () => {
+    render(com(() => false));
+    expect(screen.getByRole("button")).toHaveAttribute("data-executa", "false");
+  });
+
+  it("um passo que o provider diz que executa continua a executar", () => {
+    render(com(() => true));
+    expect(screen.getByRole("button")).toHaveAttribute("data-executa", "true");
+  });
+
+  it("o provider recebe o item para decidir", () => {
+    const decidir = vi.fn(() => true);
+    render(com(decidir));
+    expect(decidir).toHaveBeenCalledWith(negocio);
+  });
+
+  it("sem `podeExecutar` (o exemplo) tudo executa, como sempre", () => {
+    render(comProvider(vi.fn(), <Botao item={negocio} aoAbrir={vi.fn()} />));
+    expect(screen.getByRole("button")).toHaveAttribute("data-executa", "true");
+  });
+});

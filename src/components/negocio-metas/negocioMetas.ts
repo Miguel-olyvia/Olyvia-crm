@@ -132,6 +132,8 @@ export interface NegocioMes {
    * assinado fica «pronto a ganhar» e não «ganho».
    */
   estadoReal?: "aberto" | "ganho" | "perdido";
+  /** Só nos negócios da base: a base diz que as condições para ganhar estão cumpridas (a regra da organização). Manda sobre a regra local. */
+  prontoAGanhar?: boolean;
 }
 
 export interface MetaComercial {
@@ -191,6 +193,9 @@ export function valorDoNegocio(negocio: NegocioMes): number {
 
 /** A fase é a do último passo da cadeia; contrato assinado passa a Ganho. */
 export function faseDoNegocio(negocio: NegocioMes): FaseNegocio {
+  // Nos negócios da base, «ganho» é só o estado «ganho»: um aberto com contrato assinado fica na fase do contrato, pronto a ganhar.
+  if (negocio.estadoReal === "ganho") return "ganho";
+  if (negocio.estadoReal !== undefined) return negocio.contrato ? "contrato" : negocio.proposta ? "proposta" : "orcamento";
   if (negocio.contrato) return negocio.contrato.estado === "assinado" ? "ganho" : "contrato";
   if (negocio.proposta) return "proposta";
   return "orcamento";

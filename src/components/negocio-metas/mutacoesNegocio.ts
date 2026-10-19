@@ -1,0 +1,77 @@
+// O que os ecrãs do negócio podem FAZER (perder, anular a perda, ligar e desligar um registo, ganhar, criar). É um contrato: quem o
+// cumpre é a ficha real (`useMutacoesNegocio`, em `@/hooks/pessoas`, que fala com a base); os ecrãs só o leem por contexto e não sabem
+// de onde vem. Sem provider (o exemplo e os testes antigos) os ecrãs continuam a usar os stores em memória, como sempre.
+// Todas as funções lançam `ErroNeg` se falharem (o ecrã traduz-lhe a chave, nunca a mensagem) e esperam pela base.
+import { createContext, useContext } from "react";
+import type { FaseBase } from "./faseBase";
+
+/** Os tipos de registo que a base sabe ligar a um negócio. */
+export type TipoRegistoBase = "contacto" | "visita" | "levantamento" | "orcamento" | "proposta" | "contrato";
+export const TIPOS_REGISTO_BASE: readonly TipoRegistoBase[] = ["contacto", "visita", "levantamento", "orcamento", "proposta", "contrato"];
+
+/** Os documentos (orçamento, proposta e contrato) só entram em `p_registos` ao criar com a M6 aplicada. */
+export const TIPOS_DOCUMENTO: readonly TipoRegistoBase[] = ["orcamento", "proposta", "contrato"];
+
+export interface RefRegistoBase {
+  tipo: TipoRegistoBase;
+  id: string;
+}
+
+export interface PedidoPerder {
+  negocioId: string;
+  /** A fase em que estava, na linguagem da base (`faseParaBase`): «ganho» nunca chega aqui. */
+  fase: FaseBase;
+  motivo: string;
+}
+
+export type ConversaoGanho = "feita" | "ja_cliente" | "ja_convertida";
+
+export interface ResultadoGanho {
+  /** `false`: o negócio já estava ganho. */
+  mudou: boolean;
+  /** `null` quando a base trouxe um valor que o ecrã não conhece. */
+  conversao: ConversaoGanho | null;
+  /** Quantas outras leads abertas a pessoa tem (o ecrã avisa se for mais de zero). */
+  outrasLeadsAbertas: number;
+}
+
+export interface PedidoCriarNegocio {
+  /** Gerado ao abrir o diálogo e estável entre reenvios: é o que torna o criar idempotente. Novo depois de um sucesso. */
+  id: string;
+  titulo: string;
+  notas: string;
+  /** `anew_users.id`; `null`: a base usa quem cria. */
+  comercialId: string | null;
+  leadId: string | null;
+  /** A lead escolhida tem a abordagem encerrada e o utilizador quer reabri-la. */
+  reabrirAbordagem: boolean;
+  /** Contactos e visitas, e (com a M6) orçamentos, propostas e contratos. O levantamento vai à parte. */
+  registos: RefRegistoBase[];
+  levantamentoId: string | null;
+}
+
+export interface ResultadoCriar {
+  negocioId: string;
+  /** `false`: reenvio do mesmo id (o negócio já existia): sucesso, sem repetir avisos. */
+  mudou: boolean;
+  /** Os registos que a base recusou ligar: ficam «por ligar» na ficha. */
+  recusados: RefRegistoBase[];
+}
+
+export interface MutacoesNegocio {
+  perder: (pedido: PedidoPerder) => Promise<{ mudou: boolean }>;
+  anular: (negocioId: string, razao: string) => Promise<{ mudou: boolean }>;
+  ligar: (negocioId: string, ref: RefRegistoBase) => Promise<void>;
+  desligar: (negocioId: string, ref: RefRegistoBase) => Promise<void>;
+  ganhar: (negocioId: string, leadId: string | null) => Promise<ResultadoGanho>;
+  criar: (pedido: PedidoCriarNegocio) => Promise<ResultadoCriar>;
+  /** A M6 está aplicada: o criar aceita orçamentos, propostas e contratos. Desligada, o formulário não os oferece. */
+  criarComDocumentos: boolean;
+  /** Refaz a ficha e as listas, sem escrever nada (um documento criado por outro ecrã, ou uma ligação que falhou, passam a ver-se). */
+  refrescar: () => void;
+}
+
+export const MutacoesNegocioContext = createContext<MutacoesNegocio | null>(null);
+
+/** As mutações da ficha real; `null` fora dela (o exemplo): então os ecrãs usam os stores. */
+export const useMutacoesDaFicha = (): MutacoesNegocio | null => useContext(MutacoesNegocioContext);

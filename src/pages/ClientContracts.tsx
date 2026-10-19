@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { formatCurrency } from "@/lib/utils";
 import { getEffectiveContractValue } from "@/utils/contractValue";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -28,6 +28,8 @@ import { pt } from "date-fns/locale";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
+import { caminhoVoltarSeguro, comParametro } from "@/lib/voltarParaPessoas";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { ModuleAlertsBanner } from "@/components/ModuleAlertsBanner";
@@ -184,6 +186,9 @@ const ClientContracts = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [presetClientId, setPresetClientId] = useState<string | null>(null);
+  // Só vindo da ficha de uma pessoa (P3): a proposta de que o contrato nasce e o caminho a que se volta depois de o criar.
+  const [presetProposalId, setPresetProposalId] = useState<string | null>(null);
+  const voltarAoCriar = useRef<string | null>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<ClientContract | null>(null);
   const { finalizeContract } = usePipelineAutomation();
@@ -571,7 +576,7 @@ const ClientContracts = () => {
     return () => { cancelled = true; };
   }, [contracts, activeCompany?.id]);
 
-  const { data: proposals = [] } = useQuery({
+  const { data: proposals = [], isSuccess: proposalsLoaded } = useQuery({
     queryKey: [
       "proposals-for-contracts",
       activeCompany?.id,
@@ -677,14 +682,18 @@ const ClientContracts = () => {
   useEffect(() => {
     const newContractParam = searchParams.get("newContract");
     const newContractClientId = searchParams.get("clientId");
-    if (newContractParam === "true" && newContractClientId) {
+    const newContractProposalId = searchParams.get("proposalId");
+    if (newContractParam === "true" && (newContractClientId || newContractProposalId)) {
       setPresetClientId(newContractClientId);
+      setPresetProposalId(newContractProposalId);
+      voltarAoCriar.current = caminhoVoltarSeguro(searchParams.get("voltar"));
       setEditingContract(null);
       setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
       setIsDialogOpen(true);
 
       searchParams.delete("newContract");
       searchParams.delete("clientId");
+      searchParams.delete("proposalId");
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -1116,7 +1125,7 @@ const ClientContracts = () => {
       }
 
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-      const { error } = await supabase.rpc('rpc_create_client_contract' as any, {
+      const { data: novoContratoId, error } = await supabase.rpc('rpc_create_client_contract' as any, {
         p_client_id: clientId,
         p_entity_id: resolvedEntityId || null,
         p_organization_id: activeCompany.id,
@@ -1134,8 +1143,17 @@ const ClientContracts = () => {
         p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
       });
       if (error) throw error;
+      // O rpc devolve o id do contrato criado (a ficha da pessoa liga-o ao negócio ao voltar).
+      return typeof novoContratoId === "string" ? novoContratoId : null;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.createSuccess')); handleCloseDialog(); },
+    onSuccess: (novoContratoId) => {
+      const voltar = voltarAoCriar.current;
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success(t('clientContracts.toast.createSuccess'));
+      handleCloseDialog();
+      // Vindo da ficha de uma pessoa: volta a ela com o contrato novo, para ser ligado ao negócio.
+      if (voltar && novoContratoId) navigate(comParametro(voltar, "novoContrato", novoContratoId));
+    },
     onError: async (error: any) => {
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.createError'), { description });
@@ -1302,7 +1320,7 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id,
   });
 
-  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
+  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setPresetProposalId(null); voltarAoCriar.current = null; setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
 
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
@@ -1648,6 +1666,7 @@ const ClientContracts = () => {
   return (
     <Layout fullWidth>
       <div className="flex flex-col h-full">
+        <BarraVoltar />
         <ModuleAlertsBanner alerts={contractAlerts} onDismiss={dismissContractAlert} onAction={() => {}} onAlertClick={(alert) => {
           const entityIds = alert.action_config?.entity_ids as string[] | undefined;
           const contractId = entityIds?.[0] || alert.entity_id;
@@ -2347,7 +2366,9 @@ const ClientContracts = () => {
           open={isDialogOpen}
           onOpenChange={(open) => { if (!open) handleCloseDialog(); else setIsDialogOpen(true); }}
           contract={editingContract}
-          proposals={presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
+          proposals={presetProposalId ? proposals.filter((p: any) => p.id === presetProposalId) : presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
+          presetProposalId={presetProposalId}
+          proposalsLoaded={proposalsLoaded}
           templates={templates}
           onSave={handleDialogSave}
           saving={createMutation.isPending || updateMutation.isPending}

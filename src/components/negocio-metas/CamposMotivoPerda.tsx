@@ -15,7 +15,7 @@ const L = "businessGoals.lose.";
 /** O erro de um campo: o texto em `text-foreground` e a cor só no ícone (a cor não é o único sinal, nem o texto depende dela). */
 export function MensagemErro({ id, texto }: { id: string; texto: string }) {
   return (
-    <p id={id} className="flex items-center gap-1.5 text-sm text-foreground">
+    <p id={id} role="alert" className="flex items-center gap-1.5 text-sm text-foreground">
       <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
       {texto}
     </p>

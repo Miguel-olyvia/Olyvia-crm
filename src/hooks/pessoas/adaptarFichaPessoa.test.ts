@@ -131,3 +131,57 @@ describe("adaptarPessoa: abordagem encerrada", () => {
     expect(adaptar({ lead: null }).encerrada).toBeUndefined();
   });
 });
+
+describe("adaptarPessoa: a abordagem encerrada com a lead mais recente morta", () => {
+  const morta = { id: "morta", estado: "converted", aberta: false, encerramento: null };
+  const lead = (id: string, fecho: string | null, criada: string) => ({ id, status: "new", created_at: criada, closure_result: fecho });
+
+  it("a lead encerrada que está entre as abertas dá a pessoa como encerrada (e o «Reativar» aparece)", () => {
+    const p = adaptar({ lead: morta, leads_abertas: [lead("l1", "semInteresse", "2026-09-01T10:00:00Z")] });
+    expect(p.encerrada).toMatchObject({ resultado: "semInteresse", motivo: "outro", data: HOJE });
+  });
+
+  it("uma lead aberta e viva mais recente que a encerrada manda: a pessoa não está encerrada", () => {
+    const p = adaptar({ lead: morta, leads_abertas: [lead("l1", "semInteresse", "2026-08-01T10:00:00Z"), lead("l2", null, "2026-09-01T10:00:00Z")] });
+    expect(p.encerrada).toBeUndefined();
+  });
+
+  it("uma lead da ficha aberta e sem encerramento não deixa a pessoa encerrada por causa de uma aberta mais antiga", () => {
+    const aberta = { id: "viva", estado: "new", aberta: true, encerramento: null };
+    const p = adaptar({ lead: aberta, leads_abertas: [lead("antiga", "semInteresse", "2026-08-01T10:00:00Z")] });
+    expect(p.encerrada).toBeUndefined();
+  });
+
+  it("o encerramento da própria lead da ficha continua a valer, com motivo e dia", () => {
+    const encerrada = { id: "l1", estado: "new", aberta: true, encerramento: { resultado: "obraInviavel", motivo: "preco", motivo_outro: null, em: "2026-10-05T12:00:00Z" } };
+    expect(adaptar({ lead: encerrada }).encerrada).toEqual({ resultado: "obraInviavel", motivo: "preco", data: "2026-10-05" });
+  });
+
+  it("sem lead e sem abertas não há encerramento", () => {
+    expect(adaptar({ lead: null, leads_abertas: [] }).encerrada).toBeUndefined();
+  });
+});
+
+describe("adaptarPessoa: a qualificação chega da função como respostas (objeto), não como MQL ou SQL", () => {
+  const respostas = { orcamento: "5000", urgencia: "alta", sql: true };
+
+  it("um objeto de respostas não rebenta a ficha e não é MQL nem SQL", () => {
+    expect(() => adaptar({ pessoa: pessoaDb({ qualificacao: respostas }) })).not.toThrow();
+    expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas }) }).qualificacao).toBeUndefined();
+  });
+
+  it.each([[42], [true], [[]], [["SQL"]], [null]])("outro tipo (%j) também não rebenta", (valor) => {
+    expect(() => adaptar({ pessoa: pessoaDb({ qualificacao: valor }) })).not.toThrow();
+    expect(adaptar({ pessoa: pessoaDb({ qualificacao: valor }) }).qualificacao).toBeUndefined();
+  });
+
+  it("lê a chave qualificacao_tipo quando vem (MQL ou SQL, sem distinguir maiúsculas), mesmo com respostas ao lado", () => {
+    expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: "SQL" }) }).qualificacao).toBe("SQL");
+    expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: " mql " }) }).qualificacao).toBe("MQL");
+  });
+
+  it("um qualificacao_tipo desconhecido ou que não é texto não conta", () => {
+    expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: "quente" }) }).qualificacao).toBeUndefined();
+    expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: 3 as never }) }).qualificacao).toBeUndefined();
+  });
+});

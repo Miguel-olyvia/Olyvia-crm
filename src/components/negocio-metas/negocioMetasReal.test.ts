@@ -42,7 +42,34 @@ describe("isNegocioGanho com estadoReal", () => {
     expect(isNegocioGanho({ ...base, ...assinado, estadoReal: "perdido" })).toBe(false);
   });
 
-  it("a fase continua a ler a cadeia (um aberto com contrato assinado mostra a fase do contrato assinado)", () => {
-    expect(faseDoNegocio({ ...base, ...assinado, estadoReal: "aberto" })).toBe("ganho");
+  // ALTERADO no P3 (a asserção antiga dizia «ganho»): um negócio aberto com contrato assinado está na fase do contrato, pronto a ganhar.
+  it("um aberto com contrato assinado fica na fase do contrato (pronto a ganhar), não em «ganho»", () => {
+    expect(faseDoNegocio({ ...base, ...assinado, estadoReal: "aberto" })).toBe("contrato");
+  });
+});
+
+describe("faseDoNegocio com estadoReal", () => {
+  const assinado = { contrato: { estado: "assinado" as const } };
+  const pendente = { contrato: { estado: "pendente" as const } };
+
+  it("só o estado «ganho» da base põe o negócio na fase «ganho»", () => {
+    expect(faseDoNegocio({ ...base, estadoReal: "ganho" })).toBe("ganho");
+    expect(faseDoNegocio({ ...base, ...assinado, estadoReal: "ganho" })).toBe("ganho");
+  });
+
+  it("um aberto lê a cadeia: orçamento, proposta, contrato pendente e contrato assinado", () => {
+    expect(faseDoNegocio({ ...base, estadoReal: "aberto" })).toBe("orcamento");
+    expect(faseDoNegocio({ ...base, proposta: { estado: "enviada" }, estadoReal: "aberto" })).toBe("proposta");
+    expect(faseDoNegocio({ ...base, ...pendente, estadoReal: "aberto" })).toBe("contrato");
+    expect(faseDoNegocio({ ...base, ...assinado, estadoReal: "aberto" })).toBe("contrato");
+  });
+
+  it("um perdido com contrato assinado também não aparece como «ganho»", () => {
+    expect(faseDoNegocio({ ...base, ...assinado, estadoReal: "perdido" })).toBe("contrato");
+  });
+
+  it("sem estadoReal (o exemplo) nada muda: contrato assinado é a fase «ganho»", () => {
+    expect(faseDoNegocio({ ...base, ...assinado })).toBe("ganho");
+    expect(faseDoNegocio({ ...base, ...pendente })).toBe("contrato");
   });
 });

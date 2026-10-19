@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG, codigoDoErro, chaveDoErro } from "./errosNeg";
 
-const CODIGOS = Array.from({ length: 15 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`);
+const CODIGOS = Array.from({ length: 18 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`);
 
 describe("errosNeg", () => {
-  it("há uma chave própria para cada código NG001 a NG015 e para 42501", () => {
+  it("há uma chave própria para cada código NG001 a NG018 e para 42501", () => {
     for (const codigo of [...CODIGOS, "42501"]) expect(CHAVES_ERRO_NEG[codigo], codigo).toMatch(/^pessoasPagina\.erroNeg\./);
     const chaves = Object.values(CHAVES_ERRO_NEG);
     expect(new Set(chaves).size).toBe(chaves.length);
-    expect(chaves).toHaveLength(16);
+    expect(chaves).toHaveLength(19);
   });
 
   it("lê o código de error.code", () => {
@@ -40,7 +40,7 @@ describe("errosNeg", () => {
   it("não confunde números maiores nem texto parecido", () => {
     expect(codigoDoErro({ message: "NG0011 x" })).toBeNull();
     expect(codigoDoErro({ message: "xNG001" })).toBeNull();
-    expect(codigoDoErro({ message: "NG016 x" })).toBeNull();
+    expect(codigoDoErro({ message: "NG019 x" })).toBeNull();
   });
 
   it("código desconhecido, nulo ou de tipo inesperado devolve a chave genérica", () => {
@@ -48,5 +48,13 @@ describe("errosNeg", () => {
     for (const e of [null, undefined, "NG001", 42, {}, { code: 5, message: 7 }]) {
       expect(chaveDoErro(e), String(e)).toBe(CHAVE_ERRO_GENERICO);
     }
+  });
+});
+
+describe("errosNeg: NG016, NG017 e NG018", () => {
+  it.each(["NG016", "NG017", "NG018"])("%s lê-se de error.code e do texto, com a sua chave", (codigo) => {
+    expect(codigoDoErro({ code: codigo, message: "x" })).toBe(codigo);
+    expect(codigoDoErro({ message: `falhou [${codigo}]` })).toBe(codigo);
+    expect(chaveDoErro({ code: codigo, message: "x" })).toBe(`pessoasPagina.erroNeg.${codigo.toLowerCase()}`);
   });
 });

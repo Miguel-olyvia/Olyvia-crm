@@ -14,7 +14,8 @@ afterEach(limparAcoes);
 describe("useAcoesFichaReal: capacidades", () => {
   it("chamada e encerrar ligadas; nota, adiar e visita desligadas enquanto M8 e o P6 não existem", () => {
     const { result } = montar();
-    expect(result.current.capacidades).toEqual({ chamada: true, encerrar: true, adiar: false, nota: false, visita: false, negocios: false });
+    // ALTERADO no P3 (negocios era false): o negócio completo está ligado.
+    expect(result.current.capacidades).toEqual({ chamada: true, encerrar: true, adiar: false, nota: false, visita: false, negocios: true });
   });
 });
 
@@ -180,3 +181,40 @@ describe("encerrar e reativar", () => {
   });
 });
 
+
+describe("encerrar e reativar: a lead certa (a mais recente pode estar morta)", () => {
+  const MORTA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const ABERTA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const ENCERRADA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const morta = { id: MORTA, estado: "converted", aberta: false, encerramento: null };
+  const lead = (id: string, fecho: string | null, criada: string) => ({ id, status: "new", created_at: criada, closure_result: fecho });
+
+  it("encerrar escreve na lead aberta e não na lead morta que é a mais recente", async () => {
+    rpcMock.mockReturnValue(respostaOk({}));
+    const { result } = montar({ ficha: fichaDb({ lead: morta, leads_abertas: [lead(ABERTA, null, "2026-09-01T10:00:00Z")] }) });
+    await act(async () => { await result.current.encerrar(PESSOA_ID, { resultado: "semInteresse", motivo: "preco" }); });
+    expect(parametros(0).p_lead_id).toBe(ABERTA);
+  });
+
+  it("reativar usa a lead encerrada que está entre as abertas quando a mais recente está morta", async () => {
+    rpcMock.mockReturnValue(respostaOk({}));
+    const { result } = montar({ ficha: fichaDb({ lead: morta, leads_abertas: [lead(ENCERRADA, "semInteresse", "2026-09-01T10:00:00Z")] }) });
+    await act(async () => { await result.current.reativar(PESSOA_ID); });
+    expect(parametros(0).p_lead_id).toBe(ENCERRADA);
+  });
+
+  it("reativar usa a lead que tem o encerramento quando ela é a da ficha", async () => {
+    rpcMock.mockReturnValue(respostaOk({}));
+    const encerrada = { id: ENCERRADA, estado: "new", aberta: true, encerramento: { resultado: "semInteresse", motivo: "preco", motivo_outro: null, em: "2026-10-01T10:00:00Z" } };
+    const { result } = montar({ ficha: fichaDb({ lead: encerrada, leads_abertas: [lead(ENCERRADA, "semInteresse", "2026-09-01T10:00:00Z")] }) });
+    await act(async () => { await result.current.reativar(PESSOA_ID); });
+    expect(parametros(0).p_lead_id).toBe(ENCERRADA);
+  });
+
+  it("com várias abertas escreve na mais recente", async () => {
+    rpcMock.mockReturnValue(respostaOk({}));
+    const { result } = montar({ ficha: fichaDb({ lead: morta, leads_abertas: [lead("velha", null, "2026-08-01T10:00:00Z"), lead(ABERTA, null, "2026-09-10T10:00:00Z")] }) });
+    await act(async () => { await result.current.encerrar(PESSOA_ID, { resultado: "semInteresse", motivo: "preco" }); });
+    expect(parametros(0).p_lead_id).toBe(ABERTA);
+  });
+});

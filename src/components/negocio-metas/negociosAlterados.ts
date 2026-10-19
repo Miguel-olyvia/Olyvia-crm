@@ -3,6 +3,7 @@
 // testes). A página de Negócio e metas e a ficha de Pessoas leem-no, por isso as duas mostram o mesmo. As funções
 // `negociosDoQuadro` e `negociosComPerdidos` aplicam o que está guardado a uma lista de negócios (puras).
 import { useSyncExternalStore } from "react";
+import { useDadosNegocio } from "./costuraNegocio";
 import type { Aplicacao } from "./negocioAcoes";
 import { DETALHES_EXEMPLO } from "./negocioDetalhesExemplo";
 import type { DetalheNegocio, OrcamentoDetalhe } from "./negocioDetalhes";
@@ -96,8 +97,18 @@ export function repor(): void {
   mudar(SEM_ALTERACOES);
 }
 
-/** As alterações, atualizadas sempre que se muda um negócio. */
-export const useAlteracoesNegocios = (): Alteracoes => useSyncExternalStore(subscrever, alteracoesAtuais, alteracoesAtuais);
+/** As alterações, atualizadas sempre que se muda um negócio. Na ficha real (com `DadosNegocio`) são as da base, nunca as do store. */
+export function useAlteracoesNegocios(): Alteracoes {
+  const doStore = useSyncExternalStore(subscrever, alteracoesAtuais, alteracoesAtuais);
+  return useDadosNegocio()?.alteracoes ?? doStore;
+}
+
+/** O detalhe de um negócio: o da ficha real (ou `null`, nunca o de exemplo de outro negócio) ou, sem ela, o do store. */
+export function useDetalheDoNegocio(negocioId: string): DetalheNegocio | null {
+  const doStore = useAlteracoesNegocios();
+  const dados = useDadosNegocio();
+  return dados ? dados.detalhe(negocioId) : detalheDoNegocio(negocioId, doStore);
+}
 
 const comEdicao = (negocios: readonly NegocioMes[], a: Alteracoes): NegocioMes[] => negocios.map((n) => a.editados[n.id] ?? n);
 

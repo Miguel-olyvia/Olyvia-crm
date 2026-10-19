@@ -6,6 +6,7 @@ import type { NegocioHistorico, NegocioPessoa } from "@/components/pessoas/pesso
 import { maisRecentePrimeiro, numero } from "./adaptarComum";
 import { diasEntre } from "./adaptarResumoPessoa";
 import type { ContratoDb, FichaDb, NegocioFichaDb, PropostaDb } from "./fichaTipos";
+import { propostaRecusada, propostaViva } from "./propostaViva";
 import { diaLisboa } from "./tempoLisboa";
 
 // Tabelas de tradução dos valores da base (em minúsculas). Valores reais por confirmar na nike: um desconhecido nunca rebenta.
@@ -46,8 +47,9 @@ function contratoDoNegocio(n: NegocioFichaDb): NegocioMes["contrato"] {
 }
 
 function propostaDoNegocio(n: NegocioFichaDb): NegocioMes["proposta"] {
-  const recente = maisRecentePrimeiro(n.propostas ?? [], (p) => p.criado_em)[0];
-  return recente ? { estado: estadoPropostaDeDb(recente) } : null;
+  // A proposta viva (a mesma regra de todo o lado); se só há recusadas o negócio está sem proposta: recusada não conta como «enviada».
+  const viva = propostaViva(n);
+  return viva && !propostaRecusada(viva) ? { estado: estadoPropostaDeDb(viva) } : null;
 }
 
 function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string): NegocioMes {
@@ -68,6 +70,7 @@ function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string): Negoci
     ...(n.levantamento_id ? { decisaoLevantamento: "ligado" as const } : {}),
     valorBase: numero(n.valor),
     estadoReal,
+    prontoAGanhar: n.pronto_a_ganhar === true,
   };
 }
 

@@ -5,6 +5,7 @@ import { pessoasEncerrarTranslations } from "./pessoasEncerrar";
 import { pessoasErrosTranslations } from "./pessoasErros";
 import { pessoasFichaTranslations } from "./pessoasFicha";
 import { pessoasFichaRealTranslations } from "./pessoasFichaReal";
+import { pessoasNegocioTranslations } from "./pessoasNegocio";
 import { pessoasFichaResumoTranslations } from "./pessoasFichaResumo";
 import { pessoasListaTranslations } from "./pessoasLista";
 import { pessoasListaRealTranslations } from "./pessoasListaReal";
@@ -130,6 +131,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasErrosTranslations.en,
     ...pessoasListaRealTranslations.en,
     ...pessoasFichaRealTranslations.en,
+    ...pessoasNegocioTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -245,5 +247,6 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasErrosTranslations.pt,
     ...pessoasListaRealTranslations.pt,
     ...pessoasFichaRealTranslations.pt,
+    ...pessoasNegocioTranslations.pt,
   },
 };

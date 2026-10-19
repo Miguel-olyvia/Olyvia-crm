@@ -30,6 +30,8 @@ function passoDaPessoa(item: ItemProcesso): PassoProcesso {
  * Sem detalhe (os negócios de exemplo) o passo é o da coluna.
  */
 function passoDoNegocio(item: ItemProcesso): PassoProcesso {
+  if (item.prontoAGanhar && item.fase === "contrato") return "ganharNegocio";
+  if (item.propostaAceite && item.fase === "proposta") return "criarContrato";
   if (item.fase === "levantamento") return "fazerLevantamento";
   if (item.fase === "contrato") return "registarAssinatura";
   if (item.fase === "proposta") return item.propostaRascunho ? "enviarProposta" : "registarRespostaCliente";

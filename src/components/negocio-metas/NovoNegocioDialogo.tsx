@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Plus, Sparkles, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -51,6 +51,13 @@ interface NovoNegocioDialogoProps {
   titulo?: string;
   /** A descrição do painel (por omissão a de "Novo negócio"). */
   descricao?: string;
+  /** O selo do cabeçalho (por omissão «Novo · por gravar», que é do exemplo); `null` tira-o (a ficha real grava mesmo). */
+  selo?: string | null;
+  /**
+   * O corpo do painel, no lugar dos formulários do exemplo (a ficha real monta o seu). Recebe `aoCriou` (o painel vai fechar por ter criado o negócio: o foco não volta ao botão que o abriu) e `aoSujar`, que avisa que há alterações por
+   * gravar (um clique fora deixa de fechar). O campo com `data-foco-inicial` recebe o foco ao abrir.
+   */
+  corpo?: (contexto: { aoSujar: () => void; aoCriou: () => void }) => ReactNode;
   /**
    * Chamado ao fechar o painel (cancelando ou criando): devolve o foco a quem o abriu e diz se o fez. Sem isto, o foco volta
    * ao botão "Novo negócio" (se o painel o tiver); com ele a quem chama cabe decidir, porque o botão que abriu o painel
@@ -60,7 +67,7 @@ interface NovoNegocioDialogoProps {
 }
 
 /** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
-function CabecalhoNovo({ titulo, descricao }: Pick<NovoNegocioDialogoProps, "titulo" | "descricao">) {
+function CabecalhoNovo({ titulo, descricao, selo }: Pick<NovoNegocioDialogoProps, "titulo" | "descricao" | "selo">) {
   const { t } = useTranslation();
   return (
     <SheetHeader className="space-y-2 border-b border-border p-6 text-left">
@@ -80,10 +87,12 @@ function CabecalhoNovo({ titulo, descricao }: Pick<NovoNegocioDialogoProps, "tit
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <SheetTitle className="text-lg">{titulo ?? t("businessGoals.new.title")}</SheetTitle>
-        <span className="inline-flex items-center gap-1 rounded-sm border border-primary px-1.5 py-0.5 text-xs font-semibold text-primary dark:text-violet-300">
-          <Sparkles className="h-3 w-3" aria-hidden="true" />
-          {t("businessGoals.new.badge")}
-        </span>
+        {selo !== null && (
+          <span className="inline-flex items-center gap-1 rounded-sm border border-primary px-1.5 py-0.5 text-xs font-semibold text-primary dark:text-violet-300">
+            <Sparkles className="h-3 w-3" aria-hidden="true" />
+            {selo ?? t("businessGoals.new.badge")}
+          </span>
+        )}
       </div>
       <SheetDescription>{descricao ?? t("businessGoals.new.description")}</SheetDescription>
     </SheetHeader>
@@ -99,7 +108,7 @@ function CabecalhoNovo({ titulo, descricao }: Pick<NovoNegocioDialogoProps, "tit
  */
 export function NovoNegocioDialogo({
   pessoas, modo = "negocio", aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial,
-  guardarLevantamento, aoDevolverFoco, titulo, descricao,
+  guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -139,7 +148,8 @@ export function NovoNegocioDialogo({
     const campo = primeiroCampo.current;
     const seccao = seccaoInicial ? conteudo.current?.querySelector<HTMLElement>("[data-foco-seccao]") : null;
     const separador = conteudo.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    (seccao ?? (campo && !campo.disabled ? campo : separador))?.focus();
+    const inicial = corpo ? conteudo.current?.querySelector<HTMLElement>("[data-foco-inicial]") : null;
+    (seccao ?? inicial ?? (campo && !campo.disabled ? campo : separador))?.focus();
   };
   const devolverFoco = (e: Event) => {
     e.preventDefault();
@@ -163,8 +173,8 @@ export function NovoNegocioDialogo({
           onCloseAutoFocus={devolverFoco}
           className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
         >
-          <CabecalhoNovo titulo={titulo} descricao={descricao} />
-          {modo === "registos" && guardar ? (
+          <CabecalhoNovo titulo={titulo} descricao={descricao} selo={selo} />
+          {corpo ? corpo({ aoSujar: () => { sujo.current = true; }, aoCriou: () => { criou.current = true; } }) : modo === "registos" && guardar ? (
             <FormularioRegistos
               pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
               abaInicial={abaInicial} seccaoInicial={seccaoInicial} guardarLevantamento={guardar} aoSujar={() => { sujo.current = true; }}

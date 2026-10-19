@@ -1,5 +1,6 @@
 // A ficha real da pessoa (P2): lê neg_ficha_pessoa por `useFichaPessoa`, adapta-a e alimenta a MESMA ficha do protótipo (`FichaPessoa`), como
-// o `Pessoas.tsx` a alimenta com os stores. A base só entra por `@/hooks/pessoas/`; aqui não há consultas.
+// o `Pessoas.tsx` a alimenta com os stores. A base só entra por `@/hooks/pessoas/`; aqui não há consultas. Com a capacidade `negocios` (P3) a
+// ficha ganha o negócio completo (`NegociosDaFichaReal`); sem ela continua só de leitura.
 //
 // Só se mostra a ficha da pessoa que está aberta (`?open=`): ao passar de A para B não se mostra a de A (nem as ações trabalham sobre ela)
 // enquanto B carrega; há um indicador visível e o anúncio. A última ficha só se guarda para o painel deslizar para fora com conteúdo
@@ -15,6 +16,7 @@ import { useFichaPessoa } from "@/hooks/pessoas/useFichaPessoa";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
 import type { ItemAtividade, NotaPessoa, Pessoa, Submissao } from "@/components/pessoas/pessoasTipos";
+import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 
 const F = "pessoasPagina.real.ficha.";
 
@@ -37,9 +39,13 @@ interface FichaRealProps {
   aoLimpar: () => void;
   /** O elemento a que o foco volta ao fechar, guardado no clique que abriu. */
   origemFoco?: MutableRefObject<HTMLElement | null>;
+  /** O negócio a abrir dentro da ficha (`?negocio=`). */
+  negocioInicial?: string | null;
+  /** Depois de criar um negócio: leva-o ao endereço (`?negocio=`), para a ligação se poder partilhar e recarregar. */
+  aoAbrirNegocio?: (negocioId: string, pessoaId: string) => void;
 }
 
-export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco }: FichaRealProps) {
+export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio }: FichaRealProps) {
   const { t } = useTranslation();
   const lida = useFichaPessoa(pessoaId);
   const ultima = useRef<FichaDb | null>(null);
@@ -80,6 +86,15 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   const avisoAtualizacao = useMemo(() => (lida.atualizacaoFalhou ? { aoRepetir: lida.recarregar } : undefined), [lida.atualizacaoFalhou, lida.recarregar]);
 
   const aAbrir = pessoaId !== null && mostrada === null && lida.estado === "a-carregar";
+  const ficha = (aoCriarNegocio?: () => void, negocioAbrir: string | null = null) => (
+    <FichaPessoa
+      resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null && adaptada !== null} aoFechar={aoFechar} idsVisiveis={idsVisiveis}
+      aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={adaptada?.hoje ?? hojeLisboa()} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
+      atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={false} podeVerSubmissoes={false}
+      acoes={acoes} aoPedir={NADA} aoVerTodasSubmissoes={NADA} comNotas={false} maisItens={maisItens} avisoAtualizacao={avisoAtualizacao}
+      aoCriarNegocio={aoCriarNegocio} negocioInicial={negocioAbrir}
+    />
+  );
   return (
     <div aria-busy={aAbrir}>
       {/* Sempre montada: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
@@ -89,12 +104,11 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
           {t(`${F}opening`)}
         </div>
       )}
-      <FichaPessoa
-        resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null && adaptada !== null} aoFechar={aoFechar} idsVisiveis={idsVisiveis}
-        aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={adaptada?.hoje ?? hojeLisboa()} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
-        atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={false} podeVerSubmissoes={false}
-        acoes={acoes} aoPedir={NADA} aoVerTodasSubmissoes={NADA} comNotas={false} maisItens={maisItens} avisoAtualizacao={avisoAtualizacao}
-      />
+      {acoes.capacidades?.negocios === false ? ficha() : (
+        <NegociosDaFichaReal ficha={mostrada} pessoaAberta={pessoaId} negocioDoEndereco={negocioInicial} aoAbrirNegocio={aoAbrirNegocio} aoFecharFicha={aoLimpar}>
+          {({ aoCriarNegocio, negocioInicial: aAbrir }) => ficha(aoCriarNegocio, aAbrir)}
+        </NegociosDaFichaReal>
+      )}
     </div>
   );
 }

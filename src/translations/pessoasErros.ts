@@ -1,4 +1,4 @@
-// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG015 e 42501).
+// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG018 e 42501).
 // Juntam-se aos de `pessoasPagina.ts`, por isso as chaves continuam a ser `pessoasPagina.*`.
 const E = "pessoasPagina.erroNeg.";
 
@@ -18,6 +18,9 @@ const pt: Record<string, string> = {
   [`${E}ng013`]: "Este negócio já tem um levantamento ligado.",
   [`${E}ng014`]: "Este contrato só se liga depois de assinado.",
   [`${E}ng015`]: "A pessoa não tem lead aberta para converter.",
+  [`${E}ng016`]: "Não foi possível criar a lead.",
+  [`${E}ng017`]: "Esta visita já não está disponível.",
+  [`${E}ng018`]: "Esta visita já foi feita ou cancelada e não se altera.",
   [`${E}permissao`]: "Não tem permissão para esta ação.",
   [`${E}generico`]: "Não foi possível concluir a ação. Tente novamente.",
 };
@@ -38,6 +41,9 @@ const en: Record<string, string> = {
   [`${E}ng013`]: "This deal already has a survey linked.",
   [`${E}ng014`]: "This contract can only be linked once signed.",
   [`${E}ng015`]: "The person has no open lead to convert.",
+  [`${E}ng016`]: "The lead could not be created.",
+  [`${E}ng017`]: "This visit is no longer available.",
+  [`${E}ng018`]: "This visit has already been done or cancelled and cannot be changed.",
   [`${E}permissao`]: "You do not have permission for this action.",
   [`${E}generico`]: "The action could not be completed. Please try again.",
 };

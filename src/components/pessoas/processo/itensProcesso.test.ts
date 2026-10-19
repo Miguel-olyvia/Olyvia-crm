@@ -62,6 +62,36 @@ describe("itensDaPessoa", () => {
   });
 });
 
+describe("itensDaPessoa: o fim do percurso, só nos negócios da base (com estadoReal)", () => {
+  const daBase = (extra: Partial<ReturnType<typeof negocioBase>>) =>
+    negocioBase("n1", { estadoReal: "aberto", orcamentos: [{ id: "o", valor: 1000, escolhido: true }], ...extra });
+  const itemDe = (n: ReturnType<typeof negocioBase>) => itens(registosBase(), [n])[0];
+
+  it("proposta aceite sem contrato: propostaAceite", () => {
+    expect(itemDe(daBase({ proposta: { estado: "aceite" } }))).toMatchObject({ fase: "proposta", propostaAceite: true, prontoAGanhar: false });
+  });
+
+  it("proposta aceite COM contrato pendente: já não é «criar o contrato»", () => {
+    const i = itemDe(daBase({ proposta: { estado: "aceite" }, contrato: { estado: "pendente" } }));
+    expect(i).toMatchObject({ fase: "contrato", propostaAceite: false, prontoAGanhar: false });
+  });
+
+  it("contrato assinado, negócio aberto e a base diz que está pronto: prontoAGanhar, na coluna do contrato (não desaparece do quadro)", () => {
+    const i = itemDe(daBase({ proposta: { estado: "aceite" }, contrato: { estado: "assinado" }, prontoAGanhar: true }));
+    expect(i).toMatchObject({ fase: "contrato", prontoAGanhar: true, propostaAceite: false });
+  });
+
+  it("contrato assinado mas a base não diz que está pronto: não se oferece ganhar", () => {
+    expect(itemDe(daBase({ contrato: { estado: "assinado" }, prontoAGanhar: false })).prontoAGanhar).toBe(false);
+  });
+
+  it("um negócio de exemplo (sem estadoReal) nunca recebe os campos novos como verdadeiros", () => {
+    const i = itemDe(negocioBase("n1", { orcamentos: [{ id: "o", valor: 1, escolhido: true }], proposta: { estado: "aceite" } }));
+    expect(i.propostaAceite ?? false).toBe(false);
+    expect(i.prontoAGanhar ?? false).toBe(false);
+  });
+});
+
 describe("itemEmFoco", () => {
   it("com negócio aberto é o do negócio mais avançado", () => {
     const r = resumoBase(pessoaBase("a"), [aberto, negocioBase("n0", { orcamentos: [] })], HOJE_EXEMPLO, "lead", contactada);

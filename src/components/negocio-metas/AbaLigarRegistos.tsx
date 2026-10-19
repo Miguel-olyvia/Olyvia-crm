@@ -21,6 +21,8 @@ interface Props {
   porLigar: RegistosDaPessoa;
   valor: LigarRegistos;
   aoMudar: (valor: LigarRegistos) => void;
+  /** Não oferece «fazer um novo» levantamento (na ficha real é do P5: o negócio só liga um levantamento que já existe). */
+  semNovo?: boolean;
 }
 
 const mesmaRef = (a: RefRegisto, b: RefRegisto): boolean => a.tipo === b.tipo && a.id === b.id;
@@ -93,7 +95,7 @@ function Opcao({ nome, id, marcada, desativada, texto, dica, aoEscolher }: {
 }
 
 /** O levantamento: usar um existente (e qual), fazer um novo ou dispensar. É opcional. */
-function EscolhaDoLevantamento({ id, porLigar, valor, aoMudar }: Omit<Props, "pessoaEscolhida">) {
+function EscolhaDoLevantamento({ id, porLigar, valor, aoMudar, semNovo }: Omit<Props, "pessoaEscolhida">) {
   const { t } = useTranslation();
   const nome = useId();
   const legenda = useId();
@@ -121,10 +123,12 @@ function EscolhaDoLevantamento({ id, porLigar, valor, aoMudar }: Omit<Props, "pe
           ))}
         </div>
       )}
-      <Opcao
-        nome={nome} id={`${id}-lev-novo`} marcada={escolha.tipo === "novo"} texto={t(`${L}survey.new`)}
-        dica={escolha.tipo === "novo" ? t(`${L}survey.newHint`) : undefined} aoEscolher={() => escolher({ tipo: "novo" })}
-      />
+      {!semNovo && (
+        <Opcao
+          nome={nome} id={`${id}-lev-novo`} marcada={escolha.tipo === "novo"} texto={t(`${L}survey.new`)}
+          dica={escolha.tipo === "novo" ? t(`${L}survey.newHint`) : undefined} aoEscolher={() => escolher({ tipo: "novo" })}
+        />
+      )}
       <Opcao
         nome={nome} id={`${id}-lev-dispensar`} marcada={escolha.tipo === "dispensar"} texto={t(`${L}survey.skip`)}
         dica={escolha.tipo === "dispensar" ? t(`${L}survey.skipHint`) : undefined} aoEscolher={() => escolher({ tipo: "dispensar" })}
@@ -133,7 +137,7 @@ function EscolhaDoLevantamento({ id, porLigar, valor, aoMudar }: Omit<Props, "pe
   );
 }
 
-export function AbaLigarRegistos({ id, pessoaEscolhida, porLigar, valor, aoMudar }: Props) {
+export function AbaLigarRegistos({ id, pessoaEscolhida, porLigar, valor, aoMudar, semNovo }: Props) {
   const { t } = useTranslation();
   const haRegistos = porLigar.contactos.length + porLigar.visitas.length > 0;
   return (
@@ -145,7 +149,7 @@ export function AbaLigarRegistos({ id, pessoaEscolhida, porLigar, valor, aoMudar
         {pessoaEscolhida && !haRegistos && <p className="text-sm text-foreground">{t(`${L}none`)}</p>}
         {pessoaEscolhida && haRegistos && <ListasDeRegistos id={id} porLigar={porLigar} valor={valor} aoMudar={aoMudar} />}
       </section>
-      {pessoaEscolhida && <EscolhaDoLevantamento id={id} porLigar={porLigar} valor={valor} aoMudar={aoMudar} />}
+      {pessoaEscolhida && <EscolhaDoLevantamento id={id} porLigar={porLigar} valor={valor} aoMudar={aoMudar} semNovo={semNovo} />}
     </div>
   );
 }
