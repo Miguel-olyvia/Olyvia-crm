@@ -12,11 +12,13 @@ import type { DadosChamada } from "./acoesPessoa";
 import { BotoesPainel } from "./BotoesPainel";
 import { textoAgenda } from "./chamadaPassos";
 import { DetalhesPasso } from "./DetalhesPasso";
+import { ErroAcao } from "./ErroAcao";
 import { NotaChamada } from "./NotaChamada";
 import { OpcoesResultado } from "./OpcoesResultado";
 import type { AcoesFicha, PropsPainel } from "./PainelBase";
 import type { PassoChamada } from "./pessoasTipos";
 import { ProximoPassoChamada } from "./ProximoPassoChamada";
+import { useExecutarAcao } from "./useExecutarAcao";
 import { useFormChamada } from "./useFormChamada";
 
 export type PropsFormChamada = Pick<PropsPainel, "id" | "pessoa" | "resumo" | "hoje" | "aoFechar"> & {
@@ -39,7 +41,8 @@ function mensagemChamada(t: ReturnType<typeof useTranslation>["t"], nome: string
 
 export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora }: PropsFormChamada) {
   const { t } = useTranslation();
-  const f = useFormChamada(resumo, hoje);
+  const f = useFormChamada(resumo, hoje, acoes.capacidades?.visita === false);
+  const acao = useExecutarAcao();
   const secao = useRef<HTMLElement>(null);
   const titulo = useRef<HTMLHeadingElement>(null);
   const idGerado = useId();
@@ -52,9 +55,12 @@ export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcl
   const guardar = () => {
     const dados = f.preparar();
     if (!dados) return;
-    acoes.registarChamada(pessoa.id, dados);
-    toast.success(t("pessoasPagina.call.done"));
-    aoConcluir(mensagemChamada(t, pessoa.nome, dados), dados.passo);
+    // O aviso de sucesso e a conclusão só chegam depois de a ação terminar (na base pode demorar ou falhar).
+    const mensagem = mensagemChamada(t, pessoa.nome, dados);
+    acao.executar(() => acoes.registarChamada(pessoa.id, dados), () => {
+      toast.success(t("pessoasPagina.call.done"));
+      aoConcluir(mensagem, dados.passo);
+    }, mensagem);
   };
   return (
     <section ref={secao} id={id} aria-labelledby={idTitulo} className="px-6 pt-4">
@@ -77,7 +83,11 @@ export function FormChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcl
         />
       </div>
       <div className="sticky bottom-0 z-10 -mx-6 border-t border-border bg-background px-6 py-3">
-        <BotoesPainel guardar={guardar} aoCancelar={aoFechar} desativado={f.campos.resultado === null} dica={t("pessoasPagina.panel.hintResult")} />
+        <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} className="mb-2" />
+        <BotoesPainel
+          guardar={guardar} aoCancelar={aoFechar} desativado={f.campos.resultado === null} dica={t("pessoasPagina.panel.hintResult")}
+          aGuardar={acao.aGuardar}
+        />
       </div>
     </section>
   );

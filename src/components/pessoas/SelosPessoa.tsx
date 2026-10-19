@@ -1,4 +1,5 @@
 import { Repeat, XCircle } from "lucide-react";
+import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { ICONE_RESULTADO } from "./iconesPessoa";
@@ -69,8 +70,10 @@ export function SeloQualificacao({ qualificacao }: { qualificacao: QualificacaoP
   );
 }
 
-/** A marca "exemplo": os dados desta secção são de exemplo (uma por secção, não por campo). */
+/** A marca "exemplo": os dados desta secção são de exemplo (uma por secção, não por campo). Em modo real (dados da base) não há marca. */
 export function MarcaExemplo() {
   const { t } = useTranslation();
+  const real = useFontePessoas().modo === "real";
+  if (real) return null;
   return <span className="rounded-sm border border-dashed border-border px-1.5 text-xs text-muted-foreground">{t("pessoasPagina.head.example")}</span>;
 }

@@ -74,12 +74,12 @@ function Etapa({ resumo }: { resumo: ResumoPessoa }) {
 function UltimoContacto({ pessoa }: { pessoa: Pessoa }) {
   const { t } = useTranslation();
   const dias = pessoa.ultimoContactoDias;
-  const antigo = dias >= LIMITE_SEM_CONTACTO;
+  const antigo = dias !== null && dias >= LIMITE_SEM_CONTACTO;
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
       <span className={cn("inline-flex items-center gap-1.5", antigo ? "font-medium text-foreground" : "text-muted-foreground")}>
         <Clock className={cn("h-3.5 w-3.5 shrink-0", antigo && "text-destructive")} aria-hidden="true" />
-        {antigo ? textoSemContacto(t, dias) : textoUltimoContacto(t, dias)}
+        {antigo && dias !== null ? textoSemContacto(t, dias) : textoUltimoContacto(t, dias)}
       </span>
       <SeloResultado resultado={resultadoEfetivo(pessoa)} className="h-5 border-transparent py-0" />
     </span>

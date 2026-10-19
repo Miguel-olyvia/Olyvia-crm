@@ -6,8 +6,9 @@ import type { Pessoa, ResumoPessoa } from "./pessoasTipos";
 
 const P = "pessoasPagina.";
 
-/** "hoje", "há 1 dia", "há 9 dias". */
-export function textoUltimoContacto(t: Traduzir, dias: number): string {
+/** "hoje", "há 1 dia", "há 9 dias"; `null` (nunca houve contacto) diz «Sem contacto». */
+export function textoUltimoContacto(t: Traduzir, dias: number | null): string {
+  if (dias === null) return t(`${P}real.noContact`);
   if (dias <= 0) return t(`${P}last.today`);
   return t(`${P}last.${dias === 1 ? "one" : "many"}`, { count: dias });
 }

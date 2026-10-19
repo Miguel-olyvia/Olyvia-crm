@@ -9,14 +9,15 @@ import { formatarData } from "./negocioPainel";
 function Dados({ pessoa }: { pessoa: DadosPessoaPainel }) {
   const { t } = useTranslation();
   const id = useId();
-  const ultimo = pessoa.ultimoContactoDias <= 0
+  const dias = pessoa.ultimoContactoDias;
+  const ultimo = dias === null ? null : dias <= 0
     ? t("businessGoals.painel.person.today")
-    : t("businessGoals.painel.person.ago", { dias: t(pessoa.ultimoContactoDias === 1 ? "businessGoals.days.longOne" : "businessGoals.days.long", { count: pessoa.ultimoContactoDias }) });
+    : t("businessGoals.painel.person.ago", { dias: t(dias === 1 ? "businessGoals.days.longOne" : "businessGoals.days.long", { count: dias }) });
   const linhas: readonly [string, string | null][] = [
     ["role", t(`businessGoals.painel.person.roles.${pessoa.papel}`)],
     ["stage", t(`businessGoals.painel.person.stages.${pessoa.etapa}`)],
     ["company", pessoa.empresa],
-    ["origin", t(`businessGoals.painel.person.origins.${pessoa.origem}`)],
+    ["origin", pessoa.origem ? t(`businessGoals.painel.person.origins.${pessoa.origem}`) : null],
     ["last", ultimo],
     ["owner", pessoa.comercial],
     ["since", pessoa.desde ? formatarData(pessoa.desde) : null],

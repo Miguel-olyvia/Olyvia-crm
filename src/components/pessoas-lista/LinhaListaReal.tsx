@@ -4,6 +4,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import type { PessoaDaLista } from "@/hooks/pessoas/listaPessoasTipos";
 import { TableCell, TableRow } from "@/components/ui/table";
+import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { AvatarPessoa } from "@/components/pessoas/AvatarPessoa";
 import { LIMITE_SEM_CONTACTO } from "@/components/pessoas/filtrosPessoas";
@@ -11,6 +12,9 @@ import { textoSemContacto, textoUltimoContacto } from "@/components/pessoas/form
 import { COR_ETAPA, ICONE_ETAPA } from "@/components/pessoas/iconesPessoa";
 
 type Traduzir = ReturnType<typeof useTranslation>["t"];
+
+/** Abre a ficha de uma pessoa; `origem` é o botão clicado (a ficha devolve-lhe o foco ao fechar). */
+export type AoAbrirPessoa = (pessoaId: string, origem?: HTMLElement) => void;
 
 const CELULA = "min-h-11 px-3 py-2.5 align-middle text-sm";
 const SELO = "inline-flex w-fit items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium";
@@ -62,16 +66,26 @@ function SemTexto({ rotulo }: { rotulo: string }) {
   );
 }
 
-function CelulaPessoa({ pessoa }: { pessoa: PessoaDaLista }) {
+function CelulaPessoa({ pessoa, aoAbrir }: { pessoa: PessoaDaLista; aoAbrir?: AoAbrirPessoa }) {
   const { t } = useTranslation();
   const semNome = pessoa.nome === "";
+  const nomeClasse = cn("text-sm font-medium leading-5", semNome ? "italic text-muted-foreground" : "text-foreground");
+  const nome = semNome ? t(`${R}noName`) : pessoa.nome;
   return (
     <span className="flex items-center gap-2.5">
       <AvatarPessoa nome={pessoa.nome} pequeno />
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className={cn("text-sm font-medium leading-5", semNome ? "italic text-muted-foreground" : "text-foreground")}>
-          {semNome ? t(`${R}noName`) : pessoa.nome}
-        </span>
+        {aoAbrir ? (
+          // O nome é o botão que abre a ficha (o cabeçalho da linha continua a ser a célula). Só o nome entra no nome acessível.
+          <button
+            type="button" data-abrir-pessoa={pessoa.id} aria-haspopup="dialog" onClick={(e) => aoAbrir(pessoa.id, e.currentTarget)}
+            className={cn("-ml-1 inline-flex min-h-11 w-fit items-center rounded-sm px-1 text-left hover:underline", nomeClasse, FOCO)}
+          >
+            {nome}
+          </button>
+        ) : (
+          <span className={nomeClasse}>{nome}</span>
+        )}
         {pessoa.encerrada && (
           <span className={cn(SELO, "border-border bg-muted")}>
             <XCircle className="h-3 w-3" aria-hidden="true" />
@@ -102,13 +116,16 @@ function CelulaVisita({ iso }: { iso: string | null }) {
   return <time dateTime={iso}>{texto}</time>;
 }
 
-/** Uma linha da Lista real: só leitura. O nome é texto simples (sem ficha no P1) e o cabeçalho da linha. */
-export const LinhaListaReal = memo(function LinhaListaReal({ pessoa }: { pessoa: PessoaDaLista }) {
+/**
+ * Uma linha da Lista real: só leitura. O nome é o cabeçalho da linha e, com `aoAbrir` (a ficha ligada), um botão que abre a ficha;
+ * sem ele é texto simples.
+ */
+export const LinhaListaReal = memo(function LinhaListaReal({ pessoa, aoAbrir }: { pessoa: PessoaDaLista; aoAbrir?: AoAbrirPessoa }) {
   const { t } = useTranslation();
   const Icone = ICONE_ETAPA[pessoa.etapa];
   return (
     <TableRow data-pessoa-id={pessoa.id}>
-      <th scope="row" className={cn(CELULA, "text-left font-normal")}><CelulaPessoa pessoa={pessoa} /></th>
+      <th scope="row" className={cn(CELULA, "text-left font-normal")}><CelulaPessoa pessoa={pessoa} aoAbrir={aoAbrir} /></th>
       <TableCell className={CELULA}>
         <span className="inline-flex items-center gap-2">
           <span className={cn("grid size-6 shrink-0 place-items-center rounded-full", COR_ETAPA[pessoa.etapa])} aria-hidden="true">

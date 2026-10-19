@@ -10,10 +10,11 @@ export interface DadosPessoaPainel {
   nome: string;
   papel: PapelFicha;
   etapa: EtapaFicha;
-  origem: OrigemFicha;
+  /** `null` quando a pessoa não tem origem conhecida (as da base). */
+  origem: OrigemFicha | null;
   empresa: string | null;
-  /** Dias desde o último contacto. */
-  ultimoContactoDias: number;
+  /** Dias desde o último contacto; `null` quando nunca houve. */
+  ultimoContactoDias: number | null;
   comercial: string;
   /** Cliente ou lead desde (AAAA-MM-DD); `null` sem data. */
   desde: string | null;

@@ -4,6 +4,7 @@ import { ClipboardList, Phone } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import type { ContactoPessoa, LevantamentoPessoa } from "@/components/negocio-metas/registosTipos";
+import { CarregarMais, type MaisItens } from "./CarregarMais";
 import { textoDiaCompleto } from "./formatoPessoas";
 import { MarcaExemplo } from "./SelosPessoa";
 
@@ -12,6 +13,9 @@ interface SeccaoRegistosProps {
   levantamentos: readonly LevantamentoPessoa[];
   /** O nome de cada negócio, pelo id. */
   negocios: ReadonlyMap<string, string>;
+  /** «Carregar mais» chamadas e levantamentos (a ficha real). */
+  maisContactos?: MaisItens;
+  maisLevantamentos?: MaisItens;
 }
 
 interface Linha {
@@ -24,12 +28,15 @@ interface Linha {
   ligada: "Call" | "Survey";
 }
 
-export function SeccaoRegistos({ contactos, levantamentos, negocios }: SeccaoRegistosProps) {
+export function SeccaoRegistos({ contactos, levantamentos, negocios, maisContactos, maisLevantamentos }: SeccaoRegistosProps) {
   const { t } = useTranslation();
   const linhas: Linha[] = [
     ...contactos.map((c): Linha => ({
       chave: `c-${c.id}`, data: c.data, icone: Phone, tipo: t("pessoasPagina.reg.kind.contact"), negocioId: c.negocioId, ligada: "Call",
-      detalhe: t("pessoasPagina.reg.contact.line", { date: textoDiaCompleto(c.data), result: t(`pessoasPagina.result.${c.resultado}`) }),
+      // Sem resultado conhecido (a base trouxe um que a ficha não conhece): texto neutro, nunca a chave nem «null».
+      detalhe: t("pessoasPagina.reg.contact.line", {
+        date: textoDiaCompleto(c.data), result: c.resultado ? t(`pessoasPagina.result.${c.resultado}`) : t("pessoasPagina.real.ficha.unknownResult"),
+      }),
     })),
     ...levantamentos.map((l): Linha => {
       const n = l.rascunho.linhas.length;
@@ -60,6 +67,8 @@ export function SeccaoRegistos({ contactos, levantamentos, negocios }: SeccaoReg
             </li>
           ))}
         </ul>
+        <CarregarMais tipo="contactos" estado={maisContactos} />
+        <CarregarMais tipo="levantamentos" estado={maisLevantamentos} />
       </div>
     </Seccao>
   );

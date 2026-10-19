@@ -107,7 +107,8 @@ export function extrasExemplo(id: string): Extra {
 
 /** A atividade de exemplo de uma pessoa: a última chamada (se houve), um email (se já passaram dias) e o registo da ficha. */
 function atividadeDe(p: Pessoa): ItemAtividade[] {
-  const ultimo = somarDias(HOJE_EXEMPLO, -p.ultimoContactoDias);
+  const dias = p.ultimoContactoDias ?? 0; // as pessoas de exemplo têm sempre um último contacto
+  const ultimo = somarDias(HOJE_EXEMPLO, -dias);
   const base = { pessoaId: p.id, exemplo: true };
   const itens: ItemAtividade[] = [
     {
@@ -121,7 +122,7 @@ function atividadeDe(p: Pessoa): ItemAtividade[] {
       titulo: "", chaveTitulo: `pessoasPagina.result.${p.resultadoContacto}`, detalhe: "", chaveDetalhe: "pessoasPagina.seed.callNote",
     });
   }
-  if (p.ultimoContactoDias >= 3) {
+  if (dias >= 3) {
     itens.push({
       ...base, id: `${p.id}-a2`, tipo: "email", quando: somarDias(ultimo, -2), hora: "15:10",
       titulo: "", chaveTitulo: "pessoasPagina.seed.emailSent", detalhe: "", chaveDetalhe: "pessoasPagina.seed.emailDetail",

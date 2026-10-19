@@ -34,17 +34,17 @@ export interface Pessoa {
   nome: string;
   contacto: { telefone: string | null; email: string | null };
   comercial: string;
-  /** Campo de exemplo, só desta página. */
-  origem: OrigemPessoa;
+  /** Campo de exemplo, só desta página. Falta nas pessoas da base (sem fonte): a ficha esconde-o. */
+  origem?: OrigemPessoa;
   /** Campos de exemplo da origem (todos opcionais): canal, campanha e o formulário de onde veio. */
   canal?: string;
   campanha?: string;
   formulario?: string;
-  viaEntrada: ViaEntrada;
-  /** Saúde da pessoa, de 0 a 100 (campo de exemplo). */
-  saude: number;
-  /** Campo de exemplo: dias desde o último contacto. */
-  ultimoContactoDias: number;
+  viaEntrada?: ViaEntrada;
+  /** Saúde da pessoa, de 0 a 100 (campo de exemplo); falta nas pessoas da base. */
+  saude?: number;
+  /** Dias desde o último contacto (de exemplo, ou da base); `null` quando nunca houve contacto. */
+  ultimoContactoDias: number | null;
   /** Campos de exemplo da ficha (todos opcionais): a empresa, a morada, o NIF e o resto. */
   empresa?: { nome: string; contacto?: string; nif?: string };
   morada?: { linha: string; cp: string; localidade: string };
@@ -103,6 +103,8 @@ export interface ItemAtividade {
   detalhe: string;
   chaveTitulo?: string;
   chaveDetalhe?: string;
+  /** A chave do motivo (de encerrar a abordagem), traduzida e mostrada antes do `detalhe` (que, no motivo «outro», é o texto escrito). */
+  chaveMotivo?: string;
   quando: string;
   hora?: string;
   exemplo: boolean;

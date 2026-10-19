@@ -64,7 +64,7 @@ const TIMEOUT_BASE = "57014";
 // Não repete o que não muda (NG008, NG009, 42501) nem o timeout da base: cada tentativa
 // gastaria até 5 s na base partilhada. O resto repete no máximo 2 vezes; o chamarNeg
 // reporta cada tentativa ao Sentry (aceite).
-function repetir(tentativas: number, erro: unknown): boolean {
+export function repetir(tentativas: number, erro: unknown): boolean {
   if (erro instanceof ErroNeg) {
     if (erro.codigo) return false;
     if ((erro.causa as { code?: unknown } | null)?.code === TIMEOUT_BASE) return false;
@@ -72,7 +72,7 @@ function repetir(tentativas: number, erro: unknown): boolean {
   return tentativas < MAX_REPETICOES;
 }
 
-function comoErroNeg(erro: unknown): ErroNeg | null {
+export function comoErroNeg(erro: unknown): ErroNeg | null {
   if (!erro) return null;
   return erro instanceof ErroNeg ? erro : new ErroNeg(erro, null, CHAVE_ERRO_GENERICO);
 }

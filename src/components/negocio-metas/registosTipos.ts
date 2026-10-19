@@ -13,7 +13,8 @@ export interface ContactoPessoa {
   data: string;
   /** HH:MM; falta nos registos sem hora. */
   hora?: string;
-  resultado: ResultadoContacto;
+  /** `null` quando a base trouxe um resultado que a ficha não conhece (a chamada vê-se, sem resultado). */
+  resultado: ResultadoContacto | null;
   nota: string;
   negocioId: string | null;
 }

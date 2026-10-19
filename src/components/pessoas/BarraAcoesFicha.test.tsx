@@ -93,7 +93,8 @@ describe("BarraAcoesFicha: o menu «Mais»", () => {
     abrirMenu(lead({ proximoContacto: null }, "lead", comVisita));
     const adiar = screen.getByRole("menuitem", { name: /Adiar/ });
     expect(adiar).toHaveAttribute("aria-disabled", "true");
-    expect(adiar).toHaveTextContent(/visita/i);
+    // A razão deixou de estar DENTRO do item (item 17 da ronda de revisão): está fora e liga-se por aria-describedby.
+    expect(document.getElementById(adiar.getAttribute("aria-describedby") ?? "")).toHaveTextContent(/visita/i);
   });
 
   it("sem processo (fora do provider) não há «Visita e levantamento»", () => {

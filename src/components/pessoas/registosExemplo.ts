@@ -44,7 +44,7 @@ function registosDeAbordagens(abordagens: readonly AbordagemExemplo[], pessoas: 
     const pessoa = pessoas.find((p) => p.id === a.pessoaId);
     if (a.contactado && pessoa && !contactos.some((c) => c.pessoaId === a.pessoaId)) {
       contactos.push({
-        id: `rc-${contactos.length + 1}`, pessoaId: a.pessoaId, data: somarDias(hoje, -pessoa.ultimoContactoDias),
+        id: `rc-${contactos.length + 1}`, pessoaId: a.pessoaId, data: somarDias(hoje, -(pessoa.ultimoContactoDias ?? 0)),
         resultado: pessoa.resultadoContacto ?? "atendeuInteressado", nota: "", negocioId: null,
       });
     }

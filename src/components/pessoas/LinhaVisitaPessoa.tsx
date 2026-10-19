@@ -43,7 +43,8 @@ interface LinhaVisitaPessoaProps {
   /** O nome do negócio a que a visita está ligada; `undefined` se está por ligar. */
   negocio?: string;
   hoje: string;
-  alterarVisita: AcoesFicha["alterarVisita"];
+  /** Sem isto (a ficha real, até ao P6) a visita não se altera: o botão «Alterar» não existe. */
+  alterarVisita?: AcoesFicha["alterarVisita"];
   /** Abre o diálogo do resultado desta visita. */
   aoRegistarResultado: (visitaId: string) => void;
 }
@@ -54,6 +55,7 @@ export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita
   const quando = useQuando(visita.data, visita.hora);
   const porFazer = visita.estado === "porFazer";
   const ligada = visita.negocioId !== null;
+  const podeAlterar = porFazer && !ligada && alterarVisita !== undefined;
   const porConcluir = porFazer && visita.data !== "" && visita.data < hoje;
   // O resultado pede-se de uma visita que já aconteceu (feita, ou com o dia a chegar ao fim) e ainda sem resultado; as ligadas já seguiram.
   const pedeResultado = !ligada && visita.resultado === undefined && (visita.estado === "feita" || porConcluir || (porFazer && visita.data === hoje));
@@ -87,9 +89,9 @@ export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita
         {ligada ? t("pessoasPagina.reg.visits.linked", { deal: negocio ?? "" }) : t("pessoasPagina.reg.visits.unlinked")}
       </p>
       {visita.resultado && <p className="text-[15px] font-medium text-foreground">{t(`${R}summary`, { result: t(`${R}result.${visita.resultado}`) })}</p>}
-      {(porFazer && !ligada) || pedeResultado ? (
+      {(podeAlterar || pedeResultado) ? (
         <div className="flex flex-wrap gap-2">
-          {porFazer && !ligada && (
+          {podeAlterar && (
             <>
               <Button
                 type="button" variant="outline" aria-label={t(`${K}changeLabel`, { when: quando, work: pessoa.nome })} className={cn("min-h-11", FOCO)}
@@ -99,7 +101,7 @@ export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita
               </Button>
               <AlterarVisita
                 aberto={aAlterar} aoMudarAberto={setAAlterar} pessoa={pessoa} visita={visita} hoje={hoje}
-                aoGuardar={(dados) => alterarVisita(visita.id, dados)}
+                aoGuardar={(dados) => alterarVisita?.(visita.id, dados)}
               />
             </>
           )}

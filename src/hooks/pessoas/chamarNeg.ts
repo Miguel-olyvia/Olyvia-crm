@@ -15,7 +15,10 @@ export type NomeNeg =
   | "neg_encerrar_abordagem"
   | "neg_reabrir_abordagem"
   | "neg_resultado_visita"
-  | "neg_resumo_pessoas";
+  | "neg_resumo_pessoas"
+  | "neg_ficha_pessoa"
+  | "neg_registar_nota"
+  | "neg_adiar_contacto";
 
 /** Erro de uma função neg_*: o código (se for conhecido), a chave a traduzir e a causa. */
 export class ErroNeg extends Error {
@@ -23,13 +26,16 @@ export class ErroNeg extends Error {
   readonly chave: string;
   // Não se usa a opção `cause` do Error: a lib do projeto é ES2020.
   readonly causa: unknown;
+  /** Uma segunda mensagem a mostrar a seguir à principal (numa falha parcial: o aviso de parcial e, depois, a do código que falhou). */
+  readonly chaveExtra?: string;
 
-  constructor(causa: unknown, codigo: string | null, chave: string) {
+  constructor(causa: unknown, codigo: string | null, chave: string, chaveExtra?: string) {
     super(causa instanceof Error ? causa.message : (codigo ?? "erro-neg"));
     this.name = "ErroNeg";
     this.codigo = codigo;
     this.chave = chave;
     this.causa = causa;
+    this.chaveExtra = chaveExtra;
   }
 }
 

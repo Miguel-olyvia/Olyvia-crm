@@ -6,10 +6,12 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { BotoesPainel } from "./BotoesPainel";
 import { classeCartao } from "./cartaoOpcao";
 import { CamposMotivo, erroDoMotivo } from "./CamposMotivo";
+import { ErroAcao } from "./ErroAcao";
 import { RESULTADOS_ENCERRAMENTO } from "./acoesEncerrar";
 import { Visto } from "./OpcoesResultado";
 import { MolduraPainel, type PropsPainel } from "./PainelBase";
 import type { MotivoEncerramento, ResultadoEncerramento } from "./pessoasTipos";
+import { useExecutarAcao } from "./useExecutarAcao";
 import { useFocoInicial } from "./useFocoInicial";
 
 type PropsComTitulo = PropsPainel & { titulo: string };
@@ -25,10 +27,15 @@ export function PainelEncerrar({ id, titulo, ativo, pessoa, acoes, aoFechar, aoC
   // Enquanto falta algo o botão de confirmar fica `aria-disabled` e a dica diz o que falta: não há erros a mostrar antes de tentar.
   const incompleto = resultado === "" || erroDoMotivo(motivo, motivoOutro) !== null;
   useEffect(() => aoMudarConteudo(resultado !== "" || motivo !== ""), [resultado, motivo, aoMudarConteudo]);
+  const acao = useExecutarAcao();
   const confirmar = () => {
     if (resultado === "" || motivo === "" || incompleto) return;
-    acoes.encerrar(pessoa.id, { resultado, motivo, motivoOutro: motivo === "outro" ? motivoOutro.trim() : undefined });
-    aoConcluir(t("pessoasPagina.close.live.closed", { name: pessoa.nome }));
+    const mensagem = t("pessoasPagina.close.live.closed", { name: pessoa.nome });
+    acao.executar(
+      () => acoes.encerrar(pessoa.id, { resultado, motivo, motivoOutro: motivo === "outro" ? motivoOutro.trim() : undefined }),
+      () => aoConcluir(mensagem),
+      mensagem,
+    );
   };
   return (
     <MolduraPainel id={id} titulo={titulo} ativo={ativo}>
@@ -51,9 +58,10 @@ export function PainelEncerrar({ id, titulo, ativo, pessoa, acoes, aoFechar, aoC
         motivo={motivo} motivoOutro={motivoOutro} erro={null} rotulo={t("pessoasPagina.close.reasonLabel")}
         aoMudar={(p) => { if (p.motivo !== undefined) setMotivo(p.motivo); if (p.motivoOutro !== undefined) setMotivoOutro(p.motivoOutro); }}
       />
+      <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} />
       <BotoesPainel
         guardar={confirmar} aoCancelar={aoFechar} desativado={incompleto} dica={t("pessoasPagina.close.hintMissing")}
-        rotuloGuardar={t("pessoasPagina.close.confirm")} destrutivo cancelarPrimeiro refCancelar={cancelar}
+        rotuloGuardar={t("pessoasPagina.close.confirm")} destrutivo cancelarPrimeiro refCancelar={cancelar} aGuardar={acao.aGuardar}
       />
     </MolduraPainel>
   );

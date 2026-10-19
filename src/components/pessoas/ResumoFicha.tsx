@@ -2,6 +2,7 @@
 // ligar (chamadas e levantamentos), contacto, origem e sobre a pessoa. A marca "exemplo" vai por secção.
 import { useMemo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import type { MaisItensFicha } from "./CarregarMais";
 import { ContactoFicha } from "./ContactoFicha";
 import type { AcoesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
@@ -20,9 +21,12 @@ interface ResumoFichaProps {
   podeVerSubmissoes: boolean;
   pendentes: number;
   aoVerSubmissoes: () => void;
-  alterarVisita: AcoesFicha["alterarVisita"];
+  /** Sem isto (a ficha real, até ao P6) as visitas não têm o botão «Alterar». */
+  alterarVisita?: AcoesFicha["alterarVisita"];
   /** Abre o diálogo do resultado de uma visita. */
   aoRegistarResultado: (visitaId: string) => void;
+  /** «Carregar mais» das visitas, contactos e levantamentos (a ficha real). */
+  maisItens?: MaisItensFicha;
 }
 
 export function ResumoFicha(p: ResumoFichaProps) {
@@ -42,14 +46,17 @@ export function ResumoFicha(p: ResumoFichaProps) {
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
       <SeccaoVisitas
         pessoa={resumo.pessoa} visitas={visitas} item={item} hoje={p.hoje} negocios={negocios} alterarVisita={p.alterarVisita}
-        aoRegistarResultado={p.aoRegistarResultado}
+        aoRegistarResultado={p.aoRegistarResultado} mais={p.maisItens?.visitas}
       />
       <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas} />
       <SeccaoAvisos
         resumo={resumo} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={p.pendentes}
         aoVerSubmissoes={p.aoVerSubmissoes}
       />
-      <SeccaoRegistos contactos={resumo.registos.contactos} levantamentos={resumo.registos.levantamentos} negocios={negocios} />
+      <SeccaoRegistos
+        contactos={resumo.registos.contactos} levantamentos={resumo.registos.levantamentos} negocios={negocios}
+        maisContactos={p.maisItens?.contactos} maisLevantamentos={p.maisItens?.levantamentos}
+      />
       <ContactoFicha pessoa={resumo.pessoa} />
       <SeccaoOrigem pessoa={resumo.pessoa} />
       <SeccaoSobre resumo={resumo} hoje={p.hoje} />

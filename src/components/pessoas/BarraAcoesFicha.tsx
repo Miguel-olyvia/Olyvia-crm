@@ -1,6 +1,6 @@
 // A barra de ações da ficha: Ligar, WhatsApp e Email são ligações em contorno (só existem se há telefone ou email),
 // "Registar chamada" é o único botão cheio e "Mais" guarda o resto. Cada ação abre um painel em linha, não um popover.
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { ArrowRight, Mail, MessageCircle, MoreHorizontal, Phone } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ligacoes } from "./acoesPessoa";
-import type { AcaoFicha } from "./PainelBase";
+import type { AcaoFicha, CapacidadesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { useProcesso } from "./processo/processoContexto";
 
@@ -24,8 +24,12 @@ interface BarraAcoesProps {
   /** `origem` é o botão a que o foco regressa quando o painel fecha. */
   aoAbrir: (acao: AcaoFicha, origem: HTMLElement | null) => void;
   aoReativar: () => void;
-  /** "Criar negócio" (uma lead) ou "Novo negócio" (um cliente): a página abre o painel "Novo negócio" com esta pessoa já escolhida. */
-  aoCriarNegocio: () => void;
+  /** "Criar negócio" (uma lead) ou "Novo negócio" (um cliente): a página abre o painel "Novo negócio" com esta pessoa já escolhida. Sem isto (a ficha real, até ao P3) o item não existe. */
+  aoCriarNegocio?: () => void;
+  /** O que a versão em curso liga; sem isto (o exemplo) está tudo ligado. */
+  capacidades?: CapacidadesFicha;
+  /** Há uma ação do menu (reativar) à espera da base: o gatilho fica `aria-busy`. */
+  aGuardar?: boolean;
 }
 
 /** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. */
@@ -64,18 +68,26 @@ function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
  * qualquer fase, e liga registos existentes da pessoa: a lead tem "Criar negócio" e o cliente "Novo negócio". A visita e o levantamento
  * são opcionais.
  */
-function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesProps) {
+function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aGuardar }: BarraAcoesProps) {
   const { t } = useTranslation();
+  const idExplicacao = useId();
   const processo = useProcesso();
   const gatilho = useRef<HTMLButtonElement>(null);
   const escolhida = useRef(false);
   const { pessoa, papel } = resumo;
   const adiarSemEfeito = resumo.proximoDeVisita;
   const fechada = !!pessoa.encerrada || !!pessoa.perdida;
-  const podeEncerrar = papel === "lead" && !fechada && resumo.abertos.length === 0;
+  const encerrarLigado = capacidades?.encerrar !== false;
+  const podeEncerrar = encerrarLigado && papel === "lead" && !fechada && resumo.abertos.length === 0;
+  const podeReativar = encerrarLigado && fechada;
+  const comNota = capacidades?.nota !== false;
+  const comAdiar = capacidades?.adiar !== false;
+  const comVisita = !!processo && !fechada && capacidades?.visita !== false;
+  // Sem nenhum item (um cliente na ficha real) não há menu: um botão «Mais» vazio não faz nada.
+  if (!comNota && !comAdiar && !comVisita && !aoCriarNegocio && !podeEncerrar && !podeReativar) return null;
   const criarNegocio = () => {
     escolhida.current = true;
-    aoCriarNegocio();
+    aoCriarNegocio?.();
   };
   const visitaELevantamento = () => {
     escolhida.current = true;
@@ -88,7 +100,7 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesPro
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button ref={gatilho} type="button" variant="outline" className={BOTAO} data-ficha-mais>
+        <Button ref={gatilho} type="button" variant="outline" className={BOTAO} data-ficha-mais aria-busy={aGuardar || undefined}>
           <MoreHorizontal aria-hidden="true" />
           {t("pessoasPagina.bar.more")}
         </Button>
@@ -97,19 +109,29 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio }: BarraAcoesPro
         align="start" className="min-w-48"
         onCloseAutoFocus={(e) => { if (escolhida.current) { e.preventDefault(); escolhida.current = false; } }}
       >
-        <DropdownMenuItem className="min-h-11" onSelect={() => abrir("nota")}>{t("pessoasPagina.bar.note")}</DropdownMenuItem>
+        {comNota && <DropdownMenuItem className="min-h-11" onSelect={() => abrir("nota")}>{t("pessoasPagina.bar.note")}</DropdownMenuItem>}
         {/* Com o próximo contacto numa visita não há chamada a adiar: o item fica desativado e a explicação é texto, não só a cor. */}
-        <DropdownMenuItem className="min-h-11 flex-col items-start" disabled={adiarSemEfeito} onSelect={() => abrir("adiar")}>
-          {t("pessoasPagina.bar.snooze")}
-          {adiarSemEfeito && <span className="text-xs font-normal">{t("pessoasPagina.bar.snoozeVisit")}</span>}
-        </DropdownMenuItem>
-        {processo && !fechada && (
+        {comAdiar && (
+          <>
+            <DropdownMenuItem
+              className="min-h-11" disabled={adiarSemEfeito} aria-describedby={adiarSemEfeito ? idExplicacao : undefined}
+              onSelect={() => abrir("adiar")}
+            >
+              {t("pessoasPagina.bar.snooze")}
+            </DropdownMenuItem>
+            {/* A explicação fica FORA do item (o nome do item não a leva) e liga-se a ele por aria-describedby: é texto, não só a cor. */}
+            {adiarSemEfeito && <p id={idExplicacao} className="px-2 pb-1.5 text-xs text-muted-foreground">{t("pessoasPagina.bar.snoozeVisit")}</p>}
+          </>
+        )}
+        {comVisita && (
           <DropdownMenuItem className="min-h-11" onSelect={visitaELevantamento}>{t("pessoasPagina.bar.visitSurvey")}</DropdownMenuItem>
         )}
-        <DropdownMenuItem className="min-h-11" onSelect={criarNegocio}>
-          {t(papel === "cliente" ? "pessoasPagina.bar.newDeal" : "pessoasPagina.bar.createDeal")}
-        </DropdownMenuItem>
-        {(fechada || podeEncerrar) && (
+        {aoCriarNegocio && (
+          <DropdownMenuItem className="min-h-11" onSelect={criarNegocio}>
+            {t(papel === "cliente" ? "pessoasPagina.bar.newDeal" : "pessoasPagina.bar.createDeal")}
+          </DropdownMenuItem>
+        )}
+        {(podeReativar || podeEncerrar) && (
           <>
             <DropdownMenuSeparator />
             {fechada ? (
@@ -131,13 +153,15 @@ export function BarraAcoesFicha(p: BarraAcoesProps) {
   return (
     <div role="group" aria-label={t("pessoasPagina.actions.label")} className="flex flex-wrap gap-2 px-6 pb-4">
       <Ligacoes resumo={p.resumo} />
-      <Button
-        type="button" className={BOTAO} aria-expanded={p.aberta === "chamada"} aria-controls={p.aberta === "chamada" ? `${p.painelId}-chamada` : undefined}
-        onClick={(e) => p.aoAbrir("chamada", e.currentTarget)}
-      >
-        {t("pessoasPagina.bar.call")}
-        <ArrowRight aria-hidden="true" />
-      </Button>
+      {p.capacidades?.chamada !== false && (
+        <Button
+          type="button" className={BOTAO} aria-expanded={p.aberta === "chamada"} aria-controls={p.aberta === "chamada" ? `${p.painelId}-chamada` : undefined}
+          onClick={(e) => p.aoAbrir("chamada", e.currentTarget)}
+        >
+          {t("pessoasPagina.bar.call")}
+          <ArrowRight aria-hidden="true" />
+        </Button>
+      )}
       <MenuMais {...p} />
     </div>
   );

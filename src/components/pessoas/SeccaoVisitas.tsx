@@ -8,6 +8,7 @@ import { Seccao } from "@/components/ficha-comum/Seccao";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import { ordenarVisitas } from "@/components/negocio-metas/visitasNegocio";
+import { CarregarMais, type MaisItens } from "./CarregarMais";
 import type { AcoesFicha } from "./PainelBase";
 import type { Pessoa } from "./pessoasTipos";
 import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
@@ -28,8 +29,10 @@ interface SeccaoVisitasProps {
   hoje: string;
   /** O nome de cada negócio, pelo id: uma visita ligada diz a que negócio. */
   negocios: ReadonlyMap<string, string>;
-  alterarVisita: AcoesFicha["alterarVisita"];
+  alterarVisita?: AcoesFicha["alterarVisita"];
   aoRegistarResultado: (visitaId: string) => void;
+  /** «Carregar mais» visitas (a ficha real). */
+  mais?: MaisItens;
 }
 
 /** O botão do passo da pessoa, com a explicação do portão (se o passo não puder avançar) a seguir. */
@@ -51,7 +54,7 @@ function BotaoDoPasso({ item, nome }: { item: ItemProcesso; nome: string }) {
   );
 }
 
-export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, aoRegistarResultado }: SeccaoVisitasProps) {
+export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, aoRegistarResultado, mais }: SeccaoVisitasProps) {
   const { t } = useTranslation();
   const validas = ordenarVisitas(visitas).filter((v) => v.estado !== "cancelada") as VisitaPessoa[];
   if (validas.length === 0) return null;
@@ -67,6 +70,7 @@ export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVi
             />
           ))}
         </ul>
+        <CarregarMais tipo="visitas" estado={mais} />
         {item && <div className="flex flex-wrap gap-2 pt-1"><BotaoDoPasso item={item} nome={pessoa.nome} /></div>}
         {item && <p className="text-sm text-muted-foreground">{t(`${K}${feita ? "doneHintDone" : "doneHint"}`)}</p>}
       </div>

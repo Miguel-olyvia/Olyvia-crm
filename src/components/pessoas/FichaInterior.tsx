@@ -2,14 +2,19 @@
 // vai num único contentor que rola, para o painel de chamada e o "Guardar" ficarem alcançáveis com zoom ou em ecrãs baixos.
 import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/AbasSublinhadas";
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
+import { FOCO } from "@/components/negocio-metas/estilos";
+import type { MaisItensFicha } from "./CarregarMais";
 import { AtividadeFicha } from "./AtividadeFicha";
 import { AvisoNegociosPerdidos } from "./AvisoNegociosPerdidos";
 import { BarraAcoesFicha } from "./BarraAcoesFicha";
 import { CabecalhoFicha } from "./CabecalhoFicha";
 import { DialogoResultadoVisita } from "./DialogoResultadoVisita";
 import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
+import { ErroAcao } from "./ErroAcao";
 import { todosNegociosPerdidos } from "./etapaPessoa";
 import { FichaNegocios, LINHA_NEGOCIO } from "./FichaNegocios";
 import { FichaNotas, FichaSubmissoes } from "./FichaSubmissoesNotas";
@@ -23,6 +28,7 @@ import { itensDaPessoa } from "./processo/itensProcesso";
 import { useExtrasProcesso } from "./processo/processoNegocios";
 import type { ItemAtividade, NotaPessoa, Pessoa, ResumoPessoa, Submissao } from "./pessoasTipos";
 import { ResumoFicha } from "./ResumoFicha";
+import { useExecutarAcao } from "./useExecutarAcao";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
 
 type AbaFicha = "resumo" | "negocios" | "submissoes" | "notas" | "atividade";
@@ -46,7 +52,9 @@ export interface FichaInteriorProps {
    * "Criar negócio" (uma lead, ligado ao pedido dela) e "Novo negócio sem visita" (um cliente): a página abre o painel "Novo negócio"
    * com esta pessoa já escolhida. O "Novo negócio com visita" de um cliente não passa por aqui: abre o painel de visita e levantamento.
    */
-  aoCriarNegocio: (pessoa: Pessoa) => void;
+  aoCriarNegocio?: (pessoa: Pessoa) => void;
+  /** A aba Notas (feita só de submissões): por defeito aparece; a ficha real não a tem. */
+  comNotas?: boolean;
   /** Um anúncio vindo da página (resolver uma submissão a partir da ficha), para o leitor de ecrã o ouvir aqui. */
   anuncioExterno?: string;
   /** O aviso de um passo do processo feito com a ficha aberta: a região da página está escondida, por isso diz-se aqui dentro. */
@@ -58,6 +66,10 @@ export interface FichaInteriorProps {
   aoIr: (id: string, qual: TeclaNavegacao) => void;
   /** O negócio a abrir logo à entrada (vindo do Quadro ou da Lista, `?negocio=`): a ficha abre na aba Negócios com ele aberto. */
   negocioInicial?: string | null;
+  /** «Carregar mais» por secção (a ficha real); sem isto (o exemplo) não há botões. */
+  maisItens?: MaisItensFicha;
+  /** A atualização em segundo plano falhou e a ficha mostra os últimos dados: um aviso com «Tentar de novo». */
+  avisoAtualizacao?: { aoRepetir: () => void };
 }
 
 interface AbasProps extends FichaInteriorProps {
@@ -79,7 +91,8 @@ function ConteudoNegocios(p: AbasProps) {
     () => itensDaPessoa(p.resumo, p.hoje, extras).find((i) => i.id === p.negocioAberto),
     [p.resumo, p.hoje, extras, p.negocioAberto],
   );
-  if (!aberto) return <FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.aoAbrirNegocio} />;
+  // Sem a capacidade «negocios» (a ficha real, até ao P3) a lista só se lê: o detalhe e as ações do negócio ainda não existem na base.
+  if (!aberto) return <FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.acoes.capacidades?.negocios === false ? undefined : p.aoAbrirNegocio} />;
   return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} />;
 }
 
@@ -87,6 +100,7 @@ function ConteudoNegocios(p: AbasProps) {
 function AbasFicha(p: AbasProps) {
   const { t } = useTranslation();
   const { resumo, submissoes, notas, atividade } = p;
+  const comNotas = p.comNotas ?? true;
   const verSubmissoes = () => p.aoMudar("submissoes");
   return (
     <Tabs value={p.aba} onValueChange={(v) => p.aoMudar(v as AbaFicha)} className="mt-2 flex flex-col">
@@ -100,14 +114,15 @@ function AbasFicha(p: AbasProps) {
             novo={submissoes.length > 0}
           />
         )}
-        <Aba value="notas" rotulo={t("pessoasPagina.fichaTabs.notes")} contador={notas.length} />
+        {comNotas && <Aba value="notas" rotulo={t("pessoasPagina.fichaTabs.notes")} contador={notas.length} />}
         <Aba value="atividade" rotulo={t("pessoasPagina.fichaTabs.activity")} contador={atividade.length} />
       </ListaAbas>
       <div data-foco-ficha tabIndex={-1} className="px-6 pb-6 outline-none">
         <TabsContent value="resumo" className="mt-0">
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={submissoes.length}
-            aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.alterarVisita} aoRegistarResultado={p.aoRegistarResultado}
+            aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
+            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens}
           />
         </TabsContent>
         <TabsContent value="negocios" className="mt-0 pt-4"><ConteudoNegocios {...p} /></TabsContent>
@@ -116,10 +131,12 @@ function AbasFicha(p: AbasProps) {
             submissoes={submissoes} hoje={p.hoje} pessoas={p.pessoas} aoPedir={(id) => p.aoPedir(id, resumo.pessoa.id)} aoVerTodas={p.aoVerTodasSubmissoes}
           />
         </TabsContent>
-        <TabsContent value="notas" className="mt-0 pt-4">
-          <FichaNotas notas={notas} hoje={p.hoje} pendentes={submissoes.length} aoVerSubmissoes={verSubmissoes} />
-        </TabsContent>
-        <TabsContent value="atividade" className="mt-0 pt-4"><AtividadeFicha itens={atividade} hoje={p.hoje} /></TabsContent>
+        {comNotas && (
+          <TabsContent value="notas" className="mt-0 pt-4">
+            <FichaNotas notas={notas} hoje={p.hoje} pendentes={submissoes.length} aoVerSubmissoes={verSubmissoes} />
+          </TabsContent>
+        )}
+        <TabsContent value="atividade" className="mt-0 pt-4"><AtividadeFicha itens={atividade} hoje={p.hoje} mais={p.maisItens?.atividade} /></TabsContent>
       </div>
     </Tabs>
   );
@@ -173,18 +190,31 @@ export function FichaInterior(p: FichaInteriorProps) {
     negocio.abrir(p.negocioInicial);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- só reage a mudar o negócio pedido pelo endereço
   }, [p.negocioInicial]);
+  // Reativar espera pela ação (na base pode demorar ou falhar): só anuncia no fim, e uma falha fica à vista em role=alert.
+  const reabrir = useExecutarAcao(anunciar);
   const reativar = () => {
-    p.acoes.reativar(p.resumo.pessoa.id);
-    anunciar(t("pessoasPagina.live.reactivated", { name: p.resumo.pessoa.nome }));
+    const mensagem = t("pessoasPagina.live.reactivated", { name: p.resumo.pessoa.nome });
+    reabrir.executar(() => p.acoes.reativar(p.resumo.pessoa.id), () => anunciar(mensagem), mensagem);
   };
+  const criarNegocio = p.aoCriarNegocio;
   return (
     <AnuncioFichaContext.Provider value={anunciar}>
       <div className="flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto">
         <CabecalhoFicha resumo={p.resumo} vizinhas={p.vizinhas} aoIr={p.aoIr} />
         <BarraAcoesFicha
           resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar}
-          aoCriarNegocio={() => p.aoCriarNegocio(p.resumo.pessoa)}
+          aoCriarNegocio={criarNegocio ? () => criarNegocio(p.resumo.pessoa) : undefined} capacidades={p.acoes.capacidades}
+          aGuardar={reabrir.aGuardar}
         />
+        <ErroAcao chave={reabrir.erro} chaveExtra={reabrir.erroExtra} className="px-6 pb-3" />
+        {p.avisoAtualizacao && (
+          <div role="alert" className="mx-6 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+            <p>{t("pessoasPagina.real.ficha.staleWarn")}</p>
+            <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={p.avisoAtualizacao.aoRepetir}>
+              {t("pessoasPagina.real.retry")}
+            </Button>
+          </div>
+        )}
         <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
         {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("encerrar", origem)} />}
         {visitados.filter((a): a is AcaoPainel => a !== "chamada").map((a) => (

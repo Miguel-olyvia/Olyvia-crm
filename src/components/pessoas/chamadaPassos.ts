@@ -15,6 +15,8 @@ export interface ContextoChamada {
   /** A pessoa está perdida, ou com a abordagem encerrada. */
   perdida: boolean;
   comNegocioAberto?: boolean;
+  /** Marcar visita ainda não existe nesta versão (a ficha real): o passo «Marcar visita» não se oferece. */
+  semVisita?: boolean;
 }
 
 const PASSOS_DO_RESULTADO: Record<ResultadoContacto, readonly PassoChamada[]> = {
@@ -29,7 +31,7 @@ const PASSOS_DO_RESULTADO: Record<ResultadoContacto, readonly PassoChamada[]> = 
 export function passosDisponiveis(resultado: ResultadoContacto, ctx: ContextoChamada): PassoChamada[] {
   return PASSOS_DO_RESULTADO[resultado].filter((p) => {
     if (p === "perder") return ctx.papel === "lead" && !ctx.perdida && !ctx.comNegocioAberto;
-    if (p === "marcarVisita") return !ctx.perdida;
+    if (p === "marcarVisita") return !ctx.perdida && !ctx.semVisita;
     return true;
   });
 }

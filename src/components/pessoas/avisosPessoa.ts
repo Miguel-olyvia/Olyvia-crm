@@ -22,8 +22,10 @@ export interface EntradaAvisos {
 export function avisosPessoa({ pessoa, voltou, podeVerSubmissoes, negociosAbertos = 0 }: EntradaAvisos): AvisoPessoa[] {
   const avisos: AvisoPessoa[] = [];
   if (voltou && podeVerSubmissoes) avisos.push({ tipo: "voltou" });
-  if (!pessoa.perdida && pessoa.ultimoContactoDias >= LIMITE_SEM_CONTACTO) {
-    avisos.push({ tipo: "semContacto", dias: pessoa.ultimoContactoDias });
+  // `null` é «nunca contactada»: não há dias para contar.
+  const dias = pessoa.ultimoContactoDias;
+  if (!pessoa.perdida && dias !== null && dias >= LIMITE_SEM_CONTACTO) {
+    avisos.push({ tipo: "semContacto", dias });
   }
   if (pessoa.perdida && negociosAbertos > 0) avisos.push({ tipo: "negociosAbertosPerdida", quantos: negociosAbertos });
   return avisos;

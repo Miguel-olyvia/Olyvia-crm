@@ -82,7 +82,8 @@ export interface VisitaNegocio {
   hora: string;
   feitoPor: string;
   estado: EstadoVisitaNegocio;
-  tipo: TipoVisitaNegocio;
+  /** Vazio nas visitas reais sem tipo conhecido. */
+  tipo: TipoVisitaNegocio | "";
   quemVaiEstar: string;
   duracao: string;
   morada: MoradaObraNegocio;
@@ -124,6 +125,13 @@ export interface NegocioMes {
   orcamentos: OrcamentoNegocio[];
   proposta: { estado: EstadoProposta } | null;
   contrato: { estado: EstadoContrato } | null;
+  /** Só nos negócios da base (ficha real): o valor que a base calcula; manda sobre o orçamento escolhido. */
+  valorBase?: number;
+  /**
+   * Só nos negócios da base: o estado que a base diz. Com ele, «ganho» é só o estado «ganho»: um negócio aberto com contrato
+   * assinado fica «pronto a ganhar» e não «ganho».
+   */
+  estadoReal?: "aberto" | "ganho" | "perdido";
 }
 
 export interface MetaComercial {
@@ -176,9 +184,9 @@ export function percentagemBarra(valor: number, meta: number): number {
   return Math.min(100, Math.max(0, percentagem(valor, meta)));
 }
 
-/** O valor do negócio é o do orçamento escolhido; sem escolha, é 0. */
+/** O valor do negócio é o da base (se a ficha o trouxe) ou o do orçamento escolhido; sem escolha, é 0. */
 export function valorDoNegocio(negocio: NegocioMes): number {
-  return negocio.orcamentos.find((o) => o.escolhido)?.valor ?? 0;
+  return negocio.valorBase ?? negocio.orcamentos.find((o) => o.escolhido)?.valor ?? 0;
 }
 
 /** A fase é a do último passo da cadeia; contrato assinado passa a Ganho. */
@@ -188,8 +196,9 @@ export function faseDoNegocio(negocio: NegocioMes): FaseNegocio {
   return "orcamento";
 }
 
-/** Ganho = contrato assinado. */
+/** Ganho = contrato assinado (nos negócios da base, o estado «ganho»). */
 export function isNegocioGanho(negocio: NegocioMes): boolean {
+  if (negocio.estadoReal !== undefined) return negocio.estadoReal === "ganho";
   return negocio.contrato?.estado === "assinado";
 }
 

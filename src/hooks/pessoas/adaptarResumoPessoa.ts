@@ -27,7 +27,7 @@ function emDias(dia: string): number {
   return Date.UTC(a, m - 1, d) / MS_POR_DIA;
 }
 
-function diasEntre(instante: string | null, hoje: string): number | null {
+export function diasEntre(instante: string | null, hoje: string): number | null {
   if (!instante) return null;
   const quando = new Date(instante);
   if (Number.isNaN(quando.getTime())) return null;

@@ -15,6 +15,8 @@ interface BotoesPainelProps {
   /** O Cancelar vem primeiro e é o que recebe o foco (a ação é grave). */
   cancelarPrimeiro?: boolean;
   refCancelar?: Ref<HTMLButtonElement>;
+  /** A ação está à espera da base: o botão fica `aria-busy` e ignora cliques (continua focável). */
+  aGuardar?: boolean;
 }
 
 /**
@@ -26,16 +28,21 @@ export function BotoesPainel(p: BotoesPainelProps) {
   const idDica = useId();
   const guardar = (
     <Button
-      key="guardar" type="button" variant={p.destrutivo ? "destructive" : "default"} aria-disabled={p.desativado || undefined}
-      aria-describedby={p.desativado ? idDica : undefined}
+      key="guardar" type="button" variant={p.destrutivo ? "destructive" : "default"} aria-disabled={p.desativado || p.aGuardar || undefined}
+      aria-busy={p.aGuardar || undefined} aria-describedby={p.desativado ? idDica : undefined}
       className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)}
-      onClick={() => { if (!p.desativado) p.guardar(); }}
+      onClick={() => { if (!p.desativado && !p.aGuardar) p.guardar(); }}
     >
-      {p.rotuloGuardar ?? t("pessoasPagina.panel.save")}
+      {p.aGuardar ? t("pessoasPagina.real.ficha.saving") : p.rotuloGuardar ?? t("pessoasPagina.panel.save")}
     </Button>
   );
+  // Com uma ação em voo o Cancelar fica bloqueado (aria-disabled, continua focável): fechar não a pararia e perder-se-ia o resultado.
   const cancelar = (
-    <Button key="cancelar" ref={p.refCancelar} type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={p.aoCancelar}>
+    <Button
+      key="cancelar" ref={p.refCancelar} type="button" variant="outline" aria-disabled={p.aGuardar || undefined}
+      className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)}
+      onClick={() => { if (!p.aGuardar) p.aoCancelar(); }}
+    >
       {t("pessoasPagina.panel.cancel")}
     </Button>
   );

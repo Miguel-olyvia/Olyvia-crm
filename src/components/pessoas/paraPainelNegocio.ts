@@ -10,7 +10,7 @@ export function paraPainelNegocio({ pessoa, papel, etapa }: ResumoPessoa): Dados
     nome: pessoa.nome,
     papel,
     etapa,
-    origem: pessoa.origem,
+    origem: pessoa.origem ?? null,
     empresa: pessoa.empresa?.nome ?? null,
     ultimoContactoDias: pessoa.ultimoContactoDias,
     comercial: pessoa.comercial,

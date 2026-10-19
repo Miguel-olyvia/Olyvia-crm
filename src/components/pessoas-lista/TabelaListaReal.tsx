@@ -5,7 +5,7 @@ import type { PessoaDaLista } from "@/hooks/pessoas/listaPessoasTipos";
 import { Table, TableBody, TableCaption, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { BarraProgresso } from "./BarraProgresso";
-import { LinhaListaReal } from "./LinhaListaReal";
+import { LinhaListaReal, type AoAbrirPessoa } from "./LinhaListaReal";
 
 /** As 6 colunas, com a largura em percentagem (somam 100). */
 const COLUNAS = [
@@ -17,6 +17,8 @@ interface TabelaListaRealProps {
   linhas: readonly PessoaDaLista[];
   /** As linhas são as de um filtro anterior: a tabela fica marcada como ocupada (barra fina, sem perder contraste). */
   ocupada: boolean;
+  /** Abre a ficha da pessoa (o nome da linha passa a botão). Deve ser estável (useCallback): as linhas estão em memória. */
+  aoAbrir?: AoAbrirPessoa;
 }
 
 /**
@@ -24,7 +26,7 @@ interface TabelaListaRealProps {
  * de ecrã) dá o nome à tabela; a região leva um rótulo curto, diferente. Em memória: só se redesenha se as linhas mudam.
  */
 export const TabelaListaReal = memo(forwardRef<HTMLDivElement, TabelaListaRealProps>(function TabelaListaReal(
-  { linhas, ocupada },
+  { linhas, ocupada, aoAbrir },
   ref,
 ) {
   const { t } = useTranslation();
@@ -56,7 +58,7 @@ export const TabelaListaReal = memo(forwardRef<HTMLDivElement, TabelaListaRealPr
             </TableRow>
           </TableHeader>
           <TableBody>
-            {linhas.map((pessoa) => <LinhaListaReal key={pessoa.id} pessoa={pessoa} />)}
+            {linhas.map((pessoa) => <LinhaListaReal key={pessoa.id} pessoa={pessoa} aoAbrir={aoAbrir} />)}
           </TableBody>
         </Table>
       </div>

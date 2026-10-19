@@ -45,12 +45,12 @@ export function dadosDaChamada(c: CamposChamada): Omit<DadosChamada, "hoje"> | n
 }
 
 /** O estado do formulário: o que se escolheu, os passos que cabem ao resultado, os erros e `preparar` (os dados, ou nada se falta algo). */
-export function useFormChamada(resumo: ResumoPessoa, hoje: string) {
+export function useFormChamada(resumo: ResumoPessoa, hoje: string, semVisita = false) {
   const ctx = useMemo<ContextoChamada>(
     () => ({
-      papel: resumo.papel, perdida: !!resumo.pessoa.perdida || !!resumo.pessoa.encerrada, comNegocioAberto: resumo.abertos.length > 0,
+      papel: resumo.papel, perdida: !!resumo.pessoa.perdida || !!resumo.pessoa.encerrada, comNegocioAberto: resumo.abertos.length > 0, semVisita,
     }),
-    [resumo.papel, resumo.pessoa.perdida, resumo.pessoa.encerrada, resumo.abertos.length],
+    [resumo.papel, resumo.pessoa.perdida, resumo.pessoa.encerrada, resumo.abertos.length, semVisita],
   );
   const [campos, setCampos] = useState<CamposChamada>(() => inicial(resumo, hoje));
   const [tentativas, setTentativas] = useState(0);

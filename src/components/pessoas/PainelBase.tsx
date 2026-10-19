@@ -10,19 +10,36 @@ import type { DadosAlterarVisita } from "./visitaPessoa";
 
 export type AcaoFicha = "chamada" | "nota" | "adiar" | "encerrar";
 
-/** O que a ficha pode fazer à pessoa (vem do estado da página). */
+/**
+ * O que a ficha liga na versão em curso: o que está a `false` não aparece (sem botões que não fazem nada). Sem este objeto (o exemplo)
+ * está tudo ligado. `negocios: false` deixa a lista de negócios só para ler (o detalhe e as ações do negócio são do P3).
+ */
+export interface CapacidadesFicha {
+  chamada: boolean;
+  encerrar: boolean;
+  adiar: boolean;
+  nota: boolean;
+  visita: boolean;
+  negocios?: boolean;
+}
+
+/** O resultado de uma ação: nada (em memória, no exemplo) ou uma Promise que termina quando a base respondeu e lança se falhar. */
+type Resultado = void | Promise<void>;
+
+/** O que a ficha pode fazer à pessoa (vem do estado da página, ou da base na ficha real). */
 export interface AcoesFicha {
-  registarChamada: (id: string, dados: Omit<DadosChamada, "hoje">) => void;
-  adiar: (id: string, dias: 1 | 3 | 7) => void;
+  registarChamada: (id: string, dados: Omit<DadosChamada, "hoje">) => Resultado;
+  adiar: (id: string, dias: 1 | 3 | 7) => Resultado;
   /** Encerra a abordagem (sem interesse, ou obra inviável): fica o resultado e o motivo na pessoa e não se cria negócio. */
-  encerrar: (id: string, dados: PedidoEncerrar) => void;
+  encerrar: (id: string, dados: PedidoEncerrar) => Resultado;
   /** Reativa a abordagem encerrada (ou a lead perdida do exemplo antigo). */
-  reativar: (id: string) => void;
-  juntarNota: (id: string, texto: string) => void;
+  reativar: (id: string) => Resultado;
+  juntarNota: (id: string, texto: string) => Resultado;
   /** Muda o dia, a hora e a morada de uma visita da pessoa. */
-  alterarVisita: (visitaId: string, dados: DadosAlterarVisita) => void;
+  alterarVisita: (visitaId: string, dados: DadosAlterarVisita) => Resultado;
   /** Escreve o resultado de uma visita (interessado, a pensar, sem interesse, obra inviável); os dois últimos encerram a abordagem. */
-  registarResultadoVisita: (visitaId: string, dados: DadosResultadoVisita) => void;
+  registarResultadoVisita: (visitaId: string, dados: DadosResultadoVisita) => Resultado;
+  capacidades?: CapacidadesFicha;
 }
 
 /** A moldura comum: título e conteúdo, ligados por `aria-labelledby`; escondida quando o painel não é o ativo. */

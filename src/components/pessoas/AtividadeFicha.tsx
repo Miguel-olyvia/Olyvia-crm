@@ -7,6 +7,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import type { Traduzir } from "@/components/negocio-metas/saudeNegocio";
 import { agruparPorDia, type GrupoDia } from "./agruparAtividade";
+import { CarregarMais, type MaisItens } from "./CarregarMais";
 import { textoDiaCompleto } from "./formatoPessoas";
 import type { ItemAtividade, TipoAtividade } from "./pessoasTipos";
 
@@ -19,6 +20,8 @@ function Item({ item }: { item: ItemAtividade }) {
   const { t } = useTranslation();
   const Icone = ICONES[item.tipo];
   const titulo = [t(`pessoasPagina.activity.type.${item.tipo}`), texto(t, item.chaveTitulo, item.titulo)].filter(Boolean).join(" · ");
+  // O motivo (de encerrar a abordagem) traduzido e, a seguir, o texto: o escrito à mão no «Outro», ou o da aplicação.
+  const textoDoDetalhe = [item.chaveMotivo ? t(item.chaveMotivo) : "", texto(t, item.chaveDetalhe, item.detalhe)].filter(Boolean).join(" · ");
   return (
     <li className="flex gap-3">
       <span aria-hidden="true" className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -26,9 +29,10 @@ function Item({ item }: { item: ItemAtividade }) {
       </span>
       <div className="min-w-0 space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{titulo}</p>
-        {(item.chaveDetalhe || item.detalhe) && <p className="break-words text-[15px] text-muted-foreground">{texto(t, item.chaveDetalhe, item.detalhe)}</p>}
+        {textoDoDetalhe && <p className="break-words text-[15px] text-muted-foreground">{textoDoDetalhe}</p>}
         <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-          {item.exemplo ? item.hora && <span className="tabular-nums">{item.hora}</span> : <span>{t("pessoasPagina.activity.now")}</span>}
+          {/* Com hora (de exemplo ou da base) mostra-a; sem hora, só os registos desta sessão dizem «agora». */}
+          {item.hora ? <span className="tabular-nums">{item.hora}</span> : !item.exemplo && <span>{t("pessoasPagina.activity.now")}</span>}
           {item.exemplo && <span>{t("pessoasPagina.head.example")}</span>}
         </p>
       </div>
@@ -42,7 +46,7 @@ function tituloDoDia(t: Traduzir, g: GrupoDia): string {
   return g.relativo === "ontem" ? t("pessoasPagina.activity.groupYesterday") : textoDiaCompleto(g.dia);
 }
 
-export function AtividadeFicha({ itens, hoje }: { itens: ItemAtividade[]; hoje: string }) {
+export function AtividadeFicha({ itens, hoje, mais }: { itens: ItemAtividade[]; hoje: string; mais?: MaisItens }) {
   const { t } = useTranslation();
   if (itens.length === 0) {
     return (
@@ -59,6 +63,7 @@ export function AtividadeFicha({ itens, hoje }: { itens: ItemAtividade[]; hoje: 
           <ol className="space-y-4">{g.itens.map((i) => <Item key={i.id} item={i} />)}</ol>
         </Seccao>
       ))}
+      <CarregarMais tipo="atividade" estado={mais} />
     </div>
   );
 }

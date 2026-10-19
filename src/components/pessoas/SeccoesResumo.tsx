@@ -157,14 +157,15 @@ export function SeccaoSobre({ resumo, hoje }: { resumo: ResumoPessoa; hoje: stri
   return (
     <Seccao titulo={t(`${P}sum.about`)} marca={<MarcaExemplo />}>
       <ListaCampos>
-        <LinhaCampo rotulo={t(`${P}sum.personHealth`)}><SaudePessoa valor={pessoa.saude} /></LinhaCampo>
+        {pessoa.saude !== undefined && <LinhaCampo rotulo={t(`${P}sum.personHealth`)}><SaudePessoa valor={pessoa.saude} /></LinhaCampo>}
         <LinhaCampo rotulo={t(`${P}sum.last`)}>
           <span className="flex flex-wrap items-center gap-2">
-            {textoUltimoContacto(t, pessoa.ultimoContactoDias)}
+            {/* Nunca contactada: o selo já diz «Sem contacto», não se repete em texto. */}
+            {pessoa.ultimoContactoDias !== null && textoUltimoContacto(t, pessoa.ultimoContactoDias)}
             <SeloResultado resultado={resultadoEfetivo(pessoa)} />
           </span>
         </LinhaCampo>
-        <LinhaCampo rotulo={t(`${P}sum.rep`)}>{pessoa.comercial}</LinhaCampo>
+        {pessoa.comercial !== "" && <LinhaCampo rotulo={t(`${P}sum.rep`)}>{pessoa.comercial}</LinhaCampo>}
         {pessoa.qualificacao && <LinhaCampo rotulo={t(`${P}sum.qual`)}>{t(`${P}sum.qual${pessoa.qualificacao}`)}</LinhaCampo>}
         {pessoa.desde && (
           <LinhaCampo rotulo={t(resumo.papel === "cliente" ? `${P}sum.clientSince` : `${P}sum.created`)}>{textoDiaCompleto(pessoa.desde)}</LinhaCampo>

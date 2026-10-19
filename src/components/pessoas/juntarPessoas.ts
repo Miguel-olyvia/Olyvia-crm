@@ -9,7 +9,9 @@ import {
   colunaDaPessoa, estaAtrasadaRegistos, etapaDosRegistos, horaDoProximoContactoRegistos, negocioEmFoco, proximoContactoRegistos,
   proximoContactoVemDeVisitaRegistos, proximoPassoRegistos, registosParaAbordagem,
 } from "./etapaPessoa";
-import { ehHistorico, type NegocioPessoa, type PapelPessoa, type ParteQuadro, type Pessoa, type ResumoPessoa } from "./pessoasTipos";
+import {
+  ehHistorico, type EtapaPessoa, type NegocioPessoa, type PapelPessoa, type ParteQuadro, type Pessoa, type ResumoPessoa,
+} from "./pessoasTipos";
 
 /** Ganho: contrato assinado no quadro do mês, ou resultado "ganho" num histórico. */
 export const estaGanho = (n: NegocioPessoa): boolean => (ehHistorico(n) ? n.resultado === "ganho" : isNegocioGanho(n));
@@ -49,8 +51,19 @@ export function derivar(pessoa: Pessoa, papel: PapelPessoa, negocios: NegocioPes
   };
 }
 
-function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], registos: RegistosDaPessoa, hoje: string): ResumoPessoa {
-  const { papel, abertos } = papelEAbertos(negocios);
+/**
+ * O que a base já sabe de uma pessoa (ficha real). Com isto, `resumir` não infere o papel («tem negócio ganho») nem os abertos («sem
+ * contrato assinado»): um negócio aberto com contrato assinado fica nos abertos, e um cliente sem negócio ganho continua cliente.
+ */
+export interface BaseResumo {
+  papel: PapelPessoa;
+  abertos: NegocioMes[];
+  etapa: EtapaPessoa;
+}
+
+/** O resumo de uma pessoa. Sem `base` infere tudo dos negócios e dos registos (o exemplo); com `base`, o papel, os abertos e a etapa vêm dela. */
+export function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], registos: RegistosDaPessoa, hoje: string, base?: BaseResumo): ResumoPessoa {
+  const { papel, abertos } = base ?? papelEAbertos(negocios);
   const pior = piorAberto(abertos, hoje);
   const foco = negocioEmFoco(abertos);
   return {
@@ -60,6 +73,7 @@ function resumir(pessoa: Pessoa, negocios: NegocioPessoa[], registos: RegistosDa
     abertos,
     registos,
     ...derivar(pessoa, papel, negocios, abertos, registos, hoje),
+    ...(base ? { etapa: base.etapa } : {}),
     emJogo: abertos.reduce((soma, n) => soma + valorDoNegocio(n), 0),
     formulario: pessoa.formulario ?? null,
     faseEtapa: foco ? faseDoNegocio(foco) : null,

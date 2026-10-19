@@ -11,9 +11,11 @@ import { RESULTADOS_VISITA, resultadoEncerra, type ResultadoVisita, type VisitaP
 import type { DadosResultadoVisita } from "./acoesVisitaPessoa";
 import { classeCartao } from "./cartaoOpcao";
 import { CamposMotivo, erroDoMotivo } from "./CamposMotivo";
+import { ErroAcao } from "./ErroAcao";
 import { diaDaSemana, textoDiaCompleto } from "./formatoPessoas";
 import { Visto } from "./OpcoesResultado";
 import type { MotivoEncerramento, Pessoa } from "./pessoasTipos";
+import { useExecutarAcao } from "./useExecutarAcao";
 
 const R = "pessoasPagina.visitResult.";
 
@@ -23,7 +25,7 @@ interface DialogoResultadoVisitaProps {
   pessoa: Pessoa;
   /** A pessoa tem um negócio aberto: não há abordagem a encerrar, por isso só há os resultados que a deixam seguir. */
   comNegocioAberto: boolean;
-  aoGuardar: (visitaId: string, dados: DadosResultadoVisita) => void;
+  aoGuardar: (visitaId: string, dados: DadosResultadoVisita) => void | Promise<void>;
   aoFechar: () => void;
   /** Diz uma frase ao leitor de ecrã, já com o diálogo fechado. */
   aoAnunciar: (mensagem: string) => void;
@@ -40,14 +42,18 @@ function FormResultado({ visita, pessoa, comNegocioAberto, aoGuardar, aoFechar, 
   const opcoes = RESULTADOS_VISITA.filter((r) => !comNegocioAberto || !resultadoEncerra(r));
   const encerra = resultado !== "" && resultadoEncerra(resultado);
   const incompleto = resultado === "" || (encerra && erroDoMotivo(motivo, motivoOutro) !== null);
+  const acao = useExecutarAcao();
   const guardar = () => {
     if (resultado === "" || incompleto) return;
     const dados: DadosResultadoVisita = encerra
       ? { resultado, motivo: motivo === "" ? undefined : motivo, motivoOutro: motivo === "outro" ? motivoOutro.trim() : undefined }
       : { resultado };
-    aoGuardar(visita.id, dados);
-    aoPendente(t(`${R}done`, { name: pessoa.nome, result: t(`${R}result.${resultado}`) }));
-    aoFechar();
+    // Só fecha (e só anuncia) quando a ação terminou: na base pode demorar ou falhar, e então o erro fica à vista aqui dentro.
+    const mensagem = t(`${R}done`, { name: pessoa.nome, result: t(`${R}result.${resultado}`) });
+    acao.executar(() => aoGuardar(visita.id, dados), () => {
+      aoPendente(mensagem);
+      aoFechar();
+    }, mensagem);
   };
   return (
     <div className="space-y-4">
@@ -74,14 +80,21 @@ function FormResultado({ visita, pessoa, comNegocioAberto, aoGuardar, aoFechar, 
           />
         </>
       )}
+      <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} />
       <DialogFooter className="flex-col items-stretch gap-2 sm:flex-col sm:space-x-0">
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={aoFechar}>{t(`${R}cancel`)}</Button>
           <Button
-            type="button" aria-disabled={incompleto || undefined} aria-describedby={incompleto ? idDica : undefined}
-            className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)} onClick={guardar}
+            type="button" variant="outline" className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)}
+            aria-disabled={acao.aGuardar || undefined} onClick={() => { if (!acao.aGuardar) aoFechar(); }}
           >
-            {t(`${R}save`)}
+            {t(`${R}cancel`)}
+          </Button>
+          <Button
+            type="button" aria-disabled={incompleto || acao.aGuardar || undefined} aria-busy={acao.aGuardar || undefined}
+            aria-describedby={incompleto ? idDica : undefined}
+            className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)} onClick={() => { if (!acao.aGuardar) guardar(); }}
+          >
+            {acao.aGuardar ? t("pessoasPagina.real.ficha.saving") : t(`${R}save`)}
           </Button>
         </div>
         {incompleto && <p id={idDica} className="text-xs text-muted-foreground">{t(`${R}hintMissing`)}</p>}

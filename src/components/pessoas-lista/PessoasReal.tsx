@@ -1,12 +1,16 @@
-import { useRef, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { MIN_PESQUISA, type FiltrosLista } from "@/hooks/pessoas/listaPessoasTipos";
+import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useListaPessoas, type ListaPessoas } from "@/hooks/pessoas/useListaPessoas";
 import { Button } from "@/components/ui/button";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import { usePessoasUrl } from "@/components/pessoas/usePessoasUrl";
 import { BarraListaReal } from "./BarraListaReal";
 import { BarraProgresso } from "./BarraProgresso";
+import { FichaReal } from "./FichaReal";
+import type { AoAbrirPessoa } from "./LinhaListaReal";
 import { RodapeListaReal } from "./RodapeListaReal";
 import { TabelaListaReal } from "./TabelaListaReal";
 import { useFiltrosLista } from "./useFiltrosLista";
@@ -30,10 +34,12 @@ interface CorpoProps {
   filtros: FiltrosLista;
   tabelaRef: RefObject<HTMLDivElement>;
   aoLimpar: () => void;
+  /** Abre a ficha de uma pessoa; sem isto (fora do modo real) o nome das linhas é texto simples. */
+  aoAbrir?: AoAbrirPessoa;
 }
 
 // Os avisos visíveis não levam role: as mesmas mensagens são anunciadas pelo contentor live da página.
-function Corpo({ lista, filtros, tabelaRef, aoLimpar }: CorpoProps) {
+function Corpo({ lista, filtros, tabelaRef, aoLimpar, aoAbrir }: CorpoProps) {
   const { t } = useTranslation();
   if (lista.erroSemDados) {
     return (
@@ -64,7 +70,7 @@ function Corpo({ lista, filtros, tabelaRef, aoLimpar }: CorpoProps) {
           <BotaoRepetir aoRepetir={lista.recarregar} />
         </div>
       )}
-      <TabelaListaReal ref={tabelaRef} linhas={lista.linhas} ocupada={lista.aMostrarAnterior} />
+      <TabelaListaReal ref={tabelaRef} linhas={lista.linhas} ocupada={lista.aMostrarAnterior} aoAbrir={aoAbrir} />
     </div>
   );
 }
@@ -79,11 +85,31 @@ function textoEstado(t: ReturnType<typeof useTranslation>["t"], lista: ListaPess
   return "";
 }
 
-/** A Lista real das Pessoas (P1): só leitura, página a página, ligada à base por useListaPessoas. */
+/**
+ * A Lista real das Pessoas, página a página, ligada à base por useListaPessoas. Em modo real o nome de cada linha abre a ficha da pessoa
+ * (P2, `?open=<uuid>`); o resto da página não muda ao abrir e fechar (os filtros ficam).
+ */
 export function PessoasReal() {
   const { t } = useTranslation();
+  const comFicha = useFontePessoas().modo === "real";
+  const url = usePessoasUrl(false);
   const f = useFiltrosLista();
   const lista = useListaPessoas(f.filtros);
+  const { abrir, abertaId } = url;
+  // `abrir` muda sempre que o ?open= muda; as linhas e a tabela estão em memória e só valem se o que lhes damos não mudar. Por isso o que
+  // se passa é uma função estável que chama sempre o `abrir` mais recente (guardado depois de cada render, nunca durante).
+  const abrirRef = useRef(abrir);
+  useEffect(() => {
+    abrirRef.current = abrir;
+  });
+  // O botão clicado fica guardado AQUI, no clique: a ficha só abre quando os dados chegam e o foco já pode estar noutro sítio.
+  const origemFoco = useRef<HTMLElement | null>(null);
+  const aoAbrir = useCallback((id: string, origem?: HTMLElement) => {
+    origemFoco.current = origem ?? null;
+    abrirRef.current(id);
+  }, []);
+  const aoIrPara = useCallback((id: string) => abrirRef.current(id), []);
+  const idsVisiveis = useMemo(() => lista.linhas.map((l) => l.id), [lista.linhas]);
   const tabelaRef = useRef<HTMLDivElement>(null);
   const botaoMaisRef = useRef<HTMLButtonElement>(null);
   const repetirRef = useRef<HTMLButtonElement>(null);
@@ -107,8 +133,11 @@ export function PessoasReal() {
       />
       {/* Sempre montado: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{anuncio}</div>
-      <Corpo lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} />
+      <Corpo lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined} />
       <RodapeListaReal lista={lista} botaoMaisRef={botaoMaisRef} repetirRef={repetirRef} aoPedirMais={aoPedirMais} />
+      {comFicha && (
+        <FichaReal pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={url.fechar} aoIrPara={aoIrPara} aoLimpar={url.limpar} origemFoco={origemFoco} />
+      )}
     </div>
   );
 }
