@@ -163,4 +163,7 @@ describe("colunas visíveis e larguras", () => {
       expect(cols.reduce((s, c) => s + l[c], 0)).toBeCloseTo(100, 5);
     }
   });
+  it("a coluna WhatsApp tem largura para o seu cabeçalho (não menos de 9 do peso total)", () => {
+    expect(CATALOGO.find((c) => c.id === "whatsapp")?.largura).toBeGreaterThanOrEqual(9);
+  });
 });

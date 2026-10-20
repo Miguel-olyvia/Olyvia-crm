@@ -5,6 +5,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import type { ContactoDaLista } from "./listaPessoasTipos";
 import { lotesDeIds } from "./lotesDeIds";
 import { useFontePessoas } from "./useFontePessoas";
+import { useUltimoConhecidoPorId } from "./useUltimoConhecidoPorId";
 
 const STALE_TIME_MS = 5 * 60_000;
 const MAX_REPETICOES = 1;
@@ -75,7 +76,7 @@ export function useContactosPessoas(ids: readonly string[], ativo: boolean): Rea
   const fonte = useFontePessoas();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const lotes = useMemo(() => lotesDeIds(ids), [ids]);
-  return useQueries({
+  const atuais = useQueries({
     queries: lotes.map((lote) => ({
       queryKey: ["pessoas-contactos", organizationId, [...lote].sort()] as const,
       queryFn: () => lerLote(lote),
@@ -85,4 +86,5 @@ export function useContactosPessoas(ids: readonly string[], ativo: boolean): Rea
     })),
     combine: juntar,
   });
+  return useUltimoConhecidoPorId(atuais, organizationId);
 }

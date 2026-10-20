@@ -64,6 +64,12 @@ describe("traduções da Lista real das Pessoas", () => {
     expect(pessoasPaginaTranslations.en["pessoasPagina.stage.cliente"]).toBeTruthy();
   });
 
+  it("«Repor padrão» tem aviso nas duas línguas e a etapa em falta de uma cliente não usa dois pontos", () => {
+    expect(pt["pessoasPagina.real.cols.resetDone"]).toBe("Colunas repostas ao padrão.");
+    expect(en["pessoasPagina.real.cols.resetDone"]).toBeTruthy();
+    expect(en["pessoasPagina.real.noStage"]).toBe("No stage (client)");
+  });
+
   it("a página junta estes textos nas duas línguas", () => {
     for (const chave of Object.keys(pt)) expect(pessoasPaginaTranslations.pt[chave]).toBe(pt[chave]);
     for (const chave of Object.keys(en)) expect(pessoasPaginaTranslations.en[chave]).toBe(en[chave]);

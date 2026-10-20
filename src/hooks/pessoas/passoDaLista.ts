@@ -4,6 +4,7 @@
 import type { FaseNegocio } from "@/components/negocio-metas/negocioMetas";
 import type { IdPasso } from "@/components/pessoas/etapaPessoa";
 import type { ResultadoEncerramento } from "@/components/pessoas/pessoasTipos";
+import { diaLisboa } from "./tempoLisboa";
 
 export interface EntradaPasso {
   encerrada: ResultadoEncerramento | null;
@@ -19,25 +20,24 @@ export interface EntradaPasso {
   porLigarLevantamentos: number;
 }
 
-function instante(valor: string | null): number | null {
-  if (!valor) return null;
-  const t = Date.parse(valor);
-  return Number.isNaN(t) ? null : t;
-}
-
 /**
  * Há uma visita feita por ligar a um negócio. Sem negócios terminados é exato (qualquer visita feita conta). Com negócios
- * terminados é uma aproximação: conta se a visita é posterior ao último negócio (a função não diz a que negócio está ligada).
+ * terminados é uma aproximação: conta se a visita é de um dia de Lisboa estritamente posterior ao do último negócio (a função não diz
+ * a que negócio está ligada). Compara o DIA, como o protótipo (`registosParaAbordagem`: `r.data > limite`), não o instante.
  */
 function visitaFeitaPorLigar(p: EntradaPasso): boolean {
-  const visita = instante(p.ultimaVisitaFeitaEm);
+  const visita = diaLisboa(p.ultimaVisitaFeitaEm);
   if (visita === null) return false;
   if (p.ganhos + p.perdidos === 0) return true;
-  const negocio = instante(p.ultimoNegocioEm);
+  const negocio = diaLisboa(p.ultimoNegocioEm);
   return negocio === null || visita > negocio;
 }
 
-/** Com negócio aberto: manda o mais avançado. Uma proposta por fechar depende do estado da proposta, que a lista não tem. */
+/**
+ * Com negócio aberto: manda o mais avançado. Uma proposta por fechar depende do estado da proposta, que a lista não tem.
+ * `faseEtapa === "orcamento"` quer dizer que um negócio aberto tem pelo menos um orçamento (neg_resumo_pessoas só dá «orcamento» com uma linha
+ * em `quotes`; sem nenhum documento a fase é nula), por isso «criar a proposta» é exato, e não uma suposição.
+ */
 function passoComNegocioAberto(p: EntradaPasso): IdPasso | null {
   if (p.prontoAGanhar) return "ganharNegocio";
   if (p.faseEtapa === "contrato") return "recolherAssinatura";
@@ -52,7 +52,10 @@ export function passoDaLista(p: EntradaPasso): IdPasso | null {
   const visitaFeita = visitaFeitaPorLigar(p);
   const semNegocios = p.ganhos + p.perdidos === 0;
   const registoPorLigar = p.porLigarContactos > 0 || p.porLigarVisitas > 0 || p.porLigarLevantamentos > 0;
-  if (!semNegocios && !registoPorLigar && !visitaFeita) return "nenhum";
+  // Só negócios terminados e nada por ligar: a ficha ainda pode dar um passo (`voltouAAbordagem`: uma submissão resolvida depois do último
+  // negócio) e a lista não tem essa fonte. Não se sabe, e não se afirma «nenhum».
+  // TODO: devolver «nenhum» aqui quando a coluna voltou_a_contactar existir em neg_resumo_pessoas (Lote B).
+  if (!semNegocios && !registoPorLigar && !visitaFeita) return null;
   if (visitaFeita) return "criarNegocio";
   if (p.porLigarVisitas > 0) return "fecharLevantamento";
   return p.porLigarContactos > 0 ? "marcarVisita" : "registarChamada";

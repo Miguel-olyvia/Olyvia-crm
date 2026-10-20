@@ -25,7 +25,7 @@ export const CATALOGO: readonly DefColuna[] = [
   { id: "assigned", largura: 11, temDado: true, visivelPorOmissao: true },
   { id: "phone", largura: 10, temDado: true, visivelPorOmissao: true },
   { id: "email", largura: 14, temDado: true, visivelPorOmissao: true },
-  { id: "whatsapp", largura: 6, temDado: true, visivelPorOmissao: true },
+  { id: "whatsapp", largura: 9, temDado: true, visivelPorOmissao: true },
   { id: "created", largura: 9, temDado: false, visivelPorOmissao: true },
   { id: "origin", largura: 9, temDado: false, visivelPorOmissao: false },
   { id: "campaign", largura: 11, temDado: false, visivelPorOmissao: false },

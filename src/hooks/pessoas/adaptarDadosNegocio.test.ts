@@ -160,9 +160,10 @@ describe("adaptarDadosNegocio: as leads abertas", () => {
         { id: "l3", status: "new", created_at: null, closure_result: "" },
       ],
     }));
+    // ALTERADO: cada lead com data passa a levar também o instante completo (`instante`), para a mais recente se escolher pelo instante e não só pelo dia.
     expect(d.leadsAbertas).toEqual([
-      { id: "l1", criadaEm: "2026-09-01", encerrada: false },
-      { id: "l2", criadaEm: "2026-10-01", encerrada: true },
+      { id: "l1", criadaEm: "2026-09-01", encerrada: false, instante: "2026-09-01T10:00:00Z" },
+      { id: "l2", criadaEm: "2026-10-01", encerrada: true, instante: "2026-10-01T10:00:00Z" },
       { id: "l3", criadaEm: "", encerrada: false },
     ]);
   });

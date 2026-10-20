@@ -11,6 +11,7 @@ import { adaptarPessoa } from "./adaptarFichaPessoa";
 import { adaptarNegocios } from "./adaptarNegociosFicha";
 import { adaptarRegistos } from "./adaptarRegistos";
 import type { FichaDb } from "./fichaTipos";
+import type { MomentoGanho } from "./useFontePessoas";
 
 export interface FichaAdaptada {
   resumo: ResumoPessoa;
@@ -20,9 +21,9 @@ export interface FichaAdaptada {
 }
 
 /** A ficha pronta para o ecrã. `hoje` é o dia de Lisboa (AAAA-MM-DD). Não muda a ficha de entrada. */
-export function adaptarFicha(ficha: FichaDb, hoje: string): FichaAdaptada {
+export function adaptarFicha(ficha: FichaDb, hoje: string, momentoGanho: MomentoGanho | null = null): FichaAdaptada {
   const pessoa = adaptarPessoa(ficha, hoje);
-  const negocios = adaptarNegocios(ficha, hoje);
+  const negocios = adaptarNegocios(ficha, hoje, momentoGanho);
   const abertos = negocios.filter((n): n is NegocioMes => !ehHistorico(n) && n.estadoReal === "aberto");
   const papel: PapelPessoa = ficha.pessoa.papel === "cliente" ? "cliente" : "lead";
   const etapa = escolher(ficha.pessoa.etapa, ETAPAS) ?? "nova";

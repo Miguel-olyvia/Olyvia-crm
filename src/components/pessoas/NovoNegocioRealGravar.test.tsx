@@ -102,6 +102,30 @@ describe("NovoNegocioReal: gravar", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
+  it("a guardar: o X do cabeçalho também mostra que está ocupado (aria-disabled, com pista visual) e não fecha o painel", () => {
+    const acao = pendente<ResultadoCriar>();
+    montar(mutacoesFalsas({ criar: vi.fn(() => acao.promessa) }));
+    const x = screen.getByRole("button", { name: "Fechar" });
+    expect(x).not.toHaveAttribute("aria-disabled");
+    escrever("Sala");
+    fireEvent.click(criar());
+    expect(x).toHaveAttribute("aria-disabled", "true");
+    expect(x.className).toMatch(/aria-disabled:/);
+    fireEvent.click(x);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("depois de uma falha o X volta a fechar o painel", async () => {
+    const acao = pendente<ResultadoCriar>();
+    montar(mutacoesFalsas({ criar: vi.fn(() => acao.promessa) }));
+    escrever("Sala");
+    fireEvent.click(criar());
+    await acao.falhar(erroNegFalso("pessoasPagina.erroNeg.generico"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Fechar" })).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("em sucesso fecha, abre o negócio novo e avisa (toast e anúncio da ficha)", async () => {
     const aoCriado = vi.fn();
     const { anunciar } = montar(mutacoesFalsas(), {}, { aoCriado });

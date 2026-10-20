@@ -7,6 +7,7 @@ import { maisRecentePrimeiro, numero } from "./adaptarComum";
 import { diasEntre } from "./adaptarResumoPessoa";
 import type { ContratoDb, FichaDb, NegocioFichaDb, PropostaDb } from "./fichaTipos";
 import { propostaRecusada, propostaViva } from "./propostaViva";
+import type { MomentoGanho } from "./useFontePessoas";
 import { diaLisboa } from "./tempoLisboa";
 
 // Tabelas de tradução dos valores da base (em minúsculas). Valores reais por confirmar na nike: um desconhecido nunca rebenta.
@@ -52,8 +53,10 @@ function propostaDoNegocio(n: NegocioFichaDb): NegocioMes["proposta"] {
   return viva && !propostaRecusada(viva) ? { estado: estadoPropostaDeDb(viva) } : null;
 }
 
-function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string): NegocioMes {
+function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string, momentoGanho: MomentoGanho | null): NegocioMes {
   const estadoReal = n.estado === "ganho" || n.estado === "perdido" ? n.estado : "aberto";
+  // Regra manual: a base aceita o ganho de qualquer negócio aberto, mas devolve pronto_a_ganhar = false para ela (ELSE false).
+  const manualAberto = momentoGanho === "manual" && estadoReal === "aberto";
   return {
     id: n.id,
     pessoaId: ficha.pessoa.id,
@@ -70,7 +73,7 @@ function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string): Negoci
     ...(n.levantamento_id ? { decisaoLevantamento: "ligado" as const } : {}),
     valorBase: numero(n.valor),
     estadoReal,
-    prontoAGanhar: n.pronto_a_ganhar === true,
+    prontoAGanhar: manualAberto || n.pronto_a_ganhar === true,
   };
 }
 
@@ -81,9 +84,9 @@ function comoHistorico(base: NegocioMes, n: NegocioFichaDb): NegocioHistorico {
 }
 
 /** Todos os negócios da pessoa: os abertos como NegocioMes, os ganhos e perdidos como históricos. */
-export function adaptarNegocios(ficha: FichaDb, hoje: string): NegocioPessoa[] {
+export function adaptarNegocios(ficha: FichaDb, hoje: string, momentoGanho: MomentoGanho | null = null): NegocioPessoa[] {
   return (ficha.negocios?.itens ?? []).map((n) => {
-    const base = adaptarNegocio(n, ficha, hoje);
+    const base = adaptarNegocio(n, ficha, hoje, momentoGanho);
     return base.estadoReal === "aberto" ? base : comoHistorico(base, n);
   });
 }

@@ -137,6 +137,23 @@ describe("LinhaListaReal: comercial, telefone, email e WhatsApp", () => {
   });
 });
 
+describe("LinhaListaReal: textos longos que não se podem perder", () => {
+  const EMAIL_LONGO = "maria.fernanda.albuquerque.de.sousa.e.castro@empresa-de-remodelacoes-e-obras.exemplo.pt";
+
+  it("um email comprido quebra por inteiro (sem line-clamp que o corte sem forma de ler) e leva o valor completo em title", () => {
+    desenhar({}, { colunas: ["person", "email"], contacto: { telefone: null, email: EMAIL_LONGO } });
+    const email = screen.getByText(EMAIL_LONGO);
+    expect(email.className).toContain("break-all");
+    expect(email.className).not.toContain("line-clamp");
+    expect(email).toHaveAttribute("title", EMAIL_LONGO);
+  });
+  it("o comercial comprido continua cortado em duas linhas, mas com o nome completo em title", () => {
+    const nome = "Maria Fernanda Albuquerque de Sousa e Castro Pinto Coelho";
+    desenhar({ responsavelId: "u1" }, { colunas: ["person", "assigned"], comercial: nome });
+    expect(screen.getByText(nome)).toHaveAttribute("title", nome);
+  });
+});
+
 describe("LinhaListaReal: colunas preparadas para o Lote C", () => {
   it("as colunas sem dado desenham-se sem rebentar e com «Sem dado» (localidade, formulário, criado em, origem, campanha)", () => {
     const linha = desenhar({}, { colunas: ["person", "place", "form", "created", "origin", "campaign"] });

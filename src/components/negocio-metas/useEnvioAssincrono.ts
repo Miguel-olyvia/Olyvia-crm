@@ -43,7 +43,23 @@ export function useEnvioAssincrono(aoFalhar?: (chave: string) => void): EnvioAss
     ocupado.current = true;
     setErro(null);
     setAGuardar(true);
-    acao().then(
+    const aoFalhou = (falha: unknown): void => {
+      ocupado.current = false;
+      const chave = chaveDoErroDeEnvio(falha);
+      if (!montado.current) return;
+      setAGuardar(false);
+      setErro(chave);
+      falhar.current?.(chave);
+    };
+    // Uma gravação que lança antes de devolver a promessa conta como falha, tratada logo: sem isto ficavam `ocupado` e `aGuardar` presos.
+    let promessa: Promise<unknown>;
+    try {
+      promessa = acao();
+    } catch (falha) {
+      aoFalhou(falha);
+      return;
+    }
+    promessa.then(
       () => {
         ocupado.current = false;
         if (montado.current) setAGuardar(false);
@@ -55,14 +71,7 @@ export function useEnvioAssincrono(aoFalhar?: (chave: string) => void): EnvioAss
           if (montado.current) setErro(CHAVE_ERRO_ENVIO_GENERICO);
         }
       },
-      (falha: unknown) => {
-        ocupado.current = false;
-        const chave = chaveDoErroDeEnvio(falha);
-        if (!montado.current) return;
-        setAGuardar(false);
-        setErro(chave);
-        falhar.current?.(chave);
-      },
+      aoFalhou,
     );
   }, []);
 

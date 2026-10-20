@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 const SRC = join(process.cwd(), "src");
 
 /** As pastas e os ficheiros que têm de continuar sem base. */
-const PASTAS = ["components/pessoas", "components/pessoas-lista", "components/ficha-comum", "components/negocio-metas"];
+const PASTAS = ["components/pessoas", "components/pessoas-lista", "components/pessoas-processo", "components/ficha-comum", "components/negocio-metas"];
 const FICHEIROS = ["pages/Pessoas.tsx", "pages/NegocioMetas.tsx"];
 
 const proibido: { nome: string; padrao: RegExp }[] = [
@@ -49,6 +49,40 @@ describe("sem ligação à base de dados", () => {
       .filter((f) => padrao.test(readFileSync(f, "utf8")))
       .map((f) => relative(SRC, f).replace(/\\/g, "/"));
     expect(culpados).toEqual([]);
+  });
+});
+
+/**
+ * Os ÚNICOS ficheiros da Lista real (components/pessoas-lista e components/pessoas-processo) que podem tocar em localStorage: a escolha de
+ * colunas, guardada por organização (`colunasPessoas.ts`), e o hook que a usa (`useColunasPessoas.ts`). Os outros nunca guardam nada no
+ * browser: quem precisar acrescenta o ficheiro aqui e diz porquê na revisão.
+ */
+const USAM_LOCALSTORAGE = ["components/pessoas-lista/colunasPessoas.ts", "components/pessoas-lista/useColunasPessoas.ts"];
+
+describe("Lista real: localStorage só nos ficheiros autorizados", () => {
+  const daListaReal = analisados.filter((f) => /\/components\/pessoas-(lista|processo)\//.test(f.replace(/\\/g, "/")));
+  const relativo = (f: string): string => relative(SRC, f).replace(/\\/g, "/");
+
+  it("a lista de autorizados só tem ficheiros que existem (não fica a autorizar fantasmas)", () => {
+    const existentes = daListaReal.map(relativo);
+    for (const f of USAM_LOCALSTORAGE) expect(existentes, f).toContain(f);
+  });
+
+  it("nenhum outro ficheiro usa localStorage", () => {
+    const culpados = daListaReal.map(relativo).filter((f) => !USAM_LOCALSTORAGE.includes(f) && /\blocalStorage\b/.test(readFileSync(join(SRC, f), "utf8")));
+    expect(culpados).toEqual([]);
+  });
+
+  it("os autorizados continuam a precisar dele (um autorizado que já não o usa sai da lista)", () => {
+    const sem = USAM_LOCALSTORAGE.filter((f) => !/\blocalStorage\b/.test(readFileSync(join(SRC, f), "utf8")));
+    expect(sem).toEqual([]);
+  });
+});
+
+describe("pessoas-processo: sem base", () => {
+  it("a pasta é vigiada (encontra os seus ficheiros)", () => {
+    const nomes = analisados.map((f) => f.replace(/\\/g, "/")).filter((f) => f.includes("/components/pessoas-processo/")).map((f) => f.split("/").pop());
+    expect(nomes).toEqual(expect.arrayContaining(["ProcessoProviderReal.tsx", "PainelOrcamentoReal.tsx", "PainelPropostaReal.tsx", "BarraVoltar.tsx"]));
   });
 });
 

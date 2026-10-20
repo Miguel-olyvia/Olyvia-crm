@@ -34,12 +34,12 @@ const empresaDe = (nome: string | null): Pessoa["empresa"] => {
 /**
  * O encerramento da abordagem. Motivo da lista, «outro» com texto, ou nulo (encerrada pelo resultado da visita) que vira «outro».
  * Quando a lead mais recente da ficha está morta, a abordagem é a da aberta mais recente: se essa está encerrada só se sabe o resultado
- * (`closure_result`), por isso o motivo é «outro» sem texto e o dia é hoje.
+ * (`closure_result`), por isso só o resultado se devolve: o motivo e o dia ficam por preencher.
  */
 function adaptarEncerramento(ficha: FichaDb, hoje: string): EncerramentoPessoa | undefined {
   const e = ficha.lead?.encerramento;
   const resultado = escolher(e?.resultado, ENCERRAMENTOS);
-  if (!e || !resultado) return encerramentoDeLeadAberta(ficha, hoje);
+  if (!e || !resultado) return encerramentoDeLeadAberta(ficha);
   const data = diaLisboa(e.em) ?? hoje;
   const daLista = escolher(e.motivo, MOTIVOS_PERDA);
   if (daLista) return { resultado, motivo: daLista, data };
@@ -47,12 +47,13 @@ function adaptarEncerramento(ficha: FichaDb, hoje: string): EncerramentoPessoa |
   return { resultado, motivo, motivoOutro: textoOuNull(e.motivo_outro) ?? undefined, data };
 }
 
-function encerramentoDeLeadAberta(ficha: FichaDb, hoje: string): EncerramentoPessoa | undefined {
+/** Só o resultado: a base não dá o motivo nem o dia desta lead encerrada, e não se inventam. */
+function encerramentoDeLeadAberta(ficha: FichaDb): EncerramentoPessoa | undefined {
   const certa = leadDaAbordagem(ficha);
   if (!certa?.encerrada || certa.id === ficha.lead?.id) return undefined;
-  const fecho = ficha.leads_abertas.find((l) => l.id === certa.id)?.closure_result;
+  const fecho = (ficha.leads_abertas ?? []).find((l) => l.id === certa.id)?.closure_result;
   const resultado = escolher(fecho?.trim(), ENCERRAMENTOS) ?? "semInteresse";
-  return { resultado, motivo: "outro", data: hoje };
+  return { resultado };
 }
 
 const QUALIFICACOES_TEXTO = (valor: unknown): QualificacaoPessoa | undefined =>

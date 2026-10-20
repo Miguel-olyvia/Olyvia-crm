@@ -138,7 +138,15 @@ describe("adaptarPessoa: a abordagem encerrada com a lead mais recente morta", (
 
   it("a lead encerrada que está entre as abertas dá a pessoa como encerrada (e o «Reativar» aparece)", () => {
     const p = adaptar({ lead: morta, leads_abertas: [lead("l1", "semInteresse", "2026-09-01T10:00:00Z")] });
-    expect(p.encerrada).toMatchObject({ resultado: "semInteresse", motivo: "outro", data: HOJE });
+    // ALTERADO: antes esperava motivo «outro» e data de hoje; a base só dá o resultado (closure_result), por isso o resto não se inventa.
+    expect(p.encerrada).toEqual({ resultado: "semInteresse" });
+    expect(p.encerrada).not.toHaveProperty("motivo");
+    expect(p.encerrada).not.toHaveProperty("data");
+  });
+
+  it("um resultado ilegível na base cai em «semInteresse», também sem motivo nem data", () => {
+    const p = adaptar({ lead: morta, leads_abertas: [lead("l1", "xpto", "2026-09-01T10:00:00Z")] });
+    expect(p.encerrada).toEqual({ resultado: "semInteresse" });
   });
 
   it("uma lead aberta e viva mais recente que a encerrada manda: a pessoa não está encerrada", () => {

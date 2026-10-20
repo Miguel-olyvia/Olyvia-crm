@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { lotesDeIds } from "./lotesDeIds";
 import { useFontePessoas } from "./useFontePessoas";
+import { useUltimoConhecidoPorId } from "./useUltimoConhecidoPorId";
 
 const STALE_TIME_MS = 5 * 60_000;
 const MAX_REPETICOES = 1;
@@ -46,7 +47,7 @@ export function useNomesResponsaveis(ids: readonly (string | null)[], ativo: boo
   const fonte = useFontePessoas();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const lotes = useMemo(() => lotesDeIds(ids), [ids]);
-  return useQueries({
+  const atuais = useQueries({
     queries: lotes.map((lote) => ({
       queryKey: ["pessoas-responsaveis", organizationId, [...lote].sort()] as const,
       queryFn: () => lerLote(lote),
@@ -56,4 +57,5 @@ export function useNomesResponsaveis(ids: readonly (string | null)[], ativo: boo
     })),
     combine: juntar,
   });
+  return useUltimoConhecidoPorId(atuais, organizationId);
 }

@@ -28,8 +28,11 @@ const CODIGOS_QUE_FECHAM_A_FICHA = ["NG003", "NG008"];
 export interface OpcoesMutacoes {
   /** Só para os testes: sobrepõe a bandeira da M6. */
   comDocumentos?: boolean;
-  /** NG003 e NG008: a ficha já não pode ficar aberta. Recebe a chave de tradução do erro (quem monta avisa e volta à Lista). */
-  aoIndisponivel?: (chave: string) => void;
+  /**
+   * NG003 e NG008: a ficha já não pode ficar aberta. Recebe a chave de tradução do erro e a pessoa a que a mutação pertence (quem monta avisa
+   * e só volta à Lista se essa pessoa ainda for a aberta: o erro pode chegar depois de se passar a outra).
+   */
+  aoIndisponivel?: (chave: string, pessoaId: string) => void;
 }
 
 /**
@@ -52,7 +55,7 @@ export function useMutacoesNegocio(pessoaId: string, ficha: FichaDb | null, opco
   const [emVoo] = useState(() => new Map<string, Promise<unknown>>());
   return useMemo(
     () => criarMutacoes({
-      organizationId, pessoaId, client, emVoo, comDocumentos, ficha: () => fichaRef.current, indisponivel: (chave) => indisponivelRef.current?.(chave),
+      organizationId, pessoaId, client, emVoo, comDocumentos, ficha: () => fichaRef.current, indisponivel: (chave, pessoa) => indisponivelRef.current?.(chave, pessoa),
     }),
     [organizationId, pessoaId, client, emVoo, comDocumentos],
   );
@@ -65,7 +68,7 @@ interface Contexto {
   emVoo: Map<string, Promise<unknown>>;
   comDocumentos: boolean;
   ficha: () => FichaDb | null;
-  indisponivel: (chave: string) => void;
+  indisponivel: (chave: string, pessoaId: string) => void;
 }
 
 const ehDocumento = (ref: RefRegistoBase): boolean => TIPOS_DOCUMENTO.includes(ref.tipo);
@@ -92,7 +95,7 @@ function criarMutacoes(c: Contexto): MutacoesNegocio {
         return ler(resposta);
       } catch (erro) {
         if (erro instanceof ErroNeg && erro.codigo && CODIGOS_QUE_REFRESCAM.includes(erro.codigo)) invalidar();
-        if (erro instanceof ErroNeg && erro.codigo && CODIGOS_QUE_FECHAM_A_FICHA.includes(erro.codigo)) c.indisponivel(erro.chave);
+        if (erro instanceof ErroNeg && erro.codigo && CODIGOS_QUE_FECHAM_A_FICHA.includes(erro.codigo)) c.indisponivel(erro.chave, c.pessoaId);
         throw erro;
       }
     })().finally(() => { c.emVoo.delete(chave); });

@@ -72,12 +72,15 @@ export type ResultadoEncerramento = "semInteresse" | "obraInviavel";
 /** Os motivos de encerramento: a lista fixa de `MotivoPerda` mais "outro" (texto livre em `motivoOutro`). */
 export type MotivoEncerramento = MotivoPerda | "outro";
 
-/** A abordagem encerrada: o resultado, o motivo (e o texto, quando o motivo é "outro") e o dia (AAAA-MM-DD). Não se cria negócio. */
+/**
+ * A abordagem encerrada: o resultado, o motivo (e o texto, quando o motivo é "outro") e o dia (AAAA-MM-DD). Não se cria negócio.
+ * O motivo e o dia são opcionais: a lista só sabe o resultado (`closure_result`) de uma lead encerrada que não é a da ficha, e não se inventam.
+ */
 export interface EncerramentoPessoa {
   resultado: ResultadoEncerramento;
-  motivo: MotivoEncerramento;
+  motivo?: MotivoEncerramento;
   motivoOutro?: string;
-  data: string;
+  data?: string;
 }
 
 export type QualificacaoPessoa = "MQL" | "SQL";

@@ -113,4 +113,11 @@ describe("reativarAbordagem", () => {
     const e = encerrarAbordagem(estado(), alvo.id, dados({ motivo: "outro", motivoOutro: "Sem orçamento" }));
     expect(reativarAbordagem(e, alvo.id, HOJE).atividade[0]).toMatchObject({ detalhe: "Sem orçamento" });
   });
+
+  it("reativar uma encerrada da base, que só tem o resultado (sem motivo nem dia), não inventa um motivo na atividade", () => {
+    const daBase: Pessoa = { ...alvo, encerrada: { resultado: "semInteresse" } };
+    const item = reativarAbordagem(estado([daBase]), alvo.id, HOJE).atividade[0];
+    expect(item).toMatchObject({ chaveTitulo: "pessoasPagina.close.activity.reopened", detalhe: "" });
+    expect(item.chaveDetalhe).toBeUndefined();
+  });
 });

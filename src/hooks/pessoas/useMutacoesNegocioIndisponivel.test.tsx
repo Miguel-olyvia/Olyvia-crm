@@ -32,7 +32,23 @@ describe("erros que tornam a ficha indisponível", () => {
     await act(async () => { await perder(m).catch(() => undefined); });
     expect(invalidadas(m.client)).toEqual([false, false]);
     expect(aoIndisponivel).toHaveBeenCalledTimes(1);
-    expect(aoIndisponivel).toHaveBeenCalledWith(`pessoasPagina.erroNeg.${chave}`);
+    // ALTERADO: o aviso passa a dizer também a que pessoa pertence a mutação, para quem monta só fechar a ficha dessa pessoa.
+    expect(aoIndisponivel).toHaveBeenCalledWith(`pessoasPagina.erroNeg.${chave}`, PESSOA_ID);
+  });
+
+  it("o aviso leva a pessoa da mutação, mesmo que o ecrã já tenha passado a outra pessoa quando o erro chega", async () => {
+    let terminar: (resposta: unknown) => void = () => undefined;
+    rpcMock.mockReturnValue(new Promise((resolver) => { terminar = resolver; }));
+    const aoIndisponivel = vi.fn();
+    const outra = "33333333-3333-4333-8333-333333333333";
+    const client = criarCliente();
+    const r = montarHook(({ pessoa }: { pessoa: string }) => useMutacoesNegocio(pessoa, null, { aoIndisponivel }), { pessoa: PESSOA_ID }, { client, fonte: fonteReal() });
+    let pedido: Promise<unknown> = Promise.resolve();
+    act(() => { pedido = r.result.current.perder({ negocioId: NEG, fase: "orcamento", motivo: "Preço" }).catch(() => undefined); });
+    r.rerender({ pessoa: outra });
+    await act(async () => { terminar(respostaErro("NG003")); await pedido; });
+    expect(aoIndisponivel).toHaveBeenCalledTimes(1);
+    expect(aoIndisponivel).toHaveBeenCalledWith("pessoasPagina.erroNeg.ng003", PESSOA_ID);
   });
 
   it("os outros erros não fecham a ficha", async () => {

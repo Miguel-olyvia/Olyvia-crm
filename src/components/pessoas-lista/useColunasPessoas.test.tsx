@@ -57,6 +57,33 @@ describe("useColunasPessoas", () => {
     expect(result.current.visiveis).not.toContain("email");
     expect(window.localStorage.length).toBe(0);
   });
+  // Dois eventos antes do re-render (um duplo clique, ou teclas em rajada) partem ambos do estado MAIS RECENTE: o segundo não desfaz o primeiro.
+  it("duas alterações seguidas antes do re-render ficam as duas, no estado e no que se guardou", () => {
+    const { result } = renderHook(() => useColunasPessoas("org-1"));
+    act(() => {
+      result.current.alternar("phone");
+      result.current.alternar("email");
+    });
+    expect(result.current.visiveis).not.toContain("phone");
+    expect(result.current.visiveis).not.toContain("email");
+    const guardadas = JSON.parse(window.localStorage.getItem(chaveColunas("org-1")) ?? "null").colunas as { id: string; visivel: boolean }[];
+    expect(guardadas.filter((c) => !c.visivel).map((c) => c.id).sort()).toEqual(["email", "phone"]);
+  });
+  it("mover duas vezes seguidas move duas posições, e mover e arrastar seguidos somam-se", () => {
+    const { result } = renderHook(() => useColunasPessoas("org-1"));
+    const antes = result.current.visiveis.indexOf("value");
+    act(() => {
+      result.current.mover("value", -1);
+      result.current.mover("value", -1);
+    });
+    expect(result.current.visiveis.indexOf("value")).toBe(antes - 2);
+    act(() => {
+      result.current.alternar("deals");
+      result.current.moverPara("value", 1);
+    });
+    expect(result.current.visiveis[1]).toBe("value");
+    expect(result.current.visiveis).not.toContain("deals");
+  });
   it("«Pessoa» nunca se esconde, mesmo se alguém o pedir", () => {
     const { result } = renderHook(() => useColunasPessoas("org-1"));
     act(() => result.current.alternar("person"));

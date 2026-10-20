@@ -78,14 +78,33 @@ describe("DialogoColunasPessoas: ordenar com o teclado", () => {
     fireEvent.click(desce);
     expect(aoMover.mock.calls).toEqual([["value", -1], ["value", 1]]);
   });
-  it("a primeira depois de «Pessoa» não sobe e a última não desce", () => {
-    desenhar();
+  // ALTERADO: antes esperava `disabled` (toBeDisabled). Um botão `disabled` sai da ordem do teclado e o foco perdia-se ao chegar ao extremo;
+  // passa a `aria-disabled` com a guarda no clique, e continua a ser focável.
+  it("a primeira depois de «Pessoa» não sobe e a última não desce: aria-disabled (focável), com pista visual, e o clique não faz nada", () => {
+    const { aoMover } = desenhar();
     abrir();
     const e = escolhaPorOmissao();
-    expect(screen.getByRole("button", { name: "Subir Etapa" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Descer WhatsApp" })).toBeDisabled();
+    const sobe = screen.getByRole("button", { name: "Subir Etapa" });
+    const desce = screen.getByRole("button", { name: "Descer WhatsApp" });
+    for (const botao of [sobe, desce]) {
+      expect(botao).toHaveAttribute("aria-disabled", "true");
+      expect(botao).not.toBeDisabled();
+      expect(botao.className).toContain("aria-disabled:opacity-60");
+    }
+    sobe.focus();
+    expect(sobe).toHaveFocus();
+    fireEvent.click(sobe);
+    fireEvent.click(desce);
+    expect(aoMover).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
     expect(e[1].id).toBe("stage");
     expect(e[e.length - 1].id).toBe("whatsapp");
+  });
+  it("os botões que podem mover-se não levam aria-disabled", () => {
+    desenhar();
+    abrir();
+    expect(screen.getByRole("button", { name: "Subir Valor" })).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByRole("button", { name: "Descer Valor" })).not.toHaveAttribute("aria-disabled");
   });
   it("depois de mover, uma região live diz a nova posição (quem não vê o ecrã sabe onde ficou)", () => {
     desenhar();
@@ -135,5 +154,38 @@ describe("DialogoColunasPessoas: repor", () => {
     expect(botao.className).toContain("min-h-11");
     fireEvent.click(botao);
     expect(aoRepor).toHaveBeenCalledTimes(1);
+  });
+  it("«Repor padrão» anuncia que as colunas voltaram ao padrão", () => {
+    desenhar();
+    abrir();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    fireEvent.click(screen.getByRole("button", { name: "Repor padrão" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Colunas repostas ao padrão.");
+  });
+  it("o anúncio limpa-se ao fechar o diálogo (não volta a aparecer ao reabrir)", () => {
+    desenhar();
+    abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Repor padrão" }));
+    fireEvent.click(screen.getByRole("button", { name: "Descer Valor" }));
+    expect(screen.getByRole("status")).not.toHaveTextContent("");
+    fireEvent.click(screen.getByRole("button", { name: "Fechar" }));
+    abrir();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+});
+
+describe("DialogoColunasPessoas: acessibilidade do diálogo", () => {
+  it("só há um botão de fechar (o «Fechar» traduzido): o X em inglês do componente base não aparece", () => {
+    desenhar();
+    abrir();
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^(Fechar|Close)$/ })).toHaveLength(1);
+  });
+  it("a caixa de «Pessoa» liga «Sempre visível» por aria-describedby, para o leitor de ecrã dizer porque está desativada", () => {
+    desenhar();
+    abrir();
+    const pessoa = screen.getByRole("checkbox", { name: "Pessoa" });
+    expect(pessoa).toHaveAccessibleDescription("Sempre visível");
+    expect(screen.getByRole("checkbox", { name: "Etapa" })).not.toHaveAttribute("aria-describedby");
   });
 });

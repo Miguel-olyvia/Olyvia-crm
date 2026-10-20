@@ -39,8 +39,10 @@ const valido = (d: DadosEncerramento): boolean =>
   RESULTADOS_ENCERRAMENTO.includes(d.resultado) && MOTIVOS_ENCERRAMENTO.includes(d.motivo) && textoDoMotivo(d) !== undefined;
 
 /** O detalhe da linha da atividade: o texto livre, ou a chave do motivo da lista. */
-const detalheDaAtividade = (motivo: MotivoEncerramento, outro: string | undefined): Pick<ItemAtividade, "detalhe" | "chaveDetalhe"> =>
-  motivo === "outro" ? { detalhe: outro ?? "", chaveDetalhe: undefined } : { detalhe: "", chaveDetalhe: `pessoasPagina.lost.${motivo}` };
+const detalheDaAtividade = (motivo: MotivoEncerramento | undefined, outro: string | undefined): Pick<ItemAtividade, "detalhe" | "chaveDetalhe"> => {
+  if (motivo === undefined) return { detalhe: "", chaveDetalhe: undefined };
+  return motivo === "outro" ? { detalhe: outro ?? "", chaveDetalhe: undefined } : { detalhe: "", chaveDetalhe: `pessoasPagina.lost.${motivo}` };
+};
 
 const novoId = (e: Estado, tipo: string): string => `novo-${tipo}-${e.atividade.length + 1}`;
 const mudar = (pessoas: Pessoa[], id: string, f: (p: Pessoa) => Pessoa): Pessoa[] => pessoas.map((p) => (p.id === id ? f(p) : p));

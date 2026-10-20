@@ -95,6 +95,7 @@ function documentosPorLigar(ficha: FichaDb): DocumentoPorLigar[] {
 function leadsAbertas(ficha: FichaDb): LeadAbertaCostura[] {
   return (ficha.leads_abertas ?? []).map((l) => ({
     id: l.id, criadaEm: diaLisboa(l.created_at) ?? "", encerrada: textoOuNull(l.closure_result) !== null,
+    ...(l.created_at ? { instante: l.created_at } : {}),
   }));
 }
 

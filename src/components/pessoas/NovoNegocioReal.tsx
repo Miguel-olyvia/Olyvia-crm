@@ -1,7 +1,7 @@
 // O painel «Novo negócio» da ficha real: a mesma casca do exemplo (`NovoNegocioDialogo`: painel lateral, foco, clique fora que não perde o que
 // se escreveu) com o corpo real (`FormularioNovoNegocioReal`). Sem as mutações nem os dados da ficha real (o exemplo), ou sem permissão para
 // criar, não desenha nada. Em sucesso fecha, avisa (toast e anúncio da ficha), diz os registos que ficaram por ligar e abre o negócio novo.
-import { useRef } from "react";
+import { useState } from "react";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAnunciar } from "@/components/ficha-comum/anuncioFicha";
@@ -35,7 +35,8 @@ export function NovoNegocioReal({ pessoaId, pessoaNome, aberto, aoMudarAberto, a
   const dados = useDadosNegocio();
   const avisar = useAvisarNegocio();
   const anunciar = useAnunciar();
-  const ocupado = useRef(false);
+  // Estado (e não ref): o X do cabeçalho tem de se redesenhar a dizer que está ocupado enquanto a gravação corre.
+  const [aGuardar, setAGuardar] = useState(false);
   if (!mutacoes || !dados || !dados.podeCriar) return null;
 
   const criado = (resultado: ResultadoCriar, titulo: string, aoCriou: () => void): void => {
@@ -55,12 +56,12 @@ export function NovoNegocioReal({ pessoaId, pessoaNome, aberto, aoMudarAberto, a
 
   return (
     <NovoNegocioDialogo
-      pessoas={SEM_PESSOAS} semBotao aberto={aberto} aoMudarAberto={(a) => { if (a || !ocupado.current) aoMudarAberto(a); }}
-      titulo={t("businessGoals.new.title")} descricao={t(`${C}description`, { name: pessoaNome })} selo={null}
+      pessoas={SEM_PESSOAS} semBotao aberto={aberto} aoMudarAberto={(a) => { if (a || !aGuardar) aoMudarAberto(a); }}
+      aGuardar={aGuardar} titulo={t("businessGoals.new.title")} descricao={t(`${C}description`, { name: pessoaNome })} selo={null}
       aoDevolverFoco={(criou) => (criou ? true : focarMais())}
       corpo={({ aoSujar, aoCriou }) => (
         <FormularioNovoNegocioReal
-          pessoaId={pessoaId} pessoaNome={pessoaNome} mutacoes={mutacoes} dados={dados} ocupado={ocupado} aoSujar={aoSujar}
+          pessoaId={pessoaId} pessoaNome={pessoaNome} mutacoes={mutacoes} dados={dados} aoMudarOcupado={setAGuardar} aoSujar={aoSujar}
           aoCriado={(resultado, titulo) => criado(resultado, titulo, aoCriou)}
           aoFechar={() => aoMudarAberto(false)}
         />

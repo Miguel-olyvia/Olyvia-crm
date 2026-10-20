@@ -14,9 +14,9 @@ import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
-const { atual } = vi.hoisted(() => ({ atual: { mutacoes: null as unknown, opcoes: undefined as undefined | { aoIndisponivel?: (chave: string) => void } } }));
+const { atual } = vi.hoisted(() => ({ atual: { mutacoes: null as unknown, opcoes: undefined as undefined | { aoIndisponivel?: (chave: string, pessoaId: string) => void } } }));
 vi.mock("@/hooks/pessoas/useMutacoesNegocio", () => ({
-  useMutacoesNegocio: (_pessoa: string, _ficha: unknown, opcoes?: { aoIndisponivel?: (chave: string) => void }) => { atual.opcoes = opcoes; return atual.mutacoes; },
+  useMutacoesNegocio: (_pessoa: string, _ficha: unknown, opcoes?: { aoIndisponivel?: (chave: string, pessoaId: string) => void }) => { atual.opcoes = opcoes; return atual.mutacoes; },
 }));
 const { sucesso, info, erro } = vi.hoisted(() => ({ sucesso: vi.fn(), info: vi.fn(), erro: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast: { info, error: erro, success: sucesso } }));
@@ -131,9 +131,26 @@ describe("NegociosDaFichaReal: a pessoa ou a funcionalidade já não estão disp
   it("o erro das mutações fecha a ficha (volta à Lista) e diz porquê, por toast e pela região viva", () => {
     const aoFecharFicha = vi.fn();
     montar(mutacoesFalsas(), { ficha: FICHA_A, aberta: A, aoFecharFicha });
-    act(() => atual.opcoes?.aoIndisponivel?.("pessoasPagina.erroNeg.ng003"));
+    // ALTERADO: o aviso passa a levar a pessoa da mutação (A); antes só levava a chave.
+    act(() => atual.opcoes?.aoIndisponivel?.("pessoasPagina.erroNeg.ng003", A));
     expect(aoFecharFicha).toHaveBeenCalledTimes(1);
     expect(erro).toHaveBeenCalledWith("Esta pessoa já não está disponível.");
     expect(regioesVivas().join(" | ")).toContain("Esta pessoa já não está disponível.");
+  });
+
+  it.each(["pessoasPagina.erroNeg.ng003", "pessoasPagina.erroNeg.ng008"])("%s de uma mutação da pessoa A que acaba depois de abrir a B não fecha a ficha da B", (chave) => {
+    const aoFecharFicha = vi.fn();
+    const r = montar(mutacoesFalsas(), { ficha: FICHA_A, aberta: A, aoFecharFicha });
+    r.rerender(<Montar ficha={FICHA_B} aberta={B} aoFecharFicha={aoFecharFicha} />);
+    act(() => atual.opcoes?.aoIndisponivel?.(chave, A));
+    expect(aoFecharFicha).not.toHaveBeenCalled();
+  });
+
+  it("o erro da pessoa que continua aberta (mesmo depois de outros ecrãs) fecha a ficha", () => {
+    const aoFecharFicha = vi.fn();
+    const r = montar(mutacoesFalsas(), { ficha: FICHA_A, aberta: A, aoFecharFicha });
+    r.rerender(<Montar ficha={FICHA_B} aberta={B} aoFecharFicha={aoFecharFicha} />);
+    act(() => atual.opcoes?.aoIndisponivel?.("pessoasPagina.erroNeg.ng008", B));
+    expect(aoFecharFicha).toHaveBeenCalledTimes(1);
   });
 });

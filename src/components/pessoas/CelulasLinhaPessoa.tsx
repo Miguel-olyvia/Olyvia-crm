@@ -35,7 +35,9 @@ export function SemDado() {
 export function TextoOuTravessao({ valor, vazio, quebra }: { valor: string | null | undefined; vazio: string; quebra?: boolean }) {
   if (valor === undefined) return <SemDado />;
   if (valor === null || valor.trim() === "") return <SemTexto rotulo={vazio} />;
-  return <span className={cn("line-clamp-2", quebra && "break-all")}>{valor}</span>;
+  // Com `quebra` (o email) o texto quebra por inteiro: cortá-lo em duas linhas escondia o fim sem forma de o ler. Nos outros, o corte em duas
+  // linhas fica e o valor completo vai em `title`.
+  return <span title={valor} className={quebra ? "break-all" : "line-clamp-2"}>{valor}</span>;
 }
 
 /** «Lead · Empresa · MQL · Atrasada · exemplo», com «Voltou a contactar», «Perdida» e «Encerrada» à parte. Uma cliente leva o papel no selo do nome. */

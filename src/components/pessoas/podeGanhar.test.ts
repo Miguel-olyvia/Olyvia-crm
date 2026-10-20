@@ -47,6 +47,27 @@ describe("podeGanhar: o prontoAGanhar da base manda", () => {
   it("não pronto: não pode, mesmo que a regra local dissesse que sim, e o motivo é o da regra da organização", () => {
     expect(podeGanhar(aberto({ prontoAGanhar: false, proposta: { estado: "aceite" } }), "proposta_aceite")).toEqual({ pode: false, motivo: "semProposta" });
     expect(podeGanhar(aberto({ prontoAGanhar: false, contrato: { estado: "assinado" } }), "contrato_assinado")).toEqual({ pode: false, motivo: "semContrato" });
-    expect(podeGanhar(aberto({ prontoAGanhar: false }), "manual")).toEqual({ pode: false, motivo: "semRegra" });
+    expect(podeGanhar(aberto({ prontoAGanhar: false }), "contrato_assinado")).toEqual({ pode: false, motivo: "semContrato" });
+    expect(podeGanhar(aberto({ prontoAGanhar: false }), null)).toEqual({ pode: false, motivo: "semRegra" });
+  });
+});
+
+// A regra manual: a base (neg_ganhar_negocio) aceita o ganho sem condição, mas neg_ficha_pessoa devolve pronto_a_ganhar = false para ela
+// (ELSE false); por isso o prontoAGanhar da base não pode vetar a regra manual.
+describe("podeGanhar: regra manual", () => {
+  it("manual: pode ganhar mesmo com o prontoAGanhar da base a falso (ou ausente)", () => {
+    expect(podeGanhar(aberto({ prontoAGanhar: false }), "manual")).toEqual({ pode: true, motivo: null });
+    expect(podeGanhar(aberto({ prontoAGanhar: undefined }), "manual")).toEqual({ pode: true, motivo: null });
+  });
+
+  it("manual: um negócio que não está aberto continua a não se ganhar", () => {
+    expect(podeGanhar(negocioBase("n1", { estadoReal: "ganho", prontoAGanhar: false }), "manual")).toEqual({ pode: false, motivo: "naoAberto" });
+  });
+
+  it("proposta_aceite e contrato_assinado continuam a mandar a base: falso veta, verdadeiro oferece", () => {
+    expect(podeGanhar(aberto({ prontoAGanhar: false, proposta: { estado: "aceite" } }), "proposta_aceite").pode).toBe(false);
+    expect(podeGanhar(aberto({ prontoAGanhar: true }), "proposta_aceite").pode).toBe(true);
+    expect(podeGanhar(aberto({ prontoAGanhar: false, contrato: { estado: "assinado" } }), "contrato_assinado").pode).toBe(false);
+    expect(podeGanhar(aberto({ prontoAGanhar: true }), "contrato_assinado").pode).toBe(true);
   });
 });

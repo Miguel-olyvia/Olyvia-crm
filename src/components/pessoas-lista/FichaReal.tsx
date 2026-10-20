@@ -13,6 +13,7 @@ import { TIPOS_SECCAO, type FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useAcoesFichaReal } from "@/hooks/pessoas/useAcoesFichaReal";
 import { useFichaPessoa } from "@/hooks/pessoas/useFichaPessoa";
+import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
 import type { ItemAtividade, NotaPessoa, Pessoa, Submissao } from "@/components/pessoas/pessoasTipos";
@@ -52,11 +53,13 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   if (pessoaId !== null && lida.ficha && lida.ficha.pessoa.id === pessoaId) ultima.current = lida.ficha;
   // Com uma pessoa aberta, só a SUA ficha; sem ninguém aberto (a fechar), a última, para o painel não deslizar vazio.
   const mostrada: FichaDb | null = pessoaId === null ? ultima.current : (lida.ficha?.pessoa.id === pessoaId ? lida.ficha : null);
+  const fonte = useFontePessoas();
+  const momentoGanho = fonte.modo === "real" ? fonte.momentoGanho : null;
   const adaptada = useMemo(() => {
     if (!mostrada) return null;
     const hoje = hojeLisboa();
-    return { ...adaptarFicha(mostrada, hoje), hoje };
-  }, [mostrada]);
+    return { ...adaptarFicha(mostrada, hoje, momentoGanho), hoje };
+  }, [mostrada, momentoGanho]);
   const acoes = useAcoesFichaReal(mostrada?.pessoa.id ?? "", mostrada);
 
   // Uma falha ao abrir (pessoa que já não existe, identificador inválido, erro da base): um toast com a chave do erro e o ?open= limpo.

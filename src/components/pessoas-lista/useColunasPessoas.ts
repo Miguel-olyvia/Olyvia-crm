@@ -17,14 +17,20 @@ export function useColunasPessoas(organizationId: string | null) {
   }
   const { escolha } = atual;
 
-  const aplicar = useCallback((nova: EscolhaColuna[]) => {
-    guardarColunas(organizationId, nova);
-    setEstado({ org: organizationId, escolha: nova });
+  // Atualização funcional: parte sempre da escolha MAIS RECENTE, e não da do último render. Dois eventos antes do re-render (um duplo clique,
+  // teclas em rajada) somam-se em vez de o segundo desfazer o primeiro. Guardar é idempotente (escreve o mesmo valor se o React repetir a função).
+  const aplicar = useCallback((mudar: (escolha: readonly EscolhaColuna[]) => EscolhaColuna[]) => {
+    setEstado((antes) => {
+      const base = antes.org === organizationId ? antes.escolha : lerColunas(organizationId);
+      const nova = mudar(base);
+      guardarColunas(organizationId, nova);
+      return { org: organizationId, escolha: nova };
+    });
   }, [organizationId]);
 
-  const alternar = useCallback((id: IdColuna) => aplicar(alternarColuna(escolha, id)), [aplicar, escolha]);
-  const mover = useCallback((id: IdColuna, delta: number) => aplicar(moverColuna(escolha, id, delta)), [aplicar, escolha]);
-  const moverPara = useCallback((id: IdColuna, indice: number) => aplicar(moverParaIndice(escolha, id, indice)), [aplicar, escolha]);
+  const alternar = useCallback((id: IdColuna) => aplicar((e) => alternarColuna(e, id)), [aplicar]);
+  const mover = useCallback((id: IdColuna, delta: number) => aplicar((e) => moverColuna(e, id, delta)), [aplicar]);
+  const moverPara = useCallback((id: IdColuna, indice: number) => aplicar((e) => moverParaIndice(e, id, indice)), [aplicar]);
   const repor = useCallback(() => setEstado({ org: organizationId, escolha: reporColunas(organizationId) }), [organizationId]);
   const visiveis = useMemo(() => colunasVisiveis(escolha), [escolha]);
 

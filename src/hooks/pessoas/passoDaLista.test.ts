@@ -32,9 +32,11 @@ describe("passoDaLista: com negócio aberto", () => {
 });
 
 describe("passoDaLista: sem negócios abertos", () => {
-  it("só com negócios terminados e nada por ligar: nenhum", () => {
-    expect(passoDaLista(com({ ganhos: 2 }))).toBe("nenhum");
-    expect(passoDaLista(com({ perdidos: 1 }))).toBe("nenhum");
+  // ALTERADO: antes dizia «nenhum» (definitivo). Mas a ficha pode dar um passo a quem só tem negócios terminados (voltouAAbordagem: uma
+  // submissão resolvida depois do último negócio) e a lista não tem essa fonte (coluna voltou_a_contactar): não se sabe, e não se afirma.
+  it("só com negócios terminados e nada por ligar: não se sabe (a ficha pode dar um passo), nunca «nenhum»", () => {
+    expect(passoDaLista(com({ ganhos: 2 }))).toBeNull();
+    expect(passoDaLista(com({ perdidos: 1 }))).toBeNull();
   });
   it("sem negócios de todo e sem registos: registar a chamada", () => {
     expect(passoDaLista(base)).toBe("registarChamada");
@@ -55,12 +57,26 @@ describe("passoDaLista: sem negócios abertos", () => {
   it("aproximação: com negócios terminados, a visita feita só conta se for posterior ao último negócio", () => {
     const terminado = { perdidos: 1, ultimoNegocioEm: "2026-09-01T09:00:00Z" };
     expect(passoDaLista(com({ ...terminado, ultimaVisitaFeitaEm: "2026-10-01T09:00:00Z" }))).toBe("criarNegocio");
-    expect(passoDaLista(com({ ...terminado, ultimaVisitaFeitaEm: "2026-08-01T09:00:00Z" }))).toBe("nenhum");
+    // ALTERADO: «nenhum» passa a null pela mesma razão do primeiro teste deste bloco.
+    expect(passoDaLista(com({ ...terminado, ultimaVisitaFeitaEm: "2026-08-01T09:00:00Z" }))).toBeNull();
+  });
+  // Como o protótipo (`registosParaAbordagem`): conta o DIA de Lisboa, estritamente depois do dia do último negócio; não o instante.
+  it("aproximação: uma visita feita no mesmo dia do último negócio, mesmo mais tarde, não conta (compara o dia, não o instante)", () => {
+    const terminado = { perdidos: 1, ultimoNegocioEm: "2026-10-01T08:00:00Z" };
+    expect(passoDaLista(com({ ...terminado, ultimaVisitaFeitaEm: "2026-10-01T18:00:00Z" }))).toBeNull();
+    expect(passoDaLista(com({ ...terminado, ultimaVisitaFeitaEm: "2026-10-02T08:00:00Z" }))).toBe("criarNegocio");
+  });
+  it("aproximação: o dia é o de Lisboa (23h30 UTC já é o dia seguinte em Lisboa no verão)", () => {
+    // Negócio criado às 00h30 de 2 de outubro em Lisboa; a visita, às 11h de 2 de outubro em Lisboa: mesmo dia, não conta.
+    expect(passoDaLista(com({ perdidos: 1, ultimoNegocioEm: "2026-10-01T23:30:00Z", ultimaVisitaFeitaEm: "2026-10-02T10:00:00Z" }))).toBeNull();
+    // Negócio ao fim do dia 1 em Lisboa (22h), visita 00h30 do dia 2 em Lisboa: dia seguinte, conta.
+    expect(passoDaLista(com({ perdidos: 1, ultimoNegocioEm: "2026-10-01T21:00:00Z", ultimaVisitaFeitaEm: "2026-10-01T23:30:00Z" }))).toBe("criarNegocio");
   });
   it("aproximação: com negócios terminados e sem data do último negócio, uma visita feita conta", () => {
     expect(passoDaLista(com({ ganhos: 1, ultimaVisitaFeitaEm: "2026-08-01T09:00:00Z" }))).toBe("criarNegocio");
   });
   it("datas que não são datas não rebentam e não contam como visita feita posterior", () => {
-    expect(passoDaLista(com({ perdidos: 1, ultimoNegocioEm: "lixo", ultimaVisitaFeitaEm: "lixo" }))).toBe("nenhum");
+    // ALTERADO: «nenhum» passa a null (sem visita feita válida, só negócios terminados: não se sabe).
+    expect(passoDaLista(com({ perdidos: 1, ultimoNegocioEm: "lixo", ultimaVisitaFeitaEm: "lixo" }))).toBeNull();
   });
 });

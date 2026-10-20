@@ -49,6 +49,37 @@ describe("useEnvioAssincrono: o que corre depois de gravar lança", () => {
   });
 });
 
+describe("useEnvioAssincrono: a gravação lança de forma síncrona", () => {
+  it("conta como falha: não fica a guardar nem ocupado, dá o erro genérico e avisa quem monta", () => {
+    const aoFalhar = vi.fn();
+    const { result } = renderHook(() => useEnvioAssincrono(aoFalhar));
+    const aoOk = vi.fn();
+    act(() => result.current.enviar(() => { throw new Error("rebentou antes de devolver a promessa"); }, aoOk));
+    expect(result.current.aGuardar).toBe(false);
+    expect(result.current.erro).toBe(CHAVE_ERRO_ENVIO_GENERICO);
+    expect(aoFalhar).toHaveBeenCalledWith(CHAVE_ERRO_ENVIO_GENERICO);
+    expect(aoOk).not.toHaveBeenCalled();
+  });
+
+  it("depois dela pode-se tentar de novo (o estado ocupado não ficou preso)", async () => {
+    const { result } = renderHook(() => useEnvioAssincrono());
+    act(() => result.current.enviar(() => { throw new Error("x"); }, vi.fn()));
+    const aoOk = vi.fn();
+    act(() => result.current.enviar(async () => undefined, aoOk));
+    await esperarMicrotarefas();
+    expect(aoOk).toHaveBeenCalledTimes(1);
+    expect(result.current.erro).toBeNull();
+    expect(result.current.aGuardar).toBe(false);
+  });
+
+  it("não deixa rejeição por tratar", async () => {
+    const { result } = renderHook(() => useEnvioAssincrono());
+    act(() => result.current.enviar(() => { throw new Error("x"); }, vi.fn()));
+    await esperarMicrotarefas();
+    expect(rejeicoes).toEqual([]);
+  });
+});
+
 describe("useLigacoes: o que corre depois de ligar ou desligar lança", () => {
   it("apanha-o: a linha deixa de estar ocupada, o erro genérico fica visível e não há rejeição por tratar", async () => {
     const { result } = renderHook(() => useLigacoes());

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FormularioNovoNegocio } from "./FormularioNovoNegocio";
 import { FormularioRegistos } from "./FormularioRegistos";
-import { FOCO } from "./estilos";
+import { FOCO, PISTA_DESATIVADO } from "./estilos";
 import { HOJE_EXEMPLO } from "./negocioMetasExemplo";
 import type { VisitaNegocio } from "./negocioMetas";
 import type { AbaNovoNegocio, DadosCriarNegocio, PessoaOpcao, RascunhoLevantamento, ValoresIniciaisNegocio } from "./novoNegocio";
@@ -53,6 +53,8 @@ interface NovoNegocioDialogoProps {
   descricao?: string;
   /** O selo do cabeçalho (por omissão «Novo · por gravar», que é do exemplo); `null` tira-o (a ficha real grava mesmo). */
   selo?: string | null;
+  /** Há uma gravação em curso: o X do cabeçalho fica aria-disabled e não fecha (quem monta também ignora o pedido de fechar). */
+  aGuardar?: boolean;
   /**
    * O corpo do painel, no lugar dos formulários do exemplo (a ficha real monta o seu). Recebe `aoCriou` (o painel vai fechar por ter criado o negócio: o foco não volta ao botão que o abriu) e `aoSujar`, que avisa que há alterações por
    * gravar (um clique fora deixa de fechar). O campo com `data-foco-inicial` recebe o foco ao abrir.
@@ -67,7 +69,7 @@ interface NovoNegocioDialogoProps {
 }
 
 /** O cabeçalho do painel: migalhas "Negócio e metas › Novo negócio", título, selo "Novo · por gravar" e Fechar. */
-function CabecalhoNovo({ titulo, descricao, selo }: Pick<NovoNegocioDialogoProps, "titulo" | "descricao" | "selo">) {
+function CabecalhoNovo({ titulo, descricao, selo, aGuardar }: Pick<NovoNegocioDialogoProps, "titulo" | "descricao" | "selo" | "aGuardar">) {
   const { t } = useTranslation();
   return (
     <SheetHeader className="space-y-2 border-b border-border p-6 text-left">
@@ -80,7 +82,12 @@ function CabecalhoNovo({ titulo, descricao, selo }: Pick<NovoNegocioDialogoProps
           </ol>
         </nav>
         <SheetClose asChild>
-          <Button type="button" variant="ghost" size="icon" aria-label={t("businessGoals.new.close")} className={cn("-mr-2 -mt-2 h-11 w-11", FOCO)}>
+          <Button
+            type="button" variant="ghost" size="icon" aria-label={t("businessGoals.new.close")} aria-disabled={aGuardar || undefined}
+            // A guardar não se fecha (quem monta ignora o pedido): o X diz que está ocupado, sem sair da ordem do teclado.
+            onClick={(e) => { if (aGuardar) e.preventDefault(); }}
+            className={cn("-mr-2 -mt-2 h-11 w-11", FOCO, PISTA_DESATIVADO)}
+          >
             <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </SheetClose>
@@ -108,7 +115,7 @@ function CabecalhoNovo({ titulo, descricao, selo }: Pick<NovoNegocioDialogoProps
  */
 export function NovoNegocioDialogo({
   pessoas, modo = "negocio", aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial,
-  guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo,
+  guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo, aGuardar,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -173,7 +180,7 @@ export function NovoNegocioDialogo({
           onCloseAutoFocus={devolverFoco}
           className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
         >
-          <CabecalhoNovo titulo={titulo} descricao={descricao} selo={selo} />
+          <CabecalhoNovo titulo={titulo} descricao={descricao} selo={selo} aGuardar={aGuardar} />
           {corpo ? corpo({ aoSujar: () => { sujo.current = true; }, aoCriou: () => { criou.current = true; } }) : modo === "registos" && guardar ? (
             <FormularioRegistos
               pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}

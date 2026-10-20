@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { FOCO } from "@/components/negocio-metas/estilos";
+import { FOCO, PISTA_DESATIVADO } from "@/components/negocio-metas/estilos";
 import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 import type { EscolhaColuna } from "./colunasPessoas";
 
 const R = "pessoasPagina.real.";
-const BOTAO_ICONE = cn("h-11 min-h-11 w-11 min-w-11", FOCO);
+// Nos extremos o botão fica aria-disabled (e não `disabled`): continua focável, e o clique é ignorado pela guarda.
+const BOTAO_ICONE = cn("h-11 min-h-11 w-11 min-w-11", FOCO, PISTA_DESATIVADO);
+const ID_FIXA = "col-fixed-person";
 
 interface DialogoColunasProps {
   escolha: readonly EscolhaColuna[];
@@ -36,6 +38,8 @@ export function DialogoColunasPessoas({ escolha, aoAlternar, aoMover, aoMoverPar
   const mover = (id: IdColuna, delta: number): void => {
     const i = escolha.findIndex((c) => c.id === id);
     const novo = Math.min(Math.max(i + delta, 1), escolha.length - 1);
+    // Nos extremos não há para onde ir: não se move nem se anuncia (o botão é só aria-disabled, o clique chega aqui).
+    if (i < 1 || novo === i) return;
     aoMover(id, delta);
     setAnuncio(t(`${R}cols.moved`, { name: nomeDe(id), n: novo + 1, total: escolha.length }));
   };
@@ -44,15 +48,21 @@ export function DialogoColunasPessoas({ escolha, aoAlternar, aoMover, aoMoverPar
     aoMoverPara(arrastada, indice);
   };
 
+  const repor = (): void => {
+    aoRepor();
+    setAnuncio(t(`${R}cols.resetDone`));
+  };
+
   return (
-    <Dialog>
+    <Dialog onOpenChange={(aberto) => { if (!aberto) setAnuncio(""); }}>
       <DialogTrigger asChild>
         <Button type="button" variant="outline" className={cn("min-h-11 gap-2", FOCO)}>
           <Settings2 className="h-4 w-4" aria-hidden="true" />
           {t(`${R}cols.button`)}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-md">
+      {/* hideClose: o X do componente base diz «Close» em inglês e repete o «Fechar» traduzido do rodapé (44 px). */}
+      <DialogContent className="max-w-md" hideClose>
         <DialogHeader>
           <DialogTitle>{t(`${R}cols.title`)}</DialogTitle>
           <DialogDescription>{t(`${R}cols.help`)}</DialogDescription>
@@ -78,23 +88,23 @@ export function DialogoColunasPessoas({ escolha, aoAlternar, aoMover, aoMoverPar
                 )}
                 <Label htmlFor={`col-${coluna.id}`} className="flex min-h-11 flex-1 cursor-pointer items-center gap-3 text-sm">
                   <Checkbox
-                    id={`col-${coluna.id}`} checked={coluna.visivel} disabled={fixa}
+                    id={`col-${coluna.id}`} checked={coluna.visivel} disabled={fixa} aria-describedby={fixa ? ID_FIXA : undefined}
                     onCheckedChange={() => aoAlternar(coluna.id)}
                   />
                   {nome}
                 </Label>
                 {fixa ? (
-                  <span className="text-xs text-muted-foreground">{t(`${R}cols.fixed`)}</span>
+                  <span id={ID_FIXA} className="text-xs text-muted-foreground">{t(`${R}cols.fixed`)}</span>
                 ) : (
                   <>
                     <Button
-                      type="button" variant="ghost" size="icon" className={BOTAO_ICONE} disabled={i <= 1}
+                      type="button" variant="ghost" size="icon" className={BOTAO_ICONE} aria-disabled={i <= 1 || undefined}
                       aria-label={t(`${R}cols.up`, { name: nome })} onClick={() => mover(coluna.id, -1)}
                     >
                       <ArrowUp className="h-4 w-4" aria-hidden="true" />
                     </Button>
                     <Button
-                      type="button" variant="ghost" size="icon" className={BOTAO_ICONE} disabled={i === escolha.length - 1}
+                      type="button" variant="ghost" size="icon" className={BOTAO_ICONE} aria-disabled={i === escolha.length - 1 || undefined}
                       aria-label={t(`${R}cols.down`, { name: nome })} onClick={() => mover(coluna.id, 1)}
                     >
                       <ArrowDown className="h-4 w-4" aria-hidden="true" />
@@ -107,7 +117,7 @@ export function DialogoColunasPessoas({ escolha, aoAlternar, aoMover, aoMoverPar
         </ul>
         <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{anuncio}</div>
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button type="button" variant="ghost" className={cn("min-h-11 gap-2", FOCO)} onClick={aoRepor}>
+          <Button type="button" variant="ghost" className={cn("min-h-11 gap-2", FOCO)} onClick={repor}>
             <RotateCcw className="h-4 w-4" aria-hidden="true" />
             {t(`${R}cols.reset`)}
           </Button>

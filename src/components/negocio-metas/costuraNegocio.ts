@@ -14,6 +14,8 @@ export interface LeadAbertaCostura {
   id: string;
   /** AAAA-MM-DD, para o texto da opção. */
   criadaEm: string;
+  /** O instante completo da criação (ISO), para escolher a mais recente entre leads do mesmo dia; sem ele vale só o dia. */
+  instante?: string;
   /** A abordagem desta lead está encerrada: criar o negócio exige «Reabrir a abordagem». */
   encerrada: boolean;
 }

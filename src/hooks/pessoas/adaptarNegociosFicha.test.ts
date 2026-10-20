@@ -68,6 +68,30 @@ describe("adaptarNegocios: aberto com contrato assinado continua aberto", () => 
   });
 });
 
+describe("adaptarNegocios: a regra manual", () => {
+  const comMomento = (momento: "manual" | "proposta_aceite" | "contrato_assinado" | null, ...itens: NegocioFichaDb[]) =>
+    adaptarNegocios(fichaDb({ negocios: { total: itens.length, itens } }), HOJE, momento);
+
+  it("manual: o negócio aberto fica pronto mesmo com pronto_a_ganhar falso, e o botão pode oferecer o ganho", () => {
+    const [n] = comMomento("manual", negocioDb({ pronto_a_ganhar: false })) as NegocioMes[];
+    expect(n.prontoAGanhar).toBe(true);
+    expect(podeGanhar(n, "manual").pode).toBe(true);
+  });
+
+  it("manual: um negócio ganho ou perdido não é marcado como pronto", () => {
+    const itens = comMomento("manual", negocioDb({ id: "g", estado: "ganho", ganho_em: "2026-10-11T09:00:00Z" }), negocioDb({ id: "p", estado: "perdido", perdido_em: "2026-10-11T09:00:00Z" }));
+    expect(itens.map((n) => n.estadoReal)).toEqual(["ganho", "perdido"]);
+    expect(itens.every((n) => n.prontoAGanhar === false)).toBe(true);
+  });
+
+  it("proposta_aceite, contrato_assinado e sem regra: manda o pronto_a_ganhar da base", () => {
+    for (const momento of ["proposta_aceite", "contrato_assinado", null] as const) {
+      expect((comMomento(momento, negocioDb({ pronto_a_ganhar: false }))[0] as NegocioMes).prontoAGanhar).toBe(false);
+      expect((comMomento(momento, negocioDb({ pronto_a_ganhar: true }))[0] as NegocioMes).prontoAGanhar).toBe(true);
+    }
+  });
+});
+
 describe("adaptarNegocios: o pronto_a_ganhar da base", () => {
   it("passa ao negócio como prontoAGanhar, verdadeiro ou falso", () => {
     expect((adaptar(negocioDb({ pronto_a_ganhar: true }))[0] as NegocioMes).prontoAGanhar).toBe(true);

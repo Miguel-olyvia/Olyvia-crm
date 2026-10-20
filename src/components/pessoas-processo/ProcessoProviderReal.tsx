@@ -148,7 +148,7 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
     ? { id: doPainel.id, entityId: ficha.pessoa.id, orcamentoId: orcamentoParaProposta(doPainel) }
     : null;
   const paraGanhar: NegocioMes | null = doPainel && aberto?.painel === "ganhar" && ficha
-    ? adaptarNegocios(ficha, hojeLisboa()).find((n) => n.id === doPainel.id && n.estadoReal === "aberto") ?? null
+    ? adaptarNegocios(ficha, hojeLisboa(), fonte.modo === "real" ? fonte.momentoGanho : null).find((n) => n.id === doPainel.id && n.estadoReal === "aberto") ?? null
     : null;
 
   return (

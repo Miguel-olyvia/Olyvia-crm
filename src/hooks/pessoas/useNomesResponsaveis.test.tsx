@@ -115,3 +115,52 @@ describe("useNomesResponsaveis", () => {
     expect(fromMock).not.toHaveBeenCalled();
   });
 });
+
+describe("useNomesResponsaveis: o último valor conhecido não pisca", () => {
+  beforeEach(() => {
+    [inMock, selectMock, fromMock, captureMock].forEach((m) => m.mockReset());
+    selectMock.mockReturnValue({ in: inMock });
+    fromMock.mockReturnValue({ select: selectMock });
+  });
+
+  it("ao mudar a lista (ordem nova ou mais uma página) o nome já conhecido mantém-se enquanto o novo lote carrega", async () => {
+    inMock.mockReturnValueOnce(resposta([{ id: "u1", name: "Rui Dias" }]));
+    inMock.mockReturnValueOnce(new Promise(() => undefined));
+    const { wrapper } = montar();
+    const { result, rerender } = renderHook(({ lista }) => useNomesResponsaveis(lista, true), { wrapper, initialProps: { lista: ["u1"] } });
+    await waitFor(() => expect(result.current.get("u1")).toBe("Rui Dias"));
+    rerender({ lista: ["u2", "u1"] });
+    await waitFor(() => expect(inMock).toHaveBeenCalledTimes(2));
+    expect(result.current.get("u1")).toBe("Rui Dias");
+    expect(result.current.has("u2")).toBe(false);
+  });
+
+  it("quando o novo lote chega, o nome novo substitui o antigo e acrescenta os que faltavam", async () => {
+    inMock.mockReturnValueOnce(resposta([{ id: "u1", name: "Rui Dias" }]));
+    inMock.mockReturnValueOnce(resposta([{ id: "u1", name: "Rui Dias Pinto" }, { id: "u2", name: "Ana Reis" }]));
+    const { wrapper } = montar();
+    const { result, rerender } = renderHook(({ lista }) => useNomesResponsaveis(lista, true), { wrapper, initialProps: { lista: ["u1"] } });
+    await waitFor(() => expect(result.current.get("u1")).toBe("Rui Dias"));
+    rerender({ lista: ["u2", "u1"] });
+    await waitFor(() => expect(result.current.get("u2")).toBe("Ana Reis"));
+    expect(result.current.get("u1")).toBe("Rui Dias Pinto");
+  });
+
+  it("noutra organização não se mostra nada da anterior, nem enquanto carrega", async () => {
+    inMock.mockReturnValueOnce(resposta([{ id: "u1", name: "Rui Dias" }]));
+    inMock.mockReturnValueOnce(new Promise(() => undefined));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 0 } } });
+    let organizacao = "org-1";
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <FontePessoasContext.Provider value={real(organizacao)}>{children}</FontePessoasContext.Provider>
+      </QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(() => useNomesResponsaveis(["u1"], true), { wrapper });
+    await waitFor(() => expect(result.current.get("u1")).toBe("Rui Dias"));
+    organizacao = "org-2";
+    rerender();
+    await waitFor(() => expect(inMock).toHaveBeenCalledTimes(2));
+    expect(result.current.size).toBe(0);
+  });
+});

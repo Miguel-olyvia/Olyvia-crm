@@ -10,9 +10,23 @@ import { FOCO } from "./estilos";
 
 const L = "pessoasPagina.neg.lead.";
 
-/** A lead mais recente (a última em caso de empate); `null` sem leads. */
+/** O instante da criação (ms); sem instante legível, o início do dia de `criadaEm`; sem nenhum dos dois, o mais antigo possível. */
+function quando(l: LeadAbertaCostura): number {
+  const instante = l.instante ? Date.parse(l.instante) : Number.NaN;
+  if (!Number.isNaN(instante)) return instante;
+  const dia = l.criadaEm ? Date.parse(l.criadaEm) : Number.NaN;
+  return Number.isNaN(dia) ? Number.NEGATIVE_INFINITY : dia;
+}
+
+/** Verdadeiro se `a` é mais recente que `b`: pelo instante completo, e em empate pelo id (assim não depende da ordem de chegada). */
+function maisRecenteQue(a: LeadAbertaCostura, b: LeadAbertaCostura): boolean {
+  const [ta, tb] = [quando(a), quando(b)];
+  return ta !== tb ? ta > tb : a.id > b.id;
+}
+
+/** A lead mais recente (pelo instante completo; em empate, a de maior id); `null` sem leads. */
 export function leadMaisRecente(leads: readonly LeadAbertaCostura[]): LeadAbertaCostura | null {
-  return leads.reduce<LeadAbertaCostura | null>((melhor, l) => (melhor === null || l.criadaEm >= melhor.criadaEm ? l : melhor), null);
+  return leads.reduce<LeadAbertaCostura | null>((melhor, l) => (melhor === null || maisRecenteQue(l, melhor) ? l : melhor), null);
 }
 
 interface SeletorLeadProps {

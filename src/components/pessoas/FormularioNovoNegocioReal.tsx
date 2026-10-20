@@ -2,7 +2,7 @@
 // negócio) e a gravação contra a base (neg_criar_negocio). O id do negócio gera-se ao abrir (o painel desmonta ao fechar, por isso é novo
 // a cada abertura) e fica o mesmo entre reenvios: é o que torna o criar idempotente. O erro diz-se pelo código dentro do painel e o painel
 // só fecha em sucesso. Um envio recusado leva ao primeiro campo errado. O comercial fica por escolher: a base usa quem cria.
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type MutableRefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,14 +39,14 @@ interface FormularioProps {
   mutacoes: MutacoesNegocio;
   dados: DadosNegocio;
   /** O painel diz a quem o controla se há uma gravação em curso (o Esc e o clique fora não fecham enquanto guarda). */
-  ocupado: MutableRefObject<boolean>;
+  aoMudarOcupado: (ocupado: boolean) => void;
   aoSujar: () => void;
   aoCriado: (resultado: ResultadoCriar, titulo: string) => void;
   /** Fecha o painel (NG001: o negócio já não está disponível). */
   aoFechar: () => void;
 }
 
-export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, ocupado, aoSujar, aoCriado, aoFechar }: FormularioProps) {
+export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOcupado, aoSujar, aoCriado, aoFechar }: FormularioProps) {
   const { t } = useTranslation();
   const id = useId();
   const [idNegocio] = useState(() => crypto.randomUUID());
@@ -64,8 +64,10 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, ocupado, 
   const [ligar, setLigar] = useState<LigarRegistos>(() => ligacaoInicial(porLigar));
   const [docs, setDocs] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    ocupado.current = envio.aGuardar;
-  }, [ocupado, envio.aGuardar]);
+    aoMudarOcupado(envio.aGuardar);
+  }, [aoMudarOcupado, envio.aGuardar]);
+  // Ao desmontar (o painel fechou) já não há gravação a bloquear nada.
+  useEffect(() => () => aoMudarOcupado(false), [aoMudarOcupado]);
 
   const podeLigar = dados.podeEditar;
   const comDocumentos = mutacoes.criarComDocumentos && podeLigar;
@@ -80,9 +82,9 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, ocupado, 
     if (p.lead !== undefined) setLead(p.lead);
     if (p.reabrir !== undefined) setReabrir(p.reabrir);
   };
-  const alternarDoc = (d: { tipo: string; id: string }) => {
+  const alternarDoc = (d: Parameters<typeof chaveDocumento>[0]) => {
     aoSujar();
-    const chave = chaveDocumento(d as Parameters<typeof chaveDocumento>[0]);
+    const chave = chaveDocumento(d);
     setDocs((atual) => {
       const novo = new Set(atual);
       if (!novo.delete(chave)) novo.add(chave);

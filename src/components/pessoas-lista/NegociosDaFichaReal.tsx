@@ -53,11 +53,17 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
     const id = contador.current;
     setAnuncios((antes) => [...antes.slice(-2), { id, texto }]);
   }, []);
-  const aoIndisponivel = useCallback((chave: string) => {
+  // O que está aberto AGORA (guardado depois de cada render): uma gravação que acaba depois de trocar de pessoa tem de o ver.
+  const atual = useRef({ pessoaAberta, negocioDoEndereco });
+  useEffect(() => {
+    atual.current = { pessoaAberta, negocioDoEndereco };
+  });
+  const aoIndisponivel = useCallback((chave: string, pessoaDaMutacao: string) => {
     const texto = t(chave);
     toast.error(texto);
     anunciar(texto);
-    fecharFicha.current?.();
+    // Só se fecha a ficha da pessoa a que o erro pertence: se entretanto se abriu outra, essa não se fecha.
+    if (atual.current.pessoaAberta === pessoaDaMutacao) fecharFicha.current?.();
   }, [t, anunciar]);
   const mutacoes = useMutacoesNegocio(pessoaId, ficha, { aoIndisponivel });
   const momentoGanho = fonte.modo === "real" ? fonte.momentoGanho : null;
@@ -72,11 +78,6 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
     // O endereço já aponta para o negócio criado: passa a ser ele a mandar (voltar à lista não reabre o criado).
     if (criado && negocioDoEndereco === criado.negocio) setCriado(null);
   }, [pessoaAberta, criado, criandoPara, negocioDoEndereco]);
-  // O que está aberto AGORA (guardado depois de cada render): uma gravação que acaba depois de trocar de pessoa tem de o ver.
-  const atual = useRef({ pessoaAberta, negocioDoEndereco });
-  useEffect(() => {
-    atual.current = { pessoaAberta, negocioDoEndereco };
-  });
   const criadoValido = criado && criado.pessoa === pessoaAberta ? criado : null;
   const negocioCriado = criadoValido && (negocioDoEndereco === criadoValido.endereco || negocioDoEndereco === criadoValido.negocio) ? criadoValido.negocio : null;
   const aoCriado = (pessoa: string, negocio: string): void => {

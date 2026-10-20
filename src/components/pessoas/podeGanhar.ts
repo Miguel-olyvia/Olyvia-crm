@@ -30,6 +30,8 @@ function cumpreARegra(negocio: NegocioMes, momento: MomentoGanho | null): boolea
 
 export function podeGanhar(negocio: NegocioMes, momento: MomentoGanho | null): ResultadoPodeGanhar {
   if (negocio.estadoReal !== "aberto") return nao("naoAberto");
-  const pronto = negocio.prontoAGanhar ?? cumpreARegra(negocio, momento);
+  // Regra manual: a base aceita o ganho sem condição (neg_ganhar_negocio), mas neg_ficha_pessoa devolve pronto_a_ganhar = false para ela;
+  // por isso o prontoAGanhar da base não pode vetar o ganho aqui.
+  const pronto = momento === "manual" || (negocio.prontoAGanhar ?? cumpreARegra(negocio, momento));
   return pronto ? SIM : nao(motivoDaRegra(momento));
 }

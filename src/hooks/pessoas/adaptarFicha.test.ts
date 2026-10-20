@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { passoDoNegocio } from "@/components/pessoas/etapaPessoa";
 import { adaptarFicha } from "./adaptarFicha";
 import { adaptarResumo } from "./adaptarResumoPessoa";
 import { agregadosDb, atividadeDb, contactoDb, fichaDb, negocioDb, pessoaDb, PESSOA_ID, seccaoDb } from "./fichaFabrica";
@@ -96,5 +97,22 @@ describe("adaptarFicha: papel, etapa e abertos vêm da base", () => {
     const n = resumo.abertos[0] as NegocioMes;
     expect(n.valorBase).toBe(700);
     expect(n.estadoReal).toBe("aberto");
+  });
+});
+
+describe("adaptarFicha: o passo «ganhar» na regra manual", () => {
+  const comContratoAssinado = () => fichaDb({
+    negocios: { total: 1, itens: [negocioDb({ pronto_a_ganhar: false, contratos: [assinado], propostas: [] })] },
+  });
+
+  it("manual: com o contrato assinado o próximo passo é ganhar o negócio, mesmo com pronto_a_ganhar falso na base", () => {
+    const { resumo } = adaptarFicha(comContratoAssinado(), HOJE, "manual");
+    expect(passoDoNegocio(resumo.abertos[0] as NegocioMes)).toBe("ganharNegocio");
+    expect(resumo.proximo.id).toBe("ganharNegocio");
+  });
+
+  it("contrato_assinado e sem regra: pronto_a_ganhar falso na base continua a pedir a assinatura", () => {
+    expect(passoDoNegocio(adaptarFicha(comContratoAssinado(), HOJE, "contrato_assinado").resumo.abertos[0] as NegocioMes)).toBe("recolherAssinatura");
+    expect(passoDoNegocio(adaptarFicha(comContratoAssinado(), HOJE).resumo.abertos[0] as NegocioMes)).toBe("recolherAssinatura");
   });
 });

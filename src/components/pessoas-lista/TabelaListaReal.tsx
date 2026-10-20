@@ -46,7 +46,8 @@ export const TabelaListaReal = memo(forwardRef<HTMLDivElement, TabelaListaRealPr
       {ocupada && <BarraProgresso />}
       <div
         ref={ref} role="region" aria-label={t("pessoasPagina.real.regionLabel")} aria-busy={ocupada} tabIndex={0}
-        className={cn("max-h-[max(70vh,24rem)] overflow-auto rounded-xl border border-border/70 bg-card", FOCO)}
+        // scroll-pt-10 (2,5 rem) > altura do cabeçalho fixo (h-9): ao focar uma linha por teclado o cabeçalho não a tapa.
+        className={cn("max-h-[max(70vh,24rem)] scroll-pt-10 overflow-auto rounded-xl border border-border/70 bg-card", FOCO)}
       >
         <Table
           className="table-fixed text-sm" containerClassName="overflow-visible"
@@ -62,7 +63,7 @@ export const TabelaListaReal = memo(forwardRef<HTMLDivElement, TabelaListaRealPr
                 <TableHead
                   key={c} scope="col"
                   className={cn(
-                    "sticky top-0 z-10 h-9 bg-card px-3 text-xs font-semibold text-muted-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]",
+                    "sticky top-0 z-10 h-9 whitespace-nowrap bg-card px-3 text-xs font-semibold text-muted-foreground shadow-[inset_0_-1px_0_hsl(var(--border))]",
                     c === "value" && "text-right",
                   )}
                 >

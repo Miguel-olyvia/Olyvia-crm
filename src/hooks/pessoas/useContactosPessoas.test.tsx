@@ -182,3 +182,37 @@ describe("useContactosPessoas", () => {
     await waitFor(() => expect(pedidos).toHaveLength(4));
   });
 });
+
+describe("useContactosPessoas: o último valor conhecido não pisca", () => {
+  beforeEach(() => { fromMock.mockReset(); captureMock.mockReset(); pedidos.length = 0; });
+
+  const quandoHaE2Fica = (conhecido: Respondedor): Respondedor => (p) => (p.filtroIn[1].includes("e2") ? new Promise<Resp>(() => undefined) : conhecido(p));
+
+  it("ao mudar a lista o contacto já conhecido mantém-se enquanto o novo lote carrega", async () => {
+    simular(quandoHaE2Fica(porTabela(ok([{ entity_id: "e1", email: "a@x.pt" }]), ok([{ entity_id: "e1", phone_number: "912345678" }]))));
+    const { wrapper } = montar();
+    const { result, rerender } = renderHook(({ lista }) => useContactosPessoas(lista, true), { wrapper, initialProps: { lista: ["e1"] } });
+    await waitFor(() => expect(result.current.get("e1")).toEqual({ telefone: "912345678", email: "a@x.pt" }));
+    rerender({ lista: ["e2", "e1"] });
+    await waitFor(() => expect(pedidos).toHaveLength(4));
+    expect(result.current.get("e1")).toEqual({ telefone: "912345678", email: "a@x.pt" });
+    expect(result.current.has("e2")).toBe(false);
+  });
+
+  it("noutra organização não se mostra nada da anterior, nem enquanto carrega", async () => {
+    simular(quandoHaE2Fica(porTabela(ok([{ entity_id: "e1", email: "a@x.pt" }]), ok([]))));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: 0 } } });
+    let organizacao = "org-1";
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <FontePessoasContext.Provider value={real(organizacao)}>{children}</FontePessoasContext.Provider>
+      </QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(({ lista }) => useContactosPessoas(lista, true), { wrapper, initialProps: { lista: ["e1"] } });
+    await waitFor(() => expect(result.current.get("e1")?.email).toBe("a@x.pt"));
+    organizacao = "org-2";
+    rerender({ lista: ["e2"] });
+    await waitFor(() => expect(pedidos).toHaveLength(4));
+    expect(result.current.size).toBe(0);
+  });
+});

@@ -22,6 +22,8 @@ export function vistaDaLista(pessoa: PessoaDaLista, dados: DadosDaLinha = {}): V
     // O papel de cliente é o selo junto ao nome; «Cliente» não é uma etapa.
     etapa: pessoa.papel === "cliente" ? null : pessoa.etapa,
     faseEtapa: pessoa.faseEtapa,
+    // TODO (depois da migration por aplicar): os dias sem contacto e o selo «Sem contacto» dependem de `ultimo_resultado` e de
+    // `ultimo_contacto_lead_em`, colunas que só existem numa migration ainda por aplicar. Até lá o comportamento mantém-se como está.
     diasSemContacto: pessoa.diasSemContacto,
     // «Sem contacto» só quando se sabe que nunca houve; com contacto e sem resultado na lista, é desconhecido (sem selo).
     resultado: pessoa.ultimoContactoEm === null ? "semContacto" : undefined,
