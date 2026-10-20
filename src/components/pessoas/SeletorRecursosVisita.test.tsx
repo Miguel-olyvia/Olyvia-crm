@@ -76,7 +76,18 @@ describe("SeletorRecursosVisita", () => {
     const alerta = screen.getByRole("alert");
     expect(alerta).toHaveTextContent("Escolha quem vai à visita.");
     expect(grupo.getAttribute("aria-describedby")).toContain(alerta.id);
-    expect(grupo).toHaveAttribute("aria-invalid", "true");
+    expect(grupo.getAttribute("aria-describedby")).toBe(alerta.id);
+    // `aria-invalid` num grupo (fieldset) é ignorado pelos leitores de ecrã: o erro liga-se só por aria-describedby, e o grupo marca-se para o foco.
+    expect(grupo).not.toHaveAttribute("aria-invalid");
+    expect(grupo).toHaveAttribute("data-foco-erro");
+  });
+
+  it("sem erro o grupo não leva descrição nem marca de foco", () => {
+    montar();
+    const grupo = screen.getByRole("group", { name: "Quem vai à visita" });
+    expect(grupo).not.toHaveAttribute("aria-describedby");
+    expect(grupo).not.toHaveAttribute("aria-invalid");
+    expect(grupo).not.toHaveAttribute("data-foco-erro");
   });
 
   it("desativado (a guardar) usa aria-disabled e ignora os cliques, sem tirar os botões do teclado", () => {

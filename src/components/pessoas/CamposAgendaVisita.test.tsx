@@ -38,7 +38,7 @@ function montar(extra: Partial<Parameters<typeof CamposAgendaVisita>[0]> = {}) {
   render(
     <CamposAgendaVisita
       id="x" hoje="2026-10-20" agenda={{ quadros: QUADROS, recursos: RECURSOS, isLoading: false, isError: false, refetch }} valor={VALOR}
-      aoMudar={aoMudar} erro={null} conflito={{ emConflito: [], aVerificar: false, falhou: false }} recursoOcupado={null}
+      aoMudar={aoMudar} erro={null} conflito={{ emConflito: [], aVerificar: false, falharam: [] }} recursoOcupado={null}
       moradaLead={LEAD} destino={destinoInicial(LEAD)} aoMudarDestino={aoMudarDestino} erroMorada={null} {...extra}
     />,
   );
@@ -138,7 +138,7 @@ describe("CamposAgendaVisita: conflito e morada", () => {
   });
 
   it("os recursos ocupados dizem-se pelo nome, com a nota de que a base confirma ao guardar", () => {
-    montar({ conflito: { emConflito: ["r2", "r1"], aVerificar: false, falhou: false } });
+    montar({ conflito: { emConflito: ["r2", "r1"], aVerificar: false, falharam: [] } });
     expect(screen.getByTestId("conflito-visita")).toHaveTextContent("Rui Costa, Rita Gomes já tem uma marcação ou uma ausência a essa hora");
     expect(screen.getByRole("button", { name: /Rui Costa/ })).toHaveTextContent("ocupado nesse horário");
   });
@@ -148,13 +148,33 @@ describe("CamposAgendaVisita: conflito e morada", () => {
     expect(screen.getByRole("button", { name: /Rui Costa/ })).toHaveTextContent("ocupado nesse horário");
   });
 
-  it("se a verificação falhou, diz que não foi possível verificar (aberto: a base decide ao guardar)", () => {
-    montar({ conflito: { emConflito: [], aVerificar: false, falhou: true } });
+  it("se a verificação falhou, diz de que recurso não foi possível verificar (aberto: a base decide ao guardar)", () => {
+    montar({ conflito: { emConflito: [], aVerificar: false, falharam: ["r2"] } });
+    const aviso = screen.getByTestId("conflito-visita");
+    expect(aviso).toHaveTextContent("Não foi possível verificar o horário de Rui Costa");
+    expect(aviso).not.toHaveTextContent("já tem uma marcação");
+  });
+
+  it("um recurso ocupado e OUTRO por verificar: as duas frases, cada uma com o seu recurso (a ocupada não esconde a que falhou)", () => {
+    montar({ conflito: { emConflito: ["r1"], aVerificar: false, falharam: ["r2"] } });
+    const aviso = screen.getByTestId("conflito-visita");
+    expect(aviso).toHaveTextContent("Rita Gomes já tem uma marcação ou uma ausência a essa hora");
+    expect(aviso).toHaveTextContent("Não foi possível verificar o horário de Rui Costa");
+    expect(aviso).not.toHaveTextContent("horário de Rita Gomes");
+  });
+
+  it("vários recursos por verificar dizem-se todos pelo nome", () => {
+    montar({ conflito: { emConflito: [], aVerificar: false, falharam: ["r1", "r2"] } });
+    expect(screen.getByTestId("conflito-visita")).toHaveTextContent("Não foi possível verificar o horário de Rita Gomes, Rui Costa");
+  });
+
+  it("uma falha de um recurso que a agenda já não lista cai na frase geral, em vez de ficar sem nome", () => {
+    montar({ conflito: { emConflito: [], aVerificar: false, falharam: ["desconhecido"] } });
     expect(screen.getByTestId("conflito-visita")).toHaveTextContent("Não foi possível verificar se há conflitos de horário");
   });
 
   it("a verificar, diz que está a verificar", () => {
-    montar({ conflito: { emConflito: [], aVerificar: true, falhou: false } });
+    montar({ conflito: { emConflito: [], aVerificar: true, falharam: [] } });
     expect(screen.getByTestId("conflito-visita")).toHaveTextContent("A verificar o horário…");
   });
 

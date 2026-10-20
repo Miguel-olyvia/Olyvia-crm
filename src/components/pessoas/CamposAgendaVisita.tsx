@@ -113,15 +113,18 @@ function Duracao({ id, valor, aoMudar, desativado }: Pick<CamposAgendaVisitaProp
 }
 
 /** O aviso de conflito: sempre presente (uma região de estado só se anuncia se já existia), vazia quando não há nada a dizer. */
-function AvisoConflito({ conflito, nomes }: { conflito: ConflitoVisita; nomes: string[] }) {
+function AvisoConflito({ conflito, nomes, semVerificar }: { conflito: ConflitoVisita; nomes: string[]; semVerificar: string[] }) {
   const { t } = useTranslation();
-  let texto = "";
-  if (nomes.length > 0) texto = t(`${C}busy`, { names: nomes.join(", ") });
-  else if (conflito.aVerificar) texto = t(`${C}checking`);
-  else if (conflito.falhou) texto = t(`${C}failed`);
+  const frases: string[] = [];
+  if (nomes.length > 0) frases.push(t(`${C}busy`, { names: nomes.join(", ") }));
+  else if (conflito.aVerificar) frases.push(t(`${C}checking`));
+  // Um recurso ocupado não esconde o que ficou por verificar: as duas frases dizem-se, cada uma com o seu recurso.
+  if (conflito.falharam.length > 0) {
+    frases.push(semVerificar.length > 0 ? t(`${C}failedFor`, { names: semVerificar.join(", ") }) : t(`${C}failed`));
+  }
   return (
     <div role="status" data-testid="conflito-visita" className="text-sm text-foreground">
-      {texto}
+      {frases.join(" ")}
     </div>
   );
 }
@@ -138,7 +141,9 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
   const [erroData, erroHora] = textoDoErroData(t, p.erro);
   // Os recursos ocupados, pelo nome e sem repetir: o pré-aviso da leitura e o que a base acabou de recusar.
   const ocupados = Array.from(new Set([...p.conflito.emConflito, ...(p.recursoOcupado ? [p.recursoOcupado] : [])]));
-  const nomes = ocupados.map((r) => p.agenda.recursos.find((x) => x.id === r)?.name).filter((n): n is string => !!n);
+  const nomeDe = (r: string): string | undefined => p.agenda.recursos.find((x) => x.id === r)?.name;
+  const nomes = ocupados.map(nomeDe).filter((n): n is string => !!n);
+  const semVerificar = p.conflito.falharam.map(nomeDe).filter((n): n is string => !!n);
   return (
     <div className="space-y-4">
       <EstadoDaAgenda agenda={p.agenda} />
@@ -153,7 +158,7 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
         erroData={erroData} erroHora={erroHora} somenteLeitura={p.desativado} aoMudar={p.aoMudar}
       />
       <Duracao id={p.id} valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />
-      <AvisoConflito conflito={p.conflito} nomes={nomes} />
+      <AvisoConflito conflito={p.conflito} nomes={nomes} semVerificar={semVerificar} />
       <MoradaVisitaCampos id={`${p.id}-morada`} moradaLead={p.moradaLead} valor={p.destino} erro={p.erroMorada} aoMudar={p.aoMudarDestino} />
     </div>
   );

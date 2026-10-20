@@ -220,6 +220,8 @@ function criarAcoes(c: Contexto): AcoesFichaReal {
     const recursos = visita?.agenda?.recursos.map((r) => r.id) ?? [];
     if (!ficha || !visita?.agenda?.boardId || recursos.length === 0) throw generico();
     const minutos = visita.agenda.duracaoMinutos;
+    // neg_alterar_visita exige início e fim: uma visita cujo fim a ficha não sabe ler não pode receber 60 minutos em silêncio (a duração por omissão).
+    if (visita.duracao === "" && minutos === null) throw new ErroNeg(null, null, CHAVES_ENTRADA_VISITA.duracaoEmFalta);
     const entrada = entradaDaVisita({
       agenda: {
         boardId: visita.agenda.boardId, recursos, data: dados.data, hora: dados.hora, duracao: visita.duracao,

@@ -24,7 +24,7 @@ vi.mock("@/hooks/pessoas/useAgendaVisita", () => ({
 vi.mock("@/hooks/pessoas/useAcoesVisita", () => ({
   useAcoesVisita: () => ({ marcar: vi.fn(), alterar: vi.fn(), cancelar: vi.fn(), resultado: vi.fn() }),
 }));
-vi.mock("@/hooks/pessoas/useConflitoVisita", () => ({ useConflitoVisita: () => ({ emConflito: [], aVerificar: false, falhou: false }) }));
+vi.mock("@/hooks/pessoas/useConflitoVisita", () => ({ useConflitoVisita: () => ({ emConflito: [], aVerificar: false, falharam: [] }) }));
 
 import { LinhaVisitaPessoa } from "./LinhaVisitaPessoa";
 import { idLinhaVisita } from "./focoVisita";

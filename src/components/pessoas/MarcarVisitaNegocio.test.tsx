@@ -29,7 +29,7 @@ vi.mock("@/hooks/pessoas/useAgendaVisita", () => ({ useAgendaVisita: (...a: unkn
 vi.mock("@/hooks/pessoas/useAcoesVisita", () => ({
   useAcoesVisita: () => ({ marcar: estado.marcar, alterar: vi.fn(), cancelar: vi.fn(), resultado: vi.fn() }),
 }));
-vi.mock("@/hooks/pessoas/useConflitoVisita", () => ({ useConflitoVisita: () => ({ emConflito: [], aVerificar: false, falhou: false }) }));
+vi.mock("@/hooks/pessoas/useConflitoVisita", () => ({ useConflitoVisita: () => ({ emConflito: [], aVerificar: false, falharam: [] }) }));
 
 import { MarcarVisitaProvider } from "./MarcarVisita";
 import { useMarcarVisita, type AberturaVisita } from "./marcarVisitaContexto";

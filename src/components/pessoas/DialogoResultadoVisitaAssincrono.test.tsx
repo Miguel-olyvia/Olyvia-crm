@@ -132,7 +132,7 @@ describe("DialogoResultadoVisita a gravar", () => {
 
   it("falha parcial (abordagem encerrada, resultado por gravar): o alerta diz as duas coisas e repetir é possível", async () => {
     const aoGuardar = vi.fn()
-      .mockRejectedValueOnce({ chave: "pessoasPagina.real.ficha.partialVisit", chaveExtra: "pessoasPagina.real.visit.err.resultado.ng004" })
+      .mockRejectedValueOnce({ chave: "pessoasPagina.real.ficha.partialVisit", chaveExtra: "pessoasPagina.real.visit.err.resultado.ng009" })
       .mockResolvedValueOnce(undefined);
     const { aoFechar } = montar(aoGuardar);
     escolher("Sem interesse");
@@ -140,7 +140,7 @@ describe("DialogoResultadoVisita a gravar", () => {
     fireEvent.click(guardar());
     const alerta = await screen.findByRole("alert");
     expect(alerta).toHaveTextContent("A abordagem ficou encerrada, mas o resultado da visita não foi registado.");
-    expect(alerta).toHaveTextContent("Esta visita já não está disponível.");
+    expect(alerta).toHaveTextContent("Uma visita que ainda não aconteceu não se pode dar como feita.");
     expect(aoFechar).not.toHaveBeenCalled();
     fireEvent.click(guardar());
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));

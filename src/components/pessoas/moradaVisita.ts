@@ -16,6 +16,11 @@ export interface DestinoVisita {
   igualALead: boolean;
   outra: MoradaVisita;
   notaAcesso: string;
+  /**
+   * A nota que a visita já tinha na base (nota e acesso unidas por « · », que pode passar do máximo). Enquanto o utilizador não a edita não falha
+   * por comprida, porque não a escreveu: só uma edição passa a valer o máximo.
+   */
+  notaAcessoDaBase?: string;
 }
 
 export type ErroMoradaVisita = "ruaVazia" | "codigoPostalInvalido" | "notaAcessoComprida";
@@ -36,7 +41,7 @@ export const destinoInicial = (moradaLead: MoradaVisita | null): DestinoVisita =
 /** A escolha de partida de uma visita que já existe: a da própria visita (a morada da lead só conta se a ficha ainda a tiver). */
 export function destinoDaVisita(visita: Pick<VisitaNegocio, "igualALead" | "morada" | "nota">, temMoradaLead: boolean): DestinoVisita {
   const naLead = visita.igualALead === true && temMoradaLead;
-  return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : { ...visita.morada }, notaAcesso: visita.nota };
+  return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : { ...visita.morada }, notaAcesso: visita.nota, notaAcessoDaBase: visita.nota };
 }
 
 /** A visita só pode ser "na morada da lead" se a lead tiver uma. */
@@ -48,7 +53,9 @@ export function validarDestino(d: DestinoVisita, moradaLead: MoradaVisita | null
   if (d.outra.rua.trim() === "") return "ruaVazia";
   const cp = d.outra.codigoPostal.trim();
   if (cp !== "" && !FORMATO_CODIGO_POSTAL.test(cp)) return "codigoPostalInvalido";
-  return d.notaAcesso.trim().length > MAX_NOTA_ACESSO ? "notaAcessoComprida" : null;
+  const nota = d.notaAcesso.trim();
+  if (d.notaAcessoDaBase !== undefined && nota === d.notaAcessoDaBase.trim()) return null;
+  return nota.length > MAX_NOTA_ACESSO ? "notaAcessoComprida" : null;
 }
 
 export interface DestinoResolvido {

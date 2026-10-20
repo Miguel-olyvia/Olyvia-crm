@@ -9,11 +9,11 @@ export interface ConflitoVisita {
   emConflito: string[];
   /** Há uma pergunta à espera ou em curso. */
   aVerificar: boolean;
-  /** Alguma pergunta falhou: o aviso falha aberto (não se sabe), e nunca se diz «disponível». */
-  falhou: boolean;
+  /** Os recursos cuja pergunta falhou: o aviso falha aberto (não se sabe) e nunca se diz «disponível» deles. */
+  falharam: string[];
 }
 
-const SEM_AVISO: ConflitoVisita = { emConflito: [], aVerificar: false, falhou: false };
+const SEM_AVISO: ConflitoVisita = { emConflito: [], aVerificar: false, falharam: [] };
 
 type Leitura = { recurso: string; conflito: boolean; falhou: boolean };
 
@@ -55,7 +55,7 @@ export function useConflitoVisita(recursos: readonly string[], inicio: string | 
         if (!atual) return;
         setEstado({
           chave,
-          resultado: { emConflito: leituras.filter((l) => l.conflito).map((l) => l.recurso), aVerificar: false, falhou: leituras.some((l) => l.falhou) },
+          resultado: { emConflito: leituras.filter((l) => l.conflito).map((l) => l.recurso), aVerificar: false, falharam: leituras.filter((l) => l.falhou).map((l) => l.recurso) },
         });
       });
     }, ESPERA_CONFLITO_MS);
@@ -67,5 +67,5 @@ export function useConflitoVisita(recursos: readonly string[], inicio: string | 
 
   if (chave === "") return SEM_AVISO;
   // Enquanto a pergunta nova não volta, não se mostra o resultado da anterior (era de outro horário ou de outros recursos).
-  return estado.chave === chave ? estado.resultado : { emConflito: [], aVerificar: true, falhou: false };
+  return estado.chave === chave ? estado.resultado : { emConflito: [], aVerificar: true, falharam: [] };
 }

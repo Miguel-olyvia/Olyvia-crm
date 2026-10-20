@@ -90,7 +90,7 @@ export function FormAlterarReal({ pessoa, visita, hoje, aoOcupado, aoFechar }: F
     if (envio.aGuardar) return;
     setTentou(true);
     if (erro) {
-      setTimeout(() => formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(), 0);
+      setTimeout(() => formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"], [data-foco-erro]')?.focus(), 0);
       return;
     }
     // O título vai vazio: a base mantém o atual. O resto reenvia-se sempre (um campo omitido apaga-se).

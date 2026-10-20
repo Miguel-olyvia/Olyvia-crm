@@ -1,7 +1,7 @@
 // «Marcar visita» ligado à base (naBase): quadro, recursos, dia, hora obrigatória, duração e morada; grava por useAcoesVisita (nunca pelo store de
 // exemplo), aguenta duplo clique, não deixa fechar a meio e traduz os erros. Os hooks da base estão simulados: nunca se chama a base.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
@@ -27,7 +27,7 @@ const estado = vi.hoisted(() => ({
   acoesArgs: [] as unknown[][],
   marcar: vi.fn(),
   conflitoArgs: [] as unknown[][],
-  conflito: { emConflito: [] as string[], aVerificar: false, falhou: false },
+  conflito: { emConflito: [] as string[], aVerificar: false, falharam: [] },
 }));
 vi.mock("@/hooks/pessoas/useAgendaVisita", () => ({ useAgendaVisita: (...a: unknown[]) => { estado.agendaArgs.push(a); return estado.agenda; } }));
 vi.mock("@/hooks/pessoas/useAcoesVisita", () => ({
@@ -59,7 +59,7 @@ beforeEach(() => {
   estado.agendaArgs.length = 0;
   estado.acoesArgs.length = 0;
   estado.conflitoArgs.length = 0;
-  estado.conflito = { emConflito: [], aVerificar: false, falhou: false };
+  estado.conflito = { emConflito: [], aVerificar: false, falharam: [] };
 });
 
 function Abrir({ responsavelUserId }: { responsavelUserId?: string }) {
@@ -117,6 +117,8 @@ describe("MarcarVisita ligado à base", () => {
     fireEvent.click(submeter());
     expect(estado.marcar).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("Escolha quem vai à visita.");
+    // O foco vai para o grupo dos recursos (um fieldset já não leva aria-invalid, que os leitores de ecrã ignoram).
+    await waitFor(() => expect(screen.getByRole("group", { name: "Quem vai à visita" })).toHaveFocus());
   });
 
   it("sem quadro elegível não grava e remete para a Agenda", async () => {
@@ -199,6 +201,24 @@ describe("MarcarVisita ligado à base", () => {
     expect(estado.marcar).toHaveBeenCalledTimes(1);
   });
 
+  it("dois cliques no MESMO instante (antes de o ecrã se refazer e mostrar «a guardar»): só há um pedido", async () => {
+    let resolver!: (v: unknown) => void;
+    estado.marcar.mockReturnValue(new Promise((ok) => { resolver = ok; }));
+    await montar();
+    preencher();
+    const botao = submeter();
+    // Um só `act` à volta dos dois: o React não refaz o ecrã entre um clique e o outro, por isso o segundo ainda vê o botão como livre.
+    act(() => {
+      fireEvent.click(botao);
+      fireEvent.click(botao);
+      fireEvent.submit(dialogo().querySelector("form") as HTMLFormElement);
+    });
+    expect(estado.marcar).toHaveBeenCalledTimes(1);
+    resolver({ visitaId: "v-novo", mudou: true });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(estado.marcar).toHaveBeenCalledTimes(1);
+  });
+
   it("um erro fica dentro do diálogo, traduzido; os dados escritos ficam e repetir volta a gravar", async () => {
     estado.marcar
       .mockRejectedValueOnce(new ErroNeg(null, "NG008", "pessoasPagina.real.visit.err.marcar.ng008"))
@@ -233,7 +253,7 @@ describe("MarcarVisita ligado à base", () => {
   });
 
   it("um aviso de conflito não impede de gravar (a recusa verdadeira é da base)", async () => {
-    estado.conflito = { emConflito: [R1], aVerificar: false, falhou: false };
+    estado.conflito = { emConflito: [R1], aVerificar: false, falharam: [] };
     estado.marcar.mockResolvedValue({ visitaId: "v-novo", mudou: true });
     await montar();
     preencher();

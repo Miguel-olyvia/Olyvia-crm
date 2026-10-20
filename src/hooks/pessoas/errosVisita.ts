@@ -1,10 +1,14 @@
 // Os erros das funções de visita, lidos por diálogo. O mesmo código quer dizer coisas diferentes consoante o ecrã (NG008 ao marcar é
-// «quadro ou recurso indisponível»; NG004 no resultado é «visita indisponível»), por isso este mapa reinterpreta-os SÓ dentro dos diálogos
+// «quadro ou recurso indisponível»; NG009 ao encerrar a abordagem não é o mesmo que ao dar a visita como feita), por isso este mapa reinterpreta-os SÓ dentro dos diálogos
 // de visita. `errosNeg.ts` fica como está e continua a dar a leitura geral de cada código.
 import { ErroNeg } from "./chamarNeg";
 import { CHAVES_ERRO_NEG, CHAVE_ERRO_GENERICO } from "./errosNeg";
 
-export type DialogoVisita = "marcar" | "alterar" | "cancelar" | "resultado";
+/**
+ * Onde o erro aparece. `resultado` é a chamada que dá a visita como feita (neg_resultado_visita); `encerrar` é a que encerra a abordagem antes dela
+ * (neg_encerrar_abordagem). Os dois correm no mesmo diálogo, mas o mesmo código quer dizer coisas diferentes consoante a chamada que falhou.
+ */
+export type DialogoVisita = "marcar" | "alterar" | "cancelar" | "resultado" | "encerrar";
 
 const V = "pessoasPagina.real.visit.";
 const E = `${V}err.`;
@@ -16,6 +20,8 @@ export const CHAVES_ENTRADA_VISITA = {
   recursoEmFalta: `${V}err.noResource`,
   quadroEmFalta: `${V}err.noBoard`,
   visitaEmFalta: `${V}err.noVisit`,
+  /** A visita não tem um fim legível na ficha: sem ele não se reenvia o horário (a duração por omissão alterá-lo-ia em silêncio). */
+  duracaoEmFalta: `${V}err.noDuration`,
   /** A visita não está na ficha que o hook tem (a ficha recarrega ou a pessoa mudou): pede para recarregar, em vez de parecer uma falha de rede. */
   visitaNaoCarregada: `${V}err.visitNotLoaded`,
 } as const;
@@ -29,7 +35,10 @@ export const CHAVES_ERRO_POR_DIALOGO: Readonly<Record<DialogoVisita, Readonly<Re
   marcar: { NG008: `${E}marcar.ng008`, NG009: `${E}marcar.ng009`, NG010: `${E}marcar.ng010` },
   alterar: { NG008: `${E}alterar.ng008`, NG009: `${E}alterar.ng009`, NG010: `${E}alterar.ng010` },
   cancelar: { NG018: `${E}cancelar.ng018` },
-  resultado: { NG004: `${E}resultado.ng004`, NG009: `${E}resultado.ng009`, NG018: `${E}resultado.ng018` },
+  // NG004 não está em nenhuma: neg_resultado_visita e neg_encerrar_abordagem não o lançam (ficaria a leitura geral, que seria enganadora).
+  resultado: { NG009: `${E}resultado.ng009`, NG018: `${E}resultado.ng018` },
+  // neg_encerrar_abordagem lança NG009, NG011, NG008, NG003 e 42501: só o NG009 muda de sentido; o resto fica com a leitura geral.
+  encerrar: { NG009: `${E}encerrar.ng009` },
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

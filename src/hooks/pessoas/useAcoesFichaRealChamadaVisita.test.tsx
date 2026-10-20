@@ -112,6 +112,9 @@ const FICHA_COM_VISITA = fichaDb({
       recursos: [{ id: "r1", nome: "Rita", user_id: "u1", ativo: true }, { id: "r2", nome: "Rui", user_id: "u2", ativo: true }],
     }),
     visitaDb({ id: "sem-quadro", board_id: null, recursos: [] }),
+    visitaDb({ id: "sem-fim", inicio: "2026-10-25T09:00:00Z", fim: null, board_id: "b1", recursos: [{ id: "r1", nome: "Rita", user_id: "u1", ativo: true }] }),
+    visitaDb({ id: "fim-igual", inicio: "2026-10-25T09:00:00Z", fim: "2026-10-25T09:00:00Z", board_id: "b1", recursos: [{ id: "r1", nome: "Rita", user_id: "u1", ativo: true }] }),
+    visitaDb({ id: "de-45", inicio: "2026-10-25T09:00:00Z", fim: "2026-10-25T09:45:00Z", board_id: "b1", recursos: [{ id: "r1", nome: "Rita", user_id: "u1", ativo: true }] }),
   ]),
 });
 const DESTINO = { igualALead: false, outra: { rua: "Rua B 2", codigoPostal: "", localidade: "", andar: "" }, notaAcesso: "Tocar à campainha" };
@@ -157,6 +160,22 @@ describe("alterarVisita (a ação da ficha, sobre a visita lida da base)", () =>
     const erro = await erroDe(act(async () => { await result.current.alterarVisita("sem-quadro", { data: "2026-10-28", hora: "11:00", destino: DESTINO }); }));
     expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");
     expect(rpcMock).not.toHaveBeenCalled();
+  });
+
+  it.each([["sem-fim"], ["fim-igual"]])("uma visita sem fim legível (%s) NÃO grava 60 minutos em silêncio: recusa antes de chamar a base, com mensagem traduzida", async (id) => {
+    const { result, client } = montar({ ficha: FICHA_COM_VISITA });
+    semear(client);
+    const erro = await erroDe(act(async () => { await result.current.alterarVisita(id, { data: "2026-10-28", hora: "11:00", destino: DESTINO }); }));
+    expect(erro.chave).toBe(`${V}err.noDuration`);
+    expect(rpcMock).not.toHaveBeenCalled();
+    expect(invalidadas(client)).toEqual([false, false]);
+  });
+
+  it("uma duração fora das quatro chaves (45 min) mantém-se: o fim lido da ficha manda", async () => {
+    rpcMock.mockReturnValueOnce(respostaOk({ mudou: true }));
+    const { result } = montar({ ficha: FICHA_COM_VISITA });
+    await act(async () => { await result.current.alterarVisita("de-45", { data: "2026-10-28", hora: "11:00", destino: DESTINO }); });
+    expect(parametros(0)).toMatchObject({ p_inicio: "2026-10-28T11:00:00.000Z", p_fim: "2026-10-28T11:45:00.000Z" });
   });
 
   it("NG010 chega com a leitura do diálogo de alterar", async () => {

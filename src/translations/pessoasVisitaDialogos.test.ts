@@ -25,7 +25,7 @@ describe("traduções dos diálogos de visita (agenda, alterar, cancelar)", () =
     const precisas = [
       "agenda.board", "agenda.boardChoose", "agenda.loading", "agenda.date", "agenda.time", "agenda.boardNone", "agenda.loadError", "agenda.formLoadError", "agenda.retry", "agenda.resources", "agenda.resourcesNone",
       "agenda.resourceBusy", "agenda.duration", "agenda.duration.m30", "agenda.duration.h1", "agenda.duration.h1m30", "agenda.duration.h2",
-      "agenda.duration.custom", "agenda.error.horaVazia", "conflict.busy", "conflict.failed", "conflict.checking",
+      "agenda.duration.custom", "agenda.error.horaVazia", "conflict.busy", "conflict.failed", "conflict.failedFor", "conflict.checking",
       "marcar.done", "marcar.description", "alterar.description", "alterar.done", "alterar.owner", "alterar.ownerUnknown", "alterar.ownerOthers", "alterar.unconfirmed",
       "cancelar.button", "cancelar.buttonLabel", "cancelar.title", "cancelar.description", "cancelar.confirm", "cancelar.back", "cancelar.done",
       "kind.levantamento", "kind.medicao", "kind.materiais", "kind.revisita",
@@ -40,6 +40,7 @@ describe("traduções dos diálogos de visita (agenda, alterar, cancelar)", () =
     expect(marcas(pt["pessoasPagina.real.visit.alterar.owner"])).toEqual(["{name}", "{owner}"]);
     expect(marcas(pt["pessoasPagina.real.visit.alterar.ownerOthers"])).toEqual(["{count}"]);
     expect(marcas(pt["pessoasPagina.real.visit.conflict.busy"])).toEqual(["{names}"]);
+    expect(marcas(pt["pessoasPagina.real.visit.conflict.failedFor"])).toEqual(["{names}"]);
     expect(marcas(pt["pessoasPagina.real.visit.agenda.duration.custom"])).toEqual(["{minutes}"]);
   });
 

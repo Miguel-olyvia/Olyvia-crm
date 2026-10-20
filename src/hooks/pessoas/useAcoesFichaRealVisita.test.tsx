@@ -79,13 +79,13 @@ describe("registarResultadoVisita lido pelo diálogo da visita", () => {
     expect(futura.chave).toBe(`${V}err.resultado.ng009`);
   });
 
-  it("NG004 depois de o encerramento ter ficado gravado: aviso parcial com a mensagem da visita ao lado", async () => {
+  it("NG009 depois de o encerramento ter ficado gravado: aviso parcial com a mensagem da VISITA (a chamada que falhou) ao lado", async () => {
     const { result, client } = montar();
     semear(client);
-    rpcMock.mockReturnValueOnce(respostaOk({ mudou: true })).mockReturnValueOnce(respostaErro("NG004"));
+    rpcMock.mockReturnValueOnce(respostaOk({ mudou: true })).mockReturnValueOnce(respostaErro("NG009"));
     const erro = await erroDe(act(async () => { await result.current.registarResultadoVisita("passada", { resultado: "semInteresse", motivo: "preco" }); }));
     expect(erro.chave).toBe("pessoasPagina.real.ficha.partialVisit");
-    expect(erro.chaveExtra).toBe(`${V}err.resultado.ng004`);
+    expect(erro.chaveExtra).toBe(`${V}err.resultado.ng009`);
     expect(invalidadas(client)).toEqual([true, true]);
     expect(chamadas()).toEqual(["neg_encerrar_abordagem", "neg_resultado_visita"]);
   });

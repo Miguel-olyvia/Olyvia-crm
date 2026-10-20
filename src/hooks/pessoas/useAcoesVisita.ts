@@ -200,9 +200,9 @@ function criarAcoes(c: Contexto): AcoesVisita {
             resultado: dados.resultado as ResultadoEncerramento, motivo: dados.motivo ?? "outro", motivoOutro: dados.motivoOutro,
           }));
         } catch (erro) {
-          // Lido para o diálogo do resultado (NG018 visita cancelada, NG004, NG009); o que não tem leitura própria, como o NG011, fica com a geral.
+          // Lido para a chamada que falhou (o encerrar: NG009 tem leitura própria; NG011, NG008, NG003 e 42501 ficam com a geral).
           // Nada se escreveu: pára aqui, sem invalidar.
-          throw falha(erro, "resultado");
+          throw falha(erro, "encerrar");
         }
       }
       try {

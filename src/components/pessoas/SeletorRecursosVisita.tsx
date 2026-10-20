@@ -20,7 +20,7 @@ interface SeletorRecursosVisitaProps {
   aoMudar: (ids: string[]) => void;
   /** A guardar: os botões ficam `aria-disabled` (continuam no teclado) e ignoram os cliques. */
   desativado?: boolean;
-  /** O erro já traduzido, ligado ao grupo. */
+  /** O erro já traduzido, ligado ao grupo por `aria-describedby` (um `aria-invalid` num fieldset é ignorado pelos leitores de ecrã) e marcado com `data-foco-erro` para o foco. */
   erro?: string | null;
   /** O grupo aceita foco por código (a recusa NG010 leva o foco para aqui). */
   grupoRef?: Ref<HTMLFieldSetElement>;
@@ -37,7 +37,7 @@ export function SeletorRecursosVisita({ id, recursos, escolhidos, emConflito, ao
   };
   return (
     <fieldset
-      ref={grupoRef} tabIndex={-1} aria-describedby={erro ? idErro : undefined} aria-invalid={erro ? true : undefined}
+      ref={grupoRef} tabIndex={-1} aria-describedby={erro ? idErro : undefined} data-foco-erro={erro ? "" : undefined}
       className="space-y-2 outline-none"
     >
       <legend className="mb-1 text-sm font-semibold text-foreground">{t(`${A}resources`)}</legend>

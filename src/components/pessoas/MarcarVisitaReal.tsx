@@ -64,7 +64,7 @@ export function FormVisitaReal({ pessoa, hoje, revisita, aoOcupado, aoMarcada, a
     setTentou(true);
     if (erro) {
       // O foco vai para o primeiro campo com erro, depois de o erro aparecer (a ordem do ecrã é a da validação).
-      setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? campoData.current)?.focus(), 0);
+      setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"], [data-foco-erro]') ?? campoData.current)?.focus(), 0);
       return;
     }
     const tipo = revisita ? "revisita" : "levantamento";

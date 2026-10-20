@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_NOTA_ACESSO, MORADA_VISITA_VAZIA, destinoInicial, moradaDaLead, resolverDestino, textoMoradaVisita, validarDestino,
+  MAX_NOTA_ACESSO, MORADA_VISITA_VAZIA, destinoDaVisita, destinoInicial, moradaDaLead, resolverDestino, textoMoradaVisita, validarDestino,
   type DestinoVisita,
 } from "./moradaVisita";
 import type { MoradaVisita } from "./pessoasTipos";
@@ -41,6 +41,35 @@ describe("validarDestino", () => {
     expect(validarDestino(outra({ codigoPostal: "4700-010" }), LEAD)).toBeNull();
     expect(validarDestino(outra({}, "x".repeat(MAX_NOTA_ACESSO)), LEAD)).toBeNull();
     expect(validarDestino(outra({}, "x".repeat(MAX_NOTA_ACESSO + 1)), LEAD)).toBe("notaAcessoComprida");
+  });
+});
+
+describe("destinoDaVisita: uma nota que veio da base e o utilizador não editou", () => {
+  const MORADA_B: MoradaVisita = { rua: "Rua B 2", codigoPostal: "", localidade: "", andar: "" };
+  // A nota da base junta a nota da visita e a de acesso por « · »: pode passar dos 140 sem o utilizador ter escrito nada.
+  const COMPRIDA = `${"a".repeat(100)} · ${"b".repeat(60)}`;
+  const daBase = (nota: string) => destinoDaVisita({ igualALead: false, morada: MORADA_B, nota }, true);
+
+  it("não falha por uma nota comprida que veio da base e não foi tocada, e guarda-a tal e qual (sem cortar)", () => {
+    expect(COMPRIDA.length).toBeGreaterThan(MAX_NOTA_ACESSO);
+    const destino = daBase(COMPRIDA);
+    expect(destino.notaAcesso).toBe(COMPRIDA);
+    expect(validarDestino(destino, LEAD)).toBeNull();
+    expect(resolverDestino(destino, LEAD).notaAcesso).toBe(COMPRIDA);
+  });
+
+  it("se o utilizador a edita e fica comprida, falha (o aviso é do campo que ele escreveu); voltar ao valor da base deixa de falhar", () => {
+    const destino = daBase(COMPRIDA);
+    expect(validarDestino({ ...destino, notaAcesso: `${COMPRIDA}x` }, LEAD)).toBe("notaAcessoComprida");
+    expect(validarDestino({ ...destino, notaAcesso: "c".repeat(MAX_NOTA_ACESSO + 1) }, LEAD)).toBe("notaAcessoComprida");
+    expect(validarDestino({ ...destino, notaAcesso: `${COMPRIDA}  ` }, LEAD)).toBeNull();
+    expect(validarDestino({ ...destino, notaAcesso: "d".repeat(MAX_NOTA_ACESSO) }, LEAD)).toBeNull();
+  });
+
+  it("a nota de um destino novo (sem base) continua a ter o máximo, e as outras validações não mudam com uma nota da base", () => {
+    expect(validarDestino(outra({}, COMPRIDA), LEAD)).toBe("notaAcessoComprida");
+    expect(validarDestino({ ...daBase(COMPRIDA), outra: { ...MORADA_B, rua: "" } }, LEAD)).toBe("ruaVazia");
+    expect(validarDestino({ ...daBase(COMPRIDA), outra: { ...MORADA_B, codigoPostal: "1000" } }, LEAD)).toBe("codigoPostalInvalido");
   });
 });
 

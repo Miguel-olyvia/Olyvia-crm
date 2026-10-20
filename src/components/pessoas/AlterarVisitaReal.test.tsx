@@ -1,7 +1,7 @@
 // «Alterar visita» ligado à base (naBase): parte da visita da ficha (quadro, recursos, duração, morada, nota), reenvia TODOS os campos por
 // useAcoesVisita, avisa se o responsável da lead mudou, e aguenta duplo clique e fecho a meio. Os hooks da base estão simulados.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
@@ -33,7 +33,7 @@ vi.mock("@/hooks/pessoas/useAcoesVisita", () => ({
   useAcoesVisita: (...a: unknown[]) => { estado.acoesArgs.push(a); return { marcar: vi.fn(), alterar: estado.alterar, cancelar: vi.fn(), resultado: vi.fn() }; },
 }));
 vi.mock("@/hooks/pessoas/useConflitoVisita", () => ({
-  useConflitoVisita: (...a: unknown[]) => { estado.conflitoArgs.push(a); return { emConflito: [], aVerificar: false, falhou: false }; },
+  useConflitoVisita: (...a: unknown[]) => { estado.conflitoArgs.push(a); return { emConflito: [], aVerificar: false, falharam: [] }; },
 }));
 
 import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
@@ -154,6 +154,7 @@ describe("AlterarVisita ligado à base", () => {
     fireEvent.click(guardar());
     expect(estado.alterar).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("Escolha quem vai à visita.");
+    await waitFor(() => expect(screen.getByRole("group", { name: "Quem vai à visita" })).toHaveFocus());
   });
 
   it("uma visita sem agenda lida (sem quadro nem recursos) também pede a escolha dos recursos", async () => {
@@ -171,13 +172,22 @@ describe("AlterarVisita ligado à base", () => {
     expect(estado.alterar).toHaveBeenCalledWith("v1", expect.objectContaining({ duracao: "h1" }), [R1]);
   });
 
-  it("uma nota que passa dos 140 caracteres (nota mais nota de acesso unidas) com «outra morada» vê-se no campo da nota de acesso e encurta-se: há saída", async () => {
+  it("uma nota que passa dos 140 caracteres e veio da base (nota mais nota de acesso unidas), com «outra morada», grava tal e qual: não falha por um valor que o utilizador não escreveu", async () => {
     estado.alterar.mockResolvedValue({ mudou: true, recursosMudaram: false, donoAlterado: false, novoDono: null, outrasVisitas: [], desconfirmada: false });
     await montar({ ...VISITA, igualALead: false, morada: { rua: "Rua B 2", codigoPostal: "", localidade: "", andar: "" }, nota: "x".repeat(200) });
     fireEvent.click(guardar());
-    expect(estado.alterar).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Nota de acesso/i)).not.toHaveAttribute("aria-invalid");
+    expect(estado.alterar).toHaveBeenCalledWith("v1", expect.objectContaining({ nota: "x".repeat(200) }), [R1]);
+  });
+
+  it("se o utilizador edita a nota de acesso e passa dos 140 caracteres, o aviso aparece nesse campo; encurtá-la dá saída", async () => {
+    estado.alterar.mockResolvedValue({ mudou: true, recursosMudaram: false, donoAlterado: false, novoDono: null, outrasVisitas: [], desconfirmada: false });
+    await montar({ ...VISITA, igualALead: false, morada: { rua: "Rua B 2", codigoPostal: "", localidade: "", andar: "" }, nota: "x".repeat(200) });
     const campo = screen.getByLabelText(/Nota de acesso/i);
     expect(campo).toHaveValue("x".repeat(200));
+    fireEvent.change(campo, { target: { value: "x".repeat(150) } });
+    fireEvent.click(guardar());
+    expect(estado.alterar).not.toHaveBeenCalled();
     expect(campo).toHaveAttribute("aria-invalid", "true");
     fireEvent.change(campo, { target: { value: "x".repeat(100) } });
     fireEvent.click(guardar());
@@ -230,6 +240,23 @@ describe("AlterarVisita ligado à base", () => {
     expect(aoMudarAberto).not.toHaveBeenCalledWith(false);
     resolver({ mudou: true, recursosMudaram: false, donoAlterado: false, novoDono: null, outrasVisitas: [], desconfirmada: false });
     await waitFor(() => expect(aoMudarAberto).toHaveBeenCalledWith(false));
+  });
+
+  it("dois cliques no MESMO instante (antes de o ecrã se refazer e mostrar «a guardar»): só há um pedido", async () => {
+    let resolver!: (v: unknown) => void;
+    estado.alterar.mockReturnValue(new Promise((ok) => { resolver = ok; }));
+    const { aoMudarAberto } = await montar();
+    const botao = guardar();
+    // Um só `act` à volta dos dois: o React não refaz o ecrã entre um clique e o outro, por isso o segundo ainda vê o botão como livre.
+    act(() => {
+      fireEvent.click(botao);
+      fireEvent.click(botao);
+      fireEvent.submit(dialogo().querySelector("form") as HTMLFormElement);
+    });
+    expect(estado.alterar).toHaveBeenCalledTimes(1);
+    resolver({ mudou: true, recursosMudaram: false, donoAlterado: false, novoDono: null, outrasVisitas: [], desconfirmada: false });
+    await waitFor(() => expect(aoMudarAberto).toHaveBeenCalledWith(false));
+    expect(estado.alterar).toHaveBeenCalledTimes(1);
   });
 
   it("fora da base (sem naBase) continua a ser o diálogo de exemplo: guarda pelo aoGuardar e não lê a agenda", async () => {

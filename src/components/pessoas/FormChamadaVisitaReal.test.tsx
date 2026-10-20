@@ -23,7 +23,7 @@ const R1 = "11111111-1111-4111-8111-111111111111";
 const estado = vi.hoisted(() => ({
   agenda: null as unknown,
   agendaArgs: [] as unknown[][],
-  conflito: { emConflito: [] as string[], aVerificar: false, falhou: false },
+  conflito: { emConflito: [] as string[], aVerificar: false, falharam: [] },
 }));
 vi.mock("@/hooks/pessoas/useAgendaVisita", () => ({ useAgendaVisita: (...a: unknown[]) => { estado.agendaArgs.push(a); return estado.agenda; } }));
 vi.mock("@/hooks/pessoas/useConflitoVisita", () => ({ useConflitoVisita: () => estado.conflito }));
@@ -42,7 +42,7 @@ const MORADA = { linha: "Rua A 1", cp: "1000-001", localidade: "Lisboa" };
 beforeEach(() => {
   estado.agenda = { quadros: QUADROS, recursos: RECURSOS, isLoading: false, isError: false, refetch: vi.fn(), omissao: { boardId: "q1", recursoId: R1 } };
   estado.agendaArgs.length = 0;
-  estado.conflito = { emConflito: [], aVerificar: false, falhou: false };
+  estado.conflito = { emConflito: [], aVerificar: false, falharam: [] };
 });
 
 const CAPACIDADES_REAIS = { chamada: true, encerrar: true, adiar: true, nota: true, visita: true, negocios: true, gerirVisitas: true };

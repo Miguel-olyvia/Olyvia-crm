@@ -26,13 +26,13 @@ describe("useConflitoVisita (pré-aviso de leitura)", () => {
     expect(ESPERA_CONFLITO_MS).toBe(400);
     rpcMock.mockImplementation((_nome: string, p: { p_resource_id: string }) => ok(p.p_resource_id === "r2"));
     const { result } = renderHook(() => useConflitoVisita(["r1", "r2"], INICIO, FIM));
-    expect(result.current).toEqual({ emConflito: [], aVerificar: true, falhou: false });
+    expect(result.current).toEqual({ emConflito: [], aVerificar: true, falharam: [] });
     await passar(399);
     expect(rpcMock).not.toHaveBeenCalled();
     await passar(1);
     expect(rpcMock).toHaveBeenCalledTimes(2);
     expect(rpcMock).toHaveBeenCalledWith("check_schedule_conflict", { p_resource_id: "r1", p_start: INICIO, p_end: FIM, p_exclude_item_id: null });
-    expect(result.current).toEqual({ emConflito: ["r2"], aVerificar: false, falhou: false });
+    expect(result.current).toEqual({ emConflito: ["r2"], aVerificar: false, falharam: [] });
   });
 
   it("ao alterar, exclui a própria visita", async () => {
@@ -66,30 +66,30 @@ describe("useConflitoVisita (pré-aviso de leitura)", () => {
     expect(result.current.emConflito).toEqual([]);
   });
 
-  it("falha aberto e nunca diz que está livre: o erro (da base ou de rede) dá falhou=true e nenhum conflito inventado", async () => {
+  it("falha aberto e nunca diz que está livre: o erro (da base ou de rede) põe o recurso em falharam e nenhum conflito inventado", async () => {
     rpcMock.mockReturnValueOnce(Promise.resolve({ data: null, error: { message: "x" } }));
     const a = renderHook(() => useConflitoVisita(["r1"], INICIO, FIM));
     await passar(400);
-    expect(a.result.current).toEqual({ emConflito: [], aVerificar: false, falhou: true });
+    expect(a.result.current).toEqual({ emConflito: [], aVerificar: false, falharam: ["r1"] });
     expect(Object.keys(a.result.current)).not.toContain("livre");
 
     rpcMock.mockImplementationOnce(() => Promise.reject(new Error("rede")));
     const b = renderHook(() => useConflitoVisita(["r1"], INICIO, FIM));
     await passar(400);
-    expect(b.result.current).toEqual({ emConflito: [], aVerificar: false, falhou: true });
+    expect(b.result.current).toEqual({ emConflito: [], aVerificar: false, falharam: ["r1"] });
   });
 
-  it("se só um dos recursos falha, o conflito que se leu mantém-se e avisa que falhou", async () => {
+  it("se só um dos recursos falha, o conflito que se leu mantém-se e diz QUAL recurso ficou por verificar", async () => {
     rpcMock.mockImplementation((_n: string, p: { p_resource_id: string }) => (p.p_resource_id === "r1" ? ok(true) : Promise.reject(new Error("rede"))));
     const { result } = renderHook(() => useConflitoVisita(["r1", "r2"], INICIO, FIM));
     await passar(400);
-    expect(result.current).toEqual({ emConflito: ["r1"], aVerificar: false, falhou: true });
+    expect(result.current).toEqual({ emConflito: ["r1"], aVerificar: false, falharam: ["r2"] });
   });
 
   it("sem recursos, sem horário ou com o fim antes do início, não pergunta nada", async () => {
     for (const [rec, i, f] of [[[], INICIO, FIM], [["r1"], null, FIM], [["r1"], INICIO, null], [["r1"], FIM, INICIO], [["r1"], INICIO, INICIO]] as const) {
       const { result } = renderHook(() => useConflitoVisita([...rec], i, f));
-      expect(result.current).toEqual({ emConflito: [], aVerificar: false, falhou: false });
+      expect(result.current).toEqual({ emConflito: [], aVerificar: false, falharam: [] });
     }
     await passar(1000);
     expect(rpcMock).not.toHaveBeenCalled();

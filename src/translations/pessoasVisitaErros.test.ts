@@ -41,7 +41,13 @@ describe("traduções dos erros dos diálogos de visita", () => {
 
   it("lê por diálogo os códigos que mudam de sentido; NG016 e NG017 ficam com a mensagem geral (que já existe nas duas línguas)", () => {
     const porCodigo = new Set(Object.values(CHAVES_ERRO_POR_DIALOGO).flatMap((m) => Object.keys(m)));
-    for (const c of ["NG004", "NG008", "NG009", "NG010", "NG018"]) expect(porCodigo.has(c), c).toBe(true);
+    for (const c of ["NG008", "NG009", "NG010", "NG018"]) expect(porCodigo.has(c), c).toBe(true);
+    // NG004 nunca dispara nos diálogos de visita (neg_resultado_visita e neg_encerrar_abordagem não o lançam): fica com a leitura geral.
+    expect(CHAVES_ERRO_POR_DIALOGO.resultado).not.toHaveProperty("NG004");
+    expect(pt["pessoasPagina.real.visit.err.resultado.ng004"]).toBeUndefined();
+    expect(en["pessoasPagina.real.visit.err.resultado.ng004"]).toBeUndefined();
+    expect(pt["pessoasPagina.real.visit.err.encerrar.ng009"]).not.toBe(pt["pessoasPagina.real.visit.err.resultado.ng009"]);
+    expect(en["pessoasPagina.real.visit.err.encerrar.ng009"]).not.toBe(en["pessoasPagina.real.visit.err.resultado.ng009"]);
     for (const c of ["NG016", "NG017"]) {
       expect(porCodigo.has(c), c).toBe(false);
       expect(pessoasPaginaTranslations.pt[`pessoasPagina.erroNeg.${c.toLowerCase()}`], c).toBeTruthy();

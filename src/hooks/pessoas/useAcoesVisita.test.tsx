@@ -299,10 +299,10 @@ describe("resultado", () => {
     expect(invalidadas(client)).toEqual([true, true]);
   });
 
-  it("um resultado que não encerra e falha é falha total, lida para o diálogo (NG004, NG018, NG009), sem invalidar", async () => {
+  it("um resultado que não encerra e falha é falha total, lida para o diálogo (NG018, NG009), sem invalidar", async () => {
     const { result, client } = montar();
     semear(client);
-    for (const [codigo, chave] of [["NG004", `${V}err.resultado.ng004`], ["NG018", `${V}err.resultado.ng018`], ["NG009", `${V}err.resultado.ng009`]]) {
+    for (const [codigo, chave] of [["NG018", `${V}err.resultado.ng018`], ["NG009", `${V}err.resultado.ng009`]]) {
       rpcMock.mockReturnValueOnce(respostaErro(codigo));
       const erro = await erroDe(act(async () => result.current.resultado("passada", { resultado: "interessado" })));
       expect(erro.chave).toBe(chave);
@@ -326,8 +326,11 @@ describe("resultado", () => {
     expect(rpcMock).not.toHaveBeenCalled();
   });
 
-  it.each([["NG018", `${V}err.resultado.ng018`], ["NG004", `${V}err.resultado.ng004`], ["NG009", `${V}err.resultado.ng009`]])(
-    "um resultado que encerra: %s no encerramento é lido para o diálogo de resultado (não a leitura geral) e o resultado não se escreve", async (codigo, chave) => {
+  it.each([
+    ["NG009", `${V}err.encerrar.ng009`], ["NG011", "pessoasPagina.erroNeg.ng011"], ["NG008", "pessoasPagina.erroNeg.ng008"],
+    ["NG003", "pessoasPagina.erroNeg.ng003"], ["42501", "pessoasPagina.erroNeg.permissao"],
+  ])(
+    "um resultado que encerra: %s no encerramento é lido para a chamada que falhou (o encerrar, não a visita) e o resultado não se escreve", async (codigo, chave) => {
       const { result, client } = montar();
       semear(client);
       rpcMock.mockReturnValueOnce(respostaErro(codigo));
@@ -338,6 +341,21 @@ describe("resultado", () => {
       expect(invalidadas(client)).toEqual([false, false]);
     },
   );
+
+  it("NG009 diz coisas diferentes consoante a chamada: ao encerrar é o encerramento; ao dar a visita como feita é a visita (também no aviso parcial)", async () => {
+    const { result, client } = montar();
+    semear(client);
+    rpcMock.mockReturnValueOnce(respostaErro("NG009"));
+    const aoEncerrar = await erroDe(act(async () => result.current.resultado("passada", encerra)));
+    expect(aoEncerrar.chave).toBe(`${V}err.encerrar.ng009`);
+    rpcMock.mockReturnValueOnce(respostaErro("NG009"));
+    const aoDarFeita = await erroDe(act(async () => result.current.resultado("passada", { resultado: "interessado" })));
+    expect(aoDarFeita.chave).toBe(`${V}err.resultado.ng009`);
+    rpcMock.mockReturnValueOnce(respostaOk({ mudou: true })).mockReturnValueOnce(respostaErro("NG009"));
+    const parcial = await erroDe(act(async () => result.current.resultado("passada", encerra)));
+    expect(parcial.chave).toBe("pessoasPagina.real.ficha.partialVisit");
+    expect(parcial.chaveExtra).toBe(`${V}err.resultado.ng009`);
+  });
 
   it("o mesmo pedido de duas pessoas diferentes não se partilha (a pessoa conta na assinatura do pedido em curso)", async () => {
     const { result, rerender } = montarComPessoa({ pessoaId: PESSOA_ID, ficha: FICHA });
