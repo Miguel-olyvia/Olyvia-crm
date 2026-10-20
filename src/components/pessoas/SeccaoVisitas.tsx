@@ -1,4 +1,4 @@
-// As visitas da PESSOA no Resumo da ficha: uma só secção com as visitas dela (as canceladas não contam), por ordem cronológica, e o botão
+// As visitas da PESSOA no Resumo da ficha: uma só secção com as visitas dela (as canceladas aparecem marcadas, mas sozinhas não abrem a secção), por ordem cronológica, e o botão
 // do passo da pessoa: "Marcar a visita como feita" (que abre o painel de visita e levantamento) ou, com a visita feita, "Criar o negócio".
 // É o MESMO caminho dos botões do Quadro e da Lista (`useProcesso().executar`). Sem visitas, não há secção.
 import { useTranslation } from "@/hooks/useTranslation";
@@ -56,14 +56,14 @@ function BotaoDoPasso({ item, nome }: { item: ItemProcesso; nome: string }) {
 
 export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, aoRegistarResultado, mais }: SeccaoVisitasProps) {
   const { t } = useTranslation();
-  const validas = ordenarVisitas(visitas).filter((v) => v.estado !== "cancelada") as VisitaPessoa[];
-  if (validas.length === 0) return null;
-  const feita = validas.some((v) => v.negocioId === null && v.estado === "feita");
+  const todas = ordenarVisitas(visitas) as VisitaPessoa[];
+  if (!todas.some((v) => v.estado !== "cancelada")) return null;
+  const feita = todas.some((v) => v.negocioId === null && v.estado === "feita");
   return (
     <Seccao titulo={t("pessoasPagina.reg.visits.title")} marca={<MarcaExemplo />}>
       <div className="space-y-2">
         <ul role="list" className="list-none divide-y divide-border p-0">
-          {validas.map((v) => (
+          {todas.map((v) => (
             <LinhaVisitaPessoa
               key={v.id} pessoa={pessoa} visita={v} negocio={v.negocioId ? negocios.get(v.negocioId) : undefined} hoje={hoje}
               alterarVisita={alterarVisita} aoRegistarResultado={aoRegistarResultado}

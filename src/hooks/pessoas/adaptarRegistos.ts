@@ -20,9 +20,13 @@ function adaptarContacto(c: ContactoFichaDb, pessoaId: string): ContactoPessoa {
   };
 }
 
-/** draft, scheduled, confirmed, in_progress e rescheduled valem «por fazer»; completed vale «feita» (as canceladas nem vêm da base). */
-function estadoDaVisita(status: string): EstadoVisitaNegocio {
-  return status === "completed" ? "feita" : "porFazer";
+/**
+ * cancelada=true ou cancelled valem «cancelada» (mesmo que o estado diga outra coisa: a marca da base manda); draft, scheduled, confirmed,
+ * in_progress e rescheduled valem «por fazer»; completed vale «feita».
+ */
+function estadoDaVisita(v: Pick<VisitaFichaDb, "status" | "cancelada">): EstadoVisitaNegocio {
+  if (v.cancelada === true || v.status === "cancelled") return "cancelada";
+  return v.status === "completed" ? "feita" : "porFazer";
 }
 
 function adaptarVisita(v: VisitaFichaDb, pessoaId: string): VisitaPessoa {
@@ -35,7 +39,7 @@ function adaptarVisita(v: VisitaFichaDb, pessoaId: string): VisitaPessoa {
     data: diaLisboa(v.inicio) ?? "",
     hora: horaLisboa(v.inicio) ?? "",
     feitoPor: v.feito_por_nome?.trim() ?? "",
-    estado: estadoDaVisita(v.status),
+    estado: estadoDaVisita(v),
     tipo: escolher(v.tipo, TIPOS_VISITA) ?? "",
     quemVaiEstar: textoOuNull(v.detalhes?.presentes) ?? "",
     duracao: "",

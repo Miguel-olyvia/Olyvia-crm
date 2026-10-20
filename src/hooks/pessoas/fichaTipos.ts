@@ -177,6 +177,8 @@ export interface VisitaFichaDb {
   inicio: string;
   fim: string | null;
   status: string;
+  /** A base marca as visitas canceladas (e devolve-as): `true` ou o estado `cancelled` valem «cancelada». Ausente nas respostas antigas. */
+  cancelada?: boolean;
   resultado: string | null;
   tipo: string | null;
   titulo: string | null;

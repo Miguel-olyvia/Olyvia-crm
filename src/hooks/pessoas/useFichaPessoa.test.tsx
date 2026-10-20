@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
-import { atividadeDb, fichaDb, pessoaDb, PESSOA_ID, seccaoDb } from "./fichaFabrica";
+import { atividadeDb, fichaDb, levantamentoDb, pessoaDb, PESSOA_ID, seccaoDb } from "./fichaFabrica";
 import {
   captureMock, criarCliente, fonteReal, montarHook, nomeChamado, parametros, respostaErro, respostaOk, rpcMock,
 } from "./fichaTestUtil";
@@ -162,6 +162,74 @@ describe("useFichaPessoa: carregar mais", () => {
     expect(result.current.ficha?.atividade?.itens).toHaveLength(2);
     expect(result.current.erroAoCarregarMais?.codigo).toBe("NG009");
     expect(result.current.estado).toBe("ok");
+  });
+});
+
+describe("useFichaPessoa: os levantamentos vêm todos", () => {
+  const c1 = { data: "2026-10-03", id: "l2" };
+  const c2 = { data: "2026-10-02", id: "l4" };
+  const pagina = (ids: string[], tem: boolean, proximo: typeof c1 | null) => fichaDb({
+    levantamentos: seccaoDb(ids.map((id) => levantamentoDb({ id })), { total: 5, tem_mais: tem, proximo }),
+  });
+  const idsDe = (r: { current: ReturnType<typeof useFichaPessoa> }) => r.current.ficha?.levantamentos?.itens.map((i) => i.id);
+
+  it("enquanto tem_mais for verdadeiro pede a página seguinte, e só dá a ficha por pronta quando estão todas", async () => {
+    rpcMock.mockReturnValueOnce(respostaOk(pagina(["l1", "l2"], true, c1)));
+    let resolver: (v: unknown) => void = () => undefined;
+    rpcMock.mockReturnValueOnce(new Promise((r) => { resolver = r; }));
+    const { result } = montar();
+    await waitFor(() => expect(rpcMock).toHaveBeenCalledTimes(2));
+    expect(result.current.estado).toBe("a-carregar");
+    expect(result.current.ficha).toBeNull();
+    rpcMock.mockReturnValueOnce(respostaOk(pagina(["l5"], false, null)));
+    resolver({ data: pagina(["l3", "l4"], true, c2), error: null });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(idsDe(result)).toEqual(["l1", "l2", "l3", "l4", "l5"]);
+    expect(result.current.ficha?.levantamentos).toMatchObject({ tem_mais: false, proximo: null });
+    expect(parametros(1)).toEqual({
+      p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_limite: 30, p_depois: { levantamentos: c1 }, p_partes: ["levantamentos"],
+    });
+    expect(parametros(2)).toMatchObject({ p_depois: { levantamentos: c2 }, p_partes: ["levantamentos"] });
+    expect(rpcMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("uma falha numa página seguinte não derruba a ficha: fica com o que veio, a secção continua com tem_mais e o erro diz-se", async () => {
+    rpcMock.mockReturnValueOnce(respostaOk(pagina(["l1", "l2"], true, c1)));
+    rpcMock.mockReturnValueOnce(respostaErro("NG009"));
+    const { result } = montar();
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(idsDe(result)).toEqual(["l1", "l2"]);
+    expect(result.current.ficha?.levantamentos?.tem_mais).toBe(true);
+    expect(result.current.errosMais.levantamentos?.codigo).toBe("NG009");
+  });
+
+  it("carregarMais dos levantamentos continua até não haver mais, e não repete ids", async () => {
+    rpcMock.mockReturnValueOnce(respostaOk(pagina(["l1", "l2"], true, c1)));
+    rpcMock.mockReturnValueOnce(respostaErro("NG009"));
+    const { result } = montar();
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    rpcMock.mockReturnValueOnce(respostaOk(pagina(["l2", "l3"], true, c2)));
+    rpcMock.mockReturnValueOnce(respostaOk(pagina(["l4", "l5"], false, null)));
+    await act(async () => { await result.current.carregarMais("levantamentos"); });
+    expect(idsDe(result)).toEqual(["l1", "l2", "l3", "l4", "l5"]);
+    expect(result.current.ficha?.levantamentos?.tem_mais).toBe(false);
+    expect(result.current.errosMais.levantamentos).toBeUndefined();
+    expect(result.current.aCarregarMais).toBe(false);
+  });
+
+  it("um cursor que a base repete não faz um ciclo sem fim", async () => {
+    rpcMock.mockReturnValue(respostaOk(pagina(["l1", "l2"], true, c1)));
+    const { result } = montar();
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(rpcMock.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(result.current.ficha?.levantamentos?.tem_mais).toBe(true);
+  });
+
+  it("as outras secções não se pedem em ciclo: com tem_mais nas visitas há uma só chamada", async () => {
+    rpcMock.mockReturnValueOnce(respostaOk(fichaDb({ visitas: seccaoDb([], { tem_mais: true, proximo: { em: "x", id: "v1" } }) })));
+    const { result } = montar();
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(rpcMock).toHaveBeenCalledTimes(1);
   });
 });
 

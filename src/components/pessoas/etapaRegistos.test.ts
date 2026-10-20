@@ -70,6 +70,11 @@ describe("etapaDosRegistos", () => {
 });
 
 describe("registosParaAbordagem: o que faz a pessoa voltar à Parte 1", () => {
+  it("uma visita cancelada não conta como registo por ligar", () => {
+    const r = registos({ visitas: [visita("c", "2026-10-12", "cancelada"), visita("f", "2026-10-12", "feita")] });
+    expect(registosParaAbordagem(r, [], HOJE).visitas.map((v) => v.id)).toEqual(["f"]);
+  });
+
   it("só conta o que está por ligar e é posterior ao último negócio (criado há `dias`)", () => {
     const n = negocio("n1", 10); // criado a 2026-10-05
     const r = registos({

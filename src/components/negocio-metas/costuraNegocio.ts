@@ -43,6 +43,8 @@ export interface DadosNegocio {
   /** `pessoas.create`: criar um negócio. */
   podeCriar: boolean;
   leadsAbertas: readonly LeadAbertaCostura[];
+  /** Os levantamentos da lista são todos os da pessoa (a base pagina): sem isto, «o mais recente» pode ser só o mais recente carregado. */
+  levantamentosCompletos: boolean;
   /** Os documentos antigos da pessoa sem negócio; vazio se não há. */
   documentosPorLigar: readonly DocumentoPorLigar[];
 }

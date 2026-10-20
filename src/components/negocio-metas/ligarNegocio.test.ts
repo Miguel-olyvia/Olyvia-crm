@@ -38,6 +38,12 @@ describe("escolhaInicial", () => {
     expect(l).toEqual({ tipo: "existente", id: "rl-2" });
   });
 
+  it("uma visita cancelada não se marca para ligar", () => {
+    const cancelada = { ...visita("rv-c", "p1"), estado: "cancelada" as const };
+    const { marcados } = escolhaInicial({ contactos: [], visitas: [visita("rv-1", "p1"), cancelada], levantamentos: [] });
+    expect(marcados).toEqual([{ tipo: "visita", id: "rv-1" }]);
+  });
+
   it("sem levantamento por ligar propõe fazer um novo; sem nada por ligar não marca nada", () => {
     expect(escolhaInicial({ contactos: [], visitas: [], levantamentos: [] })).toEqual({ marcados: [], levantamento: { tipo: "novo" } });
   });

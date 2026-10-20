@@ -90,8 +90,8 @@ export function preservarCarregados(nova: FichaDb, anterior: FichaDb | undefined
     const juntos: SeccaoDb<{ id: string }> = {
       ...agora,
       itens: [...agora.itens, ...antes.itens.filter((i) => !vistos.has(i.id))],
-      tem_mais: antes.tem_mais,
-      proximo: antes.proximo,
+      tem_mais: agora.tem_mais && antes.tem_mais,
+      proximo: agora.tem_mais ? antes.proximo : null,
     };
     resultado = { ...resultado, [tipo]: juntos } as FichaDb;
   }
@@ -112,6 +112,33 @@ function pedirFicha(organizationId: string, pessoaId: string, extra: { depois: u
   });
 }
 
+/** Teto de páginas seguintes por pedido: protege de uma base que nunca diga «acabou». */
+const MAX_PAGINAS_SEGUINTES = 100;
+
+/**
+ * Pede a página seguinte de uma secção e junta-a. Com `todas`, repete enquanto `tem_mais` for verdadeiro (pára se a base repetir o cursor).
+ * Nunca lança: numa falha devolve o que já juntou e o erro.
+ */
+async function pedirSeguintes(
+  organizationId: string, pessoaId: string, inicial: FichaDb, tipo: TipoSeccao, todas: boolean,
+): Promise<{ ficha: FichaDb; erro: unknown }> {
+  let atual = inicial;
+  for (let i = 0; i < MAX_PAGINAS_SEGUINTES; i += 1) {
+    const seccao = atual[tipo];
+    if (!seccao || !seccao.tem_mais || !seccao.proximo) break;
+    try {
+      const nova = await pedirFicha(organizationId, pessoaId, { depois: { [tipo]: seccao.proximo }, partes: [tipo] });
+      const parte = nova[tipo];
+      if (!parte) break;
+      atual = juntarFicha(atual, nova, tipo);
+      if (!todas || JSON.stringify(parte.proximo) === JSON.stringify(seccao.proximo)) break;
+    } catch (erro) {
+      return { ficha: atual, erro };
+    }
+  }
+  return { ficha: atual, erro: null };
+}
+
 interface EstadoMais {
   carregando: TipoSeccao[];
   erros: ErrosMais;
@@ -128,18 +155,6 @@ export function useFichaPessoa(pessoaId: string | null): FichaPessoaLida {
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const ativo = !!organizationId && !!pessoaId && UUID.test(pessoaId);
   const chave = fichaPessoaQueryKey(organizationId, pessoaId);
-  const consulta = useQuery({
-    queryKey: chave,
-    queryFn: async () => preservarCarregados(
-      await pedirFicha(organizationId as string, pessoaId as string, { depois: null, partes: null }),
-      client.getQueryData<FichaDb>(chave),
-      alargadasDe(client, organizationId, pessoaId as string),
-    ),
-    enabled: ativo,
-    staleTime: STALE_TIME_MS,
-    refetchOnMount: "always",
-    retry: repetir,
-  });
 
   // Os estados de «carregar mais» ficam por pessoa: um carregamento a meio de A não aparece em B.
   const [maisPorPessoa, setMaisPorPessoa] = useState<Record<string, EstadoMais>>({});
@@ -147,6 +162,22 @@ export function useFichaPessoa(pessoaId: string | null): FichaPessoaLida {
   const mexer = useCallback((id: string, mudar: (e: EstadoMais) => EstadoMais) => {
     setMaisPorPessoa((todos) => ({ ...todos, [id]: mudar(todos[id] ?? SEM_MAIS) }));
   }, []);
+
+  const consulta = useQuery({
+    queryKey: chave,
+    queryFn: async () => {
+      const primeira = await pedirFicha(organizationId as string, pessoaId as string, { depois: null, partes: null });
+      // Os levantamentos vêm todos: «o mais recente por ligar» só é fiável com todas as páginas. Uma falha deixa a ficha com o que veio.
+      const { ficha, erro } = await pedirSeguintes(organizationId as string, pessoaId as string, primeira, "levantamentos", true);
+      const falha = comoErroNeg(erro) ?? undefined;
+      mexer(pessoaId as string, (e) => ({ ...e, erros: { ...semChave(e.erros, "levantamentos"), ...(falha ? { levantamentos: falha } : {}) } }));
+      return preservarCarregados(ficha, client.getQueryData<FichaDb>(chave), alargadasDe(client, organizationId, pessoaId as string));
+    },
+    enabled: ativo,
+    staleTime: STALE_TIME_MS,
+    refetchOnMount: "always",
+    retry: repetir,
+  });
 
   const carregarMais = useCallback(async (tipo: TipoSeccao): Promise<void> => {
     const atual = client.getQueryData<FichaDb>(chave);
@@ -156,11 +187,12 @@ export function useFichaPessoa(pessoaId: string | null): FichaPessoaLida {
     emCurso.current.add(marca);
     mexer(pessoaId, (e) => ({ carregando: [...e.carregando, tipo], erros: { ...e.erros, [tipo]: undefined } }));
     try {
-      const nova = await pedirFicha(organizationId as string, pessoaId, { depois: { [tipo]: seccao.proximo }, partes: [tipo] });
-      client.setQueryData<FichaDb>(chave, (velha) => (velha ? juntarFicha(velha, nova, tipo) : velha));
-      alargadasDe(client, organizationId, pessoaId).add(tipo);
-      mexer(pessoaId, (e) => ({ ...e, carregando: e.carregando.filter((t) => t !== tipo), erros: semChave(e.erros, tipo) }));
-    } catch (erro) {
+      // Os levantamentos pedem-se até ao fim; as outras secções, uma página de cada vez.
+      const { ficha: completa, erro } = await pedirSeguintes(organizationId as string, pessoaId, atual as FichaDb, tipo, tipo === "levantamentos");
+      if (completa !== atual) {
+        client.setQueryData<FichaDb>(chave, (velha) => (velha ? { ...velha, [tipo]: completa[tipo] } as FichaDb : velha));
+        alargadasDe(client, organizationId, pessoaId).add(tipo);
+      }
       const falha = comoErroNeg(erro) ?? undefined;
       mexer(pessoaId, (e) => ({ carregando: e.carregando.filter((t) => t !== tipo), erros: { ...semChave(e.erros, tipo), ...(falha ? { [tipo]: falha } : {}) } }));
     } finally {

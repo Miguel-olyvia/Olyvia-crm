@@ -61,12 +61,12 @@ export const registosDaPessoa = (estado: EstadoRegistos, pessoaId: string): Regi
   levantamentos: estado.levantamentos.filter((r) => r.pessoaId === pessoaId),
 });
 
-/** Os registos de uma pessoa que não estão ligados a nenhum negócio. */
+/** Os registos de uma pessoa que não estão ligados a nenhum negócio. Uma visita cancelada não se oferece para ligar. */
 export const registosPorLigar = (estado: EstadoRegistos, pessoaId: string): RegistosDaPessoa => {
   const dela = registosDaPessoa(estado, pessoaId);
   return {
     contactos: dela.contactos.filter((r) => r.negocioId === null),
-    visitas: dela.visitas.filter((r) => r.negocioId === null),
+    visitas: dela.visitas.filter((r) => r.negocioId === null && r.estado !== "cancelada"),
     levantamentos: dela.levantamentos.filter((r) => r.negocioId === null),
   };
 };

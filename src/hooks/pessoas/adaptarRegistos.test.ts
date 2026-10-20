@@ -36,6 +36,15 @@ describe("adaptarRegistos: visitas", () => {
     expect(estadoDe("inventado")).toBe("porFazer");
   });
 
+  it("uma visita com cancelada=true, ou com o estado cancelled, vale cancelada (mesmo que o estado diga o contrário)", () => {
+    const estadoCom = (sobre: Parameters<typeof visitaDb>[0]) => adaptarRegistos(fichaDb({ visitas: seccaoDb([visitaDb(sobre)]) })).visitas[0].estado;
+    expect(estadoCom({ status: "scheduled", cancelada: true })).toBe("cancelada");
+    expect(estadoCom({ status: "completed", cancelada: true })).toBe("cancelada");
+    expect(estadoCom({ status: "cancelled" })).toBe("cancelada");
+    expect(estadoCom({ status: "scheduled", cancelada: false })).toBe("porFazer");
+    expect(estadoCom({ status: "completed" })).toBe("feita");
+  });
+
   it("dia, hora, comercial e nota; sem morada própria usa o local como rua", () => {
     const [v] = adaptarRegistos(fichaDb({
       visitas: seccaoDb([visitaDb({ inicio: "2026-10-20T09:00:00Z", feito_por_nome: null, local: "Rua do Ouro 5", notas: "Tocar à campainha" })]),

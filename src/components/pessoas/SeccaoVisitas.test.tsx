@@ -48,6 +48,16 @@ describe("SeccaoVisitas", () => {
     expect(screen.queryByRole("heading", { name: /Visitas/ })).not.toBeInTheDocument();
   });
 
+  it("uma visita cancelada, ao lado de outras, aparece marcada «Cancelada»: sem «Alterar visita» nem «Registar o resultado»", () => {
+    montar([visitaPessoaBase("rv-1", { data: "2026-10-20" }), visitaPessoaBase("rv-c", { data: "2026-10-12", estado: "cancelada" })]);
+    const itens = screen.getAllByRole("listitem");
+    expect(itens).toHaveLength(2);
+    expect(within(itens[0]).getByText("Cancelada")).toBeInTheDocument();
+    expect(within(itens[0]).queryByRole("button")).toBeNull();
+    expect(within(itens[0]).queryByText(/ainda não foi concluída/)).toBeNull();
+    expect(within(itens[1]).queryByText("Cancelada")).toBeNull();
+  });
+
   it("uma só secção «Visitas» com todas as visitas da pessoa, por ordem cronológica, sem falar de pedidos", () => {
     montar([visitaPessoaBase("rv-2", { data: "2026-10-25" }), visitaPessoaBase("rv-1", { data: "2026-10-20" })]);
     expect(screen.getAllByRole("heading", { name: /Visitas/ })).toHaveLength(1);

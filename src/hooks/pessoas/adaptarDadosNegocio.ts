@@ -111,6 +111,6 @@ export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCo
     },
     detalhe: (negocioId) => detalhes.get(negocioId) ?? null,
     momentoGanho, podeEditar: ficha.permissoes.editar === true, podeCriar: ficha.permissoes.criar === true,
-    leadsAbertas: leadsAbertas(ficha), documentosPorLigar: documentosPorLigar(ficha),
+    leadsAbertas: leadsAbertas(ficha), levantamentosCompletos: ficha.levantamentos?.tem_mais !== true, documentosPorLigar: documentosPorLigar(ficha),
   };
 }

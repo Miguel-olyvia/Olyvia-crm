@@ -23,7 +23,7 @@ export const dadosFalsos = (extra: Partial<DadosNegocio> = {}): DadosNegocio => 
   registos: REGISTOS_VAZIOS,
   alteracoes: { editados: {}, perdidos: {}, detalhes: {}, sequencia: 0 },
   detalhe: () => null,
-  momentoGanho: "manual", podeEditar: true, podeCriar: true, leadsAbertas: [], documentosPorLigar: [],
+  momentoGanho: "manual", podeEditar: true, podeCriar: true, leadsAbertas: [], levantamentosCompletos: true, documentosPorLigar: [],
   ...extra,
 });
 

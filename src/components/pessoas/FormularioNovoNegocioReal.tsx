@@ -27,9 +27,12 @@ const CONTEUDO = cn("mt-0 rounded-sm", FOCO);
 
 type Aba = "geral" | "registos";
 
-/** A escolha de partida dos registos: os contactos e visitas por ligar marcados, e o levantamento mais recente (ou nenhum: «fazer um novo» é do P5). */
-function ligacaoInicial(porLigar: ReturnType<typeof registosPorLigar>): LigarRegistos {
-  const inicial = ligarInicial(porLigar);
+/**
+ * A escolha de partida dos registos: os contactos e visitas por ligar marcados, e o levantamento mais recente (ou nenhum: «fazer um novo» é do P5).
+ * Com a lista de levantamentos incompleta (faltam páginas) não se propõe «o mais recente»: seria o mais recente dos carregados.
+ */
+function ligacaoInicial(porLigar: ReturnType<typeof registosPorLigar>, levantamentosCompletos: boolean): LigarRegistos {
+  const inicial = ligarInicial(levantamentosCompletos ? porLigar : { ...porLigar, levantamentos: [] });
   return inicial.levantamento.tipo === "novo" ? { ...inicial, levantamento: { tipo: "dispensar" } } : inicial;
 }
 
@@ -61,7 +64,7 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOc
   const [lead, setLead] = useState(() => leadMaisRecente(dados.leadsAbertas)?.id ?? "");
   const [reabrir, setReabrir] = useState(false);
   const porLigar = useMemo(() => registosPorLigar(dados.registos, pessoaId), [dados.registos, pessoaId]);
-  const [ligar, setLigar] = useState<LigarRegistos>(() => ligacaoInicial(porLigar));
+  const [ligar, setLigar] = useState<LigarRegistos>(() => ligacaoInicial(porLigar, dados.levantamentosCompletos));
   const [docs, setDocs] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     aoMudarOcupado(envio.aGuardar);

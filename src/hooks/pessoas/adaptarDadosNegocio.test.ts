@@ -41,6 +41,16 @@ describe("adaptarDadosNegocio: os registos", () => {
   });
 });
 
+describe("adaptarDadosNegocio: os levantamentos estão todos?", () => {
+  const com = (tem_mais: boolean | null) => dados(fichaDb({ levantamentos: tem_mais === null ? null : seccaoDb([], { tem_mais }) }));
+
+  it("só com tem_mais verdadeiro a lista está incompleta", () => {
+    expect(com(true).levantamentosCompletos).toBe(false);
+    expect(com(false).levantamentosCompletos).toBe(true);
+    expect(com(null).levantamentosCompletos).toBe(true);
+  });
+});
+
 describe("adaptarDadosNegocio: as perdas", () => {
   const perdido = negocioDb({ id: "n9", estado: "perdido", fase_perda: "proposta", motivo_perda: "Preço", perdido_em: "2026-09-30T23:30:00Z" });
 

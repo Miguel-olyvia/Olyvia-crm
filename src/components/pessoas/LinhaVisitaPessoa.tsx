@@ -1,6 +1,6 @@
 // Uma visita da pessoa, no Resumo da ficha: o dia da semana, a data e a hora, o estado em texto (Por fazer ou Feita), o resultado (se já se
 // registou), a MORADA DA VISITA (com a indicação de que é igual à morada da lead ou outra), a nota de acesso, o comercial e a que negócio
-// está ligada (ou que está por ligar). Uma visita por fazer e por ligar pode alterar-se; uma já feita já aconteceu; uma ligada a um negócio
+// está ligada (ou que está por ligar). Uma visita cancelada só se lê: diz «Cancelada» e não pede resultado, nem se altera, nem se liga. Uma visita por fazer e por ligar pode alterar-se; uma já feita já aconteceu; uma ligada a um negócio
 // só se desliga na ficha do negócio.
 import { useState } from "react";
 import { AlertCircle, CalendarClock, MapPin } from "lucide-react";
@@ -54,6 +54,7 @@ export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita
   const [aAlterar, setAAlterar] = useState(false);
   const quando = useQuando(visita.data, visita.hora);
   const porFazer = visita.estado === "porFazer";
+  const cancelada = visita.estado === "cancelada";
   const ligada = visita.negocioId !== null;
   const podeAlterar = porFazer && !ligada && alterarVisita !== undefined;
   const porConcluir = porFazer && visita.data !== "" && visita.data < hoje;
@@ -85,9 +86,11 @@ export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita
         {visita.nota && <LinhaCampo rotulo={t(`${K}access`)}>{visita.nota}</LinhaCampo>}
         <LinhaCampo rotulo={t(`${K}rep`)}>{visita.feitoPor}</LinhaCampo>
       </ListaCampos>
-      <p className="text-sm text-muted-foreground">
-        {ligada ? t("pessoasPagina.reg.visits.linked", { deal: negocio ?? "" }) : t("pessoasPagina.reg.visits.unlinked")}
-      </p>
+      {!cancelada && (
+        <p className="text-sm text-muted-foreground">
+          {ligada ? t("pessoasPagina.reg.visits.linked", { deal: negocio ?? "" }) : t("pessoasPagina.reg.visits.unlinked")}
+        </p>
+      )}
       {visita.resultado && <p className="text-[15px] font-medium text-foreground">{t(`${R}summary`, { result: t(`${R}result.${visita.resultado}`) })}</p>}
       {(podeAlterar || pedeResultado) ? (
         <div className="flex flex-wrap gap-2">

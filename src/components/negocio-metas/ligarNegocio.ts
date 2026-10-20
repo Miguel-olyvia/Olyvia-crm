@@ -31,7 +31,7 @@ export function escolhaInicial(porLigar: RegistosDaPessoa): { marcados: RefRegis
   return {
     marcados: [
       ...porLigar.contactos.map((c): RefRegisto => ({ tipo: "contacto", id: c.id })),
-      ...porLigar.visitas.map((v): RefRegisto => ({ tipo: "visita", id: v.id })),
+      ...porLigar.visitas.filter((v) => v.estado !== "cancelada").map((v): RefRegisto => ({ tipo: "visita", id: v.id })),
     ],
     levantamento: maisRecente ? { tipo: "existente", id: maisRecente.id } : { tipo: "novo" },
   };

@@ -115,6 +115,13 @@ describe("NovoNegocioReal: criar", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("com os levantamentos por carregar (a lista pode estar incompleta) não propõe «o mais recente»: nasce sem levantamento", () => {
+    const { mutacoes } = montar(mutacoesFalsas(), { levantamentosCompletos: false });
+    escrever("Casa de banho");
+    fireEvent.click(criar());
+    expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({ registos: [{ tipo: "contacto", id: "c1" }, { tipo: "visita", id: "v1" }], levantamentoId: null }));
+  });
+
   it("desmarcar um registo (e dispensar o levantamento) tira-o do pedido; um registo já ligado a outro negócio nem se oferece", () => {
     const { mutacoes } = montar();
     escrever("Sala");

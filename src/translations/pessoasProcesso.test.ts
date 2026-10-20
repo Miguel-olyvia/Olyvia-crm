@@ -178,7 +178,10 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
   });
 
   it("os textos das visitas da pessoa existem nas duas línguas, com os mesmos marcadores", () => {
-    const chaves = ["pessoasPagina.nextVisit.state.porFazer", "pessoasPagina.nextVisit.state.feita", "pessoasPagina.nextVisit.changeLabel"] as const;
+    const chaves = [
+      "pessoasPagina.nextVisit.state.porFazer", "pessoasPagina.nextVisit.state.feita", "pessoasPagina.nextVisit.state.cancelada",
+      "pessoasPagina.nextVisit.changeLabel",
+    ] as const;
     for (const chave of chaves) {
       expect(pessoasVisitaTranslations.pt[chave], chave).toBeTruthy();
       expect(pessoasVisitaTranslations.en[chave], chave).toBeTruthy();

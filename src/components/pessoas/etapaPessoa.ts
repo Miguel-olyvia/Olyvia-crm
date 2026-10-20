@@ -110,13 +110,14 @@ function criadoEmDoUltimo(negocios: readonly NegocioPessoa[], hoje: string): str
 
 /**
  * Os registos que contam para a abordagem: por ligar a nenhum negócio e posteriores (dia estritamente depois) ao último negócio. Um
- * registo deixado por ligar antes de o negócio existir foi deixado de fora de propósito e não faz a pessoa voltar.
+ * registo deixado por ligar antes de o negócio existir foi deixado de fora de propósito e não faz a pessoa voltar. Uma visita cancelada não conta.
  */
 export function registosParaAbordagem(registos: RegistosDaPessoa, negocios: readonly NegocioPessoa[], hoje: string): RegistosDaPessoa {
   const limite = criadoEmDoUltimo(negocios, hoje);
   const conta = (r: { negocioId: string | null; data: string }): boolean => r.negocioId === null && (limite === null || r.data > limite);
   return {
-    contactos: registos.contactos.filter(conta), visitas: registos.visitas.filter(conta), levantamentos: registos.levantamentos.filter(conta),
+    contactos: registos.contactos.filter(conta), visitas: registos.visitas.filter((v) => v.estado !== "cancelada" && conta(v)),
+    levantamentos: registos.levantamentos.filter(conta),
   };
 }
 
