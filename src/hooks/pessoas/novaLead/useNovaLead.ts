@@ -64,7 +64,8 @@ export interface UseNovaLead {
   voltarDaConfirmacao: () => void;
   abrirExistente: (pessoa: PessoaBloqueio) => void;
   cancelarDuplicados: () => void;
-  tentarDeNovo: () => Promise<void>;
+  /** Repete o que falhou. Ao criar, com `entradaAtual` (o formulário de agora) em vez da última enviada: depois de um erro os campos voltam a ser editáveis. */
+  tentarDeNovo: (entradaAtual?: EntradaNovaLead) => Promise<void>;
   reiniciar: () => void;
 }
 
@@ -248,11 +249,11 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
     setParcial(null);
   }, []);
 
-  const tentarDeNovo = useCallback(async (): Promise<void> => {
+  const tentarDeNovo = useCallback(async (entradaAtual?: EntradaNovaLead): Promise<void> => {
     const antes = ultima.current;
     setErro(null);
     if (antes === "atualizar") await confirmarAtualizar();
-    else if (antes === "criar" && pendente.current) await submeter(pendente.current.entrada);
+    else if (antes === "criar" && pendente.current) await submeter(entradaAtual ?? pendente.current.entrada);
   }, [confirmarAtualizar, submeter]);
 
   return { aCriar, duplicados, confirmar, erro, parcial, errosCampo, submeter, atualizar, confirmarAtualizar, voltarDaConfirmacao, abrirExistente, cancelarDuplicados, tentarDeNovo, reiniciar };

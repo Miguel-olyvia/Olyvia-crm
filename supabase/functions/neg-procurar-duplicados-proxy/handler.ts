@@ -30,10 +30,11 @@ export interface ProcurarDuplicadosProxyDeps {
 
 const requestSchema = z.object({
   orgId: z.string().trim().uuid(),
-  email: z.string().trim().min(1).nullable().optional(),
-  phone: z.string().trim().min(1).nullable().optional(),
-  nif: z.string().trim().min(1).nullable().optional(),
-  countryCode: z.string().trim().min(1).optional(),
+  // Limites de tamanho: sem eles qualquer sessão mandava megabytes ao hash e à RPC. 254 é o máximo de um endereço de email (RFC 5321).
+  email: z.string().trim().min(1).max(254).nullable().optional(),
+  phone: z.string().trim().min(1).max(30).nullable().optional(),
+  nif: z.string().trim().min(1).max(64).nullable().optional(),
+  countryCode: z.string().trim().min(1).max(8).optional(),
 });
 
 // Os códigos da função da base que a UI traduz. Respondem com HTTP 200 e `success: false`: o `functions.invoke` do browser deita fora o

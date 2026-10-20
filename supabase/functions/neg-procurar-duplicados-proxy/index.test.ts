@@ -211,3 +211,65 @@ Deno.test("a base devolve algo que não é lista => data vazia", async () => {
   );
   assertEquals(await res.json(), { success: true, data: [] });
 });
+
+Deno.test("limites de tamanho: nif acima de 64, email acima de 254, telefone acima de 30 ou país acima de 8 => 400 e a RPC não corre", async () => {
+  const excessos: Record<string, unknown>[] = [
+    { nif: "1".repeat(65) },
+    { email: `${"a".repeat(250)}@x.pt` },
+    { phone: "9".repeat(31) },
+    { countryCode: "P".repeat(9) },
+  ];
+  for (const extra of excessos) {
+    const { createUserClient, rpcCalls, createUserClientCalls } = makeMockUserClientFactory();
+    const res = await handleProcurarDuplicadosProxyRequest(
+      makeRequest({ orgId: ORG_ID, ...extra }, `Bearer ${CALLER_JWT}`), baseDeps({ createUserClient }),
+    );
+    assertEquals(res.status, 400, JSON.stringify(Object.keys(extra)));
+    const body = await res.json();
+    assertEquals(body.success, false);
+    assertEquals(body.code, "INVALID_INPUT");
+    assertEquals(rpcCalls.length, 0);
+    assertEquals(createUserClientCalls.length, 0);
+  }
+});
+
+Deno.test("limites de tamanho: no limite exato passa (nif 64, email 254, telefone 30)", async () => {
+  const { createUserClient, rpcCalls } = makeMockUserClientFactory();
+  const email = `${"a".repeat(249)}@x.pt`;
+  assertEquals(email.length, 254);
+  const res = await handleProcurarDuplicadosProxyRequest(
+    makeRequest({ orgId: ORG_ID, nif: "1".repeat(64), email, phone: "9".repeat(30), countryCode: "pt" }, `Bearer ${CALLER_JWT}`),
+    baseDeps({ createUserClient }),
+  );
+  assertEquals(res.status, 200);
+  assertEquals(rpcCalls.length, 1);
+});
+
+Deno.test("o Authorization de quem chama é exatamente o que chega a createUserClient (nunca um token da função)", async () => {
+  const { createUserClient, createUserClientCalls } = makeMockUserClientFactory();
+  await handleProcurarDuplicadosProxyRequest(
+    makeRequest({ orgId: ORG_ID, email: "ana@x.pt" }, "Bearer outro-jwt-do-chamador"), baseDeps({ createUserClient }),
+  );
+  assertEquals(createUserClientCalls, ["Bearer outro-jwt-do-chamador"]);
+});
+
+Deno.test("token de serviço/cron: passa a autenticação, o token segue tal e qual e a base recusa com 42501 => HTTP 200 success:false 42501", async () => {
+  const anterior = Deno.env.get("CRON_SHARED_SECRET");
+  Deno.env.set("CRON_SHARED_SECRET", "segredo-cron-de-teste");
+  try {
+    const { createUserClient, createUserClientCalls, rpcCalls } = makeMockUserClientFactory({ rpcError: { message: "permission denied", code: "42501" } });
+    const res = await handleProcurarDuplicadosProxyRequest(
+      makeRequest({ orgId: ORG_ID, email: "ana@x.pt" }, "Bearer segredo-cron-de-teste"),
+      baseDeps({ createUserClient, supabaseAdmin: makeMockSupabaseAdmin({ authUser: null }) }),
+    );
+    assertEquals(createUserClientCalls, ["Bearer segredo-cron-de-teste"]);
+    assertEquals(rpcCalls.length, 1);
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.success, false);
+    assertEquals(body.code, "42501");
+  } finally {
+    if (anterior === undefined) Deno.env.delete("CRON_SHARED_SECRET");
+    else Deno.env.set("CRON_SHARED_SECRET", anterior);
+  }
+});

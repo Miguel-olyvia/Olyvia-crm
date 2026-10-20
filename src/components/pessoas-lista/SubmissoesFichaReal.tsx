@@ -121,17 +121,24 @@ export function SubmissoesFichaReal({ submissoes, estado, desatualizado = false,
       </div>
     );
   }
+  // O aviso de leitura falhada vale com lista ou sem ela: uma lista vazia e desatualizada não pode dizer só «Sem submissões».
+  const aviso = desatualizado && (
+    <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+      <p role="status">{t(`${S}stale`)}</p>
+      <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={aoTentarDeNovo}>{t("pessoasPagina.real.retry")}</Button>
+    </div>
+  );
   if (submissoes.length === 0) {
-    return <p className="rounded-xl border border-dashed border-border p-4 text-sm font-semibold text-foreground">{t(`${S}empty`)}</p>;
+    return (
+      <>
+        {aviso}
+        <p className="rounded-xl border border-dashed border-border p-4 text-sm font-semibold text-foreground">{t(`${S}empty`)}</p>
+      </>
+    );
   }
   return (
     <>
-      {desatualizado && (
-        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-          <p role="status">{t(`${S}stale`)}</p>
-          <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={aoTentarDeNovo}>{t("pessoasPagina.real.retry")}</Button>
-        </div>
-      )}
+      {aviso}
       <ul aria-label={t(`${S}label`)}>{submissoes.map((s) => <Cartao key={s.chave} s={s} hoje={hoje} />)}</ul>
     </>
   );

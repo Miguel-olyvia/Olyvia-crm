@@ -8,6 +8,7 @@ import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFonte
 import type { ListaPessoas } from "@/hooks/pessoas/useListaPessoas";
 import { listaBase, pessoaLista } from "./fabricaLista";
 import { PessoasReal } from "./PessoasReal";
+import { ATRASO_LIMPAR_MS } from "./useMensagemAnunciada";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
@@ -82,7 +83,29 @@ describe("PessoasReal: o botão «Nova lead»", () => {
     desenhar();
     act(() => { fireEvent.click(screen.getByRole("button", { name: "Nova lead" })); });
     expect(screen.getByTestId("url").textContent).toContain("open=33333333-3333-4333-8333-333333333333");
-    const viva = screen.getAllByRole("status").find((r) => r.getAttribute("aria-live") === "polite" && r.className.includes("sr-only"));
-    expect(viva).toHaveTextContent("Lead criada: Carla.");
+    const viva = screen.getByText("Lead criada: Carla.").closest("[aria-live='polite']");
+    expect(viva).not.toBeNull();
+    expect(viva?.className).toContain("sr-only");
+  });
+
+  it("a mensagem da ação tem a sua região viva: a das contagens não é atómica e não a leva, para não voltar a ser lida quando a mensagem se retira", () => {
+    vi.useFakeTimers();
+    try {
+      desenhar();
+      const contagens = screen.getAllByText(/pessoas carregadas/).map((e) => e.closest("[aria-live='polite']")).find(Boolean) as HTMLElement;
+      expect(contagens).not.toHaveAttribute("aria-atomic", "true");
+      const antes = contagens.textContent;
+      act(() => { fireEvent.click(screen.getByRole("button", { name: "Nova lead" })); });
+      expect(contagens).not.toHaveTextContent("Lead criada");
+      expect(contagens.textContent).toBe(antes);
+      const acao = screen.getByText("Lead criada: Carla.").closest("[aria-live='polite']") as HTMLElement;
+      expect(acao).not.toBe(contagens);
+      expect(acao).not.toHaveAttribute("aria-atomic", "true");
+      act(() => { vi.advanceTimersByTime(ATRASO_LIMPAR_MS + 100); });
+      expect(screen.queryByText("Lead criada: Carla.")).toBeNull();
+      expect(contagens.textContent).toBe(antes);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

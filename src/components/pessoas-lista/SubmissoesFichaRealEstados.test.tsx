@@ -38,6 +38,20 @@ describe("SubmissoesFichaReal: lista desatualizada", () => {
     expect(aoTentarDeNovo).toHaveBeenCalledTimes(1);
   });
 
+  it("lista vazia mas desatualizada (releitura falhada): avisa e deixa repetir, em vez de dizer só «Sem submissões»", () => {
+    const { aoTentarDeNovo } = desenhar({ desatualizado: true, submissoes: [] });
+    expect(screen.getByRole("status")).toHaveTextContent("Não foi possível atualizar as submissões.");
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    expect(aoTentarDeNovo).toHaveBeenCalledTimes(1);
+  });
+
+  it("lista vazia e atualizada: só «Sem submissões», sem aviso nem botão", () => {
+    desenhar({ submissoes: [] });
+    expect(screen.getByText(/Sem submissões/)).toBeInTheDocument();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Tentar de novo" })).toBeNull();
+  });
+
   it("sem o aviso, não há botão nem estado", () => {
     desenhar();
     expect(screen.queryByRole("status")).toBeNull();

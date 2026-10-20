@@ -137,8 +137,14 @@ export function DuplicadosNovaLead(p: DuplicadosProps) {
     const botao = Array.from(conteudo.current?.querySelectorAll<HTMLElement>("[data-atualizar]") ?? []).find((el) => el.dataset.atualizar === veioDe);
     (botao ?? conteudo.current?.querySelector<HTMLElement>("[data-titulo-duplicados]"))?.focus();
   }, [idConfirmar, decisao]);
+  // A gravar, o diálogo não se fecha (Escape, clique fora): voltar ou cancelar largava a pessoa a que «Tentar de novo» se aplica.
+  const aoMudarAberto = (aberto: boolean) => {
+    if (aberto || p.aGuardar) return;
+    if (p.confirmar) p.aoVoltar();
+    else p.aoCancelar();
+  };
   return (
-    <AlertDialog open={decisao !== null} onOpenChange={(aberto) => { if (!aberto) (p.confirmar ? p.aoVoltar() : p.aoCancelar()); }}>
+    <AlertDialog open={decisao !== null} onOpenChange={aoMudarAberto}>
       <AlertDialogContent ref={conteudo} className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <AlertDialogHeader>
           <AlertDialogTitle tabIndex={-1} data-titulo-duplicados="">{t(`${N}title`)}</AlertDialogTitle>

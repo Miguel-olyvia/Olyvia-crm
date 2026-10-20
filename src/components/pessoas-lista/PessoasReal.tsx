@@ -152,7 +152,6 @@ export function PessoasReal() {
     t(`${R}orderAnnounce`, { ordem: t(`${R}order.${f.filtros.ordem}`) }),
     textoEstado(t, lista),
     dicaPendente ? t(`${R}searchHint`) : "",
-    mensagemAcao,
   ].filter(Boolean).join(". ");
   return (
     <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
@@ -180,7 +179,9 @@ export function PessoasReal() {
         />
       </div>
       {/* Sempre montado: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
-      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{anuncio}</div>
+      <div role="status" aria-live="polite" className="sr-only">{anuncio}</div>
+      {/* A mensagem de uma ação (lead criada, dados atualizados) tem a sua região: ao retirar-se aos 4 s não mexe na das contagens, que o leitor releria. */}
+      <div aria-live="polite" className="sr-only">{mensagemAcao}</div>
       <Corpo
         lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined}
         colunas={colunas.visiveis} comDados={comFicha}

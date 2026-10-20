@@ -61,12 +61,28 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
     if (Object.keys(p.errosCampo).length === 0) return;
     conteudo.current?.querySelector<HTMLElement>('input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]')?.focus();
   }, [p.errosCampo]);
+  // O fieldset desativado tira o foco ao botão «Criar lead» (o corpo da página passa a ser o elemento ativo). Quando a gravação acaba e o
+  // diálogo continua aberto (um erro), o foco volta ao primeiro campo marcado ou, sem campos marcados, ao botão. Se o foco já está noutro
+  // sítio (o diálogo de duplicados, por exemplo), não se mexe.
+  const criarRef = useRef<HTMLButtonElement>(null);
+  const eraACriar = useRef(false);
+  useEffect(() => {
+    const acabou = eraACriar.current && !p.aCriar;
+    eraACriar.current = p.aCriar;
+    if (!acabou || !p.aberto) return;
+    const ativo = document.activeElement;
+    // Perdido = o corpo da página ou o próprio contentor do diálogo (é para onde a armadilha de foco o manda quando o botão se desativa).
+    if (ativo && ativo !== document.body && ativo !== conteudo.current) return;
+    const marcado = conteudo.current?.querySelector<HTMLElement>('input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]');
+    (marcado ?? criarRef.current)?.focus();
+  }, [p.aCriar, p.aberto]);
   // Enquanto grava, o diálogo não se fecha (nem por Cancelar, Escape ou clique fora): o resultado chegaria a um diálogo já fechado.
   const aoMudarAberto = (aberto: boolean) => {
     if (!aberto && p.aCriar) return;
     p.aoMudarAberto(aberto);
   };
-  const semCampos = p.camposACarregar || p.camposErro;
+  // Sem campos da campanha, ou sem campanhas, origens ou comerciais, não se cria: a lead sairia sem campanha ou sem comercial sem se querer.
+  const semCampos = p.camposACarregar || p.camposErro || p.erroApoio;
   const distrito = [p.valores.distrito, p.valores.district].find((v) => typeof v === "string" && v) as string | undefined;
   return (
     <Dialog open={p.aberto} onOpenChange={aoMudarAberto}>
@@ -90,7 +106,10 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
         <form noValidate className="space-y-4" onSubmit={(e) => { e.preventDefault(); p.aoCriar(); }}>
           {p.erroApoio && (
             <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">
-              <p>{t(`${N}supportError`)}</p>
+              <div className="space-y-1">
+                <p>{t(`${N}supportError`)}</p>
+                <p>{t(`${N}supportBlocked`)}</p>
+              </div>
               <Button type="button" variant="outline" className={`min-h-11 ${FOCO}`} onClick={p.aoRepetirDados}>{t(`${N}error.retry`)}</Button>
             </div>
           )}
@@ -132,7 +151,7 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
           <p role="status" aria-live="polite" className="min-h-5 text-xs text-muted-foreground">{p.aCriar ? t(`${N}checking`) : ""}</p>
           <div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col-reverse gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" className={`min-h-11 ${FOCO}`} disabled={p.aCriar} onClick={() => p.aoMudarAberto(false)}>{t(`${N}cancel`)}</Button>
-            <Button type="submit" className={`min-h-11 ${FOCO}`} disabled={p.aCriar || semCampos} aria-busy={p.aCriar}>
+            <Button ref={criarRef} type="submit" className={`min-h-11 ${FOCO}`} disabled={p.aCriar || semCampos} aria-busy={p.aCriar}>
               {p.aCriar ? t(`${N}creating`) : t(`${N}create`)}
             </Button>
           </div>

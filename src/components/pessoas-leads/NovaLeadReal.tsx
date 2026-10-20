@@ -6,7 +6,7 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { camposBase } from "@/hooks/pessoas/novaLead/fluxoNovaLead";
 import { isBaseFieldCoveredByCampaignFields } from "@/hooks/pessoas/novaLead/coberturaCampanha";
 import { useDadosNovaLead } from "@/hooks/pessoas/novaLead/useDadosNovaLead";
-import { useNovaLead, type ConclusaoNovaLead } from "@/hooks/pessoas/novaLead/useNovaLead";
+import { useNovaLead, type ConclusaoNovaLead, type EntradaNovaLead } from "@/hooks/pessoas/novaLead/useNovaLead";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { SEM_ORIGEM } from "./CampanhaOrigemNovaLead";
@@ -63,14 +63,25 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
   }, [aberto, reiniciar]);
 
   const mudarValor = useCallback((chave: string, valor: unknown) => setValores((v) => ({ ...v, [chave]: valor })), []);
-  const criar = useCallback(() => {
-    // Com campanha, sem os campos dela (a carregar ou em erro) não se cria: a lead sairia sem os campos obrigatórios.
-    if (campanhaId && (dados.camposACarregar || dados.camposErro)) return;
+  /** O formulário de agora, ou null quando não se pode criar: sem os campos da campanha (a lead sairia sem os obrigatórios) ou sem as leituras de apoio. */
+  const entradaAtual = useCallback((): EntradaNovaLead | null => {
+    if (dados.erroApoio) return null;
+    if (campanhaId && (dados.camposACarregar || dados.camposErro)) return null;
     const origem = origemId && origemId !== SEM_ORIGEM ? dados.origens.find((o) => o.id === origemId) : undefined;
-    void nova.submeter({
+    return {
       base, campanha: dados.camposCampanha, valores, origemId: origem ? origem.id : null, origemNome: origem?.name ?? "manual", campanhaId: campanhaId || null,
-    });
-  }, [nova, base, dados.camposCampanha, dados.camposACarregar, dados.camposErro, dados.origens, valores, origemId, campanhaId]);
+    };
+  }, [base, dados.camposCampanha, dados.camposACarregar, dados.camposErro, dados.erroApoio, dados.origens, valores, origemId, campanhaId]);
+  const { submeter, tentarDeNovo } = nova;
+  const criar = useCallback(() => {
+    const entrada = entradaAtual();
+    if (entrada) void submeter(entrada);
+  }, [entradaAtual, submeter]);
+  // «Tentar de novo» depois de um erro ao verificar repete com o que o formulário tem agora, não com o que se enviou da primeira vez.
+  const repetir = useCallback(() => {
+    const entrada = entradaAtual();
+    if (entrada) void tentarDeNovo(entrada);
+  }, [entradaAtual, tentarDeNovo]);
 
   const irParaFormularios = useCallback(() => {
     // Sair daqui abandona o que já se escreveu: confirma antes de perder dados.
@@ -92,7 +103,7 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
         aoMudarCampanha={setCampanhaId} formularioNome={formularioNome} temFormulario={dados.formularioId !== ""} origens={dados.origens}
         origemId={origemId} aoMudarOrigem={setOrigemId} comerciais={dados.comerciais} arvore={dados.arvore} orgFiltro={orgFiltro}
         aoMudarOrgFiltro={setOrgFiltro} aCriar={nova.aCriar && nova.duplicados === null} erro={nova.erro?.tipo === "verificar" ? nova.erro : null}
-        aoCriar={criar} aoCriarFormulario={irParaFormularios} aoTentarDeNovo={() => void nova.tentarDeNovo()}
+        aoCriar={criar} aoCriarFormulario={irParaFormularios} aoTentarDeNovo={repetir}
         aoFocarOrigem={() => botao.current?.focus()} camposACarregar={dados.camposACarregar} camposErro={dados.camposErro}
         erroApoio={dados.erroApoio} aoRepetirDados={dados.repetir}
       />
