@@ -11,6 +11,15 @@ const CHAVES_USADAS = [
   "opening", "notFound", "partialCall", "partialVisit", "saving", "staleWarn", "unknownResult",
   "more.contactos", "more.visitas", "more.levantamentos", "more.atividade", "more.loading",
   "activity.snoozed", "activity.lost", "activity.reopened", "activity.won", "activity.deleted", "activity.restored",
+  // A identidade (IdentidadeFichaReal) e o separador Submissões (SubmissoesFichaReal).
+  "identity.title", "identity.type", "identity.typeLegend", "identity.person", "identity.company", "identity.name", "identity.companyName",
+  "identity.firstName", "identity.lastName", "identity.edit", "identity.save", "identity.cancel", "identity.errorCompany", "identity.errorPerson",
+  "identity.saved",
+  "subs.label", "subs.empty", "subs.loading", "subs.error", "subs.noCampaign", "subs.kind.submission", "subs.fields", "subs.none",
+  "subs.review.pending", "subs.review.merged", "subs.review.new_lead", "subs.review.resolved",
+  "subs.stage.novo", "subs.stage.contactado", "subs.stage.qualificado", "subs.stage.proposta", "subs.stage.ganho", "subs.stage.perdido",
+  "subs.record.cliente", "subs.record.lead", "subs.match.email", "subs.match.telefone", "subs.match.ambos", "subs.match.conflito",
+  "subs.conflict.title", "subs.conflict.unnamed", "subs.unsaved.email", "subs.unsaved.phone",
 ].map((c) => `pessoasPagina.real.ficha.${c}`);
 
 describe("traduções da ficha real das Pessoas", () => {
@@ -32,6 +41,19 @@ describe("traduções da ficha real das Pessoas", () => {
       expect(pt[chave], chave).toBeTruthy();
       expect(en[chave], chave).toBeTruthy();
     }
+  });
+
+  it("a identidade não fala de NIF (a função da base não lhe toca)", () => {
+    for (const [chave, texto] of [...Object.entries(pt), ...Object.entries(en)]) {
+      if (chave.includes(".identity.")) expect(texto, chave).not.toMatch(/nif/i);
+    }
+  });
+
+  it("as frases de coincidência levam os marcadores que o componente preenche", () => {
+    expect(marcas(pt["pessoasPagina.real.ficha.subs.match.ambos"])).toEqual(["{email}", "{phone}", "{record}"]);
+    expect(marcas(pt["pessoasPagina.real.ficha.subs.match.email"])).toEqual(["{email}", "{record}"]);
+    expect(marcas(pt["pessoasPagina.real.ficha.subs.match.telefone"])).toEqual(["{phone}", "{record}"]);
+    expect(marcas(pt["pessoasPagina.real.ficha.subs.match.conflito"])).toEqual([]);
   });
 
   it("o aviso de falha parcial diz as duas coisas: o contacto ficou e o encerramento não", () => {

@@ -11,6 +11,9 @@ import { listaBase, pessoaLista } from "./fabricaLista";
 import { PessoasReal } from "./PessoasReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// A «Nova lead» do cabeçalho (P7) tem testes próprios; aqui não interessa. Sem permissão `leads.create`, o botão não se desenha.
+vi.mock("@/components/pessoas-leads/NovaLeadReal", () => ({ NovaLeadReal: () => null }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false, hasAnyPermission: () => false, permissions: [], loading: false }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 // Estes testes são do foco, do endereço e da ficha, não das leituras em lote por página (têm o seu ficheiro: PessoasRealColunas.test.tsx).
 const semLeituras = vi.hoisted(() => new Map());
@@ -28,6 +31,8 @@ vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
     capacidades: { chamada: true, encerrar: true, adiar: false, nota: false, visita: false, negocios: false },
   }),
 }));
+vi.mock("@/hooks/pessoas/useSubmissoesPessoa", () => ({ useSubmissoesPessoa: () => ({ submissoes: [], pendentes: 0, estado: "ok", recarregar: () => undefined }) }));
+vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: erroToast } }));
 vi.mock("@/components/pessoas/AvatarPessoa", () => ({ AvatarPessoa: () => null }));
 

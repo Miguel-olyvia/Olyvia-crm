@@ -1,6 +1,6 @@
 // O interior da ficha da pessoa: cabeçalho, barra de ações, percurso, os painéis de ação (em linha) e as abas fixas. Tudo
 // vai num único contentor que rola, para o painel de chamada e o "Guardar" ficarem alcançáveis com zoom ou em ecrãs baixos.
-import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,18 @@ import { useExecutarAcao } from "./useExecutarAcao";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
 
 type AbaFicha = "resumo" | "negocios" | "submissoes" | "notas" | "atividade";
+
+/**
+ * O separador Submissões da ficha real: o conteúdo vem de quem monta a ficha (só para ler, lido como Leads o lê) e as contagens, da leitura.
+ * Sem isto (o exemplo) o separador é o das submissões pendentes, com as ações de resolver.
+ */
+export interface SeparadorSubmissoesReal {
+  /** Quantas submissões há; `null` enquanto não se sabe (a carregar, ou a leitura falhou): o separador fica sem número. */
+  total: number | null;
+  /** Quantas estão por rever: o aviso «Voltou a contactar» oferece vê-las. */
+  pendentes: number;
+  conteudo: ReactNode;
+}
 
 export interface FichaInteriorProps {
   resumo: ResumoPessoa;
@@ -70,6 +82,10 @@ export interface FichaInteriorProps {
   maisItens?: MaisItensFicha;
   /** A atualização em segundo plano falhou e a ficha mostra os últimos dados: um aviso com «Tentar de novo». */
   avisoAtualizacao?: { aoRepetir: () => void };
+  /** O separador Submissões da ficha real (só leitura); sem isto vale o das submissões pendentes. Aparece com `podeVerSubmissoes`. */
+  separadorSubmissoes?: SeparadorSubmissoesReal;
+  /** A identidade da pessoa (a ficha real: empresa ou pessoa singular, com edição), no Resumo antes do contacto. */
+  identidade?: ReactNode;
 }
 
 interface AbasProps extends FichaInteriorProps {
@@ -102,6 +118,8 @@ function AbasFicha(p: AbasProps) {
   const { resumo, submissoes, notas, atividade } = p;
   const comNotas = p.comNotas ?? true;
   const verSubmissoes = () => p.aoMudar("submissoes");
+  const real = p.separadorSubmissoes;
+  const pendentes = real ? real.pendentes : submissoes.length;
   return (
     <Tabs value={p.aba} onValueChange={(v) => p.aoMudar(v as AbaFicha)} className="mt-2 flex flex-col">
       <ListaAbas aria-label={t("pessoasPagina.fichaTabs.label")} className="sticky top-0 z-10 shrink-0 bg-background px-6">
@@ -109,9 +127,9 @@ function AbasFicha(p: AbasProps) {
         <Aba value="negocios" rotulo={t("pessoasPagina.fichaTabs.deals")} contador={resumo.negocios.length} />
         {p.podeVerSubmissoes && (
           <Aba
-            value="submissoes" rotulo={t("pessoasPagina.fichaTabs.subs")} contador={submissoes.length}
-            contadorLeitor={submissoes.length > 0 ? textoPendentes(t, submissoes.length) : undefined}
-            novo={submissoes.length > 0}
+            value="submissoes" rotulo={t("pessoasPagina.fichaTabs.subs")} contador={real ? real.total ?? undefined : submissoes.length}
+            contadorLeitor={!real && submissoes.length > 0 ? textoPendentes(t, submissoes.length) : undefined}
+            novo={pendentes > 0}
           />
         )}
         {comNotas && <Aba value="notas" rotulo={t("pessoasPagina.fichaTabs.notes")} contador={notas.length} />}
@@ -120,16 +138,18 @@ function AbasFicha(p: AbasProps) {
       <div data-foco-ficha tabIndex={-1} className="px-6 pb-6 outline-none">
         <TabsContent value="resumo" className="mt-0">
           <ResumoFicha
-            resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={submissoes.length}
+            resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
             aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
-            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens}
+            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade}
           />
         </TabsContent>
         <TabsContent value="negocios" className="mt-0 pt-4"><ConteudoNegocios {...p} /></TabsContent>
         <TabsContent value="submissoes" className="mt-0 pt-4">
-          <FichaSubmissoes
-            submissoes={submissoes} hoje={p.hoje} pessoas={p.pessoas} aoPedir={(id) => p.aoPedir(id, resumo.pessoa.id)} aoVerTodas={p.aoVerTodasSubmissoes}
-          />
+          {real ? real.conteudo : (
+            <FichaSubmissoes
+              submissoes={submissoes} hoje={p.hoje} pessoas={p.pessoas} aoPedir={(id) => p.aoPedir(id, resumo.pessoa.id)} aoVerTodas={p.aoVerTodasSubmissoes}
+            />
+          )}
         </TabsContent>
         {comNotas && (
           <TabsContent value="notas" className="mt-0 pt-4">

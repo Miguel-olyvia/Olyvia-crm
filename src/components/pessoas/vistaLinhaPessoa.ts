@@ -37,7 +37,7 @@ export interface VistaLinhaPessoa {
   /** `null`: nunca houve contacto. */
   diasSemContacto: number | null;
   /** `undefined`: resultado desconhecido, sem selo. «semContacto» só quando se sabe que nunca houve contacto. */
-  resultado?: ResultadoOuNenhum;
+  resultado?: ResultadoOuNenhum | "outro";
   /** `null`: a fonte não sabe o passo (a linha mostra «—» e remete para a ficha). «nenhum»: sabe-se que não há. */
   passo: IdPasso | null;
   valorEmJogo: number;

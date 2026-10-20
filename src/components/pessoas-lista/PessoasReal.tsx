@@ -4,6 +4,8 @@ import { MIN_PESQUISA, type FiltrosLista } from "@/hooks/pessoas/listaPessoasTip
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useListaPessoas, type ListaPessoas } from "@/hooks/pessoas/useListaPessoas";
 import { Button } from "@/components/ui/button";
+import { PermissionGate } from "@/components/PermissionGate";
+import { NovaLeadReal } from "@/components/pessoas-leads/NovaLeadReal";
 import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { FOCO } from "@/components/negocio-metas/estilos";
@@ -12,6 +14,7 @@ import { BarraListaReal } from "./BarraListaReal";
 import { BarraProgresso } from "./BarraProgresso";
 import { DialogoColunasPessoas } from "./DialogoColunasPessoas";
 import { FichaReal } from "./FichaReal";
+import { FiltrosExtraReal } from "./FiltrosExtraReal";
 import type { AoAbrirPessoa } from "./LinhaListaReal";
 import { RodapeListaReal } from "./RodapeListaReal";
 import { TabelaListaReal } from "./TabelaListaReal";
@@ -19,6 +22,7 @@ import { TabelaListaRealComDados } from "./TabelaListaRealComDados";
 import { useColunasPessoas } from "./useColunasPessoas";
 import { useFiltrosLista } from "./useFiltrosLista";
 import { useFocoRodape } from "./useFocoRodape";
+import { useMensagemAnunciada } from "./useMensagemAnunciada";
 
 const R = "pessoasPagina.real.";
 
@@ -31,7 +35,9 @@ function BotaoRepetir({ aoRepetir }: { aoRepetir: () => void }) {
   );
 }
 
-const temFiltros = (f: FiltrosLista): boolean => f.papel !== null || f.etapa !== null || f.pesquisa.trim().length >= MIN_PESQUISA;
+const temFiltros = (f: FiltrosLista): boolean =>
+  f.papel !== null || f.etapa !== null || f.pesquisa.trim().length >= MIN_PESQUISA
+  || f.atribuidoA !== null || f.formularioId !== null || f.ultimoResultado !== null || f.voltou || f.atrasada;
 
 interface CorpoProps {
   lista: ListaPessoas;
@@ -107,7 +113,8 @@ export function PessoasReal() {
   const comFicha = fonte.modo === "real";
   const colunas = useColunasPessoas(fonte.modo === "real" ? fonte.organizationId : null);
   const url = usePessoasUrl(false);
-  const f = useFiltrosLista();
+  const utilizadorId = fonte.modo === "real" ? (fonte.utilizadorId ?? null) : null;
+  const f = useFiltrosLista(utilizadorId);
   const lista = useListaPessoas(f.filtros);
   const { abrir, abertaId } = url;
   // `abrir` muda sempre que o ?open= muda; as linhas e a tabela estão em memória e só valem se o que lhes damos não mudar. Por isso o que
@@ -125,6 +132,9 @@ export function PessoasReal() {
     abrirRef.current(id);
   }, []);
   const aoIrPara = useCallback((id: string) => abrirRef.current(id), []);
+  // O que a «Nova lead» anuncia (lead criada, dados atualizados) vai para o contentor live da página, a seguir ao resto.
+  // A mensagem retira-se sozinha (não volta a ser lida com cada mudança seguinte da região) e duas iguais seguidas anunciam-se as duas.
+  const { mensagem: mensagemAcao, anunciar: setMensagemAcao } = useMensagemAnunciada();
   // Depois de criar um negócio na ficha: o negócio novo vai para o endereço (`?negocio=`), na pessoa que está aberta.
   // Só se a pessoa aberta ainda é a do negócio (a gravação pode acabar depois de se trocar de pessoa).
   const aoAbrirNegocio = useCallback((negocioId: string, pessoaId: string) => {
@@ -142,17 +152,29 @@ export function PessoasReal() {
     t(`${R}orderAnnounce`, { ordem: t(`${R}order.${f.filtros.ordem}`) }),
     textoEstado(t, lista),
     dicaPendente ? t(`${R}searchHint`) : "",
+    mensagemAcao,
   ].filter(Boolean).join(". ");
   return (
     <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
       <CabecalhoPagina
         subtitulo={contagem} titulo={t(`${R}title`)} aviso={null} pai={{ to: "/leads", texto: t("sidebar.crm") }}
+        acoes={comFicha ? (
+          // Como em Leads: «Nova lead» só a quem pode criar leads. No modo exemplo fica o `NovaLeadPainel` da página de exemplo.
+          <PermissionGate permission="leads.create">
+            <NovaLeadReal aoAbrirPessoa={aoAbrir} aoAnunciar={setMensagemAcao} />
+          </PermissionGate>
+        ) : undefined}
       />
       <BarraListaReal
         pesquisa={f.pesquisa} papel={f.filtros.papel} etapa={f.filtros.etapa} ordem={f.filtros.ordem}
         aoMudarPesquisa={f.mudarPesquisa} aoMudarPapel={f.mudarPapel} aoMudarEtapa={f.mudarEtapa} aoMudarOrdem={f.mudarOrdem}
       />
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <FiltrosExtraReal
+          filtros={f.filtros} soMinhas={f.soMinhas} podeSoMinhas={utilizadorId !== null} aoMudarSoMinhas={f.mudarSoMinhas}
+          aoMudarAtrasada={f.mudarAtrasada} aoMudarVoltou={f.mudarVoltou} aoMudarFormulario={f.mudarFormulario}
+          aoMudarResultado={f.mudarResultado} aoLimpar={f.limpar}
+        />
         <DialogoColunasPessoas
           escolha={colunas.escolha} aoAlternar={colunas.alternar} aoMover={colunas.mover} aoMoverPara={colunas.moverPara} aoRepor={colunas.repor}
         />

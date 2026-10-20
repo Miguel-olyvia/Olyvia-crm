@@ -8,7 +8,10 @@ afterEach(() => vi.useRealTimers());
 describe("useFiltrosLista", () => {
   it("começa sem filtros, por «recentes»", () => {
     const { result } = renderHook(() => useFiltrosLista());
-    expect(result.current.filtros).toEqual({ papel: null, etapa: null, pesquisa: "", ordem: "recentes" });
+    expect(result.current.filtros).toEqual({
+      papel: null, etapa: null, pesquisa: "", ordem: "recentes",
+      atribuidoA: null, formularioId: null, ultimoResultado: null, voltou: false, atrasada: false,
+    });
     expect(result.current.pesquisa).toBe("");
   });
 
@@ -17,7 +20,7 @@ describe("useFiltrosLista", () => {
     act(() => result.current.mudarPapel("cliente"));
     act(() => result.current.mudarEtapa("emContacto"));
     act(() => result.current.mudarOrdem("nome"));
-    expect(result.current.filtros).toEqual({ papel: "cliente", etapa: "emContacto", pesquisa: "", ordem: "nome" });
+    expect(result.current.filtros).toMatchObject({ papel: "cliente", etapa: "emContacto", pesquisa: "", ordem: "nome" });
   });
 
   it("a pesquisa só chega aos filtros 300 ms depois da última tecla, mas o campo mostra logo", () => {
@@ -61,6 +64,46 @@ describe("useFiltrosLista", () => {
     expect(result.current.filtros).toMatchObject({ papel: null, etapa: null, ordem: "nome" });
     act(() => { vi.advanceTimersByTime(300); });
     expect(result.current.filtros.pesquisa).toBe("");
+  });
+
+  it("«só as minhas» filtra pelo utilizador da sessão; desligado, por ninguém", () => {
+    const { result } = renderHook(() => useFiltrosLista("u-rui"));
+    expect(result.current.soMinhas).toBe(false);
+    act(() => result.current.mudarSoMinhas(true));
+    expect(result.current.soMinhas).toBe(true);
+    expect(result.current.filtros.atribuidoA).toBe("u-rui");
+    act(() => result.current.mudarSoMinhas(false));
+    expect(result.current.filtros.atribuidoA).toBeNull();
+  });
+
+  it("sem utilizador conhecido «só as minhas» não liga (nunca mostraria todos com o botão carregado)", () => {
+    const { result } = renderHook(() => useFiltrosLista(null));
+    act(() => result.current.mudarSoMinhas(true));
+    expect(result.current.soMinhas).toBe(false);
+    expect(result.current.filtros.atribuidoA).toBeNull();
+  });
+
+  it("formulário, resultado, voltou e atrasada mudam logo", () => {
+    const { result } = renderHook(() => useFiltrosLista());
+    act(() => result.current.mudarFormulario("f-1"));
+    act(() => result.current.mudarResultado("semContacto"));
+    act(() => result.current.mudarVoltou(true));
+    act(() => result.current.mudarAtrasada(true));
+    expect(result.current.filtros).toMatchObject({ formularioId: "f-1", ultimoResultado: "semContacto", voltou: true, atrasada: true });
+  });
+
+  it("limpar repõe também os filtros novos", () => {
+    const { result } = renderHook(() => useFiltrosLista("u-rui"));
+    act(() => result.current.mudarSoMinhas(true));
+    act(() => result.current.mudarFormulario("f-1"));
+    act(() => result.current.mudarResultado("naoAtendeu"));
+    act(() => result.current.mudarVoltou(true));
+    act(() => result.current.mudarAtrasada(true));
+    act(() => result.current.limpar());
+    expect(result.current.soMinhas).toBe(false);
+    expect(result.current.filtros).toMatchObject({
+      atribuidoA: null, formularioId: null, ultimoResultado: null, voltou: false, atrasada: false,
+    });
   });
 
   it("os filtros mantêm a mesma referência enquanto nada muda", () => {

@@ -30,6 +30,11 @@ function normalizar(filtros: FiltrosLista) {
     etapa: filtros.etapa,
     ordem: filtros.ordem,
     pesquisa: pesquisaEfetiva(filtros.pesquisa),
+    atribuidoA: filtros.atribuidoA,
+    formularioId: filtros.formularioId,
+    ultimoResultado: filtros.ultimoResultado,
+    voltou: filtros.voltou,
+    atrasada: filtros.atrasada,
   };
 }
 type FiltrosNormalizados = ReturnType<typeof normalizar>;
@@ -40,7 +45,8 @@ export function listaPessoasQueryKey(organizationId: string | null | undefined, 
   return filtros ? ([...base, normalizar(filtros)] as const) : base;
 }
 
-// Os 8 parâmetros vão sempre, com null explícito (evita a ambiguidade de overloads).
+// Os 13 parâmetros vão sempre, com null explícito (evita a ambiguidade de overloads). «Voltou» e «atrasada» desligados vão como
+// null: um false na base seria «só quem NÃO voltou», que a página não oferece.
 async function pedirPagina(
   organizationId: string,
   filtros: FiltrosNormalizados,
@@ -55,6 +61,11 @@ async function pedirPagina(
     p_depois_de_chave: depois?.chave ?? null,
     p_depois_de_id: depois?.id ?? null,
     p_limite: PAGINA_LISTA,
+    p_atribuido_a: filtros.atribuidoA,
+    p_formulario_id: filtros.formularioId,
+    p_ultimo_resultado: filtros.ultimoResultado,
+    p_voltou: filtros.voltou ? true : null,
+    p_atrasada: filtros.atrasada ? true : null,
   });
   return pagina ?? [];
 }

@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useUtilizadorPessoas } from "@/hooks/pessoas/useUtilizadorPessoas";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { FOCO } from "@/components/negocio-metas/estilos";
@@ -23,9 +24,11 @@ export function PessoasRota({ children }: { children: ReactNode }) {
   const { activeCompany } = useCompany();
   const organizationId = activeCompany?.id ?? null;
   const momentoGanho = MOMENTOS.find((m) => m === negocios.momentoGanho) ?? null;
+  // O anew_users.id da sessão (o mesmo que a página de Leads usa em «Só os meus»); null até a leitura acabar.
+  const utilizadorId = useUtilizadorPessoas();
   const fonte = useMemo<FontePessoas | null>(
-    () => (organizationId ? { modo: "real", organizationId, momentoGanho } : null),
-    [organizationId, momentoGanho],
+    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId } : null),
+    [organizationId, momentoGanho, utilizadorId],
   );
 
   if (negocios.isLoading) {
@@ -52,5 +55,7 @@ export function PessoasRota({ children }: { children: ReactNode }) {
     );
   }
   if (!negocios.ativo || !fonte) return <Navigate to="/leads" replace />;
-  return <FontePessoasContext.Provider value={fonte}>{children}</FontePessoasContext.Provider>;
+  // `key`: ao trocar de organização a página remonta e os filtros (formulário, «Só as minhas») voltam ao início, em vez de levarem
+  // para a organização nova um id que é da anterior (a lista viria vazia).
+  return <FontePessoasContext.Provider key={organizationId ?? ""} value={fonte}>{children}</FontePessoasContext.Provider>;
 }

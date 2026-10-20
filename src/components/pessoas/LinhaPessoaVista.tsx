@@ -5,7 +5,7 @@ import { TableCell, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { AvatarPessoa } from "./AvatarPessoa";
 import {
-  Comercial, Criado, Etapa, Formulario, Passo, SemDado, SemTexto, SeloPapel, Sublinha, TextoOuTravessao, UltimoContacto, Valor, Whatsapp,
+  Comercial, Criado, Etapa, Formulario, Origem, Passo, SemDado, SemTexto, SeloPapel, Sublinha, TextoOuTravessao, UltimoContacto, Valor, Whatsapp,
 } from "./CelulasLinhaPessoa";
 import type { IdColuna, VistaLinhaPessoa } from "./vistaLinhaPessoa";
 
@@ -91,7 +91,7 @@ function conteudo(id: IdColuna, p: LinhaPessoaVistaProps): ReactNode {
     case "email": return <Contacto valor={vista.email} vazio="noEmail" quebra />;
     case "whatsapp": return <Whatsapp vista={vista} />;
     case "created": return <Criado vista={vista} />;
-    case "origin": return <Contacto valor={vista.origem} vazio="noData" />;
+    case "origin": return <Origem vista={vista} />;
     case "campaign": return <Contacto valor={vista.campanha} vazio="noData" />;
     default: return <SemDado />;
   }

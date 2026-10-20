@@ -28,6 +28,26 @@ describe("chamarNeg", () => {
     expect(captureMock).not.toHaveBeenCalled();
   });
 
+  it.each(["neg_procurar_duplicados", "neg_guardar_identidade_pessoa", "neg_substituir_contacto"] as const)(
+    "%s é uma função conhecida: passa o nome e os parâmetros sem os mexer",
+    async (nome) => {
+      const params = { p_organization_id: "org-1", p_email: "a@b.pt" };
+      rpcMock.mockResolvedValue({ data: [], error: null });
+      await chamarNeg(nome, params);
+      expect(rpcMock).toHaveBeenCalledWith(nome, params);
+    },
+  );
+
+  it("NG019 e NG020 viram ErroNeg com a sua chave e não vão para o Sentry", async () => {
+    for (const codigo of ["NG019", "NG020"]) {
+      rpcMock.mockResolvedValue({ data: null, error: { code: codigo, message: "texto da base" } });
+      const erro = await chamarNeg("neg_substituir_contacto", {}).catch((e) => e);
+      expect(erro.codigo).toBe(codigo);
+      expect(erro.chave).toBe(CHAVES_ERRO_NEG[codigo]);
+    }
+    expect(captureMock).not.toHaveBeenCalled();
+  });
+
   it("um código NG vira ErroNeg com a chave certa e não vai para o Sentry", async () => {
     rpcMock.mockResolvedValue({ data: null, error: { code: "NG006", message: "texto da base" } });
     const erro = await chamarNeg("neg_ganhar_negocio", { p_deal_id: "d" }).catch((e) => e);

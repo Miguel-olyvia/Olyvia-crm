@@ -1,4 +1,4 @@
-// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG018 e 42501).
+// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG020 e 42501).
 // Juntam-se aos de `pessoasPagina.ts`, por isso as chaves continuam a ser `pessoasPagina.*`.
 const E = "pessoasPagina.erroNeg.";
 
@@ -21,6 +21,8 @@ const pt: Record<string, string> = {
   [`${E}ng016`]: "Não foi possível criar a lead.",
   [`${E}ng017`]: "Esta visita já não está disponível.",
   [`${E}ng018`]: "Esta visita já foi feita ou cancelada e não se altera.",
+  [`${E}ng019`]: "Este contacto já pertence a outra pessoa desta organização. Nada foi alterado.",
+  [`${E}ng020`]: "Demasiadas verificações seguidas. Tente de novo dentro de alguns minutos.",
   [`${E}permissao`]: "Não tem permissão para esta ação.",
   [`${E}generico`]: "Não foi possível concluir a ação. Tente novamente.",
 };
@@ -44,6 +46,8 @@ const en: Record<string, string> = {
   [`${E}ng016`]: "The lead could not be created.",
   [`${E}ng017`]: "This visit is no longer available.",
   [`${E}ng018`]: "This visit has already been done or cancelled and cannot be changed.",
+  [`${E}ng019`]: "This contact already belongs to another person in this organization. Nothing was changed.",
+  [`${E}ng020`]: "Too many checks in a row. Please try again in a few minutes.",
   [`${E}permissao`]: "You do not have permission for this action.",
   [`${E}generico`]: "The action could not be completed. Please try again.",
 };

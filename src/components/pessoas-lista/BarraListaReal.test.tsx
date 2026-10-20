@@ -31,11 +31,11 @@ function desenhar(estado: Partial<Estado> = {}) {
 describe("BarraListaReal", () => {
   it("escrever na pesquisa chama aoMudarPesquisa com o texto", () => {
     const { aoMudarPesquisa } = desenhar();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar pessoas por nome" }), { target: { value: "ana" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar pessoas por nome, email ou telefone" }), { target: { value: "ana" } });
     expect(aoMudarPesquisa).toHaveBeenCalledWith("ana");
   });
 
-  const DICA = "Pesquise por nome (mínimo 2 letras)";
+  const DICA = "Pesquise por nome, email ou telefone (mínimo 2 letras)";
 
   it("a dica está sempre visível e ligada ao campo por aria-describedby", () => {
     desenhar();

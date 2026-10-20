@@ -9,6 +9,9 @@ import { listaBase, pessoaLista } from "./fabricaLista";
 import { PessoasReal } from "./PessoasReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// A «Nova lead» do cabeçalho (P7) tem testes próprios; aqui não interessa. Sem permissão `leads.create`, o botão não se desenha.
+vi.mock("@/components/pessoas-leads/NovaLeadReal", () => ({ NovaLeadReal: () => null }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false, hasAnyPermission: () => false, permissions: [], loading: false }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 // Estes testes são do foco, do endereço e da ficha, não das leituras em lote por página (têm o seu ficheiro: PessoasRealColunas.test.tsx).
 const semLeituras = vi.hoisted(() => new Map());

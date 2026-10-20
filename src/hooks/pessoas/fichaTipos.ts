@@ -33,6 +33,14 @@ export interface PessoaFichaDb {
   origem: { origin: string | null; source: string | null; campanha: string | null; formulario: string | null } | null;
   nif: string | null;
   empresa: string | null;
+  /** O tipo da entidade (`person` ou `organization`); falta numa leitura anterior à migration 20261225150000. */
+  tipo?: string | null;
+  /** O nome da empresa, só numa entidade `organization` (é o nome visível dela). */
+  empresa_nome?: string | null;
+  /** Há uma ligação fiscal principal (só se lê: o NIF nunca sai da função). */
+  tem_nif?: boolean | null;
+  /** «Voltou a contactar»: a atividade da lead é posterior ao último contacto (a chamada registada em Pessoas conta como contacto). */
+  voltou_a_contactar?: boolean | null;
 }
 
 export interface EncerramentoDb {

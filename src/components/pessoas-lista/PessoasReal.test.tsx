@@ -9,6 +9,9 @@ import { listaBase, pessoaLista } from "./fabricaLista";
 import { PessoasReal } from "./PessoasReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// A «Nova lead» do cabeçalho (P7) tem testes próprios; aqui não interessa. Sem permissão `leads.create`, o botão não se desenha.
+vi.mock("@/components/pessoas-leads/NovaLeadReal", () => ({ NovaLeadReal: () => null }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false, hasAnyPermission: () => false, permissions: [], loading: false }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 const listaMock = vi.hoisted(() => vi.fn());
@@ -20,6 +23,10 @@ const CAPTION = "Pessoas, com as colunas escolhidas";
 const REGIAO = "Lista de pessoas";
 const DUAS = [pessoaLista("a", { nome: "Ana Lopes" }), pessoaLista("b", { nome: "Bruno Reis" })];
 const ultimosFiltros = (): FiltrosLista => listaMock.mock.calls[listaMock.mock.calls.length - 1][0];
+const SEM_FILTROS: FiltrosLista = {
+  papel: null, etapa: null, pesquisa: "", ordem: "recentes",
+  atribuidoA: null, formularioId: null, ultimoResultado: null, voltou: false, atrasada: false,
+};
 
 function desenhar(sobre: Partial<ListaPessoas> = {}) {
   listaMock.mockReturnValue(listaBase({ linhas: DUAS, ...sobre }));
@@ -36,14 +43,14 @@ beforeEach(() => { listaMock.mockReset(); avatarMock.mockReset(); });
 afterEach(() => vi.useRealTimers());
 
 describe("PessoasReal: o que mostra", () => {
-  it("tem as colunas por omissão do Lote A e nenhuma de Localidade nem Formulário (ainda sem dado)", () => {
+  it("tem as colunas por omissão (com Formulário e Criado em) e nenhuma de Localidade, que saiu", () => {
     desenhar();
     const nomes = screen.getAllByRole("columnheader").map((c) => c.textContent);
     expect(nomes).toEqual([
-      "Pessoa", "Etapa", "Último contacto", "Próximo passo", "Próxima visita", "Valor", "Negócios", "Atribuído a", "Telefone", "Email", "WhatsApp",
+      "Pessoa", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Próxima visita", "Valor", "Negócios", "Atribuído a", "Telefone", "Email",
+      "WhatsApp", "Criado em",
     ]);
     expect(screen.queryByText("Localidade")).toBeNull();
-    expect(screen.queryByText("Formulário")).toBeNull();
     screen.getAllByRole("columnheader").forEach((c) => expect(c).toHaveAttribute("scope", "col"));
   });
 
@@ -105,7 +112,7 @@ describe("PessoasReal: o que mostra", () => {
     expect(screen.getByText("Nenhuma pessoa corresponde aos filtros.")).toBeInTheDocument();
     expect(screen.queryByText("Ainda não há pessoas para mostrar.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Limpar filtros" }));
-    expect(ultimosFiltros()).toEqual({ papel: null, etapa: null, pesquisa: "", ordem: "recentes" });
+    expect(ultimosFiltros()).toEqual(SEM_FILTROS);
     expect(screen.getByText("Ainda não há pessoas para mostrar.")).toBeInTheDocument();
   });
 
@@ -133,7 +140,7 @@ describe("PessoasReal: o que mostra", () => {
 describe("PessoasReal: filtros", () => {
   it("começa sem filtros e o tipo «Clientes» muda o papel", () => {
     desenhar();
-    expect(ultimosFiltros()).toEqual({ papel: null, etapa: null, pesquisa: "", ordem: "recentes" });
+    expect(ultimosFiltros()).toEqual(SEM_FILTROS);
     fireEvent.click(screen.getByRole("button", { name: "Clientes" }));
     expect(ultimosFiltros().papel).toBe("cliente");
   });
@@ -142,19 +149,19 @@ describe("PessoasReal: filtros", () => {
     vi.useFakeTimers();
     desenhar();
     const campo = screen.getByRole("searchbox");
-    const dica = screen.getByText("Pesquise por nome (mínimo 2 letras)");
+    const dica = screen.getByText("Pesquise por nome, email ou telefone (mínimo 2 letras)");
     expect(campo.getAttribute("aria-describedby")).toBe(dica.id);
     expect(dica).not.toHaveAttribute("data-destacada");
     fireEvent.change(campo, { target: { value: "a" } });
     act(() => { vi.advanceTimersByTime(400); });
-    expect(screen.getByText("Pesquise por nome (mínimo 2 letras)")).toHaveAttribute("data-destacada", "true");
-    expect(viva()).toHaveTextContent("Pesquise por nome (mínimo 2 letras)");
+    expect(screen.getByText("Pesquise por nome, email ou telefone (mínimo 2 letras)")).toHaveAttribute("data-destacada", "true");
+    expect(viva()).toHaveTextContent("Pesquise por nome, email ou telefone (mínimo 2 letras)");
     expect(ultimosFiltros().pesquisa).toBe("");
     fireEvent.change(campo, { target: { value: "ana" } });
     expect(ultimosFiltros().pesquisa).toBe("");
     act(() => { vi.advanceTimersByTime(300); });
     expect(ultimosFiltros().pesquisa).toBe("ana");
-    expect(screen.getByText("Pesquise por nome (mínimo 2 letras)")).not.toHaveAttribute("data-destacada");
+    expect(screen.getByText("Pesquise por nome, email ou telefone (mínimo 2 letras)")).not.toHaveAttribute("data-destacada");
   });
 });
 

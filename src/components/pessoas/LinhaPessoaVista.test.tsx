@@ -153,8 +153,16 @@ describe("LinhaPessoaVista: colunas escolhidas", () => {
     );
     expect(screen.getByText("Sintra")).toBeInTheDocument();
     expect(screen.getByText("05/03/2026")).toBeInTheDocument();
-    expect(screen.getByText("web")).toBeInTheDocument();
+    expect(screen.getByText("Web")).toBeInTheDocument();
     expect(screen.getByText("Cozinhas")).toBeInTheDocument();
+  });
+  it("a origem conhecida (web, api, import) tem nome legível; as outras aparecem tal como a base as guarda", () => {
+    desenhar(vista({ origem: "import" }), { colunas: ["person", "origin"] });
+    expect(screen.getByText("Importação")).toBeInTheDocument();
+  });
+  it("uma origem desconhecida não se traduz nem se esconde", () => {
+    desenhar(vista({ origem: "facebook_ads" }), { colunas: ["person", "origin"] });
+    expect(screen.getByText("facebook_ads")).toBeInTheDocument();
   });
   it("uma data de criação inválida não rebenta: travessão", () => {
     const linha = desenhar(vista({ criadoEm: "lixo" }), { colunas: ["person", "created"] });

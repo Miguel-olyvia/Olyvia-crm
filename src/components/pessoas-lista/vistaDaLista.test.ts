@@ -67,11 +67,64 @@ describe("vistaDaLista: telefone e email", () => {
   });
 });
 
-describe("vistaDaLista: o que ainda não existe na função fica por saber", () => {
-  it("criado em, MQL/SQL, voltou, atrasada, origem, campanha, localidade e formulário são undefined", () => {
-    const v = vistaDaLista(pessoaLista("p1"));
-    for (const campo of ["criadoEm", "qualificacao", "voltou", "atrasada", "origem", "campanha", "localidade", "formulario"] as const) {
-      expect(v[campo], campo).toBeUndefined();
-    }
+describe("vistaDaLista: selos da sublinha", () => {
+  it("MQL/SQL, voltou e atrasada passam", () => {
+    const v = vistaDaLista(pessoaLista("p1", { qualificacao: "SQL", voltou: true, atrasada: true }));
+    expect([v.qualificacao, v.voltou, v.atrasada]).toEqual(["SQL", true, true]);
+  });
+  it("sem qualificação: null (não se escreve nada)", () => {
+    expect(vistaDaLista(pessoaLista("p1", { qualificacao: null })).qualificacao).toBeNull();
+  });
+  it("sem dado de voltou ou de atrasada (null): a vista não afirma nada", () => {
+    const v = vistaDaLista(pessoaLista("p1", { voltou: null, atrasada: null }));
+    expect(v.voltou).toBeNull();
+    expect(v.atrasada).toBeNull();
+  });
+});
+
+describe("vistaDaLista: o resultado do último contacto", () => {
+  it("o resultado que a base deu", () => {
+    const v = vistaDaLista(pessoaLista("p1", { ultimoContactoEm: "2026-10-01T10:00:00Z", diasSemContacto: 3, ultimoResultado: "naoAtendeu" }));
+    expect(v.resultado).toBe("naoAtendeu");
+  });
+  it("um resultado de outro tipo (Leads) vai como «outro»", () => {
+    const v = vistaDaLista(pessoaLista("p1", { ultimoContactoEm: "2026-10-01T10:00:00Z", ultimoResultado: "outro" }));
+    expect(v.resultado).toBe("outro");
+  });
+  it("sem contacto em NENHUMA das fontes, mesmo que haja um resultado antigo: «Sem contacto»", () => {
+    expect(vistaDaLista(pessoaLista("p1", { ultimoContactoEm: null, ultimoResultado: "naoAtendeu" })).resultado).toBe("semContacto");
+  });
+});
+
+describe("vistaDaLista: origem, campanha, formulário e criado em", () => {
+  const LEAD = "22222222-2222-4222-8222-222222222222";
+  it("passa criado em e origem", () => {
+    const v = vistaDaLista(pessoaLista("p1", { leadId: LEAD, criadoEm: "2026-06-01T10:00:00Z", origem: "web" }));
+    expect(v.criadoEm).toBe("2026-06-01T10:00:00Z");
+    expect(v.origem).toBe("web");
+  });
+  it("lead sem campanha: «Manual» (formulário null) e campanha null", () => {
+    const v = vistaDaLista(pessoaLista("p1", { leadId: LEAD, campanhaId: null }));
+    expect(v.formulario).toBeNull();
+    expect(v.campanha).toBeNull();
+  });
+  it("com campanha e formulário: os nomes", () => {
+    const v = vistaDaLista(pessoaLista("p1", { leadId: LEAD, campanhaId: "c1", campanha: "Cozinhas", formulario: "Pedido" }));
+    expect([v.campanha, v.formulario]).toEqual(["Cozinhas", "Pedido"]);
+  });
+  it("campanha escondida pela RLS (id sem nome): por saber, nunca «Manual»", () => {
+    const v = vistaDaLista(pessoaLista("p1", { leadId: LEAD, campanhaId: "c1", campanha: null, formulario: null }));
+    expect(v.formulario).toBeUndefined();
+    expect(v.campanha).toBeUndefined();
+  });
+  it("pessoa sem lead (só cliente): nada se sabe da origem, nunca «Manual»", () => {
+    const v = vistaDaLista(pessoaLista("p1", { papel: "cliente", leadId: null, clienteId: "c" }));
+    expect([v.formulario, v.campanha, v.origem]).toEqual([undefined, undefined, undefined]);
+  });
+});
+
+describe("vistaDaLista: a localidade saiu da Lista", () => {
+  it("a vista não traz localidade", () => {
+    expect(vistaDaLista(pessoaLista("p1")).localidade).toBeUndefined();
   });
 });

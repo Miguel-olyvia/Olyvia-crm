@@ -154,11 +154,61 @@ describe("LinhaListaReal: textos longos que não se podem perder", () => {
   });
 });
 
-describe("LinhaListaReal: colunas preparadas para o Lote C", () => {
-  it("as colunas sem dado desenham-se sem rebentar e com «Sem dado» (localidade, formulário, criado em, origem, campanha)", () => {
-    const linha = desenhar({}, { colunas: ["person", "place", "form", "created", "origin", "campaign"] });
-    expect(celulas(linha)).toHaveLength(6);
+describe("LinhaListaReal: formulário, criado em, origem e campanha", () => {
+  it("pessoa sem lead: nada se sabe do formulário, origem e campanha («Sem dado», nunca «Registada à mão»)", () => {
+    const linha = desenhar({}, { colunas: ["person", "form", "created", "origin", "campaign"] });
+    expect(celulas(linha)).toHaveLength(5);
     expect(screen.queryByText("Registada à mão")).toBeNull();
-    expect(screen.getAllByText("Sem dado")).toHaveLength(5);
+    expect(screen.getAllByText("Sem dado")).toHaveLength(3);
+    expect(screen.getByText("Sem data")).toBeInTheDocument();
+  });
+
+  it("lead sem campanha: «Registada à mão» no formulário; a data aparece no dia de Lisboa", () => {
+    desenhar(
+      { leadId: "l1", campanhaId: null, origem: "web", criadoEm: "2026-06-01T10:00:00Z" },
+      { colunas: ["person", "form", "created", "origin"] },
+    );
+    expect(screen.getByText("Registada à mão")).toBeInTheDocument();
+    expect(screen.getByText("01/06/2026")).toBeInTheDocument();
+    expect(screen.getByText("Web")).toBeInTheDocument();
+  });
+
+  it("origem desconhecida aparece tal como a base a deu", () => {
+    desenhar({ leadId: "l1", origem: "whatsapp_bot" }, { colunas: ["person", "origin"] });
+    expect(screen.getByText("whatsapp_bot")).toBeInTheDocument();
+  });
+
+  it("lead com campanha e formulário: os nomes", () => {
+    desenhar(
+      { leadId: "l1", campanhaId: "c1", campanha: "Cozinhas", formulario: "Pedido de orçamento" },
+      { colunas: ["person", "form", "campaign"] },
+    );
+    expect(screen.getByText("Pedido de orçamento")).toBeInTheDocument();
+    expect(screen.getByText("Cozinhas")).toBeInTheDocument();
+  });
+});
+
+describe("LinhaListaReal: sublinha e selos dos campos novos", () => {
+  it("MQL/SQL, «Atrasada» e «Voltou a contactar» aparecem por baixo do nome", () => {
+    desenhar({ qualificacao: "SQL", atrasada: true, voltou: true });
+    expect(screen.getByText(/SQL/)).toBeInTheDocument();
+    expect(screen.getByText("Atrasada")).toBeInTheDocument();
+    expect(screen.getByText("Voltou a contactar")).toBeInTheDocument();
+  });
+
+  it("sem os sinais (false ou sem dado) não se escreve nada", () => {
+    desenhar({ qualificacao: null, atrasada: false, voltou: null });
+    expect(screen.queryByText("Atrasada")).toBeNull();
+    expect(screen.queryByText("Voltou a contactar")).toBeNull();
+  });
+
+  it("o selo do resultado do último contacto, e «Outro» para um resultado das Leads", () => {
+    desenhar({ ultimoContactoEm: "2026-10-01T10:00:00Z", diasSemContacto: 3, ultimoResultado: "naoAtendeu" });
+    expect(screen.getByText("Não atendeu")).toBeInTheDocument();
+  });
+
+  it("«Outro» quando o resultado vem das Leads", () => {
+    desenhar({ ultimoContactoEm: "2026-10-01T10:00:00Z", diasSemContacto: 3, ultimoResultado: "outro" });
+    expect(screen.getByText("Outro")).toBeInTheDocument();
   });
 });

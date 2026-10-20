@@ -15,6 +15,8 @@ vi.mock("@/hooks/pessoas/useNegociosAtivos", () => ({
 }));
 let empresa: { id: string } | null = { id: "org-nike" };
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: empresa, isLoading: false }) }));
+let utilizador: string | null = "u-rui";
+vi.mock("@/hooks/usePermissionScope", () => ({ usePermissionScope: () => ({ anewUserId: utilizador }) }));
 
 const vistas: FontePessoas[] = [];
 function Sonda({ n = 0 }: { n?: number }) {
@@ -44,6 +46,22 @@ beforeEach(() => {
   repetirMock.mockReset();
   vistas.length = 0;
   empresa = { id: "org-nike" };
+  utilizador = "u-rui";
+});
+
+describe("PessoasRota: o utilizador da sessão", () => {
+  it("a fonte real leva o anew_users.id de quem está na sessão («Só as minhas»)", () => {
+    desenhar({ ativo: true, momentoGanho: "manual" });
+    const fonte = vistas[vistas.length - 1];
+    expect(fonte.modo === "real" && fonte.utilizadorId).toBe("u-rui");
+  });
+
+  it("enquanto o utilizador não se conhece, a fonte leva null", () => {
+    utilizador = null;
+    desenhar({ ativo: true, momentoGanho: "manual" });
+    const fonte = vistas[vistas.length - 1];
+    expect(fonte.modo === "real" && fonte.utilizadorId).toBeNull();
+  });
 });
 
 describe("PessoasRota", () => {

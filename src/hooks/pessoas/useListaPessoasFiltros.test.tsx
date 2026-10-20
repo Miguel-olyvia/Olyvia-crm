@@ -34,8 +34,21 @@ describe("listaPessoasQueryKey", () => {
     expect(listaPessoasQueryKey("org-1")).toEqual(["neg-resumo-pessoas", "org-1"]);
     expect(listaPessoasQueryKey(null)).toEqual(["neg-resumo-pessoas", null]);
     expect(listaPessoasQueryKey("org-1", FILTROS)).toEqual([
-      "neg-resumo-pessoas", "org-1", { papel: null, etapa: null, ordem: "recentes", pesquisa: null },
+      "neg-resumo-pessoas", "org-1", {
+        papel: null, etapa: null, ordem: "recentes", pesquisa: null,
+        atribuidoA: null, formularioId: null, ultimoResultado: null, voltou: false, atrasada: false,
+      },
     ]);
+  });
+
+  it("cada filtro novo muda a chave (não partilham cache)", () => {
+    const k = (sobre: Partial<FiltrosLista>) => JSON.stringify(listaPessoasQueryKey("o", { ...FILTROS, ...sobre }));
+    const base = k({});
+    const variantes = [
+      k({ atribuidoA: "u1" }), k({ formularioId: "f1" }), k({ ultimoResultado: "naoAtendeu" }), k({ voltou: true }), k({ atrasada: true }),
+    ];
+    for (const v of variantes) expect(v).not.toBe(base);
+    expect(new Set(variantes).size).toBe(variantes.length);
   });
 
   it("normaliza a pesquisa: vazia, 1 caracter e só espaços dão a mesma chave; aparar não muda a chave", () => {
@@ -59,7 +72,7 @@ describe("useListaPessoas: filtros, fonte e estado", () => {
     definirFonte(real("org-1"));
   });
 
-  it("primeira página: envia sempre os 8 parâmetros, com null explícito", async () => {
+  it("primeira página: envia sempre os 13 parâmetros, com null explícito", async () => {
     rpcMock.mockReturnValue(ok([linha("a")]));
     const { result } = montar();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -68,7 +81,37 @@ describe("useListaPessoas: filtros, fonte e estado", () => {
     expect(params(0)).toEqual({
       p_organization_id: "org-1", p_papel: null, p_etapa: null, p_pesquisa: null,
       p_ordem: "recentes", p_depois_de_chave: null, p_depois_de_id: null, p_limite: 100,
+      p_atribuido_a: null, p_formulario_id: null, p_ultimo_resultado: null, p_voltou: null, p_atrasada: null,
     });
+  });
+
+  it("envia os filtros ligados: só as minhas, formulário, resultado, voltou e atrasada", async () => {
+    rpcMock.mockReturnValue(ok([]));
+    const { result } = montar({
+      ...FILTROS, atribuidoA: "u-rui", formularioId: "f-1", ultimoResultado: "semContacto", voltou: true, atrasada: true,
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(params(0)).toMatchObject({
+      p_atribuido_a: "u-rui", p_formulario_id: "f-1", p_ultimo_resultado: "semContacto", p_voltou: true, p_atrasada: true,
+    });
+  });
+
+  it("voltou e atrasada desligados vão como null (não como false: a função filtraria quem NÃO voltou)", async () => {
+    rpcMock.mockReturnValue(ok([]));
+    const { result } = montar({ ...FILTROS, voltou: false, atrasada: false });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(params(0).p_voltou).toBeNull();
+    expect(params(0).p_atrasada).toBeNull();
+  });
+
+  it("a segunda página repete os filtros novos", async () => {
+    rpcMock.mockReturnValueOnce(ok([linha("a", { ha_mais: true })]));
+    rpcMock.mockReturnValueOnce(ok([linha("b")]));
+    const { result } = montar({ ...FILTROS, atribuidoA: "u-rui", voltou: true });
+    await waitFor(() => expect(result.current.haMais).toBe(true));
+    act(() => result.current.carregarMais());
+    await waitFor(() => expect(result.current.linhas).toHaveLength(2));
+    expect(params(1)).toMatchObject({ p_atribuido_a: "u-rui", p_voltou: true, p_depois_de_chave: "chave-a", p_depois_de_id: "a" });
   });
 
   it("envia papel, etapa, ordem e pesquisa dos filtros", async () => {

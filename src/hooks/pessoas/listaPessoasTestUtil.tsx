@@ -14,7 +14,10 @@ export const real = (organizationId: string): FontePessoas => ({ modo: "real", o
 let fonte: FontePessoas = real("org-1");
 export const definirFonte = (nova: FontePessoas): void => { fonte = nova; };
 
-export const FILTROS: FiltrosLista = { papel: null, etapa: null, pesquisa: "", ordem: "recentes" };
+export const FILTROS: FiltrosLista = {
+  papel: null, etapa: null, pesquisa: "", ordem: "recentes",
+  atribuidoA: null, formularioId: null, ultimoResultado: null, voltou: false, atrasada: false,
+};
 
 
 export function linha(id: string, sobre: Partial<LinhaResumoDb> = {}): LinhaResumoDb {
@@ -24,7 +27,10 @@ export function linha(id: string, sobre: Partial<LinhaResumoDb> = {}): LinhaResu
     negocios_perdidos: 0, fase_mais_avancada: null, pronto_a_ganhar: false, valor_em_jogo: null,
     ultimo_contacto_em: null, proxima_visita_em: null, ultima_visita_feita_em: null, ultimo_negocio_em: null,
     por_ligar_contactos: 0, por_ligar_visitas: 0, por_ligar_levantamentos: 0,
-    chave_ordem: `chave-${id}`, ha_mais: false, ...sobre,
+    chave_ordem: `chave-${id}`, ha_mais: false,
+    criado_em: null, qualificacao_tipo: null, ultima_atividade_em: null, ultimo_contacto_lead_em: null,
+    voltou_a_contactar: false, origem: null, origem_detalhe: null, campanha_id: null, campanha: null,
+    formulario_id: null, formulario: null, ultimo_resultado: null, atrasada: false, ...sobre,
   };
 }
 

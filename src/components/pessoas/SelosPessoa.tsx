@@ -1,4 +1,4 @@
-import { Repeat, XCircle } from "lucide-react";
+import { CircleHelp, Repeat, XCircle } from "lucide-react";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -47,13 +47,14 @@ export function SeloEmpresa() {
 }
 
 /** O resultado do último contacto, sempre com ícone e texto ("Atendeu · interessado", "Sem contacto"). */
-export function SeloResultado({ resultado, className }: { resultado: ResultadoOuNenhum; className?: string }) {
+export function SeloResultado({ resultado, className }: { resultado: ResultadoOuNenhum | "outro"; className?: string }) {
   const { t } = useTranslation();
-  const Icone = ICONE_RESULTADO[resultado];
+  // «Outro»: um resultado que as Leads guardam e não é dos cinco da chamada (só na Lista real).
+  const Icone = resultado === "outro" ? CircleHelp : ICONE_RESULTADO[resultado];
   return (
     <span className={cn(SELO, "border-border bg-muted", className)}>
       <Icone className="h-3 w-3 shrink-0" aria-hidden="true" />
-      {t(`pessoasPagina.result.${resultado}`)}
+      {resultado === "outro" ? t("pessoasPagina.real.resultOther") : t(`pessoasPagina.result.${resultado}`)}
     </span>
   );
 }

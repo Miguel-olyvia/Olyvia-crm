@@ -14,19 +14,27 @@ import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useAcoesFichaReal } from "@/hooks/pessoas/useAcoesFichaReal";
 import { useFichaPessoa } from "@/hooks/pessoas/useFichaPessoa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
+import { useSubmissoesPessoa } from "@/hooks/pessoas/useSubmissoesPessoa";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
+import type { SeparadorSubmissoesReal } from "@/components/pessoas/FichaInterior";
 import type { ItemAtividade, NotaPessoa, Pessoa, Submissao } from "@/components/pessoas/pessoasTipos";
+import { IdentidadeFichaReal } from "./IdentidadeFichaReal";
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
+import { SubmissoesFichaReal } from "./SubmissoesFichaReal";
 
 const F = "pessoasPagina.real.ficha.";
 
-// Sem submissões nem notas na ficha real (são da página de submissões): referências fixas para não redesenhar à toa.
+// Sem a aba Notas na ficha real; as submissões têm o seu separador (só leitura, `SubmissoesFichaReal`). Referências fixas para não redesenhar à toa.
 const SEM_SUBMISSOES: Submissao[] = [];
 const SEM_NOTAS: NotaPessoa[] = [];
 const SEM_ATIVIDADE: ItemAtividade[] = [];
 const SEM_PESSOAS: ReadonlyMap<string, Pessoa> = new Map();
 const NADA = (): void => undefined;
+
+/** O tipo da entidade que a base devolve; qualquer outro valor (ou a falta dele, numa leitura antiga) não se edita. */
+const tipoDeIdentidade = (tipo: string | null | undefined): "person" | "organization" | null => (tipo === "person" || tipo === "organization" ? tipo : null);
 
 interface FichaRealProps {
   /** A pessoa aberta (o `?open=` da página); `null` com a ficha fechada. */
@@ -88,12 +96,33 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   }])), [mostrada, carregarMais, carregandoTipos, errosMais]);
   const avisoAtualizacao = useMemo(() => (lida.atualizacaoFalhou ? { aoRepetir: lida.recarregar } : undefined), [lida.atualizacaoFalhou, lida.recarregar]);
 
+  // As submissões de formulário, lidas como Leads as lê (só leitura), e a identidade da pessoa (tipo e nome, sem NIF).
+  const submissoes = useSubmissoesPessoa(pessoaId);
+  const { recarregar: recarregarSubmissoes } = submissoes;
+  const hojeDaFicha = adaptada?.hoje ?? hojeLisboa();
+  const separadorSubmissoes = useMemo<SeparadorSubmissoesReal>(() => ({
+    total: submissoes.estado === "ok" ? submissoes.submissoes.length : null,
+    pendentes: submissoes.pendentes,
+    conteudo: <SubmissoesFichaReal
+      submissoes={submissoes.submissoes} estado={submissoes.estado} desatualizado={submissoes.desatualizado} hoje={hojeDaFicha}
+      aoTentarDeNovo={recarregarSubmissoes}
+    />,
+  }), [submissoes.estado, submissoes.submissoes, submissoes.desatualizado, submissoes.pendentes, hojeDaFicha, recarregarSubmissoes]);
+  const { guardar: guardarIdentidade } = useGuardarIdentidadePessoa(mostrada?.pessoa.id ?? "");
+  const identidade = mostrada ? (
+    <IdentidadeFichaReal
+      nome={mostrada.pessoa.nome?.trim() ?? ""} tipo={tipoDeIdentidade(mostrada.pessoa.tipo)} empresaNome={mostrada.pessoa.empresa_nome ?? null}
+      podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarIdentidade}
+    />
+  ) : undefined;
+
   const aAbrir = pessoaId !== null && mostrada === null && lida.estado === "a-carregar";
   const ficha = (aoCriarNegocio?: () => void, negocioAbrir: string | null = null) => (
     <FichaPessoa
       resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null && adaptada !== null} aoFechar={aoFechar} idsVisiveis={idsVisiveis}
-      aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={adaptada?.hoje ?? hojeLisboa()} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
-      atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={false} podeVerSubmissoes={false}
+      aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={hojeDaFicha} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
+      atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={mostrada?.pessoa.voltou_a_contactar === true}
+      podeVerSubmissoes separadorSubmissoes={separadorSubmissoes} identidade={identidade}
       acoes={acoes} aoPedir={NADA} aoVerTodasSubmissoes={NADA} comNotas={false} maisItens={maisItens} avisoAtualizacao={avisoAtualizacao}
       aoCriarNegocio={aoCriarNegocio} negocioInicial={negocioAbrir}
     />

@@ -1,6 +1,6 @@
 // As colunas da Lista real que a pessoa pode escolher e ordenar, e a preferência guardada POR ORGANIZAÇÃO (localStorage).
-// «Pessoa» (o nome) é sempre a primeira e está sempre visível. As colunas `temDado: false` esperam campos que a função ainda não
-// devolve (Lote C): existem no catálogo e a linha já sabe desenhá-las, mas não aparecem no diálogo nem na tabela até terem dado.
+// «Pessoa» (o nome) é sempre a primeira e está sempre visível. Uma coluna `temDado: false` existiria no catálogo mas não apareceria no
+// diálogo nem na tabela; hoje todas têm dado. A localidade saiu da Lista (decisão do utilizador, 20/10): fica só na ficha.
 import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 
 export interface DefColuna {
@@ -11,12 +11,11 @@ export interface DefColuna {
   visivelPorOmissao: boolean;
 }
 
-/** Por ordem de omissão. As sem dado ficam nos sítios do protótipo, para quando passarem a ter. */
+/** Por ordem de omissão. */
 export const CATALOGO: readonly DefColuna[] = [
   { id: "person", largura: 22, temDado: true, visivelPorOmissao: true },
-  { id: "place", largura: 10, temDado: false, visivelPorOmissao: true },
   { id: "stage", largura: 12, temDado: true, visivelPorOmissao: true },
-  { id: "form", largura: 11, temDado: false, visivelPorOmissao: true },
+  { id: "form", largura: 11, temDado: true, visivelPorOmissao: true },
   { id: "lastContact", largura: 12, temDado: true, visivelPorOmissao: true },
   { id: "next", largura: 12, temDado: true, visivelPorOmissao: true },
   { id: "nextVisit", largura: 11, temDado: true, visivelPorOmissao: true },
@@ -26,9 +25,9 @@ export const CATALOGO: readonly DefColuna[] = [
   { id: "phone", largura: 10, temDado: true, visivelPorOmissao: true },
   { id: "email", largura: 14, temDado: true, visivelPorOmissao: true },
   { id: "whatsapp", largura: 9, temDado: true, visivelPorOmissao: true },
-  { id: "created", largura: 9, temDado: false, visivelPorOmissao: true },
-  { id: "origin", largura: 9, temDado: false, visivelPorOmissao: false },
-  { id: "campaign", largura: 11, temDado: false, visivelPorOmissao: false },
+  { id: "created", largura: 9, temDado: true, visivelPorOmissao: true },
+  { id: "origin", largura: 9, temDado: true, visivelPorOmissao: false },
+  { id: "campaign", largura: 11, temDado: true, visivelPorOmissao: false },
 ];
 
 const DISPONIVEIS = CATALOGO.filter((c) => c.temDado);

@@ -16,7 +16,9 @@ const CHAVES_USADAS = [
   "searchLabel", "searchPlaceholder", "orderLabel", "caption", "loading", "refreshWarn", "loadMoreError", "routeError",
   "regionLabel", "stageFilterLabel", "updating", "orderAnnounce", "emptyFiltered", "clearFilters", "deals.none",
   // Lote A: colunas novas, sem dado e diálogo de colunas.
-  "columns.next", "columns.assigned", "columns.phone", "columns.email", "columns.whatsapp", "columns.place", "columns.form",
+  // Lote C: origem com tradução, resultado «outro» e o aviso do painel de filtros.
+  "origin.web", "origin.api", "origin.import", "resultOther", "filters.formsError", "filters.formSelected", "filters.chipsLabel",
+  "columns.next", "columns.assigned", "columns.phone", "columns.email", "columns.whatsapp", "columns.form",
   "columns.created", "columns.origin", "columns.campaign", "noData", "noStage", "nextUnknown", "noAssigned", "noPhone", "noEmail",
   "noDate", "whatsappFor", "cols.button", "cols.title", "cols.help", "cols.up", "cols.down", "cols.drag", "cols.reset", "cols.close",
   "cols.fixed", "cols.moved", "cols.listLabel", "cols.down",
@@ -40,6 +42,16 @@ describe("traduções da Lista real das Pessoas", () => {
     for (const chave of CHAVES_USADAS) {
       expect(pt[chave], chave).toBeTruthy();
       expect(en[chave], chave).toBeTruthy();
+    }
+  });
+
+  it("a localidade saiu: nem coluna nem pesquisa por localidade", () => {
+    expect(pt["pessoasPagina.real.columns.place"]).toBeUndefined();
+    expect(en["pessoasPagina.real.columns.place"]).toBeUndefined();
+    for (const texto of [pt["pessoasPagina.real.searchLabel"], pt["pessoasPagina.real.searchPlaceholder"], pt["pessoasPagina.real.searchHint"]]) {
+      expect(texto.toLowerCase()).not.toContain("localidade");
+      expect(texto.toLowerCase()).toContain("email");
+      expect(texto.toLowerCase()).toContain("telefone");
     }
   });
 

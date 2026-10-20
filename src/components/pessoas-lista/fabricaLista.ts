@@ -9,6 +9,8 @@ export function pessoaLista(id: string, sobre: Partial<PessoaDaLista> = {}): Pes
     prontoAGanhar: false, valorEmJogo: 0, ultimoContactoEm: null, diasSemContacto: null, proximaVisitaEm: null,
     leadStatus: null, ultimaVisitaFeitaEm: null, ultimoNegocioEm: null, porLigarContactos: 0, porLigarVisitas: 0,
     porLigarLevantamentos: 0, passo: "registarChamada",
+    criadoEm: null, qualificacao: null, voltou: null, atrasada: null, origem: null, campanhaId: null, campanha: null,
+    formulario: null, ultimoResultado: null,
     ...sobre,
   };
 }

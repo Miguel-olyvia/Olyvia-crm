@@ -20,6 +20,8 @@ vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
     capacidades: { chamada: true, encerrar: true, adiar: false, nota: false, visita: false, negocios: false },
   }),
 }));
+vi.mock("@/hooks/pessoas/useSubmissoesPessoa", () => ({ useSubmissoesPessoa: () => ({ submissoes: [], pendentes: 0, estado: "ok", recarregar: () => undefined }) }));
+vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }));
 
 beforeAll(prepararRadixNoJsdom);

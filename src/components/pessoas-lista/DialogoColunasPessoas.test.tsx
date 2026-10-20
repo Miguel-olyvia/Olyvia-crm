@@ -36,13 +36,14 @@ describe("DialogoColunasPessoas: abrir", () => {
 });
 
 describe("DialogoColunasPessoas: as colunas", () => {
-  it("uma linha por coluna com dado, pela ordem da escolha; as sem dado não aparecem", () => {
+  it("uma linha por coluna com dado, pela ordem da escolha; a localidade saiu e as outras já aparecem", () => {
     desenhar();
     abrir();
     const nomes = within(screen.getByRole("list", { name: "Colunas da lista" })).getAllByRole("checkbox").map((c) => c.getAttribute("aria-label") ?? c.id);
     expect(nomes).toHaveLength(escolhaPorOmissao().length);
-    for (const sem of ["Localidade", "Formulário", "Criado em", "Origem", "Campanha"]) {
-      expect(screen.queryByRole("checkbox", { name: sem })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Localidade" })).toBeNull();
+    for (const com of ["Formulário", "Criado em", "Origem", "Campanha"]) {
+      expect(screen.getByRole("checkbox", { name: com })).toBeInTheDocument();
     }
     expect(screen.getByRole("checkbox", { name: "Telefone" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Atribuído a" })).toBeInTheDocument();
@@ -85,7 +86,7 @@ describe("DialogoColunasPessoas: ordenar com o teclado", () => {
     abrir();
     const e = escolhaPorOmissao();
     const sobe = screen.getByRole("button", { name: "Subir Etapa" });
-    const desce = screen.getByRole("button", { name: "Descer WhatsApp" });
+    const desce = screen.getByRole("button", { name: "Descer Campanha" });
     for (const botao of [sobe, desce]) {
       expect(botao).toHaveAttribute("aria-disabled", "true");
       expect(botao).not.toBeDisabled();
@@ -98,7 +99,7 @@ describe("DialogoColunasPessoas: ordenar com o teclado", () => {
     expect(aoMover).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent("");
     expect(e[1].id).toBe("stage");
-    expect(e[e.length - 1].id).toBe("whatsapp");
+    expect(e[e.length - 1].id).toBe("campaign");
   });
   it("os botões que podem mover-se não levam aria-disabled", () => {
     desenhar();

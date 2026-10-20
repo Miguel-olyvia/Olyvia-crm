@@ -15,17 +15,22 @@ describe("catálogo e omissão", () => {
     const e = escolhaPorOmissao();
     expect(e[0]).toEqual({ id: "person", visivel: true });
   });
-  it("só entram as colunas que têm dado neste lote; as preparadas (sem dado) não aparecem", () => {
+  it("entram todas as colunas com dado: formulário, criado em, origem e campanha já têm", () => {
     const e = ids(escolhaPorOmissao());
-    for (const sem of ["place", "form", "created", "origin", "campaign"]) expect(e).not.toContain(sem);
-    for (const com of ["stage", "lastContact", "next", "nextVisit", "value", "deals", "assigned", "phone", "email", "whatsapp"]) {
-      expect(e).toContain(com);
+    for (const com of ["stage", "form", "lastContact", "next", "nextVisit", "value", "deals", "assigned", "phone", "email", "whatsapp", "created", "origin", "campaign"]) {
+      expect(e, com).toContain(com);
     }
   });
-  it("as colunas preparadas existem no catálogo, marcadas sem dado, prontas a ligar", () => {
-    for (const id of ["place", "form", "created", "origin", "campaign"]) {
-      expect(CATALOGO.find((c) => c.id === id)?.temDado, id).toBe(false);
-    }
+  it("origem e campanha ficam escondidas por omissão; formulário e criado em visíveis", () => {
+    const e = escolhaPorOmissao();
+    expect(e.find((c) => c.id === "origin")?.visivel).toBe(false);
+    expect(e.find((c) => c.id === "campaign")?.visivel).toBe(false);
+    expect(e.find((c) => c.id === "form")?.visivel).toBe(true);
+    expect(e.find((c) => c.id === "created")?.visivel).toBe(true);
+  });
+  it("a localidade saiu: não está no catálogo", () => {
+    expect(CATALOGO.find((c) => c.id === "place")).toBeUndefined();
+    expect(ids(escolhaPorOmissao())).not.toContain("place");
   });
   it("sem ids repetidos e com larguras positivas", () => {
     expect(new Set(CATALOGO.map((c) => c.id)).size).toBe(CATALOGO.length);

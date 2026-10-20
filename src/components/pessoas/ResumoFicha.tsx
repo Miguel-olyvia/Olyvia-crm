@@ -1,6 +1,6 @@
 // A aba "Resumo" da ficha, em secções por esta ordem: as visitas da pessoa (uma só secção), próximo passo e prazo, avisos, os registos por
 // ligar (chamadas e levantamentos), contacto, origem e sobre a pessoa. A marca "exemplo" vai por secção.
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { MaisItensFicha } from "./CarregarMais";
 import { ContactoFicha } from "./ContactoFicha";
@@ -27,6 +27,8 @@ interface ResumoFichaProps {
   aoRegistarResultado: (visitaId: string) => void;
   /** «Carregar mais» das visitas, contactos e levantamentos (a ficha real). */
   maisItens?: MaisItensFicha;
+  /** A identidade da pessoa (a ficha real), logo antes do contacto. */
+  identidade?: ReactNode;
 }
 
 export function ResumoFicha(p: ResumoFichaProps) {
@@ -57,6 +59,7 @@ export function ResumoFicha(p: ResumoFichaProps) {
         contactos={resumo.registos.contactos} levantamentos={resumo.registos.levantamentos} negocios={negocios}
         maisContactos={p.maisItens?.contactos} maisLevantamentos={p.maisItens?.levantamentos}
       />
+      {p.identidade}
       <ContactoFicha pessoa={resumo.pessoa} />
       <SeccaoOrigem pessoa={resumo.pessoa} />
       <SeccaoSobre resumo={resumo} hoje={p.hoje} />

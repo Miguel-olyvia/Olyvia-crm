@@ -67,7 +67,8 @@ describe("useColunasPessoas", () => {
     expect(result.current.visiveis).not.toContain("phone");
     expect(result.current.visiveis).not.toContain("email");
     const guardadas = JSON.parse(window.localStorage.getItem(chaveColunas("org-1")) ?? "null").colunas as { id: string; visivel: boolean }[];
-    expect(guardadas.filter((c) => !c.visivel).map((c) => c.id).sort()).toEqual(["email", "phone"]);
+    // Além das duas, ficam escondidas por omissão a origem e a campanha.
+    expect(guardadas.filter((c) => !c.visivel).map((c) => c.id).sort()).toEqual(["campaign", "email", "origin", "phone"]);
   });
   it("mover duas vezes seguidas move duas posições, e mover e arrastar seguidos somam-se", () => {
     const { result } = renderHook(() => useColunasPessoas("org-1"));

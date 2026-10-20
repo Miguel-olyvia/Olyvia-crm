@@ -16,6 +16,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 let ctx: { activeCompany: { id: string } | null; isLoading: boolean } = { activeCompany: { id: "org-1" }, isLoading: false };
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ctx }));
+vi.mock("@/hooks/usePermissionScope", () => ({ usePermissionScope: () => ({ anewUserId: "u-rui" }) }));
 
 function Sonda() {
   const f = useFontePessoas();

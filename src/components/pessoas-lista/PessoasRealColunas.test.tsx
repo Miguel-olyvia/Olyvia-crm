@@ -12,6 +12,9 @@ import { listaBase, pessoaLista } from "./fabricaLista";
 import { PessoasReal } from "./PessoasReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+// A «Nova lead» do cabeçalho (P7) tem testes próprios; aqui não interessa. Sem permissão `leads.create`, o botão não se desenha.
+vi.mock("@/components/pessoas-leads/NovaLeadReal", () => ({ NovaLeadReal: () => null }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false, hasAnyPermission: () => false, permissions: [], loading: false }) }));
 const contactosMock = vi.hoisted(() => vi.fn());
 const inMock = vi.hoisted(() => vi.fn());
 const fromMock = vi.hoisted(() => vi.fn());
@@ -68,15 +71,16 @@ beforeEach(() => {
 });
 
 describe("PessoasReal: colunas por omissão", () => {
-  it("mostra o nome, a etapa, o último contacto, o próximo passo, a próxima visita, o valor, os negócios e os dados de contacto", () => {
+  it("mostra o nome, a etapa, o formulário, o último contacto, o próximo passo, a próxima visita, o valor, os negócios, os dados de contacto e o criado em", () => {
     desenhar({ modo: "exemplo" });
     expect(cabecalhos()).toEqual([
-      "Pessoa", "Etapa", "Último contacto", "Próximo passo", "Próxima visita", "Valor", "Negócios", "Atribuído a", "Telefone", "Email", "WhatsApp",
+      "Pessoa", "Etapa", "Formulário", "Último contacto", "Próximo passo", "Próxima visita", "Valor", "Negócios", "Atribuído a", "Telefone", "Email",
+      "WhatsApp", "Criado em",
     ]);
   });
-  it("as colunas que esperam dados da função (localidade, formulário, criado em, origem, campanha) não aparecem", () => {
+  it("a localidade saiu, e origem e campanha ficam escondidas até a pessoa as escolher", () => {
     desenhar({ modo: "exemplo" });
-    for (const sem of ["Localidade", "Formulário", "Criado em", "Origem", "Campanha"]) expect(cabecalhos()).not.toContain(sem);
+    for (const sem of ["Localidade", "Origem", "Campanha"]) expect(cabecalhos()).not.toContain(sem);
   });
   it("o botão «Colunas» está na página", () => {
     desenhar({ modo: "exemplo" });
@@ -159,6 +163,7 @@ describe("PessoasReal: escolher as colunas", () => {
   it("Subir muda a ordem do cabeçalho e das células por igual", () => {
     desenhar({ modo: "exemplo" });
     fireEvent.click(screen.getByRole("button", { name: "Colunas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Subir Último contacto" }));
     fireEvent.click(screen.getByRole("button", { name: "Subir Último contacto" }));
     expect(cabecalhos().slice(0, 3)).toEqual(["Pessoa", "Último contacto", "Etapa"]);
     // Com o diálogo aberto o resto da página fica aria-hidden: por isso se procura também entre os escondidos.

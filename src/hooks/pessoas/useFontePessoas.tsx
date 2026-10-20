@@ -10,7 +10,13 @@ export type MomentoGanho = "manual" | "proposta_aceite" | "contrato_assinado";
  */
 export type FontePessoas =
   | { modo: "exemplo" }
-  | { modo: "real"; organizationId: string; momentoGanho: MomentoGanho | null };
+  | {
+    modo: "real";
+    organizationId: string;
+    momentoGanho: MomentoGanho | null;
+    /** O `anew_users.id` de quem está na sessão (para «Só as minhas»); `null`/ausente enquanto não se conhece. */
+    utilizadorId?: string | null;
+  };
 
 export const FontePessoasContext = createContext<FontePessoas>({ modo: "exemplo" });
 

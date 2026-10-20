@@ -75,6 +75,16 @@ describe("adaptarResumo", () => {
       porLigarVisitas: 0,
       porLigarLevantamentos: 0,
       passo: "ganharNegocio",
+      // Lote C: os campos novos; a função mais antiga (esta linha não os traz) dá «sem dado» (null), nunca undefined.
+      criadoEm: null,
+      qualificacao: null,
+      voltou: null,
+      atrasada: null,
+      origem: null,
+      campanhaId: null,
+      campanha: null,
+      formulario: null,
+      ultimoResultado: null,
     });
   });
 

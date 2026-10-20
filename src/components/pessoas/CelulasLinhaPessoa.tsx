@@ -135,6 +135,18 @@ export function Formulario({ vista }: { vista: VistaLinhaPessoa }) {
   return <TextoOuTravessao valor={vista.formulario} vazio={t("pessoasPagina.formManual")} />;
 }
 
+const ORIGENS_CONHECIDAS: readonly string[] = ["web", "api", "import"];
+
+/** A origem da lead (`anew_leads.source`): web, api e import com nome legível (como as Leads); o resto, tal como a base o guarda. */
+export function Origem({ vista }: { vista: VistaLinhaPessoa }) {
+  const { t } = useTranslation();
+  const origem = vista.origem;
+  if (origem === undefined) return <SemDado />;
+  if (origem === null || origem.trim() === "") return <SemTexto rotulo={t(`${R}noData`)} />;
+  const chave = origem.trim().toLowerCase();
+  return <TextoOuTravessao valor={ORIGENS_CONHECIDAS.includes(chave) ? t(`${R}origin.${chave}`) : origem} vazio={t(`${R}noData`)} />;
+}
+
 export function Comercial({ vista }: { vista: VistaLinhaPessoa }) {
   const { t } = useTranslation();
   if (vista.comercial === null) return <span className="italic text-muted-foreground">{t(`${R}noAssigned`)}</span>;
