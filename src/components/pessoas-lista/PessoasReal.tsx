@@ -6,6 +6,7 @@ import { useListaPessoas, type ListaPessoas } from "@/hooks/pessoas/useListaPess
 import { Button } from "@/components/ui/button";
 import { PermissionGate } from "@/components/PermissionGate";
 import { NovaLeadReal } from "@/components/pessoas-leads/NovaLeadReal";
+import { BotaoWorkflowPessoas } from "@/components/pessoas-workflow/BotaoWorkflowPessoas";
 import type { IdColuna } from "@/components/pessoas/vistaLinhaPessoa";
 import { CabecalhoPagina } from "@/components/negocio-metas/CabecalhoPagina";
 import { FOCO } from "@/components/negocio-metas/estilos";
@@ -158,10 +159,16 @@ export function PessoasReal() {
       <CabecalhoPagina
         subtitulo={contagem} titulo={t(`${R}title`)} aviso={null} pai={{ to: "/leads", texto: t("sidebar.crm") }}
         acoes={comFicha ? (
-          // Como em Leads: «Nova lead» só a quem pode criar leads. No modo exemplo fica o `NovaLeadPainel` da página de exemplo.
-          <PermissionGate permission="leads.create">
-            <NovaLeadReal aoAbrirPessoa={aoAbrir} aoAnunciar={setMensagemAcao} />
-          </PermissionGate>
+          // Como em Leads: «Nova lead» só a quem pode criar leads e «Workflow» só a quem pode configurá-lo (`pessoas.config`, não a de Leads).
+          // `comFicha` é o modo real, isto é, a organização com o novo fluxo ligado. No modo exemplo fica o `NovaLeadPainel` da página de exemplo.
+          <>
+            <PermissionGate permission="leads.create">
+              <NovaLeadReal aoAbrirPessoa={aoAbrir} aoAnunciar={setMensagemAcao} />
+            </PermissionGate>
+            <PermissionGate permission="pessoas.config">
+              <BotaoWorkflowPessoas />
+            </PermissionGate>
+          </>
         ) : undefined}
       />
       <BarraListaReal

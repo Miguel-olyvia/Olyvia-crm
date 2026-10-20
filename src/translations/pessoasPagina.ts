@@ -13,6 +13,7 @@ import { pessoasListaRealTranslations } from "./pessoasListaReal";
 import { pessoasProcessoTranslations } from "./pessoasProcesso";
 import { pessoasRegistosTranslations } from "./pessoasRegistos";
 import { pessoasVisitaTranslations } from "./pessoasVisita";
+import { pessoasWorkflowTranslations } from "./pessoasWorkflow";
 
 // Página "Pessoas" (/pessoas) — módulo próprio, mesmo padrão de `negocioMetas.ts` e `today.ts`,
 // juntado em `useTranslation.ts`. Apenas en/pt: nas outras línguas o `t()` cai para `en`.
@@ -134,6 +135,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasFichaRealTranslations.en,
     ...pessoasNegocioTranslations.en,
     ...pessoasNovaLeadTranslations.en,
+    ...pessoasWorkflowTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -251,5 +253,6 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasFichaRealTranslations.pt,
     ...pessoasNegocioTranslations.pt,
     ...pessoasNovaLeadTranslations.pt,
+    ...pessoasWorkflowTranslations.pt,
   },
 };

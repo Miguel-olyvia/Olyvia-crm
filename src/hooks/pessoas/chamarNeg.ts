@@ -21,7 +21,8 @@ export type NomeNeg =
   | "neg_adiar_contacto"
   | "neg_guardar_identidade_pessoa"
   | "neg_procurar_duplicados"
-  | "neg_substituir_contacto";
+  | "neg_substituir_contacto"
+  | "neg_guardar_regras_qualificacao";
 
 /** Erro de uma função neg_*: o código (se for conhecido), a chave a traduzir e a causa. */
 export class ErroNeg extends Error {
