@@ -188,6 +188,13 @@ describe("adaptarPessoa: a qualificação chega da função como respostas (obje
     expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: " mql " }) }).qualificacao).toBe("MQL");
   });
 
+  it("o selo vem com a lead em qualquer estado, como na lista (sem a condição «qualified»)", () => {
+    for (const estado of ["new", "contacted", "qualified"]) {
+      const lead = { id: "22222222-2222-4222-8222-222222222222", estado, aberta: true, encerramento: null };
+      expect(adaptar({ pessoa: pessoaDb({ qualificacao_tipo: "MQL" }), lead }).qualificacao, estado).toBe("MQL");
+    }
+  });
+
   it("um qualificacao_tipo desconhecido ou que não é texto não conta", () => {
     expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: "quente" }) }).qualificacao).toBeUndefined();
     expect(adaptar({ pessoa: pessoaDb({ qualificacao: respostas, qualificacao_tipo: 3 as never }) }).qualificacao).toBeUndefined();

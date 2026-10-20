@@ -45,11 +45,8 @@ function numero(valor: number | string | null): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Como a página de Leads (LeadTableRow): o selo MQL/SQL só existe com a lead em estado «qualified». */
-const ESTADO_QUALIFICADA = "qualified";
-
-function qualificacaoDe(tipo: string | null | undefined, estado: string | null | undefined): QualificacaoPessoa | null {
-  if (estado !== ESTADO_QUALIFICADA) return null;
+/** O selo MQL/SQL aparece sempre que a lead tem classificação, seja qual for o estado dela (decisão do produto: o fluxo de Pessoas difere do de Leads). */
+function qualificacaoDe(tipo: string | null | undefined): QualificacaoPessoa | null {
   const limpo = tipo?.trim().toUpperCase();
   return limpo === "MQL" || limpo === "SQL" ? limpo : null;
 }
@@ -114,7 +111,7 @@ export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista
       ultimoNegocioEm: linha.ultimo_negocio_em ?? null, porLigarContactos, porLigarVisitas, porLigarLevantamentos,
     }),
     criadoEm: linha.criado_em ?? null,
-    qualificacao: qualificacaoDe(linha.qualificacao_tipo, linha.lead_status),
+    qualificacao: qualificacaoDe(linha.qualificacao_tipo),
     voltou: linha.voltou_a_contactar ?? null,
     atrasada: linha.atrasada ?? null,
     origem: linha.origem ?? null,

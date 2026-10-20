@@ -32,6 +32,14 @@ const guardarBtn = () => screen.getByRole("button", { name: /guardar regras de q
 const estado = () => screen.getByRole("status");
 const erroNeg = (codigo: string | null) => new ErroNeg(new Error("texto da base"), codigo, codigo ? CHAVES_ERRO_NEG[codigo] : "pessoasPagina.erroNeg.generico");
 
+describe("QualificacaoSeparador: o selo MQL/SQL não vem das regras", () => {
+  it("diz que gravar as regras não muda o selo e que o selo se classifica à mão na ficha", () => {
+    render(<QualificacaoSeparador regras={hook()} />);
+    const nota = screen.getByText(/não muda o selo/i);
+    expect(nota).toHaveTextContent(/classifica-se à mão na ficha/i);
+  });
+});
+
 describe("QualificacaoSeparador: carregar", () => {
   it("enquanto lê mostra «A carregar» e ainda não mostra regras nem o botão Guardar", () => {
     render(<QualificacaoSeparador regras={hook({ dados: null, isLoading: true })} />);

@@ -15,6 +15,7 @@ import { useAcoesFichaReal } from "@/hooks/pessoas/useAcoesFichaReal";
 import { useFichaPessoa } from "@/hooks/pessoas/useFichaPessoa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
+import { useQualificarLeadPessoa } from "@/hooks/pessoas/useQualificarLeadPessoa";
 import { useSubmissoesPessoa } from "@/hooks/pessoas/useSubmissoesPessoa";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
@@ -22,6 +23,7 @@ import type { SeparadorSubmissoesReal } from "@/components/pessoas/FichaInterior
 import type { ItemAtividade, NotaPessoa, Pessoa, Submissao } from "@/components/pessoas/pessoasTipos";
 import { IdentidadeFichaReal } from "./IdentidadeFichaReal";
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
+import { QualificacaoManualFichaReal } from "./QualificacaoManualFichaReal";
 import { SubmissoesFichaReal } from "./SubmissoesFichaReal";
 
 const F = "pessoasPagina.real.ficha.";
@@ -109,11 +111,20 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
     />,
   }), [submissoes.estado, submissoes.submissoes, submissoes.desatualizado, submissoes.pendentes, hojeDaFicha, recarregarSubmissoes]);
   const { guardar: guardarIdentidade } = useGuardarIdentidadePessoa(mostrada?.pessoa.id ?? "");
+  const { classificar } = useQualificarLeadPessoa(mostrada?.pessoa.id ?? "", mostrada?.pessoa.lead_id ?? "");
   const identidade = mostrada ? (
-    <IdentidadeFichaReal
-      nome={mostrada.pessoa.nome?.trim() ?? ""} tipo={tipoDeIdentidade(mostrada.pessoa.tipo)} empresaNome={mostrada.pessoa.empresa_nome ?? null}
-      podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarIdentidade}
-    />
+    <>
+      <IdentidadeFichaReal
+        nome={mostrada.pessoa.nome?.trim() ?? ""} tipo={tipoDeIdentidade(mostrada.pessoa.tipo)} empresaNome={mostrada.pessoa.empresa_nome ?? null}
+        nomeProprio={mostrada.pessoa.first_name ?? null} apelido={mostrada.pessoa.last_name ?? null}
+        podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarIdentidade}
+      />
+      {/* O selo MQL/SQL classifica-se à mão (como em Leads); as regras do Workflow não o acendem. */}
+      <QualificacaoManualFichaReal
+        key={mostrada.pessoa.id} leadId={mostrada.pessoa.lead_id} qualificacao={adaptada?.resumo.pessoa.qualificacao}
+        podeEditar={mostrada.permissoes?.editar === true} aoClassificar={classificar}
+      />
+    </>
   ) : undefined;
 
   const aAbrir = pessoaId !== null && mostrada === null && lida.estado === "a-carregar";

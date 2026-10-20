@@ -1,14 +1,19 @@
 import { useCallback, useRef, useState } from "react";
-import { respostasParaBase } from "@/components/negocio-metas/respostasQuestionario";
+import { useQueryClient } from "@tanstack/react-query";
+import { respostasParaBase, validarRespostas } from "@/components/negocio-metas/respostasQuestionario";
 import type { QuestionarioForm } from "@/components/negocio-metas/questionarioForm";
 import type { Respostas } from "@/components/negocio-metas/perguntasTipos";
 import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { chamarNeg, ErroNeg } from "./chamarNeg";
+import { invalidarPessoas } from "./invalidarPessoas";
 import { useFontePessoas } from "./useFontePessoas";
 
-const CHAVE_NAO_PRONTO = "businessGoals.new.qform.notReady";
+// A base recusa estes dois porque o levantamento já está ligado (NG005) ou o negócio já tem um (NG013): a ficha que se vê está desatualizada.
+const RECUSAS_DE_FICHA_DESATUALIZADA = ["NG005", "NG013"];
+export const CHAVE_NAO_PRONTO ="businessGoals.new.qform.notReady";
+const CHAVE_INVALIDAS = "businessGoals.new.qform.invalid";
 const CHAVE_MUDOU = "businessGoals.new.qform.changed";
 const CHAVE_MUDOU_SEM_RECARGA = "businessGoals.new.qform.changedReloadFailed";
 
@@ -28,8 +33,11 @@ export interface EntradaGuardarLevantamento {
 /**
  * Os parâmetros de neg_guardar_levantamento no formato novo: as respostas por chave de pergunta (escolhas, texto ou número) e a versão do
  * questionário contra a qual a pessoa preencheu em p_dados (a base devolve `questionario_mudou` se entretanto subiu). O catálogo do código não tem versão.
+ * Valida as respostas antes de as montar (texto comprido, número fora dos limites ou das casas): lança `ErroNeg` e nada segue. A guarda do botão
+ * é do ecrã; esta é a que impede gravar mesmo que alguém chame `guardar` sem passar por ele.
  */
 export function paramsGuardarLevantamento(e: EntradaGuardarLevantamento, q: QuestionarioForm): Record<string, unknown> {
+  if (Object.keys(validarRespostas(q, e.respostas)).length > 0) throw new ErroNeg(null, null, CHAVE_INVALIDAS);
   return {
     p_id: e.id,
     p_organization_id: e.organizationId,
@@ -63,7 +71,7 @@ function lerResultado(cru: unknown): ResultadoGuardarLevantamento {
 }
 
 export interface GuardarLevantamentoHook {
-  /** Grava. Lança `ErroNeg` se falhar, e recusa (sem chamar a base) se o questionário ainda não carregou. Um pedido durante outro devolve o que já está em curso. */
+  /** Grava. Lança `ErroNeg` se falhar, e recusa (sem chamar a base) se o questionário ainda não carregou ou se há respostas por corrigir. Um pedido durante outro devolve o que já está em curso. */
   guardar: (entrada: EntradaGuardarLevantamento) => Promise<ResultadoGuardarLevantamento>;
   aGuardar: boolean;
   /** O questionário está carregado e pode gravar-se. Um botão «Guardar» fica desativado enquanto isto for falso. */
@@ -76,7 +84,10 @@ export interface GuardarLevantamentoHook {
  */
 export function useGuardarLevantamento(): GuardarLevantamentoHook {
   const { questionario, podeGuardar: contextoPodeGuardar, recarregar } = useQuestionario();
-  const modoReal = useFontePessoas().modo === "real";
+  const fonte = useFontePessoas();
+  const modoReal = fonte.modo === "real";
+  const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
+  const client = useQueryClient();
   // Em modo real o catálogo do código (`semBase`) é o que o contexto vale SEM fornecedor: gravaria sem `versao_questionario` e com chaves de
   // pergunta que a base pode não ter. Só se grava contra as perguntas lidas da base; o protótipo sem base (modo exemplo) continua com o catálogo.
   const podeGuardar = contextoPodeGuardar && !(modoReal && questionario.semBase);
@@ -91,7 +102,17 @@ export function useGuardarLevantamento(): GuardarLevantamentoHook {
     setAGuardar(true);
     const voo = (async (): Promise<ResultadoGuardarLevantamento> => {
       try {
-        const resultado = lerResultado(await chamarNeg<unknown>("neg_guardar_levantamento", paramsGuardarLevantamento(entrada, questionario)));
+        let resultado: ResultadoGuardarLevantamento;
+        try {
+          resultado = lerResultado(await chamarNeg<unknown>("neg_guardar_levantamento", paramsGuardarLevantamento(entrada, questionario)));
+        } catch (erro) {
+          if (erro instanceof ErroNeg && erro.codigo !== null && RECUSAS_DE_FICHA_DESATUALIZADA.includes(erro.codigo)) {
+            void invalidarPessoas(client, organizationId, entrada.entityId);
+          }
+          throw erro;
+        }
+        // Depois de escrever: a ficha e as listas refazem-se (o levantamento aparece em todo o lado sem recarregar a página).
+        void invalidarPessoas(client, organizationId, entrada.entityId);
         if (resultado.questionarioMudou) {
           const recarregado = await recarregar();
           // Se a releitura falhou, as perguntas no ecrã continuam as antigas: não se diz que foram recarregadas.
@@ -105,7 +126,7 @@ export function useGuardarLevantamento(): GuardarLevantamentoHook {
     })();
     emCurso.current = voo;
     return voo;
-  }, [podeGuardar, questionario, recarregar, t]);
+  }, [podeGuardar, questionario, recarregar, t, client, organizationId]);
 
   return { guardar, aGuardar, pronto: podeGuardar };
 }

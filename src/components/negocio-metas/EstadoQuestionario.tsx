@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -58,6 +58,36 @@ export function EstadoQuestionario({ estado, aoRepetir }: Props) {
       >
         {aRepetir ? t(`${N}qform.loading`) : t(`${N}qform.retry`)}
       </Button>
+    </div>
+  );
+}
+
+/**
+ * O estado das perguntas dentro de um contentor `aria-live` que existe SEMPRE (vazio quando está pronto): um aviso que aparece já com o texto
+ * dentro nem sempre é lido; o contentor que já estava no ecrã e muda, é. Depois de um «Repetir» que deu certo o botão desaparece: o foco passa para
+ * este contentor (e diz-se que as perguntas carregaram) em vez de cair no corpo da página.
+ */
+export function EstadoQuestionarioVivo({ estado, aoRepetir }: Props) {
+  const { t } = useTranslation();
+  const caixa = useRef<HTMLDivElement>(null);
+  const repetiu = useRef(false);
+  const [recuperou, setRecuperou] = useState(false);
+  useEffect(() => {
+    if (estado !== "pronto") {
+      setRecuperou(false);
+      // O «Repetir» falhou: a recarga que der certo mais tarde (ao voltar à janela, por exemplo) já ninguém a pediu, e não rouba o foco.
+      if (estado === "erro") repetiu.current = false;
+      return;
+    }
+    if (!repetiu.current) return;
+    repetiu.current = false;
+    setRecuperou(true);
+    caixa.current?.focus();
+  }, [estado]);
+  return (
+    <div ref={caixa} tabIndex={-1} aria-live="polite" data-testid="estado-questionario" className="space-y-2 outline-none">
+      {estado !== "pronto" && <EstadoQuestionario estado={estado} aoRepetir={() => { repetiu.current = true; aoRepetir(); }} />}
+      {recuperou && estado === "pronto" && <p className="text-sm text-muted-foreground">{t(`${N}qform.loaded`)}</p>}
     </div>
   );
 }

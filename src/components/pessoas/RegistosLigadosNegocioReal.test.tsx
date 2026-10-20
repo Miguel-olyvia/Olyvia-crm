@@ -13,6 +13,8 @@ import { contactoBase, levantamentoBase, negocioBase, registosBase, visitaPessoa
 import { textoDiaCompleto } from "./formatoPessoas";
 import { RegistosLigadosNegocio } from "./RegistosLigadosNegocio";
 
+// A ficha real monta o fornecedor do questionário (importa o cliente da base): nenhum destes testes fala com a base.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 
 beforeAll(prepararRadixNoJsdom);

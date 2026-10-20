@@ -2,15 +2,16 @@
 // resultado ao negócio: criar o orçamento e a proposta abre o editor e o diálogo que a app já tem (`PainelOrcamentoReal`, `PainelPropostaReal`);
 // enviar e responder à proposta, criar o contrato e assiná-lo vão por ligação ao ecrã da app com `?voltar=` para regressar à ficha (o contrato
 // novo volta ligado por `useLigarAoVoltar`); ganhar abre o diálogo de ganhar. Os passos que o exemplo simula (verificar o orçamento, a Direção)
-// não existem em modo real, e o levantamento é do P5: um passo que a ficha não sabe executar não tem botão (`podeExecutar`). Sem as
-// mutações da ficha real (o exemplo) não faz nada: os filhos ficam como estavam.
+// não existem em modo real, e o passo «Fazer o levantamento» de um negócio é do P3: um passo que a ficha não sabe executar não tem botão
+// (`podeExecutar`). O painel «Visita e levantamento» (menu «Mais» da ficha) abre daqui e grava na base (`PainelVisitaLevantamentoReal`) a quem pode
+// editar a ficha. Sem as mutações da ficha real (o exemplo) não faz nada: os filhos ficam como estavam.
 //
 // RISCO LATENTE (partilhado com a Mudelar, por isso NÃO alterado aqui): «criar contrato» abre `/client-contracts?newContract=true&proposalId=`
 // e o seletor de propostas dessa página só lista as propostas com `status` em approved, accepted, sent e draft (`ClientContracts.tsx`, a
 // consulta «proposals-for-contracts»). Uma organização cujas etapas de proposta tenham nome em português («aceite», «enviada») grava esse
 // nome em `proposals.status`: a proposta aceite não entra na lista, o seletor fica vazio e o botão de criar fica desativado (agora com uma
 // mensagem a explicar). Não confirmado na base: ver os valores de `proposals.status` que cada organização grava antes de ligar isto a produção.
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { adaptarPessoa } from "@/hooks/pessoas/adaptarFichaPessoa";
 import { adaptarNegocios } from "@/hooks/pessoas/adaptarNegociosFicha";
@@ -18,6 +19,7 @@ import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva } fro
 import type { FichaDb, NegocioFichaDb } from "@/hooks/pessoas/fichaTipos";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { useTranslation } from "@/hooks/useTranslation";
 import { enderecoDeRegresso, ligacaoComVoltar } from "@/lib/voltarParaPessoas";
 import { GanharNegocioDialogo } from "@/components/negocio-metas/GanharNegocioDialogo";
 import { useMutacoesDaFicha } from "@/components/negocio-metas/mutacoesNegocio";
@@ -35,6 +37,8 @@ import type { NegocioDaProposta } from "./PainelPropostaReal";
 // Os editores de orçamentos e de propostas são ecrãs enormes: só se carregam quando se abrem (a ficha não os paga a quem não os usa).
 const PainelOrcamentoReal = lazy(() => import("./PainelOrcamentoReal").then((m) => ({ default: m.PainelOrcamentoReal })));
 const PainelPropostaReal = lazy(() => import("./PainelPropostaReal").then((m) => ({ default: m.PainelPropostaReal })));
+// O painel «Visita e levantamento» (formulário, perguntas da base e gravação) também só se carrega quando se abre pela primeira vez.
+const PainelVisitaLevantamentoReal = lazy(() => import("./PainelVisitaLevantamentoReal").then((m) => ({ default: m.PainelVisitaLevantamentoReal })));
 
 type TipoDocumento = "orcamento" | "proposta" | "contrato";
 type Painel = "orcamento" | "proposta" | "ganhar";
@@ -98,6 +102,12 @@ function destinoDoDocumento(tipo: TipoDocumento, negocio: NegocioFichaDb): strin
   return tipo === "proposta" ? `/proposals?open=${codificar(id)}` : `/client-contracts?open=${codificar(id)}`;
 }
 
+/** O que se vê (e se ouve) enquanto o painel «Visita e levantamento» carrega à primeira abertura: sem isto o clique no menu parecia morto. */
+function AbrindoPainel() {
+  const { t } = useTranslation();
+  return <p role="status" className="sr-only">{t("pessoasPagina.process.visitSurvey.loading")}</p>;
+}
+
 interface ProcessoProviderRealProps {
   /** A ficha da pessoa aberta (a que a base devolveu). */
   ficha: FichaDb | null;
@@ -113,9 +123,21 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   // Trocar de pessoa (ou fechar a ficha) larga o painel: sem isto voltar à pessoa em que ele se abriu voltava a abri-lo.
   const pessoaDaFicha = ficha?.pessoa.id ?? null;
+  // O painel «Visita e levantamento»: `pessoa` é a de quem está aberto (`null` fechado) e `n` conta as aberturas (0: nunca abriu, e nada se monta).
+  const [visita, setVisita] = useState<{ pessoa: string | null; n: number }>({ pessoa: null, n: 0 });
+  const origemDoFoco = useRef<HTMLElement | null>(null);
   useEffect(() => {
     setAberto((atual) => (atual !== null && atual.pessoa !== pessoaDaFicha ? null : atual));
+    setVisita((atual) => (atual.pessoa !== null && atual.pessoa !== pessoaDaFicha ? { ...atual, pessoa: null } : atual));
   }, [pessoaDaFicha]);
+  // Só quem pode editar a ficha vê o item «Visita e levantamento»: visitas e levantamento escrevem-se na pessoa (quem só pode criar recebe recusa).
+  // Uma pessoa perdida ou com a abordagem encerrada não: abrir não faria nada (`abrirVisitaLevantamento` recusa), e o item não pode estar lá a fingir.
+  const pessoaFechada = useMemo(() => {
+    if (!ficha) return false;
+    const pessoa = adaptarPessoa(ficha, hojeLisboa());
+    return !!pessoa.perdida || !!pessoa.encerrada;
+  }, [ficha]);
+  const podeVisita = organizationId !== null && ficha?.permissoes.editar === true && !pessoaFechada;
 
   // O diálogo de marcar visita (ligado à base), montado uma vez por ficha: serve o botão «Marcar visita» de um negócio. Completa a abertura com o que o
   // botão não sabe (a morada da lead e o responsável, que dá o recurso por omissão) e diz que a pessoa já tem uma visita (então é uma revisita).
@@ -147,22 +169,32 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
         if (plano.tipo === "ir") ir(plano.destino, plano.negocio.id);
         else setAberto({ painel: plano.painel, negocio: plano.negocio.id, pessoa: ficha.pessoa.id });
       },
-      abrirVisitaLevantamento: () => undefined,
-      // O painel «Visita e levantamento» ainda não grava na base (o levantamento é do P5): o menu «Mais» não o mostra.
-      comPainelVisita: false,
+      abrirVisitaLevantamento: (pessoaId, origem) => {
+        if (!ficha || !podeVisita || ficha.pessoa.id !== pessoaId) return;
+        origemDoFoco.current = origem;
+        setVisita((atual) => ({ pessoa: pessoaId, n: atual.n + 1 }));
+      },
+      comPainelVisita: podeVisita,
       abrirDocumento: (tipo, negocioId) => {
         const negocio = ficha?.negocios?.itens.find((n) => n.id === negocioId);
         const destino = negocio ? destinoDoDocumento(tipo, negocio) : null;
         if (destino) ir(destino, negocioId);
       },
     };
-  }, [ficha, navegar, organizationId]);
+  }, [ficha, navegar, organizationId, podeVisita]);
 
   if (!mutacoes) return <>{children}</>;
 
   // Um painel aberto só vale para a pessoa em que se abriu (trocar de pessoa nunca deixa o painel de uma sobre a ficha de outra).
   const doPainel = ficha && aberto && aberto.pessoa === ficha.pessoa.id ? ficha.negocios?.itens.find((n) => n.id === aberto.negocio) : undefined;
   const fechar = (): void => setAberto(null);
+  const devolverFoco = (): boolean => {
+    const origem = origemDoFoco.current;
+    origemDoFoco.current = null;
+    if (!origem?.isConnected) return false;
+    origem.focus();
+    return true;
+  };
   const origem = ficha ? origemDoOrcamento(ficha) : null;
   const orcamento: NegocioDoOrcamento | null = doPainel && aberto?.painel === "orcamento" && ficha && origem && organizationId
     ? { id: doPainel.id, nome: ficha.pessoa.nome ?? "", entityId: ficha.pessoa.id, organizationId, origem }
@@ -182,6 +214,14 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
       {orcamento && <Suspense fallback={null}><PainelOrcamentoReal negocio={orcamento} mutacoes={mutacoes} aoFechar={fechar} /></Suspense>}
       {proposta && <Suspense fallback={null}><PainelPropostaReal negocio={proposta} mutacoes={mutacoes} aoFechar={fechar} /></Suspense>}
       <GanharNegocioDialogo negocio={paraGanhar} aoFechar={fechar} aoGanho={avisar} />
+      {ficha && visita.n > 0 && (
+        <Suspense fallback={<AbrindoPainel />}>
+          <PainelVisitaLevantamentoReal
+            ficha={ficha} aberto={visita.pessoa !== null && visita.pessoa === ficha.pessoa.id} abertura={visita.n} aoDevolverFoco={devolverFoco}
+            aoMudarAberto={(abre) => { if (!abre) setVisita((atual) => ({ ...atual, pessoa: null })); }}
+          />
+        </Suspense>
+      )}
     </ProcessoContext.Provider>
   );
 }

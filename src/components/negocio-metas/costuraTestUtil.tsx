@@ -2,6 +2,7 @@
 // pendente até o teste a resolver ou rejeitar.
 import { vi } from "vitest";
 import { act } from "@testing-library/react";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import type { ReactNode } from "react";
 import { DadosNegocioContext, type DadosNegocio } from "./costuraNegocio";
 import { MutacoesNegocioContext, type MutacoesNegocio } from "./mutacoesNegocio";
@@ -35,10 +36,13 @@ interface ComCosturaProps {
 
 /** Monta a ficha real falsa à volta de `children`; sem `dados` ou `mutacoes` usa os valores por omissão, e `null` tira o provider. */
 export function ComCostura({ mutacoes, dados, children }: ComCosturaProps) {
+  // A ficha real monta o fornecedor do questionário (react-query) à volta dos registos: precisa de um cliente (que sem fonte real não lê nada).
   return (
-    <DadosNegocioContext.Provider value={dados === undefined ? dadosFalsos() : dados}>
-      <MutacoesNegocioContext.Provider value={mutacoes === undefined ? mutacoesFalsas() : mutacoes}>{children}</MutacoesNegocioContext.Provider>
-    </DadosNegocioContext.Provider>
+    <ComClienteQuery>
+      <DadosNegocioContext.Provider value={dados === undefined ? dadosFalsos() : dados}>
+        <MutacoesNegocioContext.Provider value={mutacoes === undefined ? mutacoesFalsas() : mutacoes}>{children}</MutacoesNegocioContext.Provider>
+      </DadosNegocioContext.Provider>
+    </ComClienteQuery>
   );
 }
 

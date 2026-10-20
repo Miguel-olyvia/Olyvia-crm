@@ -72,6 +72,7 @@ export function QualificacaoSeparador({ regras }: { regras: RegrasQualificacaoHo
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">{t(`${W}qual.intro`)}</p>
+      <p className="text-sm text-muted-foreground">{t(`${W}qual.badgeNote`)}</p>
       {dados.descartadas > 0 && (
         <p role="note" className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">{t(`${W}qual.dropped`, { n: dados.descartadas })}</p>
       )}

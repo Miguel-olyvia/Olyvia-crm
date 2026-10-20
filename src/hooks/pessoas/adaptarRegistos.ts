@@ -1,12 +1,15 @@
 // Os registos da pessoa (contactos, visitas e levantamentos) da ficha real, no formato que a ficha do protótipo já lê.
-// Mantém a ordem da base. As respostas do levantamento ficam por ler (são do P5).
+// Mantém a ordem da base. As respostas do levantamento leem-se com o snapshot (`lerRespostasGravadas`): um texto por pergunta para o rascunho abrir
+// preenchido, e as gravadas tal como estão para o formulário mostrar o que a pessoa viu (D5).
 import type { EstadoVisitaNegocio, TipoVisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import {
   RESULTADOS_VISITA, type AgendaDaVisita, type ContactoPessoa, type LevantamentoPessoa, type RegistosDaPessoa, type ResultadoVisita, type VisitaPessoa,
 } from "@/components/negocio-metas/registosTipos";
+import { respostasDeGravadas } from "@/components/negocio-metas/respostasQuestionario";
 import { RESULTADOS_CONTACTO } from "@/components/pessoas/opcoesPessoa";
 import { escolher, textoOuNull } from "./adaptarComum";
 import type { ContactoFichaDb, FichaDb, LevantamentoFichaDb, LinhaLevantamentoDb, VisitaFichaDb } from "./fichaTipos";
+import { lerRespostasGravadas } from "./respostasGravadas";
 import { diaLisboa, horaLisboa } from "./tempoLisboa";
 
 const TIPOS_VISITA: readonly TipoVisitaNegocio[] = ["levantamento", "medicao", "materiais", "revisita"];
@@ -95,13 +98,17 @@ function linhasDoLevantamento(l: LevantamentoFichaDb): LevantamentoPessoa["rascu
 }
 
 function adaptarLevantamento(l: LevantamentoFichaDb, pessoaId: string): LevantamentoPessoa {
+  const gravadas = lerRespostasGravadas(l.respostas);
   return {
     id: l.id,
     pessoaId,
     visitaId: l.visita_id,
     data: FORMATO_DIA.test(l.data) ? l.data : diaLisboa(l.data) ?? "",
     feitoPor: l.feito_por_nome?.trim() ?? "",
-    rascunho: { linhas: linhasDoLevantamento(l), observacoes: l.notas?.trim() ?? "", respostas: {} },
+    rascunho: {
+      linhas: linhasDoLevantamento(l), observacoes: l.notas?.trim() ?? "", respostas: respostasDeGravadas(gravadas),
+      ...(gravadas.length > 0 ? { gravadas } : {}),
+    },
     negocioId: l.negocio_id,
   };
 }

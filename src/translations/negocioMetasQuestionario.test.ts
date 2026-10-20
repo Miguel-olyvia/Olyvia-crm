@@ -8,6 +8,7 @@ const P = "businessGoals.new.";
 const CHAVES = [
   "qform.loading", "qform.error", "qform.error.blocked", "qform.retry", "qform.notReady", "qform.changed", "qform.multi.hint", "qform.number.range", "qform.number.min", "qform.number.max",
   "qform.error.fora", "qform.error.casas", "qform.error.invalido", "qform.error.comprido", "qform.changedReloadFailed", "qform.error.ng008", "qform.error.permission",
+  "qform.invalid", "qform.loaded", "qform.qualEmpty", "qform.visitEmpty",
 ];
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 

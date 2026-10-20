@@ -78,7 +78,7 @@ export function PerguntaTexto({ pergunta, valor, erro, aoEscrever }: EscritaProp
     <div className="space-y-1.5">
       <Label htmlFor={id}>{textoDaPergunta(pergunta, (c) => t(`${N}${c}`))}</Label>
       <Textarea
-        id={id} value={valor ?? ""} maxLength={pergunta.textoMax} rows={3} autoComplete="off" readOnly={!aoEscrever}
+        id={id} data-pergunta={pergunta.id} value={valor ?? ""} maxLength={pergunta.textoMax} rows={3} autoComplete="off" readOnly={!aoEscrever}
         aria-invalid={erro ? true : undefined} aria-describedby={erro ? `${id}-erro` : undefined}
         onChange={(e) => aoEscrever?.(e.target.value)} className={cn(FOCO, erro && "border-destructive")}
       />
@@ -110,7 +110,7 @@ export function PerguntaNumero({ pergunta, valor, erro, aoEscrever }: EscritaPro
       <Label htmlFor={id}>{textoDaPergunta(pergunta, (c) => t(`${N}${c}`))}</Label>
       <div className="flex items-center gap-2">
         <Input
-          id={id} type="text" inputMode="decimal" value={valor ?? ""} autoComplete="off" readOnly={!aoEscrever}
+          id={id} data-pergunta={pergunta.id} type="text" inputMode="decimal" value={valor ?? ""} autoComplete="off" readOnly={!aoEscrever}
           aria-invalid={erro ? true : undefined} aria-describedby={ligacoes || undefined}
           onChange={(e) => aoEscrever?.(e.target.value)} className={cn("min-h-11 max-w-[14rem]", FOCO, erro && "border-destructive")}
         />

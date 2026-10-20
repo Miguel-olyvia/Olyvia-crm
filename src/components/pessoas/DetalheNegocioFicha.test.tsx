@@ -8,6 +8,8 @@ import { negociosComPerdidos, alteracoesAtuais, perdaDoNegocio, perderNegocio, r
 import { repor as reporRegistos } from "@/components/negocio-metas/registosPessoa";
 import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 
+// A ficha real monta o fornecedor do questionário (importa o cliente da base): nenhum destes testes fala com a base.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", () => import("@/test/traducoesPessoasTeste").then((m) => m.moduloDeTraducao()));
 
 beforeAll(() => {

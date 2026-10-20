@@ -15,6 +15,9 @@ const CHAVES_USADAS = [
   "identity.title", "identity.type", "identity.typeLegend", "identity.person", "identity.company", "identity.name", "identity.companyName",
   "identity.firstName", "identity.lastName", "identity.edit", "identity.save", "identity.cancel", "identity.errorCompany", "identity.errorPerson",
   "identity.saved",
+  // A classificação MQL/SQL à mão (QualificacaoManualFichaReal).
+  "qualify.title", "qualify.hint", "qualify.mql", "qualify.sql", "qualify.mqlDescription", "qualify.sqlDescription", "qualify.setMql", "qualify.setSql",
+  "qualify.promote", "qualify.demote", "qualify.clear", "qualify.saved", "qualify.cleared",
   "subs.label", "subs.empty", "subs.loading", "subs.error", "subs.noCampaign", "subs.kind.submission", "subs.fields", "subs.none",
   "subs.review.pending", "subs.review.merged", "subs.review.new_lead", "subs.review.resolved",
   "subs.stage.novo", "subs.stage.contactado", "subs.stage.qualificado", "subs.stage.proposta", "subs.stage.ganho", "subs.stage.perdido",

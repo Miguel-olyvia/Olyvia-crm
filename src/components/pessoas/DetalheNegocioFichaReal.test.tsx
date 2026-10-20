@@ -14,6 +14,8 @@ import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 import { negocioBase } from "./fabricaTestes";
 import { ProcessoContext, type ProcessoValor } from "./processo/processoContexto";
 
+// A ficha real monta o fornecedor do questionário (importa o cliente da base): nenhum destes testes fala com a base.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 const { sucesso } = vi.hoisted(() => ({ sucesso: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: sucesso } }));

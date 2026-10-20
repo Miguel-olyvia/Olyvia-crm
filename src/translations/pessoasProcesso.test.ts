@@ -56,7 +56,7 @@ describe("traduções do seletor de vista e do Quadro de Pessoas", () => {
   });
 
   it("o painel aberto por um passo tem título e descrição próprios, com o nome da pessoa, nas duas línguas", () => {
-    for (const chave of ["process.visitSurvey.title", "process.visitSurvey.description", "process.visitSurvey.save", "process.deal.title", "process.deal.description"]) {
+    for (const chave of ["process.visitSurvey.title", "process.visitSurvey.description", "process.visitSurvey.save", "process.visitSurvey.loading", "process.deal.title", "process.deal.description"]) {
       expect(pt[`pessoasPagina.${chave}`], chave).toBeTruthy();
       expect(en[`pessoasPagina.${chave}`], chave).toBeTruthy();
     }

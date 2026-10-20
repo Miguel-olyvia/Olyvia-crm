@@ -6,6 +6,7 @@ import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 import { validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
 import { decisaoDaEscolha, type LigarRegistos } from "./ligarNegocio";
 import type { Respostas } from "./perguntasTipos";
+import type { RespostaGravada } from "./respostasQuestionario";
 
 /** Uma pessoa a escolher no formulário. A página monta a lista (Negócio e metas não importa de Pessoas). */
 export interface PessoaOpcao {
@@ -61,6 +62,8 @@ export interface RascunhoLevantamento {
   respostas: Respostas;
   /** A morada da obra escrita no painel (a que não está nas visitas); falta nos rascunhos antigos. */
   moradaObra?: MoradaObraForm;
+  /** As respostas já gravadas na base, com o snapshot do que a pessoa viu (a ficha real): o fornecedor do questionário mostra esse texto (D5). Falta no exemplo. */
+  gravadas?: readonly RespostaGravada[];
 }
 
 /**

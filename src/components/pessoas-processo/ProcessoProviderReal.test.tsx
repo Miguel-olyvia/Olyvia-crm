@@ -1,7 +1,7 @@
 // O processo (orçamento, proposta e contrato) na ficha REAL: o botão do «A fazer» de um negócio abre o ecrã real da app que faz esse passo e
 // liga o resultado ao negócio. Criar o orçamento e a proposta abre o editor e o diálogo que a app já tem; enviar e responder à proposta,
 // criar o contrato e assiná-lo vão por ligação ao ecrã da app, com `?voltar=` para regressar à ficha; ganhar abre o diálogo de ganhar.
-// Um passo que a ficha real ainda não sabe fazer (o levantamento é do P5) não oferece botão.
+// Um passo que a ficha real ainda não sabe fazer (o levantamento de um negócio é do P3) não oferece botão.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -174,7 +174,7 @@ describe("ProcessoProviderReal: o que a ficha real ainda não executa", () => {
   });
 
   it.each<[string, Partial<ItemProcesso>]>([
-    ["o levantamento (P5)", { fase: "levantamento" }],
+    ["o passo «Fazer o levantamento» de um negócio (P3)", { fase: "levantamento" }],
     ["verificar o orçamento (a Direção simulada não existe em modo real)", { verificacao: "porVerificar", orcamentos: 1 }],
     ["aguardar a Direção", { verificacao: "aguardaDirecao", orcamentos: 1 }],
     ["um item de pessoa (a abordagem é da lista)", { tipo: "pessoa", id: "pessoa-x" }],
@@ -270,8 +270,11 @@ describe("ProcessoProviderReal: marcar visita pela ficha real", () => {
     );
   }
 
-  it("diz que o painel «Visita e levantamento» ainda não abre na ficha real (não grava na base)", () => {
+  it("diz que o painel «Visita e levantamento» abre na ficha real a quem pode editar (grava na base), e não a quem não pode", () => {
     montarSonda(FICHA);
+    expect(screen.getByTestId("painel")).toHaveTextContent("true");
+    cleanup();
+    montarSonda(fichaDb({ ...FICHA, permissoes: { editar: false, criar: true } }));
     expect(screen.getByTestId("painel")).toHaveTextContent("false");
   });
 

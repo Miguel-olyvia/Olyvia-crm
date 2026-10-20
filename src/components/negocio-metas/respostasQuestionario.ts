@@ -80,6 +80,41 @@ export function validarRespostas(q: QuestionarioForm, respostas: Respostas): Rec
   return erros;
 }
 
+/** Onde está uma resposta errada: a aba, a secção e a pergunta (o campo a focar). */
+export interface LocalDoErro {
+  aba: "qualificacao" | "visita";
+  seccao: string;
+  pergunta: string;
+}
+
+/** Onde estão as respostas erradas: a primeira (pela ordem do ecrã: a aba Qualificação, depois as secções da Visita), e as abas e secções que as têm. */
+export interface ErrosLocalizados {
+  primeiro: LocalDoErro | null;
+  abas: ReadonlySet<LocalDoErro["aba"]>;
+  seccoes: ReadonlySet<string>;
+}
+
+/**
+ * Diz ONDE estão as respostas erradas (as de `validarRespostas`), para o formulário levar a pessoa ao primeiro erro e marcar a aba e a secção:
+ * uma resposta antiga pode passar a violar um limite mais apertado numa secção que não está à vista. Devolve objetos novos.
+ */
+export function localizarErrosRespostas(q: QuestionarioForm, erros: Readonly<Record<string, ErroResposta>>): ErrosLocalizados {
+  const abas = new Set<LocalDoErro["aba"]>();
+  const seccoes = new Set<string>();
+  let primeiro: LocalDoErro | null = null;
+  const ordenadas = [...q.seccoes.filter((s) => s.aba === "qualificacao"), ...q.seccoes.filter((s) => s.aba !== "qualificacao")];
+  for (const s of ordenadas) {
+    const aba = s.aba === "qualificacao" ? "qualificacao" : "visita";
+    for (const p of s.blocos.flatMap((b) => b.perguntas)) {
+      if (!erros[p.id]) continue;
+      abas.add(aba);
+      seccoes.add(s.id);
+      primeiro ??= { aba, seccao: s.id, pergunta: p.id };
+    }
+  }
+  return { primeiro, abas, seccoes };
+}
+
 // ---------------------------------------------------------------- respostas já gravadas
 
 /** As respostas gravadas passadas ao estado do formulário (um texto por pergunta). */

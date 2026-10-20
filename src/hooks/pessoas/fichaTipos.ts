@@ -39,6 +39,9 @@ export interface PessoaFichaDb {
   tipo?: string | null;
   /** O nome da empresa, só numa entidade `organization` (é o nome visível dela). */
   empresa_nome?: string | null;
+  /** `first_name` e `last_name` da entidade (neg_ficha_pessoa, migration 20261226100000); ausentes numa leitura anterior. */
+  first_name?: string | null;
+  last_name?: string | null;
   /** Há uma ligação fiscal principal (só se lê: o NIF nunca sai da função). */
   tem_nif?: boolean | null;
   /** «Voltou a contactar»: a atividade da lead é posterior ao último contacto (a chamada registada em Pessoas conta como contacto). */

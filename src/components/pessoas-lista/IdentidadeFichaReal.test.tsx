@@ -213,3 +213,28 @@ describe("IdentidadeFichaReal: guardar, erros e foco", () => {
     expect(screen.getByLabelText("Apelido")).toHaveValue("Maria Lopes");
   });
 });
+
+describe("IdentidadeFichaReal: nome em duas partes da base", () => {
+  it("abre com first_name e last_name (Ana Maria + Silva) e sem o aviso de palpite", () => {
+    desenhar({ nome: "Ana Maria Silva", nomeProprio: "Ana Maria", apelido: "Silva" });
+    abrir();
+    expect(screen.getByLabelText("Nome próprio")).toHaveValue("Ana Maria");
+    expect(screen.getByLabelText("Apelido")).toHaveValue("Silva");
+    expect(screen.queryByText(/palpite/)).toBeNull();
+  });
+
+  it("sem as duas partes, mantém o palpite e o aviso", () => {
+    desenhar({ nome: "Ana Maria Silva" });
+    abrir();
+    expect(screen.getByLabelText("Nome próprio")).toHaveValue("Ana");
+    expect(screen.getByText(/palpite/)).toBeInTheDocument();
+  });
+
+  it("mudar só o apelido manda as duas partes tal como estão", async () => {
+    const { aoGuardar } = desenhar({ nome: "Ana Maria Silva", nomeProprio: "Ana Maria", apelido: "Silva" });
+    abrir();
+    escrever("Apelido", "Santos");
+    guardar();
+    await waitFor(() => expect(aoGuardar).toHaveBeenCalledExactlyOnceWith({ tipo: "person", nomeProprio: "Ana Maria", apelido: "Santos" }));
+  });
+});

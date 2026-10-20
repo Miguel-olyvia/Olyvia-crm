@@ -16,7 +16,7 @@ import { ErroAcao } from "@/components/pessoas/ErroAcao";
 import { useExecutarAcao } from "@/components/pessoas/useExecutarAcao";
 import type { DadosIdentidade } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
 import { CHAVES_ERRO_NEG } from "@/hooks/pessoas/errosNeg";
-import { compactar, formularioInicial, nomeAmbiguo, pedidoDeIdentidade, type FormularioIdentidade, type TipoIdentidade } from "./identidadeFormulario";
+import { compactar, formularioInicial, nomeAmbiguo, pedidoDeIdentidade, temNomeEmPartes, type FormularioIdentidade, type TipoIdentidade } from "./identidadeFormulario";
 
 const I = "pessoasPagina.real.ficha.identity.";
 const SEM_INVALIDOS = { empresa: false, nomeProprio: false, apelido: false };
@@ -27,6 +27,9 @@ interface IdentidadeFichaRealProps {
   /** `null` numa leitura anterior à migration que devolve o tipo: mostra o nome e não deixa editar. */
   tipo: TipoIdentidade | null;
   empresaNome: string | null;
+  /** `first_name` e `last_name` da base: quando existem, o formulário abre com eles em vez de partir o nome. */
+  nomeProprio?: string | null;
+  apelido?: string | null;
   podeEditar: boolean;
   aoGuardar: (dados: DadosIdentidade) => Promise<unknown>;
 }
@@ -40,7 +43,7 @@ function OpcaoTipo({ valor, rotulo, id }: { valor: TipoIdentidade; rotulo: strin
   );
 }
 
-export function IdentidadeFichaReal({ nome, tipo, empresaNome, podeEditar, aoGuardar }: IdentidadeFichaRealProps) {
+export function IdentidadeFichaReal({ nome, tipo, empresaNome, nomeProprio, apelido, podeEditar, aoGuardar }: IdentidadeFichaRealProps) {
   const { t } = useTranslation();
   const anunciar = useAnunciar();
   const id = useId();
@@ -60,7 +63,7 @@ export function IdentidadeFichaReal({ nome, tipo, empresaNome, podeEditar, aoGua
     if (aberto) { jaAbriu.current = true; primeiroCampo.current?.focus(); } else if (jaAbriu.current) botaoEditar.current?.focus();
   }, [aberto]);
 
-  const atual = tipo === null ? null : { nome, tipo, empresaNome };
+  const atual = tipo === null ? null : { nome, tipo, empresaNome, nomeProprio, apelido };
   const abrir = () => {
     if (!atual) return;
     setForm(formularioInicial(atual));
@@ -98,7 +101,7 @@ export function IdentidadeFichaReal({ nome, tipo, empresaNome, podeEditar, aoGua
   const chaveErro = executar.erro === CHAVES_ERRO_NEG.NG003 ? `${I}errorUnavailable` : executar.erro;
   const idErro = `${id}-erro`;
   const idAviso = `${id}-aviso`;
-  const mostrarAviso = form?.tipo === "person" && atual?.tipo === "person" && nomeAmbiguo(atual.nome);
+  const mostrarAviso = form?.tipo === "person" && atual?.tipo === "person" && !temNomeEmPartes(atual) && nomeAmbiguo(atual.nome);
   const ligar = (invalido: boolean, comAviso: boolean): { "aria-invalid"?: true; "aria-describedby"?: string } => {
     const ids = [invalido && faltaChave ? idErro : null, comAviso ? idAviso : null].filter(Boolean).join(" ");
     return { "aria-invalid": invalido ? true : undefined, "aria-describedby": ids || undefined };

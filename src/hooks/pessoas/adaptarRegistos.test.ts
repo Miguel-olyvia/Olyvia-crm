@@ -82,7 +82,29 @@ describe("adaptarRegistos: visitas", () => {
 });
 
 describe("adaptarRegistos: levantamentos", () => {
-  it("leva a data, quem fez, as linhas e o negócio; as respostas ficam para o P5", () => {
+  it("leva as respostas gravadas ao rascunho: o texto de cada pergunta (para o formulário abrir preenchido) e o snapshot (D5)", () => {
+    const [l] = adaptarRegistos(fichaDb({
+      levantamentos: seccaoDb([levantamentoDb({
+        n_respostas: 3,
+        respostas: [
+          { seccao: "exterior", pergunta: "acesso", resposta: "facil", tipo: "escolha_unica", escolhas: ["facil"], escolhas_texto: ["Fácil"], pergunta_texto: "Acesso" },
+          { seccao: "exterior", pergunta: "notas", resposta: null, tipo: "texto", valor_texto: "portão", escolhas: null },
+          { seccao: "qualificacao", pergunta: "orc", resposta: null, tipo: "numero", valor_numero: 12.5 },
+        ],
+      })]),
+    })).levantamentos;
+    expect(l.rascunho.respostas).toEqual({ acesso: "facil", notas: "portão", orc: "12.5" });
+    expect(l.rascunho.gravadas).toHaveLength(3);
+    expect(l.rascunho.gravadas?.[0]).toMatchObject({ pergunta: "acesso", perguntaTexto: "Acesso", escolhasTexto: ["Fácil"] });
+  });
+
+  it("sem respostas na base o rascunho abre sem respostas e sem gravadas", () => {
+    const [l] = adaptarRegistos(fichaDb({ levantamentos: seccaoDb([levantamentoDb({ respostas: [] })]) })).levantamentos;
+    expect(l.rascunho.respostas).toEqual({});
+    expect(l.rascunho.gravadas ?? []).toEqual([]);
+  });
+
+  it("leva a data, quem fez, as linhas e o negócio", () => {
     const [l] = adaptarRegistos(fichaDb({
       levantamentos: seccaoDb([levantamentoDb({
         data: "2026-10-12", visita_id: "v1", negocio_id: "n1", notas: "Obs", n_linhas: 1, n_respostas: 3,

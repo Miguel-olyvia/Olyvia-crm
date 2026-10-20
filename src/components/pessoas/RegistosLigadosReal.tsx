@@ -52,6 +52,7 @@ export function RegistosLigadosReal({ negocio, aberto, mutacoes }: RegistosLigad
     );
   };
 
+  // Sem fornecedor do questionário: o painel «Visita e levantamento» monta o seu (PainelVisitaLevantamentoReal), só quando se abre.
   return (
     <RegistosLigadosLista
       ligados={ligados} porLigar={porLigar} aberto={aberto} podeAgir={podeAgir} desligaLevantamento={false} oQue={oQue}

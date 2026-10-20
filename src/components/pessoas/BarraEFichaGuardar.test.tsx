@@ -8,6 +8,8 @@ import { FichaPessoa, type FichaPessoaProps } from "./FichaPessoa";
 import type { AcoesFicha } from "./PainelBase";
 import { ProcessoContext } from "./processo/processoContexto";
 
+// A ficha real monta o fornecedor do questionário (importa o cliente da base): nenhum destes testes fala com a base.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => {
   const { pessoasPaginaTranslations } = await import("@/translations/pessoasPagina");
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");

@@ -10,6 +10,9 @@ export interface IdentidadeAtual {
   tipo: TipoIdentidade;
   /** O nome da empresa (só numa empresa). */
   empresaNome: string | null;
+  /** `first_name` e `last_name` da base (anew_entities), quando a ficha os devolve; só valem os dois juntos. */
+  nomeProprio?: string | null;
+  apelido?: string | null;
 }
 
 export interface FormularioIdentidade {
@@ -36,16 +39,27 @@ export function partirNome(nome: string): { nomeProprio: string; apelido: string
 
 /**
  * O nome visível tem três ou mais palavras: não se sabe onde acaba o nome próprio («Ana Maria» + «Silva» ou «Ana» + «Maria Silva»), por isso
- * a divisão de `partirNome` é um palpite e o formulário avisa. (Até a ficha devolver `first_name` e `last_name` da base.)
+ * a divisão de `partirNome` é um palpite e o formulário avisa. (Só quando a base não tem `first_name` e `last_name`: ver `temNomeEmPartes`.)
  */
 export function nomeAmbiguo(nome: string): boolean {
   const limpo = compactar(nome);
   return limpo === "" ? false : limpo.split(" ").length >= 3;
 }
 
+/** A base tem o nome em duas partes (os dois não vazios): usam-se tal como estão, sem palpite. */
+export function temNomeEmPartes(atual: IdentidadeAtual): boolean {
+  return compactar(atual.nomeProprio ?? "") !== "" && compactar(atual.apelido ?? "") !== "";
+}
+
+function partesDe(atual: IdentidadeAtual): { nomeProprio: string; apelido: string } {
+  return temNomeEmPartes(atual)
+    ? { nomeProprio: compactar(atual.nomeProprio ?? ""), apelido: compactar(atual.apelido ?? "") }
+    : partirNome(atual.nome);
+}
+
 /** Os valores com que o formulário abre: os da base (uma empresa abre sem nome próprio nem apelido: o nome dela não é de uma pessoa). */
 export function formularioInicial(atual: IdentidadeAtual): FormularioIdentidade {
-  const pessoa = atual.tipo === "person" ? partirNome(atual.nome) : { nomeProprio: "", apelido: "" };
+  const pessoa = atual.tipo === "person" ? partesDe(atual) : { nomeProprio: "", apelido: "" };
   return { tipo: atual.tipo, nomeEmpresa: atual.tipo === "organization" ? atual.empresaNome ?? atual.nome : "", ...pessoa };
 }
 
@@ -59,7 +73,7 @@ export function pedidoDeIdentidade(form: FormularioIdentidade, atual: Identidade
   const nomeProprio = compactar(form.nomeProprio);
   const apelido = compactar(form.apelido);
   if (atual.tipo === "person") {
-    const inicial = partirNome(atual.nome);
+    const inicial = partesDe(atual);
     if (nomeProprio === inicial.nomeProprio && apelido === inicial.apelido) return { estado: "semAlteracao" };
   }
   if (nomeProprio === "" || apelido === "") return { estado: "falta", chaveErro: "errorPerson" };

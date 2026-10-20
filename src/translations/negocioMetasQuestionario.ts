@@ -24,6 +24,10 @@ const pt: Record<string, string> = {
   'qform.error.casas': 'Use no máximo {casas} casas decimais.',
   'qform.error.invalido': 'Escreva um número, por exemplo 12,5.',
   'qform.error.comprido': 'O texto é demasiado comprido.',
+  'qform.invalid': 'Corrija as respostas assinaladas antes de guardar.',
+  'qform.loaded': 'As perguntas do levantamento foram carregadas.',
+  'qform.qualEmpty': 'Não há perguntas de qualificação ativas.',
+  'qform.visitEmpty': 'Não há secções de visita ativas.',
 };
 
 const en: Record<string, string> = {
@@ -44,6 +48,10 @@ const en: Record<string, string> = {
   'qform.error.casas': 'Use at most {casas} decimal places.',
   'qform.error.invalido': 'Enter a number, for example 12.5.',
   'qform.error.comprido': 'The text is too long.',
+  'qform.invalid': 'Fix the highlighted answers before saving.',
+  'qform.loaded': 'The survey questions have been loaded.',
+  'qform.qualEmpty': 'There are no active qualification questions.',
+  'qform.visitEmpty': 'There are no active visit sections.',
 };
 
 export const negocioMetasQuestionarioTranslations: Record<"en" | "pt", Record<string, string>> = {

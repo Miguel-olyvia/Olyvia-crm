@@ -46,12 +46,16 @@ interface NovoNegocioDialogoProps {
    */
   guardarLevantamento?: {
     texto: string;
-    aoGuardar: (rascunho: RascunhoLevantamento, visitas: VisitaNegocio[], comercial: string) => boolean;
+    aoGuardar: (rascunho: RascunhoLevantamento, visitas: VisitaNegocio[], comercial: string) => boolean | Promise<boolean>;
     /** Porque é que o último `aoGuardar` não guardou: aparece dentro do painel, como alerta (o toast e a região live ficam fora do modal). */
     motivo?: string | null;
     /** Cresce a cada recusa: o alerta remonta (e volta a ser lido, mesmo com o mesmo texto) e esconde-se quando o rascunho muda. */
     tentativa?: number;
+    /** O que se grava está pronto (`useGuardarLevantamento().pronto`); falso deixa o botão aria-disabled. Sem isto vale como pronto (o exemplo). */
+    pronto?: boolean;
   };
+  /** O dia de hoje (AAAA-MM-DD), que dá a data de uma visita nova no modo `registos`; por omissão o dia do exemplo. A ficha real passa o de Lisboa. */
+  hoje?: string;
   /** O título do painel (por omissão "Novo negócio"): um passo do "A fazer" diz o que se faz, por exemplo "Levantamento de Ana". */
   titulo?: string;
   /** A descrição do painel (por omissão a de "Novo negócio"). */
@@ -120,7 +124,7 @@ function CabecalhoNovo({ titulo, descricao, selo, aGuardar }: Pick<NovoNegocioDi
  */
 export function NovoNegocioDialogo({
   pessoas, modo = "negocio", aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial,
-  visitasGravadas, guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo, aGuardar,
+  visitasGravadas, guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo, aGuardar, hoje,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -145,10 +149,18 @@ export function NovoNegocioDialogo({
 
   const guardar = guardarLevantamento && {
     texto: guardarLevantamento.texto,
+    pronto: guardarLevantamento.pronto,
     motivo: guardarLevantamento.motivo,
     tentativa: guardarLevantamento.tentativa,
+    aGuardar,
     aoGuardar: (rascunho: RascunhoLevantamento, visitas: VisitaNegocio[], comercial: string) => {
-      if (guardarLevantamento.aoGuardar(rascunho, visitas, comercial)) setAberto(false);
+      const resultado = guardarLevantamento.aoGuardar(rascunho, visitas, comercial);
+      // Síncrono (o exemplo): fecha já. Assíncrono (a ficha real grava na base): fecha só quando a gravação correu bem.
+      if (typeof resultado === "boolean") {
+        if (resultado) setAberto(false);
+        return;
+      }
+      void resultado.then((fechar) => { if (fechar) setAberto(false); });
     },
   };
 
@@ -188,7 +200,7 @@ export function NovoNegocioDialogo({
           <CabecalhoNovo titulo={titulo} descricao={descricao} selo={selo} aGuardar={aGuardar} />
           {corpo ? corpo({ aoSujar: () => { sujo.current = true; }, aoCriou: () => { criou.current = true; } }) : modo === "registos" && guardar ? (
             <FormularioRegistos
-              pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
+              pessoas={pessoas} hoje={hoje ?? HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
               abaInicial={abaInicial} seccaoInicial={seccaoInicial} visitasGravadas={visitasGravadas} guardarLevantamento={guardar}
               aoSujar={() => { sujo.current = true; }}
             />

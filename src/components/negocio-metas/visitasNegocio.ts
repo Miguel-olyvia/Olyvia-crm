@@ -97,6 +97,10 @@ function pesoDoLevantamento(v: VisitaNegocio): number {
   return v.estado === "porFazer" ? 2 : 3;
 }
 
+/** A visita que representa o levantamento: a Feita de Levantamento, outra Feita, a Por fazer, o resto; `undefined` sem visitas. */
+export const visitaDoLevantamento = (visitas: readonly VisitaNegocio[]): VisitaNegocio | undefined =>
+  [...ordenarVisitas(visitas)].sort((a, b) => pesoDoLevantamento(a) - pesoDoLevantamento(b))[0];
+
 /**
  * O que o levantamento do negócio leva (data, quem fez, estado) quando há visitas: o da visita que o representa. Basta uma
  * visita Feita para o estado ser "feito" (e então pedem-se linhas de levantamento, como sempre). Sem visitas, é o de hoje.
@@ -104,7 +108,7 @@ function pesoDoLevantamento(v: VisitaNegocio): number {
 export function camposDoLevantamento(
   visitas: readonly VisitaNegocio[], hoje: string, comercial: string,
 ): { data: string; feitoPor: string; estado: EstadoLevantamento } {
-  const [principal] = [...ordenarVisitas(visitas)].sort((a, b) => pesoDoLevantamento(a) - pesoDoLevantamento(b));
+  const principal = visitaDoLevantamento(visitas);
   if (!principal) return { data: hoje, feitoPor: comercial, estado: "porFazer" };
   return { data: principal.data, feitoPor: principal.feitoPor, estado: principal.estado === "feita" ? "feito" : "porFazer" };
 }

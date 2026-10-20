@@ -1,7 +1,7 @@
 import { Info } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { MoradaObra } from "./CamposMoradaObra";
-import { EstadoQuestionario } from "./EstadoQuestionario";
+import { EstadoQuestionarioVivo } from "./EstadoQuestionario";
 import { BlocosPerguntas } from "./PerguntaEscolha";
 import { N } from "./PecasNovoNegocio";
 import { useQuestionario } from "./QuestionarioContexto";
@@ -9,7 +9,7 @@ import type { ChaveMorada, MoradaObraForm } from "./moradaObra";
 import type { OrigemMorada } from "./useEstadoNovoNegocio";
 import type { Respostas } from "./perguntasTipos";
 import { blocosDaQualificacao } from "./questionarioForm";
-import { validarRespostas } from "./respostasQuestionario";
+import type { ErroResposta } from "./respostasQuestionario";
 import { contarRespostas } from "./respostasVisita";
 
 export interface AcoesQualificacao {
@@ -30,13 +30,15 @@ interface Props {
   /** A morada da aba Geral, para o atalho da morada da obra. */
   moradaContacto: string;
   acoes: AcoesQualificacao;
+  /** Os erros das respostas de texto e número, pela pergunta (`validarRespostas`, calculado uma vez pelo formulário). */
+  errosRespostas: Readonly<Record<string, ErroResposta>>;
 }
 
 /**
  * A aba Qualificação: as perguntas da secção Qualificação do questionário (uma secção como as outras: da base, ou do código no protótipo sem
  * base) e a morada da obra. Tudo opcional. Enquanto as perguntas não carregam, ou se a leitura falhou, diz-se no lugar delas.
  */
-export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, origemMorada = null, moradaContacto, acoes }: Props) {
+export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, origemMorada = null, moradaContacto, acoes, errosRespostas }: Props) {
   const { t } = useTranslation();
   const { questionario, estado, repetir } = useQuestionario();
   const blocos = blocosDaQualificacao(questionario);
@@ -50,7 +52,10 @@ export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, orige
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         {t(`${N}qual.help`)}
       </p>
-      {!pronto && <EstadoQuestionario estado={estado} aoRepetir={repetir} />}
+      <EstadoQuestionarioVivo estado={estado} aoRepetir={repetir} />
+      {pronto && blocos.length === 0 && (
+        <p role="note" className="text-sm text-muted-foreground">{t(`${N}qform.qualEmpty`)}</p>
+      )}
       {pronto && blocos.length > 0 && (
         <section aria-labelledby={`${id}-qualificacao`} className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -59,7 +64,7 @@ export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, orige
           </div>
           <BlocosPerguntas
             blocos={blocos} respostas={respostas} aoEscolher={acoes.escolher} aoEscrever={acoes.escrever}
-            erros={validarRespostas(questionario, respostas)}
+            erros={errosRespostas}
           />
         </section>
       )}

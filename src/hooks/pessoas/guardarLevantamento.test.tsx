@@ -59,6 +59,19 @@ describe("paramsGuardarLevantamento", () => {
     paramsGuardarLevantamento(ENTRADA, QUESTIONARIO);
     expect(JSON.stringify(ENTRADA)).toBe(antes);
   });
+
+  it("VALIDA antes de montar o pedido: um número fora dos limites ou um texto demasiado comprido não segue (ErroNeg com a chave das respostas por corrigir)", () => {
+    const erro = (respostas: Record<string, string>) => {
+      try { paramsGuardarLevantamento({ ...ENTRADA, respostas }, QUESTIONARIO); } catch (e) { return e; }
+      return null;
+    };
+    for (const respostas of [{ orcCliente: "abc" }, { orcCliente: "100001" }, { orcCliente: "1,234" }, { notas: "x".repeat(2001) }]) {
+      const e = erro(respostas);
+      expect(e).toBeInstanceOf(ErroNeg);
+      expect((e as ErroNeg).chave).toBe("businessGoals.new.qform.invalid");
+    }
+    expect(erro({ orcCliente: "12,5", notas: "ok" })).toBeNull();
+  });
 });
 
 function montar(opcoes: { fonte?: FontePessoas; gravadas?: Parameters<typeof QuestionarioFormularioProvider>[0]["gravadas"] } = {}) {
@@ -90,6 +103,17 @@ describe("useGuardarLevantamento", () => {
     expect(chamada[1]).toEqual(paramsGuardarLevantamento(ENTRADA, QUESTIONARIO));
     expect(resultado).toEqual({ levantamentoId: "lev-1", criado: true, mudou: true, ligadoA: null, versaoQuestionario: 7, questionarioMudou: false });
     expect(avisar).not.toHaveBeenCalled();
+  });
+
+  it("NÃO grava respostas inválidas (número fora dos limites): recusa sem chamar a base de gravação", async () => {
+    const h = montar();
+    await pronto(h);
+    let erro: unknown;
+    await act(async () => { erro = await h.result.current.guardar({ ...ENTRADA, respostas: { orcCliente: "abc" } }).catch((e: unknown) => e); });
+    expect(erro).toBeInstanceOf(ErroNeg);
+    expect((erro as ErroNeg).chave).toBe("businessGoals.new.qform.invalid");
+    expect(chamadasDe("neg_guardar_levantamento")).toHaveLength(0);
+    expect(h.result.current.aGuardar).toBe(false);
   });
 
   it("NÃO grava com o questionário por carregar: recusa sem chamar a base de gravação", async () => {

@@ -60,6 +60,11 @@ export interface AcoesVisita {
   alterar: (visitaId: string, entrada: EntradaVisita, recursosAtuais?: readonly string[]) => Promise<ResultadoAlterar>;
   cancelar: (visitaId: string) => Promise<ResultadoCancelar>;
   resultado: (visitaId: string, dados: DadosResultado) => Promise<void>;
+  /**
+   * Dá a visita como feita, sem resultado. Não precisa da visita na ficha: serve a que o painel «Visita e levantamento» acabou de criar, que a ficha
+   * ainda não tem. A base recusa (NG009) uma visita que ainda não aconteceu.
+   */
+  concluir: (visitaId: string) => Promise<void>;
 }
 
 const generico = (): ErroNeg => new ErroNeg(null, null, CHAVE_ERRO_GENERICO);
@@ -213,5 +218,18 @@ function criarAcoes(c: Contexto): AcoesVisita {
     });
   }
 
-  return { marcar, alterar, cancelar, resultado };
+  async function concluir(visitaId: string): Promise<void> {
+    org();
+    if (!visitaId) throw entradaInvalida("visitaEmFalta");
+    return partilhar(`concluir:${visitaId}`, async () => {
+      try {
+        await chamarNeg("neg_resultado_visita", { p_visita_id: visitaId, p_resultado: null, p_feita: true });
+      } catch (erro) {
+        throw falha(erro, "resultado");
+      }
+      invalidar();
+    });
+  }
+
+  return { marcar, alterar, cancelar, resultado, concluir };
 }

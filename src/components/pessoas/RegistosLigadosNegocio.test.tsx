@@ -12,6 +12,8 @@ import { NEGOCIOS_VARIADO } from "./negociosExemploVariado";
 import { REGISTOS_EXEMPLO } from "./registosExemplo";
 import { RegistosLigadosNegocio } from "./RegistosLigadosNegocio";
 
+// A ficha real monta o fornecedor do questionário (importa o cliente da base): nenhum destes testes fala com a base.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", () => import("@/test/traducoesPessoasTeste").then((m) => m.moduloDeTraducao()));
 
 const negocio = (id: string): NegocioMes => NEGOCIOS_VARIADO.find((n) => n.id === id) as NegocioMes;

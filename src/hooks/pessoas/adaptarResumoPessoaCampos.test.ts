@@ -50,11 +50,11 @@ describe("adaptarResumo: campos novos tal como a função os devolve", () => {
   });
 });
 
-describe("adaptarResumo: selo MQL/SQL (como a página de Leads: só com a lead qualificada)", () => {
+describe("adaptarResumo: selo MQL/SQL (aparece sempre que a lead tem classificação, seja qual for o estado dela)", () => {
   it.each([
     ["mql", "qualified", "MQL"], ["sql", "qualified", "SQL"], [" SQL ", "qualified", "SQL"],
-    ["mql", "open", null], ["sql", "new", null], [null, "qualified", null], ["outro", "qualified", null],
-    ["sql", null, null],
+    ["mql", "open", "MQL"], ["sql", "new", "SQL"], ["sql", null, "SQL"],
+    [null, "qualified", null], ["outro", "qualified", null], [null, null, null], ["", "new", null],
   ] as const)("tipo %s com o estado %s dá %s", (tipo, estado, esperado) => {
     expect(adaptarResumo(linha({ qualificacao_tipo: tipo, lead_status: estado }), HOJE).qualificacao).toBe(esperado);
   });

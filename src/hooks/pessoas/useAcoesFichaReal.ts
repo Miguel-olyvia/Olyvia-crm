@@ -27,8 +27,8 @@ const FUNCOES_M8_APLICADAS = true;
 
 /**
  * O que a ficha real consegue fazer hoje. Alterar e cancelar as visitas já marcadas (`gerirVisitas`) grava na base pelos diálogos; marcar uma visita
- * pela chamada (`visita`) grava por `useAcoesVisita`. O painel «Visita e levantamento» (o levantamento é do P5) ainda não grava na base: o
- * `ProcessoProviderReal` não o abre e o menu «Mais» não o mostra. O negócio (detalhe, perder, ganhar, ligar e criar) é do P3.
+ * pela chamada (`visita`) grava por `useAcoesVisita`. O painel «Visita e levantamento» (menu «Mais») grava por `useGuardarRegistos`: abre-o o
+ * `ProcessoProviderReal` a quem pode editar a ficha. O negócio (detalhe, perder, ganhar, ligar e criar) é do P3.
  */
 export const CAPACIDADES_FICHA_REAL: CapacidadesFicha = {
   chamada: true, encerrar: true, adiar: FUNCOES_M8_APLICADAS, nota: FUNCOES_M8_APLICADAS, visita: true, negocios: true, gerirVisitas: true,
