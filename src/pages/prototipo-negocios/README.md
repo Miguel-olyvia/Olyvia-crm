@@ -275,6 +275,17 @@ Na **Atual** e na **V2** (16/10; na V2 funcional ficam o item e a vista "Invent�
 - **editar inline** os dados do fornecedor e dos artigos (preço, embalagem, MOQ, prazo) e as células das listas;
 - **importar** CSV e exportar exceto os Movimentos; os **PDF** de encomenda, EC e guia (pré-visualização imprimível); a **pesquisa global**; a **duplicar PO** e o portal do fornecedor. O ecrã "Mockup · cobertura" foi retirado (12/10/2026).
 
+### Portal do Fornecedor simulado (20/10/2026, de volta só para a demonstração)
+
+`portalFornecedor/`: o portal do fornecedor em ecrã inteiro, com o aspeto do portal real (`src/components/supplier-portal/SupplierPortalLayout.tsx`, `src/pages/SupplierPortal*.tsx`): cabeçalho com o fornecedor e "Clientes: …", separadores Início · Encomendas · Catálogo · Os meus dados, os mesmos filtros e selos das encomendas. Não usa Supabase nem componentes do portal real que chamam RPCs: lê e escreve o Inventário do protótipo (em memória), por isso abre **no mesmo separador** e volta com "Voltar ao CRM".
+
+- **Onde abrir**: menu lateral "Portal do Fornecedor" (junto ao Inventário e à Frota, e no "Mais" do telemóvel; só na Atual e na V2), com o seletor "Entrar como"; na folha de uma PO › Portal › **"Abrir como fornecedor →"** (abre já nessa encomenda); ou na ficha do fornecedor › Portal.
+- **Acesso**: ficha do fornecedor › Portal › "Enviar acesso" (email do convite editável) → convidado; "Reenviar" e "Revogar" mudam o estado. Um convidado entra pelo **primeiro acesso** (aceitar convite → password → dados da empresa → concluído; a regra `submeterPortal`) e fica **ativo** ("Ativo desde dd/mm" na ficha). Sem acesso, convidado ou revogado, as POs seguem por email; ativo, vão para o portal. Revogado: o portal mostra "Acesso revogado".
+- **Encomendas**: abrir uma nova marca-a como vista (`portalVista`); "Confirmar encomenda" pede a data de entrega e um comentário (`portalConfirmar`).
+- **Catálogo e Os meus dados** são editáveis (`regrasPortal.ts`): novo artigo, editar, ativar/desativar, mostrar inativos; um preço mudado num artigo que a empresa já compra chega como alteração por aprovar. Os dados gravam na ficha do fornecedor.
+- **Expedição com guia de remessa — SÓ PROTÓTIPO (o portal real não a tem)**: depois de confirmada, "Expedir encomenda" (tudo ou parte, por linha) com o nº da guia (`GR 2026/n`), data, transportador e observações (`portalExpedir`, `po.ts`). A guia fica como guia do fornecedor aberta, ligada à PO (`Guia.doPortal`); a PO fica "Expedida pelo fornecedor · guia X", com o passo "Expedida" no percurso e no grupo **"Expedidas · a caminho"** no topo da Receção. Na Receção, ler/escrever o número da guia abre a PO com as quantidades da guia já postas. A guia de remessa vê-se e imprime-se no portal; no CRM aparece no separador Portal (expedições) e no separador Guias da PO. O separador Portal da PO tem também o atalho "Fornecedor expede".
+- Testes: `portalFornecedor/portalFornecedor.test.tsx` (do pagamento à obra arrancada, pelo portal, pela guia e pela carrinha da Frota) e `portalFornecedor/acessoPortal.test.tsx` (convite → primeiro acesso → ativo → PO pelo portal; revogado; catálogo e dados).
+
 ---
 
 ## Frota (Atual e V2, 14/10/2026; na Atual desde 16/10)

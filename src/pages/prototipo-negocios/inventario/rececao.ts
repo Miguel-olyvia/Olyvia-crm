@@ -200,6 +200,8 @@ const recebiveisCom = (db: Inventario, skus: readonly string[], sup?: string): P
 
 /** As POs por receber de uma guia aberta: as do fornecedor com os artigos anunciados (ou todas do fornecedor, se nada bater). */
 export function posDaGuia(db: Inventario, g: Guia): Po[] {
+  // SÓ PROTÓTIPO: a guia de remessa do portal já diz a que encomenda pertence
+  if (g.doPortal) { const L = g.pos.map((id) => poPorId(db, id)).filter((p): p is Po => !!p && poRecebivel(p)); if (L.length) return L; }
   const doForn = db.pos.filter((p) => poRecebivel(p) && p.sup === g.sup);
   const comArtigos = g.ann.length ? recebiveisCom(db, g.ann.map((a) => a.sku), g.sup) : [];
   return comArtigos.length ? comArtigos : doForn;

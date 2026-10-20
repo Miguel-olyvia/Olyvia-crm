@@ -1,15 +1,15 @@
 // Os separadores da folha de uma PO que não são as Linhas (poTab do mockup): Receções, Guias, Portal, Anulações, Notas e Histórico.
 import { useState } from "react";
-import { CheckCircle2, Play, RefreshCw, Send, Undo2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Play, RefreshCw, Send, Truck, Undo2 } from "lucide-react";
 import { useIrReceber } from "./irReceber";
-import { ecPorId, fmtD, fmtDT, nomeArm, nomeProd, somarDias } from "./base";
+import { agora, ecPorId, fmtD, fmtDT, nomeArm, nomeProd, somarDias } from "./base";
 import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
 import { GUIA_ESTADOS, resumoGuia } from "./guias";
 import { Ligacao, Notas, Peq, Selo, Vazio } from "./pecasInv";
 import { can, porqueNao } from "./perfil";
 import { poDe } from "./PoCab";
-import { PORTAL_FORN, poOpen, poPublished, poRecebivel, portalConfirmar, portalVista, republicarPo } from "./po";
+import { PORTAL_FORN, podeExpedir, poOpen, poPublished, poRecebivel, porExpedir, portalConfirmar, portalExpedir, portalVista, proximaGuiaRemessa, republicarPo } from "./po";
 import type { AcoesPo, EstadoPd } from "./poTipos";
 import { desfazerAnulacao, passarParaStock } from "./receber";
 import { TabelaInv } from "./TabelaInv";
@@ -77,20 +77,41 @@ function Simulacao({ p }: { p: Po }) {
     <div className="card pad stack" style={{ boxShadow: "none", borderStyle: "dashed" }}><b style={{ fontSize: 13 }}><Play className="ic sm" aria-hidden="true" /> Simular o lado do fornecedor</b>
       <div className="row">
         {p.portal.state === "sent" && <Peq onClick={() => agir((d) => portalVista(d, poDe(d, p.id)), "Fornecedor abriu a encomenda.")}>Fornecedor abre a encomenda</Peq>}
-        <label className="inl">Data prometida <input id="sim-prom" type="date" value={prom} onChange={(e) => setProm(e.target.value)} /></label>
-        <Peq onClick={() => agir((d) => portalConfirmar(d, poDe(d, p.id), prom, "Confirmado pelo portal (simulação)."), "Fornecedor confirmou: já aparece na Receção.")}>Fornecedor confirma</Peq>
+        {["sent", "seen"].includes(p.portal.state) && <>
+          <label className="inl">Data prometida <input id="sim-prom" type="date" value={prom} onChange={(e) => setProm(e.target.value)} /></label>
+          <Peq onClick={() => agir((d) => portalConfirmar(d, poDe(d, p.id), prom, "Confirmado pelo portal (simulação)."), "Fornecedor confirmou: já aparece na Receção.")}>Fornecedor confirma</Peq>
+        </>}
+        {/* SÓ PROTÓTIPO: a expedição com guia de remessa (tudo o que falta, hoje) */}
+        {podeExpedir(p) && <Peq onClick={() => agir((d) => { const x = poDe(d, p.id); return portalExpedir(d, x, { guia: proximaGuiaRemessa(d), data: agora(d).slice(0, 10), linhas: x.lines.map((l) => ({ lineId: l.id, qty: porExpedir(x, l) })), transportador: "Transporte do fornecedor" }); }, (e) => `Fornecedor expediu com a guia ${e.guia}: leia-a na Receção.`)}><Truck className="ic" aria-hidden="true" />Fornecedor expede</Peq>}
       </div>
-      <Fonte>sp_confirm_order · fn_po_notify_supplier_confirmed</Fonte>
+      <Fonte>sp_confirm_order · fn_po_notify_supplier_confirmed · (expedição: só no protótipo)</Fonte>
     </div>
   );
 }
 
+/** SÓ PROTÓTIPO (20/10): as expedições do fornecedor no portal, cada uma com a guia de remessa dele. */
+function Expedicoes({ p }: { p: Po }) {
+  const { db } = useCtxInv();
+  const L = (p.portal.expedicoes ?? []).slice().reverse();
+  if (!L.length) return null;
+  return (
+    <>
+      <h3 style={{ margin: "14px 0 8px" }}>Expedições do fornecedor</h3>
+      <TabelaInv titulo="Expedições do fornecedor" minimo={560} chave={(e) => e.guia} linhas={L} colunas={[
+        { id: "g", titulo: "Guia de remessa", classe: () => "mono", celula: (e) => <b>{e.guia}</b> }, { id: "d", titulo: "Expedida", celula: (e) => fmtD(e.data) },
+        { id: "l", titulo: "O que vem", celula: (e) => e.linhas.map((x) => `${x.qty}× ${nomeProd(db, p.lines.find((l) => l.id === x.lineId)?.sku ?? "")}`).join(", ") },
+        { id: "t", titulo: "Transportador", celula: (e) => e.transportador || "—" }, { id: "o", titulo: "Observações", celula: (e) => e.obs || "—" },
+      ]} />
+    </>
+  );
+}
+
 export function TabPortal({ p, a }: P) {
-  const { db, agir } = useCtxInv();
+  const { db, agir, abrirPortalForn } = useCtxInv();
   const irReceber = useIrReceber();
   const x = p.portal, s = db.suppliers.find((y) => y.id === p.sup);
   const emails = (x.emails ?? []).slice().reverse();
-  const pares: [string, React.ReactNode][] = [["Estado no portal", ESTADO_PORTAL[x.state]], ["Enviada", fmtDT(x.sent || p.sentAt)], ["Vista", fmtDT(x.seen)], ["Confirmada", fmtDT(x.confirmed)],
+  const pares: [string, React.ReactNode][] = [["Estado no portal", ESTADO_PORTAL[x.state] + (x.expedicoes?.length ? ` · expedida (guia ${x.expedicoes[x.expedicoes.length - 1].guia})` : "")], ["Enviada", fmtDT(x.sent || p.sentAt)], ["Vista", fmtDT(x.seen)], ["Confirmada", fmtDT(x.confirmed)],
     ["Data prometida", x.promised ? <>{fmtD(x.promised)}{p.promiseAccepted ? <> <Selo tom="ok">aceite</Selo></> : null}</> : "—"], ["Portal do fornecedor", s ? PORTAL_FORN[s.portal][0] : "—"]];
   return (
     <>
@@ -100,15 +121,18 @@ export function TabPortal({ p, a }: P) {
         <button type="button" className="btn" onClick={() => agir(() => undefined, "Estado do portal atualizado.")}><RefreshCw className="ic" aria-hidden="true" />Atualizar</button>
         {poPublished(p) && <button type="button" className="btn" onClick={() => a.pedir({ t: "retirar" })}>Retirar do portal</button>}
         {x.state === "withdrawn" && poOpen(p) && s?.portal === "active" && <button type="button" className="btn" onClick={() => agir((d) => republicarPo(d, poDe(d, p.id)), "Republicada no portal.")}><Send className="ic" aria-hidden="true" />Publicar de novo</button>}
+        {/* 20/10 (demo): o portal do fornecedor simulado, já nesta encomenda */}
+        {abrirPortalForn && s?.portal === "active" && poPublished(p) && <button type="button" className="btn" onClick={() => abrirPortalForn(p.sup, p.id)}><ExternalLink className="ic" aria-hidden="true" />Abrir como fornecedor →</button>}
       </div>
-      {poOpen(p) && s?.portal === "active" && ["sent", "seen"].includes(x.state) && <Simulacao p={p} />}
+      {poOpen(p) && s?.portal === "active" && ["sent", "seen", "confirmed"].includes(x.state) && (x.state !== "confirmed" || podeExpedir(p)) && <Simulacao p={p} />}
       {/* 19/10: confirmada pelo fornecedor e ainda por receber: vai direto ao painel "Dar entrada" na Receção */}
       {x.state === "confirmed" && poRecebivel(p) && (
         <div className="alert ok rec-confirmada" style={{ marginBottom: 10 }}><CheckCircle2 className="ic" aria-hidden="true" />
-          <div className="row between grow"><span>Confirmada pelo fornecedor{x.promised ? ` · entrega a ${fmtD(x.promised)}` : ""}. Já aparece na Receção.</span>
+          <div className="row between grow"><span>{x.expedicoes?.length ? `Expedida pelo fornecedor com a guia ${x.expedicoes[x.expedicoes.length - 1].guia}: leia o número da guia na Receção.` : `Confirmada pelo fornecedor${x.promised ? ` · entrega a ${fmtD(x.promised)}` : ""}. Já aparece na Receção.`}</span>
             <button type="button" className="btn btn-sm" disabled={!can("inventory.receive")} title={can("inventory.receive") ? undefined : porqueNao("inventory.receive")} onClick={() => irReceber(p.id)}>Receber agora →</button></div>
         </div>
       )}
+      <Expedicoes p={p} />
       <h3 style={{ margin: "14px 0 8px" }}>Emails</h3>
       {emails.length ? (
         <TabelaInv titulo="Emails da encomenda" minimo={560} chave={(m) => m.at + m.t} linhas={emails} colunas={[

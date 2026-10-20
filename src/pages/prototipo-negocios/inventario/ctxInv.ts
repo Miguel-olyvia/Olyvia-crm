@@ -34,6 +34,8 @@ export interface CtxInv {
   registarAcoes: (el: HTMLElement | null) => void;
   filtros: FiltrosInv;
   setFiltros: <K extends keyof FiltrosInv>(k: K, p: Partial<FiltrosInv[K]>) => void;
+  /** 20/10 (demo): abre o portal do fornecedor simulado, já na encomenda `po`. Só existe quando a moldura do protótipo o sabe abrir. */
+  abrirPortalForn?: (sup: string, po?: string) => void;
 }
 
 export const Contexto = createContext<CtxInv | null>(null);

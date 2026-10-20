@@ -2,7 +2,7 @@
 // que ele carregou, onde cada artigo se liga a um produto (com a sugestão), se cria o produto a partir dele, se dispensa ou se repõe.
 import { useState } from "react";
 import { Lock, Send } from "lucide-react";
-import { fmtDT, nomeProd } from "./base";
+import { fmtD, fmtDT, nomeProd } from "./base";
 import { desligarCatalogo, dispensarCatalogo, ligarCatalogo } from "./cadastros";
 import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
@@ -22,18 +22,33 @@ const CONF: Record<string, "ok" | "info" | "warn" | "neu"> = { Exata: "ok", Alta
 const VISTAS: readonly (readonly [Vista, string])[] = [["unlinked", "Por ligar"], ["linked", "Ligados"], ["dismissed", "Dispensados"], ["all", "Todos"]];
 
 function Acesso({ s, revogar, simular }: { s: Fornecedor; revogar: () => void; simular: () => void }) {
-  const { agir } = useCtxInv();
+  const { agir, abrirPortalForn } = useCtxInv();
   const man = can(PM);
-  const enviar = (k: "invite" | "resend"): void => { agir((d) => acessoPortal(d, s.id, k), k === "invite" ? `Convite enviado para ${s.email}.` : `Acesso reenviado para ${s.email}.`); };
+  // 20/10: o email do convite edita-se aqui (validado na regra; fica como email do fornecedor)
+  const [email, setEmail] = useState(s.invite?.email || s.email);
+  const enviar = (k: "invite" | "resend"): void => {
+    if (k === "invite") agir((d) => acessoPortal(d, s.id, "invite", email), `Convite enviado para ${email.trim()}.`);
+    else agir((d) => acessoPortal(d, s.id, "resend"), `Acesso reenviado para ${s.invite?.email || s.email}.`);
+  };
   const dentro = s.portal === "invited" || s.portal === "active";
+  const estado = s.portal === "invited" ? `Convite enviado a ${s.invite?.email || s.email} em ${fmtD(s.invitedAt)}. À espera do primeiro acesso.`
+    : s.portal === "active" ? `Ativo${s.ativoDesde ? ` desde ${fmtD(s.ativoDesde)}` : ""}${s.invite ? ` · ${s.invite.email}` : ""}.`
+    : s.portal === "revoked" ? "Acesso revogado: o fornecedor já não entra no portal. As encomendas seguem por email." : "Sem acesso ao portal: as encomendas seguem em PDF por email.";
   return (
-    <div className="row" style={{ margin: "12px 0" }}>
-      {man ? <>
-        {(s.portal === "none" || s.portal === "revoked") && <button type="button" className="btn btn-p" onClick={() => enviar("invite")}><Send className="ic" aria-hidden="true" />Enviar acesso</button>}
-        {dentro && <><Sec onClick={() => enviar("resend")}><Send className="ic" aria-hidden="true" />Reenviar</Sec><Sec onClick={revogar}>Revogar</Sec></>}
-      </> : <span className="muted"><Lock className="ic sm" aria-hidden="true" /> {porqueNao(PM)}</span>}
-      {s.portal === "invited" && <BotaoSimular aoClicar={simular} />}
-    </div>
+    <>
+      <p className="portal-estado" style={{ margin: "12px 0 0" }}>{estado}</p>
+      <div className="row" style={{ margin: "12px 0" }}>
+        {man ? <>
+          {(s.portal === "none" || s.portal === "revoked") && <>
+            <label className="inl">Email do convite <input type="email" aria-label="Email do convite" value={email} onChange={(e) => setEmail(e.target.value)} style={{ minWidth: 220 }} /></label>
+            <button type="button" className="btn btn-p" onClick={() => enviar("invite")}><Send className="ic" aria-hidden="true" />Enviar acesso</button>
+          </>}
+          {dentro && <><Sec onClick={() => enviar("resend")}><Send className="ic" aria-hidden="true" />Reenviar</Sec><Sec onClick={revogar}>Revogar</Sec></>}
+        </> : <span className="muted"><Lock className="ic sm" aria-hidden="true" /> {porqueNao(PM)}</span>}
+        {s.portal === "invited" && <BotaoSimular aoClicar={simular} />}
+        {abrirPortalForn && s.portal === "active" && <Sec onClick={() => abrirPortalForn(s.id)}>Abrir como fornecedor →</Sec>}
+      </div>
+    </>
   );
 }
 
@@ -74,7 +89,7 @@ function Catalogo({ s }: { s: Fornecedor }) {
         colunas={[
           { id: "s", titulo: "", celula: (c) => (c.state === "unlinked" ? <input type="checkbox" aria-label="Selecionar" checked={!!csel[c.id]} onChange={(e) => setCsel((x) => ({ ...x, [c.id]: e.target.checked }))} /> : null) },
           { id: "r", titulo: "Ref.", classe: () => "mono", celula: (c) => c.ref },
-          { id: "a", titulo: "Artigo", celula: (c) => <>{c.name}<br /><small className="muted">{c.unitLabel}{c.ean ? ` · EAN ${c.ean}` : ""}{c.moq ? ` · MOQ ${c.moq}` : ""}</small></> },
+          { id: "a", titulo: "Artigo", celula: (c) => <>{c.name}{c.inactive ? <> <Selo>Inativo no fornecedor</Selo></> : null}<br /><small className="muted">{c.unitLabel}{c.ean ? ` · EAN ${c.ean}` : ""}{c.moq ? ` · MOQ ${c.moq}` : ""}</small></> },
           { id: "p", titulo: "Preço", direita: true, celula: (c) => dinheiro(c.price) },
           { id: "l", titulo: "Produto / sugestão", celula: (c) => (c.state === "linked" ? <><Selo tom="ok">Ligado</Selo> {nomeProd(db, c.link ?? "")}</> : c.state === "dismissed" ? <Selo>Dispensado</Selo> : (
             <><select aria-label="Produto a ligar" value={alvo(c)} onChange={(e) => setEscolha((x) => ({ ...x, [c.id]: e.target.value }))}>{c.sug ? null : <option value="">Sem sugestão — escolher…</option>}{produtos.map((p) => <option key={p.sku} value={p.sku}>{p.sku} — {p.name}</option>)}</select>{" "}{c.sug ? <Selo tom={CONF[c.sug.conf]}>{c.sug.conf}</Selo> : null}</>)) },

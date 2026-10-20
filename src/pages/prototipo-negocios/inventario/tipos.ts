@@ -28,17 +28,26 @@ export interface Fornecedor {
   portal: PortalForn; portalUsers: number; lastAccess: string | null; dataConfirmed: boolean; invitedAt: string | null; awaiting: boolean;
   /** O convite ao portal (quem o recebe e em que estado está), os emails enviados e quando o fornecedor atualizou a ficha. */
   invite?: { email: string; name: string; state: "pending" | "active" | "revoked"; at: string }; emails?: { at: string; to: string; t: string; ok: boolean }[]; dataUpdatedAt?: string | null;
+  /** Quando o fornecedor concluiu o primeiro acesso ao portal (protótipo, 20/10). */
+  ativoDesde?: string | null;
 }
 
 /** Um artigo do fornecedor ligado a um produto (preço por embalagem). */
 export interface Artigo { id: string; sup: string; sku: string; ref: string; packN: number; unitLabel: string; price: number; pref: boolean; moq: number; lead: number; history?: { at: string; from: number; to: number }[] }
 
 export type EstadoCatalogo = "linked" | "unlinked" | "dismissed";
-export interface ItemCatalogo { id: string; sup: string; ref: string; name: string; price: number; packN: number; unitLabel: string; state: EstadoCatalogo; link: string | null; sug: { sku: string; conf: string } | null; ean?: string; moq?: number; lead?: number }
+export interface ItemCatalogo { id: string; sup: string; ref: string; name: string; price: number; packN: number; unitLabel: string; state: EstadoCatalogo; link: string | null; sug: { sku: string; conf: string } | null; ean?: string; moq?: number; lead?: number; /** Desativado pelo fornecedor no portal (protótipo, 20/10). */ inactive?: boolean }
 export interface AlteracaoPreco { id: string; sup: string; itemId: string; cur: number; nw: number; state: "pending" | "accepted" | "rejected"; at: string; note: string; decidedAt?: string; by?: string }
 
 export type EstadoPortal = "none" | "sent" | "seen" | "confirmed" | "withdrawn" | "email";
-export interface PoPortal { state: EstadoPortal; sent: string | null; seen: string | null; confirmed: string | null; promised: string | null; comment: string; withdrawn?: string; emails?: { at: string; to: string; t: string; ok: boolean; err?: string }[] }
+/** SÓ PROTÓTIPO (20/10, demo): a expedição pelo fornecedor no portal, com a guia de remessa dele. O portal real não tem expedição; cada envio
+ *  (parcial ou total) fica aqui e cria a guia do fornecedor aberta (Guia, doPortal), que a Receção lê pelo número. Quantidades em unidades. */
+export interface Expedicao { guia: string; data: string; at: string; linhas: { lineId: string; qty: number }[]; transportador: string; obs: string }
+export interface PoPortal {
+  state: EstadoPortal; sent: string | null; seen: string | null; confirmed: string | null; promised: string | null; comment: string; withdrawn?: string; emails?: { at: string; to: string; t: string; ok: boolean; err?: string }[];
+  /** SÓ PROTÓTIPO: as expedições do fornecedor (com a encomenda confirmada). */
+  expedicoes?: Expedicao[];
+}
 export interface PoOrigem { k: "stock" | "CT" | "VD" | "PR" | "manual" | "EC"; ref?: string | null; client?: string; ec?: string; proforma?: string | null }
 
 export interface PoLinha {
@@ -72,6 +81,8 @@ export interface Ec {
 export interface Transferencia { id: string; sku: string; from: string; to: string; qty: number; ec: string | null; state: "pending" | "done" | "cancelled"; at: string; auto: boolean; reason: string; doneAt?: string }
 export interface Guia {
   id: string; sup: string; date: string; wh: string; ann: { sku: string; qty: number }[]; pos: string[]; state: "open" | "closed" | "cancelled"; note: string; history: { at: string; t: string }[];
+  /** SÓ PROTÓTIPO: guia de remessa emitida pelo fornecedor no portal (portalExpedir): a Receção abre logo as POs dela. */
+  doPortal?: boolean;
 }
 export type Resolucao = "" | "adjusted" | "accepted" | "recount";
 export interface LinhaContagem { sku: string; sys: number; counted: number | null; res: Resolucao; note: string }

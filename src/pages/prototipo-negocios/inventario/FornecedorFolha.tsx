@@ -62,7 +62,7 @@ function PortalRascunho({ d, enviar, aoMudar, aoCompletar }: { d: DadosForn; env
 
 interface Props { id: string | null; pre?: PreForn; tabInicial?: string; aoFechar: () => void }
 export function FolhaForn({ id, pre, tabInicial, aoFechar }: Props) {
-  const { db, agir, avisar, abrir } = useCtxInv();
+  const { db, agir, avisar, abrir, abrirPortalForn } = useCtxInv();
   const s = id ? fornecedor(db, id) ?? null : null;
   const rascunho = !id;
   const [tab, setTab] = useState<TabF>(rascunho ? "dados" : ((tabInicial as TabF) || "resumo"));
@@ -78,7 +78,8 @@ export function FolhaForn({ id, pre, tabInicial, aoFechar }: Props) {
     const r = agir((x) => gravarFicha(x, d, id, rasc), () => (s ? "Fornecedor gravado." : `Fornecedor criado${rasc.enviar ? " e convite enviado." : ` com ${rasc.items.length} artigo(s).`}`));
     if (r.ok && rascunho) { aoFechar(); abrir({ t: "sup", id: r.valor.id }); }
   };
-  const simular = (): void => { if (s && podeSimular(db, s.id, avisar)) setSim(true); };
+  // 20/10: dentro do protótipo, o fornecedor entra no Portal do Fornecedor simulado (primeiro acesso no ecrã inteiro); sem a moldura, o diálogo de sempre
+  const simular = (): void => { if (s && podeSimular(db, s.id, avisar)) { if (abrirPortalForn) abrirPortalForn(s.id); else setSim(true); } };
   const abas: readonly (readonly [TabF, string, number?])[] = [["resumo", "Resumo"], ["dados", "Dados"], ["artigos", "Artigos e preços", s ? db.items.filter((i) => i.sup === s.id).length : rasc.items.length], ["precos", "Preços por aprovar", s ? precosPorAprovar(db, s.id).length : 0], ["portal", "Portal"]];
   const rodape = rascunho
     ? <><Sec onClick={aoFechar}>Descartar rascunho</Sec><Pri {...perm(PM)} onClick={gravar}><Check className="ic" aria-hidden="true" />Gravar fornecedor{rasc.enviar ? " e enviar acesso" : ""}</Pri></>

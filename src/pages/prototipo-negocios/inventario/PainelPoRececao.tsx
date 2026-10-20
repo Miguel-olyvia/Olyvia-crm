@@ -58,13 +58,24 @@ interface Feito { texto: string; ecs: string[] }
 function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () => void }) {
   const { db, agir, abrir } = useCtxInv();
   const rc = db.rc;
-  const faltaDe = (x: Po) => Object.fromEntries(x.lines.map((l) => [l.id, String(Math.max(0, poRem(l)))]));
-  const [qtd, setQtd] = useState<Record<string, string>>(() => faltaDe(p));
+  const g0 = rc.guia ? guiaPorId(db, rc.guia) : undefined;
+  const [guia, setGuia] = useState(g0 && g0.sup === p.sup && g0.state === "open" ? g0.id : "");
+  // SÓ PROTÓTIPO (20/10): com a guia de remessa de uma expedição do portal, o que vem é o que o fornecedor expediu nessa guia (menos o já recebido com ela)
+  const expedicaoDe = (x: Po, gtxt: string) => (gtxt.trim() ? (x.portal.expedicoes ?? []).find((e) => e.guia.toLowerCase() === gtxt.trim().toLowerCase()) : undefined);
+  const vemDe = (x: Po, gtxt: string) => (l: PoLinha): number => {
+    const e = expedicaoDe(x, gtxt);
+    if (!e) return Math.max(0, poRem(l));
+    const q = e.linhas.filter((y) => y.lineId === l.id).reduce((a, y) => a + y.qty, 0);
+    const ja = x.receipts.filter((r) => r.state === "Ativa" && r.type === "Receção" && r.lineId === l.id && (r.guia ?? "").toLowerCase() === e.guia.toLowerCase()).reduce((a, r) => a + r.qty, 0);
+    return Math.max(0, Math.min(poRem(l), q - ja));
+  };
+  const exped = expedicaoDe(p, guia);
+  const vem = vemDe(p, guia);
+  const faltaDe = (x: Po, gtxt = "") => Object.fromEntries(x.lines.map((l) => [l.id, String(vemDe(x, gtxt)(l))]));
+  const [qtd, setQtd] = useState<Record<string, string>>(() => faltaDe(p, guia));
   const [conferir, setConferir] = useState(false);
   const [motivo, setMotivo] = useState<MotivoDif>("");
   const [nota, setNota] = useState("");
-  const g0 = rc.guia ? guiaPorId(db, rc.guia) : undefined;
-  const [guia, setGuia] = useState(g0 && g0.sup === p.sup && g0.state === "open" ? g0.id : "");
   const [resto, setResto] = useState(false);
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState<Feito | null>(null);
@@ -74,9 +85,9 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
   const fila = lerFilaRececao();
   const abertas = p.lines.filter((l) => poRem(l) > 0);
   // o que vai entrar: tudo o que falta (resumo) ou o que se escreveu na conferência
-  const quanto = (l: PoLinha): number => { if (!conferir) return Math.max(0, poRem(l)); const n = Number(qtd[l.id] ?? ""); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const quanto = (l: PoLinha): number => { if (!conferir) return vem(l); const n = Number(qtd[l.id] ?? ""); return Number.isFinite(n) && n > 0 ? n : 0; };
   const total = abertas.reduce((a, l) => a + quanto(l), 0), nLinhas = abertas.filter((l) => quanto(l) > 0).length;
-  const diferencas = conferir ? abertas.filter((l) => quanto(l) < poRem(l)) : [];
+  const diferencas = conferir ? abertas.filter((l) => quanto(l) < vem(l)) : [];
   const mais = ordenarRececao(db.pos.filter((x) => x.id !== p.id && x.sup === p.sup && poRecebivel(x)));
   const mudarQtd = (l: PoLinha, v: string): void => { setErro(""); const n = Number(v); setQtd((x) => ({ ...x, [l.id]: v !== "" && Number.isFinite(n) && n > poRem(l) ? String(poRem(l)) : v })); };
   const passo = (l: PoLinha, d: number): void => { const n = Math.max(0, Math.min(poRem(l), (Number(qtd[l.id]) || 0) + d)); mudarQtd(l, String(n)); };
@@ -84,7 +95,7 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
   const confirmar = (): void => {
     const itens: { lineId: string; qty: number }[] = [];
     for (const l of abertas) {
-      const v = conferir ? qtd[l.id] ?? "" : String(poRem(l)), n = Number(v);
+      const v = conferir ? qtd[l.id] ?? "" : String(vem(l)), n = Number(v);
       if (v === "" || n === 0) continue;
       if (!Number.isInteger(n) || n < 0) { setErro(`Quantidades inteiras: ${nomeProd(db, l.sku)}.`); return; }
       itens.push({ lineId: l.id, qty: n });
@@ -93,7 +104,7 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
     if (diferencas.length && !motivo) { setErro("Veio diferente: escolha o motivo da diferença."); return; }
     if (diferencas.length && motivo === "Outro" && nota.trim().length < 3) { setErro("Com motivo “Outro”, escreva uma nota (mínimo 3 caracteres)."); return; }
     const wh = rc.wh, gtxt = guia.trim();
-    const dif = diferencas.map((l) => `${l.sku} ${quanto(l)} de ${poRem(l)}`).join(", ");
+    const dif = diferencas.map((l) => `${l.sku} ${quanto(l)} de ${vem(l)}`).join(", ");
     const r = agir((d) => {
       const po = poPorId(d, p.id) ?? falhar("Encomenda inexistente: " + p.id);
       // a guia: uma aberta do fornecedor ou uma nova (fica com o que se recebe como anunciado)
@@ -138,7 +149,7 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
         <div className="stack rec-feito" style={{ gap: 10 }}>
           <Nota tom="ok">{feito.texto}</Nota>
           {feito.ecs.length > 0 && <div className="row">{feito.ecs.map((ec) => <Sec key={ec} onClick={() => { fechar(); abrir({ t: "ec", id: ec }); }}>Ver {ec}</Sec>)}</div>}
-          {poRecebivel(p) && <div className="row"><span>Ainda falta {textoFalta(p)} nesta encomenda.</span><Peq onClick={() => { setFeito(null); setConferir(false); setMotivo(""); setNota(""); setQtd(faltaDe(p)); }}>Dar entrada ao que falta</Peq></div>}
+          {poRecebivel(p) && <div className="row"><span>Ainda falta {textoFalta(p)} nesta encomenda.</span><Peq onClick={() => { setFeito(null); setConferir(false); setMotivo(""); setNota(""); setGuia(""); setQtd(faltaDe(p)); }}>Dar entrada ao que falta</Peq></div>}
           {mais.length > 0 && (
             <div role="group" aria-label={`Mais da ${nomeForn(db, p.sup)}`} className="stack" style={{ gap: 6 }}>
               <b>Mais da {nomeForn(db, p.sup)}:</b>
@@ -150,6 +161,7 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
         <>
           {fila.length > 0 && <Nota tom="info">Receber tudo: depois desta, {fila.length === 1 ? "falta 1 encomenda" : `faltam ${fila.length} encomendas`} deste bloco ({fila.join(", ")}).</Nota>}
           {p.status === "pending" && <Nota tom="warn">{p.id} ainda está pendente (não confirmada ao fornecedor). Pode dar entrada; passa a Encomendado, sem envio ao fornecedor.</Nota>}
+          {exped && <Nota tom="info">Guia de remessa {exped.guia} do fornecedor (expedida a {exped.data.split("-").reverse().join("/")}{exped.transportador ? ` · ${exped.transportador}` : ""}): as quantidades são as que vêm nesta guia.</Nota>}
           {destaque && abertas.some((l) => l.sku === destaque) && <Nota tom="info"><ScanLine className="ic sm" aria-hidden="true" /> Lido: {nomeProd(db, destaque)} (linha destacada).</Nota>}
           <div className="fg" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
             <label className="fl">Entra em

@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
+  BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import mascote from "@/assets/olyvia-mascot.png";
@@ -52,6 +52,7 @@ import { definirMolduraFrota, obrasDoEstado, tratarPedidoFrota, usePedidoFrota }
 import { PortalCliente } from "./PortalCliente";
 import { RevisaoContrato } from "./RevisaoContrato";
 import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
+import { fornecedorInicial } from "./portalFornecedor/dadosPortal";
 
 // O Inventário completo (nativo, na Atual e na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
@@ -59,6 +60,8 @@ const MenuInventario = lazy(() => import("./inventario/MenuInventario"));
 // A Frota (nativa, na Atual e na V2), com a UI do Inventário: também só se carrega quando se abre.
 const FrotaPagina = lazy(() => import("./frota/FrotaPagina"));
 const MenuFrota = lazy(() => import("./frota/MenuFrota"));
+// 20/10 (demo): o Portal do Fornecedor simulado, de ecrã inteiro (lê e escreve o Inventário em memória: abre no mesmo separador).
+const PortalFornecedor = lazy(() => import("./portalFornecedor/PortalFornecedor"));
 
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
@@ -89,6 +92,8 @@ export default function PrototipoNegocios() {
   const [invAba, setInvAba] = useState<AbaInv>("hoje"); // qual deles
   const [frotaMock, setFrotaMock] = useState(false); // um ecrã da Frota (do menu lateral): como o Inventário, na Atual e na V2 e fora do Estado
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
+  // 20/10 (demo): o Portal do Fornecedor simulado (com que fornecedor se entrou, a encomenda a abrir e para onde voltar); fecha o Inventário e a Frota
+  const [fornMock, setFornMock] = useState<{ sup: string; po: string | null; voltar: "inv" | "crm"; n: number } | null>(null);
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). Neste ramo partilhado fica desligada por defeito
@@ -297,6 +302,11 @@ export default function PrototipoNegocios() {
     setFrotaPedido(pedidoFrota.vid ? { vid: pedidoFrota.vid, n: pedidoFrota.n } : null);
   }, [comInvFrota, pedidoFrota]);
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
+  // 20/10 (demo): abrir o portal do fornecedor (do menu, ou de uma PO com "Abrir como fornecedor →"); voltar repõe o Inventário se veio de lá
+  const abrirPortalForn = (sup: string | null, po: string | null, voltar: "inv" | "crm"): void => {
+    setMais(false); setInvMock(false); setFrotaMock(false);
+    setFornMock((x) => ({ sup: sup || fornecedorInicial(lerInventario()), po, voltar, n: (x?.n ?? 0) + 1 }));
+  };
 
   // o portal do cliente aberto pelo link de partilha
   if (portalTok) {
@@ -313,6 +323,17 @@ export default function PrototipoNegocios() {
           </div>
         </div>
       );
+  }
+
+  // o portal do fornecedor simulado: ecrã inteiro, como o portal do cliente (só na Atual e na V2, como o Inventário e a Frota)
+  if (fornMock && comInvFrota) {
+    const voltar = (): void => { const de = fornMock.voltar; setFornMock(null); if (de === "inv") setInvMock(true); };
+    return (
+      <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o portal do fornecedor…</p>}>
+        <PortalFornecedor key={fornMock.sup + ":" + fornMock.n} sup={fornMock.sup} po={fornMock.po} aoVoltar={voltar}
+          aoMudarFornecedor={(sup) => setFornMock((x) => (x ? { ...x, sup, po: null, n: x.n + 1 } : x))} />
+      </Suspense>
+    );
   }
 
   const icone = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
@@ -356,6 +377,13 @@ export default function PrototipoNegocios() {
     const menuInv = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
     const abrirFrota = (a: AbaFrota): void => { setMais(false); setInvMock(false); setFrotaAba(a); setFrotaMock(true); };
     const menuFrota = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuFrota aba={ativoFrota ? frotaAba : null} aoIr={abrirFrota} iniciarAberto={aberto} /></Suspense> : null);
+    // 20/10 (demo): o Portal do Fornecedor simulado, ao lado do Inventário e da Frota
+    const menuForn = comInvFrota ? (
+      <button type="button" onClick={() => abrirPortalForn(null, null, "crm")}
+        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground">
+        <Truck className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span className="flex-1">Portal do Fornecedor</span>
+      </button>
+    ) : null;
     // As ligações da Frota para fora: a obra (Operações), a Agenda (Definições › Agenda › Recursos) e as carrinhas no Inventário (Armazéns).
     const irObra = (id: number): void => { setFrotaMock(false); run(() => A.abrirPlano(id)); };
     const irAgenda = (): void => {
@@ -395,7 +423,7 @@ export default function PrototipoNegocios() {
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
           <nav className="flex flex-col gap-0.5" aria-label="Menu">
-            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}</> : null}</Fragment>)}
+            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}{menuForn}</> : null}</Fragment>)}
           </nav>
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
@@ -431,7 +459,7 @@ export default function PrototipoNegocios() {
           <motion.main ref={mainRef} layoutScroll className="min-h-0 flex-1 overflow-auto pb-[calc(4rem_+_env(safe-area-inset-bottom))] md:pb-0">
             {ativoInv ? (
               <div className="h-full animate-in fade-in-0 duration-200">
-                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} alvoTopo={alvoTopo} /></Suspense>
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} alvoTopo={alvoTopo} aoAbrirPortalForn={(sup, po) => abrirPortalForn(sup, po ?? null, "inv")} /></Suspense>
               </div>
             ) : ativoFrota ? (
               <div className="h-full animate-in fade-in-0 duration-200">
@@ -454,6 +482,7 @@ export default function PrototipoNegocios() {
                 </nav>
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
+                {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuForn}</div>}
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
                   className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">

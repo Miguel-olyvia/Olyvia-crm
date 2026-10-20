@@ -69,21 +69,28 @@ export function convidarFornecedor(db: Inventario, d: NovoForn): Fornecedor {
   return s;
 }
 
-/** Convidar, reenviar ou revogar o acesso ao portal de um fornecedor que já existe. */
-export function acessoPortal(db: Inventario, sid: string, kind: "invite" | "resend" | "revoke"): void {
+/** Convidar, reenviar ou revogar o acesso ao portal de um fornecedor que já existe. Ao convidar pode indicar-se o email do convite
+ *  (20/10: editável na ficha; fica como email do fornecedor). */
+export function acessoPortal(db: Inventario, sid: string, kind: "invite" | "resend" | "revoke", emailConvite?: string): void {
   exigir("suppliers.manage");
   const s = fornecedor(db, sid);
   if (!s) return falhar("Fornecedor inexistente.");
-  if (kind === "revoke") { s.portal = "revoked"; s.portalUsers = 0; s.awaiting = false; if (s.invite) s.invite.state = "revoked"; return; }
+  if (kind === "revoke") {
+    if (s.portal !== "invited" && s.portal !== "active") falhar("O fornecedor não tem acesso para revogar.");
+    s.portal = "revoked"; s.portalUsers = 0; s.awaiting = false; if (s.invite) s.invite.state = "revoked"; return;
+  }
   if (kind === "invite") {
+    if (emailConvite !== undefined) { const e = emailConvite.trim(); if (!emailValido(e)) falhar("Email do convite inválido."); s.email = e; }
     if (!emailValido(s.email)) falhar("O fornecedor não tem email válido: complete em Dados.");
     const o = donoDoEmail(db, s.email, s.id);
     if (o) falhar(`Email já usado por ${o}.`);
     if (!nifValido(s.nif)) falhar("NIF inválido: necessário para o portal (corrija em Dados).");
     const t = agora(db);
-    s.portal = "invited"; s.invitedAt = t; s.awaiting = !s.dataConfirmed; s.invite = { email: s.email, name: s.contact || s.name, state: "pending", at: t };
+    s.portal = "invited"; s.invitedAt = t; s.awaiting = !s.dataConfirmed; s.ativoDesde = null; s.invite = { email: s.email, name: s.contact || s.name, state: "pending", at: t };
+    s.emails = [...(s.emails ?? []), { at: t, to: s.email, t: "Convite para o portal do fornecedor", ok: true }];
     return;
   }
+  if (s.portal !== "invited" && s.portal !== "active") falhar("Sem acesso para reenviar: envie um convite.");
   s.emails = [...(s.emails ?? []), { at: agora(db), to: s.email, t: "Reenvio de acesso", ok: true }];
 }
 
@@ -191,7 +198,7 @@ export function submeterPortal(db: Inventario, sid: string, f: FichaPortal, arti
   }
   const t = agora(db);
   Object.assign(s, { addr: f.addr.trim(), cp: f.cp, city: f.city.trim(), country: f.country || "Portugal", phone: f.phone || "", web: f.web || "", contact: String(f.contact || "").trim() || s.contact, sla: Number(f.sla) });
-  Object.assign(s, { portal: "active", portalUsers: 1, lastAccess: t, dataConfirmed: true, awaiting: false, dataUpdatedAt: t });
+  Object.assign(s, { portal: "active", portalUsers: 1, lastAccess: t, dataConfirmed: true, awaiting: false, dataUpdatedAt: t, ativoDesde: t });
   if (s.invite) s.invite.state = "active";
   for (const i of its) {
     db.catalog.push({ id: proximoId(db, "K"), sup: sid, ref: i.ref.trim(), name: i.name.trim(), ean: String(i.ean || "").trim(), price: Number(i.price), packN: Number(i.packN) || 1, unitLabel: i.unit || "Unidade", moq: Number(i.moq) || 1, lead: Number(i.lead) || Number(f.sla), state: "unlinked", link: null, sug: sugestaoPara(db, i.name, i.ean) });

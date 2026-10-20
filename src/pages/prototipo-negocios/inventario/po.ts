@@ -1,6 +1,6 @@
 // As encomendas a fornecedor (POs): estado calculado, totais, criação, envio, portal e edição. Regras portadas do mockup. Sem React.
 import { HOJE, UTILIZADOR, agora, armazem, ehInteiro, exigir, exigirMotivo, falhar, fmtD, fmtDS, fmtDT, fornecedor, mudou, nomeForn, pad, poPorId, proximoId, somarDias, utilizadorAtual } from "./base";
-import type { Artigo, EstadoPo, Inventario, Po, PoLinha, PortalForn, Tom } from "./tipos";
+import type { Artigo, EstadoPo, Expedicao, Guia, Inventario, Po, PoLinha, PortalForn, Tom } from "./tipos";
 
 /** O estado do portal de um fornecedor, como o mockup o escreve (PORTAL). */
 export const PORTAL_FORN: Record<PortalForn, readonly [string, Tom]> = { none: ["Sem acesso", "neu"], invited: ["Convidado", "info"], active: ["Ativo", "ok"], revoked: ["Revogado", "bad"] };
@@ -115,6 +115,70 @@ export function portalConfirmar(db: Inventario, p: Po, promised: string, comment
   emailPo(p, { at: agora(db), to: "Responsável de compras", t: "Fornecedor confirmou a encomenda", ok: true });
   p.log.push({ at: agora(db), t: "Fornecedor confirmou · entrega prometida " + fmtD(promised) });
 }
+/* ------------------------------------------------------------------ SÓ PROTÓTIPO (20/10, demo): a expedição com guia de remessa */
+// O portal real do fornecedor não tem expedição: isto existe só no protótipo, para a demonstração do circuito completo
+// (o fornecedor confirma, expede com a guia de remessa dele e o armazém dá entrada lendo o número da guia).
+
+/** As unidades de uma linha já expedidas pelo fornecedor (todas as expedições). */
+export const expedidoLinha = (p: Po, lineId: string): number =>
+  (p.portal.expedicoes ?? []).reduce((a, e) => a + e.linhas.filter((x) => x.lineId === lineId).reduce((b, x) => b + x.qty, 0), 0);
+/** O que o fornecedor ainda pode expedir numa linha: encomendado, menos anulado, menos o que já expediu (ou já foi recebido, se for mais). */
+export const porExpedir = (p: Po, l: PoLinha): number => Math.max(0, poUnits(l) - l.cancelled - Math.max(l.recv, expedidoLinha(p, l.id)));
+export const totalPorExpedir = (p: Po): number => p.lines.reduce((a, l) => a + porExpedir(p, l), 0);
+/** A última expedição (ou undefined). */
+export const ultimaExpedicao = (p: Po): Expedicao | undefined => { const L = p.portal.expedicoes ?? []; return L[L.length - 1]; };
+/** Pode expedir: publicada e confirmada no portal, em aberto (encomendada ou parcial) e com alguma coisa por expedir. */
+export const podeExpedir = (p: Po): boolean => !p.deleted && p.portal.state === "confirmed" && (poStatus(p) === "ordered" || poStatus(p) === "partial") && totalPorExpedir(p) > 0;
+/** Expedida pelo fornecedor e ainda por receber (o que a Receção destaca no topo). */
+export const expedidaACaminho = (p: Po): boolean => !!p.portal.expedicoes?.length && p.portal.state === "confirmed" && poRecebivel(p);
+
+/** O número seguinte de guia de remessa ("GR 2026/313"): o maior "GR 2026/n" que a base conhece, mais um. */
+export function proximaGuiaRemessa(db: Inventario): string {
+  const re = /^GR 2026\/(\d+)$/i;
+  let n = 0;
+  for (const g of db.guias) { const m = re.exec(g.id); if (m) n = Math.max(n, Number(m[1])); }
+  for (const p of db.pos) for (const e of p.portal.expedicoes ?? []) { const m = re.exec(e.guia); if (m) n = Math.max(n, Number(m[1])); }
+  return "GR 2026/" + (n + 1);
+}
+
+export interface DadosExpedicao { guia: string; data: string; linhas: { lineId: string; qty: number }[]; transportador?: string; obs?: string }
+/** SÓ PROTÓTIPO: o fornecedor expede (tudo ou parte) uma encomenda confirmada, com a guia de remessa dele. A guia fica registada como guia do
+ *  fornecedor aberta (o anunciado = o expedido, ligada à PO): a Receção encontra-a pelo número e dá entrada já com estas quantidades. */
+export function portalExpedir(db: Inventario, p: Po, d: DadosExpedicao): Expedicao {
+  if (p.deleted) falhar("A encomenda foi eliminada.");
+  if (p.portal.state !== "confirmed") falhar("Confirme a encomenda antes de a expedir.");
+  const st = poStatus(p);
+  if (st !== "ordered" && st !== "partial") falhar(`A encomenda está ${poStatusLabel[st].toLowerCase()}: já não se expede.`);
+  const guia = String(d.guia ?? "").trim();
+  if (!guia) falhar("Indique o número da guia de remessa.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d.data || "")) falhar("Indique a data de expedição.");
+  if (d.data < p.date) falhar("A expedição não pode ser antes da data da encomenda.");
+  if (db.guias.some((g) => g.sup === p.sup && g.id.toLowerCase() === guia.toLowerCase())) falhar(`A guia ${guia} já existe: use outro número.`);
+  const linhas = d.linhas.filter((x) => x.qty > 0);
+  if (!linhas.length) falhar("Indique pelo menos uma quantidade a expedir.");
+  for (const x of linhas) {
+    const l = p.lines.find((y) => y.id === x.lineId);
+    if (!l) return falhar("Linha inexistente.");
+    if (!ehInteiro(x.qty)) falhar("Quantidades inteiras.");
+    if (x.qty > porExpedir(p, l)) falhar(`Nunca mais do que falta expedir: ${l.sku} tem ${porExpedir(p, l)} un por expedir.`);
+  }
+  const at = agora(db);
+  const e: Expedicao = { guia, data: d.data, at, linhas: linhas.map((x) => ({ lineId: x.lineId, qty: x.qty })), transportador: (d.transportador ?? "").trim(), obs: (d.obs ?? "").trim() };
+  (p.portal.expedicoes ??= []).push(e);
+  const ann = new Map<string, number>();
+  for (const x of e.linhas) { const sku = p.lines.find((l) => l.id === x.lineId)?.sku ?? ""; ann.set(sku, (ann.get(sku) ?? 0) + x.qty); }
+  const g: Guia = {
+    id: guia, sup: p.sup, date: d.data, wh: p.wh, ann: [...ann].map(([sku, qty]) => ({ sku, qty })), pos: [p.id], state: "open", note: "", doPortal: true,
+    history: [{ at, t: `Guia de remessa emitida pelo fornecedor no portal (${p.id})${e.transportador ? " · " + e.transportador : ""}` }],
+  };
+  db.guias.push(g);
+  const un = e.linhas.reduce((a, x) => a + x.qty, 0);
+  emailPo(p, { at, to: "Responsável de compras", t: `Fornecedor expediu a encomenda · guia ${guia}`, ok: true });
+  p.log.push({ at, t: `Fornecedor expediu ${un} un · guia de remessa ${guia}${e.transportador ? " · " + e.transportador : ""}` });
+  mudou(db);
+  return e;
+}
+
 export function retirarDoPortal(db: Inventario, p: Po, motivo: string): void {
   exigir("purchase_orders.manage", "retirar do portal");
   if (!poPublished(p)) falhar("A encomenda não está publicada.");
@@ -319,12 +383,16 @@ export function percursoPo(p: Po): PassoPo[] {
     ["Parcialmente recebida", st === "partial" ? `${p.lines.reduce((a, l) => a + l.recv, 0)} de ${p.lines.reduce((a, l) => a + poUnits(l) - l.cancelled, 0)} un` : ""],
     ["Recebida", st === "received" ? fmtD(ultimaRececao(p)) : ""],
   ];
+  // SÓ PROTÓTIPO: com expedições do fornecedor, o passo "Expedida" (guia de remessa) entra entre Confirmada e Parcialmente recebida
+  const ex = ultimaExpedicao(p), e = ex ? 1 : 0;
+  if (ex) passos.splice(4, 0, ["Expedida", `guia ${ex.guia} · ${fmtD(ex.data)}`]);
   let cur = 0;
   if (p.status !== "pending") cur = 1;
   if (p.portal.seen || p.portal.state === "email") cur = 2;
   if (p.portal.state === "confirmed") cur = 3;
-  if (st === "partial" || st === "received") cur = 4;
-  if (st === "received") cur = 6;
+  if (ex) cur = 4;
+  if (st === "partial" || st === "received") cur = 4 + e;
+  if (st === "received") cur = 6 + e;
   return passos.map(([nome, detalhe], i) => ({ nome, detalhe, estado: i < cur ? "feito" : i === cur ? "atual" : "depois" }));
 }
 
@@ -335,6 +403,8 @@ export function textoPortal(p: Po): string { return selarPortal(p)?.[0] ?? ""; }
 export function selarPortal(p: Po): readonly [string, Tom] | null {
   if (p.deleted || p.status === "pending" || poStatus(p) === "cancelled") return null;
   const x = p.portal;
+  const ex = ultimaExpedicao(p);
+  if (x.state === "confirmed" && ex && poOpen(p)) return [`Expedida pelo fornecedor · guia ${ex.guia}`, "violet"];
   if (x.state === "confirmed") return [`Confirmada · entrega ${fmtDS(x.promised)}`, "ok"];
   if (x.state === "seen") return [`No portal · vista ${fmtDS(x.seen)}`, "info"];
   if (x.state === "sent") return ["No portal · por ver", "neu"];

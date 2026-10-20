@@ -31,7 +31,7 @@ export const FILTROS_REC: FiltrosRec = { q: "", sup: "", wh: "", cli: "", chip: 
 export const chaveCliente = (p: Po): string => (p.origin.k === "stock" ? "" : p.origin.ref || p.origin.ec || "");
 const rotuloCliente = (p: Po): string => (p.origin.client ? `${p.origin.client} · ${chaveCliente(p)}` : chaveCliente(p));
 const doChip = (p: Po, c: ChipRec): boolean =>
-  c === "clientes" ? !!chaveCliente(p) : c === "stock" ? !chaveCliente(p) : c === "atrasadas" ? atrasadaRec(p) : c === "hoje" ? grupoRececao(p) === 0 : true;
+  c === "clientes" ? !!chaveCliente(p) : c === "stock" ? !chaveCliente(p) : c === "atrasadas" ? atrasadaRec(p) : c === "hoje" ? grupoRececao(p) <= 0 : true;
 
 /** As POs por receber com a pesquisa e os filtros (sem o chip). */
 function semChip(db: Inventario, f: FiltrosRec): Po[] {
@@ -117,12 +117,14 @@ export function EncomendasPorReceber({ f, setF }: { f: FiltrosRec; setF: (f: Fil
   const acao = (p: Po) => (
     <button type="button" className="btn btn-sm btn-p rec-dar" disabled={!pode} title={pode ? undefined : porqueNao("inventory.receive")} aria-label={`Dar entrada ${p.id}`} onClick={() => receber(p)}>Dar entrada →</button>
   );
-  const linhaClasse = (p: Po): string => cn(`rec-g${grupoRececao(p)}`, p.id === alvo && "rec-alvo");
+  // o grupo -1 (expedidas, só protótipo) usa o destaque do grupo 0
+  const classeGrupo = (g: number): string => (g < 0 ? "rec-g0 rec-exp" : `rec-g${g}`);
+  const linhaClasse = (p: Po): string => cn(classeGrupo(grupoRececao(p)), p.id === alvo && "rec-alvo");
   const cabGrupo = (L: Po[]) => (p: Po, i: number) => {
     const g = grupoRececao(p);
     if (i > 0 && grupoRececao(L[i - 1]) === g) return null;
     const k = L.filter((x) => grupoRececao(x) === g).length;
-    return <tr className={`rec-grp rec-g${g}`}><th colSpan={cols.length + 1} scope="colgroup">{GRUPOS_REC[g]} <span className="cnt">· {k}</span></th></tr>;
+    return <tr className={`rec-grp ${classeGrupo(g)}`}><th colSpan={cols.length + 1} scope="colgroup">{GRUPOS_REC[g]} <span className="cnt">· {k}</span></th></tr>;
   };
   const vazio = <Vazio titulo="Nada por receber" texto={nFiltros || f.chip !== "todas" || f.ids.length ? "Nenhuma encomenda com estes filtros." : "Não há encomendas a fornecedor por receber."} />;
   return (

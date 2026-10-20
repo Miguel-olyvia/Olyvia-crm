@@ -58,6 +58,6 @@ export function contadores(db: Inventario): Contadores {
     stockValue: db.stocks.filter((s) => !s.deleted).reduce((a, s) => a + s.qty * custo(s.sku), 0),
     excess: db.stocks.filter((s) => !s.deleted && s.max > 0 && s.qty > s.max).length,
     porReceber: db.pos.filter(poRecebivel).length,
-    chegamHoje: db.pos.filter((p) => poRecebivel(p) && grupoRececao(p) === 0).length,
+    chegamHoje: db.pos.filter((p) => poRecebivel(p) && grupoRececao(p) <= 0).length,
   };
 }

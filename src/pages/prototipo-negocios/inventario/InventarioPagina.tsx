@@ -80,10 +80,14 @@ function Topo({ fontes, mudarFontes, pedirRepor }: { fontes: boolean; mudarFonte
 }
 
 /** `alvoTopo` é o sítio, no cabeçalho do protótipo, onde se desenha o topo (pesquisa e ações); sem ele (testes e uso isolado) o topo fica dentro da página. */
-interface PaginaProps { leitura?: boolean; aba?: AbaInv; aoMudarAba?: (a: AbaInv) => void; alvoTopo?: HTMLElement | null }
+interface PaginaProps {
+  leitura?: boolean; aba?: AbaInv; aoMudarAba?: (a: AbaInv) => void; alvoTopo?: HTMLElement | null;
+  /** 20/10 (demo): "Abrir como fornecedor →" no separador Portal da PO abre o portal do fornecedor simulado (PrototipoNegocios). */
+  aoAbrirPortalForn?: (sup: string, po?: string) => void;
+}
 
 /** Sem `aba`, a página guarda ela própria o ecrã aberto (testes e uso isolado); com `aba`, quem manda é o menu lateral. */
-export default function InventarioPagina({ leitura = false, aba: abaFora, aoMudarAba, alvoTopo }: PaginaProps) {
+export default function InventarioPagina({ leitura = false, aba: abaFora, aoMudarAba, alvoTopo, aoAbrirPortalForn }: PaginaProps) {
   const db = useInventario();
   const [abaInterna, setAbaInterna] = useState<AbaInv>(lerAba);
   const aba = abaFora ?? abaInterna;
@@ -115,8 +119,8 @@ export default function InventarioPagina({ leitura = false, aba: abaFora, aoMuda
   }, [setAba, aba]);
   const ctx = useMemo<CtxInv>(() => ({
     db, leitura, agir, avisar: anunciar, aviso, ir, perfil, alvoAcoes, registarAcoes, abrir: setDetalhe, fecharDetalhe: () => setDetalhe(null), filtros,
-    setFiltros: (k, p) => setFiltros((x) => ({ ...x, [k]: { ...x[k], ...p } })),
-  }), [db, leitura, agir, anunciar, aviso, ir, perfil, alvoAcoes, filtros]);
+    setFiltros: (k, p) => setFiltros((x) => ({ ...x, [k]: { ...x[k], ...p } })), abrirPortalForn: aoAbrirPortalForn,
+  }), [db, leitura, agir, anunciar, aviso, ir, perfil, alvoAcoes, filtros, aoAbrirPortalForn]);
 
   // Os atalhos: ↓ ↑ j k entre linhas, Enter abre, "/" vai à pesquisa, Esc limpa-a, "?" mostra a ajuda. Um só ouvinte para todo o módulo.
   useAtalhos(!ajuda, "lista", painel, {
