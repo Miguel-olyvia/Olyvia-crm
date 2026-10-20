@@ -14,8 +14,8 @@ import { leadDaAbordagem } from "./leadDaAbordagem";
 import { hojeLisboa, inicioDoDiaLisboa, instanteLisboa } from "./tempoLisboa";
 import { useFontePessoas } from "./useFontePessoas";
 
-/** Passa a true quando neg_registar_nota e neg_adiar_contacto (M8) estiverem aplicadas na base: liga a Nota e o Adiar na ficha. */
-const FUNCOES_M8_APLICADAS = false;
+/** neg_registar_nota e neg_adiar_contacto (M8) já estão aplicadas na base (confirmado a 20/10): liga a Nota e o Adiar na ficha. */
+const FUNCOES_M8_APLICADAS = true;
 
 /** O que a ficha real consegue fazer hoje. A visita (marcar e alterar) é do P6; o negócio (detalhe, perder, ganhar, ligar e criar) é do P3. */
 export const CAPACIDADES_FICHA_REAL: CapacidadesFicha = {

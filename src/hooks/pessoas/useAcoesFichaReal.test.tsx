@@ -12,10 +12,89 @@ beforeEach(prepararAcoes);
 afterEach(limparAcoes);
 
 describe("useAcoesFichaReal: capacidades", () => {
-  it("chamada e encerrar ligadas; nota, adiar e visita desligadas enquanto M8 e o P6 não existem", () => {
+  it("chamada, encerrar, nota e adiar ligadas (M8 aplicada); só a visita fica desligada, até ao P6", () => {
     const { result } = montar();
-    // ALTERADO no P3 (negocios era false): o negócio completo está ligado.
-    expect(result.current.capacidades).toEqual({ chamada: true, encerrar: true, adiar: false, nota: false, visita: false, negocios: true });
+    // ALTERADO com a M8 aplicada (adiar e nota eram false): neg_registar_nota e neg_adiar_contacto existem na base.
+    expect(result.current.capacidades).toEqual({ chamada: true, encerrar: true, adiar: true, nota: true, visita: false, negocios: true });
+  });
+});
+
+describe("juntarNota (neg_registar_nota)", () => {
+  it("chama a função certa com a nota aparada e o id da pessoa, e invalida a ficha e a lista", async () => {
+    rpcMock.mockReturnValue(respostaOk({}));
+    const { result, client } = montar();
+    semear(client);
+    await act(async () => { await result.current.juntarNota(PESSOA_ID, "  Pediu orçamento novo  "); });
+    expect(chamadas()).toEqual(["neg_registar_nota"]);
+    expect(parametros(0)).toEqual({ p_id: "uuid-1", p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_texto: "Pediu orçamento novo" });
+    expect(invalidadas(client)).toEqual([true, true]);
+  });
+
+  it("repetir a mesma nota depois de uma falha reutiliza o p_id; depois de um sucesso o p_id é novo", async () => {
+    const { result } = montar();
+    rpcMock.mockReturnValueOnce(respostaErro("08006"));
+    await erroDe(act(async () => { await result.current.juntarNota(PESSOA_ID, "a"); }));
+    rpcMock.mockReturnValueOnce(respostaOk({}));
+    await act(async () => { await result.current.juntarNota(PESSOA_ID, "a"); });
+    rpcMock.mockReturnValueOnce(respostaOk({}));
+    await act(async () => { await result.current.juntarNota(PESSOA_ID, "a"); });
+    expect([parametros(0).p_id, parametros(1).p_id, parametros(2).p_id]).toEqual(["uuid-1", "uuid-1", "uuid-2"]);
+  });
+
+  it("um erro da base chega traduzido (chave) e não invalida", async () => {
+    rpcMock.mockReturnValue(respostaErro("NG003"));
+    const { result, client } = montar();
+    semear(client);
+    const erro = await erroDe(act(async () => { await result.current.juntarNota(PESSOA_ID, "a") }));
+    expect(erro).toBeInstanceOf(ErroNeg);
+    expect(erro.chave).toBe("pessoasPagina.erroNeg.ng003");
+    expect(invalidadas(client)).toEqual([false, false]);
+  });
+
+  it("uma pessoa que não é a da ficha recusa sem chamar a base", async () => {
+    const { result } = montar();
+    const erro = await erroDe(act(async () => { await result.current.juntarNota("outra-pessoa", "a"); }));
+    expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");
+    expect(rpcMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("adiar (neg_adiar_contacto)", () => {
+  it.each([[1, "2026-10-19T23:00:00.000Z"], [3, "2026-10-21T23:00:00.000Z"], [7, "2026-10-26T00:00:00.000Z"]] as const)( // 26/10 já é inverno (UTC+0)
+    "adiar %i dia(s) manda a próxima ação para as 00:00 de Lisboa desse dia", async (dias, esperado) => {
+      rpcMock.mockReturnValue(respostaOk({}));
+      const { result, client } = montar();
+      semear(client);
+      await act(async () => { await result.current.adiar(PESSOA_ID, dias); });
+      expect(chamadas()).toEqual(["neg_adiar_contacto"]);
+      expect(parametros(0)).toEqual({ p_id: "uuid-1", p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_proxima_acao_em: esperado });
+      expect(invalidadas(client)).toEqual([true, true]);
+    },
+  );
+
+  it("repetir o mesmo adiamento depois de uma falha reutiliza o p_id", async () => {
+    const { result } = montar();
+    rpcMock.mockReturnValueOnce(respostaErro("08006"));
+    await erroDe(act(async () => { await result.current.adiar(PESSOA_ID, 3); }));
+    rpcMock.mockReturnValueOnce(respostaOk({}));
+    await act(async () => { await result.current.adiar(PESSOA_ID, 3); });
+    expect(parametros(1).p_id).toBe(parametros(0).p_id);
+  });
+
+  it("um erro da base chega traduzido (chave) e não invalida", async () => {
+    rpcMock.mockReturnValue(respostaErro("NG008"));
+    const { result, client } = montar();
+    semear(client);
+    const erro = await erroDe(act(async () => { await result.current.adiar(PESSOA_ID, 1); }));
+    expect(erro.chave).toBe("pessoasPagina.erroNeg.ng008");
+    expect(invalidadas(client)).toEqual([false, false]);
+  });
+
+  it("uma pessoa que não é a da ficha recusa sem chamar a base", async () => {
+    const { result } = montar();
+    const erro = await erroDe(act(async () => { await result.current.adiar("outra-pessoa", 1); }));
+    expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 });
 

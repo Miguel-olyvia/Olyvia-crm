@@ -79,6 +79,71 @@ describe("FichaReal: a carregar", () => {
   });
 });
 
+describe("FichaReal: Nota e Adiar ligados (M8 aplicada)", () => {
+  const comNotaEAdiar = () => ({ ...acoesDe(), capacidades: { chamada: true, encerrar: true, adiar: true, nota: true, visita: false, negocios: false } });
+  const abrirMais = () => fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+  beforeEach(() => fichaMock.mockReturnValue(estadoHook({ ficha: fichaDb(), estado: "ok" })));
+
+  it("o «Mais» oferece Nota e Adiar quando as capacidades estão ligadas", () => {
+    acoesMock.mockReturnValue(comNotaEAdiar());
+    desenhar();
+    abrirMais();
+    expect(screen.getByRole("menuitem", { name: /^Nota$/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Adiar/ })).toBeInTheDocument();
+  });
+
+  it("Nota: escrever e guardar chama juntarNota com a pessoa e o texto", async () => {
+    const acoes = comNotaEAdiar();
+    acoes.juntarNota.mockResolvedValue(undefined);
+    acoesMock.mockReturnValue(acoes);
+    desenhar();
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Nota$/ }));
+    fireEvent.change(await screen.findByLabelText("Escreva a nota"), { target: { value: "Prefere de manhã" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(acoes.juntarNota).toHaveBeenCalledExactlyOnceWith(ID, "Prefere de manhã"));
+  });
+
+  it("Adiar: escolher «Amanhã» chama adiar com a pessoa e 1 dia", async () => {
+    const acoes = comNotaEAdiar();
+    acoes.adiar.mockResolvedValue(undefined);
+    acoesMock.mockReturnValue(acoes);
+    desenhar();
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Adiar/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Amanhã/ }));
+    await waitFor(() => expect(acoes.adiar).toHaveBeenCalledExactlyOnceWith(ID, 1));
+  });
+
+  it("um erro da base ao guardar a nota aparece traduzido, não a chave nem o código em bruto", async () => {
+    const acoes = comNotaEAdiar();
+    acoes.juntarNota.mockRejectedValue(new ErroNeg(null, "NG009", "pessoasPagina.erroNeg.ng009"));
+    acoesMock.mockReturnValue(acoes);
+    desenhar();
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Nota$/ }));
+    fireEvent.change(await screen.findByLabelText("Escreva a nota"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("Um dos valores não é válido.");
+    expect(alerta).not.toHaveTextContent("NG009");
+    expect(alerta).not.toHaveTextContent("erroNeg");
+  });
+
+  it("um erro da base ao adiar aparece traduzido", async () => {
+    const acoes = comNotaEAdiar();
+    acoes.adiar.mockRejectedValue(new ErroNeg(null, "NG008", "pessoasPagina.erroNeg.ng008"));
+    acoesMock.mockReturnValue(acoes);
+    desenhar();
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Adiar/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Amanhã/ }));
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).not.toHaveTextContent("NG008");
+    expect(alerta).not.toHaveTextContent("erroNeg");
+  });
+});
+
 describe("FichaReal: aberta com dados", () => {
   beforeEach(() => fichaMock.mockReturnValue(estadoHook({ ficha: FICHA, estado: "ok" })));
 

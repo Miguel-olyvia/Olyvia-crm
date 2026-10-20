@@ -101,8 +101,8 @@ describe("criar: o que cada permissão deixa mandar", () => {
 describe("criar: orçamento, proposta e contrato (a bandeira de M6)", () => {
   const docs = [{ tipo: "orcamento", id: "o1" }, { tipo: "proposta", id: "p1" }, { tipo: "contrato", id: "k1" }] as const;
 
-  it("com a bandeira desligada (por omissão) um documento recusa sem chamar a base: a base ainda não os aceita em p_registos", async () => {
-    const { result } = montar();
+  it("com a bandeira desligada um documento recusa sem chamar a base (a bandeira só se desliga à mão: por omissão a M6 está aplicada)", async () => {
+    const { result } = montar(fichaDb(), false);
     const erro = await erroDe(act(async () => { await result.current.criar(pedido({ registos: [...docs] })); }));
     expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");
     expect(rpcMock).not.toHaveBeenCalled();
@@ -123,8 +123,25 @@ describe("criar: orçamento, proposta e contrato (a bandeira de M6)", () => {
   });
 
   it("expõe a bandeira, para o formulário saber se oferece documentos", () => {
-    expect(montar().result.current.criarComDocumentos).toBe(false);
+    expect(montar().result.current.criarComDocumentos).toBe(true);
+    expect(montar(fichaDb(), false).result.current.criarComDocumentos).toBe(false);
     expect(montar(fichaDb(), true).result.current.criarComDocumentos).toBe(true);
+  });
+
+  it("por omissão (M6 aplicada) os documentos vão em p_registos sem ser preciso ligar a bandeira", async () => {
+    rpcMock.mockReturnValue(ok());
+    const { result } = montar();
+    await act(async () => { await result.current.criar(pedido({ registos: [...docs] })); });
+    expect(nomeChamado(0)).toBe("neg_criar_negocio");
+    expect(parametros(0).p_registos).toEqual([...docs]);
+  });
+
+  it("um erro da base ao criar com documentos sai traduzido (chave), não em bruto", async () => {
+    rpcMock.mockReturnValue(respostaErro("NG001"));
+    const { result } = montar();
+    const erro = await erroDe(act(async () => { await result.current.criar(pedido({ registos: [...docs] })); }));
+    expect(erro.codigo).toBe("NG001");
+    expect(erro.chave).toBe("pessoasPagina.erroNeg.ng001");
   });
 });
 

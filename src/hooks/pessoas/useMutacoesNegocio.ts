@@ -10,11 +10,11 @@ import { erroGenerico, erroLocal, lerCriado, lerGanho, lerMudou, textoDeEstado, 
 import { useFontePessoas } from "./useFontePessoas";
 
 /**
- * Passa a true quando a M6 estiver aplicada na base: `neg_criar_negocio` passa a aceitar orçamentos, propostas e contratos em
- * `p_registos` (hoje só contactos e visitas, e o levantamento à parte). Desligada, o formulário não oferece documentos e o criar recusa-os.
- * Até lá, um documento liga-se depois de o negócio existir, um a um, com `neg_ligar_registo` (que já aceita os seis tipos).
+ * A M6 já está aplicada na base (confirmado a 20/10): `neg_criar_negocio` aceita orçamentos, propostas e contratos em `p_registos`.
+ * A true, o formulário oferece documentos e o criar envia-os. A false, o formulário não os oferece e o criar recusa-os; um documento
+ * ligava-se então depois de o negócio existir, um a um, com `neg_ligar_registo` (que aceita os seis tipos).
  */
-const FUNCOES_M6_APLICADAS = false;
+const FUNCOES_M6_APLICADAS = true;
 
 /**
  * Os erros depois dos quais o que o ecrã mostra já está desatualizado (o negócio mudou, o registo já não é livre, o contrato já não se liga,
