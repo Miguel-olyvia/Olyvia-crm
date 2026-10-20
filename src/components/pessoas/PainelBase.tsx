@@ -21,6 +21,11 @@ export interface CapacidadesFicha {
   nota: boolean;
   visita: boolean;
   negocios?: boolean;
+  /**
+   * Alterar e cancelar as visitas JÁ marcadas (a ficha real, P6): cada diálogo grava na base. É independente de `visita`, que também
+   * liga o passo «marcar visita» da chamada e «Visita e levantamento» (esses seguem desligados na ficha real).
+   */
+  gerirVisitas?: boolean;
 }
 
 /** O resultado de uma ação: nada (em memória, no exemplo) ou uma Promise que termina quando a base respondeu e lança se falhar. */
@@ -35,11 +40,15 @@ export interface AcoesFicha {
   /** Reativa a abordagem encerrada (ou a lead perdida do exemplo antigo). */
   reativar: (id: string) => Resultado;
   juntarNota: (id: string, texto: string) => Resultado;
-  /** Muda o dia, a hora e a morada de uma visita da pessoa. */
+  /** Muda o dia, a hora e a morada de uma visita da pessoa (o exemplo; na ficha real o diálogo grava pela base com mais campos). */
   alterarVisita: (visitaId: string, dados: DadosAlterarVisita) => Resultado;
+  /** Cancela uma visita marcada (só na ficha real; sem isto não há «Cancelar visita»). */
+  cancelarVisita?: (visitaId: string) => Resultado;
   /** Escreve o resultado de uma visita (interessado, a pensar, sem interesse, obra inviável); os dois últimos encerram a abordagem. */
   registarResultadoVisita: (visitaId: string, dados: DadosResultadoVisita) => Resultado;
   capacidades?: CapacidadesFicha;
+  /** Só a ficha real: o `anew_users.id` do responsável da pessoa (o recurso dele vai escolhido por omissão ao marcar a visita da chamada). */
+  responsavelUserId?: string | null;
 }
 
 /** A moldura comum: título e conteúdo, ligados por `aria-labelledby`; escondida quando o painel não é o ativo. */

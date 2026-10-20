@@ -140,6 +140,7 @@ function AbasFicha(p: AbasProps) {
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
             aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
+            visitasNaBase={p.acoes.capacidades?.gerirVisitas === true} cancelarVisita={p.acoes.capacidades?.gerirVisitas === true ? p.acoes.cancelarVisita : undefined}
             aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade}
           />
         </TabsContent>

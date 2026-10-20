@@ -29,6 +29,10 @@ interface Props {
   /** O id da visita aberta (ou `null`). */
   visitaAberta: string | null;
   acoesVisitas: AcoesVisitas;
+  /** Os ids das visitas que já existem na base (a ficha real): não se removem, cancelam-se. */
+  visitasGravadas?: ReadonlySet<string>;
+  /** Os ids das visitas com o código postal fora do formato (depois de tentar guardar). */
+  visitasComCodigoPostalInvalido?: readonly string[];
 }
 
 const um = (n: number): string => (n === 1 ? ".one" : "");
@@ -109,6 +113,7 @@ function PassoDaVisita({ indice, respostas }: { indice: number; respostas: Respo
 /** A aba Visita (só exemplo): o passo, a lista de secções e a secção aberta, com as perguntas e, onde cabem, o levantamento. */
 export function AbaVisita({
   id, seccaoAtiva, aoMudarSeccao, respostas, aoEscolher, levantamento, erros, acoesLevantamento, visitas, visitaAberta, acoesVisitas,
+  visitasGravadas, visitasComCodigoPostalInvalido,
 }: Props) {
   const { t } = useTranslation();
   const contador = useContador();
@@ -128,7 +133,11 @@ export function AbaVisita({
             </h3>
             <p className="text-sm tabular-nums text-muted-foreground">{contador(seccao, respostas, linhas, visitas)}</p>
           </div>
-          {seccao.especial === "visitas" && <ListaVisitas id={id} visitas={visitas} aberta={visitaAberta} acoes={acoesVisitas} />}
+          {seccao.especial === "visitas" && (
+            <ListaVisitas
+              id={id} visitas={visitas} aberta={visitaAberta} acoes={acoesVisitas} gravadas={visitasGravadas} comCodigoPostalInvalido={visitasComCodigoPostalInvalido}
+            />
+          )}
           <BlocosPerguntas blocos={seccao.blocos} respostas={respostas} aoEscolher={aoEscolher} />
           {seccao.especial === "medidas" && <MedidasDaArea id={id} levantamento={levantamento} erros={erros} acoes={acoesLevantamento} />}
         </section>

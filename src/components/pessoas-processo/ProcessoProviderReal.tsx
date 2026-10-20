@@ -12,6 +12,7 @@
 // mensagem a explicar). Não confirmado na base: ver os valores de `proposals.status` que cada organização grava antes de ligar isto a produção.
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { adaptarPessoa } from "@/hooks/pessoas/adaptarFichaPessoa";
 import { adaptarNegocios } from "@/hooks/pessoas/adaptarNegociosFicha";
 import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva } from "@/hooks/pessoas/documentosDoNegocio";
 import type { FichaDb, NegocioFichaDb } from "@/hooks/pessoas/fichaTipos";
@@ -22,6 +23,9 @@ import { GanharNegocioDialogo } from "@/components/negocio-metas/GanharNegocioDi
 import { useMutacoesDaFicha } from "@/components/negocio-metas/mutacoesNegocio";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { useAvisarNegocio } from "@/components/negocio-metas/useAvisarNegocio";
+import { MarcarVisitaProvider } from "@/components/pessoas/MarcarVisita";
+import type { AberturaVisita } from "@/components/pessoas/marcarVisitaContexto";
+import { moradaDaLead } from "@/components/pessoas/moradaVisita";
 import { passoDoItem } from "@/components/pessoas/processo/passosProcesso";
 import { ProcessoContext, type ProcessoValor } from "@/components/pessoas/processo/processoContexto";
 import type { ItemProcesso } from "@/components/pessoas/processo/tiposProcesso";
@@ -39,6 +43,10 @@ type Painel = "orcamento" | "proposta" | "ganhar";
 type Plano = { tipo: "painel"; painel: Painel; negocio: NegocioFichaDb } | { tipo: "ir"; destino: string; negocio: NegocioFichaDb };
 
 const codificar = encodeURIComponent;
+const SEM_EFEITO = (): void => undefined;
+
+/** Uma visita da ficha que ainda conta (não está cancelada): a base marca as canceladas com `cancelada` ou o estado `cancelled`. */
+const visitaViva = (v: { status: string; cancelada?: boolean }): boolean => v.cancelada !== true && v.status !== "cancelled";
 
 /** O plano do passo de um item, ou `null` se a ficha real não o sabe executar (ou falta o documento ou a permissão que ele pede). */
 function planear(item: ItemProcesso, ficha: FichaDb | null): Plano | null {
@@ -109,6 +117,19 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
     setAberto((atual) => (atual !== null && atual.pessoa !== pessoaDaFicha ? null : atual));
   }, [pessoaDaFicha]);
 
+  // O diálogo de marcar visita (ligado à base), montado uma vez por ficha: serve o botão «Marcar visita» de um negócio. Completa a abertura com o que o
+  // botão não sabe (a morada da lead e o responsável, que dá o recurso por omissão) e diz que a pessoa já tem uma visita (então é uma revisita).
+  const completar = useMemo(() => {
+    if (!ficha) return undefined;
+    const moradaLead = moradaDaLead(adaptarPessoa(ficha, hojeLisboa()));
+    const responsavel = ficha.pessoa.responsavel_id ?? null;
+    return (a: AberturaVisita): AberturaVisita => ({ ...a, moradaLead: a.moradaLead ?? moradaLead, responsavelUserId: a.responsavelUserId ?? responsavel });
+  }, [ficha]);
+  const jaComVisita = useMemo(
+    () => (ficha && (ficha.visitas?.itens ?? []).some(visitaViva) ? new Set([ficha.pessoa.id]) : undefined),
+    [ficha],
+  );
+
   const valor = useMemo<ProcessoValor>(() => {
     const ir = (destino: string, negocio: string): void => {
       if (ficha) navegar(ligacaoComVoltar(destino, enderecoDeRegresso(ficha.pessoa.id, negocio)));
@@ -127,6 +148,8 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
         else setAberto({ painel: plano.painel, negocio: plano.negocio.id, pessoa: ficha.pessoa.id });
       },
       abrirVisitaLevantamento: () => undefined,
+      // O painel «Visita e levantamento» ainda não grava na base (o levantamento é do P5): o menu «Mais» não o mostra.
+      comPainelVisita: false,
       abrirDocumento: (tipo, negocioId) => {
         const negocio = ficha?.negocios?.itens.find((n) => n.id === negocioId);
         const destino = negocio ? destinoDoDocumento(tipo, negocio) : null;
@@ -153,7 +176,9 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
 
   return (
     <ProcessoContext.Provider value={valor}>
-      {children}
+      <MarcarVisitaProvider hoje={hojeLisboa()} aoMarcar={SEM_EFEITO} naBase jaComVisita={jaComVisita} completar={completar}>
+        {children}
+      </MarcarVisitaProvider>
       {orcamento && <Suspense fallback={null}><PainelOrcamentoReal negocio={orcamento} mutacoes={mutacoes} aoFechar={fechar} /></Suspense>}
       {proposta && <Suspense fallback={null}><PainelPropostaReal negocio={proposta} mutacoes={mutacoes} aoFechar={fechar} /></Suspense>}
       <GanharNegocioDialogo negocio={paraGanhar} aoFechar={fechar} aoGanho={avisar} />

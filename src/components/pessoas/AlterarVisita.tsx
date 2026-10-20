@@ -1,5 +1,5 @@
-// "Alterar visita": um diálogo curto para mudar o dia, a hora e a morada de uma visita já marcada (ou por concluir). A nova
-// morada passa a valer. Só em memória, como o resto da ficha.
+// "Alterar visita": um diálogo para mudar uma visita já marcada (ou por concluir). No exemplo muda o dia, a hora e a morada, só em memória.
+// Com `naBase` (a ficha real) abre o formulário ligado à base (`AlterarVisitaReal`: quadro, recursos, duração e conflito), que se carrega à parte.
 import { useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
@@ -7,9 +7,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
+import type { VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import { CamposDataHora } from "./CamposDataHora";
-import { MORADA_VISITA_VAZIA, moradaDaLead, type DestinoVisita } from "./moradaVisita";
+import { FormularioVisitaCarregavel } from "./FormularioVisitaCarregavel";
+import { destinoDaVisita, moradaDaLead, type DestinoVisita } from "./moradaVisita";
 import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
 import type { Pessoa } from "./pessoasTipos";
 import { validarVisita, type DadosAlterarVisita } from "./visitaPessoa";
@@ -17,16 +18,14 @@ import { validarVisita, type DadosAlterarVisita } from "./visitaPessoa";
 const V = "pessoasPagina.visitDialog.";
 const C = "pessoasPagina.changeVisit.";
 
-/** A escolha de partida: a da visita atual (a morada da lead só conta se a ficha ainda a tiver). */
-function destinoDaVisita(visita: VisitaNegocio, temMoradaLead: boolean): DestinoVisita {
-  const naLead = visita.igualALead && temMoradaLead;
-  return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : { ...visita.morada }, notaAcesso: visita.nota };
-}
+// O formulário ligado à base só se carrega quando se abre com `naBase`: o exemplo (e os seus testes) nunca importa a ligação à base.
+// Uma função de módulo (estável); se o pacote falhar a carregar, `FormularioVisitaCarregavel` contém o erro e deixa tentar de novo.
+const importarFormAlterarReal = () => import("./AlterarVisitaReal").then((m) => ({ default: m.FormAlterarReal }));
 
 interface FormAlterarProps {
   pessoa: Pessoa;
   /** A visita a alterar (uma visita da pessoa). */
-  visita: VisitaNegocio;
+  visita: VisitaPessoa;
   hoje: string;
   aoGuardar: (dados: DadosAlterarVisita) => void;
   aoFechar: () => void;
@@ -73,18 +72,35 @@ function FormAlterar({ pessoa, visita, hoje, aoGuardar, aoFechar }: FormAlterarP
 interface AlterarVisitaProps extends Omit<FormAlterarProps, "aoFechar"> {
   aberto: boolean;
   aoMudarAberto: (aberto: boolean) => void;
+  /** Liga o diálogo à base: grava por `useAcoesVisita` (quadro, recursos, duração, conflito) e não usa `aoGuardar`. */
+  naBase?: boolean;
 }
 
-export function AlterarVisita({ aberto, aoMudarAberto, ...resto }: AlterarVisitaProps) {
+export function AlterarVisita({ aberto, aoMudarAberto, naBase = false, ...resto }: AlterarVisitaProps) {
   const { t } = useTranslation();
+  // Uma gravação na base está a correr: o diálogo não se deixa fechar (Escape, clique fora, «Cancelar»). Lê-se no instante do clique, por isso é uma ref.
+  const ocupado = useRef(false);
+  const descricao = t(naBase ? "pessoasPagina.real.visit.alterar.description" : `${C}description`, { name: resto.pessoa.nome });
   return (
-    <Dialog open={aberto} onOpenChange={aoMudarAberto}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none">
+    <Dialog open={aberto} onOpenChange={(valor) => { if (!valor && ocupado.current) return; aoMudarAberto(valor); }}>
+      <DialogContent
+        className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none"
+        onEscapeKeyDown={(e) => { if (ocupado.current) e.preventDefault(); }} onInteractOutside={(e) => { if (ocupado.current) e.preventDefault(); }}
+      >
         <DialogHeader>
           <DialogTitle>{t(`${C}title`)}</DialogTitle>
-          <DialogDescription>{t(`${C}description`, { name: resto.pessoa.nome })}</DialogDescription>
+          <DialogDescription>{descricao}</DialogDescription>
         </DialogHeader>
-        <FormAlterar {...resto} aoFechar={() => aoMudarAberto(false)} />
+        {naBase ? (
+          <FormularioVisitaCarregavel
+            importar={importarFormAlterarReal}
+            propriedades={{
+              pessoa: resto.pessoa, visita: resto.visita, hoje: resto.hoje, aoOcupado: (a: boolean) => { ocupado.current = a; }, aoFechar: () => aoMudarAberto(false),
+            }}
+          />
+        ) : (
+          <FormAlterar {...resto} aoFechar={() => aoMudarAberto(false)} />
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG, codigoDoErro, chaveDoErro } from "./errosNeg";
 
-const CODIGOS = Array.from({ length: 20 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`);
+const CODIGOS = Array.from({ length: 21 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`);
 
 describe("errosNeg", () => {
-  it("há uma chave própria para cada código NG001 a NG020 e para 42501", () => {
+  it("há uma chave própria para cada código NG001 a NG021 e para 42501", () => {
     for (const codigo of [...CODIGOS, "42501"]) expect(CHAVES_ERRO_NEG[codigo], codigo).toMatch(/^pessoasPagina\.erroNeg\./);
     const chaves = Object.values(CHAVES_ERRO_NEG);
     expect(new Set(chaves).size).toBe(chaves.length);
-    expect(chaves).toHaveLength(21);
+    expect(chaves).toHaveLength(22);
   });
 
   it("lê o código de error.code", () => {
@@ -40,8 +40,9 @@ describe("errosNeg", () => {
   it("não confunde números maiores nem texto parecido", () => {
     expect(codigoDoErro({ message: "NG0011 x" })).toBeNull();
     expect(codigoDoErro({ message: "xNG001" })).toBeNull();
-    // NG019 e NG020 passam a existir (contacto de outra pessoa; demasiadas verificações); o próximo livre é NG021.
-    expect(codigoDoErro({ message: "NG021 x" })).toBeNull();
+    // NG019, NG020 e NG021 existem (contacto de outra pessoa; demasiadas verificações; questionário alterado entretanto); o próximo livre é NG022.
+    expect(codigoDoErro({ message: "NG022 x" })).toBeNull();
+    expect(codigoDoErro({ message: "NG0211 x" })).toBeNull();
     expect(codigoDoErro({ message: "NG0201 x" })).toBeNull();
   });
 
@@ -58,6 +59,15 @@ describe("errosNeg: NG016, NG017 e NG018", () => {
     expect(codigoDoErro({ code: codigo, message: "x" })).toBe(codigo);
     expect(codigoDoErro({ message: `falhou [${codigo}]` })).toBe(codigo);
     expect(chaveDoErro({ code: codigo, message: "x" })).toBe(`pessoasPagina.erroNeg.${codigo.toLowerCase()}`);
+  });
+});
+
+describe("errosNeg: NG021 (o questionário do levantamento foi alterado entretanto)", () => {
+  it("lê-se de error.code e do texto, com a sua chave", () => {
+    expect(codigoDoErro({ code: "NG021", message: "x" })).toBe("NG021");
+    expect(codigoDoErro({ message: "falhou [NG021]" })).toBe("NG021");
+    expect(codigoDoErro({ code: null, message: "x", details: "NG021" })).toBe("NG021");
+    expect(chaveDoErro({ code: "NG021", message: "x" })).toBe("pessoasPagina.erroNeg.ng021");
   });
 });
 

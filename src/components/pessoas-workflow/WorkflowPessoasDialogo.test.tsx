@@ -1,9 +1,12 @@
-// O diálogo do Workflow de Pessoas: título, separador «Qualificação» (o «Levantamento» é de uma fase seguinte), foco ao abrir e ao fechar,
-// e não se fecha enquanto grava. O hook das regras é simulado.
+// O diálogo do Workflow de Pessoas: título, separadores «Qualificação» e «Levantamento», foco ao abrir e ao fechar, não se fecha enquanto
+// grava e pergunta antes de fechar com alterações do levantamento por gravar. Os hooks de leitura e gravação são simulados.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import type { RegrasQualificacaoHook } from "@/hooks/pessoas/workflow/useRegrasQualificacao";
+import { lerQuestionario } from "@/hooks/pessoas/workflow/questionario";
+import { QUESTIONARIO_BRUTO } from "@/hooks/pessoas/workflow/questionarioTestUtil";
+import type { QuestionarioHook } from "@/hooks/pessoas/workflow/useQuestionarioLevantamento";
 import { WorkflowPessoasDialogo } from "./WorkflowPessoasDialogo";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -12,6 +15,8 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 const usarRegras = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useRegrasQualificacao", () => ({ useRegrasQualificacao: (h: boolean) => usarRegras(h) }));
+const usarQuest = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({ useQuestionarioLevantamento: (h: boolean) => usarQuest(h) }));
 beforeAll(prepararRadixNoJsdom);
 
 const hook = (sobre: Partial<RegrasQualificacaoHook> = {}): RegrasQualificacaoHook => ({
@@ -19,7 +24,18 @@ const hook = (sobre: Partial<RegrasQualificacaoHook> = {}): RegrasQualificacaoHo
   guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
 });
 
-beforeEach(() => { usarRegras.mockReset(); usarRegras.mockReturnValue(hook()); });
+const questionario = (sobre: Partial<QuestionarioHook> = {}): QuestionarioHook => ({
+  dados: lerQuestionario(QUESTIONARIO_BRUTO), erro: null, isLoading: false, isError: false, aGuardar: false,
+  guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
+});
+
+beforeEach(() => {
+  usarRegras.mockReset(); usarRegras.mockReturnValue(hook());
+  usarQuest.mockReset(); usarQuest.mockReturnValue(questionario());
+});
+
+const irParaLevantamento = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Levantamento" }), { button: 0, ctrlKey: false });
+const tituloExterior = () => within(screen.getByRole("region", { name: /Exterior|Fachada/ })).getByLabelText("Título da secção");
 
 const desenhar = (aberto = true, sobre: Partial<Parameters<typeof WorkflowPessoasDialogo>[0]> = {}) => {
   const props = { aberto, aoMudarAberto: vi.fn(), aoFocarOrigem: vi.fn(), ...sobre };
@@ -40,16 +56,30 @@ describe("WorkflowPessoasDialogo", () => {
     expect(usarRegras).toHaveBeenCalledWith(true);
   });
 
-  it("tem só o separador «Qualificação», selecionado, com o conteúdo das regras MQL e SQL (o «Levantamento» fica para a fase seguinte)", () => {
+  it("tem os separadores «Qualificação» (selecionado, com as regras MQL e SQL) e «Levantamento»", () => {
     desenhar();
     const lista = screen.getByRole("tablist", { name: "Secções do Workflow" });
     const separadores = within(lista).getAllByRole("tab");
-    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação"]);
+    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação", "Levantamento"]);
     expect(separadores[0]).toHaveAttribute("aria-selected", "true");
+    expect(separadores[1]).toHaveAttribute("aria-selected", "false");
     const painel = screen.getByRole("tabpanel", { name: "Qualificação" });
     expect(within(painel).getByRole("group", { name: "Quando uma lead é MQL" })).toBeInTheDocument();
     expect(within(painel).getByRole("group", { name: "Quando uma lead é SQL" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /levantamento/i })).toBeNull();
+  });
+
+  it("o questionário só se lê quando o separador «Levantamento» está à vista", () => {
+    desenhar();
+    expect(usarQuest).toHaveBeenLastCalledWith(false);
+    irParaLevantamento();
+    expect(usarQuest).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("tabpanel", { name: "Levantamento" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar levantamento" })).toBeInTheDocument();
+  });
+
+  it("fechado não lê o questionário", () => {
+    desenhar(false);
+    expect(usarQuest).toHaveBeenLastCalledWith(false);
   });
 
   it("ao abrir o foco fica dentro do diálogo", () => {
@@ -80,5 +110,83 @@ describe("WorkflowPessoasDialogo", () => {
   it("com o botão de fechar visível quando não grava", () => {
     desenhar();
     expect(screen.getByRole("button", { name: /close|fechar/i })).toBeInTheDocument();
+  });
+
+  it("a gravar o levantamento: Escape não fecha e o botão de fechar sai", () => {
+    usarQuest.mockReturnValue(questionario({ aGuardar: true }));
+    const { props } = desenhar();
+    expect(screen.queryByRole("button", { name: /close|fechar/i })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkflowPessoasDialogo: alterações do levantamento por gravar", () => {
+  const editar = () => {
+    irParaLevantamento();
+    fireEvent.change(tituloExterior(), { target: { value: "Fachada" } });
+  };
+
+  it("sem alterações, Escape fecha logo, sem perguntar", () => {
+    const { props } = desenhar();
+    irParaLevantamento();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+    expect(props.aoMudarAberto).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("com alterações, Escape não fecha: pergunta primeiro, com o foco no botão seguro («Continuar a editar»)", async () => {
+    const { props } = desenhar();
+    editar();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+    const aviso = await screen.findByRole("alertdialog", { name: "Alterações por gravar" });
+    expect(aviso).toHaveTextContent(/perdem-se/i);
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(aviso).getByRole("button", { name: "Continuar a editar" })).toHaveFocus());
+  });
+
+  it("«Continuar a editar» fecha só o aviso e conserva o que se escreveu", async () => {
+    const { props } = desenhar();
+    editar();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Continuar a editar" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
+    expect(tituloExterior()).toHaveValue("Fachada");
+  });
+
+  it("«Descartar e fechar» fecha o diálogo", async () => {
+    const { props } = desenhar();
+    editar();
+    fireEvent.click(screen.getByRole("button", { name: /close|fechar/i }));
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar e fechar" }));
+    expect(props.aoMudarAberto).toHaveBeenCalledWith(false);
+  });
+
+  it("o que se escreveu sobrevive à troca de separador", () => {
+    desenhar();
+    editar();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    expect(screen.queryByRole("region", { name: "Fachada" })).toBeNull();
+    irParaLevantamento();
+    expect(tituloExterior()).toHaveValue("Fachada");
+  });
+
+  it("com alterações no levantamento e o separador «Qualificação» à vista, fechar também pergunta", async () => {
+    const { props } = desenhar();
+    editar();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
+  });
+
+  it("ao reabrir o diálogo o rascunho não fica para a próxima vez", () => {
+    const { rerender, props } = desenhar();
+    editar();
+    rerender(<WorkflowPessoasDialogo {...props} aberto={false} />);
+    rerender(<WorkflowPessoasDialogo {...props} aberto />);
+    irParaLevantamento();
+    expect(within(screen.getByRole("region", { name: "Exterior do edifício" })).getByLabelText("Título da secção")).toHaveValue("Exterior do edifício");
   });
 });

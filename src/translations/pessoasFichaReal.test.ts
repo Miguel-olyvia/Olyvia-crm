@@ -8,7 +8,7 @@ const marcas = (texto: string): string[] => (texto.match(/\{\w+\}/g) ?? []).sort
 
 // As chaves que o código da ficha real usa (FichaReal, useAcoesFichaReal e adaptarAtividade).
 const CHAVES_USADAS = [
-  "opening", "notFound", "partialCall", "partialVisit", "saving", "staleWarn", "unknownResult",
+  "opening", "notFound", "partialCall", "partialCallVisit", "partialVisit", "saving", "staleWarn", "unknownResult",
   "more.contactos", "more.visitas", "more.levantamentos", "more.atividade", "more.loading",
   "activity.snoozed", "activity.lost", "activity.reopened", "activity.won", "activity.deleted", "activity.restored",
   // A identidade (IdentidadeFichaReal) e o separador Submissões (SubmissoesFichaReal).
@@ -61,6 +61,13 @@ describe("traduções da ficha real das Pessoas", () => {
     expect(pt["pessoasPagina.real.ficha.partialCall"]).toMatch(/encerr/i);
     expect(en["pessoasPagina.real.ficha.partialCall"]).toMatch(/call|contact/i);
     expect(en["pessoasPagina.real.ficha.partialCall"]).toMatch(/clos/i);
+  });
+
+  it("o aviso de falha parcial da chamada com visita diz que o contacto ficou e a visita não", () => {
+    expect(pt["pessoasPagina.real.ficha.partialCallVisit"]).toMatch(/contacto/i);
+    expect(pt["pessoasPagina.real.ficha.partialCallVisit"]).toMatch(/visita não foi marcada/i);
+    expect(en["pessoasPagina.real.ficha.partialCallVisit"]).toMatch(/logged/i);
+    expect(en["pessoasPagina.real.ficha.partialCallVisit"]).toMatch(/visit was not booked/i);
   });
 
   it("o aviso de falha parcial da visita diz que a abordagem ficou encerrada e o resultado não", () => {

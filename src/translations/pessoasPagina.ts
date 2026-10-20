@@ -13,7 +13,10 @@ import { pessoasListaRealTranslations } from "./pessoasListaReal";
 import { pessoasProcessoTranslations } from "./pessoasProcesso";
 import { pessoasRegistosTranslations } from "./pessoasRegistos";
 import { pessoasVisitaTranslations } from "./pessoasVisita";
+import { pessoasVisitaDialogosTranslations } from "./pessoasVisitaDialogos";
+import { pessoasVisitaErrosTranslations } from "./pessoasVisitaErros";
 import { pessoasWorkflowTranslations } from "./pessoasWorkflow";
+import { pessoasWorkflowLevantamentoTranslations } from "./pessoasWorkflowLevantamento";
 
 // Página "Pessoas" (/pessoas) — módulo próprio, mesmo padrão de `negocioMetas.ts` e `today.ts`,
 // juntado em `useTranslation.ts`. Apenas en/pt: nas outras línguas o `t()` cai para `en`.
@@ -126,6 +129,8 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasAcoesTranslations.en,
     ...pessoasChamadaTranslations.en,
     ...pessoasVisitaTranslations.en,
+    ...pessoasVisitaErrosTranslations.en,
+    ...pessoasVisitaDialogosTranslations.en,
     ...pessoasProcessoTranslations.en,
     ...pessoasEncerrarTranslations.en,
     ...pessoasRegistosTranslations.en,
@@ -136,6 +141,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasNegocioTranslations.en,
     ...pessoasNovaLeadTranslations.en,
     ...pessoasWorkflowTranslations.en,
+    ...pessoasWorkflowLevantamentoTranslations.en,
   },
   pt: {
     'sidebar.people': 'Pessoas',
@@ -244,6 +250,8 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasAcoesTranslations.pt,
     ...pessoasChamadaTranslations.pt,
     ...pessoasVisitaTranslations.pt,
+    ...pessoasVisitaErrosTranslations.pt,
+    ...pessoasVisitaDialogosTranslations.pt,
     ...pessoasProcessoTranslations.pt,
     ...pessoasEncerrarTranslations.pt,
     ...pessoasRegistosTranslations.pt,
@@ -254,5 +262,6 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasNegocioTranslations.pt,
     ...pessoasNovaLeadTranslations.pt,
     ...pessoasWorkflowTranslations.pt,
+    ...pessoasWorkflowLevantamentoTranslations.pt,
   },
 };

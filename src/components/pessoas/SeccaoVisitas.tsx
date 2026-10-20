@@ -30,6 +30,10 @@ interface SeccaoVisitasProps {
   /** O nome de cada negócio, pelo id: uma visita ligada diz a que negócio. */
   negocios: ReadonlyMap<string, string>;
   alterarVisita?: AcoesFicha["alterarVisita"];
+  /** A ficha real: alterar visitas grava na base pelo próprio diálogo. */
+  naBase?: boolean;
+  /** Cancela uma visita na base (a ficha real); sem isto não há «Cancelar visita». */
+  cancelarVisita?: AcoesFicha["cancelarVisita"];
   aoRegistarResultado: (visitaId: string) => void;
   /** «Carregar mais» visitas (a ficha real). */
   mais?: MaisItens;
@@ -54,7 +58,7 @@ function BotaoDoPasso({ item, nome }: { item: ItemProcesso; nome: string }) {
   );
 }
 
-export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, aoRegistarResultado, mais }: SeccaoVisitasProps) {
+export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, naBase, cancelarVisita, aoRegistarResultado, mais }: SeccaoVisitasProps) {
   const { t } = useTranslation();
   const todas = ordenarVisitas(visitas) as VisitaPessoa[];
   if (!todas.some((v) => v.estado !== "cancelada")) return null;
@@ -66,7 +70,7 @@ export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVi
           {todas.map((v) => (
             <LinhaVisitaPessoa
               key={v.id} pessoa={pessoa} visita={v} negocio={v.negocioId ? negocios.get(v.negocioId) : undefined} hoje={hoje}
-              alterarVisita={alterarVisita} aoRegistarResultado={aoRegistarResultado}
+              alterarVisita={alterarVisita} naBase={naBase} cancelarVisita={cancelarVisita} aoRegistarResultado={aoRegistarResultado}
             />
           ))}
         </ul>

@@ -32,6 +32,8 @@ interface CamposDataHoraProps {
   erroHora: string | null;
   campoData?: Ref<HTMLInputElement>;
   aoMudar: (parcial: { data?: string; hora?: string }) => void;
+  /** A guardar: os campos só se leem (não se desativam, para não saírem do teclado nem do leitor de ecrã). */
+  somenteLeitura?: boolean;
 }
 
 export function CamposDataHora(p: CamposDataHoraProps) {
@@ -40,7 +42,7 @@ export function CamposDataHora(p: CamposDataHoraProps) {
       <div className="space-y-1.5">
         <Label htmlFor={`${p.id}-data`}>{p.rotuloData}</Label>
         <Input
-          ref={p.campoData} id={`${p.id}-data`} type="date" min={p.hoje} value={p.data} aria-invalid={p.erroData ? true : undefined}
+          ref={p.campoData} id={`${p.id}-data`} type="date" min={p.hoje} value={p.data} readOnly={p.somenteLeitura} aria-invalid={p.erroData ? true : undefined}
           aria-describedby={p.erroData ? `${p.id}-data-erro` : undefined} className={cn("min-h-11", FOCO, p.erroData && "border-destructive")}
           onChange={(e) => p.aoMudar({ data: e.target.value })}
         />
@@ -49,7 +51,7 @@ export function CamposDataHora(p: CamposDataHoraProps) {
       <div className="space-y-1.5">
         <Label htmlFor={`${p.id}-hora`}>{p.rotuloHora}</Label>
         <Input
-          id={`${p.id}-hora`} type="time" value={p.hora} aria-invalid={p.erroHora ? true : undefined}
+          id={`${p.id}-hora`} type="time" value={p.hora} readOnly={p.somenteLeitura} aria-invalid={p.erroHora ? true : undefined}
           aria-describedby={p.erroHora ? `${p.id}-hora-erro` : undefined} className={cn("min-h-11", FOCO, p.erroHora && "border-destructive")}
           onChange={(e) => p.aoMudar({ hora: e.target.value })}
         />

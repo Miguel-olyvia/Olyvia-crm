@@ -6,9 +6,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ComCostura, dadosFalsos, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
-import { fichaDb, LEAD_ID, negocioDb, PESSOA_ID, pessoaDb } from "@/hooks/pessoas/fichaFabrica";
+import { fichaDb, LEAD_ID, negocioDb, PESSOA_ID, pessoaDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { ContratoDb, FichaDb, NegocioFichaDb, OrcamentoDb, PropostaDb } from "@/hooks/pessoas/fichaTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { useMarcarVisita } from "@/components/pessoas/marcarVisitaContexto";
 import { useProcesso } from "@/components/pessoas/processo/processoContexto";
 import type { ItemProcesso } from "@/components/pessoas/processo/tiposProcesso";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
@@ -16,6 +17,16 @@ import { ProcessoProviderReal } from "./ProcessoProviderReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 const { navegar, construtor, dialogoProposta } = vi.hoisted(() => ({ navegar: vi.fn(), construtor: vi.fn(), dialogoProposta: vi.fn() }));
+// O diálogo de marcar visita importa o cliente da base (que exige variáveis de ambiente que os testes não têm): nunca se chama.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
+// A agenda da visita (quadros e recursos) é da base: aqui simula-se, só para o diálogo de marcar abrir.
+const estadoAgenda = vi.hoisted(() => ({ argumentos: [] as unknown[][] }));
+vi.mock("@/hooks/pessoas/useAgendaVisita", () => ({
+  useAgendaVisita: (...a: unknown[]) => {
+    estadoAgenda.argumentos.push(a);
+    return { quadros: [], recursos: [], isLoading: false, isError: false, refetch: vi.fn(), omissao: { boardId: null, recursoId: null } };
+  },
+}));
 vi.mock("react-router-dom", async (importar) => ({ ...(await importar<typeof import("react-router-dom")>()), useNavigate: () => navegar }));
 vi.mock("@/components/QuoteBuilder", () => ({ QuoteBuilder: (p: unknown) => { construtor(p); return <div data-testid="construtor" />; } }));
 vi.mock("@/components/proposals/ProposalCreateDialog", () => ({ ProposalCreateDialog: (p: unknown) => { dialogoProposta(p); return null; } }));
@@ -226,5 +237,58 @@ describe("ProcessoProviderReal: trocar de pessoa com um painel aberto", () => {
     r.rerender(arvore(FICHA));
     await new Promise((resolver) => setTimeout(resolver, 0));
     expect(dialogoProposta).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProcessoProviderReal: marcar visita pela ficha real", () => {
+  const FICHA_COM_MORADA = fichaDb({
+    ...FICHA,
+    pessoa: pessoaDb({ morada: { rua: "Rua A 1", codigo_postal: "1000-001", localidade: "Lisboa", andar: null }, responsavel_id: "u9" }),
+    visitas: { total: 1, tem_mais: false, proximo: null, itens: [visitaDb({ id: "v1", status: "scheduled" })] },
+  });
+
+  function Sonda() {
+    const marcar = useMarcarVisita();
+    const processo = useProcesso();
+    return (
+      <>
+        <span data-testid="painel">{String(processo?.comPainelVisita)}</span>
+        <span data-testid="marcadas">{String(marcar?.marcadas.has(PESSOA_ID))}</span>
+        <button type="button" onClick={() => marcar?.pedir({ pessoaId: PESSOA_ID, nome: "Ana", moradaLead: null, negocioId: "n-orc" })}>marcar</button>
+      </>
+    );
+  }
+  function montarSonda(ficha: FichaDb) {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <FontePessoasContext.Provider value={REAL}>
+          <ComCostura mutacoes={mutacoesFalsas()} dados={dadosFalsos()}>
+            <ProcessoProviderReal ficha={ficha}><Sonda /></ProcessoProviderReal>
+          </ComCostura>
+        </FontePessoasContext.Provider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("diz que o painel «Visita e levantamento» ainda não abre na ficha real (não grava na base)", () => {
+    montarSonda(FICHA);
+    expect(screen.getByTestId("painel")).toHaveTextContent("false");
+  });
+
+  it("monta o diálogo de marcar ligado à base: abre com a morada da lead da ficha e o responsável (recurso por omissão)", async () => {
+    montarSonda(FICHA_COM_MORADA);
+    fireEvent.click(screen.getByRole("button", { name: "marcar" }));
+    expect(await screen.findByRole("dialog", { name: "Marcar visita" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Duração", {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(estadoAgenda.argumentos.at(-1)).toEqual(["u9"]);
+    expect(screen.getByRole("radio", { name: /Na morada da lead/ })).toBeChecked();
+  });
+
+  it("a pessoa que já tem uma visita não cancelada conta como «já com visita»; uma ficha sem visitas não", () => {
+    montarSonda(FICHA_COM_MORADA);
+    expect(screen.getByTestId("marcadas")).toHaveTextContent("true");
+    cleanup();
+    montarSonda(FICHA);
+    expect(screen.getByTestId("marcadas")).toHaveTextContent("false");
   });
 });

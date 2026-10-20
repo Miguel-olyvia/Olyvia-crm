@@ -5,6 +5,11 @@ import type { MoradaObraNegocio } from "./negocioMetas";
 export type MoradaObraForm = MoradaObraNegocio;
 export type ChaveMorada = keyof MoradaObraForm;
 
+/** Os limites da base nos textos da morada (rua, localidade e andar). */
+export const MAX_RUA = 300;
+export const MAX_LOCALIDADE = 120;
+export const MAX_ANDAR = 60;
+
 export const CHAVES_MORADA = ["rua", "codigoPostal", "localidade", "andar"] as const satisfies readonly ChaveMorada[];
 
 export const MORADA_VAZIA: MoradaObraForm = { rua: "", codigoPostal: "", localidade: "", andar: "" };

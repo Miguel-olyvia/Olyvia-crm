@@ -22,7 +22,7 @@ export interface LevantamentoForm {
   observacoes: string;
 }
 
-export type ErroLevantamento = "obrigatorio" | "comprido" | "invalido";
+export type ErroLevantamento = "obrigatorio" | "comprido" | "invalido" | "fora";
 export type ErrosLinha = Partial<Record<"divisao" | "trabalho" | "trabalhoOutro" | "medida", ErroLevantamento>>;
 export interface ErrosLevantamento {
   /** Os erros de cada linha, pelo id da linha. */
@@ -30,6 +30,10 @@ export interface ErrosLevantamento {
 }
 
 export const MAX_TRABALHO_OUTRO = 60;
+
+/** Os limites da medida na base (numeric(12,3), maior que 0 e menor que 1 000 000): 0,0004 arredonda a 0,000 e a gravação rebentaria. */
+export const MEDIDA_MINIMA = 0.001;
+export const MEDIDA_MAXIMA = 999_999.999;
 
 export function levantamentoVazio(hoje: string, feitoPor: string): LevantamentoForm {
   return { data: hoje, feitoPor, estado: "porFazer", linhas: [], observacoes: "" };
@@ -51,6 +55,12 @@ export function adaptarLinhaADivisao(linha: LinhaForm, divisao: string): LinhaFo
   return linha.trabalho === "" || linha.trabalho === OUTRO || validos.includes(linha.trabalho) ? linha : { ...linha, trabalho: "" };
 }
 
+/** A medida, arredondada às três casas da base, está dentro dos limites. */
+function cabeNaBase(medida: number): boolean {
+  const arredondada = Math.round(medida * 1000) / 1000;
+  return arredondada >= MEDIDA_MINIMA && arredondada <= MEDIDA_MAXIMA;
+}
+
 function validarLinha(l: LinhaForm): ErrosLinha {
   const erros: ErrosLinha = {};
   if (!l.divisao) erros.divisao = "obrigatorio";
@@ -63,6 +73,7 @@ function validarLinha(l: LinhaForm): ErrosLinha {
   const medida = lerMedida(l.medida);
   if (l.medida.trim() === "") erros.medida = "obrigatorio";
   else if (!Number.isFinite(medida) || medida <= 0) erros.medida = "invalido";
+  else if (!cabeNaBase(medida)) erros.medida = "fora";
   return erros;
 }
 

@@ -39,7 +39,7 @@ describe("registarResultadoVisita", () => {
   it("uma visita que não está na ficha recusa sem chamar a base", async () => {
     const { result } = montar();
     const erro = await erroDe(act(async () => { await result.current.registarResultadoVisita("outra", { resultado: "interessado" }); }));
-    expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");
+    expect(erro.chave).toBe("pessoasPagina.real.visit.err.visitNotLoaded");
     expect(rpcMock).not.toHaveBeenCalled();
   });
 

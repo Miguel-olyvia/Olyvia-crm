@@ -31,11 +31,20 @@ export const RESULTADOS_VISITA: readonly ResultadoVisita[] = ["interessado", "aP
 /** Estes resultados terminam a abordagem da pessoa (não se cria negócio). */
 export const resultadoEncerra = (r: ResultadoVisita): r is ResultadoEncerramento => r === "semInteresse" || r === "obraInviavel";
 
+/** O que a agenda sabe de uma visita da base: o quadro, quem vai e quanto dura. Só nas visitas da ficha real (o exemplo não tem agenda). */
+export interface AgendaDaVisita {
+  boardId: string | null;
+  recursos: { id: string; nome: string }[];
+  /** O fim menos o início, em minutos; `null` sem fim (ou com um fim que não vem depois do início). */
+  duracaoMinutos: number | null;
+}
+
 /** Uma visita da pessoa: a mesma forma da visita do negócio, mais a quem pertence e a que negócio está ligada. */
 export type VisitaPessoa = VisitaNegocio & {
   pessoaId: string;
   negocioId: string | null;
   resultado?: ResultadoVisita;
+  agenda?: AgendaDaVisita;
 };
 
 /** O levantamento feito a uma pessoa (opcionalmente numa visita). Nunca é obrigatório. */

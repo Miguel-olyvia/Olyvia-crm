@@ -1,5 +1,6 @@
 // As ações da ficha da pessoa, em memória: funções puras e imutáveis. O dia de hoje (AAAA-MM-DD) chega sempre
 // por parâmetro e nada lê o relógio. Um id que não existe (ou uma ação que não se aplica) devolve o próprio estado.
+import type { EntradaVisita } from "@/hooks/pessoas/visitaDb";
 import { encerrarAbordagem } from "./acoesEncerrar";
 import { detalheDaVisitaDaChamada, errosDiaHora, exigeDiaHora, textoAgenda } from "./chamadaPassos";
 import { indiceEtapa } from "./etapaPessoa";
@@ -25,6 +26,8 @@ export interface DadosChamada {
   hora?: string;
   /** Onde é a visita, escolhido no formulário: a morada da lead ou outra (ver `moradaVisita.ts`). */
   destinoVisita?: DestinoVisita;
+  /** Só a ficha real, no passo `marcarVisita`: a visita completa (quadro, recursos, duração, morada) que `useAcoesVisita` marca. O exemplo não a usa. */
+  visita?: EntradaVisita;
   /** O motivo, no passo "perder" (que encerra a abordagem, «sem interesse»): um da lista ou «outro» com o texto em `motivoOutro`. */
   motivo?: MotivoEncerramento;
   motivoOutro?: string;

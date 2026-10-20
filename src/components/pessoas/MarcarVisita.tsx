@@ -1,5 +1,6 @@
 // "Marcar visita" nas submissões que a pedem e no "A fazer": um diálogo curto (dia, hora, nota e morada da visita) que marca a visita da
-// PESSOA EM MEMÓRIA (a pessoa passa à etapa Visita e a atividade regista-o). Um contexto liga o botão de cada cartão de submissão ao diálogo único da
+// PESSOA EM MEMÓRIA (a pessoa passa à etapa Visita e a atividade regista-o). Com `naBase` abre o formulário ligado à base (`MarcarVisitaReal`, que
+// se carrega à parte) e grava por `useAcoesVisita`. Um contexto liga o botão de cada cartão de submissão ao diálogo único da
 // página; sem o provider (outros usos do cartão) o botão não existe.
 import { useId, useMemo, useRef, useState, type FormEvent, type ReactNode, type Ref } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { CamposDataHora, MensagemErro } from "./CamposDataHora";
+import { FormularioVisitaCarregavel } from "./FormularioVisitaCarregavel";
 import { MarcarVisitaContext, type AberturaVisita } from "./marcarVisitaContexto";
 import { MoradaVisitaCampos } from "./MoradaVisitaCampos";
 import { destinoInicial, validarDestino, type DestinoVisita } from "./moradaVisita";
@@ -20,13 +22,24 @@ import { MAX_NOTA_VISITA, validarVisita, type ErroVisita } from "./visitaPessoa"
 
 const V = "pessoasPagina.visitDialog.";
 
+// O formulário ligado à base só se carrega quando se abre com `naBase`: o exemplo (e os seus testes) nunca importa a ligação à base.
+// Uma função de módulo (estável); se o pacote falhar a carregar, `FormularioVisitaCarregavel` contém o erro e deixa tentar de novo.
+const importarFormVisitaReal = () => import("./MarcarVisitaReal").then((m) => ({ default: m.FormVisitaReal }));
+
 interface ProviderProps {
   /** O dia de hoje (AAAA-MM-DD): a data mínima da visita. */
   hoje: string;
-  /** Marca a visita da pessoa: `dados` são o dia, a hora, a nota e a morada. */
+  /** Marca a visita da pessoa EM MEMÓRIA (o exemplo): `dados` são o dia, a hora, a nota e a morada. Com `naBase` nunca se chama. */
   aoMarcar: (pessoaId: string, dados: DadosVisitaPessoa) => void;
+  /** Liga o diálogo à base: grava por `useAcoesVisita` (quadro, recursos, hora obrigatória, conflito) e não usa `aoMarcar`. */
+  naBase?: boolean;
   /** As pessoas que já têm uma visita por ligar (juntam-se às marcadas neste ecrã). */
   jaComVisita?: ReadonlySet<string>;
+  /**
+   * Só a ficha real: completa o que quem pede não sabe (a morada da lead e o responsável da pessoa, que o botão do negócio não conhece) antes de
+   * abrir o diálogo.
+   */
+  completar?: (abertura: AberturaVisita) => AberturaVisita;
   /** Ao fechar o diálogo: devolve o foco a quem o abriu e diz se o fez (o `ProcessoProvider` fá-lo para o "A fazer"); sem isto, o diálogo devolve-o por si. */
   aoDevolverFoco?: () => boolean;
   children: ReactNode;
@@ -110,31 +123,55 @@ function FormVisita({ pessoa, hoje, aoMarcar, aoFechar }: { pessoa: AberturaVisi
   );
 }
 
-export function MarcarVisitaProvider({ hoje, aoMarcar, aoDevolverFoco, jaComVisita, children }: ProviderProps) {
+export function MarcarVisitaProvider({ hoje, aoMarcar, naBase = false, aoDevolverFoco, jaComVisita, completar, children }: ProviderProps) {
   const { t } = useTranslation();
   const [aberta, setAberta] = useState<AberturaVisita | null>(null);
   const ultimo = useRef<AberturaVisita | null>(null);
   if (aberta) ultimo.current = aberta;
   const mostrado = aberta ?? ultimo.current;
   const [marcadas, setMarcadas] = useState<ReadonlySet<string>>(new Set());
-  const valor = useMemo(
-    () => ({ pedir: (p: AberturaVisita) => setAberta(p), marcadas: jaComVisita ? new Set([...marcadas, ...jaComVisita]) : marcadas }),
-    [marcadas, jaComVisita],
-  );
+  // Uma gravação na base está a correr: o diálogo não se deixa fechar (Escape, clique fora, «Cancelar»). Lê-se no instante do clique, por isso é uma ref.
+  const ocupado = useRef(false);
+  // Se é uma revisita fixa-se ao abrir: trocar de pessoa na ficha a meio muda `jaComVisita` (passa a ser o da pessoa nova) e não pode mudar o tipo desta visita.
+  const [revisitaAoAbrir, setRevisitaAoAbrir] = useState(false);
+  const valor = useMemo(() => {
+    const todas = jaComVisita ? new Set([...marcadas, ...jaComVisita]) : marcadas;
+    return {
+      pedir: (p: AberturaVisita) => {
+        setRevisitaAoAbrir(todas.has(p.pessoaId));
+        setAberta(completar ? completar(p) : p);
+      },
+      marcadas: todas,
+    };
+  }, [marcadas, jaComVisita, completar]);
+  const juntarMarcada = (pessoaId: string) => setMarcadas((antes) => new Set(antes).add(pessoaId));
   const marcar: ProviderProps["aoMarcar"] = (pessoaId, dados) => {
     aoMarcar(pessoaId, dados);
-    setMarcadas((antes) => new Set(antes).add(pessoaId));
+    juntarMarcada(pessoaId);
   };
+  const descricao = naBase ? t("pessoasPagina.real.visit.marcar.description", { name: mostrado?.nome ?? "" }) : t("pessoasPagina.process.visitDescription", { name: mostrado?.nome ?? "" });
   return (
     <MarcarVisitaContext.Provider value={valor}>
       {children}
-      <Dialog open={aberta !== null} onOpenChange={(aberto) => { if (!aberto) setAberta(null); }}>
-        <DialogContent className="motion-reduce:!animate-none" onCloseAutoFocus={(e) => { if (aoDevolverFoco?.()) e.preventDefault(); }}>
+      <Dialog open={aberta !== null} onOpenChange={(aberto) => { if (!aberto && !ocupado.current) setAberta(null); }}>
+        <DialogContent
+          className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none" onCloseAutoFocus={(e) => { if (aoDevolverFoco?.()) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (ocupado.current) e.preventDefault(); }} onInteractOutside={(e) => { if (ocupado.current) e.preventDefault(); }}
+        >
           <DialogHeader>
             <DialogTitle>{t(`${V}title`)}</DialogTitle>
-            <DialogDescription>{t("pessoasPagina.process.visitDescription", { name: mostrado?.nome ?? "" })}</DialogDescription>
+            <DialogDescription>{descricao}</DialogDescription>
           </DialogHeader>
-          {mostrado && <FormVisita key={mostrado.pessoaId} pessoa={mostrado} hoje={hoje} aoMarcar={marcar} aoFechar={() => setAberta(null)} />}
+          {mostrado && naBase && (
+            <FormularioVisitaCarregavel
+              key={mostrado.pessoaId} importar={importarFormVisitaReal}
+              propriedades={{
+                pessoa: mostrado, hoje, revisita: revisitaAoAbrir,
+                aoOcupado: (a: boolean) => { ocupado.current = a; }, aoMarcada: () => juntarMarcada(mostrado.pessoaId), aoFechar: () => setAberta(null),
+              }}
+            />
+          )}
+          {mostrado && !naBase && <FormVisita key={mostrado.pessoaId} pessoa={mostrado} hoje={hoje} aoMarcar={marcar} aoFechar={() => setAberta(null)} />}
         </DialogContent>
       </Dialog>
     </MarcarVisitaContext.Provider>

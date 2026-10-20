@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ErroDoCampo, N, Rotulo } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
-import { moradaDoContacto, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
+import { MAX_ANDAR, MAX_LOCALIDADE, MAX_RUA, moradaDoContacto, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
 import type { OrigemMorada } from "./useEstadoNovoNegocio";
 
 interface Props {
@@ -55,7 +55,7 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, orig
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
           <Rotulo para={`${id}-rua`} texto={t(`${N}address.street`)} />
-          <Input id={`${id}-rua`} value={valores.rua} autoComplete="street-address" className={CAMPO} onChange={(e) => aoMudar("rua", e.target.value)} />
+          <Input id={`${id}-rua`} value={valores.rua} maxLength={MAX_RUA} autoComplete="street-address" className={CAMPO} onChange={(e) => aoMudar("rua", e.target.value)} />
         </div>
         <div className="space-y-1.5">
           <Rotulo para={`${id}-cp`} texto={t(`${N}address.postal`)} />
@@ -69,12 +69,12 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, orig
         </div>
         <div className="space-y-1.5">
           <Rotulo para={`${id}-localidade`} texto={t(`${N}address.city`)} />
-          <Input id={`${id}-localidade`} value={valores.localidade} autoComplete="address-level2" className={CAMPO} onChange={(e) => aoMudar("localidade", e.target.value)} />
+          <Input id={`${id}-localidade`} value={valores.localidade} maxLength={MAX_LOCALIDADE} autoComplete="address-level2" className={CAMPO} onChange={(e) => aoMudar("localidade", e.target.value)} />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Rotulo para={`${id}-andar`} texto={t(`${N}address.unit`)} />
           <Input
-            id={`${id}-andar`} value={valores.andar} autoComplete="off" placeholder={t(`${N}address.unit.placeholder`)}
+            id={`${id}-andar`} value={valores.andar} maxLength={MAX_ANDAR} autoComplete="off" placeholder={t(`${N}address.unit.placeholder`)}
             className={CAMPO} onChange={(e) => aoMudar("andar", e.target.value)}
           />
         </div>

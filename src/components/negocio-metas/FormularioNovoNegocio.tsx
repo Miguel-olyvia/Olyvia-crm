@@ -13,7 +13,8 @@ import {
   abasComErros, primeiroErro, validarNovoNegocio, type AbaNovoNegocio, type DadosCriarNegocio, type ErrosNovoNegocio, type PessoaOpcao,
   type ValoresIniciaisNegocio,
 } from "./novoNegocio";
-import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
+import { useQuestionario } from "./QuestionarioContexto";
+import { blocosDaQualificacao } from "./questionarioForm";
 import { contarRespostas, respostasEmTexto } from "./respostasVisita";
 import { useCamposGerais, useLigarRegistosForm, useMoradaForm, useRespostasForm } from "./useEstadoNovoNegocio";
 
@@ -57,6 +58,7 @@ export function FormularioNovoNegocio({ pessoas, primeiroCampo, aoSujar, aoConfi
   const pedirFoco = usePedidoFoco(id);
   const { valores, acoes } = useCamposGerais(pessoas, aoSujar, pessoaInicialId ?? valoresIniciais?.pessoaId, valoresIniciais?.comercial);
   const resp = useRespostasForm(aoSujar);
+  const blocosQualificacao = blocosDaQualificacao(useQuestionario().questionario);
   const registos = useLigarRegistosForm(valores.pessoaId, aoSujar);
   // A morada da obra parte da visita que se marcou (a mais representativa), enquanto ninguém a escreve.
   const visitasMarcadas = registos.porLigar.visitas.filter((v) => registos.valor.registos.some((r) => r.tipo === "visita" && r.id === v.id));
@@ -65,7 +67,7 @@ export function FormularioNovoNegocio({ pessoas, primeiroCampo, aoSujar, aoConfi
   const aValidar = { ...valores, pessoaId: pessoa ? valores.pessoaId : "", moradaObra: morada.morada };
   const erros: ErrosNovoNegocio = tentou ? validarNovoNegocio(aValidar) : {};
   const marcas = abasComErros(erros);
-  const nQualificacao = contarRespostas([BLOCO_QUALIFICACAO], resp.respostas).respondidas;
+  const nQualificacao = contarRespostas(blocosQualificacao, resp.respostas).respondidas;
   const nRegistos = registos.valor.registos.length;
   const plural = (n: number) => (n === 1 ? ".one" : "");
 
@@ -80,7 +82,7 @@ export function FormularioNovoNegocio({ pessoas, primeiroCampo, aoSujar, aoConfi
       const texto = (chave: string) => t(`${N}${chave}`);
       aoConfirmar({
         pessoa, comercial: valores.comercial, contacto: valores.contacto,
-        qualificacao: respostasEmTexto([BLOCO_QUALIFICACAO], resp.respostas, texto),
+        qualificacao: respostasEmTexto(blocosQualificacao, resp.respostas, texto),
         moradaObra: morada.morada, ligar: registos.valor,
       });
     }
@@ -111,7 +113,7 @@ export function FormularioNovoNegocio({ pessoas, primeiroCampo, aoSujar, aoConfi
           <TabsContent value="qualificacao" className={CONTEUDO}>
             <AbaQualificacao
               id={id} respostas={resp.respostas} morada={morada.morada} erroCodigoPostal={!!erros.codigoPostal} origemMorada={morada.origem}
-              moradaContacto={valores.contacto.morada} acoes={{ escolher: resp.escolher, morada: morada.mudar, preencherMorada: morada.preencher }}
+              moradaContacto={valores.contacto.morada} acoes={{ escolher: resp.escolher, escrever: resp.escrever, morada: morada.mudar, preencherMorada: morada.preencher }}
             />
           </TabsContent>
           <TabsContent value="registos" className={CONTEUDO}>

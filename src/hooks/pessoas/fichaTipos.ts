@@ -28,6 +28,8 @@ export interface PessoaFichaDb {
    * (A fábrica de testes e uma leitura antiga podem dar texto; o adaptador lê só o que reconhece.)
    */
   qualificacao: unknown;
+  /** As respostas da Qualificação do levantamento mais recente, com o snapshot (ver `lerRespostasGravadas`). Ausente nas respostas antigas da base. */
+  qualificacao_respostas?: unknown;
   /** O tipo de qualificação («MQL» ou «SQL»), numa migration futura; opcional enquanto a função não o devolve. */
   qualificacao_tipo?: unknown;
   origem: { origin: string | null; source: string | null; campanha: string | null; formulario: string | null } | null;
@@ -215,7 +217,8 @@ export interface LevantamentoFichaDb {
   n_linhas: number;
   n_respostas: number;
   linhas: LinhaLevantamentoDb[];
-  respostas: { seccao: string; pergunta: string; resposta: string }[];
+  /** As respostas, com o snapshot do que a pessoa viu (tipo, textos, escolhas, valores): ver `lerRespostasGravadas`. Nas antigas só vêm seccao, pergunta e resposta. */
+  respostas: { seccao: string; pergunta: string; resposta: string | null; [snapshot: string]: unknown }[];
 }
 
 export interface AtividadeFichaDb {

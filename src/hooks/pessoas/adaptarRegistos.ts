@@ -2,7 +2,7 @@
 // Mantém a ordem da base. As respostas do levantamento ficam por ler (são do P5).
 import type { EstadoVisitaNegocio, TipoVisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import {
-  RESULTADOS_VISITA, type ContactoPessoa, type LevantamentoPessoa, type RegistosDaPessoa, type ResultadoVisita, type VisitaPessoa,
+  RESULTADOS_VISITA, type AgendaDaVisita, type ContactoPessoa, type LevantamentoPessoa, type RegistosDaPessoa, type ResultadoVisita, type VisitaPessoa,
 } from "@/components/negocio-metas/registosTipos";
 import { RESULTADOS_CONTACTO } from "@/components/pessoas/opcoesPessoa";
 import { escolher, textoOuNull } from "./adaptarComum";
@@ -29,9 +29,29 @@ function estadoDaVisita(v: Pick<VisitaFichaDb, "status" | "cancelada">): EstadoV
   return v.status === "completed" ? "feita" : "porFazer";
 }
 
+const MS_MINUTO = 60_000;
+const CHAVE_DA_DURACAO: Readonly<Record<number, string>> = { 30: "m30", 60: "h1", 90: "h1m30", 120: "h2" };
+
+/** Os minutos entre o início e o fim; `null` sem fim, com datas que não se leem ou com um fim que não vem depois do início. */
+function duracaoEmMinutos(inicio: string, fim: string | null): number | null {
+  if (!fim) return null;
+  const minutos = (Date.parse(fim) - Date.parse(inicio)) / MS_MINUTO;
+  return Number.isFinite(minutos) && minutos > 0 ? minutos : null;
+}
+
+/** O quadro, quem vai e a duração: o que «Alterar visita» precisa de reenviar à base. */
+function agendaDaVisita(v: VisitaFichaDb, minutos: number | null): AgendaDaVisita {
+  return {
+    boardId: v.board_id ?? null,
+    recursos: (v.recursos ?? []).map((r) => ({ id: r.id, nome: r.nome?.trim() ?? "" })),
+    duracaoMinutos: minutos,
+  };
+}
+
 function adaptarVisita(v: VisitaFichaDb, pessoaId: string): VisitaPessoa {
   const m = v.detalhes?.morada;
   const resultado: ResultadoVisita | null = escolher(v.resultado, RESULTADOS_VISITA);
+  const minutos = duracaoEmMinutos(v.inicio, v.fim);
   return {
     id: v.id,
     pessoaId,
@@ -42,7 +62,8 @@ function adaptarVisita(v: VisitaFichaDb, pessoaId: string): VisitaPessoa {
     estado: estadoDaVisita(v),
     tipo: escolher(v.tipo, TIPOS_VISITA) ?? "",
     quemVaiEstar: textoOuNull(v.detalhes?.presentes) ?? "",
-    duracao: "",
+    duracao: minutos === null ? "" : CHAVE_DA_DURACAO[minutos] ?? "",
+    agenda: agendaDaVisita(v, minutos),
     morada: {
       rua: textoOuNull(m?.rua) ?? (m ? "" : textoOuNull(v.local) ?? ""),
       codigoPostal: textoOuNull(m?.codigo_postal) ?? "",

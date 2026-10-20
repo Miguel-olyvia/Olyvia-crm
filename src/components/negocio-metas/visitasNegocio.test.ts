@@ -6,7 +6,7 @@ import { MORADA_VAZIA } from "./moradaObra";
 import {
   acrescentarVisita, alterarVisita, camposDoLevantamento, contarVisitas, marcarFeita, migrarVisitaUnica, novaVisita, ordenarVisitas,
   moradaDasVisitas, proximaVisitaDoNegocio, removerVisita, resumoDaVisita, visitaParaAbrir, visitasDoNegocio, visitasIniciais,
-  visitasParaGuardar,
+  visitasComCodigoPostalInvalido, visitasParaGuardar,
 } from "./visitasNegocio";
 
 const HOJE = "2026-10-13";
@@ -165,6 +165,25 @@ describe("visitasParaGuardar", () => {
     expect(guardadas[1].nota).toBe("portão azul");
     expect(guardadas[1].morada).toEqual({ rua: "Rua A", codigoPostal: "1000-001", localidade: "", andar: "" });
     expect(lista[0].nota).toBe("  portão azul  ");
+  });
+});
+
+describe("visitasComCodigoPostalInvalido", () => {
+  const mau = { ...MORADA_B, codigoPostal: "12" };
+  const lista = [
+    visita("por-fazer", { data: "2026-10-14", morada: mau }),
+    visita("cancelada", { data: "2026-10-15", estado: "cancelada", morada: mau }),
+    visita("feita-gravada", { data: "2026-10-16", estado: "feita", morada: mau }),
+    visita("feita-nova", { data: "2026-10-17", estado: "feita", morada: mau }),
+    visita("boa", { data: "2026-10-18", morada: MORADA_B }),
+  ];
+
+  it("sem saber quais estão na base, só as canceladas ficam de fora", () => {
+    expect(visitasComCodigoPostalInvalido(lista)).toEqual(["por-fazer", "feita-gravada", "feita-nova"]);
+  });
+
+  it("uma visita da base já feita ou cancelada só se lê: com código postal antigo fora do formato não bloqueia o guardar (não se consegue corrigir)", () => {
+    expect(visitasComCodigoPostalInvalido(lista, new Set(["por-fazer", "cancelada", "feita-gravada"]))).toEqual(["por-fazer", "feita-nova"]);
   });
 });
 

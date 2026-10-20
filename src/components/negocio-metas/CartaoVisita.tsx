@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, Circle, Trash2, XCircle } from "lucide-react";
+import { Ban, CheckCircle2, ChevronRight, Circle, Trash2, XCircle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { FOCO } from "./estilos";
 import type { EstadoVisitaNegocio, VisitaNegocio } from "./negocioMetas";
 import { formatarData } from "./negocioPainel";
 import { chaveOpcao } from "./respostasVisita";
-import { resumoDaVisita } from "./visitasNegocio";
+import { estadosPermitidos, resumoDaVisita, visitaSoLeitura } from "./visitasNegocio";
 
 const ICONE_ESTADO: Record<EstadoVisitaNegocio, typeof Circle> = { porFazer: Circle, feita: CheckCircle2, cancelada: XCircle };
 
@@ -18,16 +18,23 @@ interface Props {
   /** A posição por ordem cronológica, a partir de 1. */
   numero: number;
   visita: VisitaNegocio;
+  /** A visita já existe na base: não se remove, cancela-se (com confirmação), e uma já feita ou cancelada só se lê. */
+  gravada: boolean;
+  /** O código postal da morada da visita está fora do formato (depois de tentar guardar). */
+  erroCodigoPostal: boolean;
   aberta: boolean;
   aoAlternar: () => void;
   aoMudar: (parcial: Partial<VisitaNegocio>) => void;
   aoMarcarFeita: () => void;
   aoRemover: () => void;
+  /** Pede para cancelar uma visita que já existe na base (quem monta pede a confirmação). */
+  aoCancelar: () => void;
 }
 
-/** «Marcar como feita» (só numa visita por fazer) e «Remover». */
-function AcoesDaVisita({ visita, dia, aoMarcarFeita, aoRemover }: Pick<Props, "visita" | "aoMarcarFeita" | "aoRemover"> & { dia: string }) {
+/** «Marcar como feita» (só numa visita por fazer) e «Remover» (ou «Cancelar visita», se a visita já existe na base; uma já fechada não tem nenhum). */
+function AcoesDaVisita({ visita, gravada, dia, aoMarcarFeita, aoRemover, aoCancelar }: Pick<Props, "visita" | "gravada" | "aoMarcarFeita" | "aoRemover" | "aoCancelar"> & { dia: string }) {
   const { t } = useTranslation();
+  if (visitaSoLeitura(gravada, visita.estado)) return null;
   return (
     <>
       {visita.estado === "porFazer" && (
@@ -39,22 +46,32 @@ function AcoesDaVisita({ visita, dia, aoMarcarFeita, aoRemover }: Pick<Props, "v
           {t(`${N}visits.markDone`)}
         </Button>
       )}
-      <Button
-        type="button" variant="outline" onClick={aoRemover} aria-label={t(`${N}visits.remove.label`, { data: dia })}
-        className={cn("min-h-11 min-w-11 gap-2", FOCO)}
-      >
-        <Trash2 className="h-4 w-4" aria-hidden="true" />
-        {t(`${N}visits.remove`)}
-      </Button>
+      {gravada ? (
+        <Button
+          type="button" variant="outline" onClick={aoCancelar} aria-label={t(`${N}visits.cancel.label`, { data: dia })}
+          className={cn("min-h-11 gap-2", FOCO)}
+        >
+          <Ban className="h-4 w-4" aria-hidden="true" />
+          {t(`${N}visits.cancel`)}
+        </Button>
+      ) : (
+        <Button
+          type="button" variant="outline" onClick={aoRemover} aria-label={t(`${N}visits.remove.label`, { data: dia })}
+          className={cn("min-h-11 min-w-11 gap-2", FOCO)}
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          {t(`${N}visits.remove`)}
+        </Button>
+      )}
     </>
   );
 }
 
 /**
  * Uma visita como cartão compacto: o resumo («Feita · 15/10/2026 · 10:00 · Bruno Costa · Levantamento») é o botão que abre e
- * fecha os campos. «Marcar como feita» e «Remover» ficam ao lado (nunca dentro do botão).
+ * fecha os campos. «Marcar como feita» e «Remover» (ou «Cancelar visita») ficam ao lado (nunca dentro do botão).
  */
-export function CartaoVisita({ id, numero, visita, aberta, aoAlternar, aoMudar, aoMarcarFeita, aoRemover }: Props) {
+export function CartaoVisita({ id, numero, visita, gravada, erroCodigoPostal, aberta, aoAlternar, aoMudar, aoMarcarFeita, aoRemover, aoCancelar }: Props) {
   const { t } = useTranslation();
   const base = `${id}-${visita.id}`;
   const dia = formatarData(visita.data) || t(`${N}visits.noDate`);
@@ -62,6 +79,7 @@ export function CartaoVisita({ id, numero, visita, aberta, aoAlternar, aoMudar, 
     estado: t(`${N}visits.status.${visita.estado}`), tipo: t(`${N}${chaveOpcao("tipoVisita", visita.tipo)}`),
   });
   const Icone = ICONE_ESTADO[visita.estado];
+  const soLeitura = visitaSoLeitura(gravada, visita.estado);
   return (
     <li className="rounded-md border border-border bg-card">
       <div className="flex flex-wrap items-center gap-2 p-2">
@@ -76,11 +94,15 @@ export function CartaoVisita({ id, numero, visita, aberta, aoAlternar, aoMudar, 
             <span className="block break-words text-sm tabular-nums text-muted-foreground">{resumo}</span>
           </span>
         </button>
-        <AcoesDaVisita visita={visita} dia={dia} aoMarcarFeita={aoMarcarFeita} aoRemover={aoRemover} />
+        <AcoesDaVisita visita={visita} gravada={gravada} dia={dia} aoMarcarFeita={aoMarcarFeita} aoRemover={aoRemover} aoCancelar={aoCancelar} />
       </div>
       {aberta && (
         <div id={`${base}-corpo`} className="space-y-4 border-t border-border p-3">
-          <CamposVisita base={base} visita={visita} aoMudar={aoMudar} />
+          {soLeitura && <p className="text-sm text-muted-foreground">{t(`${N}visits.readonly.${visita.estado}`)}</p>}
+          <CamposVisita
+            base={base} visita={visita} aoMudar={aoMudar} estados={estadosPermitidos(gravada, visita.estado)} erroCodigoPostal={erroCodigoPostal}
+            somenteLeitura={soLeitura}
+          />
         </div>
       )}
     </li>

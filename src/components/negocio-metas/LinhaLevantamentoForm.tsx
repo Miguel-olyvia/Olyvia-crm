@@ -9,7 +9,7 @@ import { FOCO } from "./estilos";
 import type { ErrosLinha, LinhaForm } from "./levantamento";
 import { DIVISOES, OUTRO, UNIDADES, trabalhosPorDivisao } from "./levantamentoExemplo";
 
-export const MAX_OBSERVACOES = 200;
+export const MAX_OBSERVACOES = 1000;
 
 interface Props {
   /** A base dos ids do painel; os da linha são `<id>-linha-<linha.id>-<campo>`. */

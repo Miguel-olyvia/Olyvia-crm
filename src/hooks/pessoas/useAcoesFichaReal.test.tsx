@@ -12,10 +12,12 @@ beforeEach(prepararAcoes);
 afterEach(limparAcoes);
 
 describe("useAcoesFichaReal: capacidades", () => {
-  it("chamada, encerrar, nota e adiar ligadas (M8 aplicada); só a visita fica desligada, até ao P6", () => {
+  it("chamada, encerrar, nota, adiar e visita ligadas (M8 e P6); alterar e cancelar visitas ligadas", () => {
     const { result } = montar();
     // ALTERADO com a M8 aplicada (adiar e nota eram false): neg_registar_nota e neg_adiar_contacto existem na base.
-    expect(result.current.capacidades).toEqual({ chamada: true, encerrar: true, adiar: true, nota: true, visita: false, negocios: true });
+    // ALTERADO com o P6: gerirVisitas liga «Alterar visita» e «Cancelar visita» (os diálogos gravam na base).
+    // ALTERADO no fecho da fase da visita: `visita` passa a true (o passo «marcar visita» da chamada grava na base).
+    expect(result.current.capacidades).toEqual({ chamada: true, encerrar: true, adiar: true, nota: true, visita: true, negocios: true, gerirVisitas: true });
   });
 });
 
@@ -205,7 +207,7 @@ describe("registarChamada", () => {
     expect(invalidadas(client)).toEqual([true, true]);
   });
 
-  it("«Marcar visita» é do P6: recusa sem chamar a base", async () => {
+  it("«Marcar visita» sem a agenda da visita (quadro e recursos): recusa sem chamar a base", async () => {
     const { result } = montar();
     const erro = await erroDe(act(async () => { await result.current.registarChamada(PESSOA_ID, dados({ resultado: "atendeuInteressado", passo: "marcarVisita", data: "2026-10-27", hora: "10:00" })); }));
     expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");

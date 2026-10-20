@@ -44,8 +44,11 @@ export function dadosDaChamada(c: CamposChamada): Omit<DadosChamada, "hoje"> | n
   return texto === "" ? null : { ...base, motivo: "outro", motivoOutro: texto };
 }
 
-/** O estado do formulário: o que se escolheu, os passos que cabem ao resultado, os erros e `preparar` (os dados, ou nada se falta algo). */
-export function useFormChamada(resumo: ResumoPessoa, hoje: string, semVisita = false) {
+/**
+ * O estado do formulário: o que se escolheu, os passos que cabem ao resultado, os erros e `preparar` (os dados, ou nada se falta algo).
+ * Com `agendaNaBase` (a ficha real) o dia e a hora da visita são os da agenda da base, que os valida por si: aqui só se valida o resto.
+ */
+export function useFormChamada(resumo: ResumoPessoa, hoje: string, semVisita = false, agendaNaBase = false) {
   const ctx = useMemo<ContextoChamada>(
     () => ({
       papel: resumo.papel, perdida: !!resumo.pessoa.perdida || !!resumo.pessoa.encerrada, comNegocioAberto: resumo.abertos.length > 0, semVisita,
@@ -59,7 +62,7 @@ export function useFormChamada(resumo: ResumoPessoa, hoje: string, semVisita = f
   const escolherResultado = (r: ResultadoContacto) => setCampos((c) => ({
     ...c, resultado: r, passo: c.resultado !== null && passosDisponiveis(r, ctx).includes(c.passo) ? c.passo : passoPorDefeito(r, ctx),
   }));
-  const erros = errosChamada(campos, hoje);
+  const erros = errosChamada(agendaNaBase && campos.passo === "marcarVisita" ? { ...campos, passo: "nenhum" } : campos, hoje);
   const moradaLead = moradaDaLead(resumo.pessoa);
   const erroMorada: ErroMoradaVisita | null = campos.passo === "marcarVisita" ? validarDestino(campos.destino, moradaLead) : null;
   const passos = campos.resultado === null ? [] : passosDisponiveis(campos.resultado, ctx);

@@ -3,7 +3,7 @@
 import type {
   EstadoLevantamento, EstadoVisitaNegocio, MoradaObraNegocio, NegocioMes, TipoVisitaNegocio, VisitaNegocio,
 } from "./negocioMetas";
-import { MORADA_VAZIA, moradaAparada, temMorada } from "./moradaObra";
+import { MORADA_VAZIA, moradaAparada, temMorada, validarCodigoPostal } from "./moradaObra";
 import { somarDias } from "./novoNegocio";
 import { formatarData } from "./negocioPainel";
 
@@ -60,6 +60,27 @@ export function marcarFeita(visitas: readonly VisitaNegocio[], id: string): Visi
 export function contarVisitas(visitas: readonly VisitaNegocio[]): { total: number; feitas: number } {
   return { total: visitas.length, feitas: visitas.filter((v) => v.estado === "feita").length };
 }
+
+/**
+ * Os estados que uma visita pode ter agora. Uma que ainda não existe na base escolhe qualquer um; uma que já existe e está por fazer pode ficar
+ * por fazer ou passar a feita (cancela-se pelo botão, com confirmação); uma já feita ou cancelada não muda (só se lê).
+ */
+export function estadosPermitidos(gravada: boolean, atual: EstadoVisitaNegocio): readonly EstadoVisitaNegocio[] {
+  if (!gravada) return ESTADOS_VISITA;
+  return atual === "porFazer" ? ["porFazer", "feita"] : [atual];
+}
+
+/** Uma visita que já existe na base e já está feita ou cancelada: só se lê. */
+export const visitaSoLeitura = (gravada: boolean, estado: EstadoVisitaNegocio): boolean => gravada && estado !== "porFazer";
+
+/**
+ * Os ids das visitas (por ordem cronológica) com um código postal escrito fora do formato 0000-000. Não contam as canceladas (não se enviam) nem as
+ * que já existem na base (`gravadas`) e só se leem (feitas ou canceladas): um código antigo, fora do formato, não se consegue corrigir e bloquearia o guardar.
+ */
+export const visitasComCodigoPostalInvalido = (visitas: readonly VisitaNegocio[], gravadas: ReadonlySet<string> = new Set()): string[] =>
+  ordenarVisitas(visitas)
+    .filter((v) => v.estado !== "cancelada" && !visitaSoLeitura(gravadas.has(v.id), v.estado) && validarCodigoPostal(v.morada.codigoPostal) !== null)
+    .map((v) => v.id);
 
 /** A próxima visita: a primeira Por fazer por ordem cronológica. */
 export const proximaVisitaDoNegocio = (visitas: readonly VisitaNegocio[]): VisitaNegocio | undefined =>

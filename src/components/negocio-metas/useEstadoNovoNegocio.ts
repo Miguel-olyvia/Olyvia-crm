@@ -9,10 +9,10 @@ import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { adaptarLinhaADivisao, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
 import { MORADA_VAZIA, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
 import type { Respostas } from "./perguntasTipos";
-import { BLOCO_QUALIFICACAO } from "./qualificacaoExemplo";
+import { useQuestionario } from "./QuestionarioContexto";
+import { todosOsBlocos } from "./questionarioForm";
 import { useRegistosPessoa } from "./registosPessoa";
-import { alternarResposta } from "./respostasVisita";
-import { SECCOES_VISITA } from "./visitaExemplo";
+import { alternarResposta, mudarResposta } from "./respostasVisita";
 import type { VisitaNegocio } from "./negocioMetas";
 import {
   acrescentarVisita, alterarVisita, marcarFeita, moradaDasVisitas, novaVisita, ordenarVisitas, removerVisita, visitaParaAbrir,
@@ -141,16 +141,23 @@ export function useLigarRegistosForm(pessoaId: string, aoSujar: () => void) {
   return { porLigar, valor, mudar };
 }
 
-const TODOS_OS_BLOCOS = [BLOCO_QUALIFICACAO, ...SECCOES_VISITA.flatMap((s) => s.blocos)];
-
-/** As respostas de escolha rápida das duas abas (os ids das perguntas são únicos): escolher, ou retirar se já estava. */
+/**
+ * As respostas às perguntas das duas abas (os ids das perguntas são únicos). Escolher: escolhe ou retira (única) ou liga e desliga (múltipla);
+ * escrever: o texto ou o número. As perguntas são as do questionário que o contexto dá (a base, ou o catálogo do código sem base): é por elas
+ * que se sabe o tipo de cada pergunta e que respostas deixam de se ver.
+ */
 export function useRespostasForm(aoSujar: () => void, inicial?: Respostas) {
   const [respostas, setRespostas] = useState<Respostas>(inicial ?? {});
+  const blocos = todosOsBlocos(useQuestionario().questionario);
   const escolher = (pergunta: string, opcao: string) => {
     aoSujar();
-    setRespostas((r) => alternarResposta(TODOS_OS_BLOCOS, r, pergunta, opcao));
+    setRespostas((r) => alternarResposta(blocos, r, pergunta, opcao));
   };
-  return { respostas, escolher };
+  const escrever = (pergunta: string, valor: string) => {
+    aoSujar();
+    setRespostas((r) => mudarResposta(blocos, r, pergunta, valor));
+  };
+  return { respostas, escolher, escrever };
 }
 
 /** De onde veio a morada da obra: da visita (igual à morada da lead, ou outra); `null` quando foi escrita à mão. */

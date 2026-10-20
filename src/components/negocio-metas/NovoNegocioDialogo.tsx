@@ -30,6 +30,11 @@ interface NovoNegocioDialogoProps {
   pessoaInicialId?: string;
   /** O que já vem preenchido ao abrir (a visita concluída de uma pessoa: comercial, aba Visita e morada da obra). */
   valoresIniciais?: ValoresIniciaisNegocio;
+  /**
+   * Modo `registos`, ficha real: os ids das visitas que já existem na base. Essas não se removem (cancelam-se, com confirmação) e, já feitas ou
+   * canceladas, só se leem. Sem isto (o exemplo) nenhuma existe e remover descarta, como sempre.
+   */
+  visitasGravadas?: ReadonlySet<string>;
   /** A aba com que o painel abre (por omissão a Geral): o "A fazer" do levantamento abre na Visita (modo `registos`). */
   abaInicial?: AbaNovoNegocio;
   /** A secção da aba Visita com que abre (o id, por exemplo `visitas`); sem isto vale a das Medidas da área. */
@@ -115,7 +120,7 @@ function CabecalhoNovo({ titulo, descricao, selo, aGuardar }: Pick<NovoNegocioDi
  */
 export function NovoNegocioDialogo({
   pessoas, modo = "negocio", aoCriar, aberto: abertoDeFora, aoMudarAberto, semBotao = false, pessoaInicialId, valoresIniciais, abaInicial, seccaoInicial,
-  guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo, aGuardar,
+  visitasGravadas, guardarLevantamento, aoDevolverFoco, titulo, descricao, selo, corpo, aGuardar,
 }: NovoNegocioDialogoProps) {
   const { t } = useTranslation();
   const [abertoProprio, setAbertoProprio] = useState(false);
@@ -184,7 +189,8 @@ export function NovoNegocioDialogo({
           {corpo ? corpo({ aoSujar: () => { sujo.current = true; }, aoCriou: () => { criou.current = true; } }) : modo === "registos" && guardar ? (
             <FormularioRegistos
               pessoas={pessoas} hoje={HOJE_EXEMPLO} primeiroCampo={primeiroCampo} pessoaInicialId={pessoaInicialId} valoresIniciais={valoresIniciais}
-              abaInicial={abaInicial} seccaoInicial={seccaoInicial} guardarLevantamento={guardar} aoSujar={() => { sujo.current = true; }}
+              abaInicial={abaInicial} seccaoInicial={seccaoInicial} visitasGravadas={visitasGravadas} guardarLevantamento={guardar}
+              aoSujar={() => { sujo.current = true; }}
             />
           ) : (
             <FormularioNovoNegocio

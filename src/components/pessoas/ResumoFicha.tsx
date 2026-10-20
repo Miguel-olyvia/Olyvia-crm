@@ -21,8 +21,11 @@ interface ResumoFichaProps {
   podeVerSubmissoes: boolean;
   pendentes: number;
   aoVerSubmissoes: () => void;
-  /** Sem isto (a ficha real, até ao P6) as visitas não têm o botão «Alterar». */
+  /** O exemplo: sem isto (e sem `visitasNaBase`) as visitas não têm o botão «Alterar». */
   alterarVisita?: AcoesFicha["alterarVisita"];
+  /** A ficha real: alterar e cancelar visitas grava na base pelos próprios diálogos. */
+  visitasNaBase?: boolean;
+  cancelarVisita?: AcoesFicha["cancelarVisita"];
   /** Abre o diálogo do resultado de uma visita. */
   aoRegistarResultado: (visitaId: string) => void;
   /** «Carregar mais» das visitas, contactos e levantamentos (a ficha real). */
@@ -48,6 +51,7 @@ export function ResumoFicha(p: ResumoFichaProps) {
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
       <SeccaoVisitas
         pessoa={resumo.pessoa} visitas={visitas} item={item} hoje={p.hoje} negocios={negocios} alterarVisita={p.alterarVisita}
+        naBase={p.visitasNaBase} cancelarVisita={p.cancelarVisita}
         aoRegistarResultado={p.aoRegistarResultado} mais={p.maisItens?.visitas}
       />
       <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas} />

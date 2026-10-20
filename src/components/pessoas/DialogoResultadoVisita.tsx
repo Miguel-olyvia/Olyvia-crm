@@ -12,9 +12,11 @@ import type { DadosResultadoVisita } from "./acoesVisitaPessoa";
 import { classeCartao } from "./cartaoOpcao";
 import { CamposMotivo, erroDoMotivo } from "./CamposMotivo";
 import { ErroAcao } from "./ErroAcao";
+import { focarLinhaVisita } from "./focoVisita";
 import { diaDaSemana, textoDiaCompleto } from "./formatoPessoas";
 import { Visto } from "./OpcoesResultado";
 import type { MotivoEncerramento, Pessoa } from "./pessoasTipos";
+import { ehAcaoAssincrona } from "./seguirAcao";
 import { useExecutarAcao } from "./useExecutarAcao";
 
 const R = "pessoasPagina.visitResult.";
@@ -31,7 +33,14 @@ interface DialogoResultadoVisitaProps {
   aoAnunciar: (mensagem: string) => void;
 }
 
-function FormResultado({ visita, pessoa, comNegocioAberto, aoGuardar, aoFechar, aoPendente }: Omit<DialogoResultadoVisitaProps, "aoAnunciar"> & { visita: VisitaPessoa; aoPendente: (m: string) => void }) {
+interface FormResultadoProps extends Omit<DialogoResultadoVisitaProps, "aoAnunciar"> {
+  visita: VisitaPessoa;
+  aoPendente: (m: string) => void;
+  /** Avisa o diálogo de que começou ou acabou de gravar na base (para não se deixar fechar a meio). */
+  aoOcupado: (ocupado: boolean) => void;
+}
+
+function FormResultado({ visita, pessoa, comNegocioAberto, aoGuardar, aoFechar, aoPendente, aoOcupado }: FormResultadoProps) {
   const { t } = useTranslation();
   const nome = useId();
   const idLegenda = useId();
@@ -50,7 +59,13 @@ function FormResultado({ visita, pessoa, comNegocioAberto, aoGuardar, aoFechar, 
       : { resultado };
     // Só fecha (e só anuncia) quando a ação terminou: na base pode demorar ou falhar, e então o erro fica à vista aqui dentro.
     const mensagem = t(`${R}done`, { name: pessoa.nome, result: t(`${R}result.${resultado}`) });
-    acao.executar(() => aoGuardar(visita.id, dados), () => {
+    acao.executar(() => {
+      const resposta = aoGuardar(visita.id, dados);
+      if (!ehAcaoAssincrona(resposta)) return resposta;
+      // Lê-se no instante do clique (antes de qualquer render): daí a ref do pai, e não só o estado de `acao`.
+      aoOcupado(true);
+      return resposta.finally(() => aoOcupado(false));
+    }, () => {
       aoPendente(mensagem);
       aoFechar();
     }, mensagem);
@@ -62,7 +77,11 @@ function FormResultado({ visita, pessoa, comNegocioAberto, aoGuardar, aoFechar, 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {opcoes.map((r) => (
             <label key={r} className="relative flex cursor-pointer">
-              <input type="radio" name={nome} className="peer sr-only" checked={resultado === r} onChange={() => setResultado(r)} />
+              {/* aria-disabled e não disabled: desativar o rádio com o foco nele deixava o foco cair para o body, dentro do diálogo. */}
+              <input
+                type="radio" name={nome} className="peer sr-only" checked={resultado === r} aria-disabled={acao.aGuardar || undefined}
+                onChange={() => { if (!acao.aGuardar) setResultado(r); }}
+              />
               <span className={classeCartao(resultado === r)}>
                 {t(`${R}result.${r}`)}
                 <Visto escolhido={resultado === r} />
@@ -110,15 +129,22 @@ export function DialogoResultadoVisita({ visita, pessoa, comNegocioAberto, aoGua
   if (visita) ultima.current = visita;
   const mostrada = visita ?? ultima.current;
   const pendente = useRef<string | null>(null);
+  // Uma gravação na base está a correr: o diálogo não se deixa fechar (Escape, clique fora, «Cancelar»).
+  const ocupado = useRef(false);
   const quando = mostrada ? `${t(`pessoasPagina.weekday.${diaDaSemana(mostrada.data)}`)}, ${textoDiaCompleto(mostrada.data)}` : "";
   return (
-    <Dialog open={visita !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
+    <Dialog open={visita !== null} onOpenChange={(aberto) => { if (!aberto && !ocupado.current) aoFechar(); }}>
       <DialogContent
         className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none"
-        onCloseAutoFocus={() => {
+        onEscapeKeyDown={(e) => { if (ocupado.current) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (ocupado.current) e.preventDefault(); }}
+        onCloseAutoFocus={(e) => {
           const mensagem = pendente.current;
           pendente.current = null;
-          if (mensagem) aoAnunciar(mensagem);
+          if (!mensagem) return;
+          // Registado o resultado, o botão que abriu o diálogo deixa de existir: o foco vai para a linha da visita.
+          if (mostrada && focarLinhaVisita(mostrada.id)) e.preventDefault();
+          aoAnunciar(mensagem);
         }}
       >
         <DialogHeader>
@@ -128,7 +154,7 @@ export function DialogoResultadoVisita({ visita, pessoa, comNegocioAberto, aoGua
         {mostrada && (
           <FormResultado
             key={mostrada.id} visita={mostrada} pessoa={pessoa} comNegocioAberto={comNegocioAberto} aoGuardar={aoGuardar} aoFechar={aoFechar}
-            aoPendente={(m) => { pendente.current = m; }}
+            aoPendente={(m) => { pendente.current = m; }} aoOcupado={(a) => { ocupado.current = a; }}
           />
         )}
       </DialogContent>

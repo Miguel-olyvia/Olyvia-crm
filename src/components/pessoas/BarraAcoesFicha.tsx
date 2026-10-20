@@ -82,7 +82,7 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
   const podeReativar = encerrarLigado && fechada;
   const comNota = capacidades?.nota !== false;
   const comAdiar = capacidades?.adiar !== false;
-  const comVisita = !!processo && !fechada && capacidades?.visita !== false;
+  const comVisita = !!processo && !fechada && capacidades?.visita !== false && processo.comPainelVisita !== false;
   // Sem nenhum item (um cliente na ficha real) não há menu: um botão «Mais» vazio não faz nada.
   if (!comNota && !comAdiar && !comVisita && !aoCriarNegocio && !podeEncerrar && !podeReativar) return null;
   const criarNegocio = () => {

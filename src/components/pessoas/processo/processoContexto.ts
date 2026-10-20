@@ -18,6 +18,11 @@ export interface ProcessoValor {
    */
   abrirVisitaLevantamento: (pessoaId: string, origem: HTMLElement | null) => void;
   /**
+   * Só a ficha real: `false` enquanto o painel «Visita e levantamento» não grava na base (o levantamento é do P5). Então o menu «Mais» não
+   * mostra o item, em vez de deixar um botão que não faz nada. Sem isto (o exemplo) o item mostra-se.
+   */
+  comPainelVisita?: boolean;
+  /**
    * Só a ficha real: diz se este item tem um passo que a ficha sabe executar (o levantamento, por exemplo, é do P5). Sem isto (o exemplo)
    * tudo executa. Um passo que não executa não tem botão: só o texto do que falta fazer.
    */

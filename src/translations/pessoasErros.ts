@@ -23,6 +23,7 @@ const pt: Record<string, string> = {
   [`${E}ng018`]: "Esta visita já foi feita ou cancelada e não se altera.",
   [`${E}ng019`]: "Este contacto já pertence a outra pessoa desta organização. Nada foi alterado.",
   [`${E}ng020`]: "Demasiadas verificações seguidas. Tente de novo dentro de alguns minutos.",
+  [`${E}ng021`]: "A configuração do levantamento foi alterada entretanto por outra pessoa. Volte a abrir e tente de novo.",
   [`${E}permissao`]: "Não tem permissão para esta ação.",
   [`${E}generico`]: "Não foi possível concluir a ação. Tente novamente.",
 };
@@ -48,6 +49,7 @@ const en: Record<string, string> = {
   [`${E}ng018`]: "This visit has already been done or cancelled and cannot be changed.",
   [`${E}ng019`]: "This contact already belongs to another person in this organization. Nothing was changed.",
   [`${E}ng020`]: "Too many checks in a row. Please try again in a few minutes.",
+  [`${E}ng021`]: "The survey configuration was changed in the meantime by someone else. Reopen it and try again.",
   [`${E}permissao`]: "You do not have permission for this action.",
   [`${E}generico`]: "The action could not be completed. Please try again.",
 };

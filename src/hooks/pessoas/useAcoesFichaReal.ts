@@ -1,29 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { resultadoEncerra } from "@/components/negocio-metas/registosTipos";
 import { somarDias, type DadosChamada } from "@/components/pessoas/acoesPessoa";
+import { entradaDaVisita } from "@/components/pessoas/agendaVisitaForm";
+import { moradaDaLead } from "@/components/pessoas/moradaVisita";
 import type { PedidoEncerrar } from "@/components/pessoas/acoesEncerrar";
 import type { DadosResultadoVisita } from "@/components/pessoas/acoesVisitaPessoa";
 import type { AcoesFicha, CapacidadesFicha } from "@/components/pessoas/PainelBase";
+import type { DadosAlterarVisita } from "@/components/pessoas/visitaPessoa";
 import { textoOuNull } from "./adaptarComum";
+import { adaptarPessoa } from "./adaptarFichaPessoa";
+import { adaptarRegistos } from "./adaptarRegistos";
 import { chamarNeg, ErroNeg, type NomeNeg } from "./chamarNeg";
 import { CHAVE_ERRO_GENERICO } from "./errosNeg";
+import { CHAVES_ENTRADA_VISITA } from "./errosVisita";
 import type { FichaDb } from "./fichaTipos";
 import { invalidarPessoas } from "./invalidarPessoas";
 import { leadDaAbordagem } from "./leadDaAbordagem";
+import { paramsEncerrar } from "./paramsEncerrar";
 import { hojeLisboa, inicioDoDiaLisboa, instanteLisboa } from "./tempoLisboa";
+import { useAcoesVisita, type AcoesVisita } from "./useAcoesVisita";
 import { useFontePessoas } from "./useFontePessoas";
+import { paraGuardarVisita, type EntradaVisita } from "./visitaDb";
 
 /** neg_registar_nota e neg_adiar_contacto (M8) já estão aplicadas na base (confirmado a 20/10): liga a Nota e o Adiar na ficha. */
 const FUNCOES_M8_APLICADAS = true;
 
-/** O que a ficha real consegue fazer hoje. A visita (marcar e alterar) é do P6; o negócio (detalhe, perder, ganhar, ligar e criar) é do P3. */
+/**
+ * O que a ficha real consegue fazer hoje. Alterar e cancelar as visitas já marcadas (`gerirVisitas`) grava na base pelos diálogos; marcar uma visita
+ * pela chamada (`visita`) grava por `useAcoesVisita`. O painel «Visita e levantamento» (o levantamento é do P5) ainda não grava na base: o
+ * `ProcessoProviderReal` não o abre e o menu «Mais» não o mostra. O negócio (detalhe, perder, ganhar, ligar e criar) é do P3.
+ */
 export const CAPACIDADES_FICHA_REAL: CapacidadesFicha = {
-  chamada: true, encerrar: true, adiar: FUNCOES_M8_APLICADAS, nota: FUNCOES_M8_APLICADAS, visita: false, negocios: true,
+  chamada: true, encerrar: true, adiar: FUNCOES_M8_APLICADAS, nota: FUNCOES_M8_APLICADAS, visita: true, negocios: true, gerirVisitas: true,
 };
 
 const CHAVE_CHAMADA_PARCIAL = "pessoasPagina.real.ficha.partialCall";
-const CHAVE_VISITA_PARCIAL = "pessoasPagina.real.ficha.partialVisit";
+const CHAVE_CHAMADA_VISITA_PARCIAL = "pessoasPagina.real.ficha.partialCallVisit";
 export type AcoesFichaReal = AcoesFicha & { capacidades: CapacidadesFicha };
 
 const generico = (): ErroNeg => new ErroNeg(null, null, CHAVE_ERRO_GENERICO);
@@ -37,6 +49,17 @@ function parcial(erro: unknown, chaveAviso: string): ErroNeg {
 /** Dados de uma chamada, como o formulário os dá (o dia de hoje sabe-o esta camada). */
 type DadosChamadaForm = Omit<DadosChamada, "hoje">;
 
+/**
+ * A visita que o passo «marcar visita» pede. Sem a agenda, ou com uma que a base não aceitaria (sem quadro, recursos ou hora), recusa-se ANTES de
+ * gravar o contacto: a chamada não fica a meio por um erro que o formulário já podia ter apanhado.
+ */
+function visitaDoPasso(organizationId: string, pessoaId: string, d: DadosChamadaForm): EntradaVisita {
+  if (!d.visita) throw generico();
+  const pedido = paraGuardarVisita(organizationId, pessoaId, d.visita);
+  if (!pedido.ok) throw new ErroNeg(null, null, CHAVES_ENTRADA_VISITA[pedido.erro]);
+  return d.visita;
+}
+
 /** O instante (ISO) da próxima ação que o passo deixa: o escolhido, amanhã ou hoje em Lisboa; `null` sem próxima ação. */
 function proximaAcaoDoPasso(d: DadosChamadaForm, hoje: string): string | null {
   if (d.passo === "ligarData") {
@@ -47,17 +70,6 @@ function proximaAcaoDoPasso(d: DadosChamadaForm, hoje: string): string | null {
   if (d.passo === "ligarAmanha") return inicioDoDiaLisboa(somarDias(hoje, 1));
   if (d.passo === "ligarHoje") return inicioDoDiaLisboa(hoje);
   return null;
-}
-
-function paramsEncerrar(org: string, pessoaId: string, leadId: string | null, p: PedidoEncerrar): Record<string, unknown> {
-  return {
-    p_organization_id: org,
-    p_entity_id: pessoaId,
-    p_resultado: p.resultado,
-    p_motivo: p.motivo ?? null,
-    p_motivo_outro: p.motivo === "outro" ? textoOuNull(p.motivoOutro) : null,
-    p_lead_id: leadId,
-  };
 }
 
 /**
@@ -76,8 +88,15 @@ export function useAcoesFichaReal(pessoaId: string, ficha: FichaDb | null): Acoe
   });
   // Um só mapa para toda a vida do hook (um `useRef(new Map())` criava um Map novo, deitado fora, a cada render).
   const [ids] = useState(() => new Map<string, string>());
+  // O resultado e o cancelamento das visitas vivem em `useAcoesVisita` (erros lidos por diálogo, duplo clique, encerrar antes do resultado).
+  const visita = useAcoesVisita(pessoaId, ficha);
+  // O `anew_users.id` do responsável: o recurso dele é o escolhido por omissão ao marcar a visita da chamada.
+  const responsavelUserId = ficha?.pessoa.responsavel_id ?? null;
 
-  return useMemo(() => criarAcoes({ organizationId, pessoaId, client, ids, ficha: () => fichaRef.current }), [organizationId, pessoaId, client, ids]);
+  return useMemo(
+    () => ({ ...criarAcoes({ organizationId, pessoaId, client, ids, visita, ficha: () => fichaRef.current }), responsavelUserId }),
+    [organizationId, pessoaId, client, ids, visita, responsavelUserId],
+  );
 }
 
 interface Contexto {
@@ -85,6 +104,7 @@ interface Contexto {
   pessoaId: string;
   client: QueryClient;
   ids: Map<string, string>;
+  visita: AcoesVisita;
   ficha: () => FichaDb | null;
 }
 
@@ -116,10 +136,13 @@ function criarAcoes(c: Contexto): AcoesFichaReal {
 
   async function registarChamada(id: string, d: DadosChamadaForm): Promise<void> {
     const o = org(id);
-    if (d.passo === "marcarVisita") throw generico(); // Marcar visita é do P6.
+    const visitaAMarcar = d.passo === "marcarVisita" ? visitaDoPasso(o, id, d) : null;
     const proxima = proximaAcaoDoPasso(d, hojeLisboa());
     // O dia entra na assinatura: um pedido repetido no dia seguinte já não é «o mesmo» (o id de ontem não se reutiliza).
-    const assinatura = `chamada:${id}:${hojeLisboa()}:${JSON.stringify([d.resultado, d.nota.trim(), d.passo, d.data ?? null, d.hora ?? null, d.motivo ?? null, d.motivoOutro ?? null])}`;
+    // A data e a hora só entram quando decidem a próxima ação («ligar numa data»): no passo «marcar visita» são as da visita, e mudá-las ao repetir
+    // depois de uma falha (a hora estava ocupada) não pode dar outro id, senão o contacto gravava-se duas vezes.
+    const quando = d.passo === "ligarData" ? [d.data ?? null, d.hora ?? null] : [null, null];
+    const assinatura = `chamada:${id}:${hojeLisboa()}:${JSON.stringify([d.resultado, d.nota.trim(), d.passo, ...quando, d.motivo ?? null, d.motivoOutro ?? null])}`;
     const pId = idEstavel(assinatura);
     await chamarNeg("neg_registar_contacto", {
       p_id: pId, p_organization_id: o, p_entity_id: id, p_resultado: d.resultado, p_nota: textoOuNull(d.nota),
@@ -132,6 +155,16 @@ function criarAcoes(c: Contexto): AcoesFichaReal {
         // O contacto já ficou gravado: refaz o que se vê e avisa das duas coisas. O id fica guardado: repetir não duplica o contacto.
         invalidar();
         throw parcial(erro, CHAVE_CHAMADA_PARCIAL);
+      }
+    }
+    if (visitaAMarcar) {
+      // O contacto é a chamada e já ficou gravado; a visita é à parte (marcá-la NÃO conta como contacto e não leva a nota da chamada).
+      try {
+        await c.visita.marcar(visitaAMarcar);
+      } catch (erro) {
+        // Repetir é seguro: o id do contacto fica guardado (não se duplica) e a visita, que falhou, volta a pedir-se.
+        invalidar();
+        throw parcial(erro, CHAVE_CHAMADA_VISITA_PARCIAL);
       }
     }
     c.ids.delete(assinatura);
@@ -148,26 +181,15 @@ function criarAcoes(c: Contexto): AcoesFichaReal {
     invalidar();
   }
 
+  /** O resultado da visita: encerrar a abordagem antes (se for o caso), depois o resultado; a falha parcial e os erros por diálogo vêm de `useAcoesVisita`. */
   async function registarResultadoVisita(visitaId: string, d: DadosResultadoVisita): Promise<void> {
-    const o = org(c.pessoaId);
-    const visita = c.ficha()?.visitas?.itens.find((v) => v.id === visitaId);
-    if (!visita) throw generico();
-    // A ordem é obrigatória: se neg_resultado_visita corresse primeiro encerraria com a nota fixa «Resultado da visita» e o motivo perdia-se.
-    if (resultadoEncerra(d.resultado)) {
-      await encerrarAbordagem(o, { resultado: d.resultado, motivo: d.motivo ?? "outro", motivoOutro: d.motivoOutro });
-    }
-    try {
-      await chamarNeg("neg_resultado_visita", {
-        p_visita_id: visitaId, p_resultado: d.resultado, p_feita: new Date(visita.inicio).getTime() <= Date.now(),
-      });
-    } catch (erro) {
-      // Se o encerramento já ficou gravado, refaz o que se vê e avisa das duas coisas. Repetir é seguro: encerrar de novo o mesmo
-      // resultado não faz mal (a função devolve mudou=false) e o passo seguinte volta a correr.
-      if (!resultadoEncerra(d.resultado)) throw erro;
-      invalidar();
-      throw parcial(erro, CHAVE_VISITA_PARCIAL);
-    }
-    invalidar();
+    org(c.pessoaId);
+    await c.visita.resultado(visitaId, d);
+  }
+
+  async function cancelarVisita(visitaId: string): Promise<void> {
+    org(c.pessoaId);
+    await c.visita.cancelar(visitaId);
   }
 
   const juntarNota = async (id: string, texto: string): Promise<void> => {
@@ -184,8 +206,30 @@ function criarAcoes(c: Contexto): AcoesFichaReal {
     }));
   };
 
-  // Alterar a visita é do P6: a capacidade `visita` está desligada e o botão não aparece.
-  const alterarVisita = (): Promise<void> => Promise.reject(generico());
+  /**
+   * Muda o dia, a hora e a morada de uma visita da ficha. Reenvia TODOS os outros campos como a ficha os lê (quadro, quem vai, duração, tipo, quem vai
+   * estar e a nota): um campo omitido apagar-se-ia na base. Sem quadro ou sem recursos lidos não há com que reenviar e recusa-se em vez de apagar.
+   * O título vai NULL de propósito: em `neg_alterar_visita` um título NULL MANTÉM o atual (só as notas, o local, o tipo e os detalhes se limpam
+   * com NULL). A nota que segue é a de acesso do destino (`destino.notaAcesso`, que o diálogo preenche com a nota da visita): esvaziá-la limpa-a.
+   * O diálogo da ficha real (`AlterarVisitaReal`) faz o mesmo com mais campos, por `useAcoesVisita`.
+   */
+  async function alterarVisita(visitaId: string, dados: DadosAlterarVisita): Promise<void> {
+    org(c.pessoaId);
+    const ficha = c.ficha();
+    const visita = ficha ? adaptarRegistos(ficha).visitas.find((v) => v.id === visitaId) : undefined;
+    const recursos = visita?.agenda?.recursos.map((r) => r.id) ?? [];
+    if (!ficha || !visita?.agenda?.boardId || recursos.length === 0) throw generico();
+    const minutos = visita.agenda.duracaoMinutos;
+    const entrada = entradaDaVisita({
+      agenda: {
+        boardId: visita.agenda.boardId, recursos, data: dados.data, hora: dados.hora, duracao: visita.duracao,
+        ...(minutos !== null ? { duracaoMinutos: minutos } : {}),
+      },
+      nome: "", tipo: visita.tipo, tituloTipo: "", destino: dados.destino, moradaLead: moradaDaLead(adaptarPessoa(ficha, hojeLisboa())), nota: "",
+      quemVaiEstar: visita.quemVaiEstar,
+    });
+    await c.visita.alterar(visitaId, entrada, recursos);
+  }
 
-  return { registarChamada, adiar, encerrar, reativar, juntarNota, alterarVisita, registarResultadoVisita, capacidades: CAPACIDADES_FICHA_REAL };
+  return { registarChamada, adiar, encerrar, reativar, juntarNota, alterarVisita, cancelarVisita, registarResultadoVisita, capacidades: CAPACIDADES_FICHA_REAL };
 }

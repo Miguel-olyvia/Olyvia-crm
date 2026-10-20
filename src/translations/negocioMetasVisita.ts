@@ -5,6 +5,7 @@ import { BLOCO_QUALIFICACAO } from "@/components/negocio-metas/qualificacaoExemp
 import { chaveSeccao, textosDosBlocos } from "@/components/negocio-metas/respostasVisita";
 import { BLOCO_ESCOLHAS_VISITA, SECCOES_VISITA } from "@/components/negocio-metas/visitaExemplo";
 import { negocioMetasListaVisitasTranslations } from "./negocioMetasListaVisitas";
+import { negocioMetasQuestionarioTranslations } from "./negocioMetasQuestionario";
 
 const PREFIXO = "businessGoals.new.";
 
@@ -96,6 +97,6 @@ const comPrefixo = (textos: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(textos).map(([chave, texto]) => [PREFIXO + chave, texto]));
 
 export const negocioMetasVisitaTranslations: Record<"en" | "pt", Record<string, string>> = {
-  en: comPrefixo({ ...dosPares(1), ...en, ...negocioMetasListaVisitasTranslations.en }),
-  pt: comPrefixo({ ...dosPares(0), ...pt, ...negocioMetasListaVisitasTranslations.pt }),
+  en: { ...comPrefixo({ ...dosPares(1), ...en, ...negocioMetasListaVisitasTranslations.en }), ...negocioMetasQuestionarioTranslations.en },
+  pt: { ...comPrefixo({ ...dosPares(0), ...pt, ...negocioMetasListaVisitasTranslations.pt }), ...negocioMetasQuestionarioTranslations.pt },
 };

@@ -5,6 +5,8 @@ import { chaveDoErro, codigoDoErro } from "./errosNeg";
 export type NomeNeg =
   | "neg_registar_contacto"
   | "neg_guardar_visita"
+  | "neg_alterar_visita"
+  | "neg_cancelar_visita"
   | "neg_guardar_levantamento"
   | "neg_criar_negocio"
   | "neg_ligar_registo"
@@ -22,7 +24,9 @@ export type NomeNeg =
   | "neg_guardar_identidade_pessoa"
   | "neg_procurar_duplicados"
   | "neg_substituir_contacto"
-  | "neg_guardar_regras_qualificacao";
+  | "neg_guardar_regras_qualificacao"
+  | "neg_guardar_questionario"
+  | "neg_questionario_levantamento";
 
 /** Erro de uma função neg_*: o código (se for conhecido), a chave a traduzir e a causa. */
 export class ErroNeg extends Error {

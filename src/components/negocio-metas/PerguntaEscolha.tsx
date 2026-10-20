@@ -3,16 +3,12 @@ import { Check } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { N } from "./PecasNovoNegocio";
+import { PerguntaMultipla, PerguntaNumero, PerguntaTexto } from "./PerguntasLivres";
 import { FOCO } from "./estilos";
+import { LIVRE, MARCADA, PILULA } from "./estilosPergunta";
 import type { BlocoDef, PerguntaDef, Respostas } from "./perguntasTipos";
-import { chaveBloco, chaveOpcao, chavePergunta, perguntaVisivel } from "./respostasVisita";
-
-const PILULA = [
-  "inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-1.5 rounded-full border px-4 text-sm",
-  "transition-colors motion-reduce:transition-none",
-].join(" ");
-const MARCADA = "border-primary bg-primary/10 font-medium text-primary dark:text-violet-300";
-const LIVRE = "border-input bg-card text-foreground hover:border-foreground/40";
+import type { ErroResposta } from "./respostasQuestionario";
+import { perguntaVisivel, textoDaOpcao, textoDaPergunta, tipoDaPergunta, tituloDoBloco } from "./respostasVisita";
 
 const SETAS_SEGUINTE = ["ArrowRight", "ArrowDown"];
 const SETAS_ANTERIOR = ["ArrowLeft", "ArrowUp"];
@@ -44,10 +40,11 @@ function aoTeclar(e: KeyboardEvent<HTMLButtonElement>, aoEscolher: (opcao: strin
 export function PerguntaEscolha({ pergunta, valor, aoEscolher }: PerguntaProps) {
   const { t } = useTranslation();
   const id = useId();
-  const noTab = pergunta.opcoes.some(([c]) => c === valor) ? valor : pergunta.opcoes[0][0];
+  const traduzir = (chave: string) => t(`${N}${chave}`);
+  const noTab = pergunta.opcoes.some(([c]) => c === valor) ? valor : pergunta.opcoes[0]?.[0];
   return (
     <div className="space-y-2">
-      <p id={`${id}-rotulo`} className="text-sm font-medium text-foreground">{t(`${N}${chavePergunta(pergunta.id)}`)}</p>
+      <p id={`${id}-rotulo`} className="text-sm font-medium text-foreground">{textoDaPergunta(pergunta, traduzir)}</p>
       <div role="radiogroup" aria-labelledby={`${id}-rotulo`} className="flex flex-wrap gap-2">
         {pergunta.opcoes.map(([chave]) => {
           const marcada = chave === valor;
@@ -58,7 +55,7 @@ export function PerguntaEscolha({ pergunta, valor, aoEscolher }: PerguntaProps) 
               className={cn(PILULA, FOCO, marcada ? MARCADA : LIVRE)}
             >
               {marcada && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
-              {t(`${N}${chaveOpcao(pergunta.id, chave)}`)}
+              {textoDaOpcao(pergunta, chave, traduzir)}
             </button>
           );
         })}
@@ -70,19 +67,35 @@ export function PerguntaEscolha({ pergunta, valor, aoEscolher }: PerguntaProps) 
 interface BlocosProps {
   blocos: readonly BlocoDef[];
   respostas: Respostas;
+  /** Toca numa opção (escolha única: escolhe ou retira; múltipla: liga ou desliga). */
   aoEscolher: (pergunta: string, opcao: string) => void;
+  /** Escreve a resposta de uma pergunta de texto ou de número. Sem isto esses campos só se leem. */
+  aoEscrever?: (pergunta: string, valor: string) => void;
+  /** Os erros das respostas de texto e número, pela pergunta. */
+  erros?: Readonly<Record<string, ErroResposta>>;
+}
+
+/** A pergunta com o campo do seu tipo. */
+function Pergunta({ pergunta: p, respostas, aoEscolher, aoEscrever, erros }: Omit<BlocosProps, "blocos"> & { pergunta: PerguntaDef }) {
+  const valor = respostas[p.id];
+  switch (tipoDaPergunta(p)) {
+    case "escolha_multipla": return <PerguntaMultipla pergunta={p} valor={valor} aoEscolher={(opcao) => aoEscolher(p.id, opcao)} />;
+    case "texto": return <PerguntaTexto pergunta={p} valor={valor} erro={erros?.[p.id]} aoEscrever={aoEscrever && ((v) => aoEscrever(p.id, v))} />;
+    case "numero": return <PerguntaNumero pergunta={p} valor={valor} erro={erros?.[p.id]} aoEscrever={aoEscrever && ((v) => aoEscrever(p.id, v))} />;
+    default: return <PerguntaEscolha pergunta={p} valor={valor} aoEscolher={(opcao) => aoEscolher(p.id, opcao)} />;
+  }
 }
 
 /** Os blocos de perguntas (título por bloco, quando o tem) só com as perguntas visíveis. */
-export function BlocosPerguntas({ blocos, respostas, aoEscolher }: BlocosProps) {
+export function BlocosPerguntas({ blocos, respostas, aoEscolher, aoEscrever, erros }: BlocosProps) {
   const { t } = useTranslation();
   return (
     <div className="space-y-6">
       {blocos.map((bloco) => (
         <div key={bloco.id} className="space-y-4">
-          {bloco.titulo && <h4 className="text-sm font-semibold text-foreground">{t(`${N}${chaveBloco(bloco.id)}`)}</h4>}
+          {bloco.titulo && <h4 className="text-sm font-semibold text-foreground">{tituloDoBloco(bloco, (c) => t(`${N}${c}`))}</h4>}
           {bloco.perguntas.filter((p) => perguntaVisivel(p, respostas)).map((p) => (
-            <PerguntaEscolha key={p.id} pergunta={p} valor={respostas[p.id]} aoEscolher={(opcao) => aoEscolher(p.id, opcao)} />
+            <Pergunta key={p.id} pergunta={p} respostas={respostas} aoEscolher={aoEscolher} aoEscrever={aoEscrever} erros={erros} />
           ))}
         </div>
       ))}

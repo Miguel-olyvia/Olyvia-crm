@@ -12,7 +12,7 @@ import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { N } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
 import { validarLevantamento, type LevantamentoForm } from "./levantamento";
-import type { MoradaObraForm } from "./moradaObra";
+import { validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import {
   abasComErros, primeiroErro, type AbaNovoNegocio, type ErrosNovoNegocio, type PessoaOpcao, type RascunhoLevantamento, type ValoresIniciaisNegocio,
 } from "./novoNegocio";
@@ -24,7 +24,7 @@ import {
 } from "./useEstadoNovoNegocio";
 import type { VisitaNegocio } from "./negocioMetas";
 import { SECCOES_VISITA } from "./visitaExemplo";
-import { camposDoLevantamento, visitasParaGuardar } from "./visitasNegocio";
+import { camposDoLevantamento, visitasComCodigoPostalInvalido, visitasParaGuardar } from "./visitasNegocio";
 
 // O painel «Visita e levantamento» de uma PESSOA (o modo «registos» do painel «Novo negócio»): as mesmas abas, mas guarda no que é da pessoa
 // (as visitas e o levantamento ficam nos registos dela) e nunca cria um negócio. O negócio cria-se à mão, noutro painel, e liga estes registos.
@@ -66,6 +66,9 @@ interface CorpoProps {
   visitas: readonly VisitaNegocio[];
   visitaAberta: string | null;
   acoesVisitas: AcoesVisitas;
+  visitasGravadas?: ReadonlySet<string>;
+  /** Os ids das visitas com o código postal fora do formato (só depois de tentar guardar). */
+  visitasComCodigoPostalInvalido: readonly string[];
 }
 
 /** As três abas sublinhadas e o conteúdo de cada uma (a zona que rola); a aba com erros leva o aviso. */
@@ -108,7 +111,8 @@ function CorpoAbas(p: CorpoProps) {
           <AbaVisita
             id={p.id} seccaoAtiva={p.seccao} aoMudarSeccao={p.aoMudarSeccao} respostas={p.respostas}
             aoEscolher={p.acoesQualificacao.escolher} levantamento={p.levantamento} erros={p.erros} acoesLevantamento={p.acoesLevantamento}
-            visitas={p.visitas} visitaAberta={p.visitaAberta} acoesVisitas={p.acoesVisitas}
+            visitas={p.visitas} visitaAberta={p.visitaAberta} acoesVisitas={p.acoesVisitas} visitasGravadas={p.visitasGravadas}
+            visitasComCodigoPostalInvalido={p.visitasComCodigoPostalInvalido}
           />
         </TabsContent>
       </div>
@@ -128,6 +132,8 @@ interface FormularioRegistosProps {
   pessoaInicialId?: string;
   /** O que já vem preenchido (por exemplo a visita concluída de uma pessoa); sem isto o formulário abre vazio. */
   valoresIniciais?: ValoresIniciaisNegocio;
+  /** Os ids das visitas que já existem na base (a ficha real): não se removem, cancelam-se, e uma já feita ou cancelada só se lê. */
+  visitasGravadas?: ReadonlySet<string>;
   /** A aba com que abre (por omissão a Geral); a Visita abre já na secção das Medidas da área. */
   abaInicial?: AbaNovoNegocio;
   /** A secção da aba Visita com que abre (o id, por exemplo `visitas`); sem isto vale a das Medidas da área. */
@@ -149,7 +155,7 @@ interface FormularioRegistosProps {
  * recusado leva para a aba com erros e põe o foco no primeiro campo errado.
  */
 export function FormularioRegistos({
-  pessoas, hoje, primeiroCampo, aoSujar: aoSujarDeFora, pessoaInicialId, valoresIniciais, abaInicial = "geral", seccaoInicial, guardarLevantamento,
+  pessoas, hoje, primeiroCampo, aoSujar: aoSujarDeFora, pessoaInicialId, valoresIniciais, visitasGravadas, abaInicial = "geral", seccaoInicial, guardarLevantamento,
 }: FormularioRegistosProps) {
   const { t } = useTranslation();
   const id = useId();
@@ -166,22 +172,48 @@ export function FormularioRegistos({
   const lev = useLevantamentoForm(hoje, aoSujar, valores.comercial, valoresIniciais?.levantamento);
   const vis = useVisitasForm(hoje, aoSujar, valores.comercial, valoresIniciais?.visitas);
   const resp = useRespostasForm(aoSujar, valoresIniciais?.levantamento?.respostas);
+  // A morada da obra sem escrever acompanha as visitas de agora (como em «Novo negócio»): corrigir o código postal da visita corrige-o na obra.
   const morada = useMoradaForm(aoSujar, {
-    visitas: valoresIniciais?.visitas, moradaObra: valoresIniciais?.moradaObra ?? valoresIniciais?.levantamento?.moradaObra,
+    visitas: vis.visitas, moradaObra: valoresIniciais?.moradaObra ?? valoresIniciais?.levantamento?.moradaObra,
   });
   const [seccao, setSeccao] = useState(seccaoInicial ?? (abaInicial === "visita" ? SECCAO_DO_LEVANTAMENTO : SECCOES_VISITA[0].id));
   const pessoa = pessoas.find((p) => p.id === valores.pessoaId);
   // A data, quem fez e o estado do levantamento derivam da lista de visitas; as linhas e as observações são do formulário.
   const levantamento = { ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, valores.comercial) };
-  const errosVisiveis: ErrosNovoNegocio = tentou ? validarLevantamento(levantamento) : {};
+  // Os erros de agora: as linhas do levantamento e os códigos postais (o da obra e os das visitas, que a base só aceita no formato 0000-000).
+  const errosAgora: ErrosNovoNegocio = {
+    ...validarLevantamento(levantamento), ...(validarCodigoPostal(morada.morada.codigoPostal) ? { codigoPostal: "invalido" as const } : {}),
+  };
+  const errosVisiveis: ErrosNovoNegocio = tentou ? errosAgora : {};
+  const cpDasVisitas = visitasComCodigoPostalInvalido(vis.visitas, visitasGravadas);
+
+  /** Leva ao primeiro código postal de visita errado: a aba Visita, a secção das Visitas, a visita aberta e o foco no campo. */
+  const irParaVisitaComErro = (visitaId: string) => {
+    setAba("visita");
+    setSeccao("visitas");
+    if (vis.aberta !== visitaId) vis.acoes.alternar(visitaId);
+    pedirFoco(`${visitaId}-cp`);
+  };
 
   /**
-   * Guarda as visitas e o levantamento da pessoa: as linhas têm de estar certas (as que existirem). Só se validam as linhas do
-   * levantamento: as abas Geral e Qualificação não impedem de guardar. Enter num campo guarda, como o botão.
+   * Guarda as visitas e o levantamento da pessoa: as linhas têm de estar certas (as que existirem) e os códigos postais, se escritos, no formato
+   * 0000-000 (o da obra e os das visitas). As abas Geral e Qualificação não impedem de guardar por outra razão. Enter num campo guarda, como o botão.
    */
   const guardar = () => {
     setTentou(true);
-    const primeiro = primeiroErro(validarLevantamento(levantamento), lev.levantamento.linhas.map((l) => l.id));
+    const primeiro = primeiroErro(errosAgora, lev.levantamento.linhas.map((l) => l.id));
+    // Os códigos postais (o da obra, depois os das visitas) vêm antes das linhas do levantamento, pela ordem do painel. Uma morada da obra que veio
+    // de uma visita com o código errado herda o erro dela: corrige-se na visita (a origem), não na obra.
+    const obraVemDaVisita = morada.origem !== null && cpDasVisitas.length > 0;
+    if (primeiro && primeiro.aba !== "visita" && !obraVemDaVisita) {
+      setAba(primeiro.aba);
+      pedirFoco(primeiro.campo);
+      return;
+    }
+    if (cpDasVisitas.length > 0) {
+      irParaVisitaComErro(cpDasVisitas[0]);
+      return;
+    }
     if (primeiro) {
       setAba(primeiro.aba);
       setSeccao(SECCAO_DO_LEVANTAMENTO);
@@ -201,6 +233,7 @@ export function FormularioRegistos({
         respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={levantamento}
         erros={errosVisiveis} primeiroCampo={primeiroCampo}
         acoesGeral={acoes} pessoaBloqueada={!!pessoaInicialId && !!pessoa} acoesLevantamento={lev.acoes} visitas={vis.visitas} visitaAberta={vis.aberta} acoesVisitas={vis.acoes}
+        visitasGravadas={visitasGravadas} visitasComCodigoPostalInvalido={tentou ? cpDasVisitas : []}
         acoesQualificacao={{ escolher: resp.escolher, morada: morada.mudar, preencherMorada: morada.preencher }}
       />
       {alertaVisivel && (

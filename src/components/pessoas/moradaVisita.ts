@@ -1,6 +1,7 @@
 // A morada de uma visita, em funções puras. A lead tem a morada que indicou (`Pessoa.morada`); a visita é nessa morada
 // ("Na morada da lead") ou noutra ("Outra morada"), e é a da visita que passa a Morada da obra ao criar o negócio. Sem
 // morada da lead só existe "Outra morada". Nada aqui lê o relógio nem importa componentes.
+import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import type { MoradaVisita, Pessoa } from "./pessoasTipos";
 
 export const MORADA_VISITA_VAZIA: MoradaVisita = { rua: "", codigoPostal: "", localidade: "", andar: "" };
@@ -31,6 +32,12 @@ export function moradaDaLead(pessoa: Pick<Pessoa, "morada">): MoradaVisita | nul
 export const destinoInicial = (moradaLead: MoradaVisita | null): DestinoVisita => ({
   igualALead: moradaLead !== null, outra: MORADA_VISITA_VAZIA, notaAcesso: "",
 });
+
+/** A escolha de partida de uma visita que já existe: a da própria visita (a morada da lead só conta se a ficha ainda a tiver). */
+export function destinoDaVisita(visita: Pick<VisitaNegocio, "igualALead" | "morada" | "nota">, temMoradaLead: boolean): DestinoVisita {
+  const naLead = visita.igualALead === true && temMoradaLead;
+  return { igualALead: naLead, outra: naLead ? MORADA_VISITA_VAZIA : { ...visita.morada }, notaAcesso: visita.nota };
+}
 
 /** A visita só pode ser "na morada da lead" se a lead tiver uma. */
 const ehNaMoradaDaLead = (d: DestinoVisita, moradaLead: MoradaVisita | null): boolean => d.igualALead && moradaLead !== null;

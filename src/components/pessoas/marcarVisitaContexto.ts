@@ -8,6 +8,10 @@ export interface AberturaVisita {
   pessoaId: string;
   nome: string;
   moradaLead: MoradaVisita | null;
+  /** O `anew_users.id` do responsável da pessoa (só com a base ligada): o recurso dele vai escolhido por omissão. */
+  responsavelUserId?: string | null;
+  /** O negócio aberto de que se marca a visita (só com a base ligada): a visita nasce ligada a ele. Sem isto nasce por ligar. */
+  negocioId?: string | null;
 }
 
 export interface MarcarVisitaValor {

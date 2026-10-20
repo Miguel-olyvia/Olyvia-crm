@@ -12,8 +12,8 @@ describe("traduções dos erros das funções neg_*", () => {
     for (const chave of Object.keys(pt)) expect(marcas(en[chave]), chave).toEqual(marcas(pt[chave]));
   });
 
-  it("têm 21 mensagens mais a genérica, com prefixo da página e sem texto vazio", () => {
-    expect(Object.keys(pt)).toHaveLength(22);
+  it("têm 22 mensagens mais a genérica, com prefixo da página e sem texto vazio", () => {
+    expect(Object.keys(pt)).toHaveLength(23);
     for (const [chave, texto] of [...Object.entries(pt), ...Object.entries(en)]) {
       expect(chave).toMatch(/^pessoasPagina\.erroNeg\./);
       expect(texto.trim(), chave).not.toBe("");

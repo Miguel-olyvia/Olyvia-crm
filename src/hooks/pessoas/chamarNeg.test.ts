@@ -28,7 +28,10 @@ describe("chamarNeg", () => {
     expect(captureMock).not.toHaveBeenCalled();
   });
 
-  it.each(["neg_procurar_duplicados", "neg_guardar_identidade_pessoa", "neg_substituir_contacto", "neg_guardar_regras_qualificacao"] as const)(
+  it.each([
+    "neg_procurar_duplicados", "neg_guardar_identidade_pessoa", "neg_substituir_contacto", "neg_guardar_regras_qualificacao",
+    "neg_alterar_visita", "neg_cancelar_visita", "neg_guardar_questionario", "neg_questionario_levantamento",
+  ] as const)(
     "%s é uma função conhecida: passa o nome e os parâmetros sem os mexer",
     async (nome) => {
       const params = { p_organization_id: "org-1", p_email: "a@b.pt" };

@@ -11,6 +11,11 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 const usarRegras = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useRegrasQualificacao", () => ({ useRegrasQualificacao: (h: boolean) => usarRegras(h) }));
+vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({
+  useQuestionarioLevantamento: () => ({
+    dados: null, erro: null, isLoading: false, isError: false, aGuardar: false, guardar: vi.fn(), recarregar: vi.fn(),
+  }),
+}));
 beforeAll(prepararRadixNoJsdom);
 beforeEach(() => {
   usarRegras.mockReset();
