@@ -25,6 +25,7 @@ import {
 } from "./trabalhoObra";
 import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
 import { lerFoto } from "./ObraOperacoes";
+import { AvisosDoTecnico } from "./AvisosTecnico";
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
@@ -71,6 +72,7 @@ export function HojeTecnico(ctx: Ctx) {
         {hoje.length ? <>Hoje tem <b className="font-semibold text-foreground">{hoje.length} {hoje.length === 1 ? "tarefa" : "tarefas"}</b> em {obras} {obras === 1 ? "obra" : "obras"} · cerca de {nfmt(horas)} h.</> : "Hoje não tem tarefas por fazer."}
       </p>
 
+      <AvisosDoTecnico ctx={ctx} eu={eu} />
       <ul className="mt-6 space-y-6">
         {hoje.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaDeHoje ctx={ctx} d={x.d} ti={x.ti} /></li>)}
       </ul>

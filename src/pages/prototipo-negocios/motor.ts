@@ -18,6 +18,7 @@ import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
+import { avisarTecnico, criarTarefa, juntarTarefa, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
@@ -246,7 +247,10 @@ export const versaoAtual = (o: Orcamento) => (o.versoes?.length ?? 0) + 1;
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null; /** a fase da obra (planos do orçamento) */ fase?: number;
   /** 15/10: uma nota das Operações para a equipa (ex.: "levar o andaime") */ nota?: string;
   /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa;
-  /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number }
+  /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number;
+  /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[] }
+/** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
+export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
 export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string }
 export interface Plano {
@@ -255,7 +259,10 @@ export interface Plano {
   origem?: "orcamento"; inicio?: string;
   /** 15/10: o plano como veio do orçamento, guardado antes do primeiro ajuste das Operações (ajustesPlano.ts) */
   base?: BaseTarefa[];
+  /** 21/10: os avisos aos técnicos quando o gestor cria ou muda uma tarefa (tarefasValidador.ts: avisarTecnico); aparecem no Hoje do técnico. */
+  avisos?: AvisoTec[];
 }
+export interface AvisoTec { tec: string; ti: number; t: string; q: string; lido?: string }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
 export interface Evento { t: string; q: string; k: "a" | "w" | "x" }
@@ -1679,6 +1686,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const velho = TECS.find((x) => x.id === t.tec);
       guardarBase(d.obra.plano!);
       t.tec = tec; log(d, `Plano: ${t.nome} passa ${velho ? `de ${velho.n} ` : ""}para ${novo.n}`);
+      avisarTecnico(d.obra.plano!, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(d.obra.plano!, t.dia)}`, agora());
+      if (velho) avisarTecnico(d.obra.plano!, ti, `${t.nome} passou para ${novo.n.split(" ")[0]}: já não é consigo`, agora(), velho.id);
       if (A.planoMudou(d)) return;
       avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${novo.n}`, kind: "ok" });
     },
@@ -1700,6 +1709,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (m.dia != null) mudarInicio(p, ti, m.dia);
       if (m.nota != null) { const n = m.nota.trim(); if ((t.nota ?? "") !== n) { t.nota = n || undefined; log(d, `Plano: nota em ${t.nome}${n ? ": " + n : " apagada"}`); } }
       if (JSON.stringify(p.tasks.map((x) => [x.dia, x.dur])) === antes) return;
+      avisarTecnico(p, ti, `${t.nome} mudou: ${t.dur} ${t.dur === 1 ? "dia" : "dias"} a partir de ${rotuloDia(p, t.dia)}`, agora());
       const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1, dif = diferencas(p).dias;
       log(d, `Plano: ${t.nome} · ${t.dur} ${t.dur === 1 ? "dia" : "dias"} a partir de ${rotuloDia(p, t.dia)} · a obra acaba a ${rotuloDia(p, fim)}`);
       if (A.planoMudou(d)) return;
@@ -1863,8 +1873,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!p || !t || p.estado !== "em curso" || !motivo.trim()) return;
       const prev = preverAjuste(p, ti, m);
       if (!prev.texto) { avisar({ msg: "Nada mudou", sub: "Mude os dias, o início ou o técnico", kind: "" }); return; }
-      const fimAntes = rotuloDia(p, prev.fimAntes - 1);
+      const fimAntes = rotuloDia(p, prev.fimAntes - 1), tecAntes = t.tec;
       aplicarAjuste(p, ti, m);
+      // 21/10: o técnico (e o que sai, se mudou) recebe o aviso no Hoje
+      avisarTecnico(p, ti, `${t.nome}: ${prev.texto}`, agora());
+      if (tecAntes && tecAntes !== t.tec) avisarTecnico(p, ti, `${t.nome} passou para outro técnico: já não é consigo`, agora(), tecAntes);
       const fimDepois = rotuloDia(p, prev.fimDepois - 1);
       const alt: Alteracao = { q: agora(), dia: p.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, t: prev.texto, motivo: motivo.trim(), fimAntes, fimDepois, cliente };
       if (cliente) alt.avisoCliente = textoAvisoCliente(t.nome, motivo.trim(), fimAntes, fimDepois);
@@ -1897,6 +1910,46 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     tratarSeguranca(id: number, k: string) {
       const d = deal(id); (d.obra.seg ??= {})[k] = agora();
       log(d, "Obra: segurança · " + k + " tratado");
+    },
+    /* -------------------------------------------- 21/10: o validador junta, muda de fase e tira tarefas (tarefasValidador.ts) */
+    novaTarefaPlano(id: number, n: NovaTarefa): number | null {
+      const d = deal(id), p = d.obra.plano, s = S.svc[n.sid];
+      if (!p || !s || p.estado === "concluída") return null;
+      const t = criarTarefa(p, s, n), ti = juntarTarefa(p, t);
+      avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+      const tec = TECS.find((x) => x.id === t.tec);
+      log(d, `Plano: tarefa nova · ${t.nome} (fase ${t.fase ?? "—"}, ${t.dur} ${t.dur === 1 ? "dia" : "dias"}${tec ? ", " + tec.n : ""})`);
+      if (!A.planoMudou(d)) avisar({ msg: "Tarefa juntada ao plano", sub: `${t.nome} · ${rotuloDia(p, t.dia)}`, kind: "ok" });
+      return ti;
+    },
+    moverTarefaPlano(id: number, ti: number, m: { fase?: number; dia?: number }) {
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
+      const antes = `${t.fase}-${t.dia}`;
+      moverTarefa(p, ti, m);
+      if (`${t.fase}-${t.dia}` === antes) return;
+      avisarTecnico(p, ti, `${t.nome} mudou: fase ${t.fase ?? "—"}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+      log(d, `Plano: ${t.nome} · fase ${t.fase ?? "—"}, a partir de ${rotuloDia(p, t.dia)}`);
+      if (!A.planoMudou(d)) avisar({ msg: m.fase != null ? `Passou para a fase ${t.fase}` : "Tarefa mudada", sub: `${t.nome} · ${rotuloDia(p, t.dia)}`, kind: "ok" });
+    },
+    tirarTarefaPlano(id: number, ti: number) {
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "concluída" || !tirarTarefa(p, ti)) return;
+      if (t.tec) avisarTecnico(p, -1, `${t.nome} saiu do plano`, agora(), t.tec);
+      log(d, `Plano: tarefa ${t.nome} tirada`);
+      if (!A.planoMudou(d)) avisar({ msg: "Tarefa tirada do plano", sub: t.nome, kind: "ok" });
+    },
+    /** Os materiais de uma tarefa (a lista inteira, já mudada). */
+    matsTarefa(id: number, ti: number, mats: MatTarefa[]) {
+      const p = deal(id).obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "concluída") return;
+      if (JSON.stringify(t.mats) !== JSON.stringify(mats)) avisarTecnico(p, ti, `Os materiais de ${t.nome} mudaram`, agora());
+      t.mats = mats.filter((m) => m.q > 0).map((m) => ({ ...m }));
+    },
+    /** O técnico viu o aviso. */
+    avisoLido(id: number, k: number) {
+      const a = deal(id).obra.plano?.avisos?.[k];
+      if (a && !a.lido) a.lido = agora();
     },
     /** Volta ao plano que veio do orçamento (datas, dias e técnicos; as notas ficam). */
     reporPlano(id: number) {

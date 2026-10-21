@@ -31,6 +31,7 @@ import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { DiaDaObra, FitaDias, HistoricoTarefa, Miniaturas, nomeTec } from "./AcompanhamentoObra";
 import { Conversa } from "./ConversaObra";
 import { pedirFrota } from "./frota/pontes";
+import { BarraTarefa, ExtrasTarefa, TarefasDoPlano } from "./PlanoInterativo";
 import { MOTIVOS_AJUSTE, TEMPOS_CORRECAO, duracaoMinima, enviosDe, inicioMinimoVivo, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, textoAvisoCliente } from "./trabalhoObra";
 
 const ESTADO_PLANO: Record<string, string> = {
@@ -308,6 +309,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       </nav>
 
       <PlanoGantt ctx={ctx} d={d} aberta={aberta} setAberta={setAberta} muda={muda} sel={p.estado === "em curso" ? sel : null} setSel={p.estado === "em curso" ? (k) => { setSel(k); irPara("hoje"); } : undefined} />
+      <TarefasDoPlano ctx={ctx} d={d} />
       {p.estado === "em curso" && <Acompanhamento ctx={ctx} d={d} sel={sel} setSel={setSel} ajustar={(ti) => { setAberta(ti); irPara("plano"); }} />}
       {p.estado === "em curso" && <PorValidar ctx={ctx} d={d} />}
       <ConversaNaObra ctx={ctx} d={d} />
@@ -497,7 +499,7 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
       {D.horas > 0 && <p className="mt-1 flex items-start gap-2 text-sm text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />+{nfmt(D.horas)} h de equipa: cerca de +{eur(custoMais)} € de custo. O preço ao cliente não muda.</p>}
       {muda && (
         <p className={cn(NOTA, "mt-1")}>
-          Toque numa tarefa para a ajustar: dias, início, técnico e nota.{p.estado === "aprovado" && " Mudar o plano aprovado volta a pô-lo por aprovar."}
+          Arraste uma barra para mudar o início (ou largue-a noutra fase); puxe a ponta para mudar os dias. Toque numa tarefa para o técnico, os materiais e a nota.{p.estado === "aprovado" && " Mudar o plano aprovado volta a pô-lo por aprovar."}
           {D.mexidas.length > 0 && <> <button type="button" onClick={() => run(() => A.reporPlano(d.id))} className="inline-flex min-h-9 items-center gap-1 font-medium text-primary underline-offset-4 hover:underline"><RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Repor o plano do orçamento</button></>}
         </p>
       )}
@@ -553,7 +555,7 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
                 const tec = TECS.find((x) => x.id === t.tec), c = C.some((x) => x.t === t), ex = estadoDe(t), aqui = aberta === i;
                 const cor = novo && t.fase ? COR_FASE[t.fase] : "hsl(var(--primary))";
                 return (
-                  <li key={i} className="py-1">
+                  <li key={i} data-fase={t.fase ?? 0} className="py-1">
                     <button type="button" onClick={() => setAberta(aqui ? null : i)} aria-expanded={aqui}
                       className={cn("sticky left-4 flex min-h-9 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary", aqui && "text-primary")}
                       style={{ width: linhaW }}>
@@ -565,10 +567,14 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
                         : <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-muted-foreground">{dias(t.dur)} · {nfmt(t.h)} h</span>}
                     </button>
                     <div className="relative h-7" style={{ width: gradeW }}>
-                      <span className={cn("absolute top-0.5 h-6 rounded-md transition-[left,width] duration-300", c && "ring-2 ring-warning", ex === "feita" && "ring-2 ring-warning/70", ex === "corrigir" && "ring-2 ring-destructive", aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card")}
-                        style={{ left: X(t.dia) + 2, width: Math.max(10, X(t.dur) - 4), background: cor, opacity: ex === "validada" || p.estado === "concluída" ? 0.55 : 1 }} aria-hidden="true">
+                      {/* 21/10: a barra arrasta-se (início e fase) e a ponta puxa os dias (PlanoInterativo.tsx) */}
+                      <BarraTarefa p={p} t={t} ti={i} colW={colW} x={X(t.dia) + 2} largura={X(t.dur) - 4} cor={cor} ativa={muda} abrir={() => setAberta(aqui ? null : i)}
+                        mover={(dia, fase) => run(() => (fase ? A.moverTarefaPlano(d.id, i, { fase, dia }) : A.ajustarTarefa(d.id, i, { dia })))} durar={(dur) => run(() => A.ajustarTarefa(d.id, i, { dur }))}
+                        rotulo={`${t.nome}, ${rotuloDia(p, t.dia)}, ${dias(t.dur)}${muda ? ". Arraste para mudar o início ou a fase; a ponta muda os dias. Teclado: setas, Shift + setas, Alt + setas." : ""}`}
+                        className={cn(c && "ring-2 ring-warning", ex === "feita" && "ring-2 ring-warning/70", ex === "corrigir" && "ring-2 ring-destructive", aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card")}
+                        style={{ opacity: ex === "validada" || p.estado === "concluída" ? 0.55 : 1 }}>
                         {(ex === "validada" || p.estado === "concluída") && <Check className="absolute right-1.5 top-1 h-4 w-4 text-white" />}
-                      </span>
+                      </BarraTarefa>
                     </div>
                   </li>
                 );
@@ -642,6 +648,7 @@ function AjustarTarefa({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: numbe
           </dd>
         </div>
       </dl>
+      <ExtrasTarefa ctx={ctx} d={d} ti={ti} fechar={fechar} />
       {conflitos(p).some((c) => c.t === t) && <p className="mt-2 flex items-start gap-2 text-[15px] text-warning"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />O técnico está de férias nesses dias: troque-o ou mude o início.</p>}
     </section>
   );
@@ -995,6 +1002,7 @@ function AjustarAoVivo({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: numbe
         <Button size="lg" variant="ghost" onClick={fechar}>Cancelar</Button>
       </div>
       {muda && !motivo.trim() && <p className={cn(NOTA, "mt-2")}>Escolha o porquê: fica no diário e, se avisar, no portal do cliente.</p>}
+      <div className="mt-4"><ExtrasTarefa ctx={ctx} d={d} ti={ti} fase={false} fechar={fechar} /></div>
     </section>
   );
 }
