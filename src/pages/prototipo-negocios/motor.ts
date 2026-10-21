@@ -211,15 +211,16 @@ export interface Orcamento {
 }
 /** O que o cliente pediu numa cláusula do contrato: o título da cláusula e o que não lhe agrada. */
 export interface PedidoClausula { c: string; nota: string }
-/** A assinatura do contrato pelo cliente (15/10): desenhada no ecrã (a imagem PNG) ou com a Chave Móvel Digital (simulada no protótipo). */
+/** A assinatura do cliente (15/10; 21/10: Chave Móvel Digital ou código por SMS, como a sms-otp da Olyvia original; o desenho ficou só nas antigas). */
 export interface Assinatura {
-  tipo: "desenho" | "digital";
+  /** 21/10: "digital" = Chave Móvel Digital, "sms" = código por SMS; "desenho" só nas assinaturas antigas (já não se assina assim) */
+  tipo: "desenho" | "digital" | "sms";
   /** desenho: a imagem (data URL PNG) */
   imagem?: string;
   nome: string;
   /** quando, "dd/mm/aaaa hh:mm" */
   q: string;
-  /** digital: o identificador da assinatura */
+  /** digital e sms: o identificador da assinatura */
   id?: string;
   /** digital: o telemóvel, mascarado (ex.: "9•• ••• 123") */
   telemovel?: string;
@@ -270,6 +271,9 @@ export interface AvisoTec { tec: string; ti: number; t: string; q: string; lido?
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
 export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
 export interface Evento { t: string; q: string; k: "a" | "w" | "x" }
+
+/** 21/10: como o cliente assinou, para o histórico e os documentos ("Chave Móvel Digital", "código por SMS"). */
+export const comoAssinou = (a: Assinatura): string => a.tipo === "digital" ? "Chave Móvel Digital" : a.tipo === "sms" ? "código por SMS" : "desenhada no ecrã";
 
 export interface Negocio {
   id: number;
@@ -1586,7 +1590,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), o = d.orc;
       if (!o || o.contrato !== "enviado") return;
       o.assinatura = { ...a };
-      log(d, "Assinatura do contrato: " + (a.tipo === "digital" ? "Chave Móvel Digital" + (a.id ? " (" + a.id + ")" : "") : "desenhada no ecrã") + " · " + a.q);
+      log(d, "Assinatura do contrato: " + comoAssinou(a) + (a.id ? " (" + a.id + ")" : "") + " · " + a.q);
       A.assinar(id);
     },
     assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },

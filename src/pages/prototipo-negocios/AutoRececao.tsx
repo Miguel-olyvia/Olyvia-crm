@@ -65,7 +65,7 @@ export function AutoRececaoDoc({ d }: { d: Negocio }) {
         {([
           ["Pela empresa", `${RESPONSAVEL_OBRA.n} · ${RESPONSAVEL_OBRA.papel}`, empresa, "Assinado", "Certificado qualificado"],
           ["O cliente", d.f.nome_fiscal || d.nome, assinado ? au.assinatura ?? null : null,
-            assinado ? (au.assinatura?.tipo === "desenho" ? "Assinado no ecrã, no portal" : "Assinado com Chave Móvel Digital") : "À espera da assinatura", undefined],
+            assinado ? (au.assinatura?.tipo === "desenho" ? "Assinado no ecrã, no portal" : au.assinatura?.tipo === "sms" ? "Assinado com código por SMS" : "Assinado com Chave Móvel Digital") : "À espera da assinatura", undefined],
         ] as [string, string, Assinatura | null, string, string | undefined][]).map(([q, nome, a, est, meio]) => (
           <div key={q} className="flex flex-col">
             <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>

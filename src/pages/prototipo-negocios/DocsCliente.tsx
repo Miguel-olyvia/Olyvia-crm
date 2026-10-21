@@ -504,7 +504,7 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
             o.contrato ? { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: o.assinatura?.q ?? "", id: `MDL-${d.id}` } as Assinatura : null,
             o.contrato ? "Assinado" : ""],
           ["O cliente", d.f.nome_fiscal || d.nome, o.contrato === "assinado" ? o.assinatura ?? null : null,
-            o.contrato === "assinado" ? (o.assinatura ? (o.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : "Assinado no ecrã, no portal") : "Assinado no portal") : o.contrato === "enviado" ? "À espera da assinatura" : ""],
+            o.contrato === "assinado" ? (o.assinatura ? (o.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : o.assinatura.tipo === "sms" ? "Assinado com código por SMS" : "Assinado no ecrã, no portal") : "Assinado no portal") : o.contrato === "enviado" ? "À espera da assinatura" : ""],
         ] as [string, string, Assinatura | null, string][]).map(([q, nome, a, est]) => (
           <div key={q} className="flex flex-col">
             <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
@@ -596,7 +596,7 @@ export function AdendaDoc({ S, d, a }: { S?: Estado; d: Negocio; a: Adenda }) {
           ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
             { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: a.criada, id: `MDL-${a.n.replace(/\D+/g, "")}` } as Assinatura, "Assinado"],
           ["O cliente", d.f.nome_fiscal || d.nome, a.assinatura ?? null,
-            a.estado === "assinada" ? (a.assinatura ? (a.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : "Assinado no ecrã, no portal") : "Assinado no portal") : "À espera da assinatura"],
+            a.estado === "assinada" ? (a.assinatura ? (a.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : a.assinatura.tipo === "sms" ? "Assinado com código por SMS" : "Assinado no ecrã, no portal") : "Assinado no portal") : "À espera da assinatura"],
         ] as [string, string, Assinatura | null, string][]).map(([q, nome, as, est]) => (
           <div key={q} className="flex flex-col">
             <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>

@@ -15,7 +15,7 @@ export interface Adenda {
   n: string; estado: "enviada" | "assinada" | "recusada" | "anulada"; criada: string; assinada?: string;
   recusada?: string; recusa?: string;
   motivo: string; linhas: LinhaAdenda[];
-  /** 15/10: a assinatura do cliente no portal (desenho ou Chave Móvel Digital), como no contrato. */
+  /** 15/10: a assinatura do cliente no portal (Chave Móvel Digital ou código por SMS; o desenho só nas antigas), como no contrato. */
   assinatura?: Assinatura;
   /** 21/10: nasceu de um imprevisto na obra (imprevistos.ts): o que o técnico encontrou, onde e a fotografia */
   origem?: { imprevisto: string; texto: string; onde: string; foto?: string };

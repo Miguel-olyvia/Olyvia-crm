@@ -58,7 +58,7 @@ export function ContratoAssinado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="min-w-0 flex-1">
           <p className="text-[15px]"><b className="font-semibold">Contrato CT 2026/{d.id} assinado</b> <span className="text-muted-foreground">· gerou o plano da obra; a encomenda de cliente emite-se com o pagamento</span></p>
           <p className="text-sm text-muted-foreground">
-            {a ? <>{a.nome} · {a.tipo === "digital" ? `Chave Móvel Digital${a.telemovel ? ` (${a.telemovel})` : ""}` : "desenhada no ecrã, no portal"} · {a.q}</> : "No portal do cliente"}
+            {a ? <>{a.nome} · {a.tipo === "desenho" ? "desenhada no ecrã, no portal" : `${a.tipo === "sms" ? "Código por SMS" : "Chave Móvel Digital"}${a.telemovel ? ` (${a.telemovel})` : ""}`} · {a.q}</> : "No portal do cliente"}
           </p>
         </div>
         {a && <div className="w-full sm:w-auto sm:max-w-[14rem]"><SeloAssinatura a={a} compacto /></div>}

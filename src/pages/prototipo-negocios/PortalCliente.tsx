@@ -370,9 +370,9 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       </>
     );
   } else if (P.estado === "assinar") {
-    // 15/10: assinar abre aqui, no cartão do passo: desenhar no ecrã ou Chave Móvel Digital (AssinaturaContrato.tsx)
+    // 15/10: assinar abre aqui, no cartão do passo: Chave Móvel Digital ou código por SMS (AssinaturaContrato.tsx)
     agora = confirmar === "assinar" ? (
-      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={`CT 2026/${d.id}`}
+      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={`CT 2026/${d.id}`}
         onAssinar={(a) => fazer(() => A.assinarCom(d.id, a))} onCancelar={() => setConfirmar(null)} />
     ) : (
       pedirContrato ? (
@@ -416,7 +416,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     const a = adendaAgora, dd = diasAdenda(a.linhas);
     const V = valorContrato(d, S), depois = V.total + totalComIva(a.linhas);
     agora = confirmar === "adenda" ? (
-      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={a.n} aceito={`Li e aceito a adenda ${a.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
+      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={a.n} aceito={`Li e aceito a adenda ${a.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
         onAssinar={(as) => fazer(() => A.assinarAdendaCom(d.id, a.n, as))} onCancelar={() => setConfirmar(null)} />
     ) : confirmar === "naoAdenda" ? (
       // 21/10: o cliente pode dizer que não; o contrato e o plano ficam como estão e o comercial vê o porquê
@@ -448,7 +448,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     );
   } else if (P.estado === "auto" && au) {
     agora = confirmar === "auto" ? (
-      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={au.n} aceito={`Recebi a obra e li o auto de receção ${au.n}.`} acao="Assinar o auto" voltar="Voltar ao auto"
+      <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={au.n} aceito={`Recebi a obra e li o auto de receção ${au.n}.`} acao="Assinar o auto" voltar="Voltar ao auto"
         onAssinar={(as) => fazer(() => A.assinarAuto(d.id, as, receber === "obs" ? obs : undefined))} onCancelar={() => setConfirmar(null)} />
     ) : (
       <>

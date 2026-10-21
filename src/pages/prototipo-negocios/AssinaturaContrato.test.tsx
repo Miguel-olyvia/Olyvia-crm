@@ -1,13 +1,11 @@
-// A assinatura do contrato no portal (15/10): a ação do motor, as duas formas de assinar e o contrato com a assinatura.
+// A assinatura do contrato no portal (15/10; 21/10: Chave Móvel Digital ou código por SMS, sem caneta): a ação do motor, as duas formas e o contrato.
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Assinatura, type Negocio } from "./motor";
 import { AssinaturaContrato, agoraAssinatura, mascararTelemovel, telemovelValido } from "./AssinaturaContrato";
 import { ContratoDoc } from "./DocsCliente";
 
 afterEach(cleanup);
-// o jsdom não desenha: sem contexto 2D, o componente conta só o comprimento do traço
-beforeEach(() => { vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null); });
 
 const preparar = () => {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn());
@@ -42,32 +40,49 @@ describe("assinatura do contrato", () => {
     expect(mascararTelemovel("912345678")).toBe("9•• ••• 678");
   });
 
-  it("desenhar: o botão só fica ativo com traço suficiente e o 'Li e aceito'", () => {
+  it("não há caneta: só Chave Móvel Digital ou código por SMS", () => {
+    render(<AssinaturaContrato nome="Carla Nunes" contrato="CT 2026/1031" onAssinar={vi.fn()} onCancelar={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /Desenhar/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Chave Móvel Digital/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Código por SMS/ })).toBeTruthy();
+  });
+
+  it("código por SMS (regras da sms-otp): para o telemóvel do negócio, 5 tentativas, depois pede-se outro", () => {
     const onAssinar = vi.fn();
-    render(<AssinaturaContrato nome="Carla Nunes" contrato="CT 2026/1031" onAssinar={onAssinar} onCancelar={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Desenhar no ecrã/ }));
-    const assinar = () => screen.getByRole("button", { name: /Assinar o contrato/ }) as HTMLButtonElement;
-    const tela = screen.getByTestId("tela-assinatura");
+    render(<AssinaturaContrato nome="Carla Nunes" telemovel="916 004 552" contrato="CT 2026/1031" onAssinar={onAssinar} onCancelar={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Código por SMS/ }));
+    expect(screen.getByText(/telemóvel 9•• ••• 552/)).toBeTruthy();
+    expect(screen.queryByLabelText("Telemóvel")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar o código por SMS" }));
+    expect(screen.getByText(/O seu código de verificação é: \d{6}\. Válido por 5 minutos\./)).toBeTruthy();
+    const certo = screen.getByTestId("codigo-sms").textContent!;
+    const errado = certo === "111111" ? "222222" : "111111";
+    const codigo = () => screen.getByLabelText("Código de 6 dígitos");
     fireEvent.click(screen.getByRole("checkbox", { name: /Li e aceito o contrato CT 2026\/1031/ }));
-    // um risco curto não chega
-    fireEvent.pointerDown(tela, { clientX: 10, clientY: 10, pointerId: 1 });
-    fireEvent.pointerMove(tela, { clientX: 30, clientY: 10, pointerId: 1 });
-    fireEvent.pointerUp(tela, { pointerId: 1 });
+    const assinar = () => screen.getByRole("button", { name: /Assinar o contrato/ }) as HTMLButtonElement;
+    fireEvent.change(codigo(), { target: { value: errado } });
+    expect(screen.getByText("Código incorreto. Restam 4 tentativas.")).toBeTruthy();
     expect(assinar().disabled).toBe(true);
-    expect(screen.getByText(/a assinatura está curta/)).toBeTruthy();
-    // uma assinatura a sério
-    fireEvent.pointerDown(tela, { clientX: 10, clientY: 40, pointerId: 1 });
-    for (const [x, y] of [[40, 20], [80, 50], [120, 25], [170, 45]]) fireEvent.pointerMove(tela, { clientX: x, clientY: y, pointerId: 1 });
-    fireEvent.pointerUp(tela, { pointerId: 1 });
-    expect(screen.getByText("Assinatura pronta")).toBeTruthy();
+    // reenviar só ao fim de 60 s
+    expect((screen.getByRole("button", { name: /Pedir outro código daqui a 60 s/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(codigo(), { target: { value: certo } });
+    expect(screen.getByText("Código confirmado.")).toBeTruthy();
     expect(assinar().disabled).toBe(false);
     fireEvent.click(assinar());
-    expect(onAssinar).toHaveBeenCalledTimes(1);
     const a = onAssinar.mock.calls[0][0] as Assinatura;
-    expect(a.tipo).toBe("desenho");
-    expect(a.nome).toBe("Carla Nunes");
-    expect(a.imagem).toMatch(/^data:image\/png/);
-    expect(a.q).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/);
+    expect(a).toMatchObject({ tipo: "sms", nome: "Carla Nunes", telemovel: "9•• ••• 552" });
+    expect(a.id).toMatch(/^SMS-[A-Z0-9]{6}$/);
+  });
+
+  it("código por SMS: à 5.ª falha o código deixa de valer", () => {
+    render(<AssinaturaContrato nome="Carla Nunes" telemovel="916004552" contrato="CT 2026/1031" onAssinar={vi.fn()} onCancelar={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Código por SMS/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Enviar o código por SMS" }));
+    const certo = screen.getByTestId("codigo-sms").textContent!;
+    const errado = certo === "111111" ? "222222" : "111111";
+    for (let i = 0; i < 5; i++) fireEvent.change(screen.getByLabelText("Código de 6 dígitos"), { target: { value: errado } });
+    expect(screen.getByText(/Número máximo de tentativas excedido/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enviar o código por SMS" })).toBeTruthy();
   });
 
   it("Chave Móvel Digital: telemóvel e PIN, depois um código de 6 dígitos", () => {
@@ -94,7 +109,7 @@ describe("assinatura do contrato", () => {
     expect(a.id).toMatch(/^CMD-[A-Z0-9]{6}$/);
   });
 
-  it("o contrato mostra a assinatura do cliente (o desenho) e o selo da empresa", () => {
+  it("o contrato mostra a assinatura antiga do cliente (o desenho) e o selo da empresa", () => {
     const { S, A, d } = preparar();
     A.assinarCom(d.id, { tipo: "desenho", imagem: "data:image/png;base64,AAAA", nome: d.nome, q: "15/10/2026 14:35" });
     render(<ContratoDoc S={S} d={d} />);
