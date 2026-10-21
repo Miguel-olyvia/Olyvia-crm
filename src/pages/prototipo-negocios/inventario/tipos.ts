@@ -42,7 +42,16 @@ export interface AlteracaoPreco { id: string; sup: string; itemId: string; cur: 
 export type EstadoPortal = "none" | "sent" | "seen" | "confirmed" | "withdrawn" | "email";
 /** SÓ PROTÓTIPO (20/10, demo): a expedição pelo fornecedor no portal, com a guia de remessa dele. O portal real não tem expedição; cada envio
  *  (parcial ou total) fica aqui e cria a guia do fornecedor aberta (Guia, doPortal), que a Receção lê pelo número. Quantidades em unidades. */
-export interface Expedicao { guia: string; data: string; at: string; linhas: { lineId: string; qty: number }[]; transportador: string; obs: string }
+/** SÓ PROTÓTIPO (21/10): o ficheiro da guia de remessa que o fornecedor anexa ao expedir (PDF ou imagem). Guardado como dataURL em `url`:
+ *  viaja com a sincronização entre aparelhos (um blob: só abria no browser de quem anexou). */
+export interface AnexoGuia { nome: string; tipo: string; tamanho: number; url: string }
+export interface Expedicao {
+  guia: string; data: string; at: string; linhas: { lineId: string; qty: number }[]; transportador: string; obs: string;
+  /** O ficheiro da guia de remessa (opcional; as expedições antigas não o têm). */
+  anexo?: AnexoGuia;
+  /** Quem a registou: o fornecedor, no portal (opcional nas expedições antigas, que também vêm do fornecedor). */
+  origem?: "fornecedor";
+}
 export interface PoPortal {
   state: EstadoPortal; sent: string | null; seen: string | null; confirmed: string | null; promised: string | null; comment: string; withdrawn?: string; emails?: { at: string; to: string; t: string; ok: boolean; err?: string }[];
   /** SÓ PROTÓTIPO: as expedições do fornecedor (com a encomenda confirmada). */
@@ -83,6 +92,10 @@ export interface Guia {
   id: string; sup: string; date: string; wh: string; ann: { sku: string; qty: number }[]; pos: string[]; state: "open" | "closed" | "cancelled"; note: string; history: { at: string; t: string }[];
   /** SÓ PROTÓTIPO: guia de remessa emitida pelo fornecedor no portal (portalExpedir): a Receção abre logo as POs dela. */
   doPortal?: boolean;
+  /** SÓ PROTÓTIPO (21/10): "fornecedor" = enviada pelo fornecedor no portal ao expedir (as antigas só têm doPortal). */
+  origem?: "fornecedor";
+  /** SÓ PROTÓTIPO (21/10): o ficheiro da guia de remessa anexado pelo fornecedor. */
+  anexo?: AnexoGuia;
 }
 export type Resolucao = "" | "adjusted" | "accepted" | "recount";
 export interface LinhaContagem { sku: string; sys: number; counted: number | null; res: Resolucao; note: string }

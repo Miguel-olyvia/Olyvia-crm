@@ -1,5 +1,5 @@
 // As guias do fornecedor: o que foi anunciado contra o que foi recebido, fechar com nota quando há divergências, reabrir e cancelar. Portado do mockup.
-import { HOJE, agora, exigir, exigirMotivo, falhar, guiaPorId, nomeForn, utilizadorAtual } from "./base";
+import { HOJE, agora, exigir, exigirMotivo, falhar, guiaPorId, mesmaGuia, nomeForn, utilizadorAtual } from "./base";
 import type { Guia, Inventario } from "./tipos";
 
 export type TipoDiferenca = "ok" | "falta" | "excesso" | "div";
@@ -38,7 +38,7 @@ export function guardarGuia(db: Inventario, d: DadosGuia): Guia {
   const no = (d.no ?? "").trim();
   if (!no) falhar("Indique o número da guia.");
   if (!d.sup) falhar("Escolha o fornecedor.");
-  const dup = db.guias.find((g) => g.id.toLowerCase() === no.toLowerCase() && g.sup === d.sup && g.id !== d.orig);
+  const dup = db.guias.find((g) => mesmaGuia(g.id, no) && g.sup === d.sup && g.id !== d.orig);
   if (dup) falhar(`Guia duplicada: ${dup.id} de ${nomeForn(db, d.sup)} já existe (${GUIA_ESTADOS[dup.state].toLowerCase()}). Use a existente.`);
   const ann = d.ann.filter((a) => a.sku && a.qty > 0);
   const g0 = d.orig ? guiaPorId(db, d.orig) : undefined;

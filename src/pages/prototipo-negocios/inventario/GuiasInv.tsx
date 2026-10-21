@@ -2,12 +2,12 @@
 // A folha da guia (GuiaFolha) e os diálogos (GuiaDialogo) são ficheiros próprios. Igual ao ecrã scrRec do mockup.
 import { useState } from "react";
 import { Plus, ScanLine } from "lucide-react";
-import { fmtD, nomeForn } from "./base";
+import { fmtD, guiaEnviadaForn, nomeForn } from "./base";
 import { AcoesCab, Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
 import { contaGuias, filtrarGuias, type FiltrosGuia } from "./filtros";
 import { GuiaForm } from "./GuiaDialogo";
-import { SeloGuia } from "./GuiaFolha";
+import { SeloGuia, SeloOrigemGuia } from "./GuiaFolha";
 import { resumoGuia } from "./guias";
 import { Chip } from "./mockPecas";
 import { Selo, Vazio } from "./pecasInv";
@@ -41,7 +41,7 @@ function PainelGuias() {
         <TabelaInv titulo="Guias do fornecedor" minimo={640} chave={(g) => g.id} linhas={lista} abrir={(g) => abrir({ t: "guia", id: g.id })} rotuloAbrir={(g) => `Abrir a guia ${g.id}`}
           colunas={[
             { id: "n", titulo: "Nº", classe: () => "mono", celula: (g) => <b>{g.id}</b>, valor: (g) => g.id },
-            { id: "f", titulo: "Fornecedor", celula: (g) => nomeForn(db, g.sup), valor: (g) => nomeForn(db, g.sup) },
+            { id: "f", titulo: "Fornecedor", celula: (g) => <>{nomeForn(db, g.sup)}{guiaEnviadaForn(g) ? <><br /><SeloOrigemGuia g={g} />{g.anexo ? <small className="muted"> · com ficheiro</small> : null}</> : null}</>, valor: (g) => nomeForn(db, g.sup) },
             { id: "d", titulo: "Data", celula: (g) => fmtD(g.date), valor: (g) => g.date },
             { id: "p", titulo: "POs", classe: () => "mono", celula: (g) => g.pos.length ? <span style={{ fontSize: 12 }}>{g.pos.map((p, i) => <span key={p}>{i > 0 ? <br /> : null}{p}</span>)}</span> : "—" },
             { id: "ar", titulo: "Anunciado / Recebido", direita: true, celula: (g) => { const s = resumoGuia(db, g); return `${s.annT} / ${s.recT}`; } },

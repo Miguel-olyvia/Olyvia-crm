@@ -1,8 +1,9 @@
 // A folha da guia do fornecedor (guiaSheet do mockup): anunciado contra recebido, as receções por esta guia, o histórico e as ações por estado
 // (editar, cancelar, fechar, usar na receção; reabrir; criar nova). Com o perfil "Só consulta" os botões que mudam a guia ficam desativados.
 import { useState, type ReactNode } from "react";
-import { AlertTriangle, Check, Lock, Pencil, Plus, Printer, ScanLine } from "lucide-react";
-import { fmtD, fmtDT, guiaPorId, nomeArm, nomeForn, nomeProd } from "./base";
+import { AlertTriangle, Check, ExternalLink, Lock, Pencil, Plus, Printer, ScanLine } from "lucide-react";
+import { fmtD, fmtDT, guiaEnviadaForn, guiaPorId, nomeArm, nomeForn, nomeProd } from "./base";
+import { abrirAnexoGuia, tamanhoAnexo } from "./anexoGuia";
 import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
 import { Confirmar, Folha } from "./DialogosInv";
@@ -16,6 +17,14 @@ import type { Guia, Inventario, Tom } from "./tipos";
 
 export const TOM_GUIA: Record<Guia["state"], Tom> = { open: "info", closed: "ok", cancelled: "neu" };
 export const SeloGuia = ({ g }: { g: Guia }) => <Selo tom={TOM_GUIA[g.state]}>{GUIA_ESTADOS[g.state]}</Selo>;
+/** SÓ PROTÓTIPO (21/10): a guia veio do fornecedor, no portal (ao expedir). */
+export const SeloOrigemGuia = ({ g }: { g: Guia }) => (guiaEnviadaForn(g) ? <Selo tom="violet">Fornecedor (portal)</Selo> : null);
+/** O ficheiro da guia anexado pelo fornecedor: nome, tamanho e "Ver guia" (separador novo). */
+export function AnexoGuiaLinha({ g }: { g: Guia }) {
+  if (!g.anexo) return <span className="muted">Sem ficheiro</span>;
+  const a = g.anexo;
+  return <span>{a.nome} <small className="muted">({tamanhoAnexo(a.tamanho)})</small> <button type="button" className="link" onClick={() => abrirAnexoGuia(a)}><ExternalLink className="ic sm" aria-hidden="true" /> Ver guia<span className="sr"> (abre num separador novo)</span></button></span>;
+}
 const TIPO: Record<TipoDiferenca, [string, Tom]> = { ok: ["Certo", "ok"], falta: ["Falta", "warn"], excesso: ["Excesso", "warn"], div: ["Divergência (não anunciado)", "bad"] };
 
 type Dlg = "editar" | "fechar" | "cancelar" | "nova" | "pdf" | "associar";
@@ -92,10 +101,11 @@ export function GuiaFolha({ id, aoFechar }: { id: string; aoFechar: () => void }
   const doG = (d: typeof db): Guia => guiaPorId(d, id) as Guia;
   const usar = (): void => { agir((d) => fixarRececao(d, { guia: id })); ir({ aba: "guia" }); };
   const info: [string, ReactNode][] = [["Fornecedor", nomeForn(db, g.sup)], ["Data", fmtD(g.date)], ["Armazém", nomeArm(db, g.wh)],
+    ["Origem", guiaEnviadaForn(g) ? "Fornecedor (portal)" : "Registada no armazém"], ...(guiaEnviadaForn(g) ? [["Ficheiro da guia", <AnexoGuiaLinha key="a" g={g} />] as [string, ReactNode]] : []),
     ["Encomendas", g.pos.length ? <FolhaPos key="p" pos={g.pos} /> : "—"], ...(g.note ? [["Nota", g.note] as [string, ReactNode]] : [])];
   return (
     <Folha aberta aoFechar={aoFechar} chave={id} titulo={g.id} tituloClasse="mono" subtitulo="Armazém › Receção › Guia do fornecedor" abas={<Dados itens={info} />}
-      selos={<><SeloGuia g={g} />{s.div ? <Selo tom="bad">{s.div} divergência(s)</Selo> : null}</>}
+      selos={<><SeloGuia g={g} /><SeloOrigemGuia g={g} />{s.div ? <Selo tom="bad">{s.div} divergência(s)</Selo> : null}</>}
       rodape={<Rodape g={g} ro={ro} abrirDlg={setDlg} aoUsar={usar} />}>
       <Corpo g={g} />
       {(dlg === "editar" || dlg === "nova") && <GuiaForm id={dlg === "editar" ? id : undefined} aoFechar={() => setDlg(null)} />}

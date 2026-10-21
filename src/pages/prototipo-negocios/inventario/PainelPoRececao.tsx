@@ -6,9 +6,10 @@
 // o motivo da diferença, que fica no histórico da PO (e da guia); "Não vou receber o resto" é o ReceberDialogo de sempre. Depois de receber, o
 // painel mostra o que entrou, "Ver EC-…" e as outras encomendas por receber do mesmo fornecedor. Fechar limpa a Receção (limparRececao).
 import { useState } from "react";
-import { ArrowRightLeft, Check as Visto, ScanLine } from "lucide-react";
+import { ArrowRightLeft, Check as Visto, ExternalLink, ScanLine } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { HOJE, agora, ecPorId, falhar, guiaPorId, nomeArm, nomeForn, nomeProd, poPorId } from "./base";
+import { HOJE, agora, chaveGuia, ecPorId, falhar, guiaDoForn, guiaEnviadaForn, guiaPorId, mesmaGuia, nomeArm, nomeForn, nomeProd, poPorId } from "./base";
+import { abrirAnexoGuia } from "./anexoGuia";
 import { useCtxInv } from "./ctxInv";
 import { Folha } from "./DialogosInv";
 import { SeloNova, SeloRec } from "./EncomendasPorReceber";
@@ -23,7 +24,7 @@ import { ReceberDialogo } from "./ReceberDialogo";
 import { abrirRececaoDaPo, fixarRececao, limparRececao } from "./rececao";
 import { faltaPo, novaConfirmacao, ordenarRececao, textoFalta } from "./rececaoLista";
 import { repartirRececao } from "./ec";
-import type { Inventario, Po, PoLinha } from "./tipos";
+import type { AnexoGuia, Inventario, Po, PoLinha } from "./tipos";
 
 /** "Entrou no Armazém Central · 8 un reservadas para Tiago Almeida · 2 un para stock." */
 export function textoEntrada(db: Inventario, p: Po, wh: string, out: ResultadoRececao): string {
@@ -55,18 +56,42 @@ function Previsao({ db, l, qty, wh, alvo }: { db: Inventario; l: PoLinha; qty: n
 
 interface Feito { texto: string; ecs: string[] }
 
+/** SÓ PROTÓTIPO (21/10): uma guia de remessa que o fornecedor enviou no portal para esta PO e que ainda se pode usar (aberta ou só na expedição). */
+interface GuiaEnviada { id: string; data: string; anexo?: AnexoGuia }
+/** As guias enviadas pelo fornecedor para esta PO: as das expedições (as antigas podem não ter guia na base) e as guias abertas do fornecedor
+ *  ligadas a ela; sem repetidos (comparadas sem espaços nem maiúsculas) e sem as fechadas/canceladas. */
+export function guiasEnviadasPo(db: Inventario, p: Po): GuiaEnviada[] {
+  const out = new Map<string, GuiaEnviada>();
+  for (const e of p.portal.expedicoes ?? []) {
+    const g = guiaDoForn(db, p.sup, e.guia);
+    if (g && g.state !== "open") continue;
+    out.set(chaveGuia(e.guia), { id: g?.id ?? e.guia, data: e.data, anexo: g?.anexo ?? e.anexo });
+  }
+  for (const g of db.guias) {
+    if (g.state === "open" && g.sup === p.sup && guiaEnviadaForn(g) && g.pos.includes(p.id) && !out.has(chaveGuia(g.id))) out.set(chaveGuia(g.id), { id: g.id, data: g.date, anexo: g.anexo });
+  }
+  return [...out.values()];
+}
+
+/** "Ver guia": abre o ficheiro que o fornecedor anexou (num separador novo); sem ficheiro diz isso. */
+function VerGuia({ anexo }: { anexo?: AnexoGuia }) {
+  return anexo
+    ? <button type="button" className="link" title={anexo.nome} onClick={() => abrirAnexoGuia(anexo)}><ExternalLink className="ic sm" aria-hidden="true" /> Ver guia<span className="sr"> (abre {anexo.nome} num separador novo)</span></button>
+    : <small className="muted">sem ficheiro</small>;
+}
+
 function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () => void }) {
   const { db, agir, abrir } = useCtxInv();
   const rc = db.rc;
   const g0 = rc.guia ? guiaPorId(db, rc.guia) : undefined;
   const [guia, setGuia] = useState(g0 && g0.sup === p.sup && g0.state === "open" ? g0.id : "");
   // SÓ PROTÓTIPO (20/10): com a guia de remessa de uma expedição do portal, o que vem é o que o fornecedor expediu nessa guia (menos o já recebido com ela)
-  const expedicaoDe = (x: Po, gtxt: string) => (gtxt.trim() ? (x.portal.expedicoes ?? []).find((e) => e.guia.toLowerCase() === gtxt.trim().toLowerCase()) : undefined);
+  const expedicaoDe = (x: Po, gtxt: string) => (gtxt.trim() ? (x.portal.expedicoes ?? []).find((e) => mesmaGuia(e.guia, gtxt)) : undefined);
   const vemDe = (x: Po, gtxt: string) => (l: PoLinha): number => {
     const e = expedicaoDe(x, gtxt);
     if (!e) return Math.max(0, poRem(l));
     const q = e.linhas.filter((y) => y.lineId === l.id).reduce((a, y) => a + y.qty, 0);
-    const ja = x.receipts.filter((r) => r.state === "Ativa" && r.type === "Receção" && r.lineId === l.id && (r.guia ?? "").toLowerCase() === e.guia.toLowerCase()).reduce((a, r) => a + r.qty, 0);
+    const ja = x.receipts.filter((r) => r.state === "Ativa" && r.type === "Receção" && r.lineId === l.id && mesmaGuia(r.guia, e.guia)).reduce((a, r) => a + r.qty, 0);
     return Math.max(0, Math.min(poRem(l), q - ja));
   };
   const exped = expedicaoDe(p, guia);
@@ -80,8 +105,12 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
   const [erro, setErro] = useState("");
   const [feito, setFeito] = useState<Feito | null>(null);
   const pode = can("inventory.receive") && poRecebivel(p);
-  const guias = db.guias.filter((g) => g.state === "open" && g.sup === p.sup);
-  const guiaNova = !!guia.trim() && !db.guias.some((g) => g.sup === p.sup && g.id.toLowerCase() === guia.trim().toLowerCase());
+  // as guias abertas do fornecedor e (SÓ PROTÓTIPO) as que ele enviou no portal para esta PO, que aparecem primeiro e com o selo
+  const enviadas = guiasEnviadasPo(db, p);
+  const guias = [...enviadas.map((e) => e.id), ...db.guias.filter((g) => g.state === "open" && g.sup === p.sup && !enviadas.some((e) => mesmaGuia(e.id, g.id))).map((g) => g.id)];
+  const escolhida = guia.trim() ? enviadas.find((e) => mesmaGuia(e.id, guia)) : undefined;
+  const guiaNova = !!guia.trim() && !escolhida && !guiaDoForn(db, p.sup, guia);
+  const usarGuia = (id: string): void => { setErro(""); setGuia(id); setQtd(faltaDe(p, id)); };
   const fila = lerFilaRececao();
   const abertas = p.lines.filter((l) => poRem(l) > 0);
   // o que vai entrar: tudo o que falta (resumo) ou o que se escreveu na conferência
@@ -107,11 +136,21 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
     const dif = diferencas.map((l) => `${l.sku} ${quanto(l)} de ${vem(l)}`).join(", ");
     const r = agir((d) => {
       const po = poPorId(d, p.id) ?? falhar("Encomenda inexistente: " + p.id);
-      // a guia: uma aberta do fornecedor ou uma nova (fica com o que se recebe como anunciado)
+      // a guia: uma aberta do fornecedor (a que ele enviou no portal é a mesma, nunca outra) ou uma nova (fica com o que se recebe como anunciado)
       let gid: string | null = null;
       if (gtxt) {
-        const g = d.guias.find((x) => x.sup === po.sup && x.id.toLowerCase() === gtxt.toLowerCase());
-        gid = g ? g.id : guardarGuia(d, { no: gtxt, sup: po.sup, wh, date: HOJE, ann: itens.map((i) => ({ sku: po.lines.find((l) => l.id === i.lineId)?.sku ?? "", qty: i.qty })) }).id;
+        const g = guiaDoForn(d, po.sup, gtxt);
+        const ex = g ? undefined : expedicaoDe(po, gtxt);
+        if (g) gid = g.id;
+        else if (ex) {
+          // SÓ PROTÓTIPO: expedição antiga sem guia na base — cria-a como a do portal (anunciado = expedido, com o ficheiro, se houver)
+          const ann = new Map<string, number>();
+          for (const x of ex.linhas) { const sku = po.lines.find((l) => l.id === x.lineId)?.sku ?? ""; ann.set(sku, (ann.get(sku) ?? 0) + x.qty); }
+          const ng = guardarGuia(d, { no: ex.guia, sup: po.sup, wh: po.wh, date: ex.data, ann: [...ann].map(([sku, qty]) => ({ sku, qty })) });
+          Object.assign(ng, { pos: [po.id], doPortal: true, origem: "fornecedor" as const, ...(ex.anexo ? { anexo: ex.anexo } : {}) });
+          ng.history.push({ at: agora(d), t: `Guia de remessa enviada pelo fornecedor no portal (${po.id}), registada na receção` });
+          gid = ng.id;
+        } else gid = guardarGuia(d, { no: gtxt, sup: po.sup, wh, date: HOJE, ann: itens.map((i) => ({ sku: po.lines.find((l) => l.id === i.lineId)?.sku ?? "", qty: i.qty })) }).id;
       }
       const out = receberLinhas(d, po, itens, wh, gid);
       if (dif) {
@@ -161,7 +200,7 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
         <>
           {fila.length > 0 && <Nota tom="info">Receber tudo: depois desta, {fila.length === 1 ? "falta 1 encomenda" : `faltam ${fila.length} encomendas`} deste bloco ({fila.join(", ")}).</Nota>}
           {p.status === "pending" && <Nota tom="warn">{p.id} ainda está pendente (não confirmada ao fornecedor). Pode dar entrada; passa a Encomendado, sem envio ao fornecedor.</Nota>}
-          {exped && <Nota tom="info">Guia de remessa {exped.guia} do fornecedor (expedida a {exped.data.split("-").reverse().join("/")}{exped.transportador ? ` · ${exped.transportador}` : ""}): as quantidades são as que vêm nesta guia.</Nota>}
+          {exped && <Nota tom="info">Guia de remessa {exped.guia} do fornecedor (expedida a {exped.data.split("-").reverse().join("/")}{exped.transportador ? ` · ${exped.transportador}` : ""}): as quantidades são as que vêm nesta guia.{escolhida?.anexo ? <> <VerGuia anexo={escolhida.anexo} /></> : null}</Nota>}
           {destaque && abertas.some((l) => l.sku === destaque) && <Nota tom="info"><ScanLine className="ic sm" aria-hidden="true" /> Lido: {nomeProd(db, destaque)} (linha destacada).</Nota>}
           <div className="fg" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
             <label className="fl">Entra em
@@ -169,10 +208,23 @@ function Corpo({ p, destaque, fechar }: { p: Po; destaque?: string; fechar: () =
             </label>
             <label className="fl">Guia do fornecedor (opcional)
               <input list={`rec-guias-${p.id}`} value={guia} disabled={!pode} placeholder="Escolher ou escrever o nº" autoComplete="off" onChange={(e) => { setErro(""); setGuia(e.target.value); }} />
-              <datalist id={`rec-guias-${p.id}`}>{guias.map((g) => <option key={g.id} value={g.id} />)}</datalist>
-              <small className="help">{guiaNova ? "Guia nova: fica criada ao receber." : guias.length ? `${guias.length} ${guias.length === 1 ? "guia aberta" : "guias abertas"} deste fornecedor.` : "Sem guias abertas deste fornecedor."}</small>
+              <datalist id={`rec-guias-${p.id}`}>{guias.map((id) => <option key={id} value={id} label={enviadas.some((e) => e.id === id) ? "Enviada pelo fornecedor" : undefined} />)}</datalist>
+              <small className="help">{guiaNova ? "Guia nova: fica criada ao receber."
+                : escolhida ? <><Selo tom="violet">Enviada pelo fornecedor</Selo> <VerGuia anexo={escolhida.anexo} /></>
+                : enviadas.length ? `${enviadas.length} ${enviadas.length === 1 ? "guia enviada" : "guias enviadas"} pelo fornecedor${guias.length > enviadas.length ? ` · ${guias.length - enviadas.length} ${guias.length - enviadas.length === 1 ? "outra aberta" : "outras abertas"}` : ""}.`
+                : guias.length ? `${guias.length} ${guias.length === 1 ? "guia aberta" : "guias abertas"} deste fornecedor.` : "Sem guias abertas deste fornecedor."}</small>
             </label>
           </div>
+          {enviadas.length > 0 && !escolhida && (
+            <ul aria-label="Guias enviadas pelo fornecedor" className="stack" style={{ gap: 6, listStyle: "none", margin: 0, padding: 0 }}>
+              {enviadas.map((e) => (
+                <li key={e.id} className="row between">
+                  <span className="row" style={{ gap: 8 }}><b className="mono">{e.id}</b><Selo tom="violet">Enviada pelo fornecedor</Selo><small className="muted">{e.data.split("-").reverse().join("/")}</small><VerGuia anexo={e.anexo} /></span>
+                  {pode && <Peq aria-label={`Usar a guia ${e.id}`} onClick={() => usarGuia(e.id)}>Usar esta guia</Peq>}
+                </li>
+              ))}
+            </ul>
+          )}
           <div>
             <b>Vai entrar {total} un ({nLinhas} {nLinhas === 1 ? "linha" : "linhas"})</b>
             <ul className="rec-prev">{abertas.filter((l) => quanto(l) > 0).map((l) => <Previsao key={l.id} db={db} l={l} qty={quanto(l)} wh={rc.wh} alvo={l.sku === destaque} />)}</ul>

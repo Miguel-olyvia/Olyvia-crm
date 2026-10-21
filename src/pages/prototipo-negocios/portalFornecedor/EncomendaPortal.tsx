@@ -81,7 +81,7 @@ export function EncomendaPortal({ id, s, empresa, voltar, avisar }: { id: string
           <AlertTitle>{expedicoes.length === 1 ? "Expedida" : `${expedicoes.length} expedições`}</AlertTitle>
           <AlertDescription>
             <ul className="space-y-0.5">
-              {expedicoes.map((e) => <li key={e.guia}>Guia de remessa <b className="font-mono">{e.guia}</b> · {fmtD(e.data)} · {e.linhas.reduce((a, x) => a + x.qty, 0)} un{e.transportador ? ` · ${e.transportador}` : ""}</li>)}
+              {expedicoes.map((e) => <li key={e.guia}>Guia de remessa <b className="font-mono">{e.guia}</b> · {fmtD(e.data)} · {e.linhas.reduce((a, x) => a + x.qty, 0)} un{e.transportador ? ` · ${e.transportador}` : ""}{e.anexo ? " · ficheiro anexado" : " · sem ficheiro"}</li>)}
             </ul>
           </AlertDescription>
         </Alert>

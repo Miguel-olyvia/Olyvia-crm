@@ -60,6 +60,13 @@ export const fornecedor = (db: Inventario, id: string): Fornecedor | undefined =
 export const poPorId = (db: Inventario, id: string): Po | undefined => db.pos.find((p) => p.id === id);
 export const ecPorId = (db: Inventario, id: string): Ec | undefined => db.ecs.find((e) => e.id === id);
 export const guiaPorId = (db: Inventario, id: string): Guia | undefined => db.guias.find((g) => g.id === id);
+/** O número de uma guia para comparar: sem espaços e em minúsculas ("GR 2026/313" = "gr2026/313"). */
+export const chaveGuia = (no: string | null | undefined): string => String(no ?? "").replace(/\s+/g, "").toLowerCase();
+export const mesmaGuia = (a: string | null | undefined, b: string | null | undefined): boolean => !!chaveGuia(a) && chaveGuia(a) === chaveGuia(b);
+/** A guia aberta ou não deste fornecedor com este número (comparado com chaveGuia). */
+export const guiaDoForn = (db: Inventario, sup: string, no: string | null | undefined): Guia | undefined => db.guias.find((g) => g.sup === sup && mesmaGuia(g.id, no));
+/** SÓ PROTÓTIPO: enviada pelo fornecedor no portal (as guias antigas só marcam doPortal). */
+export const guiaEnviadaForn = (g: Guia): boolean => g.origem === "fornecedor" || !!g.doPortal;
 export const contagemPorId = (db: Inventario, id: string): Contagem | undefined => db.counts.find((c) => c.id === id);
 export const nomeProd = (db: Inventario, sku: string): string => produto(db, sku)?.name ?? sku;
 export const nomeArm = (db: Inventario, id: string): string => armazem(db, id)?.name ?? id;

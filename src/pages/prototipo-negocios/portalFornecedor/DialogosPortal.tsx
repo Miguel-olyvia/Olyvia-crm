@@ -1,16 +1,17 @@
 // Os diálogos do Portal do Fornecedor simulado (20/10, demo): confirmar a encomenda (como SpConfirmOrderDialog do portal real, aqui com a data
 // de entrega obrigatória, que é a regra do Inventário do protótipo) e, SÓ NO PROTÓTIPO, expedir com a guia de remessa e ver/imprimir a guia.
-import { useState } from "react";
-import { CheckCircle2, Printer, Truck } from "lucide-react";
+import { useRef, useState } from "react";
+import { CheckCircle2, ExternalLink, FileText, Paperclip, Printer, Truck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { agora, armazem, fmtD, nomeProd, poPorId } from "../inventario/base";
+import { abrirAnexoGuia, lerAnexoGuia, tamanhoAnexo } from "../inventario/anexoGuia";
 import { executar, useInventario } from "../inventario/loja";
 import { porExpedir, portalConfirmar, portalExpedir, poUnits, proximaGuiaRemessa } from "../inventario/po";
-import type { Expedicao, Fornecedor, Po } from "../inventario/tipos";
+import type { AnexoGuia, Expedicao, Fornecedor, Po } from "../inventario/tipos";
 
 const refForn = (db: ReturnType<typeof useInventario>, itemId: string, sku: string): string => db.items.find((i) => i.id === itemId)?.ref || sku;
 
@@ -65,6 +66,9 @@ export function ExpedirDialogo({ p, aoFechar, aoFeito }: { p: Po; aoFechar: () =
   const [data, setData] = useState(() => agora(db).slice(0, 10));
   const [transportador, setTransportador] = useState("");
   const [obs, setObs] = useState("");
+  const [anexo, setAnexo] = useState<AnexoGuia | null>(null);
+  const [aLer, setALer] = useState(false);
+  const ficheiro = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState<Record<string, string>>(() => Object.fromEntries(linhas.map((l) => [l.id, String(porExpedir(p, l))])));
   const [erro, setErro] = useState("");
   const total = linhas.reduce((a, l) => a + (Number(q[l.id]) || 0), 0);
@@ -73,9 +77,16 @@ export function ExpedirDialogo({ p, aoFechar, aoFeito }: { p: Po; aoFechar: () =
       const n = Number(q[l.id] || 0);
       if (!Number.isInteger(n) || n < 0) { setErro(`Quantidades inteiras: ${nomeProd(db, l.sku)}.`); return; }
     }
-    const r = executar((d) => portalExpedir(d, poPorId(d, p.id) as Po, { guia, data, transportador, obs, linhas: linhas.map((l) => ({ lineId: l.id, qty: Number(q[l.id] || 0) })) }));
+    if (aLer) { setErro("Aguarde: o ficheiro da guia ainda está a carregar."); return; }
+    const r = executar((d) => portalExpedir(d, poPorId(d, p.id) as Po, { guia, data, transportador, obs, anexo, linhas: linhas.map((l) => ({ lineId: l.id, qty: Number(q[l.id] || 0) })) }));
     if (!r.ok) { setErro(r.erro); return; }
     aoFeito(r.valor);
+  };
+  const escolherFicheiro = (f: File | undefined): void => {
+    if (ficheiro.current) ficheiro.current.value = "";
+    if (!f) return;
+    setErro(""); setALer(true);
+    lerAnexoGuia(f).then(setAnexo, (e: Error) => setErro(e.message)).finally(() => setALer(false));
   };
   return (
     <Dialog open onOpenChange={(o) => { if (!o) aoFechar(); }}>
@@ -98,6 +109,25 @@ export function ExpedirDialogo({ p, aoFechar, aoFeito }: { p: Po; aoFechar: () =
               <Label htmlFor="pf-transp">Transportador (opcional)</Label>
               <Input id="pf-transp" className="h-11 text-[15px]" value={transportador} onChange={(e) => setTransportador(e.target.value)} placeholder="Ex.: transporte próprio, transportadora, matrícula…" />
             </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="pf-anexo">Ficheiro da guia de remessa (recomendado)</Label>
+            <p id="pf-anexo-ajuda" className="text-sm text-muted-foreground">PDF ou foto da guia, até 2 MB. O armazém vê-a ao dar entrada e confere sem esperar pelo papel.</p>
+            <input ref={ficheiro} id="pf-anexo" type="file" accept="application/pdf,image/*" className="sr-only" aria-describedby="pf-anexo-ajuda"
+              onChange={(e) => escolherFicheiro(e.target.files?.[0])} />
+            {anexo ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-[15px]">
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate font-medium" title={anexo.nome}>{anexo.nome}</span>
+                <span className="text-sm text-muted-foreground">{tamanhoAnexo(anexo.tamanho)}</span>
+                <Button type="button" variant="ghost" className="h-11 gap-1.5" onClick={() => abrirAnexoGuia(anexo)}><ExternalLink className="h-4 w-4" aria-hidden="true" />Ver</Button>
+                <Button type="button" variant="ghost" className="h-11 gap-1.5 text-destructive" aria-label={`Remover o ficheiro ${anexo.nome}`} onClick={() => setAnexo(null)}><X className="h-4 w-4" aria-hidden="true" />Remover</Button>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" className="h-11 w-fit gap-2" disabled={aLer} onClick={() => ficheiro.current?.click()}>
+                <Paperclip className="h-4 w-4" aria-hidden="true" />{aLer ? "A carregar…" : "Anexar a guia (PDF ou foto)"}
+              </Button>
+            )}
           </div>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-[15px]">
@@ -127,7 +157,7 @@ export function ExpedirDialogo({ p, aoFechar, aoFeito }: { p: Po; aoFechar: () =
         </div>
         <DialogFooter className="gap-2">
           <Button variant="outline" className="h-11" onClick={aoFechar}>Cancelar</Button>
-          <Button className="h-11 gap-2" onClick={expedir}><Truck className="h-4 w-4" aria-hidden="true" />Expedir · {total} un</Button>
+          <Button className="h-11 gap-2" disabled={aLer} onClick={expedir}><Truck className="h-4 w-4" aria-hidden="true" />Expedir · {total} un</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -172,6 +202,8 @@ export function GuiaRemessaDialogo({ p, e, s, empresa, aoFechar }: { p: Po; e: E
             </tbody>
           </table>
           {e.obs && <p><span className="text-sm text-muted-foreground">Observações: </span>{e.obs}</p>}
+          {e.anexo && <p className="flex flex-wrap items-center gap-2"><span className="text-sm text-muted-foreground">Ficheiro anexado: </span><span className="font-medium">{e.anexo.nome}</span>
+            <Button type="button" variant="link" className="h-11 gap-1.5 px-1" onClick={() => abrirAnexoGuia(e.anexo as AnexoGuia)}><ExternalLink className="h-4 w-4" aria-hidden="true" />Ver ficheiro</Button></p>}
           <p className="text-sm text-muted-foreground">Total de unidades: {e.linhas.reduce((a, x) => a + x.qty, 0)} de {p.lines.reduce((a, l) => a + poUnits(l) - l.cancelled, 0)} encomendadas.</p>
         </article>
         <DialogFooter className="gap-2">

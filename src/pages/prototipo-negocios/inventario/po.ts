@@ -1,6 +1,6 @@
 // As encomendas a fornecedor (POs): estado calculado, totais, criação, envio, portal e edição. Regras portadas do mockup. Sem React.
-import { HOJE, UTILIZADOR, agora, armazem, ehInteiro, exigir, exigirMotivo, falhar, fmtD, fmtDS, fmtDT, fornecedor, mudou, nomeForn, pad, poPorId, proximoId, somarDias, utilizadorAtual } from "./base";
-import type { Artigo, EstadoPo, Expedicao, Guia, Inventario, Po, PoLinha, PortalForn, Tom } from "./tipos";
+import { HOJE, UTILIZADOR, agora, armazem, ehInteiro, exigir, exigirMotivo, falhar, fmtD, fmtDS, fmtDT, fornecedor, guiaDoForn, mesmaGuia, mudou, nomeForn, pad, poPorId, proximoId, somarDias, utilizadorAtual } from "./base";
+import type { AnexoGuia, Artigo, EstadoPo, Expedicao, Guia, Inventario, Po, PoLinha, PortalForn, Tom } from "./tipos";
 
 /** O estado do portal de um fornecedor, como o mockup o escreve (PORTAL). */
 export const PORTAL_FORN: Record<PortalForn, readonly [string, Tom]> = { none: ["Sem acesso", "neu"], invited: ["Convidado", "info"], active: ["Ativo", "ok"], revoked: ["Revogado", "bad"] };
@@ -141,7 +141,11 @@ export function proximaGuiaRemessa(db: Inventario): string {
   return "GR 2026/" + (n + 1);
 }
 
-export interface DadosExpedicao { guia: string; data: string; linhas: { lineId: string; qty: number }[]; transportador?: string; obs?: string }
+/** O tamanho máximo do ficheiro da guia de remessa (o anexo viaja em dataURL na sincronização do protótipo). */
+export const ANEXO_GUIA_MAX = 2 * 1024 * 1024;
+/** PDF ou imagem: o que o portal aceita como ficheiro da guia de remessa. */
+export const anexoGuiaAceite = (tipo: string): boolean => tipo === "application/pdf" || tipo.startsWith("image/");
+export interface DadosExpedicao { guia: string; data: string; linhas: { lineId: string; qty: number }[]; transportador?: string; obs?: string; anexo?: AnexoGuia | null }
 /** SÓ PROTÓTIPO: o fornecedor expede (tudo ou parte) uma encomenda confirmada, com a guia de remessa dele. A guia fica registada como guia do
  *  fornecedor aberta (o anunciado = o expedido, ligada à PO): a Receção encontra-a pelo número e dá entrada já com estas quantidades. */
 export function portalExpedir(db: Inventario, p: Po, d: DadosExpedicao): Expedicao {
@@ -153,7 +157,13 @@ export function portalExpedir(db: Inventario, p: Po, d: DadosExpedicao): Expedic
   if (!guia) falhar("Indique o número da guia de remessa.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.data || "")) falhar("Indique a data de expedição.");
   if (d.data < p.date) falhar("A expedição não pode ser antes da data da encomenda.");
-  if (db.guias.some((g) => g.sup === p.sup && g.id.toLowerCase() === guia.toLowerCase())) falhar(`A guia ${guia} já existe: use outro número.`);
+  // o número é único por fornecedor (sem contar espaços nem maiúsculas): nas guias e nas expedições de todas as encomendas dele
+  if (guiaDoForn(db, p.sup, guia) || db.pos.some((x) => x.sup === p.sup && (x.portal.expedicoes ?? []).some((e) => mesmaGuia(e.guia, guia)))) falhar(`A guia ${guia} já existe: use outro número.`);
+  const anexo = d.anexo ?? undefined;
+  if (anexo) {
+    if (!anexoGuiaAceite(anexo.tipo)) falhar("O ficheiro da guia tem de ser PDF ou imagem.");
+    if (anexo.tamanho > ANEXO_GUIA_MAX) falhar("O ficheiro da guia tem mais de 2 MB: reduza-o ou tire uma foto mais leve.");
+  }
   const linhas = d.linhas.filter((x) => x.qty > 0);
   if (!linhas.length) falhar("Indique pelo menos uma quantidade a expedir.");
   for (const x of linhas) {
@@ -163,13 +173,13 @@ export function portalExpedir(db: Inventario, p: Po, d: DadosExpedicao): Expedic
     if (x.qty > porExpedir(p, l)) falhar(`Nunca mais do que falta expedir: ${l.sku} tem ${porExpedir(p, l)} un por expedir.`);
   }
   const at = agora(db);
-  const e: Expedicao = { guia, data: d.data, at, linhas: linhas.map((x) => ({ lineId: x.lineId, qty: x.qty })), transportador: (d.transportador ?? "").trim(), obs: (d.obs ?? "").trim() };
+  const e: Expedicao = { guia, data: d.data, at, linhas: linhas.map((x) => ({ lineId: x.lineId, qty: x.qty })), transportador: (d.transportador ?? "").trim(), obs: (d.obs ?? "").trim(), origem: "fornecedor", ...(anexo ? { anexo } : {}) };
   (p.portal.expedicoes ??= []).push(e);
   const ann = new Map<string, number>();
   for (const x of e.linhas) { const sku = p.lines.find((l) => l.id === x.lineId)?.sku ?? ""; ann.set(sku, (ann.get(sku) ?? 0) + x.qty); }
   const g: Guia = {
-    id: guia, sup: p.sup, date: d.data, wh: p.wh, ann: [...ann].map(([sku, qty]) => ({ sku, qty })), pos: [p.id], state: "open", note: "", doPortal: true,
-    history: [{ at, t: `Guia de remessa emitida pelo fornecedor no portal (${p.id})${e.transportador ? " · " + e.transportador : ""}` }],
+    id: guia, sup: p.sup, date: d.data, wh: p.wh, ann: [...ann].map(([sku, qty]) => ({ sku, qty })), pos: [p.id], state: "open", note: "", doPortal: true, origem: "fornecedor", ...(anexo ? { anexo } : {}),
+    history: [{ at, t: `Guia de remessa emitida pelo fornecedor no portal (${p.id})${e.transportador ? " · " + e.transportador : ""}${anexo ? " · ficheiro " + anexo.nome : " · sem ficheiro"}` }],
   };
   db.guias.push(g);
   const un = e.linhas.reduce((a, x) => a + x.qty, 0);

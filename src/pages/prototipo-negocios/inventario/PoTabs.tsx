@@ -2,7 +2,9 @@
 import { useState } from "react";
 import { CheckCircle2, ExternalLink, Play, RefreshCw, Send, Truck, Undo2 } from "lucide-react";
 import { useIrReceber } from "./irReceber";
-import { agora, ecPorId, fmtD, fmtDT, nomeArm, nomeProd, somarDias } from "./base";
+import { agora, ecPorId, fmtD, fmtDT, guiaEnviadaForn, nomeArm, nomeProd, somarDias } from "./base";
+import { abrirAnexoGuia } from "./anexoGuia";
+import { AnexoGuiaLinha, SeloOrigemGuia } from "./GuiaFolha";
 import { Fonte } from "./cabInv";
 import { useCtxInv } from "./ctxInv";
 import { GUIA_ESTADOS, resumoGuia } from "./guias";
@@ -13,7 +15,7 @@ import { PORTAL_FORN, podeExpedir, poOpen, poPublished, poRecebivel, porExpedir,
 import type { AcoesPo, EstadoPd } from "./poTipos";
 import { desfazerAnulacao, passarParaStock } from "./receber";
 import { TabelaInv } from "./TabelaInv";
-import type { Po } from "./tipos";
+import type { AnexoGuia, Po } from "./tipos";
 
 interface P { p: Po; a: AcoesPo }
 
@@ -57,6 +59,7 @@ export function TabGuias({ p }: { p: Po }) {
         <TabelaInv titulo="Guias da encomenda" minimo={640} chave={(g) => g.id} linhas={gs} abrir={(g) => abrir({ t: "guia", id: g.id })}
           colunas={[
             { id: "id", titulo: "Nº guia", classe: () => "mono", celula: (g) => g.id }, { id: "d", titulo: "Data", celula: (g) => fmtD(g.date) },
+            { id: "o", titulo: "Origem", celula: (g) => (guiaEnviadaForn(g) ? <><SeloOrigemGuia g={g} />{g.anexo ? <><br /><AnexoGuiaLinha g={g} /></> : null}</> : <span className="muted">Armazém</span>) },
             { id: "ar", titulo: "Anunciado / Recebido", celula: (g) => `${resumoGuia(db, g).annT} / ${resumoGuia(db, g).recT}` },
             { id: "dv", titulo: "Divergências", celula: (g) => { const d = resumoGuia(db, g).div; return d ? <Selo tom="bad">{d} divergência(s)</Selo> : <Selo tom="ok">Sem divergências</Selo>; } },
             { id: "e", titulo: "Estado", celula: (g) => <Selo tom={g.state === "open" ? "info" : g.state === "closed" ? "ok" : "neu"}>{GUIA_ESTADOS[g.state]}</Selo> },
@@ -101,6 +104,7 @@ function Expedicoes({ p }: { p: Po }) {
         { id: "g", titulo: "Guia de remessa", classe: () => "mono", celula: (e) => <b>{e.guia}</b> }, { id: "d", titulo: "Expedida", celula: (e) => fmtD(e.data) },
         { id: "l", titulo: "O que vem", celula: (e) => e.linhas.map((x) => `${x.qty}× ${nomeProd(db, p.lines.find((l) => l.id === x.lineId)?.sku ?? "")}`).join(", ") },
         { id: "t", titulo: "Transportador", celula: (e) => e.transportador || "—" }, { id: "o", titulo: "Observações", celula: (e) => e.obs || "—" },
+        { id: "a", titulo: "Ficheiro", celula: (e) => (e.anexo ? <button type="button" className="link" title={e.anexo.nome} onClick={() => abrirAnexoGuia(e.anexo as AnexoGuia)}><ExternalLink className="ic sm" aria-hidden="true" /> Ver guia</button> : <span className="muted">—</span>) },
       ]} />
     </>
   );
