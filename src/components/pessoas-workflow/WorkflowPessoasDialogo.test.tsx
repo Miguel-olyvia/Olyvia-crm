@@ -18,6 +18,20 @@ const usarRegras = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useRegrasQualificacao", () => ({ useRegrasQualificacao: (h: boolean) => usarRegras(h) }));
 const usarConfig = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useConfigNegocios", () => ({ useConfigNegocios: (h: boolean) => usarConfig(h) }));
+// Com a bandeira CONSEQUENCIAS_ATIVO ligada, o separador «Negócios» lê as consequências e a permissão pessoas.config: ambos simulados (com permissão).
+vi.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    hasPermission: (p: string) => p === "pessoas.config", hasAnyPermission: (ps: string[]) => ps.includes("pessoas.config"),
+    permissions: ["pessoas.config"], loading: false,
+  }),
+}));
+vi.mock("@/hooks/pessoas/workflow/useConsequencias", () => ({
+  useConsequencias: () => ({
+    estado: "pronto", dados: { recusaOrcamento: "perder_se_ultimo", orcamentoCriaProposta: true, propostaCriaContrato: false }, aGuardar: false,
+    recarregar: vi.fn(), guardarCadeia: vi.fn().mockResolvedValue({ mudou: true, depois: null }),
+    guardarRecusaOrcamento: vi.fn().mockResolvedValue({ mudou: true, depois: null }),
+  }),
+}));
 const usarQuest = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({ useQuestionarioLevantamento: (h: boolean) => usarQuest(h) }));
 beforeAll(prepararRadixNoJsdom);
@@ -79,13 +93,15 @@ describe("WorkflowPessoasDialogo", () => {
     expect(within(painel).getByRole("group", { name: "Quando uma lead é SQL" })).toBeInTheDocument();
   });
 
-  it("a configuração dos negócios só se lê quando o separador «Negócios» está à vista, e mostra os cinco campos", () => {
+  it("a configuração dos negócios só se lê quando o separador «Negócios» está à vista, e mostra os cinco campos e a tabela das consequências", () => {
     desenhar();
     expect(usarConfig).toHaveBeenLastCalledWith(false);
     irParaNegocios();
     expect(usarConfig).toHaveBeenLastCalledWith(true);
     const painel = screen.getByRole("tabpanel", { name: "Negócios" });
-    expect(within(painel).getAllByRole("radiogroup")).toHaveLength(4);
+    // Quatro escolhas dos cinco campos, mais a recusa do orçamento que a tabela traz.
+    expect(within(painel).getAllByRole("radiogroup")).toHaveLength(5);
+    expect(within(painel).getByRole("table")).toBeInTheDocument();
     expect(within(painel).getByRole("textbox", { name: "Prazo de reflexão (dias)" })).toBeInTheDocument();
     expect(within(painel).getByRole("button", { name: "Guardar configuração" })).toBeInTheDocument();
   });

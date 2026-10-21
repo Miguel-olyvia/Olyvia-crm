@@ -2,18 +2,35 @@
 // recusados, o cancelamento no prazo e o prazo de reflexão), «Guardar» pela função (via o hook), o aviso das conversões, o prazo de reflexão sem
 // valor por omissão e validado antes de ir à base, e os erros NG008/NG009/42501 traduzidos. O hook é simulado: aqui só se vê o que o ecrã faz com
 // o que o hook dá e devolve (o hook tem os seus testes em hooks/pessoas/workflow).
+// Com a bandeira CONSEQUENCIAS_ATIVO ligada (a omissão), as recusas, o cancelamento e o prazo vivem na tabela das consequências: os testes abaixo correm
+// com ela (permissões e hook das consequências simulados, com pessoas.config). O último bloco força o separador ANTIGO (bandeira desligada).
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import { ConsequenciasContext } from "@/hooks/pessoas/bandeirasNegocio";
 import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import { CHAVES_ERRO_NEG } from "@/hooks/pessoas/errosNeg";
 import type { ConfigNegocios, ResultadoGuardarConfig } from "@/hooks/pessoas/workflow/configNegocios";
+import type { ConsequenciasHook } from "@/hooks/pessoas/workflow/useConsequencias";
 import type { ConfigNegociosHook } from "@/hooks/pessoas/workflow/useConfigNegocios";
 import { NegociosSeparador } from "./NegociosSeparador";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    hasPermission: (p: string) => p === "pessoas.config", hasAnyPermission: (ps: string[]) => ps.includes("pessoas.config"),
+    permissions: ["pessoas.config"], loading: false,
+  }),
+}));
+vi.mock("@/hooks/pessoas/workflow/useConsequencias", () => ({
+  useConsequencias: (): ConsequenciasHook => ({
+    estado: "pronto", dados: { recusaOrcamento: "perder_se_ultimo", orcamentoCriaProposta: true, propostaCriaContrato: false }, aGuardar: false,
+    recarregar: vi.fn(), guardarCadeia: vi.fn().mockResolvedValue({ mudou: true, depois: null }),
+    guardarRecusaOrcamento: vi.fn().mockResolvedValue({ mudou: true, depois: null }),
+  }),
+}));
 beforeAll(prepararRadixNoJsdom);
 
 const OMISSOES: ConfigNegocios = {
@@ -34,7 +51,8 @@ const G = {
 };
 const prazo = () => screen.getByRole("textbox", { name: "Prazo de reflexão (dias)" });
 const guardarBtn = () => screen.getByRole("button", { name: /guardar configuração|a guardar/i });
-const estado = () => screen.getByRole("status");
+// Com a tabela há duas regiões de estado (a dela, para os interruptores, e a do separador, para «Guardar configuração»): a do separador é a última.
+const estado = () => screen.getAllByRole("status").at(-1) as HTMLElement;
 const erroNeg = (codigo: string | null) => new ErroNeg(new Error("texto da base"), codigo, codigo ? CHAVES_ERRO_NEG[codigo] : "pessoasPagina.erroNeg.generico");
 
 describe("NegociosSeparador: carregar", () => {
@@ -61,18 +79,23 @@ describe("NegociosSeparador: carregar", () => {
     expect(screen.queryByRole("button", { name: /guardar/i })).toBeNull();
   });
 
-  it("não é um workflow: tem cinco campos (quatro escolhas e o prazo) e nada de regras nem de condições", () => {
+  it("não é um workflow: tem os cinco campos (quatro escolhas e o prazo) mais a recusa do orçamento e os dois interruptores da tabela, e nada de regras nem de condições", () => {
     render(<NegociosSeparador config={hook()} />);
-    expect(screen.getAllByRole("radiogroup")).toHaveLength(4);
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(5);
+    expect(within(screen.getByRole("table")).getAllByRole("radiogroup")).toHaveLength(4);
     expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
 });
 
 describe("NegociosSeparador: cada campo explica-se com um exemplo", () => {
-  it("os quatro grupos e o prazo trazem uma linha «Exemplo:» em linguagem de negócio", () => {
+  it("a conversão e o prazo trazem uma linha «Exemplo:» em linguagem de negócio, e cada escolha da tabela traz a sua ajuda (a tabela já não leva exemplo por grupo)", () => {
     render(<NegociosSeparador config={hook()} />);
-    expect(screen.getAllByText(/^Exemplo:/)).toHaveLength(5);
+    expect(screen.getAllByText(/^Exemplo:/)).toHaveLength(2);
+    expect(within(grupo(G.conv).closest("fieldset") as HTMLElement).getByText(/^Exemplo:/)).toBeInTheDocument();
+    expect(screen.getByText(/^Exemplo:/, { selector: "[id$='-prazo-exemplo']" })).toBeInTheDocument();
+    for (const nome of [G.proposta, G.contrato, G.cancel]) expect(grupo(nome)).toHaveAccessibleDescription(/\S/);
   });
 });
 
@@ -304,5 +327,43 @@ describe("NegociosSeparador: erros", () => {
     await screen.findByRole("alert");
     fireEvent.click(guardarBtn());
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("NegociosSeparador: separador antigo (bandeira desligada)", () => {
+  const desenharAntigo = (config: ConfigNegociosHook) => render(
+    <ConsequenciasContext.Provider value={false}>
+      <NegociosSeparador config={config} />
+    </ConsequenciasContext.Provider>,
+  );
+
+  it("sem tabela: os quatro grupos soltos, o prazo, cinco linhas «Exemplo:» e uma só região de estado", () => {
+    desenharAntigo(hook());
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(4);
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.getAllByText(/^Exemplo:/)).toHaveLength(5);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
+  it("«Guardar configuração» manda as escolhas dos grupos soltos e o prazo", async () => {
+    const h = hook();
+    desenharAntigo(h);
+    fireEvent.click(radio(G.proposta, "Manter o negócio aberto"));
+    fireEvent.click(radio(G.cancel, "Manter o negócio ganho"));
+    fireEvent.change(prazo(), { target: { value: "30" } });
+    fireEvent.click(guardarBtn());
+    await waitFor(() => expect(h.guardar).toHaveBeenCalledWith({ ...OMISSOES, recusaProposta: "manter_aberto", cancelamentoNoPrazo: "manter_ganho", reflexaoDias: 30 }));
+  });
+
+  it("enquanto grava, os radios soltos ficam bloqueados", async () => {
+    let acabar: (r: ResultadoGuardarConfig) => void = () => undefined;
+    const guardar = vi.fn(() => new Promise<ResultadoGuardarConfig>((r) => { acabar = r; }));
+    desenharAntigo(hook({ guardar }));
+    fireEvent.click(guardarBtn());
+    expect(radio(G.proposta, "Manter o negócio aberto")).toHaveAttribute("aria-disabled", "true");
+    acabar(resultado());
+    await waitFor(() => expect(estado()).toHaveTextContent("Configuração guardada."));
   });
 });

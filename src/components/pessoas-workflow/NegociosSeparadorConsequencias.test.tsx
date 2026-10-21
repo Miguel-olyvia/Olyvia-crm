@@ -1,4 +1,4 @@
-// O separador «Negócios» com a bandeira CONSEQUENCIAS_ATIVO: desligada (a omissão) fica como estava, sem tabela e sem ler nada; ligada, mostra a tabela
+// O separador «Negócios» com a bandeira CONSEQUENCIAS_ATIVO: ligada (a omissão), mostra a tabela, no lugar dos três grupos soltos; desligada (forçada pelo contexto) fica como estava, sem tabela e sem ler nada. A tabela
 // das consequências no lugar dos três grupos que ela já traz, e quem não tem pessoas.config vê tudo só para ler.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,19 +57,28 @@ beforeEach(() => {
 });
 
 describe("a bandeira", () => {
-  it("vem desligada: depende de migrations por aplicar", () => {
-    expect(CONSEQUENCIAS_ATIVO).toBe(false);
+  it("vem ligada: as migrations 210000, 230000 e 240000 estão aplicadas e provadas na nike", () => {
+    expect(CONSEQUENCIAS_ATIVO).toBe(true);
   });
 
-  it("desligada (omissão): sem tabela, os quatro grupos de sempre e nenhuma leitura", () => {
+  it("ligada (omissão, sem contexto): a tabela, as cinco escolhas e a leitura das consequências", () => {
     desenhar(null);
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(5);
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
+    expect(estado.usos.length).toBeGreaterThan(0);
+    expect(estado.usos.every((u) => u === true)).toBe(true);
+  });
+
+  it("bandeira desligada (forçada pelo contexto): sem tabela, os quatro grupos de sempre e nenhuma leitura", () => {
+    desenhar(false);
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.getAllByRole("radiogroup")).toHaveLength(4);
     expect(screen.queryByRole("switch")).toBeNull();
     expect(estado.usos).toEqual([]);
   });
 
-  it("desligada pelo contexto, mesmo com o resto montado, fica igual", () => {
+  it("bandeira desligada pelo contexto, mesmo com o resto montado, fica igual", () => {
     desenhar(false);
     expect(screen.queryByRole("table")).toBeNull();
     expect(estado.usos).toEqual([]);

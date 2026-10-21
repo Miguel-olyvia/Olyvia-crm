@@ -10,10 +10,10 @@ export const CLASSIFICAR_LEAD_ATIVO = true;
 
 /**
  * D (ecrã das consequências do separador «Negócios» do Workflow): depende das migrations 20261226210000 (coluna `recusa_orcamento` e `neg_guardar_cadeia`),
- * 20261226230000 e 20261226240000 (`neg_guardar_recusa_orcamento`), ainda por aplicar. Desligada, o separador fica como estava e não lê nada. Liga-se
- * (a constante, no mesmo commit que as aplica) só depois de as três estarem na base: ligada sem elas, a leitura da recusa falha e os interruptores partem.
+ * 20261226230000 e 20261226240000 (`neg_guardar_recusa_orcamento`), aplicadas a 21/10 e provadas na nike. Ligada: o separador mostra a tabela das
+ * consequências. Se uma delas for revertida, desliga-se a constante no mesmo commit: ligada sem elas, a leitura da recusa falha e os interruptores partem.
  */
-export const CONSEQUENCIAS_ATIVO = false;
+export const CONSEQUENCIAS_ATIVO = true;
 
 export const PermissoesPorNegocioContext = createContext<boolean | null>(null);
 export const ClassificarLeadContext = createContext<boolean | null>(null);
