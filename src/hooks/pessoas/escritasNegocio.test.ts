@@ -89,6 +89,27 @@ describe("erroDeEscrita (traduz pelo código e pela restrição, nunca mostra a 
     expect(erroDeEscrita(com("23514", "Não é possível mudar a pessoa de um negócio.")).chave).toBe(CHAVES_ESCRITA.invalido);
   });
 
+  it.each([
+    ["NG028", "pessoasPagina.erroNeg.ng028"],
+    ["NG025", "pessoasPagina.erroNeg.ng025"],
+    ["NG027", "pessoasPagina.erroNeg.ng027"],
+  ])("o código %s da regra de negócio mantém o código e a chave própria", (codigo, chave) => {
+    const e = erroDeEscrita(com(codigo, "x"));
+    expect(e).toBeInstanceOf(ErroNeg);
+    expect(e.codigo).toBe(codigo);
+    expect(e.chave).toBe(chave);
+  });
+
+  it("um erro de regra sem code que traz o código no texto também é reconhecido", () => {
+    const e = erroDeEscrita({ code: null, message: "Negócio ganho ou perdido não se edita [NG028]" });
+    expect(e.codigo).toBe("NG028");
+    expect(e.chave).toBe("pessoasPagina.erroNeg.ng028");
+  });
+
+  it("um código NG desconhecido continua genérico", () => {
+    expect(erroDeEscrita(com("NG999")).chave).toBe(CHAVE_ESCRITA_GENERICA);
+  });
+
   it("um erro que a base não explica dá a mensagem genérica", () => {
     expect(erroDeEscrita(com("XX000")).chave).toBe(CHAVE_ESCRITA_GENERICA);
     expect(erroDeEscrita(new Error("boom")).chave).toBe(CHAVE_ESCRITA_GENERICA);

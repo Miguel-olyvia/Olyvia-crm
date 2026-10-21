@@ -99,6 +99,8 @@ describe("editar", () => {
     ["23514", "O comercial tem de ser membro activo da organização do negócio.", CHAVES_ESCRITA.comercial],
     ["23514", 'violates check constraint "negocios_titulo_check"', CHAVES_ESCRITA.titulo],
     ["23514", "Este negócio está no lixo: tem de ser restaurado antes de ser alterado.", CHAVES_ESCRITA.lixo],
+    ["NG028", "Um negócio ganho ou perdido não se edita.", "pessoasPagina.erroNeg.ng028"],
+    ["NG025", "x", "pessoasPagina.erroNeg.ng025"],
   ])("o erro %s da base chega ao ecrã com a chave certa e não refaz nada", async (code, message, chave) => {
     resposta = falha(code, message);
     const { result, invalidar } = montar();

@@ -1,4 +1,4 @@
-// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG025, NG027 e 42501).
+// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG025, NG027, NG028 e 42501).
 // Juntam-se aos de `pessoasPagina.ts`, por isso as chaves continuam a ser `pessoasPagina.*`.
 const E = "pessoasPagina.erroNeg.";
 
@@ -29,6 +29,7 @@ const pt: Record<string, string> = {
   [`${E}ng024`]: "Só os documentos anteriores à ativação se ligam à mão.",
   [`${E}ng025`]: "Este negócio já tem uma proposta enviada ou aceite: não se cria outra.",
   [`${E}ng027`]: "Não tem permissão sobre a pessoa desta lead, por isso não a pode classificar.",
+  [`${E}ng028`]: "Este negócio está fechado (ganho ou perdido): o título, as notas e o comercial já não se alteram. Reabra-o primeiro.",
   [`${E}comercialAmbiguo`]: "Há dois comerciais com o mesmo nome. Peça para distinguir os nomes antes de escolher o comercial do levantamento.",
   [`${E}permissao`]: "Não tem permissão para esta ação.",
   [`${E}generico`]: "Não foi possível concluir a ação. Tente novamente.",
@@ -61,6 +62,7 @@ const en: Record<string, string> = {
   [`${E}ng024`]: "Only documents from before activation can be linked by hand.",
   [`${E}ng025`]: "This deal already has a sent or accepted proposal: another one cannot be created.",
   [`${E}ng027`]: "You do not have access to the person on this lead, so you cannot classify it.",
+  [`${E}ng028`]: "This deal is closed (won or lost): its title, notes and sales rep can no longer be changed. Reopen it first.",
   [`${E}comercialAmbiguo`]: "Two sales reps have the same name. Ask for the names to be told apart before choosing the survey's sales rep.",
   [`${E}permissao`]: "You do not have permission for this action.",
   [`${E}generico`]: "The action could not be completed. Please try again.",

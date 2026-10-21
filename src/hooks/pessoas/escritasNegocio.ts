@@ -3,6 +3,7 @@
 // mudaram (estado, fase e motivo de perda nunca vão: a base recusa-os com 42501). Os erros traduzem-se pelo código e pela restrição.
 import type { ValoresNegocio } from "@/components/negocio-metas/mutacoesNegocio";
 import { ErroNeg } from "./chamarNeg";
+import { chaveDoErro, codigoDoErro } from "./errosNeg";
 
 export const MAX_TITULO_NEGOCIO = 200;
 export const MAX_NOTAS_NEGOCIO = 5000;
@@ -83,5 +84,8 @@ export function erroDeEscrita(erro: unknown): ErroNeg {
   const { code, message } = codigoETexto(erro);
   if (code === "42501") return new ErroNeg(erro, "42501", CHAVES_ESCRITA.permissao);
   if (code === "23514") return new ErroNeg(erro, "23514", chaveDeCheck(message));
+  // Erros de regra levantados pelos gatilhos (NG025, NG027, NG028...): a chave própria, não a genérica.
+  const codigoNeg = codigoDoErro(erro);
+  if (codigoNeg) return new ErroNeg(erro, codigoNeg, chaveDoErro(erro));
   return new ErroNeg(erro, null, CHAVE_ESCRITA_GENERICA);
 }

@@ -11,6 +11,8 @@ export type NomeNeg =
   | "neg_criar_negocio"
   | "neg_mudar_fecho"
   | "neg_guardar_config_negocios"
+  | "neg_guardar_cadeia"
+  | "neg_guardar_recusa_orcamento"
   | "neg_ligar_registo"
   | "neg_desligar_registo"
   | "neg_perder_negocio"

@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG, codigoDoErro, chaveDoErro } from "./errosNeg";
 
 // NG026 é da migration de recusa do orçamento (20261226210000, ainda sem ecrã); NG027 é a pessoa da lead fora do âmbito (classificar).
-const CODIGOS = [...Array.from({ length: 25 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`), "NG027"];
+const CODIGOS = [...Array.from({ length: 25 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`), "NG027", "NG028"];
 
 describe("errosNeg", () => {
-  it("há uma chave própria para cada código NG001 a NG025, NG027 e para 42501", () => {
+  it("há uma chave própria para cada código NG001 a NG025, NG027, NG028 e para 42501", () => {
     for (const codigo of [...CODIGOS, "42501"]) expect(CHAVES_ERRO_NEG[codigo], codigo).toMatch(/^pessoasPagina\.erroNeg\./);
     const chaves = Object.values(CHAVES_ERRO_NEG);
     expect(new Set(chaves).size).toBe(chaves.length);
-    expect(chaves).toHaveLength(27);
+    expect(chaves).toHaveLength(28);
   });
 
   it("lê o código de error.code", () => {
@@ -101,6 +101,21 @@ describe("errosNeg: NG025 (um negócio com proposta enviada ou aceite não cria 
   it("não confunde NG0251 nem xNG025", () => {
     expect(codigoDoErro({ message: "NG0251 x" })).toBeNull();
     expect(codigoDoErro({ message: "xNG025" })).toBeNull();
+  });
+});
+
+describe("errosNeg: NG028 (um negócio ganho ou perdido não muda título, notas nem comercial)", () => {
+  it("lê-se de error.code e do texto, com a sua chave", () => {
+    expect(codigoDoErro({ code: "NG028", message: "x" })).toBe("NG028");
+    expect(codigoDoErro({ message: "falhou [NG028]" })).toBe("NG028");
+    expect(codigoDoErro({ code: null, message: "x", details: "NG028" })).toBe("NG028");
+    expect(chaveDoErro({ code: "NG028", message: "x" })).toBe("pessoasPagina.erroNeg.ng028");
+  });
+
+  it("não confunde NG0281, xNG028 nem NG029", () => {
+    expect(codigoDoErro({ message: "NG0281 x" })).toBeNull();
+    expect(codigoDoErro({ message: "xNG028" })).toBeNull();
+    expect(codigoDoErro({ message: "NG029 x" })).toBeNull();
   });
 });
 
