@@ -1915,6 +1915,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     novaTarefaPlano(id: number, n: NovaTarefa): number | null {
       const d = deal(id), p = d.obra.plano, s = S.svc[n.sid];
       if (!p || !s || p.estado === "concluída") return null;
+      // 21/10: só o gestor das Operações cria tarefas; por isso não há aprovação
+      if (S.role !== "operacoes") { avisar({ msg: "Só o gestor da obra cria tarefas", sub: "Peça ao gestor das Operações", kind: "bad" }); return null; }
       const t = criarTarefa(p, s, n), ti = juntarTarefa(p, t);
       avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
       const tec = TECS.find((x) => x.id === t.tec);
