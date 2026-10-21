@@ -8,6 +8,7 @@ import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { SETORES } from "./setores";
 import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
 import { efetivo, grupoVisita, AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
+import { completarParaEncerrar } from "./encerrarObra";
 
 // Preenche os obrigatórios que faltam (os condicionais podem aparecer depois de preencher outros).
 function preencher(d: Negocio, gs: Grupo[]) {
@@ -96,7 +97,12 @@ describe("protótipo de Negócios", () => {
     expect(d().obra.plano!.estado).toBe("em curso");
 
     preencher(d(), [OBRA[1]]);
+    // 21/10: não encerra com tarefas por fazer; com tudo feito e validado, sim
     A.fimObra(id);
+    expect(d().obra.plano!.estado).toBe("em curso");
+    completarParaEncerrar(d());
+    A.fimObra(id);
+    expect(d().obra.plano!.estado).toBe("concluída");
     expect(d().obra.real!.m).toBeLessThan(T.m);
     const antes = JSON.stringify(realPorFase(d(), S));
     A.aprender(id);

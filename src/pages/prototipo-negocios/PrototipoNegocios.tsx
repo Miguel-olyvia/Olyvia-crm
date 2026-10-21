@@ -46,6 +46,7 @@ import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 import type { AbaInv } from "./inventario/ctxInv";
 import { lerInventario, lerPedidoEcInv, lerPedidoRececaoInv, subscrever as subscreverInv, tirarPedidoEcInv, tirarPedidoRececaoInv, useInventario } from "./inventario/loja";
 import { ecsEliminadasDeNegocios, sincronizarEcsNegocios } from "./inventario/ponteNegocios";
+import { completarParaEncerrar } from "./encerrarObra";
 import { faltaParaArrancar } from "./preparacaoObra";
 import PerfilSimulado from "./inventario/PerfilSimulado";
 import PerfilFrotaSimulado from "./frota/PerfilFrotaSimulado";
@@ -761,7 +762,7 @@ function Operacoes({ S, A, go }: Ctx) {
     let acao: ReactNode = null;
     if (p.estado === "por aprovar") acao = <Btn cls={C.length ? "sec" : ""} onClick={go(() => A.aprovarPlano(d.id))}>Aprovar plano</Btn>;
     else if (p.estado === "aprovado") acao = <Btn cls={matsOk ? "" : "sec"} onClick={go(() => A.arrancar(d.id))}>Arrancar obra</Btn>;
-    else if (p.estado === "em curso") acao = <Btn onClick={go(() => A.fimObra(d.id))}>Registar fim da obra (simular)</Btn>;
+    else if (p.estado === "em curso") acao = <Btn onClick={go(() => { completarParaEncerrar(d); A.fimObra(d.id); })}>Registar fim da obra (simular)</Btn>;
     const pode = S.role === "operacoes";
     const equipa = [...new Set(p.tasks.map((t) => t.tec))];
     return (

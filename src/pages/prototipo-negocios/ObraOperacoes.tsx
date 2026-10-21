@@ -23,6 +23,7 @@ import {
 } from "./obraOps";
 import type { Ctx } from "./pecas";
 import { AutoNoNegocio } from "./AutoRececao";
+import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
 import { ViaturasObra } from "./frota/ViaturasObra";
 import { ProximoRececaoNegocio } from "./RececaoNegocio";
 import { useInventario } from "./inventario/loja";
@@ -185,6 +186,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const fim = fimDe(p.tasks), ultimo = fim - 1;
   const horas = p.tasks.reduce((a, t) => a + t.h, 0);
   const PV = porValidar(p);
+  const PE = p.estado === "em curso" ? pontosEncerrar(d, S, db) : [], podeEncerrar = PE.every((x) => x.ok);
   const F = faltaParaArrancar(d, db).filter((f) => !/plano/.test(f));
   const tarde = entregaTarde(d, db);
   const muda = pode && (p.estado === "por aprovar" || p.estado === "aprovado");
@@ -204,9 +206,10 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   } else if (p.estado === "em curso") {
     // 21/10: sem texto corrido: o dia, o progresso e os factos em linhas com ícone (FactosObra)
     frase = `Dia ${p.dia + 1} de ${fim} · ${rotuloDia(p, p.dia)}`;
+    // 21/10: encerrar só com tudo completo (encerrarObra.ts): o botão fica ativo com a lista toda verde
     botao = PV.length
       ? <Button size="lg" onClick={() => irPara("validar")}>Validar {PV.length === 1 ? "1 tarefa" : `${PV.length} tarefas`}<ArrowRight className="ml-2 h-4 w-4" /></Button>
-      : <Button size="lg" onClick={go(() => A.fimObra(d.id))}>Registar o fim da obra</Button>;
+      : <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button>;
   } else frase = d.obra.auto?.estado === "assinado" ? "Obra concluída e recebida pelo cliente." : d.obra.auto ? "Obra concluída. O auto de receção está no portal do cliente, para assinar." : "Obra concluída.";
 
   const secoes: [Seccao, string, boolean][] = [
@@ -273,6 +276,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             </div>
           );
         })}
+        {PE.length > 0 && <ParaEncerrar L={PE} irPara={irPara} fecho={go(() => { A.abrir(d.id); A.irObra(); })} />}
         {p.estado !== "concluída" && <div className="mt-5 flex flex-wrap items-center gap-3">{pode ? botao : <Mudar ctx={ctx} papel="operacoes" />}</div>}
       </section>
       {/* 15/10: com a obra concluída, o auto de receção (por assinar / assinado) e o relatório da obra */}
@@ -385,6 +389,49 @@ function EstadoObra({ d, titulo, irPara }: { d: Negocio; titulo: string | null; 
 }
 
 /** 21/10: 2.º a seguir, com a obra em curso: o que espera por si (validar, correções, mensagens) e as próximas tarefas do plano. */
+/** 21/10: a lista para encerrar a obra: cada ponto verde ou por fazer, e os por fazer levam ao sítio onde se resolvem. */
+function ParaEncerrar({ L, irPara, fecho }: { L: PontoEncerrar[]; irPara: (s: Seccao) => void; fecho: () => void }) {
+  const feitos = L.filter((x) => x.ok).length, tudo = feitos === L.length;
+  const [aberta, setAberta] = useState(false);
+  const ver = tudo && !aberta ? [] : L;
+  return (
+    <div className={cn("mt-5 rounded-xl border p-4", tudo ? "border-success/40 bg-success/[0.05]" : "border-border")} aria-label="Para encerrar a obra">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="flex items-center gap-2 text-[15px] font-semibold">
+          {tudo ? <CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" /> : <ClipboardCheck className="h-5 w-5 text-muted-foreground" aria-hidden="true" />}
+          {tudo ? "Tudo completo: pode encerrar a obra" : "Para encerrar a obra"}
+        </p>
+        <span className="flex items-center gap-2 text-sm tabular-nums text-muted-foreground">
+          {feitos} de {L.length}
+          {tudo && <button type="button" onClick={() => setAberta(!aberta)} aria-expanded={aberta} className="min-h-9 rounded-md px-2 font-medium text-primary hover:underline">{aberta ? "Esconder" : "Ver a lista"}</button>}
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <div className={cn("h-full rounded-full transition-[width] duration-500", tudo ? "bg-success" : "bg-primary")} style={{ width: `${(feitos / L.length) * 100}%` }} />
+      </div>
+      {ver.length > 0 && (
+        <ul className="mt-3 divide-y divide-border">
+          {[...ver].sort((a, b) => Number(a.ok) - Number(b.ok)).map((x) => (
+            <li key={x.k} className="flex items-center gap-3 py-2.5">
+              {x.ok ? <Check className="h-5 w-5 shrink-0 text-success" aria-hidden="true" /> : <Circle className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+              <span className="min-w-0 flex-1">
+                <span className={cn("block text-[15px]", x.ok ? "text-muted-foreground" : "font-medium")}>{x.t}<span className="sr-only">{x.ok ? " (feito)" : " (por fazer)"}</span></span>
+                <span className="block text-sm text-muted-foreground">{x.sub}</span>
+              </span>
+              {!x.ok && (
+                <button type="button" onClick={() => (x.onde === "fecho" ? fecho() : irPara(x.onde))}
+                  className="inline-flex min-h-10 shrink-0 items-center gap-1 rounded-lg px-3 text-sm font-medium text-primary hover:bg-primary/[0.08]">
+                  {x.onde === "fecho" ? "Preencher" : "Resolver"}<ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ASeguir({ d, irPara }: { d: Negocio; irPara: (s: Seccao) => void }) {
   const p = d.obra.plano!, PV = porValidar(p);
   const msgs = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;

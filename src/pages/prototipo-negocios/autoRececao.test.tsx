@@ -8,6 +8,7 @@ import { OBRA, emFalta, type Grupo } from "./campos";
 import type { Ctx } from "./pecas";
 import { PortalCliente, passoPortal } from "./PortalCliente";
 import { ContratoDoc } from "./DocsCliente";
+import { completarParaEncerrar } from "./encerrarObra";
 import { fotosPorFase, garantiaAte, historiaDaObra, resumoObra } from "./historiaObra";
 
 afterEach(cleanup);
@@ -25,6 +26,7 @@ function obraAcabada() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   d.fase = 5; d.obra.plano!.estado = "em curso"; // como depois do recibo
   preencher(d, OBRA);
+  completarParaEncerrar(d);
   A.fimObra(d.id);
   return { S, A, d };
 }

@@ -25,6 +25,7 @@ import { lerCustos, mudarCustos, useCustos } from "./custosStore";
 import { confirmarHorasEquip, custoEquipamentos, equipamentosObra, horasReais, horasSugeridas, opcoesHoras, type LinhaEquipObra } from "./equipamentosObra";
 import { MIN_OBRAS, TOLERANCIA, comparacaoObra, podeUsarMediana, receitaComHoras, type ComparacaoReceita } from "./receitaReal";
 import { ViaturasObra } from "../frota/ViaturasObra";
+import { faltaParaEncerrar } from "../encerrarObra";
 import { ProximoRececaoNegocio } from "../RececaoNegocio";
 import { useInventario } from "../inventario/loja";
 import { estadoLinhaNegocio, resumoEcNegocio } from "../inventario/ponteNegocios";
@@ -99,7 +100,7 @@ export function ObraV2({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 type Props = { d: Negocio; reg: RegObra; pode: boolean; mudar: (fn: (r: RegObra) => RegObra) => void };
 
 function SecPlano({ ctx, d, reg, pode, mudar }: Props & { ctx: Ctx }) {
-  const { A, go, run } = ctx;
+  const { S, A, go, run } = ctx;
   // 19/10: o arranque espera pelos materiais garantidos no Inventário (lidos ao vivo)
   const db = useInventario();
   const p = d.obra.plano!, C = conflitos(p), F = faltaParaArrancar(d, db).filter((x) => !/plano/.test(x)), matsOk = !F.length;
@@ -118,8 +119,10 @@ function SecPlano({ ctx, d, reg, pode, mudar }: Props & { ctx: Ctx }) {
     frase = matsOk ? "Plano aprovado e materiais garantidos. Pode arrancar." : `Plano aprovado. Para arrancar, falta ${F.join(", ")}.`;
     botao = <Button size="lg" className={BOTAO} disabled={!pode || !matsOk} onClick={go(() => A.arrancar(d.id))}>Arrancar a obra</Button>;
   } else if (p.estado === "em curso") {
-    frase = `Obra em curso, no dia ${p.dia + 1}.`;
-    botao = <Button size="lg" className={BOTAO} disabled={!pode} onClick={go(() => A.fimObra(d.id))}>Registar o fim da obra</Button>;
+    // 21/10: só com tudo completo (encerrarObra.ts)
+    const FE = faltaParaEncerrar(d, S, db);
+    frase = FE.length ? `Obra em curso, no dia ${p.dia + 1}. Para encerrar, falta: ${FE.join(", ")}.` : `Obra em curso, no dia ${p.dia + 1}. Tudo completo: pode encerrar.`;
+    botao = <Button size="lg" className={BOTAO} disabled={!pode || !!FE.length} onClick={go(() => A.fimObra(d.id))}>Encerrar a obra</Button>;
   } else frase = "Obra concluída.";
   const porAprovar = p.estado === "por aprovar";
   return (

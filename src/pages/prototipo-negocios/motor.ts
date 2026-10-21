@@ -12,6 +12,7 @@ import {
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { volumesDasLinhas } from "./entulhoPadrao";
+import { faltaParaEncerrar } from "./encerrarObra";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
@@ -1929,7 +1930,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
     },
     fimObra(id: number) {
-      const d = deal(id); if (!portao(d, [OBRA[1]])) return;
+      const d = deal(id);
+      if (d.obra.plano?.estado !== "em curso") return;
+      // 21/10: só com tudo completo (encerrarObra.ts): tarefas feitas e validadas, mensagens, materiais, adendas, segurança
+      { const F = faltaParaEncerrar(d, S); if (F.length) { avisar({ msg: "Ainda não dá para encerrar a obra", sub: "Falta: " + F.join(", "), kind: "bad" }); return; } }
+      if (!portao(d, [OBRA[1]])) return;
       d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S); d.obra.realFases = realPorFase(d, S);
       log(d, "Obra concluída · margem real " + pct(d.obra.real.m));
       A.enviarAuto(id); // 15/10: o auto de receção vai logo ao portal do cliente
