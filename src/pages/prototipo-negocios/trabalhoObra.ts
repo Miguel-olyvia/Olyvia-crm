@@ -6,7 +6,7 @@
 // · Os ajustes ao plano com a obra em curso: o que se pode mexer (só o que ainda não foi validado e não ficou para trás),
 //   a pré-visualização do efeito (sem mexer no plano) e o texto do aviso ao cliente.
 import { TECS, type Negocio, type Plano, type Tarefa } from "./motor";
-import { fimDe, inicioMinimo, mudarDuracao, mudarInicio } from "./ajustesPlano";
+import { fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarInicio } from "./ajustesPlano";
 import { estadoDe } from "./obraOps";
 import { rotuloDia } from "./preparacaoObra";
 
@@ -89,7 +89,12 @@ const GERAL: Instrucoes = {
 /** No fim de cada dia, em todas as tarefas. */
 export const FIM_DO_DIA = ["Arrumar a ferramenta na carrinha", "Deixar a zona limpa e segura", "Fechar a porta e entregar a chave como combinado"];
 
-export function instrucoesDe(t: Pick<Tarefa, "nome" | "sk">): Instrucoes {
+export function instrucoesDe(t: Pick<Tarefa, "nome" | "sk"> & { corrige?: number; nota?: string }): Instrucoes {
+  // 21/10: uma correção tem as instruções do pedido do responsável
+  if (t.corrige != null) {
+    const base = instrucoesDe({ nome: t.nome.replace(/^Correção · /, ""), sk: t.sk });
+    return { antes: ["Ler o pedido do responsável de obra", "Ver as fotografias que enviou antes"], passos: [`Corrigir: ${t.nota ?? "o que o responsável pediu"}`, "Verificar o resultado com o que foi pedido", "Limpar a zona"], verificar: ["O pedido do responsável está resolvido", ...base.verificar.slice(0, 1), "Fotografia do resultado, no mesmo enquadramento"], epi: base.epi };
+  }
   const s = sem(t.nome + " " + t.sk);
   return MODELOS.find((m) => m.re.test(s))?.i ?? GERAL;
 }
@@ -152,6 +157,8 @@ export function trabalhoDoTecnico(deals: Negocio[], tec: string, desvio = 0): Tr
     const dia = p.dia + desvio;
     p.tasks.forEach((t, ti) => {
       if (t.tec !== tec || diaDaTarefa(t, dia) == null) return;
+      // a tarefa que está a ser corrigida sai do Hoje: o técnico trabalha na tarefa de correção
+      if (p.tasks.some((x) => x.corrige === ti && estadoDe(x) !== "validada")) return;
       // hoje: as que não estão validadas; amanhã: todas as que ocupam o dia
       if (desvio === 0 && estadoDe(t) === "validada") return;
       L.push({ d, ti, t });
@@ -224,4 +231,28 @@ export function preverAjuste(p: Plano, ti: number, m: AjusteVivo): { fimAntes: n
 export function textoAvisoCliente(nomeTarefa: string, motivo: string, fimAntes: string, fimDepois: string): string {
   const fim = fimAntes === fimDepois ? `A data de fim mantém-se: ${fimDepois}.` : `A obra passa a acabar a ${fimDepois} (antes: ${fimAntes}).`;
   return `Ajustámos o plano em "${nomeTarefa.toLowerCase()}" (${motivo.toLowerCase()}). ${fim}`;
+}
+
+/* ------------------------------------------------------------------ as correções (21/10) */
+/** O tempo que o responsável estima para corrigir (±). */
+export const TEMPOS_CORRECAO = [{ h: 2, rot: "2 h" }, { h: 4, rot: "Meio dia" }, { h: 8, rot: "1 dia" }, { h: 16, rot: "2 dias" }] as const;
+/** Quando entra a correção: o que cabe num dia fica para hoje (sem atrasar); um dia ou mais começa amanhã e empurra o que vem depois. */
+export function planoCorrecao(p: Plano, horas: number): { dia: number; dur: number; atraso: number } {
+  if (horas < 8) return { dia: p.dia, dur: 1, atraso: 0 };
+  const dur = Math.ceil(horas / 8);
+  return { dia: p.dia + 1, dur, atraso: dur };
+}
+/** O efeito, sem mexer: o fim da obra antes e depois e as tarefas que andam. */
+export function preverCorrecao(p: Plano, horas: number): { dia: number; fimAntes: number; fimDepois: number; mexe: string[] } {
+  const c = planoCorrecao(p, horas), fimAntes = fimDe(p.tasks);
+  const mexe = c.atraso ? p.tasks.filter((x) => estadoDe(x) !== "validada" && x.dia >= c.dia).map((x) => x.nome) : [];
+  return { dia: c.dia, fimAntes, fimDepois: Math.max(fimAntes + (mexe.length ? c.atraso : 0), c.dia + c.dur), mexe };
+}
+/** Junta a tarefa de correção ao plano (no fim da lista, para os índices não mudarem) e empurra o que vem depois. Devolve o índice. */
+export function aplicarCorrecao(p: Plano, ti: number, motivo: string, horas: number, tec: string | null): number {
+  const t = p.tasks[ti], c = planoCorrecao(p, horas);
+  guardarBase(p);
+  if (c.atraso) p.tasks.forEach((x) => { if (estadoDe(x) !== "validada" && x.dia >= c.dia) x.dia += c.atraso; });
+  p.tasks.push({ nome: `Correção · ${t.nome}`, svcs: t.svcs, dia: c.dia, dur: c.dur, sk: t.sk, h: horas, tec, fase: t.fase, nota: motivo, corrige: ti });
+  return p.tasks.length - 1;
 }

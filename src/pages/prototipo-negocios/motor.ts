@@ -2,9 +2,9 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
-import { diferencas, guardarBase, mudarDuracao, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
+import { diferencas, fimDe, guardarBase, mudarDuracao, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
-import { aplicarAjuste, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
+import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo } from "./catalogo";
 import {
   ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
@@ -14,7 +14,7 @@ import type { Produto } from "./v2/catalogoModelo";
 import { volumesDasLinhas } from "./entulhoPadrao";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
-import { PAGAMENTO_FASES, diasDaObra, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
+import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -231,7 +231,7 @@ export interface AutoRececao {
   assinado?: string;
 }
 /** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
-export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
+export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; /** 21/10: com IVA */ totalIva?: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
 /** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
 /** Porque o cliente recusa a proposta por completo (no portal). */
@@ -242,7 +242,10 @@ export const MOTIVOS_DA_VISITA: readonly string[] = ["Outros materiais", "Juntar
 export const versaoAtual = (o: Orcamento) => (o.versoes?.length ?? 0) + 1;
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null; /** a fase da obra (planos do orçamento) */ fase?: number;
   /** 15/10: uma nota das Operações para a equipa (ex.: "levar o andaime") */ nota?: string;
-  /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa }
+  /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa;
+  /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number }
+/** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
+export interface MensagemObra { de: "cliente" | "empresa"; quem: string; t: string; q: string; lida?: boolean; foto?: string }
 export interface Plano {
   tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number;
   /** Gerado do plano do orçamento (preparacaoObra.ts), com o início previsto ("aaaa-mm-dd"). */
@@ -297,7 +300,9 @@ export interface Negocio {
     /** 15/10: o auto de receção (por assinar → assinado) */
     auto?: AutoRececao | null;
     /** 21/10: os ajustes ao plano com a obra em curso (trabalhoObra.ts), com o aviso ao cliente quando foi avisado. */
-    alteracoes?: Alteracao[] };
+    alteracoes?: Alteracao[];
+    /** 21/10: a conversa com o cliente sobre a obra (a página da obra e o portal do cliente) */
+    chat?: MensagemObra[] };
   /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
   adendas?: Adenda[];
   hist: Evento[];
@@ -355,7 +360,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
 // 16 (16/10/2026): a encomenda de cliente deixa de nascer no contrato; emite-se no Inventário novo ao validar o pagamento
 // 17 (19/10/2026): sai a encomenda a fornecedor do motor (obra.enc): os materiais vivem só no Inventário; negócios anulados (anulado)
-export const VERSAO = 20;
+export const VERSAO = 21;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -490,6 +495,12 @@ export function seed(): Estado {
       { q: "ter 14/10 17:40", quem: "Marco Antunes", t: "Canalização feita. Falta validar.", k: "horas", fotos: [fotoExemplo("Canalização", "#5a3fc0", 1)] },
     ];
     m.obra.seg = { pss: "seg 13/10", condominio: "sex 10/10" };
+    m.obra.chat = [
+      { de: "empresa", quem: "Filipe Rocha", t: "Bom dia, Marta. A obra arrancou hoje: a equipa está no local e as proteções estão no elevador. Qualquer dúvida, escreva aqui.", q: "seg 13/10 08:20", lida: true },
+      { de: "cliente", quem: "Marta Lima", t: "Obrigada! O porteiro sabe que vêm. Já agora, a base de duche pode ficar mais para a janela?", q: "ter 14/10 09:02", lida: true },
+      { de: "empresa", quem: "Filipe Rocha", t: "Pode, sim: o Marco mudou o ponto de água 20 cm. Está nas fotografias da canalização.", q: "ter 14/10 17:55", lida: true },
+      { de: "cliente", quem: "Marta Lima", t: "Vi as fotografias, está ótimo. Os azulejos são os que escolhemos na loja (o 30×60 claro)?", q: "qua 15/10 08:40" },
+    ];
   }
   // as obras antigas do exemplo (pagas em setembro, antes do Inventário novo) têm a encomenda de cliente já servida, sem origem no Inventário (ref)
   const ecAntiga = (d: Negocio, n: string, quando: string) => {
@@ -1240,7 +1251,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       // 14/10: também depois de aceite, enquanto o contrato não está assinado (o contrato enviado fica anulado)
       if (!o?.enviada || o.contrato === "assinado" || d.fase !== 3) { avisar({ msg: "Não há proposta para refazer", sub: o?.contrato === "assinado" ? "O contrato já foi assinado" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
       const n = versaoAtual(o);
-      (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, motivos: [...motivos], nota: nota.trim() || undefined, onde });
+      (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, totalIva: totaisIva(d, S).total, motivos: [...motivos], nota: nota.trim() || undefined, onde });
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
       o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
@@ -1249,6 +1260,27 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
         d.visita.fechada = false; d.fase = 2; d.valida = null;
         avisar({ msg: `A preparar a versão ${n + 1}`, sub: "De volta à visita. Ao fechar o levantamento, o orçamento refaz-se", kind: "" });
       } else avisar({ msg: `A preparar a versão ${n + 1}`, sub: `Mude o que o cliente pediu e envie. A v${n} fica guardada`, kind: "" });
+    },
+    /** 21/10: a versão nova faz-se num só sítio: mexer nos produtos da visita refaz o orçamento logo (sem voltar à visita);
+     *  os preços, o desconto e as linhas à mão mantêm-se (preservarManuais). Só com a proposta por enviar. */
+    refazerOrcamento(id: number) {
+      const d = deal(id), antes = d.orc, L = LINHAS[d.linha];
+      if (!antes || antes.enviada || d.fase !== 3) return;
+      d.orc = criarOrc(d, S);
+      preservarManuais(antes, d.orc, L);
+      ligarDemolicao(d.orc, antes.demolicao);
+      sincronizarEfeitos(d, S); sincronizarDemolicao(d, S);
+    },
+    /** 21/10: a versão nova pronta: verifica e envia ao portal num toque. Com bloqueios (margem abaixo do mínimo sem aprovação), não envia e diz porquê. */
+    enviarVersao(id: number): boolean {
+      const d = deal(id), o = d.orc;
+      if (!o || o.enviada || d.fase !== 3) return false;
+      // o início previsto da proposta é o do plano (o editor muda-o lá); sem ele, o primeiro dia útil possível
+      if (!d.f.inicio_prev) d.f.inicio_prev = o.inicioObra ?? isoDia(iniciosRapidos(new Date())[0].data);
+      o.verif = true;
+      if (bloqueado(d, S)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: baixe o desconto ou peça aprovação à Direção", kind: "bad" }); return false; }
+      A.enviar(id);
+      return !!o.enviada;
     },
     /** Produtos do Catálogo na visita: escolher (com a quantidade sugerida), mudar a quantidade, "o cliente fornece", tirar. */
     produto(id: number, p: Produto, q: number) { const v = deal(id).visita; if (p.servico) garantirServico(S, p.servico); v.prod = juntarProduto(v.prod ?? [], fotografia(p, q)); },
@@ -1596,6 +1628,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t?.exec || t.exec.estado !== "feita") return;
       t.exec.estado = "validada"; t.exec.validada = agora();
+      // 21/10: validar a correção valida também a tarefa corrigida
+      const orig = t.corrige != null ? d.obra.plano!.tasks[t.corrige] : null;
+      if (orig?.exec && orig.exec.estado !== "validada") {
+        orig.exec.estado = "validada"; orig.exec.validada = agora(); orig.exec.motivo = undefined;
+        (orig.exec.envios ??= []).push({ q: agora(), dia: d.obra.plano!.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, k: "validada", nota: "Validada depois da correção." });
+      }
       (t.exec.envios ??= []).push({ q: agora(), dia: d.obra.plano!.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, k: "validada" });
       (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Validou ${t.nome.toLowerCase()}.`, k: "validacao" });
       log(d, `Obra: ${t.nome} validada`);
@@ -1603,9 +1641,22 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: `${t.nome} validada`, sub: falta ? `${falta} ${falta === 1 ? "tarefa ainda não validada" : "tarefas ainda não validadas"}` : "Todas as tarefas validadas: pode registar o fim da obra", kind: "ok" });
     },
     /** O supervisor pede correção, com o motivo: volta ao técnico. */
-    pedirCorrecao(id: number, ti: number, motivo: string) {
+    pedirCorrecao(id: number, ti: number, motivo: string, extra?: { horas: number; tec?: string | null }) {
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t?.exec || t.exec.estado !== "feita" || !motivo.trim()) return;
+      // 21/10: com o tempo estimado, a correção é uma tarefa nova para o técnico (atrasa o plano se não couber hoje) e volta à validação
+      if (extra) {
+        const p = d.obra.plano!, fimAntes = rotuloDia(p, fimDe(p.tasks) - 1);
+        const nt = aplicarCorrecao(p, ti, motivo.trim(), extra.horas, extra.tec ?? t.tec);
+        const c = p.tasks[nt], fimDepois = rotuloDia(p, fimDe(p.tasks) - 1), quem = TECS.find((x) => x.id === c.tec)?.n ?? "o técnico";
+        t.exec.estado = "corrigir"; t.exec.motivo = motivo.trim();
+        const eu = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+        (t.exec.envios ??= []).push({ q: agora(), dia: p.dia, quem: eu, k: "correcao", nota: `${motivo.trim()} · nova tarefa para ${quem.split(" ")[0]}, ${nfmt(extra.horas)} h a ${rotuloDia(p, c.dia)}` });
+        (d.obra.diario ??= []).push({ q: agora(), quem: eu, t: `Pediu correção em ${t.nome.toLowerCase()}: ${motivo.trim()}. Nova tarefa para ${quem} (${nfmt(extra.horas)} h, ${rotuloDia(p, c.dia)})${fimAntes !== fimDepois ? `; a obra passa a acabar a ${fimDepois}` : ""}.`, k: "correcao" });
+        log(d, `Obra: correção pedida em ${t.nome} · ${motivo.trim()} · ${nfmt(extra.horas)} h para ${quem}${fimAntes !== fimDepois ? ` · fim ${fimAntes} → ${fimDepois}` : ""}`, "w");
+        avisar({ msg: `Correção enviada a ${quem.split(" ")[0]}`, sub: `Tem a tarefa no Hoje ${c.dia === p.dia ? "de hoje" : `a ${rotuloDia(p, c.dia)}`}${fimAntes !== fimDepois ? ` · a obra passa a acabar a ${fimDepois}` : " · a data de fim mantém-se"}`, kind: "" });
+        return;
+      }
       t.exec.estado = "corrigir"; t.exec.motivo = motivo.trim();
       (t.exec.envios ??= []).push({ q: agora(), dia: d.obra.plano!.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, k: "correcao", nota: motivo.trim() });
       (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Pediu correção em ${t.nome.toLowerCase()}: ${motivo.trim()}`, k: "correcao" });
@@ -1685,6 +1736,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, `Plano ajustado em obra: ${prev.texto} · ${motivo.trim()}${cliente ? " · cliente avisado no portal" : ""}`, prev.fimDepois > prev.fimAntes ? "w" : "a");
       avisar({ msg: "Plano ajustado", sub: `${prev.fimDepois !== prev.fimAntes ? `Acaba a ${fimDepois}` : "A data de fim mantém-se"}${cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
     },
+    /** 21/10: uma mensagem na conversa da obra (do cliente no portal, ou da empresa na página da obra). */
+    mensagemObra(id: number, de: "cliente" | "empresa", texto: string) {
+      const d = deal(id), t = texto.trim();
+      if (!t) return;
+      const quem = de === "cliente" ? d.nome : S.role === "operacoes" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      (d.obra.chat ??= []).push({ de, quem, t, q: agora(), lida: de === "empresa" });
+      if (de === "cliente") log(d, "Mensagem do cliente no portal: " + t);
+      // as mensagens do cliente que estavam por ler ficam lidas quando a empresa responde
+      if (de === "empresa") for (const m of d.obra.chat) if (m.de === "cliente") m.lida = true;
+    },
+    /** A empresa leu a conversa. */
+    lerChat(id: number) { for (const m of deal(id).obra.chat ?? []) if (m.de === "cliente") m.lida = true; },
     /** Uma ocorrência no diário de obra (ex.: um imprevisto). */
     ocorrencia(id: number, texto: string) {
       const d = deal(id); if (!texto.trim()) return;

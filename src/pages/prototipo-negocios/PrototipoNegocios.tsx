@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
+  ArrowLeft, BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import mascote from "@/assets/olyvia-mascot.png";
@@ -71,6 +71,17 @@ function ler(): Estado {
   try {
     const j = JSON.parse(localStorage.getItem(CHAVE) || "null");
     if (j && j.v === VERSAO) return j as Estado;
+    // 21/10: as versões 18 a 20 (o acompanhamento da obra) migram sem perder o que se fez na demonstração:
+    // só se juntam os dados novos do exemplo (a conversa da obra) a quem ainda não os tem
+    if (j && j.v >= 18 && j.v < VERSAO) {
+      const novo = seed(), E = j as Estado;
+      for (const d of E.deals) {
+        const s = novo.deals.find((x) => x.id === d.id);
+        if (s?.obra.chat && !d.obra.chat) d.obra.chat = s.obra.chat;
+      }
+      E.v = VERSAO;
+      return E;
+    }
   } catch {
     /* sem storage: começa do zero */
   }
@@ -80,8 +91,17 @@ function ler(): Estado {
 interface Toast extends Aviso { id: number }
 const CHAVE_PROPOSTA_V1 = "olyvia-prototipo-v1-proposta";
 
+/** 21/10: o link da app do técnico (?tecnico=hn): abre o Hoje desse técnico. Assim, numa demonstração, uma janela é o técnico e outra o gestor. */
+function comLink(S: Estado): Estado {
+  try {
+    const tec = new URLSearchParams(window.location.search).get("tecnico");
+    if (tec) { S.role = "tecnico"; S.tec = tec; S.view = "hoje"; }
+  } catch { /* sem URL */ }
+  return S;
+}
+
 export default function PrototipoNegocios() {
-  const ref = useRef<Estado>(ler());
+  const ref = useRef<Estado>(comLink(ler()));
   const S = ref.current;
   const [, redesenhar] = useReducer((x: number) => x + 1, 0);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -108,7 +128,13 @@ export default function PrototipoNegocios() {
   const [portalTok, setPortalTok] = useState<string | null>(() => { try { return new URLSearchParams(window.location.search).get("portal"); } catch { return null; } });
   // o que se faz noutro separador (o portal) chega aqui sem recarregar
   useEffect(() => {
-    const f = (e: StorageEvent) => { if (e.key === CHAVE) { ref.current = ler(); redesenhar(); } };
+    // 21/10: os dados vêm do outro separador, mas quem vê e onde está ficam deste (o técnico numa janela e o gestor noutra)
+    const f = (e: StorageEvent) => {
+      if (e.key !== CHAVE) return;
+      const { role, view, deal, op, tec } = ref.current;
+      ref.current = { ...ler(), role, view, deal, op, tec };
+      redesenhar();
+    };
     window.addEventListener("storage", f);
     return () => window.removeEventListener("storage", f);
   }, []);
@@ -301,7 +327,10 @@ export default function PrototipoNegocios() {
     if (!comInvFrota) return;
     setInvMock(false); setFrotaAba(pedidoFrota.aba ?? "viaturas"); setFrotaMock(true);
     setFrotaPedido(pedidoFrota.vid ? { vid: pedidoFrota.vid, n: pedidoFrota.n } : null);
+    // 21/10: vindo da página de uma obra, a Frota mostra "Voltar à obra"
+    setVoltarObra(ref.current.view === "operacoes" && ref.current.op ? ref.current.op : null);
   }, [comInvFrota, pedidoFrota]);
+  const [voltarObra, setVoltarObra] = useState<number | null>(null);
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
   // 20/10 (demo): abrir o portal do fornecedor (do menu, ou de uma PO com "Abrir como fornecedor →"); voltar repõe o Inventário se veio de lá
   const abrirPortalForn = (sup: string | null, po: string | null, voltar: "inv" | "crm"): void => {
@@ -447,7 +476,14 @@ export default function PrototipoNegocios() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {(ativoInv || ativoFrota) && <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:px-6"><div ref={setAlvoTopo} className="flex min-w-0 flex-1" /></header>}
+          {(ativoInv || ativoFrota) && <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:px-6">
+            {ativoFrota && voltarObra != null && (
+              <button type="button" onClick={() => { const id = voltarObra; setVoltarObra(null); setFrotaMock(false); run(() => A.abrirPlano(id)); }}
+                className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/[0.06] px-3 text-[15px] font-medium text-primary hover:bg-primary/10">
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar à obra
+              </button>
+            )}
+            <div ref={setAlvoTopo} className="flex min-w-0 flex-1" /></header>}
           <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:hidden">
             <img src={mascote} alt="" className="h-7 w-7 object-contain" />
             <span className="flex-1 text-base font-semibold">Olyvia</span>

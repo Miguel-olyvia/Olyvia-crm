@@ -2,10 +2,7 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import {
-  ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer,
-  Home, Lock, MapPin, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -336,7 +333,11 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
           </Partilhar>
         </div>
       ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
-      ...(o.vendaDireta ? [] : [simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
+      // 21/10: o contrato só abre depois de o cliente aceitar a proposta (no portal ou registado pelo comercial)
+      ...(o.vendaDireta ? [] : [simples && !o.aceite && !o.contrato ? {
+        id: PROPOSTA[1].titulo, titulo: PROPOSTA[1].nome || PROPOSTA[1].titulo, icone: Lock, bloqueado: true, feito: false, resumo: ["à espera da aceitação"],
+        corpo: <ContratoBloqueado d={d} />,
+      } : simples ? fechadoSe({ ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
         <div className="space-y-10">
           <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
           <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? `o cliente aceitou a proposta ${o.aceite === "hoje" ? "hoje" : "a " + o.aceite} · pronto a gerar` : "depois de a proposta ser aceite"}>
@@ -637,5 +638,20 @@ function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
         </div>
       )}
     </>
+  );
+}
+
+/** 21/10: o passo Contrato antes de o cliente aceitar a proposta: fechado, com o porquê e o estado da proposta. */
+function ContratoBloqueado({ d }: { d: Negocio }) {
+  const o = d.orc!;
+  const estado = o.pedidoCliente ? `${d.nome.split(" ")[0]} pediu alterações: faça a versão nova e envie-a de novo.`
+    : o.enviada ? `Proposta enviada ${o.enviada === "hoje" ? "hoje" : "a " + o.enviada}: à espera da resposta no portal.`
+    : "A proposta ainda não foi enviada: termine o Orçamento e envie a Proposta.";
+  return (
+    <div className="rounded-2xl border border-dashed border-input bg-muted/40 p-6 text-center">
+      <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground" aria-hidden="true"><Lock className="h-5 w-5" /></span>
+      <p className="mt-3 text-lg font-semibold">O contrato abre quando o cliente aceitar a proposta</p>
+      <p className="mx-auto mt-1 max-w-md text-[15px] text-muted-foreground">{estado}</p>
+    </div>
   );
 }

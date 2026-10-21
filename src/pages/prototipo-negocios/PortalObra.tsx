@@ -43,7 +43,7 @@ export function TrabalhosDaFase({ p, ts }: { p: Plano; ts: Tarefa[] }) {
   const [aberto, setAberto] = useState<string | null>(null);
   return (
     <ul className="mt-2 space-y-2">
-      {ts.map((t) => {
+      {ts.filter((t) => t.corrige == null).map((t) => {
         const n = visiveis(t).length, f = nFotos(t), on = aberto === t.nome;
         return (
           <li key={t.nome} className="rounded-xl border border-slate-200">
@@ -69,7 +69,8 @@ export function TrabalhosDaFase({ p, ts }: { p: Plano; ts: Tarefa[] }) {
 /** O diário da obra: tudo o que os técnicos enviaram, do mais recente para o mais antigo. */
 export function DiarioPortal({ p }: { p: Plano }) {
   const L: { t: Tarefa; e: Envio; ordem: number }[] = [];
-  p.tasks.forEach((t) => visiveis(t).forEach((e, k) => L.push({ t, e, ordem: e.dia * 100 + k })));
+  // as correções internas não aparecem ao cliente; a fotografia final fica na tarefa corrigida quando é validada
+  p.tasks.filter((t) => t.corrige == null).forEach((t) => visiveis(t).forEach((e, k) => L.push({ t, e, ordem: e.dia * 100 + k })));
   L.sort((a, b) => b.ordem - a.ordem);
   const [todos, setTodos] = useState(false);
   if (!L.length) return null;

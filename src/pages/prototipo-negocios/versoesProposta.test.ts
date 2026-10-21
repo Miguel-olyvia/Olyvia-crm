@@ -20,13 +20,31 @@ const preparar = () => {
   return { S, A, d };
 };
 
+describe("a versão nova num só sítio (21/10)", () => {
+  it("o cliente pede, o comercial muda o preço ali e envia num toque; refazer o orçamento mantém o desconto", () => {
+    const { S, A, d } = preparar();
+    A.pedirAlteracoes(d.id, "baixar uns 500 €", ["Baixar o preço"]);
+    A.novaVersao(d.id, ["Baixar o preço"], "baixar uns 500 €", "orcamento");
+    const o = d.orc!, v1 = o.versoes![0];
+    expect(v1.totalIva).toBeGreaterThan(v1.total);
+    o.desconto = 3;
+    A.refazerOrcamento(d.id);
+    expect(d.orc!.desconto).toBe(3);
+    expect(tot(d, S).pf).toBeLessThan(v1.total);
+    // com um bloqueio (a margem de uma linha do exemplo), só envia depois de aprovado
+    if (!A.enviarVersao(d.id)) { d.orc!.aprov = "ok"; A.enviarVersao(d.id); }
+    expect(d.orc!.enviada).toBe("hoje");
+    expect(versaoAtual(d.orc!)).toBe(2);
+  });
+});
+
 describe("versões da proposta", () => {
   it("só no orçamento: guarda a v1 como substituída e destranca o orçamento", () => {
     const { S, A, d } = preparar();
     const total = tot(d, S).pf;
     A.novaVersao(d.id, ["Baixar o preço"], " prefere pagar em 3 vezes ", "orcamento");
     const o = d.orc!;
-    expect(o.versoes).toEqual([{ n: 1, enviada: "05/10", substituida: expect.any(String), total, motivos: ["Baixar o preço"], nota: "prefere pagar em 3 vezes", onde: "orcamento" }]);
+    expect(o.versoes).toEqual([{ n: 1, enviada: "05/10", substituida: expect.any(String), total, totalIva: expect.any(Number), motivos: ["Baixar o preço"], nota: "prefere pagar em 3 vezes", onde: "orcamento" }]);
     expect(o.enviada).toBeNull();
     expect(o.verif).toBe(false);
     expect(d.fase).toBe(3);

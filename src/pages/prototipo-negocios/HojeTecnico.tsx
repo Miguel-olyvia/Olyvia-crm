@@ -3,7 +3,8 @@
 // o que verificar no fim e o registo do dia (horas, fotografias e o que fez). O registo vai para a página da obra
 // (o responsável valida ou pede correção) e para o portal do cliente (fotografias e descrição, sem horas).
 // O protótipo não tem relógio: "hoje" é o dia de cada obra em curso (as Operações mudam-no na página da obra).
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
@@ -22,7 +23,7 @@ import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import {
   FIM_DO_DIA, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, trabalhoDoTecnico,
 } from "./trabalhoObra";
-import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa } from "./AcompanhamentoObra";
+import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
 import { lerFoto } from "./ObraOperacoes";
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
@@ -114,6 +115,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   const equip = equipamentosDaObra(p).filter((e) => e.tarefas.includes(t.nome) || e.origem === "Frota");
   const envHoje = enviosDe(t).filter((e) => e.dia === p.dia && (e.k === "registo" || e.k === "feita"));
   const morada = d.f.morada || d.local;
+  const corr = t.corrige != null, orig = corr ? p.tasks[t.corrige!] : null;
   const [abertoAntes, setAbertoAntes] = useState(ex === "por fazer");
   const [hist, setHist] = useState(false);
   const [problema, setProblema] = useState<string | null>(null);
@@ -123,7 +125,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   return (
     <article className={cn(CARTAO, "overflow-hidden")} aria-label={`${t.nome} · ${d.nome}`}>
       {/* a obra */}
-      <header className="relative p-5 pb-4 text-white" style={{ background: `linear-gradient(135deg, ${cor}, #2e1a6b)` }}>
+      <header className="relative p-5 pb-4 text-white" style={{ background: corr ? "linear-gradient(135deg, #dc2626, #7f1d1d)" : `linear-gradient(135deg, ${cor}, #2e1a6b)` }}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-white/80">{fase ? `Fase ${t.fase} · ${fase.curto}` : t.sk} · {rotuloDiaTarefa(t, p.dia)}</p>
           <span className="rounded-full bg-white shadow-sm"><ChipEstado e={ex} /></span>
@@ -138,7 +140,13 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
       </header>
 
       <div className="space-y-6 p-5">
-        {t.nota && <p className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/[0.08] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" /><span><b className="font-medium">Das Operações:</b> {t.nota}</span></p>}
+        {corr ? (
+          // 21/10: a tarefa de correção: o pedido do responsável e o que enviou antes, para comparar
+          <div className="rounded-xl border border-destructive/40 bg-destructive/[0.06] p-3 animate-in fade-in-0 zoom-in-95">
+            <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" /><span><b className="font-semibold">Nova tarefa de correção.</b> {RESPONSAVEL_OBRA.n.split(" ")[0]} pediu: {t.nota}. Corrija, fotografe e envie de novo: volta à validação.</span></p>
+            {orig && enviosDe(orig).some((e) => e.fotos?.length) && <><p className="mt-2 text-sm text-muted-foreground">O que enviou antes:</p><Miniaturas fotos={enviosDe(orig).flatMap((e) => e.fotos ?? []).slice(-3)} tam="h-16 w-24" /></>}
+          </div>
+        ) : t.nota && <p className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/[0.08] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" /><span><b className="font-medium">Das Operações:</b> {t.nota}</span></p>}
         {ex === "corrigir" && t.exec?.motivo && (
           <p className="flex items-start gap-2 rounded-xl bg-destructive/[0.07] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" /><span><b className="font-medium">{RESPONSAVEL_OBRA.n.split(" ")[0]} pediu uma correção:</b> {t.exec.motivo}. Corrija e envie um novo registo.</span></p>
         )}
@@ -275,11 +283,13 @@ function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado }: { ctx: Ctx; d:
   const [fotos, setFotos] = useState<string[]>([]);
   const [nota, setNota] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const [camara, setCamara] = useState(false);
   const juntar = async (f?: File | null) => { if (!f) return; try { const u = await lerFoto(f); setFotos((x) => [...x, u].slice(-4)); } catch { /* sem leitura */ } };
   const falta = [!(horas > 0) && "as horas", !fotos.length && "uma fotografia", !nota.trim() && "o que fez hoje"].filter(Boolean) as string[];
   const enviar = (feita: boolean) => run(() => { A.enviarRegisto(d.id, ti, { horas, fotos, nota, feita }); setFotos([]); setNota(""); enviado(); });
   return (
     <div className="mt-3 space-y-4">
+      {camara && <Camara titulo={t.nome} fechar={() => setCamara(false)} tirar={(u) => setFotos((x) => [...x, u].slice(-4))} semCamara={() => { setCamara(false); input.current?.click(); }} />}
       <div>
         <p className="text-sm font-medium text-muted-foreground">Horas de hoje <span className="font-normal">(previstas {nfmt(horasPorDia(t))} h)</span></p>
         <span role="group" aria-label="Horas de hoje" className="mt-1.5 inline-flex items-center rounded-xl border border-input bg-card p-0.5">
@@ -297,8 +307,9 @@ function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado }: { ctx: Ctx; d:
               <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => setFotos(fotos.filter((_, i) => i !== k))} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
             </span>
           ))}
-          <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Tirar ou escolher uma fotografia" onChange={(e) => { void juntar(e.target.files?.[0]); e.target.value = ""; }} />
-          <Button variant="outline" className="min-h-12" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar fotografia</Button>
+          <input ref={input} type="file" accept="image/*" capture="environment" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => { for (const f of Array.from(e.target.files ?? [])) void juntar(f); e.target.value = ""; }} />
+          <Button variant="outline" className="min-h-12" onClick={() => (temCamara() ? setCamara(true) : input.current?.click())}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar fotografia</Button>
+          {temCamara() && <button type="button" onClick={() => input.current?.click()} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Escolher da galeria</button>}
           <button type="button" onClick={() => setFotos((x) => [...x, fotoExemplo(t.nome, cor, enviosDe(t).length + x.length)].slice(-4))} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><ImagePlus className="h-4 w-4" aria-hidden="true" />Usar uma de exemplo</button>
         </div>
       </div>
@@ -320,5 +331,59 @@ function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado }: { ctx: Ctx; d:
       </div>
       {falta.length > 0 && <p className="text-sm text-muted-foreground">Falta {falta.join(", ").replace(/, ([^,]*)$/, " e $1")}.</p>}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ a câmara na app (21/10) */
+/** Há câmara ao vivo? (precisa de https ou localhost; sem ela, o botão abre a câmara do telemóvel pelo seletor de ficheiros) */
+const temCamara = () => typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia && window.isSecureContext;
+
+/** A câmara dentro da app: vê-se o que se vai fotografar, tira-se num toque (várias seguidas) e volta-se ao registo. */
+function Camara({ titulo, fechar, tirar, semCamara }: { titulo: string; fechar: () => void; tirar: (dataUrl: string) => void; semCamara: () => void }) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [pronta, setPronta] = useState(false);
+  const [flash, setFlash] = useState(0);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let fluxo: MediaStream | null = null, vivo = true;
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false })
+      .then((s) => {
+        if (!vivo) { s.getTracks().forEach((x) => x.stop()); return; }
+        fluxo = s;
+        if (video.current) { video.current.srcObject = s; void video.current.play().then(() => setPronta(true)).catch(() => setPronta(true)); }
+      })
+      .catch(() => { if (vivo) semCamara(); });
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") fechar(); };
+    window.addEventListener("keydown", esc);
+    return () => { vivo = false; fluxo?.getTracks().forEach((x) => x.stop()); window.removeEventListener("keydown", esc); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const disparar = () => {
+    const v = video.current;
+    if (!v || !v.videoWidth) return;
+    const k = Math.min(1, 720 / v.videoWidth), c = document.createElement("canvas");
+    c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+    c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
+    tirar(c.toDataURL("image/jpeg", 0.72));
+    setN((x) => x + 1); setFlash((x) => x + 1);
+  };
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label="Câmara" className="fixed inset-0 z-[1000] flex flex-col bg-black text-white animate-in fade-in-0">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <p className="min-w-0 truncate text-[15px]"><span className="text-white/70">Fotografia de</span> {titulo}</p>
+        <button type="button" onClick={fechar} aria-label="Fechar a câmara" className="grid h-11 w-11 place-items-center rounded-full bg-white/15 hover:bg-white/25"><X className="h-5 w-5" /></button>
+      </div>
+      <div className="relative min-h-0 flex-1">
+        <video ref={video} playsInline muted className="absolute inset-0 h-full w-full object-contain" />
+        {!pronta && <p className="absolute inset-0 grid place-items-center text-white/70">A abrir a câmara…</p>}
+        {flash > 0 && <span key={flash} className="pointer-events-none absolute inset-0 bg-white animate-out fade-out-0 duration-300 fill-mode-forwards" aria-hidden="true" />}
+      </div>
+      <div className="flex items-center justify-between px-6 pb-8 pt-4">
+        <span className="w-24 text-sm text-white/80">{n ? `${n} ${n === 1 ? "tirada" : "tiradas"}` : ""}</span>
+        <button type="button" onClick={disparar} disabled={!pronta} aria-label="Tirar a fotografia"
+          className="grid h-20 w-20 place-items-center rounded-full border-4 border-white transition-transform active:scale-90 disabled:opacity-40"><span className="h-16 w-16 rounded-full bg-white" /></button>
+        <button type="button" onClick={fechar} className="w-24 text-right text-[15px] font-semibold">{n ? "Concluído" : "Cancelar"}</button>
+      </div>
+    </div>,
+    document.body,
   );
 }

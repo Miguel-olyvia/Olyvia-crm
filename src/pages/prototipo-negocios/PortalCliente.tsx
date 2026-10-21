@@ -22,6 +22,7 @@ import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
 import { PAGAMENTO_EMPRESA, em3, referenciaMb, vencimento } from "./pagamentoCliente";
 import { DiarioPortal, NovidadesPortal, TrabalhosDaFase } from "./PortalObra";
+import { Conversa } from "./ConversaObra";
 
 /** Os passos do percurso, pela ordem. */
 export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar a obra", "Receber a obra"] as const;
@@ -511,6 +512,15 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
             </section>
           )}
           {P.estado === "obra" && p && (p.estado === "em curso" || p.estado === "concluída") && <DiarioPortal p={p} />}
+          {/* 21/10: a conversa com a equipa da obra (o gestor responde na página da obra) */}
+          {(P.estado === "obra" || P.estado === "adenda" || P.estado === "auto") && (
+            <section aria-labelledby="conversa-portal-t" className="rounded-2xl bg-white p-5 shadow-sm">
+              <h2 id="conversa-portal-t" className="text-base font-semibold">Fale com a equipa</h2>
+              <p className="mb-3 text-sm text-slate-500">O responsável de obra responde aqui. Também pode ligar: 917 300 210.</p>
+              <Conversa msgs={d.obra.chat ?? []} eu="cliente" enviar={(t) => run(() => A.mensagemObra(d.id, "cliente", t))} vazio="Escreva-nos: dúvidas, pedidos ou o que precisar."
+                rapidas={["Obrigada!", "A que horas chegam amanhã?", "Podem ligar-me?"]} />
+            </section>
+          )}
 
           {outros.length > 0 && (
             <section aria-label="O que precisa de si" className="space-y-3">

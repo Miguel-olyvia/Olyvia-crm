@@ -4,7 +4,7 @@ import { acoes, seed, type Estado, type Negocio } from "./motor";
 import { fimDe } from "./ajustesPlano";
 import { estadoDe } from "./obraOps";
 import {
-  diaDaTarefa, duracaoMinima, instrucoesDe, oDia, podeAjustar, preverAjuste, registouNoDia, tecnicosComTrabalho, tempoDoDia, trabalhoDoTecnico,
+  diaDaTarefa, duracaoMinima, instrucoesDe, oDia, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, tecnicosComTrabalho, tempoDoDia, trabalhoDoTecnico,
 } from "./trabalhoObra";
 
 function obra(id = 1022) {
@@ -106,6 +106,33 @@ describe("o gestor", () => {
     // as tarefas já validadas não andam
     expect(p.tasks[dem].dia).toBe(0);
   });
+  it("recusar com tempo estimado cria a correção para o técnico, atrasa o plano e volta à validação", () => {
+    const { A, S, d, p } = obra();
+    const can = p.tasks.findIndex((t) => /canaliz/i.test(t.nome)), fim0 = fimDe(p.tasks), n0 = p.tasks.length;
+    // cabe hoje (2 h): não atrasa
+    const prev = preverCorrecao(p, 2);
+    expect(prev.fimDepois).toBe(fim0);
+    // 1 dia: começa amanhã e empurra o que ainda não está validado
+    A.pedirCorrecao(d.id, can, "Falta acabamento", { horas: 8, tec: "ma" });
+    expect(p.tasks).toHaveLength(n0 + 1);
+    const c = p.tasks[n0];
+    expect(c.corrige).toBe(can);
+    expect(c.dia).toBe(p.dia + 1);
+    expect(fimDe(p.tasks)).toBe(fim0 + 1);
+    expect(estadoDe(p.tasks[can])).toBe("corrigir");
+    expect(instrucoesDe(c).passos[0]).toMatch(/Falta acabamento/);
+    // o Marco vê a correção amanhã (e já não vê a tarefa original)
+    A.irParaDia(d.id, p.dia + 1);
+    const H = trabalhoDoTecnico(S.deals, "ma");
+    expect(H.some((x) => x.ti === n0)).toBe(true);
+    expect(H.some((x) => x.ti === can)).toBe(false);
+    A.enviarRegisto(d.id, n0, { horas: 6, fotos: [foto], nota: "Acabamento feito.", feita: true });
+    expect(estadoDe(c)).toBe("feita");
+    A.validarTarefa(d.id, n0);
+    expect(estadoDe(c)).toBe("validada");
+    expect(estadoDe(p.tasks[can])).toBe("validada");
+  });
+
   it("sem motivo, não ajusta", () => {
     const { A, d, p } = obra();
     const rev = p.tasks.findIndex((t) => /revest/i.test(t.nome)), fim0 = fimDe(p.tasks);

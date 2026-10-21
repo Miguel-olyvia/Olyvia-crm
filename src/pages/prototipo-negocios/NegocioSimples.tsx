@@ -3,10 +3,11 @@
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { pessoaDeOrigem } from "./PessoasV1";
-import { ArrowLeft, Check, Euro, MapPin, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Euro, Lock, MapPin, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
 import { CaminhoObra } from "./CaminhoObra";
+import { PedidoDoCliente } from "./PedidoDoCliente";
 import { TrabalhosAMais } from "./TrabalhosAMais";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -147,6 +148,8 @@ export function NegocioSimples(ctx: Ctx) {
       )}
 
       {portal && <PortalCliente ctx={ctx} d={d} fechar={() => setPortal(false)} />}
+      {/* 21/10: o cliente pediu alterações no portal: a proposta volta atrás, à vista, e guia-se a versão nova */}
+      {(d.fase === 3 || d.fase === 2) && <PedidoDoCliente ctx={ctx} d={d} />}
       {/* do contrato à obra (16/10): o pagamento primeiro; com ele, a encomenda no Inventário; depois o plano e o arranque */}
       {d.fase >= 4 && d.obra.plano && !d.perdido && <CaminhoObra {...ctx} d={d} />}
       {/* trabalhos a mais depois do contrato (adendas) */}
@@ -172,7 +175,7 @@ export function NegocioSimples(ctx: Ctx) {
 
       <div className="mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_240px]">
         {ver === null
-          ? <FaseSimples key={d.id + ":" + d.fase} ctx={ctx} d={d} lateral={(passos, ativo, setAtivo) => (
+          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} lateral={(passos, ativo, setAtivo) => (
             <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} verFase={setVer} />
           )} />
           : <>
@@ -293,9 +296,9 @@ function Lateral({ d, passos, ativo, setAtivo, verFase, vendo }: { d: Negocio; p
                       i === ativo ? "bg-muted font-semibold text-foreground" : "text-foreground/80 hover:bg-muted/60")}>
                     <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px]",
                       p.falta ? "border-destructive bg-destructive text-destructive-foreground" : ok ? "border-primary bg-primary text-primary-foreground" : i === ativo ? "border-foreground" : "border-input")}>
-                      {p.falta ? "!" : ok && <Check className="h-3 w-3" aria-hidden="true" />}
+                      {p.falta ? "!" : ok ? <Check className="h-3 w-3" aria-hidden="true" /> : p.bloqueado && <Lock className="h-3 w-3 text-muted-foreground" aria-hidden="true" />}
                     </span>
-                    <span className="min-w-0 flex-1">{curto(p)}</span>
+                    <span className={cn("min-w-0 flex-1", p.bloqueado && "text-muted-foreground")}>{curto(p)}{p.bloqueado && <span className="sr-only"> (fechado até o cliente aceitar)</span>}</span>
                     {!!p.falta && <span className="text-sm font-medium text-destructive">falta{p.falta > 1 ? "m" : ""} {p.falta}</span>}
                     {ok && <span className="sr-only">(feito)</span>}
                   </button>
@@ -449,7 +452,7 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
                   com bloqueios, leva-os à vista (antes, o "Continuar" passava à Proposta com o orçamento por aprovar) */}
               {atual?.id === "orc" && d.orc && !d.orc.enviada && !completo(atual)
                 ? <Button size="lg" className="w-full sm:w-auto" onClick={ctx.go(() => (d.orc!.verif ? ctx.A.irVerif() : ctx.A.verificar(d.id)))}>{d.orc.verif ? "Ver o que falta resolver" : "Verificar o orçamento"}</Button>
-                : <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>}
+                : atual?.bloqueado ? null : <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>}
             </div>}
         </div>
         )}

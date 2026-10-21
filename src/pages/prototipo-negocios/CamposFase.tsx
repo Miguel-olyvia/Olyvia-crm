@@ -242,6 +242,8 @@ export interface Passo {
   personalizado?: boolean;
   /** Campos em falta, depois de tentar passar de fase. */
   falta?: number;
+  /** 21/10: o passo ainda não abre (ex.: o contrato antes de o cliente aceitar a proposta); o corpo diz porquê. */
+  bloqueado?: boolean;
   resumo: string[];
   corpo: ReactNode;
 }

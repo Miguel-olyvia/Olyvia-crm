@@ -14,7 +14,8 @@ export const fimDe = (tasks: { dia: number; dur: number }[]): number => tasks.re
 
 /** Guarda o plano do orçamento, uma vez, antes do primeiro ajuste. */
 export function guardarBase(p: Plano): void {
-  if (!p.base || p.base.length !== p.tasks.length) p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+  // 21/10: só uma vez; as tarefas de correção juntam-se depois, no fim (a base fica com as do orçamento)
+  if (!p.base) p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
 }
 
 /** O primeiro dia em que uma tarefa da fase `f` pode começar: o último dia das fases anteriores (a passagem pode ser a meio do dia). */
@@ -62,17 +63,18 @@ export function mudarInicio(p: Plano, ti: number, dia: number): void {
 
 /** Volta ao plano do orçamento (datas, dias, horas e técnicos); as notas ficam. */
 export function reporBase(p: Plano): boolean {
-  if (!p.base || p.base.length !== p.tasks.length) return false;
-  p.tasks.forEach((t, i) => { const b = p.base![i]; t.dia = b.dia; t.dur = b.dur; t.h = b.h; t.tec = b.tec; });
+  if (!p.base || p.base.length > p.tasks.length) return false;
+  p.tasks.forEach((t, i) => { const b = p.base![i]; if (!b) return; t.dia = b.dia; t.dur = b.dur; t.h = b.h; t.tec = b.tec; });
   return true;
 }
 
 /** O que mudou face ao orçamento: dias úteis no total, horas de equipa e as tarefas mexidas. */
 export function diferencas(p: Plano): { dias: number; horas: number; mexidas: number[] } {
-  if (!p.base || p.base.length !== p.tasks.length) return { dias: 0, horas: 0, mexidas: [] };
+  if (!p.base || p.base.length > p.tasks.length) return { dias: 0, horas: 0, mexidas: [] };
   const b = p.base;
-  const mexidas = p.tasks.map((t, i) => (t.dia !== b[i].dia || t.dur !== b[i].dur || t.tec !== b[i].tec ? i : -1)).filter((i) => i >= 0);
-  const horas = p.tasks.reduce((a, t, i) => a + (t.h - b[i].h), 0);
+  // as tarefas a mais (correções) contam inteiras nas horas e não são "mexidas"
+  const mexidas = p.tasks.map((t, i) => (b[i] && (t.dia !== b[i].dia || t.dur !== b[i].dur || t.tec !== b[i].tec) ? i : -1)).filter((i) => i >= 0);
+  const horas = p.tasks.reduce((a, t, i) => a + (t.h - (b[i]?.h ?? 0)), 0);
   return { dias: fimDe(p.tasks) - fimDe(b), horas: Math.round(horas * 100) / 100, mexidas };
 }
 
