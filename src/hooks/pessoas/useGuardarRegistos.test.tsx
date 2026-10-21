@@ -59,7 +59,7 @@ function responder(respostas: Respostas = {}): void {
   });
 }
 
-async function montar(opcoes: { ficha?: FichaDb | null; fonte?: FontePessoas; negocioId?: string | null } = {}) {
+async function montar(opcoes: { ficha?: FichaDb | null; fonte?: FontePessoas; negocioId?: string | null; ignorarLevantamentoLivre?: boolean } = {}) {
   const client = criarCliente();
   semear(client);
   const ficha = opcoes.ficha === undefined ? FICHA_VAZIA : opcoes.ficha;
@@ -68,7 +68,10 @@ async function montar(opcoes: { ficha?: FichaDb | null; fonte?: FontePessoas; ne
       <FontePessoasContext.Provider value={opcoes.fonte ?? fonteReal()}><QuestionarioFormularioProvider>{children}</QuestionarioFormularioProvider></FontePessoasContext.Provider>
     </QueryClientProvider>
   );
-  const h = renderHook(() => useGuardarRegistos(ficha, { negocioId: opcoes.negocioId ?? null }), { wrapper });
+  const h = renderHook(
+    () => useGuardarRegistos(ficha, { negocioId: opcoes.negocioId ?? null, ignorarLevantamentoLivre: opcoes.ignorarLevantamentoLivre }),
+    { wrapper },
+  );
   if (opcoes.fonte === undefined && ficha !== null) await waitFor(() => expect(h.result.current.pronto).toBe(true));
   return { client, ...h };
 }
@@ -283,6 +286,53 @@ describe("falhas", () => {
     expect(e).toBeInstanceOf(ErroGuardarParcial);
     expect((e as ErroGuardarParcial).feitos).toEqual(["criarVisita"]);
     expect((e as ErroGuardarParcial).falhou).toBe("alterarVisita");
+  });
+});
+
+describe("criar negócio com abas (ignorarLevantamentoLivre e verificar)", () => {
+  const FICHA_COM_LIVRE = fichaDb({ levantamentos: seccaoDb([levantamentoDb({ id: "lev-existente", data: "2026-10-12" })]) });
+
+  it("com a opção, o levantamento novo nasce com id novo, ligado ao negócio, e não reescreve o livre que a pessoa já tem", async () => {
+    const { result } = await montar({ ficha: FICHA_COM_LIVRE, negocioId: "neg-1", ignorarLevantamentoLivre: true });
+    await act(async () => { await result.current.guardar([], COM_NOTA, "Rita"); });
+    const lev = argumentos("neg_guardar_levantamento");
+    expect(lev.p_id).not.toBe("lev-existente");
+    expect(lev.p_negocio_id).toBe("neg-1");
+    expect(lev.p_dados).toMatchObject({ notas: "portão estreito" });
+  });
+
+  it("com a opção e sem conteúdo novo, o livre existente não se grava (nada a fazer)", async () => {
+    const { result } = await montar({ ficha: FICHA_COM_LIVRE, negocioId: "neg-1", ignorarLevantamentoLivre: true });
+    await act(async () => { await result.current.guardar([], RASCUNHO, "Rita"); });
+    expect(chamadas()).toEqual([]);
+  });
+
+  it("a visita nova leva o negócio mesmo com a opção, e a visita ligada ao levantamento novo é a nova", async () => {
+    const { result } = await montar({ ficha: FICHA_COM_LIVRE, negocioId: "neg-1", ignorarLevantamentoLivre: true });
+    await act(async () => { await result.current.guardar([visita("nova")], COM_NOTA, "Rita"); });
+    expect(argumentos("neg_guardar_visita").p_negocio_id).toBe("neg-1");
+    expect(argumentos("neg_guardar_levantamento").p_dados).toMatchObject({ visita_id: "v-novo" });
+    expect(argumentos("neg_guardar_levantamento").p_id).not.toBe("lev-existente");
+  });
+
+  it("sem a opção (o painel de sempre) o livre continua a ser o que se escreve", async () => {
+    const { result } = await montar({ ficha: FICHA_COM_LIVRE });
+    await act(async () => { await result.current.guardar([], COM_NOTA, "Rita"); });
+    expect(argumentos("neg_guardar_levantamento").p_id).toBe("lev-existente");
+  });
+
+  it("verificar recusa antes de escrever (hora em falta) e não chama a base", async () => {
+    const { result } = await montar({ negocioId: "neg-1", ignorarLevantamentoLivre: true });
+    let erro: unknown = null;
+    try { result.current.verificar([visita("nova", { hora: "" })], RASCUNHO, "Rita"); } catch (e) { erro = e; }
+    expect((erro as ErroNeg).chave).toBe("pessoasPagina.real.records.err.timeMissing");
+    expect(chamadas()).toEqual([]);
+  });
+
+  it("verificar passa quando o plano é válido, sem chamar a base", async () => {
+    const { result } = await montar({ negocioId: "neg-1", ignorarLevantamentoLivre: true });
+    expect(() => result.current.verificar([visita("nova")], COM_NOTA, "Rita")).not.toThrow();
+    expect(chamadas()).toEqual([]);
   });
 });
 

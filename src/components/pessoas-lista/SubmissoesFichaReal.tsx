@@ -1,12 +1,13 @@
 // O separador Submissões da ficha real: um cartão por submissão de formulário, só para ler, como o separador «Formulários» do detalhe de uma
 // lead (Leads). Resolver submissões continua a ser da página de submissões pendentes: aqui não há botões de ação.
+import { useId } from "react";
 import { AlertTriangle, FileText, Link2, Mail, Phone, Workflow } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { textoDataCompleta } from "@/components/pessoas/formatoPessoas";
-import { ETAPAS_DO_FUNIL, type CoincidenciaSubmissao, type SubmissaoFicha } from "@/hooks/pessoas/adaptarSubmissoes";
+import { ETAPAS_DO_FUNIL, type CampoSubmissao, type CoincidenciaSubmissao, type SubmissaoFicha } from "@/hooks/pessoas/adaptarSubmissoes";
 import { diaLisboa, horaLisboa } from "@/hooks/pessoas/tempoLisboa";
 
 const S = "pessoasPagina.real.ficha.subs.";
@@ -19,6 +20,8 @@ interface SubmissoesFichaRealProps {
   desatualizado?: boolean;
   /** O dia de hoje em Lisboa (AAAA-MM-DD), para dizer «hoje às 10:00». */
   hoje: string;
+  /** A campanha que a secção «Lead» do Resumo já diz: os cartões dessa campanha não a repetem. */
+  campanhaDaLead?: string;
   aoTentarDeNovo: () => void;
 }
 
@@ -50,16 +53,47 @@ function ValorNaoGravado({ icone: Icone, rotulo, valor }: { icone: typeof Mail; 
   );
 }
 
-function Cartao({ s, hoje }: { s: SubmissaoFicha; hoje: string }) {
+/** Os campos de um formulário em pares rótulo e valor (a mesma grelha nos cartões e na secção do topo). */
+function GrelhaCampos({ campos }: { campos: CampoSubmissao[] }) {
+  return (
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+      {campos.map((c) => (
+        <div key={c.chave} className="flex gap-2">
+          <dt className="text-muted-foreground">{c.rotulo}:</dt>
+          <dd className="break-words text-foreground">{c.valor}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** Os dados do formulário sem mapeamento da submissão mais recente, no topo; sem nenhum, nada se desenha. */
+function DadosDoFormulario({ campos }: { campos: CampoSubmissao[] }) {
+  const { t } = useTranslation();
+  const id = useId();
+  if (campos.length === 0) return null;
+  return (
+    <section aria-labelledby={id} className="mb-4 space-y-2 border-b border-border pb-4">
+      <h3 id={id} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t(`${S}unmapped.title`)}</h3>
+      <p className="text-sm text-muted-foreground">{t(`${S}unmapped.hint`)}</p>
+      <GrelhaCampos campos={campos} />
+    </section>
+  );
+}
+
+function Cartao({ s, hoje, campanhaDaLead, camposNoTopo }: { s: SubmissaoFicha; hoje: string; campanhaDaLead?: string; camposNoTopo: boolean }) {
   const { t } = useTranslation();
   const data = dataLisboa(s.criadoEm);
   const Icone = s.tipo === "submissao" ? FileText : Workflow;
+  // A campanha que a secção «Lead» já diz não se repete: o título diz que tipo de entrada é.
+  const campanhaRepetida = s.campanha !== null && s.campanha === campanhaDaLead;
+  const campos = camposNoTopo ? s.campos.filter((c) => c.mapeado) : s.campos;
   return (
     <li className="space-y-2 border-b border-border py-4 first:pt-0 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <p className="flex items-center gap-1.5 text-[15px] font-semibold text-foreground">
           <Icone className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          {s.campanha ?? t(`${S}noCampaign`)}
+          {campanhaRepetida ? t(`${S}kind.${s.tipo === "lead" ? "lead" : "submission"}`) : s.campanha ?? t(`${S}noCampaign`)}
         </p>
         {data && <p className="text-sm tabular-nums text-muted-foreground">{textoDataCompleta(t, data, hoje)}</p>}
       </div>
@@ -92,23 +126,13 @@ function Cartao({ s, hoje }: { s: SubmissaoFicha; hoje: string }) {
           {s.telefoneNaoGravado && <ValorNaoGravado icone={Phone} rotulo={t(`${S}unsaved.phone`)} valor={s.telefoneNaoGravado} />}
         </div>
       )}
-      {s.campos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t(`${S}none`)}</p>
-      ) : (
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
-          {s.campos.map((c) => (
-            <div key={c.chave} className="flex gap-2">
-              <dt className="text-muted-foreground">{c.rotulo}:</dt>
-              <dd className="break-words text-foreground">{c.valor}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {s.campos.length === 0 && <p className="text-sm text-muted-foreground">{t(`${S}none`)}</p>}
+      {campos.length > 0 && <GrelhaCampos campos={campos} />}
     </li>
   );
 }
 
-export function SubmissoesFichaReal({ submissoes, estado, desatualizado = false, hoje, aoTentarDeNovo }: SubmissoesFichaRealProps) {
+export function SubmissoesFichaReal({ submissoes, estado, desatualizado = false, hoje, campanhaDaLead, aoTentarDeNovo }: SubmissoesFichaRealProps) {
   const { t } = useTranslation();
   // Inativo (por exemplo a ficha a fechar, sem pessoa): nada se lê e nada se diz; «Sem submissões» seria falso.
   if (estado === "inativo") return null;
@@ -136,10 +160,15 @@ export function SubmissoesFichaReal({ submissoes, estado, desatualizado = false,
       </>
     );
   }
+  // As submissões vêm da mais recente para a mais antiga: os dados sem mapeamento do topo são os da primeira.
+  const semMapeamento = submissoes[0].campos.filter((c) => !c.mapeado);
   return (
     <>
       {aviso}
-      <ul aria-label={t(`${S}label`)}>{submissoes.map((s) => <Cartao key={s.chave} s={s} hoje={hoje} />)}</ul>
+      <DadosDoFormulario campos={semMapeamento} />
+      <ul aria-label={t(`${S}label`)}>
+        {submissoes.map((s, i) => <Cartao key={s.chave} s={s} hoje={hoje} campanhaDaLead={campanhaDaLead} camposNoTopo={i === 0 && semMapeamento.length > 0} />)}
+      </ul>
     </>
   );
 }

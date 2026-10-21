@@ -12,6 +12,7 @@ import { extrasAtuais, repor as reporExtras } from "@/components/pessoas/process
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import Pessoas from "./Pessoas";
 
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/test/traducoesPessoasTeste")).moduloDeTraducao());
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true }) }));

@@ -40,6 +40,8 @@ interface Props {
   visitasGravadas?: ReadonlySet<string>;
   /** Os ids das visitas com o código postal fora do formato (depois de tentar guardar). */
   visitasComCodigoPostalInvalido?: readonly string[];
+  /** Só as secções do levantamento (as perguntas e as medidas), sem a lista de visitas: a aba «Levantamento» do criar negócio, que tem as visitas na sua. */
+  semVisitas?: boolean;
 }
 
 const um = (n: number): string => (n === 1 ? ".one" : "");
@@ -126,12 +128,12 @@ function PassoDaVisita({ seccoes, indice, respostas }: { seccoes: readonly Secca
  */
 export function AbaVisita({
   id, seccaoAtiva, aoMudarSeccao, respostas, aoEscolher, aoEscrever, errosRespostas, levantamento, erros, acoesLevantamento, visitas, visitaAberta,
-  acoesVisitas, visitasGravadas, visitasComCodigoPostalInvalido,
+  acoesVisitas, visitasGravadas, visitasComCodigoPostalInvalido, semVisitas = false,
 }: Props) {
   const { t } = useTranslation();
   const contador = useContador();
   const { questionario, estado, repetir } = useQuestionario();
-  const seccoes = seccoesDaVisita(questionario);
+  const seccoes = seccoesDaVisita(questionario).filter((s) => !semVisitas || s.especial !== "visitas");
   const indice = Math.max(0, seccoes.findIndex((s) => s.id === seccaoAtiva));
   const seccao = seccoes[indice];
   const linhas = levantamento.linhas.length;

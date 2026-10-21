@@ -13,6 +13,9 @@ const LIMITE = 20;
 const COLUNAS_LEAD = "id, campaign_id, field_values, source, status, created_at, campaigns(id, name)";
 const COLUNAS_SUBMISSAO = "id, campaign_id, field_values, status, resolution, resolved_at, created_at, entity_id, campaigns(id, name)";
 
+/** Os campos base da lead que um formulário pode mapear: os mesmos de Leads (`GENERAL_FIELDS` em AnewLeadEditDialog.tsx). */
+const CAMPOS_BASE_DA_LEAD: ReadonlySet<string> = new Set(["first_name", "last_name", "email", "phone", "company_name", "address", "postal_code", "city", "vat"]);
+
 const resolvedorDeRotulos = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
 async function lerLeads(organizationId: string, entityId: string): Promise<LinhaLeadSubmetida[]> {
@@ -83,6 +86,11 @@ export async function lerSubmissoesPessoa(organizationId: string, entityId: stri
   const rotulosPorCampanha = Object.fromEntries(
     Object.entries(definicoes).map(([campanha, defs]) => [campanha, Object.fromEntries(defs.map((d) => [d.field_key, d.field_label]))]),
   );
-  const contexto: ContextoSubmissoes = { rotulosPorCampanha, chavesDistrito, distritoPorId, nomePorEntidade };
+  const chavesMapeadasPorCampanha = Object.fromEntries(
+    Object.entries(definicoes).map(([campanha, defs]) => [
+      campanha, new Set(defs.filter((d) => d.contact_field_mapping && CAMPOS_BASE_DA_LEAD.has(d.contact_field_mapping)).map((d) => d.field_key)),
+    ]),
+  );
+  const contexto: ContextoSubmissoes = { rotulosPorCampanha, chavesDistrito, distritoPorId, nomePorEntidade, chavesMapeadasPorCampanha };
   return adaptarSubmissoes(leads, submissoes, contexto);
 }

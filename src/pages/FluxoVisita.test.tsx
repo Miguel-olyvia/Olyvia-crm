@@ -23,6 +23,7 @@ vi.mock("@/hooks/useTranslation", async () => {
   };
 });
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true }) }));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
 
 // O jsdom não tem estas funções, que o Select do Radix usa ao abrir a lista.
@@ -45,24 +46,34 @@ const escolher = async (dialogo: HTMLElement, campo: RegExp | string, opcao: str
   fireEvent.click(await screen.findByRole("option", { name: opcao }));
 };
 
+/** Passa da aba Resumo à aba Visitas da ficha aberta. */
+const abrirAbaVisitas = () => {
+  const aba = within(screen.getByRole("dialog")).getByRole("tab", { name: /^Visitas/ });
+  fireEvent.mouseDown(aba, { button: 0, ctrlKey: false });
+  fireEvent.click(aba);
+};
+
 describe("Ficha: Visitas no Resumo", () => {
   it("visita marcada com a morada igual à da lead: dia da semana, data, hora, morada e o chip, por cima do próximo passo", () => {
     render(aplicacao("/pessoas?open=p-rita"));
     const ficha = screen.getByRole("dialog");
-    const visita = within(ficha).getByRole("heading", { name: "Visitas" }).closest("section")!;
+    const visita = within(ficha).getByRole("heading", { name: "Próxima visita" }).closest("section")!;
     expect(within(visita).getByText("terça-feira, 13/10/2026 · 15:00")).toBeInTheDocument();
     expect(within(visita).getByText("Rua dos Combatentes 12, 2710-100 Sintra")).toBeInTheDocument();
     expect(within(visita).getByText("Igual à da lead")).toBeInTheDocument();
     const titulos = within(ficha).getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titulos.indexOf("Visitas")).toBeLessThan(titulos.indexOf("Próximo passo e prazo"));
+    expect(titulos.indexOf("Próxima visita")).toBeLessThan(titulos.indexOf("Próximo passo e prazo"));
+    // O Resumo só tem a próxima visita: a secção «Visitas» (a lista toda) vive na aba Visitas.
+    expect(within(ficha).queryByRole("heading", { name: "Visitas" })).not.toBeInTheDocument();
     // O passo remete para o bloco em vez de repetir o dia.
-    expect(within(ficha).getByText(/vê o bloco «Visitas» acima/)).toBeInTheDocument();
+    expect(within(ficha).getByText(/vê o bloco «Próxima visita» acima/)).toBeInTheDocument();
     // O contacto da ficha diz que a morada é a que a lead indicou.
     expect(within(ficha).getByText("Morada (indicada pela lead)")).toBeInTheDocument();
   });
 
   it("cliente com visita noutra morada: mostra «Outra morada» e a nota de acesso", () => {
     render(aplicacao("/pessoas?open=p-paulo"));
+    abrirAbaVisitas();
     const visita = within(screen.getByRole("dialog")).getByRole("heading", { name: "Visitas" }).closest("section")!;
     expect(within(visita).getByText("Zona Industrial, Lote 7, Armazém 2, 4700-500 Braga")).toBeInTheDocument();
     expect(within(visita).getByText("Outra morada")).toBeInTheDocument();
@@ -72,6 +83,9 @@ describe("Ficha: Visitas no Resumo", () => {
   it("visita cujo dia já passou diz que está por concluir, com a data", () => {
     render(aplicacao("/pessoas?open=p-goncalo"));
     const ficha = screen.getByRole("dialog");
+    // Já passou: não é a «próxima visita» do Resumo, lê-se na aba Visitas.
+    expect(within(ficha).queryByRole("heading", { name: "Próxima visita" })).not.toBeInTheDocument();
+    abrirAbaVisitas();
     const visita = within(ficha).getByRole("heading", { name: "Visitas" }).closest("section")!;
     expect(within(visita).getByText(/era a 12\/10\/2026 e ainda não foi concluída/)).toBeInTheDocument();
   });
@@ -94,7 +108,7 @@ describe("Ficha: Visitas no Resumo", () => {
     fireEvent.change(within(dialogo).getByLabelText("Código postal"), { target: { value: "2750-300" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Guardar visita" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Alterar visita" })).not.toBeInTheDocument());
-    const visita = within(screen.getByRole("dialog")).getByRole("heading", { name: "Visitas" }).closest("section")!;
+    const visita = within(screen.getByRole("dialog")).getByRole("heading", { name: "Próxima visita" }).closest("section")!;
     expect(within(visita).getByText("Rua Nova 5, 2750-300")).toBeInTheDocument();
     expect(within(visita).getByText("Outra morada")).toBeInTheDocument();
   });
@@ -187,7 +201,7 @@ describe("Ficha: marcar a visita como feita e criar o negócio (o mesmo caminho 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Novo negócio" })).not.toBeInTheDocument());
     expect(negociosNovos()).toHaveLength(0);
     expect(registosAtuais().visitas.filter((v) => v.pessoaId === "p-rita" && v.negocioId !== null)).toHaveLength(0);
-    expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Visitas" })).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Próxima visita" })).toBeInTheDocument();
     // Outra vez, e desta vez cria: o negócio liga a visita da pessoa (que continua a ser dela, só ganha o negócio).
     await menu("Criar negócio");
     painel = await screen.findByRole("dialog", { name: "Novo negócio" });

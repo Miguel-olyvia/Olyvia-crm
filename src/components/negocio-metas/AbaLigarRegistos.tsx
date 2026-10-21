@@ -38,14 +38,21 @@ function Linha({ id, marcado, texto, aoAlternar }: { id: string; marcado: boolea
   );
 }
 
-/** A lista de chamadas e a de visitas, cada registo com a sua caixa. */
-function ListasDeRegistos({ id, porLigar, valor, aoMudar }: Omit<Props, "pessoaEscolhida">) {
-  const { t } = useTranslation();
-  const alternar = (ref: RefRegisto) => {
-    const marcado = valor.registos.some((r) => mesmaRef(r, ref));
-    aoMudar({ ...valor, registos: marcado ? valor.registos.filter((r) => !mesmaRef(r, ref)) : [...valor.registos, ref] });
-  };
+type PropsListas = Omit<Props, "pessoaEscolhida" | "semNovo">;
+
+/** Alterna um registo na escolha (e diz se está marcado): comum às listas de contactos e de visitas. */
+function useMarcas({ valor, aoMudar }: Pick<PropsListas, "valor" | "aoMudar">) {
   const marcado = (ref: RefRegisto) => valor.registos.some((r) => mesmaRef(r, ref));
+  const alternar = (ref: RefRegisto) => {
+    aoMudar({ ...valor, registos: marcado(ref) ? valor.registos.filter((r) => !mesmaRef(r, ref)) : [...valor.registos, ref] });
+  };
+  return { marcado, alternar };
+}
+
+/** As chamadas por ligar, cada uma com a sua caixa. Sem chamadas não desenha nada. */
+export function ListaContactosPorLigar({ id, porLigar, valor, aoMudar }: PropsListas) {
+  const { t } = useTranslation();
+  const { marcado, alternar } = useMarcas({ valor, aoMudar });
   return (
     <>
       {porLigar.contactos.length > 0 && (
@@ -61,6 +68,16 @@ function ListasDeRegistos({ id, porLigar, valor, aoMudar }: Omit<Props, "pessoaE
           </ul>
         </fieldset>
       )}
+    </>
+  );
+}
+
+/** As visitas por ligar, cada uma com a sua caixa. Sem visitas não desenha nada. */
+export function ListaVisitasPorLigar({ id, porLigar, valor, aoMudar }: PropsListas) {
+  const { t } = useTranslation();
+  const { marcado, alternar } = useMarcas({ valor, aoMudar });
+  return (
+    <>
       {porLigar.visitas.length > 0 && (
         <fieldset className="space-y-1">
           <legend className="text-sm font-semibold text-foreground">{t(`${L}visits`)}</legend>
@@ -80,6 +97,16 @@ function ListasDeRegistos({ id, porLigar, valor, aoMudar }: Omit<Props, "pessoaE
   );
 }
 
+/** A lista de chamadas e a de visitas, cada registo com a sua caixa. */
+function ListasDeRegistos(p: PropsListas) {
+  return (
+    <>
+      <ListaContactosPorLigar {...p} />
+      <ListaVisitasPorLigar {...p} />
+    </>
+  );
+}
+
 function Opcao({ nome, id, marcada, desativada, texto, dica, aoEscolher }: {
   nome: string; id: string; marcada: boolean; desativada?: boolean; texto: string; dica?: string; aoEscolher: () => void;
 }) {
@@ -95,7 +122,7 @@ function Opcao({ nome, id, marcada, desativada, texto, dica, aoEscolher }: {
 }
 
 /** O levantamento: usar um existente (e qual), fazer um novo ou dispensar. É opcional. */
-function EscolhaDoLevantamento({ id, porLigar, valor, aoMudar, semNovo }: Omit<Props, "pessoaEscolhida">) {
+export function EscolhaDoLevantamento({ id, porLigar, valor, aoMudar, semNovo }: Omit<Props, "pessoaEscolhida">) {
   const { t } = useTranslation();
   const nome = useId();
   const legenda = useId();

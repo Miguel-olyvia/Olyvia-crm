@@ -1,5 +1,6 @@
-// As secções do Resumo da ficha que mostram o estado da pessoa: o próximo passo e o prazo, os avisos e "Sobre a pessoa".
+// As secções do Resumo da ficha que mostram o estado da pessoa: o próximo passo e o prazo, os avisos e "Lead" (a origem e o resumo da pessoa, juntos).
 // Cada uma é uma `Seccao` de `ficha-comum` com os seus campos; ícones sempre com texto.
+import type { ReactNode } from "react";
 import { AlertCircle, CalendarClock, Clock, Repeat, TimerOff, XCircle, type LucideIcon } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -14,7 +15,7 @@ import { avisosPessoa, type AvisoPessoa } from "./avisosPessoa";
 import { passoDaPerdida, proximoPasso } from "./etapaPessoa";
 import { resultadoEfetivo } from "./filtrosPessoas";
 import { faixaSaude, textoDiaCompleto, textoPrazoPasso, textoUltimoContacto } from "./formatoPessoas";
-import type { MotivoEncerramento, ResumoPessoa } from "./pessoasTipos";
+import type { MotivoEncerramento, Pessoa, ResumoPessoa } from "./pessoasTipos";
 import { MarcaExemplo, SeloResultado } from "./SelosPessoa";
 
 const P = "pessoasPagina.";
@@ -38,12 +39,23 @@ export function Prazo({ prazo, hoje, hora }: { prazo: string | null; hoje: strin
 const textoDoMotivo = (t: ReturnType<typeof useTranslation>["t"], motivo: MotivoEncerramento, outro?: string): string =>
   motivo === "outro" ? outro ?? t(`${P}close.reason.other`) : t(`${P}lost.${motivo}`);
 
+interface SeccaoPassoProps {
+  resumo: ResumoPessoa;
+  hoje: string;
+  /** A pessoa tem visitas (não canceladas): o passo da visita remete para elas em vez de repetir o dia. */
+  comVisita?: boolean;
+  /** O bloco «Próxima visita» está no Resumo: o passo remete para ele; sem ele, remete para a aba «Visitas». */
+  proximaVisitaVisivel?: boolean;
+  /** O botão do passo, quando não há bloco «Próxima visita» onde o pôr (a visita já passou ou já foi feita). */
+  acao?: ReactNode;
+}
+
 /**
  * "Próximo passo e prazo": o título, a explicação de uma linha e o prazo; numa abordagem encerrada, o resultado, o motivo e o dia; numa
- * perdida (exemplo antigo), "Perdida" com motivo, data e passo. Quando o passo é a visita e o bloco "Visitas" está por cima (`comVisita`),
- * o passo remete para ele em vez de repetir o dia.
+ * perdida (exemplo antigo), "Perdida" com motivo, data e passo. Quando o passo é a visita e a pessoa tem visitas (`comVisita`), o passo
+ * remete para o bloco «Próxima visita» (ou, sem ele, para a aba «Visitas») em vez de repetir o dia.
  */
-export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: ResumoPessoa; hoje: string; comVisita?: boolean }) {
+export function SeccaoPasso({ resumo, hoje, comVisita = false, proximaVisitaVisivel = false, acao }: SeccaoPassoProps) {
   const { t } = useTranslation();
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
@@ -78,7 +90,7 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: Resum
     conteudo = (
       <div className="space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
-        <p className="text-[15px] text-muted-foreground">{t(`${P}nextVisit.seeStep`)}</p>
+        <p className="text-[15px] text-muted-foreground">{t(`${P}nextVisit.${proximaVisitaVisivel ? "seeStep" : "seeTab"}`)}</p>
       </div>
     );
   } else {
@@ -90,7 +102,11 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false }: { resumo: Resum
       </div>
     );
   }
-  return <Seccao titulo={t(`${P}sum.nextTitle`)} marca={<MarcaExemplo />}>{conteudo}</Seccao>;
+  return (
+    <Seccao titulo={t(`${P}sum.nextTitle`)} marca={<MarcaExemplo />}>
+      {acao ? <div className="space-y-2">{conteudo}{acao}</div> : conteudo}
+    </Seccao>
+  );
 }
 
 const ICONE_AVISO: Record<AvisoPessoa["tipo"], LucideIcon> = { voltou: Repeat, semContacto: TimerOff, negociosAbertosPerdida: XCircle };
@@ -150,13 +166,29 @@ function SaudePessoa({ valor }: { valor: number }) {
   );
 }
 
-/** "Sobre a pessoa": saúde, último contacto e resultado, comercial, qualificação, desde quando e saúde do negócio. */
-export function SeccaoSobre({ resumo, hoje }: { resumo: ResumoPessoa; hoje: string }) {
+/** As linhas da origem que existem: origem, canal, campanha, formulário e via de entrada. */
+function linhasDeOrigem(t: ReturnType<typeof useTranslation>["t"], pessoa: Pessoa): [string, string][] {
+  const linhas: [string, string | undefined][] = [
+    [t(`${P}origin.source`), pessoa.origem ? t(`${P}origin.${pessoa.origem}`) : undefined],
+    [t(`${P}origin.channel`), pessoa.canal],
+    [t(`${P}origin.campaign`), pessoa.campanha],
+    [t(`${P}origin.form`), pessoa.formulario],
+    [t(`${P}origin.via`), pessoa.viaEntrada ? t(`${P}via.${pessoa.viaEntrada}`) : undefined],
+  ];
+  return linhas.filter((l): l is [string, string] => Boolean(l[1]));
+}
+
+/**
+ * "Lead": tudo o que se sabe da lead numa só secção. A origem (origem, canal, campanha, formulário, via de entrada) só tem as linhas que existem; segue-se
+ * o resumo (desde quando, qualificação, comercial, saúde, último contacto com o selo do resultado e saúde do negócio).
+ */
+export function SeccaoLead({ resumo, hoje }: { resumo: ResumoPessoa; hoje: string }) {
   const { t } = useTranslation();
   const { pessoa, piorAberto } = resumo;
   return (
-    <Seccao titulo={t(`${P}sum.about`)} marca={<MarcaExemplo />}>
+    <Seccao titulo={t(`${P}sum.lead`)} marca={<MarcaExemplo />}>
       <ListaCampos>
+        {linhasDeOrigem(t, pessoa).map(([rotulo, valor]) => <LinhaCampo key={rotulo} rotulo={rotulo}>{valor}</LinhaCampo>)}
         {pessoa.saude !== undefined && <LinhaCampo rotulo={t(`${P}sum.personHealth`)}><SaudePessoa valor={pessoa.saude} /></LinhaCampo>}
         <LinhaCampo rotulo={t(`${P}sum.last`)}>
           <span className="flex flex-wrap items-center gap-2">

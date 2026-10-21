@@ -1,5 +1,5 @@
-// A aba "Resumo" da ficha, em secções por esta ordem: as visitas da pessoa (uma só secção), próximo passo e prazo, avisos, os registos por
-// ligar (chamadas e levantamentos), contacto, origem e sobre a pessoa. A marca "exemplo" vai por secção.
+// A aba "Resumo" da ficha, em secções por esta ordem: a próxima visita (as outras estão na aba Visitas), próximo passo e prazo, avisos, os registos por
+// ligar (chamadas e levantamentos), contacto e a lead (origem e resumo). A marca "exemplo" vai por secção.
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { MaisItensFicha } from "./CarregarMais";
@@ -8,10 +8,11 @@ import type { AcoesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { itensDaPessoa } from "./processo/itensProcesso";
 import { useExtrasProcesso } from "./processo/processoNegocios";
-import { SeccaoOrigem } from "./SeccaoOrigem";
 import { SeccaoRegistos } from "./SeccaoRegistos";
-import { SeccaoAvisos, SeccaoPasso, SeccaoSobre } from "./SeccoesResumo";
-import { SeccaoVisitas } from "./SeccaoVisitas";
+import { SeccaoAvisos, SeccaoLead, SeccaoPasso } from "./SeccoesResumo";
+import { proximaVisitaDaPessoa, contarVisitasAtivas, visitasDaFicha } from "./proximaVisita";
+import { SeccaoProximaVisita } from "./SeccaoProximaVisita";
+import { AcaoDoPassoPessoa, temVisitaFeitaPorLigar } from "./SeccaoVisitas";
 
 interface ResumoFichaProps {
   resumo: ResumoPessoa;
@@ -21,6 +22,8 @@ interface ResumoFichaProps {
   podeVerSubmissoes: boolean;
   pendentes: number;
   aoVerSubmissoes: () => void;
+  /** «Ver todas» da próxima visita: abre a aba Visitas. */
+  aoVerVisitas: () => void;
   /** O exemplo: sem isto (e sem `visitasNaBase`) as visitas não têm o botão «Alterar». */
   alterarVisita?: AcoesFicha["alterarVisita"];
   /** A ficha real: alterar e cancelar visitas grava na base pelos próprios diálogos. */
@@ -43,18 +46,21 @@ export function ResumoFicha(p: ResumoFichaProps) {
     () => new Map(resumo.negocios.map((n) => [n.id, n.servico || t("pessoasPagina.board.dealName")])),
     [resumo.negocios, t],
   );
-  // Uma perdida não tem visitas à vista; os outros mostram uma só secção com as visitas da pessoa (as canceladas não contam).
-  const visitas = resumo.pessoa.perdida ? [] : resumo.registos.visitas;
-  const comVisitas = visitas.some((v) => v.estado !== "cancelada");
+  // Uma perdida não tem visitas à vista. O Resumo só mostra a próxima visita (as outras estão na aba Visitas); o botão do passo fica aqui:
+  // junto da próxima visita ou, sem ela (a visita já passou, ou já foi feita), no «Próximo passo e prazo».
+  const visitas = visitasDaFicha(resumo);
+  const comVisitas = contarVisitasAtivas(visitas) > 0;
+  const proxima = proximaVisitaDaPessoa(visitas, p.hoje);
   const item = itensDaPessoa(resumo, p.hoje, extras).find((i) => i.tipo === "pessoa");
+  const acaoDoPasso = item && comVisitas ? <AcaoDoPassoPessoa item={item} nome={resumo.pessoa.nome} feita={temVisitaFeitaPorLigar(visitas)} /> : undefined;
   return (
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
-      <SeccaoVisitas
-        pessoa={resumo.pessoa} visitas={visitas} item={item} hoje={p.hoje} negocios={negocios} alterarVisita={p.alterarVisita}
-        naBase={p.visitasNaBase} cancelarVisita={p.cancelarVisita}
-        aoRegistarResultado={p.aoRegistarResultado} mais={p.maisItens?.visitas}
+      <SeccaoProximaVisita
+        pessoa={resumo.pessoa} visita={proxima} visitas={visitas} total={contarVisitasAtivas(visitas)} item={item} hoje={p.hoje} negocios={negocios}
+        alterarVisita={p.alterarVisita} naBase={p.visitasNaBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado}
+        aoVerTodas={p.aoVerVisitas}
       />
-      <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas} />
+      <SeccaoPasso resumo={resumo} hoje={p.hoje} comVisita={comVisitas} proximaVisitaVisivel={proxima !== undefined} acao={proxima ? undefined : acaoDoPasso} />
       <SeccaoAvisos
         resumo={resumo} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={p.pendentes}
         aoVerSubmissoes={p.aoVerSubmissoes}
@@ -65,8 +71,7 @@ export function ResumoFicha(p: ResumoFichaProps) {
       />
       {p.identidade}
       <ContactoFicha pessoa={resumo.pessoa} />
-      <SeccaoOrigem pessoa={resumo.pessoa} />
-      <SeccaoSobre resumo={resumo} hoje={p.hoje} />
+      <SeccaoLead resumo={resumo} hoje={p.hoje} />
     </div>
   );
 }

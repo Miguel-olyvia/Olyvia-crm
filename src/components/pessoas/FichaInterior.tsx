@@ -8,7 +8,9 @@ import { Aba, ListaAbas, Tabs, TabsContent } from "@/components/ficha-comum/Abas
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { MaisItensFicha } from "./CarregarMais";
+import { AbaVisitasFicha } from "./AbaVisitasFicha";
 import { AtividadeFicha } from "./AtividadeFicha";
+import { contarVisitasAtivas, visitasDaFicha } from "./proximaVisita";
 import { AvisoNegociosPerdidos } from "./AvisoNegociosPerdidos";
 import { BarraAcoesFicha } from "./BarraAcoesFicha";
 import { CabecalhoFicha } from "./CabecalhoFicha";
@@ -32,7 +34,7 @@ import { ResumoFicha } from "./ResumoFicha";
 import { useExecutarAcao } from "./useExecutarAcao";
 import { useAnuncios, usePaineis } from "./useFichaPaineis";
 
-type AbaFicha = "resumo" | "negocios" | "submissoes" | "notas" | "atividade";
+type AbaFicha = "resumo" | "visitas" | "negocios" | "submissoes" | "notas" | "atividade";
 
 /**
  * O separador Submissões da ficha real: o conteúdo vem de quem monta a ficha (só para ler, lido como Leads o lê) e as contagens, da leitura.
@@ -129,7 +131,7 @@ function ConteudoNegocios(p: AbasProps) {
   );
 }
 
-/** As abas por esta ordem: Resumo, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */
+/** As abas por esta ordem: Resumo, Visitas, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */
 function AbasFicha(p: AbasProps) {
   const { t } = useTranslation();
   const { resumo, submissoes, notas, atividade } = p;
@@ -137,10 +139,16 @@ function AbasFicha(p: AbasProps) {
   const verSubmissoes = () => p.aoMudar("submissoes");
   const real = p.separadorSubmissoes;
   const pendentes = real ? real.pendentes : submissoes.length;
+  const nVisitas = contarVisitasAtivas(visitasDaFicha(resumo));
+  const maisVisitas = p.maisItens?.visitas?.temMais === true;
   return (
     <Tabs value={p.aba} onValueChange={(v) => p.aoMudar(v as AbaFicha)} className="mt-2 flex flex-col">
       <ListaAbas aria-label={t("pessoasPagina.fichaTabs.label")} className="sticky top-0 z-10 shrink-0 bg-background px-6">
         <Aba value="resumo" rotulo={t("pessoasPagina.fichaTabs.summary")} />
+        <Aba
+          value="visitas" rotulo={t("pessoasPagina.fichaTabs.visits")} contador={nVisitas} contadorMais={maisVisitas}
+          contadorLeitor={maisVisitas ? t("pessoasPagina.fichaTabs.visits.more", { n: nVisitas }) : undefined}
+        />
         <Aba value="negocios" rotulo={t("pessoasPagina.fichaTabs.deals")} contador={resumo.negocios.length} />
         {p.podeVerSubmissoes && (
           <Aba
@@ -156,9 +164,16 @@ function AbasFicha(p: AbasProps) {
         <TabsContent value="resumo" className="mt-0">
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
-            aoVerSubmissoes={verSubmissoes} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
+            aoVerSubmissoes={verSubmissoes} aoVerVisitas={() => p.aoMudar("visitas")} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
             visitasNaBase={p.acoes.capacidades?.gerirVisitas === true} cancelarVisita={p.acoes.capacidades?.gerirVisitas === true ? p.acoes.cancelarVisita : undefined}
             aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade}
+          />
+        </TabsContent>
+        <TabsContent value="visitas" className="mt-0 pt-4">
+          <AbaVisitasFicha
+            resumo={resumo} hoje={p.hoje} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
+            visitasNaBase={p.acoes.capacidades?.gerirVisitas === true} cancelarVisita={p.acoes.capacidades?.gerirVisitas === true ? p.acoes.cancelarVisita : undefined}
+            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens}
           />
         </TabsContent>
         <TabsContent value="negocios" className="mt-0 pt-4"><ConteudoNegocios {...p} /></TabsContent>

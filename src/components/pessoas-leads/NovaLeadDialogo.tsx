@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { ChevronRight, X } from "lucide-react";
 import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { ComercialLido, NoArvoreOrg } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
@@ -82,13 +83,16 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
     p.aoMudarAberto(aberto);
   };
   // Sem campos da campanha, ou sem campanhas, origens ou comerciais, não se cria: a lead sairia sem campanha ou sem comercial sem se querer.
+  // Com o que se escreveu por gravar, um clique fora não fecha o painel (Escape e «Fechar» fecham): perder o formulário por um toque ao lado custa caro.
+  const sujo = Object.values(p.valores).some((v) => v !== undefined && v !== null && v !== "") || p.campanhaId !== "" || p.origemId !== "";
   const semCampos = p.camposACarregar || p.camposErro || p.erroApoio;
   const distrito = [p.valores.distrito, p.valores.district].find((v) => typeof v === "string" && v) as string | undefined;
   return (
-    <Dialog open={p.aberto} onOpenChange={aoMudarAberto}>
-      <DialogContent
-        ref={conteudo} hideClose={p.aCriar}
-        className="max-h-[85vh] max-w-4xl overflow-y-auto"
+    <Sheet open={p.aberto} onOpenChange={aoMudarAberto}>
+      <SheetContent
+        ref={conteudo} hideClose
+        className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none"
+        onInteractOutside={(e) => { if (sujo || p.aCriar) e.preventDefault(); }}
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           conteudo.current?.querySelector<HTMLElement>("input, select, textarea")?.focus();
@@ -98,12 +102,27 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
           p.aoFocarOrigem();
         }}
       >
-        <DialogHeader>
-          <DialogTitle>{t(`${N}title`)}</DialogTitle>
-          <DialogDescription>{t(`${N}description`)}</DialogDescription>
-        </DialogHeader>
-        <PlanLimitWarning organizationId={p.organizationId} limitType="leads" />
-        <form noValidate className="space-y-4" onSubmit={(e) => { e.preventDefault(); p.aoCriar(); }}>
+        <SheetHeader className="space-y-2 border-b border-border p-6 text-left">
+          <div className="flex items-start justify-between gap-3">
+            <nav aria-label={t(`${N}breadcrumb`)}>
+              <ol className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                <li>{t("pessoasPagina.title")}</li>
+                <li aria-hidden="true"><ChevronRight className="h-3.5 w-3.5" /></li>
+                <li aria-current="page" className="font-medium text-foreground">{t("pessoasPagina.newLead")}</li>
+              </ol>
+            </nav>
+            <SheetClose asChild>
+              <Button type="button" variant="ghost" size="icon" disabled={p.aCriar} aria-label={t(`${N}close`)} className={`-mr-2 -mt-2 h-11 w-11 ${FOCO}`}>
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </SheetClose>
+          </div>
+          <SheetTitle className="text-lg">{t(`${N}title`)}</SheetTitle>
+          <SheetDescription>{t(`${N}description`)}</SheetDescription>
+        </SheetHeader>
+        <form noValidate className="flex min-h-0 flex-1 flex-col" onSubmit={(e) => { e.preventDefault(); p.aoCriar(); }}>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
+          <PlanLimitWarning organizationId={p.organizationId} limitType="leads" />
           {p.erroApoio && (
             <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm">
               <div className="space-y-1">
@@ -149,14 +168,15 @@ export function NovaLeadDialogo(p: NovaLeadDialogoProps) {
             </div>
           )}
           <p role="status" aria-live="polite" className="min-h-5 text-xs text-muted-foreground">{p.aCriar ? t(`${N}checking`) : ""}</p>
-          <div className="sticky bottom-0 -mx-6 -mb-6 flex flex-col-reverse gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:justify-end">
+          </div>
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border bg-background px-6 py-4 sm:flex-row sm:justify-end">
             <Button type="button" variant="outline" className={`min-h-11 ${FOCO}`} disabled={p.aCriar} onClick={() => p.aoMudarAberto(false)}>{t(`${N}cancel`)}</Button>
             <Button ref={criarRef} type="submit" className={`min-h-11 ${FOCO}`} disabled={p.aCriar || semCampos} aria-busy={p.aCriar}>
               {p.aCriar ? t(`${N}creating`) : t(`${N}create`)}
             </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

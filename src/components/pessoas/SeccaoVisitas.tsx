@@ -58,11 +58,28 @@ function BotaoDoPasso({ item, nome }: { item: ItemProcesso; nome: string }) {
   );
 }
 
+/**
+ * O botão do passo da pessoa e a dica a seguir («marca a visita como feita» ou «cria o negócio à mão»). Vive no Resumo, junto da próxima visita
+ * (ou no «Próximo passo e prazo» quando não há próxima); a aba Visitas usa `SeccaoVisitas` sem `item`, para não o repetir.
+ */
+export function AcaoDoPassoPessoa({ item, nome, feita }: { item: ItemProcesso; nome: string; feita: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 pt-1"><BotaoDoPasso item={item} nome={nome} /></div>
+      <p className="text-sm text-muted-foreground">{t(`${K}${feita ? "doneHintDone" : "doneHint"}`)}</p>
+    </>
+  );
+}
+
+/** Há uma visita feita da pessoa, ainda por ligar a um negócio: o passo passa a ser criar o negócio. */
+export const temVisitaFeitaPorLigar = (visitas: readonly VisitaPessoa[]): boolean => visitas.some((v) => v.negocioId === null && v.estado === "feita");
+
 export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, naBase, cancelarVisita, aoRegistarResultado, mais }: SeccaoVisitasProps) {
   const { t } = useTranslation();
   const todas = ordenarVisitas(visitas) as VisitaPessoa[];
   if (!todas.some((v) => v.estado !== "cancelada")) return null;
-  const feita = todas.some((v) => v.negocioId === null && v.estado === "feita");
+  const feita = temVisitaFeitaPorLigar(todas);
   return (
     <Seccao titulo={t("pessoasPagina.reg.visits.title")} marca={<MarcaExemplo />}>
       <div className="space-y-2">
@@ -75,8 +92,7 @@ export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVi
           ))}
         </ul>
         <CarregarMais tipo="visitas" estado={mais} />
-        {item && <div className="flex flex-wrap gap-2 pt-1"><BotaoDoPasso item={item} nome={pessoa.nome} /></div>}
-        {item && <p className="text-sm text-muted-foreground">{t(`${K}${feita ? "doneHintDone" : "doneHint"}`)}</p>}
+        {item && <AcaoDoPassoPessoa item={item} nome={pessoa.nome} feita={feita} />}
       </div>
     </Seccao>
   );

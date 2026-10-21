@@ -43,7 +43,7 @@ export function ResumoPainel({ negocio, hoje }: { negocio: NegocioMes; hoje: str
       {negocio.moradaObra && <MoradaObraResumo morada={negocio.moradaObra} />}
       {negocio.visita && <VisitaResumo seccoes={negocio.visita} />}
       {visitas.length > 0 && <VisitasResumo visitas={visitas} />}
-      {levantamento && <LevantamentoResumo levantamento={levantamento} comResumo={visitas.length === 0} />}
+      {levantamento && <LevantamentoResumo levantamento={levantamento} />}
       <AoMudarNegocio negocio={negocio} />
       <p className="text-xs text-muted-foreground">{t("businessGoals.panel.note")}</p>
     </div>

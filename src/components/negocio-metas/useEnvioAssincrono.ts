@@ -2,6 +2,7 @@
 // chave de erro para traduzir. Os erros chegam com a `chave` do código (`ErroNeg`); aqui só se lê essa chave (nunca a mensagem) e uma falha
 // sem chave dá a mensagem genérica. Duplicado de propósito de `pessoas/seguirAcao.ts`: `negocio-metas` não importa de `pessoas`.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export const CHAVE_ERRO_ENVIO_GENERICO = "pessoasPagina.erroNeg.generico";
 
@@ -67,7 +68,8 @@ export function useEnvioAssincrono(aoFalhar?: (chave: string) => void): EnvioAss
         // a seguir, em vez de deixar uma rejeição por tratar e o diálogo aberto sem erro.
         try {
           aoOk();
-        } catch {
+        } catch (falha) {
+          captureFlowError(falha, "deal-lifecycle");
           if (montado.current) setErro(CHAVE_ERRO_ENVIO_GENERICO);
         }
       },

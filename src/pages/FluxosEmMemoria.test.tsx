@@ -12,6 +12,7 @@ import { faseDoNegocio, type NegocioMes } from "@/components/negocio-metas/negoc
 import { registarLead, repor as reporPessoas } from "@/components/pessoas/pessoasNovas";
 import { criarNegocioNovo } from "@/components/negocio-metas/negociosNovos";
 
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => {
   const { negocioMetasTranslations } = await import("@/translations/negocioMetas");
   const { pessoasPaginaTranslations } = await import("@/translations/pessoasPagina");

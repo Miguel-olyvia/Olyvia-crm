@@ -59,11 +59,15 @@ describe("Carregar mais", () => {
     fichaMock.mockReturnValue(h);
     desenhar();
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais contactos" }));
-    fireEvent.click(screen.getByRole("button", { name: "Carregar mais visitas" }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais levantamentos" }));
+    // As visitas já não estão no Resumo (só a próxima): o «Carregar mais visitas» vive na aba Visitas.
+    expect(screen.queryByRole("button", { name: "Carregar mais visitas" })).toBeNull();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /^Visitas/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^Visitas/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Carregar mais visitas" }));
     irParaAtividade();
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais atividade" }));
-    expect(h.carregarMais.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["contactos", "visitas", "levantamentos", "atividade"]);
+    expect(h.carregarMais.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["contactos", "levantamentos", "visitas", "atividade"]);
   });
 
   it("sem mais itens não há botão", () => {

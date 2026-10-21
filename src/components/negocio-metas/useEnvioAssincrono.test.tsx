@@ -2,6 +2,9 @@
 // o que fazer quando o que corre DEPOIS de a base responder bem (fechar, avisar, abrir o negócio) lança, e quando a base diz que o negócio
 // já não está disponível (NG001).
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { captureMock } = vi.hoisted(() => ({ captureMock: vi.fn() }));
+vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: captureMock }));
 import { act, renderHook } from "@testing-library/react";
 import { useLigacoes } from "@/components/pessoas/useLigacoes";
 import { erroNegFalso, pendente } from "./costuraTestUtil";
@@ -24,6 +27,14 @@ describe("useEnvioAssincrono: o que corre depois de gravar lança", () => {
     expect(result.current.aGuardar).toBe(false);
     expect(result.current.erro).toBe(CHAVE_ERRO_ENVIO_GENERICO);
     expect(rejeicoes).toEqual([]);
+  });
+
+  it("a exceção de depois de gravar não se perde: vai para a observabilidade", async () => {
+    captureMock.mockReset();
+    const { result } = renderHook(() => useEnvioAssincrono());
+    act(() => result.current.enviar(async () => undefined, () => { throw new Error("falhou depois de gravar"); }));
+    await esperarMicrotarefas();
+    expect(captureMock).toHaveBeenCalledTimes(1);
   });
 
   it("depois do erro pode-se tentar de novo (e um aoOk que já não lança limpa o erro)", async () => {

@@ -12,18 +12,19 @@ import { useEscritasNegocio } from "./useEscritasNegocio";
 import { useFontePessoas } from "./useFontePessoas";
 
 /**
- * A M6 já está aplicada na base (confirmado a 20/10): `neg_criar_negocio` aceita orçamentos, propostas e contratos em `p_registos`.
- * A true, o formulário oferece documentos e o criar envia-os. A false, o formulário não os oferece e o criar recusa-os; um documento
- * ligava-se então depois de o negócio existir, um a um, com `neg_ligar_registo` (que aceita os seis tipos).
+ * Documentos (orçamento, proposta, contrato) ao criar: desligado. A base (M6) já os aceita em `p_registos`, mas a interface não os oferece
+ * (nem ao criar nem em «Registos ligados»): a ligação dos documentos da Mudelar faz-se só no fim. A true (só nos testes), o criar envia-os;
+ * a false, recusa-os. A função da base e `ligar` ficam.
  */
-const FUNCOES_M6_APLICADAS = true;
+const DOCUMENTOS_AO_CRIAR_ATIVOS = false;
 
 /**
  * Os erros depois dos quais o que o ecrã mostra já está desatualizado (o negócio mudou, o registo já não é livre, o contrato já não se liga,
  * o contrato já não se liga): refaz-se a ficha. NG003 e NG008 não refazem nada: fecham a ficha (ver abaixo).
  */
 // NG022 (o tipo de fecho já não pode mudar: o estado ou os documentos do negócio mudaram) também refaz a ficha.
-const CODIGOS_QUE_REFRESCAM = ["NG001", "NG002", "NG004", "NG013", "NG014", "NG022"];
+// NG023 (o negócio fecha na proposta e não liga contratos) diz que o ecrã tem o fecho desatualizado: também refaz.
+const CODIGOS_QUE_REFRESCAM = ["NG001", "NG002", "NG004", "NG013", "NG014", "NG022", "NG023"];
 
 /** Os erros que tiram a própria ficha do ar (a pessoa já não está disponível, ou a funcionalidade não está ativa): fecha-se a ficha. */
 const CODIGOS_QUE_FECHAM_A_FICHA = ["NG003", "NG008"];
@@ -47,7 +48,7 @@ export function useMutacoesNegocio(pessoaId: string, ficha: FichaDb | null, opco
   const fonte = useFontePessoas();
   const client = useQueryClient();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
-  const comDocumentos = opcoes.comDocumentos ?? FUNCOES_M6_APLICADAS;
+  const comDocumentos = opcoes.comDocumentos ?? DOCUMENTOS_AO_CRIAR_ATIVOS;
   // A ficha mais recente sem refazer as mutações a cada leitura (atualiza-se depois de cada render, nunca durante).
   const fichaRef = useRef(ficha);
   const indisponivelRef = useRef(opcoes.aoIndisponivel);

@@ -18,12 +18,14 @@ interface AbaProps extends Omit<ComponentPropsWithoutRef<typeof TabsTrigger>, "c
   contador?: number;
   /** O que o leitor de ecrã ouve a seguir ao nome (por omissão, vírgula e o número); só com `contador`. */
   contadorLeitor?: string;
+  /** Há mais itens por carregar do que os contados: a pastilha mostra «N+». */
+  contadorMais?: boolean;
   /** A etiqueta "Novo": só quando há coisas por tratar. */
   novo?: boolean;
 }
 
 /** Uma aba: o rótulo, o contador em pastilha e, se for o caso, a etiqueta "Novo". */
-export function Aba({ rotulo, contador, contadorLeitor, novo, className, ...props }: AbaProps) {
+export function Aba({ rotulo, contador, contadorLeitor, contadorMais, novo, className, ...props }: AbaProps) {
   const { t } = useTranslation();
   return (
     <TabsTrigger className={cn(ABA, className)} {...props}>
@@ -31,7 +33,7 @@ export function Aba({ rotulo, contador, contadorLeitor, novo, className, ...prop
       {contador !== undefined && (
         <>
           <span aria-hidden="true" className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-foreground">
-            {contador}
+            {contadorMais ? `${contador}+` : contador}
           </span>
           <span className="sr-only">{contadorLeitor ?? `, ${contador}`}</span>
         </>

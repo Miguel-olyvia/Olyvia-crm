@@ -9,6 +9,7 @@ import { repor as reporPessoas } from "@/components/pessoas/pessoasNovas";
 import { CHAVE_PREFS_PESSOAS } from "@/components/pessoas/preferenciasPessoas";
 import Pessoas from "./Pessoas";
 
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 /** A ficha abre num painel lateral e o Quadro é grande: com a máquina ocupada passa dos 5 s por omissão. */

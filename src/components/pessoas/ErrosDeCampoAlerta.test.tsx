@@ -9,9 +9,11 @@ import { PerderNegocioDialogo } from "@/components/negocio-metas/PerderNegocioDi
 import { MOTIVOS_PREDEFINIDOS } from "@/components/negocio-metas/workflowNegocio";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { negocioBase } from "./fabricaTestes";
+import { fichaDb } from "@/hooks/pessoas/fichaFabrica";
 import { NovoNegocioReal } from "./NovoNegocioReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 beforeAll(prepararRadixNoJsdom);
@@ -43,7 +45,7 @@ describe("erros de campo em role=alert", () => {
   it("criar um negócio sem título", () => {
     function Caso() {
       const [aberta, setAberta] = useState(true);
-      return <NovoNegocioReal pessoaId="a" pessoaNome="Ana" aberto={aberta} aoCriado={vi.fn()} aoMudarAberto={setAberta} />;
+      return <NovoNegocioReal pessoaId="a" pessoaNome="Ana" ficha={fichaDb()} aberto={aberta} aoCriado={vi.fn()} aoMudarAberto={setAberta} />;
     }
     render(<ComCostura mutacoes={mutacoesFalsas()} dados={dadosFalsos()}><Caso /></ComCostura>);
     fireEvent.click(screen.getByRole("button", { name: "Criar o negócio" }));

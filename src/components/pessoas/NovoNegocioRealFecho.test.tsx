@@ -1,5 +1,5 @@
 // «Como fecha este negócio?» no «Novo negócio» da ficha real: duas opções («No contrato», por omissão, e «Na proposta (venda directa)»), enviadas
-// em `fecho` ao criar (a base recebe-as em p_fecho). Com «Na proposta» os contratos não se oferecem nem seguem no pedido. O exemplo (sem base) não
+// em `fecho` ao criar (a base recebe-as em p_fecho). O criar não oferece documentos (a ligação deles faz-se no fim). O exemplo (sem base) não
 // leva este grupo.
 import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,9 +10,11 @@ import type { DadosNegocio } from "@/components/negocio-metas/costuraNegocio";
 import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio";
 import { repor } from "@/components/negocio-metas/registosPessoa";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import { fichaDb } from "@/hooks/pessoas/fichaFabrica";
 import { NovoNegocioReal } from "./NovoNegocioReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
 beforeAll(prepararRadixNoJsdom);
@@ -24,7 +26,7 @@ afterEach(() => { cleanup(); repor(); vi.unstubAllGlobals(); });
 
 function Harness() {
   const [aberto, setAberto] = useState(true);
-  return <NovoNegocioReal pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={setAberto} />;
+  return <NovoNegocioReal pessoaId="a" pessoaNome="Ana" ficha={fichaDb()} aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={setAberto} />;
 }
 
 function montar(mutacoes: MutacoesNegocio = mutacoesFalsas(), dados: Partial<DadosNegocio> = {}) {
@@ -82,44 +84,31 @@ describe("«Como fecha este negócio?»", () => {
 
 });
 
-describe("«Na proposta (venda directa)» não oferece contratos", () => {
+describe("o criar negócio não oferece documentos, seja qual for o fecho", () => {
   const dados = { documentosPorLigar: [contratoSemProposta, { tipo: "proposta" as const, id: "p1", numero: "P-1", temBase: true }] };
   const comDocumentos = () => mutacoesFalsas({ criarComDocumentos: true });
 
-  it("com «No contrato» o contrato por ligar oferece-se na aba Registos", () => {
+  it("com «No contrato» nenhuma aba tem caixas de contrato nem de proposta", () => {
     montar(comDocumentos(), dados);
-    aba("Registos");
-    expect(screen.getByRole("checkbox", { name: "Contrato C-1" })).toBeInTheDocument();
+    for (const nome of ["Geral", "Visita", "Levantamento"]) {
+      aba(nome);
+      expect(screen.queryByRole("checkbox", { name: "Contrato C-1" })).toBeNull();
+      expect(screen.queryByRole("checkbox", { name: "Proposta P-1" })).toBeNull();
+    }
   });
 
-  it("com «Na proposta» o contrato por ligar deixa de se oferecer, e a proposta continua", () => {
-    montar(comDocumentos(), dados);
-    fireEvent.click(opcao("Na proposta (venda directa)"));
-    aba("Registos");
-    expect(screen.queryByRole("checkbox", { name: "Contrato C-1" })).toBeNull();
-    expect(screen.getByRole("checkbox", { name: "Proposta P-1" })).toBeInTheDocument();
-  });
-
-  it("um contrato marcado antes de mudar para «Na proposta» não segue no pedido", () => {
+  it("com «Na proposta» também não, e o pedido segue sem documentos", () => {
     const mutacoes = montar(comDocumentos(), dados);
     fireEvent.change(titulo(), { target: { value: "Cozinha" } });
-    aba("Registos");
-    fireEvent.click(screen.getByRole("checkbox", { name: "Contrato C-1" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Proposta P-1" }));
-    aba("Geral");
     fireEvent.click(opcao("Na proposta (venda directa)"));
+    for (const nome of ["Visita", "Levantamento"]) {
+      aba(nome);
+      expect(screen.queryByRole("checkbox", { name: /^(Contrato|Proposta) / })).toBeNull();
+    }
+    aba("Geral");
     fireEvent.click(criar());
     const pedido = (mutacoes.criar as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(pedido.fecho).toBe("proposta");
-    expect(pedido.registos).toEqual([{ tipo: "proposta", id: "p1" }]);
-  });
-
-  it("com «No contrato» o contrato marcado segue no pedido", () => {
-    const mutacoes = montar(comDocumentos(), dados);
-    fireEvent.change(titulo(), { target: { value: "Cozinha" } });
-    aba("Registos");
-    fireEvent.click(screen.getByRole("checkbox", { name: "Contrato C-1" }));
-    fireEvent.click(criar());
-    expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({ fecho: "contrato", registos: [{ tipo: "contrato", id: "k1" }] }));
+    expect(pedido.registos.filter((r: { tipo: string }) => ["orcamento", "proposta", "contrato"].includes(r.tipo))).toEqual([]);
   });
 });

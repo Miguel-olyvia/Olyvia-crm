@@ -138,3 +138,27 @@ describe("adaptarSubmissoes: porque não criou lead nova", () => {
     expect(adaptarSubmissoes([], [sub()], CTX)[0].conflito).toBeNull();
   });
 });
+
+describe("adaptarSubmissoes: campos mapeados", () => {
+  it("marca como mapeado o campo cuja chave o formulário declara como campo base (o critério de Leads)", () => {
+    const r = adaptarSubmissoes(
+      [lead({ field_values: { po_email: "a@b.pt", nome_obra: "Cozinha" } })], [],
+      ctx({ chavesMapeadasPorCampanha: { c1: new Set(["po_email"]) } }),
+    );
+    expect(r[0].campos.find((c) => c.chave === "po_email")?.mapeado).toBe(true);
+    expect(r[0].campos.find((c) => c.chave === "nome_obra")?.mapeado).toBeFalsy();
+  });
+
+  it("sem informação de mapeamento nenhum campo vem como mapeado", () => {
+    const r = adaptarSubmissoes([lead({ field_values: { nome_obra: "Cozinha" } })], [], CTX);
+    expect(r[0].campos.every((c) => !c.mapeado)).toBe(true);
+  });
+
+  it("uma submissão sem campanha usa as chaves da organização", () => {
+    const r = adaptarSubmissoes(
+      [lead({ campaign_id: null, campaigns: null, field_values: { x_mail: "a@b.pt" } })], [],
+      ctx({ chavesMapeadasPorCampanha: { __org__: new Set(["x_mail"]) } }),
+    );
+    expect(r[0].campos[0].mapeado).toBe(true);
+  });
+});

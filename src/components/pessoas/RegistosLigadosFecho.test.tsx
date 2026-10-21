@@ -1,5 +1,5 @@
-// «Registos ligados» num negócio de fecho «proposta» (ficha real): os contratos por ligar não se oferecem. Com fecho «contrato» (ou sem tipo)
-// oferecem-se como sempre.
+// «Registos ligados» (ficha real): os documentos por ligar (orçamentos, propostas e contratos sem negócio) não se oferecem, nem com fecho
+// «proposta» nem com «contrato»: a ligação deles faz-se no fim, fora desta lista.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
@@ -34,21 +34,11 @@ function mostrar(negocio: NegocioMes) {
 const ligarContrato = () => screen.queryByRole("button", { name: /Contrato C-1/ });
 const ligarProposta = () => screen.queryByRole("button", { name: /Proposta P-1/ });
 
-describe("documentos por ligar, segundo o tipo de fecho", () => {
-  it("fecho «proposta»: a proposta liga-se, o contrato não se oferece", () => {
-    mostrar(negocioBase("n1", { estadoReal: "aberto", fecho: "proposta" }));
-    expect(ligarProposta()).not.toBeNull();
+describe("documentos por ligar: nenhum se oferece, seja qual for o fecho", () => {
+  it.each([["proposta" as const], ["contrato" as const], [undefined]])("fecho %s: nem a proposta nem o contrato têm botão de ligar", (fecho) => {
+    mostrar(negocioBase("n1", { estadoReal: "aberto", ...(fecho ? { fecho } : {}) }));
+    expect(ligarProposta()).toBeNull();
     expect(ligarContrato()).toBeNull();
-  });
-
-  it("fecho «contrato»: os dois oferecem-se", () => {
-    mostrar(negocioBase("n1", { estadoReal: "aberto", fecho: "contrato" }));
-    expect(ligarProposta()).not.toBeNull();
-    expect(ligarContrato()).not.toBeNull();
-  });
-
-  it("sem tipo conhecido: tudo como estava", () => {
-    mostrar(negocioBase("n1", { estadoReal: "aberto" }));
-    expect(ligarContrato()).not.toBeNull();
+    expect(screen.queryByRole("group", { name: "Documentos por ligar" })).toBeNull();
   });
 });

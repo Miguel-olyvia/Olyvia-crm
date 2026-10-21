@@ -9,8 +9,7 @@ import { pessoaBase, resumoBase } from "./fabricaTestes";
 import { FichaNegocios } from "./FichaNegocios";
 import { textoUltimoContacto } from "./formatoPessoas";
 import type { ItemAtividade } from "./pessoasTipos";
-import { SeccaoOrigem } from "./SeccaoOrigem";
-import { SeccaoSobre } from "./SeccoesResumo";
+import { SeccaoLead } from "./SeccoesResumo";
 import { MarcaExemplo } from "./SelosPessoa";
 import { negocioBase } from "./fabricaTestes";
 
@@ -45,45 +44,56 @@ describe("MarcaExemplo", () => {
   });
 });
 
-describe("SeccaoSobre sem as linhas que a base não tem", () => {
+describe("SeccaoLead sem as linhas que a base não tem", () => {
   const real = (extra = {}) => resumoBase(pessoaBase("a", { saude: undefined, comercial: "", ultimoContactoDias: null, ...extra }), [], HOJE);
 
   it("sem saúde, sem comercial e sem contacto: não há linha da saúde da pessoa nem do comercial", () => {
-    noReal(<SeccaoSobre resumo={real()} hoje={HOJE} />);
+    noReal(<SeccaoLead resumo={real()} hoje={HOJE} />);
     expect(screen.queryByText("Saúde da pessoa")).toBeNull();
     expect(screen.queryByText("Comercial")).toBeNull();
     expect(screen.queryByText("exemplo")).toBeNull();
   });
 
   it("nunca contactada: diz «Sem contacto» uma só vez (no selo), sem texto de dias", () => {
-    noReal(<SeccaoSobre resumo={real()} hoje={HOJE} />);
+    noReal(<SeccaoLead resumo={real()} hoje={HOJE} />);
     expect(screen.getAllByText("Sem contacto")).toHaveLength(1);
     expect(screen.queryByText(/há \d+ dias/)).toBeNull();
   });
 
   it("com comercial, mostra a linha; com saúde (exemplo) também", () => {
-    noReal(<SeccaoSobre resumo={real({ comercial: "Rita Gomes" })} hoje={HOJE} />);
+    noReal(<SeccaoLead resumo={real({ comercial: "Rita Gomes" })} hoje={HOJE} />);
     expect(screen.getByText("Rita Gomes")).toBeInTheDocument();
   });
 
   it("a qualificação só aparece se existir (MQL ou SQL)", () => {
-    const { unmount } = noReal(<SeccaoSobre resumo={real({ qualificacao: "SQL" })} hoje={HOJE} />);
+    const { unmount } = noReal(<SeccaoLead resumo={real({ qualificacao: "SQL" })} hoje={HOJE} />);
     expect(screen.getByText(/SQL/)).toBeInTheDocument();
     unmount();
-    noReal(<SeccaoSobre resumo={real()} hoje={HOJE} />);
+    noReal(<SeccaoLead resumo={real()} hoje={HOJE} />);
     expect(screen.queryByText(/SQL|MQL/)).toBeNull();
   });
 });
 
-describe("SeccaoOrigem sem fonte", () => {
-  it("sem origem, canal, campanha, formulário nem via de entrada, a secção não aparece", () => {
-    const { container } = noReal(<SeccaoOrigem pessoa={pessoaBase("a", { origem: undefined, viaEntrada: undefined })} />);
-    expect(container).toBeEmptyDOMElement();
+describe("SeccaoLead: a origem e o resumo numa só secção", () => {
+  const com = (extra = {}) => resumoBase(pessoaBase("a", { saude: undefined, ultimoContactoDias: null, ...extra }), [], HOJE);
+
+  it("uma só secção «Lead»: já não há «Origem» nem «Sobre a pessoa» à parte", () => {
+    noReal(<SeccaoLead resumo={com({ origem: "site", viaEntrada: "telefone" })} hoje={HOJE} />);
+    expect(screen.getAllByRole("heading", { name: "Lead" })).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Origem" })).toBeNull();
+    expect(screen.queryByText("Sobre a pessoa")).toBeNull();
   });
 
-  it("com a origem e a via de exemplo mostra as linhas que existem", () => {
-    noReal(<SeccaoOrigem pessoa={pessoaBase("a", { origem: "site", viaEntrada: "telefone" })} />);
-    expect(screen.getByText("Site")).toBeInTheDocument();
+  it("com origem, canal, campanha, formulário e via de entrada mostra essas linhas junto das do resumo", () => {
+    noReal(<SeccaoLead resumo={com({ origem: "site", viaEntrada: "telefone", canal: "Google", campanha: "Remodelações", formulario: "Orçamento", comercial: "Rita Gomes" })} hoje={HOJE} />);
+    for (const texto of ["Site", "Google", "Remodelações", "Orçamento", "Rita Gomes"]) expect(screen.getByText(texto)).toBeInTheDocument();
+  });
+
+  it("sem dados de origem não há linhas de origem, mas a secção aparece (o último contacto existe sempre)", () => {
+    noReal(<SeccaoLead resumo={com({ origem: undefined, viaEntrada: undefined, canal: undefined, campanha: undefined, formulario: undefined })} hoje={HOJE} />);
+    expect(screen.getByRole("heading", { name: "Lead" })).toBeInTheDocument();
+    expect(screen.queryByText("Campanha")).toBeNull();
+    expect(screen.queryByText("Canal")).toBeNull();
   });
 });
 

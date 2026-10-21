@@ -64,6 +64,11 @@ export interface ResultadoGuardarRegistos {
 export interface GuardarRegistosHook {
   /** Grava. Lança `ErroNeg` (o primeiro passo falhou, ou o pedido nem chegou à base) ou `ErroGuardarParcial` (já havia coisas gravadas). */
   guardar: (visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string) => Promise<ResultadoGuardarRegistos>;
+  /**
+   * Faz o plano em seco, sem escrever nada: lança `ErroNeg` pelo que a gravação recusaria (dia ou hora em falta, quadro, perguntas por carregar,
+   * respostas inválidas). Serve para o criar negócio dizer o erro ANTES de criar o negócio, em vez de o deixar criado e a meio.
+   */
+  verificar: (visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string) => void;
   aGuardar: boolean;
   /** Pode gravar-se: a base é a fonte, há ficha e as perguntas do questionário carregaram. */
   pronto: boolean;
@@ -148,7 +153,16 @@ function paraEntrada(p: PassoLevantamento, organizationId: string, pessoaId: str
   };
 }
 
-export function useGuardarRegistos(ficha: FichaDb | null, opcoes: { negocioId?: string | null } = {}): GuardarRegistosHook {
+/**
+ * `negocioId`: as visitas novas e o levantamento ficam ligados a ele. `ignorarLevantamentoLivre`: o levantamento que a pessoa já tem sem negócio
+ * não se reescreve nem se liga (criar negócio: o levantamento que se grava é sempre um novo).
+ */
+export interface OpcoesGuardarRegistos {
+  negocioId?: string | null;
+  ignorarLevantamentoLivre?: boolean;
+}
+
+export function useGuardarRegistos(ficha: FichaDb | null, opcoes: OpcoesGuardarRegistos = {}): GuardarRegistosHook {
   const fonte = useFontePessoas();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const pessoaId = ficha?.pessoa.id ?? null;
@@ -163,15 +177,17 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: { negocioId?: 
   // Trocar de pessoa esquece o que a sessão anterior criou.
   const sessao = useMemo<Sessao>(() => ({ criadas: new Map(), idLevantamento: null }), [pessoaId]);
   const negocioId = opcoes.negocioId ?? null;
+  const ignorarLivre = opcoes.ignorarLevantamentoLivre === true;
 
-  const executar = useCallback(async (visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string): Promise<ResultadoGuardarRegistos> => {
+  /** O plano de agora; lança o que a gravação recusaria antes de escrever (sem escrever nada). */
+  const planear = useCallback((visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string) => {
     if (!organizationId || !ficha) throw generico();
     const base = new Map<string, BaseVisita>(adaptarRegistos(ficha).visitas.map((v) => [v.id, { idReal: v.id, visita: v }]));
     sessao.criadas.forEach((b, id) => base.set(id, b));
     const plano = planoGravacao({
       organizationId, pessoaId: ficha.pessoa.id, nome: ficha.pessoa.nome ?? "", visitas, base, sessao: new Set(sessao.criadas.keys()), omissao,
       tituloDoTipo: (tipo) => (tipo ? t(`pessoasPagina.real.visit.kind.${tipo}`) : ""), agora: Date.now(), hoje: hojeLisboa(), comercial, negocioId,
-      rascunho, levantamentoLivre: levantamentoLivreDaFicha(ficha), novoIdLevantamento: () => (sessao.idLevantamento ??= crypto.randomUUID()),
+      rascunho, levantamentoLivre: ignorarLivre ? null : levantamentoLivreDaFicha(ficha), novoIdLevantamento: () => (sessao.idLevantamento ??= crypto.randomUUID()),
     });
     if (!plano.ok) throw new ErroNeg(null, null, CHAVE_DA_FALTA[plano.falta]);
     const comLevantamento = plano.passos.find((p): p is PassoLevantamento => p.tipo === "levantamento");
@@ -180,7 +196,16 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: { negocioId?: 
       if (!levantamento.pronto) throw new ErroNeg(null, null, CHAVE_NAO_PRONTO);
       paramsGuardarLevantamento(paraEntrada(comLevantamento, organizationId, ficha.pessoa.id, undefined), questionario);
     }
-    const contexto: Contexto = { organizationId, ficha, sessao, acoes, levantamento, visitas };
+    return { plano, base, organizationId, ficha };
+  }, [organizationId, ficha, sessao, omissao, questionario, t, negocioId, ignorarLivre, levantamento.pronto]);
+
+  const verificar = useCallback((visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string): void => {
+    planear(visitas, rascunho, comercial);
+  }, [planear]);
+
+  const executar = useCallback(async (visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string): Promise<ResultadoGuardarRegistos> => {
+    const { plano, base, organizationId: org, ficha: fichaDaPessoa } = planear(visitas, rascunho, comercial);
+    const contexto: Contexto = { organizationId: org, ficha: fichaDaPessoa, sessao, acoes, levantamento, visitas };
     const reais = new Map<string, string>([...base].map(([id, b]) => [id, b.idReal]));
     const feitos: ParteGravacao[] = [];
     let gravado: ResultadoGuardarLevantamento | null = null;
@@ -194,7 +219,7 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: { negocioId?: 
       if (passo.tipo === "levantamento") sessao.idLevantamento = null;
     }
     return { feitos, levantamento: gravado };
-  }, [organizationId, ficha, sessao, acoes, levantamento, omissao, questionario, t, negocioId]);
+  }, [planear, sessao, acoes, levantamento]);
 
   const guardar = useCallback((visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string): Promise<ResultadoGuardarRegistos> => {
     if (emCurso.current) return emCurso.current;
@@ -207,5 +232,5 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: { negocioId?: 
     return voo;
   }, [executar]);
 
-  return { guardar, aGuardar, pronto: organizationId !== null && ficha !== null && levantamento.pronto };
+  return { guardar, verificar, aGuardar, pronto: organizationId !== null && ficha !== null && levantamento.pronto };
 }

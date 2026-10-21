@@ -33,6 +33,7 @@ vi.mock("@/hooks/useTranslation", async () => {
 });
 
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true }) }));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
 // O jsdom não tem estas funções, que o Select do Radix usa ao abrir a lista.
 beforeAll(() => {
@@ -313,11 +314,18 @@ describe("Ficha: as visitas da pessoa, e o mesmo caminho dos botões do Quadro",
       await marcarFeitaEGuardar(nome);
       fireEvent.click(botao(`Abrir a ficha de ${nome}`));
       const ficha = await screen.findByRole("dialog");
+      // No Resumo já não há próxima visita (a única está feita), mas o botão do passo continua lá, no «Próximo passo e prazo».
+      expect(within(ficha).queryByRole("heading", { name: "Próxima visita" })).not.toBeInTheDocument();
+      expect(within(ficha).getByRole("button", { name: `Criar o negócio: Abordagem de ${nome}` })).toBeInTheDocument();
+      // A visita feita lê-se na aba Visitas, que não repete o botão do passo.
+      const aba = within(ficha).getByRole("tab", { name: /^Visitas/ });
+      fireEvent.mouseDown(aba, { button: 0, ctrlKey: false });
+      fireEvent.click(aba);
       const visitas = within(ficha).getByRole("heading", { name: "Visitas" }).closest("section")!;
       expect(within(visitas).getByText("Feita")).toBeInTheDocument();
       expect(within(visitas).queryByText(/ainda não foi concluída/)).not.toBeInTheDocument();
       expect(within(visitas).queryByRole("button", { name: /^Alterar visita/ })).not.toBeInTheDocument();
-      expect(within(visitas).getByRole("button", { name: `Criar o negócio: Abordagem de ${nome}` })).toBeInTheDocument();
+      expect(within(visitas).queryByRole("button", { name: `Criar o negócio: Abordagem de ${nome}` })).not.toBeInTheDocument();
       // Uma visita feita sem resultado pede o resultado: interessado, a pensar, sem interesse ou obra inviável.
       expect(within(visitas).getByRole("button", { name: /^Registar o resultado da visita/ })).toBeInTheDocument();
     }, TEMPO,
@@ -344,7 +352,7 @@ describe("Ficha: as visitas da pessoa, e o mesmo caminho dos botões do Quadro",
     abrirPagina("quadro");
     fireEvent.click(botao("Abrir a ficha de Rita Albuquerque"));
     const ficha = await screen.findByRole("dialog");
-    expect(within(ficha).getByRole("heading", { name: "Visitas" })).toBeInTheDocument();
+    expect(within(ficha).getByRole("heading", { name: "Próxima visita" })).toBeInTheDocument();
     fireEvent.click(within(ficha).getByRole("button", { name: "Marcar a visita como feita: Abordagem de Rita Albuquerque" }));
     const painel = await screen.findByRole("dialog", { name: "Visita e levantamento de Rita Albuquerque" });
     fireEvent.click(within(painel).getByRole("button", { name: /^Medidas da área/ }));

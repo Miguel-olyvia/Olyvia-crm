@@ -46,8 +46,9 @@ describe("SubmissoesFichaReal: os cartões", () => {
     expect(within(item).getByText("Submissão")).toBeInTheDocument();
     expect(within(item).getByText("Por rever")).toBeInTheDocument();
     expect(within(item).getByText(/hoje às 10:00/)).toBeInTheDocument();
-    expect(within(item).getByText("O seu email:")).toBeInTheDocument();
-    expect(within(item).getByText("ana@exemplo.pt")).toBeInTheDocument();
+    // Sem mapeamento (o cartão de teste não traz `mapeado`), os campos aparecem na secção do topo.
+    expect(screen.getByText("O seu email:")).toBeInTheDocument();
+    expect(screen.getByText("ana@exemplo.pt")).toBeInTheDocument();
   });
 
   it("é só leitura: nenhum botão de resolver nem de registar", () => {
@@ -127,5 +128,67 @@ describe("SubmissoesFichaReal: porque não criou lead nova", () => {
     expect(screen.getByText("novo@x.pt")).toBeInTheDocument();
     expect(screen.getByText("Telefone novo, não gravado na ficha")).toBeInTheDocument();
     expect(screen.getByText("999")).toBeInTheDocument();
+  });
+});
+
+describe("SubmissoesFichaReal: dados do formulário sem mapeamento", () => {
+  const campos = [
+    { chave: "po_email", rotulo: "O seu email", valor: "ana@exemplo.pt", mapeado: true },
+    { chave: "tipo_obra", rotulo: "Tipo de obra", valor: "Cozinha" },
+  ];
+
+  it("os campos sem mapeamento da submissão mais recente vão para uma secção própria no topo", () => {
+    desenhar({ submissoes: [cartao({ campos })] });
+    const secao = screen.getByRole("region", { name: "Dados do formulário" });
+    expect(within(secao).getByText("Tipo de obra:")).toBeInTheDocument();
+    expect(within(secao).getByText("Cozinha")).toBeInTheDocument();
+    expect(within(secao).queryByText("O seu email:")).toBeNull();
+  });
+
+  it("o cartão não repete o que subiu para o topo, e mantém os campos mapeados", () => {
+    desenhar({ submissoes: [cartao({ campos })] });
+    const item = screen.getByRole("listitem");
+    expect(within(item).queryByText("Tipo de obra:")).toBeNull();
+    expect(within(item).getByText("O seu email:")).toBeInTheDocument();
+  });
+
+  it("sem nenhum campo sem mapeamento, a secção não aparece", () => {
+    desenhar({ submissoes: [cartao({ campos: [campos[0]] })] });
+    expect(screen.queryByRole("region", { name: "Dados do formulário" })).toBeNull();
+  });
+
+  it("as submissões mais antigas mantêm todos os seus campos", () => {
+    desenhar({ submissoes: [
+      cartao({ campos }),
+      cartao({ chave: "submissao:s0", id: "s0", criadoEm: "2026-10-01T09:00:00Z", campos: [{ chave: "tipo_obra", rotulo: "Tipo de obra", valor: "Casa de banho" }] }),
+    ] });
+    const antigo = screen.getAllByRole("listitem")[1];
+    expect(within(antigo).getByText("Tipo de obra:")).toBeInTheDocument();
+    expect(within(antigo).getByText("Casa de banho")).toBeInTheDocument();
+  });
+
+  it("um valor com marcas HTML aparece como texto na secção do topo", () => {
+    desenhar({ submissoes: [cartao({ campos: [{ chave: "a", rotulo: "Nota", valor: "<b>x</b>" }] })] });
+    expect(within(screen.getByRole("region", { name: "Dados do formulário" })).getByText("<b>x</b>")).toBeInTheDocument();
+    expect(document.querySelector("b")).toBeNull();
+  });
+});
+
+describe("SubmissoesFichaReal: campanha já dita na secção Lead", () => {
+  it("o cartão da mesma campanha não a repete: o título passa a dizer que tipo de entrada é", () => {
+    desenhar({ campanhaDaLead: "Remodelações" });
+    const item = screen.getByRole("listitem");
+    expect(within(item).queryByText("Remodelações")).toBeNull();
+    expect(within(item).getAllByText("Submissão").length).toBeGreaterThan(0);
+  });
+
+  it("uma campanha diferente da da secção Lead continua a aparecer", () => {
+    desenhar({ campanhaDaLead: "Outra" });
+    expect(within(screen.getByRole("listitem")).getByText("Remodelações")).toBeInTheDocument();
+  });
+
+  it("sem a campanha da lead (a ficha não a tem) mostra sempre a do cartão", () => {
+    desenhar();
+    expect(within(screen.getByRole("listitem")).getByText("Remodelações")).toBeInTheDocument();
   });
 });

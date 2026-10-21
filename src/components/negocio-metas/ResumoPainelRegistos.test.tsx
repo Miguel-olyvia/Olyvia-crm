@@ -89,6 +89,23 @@ describe("ResumoPainel: visitas e levantamento derivados dos registos ligados", 
     expect(seccao).not.toHaveTextContent("01/09/2026");
   });
 
+  it("o levantamento não depende das visitas: com uma visita ligada diz o seu próprio estado, data e quem fez, e a visita não o repete", () => {
+    const a = registarVisita(visita({ data: "2026-10-10", feitoPor: "Carla Dias" }));
+    ligarRegisto({ tipo: "visita", id: a.id }, "n1");
+    const l = registarLevantamento({
+      pessoaId: "p1", visitaId: a.id, data: "2026-10-11", feitoPor: "Bruno Costa",
+      rascunho: { linhas: [linha], observacoes: "", respostas: {} },
+    });
+    ligarRegisto({ tipo: "levantamento", id: l.id }, "n1");
+    render(<ResumoPainel negocio={negocio()} hoje={HOJE_EXEMPLO} />);
+    const levantamento = screen.getByRole("heading", { name: "Levantamento" }).closest("section")!;
+    expect(levantamento).toHaveTextContent("Feito · 11/10/2026 · Bruno Costa");
+    expect(levantamento).not.toHaveTextContent("Carla Dias");
+    const visitas = screen.getByRole("heading", { name: "Visitas" }).closest("section")!;
+    expect(visitas).not.toHaveTextContent("Bruno Costa");
+    expect(visitas).not.toHaveTextContent("Cozinha: Bancada");
+  });
+
   it("sem nada, não há secção de visitas nem de levantamento", () => {
     render(<ResumoPainel negocio={negocio()} hoje={HOJE_EXEMPLO} />);
     expect(screen.queryByRole("heading", { name: "Visitas" })).not.toBeInTheDocument();

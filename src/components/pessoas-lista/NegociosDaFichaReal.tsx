@@ -115,7 +115,7 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
         </ProcessoProviderReal>
         {ficha && pessoaAberta === pessoaId && (
           <NovoNegocioReal
-            pessoaId={pessoaId} pessoaNome={ficha.pessoa.nome ?? ""} aberto={criandoPara === pessoaId}
+            pessoaId={pessoaId} pessoaNome={ficha.pessoa.nome ?? ""} ficha={ficha} aberto={criandoPara === pessoaId}
             aoMudarAberto={(aberto) => setCriandoPara(aberto ? pessoaId : null)}
             aoCriado={(negocio) => aoCriado(pessoaId, negocio)}
           />

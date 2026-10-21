@@ -39,6 +39,19 @@ describe("lerFechos", () => {
     expect(await lerFechos("org-1", ["n1", "n3"])).toEqual(new Map([["n3", "proposta"]]));
   });
 
+  it("linhas em falta (a RLS escondeu-as) ou com fecho desconhecido ficam observáveis: um aviso, sem rebentar", async () => {
+    resposta.mockReturnValue({ data: [{ id: "n1", fecho: "proposta" }, { id: "n2", fecho: "xpto" }], error: null });
+    const mapa = await lerFechos("org-1", ["n1", "n2", "n3"]);
+    expect(mapa).toEqual(new Map([["n1", "proposta"]]));
+    expect(captureMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("com todas as linhas válidas não regista nada", async () => {
+    resposta.mockReturnValue({ data: [{ id: "n1", fecho: "proposta" }], error: null });
+    await lerFechos("org-1", ["n1"]);
+    expect(captureMock).not.toHaveBeenCalled();
+  });
+
   it("sem ids não lê nada", async () => {
     expect(await lerFechos("org-1", [])).toBeNull();
     expect(deTabela).not.toHaveBeenCalled();

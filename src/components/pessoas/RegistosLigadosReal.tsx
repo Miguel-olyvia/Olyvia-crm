@@ -1,6 +1,6 @@
 // Os «Registos ligados» de um negócio na ficha real: os registos vêm dos dados da ficha (contexto), ligar e desligar vão para a base e
 // esperam por ela (a linha fica aria-busy; o resultado anuncia-se no fim; um erro diz-se pelo código em role="alert"). Depois de escrever,
-// a ficha refaz-se e as listas mudam por si: aqui não se mexe em nada em memória. Os documentos antigos sem negócio ligam-se daqui também.
+// a ficha refaz-se e as listas mudam por si: aqui não se mexe em nada em memória.
 import { useRef } from "react";
 import { CalendarPlus } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -13,7 +13,6 @@ import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { cn } from "@/lib/utils";
-import { DocumentosPorLigar, oQueDoDocumento } from "./DocumentosPorLigar";
 import { useMarcarVisita } from "./marcarVisitaContexto";
 import { chaveDe, itensDe, oQueDoRegisto, RegistosLigadosLista, type ItemRegisto } from "./RegistosLigadosLista";
 import { useLigacoes } from "./useLigacoes";
@@ -68,11 +67,6 @@ export function RegistosLigadosReal({ negocio, aberto, mutacoes }: RegistosLigad
               {t(`${P}markVisit`)}
             </Button>
           )}
-          <DocumentosPorLigar
-            // Fecho na proposta: os contratos são ignorados, por isso nenhum contrato por ligar se oferece.
-            documentos={negocio.fecho === "proposta" ? dados.documentosPorLigar.filter((d) => d.tipo !== "contrato") : dados.documentosPorLigar} ocupadas={ocupadas}
-            aoLigar={(d) => mudar({ tipo: d.tipo, id: d.id }, oQueDoDocumento(t, d), true)}
-          />
         </>
       ) : null}
     />

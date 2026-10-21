@@ -14,6 +14,7 @@ import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 const { atual } = vi.hoisted(() => ({ atual: { mutacoes: null as unknown, opcoes: undefined as undefined | { aoIndisponivel?: (chave: string, pessoaId: string) => void } } }));
 vi.mock("@/hooks/pessoas/useMutacoesNegocio", () => ({
   useMutacoesNegocio: (_pessoa: string, _ficha: unknown, opcoes?: { aoIndisponivel?: (chave: string, pessoaId: string) => void }) => { atual.opcoes = opcoes; return atual.mutacoes; },

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
 import Pessoas from "./Pessoas";
 
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true }) }));
 vi.mock("@/components/pessoas-lista/PessoasReal", () => ({ PessoasReal: () => <p>LISTA REAL</p> }));

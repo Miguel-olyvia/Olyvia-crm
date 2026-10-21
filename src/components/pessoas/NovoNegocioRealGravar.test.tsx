@@ -1,8 +1,8 @@
-// «Novo negócio» na ficha REAL: os documentos (só com a M6) e o ciclo de gravação (a guardar, erro dentro do painel, só fecha em sucesso,
+// «Novo negócio» na ficha REAL: nenhum documento se oferece ao criar, e o ciclo de gravação (a guardar, erro dentro do painel, só fecha em sucesso,
 // id estável entre reenvios e novo depois de um sucesso). O resto está em NovoNegocioReal.test.tsx.
 import { useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
 import { ComCostura, dadosFalsos, erroNegFalso, mutacoesFalsas, pendente } from "@/components/negocio-metas/costuraTestUtil";
 import type { DadosNegocio } from "@/components/negocio-metas/costuraNegocio";
@@ -10,9 +10,11 @@ import type { MutacoesNegocio, ResultadoCriar } from "@/components/negocio-metas
 import { registosAtuais, repor } from "@/components/negocio-metas/registosPessoa";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { contactoBase, levantamentoBase, registosBase, visitaPessoaBase } from "./fabricaTestes";
+import { fichaDb } from "@/hooks/pessoas/fichaFabrica";
 import { NovoNegocioReal } from "./NovoNegocioReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 const { sucesso, info } = vi.hoisted(() => ({ sucesso: vi.fn(), info: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast: { info, error: vi.fn(), success: sucesso } }));
 
@@ -34,7 +36,7 @@ function Harness(p: { aoCriado?: (id: string) => void; aoMudar?: (a: boolean) =>
   const [aberto, setAberto] = useState(true);
   return (
     <NovoNegocioReal
-      pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={p.aoCriado ?? vi.fn()}
+      pessoaId="a" pessoaNome="Ana" ficha={fichaDb()} aberto={aberto} aoCriado={p.aoCriado ?? vi.fn()}
       aoMudarAberto={(v) => { p.aoMudar?.(v); setAberto(v); }}
     />
   );
@@ -54,31 +56,28 @@ const criar = () => screen.getByRole("button", { name: /^(Criar o negócio|A gua
 const escrever = (texto: string) => fireEvent.change(titulo(), { target: { value: texto } });
 const aba = (nome: string) => fireEvent.mouseDown(screen.getByRole("tab", { name: new RegExp(`^${nome}`) }), { button: 0 });
 
-describe("NovoNegocioReal: documentos (a bandeira da M6)", () => {
+describe("NovoNegocioReal: não oferece documentos (a ligação dos documentos faz-se no fim)", () => {
   const documentosPorLigar: DadosNegocio["documentosPorLigar"] = [
     { tipo: "orcamento", id: "o1", numero: "O-1", temBase: true },
     { tipo: "contrato", id: "k1", numero: "C-9", temBase: true },
-    { tipo: "contrato", id: "k2", numero: "C-10", temBase: false },
   ];
 
-  it("com a bandeira desligada não se oferecem documentos", () => {
-    montar(mutacoesFalsas({ criarComDocumentos: false }), { documentosPorLigar });
-    aba("Registos");
-    expect(screen.queryByRole("group", { name: "Documentos a ligar" })).toBeNull();
+  it.each([false, true])("com a bandeira em %s nenhuma aba tem documentos nem caixas deles", (criarComDocumentos) => {
+    montar(mutacoesFalsas({ criarComDocumentos }), { documentosPorLigar });
+    for (const nome of ["Geral", "Visita", "Levantamento"]) {
+      aba(nome);
+      expect(screen.queryByRole("group", { name: "Documentos a ligar" })).toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /Orçamento O-1|Contrato C-9/ })).toBeNull();
+    }
   });
 
-  it("com a bandeira ligada oferecem-se, sem o contrato sem base, e os marcados vão em registos", () => {
+  it("o pedido de criar nunca leva documentos, e a escolha de contactos e visitas continua a ir", () => {
     const { mutacoes } = montar(mutacoesFalsas({ criarComDocumentos: true }), { documentosPorLigar });
     escrever("Sala");
-    aba("Registos");
-    const grupo = screen.getByRole("group", { name: "Documentos a ligar" });
-    expect(within(grupo).queryByRole("checkbox", { name: "Contrato C-10" })).toBeNull();
-    fireEvent.click(within(grupo).getByRole("checkbox", { name: "Orçamento O-1" }));
-    fireEvent.click(within(grupo).getByRole("checkbox", { name: "Contrato C-9" }));
     fireEvent.click(criar());
-    expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({
-      registos: expect.arrayContaining([{ tipo: "orcamento", id: "o1" }, { tipo: "contrato", id: "k1" }]),
-    }));
+    const pedido = (mutacoes.criar as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(pedido.registos.some((r: { tipo: string }) => ["orcamento", "proposta", "contrato"].includes(r.tipo))).toBe(false);
+    expect(pedido.registos).toEqual(expect.arrayContaining([{ tipo: "contacto", id: "c1" }, { tipo: "visita", id: "v1" }]));
   });
 });
 
@@ -183,7 +182,7 @@ describe("NovoNegocioReal: gravar", () => {
       return (
         <>
           <button type="button" onClick={() => setAberto(true)}>reabrir</button>
-          <NovoNegocioReal pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={setAberto} />
+          <NovoNegocioReal pessoaId="a" pessoaNome="Ana" ficha={fichaDb()} aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={setAberto} />
         </>
       );
     }

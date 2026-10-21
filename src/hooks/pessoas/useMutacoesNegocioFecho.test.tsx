@@ -131,11 +131,13 @@ describe("mudarFecho: os erros, pelo código", () => {
     expect(invalidadas(client)).toEqual([true, true]);
   });
 
-  it("NG023 (ligar contrato a venda directa) traduz-se", async () => {
+  it("NG023 (ligar contrato a venda directa) traduz-se e refaz a ficha: o fecho que o ecrã mostra está desatualizado", async () => {
     rpcMock.mockReturnValue(respostaErro("NG023"));
-    const { result } = montar();
+    const { result, client } = montar();
+    semear(client);
     const erro = await erroDe(act(async () => { await result.current.mudarFecho?.(NEGOCIO, "proposta", false); }));
     expect(erro.chave).toBe("pessoasPagina.erroNeg.ng023");
+    expect(invalidadas(client)).toEqual([true, true]);
   });
 
   it("sem permissão (42501) traduz-se e não refaz nada", async () => {

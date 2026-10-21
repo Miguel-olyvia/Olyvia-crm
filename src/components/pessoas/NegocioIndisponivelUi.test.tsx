@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
 import { negocioBase } from "@/components/pessoas/fabricaTestes";
+import { fichaDb } from "@/hooks/pessoas/fichaFabrica";
 import { NovoNegocioReal } from "@/components/pessoas/NovoNegocioReal";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { ComCostura, dadosFalsos, erroNegFalso, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
@@ -13,6 +14,7 @@ import { PerderNegocioDialogo } from "@/components/negocio-metas/PerderNegocioDi
 import { MOTIVOS_PREDEFINIDOS } from "@/components/negocio-metas/workflowNegocio";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 const { erro } = vi.hoisted(() => ({ erro: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: erro, success: vi.fn() } }));
 
@@ -61,7 +63,7 @@ describe("NG001 ao perder (a casca partilhada dos diálogos de envio)", () => {
 describe("NG001 ao criar um negócio", () => {
   function Harness({ aoMudar }: { aoMudar: (a: boolean) => void }) {
     const [aberto, setAberto] = useState(true);
-    return <NovoNegocioReal pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={(v) => { aoMudar(v); setAberto(v); }} />;
+    return <NovoNegocioReal pessoaId="a" pessoaNome="Ana" ficha={fichaDb()} aberto={aberto} aoCriado={vi.fn()} aoMudarAberto={(v) => { aoMudar(v); setAberto(v); }} />;
   }
 
   it("fecha o painel e avisa por toast e por anúncio", async () => {

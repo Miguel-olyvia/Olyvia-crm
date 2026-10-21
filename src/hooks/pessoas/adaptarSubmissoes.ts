@@ -54,12 +54,19 @@ export interface ContextoSubmissoes {
   chavesDistrito: ReadonlySet<string>;
   distritoPorId: Readonly<Record<string, string>>;
   nomePorEntidade: Readonly<Record<string, string>>;
+  /**
+   * As chaves que o formulário declara como campo base da lead (`contact_field_mapping`), por campanha (`CHAVE_SEM_CAMPANHA` sem campanha): o mesmo critério
+   * com que Leads separa esses campos dos «Campos do Formulário». Sem isto nenhum campo conta como mapeado.
+   */
+  chavesMapeadasPorCampanha?: Readonly<Record<string, ReadonlySet<string>>>;
 }
 
 export interface CampoSubmissao {
   chave: string;
   rotulo: string;
   valor: string;
+  /** O formulário mapeia este campo para um campo base da lead (nome, email, telefone...). Ausente: campo sem mapeamento. */
+  mapeado?: true;
 }
 
 /** O que coincidiu com um registo que já existia (a razão de não ter criado lead nova). */
@@ -108,11 +115,12 @@ function valorEmTexto(valor: unknown): string {
 
 function camposDe(valores: CamposDb, campanhaId: string | null, ctx: ContextoSubmissoes): CampoSubmissao[] {
   const rotulos = ctx.rotulosPorCampanha[campanhaId ?? CHAVE_SEM_CAMPANHA] ?? {};
+  const mapeadas = ctx.chavesMapeadasPorCampanha?.[campanhaId ?? CHAVE_SEM_CAMPANHA];
   return Object.entries(valores ?? {})
     .filter(([chave]) => chave !== "_meta")
     .map(([chave, valor]) => {
       const bruto = ctx.chavesDistrito.has(chave) && typeof valor === "string" ? ctx.distritoPorId[valor] ?? valor : valor;
-      return { chave, rotulo: rotulos[chave] || humanizeFormFieldKey(chave), valor: valorEmTexto(bruto) };
+      return { chave, rotulo: rotulos[chave] || humanizeFormFieldKey(chave), valor: valorEmTexto(bruto), ...(mapeadas?.has(chave) ? { mapeado: true as const } : {}) };
     });
 }
 

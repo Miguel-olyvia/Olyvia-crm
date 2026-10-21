@@ -124,7 +124,7 @@ describe("RegistosLigadosNegocio na ficha real: ligar e desligar", () => {
   });
 });
 
-describe("RegistosLigadosNegocio na ficha real: documentos por ligar", () => {
+describe("RegistosLigadosNegocio na ficha real: documentos por ligar não se oferecem", () => {
   const documentosPorLigar: DadosNegocio["documentosPorLigar"] = [
     { tipo: "orcamento", id: "o1", numero: "O-1", temBase: true },
     { tipo: "proposta", id: "p1", numero: "P-3", temBase: true },
@@ -132,38 +132,11 @@ describe("RegistosLigadosNegocio na ficha real: documentos por ligar", () => {
     { tipo: "contrato", id: "k2", numero: "C-10", temBase: false },
   ];
 
-  it("lista os documentos antigos sem negócio, com «Ligar»", () => {
+  it("com documentos antigos sem negócio, não há secção nem botão «Ligar» para eles, mas os registos continuam a ligar-se", () => {
     mostrar(mutacoesFalsas(), { documentosPorLigar });
-    const secao = screen.getByRole("group", { name: "Documentos por ligar" });
-    expect(within(secao).getAllByRole("listitem")).toHaveLength(4);
-    expect(within(secao).getByRole("button", { name: "Ligar a este negócio: Orçamento O-1" })).toBeInTheDocument();
-    expect(within(secao).getByRole("button", { name: "Ligar a este negócio: Proposta P-3" })).toBeInTheDocument();
-  });
-
-  it("ligar um documento chama a base com o tipo certo", async () => {
-    const { mutacoes, anunciar } = mostrar(mutacoesFalsas(), { documentosPorLigar });
-    fireEvent.click(screen.getByRole("button", { name: "Ligar a este negócio: Proposta P-3" }));
-    expect(mutacoes.ligar).toHaveBeenCalledWith("n1", { tipo: "proposta", id: "p1" });
-    await waitFor(() => expect(anunciar).toHaveBeenCalledWith("Proposta P-3 ligado ao negócio."));
-  });
-
-  it("um contrato sem orçamento nem proposta (sem base) fica aria-disabled com a explicação visível e nunca chega à base", () => {
-    const { mutacoes } = mostrar(mutacoesFalsas(), { documentosPorLigar });
-    const botao = screen.getByRole("button", { name: "Ligar a este negócio: Contrato C-10" });
-    expect(botao).toHaveAttribute("aria-disabled", "true");
-    const explicacao = document.getElementById(botao.getAttribute("aria-describedby") ?? "");
-    expect(explicacao).toHaveTextContent("Este contrato não tem orçamento nem proposta: não se pode ligar.");
-    fireEvent.click(botao);
-    expect(mutacoes.ligar).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Ligar a este negócio: Contrato C-9" })).not.toHaveAttribute("aria-disabled");
-  });
-
-  it("sem documentos por ligar (ou num negócio terminado) a secção não existe", () => {
-    mostrar();
     expect(screen.queryByRole("group", { name: "Documentos por ligar" })).toBeNull();
-    cleanup();
-    mostrar(mutacoesFalsas(), { documentosPorLigar }, false);
-    expect(screen.queryByRole("group", { name: "Documentos por ligar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Orçamento O-1|Proposta P-3|Contrato C-9|Contrato C-10/ })).toBeNull();
+    expect(screen.getByRole("button", { name: `Ligar a este negócio: Contacto de ${data("2026-10-12")}` })).toBeInTheDocument();
   });
 });
 
@@ -186,15 +159,6 @@ describe("RegistosLigadosNegocio na ficha real: o foco depois de ligar ou deslig
     botao.focus();
     fireEvent.click(botao);
     await waitFor(() => expect(mutacoes.desligar).toHaveBeenCalledTimes(1));
-    await waitFor(noTitulo);
-  });
-
-  it("depois de ligar um documento por ligar o foco fica nesse título", async () => {
-    const { mutacoes } = mostrar(mutacoesFalsas(), { documentosPorLigar: [{ tipo: "proposta", id: "p1", numero: "P-3", temBase: true }] });
-    const botao = screen.getByRole("button", { name: "Ligar a este negócio: Proposta P-3" });
-    botao.focus();
-    fireEvent.click(botao);
-    await waitFor(() => expect(mutacoes.ligar).toHaveBeenCalledTimes(1));
     await waitFor(noTitulo);
   });
 

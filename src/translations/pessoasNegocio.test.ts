@@ -16,10 +16,13 @@ const CHAVES_USADAS = [
   "win.done.feita", "win.done.ja_cliente", "win.done.ja_convertida", "win.done.generic", "win.done.already",
   "win.blocked.naoAberto", "win.blocked.semProposta", "win.blocked.semContrato", "win.blocked.semRegra",
   "lead.option", "lead.option.closed",
-  "link.surveyLocked", "link.docs.title", "link.docs.hint", "link.docs.noBase", "doc.what", "doc.kind.orcamento", "doc.kind.proposta", "doc.kind.contrato",
+  "link.surveyLocked",
   "create.description", "create.name", "create.name.hint", "create.name.error", "create.notes", "create.lead", "create.reopen", "create.reopen.hint",
-  "create.reopen.error", "create.docs.title", "create.docs.hint", "create.records.noPermission", "create.cancel", "create.submit", "create.done",
+  "create.reopen.error","create.records.noPermission", "create.cancel", "create.submit", "create.done",
   "create.refused.one", "create.refused.many",
+  "create.partial", "create.partial.closed", "create.closeCreated", "create.tab.visit", "create.tab.visit.count", "create.tab.visit.count.one", "create.tab.survey",
+  "create.calls.title", "create.calls.hint", "create.visits.link.title", "create.visits.link.hint", "create.visits.link.none", "create.visits.new.title",
+  "create.survey.title",
   "process.quote.title", "process.quote.linked", "process.quote.notLinked", "process.proposal.linked", "process.proposal.notLinked",
   "process.contract.linked", "process.contract.notLinked", "process.quotes.preset.error", "contract.presetMissing", "process.open.orcamento", "process.open.proposta", "process.open.contrato",
   "back.label", "back.link",
@@ -60,9 +63,9 @@ describe("traduções do negócio na ficha real", () => {
     expect(marcas(pt[`${N}win.description`])).toEqual(["{name}", "{work}"]);
     expect(marcas(pt[`${N}win.otherLeads.many`])).toEqual(["{count}"]);
     expect(marcas(pt[`${N}lead.option`])).toEqual(["{date}"]);
-    expect(marcas(pt[`${N}doc.what`])).toEqual(["{kind}", "{number}"]);
     expect(marcas(pt[`${N}create.done`])).toEqual(["{name}", "{title}"]);
     expect(marcas(pt[`${N}create.refused.many`])).toEqual(["{count}"]);
+    expect(marcas(pt[`${N}create.tab.visit.count`])).toEqual(["{n}"]);
     expect(marcas(pt[`${N}process.quote.title`])).toEqual(["{name}"]);
   });
 

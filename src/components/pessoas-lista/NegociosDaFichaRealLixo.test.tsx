@@ -11,6 +11,7 @@ import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFonte
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 const { atual } = vi.hoisted(() => ({ atual: { mutacoes: null as unknown } }));
 vi.mock("@/hooks/pessoas/useMutacoesNegocio", () => ({ useMutacoesNegocio: () => atual.mutacoes }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));

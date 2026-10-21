@@ -17,6 +17,7 @@ vi.mock("@/hooks/useTranslation", async () => {
 });
 
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => true }) }));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
 const renderPage = (endereco = "/pessoas") =>
   render(
@@ -64,7 +65,7 @@ describe("Pessoas: arranque da ficha", () => {
     expect(within(ficha).getByRole("list", { name: "Percurso da lead" })).toBeInTheDocument();
     const chamada = within(ficha).getByRole("button", { name: /Registar chamada/ });
     expect(chamada).toHaveAttribute("aria-expanded", "false");
-    for (const titulo of ["Próximo passo e prazo", "Contacto", "Origem", "Sobre a pessoa"]) {
+    for (const titulo of ["Próximo passo e prazo", "Contacto", "Lead"]) {
       expect(within(ficha).getByRole("heading", { name: titulo })).toBeInTheDocument();
     }
     expect(within(ficha).getByText(/Lead · Negócio · Proposta · Setúbal/)).toBeInTheDocument();
@@ -106,8 +107,8 @@ describe("Pessoas: Registar chamada é uma vista da ficha", () => {
 
     expect(within(ficha).queryByRole("heading", { name: "Registar chamada", level: 3 })).not.toBeInTheDocument();
     expect(within(ficha).getByRole("button", { name: /Registar chamada/ })).toHaveAttribute("aria-expanded", "false");
-    // A visita passa a ver-se no bloco «Visitas», com a morada da lead (igual); o passo remete para ele.
-    const visita = within(ficha).getByRole("heading", { name: "Visitas" }).closest("section")!;
+    // A visita passa a ver-se no bloco «Próxima visita», com a morada da lead (igual); o passo remete para ele.
+    const visita = within(ficha).getByRole("heading", { name: "Próxima visita" }).closest("section")!;
     expect(within(visita).getByText("sexta-feira, 16/10/2026 · 09:30")).toBeInTheDocument();
     expect(within(visita).getByText("Igual à da lead")).toBeInTheDocument();
     fireEvent.mouseDown(within(ficha).getByRole("tab", { name: /Atividade/ }), { button: 0, ctrlKey: false });

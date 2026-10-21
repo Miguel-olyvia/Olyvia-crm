@@ -26,6 +26,8 @@ export async function lerFechos(organizationId: string, ids: readonly string[]):
       const fecho = fechoDe(l?.fecho);
       if (typeof l?.id === "string" && fecho) mapa.set(l.id, fecho);
     }
+    // Linhas em falta (a RLS escondeu-as) ou com um tipo desconhecido: o negócio fica sem tipo, e isso fica observável em vez de silencioso.
+    if (mapa.size < ids.length) captureFlowError(new Error(`lerFechos: ${mapa.size} de ${ids.length} negócios com tipo de fecho válido`), "pessoas-neg");
     return mapa;
   } catch (falha) {
     captureFlowError(falha, "pessoas-neg");

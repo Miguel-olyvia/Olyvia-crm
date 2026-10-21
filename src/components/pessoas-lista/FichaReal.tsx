@@ -102,14 +102,15 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   const submissoes = useSubmissoesPessoa(pessoaId);
   const { recarregar: recarregarSubmissoes } = submissoes;
   const hojeDaFicha = adaptada?.hoje ?? hojeLisboa();
+  const campanhaDaLead = adaptada?.resumo.pessoa.campanha;
   const separadorSubmissoes = useMemo<SeparadorSubmissoesReal>(() => ({
     total: submissoes.estado === "ok" ? submissoes.submissoes.length : null,
     pendentes: submissoes.pendentes,
     conteudo: <SubmissoesFichaReal
       submissoes={submissoes.submissoes} estado={submissoes.estado} desatualizado={submissoes.desatualizado} hoje={hojeDaFicha}
-      aoTentarDeNovo={recarregarSubmissoes}
+      campanhaDaLead={campanhaDaLead} aoTentarDeNovo={recarregarSubmissoes}
     />,
-  }), [submissoes.estado, submissoes.submissoes, submissoes.desatualizado, submissoes.pendentes, hojeDaFicha, recarregarSubmissoes]);
+  }), [submissoes.estado, submissoes.submissoes, submissoes.desatualizado, submissoes.pendentes, hojeDaFicha, campanhaDaLead, recarregarSubmissoes]);
   const { guardar: guardarIdentidade } = useGuardarIdentidadePessoa(mostrada?.pessoa.id ?? "");
   const { classificar } = useQualificarLeadPessoa(mostrada?.pessoa.id ?? "", mostrada?.pessoa.lead_id ?? "");
   const identidade = mostrada ? (

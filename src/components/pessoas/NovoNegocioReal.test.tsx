@@ -11,9 +11,11 @@ import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio
 import { repor } from "@/components/negocio-metas/registosPessoa";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { contactoBase, levantamentoBase, registosBase, visitaPessoaBase } from "./fabricaTestes";
+import { fichaDb } from "@/hooks/pessoas/fichaFabrica";
 import { NovoNegocioReal } from "./NovoNegocioReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 const { sucesso, info } = vi.hoisted(() => ({ sucesso: vi.fn(), info: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast: { info, error: vi.fn(), success: sucesso } }));
 
@@ -35,7 +37,7 @@ function Harness(p: { aoCriado?: (id: string) => void; aoMudar?: (a: boolean) =>
   const [aberto, setAberto] = useState(true);
   return (
     <NovoNegocioReal
-      pessoaId="a" pessoaNome="Ana" aberto={aberto} aoCriado={p.aoCriado ?? vi.fn()}
+      pessoaId="a" pessoaNome="Ana" ficha={fichaDb()} aberto={aberto} aoCriado={p.aoCriado ?? vi.fn()}
       aoMudarAberto={(v) => { p.aoMudar?.(v); setAberto(v); }}
     />
   );
@@ -122,21 +124,32 @@ describe("NovoNegocioReal: criar", () => {
     expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({ registos: [{ tipo: "contacto", id: "c1" }, { tipo: "visita", id: "v1" }], levantamentoId: null }));
   });
 
-  it("desmarcar um registo (e dispensar o levantamento) tira-o do pedido; um registo já ligado a outro negócio nem se oferece", () => {
+  it("desmarcar uma chamada (e dispensar o levantamento) tira-a do pedido; uma chamada já ligada a outro negócio nem se oferece", () => {
     const { mutacoes } = montar();
     escrever("Sala");
-    aba("Registos");
-    expect(screen.queryByRole("checkbox", { name: /12 de outubro/ })).toBeNull();
-    fireEvent.click(screen.getAllByRole("checkbox")[0]);
-    fireEvent.click(screen.getByRole("radio", { name: /Não fazer levantamento|Dispensar|sem levantamento/i }));
+    // As chamadas por ligar estão na aba Geral: a de 12 de outubro é de outro negócio e não aparece.
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Chamada de/ }));
+    aba("Levantamento");
+    fireEvent.click(screen.getByRole("radio", { name: /Dispensar/ }));
     fireEvent.click(criar());
     expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({ registos: [{ tipo: "visita", id: "v1" }], levantamentoId: null }));
   });
 
-  it("não oferece «fazer um levantamento novo»: é do P5, e a base não o cria daqui", () => {
+  it("desmarcar a visita por ligar, na aba Visita, tira-a do pedido", () => {
+    const { mutacoes } = montar();
+    escrever("Sala");
+    aba("Visita");
+    fireEvent.click(screen.getByRole("checkbox", { name: /Visita de/ }));
+    fireEvent.click(criar());
+    expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({ registos: [{ tipo: "contacto", id: "c1" }] }));
+  });
+
+  it("já não há aba Registos: há Geral, Visita e Levantamento, e a aba Levantamento oferece «Fazer um novo»", () => {
     montar();
-    aba("Registos");
-    expect(screen.queryByRole("radio", { name: /fazer um levantamento novo|Fazer um novo/i })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /^Registos/ })).toBeNull();
+    expect(screen.getByRole("tab", { name: /^Visita/ })).toBeInTheDocument();
+    aba("Levantamento");
+    expect(screen.getByRole("radio", { name: "Fazer um novo" })).toBeInTheDocument();
   });
 
   it("sem registos por ligar o negócio nasce sem registos e sem levantamento", () => {
@@ -148,7 +161,7 @@ describe("NovoNegocioReal: criar", () => {
 
   it("sem permissão para editar (pessoas.edit) não há aba de registos e o negócio nasce vazio", () => {
     const { mutacoes } = montar(mutacoesFalsas(), { podeEditar: false });
-    expect(screen.queryByRole("tab", { name: /^Registos/ })).toBeNull();
+    expect(screen.queryByRole("tab", { name: /^(Registos|Visita|Levantamento)/ })).toBeNull();
     escrever("Sala");
     fireEvent.click(criar());
     expect(mutacoes.criar).toHaveBeenCalledWith(expect.objectContaining({ registos: [], levantamentoId: null }));
