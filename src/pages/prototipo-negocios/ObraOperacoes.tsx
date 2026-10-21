@@ -1,13 +1,14 @@
 // As Operações no V1 (15/10/2026, refeitas): a lista de obras e a página da obra, com muito mais detalhe e tudo guiado.
 // · Lista: por estado (por arrancar, em curso, concluídas), com a fase, o progresso, a equipa, o próximo marco e os alertas.
 // · Página da obra: o que fazer agora (um primário), o plano por dia (com os ajustes das Operações antes de arrancar e o estado
-//   de cada tarefa ao vivo), hoje na obra (a app do técnico, simulada: horas, fotografia, "Marcar como feita"), por validar
-//   (o supervisor valida ou pede correção), a equipa, os equipamentos, os materiais por fase, o diário, a segurança e os custos.
+//   de cada tarefa ao vivo), o acompanhamento (21/10: o gestor vê tudo, dia a dia, para trás e para a frente; o técnico faz
+//   tudo pelo Hoje dele, HojeTecnico.tsx), por validar (o supervisor valida ou pede correção), os ajustes ao plano com a obra
+//   em curso (com aviso ao cliente), a equipa, os equipamentos, os materiais por fase, o diário, a segurança e os custos.
 // O ciclo da tarefa é o da app das obras (operacao-app), muito mais simples: um toque de cada vez.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Circle, ClipboardCheck, Clock, FileWarning, HardHat, ImagePlus,
-  MapPin, Minus, NotebookPen, Phone, Plus, RotateCcw, ShieldCheck, Store, Truck, Wrench, X,
+  AlertTriangle, ArrowLeft, ArrowRight, CalendarClock, Camera, Check, CheckCircle2, Circle, ClipboardCheck, Clock, FileWarning, HardHat,
+  MapPin, Minus, NotebookPen, Phone, Plus, RotateCcw, ShieldCheck, Smartphone, Store, Truck, Wrench, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,8 @@ import { ViaturasObra } from "./frota/ViaturasObra";
 import { ProximoRececaoNegocio } from "./RececaoNegocio";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
+import { DiaDaObra, FitaDias, HistoricoTarefa, Miniaturas, nomeTec } from "./AcompanhamentoObra";
+import { MOTIVOS_AJUSTE, duracaoMinima, enviosDe, inicioMinimoVivo, podeAjustar, preverAjuste, registouNoDia, textoAvisoCliente } from "./trabalhoObra";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "plano por aprovar", aprovado: "pronta a arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -70,7 +73,7 @@ function ChipExec({ e }: { e: EstadoExec }) {
 }
 
 /** Reduz uma fotografia a 480 px (dataURL JPEG pequeno, para caber no estado do protótipo). */
-function lerFoto(f: File): Promise<string> {
+export function lerFoto(f: File): Promise<string> {
   return new Promise((ok, falha) => {
     const r = new FileReader();
     r.onerror = () => falha(r.error);
@@ -184,6 +187,9 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const tarde = entregaTarde(d, db);
   const muda = pode && (p.estado === "por aprovar" || p.estado === "aprovado");
   const [aberta, setAberta] = useState<number | null>(null);
+  // 21/10: o dia que o gestor está a ver (para trás ou para a frente); acompanha o "hoje" do plano
+  const [sel, setSel] = useState(p.dia);
+  useEffect(() => { setSel(p.dia); }, [p.dia]);
   const irPara = (s: Seccao) => document.getElementById(`obra-${s}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   let frase = "", botao: ReactNode = null;
@@ -204,7 +210,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   } else frase = d.obra.auto?.estado === "assinado" ? "Obra concluída e recebida pelo cliente." : d.obra.auto ? "Obra concluída. O auto de receção está no portal do cliente, para assinar." : "Obra concluída.";
 
   const secoes: [Seccao, string, boolean][] = [
-    ["plano", "Plano", true], ["hoje", "Hoje na obra", p.estado === "em curso"], ["validar", "Por validar", p.estado === "em curso"],
+    ["plano", "Plano", true], ["hoje", "Acompanhamento", p.estado === "em curso"], ["validar", "Por validar", p.estado === "em curso"],
     ["equipa", "Equipa", true], ["equip", "Equipamentos", true], ["mat", "Materiais", true], ["diario", "Diário", true],
     ["seg", "Segurança", true], ["custos", "Custos", direcao || pode],
   ];
@@ -283,8 +289,8 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         ))}
       </nav>
 
-      <PlanoGantt ctx={ctx} d={d} aberta={aberta} setAberta={setAberta} muda={muda} />
-      {p.estado === "em curso" && <HojeNaObra ctx={ctx} d={d} />}
+      <PlanoGantt ctx={ctx} d={d} aberta={aberta} setAberta={setAberta} muda={muda} sel={p.estado === "em curso" ? sel : null} setSel={p.estado === "em curso" ? (k) => { setSel(k); irPara("hoje"); } : undefined} />
+      {p.estado === "em curso" && <Acompanhamento ctx={ctx} d={d} sel={sel} setSel={setSel} ajustar={(ti) => { setAberta(ti); irPara("plano"); }} />}
       {p.estado === "em curso" && <PorValidar ctx={ctx} d={d} />}
       <EquipaObra d={d} direcao={direcao} />
       <EquipamentosObra d={d} />
@@ -298,8 +304,10 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ o plano por dia (Gantt), com os ajustes e o estado ao vivo */
-function PlanoGantt({ ctx, d, aberta, setAberta, muda }: { ctx: Ctx; d: Negocio; aberta: number | null; setAberta: (i: number | null) => void; muda: boolean }) {
-  const { A, run } = ctx;
+function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx; d: Negocio; aberta: number | null; setAberta: (i: number | null) => void; muda: boolean; sel?: number | null; setSel?: (k: number) => void }) {
+  const { S, A, run } = ctx;
+  // 21/10: com a obra em curso, as Operações ajustam ao vivo (AjustarAoVivo), com o motivo e o aviso ao cliente
+  const vivo = d.obra.plano!.estado === "em curso" && S.role === "operacoes";
   const p = d.obra.plano!, C = conflitos(p), novo = p.origem === "orcamento";
   const fim = Math.max(1, fimDe(p.tasks)), nd = fim;
   const caixa = useRef<HTMLDivElement>(null);
@@ -353,6 +361,8 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda }: { ctx: Ctx; d: Negocio;
         </div>
       )}
 
+      {vivo && <p className={cn(NOTA, "mt-1")}>Obra em curso: toque numa tarefa para a ajustar (dias, início ou técnico) e avisar o cliente. Toque num dia para o ver no acompanhamento.</p>}
+      <AjustesFeitos d={d} />
       <div ref={caixa} className={cn(CARTAO, "mt-4 overflow-x-auto")}>
         <div className="relative" style={{ width: gradeW + 2 * PAD, paddingLeft: PAD, paddingRight: PAD }}>
           {/* os dias úteis; hoje marcado */}
@@ -360,7 +370,8 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda }: { ctx: Ctx; d: Negocio;
             {Array.from({ length: nd }, (_, k) => {
               const [ds, dn] = rotuloDia(p, k).replace(",", "").split(" ");
               return (
-                <div key={k} className={cn("absolute bottom-0 top-0 pt-1.5 text-center", hoje === k && "rounded-t-lg bg-primary/10")} style={{ left: X(k), width: colW }}>
+                <div key={k} onClick={setSel ? () => setSel(k) : undefined} title={setSel ? `Ver ${rotuloDia(p, k)} no acompanhamento` : undefined}
+                  className={cn("absolute bottom-0 top-0 pt-1.5 text-center", hoje === k && "rounded-t-lg bg-primary/10", setSel && "cursor-pointer rounded-t-lg hover:bg-muted", sel != null && sel === k && sel !== hoje && "rounded-t-lg ring-2 ring-inset ring-primary/50")} style={{ left: X(k), width: colW }}>
                   <span className={cn("block text-[11px] leading-4", hoje === k ? "font-semibold text-primary" : "text-muted-foreground")}>{hoje === k ? "hoje" : ds}</span>
                   <span className="block text-sm font-medium tabular-nums leading-5">{dn}</span>
                 </div>
@@ -417,7 +428,9 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda }: { ctx: Ctx; d: Negocio;
 
       {aberta != null && p.tasks[aberta] && (
         <div ref={painel} className="mt-4 scroll-mt-20">
-          {muda ? <AjustarTarefa ctx={ctx} d={d} ti={aberta} fechar={() => setAberta(null)} /> : <DetalheTarefaObra ctx={ctx} d={d} ti={aberta} fechar={() => setAberta(null)} />}
+          {muda ? <AjustarTarefa ctx={ctx} d={d} ti={aberta} fechar={() => setAberta(null)} />
+            : vivo && podeAjustar(p, aberta).dur ? <AjustarAoVivo ctx={ctx} d={d} ti={aberta} fechar={() => setAberta(null)} />
+            : <DetalheTarefaObra ctx={ctx} d={d} ti={aberta} fechar={() => setAberta(null)} />}
         </div>
       )}
     </section>
@@ -495,7 +508,7 @@ function DetalheTarefaObra({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: n
 }
 
 /** O que o técnico registou (horas, fotografias, nota) e, se está feita, validar ou pedir correção. */
-function Registo({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
+function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; compacto?: boolean }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), pode = S.role === "operacoes";
   const [motivo, setMotivo] = useState<string | null>(null);
@@ -508,12 +521,8 @@ function Registo({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
         {t.exec?.feita && <span className="text-muted-foreground">feita {t.exec.feita}</span>}
       </div>
       {t.exec?.motivo && ex === "corrigir" && <p className="rounded-lg bg-destructive/[0.06] px-3 py-2 text-[15px]"><b className="font-medium">Correção pedida:</b> {t.exec.motivo}</p>}
-      {!!t.exec?.fotos.length && (
-        <ul className="flex flex-wrap gap-2" aria-label="Fotografias">
-          {t.exec.fotos.map((f, k) => <li key={k}><img src={f} alt={`Fotografia ${k + 1} de ${t.nome}`} className="h-24 w-32 rounded-lg border border-border object-cover" /></li>)}
-        </ul>
-      )}
-      {t.exec?.nota && <p className="text-[15px] text-muted-foreground">«{t.exec.nota}»</p>}
+      {!compacto && !!t.exec?.fotos.length && <Miniaturas fotos={t.exec.fotos} tam="h-24 w-32" />}
+      {!compacto && t.exec?.nota && <p className="text-[15px] text-muted-foreground">«{t.exec.nota}»</p>}
       {ex === "feita" && (pode ? (
         motivo == null ? (
           <div className="flex flex-wrap gap-2">
@@ -542,108 +551,209 @@ function Registo({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   );
 }
 
-/* ------------------------------------------------------------------ hoje na obra: a app do técnico (simulada) */
-function HojeNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const { A, run } = ctx;
-  const p = d.obra.plano!, fim = fimDe(p.tasks);
-  const hojeIdx = tarefasDoDia(p, p.dia);
-  const tecs = [...new Set(hojeIdx.map((i) => p.tasks[i].tec).filter(Boolean) as string[])];
-  const [quem, setQuem] = useState<string | null>(tecs[0] ?? null);
-  const ativo = quem && tecs.includes(quem) ? quem : tecs[0] ?? null;
-  const minhas = ativo ? tarefasDoDia(p, p.dia, ativo) : [];
+/* ------------------------------------------------------------------ 21/10: o acompanhamento (o gestor vê tudo aqui; o técnico faz pelo Hoje dele) */
+function Indicador({ rot, valor, sub, tom, barra }: { rot: string; valor: ReactNode; sub?: ReactNode; tom?: "ok" | "aviso"; barra?: number }) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]">
+      <p className="text-sm text-muted-foreground">{rot}</p>
+      <p className={cn("mt-0.5 text-2xl font-semibold tabular-nums tracking-tight", tom === "aviso" && "text-warning", tom === "ok" && "text-success")}>{valor}</p>
+      {barra != null && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary transition-[width] duration-700" style={{ width: `${Math.round(barra * 100)}%` }} /></div>}
+      {sub && <p className="mt-1 text-sm text-muted-foreground">{sub}</p>}
+    </div>
+  );
+}
+
+function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio; sel: number; setSel: (k: number) => void; ajustar: (ti: number) => void }) {
+  const { S, A, run, go } = ctx;
+  const p = d.obra.plano!, fim = fimDe(p.tasks), pode = S.role === "operacoes";
+  const [hist, setHist] = useState<number | null>(null);
+  const prog = progresso(p);
+  // as horas previstas até ao fim de hoje (os dias já passados de cada tarefa, com hoje)
+  const ate = p.tasks.reduce((a, t) => a + (t.h / t.dur) * Math.max(0, Math.min(t.dur, p.dia + 1 - t.dia)), 0);
+  const reg = p.tasks.reduce((a, t) => a + (t.exec?.horas ?? 0), 0);
+  const val = p.tasks.filter((t) => estadoDe(t) === "validada").length;
+  const D = diferencas(p);
+  const hojeTs = p.tasks.filter((t) => t.dia <= p.dia && p.dia < t.dia + t.dur && estadoDe(t) !== "validada");
+  const tecsHoje = [...new Set(hojeTs.map((t) => t.tec).filter(Boolean) as string[])];
+  const jaReg = tecsHoje.filter((id) => hojeTs.some((t) => t.tec === id && (registouNoDia(t, p.dia) || estadoDe(t) === "feita")));
+  // o que precisa do gestor, por ordem
+  const alertas: { t: string; tom: "aviso" | "mau"; ir?: () => void }[] = [];
+  p.tasks.forEach((t, i) => {
+    if (estadoDe(t) === "feita") alertas.push({ t: `${t.nome}: ${nomeTec(t.tec).split(" ")[0]} terminou, falta validar`, tom: "aviso", ir: () => { setSel(enviosDe(t).at(-1)?.dia ?? p.dia); setHist(i); } });
+    if (estadoDe(t) === "corrigir") alertas.push({ t: `${t.nome}: correção pedida, à espera do técnico`, tom: "mau" });
+    for (let k = t.dia; k < Math.min(p.dia, t.dia + t.dur); k++)
+      if (!registouNoDia(t, k) && estadoDe(t) !== "validada" && estadoDe(t) !== "feita") alertas.push({ t: `${t.nome}: sem registo a ${rotuloDia(p, k)}`, tom: "aviso", ir: () => setSel(k) });
+  });
+  for (const x of (d.obra.diario ?? []).filter((x) => x.k === "ocorrencia" && x.q.startsWith("hoje")).slice(-3)) alertas.push({ t: `${x.quem.split(" ")[0]} reportou: ${x.t}`, tom: "mau" });
+  const verComo = (tec: string | null) => go(() => { if (tec) A.souTec(tec); A.role("tecnico"); A.nav("hoje"); });
+
   return (
     <section id="obra-hoje" aria-labelledby="obra-hoje-t" className="mt-10 scroll-mt-16">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 id="obra-hoje-t" className={H2}>Hoje na obra <span className="font-normal text-muted-foreground">· dia {p.dia + 1} de {fim}, {rotuloDia(p, p.dia)}</span></h2>
-        <Button variant="ghost" className="min-h-10 px-2 text-[15px] text-muted-foreground" onClick={() => run(() => A.diaSeguinte(d.id))}>Passar ao dia seguinte<ArrowRight className="ml-1 h-4 w-4" /></Button>
+        <h2 id="obra-hoje-t" className={H2}>Acompanhamento <span className="font-normal text-muted-foreground">· ao vivo</span></h2>
+        <span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><span className="relative flex h-2.5 w-2.5" aria-hidden="true"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" /></span>Os registos dos técnicos chegam aqui</span>
       </div>
-      <p className={cn(NOTA, "mt-1")}>A app do técnico, simulada: escolha quem está na obra e registe como ele faria no telemóvel.</p>
-      {!tecs.length ? <p className={cn(NOTA, "mt-4")}>Hoje não há tarefas por fazer. Passe ao dia seguinte ou registe o fim da obra.</p> : (
-        <>
-          <div role="group" aria-label="Quem está na obra" className="mt-3 flex flex-wrap gap-2">
-            {tecs.map((id) => {
-              const n = TECS.find((x) => x.id === id)?.n ?? id, k = tarefasDoDia(p, p.dia, id).length;
-              return (
-                <button key={id} type="button" aria-pressed={ativo === id} onClick={() => setQuem(id)}
-                  className={cn("flex min-h-11 items-center gap-2 rounded-full border py-1 pl-1 pr-4 text-[15px] transition-colors", ativo === id ? "border-primary bg-primary/[0.06] font-medium" : "border-input bg-card hover:border-foreground/40")}>
-                  <Avatar id={id} n={n} tam="h-8 w-8" />{n}<span className="text-sm text-muted-foreground">· {k}</span>
-                </button>
-              );
-            })}
-          </div>
-          <ul className="mt-4 space-y-3">{minhas.map((i) => <li key={i}><TarefaTecnico ctx={ctx} d={d} ti={i} /></li>)}</ul>
-        </>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Indicador rot="Obra feita" valor={`${Math.round(prog * 100)}%`} barra={prog} sub={`${val} de ${p.tasks.length} tarefas validadas`} />
+        <Indicador rot="Horas registadas" valor={`${nfmt(reg)} h`} tom={reg > ate * 1.1 && ate > 0 ? "aviso" : undefined} sub={`previstas até hoje: ${nfmt(Math.round(ate * 10) / 10)} h`} />
+        <Indicador rot="Acaba a" valor={rotuloDia(p, fim - 1)} tom={D.dias > 0 ? "aviso" : D.dias < 0 ? "ok" : undefined} sub={D.dias ? `${D.dias > 0 ? "+" : "−"}${dias(Math.abs(D.dias))} face ao orçamento` : "como no orçamento"} />
+        <Indicador rot="Registos de hoje" valor={`${jaReg.length} de ${tecsHoje.length}`} tom={tecsHoje.length && jaReg.length === tecsHoje.length ? "ok" : undefined}
+          sub={tecsHoje.length ? (jaReg.length === tecsHoje.length ? "toda a equipa registou" : `falta ${tecsHoje.filter((x) => !jaReg.includes(x)).map((x) => nomeTec(x).split(" ")[0]).join(", ")}`) : "ninguém na obra hoje"} />
+      </div>
+
+      {alertas.length > 0 && (
+        <ul className="mt-4 space-y-2" aria-label="Precisa de si">
+          {alertas.slice(0, 5).map((a, k) => (
+            <li key={k} className={cn("flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[15px]", a.tom === "mau" ? "border-destructive/30 bg-destructive/[0.05]" : "border-warning/40 bg-warning/[0.07]")}>
+              <span className="flex min-w-0 items-start gap-2"><AlertTriangle className={cn("mt-0.5 h-4 w-4 shrink-0", a.tom === "mau" ? "text-destructive" : "text-warning")} aria-hidden="true" />{a.t}</span>
+              {a.ir && <button type="button" onClick={a.ir} className="min-h-9 text-sm font-medium text-primary underline-offset-4 hover:underline">Ver</button>}
+            </li>
+          ))}
+        </ul>
       )}
+
+      {/* hoje: o relógio do protótipo, para a frente e para trás */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-muted/60 px-4 py-3">
+        <p className="text-[15px]"><b className="font-semibold">Hoje é o dia {p.dia + 1} de {fim}</b> <span className="text-muted-foreground">· {rotuloDia(p, p.dia)} · o protótipo não tem relógio</span></p>
+        {pode ? (
+          <div className="flex gap-2">
+            <Button variant="outline" className="min-h-10" disabled={p.dia <= 0} onClick={() => run(() => A.irParaDia(d.id, p.dia - 1))}><ArrowLeft className="mr-1 h-4 w-4" aria-hidden="true" />Recuar um dia</Button>
+            <Button variant="outline" className="min-h-10" disabled={p.dia >= fim - 1} onClick={() => run(() => A.irParaDia(d.id, p.dia + 1))}>Avançar um dia<ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" /></Button>
+          </div>
+        ) : <Mudar ctx={ctx} papel="operacoes" />}
+      </div>
+
+      <div className="mt-4"><FitaDias p={p} sel={sel} setSel={setSel} /></div>
+      {sel !== p.dia && <button type="button" onClick={() => setSel(p.dia)} className="mt-2 min-h-9 text-sm font-medium text-primary underline-offset-4 hover:underline">Voltar a hoje</button>}
+
+      <div className="mt-4">
+        <DiaDaObra p={p} dia={sel} modo="gestor" acoes={(ti) => {
+          const t = p.tasks[ti], ex = estadoDe(t), aberto = hist === ti, aj = podeAjustar(p, ti);
+          return (
+            <>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2">
+                <button type="button" onClick={() => setHist(aberto ? null : ti)} aria-expanded={aberto} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
+                  {aberto ? "Fechar" : ex === "feita" ? "Rever e validar" : `Histórico (${enviosDe(t).length})`}
+                </button>
+                {pode && (aj.dur || aj.inicio) && <button type="button" onClick={() => ajustar(ti)} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"><CalendarClock className="h-4 w-4" aria-hidden="true" />Ajustar o plano</button>}
+                {t.tec && <button type="button" onClick={verComo(t.tec)} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><Smartphone className="h-4 w-4" aria-hidden="true" />Ver como {nomeTec(t.tec).split(" ")[0]}</button>}
+              </div>
+              {aberto && (
+                <div className="mt-3 space-y-4 animate-in fade-in-0 slide-in-from-top-1">
+                  <HistoricoTarefa t={t} p={p} />
+                  {ex === "feita" && <Registo ctx={ctx} d={d} ti={ti} compacto />}
+                </div>
+              )}
+            </>
+          );
+        }} />
+      </div>
     </section>
   );
 }
 
-/** Uma tarefa na app do técnico: começar → horas → fotografia → nota → marcar como feita. Um passo de cada vez. */
-function TarefaTecnico({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
+/** 21/10: ajustar o plano com a obra em curso. Muda-se um rascunho, vê-se o efeito (o fim da obra, o que mexe, o aviso ao cliente) e aplica-se. */
+function AjustarAoVivo({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: number; fechar: () => void }) {
   const { A, run } = ctx;
-  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t);
-  const input = useRef<HTMLInputElement>(null);
-  const [nota, setNota] = useState(t.exec?.nota ?? "");
-  const F = faltaParaFeita(t);
-  // as horas sugeridas, ao meio dia (o registo anda de meia em meia hora)
-  const meia = (h: number) => Math.max(0.5, Math.round(h * 2) / 2);
-  const sugeridas = meia(t.dur > 1 ? t.h : t.h / Math.max(1, t.dur));
-  const juntarFoto = async (f?: File | null) => { if (!f) return; try { const u = await lerFoto(f); run(() => A.registarTarefa(d.id, ti, { foto: u })); } catch { /* sem leitura: fica sem foto */ } };
-  const cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
+  const p = d.obra.plano!, t = p.tasks[ti], P = podeAjustar(p, ti);
+  const [dur, setDur] = useState(t.dur), [dia, setDia] = useState(t.dia), [tec, setTec] = useState(t.tec ?? "");
+  const [motivo, setMotivo] = useState(""), [cliente, setCliente] = useState(true);
+  useEffect(() => { setDur(t.dur); setDia(t.dia); setTec(t.tec ?? ""); setMotivo(""); }, [ti, t.dur, t.dia, t.tec]);
+  const m = { dur: dur !== t.dur ? dur : undefined, dia: dia !== t.dia ? dia : undefined, tec: tec && tec !== t.tec ? tec : undefined };
+  const prev = preverAjuste(p, ti, m), muda = !!prev.texto;
+  const fimA = rotuloDia(p, prev.fimAntes - 1), delta = prev.fimDepois - prev.fimAntes;
+  const fimD = delta ? rotuloDia(p, prev.fimDepois - 1) : fimA;
+  const minDur = duracaoMinima(p, ti), minDia = inicioMinimoVivo(p, ti);
   return (
-    <article className={cn(CARTAO, "p-4 sm:p-5")} aria-label={t.nome}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
+    <section aria-label={`Ajustar ${t.nome}`} className={cn(CARTAO, "border-primary/40 p-4 ring-1 ring-primary/20 animate-in fade-in-0 slide-in-from-top-1 duration-200 sm:p-5")}>
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
+          <p className="text-sm font-medium text-primary">Ajustar com a obra em curso</p>
           <p className="text-base font-semibold">{t.nome}</p>
-          <p className={NOTA}>Previstas {nfmt(t.h)} h{t.dur > 1 ? ` em ${dias(t.dur)}` : ""}{t.nota ? ` · ${t.nota}` : ""}</p>
+          <p className={NOTA}>{nomeTec(t.tec)} · {rotuloDia(p, t.dia)}{t.dur > 1 ? ` a ${rotuloDia(p, t.dia + t.dur - 1)}` : ""}</p>
         </div>
-        <ChipExec e={ex} />
+        <button type="button" onClick={fechar} aria-label="Fechar" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg hover:bg-muted"><X className="h-5 w-5" /></button>
       </div>
-      {ex === "corrigir" && t.exec?.motivo && <p className="mt-3 rounded-lg bg-destructive/[0.06] px-3 py-2 text-[15px]"><b className="font-medium">O responsável pediu:</b> {t.exec.motivo}</p>}
-
-      {ex === "por fazer" && (
-        <div className="mt-4"><Button className="min-h-11 w-full sm:w-auto" onClick={() => run(() => A.comecarTarefa(d.id, ti))}><HardHat className="mr-1.5 h-4 w-4" aria-hidden="true" />Começar</Button></div>
-      )}
-
-      {(ex === "em curso" || ex === "corrigir") && t.exec && (
-        <ol className="mt-4 space-y-4">
-          <li>
-            <p className="flex items-center gap-2 text-[15px] font-medium">{t.exec.horas > 0 ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="grid h-4 w-4 place-items-center rounded-full border border-input text-[10px]">1</span>}Horas de trabalho</p>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <Passo rot={`Horas de ${t.nome}`} valor={`${nfmt(t.exec.horas)} h`} desMenos={t.exec.horas <= 0} menos={() => run(() => A.registarTarefa(d.id, ti, { horas: t.exec!.horas - 0.5 }))} mais={() => run(() => A.registarTarefa(d.id, ti, { horas: t.exec!.horas + 0.5 }))} />
-              {t.exec.horas === 0 && <button type="button" onClick={() => run(() => A.registarTarefa(d.id, ti, { horas: sugeridas }))} className="min-h-11 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Usar as previstas ({nfmt(sugeridas)} h)</button>}
+      {P.porque && <p className={cn(NOTA, "mt-2")}>{P.porque}</p>}
+      {(P.dur || P.inicio || P.tec) && (
+        <dl className="mt-3 divide-y divide-border">
+          {P.dur && (
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+              <dt className="text-[15px]">Dias úteis{minDur > 1 && <span className="block text-sm text-muted-foreground">não pode acabar antes de hoje</span>}</dt>
+              <dd><Passo rot="Dias da tarefa" valor={dias(dur)} desMenos={dur <= minDur} menos={() => setDur(dur - 1)} mais={() => setDur(dur + 1)} /></dd>
             </div>
-          </li>
-          <li>
-            <p className="flex items-center gap-2 text-[15px] font-medium">{t.exec.fotos.length ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="grid h-4 w-4 place-items-center rounded-full border border-input text-[10px]">2</span>}Fotografia do trabalho feito</p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {t.exec.fotos.map((f, k) => (
-                <span key={k} className="relative">
-                  <img src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
-                  <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => run(() => A.registarTarefa(d.id, ti, { tirarFoto: k }))} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
-                </span>
-              ))}
-              <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Tirar ou escolher uma fotografia" onChange={(e) => { void juntarFoto(e.target.files?.[0]); e.target.value = ""; }} />
-              <Button variant="outline" className="min-h-11" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar fotografia</Button>
-              <button type="button" onClick={() => run(() => A.registarTarefa(d.id, ti, { foto: fotoExemplo(t.nome, cor, t.exec!.fotos.length) }))} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><ImagePlus className="h-4 w-4" aria-hidden="true" />Usar uma de exemplo</button>
+          )}
+          {P.inicio && (
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+              <dt className="text-[15px]">Começa</dt>
+              <dd><Passo rot="Dia de início" valor={rotuloDia(p, dia)} desMenos={dia <= minDia} menos={() => setDia(dia - 1)} mais={() => setDia(dia + 1)} /></dd>
             </div>
-          </li>
-          <li>
-            <label className="block">
-              <span className="flex items-center gap-2 text-[15px] font-medium"><span className="grid h-4 w-4 place-items-center rounded-full border border-input text-[10px]">3</span>Nota <span className="font-normal text-muted-foreground">(opcional)</span></span>
-              <input value={nota} onChange={(e) => setNota(e.target.value)} onBlur={() => run(() => A.registarTarefa(d.id, ti, { nota }))} placeholder="Ex.: faltou uma peça; o cliente pediu…"
-                className="mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-            </label>
-          </li>
-          <li className="border-t border-border pt-4">
-            <Button className="min-h-11 w-full sm:w-auto" disabled={!!F.length} onClick={() => run(() => { A.registarTarefa(d.id, ti, { nota }); A.marcarFeita(d.id, ti); })}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Marcar como feita</Button>
-            {F.length > 0 && <p className={cn(NOTA, "mt-2")}>Falta {F.join(" e ")}.</p>}
-          </li>
-        </ol>
+          )}
+          {P.tec && (
+            <div className="py-3">
+              <dt className="text-[15px]">Técnico</dt>
+              <dd role="group" aria-label={`Técnico de ${t.nome}`} className="mt-2 flex flex-wrap gap-2">
+                {tecnicosPara(t, p).map((x) => (
+                  <button key={x.id} type="button" aria-pressed={tec === x.id} onClick={() => setTec(x.id)}
+                    className={cn("flex min-h-11 items-center gap-2 rounded-xl border px-3 py-1.5 text-left text-[15px] transition-colors", tec === x.id ? "border-primary bg-primary/[0.06]" : "border-input hover:border-foreground/40")}>
+                    <Avatar id={x.id} n={x.n} tam="h-7 w-7" /><span>{x.n}<span className={cn("block text-sm", x.livre ? "text-success" : "text-warning")}>{x.livre ? "livre" : `de férias a ${x.ferias}`}</span></span>
+                  </button>
+                ))}
+              </dd>
+            </div>
+          )}
+          <div className="py-3">
+            <dt className="text-[15px]">Porquê</dt>
+            <dd className="mt-2 space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {MOTIVOS_AJUSTE.map((x) => <button key={x} type="button" aria-pressed={motivo === x} onClick={() => setMotivo(x)} className={cn("min-h-10 rounded-full border px-3 text-[15px]", motivo === x ? "border-foreground bg-foreground text-background" : "border-input hover:border-foreground/40")}>{x}</button>)}
+              </div>
+              <input value={motivo} onChange={(e) => setMotivo(e.target.value)} aria-label="Motivo do ajuste" placeholder="Ou escreva o motivo" className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            </dd>
+          </div>
+        </dl>
       )}
+      {muda && (
+        <div className="mt-2 rounded-xl bg-muted/60 p-4 animate-in fade-in-0">
+          <p className="text-sm font-medium text-muted-foreground">O efeito</p>
+          <p className="mt-1 text-[15px]">{prev.texto}.</p>
+          <p className={cn("mt-1 text-[15px] font-medium", delta > 0 ? "text-warning" : delta < 0 ? "text-success" : "")}>
+            {delta ? `A obra passa a acabar a ${fimD} (era ${fimA}) · ${delta > 0 ? "+" : "−"}${dias(Math.abs(delta))}` : `A obra continua a acabar a ${fimA}`}
+          </p>
+          {prev.mexe.length > 0 && <p className={cn(NOTA, "mt-1")}>Também mudam de datas: {prev.mexe.join(", ")}.</p>}
+          <label className="mt-3 flex cursor-pointer items-start gap-3">
+            <input type="checkbox" checked={cliente} onChange={(e) => setCliente(e.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-[hsl(var(--primary))]" />
+            <span className="text-[15px]"><b className="font-medium">Avisar o cliente no portal</b>
+              {cliente && <span className="mt-1 block rounded-lg border border-border bg-card px-3 py-2 text-muted-foreground">«{textoAvisoCliente(t.nome, motivo || "motivo", fimA, fimD)}»</span>}</span>
+          </label>
+        </div>
+      )}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button size="lg" disabled={!muda || !motivo.trim()} onClick={() => { run(() => A.ajustarAoVivo(d.id, ti, m, motivo, cliente)); fechar(); }}>Aplicar o ajuste</Button>
+        <Button size="lg" variant="ghost" onClick={fechar}>Cancelar</Button>
+      </div>
+      {muda && !motivo.trim() && <p className={cn(NOTA, "mt-2")}>Escolha o porquê: fica no diário e, se avisar, no portal do cliente.</p>}
+    </section>
+  );
+}
 
-      {ex === "feita" && <p className="mt-3 flex items-center gap-2 text-[15px] text-muted-foreground"><Clock className="h-4 w-4" aria-hidden="true" />Feita. À espera do responsável de obra.</p>}
-    </article>
+/** Os ajustes feitos com a obra em curso, do mais recente para o mais antigo. */
+function AjustesFeitos({ d }: { d: Negocio }) {
+  const L = d.obra.alteracoes ?? [];
+  if (!L.length) return null;
+  return (
+    <div className="mt-4">
+      <p className="text-[15px] font-medium">Ajustes com a obra em curso <span className="font-normal text-muted-foreground">· {L.length}</span></p>
+      <ul className={cn(CARTAO, "mt-2 divide-y divide-border px-4")}>
+        {L.map((a, k) => (
+          <li key={k} className="py-3 text-[15px] animate-in fade-in-0">
+            <p>{a.t} <span className="text-muted-foreground">· {a.motivo}</span></p>
+            <p className="text-sm text-muted-foreground">{a.q} · {a.quem} · {a.fimAntes === a.fimDepois ? `o fim mantém-se a ${a.fimDepois}` : `fim: ${a.fimAntes} → ${a.fimDepois}`}{a.cliente ? " · cliente avisado no portal" : " · sem aviso ao cliente"}</p>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

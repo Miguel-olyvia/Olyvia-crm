@@ -16,6 +16,7 @@ import {
 } from "./motor";
 import { Hoje } from "./Hoje";
 import { HojeSimples } from "./HojeSimples";
+import { HojeTecnico } from "./HojeTecnico";
 import { LeadsSimples, esquecerLeads } from "./LeadsSimples";
 import { NegocioSimples } from "./NegocioSimples";
 import { NegociosSimples } from "./NegociosSimples";
@@ -226,7 +227,7 @@ export default function PrototipoNegocios() {
     : <Negocios {...ctx} />;
   let corpo: ReactNode;
   switch (S.view) {
-    case "hoje": corpo = v2 ? <HojeV2 {...ctx} /> : simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
+    case "hoje": corpo = S.role === "tecnico" ? <HojeTecnico {...ctx} /> : v2 ? <HojeV2 {...ctx} /> : simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
     case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : listaNegocios; break;
     case "leads": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
     case "pessoas": corpo = simples ? (func ? <PessoasFunc {...ctx} alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;

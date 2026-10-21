@@ -21,6 +21,7 @@ import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
 import { PAGAMENTO_EMPRESA, em3, referenciaMb, vencimento } from "./pagamentoCliente";
+import { DiarioPortal, NovidadesPortal, TrabalhosDaFase } from "./PortalObra";
 
 /** Os passos do percurso, pela ordem. */
 export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar a obra", "Receber a obra"] as const;
@@ -186,10 +187,12 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   const adendaAgora = (d.adendas ?? []).find((a) => a.estado === "enviada");
 
   /* ---------------------------------------------- o plano da obra, como o cliente o vê (sem custos) */
-  const fasesObra = p?.origem === "orcamento"
+  const fasesObra = p && p.tasks.some((t) => t.fase)
     ? ([...new Set(p.tasks.map((t) => t.fase ?? 0))].filter(Boolean).sort() as FaseObra[]).map((f) => {
         const ts = p.tasks.filter((t) => t.fase === f), i0 = Math.min(...ts.map((t) => t.dia)), i1 = Math.max(...ts.map((t) => t.dia + t.dur - 1));
-        const estado = p.estado === "concluída" || (p.estado === "em curso" && p.dia > i1) ? "feita" : p.estado === "em curso" && p.dia >= i0 ? "agora" : "depois";
+        // 21/10: feita só quando o responsável de obra validou todos os trabalhos da fase (não basta os dias passarem)
+        const validada = ts.every((t) => t.exec?.estado === "validada");
+        const estado = p.estado === "concluída" || (p.estado === "em curso" && validada) ? "feita" : p.estado === "em curso" && (p.dia >= i0 || ts.some((t) => t.exec)) ? "agora" : "depois";
         return { f, ts, i0, i1, estado };
       })
     : [];
@@ -395,7 +398,12 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
         <h2 className="mt-2 text-xl font-semibold">A sua obra</h2>
         <p className="mt-1 text-[15px] text-slate-600">
           {p?.estado === "concluída" ? "Concluída. Obrigado pela confiança."
-            : p?.estado === "em curso" ? "Em curso. Aqui vê em que fase está."
+            : p?.estado === "em curso" ? (() => {
+                // o que a equipa está a fazer hoje e quando acaba, numa frase
+                const hoje = [...new Set(p.tasks.filter((t) => t.dia <= p.dia && p.dia < t.dia + t.dur && t.exec?.estado !== "validada").map((t) => t.nome.toLowerCase()))];
+                const fim = rotuloDia(p, Math.max(...p.tasks.map((t) => t.dia + t.dur)) - 1);
+                return `Em curso. ${hoje.length ? `Hoje a equipa está em ${hoje.join(" e ")}. ` : ""}A obra acaba a ${fim}. Em baixo vê as fotografias de cada trabalho.`;
+              })()
             : p && p.origem === "orcamento" && fasesObra.length ? `Começa a ${rotuloDia(p, 0)} e acaba a ${rotuloDia(p, ultimo)}.`
             : "As datas confirmam-se em breve; avisamos aqui."}
         </p>
@@ -475,6 +483,8 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           {P.estado === "obra" && fasesObra.length > 0 && p && (
             <section aria-label="O plano da obra" className="rounded-2xl bg-white p-5 shadow-sm">
               <h2 className="text-base font-semibold">O plano, fase a fase</h2>
+              {/* 21/10: o progresso, os avisos de ajustes e, em cada trabalho, as fotografias e as notas dos técnicos */}
+              <div className="mt-3"><NovidadesPortal d={d} p={p} /></div>
               <ol className="mt-4">
                 {fasesObra.map(({ f, ts, i0, i1, estado }, k) => {
                   const Ic = ICONE_FASE[f] ?? Hammer, ultima = k === fasesObra.length - 1;
@@ -489,7 +499,9 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
                         <p className="text-sm tabular-nums text-slate-500">{rotuloDia(p, i0)}{i1 > i0 ? ` a ${rotuloDia(p, i1)}` : ""}</p>
                         {estado === "agora" && <p className="text-sm font-medium text-[#5a36bf]">A decorrer</p>}
                         {estado === "feita" && <p className="text-sm font-medium text-emerald-700">Feita</p>}
-                        <p className="text-sm text-slate-600">{[...new Set(ts.map((t) => t.nome))].join(" · ")}</p>
+                        {p.estado === "em curso" || p.estado === "concluída"
+                          ? <TrabalhosDaFase p={p} ts={ts} />
+                          : <p className="text-sm text-slate-600">{[...new Set(ts.map((t) => t.nome))].join(" · ")}</p>}
                       </div>
                     </li>
                   );
@@ -498,6 +510,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
               {d.obra.ec && <MateriaisPortal d={d} />}
             </section>
           )}
+          {P.estado === "obra" && p && (p.estado === "em curso" || p.estado === "concluída") && <DiarioPortal p={p} />}
 
           {outros.length > 0 && (
             <section aria-label="O que precisa de si" className="space-y-3">

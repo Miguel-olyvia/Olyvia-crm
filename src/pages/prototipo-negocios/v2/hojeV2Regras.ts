@@ -50,6 +50,7 @@ export const CATS_PAPEL: Record<Papel, readonly CatV2[]> = {
   armazem: ["encomendas", "receber"],
   operacoes: ["planos", "arrancar", "obras"],
   juridico: [],
+  tecnico: [],
 };
 
 /* ---------------------------------------------------------------- uma linha do Hoje */

@@ -8,6 +8,7 @@ import { TECS, type Negocio, type Plano, type Tarefa } from "./motor";
 import { RECEITAS } from "./receitas";
 import { rotuloDia } from "./preparacaoObra";
 import { linhaDoResumo, type ResumoEcNeg } from "./inventario/ponteNegocios";
+import type { Envio } from "./trabalhoObra";
 
 /* ------------------------------------------------------------------ o ciclo da tarefa */
 export type EstadoExec = "por fazer" | "em curso" | "feita" | "validada" | "corrigir";
@@ -21,6 +22,10 @@ export interface ExecTarefa {
   /** Porque o supervisor pediu correção. */
   motivo?: string;
   feita?: string; validada?: string;
+  /** 21/10: os registos do técnico, dia a dia, e as respostas do responsável (trabalhoObra.ts); o cliente vê-os no portal. */
+  envios?: Envio[];
+  /** 21/10: os passos das instruções já marcados pelo técnico (índices). */
+  passos?: number[];
 }
 export const ROTULO_EXEC: Record<EstadoExec, string> = {
   "por fazer": "por fazer", "em curso": "em curso", feita: "feita, por validar", validada: "validada", corrigir: "a corrigir",
@@ -51,12 +56,50 @@ export function progresso(p: Plano): number {
   return Math.min(1, feito / tot);
 }
 
-/** Fotografias de exemplo (sem câmara no computador): um desenho simples com a cor da fase e o nome do trabalho. */
+/** Fotografias de exemplo (sem câmara no computador): a divisão desenhada como está nessa fase do trabalho (21/10: demolição com o
+ *  tijolo à vista, roços com os tubos, azulejo a meio, louças montadas), com o nome do trabalho em baixo. `k` varia o enquadramento. */
 export function fotoExemplo(nome: string, cor = "#7c5ce0", k = 0): string {
-  const tons = ["#efeaff", "#e8f4ff", "#fff3e6", "#eaf8ef"];
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="320" height="240" fill="${tons[k % tons.length]}"/>`
-    + `<g stroke="${cor}" stroke-width="3" fill="none" opacity="0.55">${Array.from({ length: 6 }, (_, i) => `<line x1="${i * 64}" y1="0" x2="${i * 64}" y2="170"/>`).join("")}${Array.from({ length: 3 }, (_, i) => `<line x1="0" y1="${i * 56}" x2="320" y2="${i * 56}"/>`).join("")}</g>`
-    + `<rect y="170" width="320" height="70" fill="${cor}" opacity="0.9"/><text x="16" y="212" font-family="sans-serif" font-size="18" fill="#fff">${nome.replace(/[<&>]/g, "")}</text></svg>`;
+  const s = nome.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const W = 480, H = 360, dx = (k % 3) * 18 - 18, fundo = 170 + dx; // a esquina da divisão anda um pouco de fotografia para fotografia
+  const parede = (c: string) => `<polygon points="0,0 ${fundo},40 ${fundo},250 0,${H}" fill="${c}" opacity="0.88"/><rect x="${fundo}" y="40" width="${W - fundo}" height="210" fill="${c}"/>`;
+  const chao = (c: string) => `<polygon points="0,${H} ${fundo},250 ${W},250 ${W},${H}" fill="${c}"/>`;
+  const azulejos = (x0: number, y0: number, x1: number, y1: number, t: number, c: string, j = "#d6d0c4") => {
+    let g = `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="${c}"/>`;
+    for (let x = x0; x <= x1; x += t) g += `<line x1="${x}" y1="${y0}" x2="${x}" y2="${y1}" stroke="${j}" stroke-width="2"/>`;
+    for (let y = y0; y <= y1; y += t / 2) g += `<line x1="${x0}" y1="${y}" x2="${x1}" y2="${y}" stroke="${j}" stroke-width="2"/>`;
+    return g;
+  };
+  let cena = "";
+  if (/demol|remoc|picar/.test(s)) {
+    cena = parede("#c98b6b") + chao("#9b9284");
+    for (let y = 48; y < 250; y += 16) for (let x = fundo + ((y / 16) % 2) * 14; x < W; x += 28) cena += `<rect x="${x}" y="${y}" width="26" height="14" rx="1" fill="#b56f4f" stroke="#a55f40"/>`;
+    cena += `<rect x="${fundo + 40}" y="60" width="90" height="70" fill="#e9e3d8" opacity="0.85"/>`; // restos de reboco
+    for (let i = 0; i < 9; i++) cena += `<ellipse cx="${60 + ((i * 53 + k * 31) % 380)}" cy="${300 + ((i * 17) % 40)}" rx="${14 + (i % 3) * 6}" ry="8" fill="#7d7468"/>`;
+    cena += `<rect x="${330 + dx}" y="232" width="56" height="62" rx="8" fill="#e8e2d6" stroke="#bfb6a6"/><text x="${340 + dx}" y="268" font-size="11" font-family="sans-serif" fill="#7d7468">entulho</text>`;
+  } else if (/canaliz|agua|esgoto|tubag/.test(s)) {
+    cena = parede("#d9d4cb") + chao("#a79f92");
+    cena += `<rect x="${fundo + 60}" y="40" width="22" height="210" fill="#b9b2a5"/><rect x="${fundo + 60}" y="150" width="${W - fundo - 60}" height="22" fill="#b9b2a5"/>`;
+    cena += `<path d="M${fundo + 66} 40 V160 H${W}" stroke="#d64545" stroke-width="7" fill="none"/><path d="M${fundo + 76} 40 V166 H${W}" stroke="#3b7dd8" stroke-width="7" fill="none"/>`;
+    cena += `<path d="M${fundo + 150} 250 V205" stroke="#8a8f99" stroke-width="16"/><circle cx="${fundo + 66}" cy="160" r="6" fill="#9aa1ab"/><circle cx="${fundo + 76}" cy="166" r="6" fill="#9aa1ab"/>`;
+    cena += `<rect x="${360 + dx}" y="110" width="12" height="20" fill="#c0c5cc"/><rect x="${384 + dx}" y="110" width="12" height="20" fill="#c0c5cc"/>`;
+  } else if (/revest|pavim|azulej|ceram/.test(s)) {
+    cena = parede("#e6e1d7") + chao("#b8b0a2");
+    const ate = 250 - 70 - (k % 3) * 40; // o azulejo vai subindo
+    cena += azulejos(fundo, ate, W, 250, 44, "#f4f1ea");
+    cena += `<polygon points="0,${H} ${fundo},250 ${W},250 ${W},${H}" fill="#cfc8ba"/>`;
+    for (let i = 1; i < 6; i++) cena += `<line x1="${(fundo * (6 - i)) / 6 + (i * W) / 6 - 40}" y1="250" x2="${(i * W) / 5 - 60}" y2="${H}" stroke="#b0a897" stroke-width="2"/>`;
+    cena += `<rect x="${60 + dx}" y="270" width="54" height="48" rx="6" fill="#f2a33a"/><rect x="${66 + dx}" y="262" width="42" height="10" rx="4" fill="#d98b25"/>`;
+    cena += `<line x1="${fundo + 10}" y1="${ate - 6}" x2="${W}" y2="${ate - 6}" stroke="#ff3b3b" stroke-width="2" stroke-dasharray="6 4" opacity="0.8"/>`;
+  } else if (/louc|acabam|mont|sanita/.test(s)) {
+    cena = azulejos(fundo, 40, W, 250, 52, "#f5f3ee") + `<polygon points="0,0 ${fundo},40 ${fundo},250 0,${H}" fill="#ebe7df"/>` + chao("#c9c1b2");
+    cena += `<rect x="${fundo + 40}" y="150" width="70" height="44" rx="20" fill="#ffffff" stroke="#d8d3ca" stroke-width="2"/><rect x="${fundo + 55}" y="120" width="40" height="26" rx="4" fill="#f0eee9" stroke="#d8d3ca"/>`;
+    cena += `<rect x="${fundo + 170}" y="232" width="${W - fundo - 180}" height="18" fill="#fafafa" stroke="#d8d3ca"/><rect x="${W - 60}" y="70" width="6" height="150" fill="#b8bec7"/><circle cx="${W - 57}" cy="66" r="14" fill="#c9ced6"/>`;
+    cena += `<rect x="${fundo + 160}" y="60" width="4" height="190" fill="#cfe3f0" opacity="0.8"/>`;
+  } else cena = parede("#e3dfd6") + chao("#b9b1a3");
+  const luz = `<radialGradient id="l" cx="0.65" cy="0.2" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="1" stop-color="#000" stop-opacity="0.18"/></radialGradient>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${luz}<linearGradient id="r" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.65"/></linearGradient></defs>`
+    + cena + `<rect width="${W}" height="${H}" fill="url(#l)"/><rect y="${H - 64}" width="${W}" height="64" fill="url(#r)"/>`
+    + `<rect x="16" y="${H - 38}" width="10" height="10" rx="5" fill="${cor}"/><text x="34" y="${H - 28}" font-family="sans-serif" font-size="18" font-weight="600" fill="#fff">${nome.replace(/[<&>]/g, "")}</text></svg>`;
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
 

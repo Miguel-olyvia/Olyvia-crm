@@ -1,0 +1,324 @@
+// O Hoje do técnico (21/10/2026): o técnico faz tudo daqui, no telemóvel. Para cada tarefa de hoje:
+// a obra (morada, contactos, a nota das Operações), o que levar e preparar, o passo a passo (marca-se à medida),
+// o que verificar no fim e o registo do dia (horas, fotografias e o que fez). O registo vai para a página da obra
+// (o responsável valida ou pede correção) e para o portal do cliente (fotografias e descrição, sem horas).
+// O protótipo não tem relógio: "hoje" é o dia de cada obra em curso (as Operações mudam-no na página da obra).
+import { useRef, useState } from "react";
+import { format } from "date-fns";
+import { pt } from "date-fns/locale";
+import {
+  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, MapPin, Minus, Package, Phone, Plus, ShieldCheck, Sparkles, Wrench, X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { TECS, nfmt, type Negocio } from "./motor";
+import type { Ctx } from "./pecas";
+import { COR_FASE } from "./planoObra";
+import { FASES_OBRA } from "./fasesObra";
+import { rotuloDia } from "./preparacaoObra";
+import { RESPONSAVEL_OBRA, equipamentosDaObra, estadoDe, fotoExemplo, materiaisPorFase } from "./obraOps";
+import { useInventario } from "./inventario/loja";
+import { resumoEcNegocio } from "./inventario/ponteNegocios";
+import {
+  FIM_DO_DIA, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, trabalhoDoTecnico,
+} from "./trabalhoObra";
+import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa } from "./AcompanhamentoObra";
+import { lerFoto } from "./ObraOperacoes";
+
+const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
+const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
+const RAPIDAS = ["Correu como previsto.", "Falta acabar amanhã.", "Faltou material.", "O cliente pediu uma alteração."];
+
+export function HojeTecnico(ctx: Ctx) {
+  const { S, A, run } = ctx;
+  const comTrabalho = tecnicosComTrabalho(S.deals);
+  const eu = S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? "hn";
+  const tec = TECS.find((x) => x.id === eu)!;
+  const hoje = trabalhoDoTecnico(S.deals, eu);
+  const amanha = trabalhoDoTecnico(S.deals, eu, 1);
+  const horas = hoje.reduce((a, x) => a + horasPorDia(x.t), 0);
+  const obras = new Set(hoje.map((x) => x.d.id)).size;
+  const agora = new Date();
+  return (
+    <div className="mx-auto w-full pb-28 sm:px-8 sm:pt-6">
+      {/* fora do telemóvel: o controlo do protótipo (que técnico se vê) */}
+      <div role="group" aria-label="Ver como (no protótipo)" className="mx-auto flex max-w-2xl flex-wrap items-center justify-center gap-2 px-4 pt-4 sm:pt-0">
+        <span className="text-sm text-muted-foreground">A app do técnico · ver como</span>
+        {TECS.map((x) => {
+          const n = trabalhoDoTecnico(S.deals, x.id).length;
+          return (
+            <button key={x.id} type="button" aria-pressed={eu === x.id} onClick={() => run(() => A.souTec(x.id))}
+              className={cn("flex min-h-10 items-center gap-1.5 rounded-full border py-0.5 pl-0.5 pr-3 text-sm transition-colors", eu === x.id ? "border-primary bg-primary/[0.06] font-medium" : "border-input bg-card hover:border-foreground/40", !n && eu !== x.id && "opacity-60")}>
+              <AvatarTec id={x.id} tam="h-7 w-7" />{x.n.split(" ")[0]}{n > 0 && <span className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground">{n}</span>}
+            </button>
+          );
+        })}
+      </div>
+      {/* no computador, a app dentro de um telemóvel; no telemóvel, a app inteira */}
+      <div className="mx-auto mt-4 w-full sm:mt-6 sm:max-w-[440px] sm:overflow-hidden sm:rounded-[2.75rem] sm:border-[10px] sm:border-neutral-900 sm:bg-background sm:shadow-2xl">
+        <div className="hidden justify-center pt-2 sm:flex" aria-hidden="true"><span className="h-6 w-28 rounded-full bg-neutral-900" /></div>
+        <div className="px-4 pb-10 pt-4 sm:px-4">
+      <p className="text-[15px] text-muted-foreground first-letter:uppercase">{format(agora, "EEEE, d 'de' MMMM", { locale: pt })}</p>
+      <div className="mt-1 flex items-center gap-3">
+        <AvatarTec id={eu} tam="h-12 w-12 text-sm" />
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight">{saudacao(agora.getHours())}, {tec.n.split(" ")[0]}</h1>
+          <p className="text-[15px] text-muted-foreground">{tec.sk}</p>
+        </div>
+      </div>
+      <p className="mt-3 text-lg text-muted-foreground">
+        {hoje.length ? <>Hoje tem <b className="font-semibold text-foreground">{hoje.length} {hoje.length === 1 ? "tarefa" : "tarefas"}</b> em {obras} {obras === 1 ? "obra" : "obras"} · cerca de {nfmt(horas)} h.</> : "Hoje não tem tarefas por fazer."}
+      </p>
+
+      <ul className="mt-6 space-y-6">
+        {hoje.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaDeHoje ctx={ctx} d={x.d} ti={x.ti} /></li>)}
+      </ul>
+
+      {!hoje.length && (
+        <div className={cn(CARTAO, "mt-6 p-6 text-center")}>
+          <Sparkles className="mx-auto h-8 w-8 text-primary" aria-hidden="true" />
+          <p className="mt-2 text-[15px]">Sem trabalho para si hoje{comTrabalho.length ? `. Experimente ver como ${TECS.find((t) => t.id === comTrabalho[0])?.n.split(" ")[0]}.` : "."}</p>
+        </div>
+      )}
+
+      {amanha.length > 0 && (
+        <section aria-labelledby="amanha-t" className="mt-10">
+          <h2 id="amanha-t" className="text-lg font-semibold">Amanhã</h2>
+          <ul className={cn(CARTAO, "mt-3 divide-y divide-border px-4")}>
+            {amanha.map(({ d, t }, k) => (
+              <li key={k} className="flex items-center gap-3 py-3">
+                <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ background: t.fase ? COR_FASE[t.fase] : "#7c5ce0" }} aria-hidden="true" />
+                <span className="min-w-0 flex-1"><span className="block text-[15px] font-medium">{t.nome}</span>
+                  <span className="block text-sm text-muted-foreground">{d.nome} · {d.f.localidade || d.local.split(",").pop()?.trim()} · {rotuloDia(d.obra.plano!, d.obra.plano!.dia + 1)} · {rotuloDiaTarefa(t, d.obra.plano!.dia + 1)}</span></span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Uma tarefa de hoje: tudo o que o técnico precisa, por ordem, com um primário de cada vez. */
+function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
+  const { A, run } = ctx;
+  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), I = instrucoesDe(t), feitos = passosFeitos(t);
+  const k = diaDaTarefa(t, p.dia) ?? 1, ultimoDia = k === t.dur;
+  const cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
+  const fase = t.fase ? FASES_OBRA[t.fase - 1] : null;
+  const db = useInventario();
+  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const mats = materiaisPorFase(d, inv).find((g) => g.fase === t.fase)?.itens ?? [];
+  const equip = equipamentosDaObra(p).filter((e) => e.tarefas.includes(t.nome) || e.origem === "Frota");
+  const envHoje = enviosDe(t).filter((e) => e.dia === p.dia && (e.k === "registo" || e.k === "feita"));
+  const morada = d.f.morada || d.local;
+  const [abertoAntes, setAbertoAntes] = useState(ex === "por fazer");
+  const [hist, setHist] = useState(false);
+  const [problema, setProblema] = useState<string | null>(null);
+  const [mais, setMais] = useState(false);
+  const todos = feitos.length === I.passos.length;
+
+  return (
+    <article className={cn(CARTAO, "overflow-hidden")} aria-label={`${t.nome} · ${d.nome}`}>
+      {/* a obra */}
+      <header className="relative p-5 pb-4 text-white" style={{ background: `linear-gradient(135deg, ${cor}, #2e1a6b)` }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-white/80">{fase ? `Fase ${t.fase} · ${fase.curto}` : t.sk} · {rotuloDiaTarefa(t, p.dia)}</p>
+          <span className="rounded-full bg-white shadow-sm"><ChipEstado e={ex} /></span>
+        </div>
+        <h2 className="mt-0.5 text-2xl font-semibold tracking-tight">{t.nome}</h2>
+        <p className="mt-1 text-[15px] text-white/90">{d.nome} · {d.servico}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>
+          <a href={`tel:${d.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />Cliente</a>
+          <a href={`tel:${RESPONSAVEL_OBRA.tel.replace(/\s/g, "")}`} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><Phone className="h-4 w-4" aria-hidden="true" />{RESPONSAVEL_OBRA.n.split(" ")[0]} (responsável)</a>
+        </div>
+      </header>
+
+      <div className="space-y-6 p-5">
+        {t.nota && <p className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/[0.08] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" /><span><b className="font-medium">Das Operações:</b> {t.nota}</span></p>}
+        {ex === "corrigir" && t.exec?.motivo && (
+          <p className="flex items-start gap-2 rounded-xl bg-destructive/[0.07] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" /><span><b className="font-medium">{RESPONSAVEL_OBRA.n.split(" ")[0]} pediu uma correção:</b> {t.exec.motivo}. Corrija e envie um novo registo.</span></p>
+        )}
+
+        {/* 1. antes de começar */}
+        <section aria-labelledby={`antes-${ti}`}>
+          <button type="button" onClick={() => setAbertoAntes(!abertoAntes)} aria-expanded={abertoAntes} className="flex min-h-11 w-full items-center justify-between gap-3 text-left">
+            <h3 id={`antes-${ti}`} className="flex items-center gap-2 text-base font-semibold"><Num n={1} ok={ex !== "por fazer"} />Antes de começar</h3>
+            <ChevronDown className={cn("h-5 w-5 text-muted-foreground transition-transform", abertoAntes && "rotate-180")} aria-hidden="true" />
+          </button>
+          {abertoAntes && (
+            <div className="mt-2 space-y-4 animate-in fade-in-0 slide-in-from-top-1">
+              <ul className="space-y-1.5 text-[15px]">{I.antes.map((x) => <li key={x} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />{x}</li>)}</ul>
+              <div>
+                <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Proteção</p>
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">{I.epi.map((x) => <li key={x} className="rounded-full bg-muted px-2.5 py-1 text-sm">{x}</li>)}</ul>
+              </div>
+              {mats.length > 0 && (
+                <div>
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Package className="h-4 w-4" aria-hidden="true" />Material desta fase</p>
+                  <ul className="mt-1.5 divide-y divide-border rounded-xl border border-border">
+                    {mats.map((m) => (
+                      <li key={m.n} className="flex items-center justify-between gap-3 px-3 py-2 text-[15px]">
+                        <span className="min-w-0">{m.n}</span>
+                        <span className={cn("shrink-0 text-sm tabular-nums", m.estado === "na obra" || m.estado === "na carrinha" || m.estado === "reservado" ? "text-success" : "text-warning")}>{nfmt(m.q)} {m.un} · {m.estado}{m.quando ? ` ${m.quando}` : ""}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {equip.length > 0 && (
+                <div>
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Wrench className="h-4 w-4" aria-hidden="true" />Levar</p>
+                  <ul className="mt-1.5 flex flex-wrap gap-1.5">{equip.map((e) => <li key={e.n} className="rounded-full border border-border px-2.5 py-1 text-sm">{e.n}{e.origem === "Aluguer" ? " (aluguer)" : ""}</li>)}</ul>
+                </div>
+              )}
+              {ex === "por fazer" && (
+                <Button size="lg" className="w-full sm:w-auto" onClick={() => run(() => { A.comecarTarefa(d.id, ti); setAbertoAntes(false); })}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />Começar a tarefa</Button>
+              )}
+            </div>
+          )}
+        </section>
+
+        {ex !== "por fazer" && ex !== "feita" && (
+          <>
+            {/* 2. o passo a passo */}
+            <section aria-labelledby={`passos-${ti}`} className="border-t border-border pt-5">
+              <div className="flex items-baseline justify-between gap-3">
+                <h3 id={`passos-${ti}`} className="flex items-center gap-2 text-base font-semibold"><Num n={2} ok={todos} />Passo a passo</h3>
+                <span className="text-sm tabular-nums text-muted-foreground">{feitos.length} de {I.passos.length}</span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${(feitos.length / I.passos.length) * 100}%` }} /></div>
+              <ul className="mt-3 space-y-2">
+                {I.passos.map((x, i) => {
+                  const on = feitos.includes(i);
+                  return (
+                    <li key={x}>
+                      <button type="button" role="checkbox" aria-checked={on} onClick={() => run(() => A.marcarPasso(d.id, ti, i))}
+                        className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-[15px] transition-all active:scale-[0.99]", on ? "border-success/40 bg-success/[0.07]" : "border-input bg-card hover:border-foreground/40")}>
+                        <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 transition-colors", on ? "border-success bg-success text-white" : "border-input")}>{on && <Check className="h-4 w-4 animate-in zoom-in-50" aria-hidden="true" />}</span>
+                        <span className={cn(on && "text-muted-foreground line-through decoration-muted-foreground/50")}>{x}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              {(todos || ultimoDia) && (
+                <div className="mt-4 rounded-xl bg-muted/60 p-3">
+                  <p className="text-sm font-medium">Antes de dar por feita, verifique</p>
+                  <ul className="mt-1.5 space-y-1 text-[15px]">{I.verificar.map((x) => <li key={x} className="flex gap-2"><Check className="mt-1 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />{x}</li>)}</ul>
+                </div>
+              )}
+            </section>
+
+            {/* 3. o registo de hoje */}
+            <section aria-labelledby={`reg-${ti}`} className="border-t border-border pt-5">
+              <h3 id={`reg-${ti}`} className="flex items-center gap-2 text-base font-semibold"><Num n={3} ok={envHoje.length > 0} />Registo de hoje</h3>
+              {envHoje.length > 0 && !mais ? (
+                // enviado: o que foi (como o responsável e o cliente o veem) e, se for preciso, mais um registo
+                <div className="mt-3 rounded-xl border border-success/30 bg-success/[0.06] p-3 animate-in fade-in-0 zoom-in-95">
+                  <p className="flex items-center gap-2 text-[15px] font-medium text-success"><Check className="h-4 w-4" aria-hidden="true" />Registo de hoje enviado ao {RESPONSAVEL_OBRA.n.split(" ")[0]} e ao portal do cliente</p>
+                  <ol className="mt-2">{envHoje.map((e, k) => <EnvioItem key={k} e={e} p={p} ultimo={k === envHoje.length - 1} />)}</ol>
+                  <div className="mt-2 flex flex-wrap gap-x-5">
+                    <button type="button" onClick={() => setMais(true)} className="min-h-11 text-[15px] font-medium text-primary underline-offset-4 hover:underline">{todos || ultimoDia ? "Terminar a tarefa" : "Enviar mais um registo"}</button>
+                  </div>
+                </div>
+              ) : <RegistoDoDia ctx={ctx} d={d} ti={ti} podeTerminar={todos || ultimoDia} cor={cor} enviado={() => setMais(false)} />}
+              <p className="mt-3 text-sm text-muted-foreground">No fim do dia: {FIM_DO_DIA.join(" · ").toLowerCase()}.</p>
+            </section>
+          </>
+        )}
+
+        {ex === "feita" && (
+          <p className="flex items-center gap-2 rounded-xl bg-warning/[0.1] px-3 py-3 text-[15px]"><Clock className="h-5 w-5 shrink-0 text-warning" aria-hidden="true" />Tarefa terminada. À espera da validação de {RESPONSAVEL_OBRA.n}.</p>
+        )}
+
+        {/* o histórico e um problema */}
+        <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-border pt-4">
+          <button type="button" onClick={() => setHist(!hist)} aria-expanded={hist} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+            {hist ? "Esconder o histórico" : `Histórico da tarefa (${enviosDe(t).length})`}<ChevronDown className={cn("h-4 w-4 transition-transform", hist && "rotate-180")} aria-hidden="true" />
+          </button>
+          {problema == null && <button type="button" onClick={() => setProblema("")} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Reportar um problema</button>}
+        </div>
+        {hist && <div className="animate-in fade-in-0"><HistoricoTarefa t={t} p={p} /></div>}
+        {problema != null && (
+          <div className="space-y-2 rounded-xl border border-border p-3 animate-in fade-in-0">
+            <p className="text-[15px] font-medium">O que aconteceu?</p>
+            <div className="flex flex-wrap gap-2">
+              {["Falta material", "Encontrei um problema escondido", "O cliente não está", "Preciso de ajuda"].map((m) => (
+                <button key={m} type="button" aria-pressed={problema === m} onClick={() => setProblema(m)} className={cn("min-h-10 rounded-full border px-3 text-[15px]", problema === m ? "border-foreground bg-foreground text-background" : "border-input hover:border-foreground/40")}>{m}</button>
+              ))}
+            </div>
+            <input value={problema} onChange={(e) => setProblema(e.target.value)} aria-label="Descreva o problema" placeholder="Ou descreva" className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => setProblema(null)}>Cancelar</Button>
+              <Button variant="outline" disabled={!problema.trim()} onClick={() => { run(() => A.ocorrencia(d.id, `${t.nome}: ${problema}`)); setProblema(null); }}>Enviar ao responsável</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function Num({ n, ok }: { n: number; ok: boolean }) {
+  return <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold", ok ? "bg-success text-white" : "bg-primary/10 text-primary")} aria-hidden="true">{ok ? <Check className="h-3.5 w-3.5" /> : n}</span>;
+}
+
+/** O registo do dia: horas (as previstas para hoje, já sugeridas), fotografias e o que fez. Um envio: vai ao responsável e ao portal. */
+function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado }: { ctx: Ctx; d: Negocio; ti: number; podeTerminar: boolean; cor: string; enviado: () => void }) {
+  const { A, run } = ctx;
+  const p = d.obra.plano!, t = p.tasks[ti];
+  const [horas, setHoras] = useState(horasPorDia(t));
+  const [fotos, setFotos] = useState<string[]>([]);
+  const [nota, setNota] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const juntar = async (f?: File | null) => { if (!f) return; try { const u = await lerFoto(f); setFotos((x) => [...x, u].slice(-4)); } catch { /* sem leitura */ } };
+  const falta = [!(horas > 0) && "as horas", !fotos.length && "uma fotografia", !nota.trim() && "o que fez hoje"].filter(Boolean) as string[];
+  const enviar = (feita: boolean) => run(() => { A.enviarRegisto(d.id, ti, { horas, fotos, nota, feita }); setFotos([]); setNota(""); enviado(); });
+  return (
+    <div className="mt-3 space-y-4">
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">Horas de hoje <span className="font-normal">(previstas {nfmt(horasPorDia(t))} h)</span></p>
+        <span role="group" aria-label="Horas de hoje" className="mt-1.5 inline-flex items-center rounded-xl border border-input bg-card p-0.5">
+          <button type="button" aria-label="Menos meia hora" disabled={horas <= 0} onClick={() => setHoras(Math.max(0, horas - 0.5))} className="grid h-12 w-12 place-items-center rounded-lg hover:bg-muted disabled:opacity-30"><Minus className="h-4 w-4" /></button>
+          <output className="min-w-[5.5rem] text-center text-xl font-semibold tabular-nums">{nfmt(horas)} h</output>
+          <button type="button" aria-label="Mais meia hora" onClick={() => setHoras(horas + 0.5)} className="grid h-12 w-12 place-items-center rounded-lg hover:bg-muted"><Plus className="h-4 w-4" /></button>
+        </span>
+      </div>
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">Fotografias do trabalho <span className="font-normal">(o cliente vê-as no portal)</span></p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {fotos.map((f, k) => (
+            <span key={k} className="relative animate-in zoom-in-95">
+              <img src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
+              <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => setFotos(fotos.filter((_, i) => i !== k))} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
+            </span>
+          ))}
+          <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Tirar ou escolher uma fotografia" onChange={(e) => { void juntar(e.target.files?.[0]); e.target.value = ""; }} />
+          <Button variant="outline" className="min-h-12" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar fotografia</Button>
+          <button type="button" onClick={() => setFotos((x) => [...x, fotoExemplo(t.nome, cor, enviosDe(t).length + x.length)].slice(-4))} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><ImagePlus className="h-4 w-4" aria-hidden="true" />Usar uma de exemplo</button>
+        </div>
+      </div>
+      <div>
+        <label htmlFor={`nota-${d.id}-${ti}`} className="text-sm font-medium text-muted-foreground">O que fez hoje</label>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {RAPIDAS.map((r) => <button key={r} type="button" onClick={() => setNota((n) => (n.trim() ? n.trim() + " " : "") + r)} className="min-h-9 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
+        </div>
+        <textarea id={`nota-${d.id}-${ti}`} value={nota} onChange={(e) => setNota(e.target.value)} rows={3} placeholder="Ex.: assentei as paredes do duche e metade do chão; amanhã betumo as juntas."
+          className="mt-2 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        {podeTerminar ? (
+          <>
+            <Button size="lg" disabled={!!falta.length} onClick={() => enviar(true)}><Check className="mr-2 h-4 w-4" aria-hidden="true" />Enviar e terminar a tarefa</Button>
+            <Button size="lg" variant="outline" disabled={!!falta.length} onClick={() => enviar(false)}>Enviar sem terminar</Button>
+          </>
+        ) : <Button size="lg" disabled={!!falta.length} onClick={() => enviar(false)}>Enviar o registo de hoje<ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" /></Button>}
+      </div>
+      {falta.length > 0 && <p className="text-sm text-muted-foreground">Falta {falta.join(", ").replace(/, ([^,]*)$/, " e $1")}.</p>}
+    </div>
+  );
+}

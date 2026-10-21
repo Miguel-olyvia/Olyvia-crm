@@ -7,7 +7,7 @@ export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contract
 
 export const PERMS_PAPEL: Record<Papel, readonly (PermNeg | "*")[]> = {
   direcao: ["*"], financeiro: ["finance.validate_payment", "finance.invoice"],
-  comercial: [], armazem: [], operacoes: [], juridico: [],
+  comercial: [], armazem: [], operacoes: [], juridico: [], tecnico: [],
 };
 
 /** O papel tem a permissão? */

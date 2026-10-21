@@ -4,6 +4,7 @@
 
 import { diferencas, guardarBase, mudarDuracao, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
+import { aplicarAjuste, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo } from "./catalogo";
 import {
   ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
@@ -26,7 +27,7 @@ import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivi
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
-export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes" | "juridico";
+export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes" | "juridico" | "tecnico";
 export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
   comercial: { n: "Rúben · Comercial", av: "RB", nome: "Rúben" },
   direcao: { n: "Direção", av: "DI", nome: "Direção" },
@@ -35,6 +36,8 @@ export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
   operacoes: { n: "Filipe · Operações", av: "FI", nome: "Filipe" },
   // 15/10: revê e valida o contrato quando o cliente pede alterações a cláusulas (RevisaoContrato.tsx)
   juridico: { n: "Inês · Jurídico", av: "IN", nome: "Inês" },
+  // 21/10: o técnico na obra faz tudo pelo Hoje dele (HojeTecnico.tsx); qual técnico é escolhe-se lá (Estado.tec)
+  tecnico: { n: "Técnico de obra", av: "TE", nome: "Técnico" },
 };
 
 export const FASES = ["Lead", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
@@ -292,7 +295,9 @@ export interface Negocio {
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
     /** 15/10: o auto de receção (por assinar → assinado) */
-    auto?: AutoRececao | null };
+    auto?: AutoRececao | null;
+    /** 21/10: os ajustes ao plano com a obra em curso (trabalhoObra.ts), com o aviso ao cliente quando foi avisado. */
+    alteracoes?: Alteracao[] };
   /** Os trabalhos a mais depois do contrato assinado (adendas.ts). */
   adendas?: Adenda[];
   hist: Evento[];
@@ -312,6 +317,8 @@ export interface Estado {
   pulse?: string | null;
   /** 15/10: o negócio cujo contrato o Jurídico está a rever (o editor abre por cima: RevisaoContrato.tsx). */
   revisao?: number | null;
+  /** 21/10: o técnico que está a ver o Hoje (papel "tecnico"); por omissão, Hugo Neves. */
+  tec?: string;
   cfg: { min: number; alvo: number; estrutura: boolean };
   /** "simples": a proposta de 09/10 com menos ruído; "atual": o aspeto de hoje da Olyvia, para comparar. */
   aspeto?: "simples" | "atual";
@@ -348,7 +355,7 @@ function novoDeal(o: NovoNegocio): Negocio {
 // 10 (14/10/2026): as estruturas de sanita e bidé ("Kit´s para Sanitários") deixam de ser sanitas e de trazer a instalação
 // 16 (16/10/2026): a encomenda de cliente deixa de nascer no contrato; emite-se no Inventário novo ao validar o pagamento
 // 17 (19/10/2026): sai a encomenda a fornecedor do motor (obra.enc): os materiais vivem só no Inventário; negócios anulados (anulado)
-export const VERSAO = 17;
+export const VERSAO = 20;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -452,6 +459,8 @@ export function seed(): Estado {
   m.fin = { fatura: { n: "FT 2026/391", q: "18/09" }, pago: true, recibo: { n: "RC 2026/288", q: "22/09" } };
   m.obra.plano = gerarPlano(m, S);
   m.obra.plano.tasks.forEach((t) => { if (t.tec === "sf") t.tec = "hn"; });
+  // 21/10: as fases da obra também no exemplo (o portal mostra o plano por fases e o Hoje do técnico diz a fase)
+  m.obra.plano.tasks.forEach((t) => { t.fase = /demol/i.test(t.nome) ? 1 : /canaliz/i.test(t.nome) ? 2 : /revest|pavim/i.test(t.nome) ? 3 : 4; });
   m.obra.plano.estado = "em curso";
   m.obra.plano.dia = 2;
   m.obra.mats = calcMats(m, S, true);
@@ -462,9 +471,16 @@ export function seed(): Estado {
     pm.tasks.forEach((t, i) => {
       const tec = TECS.find((x) => x.id === t.tec)?.n ?? "Equipa";
       if (t.dia + t.dur <= 1) t.exec = { estado: "validada", horas: Math.round(t.h * 1.05 * 2) / 2, fotos: [fotoExemplo(t.nome, "#8b6fe0", i), fotoExemplo(t.nome + " · fim", "#8b6fe0", i + 1)], nota: "Paredes picadas até ao tijolo. Entulho no contentor.", feita: dias[0], validada: dias[0] + " 18:10" };
-      else if (t.dia + t.dur <= 2) t.exec = { estado: "feita", horas: Math.round(t.h * 1.1 * 2) / 2, fotos: [fotoExemplo(t.nome, "#5a3fc0", i)], nota: "Ponto de água da base de duche mudado 20 cm.", feita: dias[1] + " 17:40" };
-      else if (t.dia <= 2 && 2 < t.dia + t.dur) t.exec = { estado: "em curso", horas: 0, fotos: [] };
-      void tec;
+      else if (t.dia + t.dur <= 2) t.exec = { estado: "feita", horas: Math.round(t.h * 1.1 * 2) / 2, fotos: [fotoExemplo(t.nome, "#5a3fc0", i), fotoExemplo(t.nome + " · ensaio", "#5a3fc0", i + 1)], nota: "Ensaio de pressão sem perdas. Ponto de água da base de duche mudado 20 cm.", feita: dias[1] + " 17:40" };
+      // 21/10: a tarefa de hoje (o revestimento) fica por começar: na demonstração, o técnico começa-a no Hoje dele
+      // 21/10: o histórico dos registos (o que o cliente vê no portal) e os passos feitos
+      const e = t.exec;
+      if (e && e.estado !== "em curso") {
+        const n = instrucoesDe(t).passos.length;
+        e.passos = Array.from({ length: n }, (_, k) => k);
+        e.envios = [{ q: e.feita!.includes(":") ? e.feita! : e.feita + " 17:50", dia: t.dia, quem: tec, k: "feita", horas: e.horas, fotos: e.fotos, nota: e.nota, passos: instrucoesDe(t).passos }];
+        if (e.estado === "validada") e.envios.push({ q: e.validada!, dia: t.dia, quem: "Filipe Rocha", k: "validada" });
+      }
     });
     m.obra.diario = [
       { q: "seg 13/10 08:05", quem: "Filipe Rocha", t: "Obra arrancou. Equipa no local, proteções colocadas no caminho e no elevador.", k: "marco" },
@@ -1567,6 +1583,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (F.length) { avisar({ msg: "Ainda não dá para marcar como feita", sub: "Falta " + F.join(" e "), kind: "bad" }); return; }
       t.exec.estado = "feita"; t.exec.feita = agora(); t.exec.motivo = undefined;
       const quem = TECS.find((x) => x.id === t.tec)?.n ?? "Técnico";
+      // 21/10: sem registo do dia (o ecrã antigo), o "feita" leva o que está registado
+      const ev = (t.exec.envios ??= []), ultimo = ev[ev.length - 1];
+      if (ultimo?.k === "registo" && ultimo.dia === d.obra.plano!.dia) ultimo.k = "feita";
+      else ev.push({ q: agora(), dia: d.obra.plano!.dia, quem, k: "feita", horas: t.exec.horas, fotos: t.exec.fotos.slice(), nota: t.exec.nota });
       (d.obra.diario ??= []).push({ q: agora(), quem, t: `${t.nome} feita: ${nfmt(t.exec.horas)} h${t.exec.nota ? `. ${t.exec.nota}` : ""}`, k: "horas", fotos: t.exec.fotos.slice(0, 2) });
       log(d, `Obra: ${t.nome} feita por ${quem} · por validar`);
       avisar({ msg: "Tarefa marcada como feita", sub: "O responsável de obra valida a seguir", kind: "ok" });
@@ -1576,6 +1596,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t?.exec || t.exec.estado !== "feita") return;
       t.exec.estado = "validada"; t.exec.validada = agora();
+      (t.exec.envios ??= []).push({ q: agora(), dia: d.obra.plano!.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, k: "validada" });
       (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Validou ${t.nome.toLowerCase()}.`, k: "validacao" });
       log(d, `Obra: ${t.nome} validada`);
       const falta = d.obra.plano!.tasks.filter((x) => x.exec?.estado !== "validada").length;
@@ -1586,6 +1607,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t?.exec || t.exec.estado !== "feita" || !motivo.trim()) return;
       t.exec.estado = "corrigir"; t.exec.motivo = motivo.trim();
+      (t.exec.envios ??= []).push({ q: agora(), dia: d.obra.plano!.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, k: "correcao", nota: motivo.trim() });
       (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: `Pediu correção em ${t.nome.toLowerCase()}: ${motivo.trim()}`, k: "correcao" });
       log(d, `Obra: correção pedida em ${t.nome} · ${motivo.trim()}`, "w");
       avisar({ msg: "Correção pedida", sub: "Volta ao técnico, com o motivo", kind: "" });
@@ -1598,10 +1620,77 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (p.dia + 1 >= fim) { avisar({ msg: "É o último dia do plano", sub: "Registe o fim da obra quando estiver tudo validado", kind: "" }); return; }
       p.dia += 1; log(d, `Obra: dia ${p.dia + 1} de ${fim}`);
     },
+    /* -------------------------------------------- 21/10: o dia a dia da obra (trabalhoObra.ts) */
+    /** O dia da obra para trás ou para a frente (o protótipo não tem relógio): os registos feitos ficam. */
+    irParaDia(id: number, dia: number) {
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado !== "em curso") return;
+      const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)), nd = Math.max(0, Math.min(fim - 1, Math.round(dia)));
+      if (nd === p.dia) return;
+      p.dia = nd;
+    },
+    /** O técnico escolhe quem é no Hoje dele. */
+    souTec(tec: string) { if (TECS.some((x) => x.id === tec)) S.tec = tec; },
+    /** O técnico marca (ou desmarca) um passo das instruções; a tarefa começa com o primeiro. */
+    marcarPasso(id: number, ti: number, k: number) {
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t || d.obra.plano!.estado !== "em curso") return;
+      const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      if (e.estado === "validada" || e.estado === "feita") return;
+      const L = new Set(e.passos ?? []);
+      if (L.has(k)) L.delete(k); else L.add(k);
+      e.passos = [...L].sort((a, b) => a - b); t.exec = e;
+    },
+    /** O registo do dia do técnico: as horas de hoje, as fotografias e a descrição. Com `feita`, pede a validação. */
+    enviarRegisto(id: number, ti: number, m: { horas: number; fotos: string[]; nota: string; feita?: boolean }) {
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado !== "em curso") return;
+      const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      if (e.estado === "validada" || e.estado === "feita") return;
+      const nota = m.nota.trim(), horas = Math.max(0, Math.round(m.horas * 2) / 2);
+      const F: string[] = [];
+      if (!(horas > 0)) F.push("as horas de hoje");
+      if (!m.fotos.length) F.push("uma fotografia");
+      if (!nota) F.push("o que fez hoje");
+      if (F.length) { avisar({ msg: "Ainda não dá para enviar", sub: "Falta " + F.join(", ").replace(/, ([^,]*)$/, " e $1"), kind: "bad" }); return; }
+      const quem = TECS.find((x) => x.id === t.tec)?.n ?? "Técnico", I = instrucoesDe(t);
+      const feitos = (e.passos ?? []).map((k) => I.passos[k]).filter(Boolean);
+      const ja = new Set((e.envios ?? []).flatMap((x) => x.passos ?? []));
+      e.horas = Math.round((e.horas + horas) * 2) / 2;
+      e.fotos = [...e.fotos, ...m.fotos].slice(-6);
+      e.nota = nota; e.motivo = undefined;
+      const envio: Envio = { q: agora(), dia: p.dia, quem, k: m.feita ? "feita" : "registo", horas, fotos: m.fotos.slice(), nota, passos: feitos.filter((x) => !ja.has(x)) };
+      (e.envios ??= []).push(envio);
+      if (m.feita) { e.estado = "feita"; e.feita = agora(); } else e.estado = "em curso";
+      t.exec = e;
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `${t.nome}: ${nota}${m.feita ? " · pronta a validar" : ""}`, k: "horas", fotos: m.fotos.slice(0, 2) });
+      log(d, `Obra: registo de ${quem} em ${t.nome} · ${nfmt(horas)} h${m.feita ? " · feita, por validar" : ""}`);
+      avisar(m.feita
+        ? { msg: "Enviado ao responsável de obra", sub: "Valida a seguir. O cliente já vê as fotografias no portal.", kind: "ok" }
+        : { msg: "Registo de hoje enviado", sub: "O responsável e o cliente já o veem", kind: "ok" });
+    },
+    /** As Operações ajustam o plano com a obra em curso (dias, início, técnico), com o motivo; podem avisar o cliente no portal. */
+    ajustarAoVivo(id: number, ti: number, m: AjusteVivo, motivo: string, cliente: boolean) {
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado !== "em curso" || !motivo.trim()) return;
+      const prev = preverAjuste(p, ti, m);
+      if (!prev.texto) { avisar({ msg: "Nada mudou", sub: "Mude os dias, o início ou o técnico", kind: "" }); return; }
+      const fimAntes = rotuloDia(p, prev.fimAntes - 1);
+      aplicarAjuste(p, ti, m);
+      const fimDepois = rotuloDia(p, prev.fimDepois - 1);
+      const alt: Alteracao = { q: agora(), dia: p.dia, quem: PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, t: prev.texto, motivo: motivo.trim(), fimAntes, fimDepois, cliente };
+      if (cliente) alt.avisoCliente = textoAvisoCliente(t.nome, motivo.trim(), fimAntes, fimDepois);
+      (d.obra.alteracoes ??= []).unshift(alt);
+      (d.obra.diario ??= []).push({ q: agora(), quem: alt.quem, t: `Plano ajustado: ${prev.texto} (${motivo.trim().toLowerCase()})${cliente ? " · cliente avisado" : ""}`, k: "marco" });
+      log(d, `Plano ajustado em obra: ${prev.texto} · ${motivo.trim()}${cliente ? " · cliente avisado no portal" : ""}`, prev.fimDepois > prev.fimAntes ? "w" : "a");
+      avisar({ msg: "Plano ajustado", sub: `${prev.fimDepois !== prev.fimAntes ? `Acaba a ${fimDepois}` : "A data de fim mantém-se"}${cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
+    },
     /** Uma ocorrência no diário de obra (ex.: um imprevisto). */
     ocorrencia(id: number, texto: string) {
       const d = deal(id); if (!texto.trim()) return;
-      (d.obra.diario ??= []).push({ q: agora(), quem: PAPEIS[S.role].nome, t: texto.trim(), k: "ocorrencia" });
+      const quem = S.role === "tecnico" ? TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico" : PAPEIS[S.role].nome;
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: texto.trim(), k: "ocorrencia" });
+      if (S.role === "tecnico") avisar({ msg: "Problema enviado ao responsável de obra", sub: "O Filipe vê-o já na página da obra", kind: "ok" });
       log(d, "Obra: ocorrência · " + texto.trim(), "w");
     },
     /** Segurança e licenças: marcar um ponto como tratado. */

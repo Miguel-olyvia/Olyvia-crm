@@ -13,7 +13,14 @@ import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
 import { resumoFin } from "./v2/financeiro";
 import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
-import { textoMateriais } from "./preparacaoObra";
+import { rotuloDia, textoMateriais } from "./preparacaoObra";
+import { useState } from "react";
+import { COR_FASE } from "./planoObra";
+import { FASES_OBRA } from "./fasesObra";
+import { fimDe } from "./ajustesPlano";
+import { estadoDe, progresso } from "./obraOps";
+import { enviosDe } from "./trabalhoObra";
+import { ChipEstado, DiaDaObra, FitaDias } from "./AcompanhamentoObra";
 
 /** A V2 e a V2 funcional registam faturas (com tranches); a Atual fica como era. */
 const ehV2 = () => lerVersao() !== "atual";
@@ -74,28 +81,82 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   const pl = d.obra.plano!, R = d.obra.real, T = tot(d, S);
   const horas = pl.tasks.reduce((a, t) => a + t.h, 0), nc = conflitos(pl).length;
-  const estado = { "por aprovar": "O plano está à espera das Operações.", aprovado: "Plano aprovado. Falta arrancar.", "em curso": `Obra em curso: dia ${pl.dia + 1}.`, "concluída": "Obra concluída." }[pl.estado];
+  const fim = Math.max(1, fimDe(pl.tasks)), prog = progresso(pl);
+  const val = pl.tasks.filter((t) => pl.estado === "concluída" || estadoDe(t) === "validada").length;
+  const fotos = pl.tasks.reduce((a, t) => a + enviosDe(t).reduce((b, e) => b + (e.fotos?.length ?? 0), 0), 0);
+  const alts = d.obra.alteracoes ?? [];
+  // 21/10: o dia que o comercial está a ver (para trás ou para a frente); começa em hoje
+  const [sel, setSel] = useState(pl.estado === "em curso" ? pl.dia : 0);
+  const titulo = { "por aprovar": "Plano à espera das Operações", aprovado: "Plano aprovado, falta arrancar", "em curso": `Obra em curso · dia ${pl.dia + 1} de ${fim}`, "concluída": "Obra concluída" }[pl.estado];
+  const fases = [...new Set(pl.tasks.map((t) => t.fase ?? 0))].sort();
   return (
     <div className="max-w-3xl space-y-10">
-      <section aria-labelledby="plano-t">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h3 id="plano-t" className="text-base font-semibold">Plano</h3>
-          <Button variant="ghost" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
+      {/* o estado da obra, num cartão: o progresso, as fases e o estado de cada tarefa */}
+      <section aria-labelledby="plano-t" className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 id="plano-t" className="text-xl font-semibold tracking-tight">{titulo}</h3>
+            <p className="mt-0.5 text-[15px] text-muted-foreground">
+              {rotuloDia(pl, 0)} a {rotuloDia(pl, fim - 1)} · {pl.tasks.length} {pl.origem === "orcamento" ? "tarefas" : "fases"} · {nfmt(horas)} h de equipa{nc ? ` · ${nc} conflito por resolver` : ""}
+            </p>
+          </div>
+          <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </div>
-        <p className="mt-1 text-[15px]">{estado} <span className="text-muted-foreground">{pl.tasks.length} {pl.origem === "orcamento" ? "tarefas" : "fases"} · {nfmt(horas)} h de equipa{nc ? ` · ${nc} conflito por resolver` : ""}</span></p>
-        <ol className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-          {pl.tasks.map((t, i) => {
-            const tec = TECS.find((x) => x.id === t.tec);
-            const feita = pl.estado === "concluída" || (pl.estado === "em curso" && t.dia + t.dur <= pl.dia);
-            return (
-              <li key={i} className="flex min-h-14 items-center gap-3 py-2.5">
-                <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full border", feita ? "border-success bg-success text-white" : "border-input")}>{feita && <Check className="h-3.5 w-3.5" />}</span>
-                <span className="min-w-0 flex-1"><span className="block text-[15px]">{t.nome}</span><span className="block text-[15px] text-muted-foreground">{tec ? tec.n : "sem técnico"} · {nfmt(t.h)} h · {t.dur} {t.dur === 1 ? "dia" : "dias"}</span></span>
-              </li>
-            );
-          })}
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary transition-[width] duration-700" style={{ width: `${Math.round(prog * 100)}%` }} /></div>
+          <span className="text-lg font-semibold tabular-nums">{Math.round(prog * 100)}%</span>
+        </div>
+        <dl className="mt-4 grid grid-cols-3 gap-3 text-center">
+          {([["Tarefas validadas", `${val} de ${pl.tasks.length}`], ["Fotografias", String(fotos)], ["Ajustes ao plano", String(alts.length)]] as [string, string][]).map(([k, v]) => (
+            <div key={k} className="rounded-xl bg-muted/60 px-2 py-2.5"><dt className="text-sm text-muted-foreground">{k}</dt><dd className="text-lg font-semibold tabular-nums">{v}</dd></div>
+          ))}
+        </dl>
+        <ol className="mt-5 space-y-3">
+          {fases.map((f) => (
+            <li key={f} className="flex gap-3">
+              <span className="mt-1.5 h-3 w-3 shrink-0 rounded-full" style={{ background: f ? COR_FASE[f] : "#7c5ce0" }} aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                {f > 0 && <p className="text-sm font-medium text-muted-foreground">Fase {f} · {FASES_OBRA[f - 1].curto}</p>}
+                <ul className="mt-1 space-y-1.5">
+                  {pl.tasks.filter((t) => (t.fase ?? 0) === f).map((t) => (
+                    <li key={t.nome} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <span className="min-w-0 text-[15px]">{t.nome} <span className="text-muted-foreground">· {TECS.find((x) => x.id === t.tec)?.n ?? "sem técnico"} · {rotuloDia(pl, t.dia)}{t.dur > 1 ? ` a ${rotuloDia(pl, t.dia + t.dur - 1)}` : ""}</span></span>
+                      {(pl.estado === "em curso" || pl.estado === "concluída") && <ChipEstado e={pl.estado === "concluída" ? "validada" : estadoDe(t)} />}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </li>
+          ))}
         </ol>
       </section>
+
+      {/* o dia a dia: para trás e para a frente */}
+      {(pl.estado === "em curso" || pl.estado === "concluída") && (
+        <section aria-labelledby="dia-t">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h3 id="dia-t" className="text-base font-semibold">Dia a dia</h3>
+            {pl.estado === "em curso" && sel !== pl.dia && <button type="button" onClick={() => setSel(pl.dia)} className="min-h-10 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Voltar a hoje</button>}
+          </div>
+          <p className="mt-1 text-[15px] text-muted-foreground">O que cada técnico fez e enviou, com as fotografias. Use as setas para ver os dias anteriores e os próximos.</p>
+          <div className="mt-3"><FitaDias p={pl} sel={sel} setSel={setSel} /></div>
+          <div className="mt-4"><DiaDaObra p={pl} dia={sel} modo="comercial" /></div>
+        </section>
+      )}
+
+      {alts.length > 0 && (
+        <section aria-labelledby="alt-t">
+          <h3 id="alt-t" className="text-base font-semibold">Ajustes ao plano</h3>
+          <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
+            {alts.map((a, k) => (
+              <li key={k} className="py-3">
+                <p className="text-[15px]">{a.t} <span className="text-muted-foreground">· {a.motivo}</span></p>
+                <p className="text-sm text-muted-foreground">{a.q} · {a.quem} · {a.fimAntes === a.fimDepois ? "o fim mantém-se" : `fim: ${a.fimAntes} → ${a.fimDepois}`} · {a.cliente ? "cliente avisado no portal" : "cliente não avisado"}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section aria-labelledby="mat-t">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
