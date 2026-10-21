@@ -1,7 +1,8 @@
 // Os ajustes das Operações ao plano da obra (15/10/2026) e o ciclo da tarefa na obra (técnico → fotografia → supervisor).
 import { describe, expect, it } from "vitest";
 import { acoes, conflitos, seed, type Estado, type Negocio } from "./motor";
-import { diferencas, encadearFases, fimDe, inicioMinimo } from "./ajustesPlano";
+import { diasDasHoras, diferencas, encadearFases, fimDe, inicioMinimo } from "./ajustesPlano";
+import { aplicarAjuste, preverAjuste } from "./trabalhoObra";
 import { equipaDaObra, equipamentosDaObra, faltaParaFeita, materiaisPorFase, porValidar, seguranca, tarefasDoDia } from "./obraOps";
 import { rotuloDia } from "./preparacaoObra";
 
@@ -151,5 +152,32 @@ describe("a obra: técnico → fotografia → supervisor", () => {
     expect(E.some((e) => e.n === "Martelo demolidor")).toBe(true);
     expect(materiaisPorFase(d).length).toBeGreaterThan(0);
     expect(seguranca(d).find((x) => x.k === "seguro")!.ok).toBe(true);
+  });
+});
+
+describe("a duração em horas úteis (21/10)", () => {
+  it("as horas dão os dias do calendário (8 h por dia útil)", () => {
+    expect([diasDasHoras(0.5), diasDasHoras(8), diasDasHoras(8.5), diasDasHoras(16)]).toEqual([1, 1, 2, 2]);
+  });
+  it("antes de arrancar: 3 h numa tarefa de 1 dia mantém o calendário; 12 h passa a 2 dias e empurra o que vem depois", () => {
+    const { A, d, p } = preparar();
+    const ti = p.tasks.findIndex((t) => t.dur === 1);
+    const fim = fimDe(p.tasks), depois = p.tasks.filter((x, i) => i !== ti && x.dia >= p.tasks[ti].dia + 1).map((x) => x.dia);
+    A.ajustarTarefa(d.id, ti, { h: 3 });
+    expect(p.tasks[ti]).toMatchObject({ h: 3, dur: 1 });
+    expect(fimDe(p.tasks)).toBe(fim);
+    A.ajustarTarefa(d.id, ti, { h: 12 });
+    expect(p.tasks[ti]).toMatchObject({ h: 12, dur: 2 });
+    expect(p.tasks.filter((x, i) => i !== ti && x.dia >= p.tasks[ti].dia + 2).map((x) => x.dia).length).toBeGreaterThanOrEqual(depois.length ? 1 : 0);
+    expect(fimDe(p.tasks)).toBeGreaterThanOrEqual(fim);
+  });
+  it("com a obra em curso: o efeito diz as horas, e as horas arredondam à meia hora", () => {
+    const { p } = preparar();
+    p.estado = "em curso"; p.dia = 0;
+    const ti = p.tasks.findIndex((t) => t.dia > 0 && t.dur === 1);
+    const prev = preverAjuste(p, ti, { h: 2.3 });
+    expect(prev.texto).toContain("→ 2,5 h");
+    aplicarAjuste(p, ti, { h: 2.3 });
+    expect(p.tasks[ti].h).toBe(2.5);
   });
 });

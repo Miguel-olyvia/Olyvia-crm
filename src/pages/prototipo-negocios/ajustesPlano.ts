@@ -52,6 +52,21 @@ export function mudarDuracao(p: Plano, ti: number, dur: number): void {
   encadearFases(p);
 }
 
+/** 21/10: a duração em horas úteis (passos de meia hora, mínimo meia hora). Os dias no calendário são os que essas horas
+ *  pedem (8 h por dia útil); se mudarem, o que vinha depois anda o mesmo, como em mudarDuracao. As horas são as da tarefa. */
+export const diasDasHoras = (h: number): number => Math.max(1, Math.ceil(h / HORAS_DIA - 1e-9));
+export function mudarHoras(p: Plano, ti: number, h: number): void {
+  const t = p.tasks[ti];
+  if (!t) return;
+  guardarBase(p);
+  const nh = Math.max(0.5, Math.round(h * 2) / 2), nd = diasDasHoras(nh), delta = nd - t.dur, fimAntes = t.dia + t.dur;
+  t.h = nh;
+  if (!delta) return;
+  t.dur = nd;
+  p.tasks.forEach((x, i) => { if (i !== ti && x.dia >= fimAntes) x.dia = Math.max(0, x.dia + delta); });
+  encadearFases(p);
+}
+
 /** Muda o dia de início (não antes do fim da fase anterior); as fases seguintes empurram-se se for preciso. */
 export function mudarInicio(p: Plano, ti: number, dia: number): void {
   const t = p.tasks[ti];

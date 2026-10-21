@@ -2,7 +2,7 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
-import { diferencas, fimDe, guardarBase, mudarDuracao, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
+import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo } from "./catalogo";
@@ -1700,18 +1700,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: "O plano mudou", sub: "Volta a por aprovar. Aprove de novo para os técnicos receberem as tarefas", kind: "" });
       return true;
     },
-    /** A duração (dias úteis), o dia de início e a nota de uma tarefa. Só antes de a obra arrancar. */
-    ajustarTarefa(id: number, ti: number, m: { dur?: number; dia?: number; nota?: string }) {
+    /** A duração (dias úteis, ou h: horas úteis), o dia de início e a nota de uma tarefa. Só antes de a obra arrancar. */
+    ajustarTarefa(id: number, ti: number, m: { dur?: number; h?: number; dia?: number; nota?: string }) {
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "em curso" || p.estado === "concluída") return;
-      const antes = JSON.stringify(p.tasks.map((x) => [x.dia, x.dur]));
+      const antes = JSON.stringify(p.tasks.map((x) => [x.dia, x.dur, x.h]));
       if (m.dur != null) mudarDuracao(p, ti, m.dur);
+      if (m.h != null) mudarHoras(p, ti, m.h);
       if (m.dia != null) mudarInicio(p, ti, m.dia);
       if (m.nota != null) { const n = m.nota.trim(); if ((t.nota ?? "") !== n) { t.nota = n || undefined; log(d, `Plano: nota em ${t.nome}${n ? ": " + n : " apagada"}`); } }
-      if (JSON.stringify(p.tasks.map((x) => [x.dia, x.dur])) === antes) return;
-      avisarTecnico(p, ti, `${t.nome} mudou: ${t.dur} ${t.dur === 1 ? "dia" : "dias"} a partir de ${rotuloDia(p, t.dia)}`, agora());
+      if (JSON.stringify(p.tasks.map((x) => [x.dia, x.dur, x.h])) === antes) return;
+      const quanto = m.h != null ? `${nfmt(t.h)} h` : `${t.dur} ${t.dur === 1 ? "dia" : "dias"}`;
+      avisarTecnico(p, ti, `${t.nome} mudou: ${quanto} a partir de ${rotuloDia(p, t.dia)}`, agora());
       const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1, dif = diferencas(p).dias;
-      log(d, `Plano: ${t.nome} · ${t.dur} ${t.dur === 1 ? "dia" : "dias"} a partir de ${rotuloDia(p, t.dia)} · a obra acaba a ${rotuloDia(p, fim)}`);
+      log(d, `Plano: ${t.nome} · ${quanto} a partir de ${rotuloDia(p, t.dia)} · a obra acaba a ${rotuloDia(p, fim)}`);
       if (A.planoMudou(d)) return;
       avisar({ msg: "Plano ajustado", sub: `Acaba a ${rotuloDia(p, fim)}${dif ? ` · ${dif > 0 ? "+" : "−"}${Math.abs(dif)} ${Math.abs(dif) === 1 ? "dia" : "dias"} face ao orçamento` : ""}`, kind: "ok" });
     },

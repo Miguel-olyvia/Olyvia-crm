@@ -6,7 +6,7 @@
 // · Os ajustes ao plano com a obra em curso: o que se pode mexer (só o que ainda não foi validado e não ficou para trás),
 //   a pré-visualização do efeito (sem mexer no plano) e o texto do aviso ao cliente.
 import { TECS, type Negocio, type Plano, type Tarefa } from "./motor";
-import { fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarInicio } from "./ajustesPlano";
+import { fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarHoras, mudarInicio } from "./ajustesPlano";
 import { estadoDe } from "./obraOps";
 import { rotuloDia } from "./preparacaoObra";
 
@@ -211,7 +211,8 @@ export interface Alteracao {
   /** O texto que o cliente vê no portal. */
   avisoCliente?: string;
 }
-export interface AjusteVivo { dur?: number; dia?: number; tec?: string }
+/** dur em dias úteis, ou h em horas úteis (21/10: as tarefas curtas ajustam-se à hora). */
+export interface AjusteVivo { dur?: number; h?: number; dia?: number; tec?: string }
 export const MOTIVOS_AJUSTE = ["Imprevisto na obra", "Pedido do cliente", "Material atrasado", "Técnico indisponível", "Mais rápido do que previsto"] as const;
 
 /** O que se pode mexer numa tarefa com a obra em curso: nada nas validadas; o início só nas que ainda não começaram (e não para trás de hoje). */
@@ -236,6 +237,8 @@ export function inicioMinimoVivo(p: Plano, ti: number): number {
 export function aplicarAjuste(p: Plano, ti: number, m: AjusteVivo): void {
   const P = podeAjustar(p, ti);
   if (m.dur != null && P.dur) mudarDuracao(p, ti, Math.max(duracaoMinima(p, ti), m.dur));
+  // em horas: não acaba antes de hoje (as horas chegam pelo menos ao dia de hoje)
+  if (m.h != null && P.dur) mudarHoras(p, ti, Math.max((duracaoMinima(p, ti) - 1) * 8 + 0.5, m.h));
   if (m.dia != null && P.inicio) mudarInicio(p, ti, Math.max(inicioMinimoVivo(p, ti), m.dia));
   if (m.tec && P.tec) p.tasks[ti].tec = m.tec;
   // o que já passou não muda: as tarefas validadas ficam onde estavam
@@ -246,11 +249,14 @@ export function preverAjuste(p: Plano, ti: number, m: AjusteVivo): { fimAntes: n
   aplicarAjuste(c, ti, m);
   const mexe = p.tasks.map((t, i) => (i !== ti && (c.tasks[i].dia !== t.dia || c.tasks[i].dur !== t.dur) ? t.nome : "")).filter(Boolean);
   const t = p.tasks[ti], n = c.tasks[ti], partes: string[] = [];
-  if (n.dur !== t.dur) partes.push(`${t.dur} → ${n.dur} ${n.dur === 1 ? "dia" : "dias"}`);
+  if (m.h != null && n.h !== t.h) partes.push(`${horasTxt(t.h)} → ${horasTxt(n.h)}${n.dur !== t.dur ? ` (${n.dur} ${n.dur === 1 ? "dia" : "dias"})` : ""}`);
+  else if (n.dur !== t.dur) partes.push(`${t.dur} → ${n.dur} ${n.dur === 1 ? "dia" : "dias"}`);
   if (n.dia !== t.dia) partes.push(`começa a ${rotuloDia(c, n.dia)} (era ${rotuloDia(p, t.dia)})`);
   if (n.tec !== t.tec) partes.push(`passa para ${TECS.find((x) => x.id === n.tec)?.n ?? "outro técnico"}`);
   return { fimAntes: fimDe(p.tasks), fimDepois: fimDe(c.tasks), mexe, texto: partes.length ? `${t.nome}: ${partes.join(", ")}` : "" };
 }
+/** "5,5 h". */
+export const horasTxt = (h: number) => `${String(Math.round(h * 100) / 100).replace(".", ",")} h`;
 /** O aviso ao cliente, em linguagem simples (sem técnicos nem horas). */
 export function textoAvisoCliente(nomeTarefa: string, motivo: string, fimAntes: string, fimDepois: string): string {
   const fim = fimAntes === fimDepois ? `A data de fim mantém-se: ${fimDepois}.` : `A obra passa a acabar a ${fimDepois} (antes: ${fimAntes}).`;

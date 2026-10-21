@@ -16,7 +16,8 @@ import { PAPEIS, TECS, aberto, conflitos, diaDeFerias, eur, nfmt, type Negocio, 
 import { COR_FASE, dataCurta, iniciosRapidos, isoDia } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara } from "./preparacaoObra";
-import { diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
+import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
+import { HORAS_DIA } from "./ganttOrcamento";
 import {
   RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, custosObra, equipaDaObra, equipamentosDaObra, estadoDe, faltaParaFeita, fotoExemplo,
   iniciais, materiaisPorFase, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
@@ -65,6 +66,37 @@ function Passo({ rot, valor, menos, mais, desMenos, desMais }: { rot: string; va
   );
 }
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
+
+/**
+ * 21/10: a duração de uma tarefa, em dias úteis ou em horas úteis (uma tarefa curta não tem de ocupar um dia inteiro).
+ * Em horas, o passo é de meia hora até 2 h e de 1 h a seguir; os dias no calendário saem das horas (8 h por dia).
+ */
+function Duracao({ dur, h, minDur = 1, mudarDias, mudarHoras, nota }: {
+  dur: number; h: number; minDur?: number; mudarDias: (n: number) => void; mudarHoras: (n: number) => void; nota?: ReactNode;
+}) {
+  const [modo, setModo] = useState<"dias" | "horas">(dur === 1 && h < HORAS_DIA ? "horas" : "dias");
+  const minH = (minDur - 1) * HORAS_DIA + 0.5, passo = (x: number, dir: 1 | -1) => (x + (dir > 0 ? 0 : -0.01) < 2 ? 0.5 : 1) * dir;
+  const seg = (on: boolean) => cn("min-h-9 rounded-md px-3 text-sm font-medium transition-colors", on ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground");
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+      <dt className="text-[15px]">
+        <span className="flex items-center gap-2">Duração
+          <span role="group" aria-label="Unidade da duração" className="inline-flex rounded-lg bg-muted p-0.5">
+            <button type="button" aria-pressed={modo === "dias"} onClick={() => setModo("dias")} className={seg(modo === "dias")}>Dias</button>
+            <button type="button" aria-pressed={modo === "horas"} onClick={() => setModo("horas")} className={seg(modo === "horas")}>Horas</button>
+          </span>
+        </span>
+        <span className="block text-sm text-muted-foreground">{modo === "horas" ? `${dias(dur)} no calendário · 8 h por dia útil` : `${nfmt(h)} h de trabalho`}</span>
+        {nota}
+      </dt>
+      <dd>
+        {modo === "dias"
+          ? <Passo rot="Dias da tarefa" valor={dias(dur)} desMenos={dur <= minDur} menos={() => mudarDias(dur - 1)} mais={() => mudarDias(dur + 1)} />
+          : <Passo rot="Horas úteis da tarefa" valor={`${nfmt(h)} h`} desMenos={h <= minH} menos={() => mudarHoras(Math.max(minH, h + passo(h, -1)))} mais={() => mudarHoras(h + passo(h, 1))} />}
+      </dd>
+    </div>
+  );
+}
 
 /** O estado da tarefa na obra: a cor e o ícone (iguais no Gantt, nas listas e na app do técnico). */
 const TOM_EXEC: Record<EstadoExec, string> = {
@@ -568,9 +600,9 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
                     </button>
                     <div className="relative h-7" style={{ width: gradeW }}>
                       {/* 21/10: a barra arrasta-se (início e fase) e a ponta puxa os dias (PlanoInterativo.tsx) */}
-                      <BarraTarefa p={p} t={t} ti={i} colW={colW} x={X(t.dia) + 2} largura={X(t.dur) - 4} cor={cor} ativa={muda} abrir={() => setAberta(aqui ? null : i)}
+                      <BarraTarefa p={p} t={t} ti={i} colW={colW} x={X(t.dia) + 2} largura={(t.dur === 1 && t.h < HORAS_DIA ? X(1) * Math.max(0.3, t.h / HORAS_DIA) : X(t.dur)) - 4 /* 21/10: menos de um dia, barra parcial */} cor={cor} ativa={muda} abrir={() => setAberta(aqui ? null : i)}
                         mover={(dia, fase) => run(() => (fase ? A.moverTarefaPlano(d.id, i, { fase, dia }) : A.ajustarTarefa(d.id, i, { dia })))} durar={(dur) => run(() => A.ajustarTarefa(d.id, i, { dur }))}
-                        rotulo={`${t.nome}, ${rotuloDia(p, t.dia)}, ${dias(t.dur)}${muda ? ". Arraste para mudar o início ou a fase; a ponta muda os dias. Teclado: setas, Shift + setas, Alt + setas." : ""}`}
+                        rotulo={`${t.nome}, ${rotuloDia(p, t.dia)}, ${t.dur === 1 && t.h < HORAS_DIA ? nfmt(t.h) + " h" : dias(t.dur)}${muda ? ". Arraste para mudar o início ou a fase; a ponta muda os dias. Teclado: setas, Shift + setas, Alt + setas." : ""}`}
                         className={cn(c && "ring-2 ring-warning", ex === "feita" && "ring-2 ring-warning/70", ex === "corrigir" && "ring-2 ring-destructive", aqui && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-card")}
                         style={{ opacity: ex === "validada" || p.estado === "concluída" ? 0.55 : 1 }}>
                         {(ex === "validada" || p.estado === "concluída") && <Check className="absolute right-1.5 top-1 h-4 w-4 text-white" />}
@@ -619,10 +651,8 @@ function AjustarTarefa({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: numbe
         <button type="button" onClick={fechar} aria-label="Fechar" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg hover:bg-muted"><X className="h-5 w-5" /></button>
       </div>
       <dl className="mt-3 divide-y divide-border">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
-          <dt className="text-[15px]">Dias úteis{b && b.dur !== t.dur && <span className="block text-sm text-muted-foreground">no orçamento: {dias(b.dur)}</span>}</dt>
-          <dd><Passo rot="Dias da tarefa" valor={dias(t.dur)} desMenos={t.dur <= 1} menos={() => run(() => A.ajustarTarefa(d.id, ti, { dur: t.dur - 1 }))} mais={() => run(() => A.ajustarTarefa(d.id, ti, { dur: t.dur + 1 }))} /></dd>
-        </div>
+        <Duracao dur={t.dur} h={t.h} mudarDias={(n) => run(() => A.ajustarTarefa(d.id, ti, { dur: n }))} mudarHoras={(n) => run(() => A.ajustarTarefa(d.id, ti, { h: n }))}
+          nota={b && (b.dur !== t.dur || b.h !== t.h) && <span className="block text-sm text-muted-foreground">no orçamento: {dias(b.dur)} · {nfmt(b.h)} h</span>} />
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
           <dt className="text-[15px]">Começa{t.dia <= min && min > 0 && <span className="block text-sm text-muted-foreground">não antes do último dia da fase anterior</span>}</dt>
           <dd><Passo rot="Dia de início" valor={rotuloDia(p, t.dia)} desMenos={t.dia <= min} menos={() => run(() => A.ajustarTarefa(d.id, ti, { dia: t.dia - 1 }))} mais={() => run(() => A.ajustarTarefa(d.id, ti, { dia: t.dia + 1 }))} /></dd>
@@ -925,10 +955,11 @@ function DarPorFeita({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: number;
 function AjustarAoVivo({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: number; fechar: () => void }) {
   const { A, run } = ctx;
   const p = d.obra.plano!, t = p.tasks[ti], P = podeAjustar(p, ti);
-  const [dur, setDur] = useState(t.dur), [dia, setDia] = useState(t.dia), [tec, setTec] = useState(t.tec ?? "");
+  const [dur, setDur] = useState(t.dur), [h, setH] = useState(t.h), [dia, setDia] = useState(t.dia), [tec, setTec] = useState(t.tec ?? "");
   const [motivo, setMotivo] = useState(""), [cliente, setCliente] = useState(true);
-  useEffect(() => { setDur(t.dur); setDia(t.dia); setTec(t.tec ?? ""); setMotivo(""); }, [ti, t.dur, t.dia, t.tec]);
-  const m = { dur: dur !== t.dur ? dur : undefined, dia: dia !== t.dia ? dia : undefined, tec: tec && tec !== t.tec ? tec : undefined };
+  useEffect(() => { setDur(t.dur); setH(t.h); setDia(t.dia); setTec(t.tec ?? ""); setMotivo(""); }, [ti, t.dur, t.h, t.dia, t.tec]);
+  // a duração muda-se em dias ou em horas (a última que se mexeu manda)
+  const m = { dur: dur !== t.dur && h === t.h ? dur : undefined, h: h !== t.h ? h : undefined, dia: dia !== t.dia ? dia : undefined, tec: tec && tec !== t.tec ? tec : undefined };
   const prev = preverAjuste(p, ti, m), muda = !!prev.texto;
   const fimA = rotuloDia(p, prev.fimAntes - 1), delta = prev.fimDepois - prev.fimAntes;
   const fimD = delta ? rotuloDia(p, prev.fimDepois - 1) : fimA;
@@ -947,10 +978,9 @@ function AjustarAoVivo({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: numbe
       {(P.dur || P.inicio || P.tec) && (
         <dl className="mt-3 divide-y divide-border">
           {P.dur && (
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
-              <dt className="text-[15px]">Dias úteis{minDur > 1 && <span className="block text-sm text-muted-foreground">não pode acabar antes de hoje</span>}</dt>
-              <dd><Passo rot="Dias da tarefa" valor={dias(dur)} desMenos={dur <= minDur} menos={() => setDur(dur - 1)} mais={() => setDur(dur + 1)} /></dd>
-            </div>
+            <Duracao dur={h !== t.h ? diasDasHoras(h) : dur} h={h !== t.h ? h : dur !== t.dur ? dur * HORAS_DIA : t.h} minDur={minDur}
+              mudarDias={(n) => { setDur(n); setH(t.h); }} mudarHoras={(n) => { setH(n); setDur(t.dur); }}
+              nota={minDur > 1 && <span className="block text-sm text-muted-foreground">não pode acabar antes de hoje</span>} />
           )}
           {P.inicio && (
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
