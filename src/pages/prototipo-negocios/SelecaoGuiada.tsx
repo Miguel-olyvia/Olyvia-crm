@@ -31,8 +31,6 @@ import {
   tocarServico, trocaResolvida, vizinho, type BlocoFornece, type ItemFornece, type PassoSel,
 } from "./selecao";
 import { CartaoProduto, CartaoResposta, CartaoServico, FiltrosFila, Pesquisa, QtdMudar } from "./CartoesSelecao";
-import { ConversaLevantamento, itensAValidar, validarConversa } from "./ConversaLevantamento";
-import { useConversa } from "./conversaStore";
 import { useGuiaPasso } from "./guiaPasso";
 import { NOMES_FASES, faseDoNome, filtrarPorFase, filtroAtivo, nomeDaFase, textoResultados } from "./filtrosNecessidades";
 import { ANIMAR_ATE, Brilho, CASCATA, Contagem, MOLA, MOLA_CARTAO, Progresso, SAIDA, VistoDesenho, cascata, deslize, useReduzir, useUmaVez, vibrar } from "./movimento";
@@ -66,8 +64,7 @@ export function SelecaoGuiada(ctx: P) {
   };
   // as trocas pela ordem das fases (primeiro as da fase mais cedo)
   const obr = ordenarObrigacoesPorFase(obrigacoesAMostrar(obrigacoes(K, servicosVisita(d), v, clienteFornece), d), faseSvc);
-  const passos = passosSelecao(obr, clienteFornece, comEscolhas, true);
-  const conversa = useConversa(d.id);
+  const passos = passosSelecao(obr, clienteFornece, comEscolhas);
   const faltaEscolhas = comEscolhas && emFalta([esc], d.f).length > 0;
 
   // abre onde se ficou (o passo guardado a cada mudança); sem ele: nos serviços (nada mexido), na primeira troca por
@@ -77,7 +74,7 @@ export function SelecaoGuiada(ctx: P) {
     const guardado = lerPassoGuardado(d.id);
     if (guardado && passos.some((p) => p.k === guardado)) return guardado;
     const mexeu = Object.keys(v.manter ?? {}).length + (v.prod ?? []).length + Object.keys(v.extra).length;
-    if (!mexeu) return "conversa";
+    if (!mexeu) return "servicos";
     const q = obr.find((o) => !o.cumprida);
     return q ? "q:" + q.sid : faltaEscolhas ? "escolhas" : "resumo";
   });
@@ -119,11 +116,7 @@ export function SelecaoGuiada(ctx: P) {
     setDir(j >= 0 && j < i ? -1 : 1);
     setK(kk);
   };
-  const seguinte = () => {
-    // na conversa, o "Seguinte" junta primeiro à visita o que está marcado na proposta da Olyvia
-    if (atual.tipo === "conversa" && validarConversa(ctx, K)) vibrar([10, 30, 10], reduzir);
-    const n = vizinho(passosRef.current, atual.k, 1); if (n) ir(n); else guia?.avancar();
-  };
+  const seguinte = () => { const n = vizinho(passos, atual.k, 1); if (n) ir(n); else guia?.avancar(); };
   const anterior = () => { const n = vizinho(passos, atual.k, -1); if (n) ir(n); else guia?.recuar(); };
 
   // o aviso com "Desfazer" (5 s), por cima da barra de baixo, ao alcance do polegar
@@ -165,10 +158,8 @@ export function SelecaoGuiada(ctx: P) {
 
   const r = resumoNecessidades(S, d, orcLinhas(d, S));
   const fim = atual.tipo === "resumo";
-  const aValidarConv = conversa.estado === "parado" ? itensAValidar(d.id) : 0;
   const titulo = atual.tipo === "pergunta" && atual.o ? atual.o.pergunta ?? `Escolha ${atual.titulo.toLowerCase()}` : atual.titulo;
   const sub = atual.tipo === "pergunta" && atual.o ? `Para ${nomeCurto(nomeSvc(S, atual.o.sid)).toLowerCase()}`
-    : atual.tipo === "conversa" ? "Fale, escreva ou mande fotografias. A Olyvia procura no Catálogo e prepara a proposta; no fim, valida."
     : atual.tipo === "servicos" ? "Toque para ligar ou desligar." : atual.tipo === "fornece" ? "Por serviço: toque no que o cliente traz. Sai do preço; a mão de obra e a instalação ficam." : null;
   const variantes = deslize(reduzir);
 
@@ -189,7 +180,6 @@ export function SelecaoGuiada(ctx: P) {
               </h3>
               {sub && <p className="mt-1.5 text-[15px] leading-snug text-muted-foreground">{sub}</p>}
               <div className="mt-5">
-                {atual.tipo === "conversa" && <ConversaLevantamento ctx={ctx} />}
                 {atual.tipo === "escolhas" && <PassoEscolhas ctx={ctx} />}
                 {atual.tipo === "servicos" && <PassoServicos ctx={ctx} K={K} tiles={tiles} avisar={avisar} />}
                 {atual.tipo === "pergunta" && atual.o && <PassoPergunta key={atual.o.sid} ctx={ctx} K={K} o={atual.o} tiles={tiles} resolvido={() => avancarSozinho(atual.k)} />}
@@ -229,7 +219,7 @@ export function SelecaoGuiada(ctx: P) {
         </div>
         {(!fim || guia) && (
           <Button size="lg" className="h-12 shrink-0 rounded-xl px-5 text-[15px] shadow-[0_6px_16px_-6px_hsl(var(--primary)/0.6)]" onClick={seguinte}>
-            {fim ? "Continuar" : atual.tipo === "conversa" && aValidarConv > 0 ? `Validar (${aValidarConv})` : "Seguinte"}<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+            {fim ? "Continuar" : "Seguinte"}<ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
           </Button>
         )}
       </div>

@@ -22,7 +22,6 @@ import { MotionGlobalConfig } from "framer-motion";
 // as animações (framer-motion) acabam logo nos testes: o passo que sai não fica no DOM e os números não contam
 MotionGlobalConfig.skipAnimations = true;
 import { GuiaPassoCtx } from "./guiaPasso";
-import { guardarPasso, lerPassoGuardado } from "./rapido";
 
 const prodN = (n: string) => lerCatalogo().produtos.find((p) => p.n === n)!;
 function preencher(d: Negocio, gs: Grupo[]) {
@@ -237,12 +236,7 @@ describe("o que o cliente fornece", () => {
 });
 
 /* ------------------------------------------------------------------ no ecrã */
-function Montar({ S, d, guia, conversa }: { S: Estado; d: Negocio; guia?: { avancar: () => void; recuar: () => void; setGuiado: (b: boolean) => void }; conversa?: boolean }) {
-  // 21/10: a etapa abre na conversa com a Olyvia; estes testes começam no passo seguinte ("O que se faz"), salvo com `conversa`
-  useState(() => {
-    const v = d.visita, mexeu = Object.keys(v.manter ?? {}).length + (v.prod ?? []).length + Object.keys(v.extra).length;
-    if (!conversa && !mexeu && !lerPassoGuardado(d.id)) guardarPasso(d.id, "servicos");
-  });
+function Montar({ S, d, guia }: { S: Estado; d: Negocio; guia?: { avancar: () => void; recuar: () => void; setGuiado: (b: boolean) => void } }) {
   const [, setN] = useState(0);
   const run = useMemo(() => (fn: () => void) => { fn(); setN((x) => x + 1); }, []);
   const A = useMemo(() => acoes(S, vi.fn(), run), [S, run]);
@@ -260,11 +254,9 @@ describe("a seleção guiada no ecrã", () => {
     render(<Montar S={S} d={d} guia={guia} />);
     expect(guia.setGuiado).toHaveBeenCalledWith(true);
     expect(titulo()).toBe("O que se faz");
-    fireEvent.click(screen.getByRole("button", { name: "Voltar" })); // volta à conversa com a Olyvia
-    expect(titulo()).toBe("O que o cliente quer");
     fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
     expect(guia.recuar).toHaveBeenCalled();
-    seguinte(); seguinte(); seguinte(); seguinte(); // O que se faz, as duas trocas e Mais produtos
+    seguinte(); seguinte(); seguinte(); // as duas trocas e Mais produtos
     expect(titulo()).toBe("Mais produtos");
     seguinte();
     expect(titulo()).toBe("Escolhas do cliente");
@@ -272,13 +264,13 @@ describe("a seleção guiada no ecrã", () => {
     fireEvent.click(within(g).getByRole("button", { name: "Sim" }));
     expect(d.f.materiais_cliente).toBe("Sim");
     expect(within(g).getByRole("button", { name: "Sim" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText(/de 8$/)).toBeInTheDocument(); // conversa, serviços, 2 trocas, mais produtos, escolhas, fornece, resumo
-    expect(screen.getByText(/^6 de 8$/)).toBeInTheDocument();
+    expect(screen.getByText(/de 7$/)).toBeInTheDocument(); // serviços, 2 trocas, mais produtos, escolhas, fornece, resumo
+    expect(screen.getByText(/^5 de 7$/)).toBeInTheDocument();
     seguinte();
     expect(titulo()).toBe("O que o cliente fornece"); // logo a seguir ao "Sim"
     fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
     fireEvent.click(within(screen.getByRole("group", { name: /fornece materiais/i })).getByRole("button", { name: "Não" }));
-    expect(screen.getByText(/de 7$/)).toBeInTheDocument();
+    expect(screen.getByText(/de 6$/)).toBeInTheDocument();
     seguinte();
     expect(titulo()).toBe("Resumo");
   });
@@ -565,38 +557,17 @@ describe("a fila de filtros arrasta-se com o rato", () => {
 });
 
 /* ------------------------------------------------------------------ 14/10, 3.ª volta: o movimento, o preenchimento rápido e as fases da obra */
-describe("a conversa com a Olyvia (21/10)", () => {
-  it("sem nada mexido, a etapa abre na conversa; o modo de demonstração propõe, e 'Validar' junta à visita", async () => {
-    const { S, d } = preparar();
-    d.visita.med = { pav: 0, par: 0, pts: 0, pcs: 0 };
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ligada: false }), { status: 200 })));
-    render(<Montar S={S} d={d} conversa />);
-    expect(titulo()).toBe("O que o cliente quer");
-    expect(screen.getByRole("button", { name: /^Seguinte/ })).toBeInTheDocument(); // nada proposto: só avança
-    fireEvent.change(screen.getByRole("textbox", { name: "Mensagem para a Olyvia" }), { target: { value: "Remodelação, 2 por 2,5 e pé direito 2,4" } });
-    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
-    const validar = await screen.findByRole("button", { name: /^Validar/ }, { timeout: 4000 });
-    expect(screen.getByRole("switch", { name: /Pavimento/ })).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(screen.getByRole("switch", { name: /Paredes/ })); // fica de fora
-    fireEvent.click(validar);
-    expect(d.visita.med.pav).toBe(5);
-    expect(d.visita.med.par).toBe(0);
-    expect(titulo()).toBe("O que se faz");
-    vi.unstubAllGlobals();
-  });
-});
-
 describe("a experiência guiada: aria-live, foco, modelos rápidos, passo guardado e fases", () => {
   it("o aria-live diz o passo, o foco vai para o título do passo novo e a ordem dos passos não muda", () => {
     const { S, d } = preparar();
     d.f.materiais_cliente = "Sim";
     render(<Montar S={S} d={d} />);
     const vivo = () => document.querySelector("p[aria-live][aria-atomic]")!.textContent;
-    expect(vivo()).toBe("Passo 2 de 8: O que se faz");
+    expect(vivo()).toBe("Passo 1 de 7: O que se faz");
     const titulos: string[] = [titulo()!];
     for (let i = 0; i < 6; i++) { seguinte(); titulos.push(titulo()!); }
     expect(titulos).toEqual(["O que se faz", "O cliente mantém o pavimento?", "O cliente mantém a sanita e a base de duche?", "Mais produtos", "Escolhas do cliente", "O que o cliente fornece", "Resumo"]);
-    expect(vivo()).toBe("Passo 8 de 8: Resumo");
+    expect(vivo()).toBe("Passo 7 de 7: Resumo");
     expect(document.activeElement).toBe(screen.getByRole("heading", { level: 3 }));
   });
 
