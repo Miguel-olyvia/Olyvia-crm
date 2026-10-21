@@ -35,6 +35,8 @@ interface SeccaoVisitasProps {
   /** Cancela uma visita na base (a ficha real); sem isto não há «Cancelar visita». */
   cancelarVisita?: AcoesFicha["cancelarVisita"];
   aoRegistarResultado: (visitaId: string) => void;
+  /** O exemplo: os ids das visitas em que se fez um levantamento (cada uma di-lo). Sem isto nenhuma o diz. */
+  comLevantamento?: ReadonlySet<string>;
   /** «Carregar mais» visitas (a ficha real). */
   mais?: MaisItens;
 }
@@ -75,7 +77,7 @@ export function AcaoDoPassoPessoa({ item, nome, feita }: { item: ItemProcesso; n
 /** Há uma visita feita da pessoa, ainda por ligar a um negócio: o passo passa a ser criar o negócio. */
 export const temVisitaFeitaPorLigar = (visitas: readonly VisitaPessoa[]): boolean => visitas.some((v) => v.negocioId === null && v.estado === "feita");
 
-export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, naBase, cancelarVisita, aoRegistarResultado, mais }: SeccaoVisitasProps) {
+export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVisita, naBase, cancelarVisita, aoRegistarResultado, comLevantamento, mais }: SeccaoVisitasProps) {
   const { t } = useTranslation();
   const todas = ordenarVisitas(visitas) as VisitaPessoa[];
   if (!todas.some((v) => v.estado !== "cancelada")) return null;
@@ -88,6 +90,7 @@ export function SeccaoVisitas({ pessoa, visitas, item, hoje, negocios, alterarVi
             <LinhaVisitaPessoa
               key={v.id} pessoa={pessoa} visita={v} negocio={v.negocioId ? negocios.get(v.negocioId) : undefined} hoje={hoje}
               alterarVisita={alterarVisita} naBase={naBase} cancelarVisita={cancelarVisita} aoRegistarResultado={aoRegistarResultado}
+              comLevantamento={comLevantamento?.has(v.id)}
             />
           ))}
         </ul>

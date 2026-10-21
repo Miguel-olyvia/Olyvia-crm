@@ -53,11 +53,13 @@ interface LinhaVisitaPessoaProps {
   naBase?: boolean;
   /** Cancela a visita na base; sem isto (o exemplo) o botão «Cancelar visita» não existe. */
   cancelarVisita?: AcoesFicha["cancelarVisita"];
+  /** O exemplo: houve um levantamento feito nesta visita (a linha di-lo). Sem isto (a ficha real) a linha não o diz. */
+  comLevantamento?: boolean;
   /** Abre o diálogo do resultado desta visita. */
   aoRegistarResultado: (visitaId: string) => void;
 }
 
-export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita, naBase = false, cancelarVisita, aoRegistarResultado }: LinhaVisitaPessoaProps) {
+export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita, naBase = false, cancelarVisita, comLevantamento = false, aoRegistarResultado }: LinhaVisitaPessoaProps) {
   const { t } = useTranslation();
   const [aAlterar, setAAlterar] = useState(false);
   const [aCancelar, setACancelar] = useState(false);
@@ -98,6 +100,7 @@ export function LinhaVisitaPessoa({ pessoa, visita, negocio, hoje, alterarVisita
         {visita.nota && <LinhaCampo rotulo={t(`${K}access`)}>{visita.nota}</LinhaCampo>}
         <LinhaCampo rotulo={t(`${K}rep`)}>{visita.feitoPor}</LinhaCampo>
       </ListaCampos>
+      {comLevantamento && <p className="text-sm text-foreground">{t("pessoasPagina.reg.visits.withSurvey")}</p>}
       {!cancelada && (
         <p className="text-sm text-muted-foreground">
           {ligada ? t("pessoasPagina.reg.visits.linked", { deal: negocio ?? "" }) : t("pessoasPagina.reg.visits.unlinked")}

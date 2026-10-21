@@ -48,6 +48,10 @@ export function ResumoFicha(p: ResumoFichaProps) {
     () => new Map(resumo.negocios.map((n) => [n.id, n.servico || t("pessoasPagina.board.dealName")])),
     [resumo.negocios, t],
   );
+  // No exemplo, a visita diz se nela se fez um levantamento (como na aba Visitas); na ficha real a informação não existe.
+  const comLevantamento = useMemo(
+    () => new Set(resumo.registos.levantamentos.flatMap((l) => (l.visitaId ? [l.visitaId] : []))), [resumo.registos.levantamentos],
+  );
   // Uma perdida não tem visitas à vista. O Resumo mostra as visitas por fechar (já passaram e ainda não foram marcadas como feitas) e a próxima
   // visita (as outras estão na aba Visitas); o botão do passo fica num só sítio: nas visitas por fechar, ou, sem elas, junto da próxima visita
   // ou, sem nenhuma das duas (a visita já foi feita, ou não tem dia), no «Próximo passo e prazo».
@@ -63,11 +67,12 @@ export function ResumoFicha(p: ResumoFichaProps) {
       <SeccaoVisitasPorFechar
         pessoa={resumo.pessoa} porFechar={porFechar} visitas={visitas} item={item} hoje={p.hoje} negocios={negocios}
         alterarVisita={p.alterarVisita} naBase={p.visitasNaBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado}
+        comLevantamento={p.visitasNaBase ? undefined : comLevantamento}
       />
       <SeccaoProximaVisita
         pessoa={resumo.pessoa} visita={proxima} visitas={visitas} total={contarVisitasAtivas(visitas)} item={temPorFechar ? undefined : item} hoje={p.hoje} negocios={negocios}
         alterarVisita={p.alterarVisita} naBase={p.visitasNaBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado}
-        aoVerTodas={p.aoVerVisitas}
+        comLevantamento={p.visitasNaBase ? undefined : comLevantamento} aoVerTodas={p.aoVerVisitas}
       />
       <SeccaoPasso
         resumo={resumo} hoje={p.hoje} comVisita={comVisitas} proximaVisitaVisivel={proxima !== undefined} visitaPorFechar={temPorFechar}

@@ -33,7 +33,7 @@ import { usePainelRegistos } from "./usePainelRegistos";
 /** O que os passos mudam no estado da página (o `usePessoasEstado`). */
 export interface AcoesProcesso extends AcoesFicha {
   /** Marca uma visita à pessoa (fica nos registos dela, por ligar). */
-  marcarVisita: (pessoaId: string, dados: DadosVisitaPessoa) => void;
+  marcarVisita: (pessoaId: string, dados: DadosVisitaPessoa, negocioId?: string) => void;
   /** Guarda as visitas e o levantamento da pessoa numa só gravação. */
   guardarRegistos: (pessoaId: string, dados: PedidoGuardarRegistos) => void;
 }
@@ -182,8 +182,8 @@ export function ProcessoProvider({ aoAnunciar, children, ...p }: ProcessoProvide
   return (
     <MarcarVisitaProvider
       hoje={p.hoje} aoDevolverFoco={controlo.aoDevolverFoco} jaComVisita={jaComVisita}
-      aoMarcar={(pessoaId, dados) => {
-        p.acoes.marcarVisita(pessoaId, dados);
+      aoMarcar={(pessoaId, dados, negocioId) => {
+        p.acoes.marcarVisita(pessoaId, dados, negocioId);
         controlo.registar("visita", pessoaId, undefined, idCartaoPessoa(pessoaId));
       }}
     >

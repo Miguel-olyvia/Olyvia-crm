@@ -26,6 +26,10 @@ export function AbaVisitasFicha(p: AbaVisitasFichaProps) {
     [resumo.negocios, t],
   );
   const visitas = visitasDaFicha(resumo);
+  // No exemplo, a visita diz se nela se fez um levantamento (o levantamento não diz a visita).
+  const comLevantamento = useMemo(
+    () => new Set(resumo.registos.levantamentos.flatMap((l) => (l.visitaId ? [l.visitaId] : []))), [resumo.registos.levantamentos],
+  );
   if (contarVisitasAtivas(visitas) === 0) {
     // A primeira página pode ter só canceladas: se há mais por carregar, o botão tem de estar à vista junto do texto de vazio.
     return (
@@ -40,6 +44,7 @@ export function AbaVisitasFicha(p: AbaVisitasFichaProps) {
       <SeccaoVisitas
         pessoa={resumo.pessoa} visitas={visitas} item={undefined} hoje={p.hoje} negocios={negocios} alterarVisita={p.alterarVisita}
         naBase={p.visitasNaBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado} mais={p.maisItens?.visitas}
+        comLevantamento={p.visitasNaBase ? undefined : comLevantamento}
       />
     </div>
   );

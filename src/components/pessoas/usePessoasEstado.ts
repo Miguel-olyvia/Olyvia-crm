@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HOJE_EXEMPLO } from "@/components/negocio-metas/negocioMetasExemplo";
 import {
-  atualizarVisita, guardarVisitasELevantamento, registarContacto, registarVisita, useRegistosPessoa,
+  atualizarVisita, guardarVisitasELevantamento, ligarRegisto, registarContacto, registarVisita, useRegistosPessoa,
 } from "@/components/negocio-metas/registosPessoa";
 import { resultadoEncerra } from "@/components/negocio-metas/registosTipos";
 import { encerrarAbordagem, reativarAbordagem, type PedidoEncerrar } from "./acoesEncerrar";
@@ -114,15 +114,22 @@ export function usePessoasEstado(podeVerSubmissoes: boolean) {
     return lead.pessoa;
   }, [mudar]);
 
-  /** Marca uma visita à pessoa (fica nos registos dela, por ligar). */
-  const marcarVisita = useCallback((pessoaId: string, dados: DadosVisitaPessoa) => {
+  /**
+   * Marca uma visita à pessoa (fica nos registos dela, por ligar). Com `negocioId` (marcada a partir do negócio) fica logo ligada a ele,
+   * mas só se for um negócio ABERTO da mesma pessoa; senão fica por ligar. Devolve `false` quando se pediu um negócio e a visita ficou por
+   * ligar (quem chama avisa o utilizador); `true` quando ficou onde se pediu; `undefined` quando não se registou nenhuma visita.
+   */
+  const marcarVisita = useCallback((pessoaId: string, dados: DadosVisitaPessoa, negocioId?: string): boolean | undefined => {
     const pessoa = pessoaDe(pessoaId);
-    if (!pessoa || pessoa.perdida || pessoa.encerrada) return;
+    if (!pessoa || pessoa.perdida || pessoa.encerrada) return undefined;
     const nova = visitaNova(pessoa, dados, visitasDe(pessoaId), HOJE_EXEMPLO);
-    if (!nova) return;
-    registarVisita({ ...nova.visita, pessoaId });
+    if (!nova) return undefined;
+    const registada = registarVisita({ ...nova.visita, pessoaId });
+    const ligavel = !negocioId || (resumoDe(pessoaId)?.abertos.some((n) => n.id === negocioId) ?? false);
+    if (negocioId && ligavel) ligarRegisto({ tipo: "visita", id: registada.id }, negocioId);
     mudar((e) => visitaMarcada(e, pessoaId, nova.detalhe, HOJE_EXEMPLO));
-  }, [mudar, pessoaDe, visitasDe]);
+    return ligavel;
+  }, [mudar, pessoaDe, visitasDe, resumoDe]);
 
   /** Muda o dia, a hora e a morada de uma visita da pessoa. */
   const alterarVisita = useCallback((visitaId: string, dados: DadosAlterarVisita) => {

@@ -30,6 +30,8 @@ interface SeccaoProximaVisitaProps {
   naBase?: boolean;
   cancelarVisita?: AcoesFicha["cancelarVisita"];
   aoRegistarResultado: (visitaId: string) => void;
+  /** As visitas onde se fez um levantamento (só o exemplo). */
+  comLevantamento?: ReadonlySet<string>;
   /** Abre a aba Visitas. */
   aoVerTodas: () => void;
 }
@@ -43,7 +45,7 @@ export function SeccaoProximaVisita(p: SeccaoProximaVisitaProps) {
         <ul role="list" className="list-none divide-y divide-border p-0">
           <LinhaVisitaPessoa
             pessoa={p.pessoa} visita={p.visita} negocio={p.visita.negocioId ? p.negocios.get(p.visita.negocioId) : undefined} hoje={p.hoje}
-            alterarVisita={p.alterarVisita} naBase={p.naBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado}
+            alterarVisita={p.alterarVisita} naBase={p.naBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado} comLevantamento={p.comLevantamento?.has(p.visita.id)}
           />
         </ul>
         <Button

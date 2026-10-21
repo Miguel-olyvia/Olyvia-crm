@@ -30,7 +30,7 @@ interface ProviderProps {
   /** O dia de hoje (AAAA-MM-DD): a data mínima da visita. */
   hoje: string;
   /** Marca a visita da pessoa EM MEMÓRIA (o exemplo): `dados` são o dia, a hora, a nota e a morada. Com `naBase` nunca se chama. */
-  aoMarcar: (pessoaId: string, dados: DadosVisitaPessoa) => void;
+  aoMarcar: (pessoaId: string, dados: DadosVisitaPessoa, negocioId?: string) => boolean | void;
   /** Liga o diálogo à base: grava por `useAcoesVisita` (quadro, recursos, hora obrigatória, conflito) e não usa `aoMarcar`. */
   naBase?: boolean;
   /** As pessoas que já têm uma visita por ligar (juntam-se às marcadas neste ecrã). */
@@ -104,8 +104,11 @@ function FormVisita({ pessoa, hoje, aoMarcar, aoFechar }: { pessoa: AberturaVisi
       setTimeout(() => (formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]') ?? campoData.current)?.focus(), 0);
       return;
     }
-    aoMarcar(pessoa.pessoaId, { ...campos, destino });
-    toast.success(t(`${V}done`, { name: pessoa.nome }));
+    // `false`: pediu-se um negócio e a visita ficou por ligar. O toast não pode dizer só «marcada», nem fica calado.
+    const ligada = aoMarcar(pessoa.pessoaId, { ...campos, destino }, pessoa.negocioId ?? undefined) !== false;
+    if (ligada) toast.success(t(`${V}done`, { name: pessoa.nome }));
+    else toast.info(t(`${V}doneUnlinked`, { name: pessoa.nome }));
+    pessoa.aoMarcada?.(ligada);
     aoFechar();
   };
   return (
@@ -127,6 +130,8 @@ export function MarcarVisitaProvider({ hoje, aoMarcar, naBase = false, aoDevolve
   const { t } = useTranslation();
   const [aberta, setAberta] = useState<AberturaVisita | null>(null);
   const ultimo = useRef<AberturaVisita | null>(null);
+  // Quem tinha o foco ao pedir o diálogo: o diálogo não tem um gatilho do Radix, por isso o foco volta-se a esse elemento ao fechar.
+  const origemDoFoco = useRef<HTMLElement | null>(null);
   if (aberta) ultimo.current = aberta;
   const mostrado = aberta ?? ultimo.current;
   const [marcadas, setMarcadas] = useState<ReadonlySet<string>>(new Set());
@@ -138,6 +143,7 @@ export function MarcarVisitaProvider({ hoje, aoMarcar, naBase = false, aoDevolve
     const todas = jaComVisita ? new Set([...marcadas, ...jaComVisita]) : marcadas;
     return {
       pedir: (p: AberturaVisita) => {
+        origemDoFoco.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setRevisitaAoAbrir(todas.has(p.pessoaId));
         setAberta(completar ? completar(p) : p);
       },
@@ -145,9 +151,12 @@ export function MarcarVisitaProvider({ hoje, aoMarcar, naBase = false, aoDevolve
     };
   }, [marcadas, jaComVisita, completar]);
   const juntarMarcada = (pessoaId: string) => setMarcadas((antes) => new Set(antes).add(pessoaId));
-  const marcar: ProviderProps["aoMarcar"] = (pessoaId, dados) => {
-    aoMarcar(pessoaId, dados);
-    juntarMarcada(pessoaId);
+  const marcar: ProviderProps["aoMarcar"] = (pessoaId, dados, negocioId) => {
+    const ligada = aoMarcar(pessoaId, dados, negocioId) !== false;
+    // Marcada a partir de um negócio e ligada a ele, a visita fica nele: o botão «Marcar visita» das submissões da pessoa não tem de
+    // desaparecer. Sem negócio, ou com a ligação recusada, a visita fica por ligar à pessoa e esse botão sai.
+    if (!negocioId || !ligada) juntarMarcada(pessoaId);
+    return ligada;
   };
   const descricao = naBase ? t("pessoasPagina.real.visit.marcar.description", { name: mostrado?.nome ?? "" }) : t("pessoasPagina.process.visitDescription", { name: mostrado?.nome ?? "" });
   return (
@@ -155,7 +164,11 @@ export function MarcarVisitaProvider({ hoje, aoMarcar, naBase = false, aoDevolve
       {children}
       <Dialog open={aberta !== null} onOpenChange={(aberto) => { if (!aberto && !ocupado.current) setAberta(null); }}>
         <DialogContent
-          className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none" onCloseAutoFocus={(e) => { if (aoDevolverFoco?.()) e.preventDefault(); }}
+          className="max-h-[90vh] overflow-y-auto motion-reduce:!animate-none" onCloseAutoFocus={(e) => {
+            if (aoDevolverFoco?.()) { e.preventDefault(); return; }
+            const origem = origemDoFoco.current;
+            if (origem?.isConnected) { e.preventDefault(); origem.focus(); }
+          }}
           onEscapeKeyDown={(e) => { if (ocupado.current) e.preventDefault(); }} onInteractOutside={(e) => { if (ocupado.current) e.preventDefault(); }}
         >
           <DialogHeader>

@@ -10,8 +10,10 @@ export interface AberturaVisita {
   moradaLead: MoradaVisita | null;
   /** O `anew_users.id` do responsável da pessoa (só com a base ligada): o recurso dele vai escolhido por omissão. */
   responsavelUserId?: string | null;
-  /** O negócio aberto de que se marca a visita (só com a base ligada): a visita nasce ligada a ele. Sem isto nasce por ligar. */
+  /** O negócio aberto de que se marca a visita: a visita nasce ligada a ele. Sem isto nasce por ligar. */
   negocioId?: string | null;
+  /** Chamada depois de marcar (só o exemplo): `ligada` diz se a visita ficou onde se pediu (ligada ao negócio, ou por ligar se não se pediu negócio). */
+  aoMarcada?: (ligada: boolean) => void;
 }
 
 export interface MarcarVisitaValor {

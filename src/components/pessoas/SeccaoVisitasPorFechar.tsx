@@ -27,6 +27,8 @@ interface SeccaoVisitasPorFecharProps {
   naBase?: boolean;
   cancelarVisita?: AcoesFicha["cancelarVisita"];
   aoRegistarResultado: (visitaId: string) => void;
+  /** As visitas onde se fez um levantamento (só o exemplo): cada uma di-lo, como na aba Visitas. */
+  comLevantamento?: ReadonlySet<string>;
 }
 
 export function SeccaoVisitasPorFechar(p: SeccaoVisitasPorFecharProps) {
@@ -41,6 +43,7 @@ export function SeccaoVisitasPorFechar(p: SeccaoVisitasPorFecharProps) {
             <LinhaVisitaPessoa
               key={v.id} pessoa={p.pessoa} visita={v} negocio={v.negocioId ? p.negocios.get(v.negocioId) : undefined} hoje={p.hoje}
               alterarVisita={p.alterarVisita} naBase={p.naBase} cancelarVisita={p.cancelarVisita} aoRegistarResultado={p.aoRegistarResultado}
+              comLevantamento={p.comLevantamento?.has(v.id)}
             />
           ))}
         </ul>
