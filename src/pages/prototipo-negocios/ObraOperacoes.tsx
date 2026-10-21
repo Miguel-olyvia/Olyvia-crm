@@ -7,7 +7,7 @@
 // O ciclo da tarefa é o da app das obras (operacao-app), muito mais simples: um toque de cada vez.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, ArrowUp, CalendarClock, ChevronDown, MessageCircle, Camera, Check, CheckCircle2, Circle, ClipboardCheck, Clock, FileWarning, HardHat,
+  AlertTriangle, ArrowLeft, ArrowRight, CalendarClock, ChevronDown, MessageCircle, Camera, Check, CheckCircle2, Circle, ClipboardCheck, Clock, FileWarning, HardHat,
   MapPin, Minus, NotebookPen, Phone, Plus, RotateCcw, ShieldCheck, Smartphone, Store, Truck, Wrench, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara
 import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
 import { HORAS_DIA } from "./ganttOrcamento";
 import {
-  RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, custosObra, equipaDaObra, equipamentosDaObra, estadoDe, faltaParaFeita, fotoExemplo,
+  RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, custosObra, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
   iniciais, materiaisPorFase, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
 } from "./obraOps";
 import type { Ctx } from "./pecas";
@@ -143,7 +143,7 @@ export function ListaObras(ctx: Ctx) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Operações</h1>
-      <p className="mt-2 text-lg text-muted-foreground">As obras chegam aqui sozinhas quando o contrato é assinado, com o plano do orçamento por aprovar.</p>
+      <p className="mt-2 text-lg text-muted-foreground">As obras chegam aqui quando o contrato é assinado.</p>
       {!obras.length && <p className={cn(NOTA, "mt-8")}>Ainda não há obras. Aparecem quando o cliente assina o contrato.</p>}
       {grupos.filter(([, L]) => L.length).map(([titulo, L]) => (
         <section key={titulo} aria-label={titulo} className="mt-8">
@@ -159,13 +159,15 @@ export function ListaObras(ctx: Ctx) {
               const fase = tHoje?.fase ?? p.tasks[0]?.fase;
               const pr = progresso(p);
               const F = faltaParaArrancar(o, db);
-              const marco = p.estado === "por aprovar" ? "Aprovar o plano"
-                : p.estado === "aprovado" ? (F.length ? `Para arrancar falta ${F.filter((f) => !/plano/.test(f)).join(", ")}` : `Arrancar a ${rotuloDia(p, 0)}`)
-                : p.estado === "em curso" ? `Dia ${p.dia + 1} de ${fim} · acaba a ${rotuloDia(p, fim - 1)}` : "Obra concluída";
+              // 21/10 (revisto): a próxima ação em destaque quando é do Filipe; senão, à espera de quê (sem repetir o estado)
+              const Fa = F.filter((f) => !/plano/.test(f));
+              const [marco, acao]: [string, boolean] = p.estado === "por aprovar" ? (o.fin.pago ? ["Aprovar o plano", true] : ["À espera do pagamento do sinal", false])
+                : p.estado === "aprovado" ? (Fa.length ? [`Para arrancar falta ${Fa.join(", ")}`, false] : [`Arrancar a obra · ${rotuloDia(p, 0)}`, true])
+                : p.estado === "em curso" ? [pv ? `Validar ${pv === 1 ? "1 tarefa" : `${pv} tarefas`}` : `Dia ${p.dia + 1} de ${fim} · acaba a ${rotuloDia(p, fim - 1)}`, !!pv]
+                : [o.obra.auto?.estado === "assinado" ? "Recebida pelo cliente" : o.obra.auto ? "Auto de receção por assinar" : `Acabou a ${rotuloDia(p, fim - 1)}`, false];
               const alertas: [ReactNode, string][] = [
                 ...(nc ? [[<AlertTriangle key="c" className="h-4 w-4 text-warning" aria-hidden="true" />, `${nc} conflito de férias`] as [ReactNode, string]] : []),
                 ...(faltaMat && p.estado !== "concluída" ? [[<Truck key="m" className="h-4 w-4 text-warning" aria-hidden="true" />, prev ? `material previsto a ${prev.slice(8, 10)}/${prev.slice(5, 7)}` : "material por chegar"] as [ReactNode, string]] : []),
-                ...(pv ? [[<ClipboardCheck key="v" className="h-4 w-4 text-primary" aria-hidden="true" />, `${pv} por validar`] as [ReactNode, string]] : []),
                 ...(corr ? [[<FileWarning key="r" className="h-4 w-4 text-destructive" aria-hidden="true" />, `${corr} a corrigir`] as [ReactNode, string]] : []),
               ];
               return (
@@ -185,8 +187,9 @@ export function ListaObras(ctx: Ctx) {
                     </span>
                     <span className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                       <span className="text-[15px]">
-                        {fase ? <><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COR_FASE[fase] }} aria-hidden="true" />{p.estado === "em curso" ? "Fase " : "Começa pela fase "}{fase} · {FASES_OBRA[fase - 1].curto}</> : ESTADO_PLANO[p.estado]}
-                        <span className="block text-sm text-muted-foreground">{marco}</span>
+                        {p.estado === "concluída" ? <span className="inline-flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />Concluída</span>
+                          : fase ? <><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COR_FASE[fase] }} aria-hidden="true" />{p.estado === "em curso" ? "Fase " : "Começa pela fase "}{fase} · {FASES_OBRA[fase - 1].curto}</> : ESTADO_PLANO[p.estado]}
+                        <span className={cn("block text-sm", acao ? "font-medium text-primary" : "text-muted-foreground")}>{marco}{acao && <ArrowRight className="ml-1 inline h-3.5 w-3.5" aria-hidden="true" />}</span>
                       </span>
                       <span className="flex -space-x-2" aria-label={`Equipa: ${eq.map((m) => m.n).join(", ")}`}>{eq.slice(0, 5).map((m) => <Avatar key={m.id} id={m.id} n={m.n} />)}</span>
                     </span>
@@ -209,17 +212,23 @@ export function ListaObras(ctx: Ctx) {
 /* ================================================================== a página da obra */
 type Seccao = "plano" | "hoje" | "validar" | "chat" | "equipa" | "equip" | "mat" | "diario" | "seg" | "custos";
 
+/** 21/10 (revisto): as partes da obra, uma de cada vez (antes, dez secções empilhadas numa página só). */
+type Aba = "dia" | "plano" | "cliente" | "meios" | "registos";
+const ABA_DE: Record<Seccao, Aba | null> = {
+  plano: "plano", hoje: "dia", validar: null, chat: "cliente", equipa: "meios", equip: "meios", mat: "meios", diario: "registos", seg: "registos", custos: "registos",
+};
+
 export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, go } = ctx;
   const p = d.obra.plano!, C = conflitos(p), pode = S.role === "operacoes", direcao = S.role === "direcao";
-  const novo = p.origem === "orcamento";
   // 19/10: os materiais lidos ao vivo do Inventário (o arranque espera por eles)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   const fim = fimDe(p.tasks), ultimo = fim - 1;
-  const horas = p.tasks.reduce((a, t) => a + t.h, 0);
   const PV = porValidar(p);
   const PE = p.estado === "em curso" ? pontosEncerrar(d, S, db) : [], podeEncerrar = PE.every((x) => x.ok);
+  // a lista para encerrar só se abre na reta final (tudo feito, ou o último dia): antes disso é ruído
+  const retaFinal = p.estado === "em curso" && (p.dia >= ultimo || p.tasks.every((t) => estadoDe(t) === "feita" || estadoDe(t) === "validada"));
   const F = faltaParaArrancar(d, db).filter((f) => !/plano/.test(f));
   const tarde = entregaTarde(d, db);
   const muda = pode && (p.estado === "por aprovar" || p.estado === "aprovado");
@@ -227,29 +236,36 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // 21/10: o dia que o gestor está a ver (para trás ou para a frente); acompanha o "hoje" do plano
   const [sel, setSel] = useState(p.dia);
   useEffect(() => { setSel(p.dia); }, [p.dia]);
-  const irPara = (s: Seccao) => document.getElementById(`obra-${s}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const abas: [Aba, string][] = p.estado === "em curso"
+    ? [["dia", "Dia a dia"], ["plano", "Plano"], ["cliente", "Cliente"], ["meios", "Equipa e meios"], ["registos", "Registos"]]
+    : [["plano", "Plano"], ["meios", "Equipa e meios"], ["cliente", "Cliente"], ["registos", "Registos"]];
+  const [aba, setAba] = useState<Aba>(abas[0][0]);
+  useEffect(() => { setAba(abas[0][0]); }, [p.estado]); // eslint-disable-line react-hooks/exhaustive-deps
+  const irPara = (s: Seccao) => {
+    const a = ABA_DE[s];
+    if (a) setAba(a);
+    window.setTimeout(() => document.getElementById(a ? `obra-${s}` : "obra-agora")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
+  const verDia = (k: number) => { setSel(k); irPara("hoje"); };
 
   let frase = "", botao: ReactNode = null;
   if (p.estado === "por aprovar") {
-    frase = C.length ? "Há um técnico de férias numa tarefa. Troque-o ou adie a tarefa antes de aprovar." : "O plano está pronto para aprovar. Confirme as datas e os técnicos; pode ajustar qualquer tarefa.";
-    botao = <Button size="lg" disabled={!!C.length} onClick={go(() => A.aprovarPlano(d.id))}>Aprovar o plano</Button>;
+    // o plano aprova-se depois do pagamento (A.aprovarPlano recusa): diz-se à espera de quê, em vez de um botão que falha
+    frase = !d.fin.pago ? "À espera do pagamento do sinal (Financeiro). Entretanto, reveja o plano: datas, técnicos e materiais."
+      : C.length ? "Há um técnico de férias numa tarefa. Troque-o ou adie a tarefa antes de aprovar." : "O plano está pronto para aprovar. Confirme as datas e os técnicos; pode ajustar qualquer tarefa.";
+    botao = <>
+      <Button size="lg" disabled={!d.fin.pago || !!C.length} onClick={go(() => A.aprovarPlano(d.id))}>Aprovar o plano</Button>
+      {!d.fin.pago && <span className={NOTA}>Fica disponível quando o pagamento for confirmado.</span>}
+    </>;
   } else if (p.estado === "aprovado") {
     frase = F.length ? `Plano aprovado. Para arrancar, falta ${F.join(", ")}.` : "Plano aprovado e tudo pronto. Pode arrancar.";
     botao = <Button size="lg" disabled={!!F.length} onClick={go(() => A.arrancar(d.id))}>Arrancar a obra</Button>;
   } else if (p.estado === "em curso") {
-    // 21/10: sem texto corrido: o dia, o progresso e os factos em linhas com ícone (FactosObra)
     frase = `Dia ${p.dia + 1} de ${fim} · ${rotuloDia(p, p.dia)}`;
-    // 21/10: encerrar só com tudo completo (encerrarObra.ts): o botão fica ativo com a lista toda verde
-    botao = PV.length
-      ? <Button size="lg" onClick={() => irPara("validar")}>Validar {PV.length === 1 ? "1 tarefa" : `${PV.length} tarefas`}<ArrowRight className="ml-2 h-4 w-4" /></Button>
-      : <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button>;
+    // a validação faz-se no próprio cartão (Agora); o encerrar só aparece na reta final e só fica ativo com tudo completo
+    botao = !PV.length && retaFinal ? <Button size="lg" disabled={!podeEncerrar} onClick={go(() => A.fimObra(d.id))}><CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />Encerrar a obra</Button> : null;
   } else frase = d.obra.auto?.estado === "assinado" ? "Obra concluída e recebida pelo cliente." : d.obra.auto ? "Obra concluída. O auto de receção está no portal do cliente, para assinar." : "Obra concluída.";
 
-  const secoes: [Seccao, string, boolean][] = [
-    ["plano", "Plano", true], ["hoje", "Acompanhamento", p.estado === "em curso"], ["validar", "Por validar", p.estado === "em curso"],
-    ["chat", "Cliente", true], ["equipa", "Equipa", true], ["equip", "Equipamentos", true], ["mat", "Materiais", true], ["diario", "Diário", true],
-    ["seg", "Segurança", true], ["custos", "Custos", direcao || pode],
-  ];
   const morada = d.f.morada || d.local;
   const porLer = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;
 
@@ -259,22 +275,26 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Operações
       </button>
 
-      {/* 21/10: por prioridade: 1.º o estado, 2.º o que vem a seguir (com o primário), 3.º o resto (contactos, viaturas, secções) */}
+      {/* 21/10 (revisto): 1.º quem e onde, 2.º como vai, 3.º o que espera por si (resolve-se ali), 4.º o resto, uma parte de cada vez */}
       <header className="mt-2">
         <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-muted-foreground">Obra #{d.id} <ChipEstadoObra estado={p.estado} /></p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">{d.nome}</h1>
-        <p className="mt-1 text-base text-muted-foreground">{d.servico}{p.tasks.length ? ` · ${rotuloDia(p, 0)} a ${rotuloDia(p, ultimo)}` : ""}</p>
+        <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[15px] text-muted-foreground">
+          <span>{d.servico}</span>
+          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center gap-1.5 text-primary underline-offset-4 hover:underline"><MapPin className="h-4 w-4 shrink-0" aria-hidden="true" />{morada}</a>
+          <a href={`tel:${d.tel.replace(/\s/g, "")}`} className="inline-flex min-h-9 items-center gap-1.5 text-primary underline-offset-4 hover:underline"><Phone className="h-4 w-4" aria-hidden="true" />{d.tel}</a>
+        </p>
       </header>
 
-      {/* ------------------------------------------------ 1. o estado */}
+      {/* ------------------------------------------------ 1. como vai */}
       <section aria-label="Estado da obra" className={cn(CARTAO, "mt-6 p-5")}>
         <EstadoObra d={d} titulo={p.estado === "em curso" ? frase : null} irPara={irPara} />
       </section>
 
-      {/* ------------------------------------------------ 2. a seguir (um primário) */}
-      <section aria-label="O que fazer" className={cn(CARTAO, "mt-4 p-5")}>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">A seguir</h2>
-        {p.estado === "em curso" ? <ASeguir d={d} irPara={irPara} /> : <p className="mt-2 text-lg">{frase}</p>}
+      {/* ------------------------------------------------ 2. agora: o que espera por si, com um primário */}
+      <section id="obra-agora" aria-label="O que fazer" className={cn(CARTAO, "mt-4 scroll-mt-16 p-5")}>
+        <h2 className={H2}>Agora</h2>
+        {p.estado === "em curso" ? <Agora ctx={ctx} d={d} irPara={irPara} verDia={verDia} /> : <p className="mt-2 text-lg">{frase}</p>}
         {tarde && (
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/[0.06] p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-start gap-2 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
@@ -309,50 +329,41 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             </div>
           );
         })}
-        {PE.length > 0 && <ParaEncerrar L={PE} irPara={irPara} fecho={go(() => { A.abrir(d.id); A.irObra(); })} />}
-        {p.estado !== "concluída" && <div className="mt-5 flex flex-wrap items-center gap-3">{pode ? botao : <Mudar ctx={ctx} papel="operacoes" />}</div>}
+        {PE.length > 0 && <ParaEncerrar L={PE} irPara={irPara} recolhida={!retaFinal} fecho={go(() => { A.abrir(d.id); A.irObra(); })} />}
+        {p.estado !== "concluída" && (botao || !pode) && <div className="mt-5 flex flex-wrap items-center gap-3">{pode ? botao : <Mudar ctx={ctx} papel="operacoes" />}</div>}
       </section>
       {/* 15/10: com a obra concluída, o auto de receção (por assinar / assinado) e o relatório da obra */}
       {p.estado === "concluída" && d.obra.auto && <div className="mt-4"><AutoNoNegocio S={ctx.S} d={d} /></div>}
 
-      {/* ------------------------------------------------ 3. o resto: os contactos, a dimensão e as viaturas */}
-      <section aria-label="Detalhes da obra" className="mt-8">
-        <dl className="grid gap-x-6 gap-y-3 text-[15px] sm:grid-cols-2 lg:grid-cols-4">
-          <div className="min-w-0"><dt className="text-sm text-muted-foreground">Morada</dt>
-            <dd><a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex items-start gap-1.5 font-medium text-primary underline-offset-4 hover:underline"><MapPin className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />{morada}</a></dd></div>
-          <div><dt className="text-sm text-muted-foreground">Cliente</dt>
-            <dd><a href={`tel:${d.tel.replace(/\s/g, "")}`} className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"><Phone className="h-4 w-4" aria-hidden="true" />{d.tel}</a></dd></div>
-          <div><dt className="text-sm text-muted-foreground">{RESPONSAVEL_OBRA.papel}</dt>
-            <dd>{RESPONSAVEL_OBRA.n}<a href={`tel:${RESPONSAVEL_OBRA.tel.replace(/\s/g, "")}`} className="block text-primary underline-offset-4 hover:underline">{RESPONSAVEL_OBRA.tel}</a></dd></div>
-          <div><dt className="text-sm text-muted-foreground">Dimensão</dt>
-            <dd className="tabular-nums">{p.tasks.length} {p.tasks.length === 1 ? "tarefa" : "tarefas"}<span className="block text-muted-foreground">{nfmt(horas)} h de equipa</span></dd></div>
-        </dl>
-        <ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} />
-      </section>
-
-      {/* ------------------------------------------------ as secções da obra, num toque */}
-      <nav aria-label="Secções da obra" className="sticky top-0 z-10 -mx-4 mt-6 flex gap-2 overflow-x-auto bg-background/95 px-4 py-2 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:[mask-image:none]">
-        {secoes.filter(([, , v]) => v).map(([k, t]) => (
-          <button key={k} type="button" onClick={() => irPara(k)} className="min-h-10 shrink-0 whitespace-nowrap rounded-full border border-input bg-card px-4 text-[15px] hover:border-foreground/40">
-            {t}{k === "validar" && PV.length > 0 && <span className="ml-1.5 rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground">{PV.length}</span>}
-            {k === "chat" && porLer > 0 && <span className="ml-1.5 rounded-full bg-warning px-1.5 text-xs font-semibold text-white">{porLer}</span>}
+      {/* ------------------------------------------------ 3. o resto, uma parte de cada vez */}
+      <div role="tablist" aria-label="Partes da obra" className="sticky top-0 z-10 -mx-4 mt-8 flex gap-1 overflow-x-auto border-b border-border bg-background/95 px-4 backdrop-blur [scrollbar-width:none] sm:mx-0 sm:px-0 [&::-webkit-scrollbar]:hidden">
+        {abas.map(([k, t]) => (
+          <button key={k} type="button" role="tab" id={`aba-${k}`} aria-selected={aba === k} aria-controls="obra-painel" onClick={() => setAba(k)}
+            className={cn("relative min-h-12 shrink-0 whitespace-nowrap px-4 text-[15px] font-medium transition-colors", aba === k ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+            {t}{k === "cliente" && porLer > 0 && <span className="ml-1.5 rounded-full bg-warning px-1.5 text-xs font-semibold text-white">{porLer}</span>}
+            {aba === k && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-primary" aria-hidden="true" />}
           </button>
         ))}
-      </nav>
-
-      <PlanoGantt ctx={ctx} d={d} aberta={aberta} setAberta={setAberta} muda={muda} sel={p.estado === "em curso" ? sel : null} setSel={p.estado === "em curso" ? (k) => { setSel(k); irPara("hoje"); } : undefined} />
-      <TarefasDoPlano ctx={ctx} d={d} />
-      {p.estado === "em curso" && <Acompanhamento ctx={ctx} d={d} sel={sel} setSel={setSel} ajustar={(ti) => { setAberta(ti); irPara("plano"); }} />}
-      {p.estado === "em curso" && <PorValidar ctx={ctx} d={d} />}
-      <ConversaNaObra ctx={ctx} d={d} />
-      <EquipaObra ctx={ctx} d={d} direcao={direcao} verDia={(k) => { setSel(k); irPara("hoje"); }} />
-      <EquipamentosObra d={d} />
-      <ParaCima />
-      <MateriaisObra ctx={ctx} d={d} />
-      <DiarioObra ctx={ctx} d={d} pode={pode || direcao} />
-      <SegurancaObra ctx={ctx} d={d} pode={pode} />
-      {(direcao || pode) && <CustosObra d={d} />}
-      {novo ? null : <p className={cn(NOTA, "mt-8")}>Plano de exemplo (antes do circuito do orçamento).</p>}
+      </div>
+      <div id="obra-painel" role="tabpanel" aria-labelledby={`aba-${aba}`} key={aba} className="animate-in fade-in-0 duration-200">
+        {aba === "dia" && p.estado === "em curso" && <Acompanhamento ctx={ctx} d={d} sel={sel} setSel={setSel} ajustar={(ti) => { setAberta(ti); irPara("plano"); }} />}
+        {aba === "plano" && <>
+          <PlanoGantt ctx={ctx} d={d} aberta={aberta} setAberta={setAberta} muda={muda} sel={p.estado === "em curso" ? sel : null} setSel={p.estado === "em curso" ? verDia : undefined} />
+          <TarefasDoPlano ctx={ctx} d={d} />
+        </>}
+        {aba === "cliente" && <ConversaNaObra ctx={ctx} d={d} />}
+        {aba === "meios" && <>
+          <EquipaObra ctx={ctx} d={d} direcao={direcao} verDia={verDia} />
+          <div className="mt-8"><ViaturasObra obra={d.id} ec={d.obra.ec?.ref} estado={d.obra.plano?.estado} /></div>
+          <MateriaisObra ctx={ctx} d={d} />
+          <EquipamentosObra d={d} />
+        </>}
+        {aba === "registos" && <>
+          <DiarioObra ctx={ctx} d={d} pode={pode || direcao} />
+          <SegurancaObra ctx={ctx} d={d} pode={pode} />
+          {(direcao || pode) && <CustosObra d={d} />}
+        </>}
+      </div>
     </div>
   );
 }
@@ -391,16 +402,20 @@ function EstadoObra({ d, titulo, irPara }: { d: Negocio; titulo: string | null; 
     const corr = p.tasks.filter((t) => t.corrige != null && estadoDe(t) !== "validada");
     const hoje = p.tasks.filter((t) => t.dia <= p.dia && p.dia < t.dia + t.dur && estadoDe(t) !== "validada");
     const reg = hoje.filter((t) => registouNoDia(t, p.dia) || estadoDe(t) === "feita").length;
+    // as horas registadas e as previstas até ao fim de hoje (os dias já passados de cada tarefa, com hoje)
+    const hReg = p.tasks.reduce((a, t) => a + (t.exec?.horas ?? 0), 0);
+    const hAte = Math.round(p.tasks.reduce((a, t) => a + (t.h / t.dur) * Math.max(0, Math.min(t.dur, p.dia + 1 - t.dia)), 0) * 10) / 10;
     cab = <>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4">
         <p className="text-xl font-semibold tracking-tight">{titulo}</p>
         <p className="text-2xl font-semibold tabular-nums">{Math.round(prog * 100)}%</p>
       </div>
+      <p className="text-sm text-muted-foreground">{val} de {p.tasks.length} tarefas validadas</p>
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary transition-[width] duration-700" style={{ width: `${Math.round(prog * 100)}%` }} /></div>
     </>;
     L = [
       { I: CalendarClock, t: <>Acaba a <b className="font-semibold">{rotuloDia(p, fim - 1)}</b>{atraso}</>, tom: D.dias > 0 ? "aviso" : undefined },
-      { I: CheckCircle2, t: <><b className="font-semibold">{val} de {p.tasks.length}</b> tarefas validadas</>, tom: val === p.tasks.length ? "ok" : undefined },
+      { I: Clock, t: <><b className="font-semibold">{nfmt(hReg)} h</b> registadas · previstas até hoje {nfmt(hAte)} h</>, tom: hAte > 0 && hReg > hAte * 1.1 ? "aviso" : undefined },
       { I: HardHat, t: hoje.length ? <>Hoje na obra: {[...new Set(hoje.map((t) => nomeTec(t.tec).split(" ")[0]))].join(", ")} · <b className="font-semibold">{reg} de {hoje.length}</b> com registo</> : "Hoje não há tarefas por fazer", ir: "hoje" },
       ...(corr.length ? [{ I: AlertTriangle, t: <><b className="font-semibold">{corr.length}</b> {corr.length === 1 ? "correção" : "correções"} em curso · {corr.map((t) => nomeTec(t.tec).split(" ")[0]).join(", ")}</>, tom: "mau" as const, ir: "hoje" as Seccao }] : []),
     ];
@@ -422,12 +437,12 @@ function EstadoObra({ d, titulo, irPara }: { d: Negocio; titulo: string | null; 
   return <div>{cab}<div className="mt-4"><Factos L={L} irPara={irPara} rot="Estado" /></div></div>;
 }
 
-/** 21/10: 2.º a seguir, com a obra em curso: o que espera por si (validar, correções, mensagens) e as próximas tarefas do plano. */
 /** 21/10: a lista para encerrar a obra: cada ponto verde ou por fazer, e os por fazer levam ao sítio onde se resolvem. */
-function ParaEncerrar({ L, irPara, fecho }: { L: PontoEncerrar[]; irPara: (s: Seccao) => void; fecho: () => void }) {
+function ParaEncerrar({ L, irPara, fecho, recolhida }: { L: PontoEncerrar[]; irPara: (s: Seccao) => void; fecho: () => void; recolhida?: boolean }) {
   const feitos = L.filter((x) => x.ok).length, tudo = feitos === L.length;
   const [aberta, setAberta] = useState(false);
-  const ver = tudo && !aberta ? [] : L;
+  // fora da reta final (ou com tudo verde) fica numa linha; abre-se se for preciso
+  const fechada = tudo || !!recolhida, ver = fechada && !aberta ? [] : L;
   return (
     <div className={cn("mt-5 rounded-xl border p-4", tudo ? "border-success/40 bg-success/[0.05]" : "border-border")} aria-label="Para encerrar a obra">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -437,7 +452,7 @@ function ParaEncerrar({ L, irPara, fecho }: { L: PontoEncerrar[]; irPara: (s: Se
         </p>
         <span className="flex items-center gap-2 text-sm tabular-nums text-muted-foreground">
           {feitos} de {L.length}
-          {tudo && <button type="button" onClick={() => setAberta(!aberta)} aria-expanded={aberta} className="min-h-9 rounded-md px-2 font-medium text-primary hover:underline">{aberta ? "Esconder" : "Ver a lista"}</button>}
+          {fechada && <button type="button" onClick={() => setAberta(!aberta)} aria-expanded={aberta} className="min-h-9 rounded-md px-2 font-medium text-primary hover:underline">{aberta ? "Esconder" : "Ver a lista"}</button>}
         </span>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
@@ -466,31 +481,83 @@ function ParaEncerrar({ L, irPara, fecho }: { L: PontoEncerrar[]; irPara: (s: Se
   );
 }
 
-function ASeguir({ d, irPara }: { d: Negocio; irPara: (s: Seccao) => void }) {
+/**
+ * 21/10 (revisto): o que espera pelo responsável, num só sítio e resolvido ali: validar (as fotografias, Validar ou Pedir correção),
+ * as mensagens do cliente, os registos em falta, os problemas reportados e as correções em curso. Sem nada à espera, as próximas tarefas.
+ * Antes estava espalhado por "A seguir", pelos alertas do acompanhamento e pela secção "Por validar".
+ */
+function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: Seccao) => void; verDia: (k: number) => void }) {
   const p = d.obra.plano!, PV = porValidar(p);
-  const msgs = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;
-  const L: Facto[] = [
-    ...(PV.length ? [{ I: Clock, t: <><b className="font-semibold">{PV.length}</b> {PV.length === 1 ? "tarefa terminada espera" : "tarefas terminadas esperam"} pela sua validação</>, tom: "aviso" as const, ir: "validar" as Seccao, acao: "validar" }] : []),
-    ...(msgs ? [{ I: MessageCircle, t: <><b className="font-semibold">{msgs}</b> {msgs === 1 ? "mensagem nova" : "mensagens novas"} do cliente</>, tom: "aviso" as const, ir: "chat" as Seccao, acao: "responder" }] : []),
-  ];
+  const [todas, setTodas] = useState(false);
+  const cli = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida);
+  const corr = p.tasks.filter((t) => estadoDe(t) === "corrigir");
+  const semReg: { t: Tarefa; k: number }[] = [];
+  for (const t of p.tasks)
+    for (let k = t.dia; k < Math.min(p.dia, t.dia + t.dur); k++)
+      if (!registouNoDia(t, k) && estadoDe(t) !== "validada" && estadoDe(t) !== "feita") semReg.push({ t, k });
+  const ocorr = (d.obra.diario ?? []).filter((x) => x.k === "ocorrencia" && x.q.startsWith("hoje")).slice(-3);
   const prox = p.tasks.filter((t) => t.dia > p.dia && estadoDe(t) === "por fazer").sort((a, b) => a.dia - b.dia).slice(0, 3);
+  const nada = !PV.length && !cli.length && !semReg.length && !ocorr.length && !corr.length;
+  const primeiro = (n: string | null) => nomeTec(n).split(" ")[0];
   return (
-    <div className="mt-3 space-y-4">
-      {L.length > 0 ? <Factos L={L} irPara={irPara} rot="Por fazer" umaColuna /> : <p className="flex items-center gap-2 text-[15px]"><Check className="h-4 w-4 text-success" aria-hidden="true" />Nada à espera de si.</p>}
-      {prox.length > 0 && (
+    <div className="mt-3 space-y-3">
+      {PV.slice(0, todas ? PV.length : 1).map((ti) => {
+        const t = p.tasks[ti];
+        return (
+          <div key={ti} className="rounded-xl border border-warning/40 bg-warning/[0.05] p-4 animate-in fade-in-0">
+            <div className="flex items-start gap-3">
+              <Avatar id={t.tec} n={nomeTec(t.tec)} />
+              <div className="min-w-0">
+                <p className="text-base font-semibold">Validar · {t.nome}</p>
+                <p className={NOTA}>{primeiro(t.tec)} deu por feita · previstas {nfmt(t.h)} h</p>
+              </div>
+            </div>
+            <Registo ctx={ctx} d={d} ti={ti} />
+          </div>
+        );
+      })}
+      {PV.length > 1 && !todas && (
+        <button type="button" onClick={() => setTodas(true)} className="min-h-10 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+          Mais {PV.length - 1} por validar
+        </button>
+      )}
+      {cli.length > 0 && (
+        <LinhaAgora I={MessageCircle} tom="aviso" titulo={`${d.nome.split(" ")[0]} escreveu${cli.length > 1 ? ` (${cli.length} mensagens)` : ""}`} texto={`«${cli[cli.length - 1].t}»`} acao="Responder" fazer={() => irPara("chat")} />
+      )}
+      {ocorr.map((x, k) => <LinhaAgora key={"o" + k} I={AlertTriangle} tom="mau" titulo={`${x.quem.split(" ")[0]} reportou um problema`} texto={x.t} acao="Ver o dia" fazer={() => verDia(p.dia)} />)}
+      {semReg.slice(0, 3).map(({ t, k }) => (
+        <LinhaAgora key={`r${p.tasks.indexOf(t)}-${k}`} I={HardHat} tom="aviso" titulo={`${primeiro(t.tec)} não registou ${rotuloDia(p, k)}`} texto={`${t.nome}: sem horas nem fotografias nesse dia`} acao="Ver o dia" fazer={() => verDia(k)} />
+      ))}
+      {corr.map((t) => <LinhaAgora key={"c" + p.tasks.indexOf(t)} I={FileWarning} tom="mau" titulo={`${t.nome}: correção pedida`} texto={`À espera de ${primeiro(t.tec)}${t.exec?.motivo ? ` · ${t.exec.motivo}` : ""}`} />)}
+      {nada && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Nada à espera de si.</p>}
+      {!PV.length && prox.length > 0 && (
         <div>
-          <p className="text-sm text-muted-foreground">Próximas tarefas</p>
+          <p className="text-sm text-muted-foreground">A seguir no plano</p>
           <ul aria-label="Próximas tarefas" className="mt-1.5 divide-y divide-border rounded-xl border border-border">
             {prox.map((t) => (
               <li key={p.tasks.indexOf(t)} className="flex items-center gap-3 px-3 py-2 text-[15px]">
                 <span className="w-24 shrink-0 text-sm font-medium tabular-nums text-muted-foreground">{rotuloDia(p, t.dia)}</span>
                 <span className="min-w-0 flex-1 font-medium">{t.nome}</span>
-                <span className="inline-flex shrink-0 items-center gap-2 text-sm text-muted-foreground"><Avatar id={t.tec} n={nomeTec(t.tec)} tam="h-6 w-6" /><span className="hidden sm:inline">{nomeTec(t.tec).split(" ")[0]}</span></span>
+                <span className="inline-flex shrink-0 items-center gap-2 text-sm text-muted-foreground"><Avatar id={t.tec} n={nomeTec(t.tec)} tam="h-6 w-6" /><span className="hidden sm:inline">{primeiro(t.tec)}</span></span>
               </li>
             ))}
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Uma coisa à espera no cartão "Agora": ícone, o quê, o detalhe e, quando dá, a ação. */
+function LinhaAgora({ I, tom, titulo, texto, acao, fazer }: { I: typeof Check; tom: "aviso" | "mau"; titulo: string; texto: string; acao?: string; fazer?: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border px-3 py-2.5 sm:flex-nowrap">
+      <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-full", tom === "mau" ? "bg-destructive/10 text-destructive" : "bg-warning/15 text-warning")} aria-hidden="true"><I className="h-4 w-4" /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[15px] font-medium">{titulo}</span>
+        <span className="block truncate text-sm text-muted-foreground">{texto}</span>
+      </span>
+      {acao && fazer && <Button variant="outline" className="min-h-10 shrink-0" onClick={fazer}>{acao}</Button>}
     </div>
   );
 }
@@ -522,7 +589,7 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
   useEffect(() => { if (aberta != null) painel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, [aberta]);
 
   return (
-    <section id="obra-plano" aria-labelledby="obra-plano-t" className="mt-8 scroll-mt-16">
+    <section id="obra-plano" aria-labelledby="obra-plano-t" className="mt-6 scroll-mt-16">
       <h2 id="obra-plano-t" className={H2}>Plano</h2>
       <p className="mt-1 text-[15px]">
         <b className="font-semibold tabular-nums">{dias(fim)} úteis</b> · acaba a {rotuloDia(p, fim - 1)}
@@ -553,7 +620,7 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
         </div>
       )}
 
-      {vivo && <p className={cn(NOTA, "mt-1")}>Obra em curso: toque numa tarefa para a ajustar (dias, início ou técnico) e avisar o cliente. Toque num dia para o ver no acompanhamento.</p>}
+      {vivo && <p className={cn(NOTA, "mt-1")}>Toque numa tarefa para a ajustar (dias, início ou técnico) e avisar o cliente; toque num dia para o ver no dia a dia.</p>}
       <AjustesFeitos d={d} />
       <div ref={caixa} className={cn(CARTAO, "mt-4 overflow-x-auto")}>
         <div className="relative" style={{ width: gradeW + 2 * PAD, paddingLeft: PAD, paddingRight: PAD }}>
@@ -788,40 +855,11 @@ function Registo({ ctx, d, ti, compacto }: { ctx: Ctx; d: Negocio; ti: number; c
 }
 
 /* ------------------------------------------------------------------ 21/10: o acompanhamento (o gestor vê tudo aqui; o técnico faz pelo Hoje dele) */
-function Indicador({ rot, valor, sub, tom, barra }: { rot: string; valor: ReactNode; sub?: ReactNode; tom?: "ok" | "aviso"; barra?: number }) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]">
-      <p className="text-sm text-muted-foreground">{rot}</p>
-      <p className={cn("mt-0.5 text-2xl font-semibold tabular-nums tracking-tight", tom === "aviso" && "text-warning", tom === "ok" && "text-success")}>{valor}</p>
-      {barra != null && <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary transition-[width] duration-700" style={{ width: `${Math.round(barra * 100)}%` }} /></div>}
-      {sub && <p className="mt-1 text-sm text-muted-foreground">{sub}</p>}
-    </div>
-  );
-}
-
 function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio; sel: number; setSel: (k: number) => void; ajustar: (ti: number) => void }) {
   const { S, A, run, go } = ctx;
   const p = d.obra.plano!, fim = fimDe(p.tasks), pode = S.role === "operacoes";
   const [hist, setHist] = useState<number | null>(null);
   const [fecho, setFecho] = useState<number | null>(null);
-  const prog = progresso(p);
-  // as horas previstas até ao fim de hoje (os dias já passados de cada tarefa, com hoje)
-  const ate = p.tasks.reduce((a, t) => a + (t.h / t.dur) * Math.max(0, Math.min(t.dur, p.dia + 1 - t.dia)), 0);
-  const reg = p.tasks.reduce((a, t) => a + (t.exec?.horas ?? 0), 0);
-  const val = p.tasks.filter((t) => estadoDe(t) === "validada").length;
-  const D = diferencas(p);
-  const hojeTs = p.tasks.filter((t) => t.dia <= p.dia && p.dia < t.dia + t.dur && estadoDe(t) !== "validada");
-  const tecsHoje = [...new Set(hojeTs.map((t) => t.tec).filter(Boolean) as string[])];
-  const jaReg = tecsHoje.filter((id) => hojeTs.some((t) => t.tec === id && (registouNoDia(t, p.dia) || estadoDe(t) === "feita")));
-  // o que precisa do gestor, por ordem
-  const alertas: { t: string; tom: "aviso" | "mau"; ir?: () => void }[] = [];
-  p.tasks.forEach((t, i) => {
-    if (estadoDe(t) === "feita") alertas.push({ t: `${t.nome}: ${nomeTec(t.tec).split(" ")[0]} terminou, falta validar`, tom: "aviso", ir: () => { setSel(enviosDe(t).at(-1)?.dia ?? p.dia); setHist(i); } });
-    if (estadoDe(t) === "corrigir") alertas.push({ t: `${t.nome}: correção pedida, à espera do técnico`, tom: "mau" });
-    for (let k = t.dia; k < Math.min(p.dia, t.dia + t.dur); k++)
-      if (!registouNoDia(t, k) && estadoDe(t) !== "validada" && estadoDe(t) !== "feita") alertas.push({ t: `${t.nome}: sem registo a ${rotuloDia(p, k)}`, tom: "aviso", ir: () => setSel(k) });
-  });
-  for (const x of (d.obra.diario ?? []).filter((x) => x.k === "ocorrencia" && x.q.startsWith("hoje")).slice(-3)) alertas.push({ t: `${x.quem.split(" ")[0]} reportou: ${x.t}`, tom: "mau" });
   const verComo = (tec: string | null) => go(() => { if (tec) A.souTec(tec); A.role("tecnico"); A.nav("hoje"); });
   // o que chega do terreno enquanto o gestor está a ver (o técnico noutra janela): aparece em cima, com a fotografia
   const nDiario = d.obra.diario?.length ?? 0, antes = useRef(nDiario);
@@ -836,9 +874,9 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
   }, [nDiario]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <section id="obra-hoje" aria-labelledby="obra-hoje-t" className="mt-10 scroll-mt-16">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 id="obra-hoje-t" className={H2}>Acompanhamento <span className="font-normal text-muted-foreground">· ao vivo</span></h2>
+    <section id="obra-hoje" aria-labelledby="obra-hoje-t" className="mt-8 scroll-mt-16">
+      <div className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1">
+        <h2 id="obra-hoje-t" className="sr-only">Dia a dia</h2>
         <span className="inline-flex items-center gap-2 text-sm text-muted-foreground"><span className="relative flex h-2.5 w-2.5" aria-hidden="true"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" /></span>Os registos dos técnicos chegam aqui</span>
       </div>
 
@@ -851,25 +889,6 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
           </div>
           <button type="button" onClick={() => setChegou(null)} aria-label="Fechar" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
-      )}
-
-      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Indicador rot="Obra feita" valor={`${Math.round(prog * 100)}%`} barra={prog} sub={`${val} de ${p.tasks.length} tarefas validadas`} />
-        <Indicador rot="Horas registadas" valor={`${nfmt(reg)} h`} tom={reg > ate * 1.1 && ate > 0 ? "aviso" : undefined} sub={`previstas até hoje: ${nfmt(Math.round(ate * 10) / 10)} h`} />
-        <Indicador rot="Acaba a" valor={rotuloDia(p, fim - 1)} tom={D.dias > 0 ? "aviso" : D.dias < 0 ? "ok" : undefined} sub={D.dias ? `${D.dias > 0 ? "+" : "−"}${dias(Math.abs(D.dias))} face ao orçamento` : "como no orçamento"} />
-        <Indicador rot="Registos de hoje" valor={`${jaReg.length} de ${tecsHoje.length}`} tom={tecsHoje.length && jaReg.length === tecsHoje.length ? "ok" : undefined}
-          sub={tecsHoje.length ? (jaReg.length === tecsHoje.length ? "toda a equipa registou" : `falta ${tecsHoje.filter((x) => !jaReg.includes(x)).map((x) => nomeTec(x).split(" ")[0]).join(", ")}`) : "ninguém na obra hoje"} />
-      </div>
-
-      {alertas.length > 0 && (
-        <ul className="mt-4 space-y-2" aria-label="Precisa de si">
-          {alertas.slice(0, 5).map((a, k) => (
-            <li key={k} className={cn("flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 text-[15px]", a.tom === "mau" ? "border-destructive/30 bg-destructive/[0.05]" : "border-warning/40 bg-warning/[0.07]")}>
-              <span className="flex min-w-0 items-start gap-2"><AlertTriangle className={cn("mt-0.5 h-4 w-4 shrink-0", a.tom === "mau" ? "text-destructive" : "text-warning")} aria-hidden="true" />{a.t}</span>
-              {a.ir && <button type="button" onClick={a.ir} className="min-h-9 text-sm font-medium text-primary underline-offset-4 hover:underline">Ver</button>}
-            </li>
-          ))}
-        </ul>
       )}
 
       {/* hoje: o relógio do protótipo, para a frente e para trás */}
@@ -1056,35 +1075,6 @@ function AjustesFeitos({ d }: { d: Negocio }) {
   );
 }
 
-/* ------------------------------------------------------------------ por validar (o supervisor) */
-function PorValidar({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const p = d.obra.plano!, PV = porValidar(p);
-  return (
-    <section id="obra-validar" aria-labelledby="obra-validar-t" className="mt-10 scroll-mt-16">
-      <h2 id="obra-validar-t" className={H2}>Por validar <span className="font-normal text-muted-foreground">· {PV.length}</span></h2>
-      {!PV.length ? <p className={cn(NOTA, "mt-1")}>Nada à espera. Quando um técnico marca uma tarefa como feita, aparece aqui com as fotografias.</p> : (
-        <ul className="mt-3 space-y-3">
-          {PV.map((i) => {
-            const t = p.tasks[i], tec = TECS.find((x) => x.id === t.tec);
-            return (
-              <li key={i} className={cn(CARTAO, "p-4 sm:p-5")}>
-                <div className="flex items-start gap-3">
-                  <Avatar id={t.tec} n={tec?.n ?? "?"} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-base font-semibold">{t.nome}</p>
-                    <p className={NOTA}>{tec?.n ?? "sem técnico"} · previstas {nfmt(t.h)} h</p>
-                  </div>
-                </div>
-                <Registo ctx={ctx} d={d} ti={i} />
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
-
 /* ------------------------------------------------------------------ a equipa */
 /** 21/10: a equipa, com links: cada pessoa abre as tarefas dela nesta obra (com o estado e o dia, que leva ao acompanhamento),
  *  a app dela (o Hoje do técnico) e o telefone. */
@@ -1208,37 +1198,6 @@ function ConversaNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           rapidas={["Bom dia! A equipa já está na obra.", "Já pode ver as fotografias de hoje no portal.", "Vou confirmar e respondo ainda hoje."]} />
       </div>
     </section>
-  );
-}
-
-/** 21/10: voltar ao topo da página da obra, sem rolar (aparece depois de descer). */
-function ParaCima() {
-  const [ver, setVer] = useState(false);
-  const ancora = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    // a página rola dentro do <main> do protótipo (ou da janela, no telemóvel)
-    let el: HTMLElement | null = ancora.current?.parentElement ?? null;
-    while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement;
-    const alvo: HTMLElement | Window = el ?? window;
-    const f = () => setVer((el ? el.scrollTop : window.scrollY) > 700);
-    alvo.addEventListener("scroll", f, { passive: true }); f();
-    return () => alvo.removeEventListener("scroll", f);
-  }, []);
-  const subir = () => {
-    let el: HTMLElement | null = ancora.current?.parentElement ?? null;
-    while (el && !/(auto|scroll)/.test(getComputedStyle(el).overflowY)) el = el.parentElement;
-    (el ?? window).scrollTo({ top: 0, behavior: "smooth" });
-  };
-  return (
-    <>
-      <span ref={ancora} aria-hidden="true" />
-      {ver && (
-        <button type="button" onClick={subir} aria-label="Voltar ao topo da obra"
-          className="fixed bottom-24 right-5 z-30 grid h-12 w-12 place-items-center rounded-full bg-foreground text-background shadow-xl transition-transform animate-in fade-in-0 zoom-in-90 hover:scale-105 md:bottom-8 md:right-8">
-          <ArrowUp className="h-5 w-5" />
-        </button>
-      )}
-    </>
   );
 }
 
