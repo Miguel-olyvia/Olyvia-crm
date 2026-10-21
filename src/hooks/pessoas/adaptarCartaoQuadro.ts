@@ -80,5 +80,7 @@ export function adaptarLinhaQuadro(l: LinhaQuadroDb, hoje: string): CartaoComCur
   const paradoDias = paradoDe(l, coluna, hoje);
   if (paradoDias !== undefined) cartao.paradoDias = paradoDias;
   if (l.pronto_a_ganhar === true) cartao.prontoAGanhar = true;
+  // Sem orçamentos o passo continua a ser «nenhum» (nenhum passo novo no motor); só o texto do cartão explica porque não há botão.
+  if (coluna === "orcamento" && !positivo(l.n_orcamentos) && l.pronto_a_ganhar !== true) cartao.semOrcamentos = true;
   return { cartao, cursor };
 }

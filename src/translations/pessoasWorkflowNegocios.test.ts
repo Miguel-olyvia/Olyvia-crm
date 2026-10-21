@@ -21,6 +21,17 @@ const CHAVES_USADAS = [
   ...CANCELAMENTOS.map((c) => `cancel.${c}`),
 ].map((c) => `${N}${c}`);
 
+describe("as ajudas das recusas dizem o que a base faz (decisão 4)", () => {
+  it("a recusa decide-se só por esta opção: não se fala de «outra proposta ou contrato positivo ativo»", () => {
+    for (const chave of ["propRefused.hint", "contRefused.hint"].map((c) => `${N}${c}`)) {
+      expect(pt[chave], chave).not.toMatch(/outro? (proposta|contrato).*positivo|positivo/i);
+      expect(en[chave], chave).not.toMatch(/positive|other active/i);
+      expect(pt[chave], chave).toMatch(/não depende/);
+      expect(en[chave], chave).toMatch(/does not depend/);
+    }
+  });
+});
+
 describe("traduções do separador «Negócios» do Workflow de Pessoas", () => {
   it("pt e en têm exatamente as mesmas chaves, com os mesmos marcadores", () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(pt).sort());

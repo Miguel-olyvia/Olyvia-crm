@@ -11,6 +11,9 @@ import type { CondicoesTermos } from "./termosProposta";
 /** A regra da organização para dar um negócio como ganho (os valores que o CHECK da base aceita). */
 export type MomentoGanhoCostura = "manual" | "proposta_aceite" | "contrato_assinado";
 
+/** Os documentos de um negócio que têm permissão própria (orçamento = `quotes`, proposta = `proposals`, contrato = `client_contracts`). */
+export type TipoDocumentoPermissao = "orcamento" | "proposta" | "contrato";
+
 /** Uma lead aberta da pessoa, para escolher a que um negócio novo corresponde. */
 export interface LeadAbertaCostura {
   id: string;
@@ -61,6 +64,25 @@ export interface DadosNegocio {
   documentosPorLigar: readonly DocumentoPorLigar[];
   /** `pessoas.delete` (com o âmbito que a base decide): mandar para o lixo e restaurar. Ausente conta como falso. */
   podeApagar?: boolean;
+  /**
+   * Os botões de documento pedem `pessoas.edit` E a permissão do documento (`quotes`, `proposals`, `client_contracts`), com o âmbito que a base decide.
+   * Ausente (exemplo e testes antigos): sem restrição extra; a base continua a ser quem decide, o ecrã só esconde.
+   */
+  podeNoDocumento?: (tipo: TipoDocumentoPermissao, acao: "create" | "edit") => boolean;
+  /** `pessoas.reopen` (só o Super Admin): «Reabrir negócio». Ausente conta como falso: sem a permissão o botão nem aparece. */
+  podeReabrir?: boolean;
+  /** `leads.convert` (com âmbito): «Converter em cliente». Ausente conta como permitido; `false` esconde o botão (a base decide: NG007). */
+  podeConverter?: boolean;
+  /**
+   * Os nomes dos comerciais REAIS da organização (a lista da página de Leads), para o «Feito por» das visitas. Ausente: ainda por ler (ou falhou), e a
+   * lista fica vazia. Só a ficha real os traz; no exemplo (sem `DadosNegocio`) o «Feito por» usa os comerciais de exemplo.
+   */
+  comerciais?: readonly string[];
+  /**
+   * Quem precisa dos comerciais (o «Feito por» de uma visita) pede-os ao montar: a ficha só os lê então (não paga a leitura a quem nunca abre uma visita).
+   * Ausente no exemplo.
+   */
+  pedirComerciais?: () => void;
   /** A proposta do negócio e as condições dela; ausente (exemplo e testes antigos) conta como «sem proposta». */
   proposta?: (negocioId: string) => PropostaCondicoes | null;
 }

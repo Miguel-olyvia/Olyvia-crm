@@ -7,7 +7,7 @@ import {
 import { chamarNeg, ErroNeg, type NomeNeg } from "./chamarNeg";
 import type { FichaDb } from "./fichaTipos";
 import { invalidarPessoas } from "./invalidarPessoas";
-import { erroGenerico, erroLocal, lerCriado, lerGanho, lerMudarFecho, lerMudou, textoDeEstado, tipoDeRegisto, tituloENotas } from "./paramsNegocio";
+import { erroGenerico, erroLocal, lerCriado, lerGanho, lerMudarFecho, lerMudou, lerReavaliar, textoDeEstado, tipoDeRegisto, tituloENotas } from "./paramsNegocio";
 import { useEscritasNegocio } from "./useEscritasNegocio";
 import { useFontePessoas } from "./useFontePessoas";
 
@@ -173,8 +173,33 @@ function criarMutacoes(c: Contexto): MutacoesNegocio {
     return chamar("neg_mudar_fecho", { p_negocio_id: negocioId, p_fecho: fechoValido(fecho), p_confirmar: confirmar });
   }, lerMudarFecho);
 
+  /** Defesa em profundidade: o botão só aparece com `pessoas.edit` e a base recusa de qualquer forma; aqui recusa-se sem gastar uma ida à base. */
+  const exigirEditar = (): void => {
+    const atual = c.ficha();
+    if (!atual || atual.pessoa.id !== c.pessoaId) throw erroGenerico();
+    if (!atual.permissoes.editar) throw erroLocal("42501");
+  };
+
+  // Fecho v4 (migrations D e F): só se chamam com a bandeira ligada. «Reabrir» não tem defesa local: `pessoas.reopen` não vem na ficha, a base decide (42501).
+  const reavaliar = (negocioId: string) => escrever(`reavaliar:${negocioId}`, async () => {
+    org();
+    exigirEditar();
+    return chamar("neg_reavaliar_negocio", { p_negocio_id: negocioId });
+  }, lerReavaliar);
+
+  const reabrirGanho = (negocioId: string, motivo: string) => escrever(`reabrir:${negocioId}`, async () => {
+    org();
+    return chamar("neg_reabrir_ganho", { p_negocio_id: negocioId, p_motivo: textoDeEstado(motivo) });
+  }, lerMudou);
+
+  const dispensarAlerta = (negocioId: string) => escrever(`dispensar:${negocioId}`, async () => {
+    org();
+    exigirEditar();
+    return chamar("neg_dispensar_alerta", { p_negocio_id: negocioId });
+  }, lerMudou);
+
   return {
-    perder, anular, ganhar, criar, mudarFecho, criarComDocumentos: c.comDocumentos, refrescar: invalidar,
+    perder, anular, ganhar, criar, mudarFecho, reavaliar, reabrirGanho, dispensarAlerta, criarComDocumentos: c.comDocumentos, refrescar: invalidar,
     ligar: (negocioId, ref) => mudarLigacao("neg_ligar_registo", negocioId, ref),
     desligar: (negocioId, ref) => mudarLigacao("neg_desligar_registo", negocioId, ref),
   };

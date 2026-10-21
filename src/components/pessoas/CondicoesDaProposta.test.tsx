@@ -74,6 +74,17 @@ describe("o que se vê", () => {
     expect(screen.queryByRole("button", { name: /condições/ })).toBeNull();
   });
 
+  it("sem proposals.edit (mesmo com pessoas.edit) mostra as condições mas não deixa editar", () => {
+    abrir(proposta(), { podeNoDocumento: (tipo, acao) => !(tipo === "proposta" && acao === "edit") });
+    expect(screen.getByText("20 dias úteis")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /condições/ })).toBeNull();
+  });
+
+  it("com proposals.edit e pessoas.edit deixa editar", () => {
+    abrir(proposta(), { podeNoDocumento: (tipo, acao) => tipo === "proposta" && acao === "edit" });
+    expect(screen.getByRole("button", { name: "Editar condições" })).toBeInTheDocument();
+  });
+
   it("sem a mutação de guardar condições não deixa editar", () => {
     abrir(proposta(), {}, mutacoesFalsas());
     expect(screen.queryByRole("button", { name: /condições/ })).toBeNull();
@@ -117,6 +128,12 @@ describe("editar as condições", () => {
     expect(prazo()).toHaveValue("");
     expect(inicio()).toHaveValue("");
     expect(within(dialogo()).getByRole("radio", { name: "50 % + 50 % no fim" })).toBeChecked();
+  });
+
+  it("avisa que o cliente só vê a mudança quando a proposta for republicada no portal", () => {
+    abrir(proposta());
+    abrirDialogo();
+    expect(within(dialogo()).getByText("O cliente só vê esta mudança quando a proposta for republicada no portal.")).toBeInTheDocument();
   });
 
   it("condições ilegíveis avisam que as novas as substituem", () => {

@@ -2,6 +2,7 @@
 // negócio, e liga a proposta ao negócio (neg_ligar_registo) assim que é guardada. Se a ligação falhar, a proposta fica criada e diz-se.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
+import { FechoV4Context } from "@/components/negocio-metas/bandeiraFecho";
 import { ComCostura, erroNegFalso, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
 import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio";
 import { PainelPropostaReal, type NegocioDaProposta } from "./PainelPropostaReal";
@@ -15,7 +16,7 @@ afterEach(() => { cleanup(); dialogo.mockReset(); sucesso.mockReset(); erro.mock
 
 const negocio: NegocioDaProposta = { id: "n1", entityId: "e1", orcamentoId: "q-1" };
 type PropsDoDialogo = {
-  open: boolean; onOpenChange: (a: boolean) => void; presetEntityId?: string; presetQuoteIds?: string[]; onSaved?: (id: string) => void;
+  open: boolean; onOpenChange: (a: boolean) => void; presetEntityId?: string; presetQuoteIds?: string[]; onSaved?: (id: string) => void; propostaVivaNoNegocio?: boolean; criarNoNegocioId?: string;
 };
 const ultimo = (): PropsDoDialogo => dialogo.mock.calls[dialogo.mock.calls.length - 1][0] as PropsDoDialogo;
 
@@ -41,12 +42,48 @@ describe("PainelPropostaReal: abrir", () => {
     expect(ultimo().presetQuoteIds).toBeUndefined();
   });
 
+  it("um negócio com proposta viva (enviada ou aceite) pede ao diálogo que avise e não deixe criar outra", () => {
+    montar(mutacoesFalsas(), { ...negocio, propostaViva: true });
+    expect(ultimo()).toMatchObject({ open: true, propostaVivaNoNegocio: true });
+  });
+
+  it("sem proposta viva, ou sem a indicação, o diálogo não leva a propriedade a verdadeiro", () => {
+    montar();
+    expect(ultimo().propostaVivaNoNegocio).toBeFalsy();
+    cleanup();
+    montar(mutacoesFalsas(), { ...negocio, propostaViva: false });
+    expect(ultimo().propostaVivaNoNegocio).toBe(false);
+  });
+
   it("fechar o diálogo pede ao painel que feche; abrir não faz nada", () => {
     const { aoFechar } = montar();
     ultimo().onOpenChange(true);
     expect(aoFechar).not.toHaveBeenCalled();
     ultimo().onOpenChange(false);
     expect(aoFechar).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PainelPropostaReal: com a bandeira do fecho ligada a proposta nasce ligada", () => {
+  const montarLigada = (mutacoes: MutacoesNegocio = mutacoesFalsas()) => {
+    render(<FechoV4Context.Provider value><ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={negocio} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura></FechoV4Context.Provider>);
+    return mutacoes;
+  };
+
+  it("o diálogo recebe o negócio para criar por neg_criar_proposta; desligada, não", () => {
+    montarLigada();
+    expect(ultimo().criarNoNegocioId).toBe("n1");
+    cleanup();
+    montar();
+    expect(ultimo().criarNoNegocioId).toBeUndefined();
+  });
+
+  it("depois de guardar não volta a ligar (já nasceu ligada): refaz a ficha e avisa", async () => {
+    const mutacoes = montarLigada();
+    ultimo().onSaved?.("pr-7");
+    await vi.waitFor(() => expect(sucesso).toHaveBeenCalledWith("Proposta criada e ligada ao negócio."));
+    expect(mutacoes.ligar).not.toHaveBeenCalled();
+    expect(mutacoes.refrescar).toHaveBeenCalledTimes(1);
   });
 });
 

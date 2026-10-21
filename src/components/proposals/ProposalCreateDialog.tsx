@@ -28,6 +28,7 @@ import { calculateProposalItemsTotal, ProposalItem } from "@/components/proposal
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { chaveDoErro, codigoDoErro } from "@/hooks/pessoas/errosNeg";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
 import { caminhoVoltarSeguro, ligacaoComVoltar } from "@/lib/voltarParaPessoas";
@@ -118,6 +119,16 @@ interface ProposalCreateDialogProps {
    * ao criar. Sem isto nada muda.
    */
   presetQuoteIds?: string[];
+  /**
+   * Só a ficha da pessoa: o negócio a que esta proposta ia ligar-se já tem uma proposta enviada ou aceite. Avisa e não deixa criar outra (com duas
+   * propostas vivas, recusar uma pode perder o negócio com a outra enviada). Só vale ao criar. Sem isto nada muda.
+   */
+  propostaVivaNoNegocio?: boolean;
+  /**
+   * Só a ficha da pessoa, com a bandeira do fecho ligada (migration E aplicada): ao CRIAR, a proposta nasce já ligada a este negócio, por `neg_criar_proposta`
+   * (mesmos parâmetros de `rpc_create_proposal` mais o negócio) e os erros da base (NG) aparecem traduzidos. Sem isto grava como sempre.
+   */
+  criarNoNegocioId?: string;
 }
 
 export function ProposalCreateDialog({
@@ -127,6 +138,8 @@ export function ProposalCreateDialog({
   editingId = null,
   onSaved,
   presetQuoteIds,
+  propostaVivaNoNegocio = false,
+  criarNoNegocioId,
 }: ProposalCreateDialogProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -441,6 +454,11 @@ export function ProposalCreateDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // A ficha da pessoa diz que o negócio já tem uma proposta viva: o botão avisa e aqui nada se grava (também não por Enter).
+    if (propostaVivaNoNegocio && !editingId) {
+      toast({ title: t('proposals.toast.createError'), description: t('pessoasPagina.neg.close.secondProposal.blocked'), variant: "destructive" });
+      return;
+    }
     if (submitLockRef.current || savingProposal) return;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
@@ -600,13 +618,17 @@ export function ProposalCreateDialog({
         // above, so editing an existing proposal's fields can never
         // re-resolve/overwrite its already-frozen layout.
         const templateSnapshot = await resolveTemplateSnapshot(templateId, activeCompany.id);
-        const { data, error } = await supabase.rpc('rpc_create_proposal', {
+        const parametrosDaProposta = {
           p_proposal_data: { ...proposalData, template_snapshot: templateSnapshot },
           p_selected_quote_ids: selectedQuoteIds,
           p_inline_quotes: inlineQuotesPayload,
           p_proposal_items: proposalItemsPayload,
           p_quote_entity_id: quoteEntityId,
-        });
+        };
+        // Na ficha da pessoa (fecho v4) a proposta nasce já ligada ao negócio; fora dela grava como sempre.
+        const { data, error } = criarNoNegocioId
+          ? await (supabase as any).rpc('neg_criar_proposta', { p_negocio_id: criarNoNegocioId, ...parametrosDaProposta })
+          : await supabase.rpc('rpc_create_proposal', parametrosDaProposta);
         if (error) throw error;
         savedProposal = data;
         savedProposalId = data.id;
@@ -622,7 +644,11 @@ export function ProposalCreateDialog({
       if (savedProposalId && onSaved) onSaved(savedProposalId);
     } catch (error: any) {
       captureFlowError(error, "proposal-lifecycle");
-      toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
+      // Criar já ligado a um negócio: o erro da base traduz-se pelo código (NG...), nunca o texto em bruto.
+      toast({
+        title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'),
+        description: criarNoNegocioId && !editingId && codigoDoErro(error) ? t(chaveDoErro(error)) : error.message, variant: "destructive",
+      });
     } finally {
       submitLockRef.current = false;
       setSavingProposal(false);
@@ -1126,9 +1152,17 @@ export function ProposalCreateDialog({
               <Textarea id="notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} />
             </div>
           </div>
+          {propostaVivaNoNegocio && !editingId && (
+            <p id="proposta-viva-aviso" className="text-sm font-medium text-foreground">{t('pessoasPagina.neg.close.secondProposal.warning')}</p>
+          )}
           <DialogFooter className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => handleClose(false)}>{t('proposals.form.cancel')}</Button>
-            <Button type="submit" disabled={savingProposal}>{editingId ? t('proposals.form.update') : t('proposals.form.create')}</Button>
+            <Button
+              type="submit" disabled={savingProposal} aria-disabled={propostaVivaNoNegocio && !editingId ? true : undefined}
+              aria-describedby={propostaVivaNoNegocio && !editingId ? 'proposta-viva-aviso' : undefined}
+            >
+              {editingId ? t('proposals.form.update') : t('proposals.form.create')}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

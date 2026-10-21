@@ -6,6 +6,7 @@
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
 import { chaveDoErroDeEnvio } from "@/components/negocio-metas/useEnvioAssincrono";
 import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
@@ -33,11 +34,18 @@ interface PainelOrcamentoRealProps {
 
 export function PainelOrcamentoReal({ negocio, mutacoes, aoFechar }: PainelOrcamentoRealProps) {
   const { t } = useTranslation();
+  // Fecho v4: com a bandeira ligada (migration E aplicada) o orçamento nasce já ligado ao negócio (neg_criar_orcamento) e não há nada a ligar depois.
+  const nascerLigado = useFechoV4();
   if (negocio === null) return null;
   const titulo = t(`${P}quote.title`, { name: negocio.nome });
 
   /** Liga o orçamento guardado ao negócio. Nunca lança: o editor fecha a seguir, e o orçamento já existe (uma falha diz-se, não se esconde). */
   const aoGuardar = async (orcamentoId: string): Promise<void> => {
+    if (nascerLigado) {
+      mutacoes.refrescar();
+      toast.success(t(`${P}quote.linked`));
+      return;
+    }
     try {
       await mutacoes.ligar(negocio.id, { tipo: "orcamento", id: orcamentoId });
       toast.success(t(`${P}quote.linked`));
@@ -53,7 +61,7 @@ export function PainelOrcamentoReal({ negocio, mutacoes, aoFechar }: PainelOrcam
         <DialogTitle className="sr-only">{titulo}</DialogTitle>
         <DialogDescription className="sr-only">{titulo}</DialogDescription>
         <QuoteBuilder
-          quoteId={null} onClose={aoFechar} onSaved={aoGuardar}
+          quoteId={null} onClose={aoFechar} onSaved={aoGuardar} criarNoNegocioId={nascerLigado ? negocio.id : undefined}
           initialEntity={{ kind: negocio.origem.tipo, id: negocio.origem.id, name: negocio.nome, entity_id: negocio.entityId, organization_id: negocio.organizationId }}
         />
       </DialogContent>

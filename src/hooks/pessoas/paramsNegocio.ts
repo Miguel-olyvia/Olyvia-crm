@@ -2,7 +2,8 @@
 // com o que ela vai recusar com NG009) e ler as respostas sem nunca rebentar com uma forma inesperada.
 import { fechoDe } from "@/components/negocio-metas/fechoNegocio";
 import {
-  TIPOS_REGISTO_BASE, type ConversaoGanho, type RefRegistoBase, type ResultadoCriar, type ResultadoGanho, type ResultadoMudarFecho, type TipoRegistoBase,
+  TIPOS_REGISTO_BASE, type ConversaoGanho, type RefRegistoBase, type ResultadoCriar, type ResultadoGanho, type ResultadoMudarFecho, type ResultadoReavaliar,
+  type TipoRegistoBase,
 } from "@/components/negocio-metas/mutacoesNegocio";
 import { ErroNeg } from "./chamarNeg";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG } from "./errosNeg";
@@ -61,6 +62,24 @@ export function lerGanho(dados: unknown): ResultadoGanho {
     mudou: d.mudou === true,
     conversao: CONVERSOES.find((c) => c === d.conversao) ?? null,
     outrasLeadsAbertas: typeof outras === "number" && Number.isInteger(outras) && outras > 0 ? outras : 0,
+  };
+}
+
+const CONVERSOES_REAVALIAR: readonly NonNullable<ResultadoReavaliar["conversao"]>[] = ["feita", "ja_cliente", "ja_convertida", "por_fazer", "falhou", "manual"];
+
+const texto = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+
+/** A resposta de `neg_reavaliar_negocio` («Fechar agora»): `mudou` só vale se for exatamente `true`; o que a base trouxe e o ecrã não conhece lê-se como nulo. */
+export function lerReavaliar(dados: unknown): ResultadoReavaliar {
+  const d = objeto(dados);
+  return {
+    mudou: d.mudou === true,
+    estado: d.estado === "aberto" || d.estado === "ganho" ? d.estado : null,
+    origemTipo: d.origem_tipo === "proposta" || d.origem_tipo === "contrato" ? d.origem_tipo : null,
+    origemId: texto(d.origem_id),
+    prova: texto(d.prova),
+    conversao: CONVERSOES_REAVALIAR.find((c) => c === d.conversao) ?? null,
+    motivo: texto(d.motivo),
   };
 }
 

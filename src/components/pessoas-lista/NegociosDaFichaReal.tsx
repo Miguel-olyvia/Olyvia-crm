@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { adaptarDadosNegocio } from "@/hooks/pessoas/adaptarDadosNegocio";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
+import { useComerciaisNegocio } from "@/hooks/pessoas/useComerciaisNegocio";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useLigarAoVoltar } from "@/hooks/pessoas/useLigarAoVoltar";
 import { useMutacoesNegocio } from "@/hooks/pessoas/useMutacoesNegocio";
@@ -68,7 +69,17 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
   const mutacoes = useMutacoesNegocio(pessoaId, ficha, { aoIndisponivel });
   const momentoGanho = fonte.modo === "real" ? fonte.momentoGanho : null;
   const podeApagar = fonte.modo === "real" && fonte.podeApagarNegocios === true;
-  const dados = useMemo(() => (ficha ? adaptarDadosNegocio(ficha, momentoGanho, { podeApagar }) : null), [ficha, momentoGanho, podeApagar]);
+  const permissoes = fonte.modo === "real" ? fonte.permissoesFecho : undefined;
+  // Os comerciais reais da organização, para o «Feito por» das visitas (a mesma lista e a mesma cache do painel «Nova lead»). Só se leem quando
+  // um ecrã os pede (ao montar um «Feito por»): abrir a ficha não paga a leitura.
+  const [querComerciais, setQuerComerciais] = useState(false);
+  const pedirComerciais = useCallback(() => setQuerComerciais(true), []);
+  const { comerciais } = useComerciaisNegocio(fonte.modo === "real" && querComerciais);
+  const nomesComerciais = useMemo(() => comerciais.map((c) => c.nome), [comerciais]);
+  const dados = useMemo(
+    () => (ficha ? adaptarDadosNegocio(ficha, momentoGanho, { podeApagar, permissoes, comerciais: nomesComerciais, pedirComerciais }) : null),
+    [ficha, momentoGanho, podeApagar, permissoes, nomesComerciais, pedirComerciais],
+  );
   // O painel e o negócio criado guardam a pessoa a que pertencem: trocar de pessoa (ou fechar a ficha) deixa-os de valer.
   const [criandoPara, setCriandoPara] = useState<string | null>(null);
   // `endereco` é o `?negocio=` do momento em que se criou: o negócio criado só manda enquanto o endereço não passa para outro negócio.

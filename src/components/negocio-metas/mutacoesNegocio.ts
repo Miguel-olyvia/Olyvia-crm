@@ -28,6 +28,20 @@ export interface PedidoPerder {
 
 export type ConversaoGanho = "feita" | "ja_cliente" | "ja_convertida";
 
+/** O que `neg_reavaliar_negocio` («Fechar agora») devolveu. Os campos que a base não traz, ou traz com um valor desconhecido, ficam `null`. */
+export interface ResultadoReavaliar {
+  /** `false`: nada mudou (o negócio continua como estava). */
+  mudou: boolean;
+  estado: "aberto" | "ganho" | null;
+  origemTipo: "proposta" | "contrato" | null;
+  origemId: string | null;
+  prova: string | null;
+  /** `por_fazer`: a conversão em cliente fica por fazer (falta `leads.convert`); usa-se «Converter em cliente». */
+  conversao: ConversaoGanho | "por_fazer" | "falhou" | "manual" | null;
+  /** Quando nada mudou: porquê (código da base). */
+  motivo: string | null;
+}
+
 export interface ResultadoGanho {
   /** `false`: o negócio já estava ganho. */
   mudou: boolean;
@@ -105,6 +119,13 @@ export interface MutacoesNegocio {
   criar: (pedido: PedidoCriarNegocio) => Promise<ResultadoCriar>;
   /** A M6 está aplicada: o criar aceita orçamentos, propostas e contratos. Desligada, o formulário não os oferece. */
   criarComDocumentos: boolean;
+  /**
+   * Fecho v4 (migrations D e F): ausentes só no exemplo (sem ficha real). Na ficha real estão sempre presentes e NÃO testam se a base as tem: o único
+   * travão é a bandeira do fecho, que só se liga depois de C, D, E e F aplicadas (por esta ordem). Lançam `ErroNeg` (o ecrã traduz-lhe a chave).
+   */
+  reavaliar?: (negocioId: string) => Promise<ResultadoReavaliar>;
+  reabrirGanho?: (negocioId: string, motivo: string) => Promise<{ mudou: boolean }>;
+  dispensarAlerta?: (negocioId: string) => Promise<{ mudou: boolean }>;
   /** Refaz a ficha e as listas, sem escrever nada (um documento criado por outro ecrã, ou uma ligação que falhou, passam a ver-se). */
   refrescar: () => void;
 }

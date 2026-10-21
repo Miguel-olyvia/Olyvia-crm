@@ -141,6 +141,17 @@ export interface NegocioMes {
   notas?: string;
   /** Só nos negócios da base: o `anew_users.id` do comercial (`null` sem comercial), para o diálogo de editar. */
   comercialId?: string | null;
+  /**
+   * Fecho v4, só nos negócios da base e só quando a base o devolve: o alerta em aberto (`negocios.alerta_codigo`). `codigo: null` é um alerta sem código
+   * (tratado como genérico). Ausente: sem alerta. Só se mostra com a bandeira do fecho ligada.
+   */
+  alerta?: { codigo: string | null };
+  /** Fecho v4: o documento que decidiu o ganho ou a perda (`decisao_origem_*`). Ausente: decisão manual, ou a base ainda não o devolve. */
+  origemDecisao?: { tipo: "proposta" | "contrato" | null; numero: string | null; em: string | null };
+  /** Fecho v4, num negócio perdido: `true` = perdeu-se por decisão automática, `false` = à mão; ausente = a base não o diz. */
+  perdaAutomatica?: boolean;
+  /** Fecho v4, num negócio ganho: a conversão da pessoa em cliente ficou por fazer (`por_fazer`, `falhou` ou `manual`). */
+  conversaoPendente?: boolean;
 }
 
 export interface MetaComercial {

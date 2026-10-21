@@ -18,6 +18,8 @@ export type FontePessoas =
     utilizadorId?: string | null;
     /** `pessoas.delete` (com qualquer âmbito): mostra o lixo de negócios e deixa mandar para lá e restaurar. Ausente conta como falso. */
     podeApagarNegocios?: boolean;
+    /** As permissões do fecho que a sessão tem (documentos, `pessoas.reopen`, `leads.convert`): esconder o que a base recusaria. Ausente: nada se restringe. */
+    permissoesFecho?: readonly string[];
   };
 
 export const FontePessoasContext = createContext<FontePessoas>({ modo: "exemplo" });

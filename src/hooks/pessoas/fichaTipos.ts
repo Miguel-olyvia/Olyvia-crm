@@ -136,6 +136,16 @@ export interface NegocioFichaDb {
   pronto_a_ganhar: boolean;
   /** O tipo de fecho (`negocios.fecho`). `neg_ficha_pessoa` ainda não o devolve: `lerFechos` junta-o à ficha; ausente se a leitura falhou. */
   fecho?: string | null;
+  /**
+   * Fecho v4: `neg_ficha_pessoa` ainda não devolve estes campos (mudança de RPC por decidir, a entrar com o código que a usa). Ausentes, o ecrã não
+   * mostra alerta, origem nem perda automática. `alerta_codigo` é o alerta em aberto; `decisao_origem_*` o documento que decidiu o ganho ou a perda.
+   */
+  alerta_codigo?: string | null;
+  decisao_origem_tipo?: string | null;
+  decisao_origem_numero?: string | null;
+  decisao_origem_em?: string | null;
+  perda_automatica?: boolean | null;
+  conversao_pendente?: boolean | null;
   parado_desde: string | null;
   levantamento_id: string | null;
   orcamentos: OrcamentoDb[];

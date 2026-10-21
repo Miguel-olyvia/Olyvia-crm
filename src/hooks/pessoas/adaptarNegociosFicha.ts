@@ -80,6 +80,18 @@ function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string, momento
     prontoAGanhar: manualAberto || n.pronto_a_ganhar === true,
     notas: n.notas ?? "",
     comercialId: n.responsavel_id ?? null,
+    ...camposDoFecho(n, estadoReal),
+  };
+}
+
+/** Fecho v4: só o que a base devolveu e o ecrã sabe dizer. Um tipo de origem desconhecido, ou um booleano que não o é, não conta. */
+function camposDoFecho(n: NegocioFichaDb, estadoReal: "aberto" | "ganho" | "perdido"): Partial<NegocioMes> {
+  const tipo = n.decisao_origem_tipo === "proposta" || n.decisao_origem_tipo === "contrato" ? n.decisao_origem_tipo : null;
+  return {
+    ...(typeof n.alerta_codigo === "string" && n.alerta_codigo !== "" ? { alerta: { codigo: n.alerta_codigo } } : {}),
+    ...(tipo ? { origemDecisao: { tipo, numero: n.decisao_origem_numero ?? null, em: diaLisboa(n.decisao_origem_em ?? null) } } : {}),
+    ...(estadoReal === "perdido" && typeof n.perda_automatica === "boolean" ? { perdaAutomatica: n.perda_automatica } : {}),
+    ...(estadoReal === "ganho" && n.conversao_pendente === true ? { conversaoPendente: true } : {}),
   };
 }
 

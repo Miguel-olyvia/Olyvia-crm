@@ -81,6 +81,7 @@ function Formulario({ negocio, proposta, hoje, guardar, envio, aoFechar, aoGuard
   return (
     <form onSubmit={enviar} noValidate className="space-y-4">
       {!proposta.legivel && <p className="text-sm text-muted-foreground">{t(`${N}dialog.unreadable`)}</p>}
+      <p className="text-sm text-muted-foreground">{t(`${N}dialog.republish`)}</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <div className="flex items-baseline">

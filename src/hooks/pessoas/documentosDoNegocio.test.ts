@@ -1,7 +1,7 @@
 // Os documentos de um negócio que o processo precisa de encontrar: o orçamento a partir do qual se cria a proposta, a proposta que se envia ou
 // aceita, a proposta aceite de onde nasce o contrato, e o contrato que se assina. Lidos da ficha, sem nunca rebentar com valores em falta.
 import { describe, expect, it } from "vitest";
-import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva } from "./documentosDoNegocio";
+import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva, temPropostaEnviadaOuAceite } from "./documentosDoNegocio";
 import { negocioDb } from "./fichaFabrica";
 import type { ContratoDb, OrcamentoDb, PropostaDb } from "./fichaTipos";
 
@@ -54,6 +54,23 @@ describe("propostaAceite", () => {
 
   it("sem nenhuma aceite, null", () => {
     expect(propostaAceite(negocioDb({ propostas: [prop("a", "draft", "2026-10-01T09:00:00Z")] }))).toBeNull();
+  });
+});
+
+describe("temPropostaEnviadaOuAceite", () => {
+  it("uma proposta enviada ou aceite conta, em qualquer posição da lista", () => {
+    expect(temPropostaEnviadaOuAceite(negocioDb({ propostas: [prop("a", "sent", "2026-10-01T09:00:00Z", { enviada_em: "2026-10-02T09:00:00Z" })] }))).toBe(true);
+    expect(temPropostaEnviadaOuAceite(negocioDb({ propostas: [prop("a", "accepted", "2026-10-01T09:00:00Z"), prop("b", "draft", "2026-10-09T09:00:00Z")] }))).toBe(true);
+  });
+
+  it("rascunhos, recusadas e a falta de propostas não contam", () => {
+    expect(temPropostaEnviadaOuAceite(negocioDb())).toBe(false);
+    expect(temPropostaEnviadaOuAceite(negocioDb({ propostas: [prop("a", "draft", null)] }))).toBe(false);
+    expect(temPropostaEnviadaOuAceite(negocioDb({ propostas: [prop("a", "rejected", null, { enviada_em: "2026-10-02T09:00:00Z" }), prop("b", "declined", null)] }))).toBe(false);
+  });
+
+  it("uma enviada que o cliente recusou e um rascunho novo: nenhuma viva", () => {
+    expect(temPropostaEnviadaOuAceite(negocioDb({ propostas: [prop("a", "rejected", "2026-10-01T09:00:00Z"), prop("b", "draft", "2026-10-09T09:00:00Z")] }))).toBe(false);
   });
 });
 

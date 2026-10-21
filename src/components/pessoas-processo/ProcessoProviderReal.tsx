@@ -15,7 +15,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } 
 import { useNavigate } from "react-router-dom";
 import { adaptarPessoa } from "@/hooks/pessoas/adaptarFichaPessoa";
 import { adaptarNegocios } from "@/hooks/pessoas/adaptarNegociosFicha";
-import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva } from "@/hooks/pessoas/documentosDoNegocio";
+import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva, temPropostaEnviadaOuAceite } from "@/hooks/pessoas/documentosDoNegocio";
 import type { FichaDb, NegocioFichaDb } from "@/hooks/pessoas/fichaTipos";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
@@ -53,16 +53,18 @@ const SEM_EFEITO = (): void => undefined;
 const visitaViva = (v: { status: string; cancelada?: boolean }): boolean => v.cancelada !== true && v.status !== "cancelled";
 
 /** O plano do passo de um item, ou `null` se a ficha real não o sabe executar (ou falta o documento ou a permissão que ele pede). */
-function planear(item: ItemProcesso, ficha: FichaDb | null): Plano | null {
+function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonly string[]): Plano | null {
   if (!ficha || item.tipo !== "negocio") return null;
   const negocio = ficha.negocios?.itens.find((n) => n.id === item.id);
   if (!negocio) return null;
   const editar = ficha.permissoes.editar === true;
+  // Criar um documento pede pessoas.edit E a permissão do documento. Sem a lista (a página ainda não a leu) nada se restringe: a base decide.
+  const podeCriar = (codigo: string): boolean => editar && (permissoes === undefined || permissoes.includes(codigo));
   switch (passoDoItem(item).id) {
     case "criarOrcamento":
-      return editar ? { tipo: "painel", painel: "orcamento", negocio } : null;
+      return podeCriar("quotes.create") ? { tipo: "painel", painel: "orcamento", negocio } : null;
     case "criarProposta":
-      return editar && orcamentoParaProposta(negocio) !== null ? { tipo: "painel", painel: "proposta", negocio } : null;
+      return podeCriar("proposals.create") && orcamentoParaProposta(negocio) !== null ? { tipo: "painel", painel: "proposta", negocio } : null;
     case "enviarProposta":
     case "registarRespostaCliente": {
       const proposta = propostaViva(negocio);
@@ -70,7 +72,7 @@ function planear(item: ItemProcesso, ficha: FichaDb | null): Plano | null {
     }
     case "criarContrato": {
       const proposta = propostaAceite(negocio);
-      return editar && proposta ? { tipo: "ir", destino: `/client-contracts?newContract=true&proposalId=${codificar(proposta.id)}`, negocio } : null;
+      return podeCriar("client_contracts.create") && proposta ? { tipo: "ir", destino: `/client-contracts?newContract=true&proposalId=${codificar(proposta.id)}`, negocio } : null;
     }
     case "registarAssinatura": {
       const contrato = contratoVivo(negocio);
@@ -121,6 +123,8 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
   const avisar = useAvisarNegocio();
   const [aberto, setAberto] = useState<{ painel: Painel; negocio: string; pessoa: string } | null>(null);
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
+  // As permissões do fecho (criar orçamento, proposta e contrato): sem a lista nada se restringe; a base decide.
+  const permissoesFecho = fonte.modo === "real" ? fonte.permissoesFecho : undefined;
   // Trocar de pessoa (ou fechar a ficha) larga o painel: sem isto voltar à pessoa em que ele se abriu voltava a abri-lo.
   const pessoaDaFicha = ficha?.pessoa.id ?? null;
   // O painel «Visita e levantamento»: `pessoa` é a de quem está aberto (`null` fechado) e `n` conta as aberturas (0: nunca abriu, e nada se monta).
@@ -157,14 +161,14 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
       if (ficha) navegar(ligacaoComVoltar(destino, enderecoDeRegresso(ficha.pessoa.id, negocio)));
     };
     const podeExecutar = (item: ItemProcesso): boolean => {
-      const plano = planear(item, ficha);
+      const plano = planear(item, ficha, permissoesFecho);
       if (!plano || !organizationId) return false;
       return plano.tipo === "ir" || plano.painel !== "orcamento" || !!(ficha && origemDoOrcamento(ficha));
     };
     return {
       podeExecutar,
       executar: (item) => {
-        const plano = planear(item, ficha);
+        const plano = planear(item, ficha, permissoesFecho);
         if (!plano || !ficha || !podeExecutar(item)) return;
         if (plano.tipo === "ir") ir(plano.destino, plano.negocio.id);
         else setAberto({ painel: plano.painel, negocio: plano.negocio.id, pessoa: ficha.pessoa.id });
@@ -181,7 +185,7 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
         if (destino) ir(destino, negocioId);
       },
     };
-  }, [ficha, navegar, organizationId, podeVisita]);
+  }, [ficha, navegar, organizationId, podeVisita, permissoesFecho]);
 
   if (!mutacoes) return <>{children}</>;
 
@@ -200,7 +204,7 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
     ? { id: doPainel.id, nome: ficha.pessoa.nome ?? "", entityId: ficha.pessoa.id, organizationId, origem }
     : null;
   const proposta: NegocioDaProposta | null = doPainel && aberto?.painel === "proposta" && ficha
-    ? { id: doPainel.id, entityId: ficha.pessoa.id, orcamentoId: orcamentoParaProposta(doPainel) }
+    ? { id: doPainel.id, entityId: ficha.pessoa.id, orcamentoId: orcamentoParaProposta(doPainel), propostaViva: temPropostaEnviadaOuAceite(doPainel) }
     : null;
   const paraGanhar: NegocioMes | null = doPainel && aberto?.painel === "ganhar" && ficha
     ? adaptarNegocios(ficha, hojeLisboa(), fonte.modo === "real" ? fonte.momentoGanho : null).find((n) => n.id === doPainel.id && n.estadoReal === "aberto") ?? null

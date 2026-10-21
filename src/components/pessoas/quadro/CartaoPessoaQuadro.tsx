@@ -54,6 +54,7 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
       {/* Só no Quadro real (no exemplo estes campos não existem): o selo e a linha dizem-se por texto, nunca só por cor. */}
       {cartao.prontoAGanhar === true && <Badge variant="secondary" className="w-fit">{t("pessoasPagina.real.readyToWin")}</Badge>}
       {cartao.paradoDias !== undefined && <p className="text-xs text-muted-foreground">{t("pessoasPagina.real.board.stalled", { n: cartao.paradoDias })}</p>}
+      {cartao.semOrcamentos === true && <p className="text-xs text-muted-foreground">{t("pessoasPagina.step.semOrcamentos")}</p>}
       {prazo && (
         <p className={cn("flex items-center gap-1 text-xs", cartao.atrasado ? "font-medium text-foreground" : "text-muted-foreground")}>
           {cartao.atrasado && <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}

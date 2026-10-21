@@ -2,6 +2,7 @@
 // ao negócio (neg_ligar_registo) logo a seguir a ele ser guardado. Se a ligação falhar, o orçamento fica criado e diz-se, sem o esconder.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { FechoV4Context } from "@/components/negocio-metas/bandeiraFecho";
 import { ComCostura, erroNegFalso, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
 import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
@@ -54,6 +55,29 @@ describe("PainelOrcamentoReal: abrir", () => {
     const { aoFechar } = montar();
     ultimo().onClose();
     expect(aoFechar).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PainelOrcamentoReal: com a bandeira do fecho ligada o orçamento nasce ligado", () => {
+  const montarLigada = (mutacoes: MutacoesNegocio = mutacoesFalsas()) => {
+    render(<FechoV4Context.Provider value><ComCostura mutacoes={mutacoes}><PainelOrcamentoReal negocio={negocio} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura></FechoV4Context.Provider>);
+    return mutacoes;
+  };
+
+  it("o editor recebe o negócio para criar por neg_criar_orcamento; desligada, não", () => {
+    montarLigada();
+    expect((ultimo() as { criarNoNegocioId?: string }).criarNoNegocioId).toBe("n1");
+    cleanup();
+    montar();
+    expect((ultimo() as { criarNoNegocioId?: string }).criarNoNegocioId).toBeUndefined();
+  });
+
+  it("depois de guardar não volta a ligar (já nasceu ligado): refaz a ficha e avisa", async () => {
+    const mutacoes = montarLigada();
+    await ultimo().onSaved("q-9");
+    expect(mutacoes.ligar).not.toHaveBeenCalled();
+    expect(mutacoes.refrescar).toHaveBeenCalledTimes(1);
+    expect(sucesso).toHaveBeenCalledWith("Orçamento criado e ligado ao negócio.");
   });
 });
 

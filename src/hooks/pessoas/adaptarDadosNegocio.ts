@@ -1,7 +1,9 @@
 // Os dados que a ficha real dá aos ecrãs do negócio (`DadosNegocio`, em negocio-metas): lê o que `neg_ficha_pessoa` devolve e entrega o que os
 // painéis já sabiam mostrar (perdas, detalhes dos documentos) mais o que só a base sabe (documentos por ligar, leads abertas, permissões).
 // Funções puras: nada rebenta com um valor que a ficha não conhece.
-import type { DadosNegocio, DocumentoPorLigar, LeadAbertaCostura, MomentoGanhoCostura, PropostaCondicoes } from "@/components/negocio-metas/costuraNegocio";
+import type {
+  DadosNegocio, DocumentoPorLigar, LeadAbertaCostura, MomentoGanhoCostura, PropostaCondicoes, TipoDocumentoPermissao,
+} from "@/components/negocio-metas/costuraNegocio";
 import type {
   ContratoDetalhe, DetalheNegocio, EstadoOrcamentoDetalhe, OrcamentoDetalhe, PropostaDetalhe,
 } from "@/components/negocio-metas/negocioDetalhes";
@@ -111,6 +113,28 @@ function propostaComCondicoes(n: NegocioFichaDb): PropostaCondicoes | null {
 export interface OpcoesDadosNegocio {
   /** `pessoas.delete`: a página sabe-o (a ficha não o devolve). */
   podeApagar?: boolean;
+  /**
+   * As permissões do fecho que a sessão tem (`quotes.*`, `proposals.*`, `client_contracts.*`, `pessoas.reopen`, `leads.convert`). Ausente: a página ainda
+   * não as leu e nada se restringe por aqui (a base decide). Uma lista vazia quer dizer «não tem nenhuma».
+   */
+  permissoes?: readonly string[];
+  /** Os nomes dos comerciais reais da organização, para o «Feito por». Ausente: ainda por ler. */
+  comerciais?: readonly string[];
+  /** Quem precisa dos comerciais pede-os por aqui (a leitura só começa então). */
+  pedirComerciais?: () => void;
+}
+
+const PREFIXO_DOCUMENTO: Record<TipoDocumentoPermissao, string> = { orcamento: "quotes", proposta: "proposals", contrato: "client_contracts" };
+
+/** As permissões do fecho como o ecrã as usa; vazio (sem lista) deixa tudo por restringir. */
+function permissoesDoFecho(ficha: FichaDb, permissoes: readonly string[] | undefined): Partial<DadosNegocio> {
+  if (!permissoes) return {};
+  const tem = new Set(permissoes);
+  return {
+    podeNoDocumento: (tipo, acao) => ficha.permissoes.editar === true && tem.has(`${PREFIXO_DOCUMENTO[tipo]}.${acao}`),
+    podeReabrir: tem.has("pessoas.reopen"),
+    podeConverter: tem.has("leads.convert"),
+  };
 }
 
 /** Os dados do negócio para uma ficha. Não muda a ficha; cria objetos novos a cada chamada (quem os usa memoriza pelo resultado). */
@@ -128,5 +152,8 @@ export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCo
     momentoGanho, podeEditar: ficha.permissoes.editar === true, podeCriar: ficha.permissoes.criar === true,
     leadsAbertas: leadsAbertas(ficha), levantamentosCompletos: ficha.levantamentos?.tem_mais !== true, documentosPorLigar: documentosPorLigar(ficha),
     podeApagar: opcoes.podeApagar === true, proposta: (negocioId) => propostas.get(negocioId) ?? null,
+    ...permissoesDoFecho(ficha, opcoes.permissoes),
+    ...(opcoes.comerciais ? { comerciais: opcoes.comerciais } : {}),
+    ...(opcoes.pedirComerciais ? { pedirComerciais: opcoes.pedirComerciais } : {}),
   };
 }

@@ -22,7 +22,7 @@ import { ErroDeEnvio } from "@/components/negocio-metas/DialogoDeEnvio";
 import { FOCO, PISTA_DESATIVADO } from "@/components/negocio-metas/estilos";
 import { FECHO_POR_OMISSAO, type FechoNegocio } from "@/components/negocio-metas/fechoNegocio";
 import type { MutacoesNegocio, ResultadoCriar } from "@/components/negocio-metas/mutacoesNegocio";
-import { COMERCIAL_POR_OMISSAO } from "@/components/negocio-metas/novoNegocio";
+import { useComercialDaSessao } from "@/hooks/pessoas/useComercialDaSessao";
 import { localizarErrosRespostas } from "@/components/negocio-metas/respostasQuestionario";
 import { leadMaisRecente } from "@/components/negocio-metas/SeletorLead";
 import { useAoNegocioIndisponivel } from "@/components/negocio-metas/useAoNegocioIndisponivel";
@@ -82,6 +82,7 @@ export function FormularioNovoNegocioReal({ pessoaId, ficha, mutacoes, dados, ao
   const [reabrir, setReabrir] = useState(false);
   const [fecho, setFecho] = useState<FechoNegocio>(FECHO_POR_OMISSAO);
   const porLigar = useMemo(() => registosPorLigar(dados.registos, pessoaId), [dados.registos, pessoaId]);
+  const comercialDaSessao = useComercialDaSessao();
   const registos = useRegistosNovoNegocio({ porLigar, levantamentosCompletos: dados.levantamentosCompletos, hoje: hojeLisboa(), aoSujar });
   useEffect(() => {
     aoMudarOcupado(envio.aGuardar);
@@ -166,12 +167,12 @@ export function FormularioNovoNegocioReal({ pessoaId, ficha, mutacoes, dados, ao
         setParcial(null);
         // O que a gravação das visitas e do levantamento recusaria diz-se ANTES de criar o negócio. Num reenvio o negócio já existe: não há
         // nada a evitar, e uma recusa aqui esconderia o aviso de que ele foi criado (a gravação recusa o mesmo, já dentro do aviso).
-        if (novos && resultado.current === null) gravar.verificar(registos.visitasNovas, registos.rascunho, COMERCIAL_POR_OMISSAO);
+        if (novos && resultado.current === null) gravar.verificar(registos.visitasNovas, registos.rascunho, comercialDaSessao);
         // Um reenvio depois de uma falha a meio já tem o negócio criado: não se repete.
         resultado.current ??= await mutacoes.criar(pedido);
         if (!novos) return;
         try {
-          const gravado = await gravar.guardar(registos.visitasNovas, registos.rascunho, COMERCIAL_POR_OMISSAO);
+          const gravado = await gravar.guardar(registos.visitasNovas, registos.rascunho, comercialDaSessao);
           questionarioMudou.current = gravado.levantamento?.questionarioMudou === true;
         } catch (erro) {
           setParcial(`${t(`${C}partial`)} ${textoDoErroGravar(erro, t)}`);

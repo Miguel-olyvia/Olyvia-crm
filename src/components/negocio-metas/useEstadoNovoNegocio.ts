@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AcoesGeral, ValoresGeral } from "./AbaGeralNovoNegocio";
 import { registosPorLigar } from "./acoesRegistos";
+import { useDadosNegocio } from "./costuraNegocio";
 import { ligarInicial, type LigarRegistos } from "./ligarNegocio";
 import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { adaptarLinhaADivisao, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
@@ -23,15 +24,22 @@ import {
   type PessoaOpcao, type RascunhoLevantamento, type ValoresIniciaisNegocio,
 } from "./novoNegocio";
 
-/** O comercial pedido, se for um dos que se podem escolher; senão o por omissão. */
-const comercialValido = (comercial?: string): string =>
-  comercial !== undefined && COMERCIAIS_EXEMPLO.includes(comercial) ? comercial : COMERCIAL_POR_OMISSAO;
+/**
+ * O comercial pedido, se for um dos que se podem escolher; senão o por omissão. Na ficha real (`real`) não há comerciais de exemplo: vale o que vier
+ * (o comercial da pessoa, lido da base) e, sem nada, fica vazio.
+ */
+const comercialValido = (comercial: string | undefined, real: boolean): string => {
+  if (real) return comercial ?? "";
+  return comercial !== undefined && COMERCIAIS_EXEMPLO.includes(comercial) ? comercial : COMERCIAL_POR_OMISSAO;
+};
 
 export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => void, pessoaInicialId?: string, comercialInicial?: string) {
+  // Só a ficha real tem `DadosNegocio`: o exemplo e os testes antigos continuam com os comerciais de exemplo.
+  const emFichaReal = useDadosNegocio() !== null;
   const [valores, setValores] = useState<ValoresGeral>(() => {
     const inicial = pessoas.find((p) => p.id === pessoaInicialId);
     return {
-      pessoaId: inicial?.id ?? "", comercial: comercialValido(comercialInicial),
+      pessoaId: inicial?.id ?? "", comercial: comercialValido(comercialInicial, emFichaReal),
       contacto: inicial ? preencherContactoDaPessoa(inicial) : CONTACTO_VAZIO,
     };
   });

@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePodeApagarNegocios } from "@/hooks/pessoas/usePodeApagarNegocios";
+import { usePermissoesDoFecho } from "@/hooks/pessoas/usePermissoesDoFecho";
 import { useUtilizadorPessoas } from "@/hooks/pessoas/useUtilizadorPessoas";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -29,9 +30,11 @@ export function PessoasRota({ children }: { children: ReactNode }) {
   const utilizadorId = useUtilizadorPessoas();
   // pessoas.delete: o lixo de negócios só se mostra a quem pode apagar e restaurar.
   const podeApagarNegocios = usePodeApagarNegocios();
+  // As permissões do fecho (documentos, reabrir, converter): só servem para esconder o que a base recusaria.
+  const permissoesFecho = usePermissoesDoFecho();
   const fonte = useMemo<FontePessoas | null>(
-    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId, podeApagarNegocios } : null),
-    [organizationId, momentoGanho, utilizadorId, podeApagarNegocios],
+    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId, podeApagarNegocios, permissoesFecho } : null),
+    [organizationId, momentoGanho, utilizadorId, podeApagarNegocios, permissoesFecho],
   );
 
   if (negocios.isLoading) {

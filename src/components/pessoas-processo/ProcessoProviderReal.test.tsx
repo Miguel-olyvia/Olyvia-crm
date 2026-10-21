@@ -81,12 +81,12 @@ function Consumidor({ casos }: { casos: Record<string, ItemProcesso> }) {
   );
 }
 
-function montar(ficha: FichaDb | null = FICHA, casos: Record<string, ItemProcesso> = CASOS) {
+function montar(ficha: FichaDb | null = FICHA, casos: Record<string, ItemProcesso> = CASOS, fonte: FontePessoas = REAL) {
   const mutacoes = mutacoesFalsas();
   const cliente = new QueryClient();
   render(
     <QueryClientProvider client={cliente}>
-      <FontePessoasContext.Provider value={REAL}>
+      <FontePessoasContext.Provider value={fonte}>
         <ComCostura mutacoes={mutacoes} dados={dadosFalsos()}>
           <ProcessoProviderReal ficha={ficha}><Consumidor casos={casos} /></ProcessoProviderReal>
         </ComCostura>
@@ -161,6 +161,44 @@ describe("ProcessoProviderReal: dar o negócio como ganho", () => {
     montar();
     clicar("ganharNegocio");
     expect(screen.getByRole("dialog", { name: "Dar o negócio como ganho" })).toBeInTheDocument();
+    expect(navegar).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProcessoProviderReal: criar um documento pede também a permissão do documento", () => {
+  const pode = (nome: string) => screen.getByRole("button", { name: nome }).getAttribute("data-pode");
+  const comPermissoes = (permissoesFecho: readonly string[]): FontePessoas => ({ ...REAL, permissoesFecho });
+
+  it("sem a lista (a página ainda não a leu) nada se restringe: a base decide", () => {
+    montar();
+    for (const nome of ["criarOrcamento", "criarProposta", "criarContrato"]) expect(pode(nome), nome).toBe("true");
+  });
+
+  it("com uma lista vazia não se cria nenhum documento, mas enviar, assinar e ganhar continuam", () => {
+    montar(FICHA, CASOS, comPermissoes([]));
+    for (const nome of ["criarOrcamento", "criarProposta", "criarContrato"]) expect(pode(nome), nome).toBe("false");
+    for (const nome of ["enviarProposta", "registarRespostaCliente", "registarAssinatura", "ganharNegocio"]) expect(pode(nome), nome).toBe("true");
+  });
+
+  it("cada criar pede a sua permissão: quotes.create, proposals.create e client_contracts.create", () => {
+    montar(FICHA, CASOS, comPermissoes(["proposals.create"]));
+    expect(pode("criarProposta")).toBe("true");
+    expect(pode("criarOrcamento")).toBe("false");
+    expect(pode("criarContrato")).toBe("false");
+    cleanup();
+    montar(FICHA, CASOS, comPermissoes(["quotes.create", "proposals.create", "client_contracts.create"]));
+    for (const nome of ["criarOrcamento", "criarProposta", "criarContrato"]) expect(pode(nome), nome).toBe("true");
+  });
+
+  it("as permissões de editar o documento não chegam para criar", () => {
+    montar(FICHA, CASOS, comPermissoes(["quotes.edit", "proposals.edit", "client_contracts.edit"]));
+    for (const nome of ["criarOrcamento", "criarProposta", "criarContrato"]) expect(pode(nome), nome).toBe("false");
+  });
+
+  it("sem permissão o clique não faz nada", () => {
+    montar(FICHA, CASOS, comPermissoes([]));
+    clicar("criarProposta");
+    expect(dialogoProposta).not.toHaveBeenCalled();
     expect(navegar).not.toHaveBeenCalled();
   });
 });

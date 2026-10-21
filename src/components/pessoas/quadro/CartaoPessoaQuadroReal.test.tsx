@@ -21,6 +21,17 @@ describe("CartaoPessoaQuadro: os extras do Quadro real", () => {
     expect(container).not.toHaveTextContent("null");
   });
 
+  it("sem orçamentos explica porque não há botão, em texto, sem inventar um passo", () => {
+    mostrar({ coluna: "orcamento", passo: "nenhum", semOrcamentos: true });
+    expect(screen.getByText("Sem orçamentos: crie o orçamento na ficha do negócio.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /orçamento na ficha/ })).toBeNull();
+  });
+
+  it("sem a marca não há texto de sem orçamentos", () => {
+    mostrar({ coluna: "orcamento", passo: "criarProposta" });
+    expect(screen.queryByText(/Sem orçamentos/)).toBeNull();
+  });
+
   it("sem paradoDias não há linha de parado", () => {
     mostrar({});
     expect(screen.queryByText(/Parado há/)).toBeNull();

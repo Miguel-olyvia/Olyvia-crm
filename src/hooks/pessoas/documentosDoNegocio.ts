@@ -3,7 +3,7 @@
 import { maisRecentePrimeiro } from "./adaptarComum";
 import { estadoContratoDeDb, estadoPropostaDeDb } from "./adaptarNegociosFicha";
 import type { ContratoDb, NegocioFichaDb, OrcamentoDb, PropostaDb } from "./fichaTipos";
-import { propostaViva } from "./propostaViva";
+import { propostaRecusada, propostaViva } from "./propostaViva";
 
 const ORCAMENTO_ACEITE = ["aceite", "aceito", "accepted", "approved"];
 const RECUSADO = ["rejeitado", "rejeitada", "recusado", "recusada", "rejected", "declined", "lost"];
@@ -23,6 +23,14 @@ export { propostaViva };
 /** A proposta aceite mais recente (de onde se cria o contrato); `null` se nenhuma foi aceite. */
 export function propostaAceite(n: NegocioFichaDb): PropostaDb | null {
   return maisRecentePrimeiro(n.propostas ?? [], (p) => p.criado_em).find((p) => estadoPropostaDeDb(p) === "aceite") ?? null;
+}
+
+/**
+ * O negócio já tem uma proposta enviada ou aceite que o cliente não recusou? Um rascunho não conta. Com duas propostas assim, recusar uma pode
+ * perder o negócio com a outra enviada: o ecrã avisa e não deixa criar outra.
+ */
+export function temPropostaEnviadaOuAceite(n: NegocioFichaDb): boolean {
+  return (n.propostas ?? []).some((p) => !propostaRecusada(p) && estadoPropostaDeDb(p) !== "rascunho");
 }
 
 /** O contrato que conta: o mais recente que não está cancelado. */

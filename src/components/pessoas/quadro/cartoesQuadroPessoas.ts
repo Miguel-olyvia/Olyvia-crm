@@ -51,6 +51,8 @@ export interface CartaoQuadro {
   paradoDias?: number;
   /** Só no Quadro real: a base diz que o negócio está pronto a ganhar. Ausente no exemplo. */
   prontoAGanhar?: boolean;
+  /** Só no Quadro real: negócio na coluna Orçamento sem nenhum orçamento. Não é um passo (o motor não o tem): só muda o texto, que explica porque não há botão. */
+  semOrcamentos?: boolean;
 }
 
 /** Marca o botão do nome de um cartão de negócio; o valor é o id do negócio (o atalho `o` abre a ficha já nesse negócio). */

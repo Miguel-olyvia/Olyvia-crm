@@ -7,7 +7,8 @@ import type { registosPorLigar } from "@/components/negocio-metas/acoesRegistos"
 import { camposDoLevantamento, visitasComCodigoPostalInvalido, visitasParaGuardar } from "@/components/negocio-metas/visitasNegocio";
 import { ligarInicial, type LigarRegistos } from "@/components/negocio-metas/ligarNegocio";
 import { validarLevantamento, type ErrosLevantamento } from "@/components/negocio-metas/levantamento";
-import { COMERCIAL_POR_OMISSAO, type RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
+import { useComercialDaSessao } from "@/hooks/pessoas/useComercialDaSessao";
+import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
 import { validarRespostas } from "@/components/negocio-metas/respostasQuestionario";
@@ -35,8 +36,10 @@ interface Opcoes {
 
 export function useRegistosNovoNegocio({ porLigar, levantamentosCompletos, hoje, aoSujar }: Opcoes) {
   const [ligar, setLigar] = useState<LigarRegistos>(() => ligacaoInicial(porLigar, levantamentosCompletos));
-  const vis = useVisitasForm(hoje, aoSujar, COMERCIAL_POR_OMISSAO);
-  const lev = useLevantamentoForm(hoje, aoSujar, COMERCIAL_POR_OMISSAO);
+  // O «Feito por» de uma visita nova parte de quem está na sessão (se for comercial) ou fica vazio: nunca de um nome de exemplo.
+  const comercial = useComercialDaSessao();
+  const vis = useVisitasForm(hoje, aoSujar, comercial);
+  const lev = useLevantamentoForm(hoje, aoSujar, comercial);
   const resp = useRespostasForm(aoSujar);
   // A morada da obra acompanha as visitas novas, como no painel «Visita e levantamento».
   const morada = useMoradaForm(aoSujar, { visitas: vis.visitas });
@@ -47,8 +50,8 @@ export function useRegistosNovoNegocio({ porLigar, levantamentosCompletos, hoje,
 
   // A data, quem fez e o estado do levantamento derivam das visitas novas; as linhas e as observações são do formulário.
   const levantamento = useMemo(
-    () => ({ ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, COMERCIAL_POR_OMISSAO) }),
-    [lev.levantamento, vis.visitas, hoje],
+    () => ({ ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, comercial) }),
+    [lev.levantamento, vis.visitas, hoje, comercial],
   );
   const errosLevantamento: ErrosLevantamento = levantamentoNovo ? validarLevantamento(levantamento) : {};
   const visitasComCodigoPostal = visitasComCodigoPostalInvalido(vis.visitas);

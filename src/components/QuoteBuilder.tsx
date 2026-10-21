@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import React from "react";
+import { escolherGravacaoDeOrcamento, parametrosNegCriarOrcamento } from "@/components/negocio-metas/criarOrcamentoNoNegocio";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -107,6 +108,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { chaveDoErro, codigoDoErro } from "@/hooks/pessoas/errosNeg";
 import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 
 // Sortable row wrapper for quote items
@@ -141,6 +143,11 @@ interface QuoteBuilderProps {
    * o orçamento ao negócio). Nunca deve lançar: o orçamento já existe. Sem isto nada muda.
    */
   onSaved?: (quoteId: string) => void | Promise<void>;
+  /**
+   * Só a ficha da pessoa, com a bandeira do fecho ligada (migration E aplicada): ao CRIAR um orçamento novo, grava por `neg_criar_orcamento` e o
+   * orçamento nasce já ligado a este negócio. Ao editar um orçamento que já existe não vale. Sem isto grava como sempre (`rpc_save_quote`).
+   */
+  criarNoNegocioId?: string;
 }
 
 interface Client {
@@ -283,7 +290,7 @@ interface QuoteLine {
 const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
   quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
-export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null, autoImportFromDeal = false, initialEntity = null, onSaved }: QuoteBuilderProps) {
+export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null, autoImportFromDeal = false, initialEntity = null, onSaved, criarNoNegocioId }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   // `effectiveQuoteId` é o id do orçamento a usar em todo o componente: só
   // existe quando se está a EDITAR um orçamento já gravado. "Novo Orçamento"
@@ -2496,7 +2503,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // INSERT/UPDATE column lists do not include lost_reason. Persisting it end-to-end
       // requires a follow-up migration extending rpc_save_quote; out of scope here pending
       // approval (não é um dos ficheiros autorizados nesta tarefa).
-      const { data: savedQuote, error: saveError } = await supabase.rpc('rpc_save_quote', {
+      const gravacao = escolherGravacaoDeOrcamento({ quoteId: effectiveQuoteId || null, criarNoNegocioId });
+      const { data: savedQuote, error: saveError } = gravacao === 'neg_criar_orcamento'
+        // A criar a partir de um negócio (fecho v4): o orçamento nasce já ligado a ele.
+        ? await (supabase as any).rpc('neg_criar_orcamento', parametrosNegCriarOrcamento(criarNoNegocioId as string, { quoteData, lines: linesToInsert, fees: feesToInsert, totals: totalsPayload }))
+        : await supabase.rpc('rpc_save_quote', {
         // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
         // updates an existing one) but the generated RPC Args type widens it
         // to `string` since the SQL parameter has no default value.
@@ -2576,7 +2587,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     } catch (error: any) {
       captureFlowError(error, "quote-lifecycle");
-      const description = await getFriendlyErrorMessage(error);
+      // Criar a partir de um negócio (neg_criar_orcamento): o código NG da base traduz-se, como na proposta; outro erro segue o caminho de sempre.
+      const description = criarNoNegocioId && !quoteId && codigoDoErro(error) ? t(chaveDoErro(error)) : await getFriendlyErrorMessage(error);
       toast({
         title: t('quoteBuilder.toast.errorSavingQuote'),
         description,

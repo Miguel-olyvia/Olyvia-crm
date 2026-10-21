@@ -70,6 +70,14 @@ describe("adaptarLinhaQuadro: negócios", () => {
     expect(cartao(linhaNegocio("n", "orcamento", { n_orcamentos: 0 }))?.passo).toBe("nenhum");
   });
 
+  it("orçamento sem orçamentos leva a marca «semOrcamentos» (só o texto muda; o passo continua nenhum); só nessa coluna e só sem orçamentos", () => {
+    expect(cartao(linhaNegocio("n", "orcamento", { n_orcamentos: 0 }))).toMatchObject({ passo: "nenhum", semOrcamentos: true });
+    expect(cartao(linhaNegocio("n", "orcamento", { n_orcamentos: null }))?.semOrcamentos).toBe(true);
+    expect(cartao(linhaNegocio("n", "orcamento", { n_orcamentos: 1 }))?.semOrcamentos).toBeUndefined();
+    expect(cartao(linhaNegocio("n", "proposta", { n_orcamentos: 0, proposta_status: "draft" }))?.semOrcamentos).toBeUndefined();
+    expect(cartao(linhaNegocio("n", "levantamento", { n_orcamentos: 0 }))?.semOrcamentos).toBeUndefined();
+  });
+
   it("proposta: rascunho, aceite sem contrato, outro estado e estado desconhecido", () => {
     expect(cartao(linhaNegocio("n", "proposta", { proposta_status: "draft" }))?.passo).toBe("enviarProposta");
     expect(cartao(linhaNegocio("n", "proposta", { proposta_status: "accepted" }))?.passo).toBe("criarContrato");

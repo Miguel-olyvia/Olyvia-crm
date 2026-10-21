@@ -20,7 +20,7 @@ const CHAVES_USADAS = [
   "bin.filter.label", "bin.filter.active", "bin.filter.bin", "bin.title", "bin.empty", "bin.loading", "bin.error", "bin.retry", "bin.deletedAt",
   "bin.event.apagado", "bin.event.restaurado", "bin.noEdit", "bin.state.aberto", "bin.state.ganho", "bin.state.perdido", "bin.list.label",
   "terms.title", "terms.empty", "terms.unreadable", "terms.edit", "terms.add", "terms.locked", "terms.dialog.title", "terms.dialog.description",
-  "terms.dialog.unreadable", "terms.submit", "terms.cancel", "terms.done", "terms.show.duration", "terms.show.durationValue", "terms.show.start",
+  "terms.dialog.unreadable", "terms.dialog.republish", "terms.submit", "terms.cancel", "terms.done", "terms.show.duration", "terms.show.durationValue", "terms.show.start",
   "terms.show.payment", "terms.show.warranty",
   "write.error.permission", "write.error.title", "write.error.notes", "write.error.rep", "write.error.trashed", "write.error.invalid", "write.error.unavailable", "write.error.proposalClosed",
 ].map((c) => `${N}${c}`);

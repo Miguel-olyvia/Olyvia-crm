@@ -8,6 +8,8 @@ import { PerguntaEscolha } from "./PerguntaEscolha";
 import { FOCO } from "./estilos";
 import type { EstadoVisitaNegocio, VisitaNegocio } from "./negocioMetas";
 import { CHAVES_MORADA, MAX_ANDAR, MAX_LOCALIDADE, MAX_RUA, type ChaveMorada } from "./moradaObra";
+import { useEffect } from "react";
+import { useDadosNegocio } from "./costuraNegocio";
 import { COMERCIAIS_EXEMPLO } from "./novoNegocio";
 import { PERGUNTA_DURACAO_VISITA, PERGUNTA_PRESENTES_VISITA, PERGUNTA_TIPO_VISITA } from "./visitaExemplo";
 import { ESTADOS_VISITA } from "./visitasNegocio";
@@ -31,9 +33,39 @@ const ID_MORADA: Record<ChaveMorada, string> = { rua: "rua", codigoPostal: "cp",
 // Os limites da base nos textos da morada da visita (o código postal tem o formato 0000-000, oito caracteres).
 const LIMITE_MORADA: Record<ChaveMorada, number> = { rua: MAX_RUA, codigoPostal: 8, localidade: MAX_LOCALIDADE, andar: MAX_ANDAR };
 
+/** O «Feito por»: o seletor, com as opções que lhe derem (o valor guardado é o nome, como o resto do modelo da visita). */
+function SeletorFeitoPor({ base, valor, opcoes, aoEscolher }: { base: string; valor: string; opcoes: readonly string[]; aoEscolher: (nome: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Rotulo para={`${base}-feitoPor`} texto={t(`${N}visits.by`)} />
+      <Select value={valor} onValueChange={aoEscolher}>
+        <SelectTrigger id={`${base}-feitoPor`} className={CAMPO}><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {opcoes.map((c) => <SelectItem key={c} value={c} className={ITEM}>{c}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/**
+ * Na ficha real o «Feito por» oferece os comerciais REAIS da organização (a mesma lista da página de Leads, que a ficha põe em `DadosNegocio.comerciais`),
+ * em vez dos de exemplo. Um nome que a visita já traz (a base trouxe-o) e já não está na lista continua visível, no fim. Sem comerciais (a carregar ou
+ * a leitura falhou) a lista fica vazia: nunca se inventam nomes.
+ */
+function opcoesFeitoPorReal(comerciais: readonly string[], valor: string): readonly string[] {
+  return valor !== "" && !comerciais.includes(valor) ? [...comerciais, valor] : comerciais;
+}
+
 /** Data, hora, quem fez e estado de uma visita. */
 function DadosBase({ base, visita, aoMudar, estados = ESTADOS_VISITA }: Props) {
   const { t } = useTranslation();
+  // Só a ficha real tem `DadosNegocio`: o exemplo e os testes antigos continuam com os comerciais de exemplo.
+  const dados = useDadosNegocio();
+  // Na ficha real o «Feito por» precisa dos comerciais da organização: pede-os ao montar (a ficha só os lê então).
+  const pedirComerciais = dados?.pedirComerciais;
+  useEffect(() => { pedirComerciais?.(); }, [pedirComerciais]);
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="space-y-1.5">
@@ -44,15 +76,10 @@ function DadosBase({ base, visita, aoMudar, estados = ESTADOS_VISITA }: Props) {
         <Rotulo para={`${base}-hora`} texto={t(`${N}visits.time`)} />
         <Input id={`${base}-hora`} type="time" value={visita.hora} className={CAMPO} onChange={(e) => aoMudar({ hora: e.target.value })} />
       </div>
-      <div className="space-y-1.5">
-        <Rotulo para={`${base}-feitoPor`} texto={t(`${N}visits.by`)} />
-        <Select value={visita.feitoPor} onValueChange={(feitoPor) => aoMudar({ feitoPor })}>
-          <SelectTrigger id={`${base}-feitoPor`} className={CAMPO}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {COMERCIAIS_EXEMPLO.map((c) => <SelectItem key={c} value={c} className={ITEM}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      <SeletorFeitoPor
+        base={base} valor={visita.feitoPor} aoEscolher={(feitoPor) => aoMudar({ feitoPor })}
+        opcoes={dados === null ? COMERCIAIS_EXEMPLO : opcoesFeitoPorReal(dados.comerciais ?? [], visita.feitoPor)}
+      />
       <div className="space-y-1.5">
         <Rotulo para={`${base}-estado`} texto={t(`${N}visits.status`)} />
         <Select value={visita.estado} onValueChange={(estado) => aoMudar({ estado: estado as VisitaNegocio["estado"] })}>

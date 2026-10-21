@@ -53,7 +53,9 @@ export function CondicoesDaProposta({ negocio, hoje }: CondicoesDaPropostaProps)
   const proposta = dados?.proposta?.(negocio.id) ?? null;
   if (!dados || !proposta) return null;
   const aceite = proposta.estado === "aceite";
-  const podeEditar = dados.podeEditar && mutacoes?.guardarCondicoes !== undefined && !aceite;
+  // Editar as condições pede pessoas.edit E proposals.edit (sem a lista de permissões, no exemplo e nos testes antigos, nada se restringe: a base decide).
+  const podeNaProposta = dados.podeNoDocumento?.("proposta", "edit") ?? true;
+  const podeEditar = dados.podeEditar && podeNaProposta && mutacoes?.guardarCondicoes !== undefined && !aceite;
   const rotulo = proposta.condicoes === null && proposta.legivel ? t(`${N}add`) : t(`${N}edit`);
   return (
     <Seccao titulo={t(`${N}title`)} nivel={4} className="mt-3">
