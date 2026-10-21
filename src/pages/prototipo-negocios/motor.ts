@@ -16,11 +16,11 @@ import { faltaParaEncerrar } from "./encerrarObra";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
-import { MOTIVO_IMPREVISTO, diasAdenda, pagamentoPorValidar, porFaturar, juntarAoPlano, linhaAdenda, totalAdenda, totalComIva, type Adenda, type LinhaAdenda } from "./adendas";
+import { MOTIVO_IMPREVISTO, assinadas, diasAdenda, pagamentoPorValidar, porFaturar, juntarAoPlano, linhaAdenda, totalAdenda, totalComIva, type Adenda, type LinhaAdenda } from "./adendas";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
-import { anularAjustesDaTarefa, encomendarAjustes } from "./encomendasAjuste";
+import { anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
@@ -253,7 +253,8 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number;
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
-  /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string }
+  /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
+  /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
@@ -1063,6 +1064,8 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (p.estado === "aprovado") {
         // 19/10: os materiais por garantir no Inventário (aprovar ou receber as encomendas a fornecedor) seguram o arranque
         const F = faltaParaArrancar(d);
+        // 21/10: só a adenda por pagar (ou por encomendar) segura o arranque: é do Financeiro
+        if (F.length && F.every((x) => /adenda/.test(x))) return { t: "À espera da adenda", sub: "Para arrancar falta " + F.join(", ") + ".", who: "financeiro", wait: true };
         if (F.length) return { t: "À espera dos materiais", sub: "Para arrancar falta " + F.join(", ") + ".", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
         return { t: "Operações: arrancar a obra", sub: "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       }
@@ -1095,7 +1098,10 @@ export function minhas(S: Estado, role: Papel) {
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
       if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
     }
-    if (role === "financeiro" && porFaturar(d).length) L.push({ d, p: { t: "Emitir a fatura da adenda", sub: porFaturar(d).map((a) => `${a.n} · ${eur(totalComIva(a.linhas))} €`).join(", "), btn: "Emitir a fatura", act: "faturarAdendas", who: "financeiro" } });
+    // (21/10: na V2 a fatura emite-se no programa certificado e regista-se no Financeiro do negócio: sem botão aqui)
+    if (role === "financeiro" && porFaturar(d).length) L.push({ d, p: lerVersao() === "atual"
+      ? { t: "Emitir a fatura da adenda", sub: porFaturar(d).map((a) => `${a.n} · ${eur(totalComIva(a.linhas))} €`).join(", "), btn: "Emitir a fatura", act: "faturarAdendas", who: "financeiro" }
+      : { t: "Registar a fatura da adenda", sub: porFaturar(d).map((a) => `${a.n} · ${eur(totalComIva(a.linhas))} €`).join(", ") + " · no Financeiro do negócio", who: "financeiro" } });
     if (role === "financeiro" && pagamentoPorValidar(d).length) L.push({ d, p: { t: "Validar o pagamento da adenda", sub: pagamentoPorValidar(d).map((a) => `${a.fatura!.n} · ${a.pag!.comprovativo}`).join(", "), btn: "Validar o pagamento", act: "validarPagamentosAdenda", who: "financeiro" } });
   }
   return L;
@@ -1248,7 +1254,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
     const res = resumoEcNegocio(lerInventario(), ec.ref);
     log(d, "Encomenda de cliente " + ec.n + " emitida no Inventário" + (res ? " · " + textoResumoEc(res) : ""));
-    // 21/10: os materiais das tarefas juntadas antes do pagamento vão numa encomenda de ajuste, logo a seguir
+    // 21/10: as adendas já pagas antes da inicial têm a sua encomenda logo a seguir (decisão B); depois, os materiais das tarefas
+    // juntadas antes do pagamento vão numa encomenda de ajuste
+    encomendarAdendas(d);
     ajustar(d, "materiais das tarefas novas do plano");
     return true;
   };
@@ -1259,8 +1267,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     return a?.fatura && !a.recibo ? { f: (a.pag ??= {}), n: a.fatura.n } : null;
   };
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
-  const ajustar = (d: Negocio, motivo: string): boolean => {
-    const r = encomendarAjustes(d, motivo, PAPEIS[S.role].n, agora());
+  const ajustar = (d: Negocio, motivo: string, adenda?: string): boolean => {
+    const r = encomendarAjustes(d, motivo, PAPEIS[S.role].n, agora(), adenda);
     if (!r) return false;
     if ("erro" in r) {
       log(d, "Encomenda de ajuste não emitida no Inventário: " + r.erro, "x");
@@ -1274,6 +1282,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     avisar({ msg: `Encomenda ${r.ec.n} no Inventário`, sub: `${n} ${n === 1 ? "material novo" : "materiais novos"}${partes.length ? " · " + partes.join(" · ") : ""}${r.adiadas.length ? ` · ${r.adiadas.map((t) => t.nome).join(", ")} passa${r.adiadas.length > 1 ? "m" : ""} para ${rotuloDia(p, r.adiadas[0].dia)}` : ""}`,
       kind: "auto", atraso: 400, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(d.id)) } });
     return true;
+  };
+  /** 21/10 (decisão B): as encomendas das adendas com o pagamento validado e materiais por encomendar, uma por adenda, ligadas a ela.
+   *  Sem encomenda inicial não faz nada (emitirEc chama-a logo a seguir). Devolve quantas emitiu. */
+  const encomendarAdendas = (d: Negocio): number => {
+    if (!d.obra.ec?.ref) return 0;
+    let n = 0;
+    for (const a of assinadas(d)) if (a.recibo && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length && ajustar(d, "adenda " + a.n, a.n)) n++;
+    return n;
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
@@ -1631,8 +1647,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (p && p.estado !== "concluída") {
         const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
         const novas = juntarAoPlano(p, a);
-        // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço, ou os escolhidos na linha livre) vão numa encomenda de ajuste
-        novas.forEach((t, i) => { const x = a.linhas[i]; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+        // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço, ou os escolhidos na linha livre) vão numa encomenda de ajuste,
+        // mas só quando o Financeiro validar o pagamento desta adenda (decisão B: sem encomenda antes do pagamento, como no contrato)
+        novas.forEach((t, i) => { const x = a.linhas[i]; t.adenda = n; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
         // 21/10: a de um imprevisto resolve-se já (a partir de hoje), antes das tarefas que ele parou
         const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
         if (im && p.estado === "em curso") {
@@ -1640,7 +1657,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
           for (const [t, dia] of antes) t.dia = dia;
           for (const t of novas) mudarInicio(p, p.tasks.indexOf(t), p.dia);
         }
-        ajustar(d, "adenda " + n);
+        if (porEncomendarDe(d, n).length) log(d, "Materiais da adenda " + n + " por encomendar: a encomenda emite-se quando o pagamento da adenda for validado");
         if (im) {
           im.estado = "aprovado";
           // as paradas seguem depois do trabalho novo: as que ainda não começaram começam a seguir, as começadas ficam mais longas
@@ -2057,7 +2074,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     encomendarMateriais(id: number) {
       const d = deal(id);
       if (!d.obra.ec?.ref) { avisar({ msg: "Ainda sem encomenda de cliente", sub: "Os materiais novos encomendam-se logo a seguir à inicial, quando o pagamento for validado", kind: "" }); return; }
-      if (!ajustar(d, "materiais mudados no plano")) avisar({ msg: "Nada por encomendar", sub: "Os materiais do plano já estão encomendados", kind: "" });
+      // 21/10: as adendas pagas cuja encomenda não chegou ao Inventário vão primeiro (cada uma ligada à sua)
+      const nAd = encomendarAdendas(d);
+      if (!ajustar(d, "materiais mudados no plano") && !nAd) avisar({ msg: "Nada por encomendar", sub: "Os materiais do plano já estão encomendados", kind: "" });
     },
     /** O técnico viu o aviso. */
     avisoLido(id: number, k: number) {
@@ -2262,8 +2281,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       for (const a of L) {
         a.recibo = { n: "RC 2026/" + S.rc++, q: agora() };
         log(d, `Pagamento da adenda ${a.n} validado · ${a.recibo.n} emitido`);
+        // 21/10 (decisão B): sem encomenda inicial, a da adenda emite-se logo a seguir a ela (emitirEc)
+        if (!d.obra.ec?.ref && porEncomendarDe(d, a.n).length) log(d, `A encomenda da adenda ${a.n} emite-se logo a seguir à encomenda de cliente inicial`);
       }
       if (L.length) avisar({ msg: L.length === 1 ? `Recibo ${L[0].recibo!.n} emitido` : `${L.length} recibos emitidos`, sub: "Pagamento da adenda validado", kind: "ok" });
+      // 21/10 (decisão B): o pagamento validado da adenda emite a encomenda dos materiais dela no Inventário (EC-<id>-A<k>)
+      if (L.length) encomendarAdendas(d);
+    },
+    /** 21/10: volta a emitir as encomendas das adendas pagas que não chegaram ao Inventário (o Inventário recusou ao validar). */
+    emitirEcsAdenda(id: number) {
+      const d = deal(id);
+      if (!exigePerm("finance.validate_payment")) return;
+      if (!d.obra.ec?.ref) { avisar({ msg: "Primeiro, a encomenda de cliente inicial", sub: "A das adendas pagas emite-se logo a seguir a ela", kind: "bad" }); return; }
+      if (!encomendarAdendas(d)) avisar({ msg: "Nada por encomendar", sub: "As adendas pagas já têm a encomenda no Inventário", kind: "" });
+    },
+    /** V2 (21/10): regista a fatura da adenda emitida no programa certificado (a Olyvia não emite faturas na V2). */
+    registarFaturaAdenda(id: number, n: string, numero: string): boolean {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      if (!exigePerm("finance.invoice")) return false;
+      if (!a || a.estado !== "assinada" || a.fatura || !numero.trim()) return false;
+      a.fatura = { n: numero.trim(), q: agora() };
+      log(d, `Fatura ${a.fatura.n} registada (adenda ${a.n}, ${eur(totalComIva(a.linhas))} € com IVA) · emitida no programa certificado`);
+      return true;
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

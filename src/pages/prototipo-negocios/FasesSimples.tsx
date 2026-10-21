@@ -9,6 +9,7 @@ import { FaturaDoc, Partilhar, totais } from "./DocsCliente";
 import { ObraPorFases } from "./ObraPorFases";
 import { lerVersao } from "./versaoPrototipo";
 import { FinanceiroV2 } from "./v2/FinanceiroV2";
+import { AdendasNoFinanceiro } from "./FinanceiroAdendas";
 import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
 import { resumoFin } from "./v2/financeiro";
 import { useInventario } from "./inventario/loja";
@@ -66,6 +67,8 @@ export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
           {["O negócio passa à Obra", "A encomenda de cliente vai para o Inventário: reserva o stock e encomenda ao fornecedor o que falta", "As Operações aprovam o plano da obra", "O cliente recebe o recibo no portal"].map((t) => <li key={t} className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} {t}</li>)}
         </ul>
       </section>
+      {/* 21/10: as adendas assinadas, cada uma com a sua fatura, o seu pagamento e a encomenda dos materiais (decisão B) */}
+      <AdendasNoFinanceiro ctx={ctx} d={d} />
       <Partilhar ctx={ctx} d={d} tipo="fatura" estado={rc ? `paga · ${rc.n}` : ft ? `emitida ${ft.q} · por pagar` : "rascunho: ainda não emitida"}>
         <FaturaDoc S={S} d={d} />
       </Partilhar>

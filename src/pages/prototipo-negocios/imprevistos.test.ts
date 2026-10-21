@@ -90,9 +90,9 @@ describe("imprevistos a meio da obra", () => {
     expect(nova.dia).toBeGreaterThanOrEqual(p.dia);
     expect(parada.bloqueio).toBeUndefined();
     expect(parada.dia).toBeGreaterThanOrEqual(nova.dia + nova.dur);
-    // os materiais da linha livre vão numa encomenda de ajuste
+    // os materiais da linha livre vão numa encomenda de ajuste, mas só com o pagamento da adenda validado (decisão B)
     expect(nova.mats).toEqual([{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }]);
-    expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(true);
+    expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(false);
     // o Financeiro: a fatura própria da adenda, no Hoje dele
     expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "faturarAdendas")).toBe(true);
     A.role("financeiro"); A.faturarAdendas(d.id);
@@ -105,6 +105,9 @@ describe("imprevistos a meio da obra", () => {
     expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "validarPagamentosAdenda")).toBe(true);
     A.validarPagamentosAdenda(d.id);
     expect(a.recibo?.n).toMatch(/^RC 2026\/\d+$/);
+    // com o pagamento da adenda validado, a encomenda dela nasce no Inventário, ligada à adenda
+    expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(true);
+    expect(d.obra.ecsAjuste!.find((x) => x.adenda === n)?.n).toBe("EC-1027-A1");
   });
 
   it("só a equipa da obra regista, com a obra em curso", () => {

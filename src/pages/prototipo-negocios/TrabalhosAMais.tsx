@@ -13,6 +13,7 @@ import { eur, r2, servicoDoCatalogo, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { SeletorPesquisa } from "./pecasFicha";
 import { AdendaDoc, Partilhar } from "./DocsCliente";
+import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { MOTIVOS_ADENDA, diasAdenda, previsaoLinha, totalAdenda, totalComIva, valorContrato, type Adenda, type LinhaAdenda } from "./adendas";
 
 const ESTADO: Record<Adenda["estado"], [string, string]> = {
@@ -77,6 +78,12 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                   {a.fatura && !a.recibo && a.pag?.comprovativo && S.role === "financeiro" && <Button size="sm" className="min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id))}>Validar o pagamento</Button>}
                 </div>
               )}
+              {/* 21/10 (decisão B): os materiais da adenda só se encomendam com o pagamento dela validado */}
+              {a.estado === "assinada" && (() => {
+                const ea = ecDaAdenda(d, a.n), pend = porEncomendarDe(d, a.n).length;
+                if (!ea && !pend) return null;
+                return <p className="mt-1 text-[15px] text-muted-foreground">Materiais: {ea ? `encomenda ${ea.n} no Inventário` : a.recibo ? (d.obra.ec?.ref ? "a encomenda não chegou ao Inventário: emita-a no passo Materiais" : "a encomenda emite-se logo a seguir à inicial") : "encomendam-se quando o pagamento da adenda for validado"}</p>;
+              })()}
               {a.estado === "recusada" && <p className="mt-2 text-[15px]">{a.recusa ? <>«{a.recusa}»</> : "Sem motivo."} <span className="text-sm text-muted-foreground">· {a.recusada}</span></p>}
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 {a.estado === "enviada" && <Button size="sm" variant="outline" className="min-h-10" onClick={go(() => A.simularAdenda(d.id, a.n))}>Simular: o cliente assina</Button>}

@@ -15,6 +15,8 @@ import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type Resu
 import { lerInventario } from "./inventario/loja";
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
+import { assinadas, diasAdenda } from "./adendas";
+import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -44,7 +46,9 @@ export interface EncCliente {
 }
 /** 21/10: uma encomenda de cliente de ajuste (EC-<id>-A1): os materiais novos de uma tarefa nova, de uma adenda ou mudados à mão
  *  depois da inicial (encomendasAjuste.ts). Vive no Inventário como a inicial; anulada se as tarefas dela saíram antes de alguma coisa sair. */
-export interface EcAjuste extends EncCliente { motivo: string; anulada?: string }
+export interface EcAjuste extends EncCliente { motivo: string; anulada?: string;
+  /** 21/10: a adenda que a originou (o número, "AD 2026/1027-1"): emitida quando o Financeiro validou o pagamento dessa adenda */
+  adenda?: string }
 
 /** Os fornecedores de exemplo (o real virá das Compras); o sugerido é pelo tipo de obra. */
 export const FORNECEDORES = ["Cerâmica do Centro (exemplo)", "Sanitários do Tejo (exemplo)", "Madeiras e Cozinhas (exemplo)"];
@@ -143,9 +147,20 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
   if (!d.fin.pago) F.push(d.fin.fatura ? "receber o pagamento" : "emitir a fatura e receber o pagamento");
   else if (!d.obra.ec) F.push("emitir a encomenda de cliente");
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
+  // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
+  // outras de ajuste, as encomendas a fornecedor dela não seguram o arranque: as tarefas esperam no plano). Com a obra a andar, não bloqueiam nada.
+  if (!p || p.estado === "por aprovar" || p.estado === "aprovado") for (const a of assinadas(d)) {
+    if (!a.recibo) F.push(a.fatura ? `receber o pagamento da adenda ${a.n}` : `faturar a adenda ${a.n} e receber o pagamento`);
+    else if (d.obra.ec?.ref && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length) F.push(`emitir a encomenda da adenda ${a.n}`);
+  }
   if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
   return F;
 }
+
+/** 21/10: as tarefas de uma adenda no plano (as de antes de 21/10 só têm o número no nome). */
+export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter((t) => t.adenda === n || (!t.adenda && t.nome.endsWith(`(adenda ${n})`)));
+/** A encomenda da adenda emite-se com o pagamento dela validado (decisão B, como no contrato). */
+export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da adenda for validado.";
 
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
 export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
@@ -178,9 +193,28 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       : { id: "ec-inv", trilho: "ec", estado: inv.pronta ? "feito" : "espera", who: null, t: inv.eliminada ? "Eliminada no Inventário" : `No Inventário: ${inv.rotulo.toLowerCase()}`, sub: textoResumoEc(inv) });
   }
 
+  // 21/10 (decisão B): a encomenda de cada adenda assinada (com tarefas no plano), emitida só quando o pagamento dessa adenda é validado
+  const ADS = assinadas(d).filter((a) => tarefasDaAdenda(p, a.n).length || ecDaAdenda(d, a.n));
+  for (const a of ADS) {
+    const ea = ecDaAdenda(d, a.n), pend = porEncomendarDe(d, a.n).length, t = `Encomenda da adenda ${a.n}`, id = "ec-ad-" + a.n;
+    L.push(ea
+      ? { id, trilho: "ec", estado: "feito", who: ea.adenda ? "financeiro" : null, t: `${t} · ${ea.n}`,
+        sub: `${ea.adenda ? `Emitida ao validar o pagamento da adenda${ea.emitida ? ` · ${ea.emitida.q}` : ""}` : "Emitida ao assinar a adenda"} · ${ea.linhas.length} ${ea.linhas.length === 1 ? "linha" : "linhas"} · ${eur(ea.valor)} €` }
+      : !pend ? { id, trilho: "ec", estado: "feito", who: null, t, sub: "Sem materiais a encomendar: só mão de obra." }
+      : !a.recibo ? { id, trilho: "ec", estado: "espera", who: null, t, sub: EC_ADENDA_NO_PAGAMENTO }
+      : !ec?.ref ? { id, trilho: "ec", estado: "espera", who: null, t, sub: "O pagamento da adenda está validado: emite-se logo a seguir à encomenda de cliente inicial." }
+      : { id, trilho: "ec", estado: "agora", who: "financeiro", t: `Emitir a encomenda da adenda ${a.n}`, sub: "O pagamento da adenda está validado mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEcsAdenda", btn: "Emitir no Inventário" });
+  }
+
   // o plano
   const nc = conflitos(p).length, dias = p.tasks.length ? Math.max(...p.tasks.map((t) => t.dia + t.dur)) : 0;
   L.push({ id: "pl", trilho: "plano", estado: "feito", who: null, t: p.origem === "orcamento" ? "Plano gerado do orçamento" : "Plano da obra", sub: `${p.tasks.length} ${p.tasks.length === 1 ? "tarefa" : "tarefas"} · ${nfmt(dias)} dias úteis${p.inicio ? ` · início ${p.inicio.split("-").reverse().slice(0, 2).join("/")}` : ""}` });
+  // 21/10: as tarefas de cada adenda assinada, juntas ao plano (no fim da fase de cada serviço); se o plano estava aprovado, volta a aprovação
+  for (const a of ADS) {
+    const k = tarefasDaAdenda(p, a.n).length, N = diasAdenda(a.linhas);
+    if (k) L.push({ id: "pl-ad-" + a.n, trilho: "plano", estado: "feito", who: null, t: `Tarefas da adenda ${a.n} juntas ao plano · +${N} ${N === 1 ? "dia" : "dias"}`,
+      sub: `${k} ${k === 1 ? "tarefa" : "tarefas"} no fim da fase de cada serviço.` });
+  }
   L.push(p.estado === "por aprovar" && !d.fin.pago
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
     : p.estado === "por aprovar"

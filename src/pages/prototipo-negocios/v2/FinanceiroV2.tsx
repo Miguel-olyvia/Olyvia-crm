@@ -13,6 +13,7 @@ import { DISPARO, dataPT, disparaObra, errosPagamento, errosRegisto, registarFat
 import { faturasDe, guardarFaturas, hojeISO, totalComIva, tranchesDe } from "./estadoV2";
 import { BOTAO, CHIP, INPUT } from "./estilo";
 import { SEM_PERM, podeNeg } from "../permissoes";
+import { AdendasNoFinanceiro } from "../FinanceiroAdendas";
 
 const CONTAS = FINANCEIRO[2].campos.find((c) => c.k === "conta")?.op ?? ["Banco A · conta à ordem", "Banco B · conta obras"];
 
@@ -253,6 +254,8 @@ export function FinanceiroV2(ctx: Ctx & { d: Negocio; compacto?: boolean }) {
           </ul>
         </section>
       )}
+      {/* 21/10: as adendas assinadas: a fatura (registada, do programa certificado), o pagamento e a encomenda dos materiais (decisão B) */}
+      <AdendasNoFinanceiro ctx={ctx} d={d} v2 />
     </div>
   );
 }

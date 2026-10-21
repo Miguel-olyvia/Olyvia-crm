@@ -152,10 +152,10 @@ export function NegocioSimples(ctx: Ctx) {
       {portal && <PortalCliente ctx={ctx} d={d} fechar={() => setPortal(false)} />}
       {/* 21/10: o cliente pediu alterações no portal: a proposta volta atrás, à vista, e guia-se a versão nova */}
       {(d.fase === 3 || d.fase === 2) && <PedidoDoCliente ctx={ctx} d={d} />}
+      {/* trabalhos a mais depois do contrato (adendas); 21/10: em cima, antes das colunas do caminho da obra que eles alimentam */}
+      {d.fase >= 4 && !d.perdido && <TrabalhosAMais {...ctx} d={d} />}
       {/* do contrato à obra (16/10): o pagamento primeiro; com ele, a encomenda no Inventário; depois o plano e o arranque */}
       {d.fase >= 4 && d.obra.plano && !d.perdido && <CaminhoObra {...ctx} d={d} />}
-      {/* trabalhos a mais depois do contrato (adendas) */}
-      {d.fase >= 4 && !d.perdido && <TrabalhosAMais {...ctx} d={d} />}
 
       {/* De volta à visita com um orçamento já feito: diz o que fazer e como sair */}
       {d.fase === 2 && d.orc && !d.perdido && (

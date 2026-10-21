@@ -9,7 +9,8 @@ import type { Ctx } from "./pecas";
 import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
-import { linhasDaObra, porEncomendar } from "./encomendasAjuste";
+import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
+import { assinadas } from "./adendas";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -52,7 +53,9 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   // 21/10: com as linhas das encomendas de ajuste (materiais novos de tarefas novas, adendas ou mudados à mão)
   const linhas = linhasDaObra(d).map(({ x, ec: n, motivo }) => { const l = linhaDoResumo(r, x.n, n); return { x, l, n, motivo, g: grupoDe(l, exemplo) }; });
   const ajustes = (d.obra.ecsAjuste ?? []).filter((a) => !a.anulada);
-  const pendentes = porEncomendar(d.obra.plano);
+  // 21/10 (decisão B): os das adendas por pagar não se encomendam aqui: esperam pelo pagamento da adenda (ficam à parte, por adenda)
+  const pendentes = porEncomendarDe(d);
+  const retidos = assinadas(d).filter((a) => !ecDaAdenda(d, a.n)).map((a) => ({ a, L: porEncomendarDe(d, a.n) })).filter((x) => x.L.length);
   const nCaminho = linhas.filter((y) => y.g === "caminho").length, nResolver = linhas.filter((y) => y.g === "resolver").length;
   const falta = exemplo ? [] : faltaMateriais(r);
   const tarde = entregaTarde(d, db);
@@ -73,7 +76,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
               Encomenda de cliente {ec.n} · {exemplo ? `de ${ec.criada}` : `emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}`} · {ec.linhas.length} {ec.linhas.length === 1 ? "material" : "materiais"}
             </p>
             {ajustes.map((a) => (
-              <p key={a.n} className="text-[15px] text-muted-foreground">Encomenda de ajuste {a.n} · {a.motivo} · {a.linhas.length} {a.linhas.length === 1 ? "material" : "materiais"}</p>
+              <p key={a.n} className="text-[15px] text-muted-foreground">{a.adenda ? `Encomenda da adenda ${a.adenda} · ${a.n} · emitida ao validar o pagamento da adenda` : `Encomenda de ajuste ${a.n} · ${a.motivo}`} · {a.linhas.length} {a.linhas.length === 1 ? "material" : "materiais"}</p>
             ))}
           </div>
           {!exemplo && <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>}
@@ -102,6 +105,22 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           <p className="mt-2 text-sm text-muted-foreground">Vão numa encomenda de cliente de ajuste, no Inventário; as tarefas esperam por eles no plano.</p>
         </section>
       )}
+
+      {/* 21/10 (decisão B): os materiais das adendas assinadas, à espera do pagamento de cada uma (depois, encomenda própria) */}
+      {retidos.map(({ a, L }) => (
+        <section key={a.n} aria-label={`Materiais da adenda ${a.n}`} className="rounded-2xl border border-dashed border-input p-5">
+          <h3 className="text-base font-semibold">Materiais da adenda {a.n}</h3>
+          <ul className="mt-2 space-y-1 text-[15px]">
+            {L.map(({ t, m, q }) => <li key={t.nome + m.n}>{m.n} · {nfmt(q)} {m.un} <span className="text-muted-foreground">· {t.nome}</span></li>)}
+          </ul>
+          {!a.recibo
+            ? <p className="mt-2 text-sm text-muted-foreground">Encomendam-se quando o pagamento da adenda for validado: vão numa encomenda de cliente própria, no Inventário.</p>
+            : <>
+              <p className="mt-2 text-sm text-muted-foreground">O pagamento da adenda está validado mas a encomenda não chegou ao Inventário.</p>
+              <Button className="mt-3 min-h-11" onClick={go(() => A.emitirEcsAdenda(d.id))}>Emitir a encomenda da adenda</Button>
+            </>}
+        </section>
+      ))}
 
       {/* o que falta para os materiais estarem garantidos, e quem o faz: as Compras aprovam, o Armazém recebe e reserva */}
       {(falta.length > 0 || tarde) && (

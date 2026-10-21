@@ -4,7 +4,7 @@ import { esquecerInventario, lerInventario } from "./inventario/loja";
 import { anularEcNoInventario, resumoEcNegocio, sincronizarEcsNegocios } from "./inventario/ponteNegocios";
 import { acoes, seed, type Negocio } from "./motor";
 import { FINANCEIRO, emFalta } from "./campos";
-import { aMais, diaDaChegada, linhasDaObra, porEncomendar } from "./encomendasAjuste";
+import { aMais, diaDaChegada, ecDaAdenda, linhasDaObra, porEncomendar, porEncomendarDe } from "./encomendasAjuste";
 import { materiaisDaTarefa } from "./tarefasValidador";
 
 const preencher = (d: Negocio) => {
@@ -98,7 +98,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     expect(lerInventario().pos.filter((p) => p.originKey === "CT 2026/1027 · A1" && !p.deleted).every((p) => p.lines.every((l) => l.ec !== "EC-1027-A1") || p.cancels.length > 0)).toBe(true);
   });
 
-  it("a adenda assinada junta as tarefas com os materiais da receita e emite a encomenda de ajuste", () => {
+  it("a adenda assinada junta as tarefas com os materiais da receita; a encomenda dela só nasce com o pagamento da adenda validado (decisão B)", () => {
     const ctx = preparar(), { A, d } = ctx;
     pagar(ctx);
     A.role("comercial");
@@ -106,9 +106,58 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.assinarAdenda(d.id, "AD 2026/1027-1");
     const t = d.obra.plano!.tasks.find((x) => x.nome.includes("adenda AD 2026/1027-1"))!;
     expect(t.mats!.length).toBeGreaterThan(0);
+    expect(t.adenda).toBe("AD 2026/1027-1");
+    // assinada: nada no Inventário; os materiais ficam presos à adenda (nem o botão Encomendar dos ajustes os leva)
+    expect(d.obra.ecsAjuste ?? []).toEqual([]);
+    expect(ecInv("EC-1027-A1")).toBeUndefined();
+    expect(porEncomendarDe(d)).toEqual([]);
+    expect(porEncomendarDe(d, "AD 2026/1027-1").length).toBeGreaterThan(0);
+    A.role("operacoes"); A.encomendarMateriais(d.id);
+    expect(d.obra.ecsAjuste ?? []).toEqual([]);
+    // a fatura da adenda, o cliente paga no portal, o Financeiro valida: sai o recibo e a EC-1027-A1, ligada à adenda
+    A.role("financeiro"); A.faturarAdendas(d.id);
+    A.avisarPagamento(d.id, "TRF 123", "AD 2026/1027-1");
+    A.validarPagamentosAdenda(d.id);
+    const a = d.adendas![0];
+    expect(a.recibo?.n).toMatch(/^RC 2026\//);
+    expect(d.obra.ecsAjuste![0]).toMatchObject({ n: "EC-1027-A1", adenda: "AD 2026/1027-1", motivo: "adenda AD 2026/1027-1" });
+    expect(ecDaAdenda(d, "AD 2026/1027-1")?.n).toBe("EC-1027-A1");
     expect(t.ecs).toEqual(["EC-1027-A1"]);
-    expect(d.obra.ecsAjuste![0].motivo).toBe("adenda AD 2026/1027-1");
+    expect(ecInv("EC-1027-A1")?.origin.ref).toBe("CT 2026/1027 · A1");
+    expect(resumoEcNegocio(lerInventario(), "CT 2026/1027")!.ajustes).toEqual(["EC-1027-A1"]);
+    expect(porEncomendarDe(d, "AD 2026/1027-1")).toEqual([]);
+  });
+
+  it("a adenda paga antes da encomenda inicial: a dela emite-se logo a seguir à inicial, ligada à adenda", () => {
+    const ctx = preparar(), { A, d } = ctx;
+    A.role("comercial");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 10 }], "O cliente pediu");
+    A.simularAdenda(d.id, "AD 2026/1027-1");
+    A.role("financeiro"); A.faturarAdendas(d.id);
+    A.avisarPagamento(d.id, "TRF 9", "AD 2026/1027-1");
+    A.validarPagamentosAdenda(d.id);
+    expect(d.adendas![0].recibo).toBeTruthy();
+    expect(d.obra.ecsAjuste ?? []).toEqual([]); // ainda sem a inicial: não se perde, espera
+    pagar(ctx);
+    expect(ecInv("EC-1027")).toBeTruthy();
+    expect(d.obra.ecsAjuste![0]).toMatchObject({ n: "EC-1027-A1", adenda: "AD 2026/1027-1" });
     expect(ecInv("EC-1027-A1")).toBeTruthy();
+  });
+
+  it("a adenda recusada ou retirada nunca encomenda nada", () => {
+    const ctx = preparar(), { A, d } = ctx;
+    pagar(ctx);
+    A.role("comercial");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 5 }], "O cliente pediu");
+    A.recusarAdenda(d.id, "AD 2026/1027-1", "O preço");
+    A.anularAdenda(d.id, "AD 2026/1027-2");
+    A.role("financeiro"); A.faturarAdendas(d.id); A.validarPagamentosAdenda(d.id);
+    A.role("operacoes"); A.encomendarMateriais(d.id);
+    expect(d.adendas!.every((a) => !a.fatura && !a.recibo)).toBe(true);
+    expect(d.obra.plano!.tasks.some((t) => t.adenda)).toBe(false);
+    expect(d.obra.ecsAjuste ?? []).toEqual([]);
+    expect(lerInventario().ecs.some((e) => e.id.startsWith("EC-1027-A"))).toBe(false);
   });
 
   it("anular o contrato leva as encomendas de ajuste; recarregar volta a emiti-las", () => {

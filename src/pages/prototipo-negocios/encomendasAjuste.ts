@@ -8,6 +8,9 @@
 //   liberta as reservas e anula as encomendas a fornecedor ligadas), se ainda nada saiu para a obra. Quantidades a menos não mexem na
 //   encomenda: o que sobrar volta ao armazém no fim (devolução no Inventário).
 // · Antes do pagamento não há encomenda de cliente: o que as tarefas pedem fica por encomendar e emite-se logo a seguir à inicial.
+// · 21/10 (decisão B): as tarefas de uma adenda (Tarefa.adenda) guardam os materiais até o Financeiro validar o pagamento DESSA adenda, como
+//   no contrato (sem encomenda antes do pagamento). Validado, emite-se a encomenda de ajuste da adenda (EcAjuste.adenda = o número); se ainda
+//   não há encomenda inicial, emite-se logo a seguir a ela. As adendas recusadas ou retiradas nunca juntam tarefas: nunca encomendam.
 import { comoSistema } from "./inventario/base";
 import { eliminarEc } from "./inventario/ec";
 import { executar, lerInventario } from "./inventario/loja";
@@ -34,6 +37,18 @@ export function aMais(p: Plano | null | undefined): PorEncomendar[] {
   if (!p) return [];
   return p.tasks.filter(contaParaAjuste).flatMap((t) =>
     (t.encomendado ?? []).map((e) => ({ t, m: e, q: r2(e.q - ((t.mats ?? []).find((x) => x.n === e.n)?.q ?? 0)) })).filter((x) => x.q > 0));
+}
+
+/** 21/10: a encomenda de ajuste de uma adenda (não anulada). As assinadas antes da decisão B têm só o motivo "adenda <n>". */
+export const ecDaAdenda = (d: Negocio, n: string): EcAjuste | undefined =>
+  (d.obra.ecsAjuste ?? []).find((a) => !a.anulada && (a.adenda === n || (!a.adenda && a.motivo === "adenda " + n)));
+
+/**
+ * 21/10: o que falta encomendar no negócio. Com `adenda`, só o das tarefas dessa adenda; sem ela, o resto: as tarefas de uma adenda ficam
+ * de fora enquanto a encomenda da adenda não existir (esperam pelo pagamento dela). Depois, o que se mudar à mão nelas vai como os outros ajustes.
+ */
+export function porEncomendarDe(d: Negocio, adenda?: string): PorEncomendar[] {
+  return porEncomendar(d.obra.plano).filter(({ t }) => (adenda ? t.adenda === adenda : !t.adenda || !!ecDaAdenda(d, t.adenda)));
 }
 
 /** As linhas de uma encomenda de ajuste: o que falta, junto pelo nome do material (várias tarefas podem pedir o mesmo). */
@@ -83,17 +98,20 @@ export interface ResultadoAjuste {
 /**
  * Emite a encomenda de ajuste com o que falta encomendar e ajusta o plano à chegada. Devolve null se não há nada a encomendar (ou ainda
  * não há encomenda inicial: emite-se depois dela) e { erro } se o Inventário recusou (não fica nada a meio).
+ * 21/10: com `adenda`, só os materiais das tarefas dessa adenda (o motor chama-a quando o pagamento da adenda é validado) e a encomenda
+ * fica ligada a ela; sem `adenda`, os das tarefas de adendas ainda sem encomenda ficam de fora (porEncomendarDe).
  */
-export function encomendarAjustes(d: Negocio, motivo: string, quem: string, quando: string): ResultadoAjuste | { erro: string } | null {
+export function encomendarAjustes(d: Negocio, motivo: string, quem: string, quando: string, adenda?: string): ResultadoAjuste | { erro: string } | null {
   const p = d.obra.plano, base = d.obra.ec;
   if (!p || !base?.ref || d.perdido) return null;
-  const P = porEncomendar(p);
+  const P = porEncomendarDe(d, adenda);
   if (!P.length) return null;
   const k = (d.obra.ecsAjuste?.length ?? 0) + 1;
   const linhas = linhasDeAjuste(P);
   const ec: EcAjuste = {
     n: idAjuste(d, k), ref: refAjuste(base.ref, k), estado: "emitida", criada: quando, linhas, motivo, emitida: { por: quem, q: quando },
     valor: r2(linhas.reduce((a, x) => a + x.preco * x.q, 0)), custo: r2(linhas.reduce((a, x) => a + x.custo * x.q, 0)),
+    ...(adenda ? { adenda } : {}),
   };
   const r = emitirNoInventario({ ...pedidoDoNegocio(d, ec), id: ec.n, registo: `Encomenda de ajuste do negócio: ${motivo}` });
   if (!r.ok) return { erro: r.erro };
