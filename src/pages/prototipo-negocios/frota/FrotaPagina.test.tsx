@@ -172,7 +172,7 @@ describe("a Frota vista de fora: Agenda e obra", () => {
     render(<ViaturasObra obra={1022} />);
     const g = screen.getByRole("group", { name: "Viaturas da obra" });
     expect(within(g).getAllByRole("button").map((b) => b.textContent)).toEqual(["AA-12-BC", "12-TT-90", "BX-55-RT"]);
-    expect(g.textContent).toContain("Hugo Neves, Revestimento e pavimento");
+    expect(within(g).getAllByRole("listitem")[2]).toHaveTextContent(/BX-55-RT\s*Hugo Neves.*Revestimento e pavimento/);
     expect(g.textContent).toMatch(/€\/km/);
   });
 

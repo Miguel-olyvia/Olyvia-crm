@@ -44,20 +44,29 @@ export function ViaturasObra({ obra, ec, estado }: { obra: number; ec?: string |
   const comFrota = useMolduraFrota(); // só quando a moldura do protótipo consegue mesmo abrir a Frota
   const l = viaturasDaObra(F, obra);
   if (!l.length) return <ViaturaLigada obra={obra} ec={ec} estado={estado} />;
+  // 21/10: uma linha por viatura (matrícula e quem a leva; o que se fez e quando por baixo; o custo por km à direita), sem texto corrido
   return (<>
-    <div className="mt-3 text-[15px]" aria-label="Viaturas da obra" role="group">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-        <Truck className="h-4 w-4 text-primary" aria-hidden="true" />
-        <span>Viaturas:</span>
-        {l.map((x, i) => (
-          <span key={x.v.id} className="inline-flex items-center gap-1">
-            {comFrota
-              ? <button type="button" className="min-h-11 font-medium text-primary underline-offset-4 hover:underline" onClick={() => pedirFrota({ aba: "viaturas", vid: x.v.id })} title="Abrir na Frota">{x.v.mat}</button>
-              : <span className="font-medium text-foreground">{x.v.mat}</span>}
-            <span>({x.quem}{x.oQue.length ? `, ${x.oQue.join(", ")}` : ""}{x.datas.length ? `, ${x.datas.map(fDataC).join(" e ")}` : ""}; {fEur(custoKmDeslocacao(F, x.v.id))}/km){i < l.length - 1 ? " ·" : ""}</span>
-          </span>
+    <div className="mt-3" aria-label="Viaturas da obra" role="group">
+      <p className="text-sm text-muted-foreground">Viaturas</p>
+      <ul className="mt-1.5 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+        {l.map((x) => (
+          <li key={x.v.id} className="flex items-center gap-3 px-3 py-2">
+            <Truck className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="flex flex-wrap items-baseline gap-x-2 text-[15px]">
+                {comFrota
+                  ? <button type="button" className="min-h-9 font-semibold tabular-nums text-primary underline-offset-4 hover:underline" onClick={() => pedirFrota({ aba: "viaturas", vid: x.v.id })} title="Abrir na Frota">{x.v.mat}</button>
+                  : <span className="font-semibold tabular-nums">{x.v.mat}</span>}
+                <span>{x.quem}</span>
+              </p>
+              {(x.oQue.length > 0 || x.datas.length > 0) && (
+                <p className="text-sm text-muted-foreground">{[x.oQue.join(", "), x.datas.map(fDataC).join(" e ")].filter(Boolean).join(" · ")}</p>
+              )}
+            </div>
+            <span className="shrink-0 text-sm tabular-nums text-muted-foreground"><b className="font-semibold text-foreground">{fEur(custoKmDeslocacao(F, x.v.id))}</b>/km</span>
+          </li>
         ))}
-      </p>
+      </ul>
     </div>
     <ViaturaLigada obra={obra} ec={ec} estado={estado} />
   </>);
