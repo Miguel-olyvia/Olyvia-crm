@@ -7,6 +7,8 @@ import type { Ctx } from "./pecas";
 import { ImprevistosNaObra, RegistarImprevisto } from "./ImprevistosObra";
 import { PortalCliente } from "./PortalCliente";
 import { juntarAjustes, type Alteracao } from "./trabalhoObra";
+import { precoSugeridoLivre } from "./adendas";
+import { adendaAssinada } from "./testeAdenda";
 
 afterEach(cleanup);
 
@@ -59,18 +61,19 @@ describe("imprevistos no ecrã", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar ao cliente para aprovar" }));
     const a = d.adendas!.at(-1)!;
     expect(a).toMatchObject({ motivo: "Imprevisto na obra", estado: "enviada", origem: { texto: "Cano podre" } });
-    expect(a.linhas[0]).toMatchObject({ livre: true, n: "Cano podre", h: 4, pu: 120 });
+    // 21/10: o preço sugerido da linha livre tem a margem alvo (a adenda verifica-se antes de ir ao cliente)
+    expect(a.linhas[0]).toMatchObject({ livre: true, n: "Cano podre", h: 4, pu: precoSugeridoLivre(S, 4) });
     expect(screen.getByText(/no portal do cliente/)).toBeTruthy();
     r.unmount();
     // o cliente assina; o Financeiro fatura; no portal paga por referência MB
-    A.simularAdenda(d.id, a.n);
+    adendaAssinada(A, d.id, a.n);
     A.role("financeiro"); A.faturarAdendas(d.id);
     render(<Montar S={S} A={A}>{(c) => <PortalCliente ctx={c} d={d} fechar={() => {}} />}</Montar>);
-    const pag = screen.getByText(`Pagar a fatura ${a.fatura!.n}`).closest("section, li, div[class]")!;
+    const pag = screen.getByText(`Pagar a fatura ${a.faturas![0].n}`).closest("section, li, div[class]")!;
     expect(pag).toBeTruthy();
     const grupo = screen.getAllByRole("radiogroup", { name: "Como quer pagar" }).at(-1)!;
     fireEvent.click(within(grupo).getByRole("radio", { name: "Referência MB" }));
-    expect(a.pag?.metodo).toBe("Referência MB");
+    expect(a.faturas![0].pag?.metodo).toBe("Referência MB");
     expect(d.f.metodo).not.toBe("Referência MB");
   });
 

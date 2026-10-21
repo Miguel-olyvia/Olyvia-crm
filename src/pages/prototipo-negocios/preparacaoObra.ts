@@ -15,7 +15,7 @@ import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type Resu
 import { lerInventario } from "./inventario/loja";
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
-import { assinadas, diasAdenda } from "./adendas";
+import { assinadas, diasAdenda, faturasAdenda, primeiraPaga } from "./adendas";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
@@ -149,8 +149,9 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
   // outras de ajuste, as encomendas a fornecedor dela não seguram o arranque: as tarefas esperam no plano). Com a obra a andar, não bloqueiam nada.
+  // 21/10 (decisão C): basta a 1.ª parcela da adenda paga (e a encomenda dela emitida); as outras parcelas não seguram o arranque
   if (!p || p.estado === "por aprovar" || p.estado === "aprovado") for (const a of assinadas(d)) {
-    if (!a.recibo) F.push(a.fatura ? `receber o pagamento da adenda ${a.n}` : `faturar a adenda ${a.n} e receber o pagamento`);
+    if (!primeiraPaga(a)) F.push(faturasAdenda(a).length ? `receber o pagamento da 1.ª parcela da adenda ${a.n}` : `faturar a 1.ª parcela da adenda ${a.n} e receber o pagamento`);
     else if (d.obra.ec?.ref && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length) F.push(`emitir a encomenda da adenda ${a.n}`);
   }
   if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
@@ -160,7 +161,7 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
 /** 21/10: as tarefas de uma adenda no plano (as de antes de 21/10 só têm o número no nome). */
 export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter((t) => t.adenda === n || (!t.adenda && t.nome.endsWith(`(adenda ${n})`)));
 /** A encomenda da adenda emite-se com o pagamento dela validado (decisão B, como no contrato). */
-export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da adenda for validado.";
+export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
 export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
@@ -201,7 +202,7 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       ? { id, trilho: "ec", estado: "feito", who: ea.adenda ? "financeiro" : null, t: `${t} · ${ea.n}`,
         sub: `${ea.adenda ? `Emitida ao validar o pagamento da adenda${ea.emitida ? ` · ${ea.emitida.q}` : ""}` : "Emitida ao assinar a adenda"} · ${ea.linhas.length} ${ea.linhas.length === 1 ? "linha" : "linhas"} · ${eur(ea.valor)} €` }
       : !pend ? { id, trilho: "ec", estado: "feito", who: null, t, sub: "Sem materiais a encomendar: só mão de obra." }
-      : !a.recibo ? { id, trilho: "ec", estado: "espera", who: null, t, sub: EC_ADENDA_NO_PAGAMENTO }
+      : !primeiraPaga(a) ? { id, trilho: "ec", estado: "espera", who: null, t, sub: EC_ADENDA_NO_PAGAMENTO }
       : !ec?.ref ? { id, trilho: "ec", estado: "espera", who: null, t, sub: "O pagamento da adenda está validado: emite-se logo a seguir à encomenda de cliente inicial." }
       : { id, trilho: "ec", estado: "agora", who: "financeiro", t: `Emitir a encomenda da adenda ${a.n}`, sub: "O pagamento da adenda está validado mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEcsAdenda", btn: "Emitir no Inventário" });
   }

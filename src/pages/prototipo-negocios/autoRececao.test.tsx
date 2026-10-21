@@ -10,6 +10,7 @@ import { PortalCliente, passoPortal } from "./PortalCliente";
 import { ContratoDoc } from "./DocsCliente";
 import { completarParaEncerrar } from "./encerrarObra";
 import { fotosPorFase, garantiaAte, historiaDaObra, resumoObra } from "./historiaObra";
+import { adendaPorAssinar } from "./testeAdenda";
 
 afterEach(cleanup);
 
@@ -86,7 +87,8 @@ describe("a adenda assinada no portal", () => {
     const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
     const a = d.adendas![0];
-    expect(passoPortal(d).estado).toBe("adenda");
+    adendaPorAssinar(A, d.id, a.n);
+    expect(passoPortal(d)).toEqual({ i: 3, estado: "assinar", adenda: a.n });
     A.assinarAdendaCom(d.id, a.n, ASS);
     expect(a).toMatchObject({ estado: "assinada", assinatura: { id: "CMD-TESTE1" } });
     render(<ContratoDoc S={S} d={d} />);
@@ -132,6 +134,7 @@ describe("no portal: receber a obra", () => {
   it("a adenda por assinar é o passo em destaque, com o documento à vista", () => {
     const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
+    adendaPorAssinar(A, d.id, "AD 2026/1027-1");
     render(<Portal S={S} d={d} A={A} />);
     expect(screen.getByRole("heading", { name: /Assinar a adenda AD 2026\/1027-1/ })).toBeTruthy();
     expect(screen.getByRole("region", { name: "A adenda" })).toBeTruthy();

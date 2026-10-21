@@ -14,6 +14,7 @@ import {
   aberto, acoes, conflitos, custoUn, demo, eur, exemplosClientes, minhas, nfmt, pct, proximo, seed, tot,
   type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
+import { migrarAdendas } from "./adendas";
 import { Hoje } from "./Hoje";
 import { HojeSimples } from "./HojeSimples";
 import { HojeTecnico } from "./HojeTecnico";
@@ -76,7 +77,7 @@ function ler(): Estado {
   try {
     const j = JSON.parse(localStorage.getItem(CHAVE) || "null");
     // 21/10: os clientes com vários negócios juntam-se a um Estado já guardado (só os que faltam)
-    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); return j as Estado; }
+    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); migrarAdendas(j as Estado); return j as Estado; }
     // 21/10: as versões 18 a 20 (o acompanhamento da obra) migram sem perder o que se fez na demonstração:
     // só se juntam os dados novos do exemplo (a conversa da obra) a quem ainda não os tem
     if (j && j.v >= 18 && j.v < VERSAO) {
@@ -86,7 +87,7 @@ function ler(): Estado {
         if (s?.obra.chat && !d.obra.chat) d.obra.chat = s.obra.chat;
       }
       E.v = VERSAO;
-      exemplosClientes(E);
+      exemplosClientes(E); migrarAdendas(E);
       return E;
     }
   } catch {
@@ -186,7 +187,8 @@ export default function PrototipoNegocios() {
   useEffect(() => {
     const aplicar = (S: Estado) => {
       if (S.v !== VERSAO) S.v = VERSAO;
-      const juntou = exemplosClientes(S); // uma sala de antes dos clientes com vários negócios: junta-os e partilha-os
+      // uma sala de antes dos clientes com vários negócios: junta-os e partilha-os; 21/10: e as adendas de antes do percurso novo
+      const juntou = [exemplosClientes(S), migrarAdendas(S)].some(Boolean);
       ref.current = S;
       try { localStorage.setItem(CHAVE, JSON.stringify(S)); } catch { /* ignora */ }
       redesenhar();
@@ -436,7 +438,9 @@ export default function PrototipoNegocios() {
   const toastsEl = alvoAvisos ? createPortal(toastsBase, alvoAvisos) : toastsBase;
   // 15/10: a revisão do contrato pelo Jurídico abre por cima da app (RevisaoContrato.tsx)
   const dRev = S.revisao != null ? S.deals.find((x) => x.id === S.revisao) : undefined;
-  const revisaoEl = dRev ? <RevisaoContrato ctx={ctx} d={dRev} /> : null;
+  // 21/10: o contrato de uma adenda (S.revisaoAdenda), com o mesmo editor
+  const aRev = dRev && S.revisaoAdenda ? dRev.adendas?.find((x) => x.n === S.revisaoAdenda) : undefined;
+  const revisaoEl = dRev ? <RevisaoContrato key={aRev?.n ?? "contrato"} ctx={ctx} d={dRev} a={aRev} /> : null;
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (

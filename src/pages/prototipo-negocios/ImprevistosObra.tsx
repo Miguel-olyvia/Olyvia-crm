@@ -8,13 +8,14 @@ import { AlertTriangle, Camera, Check, Minus, Plus, Trash2, X } from "lucide-rea
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO_TODO } from "./catalogo";
-import { IVA_MO, eur, nfmt, r2, servicoDoCatalogo, type MatTarefa, type Negocio } from "./motor";
+import { eur, nfmt, servicoDoCatalogo, type MatTarefa, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { SeletorPesquisa } from "./pecasFicha";
 import { EditorMateriais } from "./PlanoInterativo";
 import { Miniaturas } from "./AcompanhamentoObra";
 import { lerFoto } from "./ObraOperacoes";
-import { diasAdenda, previsaoLinha, totalComIva, type LinhaAdenda } from "./adendas";
+import { diasAdenda, estadoAdenda, faturasAdenda, nomeParcela, precoSugeridoLivre, previsaoLinha, totaisAdenda, totaisLinhas, type LinhaAdenda } from "./adendas";
+import { AcoesAdenda } from "./TrabalhosAMais";
 import { DECISOES, GRAVIDADES, imprevistosDe, paradasPor, tarefasAfetaveis, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 
 const chip = (on: boolean) => cn("inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40");
@@ -144,8 +145,9 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
       {im.estado === "aberto" && propor && <PropostaImprevisto ctx={ctx} d={d} im={im} fechar={() => setPropor(false)} />}
       {im.estado === "proposta" && a && (
         <div className="mt-3 flex flex-wrap items-center gap-3 text-[15px]">
-          <span>Proposta {a.n} · {eur(totalComIva(a.linhas))} € com IVA · +{diasAdenda(a.linhas)} {diasAdenda(a.linhas) === 1 ? "dia" : "dias"} · no portal do cliente</span>
-          <Button size="sm" variant="outline" className="min-h-10" onClick={go(() => A.simularAdenda(d.id, a.n))}>Simular: o cliente aprova</Button>
+          {/* 21/10: a adenda do imprevisto segue o percurso da proposta (verificação, aceitação, contrato da adenda, assinatura) */}
+          <span>Proposta {a.n} · {eur(totaisAdenda(a).total)} € com IVA · +{diasAdenda(a.linhas)} {diasAdenda(a.linhas) === 1 ? "dia" : "dias"} · {a.estado === "rascunho" ? estadoAdenda(a).t : `no portal do cliente (${estadoAdenda(a).t})`}</span>
+          <div className="w-full"><AcoesAdenda ctx={ctx} d={d} a={a} /></div>
         </div>
       )}
       {im.estado === "recusado" && (
@@ -164,7 +166,7 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
         </div>
       )}
       {im.estado === "aprovado" && a && (
-        <p className="mt-2 text-[15px] text-muted-foreground">Aprovado ({a.n}): o trabalho entrou no plano. Fatura: {a.recibo ? `paga (${a.recibo.n})` : a.fatura ? `${a.fatura.n}, por pagar` : "por emitir (Financeiro)"}.</p>
+        <p className="mt-2 text-[15px] text-muted-foreground">Aprovado ({a.n}): o trabalho entrou no plano. Faturas: {faturasAdenda(a).length ? faturasAdenda(a).map((f) => `${nomeParcela(f.i)} ${f.n}, ${f.recibo ? `paga (${f.recibo.n})` : "por pagar"}`).join(" · ") : "por emitir (Financeiro)"}.</p>
       )}
       {im.decisao && im.estado !== "aprovado" && <p className="mt-2 text-sm text-muted-foreground">Decisão: {im.decisao}</p>}
     </article>
@@ -175,7 +177,8 @@ function CartaoImprevisto({ ctx, d, im }: { ctx: Ctx; d: Negocio; im: Imprevisto
 function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: Imprevisto; fechar: () => void }) {
   const { S, A, run } = ctx;
   const [itens, setItens] = useState<{ sid: string; q: number }[]>([]);
-  const [livre, setLivre] = useState<LinhaLivre | null>({ n: im.texto.replace(/^./, (c) => c.toUpperCase()), h: 4, preco: 120, perfil: "Canalização", mats: [] });
+  // 21/10: o preço sugerido da linha livre tem a margem alvo (a adenda verifica-se como o orçamento antes de ir ao cliente)
+  const [livre, setLivre] = useState<LinhaLivre | null>({ n: im.texto.replace(/^./, (c) => c.toUpperCase()), h: 4, preco: precoSugeridoLivre(S, 4), perfil: "Canalização", mats: [] });
   const opcoes = useMemo(() => {
     const vistos = new Set<string>(), out: { v: string; t: string; sub: string; valor: string }[] = [];
     for (const [sid, s] of Object.entries(S.svc)) { if (sid.startsWith("livre-")) continue; vistos.add(sid); out.push({ v: sid, t: s.n, sub: s.perfil, valor: `${eur(s.preco)} €/${s.un}` }); }
@@ -184,12 +187,13 @@ function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: 
   }, [S.svc]);
   const linhas: LinhaAdenda[] = itens.flatMap((x) => { const l = previsaoLinha(S, x.sid, x.q); return l ? [l] : []; });
   const livres = livre && livre.n.trim() && livre.h > 0 ? [livre] : [];
-  const todas: LinhaAdenda[] = [...linhas, ...livres.map((x) => ({ sid: "livre", n: x.n, un: "vg", q: 1, pu: x.preco, h: x.h, perfil: x.perfil }))];
-  const base = r2(todas.reduce((a, x) => a + x.q * x.pu, 0)), dd = todas.length ? diasAdenda(todas) : 0;
+  const todas: LinhaAdenda[] = [...linhas, ...livres.map((x): LinhaAdenda => ({ sid: "livre", n: x.n, un: "vg", q: 1, pu: x.preco, h: x.h, perfil: x.perfil, livre: true, mats: x.mats }))];
+  // 21/10: o IVA por taxa: 6% na mão de obra, 23% nos materiais da linha livre
+  const T = totaisLinhas(todas), dd = todas.length ? diasAdenda(todas) : 0;
   const mudar = (m: Partial<LinhaLivre>) => setLivre((L) => (L ? { ...L, ...m } : L));
   return (
     <div className="mt-4 space-y-5 border-t border-border pt-4 animate-in fade-in-0 slide-in-from-top-1">
-      <p className="text-[15px]">O trabalho extra vai ao cliente como uma adenda ao contrato: aprova (assina) ou recusa no portal. Aprovada, entra no plano e o Financeiro fatura-a.</p>
+      <p className="text-[15px]">O trabalho extra vai ao cliente como uma adenda ao contrato, com o percurso da proposta: a Olyvia verifica as margens, o cliente aceita (ou pede alterações, ou recusa) e assina o contrato da adenda no portal. Assinada, entra no plano e o Financeiro fatura-a nas parcelas do contrato.</p>
       <div>
         <p className="text-[15px] font-medium">Serviços do Catálogo</p>
         {linhas.length > 0 && (
@@ -214,7 +218,7 @@ function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: 
         <div className="flex items-center justify-between gap-3">
           <p className="text-[15px] font-medium">Linha livre</p>
           {livre ? <button type="button" onClick={() => setLivre(null)} className="min-h-10 text-sm text-muted-foreground hover:text-foreground">Tirar</button>
-            : <button type="button" onClick={() => setLivre({ n: im.texto, h: 4, preco: 120, perfil: "Canalização", mats: [] })} className="min-h-10 text-sm font-medium text-primary">Juntar uma linha livre</button>}
+            : <button type="button" onClick={() => setLivre({ n: im.texto, h: 4, preco: precoSugeridoLivre(S, 4), perfil: "Canalização", mats: [] })} className="min-h-10 text-sm font-medium text-primary">Juntar uma linha livre</button>}
         </div>
         {livre && (
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -233,8 +237,8 @@ function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: 
         )}
       </div>
       <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/50 p-3 text-sm">
-        <div><p className="text-muted-foreground">Sem IVA</p><p className="text-[15px] font-semibold tabular-nums">+{eur(base)} €</p></div>
-        <div><p className="text-muted-foreground">Com IVA (6%)</p><p className="text-[15px] font-semibold tabular-nums">+{eur(base * (1 + IVA_MO))} €</p></div>
+        <div><p className="text-muted-foreground">Sem IVA</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.base)} €</p></div>
+        <div><p className="text-muted-foreground">Com IVA {T.mat > 0 ? "(6% e 23%)" : "(6%)"}</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
         <div><p className="text-muted-foreground">Prazo</p><p className="text-[15px] font-semibold tabular-nums">+{nfmt(dd)} {dd === 1 ? "dia" : "dias"}</p></div>
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

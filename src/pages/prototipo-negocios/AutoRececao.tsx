@@ -10,7 +10,7 @@ import { Cliente, Folha } from "./DocsCliente";
 import { SeloAssinatura } from "./AssinaturaContrato";
 import { FASES_OBRA } from "./fasesObra";
 import { RESPONSAVEL_OBRA } from "./obraOps";
-import { totalComIva } from "./adendas";
+import { totaisAdenda } from "./adendas";
 import { garantiaAte, resumoObra } from "./historiaObra";
 import { RelatorioObra } from "./RelatorioObra";
 
@@ -49,7 +49,7 @@ export function AutoRececaoDoc({ d }: { d: Negocio }) {
         <section aria-label="Trabalhos a mais">
           <h3 className="font-semibold">Trabalhos a mais</h3>
           <ul className="mt-1 list-disc pl-5 text-slate-700">
-            {adendas.map((a) => <li key={a.n}>{a.n}: {a.linhas.map((x) => x.n).join(", ")} ({eur(totalComIva(a.linhas))} € com IVA)</li>)}
+            {adendas.map((a) => <li key={a.n}>{a.n}: {a.linhas.map((x) => x.n).join(", ")} ({eur(totaisAdenda(a).total)} € com IVA)</li>)}
           </ul>
         </section>
       )}

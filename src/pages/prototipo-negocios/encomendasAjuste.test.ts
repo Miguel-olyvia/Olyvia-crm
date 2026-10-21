@@ -4,6 +4,7 @@ import { esquecerInventario, lerInventario } from "./inventario/loja";
 import { anularEcNoInventario, resumoEcNegocio, sincronizarEcsNegocios } from "./inventario/ponteNegocios";
 import { acoes, seed, type Negocio } from "./motor";
 import { FINANCEIRO, emFalta } from "./campos";
+import { adendaAssinada, adendaPorAssinar } from "./testeAdenda";
 import { aMais, diaDaChegada, ecDaAdenda, linhasDaObra, porEncomendar, porEncomendarDe } from "./encomendasAjuste";
 import { materiaisDaTarefa } from "./tarefasValidador";
 
@@ -103,6 +104,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     pagar(ctx);
     A.role("comercial");
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
+    adendaPorAssinar(A, d.id, "AD 2026/1027-1");
     A.assinarAdenda(d.id, "AD 2026/1027-1");
     const t = d.obra.plano!.tasks.find((x) => x.nome.includes("adenda AD 2026/1027-1"))!;
     expect(t.mats!.length).toBeGreaterThan(0);
@@ -119,7 +121,8 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.avisarPagamento(d.id, "TRF 123", "AD 2026/1027-1");
     A.validarPagamentosAdenda(d.id);
     const a = d.adendas![0];
-    expect(a.recibo?.n).toMatch(/^RC 2026\//);
+    // 21/10 (decisão C): a 1.ª parcela paga (as parcelas do contrato) emite a encomenda
+    expect(a.faturas![0]).toMatchObject({ i: 0, recibo: { n: expect.stringMatching(/^RC 2026\//) } });
     expect(d.obra.ecsAjuste![0]).toMatchObject({ n: "EC-1027-A1", adenda: "AD 2026/1027-1", motivo: "adenda AD 2026/1027-1" });
     expect(ecDaAdenda(d, "AD 2026/1027-1")?.n).toBe("EC-1027-A1");
     expect(t.ecs).toEqual(["EC-1027-A1"]);
@@ -132,11 +135,11 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     const ctx = preparar(), { A, d } = ctx;
     A.role("comercial");
     A.criarAdenda(d.id, [{ sid: "pint", q: 10 }], "O cliente pediu");
-    A.simularAdenda(d.id, "AD 2026/1027-1");
+    adendaAssinada(A, d.id, "AD 2026/1027-1");
     A.role("financeiro"); A.faturarAdendas(d.id);
     A.avisarPagamento(d.id, "TRF 9", "AD 2026/1027-1");
     A.validarPagamentosAdenda(d.id);
-    expect(d.adendas![0].recibo).toBeTruthy();
+    expect(d.adendas![0].faturas![0].recibo).toBeTruthy();
     expect(d.obra.ecsAjuste ?? []).toEqual([]); // ainda sem a inicial: não se perde, espera
     pagar(ctx);
     expect(ecInv("EC-1027")).toBeTruthy();
@@ -150,11 +153,13 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.role("comercial");
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
     A.criarAdenda(d.id, [{ sid: "pint", q: 5 }], "O cliente pediu");
+    A.verificarEnviarAdenda(d.id, "AD 2026/1027-1"); A.verificarEnviarAdenda(d.id, "AD 2026/1027-2");
     A.recusarAdenda(d.id, "AD 2026/1027-1", "O preço");
     A.anularAdenda(d.id, "AD 2026/1027-2");
     A.role("financeiro"); A.faturarAdendas(d.id); A.validarPagamentosAdenda(d.id);
     A.role("operacoes"); A.encomendarMateriais(d.id);
-    expect(d.adendas!.every((a) => !a.fatura && !a.recibo)).toBe(true);
+    expect(d.adendas!.every((a) => !a.faturas?.length)).toBe(true);
+    expect(d.adendas!.map((a) => a.estado)).toEqual(["recusada", "anulada"]);
     expect(d.obra.plano!.tasks.some((t) => t.adenda)).toBe(false);
     expect(d.obra.ecsAjuste ?? []).toEqual([]);
     expect(lerInventario().ecs.some((e) => e.id.startsWith("EC-1027-A"))).toBe(false);

@@ -9,11 +9,14 @@ import { cn } from "@/lib/utils";
 import { PAPEIS, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { clausulasContrato } from "./DocsCliente";
+import type { Adenda } from "./adendas";
 
-export function RevisaoContrato({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** 21/10: com `a`, o contrato da adenda (o mesmo editor, as mesmas regras). */
+export function RevisaoContrato({ ctx, d, a }: { ctx: Ctx; d: Negocio; a?: Adenda }) {
   const { S, A, run } = ctx;
-  const o = d.orc!, pedido = o.contratoPedido;
-  const atuais = useMemo(() => clausulasContrato(d, S), [d, S]);
+  const o = a ?? d.orc!, pedido = o.contratoPedido;
+  const atuais = useMemo(() => clausulasContrato(d, S, a), [d, S, a]);
+  const doc = a ? `a adenda ${a.n}` : `o contrato CT 2026/${d.id}`;
   const [texto, setTexto] = useState<Record<string, string>>(() => Object.fromEntries((pedido?.clausulas ?? []).map((x) => [x.c, atuais.find((c) => c.titulo === x.c)?.texto ?? ""])));
   const [mantem, setMantem] = useState<Record<string, boolean>>({});
   const fechar = () => run(() => A.fecharRevisao());
@@ -22,20 +25,20 @@ export function RevisaoContrato({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const revista = (c: string) => mantem[c] || (texto[c] ?? "").trim() !== (atuais.find((x) => x.titulo === c)?.texto ?? "").trim();
   const feitas = pedido.clausulas.filter((x) => revista(x.c)).length, todas = feitas === pedido.clausulas.length;
   const validar = () => run(() => {
-    for (const x of pedido.clausulas) if (!mantem[x.c]) A.reverClausula(d.id, x.c, texto[x.c] ?? "");
-    A.validarContrato(d.id);
+    for (const x of pedido.clausulas) if (!mantem[x.c]) A.reverClausula(d.id, x.c, texto[x.c] ?? "", a?.n);
+    A.validarContrato(d.id, a?.n);
   });
 
   return (
-    <div className="fixed inset-0 z-[85] overflow-y-auto bg-background animate-in fade-in-0 duration-200" role="dialog" aria-modal="true" aria-label={`Rever o contrato CT 2026/${d.id}`}>
+    <div className="fixed inset-0 z-[85] overflow-y-auto bg-background animate-in fade-in-0 duration-200" role="dialog" aria-modal="true" aria-label={`Rever ${doc}`}>
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-4 py-2 backdrop-blur">
-        <p className="flex items-center gap-2 text-sm font-semibold"><Scale className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Jurídico · contrato CT 2026/{d.id}</p>
+        <p className="flex items-center gap-2 text-sm font-semibold"><Scale className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Jurídico · {a ? `adenda ${a.n} ao contrato CT 2026/${d.id}` : `contrato CT 2026/${d.id}`}</p>
         <button type="button" onClick={fechar} aria-label="Fechar" className="grid h-11 w-11 place-items-center rounded-lg hover:bg-muted"><X className="h-5 w-5" /></button>
       </div>
       <div className="mx-auto w-full max-w-3xl space-y-6 px-4 pb-40 pt-6 sm:px-6">
         <header>
           <p className="text-sm text-muted-foreground">{d.nome} · {d.servico}</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Rever o contrato</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight">{a ? `Rever a adenda ${a.n}` : "Rever o contrato"}</h1>
           <p className="mt-1 text-[15px] text-muted-foreground">
             O cliente pediu alterações {pedido.clausulas.length === 1 ? "a uma cláusula" : `a ${pedido.clausulas.length} cláusulas`} ({pedido.q}). Reescreva cada uma (ou mantenha o texto) e valide: a versão {versao} vai depois ao cliente pelo comercial.
           </p>

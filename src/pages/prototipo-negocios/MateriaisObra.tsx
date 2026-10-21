@@ -10,7 +10,7 @@ import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
 import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
-import { assinadas } from "./adendas";
+import { assinadas, primeiraPaga } from "./adendas";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -113,8 +113,8 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           <ul className="mt-2 space-y-1 text-[15px]">
             {L.map(({ t, m, q }) => <li key={t.nome + m.n}>{m.n} · {nfmt(q)} {m.un} <span className="text-muted-foreground">· {t.nome}</span></li>)}
           </ul>
-          {!a.recibo
-            ? <p className="mt-2 text-sm text-muted-foreground">Encomendam-se quando o pagamento da adenda for validado: vão numa encomenda de cliente própria, no Inventário.</p>
+          {!primeiraPaga(a)
+            ? <p className="mt-2 text-sm text-muted-foreground">Encomendam-se quando o pagamento da 1.ª parcela da adenda for validado: vão numa encomenda de cliente própria, no Inventário.</p>
             : <>
               <p className="mt-2 text-sm text-muted-foreground">O pagamento da adenda está validado mas a encomenda não chegou ao Inventário.</p>
               <Button className="mt-3 min-h-11" onClick={go(() => A.emitirEcsAdenda(d.id))}>Emitir a encomenda da adenda</Button>

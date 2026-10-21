@@ -10,13 +10,14 @@ import { useInventario } from "./inventario/loja";
 import { linhasDaObra } from "./encomendasAjuste";
 import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
-import { FASES_OBRA, type FaseObra } from "./fasesObra";
+import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { SeloAssinatura } from "./AssinaturaContrato";
 import { LINHA_DEMOLICAO } from "./entulho";
 import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
-import { assinadas, diasAdenda, totalAdenda, valorContrato, type Adenda } from "./adendas";
+import { adendaComoEnviada, assinadas, diasAdenda, impactoNoPlano, materiaisAdenda, nomeParcela, parcelasAdenda, totaisAdenda, valorContrato, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda } from "./adendas";
+import { materiaisDoServico } from "./tarefasValidador";
 import { porFase, linhaDeMaterial, quantidade, escolhasVisiveis, fornecidosPeloCliente, type Grupo } from "./propostaConteudo";
 import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriais, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
@@ -253,7 +254,60 @@ export function MateriaisEscolhas({ mats, escolhidos, fornecidos, escolhas, nec,
   );
 }
 
-export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
+/** 21/10: a capa da proposta (a do orçamento e a da adenda): a empresa, o número, o título, para quem, a data e a validade, o essencial
+ *  numa linha, a carta (children) e o carimbo de aceite. */
+function Capa({ d, total, numero, tipo, titulo, emitida, validade, essencial, aceite, children }: {
+  d: Negocio; total: number; numero: string; tipo: string; titulo: string; emitida: Date; validade: string; essencial: [string, string][]; aceite?: string | null; children: ReactNode;
+}) {
+  return (
+    <Pagina n={1} total={total} numero={numero} capa>
+      <div className="bg-[#24204a] px-6 pb-12 pt-10 text-white sm:px-12">
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <p className="text-2xl font-semibold tracking-[0.18em]">{EMPRESA.nome.toUpperCase()}</p>
+            <p className="mt-1 text-sm text-white/70">{EMPRESA.sub}</p>
+          </div>
+          <div className="text-right text-sm text-white/80">
+            <p className="text-xs uppercase tracking-[0.2em] text-white/60">Proposta</p>
+            <p className="text-lg font-semibold tabular-nums text-white">{numero}</p>
+          </div>
+        </div>
+        <p className="mt-16 text-sm uppercase tracking-[0.2em] text-white/60">{tipo}</p>
+        <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">{titulo}</h1>
+        <p className="mt-2 text-lg text-white/80">{[d.f.morada || d.local, d.f.localidade].filter(Boolean).join(", ")}</p>
+      </div>
+      <div className="space-y-10 px-6 py-10 sm:px-12">
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Preparada para</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{d.f.nome_fiscal || d.nome}</p>
+            <p className="text-slate-600">{d.f.email || d.tel}{d.f.nif_fat || d.f.nif ? ` · NIF ${d.f.nif_fat || d.f.nif}` : ""}</p>
+          </div>
+          <div className="sm:text-right">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Data</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{longa(emitida)}</p>
+            <p className="text-slate-600">{validade}</p>
+          </div>
+        </div>
+        {/* o essencial numa linha: o que o cliente procura primeiro */}
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-slate-200 sm:grid-cols-4">
+          {essencial.map(([t, v]) => (
+            <div key={t} className="bg-white p-4"><dt className="text-xs uppercase tracking-[0.14em] text-slate-500">{t}</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{v}</dd></div>
+          ))}
+        </dl>
+        {/* a carta */}
+        <div className="max-w-[60ch] space-y-3 text-slate-700">
+          {children}
+        </div>
+        {aceite && <p className="inline-block -rotate-3 rounded-lg border-2 border-emerald-600 px-4 py-1.5 text-sm font-bold uppercase tracking-wider text-emerald-700">Aceite {aceite}</p>}
+      </div>
+    </Pagina>
+  );
+}
+
+/** A proposta (o documento formal, em páginas A4). 21/10: com `a`, a proposta da adenda (o mesmo documento, com o que é dela). */
+export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) {
+  if (a) return <PropostaAdenda S={S} d={d} a={a} />;
   const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0, k = 1 - desconto / 100;
   const numero = `PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`;
   const emitida = dataDe(o.enviada);
@@ -290,51 +344,15 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
   return (
     <div className="folha doc-paginas space-y-8">
       {/* ---------------- 1. a capa */}
-      <Pagina n={1} total={total} numero={numero} capa>
-        <div className="bg-[#24204a] px-6 pb-12 pt-10 text-white sm:px-12">
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <p className="text-2xl font-semibold tracking-[0.18em]">{EMPRESA.nome.toUpperCase()}</p>
-              <p className="mt-1 text-sm text-white/70">{EMPRESA.sub}</p>
-            </div>
-            <div className="text-right text-sm text-white/80">
-              <p className="text-xs uppercase tracking-[0.2em] text-white/60">Proposta</p>
-              <p className="text-lg font-semibold tabular-nums text-white">{numero}</p>
-            </div>
-          </div>
-          <p className="mt-16 text-sm uppercase tracking-[0.2em] text-white/60">Proposta de remodelação</p>
-          <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">{d.servico}</h1>
-          <p className="mt-2 text-lg text-white/80">{[d.f.morada || d.local, d.f.localidade].filter(Boolean).join(", ")}</p>
-        </div>
-        <div className="space-y-10 px-6 py-10 sm:px-12">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Preparada para</p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">{d.f.nome_fiscal || d.nome}</p>
-              <p className="text-slate-600">{d.f.email || d.tel}{d.f.nif_fat || d.f.nif ? ` · NIF ${d.f.nif_fat || d.f.nif}` : ""}</p>
-            </div>
-            <div className="sm:text-right">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Data</p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">{longa(emitida)}</p>
-              <p className="text-slate-600">Válida até {longa(ate)}{o.versoes?.length ? ` · substitui a versão ${o.versoes.length}` : ""}</p>
-            </div>
-          </div>
-          {/* o essencial numa linha: o que o cliente procura primeiro */}
-          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-slate-200 sm:grid-cols-4">
-            {([["Total, com IVA", `${eur(T.total)} €`], ["Prazo", `${prazo} ${prazo === 1 ? "dia útil" : "dias úteis"}`], ["Início previsto", dataCurta(cal[0])], ["Garantia", `${d.f.garantia || "2 anos"}`]] as const).map(([t, v]) => (
-              <div key={t} className="bg-white p-4"><dt className="text-xs uppercase tracking-[0.14em] text-slate-500">{t}</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{v}</dd></div>
-            ))}
-          </dl>
-          {/* a carta */}
-          <div className="max-w-[60ch] space-y-3 text-slate-700">
-            <p>Olá, {d.nome.split(" ")[0]},</p>
-            <p>Obrigado por nos ter recebido{d.visita.slot ? ` (${d.visita.slot.split(" · ")[0]})` : ""}. Esta proposta foi preparada a partir do levantamento feito no local: as medidas, o que nos disse que queria mudar e o que escolheu manter.</p>
-            <p>Nas páginas seguintes está o que vamos fazer, fase a fase, o orçamento detalhado, as datas e as condições. Se quiser mudar alguma coisa, diga-nos: fazemos uma nova versão.</p>
-            <p className="pt-2">Com os melhores cumprimentos,<br /><span className="font-semibold text-slate-900">{comercial}</span>, {EMPRESA.nome}</p>
-          </div>
-          {o.aceite && <p className="inline-block -rotate-3 rounded-lg border-2 border-emerald-600 px-4 py-1.5 text-sm font-bold uppercase tracking-wider text-emerald-700">Aceite {o.aceite}</p>}
-        </div>
-      </Pagina>
+      <Capa d={d} total={total} numero={numero} tipo="Proposta de remodelação" titulo={d.servico} emitida={emitida}
+        validade={`Válida até ${longa(ate)}${o.versoes?.length ? ` · substitui a versão ${o.versoes.length}` : ""}`}
+        essencial={[["Total, com IVA", `${eur(T.total)} €`], ["Prazo", `${prazo} ${prazo === 1 ? "dia útil" : "dias úteis"}`], ["Início previsto", dataCurta(cal[0])], ["Garantia", `${d.f.garantia || "2 anos"}`]]}
+        aceite={o.aceite}>
+        <p>Olá, {d.nome.split(" ")[0]},</p>
+        <p>Obrigado por nos ter recebido{d.visita.slot ? ` (${d.visita.slot.split(" · ")[0]})` : ""}. Esta proposta foi preparada a partir do levantamento feito no local: as medidas, o que nos disse que queria mudar e o que escolheu manter.</p>
+        <p>Nas páginas seguintes está o que vamos fazer, fase a fase, o orçamento detalhado, as datas e as condições. Se quiser mudar alguma coisa, diga-nos: fazemos uma nova versão.</p>
+        <p className="pt-2">Com os melhores cumprimentos,<br /><span className="font-semibold text-slate-900">{comercial}</span>, {EMPRESA.nome}</p>
+      </Capa>
 
       {/* ---------------- 2. o que vamos fazer */}
       <Pagina n={2} total={total} numero={numero}>
@@ -421,17 +439,7 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
         </section>
         <section className="space-y-4">
           <Titulo n={5}>Pagamento</Titulo>
-          <table className="w-full border-collapse text-[14px]">
-            <tbody>
-              {tr.map((t) => (
-                <tr key={t.l} className="border-b border-slate-100">
-                  <td className="py-2 pr-3">{t.l}{t.quando ? <span className="text-slate-500"> · previsto {t.quando}</span> : null}</td>
-                  <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{Math.round(t.p * 100)}%</td>
-                  <td className="py-2 text-right font-medium tabular-nums">{eur(t.v)} €</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TabelaPrestacoes tr={tr} />
           <p className="text-sm text-slate-600">Por transferência, referência Multibanco ou débito direto, à escolha do cliente no portal. Cada prestação tem a sua fatura, enviada para o portal.</p>
         </section>
         <section className="space-y-3">
@@ -446,17 +454,174 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
         </section>
         <section className="space-y-4">
           <Titulo n={7}>Aceitação</Titulo>
-          <div className="grid gap-6 sm:grid-cols-2">
-            {[["Pela " + EMPRESA.nome, comercial], ["O cliente", d.f.nome_fiscal || d.nome]].map(([q, nome]) => (
-              <div key={q} className="pt-10">
-                <div className="border-t border-slate-400 pt-2">
-                  <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{q}</p>
-                  <p className="font-medium text-slate-900">{nome}</p>
-                </div>
-              </div>
-            ))}
+          <Aceitacao d={d} comercial={comercial} aceite={o.aceite} />
+        </section>
+      </Pagina>
+    </div>
+  );
+}
+
+/** As prestações (o momento, a percentagem e o valor com IVA): na proposta e na proposta da adenda. */
+function TabelaPrestacoes({ tr }: { tr: { l: string; p: number; v: number; quando?: string }[] }) {
+  return (
+    <table className="w-full border-collapse text-[14px]">
+      <tbody>
+        {tr.map((t) => (
+          <tr key={t.l} className="border-b border-slate-100">
+            <td className="py-2 pr-3">{t.l}{t.quando ? <span className="text-slate-500"> · previsto {t.quando}</span> : null}</td>
+            <td className="py-2 pr-3 text-right tabular-nums text-slate-500">{Math.round(t.p * 100)}%</td>
+            <td className="py-2 text-right font-medium tabular-nums">{eur(t.v)} €</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+/** As linhas de aceitação (a empresa e o cliente) e como se aceita. */
+function Aceitacao({ d, comercial, aceite }: { d: Negocio; comercial: string; aceite?: string | null }) {
+  return (
+    <>
+      <div className="grid gap-6 sm:grid-cols-2">
+        {[["Pela " + EMPRESA.nome, comercial], ["O cliente", d.f.nome_fiscal || d.nome]].map(([q, nome]) => (
+          <div key={q} className="pt-10">
+            <div className="border-t border-slate-400 pt-2">
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{q}</p>
+              <p className="font-medium text-slate-900">{nome}</p>
+            </div>
           </div>
-          <p className="text-sm text-slate-600">{o.aceite ? `Aceite no portal do cliente a ${o.aceite}.` : "Pode aceitar no portal do cliente, com um toque: fica registado quem, quando e de onde."}</p>
+        ))}
+      </div>
+      <p className="text-sm text-slate-600">{aceite ? `Aceite no portal do cliente a ${aceite}.` : "Pode aceitar no portal do cliente, com um toque: fica registado quem, quando e de onde."}</p>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ a proposta da adenda (21/10) */
+/** A proposta dos trabalhos a mais, com as peças da proposta do orçamento: a capa (total, prazo a mais, início), o que vamos fazer por fase,
+ *  os materiais, o que muda no plano da obra, o orçamento com o IVA por taxa, as parcelas (as do contrato), as condições e a aceitação. */
+function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
+  const a = adendaComoEnviada(a0), T = totaisAdenda(a), k = 1 - (a.desconto || 0) / 100, v = versaoAdenda(a);
+  const numero = `${a.n}${v > 1 ? ` · v${v}` : ""}`;
+  const emitida = dataDe(a.enviada);
+  const dv = Number((d.f.validade || "30 dias").match(/\d+/)?.[0] ?? 30);
+  const ate = new Date(emitida); ate.setDate(ate.getDate() + dv);
+  const dias = diasAdenda(a.linhas), im = impactoNoPlano(d.obra.plano, a);
+  const inicio = im?.novas.length ? rotuloDia(im.plano, Math.min(...im.novas.map((t) => t.dia))) : "a combinar";
+  const fase = (x: LinhaAdenda): FaseObra => fasesPadrao(x.n, x.perfil)[0];
+  const fases = FASES_OBRA.filter((f) => a.linhas.some((x) => fase(x) === f.n));
+  const mats = materiaisAdenda(a, materiaisDoServico);
+  const pc = parcelasAdenda(d, a), comercial = PAPEIS.comercial.nome, total = 3;
+  const V = valorContrato(d, S), antes = a0.estado === "assinada" ? V.total - T.total : V.total;
+  return (
+    <div className="folha doc-paginas space-y-8">
+      <Capa d={d} total={total} numero={numero} tipo="Proposta de trabalhos a mais" titulo={`Adenda ao contrato CT 2026/${d.id}`} emitida={emitida}
+        validade={`Válida até ${longa(ate)}${a.versoes?.length ? ` · substitui a versão ${a.versoes.length}` : ""}`}
+        essencial={[["Total, com IVA", `${eur(T.total)} €`], ["Prazo", `+${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`], ["Início previsto", inicio], ["Garantia", `${d.f.garantia || "2 anos"}`]]}
+        aceite={a.aceite}>
+        <p>Olá, {d.nome.split(" ")[0]},</p>
+        <p>Esta é a proposta dos trabalhos a mais na sua obra ({a.motivo.toLowerCase()}): {a.linhas.map((x) => x.n.toLowerCase()).join(", ")}. O resto do contrato mantém-se.</p>
+        {a.origem && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-slate-800"><b className="font-medium">O que encontrámos{a.origem.onde ? ` (${a.origem.onde.toLowerCase()})` : ""}:</b> {a.origem.texto}</p>}
+        <p>Nas páginas seguintes está o que vamos fazer, os materiais, o que muda no plano da obra, o preço e as condições. Se quiser mudar alguma coisa, diga-nos: fazemos uma nova versão.</p>
+        <p className="pt-2">Com os melhores cumprimentos,<br /><span className="font-semibold text-slate-900">{comercial}</span>, {EMPRESA.nome}</p>
+      </Capa>
+
+      <Pagina n={2} total={total} numero={numero}>
+        <section className="space-y-4">
+          <Titulo n={1}>O que vamos fazer</Titulo>
+          {a.origem?.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="max-h-48 rounded-lg object-cover" />}
+          <ol className="space-y-5">
+            {fases.map((f) => {
+              const Ic = ICONE_FASE[f.n] ?? HardHat, cor = COR_FASE[f.n as FaseObra];
+              return (
+                <li key={f.n} className="break-inside-avoid">
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: `${cor}1f`, color: cor }} aria-hidden="true"><Ic className="h-[18px] w-[18px]" /></span>
+                    <p className="min-w-0 text-[15px] font-semibold leading-snug text-slate-900"><span className="text-slate-500">Fase {f.n} ·</span> {f.nome}</p>
+                  </div>
+                  <ul className="ml-[18px] mt-2 space-y-0.5 border-l border-slate-200 pl-[29px] text-[15px] text-slate-800">
+                    {a.linhas.filter((x) => fase(x) === f.n).map((x) => <li key={x.sid}>{x.n}<span className="text-slate-500"> · {quantidade(x.q, x.un)}</span></li>)}
+                  </ul>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+        {mats.length > 0 && (
+          <section className="space-y-3">
+            <Titulo n={2}>Materiais</Titulo>
+            <ListaMateriais titulo="Para estes trabalhos" itens={mats.map((m, i) => ({ k: m.n + i, nome: m.n, det: `${quantidade(m.q, m.un)}${m.incluido ? " · incluído no serviço" : ""}` }))} />
+            {mats.some((m) => !m.incluido) && <p className="text-sm text-slate-600">Os materiais escolhidos para estes trabalhos têm IVA a 23%; a mão de obra, a 6%.</p>}
+          </section>
+        )}
+        <section className="space-y-3">
+          <Titulo n={3}>O plano da obra</Titulo>
+          {im ? (
+            <>
+              <ul className="divide-y divide-slate-100">
+                {im.novas.map((t) => (
+                  <li key={t.nome} className="flex items-baseline justify-between gap-3 py-2 text-[15px]">
+                    <span>{t.nome.replace(` (adenda ${a.n})`, "")}<span className="block text-sm text-slate-500">Fase {t.fase} · {FASES_OBRA[(t.fase ?? 4) - 1]?.curto}</span></span>
+                    <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-slate-600">{rotuloDia(im.plano, t.dia)}{t.dur > 1 ? ` a ${rotuloDia(im.plano, t.dia + t.dur - 1)}` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-slate-700">{im.fimDepois > im.fimAntes ? <>A obra passa a acabar a <b className="font-semibold">{rotuloDia(im.plano, im.fimDepois - 1)}</b> (antes, {rotuloDia(d.obra.plano!, im.fimAntes - 1)}).</> : "O fim da obra não muda."} Datas previstas, a confirmar pelas Operações.</p>
+            </>
+          ) : <p className="text-slate-700">Mais {dias} {dias === 1 ? "dia útil" : "dias úteis"} de obra. As datas confirmam-se com o plano da obra.</p>}
+        </section>
+      </Pagina>
+
+      <Pagina n={3} total={total} numero={numero}>
+        <section className="space-y-4">
+          <Titulo n={4}>Orçamento</Titulo>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] border-collapse text-[14px]">
+              <thead>
+                <tr className="border-b border-slate-300 text-left text-xs uppercase tracking-[0.12em] text-slate-500">
+                  <th className="py-2 pr-3 font-semibold">Descrição</th><th className="py-2 pr-3 text-right font-semibold">Qtd.</th><th className="py-2 pr-3 text-right font-semibold">Preço un.</th><th className="py-2 text-right font-semibold">Total</th>
+                </tr>
+              </thead>
+              {fases.map((f) => {
+                const L2 = a.linhas.filter((x) => fase(x) === f.n);
+                const linhas = L2.flatMap((x) => [{ k: x.sid, nome: x.n, q: x.q, un: x.un, pu: x.pu * k, iva: "6%" },
+                  ...(x.livre ? x.mats ?? [] : []).map((m, i) => ({ k: x.sid + "m" + i, nome: m.n, q: m.q, un: m.un, pu: (m.preco ?? 0) * k, iva: "23%" }))]);
+                return (
+                  <tbody key={f.n}>
+                    <tr><td colSpan={4} className="pb-1 pt-4 text-[13px] font-semibold text-slate-900"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />Fase {f.n} · {f.curto}</td></tr>
+                    {linhas.map((x) => (
+                      <tr key={x.k} className="border-b border-slate-100">
+                        <td className="py-1.5 pr-3">{x.nome}<span className="text-slate-500"> · IVA {x.iva}</span></td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{nfmt(x.q)} {x.un}</td>
+                        <td className="py-1.5 pr-3 text-right tabular-nums">{eur(x.pu)} €</td>
+                        <td className="py-1.5 text-right tabular-nums">{eur(x.pu * x.q)} €</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                );
+              })}
+            </table>
+          </div>
+          {(a.desconto ?? 0) > 0 && <p className="text-right text-sm text-slate-600">Desconto incluído nos preços: {nfmt(a.desconto!)}%</p>}
+          <QuadroIva T={T} />
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + T.total)} €</b>, com IVA.</p>
+        </section>
+        <section className="space-y-4">
+          <Titulo n={5}>Pagamento</Titulo>
+          <TabelaPrestacoes tr={pc} />
+          <p className="text-sm text-slate-600">Nas mesmas parcelas do contrato. Cada parcela tem a sua fatura, enviada para o portal; paga por transferência, referência Multibanco ou débito direto.</p>
+        </section>
+        <section className="space-y-3">
+          <Titulo n={6}>Condições</Titulo>
+          <ul className="list-disc space-y-1 pl-5 text-slate-700">
+            <li>Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato.</li>
+            <li>Garantia de {d.f.garantia || "2 anos"} sobre a mão de obra, a contar do auto de receção da obra; os materiais têm a garantia do fabricante.</li>
+            <li>Proposta válida até {longa(ate)}. Aceite, segue-se o contrato da adenda, para assinar neste mesmo link.</li>
+            <li>Tudo o resto do contrato CT 2026/{d.id} mantém-se.</li>
+          </ul>
+        </section>
+        <section className="space-y-4">
+          <Titulo n={7}>Aceitação</Titulo>
+          <Aceitacao d={d} comercial={comercial} aceite={a.aceite} />
         </section>
       </Pagina>
     </div>
@@ -467,9 +632,18 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
 /** As cláusulas do contrato, em texto (15/10): o modelo, ou o texto que o Jurídico reescreveu a pedido do cliente.
  *  O "Pagamento" do modelo é uma lista (uma prestação por linha). O editor da revisão (RevisaoContrato.tsx) usa o mesmo texto. */
 export const TITULOS_CLAUSULAS = ["Objeto", "Preço", "Pagamento", "Prazo", "Garantia", "Condições gerais"] as const;
-export function clausulasContrato(d: Negocio, S: Estado): { titulo: string; texto: string; lista?: string[]; revista: boolean }[] {
-  const o = d.orc!, T = totais(d, S), tr = tranches(d, T.total, S), ed = o.clausulas ?? {};
-  const modelo: Record<string, string | string[]> = {
+export function clausulasContrato(d: Negocio, S: Estado, a?: Adenda): { titulo: string; texto: string; lista?: string[]; revista: boolean }[] {
+  const o = d.orc!, T = a ? totaisAdenda(a) : totais(d, S), tr = a ? parcelasAdenda(d, a) : tranches(d, T.total, S), ed = (a ?? o).clausulas ?? {};
+  const da = a ? diasAdenda(a.linhas) : 0, im = a ? impactoNoPlano(d.obra.plano, a) : null;
+  // 21/10: as cláusulas da adenda: as mesmas, com o que é dela (os trabalhos a mais, o preço por taxa, as parcelas do contrato, os dias a mais)
+  const modelo: Record<string, string | string[]> = a ? {
+    Objeto: `Os trabalhos a mais da adenda ${a.n} ao contrato CT 2026/${d.id}, em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")}${a.linhas.some((x) => x.livre && x.mats?.length) ? ", e os materiais indicados na proposta da adenda" : ""}.`,
+    "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €)${T.mat > 0 ? `, e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €)` : ""}. Total com IVA: ${eur(T.total)} €.`,
+    Pagamento: tr.map((t) => `${t.l}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
+    Prazo: `Mais ${da} ${da === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato CT 2026/${d.id}${im && im.fimDepois > im.fimAntes ? `: fim da obra previsto a ${rotuloDia(im.plano, im.fimDepois - 1)}` : ""}.`,
+    Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção da obra. Os materiais têm a garantia do fabricante.`,
+    "Condições gerais": `Mantém-se tudo o resto do contrato CT 2026/${d.id}, incluindo as condições gerais da empresa.`,
+  } : {
     Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
     "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`,
     Pagamento: tr.map((t) => `${t.l}${t.quando ? ` (previsto: ${t.quando})` : ""}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
@@ -484,38 +658,93 @@ export function clausulasContrato(d: Negocio, S: Estado): { titulo: string; text
   });
 }
 
-export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
-  const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1;
-  const n = (k: number, titulo: string, corpo: ReactNode, revista?: boolean) => (
-    <section key={k}><h3 className="font-semibold">Cláusula {k}.ª · {titulo}{revista && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 align-middle text-xs font-medium text-slate-600">revista</span>}</h3><div className="mt-1 whitespace-pre-line text-slate-700">{corpo}</div></section>
+/** Uma cláusula numerada (com o selo "revista" quando o Jurídico a reescreveu). */
+const Clausula = ({ k, titulo, corpo, revista }: { k: number; titulo: string; corpo: ReactNode; revista?: boolean }) => (
+  <section><h3 className="font-semibold">Cláusula {k}.ª · {titulo}{revista && <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 align-middle text-xs font-medium text-slate-600">revista</span>}</h3><div className="mt-1 whitespace-pre-line text-slate-700">{corpo}</div></section>
+);
+/** O texto do estado da assinatura do cliente ("Assinado com Chave Móvel Digital", …). */
+const comoAssinado = (a?: Assinatura | null) => (a ? (a.tipo === "digital" ? "Assinado com Chave Móvel Digital" : a.tipo === "sms" ? "Assinado com código por SMS" : "Assinado no ecrã, no portal") : "Assinado no portal");
+/** As assinaturas (15/10): por cima de cada nome, o desenho do cliente ou o selo digital; a empresa assina digitalmente ao gerar o contrato. */
+function Assinaturas({ linhas, quandoCliente = true }: { linhas: [string, string, Assinatura | null, string][]; quandoCliente?: boolean }) {
+  return (
+    <section className="grid gap-8 pt-6 sm:grid-cols-2" aria-label="Assinaturas">
+      {linhas.map(([q, nome, a, est]) => (
+        <div key={q} className="flex flex-col">
+          <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
+          <div className="flex min-h-[4.5rem] items-end pb-1 pt-2">{a ? <SeloAssinatura a={a} compacto meio={q === "Pela empresa" ? "Certificado qualificado" : undefined} /> : null}</div>
+          <div className="border-t border-slate-300 pt-2">
+            <p className="font-medium">{nome}</p>
+            {est && <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}{a?.q && (quandoCliente || q === "O cliente") ? ` · ${a.q}` : ""}</p>}
+          </div>
+        </div>
+      ))}
+    </section>
   );
+}
+
+/** O contrato. 21/10: com `a`, o contrato da adenda (as mesmas cláusulas e assinaturas, com o que é dela). */
+export function ContratoDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) {
+  if (a) return <ContratoAdenda S={S} d={d} a={a} />;
+  const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1;
   return (
     <Folha titulo={d.f.modelo_contrato || "Contrato de empreitada"} numero={`CT 2026/${d.id}`} data={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "rascunho"} carimbo={o.contrato === "assinado" ? "Assinado" : undefined}>
       <p className="text-slate-700">
         Entre <b>{EMPRESA.nome}</b>, NIF {EMPRESA.nif}, com sede em {EMPRESA.morada}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
       </p>
       {o.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({o.contratoRevisto.por}) a {o.contratoRevisto.q}, a pedido do cliente.</p>}
-      {clausulasContrato(d, S).map((c, i) => n(i + 1, c.titulo, c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto, c.revista))}
+      {clausulasContrato(d, S).map((c, i) => <Clausula key={i + 1} k={i + 1} titulo={c.titulo} corpo={c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto} revista={c.revista} />)}
       <AdendasDoContrato S={S} d={d} />
-      {/* as assinaturas (15/10): por cima de cada nome, o desenho do cliente ou o selo digital; a empresa assina digitalmente ao gerar o contrato */}
-      <section className="grid gap-8 pt-6 sm:grid-cols-2" aria-label="Assinaturas">
-        {([
-          ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
-            o.contrato ? { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: o.assinatura?.q ?? "", id: `MDL-${d.id}` } as Assinatura : null,
-            o.contrato ? "Assinado" : ""],
-          ["O cliente", d.f.nome_fiscal || d.nome, o.contrato === "assinado" ? o.assinatura ?? null : null,
-            o.contrato === "assinado" ? (o.assinatura ? (o.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : o.assinatura.tipo === "sms" ? "Assinado com código por SMS" : "Assinado no ecrã, no portal") : "Assinado no portal") : o.contrato === "enviado" ? "À espera da assinatura" : ""],
-        ] as [string, string, Assinatura | null, string][]).map(([q, nome, a, est]) => (
-          <div key={q} className="flex flex-col">
-            <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
-            <div className="flex min-h-[4.5rem] items-end pb-1 pt-2">{a ? <SeloAssinatura a={a} compacto meio={q === "Pela empresa" ? "Certificado qualificado" : undefined} /> : null}</div>
-            <div className="border-t border-slate-300 pt-2">
-              <p className="font-medium">{nome}</p>
-              {est && <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}{a?.q ? ` · ${a.q}` : ""}</p>}
-            </div>
-          </div>
+      <Assinaturas linhas={[
+        ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
+          o.contrato ? { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: o.assinatura?.q ?? "", id: `MDL-${d.id}` } as Assinatura : null,
+          o.contrato ? "Assinado" : ""],
+        ["O cliente", d.f.nome_fiscal || d.nome, o.contrato === "assinado" ? o.assinatura ?? null : null,
+          o.contrato === "assinado" ? comoAssinado(o.assinatura) : o.contrato === "enviado" ? "À espera da assinatura" : ""],
+      ]} />
+    </Folha>
+  );
+}
+
+/** 21/10: o contrato da adenda (a "adenda ao contrato"): segue a proposta da adenda aceite; as cláusulas (com a revisão do Jurídico, se o
+ *  cliente pediu), o que nasceu de um imprevisto, o valor do contrato antes e depois, e as assinaturas (Chave Móvel Digital ou SMS). */
+function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
+  const T = totaisAdenda(a), V = valorContrato(d, S), antes = a.estado === "assinada" ? V.total - T.total : V.total;
+  const versao = (a.contratoVersoes?.length ?? 0) + 1, v = versaoAdenda(a), gerado = a.contrato === "enviado" || a.estado === "assinada";
+  const quando = a.estado === "assinada" ? "assinada" : a.estado === "recusada" ? "não aceite" : a.estado === "anulada" ? "retirada" : a.contrato === "enviado" ? "à espera da assinatura" : "rascunho";
+  return (
+    <Folha titulo="Adenda ao contrato" numero={a.n} data={quando} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
+      <Cliente d={d} />
+      <p className="text-slate-700">
+        Entre <b>{EMPRESA.nome}</b>, NIF {EMPRESA.nif}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrada esta adenda ao contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}, que segue a proposta da adenda {a.n}{v > 1 ? ` (versão ${v})` : ""}{a.aceite ? `, aceite a ${a.aceite}` : ""}. O resto do contrato mantém-se.
+      </p>
+      {/* 21/10: nasceu de um imprevisto na obra: o que a equipa encontrou, onde e a fotografia */}
+      {a.origem && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="font-medium">O que encontrámos{a.origem.onde ? ` (${a.origem.onde.toLowerCase()})` : ""}</p>
+          <p className="text-slate-700">{a.origem.texto}</p>
+          {a.origem.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="mt-2 max-h-48 rounded-lg object-cover" />}
+        </section>
+      )}
+      {a.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({a.contratoRevisto.por}) a {a.contratoRevisto.q}, a pedido do cliente.</p>}
+      <ul className="divide-y divide-slate-200 border-y border-slate-200">
+        {a.linhas.map((x) => (
+          <li key={x.sid} className="flex items-baseline justify-between gap-4 py-2.5">
+            <span>{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} × {eur(x.pu * (1 - (a.desconto || 0) / 100))} € · IVA 6%{x.livre && x.mats?.length ? ` · materiais: ${x.mats.map((m) => `${m.n} × ${nfmt(m.q)}`).join(", ")} (IVA 23%)` : ""}</span></span>
+            <span className="tabular-nums">{eur(x.q * x.pu * (1 - (a.desconto || 0) / 100))} €</span>
+          </li>
         ))}
-      </section>
+      </ul>
+      {clausulasContrato(d, S, a).map((c, i) => <Clausula key={i + 1} k={i + 1} titulo={c.titulo} corpo={c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto} revista={c.revista} />)}
+      <QuadroIva T={T} />
+      {(a.estado === "aceite" || a.estado === "assinada") && (
+        <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + T.total)} €</b>, com IVA.</p>
+      )}
+      <Assinaturas quandoCliente={false} linhas={[
+        ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
+          gerado ? { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: a.criada, id: `MDL-${a.n.replace(/\D+/g, "")}` } as Assinatura : null, gerado ? "Assinado" : ""],
+        ["O cliente", d.f.nome_fiscal || d.nome, a.estado === "assinada" ? a.assinatura ?? null : null,
+          a.estado === "assinada" ? comoAssinado(a.assinatura) : a.contrato === "enviado" ? "À espera da assinatura" : ""],
+      ]} />
     </Folha>
   );
 }
@@ -531,12 +760,12 @@ function AdendasDoContrato({ S, d }: { S: Estado; d: Negocio }) {
       <p className="text-sm text-slate-600">Fazem parte deste contrato. O resto mantém-se.</p>
       <ul className="mt-3 divide-y divide-slate-200">
         {as.map((a) => {
-          const base = totalAdenda(a.linhas), dias = diasAdenda(a.linhas);
+          const total = totaisAdenda(a).total, dias = diasAdenda(a.linhas);
           return (
             <li key={a.n} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{a.n} · {a.linhas.map((x) => x.n).join(", ")}</p>
-                <p className="text-sm text-slate-600">+{eur(base * (1 + IVA_MO))} € com IVA · +{dias} {dias === 1 ? "dia útil" : "dias úteis"} · {a.motivo.toLowerCase()}</p>
+                <p className="text-sm text-slate-600">+{eur(total)} € com IVA · +{dias} {dias === 1 ? "dia útil" : "dias úteis"} · {a.motivo.toLowerCase()}</p>
                 <p className="text-sm text-emerald-700">Assinada{a.assinatura ? ` · ${a.assinatura.q}` : a.assinada ? ` · ${a.assinada}` : ""}</p>
               </div>
               {a.assinatura && <SeloAssinatura a={a.assinatura} compacto />}
@@ -555,79 +784,31 @@ function AdendasDoContrato({ S, d }: { S: Estado; d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ adenda (14/10) */
-/** A adenda ao contrato: os trabalhos a mais, o preço (IVA a 6%), os dias a mais e as assinaturas. */
-export function AdendaDoc({ S, d, a }: { S?: Estado; d: Negocio; a: Adenda }) {
-  const base = totalAdenda(a.linhas), dias = diasAdenda(a.linhas);
-  // 21/10: o valor do contrato antes e depois desta adenda (as assinadas antes dela já contam)
-  const V = S ? valorContrato(d, S) : null, antes = V ? (a.estado === "assinada" ? V.total - base * (1 + IVA_MO) : V.total) : 0;
-  const quando = { enviada: "à espera da assinatura", assinada: "assinada", recusada: "não aceite", anulada: "retirada" }[a.estado];
-  return (
-    <Folha titulo="Adenda ao contrato" numero={a.n} data={quando} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
-      <Cliente d={d} />
-      <p className="text-slate-700">Trabalhos a mais na obra do contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}. O resto do contrato mantém-se.</p>
-      {/* 21/10: nasceu de um imprevisto na obra: o que a equipa encontrou, onde e a fotografia */}
-      {a.origem && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="font-medium">O que encontrámos{a.origem.onde ? ` (${a.origem.onde.toLowerCase()})` : ""}</p>
-          <p className="text-slate-700">{a.origem.texto}</p>
-          {a.origem.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} className="mt-2 max-h-48 rounded-lg object-cover" />}
-        </section>
-      )}
-      <ul className="divide-y divide-slate-200 border-y border-slate-200">
-        {a.linhas.map((x) => (
-          <li key={x.sid} className="flex items-baseline justify-between gap-4 py-2.5">
-            <span>{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} × {eur(x.pu)} € · IVA 6%</span></span>
-            <span className="tabular-nums">{eur(x.q * x.pu)} €</span>
-          </li>
-        ))}
-      </ul>
-      <div className="space-y-1">
-        <div className="flex justify-between text-slate-600"><span>Sem IVA</span><span className="tabular-nums">{eur(base)} €</span></div>
-        <div className="flex justify-between text-slate-600"><span>IVA (6%)</span><span className="tabular-nums">{eur(base * IVA_MO)} €</span></div>
-        <div className="flex justify-between text-lg font-semibold"><span>Total</span><span className="tabular-nums">{eur(base * (1 + IVA_MO))} €</span></div>
-      </div>
-      {V && (a.estado === "enviada" || a.estado === "assinada") && (
-        <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + base * (1 + IVA_MO))} €</b>, com IVA.</p>
-      )}
-      <p className="text-slate-700">Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}. Pagamento: fatura própria, depois da assinatura, a pagar no portal{a.fatura ? ` (${a.fatura.n}${a.recibo ? `, paga · ${a.recibo.n}` : ""})` : ""}.</p>
-      {/* as assinaturas (15/10), como no contrato: o selo digital da empresa e a do cliente (desenho ou Chave Móvel Digital) */}
-      <section className="grid gap-8 pt-4 sm:grid-cols-2" aria-label="Assinaturas">
-        {([
-          ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
-            { tipo: "digital", nome: d.f.representante ? `${d.f.representante} (${EMPRESA.nome})` : EMPRESA.nome, q: a.criada, id: `MDL-${a.n.replace(/\D+/g, "")}` } as Assinatura, "Assinado"],
-          ["O cliente", d.f.nome_fiscal || d.nome, a.assinatura ?? null,
-            a.estado === "assinada" ? (a.assinatura ? (a.assinatura.tipo === "digital" ? "Assinado com Chave Móvel Digital" : a.assinatura.tipo === "sms" ? "Assinado com código por SMS" : "Assinado no ecrã, no portal") : "Assinado no portal") : "À espera da assinatura"],
-        ] as [string, string, Assinatura | null, string][]).map(([q, nome, as, est]) => (
-          <div key={q} className="flex flex-col">
-            <p className="text-xs uppercase tracking-wider text-slate-500">{q}</p>
-            <div className="flex min-h-[4.5rem] items-end pb-1 pt-2">{as ? <SeloAssinatura a={as} compacto meio={q === "Pela empresa" ? "Certificado qualificado" : undefined} /> : null}</div>
-            <div className="border-t border-slate-300 pt-2">
-              <p className="font-medium">{nome}</p>
-              <p className={cn("text-sm", est.startsWith("Assinado") ? "text-emerald-700" : "text-slate-500")}>{est}{as?.q && q === "O cliente" ? ` · ${as.q}` : ""}</p>
-            </div>
-          </div>
-        ))}
-      </section>
-    </Folha>
-  );
+/** A adenda ao contrato (21/10: o contrato da adenda, ContratoDoc com `a`). */
+export function AdendaDoc({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
+  return <ContratoDoc S={S} d={d} a={a} />;
 }
 
 /* ------------------------------------------------------------------ fatura */
-export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
-  const T = totais(d, S), tr = tranches(d, T.total), t0 = tr[0], ft = d.fin.fatura;
+/** A fatura (a da 1.ª tranche do contrato). 21/10: com `a` e `ft`, a fatura de uma parcela da adenda (o IVA por taxa, a parte da parcela). */
+export function FaturaDoc({ S, d, a, ft: fa }: { S: Estado; d: Negocio; a?: Adenda; ft?: FaturaAdenda }) {
+  const ad = !!(a && fa);
+  const T = a && fa ? totaisAdenda(a) : totais(d, S), p = fa && a ? fa.p : tranches(d, T.total)[0].p, ft = a && fa ? fa : d.fin.fatura, recibo = a && fa ? fa.recibo : d.fin.recibo;
+  const objeto = a && fa ? `trabalhos a mais, conforme a adenda ${a.n} ao contrato CT 2026/${d.id}` : `${d.servico}, conforme contrato CT 2026/${d.id}`;
+  const parcela = a && fa ? `${nomeParcela(fa.i)} (${fa.l.toLowerCase()})` : d.f.tranche || "1.ª tranche";
   return (
-    <Folha titulo="Fatura" numero={ft ? ft.n : "por emitir"} data={ft ? `emitida ${ft.q}` : "rascunho"} carimbo={d.fin.recibo ? `Paga · ${d.fin.recibo.n}` : undefined}>
+    <Folha titulo="Fatura" numero={ft ? ft.n : "por emitir"} data={ft ? `emitida ${ft.q}` : "rascunho"} carimbo={recibo ? `Paga · ${recibo.n}` : undefined}>
       <Cliente d={d} />
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
-        {linhasIva(T, t0.p).map((x) => (
+        {linhasIva(T, p).map((x) => (
           <li key={x.l} className="flex items-baseline justify-between gap-4 py-2.5">
-            <span>{x.l} · {d.servico}, conforme contrato CT 2026/{d.id}<span className="block text-sm text-slate-500">{d.f.tranche || "1.ª tranche"}: {Math.round(t0.p * 100)}% · IVA {Math.round(x.taxa * 100)}%</span></span>
+            <span>{x.l} · {objeto}<span className="block text-sm text-slate-500">{parcela}: {Math.round(p * 100)}% · IVA {Math.round(x.taxa * 100)}%</span></span>
             <span className="tabular-nums">{eur(x.base)} €</span>
           </li>
         ))}
       </ul>
-      <QuadroIva T={T} parte={t0.p} rotulo="A pagar" />
-      <p className="text-sm text-slate-600">Vencimento: {d.f.vencimento || "15 dias"} · {d.f.metodo || "Transferência"} · série {d.f.serie || "FT 2026"}</p>
+      <QuadroIva T={T} parte={p} rotulo="A pagar" />
+      <p className="text-sm text-slate-600">Vencimento: {ad ? "15 dias" : d.f.vencimento || "15 dias"} · {(ad ? fa?.pag?.metodo : d.f.metodo) || "Transferência"} · série {d.f.serie || "FT 2026"}</p>
     </Folha>
   );
 }

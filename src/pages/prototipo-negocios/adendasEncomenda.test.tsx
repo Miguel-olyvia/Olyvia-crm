@@ -16,7 +16,8 @@ import { CHAVE_VERSAO } from "./versaoPrototipo";
 import { Montar } from "./v2/testeV2";
 import { faltaParaArrancar } from "./preparacaoObra";
 import { receberTudo } from "./testeObra";
-import { totalComIva } from "./adendas";
+import { totaisAdenda } from "./adendas";
+import { adendaAssinada } from "./testeAdenda";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 beforeEach(() => { esquecerInventario(); });
@@ -32,7 +33,7 @@ function preparar() {
   cleanup();
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
   A.role("operacoes"); A.aprovarPlano(d.id);
-  A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); A.simularAdenda(d.id, N);
+  A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); adendaAssinada(A, d.id, N);
   return { S, A, d };
 }
 const caminho = (S: Estado, d: Negocio) => render(<Montar S={S}>{(ctx) => <CaminhoObra {...ctx} d={d} />}</Montar>);
@@ -47,13 +48,13 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     caminho(S, d);
     // (o mesmo texto aparece na bolinha, no trilho Materiais, e na lista para arrancar, em baixo)
     const mat = screen.getAllByText("Encomenda da adenda AD 2026/1027-1")[0].closest("li")!;
-    expect(mat.textContent).toMatch(/Emite-se quando o pagamento da adenda for validado\./);
+    expect(mat.textContent).toMatch(/Emite-se quando o pagamento da 1\.ª parcela da adenda for validado\./);
     expect(mat.textContent).toMatch(/\(ainda não\)/);
     expect(screen.getByText(/^Tarefas da adenda AD 2026\/1027-1 juntas ao plano · \+\d+ dias?$/)).toBeTruthy();
     // o plano reaberto pela adenda: aprovar de novo
     expect(screen.getByRole("button", { name: "Aprovar o plano" })).toBeTruthy();
     // para arrancar: a adenda (fatura e pagamento) e, na lista, a encomenda dela por fazer
-    expect(screen.getByText(/Para arrancar, falta .*faturar a adenda AD 2026\/1027-1 e receber o pagamento/)).toBeTruthy();
+    expect(screen.getByText(/Para arrancar, falta .*faturar a 1\.ª parcela da adenda AD 2026\/1027-1 e receber o pagamento/)).toBeTruthy();
     expect(within(condicoes()).getByText("Encomenda da adenda AD 2026/1027-1").closest("li")!.textContent).toMatch(/por fazer/);
   });
 
@@ -62,7 +63,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     A.role("operacoes"); A.aprovarPlano(d.id);
     expect(receberTudo("CT 2026/1027")).toBe("");
     // com tudo o resto pronto, só a adenda segura o arranque
-    expect(faltaParaArrancar(d)).toEqual([`faturar a adenda ${N} e receber o pagamento`]);
+    expect(faltaParaArrancar(d)).toEqual([`faturar a 1.ª parcela da adenda ${N} e receber o pagamento`]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("aprovado");
     // o Hoje do Financeiro: emitir a fatura da adenda
@@ -72,21 +73,22 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     let bloco = screen.getByTestId(`fin-adenda-${N}`);
-    expect(bloco.textContent).toContain(`${eur(totalComIva(d.adendas![0].linhas))} € com IVA`);
-    expect(bloco.textContent).toMatch(/Emite-se quando o pagamento da adenda for validado\./);
+    expect(bloco.textContent).toContain(`${eur(totaisAdenda(d.adendas![0]).total)} € com IVA`);
+    expect(bloco.textContent).toMatch(/Emite-se quando o pagamento da 1\.ª parcela da adenda for validado\./);
     fireEvent.click(within(bloco).getByRole("button", { name: "Emitir a fatura" }));
-    const a = d.adendas![0];
-    expect(a.fatura?.n).toMatch(/^FT 2026\//);
+    const a = d.adendas![0], ft = () => a.faturas![0];
+    // 21/10 (decisão C): a 1.ª parcela (50%, como no contrato)
+    expect(ft()).toMatchObject({ i: 0, p: 0.5, n: expect.stringMatching(/^FT 2026\//) });
     expect(within(bloco).queryByRole("button", { name: "Validar o pagamento" })).toBeNull(); // ainda sem aviso do cliente
     cleanup();
 
     // o cliente paga no portal (o cartão da fatura da adenda)
     render(<Montar S={S}>{(ctx) => <PortalCliente ctx={ctx} d={d} fechar={() => {}} />}</Montar>);
-    const cartao = screen.getByText(`Pagar a fatura ${a.fatura!.n}`).parentElement!;
+    const cartao = screen.getByText(`Pagar a fatura ${ft().n}`).parentElement!;
     expect(cartao.textContent).toMatch(/Adenda AD 2026\/1027-1/);
     fireEvent.click(within(cartao).getByRole("radio", { name: "Transferência" }));
     fireEvent.click(within(cartao).getByRole("button", { name: "Já paguei" }));
-    expect(a.pag?.comprovativo).toBeTruthy();
+    expect(ft().pag?.comprovativo).toBeTruthy();
     expect(lerInventario().ecs.some((e) => e.id === "EC-1027-A1")).toBe(false); // avisar não chega: falta validar
     cleanup();
 
@@ -95,7 +97,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     bloco = screen.getByTestId(`fin-adenda-${N}`);
     fireEvent.click(within(bloco).getByRole("button", { name: "Validar o pagamento" }));
-    expect(a.recibo?.n).toMatch(/^RC 2026\//);
+    expect(ft().recibo?.n).toMatch(/^RC 2026\//);
     expect(bloco.textContent).toMatch(/Encomenda EC-1027-A1 no Inventário/);
     const ec = lerInventario().ecs.find((e) => e.id === "EC-1027-A1")!;
     expect(ec.deleted).toBeFalsy();
@@ -132,7 +134,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     S.role = "operacoes";
     render(<Montar S={S}>{(ctx) => <MateriaisObra {...ctx} d={d} />}</Montar>);
     const sec = screen.getByRole("region", { name: `Materiais da adenda ${N}` });
-    expect(sec.textContent).toMatch(/Encomendam-se quando o pagamento da adenda for validado/);
+    expect(sec.textContent).toMatch(/Encomendam-se quando o pagamento da 1.ª parcela da adenda for validado/);
     expect(screen.queryByRole("button", { name: "Encomendar os materiais novos" })).toBeNull();
   });
 
@@ -149,6 +151,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
     cleanup();
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
+    A.verificarEnviarAdenda(d.id, N);
     A.recusarAdenda(d.id, N, "O preço");
     caminho(S, d);
     expect(screen.queryByText(/da adenda AD 2026\/1027-1/)).toBeNull();
@@ -168,10 +171,10 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
     fireEvent.change(within(bloco).getByLabelText(`Número da fatura da adenda ${N}`), { target: { value: "FT 2026/777" } });
     fireEvent.click(within(bloco).getByRole("button", { name: "Registar a fatura" }));
-    expect(d.adendas![0].fatura?.n).toBe("FT 2026/777");
+    expect(d.adendas![0].faturas![0].n).toBe("FT 2026/777");
     expect(bloco.textContent).toMatch(/Fatura FT 2026\/777 registada/);
     // o Hoje da V2 diz para registar, sem o botão que emitiria
-    d.adendas![0].fatura = undefined;
+    d.adendas![0].faturas = [];
     expect(minhas(S, "financeiro").find((x) => x.d === d && x.p.t === "Registar a fatura da adenda")?.p.act).toBeUndefined();
   });
 });

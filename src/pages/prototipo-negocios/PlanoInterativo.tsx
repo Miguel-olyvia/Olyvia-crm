@@ -18,6 +18,7 @@ import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
 import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDaTarefa, materiaisDoServico, podeTirar, tempoDoServico, ultimoAviso } from "./tarefasValidador";
 import { ecDaAdenda, porEncomendar } from "./encomendasAjuste";
+import { primeiraPaga } from "./adendas";
 
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 /** As unidades de área e de comprimento: começam em 5 e andam de 5 em 5. */
@@ -212,14 +213,14 @@ export function ExtrasTarefa({ ctx, d, ti, fase = true, fechar }: { ctx: Ctx; d:
         {(() => {
           const falta = porEncomendar(p).filter((x) => x.t === t);
           // 21/10 (decisão B): numa tarefa de adenda, os materiais esperam pelo pagamento da adenda
-          const retida = !!t.adenda && !ecDaAdenda(d, t.adenda) && !d.adendas?.find((a) => a.n === t.adenda)?.recibo;
+          const retida = !!t.adenda && !ecDaAdenda(d, t.adenda) && !(() => { const a = d.adendas?.find((x) => x.n === t.adenda); return a && primeiraPaga(a); })();
           return <>
             {t.ecs?.length ? <p className="mt-2 text-sm text-muted-foreground">Encomendado em {t.ecs.join(", ")}</p> : null}
             {falta.length > 0 && (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warning/10 px-3 py-2">
                 <span className="text-sm">Por encomendar: {falta.map((x) => `${x.m.n} (${nfmt(x.q)} ${x.m.un})`).join(", ")}</span>
                 {retida
-                  ? <span className="text-sm text-muted-foreground">encomenda-se quando o pagamento da adenda {t.adenda} for validado</span>
+                  ? <span className="text-sm text-muted-foreground">encomenda-se quando o pagamento da 1.ª parcela da adenda {t.adenda} for validado</span>
                   : d.obra.ec?.ref
                   ? <Button size="sm" className="min-h-10" onClick={() => run(() => A.encomendarMateriais(d.id))}>Encomendar</Button>
                   : <span className="text-sm text-muted-foreground">encomenda-se a seguir ao pagamento</span>}

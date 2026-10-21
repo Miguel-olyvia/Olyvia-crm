@@ -7,6 +7,8 @@ import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { paradasPor, tarefasAfetaveis } from "./imprevistos";
 import { receberTudo } from "./testeObra";
 import { fimDe } from "./ajustesPlano";
+import { adendaAssinada } from "./testeAdenda";
+import { totaisAdenda } from "./adendas";
 
 const foto = "data:image/svg+xml;utf8,x";
 const obra1022 = () => {
@@ -53,17 +55,20 @@ describe("imprevistos a meio da obra", () => {
     expect(d.obra.alteracoes![0].avisoCliente).toMatch(/Atrasa alguns trabalhos\. A obra passa a acabar/);
   });
 
-  it("o gestor faz a proposta (serviço + linha livre): adenda com origem, no portal; o cliente recusa e o gestor decide seguir", () => {
+  it("o gestor faz a proposta (serviço + linha livre): adenda com origem, verificada e no portal; o cliente recusa e o gestor decide seguir", () => {
     const { S, A, d, p } = obra1022();
     const ti = tarefasAfetaveis(p).find((i) => p.tasks[i].dia >= p.dia)!;
     A.role("tecnico");
     const id = A.registarImprevisto(d.id, { texto: "Cano podre", onde: "", foto, grav: "impede", tarefas: [ti] })!;
     A.role("operacoes");
-    const n = A.proporImprevisto(d.id, id, [{ sid: "canal", q: 1 }], [{ n: "Trocar o troço de esgoto", h: 6, preco: 180, perfil: "Canalização", mats: [{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }] }])!;
+    const n = A.proporImprevisto(d.id, id, [{ sid: "canal", q: 1 }], [{ n: "Trocar o troço de esgoto", h: 6, preco: 300, perfil: "Canalização", mats: [{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }] }])!;
     const a = d.adendas!.find((x) => x.n === n)!;
     expect(a).toMatchObject({ estado: "enviada", motivo: "Imprevisto na obra", origem: { imprevisto: id, texto: "Cano podre", foto } });
-    expect(a.linhas.at(-1)).toMatchObject({ livre: true, n: "Trocar o troço de esgoto", q: 1, pu: 180, h: 6 });
-    expect(S.svc[a.linhas.at(-1)!.sid]).toMatchObject({ n: "Trocar o troço de esgoto", h: 6, preco: 180 });
+    expect(a.linhas.at(-1)).toMatchObject({ livre: true, n: "Trocar o troço de esgoto", q: 1, pu: 300, h: 6 });
+    expect(S.svc[a.linhas.at(-1)!.sid]).toMatchObject({ n: "Trocar o troço de esgoto", h: 6, preco: 300 });
+    // 21/10 (decisão D): verificada (margens) antes de ir ao cliente; o IVA dos materiais da linha livre a 23%
+    expect(a.verif).toBe(true);
+    expect(totaisAdenda(a).ivaMat).toBeCloseTo(18 * 0.23, 2);
     expect(d.obra.imprevistos![0]).toMatchObject({ estado: "proposta", adenda: n });
     A.recusarAdenda(d.id, n, "O preço");
     expect(d.obra.imprevistos![0].estado).toBe("recusado");
@@ -81,8 +86,9 @@ describe("imprevistos a meio da obra", () => {
     A.role("tecnico");
     const id = A.registarImprevisto(d.id, { texto: "Cano podre", onde: "Cozinha", grav: "impede", tarefas: [ti] })!;
     A.role("operacoes");
-    const n = A.proporImprevisto(d.id, id, [], [{ n: "Trocar o cano", h: 8, preco: 240, perfil: "Canalização", mats: [{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }] }])!;
-    A.simularAdenda(d.id, n);
+    const n = A.proporImprevisto(d.id, id, [], [{ n: "Trocar o cano", h: 8, preco: 400, perfil: "Canalização", mats: [{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }] }])!;
+    expect(d.adendas!.find((x) => x.n === n)!.estado).toBe("enviada");
+    adendaAssinada(A, d.id, n);
     const a = d.adendas!.find((x) => x.n === n)!;
     expect(a.estado).toBe("assinada");
     expect(d.obra.imprevistos![0].estado).toBe("aprovado");
@@ -96,15 +102,15 @@ describe("imprevistos a meio da obra", () => {
     // o Financeiro: a fatura própria da adenda, no Hoje dele
     expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "faturarAdendas")).toBe(true);
     A.role("financeiro"); A.faturarAdendas(d.id);
-    expect(a.fatura?.n).toMatch(/^FT 2026\/\d+$/);
+    expect(a.faturas![0].n).toMatch(/^FT 2026\/\d+$/);
     // o cliente paga no portal por débito direto; o Financeiro valida e sai o recibo
     A.escolherMetodo(d.id, "Débito direto", n);
     A.autorizarDebito(d.id, "PT50 ···· 0154", "Tiago Almeida", n);
-    expect(a.pag).toMatchObject({ metodo: "Débito direto", debito_iban: "PT50 ···· 0154" });
+    expect(a.faturas![0].pag).toMatchObject({ metodo: "Débito direto", debito_iban: "PT50 ···· 0154" });
     expect(d.f.metodo).not.toBe("Débito direto"); // a fatura do contrato fica como estava
     expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "validarPagamentosAdenda")).toBe(true);
     A.validarPagamentosAdenda(d.id);
-    expect(a.recibo?.n).toMatch(/^RC 2026\/\d+$/);
+    expect(a.faturas![0].recibo?.n).toMatch(/^RC 2026\/\d+$/);
     // com o pagamento da adenda validado, a encomenda dela nasce no Inventário, ligada à adenda
     expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(true);
     expect(d.obra.ecsAjuste!.find((x) => x.adenda === n)?.n).toBe("EC-1027-A1");

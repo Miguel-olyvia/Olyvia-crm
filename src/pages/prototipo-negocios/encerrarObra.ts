@@ -30,7 +30,8 @@ export function pontosEncerrar(d: Negocio, S?: Pick<Estado, "campos"> | null, db
   const msgs = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref) : null;
   const mats = materiaisPorFase(d, inv).flatMap((g) => g.itens).filter((m) => MAT_POR_CHEGAR.has(m.estado));
-  const adendas = (d.adendas ?? []).filter((a) => a.estado === "enviada");
+  // 21/10: por responder = ainda antes da assinatura (por enviar, proposta no portal, ou aceite com o contrato por assinar)
+  const adendas = (d.adendas ?? []).filter((a) => a.estado === "rascunho" || a.estado === "enviada" || a.estado === "aceite");
   const seg = seguranca(d).filter((x) => !x.ok);
   const fecho = emFalta([S ? efetivo(S.campos, OBRA[1]) : OBRA[1]], d.f);
   const nomes = (L: { nome: string }[]) => L.slice(0, 3).map((t) => t.nome).join(", ") + (L.length > 3 ? "…" : "");

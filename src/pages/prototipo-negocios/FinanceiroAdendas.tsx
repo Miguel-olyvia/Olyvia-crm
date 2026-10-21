@@ -1,13 +1,15 @@
-// As adendas no Financeiro do negócio (21/10/2026): cada adenda assinada tem a sua fatura, o seu pagamento e, com ele validado, a
-// encomenda dos materiais dela no Inventário (decisão B, como no contrato: nada se encomenda antes do pagamento).
-// As ações são as do motor (faturarAdendas, validarPagamentosAdenda; na V2, registarFaturaAdenda): aqui só se desenha o caminho.
+// As adendas no Financeiro do negócio (21/10/2026): cada adenda assinada fatura-se e paga-se nas mesmas parcelas do contrato
+// (decisão C: uma fatura por parcela, por omissão 50% na adjudicação + 50% no fim); com a 1.ª parcela paga, os materiais dela vão
+// numa encomenda própria para o Inventário (decisão B, como no contrato: nada se encomenda antes do pagamento).
+// As ações são as do motor (faturarAdendas / faturarParcelaAdenda, validarPagamentosAdenda; na V2, registarFaturaAdenda): aqui só se
+// desenha o caminho, um passo por parcela (a fatura e o pagamento) e a encomenda.
 import { useState, type ReactNode } from "react";
 import { Check, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { assinadas, totalAdenda, totalComIva, type Adenda } from "./adendas";
+import { assinadas, nomeParcela, parcelasAdenda, primeiraPaga, proximaParcela, totaisAdenda, type Adenda, type ParcelaAdenda } from "./adendas";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { EC_ADENDA_NO_PAGAMENTO } from "./preparacaoObra";
 
@@ -27,14 +29,14 @@ function Passo({ feito, titulo, texto, children }: { feito: boolean; titulo: str
   );
 }
 
-/** V2: o número da fatura emitida no programa certificado, registado na Olyvia. */
-function RegistarFatura({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
+/** V2: o número da fatura emitida no programa certificado, registado na Olyvia (a da parcela seguinte). */
+function RegistarFatura({ ctx, d, a, x }: { ctx: Ctx; d: Negocio; a: Adenda; x: ParcelaAdenda }) {
   const [num, setNum] = useState("");
-  const id = `ft-ad-${a.n.replace(/\W/g, "")}`;
+  const id = `ft-ad-${a.n.replace(/\W/g, "")}-${x.i}`;
   return (
     <div className="mt-2 flex flex-wrap items-end gap-2">
       <label htmlFor={id} className="text-sm">
-        <span className="block text-muted-foreground">Número da fatura da adenda {a.n}</span>
+        <span className="block text-muted-foreground">Número da fatura da adenda {a.n}{x.i > 0 ? ` (${nomeParcela(x.i)})` : ""}</span>
         <input id={id} value={num} onChange={(e) => setNum(e.target.value)} placeholder="FT 2026/…" className="mt-1 h-11 w-44 rounded-lg border border-input bg-card px-3 text-[15px]" />
       </label>
       <Button className="min-h-11" variant="outline" disabled={!num.trim()} onClick={() => ctx.run(() => { ctx.A.registarFaturaAdenda(d.id, a.n, num); })}>Registar a fatura</Button>
@@ -51,26 +53,33 @@ export function AdendasNoFinanceiro({ ctx, d, v2 = false }: { ctx: Ctx; d: Negoc
     <section aria-labelledby={`fin-ad-${d.id}`} className="space-y-6">
       <div>
         <h3 id={`fin-ad-${d.id}`} className="text-base font-semibold">Adendas ao contrato</h3>
-        <p className="text-[15px] text-muted-foreground">Cada adenda assinada fatura-se e paga-se à parte. Com o pagamento validado, os materiais dela vão numa encomenda própria para o Inventário.</p>
+        <p className="text-[15px] text-muted-foreground">Cada adenda assinada fatura-se e paga-se à parte, nas mesmas parcelas do contrato (uma fatura por parcela). Com a 1.ª parcela paga, os materiais dela vão numa encomenda própria para o Inventário.</p>
       </div>
       {L.map((a) => {
-        const ea = ecDaAdenda(d, a.n), pend = porEncomendarDe(d, a.n).length;
+        const ea = ecDaAdenda(d, a.n), pend = porEncomendarDe(d, a.n).length, T = totaisAdenda(a), P = parcelasAdenda(d, a), prox = proximaParcela(d, a);
         return (
           <div key={a.n} className="rounded-2xl border border-border bg-card p-4" data-testid={`fin-adenda-${a.n}`}>
-            <p className="text-[15px] font-semibold">Adenda {a.n} <span className="font-normal tabular-nums text-muted-foreground">· {eur(totalComIva(a.linhas))} € com IVA ({eur(totalAdenda(a.linhas))} € + IVA a 6%)</span></p>
+            <p className="text-[15px] font-semibold">Adenda {a.n} <span className="font-normal tabular-nums text-muted-foreground">· {eur(T.total)} € com IVA ({eur(T.mo)} € de mão de obra + IVA a 6%{T.mat > 0 ? `, ${eur(T.mat)} € de materiais + IVA a 23%` : ""})</span></p>
             <ol className="mt-1 divide-y divide-border">
-              <Passo feito={!!a.fatura} titulo={a.fatura ? `Fatura ${a.fatura.n} ${v2 ? "registada" : "emitida"}` : v2 ? "Registar a fatura" : "Emitir a fatura"}
-                texto={a.fatura ? `A ${a.fatura.q}, no portal do cliente.` : v2 ? "Emita-a no programa de faturação certificado e registe-a aqui." : "Só o Financeiro emite. Vai para o portal do cliente."}>
-                {!a.fatura && fin && (v2
-                  ? <RegistarFatura ctx={ctx} d={d} a={a} />
-                  : <Button size="sm" className="mt-2 min-h-10" onClick={go(() => A.faturarAdendas(d.id))}>Emitir a fatura</Button>)}
-              </Passo>
-              <Passo feito={!!a.recibo} titulo={a.recibo ? `Pagamento validado · recibo ${a.recibo.n}` : "Validar o pagamento"}
-                texto={a.recibo ? `Confirmado a ${a.recibo.q}${a.pag?.comprovativo ? " · " + a.pag.comprovativo : ""}.` : !a.fatura ? "Depois da fatura." : a.pag?.comprovativo ? `O cliente avisou no portal: ${a.pag.comprovativo}.` : "À espera do pagamento no portal do cliente."}>
-                {a.fatura && !a.recibo && a.pag?.comprovativo && fin && <Button size="sm" className="mt-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id))}>Validar o pagamento</Button>}
-              </Passo>
-              <Passo feito={!!ea || !pend} titulo={ea ? `Encomenda ${ea.n} no Inventário` : pend ? "Encomenda dos materiais da adenda" : "Sem materiais a encomendar"}
-                texto={ea ? `${ea.linhas.length} ${ea.linhas.length === 1 ? "material" : "materiais"} · ${eur(ea.valor)} € sem IVA.` : !pend ? "Só mão de obra." : a.recibo ? "O pagamento está validado: emite-se logo a seguir à encomenda de cliente inicial." : EC_ADENDA_NO_PAGAMENTO} />
+              {P.flatMap((x) => {
+                const f = x.ft, nome = `${nomeParcela(x.i)} (${x.l.toLowerCase()}, ${Math.round(x.p * 100)}%) · ${eur(x.v)} €`;
+                return [
+                  <Passo key={"f" + x.i} feito={!!f} titulo={f ? `Fatura ${f.n} ${v2 ? "registada" : "emitida"} · ${nomeParcela(x.i)}` : `${v2 ? "Registar" : "Emitir"} a fatura da ${nome}`}
+                    texto={f ? `A ${f.q}, no portal do cliente · ${eur(f.v)} €.` : prox?.i !== x.i ? "Depois da parcela anterior." : v2 ? "Emita-a no programa de faturação certificado e registe-a aqui." : "Só o Financeiro emite. Vai para o portal do cliente."}>
+                    {!f && prox?.i === x.i && fin && (v2
+                      ? <RegistarFatura ctx={ctx} d={d} a={a} x={x} />
+                      : <Button size="sm" className="mt-2 min-h-10" onClick={go(() => (x.i === 0 ? A.faturarAdendas(d.id) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura</Button>)}
+                  </Passo>,
+                  <Passo key={"p" + x.i} feito={!!f?.recibo} titulo={f?.recibo ? `Pagamento validado · recibo ${f.recibo.n}` : `Validar o pagamento da ${nomeParcela(x.i)}`}
+                    texto={f?.recibo ? `Confirmado a ${f.recibo.q}${f.pag?.comprovativo ? " · " + f.pag.comprovativo : ""}.` : !f ? "Depois da fatura." : f.pag?.comprovativo ? `O cliente avisou no portal: ${f.pag.comprovativo}.` : "À espera do pagamento no portal do cliente."}>
+                    {f && !f.recibo && f.pag?.comprovativo && fin && <Button size="sm" className="mt-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id))}>Validar o pagamento</Button>}
+                  </Passo>,
+                  ...(x.i === 0 ? [
+                    <Passo key="ec" feito={!!ea || !pend} titulo={ea ? `Encomenda ${ea.n} no Inventário` : pend ? "Encomenda dos materiais da adenda" : "Sem materiais a encomendar"}
+                      texto={ea ? `${ea.linhas.length} ${ea.linhas.length === 1 ? "material" : "materiais"} · ${eur(ea.valor)} € sem IVA.` : !pend ? "Só mão de obra." : primeiraPaga(a) ? "A 1.ª parcela está paga: emite-se logo a seguir à encomenda de cliente inicial." : EC_ADENDA_NO_PAGAMENTO} />,
+                  ] : []),
+                ];
+              })}
             </ol>
           </div>
         );

@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { Camera, ChevronRight, ClipboardCheck, FileSignature, FileText, Flag, Hammer, Package, Phone, Receipt, ShieldCheck, Sparkles, Wrench, type LucideIcon } from "lucide-react";
 import { eur, type Estado, type Negocio } from "./motor";
 import { totais } from "./DocsCliente";
-import { totalComIva } from "./adendas";
+import { totaisAdenda } from "./adendas";
 import { materiaisPorFase, RESPONSAVEL_OBRA } from "./obraOps";
 import { FASES_OBRA } from "./fasesObra";
 import { fotosPorFase, garantiaAte, historiaDaObra, resumoObra, type Marco } from "./historiaObra";
@@ -23,7 +23,7 @@ const Caixa = ({ titulo, children, rotulo }: { titulo: string; children: ReactNo
 export function RelatorioObra({ S, d, docs, abrirDoc }: { S: Estado; d: Negocio; docs?: [string, string][]; abrirDoc?: (k: string) => void }) {
   const R = resumoObra(d), H = historiaDaObra(d), F = fotosPorFase(d), ate = garantiaAte(d);
   const adendas = (d.adendas ?? []).filter((a) => a.estado === "assinada");
-  const total = (d.orc ? totais(d, S).total : 0) + adendas.reduce((a, x) => a + totalComIva(x.linhas), 0);
+  const total = (d.orc ? totais(d, S).total : 0) + adendas.reduce((a, x) => a + totaisAdenda(x).total, 0);
   const mats = materiaisPorFase(d);
   return (
     <div className="space-y-5 text-slate-900" aria-label="Relatório da obra" role="region">

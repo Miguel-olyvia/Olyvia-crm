@@ -16,7 +16,10 @@ import { faltaParaEncerrar } from "./encerrarObra";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
-import { MOTIVO_IMPREVISTO, assinadas, diasAdenda, pagamentoPorValidar, porFaturar, juntarAoPlano, linhaAdenda, totalAdenda, totalComIva, type Adenda, type LinhaAdenda } from "./adendas";
+import {
+  MOTIVO_IMPREVISTO, adendaBloqueada, alertasAdenda, assinadas, diasAdenda, faturasAdenda, margemAdenda, nomeParcela, pagamentoPorValidar, porFaturar, primeiraPaga, proximaParcela,
+  juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
+} from "./adendas";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
@@ -345,6 +348,8 @@ export interface Estado {
   pulse?: string | null;
   /** 15/10: o negócio cujo contrato o Jurídico está a rever (o editor abre por cima: RevisaoContrato.tsx). */
   revisao?: number | null;
+  /** 21/10: com `revisao`, a adenda cujo contrato o Jurídico está a rever (sem ela, o contrato do negócio). */
+  revisaoAdenda?: string | null;
   /** 21/10: o técnico que está a ver o Hoje (papel "tecnico"); por omissão, Hugo Neves. */
   tec?: string;
   cfg: { min: number; alvo: number; estrutura: boolean };
@@ -1098,13 +1103,51 @@ export function minhas(S: Estado, role: Papel) {
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
       if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
     }
+    // 21/10: as adendas, com o mesmo percurso do orçamento: cada passo de quem é (comercial, Direção, Jurídico)
+    if (!d.anulado) for (const a of d.adendas ?? []) for (const t of tarefasAdenda(d, S, a)) if (t.who === role) L.push({ d, p: t });
     // (21/10: na V2 a fatura emite-se no programa certificado e regista-se no Financeiro do negócio: sem botão aqui)
+    // 21/10 (decisão C): a fatura da 1.ª parcela de cada adenda assinada (as seguintes, no Financeiro do negócio, como no contrato)
+    const pf = porFaturar(d).map((a) => `${a.n} · ${nomeParcela(0)} · ${eur(proximaParcela(d, a)?.v ?? 0)} €`).join(", ");
     if (role === "financeiro" && porFaturar(d).length) L.push({ d, p: lerVersao() === "atual"
-      ? { t: "Emitir a fatura da adenda", sub: porFaturar(d).map((a) => `${a.n} · ${eur(totalComIva(a.linhas))} €`).join(", "), btn: "Emitir a fatura", act: "faturarAdendas", who: "financeiro" }
-      : { t: "Registar a fatura da adenda", sub: porFaturar(d).map((a) => `${a.n} · ${eur(totalComIva(a.linhas))} €`).join(", ") + " · no Financeiro do negócio", who: "financeiro" } });
-    if (role === "financeiro" && pagamentoPorValidar(d).length) L.push({ d, p: { t: "Validar o pagamento da adenda", sub: pagamentoPorValidar(d).map((a) => `${a.fatura!.n} · ${a.pag!.comprovativo}`).join(", "), btn: "Validar o pagamento", act: "validarPagamentosAdenda", who: "financeiro" } });
+      ? { t: "Emitir a fatura da adenda", sub: pf, btn: "Emitir a fatura", act: "faturarAdendas", who: "financeiro" }
+      : { t: "Registar a fatura da adenda", sub: pf + " · no Financeiro do negócio", who: "financeiro" } });
+    if (role === "financeiro" && pagamentoPorValidar(d).length) L.push({ d, p: { t: "Validar o pagamento da adenda", sub: pagamentoPorValidar(d).map(({ f }) => `${f.n} · ${f.pag!.comprovativo}`).join(", "), btn: "Validar o pagamento", act: "validarPagamentosAdenda", who: "financeiro" } });
   }
   return L;
+}
+
+/** 21/10: o passo de cada adenda (o mesmo percurso do orçamento), de quem é e o botão. As ações sem o número fazem a primeira adenda
+ *  do negócio nesse estado (o Hoje chama-as só com o negócio). */
+export function tarefasAdenda(d: Negocio, S: Estado, a: Adenda): Proximo[] {
+  const n = a.n, v = versaoAdenda(a);
+  switch (a.estado) {
+    case "rascunho":
+      if (!a.verif) return [{ t: v > 1 ? `Verificar e enviar a versão ${v} da adenda ${n}` : `Verificar e enviar a adenda ${n}`, sub: "A Olyvia verifica as margens antes de enviar ao cliente.", btn: "Verificar", act: "verificarAdenda", who: "comercial" }];
+      if (adendaBloqueada(d, S, a)) {
+        if (a.aprov === "pedida") return [{ t: `Aprovar a exceção à margem da adenda ${n}`, sub: `${pct(margemAdenda(d, S, a))} de margem · mínimo ${S.cfg.min}%`, btn: "Aprovar", act: "aprovarAdenda", who: "direcao" }];
+        const aprovavel = alertasAdenda(d, S, a).filter((x) => x.k === "x").every((x) => x.aprov);
+        return [{ t: `Resolver os bloqueios da adenda ${n}`, sub: aprovavel ? "Corrigir o preço ou pedir aprovação à Direção." : "Há um preço abaixo do custo: corrija-o (não se aprova).", ...(aprovavel ? { btn: "Pedir aprovação", act: "pedirAprovAdenda" } : {}), who: "comercial" }];
+      }
+      return [{ t: v > 1 ? `Enviar a versão ${v} da adenda ${n}` : `Enviar a adenda ${n}`, sub: v > 1 ? `Substitui a v${v - 1}. Vai para o portal do cliente.` : "Vai para o portal do cliente.", btn: "Enviar ao cliente", act: "enviarAdenda", who: "comercial" }];
+    case "enviada": {
+      const pc = a.pedidoCliente;
+      if (pc) {
+        const pediu = [...pc.motivos, pc.nota ? "«" + pc.nota + "»" : ""].filter(Boolean).join(", ");
+        return [{ t: `O cliente pediu alterações à adenda ${n}`, sub: `No portal, ${pc.q}: ${pediu || "sem detalhe"}. Faça a versão ${v + 1}: a v${v} fica guardada.`, who: "comercial" }];
+      }
+      return [{ t: `À espera do cliente (adenda ${n})`, sub: `Proposta da adenda no portal desde ${a.enviada}.`, who: "comercial", wait: true, sim: "aceitar" }];
+    }
+    case "aceite":
+      if (a.contratoPedido) return [{ t: `O cliente pediu alterações ao contrato da adenda ${n}`, sub: `Cláusulas: ${a.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(a.contratoVersoes?.length ?? 0) + 1}.`, btn: "Rever o contrato", act: "abrirRevisaoAdenda", who: "juridico" }];
+      if (a.contrato === "enviado") return [{ t: `À espera da assinatura da adenda ${n}`, sub: "O contrato da adenda está no portal do cliente.", who: "comercial", wait: true, sim: "assinar" }];
+      return a.contratoRevisto
+        ? [{ t: `Enviar o contrato da adenda ${n} (versão ${(a.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${a.contratoRevisto.por}, ${a.contratoRevisto.q}).`, btn: "Enviar o contrato", act: "enviarContratoAdenda", who: "comercial" }]
+        : [{ t: `Aceitou a adenda ${n}: gerar o contrato`, sub: `Aceite ${a.aceite === "hoje" || a.aceite?.startsWith("hoje") ? a.aceite : "a " + a.aceite}, no portal. O contrato da adenda aparece no mesmo link do cliente, por assinar.`, btn: "Gerar o contrato", act: "enviarContratoAdenda", who: "comercial" }];
+    case "recusada":
+      // as de um imprevisto voltam ao gestor da obra (e o comercial já tem a do imprevisto)
+      return a.vista || a.origem ? [] : [{ t: `O cliente recusou a adenda ${n}`, sub: `${a.recusa ? `«${a.recusa}» · ` : ""}${a.recusada ?? ""}. O contrato e a obra ficam como estavam.`, btn: "Marcar como visto", act: "vistaRecusaAdenda", who: "comercial" }];
+  }
+  return [];
 }
 
 /* ------------------------------------------------------------------ ações */
@@ -1261,11 +1304,50 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     return true;
   };
   /** 21/10: onde fica o pagamento no portal: o do negócio (a fatura do sinal) ou o de uma adenda faturada. Null se não há nada a pagar. */
+  // 21/10 (decisão C): `adenda` é o número da fatura (uma por parcela) ou o da adenda (a 1.ª fatura dela por pagar)
   const alvoPag = (d: Negocio, adenda?: string): { f: Record<string, string>; n: string } | null => {
     if (!adenda) return d.fin.fatura && !d.fin.pago ? { f: d.f, n: d.fin.fatura.n } : null;
-    const a = d.adendas?.find((x) => x.n === adenda);
-    return a?.fatura && !a.recibo ? { f: (a.pag ??= {}), n: a.fatura.n } : null;
+    let ft: FaturaAdenda | undefined;
+    for (const a of d.adendas ?? []) {
+      const F = faturaDaAdenda(a);
+      ft = F.find((x) => x.n === adenda && !x.recibo) ?? (a.n === adenda ? F.find((x) => !x.recibo) : undefined);
+      if (ft) break;
+    }
+    return ft ? { f: (ft.pag ??= {}), n: ft.n } : null;
   };
+  /** As faturas da adenda, guardadas nela (as antigas, de uma só fatura, passam para a lista). */
+  const faturaDaAdenda = (a: Adenda): FaturaAdenda[] => {
+    if (!a.faturas) { const F = faturasAdenda(a); if (!F.length) return F; a.faturas = F; delete a.fatura; delete a.recibo; delete a.pag; }
+    return a.faturas;
+  };
+  /** 21/10 (decisão C): a fatura da parcela seguinte da adenda, com o valor congelado (o número vem do motor ou do programa certificado). */
+  const emitirParcela = (d: Negocio, a: Adenda, numero: string, registada: boolean): FaturaAdenda | null => {
+    const x = proximaParcela(d, a);
+    if (!x) return null;
+    const F = faturaDaAdenda(a);
+    if (!a.faturas) a.faturas = F;
+    const f: FaturaAdenda = { n: numero, q: agora(), i: x.i, l: x.l, p: x.p, v: x.v };
+    a.faturas.push(f);
+    log(d, registada
+      ? `Fatura ${f.n} registada (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) · emitida no programa certificado`
+      : `${f.n} emitida (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) e enviada ao portal do cliente`);
+    return f;
+  };
+  /** A adenda pelo número, ou (sem ele) a primeira do negócio que satisfaz `cond` (as ações do Hoje só levam o negócio). */
+  const adendaDe = (d: Negocio, n: string | undefined, cond: (a: Adenda) => boolean): Adenda | undefined =>
+    n ? (d.adendas ?? []).find((a) => a.n === n) : (d.adendas ?? []).find(cond);
+  /** As linhas de uma adenda: os serviços do Catálogo (entram em uso) e as linhas livres (de um imprevisto), que entram em uso como um
+   *  serviço da obra: as horas, o preço e os materiais escolhidos. */
+  const linhasDaAdenda = (d: Negocio, k: number, itens: { sid: string; q: number }[], livres: LinhaLivre[]): LinhaAdenda[] => {
+    const linhas = itens.filter((x) => Number.isFinite(x.q) && x.q > 0).map((x) => linhaAdenda(S, x.sid, r2(x.q))).filter((x): x is NonNullable<typeof x> => !!x);
+    livres.filter((x) => x.n.trim() && x.h > 0).forEach((x, j) => {
+      const sid = `livre-${d.id}-${k}-${j + 1}`, cons = r2(x.mats.reduce((a, m) => a + (m.preco ?? 0) * m.q, 0));
+      S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: 25, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil };
+      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, livre: true, mats: x.mats.map((m) => ({ ...m })) });
+    });
+    return linhas;
+  };
+  const descontoValido = (x?: number) => (x != null && Number.isFinite(x) && x > 0 ? Math.min(100, r2(x)) : 0);
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
   const ajustar = (d: Negocio, motivo: string, adenda?: string): boolean => {
     const r = encomendarAjustes(d, motivo, PAPEIS[S.role].n, agora(), adenda);
@@ -1288,7 +1370,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   const encomendarAdendas = (d: Negocio): number => {
     if (!d.obra.ec?.ref) return 0;
     let n = 0;
-    for (const a of assinadas(d)) if (a.recibo && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length && ajustar(d, "adenda " + a.n, a.n)) n++;
+    for (const a of assinadas(d)) if (primeiraPaga(a) && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length && ajustar(d, "adenda " + a.n, a.n)) n++;
     return n;
   };
   const extrasVisita = (d: Negocio) => {
@@ -1618,31 +1700,155 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (d.obra.ec) return;
       if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " emitida", sub: "Já está no Inventário", kind: "ok" });
     },
-    /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda vai ao cliente para assinar. */
-    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"] }): string | null {
+    /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda nasce em rascunho; verifica-se (as margens) e envia-se ao cliente
+     *  como o orçamento (verificarEnviarAdenda). */
+    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"]; desconto?: number }): string | null {
       const d = deal(id);
       if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return null; }
       if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
-      const linhas = itens.filter((x) => Number.isFinite(x.q) && x.q > 0).map((x) => linhaAdenda(S, x.sid, r2(x.q))).filter((x): x is NonNullable<typeof x> => !!x);
       const k = (d.adendas?.length ?? 0) + 1;
-      // 21/10: as linhas livres (de um imprevisto) entram em uso como um serviço da obra: as horas, o preço e os materiais escolhidos
-      (extra?.livres ?? []).filter((x) => x.n.trim() && x.h > 0).forEach((x, j) => {
-        const sid = `livre-${d.id}-${k}-${j + 1}`, cons = r2(x.mats.reduce((a, m) => a + (m.preco ?? 0) * m.q, 0));
-        S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: 25, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil };
-        linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, livre: true, mats: x.mats.map((m) => ({ ...m })) });
-      });
+      const linhas = linhasDaAdenda(d, k, itens, extra?.livres ?? []);
       if (!linhas.length) return null;
-      const n = "AD 2026/" + d.id + "-" + k;
-      (d.adendas ??= []).push({ n, estado: "enviada", criada: agora(), motivo, linhas, ...(extra?.origem ? { origem: extra.origem } : {}) });
-      log(d, "Adenda " + n + " enviada ao cliente: " + linhas.map((x) => x.n.toLowerCase()).join(", ") + " · +" + eur(totalAdenda(linhas)) + " € · +" + diasAdenda(linhas) + " dias");
-      avisar({ msg: "Adenda " + n + " enviada", sub: "Está no portal do cliente para assinar", kind: "ok" });
+      const n = "AD 2026/" + d.id + "-" + k, desconto = descontoValido(extra?.desconto);
+      (d.adendas ??= []).push({ n, estado: "rascunho", criada: agora(), motivo, linhas, enviada: null, aceite: null, verif: false, aprov: null,
+        ...(desconto ? { desconto } : {}), ...(extra?.origem ? { origem: extra.origem } : {}) });
+      log(d, "Adenda " + n + " preparada: " + linhas.map((x) => x.n.toLowerCase()).join(", ") + " · +" + eur(totalAdenda(linhas, desconto)) + " € sem IVA · +" + diasAdenda(linhas) + " dias · por verificar e enviar");
+      avisar({ msg: "Adenda " + n + " preparada", sub: "Verifique as margens e envie ao cliente", kind: "" });
       return n;
+    },
+    /** 21/10 (decisão D): a verificação das margens da adenda, com as regras do orçamento. */
+    verificarAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && !x.verif);
+      if (!a || a.estado !== "rascunho") return;
+      a.verif = true;
+      const A2 = alertasAdenda(d, S, a);
+      log(d, `Adenda ${a.n} verificada · ${A2.filter((x) => x.k === "x").length} bloqueio(s), ${A2.filter((x) => x.k === "w").length} aviso(s)`, A2.some((x) => x.k === "x") ? "x" : "a");
+    },
+    /** A proposta da adenda vai ao portal do cliente (verificada e sem bloqueios, ou com a exceção aprovada pela Direção). */
+    enviarAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && !!x.verif && !adendaBloqueada(d, S, x));
+      if (!a || a.estado !== "rascunho") return;
+      if (!a.verif) { avisar({ msg: "Primeiro, verifique a adenda", sub: "A Olyvia verifica as margens antes de enviar", kind: "bad" }); return; }
+      if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return; }
+      const v = versaoAdenda(a);
+      a.estado = "enviada"; a.enviada = agora(); a.aceite = null; a.pedidoCliente = null;
+      log(d, `Proposta da adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada ao portal do cliente: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")} · +${eur(totaisAdenda(a).total)} € com IVA · +${diasAdenda(a.linhas)} dias`);
+      avisar({ msg: `Adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada`, sub: v > 1 ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente, para aceitar", kind: "ok" });
+    },
+    /** Num toque, como a versão nova do orçamento: verifica e envia; com bloqueios, não envia e diz porquê. */
+    verificarEnviarAdenda(id: number, n?: string): boolean {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho");
+      if (!a) return false;
+      if (!a.verif) A.verificarAdenda(id, a.n);
+      if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return false; }
+      A.enviarAdenda(id, a.n);
+      return a.estado === "enviada";
+    },
+    pedirAprovAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && x.aprov !== "pedida" && adendaBloqueada(d, S, x));
+      if (!a || a.estado !== "rascunho") return;
+      a.aprov = "pedida"; log(d, `Pedida aprovação à Direção (adenda ${a.n})`, "w");
+      avisar({ msg: "Pedido enviado à Direção", sub: "Aparece no Hoje da Direção. Mude de papel em cima para aprovar.", kind: "", act: { label: "Ver como Direção", fn: () => run(() => { S.role = "direcao"; S.view = "hoje"; S.deal = null; }) } });
+    },
+    aprovarAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && x.aprov === "pedida");
+      if (!a || a.estado !== "rascunho") return;
+      a.aprov = "ok"; log(d, `Exceção aprovada pela Direção (adenda ${a.n})`);
+      avisar({ msg: "Exceção aprovada", sub: `${d.nome} · adenda ${a.n} · o comercial já pode enviar`, kind: "ok" });
+    },
+    recusarAprovAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && x.aprov === "pedida");
+      if (!a || a.estado !== "rascunho") return;
+      a.aprov = null; log(d, `Exceção recusada pela Direção (adenda ${a.n})`, "x");
+      avisar({ msg: "Exceção recusada", sub: "O comercial tem de corrigir o preço", kind: "bad" });
+    },
+    /** No portal: o cliente aceita a proposta da adenda; o comercial gera o contrato dela (como no orçamento). */
+    aceitarAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "enviada");
+      if (!a || a.estado !== "enviada") return;
+      a.estado = "aceite"; a.aceite = agora(); a.pedidoCliente = null; a.contrato = null;
+      log(d, `O cliente aceitou a adenda ${a.n} no portal`);
+      avisar({ msg: `O cliente aceitou a adenda ${a.n}`, sub: "Falta o comercial gerar o contrato da adenda", kind: "ok" });
+    },
+    /** No portal: o cliente pede alterações à proposta da adenda; o comercial faz a versão seguinte (o mesmo número). */
+    pedirAlteracoesAdenda(id: number, n: string, texto: string, motivos: string[] = []) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "enviada");
+      if (!a || a.estado !== "enviada") return;
+      const nota = texto.trim();
+      a.pedidoCliente = { motivos: [...motivos], nota: nota || undefined, q: agora() };
+      const porque = [...motivos, nota].filter(Boolean);
+      log(d, `O cliente pediu alterações à adenda ${a.n} no portal${porque.length ? ": " + porque.join(", ") : ""}`, "w");
+      avisar({ msg: "Pedido enviado ao comercial", sub: "Recebe uma nova versão da adenda no portal", kind: "ok" });
+    },
+    /** A nova versão da adenda (o mesmo número): a enviada fica guardada como substituída; as linhas novas ficam por verificar e enviar.
+     *  As linhas livres da versão anterior mantêm-se se o seu id vier nos itens. */
+    novaVersaoAdenda(id: number, n: string, itens: { sid: string; q: number }[], desconto?: number): boolean {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "enviada" || x.estado === "aceite");
+      if (!a || (a.estado !== "enviada" && a.estado !== "aceite") || !a.enviada) return false;
+      const k = Number(a.n.split("-").at(-1)) || 1;
+      const livresAntes = a.linhas.filter((x) => x.livre && itens.some((y) => y.sid === x.sid)).map((x) => ({ ...x, mats: x.mats?.map((m) => ({ ...m })) }));
+      const linhas = [...linhasDaAdenda(d, k, itens.filter((y) => !a.linhas.some((x) => x.livre && x.sid === y.sid)), []), ...livresAntes];
+      if (!linhas.length) return false;
+      const v = versaoAdenda(a), pc = a.pedidoCliente;
+      (a.versoes ??= []).push({ n: v, enviada: a.enviada, substituida: agora(), total: r2(totaisAdenda(a).total), motivos: [...(pc?.motivos ?? [])], nota: pc?.nota,
+        linhas: a.linhas.map((x) => ({ ...x, mats: x.mats?.map((m) => ({ ...m })) })), ...(a.desconto ? { desconto: a.desconto } : {}) });
+      if (a.estado === "aceite" && a.contrato) log(d, `Contrato da adenda ${a.n} anulado (a adenda vai mudar)`, "w");
+      const dsc = descontoValido(desconto);
+      Object.assign(a, { estado: "rascunho", linhas, verif: false, aprov: null, enviada: null, aceite: null, pedidoCliente: null, contrato: null, contratoPedido: null, contratoRevisto: null });
+      if (dsc) a.desconto = dsc; else delete a.desconto;
+      log(d, `Adenda ${a.n} v${v} substituída${pc ? ": o cliente pediu " + [...pc.motivos, pc.nota].filter(Boolean).join(", ").toLowerCase() : ""} · a v${v + 1} fica por verificar e enviar`, "w");
+      avisar({ msg: `A preparar a versão ${v + 1} da adenda`, sub: `Verifique e envie. A v${v} fica guardada`, kind: "" });
+      return true;
+    },
+    /** Mudar a adenda ainda por enviar (as linhas e o desconto): volta a verificar-se. */
+    mudarAdenda(id: number, n: string, itens: { sid: string; q: number }[], desconto?: number): boolean {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      if (!a || a.estado !== "rascunho") return false;
+      const k = Number(a.n.split("-").at(-1)) || 1;
+      const livres = a.linhas.filter((x) => x.livre && itens.some((y) => y.sid === x.sid));
+      const linhas = [...linhasDaAdenda(d, k, itens.filter((y) => !a.linhas.some((x) => x.livre && x.sid === y.sid)), []), ...livres];
+      if (!linhas.length) return false;
+      const dsc = descontoValido(desconto);
+      Object.assign(a, { linhas, verif: false, aprov: null });
+      if (dsc) a.desconto = dsc; else delete a.desconto;
+      log(d, `Adenda ${a.n} mudada antes de enviar: ${linhas.map((x) => x.n.toLowerCase()).join(", ")}`);
+      return true;
+    },
+    /** O comercial gera o contrato da adenda aceite (ou envia a versão revista pelo Jurídico): aparece no portal, por assinar. */
+    enviarContratoAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "aceite" && !x.contrato && !x.contratoPedido);
+      if (!a || a.estado !== "aceite") return;
+      if (a.contratoPedido) { avisar({ msg: "O contrato da adenda está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; }
+      a.contrato = "enviado";
+      log(d, `Contrato da adenda ${a.n} gerado e enviado para assinatura no portal`);
+      avisar({ msg: "Contrato da adenda gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" });
+    },
+    /** No portal: o cliente pede alterações a cláusulas do contrato da adenda: vai ao Jurídico (como no contrato). */
+    pedirAlteracoesContratoAdenda(id: number, n: string, clausulas: PedidoClausula[]) {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      const cs = clausulas.map((x) => ({ c: x.c, nota: x.nota.trim() })).filter((x) => x.c);
+      if (!a || a.estado !== "aceite" || a.contrato !== "enviado" || !cs.length) return;
+      (a.contratoVersoes ??= []).push({ n: a.contratoVersoes.length + 1, substituido: agora(), pedido: cs, revisto: a.contratoRevisto ?? undefined });
+      a.contrato = null; a.contratoPedido = { clausulas: cs, q: agora() }; a.contratoRevisto = null;
+      log(d, `O cliente pediu alterações ao contrato da adenda ${a.n}: ` + cs.map((x) => x.c + (x.nota ? " («" + x.nota + "»)" : "")).join(", ") + " · vai ao Jurídico", "w");
+      avisar({ msg: "Pedido enviado à equipa jurídica", sub: "O contrato da adenda volta ao portal depois de revisto", kind: "ok" });
+    },
+    /** O Jurídico abre a revisão do contrato de uma adenda (a primeira com o pedido do cliente, sem o número). */
+    abrirRevisaoAdenda(id: number, n?: string) {
+      const a = adendaDe(deal(id), n, (x) => !!x.contratoPedido);
+      if (!a) return;
+      S.revisao = id; S.revisaoAdenda = a.n;
+    },
+    /** O comercial já viu a recusa da adenda (sai do Hoje dele). */
+    vistaRecusaAdenda(id: number, n?: string) {
+      const a = adendaDe(deal(id), n, (x) => x.estado === "recusada" && !x.vista);
+      if (a) a.vista = true;
     },
     /** O cliente assina a adenda (no portal): as tarefas entram no plano e o plano volta a aprovação, se já estava aprovado. */
     assinarAdenda(id: number, n: string) {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n), p = d.obra.plano;
-      if (!a || a.estado !== "enviada") return;
-      a.estado = "assinada"; a.assinada = agora();
+      if (!a || a.estado !== "aceite" || a.contrato !== "enviado") return;
+      a.estado = "assinada"; a.assinada = agora(); a.contrato = null;
       log(d, "Adenda " + n + " assinada pelo cliente");
       if (p && p.estado !== "concluída") {
         const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
@@ -2158,55 +2364,70 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: "Pedido enviado à equipa jurídica", sub: "O contrato volta ao portal depois de revisto", kind: "ok" });
     },
     /** O Jurídico abre (e fecha) o editor da revisão do contrato. */
-    abrirRevisao(id: number) { S.revisao = id; },
-    fecharRevisao() { S.revisao = null; },
-    /** O Jurídico reescreve uma cláusula (texto vazio: volta ao texto do modelo). */
-    reverClausula(id: number, c: string, texto: string) {
-      const o = deal(id).orc;
+    abrirRevisao(id: number) { S.revisao = id; if (S.revisaoAdenda) S.revisaoAdenda = null; },
+    fecharRevisao() { S.revisao = null; if (S.revisaoAdenda) S.revisaoAdenda = null; },
+    /** O Jurídico reescreve uma cláusula (texto vazio: volta ao texto do modelo). 21/10: com `n`, a do contrato dessa adenda. */
+    reverClausula(id: number, c: string, texto: string, n?: string) {
+      const o = n ? deal(id).adendas?.find((x) => x.n === n) : deal(id).orc;
       if (!o?.contratoPedido) return;
       const t = texto.trim(), cl = (o.clausulas ??= {});
       if (t) cl[c] = t; else delete cl[c];
     },
-    /** O Jurídico valida o contrato revisto: só então o comercial o pode enviar outra vez ao cliente. */
-    validarContrato(id: number) {
-      const d = deal(id), o = d.orc;
+    /** O Jurídico valida o contrato revisto: só então o comercial o pode enviar outra vez ao cliente. 21/10: com `n`, o da adenda. */
+    validarContrato(id: number, n?: string) {
+      const d = deal(id), o = n ? d.adendas?.find((x) => x.n === n) : d.orc;
       if (!o?.contratoPedido) return;
       o.contratoRevisto = { por: PAPEIS.juridico.nome, q: agora() };
       o.contratoPedido = null; S.revisao = null;
-      log(d, `Contrato revisto e validado pelo Jurídico (${PAPEIS.juridico.nome}) · versão ${(o.contratoVersoes?.length ?? 0) + 1}`);
-      avisar({ msg: "Contrato validado", sub: "O comercial já o pode enviar ao cliente", kind: "ok", act: { label: "Mudar para Rúben", fn: () => run(() => { A.role("comercial"); }) } });
+      if (n) S.revisaoAdenda = null;
+      log(d, `${n ? `Contrato da adenda ${n}` : "Contrato"} revisto e validado pelo Jurídico (${PAPEIS.juridico.nome}) · versão ${(o.contratoVersoes?.length ?? 0) + 1}`);
+      avisar({ msg: n ? "Contrato da adenda validado" : "Contrato validado", sub: "O comercial já o pode enviar ao cliente", kind: "ok", act: { label: "Mudar para Rúben", fn: () => run(() => { A.role("comercial"); }) } });
     },
-    /** O cliente assina a adenda no portal (desenho ou Chave Móvel Digital); o resto é o de "assinarAdenda" (as tarefas entram no plano). */
+    /** O cliente assina a adenda no portal (Chave Móvel Digital ou SMS); o resto é o de "assinarAdenda" (as tarefas entram no plano).
+     *  21/10: só com o contrato da adenda gerado e enviado (como o contrato). */
     assinarAdendaCom(id: number, n: string, a: Assinatura) {
       const ad = deal(id).adendas?.find((x) => x.n === n);
-      if (!ad || ad.estado !== "enviada") return;
+      if (!ad || ad.estado !== "aceite" || ad.contrato !== "enviado") return;
       ad.assinatura = { ...a };
+      log(deal(id), `Assinatura da adenda ${n}: ${comoAssinou(a)}${a.id ? " (" + a.id + ")" : ""} · ${a.q}`);
       A.assinarAdenda(id, n);
     },
-    /** No protótipo, o comercial simula o cliente a assinar a adenda (Chave Móvel Digital), como no auto. */
-    simularAdenda(id: number, n: string) {
-      const d = deal(id), t = new Date(), p = (k: number) => String(k).padStart(2, "0");
-      A.assinarAdendaCom(id, n, { tipo: "digital", nome: d.f.nome_fiscal || d.nome, q: `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`, id: "CMD-SIM" + String(d.id).slice(-3) });
+    /** No protótipo, o comercial simula o cliente a assinar o contrato da adenda (Chave Móvel Digital), como no auto. */
+    simularAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "aceite" && x.contrato === "enviado"), t = new Date(), p = (k: number) => String(k).padStart(2, "0");
+      if (!a) return;
+      A.assinarAdendaCom(id, a.n, { tipo: "digital", nome: d.f.nome_fiscal || d.nome, q: `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`, id: "CMD-SIM" + String(d.id).slice(-3) });
+    },
+    /** No protótipo: o cliente aceita a proposta da adenda (como o "Aceitou" do orçamento). */
+    simularAceitarAdenda(id: number, n?: string) { A.aceitarAdenda(id, n); },
+    /** No protótipo: o cliente pede alterações à proposta da adenda (o preço). */
+    simularAlteracoesAdenda(id: number, n?: string) {
+      const a = adendaDe(deal(id), n, (x) => x.estado === "enviada" && !x.pedidoCliente);
+      if (a) A.pedirAlteracoesAdenda(id, a.n, "Pode baixar um pouco o preço?", ["Baixar o preço"]);
     },
     /** 21/10: o cliente não aceita a adenda no portal (com o porquê): nada muda no contrato nem no plano; o comercial vê e pode refazê-la. */
     recusarAdenda(id: number, n: string, motivo: string) {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
-      if (!a || a.estado !== "enviada") return;
+      if (!a || (a.estado !== "enviada" && a.estado !== "aceite")) return;
       const m = motivo.trim();
-      Object.assign(a, { estado: "recusada", recusada: agora(), recusa: m || undefined });
+      Object.assign(a, { estado: "recusada", recusada: agora(), recusa: m || undefined, pedidoCliente: null, contrato: null });
       log(d, "O cliente não aceitou a adenda " + n + (m ? ": «" + m + "»" : ""), "w");
       // 21/10: a de um imprevisto volta ao gestor, que decide o que fazer (imprevistos.ts: DECISOES)
       const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
       if (im) { im.estado = "recusado"; log(d, `Imprevisto ${im.id}: o cliente não aceitou a proposta · o gestor da obra decide`, "w"); }
       avisar({ msg: "Resposta enviada", sub: "O contrato e o plano da obra ficam como estavam", kind: "ok" });
     },
-    /** 21/10: o comercial retira a adenda enviada (ainda não assinada): sai do portal do cliente. */
+    /** 21/10: o comercial retira a adenda ainda não assinada (por enviar, enviada ou aceite): sai do portal do cliente (fica nos documentos, retirada). */
     anularAdenda(id: number, n: string) {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
-      if (!a || a.estado !== "enviada") return;
-      a.estado = "anulada";
-      log(d, "Adenda " + n + " retirada do portal do cliente");
-      avisar({ msg: "Adenda " + n + " retirada", sub: "Já não aparece no portal do cliente", kind: "ok" });
+      if (!a || (a.estado !== "rascunho" && a.estado !== "enviada" && a.estado !== "aceite")) return;
+      const enviada = !!a.enviada || !!a.versoes?.length;
+      a.estado = "anulada"; a.contrato = null; a.pedidoCliente = null;
+      // a de um imprevisto: o gestor da obra volta a decidir
+      const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto && x.adenda === n) : undefined;
+      if (im && im.estado === "proposta") im.estado = "aberto";
+      log(d, "Adenda " + n + (enviada ? " retirada do portal do cliente" : " apagada antes de enviar"));
+      avisar({ msg: "Adenda " + n + " retirada", sub: enviada ? "Já não aparece no portal do cliente para responder" : "Não chegou ao cliente", kind: "ok" });
     },
     /* -------------------------------------------- 21/10: os imprevistos a meio da obra (imprevistos.ts) e a fatura das adendas */
     /** O técnico (no Hoje) ou o gestor (na página da obra) registam o que encontraram: impede (as tarefas param) ou atrasa (o plano anda). */
@@ -2243,7 +2464,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!n) return null;
       Object.assign(im, { estado: "proposta", adenda: n });
       delete im.decisao;
-      log(d, `Imprevisto ${im.id}: proposta ${n} enviada ao cliente`);
+      // 21/10 (decisão D): como qualquer adenda, verifica-se antes de ir ao cliente; com a margem abaixo do mínimo fica à espera da Direção
+      const foi = A.verificarEnviarAdenda(id, n);
+      log(d, `Imprevisto ${im.id}: proposta ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"}`, foi ? "a" : "w");
       return n;
     },
     /** Com a proposta recusada (ou sem proposta), o gestor decide: seguir sem o trabalho, fazer outra proposta ou suspender a obra. */
@@ -2261,32 +2484,40 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
         avisoCliente: k === "seguir" ? `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): seguimos a obra sem esse trabalho.` : `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): a obra fica suspensa até combinarmos consigo.` });
       avisar({ msg: D.t, sub: k === "seguir" ? "As tarefas paradas continuam" : k === "refazer" ? "Faça a nova proposta no imprevisto" : "As tarefas ficam paradas", kind: "ok" });
     },
-    /** O Financeiro emite a fatura própria de cada adenda assinada (vai para o portal do cliente, que paga com o método que escolher). */
+    /** O Financeiro emite a fatura da 1.ª parcela de cada adenda assinada sem faturas (vai para o portal do cliente, que paga com o método
+     *  que escolher). 21/10 (decisão C): as parcelas são as do contrato; as seguintes emitem-se no Financeiro do negócio (faturarParcelaAdenda). */
     faturarAdendas(id: number) {
       const d = deal(id);
       if (!exigePerm("finance.invoice")) return;
       if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      const L = (d.adendas ?? []).filter((a) => a.estado === "assinada" && !a.fatura);
-      for (const a of L) {
-        a.fatura = { n: "FT 2026/" + S.ft++, q: agora() };
-        log(d, `${a.fatura.n} emitida (adenda ${a.n}, ${eur(totalComIva(a.linhas))} € com IVA) e enviada ao portal do cliente`);
-      }
-      if (L.length) avisar({ msg: L.length === 1 ? `${L[0].fatura!.n} emitida` : `${L.length} faturas emitidas`, sub: "Da adenda · enviada ao portal do cliente", kind: "ok" });
+      const F = porFaturar(d).map((a) => emitirParcela(d, a, "FT 2026/" + S.ft++, false)).filter((x): x is FaturaAdenda => !!x);
+      if (F.length) avisar({ msg: F.length === 1 ? `${F[0].n} emitida` : `${F.length} faturas emitidas`, sub: "Da adenda · enviada ao portal do cliente", kind: "ok" });
     },
-    /** O Financeiro confirma que o pagamento da adenda entrou: sai o recibo. */
+    /** 21/10 (decisão C): a fatura da parcela seguinte da adenda (pela ordem; como no contrato, a final no fim da obra). */
+    faturarParcelaAdenda(id: number, n: string) {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      if (!exigePerm("finance.invoice")) return;
+      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
+      if (!a || a.estado !== "assinada" || !proximaParcela(d, a)) return;
+      const f = emitirParcela(d, a, "FT 2026/" + S.ft++, false);
+      if (f) avisar({ msg: `${f.n} emitida`, sub: `Adenda ${a.n} · ${nomeParcela(f.i)} · enviada ao portal do cliente`, kind: "ok" });
+    },
+    /** O Financeiro confirma que o pagamento de cada fatura de adenda (com o aviso do cliente) entrou: sai o recibo. */
     validarPagamentosAdenda(id: number) {
       const d = deal(id);
       if (!exigePerm("finance.validate_payment")) return;
-      const L = (d.adendas ?? []).filter((a) => a.fatura && !a.recibo && a.pag?.comprovativo);
-      for (const a of L) {
-        a.recibo = { n: "RC 2026/" + S.rc++, q: agora() };
-        log(d, `Pagamento da adenda ${a.n} validado · ${a.recibo.n} emitido`);
+      const L = pagamentoPorValidar(d).map(({ a, f }) => {
+        faturaDaAdenda(a);
+        const ft = a.faturas!.find((x) => x.n === f.n)!;
+        ft.recibo = { n: "RC 2026/" + S.rc++, q: agora() };
+        log(d, `Pagamento da ${nomeParcela(ft.i)} da adenda ${a.n} (${ft.n}) validado · ${ft.recibo.n} emitido`);
         // 21/10 (decisão B): sem encomenda inicial, a da adenda emite-se logo a seguir a ela (emitirEc)
-        if (!d.obra.ec?.ref && porEncomendarDe(d, a.n).length) log(d, `A encomenda da adenda ${a.n} emite-se logo a seguir à encomenda de cliente inicial`);
-      }
+        if (ft.i === 0 && !d.obra.ec?.ref && porEncomendarDe(d, a.n).length) log(d, `A encomenda da adenda ${a.n} emite-se logo a seguir à encomenda de cliente inicial`);
+        return ft;
+      });
       if (L.length) avisar({ msg: L.length === 1 ? `Recibo ${L[0].recibo!.n} emitido` : `${L.length} recibos emitidos`, sub: "Pagamento da adenda validado", kind: "ok" });
-      // 21/10 (decisão B): o pagamento validado da adenda emite a encomenda dos materiais dela no Inventário (EC-<id>-A<k>)
-      if (L.length) encomendarAdendas(d);
+      // 21/10 (decisão B/C): a 1.ª parcela paga emite a encomenda dos materiais da adenda no Inventário (EC-<id>-A<k>)
+      if (L.some((f) => f.i === 0)) encomendarAdendas(d);
     },
     /** 21/10: volta a emitir as encomendas das adendas pagas que não chegaram ao Inventário (o Inventário recusou ao validar). */
     emitirEcsAdenda(id: number) {
@@ -2295,14 +2526,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!d.obra.ec?.ref) { avisar({ msg: "Primeiro, a encomenda de cliente inicial", sub: "A das adendas pagas emite-se logo a seguir a ela", kind: "bad" }); return; }
       if (!encomendarAdendas(d)) avisar({ msg: "Nada por encomendar", sub: "As adendas pagas já têm a encomenda no Inventário", kind: "" });
     },
-    /** V2 (21/10): regista a fatura da adenda emitida no programa certificado (a Olyvia não emite faturas na V2). */
+    /** V2 (21/10): regista a fatura da parcela seguinte da adenda, emitida no programa certificado (a Olyvia não emite faturas na V2). */
     registarFaturaAdenda(id: number, n: string, numero: string): boolean {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return false;
-      if (!a || a.estado !== "assinada" || a.fatura || !numero.trim()) return false;
-      a.fatura = { n: numero.trim(), q: agora() };
-      log(d, `Fatura ${a.fatura.n} registada (adenda ${a.n}, ${eur(totalComIva(a.linhas))} € com IVA) · emitida no programa certificado`);
-      return true;
+      if (!a || a.estado !== "assinada" || !proximaParcela(d, a) || !numero.trim()) return false;
+      return !!emitirParcela(d, a, numero.trim(), true);
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

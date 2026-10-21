@@ -21,7 +21,7 @@ import { useFrota } from "./frota/loja";
 import { ligacoesObra } from "./frota/transporteObra";
 import { ProximoRececaoNegocio } from "./RececaoNegocio";
 import { ecDaAdenda, linhasDaObra, porEncomendarDe } from "./encomendasAjuste";
-import { assinadas } from "./adendas";
+import { assinadas, primeiraPaga } from "./adendas";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 
 const ICONE: Record<Trilho, typeof Package> = { ec: Package, plano: CalendarRange, pag: Euro, obra: HardHat };
@@ -189,7 +189,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
               {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
                 // 21/10 (decisão B): antes do arranque, cada adenda assinada: a encomenda dela (com o pagamento validado) ou, só mão de obra, o pagamento
                 ...(go1.estado === "feito" ? [] : assinadas(d).map((a) => (ecDaAdenda(d, a.n) || porEncomendarDe(d, a.n).length
-                  ? [`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)] : [`Adenda ${a.n} paga`, !!a.recibo]))),
+                  ? [`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)] : [`1.ª parcela da adenda ${a.n} paga`, primeiraPaga(a)]))),
                 ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"]].map(([t, ok]) => (
                 <li key={t as string} className={cn("inline-flex items-center gap-1.5", ok ? "text-foreground" : "text-muted-foreground")}>
                   {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="h-3.5 w-3.5 rounded-full border-2 border-input" aria-hidden="true" />}{t as string}

@@ -5,7 +5,7 @@ import { eur, type Negocio } from "./motor";
 import { FASES_OBRA } from "./fasesObra";
 import { equipaDaObra } from "./obraOps";
 import { rotuloDia } from "./preparacaoObra";
-import { totalComIva } from "./adendas";
+import { totaisAdenda } from "./adendas";
 
 /** Um marco da linha do tempo. `k` diz o ícone; `fotos` são as da tarefa validada ou do registo do diário. */
 export interface Marco { q: string; t: string; sub?: string; fotos?: string[]; k: "proposta" | "contrato" | "pagamento" | "materiais" | "obra" | "tarefa" | "diario" | "adenda" | "auto" }
@@ -31,8 +31,15 @@ export function historiaDaObra(d: Negocio): Marco[] {
   if (d.obra.ec && !d.obra.ec.ref) m({ q: d.obra.ec.criada, t: "Materiais prontos para a obra", k: "materiais" });
   else if (d.obra.ec) m({ q: d.obra.ec.emitida?.q ?? quando(d, /Encomenda de cliente .* emitida/i) ?? "", t: `Encomenda de cliente ${d.obra.ec.n} emitida no Inventário`, k: "materiais" });
   m(!!p && p.estado !== "por aprovar" && p.estado !== "aprovado" && { q: quando(d, /^Obra arrancou/) ?? (p.origem === "orcamento" ? rotuloDia(p, 0) : ""), t: "A obra começou", k: "obra" });
-  // as adendas (trabalhos a mais) assinadas
-  for (const a of d.adendas ?? []) if (a.estado === "assinada") m({ q: a.assinatura?.q ?? a.assinada ?? "", t: `Trabalhos a mais: adenda ${a.n}`, sub: `${a.linhas.map((x) => x.n).join(", ")} · +${eur(totalComIva(a.linhas))} € com IVA`, k: "adenda" });
+  // as adendas (trabalhos a mais): 21/10, o percurso todo, como o da proposta: enviada (e as versões refeitas), aceite, recusada, retirada, assinada
+  for (const a of d.adendas ?? []) {
+    for (const v of a.versoes ?? []) m({ q: v.enviada, t: `Proposta da adenda ${a.n} (versão ${v.n})`, sub: v.motivos.length || v.nota ? `Refeita a seu pedido: ${[...v.motivos, v.nota].filter(Boolean).join(", ").toLowerCase()}` : undefined, k: "adenda" });
+    if (a.enviada) m({ q: a.enviada, t: a.versoes?.length ? `Proposta da adenda ${a.n} (versão ${a.versoes.length + 1})` : `Proposta da adenda ${a.n} recebida`, sub: `${a.linhas.map((x) => x.n).join(", ")} · +${eur(totaisAdenda(a).total)} € com IVA`, k: "adenda" });
+    if (a.aceite) m({ q: a.aceite, t: `Adenda ${a.n} aceite`, k: "adenda" });
+    if (a.estado === "recusada") m({ q: a.recusada ?? "", t: `Não aceitou a adenda ${a.n}`, sub: a.recusa, k: "adenda" });
+    if (a.estado === "anulada" && a.enviada) m({ q: quando(d, new RegExp(`Adenda ${a.n.replace(/[/]/g, "\\/")} retirada`)) ?? "", t: `Adenda ${a.n} retirada`, k: "adenda" });
+    if (a.estado === "assinada") m({ q: a.assinatura?.q ?? a.assinada ?? "", t: `Trabalhos a mais: adenda ${a.n}`, sub: `${a.linhas.map((x) => x.n).join(", ")} · +${eur(totaisAdenda(a).total)} € com IVA`, k: "adenda" });
+  }
   // cada tarefa validada pelo responsável de obra, pela ordem do plano, com a fotografia e a nota do técnico
   for (const t of [...(p?.tasks ?? [])].sort((a, b) => a.dia - b.dia)) {
     if (t.exec?.estado !== "validada") continue;
