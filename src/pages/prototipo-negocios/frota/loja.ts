@@ -68,3 +68,6 @@ export function esquecerFrota(): void {
 export function useFrota(): Frota {
   return useSyncExternalStore(subscreverFrota, lerFrota, lerFrota);
 }
+
+/** 21/10: a base que veio de outro aparelho (sincronizacao.ts): passa a ser esta (e grava-se) e quem lê redesenha. */
+export function substituirFrota(F: Frota): void { base = F; gravar(F); avisar(); }

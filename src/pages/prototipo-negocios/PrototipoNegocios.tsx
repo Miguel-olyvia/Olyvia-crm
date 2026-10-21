@@ -1,7 +1,7 @@
 // Protótipo de Negócios (08/10/2026, com o aspeto da Olyvia desde 09/10): as 12
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { createPortal } from "react-dom";
-import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   ArrowLeft, BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
@@ -64,6 +64,9 @@ const MenuFrota = lazy(() => import("./frota/MenuFrota"));
 // 20/10 (demo): o Portal do Fornecedor simulado, de ecrã inteiro (lê e escreve o Inventário em memória: abre no mesmo separador).
 const PortalFornecedor = lazy(() => import("./portalFornecedor/PortalFornecedor"));
 
+import { sala, sinc } from "./sincronizacao";
+import { esquecerInventario, substituirInventario } from "./inventario/loja";
+import { lerFrota, substituirFrota, subscreverFrota } from "./frota/loja";
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
 
@@ -90,6 +93,18 @@ function ler(): Estado {
 
 interface Toast extends Aviso { id: number }
 const CHAVE_PROPOSTA_V1 = "olyvia-prototipo-v1-proposta";
+
+/** 21/10: se os dados estão partilhados com os outros aparelhos (sincronizacao.ts). */
+function EstadoPartilha() {
+  const e = useSyncExternalStore((f) => sinc.ouvir(f), () => sinc.estado, () => sinc.estado);
+  const cor = e === "ao vivo" ? "bg-success" : e === "a ligar" ? "bg-warning" : "bg-destructive";
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+      <span className={cn("h-2 w-2 rounded-full", cor, e === "ao vivo" && "animate-pulse")} aria-hidden="true" />
+      {e === "ao vivo" ? `Ao vivo · partilhado (sala ${sala()})` : e === "a ligar" ? "A ligar aos outros aparelhos…" : "Sem ligação: só neste aparelho"}
+    </span>
+  );
+}
 
 /** 21/10: o link da app do técnico (?tecnico=hn): abre o Hoje desse técnico. Assim, numa demonstração, uma janela é o técnico e outra o gestor. */
 function comLink(S: Estado): Estado {
@@ -141,6 +156,7 @@ export default function PrototipoNegocios() {
 
   const guardar = useCallback(() => {
     try { localStorage.setItem(CHAVE, JSON.stringify(ref.current)); } catch { /* ignora */ }
+    sinc.mudou(); // 21/10: e para os outros aparelhos
   }, []);
 
   // corre uma mudança, grava e desenha; volta ao topo quando muda de ecrã
@@ -161,6 +177,29 @@ export default function PrototipoNegocios() {
     };
     if (a.atraso) setTimeout(mostra, a.atraso); else mostra();
   }, []);
+
+  // 21/10: o estado partilhado entre aparelhos (sincronizacao.ts): o Estado, o Inventário e a Frota
+  useEffect(() => {
+    const aplicar = (S: Estado) => {
+      if (S.v !== VERSAO) S.v = VERSAO;
+      ref.current = S;
+      try { localStorage.setItem(CHAVE, JSON.stringify(S)); } catch { /* ignora */ }
+      redesenhar();
+    };
+    void sinc.ligar({ ler: () => ref.current, aplicar }, [
+      { chave: "inv", ler: lerInventario, aplicar: (x) => substituirInventario(x as ReturnType<typeof lerInventario>) },
+      { chave: "frota", ler: lerFrota, aplicar: (x) => substituirFrota(x as ReturnType<typeof lerFrota>) },
+    ], (t) => avisar({ msg: "Atualizado com outro aparelho", sub: t, kind: "" }), () => {
+      // uma sala nova: os dados de exemplo, com quem vê e onde está deste aparelho
+      const { role, view, deal, op, tec } = ref.current;
+      ref.current = { ...seed(), role, view, deal, op, tec };
+      esquecerInventario(); esquecerFrota();
+      try { localStorage.setItem(CHAVE, JSON.stringify(ref.current)); } catch { /* ignora */ }
+      redesenhar();
+    });
+    const tiraInv = subscreverInv(() => sinc.mudou()), tiraFrota = subscreverFrota(() => sinc.mudou());
+    return () => { tiraInv(); tiraFrota(); sinc.desligar(); };
+  }, [avisar]);
 
   const A = useMemo(() => acoes(S, avisar, run), [S, avisar, run]);
   const go = (fn: () => void) => () => run(fn);
@@ -428,6 +467,7 @@ export default function PrototipoNegocios() {
           className="h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
           {(Object.keys(PAPEIS) as Papel[]).map((k) => <option key={k} value={k}>{PAPEIS[k].n}</option>)}
         </select>
+        <EstadoPartilha />
       </label>
     );
     const listaNova = true; // na proposta simples todos os ecrãs são novos

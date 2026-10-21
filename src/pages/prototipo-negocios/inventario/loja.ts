@@ -77,3 +77,6 @@ export function esquecerInventario(): void {
 export function useInventario(): Inventario {
   return useSyncExternalStore(subscrever, lerInventario, lerInventario);
 }
+
+/** 21/10: a base que veio de outro aparelho (sincronizacao.ts): passa a ser esta e quem lê redesenha. */
+export function substituirInventario(b: Inventario): void { base = b; avisar(); }
