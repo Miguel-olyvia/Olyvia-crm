@@ -275,7 +275,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     const nMed = CM.length;
     const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
     passos = [
-      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) ? 1 : 0), n: cv.n + 1 },
+      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) || visitas(d).some((n) => d.f[`v${n}_estado`] !== "Cancelada") ? 1 : 0), n: cv.n + 1 }, // a visita fica feita sozinha: só falta se todas estão canceladas
         resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
         corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
       { ...g(EXTERIOR, Building2), corpo: (

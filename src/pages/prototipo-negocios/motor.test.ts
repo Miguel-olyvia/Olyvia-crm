@@ -36,19 +36,17 @@ describe("protótipo de Negócios", () => {
     preencher(d(), [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
     d().visita.fotos = 2;
     expect(d().vis).toEqual([1]); // marcar a visita cria a visita 1
-    A.fecharVisita(id);
-    expect(d().fase).toBe(2); // não fecha: a visita ainda não foi feita
-    expect(d().valida?.grupos).toContain("visitas");
-    A.campo(id, "v1_estado", "Feita");
     A.novaVisita(id); // uma segunda visita, também com os seus campos
     preencher(d(), [grupoVisita(2)]);
     A.fecharVisita(id);
     expect(d().fase).toBe(2); // não fecha sem medidas
     expect(d().valida?.grupos).toContain("medidas");
+    expect(d().f.v1_estado).toBe("Marcada"); // a visita só fica feita com as necessidades completas
 
     Object.assign(d().visita.med, { pav: 6, par: 18, pts: 3, pcs: 4 });
     A.fecharVisita(id);
     expect(d().fase).toBe(3);
+    expect(d().f.v1_estado).toBe("Feita"); // ficou feita sozinha
 
     // as respostas do levantamento juntam linhas próprias (proteções, logística…); sem elas, o orçamento de referência
     const lev = d().orc!.linhas.filter((l) => l.t === "mat" && l.d.startsWith(PREFIXO_LEV));
@@ -222,5 +220,42 @@ describe("protótipo de Negócios", () => {
     preencher(d, [efetivo(S.campos, EXTERIOR), efetivo(S.campos, INTERIOR), efetivo(S.campos, ESCOLHAS)]);
     A.fecharVisita(d.id);
     expect(d.fase).toBe(3);
+  });
+});
+
+describe("a visita fica feita sozinha", () => {
+  it("quando as necessidades ficam completas, e volta a marcada se deixarem de estar", () => {
+    const S = seed();
+    const A = acoes(S, () => {}, (fn) => fn());
+    const id = 1043;
+    const d = () => S.deals.find((x) => x.id === id)!;
+    preencher(d(), LEAD); A.contactar(id);
+    preencher(d(), CONTACTO); A.marcarVisita(id);
+    Object.assign(d().visita.med, { pav: 6, par: 18, pts: 3, pcs: 4 });
+    A.campo(id, "nota", "x");
+    expect(d().f.v1_estado).toBe("Marcada"); // faltam as fotografias
+    d().visita.fotos = 2;
+    A.campo(id, "nota", "y");
+    expect(d().f.v1_estado).toBe("Feita");
+    d().visita.fotos = 0;
+    A.campo(id, "nota", "z");
+    expect(d().f.v1_estado).toBe("Marcada");
+  });
+
+  it("uma visita cancelada não fica feita, e sem nenhuma por cancelar a fase não fecha", () => {
+    const S = seed();
+    const A = acoes(S, () => {}, (fn) => fn());
+    const id = 1043;
+    const d = () => S.deals.find((x) => x.id === id)!;
+    preencher(d(), LEAD); A.contactar(id);
+    preencher(d(), CONTACTO); A.marcarVisita(id);
+    A.cancelarVisita(id, 1);
+    preencher(d(), [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
+    Object.assign(d().visita.med, { pav: 6, par: 18, pts: 3, pcs: 4 });
+    d().visita.fotos = 2;
+    A.fecharVisita(id);
+    expect(d().f.v1_estado).toBe("Cancelada");
+    expect(d().fase).toBe(2);
+    expect(d().valida?.grupos).toContain("visitas");
   });
 });

@@ -1,8 +1,9 @@
 // As visitas de um negócio: pode haver várias (levantamento, medição técnica,
 // escolha de materiais, revisita), cada uma com os seus campos. Um cartão por
-// visita; a que está marcada abre logo, as outras mostram o resumo.
+// visita; a que está marcada abre logo, as outras mostram o resumo. A visita não
+// se marca como feita: fica feita sozinha quando as necessidades ficam completas.
 import { useState } from "react";
-import { CalendarClock, Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { grupoVisita, emFalta } from "./campos";
@@ -23,27 +24,20 @@ export function VisitasLista({ ctx, d, simples }: { ctx: Ctx; d: Negocio; simple
   const { A, run } = ctx;
   const vs = visitas(d), ro = d.visita.fechada;
   const primeiraAberta = [...vs].reverse().find((n) => campoVisita(d, n, "estado") !== "Feita") ?? vs[vs.length - 1];
-  const marcada = vs.find((n) => (campoVisita(d, n, "estado") || "Marcada") === "Marcada"); // a primeira visita por fazer
   const [abertas, setAbertas] = useState<number[]>(primeiraAberta ? [primeiraAberta] : []);
   const alternar = (n: number) => setAbertas((a) => (a.includes(n) ? a.filter((x) => x !== n) : [...a, n]));
 
   return (
     <div className="max-w-3xl space-y-4">
       <p className="text-[15px] text-muted-foreground">
-        Um negócio pode ter várias visitas: o levantamento, uma medição técnica, a escolha de materiais… Para fechar a fase, pelo menos uma tem de estar feita.
+        Um negócio pode ter várias visitas: o levantamento, uma medição técnica, a escolha de materiais…
       </p>
-      {/* Sem nenhuma visita feita, a ação vem logo aqui (e não escondida na escolha do estado dentro do cartão) */}
-      {!ro && !visitaFeita(d) && marcada && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <p className={cn("text-[15px]", aValidar(d, "visitas") ? "font-medium text-destructive" : "text-foreground")}>
-            {aValidar(d, "visitas") ? "Marque como feita pelo menos uma visita." : `A visita ${vs.indexOf(marcada) + 1} já foi feita?`}
-          </p>
-          <Button variant="outline" className="min-h-11 text-[15px]" onClick={() => run(() => A.campo(d.id, `v${marcada}_estado`, "Feita"))}>
-            <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Marcar a visita {vs.indexOf(marcada) + 1} como feita
-          </Button>
-        </div>
+      {!ro && !visitaFeita(d) && (
+        <p className={cn("flex items-start gap-2 text-[15px]", aValidar(d, "visitas") ? "font-medium text-destructive" : "text-foreground")}>
+          <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          {aValidar(d, "visitas") ? "Todas as visitas estão canceladas. Marque outra visita." : "A visita fica feita sozinha quando as necessidades estiverem completas."}
+        </p>
       )}
-      {aValidar(d, "visitas") && !visitaFeita(d) && !marcada && <p className="text-[15px] font-medium text-destructive">Marque como feita pelo menos uma visita.</p>}
 
       {vs.map((n) => {
         const g = grupoVisita(n), aberta = abertas.includes(n);
@@ -69,10 +63,24 @@ export function VisitasLista({ ctx, d, simples }: { ctx: Ctx; d: Negocio; simple
                 {aberta && (
                   <div className="space-y-4 border-t border-border px-4 pb-5 pt-2 sm:px-5">
                     <Campos grupo={g} d={d} A={A} run={run} ro={ro} simples={simples} plano />
-                    {!ro && vs.length > 1 && (
-                      <Button variant="ghost" className="text-muted-foreground" onClick={() => run(() => { A.apagarVisita(d.id, n); })}>
-                        <Trash2 className="mr-1.5 h-4 w-4" />Apagar esta visita
-                      </Button>
+                    {!ro && (
+                      <div className="flex flex-wrap gap-2">
+                        {estado === "Marcada" && (
+                          <Button variant="ghost" className="text-muted-foreground" onClick={() => run(() => A.cancelarVisita(d.id, n))}>
+                            <X className="mr-1.5 h-4 w-4" />Cancelar esta visita
+                          </Button>
+                        )}
+                        {estado === "Cancelada" && (
+                          <Button variant="ghost" className="text-muted-foreground" onClick={() => run(() => A.cancelarVisita(d.id, n, false))}>
+                            <RotateCcw className="mr-1.5 h-4 w-4" />Afinal vai acontecer
+                          </Button>
+                        )}
+                        {vs.length > 1 && (
+                          <Button variant="ghost" className="text-muted-foreground" onClick={() => run(() => { A.apagarVisita(d.id, n); })}>
+                            <Trash2 className="mr-1.5 h-4 w-4" />Apagar esta visita
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

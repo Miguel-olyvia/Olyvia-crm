@@ -1181,7 +1181,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
-    if (!visitaFeita(d)) x.push({ id: "visitas", t: "Pelo menos uma visita feita" });
+    if (!visitaFeita(d) && !visitas(d).some((n) => campoVisita(d, n, "estado") !== "Cancelada")) x.push({ id: "visitas", t: "Uma visita por cancelar" });
     const semMedida = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k));
     if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map(([, l]) => l).join(", ") });
     const servicos = servicosVisita(d).length;
@@ -1190,6 +1190,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     for (const f of faltaProdutosVisita(d, S)) x.push({ id: "nec", t: f.t });
     if (!(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") x.push({ id: "fotos", t: "Fotografias (ou marcar que o cliente não quis)" });
     return x;
+  };
+
+  // 21/10/2026: a visita não se marca como feita à mão. Fica feita sozinha quando as necessidades
+  // (serviços, produtos, medidas, fotografias) ficam completas, e volta a marcada se deixarem de estar.
+  const necessidadesCompletas = (d: Negocio) => !extrasVisita(d).some((x) => x.id !== "visitas");
+  const sincronizarVisita = (d: Negocio) => {
+    if (d.fase !== 2 || d.visita.fechada || d.perdido) return;
+    const vs = visitas(d), est = (n: number) => campoVisita(d, n, "estado") || "Marcada";
+    if (necessidadesCompletas(d)) {
+      // as marcadas que já deviam ter acontecido; se ainda nenhuma foi feita e nenhuma passou, a primeira marcada
+      const hoje = new Date().toISOString().slice(0, 10), marcadas = vs.filter((n) => est(n) === "Marcada");
+      const passadas = marcadas.filter((m) => campoVisita(d, m, "data") <= hoje);
+      const feitas = passadas.length ? passadas : visitaFeita(d) ? [] : marcadas.slice(0, 1);
+      for (const n of feitas) {
+        d.f[`v${n}_estado`] = "Feita"; d.f[`v${n}_auto`] = "1";
+        log(d, `Visita ${vs.indexOf(n) + 1} feita · as necessidades ficaram completas`);
+      }
+      if (feitas.length) avisar({ msg: feitas.length > 1 ? "Visitas feitas" : `Visita ${vs.indexOf(feitas[0]) + 1} feita`, sub: "As necessidades ficaram completas", kind: "ok" });
+    } else for (const n of vs) if (d.f[`v${n}_auto`] && est(n) === "Feita") {
+      d.f[`v${n}_estado`] = "Marcada"; delete d.f[`v${n}_auto`];
+      log(d, `Visita ${vs.indexOf(n) + 1} volta a marcada · as necessidades deixaram de estar completas`, "w");
+    }
   };
 
   const A = {
@@ -1217,6 +1239,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
     fecharVisita(id: number) {
       const d = deal(id), L = LINHAS[d.linha];
+      sincronizarVisita(d);
       if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, ...gruposArea(S.campos, d.f), ESCOLHAS], extrasVisita(d))) return;
       const antes = d.orc && !d.orc.enviada ? d.orc : null; // um levantamento reaberto: o orçamento de antes
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S);
@@ -1935,6 +1958,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, `Visita ${n} criada`);
       return n;
     },
+    cancelarVisita(id: number, n: number, cancelar = true) {
+      const d = deal(id), i = visitas(d).indexOf(n) + 1;
+      if (cancelar) { d.f[`v${n}_estado`] = "Cancelada"; delete d.f[`v${n}_auto`]; log(d, `Visita ${i} cancelada`, "w"); }
+      else { d.f[`v${n}_estado`] = "Marcada"; delete d.f[`v${n}_motivo`]; log(d, `Visita ${i} volta a marcada`); }
+    },
     apagarVisita(id: number, n: number) {
       const d = deal(id);
       d.vis = visitas(d).filter((x) => x !== n);
@@ -1980,6 +2008,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     foto(id: number, etapa: EtapaFotos = "area") { const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
     recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = custoUnLinha(S.svc[l.sid], S); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
   };
+  // depois de cada ação, a visita de cada negócio acompanha as necessidades
+  for (const k of Object.keys(A) as (keyof typeof A)[]) {
+    const f = A[k] as (...a: unknown[]) => unknown;
+    (A as Record<string, unknown>)[k] = (...a: unknown[]) => {
+      const r = f(...a);
+      for (const d of S.deals) sincronizarVisita(d);
+      return r;
+    };
+  }
   return A;
 }
 export type Acoes = ReturnType<typeof acoes>;

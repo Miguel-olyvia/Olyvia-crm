@@ -305,9 +305,10 @@ export function emFalta(gs: Grupo[], v: Record<string, string>): Def[] {
 /* ------------------------------------------------------------------ visitas */
 // Um negócio pode ter várias visitas (levantamento, medição técnica, escolha de
 // materiais…). Os campos de cada uma guardam-se em d.f com o prefixo v{n}_.
+// O estado (v{n}_estado) não é um campo: a visita fica feita sozinha quando as
+// necessidades ficam completas, e cancela-se pelo botão do cartão (21/10/2026).
 const VISITA_BASE: Def[] = [
   { k: "tipo", l: "Tipo de visita", t: "escolha", op: ["Levantamento", "Medição técnica", "Escolha de materiais", "Revisita"] },
-  { k: "estado", l: "Estado", t: "escolha", op: ["Marcada", "Feita", "Cancelada"], avanca: "Feita" },
   { k: "data", l: "Dia", t: "data" },
   { k: "hora", l: "Hora", t: "escolha", op: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"] },
   { k: "quem", l: "Quem vai", t: "escolha", op: ["Rúben (comercial)", "Hugo (técnico)", "Filipe (Operações)"] },
