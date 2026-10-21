@@ -565,6 +565,14 @@ export function AdendaDoc({ S, d, a }: { S?: Estado; d: Negocio; a: Adenda }) {
     <Folha titulo="Adenda ao contrato" numero={a.n} data={quando} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
       <Cliente d={d} />
       <p className="text-slate-700">Trabalhos a mais na obra do contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}. O resto do contrato mantém-se.</p>
+      {/* 21/10: nasceu de um imprevisto na obra: o que a equipa encontrou, onde e a fotografia */}
+      {a.origem && (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="font-medium">O que encontrámos{a.origem.onde ? ` (${a.origem.onde.toLowerCase()})` : ""}</p>
+          <p className="text-slate-700">{a.origem.texto}</p>
+          {a.origem.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} className="mt-2 max-h-48 rounded-lg object-cover" />}
+        </section>
+      )}
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
         {a.linhas.map((x) => (
           <li key={x.sid} className="flex items-baseline justify-between gap-4 py-2.5">
@@ -581,7 +589,7 @@ export function AdendaDoc({ S, d, a }: { S?: Estado; d: Negocio; a: Adenda }) {
       {V && (a.estado === "enviada" || a.estado === "assinada") && (
         <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + base * (1 + IVA_MO))} €</b>, com IVA.</p>
       )}
-      <p className="text-slate-700">Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}. Pagamento: com a última prestação do contrato.</p>
+      <p className="text-slate-700">Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}. Pagamento: fatura própria, depois da assinatura, a pagar no portal{a.fatura ? ` (${a.fatura.n}${a.recibo ? `, paga · ${a.recibo.n}` : ""})` : ""}.</p>
       {/* as assinaturas (15/10), como no contrato: o selo digital da empresa e a do cliente (desenho ou Chave Móvel Digital) */}
       <section className="grid gap-8 pt-4 sm:grid-cols-2" aria-label="Assinaturas">
         {([

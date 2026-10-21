@@ -16,7 +16,7 @@ import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
-import { MOTIVOS_RECUSA_ADENDA, assinadas, diasAdenda, totalComIva, valorContrato } from "./adendas";
+import { MOTIVOS_RECUSA_ADENDA, assinadas, diasAdenda, porPagar, totalComIva, valorContrato } from "./adendas";
 import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
@@ -106,6 +106,103 @@ function Botao({ children, onClick, ghost, perigo, disabled }: { children: React
   );
 }
 
+/** "dd/mm" (ou "hoje hh:mm") da emissão → a data, para contar o vencimento. */
+function emitidaEm(q: string): Date {
+  const m = q.match(/^(\d{2})\/(\d{2})/);
+  return m ? new Date(new Date().getFullYear(), Number(m[2]) - 1, Number(m[1])) : new Date();
+}
+
+/** 21/10: pagar uma fatura no portal (a do contrato ou a de uma adenda): o valor, a escolha da forma de pagar e só os dados dessa.
+ *  `alvo` é onde ficam o método e o comprovativo (os campos do negócio, ou os da adenda). */
+function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura, escolher, pago, autorizar }: {
+  numero: string; montante: string; vence: string; refMb: string; alvo: Record<string, string>; titular: string;
+  verFatura: () => void; escolher: (m: string) => void; pago: (ref: string) => void; autorizar: (ibanCurto: string, titular: string) => void;
+}) {
+  const [ref, setRef] = useState("");
+  // o débito direto: o IBAN e o titular da conta do cliente, e a autorização
+  const [ibanCli, setIbanCli] = useState("");
+  const [titularCli, setTitularCli] = useState<string | null>(null);
+  const [autorizo, setAutorizo] = useState(false);
+  if (alvo.comprovativo) return (
+    <p className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />
+      {alvo.metodo === "Débito direto" && alvo.debito_iban ? `Débito direto autorizado na conta ${alvo.debito_iban}. O valor é debitado a ${vence}.` : `Comprovativo enviado (${alvo.comprovativo}). Estamos a confirmar.`}</p>
+  );
+  const metodo = metodoDe(alvo.metodo), ibanOk = ibanValido(ibanCli), nomeConta = titularCli ?? titular;
+  const jaPaguei = (
+    <div className="space-y-2 border-t border-slate-200 pt-4">
+      <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
+      <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder={metodo === "Referência MB" ? "N.º do talão ou do pagamento (opcional)" : "Referência ou n.º da transferência (opcional)"} aria-label="Referência do pagamento" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
+      <Botao onClick={() => pago(ref)}>Já paguei</Botao>
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end justify-between gap-3">
+        <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
+        <button type="button" onClick={verFatura} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-slate-900 underline-offset-4 hover:underline">
+          <FileText className="h-4 w-4" aria-hidden="true" />Ver a fatura
+        </button>
+      </div>
+      <div className="space-y-2">
+        <p className="text-[15px] font-medium">Como quer pagar?</p>
+        <div role="radiogroup" aria-label="Como quer pagar" className="grid grid-cols-3 gap-2">
+          {METODOS_PAGAMENTO.map((m) => (
+            <button key={m} type="button" role="radio" aria-checked={metodo === m} onClick={() => escolher(m)}
+              className={cn("min-h-12 rounded-xl border px-2 text-[14px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2",
+                metodo === m ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800 hover:border-slate-500")}>
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+      {metodo === "Referência MB" && <>
+        <div className="rounded-xl border border-slate-200 px-4 py-1">
+          <p className="pt-2 text-sm font-semibold">Multibanco ou homebanking</p>
+          <dl className="divide-y divide-slate-100">
+            <Copiar rotulo="Entidade" valor={PAGAMENTO_EMPRESA.entidade} />
+            <Copiar rotulo="Referência" valor={refMb} mostrar={em3(refMb)} />
+            <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+          </dl>
+        </div>
+        {jaPaguei}
+      </>}
+      {metodo === "Transferência" && <>
+        <div className="rounded-xl border border-slate-200 px-4 py-1">
+          <p className="pt-2 text-sm font-semibold">Transferência bancária</p>
+          <dl className="divide-y divide-slate-100">
+            <Copiar rotulo="IBAN" valor={PAGAMENTO_EMPRESA.iban.replace(/\s/g, "")} mostrar={PAGAMENTO_EMPRESA.iban} />
+            <Copiar rotulo="Descritivo" valor={numero} />
+            <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+          </dl>
+          <p className="pb-2 text-sm text-slate-500">Titular: {PAGAMENTO_EMPRESA.titular}. Dados de exemplo neste protótipo.</p>
+        </div>
+        {jaPaguei}
+      </>}
+      {metodo === "Débito direto" && (
+        <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+          <p className="text-sm font-semibold">Débito direto na sua conta</p>
+          <p className="text-sm text-slate-600">Debitamos {montante} € a {vence}, e as próximas prestações no vencimento de cada fatura. Pode cancelar no seu banco.</p>
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">IBAN da sua conta</span>
+            <input value={ibanCli} onChange={(ev) => setIbanCli(ev.target.value)} placeholder="PT50 0000 0000 0000 0000 0000 0" inputMode="text" autoComplete="off"
+              aria-invalid={ibanCli.trim() !== "" && !ibanOk} aria-describedby={ibanCli.trim() !== "" && !ibanOk ? `iban-erro-${numero}` : undefined} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] tabular-nums outline-none focus:border-slate-900" />
+          </label>
+          {ibanCli.trim() !== "" && !ibanOk && <p id={`iban-erro-${numero}`} className="-mt-2 text-sm text-red-700">Um IBAN português tem PT50 e 21 dígitos.</p>}
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">Titular da conta</span>
+            <input value={nomeConta} onChange={(ev) => setTitularCli(ev.target.value)} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
+          </label>
+          <label className="flex items-start gap-3 text-sm text-slate-700">
+            <input type="checkbox" checked={autorizo} onChange={(ev) => setAutorizo(ev.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-slate-900" />
+            Autorizo a {PAGAMENTO_EMPRESA.titular} a debitar na minha conta os valores das faturas deste contrato (autorização SEPA).
+          </label>
+          <Botao disabled={!ibanOk || !autorizo || !nomeConta.trim()} onClick={() => autorizar(ibanCurto(ibanCli), nomeConta)}>Autorizar o débito</Botao>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
   const { S, A, run } = ctx;
   const [doc, setDoc] = useState<string | null>(null);
@@ -120,11 +217,6 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   const [pedirContrato, setPedirContrato] = useState(false);
   const [cls, setCls] = useState<Record<string, string>>({});
   const [texto, setTexto] = useState("");
-  const [ref, setRef] = useState("");
-  // o débito direto (21/10): o IBAN e o titular da conta do cliente, e a autorização
-  const [ibanCli, setIbanCli] = useState("");
-  const [titularCli, setTitularCli] = useState<string | null>(null);
-  const [autorizo, setAutorizo] = useState(false);
   const [verProposta, setVerProposta] = useState(false);
   const o = d.orc, p = d.obra.plano, nome = d.nome.split(" ")[0];
   const T = o ? totais(d, S) : null;
@@ -135,90 +227,22 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   // o que mais espera pelo cliente, depois do contrato: adendas e o pagamento
   const outros: { id: string; t: string; sub: string; corpo: ReactNode }[] = [];
   if (d.fin.fatura && !d.fin.pago && T) {
-    // 15/10: a fatura à vista e os dados para pagar (Multibanco ou transferência), cada um com o botão de copiar
+    // 15/10: a fatura à vista e os dados para pagar, cada um com o botão de copiar; 21/10: o cliente escolhe a forma de pagar
     const ft = d.fin.fatura, t0 = tranches(d, T.total)[0];
-    const ddmm = ft.q.match(/^(\d{2})\/(\d{2})/);
-    const emitida = ddmm ? new Date(new Date().getFullYear(), Number(ddmm[2]) - 1, Number(ddmm[1])) : new Date();
-    const montante = eur(t0.v), refMb = referenciaMb(d.id, ft.n), vence = vencimento(emitida, d.f.vencimento || "15 dias");
-    // 21/10: o cliente escolhe a forma de pagar e vê só os dados dessa
-    const metodo = metodoDe(d.f.metodo);
-    const jaPaguei = (
-      <div className="space-y-2 border-t border-slate-200 pt-4">
-        <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
-        <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder={metodo === "Referência MB" ? "N.º do talão ou do pagamento (opcional)" : "Referência ou n.º da transferência (opcional)"} aria-label="Referência do pagamento" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
-        <Botao onClick={() => fazer(() => A.avisarPagamento(d.id, ref))}>Já paguei</Botao>
-      </div>
-    );
-    const ibanOk = ibanValido(ibanCli);
+    const vence = vencimento(emitidaEm(ft.q), d.f.vencimento || "15 dias");
     outros.push({
       id: "pag", t: `Pagar a fatura ${ft.n}`, sub: `${t0.l} · vence a ${vence}`,
-      corpo: d.f.comprovativo
-        ? <p className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />
-            {d.f.metodo === "Débito direto" && d.f.debito_iban ? `Débito direto autorizado na conta ${d.f.debito_iban}. O valor é debitado a ${vence}.` : `Comprovativo enviado (${d.f.comprovativo}). Estamos a confirmar.`}</p>
-        : <div className="space-y-4">
-            <div className="flex items-end justify-between gap-3">
-              <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
-              <button type="button" onClick={() => setDoc("fatura")} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-slate-900 underline-offset-4 hover:underline">
-                <FileText className="h-4 w-4" aria-hidden="true" />Ver a fatura
-              </button>
-            </div>
-            <div className="space-y-2">
-              <p className="text-[15px] font-medium">Como quer pagar?</p>
-              <div role="radiogroup" aria-label="Como quer pagar" className="grid grid-cols-3 gap-2">
-                {METODOS_PAGAMENTO.map((m) => (
-                  <button key={m} type="button" role="radio" aria-checked={metodo === m} onClick={() => run(() => A.escolherMetodo(d.id, m))}
-                    className={cn("min-h-12 rounded-xl border px-2 text-[14px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2",
-                      metodo === m ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800 hover:border-slate-500")}>
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {metodo === "Referência MB" && <>
-              <div className="rounded-xl border border-slate-200 px-4 py-1">
-                <p className="pt-2 text-sm font-semibold">Multibanco ou homebanking</p>
-                <dl className="divide-y divide-slate-100">
-                  <Copiar rotulo="Entidade" valor={PAGAMENTO_EMPRESA.entidade} />
-                  <Copiar rotulo="Referência" valor={refMb} mostrar={em3(refMb)} />
-                  <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
-                </dl>
-              </div>
-              {jaPaguei}
-            </>}
-            {metodo === "Transferência" && <>
-              <div className="rounded-xl border border-slate-200 px-4 py-1">
-                <p className="pt-2 text-sm font-semibold">Transferência bancária</p>
-                <dl className="divide-y divide-slate-100">
-                  <Copiar rotulo="IBAN" valor={PAGAMENTO_EMPRESA.iban.replace(/\s/g, "")} mostrar={PAGAMENTO_EMPRESA.iban} />
-                  <Copiar rotulo="Descritivo" valor={ft.n} />
-                  <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
-                </dl>
-                <p className="pb-2 text-sm text-slate-500">Titular: {PAGAMENTO_EMPRESA.titular}. Dados de exemplo neste protótipo.</p>
-              </div>
-              {jaPaguei}
-            </>}
-            {metodo === "Débito direto" && (
-              <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-                <p className="text-sm font-semibold">Débito direto na sua conta</p>
-                <p className="text-sm text-slate-600">Debitamos {montante} € a {vence}, e as próximas prestações no vencimento de cada fatura. Pode cancelar no seu banco.</p>
-                <label className="block space-y-1">
-                  <span className="text-sm text-slate-600">IBAN da sua conta</span>
-                  <input value={ibanCli} onChange={(ev) => setIbanCli(ev.target.value)} placeholder="PT50 0000 0000 0000 0000 0000 0" inputMode="text" autoComplete="off"
-                    aria-invalid={ibanCli.trim() !== "" && !ibanOk} aria-describedby={ibanCli.trim() !== "" && !ibanOk ? "iban-erro" : undefined} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] tabular-nums outline-none focus:border-slate-900" />
-                </label>
-                {ibanCli.trim() !== "" && !ibanOk && <p id="iban-erro" className="-mt-2 text-sm text-red-700">Um IBAN português tem PT50 e 21 dígitos.</p>}
-                <label className="block space-y-1">
-                  <span className="text-sm text-slate-600">Titular da conta</span>
-                  <input value={titularCli ?? d.nome} onChange={(ev) => setTitularCli(ev.target.value)} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
-                </label>
-                <label className="flex items-start gap-3 text-sm text-slate-700">
-                  <input type="checkbox" checked={autorizo} onChange={(ev) => setAutorizo(ev.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-slate-900" />
-                  Autorizo a {PAGAMENTO_EMPRESA.titular} a debitar na minha conta os valores das faturas deste contrato (autorização SEPA).
-                </label>
-                <Botao disabled={!ibanOk || !autorizo || !(titularCli ?? d.nome).trim()} onClick={() => fazer(() => A.autorizarDebito(d.id, ibanCurto(ibanCli), titularCli ?? d.nome))}>Autorizar o débito</Botao>
-              </div>
-            )}
-          </div>,
+      corpo: <PagarFatura numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
+        escolher={(m) => run(() => A.escolherMetodo(d.id, m))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t))} />,
+    });
+  }
+  // 21/10: cada adenda assinada tem a sua fatura (o Financeiro emite-a); paga-se aqui como a do contrato
+  for (const a of porPagar(d)) {
+    const ft = a.fatura!, vence = vencimento(emitidaEm(ft.q), "15 dias");
+    outros.push({
+      id: "pag-" + a.n, t: `Pagar a fatura ${ft.n}`, sub: `Adenda ${a.n} · vence a ${vence}`,
+      corpo: <PagarFatura numero={ft.n} montante={eur(totalComIva(a.linhas))} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={a.pag ?? {}} titular={d.nome} verFatura={() => setDoc(a.n)}
+        escolher={(m) => run(() => A.escolherMetodo(d.id, m, a.n))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r, a.n))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t, a.n))} />,
     });
   }
 

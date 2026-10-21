@@ -26,6 +26,7 @@ import {
 import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
 import { lerFoto } from "./ObraOperacoes";
 import { AvisosDoTecnico } from "./AvisosTecnico";
+import { RegistarImprevisto } from "./ImprevistosObra";
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
@@ -110,7 +111,9 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   const corr = t.corrige != null, orig = corr ? p.tasks[t.corrige!] : null;
   const [abertoAntes, setAbertoAntes] = useState(ex === "por fazer");
   const [hist, setHist] = useState(false);
-  const [problema, setProblema] = useState<string | null>(null);
+  // 21/10: uma só porta para os problemas: o imprevisto (impede, atrasa) ou só avisar o responsável (ImprevistosObra.tsx)
+  const [problema, setProblema] = useState(false);
+  const im = t.bloqueio ? d.obra.imprevistos?.find((x) => x.id === t.bloqueio) : undefined;
   const [mais, setMais] = useState(false);
   const todos = feitos.length === I.passos.length;
 
@@ -143,6 +146,11 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           <p className="flex items-start gap-2 rounded-xl bg-destructive/[0.07] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" /><span><b className="font-medium">{RESPONSAVEL_OBRA.n.split(" ")[0]} pediu uma correção:</b> {t.exec.motivo}. Corrija e envie um novo registo.</span></p>
         )}
 
+        {im && (
+          <p role="status" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/[0.06] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+            <span><b className="font-semibold">Parada por um imprevisto:</b> {im.texto}. Não avance nesta tarefa: {im.estado === "proposta" ? "o cliente está a decidir a proposta" : im.estado === "recusado" ? "o responsável está a decidir" : "o responsável prepara a proposta ao cliente"}. Recebe um aviso quando puder continuar.</span></p>
+        )}
+
         {/* 1. antes de começar */}
         <section aria-labelledby={`antes-${ti}`}>
           <button type="button" onClick={() => setAbertoAntes(!abertoAntes)} aria-expanded={abertoAntes} className="flex min-h-11 w-full items-center justify-between gap-3 text-left">
@@ -152,14 +160,14 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           {abertoAntes && (
             <div className="mt-2 space-y-4 animate-in fade-in-0 slide-in-from-top-1">
               <Preparacao d={d} ti={ti} />
-              {ex === "por fazer" && (
+              {ex === "por fazer" && !im && (
                 <Button size="lg" className="w-full sm:w-auto" onClick={() => run(() => { A.comecarTarefa(d.id, ti); setAbertoAntes(false); })}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />Começar a tarefa</Button>
               )}
             </div>
           )}
         </section>
 
-        {ex !== "por fazer" && ex !== "feita" && (
+        {ex !== "por fazer" && ex !== "feita" && !im && (
           <>
             {/* 2. o passo a passo */}
             <section aria-labelledby={`passos-${ti}`} className="border-t border-border pt-5">
@@ -217,24 +225,10 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           <button type="button" onClick={() => setHist(!hist)} aria-expanded={hist} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             {hist ? "Esconder o histórico" : `Histórico da tarefa (${enviosDe(t).length})`}<ChevronDown className={cn("h-4 w-4 transition-transform", hist && "rotate-180")} aria-hidden="true" />
           </button>
-          {problema == null && <button type="button" onClick={() => setProblema("")} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Reportar um problema</button>}
+          {!problema && <button type="button" onClick={() => setProblema(true)} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Registar imprevisto</button>}
         </div>
         {hist && <div className="animate-in fade-in-0"><HistoricoTarefa t={t} p={p} /></div>}
-        {problema != null && (
-          <div className="space-y-2 rounded-xl border border-border p-3 animate-in fade-in-0">
-            <p className="text-[15px] font-medium">O que aconteceu?</p>
-            <div className="flex flex-wrap gap-2">
-              {["Falta material", "Encontrei um problema escondido", "O cliente não está", "Preciso de ajuda"].map((m) => (
-                <button key={m} type="button" aria-pressed={problema === m} onClick={() => setProblema(m)} className={cn("min-h-10 rounded-full border px-3 text-[15px]", problema === m ? "border-foreground bg-foreground text-background" : "border-input hover:border-foreground/40")}>{m}</button>
-              ))}
-            </div>
-            <input value={problema} onChange={(e) => setProblema(e.target.value)} aria-label="Descreva o problema" placeholder="Ou descreva" className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-            <div className="flex gap-2">
-              <Button variant="ghost" onClick={() => setProblema(null)}>Cancelar</Button>
-              <Button variant="outline" disabled={!problema.trim()} onClick={() => { run(() => A.ocorrencia(d.id, `${t.nome}: ${problema}`)); setProblema(null); }}>Enviar ao responsável</Button>
-            </div>
-          </div>
-        )}
+        {problema && <RegistarImprevisto ctx={ctx} d={d} ti={ti} fechar={() => setProblema(false)} />}
       </div>
     </article>
   );

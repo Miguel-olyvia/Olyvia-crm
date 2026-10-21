@@ -255,6 +255,24 @@ export function preverAjuste(p: Plano, ti: number, m: AjusteVivo): { fimAntes: n
   if (n.tec !== t.tec) partes.push(`passa para ${TECS.find((x) => x.id === n.tec)?.n ?? "outro técnico"}`);
   return { fimAntes: fimDe(p.tasks), fimDepois: fimDe(c.tasks), mexe, texto: partes.length ? `${t.nome}: ${partes.join(", ")}` : "" };
 }
+/**
+ * 21/10: os ajustes seguidos à mesma tarefa juntam-se num só, com o efeito líquido ("Canalização: 1 → 2 dias" em vez de "1 → 3" e depois
+ * "3 → 2"): o fim de antes é o do primeiro, o de depois é o do último, e os motivos juntam-se. A lista vem do mais recente para o mais antigo.
+ */
+export function juntarAjustes(L: Alteracao[]): (Alteracao & { n: number })[] {
+  const out: (Alteracao & { n: number })[] = [];
+  const nome = (a: Alteracao) => a.t.split(":")[0];
+  for (const a of [...L].reverse()) {
+    const ult = out[out.length - 1];
+    if (ult && nome(ult) === nome(a) && !a.t.startsWith("Imprevisto")) {
+      const ini = ult.t.match(/: (\S+) → /), fim = a.t.match(/ → (.+)$/);
+      const t = ini && fim && ult.t.match(/ → /) && a.t.match(/: \S+ → /) ? `${nome(a)}: ${ini[1]} → ${fim[1]}` : a.t;
+      const motivos = [...new Set([...ult.motivo.split(" · "), a.motivo])].join(" · ");
+      out[out.length - 1] = { ...a, t, motivo: motivos, fimAntes: ult.fimAntes, n: ult.n + 1, cliente: ult.cliente || a.cliente };
+    } else out.push({ ...a, n: 1 });
+  }
+  return out.reverse();
+}
 /** "5,5 h". */
 export const horasTxt = (h: number) => `${String(Math.round(h * 100) / 100).replace(".", ",")} h`;
 /** O aviso ao cliente, em linguagem simples (sem técnicos nem horas). */

@@ -2,12 +2,14 @@
 // O comercial escolhe os serviços e as quantidades; a adenda vai ao cliente para assinar; assinada, as tarefas entram no
 // plano da obra (no fim da fase de cada serviço, ou no fim da obra) e o plano volta a aprovação das Operações, se já estava
 // aprovado. Fatura-se à parte (só mão de obra e consumíveis dos serviços: IVA a 6%).
-import { TECS, diaDeFerias, garantirServico, servicoDoCatalogo, totaisIva, r2, IVA_MO, type Assinatura, type Estado, type Negocio, type Plano, type Tarefa } from "./motor";
+import { TECS, diaDeFerias, garantirServico, servicoDoCatalogo, totaisIva, r2, IVA_MO, type Assinatura, type Estado, type MatTarefa, type Negocio, type Plano, type Tarefa } from "./motor";
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa } from "./preparacaoObra";
 
-export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string }
+export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string;
+  /** 21/10: uma linha livre (de um imprevisto): o trabalho descrito à mão, com as horas e os materiais escolhidos */
+  livre?: true; mats?: MatTarefa[] }
 export interface Adenda {
   /** 21/10: "recusada" pelo cliente no portal (com o porquê) ou "anulada" pelo comercial antes da assinatura; o número não se reutiliza. */
   n: string; estado: "enviada" | "assinada" | "recusada" | "anulada"; criada: string; assinada?: string;
@@ -15,8 +17,20 @@ export interface Adenda {
   motivo: string; linhas: LinhaAdenda[];
   /** 15/10: a assinatura do cliente no portal (desenho ou Chave Móvel Digital), como no contrato. */
   assinatura?: Assinatura;
+  /** 21/10: nasceu de um imprevisto na obra (imprevistos.ts): o que o técnico encontrou, onde e a fotografia */
+  origem?: { imprevisto: string; texto: string; onde: string; foto?: string };
+  /** 21/10: a fatura própria da adenda (o Financeiro emite-a depois da assinatura) e o recibo, com o pagamento validado */
+  fatura?: { n: string; q: string }; recibo?: { n: string; q: string };
+  /** 21/10: o pagamento no portal: o método escolhido, o comprovativo e, no débito direto, o IBAN (últimos 4) e o titular */
+  pag?: Record<string, string>;
 }
+/** 21/10: as adendas assinadas por faturar e as faturadas com o pagamento por validar (para o Financeiro). */
+export const porFaturar = (d: Negocio) => assinadas(d).filter((a) => !a.fatura);
+export const pagamentoPorValidar = (d: Negocio) => assinadas(d).filter((a) => a.fatura && !a.recibo && !!a.pag?.comprovativo);
+export const porPagar = (d: Negocio) => assinadas(d).filter((a) => a.fatura && !a.recibo);
 export const MOTIVOS_ADENDA = ["O cliente pediu", "Surpresa em obra", "Erro de medição"] as const;
+/** 21/10: o motivo das adendas que nascem de um imprevisto registado na obra. */
+export const MOTIVO_IMPREVISTO = "Imprevisto na obra";
 /** 21/10: porque o cliente não aceita a adenda, nas palavras dele (no portal). */
 export const MOTIVOS_RECUSA_ADENDA = ["O preço", "Não preciso destes trabalhos", "O prazo", "Quero falar primeiro"];
 

@@ -16,7 +16,8 @@ import { faltaParaEncerrar } from "./encerrarObra";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
-import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
+import { MOTIVO_IMPREVISTO, diasAdenda, pagamentoPorValidar, porFaturar, juntarAoPlano, linhaAdenda, totalAdenda, totalComIva, type Adenda, type LinhaAdenda } from "./adendas";
+import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { anularAjustesDaTarefa, encomendarAjustes } from "./encomendasAjuste";
@@ -250,7 +251,8 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa;
   /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number;
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
-  /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[] }
+  /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
+  /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
@@ -309,6 +311,8 @@ export interface Negocio {
     ec?: EncCliente | null;
     /** 21/10: as encomendas de cliente de ajuste, depois da inicial: materiais novos de tarefas novas, adendas ou mudados à mão (encomendasAjuste.ts) */
     ecsAjuste?: EcAjuste[];
+    /** 21/10: os imprevistos a meio da obra (imprevistos.ts): o que se encontrou, a gravidade, as tarefas afetadas e a proposta ao cliente */
+    imprevistos?: Imprevisto[];
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
     /** 15/10: o auto de receção (por assinar → assinado) */
@@ -1080,6 +1084,15 @@ export function minhas(S: Estado, role: Papel) {
       for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
     }
     else if (p.who === role && !p.wait && !p.done) L.push({ d, p });
+    // 21/10: os imprevistos da obra (o gestor propõe ou decide; o comercial fala com o cliente que recusou) e as faturas das adendas
+    for (const im of imprevistosPorTratar(d)) {
+      if (role === "operacoes") L.push({ d, p: im.estado === "aberto"
+        ? { t: `Imprevisto · ${im.texto}`, sub: `${im.grav === "impede" ? "Tarefas paradas" : `O plano andou ${im.atraso ?? 0} ${im.atraso === 1 ? "dia" : "dias"}`}. Faça a proposta ao cliente.`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
+        : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
+      if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
+    }
+    if (role === "financeiro" && porFaturar(d).length) L.push({ d, p: { t: "Emitir a fatura da adenda", sub: porFaturar(d).map((a) => `${a.n} · ${eur(totalComIva(a.linhas))} €`).join(", "), btn: "Emitir a fatura", act: "faturarAdendas", who: "financeiro" } });
+    if (role === "financeiro" && pagamentoPorValidar(d).length) L.push({ d, p: { t: "Validar o pagamento da adenda", sub: pagamentoPorValidar(d).map((a) => `${a.fatura!.n} · ${a.pag!.comprovativo}`).join(", "), btn: "Validar o pagamento", act: "validarPagamentosAdenda", who: "financeiro" } });
   }
   return L;
 }
@@ -1234,6 +1247,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     // 21/10: os materiais das tarefas juntadas antes do pagamento vão numa encomenda de ajuste, logo a seguir
     ajustar(d, "materiais das tarefas novas do plano");
     return true;
+  };
+  /** 21/10: onde fica o pagamento no portal: o do negócio (a fatura do sinal) ou o de uma adenda faturada. Null se não há nada a pagar. */
+  const alvoPag = (d: Negocio, adenda?: string): { f: Record<string, string>; n: string } | null => {
+    if (!adenda) return d.fin.fatura && !d.fin.pago ? { f: d.f, n: d.fin.fatura.n } : null;
+    const a = d.adendas?.find((x) => x.n === adenda);
+    return a?.fatura && !a.recibo ? { f: (a.pag ??= {}), n: a.fatura.n } : null;
   };
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
   const ajustar = (d: Negocio, motivo: string): boolean => {
@@ -1580,16 +1599,24 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " emitida", sub: "Já está no Inventário", kind: "ok" });
     },
     /** Trabalhos a mais (contrato assinado, obra por acabar): a adenda vai ao cliente para assinar. */
-    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string) {
+    criarAdenda(id: number, itens: { sid: string; q: number }[], motivo: string, extra?: { livres?: LinhaLivre[]; origem?: Adenda["origem"] }): string | null {
       const d = deal(id);
-      if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return; }
-      if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return; }
+      if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return null; }
+      if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return null; }
       const linhas = itens.filter((x) => Number.isFinite(x.q) && x.q > 0).map((x) => linhaAdenda(S, x.sid, r2(x.q))).filter((x): x is NonNullable<typeof x> => !!x);
-      if (!linhas.length) return;
-      const n = "AD 2026/" + d.id + "-" + ((d.adendas?.length ?? 0) + 1);
-      (d.adendas ??= []).push({ n, estado: "enviada", criada: agora(), motivo, linhas });
+      const k = (d.adendas?.length ?? 0) + 1;
+      // 21/10: as linhas livres (de um imprevisto) entram em uso como um serviço da obra: as horas, o preço e os materiais escolhidos
+      (extra?.livres ?? []).filter((x) => x.n.trim() && x.h > 0).forEach((x, j) => {
+        const sid = `livre-${d.id}-${k}-${j + 1}`, cons = r2(x.mats.reduce((a, m) => a + (m.preco ?? 0) * m.q, 0));
+        S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: 25, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil };
+        linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, livre: true, mats: x.mats.map((m) => ({ ...m })) });
+      });
+      if (!linhas.length) return null;
+      const n = "AD 2026/" + d.id + "-" + k;
+      (d.adendas ??= []).push({ n, estado: "enviada", criada: agora(), motivo, linhas, ...(extra?.origem ? { origem: extra.origem } : {}) });
       log(d, "Adenda " + n + " enviada ao cliente: " + linhas.map((x) => x.n.toLowerCase()).join(", ") + " · +" + eur(totalAdenda(linhas)) + " € · +" + diasAdenda(linhas) + " dias");
       avisar({ msg: "Adenda " + n + " enviada", sub: "Está no portal do cliente para assinar", kind: "ok" });
+      return n;
     },
     /** O cliente assina a adenda (no portal): as tarefas entram no plano e o plano volta a aprovação, se já estava aprovado. */
     assinarAdenda(id: number, n: string) {
@@ -1598,10 +1625,31 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       a.estado = "assinada"; a.assinada = agora();
       log(d, "Adenda " + n + " assinada pelo cliente");
       if (p && p.estado !== "concluída") {
+        const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
         const novas = juntarAoPlano(p, a);
-        // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço) vão numa encomenda de ajuste
-        novas.forEach((t, i) => { const x = a.linhas[i]; if (x) { t.mats = materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+        // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço, ou os escolhidos na linha livre) vão numa encomenda de ajuste
+        novas.forEach((t, i) => { const x = a.linhas[i]; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+        // 21/10: a de um imprevisto resolve-se já (a partir de hoje), antes das tarefas que ele parou
+        const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
+        if (im && p.estado === "em curso") {
+          // o resto do plano não anda por juntar ao fim da fase: só as tarefas paradas (e o que vem depois delas) andam, a seguir
+          for (const [t, dia] of antes) t.dia = dia;
+          for (const t of novas) mudarInicio(p, p.tasks.indexOf(t), p.dia);
+        }
         ajustar(d, "adenda " + n);
+        if (im) {
+          im.estado = "aprovado";
+          // as paradas seguem depois do trabalho novo: as que ainda não começaram começam a seguir, as começadas ficam mais longas
+          const fimNovas = Math.max(...novas.map((t) => t.dia + t.dur));
+          for (const t of paradasPor(p, im.id)) {
+            const ti = p.tasks.indexOf(t);
+            if (t.dia >= fimNovas) continue;
+            if (t.dia > p.dia || p.estado !== "em curso") mudarInicio(p, ti, fimNovas);
+            else aplicarAjuste(p, ti, { dur: fimNovas - t.dia + Math.max(1, t.dia + t.dur - p.dia) });
+          }
+          const nPar = desbloquear(p, im.id);
+          log(d, `Imprevisto ${im.id} aprovado pelo cliente (${n})${nPar ? ` · ${nPar} ${nPar === 1 ? "tarefa parada segue" : "tarefas paradas seguem"} depois do trabalho novo` : ""}`);
+        }
         const voltou = p.estado === "aprovado";
         if (voltou) p.estado = "por aprovar";
         log(d, "Plano: " + a.linhas.length + " " + (a.linhas.length === 1 ? "tarefa" : "tarefas") + " da adenda juntas" + (voltou ? " · volta a aprovação das Operações" : ""), voltou ? "w" : "a");
@@ -1631,26 +1679,26 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: "O cliente recusou a proposta", sub: d.motivoPerda, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; o.recusada = null; log(d, "Recusa anulada pelo comercial"); }) } });
     },
     /** No portal do cliente: avisa que pagou, com a referência (o Financeiro confirma na conta e valida). */
-    avisarPagamento(id: number, ref: string) {
-      const d = deal(id);
-      if (!d.fin.fatura || d.fin.pago) return;
-      d.f.comprovativo = ref.trim() || "Comprovativo enviado no portal";
-      if (!d.f.data_pag) d.f.data_pag = new Date().toISOString().slice(0, 10);
-      log(d, "O cliente avisou no portal que pagou · " + d.f.comprovativo);
+    avisarPagamento(id: number, ref: string, adenda?: string) {
+      const d = deal(id), x = alvoPag(d, adenda);
+      if (!x) return;
+      x.f.comprovativo = ref.trim() || "Comprovativo enviado no portal";
+      if (!x.f.data_pag) x.f.data_pag = new Date().toISOString().slice(0, 10);
+      log(d, `O cliente avisou no portal que pagou${adenda ? " a fatura " + x.n : ""} · ` + x.f.comprovativo);
       avisar({ msg: "Comprovativo enviado", sub: "O Financeiro confirma na conta e valida o pagamento (sai o recibo)", kind: "ok" });
     },
     /** No portal do cliente (21/10): escolhe como paga a fatura (transferência, referência MB ou débito direto). */
-    escolherMetodo(id: number, metodo: string) {
-      const d = deal(id);
-      if (!d.fin.fatura || d.fin.pago || d.f.comprovativo || d.f.metodo === metodo) return;
-      d.f.metodo = metodo;
-      log(d, "O cliente escolheu pagar por " + metodo.toLowerCase());
+    escolherMetodo(id: number, metodo: string, adenda?: string) {
+      const d = deal(id), x = alvoPag(d, adenda);
+      if (!x || x.f.comprovativo || x.f.metodo === metodo) return;
+      x.f.metodo = metodo;
+      log(d, `O cliente escolheu pagar${adenda ? " a fatura " + x.n : ""} por ` + metodo.toLowerCase());
     },
     /** No portal do cliente (21/10): autoriza o débito direto na sua conta; o valor é debitado no vencimento e o Financeiro valida. */
-    autorizarDebito(id: number, ibanCurto: string, titular: string) {
-      const d = deal(id);
-      if (!d.fin.fatura || d.fin.pago) return;
-      Object.assign(d.f, { metodo: "Débito direto", debito_iban: ibanCurto, debito_titular: titular.trim(), comprovativo: "Débito direto autorizado · " + ibanCurto });
+    autorizarDebito(id: number, ibanCurto: string, titular: string, adenda?: string) {
+      const d = deal(id), x = alvoPag(d, adenda);
+      if (!x) return;
+      Object.assign(x.f, { metodo: "Débito direto", debito_iban: ibanCurto, debito_titular: titular.trim(), comprovativo: "Débito direto autorizado · " + ibanCurto });
       log(d, `O cliente autorizou o débito direto na conta ${ibanCurto} (${titular.trim()})`);
       avisar({ msg: "Débito direto autorizado", sub: "O valor é debitado no vencimento; o Financeiro confirma e sai o recibo", kind: "ok" });
     },
@@ -1763,6 +1811,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     comecarTarefa(id: number, ti: number) {
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t || d.obra.plano!.estado !== "em curso") return;
+      // 21/10: parada por um imprevisto: espera pela decisão do cliente
+      if (t.bloqueio) { avisar({ msg: "Tarefa parada por um imprevisto", sub: "Espere pela decisão do cliente", kind: "bad" }); return; }
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
       e.estado = "em curso"; t.exec = e;
     },
@@ -1885,7 +1935,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     /** O registo do dia do técnico: as horas de hoje, as fotografias e a descrição. Com `feita`, pede a validação. */
     enviarRegisto(id: number, ti: number, m: { horas: number; fotos: string[]; nota: string; feita?: boolean }) {
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
-      if (!p || !t || p.estado !== "em curso") return;
+      if (!p || !t || p.estado !== "em curso" || t.bloqueio) return;
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
       if (e.estado === "validada" || e.estado === "feita") return;
       const nota = m.nota.trim(), horas = Math.max(0, Math.round(m.horas * 2) / 2);
@@ -2122,6 +2172,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const m = motivo.trim();
       Object.assign(a, { estado: "recusada", recusada: agora(), recusa: m || undefined });
       log(d, "O cliente não aceitou a adenda " + n + (m ? ": «" + m + "»" : ""), "w");
+      // 21/10: a de um imprevisto volta ao gestor, que decide o que fazer (imprevistos.ts: DECISOES)
+      const im = a.origem ? d.obra.imprevistos?.find((x) => x.id === a.origem!.imprevisto) : undefined;
+      if (im) { im.estado = "recusado"; log(d, `Imprevisto ${im.id}: o cliente não aceitou a proposta · o gestor da obra decide`, "w"); }
       avisar({ msg: "Resposta enviada", sub: "O contrato e o plano da obra ficam como estavam", kind: "ok" });
     },
     /** 21/10: o comercial retira a adenda enviada (ainda não assinada): sai do portal do cliente. */
@@ -2131,6 +2184,82 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       a.estado = "anulada";
       log(d, "Adenda " + n + " retirada do portal do cliente");
       avisar({ msg: "Adenda " + n + " retirada", sub: "Já não aparece no portal do cliente", kind: "ok" });
+    },
+    /* -------------------------------------------- 21/10: os imprevistos a meio da obra (imprevistos.ts) e a fatura das adendas */
+    /** O técnico (no Hoje) ou o gestor (na página da obra) registam o que encontraram: impede (as tarefas param) ou atrasa (o plano anda). */
+    registarImprevisto(id: number, m: { texto: string; onde: string; foto?: string; grav: Gravidade; tarefas: number[]; dias?: number }): string | null {
+      const d = deal(id), p = d.obra.plano, texto = m.texto.trim();
+      if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return null; }
+      if (S.role !== "tecnico" && S.role !== "operacoes") { avisar({ msg: "Quem regista é a equipa da obra", sub: "O técnico no Hoje dele, ou o gestor das Operações", kind: "bad" }); return null; }
+      if (!texto || !m.tarefas.length) { avisar({ msg: "Falta o que encontrou e as tarefas afetadas", kind: "bad" }); return null; }
+      const quem = S.role === "tecnico" ? TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico" : "Filipe Rocha";
+      const im: Imprevisto = { id: novoIdImprevisto(d), q: agora(), dia: p.dia, quem, texto, onde: m.onde.trim(), foto: m.foto, grav: m.grav, tarefas: m.tarefas.map((ti) => p.tasks[ti]?.nome).filter(Boolean), estado: "aberto" };
+      let fim: { antes: string; depois: string } | undefined;
+      if (m.grav === "impede") bloquear(p, m.tarefas, im.id);
+      else {
+        const dias = Math.max(1, Math.round(m.dias ?? 1)), r = atrasar(p, m.tarefas, dias);
+        im.atraso = dias;
+        fim = { antes: rotuloDia(p, r.fimAntes - 1), depois: rotuloDia(p, r.fimDepois - 1) };
+      }
+      (d.obra.imprevistos ??= []).push(im);
+      for (const ti of m.tarefas) if (p.tasks[ti]?.tec) avisarTecnico(p, ti, `${p.tasks[ti].nome}: ${m.grav === "impede" ? "parada por um imprevisto" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`} (${texto})`, agora());
+      // o cliente vê no portal (as novidades da obra), em linguagem simples
+      const fimTxt = fim ?? { antes: rotuloDia(p, fimDe(p.tasks) - 1), depois: rotuloDia(p, fimDe(p.tasks) - 1) };
+      (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Imprevisto: ${texto}`, motivo: MOTIVO_IMPREVISTO, fimAntes: fimTxt.antes, fimDepois: fimTxt.depois, cliente: true, avisoCliente: avisoClienteImprevisto(im, fim) });
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `Imprevisto${im.onde ? " (" + im.onde + ")" : ""}: ${texto} · ${m.grav === "impede" ? "impede de continuar" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}`, k: "ocorrencia", ...(m.foto ? { fotos: [m.foto] } : {}) });
+      log(d, `Imprevisto ${im.id} registado por ${quem}: ${texto} · ${m.grav === "impede" ? `${im.tarefas.join(", ")} parad${im.tarefas.length === 1 ? "a" : "as"}` : `o plano anda ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}`, "w");
+      avisar({ msg: "Imprevisto registado", sub: m.grav === "impede" ? "As tarefas afetadas param. O gestor prepara a proposta ao cliente" : `O plano andou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"} · o cliente foi avisado`, kind: "ok" });
+      return im.id;
+    },
+    /** O gestor transforma o imprevisto em trabalho extra: uma adenda (origem «imprevisto na obra») que vai ao portal do cliente. */
+    proporImprevisto(id: number, imId: string, itens: { sid: string; q: number }[], livres: LinhaLivre[]): string | null {
+      const d = deal(id), im = d.obra.imprevistos?.find((x) => x.id === imId);
+      if (!im || (im.estado !== "aberto" && im.estado !== "recusado")) return null;
+      if (S.role !== "operacoes" && S.role !== "comercial" && S.role !== "direcao") { avisar({ msg: "Quem propõe é o gestor da obra", kind: "bad" }); return null; }
+      const n = A.criarAdenda(id, itens, MOTIVO_IMPREVISTO, { livres, origem: { imprevisto: im.id, texto: im.texto, onde: im.onde, ...(im.foto ? { foto: im.foto } : {}) } });
+      if (!n) return null;
+      Object.assign(im, { estado: "proposta", adenda: n });
+      delete im.decisao;
+      log(d, `Imprevisto ${im.id}: proposta ${n} enviada ao cliente`);
+      return n;
+    },
+    /** Com a proposta recusada (ou sem proposta), o gestor decide: seguir sem o trabalho, fazer outra proposta ou suspender a obra. */
+    decidirImprevisto(id: number, imId: string, k: Decisao, nota = "") {
+      const d = deal(id), p = d.obra.plano, im = d.obra.imprevistos?.find((x) => x.id === imId);
+      if (!im || !p || im.estado === "aprovado" || im.estado === "fechado") return;
+      const D = DECISOES.find((x) => x.k === k)!;
+      im.decisao = D.t + (nota.trim() ? ` · ${nota.trim()}` : "");
+      if (k === "refazer") im.estado = "aberto";
+      else if (k === "seguir") { im.estado = "fechado"; desbloquear(p, im.id); }
+      else im.estado = "recusado";
+      log(d, `Imprevisto ${im.id}: ${im.decisao}`, k === "suspender" ? "x" : "w");
+      if (k !== "refazer") (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem: "Filipe Rocha", t: `Imprevisto: ${D.t.toLowerCase()}`, motivo: MOTIVO_IMPREVISTO,
+        fimAntes: rotuloDia(p, fimDe(p.tasks) - 1), fimDepois: rotuloDia(p, fimDe(p.tasks) - 1), cliente: true,
+        avisoCliente: k === "seguir" ? `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): seguimos a obra sem esse trabalho.` : `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): a obra fica suspensa até combinarmos consigo.` });
+      avisar({ msg: D.t, sub: k === "seguir" ? "As tarefas paradas continuam" : k === "refazer" ? "Faça a nova proposta no imprevisto" : "As tarefas ficam paradas", kind: "ok" });
+    },
+    /** O Financeiro emite a fatura própria de cada adenda assinada (vai para o portal do cliente, que paga com o método que escolher). */
+    faturarAdendas(id: number) {
+      const d = deal(id);
+      if (!exigePerm("finance.invoice")) return;
+      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
+      const L = (d.adendas ?? []).filter((a) => a.estado === "assinada" && !a.fatura);
+      for (const a of L) {
+        a.fatura = { n: "FT 2026/" + S.ft++, q: agora() };
+        log(d, `${a.fatura.n} emitida (adenda ${a.n}, ${eur(totalComIva(a.linhas))} € com IVA) e enviada ao portal do cliente`);
+      }
+      if (L.length) avisar({ msg: L.length === 1 ? `${L[0].fatura!.n} emitida` : `${L.length} faturas emitidas`, sub: "Da adenda · enviada ao portal do cliente", kind: "ok" });
+    },
+    /** O Financeiro confirma que o pagamento da adenda entrou: sai o recibo. */
+    validarPagamentosAdenda(id: number) {
+      const d = deal(id);
+      if (!exigePerm("finance.validate_payment")) return;
+      const L = (d.adendas ?? []).filter((a) => a.fatura && !a.recibo && a.pag?.comprovativo);
+      for (const a of L) {
+        a.recibo = { n: "RC 2026/" + S.rc++, q: agora() };
+        log(d, `Pagamento da adenda ${a.n} validado · ${a.recibo.n} emitido`);
+      }
+      if (L.length) avisar({ msg: L.length === 1 ? `Recibo ${L[0].recibo!.n} emitido` : `${L.length} recibos emitidos`, sub: "Pagamento da adenda validado", kind: "ok" });
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

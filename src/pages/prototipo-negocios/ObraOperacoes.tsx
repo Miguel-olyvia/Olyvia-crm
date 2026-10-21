@@ -33,7 +33,9 @@ import { DiaDaObra, FitaDias, HistoricoTarefa, Miniaturas, nomeTec } from "./Aco
 import { Conversa } from "./ConversaObra";
 import { pedirFrota } from "./frota/pontes";
 import { BarraTarefa, ExtrasTarefa, TarefasDoPlano } from "./PlanoInterativo";
-import { MOTIVOS_AJUSTE, TEMPOS_CORRECAO, duracaoMinima, enviosDe, inicioMinimoVivo, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, textoAvisoCliente } from "./trabalhoObra";
+import { MOTIVOS_AJUSTE, TEMPOS_CORRECAO, duracaoMinima, enviosDe, inicioMinimoVivo, juntarAjustes, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, textoAvisoCliente } from "./trabalhoObra";
+import { ImprevistosNaObra, RegistarImprevisto } from "./ImprevistosObra";
+import { imprevistosDe } from "./imprevistos";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "plano por aprovar", aprovado: "pronta a arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -489,6 +491,9 @@ function ParaEncerrar({ L, irPara, fecho, recolhida }: { L: PontoEncerrar[]; irP
 function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: Seccao) => void; verDia: (k: number) => void }) {
   const p = d.obra.plano!, PV = porValidar(p);
   const [todas, setTodas] = useState(false);
+  // 21/10: os imprevistos (o que espera pelo gestor ou pelo cliente) e registar um novo
+  const [registar, setRegistar] = useState(false);
+  const imp = imprevistosDe(d).filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
   const cli = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida);
   const corr = p.tasks.filter((t) => estadoDe(t) === "corrigir");
   const semReg: { t: Tarefa; k: number }[] = [];
@@ -497,10 +502,11 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
       if (!registouNoDia(t, k) && estadoDe(t) !== "validada" && estadoDe(t) !== "feita") semReg.push({ t, k });
   const ocorr = (d.obra.diario ?? []).filter((x) => x.k === "ocorrencia" && x.q.startsWith("hoje")).slice(-3);
   const prox = p.tasks.filter((t) => t.dia > p.dia && estadoDe(t) === "por fazer").sort((a, b) => a.dia - b.dia).slice(0, 3);
-  const nada = !PV.length && !cli.length && !semReg.length && !ocorr.length && !corr.length;
+  const nada = !PV.length && !cli.length && !semReg.length && !ocorr.length && !corr.length && !imp.length;
   const primeiro = (n: string | null) => nomeTec(n).split(" ")[0];
   return (
     <div className="mt-3 space-y-3">
+      <ImprevistosNaObra ctx={ctx} d={d} />
       {PV.slice(0, todas ? PV.length : 1).map((ti) => {
         const t = p.tasks[ti];
         return (
@@ -530,6 +536,9 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
       ))}
       {corr.map((t) => <LinhaAgora key={"c" + p.tasks.indexOf(t)} I={FileWarning} tom="mau" titulo={`${t.nome}: correção pedida`} texto={`À espera de ${primeiro(t.tec)}${t.exec?.motivo ? ` · ${t.exec.motivo}` : ""}`} />)}
       {nada && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Nada à espera de si.</p>}
+      {ctx.S.role === "operacoes" && (registar
+        ? <RegistarImprevisto ctx={ctx} d={d} fechar={() => setRegistar(false)} />
+        : <button type="button" onClick={() => setRegistar(true)} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Registar imprevisto</button>)}
       {!PV.length && prox.length > 0 && (
         <div>
           <p className="text-sm text-muted-foreground">A seguir no plano</p>
@@ -644,7 +653,8 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
 
           <ul aria-label="Tarefas da obra" className="relative py-2">
             {grupos.flatMap((g) => {
-              const L = p.tasks.map((t, i) => ({ t, i })).filter(({ t }) => !novo || (t.fase ?? 0) === g);
+              // 21/10: as correções desenham-se na linha da tarefa que corrigem (uma linha por trabalho, menos ruído)
+              const L = p.tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.corrige == null && (!novo || (t.fase ?? 0) === g));
               const cab = novo && g ? [
                 <li key={"f" + g} className="sticky left-4 pb-1 pt-3" style={{ width: linhaW }}>
                   <span className="inline-flex items-center gap-2 text-sm font-semibold"><span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g] }} aria-hidden="true" />Fase {g} · {FASES_OBRA[g - 1].curto}</span>
@@ -652,6 +662,7 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
               ] : [];
               return [...cab, ...L.map(({ t, i }) => {
                 const tec = TECS.find((x) => x.id === t.tec), c = C.some((x) => x.t === t), ex = estadoDe(t), aqui = aberta === i;
+                const cor_ = p.tasks.map((x, k) => ({ x, k })).filter(({ x }) => x.corrige === i);
                 const cor = novo && t.fase ? COR_FASE[t.fase] : "hsl(var(--primary))";
                 return (
                   <li key={i} data-fase={t.fase ?? 0} className="py-1">
@@ -661,7 +672,9 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
                       <Avatar id={t.tec} n={tec?.n ?? "?"} tam="h-6 w-6" />
                       <span className="min-w-0 flex-1 text-[15px] leading-snug"><span className="font-medium">{t.nome}</span>
                         <span className={cn("text-muted-foreground", c && "text-warning")}> · {tec ? tec.n.split(" ")[0] : "sem técnico"}{c ? " de férias" : ""}</span>
-                        {mexida(p, i) && <span className="text-muted-foreground"> · ajustada</span>}{t.nota && <NotebookPen className="ml-1 inline h-3.5 w-3.5 text-muted-foreground" aria-label="com nota" />}</span>
+                        {mexida(p, i) && <span className="text-muted-foreground"> · ajustada</span>}
+                        {cor_.length > 0 && <span className="text-destructive"> · com correção</span>}
+                        {t.bloqueio && <span className="font-medium text-destructive"> · parada (imprevisto)</span>}{t.nota && <NotebookPen className="ml-1 inline h-3.5 w-3.5 text-muted-foreground" aria-label="com nota" />}</span>
                       {p.estado === "em curso" || p.estado === "concluída" ? <ChipExec e={p.estado === "concluída" && ex !== "validada" ? "validada" : ex} />
                         : <span className="shrink-0 whitespace-nowrap text-sm tabular-nums text-muted-foreground">{dias(t.dur)} · {nfmt(t.h)} h</span>}
                     </button>
@@ -674,6 +687,13 @@ function PlanoGantt({ ctx, d, aberta, setAberta, muda, sel, setSel }: { ctx: Ctx
                         style={{ opacity: ex === "validada" || p.estado === "concluída" ? 0.55 : 1 }}>
                         {(ex === "validada" || p.estado === "concluída") && <Check className="absolute right-1.5 top-1 h-4 w-4 text-white" />}
                       </BarraTarefa>
+                      {cor_.map(({ x, k }) => (
+                        <button key={k} type="button" onClick={() => setAberta(aberta === k ? null : k)} aria-label={`${x.nome}, ${rotuloDia(p, x.dia)}`}
+                          className={cn("absolute top-0 h-7 rounded-md bg-destructive/85 text-left text-[11px] font-medium leading-7 text-white outline-none ring-offset-card focus-visible:ring-2 focus-visible:ring-foreground", estadoDe(x) === "validada" && "opacity-55", aberta === k && "ring-2 ring-foreground/70 ring-offset-2")}
+                          style={{ left: X(x.dia) + 2, width: Math.max(18, X(x.dur) * (x.dur === 1 && x.h < HORAS_DIA ? Math.max(0.3, x.h / HORAS_DIA) : 1) - 4) }}>
+                          <span className="block truncate px-1.5">correção</span>
+                        </button>
+                      ))}
                     </div>
                   </li>
                 );
@@ -1058,7 +1078,8 @@ function AjustarAoVivo({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: numbe
 
 /** Os ajustes feitos com a obra em curso, do mais recente para o mais antigo. */
 function AjustesFeitos({ d }: { d: Negocio }) {
-  const L = d.obra.alteracoes ?? [];
+  // 21/10: os ajustes seguidos à mesma tarefa num só, com o efeito líquido (menos ruído)
+  const L = juntarAjustes(d.obra.alteracoes ?? []);
   if (!L.length) return null;
   return (
     <div className="mt-4">
@@ -1066,7 +1087,7 @@ function AjustesFeitos({ d }: { d: Negocio }) {
       <ul className={cn(CARTAO, "mt-2 divide-y divide-border px-4")}>
         {L.map((a, k) => (
           <li key={k} className="py-3 text-[15px] animate-in fade-in-0">
-            <p>{a.t} <span className="text-muted-foreground">· {a.motivo}</span></p>
+            <p>{a.t} <span className="text-muted-foreground">· {a.motivo}{a.n > 1 ? ` · ${a.n} ajustes` : ""}</span></p>
             <p className="text-sm text-muted-foreground">{a.q} · {a.quem} · {a.fimAntes === a.fimDepois ? `o fim mantém-se a ${a.fimDepois}` : `fim: ${a.fimAntes} → ${a.fimDepois}`}{a.cliente ? " · cliente avisado no portal" : " · sem aviso ao cliente"}</p>
           </li>
         ))}

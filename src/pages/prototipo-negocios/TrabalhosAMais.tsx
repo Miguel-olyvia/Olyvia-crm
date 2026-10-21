@@ -68,6 +68,15 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                 </div>
                 <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", ESTADO[a.estado][1])}>{ESTADO[a.estado][0]}</span>
               </div>
+              {a.origem && <p className="mt-1 text-sm text-muted-foreground">Imprevisto na obra: {a.origem.texto}</p>}
+              {/* 21/10: a fatura própria da adenda, emitida pelo Financeiro depois da assinatura, e o pagamento no portal */}
+              {a.estado === "assinada" && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-[15px]">
+                  <span className="text-muted-foreground">Fatura: {a.recibo ? `${a.fatura!.n}, paga (${a.recibo.n})` : a.fatura ? `${a.fatura.n}, ${a.pag?.comprovativo ? `o cliente avisou: ${a.pag.comprovativo}` : "por pagar no portal"}` : "por emitir"}</span>
+                  {!a.fatura && S.role === "financeiro" && <Button size="sm" className="min-h-10" onClick={go(() => A.faturarAdendas(d.id))}>Emitir a fatura</Button>}
+                  {a.fatura && !a.recibo && a.pag?.comprovativo && S.role === "financeiro" && <Button size="sm" className="min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id))}>Validar o pagamento</Button>}
+                </div>
+              )}
               {a.estado === "recusada" && <p className="mt-2 text-[15px]">{a.recusa ? <>«{a.recusa}»</> : "Sem motivo."} <span className="text-sm text-muted-foreground">· {a.recusada}</span></p>}
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 {a.estado === "enviada" && <Button size="sm" variant="outline" className="min-h-10" onClick={go(() => A.simularAdenda(d.id, a.n))}>Simular: o cliente assina</Button>}
