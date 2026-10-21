@@ -126,7 +126,7 @@ export interface PassoPrep {
 }
 // 15/10 (Ruben): o pagamento vem primeiro. 16/10: a encomenda de cliente emite-se sozinha com o pagamento validado; o plano aprova-se depois dele
 export const TRILHOS: { k: Trilho; t: string }[] = [
-  { k: "pag", t: "Pagamento" }, { k: "ec", t: "Encomenda" }, { k: "plano", t: "Plano da obra" },
+  { k: "pag", t: "Pagamento" }, { k: "ec", t: "Materiais" }, { k: "plano", t: "Plano da obra" },
 ];
 /** O plano espera pelo pagamento confirmado. */
 export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";

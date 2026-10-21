@@ -29,7 +29,7 @@ const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOL
 // nomes curtos para a lista dos passos
 const CURTO: Record<string, string> = {
   "Local · exterior (edifício e acessos)": "Exterior do edifício", "Local · interior": "Interior do espaço",
-  "nec": "Necessidades do cliente", "Escolhas do cliente": "Escolhas do cliente", "Plano, materiais e resultado": "Plano e materiais",
+  "nec": "Necessidades do cliente", "Escolhas do cliente": "Escolhas do cliente", "Plano, materiais e resultado": "Plano e materiais", "Plano da obra": "Plano da obra",
 };
 const curto = (p: Passo) => (p.personalizado ? p.titulo : CURTO[p.id] || CURTO[p.titulo] || p.titulo);
 const completo = (p: Passo) => (p.conta ? p.conta.n > 0 && p.conta.f >= p.conta.n : !!p.feito);

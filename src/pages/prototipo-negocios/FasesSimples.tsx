@@ -1,6 +1,6 @@
 // Financeiro e Obra na proposta simples: estados em frases, listas em vez de
 // cartões e tabelas, um botão por coisa.
-import { AlertTriangle, ArrowRight, Check, CheckCircle2, Circle } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, Circle, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, conflitos, eur, fatorReal, nfmt, pct, r2, tot, type Negocio } from "./motor";
@@ -12,8 +12,9 @@ import { FinanceiroV2 } from "./v2/FinanceiroV2";
 import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
 import { resumoFin } from "./v2/financeiro";
 import { useInventario } from "./inventario/loja";
-import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
-import { rotuloDia, textoMateriais } from "./preparacaoObra";
+import { resumoEcNegocio } from "./inventario/ponteNegocios";
+import { contaMateriais, materiaisProntos } from "./MateriaisObra";
+import { rotuloDia } from "./preparacaoObra";
 import { useState } from "react";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
@@ -76,7 +77,7 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
   const { S, A, go, d } = ctx;
   // V2: as tranches que faltam (a final, por exemplo) registam-se e validam-se aqui, já com a obra a andar
   const finV2 = ehV2() && !resumoFin(totalComIva(S, d), tranchesDe(d), faturasDe(S, d)).completo;
-  // os materiais lidos ao vivo do Inventário (16/10: a encomenda de cliente vive lá)
+  // os materiais lidos ao vivo do Inventário (16/10: a encomenda de cliente vive lá); o detalhe está no passo Materiais (21/10)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   const pl = d.obra.plano!, R = d.obra.real, T = tot(d, S);
@@ -111,6 +112,16 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
             <div key={k} className="rounded-xl bg-muted/60 px-2 py-2.5"><dt className="text-sm text-muted-foreground">{k}</dt><dd className="text-lg font-semibold tabular-nums">{v}</dd></div>
           ))}
         </dl>
+        {/* 21/10: os materiais têm o seu passo; aqui só a ligação, para se ver que o plano depende deles */}
+        {pl.estado !== "em curso" && pl.estado !== "concluída" && (() => {
+          const c = contaMateriais(d, r), ok = materiaisProntos(d, r);
+          return (
+            <p className="mt-4 flex items-start gap-2 text-[15px]">
+              <Package className={cn("mt-0.5 h-4 w-4 shrink-0", ok ? "text-success" : "text-warning")} aria-hidden="true" />
+              <span>{c ? `Materiais: ${c.ok} de ${c.n} garantidos${ok ? "." : " · a obra só arranca com todos."}` : "Materiais: a encomenda de cliente ainda não foi emitida."} <span className="text-muted-foreground">O detalhe está no passo Materiais.</span></span>
+            </p>
+          );
+        })()}
         <ol className="mt-5 space-y-3">
           {fases.map((f) => (
             <li key={f} className="flex gap-3">
@@ -157,36 +168,6 @@ export function ObraSimples(ctx: Ctx & { d: Negocio }) {
           </ul>
         </section>
       )}
-
-      <section aria-labelledby="mat-t">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h3 id="mat-t" className="text-base font-semibold">Materiais</h3>
-          <Button variant="ghost" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
-        </div>
-        <p className="mt-1 text-[15px]">{textoMateriais(d, r)}</p>
-        <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-          {r ? r.linhas.map((l) => {
-            const st = estadoLinhaNegocio(l);
-            return (
-              <li key={l.id} className="flex min-h-12 items-center justify-between gap-3 py-2 text-[15px]">
-                <span>{l.n}</span>
-                <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
-                  {st.ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />}{nfmt(l.q)} {l.un} · {st.t}
-                </span>
-              </li>
-            );
-          }) : (d.obra.ec?.linhas || []).map((x) => (
-            <li key={x.n} className="flex min-h-12 items-center justify-between gap-3 py-2 text-[15px]">
-              <span>{x.n}</span>
-              <span className="inline-flex items-center gap-1.5 tabular-nums text-muted-foreground">
-                {d.obra.ec?.ref
-                  ? <><Circle className="h-3 w-3" aria-hidden="true" />{nfmt(x.q)} {x.un}</>
-                  : <><Check className="h-4 w-4 text-success" aria-hidden="true" />{nfmt(x.q)} {x.un}</>}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
 
       {R && (
         <section aria-label="Previsto e real">

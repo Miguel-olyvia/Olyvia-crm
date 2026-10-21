@@ -2,7 +2,7 @@
 // cada vez. As fases feitas ficam num resumo; as seguintes aparecem quando
 // chega a vez delas. Ao mudar de fase, a nova entra animada.
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, CalendarClock, Check, ChevronDown, ClipboardList, Euro, FileSignature, FileText, Hammer, Home, Lock, MapPin, Package, Phone, Ruler, Sparkles, Target, User, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -25,7 +25,8 @@ import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
-import { useInventario } from "./inventario/loja";
+import { lerInventario, useInventario } from "./inventario/loja";
+import { MateriaisObra, contaMateriais, materiaisProntos } from "./MateriaisObra";
 import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -354,8 +355,14 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     ];
   } else if (d.fase === 5) {
     passos = [
-      { id: "obra", titulo: "Plano, materiais e resultado", icone: Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
+      // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
+      { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
         corpo: simples ? <ObraSimples {...ctx} d={d} /> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+      ...(simples ? [(() => {
+        const r = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null, c = contaMateriais(d, r);
+        return { id: "materiais", titulo: "Materiais", icone: Package, feito: materiaisProntos(d, r), resumo: [c ? `${c.ok} de ${c.n} garantidos` : "por encomendar"],
+          corpo: <MateriaisObra {...ctx} d={d} /> };
+      })()] : []),
       g(OBRA[0], Hammer), g(OBRA[1], Check),
     ];
   }
