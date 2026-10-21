@@ -57,17 +57,18 @@ function desenhar() {
 const aberta = () => screen.findByRole("dialog", { name: "Ana Lopes" });
 
 describe("FichaReal: classificação MQL/SQL à mão", () => {
-  it("uma lead sem classificação oferece MQL e SQL; classificar grava por rpc_update_lead e a ficha mostra o selo", async () => {
+  it("uma lead sem classificação oferece MQL e SQL; classificar grava por neg_classificar_lead e a ficha mostra o selo", async () => {
     rpcMock.mockImplementation((nome: string) => {
       if (nome === "neg_ficha_pessoa") return respostaOk(ficha);
-      if (nome === "rpc_update_lead") ficha = fichaCom({ qualificacao_tipo: "mql" });
+      if (nome === "neg_classificar_lead") ficha = fichaCom({ qualificacao_tipo: "mql" });
       return respostaOk(null);
     });
     desenhar();
     await aberta();
     fireEvent.click(await screen.findByRole("button", { name: "Classificar como MQL" }));
-    await waitFor(() => expect(chamadas("rpc_update_lead")).toHaveLength(1));
-    expect(chamadas("rpc_update_lead")[0][1]).toMatchObject({ p_lead_id: LEAD_ID, p_qualification_type: "mql", p_qualification_changed: true });
+    await waitFor(() => expect(chamadas("neg_classificar_lead")).toHaveLength(1));
+    expect(chamadas("neg_classificar_lead")[0][1]).toEqual({ p_organization_id: "org-1", p_lead_id: LEAD_ID, p_tipo: "mql" });
+    expect(chamadas("rpc_update_lead")).toHaveLength(0);
     expect(await screen.findByRole("button", { name: "Promover a SQL" })).toBeInTheDocument();
   });
 
