@@ -28,7 +28,7 @@ export function agenda(S: Estado, r: Papel): Compromisso[] {
     if (r === "operacoes" && d.fase === 5 && d.obra.plano?.estado === "em curso")
       L.push({ id: "o" + d.id, hora: "08:00", titulo: `Obra · dia ${d.obra.plano.dia + 1} de ${Math.max(...d.obra.plano.tasks.map((t) => t.dia + t.dur))}`, quem: d.nome, onde: loc, acao: "Abrir plano", d });
     if (r === "financeiro" && d.fin.fatura && !d.fin.pago)
-      L.push({ id: "f" + d.id, hora: "—", titulo: d.fin.fatura.n + " · confirmar a transferência", quem: d.nome, acao: "Validar", d });
+      L.push({ id: "f" + d.id, hora: "—", titulo: d.fin.fatura.n + (d.f.metodo === "Débito direto" ? " · confirmar o débito direto" : d.f.metodo === "Referência MB" ? " · confirmar o pagamento MB" : " · confirmar a transferência"), quem: d.nome, acao: "Validar", d });
   }
   return L;
 }

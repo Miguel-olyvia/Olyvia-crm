@@ -431,7 +431,7 @@ export function PropostaDoc({ S, d }: { S: Estado; d: Negocio }) {
               ))}
             </tbody>
           </table>
-          <p className="text-sm text-slate-600">Por transferência bancária. Cada prestação tem a sua fatura, enviada para o portal.</p>
+          <p className="text-sm text-slate-600">Por transferência, referência Multibanco ou débito direto, à escolha do cliente no portal. Cada prestação tem a sua fatura, enviada para o portal.</p>
         </section>
         <section className="space-y-3">
           <Titulo n={6}>Condições</Titulo>

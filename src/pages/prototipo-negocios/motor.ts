@@ -1613,6 +1613,21 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, "O cliente avisou no portal que pagou · " + d.f.comprovativo);
       avisar({ msg: "Comprovativo enviado", sub: "O Financeiro confirma na conta e valida o pagamento (sai o recibo)", kind: "ok" });
     },
+    /** No portal do cliente (21/10): escolhe como paga a fatura (transferência, referência MB ou débito direto). */
+    escolherMetodo(id: number, metodo: string) {
+      const d = deal(id);
+      if (!d.fin.fatura || d.fin.pago || d.f.comprovativo || d.f.metodo === metodo) return;
+      d.f.metodo = metodo;
+      log(d, "O cliente escolheu pagar por " + metodo.toLowerCase());
+    },
+    /** No portal do cliente (21/10): autoriza o débito direto na sua conta; o valor é debitado no vencimento e o Financeiro valida. */
+    autorizarDebito(id: number, ibanCurto: string, titular: string) {
+      const d = deal(id);
+      if (!d.fin.fatura || d.fin.pago) return;
+      Object.assign(d.f, { metodo: "Débito direto", debito_iban: ibanCurto, debito_titular: titular.trim(), comprovativo: "Débito direto autorizado · " + ibanCurto });
+      log(d, `O cliente autorizou o débito direto na conta ${ibanCurto} (${titular.trim()})`);
+      avisar({ msg: "Débito direto autorizado", sub: "O valor é debitado no vencimento; o Financeiro confirma e sai o recibo", kind: "ok" });
+    },
     emitir(id: number) {
       const d = deal(id);
       if (!exigePerm("finance.invoice")) return;

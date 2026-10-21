@@ -220,7 +220,7 @@ export const FINANCEIRO: Grupo[] = [
       { k: "serie", l: "Série", t: "escolha", op: ["FT 2026", "FT 2026-OBRAS"] },
       { k: "tranche", l: "Tranche", t: "escolha", op: ["Única", "1.ª (adjudicação)", "2.ª (a meio)", "3.ª (no fim)"] },
       { k: "vencimento", l: "Vencimento", t: "escolha", op: ["Pronto pagamento", "15 dias", "30 dias"] },
-      { k: "metodo", l: "Método de pagamento", t: "escolha", op: ["Transferência", "Referência MB", "MB Way", "Cheque"] },
+      { k: "metodo", l: "Método de pagamento", t: "escolha", op: ["Transferência", "Referência MB", "Débito direto"] },
     ],
   },
   {

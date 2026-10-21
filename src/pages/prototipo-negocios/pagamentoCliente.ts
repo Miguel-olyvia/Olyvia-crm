@@ -24,3 +24,14 @@ export function vencimento(emitida: Date, prazo = "15 dias"): string {
   v.setDate(v.getDate() + dias);
   return `${String(v.getDate()).padStart(2, "0")}/${String(v.getMonth() + 1).padStart(2, "0")}`;
 }
+
+/** 21/10: as três formas de pagar uma fatura, à escolha do cliente no portal. */
+export const METODOS_PAGAMENTO = ["Transferência", "Referência MB", "Débito direto"] as const;
+export type MetodoPagamento = (typeof METODOS_PAGAMENTO)[number];
+/** O método guardado no negócio, ou a transferência quando ainda não há escolha (ou era um método antigo, ex.: cheque). */
+export const metodoDe = (m?: string): MetodoPagamento => (METODOS_PAGAMENTO as readonly string[]).includes(m ?? "") ? (m as MetodoPagamento) : "Transferência";
+
+/** Um IBAN português para o débito direto: PT50 e 21 dígitos (espaços à parte). */
+export const ibanValido = (iban: string) => /^PT50\d{21}$/.test(iban.replace(/\s/g, "").toUpperCase());
+/** O IBAN como fica à vista depois de autorizado: só os últimos 4 dígitos. */
+export const ibanCurto = (iban: string) => "PT50 ···· " + iban.replace(/\s/g, "").slice(-4);

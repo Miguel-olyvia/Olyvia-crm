@@ -115,14 +115,41 @@ describe("portal do cliente: o percurso guiado", () => {
   });
 
   it("a fatura por pagar: o valor, ver a fatura e a referência Multibanco para copiar", () => {
-    const { d, r } = montar();
+    const { S, d, r } = montar();
     d.orc!.aceite = "hoje"; d.orc!.contrato = "assinado";
     d.fin.fatura = { n: "FT 2026/418", q: "15/10" };
     r.unmount();
-    render(<Portal S={seed()} d={d} A={acoes(seed(), vi.fn(), (fn) => fn())} />);
+    render(<Portal S={S} d={d} A={acoes(S, vi.fn(), (fn) => fn())} />);
     expect(screen.getByText("Pagar a fatura FT 2026/418")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Ver a fatura/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Copiar referência" })).toBeTruthy();
+    // 21/10: sem escolha é transferência; o cliente pode mudar para a referência MB
+    expect(screen.getByRole("radio", { name: "Transferência" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("button", { name: "Copiar iban" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copiar referência" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Referência MB" }));
+    expect(d.f.metodo).toBe("Referência MB");
+    expect(screen.getByRole("button", { name: "Copiar referência" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copiar iban" })).toBeNull();
+  });
+
+  it("a fatura por débito direto: o IBAN do cliente e a autorização, e fica só com os últimos 4 dígitos", () => {
+    const { S, d, r } = montar();
+    d.orc!.aceite = "hoje"; d.orc!.contrato = "assinado";
+    d.fin.fatura = { n: "FT 2026/418", q: "15/10" };
+    r.unmount();
+    render(<Portal S={S} d={d} A={acoes(S, vi.fn(), (fn) => fn())} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Débito direto" }));
+    expect(d.f.metodo).toBe("Débito direto");
+    const autorizar = () => screen.getByRole("button", { name: "Autorizar o débito" }) as HTMLButtonElement;
+    expect(autorizar().disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("IBAN da sua conta"), { target: { value: "PT50 0002" } });
+    expect(screen.getByText(/PT50 e 21 dígitos/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("IBAN da sua conta"), { target: { value: "PT50 0002 0123 1234 5678 9015 4" } });
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(autorizar().disabled).toBe(false);
+    fireEvent.click(autorizar());
+    expect(d.f.debito_iban).toBe("PT50 ···· 0154");
+    expect(d.f.comprovativo).toMatch(/Débito direto autorizado/);
+    expect(screen.getByText(/Débito direto autorizado na conta PT50 ···· 0154/)).toBeTruthy();
   });
 });
