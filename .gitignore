@@ -49,6 +49,7 @@ docs/
 /docs/*
 !/docs/administracao-2026-10-06/
 !/docs/negocios-2026-10-08/
+!/docs/integracao-eticadata/
 ficheiros/
 
 .env
