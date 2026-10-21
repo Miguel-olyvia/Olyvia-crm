@@ -91,3 +91,5 @@ src (2).zip
 # Supabase Personal Access Token (temporário, nunca commitar)
 .supabase-pat
 duc-app/deno.lock
+# os resultados das consultas ao Eticadata têm dados reais de clientes: nunca vão para o git
+docs/integracao-eticadata/consultas/*.csv

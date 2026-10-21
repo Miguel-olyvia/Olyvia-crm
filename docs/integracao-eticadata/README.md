@@ -4,6 +4,27 @@ Estado a 21/10/2026: **em standby.** Segundo o revendedor, para usar o módulo d
 Até lá, a fatura emite-se no Eticadata e a Olyvia, no máximo, regista o número ou lê-o do SQL, como o `registarFatura` da V2. O resto deste documento fica para quando se retomar.
 Ainda não há ligação nenhuma ao ERP, nem a de leitura. Este documento junta o que se sabe, o que se decidiu e o que falta.
 
+> **Esta pasta vai passar para um projeto novo, próprio da integração.** Foi escrita para se ler sozinha: não depende do protótipo nem desta conversa.
+> - Comece pela **secção 0** (onde parou) e depois pela **secção 9** (próximos passos).
+> - As consultas de leitura estão em [`consultas/`](consultas/README.md).
+> - Para levar a pasta, copie-a inteira (`docs/integracao-eticadata/`). **Não** copie o ficheiro da ligação (`D:\Olyvia\.eticadata`) nem os `.csv`.
+
+## 0. Onde parou (21/10/2026, fim do dia)
+
+| Frente | Estado | A seguir |
+|---|---|---|
+| **Emitir faturas pela API** | Parado (standby): o módulo com certificação exige a nossa plataforma certificada pela AT | Decidir se a Olyvia se certifica ou se a fatura continua a ser emitida no ERP |
+| **Ler pagamentos e faturas (SQL)** | Pronto a correr: `consultas/consultar.ps1` + `consultas/1-descobrir-tabelas.sql`, só leitura, na BD de testes `Emp_Z004` | Criar `D:\Olyvia\.eticadata` com a ligação, correr o 1.º passo, ver as tabelas e escrever `2-fatura-paga.sql` |
+| **Rede** | Do Wi-Fi da BMInvest o nome resolve, mas as portas 1433 e 445 e o ping não respondem | Testar com o script; se falhar, correr no servidor por Ambiente de Trabalho Remoto ou pedir acesso ao SQL a partir da rede |
+| **Segurança** | O `sa` e as passwords foram partilhados por email e por chat | Trocar a password do `sa` e criar um utilizador SQL só de leitura |
+| **Protótipo** | O circuito fatura → pagamento → recibo existe com números simulados (secção 7) | Quando houver leitura, mostrar o estado real do pagamento no negócio e no portal |
+
+**Decisões tomadas:**
+- A fatura **nunca** se cria escrevendo nas tabelas, porque não seria certificada.
+- Ler pagamentos e faturas diretamente do SQL é seguro, e é o que o próprio manual recomenda (§9.1.5).
+- Começa-se sempre pelas BDs de teste.
+- Credenciais e dados reais nunca entram no git.
+
 ---
 
 ## 1. O que é
