@@ -32,6 +32,11 @@ export const ecDoNegocio = (db: Inventario, ref: string): Ec | undefined => db.e
 export const ehRefNegocio = (ref: string | null | undefined): boolean => !!ref && /^(CT|VD) 2026\/\d+$/.test(ref);
 /** A etiqueta dos movimentos de uma fase da obra (doc dos movimentos no Inventário): "EC-1027 · fase 3". Vive aqui (e não na Frota) para a ponte a ler sem ciclo. */
 export const docFase = (ec: string, fase: number): string => `${ec} · fase ${fase}`;
+/** 21/10: as encomendas de ajuste (materiais novos depois da inicial): a origem "CT 2026/1027 · A1" e o número "EC-1027-A1". */
+export const refAjuste = (ref: string, k: number): string => `${ref} · A${k}`;
+export const idAjuste = (d: Pick<Negocio, "id">, k: number): string => `EC-${d.id}-A${k}`;
+/** As encomendas de ajuste de um negócio no Inventário (a inicial não entra). */
+export const ajustesDoNegocio = (db: Inventario, ref: string): Ec[] => db.ecs.filter((e) => !!e.origin.ref?.startsWith(ref + " · A"));
 
 /* ------------------------------------------------------------------ os materiais das obras */
 /** A chave de stock do motor → o produto no Inventário. */
@@ -101,7 +106,9 @@ function produtoDaVisita(db: Inventario, l: LinhaPedidoNeg): string {
 
 /* ------------------------------------------------------------------ emitir */
 export interface LinhaPedidoNeg { n: string; un: string; q: number; preco: number; custo: number; k?: StockKey; idProd?: string }
-export interface PedidoNeg { id: string; ref: string; tipo: "CT" | "VD"; cliente: string; morada: string; notas: string; linhas: LinhaPedidoNeg[] }
+export interface PedidoNeg { id: string; ref: string; tipo: "CT" | "VD"; cliente: string; morada: string; notas: string; linhas: LinhaPedidoNeg[];
+  /** 21/10: o que fica no registo da encomenda (por omissão, a emissão ao validar o pagamento) */
+  registo?: string }
 
 /** O pedido ao Inventário a partir do negócio e da encomenda de cliente do motor (as linhas do contrato, o cliente e a obra). */
 export function pedidoDoNegocio(d: Negocio, ec: EncCliente): PedidoNeg {
@@ -131,20 +138,21 @@ export function emitirEcNoInventario(db: Inventario, p: PedidoNeg): Ec {
     }));
     // o número segue o do negócio (EC-<id>), se estiver livre; o contador das encomendas manuais não muda
     const n0 = db.n.ec, num = Number(p.id.replace(/\D/g, ""));
-    const forcar = num > 0 && !db.ecs.some((x) => x.id === p.id);
+    const forcar = num > 0 && !/-A\d+$/.test(p.id) && !db.ecs.some((x) => x.id === p.id);
     if (forcar) db.n.ec = num - 1;
     // as encomendas a fornecedor ficam pendentes (por aprovar): o envio direto da definição não se aplica às que nascem do negócio
     const envio = db.settings.autoPO;
     db.settings.autoPO = "approval";
     let e: Ec;
     try {
-      e = criarEc(db, { origin: { k: p.tipo, ref: p.ref, proforma: null }, client: p.cliente, addr: p.morada, wh: ARMAZEM_OBRAS, notes: p.notas, lines: linhas, diag: null });
+      // 21/10: as de ajuste pedem o próprio número (EC-<id>-A1)
+      e = criarEc(db, { origin: { k: p.tipo, ref: p.ref, proforma: null }, client: p.cliente, addr: p.morada, wh: ARMAZEM_OBRAS, notes: p.notas, lines: linhas, diag: null, ...(/-A\d+$/.test(p.id) ? { id: p.id } : {}) });
     } finally {
       if (forcar) db.n.ec = n0;
       db.settings.autoPO = envio;
     }
     if (p.tipo === "VD") db.vds.push({ ref: p.ref, state: "confirmed" });
-    e.log.push({ at: e.log[0]?.at ?? "", t: "Emitida pelo Financeiro ao validar o pagamento do negócio" });
+    e.log.push({ at: e.log[0]?.at ?? "", t: p.registo ?? "Emitida pelo Financeiro ao validar o pagamento do negócio" });
     return e;
   });
 }
@@ -159,10 +167,14 @@ export function sincronizarEcsNegocios(deals: Negocio[]): number {
   const candidatos = deals.filter((d) => !d.perdido && d.fin.pago && d.obra.ec?.ref && d.obra.plano?.estado !== "concluída");
   if (!candidatos.length) return 0;
   const db = lerInventario();
-  const faltam = candidatos.filter((d) => !ecDoNegocio(db, d.obra.ec!.ref!));
-  if (!faltam.length) return 0;
-  const r = executar((x) => { for (const d of faltam) emitirEcNoInventario(x, pedidoDoNegocio(d, d.obra.ec!)); });
-  return r.ok ? faltam.length : 0;
+  // 21/10: e as de ajuste que o negócio tem (as anuladas não voltam)
+  const pedidos = candidatos.flatMap((d) => [
+    ...(ecDoNegocio(db, d.obra.ec!.ref!) ? [] : [pedidoDoNegocio(d, d.obra.ec!)]),
+    ...(d.obra.ecsAjuste ?? []).filter((a) => !a.anulada && a.ref && !ecDoNegocio(db, a.ref)).map((a) => ({ ...pedidoDoNegocio(d, a), id: a.n, registo: `Encomenda de ajuste do negócio: ${a.motivo}` })),
+  ]);
+  if (!pedidos.length) return 0;
+  const r = executar((x) => { for (const p of pedidos) emitirEcNoInventario(x, p); });
+  return r.ok ? pedidos.length : 0;
 }
 
 /* ------------------------------------------------------------------ anular (19/10) */
@@ -173,6 +185,8 @@ export function anularEcNoInventario(ref: string, motivo: string): Resultado<voi
     const e = ecDoNegocio(db, ref);
     if (!e || e.deleted) return;
     comoSistema(() => eliminarEc(db, e, motivo, { contrato: e.origin.k === "CT" }));
+    // 21/10: as encomendas de ajuste vão com a inicial
+    for (const a of ajustesDoNegocio(db, ref)) if (!a.deleted) comoSistema(() => eliminarEc(db, a, motivo, { contrato: a.origin.k === "CT" }));
   });
 }
 /** Os negócios (não perdidos) cuja encomenda de cliente foi eliminada no próprio Inventário: o negócio anula-se sozinho (motor: ecEliminadaNoInventario). */
@@ -205,6 +219,8 @@ export function fasePo(p: Po): FasePo {
 const ROTULO_FASE: Record<FasePo, string> = { "por aprovar": "por aprovar", "no portal": "no portal do fornecedor", "por email": "enviada por email", parcial: "recebida em parte", recebida: "recebida", cancelada: "cancelada" };
 
 export interface LinhaResumoNeg {
+  /** 21/10: a encomenda de cliente da linha (a inicial, EC-1027, ou uma de ajuste, EC-1027-A1) */
+  ec: string;
   id: string; sku: string; n: string; q: number; un: string; st: EstadoLinhaEc; rotulo: string;
   /** carregada na carrinha de uma viatura (a fase da obra, Frota) e ainda não entregue: conta como garantida */
   aBordo: boolean;
@@ -215,6 +231,8 @@ export interface LinhaResumoNeg {
 }
 export interface ResumoEcNeg {
   id: string; eliminada: boolean; estado: EstadoEc; rotulo: string; linhas: LinhaResumoNeg[];
+  /** 21/10: as encomendas de ajuste (por eliminar) cujas linhas entram aqui junto com as da inicial */
+  ajustes: string[];
   /** eliminada no Inventário: o motivo e quando */
   motivo?: string; quando?: string;
   tot: { linhas: number; servidas: number; prontas: number; aBordo: number; aFornecedor: number; semForn: number };
@@ -231,14 +249,10 @@ export function linhasABordo(db: Inventario, e: Ec): Set<string> {
   return S;
 }
 
-/** O estado da encomenda de cliente de um negócio, lido do Inventário (null se lá não existe). */
-export function resumoEcNegocio(db: Inventario, ref: string | null | undefined): ResumoEcNeg | null {
-  if (!ref) return null;
-  const e = ecDoNegocio(db, ref);
-  if (!e) return null;
-  const pos = new Map<string, LinhaResumoNeg["pos"][number]>();
+/** As linhas de uma encomenda de cliente para o resumo (as encomendas a fornecedor juntam-se em `pos`). */
+function linhasDoResumo(db: Inventario, e: Ec, pos: Map<string, PoResumoNeg>): LinhaResumoNeg[] {
   const bordo = e.deleted ? new Set<string>() : linhasABordo(db, e);
-  const linhas: LinhaResumoNeg[] = e.lines.filter((l) => l.sku && !l.voided).map((l) => {
+  return e.lines.filter((l) => l.sku && !l.voided).map((l) => {
     const i = ecLinhaInfo(db, e, l);
     const lp = i.d.links.map(([p]) => {
       const fase = fasePo(p);
@@ -247,10 +261,20 @@ export function resumoEcNegocio(db: Inventario, ref: string | null | undefined):
       return x;
     });
     return {
-      id: l.id, sku: l.sku!, n: produto(db, l.sku!)?.name ?? l.sku!, q: l.qty, un: produto(db, l.sku!)?.unit ?? "un", st: i.st, rotulo: EC_LINHA_ESTADOS[i.st],
+      ec: e.id, id: l.id, sku: l.sku!, n: produto(db, l.sku!)?.name ?? l.sku!, q: l.qty, un: produto(db, l.sku!)?.unit ?? "un", st: i.st, rotulo: EC_LINHA_ESTADOS[i.st],
       aBordo: bordo.has(l.id), saida: l.served, pronto: i.ready, aChegar: Math.max(0, i.d.poOut), semForn: l.nosupQty, pos: lp,
     };
   });
+}
+
+/** O estado da encomenda de cliente de um negócio, lido do Inventário (null se lá não existe). 21/10: com as linhas das de ajuste. */
+export function resumoEcNegocio(db: Inventario, ref: string | null | undefined): ResumoEcNeg | null {
+  if (!ref) return null;
+  const e = ecDoNegocio(db, ref);
+  if (!e) return null;
+  const pos = new Map<string, LinhaResumoNeg["pos"][number]>();
+  const ajustes = e.deleted ? [] : ajustesDoNegocio(db, ref).filter((a) => !a.deleted);
+  const linhas: LinhaResumoNeg[] = [e, ...ajustes].flatMap((ec) => linhasDoResumo(db, ec, pos));
   const estado = ecEstado(db, e);
   const tot = {
     linhas: linhas.length, servidas: linhas.filter((l) => l.st === "served").length,
@@ -259,11 +283,17 @@ export function resumoEcNegocio(db: Inventario, ref: string | null | undefined):
     aFornecedor: linhas.filter((l) => l.aChegar > 0).length, semForn: linhas.filter((l) => l.semForn > 0).length,
   };
   return {
-    id: e.id, eliminada: e.deleted, estado, rotulo: EC_ESTADOS[estado], linhas, tot, pos: [...pos.values()],
+    id: e.id, eliminada: e.deleted, estado, rotulo: EC_ESTADOS[estado], linhas, ajustes: ajustes.map((a) => a.id), tot, pos: [...pos.values()],
     ...(e.deleted ? { motivo: e.deleteReason, quando: e.deletedAt } : {}),
-    pronta: !e.deleted && tot.servidas + tot.prontas + tot.aBordo === tot.linhas,
+    // 21/10: pronta para arrancar = a inicial; as tarefas com materiais de ajuste esperam por eles no plano (encomendasAjuste.ts)
+    pronta: !e.deleted && linhas.filter((l) => l.ec === e.id).every(garantida),
   };
 }
+/** 21/10: as encomendas a fornecedor da encomenda inicial (as de ajuste não seguram o arranque: o plano espera por elas). */
+export const posDaInicial = (r: ResumoEcNeg): PoResumoNeg[] => {
+  const ids = new Set(r.linhas.filter((l) => l.ec === r.id).flatMap((l) => l.pos.map((x) => x.id)));
+  return r.pos.filter((x) => ids.has(x.id));
+};
 
 /** Pronta a sair no armazém (reservada com stock). */
 const pronto = (l: LinhaResumoNeg): boolean => l.st === "ready" || l.st === "recvpo";
@@ -286,12 +316,12 @@ export function faltaMateriais(r: ResumoEcNeg | null | undefined): string[] {
   if (semForn) F.push(`escolher o fornecedor de ${mat(semForn)} no Inventário`);
   const porAprovar = r.pos.filter((p) => p.fase === "por aprovar");
   if (porAprovar.length) F.push(`aprovar ${porAprovar.length === 1 ? "a encomenda a fornecedor" : "as encomendas a fornecedor"} ${porAprovar.map((p) => p.id).join(", ")} no Inventário (Compras)`);
-  const porReceber = r.pos.filter((p) => p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial");
+  const porReceber = posDaInicial(r).filter((p) => p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial");
   if (porReceber.length) {
     const data = porReceber.map((p) => p.prevista).filter(Boolean).sort().at(-1);
     F.push(`receber no armazém ${porReceber.length === 1 ? "a encomenda" : "as encomendas"} ${porReceber.map((p) => p.id).join(", ")}${data ? " (prevista a " + ddmm(data) + ")" : ""}`);
   }
-  const outras = r.linhas.filter((l) => !garantida(l) && !(l.semForn > 0) && !(l.aChegar > 0)).length;
+  const outras = r.linhas.filter((l) => l.ec === r.id && !garantida(l) && !(l.semForn > 0) && !(l.aChegar > 0)).length;
   if (outras) F.push(`reservar no armazém o que falta de ${mat(outras)} ("Pedir o que falta", no Inventário)`);
   // salvaguarda: nada acima mas a encomenda não está pronta (não devia acontecer)
   if (!F.length && !r.pronta) F.push("receber no armazém todos os materiais da encomenda de cliente");
@@ -334,4 +364,5 @@ export function estadoLinhaNegocio(l: LinhaResumoNeg): { t: string; ok: boolean 
   return { t: "em falta", ok: false };
 }
 /** A linha do resumo de uma linha do negócio (pelo nome do produto no Inventário). */
-export const linhaDoResumo = (r: ResumoEcNeg | null | undefined, nome: string): LinhaResumoNeg | undefined => r?.linhas.find((l) => l.n === nome);
+export const linhaDoResumo = (r: ResumoEcNeg | null | undefined, nome: string, ec?: string): LinhaResumoNeg | undefined =>
+  r?.linhas.find((l) => l.n === nome && (!ec || l.ec === ec));

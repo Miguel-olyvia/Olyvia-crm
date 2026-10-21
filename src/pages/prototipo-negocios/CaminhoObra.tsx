@@ -20,6 +20,7 @@ import { useInventario } from "./inventario/loja";
 import { useFrota } from "./frota/loja";
 import { ligacoesObra } from "./frota/transporteObra";
 import { ProximoRececaoNegocio } from "./RececaoNegocio";
+import { linhasDaObra } from "./encomendasAjuste";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 
 const ICONE: Record<Trilho, typeof Package> = { ec: Package, plano: CalendarRange, pag: Euro, obra: HardHat };
@@ -215,12 +216,12 @@ function DetalheEncomenda({ ctx, inv }: { ctx: Ctx & { d: Negocio }; inv: Resumo
       <div>
         <h4 className="text-[15px] font-semibold">Encomenda de cliente {ec.n} <span className="font-normal text-muted-foreground">· {inv ? inv.rotulo.toLowerCase() : ec.ref ? "emitida" : "servida"}</span></h4>
         <ul className="mt-2 divide-y divide-border">
-          {ec.linhas.map((x) => {
-            const l = linhaDoResumo(inv, x.n), st = l ? estadoLinhaNegocio(l) : ec.ref ? null : { t: "na obra", ok: true };
+          {linhasDaObra(d).map(({ x, ec: n }) => {
+            const l = linhaDoResumo(inv, x.n, n), st = l ? estadoLinhaNegocio(l) : ec.ref ? null : { t: "na obra", ok: true };
             return (
-              <li key={x.n} className="py-2 text-[15px]">
+              <li key={n + x.n} className="py-2 text-[15px]">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="min-w-0 flex-1">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}</span></span>
+                  <span className="min-w-0 flex-1">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}{n !== ec.n ? ` · ${n}` : ""}</span></span>
                   <span className="font-medium tabular-nums">{eur((x.custo ?? 0) * x.q)} €</span>
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm tabular-nums">

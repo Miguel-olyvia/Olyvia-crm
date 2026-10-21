@@ -10,6 +10,7 @@ import type { Ctx } from "./pecas";
 import { ListaObras, PaginaObra } from "./ObraOperacoes";
 import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio } from "./inventario/ponteNegocios";
+import { linhasDaObra } from "./encomendasAjuste";
 
 /** As Operações (15/10: refeitas em ObraOperacoes.tsx): a lista de obras, ou a página da obra aberta. */
 export function OperacoesSimples(ctx: Ctx) {
@@ -33,7 +34,7 @@ export function InventarioSimples(ctx: Ctx) {
   const reservado: Record<string, number> = {}, aChegar: Record<string, number> = {};
   for (const d of aberto(S)) {
     if (d.obra.plano?.estado === "concluída") continue;
-    const linhas = d.obra.ec ? d.obra.ec.linhas : d.obra.mats ?? [];
+    const linhas = d.obra.ec ? linhasDaObra(d).map((y) => y.x) : d.obra.mats ?? [];
     for (const x of linhas) if ("k" in x && x.k) reservado[x.k] = r2((reservado[x.k] ?? 0) + x.res);
     const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
     for (const l of inv?.linhas ?? []) {
@@ -70,10 +71,10 @@ export function InventarioSimples(ctx: Ctx) {
                   <span className={cn("rounded-full px-2.5 py-0.5 text-sm font-medium", !ec.ref || inv?.pronta ? "bg-success/15" : "bg-warning/15")}>{inv ? inv.rotulo.toLowerCase() : ec.ref ? "emitida" : "servida"}</span>
                 </div>
                 <ul className="mt-3 divide-y divide-border">
-                  {ec.linhas.map((x) => (
-                    <li key={x.n} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-[15px]">
-                      <span className="min-w-[10rem] flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €</span></span>
-                      {(() => { const l = linhaDoResumo(inv, x.n), st = l ? estadoLinhaNegocio(l) : { t: ec.ref ? "a preparar" : "na obra", ok: !ec.ref }; return <span className={cn("text-sm", st.ok ? "text-success" : "text-warning")}>{st.t}</span>; })()}
+                  {linhasDaObra(d).map(({ x, ec: n }) => (
+                    <li key={n + x.n} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2 text-[15px]">
+                      <span className="min-w-[10rem] flex-1">{x.n}<span className="block text-sm tabular-nums text-muted-foreground">{nfmt(x.q)} {x.un} × {eur(x.custo ?? 0)} €{n !== ec.n ? ` · ${n}` : ""}</span></span>
+                      {(() => { const l = linhaDoResumo(inv, x.n, n), st = l ? estadoLinhaNegocio(l) : { t: ec.ref ? "a preparar" : "na obra", ok: !ec.ref }; return <span className={cn("text-sm", st.ok ? "text-success" : "text-warning")}>{st.t}</span>; })()}
                     </li>
                   ))}
                 </ul>

@@ -165,7 +165,9 @@ export function enviarPosAutomaticas(db: Inventario, criadas: Set<string>): void
   for (const id of criadas) { const p = poPorId(db, id); if (p && p.status === "pending") enviarPo(db, p, { auto: true }); }
 }
 
-export interface PedidoEc { origin: Ec["origin"]; client: string; addr?: string; wh: string; notes?: string; lines: LinhaPedida[]; diag?: Ec["diag"] }
+export interface PedidoEc { origin: Ec["origin"]; client: string; addr?: string; wh: string; notes?: string; lines: LinhaPedida[]; diag?: Ec["diag"];
+  /** SÓ PROTÓTIPO (21/10): o número pedido (as encomendas de ajuste de um negócio: EC-<id>-A1), se estiver livre; senão o do contador. */
+  id?: string }
 export function criarEc(db: Inventario, a: PedidoEc): Ec {
   if (!a.client || !a.client.trim()) falhar("Indique o cliente.");
   if (!armazem(db, a.wh) || armazem(db, a.wh)?.deleted) falhar("Escolha o armazém de expedição.");
@@ -174,7 +176,7 @@ export function criarEc(db: Inventario, a: PedidoEc): Ec {
   if (!validas.length) falhar("Adicione pelo menos uma linha.");
   for (const l of validas) if (!ehInteiro(l.qty) || l.qty <= 0) falhar(`Quantidades inteiras e maiores que zero (${l.sku || l.desc}).`);
   const e: Ec = {
-    id: "EC-" + pad(++db.n.ec), seq: ++db.seq, origin: a.origin, client: a.client.trim(), addr: a.addr ?? "", wh: a.wh, notes: a.notes ?? "", date: agora(db).slice(0, 10),
+    id: a.id && !db.ecs.some((x) => x.id === a.id) ? a.id : "EC-" + pad(++db.n.ec), seq: ++db.seq, origin: a.origin, client: a.client.trim(), addr: a.addr ?? "", wh: a.wh, notes: a.notes ?? "", date: agora(db).slice(0, 10),
     deleted: false, diag: a.diag ?? null, lines: [], log: [],
   };
   db.ecs.push(e);

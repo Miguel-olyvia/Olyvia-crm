@@ -11,7 +11,7 @@ import { normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
-import { faltaMateriais, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
+import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { lerInventario } from "./inventario/loja";
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
@@ -42,6 +42,9 @@ export interface EncCliente {
   /** Quem a emitiu (ao validar o pagamento) e quando. */
   emitida?: { por: string; q: string };
 }
+/** 21/10: uma encomenda de cliente de ajuste (EC-<id>-A1): os materiais novos de uma tarefa nova, de uma adenda ou mudados à mão
+ *  depois da inicial (encomendasAjuste.ts). Vive no Inventário como a inicial; anulada se as tarefas dela saíram antes de alguma coisa sair. */
+export interface EcAjuste extends EncCliente { motivo: string; anulada?: string }
 
 /** Os fornecedores de exemplo (o real virá das Compras); o sugerido é pelo tipo de obra. */
 export const FORNECEDORES = ["Cerâmica do Centro (exemplo)", "Sanitários do Tejo (exemplo)", "Madeiras e Cozinhas (exemplo)"];
@@ -219,7 +222,7 @@ export function entregaTarde(d: Negocio, db?: Inventario | null): { entrega: Dat
   if (!ref || !p || p.estado === "em curso" || p.estado === "concluída") return null;
   const r = resumoEcNegocio(db ?? lerInventario(), ref);
   if (!r || r.eliminada) return null;
-  const abertas = r.pos.filter((x) => x.fase !== "recebida" && x.fase !== "cancelada" && x.prevista);
+  const abertas = posDaInicial(r).filter((x) => x.fase !== "recebida" && x.fase !== "cancelada" && x.prevista);
   if (!abertas.length) return null;
   const inicio = inicioDoPlano(p);
   if (!inicio) return null;

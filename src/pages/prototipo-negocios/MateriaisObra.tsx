@@ -9,6 +9,7 @@ import type { Ctx } from "./pecas";
 import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { entregaTarde, textoMateriais } from "./preparacaoObra";
+import { linhasDaObra, porEncomendar } from "./encomendasAjuste";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -48,7 +49,10 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
 
   const exemplo = !ec.ref, c = contaMateriais(d, r)!, pronto = materiaisProntos(d, r);
   const todosNaObra = exemplo || (!!r && r.linhas.length > 0 && r.linhas.every((l) => l.st === "served"));
-  const linhas = ec.linhas.map((x) => { const l = linhaDoResumo(r, x.n); return { x, l, g: grupoDe(l, exemplo) }; });
+  // 21/10: com as linhas das encomendas de ajuste (materiais novos de tarefas novas, adendas ou mudados à mão)
+  const linhas = linhasDaObra(d).map(({ x, ec: n, motivo }) => { const l = linhaDoResumo(r, x.n, n); return { x, l, n, motivo, g: grupoDe(l, exemplo) }; });
+  const ajustes = (d.obra.ecsAjuste ?? []).filter((a) => !a.anulada);
+  const pendentes = porEncomendar(d.obra.plano);
   const nCaminho = linhas.filter((y) => y.g === "caminho").length, nResolver = linhas.filter((y) => y.g === "resolver").length;
   const falta = exemplo ? [] : faltaMateriais(r);
   const tarde = entregaTarde(d, db);
@@ -68,6 +72,9 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
             <p className="mt-0.5 text-[15px] text-muted-foreground">
               Encomenda de cliente {ec.n} · {exemplo ? `de ${ec.criada}` : `emitida ao validar o pagamento${ec.emitida ? ` · ${ec.emitida.q}` : ""}`} · {ec.linhas.length} {ec.linhas.length === 1 ? "material" : "materiais"}
             </p>
+            {ajustes.map((a) => (
+              <p key={a.n} className="text-[15px] text-muted-foreground">Encomenda de ajuste {a.n} · {a.motivo} · {a.linhas.length} {a.linhas.length === 1 ? "material" : "materiais"}</p>
+            ))}
           </div>
           {!exemplo && <Button variant="outline" className="min-h-11" onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>}
         </div>
@@ -83,6 +90,18 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
         {exemplo && <p className="mt-4 text-[15px] text-muted-foreground">Obra do exemplo, paga antes do Inventário novo: os materiais já estão na obra.</p>}
         {!exemplo && !r && <p className="mt-4 text-[15px] text-muted-foreground">A encomenda ainda não está no Inventário (os dados de exemplo foram repostos). Volta a ser emitida sozinha.</p>}
       </section>
+
+      {/* 21/10: materiais mudados à mão nas tarefas e ainda por encomendar */}
+      {pendentes.length > 0 && (
+        <section aria-labelledby="mat-pend-t" className="rounded-2xl border border-warning/40 bg-warning/[0.06] p-5">
+          <h3 id="mat-pend-t" className="text-base font-semibold">Materiais novos por encomendar</h3>
+          <ul className="mt-2 space-y-1 text-[15px]">
+            {pendentes.map(({ t, m, q }) => <li key={t.nome + m.n}>{m.n} · {nfmt(q)} {m.un} <span className="text-muted-foreground">· {t.nome}</span></li>)}
+          </ul>
+          <Button className="mt-3 min-h-11" onClick={go(() => A.encomendarMateriais(d.id))}>Encomendar os materiais novos</Button>
+          <p className="mt-2 text-sm text-muted-foreground">Vão numa encomenda de cliente de ajuste, no Inventário; as tarefas esperam por eles no plano.</p>
+        </section>
+      )}
 
       {/* o que falta para os materiais estarem garantidos, e quem o faz: as Compras aprovam, o Armazém recebe e reserva */}
       {(falta.length > 0 || tarde) && (
@@ -113,12 +132,12 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
               {t} <span className="font-normal text-muted-foreground">· {L.length}</span>
             </h3>
             <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-              {L.map(({ x, l }) => {
+              {L.map(({ x, l, n }) => {
                 const st = l ? estadoLinhaNegocio(l) : exemplo ? { t: "na obra", ok: true } : { t: "não está no Inventário", ok: false };
                 return (
-                  <li key={x.n} className="py-3">
+                  <li key={n + x.n} className="py-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                      <span className="min-w-0 flex-1 text-[15px]">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}</span></span>
+                      <span className="min-w-0 flex-1 text-[15px]">{x.n} <span className="text-sm text-muted-foreground">· {x.de === "produto" ? "produto da visita" : "material"}{n !== ec.n ? ` · ${n}` : ""}</span></span>
                       <span className="text-[15px] tabular-nums">{nfmt(x.q)} {x.un}</span>
                     </div>
                     <p className={cn("text-sm", st.ok ? "text-success" : k === "caminho" ? "text-foreground/80" : "text-warning")}>

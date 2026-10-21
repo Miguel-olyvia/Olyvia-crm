@@ -7,6 +7,7 @@ import { Armchair, Check, Copy, Grid3x3, Hammer, HardHat, Mail, Maximize2, Messa
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useInventario } from "./inventario/loja";
+import { linhasDaObra } from "./encomendasAjuste";
 import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
@@ -625,9 +626,9 @@ export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
 
 /* ------------------------------------------------------------------ nota de encomenda (14/10) */
 /** O estado de cada linha, como o cliente o lê (16/10: lido do Inventário novo): reservado em armazém, encomendado ao fornecedor, saiu para a obra. */
-function estadoLinha(d: Negocio, nome: string, inv: ResumoEcNeg | null): { t: string; ok: boolean } {
+function estadoLinha(d: Negocio, nome: string, inv: ResumoEcNeg | null, ec?: string): { t: string; ok: boolean } {
   if (!d.obra.ec?.ref) return { t: "na obra", ok: true };
-  const l = linhaDoResumo(inv, nome);
+  const l = linhaDoResumo(inv, nome, ec);
   if (!l) return { t: "a preparar", ok: false };
   const st = estadoLinhaNegocio(l);
   // 21/10: a encomenda ao fornecedor por aprovar é interna: o cliente não vê estado nenhum nessa linha
@@ -640,25 +641,28 @@ export function NotaEncomendaDoc({ d }: { d: Negocio }) {
   if (!ec) return null;
   const inv = resumoEcNegocio(db, ec.ref);
   const p = d.obra.plano;
-  const prontos = ec.linhas.filter((x) => estadoLinha(d, x.n, inv).ok).length;
+  // 21/10: com as linhas das encomendas de ajuste (materiais novos de tarefas novas ou adendas)
+  const todas = linhasDaObra(d);
+  const prontos = todas.filter((y) => estadoLinha(d, y.x.n, inv, y.ec).ok).length;
   return (
     <Folha titulo="Nota de encomenda" numero={ec.n} data={`de ${ec.criada}`} carimbo="Confirmada">
       <Cliente d={d} />
       <p className="text-slate-700">Os materiais e produtos da obra de {d.servico.toLowerCase()}, conforme o contrato CT 2026/{d.id}. Estão incluídos no preço do contrato: <b>não se pagam à parte</b>.</p>
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
-        {ec.linhas.map((x) => {
-          const st = estadoLinha(d, x.n, inv);
+        {todas.map(({ x, ec: n }) => {
+          const st = estadoLinha(d, x.n, inv, n);
           return (
-            <li key={x.n} className="flex items-baseline justify-between gap-4 py-2.5">
-              <span className="min-w-0">{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} · {x.de === "produto" ? "escolhido na visita" : "do modelo"}{st.t ? <> · <span className={st.ok ? "text-emerald-700" : "text-slate-500"}>{st.t}</span></> : null}</span></span>
-              <span className="shrink-0 tabular-nums">{eur((x.preco ?? 0) * x.q)} €</span>
+            <li key={n + x.n} className="flex items-baseline justify-between gap-4 py-2.5">
+              <span className="min-w-0">{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} · {n !== ec.n ? "ajuste à obra" : x.de === "produto" ? "escolhido na visita" : "do modelo"}{st.t ? <> · <span className={st.ok ? "text-emerald-700" : "text-slate-500"}>{st.t}</span></> : null}</span></span>
+              {/* 21/10: os materiais dos ajustes não somam ao valor: vão no preço da adenda ou por conta da empresa */}
+              <span className="shrink-0 tabular-nums">{n !== ec.n ? <span className="text-sm text-slate-500">incluído</span> : <>{eur((x.preco ?? 0) * x.q)} €</>}</span>
             </li>
           );
         })}
       </ul>
       <div className="flex items-baseline justify-between"><span className="text-slate-600">Materiais, sem IVA (IVA a 23%)</span><span className="text-lg font-semibold tabular-nums">{eur(ec.valor)} €</span></div>
       <section className="rounded-xl bg-slate-50 p-4">
-        <p className="font-medium">{prontos === ec.linhas.length ? "Tudo pronto para a obra." : `${prontos} de ${ec.linhas.length} prontos para a obra.`}</p>
+        <p className="font-medium">{prontos === todas.length ? "Tudo pronto para a obra." : `${prontos} de ${todas.length} prontos para a obra.`}</p>
         <p className="text-slate-600">{p ? `Tudo em obra antes do início, a ${rotuloDia(p, 0)}.` : "A data de entrega segue o início da obra."} Avisamos no portal quando chegar.</p>
       </section>
     </Folha>

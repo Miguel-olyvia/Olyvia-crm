@@ -20,4 +20,15 @@ describe("nota de encomenda no portal do cliente", () => {
     expect(moveis.textContent).toMatch(/escolhido na visita|do modelo/);
     expect(screen.getByText("Bancada em pedra").closest("li")!.textContent).toMatch(/reservado em armazém/);
   });
+  it("21/10: as linhas das encomendas de ajuste aparecem como ajuste à obra, incluídas (não somam ao valor)", () => {
+    const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
+    for (let i = 0; i < 5; i++) for (const c of emFalta(FINANCEIRO, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
+    A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+    A.role("operacoes"); A.novaTarefaPlano(d.id, { sid: "revest", q: 20, fase: 3 });
+    render(<NotaEncomendaDoc d={d} />);
+    const li = screen.getByText("Cimento-cola C2TE").closest("li")!;
+    expect(li.textContent).toMatch(/ajuste à obra/);
+    expect(li.textContent).toMatch(/incluído/);
+    expect(li.textContent).not.toMatch(/por aprovar/);
+  });
 });

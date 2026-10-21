@@ -17,6 +17,7 @@ import { rotuloDia, skDaTarefa } from "./preparacaoObra";
 import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
 import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDaTarefa, materiaisDoServico, podeTirar, tempoDoServico, ultimoAviso } from "./tarefasValidador";
+import { porEncomendar } from "./encomendasAjuste";
 
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 /** As unidades de área e de comprimento: começam em 5 e andam de 5 em 5. */
@@ -207,6 +208,21 @@ export function ExtrasTarefa({ ctx, d, ti, fase = true, fechar }: { ctx: Ctx; d:
       <div className="py-3">
         <p className="mb-2 text-[15px]">Materiais{!t.mats && mats.length > 0 && <span className="block text-sm text-muted-foreground">da receita do serviço; mude o que for preciso</span>}</p>
         <EditorMateriais mats={mats} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
+        {/* 21/10: o que se juntou à mão vai numa encomenda de cliente de ajuste (as tarefas novas encomendam-se sozinhas ao criar) */}
+        {(() => {
+          const falta = porEncomendar(p).filter((x) => x.t === t);
+          return <>
+            {t.ecs?.length ? <p className="mt-2 text-sm text-muted-foreground">Encomendado em {t.ecs.join(", ")}</p> : null}
+            {falta.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warning/10 px-3 py-2">
+                <span className="text-sm">Por encomendar: {falta.map((x) => `${x.m.n} (${nfmt(x.q)} ${x.m.un})`).join(", ")}</span>
+                {d.obra.ec?.ref
+                  ? <Button size="sm" className="min-h-10" onClick={() => run(() => A.encomendarMateriais(d.id))}>Encomendar</Button>
+                  : <span className="text-sm text-muted-foreground">encomenda-se a seguir ao pagamento</span>}
+              </div>
+            )}
+          </>;
+        })()}
       </div>
       {(ultimoAviso(p, ti) || podeTirar(p, ti)) && (
         <div className="space-y-3 py-3">

@@ -17,8 +17,9 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import { diasAdenda, juntarAoPlano, linhaAdenda, totalAdenda, type Adenda } from "./adendas";
-import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EncCliente } from "./preparacaoObra";
-import { avisarTecnico, criarTarefa, juntarTarefa, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
+import { faltaParaArrancar, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
+import { anularAjustesDaTarefa, encomendarAjustes } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { SEM_PERM, podeNeg, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
@@ -248,7 +249,8 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 15/10: uma nota das Operações para a equipa (ex.: "levar o andaime") */ nota?: string;
   /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa;
   /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number;
-  /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[] }
+  /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
+  /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[] }
 /** 21/10: um material de uma tarefa (da receita do serviço, ou juntado à mão). */
 export interface MatTarefa { n: string; q: number; un: string; preco?: number; forn?: string }
 /** 21/10: uma mensagem da conversa da obra (cliente ↔ empresa). */
@@ -305,6 +307,8 @@ export interface Negocio {
     diario?: EntradaDiario[]; seg?: Record<string, string>;
     /** A encomenda de cliente (16/10): emitida ao validar o pagamento, no Inventário novo (inventario/ponteNegocios.ts). Antes do pagamento não há. */
     ec?: EncCliente | null;
+    /** 21/10: as encomendas de cliente de ajuste, depois da inicial: materiais novos de tarefas novas, adendas ou mudados à mão (encomendasAjuste.ts) */
+    ecsAjuste?: EcAjuste[];
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
     /** 15/10: o auto de receção (por assinar → assinado) */
@@ -1227,6 +1231,25 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     d.obra.mats = ec.linhas.filter((x) => x.k).map((x) => ({ n: x.n, un: x.un, k: x.k!, q: x.q, res: x.res, falta: x.falta }));
     const res = resumoEcNegocio(lerInventario(), ec.ref);
     log(d, "Encomenda de cliente " + ec.n + " emitida no Inventário" + (res ? " · " + textoResumoEc(res) : ""));
+    // 21/10: os materiais das tarefas juntadas antes do pagamento vão numa encomenda de ajuste, logo a seguir
+    ajustar(d, "materiais das tarefas novas do plano");
+    return true;
+  };
+  /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
+  const ajustar = (d: Negocio, motivo: string): boolean => {
+    const r = encomendarAjustes(d, motivo, PAPEIS[S.role].n, agora());
+    if (!r) return false;
+    if ("erro" in r) {
+      log(d, "Encomenda de ajuste não emitida no Inventário: " + r.erro, "x");
+      avisar({ msg: "A encomenda dos materiais novos não foi emitida", sub: r.erro, kind: "bad" });
+      return false;
+    }
+    const p = d.obra.plano!, n = r.ec.linhas.length;
+    const partes = [r.reservadas ? `${r.reservadas} reservado${r.reservadas === 1 ? "" : "s"} do stock` : "", r.aFornecedor ? `${r.aFornecedor} ao fornecedor${r.chegada ? `, chega a ${r.chegada.slice(8, 10)}/${r.chegada.slice(5, 7)}` : ""}` : ""].filter(Boolean);
+    log(d, `Encomenda de ajuste ${r.ec.n} emitida no Inventário (${motivo}): ${r.ec.linhas.map((x) => `${x.n} × ${x.q} ${x.un}`).join(", ")}${partes.length ? " · " + partes.join(" · ") : ""}`);
+    for (const t of r.adiadas) log(d, `Plano: ${t.nome} passa para ${rotuloDia(p, t.dia)}, depois de os materiais chegarem`, "w");
+    avisar({ msg: `Encomenda ${r.ec.n} no Inventário`, sub: `${n} ${n === 1 ? "material novo" : "materiais novos"}${partes.length ? " · " + partes.join(" · ") : ""}${r.adiadas.length ? ` · ${r.adiadas.map((t) => t.nome).join(", ")} passa${r.adiadas.length > 1 ? "m" : ""} para ${rotuloDia(p, r.adiadas[0].dia)}` : ""}`,
+      kind: "auto", atraso: 400, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(d.id)) } });
     return true;
   };
   const extrasVisita = (d: Negocio) => {
@@ -1575,7 +1598,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       a.estado = "assinada"; a.assinada = agora();
       log(d, "Adenda " + n + " assinada pelo cliente");
       if (p && p.estado !== "concluída") {
-        juntarAoPlano(p, a);
+        const novas = juntarAoPlano(p, a);
+        // 21/10: os materiais das tarefas da adenda (os consumíveis da receita de cada serviço) vão numa encomenda de ajuste
+        novas.forEach((t, i) => { const x = a.linhas[i]; if (x) { t.mats = materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+        ajustar(d, "adenda " + n);
         const voltou = p.estado === "aprovado";
         if (voltou) p.estado = "por aprovar";
         log(d, "Plano: " + a.linhas.length + " " + (a.linhas.length === 1 ? "tarefa" : "tarefas") + " da adenda juntas" + (voltou ? " · volta a aprovação das Operações" : ""), voltou ? "w" : "a");
@@ -1938,6 +1964,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
       const tec = TECS.find((x) => x.id === t.tec);
       log(d, `Plano: tarefa nova · ${t.nome} (fase ${t.fase ?? "—"}, ${t.dur} ${t.dur === 1 ? "dia" : "dias"}${tec ? ", " + tec.n : ""})`);
+      // 21/10: os materiais da tarefa nova vão já numa encomenda de cliente de ajuste (e a tarefa espera por eles)
+      ajustar(d, "tarefa nova " + t.nome);
       if (!A.planoMudou(d)) avisar({ msg: "Tarefa juntada ao plano", sub: `${t.nome} · ${rotuloDia(p, t.dia)}`, kind: "ok" });
       return ti;
     },
@@ -1956,6 +1984,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!p || !t || p.estado === "concluída" || !tirarTarefa(p, ti)) return;
       if (t.tec) avisarTecnico(p, -1, `${t.nome} saiu do plano`, agora(), t.tec);
       log(d, `Plano: tarefa ${t.nome} tirada`);
+      // 21/10: a encomenda de ajuste que só servia esta tarefa anula-se (se ainda nada saiu para a obra)
+      const an = anularAjustesDaTarefa(d, t, agora());
+      if (an.anuladas.length) log(d, `Encomenda de ajuste ${an.anuladas.join(", ")} anulada no Inventário: a tarefa saiu do plano`, "w");
+      if (an.ficam.length) log(d, `${an.ficam.join(", ")} fica: já saíram materiais para a obra (o que sobrar volta ao armazém)`, "w");
       if (!A.planoMudou(d)) avisar({ msg: "Tarefa tirada do plano", sub: t.nome, kind: "ok" });
     },
     /** Os materiais de uma tarefa (a lista inteira, já mudada). */
@@ -1963,7 +1995,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const p = deal(id).obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "concluída") return;
       if (JSON.stringify(t.mats) !== JSON.stringify(mats)) avisarTecnico(p, ti, `Os materiais de ${t.nome} mudaram`, agora());
+      // 21/10: numa tarefa do orçamento, o que a receita já contava fica como encomendado; só o que se junta vai à encomenda de ajuste
+      if (!t.nova && !t.encomendado) t.encomendado = materiaisDaTarefa(t, S.svc).map((m) => ({ ...m }));
       t.mats = mats.filter((m) => m.q > 0).map((m) => ({ ...m }));
+    },
+    /** 21/10: encomenda o que os materiais mudados à mão pedem a mais (encomenda de cliente de ajuste, no Inventário). */
+    encomendarMateriais(id: number) {
+      const d = deal(id);
+      if (!d.obra.ec?.ref) { avisar({ msg: "Ainda sem encomenda de cliente", sub: "Os materiais novos encomendam-se logo a seguir à inicial, quando o pagamento for validado", kind: "" }); return; }
+      if (!ajustar(d, "materiais mudados no plano")) avisar({ msg: "Nada por encomendar", sub: "Os materiais do plano já estão encomendados", kind: "" });
     },
     /** O técnico viu o aviso. */
     avisoLido(id: number, k: number) {
