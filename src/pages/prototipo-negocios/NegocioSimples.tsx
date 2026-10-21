@@ -3,6 +3,7 @@
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { pessoaDeOrigem } from "./PessoasV1";
+import { clienteDeOrigem } from "./ClientesV1";
 import { ArrowLeft, Check, Euro, Lock, MapPin, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { PortalCliente } from "./PortalCliente";
 import { NovaVersao, VoltarVisita } from "./VoltarAtras";
@@ -56,13 +57,14 @@ export function NegocioSimples(ctx: Ctx) {
   }, [d.fase]);
   const local = d.f.localidade || d.local.split(",").pop()!.trim();
   const origem = pessoaDeOrigem(S.deal);
+  const cliente = origem ? null : clienteDeOrigem(S.deal); // 21/10: aberto da página de um cliente: volta a ela
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
       {/* aberto a partir da ficha de uma pessoa (proposta do V1, 16/10): o voltar leva de volta a ela */}
-      <button type="button" onClick={go(() => A.nav(origem ? "pessoas" : "negocios"))}
+      <button type="button" onClick={go(() => A.nav(origem ? "pessoas" : cliente ? "clientes" : "negocios"))}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg text-[15px] text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> {origem ?? "Negócios"}
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> {origem ?? cliente ?? "Negócios"}
       </button>
 
       <header className="mt-2 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">

@@ -1,4 +1,4 @@
-// Catálogo, Clientes, Marketing e Definições na proposta simples.
+// Catálogo, Marketing e Definições na proposta simples (os Clientes do V1 estão em ClientesV1.tsx).
 import { ArrowRight, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -20,25 +20,6 @@ const Interruptor = ({ on, onClick, titulo, texto }: { on: boolean; onClick: () 
 /** O Catálogo do V1: desde 14/10/2026 é o CatalogoV1 (cinco secções e a ficha do serviço). */
 export function CatalogoSimples(ctx: Ctx) {
   return <CatalogoV1 {...ctx} />;
-}
-
-export function ClientesSimples({ S, A, go }: Ctx) {
-  return (
-    <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Clientes</h1>
-      <p className="mt-2 text-lg text-muted-foreground">O cliente é criado sozinho quando o contrato é assinado ou a venda direta é aceite.</p>
-      <ul className="mt-8 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
-        {S.clientes.map((c) => (
-          <li key={c.deal}>
-            <button type="button" onClick={go(() => A.abrir(c.deal))} className="group flex min-h-16 w-full items-center gap-4 py-3 text-left hover:bg-muted/50 sm:px-2">
-              <span className="min-w-0 flex-1"><span className="block text-base font-medium">{c.nome}</span><span className="block text-[15px] text-muted-foreground">{c.local} · {c.tel} · cliente desde {c.desde}</span></span>
-              <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
 }
 
 export function MarketingSimples() {

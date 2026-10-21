@@ -339,6 +339,8 @@ export interface Estado {
   ef: number;
   rc: number;
   clientes: { nome: string; tel: string; local: string; desde: string; deal: number }[];
+  /** 21/10: os dados do cliente mudados na área de Clientes (pelo nome do cliente): sobrepõem-se aos que vêm dos negócios (clientesV1Docs.ts). */
+  fichas?: Record<string, Record<string, string>>;
   deals: Negocio[];
 }
 
@@ -512,6 +514,42 @@ export function seed(): Estado {
   ecAntiga(by(1050), "EC 2026/002", "21/09");
   return S;
 }
+
+/** 21/10: os clientes com mais de um negócio (a área de Clientes): a Joana pede agora a cozinha, o Tiago a casa de banho e a Marta
+ *  perdeu um segundo negócio. Junta só os que faltam (pelo número), por isso serve também para migrar um Estado já guardado.
+ *  Fica fora do seed() (as contas dos testes de Pessoas e Negócios são sobre a seed): a página chama-a ao ler, repor e sincronizar (demo()). */
+export function exemplosClientes(S: Estado): boolean {
+  const extra: NovoNegocio[] = [
+    { id: 2001, nome: "Joana Ribeiro", tel: "916 480 213", linha: "coz", servico: "Cozinha nova", local: "Rua Morais Soares 112, Lisboa", origem: "cliente", quando: "16/10 09:30", fase: 1,
+      f: { pedido: "Agora queremos a cozinha: armários novos e bancada em pedra.", resultado: "Atendeu · interessado", prazo: "3 a 6 meses", orc_cliente: "6.000 a 10.000 €" },
+      hist: [{ t: "Chamada registada · Atendeu · interessado", q: "16/10 10:05", k: "a" }, { t: "Novo negócio do cliente", q: "16/10 09:30", k: "a" }] },
+    { id: 2002, nome: "Tiago Almeida", tel: "913 220 410", linha: "wc", servico: "WC de serviço", local: "Almada", origem: "cliente", quando: "19/10 18:20",
+      f: { pedido: "Depois da cozinha, a casa de banho pequena: trocar a banheira por duche." },
+      hist: [{ t: "Novo negócio do cliente", q: "19/10 18:20", k: "a" }] },
+    { id: 2003, nome: "Marta Lima", tel: "916 004 552", linha: "coz", servico: "Cozinha", local: "Odivelas", origem: "cliente", quando: "02/10", fase: 1, perdido: true, motivoPerda: "Adiou a obra para o próximo ano",
+      f: { pedido: "Ver também a cozinha, se o preço for bom." },
+      hist: [{ t: "Marcado como perdido · Adiou a obra para o próximo ano", q: "06/10", k: "x" }, { t: "Novo negócio do cliente", q: "02/10", k: "a" }] },
+  ];
+  let mudou = false;
+  for (const o of extra) {
+    if (S.deals.some((d) => d.id === o.id)) continue;
+    const base = S.deals.find((d) => d.nome === o.nome && d.id < 2000);
+    const d = novoDeal(o);
+    // os dados da pessoa vêm do negócio que já tem (email, NIF, preferências); o resto do exemplo segue a fase
+    // (nestes exemplos a obra é na mesma casa: a morada também)
+    const daPessoa = base ? Object.fromEntries(Object.entries(base.f).filter(([k]) => CAMPOS_PESSOA.includes(k) || ["morada", "cp", "localidade", "fracao"].includes(k))) : {};
+    d.f = { ...exemplo(d), ...daPessoa, ...o.f };
+    S.deals.push(d);
+    mudou = true;
+  }
+  return mudou;
+}
+
+/** A demonstração inteira: a seed e os clientes com vários negócios. */
+export const demo = (): Estado => { const S = seed(); exemplosClientes(S); return S; };
+
+/** Os campos que são da pessoa (e não de um negócio): passam para cada negócio novo do mesmo cliente. */
+export const CAMPOS_PESSOA: readonly string[] = ["email", "pref", "hora", "idioma", "rgpd", "tipo_cliente", "nif", "nif_fat", "nome_fiscal", "email_fat", "origem", "recomendou", "concelho"];
 
 const by0 = (S: Estado, id: number) => S.deals.find((d) => d.id === id)!;
 
@@ -1223,6 +1261,43 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     filtro(f: string) { S.filtro = f; },
     novo() { S.view = "negocios"; S.novo = { nome: "", tel: "", linha: "wc", err: "" }; },
     novoCancel() { S.novo = null; },
+    /** 21/10: um negócio novo para um cliente que já existe (área de Clientes): leva os dados da pessoa e a morada da obra escolhida, e abre-se logo. */
+    novoNegocioCliente(nome: string, linha: LinhaId, pedido: string, obra: { morada: string; cp: string; localidade: string }) {
+      const dele = S.deals.filter((d) => d.nome === nome);
+      if (!dele.length) return;
+      const base = dele.reduce((a, d) => (d.id > a.id ? d : a), dele[0]);
+      const ficha = S.fichas?.[nome] || {};
+      const daPessoa: Record<string, string> = {};
+      for (const k of CAMPOS_PESSOA) { const v = ficha[k] ?? base.f[k]; if (v) daPessoa[k] = v; }
+      const id = S.seq++;
+      S.deals.unshift(novoDeal({ id, nome, tel: ficha.tel || base.tel, linha, servico: LINHAS[linha].n, local: [obra.morada, obra.localidade].filter(Boolean).join(", "),
+        origem: "cliente", quando: agora(), dono: base.dono, fresh: true,
+        f: { ...daPessoa, ...(pedido.trim() ? { pedido: pedido.trim() } : {}), morada: obra.morada, cp: obra.cp, localidade: obra.localidade },
+        hist: [{ t: "Novo negócio do cliente", q: agora(), k: "a" }] }));
+      S.view = "negocio"; S.deal = id; S.confirmPerda = null;
+      avisar({ msg: "Negócio criado", sub: `${nome} tem agora ${dele.length + 1} negócios · fase Lead`, kind: "ok" });
+    },
+    /** 21/10: muda um dado do cliente. O nome e o telefone mudam em todos os negócios dele; os outros ficam na ficha do cliente. */
+    editarCliente(nome: string, k: string, v: string) {
+      const val = v.trim();
+      const dele = S.deals.filter((d) => d.nome === nome);
+      if (k === "nome") {
+        if (!val || val === nome) return;
+        if (S.deals.some((d) => d.nome === val)) { avisar({ msg: "Já há um cliente com esse nome", sub: "Escolha outro nome", kind: "bad" }); return; }
+        for (const d of dele) d.nome = val;
+        for (const c of S.clientes) if (c.nome === nome) c.nome = val;
+        if (S.fichas?.[nome]) { S.fichas[val] = S.fichas[nome]; delete S.fichas[nome]; }
+        avisar({ msg: "Nome mudado", sub: `Em ${dele.length} ${dele.length === 1 ? "negócio" : "negócios"}`, kind: "ok" });
+        return;
+      }
+      if (k === "tel") {
+        if (!val) return;
+        for (const d of dele) d.tel = val;
+        for (const c of S.clientes) if (c.nome === nome) c.tel = val;
+      }
+      S.fichas = S.fichas || {};
+      S.fichas[nome] = { ...(S.fichas[nome] || {}), [k]: val };
+    },
     novoCriar(nome: string, tel: string, linha: LinhaId) {
       const n = S.novo!;
       n.nome = nome.trim(); n.tel = tel.trim(); n.linha = linha;

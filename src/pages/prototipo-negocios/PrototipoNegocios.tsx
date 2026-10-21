@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import "./prototipo.css";
 import {
   ESTR, FASES, LINHAS, PAPEIS, TECS, DIAS, VERSAO,
-  aberto, acoes, conflitos, custoUn, eur, minhas, nfmt, pct, proximo, seed, tot,
+  aberto, acoes, conflitos, custoUn, demo, eur, exemplosClientes, minhas, nfmt, pct, proximo, seed, tot,
   type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
 import { Hoje } from "./Hoje";
@@ -33,7 +33,8 @@ import { SeletorVersao } from "./SeletorVersao";
 import { gravarVersao, lerVersao, vistaEquivalente, type VersaoProto } from "./versaoPrototipo";
 import { ICONE_NEGOCIO } from "./iconeNegocio";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
-import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
+import { CatalogoSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
+import { ClientesV1, esquecerClientes, listaClientes } from "./ClientesV1";
 import { CamposEditor } from "./CamposEditor";
 import { HojeV2 } from "./v2/HojeV2";
 import { CatalogoV2 } from "./v2/CatalogoV2";
@@ -73,7 +74,8 @@ const CHAVE = "olyvia-prototipo-negocios";
 function ler(): Estado {
   try {
     const j = JSON.parse(localStorage.getItem(CHAVE) || "null");
-    if (j && j.v === VERSAO) return j as Estado;
+    // 21/10: os clientes com vários negócios juntam-se a um Estado já guardado (só os que faltam)
+    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); return j as Estado; }
     // 21/10: as versões 18 a 20 (o acompanhamento da obra) migram sem perder o que se fez na demonstração:
     // só se juntam os dados novos do exemplo (a conversa da obra) a quem ainda não os tem
     if (j && j.v >= 18 && j.v < VERSAO) {
@@ -83,12 +85,13 @@ function ler(): Estado {
         if (s?.obra.chat && !d.obra.chat) d.obra.chat = s.obra.chat;
       }
       E.v = VERSAO;
+      exemplosClientes(E);
       return E;
     }
   } catch {
     /* sem storage: começa do zero */
   }
-  return seed();
+  return demo();
 }
 
 interface Toast extends Aviso { id: number }
@@ -182,9 +185,11 @@ export default function PrototipoNegocios() {
   useEffect(() => {
     const aplicar = (S: Estado) => {
       if (S.v !== VERSAO) S.v = VERSAO;
+      const juntou = exemplosClientes(S); // uma sala de antes dos clientes com vários negócios: junta-os e partilha-os
       ref.current = S;
       try { localStorage.setItem(CHAVE, JSON.stringify(S)); } catch { /* ignora */ }
       redesenhar();
+      if (juntou) setTimeout(() => sinc.mudou(), 0);
     };
     void sinc.ligar({ ler: () => ref.current, aplicar }, [
       { chave: "inv", ler: lerInventario, aplicar: (x) => substituirInventario(x as ReturnType<typeof lerInventario>) },
@@ -192,7 +197,7 @@ export default function PrototipoNegocios() {
     ], (t) => avisar({ msg: "Atualizado com outro aparelho", sub: t, kind: "" }), () => {
       // uma sala nova: os dados de exemplo, com quem vê e onde está deste aparelho
       const { role, view, deal, op, tec } = ref.current;
-      ref.current = { ...seed(), role, view, deal, op, tec };
+      ref.current = { ...demo(), role, view, deal, op, tec };
       esquecerInventario(); esquecerFrota();
       try { localStorage.setItem(CHAVE, JSON.stringify(ref.current)); } catch { /* ignora */ }
       redesenhar();
@@ -229,8 +234,8 @@ export default function PrototipoNegocios() {
 
   const repor = () => run(() => {
     try { localStorage.removeItem(CHAVE); } catch { /* ignora */ }
-    ref.current = seed();
-    esquecerLeads();
+    ref.current = demo();
+    esquecerLeads(); esquecerClientes();
     esquecerPessoas();
     esquecerPessoasFunc();
     esquecerPessoasV1();
@@ -299,7 +304,7 @@ export default function PrototipoNegocios() {
     case "operacoes": corpo = v2 ? <OperacoesV2 {...ctx} /> : simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
     case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
     case "catalogo": corpo = v2 ? <CatalogoV2 {...ctx} /> : simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
-    case "clientes": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : <ClientesSimples {...ctx} />) : <Clientes {...ctx} />; break;
+    case "clientes": corpo = simples ? (func ? <PessoasFunc {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : v2 ? <PessoasSimples {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : <ClientesV1 key={navPessoas} {...ctx} />) : <Clientes {...ctx} />; break;
     case "marketing": corpo = v2 ? <MarketingV2 {...ctx} /> : simples ? <MarketingSimples /> : <Marketing />; break;
     case "definicoes": corpo = v2 ? <DefinicoesV2 {...ctx} /> : simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
     case "campos": corpo = <CamposEditor {...ctx} />; break;
@@ -434,7 +439,7 @@ export default function PrototipoNegocios() {
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
-      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+      <button key={v} type="button" onClick={go(() => { setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v === "clientes") { listaClientes(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
         className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
           cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
         <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
@@ -573,7 +578,7 @@ export default function PrototipoNegocios() {
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] items-stretch justify-around border-t border-border bg-card px-[env(safe-area-inset-left)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Menu">
             {((comInvFrota ? (v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes"]) : v1n ? ["hoje", "negocios", "pessoas", "operacoes"] : ["hoje", "negocios", "operacoes", "inventario"]) as Vista[]).map((v) => porVista(v)).map(([v, l, Ic, c]) => (
-              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+              <button key={v} type="button" onClick={go(() => { setMais(false); setInvMock(false); setFrotaMock(false); if (v1n && v === "pessoas") { irParaLista(); setNavPessoas((x) => x + 1); } if (v === "clientes") { listaClientes(); setNavPessoas((x) => x + 1); } A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
                 {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
