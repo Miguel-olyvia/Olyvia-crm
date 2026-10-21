@@ -13,15 +13,17 @@ import type { IlustracaoKey } from "./ilustracoes";
 type A = ReturnType<typeof acoes>;
 
 /* ------------------------------------------------------------------ os passos */
-export type TipoPasso = "escolhas" | "servicos" | "pergunta" | "outros" | "fornece" | "resumo";
+export type TipoPasso = "conversa" | "escolhas" | "servicos" | "pergunta" | "outros" | "fornece" | "resumo";
 export interface PassoSel { k: string; tipo: TipoPasso; titulo: string; o?: Obrigacao }
 
 /**
  * Os passos da seleção, pela ordem: primeiro o que se faz e os produtos; as Escolhas do cliente depois, porque o "Sim" a
  * "fornece materiais" abre a seguir "O que o cliente fornece" (por serviço, já com os serviços e os produtos escolhidos).
  */
-export function passosSelecao(obr: Obrigacao[], clienteFornece: boolean, comEscolhas = true): PassoSel[] {
+export function passosSelecao(obr: Obrigacao[], clienteFornece: boolean, comEscolhas = true, comConversa = false): PassoSel[] {
   return [
+    // 21/10: primeiro, contar à Olyvia o que o cliente quer (ConversaLevantamento.tsx); ela propõe e o comercial valida
+    ...(comConversa ? [{ k: "conversa", tipo: "conversa" as const, titulo: "O que o cliente quer" }] : []),
     { k: "servicos", tipo: "servicos", titulo: "O que se faz" },
     ...obr.map((o): PassoSel => ({ k: "q:" + o.sid, tipo: "pergunta", titulo: tituloObrigacao(o), o })),
     { k: "outros", tipo: "outros", titulo: "Mais produtos" },

@@ -902,3 +902,34 @@ Pedido original do Ruben (14/10): "o orçamento gera o contrato; depois do contr
 - **O cliente fornece só produtos** (e o material das trocas sem produto escolhido). Os consumíveis e os equipamentos das receitas são sempre da empresa: saíram do passo "O cliente fornece", do orçamento e da proposta (`forneceCliente.ts` removido). Na proposta, "Fornecido por si" mostra quanto o cliente poupa em cada produto.
 - **Campos só de casa de banho** ("Toalheiro elétrico", "Mobilidade reduzida") não aparecem numa cozinha: `visivel()` em `campos.ts` aceita `se: { k: "@divisao" | "@divisoes", v: [...] }`.
 - **Para a migração (decisão do Ruben):** o Catálogo de produtos e os seus custos serão **inseridos pelo fornecedor, no portal do fornecedor** (nome, marca, referência, unidade, custo, disponibilidade, prazo, fotografias, com data de atualização). A empresa escolhe os fornecedores e produtos que usa, as margens/PVP e o serviço que instala cada produto. O orçamento guarda uma cópia do custo, por isso uma proposta enviada não muda com a atualização do fornecedor. No protótipo, o Catálogo é de exemplo (o portal do fornecedor do protótipo saiu a 19/10: testa-se o da app real).
+
+## O levantamento por conversa com a Olyvia (21/10/2026)
+
+As Necessidades do cliente começam por uma conversa. O comercial conta o que o cliente quer, e pode fazê-lo de três maneiras:
+- falar (ditado em pt-PT pelo browser);
+- escrever;
+- mandar fotografias (até 4 de cada vez, reduzidas no telemóvel).
+
+A **Olyvia**, a assistente (Claude Opus 5.5), vai ao Catálogo e faz quatro coisas:
+- propõe as medidas, os serviços e os produtos;
+- pergunta o que falta, uma coisa de cada vez, com respostas rápidas para tocar;
+- mostra cartões de produtos para o cliente escolher ali mesmo;
+- regista as respostas "o cliente mantém?" e as notas (estilo, cores).
+
+Nada entra na visita sem validação. Tudo fica em **Proposta para validar**, e cada item tem um interruptor. **Validar (n)**, na barra de baixo, junta à visita o que está marcado e passa às trocas, que já aparecem resolvidas.
+
+- **Ligar a IA:** pôr `ANTHROPIC_API_KEY=...` no `.env.local` e reiniciar o `npm run dev`.
+  - A chave só existe no servidor do Vite (`tools/ia/levantamentoProxy.ts`, rota `/api/ia/levantamento`); o browser nunca a vê.
+  - Sem chave, a Olyvia responde em **modo de demonstração**: lê o texto por palavras, com o mesmo Catálogo e o mesmo ecrã, mas não vê as fotografias.
+- **Como funciona:**
+  - O Catálogo de serviços (361) vai no system, em cache.
+  - Os produtos (≈2100) procuram-se por uma ferramenta, `procurar_produtos`.
+  - As outras ferramentas são `atualizar_levantamento`, `mostrar_produtos` e `sugerir_respostas`.
+  - O browser executa as ferramentas e volta a chamar até a Olyvia acabar. O texto chega aos poucos (NDJSON).
+  - A API guarda a conversa só em memória e sempre a crescer. Ao recarregar começa outra; o que se vê fica no `localStorage` (`olyvia-conversa-v1-<id>`).
+- **Ficheiros:**
+  - `conversaIA.ts`: o que se manda, as ferramentas, o rascunho, validar e o modo de demonstração (testes em `conversaIA.test.ts`).
+  - `conversaStore.ts`: a conversa e a chamada.
+  - `ConversaLevantamento.tsx`: o ecrã e a Olyvia animada.
+  - O passo `conversa` está em `selecao.ts` e em `SelecaoGuiada.tsx`.
+- **Na migração:** o proxy passa a ser uma função do servidor (edge function), com sessão e limites por empresa. No preview do Vercel não há proxy, por isso a Olyvia responde em modo de demonstração.
