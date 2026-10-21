@@ -5,7 +5,7 @@ import type { NegocioMes, VisitaNegocio } from "./negocioMetas";
 import { MORADA_VAZIA } from "./moradaObra";
 import {
   acrescentarVisita, alterarVisita, camposDoLevantamento, contarVisitas, marcarFeita, migrarVisitaUnica, novaVisita, ordenarVisitas,
-  moradaDasVisitas, proximaVisitaDoNegocio, removerVisita, resumoDaVisita, visitaParaAbrir, visitasDoNegocio, visitasIniciais,
+  moradaDasVisitas, proximaVisitaDoNegocio, visitaRepresentaLevantamento, removerVisita, resumoDaVisita, visitaParaAbrir, visitasDoNegocio, visitasIniciais,
   visitasComCodigoPostalInvalido, visitasParaGuardar,
 } from "./visitasNegocio";
 
@@ -219,5 +219,43 @@ describe("a lista de visitas de um pedido", () => {
     expect(moradaDasVisitas(so)).toEqual({ moradaObra: MORADA_B, igualALead: null });
     expect(moradaDasVisitas([visita("z", { morada: MORADA_VAZIA })])).toBeUndefined();
     expect(moradaDasVisitas([])).toBeUndefined();
+  });
+});
+
+describe("levantamento sem visita: tem data, estado e comercial próprios", () => {
+  const PROPRIOS = { data: "2026-10-05", feitoPor: "Carla Dias", estado: "feito" as const };
+
+  it("sem visitas vale o que está no formulário", () => {
+    expect(camposDoLevantamento([], HOJE, "Ana Ribeiro", PROPRIOS)).toEqual(PROPRIOS);
+  });
+
+  it("com o formulário por preencher, preenche os valores possíveis: hoje, o comercial da sessão, por fazer", () => {
+    expect(camposDoLevantamento([], HOJE, "Ana Ribeiro", { data: "", feitoPor: "", estado: "porFazer" }))
+      .toEqual({ data: HOJE, feitoPor: "Ana Ribeiro", estado: "porFazer" });
+  });
+
+  it("com uma visita que o representa herda dela, e os valores do formulário não contam", () => {
+    expect(camposDoLevantamento([visita("a", { estado: "feita", tipo: "levantamento" })], HOJE, "Ana Ribeiro", PROPRIOS))
+      .toEqual({ data: "2026-10-15", feitoPor: "Bruno Costa", estado: "feito" });
+  });
+
+  it("uma visita cancelada não o representa: valem os do formulário", () => {
+    expect(camposDoLevantamento([visita("c", { estado: "cancelada" })], HOJE, "Ana Ribeiro", PROPRIOS)).toEqual(PROPRIOS);
+  });
+
+  it("sem os valores próprios fica como antes (os de hoje)", () => {
+    expect(camposDoLevantamento([], HOJE, "Ana Ribeiro")).toEqual({ data: HOJE, feitoPor: "Ana Ribeiro", estado: "porFazer" });
+  });
+});
+
+describe("visitaRepresentaLevantamento", () => {
+  it("há uma visita (feita ou por fazer) que o representa", () => {
+    expect(visitaRepresentaLevantamento([visita("a")])).toBe(true);
+    expect(visitaRepresentaLevantamento([visita("a", { estado: "feita" })])).toBe(true);
+  });
+
+  it("sem visitas, ou só com canceladas, nenhuma o representa", () => {
+    expect(visitaRepresentaLevantamento([])).toBe(false);
+    expect(visitaRepresentaLevantamento([visita("c", { estado: "cancelada" })])).toBe(false);
   });
 });

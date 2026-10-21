@@ -141,3 +141,13 @@ describe("adaptarRegistos: ordem e secções em falta", () => {
     expect(adaptarRegistos(fichaDb({ contactos: null, visitas: null, levantamentos: null }))).toEqual({ contactos: [], visitas: [], levantamentos: [] });
   });
 });
+
+describe("adaptarRegistos: o estado do levantamento", () => {
+  const um = (sobre: Parameters<typeof levantamentoDb>[0]) => adaptarRegistos(fichaDb({ levantamentos: seccaoDb([levantamentoDb(sobre)]) })).levantamentos[0];
+
+  it("o estado da base passa a feito ou por fazer; sem estado fica por dizer", () => {
+    expect(um({ estado: "feito" }).estado).toBe("feito");
+    expect(um({ estado: "por_fazer" }).estado).toBe("porFazer");
+    expect(um({ estado: null }).estado).toBeUndefined();
+  });
+});

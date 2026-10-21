@@ -10,6 +10,7 @@ import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegoci
 import { invalidadas, semear } from "./acoesFichaTestUtil";
 import { adaptarRegistos } from "./adaptarRegistos";
 import { ErroNeg } from "./chamarNeg";
+import { CHAVE_COMERCIAL_AMBIGUO } from "./errosNeg";
 import { fichaDb, levantamentoDb, PESSOA_ID, seccaoDb, visitaDb } from "./fichaFabrica";
 import type { FichaDb } from "./fichaTipos";
 import { captureMock, criarCliente, fonteReal, respostaErro, respostaOk, rpcMock } from "./fichaTestUtil";
@@ -18,11 +19,17 @@ import { FontePessoasContext, type FontePessoas } from "./useFontePessoas";
 import { ErroGuardarParcial, useGuardarRegistos } from "./useGuardarRegistos";
 import { QUESTIONARIO_BRUTO } from "./workflow/questionarioTestUtil";
 
-const { agenda } = vi.hoisted(() => ({ agenda: { omissao: { boardId: "q1" as string | null, recursoId: "r1" as string | null } } }));
+const { agenda, comerciaisMock } = vi.hoisted(() => ({
+  agenda: { omissao: { boardId: "q1" as string | null, recursoId: "r1" as string | null } },
+  comerciaisMock: { lista: [] as { id: string; nome: string }[] },
+}));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...args: unknown[]) => rpcMock(...args) } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: (...args: unknown[]) => captureMock(...args) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+vi.mock("./useComerciaisNegocio", () => ({
+  useComerciaisNegocio: () => ({ comerciais: comerciaisMock.lista, isLoading: false, isError: false, repetir: vi.fn() }),
+}));
 vi.mock("./useAgendaVisita", async (importar) => ({
   ...(await importar<typeof import("./useAgendaVisita")>()),
   useAgendaVisita: () => ({
@@ -87,6 +94,7 @@ beforeEach(() => {
   rpcMock.mockReset();
   captureMock.mockReset();
   agenda.omissao = { boardId: "q1", recursoId: "r1" };
+  comerciaisMock.lista = [];
   vi.useRealTimers();
   responder();
 });
@@ -367,5 +375,50 @@ describe("duplo clique e estado", () => {
     expect(result.current.pronto).toBe(true);
     const exemplo = await montar({ fonte: { modo: "exemplo" } });
     expect(exemplo.result.current.pronto).toBe(false);
+  });
+});
+
+describe("levantamento sem visita: a data, o estado e o comercial próprios", () => {
+  const PROPRIOS = { data: "2026-10-05", estado: "feito" as const, feitoPor: "Carla Dias" };
+  const rascunho = (dados: RascunhoLevantamento["dados"] = PROPRIOS): RascunhoLevantamento => ({ ...COM_NOTA, dados });
+
+  it("grava a data e o estado escolhidos, e o comercial pelo id (resolvido pelo nome na lista da organização)", async () => {
+    comerciaisMock.lista = [{ id: "u-rita", nome: "Rita Gomes" }, { id: "u-carla", nome: "Carla Dias" }];
+    const { result } = await montar();
+    await act(async () => { await result.current.guardar([], rascunho(), "Rita"); });
+    expect(chamadas()).toEqual(["neg_guardar_levantamento"]);
+    expect(argumentos("neg_guardar_levantamento").p_dados).toMatchObject({ data_levantamento: "2026-10-05", estado: "feito", feito_por: "u-carla" });
+  });
+
+  it("com o comercial fora da lista (ainda por ler) não envia feito_por: a base põe quem grava", async () => {
+    const { result } = await montar();
+    await act(async () => { await result.current.guardar([], rascunho(), "Rita"); });
+    const dados = argumentos("neg_guardar_levantamento").p_dados as Record<string, unknown>;
+    expect(dados).toMatchObject({ data_levantamento: "2026-10-05", estado: "feito" });
+    expect("feito_por" in dados).toBe(false);
+  });
+
+  it("dois comerciais com o mesmo nome: não adivinha, recusa com a mensagem própria e não grava nada", async () => {
+    comerciaisMock.lista = [{ id: "u-carla-1", nome: "Carla Dias" }, { id: "u-carla-2", nome: "Carla Dias" }];
+    const { result } = await montar();
+    const e = await falhar(result.current.guardar([], rascunho(), "Rita"));
+    expect(e).toBeInstanceOf(ErroNeg);
+    expect((e as ErroNeg).chave).toBe(CHAVE_COMERCIAL_AMBIGUO);
+    expect(chamadas()).toEqual([]);
+  });
+
+  it("com uma visita a representá-lo, os dados são os da visita e não se envia feito_por", async () => {
+    comerciaisMock.lista = [{ id: "u-carla", nome: "Carla Dias" }];
+    const { result } = await montar();
+    await act(async () => { await result.current.guardar([visita("nova")], rascunho(), "Rita"); });
+    const dados = argumentos("neg_guardar_levantamento").p_dados as Record<string, unknown>;
+    expect(dados).toMatchObject({ data_levantamento: "2026-10-22", estado: "por_fazer", visita_id: "v-novo" });
+    expect("feito_por" in dados).toBe(false);
+  });
+
+  it("verificar (em seco) também aceita os dados próprios", async () => {
+    const { result } = await montar();
+    expect(() => result.current.verificar([], rascunho(), "Rita")).not.toThrow();
+    expect(chamadas()).toEqual([]);
   });
 });

@@ -66,7 +66,13 @@ export function useCamposGerais(pessoas: readonly PessoaOpcao[], aoSujar: () => 
  */
 export function useLevantamentoForm(hoje: string, aoSujar: () => void, comercial: string, inicial?: RascunhoLevantamento) {
   const [levantamento, setLevantamento] = useState<LevantamentoForm>(() => (
-    inicial ? { ...levantamentoVazio(hoje, comercial), linhas: inicial.linhas, observacoes: inicial.observacoes } : levantamentoVazio(hoje, comercial)
+    inicial
+      ? {
+        ...levantamentoVazio(hoje, comercial), linhas: inicial.linhas, observacoes: inicial.observacoes,
+        // Um levantamento já gravado abre com a sua data, o seu estado e o seu comercial (valem enquanto nenhuma visita o representar).
+        ...(inicial.dados ? { data: inicial.dados.data, estado: inicial.dados.estado, feitoPor: inicial.dados.feitoPor } : {}),
+      }
+      : levantamentoVazio(hoje, comercial)
   ));
   // As linhas guardadas já trazem ids (l1, l2...): as novas continuam a numeração, sem repetir nenhum.
   const sequencia = useRef(Math.max(0, ...(inicial?.linhas ?? []).map((l) => Number(l.id.slice(1)) || 0)));

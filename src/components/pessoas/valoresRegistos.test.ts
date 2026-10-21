@@ -40,3 +40,19 @@ describe("valoresIniciaisDosRegistos", () => {
     expect(valoresIniciaisDosRegistos(pessoaBase("a", { comercial: "Carla Mendes" }), registosBase())).toEqual({ pessoaId: "a", comercial: "Carla Mendes", visitas: [] });
   });
 });
+
+describe("valoresIniciaisDosRegistos: os dados próprios do levantamento", () => {
+  it("o levantamento por ligar leva a data, o estado e o comercial (nome) que já tem", () => {
+    const registos = registosBase({
+      levantamentos: [levantamentoBase("rl-1", { data: "2026-10-12", feitoPor: "Carla Dias", estado: "feito", rascunho: rascunho("x") })],
+    });
+    expect(valoresIniciaisDosRegistos(pessoaBase("a"), registos).levantamento?.dados).toEqual({
+      data: "2026-10-12", estado: "feito", feitoPor: "Carla Dias",
+    });
+  });
+
+  it("sem estado nem comercial gravados: por fazer e sem nome", () => {
+    const registos = registosBase({ levantamentos: [levantamentoBase("rl-1", { data: "2026-10-12", feitoPor: "", rascunho: rascunho("x") })] });
+    expect(valoresIniciaisDosRegistos(pessoaBase("a"), registos).levantamento?.dados).toEqual({ data: "2026-10-12", estado: "porFazer", feitoPor: "" });
+  });
+});

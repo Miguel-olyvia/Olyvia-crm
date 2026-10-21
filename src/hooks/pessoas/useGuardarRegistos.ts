@@ -10,7 +10,7 @@ import type { VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { adaptarRegistos } from "./adaptarRegistos";
 import { ErroNeg } from "./chamarNeg";
-import { CHAVE_ERRO_GENERICO } from "./errosNeg";
+import { CHAVE_COMERCIAL_AMBIGUO, CHAVE_ERRO_GENERICO } from "./errosNeg";
 import { CHAVES_ENTRADA_VISITA } from "./errosVisita";
 import type { FichaDb } from "./fichaTipos";
 import {
@@ -20,6 +20,7 @@ import { levantamentoLivreDaFicha } from "./livreDaFicha";
 import { planoGravacao, type BaseVisita, type FaltaGravacao, type Passo, type PassoLevantamento } from "./planoGravacao";
 import { hojeLisboa } from "./tempoLisboa";
 import { useAcoesVisita } from "./useAcoesVisita";
+import { useComerciaisNegocio } from "./useComerciaisNegocio";
 import { useAgendaVisita } from "./useAgendaVisita";
 import { useFontePessoas } from "./useFontePessoas";
 import { minutosDaDuracao, type EntradaVisita } from "./visitaDb";
@@ -82,6 +83,19 @@ interface Sessao {
 }
 
 const generico = (): ErroNeg => new ErroNeg(null, null, CHAVE_ERRO_GENERICO);
+
+/**
+ * O rascunho com o id do comercial dos dados próprios do levantamento, achado pelo nome; sem o nome na lista, fica como está (a base põe quem grava).
+ * Com dois comerciais do mesmo nome não se adivinha: recusa-se antes de gravar.
+ */
+function rascunhoComComercial(rascunho: RascunhoLevantamento, comerciais: readonly { id: string; nome: string }[]): RascunhoLevantamento {
+  const dados = rascunho.dados;
+  if (!dados) return rascunho;
+  const iguais = comerciais.filter((c) => c.nome === dados.feitoPor);
+  if (iguais.length > 1) throw new ErroNeg(null, null, CHAVE_COMERCIAL_AMBIGUO);
+  const id = iguais[0]?.id;
+  return id ? { ...rascunho, dados: { ...dados, feitoPorId: id } } : rascunho;
+}
 
 /** A visita do painel como a base a ficou a ter depois de a criar (por fazer: dá-se como feita num passo a seguir). */
 function comoCriada(v: VisitaNegocio, idReal: string, e: EntradaVisita, pessoaId: string): BaseVisita {
@@ -169,6 +183,8 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: OpcoesGuardarR
   const acoes = useAcoesVisita(pessoaId ?? "", ficha);
   const levantamento = useGuardarLevantamento();
   const { omissao } = useAgendaVisita(ficha?.pessoa.responsavel_id ?? null);
+  // O comercial de um levantamento sem visita escolhe-se pelo nome: o id (`feito_por`) resolve-se aqui, na lista que já está lida (nunca se pede ao gravar).
+  const { comerciais } = useComerciaisNegocio(false);
   const { questionario } = useQuestionario();
   const { t } = useTranslation();
   const [aGuardar, setAGuardar] = useState(false);
@@ -184,10 +200,11 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: OpcoesGuardarR
     if (!organizationId || !ficha) throw generico();
     const base = new Map<string, BaseVisita>(adaptarRegistos(ficha).visitas.map((v) => [v.id, { idReal: v.id, visita: v }]));
     sessao.criadas.forEach((b, id) => base.set(id, b));
+    const comId = rascunhoComComercial(rascunho, comerciais);
     const plano = planoGravacao({
       organizationId, pessoaId: ficha.pessoa.id, nome: ficha.pessoa.nome ?? "", visitas, base, sessao: new Set(sessao.criadas.keys()), omissao,
       tituloDoTipo: (tipo) => (tipo ? t(`pessoasPagina.real.visit.kind.${tipo}`) : ""), agora: Date.now(), hoje: hojeLisboa(), comercial, negocioId,
-      rascunho, levantamentoLivre: ignorarLivre ? null : levantamentoLivreDaFicha(ficha), novoIdLevantamento: () => (sessao.idLevantamento ??= crypto.randomUUID()),
+      rascunho: comId, levantamentoLivre: ignorarLivre ? null : levantamentoLivreDaFicha(ficha), novoIdLevantamento: () => (sessao.idLevantamento ??= crypto.randomUUID()),
     });
     if (!plano.ok) throw new ErroNeg(null, null, CHAVE_DA_FALTA[plano.falta]);
     const comLevantamento = plano.passos.find((p): p is PassoLevantamento => p.tipo === "levantamento");
@@ -197,7 +214,7 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: OpcoesGuardarR
       paramsGuardarLevantamento(paraEntrada(comLevantamento, organizationId, ficha.pessoa.id, undefined), questionario);
     }
     return { plano, base, organizationId, ficha };
-  }, [organizationId, ficha, sessao, omissao, questionario, t, negocioId, ignorarLivre, levantamento.pronto]);
+  }, [organizationId, ficha, sessao, omissao, questionario, t, negocioId, ignorarLivre, levantamento.pronto, comerciais]);
 
   const verificar = useCallback((visitas: readonly VisitaNegocio[], rascunho: RascunhoLevantamento, comercial: string): void => {
     planear(visitas, rascunho, comercial);

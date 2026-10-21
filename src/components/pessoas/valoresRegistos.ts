@@ -13,6 +13,12 @@ export function valoresIniciaisDosRegistos(pessoa: Pick<Pessoa, "id" | "comercia
   const livre = [...registos.levantamentos].filter((l) => l.negocioId === null).sort((a, b) => b.data.localeCompare(a.data))[0];
   return {
     pessoaId: pessoa.id, comercial: pessoa.comercial, visitas: [...registos.visitas],
-    ...(livre ? { levantamento: livre.rascunho } : {}),
+    // O levantamento leva também a data, o estado e o comercial que já tem (valem enquanto nenhuma visita o representar).
+    ...(livre ? {
+      levantamento: {
+        ...livre.rascunho,
+        dados: { data: livre.data, estado: livre.estado ?? "porFazer", feitoPor: livre.feitoPor },
+      },
+    } : {}),
   };
 }

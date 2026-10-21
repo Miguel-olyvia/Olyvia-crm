@@ -2,7 +2,7 @@
 // registo liga-se a um só negócio (`negocioId`) e nada se copia: o negócio lê os registos que tem ligados. O formulário
 // que a pessoa preencheu NÃO é um contacto. Só em memória, sem Supabase.
 import type { ResultadoContacto, ResultadoEncerramento } from "@/components/pessoas/pessoasTipos";
-import type { VisitaNegocio } from "./negocioMetas";
+import type { EstadoLevantamento, VisitaNegocio } from "./negocioMetas";
 import type { RascunhoLevantamento } from "./novoNegocio";
 
 /** Uma chamada (ou tentativa de chamada) a uma pessoa. `negocioId` é `null` enquanto o contacto não está ligado a nenhum negócio. */
@@ -56,6 +56,8 @@ export interface LevantamentoPessoa {
   /** AAAA-MM-DD. */
   data: string;
   feitoPor: string;
+  /** O estado do levantamento (feito ou por fazer); falta nos de exemplo e quando a base não o diz. */
+  estado?: EstadoLevantamento;
   rascunho: RascunhoLevantamento;
   negocioId: string | null;
 }

@@ -37,6 +37,7 @@ import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
 import { estaAberto } from "./juntarPessoas";
 import { MudarFechoNegocio } from "./MudarFechoNegocio";
 import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
+import { useAcoesDoNegocio } from "./permissoesNegocio";
 import { passoDoItem } from "./processo/passosProcesso";
 import { useAcaoDoPasso } from "./processo/processoContexto";
 import type { ItemProcesso } from "./processo/tiposProcesso";
@@ -123,8 +124,9 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
   useEffect(() => titulo.current?.focus(), []);
   const perda = useAlteracoesNegocios().perdidos[negocio.id];
-  // Sem os dados da ficha real (o exemplo) pode-se sempre agir; na ficha real, só com `pessoas.edit`.
-  const podeEditar = useDadosNegocio()?.podeEditar ?? true;
+  // Sem os dados da ficha real (o exemplo) pode-se sempre agir; na ficha real, só com `pessoas.edit` (e, com a bandeira da migration B, neste negócio).
+  const acoes = useAcoesDoNegocio(negocio);
+  const podeEditar = useDadosNegocio() === null ? true : acoes.podeAgir;
   // Perder, anular a perda ou ganhar troca o botão que tinha o foco: o foco passa para o título, em vez de se perder.
   // O mesmo vale para o aviso do negócio e a conversão por fazer: ao gravar, o botão e o aviso saem e o foco cairia no corpo da página.
   const situacao = `${perda !== undefined}:${negocio.estadoReal ?? ""}:${negocio.alerta?.codigo ?? (negocio.alerta ? "?" : "")}:${negocio.conversaoPendente === true}`;
@@ -178,8 +180,9 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
         <Seccao titulo={t(`${P}phases.title`)} nivel={4}><FasesDoNegocioLista fases={fases} /></Seccao>
         {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
         <AlertasNegocio negocio={negocio} />
-        {estaAberto(negocio) && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
-        {estaAberto(negocio) && !perda && podeEditar && (
+        {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. */}
+        {estaAberto(negocio) && !acoes.fechado && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
+        {estaAberto(negocio) && !acoes.fechado && podeEditar && (
           <div className="flex flex-wrap items-start gap-3">
             <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
           </div>

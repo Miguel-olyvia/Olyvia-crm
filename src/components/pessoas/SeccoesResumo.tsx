@@ -46,16 +46,18 @@ interface SeccaoPassoProps {
   comVisita?: boolean;
   /** O bloco «Próxima visita» está no Resumo: o passo remete para ele; sem ele, remete para a aba «Visitas». */
   proximaVisitaVisivel?: boolean;
-  /** O botão do passo, quando não há bloco «Próxima visita» onde o pôr (a visita já passou ou já foi feita). */
+  /** O bloco «Por fechar» está no Resumo (há visitas que já passaram): o passo remete para ele, onde está o botão. */
+  visitaPorFechar?: boolean;
+  /** O botão do passo, quando não há bloco «Por fechar» nem «Próxima visita» onde o pôr (a visita já foi feita, ou não tem dia). */
   acao?: ReactNode;
 }
 
 /**
  * "Próximo passo e prazo": o título, a explicação de uma linha e o prazo; numa abordagem encerrada, o resultado, o motivo e o dia; numa
  * perdida (exemplo antigo), "Perdida" com motivo, data e passo. Quando o passo é a visita e a pessoa tem visitas (`comVisita`), o passo
- * remete para o bloco «Próxima visita» (ou, sem ele, para a aba «Visitas») em vez de repetir o dia.
+ * remete para o bloco «Por fechar» ou «Próxima visita» (ou, sem eles, para a aba «Visitas») em vez de repetir o dia.
  */
-export function SeccaoPasso({ resumo, hoje, comVisita = false, proximaVisitaVisivel = false, acao }: SeccaoPassoProps) {
+export function SeccaoPasso({ resumo, hoje, comVisita = false, proximaVisitaVisivel = false, visitaPorFechar = false, acao }: SeccaoPassoProps) {
   const { t } = useTranslation();
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
@@ -90,7 +92,7 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false, proximaVisitaVisi
     conteudo = (
       <div className="space-y-0.5">
         <p className="text-[15px] font-medium text-foreground">{t(`${P}next.${passo.id}`)}</p>
-        <p className="text-[15px] text-muted-foreground">{t(`${P}nextVisit.${proximaVisitaVisivel ? "seeStep" : "seeTab"}`)}</p>
+        <p className="text-[15px] text-muted-foreground">{t(`${P}nextVisit.${visitaPorFechar ? "seeToClose" : proximaVisitaVisivel ? "seeStep" : "seeTab"}`)}</p>
       </div>
     );
   } else {

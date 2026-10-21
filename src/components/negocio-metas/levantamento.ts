@@ -27,6 +27,8 @@ export type ErrosLinha = Partial<Record<"divisao" | "trabalho" | "trabalhoOutro"
 export interface ErrosLevantamento {
   /** Os erros de cada linha, pelo id da linha. */
   linhas?: Record<string, ErrosLinha>;
+  /** A data própria do levantamento (sem visita): vazia, mal formada ou anterior a 2000 (a base recusaria o levantamento). */
+  data?: "invalido";
 }
 
 export const MAX_TRABALHO_OUTRO = 60;
@@ -77,10 +79,26 @@ function validarLinha(l: LinhaForm): ErrosLinha {
   return erros;
 }
 
-/** O levantamento é opcional (nem com a visita feita se exigem linhas); se houver linhas, cada uma pede divisão, trabalho (e o texto, se "Outro") e uma medida maior que 0. */
-export function validarLevantamento(l: LevantamentoForm | undefined): ErrosLevantamento {
+const FORMATO_DIA = /^\d{4}-\d{2}-\d{2}$/;
+/** A base só aceita levantamentos desde 2000-01-01. */
+const PRIMEIRO_DIA = "2000-01-01";
+
+/** Um dia AAAA-MM-DD que existe no calendário e a base aceita. */
+export function diaDoLevantamentoValido(dia: string): boolean {
+  if (!FORMATO_DIA.test(dia) || dia < PRIMEIRO_DIA) return false;
+  const [a, m, d] = dia.split("-").map(Number);
+  const data = new Date(Date.UTC(a, m - 1, d));
+  return data.getUTCFullYear() === a && data.getUTCMonth() === m - 1 && data.getUTCDate() === d;
+}
+
+/**
+ * O levantamento é opcional (nem com a visita feita se exigem linhas); se houver linhas, cada uma pede divisão, trabalho (e o texto, se "Outro") e uma
+ * medida maior que 0. `comDataPropria`: nenhuma visita o representa, por isso a data é dele e tem de ser um dia que a base aceite.
+ */
+export function validarLevantamento(l: LevantamentoForm | undefined, comDataPropria = false): ErrosLevantamento {
   if (!l) return {};
   const erros: ErrosLevantamento = {};
+  if (comDataPropria && !diaDoLevantamentoValido(l.data)) erros.data = "invalido";
   const porLinha = Object.fromEntries(l.linhas.map((x) => [x.id, validarLinha(x)]).filter(([, e]) => Object.keys(e as object).length > 0));
   if (Object.keys(porLinha).length > 0) erros.linhas = porLinha as Record<string, ErrosLinha>;
   return erros;

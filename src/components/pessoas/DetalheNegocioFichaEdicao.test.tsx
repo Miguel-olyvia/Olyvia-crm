@@ -79,9 +79,9 @@ describe("editar negócio", () => {
     expect(screen.queryByRole("button", { name: "Editar negócio" })).toBeNull();
   });
 
-  it("também se edita um negócio ganho (o título e as notas não dependem do estado)", () => {
+  it("um negócio ganho só se edita depois de reaberto (decisão de 21/10: ver DetalheNegocioFichaFechado.test.tsx)", () => {
     abrir(ganho);
-    expect(screen.getByRole("button", { name: "Editar negócio" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Editar negócio" })).toBeNull();
   });
 });
 

@@ -13,7 +13,7 @@ export function levantamentoLivreDaFicha(ficha: FichaDb): LevantamentoLivre | nu
   const bruto = ficha.levantamentos?.itens.find((l) => l.id === livre.id);
   const m = bruto?.morada;
   return {
-    id: livre.id, rascunho: livre.rascunho, visitaId: livre.visitaId, data: livre.data, estado: bruto?.estado ?? null,
+    id: livre.id, rascunho: livre.rascunho, visitaId: livre.visitaId, data: livre.data, estado: bruto?.estado ?? null, feitoPorId: bruto?.feito_por_id ?? null,
     morada: m ? { rua: m.rua ?? "", codigoPostal: m.codigo_postal ?? "", localidade: m.localidade ?? "", andar: m.andar ?? "" } : null,
   };
 }

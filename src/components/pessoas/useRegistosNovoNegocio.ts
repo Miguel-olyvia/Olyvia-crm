@@ -4,7 +4,7 @@
 // conta se for esse o escolhido: o que se escreveu e depois se deixou de escolher não se grava.
 import { useMemo, useState } from "react";
 import type { registosPorLigar } from "@/components/negocio-metas/acoesRegistos";
-import { camposDoLevantamento, visitasComCodigoPostalInvalido, visitasParaGuardar } from "@/components/negocio-metas/visitasNegocio";
+import { camposDoLevantamento, visitaRepresentaLevantamento, visitasComCodigoPostalInvalido, visitasParaGuardar } from "@/components/negocio-metas/visitasNegocio";
 import { ligarInicial, type LigarRegistos } from "@/components/negocio-metas/ligarNegocio";
 import { validarLevantamento, type ErrosLevantamento } from "@/components/negocio-metas/levantamento";
 import { useComercialDaSessao } from "@/hooks/pessoas/useComercialDaSessao";
@@ -48,22 +48,32 @@ export function useRegistosNovoNegocio({ porLigar, levantamentosCompletos, hoje,
   // As respostas erradas só contam quando o levantamento novo é o escolhido (as que ficaram escritas e se deixaram de escolher não se gravam).
   const errosRespostas = levantamentoNovo ? validarRespostas(questionario, resp.respostas) : {};
 
-  // A data, quem fez e o estado do levantamento derivam das visitas novas; as linhas e as observações são do formulário.
+  // A data, quem fez e o estado vêm da visita nova que representa o levantamento; sem visita são os do próprio levantamento (os do formulário, e o que
+  // falta preenche-se: hoje e o comercial da sessão). As linhas e as observações são do formulário.
+  const deVisita = visitaRepresentaLevantamento(vis.visitas);
   const levantamento = useMemo(
-    () => ({ ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, comercial) }),
+    () => ({ ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, comercial, lev.levantamento) }),
     [lev.levantamento, vis.visitas, hoje, comercial],
   );
-  const errosLevantamento: ErrosLevantamento = levantamentoNovo ? validarLevantamento(levantamento) : {};
+  // O campo da data mostra o que se escreve: uma data limpa a meio da escrita não salta para hoje (hoje só entra ao validar e ao entregar).
+  const levantamentoMostrado = useMemo(
+    () => (deVisita ? levantamento : { ...levantamento, data: lev.levantamento.data }),
+    [deVisita, levantamento, lev.levantamento.data],
+  );
+  const errosLevantamento: ErrosLevantamento = levantamentoNovo ? validarLevantamento(levantamento, !deVisita) : {};
   const visitasComCodigoPostal = visitasComCodigoPostalInvalido(vis.visitas);
   const rascunho: RascunhoLevantamento = levantamentoNovo
-    ? { linhas: lev.levantamento.linhas, observacoes: lev.levantamento.observacoes, respostas: resp.respostas, moradaObra: morada.morada }
+    ? {
+      linhas: lev.levantamento.linhas, observacoes: lev.levantamento.observacoes, respostas: resp.respostas, moradaObra: morada.morada,
+      ...(deVisita ? {} : { dados: { data: levantamento.data, estado: levantamento.estado, feitoPor: levantamento.feitoPor } }),
+    }
     : RASCUNHO_VAZIO;
   const visitasNovas: VisitaNegocio[] = visitasParaGuardar(vis.visitas);
 
   return {
     ligar,
     mudarLigar: (novo: LigarRegistos) => { aoSujar(); setLigar(novo); },
-    vis, lev, resp, morada, levantamento, errosRespostas, levantamentoNovo, errosLevantamento, visitasComCodigoPostal, rascunho, visitasNovas,
+    vis, lev, resp, morada, levantamento, levantamentoMostrado, errosRespostas, levantamentoNovo, errosLevantamento, visitasComCodigoPostal, rascunho, visitasNovas,
     /** Há visitas novas ou um levantamento novo escolhido: então o plano corre em seco antes de criar o negócio. */
     temNovos: visitasNovas.length > 0 || levantamentoNovo,
   };

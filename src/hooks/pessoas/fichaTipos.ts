@@ -146,6 +146,13 @@ export interface NegocioFichaDb {
   decisao_origem_em?: string | null;
   perda_automatica?: boolean | null;
   conversao_pendente?: boolean | null;
+  /**
+   * O que quem vê pode fazer NESTE negócio (migration 20261226190000, por aplicar): `pode_editar` é a política de edição (permissão e âmbito),
+   * `pode_apagar` e `pode_restaurar` somam-lhe `pessoas.delete`. Opcionais: sem a migration não vêm e o ecrã não restringe mais do que antes.
+   */
+  pode_editar?: boolean;
+  pode_apagar?: boolean;
+  pode_restaurar?: boolean;
   parado_desde: string | null;
   levantamento_id: string | null;
   orcamentos: OrcamentoDb[];

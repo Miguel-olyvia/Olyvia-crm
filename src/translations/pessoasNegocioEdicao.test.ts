@@ -15,7 +15,7 @@ const N = "pessoasPagina.neg.";
 const CHAVES_USADAS = [
   "edit.button", "edit.title", "edit.description", "edit.name", "edit.name.error.empty", "edit.name.error.tooLong", "edit.notes", "edit.notes.count",
   "edit.notes.error.tooLong", "edit.rep", "edit.rep.none", "edit.rep.loading", "edit.rep.error", "edit.rep.retry", "edit.submit", "edit.cancel", "edit.done", "edit.unchanged",
-  "trash.button", "trash.title", "trash.description", "trash.confirm", "trash.cancel", "trash.done",
+  "closed.won", "closed.lost", "trash.button", "trash.title", "trash.description", "trash.confirm", "trash.cancel", "trash.done",
   "restore.button", "restore.title", "restore.description", "restore.confirm", "restore.cancel", "restore.done", "restore.sr",
   "bin.filter.label", "bin.filter.active", "bin.filter.bin", "bin.title", "bin.empty", "bin.loading", "bin.error", "bin.retry", "bin.deletedAt",
   "bin.event.apagado", "bin.event.restaurado", "bin.noEdit", "bin.state.aberto", "bin.state.ganho", "bin.state.perdido", "bin.list.label",

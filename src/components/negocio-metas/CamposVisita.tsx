@@ -54,7 +54,7 @@ function SeletorFeitoPor({ base, valor, opcoes, aoEscolher }: { base: string; va
  * em vez dos de exemplo. Um nome que a visita já traz (a base trouxe-o) e já não está na lista continua visível, no fim. Sem comerciais (a carregar ou
  * a leitura falhou) a lista fica vazia: nunca se inventam nomes.
  */
-function opcoesFeitoPorReal(comerciais: readonly string[], valor: string): readonly string[] {
+export function opcoesFeitoPorReal(comerciais: readonly string[], valor: string): readonly string[] {
   return valor !== "" && !comerciais.includes(valor) ? [...comerciais, valor] : comerciais;
 }
 

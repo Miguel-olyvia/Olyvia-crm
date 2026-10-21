@@ -2,7 +2,7 @@
 // converter pede leads.convert. Sem a lista de permissões (o exemplo, ou a página que ainda não a leu) nada se restringe por aqui: a base decide.
 import { describe, expect, it } from "vitest";
 import { adaptarDadosNegocio } from "./adaptarDadosNegocio";
-import { fichaDb } from "./fichaFabrica";
+import { fichaDb, negocioDb } from "./fichaFabrica";
 
 const dados = (permissoes?: readonly string[], editar = true) =>
   adaptarDadosNegocio(fichaDb({ permissoes: { editar, criar: true } }), null, permissoes ? { permissoes } : {});
@@ -55,5 +55,25 @@ describe("adaptarDadosNegocio: comerciais reais para o «Feito por»", () => {
 
   it("uma lista vazia passa como vazia (a leitura acabou sem comerciais), diferente de «ainda por ler»", () => {
     expect(adaptarDadosNegocio(fichaDb(), null, { comerciais: [] }).comerciais).toEqual([]);
+  });
+});
+
+describe("adaptarDadosNegocio: as permissões por negócio (pode_editar, pode_apagar, pode_restaurar da ficha)", () => {
+  const ficha = (sobre: Parameters<typeof negocioDb>[0]) => fichaDb({ negocios: { total: 1, itens: [negocioDb({ id: "n1", ...sobre })] } });
+
+  it("lê os três campos de cada negócio, pelo id", () => {
+    const d = adaptarDadosNegocio(ficha({ pode_editar: true, pode_apagar: false, pode_restaurar: false }), null);
+    expect(d.permissoesNegocio?.("n1")).toEqual({ editar: true, apagar: false, restaurar: false });
+  });
+
+  it("sem os campos (a migration não está aplicada) devolve vazio: nada se sabe, nada se restringe", () => {
+    const d = adaptarDadosNegocio(ficha({}), null);
+    expect(d.permissoesNegocio?.("n1")).toEqual({});
+  });
+
+  it("um valor que não é booleano não conta; um negócio que a ficha não tem dá null", () => {
+    const d = adaptarDadosNegocio(ficha({ pode_editar: "sim", pode_apagar: null } as never), null);
+    expect(d.permissoesNegocio?.("n1")).toEqual({});
+    expect(d.permissoesNegocio?.("desconhecido")).toBeNull();
   });
 });

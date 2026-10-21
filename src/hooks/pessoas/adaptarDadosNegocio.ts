@@ -2,7 +2,7 @@
 // painéis já sabiam mostrar (perdas, detalhes dos documentos) mais o que só a base sabe (documentos por ligar, leads abertas, permissões).
 // Funções puras: nada rebenta com um valor que a ficha não conhece.
 import type {
-  DadosNegocio, DocumentoPorLigar, LeadAbertaCostura, MomentoGanhoCostura, PropostaCondicoes, TipoDocumentoPermissao,
+  DadosNegocio, DocumentoPorLigar, LeadAbertaCostura, MomentoGanhoCostura, PermissoesDoNegocio, PropostaCondicoes, TipoDocumentoPermissao,
 } from "@/components/negocio-metas/costuraNegocio";
 import type {
   ContratoDetalhe, DetalheNegocio, EstadoOrcamentoDetalhe, OrcamentoDetalhe, PropostaDetalhe,
@@ -110,6 +110,15 @@ function propostaComCondicoes(n: NegocioFichaDb): PropostaCondicoes | null {
   return { id: viva.id, estado: estadoPropostaDeDb(viva), condicoes, legivel };
 }
 
+/** Só conta o que a base mandou como booleano: um campo em falta (migration por aplicar) ou de outro tipo não restringe nada. */
+function permissoesDoNegocio(n: NegocioFichaDb): PermissoesDoNegocio {
+  const p: PermissoesDoNegocio = {};
+  if (typeof n.pode_editar === "boolean") p.editar = n.pode_editar;
+  if (typeof n.pode_apagar === "boolean") p.apagar = n.pode_apagar;
+  if (typeof n.pode_restaurar === "boolean") p.restaurar = n.pode_restaurar;
+  return p;
+}
+
 export interface OpcoesDadosNegocio {
   /** `pessoas.delete`: a página sabe-o (a ficha não o devolve). */
   podeApagar?: boolean;
@@ -142,6 +151,7 @@ export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCo
   const itens = ficha.negocios?.itens ?? [];
   const detalhes = new Map(itens.map((n) => [n.id, detalheDoNegocio(n)]));
   const propostas = new Map(itens.map((n) => [n.id, propostaComCondicoes(n)]));
+  const permissoes = new Map(itens.map((n) => [n.id, permissoesDoNegocio(n)]));
   return {
     registos: adaptarRegistos(ficha),
     alteracoes: {
@@ -151,7 +161,8 @@ export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCo
     detalhe: (negocioId) => detalhes.get(negocioId) ?? null,
     momentoGanho, podeEditar: ficha.permissoes.editar === true, podeCriar: ficha.permissoes.criar === true,
     leadsAbertas: leadsAbertas(ficha), levantamentosCompletos: ficha.levantamentos?.tem_mais !== true, documentosPorLigar: documentosPorLigar(ficha),
-    podeApagar: opcoes.podeApagar === true, proposta: (negocioId) => propostas.get(negocioId) ?? null,
+    podeApagar: opcoes.podeApagar === true, permissoesNegocio: (negocioId) => permissoes.get(negocioId) ?? null,
+    proposta: (negocioId) => propostas.get(negocioId) ?? null,
     ...permissoesDoFecho(ficha, opcoes.permissoes),
     ...(opcoes.comerciais ? { comerciais: opcoes.comerciais } : {}),
     ...(opcoes.pedirComerciais ? { pedirComerciais: opcoes.pedirComerciais } : {}),

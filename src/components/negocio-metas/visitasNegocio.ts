@@ -101,13 +101,22 @@ function pesoDoLevantamento(v: VisitaNegocio): number {
 export const visitaDoLevantamento = (visitas: readonly VisitaNegocio[]): VisitaNegocio | undefined =>
   [...ordenarVisitas(visitas)].sort((a, b) => pesoDoLevantamento(a) - pesoDoLevantamento(b))[0];
 
+/** Há uma visita que representa o levantamento (uma cancelada nunca o representa): então ele herda dela a data, o estado e quem fez. */
+export const visitaRepresentaLevantamento = (visitas: readonly VisitaNegocio[]): boolean =>
+  visitaDoLevantamento(visitas.filter((v) => v.estado !== "cancelada")) !== undefined;
+
 /**
  * O que o levantamento do negócio leva (data, quem fez, estado) quando há visitas: o da visita que o representa. Basta uma
- * visita Feita para o estado ser "feito" (e então pedem-se linhas de levantamento, como sempre). Sem visitas, é o de hoje.
+ * visita Feita para o estado ser "feito" (e então pedem-se linhas de levantamento, como sempre). Sem visita ligada, o levantamento tem
+ * os seus próprios (`proprios`, o que está no formulário); o que ainda não está preenchido preenche-se: hoje e o comercial da sessão. Sem `proprios`,
+ * é o de hoje, do comercial, por fazer (e uma visita cancelada conta como a que o representa, só para o estado).
  */
 export function camposDoLevantamento(
-  visitas: readonly VisitaNegocio[], hoje: string, comercial: string,
+  visitas: readonly VisitaNegocio[], hoje: string, comercial: string, proprios?: { data: string; feitoPor: string; estado: EstadoLevantamento },
 ): { data: string; feitoPor: string; estado: EstadoLevantamento } {
+  if (proprios && !visitaRepresentaLevantamento(visitas)) {
+    return { data: proprios.data || hoje, feitoPor: proprios.feitoPor || comercial, estado: proprios.estado };
+  }
   const principal = visitaDoLevantamento(visitas);
   if (!principal) return { data: hoje, feitoPor: comercial, estado: "porFazer" };
   return { data: principal.data, feitoPor: principal.feitoPor, estado: principal.estado === "feita" ? "feito" : "porFazer" };

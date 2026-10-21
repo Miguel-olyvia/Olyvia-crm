@@ -6,7 +6,7 @@ import { lerMedida, type LinhaForm } from "@/components/negocio-metas/levantamen
 import { OUTRO } from "@/components/negocio-metas/levantamentoExemplo";
 import type { MoradaObraNegocio, VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import { moradaAparada, MORADA_VAZIA, temMorada } from "@/components/negocio-metas/moradaObra";
-import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
+import type { DadosProprios, RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 import type { Respostas } from "@/components/negocio-metas/perguntasTipos";
 import { moradaDasVisitas, visitaDoLevantamento } from "@/components/negocio-metas/visitasNegocio";
 
@@ -35,6 +35,8 @@ export interface LevantamentoLivre {
   data: string;
   /** `por_fazer` ou `feito`, como a base o guarda. */
   estado: string | null;
+  /** O comercial que fez (`feito_por`), quando se conhece. */
+  feitoPorId?: string | null;
   morada: MoradaObraNegocio | null;
 }
 
@@ -95,11 +97,26 @@ interface Contexto {
   /** Todas as visitas do painel, canceladas incluídas: o formulário sugere a morada da obra a partir de todas. */
   todas: readonly VisitaNegocio[];
   hoje: string;
+  /** O comercial com que o formulário abre quando o levantamento gravado não tem um. */
+  comercial: string;
   negocioId: string | null;
   livre: LevantamentoLivre | null;
   /** O uuid da base de uma visita do painel que já existe (ou foi criada nesta sessão); `undefined` se ainda não existe. */
   idRealDe: (idNoPainel: string) => string | undefined;
   novoId: () => string;
+}
+
+const estadoParaBase = (estado: "porFazer" | "feito"): string => (estado === "feito" ? "feito" : "por_fazer");
+
+/** Sem visita a representá-lo, a data, o estado ou o comercial próprios mudaram em relação ao que está gravado (um estado gravado em falta conta como por fazer). */
+function mudouDadosProprios(livre: LevantamentoLivre, dados: DadosProprios | undefined, comercial: string): boolean {
+  if (!dados) return false;
+  if (dados.data !== "" && dados.data !== livre.data) return true;
+  if (estadoParaBase(dados.estado) !== (livre.estado === "feito" ? "feito" : "por_fazer")) return true;
+  if (dados.feitoPorId === undefined) return false;
+  // Gravado sem comercial, o formulário abre com o da pessoa (`comercial`): só conta como mudança se se escolheu outro.
+  if (livre.feitoPorId == null) return dados.feitoPor !== comercial;
+  return dados.feitoPorId !== livre.feitoPorId;
 }
 
 function mudouFace(livre: LevantamentoLivre, c: Contexto, principal: VisitaNegocio | undefined): boolean {
@@ -108,7 +125,7 @@ function mudouFace(livre: LevantamentoLivre, c: Contexto, principal: VisitaNegoc
   if (JSON.stringify(linhasParaBase(r.linhas)) !== JSON.stringify(linhasParaBase(antes.linhas))) return true;
   if (r.observacoes.trim() !== antes.observacoes.trim() || respostasEmTexto(r.respostas) !== respostasEmTexto(antes.respostas)) return true;
   if (moradaEscrita(r, c.todas) && !mesmaMorada(r.moradaObra, livre.morada)) return true;
-  if (!principal) return false;
+  if (!principal) return mudouDadosProprios(livre, r.dados, c.comercial);
   return (c.idRealDe(principal.id) ?? null) !== livre.visitaId || principal.data !== livre.data || (principal.estado === "feita" && livre.estado !== "feito");
 }
 
@@ -123,9 +140,12 @@ export function passoLevantamento(c: Contexto): PassoLevantamento | null {
   if (livre ? !mudouFace(livre, c, principal) : !comConteudo) return null;
   const notas = cortar(rascunho.observacoes.trim(), MAX_NOTAS);
   const feita = principal?.estado === "feita";
+  // Sem visita a representá-lo o levantamento tem a data, o estado e o comercial próprios (os que estão no formulário); com visita herda-os dela.
+  const proprios = principal ? undefined : rascunho.dados;
   const dados: Record<string, unknown> = {
-    data_levantamento: principal?.data || livre?.data || c.hoje,
-    ...(feita ? { estado: "feito" } : livre ? {} : { estado: "por_fazer" }),
+    data_levantamento: principal?.data || (proprios?.data ? proprios.data : "") || livre?.data || c.hoje,
+    ...(feita ? { estado: "feito" } : proprios ? { estado: estadoParaBase(proprios.estado) } : livre ? {} : { estado: "por_fazer" }),
+    ...(proprios?.feitoPorId ? { feito_por: proprios.feitoPorId } : {}),
     ...(!principal && livre?.visitaId ? { visita_id: livre.visitaId } : {}),
     ...(notas ? { notas } : {}),
     ...moradaParaBase(rascunho.moradaObra),

@@ -157,6 +157,23 @@ describe("ordem da gravação", () => {
   });
 });
 
+describe("data própria do levantamento novo (sem visita)", () => {
+  it("uma data inválida não cria o negócio: diz o erro no campo da aba Levantamento e leva-lhe o foco", async () => {
+    const { criar } = montar();
+    fireEvent.change(titulo(), { target: { value: "Casa de banho" } });
+    aba("Levantamento");
+    fireEvent.click(screen.getByRole("radio", { name: "Fazer um novo" }));
+    const data = await screen.findByLabelText("Data do levantamento");
+    fireEvent.change(data, { target: { value: "1999-12-31" } });
+    aba("Geral");
+    fireEvent.click(criarBotao());
+    expect(criar).not.toHaveBeenCalled();
+    const campo = await screen.findByLabelText("Data do levantamento");
+    expect(campo).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(campo).toHaveFocus());
+  });
+});
+
 describe("levantamento: um que já existe OU um novo, nunca os dois", () => {
   it("com um existente escolhido o formulário novo não aparece, o pedido liga-o e nada se grava de levantamento", async () => {
     const { criar, aoCriado } = montar();

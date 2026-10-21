@@ -166,7 +166,7 @@ export function planoGravacao(e: EntradaPlano): Plano {
     if (falta) return { ok: false, falta, visitaId: v.id };
   }
   const levantamento = passoLevantamento({
-    rascunho: e.rascunho, vivas: e.visitas.filter((v) => v.estado !== "cancelada"), todas: e.visitas, hoje: e.hoje, negocioId: e.negocioId, livre: e.levantamentoLivre,
+    rascunho: e.rascunho, vivas: e.visitas.filter((v) => v.estado !== "cancelada"), todas: e.visitas, hoje: e.hoje, comercial: e.comercial, negocioId: e.negocioId, livre: e.levantamentoLivre,
     idRealDe: (id) => e.base.get(id)?.idReal, novoId: e.novoIdLevantamento,
   });
   return { ok: true, passos: [...a.criar, ...a.alterar, ...a.concluir, ...a.cancelar, ...(levantamento ? [levantamento] : [])] };

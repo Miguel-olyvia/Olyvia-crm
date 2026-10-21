@@ -12,10 +12,12 @@ import { useDadosNegocio } from "@/components/negocio-metas/costuraNegocio";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { useMutacoesDaFicha } from "@/components/negocio-metas/mutacoesNegocio";
 import { useAvisarNegocio } from "@/components/negocio-metas/useAvisarNegocio";
+import { usePermissoesPorNegocio } from "@/hooks/pessoas/bandeirasNegocio";
 import { diaLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useNegociosNoLixo, type NegocioNoLixo } from "@/hooks/pessoas/useNegociosNoLixo";
 import { ConfirmarLixoNegocioDialogo, type NegocioDoLixo } from "./ConfirmarLixoNegocioDialogo";
 import { textoDiaCompleto } from "./formatoPessoas";
+import { podeRestaurarDoLixo } from "./permissoesNegocio";
 import { useFocoDepois } from "./useFocoDepois";
 
 const N = "pessoasPagina.neg.bin.";
@@ -34,6 +36,8 @@ interface ItemProps {
 
 function ItemDoLixo({ negocio, aoRestaurar }: ItemProps) {
   const { t } = useTranslation();
+  // Com a bandeira da migration B, `pode_restaurar` deste negócio (se a ficha o trouxe) pode esconder o botão; sem ele vale o que a página já sabe.
+  const podeRestaurar = podeRestaurarDoLixo(useDadosNegocio(), negocio.id, usePermissoesPorNegocio());
   return (
     <li className="space-y-2 border-b border-border py-3 last:border-b-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -44,13 +48,15 @@ function ItemDoLixo({ negocio, aoRestaurar }: ItemProps) {
             {negocio.apagadoEm && <span>{t(`${N}deletedAt`, { date: dia(negocio.apagadoEm) })}</span>}
           </p>
         </div>
-        <Button
-          type="button" variant="outline" aria-label={t(`${R}sr`, { work: negocio.titulo })} className={cn("min-h-11 gap-2", FOCO)}
-          onClick={() => aoRestaurar(negocio)}
-        >
-          <Undo2 className="h-4 w-4" aria-hidden="true" />
-          {t(`${R}button`)}
-        </Button>
+        {podeRestaurar && (
+          <Button
+            type="button" variant="outline" aria-label={t(`${R}sr`, { work: negocio.titulo })} className={cn("min-h-11 gap-2", FOCO)}
+            onClick={() => aoRestaurar(negocio)}
+          >
+            <Undo2 className="h-4 w-4" aria-hidden="true" />
+            {t(`${R}button`)}
+          </Button>
+        )}
       </div>
       {negocio.eventos.length > 0 && (
         <ul className="space-y-0.5 text-sm text-muted-foreground">

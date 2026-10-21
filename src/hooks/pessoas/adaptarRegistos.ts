@@ -105,6 +105,7 @@ function adaptarLevantamento(l: LevantamentoFichaDb, pessoaId: string): Levantam
     visitaId: l.visita_id,
     data: FORMATO_DIA.test(l.data) ? l.data : diaLisboa(l.data) ?? "",
     feitoPor: l.feito_por_nome?.trim() ?? "",
+    ...(l.estado === "feito" || l.estado === "por_fazer" ? { estado: l.estado === "feito" ? ("feito" as const) : ("porFazer" as const) } : {}),
     rascunho: {
       linhas: linhasDoLevantamento(l), observacoes: l.notas?.trim() ?? "", respostas: respostasDeGravadas(gravadas),
       ...(gravadas.length > 0 ? { gravadas } : {}),

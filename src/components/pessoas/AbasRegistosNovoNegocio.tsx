@@ -54,7 +54,7 @@ interface PropsLevantamento extends PropsAba {
 /** A aba Levantamento: escolher um que já existe, fazer um novo (com o formulário do painel) ou dispensar. */
 export function AbaLevantamentoNovoNegocio({ id, porLigar, registos, seccao, aoMudarSeccao, erros }: PropsLevantamento) {
   const { t } = useTranslation();
-  const { ligar, mudarLigar, vis, lev, resp, levantamento, levantamentoNovo } = registos;
+  const { ligar, mudarLigar, vis, lev, resp, levantamentoMostrado: levantamento, levantamentoNovo } = registos;
   const escolher = (valor: LigarRegistos) => mudarLigar(valor);
   return (
     <div className="space-y-6">

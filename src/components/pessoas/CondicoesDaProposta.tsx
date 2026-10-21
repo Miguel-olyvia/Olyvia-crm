@@ -1,5 +1,5 @@
 // As condições (prazo, início, pagamento e garantia) da proposta ligada ao negócio, na ficha real: mostram-se e, com pessoas.edit, edita-se
-// (`CondicoesPropostaDialogo`). Uma proposta aceite já não se edita. Só existe na ficha real: o exemplo não tem `terms` e não desenha nada.
+// (`CondicoesPropostaDialogo`). Uma proposta aceite já não se edita, nem a de um negócio ganho ou perdido (reabre-se primeiro). Só existe na ficha real: o exemplo não tem `terms` e não desenha nada.
 import { useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -14,6 +14,7 @@ import { useAvisarNegocio } from "@/components/negocio-metas/useAvisarNegocio";
 import type { CondicoesTermos } from "@/components/negocio-metas/termosProposta";
 import { CondicoesPropostaDialogo } from "./CondicoesPropostaDialogo";
 import { textoDiaCompleto } from "./formatoPessoas";
+import { useAcoesDoNegocio } from "./permissoesNegocio";
 import { useFocoDepois } from "./useFocoDepois";
 
 const N = "pessoasPagina.neg.terms.";
@@ -46,6 +47,7 @@ export function CondicoesDaProposta({ negocio, hoje }: CondicoesDaPropostaProps)
   const { t } = useTranslation();
   const dados = useDadosNegocio();
   const mutacoes = useMutacoesDaFicha();
+  const acoes = useAcoesDoNegocio(negocio);
   const avisar = useAvisarNegocio();
   const [aberto, setAberto] = useState(false);
   const botao = useRef<HTMLButtonElement>(null);
@@ -53,9 +55,9 @@ export function CondicoesDaProposta({ negocio, hoje }: CondicoesDaPropostaProps)
   const proposta = dados?.proposta?.(negocio.id) ?? null;
   if (!dados || !proposta) return null;
   const aceite = proposta.estado === "aceite";
-  // Editar as condições pede pessoas.edit E proposals.edit (sem a lista de permissões, no exemplo e nos testes antigos, nada se restringe: a base decide).
+  // Editar as condições pede um negócio aberto, pessoas.edit E proposals.edit (sem a lista de permissões, no exemplo e nos testes antigos, nada se restringe: a base decide).
   const podeNaProposta = dados.podeNoDocumento?.("proposta", "edit") ?? true;
-  const podeEditar = dados.podeEditar && podeNaProposta && mutacoes?.guardarCondicoes !== undefined && !aceite;
+  const podeEditar = acoes.podeEditar && podeNaProposta && mutacoes?.guardarCondicoes !== undefined && !aceite;
   const rotulo = proposta.condicoes === null && proposta.legivel ? t(`${N}add`) : t(`${N}edit`);
   return (
     <Seccao titulo={t(`${N}title`)} nivel={4} className="mt-3">

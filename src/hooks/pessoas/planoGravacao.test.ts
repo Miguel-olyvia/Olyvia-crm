@@ -265,6 +265,77 @@ describe("o levantamento", () => {
     expect(tipos(e)).toEqual(["levantamento"]);
   });
 
+  describe("sem visita a representá-lo: tem data, estado e comercial próprios", () => {
+    const PROPRIOS = { data: "2026-10-05", estado: "feito" as const, feitoPor: "Carla Dias", feitoPorId: "u-carla" };
+    const comProprios = (extra: Partial<RascunhoLevantamento> = {}): RascunhoLevantamento => ({ ...COM_LINHAS, dados: PROPRIOS, ...extra });
+
+    it("um levantamento novo leva a data, o estado e o comercial escolhidos (feito_por é o id)", () => {
+      const l = passos(entrada({ rascunho: comProprios() })).find((p) => p.tipo === "levantamento") as Extract<Passo, { tipo: "levantamento" }>;
+      expect(l.dados).toMatchObject({ data_levantamento: "2026-10-05", estado: "feito", feito_por: "u-carla" });
+      expect(l.visitaPainelId).toBeNull();
+    });
+
+    it("por fazer vai como por_fazer; sem o id do comercial (ainda por ler) não se envia feito_por (a base põe quem grava)", () => {
+      const l = passos(entrada({ rascunho: comProprios({ dados: { ...PROPRIOS, estado: "porFazer", feitoPorId: undefined } }) })).find((p) => p.tipo === "levantamento") as Extract<Passo, { tipo: "levantamento" }>;
+      expect(l.dados).toMatchObject({ data_levantamento: "2026-10-05", estado: "por_fazer" });
+      expect("feito_por" in l.dados).toBe(false);
+    });
+
+    it("com uma visita que o representa, os dados da visita mandam e os próprios não contam", () => {
+      const e = entrada({
+        rascunho: comProprios(), visitas: [visita("v1", { estado: "feita", data: "2026-10-19" })], base: comBase(gravada("v1", { estado: "feita", data: "2026-10-19" })),
+      });
+      const l = passos(e).find((p) => p.tipo === "levantamento") as Extract<Passo, { tipo: "levantamento" }>;
+      expect(l.dados).toMatchObject({ data_levantamento: "2026-10-19", estado: "feito" });
+      expect("feito_por" in l.dados).toBe(false);
+    });
+
+    it("uma visita cancelada não o representa: valem os próprios", () => {
+      const e = entrada({ rascunho: comProprios(), visitas: [visita("v1", { estado: "cancelada" })], base: comBase(gravada("v1")) });
+      const l = passos(e).find((p) => p.tipo === "levantamento") as Extract<Passo, { tipo: "levantamento" }>;
+      expect(l.dados).toMatchObject({ data_levantamento: "2026-10-05", estado: "feito" });
+    });
+
+    it("mudar só a data, o estado ou o comercial não cria um levantamento novo (sem conteúdo continua a não haver nada a gravar)", () => {
+      expect(passos(entrada({ rascunho: { ...RASCUNHO_VAZIO, dados: PROPRIOS } }))).toEqual([]);
+    });
+
+    describe("com um levantamento livre já gravado", () => {
+      const LIVRE_SEM_VISITA: LevantamentoLivre = {
+        id: "lev-1", rascunho: COM_LINHAS, visitaId: null, data: "2026-10-05", estado: "feito", feitoPorId: "u-carla",
+        morada: { rua: "Rua B 2", codigoPostal: "2000-002", localidade: "", andar: "" },
+      };
+
+      it("com os mesmos dados não se volta a gravar", () => {
+        expect(passos(entrada({ rascunho: comProprios(), levantamentoLivre: LIVRE_SEM_VISITA }))).toEqual([]);
+      });
+
+      it.each<[string, Partial<typeof PROPRIOS>]>([
+        ["a data", { data: "2026-10-06" }], ["o estado", { estado: "porFazer" as never }], ["o comercial", { feitoPorId: "u-outro" }],
+      ])("mudar %s grava com o id do levantamento que já existe", (_nome, mudanca) => {
+        const l = passos(entrada({ rascunho: comProprios({ dados: { ...PROPRIOS, ...mudanca } }), levantamentoLivre: LIVRE_SEM_VISITA })).find((p) => p.tipo === "levantamento");
+        expect(l).toMatchObject({ tipo: "levantamento", levantamentoId: "lev-1" });
+      });
+
+      it("um levantamento gravado sem comercial (feito_por nulo) não se regrava só porque o formulário o preencheu com o comercial da pessoa", () => {
+        const semComercial = { ...LIVRE_SEM_VISITA, feitoPorId: null };
+        const abertoComOComercial = comProprios({ dados: { ...PROPRIOS, feitoPor: "Bruno", feitoPorId: "u-bruno" } });
+        expect(passos(entrada({ rascunho: abertoComOComercial, levantamentoLivre: semComercial }))).toEqual([]);
+      });
+
+      it("um levantamento gravado sem comercial regrava-se quando se escolhe outro comercial", () => {
+        const semComercial = { ...LIVRE_SEM_VISITA, feitoPorId: null };
+        const l = passos(entrada({ rascunho: comProprios(), levantamentoLivre: semComercial })).find((p) => p.tipo === "levantamento");
+        expect(l).toMatchObject({ tipo: "levantamento", levantamentoId: "lev-1" });
+      });
+
+      it("um estado gravado em falta conta como por fazer", () => {
+        const livre = { ...LIVRE_SEM_VISITA, estado: null };
+        expect(passos(entrada({ rascunho: comProprios({ dados: { ...PROPRIOS, estado: "porFazer" } }), levantamentoLivre: livre }))).toEqual([]);
+      });
+    });
+  });
+
   it("o negócio liga-se na mesma gravação (p_negocio_id), não à parte", () => {
     const l = passos(entrada({ negocioId: "neg-1", rascunho: COM_LINHAS })).find((p) => p.tipo === "levantamento");
     expect(l).toMatchObject({ negocioId: "neg-1" });

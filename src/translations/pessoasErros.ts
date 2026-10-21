@@ -1,4 +1,4 @@
-// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG020 e 42501).
+// Mensagens dos erros das funções neg_* (pt e en), traduzidas pelo código (NG001 a NG025, NG027 e 42501).
 // Juntam-se aos de `pessoasPagina.ts`, por isso as chaves continuam a ser `pessoasPagina.*`.
 const E = "pessoasPagina.erroNeg.";
 
@@ -27,6 +27,9 @@ const pt: Record<string, string> = {
   [`${E}ng022`]: "O tipo de fecho não pode mudar neste estado. Para fechar na proposta, nenhum contrato pode estar assinado nem enviado para assinatura; para fechar no contrato, a proposta não pode estar aceite. Um negócio ganho ou perdido tem de ser reaberto primeiro.",
   [`${E}ng023`]: "Um negócio que fecha na proposta não usa contratos: este contrato não se liga.",
   [`${E}ng024`]: "Só os documentos anteriores à ativação se ligam à mão.",
+  [`${E}ng025`]: "Este negócio já tem uma proposta enviada ou aceite: não se cria outra.",
+  [`${E}ng027`]: "Não tem permissão sobre a pessoa desta lead, por isso não a pode classificar.",
+  [`${E}comercialAmbiguo`]: "Há dois comerciais com o mesmo nome. Peça para distinguir os nomes antes de escolher o comercial do levantamento.",
   [`${E}permissao`]: "Não tem permissão para esta ação.",
   [`${E}generico`]: "Não foi possível concluir a ação. Tente novamente.",
 };
@@ -56,6 +59,9 @@ const en: Record<string, string> = {
   [`${E}ng022`]: "The closing type cannot change in this state. To close on the proposal, no contract can be signed or sent for signature; to close on the contract, the proposal cannot be accepted. A won or lost deal must be reopened first.",
   [`${E}ng023`]: "A deal that closes on the proposal does not use contracts: this contract cannot be linked.",
   [`${E}ng024`]: "Only documents from before activation can be linked by hand.",
+  [`${E}ng025`]: "This deal already has a sent or accepted proposal: another one cannot be created.",
+  [`${E}ng027`]: "You do not have access to the person on this lead, so you cannot classify it.",
+  [`${E}comercialAmbiguo`]: "Two sales reps have the same name. Ask for the names to be told apart before choosing the survey's sales rep.",
   [`${E}permissao`]: "You do not have permission for this action.",
   [`${E}generico`]: "The action could not be completed. Please try again.",
 };

@@ -119,12 +119,12 @@ describe("Ficha: o Resumo só mostra a próxima visita", () => {
     expect(within(screen.getByRole("tabpanel")).getAllByRole("listitem")).toHaveLength(3);
   });
 
-  it("uma visita que já passou, por concluir, não é a próxima: o bloco não aparece", () => {
+  it("uma visita que já passou, por concluir, não é a próxima: o bloco «Próxima visita» não aparece (aparece em «Por fechar»)", () => {
     montar(pessoa([visitaPessoaBase("v-passou", { data: "2026-10-12" })]));
     const resumo = screen.getByRole("tabpanel");
     expect(within(resumo).queryByRole("heading", { name: "Próxima visita" })).toBeNull();
     expect(within(resumo).queryByRole("button", { name: /^Ver todas/ })).toBeNull();
-    expect(resumo).not.toHaveTextContent(/ainda não foi concluída/);
+    expect(within(resumo).getByRole("heading", { name: "Por fechar" })).toBeInTheDocument();
   });
 
   it("só visitas feitas ou canceladas: o bloco não aparece", () => {
@@ -137,8 +137,64 @@ describe("Ficha: o Resumo só mostra a próxima visita", () => {
     expect(within(screen.getByRole("tabpanel")).getByText(/vê o bloco «Próxima visita» acima/)).toBeInTheDocument();
   });
 
-  it("sem próxima visita o passo remete para a aba «Visitas»", () => {
-    montar(pessoa([visitaPessoaBase("v-passou", { data: "2026-10-12" })]));
+  it("sem próxima visita (e nada por fechar) o passo remete para a aba «Visitas»", () => {
+    montar(pessoa([visitaPessoaBase("v-semDia", { data: "" })]));
     expect(within(screen.getByRole("tabpanel")).getByText(/aba «Visitas»/)).toBeInTheDocument();
+  });
+
+  it("com uma visita por fechar o passo remete para o bloco «Por fechar»", () => {
+    montar(pessoa([visitaPessoaBase("v-passou", { data: "2026-10-12" })]));
+    expect(within(screen.getByRole("tabpanel")).getByText(/bloco «Por fechar» acima/)).toBeInTheDocument();
+  });
+});
+
+describe("Ficha: o Resumo mostra as visitas que já passaram como «Por fechar»", () => {
+  const PASSADAS = () => [
+    visitaPessoaBase("v-recente", { data: "2026-10-12", hora: "10:00" }),
+    visitaPessoaBase("v-antiga", { data: "2026-10-01", hora: "09:00" }),
+    visitaPessoaBase("v-proxima", { data: "2026-10-20", hora: "09:00" }),
+    visitaPessoaBase("v-feita", { data: "2026-10-05", estado: "feita" }),
+  ];
+  const blocoPorFechar = () => within(screen.getByRole("tabpanel")).getByRole("heading", { name: "Por fechar" }).closest("section")!;
+
+  it("lista só as por fazer que já passaram, da mais antiga para a mais recente, com o aviso de cada uma", () => {
+    montar(pessoa(PASSADAS()));
+    const bloco = blocoPorFechar();
+    const linhas = within(bloco).getAllByRole("listitem");
+    expect(linhas).toHaveLength(2);
+    expect(linhas[0]).toHaveTextContent(/01\/10\/2026/);
+    expect(linhas[1]).toHaveTextContent(/12\/10\/2026/);
+    expect(bloco).toHaveTextContent(/ainda não foi concluída/);
+    expect(bloco).not.toHaveTextContent(/05\/10\/2026/);
+  });
+
+  it("aparece ALÉM da próxima visita, que continua no seu bloco", () => {
+    montar(pessoa(PASSADAS()));
+    const resumo = screen.getByRole("tabpanel");
+    expect(within(resumo).getByRole("heading", { name: "Próxima visita" })).toBeInTheDocument();
+    const proxima = within(resumo).getByRole("heading", { name: "Próxima visita" }).closest("section")!;
+    expect(within(proxima).getAllByRole("listitem")).toHaveLength(1);
+    expect(proxima).toHaveTextContent(/20\/10\/2026/);
+  });
+
+  it("cada visita por fechar oferece registar o resultado (marcá-la como feita)", () => {
+    montar(pessoa([visitaPessoaBase("v-passou", { data: "2026-10-12" })]));
+    expect(within(blocoPorFechar()).getByRole("button", { name: /resultado/i })).toBeInTheDocument();
+  });
+
+  it("sem visitas passadas por fazer o bloco não aparece", () => {
+    montar(pessoa([visitaPessoaBase("v-proxima", { data: "2026-10-20" }), visitaPessoaBase("v-feita", { data: "2026-10-05", estado: "feita" })]));
+    expect(within(screen.getByRole("tabpanel")).queryByRole("heading", { name: "Por fechar" })).toBeNull();
+  });
+
+  it("uma pessoa perdida não tem visitas à vista: nada por fechar", () => {
+    montar(pessoa([visitaPessoaBase("v-passou", { data: "2026-10-12" })], { perdida: { motivo: "preco", data: "2026-10-01" } }));
+    expect(within(screen.getByRole("tabpanel")).queryByRole("heading", { name: "Por fechar" })).toBeNull();
+  });
+
+  it("a aba Visitas continua a listar todas, as por fechar incluídas", () => {
+    montar(pessoa(PASSADAS()));
+    abrirAba(/^Visitas/);
+    expect(within(screen.getByRole("tabpanel")).getAllByRole("listitem")).toHaveLength(4);
   });
 });

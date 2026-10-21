@@ -3,6 +3,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DadosDoLevantamento } from "./DadosDoLevantamento";
 import { LinhaLevantamentoForm, MAX_OBSERVACOES } from "./LinhaLevantamentoForm";
 import { N, Rotulo } from "./PecasNovoNegocio";
 import { FOCO } from "./estilos";
@@ -50,12 +51,16 @@ function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
   );
 }
 
-/** A secção Medidas da área: a ajuda, as linhas do levantamento e as observações gerais. */
-export function MedidasDaArea(props: Props) {
+/**
+ * A secção Medidas da área: os dados do levantamento (data, estado e comercial: próprios sem visita ligada, herdados dela com visita), a ajuda, as
+ * linhas do levantamento e as observações gerais. `deVisita`: uma visita representa o levantamento.
+ */
+export function MedidasDaArea(props: Props & { deVisita?: boolean }) {
   const { t } = useTranslation();
-  const { id, levantamento, acoes } = props;
+  const { id, levantamento, acoes, deVisita = false, erros } = props;
   return (
     <div className="space-y-4">
+      <DadosDoLevantamento id={id} levantamento={levantamento} deVisita={deVisita} erro={erros.data} acoes={acoes} />
       <p role="note" className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         {t(`${N}survey.help`)} {t(`${N}visit.measures.help`)}

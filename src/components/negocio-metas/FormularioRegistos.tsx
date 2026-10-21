@@ -26,7 +26,7 @@ import {
 } from "./useEstadoNovoNegocio";
 import type { VisitaNegocio } from "./negocioMetas";
 import { usePedidoFoco } from "./usePedidoFoco";
-import { camposDoLevantamento, visitasComCodigoPostalInvalido, visitasParaGuardar } from "./visitasNegocio";
+import { camposDoLevantamento, visitaRepresentaLevantamento, visitasComCodigoPostalInvalido, visitasParaGuardar } from "./visitasNegocio";
 
 // O painel «Visita e levantamento» de uma PESSOA (o modo «registos» do painel «Novo negócio»): as mesmas abas, mas guarda no que é da pessoa
 // (as visitas e o levantamento ficam nos registos dela) e nunca cria um negócio. O negócio cria-se à mão, noutro painel, e liga estes registos.
@@ -185,11 +185,15 @@ export function FormularioRegistos({
   const comRespostasErradas = Object.keys(errosRespostas).length > 0;
   const bloqueado = semPerguntas || comRespostasErradas;
   const pessoa = pessoas.find((p) => p.id === valores.pessoaId);
-  // A data, quem fez e o estado do levantamento derivam da lista de visitas; as linhas e as observações são do formulário.
-  const levantamento = { ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, valores.comercial) };
-  // Os erros de agora: as linhas do levantamento e os códigos postais (o da obra e os das visitas, que a base só aceita no formato 0000-000).
+  // A data, quem fez e o estado do levantamento vêm da visita que o representa; sem visita são os do próprio levantamento (os do formulário, e o que
+  // falta preenche-se: hoje e o comercial). As linhas e as observações são sempre do formulário.
+  const deVisita = visitaRepresentaLevantamento(vis.visitas);
+  const levantamento = { ...lev.levantamento, ...camposDoLevantamento(vis.visitas, hoje, valores.comercial, lev.levantamento) };
+  // O campo da data mostra o que se escreve: uma data limpa a meio da escrita não salta para hoje (hoje só entra ao validar e ao guardar).
+  const levantamentoMostrado = deVisita ? levantamento : { ...levantamento, data: lev.levantamento.data };
+  // Os erros de agora: a data própria e as linhas do levantamento, e os códigos postais (o da obra e os das visitas, que a base só aceita no formato 0000-000).
   const errosAgora: ErrosNovoNegocio = {
-    ...validarLevantamento(levantamento), ...(validarCodigoPostal(morada.morada.codigoPostal) ? { codigoPostal: "invalido" as const } : {}),
+    ...validarLevantamento(levantamento, !deVisita), ...(validarCodigoPostal(morada.morada.codigoPostal) ? { codigoPostal: "invalido" as const } : {}),
   };
   const errosVisiveis: ErrosNovoNegocio = tentou ? errosAgora : {};
   const cpDasVisitas = visitasComCodigoPostalInvalido(vis.visitas, visitasGravadas);
@@ -238,7 +242,10 @@ export function FormularioRegistos({
       return;
     }
     guardarLevantamento.aoGuardar(
-      { linhas: lev.levantamento.linhas, observacoes: lev.levantamento.observacoes, respostas: resp.respostas, moradaObra: morada.morada },
+      {
+        linhas: lev.levantamento.linhas, observacoes: lev.levantamento.observacoes, respostas: resp.respostas, moradaObra: morada.morada,
+        ...(deVisita ? {} : { dados: { data: levantamento.data, estado: levantamento.estado, feitoPor: levantamento.feitoPor } }),
+      },
       visitasParaGuardar(vis.visitas), valores.comercial,
     );
   };
@@ -247,7 +254,7 @@ export function FormularioRegistos({
     <form onSubmit={(e: FormEvent) => { e.preventDefault(); guardar(); }} noValidate className="flex min-h-0 flex-1 flex-col">
       <CorpoAbas
         id={id} aba={aba} aoMudarAba={setAba} seccao={seccao} aoMudarSeccao={setSeccao} pessoas={pessoas} valores={valores}
-        respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={levantamento}
+        respostas={resp.respostas} morada={morada.morada} origemMorada={morada.origem} levantamento={levantamentoMostrado}
         erros={errosVisiveis} primeiroCampo={primeiroCampo}
         acoesGeral={acoes} pessoaBloqueada={!!pessoaInicialId && !!pessoa} acoesLevantamento={lev.acoes} visitas={vis.visitas} visitaAberta={vis.aberta} acoesVisitas={vis.acoes}
         visitasGravadas={visitasGravadas} visitasComCodigoPostalInvalido={tentou ? cpDasVisitas : []}

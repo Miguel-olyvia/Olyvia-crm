@@ -16,7 +16,7 @@ import { seccoesDaVisita } from "./questionarioForm";
 import { localizarErrosRespostas, type ErroResposta } from "./respostasQuestionario";
 import { contarSeccao, contarTotal, seccaoCompleta, tituloDaSeccao } from "./respostasVisita";
 import type { AcoesVisitas } from "./useEstadoNovoNegocio";
-import { contarVisitas } from "./visitasNegocio";
+import { contarVisitas, visitaRepresentaLevantamento } from "./visitasNegocio";
 
 interface Props {
   id: string;
@@ -168,7 +168,9 @@ export function AbaVisita({
             />
           )}
           <BlocosPerguntas blocos={seccao.blocos} respostas={respostas} aoEscolher={aoEscolher} aoEscrever={aoEscrever} erros={errosRespostas} />
-          {seccao.especial === "medidas" && <MedidasDaArea id={id} levantamento={levantamento} erros={erros} acoes={acoesLevantamento} />}
+          {seccao.especial === "medidas" && (
+            <MedidasDaArea id={id} levantamento={levantamento} erros={erros} acoes={acoesLevantamento} deVisita={visitaRepresentaLevantamento(visitas)} />
+          )}
         </section>
       </div>
     </div>

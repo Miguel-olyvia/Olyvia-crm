@@ -1,6 +1,6 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
-import type { DadosContactoNegocio, MoradaObraNegocio, NegocioMes, RespostaNegocio, VisitaNegocio } from "./negocioMetas";
+import type { DadosContactoNegocio, EstadoLevantamento, MoradaObraNegocio, NegocioMes, RespostaNegocio, VisitaNegocio } from "./negocioMetas";
 import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 import { validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
@@ -55,6 +55,19 @@ export const COMERCIAL_POR_OMISSAO: string = COMERCIAIS_EXEMPLO[0];
 /** O primeiro prazo de um negócio novo: levantamento daqui a 2 dias. */
 export const DIAS_ATE_PRIMEIRO_PRAZO = 2;
 
+/**
+ * Os dados do levantamento que não vêm de nenhuma visita: a data, o estado e o comercial (nome, e o id quando se conhece). Um levantamento SEM visita
+ * ligada tem-nos próprios (e preenchem-se por omissão: hoje, por fazer, o comercial da sessão); com uma visita ligada herda-os dela e estes não contam.
+ */
+export interface DadosProprios {
+  /** AAAA-MM-DD. */
+  data: string;
+  estado: EstadoLevantamento;
+  feitoPor: string;
+  /** O id do comercial na base (`feito_por`): põe-no a gravação, a partir do nome (os formulários não o guardam); falta quando a lista de comerciais ainda não carregou (a base põe então quem grava). */
+  feitoPorId?: string;
+}
+
 /** O levantamento a meio, guardado sem criar o negócio: o que o formulário precisa para voltar a abrir como estava. */
 export interface RascunhoLevantamento {
   linhas: LevantamentoForm["linhas"];
@@ -62,6 +75,8 @@ export interface RascunhoLevantamento {
   respostas: Respostas;
   /** A morada da obra escrita no painel (a que não está nas visitas); falta nos rascunhos antigos. */
   moradaObra?: MoradaObraForm;
+  /** A data, o estado e o comercial do levantamento sem visita; só valem quando nenhuma visita o representa. Faltam nos rascunhos antigos. */
+  dados?: DadosProprios;
   /** As respostas já gravadas na base, com o snapshot do que a pessoa viu (a ficha real): o fornecedor do questionário mostra esse texto (D5). Falta no exemplo. */
   gravadas?: readonly RespostaGravada[];
 }
@@ -143,6 +158,7 @@ export function primeiroErro(
   const geral = ORDEM_GERAL.find((c) => erros[c]);
   if (geral) return { aba: "geral", campo: CAMPO_GERAL[geral] };
   if (erros.codigoPostal) return { aba: "qualificacao", campo: "cp" };
+  if (erros.data) return { aba: "visita", campo: "lev-data" };
   for (const linha of idsLinhas) {
     const campo = ORDEM_LINHA.find((c) => erros.linhas?.[linha]?.[c]);
     if (campo) return { aba: "visita", campo: `linha-${linha}-${campo}` };

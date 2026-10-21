@@ -6,6 +6,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter } from "react-router-dom";
 import type { DadosNegocio } from "@/components/negocio-metas/costuraNegocio";
 import { ComCostura, dadosFalsos, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
+import { PermissoesPorNegocioContext } from "@/hooks/pessoas/bandeirasNegocio";
+import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import type { MutacoesNegocio } from "@/components/negocio-metas/mutacoesNegocio";
 import type { LixoDosNegocios, NegocioNoLixo } from "@/hooks/pessoas/useNegociosNoLixo";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
@@ -229,6 +231,18 @@ describe("restaurar", () => {
     await waitFor(() => expect(botao()).toHaveFocus());
   });
 
+  it("se a base recusa (sem permissão sobre este negócio), o erro aparece traduzido no diálogo e o negócio fica no lixo", async () => {
+    lixoMock.mockReturnValue(lixo({ itens: [APAGADO] }));
+    const restaurar = vi.fn(async () => { throw new ErroNeg(null, "42501", "pessoasPagina.erroNeg.permissao"); });
+    abrir({}, { restaurar });
+    abrirLixo();
+    fireEvent.click(botao());
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restaurar o negócio" }));
+    await waitFor(() => expect(restaurar).toHaveBeenCalledWith("n9"));
+    expect(await within(screen.getByRole("dialog")).findByText("Não tem permissão para esta ação.")).toBeInTheDocument();
+    expect(sucesso).not.toHaveBeenCalled();
+  });
+
   it("depois de restaurar, o foco passa para o filtro (o botão desapareceu com o negócio)", async () => {
     lixoMock.mockReturnValue(lixo({ itens: [APAGADO] }));
     abrir();
@@ -237,5 +251,44 @@ describe("restaurar", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restaurar o negócio" }));
     await waitFor(() => expect(sucesso).toHaveBeenCalled());
     await waitFor(() => expect(within(filtro()).getByRole("button", { name: "Lixo" })).toHaveFocus());
+  });
+});
+
+describe("restaurar com as permissões por negócio (bandeira da migration B)", () => {
+  function abrirComBandeira(dados: Partial<DadosNegocio>, bandeira: boolean) {
+    lixoMock.mockReturnValue(lixo({ itens: [APAGADO] }));
+    render(
+      <MemoryRouter>
+        <PermissoesPorNegocioContext.Provider value={bandeira}>
+          <ComCostura mutacoes={mutacoesFalsas({ restaurar: vi.fn(async () => undefined) })} dados={dadosFalsos({ podeApagar: true, ...dados })}>
+            <ListaNegociosComLixo pessoaId="p1" pessoaNome="Ana" lista={<p>LISTA NORMAL</p>} />
+          </ComCostura>
+        </PermissoesPorNegocioContext.Provider>
+      </MemoryRouter>,
+    );
+    abrirLixo();
+  }
+  const restaurar = () => screen.queryByRole("button", { name: /Restaurar/ });
+
+  it("pode_restaurar falso para este negócio: o botão não aparece", () => {
+    abrirComBandeira({ permissoesNegocio: (id) => (id === "n9" ? { restaurar: false } : null) }, true);
+    expect(screen.getByText("Cozinha velha")).toBeInTheDocument();
+    expect(restaurar()).toBeNull();
+  });
+
+  it("pode_restaurar verdadeiro, em falta, ou negócio que a ficha não conhece (o lixo não vem na ficha): aparece como hoje", () => {
+    abrirComBandeira({ permissoesNegocio: () => ({ restaurar: true }) }, true);
+    expect(restaurar()).toBeInTheDocument();
+    cleanup();
+    abrirComBandeira({ permissoesNegocio: () => null }, true);
+    expect(restaurar()).toBeInTheDocument();
+    cleanup();
+    abrirComBandeira({}, true);
+    expect(restaurar()).toBeInTheDocument();
+  });
+
+  it("com a bandeira desligada o campo é ignorado", () => {
+    abrirComBandeira({ permissoesNegocio: () => ({ restaurar: false }) }, false);
+    expect(restaurar()).toBeInTheDocument();
   });
 });

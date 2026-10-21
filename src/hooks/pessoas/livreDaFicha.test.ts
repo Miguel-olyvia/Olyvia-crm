@@ -38,3 +38,15 @@ describe("levantamentoLivreDaFicha", () => {
     expect(levantamentoLivreDaFicha(fichaDb({ levantamentos: seccaoDb([levantamentoDb()]) }))?.morada).toBeNull();
   });
 });
+
+describe("levantamentoLivreDaFicha: o comercial que fez", () => {
+  it("traz o id (feito_por_id) para a gravação saber se mudou", () => {
+    const ficha = fichaDb({ levantamentos: seccaoDb([levantamentoDb({ id: "l1", feito_por_id: "u-carla" })]) });
+    expect(levantamentoLivreDaFicha(ficha)?.feitoPorId).toBe("u-carla");
+  });
+
+  it("sem comercial gravado o id é nulo", () => {
+    const ficha = fichaDb({ levantamentos: seccaoDb([levantamentoDb({ id: "l1", feito_por_id: null })]) });
+    expect(levantamentoLivreDaFicha(ficha)?.feitoPorId).toBeNull();
+  });
+});

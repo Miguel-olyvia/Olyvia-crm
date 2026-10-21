@@ -101,7 +101,7 @@ export function FormularioNovoNegocioReal({ pessoaId, ficha, mutacoes, dados, ao
   const erros: ErrosGeralReal = tentou ? { titulo: titulo.trim() === "", reabrir: escolhida?.encerrada === true && !reabrir } : {};
   const tituloLimpo = titulo.trim();
   const errosLevantamento = tentou ? registos.errosLevantamento : {};
-  const comErrosLevantamento = tentou && (!!registos.errosLevantamento.linhas || Object.keys(registos.errosRespostas).length > 0);
+  const comErrosLevantamento = tentou && (!!registos.errosLevantamento.linhas || !!registos.errosLevantamento.data || Object.keys(registos.errosRespostas).length > 0);
 
   const mudarGeral = (p: { titulo?: string; notas?: string; lead?: string; reabrir?: boolean; fecho?: FechoNegocio }) => {
     aoSujar();
@@ -126,6 +126,12 @@ export function FormularioNovoNegocioReal({ pessoaId, ficha, mutacoes, dados, ao
       setAba("levantamento");
       if (resposta.aba === "visita") setSeccao(resposta.seccao);
       pedirFocoPergunta(resposta.pergunta);
+      return true;
+    }
+    if (registos.errosLevantamento.data) {
+      setAba("levantamento");
+      setSeccao(SECCAO_DAS_MEDIDAS);
+      pedirFoco("lev-data");
       return true;
     }
     const linhas = registos.errosLevantamento.linhas ?? {};

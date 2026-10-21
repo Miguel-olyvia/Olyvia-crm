@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  adaptarLinhaADivisao, lerMedida, levantamentoVazio, novaLinha, paraLevantamentoNegocio, temLevantamento, type LinhaForm,
+  adaptarLinhaADivisao, lerMedida, levantamentoVazio, novaLinha, paraLevantamentoNegocio, temLevantamento, validarLevantamento, type LinhaForm,
 } from "./levantamento";
 import { DIVISOES, OUTRO, UNIDADES, trabalhosPorDivisao } from "./levantamentoExemplo";
 import { negocioMetasNovoTranslations } from "@/translations/negocioMetasNovo";
@@ -78,5 +78,24 @@ describe("levantamento", () => {
     expect(temLevantamento(vazio)).toBe(false);
     expect(temLevantamento({ ...vazio, estado: "feito" })).toBe(true);
     expect(temLevantamento({ ...vazio, observacoes: "a" })).toBe(true);
+  });
+});
+
+describe("validarLevantamento: a data própria do levantamento (sem visita)", () => {
+  const com = (data: string) => ({ ...levantamentoVazio("2026-10-13", "Ana"), data });
+
+  it("sem a data própria (há uma visita a representá-lo) a data não se valida", () => {
+    expect(validarLevantamento(com(""))).toEqual({});
+  });
+
+  it("com a data própria: vazia, mal formada ou anterior a 2000 é inválida (a base recusaria o levantamento)", () => {
+    for (const data of ["", "13/10/2026", "2026-13-40", "1999-12-31", "0002-10-21"]) {
+      expect(validarLevantamento(com(data), true), data).toEqual({ data: "invalido" });
+    }
+  });
+
+  it("uma data certa não dá erro", () => {
+    expect(validarLevantamento(com("2026-10-13"), true)).toEqual({});
+    expect(validarLevantamento(com("2000-01-01"), true)).toEqual({});
   });
 });

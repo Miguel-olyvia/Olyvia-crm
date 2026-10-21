@@ -45,6 +45,16 @@ export interface PropostaCondicoes {
   legivel: boolean;
 }
 
+/** O que a base diz que se pode fazer NESTE negócio (cada campo só existe se a ficha o devolveu); `false` esconde, ausente não restringe. */
+export interface PermissoesDoNegocio {
+  /** `pode_editar`: a política de edição de negócios (permissão e âmbito). */
+  editar?: boolean;
+  /** `pode_apagar`: mandar para o lixo (edição e `pessoas.delete`). */
+  apagar?: boolean;
+  /** `pode_restaurar`: tirar do lixo (a mesma regra de apagar). */
+  restaurar?: boolean;
+}
+
 export interface DadosNegocio {
   /** Os registos da pessoa aberta (contactos, visitas e levantamentos), com o negócio a que cada um está ligado. */
   registos: EstadoRegistos;
@@ -64,6 +74,11 @@ export interface DadosNegocio {
   documentosPorLigar: readonly DocumentoPorLigar[];
   /** `pessoas.delete` (com o âmbito que a base decide): mandar para o lixo e restaurar. Ausente conta como falso. */
   podeApagar?: boolean;
+  /**
+   * O que a ficha diz que se pode fazer em cada negócio (`pode_editar`, `pode_apagar`, `pode_restaurar`); `null` para um negócio que ela não traz (os
+   * do lixo). Só se lê com a bandeira das permissões por negócio ligada. Ausente (exemplo e testes antigos): nada se restringe por aqui.
+   */
+  permissoesNegocio?: (negocioId: string) => PermissoesDoNegocio | null;
   /**
    * Os botões de documento pedem `pessoas.edit` E a permissão do documento (`quotes`, `proposals`, `client_contracts`), com o âmbito que a base decide.
    * Ausente (exemplo e testes antigos): sem restrição extra; a base continua a ser quem decide, o ecrã só esconde.

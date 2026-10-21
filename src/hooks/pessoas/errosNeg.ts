@@ -3,6 +3,8 @@
 const P = "pessoasPagina.erroNeg.";
 
 export const CHAVE_ERRO_GENERICO = `${P}generico`;
+/** Dois comerciais da organização com o mesmo nome: o nome escolhido no levantamento não diz qual é (erro do ecrã, não vem da base). */
+export const CHAVE_COMERCIAL_AMBIGUO = `${P}comercialAmbiguo`;
 
 export const CHAVES_ERRO_NEG: Readonly<Record<string, string>> = {
   NG001: `${P}ng001`,
@@ -29,11 +31,14 @@ export const CHAVES_ERRO_NEG: Readonly<Record<string, string>> = {
   NG022: `${P}ng022`,
   NG023: `${P}ng023`,
   NG024: `${P}ng024`,
+  NG025: `${P}ng025`,
+  // NG026 é de outra migration (recusa do orçamento na cadeia) e ainda não tem ecrã.
+  NG027: `${P}ng027`,
   "42501": `${P}permissao`,
 };
 
-// NG001 a NG024, inteiro: nem NG0011 nem xNG001.
-const CODIGO_NO_TEXTO = /(?<![A-Za-z0-9])NG0(?:0[1-9]|1[0-9]|2[0-4])(?![0-9])/;
+// NG001 a NG025 e NG027, inteiro: nem NG0011 nem xNG001.
+const CODIGO_NO_TEXTO = /(?<![A-Za-z0-9])NG0(?:0[1-9]|1[0-9]|2[0-5]|27)(?![0-9])/;
 
 function texto(valor: unknown): string | null {
   return typeof valor === "string" ? valor : null;
