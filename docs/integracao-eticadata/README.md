@@ -1,6 +1,7 @@
 # Integração com o Eticadata (faturas, recibos e pagamentos)
 
-Estado a 21/10/2026: **à espera da resposta do revendedor** ao email das perguntas críticas (secção 8).
+Estado a 21/10/2026: **em standby.** Segundo o revendedor, para usar o módulo da API com certificação, **a nossa plataforma também tem de ser certificada pela AT**.
+Até lá, a fatura emite-se no Eticadata e a Olyvia, no máximo, regista o número ou lê-o do SQL, como o `registarFatura` da V2. O resto deste documento fica para quando se retomar.
 Ainda não há ligação nenhuma ao ERP, nem a de leitura. Este documento junta o que se sabe, o que se decidiu e o que falta.
 
 ---
