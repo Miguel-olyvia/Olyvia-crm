@@ -7,7 +7,7 @@ import { Armchair, Check, Copy, Grid3x3, Hammer, HardHat, Mail, Maximize2, Messa
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useInventario } from "./inventario/loja";
-import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
+import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { SeloAssinatura } from "./AssinaturaContrato";
@@ -628,7 +628,10 @@ export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
 function estadoLinha(d: Negocio, nome: string, inv: ResumoEcNeg | null): { t: string; ok: boolean } {
   if (!d.obra.ec?.ref) return { t: "na obra", ok: true };
   const l = linhaDoResumo(inv, nome);
-  return l ? estadoLinhaNegocio(l) : { t: "a preparar", ok: false };
+  if (!l) return { t: "a preparar", ok: false };
+  const st = estadoLinhaNegocio(l);
+  // 21/10: a encomenda ao fornecedor por aprovar é interna: o cliente não vê estado nenhum nessa linha
+  return st.t === ESTADO_PO_POR_APROVAR ? { t: "", ok: false } : st;
 }
 /** A nota de encomenda: os materiais e produtos da obra, com o preço (nunca o custo), o estado de cada um e quando estão em obra. */
 export function NotaEncomendaDoc({ d }: { d: Negocio }) {
@@ -647,7 +650,7 @@ export function NotaEncomendaDoc({ d }: { d: Negocio }) {
           const st = estadoLinha(d, x.n, inv);
           return (
             <li key={x.n} className="flex items-baseline justify-between gap-4 py-2.5">
-              <span className="min-w-0">{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} · {x.de === "produto" ? "escolhido na visita" : "do modelo"} · <span className={st.ok ? "text-emerald-700" : "text-slate-500"}>{st.t}</span></span></span>
+              <span className="min-w-0">{x.n}<span className="block text-sm text-slate-500">{nfmt(x.q)} {x.un} · {x.de === "produto" ? "escolhido na visita" : "do modelo"}{st.t ? <> · <span className={st.ok ? "text-emerald-700" : "text-slate-500"}>{st.t}</span></> : null}</span></span>
               <span className="shrink-0 tabular-nums">{eur((x.preco ?? 0) * x.q)} €</span>
             </li>
           );

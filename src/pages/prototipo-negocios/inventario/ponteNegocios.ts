@@ -316,13 +316,15 @@ export function textoResumoEc(r: ResumoEcNeg): string {
 }
 
 /** O estado de uma linha para quem lê o negócio (e o cliente): "saiu para a obra", "reservado em armazém", "encomendado ao fornecedor"... */
+/** O estado da linha enquanto a encomenda ao fornecedor espera aprovação (interno: o portal do cliente esconde-o). */
+export const ESTADO_PO_POR_APROVAR = "encomenda a fornecedor por aprovar";
 export function estadoLinhaNegocio(l: LinhaResumoNeg): { t: string; ok: boolean } {
   if (l.st === "served") return { t: "saiu para a obra", ok: true };
   if (l.aBordo) return { t: "na carrinha", ok: true };
   if (l.st === "ready" || l.st === "recvpo") return { t: "reservado em armazém", ok: true };
   if (l.aChegar > 0) {
     const pr = l.pos.find((x) => x.prometida)?.prometida;
-    if (l.pos.length && l.pos.every((x) => x.fase === "por aprovar")) return { t: "encomenda a fornecedor por aprovar", ok: false };
+    if (l.pos.length && l.pos.every((x) => x.fase === "por aprovar")) return { t: ESTADO_PO_POR_APROVAR, ok: false };
     const f = l.pos.find((x) => x.fase !== "por aprovar")?.fase;
     const onde = f === "no portal" ? "no portal do fornecedor" : f === "parcial" ? "recebido em parte" : "encomendado ao fornecedor";
     return { t: pr ? `${onde} · chega a ${pr.slice(8, 10)}/${pr.slice(5, 7)}` : onde, ok: false };
