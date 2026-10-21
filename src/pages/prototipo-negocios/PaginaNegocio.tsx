@@ -257,7 +257,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       g(CONTACTO[3], CalendarClock),
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Vagas do Rúben em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Escolher uma marca a visita e passa à fase Visita.</p>
+          <p className="text-sm text-muted-foreground">Vagas do Rúben em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Escolher uma vaga, ou outro dia e hora, marca a visita e passa à fase Visita.</p>
           <div className="flex flex-wrap gap-2">
             {SLOTS.map((s) => (
               <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s))}
@@ -266,6 +266,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
               </button>
             ))}
           </div>
+          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot))()} />
         </div>
       ) },
     ];
@@ -652,6 +653,25 @@ function ContratoBloqueado({ d }: { d: Negocio }) {
       <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground" aria-hidden="true"><Lock className="h-5 w-5" /></span>
       <p className="mt-3 text-lg font-semibold">O contrato abre quando o cliente aceitar a proposta</p>
       <p className="mx-auto mt-1 max-w-md text-[15px] text-muted-foreground">{estado}</p>
+    </div>
+  );
+}
+
+const DIA_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+/** "2026-10-22" e "14:30" → "qui 22/10 · 14:30", o mesmo formato das vagas. */
+export const slotDe = (dia: string, hora: string) => {
+  const [a, m, n] = dia.split("-").map(Number);
+  return `${DIA_SEMANA[new Date(a, m - 1, n).getDay()]} ${String(n).padStart(2, "0")}/${String(m).padStart(2, "0")} · ${hora}`;
+};
+
+/** Marcar a visita noutro dia e hora que não as vagas sugeridas. */
+function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (slot: string) => void }) {
+  const [dia, setDia] = useState(""), [hora, setHora] = useState("10:00");
+  return (
+    <div className="flex flex-wrap items-end gap-3 pt-2">
+      <label className={ROT}>Outro dia<input type="date" value={dia} onChange={(e) => setDia(e.target.value)} className={cn(INP, "w-44")} /></label>
+      <label className={ROT}>Hora<input type="time" step={900} value={hora} onChange={(e) => setHora(e.target.value)} className={cn(INP, "w-28")} /></label>
+      <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar(slotDe(dia, hora))}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
     </div>
   );
 }
