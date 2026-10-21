@@ -52,7 +52,7 @@ export function progresso(p: Plano): number {
   const tot = p.tasks.reduce((a, t) => a + t.h, 0);
   if (p.estado === "concluída") return 1;
   if (!tot) return 0;
-  const feito = p.tasks.reduce((a, t) => a + (estadoDe(t) === "validada" ? t.h : estadoDe(t) === "feita" ? t.h * 0.8 : estadoDe(t) === "em curso" ? t.h * 0.3 : 0), 0);
+  const feito = p.tasks.reduce((a, t) => a + (estadoDe(t) === "validada" ? t.h : estadoDe(t) === "feita" ? t.h * 0.8 : estadoDe(t) === "em curso" ? t.h * 0.3 : estadoDe(t) === "corrigir" ? t.h * 0.6 : 0), 0);
   return Math.min(1, feito / tot);
 }
 
