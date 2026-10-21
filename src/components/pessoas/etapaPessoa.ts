@@ -49,11 +49,11 @@ export interface ProximoPasso {
 
 /** Só nos negócios da base (com `estadoReal`): a proposta está aceite e ainda não há contrato, por isso o passo é criá-lo. */
 export const propostaAceiteSemContrato = (n: NegocioMes): boolean =>
-  n.estadoReal === "aberto" && n.proposta?.estado === "aceite" && n.contrato === null;
+  n.estadoReal === "aberto" && n.fecho !== "proposta" && n.proposta?.estado === "aceite" && n.contrato === null;
 
 /** Só nos negócios da base: o contrato está assinado, o negócio está aberto e a base diz que está pronto, por isso o passo é ganhá-lo. */
 export const contratoAssinadoPronto = (n: NegocioMes): boolean =>
-  n.estadoReal === "aberto" && n.contrato?.estado === "assinado" && n.prontoAGanhar === true;
+  n.estadoReal === "aberto" && n.fecho !== "proposta" && n.contrato?.estado === "assinado" && n.prontoAGanhar === true;
 
 /**
  * O passo de um negócio aberto. Nos negócios de exemplo, uma proposta aceite sem contrato (não existe nos dados) conta como "à espera";

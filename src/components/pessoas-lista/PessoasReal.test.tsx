@@ -17,6 +17,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 const listaMock = vi.hoisted(() => vi.fn());
 const avatarMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
+vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());
 vi.mock("@/components/pessoas/AvatarPessoa", () => ({ AvatarPessoa: (p: unknown) => { avatarMock(p); return null; } }));
 
 const CAPTION = "Pessoas, com as colunas escolhidas";

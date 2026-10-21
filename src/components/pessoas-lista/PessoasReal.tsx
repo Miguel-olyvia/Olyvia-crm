@@ -3,6 +3,9 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { MIN_PESQUISA, type FiltrosLista } from "@/hooks/pessoas/listaPessoasTipos";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useListaPessoas, type ListaPessoas } from "@/hooks/pessoas/useListaPessoas";
+import { useQuadroPessoas } from "@/hooks/pessoas/useQuadroPessoas";
+import { usePermissaoQuadro } from "@/hooks/pessoas/usePodeVerQuadro";
+import type { VistaPessoas } from "@/components/pessoas/pessoasTipos";
 import { Button } from "@/components/ui/button";
 import { PermissionGate } from "@/components/PermissionGate";
 import { NovaLeadReal } from "@/components/pessoas-leads/NovaLeadReal";
@@ -17,6 +20,7 @@ import { DialogoColunasPessoas } from "./DialogoColunasPessoas";
 import { FichaReal } from "./FichaReal";
 import { FiltrosExtraReal } from "./FiltrosExtraReal";
 import type { AoAbrirPessoa } from "./LinhaListaReal";
+import { QuadroReal, textoEstadoQuadro } from "./QuadroReal";
 import { RodapeListaReal } from "./RodapeListaReal";
 import { TabelaListaReal } from "./TabelaListaReal";
 import { TabelaListaRealComDados } from "./TabelaListaRealComDados";
@@ -24,6 +28,7 @@ import { useColunasPessoas } from "./useColunasPessoas";
 import { useFiltrosLista } from "./useFiltrosLista";
 import { useFocoRodape } from "./useFocoRodape";
 import { useMensagemAnunciada } from "./useMensagemAnunciada";
+import { useVistaReal } from "./useVistaReal";
 
 const R = "pessoasPagina.real.";
 
@@ -116,7 +121,23 @@ export function PessoasReal() {
   const url = usePessoasUrl(false);
   const utilizadorId = fonte.modo === "real" ? (fonte.utilizadorId ?? null) : null;
   const f = useFiltrosLista(utilizadorId);
-  const lista = useListaPessoas(f.filtros);
+  // O Quadro só existe em modo real e com `pessoas.view`; só a vista visível consulta (a outra fica em cache, sem pedidos dentro do staleTime).
+  const { pode: podeVer, aCarregar: permissoesACarregar } = usePermissaoQuadro();
+  const podeQuadro = comFicha && podeVer;
+  // Com o Quadro guardado e as permissões a carregar espera-se (sem consultar nenhuma das vistas): decidir já mandava para a Lista e saltava depois.
+  const aEsperarPermissoes = comFicha && permissoesACarregar;
+  const { vista, mudar: mudarVistaGuardada } = useVistaReal(podeQuadro, aEsperarPermissoes);
+  const noQuadro = vista === "quadro";
+  const lista = useListaPessoas(f.filtros, !noQuadro);
+  const quadroDaBase = useQuadroPessoas({ papel: f.filtros.papel, pesquisa: f.filtros.pesquisa, ordem: f.filtros.ordem }, noQuadro && !aEsperarPermissoes);
+  const quadro = useMemo(() => (noQuadro && aEsperarPermissoes ? { ...quadroDaBase, isLoading: true } : quadroDaBase), [noQuadro, aEsperarPermissoes, quadroDaBase]);
+  const { limparSoDaLista } = f;
+  // O Quadro ignora a etapa e os filtros extra (só as minhas, atrasada, voltou, formulário, resultado): ao entrar nele limpam-se, para não ficarem
+  // ativos sem se verem (os cartões apareciam todos, sem aviso) nem a Lista voltar com um filtro que o Quadro não mostrou.
+  const mudarVista = useCallback((nova: VistaPessoas) => {
+    if (nova === "quadro") limparSoDaLista();
+    mudarVistaGuardada(nova);
+  }, [limparSoDaLista, mudarVistaGuardada]);
   const { abrir, abertaId } = url;
   // `abrir` muda sempre que o ?open= muda; as linhas e a tabela estão em memória e só valem se o que lhes damos não mudar. Por isso o que
   // se passa é uma função estável que chama sempre o `abrir` mais recente (guardado depois de cada render, nunca durante).
@@ -133,6 +154,11 @@ export function PessoasReal() {
     abrirRef.current(id);
   }, []);
   const aoIrPara = useCallback((id: string) => abrirRef.current(id), []);
+  // No Quadro o foco volta ao botão que abriu a ficha (o do nome ou o do passo), como na Lista.
+  const aoAbrirQuadro = useCallback((pessoaId: string, negocioId?: string) => {
+    origemFoco.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    abrirRef.current(pessoaId, negocioId);
+  }, []);
   // O que a «Nova lead» anuncia (lead criada, dados atualizados) vai para o contentor live da página, a seguir ao resto.
   // A mensagem retira-se sozinha (não volta a ser lida com cada mudança seguinte da região) e duas iguais seguidas anunciam-se as duas.
   const { mensagem: mensagemAcao, anunciar: setMensagemAcao } = useMensagemAnunciada();
@@ -141,17 +167,21 @@ export function PessoasReal() {
   const aoAbrirNegocio = useCallback((negocioId: string, pessoaId: string) => {
     if (abertaRef.current === pessoaId) abrirRef.current(pessoaId, negocioId);
   }, []);
-  const idsVisiveis = useMemo(() => lista.linhas.map((l) => l.id), [lista.linhas]);
+  // As setas da ficha seguem as pessoas visíveis: na Lista as linhas; no Quadro as pessoas únicas pela ordem das colunas (só as carregadas).
+  const idsVisiveis = useMemo(
+    () => (noQuadro ? [...new Set(quadro.cartoes.map((c) => c.pessoaId))] : lista.linhas.map((l) => l.id)),
+    [noQuadro, quadro.cartoes, lista.linhas],
+  );
   const tabelaRef = useRef<HTMLDivElement>(null);
   const botaoMaisRef = useRef<HTMLButtonElement>(null);
   const repetirRef = useRef<HTMLButtonElement>(null);
   const aoPedirMais = useFocoRodape(lista, { botaoMais: botaoMaisRef, repetir: repetirRef, tabela: tabelaRef });
-  const contagem = t(`${R}subtitle`, { n: lista.linhas.length });
+  const contagem = noQuadro ? t(`${R}board.subtitle`, { n: quadro.cartoes.length }) : t(`${R}subtitle`, { n: lista.linhas.length });
   const dicaPendente = f.pesquisa.trim().length > 0 && f.pesquisa.trim().length < MIN_PESQUISA;
   const anuncio = [
     contagem,
     t(`${R}orderAnnounce`, { ordem: t(`${R}order.${f.filtros.ordem}`) }),
-    textoEstado(t, lista),
+    noQuadro ? textoEstadoQuadro(t, quadro) : textoEstado(t, lista),
     dicaPendente ? t(`${R}searchHint`) : "",
   ].filter(Boolean).join(". ");
   return (
@@ -174,26 +204,39 @@ export function PessoasReal() {
       <BarraListaReal
         pesquisa={f.pesquisa} papel={f.filtros.papel} etapa={f.filtros.etapa} ordem={f.filtros.ordem}
         aoMudarPesquisa={f.mudarPesquisa} aoMudarPapel={f.mudarPapel} aoMudarEtapa={f.mudarEtapa} aoMudarOrdem={f.mudarOrdem}
+        vista={vista} aoMudarVista={podeQuadro ? mudarVista : undefined} etapaNova={comFicha ? t(`${R}board.colNew`) : undefined}
       />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <FiltrosExtraReal
-          filtros={f.filtros} soMinhas={f.soMinhas} podeSoMinhas={utilizadorId !== null} aoMudarSoMinhas={f.mudarSoMinhas}
-          aoMudarAtrasada={f.mudarAtrasada} aoMudarVoltou={f.mudarVoltou} aoMudarFormulario={f.mudarFormulario}
-          aoMudarResultado={f.mudarResultado} aoLimpar={f.limpar}
-        />
-        <DialogoColunasPessoas
-          escolha={colunas.escolha} aoAlternar={colunas.alternar} aoMover={colunas.mover} aoMoverPara={colunas.moverPara} aoRepor={colunas.repor}
-        />
-      </div>
+      {/* Os filtros extra e as colunas são da Lista: o Quadro lê só tipo, pesquisa e ordem. */}
+      {!noQuadro && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <FiltrosExtraReal
+            filtros={f.filtros} soMinhas={f.soMinhas} podeSoMinhas={utilizadorId !== null} aoMudarSoMinhas={f.mudarSoMinhas}
+            aoMudarAtrasada={f.mudarAtrasada} aoMudarVoltou={f.mudarVoltou} aoMudarFormulario={f.mudarFormulario}
+            aoMudarResultado={f.mudarResultado} aoLimpar={f.limpar}
+          />
+          <DialogoColunasPessoas
+            escolha={colunas.escolha} aoAlternar={colunas.alternar} aoMover={colunas.mover} aoMoverPara={colunas.moverPara} aoRepor={colunas.repor}
+          />
+        </div>
+      )}
       {/* Sempre montado: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
       <div role="status" aria-live="polite" className="sr-only">{anuncio}</div>
       {/* A mensagem de uma ação (lead criada, dados atualizados) tem a sua região: ao retirar-se aos 4 s não mexe na das contagens, que o leitor releria. */}
       <div aria-live="polite" className="sr-only">{mensagemAcao}</div>
-      <Corpo
-        lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined}
-        colunas={colunas.visiveis} comDados={comFicha}
-      />
-      <RodapeListaReal lista={lista} botaoMaisRef={botaoMaisRef} repetirRef={repetirRef} aoPedirMais={aoPedirMais} />
+      {noQuadro ? (
+        <QuadroReal
+          quadro={quadro} aoAbrir={aoAbrirQuadro} aoLimpar={f.limpar}
+          temFiltros={f.filtros.papel !== null || f.filtros.pesquisa.trim().length >= MIN_PESQUISA}
+        />
+      ) : (
+        <>
+          <Corpo
+            lista={lista} filtros={f.filtros} tabelaRef={tabelaRef} aoLimpar={f.limpar} aoAbrir={comFicha ? aoAbrir : undefined}
+            colunas={colunas.visiveis} comDados={comFicha}
+          />
+          <RodapeListaReal lista={lista} botaoMaisRef={botaoMaisRef} repetirRef={repetirRef} aoPedirMais={aoPedirMais} />
+        </>
+      )}
       {comFicha && (
         <FichaReal
           pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={url.fechar} aoIrPara={aoIrPara} aoLimpar={url.limpar} origemFoco={origemFoco}

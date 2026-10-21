@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG, codigoDoErro, chaveDoErro } from "./errosNeg";
 
-const CODIGOS = Array.from({ length: 21 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`);
+const CODIGOS = Array.from({ length: 24 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`);
 
 describe("errosNeg", () => {
-  it("há uma chave própria para cada código NG001 a NG021 e para 42501", () => {
+  it("há uma chave própria para cada código NG001 a NG024 e para 42501", () => {
     for (const codigo of [...CODIGOS, "42501"]) expect(CHAVES_ERRO_NEG[codigo], codigo).toMatch(/^pessoasPagina\.erroNeg\./);
     const chaves = Object.values(CHAVES_ERRO_NEG);
     expect(new Set(chaves).size).toBe(chaves.length);
-    expect(chaves).toHaveLength(22);
+    expect(chaves).toHaveLength(25);
   });
 
   it("lê o código de error.code", () => {
@@ -40,8 +40,8 @@ describe("errosNeg", () => {
   it("não confunde números maiores nem texto parecido", () => {
     expect(codigoDoErro({ message: "NG0011 x" })).toBeNull();
     expect(codigoDoErro({ message: "xNG001" })).toBeNull();
-    // NG019, NG020 e NG021 existem (contacto de outra pessoa; demasiadas verificações; questionário alterado entretanto); o próximo livre é NG022.
-    expect(codigoDoErro({ message: "NG022 x" })).toBeNull();
+    // NG019 a NG024 existem (contacto de outra pessoa; demasiadas verificações; questionário alterado; o tipo de fecho); o próximo livre é NG025.
+    expect(codigoDoErro({ message: "NG025 x" })).toBeNull();
     expect(codigoDoErro({ message: "NG0211 x" })).toBeNull();
     expect(codigoDoErro({ message: "NG0201 x" })).toBeNull();
   });
@@ -68,6 +68,20 @@ describe("errosNeg: NG021 (o questionário do levantamento foi alterado entretan
     expect(codigoDoErro({ message: "falhou [NG021]" })).toBe("NG021");
     expect(codigoDoErro({ code: null, message: "x", details: "NG021" })).toBe("NG021");
     expect(chaveDoErro({ code: "NG021", message: "x" })).toBe("pessoasPagina.erroNeg.ng021");
+  });
+});
+
+describe("errosNeg: NG022, NG023 e NG024 (o tipo de fecho do negócio)", () => {
+  it.each(["NG022", "NG023", "NG024"])("%s lê-se de error.code e do texto, com a sua chave", (codigo) => {
+    expect(codigoDoErro({ code: codigo, message: "x" })).toBe(codigo);
+    expect(codigoDoErro({ message: `falhou [${codigo}]` })).toBe(codigo);
+    expect(codigoDoErro({ code: null, message: "x", details: codigo })).toBe(codigo);
+    expect(chaveDoErro({ code: codigo, message: "x" })).toBe(`pessoasPagina.erroNeg.${codigo.toLowerCase()}`);
+  });
+
+  it("não confunde NG0221 nem NG0251", () => {
+    expect(codigoDoErro({ message: "NG0221 x" })).toBeNull();
+    expect(codigoDoErro({ message: "NG0251 x" })).toBeNull();
   });
 });
 

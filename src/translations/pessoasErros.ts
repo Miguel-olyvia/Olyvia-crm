@@ -24,6 +24,9 @@ const pt: Record<string, string> = {
   [`${E}ng019`]: "Este contacto já pertence a outra pessoa desta organização. Nada foi alterado.",
   [`${E}ng020`]: "Demasiadas verificações seguidas. Tente de novo dentro de alguns minutos.",
   [`${E}ng021`]: "A configuração do levantamento foi alterada entretanto por outra pessoa. Volte a abrir e tente de novo.",
+  [`${E}ng022`]: "O tipo de fecho não pode mudar neste estado. Para fechar na proposta, nenhum contrato pode estar assinado nem enviado para assinatura; para fechar no contrato, a proposta não pode estar aceite. Um negócio ganho ou perdido tem de ser reaberto primeiro.",
+  [`${E}ng023`]: "Um negócio que fecha na proposta não usa contratos: este contrato não se liga.",
+  [`${E}ng024`]: "Só os documentos anteriores à ativação se ligam à mão.",
   [`${E}permissao`]: "Não tem permissão para esta ação.",
   [`${E}generico`]: "Não foi possível concluir a ação. Tente novamente.",
 };
@@ -50,6 +53,9 @@ const en: Record<string, string> = {
   [`${E}ng019`]: "This contact already belongs to another person in this organization. Nothing was changed.",
   [`${E}ng020`]: "Too many checks in a row. Please try again in a few minutes.",
   [`${E}ng021`]: "The survey configuration was changed in the meantime by someone else. Reopen it and try again.",
+  [`${E}ng022`]: "The closing type cannot change in this state. To close on the proposal, no contract can be signed or sent for signature; to close on the contract, the proposal cannot be accepted. A won or lost deal must be reopened first.",
+  [`${E}ng023`]: "A deal that closes on the proposal does not use contracts: this contract cannot be linked.",
+  [`${E}ng024`]: "Only documents from before activation can be linked by hand.",
   [`${E}permissao`]: "You do not have permission for this action.",
   [`${E}generico`]: "The action could not be completed. Please try again.",
 };

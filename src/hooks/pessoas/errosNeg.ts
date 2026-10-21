@@ -26,11 +26,14 @@ export const CHAVES_ERRO_NEG: Readonly<Record<string, string>> = {
   NG019: `${P}ng019`,
   NG020: `${P}ng020`,
   NG021: `${P}ng021`,
+  NG022: `${P}ng022`,
+  NG023: `${P}ng023`,
+  NG024: `${P}ng024`,
   "42501": `${P}permissao`,
 };
 
-// NG001 a NG021, inteiro: nem NG0011 nem xNG001.
-const CODIGO_NO_TEXTO = /(?<![A-Za-z0-9])NG0(?:0[1-9]|1[0-9]|2[01])(?![0-9])/;
+// NG001 a NG024, inteiro: nem NG0011 nem xNG001.
+const CODIGO_NO_TEXTO = /(?<![A-Za-z0-9])NG0(?:0[1-9]|1[0-9]|2[0-4])(?![0-9])/;
 
 function texto(valor: unknown): string | null {
   return typeof valor === "string" ? valor : null;

@@ -35,12 +35,22 @@ export function useFiltrosLista(utilizadorId: string | null = null) {
     mudarVoltou(false);
     mudarAtrasada(false);
   }, []);
+  // O que o Quadro não aplica nem mostra (etapa e filtros extra): limpa-se ao entrar nele, para não ficarem ativos sem se verem e a Lista
+  // não voltar com um filtro que o Quadro ignorou. O tipo, a pesquisa e a ordem ficam (o Quadro lê-os).
+  const limparSoDaLista = useCallback(() => {
+    mudarEtapa(null);
+    mudarSoMinhas(false);
+    mudarFormulario(null);
+    mudarResultado(null);
+    mudarVoltou(false);
+    mudarAtrasada(false);
+  }, []);
   const filtros = useMemo<FiltrosLista>(
     () => ({ papel, etapa, pesquisa: enviada, ordem, atribuidoA, formularioId, ultimoResultado, voltou, atrasada }),
     [papel, etapa, enviada, ordem, atribuidoA, formularioId, ultimoResultado, voltou, atrasada],
   );
   return {
     filtros, pesquisa, soMinhas, mudarPesquisa, mudarPapel, mudarEtapa, mudarOrdem,
-    mudarSoMinhas, mudarFormulario, mudarResultado, mudarVoltou, mudarAtrasada, limpar,
+    mudarSoMinhas, mudarFormulario, mudarResultado, mudarVoltou, mudarAtrasada, limpar, limparSoDaLista,
   };
 }

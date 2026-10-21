@@ -91,7 +91,8 @@ export interface PropostaDb {
   status: string | null;
   valor: NumeroDb;
   valid_until: string | null;
-  terms: string | null;
+  /** `proposals.terms` (jsonb): um objeto com as condições, ou null. Vem como `unknown`: lê-se com `lerTermos`. */
+  terms: unknown;
   enviada_em: string | null;
   aceite_em: string | null;
   criado_em: string | null;
@@ -133,6 +134,8 @@ export interface NegocioFichaDb {
   responsavel_nome: string | null;
   valor: NumeroDb;
   pronto_a_ganhar: boolean;
+  /** O tipo de fecho (`negocios.fecho`). `neg_ficha_pessoa` ainda não o devolve: `lerFechos` junta-o à ficha; ausente se a leitura falhou. */
+  fecho?: string | null;
   parado_desde: string | null;
   levantamento_id: string | null;
   orcamentos: OrcamentoDb[];

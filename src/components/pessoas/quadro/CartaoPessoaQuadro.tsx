@@ -12,7 +12,7 @@ import { passoDoItem } from "../processo/passosProcesso";
 import { useAcaoDoPasso } from "../processo/processoContexto";
 import { trabalhoDoItem } from "../processo/trabalhoDoItem";
 import type { ItemProcesso } from "../processo/tiposProcesso";
-import type { CartaoQuadro } from "./cartoesQuadroPessoas";
+import { ATRIBUTO_NEGOCIO, type CartaoQuadro } from "./cartoesQuadroPessoas";
 
 interface CartaoPessoaQuadroProps {
   cartao: CartaoQuadro;
@@ -42,7 +42,7 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
     <li className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
         <button
-          type="button" {...{ [LINHA_PESSOA]: cartao.pessoaId }} aria-label={t("pessoasPagina.board.open", { name: cartao.nome })} onClick={() => aoAbrir(cartao.pessoaId, negocioId)}
+          type="button" {...{ [LINHA_PESSOA]: cartao.pessoaId, ...(negocioId ? { [ATRIBUTO_NEGOCIO]: negocioId } : {}) }} aria-label={t("pessoasPagina.board.open", { name: cartao.nome })} onClick={() => aoAbrir(cartao.pessoaId, negocioId)}
           className={cn("min-h-11 min-w-11 cursor-pointer rounded-md text-left font-medium text-foreground hover:underline motion-reduce:transition-none", FOCO)}
         >
           {cartao.nome}
@@ -51,6 +51,9 @@ export function CartaoPessoaQuadro({ cartao, hoje, item, aoAbrir }: CartaoPessoa
       </div>
       <p className="text-muted-foreground">{trabalho}</p>
       {cartao.valor !== null && <p className="font-medium tabular-nums text-foreground">{formatarMeta("euro", cartao.valor)}</p>}
+      {/* Só no Quadro real (no exemplo estes campos não existem): o selo e a linha dizem-se por texto, nunca só por cor. */}
+      {cartao.prontoAGanhar === true && <Badge variant="secondary" className="w-fit">{t("pessoasPagina.real.readyToWin")}</Badge>}
+      {cartao.paradoDias !== undefined && <p className="text-xs text-muted-foreground">{t("pessoasPagina.real.board.stalled", { n: cartao.paradoDias })}</p>}
       {prazo && (
         <p className={cn("flex items-center gap-1 text-xs", cartao.atrasado ? "font-medium text-foreground" : "text-muted-foreground")}>
           {cartao.atrasado && <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}

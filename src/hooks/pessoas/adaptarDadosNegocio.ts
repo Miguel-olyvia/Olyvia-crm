@@ -1,17 +1,18 @@
 // Os dados que a ficha real dá aos ecrãs do negócio (`DadosNegocio`, em negocio-metas): lê o que `neg_ficha_pessoa` devolve e entrega o que os
 // painéis já sabiam mostrar (perdas, detalhes dos documentos) mais o que só a base sabe (documentos por ligar, leads abertas, permissões).
 // Funções puras: nada rebenta com um valor que a ficha não conhece.
-import type { DadosNegocio, DocumentoPorLigar, LeadAbertaCostura, MomentoGanhoCostura } from "@/components/negocio-metas/costuraNegocio";
+import type { DadosNegocio, DocumentoPorLigar, LeadAbertaCostura, MomentoGanhoCostura, PropostaCondicoes } from "@/components/negocio-metas/costuraNegocio";
 import type {
   ContratoDetalhe, DetalheNegocio, EstadoOrcamentoDetalhe, OrcamentoDetalhe, PropostaDetalhe,
 } from "@/components/negocio-metas/negocioDetalhes";
 import type { PerdaNegocio } from "@/components/negocio-metas/negociosAlterados";
 import type { FaseNaPerda } from "@/components/negocio-metas/percursoNegocio";
 import { maisRecentePrimeiro, textoOuNull } from "./adaptarComum";
-import { estadoContratoDeDb } from "./adaptarNegociosFicha";
+import { lerTermos } from "@/components/negocio-metas/termosProposta";
+import { estadoContratoDeDb, estadoPropostaDeDb } from "./adaptarNegociosFicha";
 import { adaptarRegistos } from "./adaptarRegistos";
 import type { FichaDb, NegocioFichaDb } from "./fichaTipos";
-import { propostaViva } from "./propostaViva";
+import { propostaRecusada, propostaViva } from "./propostaViva";
 import { diaLisboa } from "./tempoLisboa";
 
 /** A fase em que a base diz que o negócio se perdeu, na linguagem do ecrã. As da abordagem (lead, contacto, visita) contam como a mais antiga que o ecrã tem. */
@@ -99,10 +100,24 @@ function leadsAbertas(ficha: FichaDb): LeadAbertaCostura[] {
   }));
 }
 
+/** A proposta viva do negócio e as condições dela, lidas de `terms`; `null` sem proposta (as recusadas não contam, como no resto do ecrã). */
+function propostaComCondicoes(n: NegocioFichaDb): PropostaCondicoes | null {
+  const viva = propostaViva(n);
+  if (!viva || propostaRecusada(viva)) return null;
+  const { condicoes, legivel } = lerTermos(viva.terms);
+  return { id: viva.id, estado: estadoPropostaDeDb(viva), condicoes, legivel };
+}
+
+export interface OpcoesDadosNegocio {
+  /** `pessoas.delete`: a página sabe-o (a ficha não o devolve). */
+  podeApagar?: boolean;
+}
+
 /** Os dados do negócio para uma ficha. Não muda a ficha; cria objetos novos a cada chamada (quem os usa memoriza pelo resultado). */
-export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCostura | null): DadosNegocio {
+export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCostura | null, opcoes: OpcoesDadosNegocio = {}): DadosNegocio {
   const itens = ficha.negocios?.itens ?? [];
   const detalhes = new Map(itens.map((n) => [n.id, detalheDoNegocio(n)]));
+  const propostas = new Map(itens.map((n) => [n.id, propostaComCondicoes(n)]));
   return {
     registos: adaptarRegistos(ficha),
     alteracoes: {
@@ -112,5 +127,6 @@ export function adaptarDadosNegocio(ficha: FichaDb, momentoGanho: MomentoGanhoCo
     detalhe: (negocioId) => detalhes.get(negocioId) ?? null,
     momentoGanho, podeEditar: ficha.permissoes.editar === true, podeCriar: ficha.permissoes.criar === true,
     leadsAbertas: leadsAbertas(ficha), levantamentosCompletos: ficha.levantamentos?.tem_mais !== true, documentosPorLigar: documentosPorLigar(ficha),
+    podeApagar: opcoes.podeApagar === true, proposta: (negocioId) => propostas.get(negocioId) ?? null,
   };
 }

@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { LeadAbertaCostura } from "@/components/negocio-metas/costuraNegocio";
 import { FOCO } from "@/components/negocio-metas/estilos";
+import { FECHOS_NEGOCIO, type FechoNegocio } from "@/components/negocio-metas/fechoNegocio";
+import { GrupoRadios } from "@/components/negocio-metas/GrupoRadios";
 import { SeletorLead } from "@/components/negocio-metas/SeletorLead";
 
 const C = "pessoasPagina.neg.create.";
@@ -27,11 +29,13 @@ interface Props {
   notas: string;
   lead: string;
   reabrir: boolean;
+  /** Como o negócio fecha (a escolha de «Como fecha este negócio?»). */
+  fecho: FechoNegocio;
   leads: readonly LeadAbertaCostura[];
   erros: ErrosGeralReal;
   tituloRef: RefObject<HTMLInputElement>;
   reabrirRef: RefObject<HTMLInputElement>;
-  aoMudar: (parcial: { titulo?: string; notas?: string; lead?: string; reabrir?: boolean }) => void;
+  aoMudar: (parcial: { titulo?: string; notas?: string; lead?: string; reabrir?: boolean; fecho?: FechoNegocio }) => void;
 }
 
 /** O erro de um campo: ícone e texto (a cor nunca é o único sinal), ligado ao campo por aria-describedby. */
@@ -44,7 +48,9 @@ function Erro({ id, texto }: { id: string; texto: string }) {
   );
 }
 
-export function AbaGeralNovoNegocioReal({ id, titulo, notas, lead, reabrir, leads, erros, tituloRef, reabrirRef, aoMudar }: Props) {
+const SEM_MOTIVO: Record<FechoNegocio, null> = { contrato: null, proposta: null };
+
+export function AbaGeralNovoNegocioReal({ id, titulo, notas, lead, reabrir, fecho, leads, erros, tituloRef, reabrirRef, aoMudar }: Props) {
   const { t } = useTranslation();
   const escolhida = leads.find((l) => l.id === lead);
   const pedeReabrir = escolhida?.encerrada === true;
@@ -70,6 +76,10 @@ export function AbaGeralNovoNegocioReal({ id, titulo, notas, lead, reabrir, lead
           id={`${id}-notas`} value={notas} maxLength={MAX_NOTAS_NEGOCIO} rows={4} className={FOCO} onChange={(e) => aoMudar({ notas: e.target.value })}
         />
       </div>
+      <GrupoRadios<FechoNegocio>
+        legenda={t("pessoasPagina.neg.fecho.question")} ajuda={t("pessoasPagina.neg.fecho.hint")} valor={fecho} opcoes={FECHOS_NEGOCIO} indisponiveis={SEM_MOTIVO}
+        rotulo={(f) => t(`pessoasPagina.neg.fecho.option.${f}`)} aoMudar={(f) => aoMudar({ fecho: f })}
+      />
       {leads.length > 1 && <SeletorLead leads={leads} valor={lead} rotulo={t(`${C}lead`)} aoMudar={(v) => aoMudar({ lead: v, reabrir: false })} />}
       {pedeReabrir && (
         <div className="space-y-1.5">

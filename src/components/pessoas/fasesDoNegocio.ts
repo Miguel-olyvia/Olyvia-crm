@@ -47,7 +47,8 @@ export function fasesDoNegocio(negocio: NegocioMes, registos: EstadoRegistos, pe
     ...abordagem,
     fase("orcamento", estadoNa("orcamento")),
     fase("proposta", estadoNa("proposta")),
-    fase("contrato", estadoNa("contrato")),
+    // Fecho na proposta: os contratos são ignorados, por isso o percurso não tem a fase «Contrato».
+    ...(negocio.fecho === "proposta" ? [] : [fase("contrato", estadoNa("contrato"))]),
     ...(lugar === "ganho" ? [fase("ganho", "feita")] : []),
   ];
 }

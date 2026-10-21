@@ -119,7 +119,7 @@ export interface ListaPessoas {
  * - erro: isError true; se também há linhas, o aviso deve ser não-bloqueante
  *   (erroSemDados distingue); um erro ao carregar mais vai para erroAoCarregarMais.
  */
-export function useListaPessoas(filtros: FiltrosLista): ListaPessoas {
+export function useListaPessoas(filtros: FiltrosLista, ativo = true): ListaPessoas {
   const fonte = useFontePessoas();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const normalizados = normalizar(filtros);
@@ -134,7 +134,8 @@ export function useListaPessoas(filtros: FiltrosLista): ListaPessoas {
         ? { chave: ultima.chave_ordem, id: ultima.entity_id }
         : undefined;
     },
-    enabled: !!organizationId,
+    // `ativo` falso (a página está no Quadro) não consulta; o que já está em cache fica, e volta sem pedido dentro do staleTime.
+    enabled: !!organizationId && ativo,
     // Mantém a lista anterior ao mudar de filtro, nunca ao mudar de organização.
     placeholderData: (anterior, consultaAnterior) =>
       consultaAnterior?.queryKey[1] === organizationId ? anterior : undefined,

@@ -4,6 +4,8 @@
 // Todas as funções lançam `ErroNeg` se falharem (o ecrã traduz-lhe a chave, nunca a mensagem) e esperam pela base.
 import { createContext, useContext } from "react";
 import type { FaseBase } from "./faseBase";
+import type { FechoNegocio } from "./fechoNegocio";
+import type { CondicoesTermos } from "./termosProposta";
 
 /** Os tipos de registo que a base sabe ligar a um negócio. */
 export type TipoRegistoBase = "contacto" | "visita" | "levantamento" | "orcamento" | "proposta" | "contrato";
@@ -48,6 +50,18 @@ export interface PedidoCriarNegocio {
   /** Contactos e visitas, e (com a M6) orçamentos, propostas e contratos. O levantamento vai à parte. */
   registos: RefRegistoBase[];
   levantamentoId: string | null;
+  /** Como o negócio fecha (`p_fecho`); sem isto a base assume «contrato». */
+  fecho?: FechoNegocio;
+}
+
+/**
+ * O que `neg_mudar_fecho` devolveu. `precisaConfirmar`: a mudança tornaria decisivo um documento positivo já ligado e a base só a faz se se
+ * repetir a chamada com a confirmação (nada mudou ainda). `fecho` é o tipo que o negócio tem agora (`null` se a base trouxe um valor desconhecido).
+ */
+export interface ResultadoMudarFecho {
+  mudou: boolean;
+  fecho: FechoNegocio | null;
+  precisaConfirmar: boolean;
 }
 
 export interface ResultadoCriar {
@@ -58,7 +72,31 @@ export interface ResultadoCriar {
   recusados: RefRegistoBase[];
 }
 
+/** O que se edita num negócio: o título, as notas e o comercial (`anew_users.id`; `null` sem comercial). */
+export interface ValoresNegocio {
+  titulo: string;
+  notas: string;
+  comercialId: string | null;
+}
+
+export interface PedidoEditarNegocio {
+  negocioId: string;
+  /** Os valores com que o diálogo abriu: só vão à base as colunas que mudaram. */
+  antes: ValoresNegocio;
+  depois: ValoresNegocio;
+}
+
 export interface MutacoesNegocio {
+  /**
+   * Escritas DIRETAS (UPDATE em `negocios` e em `proposals.terms`, não funções neg_*): ausentes no exemplo e onde a ficha não as monta, e
+   * então os ecrãs não oferecem editar, lixo nem condições. Lançam `ErroNeg` (o ecrã traduz-lhe a chave).
+   */
+  editar?: (pedido: PedidoEditarNegocio) => Promise<{ mudou: boolean }>;
+  enviarParaLixo?: (negocioId: string) => Promise<void>;
+  restaurar?: (negocioId: string) => Promise<void>;
+  guardarCondicoes?: (negocioId: string, propostaId: string, condicoes: CondicoesTermos) => Promise<void>;
+  /** Muda o tipo de fecho (só com o negócio aberto). Ausente no exemplo: então os ecrãs não oferecem mudar. Lança `ErroNeg` (NG022: não muda neste estado). */
+  mudarFecho?: (negocioId: string, fecho: FechoNegocio, confirmar: boolean) => Promise<ResultadoMudarFecho>;
   perder: (pedido: PedidoPerder) => Promise<{ mudou: boolean }>;
   anular: (negocioId: string, razao: string) => Promise<{ mudou: boolean }>;
   ligar: (negocioId: string, ref: RefRegistoBase) => Promise<void>;

@@ -21,6 +21,7 @@ vi.mock("@/hooks/pessoas/useContactosPessoas", () => ({ useContactosPessoas: () 
 vi.mock("@/hooks/pessoas/useNomesResponsaveis", () => ({ useNomesResponsaveis: () => semLeituras }));
 const listaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
+vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());
 const fichaProps = vi.hoisted(() => ({ atual: null as null | { aoAbrirNegocio?: (negocioId: string, pessoaId: string) => void } }));
 vi.mock("./FichaReal", () => ({ FichaReal: (p: { aoAbrirNegocio?: (negocioId: string, pessoaId: string) => void }) => { fichaProps.atual = p; return null; } }));
 

@@ -29,12 +29,12 @@ describe("o Workflow de Pessoas: os ficheiros vigiados existem (o teste não pas
   it("encontra os componentes e os hooks", () => {
     expect(doComponentes.map(nome)).toEqual(expect.arrayContaining([
       `${COMPONENTES}/BotaoWorkflowPessoas.tsx`, `${COMPONENTES}/WorkflowPessoasDialogo.tsx`, `${COMPONENTES}/QualificacaoSeparador.tsx`,
-      `${COMPONENTES}/EditorCondicoes.tsx`, `${COMPONENTES}/LevantamentoSeparador.tsx`,
+      `${COMPONENTES}/EditorCondicoes.tsx`, `${COMPONENTES}/LevantamentoSeparador.tsx`, `${COMPONENTES}/NegociosSeparador.tsx`,
     ]));
     expect(doHooks.map(nome)).toEqual(expect.arrayContaining([
       `${HOOKS}/useRegrasQualificacao.ts`, `${HOOKS}/regrasQualificacao.ts`, `${HOOKS}/errosWorkflow.ts`,
       `${HOOKS}/useQuestionarioLevantamento.ts`, `${HOOKS}/useRascunhoQuestionario.ts`, `${HOOKS}/questionario.ts`,
-      `${HOOKS}/questionarioEdicao.ts`, `${HOOKS}/errosQuestionario.ts`,
+      `${HOOKS}/questionarioEdicao.ts`, `${HOOKS}/errosQuestionario.ts`, `${HOOKS}/useConfigNegocios.ts`, `${HOOKS}/configNegocios.ts`,
     ]));
   });
 });
@@ -70,15 +70,18 @@ describe("a escrita só passa pela função da base", () => {
     expect(culpados).toEqual([]);
   });
 
-  it("os hooks chamam só as funções do Workflow: gravar as regras, gravar o questionário e lê-lo (nenhuma outra neg_)", () => {
+  it("os hooks chamam só as funções do Workflow: gravar as regras, gravar o questionário e lê-lo, e gravar a configuração dos negócios (nenhuma outra neg_)", () => {
     const chamadas = doHooks.flatMap((f) => [...codigoDe(f).matchAll(/["'`](neg_[a-z_]+)["'`]/g)].map((m) => m[1]));
-    expect([...new Set(chamadas)].sort()).toEqual(["neg_guardar_questionario", "neg_guardar_regras_qualificacao", "neg_questionario_levantamento"]);
+    expect([...new Set(chamadas)].sort()).toEqual([
+      "neg_guardar_config_negocios", "neg_guardar_questionario", "neg_guardar_regras_qualificacao", "neg_questionario_levantamento",
+    ]);
   });
 
   it("cada função de escrita tem um só hook que a chama", () => {
     const quemChama = (funcao: string) => doHooks.filter((f) => codigoDe(f).includes(`"${funcao}"`)).map(nome);
     expect(quemChama("neg_guardar_regras_qualificacao")).toEqual([`${HOOKS}/useRegrasQualificacao.ts`]);
     expect(quemChama("neg_guardar_questionario")).toEqual([`${HOOKS}/useQuestionarioLevantamento.ts`]);
+    expect(quemChama("neg_guardar_config_negocios")).toEqual([`${HOOKS}/useConfigNegocios.ts`]);
   });
 });
 

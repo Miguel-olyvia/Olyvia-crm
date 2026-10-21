@@ -2,6 +2,7 @@ import { useMemo, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePodeApagarNegocios } from "@/hooks/pessoas/usePodeApagarNegocios";
 import { useUtilizadorPessoas } from "@/hooks/pessoas/useUtilizadorPessoas";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -26,9 +27,11 @@ export function PessoasRota({ children }: { children: ReactNode }) {
   const momentoGanho = MOMENTOS.find((m) => m === negocios.momentoGanho) ?? null;
   // O anew_users.id da sessão (o mesmo que a página de Leads usa em «Só os meus»); null até a leitura acabar.
   const utilizadorId = useUtilizadorPessoas();
+  // pessoas.delete: o lixo de negócios só se mostra a quem pode apagar e restaurar.
+  const podeApagarNegocios = usePodeApagarNegocios();
   const fonte = useMemo<FontePessoas | null>(
-    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId } : null),
-    [organizationId, momentoGanho, utilizadorId],
+    () => (organizationId ? { modo: "real", organizationId, momentoGanho, utilizadorId, podeApagarNegocios } : null),
+    [organizationId, momentoGanho, utilizadorId, podeApagarNegocios],
   );
 
   if (negocios.isLoading) {

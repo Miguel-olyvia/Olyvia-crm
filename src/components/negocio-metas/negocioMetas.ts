@@ -2,6 +2,7 @@
 // negócios e as metas e devolve totais e percentagens, para que os números do
 // ecrã nunca sejam escritos à mão.
 
+import type { FechoNegocio } from "./fechoNegocio";
 import type { DecisaoLevantamento } from "./registosTipos";
 
 export type FaseNegocio = "orcamento" | "proposta" | "contrato" | "ganho";
@@ -134,6 +135,12 @@ export interface NegocioMes {
   estadoReal?: "aberto" | "ganho" | "perdido";
   /** Só nos negócios da base: a base diz que as condições para ganhar estão cumpridas (a regra da organização). Manda sobre a regra local. */
   prontoAGanhar?: boolean;
+  /** Só nos negócios da base: como o negócio fecha (`negocios.fecho`). Ausente se a base não o disse (o exemplo): então nada se assume. */
+  fecho?: FechoNegocio;
+  /** Só nos negócios da base: as notas do negócio (texto vazio se não há), para o diálogo de editar. */
+  notas?: string;
+  /** Só nos negócios da base: o `anew_users.id` do comercial (`null` sem comercial), para o diálogo de editar. */
+  comercialId?: string | null;
 }
 
 export interface MetaComercial {

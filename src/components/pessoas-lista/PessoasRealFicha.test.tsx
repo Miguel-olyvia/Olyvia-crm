@@ -24,6 +24,7 @@ const listaMock = vi.hoisted(() => vi.fn());
 const fichaMock = vi.hoisted(() => vi.fn());
 const { erroToast } = vi.hoisted(() => ({ erroToast: vi.fn() }));
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
+vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());
 vi.mock("@/hooks/pessoas/useFichaPessoa", () => ({ useFichaPessoa: (id: string | null) => fichaMock(id) }));
 vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
   useAcoesFichaReal: () => ({

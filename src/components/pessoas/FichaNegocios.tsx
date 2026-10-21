@@ -38,7 +38,13 @@ function LinhaNegocio({ negocio, hoje, aoAbrir }: { negocio: NegocioPessoa; hoje
       <span className="block text-sm text-muted-foreground">{t(`${P}deals.rep`, { name: negocio.comercial })}</span>
       <span className="block truncate text-sm text-muted-foreground">{textoCadeia(negocio, t).join(" · ")}</span>
       <span className="flex items-center justify-between gap-3">
-        <Estado negocio={negocio} hoje={hoje} />
+        <span className="flex flex-wrap items-center gap-2">
+          <Estado negocio={negocio} hoje={hoje} />
+          {/* Só a venda directa leva etiqueta: «Fecha no contrato» é a omissão e encheria a lista. */}
+          {negocio.fecho === "proposta" && (
+            <span className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground">{t(`${P}neg.fecho.tag.proposta`)}</span>
+          )}
+        </span>
         {aoAbrir && (
           <span className="inline-flex items-center gap-1 text-sm font-medium text-primary dark:text-violet-300">
             {t(`${P}dealsList.open`)}

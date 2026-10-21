@@ -10,6 +10,8 @@ interface GrupoRadiosProps<T extends string> {
   legenda: string;
   /** Uma linha de ajuda por baixo da legenda; sem ela, o grupo fica só com a legenda. */
   ajuda?: string;
+  /** Um exemplo em linguagem de negócio, numa linha própria por baixo da ajuda. */
+  exemplo?: string;
   /** O nível do título da legenda: h4 por defeito; h5 quando o grupo está dentro de uma secção com h4. */
   nivel?: "h4" | "h5";
   valor: T;
@@ -18,6 +20,8 @@ interface GrupoRadiosProps<T extends string> {
   indisponiveis: Record<T, Texto | null>;
   rotulo: (opcao: T) => string;
   aoMudar: (opcao: T) => void;
+  /** Bloqueia o grupo todo (por exemplo enquanto se grava): continua focável (`aria-disabled`), mas nenhuma escolha se aceita. */
+  bloqueado?: boolean;
 }
 
 /**
@@ -25,7 +29,7 @@ interface GrupoRadiosProps<T extends string> {
  * focáveis, mas não se escolhem), com o motivo escrito fora do rótulo, em texto normal, e ligado por `aria-describedby`.
  */
 export function GrupoRadios<T extends string>({
-  legenda, ajuda, nivel: Titulo = "h4", valor, opcoes, indisponiveis, rotulo, aoMudar,
+  legenda, ajuda, exemplo, nivel: Titulo = "h4", valor, opcoes, indisponiveis, rotulo, aoMudar, bloqueado = false,
 }: GrupoRadiosProps<T>) {
   const { t } = useTranslation();
   const id = useId();
@@ -33,12 +37,15 @@ export function GrupoRadios<T extends string>({
     <fieldset className="space-y-2 rounded-lg border border-border p-4">
       <legend className="px-1"><Titulo id={`${id}-legenda`} className="text-sm font-semibold text-foreground">{legenda}</Titulo></legend>
       {ajuda && <p id={`${id}-ajuda`} className="text-sm text-muted-foreground">{ajuda}</p>}
+      {exemplo && <p id={`${id}-exemplo`} className="text-sm text-muted-foreground">{exemplo}</p>}
       <RadioGroup
-        value={valor} onValueChange={(v) => { if (!indisponiveis[v as T]) aoMudar(v as T); }}
-        aria-labelledby={`${id}-legenda`} aria-describedby={ajuda ? `${id}-ajuda` : undefined}
+        value={valor} onValueChange={(v) => { if (!bloqueado && !indisponiveis[v as T]) aoMudar(v as T); }}
+        aria-labelledby={`${id}-legenda`}
+        aria-describedby={[ajuda && `${id}-ajuda`, exemplo && `${id}-exemplo`].filter(Boolean).join(" ") || undefined}
       >
         {opcoes.map((opcao) => {
           const motivo = indisponiveis[opcao];
+          const semEscolha = bloqueado || !!motivo;
           const marcada = opcao === valor;
           return (
             <div
@@ -50,8 +57,8 @@ export function GrupoRadios<T extends string>({
             >
               <div className="flex items-center gap-3">
                 <RadioGroupItem
-                  id={`${id}-${opcao}`} value={opcao} className={cn(FOCO, motivo && "cursor-not-allowed opacity-50")}
-                  aria-disabled={motivo ? "true" : undefined} aria-describedby={motivo ? `${id}-${opcao}-motivo` : undefined}
+                  id={`${id}-${opcao}`} value={opcao} className={cn(FOCO, semEscolha && "cursor-not-allowed opacity-50")}
+                  aria-disabled={semEscolha ? "true" : undefined} aria-describedby={motivo ? `${id}-${opcao}-motivo` : undefined}
                 />
                 <Label
                   htmlFor={`${id}-${opcao}`}

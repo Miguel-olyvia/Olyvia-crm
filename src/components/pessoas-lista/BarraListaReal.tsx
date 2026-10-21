@@ -4,7 +4,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { FOCO, chip } from "@/components/negocio-metas/estilos";
-import type { EtapaPessoa, PapelPessoa } from "@/components/pessoas/pessoasTipos";
+import type { EtapaPessoa, PapelPessoa, VistaPessoas } from "@/components/pessoas/pessoasTipos";
+import { SeletorVista } from "@/components/pessoas/quadro/SeletorVista";
 import { MIN_PESQUISA, type OrdemLista } from "@/hooks/pessoas/listaPessoasTipos";
 
 const R = "pessoasPagina.real.";
@@ -31,6 +32,12 @@ interface BarraListaRealProps {
   aoMudarPapel: (papel: PapelPessoa | null) => void;
   aoMudarEtapa: (etapa: EtapaPessoa | null) => void;
   aoMudarOrdem: (ordem: OrdemLista) => void;
+  /** A vista atual; só conta com `aoMudarVista`. No Quadro os filtros de etapa não se mostram (o Quadro ignora a etapa). */
+  vista?: VistaPessoas;
+  /** Só em modo real e com `pessoas.view`: sem isto não há seletor de vista (a Lista de sempre). */
+  aoMudarVista?: (vista: VistaPessoas) => void;
+  /** Em modo real, o texto do filtro da primeira etapa («Novo»); sem isto mantém «Por contactar». */
+  etapaNova?: string;
 }
 
 function Marca({ ativo }: { ativo: boolean }) {
@@ -56,6 +63,7 @@ export function BarraListaReal(p: BarraListaRealProps) {
             onChange={(e) => p.aoMudarPesquisa(e.target.value)}
           />
         </div>
+        {p.aoMudarVista && <SeletorVista vista={p.vista ?? "lista"} aoMudar={p.aoMudarVista} />}
         <div role="group" aria-label={t("pessoasPagina.kind.label")} className="inline-flex rounded-lg border border-input bg-card p-0.5">
           {TIPOS.map(({ papel, chave }) => (
             <button
@@ -86,18 +94,20 @@ export function BarraListaReal(p: BarraListaRealProps) {
       >
         {t(`${R}searchHint`)}
       </p>
-      <div role="group" aria-label={t(`${R}stageFilterLabel`)} className="flex flex-wrap gap-2">
-        <button type="button" aria-pressed={p.etapa === null} className={chip(p.etapa === null)} onClick={() => p.aoMudarEtapa(null)}>
-          <Marca ativo={p.etapa === null} />
-          {t("pessoasPagina.chip.todas")}
-        </button>
-        {ETAPAS.map((e) => (
-          <button key={e} type="button" aria-pressed={p.etapa === e} className={chip(p.etapa === e)} onClick={() => p.aoMudarEtapa(e)}>
-            <Marca ativo={p.etapa === e} />
-            {t(CHIP_DA_ETAPA[e] ?? "")}
+      {!(p.aoMudarVista && p.vista === "quadro") && (
+        <div role="group" aria-label={t(`${R}stageFilterLabel`)} className="flex flex-wrap gap-2">
+          <button type="button" aria-pressed={p.etapa === null} className={chip(p.etapa === null)} onClick={() => p.aoMudarEtapa(null)}>
+            <Marca ativo={p.etapa === null} />
+            {t("pessoasPagina.chip.todas")}
           </button>
-        ))}
-      </div>
+          {ETAPAS.map((e) => (
+            <button key={e} type="button" aria-pressed={p.etapa === e} className={chip(p.etapa === e)} onClick={() => p.aoMudarEtapa(e)}>
+              <Marca ativo={p.etapa === e} />
+              {e === "nova" && p.etapaNova ? p.etapaNova : t(CHIP_DA_ETAPA[e] ?? "")}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

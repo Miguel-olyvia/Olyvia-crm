@@ -22,6 +22,7 @@ const listaMock = vi.hoisted(() => vi.fn());
 const tabelaMock = vi.hoisted(() => vi.fn());
 const fichaProps = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: () => listaMock() }));
+vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());
 vi.mock("./TabelaListaReal", () => ({ TabelaListaReal: forwardRef((p: unknown, _ref) => { tabelaMock(p); return null; }) }));
 vi.mock("./FichaReal", () => ({ FichaReal: (p: unknown) => { fichaProps(p); return null; } }));
 

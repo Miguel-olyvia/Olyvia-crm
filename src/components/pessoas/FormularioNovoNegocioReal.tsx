@@ -13,6 +13,7 @@ import { AbaNovo, ListaAbasNovo, Tabs, TabsContent } from "@/components/negocio-
 import type { DadosNegocio } from "@/components/negocio-metas/costuraNegocio";
 import { ErroDeEnvio } from "@/components/negocio-metas/DialogoDeEnvio";
 import { FOCO, PISTA_DESATIVADO } from "@/components/negocio-metas/estilos";
+import { FECHO_POR_OMISSAO, type FechoNegocio } from "@/components/negocio-metas/fechoNegocio";
 import { ligarInicial, type LigarRegistos } from "@/components/negocio-metas/ligarNegocio";
 import type { MutacoesNegocio, RefRegistoBase, ResultadoCriar } from "@/components/negocio-metas/mutacoesNegocio";
 import { leadMaisRecente } from "@/components/negocio-metas/SeletorLead";
@@ -63,6 +64,7 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOc
   const [notas, setNotas] = useState("");
   const [lead, setLead] = useState(() => leadMaisRecente(dados.leadsAbertas)?.id ?? "");
   const [reabrir, setReabrir] = useState(false);
+  const [fecho, setFecho] = useState<FechoNegocio>(FECHO_POR_OMISSAO);
   const porLigar = useMemo(() => registosPorLigar(dados.registos, pessoaId), [dados.registos, pessoaId]);
   const [ligar, setLigar] = useState<LigarRegistos>(() => ligacaoInicial(porLigar, dados.levantamentosCompletos));
   const [docs, setDocs] = useState<ReadonlySet<string>>(new Set());
@@ -77,13 +79,16 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOc
   const escolhida = dados.leadsAbertas.find((l) => l.id === lead);
   const erros: ErrosGeralReal = tentou ? { titulo: titulo.trim() === "", reabrir: escolhida?.encerrada === true && !reabrir } : {};
   const tituloLimpo = titulo.trim();
+  // Fecho na proposta: os contratos são ignorados, por isso nenhum contrato por ligar se oferece nem segue no pedido.
+  const documentosOfertaveis = fecho === "proposta" ? dados.documentosPorLigar.filter((d) => d.tipo !== "contrato") : dados.documentosPorLigar;
 
-  const mudarGeral = (p: { titulo?: string; notas?: string; lead?: string; reabrir?: boolean }) => {
+  const mudarGeral = (p: { titulo?: string; notas?: string; lead?: string; reabrir?: boolean; fecho?: FechoNegocio }) => {
     aoSujar();
     if (p.titulo !== undefined) setTitulo(p.titulo);
     if (p.notas !== undefined) setNotas(p.notas);
     if (p.lead !== undefined) setLead(p.lead);
     if (p.reabrir !== undefined) setReabrir(p.reabrir);
+    if (p.fecho !== undefined) setFecho(p.fecho);
   };
   const alternarDoc = (d: Parameters<typeof chaveDocumento>[0]) => {
     aoSujar();
@@ -113,10 +118,10 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOc
       return;
     }
     const documentos: RefRegistoBase[] = comDocumentos
-      ? dados.documentosPorLigar.filter((d) => d.temBase && docs.has(chaveDocumento(d))).map((d) => ({ tipo: d.tipo, id: d.id }))
+      ? documentosOfertaveis.filter((d) => d.temBase && docs.has(chaveDocumento(d))).map((d) => ({ tipo: d.tipo, id: d.id }))
       : [];
     const pedido = {
-      id: idNegocio, titulo: tituloLimpo, notas, comercialId: null, leadId: escolhida?.id ?? null, reabrirAbordagem: reabrir && escolhida?.encerrada === true,
+      id: idNegocio, titulo: tituloLimpo, notas, comercialId: null, leadId: escolhida?.id ?? null, reabrirAbordagem: reabrir && escolhida?.encerrada === true, fecho,
       registos: podeLigar ? [...ligar.registos, ...documentos] : [],
       levantamentoId: podeLigar && ligar.levantamento.tipo === "existente" ? ligar.levantamento.id : null,
     };
@@ -128,7 +133,7 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOc
 
   const geral = (
     <AbaGeralNovoNegocioReal
-      id={id} titulo={titulo} notas={notas} lead={lead} reabrir={reabrir} leads={dados.leadsAbertas} erros={erros} tituloRef={tituloRef}
+      id={id} titulo={titulo} notas={notas} lead={lead} reabrir={reabrir} fecho={fecho} leads={dados.leadsAbertas} erros={erros} tituloRef={tituloRef}
       reabrirRef={reabrirRef} aoMudar={mudarGeral}
     />
   );
@@ -148,7 +153,7 @@ export function FormularioNovoNegocioReal({ pessoaId, mutacoes, dados, aoMudarOc
             <TabsContent value="geral" className={CONTEUDO}>{geral}</TabsContent>
             <TabsContent value="registos" className={cn(CONTEUDO, "space-y-5")}>
               <AbaLigarRegistos id={id} pessoaEscolhida porLigar={porLigar} valor={ligar} aoMudar={(v) => { aoSujar(); setLigar(v); }} semNovo />
-              {comDocumentos && <DocumentosNoCriar id={id} documentos={dados.documentosPorLigar} marcados={docs} aoAlternar={alternarDoc} />}
+              {comDocumentos && <DocumentosNoCriar id={id} documentos={documentosOfertaveis} marcados={docs} aoAlternar={alternarDoc} />}
             </TabsContent>
           </div>
         </Tabs>

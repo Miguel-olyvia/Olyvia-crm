@@ -20,6 +20,7 @@ vi.mock("@/components/pessoas/AvatarPessoa", () => ({ AvatarPessoa: () => null }
 vi.mock("./FichaReal", () => ({ FichaReal: () => null }));
 const listaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
+vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());
 const permissoes = vi.hoisted(() => ({ ativas: new Set<string>(), aCarregar: false }));
 vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({

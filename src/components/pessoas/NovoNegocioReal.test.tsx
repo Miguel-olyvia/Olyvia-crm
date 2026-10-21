@@ -109,7 +109,7 @@ describe("NovoNegocioReal: criar", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Notas (opcional)" }), { target: { value: "Tudo novo" } });
     fireEvent.click(criar());
     expect(mutacoes.criar).toHaveBeenCalledWith({
-      id: "id-1", titulo: "Casa de banho", notas: "Tudo novo", comercialId: null, leadId: null, reabrirAbordagem: false,
+      id: "id-1", titulo: "Casa de banho", notas: "Tudo novo", comercialId: null, leadId: null, reabrirAbordagem: false, fecho: "contrato",
       registos: [{ tipo: "contacto", id: "c1" }, { tipo: "visita", id: "v1" }], levantamentoId: "l1",
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

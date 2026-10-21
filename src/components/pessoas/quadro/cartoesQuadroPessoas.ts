@@ -47,7 +47,14 @@ export interface CartaoQuadro {
   prazo: string | null;
   /** O prazo é anterior a hoje. */
   atrasado: boolean;
+  /** Só no Quadro real: dias parado (orçamento e proposta, acima do limite dos parados). Ausente no exemplo. */
+  paradoDias?: number;
+  /** Só no Quadro real: a base diz que o negócio está pronto a ganhar. Ausente no exemplo. */
+  prontoAGanhar?: boolean;
 }
+
+/** Marca o botão do nome de um cartão de negócio; o valor é o id do negócio (o atalho `o` abre a ficha já nesse negócio). */
+export const ATRIBUTO_NEGOCIO = "data-negocio-id";
 
 /** O id do cartão (e do item do processo) de uma pessoa em abordagem. */
 export const idCartaoPessoa = (pessoaId: string): string => `pessoa-${pessoaId}`;

@@ -69,7 +69,8 @@ export function RegistosLigadosReal({ negocio, aberto, mutacoes }: RegistosLigad
             </Button>
           )}
           <DocumentosPorLigar
-            documentos={dados.documentosPorLigar} ocupadas={ocupadas}
+            // Fecho na proposta: os contratos são ignorados, por isso nenhum contrato por ligar se oferece.
+            documentos={negocio.fecho === "proposta" ? dados.documentosPorLigar.filter((d) => d.tipo !== "contrato") : dados.documentosPorLigar} ocupadas={ocupadas}
             aoLigar={(d) => mudar({ tipo: d.tipo, id: d.id }, oQueDoDocumento(t, d), true)}
           />
         </>

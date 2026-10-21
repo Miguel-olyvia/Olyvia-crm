@@ -1,6 +1,6 @@
 // O interior da ficha da pessoa: cabeçalho, barra de ações, percurso, os painéis de ação (em linha) e as abas fixas. Tudo
 // vai num único contentor que rola, para o painel de chamada e o "Guardar" ficarem alcançáveis com zoom ou em ecrãs baixos.
-import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 import { ErroAcao } from "./ErroAcao";
 import { todosNegociosPerdidos } from "./etapaPessoa";
 import { FichaNegocios, LINHA_NEGOCIO } from "./FichaNegocios";
+import { ListaNegociosComLixo } from "./ListaNegociosComLixo";
 import { FichaNotas, FichaSubmissoes } from "./FichaSubmissoesNotas";
 import { textoPendentes } from "./formatoPessoas";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
@@ -101,6 +102,9 @@ interface AbasProps extends FichaInteriorProps {
 /** A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). */
 function ConteudoNegocios(p: AbasProps) {
   const aberto = p.resumo.negocios.find((n) => n.id === p.negocioAberto);
+  // Depois de mandar um negócio para o lixo o detalhe fecha-se e o foco perde-se: a lista que aparece leva-o para o filtro (só nesse caso).
+  const [focarFiltro, setFocarFiltro] = useState(false);
+  const focado = useCallback(() => setFocarFiltro(false), []);
   // O item do processo do negócio aberto (o mesmo do Quadro): dá ao passo seguinte o botão que o executa.
   const extras = useExtrasProcesso();
   const item = useMemo(
@@ -108,8 +112,21 @@ function ConteudoNegocios(p: AbasProps) {
     [p.resumo, p.hoje, extras, p.negocioAberto],
   );
   // Sem a capacidade «negocios» (a ficha real, até ao P3) a lista só se lê: o detalhe e as ações do negócio ainda não existem na base.
-  if (!aberto) return <FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.acoes.capacidades?.negocios === false ? undefined : p.aoAbrirNegocio} />;
-  return <DetalheNegocioFicha negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} />;
+  if (!aberto) {
+    // A lista normal, com o filtro «Lixo» para quem pode restaurar (na ficha real; no exemplo é só a lista).
+    return (
+      <ListaNegociosComLixo
+        pessoaId={p.resumo.pessoa.id} pessoaNome={p.resumo.pessoa.nome} focarAoEntrar={focarFiltro} aoFocado={focado}
+        lista={<FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.acoes.capacidades?.negocios === false ? undefined : p.aoAbrirNegocio} />}
+      />
+    );
+  }
+  return (
+    <DetalheNegocioFicha
+      negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item}
+      aoApagado={() => { setFocarFiltro(true); p.aoVoltarNegocio(); }}
+    />
+  );
 }
 
 /** As abas por esta ordem: Resumo, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */

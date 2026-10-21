@@ -67,7 +67,8 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
   }, [t, anunciar]);
   const mutacoes = useMutacoesNegocio(pessoaId, ficha, { aoIndisponivel });
   const momentoGanho = fonte.modo === "real" ? fonte.momentoGanho : null;
-  const dados = useMemo(() => (ficha ? adaptarDadosNegocio(ficha, momentoGanho) : null), [ficha, momentoGanho]);
+  const podeApagar = fonte.modo === "real" && fonte.podeApagarNegocios === true;
+  const dados = useMemo(() => (ficha ? adaptarDadosNegocio(ficha, momentoGanho, { podeApagar }) : null), [ficha, momentoGanho, podeApagar]);
   // O painel e o negócio criado guardam a pessoa a que pertencem: trocar de pessoa (ou fechar a ficha) deixa-os de valer.
   const [criandoPara, setCriandoPara] = useState<string | null>(null);
   // `endereco` é o `?negocio=` do momento em que se criou: o negócio criado só manda enquanto o endereço não passa para outro negócio.

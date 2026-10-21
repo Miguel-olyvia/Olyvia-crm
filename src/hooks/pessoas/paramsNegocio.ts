@@ -1,7 +1,8 @@
 // A parte pura das mutações de um negócio: validar o que o utilizador escreveu (os mesmos limites da base, para não gastar uma ida à base
 // com o que ela vai recusar com NG009) e ler as respostas sem nunca rebentar com uma forma inesperada.
+import { fechoDe } from "@/components/negocio-metas/fechoNegocio";
 import {
-  TIPOS_REGISTO_BASE, type ConversaoGanho, type RefRegistoBase, type ResultadoCriar, type ResultadoGanho, type TipoRegistoBase,
+  TIPOS_REGISTO_BASE, type ConversaoGanho, type RefRegistoBase, type ResultadoCriar, type ResultadoGanho, type ResultadoMudarFecho, type TipoRegistoBase,
 } from "@/components/negocio-metas/mutacoesNegocio";
 import { ErroNeg } from "./chamarNeg";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG } from "./errosNeg";
@@ -43,6 +44,12 @@ const objeto = (dados: unknown): Record<string, unknown> => {
 /** A base respondeu com um objeto: `mudou` só vale se for exatamente `true`. */
 export function lerMudou(dados: unknown): { mudou: boolean } {
   return { mudou: objeto(dados).mudou === true };
+}
+
+/** A resposta de `neg_mudar_fecho`: `precisa_confirmar` e `mudou` só valem se forem exatamente `true`; um tipo desconhecido lê-se como nulo. */
+export function lerMudarFecho(dados: unknown): ResultadoMudarFecho {
+  const d = objeto(dados);
+  return { mudou: d.mudou === true, fecho: fechoDe(d.fecho), precisaConfirmar: d.precisa_confirmar === true };
 }
 
 const CONVERSOES: readonly ConversaoGanho[] = ["feita", "ja_cliente", "ja_convertida"];

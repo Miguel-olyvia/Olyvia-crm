@@ -13,6 +13,7 @@ import { registosDoNegocio, registosPorLigar, totalDeRegistos } from "@/componen
 import { BotaoAnularPerda, BotaoPerderNegocio } from "@/components/negocio-metas/BotoesPerda";
 import { ContratoPainel } from "@/components/negocio-metas/ContratoPainel";
 import { useDadosNegocio } from "@/components/negocio-metas/costuraNegocio";
+import { semContratosSeProposta } from "@/components/negocio-metas/fechoNegocio";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
 import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
@@ -25,11 +26,15 @@ import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { AbrirDocumento } from "./AbrirDocumento";
+import { AcoesEdicaoNegocio } from "./AcoesEdicaoNegocio";
 import { BotaoGanharNegocio } from "./BotaoGanharNegocio";
+import { CondicoesDaProposta } from "./CondicoesDaProposta";
+import { EtiquetaFecho } from "./EtiquetaFecho";
 import { passoDoNegocio } from "./etapaPessoa";
 import { fasesDoNegocio, type IdFase } from "./fasesDoNegocio";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
 import { estaAberto } from "./juntarPessoas";
+import { MudarFechoNegocio } from "./MudarFechoNegocio";
 import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
 import { passoDoItem } from "./processo/passosProcesso";
 import { useAcaoDoPasso } from "./processo/processoContexto";
@@ -47,6 +52,8 @@ interface DetalheNegocioFichaProps {
   aoVoltar: () => void;
   /** O item do processo deste negócio: com ele, o passo seguinte tem o botão que o executa (sem ele, só se lê). */
   item?: ItemProcesso;
+  /** O negócio foi para o lixo: quem abre a lista pode querer dar o foco ao filtro. Sem isto, volta-se à lista como em «Voltar». */
+  aoApagado?: () => void;
 }
 
 /**
@@ -107,8 +114,10 @@ function secaoAberta(fase: IdFase | undefined, terminado: boolean): SecaoDetalhe
   return "percurso";
 }
 
-export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
+  // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
+  const negocio = semContratosSeProposta(negocioDaFicha);
   const titulo = useRef<HTMLHeadingElement>(null);
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
   useEffect(() => titulo.current?.focus(), []);
@@ -153,6 +162,7 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
           <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">{negocio.servico}</h3>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{t(`${P}deals.kind.deal`)}</Badge>
+            {negocio.fecho && <EtiquetaFecho fecho={negocio.fecho} />}
             {faseAtual && <Badge variant="secondary">{t(`${P}phases.${faseAtual}`)}</Badge>}
           </div>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[15px]">
@@ -161,6 +171,7 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
             <dt className="text-muted-foreground">{t(`${P}detail.rep`)}</dt>
             <dd className="text-foreground">{negocio.comercial}</dd>
           </dl>
+          {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
         </div>
         <Seccao titulo={t(`${P}phases.title`)} nivel={4}><FasesDoNegocioLista fases={fases} /></Seccao>
         {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
@@ -171,6 +182,10 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
             <BotaoGanharNegocio negocio={negocio} />
           </div>
         )}
+        {/* Mudar o tipo de fecho: só na ficha real, com permissão de editar e com o negócio aberto. */}
+        <MudarFechoNegocio negocio={negocio} aoSemBotao={() => titulo.current?.focus()} />
+        {/* Editar o título, as notas e o comercial, e mandar para o lixo: só na ficha real, com a permissão certa. */}
+        <AcoesEdicaoNegocio negocio={negocio} aoApagado={aoApagado ?? aoVoltar} />
       </div>
       <div className="space-y-2">
         <p className="text-sm font-semibold text-muted-foreground">{t(`${P}detail.more`)}</p>
@@ -194,6 +209,7 @@ export function DetalheNegocioFicha({ negocio, hoje, aoVoltar, item }: DetalheNe
           <SeccaoRecolhivel titulo={t(`${P}deal.proposal`)} resumo={t(`businessGoals.proposal.${negocio.proposta.estado}`)} aberta={aberta === "proposta"}>
             <AbrirDocumento tipo="proposta" negocioId={negocio.id} />
             <PropostaPainel negocio={negocio} detalhe={detalhe} hoje={hoje} />
+            <CondicoesDaProposta negocio={negocio} hoje={hoje} />
           </SeccaoRecolhivel>
         )}
         {negocio.contrato && (

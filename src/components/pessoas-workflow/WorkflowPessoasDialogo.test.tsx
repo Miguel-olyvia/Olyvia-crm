@@ -3,6 +3,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import type { ConfigNegociosHook } from "@/hooks/pessoas/workflow/useConfigNegocios";
 import type { RegrasQualificacaoHook } from "@/hooks/pessoas/workflow/useRegrasQualificacao";
 import { lerQuestionario } from "@/hooks/pessoas/workflow/questionario";
 import { QUESTIONARIO_BRUTO } from "@/hooks/pessoas/workflow/questionarioTestUtil";
@@ -15,6 +16,8 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 const usarRegras = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useRegrasQualificacao", () => ({ useRegrasQualificacao: (h: boolean) => usarRegras(h) }));
+const usarConfig = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/pessoas/workflow/useConfigNegocios", () => ({ useConfigNegocios: (h: boolean) => usarConfig(h) }));
 const usarQuest = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/workflow/useQuestionarioLevantamento", () => ({ useQuestionarioLevantamento: (h: boolean) => usarQuest(h) }));
 beforeAll(prepararRadixNoJsdom);
@@ -24,6 +27,11 @@ const hook = (sobre: Partial<RegrasQualificacaoHook> = {}): RegrasQualificacaoHo
   guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
 });
 
+const configNegocios = (sobre: Partial<ConfigNegociosHook> = {}): ConfigNegociosHook => ({
+  estado: "pronto", aGuardar: false, guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
+  dados: { conversaoAoGanhar: "automatica", recusaProposta: "perder", recusaContrato: "perder", cancelamentoNoPrazo: "perder", reflexaoDias: null },
+});
+
 const questionario = (sobre: Partial<QuestionarioHook> = {}): QuestionarioHook => ({
   dados: lerQuestionario(QUESTIONARIO_BRUTO), erro: null, isLoading: false, isError: false, aGuardar: false,
   guardar: vi.fn(), recarregar: vi.fn(), ...sobre,
@@ -31,9 +39,11 @@ const questionario = (sobre: Partial<QuestionarioHook> = {}): QuestionarioHook =
 
 beforeEach(() => {
   usarRegras.mockReset(); usarRegras.mockReturnValue(hook());
+  usarConfig.mockReset(); usarConfig.mockReturnValue(configNegocios());
   usarQuest.mockReset(); usarQuest.mockReturnValue(questionario());
 });
 
+const irParaNegocios = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Negócios" }), { button: 0, ctrlKey: false });
 const irParaLevantamento = () => fireEvent.mouseDown(screen.getByRole("tab", { name: "Levantamento" }), { button: 0, ctrlKey: false });
 const tituloExterior = () => within(screen.getByRole("region", { name: /Exterior|Fachada/ })).getByLabelText("Título da secção");
 
@@ -56,16 +66,40 @@ describe("WorkflowPessoasDialogo", () => {
     expect(usarRegras).toHaveBeenCalledWith(true);
   });
 
-  it("tem os separadores «Qualificação» (selecionado, com as regras MQL e SQL) e «Levantamento»", () => {
+  it("tem os separadores «Qualificação» (selecionado, com as regras MQL e SQL), «Levantamento» e «Negócios»", () => {
     desenhar();
     const lista = screen.getByRole("tablist", { name: "Secções do Workflow" });
     const separadores = within(lista).getAllByRole("tab");
-    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação", "Levantamento"]);
+    expect(separadores.map((s) => s.textContent)).toEqual(["Qualificação", "Levantamento", "Negócios"]);
     expect(separadores[0]).toHaveAttribute("aria-selected", "true");
     expect(separadores[1]).toHaveAttribute("aria-selected", "false");
+    expect(separadores[2]).toHaveAttribute("aria-selected", "false");
     const painel = screen.getByRole("tabpanel", { name: "Qualificação" });
     expect(within(painel).getByRole("group", { name: "Quando uma lead é MQL" })).toBeInTheDocument();
     expect(within(painel).getByRole("group", { name: "Quando uma lead é SQL" })).toBeInTheDocument();
+  });
+
+  it("a configuração dos negócios só se lê quando o separador «Negócios» está à vista, e mostra os cinco campos", () => {
+    desenhar();
+    expect(usarConfig).toHaveBeenLastCalledWith(false);
+    irParaNegocios();
+    expect(usarConfig).toHaveBeenLastCalledWith(true);
+    const painel = screen.getByRole("tabpanel", { name: "Negócios" });
+    expect(within(painel).getAllByRole("radiogroup")).toHaveLength(4);
+    expect(within(painel).getByRole("textbox", { name: "Prazo de reflexão (dias)" })).toBeInTheDocument();
+    expect(within(painel).getByRole("button", { name: "Guardar configuração" })).toBeInTheDocument();
+  });
+
+  it("fechado não lê a configuração dos negócios", () => {
+    desenhar(false);
+    expect(usarConfig).toHaveBeenCalledWith(false);
+  });
+
+  it("enquanto grava a configuração dos negócios o diálogo não fecha (Escape)", () => {
+    usarConfig.mockReturnValue(configNegocios({ aGuardar: true }));
+    const { props } = desenhar();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
   });
 
   it("o questionário só se lê quando o separador «Levantamento» está à vista", () => {
@@ -118,6 +152,58 @@ describe("WorkflowPessoasDialogo", () => {
     expect(screen.queryByRole("button", { name: /close|fechar/i })).toBeNull();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(props.aoMudarAberto).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkflowPessoasDialogo: alterações dos negócios por gravar", () => {
+  const editarNegocios = () => {
+    irParaNegocios();
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Quando a proposta é recusada" })).getByRole("radio", { name: "Manter o negócio aberto" }));
+  };
+  const escape = () => fireEvent.keyDown(screen.getByRole("dialog", { name: "Configuração de Workflow" }), { key: "Escape" });
+
+  it("sem alterações, Escape fecha logo", () => {
+    const { props } = desenhar();
+    irParaNegocios();
+    escape();
+    expect(props.aoMudarAberto).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("com uma escolha por gravar, Escape pergunta primeiro", async () => {
+    const { props } = desenhar();
+    editarNegocios();
+    escape();
+    expect(await screen.findByRole("alertdialog", { name: "Alterações por gravar" })).toBeInTheDocument();
+    expect(props.aoMudarAberto).not.toHaveBeenCalled();
+  });
+
+  it("voltar ao valor gravado deixa de contar como alteração", () => {
+    const { props } = desenhar();
+    editarNegocios();
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Quando a proposta é recusada" })).getByRole("radio", { name: "Perder o negócio" }));
+    escape();
+    expect(props.aoMudarAberto).toHaveBeenCalledWith(false);
+  });
+
+  it("o que se escolheu sobrevive à troca de separador", () => {
+    desenhar();
+    editarNegocios();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Qualificação" }), { button: 0, ctrlKey: false });
+    irParaNegocios();
+    expect(within(screen.getByRole("radiogroup", { name: "Quando a proposta é recusada" })).getByRole("radio", { name: "Manter o negócio aberto" })).toBeChecked();
+  });
+
+  it("«Descartar e fechar» fecha e ao reabrir a escolha não fica", async () => {
+    const { rerender, props } = desenhar();
+    editarNegocios();
+    escape();
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar e fechar" }));
+    expect(props.aoMudarAberto).toHaveBeenCalledWith(false);
+    rerender(<WorkflowPessoasDialogo {...props} aberto={false} />);
+    rerender(<WorkflowPessoasDialogo {...props} aberto />);
+    irParaNegocios();
+    expect(within(screen.getByRole("radiogroup", { name: "Quando a proposta é recusada" })).getByRole("radio", { name: "Perder o negócio" })).toBeChecked();
   });
 });
 

@@ -89,6 +89,23 @@ const pt: Record<string, string> = {
   [`${R}refreshWarn`]: "Não foi possível atualizar a lista. Mostra-se a última lista carregada.",
   [`${R}loadMoreError`]: "Não foi possível carregar mais pessoas.",
   [`${R}routeError`]: "Não foi possível confirmar se esta página está disponível.",
+  // O Quadro real. A coluna «Novo» é a que o protótipo chama «Por contactar» (só o texto, só em modo real).
+  [`${R}board.colNew`]: "Novo",
+  [`${R}board.subtitle`]: "cartões carregados: {n}",
+  [`${R}board.loading`]: "A carregar o quadro...",
+  [`${R}board.updating`]: "A atualizar o quadro...",
+  [`${R}board.error`]: "Não foi possível carregar o quadro.",
+  [`${R}board.refreshWarn`]: "Não foi possível atualizar o quadro. Mostra-se o último quadro carregado.",
+  [`${R}board.emptyAll`]: "Ainda não há cartões no quadro.",
+  [`${R}board.emptyFiltered`]: "Nenhum cartão corresponde aos filtros.",
+  [`${R}board.showing`]: "A mostrar {shown} de {total}",
+  [`${R}board.loadMore`]: "Carregar mais ({n} em falta)",
+  [`${R}board.loadMoreLabel`]: "Carregar mais ({n} em falta), coluna {column}",
+  [`${R}board.loadingMore`]: "A carregar mais cartões em {column}...",
+  [`${R}board.loadedMore`]: "Carregados mais {n} em {column}. A mostrar {shown} de {total}.",
+  [`${R}board.loadMoreError`]: "Não foi possível carregar mais cartões.",
+  [`${R}board.retry`]: "Repetir",
+  [`${R}board.stalled`]: "Parado há {n} d",
 };
 
 const en: Record<string, string> = {
@@ -177,6 +194,23 @@ const en: Record<string, string> = {
   [`${R}refreshWarn`]: "The list could not be refreshed. The last loaded list is shown.",
   [`${R}loadMoreError`]: "More people could not be loaded.",
   [`${R}routeError`]: "Could not confirm that this page is available.",
+  // The real board. The «New» column is what the prototype calls «To contact» (text only, real mode only).
+  [`${R}board.colNew`]: "New",
+  [`${R}board.subtitle`]: "cards loaded: {n}",
+  [`${R}board.loading`]: "Loading the board...",
+  [`${R}board.updating`]: "Updating the board...",
+  [`${R}board.error`]: "The board could not be loaded.",
+  [`${R}board.refreshWarn`]: "The board could not be refreshed. The last loaded board is shown.",
+  [`${R}board.emptyAll`]: "There are no cards on the board yet.",
+  [`${R}board.emptyFiltered`]: "No cards match the filters.",
+  [`${R}board.showing`]: "Showing {shown} of {total}",
+  [`${R}board.loadMore`]: "Load more ({n} remaining)",
+  [`${R}board.loadMoreLabel`]: "Load more ({n} remaining), column {column}",
+  [`${R}board.loadingMore`]: "Loading more cards in {column}...",
+  [`${R}board.loadedMore`]: "{n} more loaded in {column}. Showing {shown} of {total}.",
+  [`${R}board.loadMoreError`]: "More cards could not be loaded.",
+  [`${R}board.retry`]: "Retry",
+  [`${R}board.stalled`]: "Stalled for {n} d",
 };
 
 export const pessoasListaRealTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

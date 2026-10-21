@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { ehFecho, FECHO_POR_OMISSAO, type FechoNegocio } from "@/components/negocio-metas/fechoNegocio";
 import {
   TIPOS_DOCUMENTO, type MutacoesNegocio, type PedidoCriarNegocio, type PedidoPerder, type RefRegistoBase,
 } from "@/components/negocio-metas/mutacoesNegocio";
 import { chamarNeg, ErroNeg, type NomeNeg } from "./chamarNeg";
 import type { FichaDb } from "./fichaTipos";
 import { invalidarPessoas } from "./invalidarPessoas";
-import { erroGenerico, erroLocal, lerCriado, lerGanho, lerMudou, textoDeEstado, tipoDeRegisto, tituloENotas } from "./paramsNegocio";
+import { erroGenerico, erroLocal, lerCriado, lerGanho, lerMudarFecho, lerMudou, textoDeEstado, tipoDeRegisto, tituloENotas } from "./paramsNegocio";
+import { useEscritasNegocio } from "./useEscritasNegocio";
 import { useFontePessoas } from "./useFontePessoas";
 
 /**
@@ -20,7 +22,8 @@ const FUNCOES_M6_APLICADAS = true;
  * Os erros depois dos quais o que o ecrã mostra já está desatualizado (o negócio mudou, o registo já não é livre, o contrato já não se liga,
  * o contrato já não se liga): refaz-se a ficha. NG003 e NG008 não refazem nada: fecham a ficha (ver abaixo).
  */
-const CODIGOS_QUE_REFRESCAM = ["NG001", "NG002", "NG004", "NG013", "NG014"];
+// NG022 (o tipo de fecho já não pode mudar: o estado ou os documentos do negócio mudaram) também refaz a ficha.
+const CODIGOS_QUE_REFRESCAM = ["NG001", "NG002", "NG004", "NG013", "NG014", "NG022"];
 
 /** Os erros que tiram a própria ficha do ar (a pessoa já não está disponível, ou a funcionalidade não está ativa): fecha-se a ficha. */
 const CODIGOS_QUE_FECHAM_A_FICHA = ["NG003", "NG008"];
@@ -53,11 +56,17 @@ export function useMutacoesNegocio(pessoaId: string, ficha: FichaDb | null, opco
     indisponivelRef.current = opcoes.aoIndisponivel;
   });
   const [emVoo] = useState(() => new Map<string, Promise<unknown>>());
+  // As escritas DIRETAS (UPDATE em negocios e em proposals.terms: editar, lixo, restaurar, condições) não são funções neg_*: vivem no seu hook
+  // (`useEscritasNegocio`) e entram aqui para os ecrãs terem tudo no mesmo objeto de mutações.
+  const escritas = useEscritasNegocio(pessoaId);
   return useMemo(
-    () => criarMutacoes({
-      organizationId, pessoaId, client, emVoo, comDocumentos, ficha: () => fichaRef.current, indisponivel: (chave, pessoa) => indisponivelRef.current?.(chave, pessoa),
+    () => ({
+      ...criarMutacoes({
+        organizationId, pessoaId, client, emVoo, comDocumentos, ficha: () => fichaRef.current, indisponivel: (chave, pessoa) => indisponivelRef.current?.(chave, pessoa),
+      }),
+      ...escritas,
     }),
-    [organizationId, pessoaId, client, emVoo, comDocumentos],
+    [organizationId, pessoaId, client, emVoo, comDocumentos, escritas],
   );
 }
 
@@ -72,6 +81,12 @@ interface Contexto {
 }
 
 const ehDocumento = (ref: RefRegistoBase): boolean => TIPOS_DOCUMENTO.includes(ref.tipo);
+
+/** O tipo de fecho a enviar: um valor que a base não conhece é NG009, sem ir à base. */
+function fechoValido(fecho: unknown): FechoNegocio {
+  if (!ehFecho(fecho)) throw erroLocal("NG009");
+  return fecho;
+}
 
 function criarMutacoes(c: Contexto): MutacoesNegocio {
   const invalidar = (): void => { void invalidarPessoas(c.client, c.organizationId, c.pessoaId); };
@@ -138,15 +153,27 @@ function criarMutacoes(c: Contexto): MutacoesNegocio {
     if (!atual.permissoes.criar) throw erroLocal("42501");
     // Ligar exige «editar»: só com «criar» o negócio nasce sem registos (a base recusaria tudo com NG001).
     const podeLigar = atual.permissoes.editar;
+    const fecho = fechoValido(p.fecho ?? FECHO_POR_OMISSAO);
     return chamar("neg_criar_negocio", {
       p_id: p.id, p_organization_id: o, p_entity_id: c.pessoaId, p_titulo: titulo, p_notas: notas, p_assigned_to: p.comercialId,
       p_registos: podeLigar ? p.registos.map(({ tipo, id }) => ({ tipo: tipoDeRegisto(tipo), id })) : [],
       p_levantamento_id: podeLigar ? p.levantamentoId : null, p_lead_id: p.leadId, p_reabrir_abordagem: p.reabrirAbordagem,
+      p_fecho: fecho,
     });
   }, lerCriado);
 
+  // Sem a confirmação a base pode devolver `precisa_confirmar` (nada mudou): quem chama mostra o aviso e volta a chamar com `confirmar`.
+  const mudarFecho = (negocioId: string, fecho: FechoNegocio, confirmar: boolean) => escrever(`fecho:${negocioId}:${fecho}:${confirmar}`, async () => {
+    org();
+    // O botão só aparece com «editar» e a base recusa de qualquer forma; aqui recusa-se sem gastar uma ida à base.
+    const atual = c.ficha();
+    if (!atual || atual.pessoa.id !== c.pessoaId) throw erroGenerico();
+    if (!atual.permissoes.editar) throw erroLocal("42501");
+    return chamar("neg_mudar_fecho", { p_negocio_id: negocioId, p_fecho: fechoValido(fecho), p_confirmar: confirmar });
+  }, lerMudarFecho);
+
   return {
-    perder, anular, ganhar, criar, criarComDocumentos: c.comDocumentos, refrescar: invalidar,
+    perder, anular, ganhar, criar, mudarFecho, criarComDocumentos: c.comDocumentos, refrescar: invalidar,
     ligar: (negocioId, ref) => mudarLigacao("neg_ligar_registo", negocioId, ref),
     desligar: (negocioId, ref) => mudarLigacao("neg_desligar_registo", negocioId, ref),
   };

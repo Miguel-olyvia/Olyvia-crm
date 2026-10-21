@@ -1,6 +1,7 @@
 // Os negócios da ficha real: passam de `negocios.itens` ao NegocioPessoa do ecrã.
 // Um negócio ABERTO com contrato assinado continua aberto (fica «pronto a ganhar»): o estado vem da base (`estadoReal`),
 // nunca se deduz do contrato. Ganhos e perdidos viram históricos, com o mês de Lisboa.
+import { fechoDe } from "@/components/negocio-metas/fechoNegocio";
 import type { EstadoContrato, EstadoProposta, NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import type { NegocioHistorico, NegocioPessoa } from "@/components/pessoas/pessoasTipos";
 import { maisRecentePrimeiro, numero } from "./adaptarComum";
@@ -57,6 +58,7 @@ function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string, momento
   const estadoReal = n.estado === "ganho" || n.estado === "perdido" ? n.estado : "aberto";
   // Regra manual: a base aceita o ganho de qualquer negócio aberto, mas devolve pronto_a_ganhar = false para ela (ELSE false).
   const manualAberto = momentoGanho === "manual" && estadoReal === "aberto";
+  const fecho = fechoDe(n.fecho);
   return {
     id: n.id,
     pessoaId: ficha.pessoa.id,
@@ -69,11 +71,15 @@ function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string, momento
     contacto: { telefone: ficha.pessoa.contacto?.telefone ?? null, email: ficha.pessoa.contacto?.email ?? null },
     orcamentos: (n.orcamentos ?? []).map((o) => ({ id: o.id, valor: numero(o.total), escolhido: false })),
     proposta: propostaDoNegocio(n),
-    contrato: contratoDoNegocio(n),
+    // Fecho na proposta: os contratos ligados são ignorados (a base também os ignora).
+    contrato: fecho === "proposta" ? null : contratoDoNegocio(n),
+    ...(fecho ? { fecho } : {}),
     ...(n.levantamento_id ? { decisaoLevantamento: "ligado" as const } : {}),
     valorBase: numero(n.valor),
     estadoReal,
     prontoAGanhar: manualAberto || n.pronto_a_ganhar === true,
+    notas: n.notas ?? "",
+    comercialId: n.responsavel_id ?? null,
   };
 }
 

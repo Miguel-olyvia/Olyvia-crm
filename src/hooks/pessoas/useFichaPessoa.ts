@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { chamarNeg, ErroNeg } from "./chamarNeg";
 import { CHAVES_ERRO_NEG } from "./errosNeg";
+import { comFechos } from "./lerFechos";
 import { TIPOS_SECCAO, type FichaDb, type SeccaoDb, type TipoSeccao } from "./fichaTipos";
 import { comoErroNeg, repetir } from "./useListaPessoas";
 import { useFontePessoas } from "./useFontePessoas";
@@ -171,7 +172,9 @@ export function useFichaPessoa(pessoaId: string | null): FichaPessoaLida {
       const { ficha, erro } = await pedirSeguintes(organizationId as string, pessoaId as string, primeira, "levantamentos", true);
       const falha = comoErroNeg(erro) ?? undefined;
       mexer(pessoaId as string, (e) => ({ ...e, erros: { ...semChave(e.erros, "levantamentos"), ...(falha ? { levantamentos: falha } : {}) } }));
-      return preservarCarregados(ficha, client.getQueryData<FichaDb>(chave), alargadasDe(client, organizationId, pessoaId as string));
+      // O tipo de fecho de cada negócio (a função da ficha ainda não o traz): uma leitura que falhe deixa a ficha como veio.
+      const comTipos = await comFechos(ficha, organizationId as string);
+      return preservarCarregados(comTipos, client.getQueryData<FichaDb>(chave), alargadasDe(client, organizationId, pessoaId as string));
     },
     enabled: ativo,
     staleTime: STALE_TIME_MS,

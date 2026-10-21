@@ -37,8 +37,24 @@ describe("criar: os parâmetros", () => {
     expect(nomeChamado(0)).toBe("neg_criar_negocio");
     expect(parametros(0)).toEqual({
       p_id: ID, p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_titulo: "Cozinha", p_notas: "Tudo novo", p_assigned_to: "u9",
-      p_registos: [], p_levantamento_id: null, p_lead_id: LEAD_ID, p_reabrir_abordagem: false,
+      p_registos: [], p_levantamento_id: null, p_lead_id: LEAD_ID, p_reabrir_abordagem: false, p_fecho: "contrato",
     });
+  });
+
+  it("sem escolha manda p_fecho «contrato» (a omissão); «proposta» (venda directa) vai tal e qual", async () => {
+    rpcMock.mockReturnValue(ok());
+    const { result } = montar();
+    await act(async () => { await result.current.criar(pedido()); });
+    expect(parametros(0).p_fecho).toBe("contrato");
+    await act(async () => { await result.current.criar(pedido({ id: "outro-id", fecho: "proposta" })); });
+    expect(parametros(1).p_fecho).toBe("proposta");
+  });
+
+  it("um tipo de fecho desconhecido recusa com NG009 sem chamar a base", async () => {
+    const { result } = montar();
+    const erro = await erroDe(act(async () => { await result.current.criar(pedido({ fecho: "outro" as never })); }));
+    expect(erro.codigo).toBe("NG009");
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 
   it("notas vazias vão como nulo e sem comercial vai nulo (a base usa quem cria)", async () => {

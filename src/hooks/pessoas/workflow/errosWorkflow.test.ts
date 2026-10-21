@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ErroNeg } from "../chamarNeg";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG } from "../errosNeg";
-import { chaveErroWorkflow } from "./errosWorkflow";
+import { chaveErroNegocios, chaveErroWorkflow } from "./errosWorkflow";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -29,5 +29,24 @@ describe("chaveErroWorkflow", () => {
 
   it("qualquer coisa que não seja um ErroNeg dá a mensagem genérica", () => {
     for (const lixo of [new Error("x"), "x", null, undefined, { codigo: "NG008" }]) expect(chaveErroWorkflow(lixo)).toBe(CHAVE_ERRO_GENERICO);
+  });
+});
+
+describe("chaveErroNegocios (o separador «Negócios»)", () => {
+  it.each([
+    ["NG008", `${W}neg.error.ng008`],
+    ["NG009", `${W}neg.error.ng009`],
+    ["42501", `${W}neg.error.permission`],
+  ])("%s tem a mensagem própria do separador", (codigo, chave) => {
+    expect(chaveErroNegocios(erro(codigo))).toBe(chave);
+  });
+
+  it("outro código conhecido fica com a mensagem de código e sem código com a genérica", () => {
+    expect(chaveErroNegocios(erro("NG006"))).toBe(CHAVES_ERRO_NEG.NG006);
+    expect(chaveErroNegocios(erro(null))).toBe(CHAVE_ERRO_GENERICO);
+  });
+
+  it("qualquer coisa que não seja um ErroNeg dá a mensagem genérica", () => {
+    for (const lixo of [new Error("x"), "x", null, undefined, { codigo: "NG008" }]) expect(chaveErroNegocios(lixo)).toBe(CHAVE_ERRO_GENERICO);
   });
 });

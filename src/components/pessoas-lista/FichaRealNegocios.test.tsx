@@ -128,7 +128,7 @@ describe("FichaReal com o negócio completo", () => {
     fireEvent.click(within(painel).getByRole("button", { name: "Criar o negócio" }));
     await waitFor(() => expect(chamadas("neg_criar_negocio")).toHaveLength(1));
     expect(params("neg_criar_negocio")).toMatchObject({
-      p_id: "novo-1", p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_titulo: "Quarto", p_lead_id: LEAD_ID, p_reabrir_abordagem: false,
+      p_id: "novo-1", p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_titulo: "Quarto", p_lead_id: LEAD_ID, p_reabrir_abordagem: false, p_fecho: "contrato",
     });
     expect(await screen.findByRole("heading", { level: 3, name: "Quarto" })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Novo negócio" })).toBeNull());

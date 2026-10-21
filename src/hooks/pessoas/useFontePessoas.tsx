@@ -16,6 +16,8 @@ export type FontePessoas =
     momentoGanho: MomentoGanho | null;
     /** O `anew_users.id` de quem está na sessão (para «Só as minhas»); `null`/ausente enquanto não se conhece. */
     utilizadorId?: string | null;
+    /** `pessoas.delete` (com qualquer âmbito): mostra o lixo de negócios e deixa mandar para lá e restaurar. Ausente conta como falso. */
+    podeApagarNegocios?: boolean;
   };
 
 export const FontePessoasContext = createContext<FontePessoas>({ modo: "exemplo" });

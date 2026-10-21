@@ -3,8 +3,10 @@
 // (o exemplo e os testes antigos) tudo continua a vir dos stores. A parte de ESCRITA está em `mutacoesNegocio.ts`.
 import { createContext, useContext } from "react";
 import type { DetalheNegocio } from "./negocioDetalhes";
+import type { EstadoProposta } from "./negocioMetas";
 import type { Alteracoes } from "./negociosAlterados";
 import type { EstadoRegistos } from "./registosTipos";
+import type { CondicoesTermos } from "./termosProposta";
 
 /** A regra da organização para dar um negócio como ganho (os valores que o CHECK da base aceita). */
 export type MomentoGanhoCostura = "manual" | "proposta_aceite" | "contrato_assinado";
@@ -30,6 +32,16 @@ export interface DocumentoPorLigar {
   temBase: boolean;
 }
 
+/** A proposta de um negócio (a viva: a mais recente que o cliente não recusou) com as condições lidas de `proposals.terms`. */
+export interface PropostaCondicoes {
+  id: string;
+  estado: EstadoProposta;
+  /** As condições (prazo, início, pagamento, garantia); `null` se não há. */
+  condicoes: CondicoesTermos | null;
+  /** `false`: `terms` tem conteúdo num formato que esta página não conhece (guardar condições novas substitui-o). */
+  legivel: boolean;
+}
+
 export interface DadosNegocio {
   /** Os registos da pessoa aberta (contactos, visitas e levantamentos), com o negócio a que cada um está ligado. */
   registos: EstadoRegistos;
@@ -47,6 +59,10 @@ export interface DadosNegocio {
   levantamentosCompletos: boolean;
   /** Os documentos antigos da pessoa sem negócio; vazio se não há. */
   documentosPorLigar: readonly DocumentoPorLigar[];
+  /** `pessoas.delete` (com o âmbito que a base decide): mandar para o lixo e restaurar. Ausente conta como falso. */
+  podeApagar?: boolean;
+  /** A proposta do negócio e as condições dela; ausente (exemplo e testes antigos) conta como «sem proposta». */
+  proposta?: (negocioId: string) => PropostaCondicoes | null;
 }
 
 export const DadosNegocioContext = createContext<DadosNegocio | null>(null);
