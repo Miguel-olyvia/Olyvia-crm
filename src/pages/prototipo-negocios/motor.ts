@@ -1640,6 +1640,24 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const falta = d.obra.plano!.tasks.filter((x) => x.exec?.estado !== "validada").length;
       avisar({ msg: `${t.nome} validada`, sub: falta ? `${falta} ${falta === 1 ? "tarefa ainda não validada" : "tarefas ainda não validadas"}` : "Todas as tarefas validadas: pode registar o fim da obra", kind: "ok" });
     },
+    /** 21/10: o responsável de obra dá a tarefa por feita ele próprio, com uma fotografia (poupa tempo ao técnico): fica logo validada. */
+    darPorFeita(id: number, ti: number, m: { fotos: string[]; nota: string }) {
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado !== "em curso" || t.dia > p.dia || t.exec?.estado === "validada") return;
+      if (p.tasks.some((x) => x.corrige === ti && x.exec?.estado !== "validada")) return;
+      if (!m.fotos.length) { avisar({ msg: "Ainda não dá para dar por feita", sub: "Falta uma fotografia", kind: "bad" }); return; }
+      const eu = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, nota = m.nota.trim() || "Dada por feita pelo responsável de obra.";
+      const e: ExecTarefa = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
+      // as horas: as registadas pelo técnico ou, sem registo, as previstas
+      if (!(e.horas > 0)) e.horas = t.h;
+      e.fotos = [...e.fotos, ...m.fotos].slice(-6); e.nota = nota; e.motivo = undefined;
+      e.estado = "feita"; e.feita = agora();
+      (e.envios ??= []).push({ q: agora(), dia: p.dia, quem: eu, k: "feita", fotos: m.fotos.slice(), nota });
+      t.exec = e;
+      (d.obra.diario ??= []).push({ q: agora(), quem: eu, t: `${t.nome}: ${nota}`, k: "horas", fotos: m.fotos.slice(0, 2) });
+      // salta a validação: quem a daria é quem a deu por feita
+      A.validarTarefa(id, ti);
+    },
     /** O supervisor pede correção, com o motivo: volta ao técnico. */
     pedirCorrecao(id: number, ti: number, motivo: string, extra?: { horas: number; tec?: string | null }) {
       const d = deal(id), t = d.obra.plano?.tasks[ti];

@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
-  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, MapPin, Minus, Package, Phone, Plus, ShieldCheck, Sparkles, Wrench, X,
+  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, Minus, Package, Phone, Plus, ShieldCheck, Sparkles, Wrench, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ import { RESPONSAVEL_OBRA, equipamentosDaObra, estadoDe, fotoExemplo, materiaisP
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import {
-  FIM_DO_DIA, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, trabalhoDoTecnico,
+  FIM_DO_DIA, aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, trabalhoDoTecnico, type ASeguir,
 } from "./trabalhoObra";
 import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
 import { lerFoto } from "./ObraOperacoes";
@@ -36,7 +36,7 @@ export function HojeTecnico(ctx: Ctx) {
   const eu = S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? "hn";
   const tec = TECS.find((x) => x.id === eu)!;
   const hoje = trabalhoDoTecnico(S.deals, eu);
-  const amanha = trabalhoDoTecnico(S.deals, eu, 1);
+  const seguir = aSeguirDoTecnico(S.deals, eu);
   const horas = hoje.reduce((a, x) => a + horasPorDia(x.t), 0);
   const obras = new Set(hoje.map((x) => x.d.id)).size;
   const agora = new Date();
@@ -82,18 +82,12 @@ export function HojeTecnico(ctx: Ctx) {
         </div>
       )}
 
-      {amanha.length > 0 && (
-        <section aria-labelledby="amanha-t" className="mt-10">
-          <h2 id="amanha-t" className="text-lg font-semibold">Amanhã</h2>
-          <ul className={cn(CARTAO, "mt-3 divide-y divide-border px-4")}>
-            {amanha.map(({ d, t }, k) => (
-              <li key={k} className="flex items-center gap-3 py-3">
-                <span className="h-8 w-1.5 shrink-0 rounded-full" style={{ background: t.fase ? COR_FASE[t.fase] : "#7c5ce0" }} aria-hidden="true" />
-                <span className="min-w-0 flex-1"><span className="block text-[15px] font-medium">{t.nome}</span>
-                  <span className="block text-sm text-muted-foreground">{d.nome} · {d.f.localidade || d.local.split(",").pop()?.trim()} · {rotuloDia(d.obra.plano!, d.obra.plano!.dia + 1)} · {rotuloDiaTarefa(t, d.obra.plano!.dia + 1)}</span></span>
-              </li>
-            ))}
-          </ul>
+      {seguir.length > 0 && (
+        // 21/10: o que vem a seguir, com antecedência: quem está a trabalhar antes e o que preparar
+        <section aria-labelledby="seguir-t" className="mt-10">
+          <h2 id="seguir-t" className="text-lg font-semibold">A seguir</h2>
+          <p className="text-[15px] text-muted-foreground">As suas próximas tarefas e o trabalho que tem de acabar antes.</p>
+          <ul className="mt-3 space-y-3">{seguir.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaASeguir x={x} eu={eu} /></li>)}</ul>
         </section>
       )}
         </div>
@@ -109,10 +103,6 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   const k = diaDaTarefa(t, p.dia) ?? 1, ultimoDia = k === t.dur;
   const cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
   const fase = t.fase ? FASES_OBRA[t.fase - 1] : null;
-  const db = useInventario();
-  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
-  const mats = materiaisPorFase(d, inv).find((g) => g.fase === t.fase)?.itens ?? [];
-  const equip = equipamentosDaObra(p).filter((e) => e.tarefas.includes(t.nome) || e.origem === "Frota");
   const envHoje = enviosDe(t).filter((e) => e.dia === p.dia && (e.k === "registo" || e.k === "feita"));
   const morada = d.f.morada || d.local;
   const corr = t.corrige != null, orig = corr ? p.tasks[t.corrige!] : null;
@@ -159,30 +149,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           </button>
           {abertoAntes && (
             <div className="mt-2 space-y-4 animate-in fade-in-0 slide-in-from-top-1">
-              <ul className="space-y-1.5 text-[15px]">{I.antes.map((x) => <li key={x} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />{x}</li>)}</ul>
-              <div>
-                <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Proteção</p>
-                <ul className="mt-1.5 flex flex-wrap gap-1.5">{I.epi.map((x) => <li key={x} className="rounded-full bg-muted px-2.5 py-1 text-sm">{x}</li>)}</ul>
-              </div>
-              {mats.length > 0 && (
-                <div>
-                  <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Package className="h-4 w-4" aria-hidden="true" />Material desta fase</p>
-                  <ul className="mt-1.5 divide-y divide-border rounded-xl border border-border">
-                    {mats.map((m) => (
-                      <li key={m.n} className="flex items-center justify-between gap-3 px-3 py-2 text-[15px]">
-                        <span className="min-w-0">{m.n}</span>
-                        <span className={cn("shrink-0 text-sm tabular-nums", m.estado === "na obra" || m.estado === "na carrinha" || m.estado === "reservado" ? "text-success" : "text-warning")}>{nfmt(m.q)} {m.un} · {m.estado}{m.quando ? ` ${m.quando}` : ""}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {equip.length > 0 && (
-                <div>
-                  <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Wrench className="h-4 w-4" aria-hidden="true" />Levar</p>
-                  <ul className="mt-1.5 flex flex-wrap gap-1.5">{equip.map((e) => <li key={e.n} className="rounded-full border border-border px-2.5 py-1 text-sm">{e.n}{e.origem === "Aluguer" ? " (aluguer)" : ""}</li>)}</ul>
-                </div>
-              )}
+              <Preparacao d={d} ti={ti} />
               {ex === "por fazer" && (
                 <Button size="lg" className="w-full sm:w-auto" onClick={() => run(() => { A.comecarTarefa(d.id, ti); setAbertoAntes(false); })}><HardHat className="mr-2 h-4 w-4" aria-hidden="true" />Começar a tarefa</Button>
               )}
@@ -266,6 +233,106 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
             </div>
           </div>
         )}
+      </div>
+    </article>
+  );
+}
+
+/** O que preparar para uma tarefa: o que fazer antes, a proteção, o material da fase e o que levar. */
+function Preparacao({ d, ti }: { d: Negocio; ti: number }) {
+  const p = d.obra.plano!, t = p.tasks[ti], I = instrucoesDe(t);
+  const db = useInventario();
+  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const mats = materiaisPorFase(d, inv).find((g) => g.fase === t.fase)?.itens ?? [];
+  const equip = equipamentosDaObra(p).filter((e) => e.tarefas.includes(t.nome) || e.origem === "Frota");
+  return (
+    <>
+      <ul className="space-y-1.5 text-[15px]">{I.antes.map((x) => <li key={x} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />{x}</li>)}</ul>
+      <div>
+        <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Proteção</p>
+        <ul className="mt-1.5 flex flex-wrap gap-1.5">{I.epi.map((x) => <li key={x} className="rounded-full bg-muted px-2.5 py-1 text-sm">{x}</li>)}</ul>
+      </div>
+      {mats.length > 0 && (
+        <div>
+          <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Package className="h-4 w-4" aria-hidden="true" />Material desta fase</p>
+          <ul className="mt-1.5 divide-y divide-border rounded-xl border border-border">
+            {mats.map((m) => (
+              <li key={m.n} className="flex items-center justify-between gap-3 px-3 py-2 text-[15px]">
+                <span className="min-w-0">{m.n}</span>
+                <span className={cn("shrink-0 text-sm tabular-nums", m.estado === "na obra" || m.estado === "na carrinha" || m.estado === "reservado" ? "text-success" : "text-warning")}>{nfmt(m.q)} {m.un} · {m.estado}{m.quando ? ` ${m.quando}` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {equip.length > 0 && (
+        <div>
+          <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><Wrench className="h-4 w-4" aria-hidden="true" />Levar</p>
+          <ul className="mt-1.5 flex flex-wrap gap-1.5">{equip.map((e) => <li key={e.n} className="rounded-full border border-border px-2.5 py-1 text-sm">{e.n}{e.origem === "Aluguer" ? " (aluguer)" : ""}</li>)}</ul>
+        </div>
+      )}
+      <div>
+        <p className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground"><ListChecks className="h-4 w-4" aria-hidden="true" />O passo a passo</p>
+        <ol className="mt-1.5 space-y-1 text-[15px]">{I.passos.map((x, i) => <li key={x} className="flex gap-2"><span className="w-5 shrink-0 text-right tabular-nums text-muted-foreground">{i + 1}.</span>{x}</li>)}</ol>
+      </div>
+    </>
+  );
+}
+
+/** 21/10: uma tarefa que vem a seguir: quando começa, quem está a trabalhar antes (ao vivo) e, num toque, o que preparar. */
+function TarefaASeguir({ x, eu }: { x: ASeguir; eu: string }) {
+  const { d, t, ti, antes, faltam } = x;
+  const p = d.obra.plano!, cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
+  const [aberto, setAberto] = useState(false);
+  // a data (o calendário salta os fins de semana: "daqui a N dias" enganava)
+  const quando = faltam === 1 ? "amanhã" : rotuloDia(p, t.dia);
+  const a = antes?.t, ea = a ? estadoDe(a) : null, outro = !!a && a.tec !== eu;
+  const nomeA = a ? (outro ? TECS.find((y) => y.id === a.tec)?.n.split(" ")[0] ?? "a equipa" : "si") : "";
+  const pa = a ? (ea === "validada" || ea === "feita" ? 1 : passosFeitos(a).length / instrucoesDe(a).passos.length) : 0;
+  const hojeA = a ? diaDaTarefa(a, p.dia) : null;
+  // o estado do trabalho de antes, em linguagem do terreno
+  const frase = !a ? null
+    : ea === "validada" || ea === "feita" ? `${outro ? nomeA : "Já"} terminou${outro ? "" : " a sua tarefa"}. Está tudo pronto para si.`
+    : hojeA != null ? `${outro ? nomeA : "Você"} ${ea === "por fazer" ? "tem-na hoje" : "está a fazê-la hoje"} (${rotuloDiaTarefa(a, p.dia)}). Acaba ${rotuloDia(p, a.dia + a.dur - 1)}.`
+    : a.dia > p.dia ? `${outro ? nomeA : "Você"} começa ${rotuloDia(p, a.dia)} e acaba ${rotuloDia(p, a.dia + a.dur - 1)}.`
+    : `Atrasada: devia ter acabado ${rotuloDia(p, a.dia + a.dur - 1)}.`;
+  return (
+    <article className={cn(CARTAO, "overflow-hidden")} aria-label={`${t.nome} · ${d.nome} · ${quando}`}>
+      <div className="flex">
+        <span className="w-1.5 shrink-0" style={{ background: cor }} aria-hidden="true" />
+        <div className="min-w-0 flex-1 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-base font-semibold">{t.nome}</p>
+              <p className="text-sm text-muted-foreground">{d.nome} · {d.f.localidade || d.local.split(",").pop()?.trim()}</p>
+            </div>
+            <span className="shrink-0 rounded-full bg-primary/[0.08] px-2.5 py-1 text-sm font-medium text-primary first-letter:uppercase">{quando}</span>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{faltam === 1 ? `Começa ${rotuloDia(p, t.dia)} · ` : ""}{t.dur === 1 ? "1 dia" : `${t.dur} dias`} · cerca de {nfmt(horasPorDia(t))} h por dia</p>
+
+          {a && (
+            // quem trabalha antes: quando acabar, é a vez dele
+            <div className={cn("mt-3 rounded-xl p-3", ea === "validada" || ea === "feita" ? "bg-success/[0.07]" : hojeA == null && a.dia <= p.dia ? "bg-warning/[0.1]" : "bg-muted/60")}>
+              <p className="text-sm font-medium text-muted-foreground">Antes de si</p>
+              <div className="mt-1.5 flex items-center gap-3">
+                <AvatarTec id={a.tec} tam="h-9 w-9" />
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-x-2 text-[15px] font-medium">{a.nome}<ChipEstado e={ea!} /></p>
+                  <div className="mt-1.5 flex items-center gap-2 text-sm text-muted-foreground">
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-background" aria-hidden="true"><span className="block h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${pa * 100}%` }} /></span>
+                    <span className="tabular-nums">{Math.round(pa * 100)}%</span>
+                  </div>
+                </div>
+              </div>
+              <p className="mt-2 text-[15px]">{frase} {!(ea === "validada" || ea === "feita") && <b className="font-semibold">Quando acabar, é a sua vez.</b>}</p>
+            </div>
+          )}
+
+          <button type="button" onClick={() => setAberto(!aberto)} aria-expanded={aberto} className="mt-2 inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+            {aberto ? "Esconder" : "Preparar com antecedência"}<ChevronDown className={cn("h-4 w-4 transition-transform", aberto && "rotate-180")} aria-hidden="true" />
+          </button>
+          {aberto && <div className="mt-2 space-y-4 animate-in fade-in-0 slide-in-from-top-1"><Preparacao d={d} ti={ti} /></div>}
+        </div>
       </div>
     </article>
   );

@@ -170,6 +170,30 @@ export function trabalhoDoTecnico(deals: Negocio[], tec: string, desvio = 0): Tr
 export function tecnicosComTrabalho(deals: Negocio[]): string[] {
   return TECS.map((x) => x.id).filter((id) => trabalhoDoTecnico(deals, id).length > 0);
 }
+/** 21/10: o que vem a seguir para o técnico (as tarefas que ainda não começaram) e o trabalho que tem de acabar antes:
+ *  a tarefa que termina mais perto do início da dele (de preferência de outro técnico), para ele saber quando é a vez dele. */
+export interface ASeguir extends TrabalhoHoje { antes: { ti: number; t: Tarefa } | null; faltam: number }
+export function aSeguirDoTecnico(deals: Negocio[], tec: string, max = 4): ASeguir[] {
+  const L: ASeguir[] = [];
+  for (const d of deals) {
+    const p = d.obra.plano;
+    if (d.perdido || !p || p.estado !== "em curso") continue;
+    p.tasks.forEach((t, ti) => {
+      if (t.tec !== tec || t.dia <= p.dia || estadoDe(t) === "validada") return;
+      let antes: ASeguir["antes"] = null;
+      p.tasks.forEach((x, xi) => {
+        if (xi === ti || x.dia + x.dur > t.dia) return;
+        if (!antes) { antes = { ti: xi, t: x }; return; }
+        const a = antes.t, fx = x.dia + x.dur, fa = a.dia + a.dur;
+        // acaba mais tarde; no empate, a de outro técnico e a que está a decorrer hoje
+        const pontos = (y: Tarefa) => (y.tec !== tec ? 2 : 0) + (diaDaTarefa(y, p.dia) != null ? 1 : 0);
+        if (fx > fa || (fx === fa && pontos(x) > pontos(a))) antes = { ti: xi, t: x };
+      });
+      L.push({ d, ti, t, antes, faltam: t.dia - p.dia });
+    });
+  }
+  return L.sort((a, b) => a.faltam - b.faltam).slice(0, max);
+}
 
 /* ------------------------------------------------------------------ os ajustes com a obra em curso */
 export interface Alteracao {

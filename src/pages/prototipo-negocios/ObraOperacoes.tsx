@@ -648,6 +648,7 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
   const { S, A, run, go } = ctx;
   const p = d.obra.plano!, fim = fimDe(p.tasks), pode = S.role === "operacoes";
   const [hist, setHist] = useState<number | null>(null);
+  const [fecho, setFecho] = useState<number | null>(null);
   const prog = progresso(p);
   // as horas previstas até ao fim de hoje (os dias já passados de cada tarefa, com hoje)
   const ate = p.tasks.reduce((a, t) => a + (t.h / t.dur) * Math.max(0, Math.min(t.dur, p.dia + 1 - t.dia)), 0);
@@ -733,12 +734,15 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
       <div className="mt-4">
         <DiaDaObra p={p} dia={sel} modo="gestor" acoes={(ti) => {
           const t = p.tasks[ti], ex = estadoDe(t), aberto = hist === ti, aj = podeAjustar(p, ti);
+          // 21/10: o gestor pode dar por feita ele próprio (com uma fotografia): salta a validação
+          const podeFechar = pode && sel === p.dia && t.dia <= p.dia && ex !== "validada" && ex !== "feita" && !p.tasks.some((x) => x.corrige === ti && estadoDe(x) !== "validada");
           return (
             <>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2">
                 <button type="button" onClick={() => setHist(aberto ? null : ti)} aria-expanded={aberto} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline">
                   {aberto ? "Fechar" : ex === "feita" ? "Rever e validar" : `Histórico (${enviosDe(t).length})`}
                 </button>
+                {podeFechar && fecho !== ti && <button type="button" onClick={() => { setFecho(ti); setHist(null); }} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"><CheckCircle2 className="h-4 w-4" aria-hidden="true" />Dar por feita</button>}
                 {pode && (aj.dur || aj.inicio) && <button type="button" onClick={() => ajustar(ti)} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"><CalendarClock className="h-4 w-4" aria-hidden="true" />Ajustar o plano</button>}
                 {t.tec && <button type="button" onClick={verComo(t.tec)} className="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><Smartphone className="h-4 w-4" aria-hidden="true" />Ver como {nomeTec(t.tec).split(" ")[0]}</button>}
               </div>
@@ -748,11 +752,47 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
                   {ex === "feita" && <Registo ctx={ctx} d={d} ti={ti} compacto />}
                 </div>
               )}
+              {podeFechar && fecho === ti && <DarPorFeita ctx={ctx} d={d} ti={ti} fechar={() => setFecho(null)} />}
             </>
           );
         }} />
       </div>
     </section>
+  );
+}
+
+/** 21/10: o responsável de obra dá a tarefa por feita ele próprio, com uma fotografia, para poupar tempo ao técnico.
+ *  Como é ele quem valida, fica logo validada; a fotografia e a nota vão para o histórico e para o portal do cliente. */
+function DarPorFeita({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: number; fechar: () => void }) {
+  const { A, run } = ctx;
+  const p = d.obra.plano!, t = p.tasks[ti];
+  const [fotos, setFotos] = useState<string[]>([]);
+  const [nota, setNota] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const juntar = async (f: File) => { try { const u = await lerFoto(f); setFotos((x) => [...x, u].slice(-4)); } catch { /* sem leitura */ } };
+  const cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
+  return (
+    <div className="mt-3 space-y-3 rounded-xl border border-success/30 bg-success/[0.04] p-4 animate-in fade-in-0 slide-in-from-top-1">
+      <p className="text-[15px]"><b className="font-semibold">Dar por feita sem esperar por {nomeTec(t.tec).split(" ")[0]}.</b> <span className="text-muted-foreground">Fica logo validada{t.exec?.horas ? "" : `, com as ${nfmt(t.h)} h previstas`}.</span></p>
+      <div className="flex flex-wrap items-center gap-2">
+        {fotos.map((f, k) => (
+          <span key={k} className="relative animate-in zoom-in-95">
+            <img src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
+            <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => setFotos(fotos.filter((_, i) => i !== k))} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
+          </span>
+        ))}
+        <input ref={input} type="file" accept="image/*" capture="environment" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => { for (const f of Array.from(e.target.files ?? [])) void juntar(f); e.target.value = ""; }} />
+        <Button variant="outline" className="min-h-11" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais uma fotografia" : "Tirar fotografia"}</Button>
+        <button type="button" onClick={() => setFotos((x) => [...x, fotoExemplo(t.nome, cor, enviosDe(t).length + x.length)].slice(-4))} className="min-h-11 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Usar uma de exemplo</button>
+      </div>
+      <input value={nota} onChange={(e) => setNota(e.target.value)} aria-label="Nota (opcional)" placeholder="Nota (opcional): o cliente vê-a no portal"
+        className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      <div className="flex flex-wrap gap-2">
+        <Button className="min-h-11" disabled={!fotos.length} onClick={() => { run(() => A.darPorFeita(d.id, ti, { fotos, nota })); fechar(); }}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Dar por feita e validar</Button>
+        <Button variant="ghost" className="min-h-11" onClick={fechar}>Cancelar</Button>
+      </div>
+      {!fotos.length && <p className="text-sm text-muted-foreground">Falta uma fotografia do trabalho feito.</p>}
+    </div>
   );
 }
 

@@ -1,10 +1,10 @@
 // O dia a dia da obra (21/10/2026): o técnico pelo Hoje (passos, registo do dia), o gestor (validar, ajustar ao vivo, dias para trás) e o cliente.
 import { describe, expect, it } from "vitest";
-import { acoes, seed, type Estado, type Negocio } from "./motor";
+import { TECS, acoes, seed, type Estado, type Negocio } from "./motor";
 import { fimDe } from "./ajustesPlano";
 import { estadoDe } from "./obraOps";
 import {
-  diaDaTarefa, duracaoMinima, instrucoesDe, oDia, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, tecnicosComTrabalho, tempoDoDia, trabalhoDoTecnico,
+  aSeguirDoTecnico, diaDaTarefa, duracaoMinima, instrucoesDe, oDia, podeAjustar, preverAjuste, preverCorrecao, registouNoDia, tecnicosComTrabalho, tempoDoDia, trabalhoDoTecnico,
 } from "./trabalhoObra";
 
 function obra(id = 1022) {
@@ -139,5 +139,45 @@ describe("o gestor", () => {
     A.ajustarAoVivo(d.id, rev, { dur: p.tasks[rev].dur + 1 }, "  ", true);
     expect(fimDe(p.tasks)).toBe(fim0);
     expect(d.obra.alteracoes ?? []).toHaveLength(0);
+  });
+});
+
+describe("21/10: o que vem a seguir e o gestor a dar por feita", () => {
+  it("o técnico vê as próximas tarefas e o trabalho de outro técnico que tem de acabar antes", () => {
+    const { S, p } = obra();
+    const todas = TECS.map((x) => x.id).flatMap((id) => aSeguirDoTecnico(S.deals, id, 99).map((x) => ({ id, x })));
+    expect(todas.length).toBeGreaterThan(0);
+    for (const { id, x } of todas) {
+      expect(x.t.tec).toBe(id);
+      expect(x.t.dia).toBeGreaterThan(x.d.obra.plano!.dia);
+      if (x.antes) expect(x.antes.t.dia + x.antes.t.dur).toBeLessThanOrEqual(x.t.dia);
+    }
+    expect(todas.some(({ id, x }) => x.antes && x.antes.t.tec !== id)).toBe(true);
+    // 1022: as louças vêm depois do revestimento do Hugo, que está a decorrer hoje
+    const lou = todas.find(({ x }) => x.d.id === 1022 && /lou|móveis/i.test(x.t.nome))!.x;
+    expect(lou.antes!.t.nome).toMatch(/revest/i);
+    expect(diaDaTarefa(lou.antes!.t, p.dia)).not.toBeNull();
+    // por ordem: a mais próxima primeiro
+    const hn = aSeguirDoTecnico(S.deals, "hn", 99);
+    expect(hn.map((x) => x.faltam)).toEqual([...hn.map((x) => x.faltam)].sort((a, b) => a - b));
+    expect(p.estado).toBe("em curso");
+  });
+  it("o gestor dá por feita com uma fotografia: fica validada sem passar pela validação", () => {
+    const { S, A, d, p, avisos } = obra();
+    S.role = "operacoes";
+    const ti = p.tasks.findIndex((t) => /revest/i.test(t.nome)), t = p.tasks[ti];
+    A.darPorFeita(d.id, ti, { fotos: [], nota: "" });
+    expect(avisos.at(-1)).toMatch(/Falta uma fotografia/);
+    expect(estadoDe(t)).not.toBe("validada");
+    A.darPorFeita(d.id, ti, { fotos: [foto], nota: "" });
+    expect(estadoDe(t)).toBe("validada");
+    expect(t.exec!.horas).toBeGreaterThan(0);
+    expect(t.exec!.envios!.slice(-2).map((e) => e.k)).toEqual(["feita", "validada"]);
+    expect(t.exec!.envios!.at(-2)!.fotos).toEqual([foto]);
+    // sai do Hoje do técnico
+    expect(trabalhoDoTecnico(S.deals, t.tec!).some((x) => x.ti === ti && x.d.id === d.id)).toBe(false);
+    // uma tarefa futura não se pode dar por feita
+    const fut = p.tasks.findIndex((x) => x.dia > p.dia);
+    if (fut >= 0) { A.darPorFeita(d.id, fut, { fotos: [foto], nota: "" }); expect(estadoDe(p.tasks[fut])).not.toBe("validada"); }
   });
 });
