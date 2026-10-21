@@ -1,22 +1,22 @@
 // O cliente pediu alterações à proposta (21/10/2026): a versão nova faz-se toda aqui, sem voltar à visita nem ao orçamento.
 // · Com o pedido por tratar: um cartão no topo do negócio, com o que o cliente pediu no portal, e "Fazer a versão N" (um toque:
 //   a versão atual fica guardada e o editor abre já).
-// · O editor da versão nova: os produtos (trocar por outro do mesmo ramo do Catálogo, quantidade, tirar, juntar), os materiais do
-//   modelo (o preço), o preço (desconto ou "baixar X € com IVA"), as datas e o pagamento. Cada mudança nos produtos atualiza a visita
+// · O editor da versão nova: os produtos e as partes da estimativa do modelo, em cartões (TrocarProdutos.tsx: trocar, tirar,
+//   repor, juntar, pela janela do Catálogo), o preço (desconto ou "baixar X € com IVA"), as datas e o pagamento. Cada mudança nos produtos atualiza a visita
 //   e refaz o orçamento sozinha (A.refazerOrcamento); o total da versão anterior está sempre ao lado do de agora, com IVA e margem.
 // · Um só botão no fim: "Enviar a versão N" (verifica e envia; chega ao mesmo link do portal).
-import { useMemo, useState } from "react";
-import { ArrowRightLeft, Check, MessageSquareText, Minus, Plus, RotateCcw, Search, Send, X } from "lucide-react";
+import { useState } from "react";
+import { Check, MessageSquareText, Minus, Plus, RotateCcw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { MOTIVOS_VERSAO, alertas, bloqueado, eur, nfmt, pct, tot, versaoAtual, type Negocio } from "./motor";
+import { LINHAS, MOTIVOS_VERSAO, alertas, bloqueado, eur, nfmt, pct, tot, versaoAtual, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { PROPOSTA, efetivo, emFalta } from "./campos";
 import { totais } from "./DocsCliente";
-import { catalogoLigado, precoProduto, precoUnitario, PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
+import { PREFIXO_CLIENTE, PREFIXO_PROD } from "./produtosVisita";
+import { ProdutosDaVersao } from "./TrocarProdutos";
 import { PREFIXO_LEV } from "./efeitosLevantamento";
 import { LINHA_DEMOLICAO } from "./entulho";
-import type { Produto } from "./v2/catalogoModelo";
 import { dataCurta, iniciosRapidos, isoDia, proximoUtil } from "./planoObra";
 
 const ehPedido = (motivos: string[], m: string) => motivos.includes(m);
@@ -62,11 +62,10 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const T = tot(d, S), TI = totais(d, S), razao = T.pf > 0 ? TI.total / T.pf : 1.23;
   const antIva = ant.totalIva ?? ant.total * razao, dif = TI.total - antIva;
   const pedidos = ant.motivos;
-  const prods = d.visita.prod ?? [];
-  const refazer = (fn: () => void) => run(() => { fn(); A.refazerOrcamento(d.id); });
   // os materiais do modelo e as linhas à mão (não vêm dos produtos nem do levantamento): muda-se o preço
   const geradas = (dl: string) => [PREFIXO_LEV, PREFIXO_PROD, PREFIXO_CLIENTE].some((p) => dl.startsWith(p)) || dl === LINHA_DEMOLICAO;
-  const mats = o.linhas.map((l, i) => ({ l, i })).filter(({ l }) => l.t === "mat" && !geradas(l.d));
+  const matModelo = LINHAS[d.linha].mat.d;
+  const mats = o.linhas.map((l, i) => ({ l, i })).filter(({ l }) => l.t === "mat" && !geradas(l.d) && l.d !== matModelo);
   // os campos da proposta que faltam (o início sai do plano ao enviar): pedem-se aqui, sem ir ao passo Proposta
   const faltam = emFalta([efetivo(S.campos, PROPOSTA[0])], d.f).filter((c) => c.k !== "inicio_prev");
   const baixo = T.m < S.cfg.min / 100, bloq = bloqueado(d, S);
@@ -89,25 +88,17 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       <div className="divide-y divide-border">
         {/* os produtos e os materiais */}
         <Bloco titulo="Produtos e materiais" pedido={ehPedido(pedidos, "Outros materiais") || ehPedido(pedidos, "Juntar ou tirar trabalhos")}>
-          {prods.length > 0 && (
-            <ul className="space-y-2">
-              {prods.map((p) => <LinhaProduto key={p.id} ctx={ctx} d={d} pid={p.id} refazer={refazer} />)}
-            </ul>
-          )}
+          <ProdutosDaVersao ctx={ctx} d={d} ant={ant} />
           {mats.length > 0 && (
-            <ul className="mt-2 space-y-2">
+            <ul className="mt-4 space-y-2" aria-label="Linhas de materiais postas à mão">
               {mats.map(({ l, i }) => l.t === "mat" && (
                 <li key={i} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
-                  <span className="min-w-0 text-[15px] first-letter:uppercase">{l.d}<span className="block text-sm text-muted-foreground">do modelo · custo {eur(l.custo)} €</span></span>
-                  <span className="flex items-center gap-1.5">
-                    {[-10, -5].map((k) => <button key={k} type="button" onClick={() => run(() => A.precoLinha(d.id, i, Math.round(l.preco * (1 + k / 100))))} className="min-h-10 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{k}%</button>)}
-                    <PrecoInput valor={l.preco} mudar={(x) => run(() => A.precoLinha(d.id, i, x))} rotulo={`Preço de ${l.d}`} />
-                  </span>
+                  <span className="min-w-0 text-[15px] first-letter:uppercase">{l.d}<span className="block text-sm text-muted-foreground">posto à mão · custo {eur(l.custo)} €</span></span>
+                  <PrecoInput valor={l.preco} mudar={(x) => run(() => A.precoLinha(d.id, i, x))} rotulo={`Preço de ${l.d}`} />
                 </li>
               ))}
             </ul>
           )}
-          <JuntarProduto ctx={ctx} d={d} refazer={refazer} />
         </Bloco>
 
         {/* o preço */}
@@ -198,77 +189,6 @@ function PrecoInput({ valor, mudar, rotulo }: { valor: number; mudar: (v: number
       <input aria-label={rotulo} inputMode="decimal" value={t ?? eur(valor)} onChange={(e) => setT(e.target.value)} onBlur={fim} onKeyDown={(e) => { if (e.key === "Enter") fim(); }}
         className="h-10 w-24 bg-transparent text-right text-[15px] tabular-nums outline-none" />€
     </label>
-  );
-}
-
-/** Um produto da visita: quantidade, trocar por outro do mesmo ramo (mais barato primeiro), tirar. */
-function LinhaProduto({ ctx, d, pid, refazer }: { ctx: Ctx; d: Negocio; pid: string; refazer: (fn: () => void) => void }) {
-  const { A } = ctx;
-  const p = (d.visita.prod ?? []).find((x) => x.id === pid)!;
-  const [trocar, setTrocar] = useState(false);
-  const K = catalogoLigado();
-  const alt = useMemo(() => (K && p.no ? K.produtos.filter((x) => x.no === p.no && x.id !== p.id) : []).sort((a, b) => precoUnitario(a) - precoUnitario(b)).slice(0, 6), [K, p.no, p.id]);
-  return (
-    <li className="rounded-xl border border-border px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="min-w-0 flex-1 text-[15px]">{p.n}<span className="block text-sm text-muted-foreground">{p.cliente ? "o cliente fornece" : `${eur(precoUnitario(p))} €/${p.un} · ${eur(precoProduto(p))} €`}</span></span>
-        <span role="group" aria-label={`Quantidade de ${p.n}`} className="inline-flex items-center rounded-lg border border-input">
-          <button type="button" aria-label="Menos" onClick={() => refazer(() => A.produtoQtd(d.id, p.id, Math.max(0, p.q - 1)))} className="grid h-10 w-10 place-items-center hover:bg-muted"><Minus className="h-4 w-4" /></button>
-          <span className="min-w-[3.5rem] text-center text-[15px] tabular-nums">{nfmt(p.q)} {p.un}</span>
-          <button type="button" aria-label="Mais" onClick={() => refazer(() => A.produtoQtd(d.id, p.id, p.q + 1))} className="grid h-10 w-10 place-items-center hover:bg-muted"><Plus className="h-4 w-4" /></button>
-        </span>
-        {alt.length > 0 && <button type="button" onClick={() => setTrocar(!trocar)} aria-expanded={trocar} className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-input px-3 text-sm font-medium hover:border-foreground/40"><ArrowRightLeft className="h-4 w-4" aria-hidden="true" />Trocar</button>}
-        <button type="button" aria-label={`Tirar ${p.n}`} onClick={() => refazer(() => A.tirarProduto(d.id, p.id))} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted"><X className="h-4 w-4" /></button>
-      </div>
-      {trocar && (
-        <ul className="mt-2 grid gap-2 sm:grid-cols-2 animate-in fade-in-0 slide-in-from-top-1">
-          {alt.map((x) => {
-            const dif = (precoUnitario(x) - precoUnitario(p)) * p.q;
-            return (
-              <li key={x.id}>
-                <button type="button" onClick={() => { refazer(() => { A.tirarProduto(d.id, p.id); A.produto(d.id, x, p.q); }); setTrocar(false); }}
-                  className="flex min-h-12 w-full items-center justify-between gap-2 rounded-lg border border-input px-3 py-2 text-left text-[15px] hover:border-primary">
-                  <span className="min-w-0">{x.n}<span className="block text-xs text-muted-foreground">{x.marca}</span></span>
-                  <span className={cn("shrink-0 text-sm font-medium tabular-nums", dif < 0 ? "text-success" : "text-warning")}>{dif < 0 ? "−" : "+"}{eur(Math.abs(dif))} €</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </li>
-  );
-}
-
-/** Juntar um produto do Catálogo, pela pesquisa. */
-function JuntarProduto({ ctx, d, refazer }: { ctx: Ctx; d: Negocio; refazer: (fn: () => void) => void }) {
-  const { A } = ctx;
-  const [q, setQ] = useState("");
-  const K = catalogoLigado();
-  const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-  const L: Produto[] = q.trim().length >= 2 && K ? K.produtos.filter((p) => sem(p.n + " " + p.marca).includes(sem(q.trim()))).slice(0, 6) : [];
-  if (!K) return null;
-  return (
-    <div className="mt-3">
-      <label className="flex items-center gap-2 rounded-xl border border-input bg-background px-3">
-        <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Juntar um produto do Catálogo (ex.: bancada, torneira)" aria-label="Procurar um produto no Catálogo"
-          className="h-11 min-w-0 flex-1 bg-transparent text-[15px] outline-none" />
-      </label>
-      {L.length > 0 && (
-        <ul className="mt-2 space-y-1.5 animate-in fade-in-0">
-          {L.map((p) => (
-            <li key={p.id}>
-              <button type="button" onClick={() => { refazer(() => A.produto(d.id, p, 1)); setQ(""); }} className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-[15px] hover:bg-muted">
-                <span className="min-w-0">{p.n}<span className="block text-xs text-muted-foreground">{p.marca}</span></span>
-                <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary"><Plus className="h-4 w-4" aria-hidden="true" />{eur(precoUnitario(p))} €</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {q.trim().length >= 2 && !L.length && <p className="mt-2 text-sm text-muted-foreground">Nada no Catálogo com «{q.trim()}».</p>}
-    </div>
   );
 }
 

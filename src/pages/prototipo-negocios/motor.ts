@@ -8,7 +8,7 @@ import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoC
 import { itemCatalogo } from "./catalogo";
 import {
   ativosDoPacote, catalogoLigado, emFaltaProdutos, fotografia, juntarProduto, linhasClienteCompra, linhasDosProdutos, marcarCliente, materiaisDoModelo,
-  mudarQtd, precoProduto, servicosDaVisita, textoFalta, textoProduto, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita,
+  mudarQtd, precoProduto, servicosDaVisita, textoFalta, textoProduto, tirarProduto, trazidosParaOrc, PREFIXO_CLIENTE, PREFIXO_PROD, type NecVisita, type ProdVisita,
 } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { volumesDasLinhas } from "./entulhoPadrao";
@@ -231,7 +231,9 @@ export interface AutoRececao {
   assinado?: string;
 }
 /** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
-export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; /** 21/10: com IVA */ totalIva?: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita" }
+export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; /** 21/10: com IVA */ totalIva?: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita";
+  /** 21/10: os produtos e as partes tiradas da estimativa nesta versão (para mostrar o que mudou e repor). */
+  prod?: ProdVisita[]; semParte?: string[] }
 /** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
 /** Porque o cliente recusa a proposta por completo (no portal). */
@@ -684,7 +686,7 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     if (sv && t.q > 0) linhas.push(linhaSvc(d, S, sid, t.q, sv));
   }
   // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais)
-  const mm = materiaisDoModelo(L.mat, prod, d.visita.manter);
+  const mm = materiaisDoModelo(L.mat, prod, d.visita.manter, undefined, d.visita.semParte);
   if (mm) linhas.push({ t: "mat", d: L.mat.d, custo: mm.custo, preco: mm.preco });
   linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
@@ -806,7 +808,7 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
   o.linhas = o.linhas.filter((l) => !(l.t === "mat" && (l.d.startsWith(PREFIXO_LEV) || l.d === L.mat.d)));
   const ef = efeitosDoLevantamento(d.f);
   const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
-  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter);
+  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, undefined, d.visita.semParte);
   if (tinhaMat && fator > 0 && mm) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(mm.custo * fator), preco: r2(mm.preco * fator) });
   let bc = 0, bp = 0;
   for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }
@@ -1351,7 +1353,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       // 14/10: também depois de aceite, enquanto o contrato não está assinado (o contrato enviado fica anulado)
       if (!o?.enviada || o.contrato === "assinado" || d.fase !== 3) { avisar({ msg: "Não há proposta para refazer", sub: o?.contrato === "assinado" ? "O contrato já foi assinado" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
       const n = versaoAtual(o);
-      (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, totalIva: totaisIva(d, S).total, motivos: [...motivos], nota: nota.trim() || undefined, onde });
+      (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, totalIva: totaisIva(d, S).total, motivos: [...motivos], nota: nota.trim() || undefined, onde,
+        prod: (d.visita.prod ?? []).map((p) => ({ ...p })), semParte: [...(d.visita.semParte ?? [])] });
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
       o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
@@ -1387,6 +1390,21 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     produtoQtd(id: number, pid: string, q: number) { const v = deal(id).visita; v.prod = mudarQtd(v.prod ?? [], pid, q); },
     produtoCliente(id: number, pid: string, cliente: boolean) { const v = deal(id).visita; v.prod = marcarCliente(v.prod ?? [], pid, cliente); },
     tirarProduto(id: number, pid: string) { const v = deal(id).visita; v.prod = tirarProduto(v.prod ?? [], pid); },
+    /** 21/10: trocar um produto por outro do Catálogo, no mesmo lugar e com a mesma quantidade (e "o cliente fornece"). */
+    trocarProduto(id: number, pid: string, p: Produto) {
+      const v = deal(id).visita, i = (v.prod ?? []).findIndex((x) => x.id === pid);
+      if (i < 0) return;
+      const velho = v.prod![i];
+      if (p.servico) garantirServico(S, p.servico);
+      const novo = fotografia(p, velho.q, velho.cliente);
+      v.prod = v.prod!.filter((x, k) => k === i || x.id !== p.id).map((x) => (x.id === pid ? novo : x));
+    },
+    /** 21/10: tirar (ou repor) uma parte da estimativa de materiais do modelo (ex.: o cliente já tem o pavimento). */
+    parteModelo(id: number, parte: string, fora: boolean) {
+      const v = deal(id).visita, s = new Set(v.semParte ?? []);
+      if (fora) s.add(parte); else s.delete(parte);
+      v.semParte = [...s];
+    },
     /** A resposta à pergunta de um serviço que obriga a produto (ex.: "O cliente mantém a sanita?"). */
     manter(id: number, sid: SvcId, r: "sim" | "nao" | null) { const v = deal(id).visita; v.manter ??= {}; if (r) v.manter[sid] = r; else delete v.manter[sid]; },
     /** O cliente compra o produto deste serviço (só quando o cliente fornece materiais): texto do que compra, ou null para desfazer. */

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LINHAS, acoes, criarOrc, seed, tot, type Negocio } from "./motor";
 import { catalogo0, retirarNo, type Catalogo } from "./v2/catalogoModelo";
 import {
-  PREFIXO_CLIENTE, PREFIXO_PROD, fotografia, juntarProduto, ligarCatalogo, materiaisDoModelo, obrigacoes, qtdSugerida, servicosTrazidos,
+  PREFIXO_CLIENTE, PREFIXO_PROD, fotografia, juntarProduto, ligarCatalogo, materiaisDoModelo, partesDoModelo, obrigacoes, qtdSugerida, servicosTrazidos,
   tirarProduto, trazidosParaOrc,
 } from "./produtosVisita";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, type Grupo } from "./campos";
@@ -213,5 +213,23 @@ describe("na visita: portão, orçamento e reabrir", () => {
     A.reabrirVisita(d.id);
     expect(d.fase).toBe(3);
     expect(d.visita.fechada).toBe(true);
+  });
+});
+
+describe("as partes da estimativa do modelo (21/10, a versão nova da proposta)", () => {
+  const mat = LINHAS.wc.mat; // parede 25%, pavimento 15%, louças 50%, colas 10%
+  const prod = (n: string, q: number) => fotografia(prodN(K0, n), q);
+  it("cada parte diz o que se estimou, o que a cobre e o que sobra", () => {
+    const P = partesDoModelo(mat, [prod("Sanita suspensa com estrutura", 1)], {}, [], K0.arvore);
+    const loucas = P.find((p) => p.d === "louças, base e torneiras")!;
+    expect(loucas.est).toBe(700);
+    expect(loucas.custo).toBe(700 - 285);
+    expect(loucas.por.map((p) => p.n)).toEqual(["Sanita suspensa com estrutura"]);
+    expect(loucas.raiz).toBeTruthy();
+    expect(P.find((p) => p.d === "colas e pequeno material")!.raiz).toBeNull();
+  });
+  it("tirar uma parte à mão desce a estimativa; tirar todas, a linha sai", () => {
+    expect(materiaisDoModelo(mat, [], {}, K0.arvore, ["pavimento"])!.custo).toBe(1400 - 210);
+    expect(materiaisDoModelo(mat, [], {}, K0.arvore, mat.partes!.map((p) => p.d))).toBeNull();
   });
 });
