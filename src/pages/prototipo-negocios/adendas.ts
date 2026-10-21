@@ -2,25 +2,40 @@
 // O comercial escolhe os serviços e as quantidades; a adenda vai ao cliente para assinar; assinada, as tarefas entram no
 // plano da obra (no fim da fase de cada serviço, ou no fim da obra) e o plano volta a aprovação das Operações, se já estava
 // aprovado. Fatura-se à parte (só mão de obra e consumíveis dos serviços: IVA a 6%).
-import { TECS, diaDeFerias, garantirServico, r2, IVA_MO, type Assinatura, type Estado, type Plano, type Tarefa } from "./motor";
+import { TECS, diaDeFerias, garantirServico, servicoDoCatalogo, totaisIva, r2, IVA_MO, type Assinatura, type Estado, type Negocio, type Plano, type Tarefa } from "./motor";
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa } from "./preparacaoObra";
 
 export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string }
 export interface Adenda {
-  n: string; estado: "enviada" | "assinada"; criada: string; assinada?: string;
+  /** 21/10: "recusada" pelo cliente no portal (com o porquê) ou "anulada" pelo comercial antes da assinatura; o número não se reutiliza. */
+  n: string; estado: "enviada" | "assinada" | "recusada" | "anulada"; criada: string; assinada?: string;
+  recusada?: string; recusa?: string;
   motivo: string; linhas: LinhaAdenda[];
   /** 15/10: a assinatura do cliente no portal (desenho ou Chave Móvel Digital), como no contrato. */
   assinatura?: Assinatura;
 }
 export const MOTIVOS_ADENDA = ["O cliente pediu", "Surpresa em obra", "Erro de medição"] as const;
+/** 21/10: porque o cliente não aceita a adenda, nas palavras dele (no portal). */
+export const MOTIVOS_RECUSA_ADENDA = ["O preço", "Não preciso destes trabalhos", "O prazo", "Quero falar primeiro"];
 
 /** Uma linha da adenda: o serviço (do Catálogo, entra em uso se ainda não estava), a quantidade, o preço e as horas por unidade. */
 export function linhaAdenda(S: Estado, sid: string, q: number): LinhaAdenda | null {
   const s = garantirServico(S, sid);
   if (!s) return null;
   return { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil };
+}
+/** A mesma linha sem mexer no estado (a pré-visualização ao criar): o preço e as horas que o cliente vai receber. */
+export function previsaoLinha(S: Estado, sid: string, q: number): LinhaAdenda | null {
+  const s = S.svc[sid] ?? servicoDoCatalogo(sid);
+  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil } : null;
+}
+export const assinadas = (d: Negocio) => (d.adendas ?? []).filter((a) => a.estado === "assinada");
+/** O valor do contrato com IVA: o do contrato assinado, o das adendas assinadas e o total que o cliente paga. */
+export function valorContrato(d: Negocio, S: Estado) {
+  const contrato = r2(totaisIva(d, S).total), adendas = r2(assinadas(d).reduce((a, x) => a + totalComIva(x.linhas), 0));
+  return { contrato, adendas, total: r2(contrato + adendas) };
 }
 export const totalAdenda = (L: LinhaAdenda[]) => r2(L.reduce((a, x) => a + x.q * x.pu, 0));
 export const totalComIva = (L: LinhaAdenda[]) => r2(totalAdenda(L) * (1 + IVA_MO));
@@ -35,7 +50,8 @@ export function juntarAoPlano(p: Plano, a: Adenda): Tarefa[] {
     const dur = Math.max(1, Math.ceil(diasDeHoras(x.h * x.q) - 1e-9));
     // começa quando acaba a última tarefa desta fase (ou das anteriores); as das fases seguintes andam `dur` dias
     const ate = p.tasks.filter((t) => (t.fase ?? 4) <= fase);
-    const dia = ate.length ? Math.max(...ate.map((t) => t.dia + t.dur)) : 0;
+    // 21/10: com a obra em curso, nunca num dia que já passou
+    const dia = Math.max(ate.length ? Math.max(...ate.map((t) => t.dia + t.dur)) : 0, p.estado === "em curso" ? p.dia : 0);
     for (const t of p.tasks) if (t.dia >= dia && (t.fase ?? 4) > fase) t.dia += dur;
     const sk = skDaTarefa(x.perfil, x.n);
     const doOficio = TECS.filter((t) => t.sk === sk);

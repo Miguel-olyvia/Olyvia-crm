@@ -15,7 +15,7 @@ import { LINHA_DEMOLICAO } from "./entulho";
 import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
-import { diasAdenda, totalAdenda, type Adenda } from "./adendas";
+import { assinadas, diasAdenda, totalAdenda, valorContrato, type Adenda } from "./adendas";
 import { porFase, linhaDeMaterial, quantidade, escolhasVisiveis, fornecidosPeloCliente, type Grupo } from "./propostaConteudo";
 import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriais, iniciosRapidos, planoObra, prestacoes } from "./planoObra";
@@ -495,7 +495,7 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
       </p>
       {o.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({o.contratoRevisto.por}) a {o.contratoRevisto.q}, a pedido do cliente.</p>}
       {clausulasContrato(d, S).map((c, i) => n(i + 1, c.titulo, c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto, c.revista))}
-      <AdendasDoContrato d={d} />
+      <AdendasDoContrato S={S} d={d} />
       {/* as assinaturas (15/10): por cima de cada nome, o desenho do cliente ou o selo digital; a empresa assina digitalmente ao gerar o contrato */}
       <section className="grid gap-8 pt-6 sm:grid-cols-2" aria-label="Assinaturas">
         {([
@@ -520,9 +520,10 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
 }
 
 /** As adendas assinadas, anexas ao contrato (15/10): o que muda, o valor e o prazo, e a assinatura do cliente. */
-function AdendasDoContrato({ d }: { d: Negocio }) {
-  const as = (d.adendas ?? []).filter((a) => a.estado === "assinada");
+function AdendasDoContrato({ S, d }: { S: Estado; d: Negocio }) {
+  const as = assinadas(d);
   if (!as.length) return null;
+  const V = valorContrato(d, S);
   return (
     <section aria-label="Adendas ao contrato" className="rounded-xl border border-slate-200 p-4">
       <h3 className="font-semibold">Adendas ao contrato</h3>
@@ -542,16 +543,25 @@ function AdendasDoContrato({ d }: { d: Negocio }) {
           );
         })}
       </ul>
+      {/* 21/10: o valor do contrato com as adendas (o preço da cláusula fica o assinado) */}
+      <div className="mt-1 space-y-1 border-t border-slate-200 pt-3">
+        <div className="flex justify-between text-slate-600"><span>Contrato</span><span className="tabular-nums">{eur(V.contrato)} €</span></div>
+        <div className="flex justify-between text-slate-600"><span>{as.length === 1 ? "Adenda" : `${as.length} adendas`}</span><span className="tabular-nums">+{eur(V.adendas)} €</span></div>
+        <div className="flex justify-between font-semibold"><span>Valor do contrato, com IVA</span><span className="tabular-nums">{eur(V.total)} €</span></div>
+      </div>
     </section>
   );
 }
 
 /* ------------------------------------------------------------------ adenda (14/10) */
 /** A adenda ao contrato: os trabalhos a mais, o preço (IVA a 6%), os dias a mais e as assinaturas. */
-export function AdendaDoc({ d, a }: { d: Negocio; a: Adenda }) {
+export function AdendaDoc({ S, d, a }: { S?: Estado; d: Negocio; a: Adenda }) {
   const base = totalAdenda(a.linhas), dias = diasAdenda(a.linhas);
+  // 21/10: o valor do contrato antes e depois desta adenda (as assinadas antes dela já contam)
+  const V = S ? valorContrato(d, S) : null, antes = V ? (a.estado === "assinada" ? V.total - base * (1 + IVA_MO) : V.total) : 0;
+  const quando = { enviada: "à espera da assinatura", assinada: "assinada", recusada: "não aceite", anulada: "retirada" }[a.estado];
   return (
-    <Folha titulo="Adenda ao contrato" numero={a.n} data={a.estado === "assinada" ? "assinada" : "à espera da assinatura"} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
+    <Folha titulo="Adenda ao contrato" numero={a.n} data={quando} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
       <Cliente d={d} />
       <p className="text-slate-700">Trabalhos a mais na obra do contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}. O resto do contrato mantém-se.</p>
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
@@ -567,6 +577,9 @@ export function AdendaDoc({ d, a }: { d: Negocio; a: Adenda }) {
         <div className="flex justify-between text-slate-600"><span>IVA (6%)</span><span className="tabular-nums">{eur(base * IVA_MO)} €</span></div>
         <div className="flex justify-between text-lg font-semibold"><span>Total</span><span className="tabular-nums">{eur(base * (1 + IVA_MO))} €</span></div>
       </div>
+      {V && (a.estado === "enviada" || a.estado === "assinada") && (
+        <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + base * (1 + IVA_MO))} €</b>, com IVA.</p>
+      )}
       <p className="text-slate-700">Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}. Pagamento: com a última prestação do contrato.</p>
       {/* as assinaturas (15/10), como no contrato: o selo digital da empresa e a do cliente (desenho ou Chave Móvel Digital) */}
       <section className="grid gap-8 pt-4 sm:grid-cols-2" aria-label="Assinaturas">

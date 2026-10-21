@@ -967,17 +967,19 @@ export const fatorReal = (sid: SvcId) => REAL[sid] ?? 1;
 /** Um serviço do Catálogo passa a existir em S.svc quando se junta pela primeira vez. */
 export function garantirServico(S: Estado, sid: SvcId): Servico | null {
   if (S.svc[sid]) return S.svc[sid];
+  const s = servicoDoCatalogo(sid);
+  if (s) S.svc[sid] = s;
+  return s;
+}
+/** O serviço como entra em uso, sem mexer no estado (21/10: a pré-visualização da adenda mostra o preço que o cliente vai receber). */
+export function servicoDoCatalogo(sid: SvcId): Servico | null {
   const c = itemCatalogo(sid);
   if (!c) return null;
   // os serviços novos do catálogo da Mudelar (14/10) entram com a receita deles e o PVP real
-  if (c.rs) {
-    S.svc[sid] = { n: c.n, un: c.un, h: c.rs.h, eh: c.rs.eh, eq: c.rs.eq, cons: c.rs.cons, preco: c.pvp ?? 0, perfil: c.cat };
-    return S.svc[sid];
-  }
+  if (c.rs) return { n: c.n, un: c.un, h: c.rs.h, eh: c.rs.eh, eq: c.rs.eq, cons: c.rs.cons, preco: c.pvp ?? 0, perfil: c.cat };
   const h = r2(c.hu + c.hf / Math.max(1, c.qm)); // as horas fixas repartidas pela quantidade habitual
   const custo = h * (25 + ESTR);
-  S.svc[sid] = { n: c.n, un: c.un, h, eh: 25, eq: 0, cons: 0, preco: r2(custo / (1 - 0.35)), perfil: c.cat };
-  return S.svc[sid];
+  return { n: c.n, un: c.un, h, eh: 25, eq: 0, cons: 0, preco: r2(custo / (1 - 0.35)), perfil: c.cat };
 }
 
 /* ------------------------------------------------------------------ próximo passo */
@@ -1533,7 +1535,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id);
       if (d.orc?.contrato !== "assinado" && !(d.orc?.vendaDireta && d.orc.aceite)) { avisar({ msg: "Ainda não há contrato", sub: "Antes do contrato, muda-se a proposta (nova versão)", kind: "bad" }); return; }
       if (d.obra.plano?.estado === "concluída") { avisar({ msg: "A obra já acabou", kind: "bad" }); return; }
-      const linhas = itens.filter((x) => x.q > 0).map((x) => linhaAdenda(S, x.sid, x.q)).filter((x): x is NonNullable<typeof x> => !!x);
+      const linhas = itens.filter((x) => Number.isFinite(x.q) && x.q > 0).map((x) => linhaAdenda(S, x.sid, r2(x.q))).filter((x): x is NonNullable<typeof x> => !!x);
       if (!linhas.length) return;
       const n = "AD 2026/" + d.id + "-" + ((d.adendas?.length ?? 0) + 1);
       (d.adendas ??= []).push({ n, estado: "enviada", criada: agora(), motivo, linhas });
@@ -1972,6 +1974,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!ad || ad.estado !== "enviada") return;
       ad.assinatura = { ...a };
       A.assinarAdenda(id, n);
+    },
+    /** No protótipo, o comercial simula o cliente a assinar a adenda (Chave Móvel Digital), como no auto. */
+    simularAdenda(id: number, n: string) {
+      const d = deal(id), t = new Date(), p = (k: number) => String(k).padStart(2, "0");
+      A.assinarAdendaCom(id, n, { tipo: "digital", nome: d.f.nome_fiscal || d.nome, q: `${p(t.getDate())}/${p(t.getMonth() + 1)}/${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}`, id: "CMD-SIM" + String(d.id).slice(-3) });
+    },
+    /** 21/10: o cliente não aceita a adenda no portal (com o porquê): nada muda no contrato nem no plano; o comercial vê e pode refazê-la. */
+    recusarAdenda(id: number, n: string, motivo: string) {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      if (!a || a.estado !== "enviada") return;
+      const m = motivo.trim();
+      Object.assign(a, { estado: "recusada", recusada: agora(), recusa: m || undefined });
+      log(d, "O cliente não aceitou a adenda " + n + (m ? ": «" + m + "»" : ""), "w");
+      avisar({ msg: "Resposta enviada", sub: "O contrato e o plano da obra ficam como estavam", kind: "ok" });
+    },
+    /** 21/10: o comercial retira a adenda enviada (ainda não assinada): sai do portal do cliente. */
+    anularAdenda(id: number, n: string) {
+      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
+      if (!a || a.estado !== "enviada") return;
+      a.estado = "anulada";
+      log(d, "Adenda " + n + " retirada do portal do cliente");
+      avisar({ msg: "Adenda " + n + " retirada", sub: "Já não aparece no portal do cliente", kind: "ok" });
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

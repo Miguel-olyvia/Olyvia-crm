@@ -16,7 +16,7 @@ import { FASES_OBRA, type FaseObra } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
-import { diasAdenda, totalComIva } from "./adendas";
+import { MOTIVOS_RECUSA_ADENDA, assinadas, diasAdenda, totalComIva, valorContrato } from "./adendas";
 import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
@@ -112,7 +112,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   // a resposta à proposta (15/10): escolher entre pedir alterações e recusar; depois, os motivos e o texto
   const [resposta, setResposta] = useState<null | "escolher" | "alterar" | "recusar">(null);
   const [motivos, setMotivos] = useState<string[]>([]);
-  const [confirmar, setConfirmar] = useState<"aceitar" | "assinar" | "adenda" | "auto" | null>(null);
+  const [confirmar, setConfirmar] = useState<"aceitar" | "assinar" | "adenda" | "naoAdenda" | "auto" | null>(null);
   // ao receber a obra (15/10): "está tudo bem" ou uma observação, antes de assinar o auto
   const [receber, setReceber] = useState<null | "ok" | "obs">(null);
   const [obs, setObs] = useState("");
@@ -172,11 +172,13 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     });
   }
 
-  const adendasAssinadas = (d.adendas ?? []).filter((a) => a.estado === "assinada").length, au = d.obra.auto;
+  const adendasAssinadas = assinadas(d).length, au = d.obra.auto;
   const docs: [string, string, boolean][] = [
     ["proposta", `Proposta PR 2026/${d.id}`, !!o?.enviada],
     // 15/10: as adendas assinadas juntam-se ao contrato (o documento do contrato mostra-as)
     ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato],
+    // 21/10: e cada adenda assinada, com a assinatura do cliente
+    ...assinadas(d).map((a): [string, string, boolean] => [a.n, `Adenda ${a.n}`, true]),
     ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec],
     ["fatura", d.fin.fatura ? `Fatura ${d.fin.fatura.n}` : "", !!d.fin.fatura],
     ["auto", au ? `Auto de receção ${au.n}` : "", !!au],
@@ -184,7 +186,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
   ];
   const corpoDoc = (k: string) => k === "proposta" ? <PropostaDoc S={S} d={d} /> : k === "contrato" ? <ContratoDoc S={S} d={d} /> : k === "encomenda" ? <NotaEncomendaDoc d={d} /> : k === "fatura" ? <FaturaDoc S={S} d={d} />
     : k === "auto" ? <AutoRececaoDoc d={d} /> : k === "relatorio" ? <div className="mx-auto max-w-3xl"><RelatorioObra S={S} d={d} /></div>
-    : (() => { const a = d.adendas?.find((x) => x.n === k); return a ? <AdendaDoc d={d} a={a} /> : null; })();
+    : (() => { const a = d.adendas?.find((x) => x.n === k); return a ? <AdendaDoc S={S} d={d} a={a} /> : null; })();
   const adendaAgora = (d.adendas ?? []).find((a) => a.estado === "enviada");
 
   /* ---------------------------------------------- o plano da obra, como o cliente o vê (sem custos) */
@@ -338,9 +340,26 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     );
   } else if (P.estado === "adenda" && adendaAgora) {
     const a = adendaAgora, dd = diasAdenda(a.linhas);
+    const V = valorContrato(d, S), depois = V.total + totalComIva(a.linhas);
     agora = confirmar === "adenda" ? (
       <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} contrato={a.n} aceito={`Li e aceito a adenda ${a.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
         onAssinar={(as) => fazer(() => A.assinarAdendaCom(d.id, a.n, as))} onCancelar={() => setConfirmar(null)} />
+    ) : confirmar === "naoAdenda" ? (
+      // 21/10: o cliente pode dizer que não; o contrato e o plano ficam como estão e o comercial vê o porquê
+      <>
+        <h2 className="text-xl font-semibold">Porque não quer estes trabalhos?</h2>
+        <p className="mt-1 text-[15px] text-slate-600">O contrato e a obra ficam como estão. Se quiser outra coisa, diga-nos: preparamos uma nova adenda.</p>
+        <div className="mt-4"><Chips rotulo="Porque não quer estes trabalhos" opcoes={MOTIVOS_RECUSA_ADENDA} on={motivos} mudar={setMotivos} /></div>
+        <label className="mt-4 block">
+          <span className="text-[15px] font-medium">Quer acrescentar alguma coisa? <span className="font-normal text-slate-500">(opcional)</span></span>
+          <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={2}
+            className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
+        </label>
+        <div className="mt-4 grid gap-2">
+          <Botao perigo disabled={!motivos.length && !texto.trim()} onClick={() => { const m = [...motivos, texto.trim()].filter(Boolean).join(" · "); setMotivos([]); setTexto(""); fazer(() => A.recusarAdenda(d.id, a.n, m)); }}>Não aceitar a adenda</Botao>
+          <Botao ghost onClick={() => setConfirmar(null)}>Voltar à adenda</Botao>
+        </div>
+      </>
     ) : (
       <>
         <p className="text-sm font-medium text-slate-500">Trabalhos a mais</p>
@@ -350,6 +369,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">A mais, com IVA</dt><dd className="text-lg font-semibold tabular-nums">{eur(totalComIva(a.linhas))} €</dd></div>
           <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Prazo</dt><dd className="text-lg font-semibold tabular-nums">+{dd} {dd === 1 ? "dia útil" : "dias úteis"}</dd></div>
         </dl>
+        <p className="mt-3 text-sm tabular-nums text-slate-500">O contrato passa de {eur(V.total)} € para {eur(depois)} €, com IVA.</p>
       </>
     );
   } else if (P.estado === "auto" && au) {
@@ -408,6 +428,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
             : p && p.origem === "orcamento" && fasesObra.length ? `Começa a ${rotuloDia(p, 0)} e acaba a ${rotuloDia(p, ultimo)}.`
             : "As datas confirmam-se em breve; avisamos aqui."}
         </p>
+        {d.adendas?.at(-1)?.estado === "recusada" && <p className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">Não aceitou a adenda {d.adendas.at(-1)!.n}: a obra segue como no contrato. Se quiser outra coisa, escreva-nos aqui em baixo.</p>}
       </>
     );
   }
@@ -426,8 +447,11 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
       </div>
     )
   ) : P.estado === "adenda" ? (
-    confirmar === "adenda" ? null : (
-      <div className="sm:ml-auto sm:w-64"><Botao onClick={() => { setConfirmar("adenda"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar a adenda</span></Botao></div>
+    confirmar === "adenda" || confirmar === "naoAdenda" ? null : (
+      <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("adenda"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar a adenda</span></Botao></div>
+        <button type="button" onClick={() => { setMotivos([]); setTexto(""); setConfirmar("naoAdenda"); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Não aceito</button>
+      </div>
     )
   ) : P.estado === "auto" ? (
     confirmar === "auto" ? null : (
@@ -538,7 +562,7 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
           {/* o documento do passo de agora, inteiro: a proposta para aceitar, o contrato para assinar */}
           {P.estado === "rever" && <div className="-mx-4 sm:mx-0" aria-label="A proposta" role="region"><PropostaDoc S={S} d={d} /></div>}
           {P.estado === "assinar" && <div className="-mx-4 sm:mx-0" aria-label="O contrato" role="region"><ContratoDoc S={S} d={d} /></div>}
-          {P.estado === "adenda" && adendaAgora && <div className="-mx-4 sm:mx-0" aria-label="A adenda" role="region"><AdendaDoc d={d} a={adendaAgora} /></div>}
+          {P.estado === "adenda" && adendaAgora && <div className="-mx-4 sm:mx-0" aria-label="A adenda" role="region"><AdendaDoc S={S} d={d} a={adendaAgora} /></div>}
           {P.estado === "auto" && <div className="-mx-4 sm:mx-0" aria-label="O auto de receção" role="region"><AutoRececaoDoc d={d} /></div>}
           {P.estado === "relatorio" && <RelatorioObra S={S} d={d} docs={docs.filter(([k, t, ok]) => t && ok && k !== "relatorio").map(([k, t]) => [k, t])} abrirDoc={setDoc} />}
           {(P.estado === "preparar" || P.estado === "pedido") && (
