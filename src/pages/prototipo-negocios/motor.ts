@@ -17,7 +17,7 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import {
-  MOTIVO_IMPREVISTO, adendaBloqueada, alertasAdenda, assinadas, diasAdenda, faturasAdenda, margemAdenda, nomeParcela, pagamentoPorValidar, porFaturar, primeiraPaga, proximaParcela,
+  MOTIVO_IMPREVISTO, adendaBloqueada, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
   juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
@@ -1095,7 +1095,12 @@ export function minhas(S: Estado, role: Papel) {
     else if (d.fase >= 4 && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
       for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
     }
-    else if (p.who === role && !p.wait && !p.done) L.push({ d, p });
+    else {
+      if (p.who === role && !p.wait && !p.done) L.push({ d, p });
+      // 21/10: com a obra a andar (ou concluída), a 1.ª parcela de uma adenda assinada depois continua a ser do Financeiro: os mesmos
+      // passos do bloco Pagamento (preparacaoObra.ts: passosPagamentoAdenda), sem linhas à parte no Hoje
+      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (a.who === role && /^(ft|pg)-ad-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
+    }
     // 21/10: os imprevistos da obra (o gestor propõe ou decide; o comercial fala com o cliente que recusou) e as faturas das adendas
     for (const im of imprevistosPorTratar(d)) {
       if (role === "operacoes") L.push({ d, p: im.estado === "aberto"
@@ -1105,13 +1110,8 @@ export function minhas(S: Estado, role: Papel) {
     }
     // 21/10: as adendas, com o mesmo percurso do orçamento: cada passo de quem é (comercial, Direção, Jurídico)
     if (!d.anulado) for (const a of d.adendas ?? []) for (const t of tarefasAdenda(d, S, a)) if (t.who === role) L.push({ d, p: t });
-    // (21/10: na V2 a fatura emite-se no programa certificado e regista-se no Financeiro do negócio: sem botão aqui)
-    // 21/10 (decisão C): a fatura da 1.ª parcela de cada adenda assinada (as seguintes, no Financeiro do negócio, como no contrato)
-    const pf = porFaturar(d).map((a) => `${a.n} · ${nomeParcela(0)} · ${eur(proximaParcela(d, a)?.v ?? 0)} €`).join(", ");
-    if (role === "financeiro" && porFaturar(d).length) L.push({ d, p: lerVersao() === "atual"
-      ? { t: "Emitir a fatura da adenda", sub: pf, btn: "Emitir a fatura", act: "faturarAdendas", who: "financeiro" }
-      : { t: "Registar a fatura da adenda", sub: pf + " · no Financeiro do negócio", who: "financeiro" } });
-    if (role === "financeiro" && pagamentoPorValidar(d).length) L.push({ d, p: { t: "Validar o pagamento da adenda", sub: pagamentoPorValidar(d).map(({ f }) => `${f.n} · ${f.pag!.comprovativo}`).join(", "), btn: "Validar o pagamento", act: "validarPagamentosAdenda", who: "financeiro" } });
+    // 21/10: a fatura e o pagamento da 1.ª parcela de cada adenda assinada vêm dos passos do bloco Pagamento (passosAgora), como os do
+    // contrato; as parcelas seguintes ficam no Financeiro do negócio, como as do contrato
   }
   return L;
 }
@@ -2498,26 +2498,37 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return;
       if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      if (!a || a.estado !== "assinada" || !proximaParcela(d, a)) return;
+      if (!a) return;
+      // 21/10: como no contrato: as seguintes só depois de paga a 1.ª; a do fim da obra só com a obra concluída (adendas.ts: parcelaFaturavel)
+      const pf = parcelaFaturavel(d, a);
+      if (pf.motivo) { if (pf.p) avisar({ msg: `A ${nomeParcela(pf.p.i)} ainda não se fatura`, sub: `Adenda ${a.n} · ${pf.motivo}`, kind: "bad" }); return; }
       const f = emitirParcela(d, a, "FT 2026/" + S.ft++, false);
       if (f) avisar({ msg: `${f.n} emitida`, sub: `Adenda ${a.n} · ${nomeParcela(f.i)} · enviada ao portal do cliente`, kind: "ok" });
     },
-    /** O Financeiro confirma que o pagamento de cada fatura de adenda (com o aviso do cliente) entrou: sai o recibo. */
-    validarPagamentosAdenda(id: number) {
+    /** O Financeiro confirma que o pagamento de uma fatura de adenda entrou: sai o recibo. 21/10: como `validar` no contrato, não espera
+     *  pelo aviso do cliente no portal (o aviso só informa): valida a fatura mais antiga por pagar, pela ordem das parcelas (a 1.ª antes de
+     *  qualquer outra), da adenda `n` ou (sem ela, do Hoje) da primeira adenda do negócio com uma fatura a validar. */
+    validarPagamentosAdenda(id: number, n?: string) {
       const d = deal(id);
       if (!exigePerm("finance.validate_payment")) return;
-      const L = pagamentoPorValidar(d).map(({ a, f }) => {
-        faturaDaAdenda(a);
-        const ft = a.faturas!.find((x) => x.n === f.n)!;
-        ft.recibo = { n: "RC 2026/" + S.rc++, q: agora() };
-        log(d, `Pagamento da ${nomeParcela(ft.i)} da adenda ${a.n} (${ft.n}) validado · ${ft.recibo.n} emitido`);
-        // 21/10 (decisão B): sem encomenda inicial, a da adenda emite-se logo a seguir a ela (emitirEc)
-        if (ft.i === 0 && !d.obra.ec?.ref && porEncomendarDe(d, a.n).length) log(d, `A encomenda da adenda ${a.n} emite-se logo a seguir à encomenda de cliente inicial`);
-        return ft;
-      });
-      if (L.length) avisar({ msg: L.length === 1 ? `Recibo ${L[0].recibo!.n} emitido` : `${L.length} recibos emitidos`, sub: "Pagamento da adenda validado", kind: "ok" });
+      let alvo: { a: Adenda; f: FaturaAdenda } | null = null, porque: string | null = null;
+      for (const a of assinadas(d)) {
+        if (n && a.n !== n) continue;
+        const v = faturaAValidar(a);
+        if (v.f) { alvo = { a, f: v.f }; break; }
+        if (faturasAdenda(a).some((f) => !f.recibo)) porque ??= v.motivo;
+      }
+      if (!alvo) { avisar({ msg: "Nada por validar", sub: porque ?? (n ? `A adenda ${n} não tem faturas por pagar` : "As faturas das adendas estão pagas ou ainda por emitir"), kind: "" }); return; }
+      const { a } = alvo;
+      faturaDaAdenda(a);
+      const ft = a.faturas!.find((x) => x.n === alvo!.f.n)!;
+      ft.recibo = { n: "RC 2026/" + S.rc++, q: agora() };
+      log(d, `Pagamento da ${nomeParcela(ft.i)} da adenda ${a.n} (${ft.n}) validado · ${ft.recibo.n} emitido`);
+      // 21/10 (decisão B): sem encomenda inicial, a da adenda emite-se logo a seguir a ela (emitirEc)
+      if (ft.i === 0 && !d.obra.ec?.ref && porEncomendarDe(d, a.n).length) log(d, `A encomenda da adenda ${a.n} emite-se logo a seguir à encomenda de cliente inicial`);
+      avisar({ msg: `Recibo ${ft.recibo.n} emitido`, sub: `Pagamento da ${nomeParcela(ft.i)} da adenda ${a.n} validado (${ft.n})`, kind: "ok" });
       // 21/10 (decisão B/C): a 1.ª parcela paga emite a encomenda dos materiais da adenda no Inventário (EC-<id>-A<k>)
-      if (L.some((f) => f.i === 0)) encomendarAdendas(d);
+      if (ft.i === 0) encomendarAdendas(d);
     },
     /** 21/10: volta a emitir as encomendas das adendas pagas que não chegaram ao Inventário (o Inventário recusou ao validar). */
     emitirEcsAdenda(id: number) {
@@ -2530,7 +2541,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     registarFaturaAdenda(id: number, n: string, numero: string): boolean {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return false;
-      if (!a || a.estado !== "assinada" || !proximaParcela(d, a) || !numero.trim()) return false;
+      if (!a || !numero.trim()) return false;
+      const pf = parcelaFaturavel(d, a);
+      if (pf.motivo) { if (pf.p) avisar({ msg: `A ${nomeParcela(pf.p.i)} ainda não se regista`, sub: `Adenda ${a.n} · ${pf.motivo}`, kind: "bad" }); return false; }
       return !!emitirParcela(d, a, numero.trim(), true);
     },
     aprender(id: number) {

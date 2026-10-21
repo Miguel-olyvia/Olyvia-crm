@@ -145,7 +145,7 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     cleanup();
 
     // 9. o Financeiro emite a fatura da 1.ª parcela (50%, como no contrato)
-    expect(tarefa(S, d, "financeiro", "Emitir a fatura da adenda")?.p.act).toBe("faturarAdendas");
+    expect(tarefa(S, d, "financeiro", /^Emitir a fatura da adenda AD 2026\/1027-1 · 1\.ª parcela$/)?.p.act).toBe("faturarAdendas");
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     const bloco = screen.getByTestId(`fin-adenda-${N}`);
@@ -176,7 +176,7 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     cleanup();
 
     // 11. o Financeiro valida: sai o recibo e a encomenda da adenda nasce (1.ª parcela paga)
-    expect(tarefa(S, d, "financeiro", "Validar o pagamento da adenda")).toBeTruthy();
+    expect(tarefa(S, d, "financeiro", /^Validar o pagamento da adenda AD 2026\/1027-1 · 1\.ª parcela$/)).toBeTruthy();
     A.role("financeiro"); A.validarPagamentosAdenda(d.id);
     expect(f0.recibo?.n).toMatch(/^RC 2026\//);
     expect(lerInventario().ecs.some((e) => e.id === "EC-1027-A1" && !e.deleted)).toBe(true);

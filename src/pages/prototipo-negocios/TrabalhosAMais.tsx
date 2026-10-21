@@ -16,7 +16,7 @@ import { SeletorPesquisa } from "./pecasFicha";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import {
-  MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, nomeParcela, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
+  MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
   totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
 } from "./adendas";
 import { lerVersao } from "./versaoPrototipo";
@@ -73,6 +73,8 @@ export function AcoesAdenda({ ctx, d, a, editar }: { ctx: Ctx; d: Negocio; a: Ad
 function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
   const { S, A, go } = ctx;
   const P = parcelasAdenda(d, a), prox = proximaParcela(d, a), fin = S.role === "financeiro", atual = lerVersao() === "atual";
+  // 21/10: como no contrato: a seguinte só depois de paga a 1.ª (a do fim, com a obra concluída); valida-se pela ordem das parcelas
+  const fat = parcelaFaturavel(d, a), aValidar = faturaAValidar(a);
   return (
     <div className="mt-2 space-y-1 text-[15px]">
       {P.map((x) => (
@@ -80,8 +82,9 @@ function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
           {nomeParcela(x.i)} ({x.l.toLowerCase()}, {Math.round(x.p * 100)}%) · {eur(x.v)} €: {x.ft ? (x.ft.recibo ? `${x.ft.n}, paga (${x.ft.recibo.n})` : `${x.ft.n}, ${x.ft.pag?.comprovativo ? `o cliente avisou: ${x.ft.pag.comprovativo}` : "por pagar no portal"}`) : "por faturar"}
         </p>
       ))}
-      {fin && atual && prox && <Button size="sm" className="min-h-10" onClick={go(() => (prox.i === 0 ? A.faturarAdendas(d.id) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura da {nomeParcela(prox.i)}</Button>}
-      {fin && P.some((x) => x.ft && !x.ft.recibo && x.ft.pag?.comprovativo) && <Button size="sm" className="ml-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id))}>Validar o pagamento</Button>}
+      {fin && atual && prox && <Button size="sm" className="min-h-10" disabled={!!fat.motivo} onClick={go(() => (prox.i === 0 ? A.faturarAdendas(d.id) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura da {nomeParcela(prox.i)}</Button>}
+      {fin && aValidar.f && <Button size="sm" className="ml-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id, a.n))}>Validar o pagamento</Button>}
+      {fin && prox && fat.motivo && <p className="text-sm text-muted-foreground">{nomeParcela(prox.i)}: {fat.motivo.replace(/^./, (c) => c.toLowerCase())}</p>}
     </div>
   );
 }

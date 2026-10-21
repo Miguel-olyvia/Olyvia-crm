@@ -142,7 +142,9 @@ export function faturasAdenda(a: Adenda): FaturaAdenda[] {
   if (a.faturas) return a.faturas;
   return a.fatura ? [{ n: a.fatura.n, q: a.fatura.q, i: 0, l: "Única", p: 1, v: r2(totaisAdenda(a).total), ...(a.recibo ? { recibo: a.recibo } : {}), ...(a.pag ? { pag: a.pag } : {}) }] : [];
 }
-export interface ParcelaAdenda { i: number; l: string; p: number; v: number; ft?: FaturaAdenda }
+export interface ParcelaAdenda { i: number; l: string; p: number; v: number; ft?: FaturaAdenda;
+  /** 21/10: a prestação do contrato é a do fim da obra (fase "fim"): só se fatura com a obra concluída */
+  fim?: true }
 /** As parcelas da adenda: as mesmas prestações do contrato (d.f.pagamento / pagFases; por omissão 50% + 50% no fim), sobre o total
  *  com IVA da adenda; a última leva o resto (os cêntimos batem certo). Com as faturas a cobrir tudo, valem as faturas. */
 export function parcelasAdenda(d: Negocio, a: Adenda): ParcelaAdenda[] {
@@ -153,7 +155,7 @@ export function parcelasAdenda(d: Negocio, a: Adenda): ParcelaAdenda[] {
   return pr.map((t, i) => {
     const v = i === pr.length - 1 ? r2(total - acum) : r2(total * t.p);
     acum = r2(acum + v);
-    return { i, l: t.l, p: t.p, v, ft: F.find((f) => f.i === i) };
+    return { i, l: t.l, p: t.p, v, ft: F.find((f) => f.i === i), ...(t.fase === "fim" && pr.length > 1 ? { fim: true as const } : {}) };
   });
 }
 /** A parcela seguinte a faturar (pela ordem: a 2.ª só depois da 1.ª), ou undefined. */
@@ -162,6 +164,24 @@ export const proximaParcela = (d: Negocio, a: Adenda) => parcelasAdenda(d, a).fi
 export const primeiraPaga = (a: Adenda) => !!faturasAdenda(a).find((f) => f.i === 0)?.recibo;
 /** O nome curto da parcela ("1.ª parcela"). */
 export const nomeParcela = (i: number) => `${i + 1}.ª parcela`;
+/** 21/10: a parcela seguinte da adenda já se pode faturar? Como no contrato: a 1.ª logo com a adenda assinada (é ela que põe os materiais
+ *  a andar); as seguintes só depois de paga a 1.ª; a do fim da obra só com a obra concluída. `motivo` null: pode faturar-se `p`. */
+export function parcelaFaturavel(d: Negocio, a: Adenda): { p?: ParcelaAdenda; motivo: string | null } {
+  if (a.estado !== "assinada") return { motivo: "A adenda ainda não está assinada." };
+  const p = proximaParcela(d, a);
+  if (!p) return { motivo: "Todas as parcelas já têm fatura." };
+  if (p.i > 0 && !primeiraPaga(a)) return { p, motivo: `Depois de paga a ${nomeParcela(0)}.` };
+  if (p.fim && d.obra.plano?.estado !== "concluída") return { p, motivo: "No fim da obra, com a obra concluída." };
+  return { p, motivo: null };
+}
+/** 21/10: a fatura da adenda cujo pagamento se valida a seguir: a mais antiga por pagar, pela ordem das parcelas (a 1.ª antes de
+ *  qualquer outra). `motivo`: porque não há (nada por pagar, ou a fatura da 1.ª parcela ainda não foi emitida). */
+export function faturaAValidar(a: Adenda): { f?: FaturaAdenda; motivo: string | null } {
+  const F = faturasAdenda(a).filter((f) => !f.recibo).sort((x, y) => x.i - y.i);
+  if (!F.length) return { motivo: "Não há faturas por pagar." };
+  if (F[0].i !== 0 && !primeiraPaga(a)) return { motivo: `Primeiro, a fatura da ${nomeParcela(0)} da adenda ${a.n}.` };
+  return { f: F[0], motivo: null };
+}
 /** As adendas assinadas sem nenhuma fatura (a 1.ª parcela por faturar), para o Hoje do Financeiro. */
 export const porFaturar = (d: Negocio) => assinadas(d).filter((a) => !faturasAdenda(a).length);
 /** As faturas das adendas por pagar e, delas, as que o cliente já disse que pagou (para validar). */

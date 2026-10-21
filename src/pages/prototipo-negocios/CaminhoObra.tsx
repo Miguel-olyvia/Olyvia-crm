@@ -105,7 +105,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         {x.estado !== "feito" && <div className="mt-1"><Quem who={x.who} /></div>}
         {x.estado === "agora" && x.act && x.who && (
           x.who === S.role
-            ? <Button size="sm" variant={meu?.id === x.id ? "default" : "outline"} className="mt-2 min-h-10" onClick={go(() => fazer(A, x.act!, d.id))}>{x.btn}</Button>
+            ? <Button size="sm" variant={meu?.id === x.id ? "default" : "outline"} className="mt-2 min-h-10" onClick={go(() => fazer(A, x.act!, d.id, x.arg))}>{x.btn}</Button>
             : <button type="button" onClick={() => verComo(x.who!)} className="mt-1 inline-flex min-h-10 items-center text-sm font-medium text-primary underline-offset-4 hover:underline">Ver como {PAPEIS[x.who].nome}</button>
         )}
       </div>
@@ -187,9 +187,9 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
             <p className="text-[15px] font-semibold">{go1.t}</p>
             <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Condições para arrancar">
               {[["Sinal pago", d.fin.pago], ["Encomenda emitida", !!d.obra.ec], ["Materiais no armazém", !!inv?.pronta || (!!d.obra.ec && !d.obra.ec.ref)],
-                // 21/10 (decisão B): antes do arranque, cada adenda assinada: a encomenda dela (com o pagamento validado) ou, só mão de obra, o pagamento
-                ...(go1.estado === "feito" ? [] : assinadas(d).map((a) => (ecDaAdenda(d, a.n) || porEncomendarDe(d, a.n).length
-                  ? [`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)] : [`1.ª parcela da adenda ${a.n} paga`, primeiraPaga(a)]))),
+                // 21/10 (decisão B): antes do arranque, cada adenda assinada: a 1.ª parcela paga e, com materiais, a encomenda dela (emitida com esse pagamento)
+                ...(go1.estado === "feito" ? [] : assinadas(d).flatMap((a) => [[`1.ª parcela da adenda ${a.n} paga`, primeiraPaga(a)],
+                  ...(ecDaAdenda(d, a.n) || porEncomendarDe(d, a.n).length ? [[`Encomenda da adenda ${a.n}`, !!ecDaAdenda(d, a.n)]] : [])])),
                 ["Plano aprovado", d.obra.plano?.estado !== "por aprovar"]].map(([t, ok]) => (
                 <li key={t as string} className={cn("inline-flex items-center gap-1.5", ok ? "text-foreground" : "text-muted-foreground")}>
                   {ok ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <span className="h-3.5 w-3.5 rounded-full border-2 border-input" aria-hidden="true" />}{t as string}

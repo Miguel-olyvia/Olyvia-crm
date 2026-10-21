@@ -54,9 +54,10 @@ export function Progresso({ fase, className = "" }: { fase: number; className?: 
 }
 
 // Os botões de "próximo passo" chamam a ação pelo nome.
-export function fazer(A: Ctx["A"], act: string, id: number) {
-  const f = (A as unknown as Record<string, (id: number) => void>)[act];
-  if (f) f(id);
+export function fazer(A: Ctx["A"], act: string, id: number, arg?: string) {
+  const f = (A as unknown as Record<string, (id: number, arg?: string) => void>)[act];
+  // 21/10: os passos de uma adenda levam o número dela (arg); os outros só o negócio
+  if (f) { if (arg === undefined) f(id); else f(id, arg); }
 }
 
 /* A cor de cada fase: só nos ícones, nunca no texto, para ajudar a reconhecer de relance. */

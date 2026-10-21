@@ -253,10 +253,11 @@ export function PortalCliente({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar
     });
   }
   // 21/10 (decisão C): cada parcela de cada adenda assinada tem a sua fatura (o Financeiro emite-a); paga-se aqui como a do contrato
-  for (const { a, f: ft } of porPagar(d)) {
+  // 21/10: só as faturas já emitidas (as parcelas seguintes só se emitem depois de paga a 1.ª), pela ordem das parcelas
+  for (const { a, f: ft } of [...porPagar(d)].sort((x, y) => x.f.i - y.f.i)) {
     const vence = vencimento(emitidaEm(ft.q), "15 dias");
     outros.push({
-      id: "pag-" + ft.n, t: `Pagar a fatura ${ft.n}`, sub: `Adenda ${a.n} · ${nomeParcela(ft.i)} (${ft.l.toLowerCase()}) · vence a ${vence}`,
+      id: "pag-" + ft.n, t: `Pagar a fatura ${ft.n}`, sub: `Adenda ${a.n} · ${nomeParcela(ft.i)} (${ft.l.toLowerCase()}) · vence a ${vence}${ft.i > 0 && !primeiraPaga(a) ? ` · primeiro, a ${nomeParcela(0)}` : ""}`,
       corpo: <PagarFatura numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m, ft.n))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r, ft.n))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t, ft.n))} />,
     });

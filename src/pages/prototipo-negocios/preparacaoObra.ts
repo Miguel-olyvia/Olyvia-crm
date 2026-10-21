@@ -15,7 +15,7 @@ import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type Resu
 import { lerInventario } from "./inventario/loja";
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
-import { assinadas, diasAdenda, faturasAdenda, primeiraPaga } from "./adendas";
+import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
@@ -130,6 +130,8 @@ export interface PassoPrep {
   id: string; trilho: Trilho; t: string; sub: string; who: Papel | null; estado: EstadoPasso;
   /** A ação (A[act](id)) e o texto do botão, para quem é a vez. */
   act?: string; btn?: string;
+  /** 21/10: o segundo argumento da ação (o número da adenda), quando o passo é de uma adenda: A[act](id, arg) */
+  arg?: string;
 }
 // 15/10 (Ruben): o pagamento vem primeiro. 16/10: a encomenda de cliente emite-se sozinha com o pagamento validado; o plano aprova-se depois dele
 export const TRILHOS: { k: Trilho; t: string }[] = [
@@ -232,6 +234,9 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   L.push(d.fin.pago
     ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }
     : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho e a encomenda de cliente vai para o Inventário." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Validar o pagamento" });
+  // 21/10: a 1.ª parcela de cada adenda assinada, com os mesmos dois passos do contrato (a fatura e o pagamento validado): é ela que
+  // emite a encomenda dos materiais da adenda no Inventário. As parcelas seguintes ficam no Financeiro do negócio, como as do contrato.
+  for (const a of assinadas(d)) L.push(...passosPagamentoAdenda(d, a));
 
   // o arranque
   const F = faltaParaArrancar(d);
@@ -242,6 +247,25 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
   void S;
   return L;
+}
+
+/** 21/10: os passos do pagamento da 1.ª parcela de uma adenda assinada (ids "ft-ad-<n>" e "pg-ad-<n>"), como os do contrato. */
+export function passosPagamentoAdenda(d: Negocio, a: Adenda): PassoPrep[] {
+  const f0 = faturasAdenda(a).find((f) => f.i === 0), x = parcelasAdenda(d, a)[0], parc = nomeParcela(0);
+  const id = a.n, mats = porEncomendarDe(d, a.n).length > 0 || !!ecDaAdenda(d, a.n);
+  const ft: PassoPrep = f0
+    ? { id: "ft-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${f0.n} · adenda ${a.n} · ${parc}`, sub: `Emitida ${f0.q.startsWith("hoje") ? f0.q : "a " + f0.q} · ${eur(f0.v)} €.` }
+    // na V2 a Olyvia não emite faturas: regista-se a do programa certificado no Financeiro do negócio (sem botão aqui), como no contrato
+    : lerVersao() !== "atual"
+    ? { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Registar a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.` }
+    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Emitir a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Vai para o portal do cliente.`, act: "faturarAdendas", btn: "Emitir a fatura" };
+  const rc = f0?.recibo;
+  const pg: PassoPrep = rc
+    ? { id: "pg-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado · adenda ${a.n}`, sub: `Recibo ${rc.n}.` }
+    : { id: "pg-ad-" + id, trilho: "pag", estado: f0 ? "agora" : "espera", who: "financeiro", t: `Validar o pagamento da adenda ${a.n} · ${parc}`,
+      sub: !f0 ? "Depois da fatura." : `${f0.pag?.comprovativo ? `O cliente avisou no portal: ${f0.pag.comprovativo}. ` : ""}Confirmar que o valor da ${f0.n} entrou. O recibo sai sozinho${mats ? " e a encomenda dos materiais da adenda vai para o Inventário" : ""}.`,
+      act: f0 ? "validarPagamentosAdenda" : undefined, arg: a.n, btn: "Validar o pagamento" };
+  return [ft, pg];
 }
 
 /** Os passos à espera de alguém (para o Hoje), pela ordem do circuito. */

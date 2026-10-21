@@ -47,8 +47,21 @@ export function juntarEstado(local: Estado, global: Record<string, unknown> | nu
   return S;
 }
 
+/** 21/10: das partes remotas, as que se aplicam e as que ficam como estão neste aparelho: as que já foram sincronizadas (há o JSON
+ *  delas) e mudaram cá desde então, ainda por enviar. Uma parte remota igual à local aplica-se (só atualiza a versão). */
+export function separarRemoto<L extends { chave: string; dados: unknown }>(linhas: L[], locais: Parte[], sincronizado: Map<string, string>): { aplicar: L[]; manter: L[] } {
+  const atual = new Map(locais.map((p) => [p.chave, JSON.stringify(p.dados)]));
+  const aplicar: L[] = [], manter: L[] = [];
+  for (const l of linhas) {
+    const antes = sincronizado.get(l.chave), agora = atual.get(l.chave);
+    const porEnviar = antes != null && agora != null && agora !== antes;
+    (porEnviar && JSON.stringify(l.dados) !== agora ? manter : aplicar).push(l);
+  }
+  return { aplicar, manter };
+}
+
 /* ------------------------------------------------------------------ o motor da sincronização */
-class Sincronizador {
+export class Sincronizador {
   private versoes = new Map<string, number>();
   private json = new Map<string, string>();
   private fontes: Fonte[] = [];
@@ -135,7 +148,7 @@ class Sincronizador {
     const { data } = await tabela().select("chave, dados, versao").eq("sala", sala()).eq("chave", chave);
     // a parte desapareceu (a sala foi limpa): volta a criar-se com a deste aparelho
     if (!data?.length) { this.versoes.delete(chave); this.json.delete(chave); this.mudou(); return; }
-    this.aplicarRemoto(data);
+    this.aplicarRemoto(data, true);
     this.avisarConflito?.(chave.startsWith("deal:") ? "Alguém mudou este negócio ao mesmo tempo. Já tem a versão dele: repita a última ação, se for preciso." : "Os dados foram atualizados por outra pessoa. Repita a última ação, se for preciso.");
   }
 
@@ -156,7 +169,17 @@ class Sincronizador {
     }
   }
 
-  private aplicarRemoto(linhas: { chave: string; dados: unknown; versao: number }[]) {
+  /** 21/10: aplica as partes remotas. Uma parte com mudanças locais ainda por enviar (o envio espera 250 ms) não se escreve por cima:
+   *  fica a deste aparelho, com a versão remota já conhecida, e envia-se logo a seguir (senão a ação acabada de fazer perdia-se).
+   *  `forcar` (o conflito no envio): ganha a remota, como antes. */
+  private aplicarRemoto(linhas: { chave: string; dados: unknown; versao: number }[], forcar = false) {
+    const { aplicar, manter } = forcar ? { aplicar: linhas, manter: [] } : separarRemoto(linhas, this.estadoFonte ? this.todasAsPartes() : [], this.json);
+    for (const l of manter) this.versoes.set(l.chave, l.versao);
+    if (manter.length) this.mudou();
+    this.aplicarLinhas(aplicar);
+  }
+
+  private aplicarLinhas(linhas: { chave: string; dados: unknown; versao: number }[]) {
     let global: Record<string, unknown> | null = null;
     const deals = new Map<number, Negocio>();
     for (const l of linhas) {

@@ -79,7 +79,8 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     const a = d.adendas![0], ft = () => a.faturas![0];
     // 21/10 (decisão C): a 1.ª parcela (50%, como no contrato)
     expect(ft()).toMatchObject({ i: 0, p: 0.5, n: expect.stringMatching(/^FT 2026\//) });
-    expect(within(bloco).queryByRole("button", { name: "Validar o pagamento" })).toBeNull(); // ainda sem aviso do cliente
+    // 21/10: como no contrato, valida-se sem o aviso do cliente no portal (o aviso só informa)
+    expect((within(bloco).getByRole("button", { name: "Validar o pagamento" }) as HTMLButtonElement).disabled).toBe(false);
     cleanup();
 
     // o cliente paga no portal (o cartão da fatura da adenda)
