@@ -54,9 +54,9 @@ function abrir(
 }
 
 describe("com a bandeira desligada", () => {
-  it("o ecrã fica como estava: «Dar como ganho» e nada do fecho novo", () => {
+  it("nada do fecho novo, e o «Dar como ganho» antigo já não existe", () => {
     abrir(aberto({ prontoAGanhar: true }), {}, {}, false);
-    expect(screen.getByRole("button", { name: "Dar como ganho" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Fechar agora" })).toBeNull();
     cleanup();
     abrir(ganho({ alerta: { codigo: "conversao_falhou" } }), {}, {}, false);

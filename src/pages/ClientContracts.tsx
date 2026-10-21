@@ -30,6 +30,13 @@ import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
 import { caminhoVoltarSeguro, comParametro } from "@/lib/voltarParaPessoas";
+import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
+import {
+  avisoDeSubstituicao, escolherGravacaoDeContrato, parametrosNegCriarContrato, substitutoBloqueado, substitutoSemVerificar,
+} from "@/components/negocio-metas/contratoNoNegocio";
+import { AvisoSubstitutoNegocio } from "@/components/contracts/AvisoSubstitutoNegocio";
+import { chaveDoErro, codigoDoErro } from "@/hooks/pessoas/errosNeg";
+import { useNegocioDoContrato } from "@/hooks/pessoas/useNegocioDoContrato";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { ModuleAlertsBanner } from "@/components/ModuleAlertsBanner";
@@ -164,6 +171,9 @@ const statusEmojis: Record<string, string> = {
   draft: "📝", pending_signature: "📨", signed: "✅", active: "✅", expired: "❌", cancelled: "🚫",
 };
 
+// O `?negocio=` vem do endereço: só um identificador bem formado conta (a base valida o resto).
+const ID_VALIDO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const ClientContracts = () => {
   const { t, language } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -189,6 +199,9 @@ const ClientContracts = () => {
   // Só vindo da ficha de uma pessoa (P3): a proposta de que o contrato nasce e o caminho a que se volta depois de o criar.
   const [presetProposalId, setPresetProposalId] = useState<string | null>(null);
   const voltarAoCriar = useRef<string | null>(null);
+  // Só com o fecho v4 ligado e `?negocio=` no endereço (a ficha da pessoa): o contrato novo nasce ligado a este negócio. Sem isto nada muda.
+  const fechoV4 = useFechoV4();
+  const [negocioNovo, setNegocioNovo] = useState<string | null>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<ClientContract | null>(null);
   const { finalizeContract } = usePipelineAutomation();
@@ -219,6 +232,17 @@ const ClientContracts = () => {
   const [cancellingContract, setCancellingContract] = useState<ClientContract | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [createReplacementOnCancel, setCreateReplacementOnCancel] = useState(true);
+  // Fecho v4: o título do negócio onde o contrato novo nasce, e o negócio do contrato a anular (para avisar antes de gerar o substituto).
+  const { negocio: negocioDoNovo } = useNegocioDoContrato(negocioNovo, activeCompany?.id, fechoV4);
+  const negocioIdDoCancelado: string | null = fechoV4 ? (cancellingContract?.negocio_id as string | null | undefined) || null : null;
+  const { negocio: negocioDoCancelado, leitura: leituraDoCancelado } = useNegocioDoContrato(negocioIdDoCancelado, activeCompany?.id, isCancelDialogOpen);
+  // Cada botão pede a permissão do negócio E a do documento: um contrato ligado a um negócio só gera substituto a quem também tem pessoas.edit.
+  const podeEditarNegocio = isSystemAdmin || hasPermission("pessoas.edit");
+  const substitutoImpedido = substitutoBloqueado({ temNegocio: !!negocioIdDoCancelado, podeEditarNegocio });
+  const avisoDoSubstituto = !negocioIdDoCancelado ? null : substitutoImpedido ? "sem_permissao" as const : avisoDeSubstituicao({
+    negocio: negocioDoCancelado, contratoId: cancellingContract?.id ?? "", vaiGerarSubstituto: createReplacementOnCancel, podeEditarNegocio, leitura: leituraDoCancelado,
+  });
+  const anularSemVerificar = substitutoSemVerificar(avisoDoSubstituto);
 
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }) });
 
@@ -687,6 +711,8 @@ const ClientContracts = () => {
       setPresetClientId(newContractClientId);
       setPresetProposalId(newContractProposalId);
       voltarAoCriar.current = caminhoVoltarSeguro(searchParams.get("voltar"));
+      const negocioDoEndereco = searchParams.get("negocio");
+      setNegocioNovo(fechoV4 && negocioDoEndereco && ID_VALIDO.test(negocioDoEndereco) ? negocioDoEndereco : null);
       setEditingContract(null);
       setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
       setIsDialogOpen(true);
@@ -694,9 +720,10 @@ const ClientContracts = () => {
       searchParams.delete("newContract");
       searchParams.delete("clientId");
       searchParams.delete("proposalId");
+      searchParams.delete("negocio");
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, fechoV4]);
 
   // Handle "open contract" URL param (?open=<id>) — used by Propostas' "Ver
   // contrato" button/dropdown item and the AI assistant's search results.
@@ -1008,7 +1035,7 @@ const ClientContracts = () => {
       const { data, error } = await supabase.rpc('cancel_and_replace_contract' as any, {
         p_contract_id: cancellingContract.id,
         p_reason: reason,
-        p_create_replacement: createReplacementOnCancel,
+        p_create_replacement: createReplacementOnCancel && !substitutoImpedido,
       });
       if (error) throw error;
       return data as { cancelled_contract_id: string; replacement_contract_id: string | null };
@@ -1125,7 +1152,7 @@ const ClientContracts = () => {
       }
 
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-      const { data: novoContratoId, error } = await supabase.rpc('rpc_create_client_contract' as any, {
+      const parametros = {
         p_client_id: clientId,
         p_entity_id: resolvedEntityId || null,
         p_organization_id: activeCompany.id,
@@ -1141,21 +1168,28 @@ const ClientContracts = () => {
         p_contract_body_html: contractBodyHtml,
         p_final_body_html: finalBodyHtml,
         p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
-      });
+      };
+      // Dentro de um negócio (fecho v4) o contrato nasce ligado, por neg_criar_contrato; fora dele grava como sempre.
+      const ligadoAoNegocio = escolherGravacaoDeContrato({ criarNoNegocioId: negocioNovo }) === "neg_criar_contrato";
+      const { data: novoContratoId, error } = ligadoAoNegocio
+        ? await supabase.rpc('neg_criar_contrato' as any, parametrosNegCriarContrato(negocioNovo as string, parametros))
+        : await supabase.rpc('rpc_create_client_contract' as any, parametros);
       if (error) throw error;
-      // O rpc devolve o id do contrato criado (a ficha da pessoa liga-o ao negócio ao voltar).
-      return typeof novoContratoId === "string" ? novoContratoId : null;
+      // O rpc devolve o id do contrato criado (a ficha da pessoa liga-o ao negócio ao voltar, se ainda não nasceu ligado).
+      return { id: typeof novoContratoId === "string" ? novoContratoId : null, ligadoAoNegocio };
     },
-    onSuccess: (novoContratoId) => {
+    onSuccess: ({ id: novoContratoId, ligadoAoNegocio }) => {
       const voltar = voltarAoCriar.current;
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success(t('clientContracts.toast.createSuccess'));
       handleCloseDialog();
       // Vindo da ficha de uma pessoa: volta a ela com o contrato novo, para ser ligado ao negócio.
-      if (voltar && novoContratoId) navigate(comParametro(voltar, "novoContrato", novoContratoId));
+      // Já nasceu ligado ao negócio: a ficha não tem nada a ligar ao voltar.
+      if (voltar && novoContratoId) navigate(ligadoAoNegocio ? voltar : comParametro(voltar, "novoContrato", novoContratoId));
     },
     onError: async (error: any) => {
-      const description = await getFriendlyErrorMessage(error);
+      // Criar já ligado a um negócio: o erro da base (NG...) diz-se traduzido, nunca em bruto.
+      const description = negocioNovo && codigoDoErro(error) ? t(chaveDoErro(error)) : await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.createError'), { description });
     },
   });
@@ -1320,7 +1354,7 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id,
   });
 
-  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setPresetProposalId(null); voltarAoCriar.current = null; setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
+  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setPresetProposalId(null); voltarAoCriar.current = null; setNegocioNovo(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
 
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
@@ -2369,6 +2403,7 @@ const ClientContracts = () => {
           proposals={presetProposalId ? proposals.filter((p: any) => p.id === presetProposalId) : presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
           presetProposalId={presetProposalId}
           proposalsLoaded={proposalsLoaded}
+          negocioLigado={negocioNovo ? { titulo: negocioDoNovo?.titulo ?? null } : null}
           templates={templates}
           onSave={handleDialogSave}
           saving={createMutation.isPending || updateMutation.isPending}
@@ -2425,18 +2460,20 @@ const ClientContracts = () => {
               <div className="flex items-start gap-2">
                 <Checkbox
                   id="create-replacement"
-                  checked={createReplacementOnCancel}
+                  checked={createReplacementOnCancel && !substitutoImpedido}
+                  disabled={substitutoImpedido}
                   onCheckedChange={(checked) => setCreateReplacementOnCancel(checked === true)}
                 />
                 <Label htmlFor="create-replacement" className="font-normal leading-snug cursor-pointer">
                   Gerar contrato substituto a partir da mesma proposta
                 </Label>
               </div>
+              <AvisoSubstitutoNegocio aviso={avisoDoSubstituto} />
             </div>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
               <AlertDialogAction
-                disabled={!cancelReason.trim() || cancelContractMutation.isPending}
+                disabled={!cancelReason.trim() || cancelContractMutation.isPending || anularSemVerificar}
                 onClick={(e) => { e.preventDefault(); cancelContractMutation.mutate(); }}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >

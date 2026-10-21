@@ -25,11 +25,13 @@ type PropsDoConstrutor = {
 };
 const ultimo = (): PropsDoConstrutor => construtor.mock.calls[construtor.mock.calls.length - 1][0] as PropsDoConstrutor;
 
-function montar(mutacoes: MutacoesNegocio = mutacoesFalsas(), n: NegocioDoOrcamento | null = negocio) {
+// Por omissao o fluxo novo (bandeira do fecho ligada); `ligada = false` monta o caminho antigo, que continua a existir com a bandeira desligada.
+function montar(mutacoes: MutacoesNegocio = mutacoesFalsas(), n: NegocioDoOrcamento | null = negocio, ligada = true) {
   const aoFechar = vi.fn();
-  render(<ComCostura mutacoes={mutacoes}><PainelOrcamentoReal negocio={n} mutacoes={mutacoes} aoFechar={aoFechar} /></ComCostura>);
+  render(<FechoV4Context.Provider value={ligada}><ComCostura mutacoes={mutacoes}><PainelOrcamentoReal negocio={n} mutacoes={mutacoes} aoFechar={aoFechar} /></ComCostura></FechoV4Context.Provider>);
   return { aoFechar, mutacoes };
 }
+const montarDesligada = (mutacoes: MutacoesNegocio = mutacoesFalsas()) => montar(mutacoes, negocio, false);
 
 describe("PainelOrcamentoReal: abrir", () => {
   it("fechado (sem negócio) não monta o editor", () => {
@@ -59,21 +61,17 @@ describe("PainelOrcamentoReal: abrir", () => {
 });
 
 describe("PainelOrcamentoReal: com a bandeira do fecho ligada o orçamento nasce ligado", () => {
-  const montarLigada = (mutacoes: MutacoesNegocio = mutacoesFalsas()) => {
-    render(<FechoV4Context.Provider value><ComCostura mutacoes={mutacoes}><PainelOrcamentoReal negocio={negocio} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura></FechoV4Context.Provider>);
-    return mutacoes;
-  };
 
   it("o editor recebe o negócio para criar por neg_criar_orcamento; desligada, não", () => {
-    montarLigada();
+    montar();
     expect((ultimo() as { criarNoNegocioId?: string }).criarNoNegocioId).toBe("n1");
     cleanup();
-    montar();
+    montarDesligada();
     expect((ultimo() as { criarNoNegocioId?: string }).criarNoNegocioId).toBeUndefined();
   });
 
   it("depois de guardar não volta a ligar (já nasceu ligado): refaz a ficha e avisa", async () => {
-    const mutacoes = montarLigada();
+    const { mutacoes } = montar();
     await ultimo().onSaved("q-9");
     expect(mutacoes.ligar).not.toHaveBeenCalled();
     expect(mutacoes.refrescar).toHaveBeenCalledTimes(1);
@@ -81,12 +79,12 @@ describe("PainelOrcamentoReal: com a bandeira do fecho ligada o orçamento nasce
   });
 });
 
-describe("PainelOrcamentoReal: ligar ao negócio depois de guardar", () => {
+describe("PainelOrcamentoReal: com a bandeira desligada liga ao negócio depois de guardar", () => {
   it("liga o orçamento guardado ao negócio, avisa, e só devolve depois de ligar (o editor só fecha depois)", async () => {
     let ligou = false;
     const ligar = vi.fn(async () => { await Promise.resolve(); ligou = true; });
     const mutacoes = mutacoesFalsas({ ligar });
-    montar(mutacoes);
+    montarDesligada(mutacoes);
     await ultimo().onSaved("q-9");
     expect(ligar).toHaveBeenCalledWith("n1", { tipo: "orcamento", id: "q-9" });
     expect(ligou).toBe(true);
@@ -96,7 +94,7 @@ describe("PainelOrcamentoReal: ligar ao negócio depois de guardar", () => {
 
   it("se a ligação falha, o orçamento fica criado: diz-se com a causa traduzida, refaz-se a ficha, e o editor pode fechar", async () => {
     const mutacoes = mutacoesFalsas({ ligar: vi.fn(async () => { throw erroNegFalso("pessoasPagina.erroNeg.ng004", "NG004"); }) });
-    montar(mutacoes);
+    montarDesligada(mutacoes);
     await expect(ultimo().onSaved("q-9")).resolves.toBeUndefined();
     expect(erro).toHaveBeenCalledTimes(1);
     expect(erro.mock.calls[0][0]).toContain("O orçamento foi criado, mas não ficou ligado ao negócio.");
@@ -107,7 +105,7 @@ describe("PainelOrcamentoReal: ligar ao negócio depois de guardar", () => {
 
   it("um erro sem chave conhecida diz a mensagem genérica, nunca o texto cru", async () => {
     const mutacoes = mutacoesFalsas({ ligar: vi.fn(async () => { throw new Error("relation \"quotes\" does not exist"); }) });
-    montar(mutacoes);
+    montarDesligada(mutacoes);
     await ultimo().onSaved("q-9");
     expect(erro.mock.calls[0][0]).toContain("Não foi possível concluir a ação. Tente novamente.");
     expect(erro.mock.calls[0][0]).not.toContain("relation");

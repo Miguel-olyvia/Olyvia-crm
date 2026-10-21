@@ -1,6 +1,6 @@
-// O detalhe de um negócio na ficha REAL (com as mutações e os dados da ficha por contexto): perder, anular a perda com razão e dar como
-// ganho, tudo contra as mutações (nunca contra os stores do exemplo); o botão de ganhar desativado com o motivo à vista; e sem permissão
-// para editar nenhuma destas ações aparece. Os testes do exemplo (sem contexto) estão em DetalheNegocioFicha.test.tsx e não mudam.
+// O detalhe de um negócio na ficha REAL (com as mutações e os dados da ficha por contexto): perder e anular a perda com razão, tudo contra
+// as mutações (nunca contra os stores do exemplo); o «Dar como ganho» antigo já não existe (o ganho é o fecho v4, testado em
+// BlocoFechoNegocio.test.tsx); e sem permissão para editar nenhuma destas ações aparece. Os testes do exemplo (sem contexto) estão em DetalheNegocioFicha.test.tsx e não mudam.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -45,10 +45,13 @@ function abrir(negocio: Parameters<typeof DetalheNegocioFicha>[0]["negocio"], da
 }
 
 describe("negócio em curso, na ficha real", () => {
-  it("oferece «Perder negócio» e «Dar como ganho»", () => {
-    abrir(aberto);
-    expect(screen.getByRole("button", { name: "Perder negócio" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dar como ganho" })).toBeInTheDocument();
+  it("oferece «Perder negócio» e já não oferece o «Dar como ganho» antigo, seja qual for a regra da organização", () => {
+    for (const momentoGanho of ["manual", "proposta_aceite", "contrato_assinado"] as const) {
+      abrir({ ...aberto, prontoAGanhar: true }, { momentoGanho });
+      expect(screen.getByRole("button", { name: "Perder negócio" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
+      cleanup();
+    }
   });
 
   it("perder vai para a base (com a fase da base) e nunca para o store do exemplo", async () => {
@@ -61,45 +64,6 @@ describe("negócio em curso, na ficha real", () => {
     expect(alteracoesAtuais().perdidos).toEqual({});
   });
 
-  it("dar como ganho abre o diálogo e chama a base", async () => {
-    const mutacoes = abrir(aberto);
-    fireEvent.click(screen.getByRole("button", { name: "Dar como ganho" }));
-    expect(screen.getByRole("dialog", { name: "Dar o negócio como ganho" })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Dar como ganho" }));
-    expect(mutacoes.ganhar).toHaveBeenCalledWith("n1", null);
-    await waitFor(() => expect(sucesso).toHaveBeenCalledWith("Ana: negócio ganho. A pessoa passou a cliente."));
-  });
-});
-
-describe("«Dar como ganho» quando as condições não estão cumpridas", () => {
-  it("fica aria-disabled, com o motivo em texto visível ligado por aria-describedby, e não abre o diálogo", () => {
-    abrir(aberto, { momentoGanho: "contrato_assinado" });
-    const botao = screen.getByRole("button", { name: "Dar como ganho" });
-    expect(botao).toHaveAttribute("aria-disabled", "true");
-    const motivo = document.getElementById(botao.getAttribute("aria-describedby") ?? "");
-    expect(motivo).toHaveTextContent("Para ganhar é preciso um contrato assinado ligado ao negócio.");
-    expect(motivo).toBeVisible();
-    fireEvent.click(botao);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("com a regra «proposta aceite» o motivo é a proposta", () => {
-    abrir(aberto, { momentoGanho: "proposta_aceite" });
-    const botao = screen.getByRole("button", { name: "Dar como ganho" });
-    expect(document.getElementById(botao.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Para ganhar é preciso uma proposta aceite ligada ao negócio.");
-  });
-
-  it("a proposta aceite cumpre a regra «proposta aceite»: o botão fica ativo", () => {
-    abrir({ ...aberto, proposta: { estado: "aceite" } }, { momentoGanho: "proposta_aceite" });
-    const botao = screen.getByRole("button", { name: "Dar como ganho" });
-    expect(botao).not.toHaveAttribute("aria-disabled", "true");
-    expect(botao).not.toHaveAttribute("aria-describedby");
-  });
-
-  it("o «pronto a ganhar» da base manda sobre a regra local", () => {
-    abrir({ ...aberto, prontoAGanhar: true }, { momentoGanho: "contrato_assinado" });
-    expect(screen.getByRole("button", { name: "Dar como ganho" })).not.toHaveAttribute("aria-disabled", "true");
-  });
 });
 
 describe("negócio perdido, na ficha real", () => {
@@ -125,15 +89,14 @@ describe("negócio perdido, na ficha real", () => {
 });
 
 describe("negócio ganho e permissões, na ficha real", () => {
-  it("um negócio ganho não tem perder, anular nem ganhar", () => {
+  it("um negócio ganho não tem perder nem anular", () => {
     abrir(ganho);
-    for (const nome of ["Perder negócio", "Anular perda", "Dar como ganho"]) expect(screen.queryByRole("button", { name: nome })).toBeNull();
+    for (const nome of ["Perder negócio", "Anular perda"]) expect(screen.queryByRole("button", { name: nome })).toBeNull();
   });
 
-  it("sem permissão para editar (pessoas.edit) não há perder nem ganhar", () => {
+  it("sem permissão para editar (pessoas.edit) não há perder", () => {
     abrir(aberto, { podeEditar: false });
     expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
   });
 
   it("sem permissão para editar não há «Anular perda»", () => {

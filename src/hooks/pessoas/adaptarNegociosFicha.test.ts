@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isNegocioGanho, valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { ehHistorico } from "@/components/pessoas/pessoasTipos";
-import { podeGanhar } from "@/components/pessoas/podeGanhar";
 import { adaptarNegocios, estadoContratoDeDb, estadoPropostaDeDb } from "./adaptarNegociosFicha";
 import type { ContratoDb, NegocioFichaDb, PropostaDb } from "./fichaTipos";
 import { fichaDb, negocioDb, PESSOA_ID } from "./fichaFabrica";
@@ -72,10 +71,9 @@ describe("adaptarNegocios: a regra manual", () => {
   const comMomento = (momento: "manual" | "proposta_aceite" | "contrato_assinado" | null, ...itens: NegocioFichaDb[]) =>
     adaptarNegocios(fichaDb({ negocios: { total: itens.length, itens } }), HOJE, momento);
 
-  it("manual: o negócio aberto fica pronto mesmo com pronto_a_ganhar falso, e o botão pode oferecer o ganho", () => {
+  it("manual: o negócio aberto fica pronto mesmo com pronto_a_ganhar falso", () => {
     const [n] = comMomento("manual", negocioDb({ pronto_a_ganhar: false })) as NegocioMes[];
     expect(n.prontoAGanhar).toBe(true);
-    expect(podeGanhar(n, "manual").pode).toBe(true);
   });
 
   it("manual: um negócio ganho ou perdido não é marcado como pronto", () => {
@@ -184,16 +182,15 @@ describe("adaptarNegocios: uma só regra de proposta (a viva)", () => {
     }
   });
 
-  it("a regra «proposta aceite» do ganho vê a aceite mesmo com uma rejeitada mais recente", () => {
+  it("a proposta aceite continua a ser a proposta do negócio mesmo com uma rejeitada mais recente", () => {
     const [n] = adaptar(negocioDb({
       propostas: [proposta({ id: "a", status: "accepted", criado_em: antes }), proposta({ id: "b", status: "rejected", criado_em: depois })],
     })) as NegocioMes[];
     expect(n.proposta).toEqual({ estado: "aceite" });
-    expect(podeGanhar({ ...n, prontoAGanhar: undefined }, "proposta_aceite").pode).toBe(true);
   });
 
-  it("com só rejeitadas a regra «proposta aceite» não deixa ganhar", () => {
+  it("com só rejeitadas o negócio fica sem proposta", () => {
     const [n] = adaptar(negocioDb({ propostas: [proposta({ status: "rejected", criado_em: depois })] })) as NegocioMes[];
-    expect(podeGanhar({ ...n, prontoAGanhar: undefined }, "proposta_aceite")).toEqual({ pode: false, motivo: "semProposta" });
+    expect(n.proposta).toBeNull();
   });
 });

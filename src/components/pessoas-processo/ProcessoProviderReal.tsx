@@ -1,7 +1,7 @@
 // O processo (orçamento, proposta e contrato) na ficha REAL. O botão do «A fazer» de um negócio abre o ecrã real da app que faz o passo e liga o
 // resultado ao negócio: criar o orçamento e a proposta abre o editor e o diálogo que a app já tem (`PainelOrcamentoReal`, `PainelPropostaReal`);
 // enviar e responder à proposta, criar o contrato e assiná-lo vão por ligação ao ecrã da app com `?voltar=` para regressar à ficha (o contrato
-// novo volta ligado por `useLigarAoVoltar`); ganhar abre o diálogo de ganhar. Os passos que o exemplo simula (verificar o orçamento, a Direção)
+// novo volta ligado por `useLigarAoVoltar`); ganhar já não tem passo aqui (o ganho é o fecho do negócio, no detalhe). Os passos que o exemplo simula (verificar o orçamento, a Direção)
 // não existem em modo real, e o passo «Fazer o levantamento» de um negócio é do P3: um passo que a ficha não sabe executar não tem botão
 // (`podeExecutar`). O painel «Visita e levantamento» (menu «Mais» da ficha) abre daqui e grava na base (`PainelVisitaLevantamentoReal`) a quem pode
 // editar a ficha. Sem as mutações da ficha real (o exemplo) não faz nada: os filhos ficam como estavam.
@@ -14,17 +14,14 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { adaptarPessoa } from "@/hooks/pessoas/adaptarFichaPessoa";
-import { adaptarNegocios } from "@/hooks/pessoas/adaptarNegociosFicha";
 import { contratoVivo, orcamentoParaProposta, propostaAceite, propostaViva, temPropostaEnviadaOuAceite } from "@/hooks/pessoas/documentosDoNegocio";
 import type { FichaDb, NegocioFichaDb } from "@/hooks/pessoas/fichaTipos";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { enderecoDeRegresso, ligacaoComVoltar } from "@/lib/voltarParaPessoas";
-import { GanharNegocioDialogo } from "@/components/negocio-metas/GanharNegocioDialogo";
+import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
 import { useMutacoesDaFicha } from "@/components/negocio-metas/mutacoesNegocio";
-import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { useAvisarNegocio } from "@/components/negocio-metas/useAvisarNegocio";
 import { MarcarVisitaProvider } from "@/components/pessoas/MarcarVisita";
 import type { AberturaVisita } from "@/components/pessoas/marcarVisitaContexto";
 import { moradaDaLead } from "@/components/pessoas/moradaVisita";
@@ -41,7 +38,7 @@ const PainelPropostaReal = lazy(() => import("./PainelPropostaReal").then((m) =>
 const PainelVisitaLevantamentoReal = lazy(() => import("./PainelVisitaLevantamentoReal").then((m) => ({ default: m.PainelVisitaLevantamentoReal })));
 
 type TipoDocumento = "orcamento" | "proposta" | "contrato";
-type Painel = "orcamento" | "proposta" | "ganhar";
+type Painel = "orcamento" | "proposta";
 
 /** O que um passo faz: abre um painel nesta ficha, ou leva a um ecrã da app (o destino ainda sem `?voltar=`). */
 type Plano = { tipo: "painel"; painel: Painel; negocio: NegocioFichaDb } | { tipo: "ir"; destino: string; negocio: NegocioFichaDb };
@@ -53,7 +50,8 @@ const SEM_EFEITO = (): void => undefined;
 const visitaViva = (v: { status: string; cancelada?: boolean }): boolean => v.cancelada !== true && v.status !== "cancelled";
 
 /** O plano do passo de um item, ou `null` se a ficha real não o sabe executar (ou falta o documento ou a permissão que ele pede). */
-function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonly string[]): Plano | null {
+// `fechoV4`: o contrato nasce dentro do negócio (`&negocio=` no endereço) e um negócio que fecha na proposta não oferece contratos.
+function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonly string[], fechoV4 = false): Plano | null {
   if (!ficha || item.tipo !== "negocio") return null;
   const negocio = ficha.negocios?.itens.find((n) => n.id === item.id);
   if (!negocio) return null;
@@ -72,14 +70,14 @@ function planear(item: ItemProcesso, ficha: FichaDb | null, permissoes?: readonl
     }
     case "criarContrato": {
       const proposta = propostaAceite(negocio);
-      return podeCriar("client_contracts.create") && proposta ? { tipo: "ir", destino: `/client-contracts?newContract=true&proposalId=${codificar(proposta.id)}`, negocio } : null;
+      if (fechoV4 && negocio.fecho === "proposta") return null;
+      const nasceLigado = fechoV4 ? `&negocio=${codificar(negocio.id)}` : "";
+      return podeCriar("client_contracts.create") && proposta ? { tipo: "ir", destino: `/client-contracts?newContract=true&proposalId=${codificar(proposta.id)}${nasceLigado}`, negocio } : null;
     }
     case "registarAssinatura": {
       const contrato = contratoVivo(negocio);
       return contrato ? { tipo: "ir", destino: `/client-contracts?open=${codificar(contrato.id)}`, negocio } : null;
     }
-    case "ganharNegocio":
-      return editar ? { tipo: "painel", painel: "ganhar", negocio } : null;
     default:
       return null;
   }
@@ -120,7 +118,7 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
   const fonte = useFontePessoas();
   const mutacoes = useMutacoesDaFicha();
   const navegar = useNavigate();
-  const avisar = useAvisarNegocio();
+  const fechoV4 = useFechoV4();
   const [aberto, setAberto] = useState<{ painel: Painel; negocio: string; pessoa: string } | null>(null);
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   // As permissões do fecho (criar orçamento, proposta e contrato): sem a lista nada se restringe; a base decide.
@@ -161,14 +159,14 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
       if (ficha) navegar(ligacaoComVoltar(destino, enderecoDeRegresso(ficha.pessoa.id, negocio)));
     };
     const podeExecutar = (item: ItemProcesso): boolean => {
-      const plano = planear(item, ficha, permissoesFecho);
+      const plano = planear(item, ficha, permissoesFecho, fechoV4);
       if (!plano || !organizationId) return false;
       return plano.tipo === "ir" || plano.painel !== "orcamento" || !!(ficha && origemDoOrcamento(ficha));
     };
     return {
       podeExecutar,
       executar: (item) => {
-        const plano = planear(item, ficha, permissoesFecho);
+        const plano = planear(item, ficha, permissoesFecho, fechoV4);
         if (!plano || !ficha || !podeExecutar(item)) return;
         if (plano.tipo === "ir") ir(plano.destino, plano.negocio.id);
         else setAberto({ painel: plano.painel, negocio: plano.negocio.id, pessoa: ficha.pessoa.id });
@@ -185,7 +183,7 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
         if (destino) ir(destino, negocioId);
       },
     };
-  }, [ficha, navegar, organizationId, podeVisita, permissoesFecho]);
+  }, [ficha, navegar, organizationId, podeVisita, permissoesFecho, fechoV4]);
 
   if (!mutacoes) return <>{children}</>;
 
@@ -206,9 +204,6 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
   const proposta: NegocioDaProposta | null = doPainel && aberto?.painel === "proposta" && ficha
     ? { id: doPainel.id, entityId: ficha.pessoa.id, orcamentoId: orcamentoParaProposta(doPainel), propostaViva: temPropostaEnviadaOuAceite(doPainel) }
     : null;
-  const paraGanhar: NegocioMes | null = doPainel && aberto?.painel === "ganhar" && ficha
-    ? adaptarNegocios(ficha, hojeLisboa(), fonte.modo === "real" ? fonte.momentoGanho : null).find((n) => n.id === doPainel.id && n.estadoReal === "aberto") ?? null
-    : null;
 
   return (
     <ProcessoContext.Provider value={valor}>
@@ -217,7 +212,6 @@ export function ProcessoProviderReal({ ficha, children }: ProcessoProviderRealPr
       </MarcarVisitaProvider>
       {orcamento && <Suspense fallback={null}><PainelOrcamentoReal negocio={orcamento} mutacoes={mutacoes} aoFechar={fechar} /></Suspense>}
       {proposta && <Suspense fallback={null}><PainelPropostaReal negocio={proposta} mutacoes={mutacoes} aoFechar={fechar} /></Suspense>}
-      <GanharNegocioDialogo negocio={paraGanhar} aoFechar={fechar} aoGanho={avisar} />
       {ficha && visita.n > 0 && (
         <Suspense fallback={<AbrindoPainel />}>
           <PainelVisitaLevantamentoReal

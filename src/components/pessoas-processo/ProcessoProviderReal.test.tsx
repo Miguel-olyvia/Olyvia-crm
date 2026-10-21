@@ -1,10 +1,11 @@
 // O processo (orçamento, proposta e contrato) na ficha REAL: o botão do «A fazer» de um negócio abre o ecrã real da app que faz esse passo e
 // liga o resultado ao negócio. Criar o orçamento e a proposta abre o editor e o diálogo que a app já tem; enviar e responder à proposta,
-// criar o contrato e assiná-lo vão por ligação ao ecrã da app, com `?voltar=` para regressar à ficha; ganhar abre o diálogo de ganhar.
+// criar o contrato e assiná-lo vão por ligação ao ecrã da app, com `?voltar=` para regressar à ficha; ganhar já não tem diálogo (o ganho é o fecho do negócio).
 // Um passo que a ficha real ainda não sabe fazer (o levantamento de um negócio é do P3) não oferece botão.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { FechoV4Context } from "@/components/negocio-metas/bandeiraFecho";
 import { ComCostura, dadosFalsos, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
 import { fichaDb, LEAD_ID, negocioDb, PESSOA_ID, pessoaDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { ContratoDb, FichaDb, NegocioFichaDb, OrcamentoDb, PropostaDb } from "@/hooks/pessoas/fichaTipos";
@@ -81,17 +82,20 @@ function Consumidor({ casos }: { casos: Record<string, ItemProcesso> }) {
   );
 }
 
-function montar(ficha: FichaDb | null = FICHA, casos: Record<string, ItemProcesso> = CASOS, fonte: FontePessoas = REAL) {
+// `bandeira` null segue a constante (ligada); false monta o caminho antigo.
+function montar(ficha: FichaDb | null = FICHA, casos: Record<string, ItemProcesso> = CASOS, fonte: FontePessoas = REAL, bandeira: boolean | null = null) {
   const mutacoes = mutacoesFalsas();
   const cliente = new QueryClient();
   render(
-    <QueryClientProvider client={cliente}>
-      <FontePessoasContext.Provider value={fonte}>
-        <ComCostura mutacoes={mutacoes} dados={dadosFalsos()}>
-          <ProcessoProviderReal ficha={ficha}><Consumidor casos={casos} /></ProcessoProviderReal>
-        </ComCostura>
-      </FontePessoasContext.Provider>
-    </QueryClientProvider>,
+    <FechoV4Context.Provider value={bandeira}>
+      <QueryClientProvider client={cliente}>
+        <FontePessoasContext.Provider value={fonte}>
+          <ComCostura mutacoes={mutacoes} dados={dadosFalsos()}>
+            <ProcessoProviderReal ficha={ficha}><Consumidor casos={casos} /></ProcessoProviderReal>
+          </ComCostura>
+        </FontePessoasContext.Provider>
+      </QueryClientProvider>
+    </FechoV4Context.Provider>,
   );
   return { mutacoes };
 }
@@ -136,10 +140,24 @@ describe("ProcessoProviderReal: os passos que vão ao ecrã da app", () => {
     expect(navegar).toHaveBeenCalledWith(`/proposals?open=${proposta}&voltar=${REGRESSO(negocio)}`);
   });
 
-  it("criar o contrato abre a criação de contrato com a proposta aceite e ?voltar=", () => {
+  it("criar o contrato abre a criação com a proposta aceite, o negócio (nasce ligado) e ?voltar=", () => {
     montar();
     clicar("criarContrato");
+    expect(navegar).toHaveBeenCalledWith(`/client-contracts?newContract=true&proposalId=pr-ok&negocio=n-aceite&voltar=${REGRESSO("n-aceite")}`);
+  });
+
+  it("com a bandeira desligada o endereço é o de antes, sem o negócio", () => {
+    montar(FICHA, CASOS, REAL, false);
+    clicar("criarContrato");
     expect(navegar).toHaveBeenCalledWith(`/client-contracts?newContract=true&proposalId=pr-ok&voltar=${REGRESSO("n-aceite")}`);
+  });
+
+  it("num negócio que fecha na proposta o contrato não se oferece", () => {
+    const venda = fichaDb({ ...FICHA, negocios: { total: 1, itens: [neg("n-venda", { fecho: "proposta", orcamentos: [orc("o3")], propostas: [prop("pr-ok", "accepted")] })] } });
+    montar(venda, { criarContrato: item("n-venda", { fase: "proposta", orcamentos: 1, propostaAceite: true }) });
+    expect(screen.getByRole("button", { name: "criarContrato" }).getAttribute("data-pode")).toBe("false");
+    clicar("criarContrato");
+    expect(navegar).not.toHaveBeenCalled();
   });
 
   it("registar a assinatura abre o contrato com ?voltar=", () => {
@@ -157,10 +175,11 @@ describe("ProcessoProviderReal: os passos que vão ao ecrã da app", () => {
 });
 
 describe("ProcessoProviderReal: dar o negócio como ganho", () => {
-  it("abre o diálogo de ganhar para o negócio", () => {
+  it("já não abre diálogo nem navega: o ganho faz-se no fecho do negócio", () => {
     montar();
+    expect(screen.getByRole("button", { name: "ganharNegocio" }).getAttribute("data-pode")).toBe("false");
     clicar("ganharNegocio");
-    expect(screen.getByRole("dialog", { name: "Dar o negócio como ganho" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(navegar).not.toHaveBeenCalled();
   });
 });
@@ -174,10 +193,10 @@ describe("ProcessoProviderReal: criar um documento pede também a permissão do 
     for (const nome of ["criarOrcamento", "criarProposta", "criarContrato"]) expect(pode(nome), nome).toBe("true");
   });
 
-  it("com uma lista vazia não se cria nenhum documento, mas enviar, assinar e ganhar continuam", () => {
+  it("com uma lista vazia não se cria nenhum documento, mas enviar e assinar continuam", () => {
     montar(FICHA, CASOS, comPermissoes([]));
     for (const nome of ["criarOrcamento", "criarProposta", "criarContrato"]) expect(pode(nome), nome).toBe("false");
-    for (const nome of ["enviarProposta", "registarRespostaCliente", "registarAssinatura", "ganharNegocio"]) expect(pode(nome), nome).toBe("true");
+    for (const nome of ["enviarProposta", "registarRespostaCliente", "registarAssinatura"]) expect(pode(nome), nome).toBe("true");
   });
 
   it("cada criar pede a sua permissão: quotes.create, proposals.create e client_contracts.create", () => {
@@ -208,7 +227,8 @@ describe("ProcessoProviderReal: o que a ficha real ainda não executa", () => {
 
   it("os passos suportados dizem que executam", () => {
     montar();
-    for (const nome of Object.keys(CASOS)) expect(pode(nome), nome).toBe("true");
+    // «ganharNegocio» está nos CASOS mas já não é um passo desta ficha: o ganho é o fecho do negócio.
+    for (const nome of Object.keys(CASOS).filter((n) => n !== "ganharNegocio")) expect(pode(nome), nome).toBe("true");
   });
 
   it.each<[string, Partial<ItemProcesso>]>([
@@ -242,7 +262,7 @@ describe("ProcessoProviderReal: o que a ficha real ainda não executa", () => {
     for (const nome of ["a", "b", "c", "d"]) expect(pode(nome), nome).toBe("false");
   });
 
-  it("sem permissão para editar só se abrem os ecrãs (enviar, responder e assinar); criar e ganhar não executam", () => {
+  it("sem permissão para editar só se abrem os ecrãs (enviar, responder e assinar); criar não executam", () => {
     const semEditar = fichaDb({ ...FICHA, permissoes: { editar: false, criar: false } });
     montar(semEditar);
     const esperado: Record<string, string> = {

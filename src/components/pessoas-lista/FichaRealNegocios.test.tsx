@@ -1,5 +1,6 @@
 // A ficha REAL com o negócio completo (P3), de ponta a ponta: a leitura (neg_ficha_pessoa), as escritas (neg_*) e a ficha a refazer-se depois
-// de cada uma. Só o Supabase é simulado (rpc). Cobre perder, ganhar, ligar um registo e criar um negócio, e o que se vê a seguir.
+// de cada uma. Só o Supabase é simulado (rpc). Cobre perder, ligar um registo e criar um negócio, e o que se vê a seguir. O «Dar como ganho»
+// antigo já não existe: o ganho é o fecho v4 (BlocoFechoNegocio.test.tsx).
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -35,10 +36,6 @@ beforeEach(() => {
   ficha = FICHA_BASE;
   rpcMock.mockImplementation((nome: string) => {
     if (nome === "neg_ficha_pessoa") return respostaOk(ficha);
-    if (nome === "neg_ganhar_negocio") {
-      ficha = fichaDb({ ...FICHA_BASE, negocios: { total: 1, itens: [negocioDb({ id: "n1", titulo: "Casa de banho", estado: "ganho", ganho_em: "2026-10-19T09:00:00Z", orcamentos: [orcamento] })] } });
-      return respostaOk({ mudou: true, estado: "ganho", conversao: "feita", lead_id: LEAD_ID, client_id: "c9", outras_leads_abertas: 0 });
-    }
     if (nome === "neg_criar_negocio") {
       ficha = fichaDb({
         ...FICHA_BASE,
@@ -68,34 +65,20 @@ function desenhar(momento: MomentoGanho | null = "manual", sobre: Partial<Parame
 const detalhe = () => screen.findByRole("heading", { level: 3, name: "Casa de banho" });
 
 describe("FichaReal com o negócio completo", () => {
-  it("abre já no negócio pedido e oferece perder e dar como ganho", async () => {
+  it("abre já no negócio pedido e oferece perder, sem o «Dar como ganho» antigo", async () => {
     desenhar();
     await detalhe();
     expect(screen.getByRole("button", { name: "Perder negócio" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Dar como ganho" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
   });
 
-  it("dar como ganho chama a base, refaz a ficha e o negócio deixa de se poder ganhar", async () => {
-    desenhar();
-    await detalhe();
-    const leituras = chamadas("neg_ficha_pessoa").length;
-    fireEvent.click(screen.getByRole("button", { name: "Dar como ganho" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Dar o negócio como ganho" })).getByRole("button", { name: "Dar como ganho" }));
-    await waitFor(() => expect(chamadas("neg_ganhar_negocio")).toHaveLength(1));
-    expect(params("neg_ganhar_negocio")).toEqual({ p_negocio_id: "n1", p_lead_id: null });
-    await waitFor(() => expect(chamadas("neg_ficha_pessoa").length).toBeGreaterThan(leituras));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull());
-    expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
-  });
-
-  it("com a regra «contrato assinado» e sem contrato, o botão de ganhar não deixa chegar à base", async () => {
-    ficha = fichaDb({ ...FICHA_BASE, negocios: { total: 1, itens: [negocioDb({ id: "n1", titulo: "Casa de banho", orcamentos: [orcamento], pronto_a_ganhar: false })] } });
-    desenhar("contrato_assinado");
-    await detalhe();
-    const botao = screen.getByRole("button", { name: "Dar como ganho" });
-    expect(botao).toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(botao);
-    expect(screen.queryByRole("dialog", { name: "Dar o negócio como ganho" })).toBeNull();
+  it("seja qual for a regra da organização não há «Dar como ganho» e nunca se chama neg_ganhar_negocio", async () => {
+    for (const regra of ["manual", "proposta_aceite", "contrato_assinado"] as const) {
+      desenhar(regra);
+      await detalhe();
+      expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
+      cleanup();
+    }
     expect(chamadas("neg_ganhar_negocio")).toHaveLength(0);
   });
 
@@ -139,7 +122,6 @@ describe("FichaReal com o negócio completo", () => {
     desenhar();
     await detalhe();
     expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /Criar negócio/ })).toBeNull();
   });
 });

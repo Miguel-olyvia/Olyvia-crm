@@ -27,10 +27,8 @@ import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { AbrirDocumento } from "./AbrirDocumento";
 import { AcoesEdicaoNegocio } from "./AcoesEdicaoNegocio";
-import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
 import { AlertasNegocio } from "./AlertasNegocio";
 import { BlocoFechoNegocio } from "./BlocoFechoNegocio";
-import { BotaoGanharNegocio } from "./BotaoGanharNegocio";
 import { CondicoesDaProposta } from "./CondicoesDaProposta";
 import { EtiquetaFecho } from "./EtiquetaFecho";
 import { passoDoNegocio } from "./etapaPessoa";
@@ -119,8 +117,6 @@ function secaoAberta(fase: IdFase | undefined, terminado: boolean): SecaoDetalhe
 
 export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
-  // Fecho v4 (bandeira desligada por omissão): troca o «Dar como ganho» antigo pelo bloco de fecho e mostra os avisos do negócio.
-  const fechoV4 = useFechoV4();
   // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
   const negocio = semContratosSeProposta(negocioDaFicha);
   const titulo = useRef<HTMLHeadingElement>(null);
@@ -186,7 +182,6 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
         {estaAberto(negocio) && !perda && podeEditar && (
           <div className="flex flex-wrap items-start gap-3">
             <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
-            {!fechoV4 && <BotaoGanharNegocio negocio={negocio} />}
           </div>
         )}
         <BlocoFechoNegocio negocio={negocio} />

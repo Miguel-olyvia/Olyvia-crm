@@ -12,9 +12,6 @@ const N = "pessoasPagina.neg.";
 const CHAVES_USADAS = [
   "saving",
   "undo.title", "undo.description", "undo.reason", "undo.error.empty", "undo.error.tooLong", "undo.confirm", "undo.cancel", "undo.done",
-  "win.button", "win.title", "win.description", "win.lead", "win.confirm", "win.cancel", "win.ng006.proposal", "win.otherLeads.one", "win.otherLeads.many",
-  "win.done.feita", "win.done.ja_cliente", "win.done.ja_convertida", "win.done.generic", "win.done.already",
-  "win.blocked.naoAberto", "win.blocked.semProposta", "win.blocked.semContrato", "win.blocked.semRegra",
   "lead.option", "lead.option.closed",
   "link.surveyLocked",
   "create.description", "create.name", "create.name.hint", "create.name.error", "create.notes", "create.lead", "create.reopen", "create.reopen.hint",
@@ -60,8 +57,6 @@ describe("traduções do negócio na ficha real", () => {
   it("os textos com marcadores têm os marcadores certos", () => {
     expect(marcas(pt[`${N}undo.description`])).toEqual(["{name}", "{work}"]);
     expect(marcas(pt[`${N}undo.done`])).toEqual(["{name}", "{work}"]);
-    expect(marcas(pt[`${N}win.description`])).toEqual(["{name}", "{work}"]);
-    expect(marcas(pt[`${N}win.otherLeads.many`])).toEqual(["{count}"]);
     expect(marcas(pt[`${N}lead.option`])).toEqual(["{date}"]);
     expect(marcas(pt[`${N}create.done`])).toEqual(["{name}", "{title}"]);
     expect(marcas(pt[`${N}create.refused.many`])).toEqual(["{count}"]);

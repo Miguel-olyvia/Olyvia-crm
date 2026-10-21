@@ -39,6 +39,8 @@ interface ContractDetailDialogProps {
   presetProposalId?: string | null;
   /** Só com `presetProposalId`: a lista de propostas já chegou (antes disso não se diz que a pedida falta). Por omissão sim. */
   proposalsLoaded?: boolean;
+  /** Só a ficha da pessoa (fecho v4), num contrato NOVO: o negócio a que o contrato fica ligado (diz-se numa linha). Sem isto nada muda. */
+  negocioLigado?: { titulo: string | null } | null;
   getProposalName: (p: any) => string;
   getProposalTotal: (p: any) => number;
   formatCurrency: (v: number | null, c: string | null) => string;
@@ -55,7 +57,7 @@ const statusConfig: Record<string, { color: string; icon: React.ReactNode; bg: s
 };
 
 export function ContractDetailDialog({
-  open, onOpenChange, contract, proposals, templates, onSave, saving, isNew, presetProposalId = null, proposalsLoaded = true,
+  open, onOpenChange, contract, proposals, templates, onSave, saving, isNew, presetProposalId = null, proposalsLoaded = true, negocioLigado = null,
   getProposalName, getProposalTotal, formatCurrency, getTranslatedStatus,
 }: ContractDetailDialogProps) {
   const { activeCompany } = useCompany();
@@ -460,6 +462,11 @@ export function ContractDetailDialog({
                   </SelectContent>
                 </Select>
                 {presetMissing && <p role="alert" className="text-xs font-medium text-destructive">{t("pessoasPagina.neg.contract.presetMissing")}</p>}
+                {isNew && negocioLigado && (
+                  <p role="status" className="text-xs text-muted-foreground">
+                    {negocioLigado.titulo ? t("pessoasPagina.neg.fecho.contract.linked", { work: negocioLigado.titulo }) : t("pessoasPagina.neg.fecho.contract.linked.noTitle")}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

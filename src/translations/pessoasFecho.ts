@@ -23,6 +23,13 @@ const pt: Record<string, string> = {
   [`${N}done.proposta`]: "{name}: o negócio {work} passa a fechar na proposta.",
   [`${N}done.contrato`]: "{name}: o negócio {work} passa a fechar no contrato.",
   [`${N}unchanged`]: "O negócio {work} já fechava assim.",
+  [`${N}contract.linked`]: "Este contrato fica ligado ao negócio «{work}».",
+  [`${N}contract.linked.noTitle`]: "Este contrato fica ligado ao negócio.",
+  [`${N}replace.reopens`]: "Este contrato deu o negócio como ganho. Ao gerar o substituto, o negócio reabre e fica à espera de nova assinatura; o substituto fica ligado a ele.",
+  [`${N}replace.lost`]: "O negócio está perdido: o substituto não fica ligado a ele.",
+  [`${N}replace.noPermission`]: "Sem permissão para editar este negócio, o substituto não se pode gerar daqui: ficaria sem negócio.",
+  [`${N}replace.checking`]: "A verificar o negócio deste contrato. Só se pode anular com substituto quando a verificação terminar.",
+  [`${N}replace.unavailable`]: "Não foi possível verificar o negócio deste contrato. Desmarque o substituto para anular, ou tente de novo.",
 };
 
 const en: Record<string, string> = {
@@ -45,6 +52,13 @@ const en: Record<string, string> = {
   [`${N}done.proposta`]: "{name}: the deal {work} now closes on the proposal.",
   [`${N}done.contrato`]: "{name}: the deal {work} now closes on the contract.",
   [`${N}unchanged`]: "The deal {work} already closed this way.",
+  [`${N}contract.linked`]: "This contract will be linked to the deal \"{work}\".",
+  [`${N}contract.linked.noTitle`]: "This contract will be linked to the deal.",
+  [`${N}replace.reopens`]: "This contract won the deal. Generating the replacement reopens the deal until the new one is signed; the replacement stays linked to it.",
+  [`${N}replace.lost`]: "The deal is lost: the replacement will not be linked to it.",
+  [`${N}replace.noPermission`]: "Without permission to edit this deal, the replacement cannot be generated from here: it would have no deal.",
+  [`${N}replace.checking`]: "Checking the deal for this contract. You can only cancel with a replacement once the check finishes.",
+  [`${N}replace.unavailable`]: "The deal for this contract could not be checked. Untick the replacement to cancel, or try again.",
 };
 
 export const pessoasFechoTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

@@ -20,11 +20,13 @@ type PropsDoDialogo = {
 };
 const ultimo = (): PropsDoDialogo => dialogo.mock.calls[dialogo.mock.calls.length - 1][0] as PropsDoDialogo;
 
-function montar(mutacoes: MutacoesNegocio = mutacoesFalsas(), n: NegocioDaProposta | null = negocio) {
+// Por omissao o fluxo novo (bandeira do fecho ligada); `ligada = false` monta o caminho antigo, que continua a existir com a bandeira desligada.
+function montar(mutacoes: MutacoesNegocio = mutacoesFalsas(), n: NegocioDaProposta | null = negocio, ligada = true) {
   const aoFechar = vi.fn();
-  render(<ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={n} mutacoes={mutacoes} aoFechar={aoFechar} /></ComCostura>);
+  render(<FechoV4Context.Provider value={ligada}><ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={n} mutacoes={mutacoes} aoFechar={aoFechar} /></ComCostura></FechoV4Context.Provider>);
   return { aoFechar, mutacoes };
 }
+const montarDesligada = (mutacoes: MutacoesNegocio = mutacoesFalsas()) => montar(mutacoes, negocio, false);
 
 describe("PainelPropostaReal: abrir", () => {
   it("fechado (sem negócio) o diálogo está fechado", () => {
@@ -65,21 +67,17 @@ describe("PainelPropostaReal: abrir", () => {
 });
 
 describe("PainelPropostaReal: com a bandeira do fecho ligada a proposta nasce ligada", () => {
-  const montarLigada = (mutacoes: MutacoesNegocio = mutacoesFalsas()) => {
-    render(<FechoV4Context.Provider value><ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={negocio} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura></FechoV4Context.Provider>);
-    return mutacoes;
-  };
 
   it("o diálogo recebe o negócio para criar por neg_criar_proposta; desligada, não", () => {
-    montarLigada();
+    montar();
     expect(ultimo().criarNoNegocioId).toBe("n1");
     cleanup();
-    montar();
+    montarDesligada();
     expect(ultimo().criarNoNegocioId).toBeUndefined();
   });
 
   it("depois de guardar não volta a ligar (já nasceu ligada): refaz a ficha e avisa", async () => {
-    const mutacoes = montarLigada();
+    const { mutacoes } = montar();
     ultimo().onSaved?.("pr-7");
     await vi.waitFor(() => expect(sucesso).toHaveBeenCalledWith("Proposta criada e ligada ao negócio."));
     expect(mutacoes.ligar).not.toHaveBeenCalled();
@@ -87,10 +85,10 @@ describe("PainelPropostaReal: com a bandeira do fecho ligada a proposta nasce li
   });
 });
 
-describe("PainelPropostaReal: ligar ao negócio depois de guardar", () => {
+describe("PainelPropostaReal: com a bandeira desligada liga ao negócio depois de guardar", () => {
   it("liga a proposta guardada ao negócio e avisa", async () => {
     const mutacoes = mutacoesFalsas();
-    montar(mutacoes);
+    montarDesligada(mutacoes);
     ultimo().onSaved?.("pr-7");
     await vi.waitFor(() => expect(mutacoes.ligar).toHaveBeenCalledWith("n1", { tipo: "proposta", id: "pr-7" }));
     await vi.waitFor(() => expect(sucesso).toHaveBeenCalledWith("Proposta criada e ligada ao negócio."));
@@ -99,7 +97,7 @@ describe("PainelPropostaReal: ligar ao negócio depois de guardar", () => {
 
   it("se a ligação falha, a proposta fica criada: diz-se com a causa traduzida e refaz-se a ficha", async () => {
     const mutacoes = mutacoesFalsas({ ligar: vi.fn(async () => { throw erroNegFalso("pessoasPagina.erroNeg.ng001", "NG001"); }) });
-    montar(mutacoes);
+    montarDesligada(mutacoes);
     ultimo().onSaved?.("pr-7");
     await vi.waitFor(() => expect(erro).toHaveBeenCalledTimes(1));
     expect(erro.mock.calls[0][0]).toContain("A proposta foi criada, mas não ficou ligada ao negócio.");
@@ -112,9 +110,9 @@ describe("PainelPropostaReal: ligar ao negócio depois de guardar", () => {
 describe("PainelPropostaReal: o diálogo chama onSaved depois de pedir para fechar", () => {
   it("liga ao negócio mesmo quando o painel já fechou (o negócio já não vem nas props)", async () => {
     const mutacoes = mutacoesFalsas();
-    const { rerender } = render(<ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={negocio} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura>);
+    const { rerender } = render(<FechoV4Context.Provider value={false}><ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={negocio} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura></FechoV4Context.Provider>);
     // O diálogo fecha-se (o painel passa a `null`) e só depois chama o `onSaved` mais recente.
-    rerender(<ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={null} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura>);
+    rerender(<FechoV4Context.Provider value={false}><ComCostura mutacoes={mutacoes}><PainelPropostaReal negocio={null} mutacoes={mutacoes} aoFechar={vi.fn()} /></ComCostura></FechoV4Context.Provider>);
     ultimo().onSaved?.("pr-9");
     await vi.waitFor(() => expect(mutacoes.ligar).toHaveBeenCalledWith("n1", { tipo: "proposta", id: "pr-9" }));
   });

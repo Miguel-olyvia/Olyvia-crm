@@ -13,6 +13,7 @@ const CHAVES_USADAS = [
   "question", "hint", "option.contrato", "option.proposta", "tag.contrato", "tag.proposta", "note.proposta",
   "change.button", "change.title", "change.description", "change.to.proposta", "change.to.contrato", "change.cancel",
   "confirm.proposta", "confirm.contrato", "confirm.button", "done.proposta", "done.contrato", "unchanged",
+  "contract.linked", "contract.linked.noTitle", "replace.reopens", "replace.lost", "replace.noPermission", "replace.checking", "replace.unavailable",
 ].map((c) => `${N}${c}`);
 
 describe("traduções do tipo de fecho", () => {
