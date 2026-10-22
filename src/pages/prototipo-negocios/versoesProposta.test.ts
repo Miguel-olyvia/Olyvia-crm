@@ -44,7 +44,9 @@ describe("versões da proposta", () => {
     const total = tot(d, S).pf;
     A.novaVersao(d.id, ["Baixar o preço"], " prefere pagar em 3 vezes ", "orcamento");
     const o = d.orc!;
-    expect(o.versoes).toEqual([{ n: 1, enviada: "05/10", substituida: expect.any(String), total, totalIva: expect.any(Number), motivos: ["Baixar o preço"], nota: "prefere pagar em 3 vezes", onde: "orcamento", prod: expect.any(Array), semParte: [] }]);
+    expect(o.versoes).toEqual([{ n: 1, enviada: "05/10", substituida: expect.any(String), total, totalIva: expect.any(Number), motivos: ["Baixar o preço"], nota: "prefere pagar em 3 vezes", onde: "orcamento", prod: expect.any(Array), semParte: [],
+      // 22/10 (fase 2): as linhas enviadas (com o custo congelado) e o desconto
+      linhas: expect.any(Array), desconto: 0 }]);
     expect(o.enviada).toBeNull();
     expect(o.verif).toBe(false);
     expect(d.fase).toBe(3);

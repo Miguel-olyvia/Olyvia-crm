@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import "./prototipo.css";
 import {
   FASES, LINHAS, PAPEIS, TECS, DIAS, VERSAO,
-  aberto, acoes, conflitos, custoUn, demo, eur, exemplosClientes, minhas, nfmt, pct, proximo, seed, tot,
+  aberto, acoes, congelarEnviadas, conflitos, custoUn, demo, eur, exemplosClientes, minhas, nfmt, pct, proximo, seed, tot,
   type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
 import { migrarAdendas } from "./adendas";
@@ -87,9 +87,11 @@ const CHAVE = "olyvia-prototipo-negocios";
 function prepararCustos(S: Estado): boolean {
   const mudou = garantirCustos(S);
   const antes = JSON.stringify(S.svc);
+  // 22/10 (fase 2): as propostas enviadas antes do custo congelado ficam congeladas como estão, antes de o €/h mudar
+  const congelou = congelarEnviadas(S);
   derivarServicos(S);
   ligarCustos(S);
-  return mudou || JSON.stringify(S.svc) !== antes;
+  return mudou || congelou || JSON.stringify(S.svc) !== antes;
 }
 
 function ler(): Estado {

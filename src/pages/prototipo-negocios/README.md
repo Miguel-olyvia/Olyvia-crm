@@ -939,3 +939,12 @@ Pedido original do Ruben (14/10): "o orçamento gera o contrato; depois do contr
 - **Custos no Estado** (`S.custos`, `garantirCustos`): a store `v2/custosStore.ts` liga-se ao Estado (`ligarCustos`) e grava nele; já não se perde ao recarregar. `S.svc` deriva-se das receitas no arranque e ao mudar um técnico, perfil ou custo (`derivarServicos`): sem 25 €/h fixos (pacote, serviços novos pela visita, linhas livres de adendas/imprevistos). Uma só taxa de estrutura (`taxaEstrutura`, `motor.ts: estruturaHora`). A demolição usa 2 × o €/h do Servente (`parDemolicao`).
 - **Plano da obra:** o técnico escolhe-se pelo perfil (id) do serviço; sem técnico desse perfil, a tarefa fica por atribuir (`preparacaoObra.ts: porAtribuir`), já não vai para o Montador.
 - **Correções:** a "Sanita suspensa com estrutura" traz a "Instalação de Sanita Suspensa" (s-moissusp), não a compacta; as 12 subempreitadas a 0 € têm o aviso "Subempreitada sem custo" (Catálogo e linha do orçamento), sem valores inventados.
+
+## A proposta enviada congela o custo detalhado (22/10/2026, fase 2)
+
+- **Ao enviar a proposta** (`motor.ts: congelarProposta`, na ação `enviar`), cada linha de serviço guarda `det`: as horas de cada ofício e o €/h desse ofício nesse dia (a média dos técnicos do RH, com os nomes), o equipamento, os consumíveis e a estrutura; `ajuste` é a diferença para o `cu` da linha, se o Catálogo mudou entre o orçamento e o envio. As linhas de produto guardam o fornecedor e o custo/preço por unidade (`prod`). As propostas de exemplo já enviadas e as dos estados de antes congelam-se como estão (`congelarEnviadas`, no seed e ao ler).
+- **Quem lê o congelado:** `partes()` (o "De onde vem o custo"), `linhaCalc` (as horas), o prazo previsto (`ganttOrcamento.ts: tarefasPrevistas`) e o detalhe da linha (`CustoServico.tsx`, "Congelado na proposta enviada"). Sem `det` (rascunho), o de agora. `oficiosDaProposta` dá a mão de obra da proposta por ofício.
+- **Versões:** cada versão substituída guarda as linhas enviadas (com o `det`) e o desconto (`VersaoProposta.linhas`, `desconto`).
+- **"Atualizar o custo com o Catálogo"** (`recalc`) não mexe numa proposta enviada (como o preço).
+- **Adendas:** o `cu` de cada linha congela-se no envio ao cliente e na aprovação da Direção (`adendas.ts: congelarAdenda`); a versão nova volta a ser rascunho (custo de agora).
+- **Preços:** o preço de tabela mantém-se; os alertas de margem já usam o custo real (o €/h dos técnicos, fase 1).

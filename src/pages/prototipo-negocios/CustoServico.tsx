@@ -4,7 +4,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Hammer, Lock, Package, UserRound, Building2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { custoUn, estruturaHora, eur, nfmt, pct, type Estado, type Servico } from "./motor";
+import { custoUn, estruturaHora, eur, nfmt, pct, type CustoCongelado, type Estado, type Servico } from "./motor";
 import { RECEITAS, amortHora, amortUn, consUn } from "./receitas";
 import { anoPerfil, custoReceita, custosDe, horaPerfil, origemHora, perfilIdDe, receitaDe, type HoraPerfil } from "./v2/custosModelo";
 
@@ -27,7 +27,8 @@ const Linha = ({ a, b, sub }: { a: ReactNode; b: ReactNode; sub?: ReactNode }) =
   </div>
 );
 
-export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estado; sid: string; s: Servico; q?: number; pu?: number; onClose: () => void; children?: ReactNode }) {
+/** 22/10 (fase 2): `det` é o custo congelado na linha da proposta enviada: o detalhe mostra-o a ele (e não o Catálogo de agora). */
+export function CustoServico({ S, sid, s, q, pu, det, onClose, children }: { S: Estado; sid: string; s: Servico; q?: number; pu?: number; det?: CustoCongelado; onClose: () => void; children?: ReactNode }) {
   const caixa = useRef<HTMLDivElement>(null);
   useEffect(() => {
     caixa.current?.focus();
@@ -37,17 +38,21 @@ export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estad
   }, [onClose]);
 
   const R = RECEITAS[sid];
-  const mo = s.h * s.eh;
-  const eqT = R ? R.equip.reduce((a, e) => a + amortUn(e), 0) : s.eq;
-  const coT = R ? R.cons.reduce((a, c) => a + consUn(c), 0) : s.cons;
-  const taxa = estruturaHora(S), es = S.cfg.estrutura ? s.h * taxa : 0;
-  const c = custoUn(s, S), preco = pu ?? s.preco, m = preco > 0 ? (preco - c) / preco : 0;
+  const mo = det ? det.mo + det.ajuste : s.h * s.eh;
+  const eqT = det ? det.eq : R ? R.equip.reduce((a, e) => a + amortUn(e), 0) : s.eq;
+  const coT = det ? det.cons : R ? R.cons.reduce((a, c) => a + consUn(c), 0) : s.cons;
+  const taxa = det ? det.taxaEstr : estruturaHora(S), hUn = det?.h ?? s.h, es = det ? det.estr : S.cfg.estrutura ? s.h * taxa : 0;
+  const c = det ? mo + eqT + coT + es : custoUn(s, S), preco = pu ?? s.preco, m = preco > 0 ? (preco - c) / preco : 0;
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
   const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-success";
   const direcao = S.role === "direcao";
   // 22/10: o €/h de cada ofício da receita e de onde vem (a média dos técnicos do RH, ou o salário do perfil sem técnicos)
   const C = custosDe(S), rec = receitaDe(C, sid, s, S.cfg.alvo);
-  const oficios: (HoraPerfil & { h: number })[] = rec && rec.mo.length
+  const oficios: (HoraPerfil & { h: number })[] = det
+    // congelado na proposta: o €/h de cada ofício no dia do envio (e os técnicos de então)
+    ? det.oficios.map((o) => ({ perfil: o.perfil, n: o.n, h: o.h, eh: o.eh, fonte: o.tecnicos?.length ? "rh" as const : "salario" as const, salario: null, semCustoRh: [],
+      tecnicos: (o.tecnicos ?? []).map((n) => ({ id: n, n, custoHora: NaN })) }))
+    : rec && rec.mo.length
     ? custoReceita(rec, C, false).oficios.map((o) => ({ ...horaPerfil(C, o.perfil), h: o.h }))
     : [{ ...horaPerfil(C, perfilIdDe(C, s)), h: s.h }];
   const partes = [
@@ -89,10 +94,14 @@ export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estad
           <Bloco icone={<UserRound className="h-5 w-5 text-sky-700" />} cor="bg-sky-100" titulo="Técnico" total={`${eur(mo)} €`}>
             {oficios.map((o) => (
               <div key={o.perfil} className="space-y-2">
-                <Linha a={o.n} b={`${nfmt(o.h)} h × ${o.eh == null ? "—" : eur(o.eh)} €/h`} sub={origemHora(o) + "."} />
+                <Linha a={o.n} b={`${nfmt(o.h)} h × ${o.eh == null ? "—" : eur(o.eh)} €/h`} sub={det ? "Congelado no envio da proposta." : origemHora(o) + "."} />
                 <div className="rounded-xl bg-muted/60 p-3 text-sm">
                   <p className="font-medium">Como se chega aos {o.eh == null ? "—" : eur(o.eh)} €/h</p>
-                  {o.fonte === "rh" ? (
+                  {det ? (
+                    <p className="mt-1 text-muted-foreground" data-testid="custo-congelado">
+                      Congelado na proposta enviada{det.q ? ` (${det.q})` : ""}: {o.tecnicos.length ? `a média de ${o.tecnicos.map((t) => t.n).join(", ")} no RH nesse dia` : "o €/h do ofício nesse dia"}. Mudar depois o RH ou o Catálogo não mexe nesta proposta.
+                    </p>
+                  ) : o.fonte === "rh" ? (
                     <div className="mt-1.5 space-y-1 text-muted-foreground">
                       {o.tecnicos.map((t) => <Linha key={t.id} a={t.n} b={`${eur(t.custoHora)} €/h`} sub="Calculado nos Custos do RH (salário, encargos, horas do contrato)" />)}
                       <Linha a={<b className="text-foreground">Média de {o.tecnicos.length} {o.tecnicos.length === 1 ? "técnico" : "técnicos"}</b>} b={<b className="text-foreground">{eur(o.eh!)} €/h</b>} />
@@ -129,7 +138,7 @@ export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estad
 
           {S.cfg.estrutura && (
             <Bloco icone={<Building2 className="h-5 w-5 text-slate-700" />} cor="bg-slate-200" titulo="Estrutura" total={`${eur(es)} €`}>
-              <Linha a="Escritório, viaturas, seguros, gestão" b={`${nfmt(s.h)} h × ${eur(taxa)} €/h`} sub="Os custos de estrutura do mês a dividir pelas horas produtivas da empresa (Catálogo › Custos)." />
+              <Linha a="Escritório, viaturas, seguros, gestão" b={`${nfmt(hUn)} h × ${eur(taxa)} €/h`} sub="Os custos de estrutura do mês a dividir pelas horas produtivas da empresa (Catálogo › Custos)." />
             </Bloco>
           )}
 

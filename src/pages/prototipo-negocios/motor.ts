@@ -17,7 +17,7 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import {
-  MOTIVO_IMPREVISTO, adendaBloqueada, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
+  MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
   juntarAoPlano, linhaAdenda, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
@@ -174,8 +174,23 @@ export function dataDeDia(k: number): string {
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
 export type LinhaOrc =
-  | { t: "svc"; sid: SvcId; q: number; cu: number; pu: number }
-  | { t: "mat"; d: string; custo: number; preco: number };
+  | { t: "svc"; sid: SvcId; q: number; cu: number; pu: number;
+    /** 22/10 (fase 2): o custo por unidade congelado quando a proposta é enviada (ofícios, equipamento, consumíveis, estrutura). */
+    det?: CustoCongelado }
+  | { t: "mat"; d: string; custo: number; preco: number;
+    /** 22/10 (fase 2): nas linhas de produto, o fornecedor e o custo/preço por unidade, congelados no envio. */
+    prod?: { forn?: string; custoUn: number; precoUn: number; q: number } };
+
+/** 22/10 (fase 2): o custo de uma unidade de serviço como estava quando a proposta foi enviada: as horas de cada ofício ao €/h desse
+ *  ofício (a média dos técnicos do RH nesse dia), o equipamento, os consumíveis e a estrutura. `ajuste` é a diferença para o custo
+ *  gravado na linha (cu), quando o Catálogo mudou entre o orçamento e o envio sem se atualizar a linha. Não muda depois. */
+export interface CustoCongelado {
+  h: number;
+  oficios: { perfil: string; n: string; h: number; eh: number; tecnicos?: string[] }[];
+  mo: number; eq: number; cons: number; taxaEstr: number; estr: number; ajuste: number;
+  /** quando ficou congelado (a data do envio) */
+  q: string;
+}
 
 export interface Orcamento {
   modelo: string;
@@ -249,7 +264,9 @@ export interface AutoRececao {
 /** Uma proposta enviada e substituída: o que se enviou, quando, por quanto e porque se refez. */
 export interface VersaoProposta { n: number; enviada: string; /** se o cliente já a tinha aceite */ aceite?: string; substituida: string; total: number; /** 21/10: com IVA */ totalIva?: number; motivos: string[]; nota?: string; onde: "orcamento" | "visita";
   /** 21/10: os produtos e as partes tiradas da estimativa nesta versão (para mostrar o que mudou e repor). */
-  prod?: ProdVisita[]; semParte?: string[] }
+  prod?: ProdVisita[]; semParte?: string[];
+  /** 22/10 (fase 2): as linhas enviadas nesta versão, com o custo congelado de cada uma, e o desconto. */
+  linhas?: LinhaOrc[]; desconto?: number }
 /** O que o cliente costuma pedir quando quer mudar a proposta (os botões da "Nova versão"). */
 export const MOTIVOS_VERSAO = ["Outros materiais", "Juntar ou tirar trabalhos", "Baixar o preço", "Outras datas", "Outra forma de pagamento"] as const;
 /** Porque o cliente recusa a proposta por completo (no portal). */
@@ -562,6 +579,8 @@ export function seed(): Estado {
   };
   ecAntiga(m, "EC 2026/001", "17/09");
   ecAntiga(by(1050), "EC 2026/002", "21/09");
+  // 22/10 (fase 2): as propostas de exemplo já enviadas têm o custo congelado (como as que se enviam no protótipo)
+  congelarEnviadas(S);
   return S;
 }
 
@@ -899,7 +918,8 @@ export function valorSinal(d: Negocio, S: Estado): number {
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
   const s = S.svc[l.sid];
-  return { custo: l.cu * l.q, preco: l.pu * l.q, h: s.h * l.q, s };
+  // 22/10 (fase 2): enviada, as horas são as congeladas na linha
+  return { custo: l.cu * l.q, preco: l.pu * l.q, h: (l.det?.h ?? s.h) * l.q, s };
 }
 export function tot(d: Negocio, S: Estado) {
   let c = 0, p = 0, h = 0;
@@ -912,6 +932,8 @@ export function partes(d: Negocio, S: Estado) {
   const o = { mo: 0, eq: 0, cons: 0, estr: 0, mat: 0 };
   for (const l of d.orc!.linhas) {
     if (l.t === "mat") { o.mat += l.custo; continue; }
+    // 22/10 (fase 2): a proposta enviada lê o custo congelado na linha (o ajuste, se o houver, conta na mão de obra)
+    if (l.det) { o.mo += (l.det.mo + l.det.ajuste) * l.q; o.eq += l.det.eq * l.q; o.cons += l.det.cons * l.q; o.estr += l.det.estr * l.q; continue; }
     const s = S.svc[l.sid];
     o.mo += s.h * s.eh * l.q; o.eq += s.eq * l.q; o.cons += s.cons * l.q;
     if (S.cfg.estrutura) o.estr += s.h * estruturaHora(S) * l.q;
@@ -1032,6 +1054,63 @@ export function realObra(d: Negocio, S: Estado): Real {
   return { tasks, custoReal, m: (T.pf - custoReal) / T.pf };
 }
 export const fatorReal = (sid: SvcId) => REAL[sid] ?? 1;
+
+/* ------------------------------------------------------------------ a proposta enviada congela o custo (22/10, fase 2) */
+/** O custo por unidade de um serviço em uso, por ofício, como está agora (para congelar na linha). */
+export function custoCongelado(S: Estado, sid: SvcId, cu: number, quando: string): CustoCongelado | null {
+  const s = S.svc[sid];
+  if (!s) return null;
+  const C = custosDe(S), rec = sid.startsWith("livre-") ? null : receitaDe(C, sid, s, S.cfg.alvo);
+  let oficios: CustoCongelado["oficios"];
+  if (rec && rec.mo.length) {
+    const k = custoReceita(rec, C, false);
+    oficios = k.oficios.map((o) => ({ perfil: o.perfil, n: o.n, h: r2(o.h), eh: r2(o.eh ?? 0), ...(o.tecnicos.length ? { tecnicos: [...o.tecnicos] } : {}) }));
+  } else {
+    const id = perfilIdDe(C, s), h = horaPerfil(C, id);
+    oficios = [{ perfil: id, n: h.n, h: s.h, eh: s.eh, ...(h.tecnicos.length ? { tecnicos: h.tecnicos.map((t) => t.n) } : {}) }];
+  }
+  // as horas de S.svc mandam (é delas que saiu o cu); os ofícios repartem-nas
+  const hOf = oficios.reduce((a, o) => a + o.h, 0);
+  if (hOf > 0 && Math.abs(hOf - s.h) > 0.005) oficios = oficios.map((o) => ({ ...o, h: r2((o.h * s.h) / hOf) }));
+  const mo = r2(oficios.reduce((a, o) => a + o.h * o.eh, 0));
+  const taxaEstr = S.cfg.estrutura ? estruturaHora(S) : 0, estr = r2(s.h * taxaEstr);
+  const total = mo + s.eq + s.cons + estr;
+  return { h: s.h, oficios, mo, eq: s.eq, cons: s.cons, taxaEstr: r2(taxaEstr), estr, ajuste: r2(cu - total), q: quando };
+}
+/** Congela o custo de cada linha da proposta (os serviços por ofício; os produtos com o fornecedor). As linhas já congeladas ficam. */
+export function congelarProposta(d: Negocio, S: Estado, quando: string): void {
+  const o = d.orc;
+  if (!o) return;
+  const K = catalogoLigado();
+  for (const l of o.linhas) {
+    if (l.t === "svc") { if (!l.det) { const c = custoCongelado(S, l.sid, l.cu, quando); if (c) l.det = c; } continue; }
+    if (l.prod || !l.d.startsWith(PREFIXO_PROD)) continue;
+    const p = (d.visita.prod ?? []).find((x) => !x.cliente && PREFIXO_PROD + textoProduto(x) === l.d);
+    if (!p) continue;
+    const forn = K?.produtos.find((x) => x.id === p.id)?.fornecedor;
+    l.prod = { ...(forn ? { forn } : {}), custoUn: p.custo, precoUn: r2(l.preco / (p.q || 1)), q: p.q };
+  }
+}
+/** 22/10 (fase 2): as propostas já enviadas de um Estado de antes ficam congeladas como estão (o custo da linha mantém-se). */
+export function congelarEnviadas(S: Estado): boolean {
+  let mudou = false;
+  for (const d of S.deals) if (d.orc?.enviada && d.orc.linhas.some((l) => l.t === "svc" && !l.det)) { congelarProposta(d, S, d.orc.enviada); mudou = true; }
+  return mudou;
+}
+/** 22/10 (fase 2): a mão de obra da proposta por ofício (horas e custo): a congelada nas linhas enviadas, senão a de agora. */
+export function oficiosDaProposta(d: Negocio, S: Estado): { perfil: string; n: string; h: number; custo: number }[] {
+  const m = new Map<string, { perfil: string; n: string; h: number; custo: number }>();
+  for (const l of d.orc?.linhas ?? []) {
+    if (l.t !== "svc" || !(l.q > 0)) continue;
+    const det = l.det ?? custoCongelado(S, l.sid, l.cu, "");
+    for (const o of det?.oficios ?? []) {
+      const x = m.get(o.perfil) ?? { perfil: o.perfil, n: o.n, h: 0, custo: 0 };
+      x.h = r2(x.h + o.h * l.q); x.custo = r2(x.custo + o.h * o.eh * l.q);
+      m.set(o.perfil, x);
+    }
+  }
+  return [...m.values()];
+}
 
 /** Um serviço do Catálogo passa a existir em S.svc quando se junta pela primeira vez. */
 export function garantirServico(S: Estado, sid: SvcId): Servico | null {
@@ -1573,7 +1652,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!o?.enviada || o.contrato === "assinado" || d.fase !== 3) { avisar({ msg: "Não há proposta para refazer", sub: o?.contrato === "assinado" ? "O contrato já foi assinado" : "A proposta ainda não foi enviada", kind: "bad" }); return; }
       const n = versaoAtual(o);
       (o.versoes ??= []).push({ n, enviada: o.enviada, aceite: o.aceite ?? undefined, substituida: agora(), total: tot(d, S).pf, totalIva: totaisIva(d, S).total, motivos: [...motivos], nota: nota.trim() || undefined, onde,
-        prod: (d.visita.prod ?? []).map((p) => ({ ...p })), semParte: [...(d.visita.semParte ?? [])] });
+        prod: (d.visita.prod ?? []).map((p) => ({ ...p })), semParte: [...(d.visita.semParte ?? [])],
+        // 22/10 (fase 2): as linhas como foram enviadas (com o custo congelado) e o desconto
+        linhas: structuredClone(o.linhas), desconto: o.desconto });
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
       o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
@@ -1739,6 +1820,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     enviar(id: number) {
       const d = deal(id); if (!portao(d, [PROPOSTA[0]])) return;
       const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
+      // 22/10 (fase 2): o custo de cada linha fica congelado (ofícios × €/h de hoje, equipamento, consumíveis, estrutura; produtos com o fornecedor)
+      congelarProposta(d, S, agora());
       const v = d.orc!.versoes?.length ? ` v${versaoAtual(d.orc!)}` : "";
       log(d, "Proposta" + v + " enviada ao portal do cliente" + (A2.length ? " · " + A2.length + " aviso(s) registados" : ""));
       avisar({ msg: "Proposta" + v + " enviada", sub: v ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente", kind: "ok" });
@@ -1800,6 +1883,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (adendaBloqueada(d, S, a)) { avisar({ msg: "Ainda não dá para enviar", sub: "A margem ficou abaixo do mínimo: corrija o preço ou peça aprovação à Direção", kind: "bad" }); return; }
       const v = versaoAdenda(a);
       a.estado = "enviada"; a.enviada = agora(); a.aceite = null; a.pedidoCliente = null;
+      congelarAdenda(S, a); // 22/10 (fase 2): o custo das linhas fica o do envio
       log(d, `Proposta da adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada ao portal do cliente: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")} · +${eur(totaisAdenda(a).total)} € com IVA · +${diasAdenda(a.linhas)} dias`);
       avisar({ msg: `Adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada`, sub: v > 1 ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente, para aceitar", kind: "ok" });
       acessoCliente(d, "adenda", `Adenda ${a.n}${v > 1 ? ` v${v}` : ""} · ${obraDe(d)}`);
@@ -1822,7 +1906,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     aprovarAdenda(id: number, n?: string) {
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "rascunho" && x.aprov === "pedida");
       if (!a || a.estado !== "rascunho") return;
-      a.aprov = "ok"; log(d, `Exceção aprovada pela Direção (adenda ${a.n})`);
+      a.aprov = "ok"; congelarAdenda(S, a); log(d, `Exceção aprovada pela Direção (adenda ${a.n})`);
       avisar({ msg: "Exceção aprovada", sub: `${d.nome} · adenda ${a.n} · o comercial já pode enviar`, kind: "ok" });
     },
     recusarAprovAdenda(id: number, n?: string) {
@@ -1855,7 +1939,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "enviada" || x.estado === "aceite");
       if (!a || (a.estado !== "enviada" && a.estado !== "aceite") || !a.enviada) return false;
       const k = Number(a.n.split("-").at(-1)) || 1;
-      const livresAntes = a.linhas.filter((x) => x.livre && itens.some((y) => y.sid === x.sid)).map((x) => ({ ...x, mats: x.mats?.map((m) => ({ ...m })) }));
+      // a versão nova é um rascunho: o custo volta a ser o de agora (congela-se de novo no envio)
+      const livresAntes = a.linhas.filter((x) => x.livre && itens.some((y) => y.sid === x.sid)).map(({ cu: _cu, ...x }) => ({ ...x, mats: x.mats?.map((m) => ({ ...m })) }));
       const linhas = [...linhasDaAdenda(d, k, itens.filter((y) => !a.linhas.some((x) => x.livre && x.sid === y.sid)), []), ...livresAntes];
       if (!linhas.length) return false;
       const v = versaoAdenda(a), pc = a.pedidoCliente;
@@ -2758,7 +2843,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** Uma fotografia numa etapa da visita (por omissão, a área); o total sobe também. */
     foto(id: number, etapa: EtapaFotos = "area") { const v = deal(id).visita; v.fotosPor = fotosPor(v); v.fotosPor[etapa] = (v.fotosPor[etapa] || 0) + 1; v.fotos++; },
-    recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = custoUnLinha(S.svc[l.sid], S); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
+    recalc(id: number, i: number) {
+      const d = deal(id), l = d.orc!.linhas[i];
+      // 22/10 (fase 2): depois de enviada, o custo da proposta está congelado (como o preço)
+      if (d.orc!.enviada) { avisar({ msg: "O custo não foi atualizado", sub: "A proposta já foi enviada: o custo ficou congelado no envio.", kind: "bad" }); return; }
+      if (l.t === "svc") { l.cu = custoUnLinha(S.svc[l.sid], S); delete l.det; }
+      d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" });
+    },
   };
   // depois de cada ação, a visita de cada negócio acompanha as necessidades
   for (const k of Object.keys(A) as (keyof typeof A)[]) {

@@ -125,7 +125,7 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
               </button>
             )}
             {aberta === i && l.t === "svc" && s && (
-              <CustoServico S={S} sid={l.sid} s={s} q={l.q} pu={l.pu} onClose={() => setAberta(null)}>
+              <CustoServico S={S} sid={l.sid} s={s} q={l.q} pu={l.pu} det={l.det} onClose={() => setAberta(null)}>
                 {!fechado && <section className="grid gap-4 rounded-2xl border border-border bg-card p-4 sm:grid-cols-2">
                   <h3 className="text-[15px] font-semibold sm:col-span-2">Mudar nesta linha</h3>
                   <div className="grid gap-2">

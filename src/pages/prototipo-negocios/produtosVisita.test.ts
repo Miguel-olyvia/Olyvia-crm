@@ -141,7 +141,8 @@ describe("na visita: portão, orçamento e reabrir", () => {
     ligarCatalogo(() => K0);
     for (const d of S.deals.filter((x) => x.orc)) {
       const o = criarOrc(d, structuredClone(S));
-      expect(o.linhas.filter((l) => l.t === "svc")).toEqual(d.orc!.linhas.filter((l) => l.t === "svc"));
+      // 22/10 (fase 2): as enviadas guardam também o custo congelado (det); as linhas em si são as mesmas
+      expect(o.linhas.filter((l) => l.t === "svc")).toEqual(d.orc!.linhas.filter((l) => l.t === "svc").map((l) => { const { det: _det, ...x } = l as typeof l & { det?: unknown }; return x; }));
     }
     expect(tot(S.deals.find((x) => x.id === 1050)!, S).pf).toBeGreaterThan(0);
   });

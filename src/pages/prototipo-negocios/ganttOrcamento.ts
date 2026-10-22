@@ -71,12 +71,15 @@ export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): Tarefa
     if (l.t !== "svc") continue;
     const s = S.svc[l.sid as SvcId];
     if (!s || !(l.q > 0)) continue;
-    const custoHora = s.eh + (S.cfg.estrutura ? estruturaHora(S) : 0);
-    const custoOrc = l.cu * l.q, hOrc = s.h * l.q;
+    // 22/10 (fase 2): a proposta enviada usa o custo congelado na linha (horas, €/h dos ofícios, estrutura, equipamento e consumíveis)
+    const det = l.det, hUn = det?.h ?? s.h;
+    const custoHora = det ? (det.h > 0 ? det.mo / det.h : 0) + det.taxaEstr : s.eh + (S.cfg.estrutura ? estruturaHora(S) : 0);
+    const eqUn = det?.eq ?? s.eq, consUn = det?.cons ?? s.cons;
+    const custoOrc = l.cu * l.q, hOrc = hUn * l.q;
     const fases = fasesDoServico(K, l.sid, s.n, s.perfil);
     base.push({ chave: l.sid, nome: s.n, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), fase: fases[0], fases, hOrc, custoHora });
     // o que o custo da linha tem além da mão de obra (equipamento, consumíveis; e o que o Catálogo mudou desde então)
-    extra[l.sid] = { eq: s.eq * l.q, cons: s.cons * l.q, outros: custoOrc - hOrc * custoHora - s.eq * l.q - s.cons * l.q, custoOrc };
+    extra[l.sid] = { eq: eqUn * l.q, cons: consUn * l.q, outros: custoOrc - hOrc * custoHora - eqUn * l.q - consUn * l.q, custoOrc };
   }
   const r = o.demolicao?.r;
   if (r && r.horas + r.horasCarga > 0) {

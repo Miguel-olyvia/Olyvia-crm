@@ -106,7 +106,14 @@ describe("previsto contra real", () => {
   });
   it("sem a estrutura nas definições, não há linha de estrutura", () => {
     const S = seed(); S.cfg.estrutura = false;
-    expect(previstoReal(deal(S, 1050), S, REAL_POR_DEFEITO).linhas.map((l) => l.k)).not.toContain("estr");
+    // 22/10 (fase 2): a proposta enviada tem a estrutura congelada no custo; sem ela nas definições, só uma proposta por enviar fica sem
+    const d = deal(S, 1050);
+    for (const l of d.orc!.linhas) if (l.t === "svc") delete l.det;
+    expect(previstoReal(d, S, REAL_POR_DEFEITO).linhas.map((l) => l.k)).not.toContain("estr");
+  });
+  it("22/10 (fase 2): a estrutura congelada na proposta enviada fica, mesmo desligada depois nas definições", () => {
+    const S = seed(); S.cfg.estrutura = false;
+    expect(previstoReal(deal(S, 1050), S, REAL_POR_DEFEITO).linhas.map((l) => l.k)).toContain("estr");
   });
   it("o desvio em texto: até 2% é dentro do previsto", () => {
     expect(desvio(100, 108)).toEqual({ pct: 8, dif: 8, sentido: "acima" });
