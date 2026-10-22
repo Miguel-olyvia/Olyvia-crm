@@ -14,8 +14,8 @@ Ainda não há ligação nenhuma ao ERP, nem a de leitura. Este documento junta 
 | Frente | Estado | A seguir |
 |---|---|---|
 | **Emitir faturas pela API** | Parado (standby): o módulo com certificação exige a nossa plataforma certificada pela AT | Decidir se a Olyvia se certifica ou se a fatura continua a ser emitida no ERP |
-| **Ler pagamentos e faturas (SQL)** | Pronto a correr: `consultas/consultar.ps1` + `consultas/1-descobrir-tabelas.sql`, só leitura, na BD de testes `Emp_Z004` | Criar `D:\Olyvia\.eticadata` com a ligação, correr o 1.º passo, ver as tabelas e escrever `2-fatura-paga.sql` |
-| **Rede** | Do Wi-Fi da BMInvest o nome resolve, mas as portas 1433 e 445 e o ping não respondem | Testar com o script; se falhar, correr no servidor por Ambiente de Trabalho Remoto ou pedir acesso ao SQL a partir da rede |
+| **Ler pagamentos e faturas (SQL)** | **Funciona (22/10).** `consultas/2-fatura-paga.sql` diz se uma fatura está paga, com os recibos, a data e o meio. Testado na `Emp_Z004` | Ponte de leitura e ligação ao protótipo («Registar fatura do ERP» e «Verificar no ERP») |
+| **Rede** | Resolvido (22/10): a instância está na porta **64864** (`192.168.1.252,64864`), não na 1433 | — |
 | **Segurança** | O `sa` e as passwords foram partilhados por email e por chat | Trocar a password do `sa` e criar um utilizador SQL só de leitura |
 | **Protótipo** | O circuito fatura → pagamento → recibo existe com números simulados (secção 7) | Quando houver leitura, mostrar o estado real do pagamento no negócio e no portal |
 
