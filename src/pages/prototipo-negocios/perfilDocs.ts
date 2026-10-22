@@ -326,7 +326,7 @@ export function faltaParaOrcamento(S: Estado, d: Negocio): Falta {
   if (d.fase >= 3) {
     if (!ehGanho(d)) return { titulo: d.orc?.vendaDireta ? "O que falta para fechar a venda" : "O que falta para o contrato", passos: [proximo(d, S).t], campos: [] };
     const p = proximoNegocio(d, S);
-    return { titulo: "O que falta para o pagamento", passos: d.fase >= 5 || p.done ? [] : [d.fase < 4 ? "Emitir a fatura" : p.t], campos: [] };
+    return { titulo: "O que falta para o pagamento", passos: d.fase >= 5 || p.done ? [] : [d.fase < 4 ? "Registar a fatura do ERP" : p.t], campos: [] };
   }
   const gs = gruposDoPasso(d).map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto);
   return { titulo: "O que falta para o orçamento", passos: PASSOS_LEVANTAMENTO.slice(d.fase), campos: [...new Set(emFalta(gs, d.f).map((c) => c.l))] };

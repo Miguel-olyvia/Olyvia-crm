@@ -13,6 +13,7 @@ import {
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, gruposArea, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
+import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { orcLinhas } from "./ServicosCatalogo";
 import { NecessidadesCliente } from "./NecessidadesVisita";
@@ -389,6 +390,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
+  // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP
+  if (p.act === "registarFaturaErp" && meu) return <RegistarFaturaErp ctx={ctx} d={d} tamanho={tamanho} />;
   if (p.btn) return meu
     ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
     : (

@@ -10,6 +10,7 @@ import { ObraPorFases } from "./ObraPorFases";
 import { lerVersao } from "./versaoPrototipo";
 import { FinanceiroV2 } from "./v2/FinanceiroV2";
 import { AdendasNoFinanceiro } from "./FinanceiroAdendas";
+import { EstadoFaturaErp } from "./FaturaErp";
 import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
 import { resumoFin } from "./v2/financeiro";
 import { useInventario } from "./inventario/loja";
@@ -55,12 +56,14 @@ export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
           {eur(TI.base)} € sem IVA · IVA de {eur(TI.iva)} € (6% na mão de obra, 23% nos materiais) · {d.f.pagamento || "condições de pagamento por definir"}
         </p>
       </section>
+      <EstadoFaturaErp ctx={ctx} d={d} />
       <section aria-labelledby="fin-t">
         <h3 id="fin-t" className="text-base font-semibold">O que acontece</h3>
         <ol className="mt-1 divide-y divide-border">
-          <Passo feito={!!ft} titulo={ft ? `Fatura ${ft.n} emitida` : "Emitir a fatura"} texto={ft ? `A ${ft.q}, enviada ao portal do cliente.` : "Só o Financeiro emite. Vai para o portal do cliente."} />
-          <Passo feito={d.fin.pago} titulo={d.fin.pago ? "Pagamento validado" : "Validar o pagamento"} texto={d.fin.pago ? `Confirmado${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""}${d.f.comprovativo ? " · " + d.f.comprovativo : ""}.` : "Confirmar que o valor entrou na conta. Por agora é à mão."} />
-          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n} emitido` : "Recibo"} texto="Sai sozinho ao validar o pagamento e põe a obra a andar:" />
+          {/* 22/10: a fatura emite-se no Eticadata e regista-se aqui; o pagamento lê-se no ERP (FaturaErp.tsx) */}
+          <Passo feito={!!ft} titulo={ft ? `Fatura ${ft.n} registada` : "Registar a fatura do ERP"} texto={ft ? `Emitida no Eticadata a ${ft.q} e enviada ao portal do cliente.` : "O Financeiro emite-a no Eticadata e escreve aqui o número."} />
+          <Passo feito={d.fin.pago} titulo={d.fin.pago ? "Pagamento confirmado" : "O pagamento"} texto={d.fin.pago ? `Confirmado${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""}${d.f.comprovativo ? " · " + d.f.comprovativo : ""}.` : "A Olyvia vê no Eticadata quando a fatura é paga. Sem ligação ao ERP, valida-se à mão."} />
+          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n}` : "Recibo"} texto="O do Eticadata, quando a fatura é paga. Põe a obra a andar:" />
         </ol>
         {/* 16/10: o pagamento validado emite a encomenda de cliente no Inventário e passa o negócio à Obra; depois só falta aprovar o plano */}
         <ul className="ml-9 mt-1 space-y-1.5 text-[15px] text-muted-foreground">

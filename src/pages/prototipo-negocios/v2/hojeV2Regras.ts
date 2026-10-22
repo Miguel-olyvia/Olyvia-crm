@@ -246,7 +246,7 @@ export function hojePapel(S: Estado, r: Papel, dados: DadosHojeV2): ItemV2[] {
   const itens: ItemV2[] = [];
   for (const { d, p, dir } of minhas(S, r)) {
     if (dir) { itens.push(itemDeNegocio(d, "aprovar", `Aprovar a exceção à margem · ${p.sub}`, { aprovar: true })); continue; }
-    const registar = p.act === "emitir";
+    const registar = p.act === "emitir" || p.act === "registarFaturaErp";
     const razao = registar ? "Registar a fatura emitida no programa de faturação" : p.t + (p.sub ? ` · ${p.sub}` : "");
     const acao = p.btn && p.act ? { rotulo: registar ? "Registar fatura" : p.btn, act: p.act, arg: p.arg } : null;
     itens.push(itemDeNegocio(d, categoriaDe(d), razao, { acao }));

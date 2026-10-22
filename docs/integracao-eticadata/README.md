@@ -17,7 +17,7 @@ Ainda não há ligação nenhuma ao ERP, nem a de leitura. Este documento junta 
 | **Ler pagamentos e faturas (SQL)** | **Funciona (22/10).** `consultas/2-fatura-paga.sql` diz se uma fatura está paga, com os recibos, a data e o meio. Testado na `Emp_Z004` | Ponte de leitura e ligação ao protótipo («Registar fatura do ERP» e «Verificar no ERP») |
 | **Rede** | Resolvido (22/10): a instância está na porta **64864** (`192.168.1.252,64864`), não na 1433 | — |
 | **Segurança** | O `sa` e as passwords foram partilhados por email e por chat | Trocar a password do `sa` e criar um utilizador SQL só de leitura |
-| **Protótipo** | O circuito fatura → pagamento → recibo existe com números simulados (secção 7) | Quando houver leitura, mostrar o estado real do pagamento no negócio e no portal |
+| **Protótipo** | **V1 ligado ao ERP (22/10).** «Registar a fatura do ERP» (o número da fatura emitida no Eticadata, confirmado lá) e «Verificar no ERP» (lê o pagamento; paga → recibo do ERP, encomenda de cliente e Obra). Lê por `server/eticadataLeitura.ts` (`/api/erp/fatura`), só no servidor de desenvolvimento deste PC; sem ele, regista-se sem confirmar e valida-se à mão | Ponte na rede da empresa para funcionar fora deste PC; faturas das adendas |
 
 **Decisões tomadas:**
 - A fatura **nunca** se cria escrevendo nas tabelas, porque não seria certificada.
