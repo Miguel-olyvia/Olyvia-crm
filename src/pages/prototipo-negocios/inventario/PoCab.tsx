@@ -9,6 +9,7 @@ import { Selo, Ligacao } from "./pecasInv";
 import { editarCabecalhoPo, motivoBloqueioPo, percursoPo, poLate, poLocked, poOpen, poStatus, aceitarDataPrometida, type CampoCabPo, poRecebivel } from "./po";
 import { Desbloquear, SeloEstadoPo } from "./poPecas";
 import type { AcoesPo } from "./poTipos";
+import { acessoDaPoEnviada } from "./poAcesso";
 import type { Inventario, Po } from "./tipos";
 
 const PM = "purchase_orders.manage";
@@ -43,8 +44,13 @@ function EstadoEd({ p, pub, a, gravar }: { p: Po; pub: Bloq; a: AcoesPo; gravar:
 
 /** Um campo do cabeçalho da PO (poHdr do mockup). */
 export function PoHdr({ p, k, a }: { p: Po; k: "wh" | "date" | "due" | "sup" | "status"; a: AcoesPo }) {
-  const { db, agir, abrir } = useCtxInv();
-  const gravar = (v: string | boolean): unknown => agir((d) => editarCabecalhoPo(d, poDe(d, p.id), k as CampoCabPo, String(v)), "Gravado.");
+  const { db, agir, abrir, avisar } = useCtxInv();
+  const gravar = (v: string | boolean): unknown => {
+    const r = agir((d) => editarCabecalhoPo(d, poDe(d, p.id), k as CampoCabPo, String(v)), "Gravado.");
+    // 22/10: Pendente → Encomendado aprova e envia: o popup com o acesso do fornecedor ao portal (poAcesso.ts)
+    if (r.ok && k === "status" && v === "ordered" && p.status === "pending") acessoDaPoEnviada(p.id, avisar);
+    return r;
+  };
   const pub: Bloq = p.deleted ? { bloqueio: "Encomenda eliminada", desbloquear: <Desbloquear rotulo="Restaurar" aoClicar={a.restaurar} /> }
     : poLocked(p) ? { bloqueio: "Publicada no portal", desbloquear: <Desbloquear rotulo="Retirar do portal" aoClicar={() => a.pedir({ t: "retirar" })} /> } : {};
   if (k === "wh") return <Ed valor={p.wh} aoGravar={gravar} tipo="select" opcoes={opcoesArmazens(db, true)} mostrar={nomeArm(db, p.wh)} perm={PM} {...pub} />;

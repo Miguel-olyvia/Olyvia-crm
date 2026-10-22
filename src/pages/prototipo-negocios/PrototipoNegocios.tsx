@@ -61,7 +61,7 @@ import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
 import { fornecedor } from "./inventario/base";
 import { LoginPortal } from "./LoginPortal";
 import { AcessoPortalDialog } from "./AcessoPortalDialog";
-import { contaFornecedor, fecharAcesso, mostrarAcesso, ouvirAcessoForn, useAcessoPendente, type LoginPrefill } from "./acessosPortal";
+import { contaFornecedor, contaFornecedorPo, fecharAcesso, mostrarAcesso, ouvirAcessoForn, prefillDaPo, useAcessoPendente, type LoginPrefill } from "./acessosPortal";
 
 // O Inventário completo (nativo, na Atual e na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
@@ -235,10 +235,11 @@ export default function PrototipoNegocios() {
 
   const A = useMemo(() => acoes(S, avisar, run), [S, avisar, run]);
   // 22/10: o Inventário deu (ou reenviou) o acesso a um fornecedor: a conta dele no Estado e o popup com as credenciais
-  useEffect(() => ouvirAcessoForn(({ sid, reenviar }) => {
+  // 22/10: com `po`, a encomenda acabada de enviar: a conta de sempre (sem password nova) e o popup em modo "encomenda"
+  useEffect(() => ouvirAcessoForn(({ sid, reenviar, po }) => {
     const s = fornecedor(lerInventario(), sid);
     if (!s) return;
-    run(() => mostrarAcesso(contaFornecedor(ref.current, s, reenviar)));
+    run(() => mostrarAcesso(po ? contaFornecedorPo(ref.current, s, po) : contaFornecedor(ref.current, s, reenviar)));
   }), [run]);
   const go = (fn: () => void) => () => run(fn);
 
@@ -424,6 +425,13 @@ export default function PrototipoNegocios() {
       abrirLogin();
       if (envio.comPassword) mostrarAcesso(envio);
     });
+  };
+
+  // 22/10: "Entrar neste separador" no popup de uma PO: o login com o email do fornecedor e essa encomenda a abrir depois de entrar
+  const entrarDoPopup = (): void => {
+    const pre = acessoPendente ? prefillDaPo(acessoPendente) : null;
+    if (pre) setLoginPre((x) => ({ ...pre, n: (x?.n ?? 0) + 1 }));
+    abrirLogin();
   };
 
   // o portal do cliente aberto pelo link de partilha
@@ -655,7 +663,7 @@ export default function PrototipoNegocios() {
           </nav>
         </div>
         {revisaoEl}
-        {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} entrarAqui={abrirLogin} />}
+        {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} entrarAqui={entrarDoPopup} />}
         {toastsEl}
       </div>
     );
@@ -734,7 +742,7 @@ export default function PrototipoNegocios() {
       </nav>
 
       {revisaoEl}
-      {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} entrarAqui={abrirLogin} />}
+      {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} entrarAqui={entrarDoPopup} />}
       {toastsEl}
     </div>
   );

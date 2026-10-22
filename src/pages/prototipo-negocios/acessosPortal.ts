@@ -50,8 +50,14 @@ export interface EnvioAcesso {
   /** só no cliente */
   doc?: DocPortal;
   titulo?: string;
+  /** 22/10: só no fornecedor, a encomenda (PO) que acabou de seguir para ele: o popup mostra o email da encomenda e o login abre-a */
+  po?: PoEnviada;
   n: number;
 }
+
+/** 22/10: a PO aprovada e enviada ao fornecedor. `publicada`: foi ao portal (portal ativo); senão seguiu o PDF por email.
+ *  `acessoNovo`: o fornecedor não tinha acesso ao portal e o envio da PO deu-lho agora (como "Enviar acesso"). */
+export interface PoEnviada { id: string; publicada: boolean; acessoNovo: boolean }
 
 /* ------------------------------------------------------------------ as contas */
 const LETRAS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -105,6 +111,15 @@ export function contaFornecedor(S: Estado, s: FornConta, reenviar: boolean): Omi
   return { conta: { ...c }, comPassword, empresa: s.company || EMPRESA_PORTAL };
 }
 
+/** 22/10: a conta do fornecedor ao enviar-lhe uma PO: a que já existe (a password não muda) ou uma nova com password temporária, e a PO. */
+export function contaFornecedorPo(S: Estado, s: FornConta, po: PoEnviada): Omit<EnvioAcesso, "n"> {
+  return { ...contaFornecedor(S, s, false), po: { ...po } };
+}
+
+/** 22/10: o login a abrir pelo popup de uma PO: o email da conta e a encomenda (só se foi publicada no portal; por email não está lá). */
+export const prefillDaPo = (e: EnvioAcesso): Omit<LoginPrefill, "n"> | null =>
+  e.po && e.conta.tipo === "fornecedor" ? { email: e.conta.email, po: e.po.publicada ? e.po.id : null } : null;
+
 /** O login: a conta com este email e esta password (ou null). */
 export function entrar(S: Estado, email: string, password: string): ContaPortal | null {
   const c = S.acessos?.[normal(email)];
@@ -152,8 +167,9 @@ const lerPendente = (): EnvioAcesso | null => pendente;
 export function useAcessoPendente(): EnvioAcesso | null { return useSyncExternalStore(subscrever, lerPendente, lerPendente); }
 
 /* ------------------------------------------------------------------ o acesso do fornecedor, pedido no Inventário */
-/** O Inventário não conhece o Estado: pede ao protótipo que crie a conta do fornecedor (e mostre o popup). Sem quem ouça, não faz nada. */
-export interface PedidoAcessoForn { sid: string; reenviar: boolean }
+/** O Inventário não conhece o Estado: pede ao protótipo que crie a conta do fornecedor (e mostre o popup). Sem quem ouça, não faz nada.
+ *  22/10: `po`, a encomenda acabada de enviar ao fornecedor (o popup em modo "encomenda"; nunca gera password nova se a conta existe). */
+export interface PedidoAcessoForn { sid: string; reenviar: boolean; po?: PoEnviada }
 let ouvinteForn: ((p: PedidoAcessoForn) => void) | null = null;
 export function pedirAcessoForn(p: PedidoAcessoForn): void { ouvinteForn?.(p); }
 export function ouvirAcessoForn(fn: (p: PedidoAcessoForn) => void): () => void {

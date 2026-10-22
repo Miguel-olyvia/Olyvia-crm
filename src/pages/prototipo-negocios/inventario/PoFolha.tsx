@@ -17,9 +17,10 @@ import { ProximoRececao } from "./PoCab";
 import { SeloEstadoPo, SeloPortal } from "./poPecas";
 import type { AcoesPo, EstadoPd, TabPo } from "./poTipos";
 import { PoTabs } from "./PoTabsSwitch";
+import { acessoDaPoEnviada } from "./poAcesso";
 
 export function PoFolha({ id, tabInicial, aoFechar }: { id: string; tabInicial?: string; aoFechar: () => void }) {
-  const { db, agir, abrir } = useCtxInv();
+  const { db, agir, abrir, avisar } = useCtxInv();
   const p = poPorId(db, id);
   const [tab, setTab] = useState<TabPo>((tabInicial as TabPo) || "lines");
   const [dlg, setDlg] = useState<DlgPo | null>(null);
@@ -35,6 +36,8 @@ export function PoFolha({ id, tabInicial, aoFechar }: { id: string; tabInicial?:
   const gravar = (encomendar: boolean): void => {
     const r = agir((d) => gravarPo(d, poDe(d, id), { notesInt: pd.notesInt, notesSup: pd.notesSup }, encomendar), encomendar ? `${id} gravada e encomendada num só passo.` : `${id} gravada (as edições nas células gravam logo).`);
     if (r.ok) setPd((x) => ({ ...x, dirty: false }));
+    // 22/10: encomendada, o popup com o acesso do fornecedor ao portal (poAcesso.ts)
+    if (r.ok && encomendar && p.status === "pending") acessoDaPoEnviada(id, avisar);
   };
   const sup = db.suppliers.find((s) => s.id === p.sup);
   const aprova = can("purchase_orders.approve"), recebe = can("inventory.receive");

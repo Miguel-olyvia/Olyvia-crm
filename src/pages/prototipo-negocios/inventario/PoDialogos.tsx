@@ -5,6 +5,7 @@ import { useCtxInv } from "./ctxInv";
 import { Confirmar, Dlg } from "./DialogosInv";
 import { Nota, Pri, Sec } from "./pecasInv";
 import { PdfPo } from "./PdfPo";
+import { acessoDaPoEnviada } from "./poAcesso";
 import { can, porqueNao } from "./perfil";
 import { PORTAL_FORN, eliminarPo, enviarPo, poTotals, retirarDoPortal } from "./po";
 import { Dinheiro } from "./poPecas";
@@ -19,10 +20,11 @@ interface Props { id: string; dlg: DlgPo | null; fechar: () => void; /** Chamado
 const porId = (d: Inventario, id: string): Po => d.pos.find((x) => x.id === id) as Po;
 
 function Aprovar({ p, fechar }: { p: Po; fechar: () => void }) {
-  const { db, agir } = useCtxInv();
+  const { db, agir, avisar } = useCtxInv();
   const s = fornecedor(db, p.sup);
   const pode = can("purchase_orders.approve");
-  const ok = (): void => { agir((d) => enviarPo(d, porId(d, p.id)), `${p.id} aprovada e enviada ao fornecedor.`); fechar(); };
+  // 22/10: enviada, o popup com o acesso do fornecedor ao portal (poAcesso.ts)
+  const ok = (): void => { const r = agir((d) => enviarPo(d, porId(d, p.id)), `${p.id} aprovada e enviada ao fornecedor.`); fechar(); if (r.ok) acessoDaPoEnviada(p.id, avisar); };
   return (
     <Dlg aberto aoFechar={fechar} titulo={`Aprovar e enviar ${p.id}`}
       rodape={<><Sec onClick={fechar}>Cancelar</Sec><Pri disabled={!pode} title={pode ? undefined : porqueNao("purchase_orders.approve")} onClick={ok}><Send className="ic" aria-hidden="true" />Aprovar e enviar</Pri></>}>

@@ -2,6 +2,8 @@
 // o protótipo mostra o email que a Olyvia real envia (create-client-portal-access / create-supplier-portal-access): para quem, o assunto,
 // o texto, o link do login, o email e a password temporária. Assim quem testa entra no portal sem emails a sério (LoginPortal.tsx).
 // Conta que já existia: o email real só leva o link; aqui junta-se "Credenciais de teste" com a password atual (só no protótipo).
+// 22/10: modo "encomenda" (e.po), ao aprovar e enviar uma PO no Inventário: publicada no portal, o email "Nova encomenda" de fn_sp_po_queue_email
+// e as credenciais de teste; por email (fornecedor sem portal ativo), o email do acesso e o aviso de que a encomenda seguiu por email.
 import { useState } from "react";
 import { Check, Copy, ExternalLink, Info, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,12 +41,15 @@ function Linha({ rotulo, valor, mono }: { rotulo: string; valor: string; mono?: 
 
 /** `entrarAqui`: abre o login neste separador (o fornecedor precisa: o Inventário do protótipo vive em memória neste separador). */
 export function AcessoPortalDialog({ e, fechar, entrarAqui }: { e: EnvioAcesso; fechar: () => void; entrarAqui?: () => void }) {
-  const { conta, comPassword, empresa } = e;
+  const { conta, comPassword, empresa, po } = e;
   const cliente = conta.tipo === "cliente";
+  // 22/10: a PO publicada no portal: o email é o da encomenda (o acesso, se a conta é nova, vai nas credenciais de teste)
+  const poPortal = !cliente && !!po?.publicada;
   const link = linkLogin();
   const doc = e.doc ?? "proposta";
   const assunto = cliente
     ? (comPassword ? `Acesso ao Portal — ${empresa}` : `${docNovo(doc)} disponível — ${empresa}`)
+    : poPortal ? `Nova encomenda ${po.id} disponível — ${empresa}`
     : (comPassword ? `Acesso ao Portal do Fornecedor — ${empresa}` : `${empresa} deu-lhe acesso no Portal do Fornecedor`);
   const tudo = [`Portal: ${link}`, `Email: ${conta.email}`, `Password: ${conta.password}`].join("\n");
   const caixa = (
@@ -58,11 +63,20 @@ export function AcessoPortalDialog({ e, fechar, entrarAqui }: { e: EnvioAcesso; 
     <Dialog open onOpenChange={(o) => { if (!o) fechar(); }}>
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{cliente ? "Acesso ao portal do cliente" : "Acesso ao Portal do Fornecedor"}</DialogTitle>
+          <DialogTitle>{cliente ? "Acesso ao portal do cliente" : po ? `Encomenda ${po.id} enviada ao fornecedor` : "Acesso ao Portal do Fornecedor"}</DialogTitle>
           <DialogDescription className="text-[15px]">
-            {comPassword ? "O email com as credenciais de acesso." : `O email de aviso: ${cliente ? "o cliente" : "o fornecedor"} já tem conta no portal.`}
+            {poPortal ? "A encomenda foi publicada no Portal do Fornecedor: o email de aviso e as credenciais para entrar."
+              : comPassword ? "O email com as credenciais de acesso." : `O email de aviso: ${cliente ? "o cliente" : "o fornecedor"} já tem conta no portal.`}
           </DialogDescription>
         </DialogHeader>
+        {po && !po.publicada && (
+          <p role="status" className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+            <span>{po.acessoNovo
+              ? `A encomenda ${po.id} seguiu por email; foi também enviado o acesso ao portal (protótipo).`
+              : `A encomenda ${po.id} seguiu por email: o fornecedor ainda não ativou o portal. Depois de entrar, as encomendas novas já lhe chegam ao portal.`}</span>
+          </p>
+        )}
         <p className="flex items-start gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
           <span>Protótipo: em produção isto segue por email. Aqui fica à vista para entrar no portal sem emails a sério.
@@ -76,7 +90,7 @@ export function AcessoPortalDialog({ e, fechar, entrarAqui }: { e: EnvioAcesso; 
             <dt className="text-muted-foreground">Assunto</dt><dd className="min-w-0 font-medium">{assunto}</dd>
           </dl>
           <div className="space-y-2 px-4 py-3">
-            <p className="text-lg font-semibold">Olá, {conta.nome}!</p>
+            <p className="text-lg font-semibold">{poPortal ? "Nova encomenda" : `Olá, ${conta.nome}!`}</p>
             {cliente && comPassword && <>
               <p>Foi-lhe criado um acesso ao portal de <strong>{empresa}</strong>.</p>
               <p>Tem {docComArtigo(doc)} disponível para consulta{e.titulo ? <>: <em>{e.titulo}</em></> : "."}</p>
@@ -88,27 +102,33 @@ export function AcessoPortalDialog({ e, fechar, entrarAqui }: { e: EnvioAcesso; 
               <p>Tem {docUmNovo(doc)} disponível no seu portal{e.titulo ? <>: <em>{e.titulo}</em></> : "."}</p>
               <p>Aceda em: <a href={link} target="_blank" rel="noreferrer" className="break-all text-primary underline-offset-4 hover:underline">{link}</a></p>
             </>}
-            {!cliente && comPassword && <>
+            {poPortal && <>
+              <p><strong>{empresa}</strong> enviou-lhe a encomenda <strong>{po.id}</strong> no Portal do Fornecedor.</p>
+              <p>Entre no portal para ver o detalhe, descarregar o PDF e confirmar a encomenda com a data de entrega prevista.</p>
+              <p>Ver encomenda: <a href={link} target="_blank" rel="noreferrer" className="break-all text-primary underline-offset-4 hover:underline">{link}</a></p>
+            </>}
+            {!cliente && !poPortal && comPassword && <>
               <p><strong>{empresa}</strong> deu-lhe acesso ao Portal do Fornecedor da Olyvia, onde pode gerir o seu catálogo de artigos.</p>
               <p>Entre com:</p>
               {caixa}
               <p>No primeiro acesso vai ser pedido para definir uma nova password.</p>
               <p className="text-sm text-muted-foreground">Não partilhe esta password. Se o acesso não funcionar, peça a {empresa} que lhe reenvie o acesso.</p>
             </>}
-            {!cliente && !comPassword && <>
+            {!cliente && !poPortal && !comPassword && <>
               <p>Passou a ter acesso ao Portal do Fornecedor da <strong>{empresa}</strong>.</p>
               <p>Entre em <a href={link} target="_blank" rel="noreferrer" className="break-all text-primary underline-offset-4 hover:underline">{link}</a> com o mesmo email ({conta.email}) e a mesma password que já usa.</p>
             </>}
-            <p className="border-t pt-2 text-sm text-muted-foreground">Enviado por {empresa}</p>
+            <p className="border-t pt-2 text-sm text-muted-foreground">{poPortal ? `Enviado por ${empresa} através da Olyvia. Se não esperava este email, pode ignorá-lo.` : `Enviado por ${empresa}`}</p>
           </div>
         </article>
 
         {/* conta que já existia: o email real não leva a password; aqui mostra-se para testar */}
-        {!comPassword && (
+        {/* 22/10: a PO publicada: o email da encomenda nunca leva a password, por isso vai sempre aqui (conta nova: a temporária) */}
+        {(!comPassword || poPortal) && (
           <section aria-label="Credenciais de teste" className="rounded-lg border border-dashed px-4 py-3">
             <p className="font-medium">Credenciais de teste</p>
             <p className="text-sm text-muted-foreground">
-              Só no protótipo: o email real não leva a password. {conta.mudouPassword ? "É a password que já foi definida no primeiro acesso." : "Ainda é a password temporária (por trocar no primeiro acesso)."}
+              Só no protótipo: o email real não leva a password. {comPassword ? "A conta de teste do fornecedor foi criada agora, com uma password temporária (por trocar no primeiro acesso)." : conta.mudouPassword ? "É a password que já foi definida no primeiro acesso." : "Ainda é a password temporária (por trocar no primeiro acesso)."}
             </p>
             {caixa}
           </section>
