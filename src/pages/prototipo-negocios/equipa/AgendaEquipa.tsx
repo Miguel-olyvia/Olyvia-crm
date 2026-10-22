@@ -13,14 +13,23 @@ import {
   type CelulaAgenda, type ItemAgenda, type VistaAgenda,
 } from "./regrasAgenda";
 import type { EquipaCtx } from "./ctx";
-import { ausenciasDosTecnicos, pessoaRhDe } from "./pontes";
+import { agendaDasPessoas, ausenciasDosTecnicos, pessoaRhDe } from "./pontes";
 import { garantirTecnicos } from "./tecnicos";
 
 const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[15px] font-medium transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
 const horas = (h: number) => String(Math.round(h * 10) / 10).replace(".", ",") + " h";
 
-/** aoAbrirPessoa: abre a ficha da pessoa do RH (id) em Pessoas; sem ele, o nome fica só texto. */
-export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: EquipaCtx & { aoAbrirPessoa?: (pessoaRhId: string) => void }) {
+/** aoAbrirPessoa: abre a ficha da pessoa do RH (id) em Pessoas; sem ele, o nome fica só texto.
+ *  22/10: `pessoas` (ids do RH) restringe as linhas a essas pessoas (agendaDasPessoas: também quem não tem obras nem visitas, com as ausências
+ *  do RH e os feriados); `comOutros` junta no fim as visitas de quem não é pessoa do RH; `titulo` e `descricao` mudam o cabeçalho. */
+export interface PropsAgendaEquipa extends EquipaCtx {
+  aoAbrirPessoa?: (pessoaRhId: string) => void;
+  pessoas?: readonly string[];
+  comOutros?: boolean;
+  titulo?: string;
+  descricao?: string;
+}
+export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa, pessoas, comOutros, titulo, descricao }: PropsAgendaEquipa) {
   garantirTecnicos(S);
   const hoje = isoDia(new Date());
   const [vista, setVista] = useState<VistaAgenda>("semana");
@@ -29,7 +38,9 @@ export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: Eq
   const rh = useEstadoRh((e) => e);
   const aus = useMemo(() => ausenciasDosTecnicos(rh, S.tecnicos), [rh, S.tecnicos]);
   const dias = diasDoPeriodo(vista, ref);
-  const linhas = agendaEquipa({ deals: S.deals, tecnicos: S.tecnicos!, frota: F, ausencias: aus }, dias);
+  const linhas = pessoas
+    ? agendaDasPessoas({ deals: S.deals, tecnicos: S.tecnicos!, frota: F, rh }, pessoas, dias, comOutros)
+    : agendaEquipa({ deals: S.deals, tecnicos: S.tecnicos!, frota: F, ausencias: aus }, dias);
   const nConf = contarConflitos(linhas);
   const mes = vista === "mes";
   const conflitos = linhas.flatMap((l) => l.celulas.flatMap((c) => c.conflitos.map((x, i) => ({ k: `${l.id}-${c.data}-${i}`, quem: l.nome, data: c.data, texto: x.texto }))));
@@ -37,9 +48,9 @@ export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: Eq
   return (
     <div className="flex flex-col gap-5">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Agenda da equipa</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{titulo ?? "Agenda da equipa"}</h1>
         <p className="mt-1 max-w-3xl text-[15px] text-muted-foreground">
-          Quem está em que obra em cada dia, as visitas, as férias e a viatura da Frota. Só para consultar: as tarefas mudam-se no plano da obra.
+          {descricao ?? "Quem está em que obra em cada dia, as visitas, as férias e a viatura da Frota. Só para consultar: as tarefas mudam-se no plano da obra."}
         </p>
       </header>
 
@@ -62,7 +73,7 @@ export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: Eq
         <span className="inline-flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm border border-primary bg-primary/15" aria-hidden="true" />Tarefa de obra</span>
         <span className="inline-flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm border border-dashed border-primary bg-card" aria-hidden="true" />Plano por aprovar</span>
         <span className="inline-flex items-center gap-1.5"><i className="h-3 w-3 rounded-sm border border-sky-600 bg-sky-50" aria-hidden="true" />Visita</span>
-        <span className="inline-flex items-center gap-1.5"><Palmtree className="h-3.5 w-3.5" aria-hidden="true" />Férias ou ausência</span>
+        <span className="inline-flex items-center gap-1.5"><Palmtree className="h-3.5 w-3.5" aria-hidden="true" />{pessoas ? "Férias, ausência ou feriado" : "Férias ou ausência"}</span>
         <span className="inline-flex items-center gap-1.5"><Car className="h-3.5 w-3.5" aria-hidden="true" />Viatura da Frota</span>
         <span className={cn("inline-flex items-center gap-1.5 font-medium", nConf ? "text-destructive" : "")} role="status">
           <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />{nConf ? `${nConf} ${nConf === 1 ? "conflito" : "conflitos"} neste período` : "Sem conflitos neste período"}
@@ -88,8 +99,10 @@ export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: Eq
                 <th scope="row" className="sticky left-0 z-10 border-b border-r border-border bg-card px-2 py-2 text-left font-normal sm:px-3">
                   {(() => {
                     const t = l.tipo === "tecnico" && aoAbrirPessoa ? S.tecnicos!.find((x) => x.id === l.id) : undefined;
-                    return t ? (
-                      <button type="button" onClick={() => aoAbrirPessoa!(pessoaRhDe(t))} aria-label={`Abrir a ficha de ${l.nome} em Pessoas`}
+                    // 22/10: com a pessoa do RH na linha (agendaDasPessoas), abre-se a ficha de qualquer pessoa
+                    const pid = aoAbrirPessoa ? l.pessoaRhId ?? (t ? pessoaRhDe(t) : undefined) : undefined;
+                    return pid ? (
+                      <button type="button" onClick={() => aoAbrirPessoa!(pid)} aria-label={`Abrir a ficha de ${l.nome} em Pessoas`}
                         className="block min-h-6 text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
                         {l.nome}
                       </button>
@@ -116,7 +129,8 @@ export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: Eq
   );
 }
 
-function Celula({ c, mes, hoje, quem, irObra, irNegocio }: { c: CelulaAgenda; mes: boolean; hoje: boolean; quem: string } & Pick<EquipaCtx, "irObra" | "irNegocio">) {
+// 22/10: exportadas para "A minha agenda" (MinhaAgenda.tsx)
+export function Celula({ c, mes, hoje, quem, irObra, irNegocio }: { c: CelulaAgenda; mes: boolean; hoje: boolean; quem: string } & Pick<EquipaCtx, "irObra" | "irNegocio">) {
   const conflito = c.conflitos.length > 0;
   // o total do dia só quando soma mais do que uma marcação (ou passa do dia de trabalho); a tarefa sozinha já diz as horas
   const total = c.horas > HORAS_DIA || c.itens.filter((x) => x.horas).length > 1;
@@ -140,9 +154,9 @@ function Celula({ c, mes, hoje, quem, irObra, irNegocio }: { c: CelulaAgenda; me
   );
 }
 
-function Item({ x, mes, irObra, irNegocio }: { x: ItemAgenda; mes: boolean } & Pick<EquipaCtx, "irObra" | "irNegocio">) {
+export function Item({ x, mes, irObra, irNegocio }: { x: ItemAgenda; mes: boolean } & Pick<EquipaCtx, "irObra" | "irNegocio">) {
   const texto = `${x.hora ? `${x.hora} · ` : ""}${x.titulo} · ${x.sub}${x.previsto ? " · plano por aprovar" : ""}${x.feito ? (x.tipo === "visita" ? " · feita" : " · validada") : ""}`;
-  if (x.tipo === "ferias" || x.tipo === "ausencia") {
+  if (x.tipo === "ferias" || x.tipo === "ausencia" || x.tipo === "feriado") {
     return (
       <span title={`${x.titulo} · ${x.sub}`} className="inline-flex min-h-6 items-center gap-1 rounded-md bg-muted px-1.5 text-xs text-muted-foreground">
         <Palmtree className="h-3 w-3 shrink-0" aria-hidden="true" />{mes ? <span className="sr-only">{x.titulo}</span> : x.titulo}

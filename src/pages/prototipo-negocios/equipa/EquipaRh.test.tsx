@@ -104,9 +104,13 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
   }, LENTO);
 
   it("sem a permissão, o bloco Obra só se consulta", async () => {
+    // 22/10: o Comercial só vê a sua agenda (sem os técnicos): a ficha abre-se em Pessoas
     const S = seed(); S.role = "comercial";
-    render(<Casa S={S} aba="agenda" />);
-    const ficha = await abrirFichaPelaAgenda("Hugo Neves");
+    render(<Casa S={S} aba="pessoas" />);
+    const tabela = await screen.findByRole("table", undefined, { timeout: 15000 });
+    fireEvent.click(within(tabela).getByText("Hugo Neves"));
+    const titulo = await screen.findByRole("heading", { level: 1, name: /Hugo Neves/ }, { timeout: 15000 });
+    const ficha = titulo.closest<HTMLElement>('[role="dialog"]') as HTMLElement;
     const bloco = await within(ficha).findByTestId("bloco-obra-pessoa", undefined, { timeout: 15000 });
     expect(within(bloco).getByRole("note")).toHaveTextContent(/só a Direção ou as Operações/);
     expect(within(bloco).getByLabelText("Ofício")).toBeDisabled();
@@ -131,7 +135,7 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
 
 describe("RH › Agenda", () => {
   it("mostra a semana com cada técnico na obra certa, abre a obra e a visita, muda para mês e navega", async () => {
-    const S = seed();
+    const S = seed(); S.role = "direcao"; // 22/10: a Direção vê toda a gente
     render(<Casa S={S} aba="agenda" />);
     expect(await screen.findByRole("heading", { level: 1, name: "Agenda da equipa" }, { timeout: 15000 })).toBeInTheDocument();
     expect(screen.getByText("12 a 18 de outubro de 2026")).toBeInTheDocument();
@@ -140,7 +144,7 @@ describe("RH › Agenda", () => {
     expect(seg).toHaveTextContent("AA-12-BC");
     fireEvent.click(demol);
     expect(irObra).toHaveBeenCalledWith(1022);
-    fireEvent.click(within(screen.getByTestId("agenda-Rúben-2026-10-15")).getByRole("button", { name: /Abrir o negócio: 10:00/ }));
+    fireEvent.click(within(screen.getByTestId("agenda-Rúben Costa-2026-10-15")).getByRole("button", { name: /Abrir o negócio: 10:00/ }));
     expect(irNegocio).toHaveBeenCalledWith(1036);
     expect(screen.getByText("Sem conflitos neste período")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Semana seguinte/ }));

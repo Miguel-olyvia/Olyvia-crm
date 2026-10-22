@@ -19,7 +19,8 @@ import type { FichaTecnico } from "./tecnicos";
 /** As horas de um dia de trabalho. */
 export const HORAS_DIA = 8;
 
-export type TipoItem = "tarefa" | "visita" | "ferias" | "ausencia";
+// 22/10: "feriado" (os feriados nacionais, na agenda de cada pessoa: agendaDasPessoas em pontes.ts)
+export type TipoItem = "tarefa" | "visita" | "ferias" | "ausencia" | "feriado";
 export interface ItemAgenda {
   tipo: TipoItem;
   titulo: string;
@@ -38,7 +39,8 @@ export interface ItemAgenda {
 }
 export interface ConflitoAgenda { tipo: "obras" | "ferias"; texto: string }
 export interface CelulaAgenda { data: string; itens: ItemAgenda[]; horas: number; viatura: string | null; conflitos: ConflitoAgenda[] }
-export interface LinhaAgenda { id: string; nome: string; papel: string; tipo: "tecnico" | "comercial"; celulas: CelulaAgenda[] }
+// 22/10: tipo "pessoa" (uma pessoa do RH sem obras nem visitas) e a pessoa do RH da linha, quando se sabe (agendaDasPessoas)
+export interface LinhaAgenda { id: string; nome: string; papel: string; tipo: "tecnico" | "comercial" | "pessoa"; celulas: CelulaAgenda[]; pessoaRhId?: string }
 
 export interface EntradaAgenda {
   deals: readonly Negocio[];

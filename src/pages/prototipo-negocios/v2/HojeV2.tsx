@@ -8,7 +8,7 @@
 // - As perguntas do cliente (do portal; perguntasCliente.ts) aparecem no Comercial e na Direção, com a mensagem inteira e a resposta na
 //   linha: o canal (Email / WhatsApp, com o contacto já resolvido) e uma resposta rápida; 2 cliques (a resposta e "Enviar").
 // Não desenha o HojeSimples (que fica como está para a Atual).
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CalendarDays, CheckCircle2, ListTodo, Mail, MessageCircle, MessageSquareText, Plus, Users, Warehouse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,9 @@ import {
   CANAIS, MAX_TEXTO, MODELOS_RESPOSTA, OUTRA, contactoDe, destinoDe, faltaEnviar, haQuanto, perguntasPorResponder, textoResposta,
   vePerguntas, type CanalResposta, type PerguntaCliente,
 } from "./perguntasCliente";
+
+// 22/10: "A minha agenda" (a semana da pessoa do RH deste papel, a mesma da RH › Agenda; equipa/MinhaAgenda.tsx), carregada à parte
+const MinhaAgenda = lazy(() => import("../equipa/MinhaAgenda"));
 
 const saudacao = (h: number): string => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 const BOTAO = "h-11 min-h-11 text-[15px]";
@@ -508,6 +511,10 @@ export function HojeV2({ S, A, run, go }: Ctx) {
             </ul>
           )}
       </Secao>
+
+      <Suspense fallback={null}>
+        <MinhaAgenda S={S} irObra={(id) => run(() => A.abrirPlano(id))} irNegocio={(id) => run(() => A.abrir(id))} id="hv2-minha-agenda" className="mt-10 border-t border-border pt-6" />
+      </Suspense>
     </div>
   );
 }

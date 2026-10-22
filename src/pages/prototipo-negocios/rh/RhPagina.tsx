@@ -6,8 +6,8 @@ import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { MemoryRouter, Navigate, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ABAS_RH, CAMINHO_DE, TITULO_RH, abaDeCaminho, idioma, type AbaRh } from "./abas";
-import { atualizarCustosDoRh, custosDoRh, garantirTecnicosNoRh } from "../equipa/pontes";
-import { subscrever as subscreverRh } from "@/components/rh-exemplo/dados/loja";
+import { atualizarCustosDoRh, custosDoRh, equipaDe, garantirTecnicosNoRh, pessoaRhDoPapel } from "../equipa/pontes";
+import { subscrever as subscreverRh, useEstadoRh } from "@/components/rh-exemplo/dados/loja";
 import { subscreverCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import type { EquipaCtx } from "../equipa/ctx";
 import { ExtensoesFichaRh } from "@/components/rh-exemplo/ficha/extensoesFicha";
@@ -107,7 +107,7 @@ export default function RhPagina({ aba, aoMudarAba, equipa }: Props) {
           <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">{A_ABRIR[lg]}</p>}>
             {!equipa ? (
               <div><h1 className="text-2xl font-semibold tracking-tight">{ABAS_RH.find((a) => a.k === aba)?.rotulo[lg]}</h1><p className="mt-2 text-[15px] text-muted-foreground">{SEM_ESTADO[lg]}</p></div>
-            ) : <AgendaEquipa {...equipa} aoAbrirPessoa={abrirPessoa} />}
+            ) : <AgendaDoPapel equipa={equipa} aoAbrirPessoa={abrirPessoa} />}
           </Suspense>
         ) : (
         /* key: trocar de aba no menu recomeça o router interno no caminho dessa aba */
@@ -142,5 +142,19 @@ export default function RhPagina({ aba, aoMudarAba, equipa }: Props) {
         )}
       </section>
     </LanguageProvider>
+  );
+}
+
+/** 22/10: a Agenda vista por quem está a ver o protótipo (a pessoa do RH do papel): com equipa (quem lhe reporta), ela e a equipa; sem equipa,
+ *  só a sua. A Direção (a Marta) vê toda a gente e as visitas de quem não é pessoa do RH. */
+function AgendaDoPapel({ equipa, aoAbrirPessoa }: { equipa: EquipaCtx; aoAbrirPessoa?: (pid: string) => void }) {
+  const rh = useEstadoRh((e) => e);
+  const eu = pessoaRhDoPapel(equipa.S), pessoas = equipaDe(rh, eu), comEquipa = pessoas.length > 1;
+  return (
+    <AgendaEquipa {...equipa} aoAbrirPessoa={aoAbrirPessoa} pessoas={pessoas} comOutros={equipa.S.role === "direcao"}
+      titulo={comEquipa ? "Agenda da equipa" : "A minha agenda"}
+      descricao={comEquipa
+        ? "A sua agenda e a de quem lhe reporta: as obras de cada dia, as visitas, as férias, as ausências, os feriados e a viatura da Frota. Só para consultar: as tarefas mudam-se no plano da obra."
+        : "As suas obras, visitas, férias, ausências e feriados. Só para consultar: as tarefas mudam-se no plano da obra."} />
   );
 }

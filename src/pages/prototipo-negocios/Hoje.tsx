@@ -3,6 +3,7 @@
 import {
   ArrowRight, BellRing, CalendarCheck2, CalendarClock, CheckCircle2, ListTodo, MapPin, PartyPopper, Plus, UserRound,
 } from "lucide-react";
+import { Suspense, lazy } from "react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,9 @@ import { DayTrack, TrackEmpty, TrackGroup } from "@/components/atividades/DayTra
 import { cn } from "@/lib/utils";
 import { FASES, PAPEIS, aberto, conflitos, eur, minhas, pct, tot, type Estado, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
+
+// 22/10: "A minha agenda" (a semana da pessoa do RH deste papel, a mesma da RH › Agenda; equipa/MinhaAgenda.tsx), carregada à parte
+const MinhaAgenda = lazy(() => import("./equipa/MinhaAgenda"));
 
 interface Compromisso { id: string; hora: string; dia?: string; titulo: string; quem: string; onde?: string; acao: string; d: Negocio; atrasado?: boolean }
 
@@ -52,7 +56,7 @@ function alertasDia(S: Estado, A: Ctx["A"], r: Papel): Alerta[] {
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
-export function Hoje({ S, A, go }: Ctx) {
+export function Hoje({ S, A, run, go }: Ctx) {
   const r = S.role, agora = new Date();
   const tarefas = minhas(S, r);
   const atrasadas = tarefas.filter(({ d }) => d.atraso && d.fase === 0);
@@ -128,6 +132,10 @@ export function Hoje({ S, A, go }: Ctx) {
             </>
           )}
         </DayTrack>
+
+        <Suspense fallback={null}>
+          <MinhaAgenda S={S} irObra={(id) => run(() => A.abrirPlano(id))} irNegocio={(id) => run(() => A.abrir(id))} id="pn-minha-agenda" className="lg:col-span-2" />
+        </Suspense>
 
         <div className="lg:col-span-2">
           <DayTrack id="pn-alertas" icon={BellRing} title="Alertas por tratar" hint="O que está parado à espera de alguém" count={nAl} tone="task">

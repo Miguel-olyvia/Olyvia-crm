@@ -3,7 +3,7 @@
 // o que verificar no fim e o registo do dia (horas, fotografias e o que fez). O registo vai para a página da obra
 // (o responsável valida ou pede correção) e para o portal do cliente (fotografias e descrição, sem horas).
 // O protótipo não tem relógio: "hoje" é o dia de cada obra em curso (as Operações mudam-no na página da obra).
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -27,6 +27,9 @@ import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from ".
 import { lerFoto } from "./ObraOperacoes";
 import { AvisosDoTecnico } from "./AvisosTecnico";
 import { RegistarImprevisto } from "./ImprevistosObra";
+
+// 22/10: "A minha agenda" (a semana da pessoa do RH deste papel, a mesma da RH › Agenda; equipa/MinhaAgenda.tsx), carregada à parte
+const MinhaAgenda = lazy(() => import("./equipa/MinhaAgenda"));
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
@@ -93,6 +96,11 @@ export function HojeTecnico(ctx: Ctx) {
           <ul className="mt-3 space-y-3">{seguir.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaASeguir x={x} eu={eu} /></li>)}</ul>
         </section>
       )}
+
+      {/* 22/10: a semana do técnico (a linha dele na agenda do RH); é o mesmo técnico que aqui (pessoaRhDoPapel segue S.tec) */}
+      <Suspense fallback={null}>
+        <MinhaAgenda S={S} irObra={(id) => run(() => A.abrirPlano(id))} irNegocio={(id) => run(() => A.abrir(id))} id="ht-minha-agenda" className="mt-10" />
+      </Suspense>
         </div>
       </div>
     </div>

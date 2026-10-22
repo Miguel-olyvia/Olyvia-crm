@@ -1,6 +1,7 @@
 // Proposta de 09/10/2026: o Hoje com menos ruído. Uma frase diz quanto há;
 // a coisa mais urgente vem primeiro, com o único botão primário; o resto é
 // uma lista simples. Sem pastilhas, sem gradientes, sem maiúsculas.
+import { Suspense, lazy } from "react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { AlertTriangle, ArrowRight } from "lucide-react";
@@ -12,6 +13,9 @@ import { aDescoberto } from "./planoObra";
 import { useInventario } from "./inventario/loja";
 import { contadores as contadoresInv } from "./inventario/contadores";
 import { resumoInventario } from "./v2/hojeArmazem";
+
+// 22/10: "A minha agenda" (a semana da pessoa do RH deste papel, a mesma da RH › Agenda; equipa/MinhaAgenda.tsx), carregada à parte
+const MinhaAgenda = lazy(() => import("./equipa/MinhaAgenda"));
 
 /** 16/10: o que o Armazém tem no Inventário novo (o mesmo resumo do Hoje da V2). */
 function InventarioArmazem({ A, go }: Pick<Ctx, "A" | "go">) {
@@ -29,7 +33,7 @@ function InventarioArmazem({ A, go }: Pick<Ctx, "A" | "go">) {
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
-export function HojeSimples({ S, A, go }: Ctx) {
+export function HojeSimples({ S, A, run, go }: Ctx) {
   const r = S.role, agora = new Date();
   // o mais urgente primeiro: atrasados, depois aprovações, depois o resto
   const L = minhas(S, r).sort((a, b) => Number(!!b.d.atraso) - Number(!!a.d.atraso) || Number(!!b.dir) - Number(!!a.dir));
@@ -155,6 +159,10 @@ export function HojeSimples({ S, A, go }: Ctx) {
             </ul>
           )}
       </section>
+
+      <Suspense fallback={null}>
+        <MinhaAgenda S={S} irObra={(id) => run(() => A.abrirPlano(id))} irNegocio={(id) => run(() => A.abrir(id))} id="hs-minha-agenda" className="mt-12" />
+      </Suspense>
     </div>
   );
 }
