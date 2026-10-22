@@ -117,11 +117,6 @@ export function mudarPassword(S: Estado, email: string, nova: string): void {
   if (c) { c.password = nova; c.mudouPassword = true; }
 }
 
-/** A password definida no primeiro acesso do fornecedor aberto a partir do CRM (sem login): a conta dele, se a tiver, fica com ela. */
-export function mudarPasswordFornecedor(S: Estado, sid: string, nova: string): void {
-  const c = Object.values(S.acessos ?? {}).find((x) => x.tipo === "fornecedor" && x.ref === sid);
-  if (c) { c.password = nova; c.mudouPassword = true; }
-}
 
 /** Há alguma coisa do negócio no portal (a proposta ou uma adenda enviadas). */
 const noPortal = (d: Negocio): boolean => !!d.orc?.enviada || !!d.adendas?.some((a) => !!a.enviada);
@@ -131,6 +126,10 @@ export function negocioDaConta(S: Estado, c: ContaPortal): Negocio | undefined {
   const ds = ids.map((id) => S.deals.find((d) => d.id === id)).filter((d): d is Negocio => !!d);
   return ds.find(noPortal) ?? ds[0];
 }
+
+/** 22/10: o login aberto pelo Inventário ("Abrir como fornecedor →", "Simular"): o email da conta já posto (a password fica vazia) e a
+ *  encomenda a abrir no portal depois de entrar. Só em memória, neste separador (como o Inventário); `n` volta a montar o login. */
+export interface LoginPrefill { email: string; po: string | null; n: number }
 
 /* ------------------------------------------------------------------ os links */
 /** O link do login dos portais (leva a sala, para entrar noutro aparelho na mesma demonstração). */

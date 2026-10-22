@@ -79,7 +79,8 @@ export function FolhaForn({ id, pre, tabInicial, aoFechar }: Props) {
     const r = agir((x) => gravarFicha(x, d, id, rasc), () => (s ? "Fornecedor gravado." : `Fornecedor criado${rasc.enviar ? " e convite enviado." : ` com ${rasc.items.length} artigo(s).`}`));
     if (r.ok && rascunho) { aoFechar(); abrir({ t: "sup", id: r.valor.id }); if (rasc.enviar) pedirAcessoForn({ sid: r.valor.id, reenviar: false }); }
   };
-  // 20/10: dentro do protótipo, o fornecedor entra no Portal do Fornecedor simulado (primeiro acesso no ecrã inteiro); sem a moldura, o diálogo de sempre
+  // 20/10: dentro do protótipo, o fornecedor entra no Portal do Fornecedor simulado (primeiro acesso no ecrã inteiro); sem a moldura, o diálogo de sempre.
+  // 22/10: entra pelo login dos portais, com o email da conta já posto (sem conta ainda, nasce aqui e o popup mostra a password)
   const simular = (): void => { if (s && podeSimular(db, s.id, avisar)) { if (abrirPortalForn) abrirPortalForn(s.id); else setSim(true); } };
   const abas: readonly (readonly [TabF, string, number?])[] = [["resumo", "Resumo"], ["dados", "Dados"], ["artigos", "Artigos e preços", s ? db.items.filter((i) => i.sup === s.id).length : rasc.items.length], ["precos", "Preços por aprovar", s ? precosPorAprovar(db, s.id).length : 0], ["portal", "Portal"]];
   const rodape = rascunho

@@ -34,7 +34,8 @@ export interface CtxInv {
   registarAcoes: (el: HTMLElement | null) => void;
   filtros: FiltrosInv;
   setFiltros: <K extends keyof FiltrosInv>(k: K, p: Partial<FiltrosInv[K]>) => void;
-  /** 20/10 (demo): abre o portal do fornecedor simulado, já na encomenda `po`. Só existe quando a moldura do protótipo o sabe abrir. */
+  /** 20/10 (demo): abre o portal do fornecedor simulado, já na encomenda `po`. Só existe quando a moldura do protótipo o sabe abrir.
+   *  22/10: abre o login dos portais com o email da conta do fornecedor já posto; a encomenda abre depois de entrar. */
   abrirPortalForn?: (sup: string, po?: string) => void;
 }
 

@@ -82,7 +82,8 @@ function Topo({ fontes, mudarFontes, pedirRepor }: { fontes: boolean; mudarFonte
 /** `alvoTopo` é o sítio, no cabeçalho do protótipo, onde se desenha o topo (pesquisa e ações); sem ele (testes e uso isolado) o topo fica dentro da página. */
 interface PaginaProps {
   leitura?: boolean; aba?: AbaInv; aoMudarAba?: (a: AbaInv) => void; alvoTopo?: HTMLElement | null;
-  /** 20/10 (demo): "Abrir como fornecedor →" no separador Portal da PO abre o portal do fornecedor simulado (PrototipoNegocios). */
+  /** 20/10 (demo): "Abrir como fornecedor →" no separador Portal da PO abre o portal do fornecedor simulado (PrototipoNegocios).
+   *  22/10: pelo login dos portais, com o email do fornecedor já posto. */
   aoAbrirPortalForn?: (sup: string, po?: string) => void;
 }
 

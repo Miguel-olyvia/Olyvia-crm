@@ -49,6 +49,7 @@ function Acesso({ s, revogar, simular }: { s: Fornecedor; revogar: () => void; s
           {dentro && <><Sec onClick={() => enviar("resend")}><Send className="ic" aria-hidden="true" />Reenviar</Sec><Sec onClick={revogar}>Revogar</Sec></>}
         </> : <span className="muted"><Lock className="ic sm" aria-hidden="true" /> {porqueNao(PM)}</span>}
         {s.portal === "invited" && <BotaoSimular aoClicar={simular} />}
+        {/* 22/10: abre o login dos portais com o email deste fornecedor já posto */}
         {abrirPortalForn && s.portal === "active" && <Sec onClick={() => abrirPortalForn(s.id)}>Abrir como fornecedor →</Sec>}
       </div>
     </>

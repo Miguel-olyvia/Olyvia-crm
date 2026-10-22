@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
-  ArrowLeft, BarChart3, Bell, Building, Building2, ChevronDown, KeyRound, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
+  ArrowLeft, BarChart3, Bell, Building, Building2, ChevronDown, KeyRound, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import mascote from "@/assets/olyvia-mascot.png";
@@ -58,11 +58,10 @@ import type { AbaRh } from "./rh/abas";
 import { PortalCliente } from "./PortalCliente";
 import { RevisaoContrato } from "./RevisaoContrato";
 import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
-import { fornecedorInicial } from "./portalFornecedor/dadosPortal";
 import { fornecedor } from "./inventario/base";
 import { LoginPortal } from "./LoginPortal";
 import { AcessoPortalDialog } from "./AcessoPortalDialog";
-import { contaFornecedor, fecharAcesso, mostrarAcesso, mudarPasswordFornecedor, ouvirAcessoForn, useAcessoPendente } from "./acessosPortal";
+import { contaFornecedor, fecharAcesso, mostrarAcesso, ouvirAcessoForn, useAcessoPendente, type LoginPrefill } from "./acessosPortal";
 
 // O Inventário completo (nativo, na Atual e na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
@@ -73,8 +72,7 @@ const MenuFrota = lazy(() => import("./frota/MenuFrota"));
 // 21/10: o Recursos Humanos (os ecrãs de RH de exemplo, só dados de teste em memória): também só se carrega quando se abre.
 const RhPagina = lazy(() => import("./rh/RhPagina"));
 const MenuRh = lazy(() => import("./rh/MenuRh"));
-// 20/10 (demo): o Portal do Fornecedor simulado, de ecrã inteiro (lê e escreve o Inventário em memória: abre no mesmo separador).
-const PortalFornecedor = lazy(() => import("./portalFornecedor/PortalFornecedor"));
+// 22/10: o Portal do Fornecedor simulado só se abre pelo login dos portais (LoginPortal.tsx), como o do cliente.
 
 import { sala, sinc } from "./sincronizacao";
 import { esquecerInventario, substituirInventario } from "./inventario/loja";
@@ -145,8 +143,6 @@ export default function PrototipoNegocios() {
   const [frotaAba, setFrotaAba] = useState<AbaFrota>("hoje");
   const [rhMock, setRhMock] = useState(false); // um ecrã do Recursos Humanos (do menu lateral): como a Frota, na Atual e na V2 e fora do Estado
   const [rhAba, setRhAba] = useState<AbaRh>("pessoas");
-  // 20/10 (demo): o Portal do Fornecedor simulado (com que fornecedor se entrou, a encomenda a abrir e para onde voltar); fecha o Inventário e a Frota
-  const [fornMock, setFornMock] = useState<{ sup: string; po: string | null; voltar: "inv" | "crm"; n: number } | null>(null);
   const [alvoTopo, setAlvoTopo] = useState<HTMLElement | null>(null); // o cabeçalho do protótipo, onde o inventário desenha a pesquisa global
   const [versao, setVersao] = useState<VersaoProto>(lerVersao);
   // 16/10: Pessoas numa página e Negócios por documento (PessoasV1.tsx, NegociosV1Docs.tsx). Neste ramo partilhado fica desligada por defeito
@@ -160,6 +156,9 @@ export default function PrototipoNegocios() {
   const [portalTok, setPortalTok] = useState<string | null>(() => { try { return new URLSearchParams(window.location.search).get("portal"); } catch { return null; } });
   // 22/10: o login dos portais (?login=1): o cliente e o fornecedor entram com as credenciais do popup do envio (LoginPortal.tsx)
   const [login, setLogin] = useState<boolean>(() => { try { return new URLSearchParams(window.location.search).get("login") === "1"; } catch { return false; } });
+  // 22/10: o login pedido no Inventário ("Abrir como fornecedor →"): o email da conta já posto e a encomenda a abrir depois de entrar.
+  // Em memória, como o Inventário (neste separador); "Voltar" e "Sair" regressam ao Inventário, que fica aberto por baixo
+  const [loginPre, setLoginPre] = useState<LoginPrefill | null>(null);
   // 22/10: o popup com o email de acesso ao portal (acessosPortal.ts): só neste separador, nunca vai para os outros aparelhos
   const acessoPendente = useAcessoPendente();
   // um popup pedido antes de abrir o protótipo (ou deixado ao sair) não é deste ecrã
@@ -413,10 +412,18 @@ export default function PrototipoNegocios() {
   }, [comInvFrota, pedidoFrota]);
   const [voltarObra, setVoltarObra] = useState<number | null>(null);
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
-  // 20/10 (demo): abrir o portal do fornecedor (do menu, ou de uma PO com "Abrir como fornecedor →"); voltar repõe o Inventário se veio de lá
-  const abrirPortalForn = (sup: string | null, po: string | null, voltar: "inv" | "crm"): void => {
-    setMais(false); setInvMock(false); setFrotaMock(false); setRhMock(false);
-    setFornMock((x) => ({ sup: sup || fornecedorInicial(lerInventario()), po, voltar, n: (x?.n ?? 0) + 1 }));
+  // 22/10: o portal do fornecedor já não abre direto (nem do menu): "Abrir como fornecedor →" (ficha, PO) e "Simular" (convidado) levam ao
+  // login com o email da conta já posto. Sem conta ainda, cria-a como o "Enviar acesso" (pedirAcessoForn) e mostra o popup com a password;
+  // com conta, não mexe na password
+  const loginComoForn = (sid: string, po: string | null): void => {
+    const s = fornecedor(lerInventario(), sid);
+    if (!s) return;
+    run(() => {
+      const envio = contaFornecedor(ref.current, s, false);
+      setLoginPre((x) => ({ email: envio.conta.email, po, n: (x?.n ?? 0) + 1 }));
+      abrirLogin();
+      if (envio.comPassword) mostrarAcesso(envio);
+    });
   };
 
   // o portal do cliente aberto pelo link de partilha
@@ -436,21 +443,15 @@ export default function PrototipoNegocios() {
       );
   }
 
-  // 22/10: o login dos portais (cliente e fornecedor), de ecrã inteiro; "Voltar" leva ao protótipo
+  // 22/10: o login dos portais (cliente e fornecedor), de ecrã inteiro; "Voltar" leva ao protótipo (ao Inventário, se veio de lá)
   if (login) {
-    const sair = () => { window.history.replaceState(null, "", window.location.pathname + window.location.search.replace(/([?&])login=1&?/, "$1").replace(/[?&]$/, "")); setLogin(false); };
-    return <LoginPortal ctx={ctx} voltar={sair} />;
-  }
-
-  // o portal do fornecedor simulado: ecrã inteiro, como o portal do cliente (só na Atual e na V2, como o Inventário e a Frota)
-  if (fornMock && comInvFrota) {
-    const voltar = (): void => { const de = fornMock.voltar; setFornMock(null); if (de === "inv") setInvMock(true); };
+    const sair = () => { window.history.replaceState(null, "", window.location.pathname + window.location.search.replace(/([?&])login=1&?/, "$1").replace(/[?&]$/, "")); setLogin(false); setLoginPre(null); };
     return (
-      <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o portal do fornecedor…</p>}>
-        <PortalFornecedor key={fornMock.sup + ":" + fornMock.n} sup={fornMock.sup} po={fornMock.po} aoVoltar={voltar}
-          aoMudarFornecedor={(sup) => setFornMock((x) => (x ? { ...x, sup, po: null, n: x.n + 1 } : x))}
-          aoDefinirPassword={(pw) => run(() => mudarPasswordFornecedor(ref.current, fornMock.sup, pw))} />
-      </Suspense>
+      <>
+        <LoginPortal key={loginPre?.n ?? 0} ctx={ctx} voltar={sair} pre={loginPre} />
+        {/* a conta acabada de criar no "Abrir como fornecedor →": o popup com a password temporária, por cima do login */}
+        {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} />}
+      </>
     );
   }
 
@@ -497,13 +498,6 @@ export default function PrototipoNegocios() {
     const menuInv = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuInventario aba={ativoInv ? invAba : null} aoIr={abrirInv} iniciarAberto={aberto} /></Suspense> : null);
     const abrirFrota = (a: AbaFrota): void => { setMais(false); setInvMock(false); setRhMock(false); setFrotaAba(a); setFrotaMock(true); };
     const menuFrota = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuFrota aba={ativoFrota ? frotaAba : null} aoIr={abrirFrota} iniciarAberto={aberto} /></Suspense> : null);
-    // 20/10 (demo): o Portal do Fornecedor simulado, ao lado do Inventário e da Frota
-    const menuForn = comInvFrota ? (
-      <button type="button" onClick={() => abrirPortalForn(null, null, "crm")}
-        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground">
-        <Truck className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span className="flex-1">Portal do Fornecedor</span>
-      </button>
-    ) : null;
     // 22/10: o login dos portais (cliente e fornecedor), neste separador, com as credenciais do popup do envio
     const menuLogin = (
       <button type="button" onClick={abrirLogin}
@@ -557,7 +551,7 @@ export default function PrototipoNegocios() {
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
           <nav className="flex flex-col gap-0.5" aria-label="Menu">
-            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}{menuRh(false)}{menuForn}{menuLogin}</> : null}</Fragment>)}
+            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}{menuRh(false)}{menuLogin}</> : null}</Fragment>)}
           </nav>
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
@@ -600,7 +594,7 @@ export default function PrototipoNegocios() {
           <motion.main ref={mainRef} layoutScroll className="min-h-0 flex-1 overflow-auto pb-[calc(4rem_+_env(safe-area-inset-bottom))] md:pb-0">
             {ativoInv ? (
               <div className="h-full animate-in fade-in-0 duration-200">
-                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} alvoTopo={alvoTopo} aoAbrirPortalForn={(sup, po) => abrirPortalForn(sup, po ?? null, "inv")} /></Suspense>
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o inventário…</p>}><InventarioPagina leitura={!!S.leitura} aba={invAba} aoMudarAba={setInvAba} alvoTopo={alvoTopo} aoAbrirPortalForn={(sup, po) => loginComoForn(sup, po ?? null)} /></Suspense>
               </div>
             ) : ativoFrota ? (
               <div className="h-full animate-in fade-in-0 duration-200">
@@ -628,7 +622,7 @@ export default function PrototipoNegocios() {
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuRh(true)}</div>}
-                <div className="mt-2 border-t border-border pt-2">{menuForn}{menuLogin}</div>
+                <div className="mt-2 border-t border-border pt-2">{menuLogin}</div>
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
                   className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">

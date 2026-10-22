@@ -4,6 +4,8 @@
 // · Cliente: no primeiro acesso troca a password temporária (como FirstLoginModal.tsx) e abre o portal do negócio do envio mais recente.
 // · Fornecedor: convidado, corre o primeiro acesso de sempre (PrimeiroAcesso, que já pede a password nova); ativo com a password reposta
 //   ("Reenviar"), troca-a primeiro. Sair do portal volta a este ecrã.
+// · 22/10: o portal do fornecedor só se abre por aqui (já não há entrada no menu). "Abrir como fornecedor →" e "Simular" no Inventário
+//   abrem este ecrã com o email da conta já posto (`pre`); depois de entrar abre a encomenda pedida, e "Sair" volta ao Inventário.
 import { lazy, Suspense, useEffect, useState } from "react";
 import { ArrowLeft, Eye, EyeOff, Info, ShieldCheck } from "lucide-react";
 import olyviaIcon from "@/assets/olyvia-icon.png";
@@ -15,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Ctx } from "./pecas";
 import { PortalCliente } from "./PortalCliente";
-import { entrar, mudarPassword, negocioDaConta } from "./acessosPortal";
+import { entrar, mudarPassword, negocioDaConta, type LoginPrefill } from "./acessosPortal";
 import { fornecedor } from "./inventario/base";
 import { useInventario } from "./inventario/loja";
 
@@ -71,11 +73,12 @@ function PrimeiraPassword({ aoMudar }: { aoMudar: (pw: string) => void }) {
   );
 }
 
-export function LoginPortal({ ctx, voltar }: { ctx: Ctx; voltar: () => void }) {
+/** `pre` (22/10): vindo do Inventário, o email do fornecedor já posto e a encomenda a abrir; "Sair" do portal volta logo ao Inventário. */
+export function LoginPortal({ ctx, voltar, pre }: { ctx: Ctx; voltar: () => void; pre?: LoginPrefill | null }) {
   const { S, run } = ctx;
   const db = useInventario();
   const [modo, setModo] = useState<"login" | "recuperar">("login");
-  const [email, setEmail] = useState(lerLembrado);
+  const [email, setEmail] = useState(() => pre?.email || lerLembrado());
   const [password, setPassword] = useState("");
   const [ver, setVer] = useState(false);
   const [lembrar, setLembrar] = useState(() => !!lerLembrado());
@@ -112,9 +115,11 @@ export function LoginPortal({ ctx, voltar }: { ctx: Ctx; voltar: () => void }) {
     if (d) return <PortalCliente ctx={ctx} d={d} fechar={sair} />;
   }
   if (conta && conta.tipo === "fornecedor" && (sessao?.assistente || conta.mudouPassword)) {
+    // 22/10: entrou com a conta pedida no Inventário: abre a encomenda dessa PO e "Sair" volta ao Inventário
+    const doInv = !!pre && pre.email === conta.email;
     return (
       <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o portal do fornecedor…</p>}>
-        <PortalFornecedor sup={conta.ref} aoVoltar={sair} rotuloVoltar="Sair" aoDefinirPassword={trocar} />
+        <PortalFornecedor sup={conta.ref} po={doInv ? pre.po : null} aoVoltar={doInv ? voltar : sair} rotuloVoltar="Sair" aoDefinirPassword={trocar} />
       </Suspense>
     );
   }
@@ -162,7 +167,7 @@ export function LoginPortal({ ctx, voltar }: { ctx: Ctx; voltar: () => void }) {
                 <div className="space-y-2">
                   <Label htmlFor="lp-password">Password</Label>
                   <div className="relative">
-                    <Input id="lp-password" type={ver ? "text" : "password"} autoComplete="current-password" placeholder="••••••••" value={password}
+                    <Input id="lp-password" type={ver ? "text" : "password"} autoComplete="current-password" placeholder="••••••••" value={password} autoFocus={!!pre}
                       onChange={(e) => { setErro(""); setPassword(e.target.value); }} required className="pr-11" />
                     <button type="button" onClick={() => setVer(!ver)} aria-label={ver ? "Esconder a password" : "Mostrar a password"}
                       className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -176,6 +181,7 @@ export function LoginPortal({ ctx, voltar }: { ctx: Ctx; voltar: () => void }) {
                 </div>
                 {erro && <p role="alert" className="text-center text-sm text-destructive">{erro}</p>}
                 {semDocumento && <p role="status" className="text-center text-sm text-muted-foreground">Ainda não há nenhum documento seu no portal.</p>}
+                {pre && <p className="text-center text-sm text-muted-foreground">Protótipo: o email do fornecedor já vem preenchido. A password está no popup do acesso («Reenviar», na ficha do fornecedor › Portal, gera outra).</p>}
                 <Button type="submit" className="w-full">Entrar</Button>
               </form>
             )}

@@ -125,7 +125,7 @@ export function TabPortal({ p, a }: P) {
         <button type="button" className="btn" onClick={() => agir(() => undefined, "Estado do portal atualizado.")}><RefreshCw className="ic" aria-hidden="true" />Atualizar</button>
         {poPublished(p) && <button type="button" className="btn" onClick={() => a.pedir({ t: "retirar" })}>Retirar do portal</button>}
         {x.state === "withdrawn" && poOpen(p) && s?.portal === "active" && <button type="button" className="btn" onClick={() => agir((d) => republicarPo(d, poDe(d, p.id)), "Republicada no portal.")}><Send className="ic" aria-hidden="true" />Publicar de novo</button>}
-        {/* 20/10 (demo): o portal do fornecedor simulado, já nesta encomenda */}
+        {/* 20/10 (demo): o portal do fornecedor simulado, já nesta encomenda; 22/10: pelo login dos portais, com o email do fornecedor já posto */}
         {abrirPortalForn && s?.portal === "active" && poPublished(p) && <button type="button" className="btn" onClick={() => abrirPortalForn(p.sup, p.id)}><ExternalLink className="ic" aria-hidden="true" />Abrir como fornecedor →</button>}
       </div>
       {poOpen(p) && s?.portal === "active" && ["sent", "seen", "confirmed"].includes(x.state) && (x.state !== "confirmed" || podeExpedir(p)) && <Simulacao p={p} />}
