@@ -1,28 +1,33 @@
 # Integração com o Eticadata (faturas, recibos e pagamentos)
 
-Estado a 21/10/2026: **em standby.** Segundo o revendedor, para usar o módulo da API com certificação, **a nossa plataforma também tem de ser certificada pela AT**.
-Até lá, a fatura emite-se no Eticadata e a Olyvia, no máximo, regista o número ou lê-o do SQL, como o `registarFatura` da V2. O resto deste documento fica para quando se retomar.
-Ainda não há ligação nenhuma ao ERP, nem a de leitura. Este documento junta o que se sabe, o que se decidiu e o que falta.
+Estado a 22/10/2026:
+- **Emitir faturas pela API: em standby.** Segundo o revendedor, para usar o módulo da API com certificação, **a nossa plataforma também tem de ser certificada pela AT**.
+- **Ler se uma fatura foi paga: funciona.** A fatura emite-se no Eticadata, o Financeiro regista o número na Olyvia e a Olyvia lê no SQL do ERP se já foi paga. Está ligado no protótipo V1 (secção 10), a partir do PC que está na rede da empresa.
+
+Este documento junta o que se sabe, o que se decidiu e o que falta.
 
 > **Esta pasta vai passar para um projeto novo, próprio da integração.** Foi escrita para se ler sozinha: não depende do protótipo nem desta conversa.
 > - Comece pela **secção 0** (onde parou) e depois pela **secção 9** (próximos passos).
 > - As consultas de leitura estão em [`consultas/`](consultas/README.md).
 > - Para levar a pasta, copie-a inteira (`docs/integracao-eticadata/`). **Não** copie o ficheiro da ligação (`D:\Olyvia\.eticadata`) nem os `.csv`.
 
-## 0. Onde parou (21/10/2026, fim do dia)
+## 0. Onde parou (22/10/2026)
 
 | Frente | Estado | A seguir |
 |---|---|---|
 | **Emitir faturas pela API** | Parado (standby): o módulo com certificação exige a nossa plataforma certificada pela AT | Decidir se a Olyvia se certifica ou se a fatura continua a ser emitida no ERP |
-| **Ler pagamentos e faturas (SQL)** | **Funciona (22/10).** `consultas/2-fatura-paga.sql` diz se uma fatura está paga, com os recibos, a data e o meio. Testado na `Emp_Z004` | Ponte de leitura e ligação ao protótipo («Registar fatura do ERP» e «Verificar no ERP») |
+| **Ler pagamentos e faturas (SQL)** | **Funciona (22/10).** `consultas/2-fatura-paga.sql` diz se uma fatura está paga, com os recibos, a data e o meio. Testado na `Emp_Z004` | Levar a leitura para uma ponte na rede da empresa (secção 4), para funcionar fora deste PC |
 | **Rede** | Resolvido (22/10): a instância está na porta **64864** (`192.168.1.252,64864`), não na 1433 | — |
-| **Segurança** | O `sa` e as passwords foram partilhados por email e por chat | Trocar a password do `sa` e criar um utilizador SQL só de leitura |
+| **Segurança** | O `sa` e as passwords foram partilhados por email e por chat. A leitura usa, por agora, o `sa`, mas só faz `SELECT` | Trocar a password do `sa` e criar um utilizador SQL só de leitura |
 | **Protótipo** | **V1 ligado ao ERP (22/10).** «Registar a fatura do ERP» (o número da fatura emitida no Eticadata, confirmado lá) e «Verificar no ERP» (lê o pagamento; paga → recibo do ERP, encomenda de cliente e Obra). Lê por `server/eticadataLeitura.ts` (`/api/erp/fatura`), só no servidor de desenvolvimento deste PC; sem ele, regista-se sem confirmar e valida-se à mão | Ponte na rede da empresa para funcionar fora deste PC; faturas das adendas |
 
 **Decisões tomadas:**
 - A fatura **nunca** se cria escrevendo nas tabelas, porque não seria certificada.
 - Ler pagamentos e faturas diretamente do SQL é seguro, e é o que o próprio manual recomenda (§9.1.5).
 - Começa-se sempre pelas BDs de teste.
+- (22/10) A Olyvia **regista** a fatura do ERP (o número) e **lê** lá o pagamento. Não emite nem escreve nada no ERP.
+- (22/10) Uma fatura conta como paga quando falta **menos de 1 €**: há faturas com cêntimos de arredondamento por liquidar (por exemplo 0,50 € em 18 109 €).
+- (22/10) Quando a fatura está paga no ERP, o recibo da Olyvia é o **recibo do ERP** (o número `REC …`). A Olyvia não gera recibos.
 - Credenciais e dados reais nunca entram no git.
 
 ---
@@ -140,7 +145,7 @@ Lê o cliente no ERP (código e saldo), para não o criar em duplicado.
 
 **Por decidir com o revendedor:** se o cliente se cria pela API quando não existe (`Tabelas.Clientes`); os códigos de IVA (6% e 23%) e o motivo de isenção; o artigo ou serviço genérico a usar nas linhas «livres»; e a série, a secção e o tipo de documento.
 
-## 6. O que a Olyvia lê do SQL (a mapear na BD de testes `Emp_Z004`)
+## 6. O que a Olyvia lê do SQL (mapeado na BD de testes `Emp_Z004` a 22/10)
 
 Quando houver o utilizador só de leitura, mapeiam-se estas tabelas na **`Emp_Z004`**, sempre com `SELECT`:
 
@@ -149,7 +154,17 @@ Quando houver o utilizador só de leitura, mapeiam-se estas tabelas na **`Emp_Z0
 - os clientes: NIF, código e saldo;
 - onde ficam os PDFs, se o ERP os guarda numa pasta.
 
-Os nomes reais das tabelas ainda não se conhecem e vão ser escritos aqui depois desse mapeamento.
+**O que se encontrou (22/10/2026):**
+
+| O quê | Onde | Notas |
+|---|---|---|
+| Faturas (cabeçalho) | `Mov_Venda_Cab` | Na Mudelar o tipo é `FAT`, com números como `FAT 15200126/538` (`strNumero`). A chave é `strCodSeccao` + `strAbrevTpDoc` + `strCodExercicio` + `intNumero`. Também tem `strATCUD`, `dtmData`, `dtmDataVencimento`, `strCVDNumContrib` (NIF), `fltTotal` e `bitAnulado` |
+| Quanto falta pagar | `Mov_Venda_Cab.fltValorPendente` | Bate com o total menos os recibos em 3785 das 3786 faturas `FAT` |
+| Recibos | `Mov_Liquidacao_Cab` (tipo `REC`) + `Mov_Liquidacao_Lin` | Cada linha aponta para a fatura pelas colunas `strCodSeccaoPend`, `strAbrevTpDocPend`, `strCodExercicioPend` e `intNumeroPend`. O valor está em `fltAtribuido` |
+| Meio de pagamento | `Mov_Liquidacao_CabPagamento.strAbrevTpMovPagTes` | A descrição está em `Tbl_Gce_Tipos_MovPag` (Transferência, Multibanco, Dinheiro, …) |
+| Outros tipos de venda | `Mov_Venda_Cab` | `NCRE` (notas de crédito), `FPRO` (pró-formas), `GTRAN` (guias), `CONTR`, `FTR`, `EFA`. Ainda não são usados |
+
+A consulta completa está em [`consultas/2-fatura-paga.sql`](consultas/2-fatura-paga.sql) e, no protótipo, em `server/eticadataLeitura.ts`.
 
 ## 7. Onde liga no protótipo (e depois na app)
 
@@ -157,10 +172,11 @@ O protótipo (`src/pages/prototipo-negocios/`, versão «Atual») já tem o circ
 
 | No protótipo (`motor.ts`) | Hoje faz | Com o Eticadata |
 |---|---|---|
-| `emitir(id)` | `FT 2026/<n>` simulado, sai para o portal | `POST /faturas`; guarda o número, o ATCUD e o PDF que o ERP devolve |
+| `registarFaturaErp(id, numero, info)` (22/10, substitui o `emitir` no V1) | o Financeiro escreve o número da fatura emitida no Eticadata; a Olyvia confirma-a no ERP antes de a registar | igual, pela ponte (`GET /documentos`), ou `POST /faturas` se a Olyvia for certificada |
+| `verificarErp(id)` (22/10) | lê no ERP o estado da fatura; paga → `pagoNoErp`: o recibo do ERP, a encomenda de cliente e a Obra | igual, pela ponte |
 | `faturarAdendas(id)` | uma fatura por adenda assinada (inclui os imprevistos) | um `POST /faturas` por adenda |
 | `escolherMetodo` / `autorizarDebito` / `avisarPagamento` | o cliente escolhe no portal (transferência, referência MB ou débito direto) e avisa que pagou | ficam na Olyvia; o meio segue para o recibo |
-| `validar(id)` | `RC 2026/<n>` simulado; emite a encomenda de cliente e passa o negócio a Obra | `POST /recibos`; só avança com o recibo confirmado |
+| `validar(id)` | só quando não há ligação ao ERP («Validar à mão»): `RC 2026/<n>` simulado; emite a encomenda de cliente e passa o negócio a Obra | deixa de ser preciso: o recibo é o do ERP |
 | `validarPagamentosAdenda(id)` | o recibo da adenda | `POST /recibos` por adenda |
 | (novo) | — | a sincronização com `GET /documentos` marca como pagas as faturas recebidas diretamente no ERP |
 
@@ -187,8 +203,10 @@ Depois destas, perguntar também:
 
 | # | Passo | Depende de |
 |---|---|---|
-| 1 | Mapear as tabelas na `Emp_Z004` (secção 6) | utilizador só de leitura |
-| 2 | Ponte mínima: `GET /documentos` (só leitura), ligada por túnel | 1 |
+| ~~1~~ | ~~Mapear as tabelas na `Emp_Z004` (secção 6)~~ **Feito a 22/10** | — |
+| 1b | **Feito a 22/10:** a leitura do pagamento no protótipo V1 (secção 10) | — |
+| 2 | Ponte mínima: `GET /documentos` (só leitura), ligada por túnel. É o `server/eticadataLeitura.ts` a correr no servidor da empresa, e não neste PC | utilizador só de leitura |
+| 2b | As faturas das adendas pelo mesmo caminho (hoje continuam com o «Emitir» simulado) | — |
 | 3 | Na ponte: `POST /faturas` contra a `Emp_Z004`, a confirmar que sai assinada e com ATCUD | módulo de certificação; série e secção de teste |
 | 4 | Na ponte: `POST /recibos` | 3 |
 | 5 | Edge functions na Olyvia (`erp-faturar`, `erp-recibo`, `erp-sincronizar`) e ligação às ações da secção 7 | 2–4, migração do protótipo |
@@ -198,3 +216,64 @@ Depois destas, perguntar também:
 - Sem o módulo de certificação, a fatura não pode sair da Olyvia. A alternativa é a emissão manual no ERP, com a Olyvia só a ler.
 - As DLLs têm de acompanhar a versão do ERP: cada atualização do ERP obriga a atualizar a ponte.
 - O servidor e o túnel têm de estar ligados para se faturar.
+
+## 10. A fatura do ERP no protótipo V1 (22/10/2026)
+
+### O que o Financeiro faz
+
+1. **Emite a fatura no Eticadata**, como sempre.
+2. No negócio (passo «Pagamento» ou «Hoje»), carrega em **«Registar fatura»** e escreve o número tal como aparece no ERP, por exemplo `FAT 15200126/538`.
+   - A Olyvia confirma a fatura no Eticadata antes de a registar. Se não existir, recusa e diz porquê.
+   - Se o NIF da fatura no ERP for diferente do NIF de faturação do negócio, avisa (mas regista na mesma).
+   - Sem ligação ao ERP, oferece **«Registar sem confirmar»**. Nesse caso, o pagamento valida-se à mão, como antes.
+3. **À espera do pagamento:** em «Fatura e recibo» aparece o painel **«No Eticadata»**, com o total, o que está pago, o que falta, o estado (`por pagar`, `vencida`, `paga em parte`, `paga` ou `anulada`), os recibos com a data e o meio, e a hora da última leitura.
+   - Tem **«Verificar agora»** e volta a ler sozinho **a cada minuto**, enquanto o negócio estiver aberto com o papel Financeiro.
+   - Tem também **«Validar à mão»**, para quando o ERP não responde.
+4. **Quando a fatura está paga** (falta menos de 1 €):
+   - o recibo do negócio passa a ser o do ERP (`REC …`);
+   - a data, o valor e o comprovativo do pagamento vêm do ERP;
+   - a encomenda de cliente vai para o Inventário e o negócio passa a Obra, como no «Validar pagamento».
+
+A V2 e a V2 funcional não mudaram: continuam com o registo por tranches do `FinanceiroV2`.
+
+### Como funciona por dentro
+
+```
+ Browser (protótipo)                    PC na rede da empresa                    BMINVESTE-SRV
+ FaturaErp.tsx / motor.ts --fetch-->  Vite dev: /api/erp/fatura  ----SQL---->  ETICADATA (porta 64864)
+ erpEticadata.ts                      server/eticadataLeitura.ts (só SELECT)     Emp_Z004 (testes)
+```
+
+| Ficheiro | O que faz |
+|---|---|
+| `server/eticadataLeitura.ts` | O plugin do Vite que responde em `GET /api/erp/fatura?numero=…`. Lê a ligação de `D:\Olyvia\.eticadata` e corre a consulta da secção 6, com parâmetros. Só existe no servidor de desenvolvimento (`npm run dev`), não no build |
+| `src/pages/prototipo-negocios/erpEticadata.ts` | `lerFaturaErp(numero)` (o pedido e as respostas: lida, não existe, sem ligação) e `resumoErp(info)` (o estado numa frase) |
+| `src/pages/prototipo-negocios/FaturaErp.tsx` | `RegistarFaturaErp` (o campo do número) e `EstadoFaturaErp` (o painel «No Eticadata», com a leitura a cada minuto) |
+| `src/pages/prototipo-negocios/motor.ts` | `registarFaturaErp`, `verificarErp`, `pagoNoErp` e `pago` (o que o pagamento confirmado faz, partilhado com o `validar`). O negócio guarda a última leitura em `d.fin.erp` |
+| `src/pages/prototipo-negocios/preparacaoObra.ts` | Os passos «Registar a fatura do ERP» e «À espera do pagamento» no caminho do contrato à obra |
+| `src/pages/prototipo-negocios/faturaErp.test.ts` | Os testes, com o ERP simulado: por pagar, paga em parte, paga, sem ligação, não existe, só o Financeiro regista |
+
+### Como pôr a funcionar noutro PC
+
+1. O PC tem de estar na rede da empresa e chegar a `192.168.1.252`, na porta `64864`.
+2. Cria-se `D:\Olyvia\.eticadata`, fora do git, com uma linha:
+   ```
+   Server=192.168.1.252,64864;User ID=<utilizador>;Password=<password>
+   ```
+   Pode estar noutro sítio, indicado em `ETICADATA_LIGACAO`.
+3. Por omissão, lê a BD de testes `Emp_Z004`. Para a real da Mudelar, arranca-se o Vite com `ETICADATA_BD=Emp_B004` (só quando o Financeiro aprovar).
+4. `npm run dev` e abre-se `/prototipo/negocios`. Para testar sem mexer na sala partilhada, junta-se `?sala=teste-erp` ao endereço.
+5. Para experimentar na `Emp_Z004`: `FAT 15200126/538` está paga, `FAT 15200126/539` está paga dentro da tolerância (faltam 0,50 €) e `FAT 15200126/548` está vencida e por pagar.
+
+### Segurança
+
+- **Só leitura:** só `SELECT`, com o número passado como parâmetro (sem SQL montado com texto), a ligação marcada como só de leitura (`readOnlyIntent`) e `READ UNCOMMITTED`, para nunca bloquear o ERP.
+- **Só neste PC:** o servidor do Vite também está aberto à rede local, por isso a rota recusa os pedidos que não venham do próprio PC (`127.0.0.1` ou `::1`).
+- **Credenciais fora do git:** a ligação vive em `D:\Olyvia\.eticadata`. Os `.csv` das consultas estão no `.gitignore`.
+- **Em falta:** a leitura usa o `sa`. Antes de ir para produção, é preciso **trocar a password do `sa`** e usar um **utilizador SQL só de leitura** (pedido ao revendedor). Depois, basta mudar a linha do ficheiro da ligação.
+
+### Limites
+
+- Só funciona no PC que está na rede da empresa. Na versão publicada, a rota não existe: a fatura regista-se sem confirmar e o pagamento valida-se à mão. Para funcionar em todo o lado, é precisa a ponte (secção 4).
+- Não compara o total da fatura do ERP com o valor do negócio. Com as faturas da BD de testes os valores não batem, porque são de outros clientes.
+- As faturas das adendas continuam com o «Emitir» simulado.
