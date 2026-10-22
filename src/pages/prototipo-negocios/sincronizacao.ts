@@ -13,6 +13,8 @@ import type { Estado, Negocio } from "./motor";
 const TABELA = "prototipo_estado";
 const LOCAIS = ["role", "view", "deal", "op", "filtro", "novo", "confirmPerda", "pulse", "revisao", "aspeto", "leitura", "tec"] as const;
 
+const AVISO_GERAL = "Os dados foram atualizados por outra pessoa. Repita a última ação, se for preciso.";
+
 export type EstadoSync = "a ligar" | "ao vivo" | "sem ligação";
 interface Parte { chave: string; dados: unknown }
 interface Fonte {
@@ -48,16 +50,20 @@ export function juntarEstado(local: Estado, global: Record<string, unknown> | nu
 }
 
 /** 21/10: das partes remotas, as que se aplicam e as que ficam como estão neste aparelho: as que já foram sincronizadas (há o JSON
- *  delas) e mudaram cá desde então, ainda por enviar. Uma parte remota igual à local aplica-se (só atualiza a versão). */
-export function separarRemoto<L extends { chave: string; dados: unknown }>(linhas: L[], locais: Parte[], sincronizado: Map<string, string>): { aplicar: L[]; manter: L[] } {
+ *  delas) e mudaram cá desde então, ainda por enviar. Uma parte remota igual à local aplica-se (só atualiza a versão).
+ *  22/10: a "global" (contadores, ordem dos negócios) nunca se mantém: aplica-se a remota e, se tinha mudanças cá por enviar, vai
+ *  também em `perdidas` (para avisar quem a mudou). */
+export function separarRemoto<L extends { chave: string; dados: unknown }>(linhas: L[], locais: Parte[], sincronizado: Map<string, string>): { aplicar: L[]; manter: L[]; perdidas: string[] } {
   const atual = new Map(locais.map((p) => [p.chave, JSON.stringify(p.dados)]));
-  const aplicar: L[] = [], manter: L[] = [];
+  const aplicar: L[] = [], manter: L[] = [], perdidas: string[] = [];
   for (const l of linhas) {
     const antes = sincronizado.get(l.chave), agora = atual.get(l.chave);
     const porEnviar = antes != null && agora != null && agora !== antes;
-    (porEnviar && JSON.stringify(l.dados) !== agora ? manter : aplicar).push(l);
+    const diferente = porEnviar && JSON.stringify(l.dados) !== agora;
+    if (diferente && l.chave === "global") { aplicar.push(l); perdidas.push(l.chave); }
+    else (diferente ? manter : aplicar).push(l);
   }
-  return { aplicar, manter };
+  return { aplicar, manter, perdidas };
 }
 
 /* ------------------------------------------------------------------ o motor da sincronização */
@@ -149,7 +155,7 @@ export class Sincronizador {
     // a parte desapareceu (a sala foi limpa): volta a criar-se com a deste aparelho
     if (!data?.length) { this.versoes.delete(chave); this.json.delete(chave); this.mudou(); return; }
     this.aplicarRemoto(data, true);
-    this.avisarConflito?.(chave.startsWith("deal:") ? "Alguém mudou este negócio ao mesmo tempo. Já tem a versão dele: repita a última ação, se for preciso." : "Os dados foram atualizados por outra pessoa. Repita a última ação, se for preciso.");
+    this.avisarConflito?.(chave.startsWith("deal:") ? "Alguém mudou este negócio ao mesmo tempo. Já tem a versão dele: repita a última ação, se for preciso." : AVISO_GERAL);
   }
 
   private async puxar() {
@@ -170,13 +176,16 @@ export class Sincronizador {
   }
 
   /** 21/10: aplica as partes remotas. Uma parte com mudanças locais ainda por enviar (o envio espera 250 ms) não se escreve por cima:
-   *  fica a deste aparelho, com a versão remota já conhecida, e envia-se logo a seguir (senão a ação acabada de fazer perdia-se).
+   *  fica a deste aparelho e envia-se logo a seguir (senão a ação acabada de fazer perdia-se em silêncio).
+   *  22/10: a versão conhecida dessa parte NÃO passa a ser a remota: o envio grava com a versão que este aparelho viu, bate no
+   *  controlo de versão e segue o caminho do conflito (ganha a remota e avisa-se). Nunca se grava por cima de uma versão remota que
+   *  este aparelho não aplicou. A "global" não se mantém (separarRemoto): ganha logo a remota e avisa-se, se tinha mudanças por enviar.
    *  `forcar` (o conflito no envio): ganha a remota, como antes. */
   private aplicarRemoto(linhas: { chave: string; dados: unknown; versao: number }[], forcar = false) {
-    const { aplicar, manter } = forcar ? { aplicar: linhas, manter: [] } : separarRemoto(linhas, this.estadoFonte ? this.todasAsPartes() : [], this.json);
-    for (const l of manter) this.versoes.set(l.chave, l.versao);
+    const { aplicar, manter, perdidas } = forcar ? { aplicar: linhas, manter: [], perdidas: [] } : separarRemoto(linhas, this.estadoFonte ? this.todasAsPartes() : [], this.json);
     if (manter.length) this.mudou();
     this.aplicarLinhas(aplicar);
+    if (perdidas.length) this.avisarConflito?.(AVISO_GERAL);
   }
 
   private aplicarLinhas(linhas: { chave: string; dados: unknown; versao: number }[]) {

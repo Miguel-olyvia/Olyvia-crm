@@ -179,6 +179,38 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
     expect(within(blocoPagamento()).getByText("pronto")).toBeTruthy();
   });
 
+  it("duas adendas com a fatura da 1.ª parcela emitida: a tarefa do Hoje da adenda 2 valida a da adenda 2 (e validar outra vez não faz 2.ª EC)", () => {
+    const { S, A, d, a } = preparar();
+    A.role("comercial");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 10 }], "Mais uma divisão");
+    const a2 = d.adendas!.find((x) => x !== a) as Adenda, N2 = a2.n;
+    adendaAssinada(A, d.id, N2);
+    A.role("financeiro"); A.faturarAdendas(d.id);
+    expect(a.faturas?.find((f) => f.i === 0)).toBeTruthy();
+    expect(a2.faturas?.find((f) => f.i === 0)).toBeTruthy();
+    // o Hoje do Financeiro tem as duas tarefas, cada uma com o número da sua adenda
+    const tarefas = minhas(S, "financeiro").filter((x) => x.d === d && x.p.act === "validarPagamentosAdenda");
+    expect(tarefas.map((x) => x.p.arg)).toEqual([N, N2]);
+    S.role = "financeiro";
+    render(<Montar S={S}>{(ctx) => <Hoje {...ctx} />}</Montar>);
+    const linha2 = linhaHoje(new RegExp(`^Validar o pagamento da adenda ${N2.replace("/", "\\/")} · 1\\.ª parcela · `));
+    fireEvent.click(within(linha2).getByRole("button", { name: "Validar o pagamento" }));
+    expect(a2.faturas!.find((f) => f.i === 0)!.recibo).toBeTruthy();
+    expect(a.faturas!.find((f) => f.i === 0)!.recibo).toBeUndefined();
+    // a encomenda que sai é a da adenda 2 (e não a da 1)
+    const ecs = d.obra.ecsAjuste ?? [];
+    expect(ecs.filter((e) => e.adenda === N2)).toHaveLength(1);
+    expect(ecs.some((e) => e.adenda === N)).toBe(false);
+    const ec2 = ecs.find((e) => e.adenda === N2)!;
+    expect(lerInventario().ecs.some((e) => e.id === ec2.n && !e.deleted)).toBe(true);
+    cleanup();
+    // validar a adenda 2 outra vez: nada por validar, nenhuma EC nova
+    A.validarPagamentosAdenda(d.id, N2);
+    expect((d.obra.ecsAjuste ?? []).filter((e) => e.adenda === N2)).toHaveLength(1);
+    expect(d.obra.ecsAjuste ?? []).toHaveLength(1);
+    expect(a.faturas!.find((f) => f.i === 0)!.recibo).toBeUndefined();
+  });
+
   it("Arrancar a obra: por adenda, «1.ª parcela da adenda paga» e depois «Encomenda da adenda»", () => {
     const { S, A, d } = preparar();
     S.role = "operacoes";

@@ -199,7 +199,7 @@ function LinhaTarefa({ x, ctx, atraso }: { x: ReturnType<typeof minhas>[number];
           <Button size="sm" variant="outline" onClick={go(() => A.recusarAprov(d.id))}>Recusar</Button>
           <Button size="sm" onClick={go(() => A.aprovar(d.id))}>Aprovar</Button>
         </span>
-      ) : p.btn ? <Button size="sm" className="shrink-0" onClick={go(() => fazer(A, p.act!, d.id))}>{p.btn}</Button> : null}
+      ) : p.btn ? <Button size="sm" className="shrink-0" onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}</Button> : null}
     </li>
   );
 }

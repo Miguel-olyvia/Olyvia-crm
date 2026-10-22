@@ -47,7 +47,7 @@ export function PessoaFicha({ S, A, go, p, fechar, sep, aoMudarSep, topo, extras
   // Os negócios de exemplo não existem no Estado e não abrem nada (as listas mostram-nos como texto). O botão de uma pessoa de exemplo leva ao separador Negócios,
   // onde já vem escolhido o mais avançado; nas pessoas da seed continua a correr a ação do motor ou a abrir o negócio.
   const abrir = (id: number) => go(() => A.abrir(id));
-  const aoProximo = p.exemplo ? () => aoMudarSep("negocios") : go(() => (nx.act ? fazer(A, nx.act, d.id) : A.abrir(d.id)));
+  const aoProximo = p.exemplo ? () => aoMudarSep("negocios") : go(() => (nx.act ? fazer(A, nx.act, d.id, nx.arg) : A.abrir(d.id)));
   return (
     <Tabs value={ativo} onValueChange={(v) => aoMudarSep(v as SepFicha)} className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="max-h-[60dvh] shrink-0 overflow-y-auto border-b border-border px-4 pb-3 pt-4 sm:px-6">

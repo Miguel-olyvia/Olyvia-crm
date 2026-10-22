@@ -77,7 +77,7 @@ export function HojeSimples({ S, A, go }: Ctx) {
           <div className="mt-6 flex flex-wrap items-center gap-3">
             {primeiro.dir
               ? <><Button size="lg" onClick={go(() => A.aprovar(primeiro.d.id))}>Aprovar</Button><Button size="lg" variant="outline" onClick={go(() => A.recusarAprov(primeiro.d.id))}>Recusar</Button></>
-              : primeiro.p.btn && <Button size="lg" onClick={go(() => fazer(A, primeiro.p.act!, primeiro.d.id))}>{primeiro.p.btn}</Button>}
+              : primeiro.p.btn && <Button size="lg" onClick={go(() => fazer(A, primeiro.p.act!, primeiro.d.id, primeiro.p.arg))}>{primeiro.p.btn}</Button>}
             <Button size="lg" variant="ghost" onClick={go(() => A.abrir(primeiro.d.id))}>Abrir o negócio</Button>
           </div>
         </section>

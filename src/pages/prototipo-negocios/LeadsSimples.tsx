@@ -176,7 +176,7 @@ export function FichaLead({ S, A, go, p, voltar, papel = "lead", textoVoltar = "
           {email && <a className={LINK} href={`mailto:${email}`}><Mail className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Email</a>}
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Button size="lg" className="min-h-11" onClick={go(() => (nx.act ? fazer(A, nx.act, d.id) : A.abrir(d.id)))}>
+          <Button size="lg" className="min-h-11" onClick={go(() => (nx.act ? fazer(A, nx.act, d.id, nx.arg) : A.abrir(d.id)))}>
             {nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
           </Button>
           <p className="text-[15px] text-muted-foreground">Próximo passo: {nx.t}</p>

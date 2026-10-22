@@ -390,7 +390,7 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   if (p.btn) return meu
-    ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
+    ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
     : (
       <div className="grid justify-items-start gap-1 sm:justify-items-end">
         <Button size={tamanho} disabled>{p.btn}</Button>

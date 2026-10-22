@@ -171,7 +171,7 @@ function Linha({ i, editor, abrirEditor, fecharEditor, anunciar, verPessoa, S, A
             <Button type="button" variant="outline" className={BOTAO} onClick={go(() => A.recusarAprov(i.dealId!))}>Recusar</Button>
           </>
         )}
-        {i.acao && <Button type="button" variant="outline" className={BOTAO} onClick={go(() => fazer(A, i.acao!.act, i.dealId!))}>{i.acao.rotulo}</Button>}
+        {i.acao && <Button type="button" variant="outline" className={BOTAO} onClick={go(() => fazer(A, i.acao!.act, i.dealId!, i.acao!.arg))}>{i.acao.rotulo}</Button>}
         {i.podeVisita && (
           <Button type="button" id={`${base}-bv`} variant="outline" className={BOTAO} aria-label={`Marcar visita: ${i.nome}`} aria-expanded={aberto === "visita"} aria-controls={aberto === "visita" ? `${base}-ev` : undefined}
             onClick={() => alternar("visita")}><CalendarDays className="mr-2 h-5 w-5" aria-hidden="true" />Marcar visita</Button>

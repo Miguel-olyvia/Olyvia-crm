@@ -72,7 +72,7 @@ export interface ItemV2 {
   /** Lead em "Contactar": pode marcar-se a visita na linha. */
   podeVisita: boolean;
   /** O passo do motor que a linha pode fazer (os outros papéis). */
-  acao: { rotulo: string; act: string } | null;
+  acao: { rotulo: string; act: string; arg?: string } | null;
   /** Direção: aprovar ou recusar a exceção à margem. */
   aprovar: boolean;
   papel: "lead" | "cliente" | null;
@@ -248,7 +248,7 @@ export function hojePapel(S: Estado, r: Papel, dados: DadosHojeV2): ItemV2[] {
     if (dir) { itens.push(itemDeNegocio(d, "aprovar", `Aprovar a exceção à margem · ${p.sub}`, { aprovar: true })); continue; }
     const registar = p.act === "emitir";
     const razao = registar ? "Registar a fatura emitida no programa de faturação" : p.t + (p.sub ? ` · ${p.sub}` : "");
-    const acao = p.btn && p.act ? { rotulo: registar ? "Registar fatura" : p.btn, act: p.act } : null;
+    const acao = p.btn && p.act ? { rotulo: registar ? "Registar fatura" : p.btn, act: p.act, arg: p.arg } : null;
     itens.push(itemDeNegocio(d, categoriaDe(d), razao, { acao }));
   }
   for (const c of agenda(S, r)) {

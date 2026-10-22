@@ -1016,6 +1016,8 @@ export interface Proximo {
   sub?: string;
   btn?: string;
   act?: string;
+  /** 21/10: o segundo argumento da ação (o número da adenda), quando o passo é de uma adenda: fazer(A, act, id, arg) */
+  arg?: string;
   who?: Papel | "cliente" | null;
   wait?: boolean;
   sim?: "aceitar" | "assinar" | "auto";
@@ -1063,7 +1065,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       // do pagamento ao arranque: o passo à espera, pela ordem (encomenda, plano, arranque)
       if (p.estado === "por aprovar" || p.estado === "aprovado") {
         const a = passosAgora(d, S)[0];
-        if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who! };
+        if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who! };
       }
       if (p.estado === "por aprovar") return { t: conflitos(p).length ? "Operações: resolver um conflito e aprovar o plano" : "Operações: aprovar o plano", sub: "Plano gerado a partir do contrato.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (p.estado === "aprovado") {
@@ -1093,13 +1095,13 @@ export function minhas(S: Estado, role: Papel) {
       L.push({ d, p: { t: "Aprovar exceção à margem", sub: pct(tot(d, S).m) + " de margem · mínimo " + S.cfg.min + "%" }, dir: true });
     // do contrato à obra: o pagamento primeiro; depois o plano (a encomenda emite-se sozinha com o pagamento), cada um de quem é
     else if (d.fase >= 4 && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
-      for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
+      for (const a of passosAgora(d, S)) if (a.who === role) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
     }
     else {
       if (p.who === role && !p.wait && !p.done) L.push({ d, p });
       // 21/10: com a obra a andar (ou concluída), a 1.ª parcela de uma adenda assinada depois continua a ser do Financeiro: os mesmos
       // passos do bloco Pagamento (preparacaoObra.ts: passosPagamentoAdenda), sem linhas à parte no Hoje
-      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (a.who === role && /^(ft|pg)-ad-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, who: a.who } });
+      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (a.who === role && /^(ft|pg)-ad-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
     }
     // 21/10: os imprevistos da obra (o gestor propõe ou decide; o comercial fala com o cliente que recusou) e as faturas das adendas
     for (const im of imprevistosPorTratar(d)) {
