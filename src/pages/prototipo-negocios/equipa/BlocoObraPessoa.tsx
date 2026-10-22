@@ -1,6 +1,6 @@
 // O bloco "Obra" na ficha da pessoa do RH (22/10/2026): só para as pessoas que são técnicos de obra (pessoaRhId, ou "p-tec-<id>").
 // Antes era a aba RH › Técnicos; os técnicos já são pessoas em Pessoas, por isso a ficha deles ganha este bloco na Visão geral.
-// O custo/hora (€/h) entra no custo previsto e no real das obras (obraOps.ts: custosObra); ao lado mostra-se o custo/hora que o salário e os
+// 22/10: o custo/hora é só leitura (calculado nos Custos do RH: equipa/pontes.ts custosDoRh). Entra no €/h do ofício (a média dos técnicos dele: receitas e orçamentos) e no real das obras; ao lado mostra-se o custo/hora que o salário e os
 // encargos no RH dariam, sem o impor. O ofício e as férias também se mudam aqui (as férias contam nos conflitos do plano e na Agenda).
 // As tarefas já atribuídas não mudam de técnico. Só a Direção e as Operações mudam a ficha (equipa.edit, ação editarTecnico); os outros veem-na.
 // Entra na ficha do RH de exemplo pelo ponto de extensão genérico (rh-exemplo/ficha/extensoesFicha), que o RhPagina fornece.
@@ -14,14 +14,11 @@ import { podeNeg } from "../permissoes";
 import { obrasDoTecnico, rotuloCurto } from "./regrasAgenda";
 import type { EquipaCtx } from "./ctx";
 import { sugestaoCustoHora, tecnicoDaPessoaRh } from "./pontes";
-import { OFICIOS, garantirTecnicos, type FichaTecnico } from "./tecnicos";
+import { garantirTecnicos, perfilDoTecnico, type FichaTecnico } from "./tecnicos";
+import { custosDe, horaPerfil, origemHora } from "../v2/custosModelo";
 
 const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[15px] font-medium transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50";
-const PRIMARIO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-[15px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50";
 const CAMPO = "h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-60";
-
-/** "17,5" ou "17.5" → 17,5; vazio ou texto → NaN. */
-const lerNumero = (s: string): number => (s.trim() ? Number(s.trim().replace(/\s/g, "").replace(",", ".")) : NaN);
 
 /** O bloco "Obra" da pessoa `pessoaId`; nada quando a pessoa não é um técnico de obra. */
 export default function BlocoObraPessoa({ pessoaId, S, A, run, irObra }: { pessoaId: string } & Pick<EquipaCtx, "S" | "A" | "run" | "irObra">) {
@@ -37,16 +34,16 @@ function FichaObra({ t, pessoaId, ctx }: { t: FichaTecnico; pessoaId: string; ct
   const pode = podeNeg(S.role, "equipa.edit");
   const hoje = new Date().toISOString().slice(0, 10);
   const fichaRh = useEstadoRh((e) => e.fichas[pessoaId] ?? null);
-  useCusto((e) => e.definicoes); // a sugestão muda com a taxa e o seguro do separador Custos
+  useCusto((e) => e.definicoes); // o cálculo muda com a taxa e o seguro do separador Custos
+  // o detalhe do cálculo: o do RH deste aparelho, ou o guardado na ficha (vindo de outro aparelho)
   const sug = sugestaoCustoHora(fichaRh);
-  const [custo, setCusto] = useState(nfmt(t.custoHora));
+  const rh = sug && sug.valor === t.custoHora ? { salario: sug.salario, encargosPct: sug.encargosPct, horasMes: sug.horasMes } : t.custoRh;
   const [novaData, setNovaData] = useState("");
-  const v = lerNumero(custo);
-  const invalido = !Number.isFinite(v) || v <= 0 || v > 200;
-  const mudou = !invalido && Math.round(v * 100) / 100 !== t.custoHora;
   const obras = obrasDoTecnico(S.deals, t.id, t.custoHora);
   const ferias = t.feriasDatas ?? [];
   const editar = (m: Parameters<typeof A.editarTecnico>[1]) => run(() => A.editarTecnico(t.id, m));
+  // 22/10: o ofício é um perfil do Catálogo; ao lado, o €/h que o orçamento usa para esse ofício (a média dos técnicos dele)
+  const C = custosDe(S), perfil = perfilDoTecnico(t), hp = perfil ? horaPerfil(C, perfil) : null;
 
   return (
     <section aria-labelledby={`${id}-t`} data-testid="bloco-obra-pessoa" className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4 sm:p-5">
@@ -55,44 +52,45 @@ function FichaObra({ t, pessoaId, ctx }: { t: FichaTecnico; pessoaId: string; ct
         <p className="text-[15px] text-muted-foreground">Técnico de obra · {t.tel} · na empresa desde {t.desde || "—"}</p>
         {!pode && (
           <p className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px]" role="note">
-            Está a ver como {PAPEIS[S.role].n}: pode consultar, mas só a Direção ou as Operações mudam o custo por hora, o ofício e as férias.
+            Está a ver como {PAPEIS[S.role].n}: pode consultar, mas só a Direção ou as Operações mudam o ofício e as férias.
           </p>
         )}
       </div>
 
-      {/* o custo/hora */}
-      <div className="flex flex-col gap-2">
-        <label htmlFor={`${id}-custo`} className="text-[15px] font-medium">Custo por hora (€/h)</label>
-        <div className="flex flex-wrap items-start gap-3">
-          <form className="flex items-start gap-2" onSubmit={(e) => { e.preventDefault(); if (mudou) editar({ custoHora: v }); }}>
-            <div className="flex flex-col gap-1">
-              <input id={`${id}-custo`} inputMode="decimal" value={custo} onChange={(e) => setCusto(e.target.value)} disabled={!pode}
-                aria-invalid={invalido || undefined} aria-describedby={`${id}-custo-ajuda`} className={cn(CAMPO, "w-32 tabular-nums", invalido && "border-destructive")} />
-              {invalido && <span className="text-sm text-destructive" role="alert">Escreva um valor entre 0 e 200.</span>}
-            </div>
-            <button type="submit" className={PRIMARIO} disabled={!pode || !mudou}>Guardar</button>
-          </form>
-          <div id={`${id}-custo-ajuda`} className="flex min-w-0 max-w-md flex-1 gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
+      {/* o custo/hora: só leitura, calculado nos Custos do RH (22/10) */}
+      <div className="flex flex-col gap-2" data-testid="custo-hora-rh">
+        <h4 className="text-[15px] font-medium">Custo/hora (calculado nos Custos do RH)</h4>
+        {t.semCustoRh ? (
+          <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px]" role="note">
+            Sem custo no RH: falta a retribuição ou o vínculo desta pessoa. Fica fora da média do ofício{hp?.fonte === "salario" ? ", que usa o salário do perfil" : ""}.
+          </p>
+        ) : (
+          <div className="flex min-w-0 max-w-xl gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
             <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {sug ? (
-              <span>
-                Pelo salário no RH: <b className="tabular-nums">{eur(sug.valor)} €/h</b> ({eur(sug.salario)} € × 14 ÷ 12 + {nfmt(sug.encargosPct)} % de encargos, a dividir por {nfmt(sug.horasMes)} h por mês).
-                Não conta o tempo fora da obra nem a estrutura: é um ponto de partida.
-                {pode && <button type="button" className="ml-1 font-medium text-primary underline-offset-4 hover:underline" onClick={() => setCusto(nfmt(sug.valor))}>Usar este valor</button>}
-              </span>
-            ) : <span>Sem salário no RH para sugerir um valor.</span>}
+            <span>
+              <b className="text-[15px] tabular-nums">{eur(t.custoHora)} €/h</b>
+              {rh ? <> = ({eur(rh.salario)} € × 14 ÷ 12 + {nfmt(rh.encargosPct)} % de encargos da empresa) ÷ {nfmt(rh.horasMes)} h do contrato por mês.</> : null}
+              {" "}Para o mudar, mude a retribuição ou o horário da pessoa no RH (Custos e Contrato).
+            </span>
           </div>
-        </div>
-        <p className="text-sm text-muted-foreground">Entra no custo previsto e no real das obras: as horas de cada tarefa vezes o custo por hora de quem a faz.</p>
+        )}
+        <p className="text-sm text-muted-foreground">Entra no €/h do ofício (a média dos técnicos dele), que o Catálogo e os orçamentos novos usam, e no custo real das obras. Os orçamentos já enviados não mudam.</p>
+        <p className="text-xs text-muted-foreground">O RH de exemplo só vive neste aparelho: uma retribuição mudada aqui chega aos outros aparelhos pelo custo/hora guardado na ficha do técnico.</p>
       </div>
 
-      {/* o ofício */}
+      {/* o ofício: o perfil do Catálogo (22/10) */}
       <div className="flex flex-col gap-2">
         <label htmlFor={`${id}-sk`} className="text-[15px] font-medium">Ofício</label>
-        <select id={`${id}-sk`} value={t.sk} disabled={!pode} onChange={(e) => editar({ sk: e.target.value })} className={cn(CAMPO, "max-w-xs")}>
-          {OFICIOS.map((o) => <option key={o} value={o}>{o}</option>)}
+        <select id={`${id}-sk`} value={perfil} disabled={!pode} onChange={(e) => editar({ perfilId: e.target.value })} className={cn(CAMPO, "max-w-xs")}>
+          {!perfil && <option value="">Sem ofício</option>}
+          {C.perfis.map((p) => <option key={p.id} value={p.id}>{p.n}</option>)}
         </select>
-        <p className="text-sm text-muted-foreground">O plano da obra propõe técnicos pelo ofício. As tarefas já atribuídas ficam com quem estão.</p>
+        {hp && (
+          <p className="text-sm text-muted-foreground" data-testid="media-oficio">
+            {hp.eh == null ? "Sem custo/hora neste ofício." : <>O orçamento usa <b className="tabular-nums text-foreground">{eur(hp.eh)} €/h</b> para {hp.n}: {origemHora(hp).replace(/^./, (c) => c.toLowerCase())}.</>}
+          </p>
+        )}
+        <p className="text-sm text-muted-foreground">O €/h de cada ofício nas receitas e nos orçamentos é a média dos técnicos dele. O plano da obra propõe técnicos pelo ofício; as tarefas já atribuídas ficam com quem estão.</p>
       </div>
 
       {/* as férias */}

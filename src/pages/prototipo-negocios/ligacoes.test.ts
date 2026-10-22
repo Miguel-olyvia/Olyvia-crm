@@ -56,11 +56,13 @@ describe("ligacoes · ligacoesDe", () => {
     expect(m!.centro.n).toBe("Instalação de Sanita Compacta");
     const P = grupo(m, "produtos");
     expect(P.nota).toMatch(/^O cliente mantém a sanita\?/);
-    const sanita = P.itens.find((l) => l.n === "Sanita suspensa com estrutura")!;
+    // 22/10: a sanita suspensa traz a instalação de sanita suspensa; quem traz a compacta é a sanita compacta
+    expect(P.itens.some((l) => l.n === "Sanita suspensa com estrutura" && /traz/.test(l.porque))).toBe(false);
+    const sanita = P.itens.find((l) => l.n === "Sanita compacta")!;
     expect(sanita.porque).toBe("1 un traz 1 × Instalação de Sanita Compacta");
     expect(P.itens.find((l) => l.n === "Base de duche 80×120")!.porque).toBe("Pede um de Louças e torneiras · se o cliente não mantém");
     // 14/10: a receita da Mudelar do c13 (dois passos do canalizador)
-    expect(grupo(m, "tecnicos").itens).toEqual([expect.objectContaining({ n: "Canalizador", porque: "2 passos: 0,87 h/un · 25,00 €/h" })]);
+    expect(grupo(m, "tecnicos").itens).toEqual([expect.objectContaining({ n: "Canalizador", porque: "2 passos: 0,87 h/un · 18,50 €/h (média de Marco Antunes)" })]);
   });
   it("serviço com receita: equipamentos com €/h × h/un e consumíveis com a marca de opcional", () => {
     const K = montar((c) => { c.receitas.canal = { ...receitaCanal(c), cons: receitaCanal(c).cons.map((x) => (x.n === "Fita e vedante" ? { ...x, opcional: true } : x)) }; });
@@ -72,13 +74,17 @@ describe("ligacoes · ligacoesDe", () => {
     expect(grupo(m, "consumiveis").itens.find((l) => l.n === "Tubo multicamada 16 mm")!.opcional).toBeUndefined();
   });
   it("produto no centro (o vice-versa): o serviço que traz, os que o pedem, as alternativas (as do mesmo serviço primeiro) e quem instala", () => {
-    const K = montar(), id = K.produtos.find((p) => p.n === "Sanita suspensa com estrutura")!.id;
+    // 22/10: a sanita suspensa traz a instalação de sanita suspensa (s-moissusp, só no Catálogo inteiro da Mudelar, fora destes testes);
+    // o produto no centro é a sanita compacta, que traz a de sanita compacta (c13)
+    const K = montar();
+    expect(K.produtos.find((p) => p.n === "Sanita suspensa com estrutura")!.servico).toBe("s-moissusp");
+    const id = K.produtos.find((p) => p.n === "Sanita compacta")!.id;
     const m = ligacoesDe({ t: "prod", id }, K);
     expect(grupo(m, "traz").itens).toEqual([expect.objectContaining({ n: "Instalação de Sanita Compacta", porque: "traz 1 × Instalação de Sanita Compacta" })]);
     expect(nomes(m, "pedem")).toContain("Montagem de louças");
-    expect(nomes(m, "alternativas")[0]).toBe("Sanita compacta");
+    expect(nomes(m, "alternativas")).toContain("Sanita suspensa com estrutura");
     expect(nomes(m, "alternativas")).toContain("Base de duche 80×120");
-    expect(grupo(m, "instala").itens[0]).toMatchObject({ n: "Canalizador", porque: "Instala · 2 passos: 0,87 h/un · 25,00 €/h" });
+    expect(grupo(m, "instala").itens[0]).toMatchObject({ n: "Canalizador", porque: "Instala · 2 passos: 0,87 h/un · 18,50 €/h (média de Marco Antunes)" });
   });
   it("as alternativas são as da mesma subcategoria quando o produto a tem", () => {
     const K = montar(undefined, (k) => {

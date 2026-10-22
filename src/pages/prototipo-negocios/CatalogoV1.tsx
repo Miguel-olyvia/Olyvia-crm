@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
-import { aplicarTodos, dataPT, listaCatalogoCompleta, mediaHora, pesquisar, type Custos, type ItemLista } from "./v2/custosModelo";
+import { aplicarTodos, dataPT, listaCatalogoCompleta, origemHora, pesquisar, type Custos, type ItemLista } from "./v2/custosModelo";
 import { lerCustos, mudarCustos, useCustos } from "./v2/custosStore";
 import { caminho, dentroDe, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { useCatalogo } from "./v2/catalogoStore";
@@ -251,17 +251,18 @@ function Consumiveis({ todos, C, nomeServico }: { todos: ConsCatalogo[]; C: Cust
 
 /* ------------------------------------------------------------------ técnicos */
 function Tecnicos({ S, C, mudar }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c: Custos) => void, msg: string) => void }) {
-  const L = tecnicosCatalogo(S, C), direcao = S.role === "direcao", media = mediaHora(C);
+  const L = tecnicosCatalogo(S, C), direcao = S.role === "direcao";
   return (
     <>
-      <p className={NOTA}>O tipo de técnico de cada passo das fichas. O custo/hora = salário × {nfmt(C.par.meses)} meses + TSU de {nfmt(C.par.tsu)}% + seguros, a dividir por {nfmt(C.par.horasAno)} h produtivas por ano.</p>
+      <p className={NOTA}>O tipo de técnico de cada passo das fichas. O custo/hora de cada ofício é a média do custo/hora dos técnicos dele no RH (ficha da pessoa › Obra). Sem técnicos, usa o salário do perfil: salário × {nfmt(C.par.meses)} meses + TSU de {nfmt(C.par.tsu)}% + seguros, a dividir por {nfmt(C.par.horasAno)} h produtivas por ano.</p>
       <ul className={cn(LISTA, "mt-4")}>
-        {L.map(({ p, eh, servicos }) => (
+        {L.map(({ p, eh, servicos, hora }) => (
           <li key={p.id} className="flex min-h-16 flex-wrap items-center gap-3 py-3">
             <span className="min-w-0 flex-1">
               <span className="block text-[15px] font-medium">{p.n}</span>
               <span className={cn(NOTA, "block")}>{servicos ? `${servicos} ${servicos === 1 ? "serviço" : "serviços"} em uso` : "sem serviços em uso"}{direcao ? "" : " · o salário só a Direção vê"}</span>
-              {eh == null && <span className="mt-0.5 flex items-start gap-1.5 text-[15px]"><UserX className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />Técnico sem custo/hora: usa a média ({eur(media)} €/h).</span>}
+              <span className={cn(NOTA, "block")}>{origemHora(hora)}{hora.fonte === "rh" && hora.tecnicos.length > 1 ? `: ${hora.tecnicos.map((t) => `${t.n.split(" ")[0]} ${eur(t.custoHora)} €/h`).join(" · ")}` : ""}</span>
+              {eh == null && <span className="mt-0.5 flex items-start gap-1.5 text-[15px]"><UserX className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />Ofício sem custo/hora: a mão de obra conta 0 €. Ligue um técnico a este ofício no RH ou ponha o salário.</span>}
             </span>
             {direcao && (
               <label className="flex items-center gap-2"><span className={NOTA}>Salário</span>

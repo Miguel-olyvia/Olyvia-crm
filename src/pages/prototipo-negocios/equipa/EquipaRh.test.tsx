@@ -1,13 +1,13 @@
 // Os técnicos de obra no RH do protótipo (22/10/2026): não há aba Técnicos; a ficha da pessoa que é técnico (RH › Pessoas) tem o bloco "Obra",
-// que muda o custo/hora (e o custo da obra), o ofício e as férias; a Agenda mostra a semana com a obra certa, abre a obra ao clicar e abre a
+// com o custo/hora calculado nos Custos do RH (só leitura; 22/10), o ofício e as férias; a Agenda mostra a semana com a obra certa, abre a obra ao clicar e abre a
 // ficha do técnico pelo nome. Sem base de dados: o cliente rebenta se alguém o importar.
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo, useReducer, useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client", () => { throw new Error("Os ecrãs da equipa não podem importar o cliente Supabase"); });
 
-import { lerEstado } from "@/components/rh-exemplo/dados/loja";
+import { atualizarFicha, lerEstado } from "@/components/rh-exemplo/dados/loja";
 import { acoes, seed, type Estado } from "../motor";
 import { custosObra } from "../obraOps";
 import MenuRh from "../rh/MenuRh";
@@ -60,13 +60,24 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
     expect(lerEstado().fichas["p-tec-hn"]?.pessoa.cargo).toBe("Técnico de obra");
     const bloco = await within(ficha).findByTestId("bloco-obra-pessoa", undefined, { timeout: 15000 });
     expect(within(bloco).getByRole("heading", { name: "Obra" })).toBeInTheDocument();
-    expect(within(bloco).getByText(/Pelo salário no RH/)).toBeInTheDocument();
+    // 22/10: o custo/hora é só leitura, calculado nos Custos do RH (2.112 € × 14 ÷ 12 + 25,25 % ÷ 173,3 h = 17,80 €/h)
+    const custo = within(bloco).getByTestId("custo-hora-rh");
+    expect(custo).toHaveTextContent("Custo/hora (calculado nos Custos do RH)");
+    expect(custo).toHaveTextContent(/17,80 €\/h = \(2\.112,00 € × 14 ÷ 12 \+ 25,25 % de encargos da empresa\) ÷ 173,3 h/);
+    expect(within(bloco).queryByLabelText("Custo por hora (€/h)")).not.toBeInTheDocument();
     expect(within(bloco).getByText(/#1022/)).toBeInTheDocument();
-    const p = S.deals.find((d) => d.id === 1022)!.obra.plano!, antes = custosObra(p).prev;
-    fireEvent.change(within(bloco).getByLabelText("Custo por hora (€/h)"), { target: { value: "25,5" } });
-    fireEvent.click(within(bloco).getByRole("button", { name: "Guardar" }));
-    expect(S.tecnicos!.find((t) => t.id === "hn")!.custoHora).toBe(25.5);
+    // mudar a retribuição no RH muda o €/h dele, a média do Ladrilhador e o custo do revestimento num orçamento novo
+    const p = S.deals.find((d) => d.id === 1022)!.obra.plano!, antes = custosObra(p).prev, revAntes = S.svc.revest.eh;
+    const enviado = S.deals.find((d) => d.id === 1050)!.orc!.linhas.find((l) => l.t === "svc" && l.sid === "revest")!;
+    const cuEnviado = enviado.t === "svc" ? enviado.cu : 0;
+    act(() => atualizarFicha("p-tec-hn", (f) => ({ ...f, retribuicoes: f.retribuicoes.map((r) => ({ ...r, valor_base: 2500 })) })));
+    const hn = S.tecnicos!.find((t) => t.id === "hn")!;
+    expect(hn.custoHora).toBe(21.08);
+    expect(S.svc.revest.eh).toBeCloseTo((17.8 + 21.08) / 2, 2);
+    expect(S.svc.revest.eh).toBeGreaterThan(revAntes);
     expect(custosObra(p).prev).toBeGreaterThan(antes);
+    expect(enviado.t === "svc" && enviado.cu).toBe(cuEnviado); // a proposta já enviada não muda
+    await waitFor(() => expect(within(bloco).getByTestId("custo-hora-rh")).toHaveTextContent("21,08 €/h"));
     // as férias: junta um dia e tira-o
     fireEvent.change(within(bloco).getByLabelText("Dia de férias a juntar"), { target: { value: "2026-11-02" } });
     fireEvent.click(within(bloco).getByRole("button", { name: /Juntar dia/ }));
@@ -74,8 +85,8 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
     fireEvent.click(within(bloco).getByRole("button", { name: "Tirar o dia 02/11/2026 das férias" }));
     expect(S.tecnicos!.find((t) => t.id === "hn")!.feriasDatas).toEqual([]);
     // o ofício
-    fireEvent.change(within(bloco).getByLabelText("Ofício"), { target: { value: "Montador" } });
-    expect(S.tecnicos!.find((t) => t.id === "hn")!.sk).toBe("Montador");
+    fireEvent.change(within(bloco).getByLabelText("Ofício"), { target: { value: "montador" } });
+    expect(S.tecnicos!.find((t) => t.id === "hn")).toMatchObject({ sk: "Montador", perfilId: "montador" });
     // abrir a obra
     fireEvent.click(within(bloco).getByRole("button", { name: "Abrir a obra #1022" }));
     expect(irObra).toHaveBeenCalledWith(1022);
@@ -98,7 +109,6 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
     const ficha = await abrirFichaPelaAgenda("Hugo Neves");
     const bloco = await within(ficha).findByTestId("bloco-obra-pessoa", undefined, { timeout: 15000 });
     expect(within(bloco).getByRole("note")).toHaveTextContent(/só a Direção ou as Operações/);
-    expect(within(bloco).getByLabelText("Custo por hora (€/h)")).toBeDisabled();
     expect(within(bloco).getByLabelText("Ofício")).toBeDisabled();
     expect(within(bloco).queryByLabelText("Dia de férias a juntar")).not.toBeInTheDocument();
   }, LENTO);

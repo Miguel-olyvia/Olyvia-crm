@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { CATALOGO } from "../catalogo";
 import { eur, nfmt, pct, r2, type Estado, type SvcId } from "../motor";
 import {
-  HOJE, JUSTIFICACOES, LINHA_NOME, alertasServico, consumiveisDesatualizados, aplicarTodos, custoHoraPerfil, custoReceita, dataPT, equipHora, margemSobrePreco, mediaHora,
+  HOJE, JUSTIFICACOES, LINHA_NOME, alertasServico, consumiveisDesatualizados, aplicarTodos, custoReceita, dataPT, equipHora, margemSobrePreco, horaPerfil,
   minimoServico, precoReceita, receitaDe, taxaEstrutura, type Custos, type ModoPreco, type ReceitaV2,
 } from "./custosModelo";
 import { lerCustos, mudarCustos } from "./custosStore";
@@ -65,7 +65,6 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
   };
   const nid = (pref: string, L: { id: string }[]) => pref + (Math.max(0, ...L.map((x) => Number(x.id.replace(/\D/g, "")) || 0)) + 1);
   const perfisOp = C.perfis.map((p) => ({ v: p.id, t: p.n }));
-  const media = mediaHora(C);
   const velhos = new Set(consumiveisDesatualizados(rec, C.par.mesesDesatualizado).map((x) => x.id));
 
   return (
@@ -126,20 +125,20 @@ export function FichaServicoV2({ S, C, run, sid, voltar, anunciar }: {
           <h2 id="mo-t" className="text-lg font-semibold">Mão de obra</h2>
           <span className="text-[15px] tabular-nums">{eur(c.mo)} €/{un}</span>
         </div>
-        <p className="mt-1 text-[15px] text-muted-foreground">Passos e horas por {un}, a multiplicar pelo custo/hora do perfil (de Custos › Perfis).</p>
+        <p className="mt-1 text-[15px] text-muted-foreground">Passos e horas por {un}, a multiplicar pelo custo/hora do perfil (a média dos técnicos dele no RH; sem técnicos, o salário do perfil).</p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse">
             <thead><tr className="border-b border-border"><th scope="col" className={TH}>Passo</th><th scope="col" className={TH}>Perfil</th><th scope="col" className={cn(TH, "text-right")}>Horas por {un}</th><th scope="col" className={cn(TH, "text-right")}>€/h</th><th scope="col" className={cn(TH, "text-right")}>Custo</th><th scope="col" className={TH}><span className="sr-only">Retirar</span></th></tr></thead>
             <tbody>
               {rec.mo.map((p) => {
-                const pf = C.perfis.find((x) => x.id === p.perfil), eh = pf ? custoHoraPerfil(pf, C.par) : null;
+                const eh = horaPerfil(C, p.perfil).eh;
                 return (
                   <tr key={p.id} className="border-b border-border">
                     <td className={TD}><TextoCelula rotulo="Passo" v={p.n} onSet={(v) => editar((r) => { r.mo.find((x) => x.id === p.id)!.n = v; }, "Passo renomeado")} /></td>
                     <td className={TD}><Escolha rotulo={`Perfil de ${p.n}`} v={p.perfil} opcoes={perfisOp} onSet={(v) => editar((r) => { r.mo.find((x) => x.id === p.id)!.perfil = v; }, "Perfil mudado")} /></td>
                     <td className={cn(TD, "text-right")}><NumeroCelula rotulo={`Horas por ${un} de ${p.n}`} v={p.h} onSet={(v) => editar((r) => { r.mo.find((x) => x.id === p.id)!.h = v; }, "Horas mudadas")} /></td>
-                    <td className={cn(TD, "text-right text-[15px] tabular-nums text-muted-foreground")}>{eur(eh ?? media)}{eh == null && <span className="block text-[15px]">média</span>}</td>
-                    <td className={cn(TD, "text-right text-[15px] tabular-nums")}>{eur(p.h * (eh ?? media))} €</td>
+                    <td className={cn(TD, "text-right text-[15px] tabular-nums text-muted-foreground")}>{eh == null ? "—" : eur(eh)}{eh == null && <span className="block text-[15px]">sem custo/hora</span>}</td>
+                    <td className={cn(TD, "text-right text-[15px] tabular-nums")}>{eur(p.h * (eh ?? 0))} €</td>
                     <td className={TD}><Retirar rotulo={`Retirar o passo ${p.n}`} onClick={() => editar((r) => { r.mo = r.mo.filter((x) => x.id !== p.id); }, `Passo ${p.n} retirado`)} /></td>
                   </tr>
                 );

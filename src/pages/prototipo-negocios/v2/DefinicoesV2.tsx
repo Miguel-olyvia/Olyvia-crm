@@ -8,7 +8,7 @@ import { Check, RotateCcw, Search, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorFases, ModelosSetor } from "../CamposEditor";
-import { ESTR, FASES, PAPEIS, eur, type Papel } from "../motor";
+import { FASES, PAPEIS, eur, estruturaHora, type Papel } from "../motor";
 import { IconeFase, type Ctx } from "../pecas";
 import { useAviso } from "../useAviso";
 import { AjudaBotao, AjudaTexto, ComAjuda } from "./Ajuda";
@@ -166,7 +166,7 @@ export function DefinicoesV2({ S, A, go, run, repor }: Ctx) {
         </Sub>
         <Sub id="orcamento-estrutura" titulo="Estrutura">
           <div className={CARTAO}>
-            <Interruptor on={S.cfg.estrutura} onClick={() => run(() => { S.cfg.estrutura = !S.cfg.estrutura; })} titulo={`Somar ${eur(ESTR)} €/h de estrutura ao custo`}
+            <Interruptor on={S.cfg.estrutura} onClick={() => run(() => { S.cfg.estrutura = !S.cfg.estrutura; })} titulo={`Somar ${eur(estruturaHora(S))} €/h de estrutura ao custo`}
               texto="Decisão em aberto. Pelo método BMG a estrutura fica dentro da margem: somá-la aqui cobra-a duas vezes." />
           </div>
         </Sub>

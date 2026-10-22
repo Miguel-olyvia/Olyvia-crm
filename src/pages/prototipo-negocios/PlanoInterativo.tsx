@@ -13,10 +13,10 @@ import { TECS, diaDeFerias, nfmt, type MatTarefa, type Negocio, type Plano, type
 import type { Ctx } from "./pecas";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { rotuloDia, skDaTarefa } from "./preparacaoObra";
+import { rotuloDia, tecnicosDoOficio } from "./preparacaoObra";
 import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
-import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDaTarefa, materiaisDoServico, podeTirar, tempoDoServico, ultimoAviso } from "./tarefasValidador";
+import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDaTarefa, materiaisDoServico, oficioDe, podeTirar, tempoDoServico, ultimoAviso } from "./tarefasValidador";
 import { ecDaAdenda, porEncomendar } from "./encomendasAjuste";
 import { primeiraPaga } from "./adendas";
 
@@ -282,13 +282,13 @@ function NovaTarefa({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => vo
   const sugerido = s && sid ? criarTarefa(p, s, { sid, q, fase }).dia : 0;
   const dia = Math.max(min, sugerido + delta);
   const previa = s && sid ? criarTarefa(p, s, { sid, q, fase, tec, mats: mats ?? undefined, dia }) : null;
-  const sk = s ? skDaTarefa(s.perfil, s.n) : "";
-  const tecs = TECS.filter((x) => x.sk === sk);
+  const of = s ? oficioDe(s) : null;
+  const tecs = of ? tecnicosDoOficio(of) : [];
   const escolherSvc = (k: SvcId) => {
     const sv = S.svc[k], un1 = POR_5.test(sv.un) ? 5 : 1;
     setSid(k); setQ(un1); setMats(null); setTec(undefined); setDelta(0);
     // a fase sugerida: a de outra tarefa do mesmo ofício, se houver
-    const igual = p.tasks.find((t) => t.sk === skDaTarefa(sv.perfil, sv.n) && t.fase);
+    const o2 = oficioDe(sv), igual = p.tasks.find((t) => (o2.perfilId ? t.perfilId === o2.perfilId || t.sk === o2.sk : t.sk === o2.sk) && t.fase);
     if (igual?.fase) setFase(igual.fase);
   };
   const criar = () => {
@@ -362,7 +362,7 @@ function NovaTarefa({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => vo
             </Linha>
 
             <div>
-              <p className="text-[15px]">Técnico <span className="text-sm text-muted-foreground">· {sk}</span></p>
+              <p className="text-[15px]">Técnico <span className="text-sm text-muted-foreground">· {of?.sk ?? ""}</span></p>
               <div role="group" aria-label="Técnico" className="mt-2 flex flex-wrap gap-2">
                 {tecs.map((x) => {
                   const k = previa ? diaDeFerias(x, p, dia, previa.dur) : null, on = previa?.tec === x.id;

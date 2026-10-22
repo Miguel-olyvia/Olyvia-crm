@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { LINHAS, acoes, criarOrc, partes, preservarManuais, seed, sugerirPrazo, tot, type Negocio } from "./motor";
+import { LINHAS, acoes, criarOrc, parDemolicao, partes, preservarManuais, seed, sugerirPrazo, tot, type Negocio } from "./motor";
 import { ligarCatalogo } from "./produtosVisita";
 import { catalogo0 } from "./v2/catalogoModelo";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, type Grupo } from "./campos";
@@ -99,7 +99,7 @@ describe("prazo previsto no orçamento", () => {
 
   describe("com a demolição e entulho", () => {
     afterEach(() => ligarCatalogo(null));
-    it("é a primeira tarefa, com as horas de demolir e de carregar, e o custo a €/h dos parâmetros", () => {
+    it("é a primeira tarefa, com as horas de demolir e de carregar, e o custo a €/h da equipa vindo do RH (22/10: 2 × Servente)", () => {
       const S = seed();
       const K = catalogo0();
       ligarCatalogo(() => K);
@@ -117,7 +117,8 @@ describe("prazo previsto no orçamento", () => {
       const antes = tot(d, S);
       A.prazoTarefa(d.id, TAREFA_DEMOLICAO, 2);
       const t = tarefasPrevistas(d, S)[0];
-      expect(t.delta).toBeCloseTo((16 - T[0].hOrc) * K.parDem!.custoHora, 2);
+      expect(t.delta).toBeCloseTo((16 - T[0].hOrc) * parDemolicao(S, K.parDem!).custoHora, 2);
+      expect(parDemolicao(S, K.parDem!).custoHora).toBeCloseTo(2 * 14.2, 2); // os dois serventes (João e Rui) a 14,20 €/h
       expect(tot(d, S).custo).toBeCloseTo(antes.custo + t.delta, 2);
       // o preço da demolição não muda
       expect(d.orc!.demolicao!.r!.preco).toBe(r.preco);

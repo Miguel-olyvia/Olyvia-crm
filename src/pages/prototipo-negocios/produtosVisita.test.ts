@@ -27,7 +27,9 @@ describe("Catálogo: relações entre serviços e produtos", () => {
     expect(K0.exigeProduto!.pav).toBe(no(K0, "Pavimento"));
     expect(K0.exigeProduto!.demol).toBeUndefined(); // serviço sem produto
     expect(K0.perguntaManter!.c13).toBe("O cliente mantém a sanita?");
-    expect(prodN(K0, "Sanita suspensa com estrutura")).toMatchObject({ servico: "c13", fatorServico: 1 });
+    // 22/10: a sanita suspensa traz a instalação de sanita suspensa (s-moissusp); a compacta traz a de sanita compacta (c13)
+    expect(prodN(K0, "Sanita suspensa com estrutura")).toMatchObject({ servico: "s-moissusp", fatorServico: 1 });
+    expect(prodN(K0, "Sanita compacta")).toMatchObject({ servico: "c13", fatorServico: 1 });
     expect(prodN(K0, "Espelho simples 60×80").servico).toBeUndefined(); // produto sem serviço
     expect(K0.produtos.find((p) => p.id === "m1")!.n).toBe("Cerâmico de parede 30×60"); // os ids de antes não mudam
   });
@@ -42,12 +44,14 @@ describe("Catálogo: relações entre serviços e produtos", () => {
 });
 
 describe("serviços trazidos por produtos", () => {
-  const sanita = fotografia(prodN(K0, "Sanita suspensa com estrutura"), 2);
+  const sanita = fotografia(prodN(K0, "Sanita compacta"), 2);
   const espelho = fotografia(prodN(K0, "Espelho simples 60×80"), 1);
   it("a quantidade do serviço é a do produto × fator, e diz de onde veio", () => {
-    const t = servicosTrazidos([sanita, espelho, { ...fotografia(prodN(K0, "Sanita compacta"), 1) }]);
-    expect(t.c13).toEqual({ q: 3, de: ["Sanita suspensa com estrutura", "Sanita compacta"] });
-    expect(Object.keys(t)).toEqual(["c13"]);
+    const t = servicosTrazidos([sanita, espelho, { ...fotografia(prodN(K0, "Sanita compacta"), 1) }, fotografia(prodN(K0, "Sanita suspensa com estrutura"), 1)]);
+    expect(t.c13).toMatchObject({ q: 3 });
+    expect(t.c13.de).toContain("Sanita compacta");
+    expect(t["s-moissusp"]).toEqual({ q: 1, de: ["Sanita suspensa com estrutura"] });
+    expect(Object.keys(t)).toEqual(["c13", "s-moissusp"]);
   });
   it("tirar o produto tira o serviço; posto à mão fica (e a quantidade à mão manda)", () => {
     const prod = juntarProduto([], sanita);
@@ -167,8 +171,9 @@ describe("na visita: portão, orçamento e reabrir", () => {
     expect(d.fase).toBe(3);
     const o = d.orc!;
     const svc = o.linhas.flatMap((l) => (l.t === "svc" ? [l.sid] : []));
-    expect(svc).toContain("c13"); // trazido pela sanita
-    expect(S.svc.c13.n).toBe("Instalação de Sanita Compacta");
+    expect(svc).toContain("s-moissusp"); // trazido pela sanita suspensa (22/10: antes, por engano, a de sanita compacta)
+    expect(svc).not.toContain("c13");
+    expect(S.svc["s-moissusp"].n).toBe("Instalação de Sanita Suspensa");
     const mats = o.linhas.flatMap((l) => (l.t === "mat" ? [l] : []));
     expect(mats.find((l) => l.d === PREFIXO_PROD + "Sanita suspensa com estrutura")).toMatchObject({ custo: 285, preco: 380 });
     expect(mats.find((l) => l.d === PREFIXO_PROD + "Espelho simples 60×80")).toBeTruthy();

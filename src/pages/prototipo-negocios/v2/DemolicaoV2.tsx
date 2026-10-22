@@ -6,7 +6,7 @@
 import { History, Lock, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PAPEIS, eur, nfmt, type Estado } from "../motor";
+import { PAPEIS, eur, nfmt, parDemolicao, type Estado } from "../motor";
 import { numero } from "../pecas";
 import {
   ARTIGOS_DEM0, CAMPOS_PAR, F_EXTRA0, PAR_DEM0, UNS_DEM, registarMudanca, vSoltoDe, type ArtigoDem, type MudancaDem, type ParDem,
@@ -20,6 +20,7 @@ const agora = () => { const t = new Date(); return `${t.toLocaleDateString("pt-P
 export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => void }) {
   const K = useCatalogo();
   const P = K.parDem ?? PAR_DEM0, artigos = K.artigosDem ?? ARTIGOS_DEM0, hist = K.histDem ?? [];
+  const rh = parDemolicao(S, P);
   const direcao = S.role === "direcao", quem = PAPEIS[S.role].nome;
   const pc = (x: number | null) => (x == null ? undefined : Math.round(x * 1000) / 10);
   const extras = P.fExtra ?? F_EXTRA0;
@@ -59,7 +60,14 @@ export function DemolicaoV2({ S, mudarPapel }: { S: Estado; mudarPapel: () => vo
 
       {/* parâmetros */}
       <div className={CARTAO} aria-label="Parâmetros da demolição">
-        {CAMPOS_PAR.map((c) => (
+        {/* 22/10: o custo/hora da equipa vem do RH (motor.ts: parDemolicao, 2 × o €/h do Servente); o do parâmetro só vale sem ele */}
+        {rh.doRh && (
+          <div className={cn(LINHA, "justify-between")} data-testid="demolicao-custo-rh">
+            <span className="text-[15px] font-medium">Custo/hora da mão de obra</span>
+            <span className="text-[15px] tabular-nums">{eur(rh.custoHora)} €/h <span className="text-sm text-muted-foreground">· do RH: {rh.doRh}</span></span>
+          </div>
+        )}
+        {CAMPOS_PAR.filter((c) => !(rh.doRh && c.k === "custoHora")).map((c) => (
           <label key={c.k} className={cn(LINHA, "justify-between")}>
             <span className="text-[15px] font-medium">{c.rot}</span>
             <span className="flex items-center gap-2">

@@ -11,10 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { itemCatalogo } from "./catalogo";
-import { eur, nfmt, pct, r2, type Estado, type SvcId } from "./motor";
+import { eur, nfmt, parDemolicao, pct, r2, type Estado, type SvcId } from "./motor";
+import { PAR_DEM0 } from "./entulho";
 import {
-  HOJE, JUSTIFICACOES, aplicarTodos, alertasServico, consumiveisDesatualizados, custoHoraPerfil, custoReceita, dataPT, margemSobrePreco,
-  mediaHora, minimoServico, precoReceita, receitaDe, taxaEstrutura, type Custos, type ModoPreco, type ReceitaV2,
+  HOJE, JUSTIFICACOES, aplicarTodos, alertasServico, consumiveisDesatualizados, custoReceita, dataPT, margemSobrePreco,
+  horaPerfil, minimoServico, origemHora, precoReceita, receitaDe, taxaEstrutura, type Custos, type ModoPreco, type ReceitaV2,
 } from "./v2/custosModelo";
 import { lerCustos, mudarCustos } from "./v2/custosStore";
 import { caminho, consumivelDe, noDoServico, opcoesArvore, textoRegra, type Produto, type Regra } from "./v2/catalogoModelo";
@@ -148,7 +149,6 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
     }, `Preço guardado: ${eur(p)} €/${un}`, false);
   };
   const nid = (pref: string, L: { id: string }[]) => pref + (Math.max(0, ...L.map((x) => Number(x.id.replace(/\D/g, "")) || 0)) + 1);
-  const media = mediaHora(C);
   const velhos = new Set(consumiveisDesatualizados(rec, C.par.mesesDesatualizado).map((x) => x.id));
   const ligados = produtosQueTrazem(K, sid);
   const partes = partesCusto(c, S.cfg.estrutura);
@@ -156,7 +156,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
   const regras: { t: string; r: Regra }[] = regraAtual && !REGRAS_QTD.some((x) => chaveRegra(x.r) === chaveRegra(regraAtual)) ? [...REGRAS_QTD, { t: textoRegra(regraAtual), r: regraAtual }] : REGRAS_QTD;
   const ramo = K.exigeProduto?.[sid];
   const ramoNome = ramo ? (K.arvore.find((x) => x.id === ramo)?.n ?? "") : "";
-  const ent = entulhoFicha(K, sid, nome, un, medida);
+  const ent = entulhoFicha(K, sid, nome, un, medida, parDemolicao(S, K.parDem ?? PAR_DEM0)); // 22/10: o €/h da equipa do RH, como no orçamento
   const artigos = (K.artigosDem ?? ARTIGOS_DEM0).filter((a) => a.ativo);
 
   /** Muda de onde vem o entulho: o artigo de demolição só fica no modo "artigo". */
@@ -280,28 +280,29 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
       </Seccao>
 
       {/* ---------------------------------------------------------- quem faz */}
-      <Seccao id="mo-t" titulo="Quem faz" total={`${eur(c.mo)} €/${un}`} desc={`Os passos, o tipo de técnico e as horas por ${un}. O custo/hora vem do salário (Técnicos).`}>
+      <Seccao id="mo-t" titulo="Quem faz" total={`${eur(c.mo)} €/${un}`} desc={`Os passos, o tipo de técnico e as horas por ${un}. O custo/hora de cada ofício é a média dos técnicos dele no RH (Técnicos).`}>
         <ul className="mt-3 divide-y divide-border">
           {rec.mo.map((p) => {
-            const pf = C.perfis.find((x) => x.id === p.perfil), eh = pf ? custoHoraPerfil(pf, C.par) : null;
+            const hp = horaPerfil(C, p.perfil), pf = C.perfis.find((x) => x.id === p.perfil), eh = hp.eh;
             return (
               <li key={p.id} className={cn("py-3", nova === p.id && NOVA)}>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                   <span className="min-w-0 flex-[1_1_12rem]"><NomeInline rotulo="Passo" v={p.n} onSet={(v) => editar((r) => { r.mo.find((x) => x.id === p.id)!.n = v; }, "Passo renomeado")} /></span>
                   <SeletorPesquisa rotulo={`Tipo de técnico de ${p.n}`} atual={p.perfil} className="w-full sm:w-60"
                     gatilho={<GatilhoCampo>{pf?.n ?? "Escolher técnico"}</GatilhoCampo>}
-                    opcoes={C.perfis.map((x) => { const h = custoHoraPerfil(x, C.par); return { v: x.id, t: x.n, valor: h == null ? "sem salário" : `${eur(h)} €/h` }; })}
+                    opcoes={C.perfis.map((x) => { const h = horaPerfil(C, x.id).eh; return { v: x.id, t: x.n, valor: h == null ? "sem custo/hora" : `${eur(h)} €/h` }; })}
                     onEscolher={(v) => editar((r) => { r.mo.find((x) => x.id === p.id)!.perfil = v; }, "Técnico mudado")} />
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <p className={cn(NOTA, "flex flex-wrap items-center gap-x-1.5 tabular-nums")}>
-                    <span>{eur(eh ?? media)} €/h ×</span>
+                    <span>{eh == null ? "—" : eur(eh)} €/h ×</span>
                     <NumeroInline rotulo={`Horas por ${un} de ${p.n}`} v={p.h} onSet={(v) => editar((r) => { r.mo.find((x) => x.id === p.id)!.h = v; }, "Horas mudadas")} />
-                    <span>h/{un} =</span><span className="font-medium text-foreground">{eur(p.h * (eh ?? media))} €/{un}</span>
+                    <span>h/{un} =</span><span className="font-medium text-foreground">{eur(p.h * (eh ?? 0))} €/{un}</span>
                   </p>
                   <Retirar rotulo={`Retirar o passo ${p.n}`} onClick={() => editar((r) => { r.mo = r.mo.filter((x) => x.id !== p.id); }, `Passo ${p.n} retirado`)} />
                 </div>
-                {eh == null && <p className="mt-1 flex items-center gap-2 text-[15px]"><UserX className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />Técnico sem custo/hora: usa a média dos técnicos ({eur(media)} €/h).</p>}
+                <p className={cn(NOTA, "mt-1")}>{origemHora(hp)}.</p>
+                {eh == null && <p className="mt-1 flex items-center gap-2 text-[15px]"><UserX className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />Ofício sem custo/hora: conta 0 €. Ligue um técnico a este ofício no RH ou ponha o salário do perfil.</p>}
               </li>
             );
           })}

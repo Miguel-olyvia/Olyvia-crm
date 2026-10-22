@@ -10,7 +10,7 @@ import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import "./prototipo.css";
 import {
-  ESTR, FASES, LINHAS, PAPEIS, TECS, DIAS, VERSAO,
+  FASES, LINHAS, PAPEIS, TECS, DIAS, VERSAO,
   aberto, acoes, conflitos, custoUn, demo, eur, exemplosClientes, minhas, nfmt, pct, proximo, seed, tot,
   type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
@@ -31,6 +31,8 @@ import { NegociosV1Docs } from "./NegociosV1Docs";
 import { NumerosV1 } from "./NumerosV1";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
+import { derivarServicos, garantirCustos, taxaEstruturaDe } from "./v2/custosModelo";
+import { ligarCustos } from "./v2/custosStore";
 import { SeletorVersao } from "./SeletorVersao";
 import { gravarVersao, lerVersao, vistaEquivalente, type VersaoProto } from "./versaoPrototipo";
 import { ICONE_NEGOCIO } from "./iconeNegocio";
@@ -80,12 +82,22 @@ import { lerFrota, substituirFrota, subscreverFrota } from "./frota/loja";
 const CHAVE = "olyvia-prototipo-negocios";
 // A versão (Atual, V2 ou V2 funcional) vive fora do Estado (e da VERSAO): é uma preferência de quem vê, não um dado da demonstração (versaoPrototipo.ts).
 
+/** 22/10: os custos no Estado (os de antes ficam com os de arranque), o €/h dos serviços derivado deles e da ficha dos técnicos,
+ *  e a store dos custos ligada a este Estado. Devolve se mudou alguma coisa (para a voltar a partilhar). */
+function prepararCustos(S: Estado): boolean {
+  const mudou = garantirCustos(S);
+  const antes = JSON.stringify(S.svc);
+  derivarServicos(S);
+  ligarCustos(S);
+  return mudou || JSON.stringify(S.svc) !== antes;
+}
+
 function ler(): Estado {
   try {
     const j = JSON.parse(localStorage.getItem(CHAVE) || "null");
     // 21/10: os clientes com vários negócios juntam-se a um Estado já guardado (só os que faltam)
     // 22/10: e a ficha dos técnicos a um Estado guardado antes dela (garantirTecnicos)
-    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); migrarAdendas(j as Estado); garantirTecnicos(j as Estado); return j as Estado; }
+    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); migrarAdendas(j as Estado); garantirTecnicos(j as Estado); prepararCustos(j as Estado); return j as Estado; }
     // 21/10: as versões 18 a 20 (o acompanhamento da obra) migram sem perder o que se fez na demonstração:
     // só se juntam os dados novos do exemplo (a conversa da obra) a quem ainda não os tem
     if (j && j.v >= 18 && j.v < VERSAO) {
@@ -95,13 +107,15 @@ function ler(): Estado {
         if (s?.obra.chat && !d.obra.chat) d.obra.chat = s.obra.chat;
       }
       E.v = VERSAO;
-      exemplosClientes(E); migrarAdendas(E); garantirTecnicos(E);
+      exemplosClientes(E); migrarAdendas(E); garantirTecnicos(E); prepararCustos(E);
       return E;
     }
   } catch {
     /* sem storage: começa do zero */
   }
-  return demo();
+  const D = demo();
+  ligarCustos(D);
+  return D;
 }
 
 interface Toast extends Aviso { id: number }
@@ -212,7 +226,8 @@ export default function PrototipoNegocios() {
       if (S.v !== VERSAO) S.v = VERSAO;
       // uma sala de antes dos clientes com vários negócios: junta-os e partilha-os; 21/10: e as adendas de antes do percurso novo
       // 22/10: e uma sala de antes da ficha dos técnicos fica com os seis de sempre (e partilha-a)
-      const juntou = [exemplosClientes(S), migrarAdendas(S), garantirTecnicos(S)].some(Boolean);
+      // 22/10: e os custos (S.custos) a uma sala de antes deles, com o €/h dos serviços derivado da ficha dos técnicos
+      const juntou = [exemplosClientes(S), migrarAdendas(S), garantirTecnicos(S), prepararCustos(S)].some(Boolean);
       ref.current = S;
       try { localStorage.setItem(CHAVE, JSON.stringify(S)); } catch { /* ignora */ }
       redesenhar();
@@ -225,6 +240,7 @@ export default function PrototipoNegocios() {
       // uma sala nova: os dados de exemplo, com quem vê e onde está deste aparelho
       const { role, view, deal, op, tec } = ref.current;
       ref.current = { ...demo(), role, view, deal, op, tec };
+      ligarCustos(ref.current);
       esquecerInventario(); esquecerFrota();
       try { localStorage.setItem(CHAVE, JSON.stringify(ref.current)); } catch { /* ignora */ }
       redesenhar();
@@ -276,6 +292,7 @@ export default function PrototipoNegocios() {
     esquecerNegociosFunc();
     esquecerDiaADia();
     esquecerV2();
+    ligarCustos(ref.current); // 22/10: os custos de arranque do Estado novo
     esquecerFrota();
     // os dados de teste de RH (só se carregam se alguém os abriu ou aqui); se o chunk não carregar, o utilizador é avisado
     void import("./rh/loja").then((m) => m.esquecerRh()).catch(() => avisar({ msg: "Os dados de Recursos Humanos não foram repostos", sub: "Tenta repor a demonstração outra vez", kind: "bad" }));
@@ -1000,14 +1017,14 @@ function Catalogo({ S, run }: Ctx) {
                 <td>{s.n}<small>{s.perfil}{s.semCusto && <> · <span style={{ color: "var(--warn)" }}>técnico sem custo/hora, usa o médio</span></>}{s.stale && <> · <span style={{ color: "var(--warn)" }}>preço de consumível antigo</span></>}</small></td>
                 <td>{s.un}</td>
                 <td className="n">{inp("h")}</td><td className="n">{inp("eh")}</td><td className="n">{eur(s.eq)}</td><td className="n">{inp("cons")}</td>
-                {S.cfg.estrutura && <td className="n">{eur(s.h * ESTR)}</td>}
+                {S.cfg.estrutura && <td className="n">{eur(s.h * taxaEstruturaDe(S))}</td>}
                 <td className="n"><b>{eur(c)}</b></td><td className="n">{inp("preco")}</td><td className="n"><span className={"pill " + cls}>{pct(m)}</span></td>
               </tr>
             );
           })}
         </tbody>
       </table></div>
-      <p className="sub">Custo por unidade = horas × €/h do técnico + equipamento + consumíveis{S.cfg.estrutura ? " + horas × " + eur(ESTR) + " €/h de estrutura" : ""}. Todos os valores são de exemplo.</p>
+      <p className="sub">Custo por unidade = horas × €/h do técnico + equipamento + consumíveis{S.cfg.estrutura ? " + horas × " + eur(taxaEstruturaDe(S)) + " €/h de estrutura" : ""}. Todos os valores são de exemplo.</p>
     </>
   );
 }
@@ -1060,7 +1077,7 @@ function Definicoes({ S, run, repor }: Ctx) {
           <h3>Estrutura no custo <span>decisão em aberto</span></h3>
           <label className="row" style={{ justifyContent: "flex-start", gap: 8 }}>
             <input type="checkbox" id="cfg-estr" checked={S.cfg.estrutura} onChange={(e) => { const v = e.target.checked; run(() => { S.cfg.estrutura = v; }); }} />
-            Somar {eur(ESTR)} €/h de estrutura ao custo de cada serviço
+            Somar {eur(taxaEstruturaDe(S))} €/h de estrutura ao custo de cada serviço
           </label>
           <span className="sub">Pelo método BMG, a estrutura fica dentro da margem. Somá-la ao custo sem baixar a margem cobra-a duas vezes. Ligue e desligue para ver o efeito nos orçamentos.</span>
         </div>

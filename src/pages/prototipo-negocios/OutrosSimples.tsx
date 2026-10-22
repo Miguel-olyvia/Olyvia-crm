@@ -2,7 +2,7 @@
 import { ArrowRight, Minus, Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ESTR, eur, pct } from "./motor";
+import { eur, estruturaHora, pct } from "./motor";
 import type { Ctx } from "./pecas";
 import { CatalogoV1 } from "./CatalogoV1";
 import { DemolicaoV2 } from "./v2/DemolicaoV2";
@@ -74,7 +74,7 @@ export function DefinicoesSimples({ S, A, go, run, repor }: Ctx) {
       <div className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         <Contador rot="Margem mínima" v={S.cfg.min} onSet={(n) => run(() => { S.cfg.min = Math.min(n, S.cfg.alvo); })} />
         <Contador rot="Margem-alvo" v={S.cfg.alvo} onSet={(n) => run(() => { S.cfg.alvo = Math.max(n, S.cfg.min); })} />
-        <Interruptor on={S.cfg.estrutura} onClick={() => run(() => { S.cfg.estrutura = !S.cfg.estrutura; })} titulo={`Somar ${eur(ESTR)} €/h de estrutura ao custo`}
+        <Interruptor on={S.cfg.estrutura} onClick={() => run(() => { S.cfg.estrutura = !S.cfg.estrutura; })} titulo={`Somar ${eur(estruturaHora(S))} €/h de estrutura ao custo`}
           texto="Decisão em aberto. Pelo método BMG a estrutura fica dentro da margem: somá-la aqui cobra-a duas vezes." />
       </div>
       <p className="mt-2 text-[15px] text-muted-foreground">Abaixo do mínimo, a proposta só sai com aprovação da Direção.</p>

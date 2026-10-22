@@ -106,7 +106,7 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
     const vistos = new Set<string>();
     const out: { v: string; t: string; sub: string; valor: string }[] = [];
     for (const [sid, s] of Object.entries(S.svc)) { if (sid.startsWith("livre-")) continue; vistos.add(sid); out.push({ v: sid, t: s.n, sub: s.perfil, valor: `${eur(s.preco)} €/${s.un}` }); }
-    for (const c of CATALOGO_TODO) if (!vistos.has(c.id)) { const s = servicoDoCatalogo(c.id); out.push({ v: c.id, t: c.n, sub: c.cat, valor: s ? `${eur(s.preco)} €/${s.un}` : c.un }); }
+    for (const c of CATALOGO_TODO) if (!vistos.has(c.id)) { const s = servicoDoCatalogo(c.id, S); out.push({ v: c.id, t: c.n, sub: c.cat, valor: s ? `${eur(s.preco)} €/${s.un}` : c.un }); }
     return out;
   }, [S.svc]);
   if (!assinado || d.obra.plano?.estado === "concluída") return null;

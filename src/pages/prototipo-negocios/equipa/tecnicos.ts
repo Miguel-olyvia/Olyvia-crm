@@ -1,4 +1,6 @@
 // Os técnicos de obra do protótipo (22/10/2026): uma ficha por técnico (nome, ofício, custo/hora editável, férias, ligação à pessoa do RH).
+// · 22/10 (tarde): o ofício é um perfil do Catálogo (perfilId). O €/h de cada perfil, que entra no custo das receitas e do orçamento,
+//   é a média do custo/hora dos técnicos com esse perfil (v2/custosModelo.ts: horaPerfil).
 // · A ficha vive no Estado (S.tecnicos), na parte "global" da sincronização: o custo/hora mudado num aparelho chega aos outros.
 // · Os estados guardados de antes não têm o campo: garantirTecnicos() junta os seis técnicos de sempre (os mesmos ids, o custo/hora
 //   que estava em obraOps.ts: FICHA_TEC) sem mexer em mais nada.
@@ -16,28 +18,38 @@ export interface Tecnico {
 
 /** A ficha do técnico: o que o motor já usava (Tecnico) mais o custo/hora, o contacto e a pessoa do RH. */
 export interface FichaTecnico extends Tecnico {
-  /** €/h que a obra custa por cada hora deste técnico (o custo previsto e o real da obra usam-no). Só a Direção e as Operações o mudam. */
+  /** €/h que a obra custa por cada hora deste técnico. 22/10: não se escreve à mão: é o custo/hora calculado nos Custos do RH
+   *  (equipa/pontes.ts: custosDoRh), guardado aqui porque o RH não se sincroniza entre aparelhos. */
   custoHora: number;
+  /** 22/10: de onde vem o custo/hora (o cálculo do RH): o salário base, os encargos da empresa (%) e as horas do contrato por mês. */
+  custoRh?: { salario: number; encargosPct: number; horasMes: number };
+  /** 22/10: a pessoa no RH não tem dados de custo (sem retribuição ou vínculo): fica fora da média do ofício, com aviso. */
+  semCustoRh?: true;
   tel: string;
   /** Na empresa desde (ano). */
   desde: string;
   /** A pessoa do RH de exemplo que é este técnico (equipa/pontes.ts). */
   pessoaRhId?: string;
+  /** 22/10: o ofício pelo id do perfil do Catálogo (v2/custosModelo.ts: Custos.perfis). É o que liga o técnico às receitas: o €/h de
+   *  cada perfil é a média do custo/hora dos técnicos com esse perfil. `sk` fica com o nome do perfil (o que os ecrãs mostram). */
+  perfilId?: string;
 }
 
-/** Os ofícios dos técnicos (o mesmo que skDaTarefa devolve, preparacaoObra.ts). */
+/** Os ofícios dos técnicos de exemplo (os nomes dos perfis; a lista completa está nos perfis do Catálogo). */
 export const OFICIOS = ["Servente · demolição", "Canalizador", "Ladrilhador", "Montador"] as const;
+/** 22/10: o ofício antigo (sk, pelo nome) → o id do perfil do Catálogo: migra as fichas de antes de perfilId. */
+export const PERFIL_DO_SK: Readonly<Record<string, string>> = { "Servente · demolição": "servente", Canalizador: "canalizador", Ladrilhador: "ladrilhador", Montador: "montador" };
 /** O custo/hora quando o técnico não tem ficha (o de sempre). */
 export const CUSTO_HORA_OMISSAO = 16;
 
 const BASE: readonly FichaTecnico[] = [
-  { id: "js", n: "João Silva", sk: "Servente · demolição", ferias: [], custoHora: 14.2, tel: "912 418 330", desde: "2019", pessoaRhId: "p-tec-js" },
-  { id: "ra", n: "Rui Alves", sk: "Servente · demolição", ferias: [], custoHora: 14.2, tel: "913 552 071", desde: "2022", pessoaRhId: "p-tec-ra" },
-  { id: "ma", n: "Marco Antunes", sk: "Canalizador", ferias: [], custoHora: 18.5, tel: "936 120 447", desde: "2017", pessoaRhId: "p-tec-ma" },
+  { id: "js", n: "João Silva", sk: "Servente · demolição", perfilId: "servente", ferias: [], custoHora: 14.2, tel: "912 418 330", desde: "2019", pessoaRhId: "p-tec-js", custoRh: { salario: 1685, encargosPct: 25.25, horasMes: 173.3 } },
+  { id: "ra", n: "Rui Alves", sk: "Servente · demolição", perfilId: "servente", ferias: [], custoHora: 14.2, tel: "913 552 071", desde: "2022", pessoaRhId: "p-tec-ra", custoRh: { salario: 1685, encargosPct: 25.25, horasMes: 173.3 } },
+  { id: "ma", n: "Marco Antunes", sk: "Canalizador", perfilId: "canalizador", ferias: [], custoHora: 18.5, tel: "936 120 447", desde: "2017", pessoaRhId: "p-tec-ma", custoRh: { salario: 2195, encargosPct: 25.25, horasMes: 173.3 } },
   // férias de exemplo: no plano de exemplo, o 4.º dia; em datas reais, 21 a 23 de outubro
-  { id: "sf", n: "Sérgio Faria", sk: "Ladrilhador", ferias: [3], feriasDatas: ["2026-10-21", "2026-10-22", "2026-10-23"], custoHora: 17.8, tel: "961 734 205", desde: "2018", pessoaRhId: "p-tec-sf" },
-  { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", ferias: [], custoHora: 17.8, tel: "924 806 113", desde: "2021", pessoaRhId: "p-tec-hn" },
-  { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [], custoHora: 16.9, tel: "917 645 382", desde: "2020", pessoaRhId: "p-tec-pm" },
+  { id: "sf", n: "Sérgio Faria", sk: "Ladrilhador", perfilId: "ladrilhador", ferias: [3], feriasDatas: ["2026-10-21", "2026-10-22", "2026-10-23"], custoHora: 17.8, tel: "961 734 205", desde: "2018", pessoaRhId: "p-tec-sf", custoRh: { salario: 2112, encargosPct: 25.25, horasMes: 173.3 } },
+  { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", perfilId: "ladrilhador", ferias: [], custoHora: 17.8, tel: "924 806 113", desde: "2021", pessoaRhId: "p-tec-hn", custoRh: { salario: 2112, encargosPct: 25.25, horasMes: 173.3 } },
+  { id: "pm", n: "Paulo Mota", sk: "Montador", perfilId: "montador", ferias: [], custoHora: 16.9, tel: "917 645 382", desde: "2020", pessoaRhId: "p-tec-pm", custoRh: { salario: 2005, encargosPct: 25.25, horasMes: 173.3 } },
 ];
 
 /** Os seis técnicos de exemplo (uma cópia nova de cada vez). */
@@ -60,12 +72,22 @@ function completar(t: FichaTecnico): boolean {
   const b = BASE.find((x) => x.id === t.id);
   let mudou = false;
   if (!numero(t.custoHora) || t.custoHora <= 0) { t.custoHora = b?.custoHora ?? CUSTO_HORA_OMISSAO; mudou = true; }
+  // 22/10: o custo/hora escrito à mão (antes do cálculo do RH) passa ao do RH das pessoas de exemplo
+  if (!t.custoRh && !t.semCustoRh && b?.custoRh) { t.custoHora = b.custoHora; t.custoRh = { ...b.custoRh }; mudou = true; }
   if (!Array.isArray(t.ferias)) { t.ferias = [...(b?.ferias ?? [])]; mudou = true; }
   if (typeof t.tel !== "string") { t.tel = b?.tel ?? "—"; mudou = true; }
   if (typeof t.desde !== "string") { t.desde = b?.desde ?? ""; mudou = true; }
   if (t.pessoaRhId === undefined && b?.pessoaRhId) { t.pessoaRhId = b.pessoaRhId; mudou = true; }
+  // 22/10: as fichas de antes do perfil do Catálogo ligam-se pelo ofício que tinham (o nome); um ofício desconhecido fica sem perfil
+  if (t.perfilId === undefined && PERFIL_DO_SK[t.sk]) { t.perfilId = PERFIL_DO_SK[t.sk]; mudou = true; }
   return mudou;
 }
+
+/** O id do perfil do Catálogo de um técnico (o da ficha; nas de antes, pelo ofício); "" sem perfil. */
+export const perfilDoTecnico = (t: Pick<FichaTecnico, "sk"> & { perfilId?: string }): string => t.perfilId ?? PERFIL_DO_SK[t.sk] ?? "";
+/** Os técnicos (do registo vivo, ou de `L`) com o perfil `perfilId`. */
+export const tecnicosDoPerfil = (perfilId: string, L: readonly FichaTecnico[] = TECNICOS): FichaTecnico[] =>
+  perfilId ? L.filter((t) => perfilDoTecnico(t) === perfilId) : [];
 
 /**
  * Garante a ficha dos técnicos no Estado e liga-lhe o registo vivo. Um estado sem `tecnicos` (guardado antes de 22/10) fica com os seis

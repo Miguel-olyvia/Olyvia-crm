@@ -15,11 +15,14 @@ import { lerCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import type { EstadoRh, FichaRh } from "@/components/rh-exemplo/dados/tiposLoja";
 import { custoPorHora, custoRepartido14em12, encargosDaEmpresa, salarioMensal, taxaEfetiva } from "@/components/rh-exemplo/lib/custo";
 import { TECNICOS, type FichaTecnico } from "./tecnicos";
+import { derivarServicos } from "../v2/custosModelo";
+import type { Estado } from "../motor";
 
 /** O cargo do RH dos técnicos de obra. */
 export const CARGO_TECNICO = { id: "cg-tecnico-obra", nome: "Técnico de obra", horas: 40 } as const;
-/** O salário base de exemplo de cada técnico (€/mês). */
-const SALARIO: Record<string, number> = { js: 920, ra: 920, ma: 1350, sf: 1250, hn: 1220, pm: 1150 };
+/** O salário base de exemplo de cada técnico (€/mês). 22/10: escolhido para o custo/hora calculado nos Custos do RH (sugestaoCustoHora)
+ *  dar os valores de antes: 1.685 € → 14,20 €/h, 2.195 € → 18,50 €/h, 2.112 € → 17,80 €/h, 2.005 € → 16,90 €/h (25,25 % de encargos, 40 h). */
+export const SALARIO: Readonly<Record<string, number>> = { js: 1685, ra: 1685, ma: 2195, sf: 2112, hn: 2112, pm: 2005 };
 const SALARIO_CARGO = 1100;
 
 /** A pessoa do RH de um técnico (a da ficha, ou a de sempre: "p-tec-<id>"). */
@@ -86,6 +89,39 @@ export function sugestaoCustoHora(f: FichaRh | null | undefined): SugestaoCustoH
   const custo = custoRepartido14em12(salario, encargosDaEmpresa(media, taxa, definicoes.seguro));
   const valor = custoPorHora(custo, horasMes);
   return valor === null ? null : { valor, salario, encargosPct: taxa + definicoes.seguro, horasMes: Math.round(horasMes * 10) / 10 };
+}
+
+/* ------------------------------------------------------------------ o custo/hora do técnico vem do RH (22/10) */
+/**
+ * 22/10: o custo/hora de cada técnico deixa de se escrever à mão: é o que os Custos do RH calculam para a pessoa (sugestaoCustoHora, com as
+ * funções de rh-exemplo/lib/custo.ts). A medida escolhida é o custo mensal repartido 14/12 (salário × 14 ÷ 12 + encargos da empresa) a dividir
+ * pelas horas do contrato num mês médio (horas semanais × 52 ÷ 12): é estável de mês para mês (o custoDoMes.porHoraPrevista muda com os dias
+ * úteis de cada mês e não reparte os subsídios), por isso serve para orçamentar.
+ * O store do RH só vive em memória e não se sincroniza: o valor calculado guarda-se na ficha do técnico (S.tecnicos, parte "global"), que é o
+ * que o orçamento e a obra leem em todos os aparelhos. Uma retribuição mudada no RH chega aos outros aparelhos por aí (o RH deles não muda).
+ * Atualiza só as fichas cuja pessoa está no RH; sem dados de custo no RH, marca-a (semCustoRh: fora da média do ofício, com aviso).
+ * Devolve se mudou alguma coisa.
+ */
+export function custosDoRh(L: FichaTecnico[], e: EstadoRh = lerEstado()): boolean {
+  let mudou = false;
+  for (const t of L) {
+    const f = e.fichas[pessoaRhDe(t)];
+    if (!f) continue;
+    const sug = sugestaoCustoHora(f);
+    if (!sug) { if (!t.semCustoRh) { t.semCustoRh = true; mudou = true; } continue; }
+    const rh = { salario: sug.salario, encargosPct: sug.encargosPct, horasMes: sug.horasMes };
+    if (t.semCustoRh || t.custoHora !== sug.valor || JSON.stringify(t.custoRh) !== JSON.stringify(rh)) {
+      delete t.semCustoRh; t.custoHora = sug.valor; t.custoRh = rh; mudou = true;
+    }
+  }
+  return mudou;
+}
+/** Leva o custo/hora calculado no RH à ficha dos técnicos do Estado e, se mudou, ao €/h dos ofícios e dos serviços em uso (orçamentos novos).
+ *  Os orçamentos já enviados guardam o custo na linha e não mudam. */
+export function atualizarCustosDoRh(S: Estado): boolean {
+  if (!S.tecnicos || !custosDoRh(S.tecnicos)) return false;
+  derivarServicos(S);
+  return true;
 }
 
 /* ------------------------------------------------------------------ as ausências */

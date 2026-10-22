@@ -6,7 +6,7 @@
 // · O resumo ("6 serviços · 3 produtos · 1.240 € estimado") e o que falta, em palavras.
 import { CATALOGO_TODO, normal, type LinhaCat } from "./catalogo";
 import { juntarDivisoes } from "./campos";
-import { LINHAS, garantirServico, r2, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
+import { LINHAS, r2, servicoDoCatalogo, servicosVisita, type Estado, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import { caminho, oficioDe, oficios, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
 import { ativosDoPacote, precoProduto, qtdSugerida, servicosTrazidos, type Obrigacao } from "./produtosVisita";
 import { iconeDoServico, ilustracaoDoProduto, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
@@ -76,7 +76,7 @@ export interface TileServico {
 
 /** Só para mostrar: um serviço do Catálogo ainda sem ficha em S.svc (não grava nada nem copia o estado). */
 export function servicoLeitura(S: Estado, sid: SvcId): Servico | null {
-  return S.svc[sid] ?? garantirServico({ svc: {} } as unknown as Estado, sid);
+  return S.svc[sid] ?? servicoDoCatalogo(sid, S);
 }
 
 /** A quantidade sugerida ao juntar um serviço do Catálogo: das medidas quando faz sentido, senão a habitual nos orçamentos. */

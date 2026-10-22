@@ -57,7 +57,9 @@ export function Retirar({ rotulo, onClick, disabled }: { rotulo: string; onClick
 /** O ícone de cada alerta (a cor fica só no ícone). */
 export const ICONE_ALERTA: Record<IdAlerta, { I: LucideIcon; cor: string }> = {
   "sem-receita": { I: PackageX, cor: "text-warning" },
-  "sem-custo-hora": { I: UserX, cor: "text-warning" },
+  "sem-custo-hora": { I: UserX, cor: "text-destructive" },
+  "sem-tecnicos": { I: UserX, cor: "text-warning" },
+  "subempreitada": { I: PackageX, cor: "text-warning" },
   "desatualizado": { I: Clock, cor: "text-warning" },
   "abaixo-custo": { I: CircleAlert, cor: "text-destructive" },
   "abaixo-minimo": { I: TriangleAlert, cor: "text-destructive" },

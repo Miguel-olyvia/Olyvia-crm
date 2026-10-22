@@ -13,7 +13,7 @@ import {
 import type { Produto } from "./v2/catalogoModelo";
 import { volumesDasLinhas } from "./entulhoPadrao";
 import { faltaParaEncerrar } from "./encerrarObra";
-import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ResultadoDem } from "./entulho";
+import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ParDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import {
@@ -31,10 +31,19 @@ import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./invent
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
-import { OFICIOS, TECNICOS, garantirTecnicos, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
+import { TECNICOS, garantirTecnicos, perfilDoTecnico, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
 import { contaCliente, mostrarAcesso, type ContaPortal, type DocPortal } from "./acessosPortal";
+// 22/10: os custos (perfis, €/h dos técnicos, estrutura, receitas) vivem no Estado (S.custos). Só se usam dentro de funções (o
+// custosModelo também importa o motor: a ordem de carga não importa).
+import {
+  TEXTO_SUBEMPREITADA, custoReceita, custos0, custosDe, derivarServicos, garantirCustos, horaPerfil, perfilIdDe, perfilPrincipal, precoReceita,
+  receitaDe, subempreitadaSemCusto, taxaEstruturaDe, textoSemCustoHora, type Custos,
+} from "./v2/custosModelo";
 
-export const ESTR = 5.06; // €/h de estrutura (exemplo)
+/** O €/h de estrutura de arranque (3.400 € ÷ 672 h). 22/10: o que conta é o dos custos do Estado (taxaEstruturaDe / estruturaHora). */
+export const ESTR = 5.06;
+/** 22/10: o €/h de estrutura do Estado (a única taxa: v2/custosModelo.ts taxaEstrutura). */
+export const estruturaHora = (S: Estado): number => taxaEstruturaDe(S);
 
 export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes" | "juridico" | "tecnico";
 export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
@@ -62,20 +71,24 @@ export interface Servico {
   cons: number;
   preco: number;
   perfil: string;
+  /** 22/10: o perfil do Catálogo pelo id (o principal da receita): liga o serviço ao €/h dos técnicos e ao técnico do plano. */
+  perfilId?: string;
   semCusto?: boolean;
   stale?: string | null;
 }
 
+/** Os serviços do pacote. 22/10: o `eh` (€/h) não é um valor fixo: o seed() e o arranque derivam-no da receita, com o €/h de cada
+ *  perfil (a média dos técnicos do RH; v2/custosModelo.ts horaPerfil). O 0 aqui é só o lugar. */
 const SVC0: Record<string, Servico> = {
-  demol: { n: "Demolição e entulho", un: "m²", h: 0.5, eh: 25, eq: 0.33, cons: 1.2, preco: 25.48, perfil: "Servente · demolição" },
-  canal: { n: "Canalização", un: "pt", h: 2, eh: 25, eq: 0.34, cons: 8.47, preco: 106.05, perfil: "Canalizador" },
-  revest: { n: "Revestimento de parede", un: "m²", h: 0.75, eh: 25, eq: 0, cons: 1.01, preco: 26.0, perfil: "Ladrilhador", semCusto: true, stale: "O cimento-cola tem o preço de há 8 meses." },
-  pav: { n: "Pavimento cerâmico", un: "m²", h: 0.85, eh: 25, eq: 0, cons: 0.66, preco: 40.32, perfil: "Ladrilhador" },
-  loucas: { n: "Montagem de louças", un: "pç", h: 1.35, eh: 25, eq: 0, cons: 1.21, preco: 64.29, perfil: "Canalizador" },
-  moveis: { n: "Montagem de móveis", un: "mód", h: 2.5, eh: 25, eq: 0, cons: 2, preco: 118.7, perfil: "Montador" },
-  eletr: { n: "Pontos elétricos", un: "pt", h: 1.5, eh: 25, eq: 0.2, cons: 6, preco: 78, perfil: "Eletricista" },
-  teto: { n: "Teto falso em pladur", un: "m²", h: 0.9, eh: 25, eq: 0.3, cons: 9.8, preco: 58, perfil: "Montador" },
-  pint: { n: "Pintura de tetos e paredes", un: "m²", h: 0.3, eh: 25, eq: 0, cons: 2.1, preco: 17.5, perfil: "Pintor" },
+  demol: { n: "Demolição e entulho", un: "m²", h: 0.5, eh: 0, eq: 0.33, cons: 1.2, preco: 25.48, perfil: "Servente · demolição", perfilId: "servente" },
+  canal: { n: "Canalização", un: "pt", h: 2, eh: 0, eq: 0.34, cons: 8.47, preco: 106.05, perfil: "Canalizador", perfilId: "canalizador" },
+  revest: { n: "Revestimento de parede", un: "m²", h: 0.75, eh: 0, eq: 0, cons: 1.01, preco: 26.0, perfil: "Ladrilhador", perfilId: "ladrilhador" },
+  pav: { n: "Pavimento cerâmico", un: "m²", h: 0.85, eh: 0, eq: 0, cons: 0.66, preco: 40.32, perfil: "Ladrilhador", perfilId: "ladrilhador" },
+  loucas: { n: "Montagem de louças", un: "pç", h: 1.35, eh: 0, eq: 0, cons: 1.21, preco: 64.29, perfil: "Canalizador", perfilId: "canalizador" },
+  moveis: { n: "Montagem de móveis", un: "mód", h: 2.5, eh: 0, eq: 0, cons: 2, preco: 118.7, perfil: "Montador", perfilId: "montador" },
+  eletr: { n: "Pontos elétricos", un: "pt", h: 1.5, eh: 0, eq: 0.2, cons: 6, preco: 78, perfil: "Eletricista", perfilId: "eletricista" },
+  teto: { n: "Teto falso em pladur", un: "m²", h: 0.9, eh: 0, eq: 0.3, cons: 9.8, preco: 58, perfil: "Montador", perfilId: "montador" },
+  pint: { n: "Pintura de tetos e paredes", un: "m²", h: 0.3, eh: 0, eq: 0, cons: 2.1, preco: 17.5, perfil: "Pintor", perfilId: "pintor" },
 };
 
 export type MedKey = "pav" | "par" | "pts" | "pcs";
@@ -246,6 +259,7 @@ export const MOTIVOS_DA_VISITA: readonly string[] = ["Outros materiais", "Juntar
 /** O número da proposta que está em cima da mesa (1 se nunca se refez). */
 export const versaoAtual = (o: Orcamento) => (o.versoes?.length ?? 0) + 1;
 export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null; /** a fase da obra (planos do orçamento) */ fase?: number;
+  /** 22/10: o ofício pelo id do perfil do Catálogo (o técnico escolhe-se pelo perfil; sem técnicos do perfil, tec fica null: por atribuir) */ perfilId?: string;
   /** 15/10: uma nota das Operações para a equipa (ex.: "levar o andaime") */ nota?: string;
   /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa;
   /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number;
@@ -366,6 +380,9 @@ export interface Estado {
   fichas?: Record<string, Record<string, string>>;
   /** 22/10: a ficha dos técnicos de obra (equipa/tecnicos.ts): custo/hora, ofício e férias. Os estados de antes não a têm (garantirTecnicos). */
   tecnicos?: FichaTecnico[];
+  /** 22/10: os custos do Catálogo (perfis, parâmetros, equipamentos, estrutura, receitas mexidas; v2/custosModelo.ts). Antes viviam só em
+   *  memória (perdiam-se ao recarregar); os estados de antes não os têm (garantirCustos). */
+  custos?: Custos;
   /** 22/10: as contas dos portais (cliente e fornecedor), pelo email em minúsculas: o login dos portais (acessosPortal.ts). Os Estados antigos não a têm. */
   acessos?: Record<string, ContaPortal>;
   deals: Negocio[];
@@ -399,6 +416,7 @@ export function seed(): Estado {
     stock: { cp: 12, pv: 0, san: 0, base: 3, cim: 40, mov: 0, banc: 2 },
     seq: 1046, ft: 418, ef: 77, rc: 301,
     tecnicos: tecnicosIniciais(),
+    custos: custos0(),
     clientes: [
       { nome: "Tiago Almeida", tel: "913 220 410", local: "Cozinha · Almada", desde: "08/10", deal: 1027 },
       { nome: "Marta Lima", tel: "916 004 552", local: "WC · Odivelas", desde: "01/10", deal: 1022 },
@@ -407,6 +425,8 @@ export function seed(): Estado {
   };
   // os planos de exemplo atribuem os técnicos da ficha deste Estado
   usarTecnicos(S.tecnicos!);
+  // 22/10: o €/h dos serviços vem das receitas, com a média dos técnicos de cada perfil (antes, 25 €/h fixos)
+  derivarServicos(S);
   const D = (o: NovoNegocio) => S.deals.push(novoDeal(o));
   D({ id: 1043, nome: "Ana Martins", tel: "912 000 111", linha: "wc", servico: "Remodelação WC suite", local: "Rua das Flores 12, Sintra", origem: "site", quando: "30/09 21:40",
     f: { pedido: "Quero remodelar a casa de banho da suite." }, hist: [{ t: "Pedido pelo site", q: "30/09 21:40", k: "a" }] });
@@ -687,7 +707,7 @@ export const pct = (x: number) => (x * 100).toFixed(1).replace(".", ",") + "%";
 export const nfmt = (x: number) => String(r2(x)).replace(".", ",");
 
 export function custoUn(s: Servico, S: Estado): number {
-  return s.h * s.eh + s.eq + s.cons + (S.cfg.estrutura ? s.h * ESTR : 0);
+  return s.h * s.eh + s.eq + s.cons + (S.cfg.estrutura ? s.h * estruturaHora(S) : 0);
 }
 /** O custo por unidade de uma linha de serviço (o do Catálogo). 15/10: o cliente só fornece produtos, por isso a receita fica inteira. */
 export const custoUnLinha = (s: Servico, S: Estado) => r2(custoUn(s, S));
@@ -776,11 +796,24 @@ export function ligarDemolicao(o: Orcamento, antes?: Orcamento["demolicao"]) {
   o.linhas = o.linhas.filter((l) => !(l.t === "svc" && mapa[l.sid]));
   o.demolicao = { itens: [...itens, ...(antes?.itens ?? []).filter((x) => !x.de)], aj: { ...(antes?.aj ?? {}) } };
 }
+/** 22/10: a equipa da demolição (entulho.ts: os tempos dos artigos são horas de equipa de 2 pessoas). */
+export const EQUIPA_DEMOLICAO = 2;
+/** 22/10: os parâmetros da demolição com o €/h da equipa vindo do RH: 2 × o €/h do perfil Servente (ou, sem ele, do Ajudante).
+ *  Sem nenhum dos dois com €/h, fica o custo/hora dos parâmetros (o da especificação). */
+export function parDemolicao(S: Estado, P: ParDem): ParDem & { perfilId?: string; doRh?: string } {
+  const C = custosDe(S);
+  for (const id of ["servente", "ajudante"]) {
+    if (!C.perfis.some((x) => x.id === id)) continue;
+    const h = horaPerfil(C, id);
+    if (h.eh != null) return { ...P, custoHora: r2(EQUIPA_DEMOLICAO * h.eh), perfilId: id, doRh: `${EQUIPA_DEMOLICAO} × ${eur(h.eh)} €/h (${h.n})` };
+  }
+  return P;
+}
 /** Refaz a conta e a linha da demolição (só com a demolição ligada e o Catálogo ligado; antes de enviar). */
 export function sincronizarDemolicao(d: Negocio, _S: Estado) {
   const o = d.orc, K = catalogoLigado();
   if (!o || !K || o.enviada) return;
-  const P = K.parDem ?? PAR_DEM0;
+  const P = parDemolicao(_S, K.parDem ?? PAR_DEM0);
   // o entulho dos serviços (entulhoPadrao.ts): sem a demolição ligada, liga-se sozinha (menos se a desligaram à mão)
   if (!o.demolicao && !o.semDemolicao && volumesDasLinhas(o.linhas, K, d.visita, P).length) ligarDemolicao(o);
   if (!o.demolicao) return;
@@ -881,7 +914,7 @@ export function partes(d: Negocio, S: Estado) {
     if (l.t === "mat") { o.mat += l.custo; continue; }
     const s = S.svc[l.sid];
     o.mo += s.h * s.eh * l.q; o.eq += s.eq * l.q; o.cons += s.cons * l.q;
-    if (S.cfg.estrutura) o.estr += s.h * ESTR * l.q;
+    if (S.cfg.estrutura) o.estr += s.h * estruturaHora(S) * l.q;
   }
   o.mo += ajustePrazo(d, S);
   return o;
@@ -895,9 +928,15 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
     if (l.t === "mat" && o.precosMan?.[l.d] != null && l.custo > 0 && l.preco < l.custo) A.push({ k: "x", fix: true, t: `Preço abaixo do custo em ${l.d}`, d: `${eur(l.preco)} € não cobre o custo de ${eur(l.custo)} €. Não se envia assim.`, i, sug: r2(l.custo / (1 - alvo)), aprov: false });
     if (l.t !== "svc") return;
     const s = S.svc[l.sid], x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
-    if (x.preco < x.custo) A.push({ k: "x", fix: true, t: `Preço abaixo do custo em ${s.n}`, d: `${eur(l.pu)} €/${s.un} não cobre o custo de ${eur(l.cu)} €/${s.un}. Não se envia assim.`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
+    // 22/10: uma linha a 0 € de custo e de preço (subempreitada sem custo) não tem margem: o aviso dela vem a seguir
+    if (x.preco === 0 && x.custo === 0) { /* sem margem para avaliar */ }
+    else if (x.preco < x.custo) A.push({ k: "x", fix: true, t: `Preço abaixo do custo em ${s.n}`, d: `${eur(l.pu)} €/${s.un} não cobre o custo de ${eur(l.cu)} €/${s.un}. Não se envia assim.`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
     else if (m < min) A.push({ k: "x", fix: true, t: `Margem abaixo do mínimo em ${s.n}`, d: `${pct(m)} nesta linha, com um mínimo de ${S.cfg.min}%. O preço de tabela (${eur(l.pu)} €/${s.un}) mal cobre o custo do Catálogo.`, i, sug: r2(l.cu / (1 - alvo)), aprov: true });
-    if (s.semCusto && !vistos["sc" + l.sid]) A.push({ k: "w", t: `Técnico sem custo/hora (${s.perfil.toLowerCase()})`, d: `Foi usado o custo médio do perfil (${eur(s.eh)} €/h). Define-se no Catálogo.`, go: "catalogo", key: "sc" + l.sid });
+    // 22/10: um ofício sem €/h (sem técnicos no RH e sem salário) não usa a média dos outros: a mão de obra conta 0 € e não se envia assim
+    if (s.semCusto) A.push({ k: "x", t: `Ofício sem custo/hora em ${s.n}`, d: textoSemCustoHora([s.perfil]), i, aprov: false, go: "catalogo", key: "sc" + l.sid });
+    // 22/10: a subempreitada sem custo (receita vazia, linha a 0 €): só o aviso, para pôr o custo do subempreiteiro
+    if (l.cu === 0 && !vistos["se" + l.sid] && subempreitadaSemCusto(receitaDe(custosDe(S), l.sid, s, S.cfg.alvo) ?? { origem: "estimada", mo: [], equip: [], cons: [] }))
+      A.push({ k: "w", t: `Subempreitada sem custo em ${s.n}`, d: TEXTO_SUBEMPREITADA, go: "catalogo", key: "se" + l.sid });
     if (s.stale && !vistos["st" + l.sid]) A.push({ k: "w", t: "Preço desatualizado", d: s.stale, key: "st" + l.sid });
   });
   // a demolição: a ocupação dos big bags ou contentores (cheios de mais, ou o último contentor quase vazio)
@@ -984,7 +1023,7 @@ export function realObra(d: Negocio, S: Estado): Real {
       if (!s) continue;
       const hp = s.h * l.q, h2 = hp * (REAL[sid] || 1);
       hr += h2;
-      extra += (h2 - hp) * (s.eh + (S.cfg.estrutura ? ESTR : 0));
+      extra += (h2 - hp) * (s.eh + (S.cfg.estrutura ? estruturaHora(S) : 0));
     }
     return { nome: t.nome, prev: t.h, real: r2(hr) };
   });
@@ -997,19 +1036,31 @@ export const fatorReal = (sid: SvcId) => REAL[sid] ?? 1;
 /** Um serviço do Catálogo passa a existir em S.svc quando se junta pela primeira vez. */
 export function garantirServico(S: Estado, sid: SvcId): Servico | null {
   if (S.svc[sid]) return S.svc[sid];
-  const s = servicoDoCatalogo(sid);
+  const s = servicoDoCatalogo(sid, S);
   if (s) S.svc[sid] = s;
   return s;
 }
-/** O serviço como entra em uso, sem mexer no estado (21/10: a pré-visualização da adenda mostra o preço que o cliente vai receber). */
-export function servicoDoCatalogo(sid: SvcId): Servico | null {
+/** O serviço como entra em uso, sem mexer no estado (21/10: a pré-visualização da adenda mostra o preço que o cliente vai receber).
+ *  22/10: entra com a receita de agora (custosDe(S): as receitas mexidas no Catálogo e o €/h de cada perfil, a média dos técnicos do RH),
+ *  e não com o resumo fixo da Mudelar nem com 25 €/h inventados. */
+export function servicoDoCatalogo(sid: SvcId, S: Estado): Servico | null {
   const c = itemCatalogo(sid);
   if (!c) return null;
-  // os serviços novos do catálogo da Mudelar (14/10) entram com a receita deles e o PVP real
-  if (c.rs) return { n: c.n, un: c.un, h: c.rs.h, eh: c.rs.eh, eq: c.rs.eq, cons: c.rs.cons, preco: c.pvp ?? 0, perfil: c.cat };
-  const h = r2(c.hu + c.hf / Math.max(1, c.qm)); // as horas fixas repartidas pela quantidade habitual
-  const custo = h * (25 + ESTR);
-  return { n: c.n, un: c.un, h, eh: 25, eq: 0, cons: 0, preco: r2(custo / (1 - 0.35)), perfil: c.cat };
+  const C = custosDe(S);
+  const rec = receitaDe(C, sid, null, S.cfg.alvo);
+  if (!rec) return null;
+  const k = custoReceita(rec, C, false);
+  const pp = perfilPrincipal(rec);
+  return {
+    n: c.n, un: c.un, h: r2(k.h), eh: r2(k.eh), eq: r2(k.eq), cons: r2(k.cons),
+    preco: r2(precoReceita(rec, custoReceita(rec, C, S.cfg.estrutura).total)), perfil: c.cat,
+    ...(pp ? { perfilId: pp } : {}), ...(k.semCustoHora.length ? { semCusto: true } : {}),
+  };
+}
+/** 22/10: o €/h de um perfil escolhido pelo nome (linhas livres de adendas e imprevistos): a média dos técnicos do RH. */
+export function horaDoPerfil(S: Estado, nome: string): { perfilId: string; eh: number; semCusto: boolean } {
+  const C = custosDe(S), id = perfilIdDe(C, { perfil: nome }), h = horaPerfil(C, id);
+  return { perfilId: id, eh: r2(h.eh ?? 0), semCusto: h.fonte === "sem" };
 }
 
 /* ------------------------------------------------------------------ próximo passo */
@@ -1260,6 +1311,8 @@ function criarCliente(S: Estado, d: Negocio) {
 export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) {
   // 22/10: os técnicos (TECS) passam a ser os da ficha deste Estado; um estado de antes fica com os seis de sempre
   garantirTecnicos(S);
+  // 22/10: e os custos (um estado de antes fica com os de arranque)
+  garantirCustos(S);
   const deal = (id: number) => S.deals.find((d) => d.id === id)!;
   /** 19/10: a ação pede a permissão ao papel atual (permissoes.ts); sem ela, avisa e não faz nada. Está aqui (e não só nos ecrãs) porque há
    *  ecrãs que chamam a ação do passo sem olhar para o papel. */
@@ -1354,8 +1407,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     const linhas = itens.filter((x) => Number.isFinite(x.q) && x.q > 0).map((x) => linhaAdenda(S, x.sid, r2(x.q))).filter((x): x is NonNullable<typeof x> => !!x);
     livres.filter((x) => x.n.trim() && x.h > 0).forEach((x, j) => {
       const sid = `livre-${d.id}-${k}-${j + 1}`, cons = r2(x.mats.reduce((a, m) => a + (m.preco ?? 0) * m.q, 0));
-      S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: 25, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil };
-      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, livre: true, mats: x.mats.map((m) => ({ ...m })) });
+      // 22/10: o €/h é o do perfil escolhido (a média dos técnicos dele no RH), não 25 €/h fixos
+      const hp = horaDoPerfil(S, x.perfil);
+      S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: hp.eh, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), ...(hp.semCusto ? { semCusto: true } : {}) };
+      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), livre: true, mats: x.mats.map((m) => ({ ...m })) });
     });
     return linhas;
   };
@@ -2164,22 +2219,24 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** O técnico escolhe quem é no Hoje dele. */
     souTec(tec: string) { if (TECS.some((x) => x.id === tec)) S.tec = tec; },
-    /** 22/10: a ficha do técnico (bloco "Obra" na ficha da pessoa, RH › Pessoas): o custo/hora (€/h, entra no custo previsto e real das obras), o ofício e as férias
-     *  (datas). As tarefas já atribuídas não mudam de técnico. Só a Direção e as Operações (equipa.edit). */
-    editarTecnico(id: string, m: { custoHora?: number; sk?: string; feriasDatas?: string[] }) {
+    /** 22/10: a ficha do técnico (bloco "Obra" na ficha da pessoa, RH › Pessoas): o ofício (o perfil do Catálogo) e as férias (datas).
+     *  O custo/hora não se muda aqui: é o calculado nos Custos do RH (equipa/pontes.ts: atualizarCustosDoRh). As tarefas já atribuídas não mudam
+     *  de técnico. Só a Direção e as Operações (equipa.edit). */
+    editarTecnico(id: string, m: { sk?: string; perfilId?: string; feriasDatas?: string[] }) {
       if (!exigePerm("equipa.edit")) return;
       garantirTecnicos(S);
       const t = S.tecnicos!.find((x) => x.id === id);
       if (!t) return;
+      const C = custosDe(S);
       const feito: string[] = [];
-      if (m.custoHora !== undefined) {
-        const v = r2(m.custoHora);
-        if (!Number.isFinite(v) || v <= 0 || v > 200) { avisar({ msg: "O custo por hora não foi mudado", sub: "Tem de ser um valor entre 0 e 200 €/h.", kind: "bad" }); return; }
-        if (v !== t.custoHora) { t.custoHora = v; feito.push(`custo/hora ${eur(v)} €/h`); }
-      }
-      if (m.sk !== undefined && m.sk !== t.sk) {
-        if (!(OFICIOS as readonly string[]).includes(m.sk)) { avisar({ msg: "O ofício não foi mudado", sub: "Escolha um dos ofícios da lista.", kind: "bad" }); return; }
-        t.sk = m.sk; feito.push(`ofício ${m.sk}`);
+      let custo = false;
+      // 22/10: o ofício é um perfil do Catálogo (pelo id); `sk` (o nome antigo) ainda se aceita e passa ao perfil com esse nome
+      let pid = m.perfilId;
+      if (pid === undefined && m.sk !== undefined) pid = C.perfis.find((p) => p.n === m.sk)?.id ?? "";
+      if (pid !== undefined && pid !== perfilDoTecnico(t)) {
+        const p = C.perfis.find((x) => x.id === pid);
+        if (!p) { avisar({ msg: "O ofício não foi mudado", sub: "Escolha um dos ofícios da lista.", kind: "bad" }); return; }
+        t.perfilId = p.id; t.sk = p.n; feito.push(`ofício ${p.n}`); custo = true;
       }
       if (m.feriasDatas !== undefined) {
         const L = [...new Set(m.feriasDatas.filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort();
@@ -2191,6 +2248,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
         }
       }
       usarTecnicos(S.tecnicos!);
+      // 22/10: o perfil mexe no €/h dos ofícios (a média dos técnicos): os serviços em uso acompanham. Os orçamentos enviados não.
+      if (custo) derivarServicos(S);
       if (feito.length) avisar({ msg: `Ficha de ${t.n} atualizada`, sub: feito.join(" · "), kind: "ok" });
     },
     /** O técnico marca (ou desmarca) um passo das instruções; a tarefa começa com o primeiro. */

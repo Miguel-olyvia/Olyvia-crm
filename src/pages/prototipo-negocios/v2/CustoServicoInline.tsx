@@ -3,7 +3,7 @@
 // perfis (custosModelo.ts). O CustoServico antigo (modal) fica para a Atual.
 import { Lock, TriangleAlert } from "lucide-react";
 import { eur, nfmt, pct, type Estado, type Servico, type SvcId } from "../motor";
-import { anoPerfil, custoHoraPerfil, custoReceita, margemSobrePreco, mediaHora, minimoServico, precoReceita, receitaDe, type Custos } from "./custosModelo";
+import { anoPerfil, custoReceita, horaPerfil, margemSobrePreco, minimoServico, origemHora, precoReceita, receitaDe, type Custos } from "./custosModelo";
 
 /** Barras cinzentas (sem cor): a parte de cada custo, do mais escuro ao mais claro. */
 const TONS = ["bg-foreground/75", "bg-foreground/50", "bg-foreground/30", "bg-foreground/15"];
@@ -54,8 +54,9 @@ export function CustoServicoInline({ S, C, sid, s, q, pu }: { S: Estado; C: Cust
           <p className="text-[15px] font-medium">De onde vem o custo/hora</p>
           <ul className="mt-1 space-y-2 text-[15px] text-muted-foreground">
             {perfis.map((p) => {
-              const eh = custoHoraPerfil(p, C.par), a = anoPerfil(p, C.par);
-              if (eh == null) return <li key={p.id}>{p.n}: sem salário no RH; usa a média dos perfis ({eur(mediaHora(C))} €/h).</li>;
+              const hp = horaPerfil(C, p.id), eh = hp.eh, a = anoPerfil(p, C.par);
+              if (eh == null) return <li key={p.id}>{p.n}: sem técnicos no RH nem salário no perfil; a mão de obra conta 0 €.</li>;
+              if (hp.fonte === "rh") return <li key={p.id}><span className="text-foreground">{p.n}: {eur(eh)} €/h</span> · {origemHora(hp)}: {hp.tecnicos.map((t) => `${t.n} ${eur(t.custoHora)} €/h`).join(", ")}.</li>;
               return (
                 <li key={p.id}>
                   <span className="text-foreground">{p.n}: {eur(eh)} €/h</span>

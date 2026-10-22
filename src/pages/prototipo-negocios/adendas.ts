@@ -7,14 +7,16 @@
 // o contrato da adenda, gerado pelo comercial (com a revisão das cláusulas pelo Jurídico, se o cliente pedir) → assinada (CMD/SMS) →
 // faturas por parcela (as mesmas parcelas do contrato) → pagamento validado. A 1.ª parcela paga emite a encomenda dos materiais.
 // IVA: a mão de obra (os serviços) a 6% e os materiais (os escolhidos nas linhas livres) a 23%, como no orçamento.
-import { TECS, alertas, bloqueado, custoUnLinha, diaDeFerias, garantirServico, servicoDoCatalogo, r2, tot, totaisIva, IVA_MAT, IVA_MO,
+import { TECS, alertas, bloqueado, custoUnLinha, garantirServico, horaDoPerfil, servicoDoCatalogo, r2, tot, totaisIva, IVA_MAT, IVA_MO,
   type Alerta, type Assinatura, type Estado, type LinhaOrc, type MatTarefa, type Negocio, type Orcamento, type Plano, type Tarefa } from "./motor";
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
-import { skDaTarefa } from "./preparacaoObra";
+import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
+import { perfilDoTecnico } from "./equipa/tecnicos";
 import { prestacoes } from "./planoObra";
 
 export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string;
+  /** 22/10: o perfil do Catálogo pelo id (o técnico do plano escolhe-se por ele) */ perfilId?: string;
   /** 21/10: uma linha livre (de um imprevisto): o trabalho descrito à mão, com as horas e os materiais escolhidos */
   livre?: true; mats?: MatTarefa[] }
 /** 21/10: rascunho (por verificar e enviar) → enviada (a proposta no portal) → aceite (o contrato da adenda) → assinada;
@@ -62,12 +64,12 @@ export const MOTIVOS_RECUSA_ADENDA = ["O preço", "Não preciso destes trabalhos
 export function linhaAdenda(S: Estado, sid: string, q: number): LinhaAdenda | null {
   const s = garantirServico(S, sid);
   if (!s) return null;
-  return { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil };
+  return { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}) };
 }
 /** A mesma linha sem mexer no estado (a pré-visualização ao criar): o preço e as horas que o cliente vai receber. */
 export function previsaoLinha(S: Estado, sid: string, q: number): LinhaAdenda | null {
-  const s = S.svc[sid] ?? servicoDoCatalogo(sid);
-  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil } : null;
+  const s = S.svc[sid] ?? servicoDoCatalogo(sid, S);
+  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}) } : null;
 }
 export const assinadas = (d: Negocio) => (d.adendas ?? []).filter((a) => a.estado === "assinada");
 /** A versão da proposta da adenda em cima da mesa (1 se nunca se refez). */
@@ -133,8 +135,10 @@ export function adendaBloqueada(d: Negocio, S: Estado, a: Adenda): boolean {
   if (!a.linhas.some((l) => S.svc[l.sid])) return false;
   return bloqueado(comoOrcamento(d, S, a), S);
 }
-/** O preço sugerido de uma linha livre: as horas ao custo/hora da estrutura, com a margem alvo. */
-export const precoSugeridoLivre = (S: Estado, h: number) => r2(custoUnLinha({ n: "", un: "vg", h, eh: 25, eq: 0, cons: 0, preco: 0, perfil: "" }, S) / (1 - S.cfg.alvo / 100));
+/** O preço sugerido de uma linha livre: as horas ao €/h do perfil escolhido (22/10: a média dos técnicos dele no RH; antes 25 €/h fixos)
+ *  mais a estrutura, com a margem alvo. Por omissão, o perfil das linhas livres (Canalização). */
+export const precoSugeridoLivre = (S: Estado, h: number, perfil = "Canalização") =>
+  r2(custoUnLinha({ n: "", un: "vg", h, eh: horaDoPerfil(S, perfil).eh, eq: 0, cons: 0, preco: 0, perfil }, S) / (1 - S.cfg.alvo / 100));
 
 /* ------------------------------------------------------------------ as parcelas e as faturas (decisão C) */
 /** As faturas da adenda (as antigas, de antes das parcelas: uma só, de 100%). */
@@ -238,10 +242,10 @@ export function juntarAoPlano(p: Plano, a: Adenda): Tarefa[] {
     // 21/10: com a obra em curso, nunca num dia que já passou
     const dia = Math.max(ate.length ? Math.max(...ate.map((t) => t.dia + t.dur)) : 0, p.estado === "em curso" ? p.dia : 0);
     for (const t of p.tasks) if (t.dia >= dia && (t.fase ?? 4) > fase) t.dia += dur;
-    const sk = skDaTarefa(x.perfil, x.n);
-    const doOficio = TECS.filter((t) => t.sk === sk);
-    const tec = doOficio.find((t) => diaDeFerias(t, p, dia, dur) == null) ?? doOficio[0];
-    const t: Tarefa = { nome: `${x.n} (adenda ${a.n})`, svcs: [x.sid], dia, dur, sk, h: r2(x.h * x.q), tec: tec?.id ?? null, fase };
+    // 22/10: o técnico pelo perfil (id) da linha; sem técnicos do perfil, fica por atribuir
+    const of = x.perfilId ? { perfilId: x.perfilId, sk: TECS.find((t) => perfilDoTecnico(t) === x.perfilId)?.sk ?? x.perfil } : { sk: skDaTarefa(x.perfil, x.n) };
+    const tec = tecnicoDoOficio(of, p, dia, dur);
+    const t: Tarefa = { nome: `${x.n} (adenda ${a.n})`, svcs: [x.sid], dia, dur, sk: of.sk, ...(x.perfilId ? { perfilId: x.perfilId } : {}), h: r2(x.h * x.q), tec, fase };
     p.tasks.push(t); novas.push(t);
   }
   p.tasks.sort((a1, b1) => a1.dia - b1.dia || (a1.fase ?? 0) - (b1.fase ?? 0));

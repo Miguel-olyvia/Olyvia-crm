@@ -78,10 +78,20 @@ describe("custos · receita, preço e margem", () => {
 });
 
 describe("custos · alertas do Catálogo", () => {
-  it("revestimento: técnico sem custo/hora, consumível com preço de há 8 meses e margem abaixo do mínimo", () => {
+  it("revestimento (22/10): o Ladrilhador sem salário tem €/h dos técnicos do RH (Sérgio e Hugo, 17,80): sem 'sem custo/hora'; consumível de há 8 meses", () => {
     const S = seed(), C = custos0();
     const item = listaCatalogo(S, C).find((i) => i.sid === "revest")!;
-    expect(item.alertas.map((a) => a.id).sort()).toEqual(["abaixo-minimo", "desatualizado", "sem-custo-hora"]);
+    expect(item.alertas.map((a) => a.id).sort()).toEqual(["desatualizado", "justificacao"]);
+    expect(item.c.mo).toBeCloseTo(0.75 * 17.8, 6); // 13,35 €
+  });
+  it("22/10: um ofício sem técnicos e sem salário bloqueia ('Ofício sem custo/hora'), sem usar a média dos outros", () => {
+    const S = seed(), C = custos0();
+    const item = listaCatalogo(S, C).find((i) => i.sid === "revest")!;
+    const c = custoReceita(item.rec, C, false, { tecnicos: [] });
+    expect(c.semCustoHora).toEqual(["Ladrilhador"]);
+    expect(c.mo).toBe(0);
+    const A = alertasServico({ rec: item.rec, c, preco: 26, un: "m²", min: 28, alvo: 35, mesesDesatualizado: 6 });
+    expect(A.find((a) => a.id === "sem-custo-hora")).toMatchObject({ k: "x", t: "Ofício sem custo/hora" });
   });
   it("'Linha sem custo' quando não há receita (e não os 25 €/h inventados)", () => {
     const S = seed(), C = custos0();
@@ -136,12 +146,12 @@ describe("custos · a lista única", () => {
 });
 
 describe("custos · passar para o motor e alertas do orçamento", () => {
-  it("dar salário ao ladrilhador tira o 'sem custo/hora' do revestimento no motor", () => {
+  it("22/10: dar salário ao ladrilhador não muda o revestimento: os técnicos do RH mandam (a média deles, 17,80 €/h)", () => {
     const S = seed(), C = custos0();
     C.perfis.find((p) => p.id === "ladrilhador")!.salario = 1900;
     aplicarAoServico(S, C, "revest");
     expect(S.svc.revest.semCusto).toBe(false);
-    expect(S.svc.revest.eh).toBeCloseTo(25, 2);
+    expect(S.svc.revest.eh).toBeCloseTo(17.8, 2);
     expect(S.svc.revest.stale).toMatch(/Cimento-cola/);
   });
   it("o alertas() do motor não muda; o da V2 junta 'Linha sem custo' e troca a frase fixa pelo desatualizado com data", () => {

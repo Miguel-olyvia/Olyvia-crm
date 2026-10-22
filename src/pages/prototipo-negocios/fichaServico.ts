@@ -8,7 +8,7 @@ import { CATALOGO_TODO, normal } from "./catalogo";
 import { LINHAS, eur, nfmt, type Estado, type MedKey, type Medidas, type SvcId } from "./motor";
 import { EX0, type Catalogo, type Produto, type Regra } from "./v2/catalogoModelo";
 import {
-  HOJE, custoHoraPerfil, equipHora, mesesEntre, perfilDoServico, receitaDe,
+  HOJE, equipHora, horaPerfil, mesesEntre, perfilIdDe, receitaDe, type HoraPerfil,
   type CustoCalc, type Custos, type Equip, type ItemLista, type Perfil, type ReceitaV2, type Filtro,
 } from "./v2/custosModelo";
 import type { IconeServicoKey } from "./ilustracoes";
@@ -200,13 +200,18 @@ export function consumiveisCatalogo(S: Estado, C: Custos, hoje = HOJE): ConsCata
 }
 
 /* ------------------------------------------------------------------ técnicos */
-export interface TecnicoLinha { p: Perfil; eh: number | null; servicos: number }
-/** Os perfis com o €/h e quantos serviços em uso os usam. */
+export interface TecnicoLinha { p: Perfil; eh: number | null; servicos: number;
+  /** 22/10: de onde vem o €/h (a média dos técnicos do RH, o salário do perfil ou nenhum) e os técnicos com este perfil */
+  hora: HoraPerfil }
+/** Os perfis com o €/h (22/10: a média dos técnicos do RH; sem técnicos, o salário) e quantos serviços em uso os usam. */
 export function tecnicosCatalogo(S: Estado, C: Custos): TecnicoLinha[] {
-  return C.perfis.map((p) => ({
-    p, eh: custoHoraPerfil(p, C.par),
-    servicos: Object.keys(S.svc).filter((sid) => (C.receitas[sid]?.mo.map((x) => x.perfil) ?? [perfilDoServico(C, S.svc[sid].perfil)]).includes(p.id)).length,
-  }));
+  return C.perfis.map((p) => {
+    const hora = horaPerfil(C, p.id);
+    return {
+      p, eh: hora.eh, hora,
+      servicos: Object.keys(S.svc).filter((sid) => (C.receitas[sid]?.mo.map((x) => x.perfil) ?? [perfilIdDe(C, S.svc[sid])]).includes(p.id)).length,
+    };
+  });
 }
 /** Quantas receitas (em uso) usam um equipamento. */
 export const usosEquip = (S: Estado, C: Custos, id: string) =>
@@ -224,8 +229,9 @@ export interface EntulhoFicha {
   de: string; custoUn: number;
 }
 /** A conta do entulho na ficha, com a quantidade de exemplo e os parâmetros de produção (os do Catálogo). */
-export function entulhoFicha(K: Catalogo, sid: SvcId, nome: string, un: string, medida: MedKey | null): EntulhoFicha {
-  const e = entulhoDoServico(K, sid), q = qtdExemplo(medida), P: ParDem = K.parDem ?? PAR_DEM0;
+/** 22/10: `par` substitui os parâmetros do Catálogo (a ficha passa os do orçamento: o €/h da equipa vem do RH, motor.ts parDemolicao). */
+export function entulhoFicha(K: Catalogo, sid: SvcId, nome: string, un: string, medida: MedKey | null, par?: ParDem): EntulhoFicha {
+  const e = entulhoDoServico(K, sid), q = qtdExemplo(medida), P: ParDem = par ?? K.parDem ?? PAR_DEM0;
   const base = { e, q, artigo: null, produto: null, conta: null, de: "", custoUn: 0 } as EntulhoFicha;
   if (e.modo === "artigo") {
     const a = (K.artigosDem ?? ARTIGOS_DEM0).find((x) => x.codigo === K.artigoDoServico?.[sid]) ?? null;

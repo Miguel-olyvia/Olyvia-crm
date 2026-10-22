@@ -10,7 +10,7 @@ import { CATALOGO_TODO, normal } from "./catalogo";
 import { eur, nfmt, type Estado, type SvcId } from "./motor";
 import { RECEITAS } from "./receitas";
 import { caminho, type Catalogo, type No, type Produto } from "./v2/catalogoModelo";
-import { custoHoraPerfil, equipHora, receitaDe, type Custos } from "./v2/custosModelo";
+import { equipHora, horaPerfil, receitaDe, type Custos } from "./v2/custosModelo";
 import { iconeDoOficio, ilustracaoDe, ilustracaoDoProduto, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
 import { iconeDoServico, todosSids } from "./fichaServico";
 import { nosAbaixo } from "./produtosVisita";
@@ -34,7 +34,8 @@ export interface SvcLig {
   pergunta: string | null;
 }
 export interface EquipLig { id: string; n: string; eh: number }
-export interface TecLig { id: string; n: string; eh: number | null }
+export interface TecLig { id: string; n: string; eh: number | null;
+  /** 22/10: os técnicos do RH com este perfil (o €/h é a média deles; sem técnicos, o salário do perfil) */ tecnicos?: string[] }
 export interface ConsLig { k: string; n: string; un: string; preco: number; fornecedor: string }
 export interface CatalogoLig {
   servicos: SvcLig[];
@@ -81,7 +82,7 @@ export function montarCatalogo(S: Estado, C: Custos, K: Catalogo): CatalogoLig {
   return {
     servicos, produtos, arvore: K.arvore,
     equip: C.equip.map((e) => ({ id: e.id, n: e.n, eh: equipHora(e) })),
-    tecnicos: C.perfis.map((p) => ({ id: p.id, n: p.n, eh: custoHoraPerfil(p, C.par) })),
+    tecnicos: C.perfis.map((p) => { const h = horaPerfil(C, p.id); return { id: p.id, n: p.n, eh: h.eh, tecnicos: h.tecnicos.map((t) => t.n) }; }),
     consumiveis: [...cons.values()].sort((a, b) => a.n.localeCompare(b.n, "pt")),
   };
 }
@@ -158,7 +159,7 @@ function tecnicosDe(s: SvcLig, K: CatalogoLig, pre = ""): Ligacao[] {
   for (const p of s.mo) { const x = por.get(p.perfil) ?? { h: 0, passos: [] }; x.h += p.h; x.passos.push(p.passo); por.set(p.perfil, x); }
   return [...por].flatMap(([perfil, x]) => {
     const t = indice(K).tec.get(perfil);
-    return liga(noDe({ t: "tec", id: perfil }, K), `${pre}${x.passos.length === 1 ? x.passos[0] : `${x.passos.length} passos`}: ${nfmt(x.h)} h/${s.un}${t?.eh != null ? ` · ${eur(t.eh)} €/h` : ""}`);
+    return liga(noDe({ t: "tec", id: perfil }, K), `${pre}${x.passos.length === 1 ? x.passos[0] : `${x.passos.length} passos`}: ${nfmt(x.h)} h/${s.un}${t?.eh != null ? ` · ${eur(t.eh)} €/h` : " · sem custo/hora"}${t?.tecnicos?.length ? ` (média de ${t.tecnicos.join(", ")})` : t ? " (sem técnicos no RH)" : ""}`);
   });
 }
 

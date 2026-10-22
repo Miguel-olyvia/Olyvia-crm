@@ -182,7 +182,7 @@ function PropostaImprevisto({ ctx, d, im, fechar }: { ctx: Ctx; d: Negocio; im: 
   const opcoes = useMemo(() => {
     const vistos = new Set<string>(), out: { v: string; t: string; sub: string; valor: string }[] = [];
     for (const [sid, s] of Object.entries(S.svc)) { if (sid.startsWith("livre-")) continue; vistos.add(sid); out.push({ v: sid, t: s.n, sub: s.perfil, valor: `${eur(s.preco)} €/${s.un}` }); }
-    for (const c of CATALOGO_TODO) if (!vistos.has(c.id)) { const s = servicoDoCatalogo(c.id); if (s) out.push({ v: c.id, t: c.n, sub: c.cat, valor: `${eur(s.preco)} €/${s.un}` }); }
+    for (const c of CATALOGO_TODO) if (!vistos.has(c.id)) { const s = servicoDoCatalogo(c.id, S); if (s) out.push({ v: c.id, t: c.n, sub: c.cat, valor: `${eur(s.preco)} €/${s.un}` }); }
     return out;
   }, [S.svc]);
   const linhas: LinhaAdenda[] = itens.flatMap((x) => { const l = previsaoLinha(S, x.sid, x.q); return l ? [l] : []; });

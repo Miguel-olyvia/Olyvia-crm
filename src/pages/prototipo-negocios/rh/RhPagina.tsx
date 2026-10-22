@@ -6,7 +6,9 @@ import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { MemoryRouter, Navigate, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ABAS_RH, CAMINHO_DE, TITULO_RH, abaDeCaminho, idioma, type AbaRh } from "./abas";
-import { garantirTecnicosNoRh } from "../equipa/pontes";
+import { atualizarCustosDoRh, custosDoRh, garantirTecnicosNoRh } from "../equipa/pontes";
+import { subscrever as subscreverRh } from "@/components/rh-exemplo/dados/loja";
+import { subscreverCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import type { EquipaCtx } from "../equipa/ctx";
 import { ExtensoesFichaRh } from "@/components/rh-exemplo/ficha/extensoesFicha";
 
@@ -68,6 +70,15 @@ export default function RhPagina({ aba, aoMudarAba, equipa }: Props) {
   const lg = idioma(); // lida a cada render (o resto do protótipo faz o mesmo); se a língua mudar com o RH aberto, muda no render seguinte
   // 22/10: os técnicos de obra são pessoas do RH de exemplo: juntam-se ao store (só as que faltam; sem mudança não avisa ninguém)
   garantirTecnicosNoRh();
+  // 22/10: o custo/hora dos técnicos é o calculado nos Custos do RH: quando a ficha (retribuição, horário) ou as definições de custo mudam,
+  // leva-se o valor novo à ficha do técnico no Estado (sincronizado) e ao €/h dos ofícios. Ao abrir não se recalcula (o valor guardado pode
+  // vir de outro aparelho, e o RH deste ainda tem o de exemplo).
+  useEffect(() => {
+    if (!equipa) return;
+    const ver = () => { if (custosDoRh([...(equipa.S.tecnicos ?? [])].map((t) => ({ ...t })))) equipa.run(() => atualizarCustosDoRh(equipa.S)); };
+    const a = subscreverRh(ver), b = subscreverCusto(ver);
+    return () => { a(); b(); };
+  }, [equipa]);
   // O router interno só recomeça quando a aba muda por escolha no menu. Quando é o próprio ecrã a navegar para outra aba (a pessoa da
   // Organização, ?tab=...), o destino exacto mantém-se: SincronizaMenu regista a aba de origem interna e aqui não se muda a chave.
   const origemInterna = useRef<AbaRh>(aba);

@@ -6,7 +6,7 @@
 // com elas (só a mão de obra; o equipamento e os consumíveis não). O preço ao cliente não muda.
 // 14/10: as etapas seguem as fases da obra (fasesObra.ts: 1 preparação, 2 infraestruturas, 3 revestimentos, 4 montagem);
 // dentro da fase, a ordem dos ofícios (o pintor depois do ladrilhador). Um serviço com várias fases entra na primeira.
-import { ESTR, r2, type Estado, type Negocio, type SvcId } from "./motor";
+import { estruturaHora, parDemolicao, r2, type Estado, type Negocio, type SvcId } from "./motor";
 import { catalogoLigado } from "./produtosVisita";
 import { PAR_DEM0 } from "./entulho";
 import { fasesDoServico, type ComFases, type FaseObra } from "./fasesObra";
@@ -36,6 +36,8 @@ export interface TarefaPrevista {
   chave: string;
   nome: string;
   perfil: string;
+  /** 22/10: o perfil do Catálogo pelo id (o do serviço; "servente" na demolição): o plano escolhe o técnico por ele. */
+  perfilId?: string;
   /** A fase da obra em que a tarefa entra (a primeira do serviço) e todas as do serviço. */
   fase: FaseObra;
   fases: FaseObra[];
@@ -69,18 +71,19 @@ export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): Tarefa
     if (l.t !== "svc") continue;
     const s = S.svc[l.sid as SvcId];
     if (!s || !(l.q > 0)) continue;
-    const custoHora = s.eh + (S.cfg.estrutura ? ESTR : 0);
+    const custoHora = s.eh + (S.cfg.estrutura ? estruturaHora(S) : 0);
     const custoOrc = l.cu * l.q, hOrc = s.h * l.q;
     const fases = fasesDoServico(K, l.sid, s.n, s.perfil);
-    base.push({ chave: l.sid, nome: s.n, perfil: s.perfil, fase: fases[0], fases, hOrc, custoHora });
+    base.push({ chave: l.sid, nome: s.n, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), fase: fases[0], fases, hOrc, custoHora });
     // o que o custo da linha tem além da mão de obra (equipamento, consumíveis; e o que o Catálogo mudou desde então)
     extra[l.sid] = { eq: s.eq * l.q, cons: s.cons * l.q, outros: custoOrc - hOrc * custoHora - s.eq * l.q - s.cons * l.q, custoOrc };
   }
   const r = o.demolicao?.r;
   if (r && r.horas + r.horasCarga > 0) {
-    const P = catalogoLigado()?.parDem ?? PAR_DEM0;
+    // 22/10: o €/h da equipa da demolição vem do RH (parDemolicao: 2 × o €/h do Servente, ou do Ajudante)
+    const P = parDemolicao(S, catalogoLigado()?.parDem ?? PAR_DEM0);
     const hOrc = r.horas + r.horasCarga, mo = hOrc * P.custoHora;
-    base.push({ chave: TAREFA_DEMOLICAO, nome: "Demolição e entulho", perfil: "Demolição", fase: 1, fases: [1], hOrc, custoHora: P.custoHora });
+    base.push({ chave: TAREFA_DEMOLICAO, nome: "Demolição e entulho", perfil: "Demolição", ...(P.perfilId ? { perfilId: P.perfilId } : {}), fase: 1, fases: [1], hOrc, custoHora: P.custoHora });
     extra[TAREFA_DEMOLICAO] = { eq: 0, cons: r.consumiveis, outros: r.custo - mo - r.consumiveis, custoOrc: r.custo };
   }
   // a etapa: a fase da obra e, dentro dela, a ordem dos ofícios; dentro da mesma etapa, a ordem das linhas

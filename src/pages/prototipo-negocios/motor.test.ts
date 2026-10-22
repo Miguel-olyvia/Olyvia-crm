@@ -54,9 +54,12 @@ describe("protótipo de Negócios", () => {
     expect(lev.length).toBeGreaterThan(0);
     const semLev = { ...d(), orc: { ...d().orc!, linhas: d().orc!.linhas.filter((l) => !lev.includes(l)) } };
     let T = tot(semLev, S);
-    expect(T.custo).toBeCloseTo(2454.55, 0);
+    // 22/10: o €/h dos ofícios é a média dos técnicos do RH (antes 25 €/h fixos): o custo baixa de 2454,55 para 2214,07; o preço não muda
+    expect(T.custo).toBeCloseTo(2214.07, 0);
     expect(T.pf).toBeCloseTo(3606.12, 0);
 
+    // 22/10: com o custo real, o revestimento já fica acima do mínimo: o comercial baixa-lhe o preço para 19 € e a Olyvia bloqueia
+    A.precoLinha(id, d().orc!.linhas.findIndex((l) => l.t === "svc" && l.sid === "revest"), 19);
     A.verificar(id);
     expect(bloqueado(d(), S)).toBe(true); // a margem do revestimento
     const al = alertas(d(), S).find((a) => a.sug)!;
@@ -118,6 +121,8 @@ describe("protótipo de Negócios", () => {
     const d = S.deals.find((x) => x.id === id)!;
     preencher(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
     A.fecharVisita(id);
+    // 22/10: com o €/h dos técnicos, a margem só fica abaixo do mínimo com o preço do revestimento baixado à mão
+    A.precoLinha(id, d.orc!.linhas.findIndex((l) => l.t === "svc" && l.sid === "revest"), 19);
     A.verificar(id);
     expect(bloqueado(d, S)).toBe(true);
     A.pedirAprov(id);

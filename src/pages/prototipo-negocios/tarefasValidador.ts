@@ -6,7 +6,8 @@ import { HORAS_DIA } from "./ganttOrcamento";
 import { encadearFases, fimDe, guardarBase, inicioMinimo, mudarInicio } from "./ajustesPlano";
 import { RECEITAS } from "./receitas";
 import { TECS, diaDeFerias, type AvisoTec, type MatTarefa, type Plano, type Servico, type SvcId, type Tarefa } from "./motor";
-import { skDaTarefa } from "./preparacaoObra";
+import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
+import { perfilDoTecnico } from "./equipa/tecnicos";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 /** As unidades que não se partem (um kit, um tubo, um saco): arredondam para cima. */
@@ -45,9 +46,13 @@ export function tempoDoServico(s: Servico, q: number): { h: number; dur: number 
 }
 
 /** O primeiro técnico do ofício livre nesses dias (senão o primeiro do ofício; senão ninguém). */
-export function tecnicoLivre(p: Plano, sk: string, dia: number, dur: number): string | null {
-  const doOficio = TECS.filter((x) => x.sk === sk);
-  return (doOficio.find((x) => diaDeFerias(x, p, dia, dur) == null) ?? doOficio[0])?.id ?? null;
+export function tecnicoLivre(p: Plano, sk: string, dia: number, dur: number, perfilId?: string): string | null {
+  return tecnicoDoOficio({ sk, perfilId }, p, dia, dur);
+}
+/** 22/10: o ofício de um serviço sem o Estado: o perfil pelo id (Servico.perfilId) e o nome dos técnicos desse perfil; sem ele, pelo nome. */
+export function oficioDe(s: Servico): { sk: string; perfilId?: string } {
+  if (s.perfilId) return { perfilId: s.perfilId, sk: TECS.find((x) => perfilDoTecnico(x) === s.perfilId)?.sk ?? s.perfil };
+  return { sk: skDaTarefa(s.perfil, s.n) };
 }
 
 /** O primeiro dia de uma tarefa nova na fase: depois das fases anteriores; com a obra em curso (o gestor), nunca num dia que já passou. */
@@ -61,13 +66,13 @@ export interface NovaTarefa { sid: SvcId; q: number; fase: number; tec?: string 
 /** A tarefa nova, pronta a juntar: começa no primeiro dia possível da fase (ou no dia pedido), com o técnico livre do ofício. */
 export function criarTarefa(p: Plano, s: Servico, n: NovaTarefa): Tarefa {
   const { h, dur } = tempoDoServico(s, n.q);
-  const sk = skDaTarefa(s.perfil, s.n);
-  const t: Tarefa = { nome: s.n, svcs: [n.sid], dia: 0, dur, sk, h, tec: null, fase: n.fase || undefined, nova: true, q: n.q, mats: n.mats ?? materiaisDoServico(n.sid, n.q) };
+  const of = oficioDe(s), sk = of.sk;
+  const t: Tarefa = { nome: s.n, svcs: [n.sid], dia: 0, dur, sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h, tec: null, fase: n.fase || undefined, nova: true, q: n.q, mats: n.mats ?? materiaisDoServico(n.sid, n.q) };
   // o primeiro dia possível: depois das fases anteriores; sem pedido, no fim do que já está na mesma fase
   const naFase = p.tasks.filter((x) => (x.fase ?? 0) === (n.fase ?? 0));
   const min = diaMinimo(p, n.fase);
   t.dia = Math.max(min, n.dia ?? (naFase.length ? Math.min(...naFase.map((x) => x.dia)) : min));
-  t.tec = n.tec !== undefined ? n.tec : tecnicoLivre(p, sk, t.dia, dur);
+  t.tec = n.tec !== undefined ? n.tec : tecnicoLivre(p, sk, t.dia, dur, of.perfilId);
   return t;
 }
 

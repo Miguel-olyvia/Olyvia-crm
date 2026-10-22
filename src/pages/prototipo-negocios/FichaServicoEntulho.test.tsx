@@ -78,12 +78,13 @@ describe("a ficha do serviço: o entulho", () => {
     abrir(/^Instalação de Sanita Compacta/, "sanita compacta");
     const sec = screen.getByRole("region", { name: "Entulho" });
     expect(within(sec).getByRole("radio", { name: /Do produto que sai/ })).toBeChecked();
-    expect(conta()).toContain("2 un × 0,06 m³ = 0,12 m³ · ≈ 50 kg → deposição 7,60 € + carga 4,43 €");
+    expect(conta()).toContain("2 un × 0,06 m³ = 0,12 m³ · ≈ 50 kg → deposição 7,60 € + carga 3,41 €");
     expect(conta()).toContain("parâmetros de produção");
-    const m3 = within(sec).getByRole("textbox", { name: "m³ de Sanita suspensa com estrutura" });
+    // 22/10: o produto que traz a instalação de sanita compacta é a sanita compacta; a carga usa o €/h da equipa do RH (2 × 14,20 €/h)
+    const m3 = within(sec).getByRole("textbox", { name: "m³ de Sanita compacta" });
     act(() => { fireEvent.change(m3, { target: { value: "0,08" } }); fireEvent.blur(m3); });
     expect(conta()).toContain("2 un × 0,08 m³ = 0,16 m³");
-    expect(lerCatalogo().produtos.find((p) => p.n === "Sanita suspensa com estrutura")!.entulho).toEqual({ m3: 0.08, kg: 25 });
+    expect(lerCatalogo().produtos.find((p) => p.n === "Sanita compacta")!.entulho).toEqual({ m3: 0.08, kg: 25 });
   });
   it("mudar o modo: m³ por unidade (com os dois números), artigo de demolição (com T_dem) e não gera", () => {
     pagina();
@@ -96,7 +97,8 @@ describe("a ficha do serviço: o entulho", () => {
     expect(conta()).toContain("2 un × 0,06 m³ = 0,12 m³ · ≈ 168 kg"); // sem kg: volume × 1,4 t/m³
     fireEvent.click(within(sec()).getByRole("radio", { name: /Do artigo de demolição/ }));
     expect(lerCatalogo().artigoDoServico!.c13).toBe("DEM-SAN-01");
-    expect(conta()).toMatch(/demolição 27,67 € \+ deposição 7,60 € \+ carga 4,43 € \+ consumíveis 6,00 €/);
+    // 22/10: a equipa da demolição ao €/h do RH (2 × 14,20 €/h = 28,40 €/h): 0,75 h × 28,40 = 21,30 € e a carga 0,12 m³ × 28,40 = 3,41 €
+    expect(conta()).toMatch(/demolição 21,30 € \+ deposição 7,60 € \+ carga 3,41 € \+ consumíveis 6,00 €/);
     fireEvent.click(within(sec()).getByRole("radio", { name: /Não gera/ }));
     expect(lerCatalogo().artigoDoServico!.c13).toBeUndefined();
     expect(conta()).toMatch(/Não gera entulho/);

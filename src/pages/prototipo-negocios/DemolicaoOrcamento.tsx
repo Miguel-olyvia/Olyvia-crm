@@ -5,7 +5,7 @@
 // big bag ou o contentor); com o contentor ligado (6 m³ a 380 €, 14/10/2026), a Olyvia propõe-no a partir de 3 m³.
 import { Minus, Plus, RotateCcw, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { eur, nfmt, type Negocio } from "./motor";
+import { eur, nfmt, parDemolicao, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
 import { useCatalogo } from "./v2/catalogoStore";
 import { SeletorPesquisa } from "./pecasFicha";
@@ -39,7 +39,7 @@ export function OcupacaoMeio({ oc }: { oc: Ocupacao }) {
 export function DemolicaoOrcamento({ S, A, run, d }: Pick<Ctx, "S" | "A" | "run"> & { d: Negocio }) {
   const K = useCatalogo();
   const o = d.orc!, dem = o.demolicao!, r = dem.r, fechado = !!o.enviada, direcao = S.role === "direcao";
-  const artigos = K.artigosDem ?? ARTIGOS_DEM0, P = K.parDem ?? PAR_DEM0;
+  const artigos = K.artigosDem ?? ARTIGOS_DEM0, P = parDemolicao(S, K.parDem ?? PAR_DEM0); // 22/10: o €/h da equipa vem do RH
   if (!r) return null;
   const aj = (k: ChaveAjuste) => r.ajustados.includes(k);
   const ajustar = <C extends ChaveAjuste>(k: C, v: AjustesDem[C] | null) => run(() => A.demolicaoAjuste(d.id, k, v));

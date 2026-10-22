@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, type Estado } from "../motor";
 import type { LinhaCat } from "../catalogo";
 import {
-  CATEGORIAS_ESTRUTURA, LINHA_NOME, aplicarTodos, custoHoraPerfil, equipHora, perfilDoServico, taxaEstrutura, totalEstrutura,
+  CATEGORIAS_ESTRUTURA, LINHA_NOME, aplicarTodos, equipHora, horaPerfil, perfilIdDe, taxaEstrutura, totalEstrutura,
   type Custos, type CategoriaEstrutura,
 } from "./custosModelo";
 import { lerCustos, mudarCustos } from "./custosStore";
@@ -26,7 +26,7 @@ export function CustosV2({ S, C, run, anunciar }: { S: Estado; C: Custos; run: (
     run(() => aplicarTodos(S, lerCustos()));
     anunciar(msg, comAnular ? antes : undefined);
   };
-  const usamPerfil = (id: string) => Object.values(S.svc).filter((s) => perfilDoServico(C, s.perfil) === id).length;
+  const usamPerfil = (id: string) => Object.values(S.svc).filter((s) => perfilIdDe(C, s) === id).length;
   const nid = (pref: string, L: { id: string }[]) => pref + (Math.max(0, ...L.map((x) => Number(x.id.replace(/\D/g, "")) || 0)) + 1);
 
   return (
@@ -70,7 +70,7 @@ export function CustosV2({ S, C, run, anunciar }: { S: Estado; C: Custos; run: (
             <thead><tr className="border-b border-border"><th scope="col" className={TH}>Perfil</th><th scope="col" className={cn(TH, "text-right")}>Salário bruto (€/mês)</th><th scope="col" className={cn(TH, "text-right")}>Custo/hora</th><th scope="col" className={cn(TH, "text-right")}>Serviços em uso</th><th scope="col" className={TH}><span className="sr-only">Retirar</span></th></tr></thead>
             <tbody>
               {C.perfis.map((p) => {
-                const eh = custoHoraPerfil(p, C.par), n = usamPerfil(p.id);
+                const eh = horaPerfil(C, p.id).eh, n = usamPerfil(p.id);
                 return (
                   <tr key={p.id} className="border-b border-border">
                     <td className={TD}><TextoCelula rotulo="Perfil" v={p.n} onSet={(v) => mudar((c) => { c.perfis.find((x) => x.id === p.id)!.n = v; }, "Perfil renomeado")} /></td>

@@ -10,13 +10,13 @@ import { custoHoraDe, custosObra, equipaDaObra } from "../obraOps";
 import { tecnicosPara } from "../preparacaoObra";
 import { juntarEstado, partesDoEstado } from "../sincronizacao";
 import { seedFrota } from "../frota/seed";
-import { repor as reporRh, lerEstado as lerRh } from "@/components/rh-exemplo/dados/loja";
+import { atualizarFicha, repor as reporRh, lerEstado as lerRh } from "@/components/rh-exemplo/dados/loja";
 import { criarEstadoInicial } from "@/components/rh-exemplo/dados/exemplo";
 import {
   agendaEquipa, contarConflitos, diasDoPeriodo, horasDaDuracao, moverPeriodo, obrasDoTecnico, segundaDe, tituloPeriodo, type LinhaAgenda,
 } from "./regrasAgenda";
-import { ausenciasDosTecnicos, garantirTecnicosNoRh, juntarTecnicosAoRh, pessoaRhDe, sugestaoCustoHora, tecnicoDaPessoaRh } from "./pontes";
-import { CUSTO_HORA_OMISSAO, garantirTecnicos, type FichaTecnico } from "./tecnicos";
+import { atualizarCustosDoRh, ausenciasDosTecnicos, custosDoRh, garantirTecnicosNoRh, juntarTecnicosAoRh, pessoaRhDe, sugestaoCustoHora, tecnicoDaPessoaRh } from "./pontes";
+import { CUSTO_HORA_OMISSAO, garantirTecnicos, tecnicosIniciais, type FichaTecnico } from "./tecnicos";
 
 const avisos: { msg: string; kind?: string }[] = [];
 function estado(papel: Estado["role"] = "direcao") {
@@ -26,10 +26,16 @@ function estado(papel: Estado["role"] = "direcao") {
   return { S, A };
 }
 const obra = (S: Estado, id: number) => S.deals.find((d) => d.id === id)!;
+/** 22/10: muda a retribuição de um técnico no RH de exemplo e leva o custo/hora calculado à ficha (como o RhPagina faz ao mudar o RH). */
+function salarioRh(S: Estado, id: string, valor: number): boolean {
+  garantirTecnicosNoRh(S.tecnicos!);
+  atualizarFicha(`p-tec-${id}`, (f) => ({ ...f, retribuicoes: f.retribuicoes.map((r) => ({ ...r, valor_base: valor })) }));
+  return atualizarCustosDoRh(S);
+}
 const HOJE = new Date(2026, 9, 14, 10);
 const celula = (L: LinhaAgenda[], quem: string, data: string) => L.find((l) => l.id === quem || l.nome === quem)!.celulas.find((c) => c.data === data)!;
 
-beforeEach(() => { avisos.length = 0; });
+beforeEach(() => { avisos.length = 0; reporRh(); });
 
 describe("a ficha dos técnicos", () => {
   it("arranca com os seis técnicos de sempre e o custo/hora que estava em obraOps (FICHA_TEC)", () => {
@@ -42,36 +48,37 @@ describe("a ficha dos técnicos", () => {
     expect(custoHoraDe(null)).toBe(CUSTO_HORA_OMISSAO);
   });
 
-  it("mudar o custo/hora de um técnico muda o custo previsto e o real da obra (só nas tarefas dele)", () => {
-    const { S, A } = estado();
+  it("22/10: o custo/hora vem dos Custos do RH: mudar a retribuição muda o custo previsto e o real da obra (só nas tarefas dele)", () => {
+    const { S } = estado();
     const p = obra(S, 1022).obra.plano!;
     const antes = custosObra(p);
     const deHugo = p.tasks.filter((t) => t.tec === "hn"), hHugo = deHugo.reduce((a, t) => a + t.h, 0);
     expect(hHugo).toBeGreaterThan(0);
-    A.editarTecnico("hn", { custoHora: 30 });
+    expect(salarioRh(S, "hn", 3560)).toBe(true);
+    const ch = S.tecnicos!.find((t) => t.id === "hn")!.custoHora;
+    expect(ch).toBe(sugestaoCustoHora(lerRh().fichas["p-tec-hn"])!.valor);
+    expect(ch).toBeCloseTo(30.01, 2);
     const depois = custosObra(p);
-    expect(depois.prev).toBeCloseTo(antes.prev + hHugo * (30 - 17.8), 1);
-    // as tarefas dos outros técnicos ficam com o custo de antes
+    expect(depois.prev).toBeCloseTo(antes.prev + hHugo * (ch - 17.8), 1);
     p.tasks.forEach((t, i) => { if (t.tec !== "hn") expect(depois.linhas[i].prev).toBe(antes.linhas[i].prev); });
-    expect(equipaDaObra(p).find((m) => m.id === "hn")?.custoH).toBe(30);
-    // o real usa as horas registadas pelo técnico ao mesmo custo/hora
+    expect(equipaDaObra(p).find((m) => m.id === "hn")?.custoH).toBe(ch);
     deHugo[0].exec = { estado: "feita", horas: 10, fotos: ["x"] };
-    expect(custosObra(p).linhas[p.tasks.indexOf(deHugo[0])].real).toBe(300);
-    expect(avisos.at(-1)).toMatchObject({ kind: "ok", msg: "Ficha de Hugo Neves atualizada" });
+    expect(custosObra(p).linhas[p.tasks.indexOf(deHugo[0])].real).toBeCloseTo(10 * ch, 2);
   });
 
-  it("só a Direção e as Operações mudam a ficha; valores fora do intervalo não passam", () => {
+  it("22/10: o custo/hora já não se escreve à mão; só a Direção e as Operações mudam o ofício; ofícios fora da lista não passam", () => {
     const c = estado("comercial");
-    c.A.editarTecnico("hn", { custoHora: 30 });
-    expect(c.S.tecnicos!.find((t) => t.id === "hn")!.custoHora).toBe(17.8);
+    c.A.editarTecnico("hn", { perfilId: "montador" });
+    expect(c.S.tecnicos!.find((t) => t.id === "hn")!.perfilId).toBe("ladrilhador");
     expect(avisos.at(-1)).toMatchObject({ kind: "bad", msg: "Sem permissão para mudar a ficha do técnico" });
     const o = estado("operacoes");
-    o.A.editarTecnico("hn", { custoHora: 0 });
-    o.A.editarTecnico("hn", { custoHora: 250 });
     o.A.editarTecnico("hn", { sk: "Astronauta" });
-    expect(o.S.tecnicos!.find((t) => t.id === "hn")).toMatchObject({ custoHora: 17.8, sk: "Ladrilhador" });
-    o.A.editarTecnico("hn", { custoHora: 19.456, sk: "Montador" });
-    expect(o.S.tecnicos!.find((t) => t.id === "hn")).toMatchObject({ custoHora: 19.46, sk: "Montador" });
+    expect(o.S.tecnicos!.find((t) => t.id === "hn")).toMatchObject({ custoHora: 17.8, sk: "Ladrilhador", perfilId: "ladrilhador" });
+    o.A.editarTecnico("hn", { sk: "Montador" });
+    expect(o.S.tecnicos!.find((t) => t.id === "hn")).toMatchObject({ custoHora: 17.8, sk: "Montador", perfilId: "montador" });
+    o.A.editarTecnico("hn", { perfilId: "eletricista" });
+    expect(o.S.tecnicos!.find((t) => t.id === "hn")).toMatchObject({ sk: "Eletricista", perfilId: "eletricista" });
+    expect(avisos.at(-1)).toMatchObject({ kind: "ok", msg: "Ficha de Hugo Neves atualizada" });
   });
 
   it("as férias mudadas na ficha contam nos conflitos do plano (as datas e o dia dos planos de exemplo)", () => {
@@ -90,7 +97,7 @@ describe("a ficha dos técnicos", () => {
     const { S, A } = estado();
     const p = obra(S, 1022).obra.plano!, t = p.tasks.find((x) => x.sk === "Ladrilhador")!;
     expect(tecnicosPara(t, p).map((x) => x.id)).toEqual(["sf", "hn"]);
-    A.editarTecnico("pm", { sk: "Ladrilhador" });
+    A.editarTecnico("pm", { perfilId: "ladrilhador" });
     expect(tecnicosPara(t, p).map((x) => x.id)).toEqual(["sf", "hn", "pm"]);
     expect(t.tec).toBe("hn"); // a tarefa já atribuída fica com quem estava
   });
@@ -100,7 +107,7 @@ describe("os estados de antes da ficha", () => {
   it("um Estado guardado sem `tecnicos` fica com os seis de sempre e as obras continuam a contar", () => {
     // o registo vivo vem "sujo" de outro Estado (custo/hora mudado)
     const outro = estado();
-    outro.A.editarTecnico("ma", { custoHora: 99 });
+    outro.S.tecnicos!.find((t) => t.id === "ma")!.custoHora = 99;
     expect(custoHoraDe("ma")).toBe(99);
     const velho = JSON.parse(JSON.stringify(seed())) as Estado;
     delete velho.tecnicos;
@@ -109,8 +116,8 @@ describe("os estados de antes da ficha", () => {
     expect(custoHoraDe("ma")).toBe(18.5);
     expect(custosObra(obra(velho, 1022).obra.plano!).prev).toBeGreaterThan(0);
     velho.role = "direcao";
-    A.editarTecnico("ma", { custoHora: 20 });
-    expect(velho.tecnicos!.find((t) => t.id === "ma")!.custoHora).toBe(20);
+    A.editarTecnico("ma", { perfilId: "gas" });
+    expect(velho.tecnicos!.find((t) => t.id === "ma")!.sk).toBe("Técnico de gás (ITG)");
   });
 
   it("uma ficha incompleta (de outro aparelho) completa-se; garantirTecnicos diz se mudou alguma coisa", () => {
@@ -122,8 +129,9 @@ describe("os estados de antes da ficha", () => {
   });
 
   it("a ficha vai na parte global da sincronização; uma global remota de antes não a apaga", () => {
-    const { S, A } = estado();
-    A.editarTecnico("sf", { custoHora: 21 });
+    const { S } = estado();
+    salarioRh(S, "sf", 2491);
+    expect(S.tecnicos!.find((t) => t.id === "sf")!.custoHora).toBe(21);
     const g = partesDoEstado(S)[0];
     expect(g.chave).toBe("global");
     expect((g.dados as { tecnicos: FichaTecnico[] }).tecnicos.find((t) => t.id === "sf")!.custoHora).toBe(21);
@@ -228,12 +236,17 @@ describe("a ponte com o RH de exemplo", () => {
     expect(tecnicoDaPessoaRh("p-tec-ma")?.n).toBe("Marco Antunes");
   });
 
-  it("sugere o custo/hora pelo salário e encargos no RH, e lê as ausências aprovadas", () => {
+  it("calcula o custo/hora pelo salário e encargos no RH (22/10: é o custo/hora do técnico), e lê as ausências aprovadas", () => {
     garantirTecnicosNoRh();
     const s = sugestaoCustoHora(lerRh().fichas["p-tec-ma"])!;
-    // 1350 € × 14 / 12 × (1 + 25,25 %) ÷ (40 × 52 / 12) h
-    expect(s.salario).toBe(1350);
-    expect(s.valor).toBeCloseTo((1350 * 14 / 12) * 1.2525 / (40 * 52 / 12), 1);
+    // 2195 € × 14 / 12 × (1 + 25,25 %) ÷ (40 × 52 / 12) h = 18,50 €/h (o da ficha do técnico de exemplo)
+    expect(s.salario).toBe(2195);
+    expect(s.valor).toBeCloseTo((2195 * 14 / 12) * 1.2525 / (40 * 52 / 12), 1);
+    expect(s.valor).toBe(18.5);
+    // as seis fichas de exemplo têm o custo/hora que o RH calcula (nada muda ao sincronizar com o RH de exemplo)
+    const L = tecnicosIniciais();
+    expect(custosDoRh(L)).toBe(false);
+    for (const t of L) expect(t.custoHora, t.id).toBe(sugestaoCustoHora(lerRh().fichas[pessoaRhDe(t)])!.valor);
     expect(sugestaoCustoHora(null)).toBeNull();
     expect(ausenciasDosTecnicos(lerRh())).toHaveProperty("ma");
   });

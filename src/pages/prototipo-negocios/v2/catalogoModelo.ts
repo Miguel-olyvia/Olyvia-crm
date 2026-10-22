@@ -420,7 +420,8 @@ const PROD_SVC0: (Omit<Produto, "id" | "no" | "data"> & { cl: [string, string?] 
 ];
 /** Produto → [serviço que traz, fator]. Os serviços são os do Catálogo real (catalogo.ts). */
 const TRAZ0: Record<string, [SvcId, number]> = {
-  "Sanita suspensa com estrutura": ["c13", 1], "Sanita compacta": ["c13", 1], "Banheira acrílica 170×70": ["c17", 1],
+  // 22/10: a sanita suspensa traz a instalação de sanita suspensa (s-moissusp, como as suspensas da Mudelar), não a compacta (c13)
+  "Sanita suspensa com estrutura": ["s-moissusp", 1], "Sanita compacta": ["c13", 1], "Banheira acrílica 170×70": ["c17", 1],
   "Espelho com LED 80 cm": ["c19", 1], "Toalheiro elétrico": ["c28", 1],
 };
 /** Serviço → [ramo de onde é obrigatório escolher produto, quantidade sugerida a partir das medidas]. */

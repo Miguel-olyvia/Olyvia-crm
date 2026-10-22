@@ -54,14 +54,14 @@ describe("Catálogo V1 · separador Ligações", () => {
     pagina();
     abrirLigacoes();
     expect(screen.getByTestId("mapa-ligacoes")).toHaveAttribute("data-layout", "camadas");
-    expect(no("Sanita suspensa com estrutura")).toHaveTextContent("1 un traz 1 × Instalação de Sanita Compacta");
+    expect(no("Sanita compacta")).toHaveTextContent("1 un traz 1 × Instalação de Sanita Compacta"); // 22/10: a suspensa traz a de sanita suspensa
     cleanup();
     window.matchMedia = ((q: string) => ({ ...mmOriginal(q), matches: q.includes("min-width: 1024px") })) as typeof window.matchMedia;
     pagina();
     abrirLigacoes();
     expect(screen.getByTestId("mapa-ligacoes")).toHaveAttribute("data-layout", "colunas");
     expect(screen.queryByTestId("porque")).toBeNull();
-    fireEvent.mouseEnter(no("Sanita suspensa com estrutura"));
+    fireEvent.mouseEnter(no("Sanita compacta"));
     expect(screen.getByTestId("porque")).toHaveTextContent("1 un traz 1 × Instalação de Sanita Compacta");
   });
   it("mostra no máximo 12 nós por grupo; o resto abre-se em «+ N», numa lista com pesquisa", () => {

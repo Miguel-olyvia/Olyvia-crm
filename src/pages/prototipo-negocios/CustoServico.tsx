@@ -4,8 +4,9 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Hammer, Lock, Package, UserRound, Building2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ESTR, custoUn, eur, nfmt, pct, type Estado, type Servico } from "./motor";
-import { RECEITAS, amortHora, amortUn, consUn, custoAnoTecnico } from "./receitas";
+import { custoUn, estruturaHora, eur, nfmt, pct, type Estado, type Servico } from "./motor";
+import { RECEITAS, amortHora, amortUn, consUn } from "./receitas";
+import { anoPerfil, custoReceita, custosDe, horaPerfil, origemHora, perfilIdDe, receitaDe, type HoraPerfil } from "./v2/custosModelo";
 
 function Bloco({ icone, cor, titulo, total, children }: { icone: ReactNode; cor: string; titulo: string; total: string; children: ReactNode }) {
   return (
@@ -39,11 +40,16 @@ export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estad
   const mo = s.h * s.eh;
   const eqT = R ? R.equip.reduce((a, e) => a + amortUn(e), 0) : s.eq;
   const coT = R ? R.cons.reduce((a, c) => a + consUn(c), 0) : s.cons;
-  const es = S.cfg.estrutura ? s.h * ESTR : 0;
+  const taxa = estruturaHora(S), es = S.cfg.estrutura ? s.h * taxa : 0;
   const c = custoUn(s, S), preco = pu ?? s.preco, m = preco > 0 ? (preco - c) / preco : 0;
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
   const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-success";
-  const ano = custoAnoTecnico(), direcao = S.role === "direcao";
+  const direcao = S.role === "direcao";
+  // 22/10: o €/h de cada ofício da receita e de onde vem (a média dos técnicos do RH, ou o salário do perfil sem técnicos)
+  const C = custosDe(S), rec = receitaDe(C, sid, s, S.cfg.alvo);
+  const oficios: (HoraPerfil & { h: number })[] = rec && rec.mo.length
+    ? custoReceita(rec, C, false).oficios.map((o) => ({ ...horaPerfil(C, o.perfil), h: o.h }))
+    : [{ ...horaPerfil(C, perfilIdDe(C, s)), h: s.h }];
   const partes = [
     { n: "Técnico", v: mo, cor: "bg-sky-500" }, { n: "Equipamentos", v: eqT, cor: "bg-amber-500" },
     { n: "Consumíveis", v: coT, cor: "bg-emerald-500" }, ...(es ? [{ n: "Estrutura", v: es, cor: "bg-slate-400" }] : []),
@@ -81,20 +87,30 @@ export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estad
           {children}
 
           <Bloco icone={<UserRound className="h-5 w-5 text-sky-700" />} cor="bg-sky-100" titulo="Técnico" total={`${eur(mo)} €`}>
-            <Linha a={s.perfil} b={`${nfmt(s.h)} h × ${eur(s.eh)} €/h`} sub={s.semCusto ? "Sem custo/hora no RH: usa o custo médio do perfil." : "Custo por hora do RH."} />
-            <div className="rounded-xl bg-muted/60 p-3 text-sm">
-              <p className="font-medium">Como se chega aos {eur(s.eh)} €/h</p>
-              {direcao ? (
-                <div className="mt-1.5 space-y-1 text-muted-foreground">
-                  <Linha a="Salário bruto" b={`${eur(ano.base)} €/ano`} sub={`${eur(1900)} € × 14 meses`} />
-                  <Linha a="TSU da empresa (23,75%)" b={`${eur(ano.tsu)} €`} />
-                  <Linha a="Seguros e medicina do trabalho" b={`${eur(ano.seguros)} €`} />
-                  <Linha a={<b className="text-foreground">Custo por ano ÷ {nfmt(ano.horas)} h produtivas</b>} b={<b className="text-foreground">{eur(ano.total / ano.horas)} €/h</b>} />
+            {oficios.map((o) => (
+              <div key={o.perfil} className="space-y-2">
+                <Linha a={o.n} b={`${nfmt(o.h)} h × ${o.eh == null ? "—" : eur(o.eh)} €/h`} sub={origemHora(o) + "."} />
+                <div className="rounded-xl bg-muted/60 p-3 text-sm">
+                  <p className="font-medium">Como se chega aos {o.eh == null ? "—" : eur(o.eh)} €/h</p>
+                  {o.fonte === "rh" ? (
+                    <div className="mt-1.5 space-y-1 text-muted-foreground">
+                      {o.tecnicos.map((t) => <Linha key={t.id} a={t.n} b={`${eur(t.custoHora)} €/h`} sub="Calculado nos Custos do RH (salário, encargos, horas do contrato)" />)}
+                      <Linha a={<b className="text-foreground">Média de {o.tecnicos.length} {o.tecnicos.length === 1 ? "técnico" : "técnicos"}</b>} b={<b className="text-foreground">{eur(o.eh!)} €/h</b>} />
+                    </div>
+                  ) : o.fonte === "salario" ? (
+                    direcao ? (() => { const p = C.perfis.find((x) => x.id === o.perfil)!, a = anoPerfil(p, C.par); return (
+                      <div className="mt-1.5 space-y-1 text-muted-foreground">
+                        <p>Sem técnicos com este ofício no RH: usa o salário do perfil.</p>
+                        <Linha a="Salário bruto" b={`${eur(a.base)} €/ano`} sub={`${eur(p.salario ?? 0)} € × ${nfmt(C.par.meses)} meses`} />
+                        <Linha a={`TSU da empresa (${nfmt(C.par.tsu)}%)`} b={`${eur(a.tsu)} €`} />
+                        <Linha a="Seguros e medicina do trabalho" b={`${eur(a.seguros)} €`} />
+                        <Linha a={<b className="text-foreground">Custo por ano ÷ {nfmt(a.horas)} h produtivas</b>} b={<b className="text-foreground">{eur(o.eh!)} €/h</b>} />
+                      </div>
+                    ); })() : <p className="mt-1 inline-flex items-center gap-1.5 text-muted-foreground"><Lock className="h-3.5 w-3.5" aria-hidden="true" />Sem técnicos com este ofício no RH: usa o salário do perfil, que só a Direção vê.</p>
+                  ) : <p className="mt-1 text-destructive">Sem técnicos no RH nem salário no perfil: a mão de obra conta 0 €. Ligue um técnico a este ofício (RH › ficha da pessoa › Obra).</p>}
                 </div>
-              ) : (
-                <p className="mt-1 inline-flex items-center gap-1.5 text-muted-foreground"><Lock className="h-3.5 w-3.5" aria-hidden="true" />Custo do ano a dividir pelas horas produtivas. O salário só a Direção vê.</p>
-              )}
-            </div>
+              </div>
+            ))}
           </Bloco>
 
           <Bloco icone={<Hammer className="h-5 w-5 text-amber-700" />} cor="bg-amber-100" titulo="Equipamentos · amortização" total={`${eur(eqT)} €`}>
@@ -113,11 +129,11 @@ export function CustoServico({ S, sid, s, q, pu, onClose, children }: { S: Estad
 
           {S.cfg.estrutura && (
             <Bloco icone={<Building2 className="h-5 w-5 text-slate-700" />} cor="bg-slate-200" titulo="Estrutura" total={`${eur(es)} €`}>
-              <Linha a="Escritório, viaturas, seguros, gestão" b={`${nfmt(s.h)} h × ${eur(ESTR)} €/h`} sub="Repartidos pelas horas de obra. Decisão em aberto: ver Definições." />
+              <Linha a="Escritório, viaturas, seguros, gestão" b={`${nfmt(s.h)} h × ${eur(taxa)} €/h`} sub="Os custos de estrutura do mês a dividir pelas horas produtivas da empresa (Catálogo › Custos)." />
             </Bloco>
           )}
 
-          <p className="text-sm text-muted-foreground">Valores de exemplo. Na Olyvia, o custo/hora vem do RH, a amortização dos equipamentos e o preço dos consumíveis vêm do Catálogo e dos fornecedores.</p>
+          <p className="text-sm text-muted-foreground">Valores de exemplo. O custo/hora de cada ofício é a média dos técnicos dele no RH, a amortização dos equipamentos e o preço dos consumíveis vêm do Catálogo e dos fornecedores.</p>
         </div>
       </div>
     </div>

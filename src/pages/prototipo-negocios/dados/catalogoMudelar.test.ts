@@ -76,14 +76,18 @@ describe("catálogo da Mudelar · perfis, equipamentos e consumíveis", () => {
 });
 
 describe("catálogo da Mudelar · as receitas", () => {
-  it("o custo do motor fica a ±30% do custo real em (quase) todos", () => {
+  // 22/10: a calibração das receitas mede-se com o €/h do salário de cada perfil (sem técnicos): o €/h dos técnicos do RH é o da empresa,
+  // não o da Mudelar, e não mede se as receitas (horas, equipamentos, consumíveis) estão certas
+  it("o custo do motor fica a ±30% do custo real em (quase) todos (com o €/h do salário dos perfis)", () => {
     const C = custos0();
+    // o Ladrilhador não tem salário no perfil (o €/h dele vem só dos técnicos): para calibrar, o salário de referência dos outros (1.900 €)
+    C.perfis.find((p) => p.id === "ladrilhador")!.salario = 1900;
     const comCusto = SERVICOS_MUDELAR.filter((s) => s.custoReal > 0);
     const fora: string[] = [];
     for (const s of comCusto) {
       // todos pela receitaDe, a do protótipo (14/10: os c1..c41 também usam a receita da Mudelar)
       const rec = receitaDe(C, s.id, null)!;
-      const c = custoReceita(rec, C, true).total;
+      const c = custoReceita(rec, C, true, { tecnicos: [] }).total;
       if (Math.abs(c / s.custoReal - 1) > 0.3) fora.push(`${s.sku} ${c.toFixed(2)} vs ${s.custoReal}`);
     }
     const pct = (100 * (comCusto.length - fora.length)) / comCusto.length;

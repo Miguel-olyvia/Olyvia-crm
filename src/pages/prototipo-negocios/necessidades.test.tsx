@@ -177,12 +177,12 @@ describe("a escolha guiada: \"Mantém a sanita?\" → Não → a sanita → as l
     A.fecharVisita(d.id);
     expect(d.fase).toBe(3);
     const linhas = d.orc!.linhas;
-    expect(linhas.some((l) => l.t === "svc" && l.sid === "c13")).toBe(true); // a instalação, trazida pela sanita
+    expect(linhas.some((l) => l.t === "svc" && l.sid === "s-moissusp")).toBe(true); // a instalação da sanita suspensa, trazida por ela
     expect(linhas.find((l) => l.t === "mat" && l.d === PREFIXO_PROD + "Sanita suspensa com estrutura")).toMatchObject({ custo: 285, preco: 410 });
     // o resumo conta o serviço trazido e o produto ao PVP
-    const r = resumoNecessidades(S, d, ["c13"]);
+    const r = resumoNecessidades(S, d, ["s-moissusp"]);
     expect(r).toMatchObject({ servicos: 1, produtos: 1 });
-    expect(r.total).toBeCloseTo(S.svc.c13.preco + 410, 2);
+    expect(r.total).toBeCloseTo(S.svc["s-moissusp"].preco + 410, 2);
   });
 });
 

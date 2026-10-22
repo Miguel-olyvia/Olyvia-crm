@@ -8,7 +8,9 @@
 //     sair no armazém ou a bordo da carrinha (o critério da Frota para carregar). As obras antigas do exemplo (encomenda sem ref) não bloqueiam.
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, conflitos, diaDeFerias, eur, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { custosDe, perfilIdDe } from "./v2/custosModelo";
+import { PERFIL_DO_SK, perfilDoTecnico } from "./equipa/tecnicos";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, planoObra, proximoUtil } from "./planoObra";
 import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
@@ -99,26 +101,45 @@ export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string
 }
 
 /* ------------------------------------------------------------------ o plano da obra, a partir do orçamento */
-/** O ofício de uma tarefa → o tipo de técnico do RH (TECS.sk). */
+/** O ofício de uma tarefa pelo nome (os planos e os serviços de antes, sem o perfil pelo id) → o tipo de técnico (TECS.sk).
+ *  22/10: um ofício que não se reconhece fica "" (por atribuir); antes ia para o Montador. */
 export function skDaTarefa(perfil: string, nome: string): string {
   const s = normal(`${perfil} ${nome}`);
   if (/demol|servente|entulho|remoc/.test(s)) return "Servente · demolição";
   if (/canaliz|louca|sanit|agua|esgoto|gas/.test(s)) return "Canalizador";
   if (/revest|ladril|pavim|ceram|azulej/.test(s)) return "Ladrilhador";
-  return "Montador";
+  if (/carpint|montag|montador|move/.test(s)) return "Montador";
+  return "";
 }
 
-/** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias). */
+/** 22/10: o ofício de um serviço (o perfil do Catálogo pelo id): o id e o nome (Tarefa.sk). Sem perfil, o de antes pelo nome. */
+export function oficioDoServico(S: Estado, s: Pick<Servico, "perfil" | "n"> & { perfilId?: string }): { perfilId: string; sk: string } {
+  const C = custosDe(S), id = perfilIdDe(C, s), p = C.perfis.find((x) => x.id === id);
+  if (p) return { perfilId: p.id, sk: p.n };
+  const sk = skDaTarefa(s.perfil, s.n);
+  return { perfilId: PERFIL_DO_SK[sk] ?? "", sk };
+}
+/** 22/10: os técnicos de um ofício: os do perfil (pelo id), ou os do mesmo nome nos planos de antes. */
+export const tecnicosDoOficio = (t: Pick<Tarefa, "sk"> & { perfilId?: string }) =>
+  t.perfilId ? TECS.filter((x) => perfilDoTecnico(x) === t.perfilId) : t.sk ? TECS.filter((x) => x.sk === t.sk) : [];
+/** O técnico do ofício livre nesses dias (o primeiro; senão o primeiro do ofício; sem técnicos do ofício, ninguém: fica por atribuir). */
+export function tecnicoDoOficio(t: Pick<Tarefa, "sk"> & { perfilId?: string }, p: Plano, dia: number, dur: number): string | null {
+  const doOficio = tecnicosDoOficio(t);
+  return (doOficio.find((x) => diaDeFerias(x, p, dia, dur) == null) ?? doOficio[0])?.id ?? null;
+}
+/** 22/10: as tarefas do plano sem técnico (o ofício não tem técnicos no RH): ficam por atribuir, com aviso. */
+export const porAtribuir = (p: Plano): Tarefa[] => p.tasks.filter((t) => !t.tec && !(t.exec?.estado === "validada"));
+
+/** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias).
+ *  22/10: o ofício é o perfil do passo da receita (pelo id); sem técnico com esse perfil, a tarefa fica por atribuir (tec null). */
 export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
   const P = planoObra(d, S);
   const plano: Plano = { tasks: [], estado: "por aprovar", dia: 0, origem: "orcamento", inicio: d.orc?.inicioObra };
   plano.tasks = P.tarefas.map((t) => {
-    const sk = skDaTarefa(t.perfil, t.nome);
+    const of = t.perfilId ? { perfilId: t.perfilId, sk: custosDe(S).perfis.find((x) => x.id === t.perfilId)?.n ?? t.perfil } : oficioDoServico(S, { perfil: t.perfil, n: t.nome });
     const dia = Math.floor(t.inicio), dur = Math.max(1, Math.ceil(t.inicio + t.dias - 1e-9) - dia);
-    const doOficio = TECS.filter((x) => x.sk === sk);
-    // o primeiro do ofício que não está de férias nesses dias (pelas datas reais)
-    const livre = doOficio.find((x) => diaDeFerias(x, plano, dia, dur) == null) ?? doOficio[0];
-    return { nome: t.nome, svcs: t.chave === "demolicao" ? [] : [t.chave], dia, dur, sk, h: r2(t.h), tec: livre?.id ?? null, fase: t.fase };
+    const tec = tecnicoDoOficio(of, plano, dia, dur);
+    return { nome: t.nome, svcs: t.chave === "demolicao" ? [] : [t.chave], dia, dur, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase };
   });
   return plano;
 }
@@ -304,7 +325,7 @@ export function rotuloDia(p: Plano, k: number, hoje = new Date()): string {
 }
 /** Os técnicos que podem fazer a tarefa (do mesmo ofício), com se estão livres nesses dias. */
 export function tecnicosPara(t: Tarefa, p: Plano): { id: string; n: string; livre: boolean; ferias: string | null }[] {
-  return TECS.filter((x) => x.sk === t.sk).map((x) => {
+  return tecnicosDoOficio(t).map((x) => {
     const k = diaDeFerias(x, p, t.dia, t.dur);
     return { id: x.id, n: x.n, livre: k == null, ferias: k == null ? null : rotuloDia(p, k) };
   });
