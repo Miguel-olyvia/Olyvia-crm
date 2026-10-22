@@ -2,8 +2,8 @@
 // base de dados) dentro da moldura do protótipo. Um MemoryRouter próprio, com as mesmas rotas lazy do CRM mas sem sessão nem permissões, faz com
 // que as ligações e navegações dos ecrãs (/rh-exemplo/...) continuem a funcionar sem os alterar e sem mexer no endereço do navegador.
 // É só protótipo com dados de teste: nada daqui fala com a base. Repor a demonstração chama esquecerRh() (loja.ts).
-import { Suspense, lazy, useEffect, useRef } from "react";
-import { MemoryRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
+import { MemoryRouter, Navigate, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ABAS_RH, CAMINHO_DE, TITULO_RH, abaDeCaminho, idioma, type AbaRh } from "./abas";
 
@@ -26,7 +26,18 @@ const RhAdmissaoIndice = lazy(() => import("@/pages/rh-exemplo/RhAdmissaoIndice"
 const RhMinhasDenuncias = lazy(() => import("@/pages/rh-exemplo/RhMinhasDenuncias"));
 const RhDenuncias = lazy(() => import("@/pages/rh-exemplo/RhDenuncias"));
 
-const A_ABRIR: Record<"pt" | "en", string> = { pt: "A abrir os Recursos Humanos…", en: "Opening Human Resources…" };
+// No App o protótipo já vive dentro do BrowserRouter e de uma rota; o react-router recusa um Router dentro de outro. Este isolamento
+// repõe os contextos de localização e de rota ao valor de origem (fora de qualquer router) para o MemoryRouter próprio do RH poder montar.
+const SEM_ROTA = { outlet: null, matches: [], isDataRoute: false } as const;
+function IsolaRouter({ children }: { children: ReactNode }) {
+  return (
+    <UNSAFE_LocationContext.Provider value={null as never}>
+      <UNSAFE_RouteContext.Provider value={SEM_ROTA}>{children}</UNSAFE_RouteContext.Provider>
+    </UNSAFE_LocationContext.Provider>
+  );
+}
+
+const A_ABRIR:Record<"pt" | "en", string> = { pt: "A abrir os Recursos Humanos…", en: "Opening Human Resources…" };
 
 /** Quando um ecrã navega para outro (por exemplo da lista à Organização), o menu do protótipo acompanha. */
 function SincronizaMenu({ aba, aoMudarAba, origemInterna }: { aba: AbaRh; aoMudarAba?: (a: AbaRh) => void; origemInterna: { current: AbaRh } }) {
@@ -57,7 +68,7 @@ export default function RhPagina({ aba, aoMudarAba }: Props) {
         {/* O leitor de ecrã ouve a troca de ecrã; o foco fica no menu, onde o utilizador de teclado está. */}
         <p data-testid="rh-anuncio" role="status" aria-live="polite" className="sr-only">{ABAS_RH.find((a) => a.k === aba)?.rotulo[lg]}</p>
         {/* key: trocar de aba no menu recomeça o router interno no caminho dessa aba */}
-        <MemoryRouter key={geracao.current} initialEntries={[CAMINHO_DE[aba]]}>
+        <IsolaRouter><MemoryRouter key={geracao.current} initialEntries={[CAMINHO_DE[aba]]}>
           <SincronizaMenu aba={aba} aoMudarAba={aoMudarAba} origemInterna={origemInterna} />
           <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">{A_ABRIR[lg]}</p>}>
             <Routes>
@@ -84,7 +95,7 @@ export default function RhPagina({ aba, aoMudarAba }: Props) {
               <Route path="*" element={<Navigate to="/rh-exemplo/pessoas" replace />} />
             </Routes>
           </Suspense>
-        </MemoryRouter>
+        </MemoryRouter></IsolaRouter>
       </section>
     </LanguageProvider>
   );
