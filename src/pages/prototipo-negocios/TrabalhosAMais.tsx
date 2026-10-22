@@ -82,7 +82,7 @@ function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
           {nomeParcela(x.i)} ({x.l.toLowerCase()}, {Math.round(x.p * 100)}%) · {eur(x.v)} €: {x.ft ? (x.ft.recibo ? `${x.ft.n}, paga (${x.ft.recibo.n})` : `${x.ft.n}, ${x.ft.pag?.comprovativo ? `o cliente avisou: ${x.ft.pag.comprovativo}` : "por pagar no portal"}`) : "por faturar"}
         </p>
       ))}
-      {fin && atual && prox && <Button size="sm" className="min-h-10" disabled={!!fat.motivo} onClick={go(() => (prox.i === 0 ? A.faturarAdendas(d.id) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura da {nomeParcela(prox.i)}</Button>}
+      {fin && atual && prox && <Button size="sm" className="min-h-10" disabled={!!fat.motivo} onClick={go(() => (prox.i === 0 ? A.faturarAdendas(d.id, a.n) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura da {nomeParcela(prox.i)}</Button>}
       {fin && aValidar.f && <Button size="sm" className="ml-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id, a.n))}>Validar o pagamento</Button>}
       {fin && prox && fat.motivo && <p className="text-sm text-muted-foreground">{nomeParcela(prox.i)}: {fat.motivo.replace(/^./, (c) => c.toLowerCase())}</p>}
     </div>

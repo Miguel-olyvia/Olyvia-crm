@@ -1,5 +1,5 @@
 // Os ajustes à obra que trazem materiais novos (21/10/2026): depois de a encomenda de cliente inicial (EC-<id>) estar no Inventário, uma
-// tarefa nova no plano, uma adenda assinada ou materiais mudados à mão numa tarefa disparam uma encomenda de cliente de AJUSTE (EC-<id>-A1,
+// tarefa nova no plano, uma adenda assinada ou materiais mudados à mão numa tarefa disparam uma encomenda de cliente de AJUSTE (EC-<id>-A1; 22/10: a de uma adenda leva o número dela, a adenda 2 é a A2,
 // origem "CT 2026/<id> · A1"), só com o que falta: as linhas novas e o aumento das quantidades. Usa as regras de sempre do Inventário
 // (ponteNegocios.emitirEcNoInventario: reserva FIFO do stock e, do que faltar, encomenda ao fornecedor, pendente por aprovar).
 // · O plano ajusta-se: as tarefas com materiais que vêm do fornecedor não começam antes do primeiro dia útil a seguir à chegada prevista
@@ -95,6 +95,28 @@ export interface ResultadoAjuste {
   reservadas: number; aFornecedor: number;
 }
 
+/** 22/10: o número da adenda ("AD 2026/1027-2" → 2); null se não tiver. */
+export const numeroAdenda = (n: string): number | null => {
+  const m = /-(\d+)$/.exec(n);
+  return m ? Number(m[1]) : null;
+};
+/**
+ * 22/10: o k de EC-<id>-A<k>. A de uma adenda leva o número da adenda (a adenda 2 é a A2, mesmo paga antes da 1). As outras (tarefa nova,
+ * materiais mudados) levam o primeiro k livre a partir do seguinte, saltando os números das adendas do negócio. Nunca se repete um nome já
+ * usado (no negócio, anuladas incluídas, ou no Inventário): se o da adenda já estiver usado (um ajuste antigo ficou com ele), a adenda
+ * leva o primeiro livre. As encomendas já gravadas não mudam de nome (a ligação à adenda é pelo campo `adenda`/motivo: ecDaAdenda).
+ */
+export function kAjuste(d: Negocio, adenda?: string): number {
+  const usados = new Set([...(d.obra.ecsAjuste ?? []).map((a) => a.n), ...lerInventario().ecs.map((e) => e.id)]);
+  const livre = (k: number) => !usados.has(idAjuste(d, k));
+  const kA = adenda ? numeroAdenda(adenda) : null;
+  if (kA && livre(kA)) return kA;
+  const dasAdendas = new Set((d.adendas ?? []).map((a) => numeroAdenda(a.n)));
+  let k = (d.obra.ecsAjuste?.length ?? 0) + 1;
+  while (!livre(k) || dasAdendas.has(k)) k++;
+  return k;
+}
+
 /**
  * Emite a encomenda de ajuste com o que falta encomendar e ajusta o plano à chegada. Devolve null se não há nada a encomendar (ou ainda
  * não há encomenda inicial: emite-se depois dela) e { erro } se o Inventário recusou (não fica nada a meio).
@@ -106,7 +128,7 @@ export function encomendarAjustes(d: Negocio, motivo: string, quem: string, quan
   if (!p || !base?.ref || d.perdido) return null;
   const P = porEncomendarDe(d, adenda);
   if (!P.length) return null;
-  const k = (d.obra.ecsAjuste?.length ?? 0) + 1;
+  const k = kAjuste(d, adenda);
   const linhas = linhasDeAjuste(P);
   const ec: EcAjuste = {
     n: idAjuste(d, k), ref: refAjuste(base.ref, k), estado: "emitida", criada: quando, linhas, motivo, emitida: { por: quem, q: quando },

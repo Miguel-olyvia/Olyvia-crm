@@ -70,7 +70,7 @@ export function AdendasNoFinanceiro({ ctx, d, v2 = false }: { ctx: Ctx; d: Negoc
                     texto={f ? `A ${f.q}, no portal do cliente · ${eur(f.v)} €.` : prox?.i !== x.i ? "Depois da parcela anterior." : fat.motivo ? fat.motivo : v2 ? "Emita-a no programa de faturação certificado e registe-a aqui." : "Só o Financeiro emite. Vai para o portal do cliente."}>
                     {!f && prox?.i === x.i && fin && (v2
                       ? (fat.motivo ? null : <RegistarFatura ctx={ctx} d={d} a={a} x={x} />)
-                      : <Button size="sm" className="mt-2 min-h-10" disabled={!!fat.motivo} onClick={go(() => (x.i === 0 ? A.faturarAdendas(d.id) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura</Button>)}
+                      : <Button size="sm" className="mt-2 min-h-10" disabled={!!fat.motivo} onClick={go(() => (x.i === 0 ? A.faturarAdendas(d.id, a.n) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura</Button>)}
                   </Passo>,
                   <Passo key={"p" + x.i} feito={!!f?.recibo} titulo={f?.recibo ? `Pagamento validado · recibo ${f.recibo.n}` : `Validar o pagamento da ${nomeParcela(x.i)}`}
                     texto={f?.recibo ? `Confirmado a ${f.recibo.q}${f.pag?.comprovativo ? " · " + f.pag.comprovativo : ""}.` : !f ? "Depois da fatura."

@@ -1118,9 +1118,12 @@ export function minhas(S: Estado, role: Papel) {
   return L;
 }
 
-/** 21/10: o passo de cada adenda (o mesmo percurso do orçamento), de quem é e o botão. As ações sem o número fazem a primeira adenda
- *  do negócio nesse estado (o Hoje chama-as só com o negócio). */
+/** 21/10: o passo de cada adenda (o mesmo percurso do orçamento), de quem é e o botão. 22/10: os passos com ação levam o número da
+ *  adenda (arg), para o botão agir nessa adenda e não na primeira do negócio no mesmo estado. */
 export function tarefasAdenda(d: Negocio, S: Estado, a: Adenda): Proximo[] {
+  return passosDaAdenda(d, S, a).map((t) => (t.act ? { ...t, arg: a.n } : t));
+}
+function passosDaAdenda(d: Negocio, S: Estado, a: Adenda): Proximo[] {
   const n = a.n, v = versaoAdenda(a);
   switch (a.estado) {
     case "rascunho":
@@ -2488,11 +2491,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** O Financeiro emite a fatura da 1.ª parcela de cada adenda assinada sem faturas (vai para o portal do cliente, que paga com o método
      *  que escolher). 21/10 (decisão C): as parcelas são as do contrato; as seguintes emitem-se no Financeiro do negócio (faturarParcelaAdenda). */
-    faturarAdendas(id: number) {
+    faturarAdendas(id: number, n?: string) {
       const d = deal(id);
       if (!exigePerm("finance.invoice")) return;
       if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      const F = porFaturar(d).map((a) => emitirParcela(d, a, "FT 2026/" + S.ft++, false)).filter((x): x is FaturaAdenda => !!x);
+      // 22/10: com o número (o passo ft-ad-<n>, o Financeiro da adenda), só a dessa adenda; sem ele, todas as por faturar
+      const F = porFaturar(d).filter((a) => !n || a.n === n).map((a) => emitirParcela(d, a, "FT 2026/" + S.ft++, false)).filter((x): x is FaturaAdenda => !!x);
       if (F.length) avisar({ msg: F.length === 1 ? `${F[0].n} emitida` : `${F.length} faturas emitidas`, sub: "Da adenda · enviada ao portal do cliente", kind: "ok" });
     },
     /** 21/10 (decisão C): a fatura da parcela seguinte da adenda (pela ordem; como no contrato, a final no fim da obra). */

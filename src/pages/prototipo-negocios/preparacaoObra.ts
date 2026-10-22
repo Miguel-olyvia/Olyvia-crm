@@ -258,7 +258,7 @@ export function passosPagamentoAdenda(d: Negocio, a: Adenda): PassoPrep[] {
     // na V2 a Olyvia não emite faturas: regista-se a do programa certificado no Financeiro do negócio (sem botão aqui), como no contrato
     : lerVersao() !== "atual"
     ? { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Registar a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.` }
-    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Emitir a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Vai para o portal do cliente.`, act: "faturarAdendas", btn: "Emitir a fatura" };
+    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Emitir a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Vai para o portal do cliente.`, act: "faturarAdendas", arg: a.n, btn: "Emitir a fatura" };
   const rc = f0?.recibo;
   const pg: PassoPrep = rc
     ? { id: "pg-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado · adenda ${a.n}`, sub: `Recibo ${rc.n}.` }

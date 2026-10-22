@@ -17,6 +17,8 @@ import { TrabalhosAMais } from "./TrabalhosAMais";
 import { Montar } from "./v2/testeV2";
 import { faturaAValidar, parcelaFaturavel, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
 import { passosPreparacao } from "./preparacaoObra";
+import { ecDaAdenda, kAjuste, numeroAdenda } from "./encomendasAjuste";
+import { fazer } from "./pecas";
 import { adendaAssinada } from "./testeAdenda";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
@@ -179,36 +181,83 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
     expect(within(blocoPagamento()).getByText("pronto")).toBeTruthy();
   });
 
-  it("duas adendas com a fatura da 1.ª parcela emitida: a tarefa do Hoje da adenda 2 valida a da adenda 2 (e validar outra vez não faz 2.ª EC)", () => {
+  it("duas adendas assinadas, paga primeiro a 2: o Hoje fatura e valida só a adenda 2 e sai a EC-1027-A2; validar outra vez não faz 2.ª EC; a 1 fica A1", () => {
     const { S, A, d, a } = preparar();
     A.role("comercial");
     A.criarAdenda(d.id, [{ sid: "pint", q: 10 }], "Mais uma divisão");
     const a2 = d.adendas!.find((x) => x !== a) as Adenda, N2 = a2.n;
     adendaAssinada(A, d.id, N2);
-    A.role("financeiro"); A.faturarAdendas(d.id);
-    expect(a.faturas?.find((f) => f.i === 0)).toBeTruthy();
+    A.role("financeiro");
+    // o passo "Emitir a fatura" da adenda 2 leva o número: emite só a dela
+    const ft2 = minhas(S, "financeiro").find((x) => x.d === d && x.p.act === "faturarAdendas" && x.p.arg === N2)!;
+    fazer(A, ft2.p.act!, d.id, ft2.p.arg);
     expect(a2.faturas?.find((f) => f.i === 0)).toBeTruthy();
-    // o Hoje do Financeiro tem as duas tarefas, cada uma com o número da sua adenda
-    const tarefas = minhas(S, "financeiro").filter((x) => x.d === d && x.p.act === "validarPagamentosAdenda");
-    expect(tarefas.map((x) => x.p.arg)).toEqual([N, N2]);
+    expect(a.faturas ?? []).toHaveLength(0);
+    A.faturarAdendas(d.id, N);
+    // o Hoje do Financeiro tem as duas tarefas de validar, cada uma com o número da sua adenda
+    expect(minhas(S, "financeiro").filter((x) => x.d === d && x.p.act === "validarPagamentosAdenda").map((x) => x.p.arg)).toEqual([N, N2]);
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <Hoje {...ctx} />}</Montar>);
-    const linha2 = linhaHoje(new RegExp(`^Validar o pagamento da adenda ${N2.replace("/", "\\/")} · 1\\.ª parcela · `));
+    const linha2 = linhaHoje(new RegExp(`^Validar o pagamento da adenda ${N2.replace("/", "\/")} · 1\.ª parcela · `));
     fireEvent.click(within(linha2).getByRole("button", { name: "Validar o pagamento" }));
     expect(a2.faturas!.find((f) => f.i === 0)!.recibo).toBeTruthy();
     expect(a.faturas!.find((f) => f.i === 0)!.recibo).toBeUndefined();
-    // a encomenda que sai é a da adenda 2 (e não a da 1)
-    const ecs = d.obra.ecsAjuste ?? [];
-    expect(ecs.filter((e) => e.adenda === N2)).toHaveLength(1);
-    expect(ecs.some((e) => e.adenda === N)).toBe(false);
-    const ec2 = ecs.find((e) => e.adenda === N2)!;
-    expect(lerInventario().ecs.some((e) => e.id === ec2.n && !e.deleted)).toBe(true);
+    // a encomenda que sai é a da adenda 2, com o número dela (A2), mesmo sendo a primeira de ajuste
+    expect(d.obra.ecsAjuste).toHaveLength(1);
+    expect(d.obra.ecsAjuste![0]).toMatchObject({ n: "EC-1027-A2", adenda: N2 });
+    expect(lerInventario().ecs.some((e) => e.id === "EC-1027-A2" && !e.deleted)).toBe(true);
     cleanup();
     // validar a adenda 2 outra vez: nada por validar, nenhuma EC nova
     A.validarPagamentosAdenda(d.id, N2);
-    expect((d.obra.ecsAjuste ?? []).filter((e) => e.adenda === N2)).toHaveLength(1);
-    expect(d.obra.ecsAjuste ?? []).toHaveLength(1);
+    expect(d.obra.ecsAjuste).toHaveLength(1);
     expect(a.faturas!.find((f) => f.i === 0)!.recibo).toBeUndefined();
+    // depois a adenda 1: fica com a A1
+    A.validarPagamentosAdenda(d.id, N);
+    expect(d.obra.ecsAjuste!.map((e) => [e.n, e.adenda])).toEqual([["EC-1027-A2", N2], ["EC-1027-A1", N]]);
+  });
+
+  it("dados antigos: a EC gravada com o nome sequencial continua ligada à sua adenda e não se repete nem se renomeia", () => {
+    const { A, d, a } = preparar();
+    A.role("comercial");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 10 }], "Mais uma divisão");
+    const a2 = d.adendas!.find((x) => x !== a) as Adenda, N2 = a2.n;
+    adendaAssinada(A, d.id, N2);
+    // como antes de 22/10: a adenda 2 ficou com a EC-1027-A1 (sequencial), ligada só pelo motivo
+    d.obra.ecsAjuste = [{ n: "EC-1027-A1", ref: "CT 2026/1027 · A1", estado: "emitida", criada: "21/10", linhas: [], motivo: "adenda " + N2, valor: 0, custo: 0 }];
+    expect(ecDaAdenda(d, N2)?.n).toBe("EC-1027-A1");
+    expect(ecDaAdenda(d, N)).toBeUndefined();
+    // a adenda 1 não pode ficar com A1 (já usado): leva o primeiro livre que não é número de outra adenda
+    expect(kAjuste(d, N)).toBe(3);
+    expect(kAjuste(d, N2)).toBe(2);
+    // um ajuste que não é de adenda salta os números das adendas
+    expect(kAjuste(d)).toBe(3);
+    expect(numeroAdenda("AD 2026/1027-12")).toBe(12);
+  });
+
+  it("duas adendas no mesmo estado (rascunho, depois aceites): a ação do Hoje da adenda 2 age só na adenda 2", () => {
+    const { S, A, d } = preparar();
+    A.role("comercial");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 5 }], "Outra");
+    A.criarAdenda(d.id, [{ sid: "pint", q: 6 }], "E outra");
+    const [b1, b2] = d.adendas!.filter((x) => x.estado === "rascunho");
+    const doHoje = (re: RegExp) => minhas(S, "comercial").find((x) => x.d === d && re.test(x.p.t))!;
+    // verificar a adenda 2 (a 1 continua por verificar)
+    const v2 = doHoje(new RegExp(`adenda ${b2.n.replace("/", "\/")}$`));
+    expect(v2.p).toMatchObject({ act: "verificarAdenda", arg: b2.n });
+    fazer(A, v2.p.act!, d.id, v2.p.arg);
+    expect(b2.verif).toBe(true);
+    expect(b1.verif).toBeFalsy();
+    // os dois verificados e enviados ao cliente, que aceita os dois: gerar o contrato da 2 só gera o da 2
+    A.verificarEnviarAdenda(d.id, b1.n); A.verificarEnviarAdenda(d.id, b2.n);
+    A.aceitarAdenda(d.id, b1.n); A.aceitarAdenda(d.id, b2.n);
+    const c2 = doHoje(new RegExp(`^Aceitou a adenda ${b2.n.replace("/", "\/")}`));
+    expect(c2.p).toMatchObject({ act: "enviarContratoAdenda", arg: b2.n });
+    fazer(A, c2.p.act!, d.id, c2.p.arg);
+    expect(b2.contrato).toBe("enviado");
+    expect(b1.contrato).toBeFalsy();
+    // sem número continua a fazer a primeira (os outros chamadores)
+    A.enviarContratoAdenda(d.id);
+    expect(b1.contrato).toBe("enviado");
   });
 
   it("Arrancar a obra: por adenda, «1.ª parcela da adenda paga» e depois «Encomenda da adenda»", () => {
