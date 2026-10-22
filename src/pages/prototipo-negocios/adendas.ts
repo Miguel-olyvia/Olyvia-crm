@@ -19,6 +19,8 @@ export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu
   /** 22/10: o perfil do Catálogo pelo id (o técnico do plano escolhe-se por ele) */ perfilId?: string;
   /** 22/10 (fase 2): o custo por unidade congelado quando a adenda é enviada ao cliente (ou aprovada pela Direção); antes, o de agora */
   cu?: number;
+  /** 22/10 (fase 3): a mão de obra por unidade congelada com o cu (horas × €/h dos ofícios): o previsto da obra para as tarefas da adenda */
+  mo?: number;
   /** 21/10: uma linha livre (de um imprevisto): o trabalho descrito à mão, com as horas e os materiais escolhidos */
   livre?: true; mats?: MatTarefa[] }
 /** 21/10: rascunho (por verificar e enviar) → enviada (a proposta no portal) → aceite (o contrato da adenda) → assinada;
@@ -128,7 +130,11 @@ export function cuLinhaAdenda(S: Estado, x: LinhaAdenda): number {
 }
 /** 22/10 (fase 2): congela o custo de cada linha (no envio ao cliente e na aprovação da Direção). As já congeladas ficam. */
 export function congelarAdenda(S: Estado, a: Adenda): void {
-  for (const x of a.linhas) if (x.cu == null) x.cu = cuLinhaAdenda(S, x);
+  for (const x of a.linhas) {
+    if (x.cu == null) x.cu = cuLinhaAdenda(S, x);
+    const s = S.svc[x.sid];
+    if (x.mo == null && s) x.mo = r2(s.h * s.eh);
+  }
 }
 /** 21/10 (decisão D): os bloqueios e avisos da adenda, com as regras do orçamento (margem mínima, abaixo do custo, desconto). */
 export function alertasAdenda(d: Negocio, S: Estado, a: Adenda): Alerta[] {

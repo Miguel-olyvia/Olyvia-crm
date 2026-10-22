@@ -109,6 +109,8 @@ export interface Envio {
   /** registo: o registo de um dia; feita: o último, que pede a validação; validada / correcao: o responsável de obra. */
   k: "registo" | "feita" | "validada" | "correcao";
   horas?: number;
+  /** 22/10 (fase 3): o €/h do técnico quando registou estas horas (o real da obra valoriza-as assim, mesmo que o €/h mude depois). */
+  ch?: number;
   fotos?: string[];
   nota?: string;
   /** Os passos que ficaram feitos neste envio. */

@@ -106,7 +106,8 @@ describe("protótipo de Negócios", () => {
     completarParaEncerrar(d());
     A.fimObra(id);
     expect(d().obra.plano!.estado).toBe("concluída");
-    expect(d().obra.real!.m).toBeLessThan(T.m);
+    // 22/10 (fase 3): as horas registadas são as previstas, ao €/h dos mesmos técnicos: o real é o da proposta (sem desvio)
+    expect(d().obra.real!.m).toBeCloseTo(T.m, 3);
     const antes = JSON.stringify(realPorFase(d(), S));
     A.aprender(id);
     expect(S.svc.revest.h).toBeGreaterThan(0.75);

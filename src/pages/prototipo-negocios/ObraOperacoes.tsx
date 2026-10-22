@@ -12,16 +12,18 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PAPEIS, TECS, aberto, conflitos, diaDeFerias, eur, nfmt, type Negocio, type Papel, type Tarefa } from "./motor";
+import { PAPEIS, TECS, aberto, conflitos, diaDeFerias, eur, nfmt, type Estado, type Negocio, type Papel, type Tarefa } from "./motor";
 import { COR_FASE, dataCurta, iniciosRapidos, isoDia } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, tecnicosPara } from "./preparacaoObra";
 import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
 import { HORAS_DIA } from "./ganttOrcamento";
 import {
-  RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, custosObra, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
+  RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
   iniciais, materiaisPorFase, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
 } from "./obraOps";
+import { custoObra } from "./custoObra";
+import { assinadas } from "./adendas";
 import type { Ctx } from "./pecas";
 import { AutoNoNegocio } from "./AutoRececao";
 import { pontosEncerrar, type PontoEncerrar } from "./encerrarObra";
@@ -363,7 +365,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {aba === "registos" && <>
           <DiarioObra ctx={ctx} d={d} pode={pode || direcao} />
           <SegurancaObra ctx={ctx} d={d} pode={pode} />
-          {(direcao || pode) && <CustosObra d={d} />}
+          {(direcao || pode) && <CustosObra d={d} S={S} />}
         </>}
       </div>
     </div>
@@ -1336,27 +1338,42 @@ function SegurancaObra({ ctx, d, pode }: { ctx: Ctx; d: Negocio; pode: boolean }
 }
 
 /* ------------------------------------------------------------------ custos previstos e reais (Direção e Operações) */
-function CustosObra({ d }: { d: Negocio }) {
-  const p = d.obra.plano!, K = custosObra(p);
-  const registadas = K.linhas.filter((l) => l.real != null).length;
+// 22/10 (fase 3): os três números da obra indexada à proposta (custoObra.ts): o previsto é a mão de obra da proposta aceite (congelada no
+// envio, mais as adendas assinadas), o real são as horas registadas × o €/h do técnico no registo, o desvio é real − previsto.
+const sinal = (x: number) => (x > 0.005 ? "+" : x < -0.005 ? "−" : "") + eur(Math.abs(x));
+function CustosObra({ d, S }: { d: Negocio; S: Estado }) {
+  const p = d.obra.plano!, K = custoObra(d, S);
+  const cor = (x: number | null) => (x == null ? "text-muted-foreground" : x > 0.5 ? "text-warning" : x < -0.5 ? "text-success" : "");
   return (
-    <section id="obra-custos" aria-labelledby="obra-custos-t" className="mt-10 scroll-mt-16">
+    <section id="obra-custos" aria-labelledby="obra-custos-t" className="mt-10 scroll-mt-16" data-testid="custos-obra">
       <h2 id="obra-custos-t" className={H2}>Custos de mão de obra</h2>
-      <p className={cn(NOTA, "mt-1")}>Previsto pelo plano; real pelas horas que os técnicos registaram ({registadas} de {K.linhas.length} tarefas). Só a Direção e as Operações veem.</p>
+      <p className={cn(NOTA, "mt-1")}>Previsto: a mão de obra da proposta aceite (horas × €/h de cada ofício no envio){assinadas(d).length ? " e das adendas assinadas" : ""}. Real: as horas que os técnicos registaram × o custo/hora de cada um no RH ({K.registadas} de {K.linhas.length} tarefas). Só a Direção e as Operações veem.</p>
+      <dl className="mt-3 grid grid-cols-3 gap-3 rounded-xl border border-border p-3 text-[15px]">
+        <div><dt className="text-sm text-muted-foreground">Previsto</dt><dd className="font-semibold tabular-nums" data-testid="custo-prev">{eur(K.prev)} €</dd></div>
+        <div><dt className="text-sm text-muted-foreground">Real até agora</dt><dd className="font-semibold tabular-nums" data-testid="custo-real">{K.registadas ? `${eur(K.real)} €` : "—"}</dd></div>
+        <div><dt className="text-sm text-muted-foreground">Desvio <span className="text-xs">(nas tarefas com horas: {eur(K.prevFeito)} € previstos)</span></dt>
+          <dd className={cn("font-semibold tabular-nums", cor(K.registadas ? K.desvio : null))} data-testid="custo-desvio">{K.registadas ? `${sinal(K.desvio)} €` : "—"}</dd></div>
+      </dl>
       <table className="mt-3 w-full text-[15px]">
-        <thead><tr className="text-left text-sm text-muted-foreground"><th className="py-2 font-normal">Tarefa</th><th className="py-2 text-right font-normal">Previsto</th><th className="py-2 text-right font-normal">Real</th></tr></thead>
+        <thead><tr className="text-left text-sm text-muted-foreground"><th className="py-2 font-normal">Tarefa</th><th className="py-2 text-right font-normal">Previsto</th><th className="py-2 text-right font-normal">Real</th><th className="py-2 text-right font-normal">Desvio</th></tr></thead>
         <tbody className="divide-y divide-border border-y border-border">
-          {K.linhas.map((l, i) => {
-            const t: Tarefa = p.tasks[i];
+          {K.linhas.map((l) => {
+            const t: Tarefa = p.tasks[l.ti];
             return (
-              <tr key={i}><td className="py-2 pr-2">{l.n}<span className="block text-sm text-muted-foreground">{nfmt(t.h)} h previstas</span></td>
+              <tr key={l.ti}><td className="py-2 pr-2">{l.n}<span className="block text-sm text-muted-foreground">{l.origem === "fora" ? "fora da proposta" : `${nfmt(l.hPrev)} h na proposta`}{l.hReal != null ? ` · ${nfmt(l.hReal)} h registadas` : ""}{t.tec ? "" : " · por atribuir"}</span></td>
                 <td className="py-2 text-right tabular-nums">{eur(l.prev)} €</td>
-                <td className={cn("py-2 text-right tabular-nums", l.real != null && l.real > l.prev + 0.5 ? "text-warning" : l.real == null && "text-muted-foreground")}>{l.real == null ? "—" : `${eur(l.real)} €`}</td></tr>
+                <td className={cn("py-2 text-right tabular-nums", l.real == null && "text-muted-foreground")}>{l.real == null ? "—" : `${eur(l.real)} €`}</td>
+                <td className={cn("py-2 text-right tabular-nums", cor(l.desvio))}>{l.desvio == null ? "—" : `${sinal(l.desvio)} €`}</td></tr>
             );
           })}
         </tbody>
-        <tfoot><tr className="font-semibold"><td className="py-2">Total</td><td className="py-2 text-right tabular-nums">{eur(K.prev)} €</td><td className="py-2 text-right tabular-nums">{registadas ? `${eur(K.real)} €` : "—"}</td></tr></tfoot>
+        <tfoot><tr className="font-semibold"><td className="py-2">Total</td><td className="py-2 text-right tabular-nums">{eur(K.prev)} €</td><td className="py-2 text-right tabular-nums">{K.registadas ? `${eur(K.real)} €` : "—"}</td><td className={cn("py-2 text-right tabular-nums", cor(K.registadas ? K.desvio : null))}>{K.registadas ? `${sinal(K.desvio)} €` : "—"}</td></tr></tfoot>
       </table>
+      {K.fases.length > 1 && (
+        <ul className="mt-3 flex flex-wrap gap-2 text-sm" aria-label="Por fase">
+          {K.fases.map((f) => <li key={f.fase} className="rounded-full border border-border px-3 py-1 tabular-nums">{f.fase ? `Fase ${f.fase}` : "Sem fase"}: {eur(f.prev)} € previstos · {eur(f.real)} € reais</li>)}
+        </ul>
+      )}
     </section>
   );
 }

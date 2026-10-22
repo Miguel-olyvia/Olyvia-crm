@@ -31,7 +31,8 @@ import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./invent
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
-import { TECNICOS, garantirTecnicos, perfilDoTecnico, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
+import { TECNICOS, custoHoraDe, garantirTecnicos, perfilDoTecnico, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
+import { custoObra } from "./custoObra";
 import { contaCliente, mostrarAcesso, type ContaPortal, type DocPortal } from "./acessosPortal";
 // 22/10: os custos (perfis, €/h dos técnicos, estrutura, receitas) vivem no Estado (S.custos). Só se usam dentro de funções (o
 // custosModelo também importa o motor: a ordem de carga não importa).
@@ -1035,6 +1036,14 @@ export function conflitos(p: Plano) {
   return C;
 }
 export function realObra(d: Negocio, S: Estado): Real {
+  // 22/10 (fase 3): com horas registadas, o real é o custo da proposta + o desvio da mão de obra (custoObra.ts: horas × €/h do técnico
+  // no registo − o previsto congelado na proposta). Sem horas registadas (as obras antigas do exemplo), o real de exemplo (fatorReal).
+  const K = custoObra(d, S);
+  if (K.registadas) {
+    const T0 = tot(d, S), custoReal = r2(T0.custo + K.desvio);
+    const tasks = K.linhas.map((l) => ({ nome: l.n, prev: l.hPrev, real: l.hReal ?? 0 }));
+    return { tasks, custoReal, m: T0.pf > 0 ? (T0.pf - custoReal) / T0.pf : 0 };
+  }
   let extra = 0;
   const tasks = d.obra.plano!.tasks.map((t) => {
     let hr = 0;
@@ -1940,7 +1949,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       if (!a || (a.estado !== "enviada" && a.estado !== "aceite") || !a.enviada) return false;
       const k = Number(a.n.split("-").at(-1)) || 1;
       // a versão nova é um rascunho: o custo volta a ser o de agora (congela-se de novo no envio)
-      const livresAntes = a.linhas.filter((x) => x.livre && itens.some((y) => y.sid === x.sid)).map(({ cu: _cu, ...x }) => ({ ...x, mats: x.mats?.map((m) => ({ ...m })) }));
+      const livresAntes = a.linhas.filter((x) => x.livre && itens.some((y) => y.sid === x.sid)).map(({ cu: _cu, mo: _mo, ...x }) => ({ ...x, mats: x.mats?.map((m) => ({ ...m })) }));
       const linhas = [...linhasDaAdenda(d, k, itens.filter((y) => !a.linhas.some((x) => x.livre && x.sid === y.sid)), []), ...livresAntes];
       if (!linhas.length) return false;
       const v = versaoAdenda(a), pc = a.pedidoCliente;
@@ -2205,7 +2214,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
       if (e.estado === "validada") return;
       if (e.estado !== "feita") e.estado = "em curso";
-      if (m.horas != null) e.horas = Math.max(0, Math.round(m.horas * 2) / 2);
+      if (m.horas != null) { e.horas = Math.max(0, Math.round(m.horas * 2) / 2); e.ch = custoHoraDe(t.tec); }
       if (m.foto) e.fotos = [...e.fotos, m.foto].slice(-4);
       if (m.tirarFoto != null) e.fotos = e.fotos.filter((_, i) => i !== m.tirarFoto);
       if (m.nota != null) e.nota = m.nota.trim() || undefined;
@@ -2253,7 +2262,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const eu = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, nota = m.nota.trim() || "Dada por feita pelo responsável de obra.";
       const e: ExecTarefa = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
       // as horas: as registadas pelo técnico ou, sem registo, as previstas
-      if (!(e.horas > 0)) e.horas = t.h;
+      if (!(e.horas > 0)) { e.horas = t.h; e.ch = custoHoraDe(t.tec); }
       e.fotos = [...e.fotos, ...m.fotos].slice(-6); e.nota = nota; e.motivo = undefined;
       e.estado = "feita"; e.feita = agora();
       (e.envios ??= []).push({ q: agora(), dia: p.dia, quem: eu, k: "feita", fotos: m.fotos.slice(), nota });
@@ -2365,7 +2374,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       e.horas = Math.round((e.horas + horas) * 2) / 2;
       e.fotos = [...e.fotos, ...m.fotos].slice(-6);
       e.nota = nota; e.motivo = undefined;
-      const envio: Envio = { q: agora(), dia: p.dia, quem, k: m.feita ? "feita" : "registo", horas, fotos: m.fotos.slice(), nota, passos: feitos.filter((x) => !ja.has(x)) };
+      // 22/10 (fase 3): o €/h do técnico neste registo (o real da obra valoriza estas horas assim, mesmo que o €/h mude depois)
+      const envio: Envio = { q: agora(), dia: p.dia, quem, k: m.feita ? "feita" : "registo", horas, ch: custoHoraDe(t.tec), fotos: m.fotos.slice(), nota, passos: feitos.filter((x) => !ja.has(x)) };
       (e.envios ??= []).push(envio);
       if (m.feita) { e.estado = "feita"; e.feita = agora(); } else e.estado = "em curso";
       t.exec = e;

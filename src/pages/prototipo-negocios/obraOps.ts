@@ -27,6 +27,8 @@ export interface ExecTarefa {
   envios?: Envio[];
   /** 21/10: os passos das instruções já marcados pelo técnico (índices). */
   passos?: number[];
+  /** 22/10 (fase 3): o €/h do técnico quando as horas foram registadas fora de um envio (mudadas pelo responsável). */
+  ch?: number;
 }
 export const ROTULO_EXEC: Record<EstadoExec, string> = {
   "por fazer": "por fazer", "em curso": "em curso", feita: "feita, por validar", validada: "validada", corrigir: "a corrigir",
@@ -207,12 +209,6 @@ export function seguranca(d: Negocio): ItemSeg[] {
 export interface EntradaDiario { q: string; quem: string; t: string; k: "horas" | "foto" | "nota" | "ocorrencia" | "validacao" | "correcao" | "marco"; fotos?: string[] }
 
 /* ------------------------------------------------------------------ custos previstos e reais (Direção e Operações) */
-export function custosObra(p: Plano): { linhas: { n: string; prev: number; real: number | null }[]; prev: number; real: number } {
-  const linhas = p.tasks.map((t) => {
-    const ch = custoHoraDe(t.tec), prev = Math.round(t.h * ch * 100) / 100;
-    const real = t.exec && t.exec.horas > 0 ? Math.round(t.exec.horas * ch * 100) / 100 : null;
-    return { n: t.nome, prev, real };
-  });
-  return { linhas, prev: linhas.reduce((a, l) => a + l.prev, 0), real: linhas.reduce((a, l) => a + (l.real ?? 0), 0) };
-}
+// 22/10 (fase 3): o previsto e o real da mão de obra da obra estão em custoObra.ts (o previsto da proposta congelada, o real das horas
+// registadas × o €/h do técnico no registo): custosObra(p), que media as horas do plano ao €/h de hoje, saiu.
 

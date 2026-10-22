@@ -5,6 +5,7 @@
 // · a curva do custo acumulado: a mão de obra corre ao longo da tarefa, os materiais entram no início da sua fase.
 // Funções puras, sem React.
 import { fatorReal, linhaCalc, r2, type Estado, type Negocio } from "./motor";
+import { custoObra } from "./custoObra";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { TAREFA_DEMOLICAO, diasPrevistos, tarefasPrevistas, type TarefaPrevista } from "./ganttOrcamento";
 import { LINHA_DEMOLICAO } from "./entulho";
@@ -280,6 +281,9 @@ function calcularRealPorFase(d: Negocio, S: Estado): ObraReal | null {
   const P = planoObra(d, S);
   if (!P.tarefas.length) return null;
   const hv = horasValidadas(d);
+  // 22/10 (fase 3): com horas registadas, o custo real de cada fase é o previsto + o desvio da mão de obra das tarefas dessa fase
+  // (custoObra.ts: horas × €/h do técnico no registo − o previsto congelado na proposta): os mesmos números da página da obra
+  const K = custoObra(d, S), comHoras = K.registadas > 0;
   let fimReal = 0;
   const fases: FaseReal[] = P.fases.map((f) => {
     const tarefas: TarefaReal[] = f.tarefas.map((t) => {
@@ -288,7 +292,9 @@ function calcularRealPorFase(d: Negocio, S: Estado): ObraReal | null {
       return { chave: t.chave, nome: t.nome, hPrev: r2(t.h), hReal: r2(t.h * fator), fator };
     });
     const hPrev = tarefas.reduce((a, t) => a + t.hPrev, 0), hReal = tarefas.reduce((a, t) => a + t.hReal, 0);
-    const extra = f.tarefas.reduce((a, t, i) => a + (tarefas[i].hReal - t.h) * t.custoHora, 0);
+    const extra = comHoras
+      ? K.linhas.filter((l) => (l.fase ?? 0) === f.n).reduce((a, l) => a + (l.desvio ?? 0), 0)
+      : f.tarefas.reduce((a, t, i) => a + (tarefas[i].hReal - t.h) * t.custoHora, 0);
     const diasPrev = f.fim - f.inicio;
     const diasReal = diasPrev > 0 ? Math.max(0.5, Math.round(diasPrev * (hPrev > 0 ? hReal / hPrev : 1) * 2) / 2) : 0;
     const custoReal = r2(f.custo + extra);

@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
 import { TECS, acoes, conflitos, seed, type Estado } from "../motor";
-import { custoHoraDe, custosObra, equipaDaObra } from "../obraOps";
+import { custoHoraDe, equipaDaObra } from "../obraOps";
+import { custoObra } from "../custoObra";
 import { tecnicosPara } from "../preparacaoObra";
 import { juntarEstado, partesDoEstado } from "../sincronizacao";
 import { seedFrota } from "../frota/seed";
@@ -48,22 +49,22 @@ describe("a ficha dos técnicos", () => {
     expect(custoHoraDe(null)).toBe(CUSTO_HORA_OMISSAO);
   });
 
-  it("22/10: o custo/hora vem dos Custos do RH: mudar a retribuição muda o custo previsto e o real da obra (só nas tarefas dele)", () => {
+  it("22/10: o custo/hora vem dos Custos do RH: mudar a retribuição muda o real das horas que ele registar, não o previsto (congelado na proposta)", () => {
     const { S } = estado();
-    const p = obra(S, 1022).obra.plano!;
-    const antes = custosObra(p);
+    const d = obra(S, 1022), p = d.obra.plano!;
+    const antes = custoObra(d, S);
     const deHugo = p.tasks.filter((t) => t.tec === "hn"), hHugo = deHugo.reduce((a, t) => a + t.h, 0);
     expect(hHugo).toBeGreaterThan(0);
     expect(salarioRh(S, "hn", 3560)).toBe(true);
     const ch = S.tecnicos!.find((t) => t.id === "hn")!.custoHora;
     expect(ch).toBe(sugestaoCustoHora(lerRh().fichas["p-tec-hn"])!.valor);
     expect(ch).toBeCloseTo(30.01, 2);
-    const depois = custosObra(p);
-    expect(depois.prev).toBeCloseTo(antes.prev + hHugo * (ch - 17.8), 1);
-    p.tasks.forEach((t, i) => { if (t.tec !== "hn") expect(depois.linhas[i].prev).toBe(antes.linhas[i].prev); });
+    const depois = custoObra(d, S);
+    expect(depois.prev).toBe(antes.prev); // fase 3: o previsto é o da proposta aceite
+    expect(depois.linhas.map((l) => l.real)).toEqual(antes.linhas.map((l) => l.real)); // as horas já registadas não mudam
     expect(equipaDaObra(p).find((m) => m.id === "hn")?.custoH).toBe(ch);
     deHugo[0].exec = { estado: "feita", horas: 10, fotos: ["x"] };
-    expect(custosObra(p).linhas[p.tasks.indexOf(deHugo[0])].real).toBeCloseTo(10 * ch, 2);
+    expect(custoObra(d, S).linhas[p.tasks.indexOf(deHugo[0])].real).toBeCloseTo(10 * ch, 2);
   });
 
   it("22/10: o custo/hora já não se escreve à mão; só a Direção e as Operações mudam o ofício; ofícios fora da lista não passam", () => {
@@ -114,7 +115,7 @@ describe("os estados de antes da ficha", () => {
     const A = acoes(velho, () => undefined, (fn) => fn());
     expect(velho.tecnicos!.map((t) => t.id)).toEqual(["js", "ra", "ma", "sf", "hn", "pm"]);
     expect(custoHoraDe("ma")).toBe(18.5);
-    expect(custosObra(obra(velho, 1022).obra.plano!).prev).toBeGreaterThan(0);
+    expect(custoObra(obra(velho, 1022), velho).prev).toBeGreaterThan(0);
     velho.role = "direcao";
     A.editarTecnico("ma", { perfilId: "gas" });
     expect(velho.tecnicos!.find((t) => t.id === "ma")!.sk).toBe("Técnico de gás (ITG)");

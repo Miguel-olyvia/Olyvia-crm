@@ -948,3 +948,9 @@ Pedido original do Ruben (14/10): "o orçamento gera o contrato; depois do contr
 - **"Atualizar o custo com o Catálogo"** (`recalc`) não mexe numa proposta enviada (como o preço).
 - **Adendas:** o `cu` de cada linha congela-se no envio ao cliente e na aprovação da Direção (`adendas.ts: congelarAdenda`); a versão nova volta a ser rascunho (custo de agora).
 - **Preços:** o preço de tabela mantém-se; os alertas de margem já usam o custo real (o €/h dos técnicos, fase 1).
+
+## A obra indexada à proposta (22/10/2026, fase 3)
+
+- **Os mesmos três números em todos os ecrãs da obra** (`custoObra.ts: custoObra`): **previsto** = a mão de obra da proposta aceite, congelada no envio (`det.mo`), mais a das adendas assinadas (`LinhaAdenda.mo`, congelada no envio da adenda) e a da demolição (o cálculo do orçamento); **real** = as horas registadas × o €/h do técnico **no momento do registo** (`Envio.ch` no registo do técnico; `ExecTarefa.ch` quando o responsável muda as horas); **desvio** = real − previsto, nas tarefas com horas. Por tarefa, fase e ofício. Correções e tarefas juntadas pelo validador têm previsto 0 (o custo delas é desvio).
+- Os registos de antes desta fase (sem €/h guardado) usam o €/h de agora da ficha do técnico. Mudar o €/h de um técnico não mexe no previsto nem nas horas já registadas.
+- `custosObra(p)` (horas do plano × €/h de hoje) saiu; a página da obra (`ObraOperacoes.tsx`, "Custos de mão de obra") mostra os três números. `realPorFase` e `realObra` somam ao previsto o desvio da mão de obra quando há horas registadas; sem horas (as obras antigas do exemplo), o real de exemplo (`fatorReal`). Só mão de obra: materiais, equipamento e consumíveis contam como previstos. A V2 (`v2/operacoes.ts: previstoReal`) lê `partes()`, já congelado (fase 2), com os fatores de exemplo.

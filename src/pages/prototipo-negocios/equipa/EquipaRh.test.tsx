@@ -9,7 +9,7 @@ vi.mock("@/integrations/supabase/client", () => { throw new Error("Os ecrãs da 
 
 import { atualizarFicha, lerEstado } from "@/components/rh-exemplo/dados/loja";
 import { acoes, seed, type Estado } from "../motor";
-import { custosObra } from "../obraOps";
+import { custoObra } from "../custoObra";
 import MenuRh from "../rh/MenuRh";
 import RhPagina from "../rh/RhPagina";
 import type { AbaRh } from "../rh/abas";
@@ -67,7 +67,7 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
     expect(within(bloco).queryByLabelText("Custo por hora (€/h)")).not.toBeInTheDocument();
     expect(within(bloco).getByText(/#1022/)).toBeInTheDocument();
     // mudar a retribuição no RH muda o €/h dele, a média do Ladrilhador e o custo do revestimento num orçamento novo
-    const p = S.deals.find((d) => d.id === 1022)!.obra.plano!, antes = custosObra(p).prev, revAntes = S.svc.revest.eh;
+    const d22 = S.deals.find((d) => d.id === 1022)!, antes = custoObra(d22, S).prev, revAntes = S.svc.revest.eh;
     const enviado = S.deals.find((d) => d.id === 1050)!.orc!.linhas.find((l) => l.t === "svc" && l.sid === "revest")!;
     const cuEnviado = enviado.t === "svc" ? enviado.cu : 0;
     act(() => atualizarFicha("p-tec-hn", (f) => ({ ...f, retribuicoes: f.retribuicoes.map((r) => ({ ...r, valor_base: 2500 })) })));
@@ -75,7 +75,7 @@ describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
     expect(hn.custoHora).toBe(21.08);
     expect(S.svc.revest.eh).toBeCloseTo((17.8 + 21.08) / 2, 2);
     expect(S.svc.revest.eh).toBeGreaterThan(revAntes);
-    expect(custosObra(p).prev).toBeGreaterThan(antes);
+    expect(custoObra(d22, S).prev).toBe(antes); // o previsto da obra é o da proposta (congelado)
     expect(enviado.t === "svc" && enviado.cu).toBe(cuEnviado); // a proposta já enviada não muda
     await waitFor(() => expect(within(bloco).getByTestId("custo-hora-rh")).toHaveTextContent("21,08 €/h"));
     // as férias: junta um dia e tira-o
