@@ -1,9 +1,9 @@
 // As entradas do grupo "Recursos Humanos" do protótipo: cada uma é um ecrã dos ecrãs de RH de exemplo (src/pages/rh-exemplo, vindos do ramo
 // feature/rh-pessoas) com o caminho que a moldura (RhPagina) abre. Só dados de teste em memória, sem base de dados.
-import { CalendarDays, CalendarRange, Clock, Coins, Eye, FileText, FolderOpen, IdCard, MapPin, Megaphone, Network, Receipt, ShieldAlert, Users, type LucideIcon } from "lucide-react";
+import { CalendarClock, CalendarDays, CalendarRange, Clock, Coins, Eye, FileText, FolderOpen, HardHat, IdCard, MapPin, Megaphone, Network, Receipt, ShieldAlert, Users, type LucideIcon } from "lucide-react";
 
 export type AbaRh =
-  | "pessoas" | "organizacao" | "assiduidade" | "centros" | "processamento" | "modelos" | "custos" | "denuncias" | "verComoPessoa"
+  | "pessoas" | "tecnicos" | "agenda" | "organizacao" | "assiduidade" | "centros" | "processamento" | "modelos" | "custos" | "denuncias" | "verComoPessoa"
   | "documentos" | "ausencias" | "ponto" | "minhasDenuncias";
 export type Idioma = "pt" | "en";
 export type GrupoRh = "gestao" | "eu";
@@ -27,6 +27,10 @@ export const GRUPO_RH: Record<GrupoRh, Record<Idioma, string>> = {
 
 export const ABAS_RH: readonly AbaRhDef[] = [
   { k: "pessoas", caminho: "/rh-exemplo/pessoas", grupo: "gestao", icone: Users, rotulo: { pt: "Pessoas", en: "People" } },
+  // 22/10: os técnicos de obra (a ficha com o custo/hora) e a agenda da equipa: ecrãs do protótipo (equipa/), não do RH de exemplo. Não passam
+  // pelo router interno (RhPagina mostra-os direto): o caminho só existe para CAMINHO_DE.
+  { k: "tecnicos", caminho: "/rh-exemplo/tecnicos-de-obra", grupo: "gestao", icone: HardHat, exato: true, rotulo: { pt: "Técnicos", en: "Site technicians" } },
+  { k: "agenda", caminho: "/rh-exemplo/agenda-da-equipa", grupo: "gestao", icone: CalendarClock, exato: true, rotulo: { pt: "Agenda", en: "Team schedule" } },
   { k: "organizacao", caminho: "/rh-exemplo/organizacao", grupo: "gestao", icone: Network, rotulo: { pt: "Organização", en: "Organisation" } },
   { k: "assiduidade", caminho: "/rh-exemplo/assiduidade-e-ausencias", grupo: "gestao", icone: CalendarRange, rotulo: { pt: "Assiduidade e ausências", en: "Attendance and absences" } },
   { k: "centros", caminho: "/rh-exemplo/centros", grupo: "gestao", icone: MapPin, rotulo: { pt: "Centros de trabalho", en: "Work centres" } },

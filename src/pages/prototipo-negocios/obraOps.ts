@@ -9,6 +9,7 @@ import { RECEITAS } from "./receitas";
 import { rotuloDia } from "./preparacaoObra";
 import { linhaDoResumo, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import type { Envio } from "./trabalhoObra";
+import { custoHoraDe, fichaTecnico } from "./equipa/tecnicos";
 
 /* ------------------------------------------------------------------ o ciclo da tarefa */
 export type EstadoExec = "por fazer" | "em curso" | "feita" | "validada" | "corrigir";
@@ -104,15 +105,8 @@ export function fotoExemplo(nome: string, cor = "#7c5ce0", k = 0): string {
 }
 
 /* ------------------------------------------------------------------ a equipa */
-/** Os dados de exemplo de cada técnico (nomes fictícios; o custo/hora só a Direção o vê). */
-export const FICHA_TEC: Record<string, { tel: string; custoH: number; desde: string }> = {
-  js: { tel: "912 418 330", custoH: 14.2, desde: "2019" },
-  ra: { tel: "913 552 071", custoH: 14.2, desde: "2022" },
-  ma: { tel: "936 120 447", custoH: 18.5, desde: "2017" },
-  sf: { tel: "961 734 205", custoH: 17.8, desde: "2018" },
-  hn: { tel: "924 806 113", custoH: 17.8, desde: "2021" },
-  pm: { tel: "917 645 382", custoH: 16.9, desde: "2020" },
-};
+// 22/10: o telefone e o custo/hora de cada técnico vêm da ficha dos técnicos (equipa/tecnicos.ts, RH › Técnicos), que se edita;
+// antes estavam fixos aqui (FICHA_TEC). O custo/hora só a Direção e as Operações o veem.
 export const RESPONSAVEL_OBRA = { n: "Filipe Rocha", papel: "Responsável de obra", tel: "917 300 210" };
 export const iniciais = (n: string) => n.split(" ").filter(Boolean).map((x) => x[0]).slice(0, 2).join("").toUpperCase();
 
@@ -122,15 +116,15 @@ export function equipaDaObra(p: Plano): Membro[] {
   for (const t of p.tasks) {
     const tec = TECS.find((x) => x.id === t.tec);
     if (!tec) continue;
-    const f = FICHA_TEC[tec.id] ?? { tel: "—", custoH: 16, desde: "" };
-    const m = M.get(tec.id) ?? { id: tec.id, n: tec.n, sk: tec.sk, tel: f.tel, custoH: f.custoH, dias: 0, horas: 0, tarefas: [], ds: new Set<number>() };
+    const m = M.get(tec.id) ?? { id: tec.id, n: tec.n, sk: tec.sk, tel: fichaTecnico(tec.id)?.tel ?? "—", custoH: custoHoraDe(tec.id), dias: 0, horas: 0, tarefas: [], ds: new Set<number>() };
     for (let k = t.dia; k < t.dia + t.dur; k++) m.ds.add(k);
     m.horas += t.h; m.tarefas.push(t.nome);
     M.set(tec.id, m);
   }
   return [...M.values()].map(({ ds, ...m }) => ({ ...m, dias: ds.size, horas: Math.round(m.horas * 10) / 10 }));
 }
-export const custoHoraDe = (tec: string | null) => (tec && FICHA_TEC[tec]?.custoH) || 16;
+/** O custo/hora de quem faz a tarefa, pela ficha do técnico (16 €/h sem técnico ou sem ficha). */
+export { custoHoraDe };
 
 /* ------------------------------------------------------------------ os equipamentos */
 type Origem = "Armazém" | "Aluguer" | "Frota";

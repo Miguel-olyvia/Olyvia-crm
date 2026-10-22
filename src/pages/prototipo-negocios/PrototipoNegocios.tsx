@@ -15,6 +15,7 @@ import {
   type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
 import { migrarAdendas } from "./adendas";
+import { garantirTecnicos } from "./equipa/tecnicos";
 import { Hoje } from "./Hoje";
 import { HojeSimples } from "./HojeSimples";
 import { HojeTecnico } from "./HojeTecnico";
@@ -81,7 +82,8 @@ function ler(): Estado {
   try {
     const j = JSON.parse(localStorage.getItem(CHAVE) || "null");
     // 21/10: os clientes com vários negócios juntam-se a um Estado já guardado (só os que faltam)
-    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); migrarAdendas(j as Estado); return j as Estado; }
+    // 22/10: e a ficha dos técnicos a um Estado guardado antes dela (garantirTecnicos)
+    if (j && j.v === VERSAO) { exemplosClientes(j as Estado); migrarAdendas(j as Estado); garantirTecnicos(j as Estado); return j as Estado; }
     // 21/10: as versões 18 a 20 (o acompanhamento da obra) migram sem perder o que se fez na demonstração:
     // só se juntam os dados novos do exemplo (a conversa da obra) a quem ainda não os tem
     if (j && j.v >= 18 && j.v < VERSAO) {
@@ -91,7 +93,7 @@ function ler(): Estado {
         if (s?.obra.chat && !d.obra.chat) d.obra.chat = s.obra.chat;
       }
       E.v = VERSAO;
-      exemplosClientes(E); migrarAdendas(E);
+      exemplosClientes(E); migrarAdendas(E); garantirTecnicos(E);
       return E;
     }
   } catch {
@@ -194,7 +196,8 @@ export default function PrototipoNegocios() {
     const aplicar = (S: Estado) => {
       if (S.v !== VERSAO) S.v = VERSAO;
       // uma sala de antes dos clientes com vários negócios: junta-os e partilha-os; 21/10: e as adendas de antes do percurso novo
-      const juntou = [exemplosClientes(S), migrarAdendas(S)].some(Boolean);
+      // 22/10: e uma sala de antes da ficha dos técnicos fica com os seis de sempre (e partilha-a)
+      const juntou = [exemplosClientes(S), migrarAdendas(S), garantirTecnicos(S)].some(Boolean);
       ref.current = S;
       try { localStorage.setItem(CHAVE, JSON.stringify(S)); } catch { /* ignora */ }
       redesenhar();
@@ -481,6 +484,9 @@ export default function PrototipoNegocios() {
     const irInventario = (): void => { setFrotaMock(false); setRhMock(false); setInvAba("wh"); setInvMock(true); };
     // 21/10: o Recursos Humanos (só dados de teste): abrir um ecrã fecha o Inventário e a Frota
     const abrirRh = (a: AbaRh): void => { setMais(false); setInvMock(false); setFrotaMock(false); setRhAba(a); setRhMock(true); };
+    // 22/10: da Agenda e dos Técnicos (RH) para a obra (Operações) ou para o negócio da visita
+    const irObraRh = (id: number): void => { setRhMock(false); run(() => A.abrirPlano(id)); };
+    const irNegocioRh = (id: number): void => { setRhMock(false); run(() => A.abrir(id)); };
     const menuRh = (aberto: boolean) => (comInvFrota ? <Suspense fallback={null}><MenuRh aba={ativoRh ? rhAba : null} aoIr={abrirRh} iniciarAberto={aberto} /></Suspense> : null);
     const papel = (
       <label className="grid gap-1.5 text-sm text-muted-foreground">
@@ -568,7 +574,7 @@ export default function PrototipoNegocios() {
               </div>
             ) : ativoRh ? (
               <div className="h-full animate-in fade-in-0 duration-200">
-                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground">A abrir os Recursos Humanos…</p>}><RhPagina aba={rhAba} aoMudarAba={setRhAba} /></Suspense>
+                <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground">A abrir os Recursos Humanos…</p>}><RhPagina aba={rhAba} aoMudarAba={setRhAba} equipa={{ S, A, run, irObra: irObraRh, irNegocio: irNegocioRh }} /></Suspense>
               </div>
             ) : <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
 

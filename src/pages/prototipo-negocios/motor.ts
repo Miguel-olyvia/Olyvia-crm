@@ -31,6 +31,7 @@ import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./invent
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
+import { OFICIOS, TECNICOS, garantirTecnicos, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
@@ -143,26 +144,19 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
   },
 };
 
-export interface Tecnico {
-  id: string; n: string; sk: string;
-  /** Os dias de férias nos planos de exemplo (índice do dia, DIAS). */
-  ferias: number[];
-  /** As férias em datas reais ("aaaa-mm-dd"), para os planos do orçamento (14/10). */
-  feriasDatas?: string[];
-}
-export const TECS: Tecnico[] = [
-  { id: "js", n: "João Silva", sk: "Servente · demolição", ferias: [] },
-  { id: "ra", n: "Rui Alves", sk: "Servente · demolição", ferias: [] },
-  { id: "ma", n: "Marco Antunes", sk: "Canalizador", ferias: [] },
-  // férias de exemplo: no plano de exemplo, o 4.º dia; em datas reais, 21 a 23 de outubro
-  { id: "sf", n: "Sérgio Faria", sk: "Ladrilhador", ferias: [3], feriasDatas: ["2026-10-21", "2026-10-22", "2026-10-23"] },
-  { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", ferias: [] },
-  { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [] },
-];
+export type { Tecnico };
+/** 22/10: os técnicos vêm da ficha dos técnicos no Estado (equipa/tecnicos.ts: S.tecnicos). TECS é o registo vivo dessa ficha
+ *  (os seis de sempre enquanto o Estado não a tem): procurar aqui um técnico vê o custo/hora, o ofício e as férias que estão na ficha. */
+export const TECS: Tecnico[] = TECNICOS;
 const REAL: Record<string, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02, eletr: 1, teto: 1.04, pint: 0.98 };
 export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17/10", "seg 20/10", "ter 21/10", "qua 22/10", "qui 23/10", "sex 24/10",
   // os planos do orçamento (14/10) podem passar das duas semanas: os dias úteis seguintes
   ...Array.from({ length: 30 }, (_, k) => { const t = new Date(2026, 9, 27 + Math.floor(k / 5) * 7 + (k % 5)); return ["seg", "ter", "qua", "qui", "sex"][k % 5] + " " + t.getDate() + "/" + (t.getMonth() + 1); })];
+/** 22/10: a data real ("aaaa-mm-dd") do dia `k` dos planos de exemplo (DIAS: "seg 13/10" → "2026-10-13"); "" fora de DIAS. */
+export function dataDeDia(k: number): string {
+  const m = /(\d{1,2})\/(\d{1,2})/.exec(DIAS[k] ?? "");
+  return m ? `2026-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+}
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
 export type LinhaOrc =
@@ -369,6 +363,8 @@ export interface Estado {
   clientes: { nome: string; tel: string; local: string; desde: string; deal: number }[];
   /** 21/10: os dados do cliente mudados na área de Clientes (pelo nome do cliente): sobrepõem-se aos que vêm dos negócios (clientesV1Docs.ts). */
   fichas?: Record<string, Record<string, string>>;
+  /** 22/10: a ficha dos técnicos de obra (equipa/tecnicos.ts): custo/hora, ofício e férias. Os estados de antes não a têm (garantirTecnicos). */
+  tecnicos?: FichaTecnico[];
   deals: Negocio[];
 }
 
@@ -399,12 +395,15 @@ export function seed(): Estado {
     svc: structuredClone(SVC0),
     stock: { cp: 12, pv: 0, san: 0, base: 3, cim: 40, mov: 0, banc: 2 },
     seq: 1046, ft: 418, ef: 77, rc: 301,
+    tecnicos: tecnicosIniciais(),
     clientes: [
       { nome: "Tiago Almeida", tel: "913 220 410", local: "Cozinha · Almada", desde: "08/10", deal: 1027 },
       { nome: "Marta Lima", tel: "916 004 552", local: "WC · Odivelas", desde: "01/10", deal: 1022 },
     ],
     deals: [],
   };
+  // os planos de exemplo atribuem os técnicos da ficha deste Estado
+  usarTecnicos(S.tecnicos!);
   const D = (o: NovoNegocio) => S.deals.push(novoDeal(o));
   D({ id: 1043, nome: "Ana Martins", tel: "912 000 111", linha: "wc", servico: "Remodelação WC suite", local: "Rua das Flores 12, Sintra", origem: "site", quando: "30/09 21:40",
     f: { pedido: "Quero remodelar a casa de banho da suite." }, hist: [{ t: "Pedido pelo site", q: "30/09 21:40", k: "a" }] });
@@ -1256,6 +1255,8 @@ function criarCliente(S: Estado, d: Negocio) {
 
 // Cada ação muda o estado no sítio. `run` (no ecrã) repõe o desenho a seguir.
 export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) {
+  // 22/10: os técnicos (TECS) passam a ser os da ficha deste Estado; um estado de antes fica com os seis de sempre
+  garantirTecnicos(S);
   const deal = (id: number) => S.deals.find((d) => d.id === id)!;
   /** 19/10: a ação pede a permissão ao papel atual (permissoes.ts); sem ela, avisa e não faz nada. Está aqui (e não só nos ecrãs) porque há
    *  ecrãs que chamam a ação do passo sem olhar para o papel. */
@@ -2154,6 +2155,35 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** O técnico escolhe quem é no Hoje dele. */
     souTec(tec: string) { if (TECS.some((x) => x.id === tec)) S.tec = tec; },
+    /** 22/10: a ficha do técnico (RH › Técnicos): o custo/hora (€/h, entra no custo previsto e real das obras), o ofício e as férias
+     *  (datas). As tarefas já atribuídas não mudam de técnico. Só a Direção e as Operações (equipa.edit). */
+    editarTecnico(id: string, m: { custoHora?: number; sk?: string; feriasDatas?: string[] }) {
+      if (!exigePerm("equipa.edit")) return;
+      garantirTecnicos(S);
+      const t = S.tecnicos!.find((x) => x.id === id);
+      if (!t) return;
+      const feito: string[] = [];
+      if (m.custoHora !== undefined) {
+        const v = r2(m.custoHora);
+        if (!Number.isFinite(v) || v <= 0 || v > 200) { avisar({ msg: "O custo por hora não foi mudado", sub: "Tem de ser um valor entre 0 e 200 €/h.", kind: "bad" }); return; }
+        if (v !== t.custoHora) { t.custoHora = v; feito.push(`custo/hora ${eur(v)} €/h`); }
+      }
+      if (m.sk !== undefined && m.sk !== t.sk) {
+        if (!(OFICIOS as readonly string[]).includes(m.sk)) { avisar({ msg: "O ofício não foi mudado", sub: "Escolha um dos ofícios da lista.", kind: "bad" }); return; }
+        t.sk = m.sk; feito.push(`ofício ${m.sk}`);
+      }
+      if (m.feriasDatas !== undefined) {
+        const L = [...new Set(m.feriasDatas.filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort();
+        if (L.join() !== (t.feriasDatas ?? []).join()) {
+          t.feriasDatas = L;
+          // os planos de exemplo (dias de DIAS) contam as mesmas férias, no dia com a mesma data
+          t.ferias = DIAS.map((_, k) => k).filter((k) => L.includes(dataDeDia(k)));
+          feito.push(L.length ? `${L.length} ${L.length === 1 ? "dia" : "dias"} de férias` : "sem férias");
+        }
+      }
+      usarTecnicos(S.tecnicos!);
+      if (feito.length) avisar({ msg: `Ficha de ${t.n} atualizada`, sub: feito.join(" · "), kind: "ok" });
+    },
     /** O técnico marca (ou desmarca) um passo das instruções; a tarefa começa com o primeiro. */
     marcarPasso(id: number, ti: number, k: number) {
       const d = deal(id), t = d.obra.plano?.tasks[ti];

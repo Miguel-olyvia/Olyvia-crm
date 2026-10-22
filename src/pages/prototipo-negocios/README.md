@@ -340,6 +340,18 @@ Como no HTML: a **laranja** ("nova ·") as tabelas e funções que não existem 
 
 ---
 
+## Técnicos de obra e Agenda da equipa (RH, 22/10/2026)
+
+Duas abas novas no grupo **Recursos Humanos** (Gestão): **Técnicos** e **Agenda**. São ecrãs do protótipo (`equipa/`), não do RH de exemplo: o `RhPagina` mostra-os sem o router interno e recebe o Estado do protótipo (`equipa`: `S`, `A`, `run`, `irObra`, `irNegocio`).
+
+- **A ficha dos técnicos** (`equipa/tecnicos.ts`): `S.tecnicos` (nome, ofício, **custo/hora** editável, férias, telefone, `pessoaRhId`), na parte `global` da sincronização. Arranca com os seis técnicos de sempre (os mesmos ids; o custo/hora que estava em `FICHA_TEC`, que saiu de `obraOps.ts`). `TECS` (motor) é agora o **registo vivo** dessa ficha: `garantirTecnicos(S)` liga-o ao Estado aberto (em `seed`, `acoes`, ao ler e ao sincronizar) e dá os seis de sempre a um Estado guardado antes (sem subir a `VERSAO`). Ação `A.editarTecnico(id, { custoHora, sk, feriasDatas })`, só para a Direção e as Operações (`equipa.edit` em `permissoes.ts`); as tarefas já atribuídas não mudam de técnico.
+- **Custo das obras:** `custoHoraDe` (e por isso `custosObra`, `equipaDaObra` e o custo a mais dos ajustes em `ObraOperacoes`) lê o €/h de quem faz cada tarefa na ficha.
+- **RH:** os seis técnicos entram no store do RH de exemplo como pessoas com o cargo **Técnico de obra** (`p-tec-<id>`), quando o RH abre no protótipo (`equipa/pontes.ts: garantirTecnicosNoRh`, só as que faltam). Os dados e os testes do RH de exemplo (`components/rh-exemplo`) não mudaram. A ficha do técnico mostra o **custo/hora sugerido** pelo salário e encargos no RH (salário × 14 ÷ 12 + TSU e seguro do separador Custos, a dividir pelas horas do contrato), sem o impor.
+- **Agenda** (`equipa/AgendaEquipa.tsx`, regras em `equipa/regrasAgenda.ts`): semana ou mês, uma linha por técnico e por quem faz visitas; tarefas de obra (obra, fase, horas; plano por aprovar a tracejado), visitas, férias (ficha) e ausências aprovadas no RH, viatura da Frota no dia. **Conflitos:** a mesma pessoa em duas obras no mesmo dia com mais de 8 h, ou obra em dia de férias/ausência. Só de leitura: a tarefa abre a obra (Operações), a visita abre o negócio. As obras de exemplo já concluídas (#1050) ficam de fora: o plano delas não tem datas reais.
+- **Testes:** `equipa/equipa.test.ts` (ficha, custo da obra, permissões, férias nos conflitos, estado antigo, sincronização, agenda, conflitos, ponte com o RH) e `equipa/EquipaRh.test.tsx` (as abas abrem, editar o custo/hora e as férias pela ficha, agenda com a obra certa, navegação e conflito de férias).
+
+---
+
 ## Como funciona (o essencial)
 
 - **O estado é um objeto mutável.**

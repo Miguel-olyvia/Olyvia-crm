@@ -6,6 +6,12 @@ import { Suspense, lazy, useEffect, useRef, type ReactNode } from "react";
 import { MemoryRouter, Navigate, Route, Routes, UNSAFE_LocationContext, UNSAFE_RouteContext, useLocation } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ABAS_RH, CAMINHO_DE, TITULO_RH, abaDeCaminho, idioma, type AbaRh } from "./abas";
+import { garantirTecnicosNoRh } from "../equipa/pontes";
+import type { EquipaCtx } from "../equipa/ctx";
+
+// 22/10: os técnicos de obra e a agenda da equipa (ecrãs do protótipo, com o Estado dele)
+const TecnicosEquipa = lazy(() => import("../equipa/TecnicosEquipa"));
+const AgendaEquipa = lazy(() => import("../equipa/AgendaEquipa"));
 
 const PessoasRh = lazy(() => import("@/pages/rh-exemplo/PessoasRh"));
 const PessoaRhDetalhe = lazy(() => import("@/pages/rh-exemplo/PessoaRhDetalhe"));
@@ -49,9 +55,18 @@ function SincronizaMenu({ aba, aoMudarAba, origemInterna }: { aba: AbaRh; aoMuda
   return null;
 }
 
-interface Props { aba: AbaRh; aoMudarAba?: (a: AbaRh) => void }
-export default function RhPagina({ aba, aoMudarAba }: Props) {
+/** 22/10: os ecrãs da equipa (equipa/): mostram-se direto, sem o router interno, e precisam do Estado do protótipo (`equipa`). */
+const ECRAS_EQUIPA: Partial<Record<AbaRh, true>> = { tecnicos: true, agenda: true };
+const SEM_ESTADO: Record<"pt" | "en", string> = {
+  pt: "Este ecrã precisa dos negócios e das obras do protótipo: abra-o pelo menu Recursos Humanos do protótipo.",
+  en: "This screen needs the prototype's deals and works: open it from the prototype's Human Resources menu.",
+};
+
+interface Props { aba: AbaRh; aoMudarAba?: (a: AbaRh) => void; /** 22/10: o Estado e as ações do protótipo, para as abas Técnicos e Agenda. */ equipa?: EquipaCtx }
+export default function RhPagina({ aba, aoMudarAba, equipa }: Props) {
   const lg = idioma(); // lida a cada render (o resto do protótipo faz o mesmo); se a língua mudar com o RH aberto, muda no render seguinte
+  // 22/10: os técnicos de obra são pessoas do RH de exemplo: juntam-se ao store (só as que faltam; sem mudança não avisa ninguém)
+  garantirTecnicosNoRh();
   // O router interno só recomeça quando a aba muda por escolha no menu. Quando é o próprio ecrã a navegar para outra aba (a pessoa da
   // Organização, ?tab=...), o destino exacto mantém-se: SincronizaMenu regista a aba de origem interna e aqui não se muda a chave.
   const origemInterna = useRef<AbaRh>(aba);
@@ -67,7 +82,14 @@ export default function RhPagina({ aba, aoMudarAba }: Props) {
       <section id="rh-painel" aria-label={TITULO_RH[lg]} className="mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">
         {/* O leitor de ecrã ouve a troca de ecrã; o foco fica no menu, onde o utilizador de teclado está. */}
         <p data-testid="rh-anuncio" role="status" aria-live="polite" className="sr-only">{ABAS_RH.find((a) => a.k === aba)?.rotulo[lg]}</p>
-        {/* key: trocar de aba no menu recomeça o router interno no caminho dessa aba */}
+        {ECRAS_EQUIPA[aba] ? (
+          <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">{A_ABRIR[lg]}</p>}>
+            {!equipa ? (
+              <div><h1 className="text-2xl font-semibold tracking-tight">{ABAS_RH.find((a) => a.k === aba)?.rotulo[lg]}</h1><p className="mt-2 text-[15px] text-muted-foreground">{SEM_ESTADO[lg]}</p></div>
+            ) : aba === "tecnicos" ? <TecnicosEquipa {...equipa} /> : <AgendaEquipa {...equipa} />}
+          </Suspense>
+        ) : (
+        /* key: trocar de aba no menu recomeça o router interno no caminho dessa aba */
         <IsolaRouter><MemoryRouter key={geracao.current} initialEntries={[CAMINHO_DE[aba]]}>
           <SincronizaMenu aba={aba} aoMudarAba={aoMudarAba} origemInterna={origemInterna} />
           <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">{A_ABRIR[lg]}</p>}>
@@ -96,6 +118,7 @@ export default function RhPagina({ aba, aoMudarAba }: Props) {
             </Routes>
           </Suspense>
         </MemoryRouter></IsolaRouter>
+        )}
       </section>
     </LanguageProvider>
   );
