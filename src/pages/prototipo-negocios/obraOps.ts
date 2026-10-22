@@ -105,7 +105,7 @@ export function fotoExemplo(nome: string, cor = "#7c5ce0", k = 0): string {
 }
 
 /* ------------------------------------------------------------------ a equipa */
-// 22/10: o telefone e o custo/hora de cada técnico vêm da ficha dos técnicos (equipa/tecnicos.ts, RH › Técnicos), que se edita;
+// 22/10: o telefone e o custo/hora de cada técnico vêm da ficha dos técnicos (equipa/tecnicos.ts, bloco "Obra" na ficha da pessoa do RH), que se edita;
 // antes estavam fixos aqui (FICHA_TEC). O custo/hora só a Direção e as Operações o veem.
 export const RESPONSAVEL_OBRA = { n: "Filipe Rocha", papel: "Responsável de obra", tel: "917 300 210" };
 export const iniciais = (n: string) => n.split(" ").filter(Boolean).map((x) => x[0]).slice(0, 2).join("").toUpperCase();

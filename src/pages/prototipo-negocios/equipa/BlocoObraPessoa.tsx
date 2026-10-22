@@ -1,7 +1,9 @@
-// RH › Técnicos (22/10/2026): os técnicos de obra, com a ficha de cada um. O custo/hora (€/h) entra no custo previsto e no real das obras
-// (obraOps.ts: custosObra); ao lado mostra-se o custo/hora que o salário e os encargos no RH dariam, sem o impor. O ofício e as férias
-// também se mudam aqui (as férias contam nos conflitos do plano e na Agenda). As tarefas já atribuídas não mudam de técnico.
-// Só a Direção e as Operações mudam a ficha (equipa.edit); os outros papéis veem-na.
+// O bloco "Obra" na ficha da pessoa do RH (22/10/2026): só para as pessoas que são técnicos de obra (pessoaRhId, ou "p-tec-<id>").
+// Antes era a aba RH › Técnicos; os técnicos já são pessoas em Pessoas, por isso a ficha deles ganha este bloco na Visão geral.
+// O custo/hora (€/h) entra no custo previsto e no real das obras (obraOps.ts: custosObra); ao lado mostra-se o custo/hora que o salário e os
+// encargos no RH dariam, sem o impor. O ofício e as férias também se mudam aqui (as férias contam nos conflitos do plano e na Agenda).
+// As tarefas já atribuídas não mudam de técnico. Só a Direção e as Operações mudam a ficha (equipa.edit, ação editarTecnico); os outros veem-na.
+// Entra na ficha do RH de exemplo pelo ponto de extensão genérico (rh-exemplo/ficha/extensoesFicha), que o RhPagina fornece.
 import { useId, useState } from "react";
 import { CalendarX2, HardHat, Lightbulb, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,7 +13,7 @@ import { PAPEIS, eur, nfmt } from "../motor";
 import { podeNeg } from "../permissoes";
 import { obrasDoTecnico, rotuloCurto } from "./regrasAgenda";
 import type { EquipaCtx } from "./ctx";
-import { pessoaRhDe, sugestaoCustoHora } from "./pontes";
+import { sugestaoCustoHora, tecnicoDaPessoaRh } from "./pontes";
 import { OFICIOS, garantirTecnicos, type FichaTecnico } from "./tecnicos";
 
 const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[15px] font-medium transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50";
@@ -20,61 +22,21 @@ const CAMPO = "h-11 rounded-lg border border-input bg-card px-3 text-[15px] text
 
 /** "17,5" ou "17.5" → 17,5; vazio ou texto → NaN. */
 const lerNumero = (s: string): number => (s.trim() ? Number(s.trim().replace(/\s/g, "").replace(",", ".")) : NaN);
-const proximasFerias = (t: FichaTecnico, hoje: string): string[] => (t.feriasDatas ?? []).filter((d) => d >= hoje);
 
-export default function TecnicosEquipa({ S, A, run, irObra }: EquipaCtx) {
+/** O bloco "Obra" da pessoa `pessoaId`; nada quando a pessoa não é um técnico de obra. */
+export default function BlocoObraPessoa({ pessoaId, S, A, run, irObra }: { pessoaId: string } & Pick<EquipaCtx, "S" | "A" | "run" | "irObra">) {
   garantirTecnicos(S);
-  const tecnicos = S.tecnicos!;
-  const [sel, setSel] = useState<string>(tecnicos[0]?.id ?? "");
-  const t = tecnicos.find((x) => x.id === sel) ?? tecnicos[0];
-  const pode = podeNeg(S.role, "equipa.edit");
-  const hoje = new Date().toISOString().slice(0, 10);
-  return (
-    <div className="flex flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Técnicos de obra</h1>
-        <p className="mt-1 max-w-3xl text-[15px] text-muted-foreground">
-          A ficha de cada técnico: o custo por hora que entra no custo das obras, o ofício e as férias. Cada técnico é também uma pessoa do RH.
-        </p>
-        {!pode && (
-          <p className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px]" role="note">
-            Está a ver como {PAPEIS[S.role].n}: pode consultar as fichas, mas só a Direção ou as Operações as mudam. Mude de papel no menu.
-          </p>
-        )}
-      </header>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-        <nav aria-label="Técnicos de obra">
-          <ul className="flex flex-col gap-1.5">
-            {tecnicos.map((x) => {
-              const fe = proximasFerias(x, hoje), obras = obrasDoTecnico(S.deals, x.id, x.custoHora).length;
-              return (
-                <li key={x.id}>
-                  <button type="button" onClick={() => setSel(x.id)} aria-current={x.id === t?.id ? "true" : undefined}
-                    className={cn("flex min-h-11 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary",
-                      x.id === t?.id ? "border-primary bg-primary/[0.06]" : "border-border bg-card hover:bg-muted")}>
-                    <HardHat className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium">{x.n}</span>
-                      <span className="block text-sm text-muted-foreground">{x.sk} · {obras} {obras === 1 ? "obra" : "obras"}{fe.length ? ` · férias a ${rotuloCurto(fe[0])}` : ""}</span>
-                    </span>
-                    <span className="shrink-0 tabular-nums text-[15px] font-semibold">{eur(x.custoHora)} €/h</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-        {t ? <FichaDoTecnico key={t.id} t={t} ctx={{ S, A, run, irObra }} pode={pode} hoje={hoje} /> : <p className="text-muted-foreground">Sem técnicos.</p>}
-      </div>
-    </div>
-  );
+  const t = tecnicoDaPessoaRh(pessoaId, S.tecnicos);
+  if (!t) return null;
+  return <FichaObra key={t.id} t={t} pessoaId={pessoaId} ctx={{ S, A, run, irObra }} />;
 }
 
-function FichaDoTecnico({ t, ctx, pode, hoje }: { t: FichaTecnico; ctx: Pick<EquipaCtx, "S" | "A" | "run" | "irObra">; pode: boolean; hoje: string }) {
+function FichaObra({ t, pessoaId, ctx }: { t: FichaTecnico; pessoaId: string; ctx: Pick<EquipaCtx, "S" | "A" | "run" | "irObra"> }) {
   const { S, A, run, irObra } = ctx;
   const id = useId();
-  const pid = pessoaRhDe(t);
-  const fichaRh = useEstadoRh((e) => e.fichas[pid] ?? null);
+  const pode = podeNeg(S.role, "equipa.edit");
+  const hoje = new Date().toISOString().slice(0, 10);
+  const fichaRh = useEstadoRh((e) => e.fichas[pessoaId] ?? null);
   useCusto((e) => e.definicoes); // a sugestão muda com a taxa e o seguro do separador Custos
   const sug = sugestaoCustoHora(fichaRh);
   const [custo, setCusto] = useState(nfmt(t.custoHora));
@@ -87,13 +49,15 @@ function FichaDoTecnico({ t, ctx, pode, hoje }: { t: FichaTecnico; ctx: Pick<Equ
   const editar = (m: Parameters<typeof A.editarTecnico>[1]) => run(() => A.editarTecnico(t.id, m));
 
   return (
-    <section aria-labelledby={`${id}-t`} className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-4 sm:p-6">
+    <section aria-labelledby={`${id}-t`} data-testid="bloco-obra-pessoa" className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4 sm:p-5">
       <div>
-        <h2 id={`${id}-t`} className="text-xl font-semibold">{t.n}</h2>
-        <p className="text-[15px] text-muted-foreground">
-          {t.sk} · {t.tel} · na empresa desde {t.desde || "—"}
-          {fichaRh ? <> · no RH: {fichaRh.pessoa.cargo ?? "sem cargo"}, {fichaRh.pessoa.numero_interno}</> : " · ainda sem pessoa no RH"}
-        </p>
+        <h3 id={`${id}-t`} className="flex items-center gap-2 text-lg font-semibold"><HardHat className="h-5 w-5 text-muted-foreground" aria-hidden="true" />Obra</h3>
+        <p className="text-[15px] text-muted-foreground">Técnico de obra · {t.tel} · na empresa desde {t.desde || "—"}</p>
+        {!pode && (
+          <p className="mt-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-[15px]" role="note">
+            Está a ver como {PAPEIS[S.role].n}: pode consultar, mas só a Direção ou as Operações mudam o custo por hora, o ofício e as férias.
+          </p>
+        )}
       </div>
 
       {/* o custo/hora */}
@@ -159,7 +123,7 @@ function FichaDoTecnico({ t, ctx, pode, hoje }: { t: FichaTecnico; ctx: Pick<Equ
 
       {/* as obras atuais */}
       <div className="flex flex-col gap-2">
-        <h3 className="text-[15px] font-medium">Obras atuais</h3>
+        <h4 className="text-[15px] font-medium">Obras atuais</h4>
         {obras.length ? (
           <ul className="flex flex-col gap-1.5">
             {obras.map((o) => (

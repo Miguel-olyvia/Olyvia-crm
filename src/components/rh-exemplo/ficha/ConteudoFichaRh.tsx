@@ -23,6 +23,7 @@ import { AbaAusencias, AbaContratos, AbaDocumentos, AbaPlaneamento } from "./Aba
 import { AbaLaborais, AbaPessoais, AbaVisaoGeral, type AbaProps } from "./AbasPessoa";
 import { AcoesFicha } from "./AcoesFicha";
 import { CabecalhoFichaRh } from "./CabecalhoFichaRh";
+import { BlocosExtraDaFicha } from "./extensoesFicha";
 import { contadoresDaFicha } from "./contadores";
 import { ehAbaFicha, type AbaFicha } from "./abas";
 import { ListaAbasFicha } from "./ListaAbasFicha";
@@ -135,7 +136,7 @@ function FichaCompleta({ vizinhas, aoIr, aba, aoMudarAba, ficha, pessoa }: Ficha
 function ConteudoAba(p: AbaProps & { aoMudarAba: (aba: string) => void; aoMudarCargo: () => void }) {
   return (
     <>
-      <TabsContent value="visaoGeral" className="mt-0"><AbaVisaoGeral {...p} aoAbrirAba={p.aoMudarAba} /></TabsContent>
+      <TabsContent value="visaoGeral" className="mt-0"><AbaVisaoGeral {...p} aoAbrirAba={p.aoMudarAba} /><BlocosExtraDaFicha pessoaId={p.pessoa.id} /></TabsContent>
       <TabsContent value="laborais" className="mt-0"><AbaLaborais {...p} aoMudarCargo={p.aoMudarCargo} /></TabsContent>
       <TabsContent value="pessoais" className="mt-0"><AbaPessoais {...p} /></TabsContent>
       <TabsContent value="contratos" className="mt-0"><AbaContratos {...p} /></TabsContent>

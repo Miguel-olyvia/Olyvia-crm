@@ -2164,7 +2164,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     /** O técnico escolhe quem é no Hoje dele. */
     souTec(tec: string) { if (TECS.some((x) => x.id === tec)) S.tec = tec; },
-    /** 22/10: a ficha do técnico (RH › Técnicos): o custo/hora (€/h, entra no custo previsto e real das obras), o ofício e as férias
+    /** 22/10: a ficha do técnico (bloco "Obra" na ficha da pessoa, RH › Pessoas): o custo/hora (€/h, entra no custo previsto e real das obras), o ofício e as férias
      *  (datas). As tarefas já atribuídas não mudam de técnico. Só a Direção e as Operações (equipa.edit). */
     editarTecnico(id: string, m: { custoHora?: number; sk?: string; feriasDatas?: string[] }) {
       if (!exigePerm("equipa.edit")) return;

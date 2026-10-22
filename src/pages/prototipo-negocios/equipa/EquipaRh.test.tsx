@@ -1,7 +1,8 @@
-// RH › Técnicos e RH › Agenda (22/10/2026) dentro da moldura do RH do protótipo: as abas abrem, a ficha do técnico muda o custo/hora (e o custo
-// da obra), a agenda mostra a semana com a obra certa e abre a obra ao clicar. Sem base de dados: o cliente rebenta se alguém o importar.
+// Os técnicos de obra no RH do protótipo (22/10/2026): não há aba Técnicos; a ficha da pessoa que é técnico (RH › Pessoas) tem o bloco "Obra",
+// que muda o custo/hora (e o custo da obra), o ofício e as férias; a Agenda mostra a semana com a obra certa, abre a obra ao clicar e abre a
+// ficha do técnico pelo nome. Sem base de dados: o cliente rebenta se alguém o importar.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { useMemo, useReducer } from "react";
+import { useMemo, useReducer, useState } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client", () => { throw new Error("Os ecrãs da equipa não podem importar o cliente Supabase"); });
@@ -18,11 +19,19 @@ import { esquecerFrota } from "../frota/loja";
 const LENTO = 30000;
 const irObra = vi.fn(), irNegocio = vi.fn();
 
-function Casa({ S, aba }: { S: Estado; aba: AbaRh }) {
+function Casa({ S, aba: inicial }: { S: Estado; aba: AbaRh }) {
   const [, redesenhar] = useReducer((x: number) => x + 1, 0);
+  const [aba, setAba] = useState<AbaRh>(inicial);
   const run = useMemo(() => (fn: () => void) => { fn(); redesenhar(); }, []);
   const A = useMemo(() => acoes(S, () => undefined, run), [S, run]);
-  return <RhPagina aba={aba} equipa={{ S, A, run, irObra, irNegocio }} />;
+  return <RhPagina aba={aba} aoMudarAba={setAba} equipa={{ S, A, run, irObra, irNegocio }} />;
+}
+
+/** Abre a ficha do técnico pelo nome na Agenda e devolve o painel da ficha (já na Visão geral). */
+async function abrirFichaPelaAgenda(nome: string): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole("button", { name: `Abrir a ficha de ${nome} em Pessoas` }, { timeout: 15000 }));
+  const titulo = await screen.findByRole("heading", { level: 1, name: new RegExp(nome) }, { timeout: 15000 });
+  return titulo.closest<HTMLElement>('[role="dialog"]') as HTMLElement;
 }
 
 beforeAll(() => {
@@ -36,51 +45,76 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); localStorage.clear(); });
 
-describe("RH › Técnicos", () => {
-  it("o menu do RH tem as entradas Técnicos e Agenda", () => {
+describe("Técnicos de obra na ficha da pessoa (RH › Pessoas)", () => {
+  it("o menu do RH tem a Agenda e já não tem a entrada Técnicos", () => {
     render(<MenuRh aba={null} aoIr={() => undefined} iniciarAberto />);
     const menu = screen.getByTestId("menu-rh");
-    expect(within(menu).getByRole("button", { name: /^Técnicos/ })).toBeInTheDocument();
+    expect(within(menu).queryByRole("button", { name: /^Técnicos/ })).not.toBeInTheDocument();
     expect(within(menu).getByRole("button", { name: /^Agenda/ })).toBeInTheDocument();
   });
 
-  it("abre com os técnicos, junta-os ao RH como pessoas e o custo/hora guardado muda o custo da obra", async () => {
+  it("a ficha do técnico tem o bloco Obra: o custo/hora guardado muda o custo da obra, as férias juntam-se e tiram-se, abre a obra", async () => {
     const S = seed(); S.role = "direcao";
-    render(<Casa S={S} aba="tecnicos" />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Técnicos de obra" }, { timeout: 15000 })).toBeInTheDocument();
+    render(<Casa S={S} aba="agenda" />);
+    const ficha = await abrirFichaPelaAgenda("Hugo Neves");
     expect(lerEstado().fichas["p-tec-hn"]?.pessoa.cargo).toBe("Técnico de obra");
-    fireEvent.click(screen.getByRole("button", { name: /Hugo Neves/ }));
-    const ficha = screen.getByRole("region", { name: "Hugo Neves" });
-    expect(within(ficha).getByText(/Pelo salário no RH/)).toBeInTheDocument();
-    expect(within(ficha).getByText(/#1022/)).toBeInTheDocument();
+    const bloco = await within(ficha).findByTestId("bloco-obra-pessoa", undefined, { timeout: 15000 });
+    expect(within(bloco).getByRole("heading", { name: "Obra" })).toBeInTheDocument();
+    expect(within(bloco).getByText(/Pelo salário no RH/)).toBeInTheDocument();
+    expect(within(bloco).getByText(/#1022/)).toBeInTheDocument();
     const p = S.deals.find((d) => d.id === 1022)!.obra.plano!, antes = custosObra(p).prev;
-    fireEvent.change(within(ficha).getByLabelText("Custo por hora (€/h)"), { target: { value: "25,5" } });
-    fireEvent.click(within(ficha).getByRole("button", { name: "Guardar" }));
+    fireEvent.change(within(bloco).getByLabelText("Custo por hora (€/h)"), { target: { value: "25,5" } });
+    fireEvent.click(within(bloco).getByRole("button", { name: "Guardar" }));
     expect(S.tecnicos!.find((t) => t.id === "hn")!.custoHora).toBe(25.5);
     expect(custosObra(p).prev).toBeGreaterThan(antes);
-    expect(screen.getByRole("button", { name: /Hugo Neves.*25,50 €\/h/ })).toBeInTheDocument();
     // as férias: junta um dia e tira-o
-    fireEvent.change(within(ficha).getByLabelText("Dia de férias a juntar"), { target: { value: "2026-11-02" } });
-    fireEvent.click(within(ficha).getByRole("button", { name: /Juntar dia/ }));
+    fireEvent.change(within(bloco).getByLabelText("Dia de férias a juntar"), { target: { value: "2026-11-02" } });
+    fireEvent.click(within(bloco).getByRole("button", { name: /Juntar dia/ }));
     expect(S.tecnicos!.find((t) => t.id === "hn")!.feriasDatas).toEqual(["2026-11-02"]);
-    fireEvent.click(within(ficha).getByRole("button", { name: "Tirar o dia 02/11/2026 das férias" }));
+    fireEvent.click(within(bloco).getByRole("button", { name: "Tirar o dia 02/11/2026 das férias" }));
     expect(S.tecnicos!.find((t) => t.id === "hn")!.feriasDatas).toEqual([]);
+    // o ofício
+    fireEvent.change(within(bloco).getByLabelText("Ofício"), { target: { value: "Montador" } });
+    expect(S.tecnicos!.find((t) => t.id === "hn")!.sk).toBe("Montador");
     // abrir a obra
-    fireEvent.click(within(ficha).getByRole("button", { name: "Abrir a obra #1022" }));
+    fireEvent.click(within(bloco).getByRole("button", { name: "Abrir a obra #1022" }));
     expect(irObra).toHaveBeenCalledWith(1022);
   }, LENTO);
 
-  it("sem a permissão, a ficha só se consulta", async () => {
-    const S = seed(); S.role = "comercial";
-    render(<Casa S={S} aba="tecnicos" />);
-    await screen.findByRole("heading", { level: 1, name: "Técnicos de obra" }, { timeout: 15000 });
-    expect(screen.getByRole("note")).toHaveTextContent(/só a Direção ou as Operações/);
-    expect(screen.getByLabelText("Custo por hora (€/h)")).toBeDisabled();
+  it("uma pessoa de loja não tem o bloco Obra", async () => {
+    const S = seed(); S.role = "direcao";
+    render(<Casa S={S} aba="pessoas" />);
+    const tabela = await screen.findByRole("table", undefined, { timeout: 15000 });
+    fireEvent.click(within(tabela).getByText("Rui Amaral"));
+    const titulo = await screen.findByRole("heading", { level: 1, name: /Rui Amaral/ }, { timeout: 15000 });
+    const ficha = titulo.closest<HTMLElement>('[role="dialog"]') as HTMLElement;
+    expect(within(ficha).getByRole("tab", { selected: true })).toHaveTextContent(/Visão geral/);
+    expect(within(ficha).queryByTestId("bloco-obra-pessoa")).not.toBeInTheDocument();
   }, LENTO);
 
-  it("aberto sem o Estado do protótipo, mostra o título e explica de onde se abre", async () => {
-    render(<RhPagina aba="tecnicos" />);
-    expect(await screen.findByRole("heading", { level: 1, name: "Técnicos" })).toBeInTheDocument();
+  it("sem a permissão, o bloco Obra só se consulta", async () => {
+    const S = seed(); S.role = "comercial";
+    render(<Casa S={S} aba="agenda" />);
+    const ficha = await abrirFichaPelaAgenda("Hugo Neves");
+    const bloco = await within(ficha).findByTestId("bloco-obra-pessoa", undefined, { timeout: 15000 });
+    expect(within(bloco).getByRole("note")).toHaveTextContent(/só a Direção ou as Operações/);
+    expect(within(bloco).getByLabelText("Custo por hora (€/h)")).toBeDisabled();
+    expect(within(bloco).getByLabelText("Ofício")).toBeDisabled();
+    expect(within(bloco).queryByLabelText("Dia de férias a juntar")).not.toBeInTheDocument();
+  }, LENTO);
+
+  it("sem o Estado do protótipo (o RH de exemplo sozinho), a ficha do técnico não tem o bloco Obra", async () => {
+    render(<RhPagina aba="pessoas" aoMudarAba={() => undefined} />);
+    const tabela = await screen.findByRole("table", undefined, { timeout: 15000 });
+    fireEvent.click(within(tabela).getByText("Hugo Neves"));
+    const titulo = await screen.findByRole("heading", { level: 1, name: /Hugo Neves/ }, { timeout: 15000 });
+    const ficha = titulo.closest<HTMLElement>('[role="dialog"]') as HTMLElement;
+    expect(within(ficha).queryByTestId("bloco-obra-pessoa")).not.toBeInTheDocument();
+  }, LENTO);
+
+  it("a Agenda aberta sem o Estado do protótipo mostra o título e explica de onde se abre", async () => {
+    render(<RhPagina aba="agenda" />);
+    expect(await screen.findByRole("heading", { level: 1, name: "Agenda" })).toBeInTheDocument();
     expect(screen.getByText(/abra-o pelo menu Recursos Humanos do protótipo/)).toBeInTheDocument();
   });
 });

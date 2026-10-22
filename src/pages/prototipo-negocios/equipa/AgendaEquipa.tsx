@@ -1,7 +1,7 @@
 // RH › Agenda (22/10/2026): a agenda da equipa, semana ou mês, uma linha por trabalhador (os técnicos de obra e quem faz visitas). Mostra as
 // tarefas das obras (obra, fase, horas), as visitas, as férias e ausências e a viatura da Frota nesse dia; destaca os conflitos (duas obras
 // com mais horas do que um dia, obra em dia de férias). Só de leitura: clicar numa tarefa abre a obra, numa visita abre o negócio.
-// As regras estão em regrasAgenda.ts. Em ecrã pequeno a grelha desliza na horizontal (a primeira coluna fica fixa).
+// Clicar no nome de um técnico abre a ficha dele em Pessoas (com o bloco "Obra"). As regras estão em regrasAgenda.ts. Em ecrã pequeno a grelha desliza na horizontal (a primeira coluna fica fixa).
 import { useMemo, useState } from "react";
 import { AlertTriangle, Car, ChevronLeft, ChevronRight, Palmtree } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,13 +13,14 @@ import {
   type CelulaAgenda, type ItemAgenda, type VistaAgenda,
 } from "./regrasAgenda";
 import type { EquipaCtx } from "./ctx";
-import { ausenciasDosTecnicos } from "./pontes";
+import { ausenciasDosTecnicos, pessoaRhDe } from "./pontes";
 import { garantirTecnicos } from "./tecnicos";
 
 const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[15px] font-medium transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary";
 const horas = (h: number) => String(Math.round(h * 10) / 10).replace(".", ",") + " h";
 
-export default function AgendaEquipa({ S, irObra, irNegocio }: EquipaCtx) {
+/** aoAbrirPessoa: abre a ficha da pessoa do RH (id) em Pessoas; sem ele, o nome fica só texto. */
+export default function AgendaEquipa({ S, irObra, irNegocio, aoAbrirPessoa }: EquipaCtx & { aoAbrirPessoa?: (pessoaRhId: string) => void }) {
   garantirTecnicos(S);
   const hoje = isoDia(new Date());
   const [vista, setVista] = useState<VistaAgenda>("semana");
@@ -85,7 +86,15 @@ export default function AgendaEquipa({ S, irObra, irNegocio }: EquipaCtx) {
             {linhas.map((l) => (
               <tr key={l.id} className="align-top">
                 <th scope="row" className="sticky left-0 z-10 border-b border-r border-border bg-card px-2 py-2 text-left font-normal sm:px-3">
-                  <span className="block font-medium">{l.nome}</span>
+                  {(() => {
+                    const t = l.tipo === "tecnico" && aoAbrirPessoa ? S.tecnicos!.find((x) => x.id === l.id) : undefined;
+                    return t ? (
+                      <button type="button" onClick={() => aoAbrirPessoa!(pessoaRhDe(t))} aria-label={`Abrir a ficha de ${l.nome} em Pessoas`}
+                        className="block min-h-6 text-left font-medium text-primary underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+                        {l.nome}
+                      </button>
+                    ) : <span className="block font-medium">{l.nome}</span>;
+                  })()}
                   <span className="block text-xs text-muted-foreground">{l.papel}</span>
                 </th>
                 {l.celulas.map((c) => <Celula key={c.data} c={c} mes={mes} hoje={c.data === hoje} quem={l.nome} irObra={irObra} irNegocio={irNegocio} />)}

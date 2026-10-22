@@ -1,7 +1,7 @@
 // As permissões dos Negócios por papel (19/10/2026), à maneira do perfil do Inventário (inventario/perfil.ts): a Direção tem tudo ("*"),
 // o Financeiro valida pagamentos e trata das faturas, os outros papéis nenhuma destas. A verificação é do motor (acoes, motor.ts): há ecrãs
 // que chamam a ação do passo sem olhar para o papel (fazer(A, act), em LeadsSimples, PessoaFicha e PessoasV1).
-// 22/10: "equipa.edit": a ficha dos técnicos de obra (custo/hora, ofício, férias), no RH › Técnicos: a Direção e as Operações.
+// 22/10: "equipa.edit": a ficha dos técnicos de obra (custo/hora, ofício, férias), no bloco "Obra" da ficha da pessoa (RH › Pessoas): a Direção e as Operações.
 import type { Papel } from "./motor";
 
 export type PermNeg = "finance.validate_payment" | "finance.invoice" | "contracts.cancel" | "equipa.edit";
