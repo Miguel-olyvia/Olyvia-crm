@@ -23,11 +23,16 @@ export interface PortalFornecedorProps {
   sup: string;
   /** Abrir já nesta encomenda (vindo de "Abrir como fornecedor →" na PO). */
   po?: string | null;
-  aoMudarFornecedor: (sup: string) => void;
+  /** Sem ele (22/10: quem entrou pelo login dos portais), não se troca de fornecedor. */
+  aoMudarFornecedor?: (sup: string) => void;
   aoVoltar: () => void;
+  /** 22/10: o texto do botão de saída ("Voltar ao CRM" por omissão; "Sair" no login dos portais). */
+  rotuloVoltar?: string;
+  /** 22/10: a password definida no primeiro acesso (o login dos portais guarda-a na conta, acessosPortal.ts). */
+  aoDefinirPassword?: (pw: string) => void;
 }
 
-export default function PortalFornecedor({ sup, po, aoMudarFornecedor, aoVoltar }: PortalFornecedorProps) {
+export default function PortalFornecedor({ sup, po, aoMudarFornecedor, aoVoltar, rotuloVoltar = "Voltar ao CRM", aoDefinirPassword }: PortalFornecedorProps) {
   const db = useInventario();
   const s = fornecedor(db, sup);
   const [pagina, setPagina] = useState<Pagina>(po ? "encomendas" : "inicio");
@@ -42,7 +47,7 @@ export default function PortalFornecedor({ sup, po, aoMudarFornecedor, aoVoltar 
       <div className="flex min-h-screen items-center justify-center bg-background p-4 text-center">
         <div className="space-y-4">
           <p className="text-lg font-semibold">Nenhum fornecedor com acesso ativo ao portal.</p>
-          <Button className="h-11 gap-2" onClick={aoVoltar}><ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar ao CRM</Button>
+          <Button className="h-11 gap-2" onClick={aoVoltar}><ArrowLeft className="h-4 w-4" aria-hidden="true" />{rotuloVoltar}</Button>
         </div>
       </div>
     );
@@ -66,7 +71,7 @@ export default function PortalFornecedor({ sup, po, aoMudarFornecedor, aoVoltar 
             <p className="max-w-[24ch] truncate text-sm font-medium leading-tight text-foreground" title={utilizador}>{utilizador}</p>
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Utilizador principal</p>
           </div>
-          {opcoes.length > 1 && (
+          {aoMudarFornecedor && opcoes.length > 1 && (
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <span className="hidden lg:inline">Entrar como</span>
               <select aria-label="Entrar como fornecedor" value={s.id} onChange={(e) => aoMudarFornecedor(e.target.value)}
@@ -75,15 +80,15 @@ export default function PortalFornecedor({ sup, po, aoMudarFornecedor, aoVoltar 
               </select>
             </label>
           )}
-          <Button variant="outline" className="h-11 min-w-11 gap-1.5" onClick={aoVoltar} aria-label="Voltar ao CRM">
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" /><span className="hidden text-sm sm:inline">Voltar ao CRM</span>
+          <Button variant="outline" className="h-11 min-w-11 gap-1.5" onClick={aoVoltar} aria-label={rotuloVoltar}>
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" /><span className="hidden text-sm sm:inline">{rotuloVoltar}</span>
           </Button>
         </div>
       </header>
 
       {primeiro || s.portal !== "active" ? (
         <main className="mx-auto w-full max-w-7xl flex-1 p-3 sm:p-4 md:p-6">
-          {primeiro ? <PrimeiroAcesso s={s} aoConcluir={() => { setPrimeiro(false); setPagina("inicio"); setAviso(`Bem-vindo ao portal, ${s.name}.`); }} /> : <SemAcesso s={s} aoVoltar={aoVoltar} />}
+          {primeiro ? <PrimeiroAcesso s={s} aoDefinirPassword={aoDefinirPassword} aoConcluir={() => { setPrimeiro(false); setPagina("inicio"); setAviso(`Bem-vindo ao portal, ${s.name}.`); }} /> : <SemAcesso s={s} aoVoltar={aoVoltar} rotuloVoltar={rotuloVoltar} />}
         </main>
       ) : <>
       <nav className="border-b bg-background px-2 md:px-6" aria-label="Portal do Fornecedor">

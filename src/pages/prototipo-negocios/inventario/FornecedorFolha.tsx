@@ -17,6 +17,7 @@ import { Nota, Pri, Sec, Selo, Vazio } from "./pecasInv";
 import { PM, perm } from "./permForn";
 import { PortalSimDialogo } from "./PortalSimDialogo";
 import { acessoPortal, errosFicha, gravarFicha, podeSimular, proximoCodigoForn, type ArtigoRascunho, type DadosForn, type ErrosForn } from "./regrasForn";
+import { pedirAcessoForn } from "../acessosPortal";
 import type { Fornecedor } from "./tipos";
 
 type TabF = "resumo" | "dados" | "artigos" | "precos" | "portal";
@@ -76,7 +77,7 @@ export function FolhaForn({ id, pre, tabInicial, aoFechar }: Props) {
     setErrs(e);
     if (Object.keys(e).length) { setTab("dados"); avisar("Corrija os campos assinalados em Dados.", true); return; }
     const r = agir((x) => gravarFicha(x, d, id, rasc), () => (s ? "Fornecedor gravado." : `Fornecedor criado${rasc.enviar ? " e convite enviado." : ` com ${rasc.items.length} artigo(s).`}`));
-    if (r.ok && rascunho) { aoFechar(); abrir({ t: "sup", id: r.valor.id }); }
+    if (r.ok && rascunho) { aoFechar(); abrir({ t: "sup", id: r.valor.id }); if (rasc.enviar) pedirAcessoForn({ sid: r.valor.id, reenviar: false }); }
   };
   // 20/10: dentro do protótipo, o fornecedor entra no Portal do Fornecedor simulado (primeiro acesso no ecrã inteiro); sem a moldura, o diálogo de sempre
   const simular = (): void => { if (s && podeSimular(db, s.id, avisar)) { if (abrirPortalForn) abrirPortalForn(s.id); else setSim(true); } };
@@ -87,7 +88,7 @@ export function FolhaForn({ id, pre, tabInicial, aoFechar }: Props) {
   return (
     <Folha aberta aoFechar={aoFechar} chave={id ?? "novo"} titulo={s ? s.name : `Novo fornecedor${d.name ? `: ${d.name}` : ""}`} subtitulo="Compras › Fornecedor"
       selos={s ? <><Selo tom="neu">{s.code}</Selo>{s.active ? <Selo tom="ok">Ativo</Selo> : <Selo>Inativo</Selo>}<PortalSelo s={s} />{s.deleted && <Selo>Eliminado</Selo>}</> : <Selo tom="warn">Rascunho · nada gravado</Selo>}
-      abas={<><Aviso s={s} simular={simular} reenviar={() => { if (s) agir((x) => acessoPortal(x, s.id, "resend"), `Acesso reenviado para ${s.email}.`); }} /><div style={{ marginTop: 12 }}><AbasFolha<TabF> rotulo="Partes da ficha" atual={tab} escolher={setTab} abas={abas} /></div></>}
+      abas={<><Aviso s={s} simular={simular} reenviar={() => { if (s && agir((x) => acessoPortal(x, s.id, "resend"), `Acesso reenviado para ${s.email}.`).ok) pedirAcessoForn({ sid: s.id, reenviar: true }); }} /><div style={{ marginTop: 12 }}><AbasFolha<TabF> rotulo="Partes da ficha" atual={tab} escolher={setTab} abas={abas} /></div></>}
       rodape={rodape}>
       <div role="tabpanel" aria-labelledby={`fa-${tab}`} className="stack">
         <Corpo tab={tab} s={s} d={d} set={(p) => setD((x) => ({ ...x, ...p }))} errs={errs} rasc={rasc} setRasc={setRasc} revogar={() => setRevogar(true)} simular={simular} irParaDados={() => setTab("dados")} />

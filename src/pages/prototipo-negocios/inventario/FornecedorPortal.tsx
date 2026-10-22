@@ -14,6 +14,7 @@ import { can, porqueNao } from "./perfil";
 import { PM, perm } from "./permForn";
 import { dinheiro } from "./ProdutoCampo";
 import { acessoPortal, criarProdutoDoCatalogo, reporCatalogo } from "./regrasForn";
+import { pedirAcessoForn } from "../acessosPortal";
 import { TabelaInv } from "./TabelaInv";
 import type { Fornecedor, ItemCatalogo } from "./tipos";
 
@@ -27,8 +28,10 @@ function Acesso({ s, revogar, simular }: { s: Fornecedor; revogar: () => void; s
   // 20/10: o email do convite edita-se aqui (validado na regra; fica como email do fornecedor)
   const [email, setEmail] = useState(s.invite?.email || s.email);
   const enviar = (k: "invite" | "resend"): void => {
-    if (k === "invite") agir((d) => acessoPortal(d, s.id, "invite", email), `Convite enviado para ${email.trim()}.`);
-    else agir((d) => acessoPortal(d, s.id, "resend"), `Acesso reenviado para ${s.invite?.email || s.email}.`);
+    const r = k === "invite" ? agir((d) => acessoPortal(d, s.id, "invite", email), `Convite enviado para ${email.trim()}.`)
+      : agir((d) => acessoPortal(d, s.id, "resend"), `Acesso reenviado para ${s.invite?.email || s.email}.`);
+    // 22/10: no protótipo, o popup com o email de acesso e a password (acessosPortal.ts); "Reenviar" gera uma password nova
+    if (r.ok) pedirAcessoForn({ sid: s.id, reenviar: k === "resend" });
   };
   const dentro = s.portal === "invited" || s.portal === "active";
   const estado = s.portal === "invited" ? `Convite enviado a ${s.invite?.email || s.email} em ${fmtD(s.invitedAt)}. À espera do primeiro acesso.`

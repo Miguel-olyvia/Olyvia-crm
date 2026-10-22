@@ -32,6 +32,7 @@ import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitos
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
 import { OFICIOS, TECNICOS, garantirTecnicos, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
+import { contaCliente, mostrarAcesso, type ContaPortal, type DocPortal } from "./acessosPortal";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
@@ -365,6 +366,8 @@ export interface Estado {
   fichas?: Record<string, Record<string, string>>;
   /** 22/10: a ficha dos técnicos de obra (equipa/tecnicos.ts): custo/hora, ofício e férias. Os estados de antes não a têm (garantirTecnicos). */
   tecnicos?: FichaTecnico[];
+  /** 22/10: as contas dos portais (cliente e fornecedor), pelo email em minúsculas: o login dos portais (acessosPortal.ts). Os Estados antigos não a têm. */
+  acessos?: Record<string, ContaPortal>;
   deals: Negocio[];
 }
 
@@ -1265,6 +1268,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     avisar({ ...SEM_PERM[p], kind: "bad" });
     return false;
   };
+  /** 22/10: um documento foi ao portal do cliente: a conta dele (criada no primeiro envio) e o popup com o email de acesso (acessosPortal.ts). */
+  const acessoCliente = (d: Negocio, doc: DocPortal, titulo: string) => mostrarAcesso(contaCliente(S, d, doc, titulo));
+  const obraDe = (d: Negocio) => d.servico || LINHAS[d.linha].n;
 
   // Não se passa de fase sem os campos obrigatórios. Se faltar algo, abre o
   // negócio, marca os campos e diz quantos faltam.
@@ -1681,6 +1687,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       const v = d.orc!.versoes?.length ? ` v${versaoAtual(d.orc!)}` : "";
       log(d, "Proposta" + v + " enviada ao portal do cliente" + (A2.length ? " · " + A2.length + " aviso(s) registados" : ""));
       avisar({ msg: "Proposta" + v + " enviada", sub: v ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente", kind: "ok" });
+      acessoCliente(d, "proposta", "Proposta" + v + " · " + obraDe(d));
     },
     aceitar(id: number) {
       const d = deal(id); d.orc!.aceite = "hoje"; d.orc!.pedidoCliente = null; log(d, "O cliente aceitou a proposta no portal");
@@ -1688,7 +1695,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta o comercial gerar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
-    enviarContrato(id: number) { const d = deal(id); if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); },
+    enviarContrato(id: number) { const d = deal(id); if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
     /** No portal (15/10): o cliente assina com o desenho ou a Chave Móvel Digital; guarda-se a assinatura e segue como "assinar". */
     assinarCom(id: number, a: Assinatura) {
       const d = deal(id), o = d.orc;
@@ -1740,6 +1747,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       a.estado = "enviada"; a.enviada = agora(); a.aceite = null; a.pedidoCliente = null;
       log(d, `Proposta da adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada ao portal do cliente: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")} · +${eur(totaisAdenda(a).total)} € com IVA · +${diasAdenda(a.linhas)} dias`);
       avisar({ msg: `Adenda ${a.n}${v > 1 ? ` v${v}` : ""} enviada`, sub: v > 1 ? "Está no portal do cliente; a anterior aparece como substituída" : "Está no portal do cliente, para aceitar", kind: "ok" });
+      acessoCliente(d, "adenda", `Adenda ${a.n}${v > 1 ? ` v${v}` : ""} · ${obraDe(d)}`);
     },
     /** Num toque, como a versão nova do orçamento: verifica e envia; com bloqueios, não envia e diz porquê. */
     verificarEnviarAdenda(id: number, n?: string): boolean {
@@ -1828,6 +1836,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       a.contrato = "enviado";
       log(d, `Contrato da adenda ${a.n} gerado e enviado para assinatura no portal`);
       avisar({ msg: "Contrato da adenda gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" });
+      acessoCliente(d, "contratoAdenda", `Contrato da adenda ${a.n} · ${obraDe(d)}`);
     },
     /** No portal: o cliente pede alterações a cláusulas do contrato da adenda: vai ao Jurídico (como no contrato). */
     pedirAlteracoesContratoAdenda(id: number, n: string, clausulas: PedidoClausula[]) {

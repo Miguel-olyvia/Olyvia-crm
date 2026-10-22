@@ -9,6 +9,7 @@ import { Dlg } from "./DialogosInv";
 import { Lista, Ligacao, Nota, Pri, Sec, Texto } from "./pecasInv";
 import { PM, perm } from "./permForn";
 import { PESSOAS, convidarFornecedor, nifValido, primeiroErro, validarNovoForn, type NovoForn } from "./regrasForn";
+import { pedirAcessoForn } from "../acessosPortal";
 
 export interface PreFicha { company: string; name: string; nif: string; email: string; contact: string }
 const LIMITE_NIF = { inputMode: "numeric" as const, maxLength: 9, placeholder: "9 dígitos" };
@@ -27,7 +28,7 @@ export function NovoFornecedorDialogo({ aoFechar, aoRascunho }: { aoFechar: () =
     const erro = primeiroErro(v.errs);
     if (erro) { avisar(erro, true); return; }
     const r = agir((x) => convidarFornecedor(x, d), (s) => `Acesso enviado para ${s.email}. À espera que o fornecedor preencha a ficha.`);
-    if (r.ok) { aoFechar(); abrir({ t: "sup", id: r.valor.id, tab: "portal" }); }
+    if (r.ok) { aoFechar(); abrir({ t: "sup", id: r.valor.id, tab: "portal" }); pedirAcessoForn({ sid: r.valor.id, reenviar: false }); }
   };
   const semPortal = (): void => {
     setTentou(true);

@@ -3,7 +3,7 @@
 import { createPortal } from "react-dom";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
-  ArrowLeft, BarChart3, Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
+  ArrowLeft, BarChart3, Bell, Building, Building2, ChevronDown, KeyRound, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Truck, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import mascote from "@/assets/olyvia-mascot.png";
@@ -59,6 +59,10 @@ import { PortalCliente } from "./PortalCliente";
 import { RevisaoContrato } from "./RevisaoContrato";
 import { TIPOS_DOC, tokenDoc } from "./DocsCliente";
 import { fornecedorInicial } from "./portalFornecedor/dadosPortal";
+import { fornecedor } from "./inventario/base";
+import { LoginPortal } from "./LoginPortal";
+import { AcessoPortalDialog } from "./AcessoPortalDialog";
+import { contaFornecedor, fecharAcesso, mostrarAcesso, mudarPasswordFornecedor, ouvirAcessoForn, useAcessoPendente } from "./acessosPortal";
 
 // O Inventário completo (nativo, na Atual e na V2) só se carrega quando se abre essa página.
 const InventarioPagina = lazy(() => import("./inventario/InventarioPagina"));
@@ -154,6 +158,18 @@ export default function PrototipoNegocios() {
 
   // o link do portal do cliente (?portal=<código>): abre o portal numa página própria (14/10)
   const [portalTok, setPortalTok] = useState<string | null>(() => { try { return new URLSearchParams(window.location.search).get("portal"); } catch { return null; } });
+  // 22/10: o login dos portais (?login=1): o cliente e o fornecedor entram com as credenciais do popup do envio (LoginPortal.tsx)
+  const [login, setLogin] = useState<boolean>(() => { try { return new URLSearchParams(window.location.search).get("login") === "1"; } catch { return false; } });
+  // 22/10: o popup com o email de acesso ao portal (acessosPortal.ts): só neste separador, nunca vai para os outros aparelhos
+  const acessoPendente = useAcessoPendente();
+  // um popup pedido antes de abrir o protótipo (ou deixado ao sair) não é deste ecrã
+  useEffect(() => { fecharAcesso(); return fecharAcesso; }, []);
+  // abrir o login neste separador (o Inventário vive em memória: o fornecedor só o encontra aqui, ou noutro separador com a partilha ao vivo)
+  const abrirLogin = useCallback(() => {
+    fecharAcesso(); setMais(false);
+    try { const u = new URL(window.location.href); u.searchParams.set("login", "1"); window.history.replaceState(null, "", u.pathname + u.search); } catch { /* sem URL */ }
+    setLogin(true);
+  }, []);
   // o que se faz noutro separador (o portal) chega aqui sem recarregar
   useEffect(() => {
     // 21/10: os dados vêm do outro separador, mas quem vê e onde está ficam deste (o técnico numa janela e o gestor noutra)
@@ -219,6 +235,12 @@ export default function PrototipoNegocios() {
   }, [avisar]);
 
   const A = useMemo(() => acoes(S, avisar, run), [S, avisar, run]);
+  // 22/10: o Inventário deu (ou reenviou) o acesso a um fornecedor: a conta dele no Estado e o popup com as credenciais
+  useEffect(() => ouvirAcessoForn(({ sid, reenviar }) => {
+    const s = fornecedor(lerInventario(), sid);
+    if (!s) return;
+    run(() => mostrarAcesso(contaFornecedor(ref.current, s, reenviar)));
+  }), [run]);
   const go = (fn: () => void) => () => run(fn);
 
   // o "pulse" faz scroll até à secção e acende-a uma vez
@@ -414,13 +436,20 @@ export default function PrototipoNegocios() {
       );
   }
 
+  // 22/10: o login dos portais (cliente e fornecedor), de ecrã inteiro; "Voltar" leva ao protótipo
+  if (login) {
+    const sair = () => { window.history.replaceState(null, "", window.location.pathname + window.location.search.replace(/([?&])login=1&?/, "$1").replace(/[?&]$/, "")); setLogin(false); };
+    return <LoginPortal ctx={ctx} voltar={sair} />;
+  }
+
   // o portal do fornecedor simulado: ecrã inteiro, como o portal do cliente (só na Atual e na V2, como o Inventário e a Frota)
   if (fornMock && comInvFrota) {
     const voltar = (): void => { const de = fornMock.voltar; setFornMock(null); if (de === "inv") setInvMock(true); };
     return (
       <Suspense fallback={<p className="p-6 text-[15px] text-muted-foreground" role="status">A abrir o portal do fornecedor…</p>}>
         <PortalFornecedor key={fornMock.sup + ":" + fornMock.n} sup={fornMock.sup} po={fornMock.po} aoVoltar={voltar}
-          aoMudarFornecedor={(sup) => setFornMock((x) => (x ? { ...x, sup, po: null, n: x.n + 1 } : x))} />
+          aoMudarFornecedor={(sup) => setFornMock((x) => (x ? { ...x, sup, po: null, n: x.n + 1 } : x))}
+          aoDefinirPassword={(pw) => run(() => mudarPasswordFornecedor(ref.current, fornMock.sup, pw))} />
       </Suspense>
     );
   }
@@ -475,6 +504,13 @@ export default function PrototipoNegocios() {
         <Truck className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span className="flex-1">Portal do Fornecedor</span>
       </button>
     ) : null;
+    // 22/10: o login dos portais (cliente e fornecedor), neste separador, com as credenciais do popup do envio
+    const menuLogin = (
+      <button type="button" onClick={abrirLogin}
+        className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] text-foreground/80 transition-colors hover:bg-muted hover:text-foreground">
+        <KeyRound className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /><span className="flex-1">Login dos portais</span>
+      </button>
+    );
     // As ligações da Frota para fora: a obra (Operações), a Agenda (Definições › Agenda › Recursos) e as carrinhas no Inventário (Armazéns).
     const irObra = (id: number): void => { setFrotaMock(false); run(() => A.abrirPlano(id)); };
     const irAgenda = (): void => {
@@ -521,7 +557,7 @@ export default function PrototipoNegocios() {
             <span className="text-lg font-semibold tracking-tight">Olyvia</span>
           </div>
           <nav className="flex flex-col gap-0.5" aria-label="Menu">
-            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}{menuRh(false)}{menuForn}</> : null}</Fragment>)}
+            {itensMenu.map(([v, l, Ic, c]) => <Fragment key={v}>{item(v, l, Ic, c)}{v === "operacoes" ? <>{menuInv(false)}{menuFrota(false)}{menuRh(false)}{menuForn}{menuLogin}</> : null}</Fragment>)}
           </nav>
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
@@ -592,7 +628,7 @@ export default function PrototipoNegocios() {
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuInv(true)}{ativoInv && <div className="px-3 pt-3"><PerfilSimulado /></div>}</div>}
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuFrota(true)}{ativoFrota && <div className="px-3 pt-3"><PerfilFrotaSimulado /></div>}</div>}
                 {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuRh(true)}</div>}
-                {comInvFrota && <div className="mt-2 border-t border-border pt-2">{menuForn}</div>}
+                <div className="mt-2 border-t border-border pt-2">{menuForn}{menuLogin}</div>
                 <div className="mt-3 border-t border-border px-3 pt-3">{seletorVersao}</div>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
                   className="flex min-h-11 w-full items-center justify-between gap-3 px-3 text-left text-[15px]">
@@ -625,6 +661,7 @@ export default function PrototipoNegocios() {
           </nav>
         </div>
         {revisaoEl}
+        {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} entrarAqui={abrirLogin} />}
         {toastsEl}
       </div>
     );
@@ -645,6 +682,11 @@ export default function PrototipoNegocios() {
             <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">Ver a proposta simples</span>
           </button>
           {icone("definicoes", "Definições", Settings)}
+          <button type="button" onClick={abrirLogin} aria-label="Login dos portais"
+            className="group relative flex w-full items-center justify-center rounded-xl p-3 text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-sidebar-foreground">
+            <KeyRound className="h-5 w-5" />
+            <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">Login dos portais</span>
+          </button>
           <a href="/prototipo/maquetas.html" target="_blank" rel="noreferrer" aria-label="Maquetas das 12 screens"
             className="group relative flex items-center justify-center rounded-xl p-3 text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-sidebar-foreground">
             <LayoutTemplate className="h-5 w-5" />
@@ -698,6 +740,7 @@ export default function PrototipoNegocios() {
       </nav>
 
       {revisaoEl}
+      {acessoPendente && <AcessoPortalDialog key={acessoPendente.n} e={acessoPendente} fechar={fecharAcesso} entrarAqui={abrirLogin} />}
       {toastsEl}
     </div>
   );

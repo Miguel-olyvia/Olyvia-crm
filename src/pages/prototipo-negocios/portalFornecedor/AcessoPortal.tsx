@@ -14,7 +14,7 @@ import type { Fornecedor } from "../inventario/tipos";
 import { FormDados } from "./CatalogoDadosPortal";
 import { dadosDoFornecedor, primeiroAcessoPortal, type DadosFornPortal } from "./regrasPortal";
 
-export function SemAcesso({ s, aoVoltar }: { s: Fornecedor; aoVoltar: () => void }) {
+export function SemAcesso({ s, aoVoltar, rotuloVoltar = "Voltar ao CRM" }: { s: Fornecedor; aoVoltar: () => void; rotuloVoltar?: string }) {
   const revogado = s.portal === "revoked";
   return (
     <div className="flex min-h-[60vh] items-center justify-center p-4">
@@ -26,7 +26,7 @@ export function SemAcesso({ s, aoVoltar }: { s: Fornecedor; aoVoltar: () => void
         <p className="text-[15px] text-muted-foreground">
           {revogado ? `${s.company || "A empresa"} revogou o acesso de ${s.name} ao portal. Contacte a empresa para voltar a ter acesso.` : "A sua conta não tem nenhum acesso ativo ao portal. Contacte a empresa que o convidou."}
         </p>
-        <Button className="h-11 w-full gap-2" variant="outline" onClick={aoVoltar}><ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar ao CRM</Button>
+        <Button className="h-11 w-full gap-2" variant="outline" onClick={aoVoltar}><ArrowLeft className="h-4 w-4" aria-hidden="true" />{rotuloVoltar}</Button>
       </div>
     </div>
   );
@@ -34,7 +34,8 @@ export function SemAcesso({ s, aoVoltar }: { s: Fornecedor; aoVoltar: () => void
 
 const PASSOS = ["Convite", "Password", "Dados da empresa", "Concluído"] as const;
 
-export function PrimeiroAcesso({ s, aoConcluir }: { s: Fornecedor; aoConcluir: () => void }) {
+/** `aoDefinirPassword` (22/10): o login dos portais guarda na conta a password definida aqui (acessosPortal.ts). */
+export function PrimeiroAcesso({ s, aoConcluir, aoDefinirPassword }: { s: Fornecedor; aoConcluir: () => void; aoDefinirPassword?: (pw: string) => void }) {
   const db = useInventario();
   const [passo, setPasso] = useState(0);
   const [pw, setPw] = useState({ password: "", password2: "" });
@@ -50,6 +51,7 @@ export function PrimeiroAcesso({ s, aoConcluir }: { s: Fornecedor; aoConcluir: (
     if (passo === 2) {
       const r = executar((x) => primeiroAcessoPortal(x, s.id, pw, d));
       if (!r.ok) { setErro(r.erro); return; }
+      aoDefinirPassword?.(pw.password);
     }
     setPasso(passo + 1);
   };
