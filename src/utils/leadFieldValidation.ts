@@ -9,6 +9,9 @@
  * `po_codigo_postal = "-"` and `po_morada = "-"`.
  */
 
+import { isPhoneField } from "@/lib/phone/isPhoneField";
+import { splitInternationalPhone } from "@/lib/phone/splitInternationalPhone";
+
 export const POSTAL_CODE_PT_PATTERN = "^[0-9]{4}-[0-9]{3}$";
 
 const POSTAL_CODE_KEY_HINTS = [
@@ -30,6 +33,7 @@ export interface LeadFieldConstraint {
   field_key: string;
   field_label: string;
   field_type?: string | null;
+  contact_field_mapping?: string | null;
   is_required?: boolean | null;
   pattern?: string | null;
   pattern_message?: string | null;
@@ -94,20 +98,26 @@ const validateField = (
   if (empty) return null;
   if (typeof rawValue !== "string") return null;
 
-  const value = rawValue.trim();
+  const trimmed = rawValue.trim();
+  // O telefone é gravado como "+<indicativo><dígitos>", mas os limites e o regex
+  // configurados na campanha sempre foram pensados para os dígitos nacionais
+  // ("Máx. 9"). Contar a string toda recusava +351912345678 (13 caracteres).
+  const isPhone = isPhoneField(field);
+  const value = isPhone ? splitInternationalPhone(trimmed).digits : trimmed;
+  const unit = isPhone ? "dígitos" : "caracteres";
 
   if (typeof field.min_length === "number" && value.length < field.min_length) {
     return {
       fieldKey: field.field_key,
       fieldLabel: label,
-      message: `${label} deve ter pelo menos ${field.min_length} caracteres`,
+      message: `${label} deve ter pelo menos ${field.min_length} ${unit}`,
     };
   }
   if (typeof field.max_length === "number" && value.length > field.max_length) {
     return {
       fieldKey: field.field_key,
       fieldLabel: label,
-      message: `${label} deve ter no máximo ${field.max_length} caracteres`,
+      message: `${label} deve ter no máximo ${field.max_length} ${unit}`,
     };
   }
 

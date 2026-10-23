@@ -6,7 +6,7 @@ import { MarkerType } from "@xyflow/react";
 export const DEFAULT_CATEGORIES: NodeCategory[] = [
   { id: "cat_triggers", name: "⚡ Triggers", order: 0 },
   { id: "cat_logic", name: "🔀 Lógica", order: 1 },
-  { id: "cat_actions", name: "▶️ Acções", order: 2 },
+  { id: "cat_actions", name: "▶️ Ações", order: 2 },
   { id: "cat_end", name: "🏁 Fim", order: 3 },
 ];
 
@@ -57,7 +57,7 @@ export const DEFAULT_NODE_TYPES: CustomNodeType[] = [
       { id: "f9", name: "Parar se", type: "dropdown", options: ["Nenhuma", "Estado mudou", "Email respondido", "Deal fechado"], required: false, defaultValue: "Nenhuma", order: 2 },
     ],
   },
-  // ── Acções ──
+  // ── Ações ──
   {
     id: "nt_send_email",
     name: "Enviar Email",

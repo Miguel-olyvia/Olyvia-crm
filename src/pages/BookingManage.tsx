@@ -587,6 +587,7 @@ export default function BookingManage() {
                       stepNumber={booking.step_number ?? 1}
                       boardId={booking.board_id}
                       durationMinutes={durationMinutes}
+                      bookingToken={token}
                       primaryColor={PRIMARY}
                       textColor="#1F2937"
                       buttonTextColor="#ffffff"

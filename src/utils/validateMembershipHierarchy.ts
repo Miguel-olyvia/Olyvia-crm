@@ -66,28 +66,37 @@ export async function validateMembershipHierarchy(
 
       const parentOrgId = parentLink.parent_org_id;
 
-      // Check if the user has a membership in this ancestor org
-      const { data: membership } = await supabase
+      // Check if the user has a membership in this ancestor org. A user may hold
+      // BOTH a CRM and a client membership in the same org (see the
+      // membership_dual_client_crm_exception migration), so read EVERY active
+      // membership and compare against the STRONGEST role they hold there. Using
+      // .maybeSingle() here rejected "multiple rows" and silently skipped the
+      // whole hierarchy check for a dual-membership ancestor.
+      const { data: memberships } = await supabase
         .from("anew_memberships")
         .select("role_id")
         .eq("user_id", userId)
         .eq("organization_id", parentOrgId)
-        .eq("status", "active")
-        .maybeSingle();
+        .eq("status", "active");
 
-      if (membership?.role_id) {
-        const { data: parentRole } = await supabase
+      const parentRoleIds = (memberships || []).map((m) => m.role_id).filter(Boolean);
+      if (parentRoleIds.length > 0) {
+        const { data: parentRoles } = await supabase
           .from("anew_roles")
           .select("code")
-          .eq("id", membership.role_id)
-          .maybeSingle();
+          .in("id", parentRoleIds);
 
-        const parentPriority = parentRole?.code
-          ? (ROLE_PRIORITY[parentRole.code] ?? -1)
-          : -1;
+        let parentCode: string | undefined;
+        let parentPriority = -1;
+        for (const r of parentRoles || []) {
+          const p = r.code ? (ROLE_PRIORITY[r.code] ?? -1) : -1;
+          if (p > parentPriority) {
+            parentPriority = p;
+            parentCode = r.code ?? undefined;
+          }
+        }
 
         if (parentPriority > newPriority) {
-          // Fetch parent org name for a friendlier message
           const { data: parentOrg } = await (supabase as any)
             .from("anew_organizations")
             .select("name")
@@ -96,8 +105,8 @@ export async function validateMembershipHierarchy(
 
           return {
             allowed: false,
-            reason: `Este utilizador já possui o cargo "${parentRole?.code}" na organização "${parentOrg?.name || parentOrgId}", que é superior ao cargo que está a tentar atribuir. O acesso é herdado automaticamente.`,
-            parentRoleCode: parentRole?.code ?? undefined,
+            reason: `Este utilizador já possui o cargo "${parentCode}" na organização "${parentOrg?.name || parentOrgId}", que é superior ao cargo que está a tentar atribuir. O acesso é herdado automaticamente.`,
+            parentRoleCode: parentCode,
             parentOrgName: parentOrg?.name ?? undefined,
           };
         }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -15,6 +15,8 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
+import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
+import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
@@ -46,8 +48,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   // SMS OTP state for company signature
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
   const [otpCode, setOtpCode] = useState("");
+  // O Reenviar não muda o passo (o campo do código fica); só desactiva o botão durante o pedido.
+  const [reenviando, setReenviando] = useState(false);
   const [otpError, setOtpError] = useState("");
   const [maskedPhone, setMaskedPhone] = useState("");
+  const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
 
   useEffect(() => {
     setBodyHtml(contract?.contract_body_html || "");
@@ -233,8 +238,17 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   };
 
   // ── SMS OTP flow for company signature ──
-  const handleSendOtp = async () => {
-    setOtpStep("sending");
+  // Ref (e não estado) para que um segundo clique durante o pedido seja ignorado.
+  const otpSendingRef = useRef(false);
+
+  // A contagem de 60 s é só do Reenviar: no primeiro envio começa quando o servidor aceita;
+  // no Reenviar começa no clique e não é reposta se o servidor recusar.
+  const sendOtp = async (isResend: boolean) => {
+    if (otpSendingRef.current) return;
+    if (isResend && !otpCooldown.iniciar()) return;
+    otpSendingRef.current = true;
+    if (isResend) setReenviando(true);
+    else setOtpStep("sending");
     setOtpError("");
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
@@ -256,7 +270,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       if (payload?.error) {
         if (payload.error === "no_phone") {
           setOtpError(payload.message || "Não foi encontrado um número de telefone associado à sua conta. Atualize o seu perfil.");
-          setOtpStep("idle");
+          if (!isResend) setOtpStep("idle");
           return;
         }
         throw new Error(payload.message || payload.error);
@@ -265,13 +279,20 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
 
       setMaskedPhone(payload?.masked_phone || "");
       setOtpStep("input");
+      if (!isResend) otpCooldown.iniciar();
       toast.success(`Código SMS enviado para ${payload?.masked_phone}`);
     } catch (err: any) {
       setOtpError(err.message);
-      setOtpStep("idle");
+      if (!isResend) setOtpStep("idle");
       toast.error("Erro ao enviar SMS: " + err.message);
+    } finally {
+      otpSendingRef.current = false;
+      setReenviando(false);
     }
   };
+
+  const handleSendOtp = () => sendOtp(false);
+  const handleResendOtp = () => sendOtp(true);
 
   const handleVerifyOtp = async () => {
     if (otpCode.length !== 6) return;
@@ -710,7 +731,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                   Código enviado para <strong>{maskedPhone}</strong>
                 </p>
                 <div className="flex justify-center">
-                  <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode}>
+                  <InputOTP autoFocus maxLength={6} value={otpCode} onChange={setOtpCode}>
                     <InputOTPGroup>
                       <InputOTPSlot index={0} />
                       <InputOTPSlot index={1} />
@@ -724,9 +745,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                 {otpError && (
                   <p className="text-sm text-destructive">{otpError}</p>
                 )}
+                <OtpCooldownNotice activo={otpCooldown.activo} />
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={handleSendOtp} className="flex-1 text-xs">
-                    Reenviar código
+                  <Button variant="outline" onClick={handleResendOtp} disabled={otpCooldown.activo || reenviando} className="flex-1 text-xs">
+                    {cooldownLabel("Reenviar código", otpCooldown.restante)}
                   </Button>
                   <Button
                     onClick={handleVerifyOtp}

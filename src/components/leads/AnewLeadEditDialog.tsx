@@ -4,6 +4,7 @@ import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,8 @@ import {
 import { Loader2, Save } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { DynamicFormField } from "./DynamicFormField";
+import { LeadPhoneField } from "./LeadPhoneField";
+import { normalizeLegacyPhonePrefix } from "@/lib/phone/splitInternationalPhone";
 import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   resolveLeadDialogFieldDefinitions,
@@ -34,6 +37,12 @@ import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validati
 import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
 import { linkEntityAddress, linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import {
+  isLeadStageTransitionAllowed,
+  LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+  leadStageTransitionBlockedMessage,
+} from "@/lib/leads/stageTransitionGuard";
 
 interface Lead {
   id: string;
@@ -172,7 +181,15 @@ export function AnewLeadEditDialog({
 }: LeadEditDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  
+
+  // Restrição de transições desenhada no diagrama de fluxo. Só se aplica a
+  // mudanças feitas por utilizadores — é exatamente o caso deste diálogo.
+  const {
+    stages: pipelineStages,
+    enforceStageTransitions,
+    transitions: stageTransitions,
+  } = useLeadPipelineRules(companyId);
+
   const [fieldDefs, setFieldDefs] = useState<LeadDialogFieldDefinition[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
   const [status, setStatus] = useState("new");
@@ -311,14 +328,23 @@ export function AnewLeadEditDialog({
   const resolveWorkflowStageId = async (statusValue: string) => {
     const { data, error } = await supabase
       .from("lead_workflow_stages")
-      .select("id, organization_id")
-      .eq("name", statusValue)
+      .select("id, organization_id, name, is_rejection")
       .or(`organization_id.eq.${companyId},organization_id.is.null`);
 
     if (error) throw error;
 
-    const organizationStage = data?.find((stage) => stage.organization_id === companyId);
-    return organizationStage?.id || data?.find((stage) => stage.organization_id === null)?.id || null;
+    // "lost" e "rejected" são tratados como o mesmo estado terminal em todo o
+    // resto da app (contadores, filtros, bucket "Lost" do Kanban), mas nenhuma
+    // org tem um estágio literalmente chamado "lost" — só "rejected". Usar
+    // is_rejection em vez de igualdade literal de name evita que a resolução
+    // falhe silenciosamente e deixe workflow_stage_id por atualizar.
+    const isLostLikeStatus = statusValue === "lost" || statusValue === "rejected";
+    const candidates = (data ?? []).filter(
+      (stage) => stage.name === statusValue || (isLostLikeStatus && stage.is_rejection)
+    );
+
+    const organizationStage = candidates.find((stage) => stage.organization_id === companyId);
+    return organizationStage?.id || candidates.find((stage) => stage.organization_id === null)?.id || null;
   };
 
   const handleSave = async () => {
@@ -356,8 +382,11 @@ export function AnewLeadEditDialog({
       // campanha, para as duas nunca divergirem. NAO toca em form_submissions
       // (a submissao original vive noutra tabela e mantem-se).
       for (const generalKey of GENERAL_FIELD_KEYS) {
-        const canonical = readGeneralField(generalKey, updatedFieldValues);
-        if (canonical === "" || canonical === null || canonical === undefined) continue;
+        const rawCanonical = readGeneralField(generalKey, updatedFieldValues);
+        if (rawCanonical === "" || rawCanonical === null || rawCanonical === undefined) continue;
+        // Telefones antigos com "00" (ex.: "0045 41736520") passam a "+45...",
+        // o formato que o seletor de indicativo mostra e que o resto guarda.
+        const canonical = generalKey === "phone" ? normalizeLegacyPhonePrefix(rawCanonical) : rawCanonical;
         updatedFieldValues[generalKey] = canonical;
         const mappedKey = generalKeyToFormKey[generalKey];
         if (mappedKey) updatedFieldValues[mappedKey] = canonical;
@@ -368,7 +397,27 @@ export function AnewLeadEditDialog({
 
       let workflowStageId = lead.workflow_stage_id || null;
       if (statusChanged) {
+        // O destino só é conhecido depois de resolvido o estágio, por isso a
+        // guarda corre imediatamente a seguir — e sempre ANTES de qualquer
+        // escrita (a RPC rpc_update_lead só é chamada mais abaixo).
         workflowStageId = await resolveWorkflowStageId(status);
+
+        if (!isLeadStageTransitionAllowed({
+          enforce: enforceStageTransitions,
+          transitions: stageTransitions,
+          fromStageId: lead.workflow_stage_id ?? null,
+          toStageId: workflowStageId,
+        })) {
+          toast({
+            title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+            description: leadStageTransitionBlockedMessage(
+              pipelineStages.find(s => s.id === lead.workflow_stage_id)?.label,
+              pipelineStages.find(s => s.id === workflowStageId)?.label,
+            ),
+            variant: "destructive",
+          });
+          return; // o finally envolvente limpa o `saving`
+        }
       }
 
       // Derive the same entity display-name fields the FE used to write
@@ -425,6 +474,27 @@ export function AnewLeadEditDialog({
             variant: "destructive",
           });
           return; // the enclosing finally clears `saving`
+        }
+      }
+
+      // O dono e as visitas futuras da lead nunca divergem: muda-se o dono PRIMEIRO
+      // (a base troca o recurso das visitas futuras). Se o novo dono não tem
+      // recurso de agenda, a mudança é recusada e nada mais é gravado.
+      let ownerAffectedVisitIds: string[] = [];
+      if ((lead.assigned_to ?? null) !== (assignedTo ?? null)) {
+        try {
+          const ownerResult = await withAuditContext(supabase, userId, () =>
+            setEntityOwner("lead", lead.id, assignedTo),
+          );
+          ownerAffectedVisitIds = ownerResult.affectedVisitIds;
+        } catch (ownerError) {
+          const description = await getFriendlyErrorMessage(ownerError);
+          toast({
+            title: t("leads.toast.assigneeUpdateError"),
+            description,
+            variant: "destructive",
+          });
+          return; // o finally envolvente limpa o `saving`
         }
       }
 
@@ -557,6 +627,14 @@ export function AnewLeadEditDialog({
         toast({
           title: "Lead atualizada",
           description: "Os dados da lead foram guardados com sucesso.",
+        });
+      }
+
+      // Avisa o cliente de que mudou o comercial da visita (só se o interruptor da
+      // organização estiver ligado). Em segundo plano: a gravação já terminou.
+      if (ownerAffectedVisitIds.length > 0) {
+        void notifyOwnerChangeVisits(companyId, ownerAffectedVisitIds).then((notified) => {
+          if (notified > 0) toast({ title: t("scheduling.notify.clientNotified") });
         });
       }
 
@@ -706,12 +784,22 @@ export function AnewLeadEditDialog({
               <div className="grid grid-cols-2 gap-4">
                 {GENERAL_FIELDS.map((field) => (
                   <div key={field.key} className="space-y-2">
-                    <Label>{field.label}</Label>
-                    <Input
-                      value={readGeneralField(field.key)}
-                      onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
-                      aria-invalid={!!fieldErrors[field.key]}
-                    />
+                    {field.key === "phone" ? (
+                      <LeadPhoneField
+                        label={field.label}
+                        value={readGeneralField(field.key)}
+                        onChange={(val) => handleGeneralFieldChange(field.key, val)}
+                      />
+                    ) : (
+                      <>
+                        <Label>{field.label}</Label>
+                        <Input
+                          value={readGeneralField(field.key)}
+                          onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
+                          aria-invalid={!!fieldErrors[field.key]}
+                        />
+                      </>
+                    )}
                     {fieldErrors[field.key] && (
                       <p className="text-xs text-destructive">{fieldErrors[field.key]}</p>
                     )}

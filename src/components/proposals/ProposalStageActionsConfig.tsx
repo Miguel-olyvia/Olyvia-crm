@@ -90,7 +90,7 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
 };
 
 /**
- * Tipos de acção oferecidos ao criar uma acção NOVA. `ACTION_LABELS` acima é o
+ * Tipos de ação oferecidos ao criar uma ação NOVA. `ACTION_LABELS` acima é o
  * dicionário de apresentação (tem de continuar a cobrir tudo o que já exista
  * guardado na tabela, senão a lista passa a mostrar o `action_type` em cru);
  * esta é a lista do que pode ser escolhido.
@@ -167,7 +167,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
 
   const handleAdd = async () => {
     if (!companyId || !selectedStageId || !selectedActionType) {
-      toast({ title: "Selecione fase e tipo de acção", variant: "destructive" });
+      toast({ title: "Selecione fase e tipo de ação", variant: "destructive" });
       return;
     }
 
@@ -195,7 +195,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     if (error) {
       toast({ title: "Erro ao adicionar", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Acção adicionada" });
+      toast({ title: "Ação adicionada" });
       resetForm();
       loadActions();
     }
@@ -209,18 +209,18 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
       loadActions();
     } else {
       captureFlowError(error, "proposal-lifecycle");
-      toast({ title: "Erro ao alterar acção", description: "Não foi possível atualizar o estado da acção.", variant: "destructive" });
+      toast({ title: "Erro ao alterar ação", description: "Não foi possível atualizar o estado da ação.", variant: "destructive" });
     }
   };
 
   const handleDelete = async (id: string) => {
     const { error } = await (supabase.from("proposal_stage_actions" as any) as any).delete().eq("id", id);
     if (!error) {
-      toast({ title: "Acção removida" });
+      toast({ title: "Ação removida" });
       loadActions();
     } else {
       captureFlowError(error, "proposal-lifecycle");
-      toast({ title: "Erro ao remover acção", description: "Não foi possível remover a acção.", variant: "destructive" });
+      toast({ title: "Erro ao remover ação", description: "Não foi possível remover a ação.", variant: "destructive" });
     }
   };
 
@@ -261,7 +261,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
         <div>
           <h4 className="font-medium flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
-            Acções por Fase
+            Ações por Fase
           </h4>
           <p className="text-xs text-muted-foreground">
             Configure tarefas e notificações automáticas quando uma proposta entra numa fase
@@ -269,7 +269,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
         </div>
         <Button size="sm" onClick={() => setIsFormOpen(true)}>
           <Plus className="w-4 h-4 mr-1" />
-          Nova Acção
+          Nova Ação
         </Button>
       </div>
 
@@ -277,9 +277,9 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
         <Card>
           <CardContent className="py-8 text-center">
             <Zap className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground">Nenhuma acção automática configurada</p>
+            <p className="text-muted-foreground">Nenhuma ação automática configurada</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Adicione acções para automatizar tarefas e notificações
+              Adicione ações para automatizar tarefas e notificações
             </p>
           </CardContent>
         </Card>
@@ -337,7 +337,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
       <Collapsible open={isFormOpen} onOpenChange={setIsFormOpen}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="w-full justify-between" size="sm">
-            Nova Acção
+            Nova Ação
             {isFormOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </Button>
         </CollapsibleTrigger>
@@ -364,10 +364,10 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Tipo de Acção *</Label>
+                  <Label>Tipo de Ação *</Label>
                   <Select value={selectedActionType} onValueChange={setSelectedActionType}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecionar acção..." />
+                      <SelectValue placeholder="Selecionar ação..." />
                     </SelectTrigger>
                     <SelectContent>
                       {SELECTABLE_ACTION_TYPES.map((key) => (
@@ -413,7 +413,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={resetForm}>Cancelar</Button>
-                <Button size="sm" onClick={handleAdd}>Adicionar Acção</Button>
+                <Button size="sm" onClick={handleAdd}>Adicionar Ação</Button>
               </div>
             </CardContent>
           </Card>

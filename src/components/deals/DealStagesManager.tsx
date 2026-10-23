@@ -419,7 +419,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
                   <TableHead className="w-16">Cor</TableHead>
                   <TableHead className="w-28">Tipo</TableHead>
                   <TableHead className="w-20">Deals</TableHead>
-                  <TableHead className="text-right w-28">Acções</TableHead>
+                  <TableHead className="text-right w-28">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <SortableContext items={displayStages.map(s => s.id)} strategy={verticalListSortingStrategy}>

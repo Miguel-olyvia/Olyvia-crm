@@ -14,7 +14,7 @@ import { formatCurrency } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import type { InlineQuoteData } from "@/components/proposals/InlineQuoteBuilder";
 import { calculateInlineQuoteTotals } from "@/utils/quotes/inlineQuoteVatCalculation";
-import { getLineSubtotal } from "@/utils/quotes/quoteLinePricing";
+import { getLineSubtotal, getLineUnitCost } from "@/utils/quotes/quoteLinePricing";
 
 interface SectionSummary {
   name: string;
@@ -117,8 +117,13 @@ export function QuoteBuilderSidebar({
 
   const validLines = lines.filter(l => l.qt > 0);
 
-  // Calculate margin only if cost_price is explicitly set on at least one line
-  const linesWithCost = validLines.filter((l: any) => l.cost_price && l.cost_price > 0);
+  // Calculate margin only if there's cost data on at least one line. Usa a
+  // mesma fonte única que a listagem (getLineUnitCost = custo_material_unit +
+  // custo_mao_obra_unit) — filtrar só por `cost_price > 0` ignorava por
+  // completo linhas de secção/bundle cujo custo só vem gravado nesses dois
+  // campos (cost_price fica a 0), fazendo a Margem Global daqui ficar
+  // sistematicamente diferente da margem já recalculada na listagem.
+  const linesWithCost = validLines.filter((l: any) => getLineUnitCost(l) > 0);
   const hasCostData = linesWithCost.length > 0;
   let totalCost = 0;
   let totalSales = 0;
@@ -128,8 +133,7 @@ export function QuoteBuilderSidebar({
     // as 100%-margin revenue. A receita usa o mesmo subtotal da fonte única,
     // para que linhas com preço de venda definido não contem como €0.
     linesWithCost.forEach((line: any) => {
-      const costUnit = line.cost_price || 0;
-      totalCost += costUnit * line.qt;
+      totalCost += getLineUnitCost(line) * line.qt;
       totalSales += getLineSubtotal(line);
     });
   }

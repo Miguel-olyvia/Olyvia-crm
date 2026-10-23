@@ -74,6 +74,12 @@ import { pt } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkflowConfig";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import {
+  isLeadStageTransitionAllowed,
+  LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+  leadStageTransitionBlockedMessage,
+} from "@/lib/leads/stageTransitionGuard";
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
 import { ScheduleLeadVisitDialog } from "@/components/leads/ScheduleLeadVisitDialog";
@@ -111,6 +117,8 @@ import {
 import { ensureEntityOrgLink, linkEntityToOrg, findEntityMatches } from "@/utils/orgEntity";
 import { assertNoSupabaseError } from "@/lib/assertNoSupabaseError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, bulkSetEntityOwner, describeSkipped, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
@@ -138,6 +146,11 @@ import {
   normalizeLeadScope,
   reconcileRefreshedLead,
 } from "./anewLeadsHelpers";
+import {
+  getRejectionStatusNames,
+  shouldApplyRejectionUnion,
+  sumRejectionStatusCounts,
+} from "./leads/rejectionStatuses";
 
 
 // Lead e FieldDefinition vivem em @/types/leads. Leia o cabecalho desse
@@ -208,7 +221,7 @@ const LEADS_LIST_COLUMNS = `
   organization_id, root_organization_id,
   created_at, updated_at, converted_at,
   converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-  field_values, notes, source, source_id,
+  field_values, notes, lost_reason, source, source_id,
   last_contact_at, last_contact_result, contact_attempts,
   last_activity_at,
   callback_scheduled_at, callback_notes,
@@ -250,6 +263,9 @@ function leadListSortValue(
   return Math.max(toMs(lead.created_at), toMs(lead.last_activity_at));
 }
 
+/** As duas datas de uma lead sobre as quais faz sentido filtrar. */
+export type LeadsDateField = "created_at" | "last_contact_at" | "ambos";
+
 interface LeadsQueryFilters {
   statusFilter: string;
   campaignFilter: string;
@@ -257,12 +273,28 @@ interface LeadsQueryFilters {
   contactResultFilter: string;
   dateFrom?: Date;
   dateTo?: Date;
+  /**
+   * SOBRE QUE DATA as datas acima filtram. Uma lead tem varias datas que
+   * interessam (criacao, ultimo contacto), e o filtro estava preso a de criacao
+   * -- por isso era impossivel pedir "o que foi contactado neste periodo": uma
+   * lead criada em Agosto e contactada em Setembro nunca aparecia.
+   * Por omissao mantem-se a criacao, para nao mudar o que ja existia.
+   */
+  dateField?: LeadsDateField;
   effectiveSearch: string;
   sourceFilter: string;
   // Orthogonal to statusFilter: qualification_type is sticky and survives
   // status changes, so it's filtered independently (AND'ed with the other
   // clauses) rather than folded into the status filter above.
   qualificationFilter?: string;
+  /**
+   * Nomes de status que contam como rejeicao nesta organizacao. Sem isto o
+   * filtro so conseguia unir `lost`+`rejected` quando o filtro activo era
+   * literalmente a string "lost" -- numa organizacao cuja etapa se chama
+   * `rejected` a uniao nunca acontecia e o cartao contava mais leads do que a
+   * lista mostrava. Ver ./leads/rejectionStatuses.
+   */
+  rejectionStatusNames?: readonly string[];
 }
 
 // Single source of truth for the filter clauses applied to anew_leads —
@@ -272,12 +304,25 @@ interface LeadsQueryFilters {
 function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   const {
     statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-    dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+    dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
+    rejectionStatusNames,
   } = filters;
+  const dateColumn: "created_at" | "last_contact_at" = dateField === "last_contact_at" ? "last_contact_at" : "created_at";
+  const rejectionNames = rejectionStatusNames ?? ["lost", "rejected", "Rejected"];
 
   if (statusFilter !== "all") {
-    if (statusFilter === "lost") {
-      q = q.in("status", ["lost", "rejected"]);
+    // Qualquer estado de rejeicao (o `lost` por omissao, o `rejected` de quem
+    // chamou assim a etapa, ou um nome proprio marcado is_rejection) une-os
+    // todos. Antes isto estava preso a string "lost" e a uniao nunca acontecia
+    // nas organizacoes que chamam `rejected` a etapa.
+    //
+    // Sem `.is("scheduled_visit_id", null)`, ao contrario do ramo generico: uma
+    // lead que foi visitada e DEPOIS se perdeu continua perdida -- a visita e
+    // historia, nao a posicao dela. Era assim que a Ma Cristina Mendes sumia do
+    // cartao. O ramo `lost` original tambem nao excluia, por isso isto nao muda
+    // o comportamento que ja existia, so o estende aos outros nomes.
+    if (shouldApplyRejectionUnion(statusFilter, rejectionNames)) {
+      q = q.in("status", rejectionNames);
     } else if (statusFilter === "visit_scheduled") {
       q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
     } else if (statusFilter === "new") {
@@ -312,8 +357,24 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
       q = q.eq("last_contact_result", contactResultFilter);
     }
   }
-  if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
-  if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
+  // A coluna e escolhida por quem filtra (criacao ou ultimo contacto). Quem
+  // nunca foi contactado tem last_contact_at nulo e fica de fora ao filtrar por
+  // contacto, que e o esperado.
+  if (dateField === "ambos") {
+    // Interseccao: a lead tem de ter entrado E sido contactada dentro do
+    // intervalo. Sao dois intervalos completos, somados com AND.
+    if (dateFrom) {
+      const de = startOfDay(dateFrom).toISOString();
+      q = q.gte("created_at", de).gte("last_contact_at", de);
+    }
+    if (dateTo) {
+      const ate = endOfDay(dateTo).toISOString();
+      q = q.lte("created_at", ate).lte("last_contact_at", ate);
+    }
+  } else {
+    if (dateFrom) q = q.gte(dateColumn, startOfDay(dateFrom).toISOString());
+    if (dateTo) q = q.lte(dateColumn, endOfDay(dateTo).toISOString());
+  }
   // Palavra a palavra, nao a frase seguida: um `.ilike("search_text", "%joao silva%")`
   // exigia que as palavras fossem contiguas, por isso "joao silva" nunca
   // encontrava "Joao Pedro Silva". `applySearchTextFilter` encadeia um
@@ -538,7 +599,11 @@ export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
-  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
+  // `identityMap` entra aqui de proposito: `getIdentity` e estavel (le de uma ref
+  // e nao tem dependencias), por isso um useMemo que so dependa dele NAO volta a
+  // correr quando as fichas das pessoas chegam. A ordenacao por Nome precisa de
+  // reagir a essa chegada, e o mapa e o unico valor que muda nesse momento.
+  const { identityMap, resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
@@ -618,11 +683,11 @@ export default function AnewLeads() {
     Object.entries(statusCounts).filter(([key]) => key !== 'converted').reduce((a, [, b]) => a + b, 0), 
     [statusCounts]
   );
-  const paginationTotal = useMemo(() => {
-    if (statusFilter === 'all') return globalTotal;
-    if (statusFilter === 'lost') return (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0);
-    return statusCounts[statusFilter] || 0;
-  }, [statusFilter, statusCounts, globalTotal]);
+  // `paginationTotal` vive mais abaixo, logo a seguir a `workflowStages`:
+  // depende de `rejectionStatusNames`, que se deriva das etapas, e estas so
+  // sao declaradas por volta da linha 1820. Le-lo aqui dava ReferenceError
+  // (TDZ) e partia a pagina inteira -- a mesma armadilha que ja obrigou a
+  // mover `assignableCompanyUsers` (ver nota mais abaixo).
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all");
   const [assignOrgFilter, setAssignOrgFilter] = useState<string>("all");
   // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
@@ -633,6 +698,9 @@ export default function AnewLeads() {
   // temporal-dead-zone ReferenceError — see their definitions near comercialUsers/assignOrgTree.
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
+  // Sobre que data o intervalo acima filtra. Comeca na criacao, que era o
+  // comportamento unico ate aqui.
+  const [dateField, setDateField] = useState<LeadsDateField>("created_at");
   // Por defeito, a mesma chave que o servidor usa (ver LEADS_LIST_SORT_COLUMN).
   // Se ficasse em "created_at", `filteredLeads` re-ordenava as paginas ja
   // carregadas por data de criacao e anulava a ordenacao do servidor. A coluna
@@ -741,7 +809,10 @@ export default function AnewLeads() {
   // drag-and-drop and the bulk status-change flows. Only one of the two
   // pending states is ever set at a time.
   const [pendingLostDrop, setPendingLostDrop] = useState<{ leadId: string; newStage: WorkflowStage; leadTitle?: string } | null>(null);
-  const [pendingLostBulk, setPendingLostBulk] = useState<{ newStatus: string; matchingStage: WorkflowStage } | null>(null);
+  // `leadIds` guarda o subconjunto já filtrado pela restrição de transições —
+  // sem isto, confirmar o motivo de perda voltaria a aplicar a tudo o que está
+  // selecionado, incluindo as leads que a validação excluiu.
+  const [pendingLostBulk, setPendingLostBulk] = useState<{ newStatus: string; matchingStage: WorkflowStage; leadIds: string[] } | null>(null);
 
   // Visit reassign dialog state
   const [showVisitReassignDialog, setShowVisitReassignDialog] = useState(false);
@@ -1101,7 +1172,7 @@ export default function AnewLeads() {
     // is safe here because initialLoadDoneRef.current prevents re-entry, and
     // the org-change path resets that ref via the effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine]);
 
 
 
@@ -1150,6 +1221,9 @@ export default function AnewLeads() {
       }
       if (dateFrom) rpcParams.p_date_from = startOfDay(dateFrom).toISOString();
       if (dateTo) rpcParams.p_date_to = endOfDay(dateTo).toISOString();
+      // Os contadores tem de contar pela MESMA data que a lista, senao os
+      // numeros dos separadores discordam do que esta em baixo.
+      if (dateField !== "created_at") rpcParams.p_date_field = dateField;
       if (effectiveSearch) rpcParams.p_search = effectiveSearch;
       if (sourceFilter === "none") rpcParams.p_source_is_null = true;
       else if (sourceFilter !== "all") rpcParams.p_source = sourceFilter;
@@ -1173,7 +1247,7 @@ export default function AnewLeads() {
       console.error("Error loading status counts:", error);
       captureFlowError(error, "lead-lifecycle");
     }
-  }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, dateField, effectiveSearch, onlyMine]);
 
   const dashboardQuery = useMemo(() => {
     if (!activeCompanyId || scopeLoading) return null;
@@ -1193,6 +1267,7 @@ export default function AnewLeads() {
         source: sourceFilter,
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
+        dateField,
       },
     };
   }, [
@@ -1210,6 +1285,7 @@ export default function AnewLeads() {
     sourceFilter,
     dateFrom?.getTime(),
     dateTo?.getTime(),
+    dateField,
   ]);
 
   const getDescendantOrgIds = useCallback(async (rootId: string): Promise<string[]> => {
@@ -1781,6 +1857,54 @@ export default function AnewLeads() {
     staleTime: 5 * 60 * 1000,
   });
 
+  /**
+   * Estados que contam como rejeição nesta organização. Declarado AQUI, e não
+   * junto dos outros useMemo lá em cima, porque depende de `workflowStages`,
+   * que só existe a partir da query acima. Lê-lo antes disso dava
+   * ReferenceError (TDZ) e partia o /leads.
+   *
+   * É a fonte única do cartão e do filtro: é isso que garante que o número
+   * mostrado é o número de linhas que a lista devolve ao clicar nele.
+   */
+  const rejectionStatusNames = useMemo(
+    () => getRejectionStatusNames(workflowStages),
+    [workflowStages]
+  );
+
+  // Movido de cima (ver nota junto a `globalTotal`): depende de
+  // `rejectionStatusNames`. Só é lido a partir de `effectiveHasMore` e do JSX,
+  // muito abaixo daqui, por isso a mudança de sítio é segura.
+  const paginationTotal = useMemo(() => {
+    if (statusFilter === 'all') return globalTotal;
+    if (shouldApplyRejectionUnion(statusFilter, rejectionStatusNames)) {
+      return sumRejectionStatusCounts(statusCounts, rejectionStatusNames);
+    }
+    return statusCounts[statusFilter] || 0;
+  }, [statusFilter, statusCounts, globalTotal, rejectionStatusNames]);
+
+  // Restrição de transições desenhada no diagrama (separador Fluxo). Só é
+  // aplicada a mudanças de estágio iniciadas pelo utilizador; o motor
+  // automático (trigger trg_sync_lead_workflow_stage_id, auto_advance e a edge
+  // function execute-workflow) nunca passa por aqui e mantém-se isento.
+  const { enforceStageTransitions, transitions: stageTransitions } = useLeadPipelineRules(activeCompanyId);
+
+  /** Rótulo de um estágio, para a mensagem de erro. */
+  const stageLabelById = useCallback(
+    (stageId: string | null | undefined) => (stageId ? workflowStages.find(s => s.id === stageId)?.label : undefined),
+    [workflowStages]
+  );
+
+  const isStageTransitionAllowed = useCallback(
+    (fromStageId: string | null | undefined, toStageId: string | null | undefined) =>
+      isLeadStageTransitionAllowed({
+        enforce: enforceStageTransitions,
+        transitions: stageTransitions,
+        fromStageId,
+        toStageId,
+      }),
+    [enforceStageTransitions, stageTransitions]
+  );
+
   // Drives the Funil's "current stage" highlight via the same rule engine
   // (reached_when/matching_statuses) the Percurso tab already uses, instead
   // of a plain literal comparison against the lead's raw status text — so a
@@ -1815,6 +1939,7 @@ export default function AnewLeads() {
       qualified: "#22c55e",
       converted: "#8b5cf6",
       rejected: "#ef4444",
+      lost: "#ef4444",
       visit_scheduled: "#f97316",
       scheduled: "#f97316",
     };
@@ -2053,7 +2178,8 @@ export default function AnewLeads() {
       teamMemberIds,
       filters: {
         statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-        dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+        dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
+        rejectionStatusNames,
       },
     });
 
@@ -2240,7 +2366,7 @@ export default function AnewLeads() {
         pipeline,
       };
     }
-  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, rejectionStatusNames, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
 
   /**
    * A lista de leads, gerida pela cache. A chave inclui a organizacao, o ambito
@@ -2253,7 +2379,7 @@ export default function AnewLeads() {
     queryKey: [
       LEADS_LIST_QUERY_KEY, activeCompanyId, normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
       scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter,
-      assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo,
+      assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField,
     ],
     queryFn: ({ pageParam }) => fetchLeadsPage(pageParam as number),
     initialPageParam: 0,
@@ -2315,7 +2441,7 @@ export default function AnewLeads() {
               organization_id, root_organization_id,
               created_at, updated_at, converted_at,
               converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-              field_values, notes, source, source_id,
+              field_values, notes, lost_reason, source, source_id,
               last_contact_at, last_contact_result, contact_attempts,
               callback_scheduled_at, callback_notes, tags,
               qualification_type, qualified_at,
@@ -2476,7 +2602,8 @@ export default function AnewLeads() {
         teamMemberIds,
         filters: {
           statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-          dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+          dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
+          rejectionStatusNames,
         },
       });
 
@@ -2540,7 +2667,7 @@ export default function AnewLeads() {
     } finally {
       setKanbanLoading(false);
     }
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, rejectionStatusNames, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
 
   // Persist a kanban drag: same status + workflow_stage_id update and
   // execute-workflow automation trigger as handleBulkStatusChange, for a
@@ -2599,6 +2726,23 @@ export default function AnewLeads() {
     const newStage = workflowStages.find(s => s.id === newStageId);
     if (!newStage) return;
 
+    // A lead arrastada já está em memória — o estágio de origem sai daqui, sem
+    // query extra.
+    const draggedLead = kanbanLeads.find(l => l.id === leadId);
+    const fromStageId = (draggedLead as any)?.workflow_stage_id as string | null | undefined;
+
+    // A validação do fluxo corre ANTES dos checks de is_conversion/is_rejection:
+    // caso contrário o diálogo de motivo de perda abria-se antes de se saber
+    // sequer se a transição é permitida.
+    if (!isStageTransitionAllowed(fromStageId, newStage.id)) {
+      toast({
+        title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+        description: leadStageTransitionBlockedMessage(stageLabelById(fromStageId), newStage.label),
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (newStage.is_conversion) {
       toast({
         title: "Não é possível mover diretamente para esta fase",
@@ -2612,7 +2756,6 @@ export default function AnewLeads() {
     // before writing anything — hold off and let the user confirm it in
     // LeadLostReasonDialog instead of saving immediately.
     if (newStage.is_rejection) {
-      const draggedLead = kanbanLeads.find(l => l.id === leadId);
       const identity = draggedLead?.entity_id ? getIdentity(draggedLead.entity_id) : null;
       const leadTitle = (identity?.first_name && identity?.last_name
         ? `${identity.first_name} ${identity.last_name}`
@@ -2622,7 +2765,7 @@ export default function AnewLeads() {
     }
 
     await persistKanbanStageDrop(leadId, newStage);
-  }, [workflowStages, toast, kanbanLeads, getIdentity, persistKanbanStageDrop]);
+  }, [workflowStages, toast, kanbanLeads, getIdentity, persistKanbanStageDrop, isStageTransitionAllowed, stageLabelById]);
 
   // Fetch kanban data only while that tab is visible, but keep it in sync
   // with every filter change made anywhere on the page (same dependency list
@@ -2632,7 +2775,7 @@ export default function AnewLeads() {
     if (activeTab !== "list" || leadsSubView !== "kanban" || !activeCompanyId || scopeLoading) return;
     loadKanbanLeads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, rejectionStatusNames, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -2648,7 +2791,7 @@ export default function AnewLeads() {
         organization_id, root_organization_id,
         created_at, updated_at, converted_at,
         converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-        field_values, notes, source, source_id,
+        field_values, notes, lost_reason, source, source_id,
         last_contact_at, last_contact_result, contact_attempts,
         last_activity_at,
         callback_scheduled_at, callback_notes,
@@ -2787,6 +2930,11 @@ export default function AnewLeads() {
     if (!leadId) return;
     invalidateEntities([payload?.entityId ?? null]);
     void refreshSingleLead(leadId);
+
+    const entityId = payload?.entityId ?? selectedLead?.entity_id ?? null;
+    if (entityId) {
+      window.dispatchEvent(new CustomEvent("entity-interaction-created", { detail: { entityId } }));
+    }
   }, [invalidateEntities, refreshSingleLead, selectedLead]);
 
   /**
@@ -2928,7 +3076,7 @@ export default function AnewLeads() {
     if (!fieldValues) return null;
     
     const phonePatterns = ['phone', 'telefone', 'tel', 'mobile', 'telemovel', 'contacto', 'celular'];
-    
+
     for (const key of Object.keys(fieldValues)) {
       if (key === '_meta') continue;
       const keyLower = key.toLowerCase();
@@ -2938,6 +3086,30 @@ export default function AnewLeads() {
       }
     }
     return null;
+  };
+
+  /**
+   * Nome, telefone e email TAL COMO APARECEM na lista.
+   *
+   * A ordenacao tem de usar exactamente estes valores. Antes procurava-os em
+   * field_values["nome"|"telefone"|"email"] -- chaves que quase nenhuma lead tem
+   * (medido: 1 nome, 0 telefones e 171 emails em 6078 leads) -- e por isso todas
+   * as linhas empatavam e o clique no cabecalho nao mudava nada. O nome, em
+   * particular, vem da ficha da pessoa e nao das respostas do formulario.
+   *
+   * Fica numa funcao so, usada pela ordenacao E pela linha da tabela, para as
+   * duas nao voltarem a divergir.
+   */
+  const leadDisplayValues = (lead: Lead) => {
+    const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    const name = identity?.first_name && identity?.last_name
+      ? `${identity.first_name} ${identity.last_name}`
+      : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+    return {
+      name: name || "",
+      phone: extractPhoneFromLead(lead.field_values) || "",
+      email: extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']) || "",
+    };
   };
 
   // Format phone for WhatsApp link (remove non-digits, add country code if needed)
@@ -4366,16 +4538,25 @@ export default function AnewLeads() {
 
   // Assign lead to user
   const handleAssignLead = async (leadId: string, userId: string | null) => {
-    const { error } = await supabase
-      .from("anew_leads")
-      .update({ assigned_to: userId })
-      .eq("id", leadId);
+    // O dono e as visitas futuras da lead nunca divergem: a RPC muda o dono e a
+    // base troca o recurso das visitas futuras; recusa se o novo dono não tem
+    // recurso de agenda (ou se a lead ficaria sem dono com visita marcada).
+    let ownerResult: Awaited<ReturnType<typeof setEntityOwner>>;
+    try {
+      ownerResult = await setEntityOwner("lead", leadId, userId);
+    } catch (error) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('common.error'), description, variant: "destructive" });
+      return;
+    }
 
-    if (error) {
-      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: userId ? t('leads.toast.assigned') : t('leads.toast.unassigned') });
-      refreshSingleLead(leadId);
+    toast({ title: userId ? t('leads.toast.assigned') : t('leads.toast.unassigned') });
+    refreshSingleLead(leadId);
+
+    if (ownerResult.affectedVisitIds.length > 0) {
+      void notifyOwnerChangeVisits(activeCompanyId, ownerResult.affectedVisitIds).then((notified) => {
+        if (notified > 0) toast({ title: t('scheduling.notify.clientNotified') });
+      });
     }
   };
 
@@ -4411,7 +4592,15 @@ export default function AnewLeads() {
 
   // Extracted from handleBulkStatusChange so a stage with is_rejection = true
   // can hold off calling this until the LeadLostReasonDialog is confirmed.
-  const persistBulkStatusChange = async (newStatus: string, matchingStage: WorkflowStage | undefined, lostReason?: string) => {
+  const persistBulkStatusChange = async (
+    newStatus: string,
+    matchingStage: WorkflowStage | undefined,
+    lostReason?: string,
+    /** Subconjunto já filtrado pela restrição de transições; por omissão, tudo o que está selecionado. */
+    targetLeadIds?: string[],
+  ) => {
+    const leadIdsToUpdate = targetLeadIds ?? selectedLeadIds;
+    if (leadIdsToUpdate.length === 0) return;
     setIsBulkUpdating(true);
     const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
     const updatePayload: any = { status: newStatus };
@@ -4423,17 +4612,17 @@ export default function AnewLeads() {
     }
     try {
       const { error } = await withAuditContext(supabase, auditUserId, async () =>
-        await supabase.from("anew_leads").update(updatePayload).in("id", selectedLeadIds)
+        await supabase.from("anew_leads").update(updatePayload).in("id", leadIdsToUpdate)
       );
 
       if (error) {
         const description = await getFriendlyErrorMessage(error);
         toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
       } else {
-        toast({ title: t('leads.toast.bulkStatusUpdatedCount', { count: selectedLeadIds.length }) });
+        toast({ title: t('leads.toast.bulkStatusUpdatedCount', { count: leadIdsToUpdate.length }) });
         // Execute workflow for each lead BEFORE reloading
         if (matchingStage?.id && activeCompanyId) {
-          const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
+          const workflowResults = await mapWithConcurrency(leadIdsToUpdate, 5, async (leadId) => {
             const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
                 body: {
                   source_entity: 'lead',
@@ -4476,19 +4665,68 @@ export default function AnewLeads() {
   const handleBulkStatusChange = async (newStatus: string) => {
     if (selectedLeadIds.length === 0) return;
 
-    // Find matching workflow stage
-    const matchingStage = workflowStages.find(s => s.name === newStatus);
+    // Find matching workflow stage. "lost" e "rejected" mapeiam para o mesmo
+    // estágio terminal (is_rejection = true) — nenhuma org tem um estágio
+    // literalmente chamado "lost", só "rejected" (mesma lógica usada em
+    // AnewLeadEditDialog.resolveWorkflowStageId).
+    const isLostLikeStatus = newStatus === "lost" || newStatus === "rejected";
+    const matchingStage = workflowStages.find(
+      s => s.name === newStatus || (isLostLikeStatus && s.is_rejection)
+    );
+
+    // Mesma regra que o Kanban já impunha (~handleKanbanStageDrop) e que
+    // faltava aqui: uma fase de conversão tem de passar pela ação "Converter
+    // em Contacto", nunca por uma mudança de estado em massa.
+    if (matchingStage?.is_conversion) {
+      toast({
+        title: "Não é possível mover diretamente para esta fase",
+        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" em cada lead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // N leads, cada uma com o seu estágio de origem: as que não têm ligação
+    // desenhada até ao destino são excluídas, as restantes avançam.
+    let leadIdsToUpdate = selectedLeadIds;
+    let blockedCount = 0;
+    if (matchingStage?.id) {
+      const leadsById = new Map(leads.map(l => [l.id, l]));
+      const allowed: string[] = [];
+      for (const leadId of selectedLeadIds) {
+        const fromStageId = (leadsById.get(leadId) as any)?.workflow_stage_id as string | null | undefined;
+        if (isStageTransitionAllowed(fromStageId, matchingStage.id)) allowed.push(leadId);
+        else blockedCount += 1;
+      }
+      leadIdsToUpdate = allowed;
+    }
+
+    if (leadIdsToUpdate.length === 0) {
+      toast({
+        title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+        description: `${blockedCount === 1 ? "A lead selecionada não tem" : `As ${blockedCount} leads selecionadas não têm`} uma transição desenhada para "${matchingStage?.label ?? newStatus}". ${leadStageTransitionBlockedMessage()}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (blockedCount > 0) {
+      toast({
+        title: `${blockedCount} lead(s) ignorada(s)`,
+        description: `Não existe transição desenhada do estágio atual dessas leads para "${matchingStage?.label ?? newStatus}". A alteração segue apenas para as restantes ${leadIdsToUpdate.length}.`,
+      });
+    }
 
     // "Perdida" stages (is_rejection = true) must always capture a reason
     // before writing anything, exactly like the Kanban drag-and-drop path —
     // hold off and let the user confirm it in LeadLostReasonDialog instead
     // of saving immediately.
     if (matchingStage?.is_rejection) {
-      setPendingLostBulk({ newStatus, matchingStage });
+      setPendingLostBulk({ newStatus, matchingStage, leadIds: leadIdsToUpdate });
       return;
     }
 
-    await persistBulkStatusChange(newStatus, matchingStage);
+    await persistBulkStatusChange(newStatus, matchingStage, undefined, leadIdsToUpdate);
   };
 
   const handleBulkContactResultChange = async (resultId: string) => {
@@ -4527,24 +4765,35 @@ export default function AnewLeads() {
 
     setIsBulkUpdating(true);
     const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    const updateData = userId === "clear"
-      ? { assigned_to: null }
-      : { assigned_to: userId };
+    const newOwnerId = userId === "clear" ? null : userId;
 
     try {
-      const { error } = await withAuditContext(supabase, auditUserId, async () =>
-        await supabase.from("anew_leads").update(updateData).in("id", selectedLeadIds)
+      // Uma só RPC: as leads com visita futura cujo novo dono não tem recurso de
+      // agenda NÃO falham o lote — ficam de fora e voltam em `skipped`. Em massa
+      // não se enviam emails aos clientes.
+      const result = await withAuditContext(supabase, auditUserId, () =>
+        bulkSetEntityOwner("lead", selectedLeadIds, newOwnerId),
       );
 
-      if (error) {
-        const description = await getFriendlyErrorMessage(error);
-        toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
-      } else {
-        toast({ title: t('leads.toast.bulkAssigneeUpdatedCount', { count: selectedLeadIds.length }) });
-        setSelectedLeadIds([]);
-        loadLeads();
-        loadStatusCounts();
+      if (result.updatedIds.length > 0) {
+        toast({ title: t('leads.toast.bulkAssigneeUpdatedCount', { count: result.updatedIds.length }) });
       }
+      if (result.updatedIds.length === 0 && result.skipped.length === 0) {
+        toast({ title: t('leads.toast.assigneeUpdateError'), variant: "destructive" });
+      }
+      if (result.skipped.length > 0) {
+        toast({
+          title: t('leads.toast.assigneeUpdateError'),
+          description: t('leads.toast.bulkAssigneeSkipped', {
+            count: result.skipped.length,
+            names: describeSkipped(result.skipped),
+          }),
+          variant: "destructive",
+        });
+      }
+      setSelectedLeadIds([]);
+      loadLeads();
+      loadStatusCounts();
     } catch (error: unknown) {
       const description = await getFriendlyErrorMessage(error);
       toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
@@ -4608,6 +4857,16 @@ export default function AnewLeads() {
           aVal = new Date(a.created_at).getTime();
           bVal = new Date(b.created_at).getTime();
           break;
+        // `last_contact_at` e coluna da tabela, nunca de `field_values`. Sem este
+        // caso o clique no cabecalho caia no `default`, ia procurar
+        // field_values["last_contact_at"], encontrava vazio em TODAS as linhas, e
+        // a lista ficava exactamente na mesma ordem -- parecia que nao ordenava.
+        // Quem nunca foi contactado conta como 0: fica no fim quando se ordena do
+        // contacto mais recente para o mais antigo.
+        case "last_contact_at":
+          aVal = a.last_contact_at ? new Date(a.last_contact_at).getTime() : 0;
+          bVal = b.last_contact_at ? new Date(b.last_contact_at).getTime() : 0;
+          break;
         case "status":
           aVal = a.status;
           bVal = b.status;
@@ -4624,6 +4883,20 @@ export default function AnewLeads() {
           aVal = a.campaigns?.name || "";
           bVal = b.campaigns?.name || "";
           break;
+        // Nome, telefone e email ordenam pelo valor MOSTRADO na lista, nao pela
+        // chave crua em field_values (que quase nenhuma lead tem preenchida).
+        case "nome":
+          aVal = leadDisplayValues(a).name;
+          bVal = leadDisplayValues(b).name;
+          break;
+        case "telefone":
+          aVal = leadDisplayValues(a).phone;
+          bVal = leadDisplayValues(b).phone;
+          break;
+        case "email":
+          aVal = leadDisplayValues(a).email;
+          bVal = leadDisplayValues(b).email;
+          break;
         default:
           // For field_values columns
           aVal = a.field_values?.[sortColumn] || "";
@@ -4638,7 +4911,10 @@ export default function AnewLeads() {
       
       return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
     });
-  }, [leads, sortColumn, sortDirection, sourceFilter]);
+    // `identityMap` e dependencia real: as fichas das pessoas chegam depois da
+    // lista, e sem ela a ordenacao por Nome ficava feita com os nomes ainda por
+    // resolver e nunca mais era refeita.
+  }, [leads, sortColumn, sortDirection, sourceFilter, identityMap]);
 
   const visibleStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -5251,7 +5527,9 @@ export default function AnewLeads() {
                           style={{ backgroundColor: stage.color }}
                         />
                         <div className="text-xl font-bold">
-                          {statusCounts[stage.name] || 0}
+                          {stage.is_rejection
+                            ? sumRejectionStatusCounts(statusCounts, rejectionStatusNames)
+                            : (statusCounts[stage.name] || 0)}
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">{stage.label}</div>
@@ -5260,14 +5538,14 @@ export default function AnewLeads() {
                 ))
               ) : (
                 [
-                  { name: "new", label: "New", color: "#3b82f6" },
-                  { name: "contacted", label: "Contacted", color: "#f59e0b" },
-                  { name: "callback_scheduled", label: "Callback Agendado", color: "#a855f7" },
-                  { name: "visit_scheduled", label: "Visita Agendada", color: "#06b6d4" },
-                  { name: "qualified", label: "Qualified", color: "#22c55e" },
-                  { name: "proposal_sent", label: "Proposal Sent", color: "#6366f1" },
-                  { name: "negotiation", label: "Negotiation", color: "#ec4899" },
-                  { name: "lost", label: "Lost / Rejected", color: "#ef4444" },
+                  { name: "new", label: t('contactResults.statuses.new'), color: "#3b82f6" },
+                  { name: "contacted", label: t('contactResults.statuses.contacted'), color: "#f59e0b" },
+                  { name: "callback_scheduled", label: t('contactResults.statuses.callbackScheduled'), color: "#a855f7" },
+                  { name: "visit_scheduled", label: t('contactResults.statuses.visitScheduled'), color: "#06b6d4" },
+                  { name: "qualified", label: t('contactResults.statuses.qualified'), color: "#22c55e" },
+                  { name: "proposal_sent", label: t('contactResults.statuses.proposalSent'), color: "#6366f1" },
+                  { name: "negotiation", label: t('contactResults.statuses.negotiation'), color: "#ec4899" },
+                  { name: "lost", label: `${t('contactResults.statuses.lost')} / ${t('contactResults.statuses.rejected')}`, color: "#ef4444" },
                 ].map(status => (
                   <Card 
                     key={status.name} 
@@ -5284,7 +5562,7 @@ export default function AnewLeads() {
                         />
                         <div className="text-xl font-bold">
                           {status.name === 'lost' 
-                            ? (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0) + (statusCounts['Rejected'] || 0)
+                            ? sumRejectionStatusCounts(statusCounts, rejectionStatusNames)
                             : (statusCounts[status.name] || 0)}
                         </div>
                       </div>
@@ -5419,15 +5697,15 @@ export default function AnewLeads() {
                           ))
                         ) : (
                           <>
-                            <SelectItem value="new">New</SelectItem>
-                            <SelectItem value="contacted">Contacted</SelectItem>
+                            <SelectItem value="new">{t('contactResults.statuses.new')}</SelectItem>
+                            <SelectItem value="contacted">{t('contactResults.statuses.contacted')}</SelectItem>
                             
                             <SelectItem value="callback_scheduled">Callback Agendado</SelectItem>
                             <SelectItem value="visit_scheduled">Visita Agendada</SelectItem>
-                            <SelectItem value="qualified">Qualified</SelectItem>
-                            <SelectItem value="converted">Converted</SelectItem>
-                            <SelectItem value="rejected">Rejected</SelectItem>
-                            <SelectItem value="lost">Lost</SelectItem>
+                            <SelectItem value="qualified">{t('contactResults.statuses.qualified')}</SelectItem>
+                            <SelectItem value="converted">{t('contactResults.statuses.converted')}</SelectItem>
+                            <SelectItem value="rejected">{t('contactResults.statuses.rejected')}</SelectItem>
+                            <SelectItem value="lost">{t('contactResults.statuses.lost')}</SelectItem>
                           </>
                         )}
                       </SelectContent>
@@ -5508,6 +5786,24 @@ export default function AnewLeads() {
                         <SelectItem value="sql">{t('leads.qualificationType.sql')}</SelectItem>
                         <SelectItem value="mql">{t('leads.qualificationType.mql')}</SelectItem>
                         <SelectItem value="unclassified">{t('leads.qualificationType.unclassified')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Sobre que data o intervalo abaixo filtra. Sem isto o filtro
+                      estava preso a data de criacao, e era impossivel pedir
+                      "leads contactadas neste periodo": uma lead criada no mes
+                      anterior e contactada este mes nunca aparecia. */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Filtrar data por</Label>
+                    <Select value={dateField} onValueChange={(v) => setDateField(v as LeadsDateField)}>
+                      <SelectTrigger className="h-9 bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="created_at">Data de criação</SelectItem>
+                        <SelectItem value="last_contact_at">Data do último contacto</SelectItem>
+                        <SelectItem value="ambos">Criada e contactada no período</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -5894,12 +6190,9 @@ export default function AnewLeads() {
                         </TableRow>
                       ) : (
                         filteredLeads.map(lead => {
-                          const phone = extractPhoneFromLead(lead.field_values);
-                          const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                          const name = identity?.first_name && identity?.last_name
-                            ? `${identity.first_name} ${identity.last_name}`
-                            : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                          const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                          // Mesma funcao que a ordenacao usa, para o que se ve e o
+                          // que ordena nao poderem divergir.
+                          const { name, phone, email } = leadDisplayValues(lead);
                           const isSelected = selectedLeadIds.includes(lead.id);
 
                           return (
@@ -5982,12 +6275,8 @@ export default function AnewLeads() {
                 ) : (
                   <LeadsKanbanView
                     leads={kanbanLeads.map(lead => {
-                      const phone = extractPhoneFromLead(lead.field_values);
-                      const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                      const name = identity?.first_name && identity?.last_name
-                        ? `${identity.first_name} ${identity.last_name}`
-                        : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                      const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                      // Mesma funcao da lista e da ordenacao.
+                      const { name, phone, email } = leadDisplayValues(lead);
                       return {
                         id: lead.id,
                         created_at: lead.created_at,
@@ -6738,15 +7027,15 @@ export default function AnewLeads() {
         <Dialog open={showFieldsConfig} onOpenChange={setShowFieldsConfig}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Configure Lead Fields</DialogTitle>
+              <DialogTitle>{t('campaigns.fields.title')}</DialogTitle>
             </DialogHeader>
             
             {/* Campaign Selector */}
             <div className="mb-4">
-              <Label className="mb-2 block">Select Campaign</Label>
+              <Label className="mb-2 block">{t('campaigns.fields.selectCampaign')}</Label>
               <Select value={configCampaignId} onValueChange={setConfigCampaignId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a campaign" />
+                  <SelectValue placeholder={t('campaigns.fields.selectCampaignPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {campaigns.map(c => (
@@ -6755,16 +7044,16 @@ export default function AnewLeads() {
                 </SelectContent>
               </Select>
               <p className="text-sm text-muted-foreground mt-2">
-                Each campaign has its own set of lead fields. Select a campaign to configure its form fields.
+                {t('campaigns.fields.perCampaignHint')}
               </p>
             </div>
 
             {!configCampaignId ? (
               <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
                 {campaigns.length === 0 ? (
-                  <p>No campaigns found. Create a campaign first in the Campaigns section.</p>
+                  <p>{t('campaigns.fields.noCampaigns')}</p>
                 ) : (
-                  <p>Select a campaign above to configure its lead fields.</p>
+                  <p>{t('campaigns.fields.selectCampaignAbove')}</p>
                 )}
               </div>
             ) : (
@@ -6775,23 +7064,23 @@ export default function AnewLeads() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Plus className="w-4 h-4" />
-                  Add New Field
+                  {t('campaigns.fields.addNew')}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Field Key</Label>
+                    <Label>{t('campaigns.fields.fieldKey')}</Label>
                     <Input
-                      placeholder="e.g. first_name"
+                      placeholder={t('campaigns.fields.keyPlaceholder')}
                       value={newField.field_key}
                       onChange={e => setNewField({ ...newField, field_key: e.target.value })}
                     />
                   </div>
                   <div>
-                    <Label>Display Label</Label>
+                    <Label>{t('campaigns.fields.displayLabel')}</Label>
                     <Input
-                      placeholder="e.g. First Name"
+                      placeholder={t('campaigns.fields.labelPlaceholder')}
                       value={newField.field_label}
                       onChange={e => setNewField({ ...newField, field_label: e.target.value })}
                     />
@@ -6799,31 +7088,31 @@ export default function AnewLeads() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Field Type</Label>
+                    <Label>{t('campaigns.fields.fieldType')}</Label>
                     <Select value={newField.field_type} onValueChange={v => setNewField({ ...newField, field_type: v })}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="text">Text</SelectItem>
+                        <SelectItem value="text">{t('fieldTypes.text')}</SelectItem>
                         <SelectItem value="email">Email</SelectItem>
-                        <SelectItem value="phone">Phone</SelectItem>
-                        <SelectItem value="number">Number</SelectItem>
-                        <SelectItem value="date">Date</SelectItem>
-                        <SelectItem value="datetime">Date & Time</SelectItem>
-                        <SelectItem value="boolean">Yes/No</SelectItem>
-                        <SelectItem value="select">Dropdown</SelectItem>
-                        <SelectItem value="textarea">Long Text</SelectItem>
+                        <SelectItem value="phone">{t('fieldTypes.phone')}</SelectItem>
+                        <SelectItem value="number">{t('fieldTypes.number')}</SelectItem>
+                        <SelectItem value="date">{t('fieldTypes.date')}</SelectItem>
+                        <SelectItem value="datetime">{t('fieldTypes.datetime')}</SelectItem>
+                        <SelectItem value="boolean">{t('fieldTypes.boolean')}</SelectItem>
+                        <SelectItem value="select">{t('fieldTypes.select')}</SelectItem>
+                        <SelectItem value="textarea">{t('fieldTypes.textarea')}</SelectItem>
                         <SelectItem value="url">URL</SelectItem>
-                        <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
-                        <SelectItem value="ref_company">Company</SelectItem>
-                        <SelectItem value="ref_client">Client</SelectItem>
-                        <SelectItem value="ref_employee">Employee</SelectItem>
-                        <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
-                        <SelectItem value="list_products">Product List</SelectItem>
-                        <SelectItem value="list_services">Service List</SelectItem>
-                        <SelectItem value="ref_product">Single Product</SelectItem>
-                        <SelectItem value="ref_service">Single Service</SelectItem>
+                        <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.references')}</SelectItem>
+                        <SelectItem value="ref_company">{t('fieldTypes.company')}</SelectItem>
+                        <SelectItem value="ref_client">{t('fieldTypes.client')}</SelectItem>
+                        <SelectItem value="ref_employee">{t('fieldTypes.employee')}</SelectItem>
+                        <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.lists')}</SelectItem>
+                        <SelectItem value="list_products">{t('fieldTypes.productList')}</SelectItem>
+                        <SelectItem value="list_services">{t('fieldTypes.serviceList')}</SelectItem>
+                        <SelectItem value="ref_product">{t('fieldTypes.singleProduct')}</SelectItem>
+                        <SelectItem value="ref_service">{t('fieldTypes.singleService')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -6882,11 +7171,11 @@ export default function AnewLeads() {
             {/* Existing Fields */}
             <div className="space-y-2">
               <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
-                Configured Fields ({fieldDefs.length})
+                {t('campaigns.fields.configuredCount', { count: fieldDefs.length })}
               </h4>
               {fieldDefs.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
-                  No fields configured yet. Add your first field above.
+                  {t('campaigns.fields.noFields')}
                 </div>
               ) : (
                 fieldDefs.map(field => (
@@ -6898,32 +7187,32 @@ export default function AnewLeads() {
                           <Input
                             value={editingField.field_label}
                             onChange={e => setEditingField({ ...editingField, field_label: e.target.value })}
-                            placeholder="Label"
+                            placeholder={t('campaigns.fields.label')}
                           />
                           <Select value={editingField.field_type} onValueChange={v => setEditingField({ ...editingField, field_type: v })}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="text">Text</SelectItem>
+                              <SelectItem value="text">{t('fieldTypes.text')}</SelectItem>
                               <SelectItem value="email">Email</SelectItem>
-                              <SelectItem value="phone">Phone</SelectItem>
-                              <SelectItem value="number">Number</SelectItem>
-                              <SelectItem value="date">Date</SelectItem>
-                              <SelectItem value="datetime">Date & Time</SelectItem>
-                              <SelectItem value="boolean">Yes/No</SelectItem>
-                              <SelectItem value="select">Dropdown</SelectItem>
-                              <SelectItem value="textarea">Long Text</SelectItem>
+                              <SelectItem value="phone">{t('fieldTypes.phone')}</SelectItem>
+                              <SelectItem value="number">{t('fieldTypes.number')}</SelectItem>
+                              <SelectItem value="date">{t('fieldTypes.date')}</SelectItem>
+                              <SelectItem value="datetime">{t('fieldTypes.datetime')}</SelectItem>
+                              <SelectItem value="boolean">{t('fieldTypes.boolean')}</SelectItem>
+                              <SelectItem value="select">{t('fieldTypes.select')}</SelectItem>
+                              <SelectItem value="textarea">{t('fieldTypes.textarea')}</SelectItem>
                               <SelectItem value="url">URL</SelectItem>
-                              <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
-                              <SelectItem value="ref_company">Company</SelectItem>
-                              <SelectItem value="ref_client">Client</SelectItem>
-                              <SelectItem value="ref_employee">Employee</SelectItem>
-                              <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
-                              <SelectItem value="list_products">Product List</SelectItem>
-                              <SelectItem value="list_services">Service List</SelectItem>
-                              <SelectItem value="ref_product">Single Product</SelectItem>
-                              <SelectItem value="ref_service">Single Service</SelectItem>
+                              <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.references')}</SelectItem>
+                              <SelectItem value="ref_company">{t('fieldTypes.company')}</SelectItem>
+                              <SelectItem value="ref_client">{t('fieldTypes.client')}</SelectItem>
+                              <SelectItem value="ref_employee">{t('fieldTypes.employee')}</SelectItem>
+                              <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.lists')}</SelectItem>
+                              <SelectItem value="list_products">{t('fieldTypes.productList')}</SelectItem>
+                              <SelectItem value="list_services">{t('fieldTypes.serviceList')}</SelectItem>
+                              <SelectItem value="ref_product">{t('fieldTypes.singleProduct')}</SelectItem>
+                              <SelectItem value="ref_service">{t('fieldTypes.singleService')}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -6961,19 +7250,19 @@ export default function AnewLeads() {
                               checked={editingField.is_required}
                               onCheckedChange={v => setEditingField({ ...editingField, is_required: v })}
                             />
-                            <span className="text-xs">Req</span>
+                            <span className="text-xs">{t('campaigns.fields.required')}</span>
                           </div>
                           <div className="flex items-center gap-1">
                             <Switch
                               checked={editingField.is_unique}
                               onCheckedChange={v => setEditingField({ ...editingField, is_unique: v })}
                             />
-                            <span className="text-xs">Uniq</span>
+                            <span className="text-xs">{t('campaigns.fields.unique')}</span>
                           </div>
                         </div>
                         <div className="flex gap-1 justify-end">
-                          <Button size="sm" onClick={handleUpdateField}>Save</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingField(null)}>Cancel</Button>
+                          <Button size="sm" onClick={handleUpdateField}>{t('common.save')}</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingField(null)}>{t('common.cancel')}</Button>
                         </div>
                       </div>
                     ) : (
@@ -7033,7 +7322,9 @@ export default function AnewLeads() {
             <DialogHeader>
               <DialogTitle>{t('leads.createLead') || 'Criar Nova Lead'}</DialogTitle>
             </DialogHeader>
-            
+
+            <PlanLimitWarning organizationId={activeCompanyId} limitType="leads" />
+
             {/* ── Campaign (optional) ── */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -7423,9 +7714,9 @@ export default function AnewLeads() {
               setPendingLostDrop(null);
               void persistKanbanStageDrop(leadId, newStage, reason);
             } else if (pendingLostBulk) {
-              const { newStatus, matchingStage } = pendingLostBulk;
+              const { newStatus, matchingStage, leadIds } = pendingLostBulk;
               setPendingLostBulk(null);
-              void persistBulkStatusChange(newStatus, matchingStage, reason);
+              void persistBulkStatusChange(newStatus, matchingStage, reason, leadIds);
             }
           }}
         />

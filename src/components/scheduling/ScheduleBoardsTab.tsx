@@ -19,6 +19,8 @@ import {
   LayoutGrid, List, CheckCircle2, CircleDot, Layers, Lock
 } from 'lucide-react';
 import type { ScheduleBoard, ScheduleItem, ScheduleResource } from '@/types/scheduling';
+import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
+import { isFleetScheduleItem } from '@/lib/agenda/fleet';
 import type { ScopeLevel } from '@/hooks/usePermissionScope';
 
 interface BoardStats {
@@ -159,12 +161,14 @@ export function ScheduleBoardsTab({
   }, [viewableUserIds, viewableResourceIds]);
 
   const canConfirm = useCallback((item: any): boolean => {
+    // Itens da Frota (quadro board_type 'fleet') são só de leitura na Agenda: nem o "Confirmar todos" lhes toca.
+    if (isFleetScheduleItem(item, boards)) return false;
     if (actionableUserIds === ALL_USERS) return true;
     if (setIncludes(actionableUserIds, item.created_by)) return true;
     if (setIncludes(actionableUserIds, item.user_id)) return true;
     const assignees = (item.assignees || []) as any[];
     return assignees.some(a => setIncludes(actionableResourceIds, a.resource_id));
-  }, [actionableUserIds, actionableResourceIds]);
+  }, [actionableUserIds, actionableResourceIds, boards]);
 
   // Fetch raw items for the company (one query). Filter is applied client-side per scope.
   const loadBoardStats = useCallback(async () => {
@@ -176,7 +180,7 @@ export function ScheduleBoardsTab({
       const { data: allItems, error } = await supabase
         .from('schedule_items')
         .select(`
-          id, board_id, title, status, start_datetime, end_datetime, created_at, user_id, created_by,
+          id, board_id, title, status, confirmed_at, start_datetime, end_datetime, created_at, user_id, created_by,
           assignees:schedule_item_assignees(
             resource_id,
             resource:schedule_resources(id, name, color, user_id)
@@ -672,6 +676,7 @@ function BoardCard({ board, stats, isTimeOff, onEdit, onClick, onDelete, canDele
                     <div className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
                     <span className="font-medium text-primary">{timeStr}</span>
                     <span className="truncate flex-1">{displayTitle}</span>
+                    {!isTimeOff && <ConfirmedByClientBadge confirmedAt={(item as any).confirmed_at} className="shrink-0" />}
                     {!itemCanConfirm && (item.status === 'draft' || item.status === 'scheduled') && (
                       <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
                     )}

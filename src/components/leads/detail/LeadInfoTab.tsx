@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
+import { formatInternationalPhone } from "@/lib/phone/splitInternationalPhone";
 
 interface LeadInfoTabProps {
   lead: any;
@@ -79,7 +80,7 @@ export function LeadInfoTab({
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Telefone</p>
-            <p className="text-sm font-medium text-primary">{leadPhone || "—"}</p>
+            <p className="text-sm font-medium text-primary">{leadPhone ? formatInternationalPhone(leadPhone) : "—"}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Morada</p>
@@ -181,7 +182,7 @@ export function LeadInfoTab({
       <Separator />
       <div className="space-y-2">
         <Label className="text-muted-foreground flex items-center gap-2 text-xs uppercase tracking-wider">
-          📅 Próximas Acções
+          📅 Próximas Ações
         </Label>
         {nextAction ? (
           <Card>
@@ -193,7 +194,7 @@ export function LeadInfoTab({
         ) : (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
-            <span className="text-sm text-destructive">Sem acção planeada</span>
+            <span className="text-sm text-destructive">Sem ação planeada</span>
             <button onClick={onScheduleAction} className="text-sm text-primary cursor-pointer hover:underline ml-1">— Agendar agora</button>
           </div>
         )}

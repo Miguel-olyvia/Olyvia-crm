@@ -1,5 +1,5 @@
 ﻿import { useEffect, useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
@@ -28,8 +28,12 @@ import { calculateProposalItemsTotal, ProposalItem } from "@/components/proposal
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { chaveDoErro, codigoDoErro } from "@/hooks/pessoas/errosNeg";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
-import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
+import { caminhoVoltarSeguro, ligacaoComVoltar } from "@/lib/voltarParaPessoas";
+import { markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { computeInlineLinePersistTotals } from "@/utils/quotes/inlineLinePersistTotals";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -110,6 +114,21 @@ interface ProposalCreateDialogProps {
   editingId?: string | null;
   /** Called after a successful create/update with the proposal id. */
   onSaved?: (proposalId: string) => void;
+  /**
+   * Só a ficha da pessoa (P3): orçamentos já escolhidos, carregados por id (a pesquisa normal nunca oferece os que estão em rascunho). Só vale
+   * ao criar. Sem isto nada muda.
+   */
+  presetQuoteIds?: string[];
+  /**
+   * Só a ficha da pessoa: o negócio a que esta proposta ia ligar-se já tem uma proposta enviada ou aceite. Avisa e não deixa criar outra (com duas
+   * propostas vivas, recusar uma pode perder o negócio com a outra enviada). Só vale ao criar. Sem isto nada muda.
+   */
+  propostaVivaNoNegocio?: boolean;
+  /**
+   * Só a ficha da pessoa, com a bandeira do fecho ligada (migration E aplicada): ao CRIAR, a proposta nasce já ligada a este negócio, por `neg_criar_proposta`
+   * (mesmos parâmetros de `rpc_create_proposal` mais o negócio) e os erros da base (NG) aparecem traduzidos. Sem isto grava como sempre.
+   */
+  criarNoNegocioId?: string;
 }
 
 export function ProposalCreateDialog({
@@ -118,6 +137,9 @@ export function ProposalCreateDialog({
   presetEntityId,
   editingId = null,
   onSaved,
+  presetQuoteIds,
+  propostaVivaNoNegocio = false,
+  criarNoNegocioId,
 }: ProposalCreateDialogProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -125,6 +147,7 @@ export function ProposalCreateDialog({
   const { isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds } = usePermissionScope();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [savingProposal, setSavingProposal] = useState(false);
   const submitLockRef = useRef(false);
@@ -210,6 +233,33 @@ export function ProposalCreateDialog({
     })();
     return () => { cancelled = true; };
   }, [open, presetEntityId]);
+
+  // Só a ficha da pessoa (P3): os orçamentos já escolhidos (a chave evita voltar a pedir a cada render por a lista ser nova).
+  const presetQuoteKey = presetQuoteIds?.join(",") ?? "";
+  const [presetQuotesFailed, setPresetQuotesFailed] = useState(false);
+  useEffect(() => {
+    setPresetQuotesFailed(false);
+    if (!open || editingId || presetQuoteKey === "") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("quotes").select("id, quote_number, total, estado").in("id", presetQuoteKey.split(","));
+        if (cancelled) return;
+        if (error || !data) { setPresetQuotesFailed(true); return; }
+        setSelectedQuotes(data.map((q) => ({ id: q.id, quote_number: q.quote_number, total: q.total, estado: q.estado })));
+      } catch {
+        if (!cancelled) setPresetQuotesFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, editingId, presetQuoteKey]);
+
+  // Só a ficha da pessoa (P3): o «Criar orçamento aqui» leva o `?voltar=` para o orçamento poder voltar à ficha. Sem a prop do P3 nada muda.
+  const quotesUrl = (proposalId: string, dealId: string): string => {
+    const destino = `/quotes?new=1&proposal_id=${proposalId}${dealId ? `&deal_id=${dealId}` : ""}`;
+    const regresso = presetQuoteIds ? caminhoVoltarSeguro(`${location.pathname}${location.search}`) : null;
+    return regresso ? ligacaoComVoltar(destino, regresso) : destino;
+  };
 
   // Load workflow stages + templates
   const loadStagesAndTemplates = useCallback(async () => {
@@ -322,7 +372,7 @@ export function ProposalCreateDialog({
     // Editing existing proposal — just navigate.
     if (editingId) {
       onOpenChange(false);
-      navigate(`/quotes?new=1&proposal_id=${editingId}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
+      navigate(quotesUrl(editingId, formData.deal_id));
       return;
     }
 
@@ -391,7 +441,7 @@ export function ProposalCreateDialog({
       onOpenChange(false);
       resetForm();
       onSaved?.(data.id);
-      navigate(`/quotes?new=1&proposal_id=${data.id}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
+      navigate(quotesUrl(data.id, formData.deal_id));
     } catch (err: any) {
       captureFlowError(err, "proposal-lifecycle");
       toast({ title: "Erro ao criar proposta", description: err.message, variant: "destructive" });
@@ -404,6 +454,11 @@ export function ProposalCreateDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // A ficha da pessoa diz que o negócio já tem uma proposta viva: o botão avisa e aqui nada se grava (também não por Enter).
+    if (propostaVivaNoNegocio && !editingId) {
+      toast({ title: t('proposals.toast.createError'), description: t('pessoasPagina.neg.close.secondProposal.blocked'), variant: "destructive" });
+      return;
+    }
     if (submitLockRef.current || savingProposal) return;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
@@ -477,12 +532,15 @@ export function ProposalCreateDialog({
         if (validLines.length === 0) continue;
 
         const linesToInsert = validLines.map(l => {
-          // Subtotal gravado pela fonte única do preço da linha.
+          // Subtotal pela fonte única do preço da linha; IVA repartido por
+          // componente nos bundles (6% mão de obra / 23% material) e
+          // iva_override respeitado — igual ao QuoteBuilder e ao portal.
           const lineDiscount = l.discount_percent || 0;
-          const precoSemIva = getLineSubtotal(l);
-          const ivaValor = precoSemIva * (l.iva_percent / 100);
-          const totalComIva = precoSemIva + ivaValor;
-          const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
+          const {
+            total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva,
+            total_com_desconto: totalComDesconto,
+          } = computeInlineLinePersistTotals(l, iq.desconto_global_percent);
           return {
             catalog_item_id: l.catalog_item_id || null,
             product_id: l.product_id || null, service_id: l.service_id || null,
@@ -560,13 +618,17 @@ export function ProposalCreateDialog({
         // above, so editing an existing proposal's fields can never
         // re-resolve/overwrite its already-frozen layout.
         const templateSnapshot = await resolveTemplateSnapshot(templateId, activeCompany.id);
-        const { data, error } = await supabase.rpc('rpc_create_proposal', {
+        const parametrosDaProposta = {
           p_proposal_data: { ...proposalData, template_snapshot: templateSnapshot },
           p_selected_quote_ids: selectedQuoteIds,
           p_inline_quotes: inlineQuotesPayload,
           p_proposal_items: proposalItemsPayload,
           p_quote_entity_id: quoteEntityId,
-        });
+        };
+        // Na ficha da pessoa (fecho v4) a proposta nasce já ligada ao negócio; fora dela grava como sempre.
+        const { data, error } = criarNoNegocioId
+          ? await (supabase as any).rpc('neg_criar_proposta', { p_negocio_id: criarNoNegocioId, ...parametrosDaProposta })
+          : await supabase.rpc('rpc_create_proposal', parametrosDaProposta);
         if (error) throw error;
         savedProposal = data;
         savedProposalId = data.id;
@@ -582,7 +644,11 @@ export function ProposalCreateDialog({
       if (savedProposalId && onSaved) onSaved(savedProposalId);
     } catch (error: any) {
       captureFlowError(error, "proposal-lifecycle");
-      toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
+      // Criar já ligado a um negócio: o erro da base traduz-se pelo código (NG...), nunca o texto em bruto.
+      toast({
+        title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'),
+        description: criarNoNegocioId && !editingId && codigoDoErro(error) ? t(chaveDoErro(error)) : error.message, variant: "destructive",
+      });
     } finally {
       submitLockRef.current = false;
       setSavingProposal(false);
@@ -796,7 +862,21 @@ export function ProposalCreateDialog({
               <Label className="flex items-center gap-2">
                 <Palette className="h-4 w-4" /> Template de Proposta
               </Label>
-              <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+              <Select
+                value={formData.template_id}
+                onValueChange={(value) => {
+                  const nextId = value === "none" ? "" : value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    template_id: nextId,
+                    title: proposalTitleFromTemplate(
+                      prev.title,
+                      proposalTemplates.find((t) => t.id === prev.template_id),
+                      proposalTemplates.find((t) => t.id === nextId),
+                    ),
+                  }));
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Escolher template" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhum</SelectItem>
@@ -995,6 +1075,10 @@ export function ProposalCreateDialog({
                 </div>
               </div>
 
+              {presetQuotesFailed && (
+                <p role="alert" className="text-sm font-medium text-destructive">{t("pessoasPagina.neg.process.quotes.preset.error")}</p>
+              )}
+
               {selectedQuotes.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {selectedQuotes.map((quote) => (
@@ -1068,9 +1152,17 @@ export function ProposalCreateDialog({
               <Textarea id="notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} />
             </div>
           </div>
+          {propostaVivaNoNegocio && !editingId && (
+            <p id="proposta-viva-aviso" className="text-sm font-medium text-foreground">{t('pessoasPagina.neg.close.secondProposal.warning')}</p>
+          )}
           <DialogFooter className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => handleClose(false)}>{t('proposals.form.cancel')}</Button>
-            <Button type="submit" disabled={savingProposal}>{editingId ? t('proposals.form.update') : t('proposals.form.create')}</Button>
+            <Button
+              type="submit" disabled={savingProposal} aria-disabled={propostaVivaNoNegocio && !editingId ? true : undefined}
+              aria-describedby={propostaVivaNoNegocio && !editingId ? 'proposta-viva-aviso' : undefined}
+            >
+              {editingId ? t('proposals.form.update') : t('proposals.form.create')}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

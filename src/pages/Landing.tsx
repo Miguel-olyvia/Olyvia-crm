@@ -225,7 +225,7 @@ const Landing = () => {
                   <Zap className="w-4 h-4 text-primary" />
                   {t['hero.automates']}
                 </span>
-                , or{" "}
+                {" "}{t['hero.or']}{" "}
                 <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
                   <BarChart3 className="w-4 h-4 text-primary" />
                   {t['hero.analyzes']}

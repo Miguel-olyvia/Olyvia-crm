@@ -154,3 +154,74 @@ export async function fetchQuotePdfTemplateById(templateId: string | null | unde
   }
   return normalizeQuotePdfTemplate(data as any);
 }
+
+// Proposal-type templates ("Templates de Proposta") use a different section
+// layout convention (client_info/company_info as "card"/"inline" blocks)
+// than quote-type templates (`layout: "quote_pdf"`), which is the only
+// convention QuotePDFDocument's items table/bundle rendering actually knows
+// how to lay out correctly. Swapping the whole template object for a
+// proposal-type one breaks that layout (overlapping bundle rows). Instead,
+// keep the quote-compatible template's structure and only patch the visible
+// branding — title, colors, footer/terms/thank-you text — from the
+// proposal's own selected template on top of it.
+//
+// Movida de generateProposalPdfBlob.ts para aqui (sem alterar uma linha) para
+// o PDF da venda direta usar exatamente a mesma fusão sem arrastar o pdf-lib
+// e o gerador de propostas para o seu chunk.
+export function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate: any | null) {
+  if (!proposalTemplate) return structuralTemplate;
+  if (!structuralTemplate) return proposalTemplate;
+
+  const proposalHeaderTitle = Array.isArray(proposalTemplate.sections)
+    ? proposalTemplate.sections.find((s: any) => s?.type === 'header')?.settings?.customTitle
+    : null;
+
+  const sections = Array.isArray(structuralTemplate.sections)
+    ? structuralTemplate.sections.map((s: any) =>
+        s?.type === 'header' && proposalHeaderTitle
+          ? { ...s, settings: { ...s.settings, customTitle: proposalHeaderTitle } }
+          : s
+      )
+    : structuralTemplate.sections;
+
+  return {
+    ...structuralTemplate,
+    sections,
+    primary_color: proposalTemplate.primary_color ?? structuralTemplate.primary_color,
+    secondary_color: proposalTemplate.secondary_color ?? structuralTemplate.secondary_color,
+    accent_color: proposalTemplate.accent_color ?? structuralTemplate.accent_color,
+    logo_url: proposalTemplate.logo_url ?? structuralTemplate.logo_url,
+    footer_text: proposalTemplate.footer_text ?? structuralTemplate.footer_text,
+    terms_conditions: proposalTemplate.terms_conditions ?? structuralTemplate.terms_conditions,
+    thank_you_message: proposalTemplate.thank_you_message ?? structuralTemplate.thank_you_message,
+  };
+}
+
+/**
+ * Modelo de proposta por omissão da empresa (template_type 'proposal'): o
+ * marcado como is_default, senão o primeiro ativo por nome — a mesma ordem de
+ * `fetchDefaultQuotePdfTemplate` para os modelos de orçamento.
+ *
+ * Usado pelo PDF da venda direta, que não tem proposta nem modelo escolhido
+ * mas tem de sair com o mesmo aspecto (cores, logótipo, rodapé, termos) que as
+ * propostas da empresa.
+ */
+export async function fetchDefaultProposalBrandingTemplate(organizationId: string | null) {
+  if (!organizationId) return null;
+  const { data, error } = await (supabase as any)
+    .from("proposal_templates")
+    .select(QUOTE_TEMPLATE_SELECT)
+    .eq("organization_id", organizationId)
+    .eq("template_type", "proposal")
+    .eq("is_active", true)
+    .order("is_default", { ascending: false })
+    .order("name", { ascending: true })
+    .limit(50);
+  if (error) {
+    console.warn("[fetchDefaultProposalBrandingTemplate] error", error);
+    captureFlowError(error, "quote-document-export");
+    return null;
+  }
+  const templates = ((data || []) as QuotePdfTemplate[]).map(normalizeQuotePdfTemplate).filter(Boolean);
+  return templates.find((template) => template?.is_default) || templates[0] || null;
+}

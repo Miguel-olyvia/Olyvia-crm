@@ -150,7 +150,7 @@ export function TemplateFileImport({ onImport }: TemplateFileImportProps) {
         const result = await extractTextFromPdf(file);
         html = result.html;
         if (result.mode === "ai") {
-          toast.info("PDF importado com extracção avançada para corrigir texto corrompido ou scannado.");
+          toast.info("PDF importado com extração avançada para corrigir texto corrompido ou scannado.");
         }
       }
 
@@ -231,7 +231,7 @@ export function TemplateFileImport({ onImport }: TemplateFileImportProps) {
                 <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
                   <FileWarning className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Texto extraído do PDF — reveja a formatação. A extracção de PDFs pode não preservar a estrutura original.
+                    Texto extraído do PDF — reveja a formatação. A extração de PDFs pode não preservar a estrutura original.
                   </p>
                 </div>
               )}

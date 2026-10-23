@@ -70,7 +70,7 @@ describe("módulos desactivados", () => {
     // Este teste afirmava o contrário até 2026-08-31 — "a regra do módulo
     // desligado não é tocada, volta a valer ao reactivar" — e a afirmação
     // estava errada. A varredura exaustiva apanhou-o: o motor não lê
-    // `organization_pipeline_config`, só as tabelas de acções. Uma regra que
+    // `organization_pipeline_config`, só as tabelas de ações. Uma regra que
     // ficasse activa continuava a ser executada com o módulo desligado no ecrã,
     // que é exactamente o defeito que esta reescrita existe para corrigir.
     //
@@ -81,7 +81,7 @@ describe("módulos desactivados", () => {
   });
 });
 
-describe("acções que não são arestas", () => {
+describe("ações que não são arestas", () => {
   it("create_task e send_email sobrevivem a qualquer reordenação", () => {
     const comTarefa: StageActionRule[] = [
       ...CADEIA_COMPLETA,

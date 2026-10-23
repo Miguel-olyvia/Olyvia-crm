@@ -617,7 +617,10 @@ export function UserTemplateManager({
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">{t("users.organizations")}</Label>
-                  <Popover>
+                  {/* `modal`: este combobox vive dentro de um Dialog e o PopoverContent
+                      sai para um portal fora do DialogContent. Sem isto, o focus trap do
+                      diálogo rouba o foco ao CommandInput e o popover fecha-se ao abrir. */}
+                  <Popover modal>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"

@@ -226,9 +226,9 @@ export default function Roles() {
     'products', 'bundles', 'brands', 'product_categories', 'product_subcategories', 'product_attributes', 'units_of_measure',
     'services', 'service_categories', 'service_subcategories', 'service_fees',
     'leads', 'contacts', 'clients',
-    'deals', 'proposals', 'quotes', 'quote_templates', 'contracts', 'client_contracts',
+    'deals', 'proposals', 'quotes', 'quote_templates', 'direct_sales', 'contracts', 'client_contracts',
     'marketing', 'forms',
-    'suppliers', 'warehouses', 'purchase_orders', 'stocks',
+    'suppliers', 'warehouses', 'purchase_orders', 'receiving', 'stocks', 'inventory', 'client_orders',
     'scheduling',
     'users', 'roles',
     'settings', 'smtp', 'email_templates',
@@ -258,6 +258,7 @@ export default function Roles() {
     proposals: 'Propostas',
     quotes: 'Orçamentos',
     quote_templates: 'Templates de Orçamento',
+    direct_sales: 'Vendas Diretas',
     contracts: 'Contratos',
     client_contracts: 'Contratos de Cliente',
     campaigns: 'Campanhas',
@@ -266,7 +267,10 @@ export default function Roles() {
     suppliers: 'Fornecedores',
     warehouses: 'Armazéns',
     purchase_orders: 'Encomendas',
+    receiving: 'Receção no armazém',
     stocks: 'Stocks',
+    inventory: 'Acesso a Stock',
+    client_orders: 'Encomendas Clientes',
     scheduling: 'Agendamentos',
     users: 'Utilizadores',
     roles: 'Funções',
@@ -326,6 +330,7 @@ export default function Roles() {
       categories: ['deals'],
       subGroups: [
         { label: 'Propostas', categories: ['proposals', 'quotes', 'quote_templates'] },
+        { label: 'Venda Direta', categories: ['direct_sales'] },
         { label: 'Contratos', categories: ['contracts', 'client_contracts'] },
       ],
     },
@@ -339,7 +344,7 @@ export default function Roles() {
         { label: 'Formulários', categories: ['forms'] },
       ],
     },
-    { label: 'Inventário', categories: ['suppliers', 'warehouses', 'purchase_orders', 'stocks'] },
+    { label: 'Inventário', categories: ['suppliers', 'warehouses', 'purchase_orders', 'receiving', 'stocks', 'inventory', 'client_orders'] },
     {
       label: 'Agendamentos',
       categories: [],
@@ -401,6 +406,11 @@ export default function Roles() {
       manage_permissions: { label: 'Gerir Permissões', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
       export: { label: 'Exportar', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
       import: { label: 'Importar', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
+      // Receção no armazém (receive também serve purchase_orders.receive)
+      receive: { label: 'Receber', className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' },
+      manage_delivery_notes: { label: 'Guias', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300' },
+      learn_codes: { label: 'Códigos', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
+      download_proof: { label: 'PDF', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
     };
     return badgeMap[suffix] || { label: suffix.charAt(0).toUpperCase() + suffix.slice(1).replace(/_/g, ' '), className: '' };
   };

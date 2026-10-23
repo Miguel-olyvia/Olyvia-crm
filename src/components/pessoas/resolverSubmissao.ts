@@ -1,0 +1,79 @@
+// Resolver uma submissão pendente, em memória: a lista desce e a nota fica na ficha da
+// pessoa certa. Não grava nada. A única ação é "registar na ficha como nota"; num conflito
+// é preciso dizer qual das candidatas é a pessoa.
+import type { EstadoPessoas, NotaPessoa, Submissao } from "./pessoasTipos";
+
+/** Conflitos primeiro; dentro de cada grupo, a data mais recente primeiro. */
+export function ordenarSubmissoes(submissoes: readonly Submissao[]): Submissao[] {
+  const conflito = (s: Submissao) => (s.codigo === "CONFLITO" ? 0 : 1);
+  return [...submissoes].sort((a, b) => conflito(a) - conflito(b) || b.data.localeCompare(a.data));
+}
+
+/** O id da submissão mais recente (pela data); `null` sem submissões. É a que a ficha destaca com "Nova". */
+export function idDaMaisRecente(submissoes: readonly Submissao[]): string | null {
+  return submissoes.reduce<Submissao | null>((m, s) => (m === null || s.data > m.data ? s : m), null)?.id ?? null;
+}
+
+/** Quem tem pelo menos uma submissão pendente (as duas candidatas de um conflito contam). */
+export function pessoasComPendentes(submissoes: readonly Submissao[]): Set<string> {
+  return new Set(submissoes.flatMap((s) => s.candidatas.map((c) => c.pessoaId)));
+}
+
+/**
+ * "Voltou a contactar": quem tem submissões pendentes e ainda não foi respondida (só um resultado "atendeu" conta, ver
+ * `registarChamada`) nem marcada como perdida.
+ */
+export function pessoasQueVoltaram(
+  estado: Pick<EstadoPessoas, "pessoas" | "contactadas">, submissoes: readonly Submissao[],
+): Set<string> {
+  const ids = pessoasComPendentes(submissoes);
+  estado.contactadas.forEach((id) => ids.delete(id));
+  estado.pessoas.filter((p) => p.perdida).forEach((p) => ids.delete(p.id));
+  return ids;
+}
+
+/**
+ * Marca que a pessoa volta à abordagem (Parte 1 do Quadro) por causa de uma submissão resolvida no dia `dia` (AAAA-MM-DD): só
+ * conta se o último negócio dela é anterior (ver `etapaRegistos.ts`). Quem resolve a submissão chama isto a seguir a `resolverSubmissao`,
+ * com a pessoa de `pessoaDaSubmissao`; um id que não existe deixa o estado como está.
+ */
+export function marcarVoltaAAbordagem<E extends Pick<EstadoPessoas, "pessoas">>(estado: E, pessoaId: string, dia: string): E {
+  if (!estado.pessoas.some((p) => p.id === pessoaId)) return estado;
+  return { ...estado, pessoas: estado.pessoas.map((p) => (p.id === pessoaId ? { ...p, abordagemDesde: dia } : p)) };
+}
+
+/** A pessoa a quem a submissão vai: a escolhida (obrigatória num conflito) ou a única candidata; `null` se não for válida. */
+export const pessoaDaSubmissao = (s: Submissao, escolhida?: string): string | null => pessoaDaNota(s, escolhida);
+
+/** A pessoa a quem a nota vai: a escolhida (obrigatória num conflito) ou a única candidata; `null` se não for válida. */
+function pessoaDaNota(s: Submissao, escolhida?: string): string | null {
+  const ids = s.candidatas.map((c) => c.pessoaId);
+  if (s.codigo === "CONFLITO") return escolhida !== undefined && ids.includes(escolhida) ? escolhida : null;
+  if (escolhida !== undefined && escolhida !== ids[0]) return null;
+  return ids[0] ?? null;
+}
+
+/**
+ * Devolve o estado novo: a submissão sai da lista e a nota entra na ficha. Se a submissão não
+ * existe ou a pessoa não é válida, devolve o próprio estado, sem mudanças.
+ */
+export function resolverSubmissao<E extends Pick<EstadoPessoas, "submissoes" | "notas">>(
+  estado: E, submissaoId: string, pessoaId?: string,
+): E {
+  const submissao = estado.submissoes.find((s) => s.id === submissaoId);
+  const destino = submissao ? pessoaDaNota(submissao, pessoaId) : null;
+  if (!submissao || destino === null) return estado;
+  const nota: NotaPessoa = {
+    id: `nota-${submissao.id}`,
+    pessoaId: destino,
+    submissaoId: submissao.id,
+    formulario: submissao.formulario,
+    data: submissao.data,
+    campos: submissao.campos,
+  };
+  return {
+    ...estado,
+    submissoes: estado.submissoes.filter((s) => s.id !== submissaoId),
+    notas: [...estado.notas, nota],
+  };
+}

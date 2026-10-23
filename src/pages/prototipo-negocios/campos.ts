@@ -1,0 +1,464 @@
+// Campos de cada fase do negócio (protótipo, 09/10/2026).
+// A Visita usa os campos de sistema da ficha do local e do diagnóstico
+// (src/lib/campos/catalogo.ts no ramo feat/campos-configuraveis) e as
+// colunas de anew_leads, deal_needs, proposals, client_contracts.
+// No produto, cada empresa ajusta rótulos, ordem e obrigatórios.
+
+export type Tipo = "sim_nao" | "escolha" | "varios" | "numero" | "contador" | "texto" | "texto_longo" | "data";
+export type Papel = "plano" | "sugestoes" | "orcamento" | "fatura";
+
+export interface Def {
+  k: string;
+  l: string;
+  t: Tipo;
+  op?: string[];
+  un?: string;
+  ajuda?: string;
+  ph?: string;
+  papel?: Papel;
+  se?: { k: string; v: string[] };
+  /** Por defeito tudo é obrigatório para passar de fase, menos o texto livre (notas). */
+  opcional?: boolean;
+  /** Escolha: a opção que é preciso marcar para avançar (ex.: a visita "Feita"). Enquanto não está escolhida, tem o contorno tracejado do acento. */
+  avanca?: string;
+  /** Contador: limites e o nome do zero (ex.: andar 0 = "R/C"). */
+  min?: number;
+  max?: number;
+  zero?: string;
+  /** Escolhido pela empresa no editor de campos (ganha à regra por defeito). */
+  obrigatorio?: boolean;
+  /** Campo criado pela empresa (pode apagar-se; os de sistema só se escondem). */
+  novo?: boolean;
+  /** Sub-bloco dentro do grupo, com título próprio (para partir os formulários longos). */
+  bloco?: string;
+}
+export interface Grupo { titulo: string; nota?: string; campos: Def[]; /** o nome que a empresa lhe deu */ nome?: string; oculto?: boolean }
+
+const SNS = ["Sim", "Não", "Não sei"];
+
+export const LEAD: Grupo[] = [
+  {
+    titulo: "Contacto",
+    campos: [
+      { k: "email", l: "Email", t: "texto", ph: "nome@exemplo.pt" },
+      { k: "pref", l: "Prefere ser contactado por", t: "escolha", op: ["Telefone", "WhatsApp", "Email"] },
+      { k: "hora", l: "Melhor hora", t: "escolha", op: ["Manhã", "Tarde", "Fim do dia"] },
+      { k: "idioma", l: "Idioma", t: "escolha", op: ["Português", "Inglês", "Francês"] },
+    ],
+  },
+  {
+    titulo: "Origem",
+    campos: [
+      { k: "origem", l: "Origem", t: "escolha", op: ["Site", "Campanha", "Telefone", "Recomendação", "Redes sociais", "Loja"] },
+      { k: "campanha", l: "Campanha", t: "escolha", op: ["Campanha de outono · Meta Ads", "Google Ads", "Folheto na caixa do correio"], se: { k: "origem", v: ["Campanha", "Redes sociais"] } },
+      { k: "recomendou", l: "Recomendado por", t: "texto", se: { k: "origem", v: ["Recomendação"] } },
+      { k: "rgpd", l: "Autoriza o contacto (RGPD)", t: "sim_nao" },
+    ],
+  },
+  {
+    titulo: "Pedido",
+    campos: [
+      { k: "tipo_cliente", l: "Tipo de cliente", t: "escolha", op: ["Particular", "Empresa", "Condomínio"] },
+      { k: "nif", l: "NIF", t: "texto", opcional: true, ajuda: "Pede-se na fatura, se ainda não o tiver." },
+      { k: "concelho", l: "Concelho", t: "texto" },
+      { k: "pedido", l: "O que o cliente pediu", t: "texto_longo" },
+    ],
+  },
+];
+
+export const CONTACTO: Grupo[] = [
+  {
+    titulo: "Chamada",
+    campos: [
+      { k: "resultado", l: "Resultado", t: "escolha", op: ["Atendeu · interessado", "Atendeu · ligar mais tarde", "Não atendeu", "Sem interesse", "Número errado"] },
+      { k: "tentativas", l: "Tentativas", t: "contador", min: 1, max: 9 },
+      { k: "religar", l: "Voltar a ligar em", t: "data", se: { k: "resultado", v: ["Atendeu · ligar mais tarde", "Não atendeu"] } },
+    ],
+  },
+  {
+    titulo: "Qualificação",
+    campos: [
+      { k: "imovel", l: "Tipo de imóvel", t: "escolha", op: ["Apartamento", "Moradia", "Loja", "Escritório"] },
+      { k: "posse", l: "O cliente é", t: "escolha", op: ["Proprietário", "Inquilino", "Administração"] },
+      { k: "decisor", l: "Quem decide", t: "escolha", op: ["O próprio", "Com a família", "Administração"] },
+      { k: "orc_cliente", l: "Orçamento do cliente", t: "escolha", op: ["Até 3.000 €", "3.000 a 6.000 €", "6.000 a 10.000 €", "Mais de 10.000 €", "Não sabe"] },
+      { k: "prazo", l: "Para quando", t: "escolha", op: ["Urgente (1 mês)", "1 a 3 meses", "3 a 6 meses", "Sem pressa"] },
+      { k: "outros_orc", l: "Pediu outros orçamentos", t: "sim_nao" },
+    ],
+  },
+  {
+    titulo: "Morada da obra",
+    nota: "A 1.ª morada do cliente é a fiscal. A da obra pode ser outra, e é dela que sai a distância ao armazém.",
+    campos: [
+      { k: "morada", l: "Rua e número", t: "texto" },
+      { k: "cp", l: "Código postal", t: "texto", ph: "0000-000" },
+      { k: "localidade", l: "Localidade", t: "texto" },
+      { k: "fracao", l: "Andar / fração", t: "texto", ph: "3.º Esq." },
+    ],
+  },
+  {
+    titulo: "Preparar a visita",
+    campos: [
+      { k: "duracao", l: "Duração prevista", t: "escolha", op: ["1 h", "1 h 30", "2 h"] },
+      { k: "presentes", l: "Quem vai estar", t: "escolha", op: ["O cliente", "O casal", "A família", "Outra pessoa"] },
+      { k: "nota_visita", l: "Nota para a visita", t: "texto_longo" },
+    ],
+  },
+];
+
+// Ficha do local: os campos de sistema (anew_address_building / anew_address_extra).
+export const EXTERIOR: Grupo = {
+  titulo: "Local · exterior (edifício e acessos)",
+  nota: "O comercial pode pré-preencher a partir da morada, antes da visita.",
+  campos: [
+    { k: "acesso", bloco: "Acesso e estacionamento", l: "Acesso", t: "escolha", op: ["Fácil", "Difícil"], papel: "plano" },
+    { k: "impacto_percent", bloco: "Acesso e estacionamento", l: "Impacto no preço", t: "escolha", op: ["5%", "10%", "15%", "20%"], ajuda: "Só com acesso difícil.", papel: "orcamento", se: { k: "acesso", v: ["Difícil"] } },
+    { k: "estacionamento", bloco: "Acesso e estacionamento", l: "Estacionamento", t: "escolha", op: ["Pago", "Não pago", "Sem estacionamento"], papel: "sugestoes" },
+    { k: "zona_estacionamento", bloco: "Acesso e estacionamento", l: "Zona de estacionamento", t: "escolha", op: ["Verde", "Amarela", "Vermelha"], papel: "sugestoes", se: { k: "estacionamento", v: ["Pago"] } },
+    // 14/10: na visita (antes estava em "Preparar a obra", tarde demais para o orçamento): decide o meio do entulho
+    { k: "contentor", bloco: "Acesso e estacionamento", l: "Contentor de entulho", t: "escolha", op: ["Não", "Na via pública (licença)", "Em espaço privado"], ajuda: "Decide o meio do entulho no orçamento. Sem resposta, a Olyvia escolhe pelo volume.", papel: "orcamento", opcional: true },
+    { k: "dist_entulho", bloco: "Acesso e estacionamento", l: "Da porta ao big bag ou contentor", t: "escolha", op: ["Até 10 m", "10 a 30 m", "Mais de 30 m"], ajuda: "Entra no fator de acesso da demolição.", papel: "orcamento", opcional: true },
+    { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano" },
+    { k: "n_elevadores", bloco: "O prédio", l: "Nº de elevadores", t: "contador", min: 1, max: 6, se: { k: "tem_elevador", v: ["Sim"] } },
+    { k: "n_andares", bloco: "O prédio", l: "Andares do prédio", t: "contador", min: 1, max: 40 },
+    { k: "andar", bloco: "O prédio", l: "Andar da fração", t: "contador", min: 0, max: 40, zero: "R/C", papel: "plano" },
+    { k: "n_fracoes_por_andar", bloco: "O prédio", l: "Frações por andar", t: "contador", min: 1, max: 20 },
+  ],
+};
+
+export const INTERIOR: Grupo = {
+  titulo: "Local · interior",
+  campos: [
+    // Casa ou escritório (B2B): num escritório não há tipologia (T0…T5+). Vazio conta como casa.
+    { k: "tipo_espaco", bloco: "O espaço", l: "Tipo de espaço", t: "escolha", op: ["Casa", "Escritório"] },
+    { k: "tipologia", bloco: "O espaço", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"], se: { k: "tipo_espaco", v: ["Casa", ""] } },
+    { k: "area_util_m2", bloco: "O espaço", l: "Área útil", t: "numero", un: "m²" },
+    { k: "n_divisoes", bloco: "O espaço", l: "Divisões", t: "contador", min: 1, max: 20 },
+    { k: "n_casas_banho", bloco: "O espaço", l: "Casas de banho", t: "contador", min: 0, max: 10 },
+    { k: "ano_construcao", bloco: "O espaço", l: "Época de construção", t: "escolha", op: ["Antes de 1950", "1950 a 1970", "1970 a 1990", "1990 a 2010", "Depois de 2010"] },
+    { k: "pavimento", bloco: "O espaço", l: "Pavimento", t: "varios", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
+    { k: "eletrica", bloco: "Instalações", l: "Instalação elétrica", t: "escolha", op: ["Antiga", "Renovada"] },
+    { k: "quadro_diferencial", bloco: "Instalações", l: "Quadro com diferencial", t: "sim_nao" },
+    { k: "canalizacao", bloco: "Instalações", l: "Canalização", t: "escolha", op: ["Ferro", "PVC", "Multicamada", "Cobre", "Misto", "Não sei"] },
+    { k: "gas", bloco: "Instalações", l: "Gás", t: "escolha", op: ["Canalizado", "Garrafa", "Sem gás"], papel: "plano" },
+    { k: "amianto", bloco: "Durante a obra", l: "Amianto", t: "escolha", op: SNS, papel: "sugestoes" },
+    { k: "habitada_durante_obra", bloco: "Durante a obra", l: "Habitada durante a obra", t: "sim_nao", papel: "plano" },
+    { k: "animais", bloco: "Durante a obra", l: "Animais", t: "sim_nao", papel: "sugestoes" },
+    { k: "notas_interior", bloco: "Durante a obra", l: "Notas do interior", t: "texto_longo" },
+  ],
+};
+
+// Diagnóstico da área (deal_needs.diag_*). As medidas ficam à parte, porque dão as quantidades.
+/** As divisões da área de intervenção (escolha múltipla, 13/10): cada uma tem os seus campos. */
+export const DIVISOES = ["Casa de banho", "Cozinha", "Sala", "Quarto", "Outra"];
+
+export const AREA: Grupo = {
+  titulo: "Área de intervenção",
+  campos: [
+    { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "varios", op: DIVISOES, papel: "plano", ajuda: "Pode escolher mais do que uma: cada divisão tem os seus campos." },
+    { k: "diag_intervencao_tipo", bloco: "A divisão", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
+    { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "escolha", op: ["2,4 m", "2,5 m", "2,6 m", "2,7 m", "2,8 m", "3 m ou mais"], papel: "plano" },
+    { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "contador", min: 0, max: 30, papel: "plano" },
+    { k: "diag_gas", bloco: "Instalações da divisão", l: "Gás na área", t: "escolha", op: ["Não há", "Manter", "Anular", "Instalar"], papel: "plano" },
+    { k: "diag_toalheiro", bloco: "Instalações da divisão", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano", se: { k: "@divisao", v: ["Casa de banho"] } },
+    { k: "diag_janela", bloco: "Instalações da divisão", l: "Janela na área", t: "sim_nao", ajuda: "Sem janela, os trabalhos com pó são mais lentos.", papel: "plano" },
+    { k: "diag_local_cortes", bloco: "Trabalho e proteções", l: "Onde se fazem os cortes", t: "escolha", op: ["Na própria área", "Varanda", "Fora (garagem, rua)"], papel: "plano" },
+    { k: "diag_distancia_entrada", bloco: "Trabalho e proteções", l: "Da entrada até à área", t: "escolha", op: ["Curta (até 5 m)", "Média (5–15 m)", "Longa (+15 m)"], papel: "sugestoes" },
+    { k: "diag_mobilada", bloco: "Trabalho e proteções", l: "Casa mobilada no caminho", t: "escolha", op: ["Pouco", "Médio", "Muito"], papel: "sugestoes" },
+    { k: "diag_portas_proteger", bloco: "Trabalho e proteções", l: "Portas a proteger", t: "contador", min: 0, max: 20, papel: "sugestoes" },
+    { k: "diag_demolir_descricao", bloco: "Trabalho e proteções", l: "O que se demole", t: "texto_longo", ph: "Banheira, azulejo das paredes, pavimento" },
+  ],
+};
+
+export const ESCOLHAS: Grupo = {
+  titulo: "Escolhas do cliente",
+  campos: [
+    { k: "materiais_cliente", l: "O cliente fornece materiais", t: "sim_nao", papel: "orcamento" },
+    { k: "mobilidade_reduzida", l: "Mobilidade reduzida", t: "sim_nao", ajuda: "O cliente ou alguém da casa tem mobilidade reduzida (pesa nas escolhas: base de duche, barras, alturas).", se: { k: "@divisoes", v: ["Casa de banho"] } },
+    { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara", opcional: true },
+  ],
+};
+
+export const PROPOSTA: Grupo[] = [
+  {
+    titulo: "Proposta",
+    campos: [
+      { k: "validade", l: "Validade", t: "escolha", op: ["15 dias", "30 dias", "60 dias"] },
+      { k: "prazo_exec", l: "Prazo de execução", t: "contador", min: 1, max: 60, un: "dias úteis" },
+      { k: "inicio_prev", l: "Início previsto", t: "data" },
+      { k: "pagamento", l: "Condições de pagamento", t: "escolha", op: ["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%", "Por fases"], papel: "fatura" },
+      { k: "garantia", l: "Garantia", t: "escolha", op: ["1 ano", "2 anos", "5 anos"] },
+      { k: "notas_cliente", l: "Notas para o cliente", t: "texto_longo" },
+    ],
+  },
+  {
+    titulo: "Contrato",
+    nota: "Gerado a partir da proposta aceite. Na venda direta não há contrato.",
+    campos: [
+      { k: "modelo_contrato", l: "Modelo", t: "escolha", op: ["Empreitada de remodelação", "Prestação de serviços"] },
+      { k: "assinatura", l: "Assinatura", t: "escolha", op: ["Digital, no portal", "Presencial"] },
+      { k: "representante", l: "Assina pela empresa", t: "escolha", op: ["Rúben", "Direção"] },
+      { k: "multa", l: "Penalização por atraso", t: "sim_nao" },
+    ],
+  },
+];
+
+export const FINANCEIRO: Grupo[] = [
+  {
+    titulo: "Dados de faturação",
+    campos: [
+      { k: "nome_fiscal", l: "Nome fiscal", t: "texto" },
+      { k: "nif_fat", l: "NIF", t: "texto" },
+      { k: "morada_fiscal_igual", l: "Morada fiscal igual à da obra", t: "sim_nao" },
+      { k: "morada_fiscal", l: "Morada fiscal", t: "texto", se: { k: "morada_fiscal_igual", v: ["Não"] } },
+      { k: "email_fat", l: "Email para as faturas", t: "texto" },
+    ],
+  },
+  {
+    titulo: "Fatura",
+    campos: [
+      { k: "serie", l: "Série", t: "escolha", op: ["FT 2026", "FT 2026-OBRAS"] },
+      { k: "tranche", l: "Tranche", t: "escolha", op: ["Única", "1.ª (adjudicação)", "2.ª (a meio)", "3.ª (no fim)"] },
+      { k: "vencimento", l: "Vencimento", t: "escolha", op: ["Pronto pagamento", "15 dias", "30 dias"] },
+      { k: "metodo", l: "Método de pagamento", t: "escolha", op: ["Transferência", "Referência MB", "Débito direto"] },
+    ],
+  },
+  {
+    titulo: "Pagamento",
+    nota: "Por agora valida-se à mão. Quando o portal aceitar pagamentos, isto preenche-se sozinho.",
+    campos: [
+      { k: "data_pag", l: "Data do pagamento", t: "data" },
+      { k: "valor_recebido", l: "Valor recebido", t: "numero", un: "€" },
+      { k: "conta", l: "Conta de destino", t: "escolha", op: ["Banco A · conta à ordem", "Banco B · conta obras"] },
+      { k: "comprovativo", l: "Referência ou comprovativo", t: "texto" },
+    ],
+  },
+];
+
+export const OBRA: Grupo[] = [
+  {
+    titulo: "Preparar a obra",
+    campos: [
+      { k: "responsavel", l: "Responsável de obra", t: "escolha", op: ["Filipe", "Hugo"] },
+      { k: "inicio", l: "Início", t: "data" },
+      { k: "horario", l: "Horário permitido", t: "escolha", op: ["Dias úteis 8h–17h", "Dias úteis 9h–18h", "Com sábados"] },
+      { k: "chaves", l: "Acesso à casa", t: "escolha", op: ["O cliente abre", "Chave entregue", "Código", "Porteiro"] },
+      { k: "contacto_local", l: "Contacto no local", t: "texto" },
+      { k: "condominio", l: "Condomínio avisado", t: "sim_nao" },
+      { k: "protecoes", l: "Proteções", t: "texto_longo", ajuda: "Sugeridas a partir da ficha do local." },
+    ],
+  },
+  {
+    titulo: "Fecho",
+    campos: [
+      { k: "vistoria", l: "Vistoria final", t: "data" },
+      { k: "auto_rececao", l: "Auto de receção assinado", t: "sim_nao" },
+      { k: "satisfacao", l: "Satisfação do cliente", t: "escolha", op: ["1", "2", "3", "4", "5"] },
+      { k: "notas_fecho", l: "Remates e notas", t: "texto_longo" },
+    ],
+  },
+];
+
+export const PAPEL_ROT: Record<Papel, string> = {
+  plano: "entra no plano da obra",
+  sugestoes: "dá sugestões de proteção e logística",
+  orcamento: "mexe no orçamento",
+  fatura: "vai para a fatura",
+};
+
+/** Escolha múltipla ("varios"): o valor guarda-se como "A, B". */
+export const listaVarios = (v: string): string[] => (v ? v.split(", ").filter(Boolean) : []);
+/** Liga/desliga uma opção, mantendo a ordem das opções. */
+export const alternarVarios = (op: string[], v: string, x: string): string => {
+  const s = new Set(listaVarios(v));
+  if (s.has(x)) s.delete(x); else s.add(x);
+  return op.filter((o) => s.has(o)).join(", ");
+};
+
+export const visivel = (c: Def, v: Record<string, string>) => {
+  if (!c.se) return true;
+  // 15/10: duas condições especiais, pela divisão (um campo de casa de banho não aparece numa cozinha):
+  // "@divisao": a divisão principal (nas outras divisões, gruposArea já tira o campo); "@divisoes": alguma das escolhidas.
+  // Sem divisão escolhida, não aparecem (a divisão é a primeira pergunta da área).
+  if (c.se.k === "@divisao") { const dp = divisaoPrincipal(v); return !!dp && c.se.v.includes(dp); }
+  if (c.se.k === "@divisoes") return divisoesEscolhidas(v).some((x) => c.se!.v.includes(x));
+  return c.se.v.includes(v[c.se.k] || "");
+};
+
+/** Obrigatório para passar de fase: tudo, menos o texto livre e o que está marcado como opcional. */
+export const obrigatorio = (c: Def) => c.obrigatorio ?? (!c.opcional && c.t !== "texto_longo");
+
+/** Campos obrigatórios preenchidos e total (os condicionais só contam quando aparecem). */
+export function contagem(gs: Grupo[], v: Record<string, string>) {
+  let n = 0, f = 0;
+  for (const g of gs) for (const c of g.campos) if (visivel(c, v) && obrigatorio(c)) { n++; if (v[c.k]) f++; }
+  return { n, f };
+}
+
+/** Os campos obrigatórios que ainda estão vazios. */
+export function emFalta(gs: Grupo[], v: Record<string, string>): Def[] {
+  const r: Def[] = [];
+  for (const g of gs) for (const c of g.campos) if (visivel(c, v) && obrigatorio(c) && !v[c.k]) r.push(c);
+  return r;
+}
+
+/* ------------------------------------------------------------------ visitas */
+// Um negócio pode ter várias visitas (levantamento, medição técnica, escolha de
+// materiais…). Os campos de cada uma guardam-se em d.f com o prefixo v{n}_.
+// O estado (v{n}_estado) não é um campo: a visita fica feita sozinha quando as
+// necessidades ficam completas, e cancela-se pelo botão do cartão (21/10/2026).
+const VISITA_BASE: Def[] = [
+  { k: "tipo", l: "Tipo de visita", t: "escolha", op: ["Levantamento", "Medição técnica", "Escolha de materiais", "Revisita"] },
+  { k: "data", l: "Dia", t: "data" },
+  { k: "hora", l: "Hora", t: "escolha", op: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"] },
+  { k: "quem", l: "Quem vai", t: "escolha", op: ["Rúben (comercial)", "Hugo (técnico)", "Filipe (Operações)"] },
+  { k: "presentes", l: "Quem vai estar", t: "escolha", op: ["O cliente", "O casal", "A família", "Outra pessoa"] },
+  { k: "duracao", l: "Duração", t: "escolha", op: ["30 min", "1 h", "1 h 30", "2 h"] },
+  { k: "motivo", l: "Porque se cancelou", t: "escolha", op: ["O cliente pediu", "Imprevisto nosso", "Não estava ninguém"], se: { k: "estado", v: ["Cancelada"] } },
+  { k: "combinado", l: "O que ficou combinado", t: "texto_longo", ph: "Ex.: o cliente escolhe o pavimento até sexta" },
+];
+export const CAMPOS_VISITA = VISITA_BASE.map((c) => c.k);
+
+/** O grupo de campos da visita n (as chaves e as condições com o prefixo v{n}_). */
+export function grupoVisita(n: number): Grupo {
+  const p = (k: string) => `v${n}_${k}`;
+  return {
+    titulo: `Visita ${n}`,
+    campos: VISITA_BASE.map((c) => ({ ...c, k: p(c.k), se: c.se ? { k: p(c.se.k), v: c.se.v } : undefined })),
+  };
+}
+
+/* ------------------------------------------------------------------ campos à medida da empresa */
+// Cada empresa ajusta os grupos de campos sem programar: nome, ordem, obrigatório,
+// opções, esconder, e campos novos. O que se guarda são só os ajustes; o grupo
+// de base continua a vir daqui, e o "titulo" é a chave estável (validação, etc.).
+export interface AjusteGrupo {
+  nome?: string;
+  oculto?: boolean;
+  ordem?: string[];
+  ocultos?: string[];
+  obrig?: Record<string, boolean>;
+  rotulos?: Record<string, string>;
+  opcoes?: Record<string, string[]>;
+  novos?: Def[];
+}
+export type CfgCampos = Record<string, AjusteGrupo>;
+
+/** Todos os campos de um grupo com os ajustes, incluindo os escondidos (para o editor). */
+export function camposAjustados(cfg: CfgCampos | undefined, g: Grupo): (Def & { escondido: boolean })[] {
+  const a = cfg?.[g.titulo] || {};
+  const todos = [...g.campos, ...(a.novos || [])];
+  const ordem = a.ordem || [];
+  const pos = (k: string) => { const i = ordem.indexOf(k); return i === -1 ? 1000 + todos.findIndex((c) => c.k === k) : i; };
+  return [...todos].sort((x, y) => pos(x.k) - pos(y.k)).map((c) => ({
+    ...c,
+    l: a.rotulos?.[c.k] ?? c.l,
+    op: a.opcoes?.[c.k] ?? c.op,
+    obrigatorio: a.obrig?.[c.k] ?? c.obrigatorio,
+    escondido: !!a.ocultos?.includes(c.k),
+  }));
+}
+
+/** O grupo como a empresa o usa: com os nomes, a ordem e os obrigatórios dela, sem os escondidos. */
+export function efetivo(cfg: CfgCampos | undefined, g: Grupo): Grupo {
+  const a = cfg?.[g.titulo];
+  if (!a) return g;
+  return { ...g, nome: a.nome || g.nome, oculto: a.oculto, campos: camposAjustados(cfg, g).filter((c) => !c.escondido).map(({ escondido: _e, ...c }) => c) };
+}
+export const nomeGrupo = (g: Grupo) => g.nome || g.titulo;
+
+/** Uma chave nova a partir do nome ("Tem garagem?" → "c_tem_garagem"), sem repetir. */
+export function chaveLivre(rotulo: string, usadas: string[]): string {
+  const base = "c_" + rotulo.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30);
+  let k = base, i = 2;
+  while (usadas.includes(k)) k = `${base}_${i++}`;
+  return k;
+}
+
+/* ------------------------------------------------------------------ divisões da área (13/10/2026) */
+// A "Divisão" é escolha múltipla; cada divisão escolhida tem os campos da área. A divisão principal (a 1.ª
+// escolhida, guardada em f.diag_div_principal) usa as chaves de sempre, sem prefixo: os negócios de antes
+// e os de exemplo ficam iguais. As outras usam o prefixo div_{divisão}_ (ex.: div_coz_diag_gas).
+// As regras que leem estes campos (efeitos no orçamento, proteções, pontos elétricos) juntam as divisões:
+// somam as contagens e ficam com o pior caso nas escolhas (juntarDivisoes).
+const SLUG_DIV: Record<string, string> = { "Casa de banho": "wc", Cozinha: "coz", Sala: "sala", Quarto: "quarto", Outra: "outra" };
+export const CHAVE_PRINCIPAL = "diag_div_principal";
+export const divisoesEscolhidas = (f: Record<string, string>) => listaVarios(f.diag_tipo_area || "");
+/** A divisão que usa as chaves sem prefixo. */
+export function divisaoPrincipal(f: Record<string, string>): string | null {
+  const ds = divisoesEscolhidas(f);
+  return ds.includes(f[CHAVE_PRINCIPAL]) ? f[CHAVE_PRINCIPAL] : ds[0] ?? null;
+}
+export const prefixoDivisao = (div: string) => `div_${SLUG_DIV[div] ?? normalSlug(div)}_`;
+const normalSlug = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+/** A chave de base de um campo de divisão: "div_coz_diag_gas" → "diag_gas". */
+export const chaveBase = (k: string) => k.replace(/^div_[a-z0-9]+_/, "");
+/** As chaves da área que se repetem por divisão (todas menos a própria escolha da divisão). */
+const camposPorDivisao = (g: Grupo) => g.campos.filter((c) => c.k !== "diag_tipo_area");
+
+/**
+ * Os grupos da área de intervenção para os valores de um negócio: o grupo de base (com a escolha das divisões e
+ * os campos da principal) e um grupo por cada outra divisão, com as chaves prefixadas. O 1.º grupo é o AREA tal
+ * como está (quem o usa aplica-lhe os ajustes da empresa); os outros já saem com os ajustes (cfg).
+ */
+export function gruposArea(cfg: CfgCampos | undefined, f: Record<string, string>): Grupo[] {
+  const ds = divisoesEscolhidas(f), princ = divisaoPrincipal(f);
+  if (ds.length < 2) return [AREA];
+  const comNome = (div: string, c: Def): Def => ({ ...c, bloco: `${div} · ${c.bloco ?? "Campos"}` });
+  const base: Grupo = { ...AREA, campos: AREA.campos.map((c) => (c.k === "diag_tipo_area" ? c : comNome(princ!, c))) };
+  const ef = efetivo(cfg, AREA);
+  const outros = ds.filter((x) => x !== princ).map((div): Grupo => {
+    const p = prefixoDivisao(div);
+    // um campo só de outra divisão (ex.: o toalheiro, só de casa de banho) não entra nesta
+    const campos = camposPorDivisao(ef).filter((c) => c.se?.k !== "@divisao" || c.se.v.includes(div)).map((c) => {
+      const se = c.se?.k === "@divisao" ? undefined : c.se && c.se.k !== "diag_tipo_area" ? { k: p + c.se.k, v: c.se.v } : c.se;
+      return comNome(div, { ...c, k: p + c.k, se });
+    });
+    return { titulo: `${AREA.titulo} · ${div}`, campos };
+  });
+  return [base, ...outros];
+}
+
+/** Ao mudar as divisões: fixa a principal; se a principal saiu, a nova principal passa para as chaves sem prefixo. */
+export function reorganizarDivisoes(f: Record<string, string>) {
+  const ds = divisoesEscolhidas(f), antes = f[CHAVE_PRINCIPAL];
+  if (!ds.length) return;
+  if (!antes) { f[CHAVE_PRINCIPAL] = ds[0]; return; }
+  if (ds.includes(antes)) return;
+  const nova = ds[0], p = prefixoDivisao(nova);
+  for (const c of camposPorDivisao(AREA)) {
+    const v = f[p + c.k];
+    if (v) f[c.k] = v; else delete f[c.k];
+    delete f[p + c.k];
+  }
+  f[CHAVE_PRINCIPAL] = nova;
+}
+
+// a ordem do melhor para o pior caso, nas escolhas em que não é a ordem das opções
+const PIOR: Record<string, string[]> = {
+  diag_local_cortes: ["Varanda", "Na própria área", "Fora (garagem, rua)"],
+  diag_janela: ["Sim", "Não"],
+  diag_toalheiro: ["Não", "Sim"],
+  diag_intervencao_tipo: ["Só substituir", "Remodelação parcial", "Remodelação total"],
+};
+/**
+ * Os valores com as divisões juntas, nas chaves de base: contagens somadas, o pior caso nas escolhas e o texto
+ * livre junto. As chaves prefixadas saem (assim juntar duas vezes dá o mesmo). Com uma só divisão, fica igual.
+ */
+export function juntarDivisoes(f: Record<string, string>): Record<string, string> {
+  const ds = divisoesEscolhidas(f), princ = divisaoPrincipal(f);
+  if (ds.length < 2) return f;
+  const r: Record<string, string> = {};
+  for (const k in f) if (!/^div_[a-z0-9]+_/.test(k)) r[k] = f[k];
+  for (const c of camposPorDivisao(AREA)) {
+    const vs = ds.map((div) => f[(div === princ ? "" : prefixoDivisao(div)) + c.k]).filter((v): v is string => !!v);
+    if (!vs.length) continue;
+    if (c.t === "contador" || c.t === "numero") r[c.k] = String(vs.reduce((a, v) => a + (Number(v) || 0), 0));
+    else if (c.t === "texto" || c.t === "texto_longo") r[c.k] = vs.join("; ");
+    else {
+      const ordem = PIOR[c.k] ?? c.op ?? [];
+      r[c.k] = vs.reduce((a, v) => (ordem.indexOf(v) > ordem.indexOf(a) ? v : a));
+    }
+  }
+  return r;
+}

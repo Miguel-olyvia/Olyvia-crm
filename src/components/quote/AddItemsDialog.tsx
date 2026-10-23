@@ -35,9 +35,11 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { QuoteAIAssistant } from "./QuoteAIAssistant";
 import { BundleSelectionTab, type SelectedBundle, type ExpandedBundleLine } from "./BundleSelectionTab";
+import { round2 } from "@/utils/quotes/quoteLinePricing";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { quoteAddItemsSchema } from "@/lib/validations";
+import { escapeIlike, escapePostgrestOrTerm } from "@/lib/clientSearch";
 
 interface ProductAttribute {
   id: string;
@@ -48,6 +50,15 @@ interface ProductAttribute {
   allowed_values: string[] | null;
   values: Array<{ id: string; value: string; rawValue?: string }>;
   pricing_type?: string;
+}
+
+interface SupplierRef {
+  id: string;
+  supplier_id: string;
+  supplier_sku: string | null;
+  purchase_price: number | null;
+  is_preferred: boolean;
+  supplier_name: string | null;
 }
 
 interface CatalogItem {
@@ -65,6 +76,7 @@ interface CatalogItem {
   type: "product" | "service";
   uom_symbol: string | null;
   uom_name: string | null;
+  supplierRefs?: SupplierRef[];
 }
 
 // Bundle component info
@@ -76,6 +88,8 @@ interface BundleComponentInfo {
   source_id: string;
   quantity: number;
   unit_price: number;
+  /** Preço de compra real do componente (0 quando desconhecido — nunca inventado). */
+  unit_cost: number;
   vat_rate: number;
   selected_attributes?: Record<string, any>;
   attribute_price_addon?: number;
@@ -99,6 +113,7 @@ interface SelectedItem {
   fullAttributes?: Record<string, { attribute_code: string; label: string; value_type: string; unit?: string; value: string; pricing_type?: string }>; // enriched data
   attributePriceAddon?: number; // Additional price from attribute ranges (dimension pricing)
   bundleInfo?: BundleInfo; // If this item represents a bundle
+  itemSupplierId?: string | null; // Chosen item_suppliers reference (null when none/not applicable)
 }
 
 interface Props {
@@ -110,11 +125,18 @@ interface Props {
   replaceMode?: boolean; // When true, selecting an item immediately replaces and closes
   replaceItemType?: "product" | "service" | "bundle"; // Which tab to show when in replace mode
   priceContext?: PriceContextCode; // 'retail' | 'bundle' - defaults to 'retail'
+  // Título/descrição do diálogo fora dos orçamentos (encomendas, venda direta).
+  // Sem eles fica o texto dos orçamentos.
+  title?: string;
+  description?: string;
 }
 
 const PAGE_SIZE = 10;
+// Explicit cap on the supplier-reference lookup (plano-referencia-fornecedor-orcamentos.md,
+// secção 2) — matches the pattern already used for entity search (clientSearch.ts).
+const SUPPLIER_SKU_MATCH_LIMIT = 300;
 
-export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initialProducts, services: initialServices, replaceMode = false, replaceItemType, priceContext = PRICE_CONTEXT_CODES.RETAIL }: Props) {
+export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initialProducts, services: initialServices, replaceMode = false, replaceItemType, priceContext = PRICE_CONTEXT_CODES.RETAIL, title, description }: Props) {
   const [activeTab, setActiveTab] = useState<"products" | "services" | "bundles">("products");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBundles, setSelectedBundles] = useState<Map<string, SelectedBundle>>(new Map());
@@ -138,6 +160,9 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
   const [categories, setCategories] = useState<{ id: string; name: string; parent_id: string | null; parent_name: string | null }[]>([]);
   const currentPageRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Caches the supplier-reference id lookup per (term, tab) so paginating within the
+  // same search (append=true) reuses it instead of re-querying item_suppliers per page.
+  const supplierRefIdsCacheRef = useRef<{ term: string; tab: string; ids: string[] } | null>(null);
   
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -274,6 +299,45 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
     return ids;
   }, []);
 
+  // Resolve product/service ids whose active item_suppliers.supplier_sku matches the
+  // search term, so buildBaseQuery can OR them into the name/sku/description/barcode
+  // match (plano-referencia-fornecedor-orcamentos.md, secção 2). Resolved once per
+  // term/tab/org-scope in loadItems and reused for that single query — there is no
+  // separate filtered count query in this dialog to keep in sync with.
+  const resolveSupplierRefIds = useCallback(async (
+    term: string,
+    tab: "products" | "services",
+    orgIds: string[],
+  ): Promise<{ ids: string[]; truncated: boolean }> => {
+    const safe = escapeIlike(term.trim());
+    if (!safe) return { ids: [], truncated: false };
+
+    const col = tab === "products" ? "product_id" : "service_id";
+    let q = (supabase as any)
+      .from("item_suppliers")
+      .select(col)
+      .eq("item_type", tab === "products" ? "product" : "service")
+      .is("deleted_at", null)
+      .ilike("supplier_sku", `%${safe}%`)
+      .limit(SUPPLIER_SKU_MATCH_LIMIT + 1);
+    if (orgIds.length > 0) q = q.in("organization_id", orgIds);
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("Error resolving supplier reference ids:", error);
+      return { ids: [], truncated: false };
+    }
+
+    const rows = data || [];
+    // Truncation is decided on the raw row count against the +1 probe limit, not on
+    // the deduped id count below — several item_suppliers rows (different suppliers)
+    // can share the same product_id/service_id, so deduped length alone can't tell
+    // whether the SQL limit actually cut off further matches.
+    const truncated = rows.length > SUPPLIER_SKU_MATCH_LIMIT;
+    const ids = Array.from(new Set(rows.slice(0, SUPPLIER_SKU_MATCH_LIMIT).map((r: any) => r[col]).filter(Boolean) as string[]));
+    return { ids, truncated };
+  }, []);
+
   // Resolve subcategory ids matching a free-text category filter (matches existing logic)
   const resolveCategoryIds = useCallback((): string[] | null => {
     if (categoryFilter === "all") return null;
@@ -295,7 +359,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
   // Build a base supabase query for the active tab with all "active" + scope filters applied.
   // Products mirror Products.tsx scoping through product_organizations.
-  const buildBaseQuery = useCallback((forCount: boolean, orgIds: string[]) => {
+  const buildBaseQuery = useCallback((forCount: boolean, orgIds: string[], extraIds: string[] = []) => {
     if (activeTab === "products") {
       const productSelect = forCount
         ? (orgIds.length > 0 ? "id, product_organizations!inner(organization_id)" : "id")
@@ -341,9 +405,10 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
       const term = debouncedSearch.trim();
       if (term) {
-        const safe = term.replace(/[%,()]/g, " ").trim();
-        if (safe) {
-          q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,description.ilike.%${safe}%,barcode.ilike.%${safe}%`);
+        const safe = escapePostgrestOrTerm(term);
+        const extraClause = extraIds.length > 0 ? `,id.in.(${extraIds.join(",")})` : "";
+        if (safe || extraClause) {
+          q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,description.ilike.%${safe}%,barcode.ilike.%${safe}%${extraClause}`);
         }
       }
       return q;
@@ -380,9 +445,10 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
     const term = debouncedSearch.trim();
     if (term) {
-      const safe = term.replace(/[%,()]/g, " ").trim();
-      if (safe) {
-        q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,short_desc.ilike.%${safe}%`);
+      const safe = escapePostgrestOrTerm(term);
+      const extraClause = extraIds.length > 0 ? `,id.in.(${extraIds.join(",")})` : "";
+      if (safe || extraClause) {
+        q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,short_desc.ilike.%${safe}%${extraClause}`);
       }
     }
     return q;
@@ -444,7 +510,29 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
     try {
       const effectiveCompanyId = getEffectiveCompanyId();
       const orgIds = await resolveOrgScope(effectiveCompanyId);
-      const baseQuery = buildBaseQuery(false, orgIds);
+
+      const term = debouncedSearch.trim();
+      let extraIds: string[] = [];
+      if (term && (activeTab === "products" || activeTab === "services")) {
+        const cached = supplierRefIdsCacheRef.current;
+        if (cached && cached.term === term && cached.tab === activeTab) {
+          extraIds = cached.ids;
+        } else {
+          const resolved = await resolveSupplierRefIds(term, activeTab, orgIds);
+          extraIds = resolved.ids;
+          supplierRefIdsCacheRef.current = { term, tab: activeTab, ids: extraIds };
+          if (resolved.truncated) {
+            toast({
+              title: "Pesquisa por referência de fornecedor incompleta",
+              description: "Há demasiadas correspondências — refine o termo de pesquisa.",
+            });
+          }
+        }
+      } else {
+        supplierRefIdsCacheRef.current = null;
+      }
+
+      const baseQuery = buildBaseQuery(false, orgIds, extraIds);
       const { data, error } = await baseQuery.order("name").order("id").range(from, to);
       if (error) throw error;
 
@@ -462,7 +550,14 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             .from("product_prices")
             .select("product_id, price, vat_rate, price_type")
             .in("price_type", ["retail", "purchase"])
-            .in("product_id", batch);
+            .in("product_id", batch)
+            // product_prices pode ter mais do que uma linha "purchase"/"retail"
+            // para o mesmo produto (a antiga fica lá para histórico, sem
+            // valid_from a distingui-la de uma nova). Ordenar por created_at
+            // ascendente e deixar o forEach sobrepor garante que fica sempre
+            // a mais recente — a mesma escolha feita no cálculo da margem na
+            // listagem (quoteCostResolver.ts), para os dois ecrãs baterem certo.
+            .order("created_at", { ascending: true });
           // O preço de compra vem junto com o de venda para que a linha do
           // orçamento guarde o custo REAL, em vez de um custo inventado a
           // partir do preço de venda dividido por uma margem por omissão.
@@ -470,6 +565,31 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             const prev = pricesMap.get(p.product_id) || { price: null, vat_rate: null, cost: null };
             if (p.price_type === "purchase") pricesMap.set(p.product_id, { ...prev, cost: p.price });
             else pricesMap.set(p.product_id, { ...prev, price: p.price, vat_rate: p.vat_rate });
+          });
+        }
+        const supplierRefsMap = new Map<string, SupplierRef[]>();
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const batch = ids.slice(i, i + BATCH);
+          if (batch.length === 0) continue;
+          const { data: refsData } = await (supabase as any).from("item_suppliers")
+            .select("id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, suppliers(name)")
+            .in("product_id", batch)
+            .is("deleted_at", null)
+            .eq("is_active", true)
+            .order("is_preferred", { ascending: false })
+            .order("purchase_price", { ascending: true, nullsFirst: false });
+          (refsData || []).forEach((r: any) => {
+            if (!r.product_id) return;
+            const list = supplierRefsMap.get(r.product_id) || [];
+            list.push({
+              id: r.id,
+              supplier_id: r.supplier_id,
+              supplier_sku: r.supplier_sku ?? null,
+              purchase_price: r.purchase_price ?? null,
+              is_preferred: !!r.is_preferred,
+              supplier_name: r.suppliers?.name ?? null,
+            });
+            supplierRefsMap.set(r.product_id, list);
           });
         }
         mapped = rows.map(r => {
@@ -488,6 +608,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             type: "product" as const,
             uom_symbol: r.uom?.code ?? null,
             uom_name: r.uom?.description ?? null,
+            supplierRefs: supplierRefsMap.get(r.id) || undefined,
           };
         });
       } else {
@@ -501,11 +622,38 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             .from("service_prices")
             .select("service_id, price, vat_rate, price_type")
             .in("price_type", ["retail", "purchase"])
-            .in("service_id", batch);
+            .in("service_id", batch)
+            // Mesmo motivo do bloco de produtos acima: fica sempre a mais recente.
+            .order("created_at", { ascending: true });
           (pd || []).forEach(p => {
             const prev = pricesMap.get(p.service_id) || { price: null, vat_rate: null, cost: null };
             if (p.price_type === "purchase") pricesMap.set(p.service_id, { ...prev, cost: p.price });
             else pricesMap.set(p.service_id, { ...prev, price: p.price, vat_rate: p.vat_rate });
+          });
+        }
+        const supplierRefsMap = new Map<string, SupplierRef[]>();
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const batch = ids.slice(i, i + BATCH);
+          if (batch.length === 0) continue;
+          const { data: refsData } = await (supabase as any).from("item_suppliers")
+            .select("id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, suppliers(name)")
+            .in("service_id", batch)
+            .is("deleted_at", null)
+            .eq("is_active", true)
+            .order("is_preferred", { ascending: false })
+            .order("purchase_price", { ascending: true, nullsFirst: false });
+          (refsData || []).forEach((r: any) => {
+            if (!r.service_id) return;
+            const list = supplierRefsMap.get(r.service_id) || [];
+            list.push({
+              id: r.id,
+              supplier_id: r.supplier_id,
+              supplier_sku: r.supplier_sku ?? null,
+              purchase_price: r.purchase_price ?? null,
+              is_preferred: !!r.is_preferred,
+              supplier_name: r.suppliers?.name ?? null,
+            });
+            supplierRefsMap.set(r.service_id, list);
           });
         }
         mapped = rows.map(r => {
@@ -524,6 +672,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             type: "service" as const,
             uom_symbol: null,
             uom_name: null,
+            supplierRefs: supplierRefsMap.get(r.id) || undefined,
           };
         });
       }
@@ -543,7 +692,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeTab, buildBaseQuery, getEffectiveCompanyId, resolveOrgScope, toast]);
+  }, [activeTab, buildBaseQuery, debouncedSearch, getEffectiveCompanyId, resolveOrgScope, resolveSupplierRefIds, toast]);
 
   // Infinite scroll handler
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
@@ -834,7 +983,8 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       const existing = newSelected.get(item.id)!;
       newSelected.set(item.id, { ...existing, quantity: existing.quantity + 1 });
     } else {
-      newSelected.set(item.id, { item, quantity: 1, attributes: {} });
+      const defaultItemSupplierId = item.supplierRefs && item.supplierRefs.length > 0 ? item.supplierRefs[0].id : null;
+      newSelected.set(item.id, { item, quantity: 1, attributes: {}, itemSupplierId: defaultItemSupplierId });
       if (item.type === "product") {
         loadProductAttributes(item.id);
       }
@@ -1024,6 +1174,15 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       attributePriceAddon: newAttributePriceAddon
     });
     
+    setSelectedItems(newSelected);
+  };
+
+  // Handle supplier reference change (local selection only; persisted only on Save)
+  const handleSupplierRefChange = (itemId: string, itemSupplierId: string) => {
+    const newSelected = new Map(selectedItems);
+    const existing = newSelected.get(itemId);
+    if (!existing) return;
+    newSelected.set(itemId, { ...existing, itemSupplierId });
     setSelectedItems(newSelected);
   };
 
@@ -1493,10 +1652,11 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       return {
         ...selected,
         fullAttributes,
-        attributePriceAddon
+        attributePriceAddon,
+        item_supplier_id: selected.itemSupplierId ?? null,
       };
     });
-    
+
     // Convert bundles to single items with component info (not expanded lines)
     const bundleItems: SelectedItem[] = [];
     selectedBundles.forEach((selectedBundle) => {
@@ -1510,8 +1670,22 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       //   - component.quantity → per single bundle (line.quantity / quantity)
       //   - bundle unit price → total / quantity
       const safeQty = quantity > 0 ? quantity : 1;
-      const unitTotalPrice = expandedLines.reduce(
-        (sum, line) => sum + line.unit_price * (line.quantity / safeQty),
+      // Preço do bundle = Σ preço unitário do componente (fechado ao cêntimo)
+      // × quantidade por bundle — o mesmo valor gravado em retail_price_unit.
+      const unitTotalPrice = round2(expandedLines.reduce(
+        (sum, line) => sum + round2(line.unit_price) * (line.quantity / safeQty),
+        0
+      ));
+      // Custo real do kit = soma do custo de compra de cada componente
+      // escolhido, à mesma quantidade. Antes disto existir, cost_price ficava
+      // sempre a null para um bundle, e QuoteBuilder.tsx assumia sempre uma
+      // margem de 30% para inventar um custo a partir do preço de venda —
+      // mesmo quando o custo real de cada peça já estava no catálogo.
+      // Um componente com custo desconhecido (unit_cost=0) entra como 0, não
+      // invalida a soma toda — só produtos/serviços totalmente sem preço de
+      // compra registado é que continuam a cair no antigo cálculo por margem.
+      const unitTotalCost = expandedLines.reduce(
+        (sum, line) => sum + line.unit_cost * (line.quantity / safeQty),
         0
       );
 
@@ -1523,13 +1697,14 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
         type: line.type,
         source_id: line.source_id,
         quantity: line.quantity / safeQty,
-        unit_price: line.unit_price,
+        unit_price: round2(line.unit_price),
+        unit_cost: line.unit_cost,
         vat_rate: line.vat_rate,
         selected_attributes: line.selected_attributes,
         attribute_price_addon: line.attribute_price_addon,
         choice_group_id: line.choice_group_id ?? null,
       }));
-      
+
       bundleItems.push({
         item: {
           id: bundle.id,
@@ -1539,7 +1714,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           category_name: "Bundles",
           brand_name: null,
           retail_price: unitTotalPrice,
-          cost_price: null,
+          cost_price: unitTotalCost > 0 ? unitTotalCost : null,
           vat_rate: 23,
           organization_id: bundle.organization_id,
           type: "product",
@@ -1582,10 +1757,10 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
               </div>
               <div>
                 <DialogTitle className="text-xl font-bold">
-                  {replaceMode ? "Substituir Item" : "Adicionar Itens ao Orçamento"}
+                  {replaceMode ? "Substituir Item" : (title ?? "Adicionar Itens ao Orçamento")}
                 </DialogTitle>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {replaceMode ? "Selecione o produto ou serviço que substituirá o item atual" : "Selecione produtos ou serviços para adicionar"}
+                  {replaceMode ? "Selecione o produto ou serviço que substituirá o item atual" : (description ?? "Selecione produtos ou serviços para adicionar")}
                 </p>
               </div>
             </div>
@@ -1895,7 +2070,18 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                     {item.sku}
                                   </p>
                                 )}
-                                
+
+                                {item.supplierRefs && item.supplierRefs.length === 1 && (
+                                  <Badge variant="outline" className="text-xs mb-2">
+                                    Ref: {item.supplierRefs[0].supplier_sku || "s/ código"}
+                                  </Badge>
+                                )}
+                                {item.supplierRefs && item.supplierRefs.length > 1 && (
+                                  <Badge variant="outline" className="text-xs mb-2">
+                                    {item.supplierRefs.length} fornecedores
+                                  </Badge>
+                                )}
+
                                 <div className="flex items-baseline justify-between mb-3">
                                   <span className="text-lg font-bold text-primary">
                                     €{((item.retail_price || 0) + (selection?.attributePriceAddon || 0)).toFixed(2)}
@@ -2118,7 +2304,19 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                   </div>
                                 </td>
                                 <td className="px-3 py-3">
-                                  <span className="text-xs font-mono text-muted-foreground">{item.sku || "-"}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-mono text-muted-foreground">{item.sku || "-"}</span>
+                                    {item.supplierRefs && item.supplierRefs.length === 1 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        Ref: {item.supplierRefs[0].supplier_sku || "s/ código"}
+                                      </Badge>
+                                    )}
+                                    {item.supplierRefs && item.supplierRefs.length > 1 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {item.supplierRefs.length} fornecedores
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-3 py-3">
                                   <span className="font-medium text-sm" title={item.name}>{item.name}</span>
@@ -2250,7 +2448,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                         
                         {/* Items in group */}
                         <div className="space-y-2 mb-4">
-                          {items.map(({ item, quantity, attributePriceAddon }) => {
+                          {items.map(({ item, quantity, attributePriceAddon, itemSupplierId }) => {
                             const basePrice = item.retail_price || 0;
                             const addon = attributePriceAddon || 0;
                             const unitPrice = basePrice + addon;
@@ -2295,6 +2493,30 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                     <p>{quantity}x €{unitPrice.toFixed(2)}</p>
                                   )}
                                 </div>
+
+                                {item.supplierRefs && item.supplierRefs.length === 1 && (
+                                  <Badge variant="outline" className="text-xs mt-1.5">
+                                    Ref: {item.supplierRefs[0].supplier_sku || "s/ código"}
+                                  </Badge>
+                                )}
+
+                                {item.supplierRefs && item.supplierRefs.length > 1 && (
+                                  <Select
+                                    value={itemSupplierId || item.supplierRefs[0].id}
+                                    onValueChange={(val) => handleSupplierRefChange(item.id, val)}
+                                  >
+                                    <SelectTrigger className="h-7 text-xs mt-1.5">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="z-[9999] bg-popover border shadow-lg" position="popper" sideOffset={4}>
+                                      {item.supplierRefs.map((ref) => (
+                                        <SelectItem key={ref.id} value={ref.id}>
+                                          {`${ref.supplier_name ?? "Fornecedor"} — ${ref.supplier_sku ?? "sem ref."} — ${ref.purchase_price != null ? ref.purchase_price.toFixed(2) + "€" : "s/ preço"}${ref.is_preferred ? " ★" : ""}`}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
                               </div>
                               <div className="text-right">
                                 <p className="font-semibold text-sm text-primary">

@@ -10,6 +10,9 @@ import { toast } from '@/lib/toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
 import type { ScheduleItem, ScheduleBoard } from '@/types/scheduling';
+import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
+import { FleetItemBadge } from './FleetScheduleItem';
+import { FLEET_READ_ONLY_MESSAGE, isFleetScheduleItem } from '@/lib/agenda/fleet';
 import type { ScheduleSettings, ScheduleHoliday } from '@/hooks/useScheduleSettings';
 
 interface ScheduleCalendarViewProps {
@@ -140,7 +143,11 @@ export function ScheduleCalendarView({
     return colors[status] || colors.scheduled;
   };
 
+  // Itens da Frota (reservas/manutenções das viaturas) são só de leitura na Agenda: não se arrastam.
+  const isFleet = (item: ScheduleItem) => isFleetScheduleItem(item, boards);
+
   const handleDragStart = (e: React.DragEvent, item: ScheduleItem) => {
+    if (isFleet(item)) { e.preventDefault(); return; }
     setDraggedItem(item);
     e.dataTransfer.setData('text/plain', item.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -160,6 +167,11 @@ export function ScheduleCalendarView({
     e.preventDefault();
     setDragOverDate(null);
     if (!draggedItem || !onItemDrop) return;
+    if (isFleet(draggedItem)) {
+      toast.info(FLEET_READ_ONLY_MESSAGE);
+      setDraggedItem(null);
+      return;
+    }
 
     // Prevent dropping to a day before today
     if (isDropDisabled(targetDate)) {
@@ -321,7 +333,7 @@ export function ScheduleCalendarView({
                     {(expandedDays.has(dayKey) ? dayItems : dayItems.slice(0, 3)).map(item => (
                       <div
                         key={item.id}
-                        draggable
+                        draggable={!isFleet(item)}
                         onDragStart={(e) => handleDragStart(e, item)}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -337,12 +349,14 @@ export function ScheduleCalendarView({
                         }}
                       >
                         <div className="flex items-center gap-1">
-                          <GripVertical className="h-3 w-3 opacity-50 shrink-0" />
+                          {!isFleet(item) && <GripVertical className="h-3 w-3 opacity-50 shrink-0" />}
                           <span className="truncate font-medium">{item.title}</span>
                         </div>
+                        {isFleet(item) && <FleetItemBadge className="mt-0.5" />}
                         <span className="text-[10px] opacity-70">
                           {format(new Date(item.start_datetime), 'HH:mm')}
                         </span>
+                        <ConfirmedByClientBadge confirmedAt={item.confirmed_at} className="block" />
                       </div>
                     ))}
                     {dayItems.length > 3 && !expandedDays.has(dayKey) && (
@@ -439,7 +453,7 @@ export function ScheduleCalendarView({
                     {dayItems.map(item => (
                       <div
                         key={item.id}
-                        draggable
+                        draggable={!isFleet(item)}
                         onDragStart={(e) => handleDragStart(e, item)}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -455,12 +469,14 @@ export function ScheduleCalendarView({
                         }}
                       >
                         <div className="flex items-center gap-1 mb-1">
-                          <GripVertical className="h-3 w-3 opacity-50 shrink-0" />
+                          {!isFleet(item) && <GripVertical className="h-3 w-3 opacity-50 shrink-0" />}
                           <span className="text-sm font-medium truncate">{item.title}</span>
                         </div>
+                        {isFleet(item) && <FleetItemBadge className="mb-1" />}
                         <div className="text-xs opacity-70">
                           {format(new Date(item.start_datetime), 'HH:mm')} - {format(new Date(item.end_datetime), 'HH:mm')}
                         </div>
+                        <ConfirmedByClientBadge confirmedAt={item.confirmed_at} />
                         {item.assignees && item.assignees.length > 0 && (
                           <div className="flex gap-1 mt-1 flex-wrap">
                             {item.assignees.map(a => (
@@ -526,7 +542,7 @@ export function ScheduleCalendarView({
                       {hourItems.map(item => (
                         <div
                           key={item.id}
-                          draggable
+                          draggable={!isFleet(item)}
                           onDragStart={(e) => handleDragStart(e, item)}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -542,13 +558,15 @@ export function ScheduleCalendarView({
                           }}
                         >
                           <div className="flex items-center gap-2">
-                            <GripVertical className="h-4 w-4 opacity-50 shrink-0" />
+                            {!isFleet(item) && <GripVertical className="h-4 w-4 opacity-50 shrink-0" />}
                             <div className="flex-1">
                               <div className="font-medium">{item.title}</div>
+                              {isFleet(item) && <FleetItemBadge />}
                               <div className="text-xs opacity-70">
                                 {format(new Date(item.start_datetime), 'HH:mm')} - {format(new Date(item.end_datetime), 'HH:mm')}
                                 {item.duration_minutes && ` (${item.duration_minutes}min)`}
                               </div>
+                              <ConfirmedByClientBadge confirmedAt={item.confirmed_at} />
                             </div>
                             {item.assignees && item.assignees.length > 0 && (
                               <div className="flex gap-1">

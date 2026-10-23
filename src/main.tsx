@@ -46,6 +46,22 @@ const root = createRoot(document.getElementById("root")!);
 let appMounted = false;
 let updateBannerShown = false;
 
+// `location.reload()` volta a pedir o documento, mas o browser pode servir o
+// MESMO index.html em cache — que aponta para os ficheiros JS que o deploy
+// novo já removeu. O recarregamento falha exatamente como a primeira vez e a
+// pessoa fica presa no ecrã de erro a carregar em "Recarregar" sem nada
+// mudar. Um parâmetro que muda a cada tentativa torna o pedido num URL
+// diferente, o que salta a cache.
+const forceReload = () => {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("v", Date.now().toString(36));
+    window.location.replace(url.toString());
+  } catch {
+    window.location.reload();
+  }
+};
+
 // Non-destructive notice for a stale-chunk error once the app is already
 // mounted and the user may be mid-task. Never touches the React tree.
 const showUpdateBanner = () => {
@@ -74,7 +90,7 @@ const showUpdateBanner = () => {
   const reload = document.createElement("button");
   reload.textContent = "Recarregar agora";
   reload.style.cssText = "background:#fff;color:#1f2937;border:none;border-radius:6px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;";
-  reload.onclick = () => window.location.reload();
+  reload.onclick = forceReload;
 
   actions.appendChild(dismiss);
   actions.appendChild(reload);
@@ -128,24 +144,37 @@ const startVersionPolling = () => {
   });
 };
 
-const renderPreviewRecovery = (error: unknown) => {
+// Este ecrã é visto por CLIENTES no portal, não só por quem desenvolve. O
+// texto anterior dizia "Preview não conseguiu carregar / Recarrega o sandbox
+// / reinicia o preview" — vocabulário que não diz nada a quem está a ver uma
+// proposta. O detalhe técnico continua disponível, mas fechado, para suporte.
+const renderLoadFailure = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error ?? "Erro desconhecido");
+  const isStaleChunk = isModuleLoadError(error);
+
   root.render(
     <div className="min-h-screen flex items-center justify-center bg-background p-6 text-foreground">
       <div className="max-w-lg space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
-        <h1 className="text-xl font-semibold">Preview não conseguiu carregar</h1>
+        <h1 className="text-xl font-semibold">
+          {isStaleChunk ? "Nova versão disponível" : "Não foi possível abrir a página"}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Um módulo do preview falhou ao carregar. Recarrega o sandbox; se continuar, reinicia o preview.
+          {isStaleChunk
+            ? "Esta página estava aberta quando foi publicada uma versão nova. Carregue em Recarregar para continuar — não perde nada do que está a ver."
+            : "Ocorreu um erro ao carregar a página. Carregue em Recarregar. Se voltar a acontecer, contacte-nos."}
         </p>
-        <pre className="max-h-40 overflow-auto rounded bg-muted p-3 text-xs text-muted-foreground whitespace-pre-wrap">
-          {message}
-        </pre>
         <button
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-          onClick={() => window.location.reload()}
+          onClick={forceReload}
         >
           Recarregar
         </button>
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none">Detalhes técnicos</summary>
+          <pre className="mt-2 max-h-40 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">
+            {message}
+          </pre>
+        </details>
       </div>
     </div>
   );
@@ -164,12 +193,15 @@ const loadApp = async () => {
   } catch (error) {
     if (isModuleLoadError(error) && !sessionStorage.getItem("olyvia-module-load-retried")) {
       sessionStorage.setItem("olyvia-module-load-retried", "true");
-      window.location.reload();
+      // forceReload, não location.reload(): o index.html em cache aponta para
+      // os chunks que o deploy novo removeu, por isso um reload normal falha
+      // outra vez e a tentativa automática não serve de nada.
+      forceReload();
       return;
     }
 
     Sentry.captureException(error);
-    renderPreviewRecovery(error);
+    renderLoadFailure(error);
   }
 };
 
@@ -182,7 +214,7 @@ window.addEventListener("unhandledrejection", (event) => {
       event.preventDefault();
       showUpdateBanner();
     } else {
-      renderPreviewRecovery(event.reason);
+      renderLoadFailure(event.reason);
     }
   } else {
     Sentry.captureException(event.reason);

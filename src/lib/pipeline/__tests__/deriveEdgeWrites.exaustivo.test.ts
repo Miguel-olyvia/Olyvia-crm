@@ -132,7 +132,7 @@ describe("varredura exaustiva: 24 ordens x 16 combinações de activação", () 
       }
   });
 
-  it("nunca toca em acções que não são arestas", () => {
+  it("nunca toca em ações que não são arestas", () => {
     const comExtras: StageActionRule[] = [
       ...REGRAS_BASE,
       { id: "t1", module: "proposta", stage_id: "outra", action_type: "create_task", is_active: true },

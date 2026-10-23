@@ -14,7 +14,7 @@ import { toast } from "@/lib/toast";
 import { useNavigate } from "react-router-dom";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveOrgSubtree } from "@/lib/orgSubtree";
-import { appendTimestamp, getNotificationRoute, notificationPriorityColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { getNotificationRoute, openNotificationRoute, notificationPriorityColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
 
 interface NotificationRow {
   id: string;
@@ -40,6 +40,9 @@ const entityLabels: Record<string, string> = {
   email_tracking: "Email",
   lead: "Leads",
   quote: "Pedidos",
+  // Frota: a única notificação (kind='notification') é a multa identificada (fleet_fine_identified, link /frota/ocorrencias);
+  // os avisos diários da Frota são kind='alert' e aparecem no Hoje da Frota.
+  fleet_incident: "Frota",
 };
 
 const actionLabels: Record<string, { label: string; icon: typeof Send }> = {
@@ -160,7 +163,7 @@ export default function Notifications() {
   const handleAction = async (n: NotificationRow) => {
     await markAsRead(n.id);
     const route = await getNotificationRoute(n);
-    if (route) navigate(appendTimestamp(route), { replace: true });
+    if (route) openNotificationRoute(navigate, route);
   };
 
   return (

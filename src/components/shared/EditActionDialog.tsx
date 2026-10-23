@@ -57,7 +57,7 @@ export function EditActionDialog({
         .eq("id", interactionId);
 
       if (error) throw error;
-      toast({ title: "Acção actualizada" });
+      toast({ title: "Ação actualizada" });
       onSaved?.();
       onOpenChange(false);
     } catch (err: any) {
@@ -77,7 +77,7 @@ export function EditActionDialog({
         .eq("id", interactionId);
 
       if (error) throw error;
-      toast({ title: "Acção removida" });
+      toast({ title: "Ação removida" });
       onSaved?.();
       onOpenChange(false);
     } catch (err: any) {
@@ -94,13 +94,13 @@ export function EditActionDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Pencil className="h-4 w-4 text-primary" />
-            Editar Próxima Acção
+            Editar Próxima Ação
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label className="text-xs">Tipo de acção</Label>
+            <Label className="text-xs">Tipo de ação</Label>
             <Select value={actionType} onValueChange={setActionType}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>

@@ -607,7 +607,7 @@ export function CustomVariablesManager({ onInsertVariable }: Props) {
             <AlertDialogTitle>Eliminar variável definitivamente?</AlertDialogTitle>
             <AlertDialogDescription>
               Vais eliminar a variável <span className="font-mono font-semibold">{confirmDeleteVar?.variable_key}</span> definitivamente.
-              Esta acção não pode ser desfeita e liberta a chave para reutilização.
+              Esta ação não pode ser desfeita e liberta a chave para reutilização.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

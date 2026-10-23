@@ -7,11 +7,25 @@ import { useCompany } from "@/contexts/CompanyContext";
 // Friendly mapping for backend error codes returned by create-client-portal-access
 const PORTAL_ERROR_MESSAGES: Record<string, string> = {
   portal_email_is_crm_user:
-    "Este email pertence a um utilizador da plataforma. Use outro email para o acesso ao portal.",
+    "Este email já pertence a um utilizador do CRM desta empresa. Use outro email para o acesso ao portal.",
   portal_email_used_by_other_entity:
     "Este email já está associado a outro cliente nesta organização. Use outro email para manter os acessos separados.",
   proposal_has_signed_contract:
     "Esta proposta tem um contrato já assinado. Para enviar valores alterados, crie uma nova proposta/adenda.",
+};
+
+/**
+ * Tipos de documento aceites pela edge function create-client-portal-access.
+ * `quote` e `direct_sale` já eram suportados no backend; faltava a união aqui.
+ */
+export type PortalDocumentType = "proposal" | "contract" | "quote" | "direct_sale";
+
+/** Rótulo usado nos toasts de sucesso. Proposta/Contrato mantêm-se inalterados. */
+const PORTAL_DOC_LABELS: Record<PortalDocumentType, string> = {
+  proposal: "Proposta",
+  contract: "Contrato",
+  quote: "Orçamento",
+  direct_sale: "Venda Direta",
 };
 
 interface UseClientPortalAccessOptions {
@@ -25,7 +39,7 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
   const { activeCompany } = useCompany();
 
   const generatePortalAccess = async (
-    documentType: "proposal" | "contract",
+    documentType: PortalDocumentType,
     documentId: string,
     forceNewPassword?: boolean
   ) => {
@@ -80,7 +94,7 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
         // clipboard may fail in some contexts
       }
 
-      const docLabel = documentType === "contract" ? "Contrato" : "Proposta";
+      const docLabel = PORTAL_DOC_LABELS[documentType];
 
       // BASE-USR-012: backend suppresses temp_password when SMTP succeeds.
       // Cases after the security fix:

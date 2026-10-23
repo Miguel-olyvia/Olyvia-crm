@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { checkIsClientRole } from "@/hooks/useClientRole";
+import { clientSupplierHome, fetchAccessKind, getClientSupplierSurface } from "@/hooks/useClientRole";
+import { getSessionContext } from "@/lib/auth/sessionContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,8 +84,30 @@ const Auth = () => {
   // Auth listener BEFORE getSession — prevents race conditions
   useEffect(() => {
     const redirectByRole = async (userId: string) => {
-      const isClient = await checkIsClientRole(userId);
-      navigate(isClient ? "/client-portal" : "/home");
+      const kind = await fetchAccessKind(userId);
+      if (kind === "supplier_only") {
+        // Conta do portal do fornecedor (sem anew_users): nunca vai para o CRM.
+        navigate("/supplier-portal");
+        return;
+      }
+      if (kind === "client_only") {
+        navigate("/client-portal");
+        return;
+      }
+      if (kind === "client_supplier") {
+        // Cliente que é também fornecedor: escolha guardada ou ecrã de escolha.
+        // Nunca vai para o CRM.
+        navigate(clientSupplierHome(getClientSupplierSurface(userId)));
+        return;
+      }
+      if (kind === "hybrid") {
+        // Account holds both CRM and client memberships: honour a prior choice,
+        // otherwise send them to the context picker.
+        const ctx = getSessionContext(userId);
+        navigate(ctx === "portal" ? "/client-portal" : ctx === "crm" ? "/home" : "/escolher-acesso");
+        return;
+      }
+      navigate("/home");
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -137,7 +160,9 @@ const Auth = () => {
       message.includes("demorou demasiado tempo") ||
       message.includes("timeout") ||
       message.includes("network") ||
-      message.includes("failed to fetch")
+      message.includes("failed to fetch") ||
+      message.includes("failed to send a request") ||
+      message.includes("edge function")
     ) {
       return `${fallbackAction} indisponível de momento. O servidor está lento. Tente novamente dentro de instantes.`;
     }
@@ -492,17 +517,17 @@ const Auth = () => {
               >
                 Voltar ao Login
               </button>
-            ) : (
+            ) : mode === "register" ? (
+              // O registo aberto foi retirado do ecra: no login nao ha ja
+              // ligacao para criar conta, por isso este modo nao e alcancavel.
               <button
                 type="button"
-                onClick={() => setMode(mode === "login" ? "register" : "login")}
+                onClick={() => setMode("login")}
                 className="text-primary hover:underline block w-full"
               >
-                {mode === "login"
-                  ? "Não tem conta? Registe-se agora"
-                  : "Já tem conta? Faça login"}
+                Já tem conta? Faça login
               </button>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>

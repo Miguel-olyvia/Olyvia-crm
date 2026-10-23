@@ -5,6 +5,8 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { LeadPhoneField } from "./LeadPhoneField";
+import { isPhoneField } from "@/lib/phone/isPhoneField";
 
 interface FieldDefinition {
   id: string;
@@ -16,6 +18,7 @@ interface FieldDefinition {
   placeholder?: string;
   help_text?: string;
   display_style?: string;
+  contact_field_mapping?: string | null;
 }
 
 interface DynamicFormFieldProps {
@@ -269,20 +272,17 @@ export function DynamicFormField({ field, value, onChange, campaignId }: Dynamic
     );
   }
 
-  // Phone field
-  if (field.field_type === 'phone') {
+  // Phone field — o tipo, o mapeamento ou o nome da chave identificam o telefone:
+  // campos criados como texto ("telefone") também levam o seletor de indicativo.
+  if (isPhoneField(field)) {
     return (
       <div className="space-y-2">
-        <Label>
-          {field.field_label}
-          {field.is_required && <span className="text-red-500 ml-1">*</span>}
-        </Label>
-        <Input
-          type="tel"
-          className="mt-1"
-          value={value || ""}
-          onChange={e => onChange(e.target.value)}
-          placeholder={field.placeholder || "912345678"}
+        <LeadPhoneField
+          label={field.field_label}
+          required={field.is_required}
+          value={value}
+          onChange={onChange}
+          placeholder={field.placeholder}
         />
         {field.help_text && <p className="text-xs text-muted-foreground">{field.help_text}</p>}
       </div>

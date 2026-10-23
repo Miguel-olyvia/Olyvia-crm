@@ -280,7 +280,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="stages">Fases</TabsTrigger>
               <TabsTrigger value="flow" className="gap-1.5"><ArrowRight className="w-3.5 h-3.5" />Fluxo</TabsTrigger>
-              <TabsTrigger value="actions" className="gap-1.5"><Zap className="w-3.5 h-3.5" />Acções</TabsTrigger>
+              <TabsTrigger value="actions" className="gap-1.5"><Zap className="w-3.5 h-3.5" />Ações</TabsTrigger>
               <TabsTrigger value="automations" className="gap-1.5"><Zap className="w-3.5 h-3.5" />Automações</TabsTrigger>
             </TabsList>
 
@@ -311,7 +311,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
                         <TableHead className="w-16">Cor</TableHead>
                         <TableHead className="w-28">Tipo</TableHead>
                         <TableHead className="w-24">Propostas</TableHead>
-                        <TableHead className="text-right w-28">Acções</TableHead>
+                        <TableHead className="text-right w-28">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <SortableContext items={displayStages.map(s => s.id)} strategy={verticalListSortingStrategy}>

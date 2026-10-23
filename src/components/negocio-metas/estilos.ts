@@ -1,0 +1,35 @@
+import { cn } from "@/lib/utils";
+import { FOCO } from "@/components/ficha-comum/estilosAbas";
+import type { FaseNegocio } from "./negocioMetas";
+
+/** Anel de foco visível, o mesmo em todos os controlos da página (vive em `ficha-comum`, partilhado com as fichas). */
+export { FOCO };
+
+/** A pista visual de um botão `aria-disabled` (que continua focável): opaco e com o cursor de «não». Local: nunca em `ui/button.tsx`, que é de toda a app. */
+export const PISTA_DESATIVADO = "aria-disabled:cursor-not-allowed aria-disabled:opacity-60";
+
+/** Chip de filtro: 44 px de altura; o ativo troca de cor e ganha uma marca (✓) que o chip mostra à parte. */
+export const chip = (ativo: boolean): string =>
+  cn(
+    "inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border px-4 text-sm",
+    FOCO,
+    ativo
+      ? "border-primary bg-primary text-primary-foreground"
+      : "border-input bg-card text-foreground hover:border-foreground/40",
+  );
+
+/** A cor de cada fase (ponto, faixa da coluna). A fase diz-se sempre também por texto. */
+export const COR_FASE: Record<FaseNegocio, string> = {
+  orcamento: "bg-info",
+  proposta: "bg-primary",
+  contrato: "bg-warning",
+  ganho: "bg-success",
+};
+
+/** Barra à esquerda do cartão, na cor da fase. */
+export const BARRA_FASE: Record<FaseNegocio, string> = {
+  orcamento: "border-l-info",
+  proposta: "border-l-primary",
+  contrato: "border-l-warning",
+  ganho: "border-l-success",
+};

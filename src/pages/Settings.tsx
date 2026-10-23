@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Settings as SettingsIcon, User, Shield, Database, Plus, Trash2, Loader2, ListPlus, Calendar, Mail, CheckCircle, XCircle, Radio } from "lucide-react";
-import { useState, useEffect } from "react";
+import { Settings as SettingsIcon, User, Shield, Database, Plus, Trash2, Loader2, ListPlus, Calendar, Mail, CheckCircle, XCircle, Radio, Package } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,6 +15,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/hooks/useTranslation";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
+import { PermissionGate } from "@/components/PermissionGate";
+import { useCompany } from "@/contexts/CompanyContext";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import PlanoFaturacaoCard from "@/components/settings/PlanoFaturacaoCard";
 
@@ -118,6 +120,14 @@ const Settings = () => {
   });
   const [editingChannelType, setEditingChannelType] = useState<ChannelType | null>(null);
 
+  // Inventário — Venda a Stock Fixo (Fase 5.0E)
+  const { activeCompany } = useCompany();
+  const [inventoryWarehouses, setInventoryWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [stockDeductionTrigger, setStockDeductionTrigger] = useState<string>("contract_signed");
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState<string>("");
+  const [inventorySettingsLoading, setInventorySettingsLoading] = useState(false);
+  const [inventorySettingsSaving, setInventorySettingsSaving] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -152,26 +162,34 @@ const Settings = () => {
           .maybeSingle();
         
         if (anewUser?.id) {
-          const { data: membership } = await supabase
+          // A user may hold several active memberships (and, since the
+          // dual-client/CRM exception, even a client + CRM pair in one org).
+          // Pick an ADMIN membership if one exists rather than an arbitrary
+          // first row, which .limit(1) could land on the client membership and
+          // wrongly hide the admin surface.
+          const { data: memberships } = await supabase
             .from('anew_memberships')
             .select('organization_id, role_id')
             .eq('user_id', anewUser.id)
-            .eq('status', 'active')
-            .limit(1)
-            .maybeSingle();
-          
-          if (membership) {
-            const { data: role } = await supabase
+            .eq('status', 'active');
+
+          const roleIds = (memberships || []).map((m) => m.role_id).filter(Boolean);
+          if (roleIds.length > 0) {
+            const { data: roles } = await supabase
               .from('anew_roles')
-              .select('code')
-              .eq('id', membership.role_id)
-              .maybeSingle();
-            
+              .select('id, code')
+              .in('id', roleIds);
+
             const adminCodes = ['org_admin', 'super_admin', 'system_admin'];
-            if (role?.code && adminCodes.includes(role.code)) {
+            const adminRoleIds = new Set(
+              (roles || []).filter((r) => r.code && adminCodes.includes(r.code)).map((r) => r.id)
+            );
+            const adminMembership = (memberships || []).find((m) => adminRoleIds.has(m.role_id));
+
+            if (adminMembership) {
               setIsCompanyAdmin(true);
-              setUserCompanyId(membership.organization_id);
-              loadSmtpSettings(membership.organization_id);
+              setUserCompanyId(adminMembership.organization_id);
+              loadSmtpSettings(adminMembership.organization_id);
             }
           }
         }
@@ -626,6 +644,66 @@ const Settings = () => {
     }
   };
 
+  // Inventário — Venda a Stock Fixo (Fase 5.0E): carrega organization_inventory_settings
+  // (pode não existir linha ainda — nesse caso ficam os valores por omissão) e a lista
+  // de armazéns ativos da organização ativa, para o select "Armazém por omissão".
+  const loadInventorySettings = useCallback(async () => {
+    if (!activeCompany?.id) return;
+    setInventorySettingsLoading(true);
+    try {
+      const [settingsRes, warehousesRes] = await Promise.all([
+        supabase
+          .from("organization_inventory_settings")
+          .select("*")
+          .eq("organization_id", activeCompany.id)
+          .maybeSingle(),
+        supabase
+          .from("warehouses")
+          .select("id, name")
+          .eq("organization_id", activeCompany.id)
+          .is("deleted_at", null)
+          .order("name"),
+      ]);
+
+      if (settingsRes.error) throw settingsRes.error;
+      if (warehousesRes.error) throw warehousesRes.error;
+
+      setInventoryWarehouses(warehousesRes.data || []);
+      setStockDeductionTrigger(settingsRes.data?.stock_deduction_trigger || "contract_signed");
+      setDefaultWarehouseId(settingsRes.data?.default_warehouse_id || "");
+    } catch (error: any) {
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('settingsPage.inventory.loadError')}: ${friendlyMessage}`);
+    } finally {
+      setInventorySettingsLoading(false);
+    }
+  }, [activeCompany?.id, t]);
+
+  useEffect(() => {
+    loadInventorySettings();
+  }, [loadInventorySettings]);
+
+  const handleSaveInventorySettings = async () => {
+    if (!activeCompany?.id) return;
+    setInventorySettingsSaving(true);
+    try {
+      const { error } = await supabase.rpc("rpc_upsert_inventory_settings", {
+        p_organization_id: activeCompany.id,
+        p_stock_deduction_trigger: stockDeductionTrigger,
+        p_default_warehouse_id: defaultWarehouseId || null,
+      } as any);
+
+      if (error) throw error;
+
+      toast.success(t('settingsPage.inventory.saveSuccess'));
+    } catch (error: any) {
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('settingsPage.inventory.saveError')}: ${friendlyMessage}`);
+    } finally {
+      setInventorySettingsSaving(false);
+    }
+  };
+
   return (
     <>
       <div className="space-y-6">
@@ -1020,7 +1098,7 @@ const Settings = () => {
                             <Label htmlFor="from_name">{t('techSettings.smtp.fromName')} *</Label>
                             <Input
                               id="from_name"
-                              placeholder="Your Company Name"
+                              placeholder={t('techSettings.smtp.fromNamePlaceholder')}
                               value={smtpForm.from_name}
                               onChange={(e) => setSmtpForm({ ...smtpForm, from_name: e.target.value })}
                             />
@@ -1412,6 +1490,81 @@ const Settings = () => {
             )}
           </CardContent>
         </Card>
+
+        <PermissionGate permission="inventory.edit">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Package className="w-5 h-5" />
+                {t('settingsPage.inventory.title')}
+              </CardTitle>
+              <CardDescription>{t('settingsPage.inventory.description')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {inventorySettingsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="stock_deduction_trigger">
+                        {t('settingsPage.inventory.deductionTriggerLabel')}
+                      </Label>
+                      <Select value={stockDeductionTrigger} onValueChange={setStockDeductionTrigger}>
+                        <SelectTrigger id="stock_deduction_trigger">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="contract_signed">
+                            {t('settingsPage.inventory.deductionTriggerContractSigned')}
+                          </SelectItem>
+                          <SelectItem value="proposal_accepted">
+                            {t('settingsPage.inventory.deductionTriggerProposalAccepted')}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="default_warehouse_id">
+                        {t('settingsPage.inventory.defaultWarehouseLabel')}
+                      </Label>
+                      <Select
+                        value={defaultWarehouseId || "none"}
+                        onValueChange={(value) => setDefaultWarehouseId(value === "none" ? "" : value)}
+                      >
+                        <SelectTrigger id="default_warehouse_id">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{t('settingsPage.inventory.defaultWarehouseNone')}</SelectItem>
+                          {inventoryWarehouses.map((w) => (
+                            <SelectItem key={w.id} value={w.id}>
+                              {w.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-muted-foreground">
+                    {t('settingsPage.inventory.defaultWarehouseHelp')}
+                  </p>
+
+                  <div className="flex justify-end">
+                    <Button onClick={handleSaveInventorySettings} disabled={inventorySettingsSaving}>
+                      {inventorySettingsSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                      {t('settingsPage.inventory.save')}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </PermissionGate>
       </div>
     </>
   );

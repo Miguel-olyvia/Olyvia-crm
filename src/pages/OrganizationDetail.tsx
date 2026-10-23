@@ -175,6 +175,7 @@ export default function OrganizationDetail() {
     address: { street: "", number: "", floor: "", unit: "", postal_code: "", city: "", city_id: "", district: "", district_id: "", country: "PT", extra: "" },
     fiscalAddressOption: "same",
     fiscalAddress: { street: "", number: "", floor: "", unit: "", postal_code: "", city: "", city_id: "", district: "", district_id: "", country: "PT", extra: "" },
+    logo_url: null,
   };
   const [newOrgFormData, setNewOrgFormData] = useState<OrganizationFormData>(emptyFormData);
 
@@ -472,8 +473,8 @@ export default function OrganizationDetail() {
         }));
 
       const nif = hasFiscalData ? newOrgFormData.nif : null;
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
-        callNifWriteProxy("rpc_create_organization_with_hierarchy", {
+      const { data: newOrgData, error } = await withAuditContext(supabase, businessUserId, () =>
+        callNifWriteProxy<{ data: { id: string } }>("rpc_create_organization_with_hierarchy", {
           p_current_org_id: id,
           p_hierarchy_type: hierarchyForm.type,
           p_name: newOrgName,
@@ -490,6 +491,17 @@ export default function OrganizationDetail() {
       );
 
       if (error) throw error;
+
+      if (newOrgFormData.logo_url && newOrgData?.data?.id) {
+        const { error: logoError } = await (supabase as any)
+          .from("anew_organizations")
+          .update({ logo_url: newOrgFormData.logo_url })
+          .eq("id", newOrgData.data.id);
+        if (logoError) {
+          console.error("Error saving organization logo:", logoError);
+          toast.error("Organização guardada, mas não foi possível guardar o ícone.");
+        }
+      }
 
       toast.success(t("common.created"));
       setIsCreateOrgSheetOpen(false); setIsAddHierarchyOpen(false);
