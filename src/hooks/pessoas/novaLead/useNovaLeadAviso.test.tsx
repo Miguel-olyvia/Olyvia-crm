@@ -6,7 +6,7 @@ import { act } from "@testing-library/react";
 import { useToast } from "@/hooks/use-toast";
 import { criarCliente, montarHook } from "../fichaTestUtil";
 import { camposBase } from "./fluxoNovaLead";
-import { supabaseFalso } from "./supabaseFalso";
+import { entidadesDaNovaLead, supabaseFalso } from "./supabaseFalso";
 import { useNovaLead, type EntradaNovaLead } from "./useNovaLead";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("./supabaseFalso")).supabaseFalso }));
@@ -29,8 +29,6 @@ function rpc(sobre: Record<string, unknown> = {}) {
   supabaseFalso.rpc.mockImplementation(async (nome: string) => {
     if (nome in sobre) return sobre[nome];
     if (nome === "neg_procurar_duplicados") return { data: [], error: null };
-    if (nome === "create_lead_entity_for_org") return { data: "ent-novo", error: null };
-    if (nome === "rpc_create_lead_manual") return { data: { id: "lead-novo" }, error: null };
     return { data: null, error: null };
   });
 }
@@ -41,7 +39,7 @@ const grupo = { pessoa: null, campo: "email", ambito: "grupo", entity_id: null, 
 beforeEach(() => {
   supabaseFalso.reiniciar();
   aoConcluir.mockReset();
-  supabaseFalso.estado.tabelas = { anew_entities: [], anew_hierarchy: [], anew_clients: [], anew_users: [] };
+  supabaseFalso.estado.tabelas = { anew_entities: entidadesDaNovaLead("p1"), anew_hierarchy: [], anew_users: [] };
   rpc();
 });
 

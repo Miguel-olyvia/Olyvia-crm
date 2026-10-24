@@ -135,30 +135,21 @@ async function ler(consulta: PromiseLike<{ data: unknown; error: unknown }>): Pr
   return Array.isArray(data) ? (data as Linha[]) : [];
 }
 
-const doEntity = (linhas: Linha[], id: string): Linha[] => linhas.filter((l) => l.entity_id === id);
-const principal = (linhas: Linha[], coluna: string): string | null => {
-  const escolhida = linhas.find((l) => l.is_primary === true) ?? linhas[0];
-  return escolhida && typeof escolhida[coluna] === "string" ? (escolhida[coluna] as string) : null;
-};
-const todos = (linhas: Linha[], coluna: string): string[] => linhas.map((l) => l[coluna]).filter((v): v is string => typeof v === "string" && v !== "");
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 
-/** Lê, com a sessão de quem cria, os dados de cada pessoa visível da organização. Só select; qualquer falha lança (fail-closed). */
+/**
+ * Lê, com a sessão de quem cria, os dados de cada pessoa visível da organização: UMA leitura às entidades (a lead é a entidade sem
+ * `client_since`; o cliente é a que o tem; só há um email e um telefone por entidade). Só select; qualquer falha lança (fail-closed).
+ */
 async function lerPessoas(organizationId: string, bases: readonly PessoaBase[]): Promise<PessoaEncontrada[]> {
   const ids = bases.filter((b) => b.visivel && b.entityId).map((b) => b.entityId as string);
   const db = supabase as unknown as { from: (t: string) => any };
-  let entidades: Linha[] = [], emails: Linha[] = [], telefones: Linha[] = [], leads: Linha[] = [], clientes: Linha[] = [], utilizadores: Linha[] = [];
+  let entidades: Linha[] = [], utilizadores: Linha[] = [];
   if (ids.length > 0) {
-    [entidades, emails, telefones, leads, clientes] = await Promise.all([
-      ler(db.from("anew_entities").select("id, display_name, created_at").in("id", ids)),
-      ler(db.from("anew_entity_emails").select("entity_id, email, is_primary").in("entity_id", ids)),
-      ler(db.from("anew_entity_phones").select("entity_id, phone_number, is_primary").in("entity_id", ids)),
-      ler(db.from("anew_leads").select("id, entity_id, status, closure_result, created_at, assigned_to")
-        .eq("organization_id", organizationId).in("entity_id", ids).is("deleted_at", null)),
-      ler(db.from("anew_clients").select("id, entity_id, status, created_at")
-        .eq("organization_id", organizationId).in("entity_id", ids).is("deleted_at", null)),
-    ]);
-    const atribuidos = [...new Set(leads.map((l) => str(l.assigned_to)).filter((v): v is string => v !== null))];
+    entidades = await ler(db.from("anew_entities")
+      .select("id, display_name, created_at, email, phone, assigned_to, client_since, closure_result")
+      .eq("organization_id", organizationId).in("id", ids).is("deleted_at", null));
+    const atribuidos = [...new Set(entidades.map((e) => str(e.assigned_to)).filter((v): v is string => v !== null))];
     if (atribuidos.length > 0) utilizadores = await ler(db.from("anew_users").select("id, name").in("id", atribuidos));
   }
   const nomeDe = (id: string | null): string | null => (id ? str(utilizadores.find((u) => u.id === id)?.name) : null);
@@ -170,30 +161,30 @@ async function lerPessoas(organizationId: string, bases: readonly PessoaBase[]):
       };
     }
     const id = b.entityId;
-    const e = doEntity(emails, id);
-    const t = doEntity(telefones, id);
-    const cs = doEntity(clientes, id);
-    const ls: LeadConhecida[] = doEntity(leads, id).map((l) => ({
-      id: String(l.id),
-      estado: str(l.status) ?? "",
-      encerrada: str(l.closure_result) !== null,
-      motivoEncerramento: str(l.closure_result),
-      criadaEm: str(l.created_at),
-      atribuidoA: nomeDe(str(l.assigned_to)),
-    }));
     const entidade = entidades.find((x) => x.id === id);
+    const email = texto(str(entidade?.email));
+    const telefone = texto(str(entidade?.phone));
+    const temCliente = str(entidade?.client_since) !== null;
+    const lead: LeadConhecida[] = entidade && !temCliente ? [{
+      id,
+      estado: "new",
+      encerrada: str(entidade.closure_result) !== null,
+      motivoEncerramento: str(entidade.closure_result),
+      criadaEm: str(entidade.created_at),
+      atribuidoA: nomeDe(str(entidade.assigned_to)),
+    }] : [];
     return {
       entityId: id,
       nome: str(entidade?.display_name) ?? b.nome,
       visivel: true,
       campos: b.campos,
-      emailPrincipal: principal(e, "email"),
-      emails: todos(e, "email"),
-      telefonePrincipal: principal(t, "phone_number"),
-      telefones: todos(t, "phone_number"),
-      leads: ls,
-      temCliente: cs.length > 0,
-      clienteAtivo: cs.some((c) => c.status !== "inactive"),
+      emailPrincipal: email,
+      emails: email ? [email] : [],
+      telefonePrincipal: telefone,
+      telefones: telefone ? [telefone] : [],
+      leads: lead,
+      temCliente,
+      clienteAtivo: temCliente,
       criadaEm: str(entidade?.created_at),
     };
   });

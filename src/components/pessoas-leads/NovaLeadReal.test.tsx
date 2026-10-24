@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
-import { supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
+import { entidadesDaNovaLead, supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
 import { NovaLeadReal } from "./NovaLeadReal";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
@@ -77,13 +77,8 @@ beforeEach(() => {
     anew_hierarchy: [], anew_organizations: [{ id: ORG, name: "Nike", type: "empresa" }],
     anew_memberships: [{ user_id: "u1", organization_id: ORG, role_id: "r" }], anew_roles: [{ id: "r", code: "vendedor" }],
     anew_users: [{ id: "u1", name: "Rui Costa", entity_id: null, status: "active" }], anew_entity_addresses: [],
-    anew_entities: [{ id: "p1", display_name: "Ana Lopes", created_at: "2026-09-01T10:00:00Z" }],
-    anew_entity_emails: [{ entity_id: "p1", email: "ana@x.pt", is_primary: true }],
-    anew_entity_phones: [{ entity_id: "p1", phone_number: "911 222 333", is_primary: true }],
-    anew_leads: (c) => (c.colunas?.includes("field_values")
-      ? { data: [{ field_values: {}, status: "new" }], error: null }
-      : { data: [{ id: "l1", entity_id: "p1", status: "new", closure_result: null, created_at: "2026-10-01T10:00:00Z", assigned_to: "u1" }], error: null }),
-    anew_clients: [],
+    // a lead é a própria entidade: um só email, um só telefone e o responsável na linha da entidade
+    anew_entities: entidadesDaNovaLead("p1", "ent-novo", { phone: "911 222 333", assigned_to: "u1" }),
   };
   rpc();
 });
@@ -155,22 +150,22 @@ describe("NovaLeadReal: o diálogo", () => {
 });
 
 describe("NovaLeadReal: criar", () => {
-  it("cria a pessoa e a lead, fecha, abre a ficha da pessoa nova e anuncia", async () => {
+  it("cria a pessoa (a lead é a entidade), fecha, abre a ficha da pessoa nova e anuncia", async () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
     preencherValido();
     criar();
     await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", screen.getByRole("button", { name: "Nova lead" })));
-    expect(nomesRpc()).toEqual(["neg_procurar_duplicados", "create_lead_entity_for_org", "ensure_entity_org_link", "rpc_create_lead_manual"]);
-    expect(supabaseFalso.rpc).toHaveBeenCalledWith("rpc_create_lead_manual", expect.objectContaining({
-      p_organization_id: ORG, p_entity_created_here: true, p_email: "ana@x.pt", p_phone: "+351912345678",
-    }));
+    expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
+    const inserts = supabaseFalso.chamadasA("anew_entities", "insert");
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].dados).toMatchObject({ organization_id: ORG, type: "person", email: "ana@x.pt", phone: "+351912345678" });
     expect(aoAnunciar).toHaveBeenCalledWith("Lead criada: Ana Lopes.");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("a origem escolhida vai para a lead pelo nome e pelo id", async () => {
+  it("a origem escolhida vai para a entidade pelo id", async () => {
     desenhar();
     abrir();
     await screen.findByRole("dialog");
@@ -179,7 +174,7 @@ describe("NovaLeadReal: criar", () => {
     preencherValido();
     criar();
     await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalled());
-    expect(supabaseFalso.rpc).toHaveBeenCalledWith("rpc_create_lead_manual", expect.objectContaining({ p_source: "Feira", p_source_id: "s1" }));
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")[0].dados).toMatchObject({ origin_id: "s1" });
   });
 
   it("se a verificação falha mostra o erro no diálogo, com «Tentar de novo», e não cria nada", async () => {
@@ -244,15 +239,15 @@ describe("NovaLeadReal: duplicados", () => {
     expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
     fireEvent.click(screen.getByRole("button", { name: "Confirmar e atualizar" }));
     await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("p1", expect.anything()));
-    expect(supabaseFalso.rpc).toHaveBeenCalledWith("neg_substituir_contacto", {
-      p_organization_id: ORG, p_entity_id: "p1", p_email: null, p_telefone: "+351912345678",
-    });
-    expect(nomesRpc()).not.toContain("create_lead_entity_for_org");
+    const contacto = supabaseFalso.chamadasA("anew_entities", "update")[0];
+    expect(contacto.dados).toEqual({ phone: "+351912345678" });
+    expect(contacto.filtros).toContainEqual(["eq", ["id", "p1"]]);
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toEqual([]);
     expect(aoAnunciar).toHaveBeenCalledWith("Dados de Ana Lopes atualizados.");
   });
 
   it("cliente ativo: «Já é cliente», sem «Atualizar dados»", async () => {
-    supabaseFalso.estado.tabelas.anew_clients = [{ id: "c1", entity_id: "p1", status: "active", created_at: "2026-09-02T10:00:00Z" }];
+    supabaseFalso.estado.tabelas.anew_entities = entidadesDaNovaLead("p1", "ent-novo", { phone: "911 222 333", client_since: "2026-09-02" });
     const dup = await ateOBloqueio();
     expect(within(dup).getByText("Já é cliente")).toBeInTheDocument();
     expect(within(dup).queryByRole("button", { name: /Atualizar dados/ })).toBeNull();

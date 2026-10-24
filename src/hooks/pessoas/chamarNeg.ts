@@ -32,6 +32,7 @@ export type NomeNeg =
   | "neg_guardar_identidade_pessoa"
   | "neg_procurar_duplicados"
   | "neg_substituir_contacto"
+  | "neg_atribuir_pessoa"
   | "neg_guardar_regras_qualificacao"
   | "neg_guardar_questionario"
   | "neg_questionario_levantamento";

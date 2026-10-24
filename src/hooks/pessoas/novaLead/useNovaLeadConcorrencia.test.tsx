@@ -5,7 +5,7 @@ import { act } from "@testing-library/react";
 import { PESSOA_ID } from "../fichaFabrica";
 import { criarCliente, montarHook } from "../fichaTestUtil";
 import { camposBase } from "./fluxoNovaLead";
-import { supabaseFalso } from "./supabaseFalso";
+import { entidadesDaNovaLead, supabaseFalso } from "./supabaseFalso";
 import { useNovaLead, type EntradaNovaLead } from "./useNovaLead";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("./supabaseFalso")).supabaseFalso }));
@@ -33,9 +33,6 @@ function rpcComEspera(duplicados: unknown[]) {
   const espera = new Promise<void>((r) => { libertar = r; });
   supabaseFalso.rpc.mockImplementation(async (nome: string) => {
     if (nome === "neg_procurar_duplicados") { await espera; return { data: duplicados, error: null }; }
-    if (nome === "create_lead_entity_for_org") return { data: "ent-novo", error: null };
-    if (nome === "rpc_create_lead_manual") return { data: { id: "lead-novo" }, error: null };
-    if (nome === "neg_substituir_contacto") return { data: { mudou: true }, error: null };
     return { data: null, error: null };
   });
   return libertar;
@@ -45,13 +42,8 @@ beforeEach(() => {
   supabaseFalso.reiniciar();
   aoConcluir.mockReset();
   supabaseFalso.estado.tabelas = {
-    anew_entities: [{ id: PESSOA_ID, display_name: "Ana Lopes", created_at: "2026-09-01T10:00:00Z" }],
-    anew_entity_emails: [{ entity_id: PESSOA_ID, email: "ana@x.pt", is_primary: true }],
-    anew_entity_phones: [{ entity_id: PESSOA_ID, phone_number: "911", is_primary: true }],
-    anew_leads: (c) => (c.colunas?.includes("field_values")
-      ? { data: [{ field_values: {}, status: "new" }], error: null }
-      : { data: [{ id: "l1", entity_id: PESSOA_ID, status: "new", closure_result: null, created_at: "2026-10-01T10:00:00Z", assigned_to: null }], error: null }),
-    anew_clients: [], anew_users: [], anew_hierarchy: [],
+    anew_entities: entidadesDaNovaLead(PESSOA_ID),
+    anew_users: [], anew_hierarchy: [],
   };
 });
 
@@ -64,7 +56,7 @@ describe("useNovaLead: pedidos em curso", () => {
     await act(async () => { await result.current.submeter(entrada("Outra")); });
     expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
     await act(async () => { libertar(); await primeiro; });
-    expect(nomesRpc().filter((n) => n === "create_lead_entity_for_org")).toHaveLength(1);
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
     expect(aoConcluir).toHaveBeenCalledTimes(1);
     expect(aoConcluir.mock.calls[0][0].mensagem).toContain("Ana Lopes");
     expect(aoConcluir.mock.calls[0][0].mensagem).not.toContain("Outra");
@@ -80,7 +72,7 @@ describe("useNovaLead: pedidos em curso", () => {
     let b: Promise<void> = Promise.resolve();
     act(() => { a = result.current.confirmarAtualizar(); b = result.current.confirmarAtualizar(); });
     await act(async () => { libertar(); await Promise.all([a, b]); });
-    expect(nomesRpc().filter((n) => n === "neg_substituir_contacto")).toHaveLength(1);
+    expect(supabaseFalso.chamadasA("anew_entities", "update").filter((c) => "phone" in (c.dados as object) || "email" in (c.dados as object))).toHaveLength(1);
     expect(aoConcluir).toHaveBeenCalledTimes(1);
   });
 
@@ -94,6 +86,6 @@ describe("useNovaLead: pedidos em curso", () => {
     act(() => { atualizacao = result.current.confirmarAtualizar(); });
     await act(async () => { await result.current.submeter(entrada("Outra")); });
     await act(async () => { libertar(); await atualizacao; });
-    expect(nomesRpc()).not.toContain("create_lead_entity_for_org");
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toEqual([]);
   });
 });

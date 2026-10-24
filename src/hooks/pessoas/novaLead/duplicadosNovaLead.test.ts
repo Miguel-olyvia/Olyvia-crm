@@ -16,16 +16,14 @@ const linha = (sobre: Record<string, unknown> = {}) => ({
   pessoa: 1, campo: "email", ambito: "organizacao", entity_id: "p1", nome: "Ana Lopes", visivel: true, organizacao_id: ORG, organizacao_nome: null, ...sobre,
 });
 
+const ENTIDADE = {
+  id: "p1", display_name: "Ana Lopes", created_at: "2026-09-01T10:00:00Z", email: "ana@x.pt", phone: "911 222 333",
+  assigned_to: "u1", client_since: null, closure_result: null,
+};
+
 beforeEach(() => {
   supabaseFalso.reiniciar();
-  supabaseFalso.estado.tabelas = {
-    anew_entities: [{ id: "p1", display_name: "Ana Lopes", created_at: "2026-09-01T10:00:00Z" }],
-    anew_entity_emails: [{ entity_id: "p1", email: "ana@x.pt", is_primary: true }, { entity_id: "p1", email: "segundo@x.pt", is_primary: false }],
-    anew_entity_phones: [{ entity_id: "p1", phone_number: "911 222 333", is_primary: true }],
-    anew_leads: [{ id: "l1", entity_id: "p1", status: "lost", closure_result: null, created_at: "2026-10-01T10:00:00Z", assigned_to: "u1" }],
-    anew_clients: [],
-    anew_users: [{ id: "u1", name: "Rui Costa" }],
-  };
+  supabaseFalso.estado.tabelas = { anew_entities: [ENTIDADE], anew_users: [{ id: "u1", name: "Rui Costa" }] };
 });
 
 describe("identificadoresVerificaveis: só o que a base aceita", () => {
@@ -70,37 +68,46 @@ describe("procurarDuplicados: o que se chama", () => {
 });
 
 describe("procurarDuplicados: o que se devolve", () => {
-  it("agrupa as linhas da mesma pessoa e lê os dados dela com a organização", async () => {
+  it("agrupa as linhas da mesma pessoa e lê a entidade UMA vez, com a organização e só as vivas", async () => {
     supabaseFalso.rpc.mockResolvedValue({ data: [linha(), linha({ campo: "telefone" })], error: null });
     const r = await procurarDuplicados(ORG, ESCRITO);
     expect(r.pessoas).toHaveLength(1);
     expect(r.pessoas[0]).toMatchObject({
       entityId: "p1", nome: "Ana Lopes", visivel: true, campos: ["email", "telefone"], emailPrincipal: "ana@x.pt",
-      emails: ["ana@x.pt", "segundo@x.pt"], telefonePrincipal: "911 222 333", temCliente: false, clienteAtivo: false, criadaEm: "2026-09-01T10:00:00Z",
+      emails: ["ana@x.pt"], telefonePrincipal: "911 222 333", telefones: ["911 222 333"],
+      temCliente: false, clienteAtivo: false, criadaEm: "2026-09-01T10:00:00Z",
     });
+    // a lead é a própria entidade (sem client_since): uma só, com o id da entidade
     expect(r.pessoas[0].leads).toEqual([{
-      id: "l1", estado: "lost", encerrada: false, motivoEncerramento: null, criadaEm: "2026-10-01T10:00:00Z", atribuidoA: "Rui Costa",
+      id: "p1", estado: "new", encerrada: false, motivoEncerramento: null, criadaEm: "2026-09-01T10:00:00Z", atribuidoA: "Rui Costa",
     }]);
-    // as leituras de leads e clientes levam a organização e só as vivas
-    for (const tabela of ["anew_leads", "anew_clients"]) {
-      const c = supabaseFalso.chamadasA(tabela, "select")[0];
-      expect(valorDoFiltro(c, "eq", "organization_id")).toBe(ORG);
-      expect(c.filtros).toContainEqual(["is", ["deleted_at", null]]);
+    const leituras = supabaseFalso.chamadasA("anew_entities", "select");
+    expect(leituras).toHaveLength(1);
+    expect(valorDoFiltro(leituras[0], "eq", "organization_id")).toBe(ORG);
+    expect(leituras[0].filtros).toContainEqual(["is", ["deleted_at", null]]);
+    // nunca lê as tabelas antigas
+    for (const tabela of ["anew_leads", "anew_clients", "anew_entity_emails", "anew_entity_phones"]) {
+      expect(supabaseFalso.chamadasA(tabela)).toEqual([]);
     }
     // só leituras: nunca escreve
     expect(supabaseFalso.estado.chamadas.every((c) => c.operacao === "select")).toBe(true);
   });
 
-  it("uma lead com closure_result está encerrada e guarda o resultado; um cliente ativo e um inativo distinguem-se", async () => {
+  it("closure_result preenchido: a lead está encerrada e guarda o resultado; client_since preenchido: é cliente e já não há lead", async () => {
     supabaseFalso.rpc.mockResolvedValue({ data: [linha()], error: null });
-    supabaseFalso.estado.tabelas.anew_leads = [{ id: "l1", entity_id: "p1", status: "new", closure_result: "semInteresse", created_at: "2026-10-01T10:00:00Z", assigned_to: null }];
-    supabaseFalso.estado.tabelas.anew_clients = [{ id: "c1", entity_id: "p1", status: "active", created_at: "2026-10-02T10:00:00Z" }];
+    supabaseFalso.estado.tabelas.anew_entities = [{ ...ENTIDADE, closure_result: "semInteresse", assigned_to: null }];
     const p = (await procurarDuplicados(ORG, ESCRITO)).pessoas[0];
     expect(p.leads[0]).toMatchObject({ encerrada: true, motivoEncerramento: "semInteresse", atribuidoA: null });
-    expect(p).toMatchObject({ temCliente: true, clienteAtivo: true });
+    expect(p).toMatchObject({ temCliente: false, clienteAtivo: false });
 
-    supabaseFalso.estado.tabelas.anew_clients = [{ id: "c1", entity_id: "p1", status: "inactive", created_at: "2026-10-02T10:00:00Z" }];
-    expect((await procurarDuplicados(ORG, ESCRITO)).pessoas[0]).toMatchObject({ temCliente: true, clienteAtivo: false });
+    supabaseFalso.estado.tabelas.anew_entities = [{ ...ENTIDADE, client_since: "2026-10-02" }];
+    expect((await procurarDuplicados(ORG, ESCRITO)).pessoas[0]).toMatchObject({ temCliente: true, clienteAtivo: true, leads: [] });
+  });
+
+  it("sem email nem telefone na entidade: listas vazias e principais a null", async () => {
+    supabaseFalso.rpc.mockResolvedValue({ data: [linha()], error: null });
+    supabaseFalso.estado.tabelas.anew_entities = [{ ...ENTIDADE, email: null, phone: "  " }];
+    expect((await procurarDuplicados(ORG, ESCRITO)).pessoas[0]).toMatchObject({ emailPrincipal: null, emails: [], telefonePrincipal: null, telefones: [] });
   });
 
   it("uma pessoa que a RLS esconde vem sem id nem nome e não gera leituras", async () => {
@@ -163,7 +170,7 @@ describe("procurarDuplicados: falhas (nunca se cria a seguir a uma falha)", () =
 
   it("se a leitura de uma pessoa falha, falha tudo (não se mostra um diálogo pela metade)", async () => {
     supabaseFalso.rpc.mockResolvedValue({ data: [linha()], error: null });
-    supabaseFalso.estado.erros["anew_leads.select"] = { message: "boom" };
+    supabaseFalso.estado.erros["anew_entities.select"] = { message: "boom" };
     const erro = await procurarDuplicados(ORG, ESCRITO).catch((e) => e);
     expect(erro).toBeInstanceOf(ErroNeg);
   });

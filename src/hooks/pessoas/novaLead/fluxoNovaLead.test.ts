@@ -78,79 +78,74 @@ const PEDIDO: PedidoGravar = {
   campanhaId: null,
 };
 
+const inseridas = () => supabaseFalso.chamadasA("anew_entities", "insert");
+const nomesRpc = () => supabaseFalso.rpc.mock.calls.map((c) => c[0] as string);
+
 beforeEach(() => {
   supabaseFalso.reiniciar();
-  supabaseFalso.rpc.mockImplementation(async (nome: string) => {
-    if (nome === "create_lead_entity_for_org") return { data: "ent-1", error: null };
-    if (nome === "rpc_create_lead_manual") return { data: { id: "lead-1" }, error: null };
-    return { data: null, error: null };
-  });
+  supabaseFalso.estado.tabelas = { anew_entities: (c) => (c.operacao === "insert" ? { data: [{ id: "ent-1" }], error: null } : { data: [], error: null }) };
+  supabaseFalso.rpc.mockImplementation(async () => ({ data: { mudou: true }, error: null }));
 });
 
-describe("gravarNovaLead: pessoa nova", () => {
-  it("cria a pessoa, liga-a à organização e cria a lead com os parâmetros exatos (caso 13: p_entity_created_here = true)", async () => {
-    const r = await gravarNovaLead(PEDIDO);
-    expect(r).toEqual({ entityId: "ent-1", leadId: "lead-1" });
-    expect(supabaseFalso.rpc.mock.calls.map((c) => c[0])).toEqual(["create_lead_entity_for_org", "ensure_entity_org_link", "rpc_create_lead_manual"]);
-    expect(supabaseFalso.rpc).toHaveBeenNthCalledWith(1, "create_lead_entity_for_org", {
-      p_organization_id: "org-nike", p_display_name: "Ana Lopes", p_first_name: "Ana", p_last_name: "Lopes",
+describe("gravarNovaLead: pessoa nova (a lead é a própria entidade)", () => {
+  it("insere UMA linha em anew_entities com a organização, o nome, o contacto, o extra, a origem e a campanha", async () => {
+    const r = await gravarNovaLead({ ...PEDIDO, origemId: "src-1", origemNome: "Feira", campanhaId: "camp-1" });
+    expect(r).toEqual({ entityId: "ent-1", leadId: "ent-1" });
+    expect(inseridas()).toHaveLength(1);
+    expect(inseridas()[0].dados).toEqual({
+      organization_id: "org-nike", type: "person", display_name: "Ana Lopes", first_name: "Ana", last_name: "Lopes",
+      email: "ana@x.pt", phone: "+351912345678", extra: { first_name: "Ana", last_name: "Lopes", notes: "n" },
+      origin_id: "src-1", campaign_id: "camp-1",
     });
-    expect(supabaseFalso.rpc).toHaveBeenNthCalledWith(2, "ensure_entity_org_link", {
-      p_entity_id: "ent-1", p_organization_id: "org-nike", p_is_primary: true,
-    });
-    expect(supabaseFalso.rpc).toHaveBeenNthCalledWith(3, "rpc_create_lead_manual", {
-      p_organization_id: "org-nike", p_root_organization_id: "raiz", p_entity_id: "ent-1", p_entity_created_here: true,
-      p_field_values: { first_name: "Ana", last_name: "Lopes", notes: "n" }, p_email: "ana@x.pt", p_phone: "+351912345678",
-      p_source: "manual", p_source_id: null, p_campaign_id: null, p_assigned_to: "u1",
-    });
+    expect(inseridas()[0].colunas).toBeNull();
   });
 
-  it("com origem, campanha e sem comercial nem email: manda o nome da origem, os ids e nulls", async () => {
-    await gravarNovaLead({
-      ...PEDIDO, dados: { ...PEDIDO.dados, email: "", telefone: "" }, valores: { first_name: "Ana" },
-      origemId: "src-1", origemNome: "Feira", campanhaId: "camp-1",
-    });
-    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("rpc_create_lead_manual", expect.objectContaining({
-      p_email: null, p_phone: null, p_source: "Feira", p_source_id: "src-1", p_campaign_id: "camp-1", p_assigned_to: null,
-      p_field_values: { first_name: "Ana" },
-    }));
-  });
-
-  it("nunca reutiliza uma pessoa, nem partilha, nem usa o override de duplicados", async () => {
+  it("o comercial escolhido atribui-se pela função da base, depois do insert; _assigned_to nunca vai para o extra nem para uma coluna", async () => {
     await gravarNovaLead(PEDIDO);
-    const usadas = supabaseFalso.rpc.mock.calls.map((c) => c[0]);
-    for (const proibida of ["rpc_create_lead_duplicate_override", "link_entity_to_org", "find_entity_matches", "neg_criar_lead"]) {
-      expect(usadas).not.toContain(proibida);
+    expect(nomesRpc()).toEqual(["neg_atribuir_pessoa"]);
+    expect(supabaseFalso.rpc).toHaveBeenCalledWith("neg_atribuir_pessoa", { p_organization_id: "org-nike", p_entity_id: "ent-1", p_assigned_to: "u1" });
+    const dados = inseridas()[0].dados as Record<string, unknown>;
+    expect(dados).not.toHaveProperty("assigned_to");
+    expect(dados.extra).not.toHaveProperty("_assigned_to");
+  });
+
+  it("sem comercial, sem email nem telefone, sem origem nem campanha: colunas a null e nenhuma função da base", async () => {
+    await gravarNovaLead({ ...PEDIDO, dados: { ...PEDIDO.dados, email: "", telefone: "" }, valores: { first_name: "Ana" } });
+    expect(inseridas()[0].dados).toMatchObject({ email: null, phone: null, origin_id: null, campaign_id: null, extra: { first_name: "Ana" } });
+    expect(supabaseFalso.rpc).not.toHaveBeenCalled();
+  });
+
+  it("nunca usa as funções nem as tabelas antigas (create_lead_entity_for_org, rpc_create_lead_manual, ensure_entity_org_link, satélites, leads)", async () => {
+    await gravarNovaLead(PEDIDO);
+    for (const proibida of ["create_lead_entity_for_org", "rpc_create_lead_manual", "ensure_entity_org_link", "rpc_create_lead_duplicate_override", "link_entity_to_org", "neg_criar_lead"]) {
+      expect(nomesRpc()).not.toContain(proibida);
+    }
+    for (const tabela of ["anew_leads", "anew_clients", "anew_entity_emails", "anew_entity_phones"]) {
+      expect(supabaseFalso.chamadasA(tabela)).toEqual([]);
     }
     expect(supabaseFalso.functions.invoke).not.toHaveBeenCalled();
-  });
-
-  it("uma falha a ligar à organização não é fatal (a lead cria-se na mesma)", async () => {
-    supabaseFalso.rpc.mockImplementation(async (nome: string) => {
-      if (nome === "create_lead_entity_for_org") return { data: "ent-1", error: null };
-      if (nome === "ensure_entity_org_link") return { data: null, error: { message: "boom" } };
-      return { data: { id: "lead-1" }, error: null };
-    });
-    expect(await gravarNovaLead(PEDIDO)).toEqual({ entityId: "ent-1", leadId: "lead-1" });
   });
 });
 
 describe("gravarNovaLead: falhas e limpeza", () => {
-  it("42501 ao criar a pessoa: lança, sem reutilizar nenhuma (a de Leads reutilizava pela identidade; aqui nunca) e sem limpeza", async () => {
-    supabaseFalso.rpc.mockImplementation(async () => ({ data: null, error: { code: "42501", message: "denied" } }));
+  it("o insert falha (por exemplo 42501): lança FalhaGravar, sem limpeza e sem atribuir ninguém", async () => {
+    supabaseFalso.estado.erros["anew_entities.insert"] = { code: "42501", message: "denied" };
     const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
     expect(erro).toBeInstanceOf(FalhaGravar);
     expect(erro.limpezaFalhou).toBe(false);
-    expect(supabaseFalso.rpc).toHaveBeenCalledTimes(1);
-    expect(supabaseFalso.estado.chamadas).toEqual([]);
+    expect(supabaseFalso.rpc).not.toHaveBeenCalled();
+    expect(supabaseFalso.chamadasA("anew_entities", "delete")).toEqual([]);
   });
 
-  it("a lead falha depois de a pessoa criada: apaga a pessoa criada nesta ação (e só essa)", async () => {
-    supabaseFalso.rpc.mockImplementation(async (nome: string) => {
-      if (nome === "create_lead_entity_for_org") return { data: "ent-1", error: null };
-      if (nome === "rpc_create_lead_manual") return { data: null, error: { code: "plan_limit_exceeded:leads", message: "limite" } };
-      return { data: null, error: null };
-    });
+  it("uma resposta sem id de pessoa é um erro (nunca se atribui sem pessoa)", async () => {
+    supabaseFalso.estado.tabelas = { anew_entities: () => ({ data: [], error: null }) };
+    const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
+    expect(erro).toBeInstanceOf(FalhaGravar);
+    expect(supabaseFalso.rpc).not.toHaveBeenCalled();
+  });
+
+  it("a atribuição falha depois de a pessoa criada: apaga a pessoa criada nesta ação (e só essa)", async () => {
+    supabaseFalso.rpc.mockImplementation(async () => ({ data: null, error: { code: "42501", message: "sem permissão" } }));
     const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
     expect(erro).toBeInstanceOf(FalhaGravar);
     expect(erro.limpezaFalhou).toBe(false);
@@ -160,20 +155,9 @@ describe("gravarNovaLead: falhas e limpeza", () => {
   });
 
   it("se a limpeza também falha, diz-se (limpezaFalhou)", async () => {
-    supabaseFalso.rpc.mockImplementation(async (nome: string) => {
-      if (nome === "create_lead_entity_for_org") return { data: "ent-1", error: null };
-      if (nome === "rpc_create_lead_manual") return { data: null, error: { message: "boom" } };
-      return { data: null, error: null };
-    });
+    supabaseFalso.rpc.mockImplementation(async () => ({ data: null, error: { message: "boom" } }));
     supabaseFalso.estado.erros["anew_entities.delete"] = { message: "sem permissão" };
     const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
     expect(erro.limpezaFalhou).toBe(true);
-  });
-
-  it("uma resposta sem id de pessoa é um erro (nunca se cria a lead sem pessoa)", async () => {
-    supabaseFalso.rpc.mockImplementation(async () => ({ data: null, error: null }));
-    const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
-    expect(erro).toBeInstanceOf(FalhaGravar);
-    expect(supabaseFalso.rpc).toHaveBeenCalledTimes(1);
   });
 });

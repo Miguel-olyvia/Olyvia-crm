@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
-import { supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
+import { entidadesDaNovaLead, supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
 import { NovaLeadReal } from "./NovaLeadReal";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
@@ -62,6 +62,7 @@ beforeEach(() => {
     anew_hierarchy: [], anew_organizations: [{ id: ORG, name: "Nike", type: "empresa" }],
     anew_memberships: [{ user_id: "u1", organization_id: ORG, role_id: "r" }], anew_roles: [{ id: "r", code: "vendedor" }],
     anew_users: [{ id: "u1", name: "Rui Costa", entity_id: null, status: "active" }], anew_entity_addresses: [],
+    anew_entities: entidadesDaNovaLead("p1"),
   };
   supabaseFalso.rpc.mockImplementation(async (nome: string) => {
     if (nome === "neg_procurar_duplicados") return { data: [], error: null };

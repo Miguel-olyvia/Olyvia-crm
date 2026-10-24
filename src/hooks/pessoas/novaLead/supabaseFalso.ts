@@ -99,3 +99,24 @@ export const supabaseFalso = {
 export function valorDoFiltro(chamada: ChamadaTabela, metodo: string, coluna: string): unknown {
   return chamada.filtros.find(([m, a]) => m === metodo && a[0] === coluna)?.[1][1];
 }
+
+/**
+ * A tabela das entidades para os testes da «Nova lead»: o insert devolve a pessoa nova, os updates devolvem a linha atualizada, a leitura
+ * do `extra` devolve um objeto vazio e as outras leituras (a da procura de duplicados) devolvem a pessoa existente (uma lead sem
+ * `client_since`, com um só email e um só telefone).
+ */
+export function entidadesDaNovaLead(pessoaId: string, novoId = "ent-novo", sobre: Record<string, unknown> = {}) {
+  return (c: ChamadaTabela): Resposta => {
+    if (c.operacao === "insert") return { data: [{ id: novoId }], error: null };
+    if (c.operacao === "update") return { data: [{ id: pessoaId }], error: null };
+    if (c.operacao !== "select") return { data: null, error: null };
+    if (c.colunas === "extra") return { data: [{ extra: {} }], error: null };
+    return {
+      data: [{
+        id: pessoaId, display_name: "Ana Lopes", created_at: "2026-09-01T10:00:00Z", email: "ana@x.pt", phone: "911",
+        assigned_to: null, client_since: null, closure_result: null, ...sobre,
+      }],
+      error: null,
+    };
+  };
+}

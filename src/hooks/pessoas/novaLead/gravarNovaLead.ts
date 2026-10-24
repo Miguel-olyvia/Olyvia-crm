@@ -1,11 +1,11 @@
-// Gravar a «Nova lead» de Pessoas: cria a pessoa NOVA (create_lead_entity_for_org), liga-a à organização e cria a lead com
-// rpc_create_lead_manual (uma só chamada, atómica para email, telefone, lead e papel). Cópia de AnewLeads.tsx:3700-3781 e 3932-3981.
-// Afasta-se de Leads em três pontos, de propósito: não reutiliza uma pessoa existente (nem pela coerência de identidade nem no
-// fallback de 42501: em Pessoas uma pessoa que já existe bloqueia e nunca se reaproveita); não usa «Criar mesmo assim»
-// (rpc_create_lead_duplicate_override) nem «Partilhar» (link_entity_to_org). A pessoa criada nesta ação desfaz-se se a lead falhar.
+// Gravar a «Nova lead» de Pessoas: a lead é a própria entidade. Insere UMA linha em anew_entities (organização, nome, contacto, extra,
+// origem e campanha) e, se se escolheu um comercial, atribui-o com neg_atribuir_pessoa (o responsável não se escreve diretamente).
+// Afasta-se de Leads em três pontos, de propósito: não reutiliza uma pessoa existente (em Pessoas uma pessoa que já existe bloqueia e
+// nunca se reaproveita); não usa «Criar mesmo assim» (rpc_create_lead_duplicate_override) nem «Partilhar» (link_entity_to_org); já não
+// passa por anew_leads nem pelos satélites de email e telefone. A pessoa criada nesta ação desfaz-se se a atribuição falhar.
 import { supabase } from "@/integrations/supabase/client";
-import { ensureEntityOrgLink } from "@/utils/orgEntity";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { chamarNeg } from "../chamarNeg";
 import type { DadosLead } from "./fluxoNovaLead";
 
 export interface PedidoGravar {
@@ -22,6 +22,7 @@ export interface PedidoGravar {
 
 export interface LeadGravada {
   entityId: string;
+  /** A lead é a própria entidade: igual a `entityId`. */
   leadId: string | null;
 }
 
@@ -37,19 +38,27 @@ export class FalhaGravar extends Error {
   }
 }
 
-type Rpc = (nome: string, params: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>;
-const chamarRpc: Rpc = (nome, params) => (supabase as unknown as { rpc: Rpc }).rpc(nome, params);
+const tabelaEntidades = () => (supabase as unknown as { from: (t: string) => any }).from("anew_entities");
 
-async function criarPessoa(p: PedidoGravar): Promise<string> {
-  const { data, error } = await chamarRpc("create_lead_entity_for_org", {
-    p_organization_id: p.organizationId,
-    p_display_name: p.dados.displayName.trim(),
-    p_first_name: p.dados.firstName,
-    p_last_name: p.dados.lastName,
-  });
+const comValor = (v: string | null | undefined): string | null => (v && v.trim() ? v.trim() : null);
+
+async function criarPessoa(p: PedidoGravar, extra: Record<string, unknown>): Promise<string> {
+  const { data, error } = await tabelaEntidades().insert({
+    organization_id: p.organizationId,
+    type: "person",
+    display_name: p.dados.displayName.trim(),
+    first_name: p.dados.firstName,
+    last_name: p.dados.lastName,
+    email: comValor(p.dados.email),
+    phone: comValor(p.dados.telefone),
+    extra,
+    origin_id: p.origemId,
+    campaign_id: p.campanhaId,
+  }).select("id").single();
   if (error) throw error;
-  if (typeof data !== "string" || !data) throw new Error("A pessoa não foi criada.");
-  return data;
+  const id = (data as { id?: unknown } | null)?.id;
+  if (typeof id !== "string" || !id) throw new Error("A pessoa não foi criada.");
+  return id;
 }
 
 /** Desfaz a pessoa criada nesta ação. Devolve true se não conseguiu (a limpeza é «melhor esforço»). */
@@ -65,40 +74,20 @@ async function desfazerPessoa(entityId: string): Promise<boolean> {
 }
 
 export async function gravarNovaLead(p: PedidoGravar): Promise<LeadGravada> {
+  const { _assigned_to: atribuido, ...valoresLimpos } = p.valores as Record<string, unknown>;
   let entityId: string;
   try {
-    entityId = await criarPessoa(p);
+    entityId = await criarPessoa(p, valoresLimpos);
   } catch (causa) {
     throw new FalhaGravar(causa);
   }
 
-  // A ligação local é idempotente e a pessoa é «principal» aqui (foi criada aqui). Uma falha não é fatal.
-  try {
-    await ensureEntityOrgLink({ entityId, organizationId: p.organizationId, isPrimary: true });
-  } catch (causa) {
-    captureFlowError(causa, "lead-lifecycle");
+  if (typeof atribuido === "string" && atribuido) {
+    try {
+      await chamarNeg("neg_atribuir_pessoa", { p_organization_id: p.organizationId, p_entity_id: entityId, p_assigned_to: atribuido });
+    } catch (causa) {
+      throw new FalhaGravar(causa, await desfazerPessoa(entityId));
+    }
   }
-
-  const { _assigned_to: atribuido, ...valoresLimpos } = p.valores as Record<string, unknown>;
-  try {
-    const { data, error } = await chamarRpc("rpc_create_lead_manual", {
-      p_organization_id: p.organizationId,
-      p_root_organization_id: p.rootOrganizationId,
-      p_entity_id: entityId,
-      // Verdadeiro: a pessoa foi criada aqui (em Pessoas nunca se reutiliza uma que já existia).
-      p_entity_created_here: true,
-      p_field_values: valoresLimpos,
-      p_email: p.dados.email || null,
-      p_phone: p.dados.telefone || null,
-      p_source: p.origemNome,
-      p_source_id: p.origemId,
-      p_campaign_id: p.campanhaId,
-      p_assigned_to: typeof atribuido === "string" && atribuido ? atribuido : null,
-    });
-    if (error) throw error;
-    const lead = data as { id?: string } | null;
-    return { entityId, leadId: lead?.id ?? null };
-  } catch (causa) {
-    throw new FalhaGravar(causa, await desfazerPessoa(entityId));
-  }
+  return { entityId, leadId: entityId };
 }

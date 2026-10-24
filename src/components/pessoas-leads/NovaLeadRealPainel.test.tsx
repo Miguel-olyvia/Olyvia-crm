@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FontePessoasContext } from "@/hooks/pessoas/useFontePessoas";
-import { supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
+import { entidadesDaNovaLead, supabaseFalso } from "@/hooks/pessoas/novaLead/supabaseFalso";
 import { NovaLeadReal } from "./NovaLeadReal";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("@/hooks/pessoas/novaLead/supabaseFalso")).supabaseFalso }));
@@ -77,13 +77,8 @@ beforeEach(() => {
     anew_hierarchy: [], anew_organizations: [{ id: ORG, name: "Nike", type: "empresa" }],
     anew_memberships: [{ user_id: "u1", organization_id: ORG, role_id: "r" }], anew_roles: [{ id: "r", code: "vendedor" }],
     anew_users: [{ id: "u1", name: "Rui Costa", entity_id: null, status: "active" }], anew_entity_addresses: [],
-    anew_entities: [{ id: "p1", display_name: "Ana Lopes", created_at: "2026-09-01T10:00:00Z" }],
-    anew_entity_emails: [{ entity_id: "p1", email: "ana@x.pt", is_primary: true }],
-    anew_entity_phones: [{ entity_id: "p1", phone_number: "911 222 333", is_primary: true }],
-    anew_leads: (c) => (c.colunas?.includes("field_values")
-      ? { data: [{ field_values: {}, status: "new" }], error: null }
-      : { data: [{ id: "l1", entity_id: "p1", status: "new", closure_result: null, created_at: "2026-10-01T10:00:00Z", assigned_to: "u1" }], error: null }),
-    anew_clients: [],
+    // a lead é a própria entidade: um só email, um só telefone e o responsável na linha da entidade
+    anew_entities: entidadesDaNovaLead("p1", "ent-novo", { phone: "911 222 333", assigned_to: "u1" }),
   };
   rpc();
 });
