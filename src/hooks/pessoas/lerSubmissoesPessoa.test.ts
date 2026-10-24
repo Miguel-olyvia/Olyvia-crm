@@ -31,7 +31,8 @@ const falha = (code: string, message = "x"): Resposta => ({ data: null, error: {
 const de = (tabela: string) => chamadas.lista.filter((c) => c.tabela === tabela);
 const chamou = (tabela: string, metodo: string, ...args: unknown[]) => de(tabela).some((c) => c.metodo === metodo && JSON.stringify(c.args) === JSON.stringify(args));
 
-const LEAD = { id: "l1", campaign_id: "c1", field_values: { email: "a@b.pt" }, source: "web", status: "new", created_at: "2026-10-10T09:00:00Z", campaigns: { id: "c1", name: "Remodelações" } };
+// A «lead» da pessoa é a própria entidade: os campos submetidos estão em `extra`, a origem em lead_sources e a campanha em campaigns.
+const ENT = { id: ENTIDADE, extra: { email: "a@b.pt" }, campaign_id: "c1", created_at: "2026-10-10T09:00:00Z", lead_sources: { name: "web" }, campaigns: { id: "c1", name: "Remodelações" } };
 const SUB = { id: "s1", campaign_id: "c1", field_values: { phone: "9" }, status: "pending", resolution: null, resolved_at: null, created_at: "2026-10-12T09:00:00Z", entity_id: ENTIDADE, conflicting_entity_id: null, campaigns: { id: "c1", name: "Remodelações" } };
 
 beforeEach(() => {
@@ -42,16 +43,23 @@ beforeEach(() => {
 });
 
 describe("lerSubmissoesPessoa: as consultas", () => {
-  it("lê as leads da entidade com campos submetidos, vivas e da organização, as 20 mais recentes", async () => {
-    respostas.porTabela = { anew_leads: [ok([LEAD])] };
+  it("lê a própria entidade (extra, origem e campanha), viva e da organização, sem tocar em anew_leads", async () => {
+    respostas.porTabela = { anew_entities: [ok([ENT])] };
     await lerSubmissoesPessoa(ORG, ENTIDADE);
-    expect(chamou("anew_leads", "select", "id, campaign_id, field_values, source, status, created_at, campaigns(id, name)")).toBe(true);
-    expect(chamou("anew_leads", "eq", "entity_id", ENTIDADE)).toBe(true);
-    expect(chamou("anew_leads", "eq", "organization_id", ORG)).toBe(true);
-    expect(chamou("anew_leads", "is", "deleted_at", null)).toBe(true);
-    expect(chamou("anew_leads", "not", "field_values", "is", null)).toBe(true);
-    expect(chamou("anew_leads", "order", "created_at", { ascending: false })).toBe(true);
-    expect(chamou("anew_leads", "limit", 20)).toBe(true);
+    expect(chamou("anew_entities", "select", "id, extra, campaign_id, created_at, lead_sources(name), campaigns(id, name)")).toBe(true);
+    expect(chamou("anew_entities", "eq", "id", ENTIDADE)).toBe(true);
+    expect(chamou("anew_entities", "eq", "organization_id", ORG)).toBe(true);
+    expect(chamou("anew_entities", "is", "deleted_at", null)).toBe(true);
+    expect(chamou("anew_entities", "not", "extra", "is", null)).toBe(true);
+    expect(de("anew_leads")).toEqual([]);
+  });
+
+  it("os campos de extra e a origem viram um cartão da pessoa, com a campanha", async () => {
+    respostas.porTabela = { anew_entities: [ok([ENT])] };
+    const r = await lerSubmissoesPessoa(ORG, ENTIDADE);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ id: ENTIDADE, tipo: "lead", campanha: "Remodelações", origem: "web" });
+    expect(r[0].campos[0].rotulo).toBe("O seu email");
   });
 
   it("lê form_submissions da entidade, vivas e da organização, com a coluna do conflito", async () => {
@@ -85,7 +93,7 @@ describe("lerSubmissoesPessoa: as consultas", () => {
   });
 
   it("um erro nas leads rebenta (não se mostra uma lista incompleta como se estivesse completa)", async () => {
-    respostas.porTabela = { anew_leads: [falha("57014")] };
+    respostas.porTabela = { anew_entities: [falha("57014")] };
     await expect(lerSubmissoesPessoa(ORG, ENTIDADE)).rejects.toMatchObject({ code: "57014" });
   });
 
@@ -98,11 +106,11 @@ describe("lerSubmissoesPessoa: as consultas", () => {
 
 describe("lerSubmissoesPessoa: rótulos, distritos e nomes", () => {
   it("resolve os rótulos uma vez por campanha, com a organização, e usa-os nos campos", async () => {
-    respostas.porTabela = { anew_leads: [ok([LEAD, { ...LEAD, id: "l2" }])], form_submissions: [ok([SUB])] };
+    respostas.porTabela = { anew_entities: [ok([ENT])], form_submissions: [ok([SUB])] };
     const r = await lerSubmissoesPessoa(ORG, ENTIDADE);
     expect(resolverMock).toHaveBeenCalledTimes(1);
     expect(resolverMock).toHaveBeenCalledWith({ campaignId: "c1", organizationId: ORG }, { marca: "cliente" });
-    expect(r.find((s) => s.id === "l1")?.campos[0].rotulo).toBe("O seu email");
+    expect(r.find((s) => s.id === ENTIDADE)?.campos[0].rotulo).toBe("O seu email");
   });
 
   it("uma submissão sem campanha resolve os rótulos da organização", async () => {
@@ -114,7 +122,7 @@ describe("lerSubmissoesPessoa: rótulos, distritos e nomes", () => {
   it("só lê os distritos se algum campo guarda um id de distrito, e dá-lhes o nome", async () => {
     resolverMock.mockResolvedValue([{ field_key: "distrito", field_label: "Distrito", field_type: "ref_district" }]);
     respostas.porTabela = {
-      anew_leads: [ok([{ ...LEAD, field_values: { distrito: "d-1" } }])],
+      anew_entities: [ok([{ ...ENT, extra: { distrito: "d-1" } }])],
       administrative_divisions: [ok([{ id: "d-1", name: "Porto" }])],
     };
     const r = await lerSubmissoesPessoa(ORG, ENTIDADE);
@@ -123,7 +131,7 @@ describe("lerSubmissoesPessoa: rótulos, distritos e nomes", () => {
   });
 
   it("sem campos de distrito não consulta os distritos", async () => {
-    respostas.porTabela = { anew_leads: [ok([LEAD])] };
+    respostas.porTabela = { anew_entities: [ok([ENT])] };
     await lerSubmissoesPessoa(ORG, ENTIDADE);
     expect(de("administrative_divisions")).toEqual([]);
   });
@@ -131,7 +139,8 @@ describe("lerSubmissoesPessoa: rótulos, distritos e nomes", () => {
   it("num conflito lê o nome das duas entidades e só então", async () => {
     respostas.porTabela = {
       form_submissions: [ok([{ ...SUB, conflicting_entity_id: "ent-2" }])],
-      anew_entities: [ok([{ id: ENTIDADE, display_name: "Ana" }, { id: "ent-2", display_name: "Rui" }])],
+      // a primeira leitura é a da própria entidade (sem campos), a segunda a dos nomes
+      anew_entities: [ok([]), ok([{ id: ENTIDADE, display_name: "Ana" }, { id: "ent-2", display_name: "Rui" }])],
     };
     const r = await lerSubmissoesPessoa(ORG, ENTIDADE);
     expect(chamou("anew_entities", "in", "id", [ENTIDADE, "ent-2"])).toBe(true);
@@ -141,12 +150,12 @@ describe("lerSubmissoesPessoa: rótulos, distritos e nomes", () => {
   it("sem conflito não consulta as entidades", async () => {
     respostas.porTabela = { form_submissions: [ok([SUB])] };
     await lerSubmissoesPessoa(ORG, ENTIDADE);
-    expect(de("anew_entities")).toEqual([]);
+    expect(de("anew_entities").filter((c) => c.metodo === "in")).toEqual([]);
   });
 
   it("uma falha ao resolver os rótulos rebenta", async () => {
     resolverMock.mockRejectedValue(new Error("sem rótulos"));
-    respostas.porTabela = { anew_leads: [ok([LEAD])] };
+    respostas.porTabela = { anew_entities: [ok([ENT])] };
     await expect(lerSubmissoesPessoa(ORG, ENTIDADE)).rejects.toThrow("sem rótulos");
   });
 });

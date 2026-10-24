@@ -1,5 +1,5 @@
-// A leitura das submissões de formulário de uma pessoa, como o separador «Formulários» do detalhe da lead (AnewLeads.tsx) as lê: as leads da
-// entidade com campos submetidos e `form_submissions`, os rótulos de cada campanha (o mesmo resolvedor) e os distritos por nome. Sob RLS, e
+// A leitura das submissões de formulário de uma pessoa: a própria entidade (a lead é a entidade: os campos submetidos estão em `extra`, a
+// origem em lead_sources e a campanha em campaigns) e `form_submissions`, os rótulos de cada campanha (o mesmo resolvedor) e os distritos por nome. Sob RLS, e
 // com a organização em todas as consultas às tabelas dela (a página de Leads confia só na RLS nas leads; aqui não).
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -10,7 +10,7 @@ import {
 } from "./adaptarSubmissoes";
 
 const LIMITE = 20;
-const COLUNAS_LEAD = "id, campaign_id, field_values, source, status, created_at, campaigns(id, name)";
+const COLUNAS_ENTIDADE = "id, extra, campaign_id, created_at, lead_sources(name), campaigns(id, name)";
 const COLUNAS_SUBMISSAO = "id, campaign_id, field_values, status, resolution, resolved_at, created_at, entity_id, campaigns(id, name)";
 
 /** Os campos base da lead que um formulário pode mapear: os mesmos de Leads (`GENERAL_FIELDS` em AnewLeadEditDialog.tsx). */
@@ -18,12 +18,25 @@ const CAMPOS_BASE_DA_LEAD: ReadonlySet<string> = new Set(["first_name", "last_na
 
 const resolvedorDeRotulos = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
+interface LinhaEntidadeSubmetida {
+  id: string;
+  extra: LinhaLeadSubmetida["field_values"] | null;
+  campaign_id: string | null;
+  created_at: string | null;
+  lead_sources?: { name: string | null } | null;
+  campaigns?: LinhaLeadSubmetida["campaigns"];
+}
+
+/** A «lead» da pessoa é a própria entidade, vista como uma linha submetida (sem estado: já não há status de lead). */
 async function lerLeads(organizationId: string, entityId: string): Promise<LinhaLeadSubmetida[]> {
   const { data, error } = await supabase
-    .from("anew_leads").select(COLUNAS_LEAD).eq("entity_id", entityId).eq("organization_id", organizationId)
-    .is("deleted_at", null).not("field_values", "is", null).order("created_at", { ascending: false }).limit(LIMITE);
+    .from("anew_entities").select(COLUNAS_ENTIDADE).eq("id", entityId).eq("organization_id", organizationId)
+    .is("deleted_at", null).not("extra", "is", null).limit(1);
   if (error) throw error;
-  return (data ?? []) as unknown as LinhaLeadSubmetida[];
+  return ((data ?? []) as unknown as LinhaEntidadeSubmetida[]).map((e) => ({
+    id: e.id, campaign_id: e.campaign_id, field_values: e.extra ?? {}, source: e.lead_sources?.name ?? null, status: null,
+    created_at: e.created_at, campaigns: e.campaigns,
+  }));
 }
 
 /** `conflicting_entity_id` só existe a partir de uma migration recente: sem ela repete-se a leitura em vez de deixar a lista vazia. */
