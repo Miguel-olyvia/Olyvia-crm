@@ -69,7 +69,7 @@ describe("App.tsx: as rotas /pessoas e /pipeline", () => {
   });
 
   it.each(["/leads", "/clients", "/anew-leads", "/anew-clients", "/anew-contacts", "/contacts"])("%s redireciona para /pessoas", (p) => {
-    expect(linhaDe(p)).toContain('<Navigate to="/pessoas" replace />');
+    expect(linhaDe(p)).toContain("<RedirectPreservandoPesquisa />");
   });
 
   it("a fila de submissões pendentes continua com a sua permissão", () => {

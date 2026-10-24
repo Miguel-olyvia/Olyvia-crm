@@ -11,6 +11,7 @@ import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { PessoasRota } from "@/components/pessoas-lista/PessoasRota";
+import { RedirectPreservandoPesquisa } from "@/components/pessoas-lista/RedirectPreservandoPesquisa";
 import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/components/ClientRouteGuard";
 import { LayoutRoute } from "@/components/Layout";
 
@@ -281,16 +282,16 @@ const App = () => (
                     <Route element={<LayoutRoute />}>
                       <Route path="/home" element={<Home />} />
                       <Route path="/dashboard" element={<Dashboard />} />
-                      <Route path="/anew-clients" element={<Navigate to="/pessoas" replace />} />
+                      <Route path="/anew-clients" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/company-groups" element={<Navigate to="/organizations" replace />} />
-                      <Route path="/anew-contacts" element={<Navigate to="/pessoas" replace />} />
-                      <Route path="/anew-leads" element={<Navigate to="/pessoas" replace />} />
+                      <Route path="/anew-contacts" element={<RedirectPreservandoPesquisa />} />
+                      <Route path="/anew-leads" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/calendar" element={<Navigate to="/scheduling" replace />} />
                       <Route path="/modelos-orcamento" element={<Navigate to="/quote-models" replace />} />
-                      <Route path="/clients" element={<Navigate to="/pessoas" replace />} />
-                      <Route path="/contacts" element={<Navigate to="/pessoas" replace />} />
+                      <Route path="/clients" element={<RedirectPreservandoPesquisa />} />
+                      <Route path="/contacts" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view"><Atividades /></ProtectedRoute>} />
-                      <Route path="/leads" element={<Navigate to="/pessoas" replace />} />
+                      <Route path="/leads" element={<RedirectPreservandoPesquisa />} />
                       <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
                       <Route path="/pipeline" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasPipeline /></PessoasRota></ProtectedRoute>} />
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
