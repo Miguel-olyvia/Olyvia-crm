@@ -1,12 +1,15 @@
 ﻿import { useEffect, useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { runProposalStageWorkflow } from "@/lib/proposals/runStageWorkflow";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { applyClientSearchTextFilter, resolveClientSearch } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
 import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
@@ -31,6 +34,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
+import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
@@ -429,10 +433,15 @@ const Proposals = () => {
     if (!orgId || (!dealId && !entityId)) { setSuggestedQuotes([]); return; }
     let cancelled = false;
     (async () => {
-      let q = supabase
+      // is_internal = false: os orçamentos sintéticos criados pela criação
+      // manual de Encomendas Clientes existem só para suportar as linhas do
+      // contrato — nunca podem ser sugeridos para ligar a uma proposta.
+      // (`supabase as any` porque a coluna ainda não está em types.ts gerado.)
+      let q = (supabase as any)
         .from("quotes")
         .select("id, quote_number, total, estado, deal_id, entity_id")
         .eq("organization_id", orgId)
+        .eq("is_internal", false)
         .is("proposal_id", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -499,11 +508,13 @@ const Proposals = () => {
 
   const loadOpenQuotesForEntity = useCallback(async (entityId: string): Promise<QuoteItem[]> => {
     if (!activeCompany?.id || !entityId) return [];
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("quotes")
       .select("id, quote_number, total, estado, created_at")
       .eq("organization_id", activeCompany.id)
       .eq("entity_id", entityId)
+      // Ver nota sobre is_internal nos orçamentos sugeridos, acima.
+      .eq("is_internal", false)
       .is("proposal_id", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -556,10 +567,12 @@ const Proposals = () => {
     const assignedTo = formData.assigned_to;
     const relevanceFilter = assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`;
 
-    const directPromise = supabase
+    const directPromise = (supabase as any)
       .from("quotes")
       .select("id, quote_number, total, estado, title, created_at")
       .eq("organization_id", orgId)
+      // Ver nota sobre is_internal nos orçamentos sugeridos, acima.
+      .eq("is_internal", false)
       .or(`quote_number.ilike.${like},title.ilike.${like}`)
       .or(relevanceFilter)
       .is("proposal_id", null)
@@ -586,10 +599,12 @@ const Proposals = () => {
 
     let byEntity: any[] = [];
     if (entityIds.length > 0) {
-      const { data: qByEntity, error: entityQuoteError } = await supabase
+      const { data: qByEntity, error: entityQuoteError } = await (supabase as any)
         .from("quotes")
         .select("id, quote_number, total, estado, title, created_at")
         .eq("organization_id", orgId)
+        // Ver nota sobre is_internal nos orçamentos sugeridos, acima.
+        .eq("is_internal", false)
         .in("entity_id", entityIds)
         .or(relevanceFilter)
         .is("proposal_id", null)
@@ -1457,10 +1472,14 @@ const Proposals = () => {
 
     // Fetch quotes and proposal items in parallel — no data dependency between them.
     const [quotesRes, itemsRes] = await Promise.all([
-      supabase
+      (supabase as any)
         .from("quotes")
         .select("id, quote_number, total, estado")
         .eq("proposal_id", proposal.id)
+        // Defesa em profundidade: a RPC de criação manual de Encomendas
+        // Clientes nunca liga o orçamento sintético a uma proposta, mas se
+        // alguma vez ligasse não podia aparecer aqui.
+        .eq("is_internal", false)
         .eq("organization_id", activeCompany?.id),
       supabase
         .from("proposal_items")
@@ -2127,7 +2146,8 @@ const Proposals = () => {
       if (editedId) afterProposalMutation([editedId]); else loadData();
     } catch (error: any) {
       captureFlowError(error, "proposal-lifecycle");
-      toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
       setSavingProposal(false);
@@ -2891,7 +2911,7 @@ const Proposals = () => {
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Ações</DropdownMenuLabel>
         {(sn === "draft" || sn === "rascunho" || sn === "sent" || sn === "enviada") && (
           <PermissionGate permission="proposals.edit">
             <DropdownMenuItem onClick={() => handleEdit(proposal)}>
@@ -2932,15 +2952,19 @@ const Proposals = () => {
           </>
         )}
 
-        {(sn === "draft" || sn === "rascunho") && (
-          <>
-            <DropdownMenuSeparator />
-            <PermissionGate permission="proposals.delete">
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteClick(proposal.id)}>
-                <Trash2 className="w-3.5 h-3.5 mr-2" /> Eliminar
-              </DropdownMenuItem>
-            </PermissionGate>
-          </>
+        <DropdownMenuSeparator />
+        {(sn === "draft" || sn === "rascunho") ? (
+          <PermissionGate permission="proposals.delete">
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteClick(proposal.id)}>
+              <Trash2 className="w-3.5 h-3.5 mr-2" /> Eliminar
+            </DropdownMenuItem>
+          </PermissionGate>
+        ) : (
+          <PermissionGate permissions={["proposals.delete", "proposals.delete_sent"]} requireAll>
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteClick(proposal.id)}>
+              <Trash2 className="w-3.5 h-3.5 mr-2" /> Eliminar proposta enviada
+            </DropdownMenuItem>
+          </PermissionGate>
         )}
       </DropdownMenuContent>
     );
@@ -2995,6 +3019,7 @@ const Proposals = () => {
   return (
     <>
       <div className="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
+        <BarraVoltar />
         {/* Header */}
         <div className="flex-shrink-0 px-4 md:px-6 pt-4 pb-2">
           <ModuleAlertsBanner alerts={proposalAlerts} onDismiss={dismissProposalAlert} onAction={(alert) => {
@@ -3044,6 +3069,9 @@ const Proposals = () => {
                   <DialogHeader>
                     <DialogTitle>{editingId ? t('proposals.editProposal') : t('proposals.newProposal')}</DialogTitle>
                   </DialogHeader>
+                  {!editingId && (
+                    <PlanLimitWarning organizationId={activeCompany?.id} limitType="proposals" />
+                  )}
                   {editingId && (
                     <div className="px-1 mb-4">
                       <PipelineBreadcrumb entityType="proposal" entityId={editingId} />
@@ -3104,7 +3132,21 @@ const Proposals = () => {
                           <Palette className="h-4 w-4" />
                           Template de Proposta
                         </Label>
-                        <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                        <Select
+                          value={formData.template_id}
+                          onValueChange={(value) => {
+                            const nextId = value === "none" ? "" : value;
+                            setFormData((prev) => ({
+                              ...prev,
+                              template_id: nextId,
+                              title: proposalTitleFromTemplate(
+                                prev.title,
+                                proposalTemplates.find((t) => t.id === prev.template_id),
+                                proposalTemplates.find((t) => t.id === nextId),
+                              ),
+                            }));
+                          }}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Escolher template" />
                           </SelectTrigger>
@@ -3183,7 +3225,8 @@ const Proposals = () => {
                                         setDealSearchResults([]);
                                         
                                         // Load existing quotes for this deal
-                                        const { data: dealQuotes } = await supabase.from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).eq("organization_id", activeCompany?.id).neq("estado", "rascunho").order("created_at", { ascending: false });
+                                        // is_internal = false: ver nota nos orçamentos sugeridos.
+                                        const { data: dealQuotes } = await (supabase as any).from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).eq("organization_id", activeCompany?.id).eq("is_internal", false).neq("estado", "rascunho").order("created_at", { ascending: false });
                                         if (dealQuotes && dealQuotes.length > 0) {
                                           setSelectedQuotes(dealQuotes.map(q => ({ id: q.id, quote_number: q.quote_number, total: q.total, estado: q.estado })));
                                         } else {
@@ -3887,7 +3930,7 @@ const Proposals = () => {
                         <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort("created_at")}>
                           <div className="flex items-center">Criada <SortIcon column="created_at" /></div>
                         </TableHead>
-                        <TableHead className="text-right">Acções</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -4137,10 +4180,37 @@ const Proposals = () => {
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('proposals.delete.title')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('proposals.delete.description')}</AlertDialogDescription>
-          </AlertDialogHeader>
+          {(() => {
+            const deletingProposal = proposals.find(p => p.id === deletingId) || null;
+            const deletingSn = deletingProposal ? getStageName(deletingProposal) : "";
+            const isDraft = deletingSn === "draft" || deletingSn === "rascunho";
+            if (isDraft) {
+              return (
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t('proposals.delete.title')}</AlertDialogTitle>
+                    <AlertDialogDescription>{t('proposals.delete.description')}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                </>
+              );
+            }
+            return (
+              <AlertDialogHeader>
+                <AlertDialogTitle>Eliminar proposta já enviada?</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-2">
+                    <p>Esta proposta já saiu de rascunho — foi enviada, aceite, rejeitada ou expirou.</p>
+                    {deletingProposal?.published_at && (
+                      <p className="text-xs font-medium text-amber-600">
+                        Tem portal de cliente activo: ao eliminar, deixa de estar visível no portal — o cliente já não a vê lá, mas o portal em si continua a funcionar normalmente para os outros documentos.
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">Esta ação não pode ser desfeita a partir daqui.</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+            );
+          })()}
           <AlertDialogFooter>
             <AlertDialogCancel>{t('proposals.form.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('proposals.actions.delete')}</AlertDialogAction>

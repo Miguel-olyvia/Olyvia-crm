@@ -1,0 +1,537 @@
+/**
+ * O separador Documentos da ficha: os documentos da pessoa e, quando ha
+ * permissao, a emissao de novos a partir de um modelo.
+ *
+ * "CADA PESSOA VE E ASSINA OS SEUS DOCUMENTOS" -- NA BASE, NAO AQUI
+ * -------------------------------------------------------------------
+ * Este ecra nao decide quem ve o que: `souAPessoa` e `permissoes` chegam de
+ * fora e refletem o que a RLS de `pessoas_documentos` ja decidiu (ver a
+ * migration 20261123030000). O ecra so escolhe quais BOTOES mostrar -- se a
+ * base recusasse a linha, ela nem chegava a `documentos`. O separador esconde
+ * o bloco quando `recusado`, nunca mostra "sem documentos" no lugar de "sem
+ * permissao" (a mesma distincao de `SemAcessoCard`).
+ *
+ * O CONTEUDO NUNCA FICA EM ESTADO DA LISTA
+ * -----------------------------------------
+ * `corpo_html` so existe no dialogo que o pediu, chamado a abrir e limpo ao
+ * fechar -- o mesmo padrao do NISS em `PessoaNissField`. E sanitizado com
+ * DOMPurify antes de ir para o DOM: vem de um modelo que outra pessoa da
+ * mesma organizacao escreveu, nao e sitio para confiar cegamente num HTML.
+ *
+ * ASSINAR NAO E EDITAR
+ * ---------------------
+ * O botao de assinar so aparece a quem e a propria pessoa do documento e so
+ * quando o estado e `a_aguardar_assinatura`. Depois de assinado o documento
+ * fica imutavel na base (trigger + `WITH CHECK`) -- este ecra nao tenta
+ * oferecer nenhuma edicao a um documento assinado.
+ *
+ * ANEXAR O FICHEIRO ASSINADO -- ANTES DE ASSINAR, NUNCA DEPOIS
+ * ----------------------------------------------------------------
+ * O botao "Anexar ficheiro" so aparece com `permissoes.edit` E
+ * `estado === 'a_aguardar_assinatura'` -- a MESMA ordem que
+ * `rpc_hr_documento_anexar_ficheiro` (20261130065000) impoe na base: so se
+ * anexa antes de assinar, nunca depois. Uma vez assinado, o ficheiro fica
+ * imutavel com o resto da linha -- corrigi-lo e anular e emitir outro, nao
+ * reabrir este dialogo.
+ *
+ * UM SO BOTAO -- "INSERIR DOCUMENTO" -- COM DOIS MODOS POR DENTRO
+ * ---------------------------------------------------------------------
+ * Ate 20261202060000 havia dois botoes ("Emitir documento" e "Anexar
+ * contrato ja assinado"), cada um com o seu dialogo. Passaram a um so botao,
+ * "Inserir documento", que abre `InserirDocumentoDialog` -- essa e que
+ * decide, por dentro, entre "a partir de um modelo" (emitir, com
+ * pre-visualizacao das variaveis por dados de amostra) e "anexar ficheiro"
+ * (criar sem modelo, `rpc_hr_documento_upload_assinado_criar`, e so entao
+ * `rpc_hr_documento_registar_assinatura_externa` -- que exige o ficheiro JA
+ * anexado, por isso o botao de confirmar externa so aparece depois disso).
+ * `assinatura_origem` (`interna`/`externa`) distingue os dois so depois de
+ * assinado -- mostrado como badge extra na coluna de estado. A mesma
+ * permissao de emitir (`permissoes.emitir`) abre os dois modos: sao a mesma
+ * classe de accao, "criar um documento novo para esta pessoa".
+ *
+ * O separador Contratos (`PessoaContratoTab`) continua com o seu proprio
+ * botao "Anexar contrato ja assinado", via `AnexarContratoAssinadoDialog` --
+ * um ponto de entrada DIFERENTE deste, intocado por esta mudanca.
+ * `InserirDocumentoDialog` copia essa logica de criar-sem-modelo para dentro
+ * de si (nao importa `AnexarContratoAssinadoDialog`), para os dois pontos de
+ * entrada poderem evoluir em separado. O passo de anexar sozinho (para
+ * qualquer documento a_aguardar_assinatura, nao so os criados por este
+ * caminho) continua em `AnexarFicheiroDialog`, reaproveitado pela accao
+ * "Anexar ficheiro" da tabela abaixo E pelos dois dialogos de criacao.
+ *
+ * A coluna "Ficheiro" mostra sempre que ha um RESUMO (hash) guardado quando
+ * `ficheiro_caminho` nao e nulo -- e o que torna verificavel a promessa de
+ * `rpc_hr_documento_anexar_ficheiro` de nunca sobrescrever em silencio: o
+ * hash muda se, e so se, os bytes por tras do caminho mudaram.
+ *
+ * A LEITURA NUNCA GUARDA O URL EM ESTADO
+ * -----------------------------------------
+ * "Abrir ficheiro" pede um URL assinado de curta duracao a
+ * `hr-documento-ficheiro-url` a cada clique -- nunca se guarda o URL da vez
+ * anterior, o mesmo cuidado do NISS e do conteudo HTML: um URL assinado e
+ * tao sensivel como o proprio ficheiro enquanto for valido.
+ */
+import { useState } from "react";
+import DOMPurify from "dompurify";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { SemAcessoCard } from "@/components/rh-exemplo/SemAcessoCard";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  ExternalLink,
+  FileCheck,
+  FilePlus2,
+  FileSignature,
+  FileText,
+  Loader2,
+  Paperclip,
+  PenLine,
+} from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { toast } from "@/lib/toast";
+import { usePessoaDocumentos } from "@/components/rh-exemplo/hooks/usePessoaDocumentos";
+import { InserirDocumentoDialog } from "@/components/rh-exemplo/InserirDocumentoDialog";
+import type { OpcaoVinculoDocumento } from "@/components/rh-exemplo/AnexarContratoAssinadoDialog";
+import { AnexarFicheiroDialog } from "@/components/rh-exemplo/AnexarFicheiroDialog";
+import type { EstadoDocumentoRH, PessoaDocumento } from "@/components/rh-exemplo/tipos";
+
+export type { OpcaoVinculoDocumento };
+
+export interface PermissoesDocumentosFicha {
+  view: boolean;
+  viewOwn: boolean;
+  edit: boolean;
+  emitir: boolean;
+  anular: boolean;
+  conteudoView: boolean;
+  modelosView: boolean;
+}
+
+interface PessoaDocumentosTabProps {
+  pessoaId: string;
+  /**
+   * So para o caminho de "Anexar contrato ja assinado" (o documento novo
+   * ainda nao esta em `dados.documentos` no momento em que se constroi
+   * localmente -- ver `AnexarContratoAssinadoDialog`). Nao usado para ler
+   * nada nesta lista, que ja filtra por `pessoaId`.
+   */
+  organizationId: string;
+  souAPessoa: boolean;
+  permissoes: PermissoesDocumentosFicha;
+  /** Vinculos desta pessoa, para o selector opcional do dialogo de upload. */
+  vinculosOpcoes?: OpcaoVinculoDocumento[];
+}
+
+const VARIANTE_ESTADO: Record<EstadoDocumentoRH, "secondary" | "outline" | "default"> = {
+  rascunho: "outline",
+  a_aguardar_assinatura: "secondary",
+  assinado: "default",
+  anulado: "outline",
+};
+
+function formatarData(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString();
+}
+
+export function PessoaDocumentosTab({
+  pessoaId,
+  organizationId,
+  souAPessoa,
+  permissoes,
+  vinculosOpcoes = [],
+}: PessoaDocumentosTabProps) {
+  const { t } = useTranslation();
+  const podeVer = permissoes.view || (souAPessoa && permissoes.viewOwn);
+  const podeEmitir = permissoes.emitir && permissoes.modelosView;
+  // O caminho de upload usa a MESMA permissao de emitir -- "criar um
+  // documento novo para esta pessoa" -- e nunca depende de haver modelos
+  // (nao passa por nenhum).
+  const podeCriarPorUpload = permissoes.emitir;
+  const dados = usePessoaDocumentos(pessoaId, podeEmitir);
+
+  // "Inserir documento": ponto de entrada UNICO, com os dois modos (a partir
+  // de um modelo, ou anexar ficheiro) dentro de `InserirDocumentoDialog`.
+  const [aInserir, setAInserir] = useState(false);
+  const [documentoAVer, setDocumentoAVer] = useState<PessoaDocumento | null>(null);
+  const [conteudo, setConteudo] = useState<string | null>(null);
+  const [aCarregarConteudo, setACarregarConteudo] = useState(false);
+  const [documentoAAssinar, setDocumentoAAssinar] = useState<PessoaDocumento | null>(null);
+  const [documentoAAnexar, setDocumentoAAnexar] = useState<PessoaDocumento | null>(null);
+  const [documentoAAbrirId, setDocumentoAAbrirId] = useState<string | null>(null);
+  const [documentoAConfirmarExterna, setDocumentoAConfirmarExterna] =
+    useState<PessoaDocumento | null>(null);
+
+  if (!podeVer || dados.recusado) {
+    return <SemAcessoCard />;
+  }
+
+  if (dados.loading) {
+    return <OlyviaLoader />;
+  }
+
+  const abrirConteudo = async (documento: PessoaDocumento) => {
+    setDocumentoAVer(documento);
+    setConteudo(null);
+    setACarregarConteudo(true);
+    try {
+      const html = await dados.verConteudo(documento.id);
+      setConteudo(html);
+    } catch {
+      toast.error(t("hr.documentos.erroVerConteudo"));
+      setDocumentoAVer(null);
+    } finally {
+      setACarregarConteudo(false);
+    }
+  };
+
+  const fecharConteudo = () => {
+    setDocumentoAVer(null);
+    // NUNCA fica em estado alem do dialogo que o mostrou -- o mesmo cuidado
+    // do NISS revelado.
+    setConteudo(null);
+  };
+
+  const confirmarAssinatura = async () => {
+    if (!documentoAAssinar) return;
+    const erro = await dados.assinar(documentoAAssinar.id);
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    toast.success(t("hr.documentos.assinadoComSucesso"));
+    setDocumentoAAssinar(null);
+  };
+
+  const confirmarAssinaturaExterna = async () => {
+    if (!documentoAConfirmarExterna) return;
+    const erro = await dados.registarAssinaturaExterna(documentoAConfirmarExterna.id);
+    if (erro) {
+      toast.error(erro);
+      return;
+    }
+    toast.success(t("hr.documentos.assinaturaExternaComSucesso"));
+    setDocumentoAConfirmarExterna(null);
+  };
+
+  const abrirFicheiro = async (documento: PessoaDocumento) => {
+    setDocumentoAAbrirId(documento.id);
+    // window.open TEM de acontecer AQUI, sincronamente dentro do gesto de
+    // clique -- se esperar pelo await abaixo (padrao anterior), perde-se o
+    // gesto do utilizador e os bloqueadores de popup (Safari e Firefox de
+    // forma fiavel, Chrome com frequencia) bloqueiam a janela; window.open
+    // devolve null SEM lancar, por isso o catch nunca corria -- o spinner
+    // parava e mais nada, sem mensagem nenhuma. A janela abre em branco
+    // AGORA e so recebe o URL (TTL de 60s) quando obterUrlFicheiro resolver;
+    // fecha-se se a chamada falhar. Sem "noopener"/"noreferrer" no proprio
+    // window.open -- com qualquer um dos dois, window.open devolve sempre
+    // null (mesmo com sucesso), e este padrao depende de guardar a
+    // referencia; a ligacao ao opener corta-se a seguir, explicitamente.
+    const janela = window.open("about:blank", "_blank");
+    if (!janela) {
+      toast.error(t("hr.documentos.bloqueadorPopup"));
+      setDocumentoAAbrirId(null);
+      return;
+    }
+    janela.opener = null;
+    try {
+      const { url } = await dados.obterUrlFicheiro(documento.id);
+      janela.location.href = url;
+    } catch {
+      janela.close();
+      toast.error(t("hr.documentos.erroAbrirFicheiro"));
+    } finally {
+      setDocumentoAAbrirId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            {t("hr.documentos.titulo")}
+          </CardTitle>
+          <div className="flex flex-wrap gap-2">
+            {(podeEmitir || podeCriarPorUpload) && (
+              <Button size="sm" onClick={() => setAInserir(true)}>
+                <FilePlus2 className="mr-2 h-4 w-4" />
+                {t("hr.documentos.inserirDocumento")}
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {dados.documentos.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              {t("hr.documentos.semDocumentos")}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("hr.documentos.coluna.titulo")}</TableHead>
+                    <TableHead>{t("hr.documentos.coluna.tipo")}</TableHead>
+                    <TableHead>{t("hr.documentos.coluna.estado")}</TableHead>
+                    <TableHead>{t("hr.documentos.coluna.ficheiro")}</TableHead>
+                    <TableHead>{t("hr.documentos.coluna.emitidoEm")}</TableHead>
+                    <TableHead>{t("hr.documentos.coluna.assinadoEm")}</TableHead>
+                    <TableHead className="text-right">
+                      {t("hr.documentos.coluna.accoes")}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {dados.documentos.map((documento) => {
+                    const podeVerConteudoDeste =
+                      permissoes.conteudoView || (souAPessoa && documento.pessoa_id === pessoaId);
+                    const podeAssinarEste =
+                      souAPessoa && documento.estado === "a_aguardar_assinatura";
+                    // Mesma ordem que a base impoe (rpc_hr_documento_anexar_ficheiro,
+                    // 20261130065000): so se anexa antes de assinar, nunca depois.
+                    const podeAnexarEste =
+                      permissoes.edit && documento.estado === "a_aguardar_assinatura";
+                    // Confirmar assinatura externa: a MESMA permissao que
+                    // cria o documento por upload, e so depois de o
+                    // ficheiro JA estar anexado -- a mesma ordem que
+                    // rpc_hr_documento_registar_assinatura_externa impoe.
+                    const podeConfirmarExternaEste =
+                      podeCriarPorUpload &&
+                      documento.estado === "a_aguardar_assinatura" &&
+                      documento.ficheiro_caminho !== null;
+                    const aAbrirEste = documentoAAbrirId === documento.id;
+                    return (
+                      <TableRow key={documento.id}>
+                        <TableCell className="font-medium">{documento.titulo}</TableCell>
+                        <TableCell>{t(`hr.tipoDocumentoRH.${documento.tipo}`)}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge
+                              variant={VARIANTE_ESTADO[documento.estado]}
+                              className="font-normal"
+                            >
+                              {t(`hr.estadoDocumentoRH.${documento.estado}`)}
+                            </Badge>
+                            {/* So faz sentido distinguir a origem depois de
+                                assinado -- antes disso nao ha assinatura
+                                nenhuma para atribuir a um caminho ou ao
+                                outro. */}
+                            {documento.estado === "assinado" && documento.assinatura_origem && (
+                              <Badge variant="outline" className="font-normal text-muted-foreground">
+                                {t(
+                                  documento.assinatura_origem === "interna"
+                                    ? "hr.documentos.origemInterna"
+                                    : "hr.documentos.origemExterna",
+                                )}
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {documento.ficheiro_caminho ? (
+                            <span
+                              className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"
+                              title={
+                                documento.ficheiro_hash_sha256
+                                  ? t("hr.documentos.resumoGuardado")
+                                  : undefined
+                              }
+                            >
+                              <FileCheck className="h-3.5 w-3.5 text-emerald-600" />
+                              {documento.ficheiro_hash_sha256
+                                ? t("hr.documentos.resumoGuardado")
+                                : t("hr.documentos.ficheiroAnexado")}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              {t("hr.documentos.semFicheiro")}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>{formatarData(documento.emitido_em)}</TableCell>
+                        <TableCell>{formatarData(documento.assinado_em)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {podeVerConteudoDeste && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => abrirConteudo(documento)}
+                              >
+                                {t("hr.documentos.verConteudo")}
+                              </Button>
+                            )}
+                            {podeVerConteudoDeste && documento.ficheiro_caminho && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={aAbrirEste}
+                                onClick={() => abrirFicheiro(documento)}
+                              >
+                                {aAbrirEste ? (
+                                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                                )}
+                                {t("hr.documentos.abrirFicheiro")}
+                              </Button>
+                            )}
+                            {podeAnexarEste && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setDocumentoAAnexar(documento)}
+                              >
+                                <Paperclip className="mr-1.5 h-3.5 w-3.5" />
+                                {t("hr.documentos.anexarFicheiro")}
+                              </Button>
+                            )}
+                            {podeConfirmarExternaEste && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setDocumentoAConfirmarExterna(documento)}
+                              >
+                                <FileSignature className="mr-1.5 h-3.5 w-3.5" />
+                                {t("hr.documentos.confirmarAssinaturaExterna")}
+                              </Button>
+                            )}
+                            {podeAssinarEste && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setDocumentoAAssinar(documento)}
+                              >
+                                <PenLine className="mr-1.5 h-3.5 w-3.5" />
+                                {t("hr.documentos.assinar")}
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <InserirDocumentoDialog
+        open={aInserir}
+        onOpenChange={setAInserir}
+        pessoaId={pessoaId}
+        organizationId={organizationId}
+        vinculosOpcoes={vinculosOpcoes}
+        modelos={dados.modelos}
+        podeEmitir={podeEmitir}
+        podeCriarPorUpload={podeCriarPorUpload}
+        emitir={dados.emitir}
+        criarPorUpload={dados.criarPorUpload}
+        anexarFicheiro={dados.anexarFicheiro}
+        saving={dados.saving}
+      />
+
+      <Dialog open={documentoAVer !== null} onOpenChange={(aberto) => !aberto && fecharConteudo()}>
+        <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{documentoAVer?.titulo}</DialogTitle>
+          </DialogHeader>
+          {aCarregarConteudo ? (
+            <OlyviaLoader />
+          ) : (
+            <div
+              className="prose prose-sm max-w-none dark:prose-invert"
+              // O corpo vem do modelo de outra pessoa da mesma organizacao --
+              // sanitizado antes de ir para o DOM, nunca confiado em bruto.
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(conteudo ?? ""),
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={documentoAAssinar !== null}
+        onOpenChange={(aberto) => !aberto && setDocumentoAAssinar(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("hr.documentos.confirmarAssinaturaTitulo")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("hr.documentos.confirmarAssinaturaDescricao", {
+              titulo: documentoAAssinar?.titulo ?? "",
+            })}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDocumentoAAssinar(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button disabled={dados.saving} onClick={confirmarAssinatura}>
+              {dados.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("hr.documentos.confirmarAssinatura")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Anexar ficheiro a um documento ja existente (qualquer origem),
+          a_aguardar_assinatura -- reaproveitado tambem pelo segundo passo do
+          fluxo abaixo. */}
+      <AnexarFicheiroDialog
+        documento={documentoAAnexar}
+        onOpenChange={(aberto) => !aberto && setDocumentoAAnexar(null)}
+        anexarFicheiro={dados.anexarFicheiro}
+        saving={dados.saving}
+      />
+
+      {/* Confirmar assinatura externa: fecha o ciclo, so depois de o
+          ficheiro JA estar anexado -- a mesma ordem que a base impoe. */}
+      <Dialog
+        open={documentoAConfirmarExterna !== null}
+        onOpenChange={(aberto) => !aberto && setDocumentoAConfirmarExterna(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("hr.documentos.confirmarAssinaturaExternaTitulo")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("hr.documentos.confirmarAssinaturaExternaDescricao", {
+              titulo: documentoAConfirmarExterna?.titulo ?? "",
+            })}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDocumentoAConfirmarExterna(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button disabled={dados.saving} onClick={confirmarAssinaturaExterna}>
+              {dados.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {t("hr.documentos.confirmarAssinaturaExterna")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

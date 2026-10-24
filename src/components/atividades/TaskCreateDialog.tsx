@@ -21,7 +21,7 @@ interface TaskCreateDialogProps {
   saving: boolean;
   onCreate: (input: CreateTaskInput) => Promise<boolean>;
   /**
-   * `primary` é o botão do cabeçalho, a acção principal do ecrã. `quiet` é o
+   * `primary` é o botão do cabeçalho, a ação principal do ecrã. `quiet` é o
    * convite que aparece dentro da lista vazia, onde um segundo botão cheio
    * competiria com o de cima em vez de o complementar.
    */

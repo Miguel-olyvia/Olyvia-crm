@@ -25,6 +25,67 @@ const addressField: LeadFieldConstraint = {
   max_length: 200,
 };
 
+// O telefone é gravado como "+<indicativo><dígitos>" (LeadPhoneField). Os limites
+// configurados na campanha ("Máx. 9") sempre contaram dígitos, por isso contam-se
+// os dígitos nacionais e nunca o indicativo.
+describe("telefone com indicativo", () => {
+  const phoneField: LeadFieldConstraint = {
+    field_key: "po_telefone",
+    field_label: "Telefone",
+    field_type: "phone",
+    is_required: true,
+    min_length: 9,
+    max_length: 9,
+  };
+
+  it("aceita 9 dígitos nacionais com +351 contra max_length 9", () => {
+    expect(validateLeadFieldValues([phoneField], { po_telefone: "+351912345678" })).toEqual([]);
+  });
+
+  it("aceita o número antigo sem indicativo", () => {
+    expect(validateLeadFieldValues([phoneField], { po_telefone: "912345678" })).toEqual([]);
+  });
+
+  it("recusa 10 dígitos nacionais e a mensagem fala em dígitos", () => {
+    const errors = validateLeadFieldValues([phoneField], { po_telefone: "+3519123456789" });
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("Telefone deve ter no máximo 9 dígitos");
+  });
+
+  it("recusa 8 dígitos nacionais contra min_length 9", () => {
+    const errors = validateLeadFieldValues([phoneField], { po_telefone: "+35191234567" });
+    expect(errors[0].message).toBe("Telefone deve ter pelo menos 9 dígitos");
+  });
+
+  it("conta só os dígitos de um indicativo estrangeiro (+45, 8 dígitos)", () => {
+    const field = { ...phoneField, min_length: 8, max_length: 8 };
+    expect(validateLeadFieldValues([field], { po_telefone: "+4541736520" })).toEqual([]);
+  });
+
+  it("também trata como telefone um campo de texto chamado telefone", () => {
+    const textField = { ...phoneField, field_type: "text", field_key: "telefone" };
+    expect(validateLeadFieldValues([textField], { telefone: "+351912345678" })).toEqual([]);
+  });
+
+  it("também trata como telefone um campo mapeado como phone", () => {
+    const mapped = { ...phoneField, field_type: "text", field_key: "contacto", contact_field_mapping: "phone" };
+    expect(validateLeadFieldValues([mapped], { contacto: "+351912345678" })).toEqual([]);
+  });
+
+  it("aplica o regex configurado aos dígitos nacionais", () => {
+    const withPattern = { ...phoneField, min_length: null, max_length: null, pattern: "^[0-9]{9}$" };
+    expect(validateLeadFieldValues([withPattern], { po_telefone: "+351912345678" })).toEqual([]);
+    expect(validateLeadFieldValues([withPattern], { po_telefone: "+35191234" })).toHaveLength(1);
+  });
+
+  it("um campo que não é telefone continua a contar caracteres", () => {
+    const text: LeadFieldConstraint = { field_key: "po_morada", field_label: "Morada", field_type: "text", max_length: 9 };
+    expect(validateLeadFieldValues([text], { po_morada: "0123456789" })[0].message).toBe(
+      "Morada deve ter no máximo 9 caracteres",
+    );
+  });
+});
+
 describe("isMeaninglessValue", () => {
   it.each(["", "   ", "-", "--", " - ", "—", "n/a", "N/A", "null", "undefined"])(
     "treats %j as meaningless",

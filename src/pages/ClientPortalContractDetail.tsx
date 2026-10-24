@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { useSyncActiveOrgWithDocument } from "@/contexts/PortalCompanyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
+import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -36,6 +39,8 @@ const ClientPortalContractDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
+  const otpSendingRef = useRef(false);
 
   const [contract, setContract] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -45,6 +50,8 @@ const ClientPortalContractDetail = () => {
   // OTP states
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
   const [otpCode, setOtpCode] = useState("");
+  // O Reenviar não muda o passo (o campo do código fica); só desactiva o botão durante o pedido.
+  const [reenviando, setReenviando] = useState(false);
   const [maskedPhone, setMaskedPhone] = useState("");
   const [otpError, setOtpError] = useState("");
 
@@ -54,6 +61,10 @@ const ClientPortalContractDetail = () => {
 
   const [showQuestion, setShowQuestion] = useState(false);
   const [questionText, setQuestionText] = useState("");
+
+  // Link de email pode abrir um contrato de outra empresa do grupo: a empresa
+  // ativa acompanha o documento em vez de o esconder.
+  useSyncActiveOrgWithDocument(contract?.organization_id);
 
   useEffect(() => {
     if (!id) return;
@@ -94,7 +105,10 @@ const ClientPortalContractDetail = () => {
   // M2: formatCurrency now imported from @/lib/utils (preserves sign for negatives)
 
 
-  const canSign = contract && (contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
+  // "pending_signature" e o nome actual do estado (ver ClientContracts.tsx) --
+  // "pending"/"sent" mantidos so por seguranca, para contratos antigos que
+  // possam ainda ter esses valores gravados.
+  const canSign = contract && (contract.status === "pending_signature" || contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
   const isSigned = contract?.status === "signed";
 
   // Descarregar o PDF do contrato. Usa exactamente o mesmo caminho do CRM
@@ -133,9 +147,16 @@ const ClientPortalContractDetail = () => {
   const isRejected = contract?.status === "rejected";
   const isCancelled = contract?.status === "cancelled";
 
-  async function handleSendOtp() {
+  // A contagem de 60 s é só do Reenviar: no primeiro envio começa quando o servidor aceita;
+  // no Reenviar começa no clique e não é reposta se o servidor recusar.
+  async function sendOtp(isResend: boolean) {
     if (!id) return; // H4
-    setOtpStep("sending");
+    // Ref (e não estado) para que um segundo clique durante o pedido seja ignorado.
+    if (otpSendingRef.current) return;
+    if (isResend && !otpCooldown.iniciar()) return;
+    otpSendingRef.current = true;
+    if (isResend) setReenviando(true);
+    else setOtpStep("sending");
     setOtpError("");
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
@@ -146,7 +167,7 @@ const ClientPortalContractDetail = () => {
       if (data?.error) {
         if (data.error === "no_phone") {
           setOtpError("Não foi encontrado um número de telefone associado à sua conta. Contacte o comercial.");
-          setOtpStep("idle");
+          if (!isResend) setOtpStep("idle");
           return;
         }
         throw new Error(data.message || data.error);
@@ -154,14 +175,21 @@ const ClientPortalContractDetail = () => {
 
       setMaskedPhone(data.masked_phone || "");
       setOtpStep("input");
+      if (!isResend) otpCooldown.iniciar();
       toast({ title: "Código SMS enviado", description: `Enviámos um código para ${data.masked_phone}` });
     } catch (err: any) {
       setOtpError(err.message);
-      setOtpStep("idle");
+      if (!isResend) setOtpStep("idle");
       captureFlowError(err, "client-portal-contract");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
+    } finally {
+      otpSendingRef.current = false;
+      setReenviando(false);
     }
   }
+
+  const handleSendOtp = () => sendOtp(false);
+  const handleResendOtp = () => sendOtp(true);
 
   async function handleVerifyOtp() {
     if (!id) return; // H4
@@ -547,7 +575,7 @@ const ClientPortalContractDetail = () => {
                     <p className="text-xs text-muted-foreground">Válido por 5 minutos</p>
                   </div>
                   <div className="flex justify-center">
-                    <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode}>
+                    <InputOTP autoFocus maxLength={6} value={otpCode} onChange={setOtpCode}>
                       <InputOTPGroup>
                         <InputOTPSlot index={0} />
                         <InputOTPSlot index={1} />
@@ -561,9 +589,10 @@ const ClientPortalContractDetail = () => {
                   {otpError && (
                     <p className="text-sm text-destructive">{otpError}</p>
                   )}
+                  <OtpCooldownNotice activo={otpCooldown.activo} />
                   <div className="flex gap-3 justify-center">
-                    <Button variant="outline" size="sm" onClick={handleSendOtp} disabled={actionLoading}>
-                      Reenviar código
+                    <Button variant="outline" size="sm" onClick={handleResendOtp} disabled={actionLoading || otpCooldown.activo || reenviando}>
+                      {cooldownLabel("Reenviar código", otpCooldown.restante)}
                     </Button>
                     <Button
                       size="sm"

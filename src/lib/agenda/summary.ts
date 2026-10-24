@@ -20,7 +20,7 @@ export interface DaySummary {
   meetings: number;
   /** Tudo o que ficou para trás: tarefas e agendamentos por fechar. */
   overdue: number;
-  /** Fracção concluída das tarefas do dia, entre 0 e 1. Sem tarefas, é 0. */
+  /** Fração concluída das tarefas do dia, entre 0 e 1. Sem tarefas, é 0. */
   progress: number;
 }
 

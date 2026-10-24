@@ -1,0 +1,224 @@
+// Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
+// aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
+import type { DadosContactoNegocio, EstadoLevantamento, MoradaObraNegocio, NegocioMes, RespostaNegocio, VisitaNegocio } from "./negocioMetas";
+import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
+import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
+import { validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
+import { decisaoDaEscolha, type LigarRegistos } from "./ligarNegocio";
+import type { Respostas } from "./perguntasTipos";
+import type { RespostaGravada } from "./respostasQuestionario";
+
+/** Uma pessoa a escolher no formulário. A página monta a lista (Negócio e metas não importa de Pessoas). */
+export interface PessoaOpcao {
+  id: string;
+  nome: string;
+  contacto?: { telefone: string | null; email: string | null };
+  /** Os dados da ficha, para pré-preencher a secção Contacto (todos opcionais). */
+  email?: string;
+  morada?: string;
+  distrito?: string;
+  nif?: string;
+  empresa?: string;
+  nifEmpresa?: string;
+}
+
+export const CHAVES_CONTACTO = ["email", "morada", "distrito", "nif", "empresa", "nifEmpresa"] as const;
+export type ChaveContacto = (typeof CHAVES_CONTACTO)[number];
+
+export const CONTACTO_VAZIO: DadosContactoNegocio = { email: "", morada: "", distrito: "", nif: "", empresa: "", nifEmpresa: "" };
+
+/** Os seis campos de contacto de uma pessoa (texto vazio quando não os tem); sem pessoa, tudo vazio. */
+export function preencherContactoDaPessoa(pessoa: PessoaOpcao | undefined | null): DadosContactoNegocio {
+  return {
+    email: pessoa?.email ?? pessoa?.contacto?.email ?? "",
+    morada: pessoa?.morada ?? "",
+    distrito: pessoa?.distrito ?? "",
+    // Os NIF da ficha podem vir escritos com espaços ("204 567 890"): sem os tirar, o formulário nunca os validava.
+    nif: (pessoa?.nif ?? "").replace(/\s+/g, ""),
+    empresa: pessoa?.empresa ?? "",
+    nifEmpresa: (pessoa?.nifEmpresa ?? "").replace(/\s+/g, ""),
+  };
+}
+
+/** Ao mudar de pessoa: os campos tocados mantêm o que o utilizador escreveu, os outros passam a ser os da nova pessoa. */
+export function reporContacto(
+  atual: DadosContactoNegocio, tocados: ReadonlySet<ChaveContacto>, pessoa: PessoaOpcao | undefined | null,
+): DadosContactoNegocio {
+  const novo = preencherContactoDaPessoa(pessoa);
+  return Object.fromEntries(CHAVES_CONTACTO.map((c) => [c, tocados.has(c) ? atual[c] : novo[c]])) as unknown as DadosContactoNegocio;
+}
+
+/** Os comerciais do exemplo (os das metas); o primeiro é o por omissão. */
+export const COMERCIAIS_EXEMPLO: readonly string[] = DADOS_EXEMPLO.metasComerciais.map((m) => m.comercial);
+export const COMERCIAL_POR_OMISSAO: string = COMERCIAIS_EXEMPLO[0];
+
+/** O primeiro prazo de um negócio novo: levantamento daqui a 2 dias. */
+export const DIAS_ATE_PRIMEIRO_PRAZO = 2;
+
+/**
+ * Os dados do levantamento que não vêm de nenhuma visita: a data, o estado e o comercial (nome, e o id quando se conhece). Um levantamento SEM visita
+ * ligada tem-nos próprios (e preenchem-se por omissão: hoje, por fazer, o comercial da sessão); com uma visita ligada herda-os dela e estes não contam.
+ */
+export interface DadosProprios {
+  /** AAAA-MM-DD. */
+  data: string;
+  estado: EstadoLevantamento;
+  feitoPor: string;
+  /** O id do comercial na base (`feito_por`): põe-no a gravação, a partir do nome (os formulários não o guardam); falta quando a lista de comerciais ainda não carregou (a base põe então quem grava). */
+  feitoPorId?: string;
+}
+
+/** O levantamento a meio, guardado sem criar o negócio: o que o formulário precisa para voltar a abrir como estava. */
+export interface RascunhoLevantamento {
+  linhas: LevantamentoForm["linhas"];
+  observacoes: string;
+  respostas: Respostas;
+  /** A morada da obra escrita no painel (a que não está nas visitas); falta nos rascunhos antigos. */
+  moradaObra?: MoradaObraForm;
+  /** A data, o estado e o comercial do levantamento sem visita; só valem quando nenhuma visita o representa. Faltam nos rascunhos antigos. */
+  dados?: DadosProprios;
+  /** As respostas já gravadas na base, com o snapshot do que a pessoa viu (a ficha real): o fornecedor do questionário mostra esse texto (D5). Falta no exemplo. */
+  gravadas?: readonly RespostaGravada[];
+}
+
+/**
+ * O que o painel "Novo negócio" já traz preenchido quando a página o abre a partir de um pedido (a pessoa, o comercial, as visitas e
+ * o levantamento dele). Tudo opcional; sem isto o painel abre como sempre.
+ */
+export interface ValoresIniciaisNegocio {
+  pessoaId?: string;
+  comercial?: string;
+  /** O levantamento já guardado (as linhas, as observações e as respostas das secções da visita); o formulário abre com ele. */
+  levantamento?: RascunhoLevantamento;
+  /** As visitas do pedido (a lista inteira). */
+  visitas?: VisitaNegocio[];
+  /** A morada da obra já guardada no pedido; sem ela vale a das visitas. */
+  moradaObra?: MoradaObraForm;
+}
+
+/** O que o formulário preenche. */
+export interface ValoresNovoNegocio {
+  pessoaId: string;
+  comercial: string;
+}
+
+export type ErroCampo = "obrigatorio" | "comprido" | "invalido";
+export type ErrosNovoNegocio = Partial<Record<"pessoaId" | "email" | "nif" | "nifEmpresa" | "codigoPostal", ErroCampo>>
+  & ErrosLevantamento;
+
+/** As abas do painel: «visita» é a dos registos da pessoa (visitas e levantamento); «registos» é a de ligar registos ao negócio novo. */
+export type AbaNovoNegocio = "geral" | "qualificacao" | "visita" | "registos";
+
+/** Que abas têm erros (para o aviso na aba): a Geral os campos do negócio, a Qualificação a morada, a Visita as linhas do levantamento. */
+export function abasComErros(erros: ErrosNovoNegocio): Record<Exclude<AbaNovoNegocio, "registos">, boolean> {
+  return {
+    geral: (["pessoaId", "email", "nif", "nifEmpresa"] as const).some((c) => !!erros[c]),
+    qualificacao: !!erros.codigoPostal,
+    visita: !!erros.linhas,
+  };
+}
+
+const FORMATO_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const FORMATO_NIF = /^\d{9}$/;
+
+/**
+ * A Pessoa é obrigatória; o contacto só valida o formato do que foi preenchido. A visita é opcional: o levantamento valida-se em
+ * `validarLevantamento` (havendo uma visita feita, pede pelo menos uma linha de medidas); vazio quando está tudo certo.
+ */
+export function validarNovoNegocio(
+  valores: Pick<ValoresNovoNegocio, "pessoaId"> & {
+    contacto?: Partial<DadosContactoNegocio>;
+    levantamento?: LevantamentoForm;
+    moradaObra?: Pick<MoradaObraForm, "codigoPostal">;
+  },
+): ErrosNovoNegocio {
+  const erros: ErrosNovoNegocio = { ...validarLevantamento(valores.levantamento) };
+  if (valores.moradaObra && validarCodigoPostal(valores.moradaObra.codigoPostal)) erros.codigoPostal = "invalido";
+  if (!valores.pessoaId?.trim()) erros.pessoaId = "obrigatorio";
+  // O contacto é opcional: só se valida o formato do que foi preenchido.
+  const email = valores.contacto?.email?.trim();
+  if (email && !FORMATO_EMAIL.test(email)) erros.email = "invalido";
+  const nif = valores.contacto?.nif?.trim();
+  if (nif && !FORMATO_NIF.test(nif)) erros.nif = "invalido";
+  const nifEmpresa = valores.contacto?.nifEmpresa?.trim();
+  if (nifEmpresa && !FORMATO_NIF.test(nifEmpresa)) erros.nifEmpresa = "invalido";
+  return erros;
+}
+
+const ORDEM_GERAL = ["pessoaId", "email", "nif", "nifEmpresa"] as const;
+const CAMPO_GERAL: Record<(typeof ORDEM_GERAL)[number], string> = {
+  pessoaId: "pessoa", email: "email", nif: "nif", nifEmpresa: "nifEmpresa",
+};
+const ORDEM_LINHA = ["divisao", "trabalho", "trabalhoOutro", "medida"] as const;
+
+/** Onde pôr o foco depois de um envio recusado: a aba e o fim do id do campo (`<id>-<campo>`); a Geral vem primeiro. */
+export function primeiroErro(
+  erros: ErrosNovoNegocio, idsLinhas: readonly string[],
+): { aba: AbaNovoNegocio; campo: string } | null {
+  const geral = ORDEM_GERAL.find((c) => erros[c]);
+  if (geral) return { aba: "geral", campo: CAMPO_GERAL[geral] };
+  if (erros.codigoPostal) return { aba: "qualificacao", campo: "cp" };
+  if (erros.data) return { aba: "visita", campo: "lev-data" };
+  for (const linha of idsLinhas) {
+    const campo = ORDEM_LINHA.find((c) => erros.linhas?.[linha]?.[c]);
+    if (campo) return { aba: "visita", campo: `linha-${linha}-${campo}` };
+  }
+  return null;
+}
+
+/** Soma `dias` a um dia AAAA-MM-DD (em UTC, sem fuso nem horário de verão). */
+export function somarDias(dia: string, dias: number): string {
+  const [a, m, d] = dia.split("-").map(Number);
+  return new Date(Date.UTC(a, m - 1, d + dias)).toISOString().slice(0, 10);
+}
+
+const aparar = (c: DadosContactoNegocio): DadosContactoNegocio => ({
+  email: c.email.trim(), morada: c.morada.trim(), distrito: c.distrito.trim(),
+  nif: c.nif.trim(), empresa: c.empresa.trim(), nifEmpresa: c.nifEmpresa.trim(),
+});
+
+/** Um negócio criado nesta página: só existe em memória e leva a marca `novo`. */
+export type NegocioNovo = NegocioMes & { novo: true };
+
+export interface DadosCriarNegocio {
+  pessoa: PessoaOpcao;
+  comercial: string;
+  contacto?: DadosContactoNegocio;
+  levantamento?: LevantamentoNegocio;
+  qualificacao?: RespostaNegocio[];
+  moradaObra?: MoradaObraNegocio;
+  /**
+   * Os registos da pessoa que o negócio liga (contactos e visitas marcados) e o que faz do levantamento (usar um existente, fazer um novo
+   * ou dispensar). Nada se copia: o negócio lê os registos que tem ligados, e quem o cria liga-os (ver `criarNegocioNovo`).
+   */
+  ligar?: LigarRegistos;
+  /** O serviço (o negócio nasce sem ele quando falta). */
+  servico?: string;
+}
+
+/**
+ * O negócio de exemplo (o serviço, ou vazio): sem orçamentos (por isso sem valor), com 0 dias, não parado e o primeiro prazo daqui a 2 dias.
+ * Começa em Orçamento, ou em Levantamento se se escolheu fazer um levantamento novo (ver `faseDoPercurso`). O id é `n-novo-<sequência>`;
+ * várias pessoas (e a mesma) podem ter vários negócios.
+ */
+export function criarNegocioExemplo(dados: DadosCriarNegocio, hoje: string, sequencia: number): NegocioNovo {
+  return {
+    id: `n-novo-${sequencia}`,
+    pessoaId: dados.pessoa.id,
+    pessoa: dados.pessoa.nome,
+    servico: dados.servico ?? "",
+    comercial: dados.comercial,
+    dias: 0,
+    parado: 0,
+    proximoPrazo: somarDias(hoje, DIAS_ATE_PRIMEIRO_PRAZO),
+    contacto: dados.pessoa.contacto ?? { telefone: null, email: null },
+    ...(dados.contacto ? { dadosContacto: aparar(dados.contacto) } : {}),
+    ...(dados.qualificacao?.length ? { qualificacao: dados.qualificacao } : {}),
+    ...(temMorada(dados.moradaObra) ? { moradaObra: moradaAparada(dados.moradaObra) } : {}),
+    ...(dados.ligar ? { decisaoLevantamento: decisaoDaEscolha(dados.ligar.levantamento) } : {}),
+    orcamentos: [],
+    proposta: null,
+    contrato: null,
+    novo: true,
+  };
+}

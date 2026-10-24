@@ -256,6 +256,7 @@ export function useCalendarScheduling(companyId?: string) {
           start_time: item.start_datetime,
           end_time: item.end_datetime,
           status: item.status === 'scheduled' ? 'scheduled' : 
+                  item.status === 'confirmed' ? 'confirmed' :
                   item.status === 'completed' ? 'completed' :
                   item.status === 'cancelled' ? 'cancelled' : 
                   item.status === 'rescheduled' ? 'rescheduled' : 'scheduled',
@@ -293,14 +294,13 @@ export function useCalendarScheduling(companyId?: string) {
     }
   }, [companyId, ensureVisitsBoard, t]);
 
-  // Create a visit (schedule_item in Visitas board). Pass either contact_id
-  // (existing Contacts flow) or lead_id (Leads' "Agendar Visita" quick
-  // action) -- lead_id is stored in metadata (schedule_items has no lead_id
-  // column, same convention fetchVisits already reads from) and, on success,
-  // links the visit back via anew_leads.scheduled_visit_id so has_visit_done
+  // Create a visit (schedule_item in Visitas board). lead_id is the lead
+  // (Leads' "Agendar Visita" quick action): it is written both to the
+  // schedule_items.lead_id column and to metadata.lead_id (the convention
+  // fetchVisits already reads from), and, on success, links the visit back
+  // via anew_leads.scheduled_visit_id so has_visit_done
   // (evaluate_lead_signals_v2) can see it once someone marks it completed.
   const createVisit = useCallback(async (visitData: {
-    contact_id?: string;
     lead_id?: string;
     title: string;
     description?: string;
@@ -332,10 +332,11 @@ export function useCalendarScheduling(companyId?: string) {
           start_datetime: visitData.start_time,
           end_datetime: visitData.end_time,
           status: visitData.status === 'scheduled' ? 'scheduled' :
+                  visitData.status === 'confirmed' ? 'confirmed' :
                   visitData.status === 'completed' ? 'completed' :
                   visitData.status === 'cancelled' ? 'cancelled' : 'scheduled',
           origin: 'manual',
-          contact_id: visitData.contact_id || null,
+          lead_id: visitData.lead_id || null,
           notes: visitData.notes,
           metadata: visitData.lead_id
             ? { visit_type: visitData.visit_type, lead_id: visitData.lead_id }
@@ -463,6 +464,7 @@ export function useCalendarScheduling(companyId?: string) {
   ): Promise<boolean> => {
     try {
       const mappedStatus = visitData.status === 'scheduled' ? 'scheduled' :
+                          visitData.status === 'confirmed' ? 'confirmed' :
                           visitData.status === 'completed' ? 'completed' :
                           visitData.status === 'cancelled' ? 'cancelled' : 'scheduled';
 

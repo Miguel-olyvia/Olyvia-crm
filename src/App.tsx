@@ -3,13 +3,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { CompanyProvider } from "@/contexts/CompanyContext";
+import { PortalCompanyProvider } from "@/contexts/PortalCompanyContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { ClientRouteGuard, CrmRouteGuard } from "@/components/ClientRouteGuard";
+import { PessoasRota } from "@/components/pessoas-lista/PessoasRota";
+import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/components/ClientRouteGuard";
 import { LayoutRoute } from "@/components/Layout";
 
 // Critical routes loaded eagerly
@@ -24,6 +26,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 
 
 const Deals = lazy(() => import("./pages/Deals"));
+const NegocioMetas = lazy(() => import("./pages/NegocioMetas"));
 const Proposals = lazy(() => import("./pages/Proposals"));
 
 
@@ -32,6 +35,7 @@ const Quotes = lazy(() => import("./pages/Quotes"));
 const QuoteModels = lazy(() => import("./pages/QuoteModels"));
 const QuoteTemplates = lazy(() => import("./pages/QuoteTemplates"));
 const ProposalTemplates = lazy(() => import("./pages/ProposalTemplates"));
+const DirectSales = lazy(() => import("./pages/DirectSales"));
 const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const CatalogItems = lazy(() => import("./pages/CatalogItems"));
 
@@ -56,8 +60,14 @@ const Brands = lazy(() => import("./pages/Brands"));
 const UnitsOfMeasure = lazy(() => import("./pages/UnitsOfMeasure"));
 const Bundles = lazy(() => import("./pages/Bundles"));
 const Stocks = lazy(() => import("./pages/Stocks"));
+const InventoryToday = lazy(() => import("./pages/InventoryToday"));
+const StockMovements = lazy(() => import("./pages/StockMovements"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
+const Frota = lazy(() => import("./pages/frota/Frota"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
+const Receiving = lazy(() => import("./pages/Receiving"));
+const ClientOrders = lazy(() => import("./pages/ClientOrders"));
+const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const Services = lazy(() => import("./pages/Services"));
 const ServiceCategories = lazy(() => import("./pages/ServiceCategories"));
@@ -80,6 +90,28 @@ const WelcomeGuide = lazy(() => import("./pages/WelcomeGuide"));
 
 
 const AnewLeads = lazy(() => import("./pages/AnewLeads"));
+const PessoasCrm = lazy(() => import("./pages/PessoasCrm"));
+const UtilizadoresPerfis = lazy(() => import("./pages/UtilizadoresPerfis"));
+const PessoasRh = lazy(() => import("./pages/rh-exemplo/PessoasRh"));
+const PessoaRhDetalhe = lazy(() => import("./pages/rh-exemplo/PessoaRhDetalhe"));
+const RhAssiduidadeEAusencias = lazy(() => import("./pages/rh-exemplo/RhAssiduidadeEAusencias"));
+const RhMinhasAusencias = lazy(() => import("./pages/rh-exemplo/RhMinhasAusencias"));
+const RhMeuPonto = lazy(() => import("./pages/rh-exemplo/RhMeuPonto"));
+const RhMeusDocumentos = lazy(() => import("./pages/rh-exemplo/RhMeusDocumentos"));
+const RhCentrosTrabalho = lazy(() => import("./pages/rh-exemplo/RhCentrosTrabalho"));
+const RhOrganizacao = lazy(() => import("./pages/rh-exemplo/RhOrganizacao"));
+const RhModelosDocumentos = lazy(() => import("./pages/rh-exemplo/RhModelosDocumentos"));
+const RhProcessamentoSalarial = lazy(() => import("./pages/rh-exemplo/RhProcessamentoSalarial"));
+const RhConfiguracaoAdmissao = lazy(() => import("./pages/rh-exemplo/RhConfiguracaoAdmissao"));
+const RhCustos = lazy(() => import("./pages/rh-exemplo/RhCustos"));
+const RhRegrasFimContrato = lazy(() => import("./pages/rh-exemplo/RhRegrasFimContrato"));
+const RhConviteAdmissao = lazy(() => import("./pages/rh-exemplo/RhConviteAdmissao"));
+const RhPortalColaborador = lazy(() => import("./pages/rh-exemplo/RhPortalColaborador"));
+const RhAdmissaoIndice = lazy(() => import("./pages/rh-exemplo/RhAdmissaoIndice"));
+const NovaDenuncia = lazy(() => import("./pages/canal-denuncias/NovaDenuncia"));
+const AcompanharDenuncia = lazy(() => import("./pages/canal-denuncias/AcompanharDenuncia"));
+const RhMinhasDenuncias = lazy(() => import("./pages/rh-exemplo/RhMinhasDenuncias"));
+const RhDenuncias = lazy(() => import("./pages/rh-exemplo/RhDenuncias"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
 // AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
 const AnewClients = lazy(() => import("./pages/AnewClients"));
@@ -131,6 +163,7 @@ const UsersNew = lazy(() => import("./pages/UsersNew"));
 const SmtpManagement = lazy(() => import("./pages/SmtpManagement"));
 const EmailTemplates = lazy(() => import("./pages/EmailTemplates"));
 const Trash = lazy(() => import("./pages/Trash"));
+const SendFailures = lazy(() => import("./pages/SendFailures"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const AlertSettings = lazy(() => import("./pages/AlertSettings"));
 const ExportAudit = lazy(() => import("./pages/ExportAudit"));
@@ -139,12 +172,21 @@ const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const BookingManage = lazy(() => import("./pages/BookingManage"));
 const ConviteAdmissao = lazy(() => import("./pages/ConviteAdmissao"));
+const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
+const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/PrototipoNegocios"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
+// Portal do Fornecedor (F3.1): contexto sp_whoami + layout montados uma vez.
+const SupplierPortalShell = lazy(() => import("./components/supplier-portal/SupplierPortalLayout"));
+const SupplierPortal = lazy(() => import("./pages/SupplierPortal"));
+const SupplierPortalCatalog = lazy(() => import("./pages/SupplierPortalCatalog"));
+const SupplierPortalOrders = lazy(() => import("./pages/SupplierPortalOrders"));
+const SupplierPortalOrderDetail = lazy(() => import("./pages/SupplierPortalOrderDetail"));
+const SupplierPortalProfile = lazy(() => import("./pages/SupplierPortalProfile"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -156,6 +198,15 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Empresa ativa do portal — monta uma só vez para todas as rotas do portal,
+// fora do CRM: uma conta de portal não tem work-orgs e o CompanyProvider não
+// lhe serve de nada (ver src/contexts/PortalCompanyContext.tsx).
+const PortalCompanyRoute = () => (
+  <PortalCompanyProvider>
+    <Outlet />
+  </PortalCompanyProvider>
+);
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -192,15 +243,38 @@ const App = () => (
                       fica fora do ProtectedRoute de proposito. Quem manda e a
                       validade do token, verificada na Edge Function. */}
                   <Route path="/admissao/:token" element={<ConviteAdmissao />} />
+                  <Route path="/booking/confirm" element={<BookingConfirm />} />
+                  {/* Protótipo de Negócios (08/10/2026): dados de exemplo, sem sessão nem base de dados */}
+                  <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
+                  {/* Portal do colaborador de exemplo (página pública, sem sessão: acesso temporário pelo link) */}
+                  <Route path="/rh-exemplo/portal-colaborador/:token" element={<RhPortalColaborador />} />
+                  {/* O endereço antigo do link de admissão redireciona para o portal */}
+                  <Route path="/rh-exemplo/admissao/:token" element={<RhConviteAdmissao />} />
+                  {/* Canal de denúncias de exemplo: páginas públicas (sem sessão), dados em memória */}
+                  <Route path="/canal-denuncias/nova" element={<NovaDenuncia />} />
+                  <Route path="/canal-denuncias/acompanhar" element={<AcompanharDenuncia />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
-                    <Route path="/client-portal" element={<ClientPortal />} />
-                    <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
-                    <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
-                    <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
-                    <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
-                    <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    <Route element={<PortalCompanyRoute />}>
+                      <Route path="/client-portal" element={<ClientPortal />} />
+                      <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
+                      <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
+                      <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
+                      <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
+                      <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    </Route>
+                  </Route>
+
+                  {/* Portal do Fornecedor — só contas supplier_only (sem anew_users); só RPCs sp_* */}
+                  <Route element={<SupplierRouteGuard />}>
+                    <Route element={<SupplierPortalShell />}>
+                      <Route path="/supplier-portal" element={<SupplierPortal />} />
+                      <Route path="/supplier-portal/catalog" element={<SupplierPortalCatalog />} />
+                      <Route path="/supplier-portal/orders" element={<SupplierPortalOrders />} />
+                      <Route path="/supplier-portal/orders/:id" element={<SupplierPortalOrderDetail />} />
+                      <Route path="/supplier-portal/profile" element={<SupplierPortalProfile />} />
+                    </Route>
                   </Route>
 
                   {/* CRM routes — guard + Layout mount once; pages render via Outlet */}
@@ -216,16 +290,42 @@ const App = () => (
                       <Route path="/modelos-orcamento" element={<Navigate to="/quote-models" replace />} />
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
                       <Route path="/contacts" element={<Navigate to="/leads" replace />} />
-                      <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view" adminOnly><Atividades /></ProtectedRoute>} />
+                      <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view"><Atividades /></ProtectedRoute>} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
+                      <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
+                      <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/pessoas" element={<ProtectedRoute permission="users.view"><PessoasRh /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/pessoas/:id" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/assiduidade-e-ausencias" element={<ProtectedRoute permission="users.view"><RhAssiduidadeEAusencias /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/ausencias" element={<ProtectedRoute permission="users.view"><RhMinhasAusencias /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/assiduidade" element={<ProtectedRoute permission="users.view"><RhMeuPonto /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/documentos" element={<ProtectedRoute permission="users.view"><RhMeusDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/centros" element={<ProtectedRoute permission="users.view"><RhCentrosTrabalho /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/organizacao" element={<ProtectedRoute permission="users.view"><RhOrganizacao /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/documentos/modelos" element={<ProtectedRoute permission="users.view"><RhModelosDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/processamento-salarial" element={<ProtectedRoute permission="users.view"><RhProcessamentoSalarial /></ProtectedRoute>} />
+                      {/* Link antigo: as horas extra da pessoa passaram a ser uma aba de «O meu ponto». */}
+                      <Route path="/rh-exemplo/minhas-horas-extra" element={<Navigate to="/rh-exemplo/assiduidade?aba=horas-extra" replace />} />
+                      <Route path="/rh-exemplo/custos" element={<ProtectedRoute permission="users.view"><RhCustos /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/admissao" element={<ProtectedRoute permission="users.view"><RhAdmissaoIndice /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/admissao/configuracao" element={<ProtectedRoute permission="users.view"><RhConfiguracaoAdmissao /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/contratos/configuracao" element={<ProtectedRoute permission="users.view"><RhRegrasFimContrato /></ProtectedRoute>} />
+                      {/* Canal de denúncias de exemplo, dentro da app: A minha área (Denúncias: denunciar num painel e acompanhar) e a gestão no RH */}
+                      <Route path="/rh-exemplo/denunciar" element={<Navigate to="/rh-exemplo/minhas-denuncias?nova=1" replace />} />
+                      <Route path="/rh-exemplo/minhas-denuncias" element={<ProtectedRoute permission="users.view"><RhMinhasDenuncias /></ProtectedRoute>} />
+                      <Route path="/rh-exemplo/denuncias" element={<ProtectedRoute permission="users.view"><RhDenuncias /></ProtectedRoute>} />
+                      <Route path="/canal-denuncias/gestao" element={<Navigate to="/rh-exemplo/denuncias" replace />} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
+                      <Route path="/negocio-metas" element={<ProtectedRoute permission="deals.view"><NegocioMetas /></ProtectedRoute>} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
                       <Route path="/acquisition-help" element={<AcquisitionHelp />} />
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />
                       <Route path="/proposal-templates" element={<ProposalTemplates />} />
-                      <Route path="/quote-templates" element={<ProtectedRoute permission="proposals.manage"><QuoteTemplates /></ProtectedRoute>} />
+                      <Route path="/quote-templates" element={<ProtectedRoute permission="quotes.manage"><QuoteTemplates /></ProtectedRoute>} />
+                      {/* Venda Direta (Fase 2) — fluxo alternativo ao Orçamento -> Proposta -> Contrato. Permissões próprias: direct_sales.view/create/edit (migration 20261130230000). */}
+                      <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />
                       <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
                       <Route path="/roles" element={<ProtectedRoute permission="roles.view"><Roles /></ProtectedRoute>} />
@@ -246,9 +346,32 @@ const App = () => (
                       <Route path="/brands" element={<Brands />} />
                       <Route path="/units-of-measure" element={<UnitsOfMeasure />} />
                       <Route path="/bundles" element={<Bundles />} />
+                      {/* Inventário › Hoje e Movimentos (livro stock_movements): mesma permissão de leitura que a RLS exige (inventory.view). */}
+                      <Route path="/inventory" element={<ProtectedRoute permission="inventory.view"><InventoryToday /></ProtectedRoute>} />
+                      <Route path="/stock-movements" element={<ProtectedRoute permission="inventory.view"><StockMovements /></ProtectedRoute>} />
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
+                      {/* Frota de exemplo (dados em memória/localStorage, sem tabelas): ainda não há permissões fleet.*, por isso usa as do
+                          Inventário — inventory.view para ver (as carrinhas são armazéns móveis) e inventory.edit, dentro do ecrã, para registar. */}
+                      <Route path="/frota" element={<Navigate to="/frota/hoje" replace />} />
+                      <Route path="/frota/hoje" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="hoje" ecra="hoje" /></ProtectedRoute>} />
+                      <Route path="/frota/viaturas" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="viaturas" ecra="viaturas" /></ProtectedRoute>} />
+                      <Route path="/frota/atribuicoes" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="atribuicoes" ecra="atribuicoes" /></ProtectedRoute>} />
+                      <Route path="/frota/condutores" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="condutores" ecra="condutores" /></ProtectedRoute>} />
+                      <Route path="/frota/manutencao" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="manutencao" ecra="manutencao" /></ProtectedRoute>} />
+                      <Route path="/frota/custos" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="custos" ecra="custos" /></ProtectedRoute>} />
+                      <Route path="/frota/ocorrencias" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="ocorrencias" ecra="ocorrencias" /></ProtectedRoute>} />
+                      <Route path="/frota/documentos" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="documentos" ecra="documentos" /></ProtectedRoute>} />
+                      <Route path="/frota/relatorios" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="relatorios" ecra="relatorios" /></ProtectedRoute>} />
+                      <Route path="/frota/atividade" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="atividade" ecra="atividade" /></ProtectedRoute>} />
+                      <Route path="/frota/ligacoes" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="ligacoes" ecra="ligacoes" /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
+                      {/* Receção por código (Fase 2): permissão própria receiving.view (categoria 'receiving'). O servidor exige ainda purchase_orders.view OU .receive para consultar (rpc_receiving_lookup) e receiving.receive + purchase_orders.receive + inventory.edit para receber (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}
+                      <Route path="/receiving" element={<ProtectedRoute permission="receiving.view"><Receiving /></ProtectedRoute>} />
+                      {/* Permissão própria client_orders.view — o armazém vê as encomendas sem precisar de ver contratos. Mesma verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
+                      <Route path="/client-orders" element={<ProtectedRoute permission="client_orders.view"><ClientOrders /></ProtectedRoute>} />
+                      {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
+                      <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
                       <Route path="/services" element={<Services />} />
                       <Route path="/service-categories" element={<ServiceCategories />} />
@@ -357,6 +480,7 @@ const App = () => (
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/email-templates" element={<ProtectedRoute permission="email_templates.view"><EmailTemplates /></ProtectedRoute>} />
                       <Route path="/trash" element={<Trash />} />
+                      <Route path="/send-failures" element={<ProtectedRoute permission="scheduling.items.view"><SendFailures /></ProtectedRoute>} />
                       <Route path="/export-audit" element={<ProtectedRoute permission="exports.audit.view"><ExportAudit /></ProtectedRoute>} />
                       <Route path="/platform/support-access" element={<ProtectedRoute permission="platform.support_access.view"><SupportAccess /></ProtectedRoute>} />
                       <Route path="/platform/auth-audit-log" element={<ProtectedRoute permission="platform.auth_audit_log.view"><AuthAuditLog /></ProtectedRoute>} />

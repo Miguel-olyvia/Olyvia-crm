@@ -28,6 +28,7 @@ export interface Lead {
   status: string;
   source: string | null;
   notes: string | null;
+  lost_reason?: string | null;
   tags: string[] | null;
   created_at: string;
   created_by: string | null;

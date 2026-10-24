@@ -3,8 +3,8 @@ import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/
 import { resolveField, type RenderContext } from '@/utils/documentVariables';
 import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
 import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
-import { computeQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
-import { getLineUnitPrice } from '@/utils/quotes/quoteLinePricing';
+import { computeQuoteTotals, getLineVatLabel, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
+import { getLineDisplayUnitPrice } from '@/utils/quotes/quoteLinePricing';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -208,8 +208,15 @@ interface QuotePDFProps {
    * dos seus orçamentos, mas o cabeçalho tem de identificar a PROPOSTA — caso
    * contrário sai o número do orçamento (Q-...) num documento intitulado
    * "Proposta", que foi exactamente o defeito reportado.
+   *
+   * 'direct_sale': PDF da venda direta para o cliente. Reaproveita este
+   * documento para sair igual às propostas; `validUntil` (data ISO) substitui
+   * a validade em dias dos orçamentos.
    */
-  documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null };
+  documentContext?:
+    | { kind: 'quote' }
+    | { kind: 'proposal'; number?: string | null; title?: string | null }
+    | { kind: 'direct_sale'; number?: string | null; validUntil?: string | null };
 }
 
 // Extract attributes from a line as a list of { label, value, priceImpact }
@@ -287,9 +294,14 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // mais abaixo); faltava saber para o titulo e para os rotulos das seccoes.
   // Calculado aqui em cima, e nao junto ao numero, porque o titulo precisa dele.
   const ehProposta = documentContext?.kind === 'proposal';
-  const rotuloDocumento = ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
-  const rotuloDetalhes = ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
-  const rotuloValor = ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
+  // Venda direta: os modelos da empresa trazem titulos e rotulos de orcamento
+  // ou de proposta ("PROPOSTA", "DETALHES DO ORÇAMENTO"). Aqui mandam sempre os
+  // rotulos da venda direta -- o resto do modelo (cores, logotipo, rodape,
+  // termos) aplica-se tal e qual.
+  const ehVendaDireta = documentContext?.kind === 'direct_sale';
+  const rotuloDocumento = ehVendaDireta ? 'VENDA DIRETA' : ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
+  const rotuloDetalhes = ehVendaDireta ? 'DETALHES DA VENDA DIRETA' : ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
+  const rotuloValor = ehVendaDireta ? 'VALOR DA VENDA DIRETA' : ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
 
   const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || rotuloDocumento;
   const showCompanyInfo = proposalTemplate?.show_company_info !== false;
@@ -378,7 +390,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
 
   // Preço unitário pela fonte única: o preço de venda definido manda mesmo
   // quando a linha tem custo, e o valor vem fechado ao cêntimo.
-  const calculateUnitPrice = (line: any) => getLineUnitPrice(line);
+  // Numa linha gravada: preço de venda gravado, senão soma dos componentes do
+  // bundle, senão total ÷ quantidade — o total da linha é sempre unit × qtd.
+  const calculateUnitPrice = (line: any) => getLineDisplayUnitPrice(line);
 
   // Format client address
   const primaryAddress = client?.client_addresses?.find((addr: any) => addr.is_primary) 
@@ -438,14 +452,14 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // documento sem qualquer identificação.
   const isProposalDocument = ehProposta;
   const headerNumber =
-    (isProposalDocument ? (documentContext as { number?: string | null }).number : null)
+    (isProposalDocument || ehVendaDireta ? (documentContext as { number?: string | null }).number : null)
     || quote.quote_number
     || 'N/A';
 
   const renderHeader = (section: any) => (
     <View fixed style={headerStyle}>
       <View style={styles.headerLeft}>
-        <Text style={[styles.title, { color: textColor }]}>{section?.settings?.customTitle || headerTitle}</Text>
+        <Text style={[styles.title, { color: textColor }]}>{ehVendaDireta ? rotuloDocumento : (section?.settings?.customTitle || headerTitle)}</Text>
         <Text style={styles.quoteNumber}>{headerNumber}</Text>
         <Text style={styles.quoteDate}>Data: {new Date(quote.created_at).toLocaleDateString('pt-PT')}</Text>
       </View>
@@ -496,8 +510,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         {vat     && <View style={styles.row}><Text style={styles.label}>NIF:</Text><Text style={styles.value}>{vat}</Text></View>}
         {email   && <View style={styles.row}><Text style={styles.label}>Email:</Text><Text style={styles.value}>{email}</Text></View>}
         {phone   && <View style={styles.row}><Text style={styles.label}>Telefone:</Text><Text style={styles.value}>{phone}</Text></View>}
-        {address && <View style={styles.row}><Text style={styles.label}>Morada:</Text><Text style={styles.value}>{address}</Text></View>}
-        {quote.obra_endereco && <View style={styles.row}><Text style={styles.label}>Morada Obra:</Text><Text style={styles.value}>{quote.obra_endereco}</Text></View>}
+        {/* Morada fiscal = principal da entidade; morada de entrega = a
+            escolhida no orçamento (obra_endereco, gravado com site_address_id). */}
+        {address && <View style={styles.row}><Text style={styles.label}>Morada fiscal:</Text><Text style={styles.value}>{address}</Text></View>}
+        {quote.obra_endereco && <View style={styles.row}><Text style={styles.label}>Morada de entrega:</Text><Text style={styles.value}>{quote.obra_endereco}</Text></View>}
       </View>
     );
   })() : null;
@@ -518,7 +534,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const renderQuoteItems = (section: any) => (
     <View>
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloDetalhes)}</Text>
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{ehVendaDireta ? rotuloDetalhes : sectionLabel(section, rotuloDetalhes)}</Text>
         <View style={styles.table}>
           <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}> 
             <Text style={columnStyles.sku}>SKU</Text>
@@ -554,19 +570,13 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                 const unitPrice = calculateUnitPrice(line);
                 const quantity = parseFloat(String(line.qt || 0));
                 const lineTotal = parseFloat(String(line.total_sem_iva || 0));
-                const lineIva = parseFloat(String(line.iva_percent || 0));
                 const lineAttrs = getLineAttributes(line);
                 const bundleComponents = getBundleComponents(line);
                 const showBundleBadge = isBundleLine(line) || bundleComponents.length > 0;
                 const unidade = line.unidade || 'UN';
-                const uniqueComponentRates = Array.from(new Set(bundleComponents.map(c => c.vat_rate)));
                 const lineIvaOverride = (line as any)?.selected_attributes?.iva_override;
                 const hasLineIvaOverride = typeof lineIvaOverride === "number" && !Number.isNaN(lineIvaOverride);
-                const ivaDisplay = hasLineIvaOverride
-                  ? `${Number(lineIvaOverride).toFixed(0)}%`
-                  : (bundleComponents.length > 0 && uniqueComponentRates.length > 1
-                      ? 'Mista'
-                      : `${(bundleComponents.length > 0 ? uniqueComponentRates[0] : lineIva).toFixed(0)}%`);
+                const ivaDisplay = getLineVatLabel(line);
 
                 return (
                   <View key={line.id} wrap={false}>
@@ -596,7 +606,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                         <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 4, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>Componentes do bundle:</Text>
                         {bundleComponents.map((component, idx) => {
                           const effectiveQty = component.quantity * (quantity || 1);
-                          const componentTotal = component.unit_price * effectiveQty;
+                          const componentTotal = round2(component.unit_price) * effectiveQty;
                           return (
                             <View key={`${component.name}-${idx}`} style={{ marginBottom: 4, paddingBottom: 4, borderBottom: idx === bundleComponents.length - 1 ? 'none' : '1 solid #e5e7eb' }}>
                               <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 1 }}>
@@ -643,7 +653,26 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     </View>
   ) : null;
 
-  const renderValidity = (section: any) => showValidity ? (
+  // Venda direta: validade por data (direct_sales.valid_until), nao em dias.
+  // Sem data gravada nao ha nada de verdadeiro a dizer, e o bloco nao sai.
+  const vendaDiretaValidaAte = (() => {
+    if (!ehVendaDireta) return null;
+    const raw = (documentContext as { validUntil?: string | null }).validUntil;
+    if (!raw) return null;
+    // valid_until e uma coluna date ("yyyy-MM-dd"): ler as partes evita que o
+    // fuso horario mude o dia ao passar por new Date().
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
+  })();
+
+  const renderValidity = (section: any) => ehVendaDireta ? (showValidity && vendaDiretaValidaAte ? (
+    <View style={styles.section}>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALIDADE')}</Text>
+      <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
+        <Text style={{ fontSize: 9, color: secondaryTextColor }}>Esta proposta de venda é válida até {vendaDiretaValidaAte}.</Text>
+      </View>
+    </View>
+  ) : null) : showValidity ? (
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALIDADE')}</Text>
       <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
@@ -689,7 +718,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     if (hideTotals) return null;
     return (
     <View style={styles.section} wrap={false} minPresenceAhead={115}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloValor)}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{ehVendaDireta ? rotuloValor : sectionLabel(section, rotuloValor)}</Text>
       {renderTotals()}
     </View>
     );
@@ -771,7 +800,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
               })()}
             </View>
             {footerText && <Text style={[styles.footerText, { textAlign: 'center', marginTop: 2 }]}>{footerText}</Text>}
-            <View style={footerBottomRowStyle}><Text style={footerBrandTextStyle}>{company?.name || 'Orçamento'}</Text></View>
+            <View style={footerBottomRowStyle}><Text style={footerBrandTextStyle}>{company?.name || (ehVendaDireta ? 'Venda Direta' : 'Orçamento')}</Text></View>
           </View>
         )}
       </Page>

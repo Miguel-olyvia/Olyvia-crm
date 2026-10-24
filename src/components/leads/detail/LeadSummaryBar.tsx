@@ -39,7 +39,7 @@ export function LeadSummaryBar({
         <p className={`font-semibold mt-0.5 ${lastContactColor}`}>{lastContactText}</p>
       </div>
       <div>
-        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Interacções</p>
+        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Interações</p>
         <p className="font-semibold mt-0.5">{interactionCount}</p>
       </div>
       <div>
@@ -47,7 +47,7 @@ export function LeadSummaryBar({
         <p className={`font-semibold mt-0.5 ${daysColor}`}>{daysAsLead} {daysAsLead === 1 ? "dia" : "dias"}</p>
       </div>
       <div>
-        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Próxima Acção</p>
+        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Próxima Ação</p>
         {nextAction ? (
           <p className="font-semibold mt-0.5 text-foreground truncate">{nextAction.description}</p>
         ) : (

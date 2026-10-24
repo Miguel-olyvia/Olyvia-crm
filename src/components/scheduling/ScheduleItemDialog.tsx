@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format, setHours, setMinutes, addHours } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -13,7 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { X, ChevronDown, Send, Check, XCircle, HelpCircle, User, Mail, Phone } from 'lucide-react';
 import { extractLeadContactInfo } from '@/utils/leadContactInfo';
 import { ClientMentionInput } from './ClientMentionInput';
-import { ContactMentionInput } from './ContactMentionInput';
+import { LeadMentionInput } from './LeadMentionInput';
 import { InviteeSelector } from './InviteeSelector';
 import { useScheduleInvitations } from '@/hooks/useScheduleInvitations';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -23,6 +23,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/toast';
 import { scheduleItemSchema } from '@/lib/validations';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleItemStatus, BoardModule } from '@/types/scheduling';
+import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
 
 interface ScheduleItemDialogProps {
   open: boolean;
@@ -69,6 +70,7 @@ export function ScheduleItemDialog({
   const { userType } = useCompany();
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const userSelectRef = useRef<HTMLButtonElement>(null);
   const [inviteesOpen, setInviteesOpen] = useState(false);
   const [addressOptions, setAddressOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [showAddressPicker, setShowAddressPicker] = useState(false);
@@ -151,7 +153,7 @@ export function ScheduleItemDialog({
       : format(defaultEnd, "yyyy-MM-dd'T'HH:mm"),
     all_day: item?.all_day || false,
     client_id: item?.client_id || defaultClientId || '',
-    contact_id: item?.contact_id || '',
+    lead_id: item?.lead_id || '',
     location: item?.location || '',
     priority: item?.priority || 0,
     notes: item?.notes || '',
@@ -184,7 +186,7 @@ export function ScheduleItemDialog({
           : format(end, "yyyy-MM-dd'T'HH:mm"),
         all_day: item?.all_day || false,
         client_id: item?.client_id || defaultClientId || '',
-        contact_id: item?.contact_id || '',
+        lead_id: item?.lead_id || '',
         location: item?.location || '',
         priority: item?.priority || 0,
         notes: item?.notes || '',
@@ -211,7 +213,7 @@ export function ScheduleItemDialog({
   const boardModules = (selectedBoard?.settings as any)?.allowed_modules as BoardModule[] | undefined;
   const autoFillAddress = (selectedBoard?.settings as any)?.auto_fill_address === true;
   const showClient    = !isTimeOffBoard && (!boardModules || boardModules.includes('client'));
-  const showContact   = !isTimeOffBoard && (!boardModules || boardModules.includes('contact'));
+  const showLead      = !isTimeOffBoard && (!boardModules || boardModules.includes('contact'));
   const showLocation  = !isTimeOffBoard && (!boardModules || boardModules.includes('location'));
   const showPriority  = !isTimeOffBoard && (!boardModules || boardModules.includes('priority'));
   const showResources = !isTimeOffBoard && (!boardModules || boardModules.includes('resources'));
@@ -226,10 +228,11 @@ export function ScheduleItemDialog({
     return companyUsers;
   }, [companyUsers, isSelfOnly, currentUserId]);
 
-  // Auto-set user_id for self-only users when creating new items on time-off boards
+  // Auto-set user_id for self-only users on time-off boards (new items, or existing items
+  // without a user_id). Never overwrites a user_id the item already has.
   useEffect(() => {
-    if (open && isTimeOffBoard && isSelfOnly && currentUserId && !item) {
-      setFormData(f => ({ ...f, user_id: currentUserId }));
+    if (open && isTimeOffBoard && isSelfOnly && currentUserId && !item?.user_id) {
+      setFormData(f => (f.user_id === currentUserId ? f : { ...f, user_id: currentUserId }));
     }
   }, [open, isTimeOffBoard, isSelfOnly, currentUserId, item]);
 
@@ -270,7 +273,16 @@ export function ScheduleItemDialog({
     if (!formData.board_id || !formData.start_datetime || !formData.end_datetime) {
       return;
     }
-    
+
+    // Em quadros de férias o Colaborador é obrigatório (sem ele o item ficava ligado a quem o cria)
+    if (isTimeOffBoard && !formData.user_id) {
+      const message = t('scheduling.timeOff.employeeRequired');
+      setFieldErrors(prev => ({ ...prev, user_id: message }));
+      toast.error(message);
+      userSelectRef.current?.focus();
+      return;
+    }
+
     // For time-off boards, title can be auto-generated
     let title = formData.title;
     if (isTimeOffBoard && !title && formData.time_off_type) {
@@ -315,7 +327,7 @@ export function ScheduleItemDialog({
         start_datetime: new Date(formData.start_datetime).toISOString(),
         end_datetime: new Date(formData.end_datetime).toISOString(),
         client_id: formData.client_id || null,
-        contact_id: formData.contact_id || null,
+        lead_id: formData.lead_id || null,
         employee_id: formData.employee_id || null,
         user_id: isTimeOffBoard ? (formData.user_id || null) : null,
         time_off_type: isTimeOffBoard ? formData.time_off_type : null,
@@ -481,6 +493,7 @@ export function ScheduleItemDialog({
                     <SelectItem value="rescheduled">{t('common.rescheduled')}</SelectItem>
                   </SelectContent>
                 </Select>
+                <ConfirmedByClientBadge confirmedAt={item?.confirmed_at} />
               </div>
             )}
 
@@ -509,13 +522,22 @@ export function ScheduleItemDialog({
 
                 {/* User selector (Colaborador) */}
                 <div className="col-span-2 space-y-2">
-                  <Label>{t('scheduling.timeOff.employee')} *</Label>
+                  <Label htmlFor="time-off-user">{t('scheduling.timeOff.employee')} *</Label>
                   <Select
                     value={formData.user_id}
-                    onValueChange={(value) => setFormData(f => ({ ...f, user_id: value }))}
+                    onValueChange={(value) => {
+                      setFormData(f => ({ ...f, user_id: value }));
+                      setFieldErrors(({ user_id: _cleared, ...rest }) => rest);
+                    }}
                     disabled={isSelfOnly}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger
+                      id="time-off-user"
+                      ref={userSelectRef}
+                      aria-required="true"
+                      aria-invalid={!!fieldErrors.user_id}
+                      aria-describedby={fieldErrors.user_id ? 'time-off-user-error' : undefined}
+                    >
                       <SelectValue placeholder={t('scheduling.timeOff.selectEmployee')} />
                     </SelectTrigger>
                     <SelectContent>
@@ -526,6 +548,9 @@ export function ScheduleItemDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.user_id && (
+                    <p id="time-off-user-error" role="alert" className="text-sm text-destructive">{fieldErrors.user_id}</p>
+                  )}
                 </div>
 
                 {/* Approval status display */}
@@ -706,7 +731,7 @@ export function ScheduleItemDialog({
 
             {/* Client - hide for time-off */}
             {showClient && (
-              <div className={showClient && !showContact ? "col-span-2 space-y-2" : "space-y-2"}>
+              <div className={showClient && !showLead ? "col-span-2 space-y-2" : "space-y-2"}>
                 <Label>{t('scheduling.item.client')}</Label>
                 <ClientMentionInput
                   selectedClientId={formData.client_id}
@@ -763,13 +788,13 @@ export function ScheduleItemDialog({
               </div>
             )}
 
-            {/* Contact - hide for time-off and construction boards */}
-            {showContact && (
+            {/* Lead - hide for time-off and construction boards */}
+            {showLead && (
               <div className="space-y-2">
                 <Label>{t('scheduling.item.contact')}</Label>
-                <ContactMentionInput
-                  selectedContactId={formData.contact_id}
-                  onContactSelect={(contactId) => setFormData(f => ({ ...f, contact_id: contactId }))}
+                <LeadMentionInput
+                  selectedLeadId={formData.lead_id}
+                  onLeadSelect={(leadId) => setFormData(f => ({ ...f, lead_id: leadId }))}
                   placeholder={t('scheduling.item.selectContact')}
                   disabled={isViewOnly}
                 />

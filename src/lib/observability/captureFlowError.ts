@@ -56,6 +56,7 @@ export type BusinessFlow =
   // the client has no other route.
   | "client-portal-proposal"
   | "client-portal-contract"
+  | "client-portal-direct-sale"
   | "client-portal-access"
   // Writes that can land half-applied and leave wrong data behind, rather
   // than simply failing. Grouped by what ends up corrupted.
@@ -71,6 +72,14 @@ export type BusinessFlow =
   // Loading a user's permission scopes: an empty result here can silently
   // wipe scopes on confirm, so a failed read is a security-relevant defect.
   | "permissions-scope-load"
+  // Numbers of the Inventory "Today" screen and menu counters
+  // (rpc_inventory_today). On failure every counter hides itself, so a
+  // timeout/permission error would otherwise look like "nothing pending".
+  | "inventory-today-load"
+  // Fleet screens (fleet_* tables, fleet_v_vehicles and the lists of other
+  // modules used by the fleet forms). A failed read shows an error banner with
+  // "try again", but RLS/timeouts must not look like "no vehicles".
+  | "fleet-load"
   // Remaining one-offs.
   | "ai-assistant"
   | "account-deletion-request"
@@ -211,7 +220,9 @@ export type BusinessFlow =
   // uma query" de `hr-retribuicao-load`/`hr-vinculo-horas-load`. So leitura:
   // este ecra nunca escreve retribuicao nem horas.
   | "hr-retribuicoes-vigentes-organizacao-load"
-  | "hr-horas-vigentes-organizacao-load";
+  | "hr-horas-vigentes-organizacao-load"
+  // Funções neg_* da página Pessoas: só os erros inesperados (os códigos NG são esperados).
+  | "pessoas-neg";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually

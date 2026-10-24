@@ -69,7 +69,12 @@ export default function ProductPricesDialog({
       const { data, error } = await supabase
         .from('product_prices')
         .select('id, price_type, price, currency, valid_from, valid_to, vat_rate')
-        .eq('product_id', productId);
+        .eq('product_id', productId)
+        // Pode haver mais do que uma linha por price_type para o mesmo produto
+        // (a antiga fica lá para histórico). Ordenar por created_at ascendente
+        // e deixar o forEach sobrepor garante que o formulário edita sempre a
+        // mais recente — a mesma que o orçamento e a listagem já passam a usar.
+        .order('created_at', { ascending: true });
 
       if (error) throw error;
 

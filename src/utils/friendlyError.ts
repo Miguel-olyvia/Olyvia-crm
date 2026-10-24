@@ -44,6 +44,11 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   // "anew_leads_conversao_coerente"') a quem arrastasse a lead noutro estado.
   // Vem primeiro por ser a regra mais especifica das que aqui estao.
   { match: /anew_leads_conversao_coerente/i, key: "friendlyError.leadAlreadyConverted" },
+  { match: /plan_limit_exceeded:leads/i, key: "friendlyError.leadLimitExceeded" },
+  { match: /plan_limit_exceeded:users/i, key: "friendlyError.userLimitExceeded" },
+  { match: /plan_limit_exceeded:proposals/i, key: "friendlyError.proposalLimitExceeded" },
+  { match: /plan_limit_exceeded:quotes/i, key: "friendlyError.quoteLimitExceeded" },
+  { match: /plan_limit_exceeded:contracts/i, key: "friendlyError.contractLimitExceeded" },
   { match: /Nenhum SMTP ativo encontrado/i, key: "friendlyError.noSmtp" },
   { match: /SMTP/i, key: "friendlyError.smtpError" },
   { match: /rate limit|too many requests/i, key: "friendlyError.rateLimit" },
@@ -121,8 +126,28 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /planeado_inexistente/i, key: "friendlyError.planeadoInexistente" },
 ];
 
+/**
+ * Erros da regra "dono da lead/cliente = recurso da visita futura", lançados
+ * pela base com prefixo estável (o nif-write-proxy só passa `message`). Tratados
+ * ANTES de FRIENDLY_MAP: o nome do utilizador pode conter "permission" ou "SMTP".
+ */
+const OWNER_WITHOUT_RESOURCE = /owner_without_schedule_resource:\s*(.*)$/im;
+const OWNER_REQUIRED = /owner_required_for_future_visit/i;
+
+function mapOwnerSyncError(raw: string): string | null {
+  const withoutResource = OWNER_WITHOUT_RESOURCE.exec(raw);
+  if (withoutResource) {
+    const name = withoutResource[1].trim().replace(/["}\\]+$/, "") || "?";
+    return translate("friendlyError.ownerWithoutScheduleResource").replace("{name}", name);
+  }
+  if (OWNER_REQUIRED.test(raw)) return translate("friendlyError.ownerRequiredForFutureVisit");
+  return null;
+}
+
 function mapFriendly(raw: string): string {
   if (!raw) return translate("friendlyError.unexpectedRetry");
+  const ownerSync = mapOwnerSyncError(raw);
+  if (ownerSync) return ownerSync;
   for (const { match, key } of FRIENDLY_MAP) {
     if (match.test(raw)) return translate(key);
   }

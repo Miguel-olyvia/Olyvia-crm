@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAccessKind } from "@/hooks/useClientRole";
+import { clientSupplierHome, fetchAccessKind, getClientSupplierSurface } from "@/hooks/useClientRole";
 import { getSessionContext } from "@/lib/auth/sessionContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,8 +85,19 @@ const Auth = () => {
   useEffect(() => {
     const redirectByRole = async (userId: string) => {
       const kind = await fetchAccessKind(userId);
+      if (kind === "supplier_only") {
+        // Conta do portal do fornecedor (sem anew_users): nunca vai para o CRM.
+        navigate("/supplier-portal");
+        return;
+      }
       if (kind === "client_only") {
         navigate("/client-portal");
+        return;
+      }
+      if (kind === "client_supplier") {
+        // Cliente que é também fornecedor: escolha guardada ou ecrã de escolha.
+        // Nunca vai para o CRM.
+        navigate(clientSupplierHome(getClientSupplierSurface(userId)));
         return;
       }
       if (kind === "hybrid") {
@@ -149,7 +160,9 @@ const Auth = () => {
       message.includes("demorou demasiado tempo") ||
       message.includes("timeout") ||
       message.includes("network") ||
-      message.includes("failed to fetch")
+      message.includes("failed to fetch") ||
+      message.includes("failed to send a request") ||
+      message.includes("edge function")
     ) {
       return `${fallbackAction} indisponível de momento. O servidor está lento. Tente novamente dentro de instantes.`;
     }
@@ -504,17 +517,17 @@ const Auth = () => {
               >
                 Voltar ao Login
               </button>
-            ) : (
+            ) : mode === "register" ? (
+              // O registo aberto foi retirado do ecra: no login nao ha ja
+              // ligacao para criar conta, por isso este modo nao e alcancavel.
               <button
                 type="button"
-                onClick={() => setMode(mode === "login" ? "register" : "login")}
+                onClick={() => setMode("login")}
                 className="text-primary hover:underline block w-full"
               >
-                {mode === "login"
-                  ? "Não tem conta? Registe-se agora"
-                  : "Já tem conta? Faça login"}
+                Já tem conta? Faça login
               </button>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>

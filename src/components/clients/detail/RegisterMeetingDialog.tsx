@@ -182,7 +182,7 @@ export function RegisterMeetingDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">Próxima acção</Label>
+              <Label className="text-xs">Próxima ação</Label>
               <Select value={nextActionType} onValueChange={setNextActionType}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
                 <SelectContent>
@@ -191,7 +191,7 @@ export function RegisterMeetingDialog({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Data/hora próxima acção</Label>
+              <Label className="text-xs">Data/hora próxima ação</Label>
               <Input type="datetime-local" value={nextActionDate} onChange={e => setNextActionDate(e.target.value)} />
             </div>
           </div>

@@ -266,7 +266,13 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  onClick={() => hasId && !isCurrent ? navigate(step.route) : undefined}
+                  // Abre o DETALHE do registo (todas as listas aceitam ?open=<id>),
+                  // não a lista: era isso que o utilizador esperava ao clicar.
+                  onClick={() =>
+                    hasId && !isCurrent && step.id
+                      ? navigate(`${step.route}?open=${encodeURIComponent(step.id)}`)
+                      : undefined
+                  }
                   disabled={!hasId || isCurrent}
                   className={cn(
                     "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap",

@@ -52,9 +52,18 @@ async function fetchScopeContext(authUid: string, organizationId: string): Promi
   if (pending) return pending;
 
   const request = (async (): Promise<ScopeContext | null> => {
-    const { data, error } = await supabase.rpc("get_permission_scope_context", {
-      _organization_id: organizationId,
-    });
+    // A dropped connection mid-request never resolves as an error — without
+    // a ceiling, `loading` never flips back to false and the page's skeleton
+    // is stuck forever. Race it against a timeout so it fails closed the
+    // same way an RPC error already does below.
+    const SCOPE_TIMEOUT_MS = 15000;
+    const timeout = new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error("get_permission_scope_context timed out") }), SCOPE_TIMEOUT_MS)
+    );
+    const { data, error } = await Promise.race([
+      supabase.rpc("get_permission_scope_context", { _organization_id: organizationId }),
+      timeout,
+    ]);
 
     if (error) {
       // Fail closed: a null context leaves every scope at NONE rather than
@@ -63,7 +72,7 @@ async function fetchScopeContext(authUid: string, organizationId: string): Promi
       return null;
     }
 
-    return (data ?? null) as ScopeContext | null;
+    return (data ?? null) as unknown as ScopeContext | null;
   })();
 
   inFlightScopeContexts.set(key, request);

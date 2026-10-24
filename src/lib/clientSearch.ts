@@ -43,11 +43,13 @@ export function escapeIlike(s: string): string {
  * `,` and `()` are structural characters in that mini-language — an
  * unescaped one in the term breaks the filter with a syntax error (400)
  * instead of just matching oddly, e.g. searching "Cadeira, Mesa (2un)".
+ * `*` (PostgREST turns it into the `%` wildcard) and `"` (value quoting in
+ * that syntax) are dropped too, same as `sanitizeWord`.
  * `%`/`_` (ilike wildcards) are also escaped via escapeIlike so the term is
  * matched literally rather than as a pattern.
  */
 export function escapePostgrestOrTerm(term: string): string {
-  return escapeIlike(term).replace(/[,()]/g, " ").trim();
+  return escapeIlike(term).replace(/[,()*"]/g, " ").trim();
 }
 
 function sanitizeWord(raw: string): string {

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Loader2, Save, RotateCcw, ChevronDown, Megaphone, UserCheck, Users, FileText, ScrollText, ClipboardList, Bell, Mail, Calendar } from "lucide-react";
+import { Loader2, Save, RotateCcw, ChevronDown, Megaphone, UserCheck, Users, FileText, ScrollText, ClipboardList, Bell, Mail, Calendar, Warehouse } from "lucide-react";
 
 // ─── Alert type definitions with defaults ───
 interface AlertDef {
@@ -18,6 +18,7 @@ interface AlertDef {
   hasDays: boolean;
   defaultDays: number | null;
   defaultActive: boolean;
+  daysUnit?: string;
 }
 
 interface ModuleDef {
@@ -97,6 +98,19 @@ const ALERT_MODULES: ModuleDef[] = [
       { type: "quote_no_value", label: "Sem valor definido", description: "Alertar quando o pedido não tem valor definido", hasDays: false, defaultDays: null, defaultActive: true },
     ],
   },
+  {
+    id: "inventory",
+    label: "Inventário",
+    icon: Warehouse,
+    iconColor: "text-teal-500",
+    alerts: [
+      { type: "stock_low", label: "Stock baixo", description: "Avisa quando o stock de um produto num armazém desce até ao ponto de reencomenda.", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "purchase_order_overdue", label: "Encomenda em atraso", description: "Avisa quando a data de entrega esperada de uma encomenda é ultrapassada sem ter sido recebida.", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "supplier_price_change", label: "Aumento de preço de fornecedor", description: "Avisa quando o preço de compra de um fornecedor sobe acima da percentagem definida (valor abaixo em %).", hasDays: true, defaultDays: 10, defaultActive: true, daysUnit: "%" },
+      { type: "inventory_discrepancy_unresolved", label: "Contagem com diferenças aceites sem ajuste", description: "Avisa quando uma contagem de inventário é finalizada com pelo menos 1 linha aceite sem ajuste ao stock.", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "inventory_count_stale", label: "Contagem parada", description: "Avisa quando uma contagem de inventário está em curso há X dias sem atualização.", hasDays: true, defaultDays: 5, defaultActive: true },
+    ],
+  },
 ];
 
 const NOTIFICATION_MODULES: ModuleDef[] = [
@@ -112,6 +126,8 @@ const NOTIFICATION_MODULES: ModuleDef[] = [
       { type: "client_rejected_quote", label: "Orçamento rejeitado", description: "Quando o cliente rejeita um orçamento", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_rejected_proposal", label: "Proposta rejeitada", description: "Quando o cliente rejeita uma proposta", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_rejected_contract", label: "Contrato rejeitado", description: "Quando o cliente rejeita um contrato", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "client_accepted_direct_sale", label: "Venda direta aceite", description: "Quando o cliente aceita uma venda direta no portal", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "client_rejected_direct_sale", label: "Venda direta rejeitada", description: "Quando o cliente rejeita uma venda direta", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_question", label: "Dúvida do cliente", description: "Quando o cliente envia uma dúvida sobre um documento", hasDays: false, defaultDays: null, defaultActive: true },
     ],
   },
@@ -124,6 +140,7 @@ const NOTIFICATION_MODULES: ModuleDef[] = [
       { type: "client_viewed_proposal", label: "Proposta visualizada", description: "Quando o cliente abre uma proposta no portal", hasDays: false, defaultDays: null, defaultActive: false },
       { type: "client_viewed_quote", label: "Orçamento visualizado", description: "Quando o cliente abre um orçamento no portal", hasDays: false, defaultDays: null, defaultActive: false },
       { type: "client_viewed_contract", label: "Contrato visualizado", description: "Quando o cliente abre um contrato no portal", hasDays: false, defaultDays: null, defaultActive: false },
+      { type: "client_viewed_direct_sale", label: "Venda direta visualizada", description: "Quando o cliente abre uma venda direta no portal", hasDays: false, defaultDays: null, defaultActive: false },
     ],
   },
   {
@@ -356,7 +373,7 @@ export default function AlertSettings() {
                             onChange={(e) => handleDays(kind, alert.type, parseInt(e.target.value) || 1)}
                             disabled={!s.is_active}
                           />
-                          <Label className="text-xs text-muted-foreground whitespace-nowrap">dias</Label>
+                          <Label className="text-xs text-muted-foreground whitespace-nowrap">{alert.daysUnit ?? "dias"}</Label>
                         </div>
                       )}
                     </div>

@@ -5,6 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Textarea } from '@/components/ui/textarea';
+import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -15,8 +18,18 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
 import { scheduleSettingsSchema, scheduleHolidaySchema } from '@/lib/validations';
+import { completeLunchFields, type LunchFields } from '@/lib/lunchWindow';
 import { format } from 'date-fns';
 import { enUS, pt, es, fr, de } from 'date-fns/locale';
+
+type NoticePrefix = 'reschedule' | 'reassign';
+
+interface NoticeOption {
+  id: string;
+  name: string | null;
+}
+
+const SMS_VARIABLES = '{{lead_name}}, {{meeting_date}}, {{company_name}}, {{technician_name}}, {{cancel_url}}';
 
 interface ScheduleSettingsDialogProps {
   open: boolean;
@@ -37,11 +50,17 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [holidayErrors, setHolidayErrors] = useState<Record<string, string>>({});
+  const [lunchEnabled, setLunchEnabled] = useState(false);
+  const [templateOptions, setTemplateOptions] = useState<NoticeOption[]>([]);
+  const [smtpOptions, setSmtpOptions] = useState<NoticeOption[]>([]);
 
   const locale = useMemo(() => {
     const locales: Record<string, typeof enUS> = { en: enUS, pt, es, fr, de };
     return locales[language] || enUS;
   }, [language]);
+
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
+  const [optionsError, setOptionsError] = useState(false);
 
   const COUNTRIES = useMemo(() => [
     { code: 'PT', name: t('scheduling.settings.countryPortugal'), timezone: 'Europe/Lisbon' },
@@ -67,10 +86,98 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
   useEffect(() => {
     if (settings) {
       setFormData(settings);
+      setLunchEnabled(
+        settings.lunch_window_start != null
+        && settings.lunch_window_end != null
+        && settings.lunch_duration_minutes != null
+      );
     }
   }, [settings]);
 
+  const updateLunchField = (change: LunchFields) => {
+    setFormData(prev => {
+      const changed = { ...prev, ...change };
+      return { ...changed, ...completeLunchFields(changed) };
+    });
+    setFieldErrors(prev => {
+      const { lunch_window_start, lunch_window_end, lunch_duration_minutes, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const unavailableOption = (id: string | null | undefined, options: NoticeOption[]) => {
+    if (!id || options.some(o => o.id === id)) return null;
+    return (
+      <SelectItem value={id}>
+        {optionsLoaded ? t('scheduling.settings.notifyOptionUnavailable') : '…'}
+      </SelectItem>
+    );
+  };
+
+  useEffect(() => {
+    if (!open || !companyId) return;
+    let cancelled = false;
+    const loadOptions = async () => {
+      try {
+      const [{ data: templates, error: templatesError }, { data: smtps, error: smtpsError }] = await Promise.all([
+        supabase
+          .from('email_templates')
+          .select('id, name')
+          .eq('organization_id', companyId)
+          .eq('is_active', true)
+          .order('name', { ascending: true }),
+        (supabase as any)
+          .from('organization_smtp_settings')
+          .select('id, name, is_default')
+          .eq('organization_id', companyId)
+          .eq('is_active', true)
+          .order('is_default', { ascending: false }),
+      ]);
+      if (cancelled) return;
+      setOptionsError(Boolean(templatesError || smtpsError));
+      setTemplateOptions((templates || []) as NoticeOption[]);
+      setSmtpOptions((smtps || []) as NoticeOption[]);
+      } catch {
+        if (cancelled) return;
+        setOptionsError(true);
+      } finally {
+        if (!cancelled) setOptionsLoaded(true);
+      }
+    };
+    setOptionsLoaded(false);
+    setOptionsError(false);
+    loadOptions();
+    return () => { cancelled = true; };
+  }, [open, companyId]);
+
   const handleSave = async () => {
+    const lunch = lunchEnabled
+      ? {
+          lunch_window_start: formData.lunch_window_start || null,
+          lunch_window_end: formData.lunch_window_end || null,
+          lunch_duration_minutes: formData.lunch_duration_minutes ?? null,
+        }
+      : {
+          lunch_window_start: null,
+          lunch_window_end: null,
+          lunch_duration_minutes: null,
+        };
+
+    // The toggle is UI-only state, invisible to the schema: with it on but a
+    // field left empty, the "all-or-none" refine below sees zero fields
+    // filled and passes silently, saving the toggle as if it had never been
+    // turned on. Catch that here, before it ever reaches the schema.
+    if (lunchEnabled && (lunch.lunch_window_start === null || lunch.lunch_window_end === null || lunch.lunch_duration_minutes === null)) {
+      const missingField = lunch.lunch_window_start === null
+        ? 'lunch_window_start'
+        : lunch.lunch_window_end === null
+          ? 'lunch_window_end'
+          : 'lunch_duration_minutes';
+      setFieldErrors({ [missingField]: t('scheduling.settings.lunchBreakIncomplete') });
+      toast({ title: t('scheduling.settings.lunchBreakIncomplete'), variant: 'destructive' });
+      return;
+    }
+
     const validation = scheduleSettingsSchema.safeParse({
       country_code: formData.country_code || 'PT',
       timezone: formData.timezone || '',
@@ -82,6 +189,19 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
       holiday_color: formData.holiday_color || '#fef3c7',
       show_weekends: formData.show_weekends ?? true,
       show_holidays: formData.show_holidays ?? true,
+      notify_client_on_reschedule: formData.notify_client_on_reschedule ?? false,
+      notify_client_on_reassign: formData.notify_client_on_reassign ?? false,
+      reschedule_notify_email: formData.reschedule_notify_email ?? true,
+      reschedule_notify_sms: formData.reschedule_notify_sms ?? false,
+      reschedule_email_template_id: formData.reschedule_email_template_id ?? null,
+      reschedule_sms_message: formData.reschedule_sms_message?.trim() ? formData.reschedule_sms_message : null,
+      reassign_notify_email: formData.reassign_notify_email ?? true,
+      reassign_notify_sms: formData.reassign_notify_sms ?? false,
+      reassign_email_template_id: formData.reassign_email_template_id ?? null,
+      reassign_sms_message: formData.reassign_sms_message?.trim() ? formData.reassign_sms_message : null,
+      notify_client_smtp_id: formData.notify_client_smtp_id ?? null,
+      notify_client_sms_include_link: formData.notify_client_sms_include_link ?? false,
+      ...lunch,
     });
     if (!validation.success) {
       const errors: Record<string, string> = {};
@@ -93,7 +213,12 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
     setFieldErrors({});
 
     setSaving(true);
-    await saveSettings(formData);
+    await saveSettings({
+      ...formData,
+      ...lunch,
+      reschedule_sms_message: formData.reschedule_sms_message?.trim() ? formData.reschedule_sms_message : null,
+      reassign_sms_message: formData.reassign_sms_message?.trim() ? formData.reassign_sms_message : null,
+    });
     setSaving(false);
     onOpenChange(false);
   };
@@ -141,6 +266,86 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
     setNewHoliday({ name: '', date: '' });
   };
 
+  const renderNoticeChannels = (prefix: NoticePrefix) => {
+    const emailKey = `${prefix}_notify_email` as const;
+    const smsKey = `${prefix}_notify_sms` as const;
+    const templateKey = `${prefix}_email_template_id` as const;
+    const messageKey = `${prefix}_sms_message` as const;
+    const emailOn = formData[emailKey] ?? true;
+    const smsOn = formData[smsKey] ?? false;
+
+    return (
+      <div className="ml-1 space-y-3 border-l-2 pl-4">
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`${prefix}-email`}
+              checked={emailOn}
+              onCheckedChange={(v) => setFormData(prev => ({ ...prev, [emailKey]: v === true }))}
+              disabled={!canEditSettings}
+            />
+            <Label htmlFor={`${prefix}-email`}>{t('scheduling.settings.notifyChannelEmail')}</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id={`${prefix}-sms`}
+              checked={smsOn}
+              onCheckedChange={(v) => setFormData(prev => ({ ...prev, [smsKey]: v === true }))}
+              disabled={!canEditSettings}
+            />
+            <Label htmlFor={`${prefix}-sms`}>{t('scheduling.settings.notifyChannelSms')}</Label>
+          </div>
+        </div>
+
+        {!emailOn && !smsOn && (
+          <p role="status" className="text-xs text-amber-600 dark:text-amber-400">{t('scheduling.settings.notifyNoChannelHint')}</p>
+        )}
+
+        {emailOn && (
+          <div className="space-y-1">
+            <Label htmlFor={`${prefix}-template`}>{t('scheduling.settings.notifyEmailTemplate')}</Label>
+            <Select
+              value={formData[templateKey] ?? '__default__'}
+              onValueChange={(v) => setFormData(prev => ({ ...prev, [templateKey]: v === '__default__' ? null : v }))}
+              disabled={!canEditSettings}
+            >
+              <SelectTrigger id={`${prefix}-template`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__default__">{t('scheduling.settings.notifyTemplateDefault')}</SelectItem>
+                {unavailableOption(formData[templateKey], templateOptions)}
+                {templateOptions.map(tpl => (
+                  <SelectItem key={tpl.id} value={tpl.id}>{tpl.name || tpl.id}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {smsOn && (
+          <div className="space-y-1">
+            <Label htmlFor={`${prefix}-sms-message`}>{t('scheduling.settings.notifySmsMessage')}</Label>
+            <Textarea
+              id={`${prefix}-sms-message`}
+              rows={3}
+              maxLength={480}
+              value={formData[messageKey] ?? ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, [messageKey]: e.target.value }))}
+              placeholder={t('scheduling.settings.notifySmsPlaceholder')}
+              disabled={!canEditSettings}
+              className={fieldErrors[messageKey] ? 'border-destructive' : ''}
+            />
+            {fieldErrors[messageKey] && <p className="text-sm text-destructive mt-1">{fieldErrors[messageKey]}</p>}
+            <p className="text-xs text-muted-foreground">
+              {t('scheduling.settings.notifyVariables')} {SMS_VARIABLES}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -161,10 +366,11 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
         </DialogHeader>
 
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="general">{t('scheduling.settings.general')}</TabsTrigger>
             <TabsTrigger value="working">{t('scheduling.settings.working')}</TabsTrigger>
             <TabsTrigger value="holidays">{t('scheduling.settings.holidays')}</TabsTrigger>
+            <TabsTrigger value="notifications">{t('scheduling.settings.notifications')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-4">
@@ -308,6 +514,62 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                 {t('scheduling.settings.clickToToggle')}
               </p>
             </div>
+
+            <div className="space-y-2 border-t pt-4">
+              <Label className="text-base">{t('scheduling.settings.lunchBreak')}</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="lunch-break-toggle">{t('scheduling.settings.lunchBreakToggle')}</Label>
+                <Switch
+                  id="lunch-break-toggle"
+                  checked={lunchEnabled}
+                  onCheckedChange={setLunchEnabled}
+                  disabled={!canEditSettings}
+                />
+              </div>
+              {lunchEnabled && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label>{t('scheduling.settings.lunchWindowStart')}</Label>
+                      <Input
+                        type="time"
+                        value={formData.lunch_window_start || ''}
+                        onChange={(e) => updateLunchField({ lunch_window_start: e.target.value })}
+                        className={fieldErrors.lunch_window_start ? 'border-destructive' : ''}
+                      />
+                      {fieldErrors.lunch_window_start && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_window_start}</p>}
+                    </div>
+                    <div className="space-y-1">
+                      <Label>{t('scheduling.settings.lunchWindowEnd')}</Label>
+                      <Input
+                        type="time"
+                        value={formData.lunch_window_end || ''}
+                        onChange={(e) => updateLunchField({ lunch_window_end: e.target.value })}
+                        className={fieldErrors.lunch_window_end ? 'border-destructive' : ''}
+                      />
+                      {fieldErrors.lunch_window_end && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_window_end}</p>}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('scheduling.settings.lunchDuration')}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={240}
+                      value={formData.lunch_duration_minutes ?? ''}
+                      onChange={(e) => updateLunchField({
+                        lunch_duration_minutes: e.target.value === '' ? null : Number(e.target.value),
+                      })}
+                      className={fieldErrors.lunch_duration_minutes ? 'border-destructive' : ''}
+                    />
+                    {fieldErrors.lunch_duration_minutes && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_duration_minutes}</p>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t('scheduling.settings.lunchBreakHelp')}
+                  </p>
+                </div>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="holidays" className="space-y-4 mt-4">
@@ -380,6 +642,88 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                 )}
               </TableBody>
             </Table>
+          </TabsContent>
+
+          <TabsContent value="notifications" className="space-y-4 mt-4">
+            <p className="text-sm text-muted-foreground">
+              {t('scheduling.settings.notificationsIntro')}
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="notify-reschedule">{t('scheduling.settings.notifyOnReschedule')}</Label>
+                <p className="text-sm text-muted-foreground">{t('scheduling.settings.notifyOnRescheduleDesc')}</p>
+              </div>
+              <Switch
+                id="notify-reschedule"
+                checked={formData.notify_client_on_reschedule ?? false}
+                onCheckedChange={(v) => setFormData(prev => ({ ...prev, notify_client_on_reschedule: v }))}
+                disabled={!canEditSettings}
+              />
+            </div>
+            {formData.notify_client_on_reschedule && renderNoticeChannels('reschedule')}
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="notify-reassign">{t('scheduling.settings.notifyOnReassign')}</Label>
+                <p className="text-sm text-muted-foreground">{t('scheduling.settings.notifyOnReassignDesc')}</p>
+              </div>
+              <Switch
+                id="notify-reassign"
+                checked={formData.notify_client_on_reassign ?? false}
+                onCheckedChange={(v) => setFormData(prev => ({ ...prev, notify_client_on_reassign: v }))}
+                disabled={!canEditSettings}
+              />
+            </div>
+            {formData.notify_client_on_reassign && renderNoticeChannels('reassign')}
+
+            {(formData.notify_client_on_reschedule || formData.notify_client_on_reassign) && (
+              <div className="space-y-3 border-t pt-4">
+                <Label className="text-base">{t('scheduling.settings.notifyDelivery')}</Label>
+                <div className="space-y-1">
+                  <Label htmlFor="notify-smtp">{t('scheduling.settings.notifySmtp')}</Label>
+                  <Select
+                    value={formData.notify_client_smtp_id ?? '__default__'}
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, notify_client_smtp_id: v === '__default__' ? null : v }))}
+                    disabled={!canEditSettings}
+                  >
+                    <SelectTrigger id="notify-smtp">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__default__">{t('scheduling.settings.notifySmtpDefault')}</SelectItem>
+                      {unavailableOption(formData.notify_client_smtp_id, smtpOptions)}
+                      {smtpOptions.map(smtp => (
+                        <SelectItem key={smtp.id} value={smtp.id}>{smtp.name || smtp.id}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {optionsLoaded && (optionsError || smtpOptions.length === 0) && (
+                    <p role="status" className="text-xs text-muted-foreground">
+                      {optionsError
+                        ? t('scheduling.settings.notifyOptionsLoadError')
+                        : t('scheduling.settings.notifySmtpEmptyHint')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label htmlFor="notify-sms-link">{t('scheduling.settings.notifySmsIncludeLink')}</Label>
+                    <p className="text-sm text-muted-foreground">{t('scheduling.settings.notifySmsIncludeLinkDesc')}</p>
+                  </div>
+                  <Switch
+                    id="notify-sms-link"
+                    checked={formData.notify_client_sms_include_link ?? false}
+                    onCheckedChange={(v) => setFormData(prev => ({ ...prev, notify_client_sms_include_link: v }))}
+                    disabled={!canEditSettings}
+                  />
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              {t('scheduling.settings.notifyChannelsNote')}
+            </p>
           </TabsContent>
         </Tabs>
 

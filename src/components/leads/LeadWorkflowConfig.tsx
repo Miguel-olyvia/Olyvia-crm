@@ -40,10 +40,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Plus, Pencil, Trash2, GripVertical, Copy, AlertTriangle,
   ArrowRight, ArrowUp, ArrowDown, UserCheck, Users, Zap, HelpCircle,
-  Target, GitBranch, Settings, TrendingUp, CheckCircle2,
+  Target, GitBranch, Settings, TrendingUp, CheckCircle2, Info,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
@@ -74,10 +75,12 @@ import { QualificationRulesTab } from "./workflow/QualificationRulesTab";
 import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
 import { StageRulesSimulator } from "./workflow/StageRulesSimulator";
 import type { RuleGroup } from "./workflow/conditionCatalog";
-import { isEmptyRule } from "./workflow/conditionCatalog";
+import { isEmptyRule, normalizeRule } from "./workflow/conditionCatalog";
+import { runRecomputeBatches } from "./workflow/recomputeBatches";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export interface WorkflowStage {
   id: string;
@@ -115,6 +118,155 @@ export const LEAD_STATUS_OPTIONS = [
   { value: "lost", label: "Perdida" },
   { value: "incomplete", label: "Incompleta" },
 ];
+
+/** minúsculas, sem acentos e sem espaços à volta — para comparar slugs com labels. */
+const normalizeStatusToken = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+/**
+ * Procura um status literal do catálogo que corresponda ao nome/slug (ou ao
+ * label) de um estágio. Só correspondências exactas contam — nada é
+ * adivinhado por semelhança: um estágio sem correspondência fica sem status
+ * associado e é o aviso de "estágio inatingível" que chama a atenção do
+ * utilizador.
+ */
+const findMatchingLeadStatus = (...candidates: Array<string | null | undefined>): string | null => {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const token = normalizeStatusToken(candidate);
+    if (!token) continue;
+    const match = LEAD_STATUS_OPTIONS.find(
+      opt => opt.value === token || normalizeStatusToken(opt.label) === token
+    );
+    if (match) return match.value;
+  }
+  return null;
+};
+
+/**
+ * Um estágio só é atingível por duas vias: o fallback por status literal do
+ * motor (`lead_status = ANY(matching_statuses)`) ou condições avançadas em
+ * `reached_when`. Se `matching_statuses` estiver vazio/nulo — ou só contiver
+ * valores que nenhuma lead pode ter, porque não existem no catálogo de
+ * status — e a regra ficar vazia depois de saneada, nenhuma lead consegue
+ * lá chegar: o estágio é permanentemente inalcançável, sem qualquer sintoma
+ * visível a não ser este aviso.
+ *
+ * Nota: o critério "existe no catálogo" é deliberadamente o mesmo que a
+ * lista de badges "Status literais associados" desenha, para que o aviso
+ * apareça exactamente quando o utilizador não vê nenhum badge aceso nem
+ * nenhuma condição marcada.
+ */
+export const isStageUnreachable = (stage: Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">): boolean => {
+  // `matching_statuses` vazio NÃO é o mesmo que nulo: nulo espelha o default de
+  // toStagePayload (gravado como [name]); um array vazio — o caso real das
+  // etapas "Reunião 2/3/4" — não tem nenhum status para o motor comparar, e
+  // `stage_reached` devolve false em qualquer circunstância.
+  const effectiveStatuses = Array.isArray(stage.matching_statuses)
+    ? stage.matching_statuses
+    : [stage.name];
+  const hasKnownStatus = effectiveStatuses.some(value =>
+    LEAD_STATUS_OPTIONS.some(opt => opt.value === value)
+  );
+  return !hasKnownStatus && isEmptyRule(normalizeRule(stage.reached_when));
+};
+
+/**
+ * Etapas da organização que nenhuma lead consegue alcançar. Serve o alerta no
+ * topo do editor: com o fluxo sequencial ligado, uma destas etapas no caminho
+ * das setas bloqueia tudo o que vem a seguir (o caso BMGest, em que o funil
+ * parou na "Visita Agendada").
+ */
+export const findUnreachableStages = <T extends Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">>(
+  stages: T[]
+): T[] => (stages ?? []).filter(isStageUnreachable);
+
+const UNREACHABLE_STAGE_HINT =
+  "Nenhuma lead consegue chegar a esta etapa: não tem nenhum status literal associado nem condições avançadas definidas. Associe pelo menos um status em \"Status literais associados\" ou defina condições em \"Condições avançadas (motor)\".";
+
+/**
+ * `public.stage_reached` avalia `reached_when` OU o fallback por status
+ * literal — nunca os dois: assim que a regra tem uma condição utilizável, os
+ * `matching_statuses` deixam de ser consultados. Os badges de "Status
+ * literais associados" continuam acesos no ecrã, por isso o utilizador
+ * assume que somam com as condições, quando na verdade já não valem nada.
+ *
+ * Foi exactamente isto que tirou 32 leads do funil: pôr condições avançadas
+ * na etapa "Contacted" desligou, sem qualquer sintoma, os status que a
+ * alimentavam.
+ *
+ * O fallback `?? [stage.name]` é deliberado — é o mesmo de `toStagePayload`,
+ * ou seja, o que fica realmente gravado quando `matching_statuses` é nulo.
+ */
+export const stageIgnoresLiteralStatuses = (
+  stage: Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">
+): boolean => {
+  const effectiveStatuses = Array.isArray(stage.matching_statuses)
+    ? stage.matching_statuses
+    : [stage.name];
+  if (effectiveStatuses.length === 0) return false;
+  return !isEmptyRule(normalizeRule(stage.reached_when));
+};
+
+/**
+ * A etapa usa alguma condição `qualification_is` (MQL/SQL)? Essas condições
+ * dependem de a organização ter regras de qualificação gravadas — sem elas
+ * nenhuma lead é classificada automaticamente e a etapa fica inalcançável na
+ * prática, sem nenhum aviso do motor.
+ */
+export const stageUsesQualificationConditions = (
+  stage: Pick<WorkflowStage, "reached_when">
+): boolean => {
+  const rule = normalizeRule(stage.reached_when);
+  if (!rule) return false;
+  return [...rule.all, ...rule.any].some(condition => condition.type === "qualification_is");
+};
+
+/**
+ * Critério único de "a organização tem regras de qualificação configuradas":
+ * a linha de `lead_qualification_rules` existe e pelo menos uma das regras
+ * (MQL ou SQL) sobrevive à normalização. É o mesmo critério que o separador
+ * Qualificação usa para gravar (`mql_when`/`sql_when`), por isso o aviso
+ * apaga-se assim que o utilizador lá configurar seja o que for.
+ */
+export const hasQualificationRulesConfigured = (
+  rules: { mql_when?: unknown; sql_when?: unknown } | null | undefined
+): boolean =>
+  !isEmptyRule(normalizeRule(rules?.mql_when)) || !isEmptyRule(normalizeRule(rules?.sql_when));
+
+/**
+ * Lê o balde `unresolved` de um dos mapas `before_totals`/`after_totals`
+ * devolvidos por `simulate_lead_v2_bucket_changes`. A chave ausente significa
+ * zero leads sem etapa (o `jsonb_object_agg` só produz baldes com contagem);
+ * um mapa em falta ou corrompido devolve `undefined` — "não sei", que nunca
+ * pode bloquear uma gravação.
+ */
+export const unresolvedCountFromTotals = (totals: unknown): number | undefined => {
+  if (!totals || typeof totals !== "object" || Array.isArray(totals)) return undefined;
+  const raw = (totals as Record<string, unknown>).unresolved;
+  if (raw === undefined || raw === null) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+/**
+ * Só se avisa quando a gravação AUMENTA o número de leads sem etapa. Descer
+ * ou manter não interessa a ninguém, e dados em falta (simulação falhada,
+ * RPC indisponível) nunca geram aviso: o utilizador tem de conseguir gravar
+ * mesmo quando a simulação não corre.
+ */
+export const shouldWarnAboutUnresolvedIncrease = (
+  before: number | null | undefined,
+  after: number | null | undefined
+): boolean => {
+  if (typeof before !== "number" || !Number.isFinite(before)) return false;
+  if (typeof after !== "number" || !Number.isFinite(after)) return false;
+  return after > before;
+};
 
 interface LeadWorkflowConfigProps {
   open: boolean;
@@ -196,6 +348,25 @@ function SortableStageRow({
           <span className="font-medium">{stage.label}</span>
           <span className="text-muted-foreground text-xs">({stage.name})</span>
           {isTemplate && <Badge variant="secondary" className="text-xs">Template</Badge>}
+          {/* Só para estágios da organização: os templates não são editáveis aqui. */}
+          {!isTemplate && isStageUnreachable(stage) && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="text-xs gap-1 border-amber-500/60 text-amber-700 dark:text-amber-400 cursor-help"
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    Inatingível
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p>{UNREACHABLE_STAGE_HINT}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           {stage.default_status && (
             <Badge variant="outline" className="text-xs">
               → {LEAD_STATUS_OPTIONS.find(o => o.value === stage.default_status)?.label || stage.default_status}
@@ -324,6 +495,7 @@ function SortableStageRow({
 // ─── Main Component ─────────────────────────────────────────
 export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpdated }: LeadWorkflowConfigProps) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [stages, setStages] = useState<WorkflowStage[]>([]);
   const [templateStages, setTemplateStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -334,6 +506,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [editStageTab, setEditStageTab] = useState("general");
   const [showHelp, setShowHelp] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
+  // Leads já examinadas no recálculo em curso (soma dos lotes concluídos).
+  const [recomputeProgress, setRecomputeProgress] = useState(0);
   const [showRecomputeConfirm, setShowRecomputeConfirm] = useState(false);
   const [unresolvedLeads, setUnresolvedLeads] = useState<{
     count: number;
@@ -348,6 +522,17 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   // preset the user picked while at least one existing stage already has
   // non-default rules, so we can confirm before overwriting them.
   const [pendingPreset, setPendingPreset] = useState<FunnelPreset | null>(null);
+
+  // Gravação do editor de etapa retida à espera de confirmação porque a
+  // simulação diz que vai deixar mais leads sem etapa nenhuma.
+  const [pendingUnresolvedSave, setPendingUnresolvedSave] = useState<{
+    before: number;
+    after: number;
+    payload: StagePayload[];
+  } | null>(null);
+  // A simulação é uma ida à BD: o botão "Guardar" tem de dizer que está a
+  // trabalhar em vez de parecer morto.
+  const [checkingSaveImpact, setCheckingSaveImpact] = useState(false);
 
   const [newStage, setNewStage] = useState({
     name: "",
@@ -372,6 +557,13 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     stages: pipelineStages,
     isLoading: stagesLoading,
     invalidate: invalidatePipelineRules,
+    // `lead_pipeline_settings.sequential_flow` — só para agravar o alerta de
+    // etapas inatingíveis: com o motor sequencial, uma etapa inalcançável no
+    // caminho das setas trava também todas as seguintes.
+    sequentialFlow,
+    // `lead_qualification_rules` da organização — as condições MQL/SQL de uma
+    // etapa não valem nada sem elas.
+    qualificationRules,
   } = useLeadPipelineRules(companyId);
 
   useEffect(() => {
@@ -460,7 +652,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     is_rejection: s.is_rejection,
     default_status: s.default_status ?? null,
     matching_statuses: s.matching_statuses ?? [s.name],
-    reached_when: s.reached_when ?? null,
+    // Saneia ao gravar: gravar um estágio repara de facto regras legadas com
+    // entulho (ver normalizeRule). Vazio depois de saneado → null, para o
+    // motor cair no fallback por status literal em vez de guardar {all:[],any:[]}.
+    reached_when: normalizeRule(s.reached_when),
     auto_advance: s.auto_advance ?? false,
     qualification_hint: s.qualification_hint ?? "none",
     counts_as_qualified: s.counts_as_qualified ?? false,
@@ -469,7 +664,18 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     counts_as_lost: s.counts_as_lost ?? false,
   });
 
-  const saveStages = async (payload: StagePayload[]) => {
+  /**
+   * A cópia do template global (copyTemplateToCompany) envia de propósito só
+   * os campos base e deixa a RPC aplicar os seus próprios defaults ao resto —
+   * por isso o payload aceita também essa forma reduzida. Correcção só de
+   * tipos: o JSON enviado à RPC é exactamente o mesmo de antes.
+   */
+  type TemplateStagePayload = Pick<
+    StagePayload,
+    "id" | "name" | "label" | "color" | "is_final" | "is_conversion" | "is_rejection" | "default_status"
+  >;
+
+  const saveStages = async (payload: Array<StagePayload | TemplateStagePayload>) => {
     const { data, error } = await (supabase as any).rpc("rpc_save_lead_workflow_stages", {
       p_organization_id: companyId,
       p_stages: payload,
@@ -483,18 +689,28 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       return;
     }
 
+    const slug = newStage.name.toLowerCase().replace(/\s+/g, '_');
+    // Um estágio novo nascia sempre com matching_statuses = [slug]. Se o slug
+    // não for um status real do catálogo, o fallback do motor
+    // (lead_status = ANY(matching_statuses)) nunca é verdadeiro e o estágio
+    // nasce permanentemente inatingível. Pré-selecionamos o status literal
+    // correspondente quando existe; quando não existe, fica vazio de
+    // propósito e o aviso de "estágio inatingível" torna o problema visível
+    // em vez de o esconder atrás de um valor que parece configurado.
+    const matchedStatus = findMatchingLeadStatus(slug, newStage.name, newStage.label);
+
     const payload: StagePayload[] = [
       ...stages.map(toStagePayload),
       {
         id: null,
-        name: newStage.name.toLowerCase().replace(/\s+/g, '_'),
+        name: slug,
         label: newStage.label,
         color: newStage.color,
         is_final: newStage.is_final,
         is_conversion: newStage.is_conversion,
         is_rejection: newStage.is_rejection,
         default_status: newStage.default_status || null,
-        matching_statuses: [newStage.name.toLowerCase().replace(/\s+/g, '_')],
+        matching_statuses: matchedStatus ? [matchedStatus] : [],
         reached_when: null,
         auto_advance: false,
         qualification_hint: "none",
@@ -518,22 +734,93 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     }
   };
 
-  const handleUpdateStage = async () => {
-    if (!editingStage) return;
+  /**
+   * Corre `simulate_lead_v2_bucket_changes` (read-only, a mesma RPC do
+   * DryRunPanel) contra a lista de etapas POR GRAVAR e devolve quantas leads
+   * ficam no balde `unresolved` — ou seja, sem etapa nenhuma — antes e depois.
+   *
+   * Devolve `null` a qualquer falha: sem organização, RPC indisponível, erro
+   * de rede ou resposta com forma inesperada. Um aviso nunca pode impedir o
+   * utilizador de gravar, por isso a falha é registada no Sentry e o fluxo
+   * segue como se a simulação não existisse.
+   */
+  const simulateUnresolvedImpact = async (
+    nextStages: WorkflowStage[]
+  ): Promise<{ before: number; after: number } | null> => {
+    if (!companyId) return null;
 
-    const payload: StagePayload[] = stages.map(s =>
-      s.id === editingStage.id ? toStagePayload(editingStage) : toStagePayload(s)
-    );
+    try {
+      // A RPC ordena as etapas por `stage_order` (DISTINCT ON ... ORDER BY
+      // stage_order DESC); sem o campo caía num `-ord` que inverteria a
+      // prioridade e daria um resultado que não é o do motor real.
+      const simulationStages: DryRunStagePayload[] = nextStages.map((s, index) => ({
+        id: s.id,
+        label: s.label,
+        stage_order: s.stage_order ?? index + 1,
+        reached_when: normalizeRule(s.reached_when),
+        matching_statuses: s.matching_statuses ?? [s.name],
+        counts_as_qualified: s.counts_as_qualified ?? false,
+        counts_as_negotiation: s.counts_as_negotiation ?? false,
+        counts_as_converted: s.counts_as_converted ?? false,
+        counts_as_lost: s.counts_as_lost ?? false,
+      }));
 
+      const { data, error } = await (supabase as any).rpc("simulate_lead_v2_bucket_changes", {
+        p_org: companyId,
+        p_stages: simulationStages,
+      });
+
+      if (error) {
+        captureFlowError(error, "lead-lifecycle");
+        return null;
+      }
+
+      const before = unresolvedCountFromTotals((data as any)?.before_totals);
+      const after = unresolvedCountFromTotals((data as any)?.after_totals);
+      if (before === undefined || after === undefined) return null;
+      return { before, after };
+    } catch (error) {
+      captureFlowError(error, "lead-lifecycle");
+      return null;
+    }
+  };
+
+  const commitStageUpdate = async (payload: StagePayload[]) => {
     const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Estágio atualizado" });
+      setPendingUnresolvedSave(null);
       setEditingStage(null);
       loadStages();
       onStagesUpdated?.();
     }
+  };
+
+  /**
+   * Gravação principal do funil: é por aqui que as regras editadas no diálogo
+   * de etapa (status literais, condições avançadas, buckets) chegam à BD para
+   * TODA a lista de estágios. As outras chamadas a `saveStages` não mexem em
+   * regras — reordenam (persistReorder), acrescentam, duplicam, removem ou
+   * copiam o template — por isso é só aqui que faz sentido avisar antes.
+   */
+  const handleUpdateStage = async () => {
+    if (!editingStage) return;
+
+    const nextStages = stages.map(s => (s.id === editingStage.id ? editingStage : s));
+    const payload: StagePayload[] = nextStages.map(toStagePayload);
+
+    setCheckingSaveImpact(true);
+    const impact = await simulateUnresolvedImpact(nextStages);
+    setCheckingSaveImpact(false);
+
+    if (impact && shouldWarnAboutUnresolvedIncrease(impact.before, impact.after)) {
+      setPendingUnresolvedSave({ before: impact.before, after: impact.after, payload });
+      return;
+    }
+
+    await commitStageUpdate(payload);
   };
 
   const handleDeleteStage = async () => {
@@ -586,7 +873,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         is_rejection: false,
         default_status: null,
         matching_statuses: [stage.name + "_copy"],
-        reached_when: stage.reached_when ?? null,
+        // Não propagar entulho legado para a cópia.
+        reached_when: normalizeRule(stage.reached_when),
         auto_advance: stage.auto_advance ?? false,
         qualification_hint: stage.qualification_hint ?? "none",
         counts_as_qualified: stage.counts_as_qualified ?? false,
@@ -610,20 +898,46 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     if (!companyId) return;
     setShowRecomputeConfirm(false);
     setUnresolvedLeads(null);
+    setRecomputeProgress(0);
     setRecomputing(true);
-    const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
-      p_org: companyId,
-    });
 
-    if (error) {
+    // Por lotes: o role `authenticated` tem statement_timeout de 8s e a
+    // organização inteira não cabe numa só chamada (ver recomputeBatches.ts).
+    const result = await runRecomputeBatches(
+      async ({ limit, after }) => {
+        const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
+          p_org: companyId,
+          p_limit: limit,
+          p_after: after,
+        });
+        return { data, error };
+      },
+      { onProgress: totals => setRecomputeProgress(totals.processedCount) }
+    );
+
+    if (result.error) {
       setRecomputing(false);
-      captureFlowError(error, "lead-lifecycle");
-      toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
+      captureFlowError(result.error, "lead-lifecycle");
+      // Ao contrário do comportamento antigo (uma só chamada, tudo ou nada),
+      // os lotes anteriores já estão gravados — o utilizador tem de saber.
+      const already = result.updatedCount > 0
+        ? ` ${result.updatedCount} lead${result.updatedCount === 1 ? "" : "s"} já tinha${result.updatedCount === 1 ? "" : "m"} sido recalculada${result.updatedCount === 1 ? "" : "s"} antes da falha e essa alteração ficou gravada.`
+        : " Nenhuma lead chegou a ser recalculada.";
+      toast({
+        title: "Erro ao recalcular leads",
+        description: `${result.error.message ?? "Erro desconhecido"}.${already}`,
+        variant: "destructive",
+      });
+      // O que já foi gravado tem de aparecer no ecrã, mesmo com erro.
+      if (result.updatedCount > 0) {
+        loadLeadCounts();
+        onStagesUpdated?.();
+      }
       return;
     }
-    const updatedCount = data?.[0]?.updated_count ?? 0;
-    const unresolvedCount = data?.[0]?.unresolved_count ?? 0;
-    const unresolvedLeadIds: string[] = data?.[0]?.unresolved_lead_ids ?? [];
+    const updatedCount = result.updatedCount;
+    const unresolvedCount = result.unresolvedCount;
+    const unresolvedLeadIds: string[] = result.unresolvedLeadIds;
 
     toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
 
@@ -634,7 +948,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         variant: "destructive",
       });
 
-      // unresolvedLeadIds is already capped to 50 by the RPC — resolve a
+      // unresolvedLeadIds já vem limitado a 50 no total pelos lotes — resolve a
       // display name for each so the banner below is actionable, not just a count.
       if (unresolvedLeadIds.length > 0) {
         const { data: leadRows } = await (supabase as any)
@@ -669,7 +983,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     const defaultMatching = stage.matching_statuses == null
       || (stage.matching_statuses.length === 1 && stage.matching_statuses[0] === stage.name);
     return !defaultMatching
-      || !isEmptyRule(stage.reached_when ?? null)
+      // Saneado: uma regra que só contém entulho legado não é avaliável pelo
+      // motor, logo não conta como personalização a proteger.
+      || !isEmptyRule(normalizeRule(stage.reached_when))
       || !!stage.auto_advance
       || (stage.qualification_hint ?? "none") !== "none"
       || !!stage.counts_as_qualified
@@ -685,7 +1001,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       return {
         ...stage,
         matching_statuses: rule.matchingStatuses.length > 0 ? rule.matchingStatuses : [stage.name],
-        reached_when: rule.reachedWhen,
+        // Os presets são estáticos e bem formados, mas passam pela mesma
+        // normalização para que nenhum caminho consiga reintroduzir entulho.
+        reached_when: normalizeRule(rule.reachedWhen),
         auto_advance: rule.autoAdvance,
         qualification_hint: rule.qualificationHint,
         counts_as_qualified: rule.countsAsQualified,
@@ -760,7 +1078,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const copyTemplateToCompany = async () => {
     if (!companyId || templateStages.length === 0) return;
 
-    const payload: StagePayload[] = templateStages
+    const payload: TemplateStagePayload[] = templateStages
       .sort((a, b) => a.stage_order - b.stage_order)
       .map(stage => ({
         id: null,
@@ -788,7 +1106,18 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   // counts already fetched/displayed per-stage above instead of an extra query.
   const totalLeadCountEstimate = Object.values(leadCountByStage).reduce((sum, n) => sum + n, 0);
 
+  // Saneia ao CARREGAR o estágio para edição: as checkboxes passam a mostrar
+  // exactamente o que o motor consegue avaliar, e o entulho legado deixa de
+  // ser reenviado tal e qual no Guardar — abrir e guardar repara mesmo a regra.
+  const handleEditStage = (stage: WorkflowStage) => {
+    setEditingStage({ ...stage, reached_when: normalizeRule(stage.reached_when) });
+  };
+
   const displayStages = stages.length > 0 ? stages : templateStages;
+  // Só as etapas da própria organização: os templates globais não são
+  // editáveis aqui, logo o alerta não seria accionável.
+  const unreachableStages = isUsingTemplate ? [] : findUnreachableStages(stages);
+  const editingStageUnreachable = editingStage ? isStageUnreachable(editingStage) : false;
   const deletableLeadCount = deletingStage ? (leadCountByStage[deletingStage.id] || 0) : 0;
   const migrationTargets = stages.filter(s => s.id !== deletingStage?.id);
 
@@ -827,6 +1156,38 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               )}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Fora das Tabs de propósito: uma etapa que nenhuma lead alcança
+              trava o funil, e o badge "Inatingível" na linha da tabela é
+              discreto de mais para um problema desta gravidade. */}
+          {unreachableStages.length > 0 && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3"
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  {unreachableStages.length === 1
+                    ? t("leads.workflow.unreachableAlertTitleOne")
+                    : t("leads.workflow.unreachableAlertTitleMany", { count: unreachableStages.length })}
+                </p>
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                  {t("leads.workflow.unreachableAlertStages", {
+                    stages: unreachableStages.map(s => s.label).join(", "),
+                  })}
+                </p>
+                {sequentialFlow && (
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                    {t("leads.workflow.unreachableAlertSequential")}
+                  </p>
+                )}
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                  {t("leads.workflow.unreachableAlertFix")}
+                </p>
+              </div>
+            </div>
+          )}
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-5">
@@ -886,7 +1247,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                         <TableHead className="w-16">Cor</TableHead>
                         <TableHead className="w-28">Tipo</TableHead>
                         <TableHead className="w-20">Leads</TableHead>
-                        <TableHead className="text-right w-28">Acções</TableHead>
+                        <TableHead className="text-right w-28">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <SortableContext items={displayStages.map(s => s.id)} strategy={verticalListSortingStrategy}>
@@ -899,7 +1260,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                             leadCount={leadCountByStage[stage.id] || 0}
                             isFirst={index === 0}
                             isLast={index === displayStages.length - 1}
-                            onEdit={setEditingStage}
+                            onEdit={handleEditStage}
                             onDelete={(s) => {
                               setDeletingStage(s);
                               setMigrationTargetId("");
@@ -953,7 +1314,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       onClick={() => setShowRecomputeConfirm(true)}
                       disabled={recomputing}
                     >
-                      {recomputing ? "A recalcular..." : "Recalcular buckets das leads"}
+                      {recomputing
+                        ? recomputeProgress > 0
+                          ? `A recalcular... ${recomputeProgress} leads`
+                          : "A recalcular..."
+                        : "Recalcular buckets das leads"}
                     </Button>
                   </div>
 
@@ -961,7 +1326,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="space-y-1.5">
                       <Progress indeterminate className="h-2" />
                       <p className="text-xs text-muted-foreground">
-                        A recalcular estágios de todas as leads da organização...
+                        {recomputeProgress > 0
+                          ? `A recalcular estágios das leads da organização... ${recomputeProgress} leads processadas.`
+                          : "A recalcular estágios de todas as leads da organização..."}
                       </p>
                     </div>
                   )}
@@ -1014,7 +1381,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       id: s.id,
                       label: s.label,
                       stage_order: s.stage_order,
-                      reached_when: s.reached_when ?? null,
+                      // Simular com a regra saneada — é o que o motor avalia
+                      // e o que ficará gravado ao guardar.
+                      reached_when: normalizeRule(s.reached_when),
                       matching_statuses: s.matching_statuses ?? [s.name],
                       counts_as_qualified: s.counts_as_qualified ?? false,
                       counts_as_negotiation: s.counts_as_negotiation ?? false,
@@ -1123,7 +1492,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               </div>
               <div className="flex items-center gap-2">
                 <Switch checked={newStage.is_rejection} onCheckedChange={v => setNewStage({ ...newStage, is_rejection: v, is_conversion: v ? false : newStage.is_conversion })} />
-                <Label>Lost</Label>
+                <Label>{t('leads.workflow.lostFlag')}</Label>
               </div>
             </div>
           </div>
@@ -1141,6 +1510,29 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
             <DialogTitle>Editar Estágio</DialogTitle>
           </DialogHeader>
           {editingStage && (
+            <>
+            {/* Fora das Tabs de propósito: o problema tem de ser visível
+                mesmo com o separador "Geral" activo. */}
+            {editingStageUnreachable && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3"
+              >
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                    Estágio inatingível — nenhuma lead consegue chegar aqui
+                  </p>
+                  <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                    Esta etapa não tem nenhum status literal associado nem condições avançadas
+                    definidas, por isso o motor nunca a considera atingida — mesmo que fique visível
+                    no funil, continuará sempre vazia. No separador <strong>Regras</strong>, associe
+                    pelo menos um status em <strong>"Status literais associados"</strong> ou defina
+                    condições em <strong>"Condições avançadas (motor)"</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
             <Tabs value={editStageTab} onValueChange={setEditStageTab}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="general">Geral</TabsTrigger>
@@ -1206,7 +1598,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch checked={editingStage.is_rejection} onCheckedChange={v => setEditingStage({ ...editingStage, is_rejection: v, is_conversion: v ? false : editingStage.is_conversion })} />
-                    <Label>Lost</Label>
+                    <Label>{t('leads.workflow.lostFlag')}</Label>
                   </div>
                 </div>
               </TabsContent>
@@ -1261,6 +1653,19 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       );
                     })}
                   </div>
+
+                  {/* Informativo, não erro: a etapa funciona — só não é por
+                      estes status. Ver stageIgnoresLiteralStatuses. */}
+                  {stageIgnoresLiteralStatuses(editingStage) && (
+                    <Alert className="mt-3 border-amber-500/40 bg-amber-500/5 py-2.5">
+                      <Info className="h-4 w-4 !text-amber-600 dark:!text-amber-400" />
+                      <AlertDescription className="text-xs text-amber-800/90 dark:text-amber-300/90">
+                        Esta etapa tem condições avançadas, por isso os status literais acima{" "}
+                        <strong>são ignorados</strong> pelo motor. Para os usar, apaga as condições
+                        em baixo.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 </div>
 
                 <div>
@@ -1272,11 +1677,28 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </p>
                   <div className="mt-2">
                     <StageRulesEditor
-                      value={editingStage.reached_when ?? null}
-                      onChange={v => setEditingStage({ ...editingStage, reached_when: v })}
+                      value={normalizeRule(editingStage.reached_when)}
+                      onChange={v => setEditingStage({ ...editingStage, reached_when: normalizeRule(v) })}
                       organizationId={companyId}
                     />
                   </div>
+
+                  {/* As condições MQL/SQL só disparam se alguém classificar as
+                      leads — regras da organização ou marcação manual. Sem
+                      nenhuma das duas, a etapa fica vazia para sempre e o motor
+                      não dá sinal nenhum. */}
+                  {stageUsesQualificationConditions(editingStage) &&
+                    !hasQualificationRulesConfigured(qualificationRules) && (
+                      <Alert className="mt-3 border-amber-500/40 bg-amber-500/5 py-2.5">
+                        <AlertTriangle className="h-4 w-4 !text-amber-600 dark:!text-amber-400" />
+                        <AlertDescription className="text-xs text-amber-800/90 dark:text-amber-300/90">
+                          Nada classifica leads como MQL/SQL nesta organização. Ou marcas à mão em
+                          cada lead (Editar Lead → Tipo de qualificação), ou configuras as regras no
+                          separador <strong>Qualificação</strong>. Enquanto isso, esta etapa só será
+                          atingida por leads marcadas manualmente.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1376,7 +1798,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     stage={{
                       id: editingStage.id,
                       matching_statuses: editingStage.matching_statuses ?? [editingStage.name],
-                      reached_when: editingStage.reached_when ?? null,
+                      reached_when: normalizeRule(editingStage.reached_when),
                       auto_advance: editingStage.auto_advance ?? false,
                       qualification_hint: editingStage.qualification_hint ?? "none",
                       counts_as_converted: editingStage.counts_as_converted ?? false,
@@ -1388,10 +1810,13 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                 </div>
               </TabsContent>
             </Tabs>
+            </>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingStage(null)}>Cancelar</Button>
-            <Button onClick={handleUpdateStage}>Guardar</Button>
+            <Button onClick={handleUpdateStage} disabled={checkingSaveImpact}>
+              {checkingSaveImpact ? "A verificar impacto..." : "Guardar"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1445,6 +1870,46 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deletableLeadCount > 0 ? `Migrar e Eliminar` : `Eliminar`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── Leads que ficam sem etapa ao gravar ────────────────
+          Simulação read-only corrida antes da gravação: só aparece quando o
+          balde `unresolved` SOBE. Falha de simulação não abre nada — grava-se
+          na mesma (ver simulateUnresolvedImpact). */}
+      <AlertDialog
+        open={!!pendingUnresolvedSave}
+        onOpenChange={(v) => { if (!v) setPendingUnresolvedSave(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              Estas regras deixam {pendingUnresolvedSave?.after ?? 0} lead
+              {(pendingUnresolvedSave?.after ?? 0) === 1 ? "" : "s"} sem etapa nenhuma
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Antes destas regras eram <strong>{pendingUnresolvedSave?.before ?? 0}</strong>.
+                </p>
+                <p>
+                  Elas continuam no sistema, mas desaparecem do funil e dos cartões até alguma
+                  etapa voltar a corresponder-lhes.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Rever</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingUnresolvedSave) void commitStageUpdate(pendingUnresolvedSave.payload);
+              }}
+            >
+              Gravar assim mesmo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1682,7 +2147,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                    <p><strong>Defina o fluxo:</strong> Restrinja as transições para evitar que leads saltem etapas.</p>
+                    <p><strong>Defina o fluxo:</strong> As ligações que desenha no separador Fluxo descrevem as transições permitidas entre estágios. Por omissão são apenas documentação: só bloqueiam mudanças se ativar o interruptor "Restringir transições ao fluxo desenhado" nesse separador — e mesmo aí aplicam-se apenas a mudanças feitas por utilizadores, nunca ao avanço automático.</p>
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />

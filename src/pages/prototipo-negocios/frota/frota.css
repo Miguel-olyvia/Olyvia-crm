@@ -1,0 +1,51 @@
+/* Só os extras da Frota (vault/frota-prototipo.html) que o CSS do Inventário (inventario.css, escopo .inv-root) não tem: a matrícula, o calendário
+   das atribuições, as barras dos relatórios, as duas colunas, os cartões das ligações, as listas de valores e as fontes "nova". Tudo com as
+   variáveis --i-* do Inventário, que apontam para os tokens do protótipo (claro/escuro vêm de fora). Classes novas: não mudam o Inventário. */
+.inv-root{--c1:hsl(var(--primary));--c2:hsl(214 85% 50%);--c3:hsl(var(--warning));--c4:hsl(var(--success));--c5:hsl(var(--muted-foreground))}
+.inv-root .src.nova{background:var(--i-warn-bg);color:var(--i-warn);border-color:hsl(var(--warning)/.6)}
+
+/* matrícula portuguesa */
+.inv-root .plate{display:inline-flex;align-items:stretch;border:1.5px solid var(--i-fg);border-radius:5px;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-weight:700;font-size:13px;letter-spacing:.04em;line-height:1;white-space:nowrap;background:hsl(var(--card));vertical-align:middle}
+.inv-root .plate .eu{background:hsl(222 70% 38%);color:hsl(50 100% 70%);font-size:8px;padding:2px 3px;display:flex;flex-direction:column;justify-content:flex-end;font-family:inherit;letter-spacing:0}
+.inv-root .plate .n{padding:4px 6px;color:var(--i-fg)}
+.inv-root .plate.lg{font-size:17px}
+.inv-root .plate.lg .n{padding:6px 9px}
+
+/* listas e cartões */
+.inv-root tr.apagada td{opacity:.6}
+.inv-root .sec{margin-top:22px}
+.frota-root section>h2,.inv-root .sec>h2{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.inv-root .two{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start}
+.inv-root .vlist{display:flex;flex-direction:column}
+.inv-root .vlist>div{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--i-border)}
+.inv-root .vlist>div:last-child{border-bottom:0}
+.inv-root button.whcard{cursor:pointer;text-align:left}
+.inv-root button.whcard:hover{border-color:var(--i-primary)}
+.inv-root .prog.warn span{background:hsl(var(--warning))}
+.inv-root .prog.bad span{background:hsl(var(--destructive))}
+.inv-root .preview{border:1px dashed var(--i-border);border-radius:10px;padding:12px;background:var(--i-bg)}
+
+/* calendário das atribuições */
+.inv-root .cal td{padding:6px;height:46px;min-width:110px}
+.inv-root .cal th.hoje{color:var(--i-primary)}
+.inv-root .blk{display:block;border-radius:7px;padding:4px 7px;font-size:12px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.inv-root .blk.perm{background:var(--i-primary-soft);color:var(--i-vio)}
+.inv-root .blk.pont{background:var(--i-info-bg);color:var(--i-info)}
+.inv-root .blk.ofi{background:var(--i-warn-bg);color:var(--i-warn)}
+.inv-root .blk.off{background:var(--i-muted);color:var(--i-muted-fg)}
+
+/* barras dos relatórios (sem biblioteca) */
+.inv-root .bars{display:flex;flex-direction:column;gap:10px}
+.inv-root .bar-row{display:grid;grid-template-columns:150px minmax(0,1fr) 90px;gap:10px;align-items:center;font-size:13px}
+.inv-root .bar{display:flex;height:16px;border-radius:5px;overflow:hidden;background:var(--i-muted);min-width:4px}
+.inv-root .bar span{display:block;height:100%}
+
+/* cartões das ligações */
+.inv-root .lig{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.inv-root .ligc{padding:14px;display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.inv-root .ligc>.row{width:100%}
+.inv-root .ligc h3{display:flex;gap:8px;align-items:center}
+.inv-root .ligc code{font-size:11.5px;background:var(--i-muted);border-radius:5px;padding:1px 5px;word-break:break-word}
+
+@media (max-width:1100px){.inv-root .two{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){.inv-root .bar-row{grid-template-columns:96px minmax(0,1fr) 72px}}

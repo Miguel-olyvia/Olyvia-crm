@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Paperclip, Download, FileText, Image as ImageIcon, File as FileIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { useSyncActiveOrgWithDocument } from "@/contexts/PortalCompanyContext";
 import { ProposalPortalDocument } from "@/components/proposals/ProposalPortalDocument";
 import { loadProposalPortalData, type ProposalPortalData } from "@/components/proposals/proposalPortalData";
 import { generateProposalPdfBlob, downloadBlob, type ProposalPdfPrefetch } from "@/utils/generateProposalPdfBlob";
@@ -21,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useCooldown, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -45,6 +47,8 @@ const ClientPortalProposalDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
+  const otpSendingRef = useRef(false);
 
   const [portalData, setPortalData] = useState<ProposalPortalData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,6 +68,10 @@ const ClientPortalProposalDetail = () => {
   const [otpError, setOtpError] = useState("");
 
   const hasLoadedOnceRef = useRef(false);
+
+  // Link de email pode abrir uma proposta de outra empresa do grupo: a empresa
+  // ativa acompanha o documento em vez de o esconder.
+  useSyncActiveOrgWithDocument(portalData?.proposal?.organization_id);
 
   const reloadPortalData = useCallback(async () => {
     if (!id) return;
@@ -168,25 +176,31 @@ const ClientPortalProposalDetail = () => {
     }
   }
 
-  async function handleSendOtp() {
+  // A contagem de 60 s é só do Reenviar: no primeiro envio começa quando o servidor aceita;
+  // no Reenviar começa no clique e não é reposta se o servidor recusar.
+  async function sendOtp(isResend: boolean) {
     if (!id) return; // H4
-    setOtpStep("sending");
+    // Validação local primeiro: sem orçamento seleccionado não se pede SMS nem começa a contagem.
+    const quotes = portalData?.quotes || [];
+    const hasAcceptedQuote = quotes.some((q) => q.estado === "aceite");
+    const hasSelectedQuote = selectedQuoteIds.length > 0;
+    if (quotes.length > 0 && !hasAcceptedQuote && !hasSelectedQuote) {
+      toast({
+        title: "Aceite pelo menos 1 orçamento",
+        description: "Antes de assinar a proposta, aceite pelo menos um orçamento.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Ref (e não estado) para que um segundo clique durante o pedido seja ignorado.
+    if (otpSendingRef.current) return;
+    if (isResend && !otpCooldown.iniciar()) return;
+    otpSendingRef.current = true;
+    // No Reenviar o passo não muda: o campo do código e o que já foi escrito mantêm-se.
+    if (!isResend) setOtpStep("sending");
     setOtpError("");
     try {
-      // Check if at least one quote is selected or already accepted
-      const quotes = portalData?.quotes || [];
-      const hasAcceptedQuote = quotes.some((q) => q.estado === "aceite");
-      const hasSelectedQuote = selectedQuoteIds.length > 0;
-      if (quotes.length > 0 && !hasAcceptedQuote && !hasSelectedQuote) {
-        toast({
-          title: "Aceite pelo menos 1 orçamento",
-          description: "Antes de assinar a proposta, aceite pelo menos um orçamento.",
-          variant: "destructive",
-        });
-        setOtpStep("idle");
-        return;
-      }
-
       const { data, error } = await supabase.functions.invoke("sms-otp", {
         body: { action: "send_otp", reference_id: id, reference_type: "proposal", purpose: "proposal_signature" },
       });
@@ -195,7 +209,7 @@ const ClientPortalProposalDetail = () => {
       if (data?.error) {
         if (data.error === "no_phone") {
           setOtpError("Não foi encontrado um número de telefone associado à sua conta. Contacte o comercial.");
-          setOtpStep("idle");
+          if (!isResend) setOtpStep("idle");
           return;
         }
         throw new Error(data.message || data.error);
@@ -203,14 +217,20 @@ const ClientPortalProposalDetail = () => {
 
       setMaskedPhone(data.masked_phone || "");
       setOtpStep("input");
+      if (!isResend) otpCooldown.iniciar();
       toast({ title: "Código SMS enviado", description: `Enviámos um código para ${data.masked_phone}` });
     } catch (err: any) {
       setOtpError(err.message);
-      setOtpStep("idle");
+      if (!isResend) setOtpStep("idle");
       captureFlowError(err, "client-portal-proposal");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
+    } finally {
+      otpSendingRef.current = false;
     }
   }
+
+  const handleSendOtp = () => sendOtp(false);
+  const handleResendOtp = () => sendOtp(true);
 
   async function handleVerifyOtp() {
     if (!id) return; // H4
@@ -415,6 +435,8 @@ const ClientPortalProposalDetail = () => {
           maskedPhone={maskedPhone}
           otpError={otpError}
           onSendOtp={handleSendOtp}
+          onResendOtp={handleResendOtp}
+          otpCooldown={otpCooldown.restante}
           onVerifyOtp={handleVerifyOtp}
           onOtpCodeChange={setOtpCode}
           onAcceptQuote={handleAcceptQuote}

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { formatCurrency } from "@/lib/utils";
 import { getEffectiveContractValue } from "@/utils/contractValue";
 import { useDebounce } from "@/hooks/useDebounce";
@@ -28,6 +28,15 @@ import { pt } from "date-fns/locale";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
+import { caminhoVoltarSeguro, comParametro } from "@/lib/voltarParaPessoas";
+import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
+import {
+  avisoDeSubstituicao, escolherGravacaoDeContrato, parametrosNegCriarContrato, substitutoBloqueado, substitutoSemVerificar,
+} from "@/components/negocio-metas/contratoNoNegocio";
+import { AvisoSubstitutoNegocio } from "@/components/contracts/AvisoSubstitutoNegocio";
+import { chaveDoErro, codigoDoErro } from "@/hooks/pessoas/errosNeg";
+import { useNegocioDoContrato } from "@/hooks/pessoas/useNegocioDoContrato";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { ModuleAlertsBanner } from "@/components/ModuleAlertsBanner";
@@ -162,6 +171,9 @@ const statusEmojis: Record<string, string> = {
   draft: "📝", pending_signature: "📨", signed: "✅", active: "✅", expired: "❌", cancelled: "🚫",
 };
 
+// O `?negocio=` vem do endereço: só um identificador bem formado conta (a base valida o resto).
+const ID_VALIDO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const ClientContracts = () => {
   const { t, language } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -175,9 +187,21 @@ const ClientContracts = () => {
   } = usePermissionScope();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  // Abre a FICHA do cliente do contrato (a lista de clientes aceita ?open=<id do cliente ou da entidade>).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const verCliente = (c: any) => {
+    const id: string | null | undefined = c?.client_id || c?.entity_id;
+    navigate(id ? `/clients?open=${encodeURIComponent(id)}` : "/clients");
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [presetClientId, setPresetClientId] = useState<string | null>(null);
+  // Só vindo da ficha de uma pessoa (P3): a proposta de que o contrato nasce e o caminho a que se volta depois de o criar.
+  const [presetProposalId, setPresetProposalId] = useState<string | null>(null);
+  const voltarAoCriar = useRef<string | null>(null);
+  // Só com o fecho v4 ligado e `?negocio=` no endereço (a ficha da pessoa): o contrato novo nasce ligado a este negócio. Sem isto nada muda.
+  const fechoV4 = useFechoV4();
+  const [negocioNovo, setNegocioNovo] = useState<string | null>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<ClientContract | null>(null);
   const { finalizeContract } = usePipelineAutomation();
@@ -208,8 +232,78 @@ const ClientContracts = () => {
   const [cancellingContract, setCancellingContract] = useState<ClientContract | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [createReplacementOnCancel, setCreateReplacementOnCancel] = useState(true);
+  // Fecho v4: o título do negócio onde o contrato novo nasce, e o negócio do contrato a anular (para avisar antes de gerar o substituto).
+  const { negocio: negocioDoNovo } = useNegocioDoContrato(negocioNovo, activeCompany?.id, fechoV4);
+  const negocioIdDoCancelado: string | null = fechoV4 ? (cancellingContract?.negocio_id as string | null | undefined) || null : null;
+  const { negocio: negocioDoCancelado, leitura: leituraDoCancelado } = useNegocioDoContrato(negocioIdDoCancelado, activeCompany?.id, isCancelDialogOpen);
+  // Cada botão pede a permissão do negócio E a do documento: um contrato ligado a um negócio só gera substituto a quem também tem pessoas.edit.
+  const podeEditarNegocio = isSystemAdmin || hasPermission("pessoas.edit");
+  const substitutoImpedido = substitutoBloqueado({ temNegocio: !!negocioIdDoCancelado, podeEditarNegocio });
+  const avisoDoSubstituto = !negocioIdDoCancelado ? null : substitutoImpedido ? "sem_permissao" as const : avisoDeSubstituicao({
+    negocio: negocioDoCancelado, contratoId: cancellingContract?.id ?? "", vaiGerarSubstituto: createReplacementOnCancel, podeEditarNegocio, leitura: leituraDoCancelado,
+  });
+  const anularSemVerificar = substitutoSemVerificar(avisoDoSubstituto);
 
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }) });
+
+  /**
+   * O contrato acabou de ser enviado ao cliente: draft → pending_signature.
+   *
+   * O estado responde a "já foi enviado?", e só a isso. Por onde foi (portal,
+   * email, WhatsApp) é pergunta da timeline, que já a regista e não é tocada
+   * aqui — são coisas diferentes e não se misturam.
+   *
+   * Um único sítio para os três canais de propósito: até agora nenhum deles
+   * escrevia 'pending_signature' (todas as referências a esse estado no
+   * codebase são leituras — métricas, alertas, filtros, exportações), e a
+   * regra repetida em três handlers acabaria por divergir num deles.
+   *
+   *  - Portal: NÃO passa por aqui. A transição vive na edge function
+   *    create-client-portal-access, logo a seguir a publicar o documento, que
+   *    é onde o envio realmente acontece (e onde também é feita quando o envio
+   *    parte de outro ecrã).
+   *  - Email: callback onSent do SendEntityEmailDialog, disparado só depois do
+   *    email seguir mesmo.
+   *  - WhatsApp: callback onSent do WhatsAppSendDialog, disparado só quando o
+   *    WhatsApp abriu mesmo com a mensagem.
+   * Abrir o diálogo nunca chega aqui: fechar sem enviar deixa o contrato em
+   * draft, como deve ser.
+   *
+   * Salvaguardas:
+   *  - Só transita a partir de 'draft', e a condição está no próprio UPDATE
+   *    (.eq("status", "draft")) em vez de num SELECT antes — um contrato
+   *    entretanto assinado ou anulado nunca é pisado, o WHERE apenas não
+   *    encontra linha nenhuma. Isto importa a sério porque reenviar por email
+   *    ou portal é oferecido também em contratos já assinados.
+   *  - Falhar nunca trava o envio nem mostra erro: o email/WhatsApp já seguiu,
+   *    e dizer ao utilizador que algo correu mal levá-lo-ia a reenviar um
+   *    documento que o cliente já tem. Fica no log.
+   */
+  const markContractAsSent = async (contractId: string) => {
+    if (!contractId) return;
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
+      const { error } = await (supabase as any)
+        .from("client_contracts")
+        .update({
+          status: "pending_signature",
+          status_changed_at: new Date().toISOString(),
+          status_changed_by: businessUserId ?? null,
+        })
+        .eq("id", contractId)
+        .eq("status", "draft");
+      if (error) {
+        console.error("[contracts] falha ao marcar contrato como enviado:", error);
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+    } catch (e) {
+      console.error("[contracts] falha ao marcar contrato como enviado:", e);
+    }
+  };
 
   const handleOpenSendChannel = (contract: any) => {
     setSendingContract(contract);
@@ -375,7 +469,13 @@ const ClientContracts = () => {
         .from("client_contracts")
         .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees, deleted_at) )`)
         .in("organization_id", subtreeIds)
-        .is("deleted_at", null);
+        .is("deleted_at", null)
+        // Encomendas Clientes manuais criam um client_contracts assinado por
+        // baixo (ver rpc_create_manual_client_order) só para reaproveitar a
+        // automação de stock/fornecedor — não são contratos de verdade e não
+        // pertencem a este ecrã. client_contracts_list_metrics aplica o mesmo
+        // filtro, para os cartões baterem certo com a lista.
+        .eq("is_manual_order", false);
       if (scopeUserIds !== null) {
         const ids = scopeUserIds.join(",");
         contractsQuery = contractsQuery.or(`created_by.in.(${ids}),assigned_to.in.(${ids})`);
@@ -500,7 +600,7 @@ const ClientContracts = () => {
     return () => { cancelled = true; };
   }, [contracts, activeCompany?.id]);
 
-  const { data: proposals = [] } = useQuery({
+  const { data: proposals = [], isSuccess: proposalsLoaded } = useQuery({
     queryKey: [
       "proposals-for-contracts",
       activeCompany?.id,
@@ -606,17 +706,24 @@ const ClientContracts = () => {
   useEffect(() => {
     const newContractParam = searchParams.get("newContract");
     const newContractClientId = searchParams.get("clientId");
-    if (newContractParam === "true" && newContractClientId) {
+    const newContractProposalId = searchParams.get("proposalId");
+    if (newContractParam === "true" && (newContractClientId || newContractProposalId)) {
       setPresetClientId(newContractClientId);
+      setPresetProposalId(newContractProposalId);
+      voltarAoCriar.current = caminhoVoltarSeguro(searchParams.get("voltar"));
+      const negocioDoEndereco = searchParams.get("negocio");
+      setNegocioNovo(fechoV4 && negocioDoEndereco && ID_VALIDO.test(negocioDoEndereco) ? negocioDoEndereco : null);
       setEditingContract(null);
       setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
       setIsDialogOpen(true);
 
       searchParams.delete("newContract");
       searchParams.delete("clientId");
+      searchParams.delete("proposalId");
+      searchParams.delete("negocio");
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, fechoV4]);
 
   // Handle "open contract" URL param (?open=<id>) — used by Propostas' "Ver
   // contrato" button/dropdown item and the AI assistant's search results.
@@ -928,7 +1035,7 @@ const ClientContracts = () => {
       const { data, error } = await supabase.rpc('cancel_and_replace_contract' as any, {
         p_contract_id: cancellingContract.id,
         p_reason: reason,
-        p_create_replacement: createReplacementOnCancel,
+        p_create_replacement: createReplacementOnCancel && !substitutoImpedido,
       });
       if (error) throw error;
       return data as { cancelled_contract_id: string; replacement_contract_id: string | null };
@@ -1045,7 +1152,7 @@ const ClientContracts = () => {
       }
 
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-      const { error } = await supabase.rpc('rpc_create_client_contract' as any, {
+      const parametros = {
         p_client_id: clientId,
         p_entity_id: resolvedEntityId || null,
         p_organization_id: activeCompany.id,
@@ -1061,12 +1168,28 @@ const ClientContracts = () => {
         p_contract_body_html: contractBodyHtml,
         p_final_body_html: finalBodyHtml,
         p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
-      });
+      };
+      // Dentro de um negócio (fecho v4) o contrato nasce ligado, por neg_criar_contrato; fora dele grava como sempre.
+      const ligadoAoNegocio = escolherGravacaoDeContrato({ criarNoNegocioId: negocioNovo }) === "neg_criar_contrato";
+      const { data: novoContratoId, error } = ligadoAoNegocio
+        ? await supabase.rpc('neg_criar_contrato' as any, parametrosNegCriarContrato(negocioNovo as string, parametros))
+        : await supabase.rpc('rpc_create_client_contract' as any, parametros);
       if (error) throw error;
+      // O rpc devolve o id do contrato criado (a ficha da pessoa liga-o ao negócio ao voltar, se ainda não nasceu ligado).
+      return { id: typeof novoContratoId === "string" ? novoContratoId : null, ligadoAoNegocio };
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.createSuccess')); handleCloseDialog(); },
+    onSuccess: ({ id: novoContratoId, ligadoAoNegocio }) => {
+      const voltar = voltarAoCriar.current;
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success(t('clientContracts.toast.createSuccess'));
+      handleCloseDialog();
+      // Vindo da ficha de uma pessoa: volta a ela com o contrato novo, para ser ligado ao negócio.
+      // Já nasceu ligado ao negócio: a ficha não tem nada a ligar ao voltar.
+      if (voltar && novoContratoId) navigate(ligadoAoNegocio ? voltar : comParametro(voltar, "novoContrato", novoContratoId));
+    },
     onError: async (error: any) => {
-      const description = await getFriendlyErrorMessage(error);
+      // Criar já ligado a um negócio: o erro da base (NG...) diz-se traduzido, nunca em bruto.
+      const description = negocioNovo && codigoDoErro(error) ? t(chaveDoErro(error)) : await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.createError'), { description });
     },
   });
@@ -1231,7 +1354,7 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id,
   });
 
-  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
+  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setPresetProposalId(null); voltarAoCriar.current = null; setNegocioNovo(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
 
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
@@ -1359,6 +1482,22 @@ const ClientContracts = () => {
     const [int, dec] = fixed.split('.');
     return '€' + int.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
   };
+
+  /**
+   * Um contrato enviado ('pending_signature') continua a ser um contrato por
+   * assinar: para efeitos de ações disponíveis vale exactamente o mesmo que
+   * um 'draft'.
+   *
+   * Porquê um predicado em vez de dois ramos: enquanto nada no sistema escrevia
+   * 'pending_signature', todos os contratos ficavam em 'draft' e a divergência
+   * entre os dois ramos do menu nunca se notava. Assim que enviar passou a
+   * transitar mesmo o estado, o ramo 'pending_signature' — que nunca tinha sido
+   * mantido a par do de 'draft' — fazia desaparecer Editar, Reatribuir, Anular
+   * e Eliminar só por o contrato ter sido enviado. Os ramos divergiram por
+   * terem sido copiados; ficam agora com uma condição só.
+   */
+  const isPreSignature = (contract: { status?: string | null }) =>
+    contract.status === "draft" || contract.status === "pending_signature";
 
   const getRowColor = (contract: ClientContract) => {
     if (contract.status === "draft") return "bg-yellow-50/60 dark:bg-yellow-950/10";
@@ -1561,6 +1700,7 @@ const ClientContracts = () => {
   return (
     <Layout fullWidth>
       <div className="flex flex-col h-full">
+        <BarraVoltar />
         <ModuleAlertsBanner alerts={contractAlerts} onDismiss={dismissContractAlert} onAction={() => {}} onAlertClick={(alert) => {
           const entityIds = alert.action_config?.entity_ids as string[] | undefined;
           const contractId = entityIds?.[0] || alert.entity_id;
@@ -1609,7 +1749,7 @@ const ClientContracts = () => {
           sentNoSignDays={alertSettings.get("contract_sent_no_sign", 5).days_threshold}
           onAction={(action, c) => {
             if (action === "send_signature" && c) handleOpenSendChannel(c);
-            if (action === "view_client" && c) navigate("/clients");
+            if (action === "view_client" && c) verCliente(c);
             if (action === "followup" && c) toast.info(t('clientContracts.toast.followUpFor', { name: c._clientName || "" }));
           }}
         />
@@ -2007,9 +2147,15 @@ const ClientContracts = () => {
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           {/* Quick actions by status */}
-                          {contract.status === "draft" && (
+                          {isPreSignature(contract) && (
                             <>
-                              <Button variant="ghost" size="icon" className="text-blue-600" title="Enviar para assinatura" onClick={() => handleOpenSendChannel(contract)}>
+                              {/* Follow-up só faz sentido depois de enviado. */}
+                              {contract.status === "pending_signature" && (
+                                <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info(t('clientContracts.toast.followUpGeneric'))}>
+                                  <Phone className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="icon" className="text-blue-600" title={contract.status === "draft" ? "Enviar para assinatura" : "Reenviar"} onClick={() => handleOpenSendChannel(contract)}>
                                 <Send className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="icon" onClick={() => handleEdit(contract)} title="Editar">
@@ -2020,24 +2166,11 @@ const ClientContracts = () => {
                               </Button>
                             </>
                           )}
-                          {contract.status === "pending_signature" && (
-                            <>
-                              <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info(t('clientContracts.toast.followUpGeneric'))}>
-                                <Phone className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" title="Reenviar" onClick={() => handleOpenSendChannel(contract)}>
-                                <Send className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="text-green-600" title="Marcar como assinado" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
-                                <CheckCheck className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
                           {(contract.status === "signed" || contract.status === "active") && (
                             <>
                               <Button variant="ghost" size="icon" title="Ver contrato" onClick={() => handleEdit(contract)}><Eye className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" title="PDF" onClick={() => handleDownloadPdf(contract)}><Download className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" className="text-green-600" title="Ver cliente" onClick={() => navigate("/clients")}>
+                              <Button variant="ghost" size="icon" className="text-green-600" title="Ver cliente" onClick={() => verCliente(contract)}>
                                 <User className="h-4 w-4" />
                               </Button>
                             </>
@@ -2059,17 +2192,23 @@ const ClientContracts = () => {
                               <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56">
-                              {contract.status === "draft" && (
+                              {isPreSignature(contract) && (
                                 <>
                                   {canSendSignature && (
                                     <>
                                       <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">✈️ Envio</DropdownMenuLabel>
-                                      <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>✈️ Enviar para assinatura</DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>
+                                        {contract.status === "draft" ? "✈️ Enviar para assinatura" : "📧 Reenviar"}
+                                      </DropdownMenuItem>
                                       <DropdownMenuSeparator />
                                     </>
                                   )}
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📊 Avançar</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
+                                  {/* Marcar como Enviado é a própria transição draft → pending_signature:
+                                      num contrato já enviado não tem para onde avançar. */}
+                                  {contract.status === "draft" && (
+                                    <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
                                     <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
@@ -2087,7 +2226,7 @@ const ClientContracts = () => {
                                     </>
                                   )}
                                    <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar contrato</DropdownMenuItem>
@@ -2132,7 +2271,7 @@ const ClientContracts = () => {
                               {(contract.status === "signed" || contract.status === "active") && (
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">👤 Cliente</DropdownMenuLabel>
-                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => navigate("/clients")}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
+                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => verCliente(contract)}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleEmailClientDirect(contract)}>📧 Enviar email ao cliente</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleWhatsAppClientDirect(contract)}>📱 WhatsApp</DropdownMenuItem>
                                   {canSendSignature && (
@@ -2148,7 +2287,7 @@ const ClientContracts = () => {
                                     </>
                                   )}
                                    <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
@@ -2163,7 +2302,7 @@ const ClientContracts = () => {
                                     disabled={!contractHasQuotes(contract)}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {(isSystemAdmin || canEdit) && (
                                     <DropdownMenuItem className="text-destructive" onClick={() => handleOpenCancelDialog(contract)}>
@@ -2173,41 +2312,8 @@ const ClientContracts = () => {
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (assinado não pode ser eliminado)</DropdownMenuItem>
                                 </>
                               )}
-                              {contract.status === "pending_signature" && (
-                                <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📊 Avançar</DropdownMenuLabel>
-                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
-                                    ✅ Marcar como Assinado
-                                  </DropdownMenuItem>
-                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Reenviar</DropdownMenuItem>}
-                                  {canSendSignature && (
-                                    <>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                        🔗 Copiar link do portal
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                                   <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem
-                                    disabled={!contract.proposal_id}
-                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
-                                  >📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={!contractHasQuotes(contract)}
-                                    onClick={() => navigate(contractQuotesRoute(contract))}
-                                  >📊 Ver orçamentos</DropdownMenuItem>
-                                </>
-                              )}
+                              {/* 'pending_signature' já não tem ramo próprio: partilha o bloco
+                                  acima com 'draft' (ver isPreSignature). */}
                               {contract.status === "expired" && (
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔄 Renovação</DropdownMenuLabel>
@@ -2215,7 +2321,7 @@ const ClientContracts = () => {
                                   {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>}
                                   {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>}
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
@@ -2225,14 +2331,14 @@ const ClientContracts = () => {
                                     disabled={!contract.proposal_id}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (expirado mantém histórico)</DropdownMenuItem>
                                 </>
                               )}
                               {contract.status === "cancelled" && (
                                 <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -2245,7 +2351,7 @@ const ClientContracts = () => {
                                     disabled={!contractHasQuotes(contract)}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {canDelete && canDeleteContract(contract) ? (
                                     <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
@@ -2294,7 +2400,10 @@ const ClientContracts = () => {
           open={isDialogOpen}
           onOpenChange={(open) => { if (!open) handleCloseDialog(); else setIsDialogOpen(true); }}
           contract={editingContract}
-          proposals={presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
+          proposals={presetProposalId ? proposals.filter((p: any) => p.id === presetProposalId) : presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
+          presetProposalId={presetProposalId}
+          proposalsLoaded={proposalsLoaded}
+          negocioLigado={negocioNovo ? { titulo: negocioDoNovo?.titulo ?? null } : null}
           templates={templates}
           onSave={handleDialogSave}
           saving={createMutation.isPending || updateMutation.isPending}
@@ -2351,18 +2460,20 @@ const ClientContracts = () => {
               <div className="flex items-start gap-2">
                 <Checkbox
                   id="create-replacement"
-                  checked={createReplacementOnCancel}
+                  checked={createReplacementOnCancel && !substitutoImpedido}
+                  disabled={substitutoImpedido}
                   onCheckedChange={(checked) => setCreateReplacementOnCancel(checked === true)}
                 />
                 <Label htmlFor="create-replacement" className="font-normal leading-snug cursor-pointer">
                   Gerar contrato substituto a partir da mesma proposta
                 </Label>
               </div>
+              <AvisoSubstitutoNegocio aviso={avisoDoSubstituto} />
             </div>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
               <AlertDialogAction
-                disabled={!cancelReason.trim() || cancelContractMutation.isPending}
+                disabled={!cancelReason.trim() || cancelContractMutation.isPending || anularSemVerificar}
                 onClick={(e) => { e.preventDefault(); cancelContractMutation.mutate(); }}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
@@ -2422,13 +2533,24 @@ const ClientContracts = () => {
         />
 
         {/* WhatsApp Dialog */}
+        {/* onSent só dispara depois do WhatsApp abrir mesmo com a mensagem —
+            nunca ao abrir este diálogo. O id vem do contexto (e não de
+            sendingContract) porque é ele que carrega o contrato que a mensagem
+            leva. */}
         <WhatsAppSendDialog
           open={showWhatsAppDialog}
           onOpenChange={setShowWhatsAppDialog}
           context={whatsAppContext}
+          onSent={() => {
+            const contractId = whatsAppContext?.contractId;
+            if (contractId) void markContractAsSent(contractId);
+          }}
         />
 
         {/* Email Dialog */}
+        {/* onSent só dispara depois do email seguir mesmo (ver
+            SendEntityEmailDialog: é chamado a seguir ao toast de sucesso).
+            Fechar o diálogo sem enviar deixa o contrato em draft. */}
         <SendEntityEmailDialog
           open={showEmailDialog}
           onOpenChange={setShowEmailDialog}
@@ -2438,6 +2560,10 @@ const ClientContracts = () => {
           entityEmail={sendingContract?._clientEmail || ""}
           organizationId={activeCompany?.id}
           contractId={sendingContract?.id}
+          onSent={() => {
+            const contractId = sendingContract?.id;
+            if (contractId) void markContractAsSent(contractId);
+          }}
         />
       </div>
     </Layout>

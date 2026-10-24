@@ -12,13 +12,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2, RotateCcw } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/lib/toast';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useScheduling } from '@/hooks/useScheduling';
 import { useScheduleSettings } from '@/hooks/useScheduleSettings';
+import { notifyClientOfScheduleChange, detectScheduleChanges, type ScheduleChange } from '@/lib/scheduling/notifyClientOfScheduleChange';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ScheduleCalendarView } from '@/components/scheduling/ScheduleCalendarView';
 import { ScheduleItemDialog } from '@/components/scheduling/ScheduleItemDialog';
@@ -28,7 +31,11 @@ import { AutoScheduleRulesTab } from '@/components/scheduling/AutoScheduleRulesT
 import { ScheduleSettingsDialog } from '@/components/scheduling/ScheduleSettingsDialog';
 import { ScheduleBoardsTab } from '@/components/scheduling/ScheduleBoardsTab';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleFilters } from '@/types/scheduling';
+import { applyRescheduleToItem } from '@/lib/scheduling/clientConfirmation';
 import { PageFAQSheet } from "@/components/PageFAQSheet";
+import { FleetScheduleItemDialog } from '@/components/scheduling/FleetScheduleItem';
+import { FLEET_READ_ONLY_MESSAGE, isFleetScheduleItem } from '@/lib/agenda/fleet';
+import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 
 type ViewMode = 'month' | 'week' | 'day';
 type TabType = 'calendar' | 'boards' | 'resources' | 'rules';
@@ -136,6 +143,8 @@ export default function Scheduling() {
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
   const [resourceDialogOpen, setResourceDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ScheduleItem | null>(null);
+  // Itens da Frota: abrem só para consulta (com "Abrir na Frota"), nunca no diálogo de edição.
+  const [fleetItem, setFleetItem] = useState<ScheduleItem | null>(null);
   const [selectedBoard, setSelectedBoard] = useState<ScheduleBoard | null>(null);
   const [selectedResource, setSelectedResource] = useState<ScheduleResource | null>(null);
   const [defaultDate, setDefaultDate] = useState<Date | undefined>();
@@ -143,8 +152,25 @@ export default function Scheduling() {
   const [boardToDelete, setBoardToDelete] = useState<string | null>(null);
   const [resourceToDelete, setResourceToDelete] = useState<string | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [showInactiveResources, setShowInactiveResources] = useState(false);
+  const [inactiveResources, setInactiveResources] = useState<ScheduleResource[]>([]);
+  const [reactivatingResourceId, setReactivatingResourceId] = useState<string | null>(null);
 
   const { settings, holidays } = useScheduleSettings(activeCompany?.id);
+
+  // Recursos inactivos ficam de fora do fetchResources normal (schedule_resources.is_active = true).
+  // Só se pede a lista completa quando o utilizador liga "Mostrar inactivos" — evita um pedido extra
+  // em cada carregamento da página quando ninguém precisa de ver quem foi desactivado.
+  useEffect(() => {
+    if (!showInactiveResources || !activeCompany?.id) return;
+    let cancelled = false;
+    (async () => {
+      const all = await fetchResourcesRef.current(true);
+      if (cancelled) return;
+      setInactiveResources(all.filter(r => r.is_active === false));
+    })();
+    return () => { cancelled = true; };
+  }, [showInactiveResources, activeCompany?.id]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
@@ -166,9 +192,23 @@ export default function Scheduling() {
         supabase.auth.getUser(),
       ]);
       // Load users via separate queries (no FK between anew_memberships and anew_users)
-      const { data: memberships } = await supabase.from('anew_memberships').select('user_id').eq('organization_id', activeCompany.id).eq('status', 'active');
+      const { data: rawMemberships } = await supabase.from('anew_memberships').select('user_id, role_id').eq('organization_id', activeCompany.id).eq('status', 'active');
+      // anew_memberships também tem linhas "active" para clientes/contactos do
+      // portal (criadas ao enviar propostas/orçamentos/contratos) — sem este
+      // filtro de role, o dropdown "Utilizador do Sistema" mostrava clientes
+      // a par dos utilizadores reais da equipa.
+      const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase.from('anew_roles').select('id, code').in('id', roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || '').toLowerCase(); });
+      }
+      const memberships = (rawMemberships || []).filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
       let usersData: any[] = [];
-      if (memberships && memberships.length > 0) {
+      if (memberships.length > 0) {
         const userIds = memberships.map((m: any) => m.user_id).filter(Boolean);
         if (userIds.length > 0) {
           const { data: anewUsers } = await supabase.from('anew_users').select('id, name').in('id', userIds);
@@ -258,14 +298,39 @@ export default function Scheduling() {
     navigate(location.pathname, { replace: true, state: null });
   }, [dataReady, location.pathname, location.state, navigate]);
 
-  const handleItemClick = (item: ScheduleItem) => { setSelectedItem(item); setDefaultDate(undefined); setPrefill({}); setItemDialogOpen(true); };
+  const isFleetItemId = (id: string | undefined) => !!id && isFleetScheduleItem(items.find(i => i.id === id), boards);
+  const handleItemClick = (item: ScheduleItem) => {
+    if (isFleetScheduleItem(item, boards)) { setFleetItem(item); return; }
+    setSelectedItem(item); setDefaultDate(undefined); setPrefill({}); setItemDialogOpen(true);
+  };
   const handleAddClick = (date?: Date) => { setSelectedItem(null); setDefaultDate(date); setPrefill({}); setItemDialogOpen(true); };
+
+  // Dispara o aviso ao cliente/lead, so para as mudancas cujo interruptor da
+  // organizacao (schedule_settings) esta ligado. Corre em segundo plano: a
+  // gravacao ja terminou antes disto ser chamado.
+  const notifyIfEnabled = (itemId: string, changes: ScheduleChange[]) => {
+    const wanted = changes.filter(c =>
+      (c === 'datetime' && settings?.notify_client_on_reschedule) ||
+      (c === 'assignee' && settings?.notify_client_on_reassign)
+    );
+    if (wanted.length === 0) return;
+    void notifyClientOfScheduleChange(itemId, wanted).then(r => {
+      if (r && (r.sent.email || r.sent.sms)) {
+        toast.info(t('scheduling.notify.clientNotified'));
+      }
+    });
+  };
+
   const handleItemDrop = async (itemId: string, newStart: Date, newEnd: Date) => {
+    const prevItem = items.find(i => i.id === itemId);
+    if (isFleetScheduleItem(prevItem, boards)) { toast.info(FLEET_READ_ONLY_MESSAGE); return; }
     if (await rescheduleItem(itemId, newStart, newEnd)) {
-      setItems(prev => prev.map(item => item.id === itemId ? { ...item, start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() } : item));
+      setItems(prev => prev.map(item => item.id === itemId ? applyRescheduleToItem(item, newStart, newEnd) : item));
+      notifyIfEnabled(itemId, detectScheduleChanges(prevItem ?? null, { start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() }, null));
     }
   };
   const handleSaveItem = async (data: Partial<ScheduleItem>, assigneeIds: string[]) => {
+    if (isFleetItemId(data.id)) { toast.info(FLEET_READ_ONLY_MESSAGE); return; }
     // Build scope-aware filter (same logic as the useEffect that loads items)
     let scopeFilter: Partial<ScheduleFilters> = {};
     if (scheduleScope === 'mine' && currentUserId) {
@@ -294,16 +359,31 @@ export default function Scheduling() {
     };
 
     if (data.id) {
+      const prevItem = selectedItem && selectedItem.id === data.id ? selectedItem : items.find(i => i.id === data.id) ?? null;
       if (await updateItem(data.id, data)) {
-        await updateAssignees(data.id, assigneeIds);
+        toast.success(t('scheduling.item.updateSuccess'));
+        const assigneesResult = await updateAssignees(data.id, assigneeIds);
         setItems(await fetchItemsRef.current(filters));
+        notifyIfEnabled(data.id, detectScheduleChanges(prevItem, data, assigneesResult ? assigneeIds : null));
+        if (assigneesResult?.leadOwnerChanged) {
+          // O recurso mudou e o dono da lead/cliente ligado acompanhou-o; as outras
+          // visitas futuras dessa ficha foram alinhadas pela base.
+          const ownerName = users.find(u => u.id === assigneesResult.newOwnerId)?.name ?? '';
+          toast.info(t('scheduling.item.leadOwnerSynced', { name: ownerName }));
+          assigneesResult.otherVisitIds
+            .filter(otherId => otherId !== data.id)
+            .forEach(otherId => notifyIfEnabled(otherId, ['assignee']));
+        }
       }
     } else {
       const newItem = await createItem(data, assigneeIds);
       if (newItem) setItems(prev => [...prev, newItem]);
     }
   };
-  const handleDeleteItem = async (id: string) => { if (await deleteItem(id)) setItems(prev => prev.filter(item => item.id !== id)); };
+  const handleDeleteItem = async (id: string) => {
+    if (isFleetItemId(id)) { toast.info(FLEET_READ_ONLY_MESSAGE); return; }
+    if (await deleteItem(id)) setItems(prev => prev.filter(item => item.id !== id));
+  };
   const handleSaveBoard = async (data: Partial<ScheduleBoard>) => {
     if (data.id) { if (await updateBoard(data.id, data)) setBoards(prev => prev.map(b => b.id === data.id ? { ...b, ...data } : b)); }
     else { const nb = await createBoard(data); if (nb) setBoards(prev => [...prev, nb]); }
@@ -333,7 +413,28 @@ export default function Scheduling() {
       }
     }
   };
-  const handleDeleteResource = async (rid: string) => { if (await deleteResource(rid)) { setResources(prev => prev.filter(r => r.id !== rid)); setResourceDialogOpen(false); } };
+  const handleDeleteResource = async (rid: string) => {
+    if (!(await deleteResource(rid))) return;
+    setResources(prev => {
+      const removed = prev.find(r => r.id === rid);
+      if (removed) {
+        setInactiveResources(inactivePrev => [...inactivePrev, { ...removed, is_active: false }]);
+      }
+      return prev.filter(r => r.id !== rid);
+    });
+    setResourceDialogOpen(false);
+  };
+  const handleReactivateResource = async (resource: ScheduleResource) => {
+    setReactivatingResourceId(resource.id);
+    try {
+      if (await updateResource(resource.id, { is_active: true })) {
+        setInactiveResources(prev => prev.filter(r => r.id !== resource.id));
+        setResources(prev => [...prev, { ...resource, is_active: true }]);
+      }
+    } finally {
+      setReactivatingResourceId(null);
+    }
+  };
   const handleDeleteBoard = async (bid: string) => { if (await deleteBoard(bid)) { setBoards(prev => prev.filter(b => b.id !== bid)); setBoardDialogOpen(false); } };
   const toggleBoardFilter = (id: string) => setSelectedBoardIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const toggleResourceFilter = (id: string) => setSelectedResourceIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -505,21 +606,41 @@ export default function Scheduling() {
           </TabsContent>
 
           <TabsContent value="resources" className="space-y-4">
-            <div className="flex justify-end">
+            <div className="flex items-center justify-end gap-4">
+              <div className="flex items-center gap-2">
+                <Switch checked={showInactiveResources} onCheckedChange={setShowInactiveResources} id="show-inactive-resources" />
+                <label htmlFor="show-inactive-resources" className="text-sm text-muted-foreground cursor-pointer">
+                  Mostrar inactivos
+                </label>
+              </div>
               <PermissionGate permission="scheduling.resources.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newResource')}</Button></PermissionGate>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {resources.map(resource => (
-                <Card key={resource.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelectedResource(resource); setResourceDialogOpen(true); }}>
+              {[...resources, ...(showInactiveResources ? inactiveResources : [])].map(resource => (
+                <Card key={resource.id} className={`cursor-pointer hover:shadow-md transition-shadow ${resource.is_active === false ? 'opacity-60' : ''}`} onClick={() => { setSelectedResource(resource); setResourceDialogOpen(true); }}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1">
                         <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: resource.color }} />
                         <CardTitle className="text-lg">{resource.name}</CardTitle>
                       </div>
-                      {hasPermission('scheduling.resources.delete') && (
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive shrink-0" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
-                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {resource.is_active === false && hasPermission('scheduling.resources.create') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-primary hover:text-primary"
+                            disabled={reactivatingResourceId === resource.id}
+                            onClick={(e) => { e.stopPropagation(); handleReactivateResource(resource); }}
+                            title="Reativar"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {resource.is_active !== false && hasPermission('scheduling.resources.delete') && (
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
@@ -554,7 +675,7 @@ export default function Scheduling() {
                   </CardContent>
                 </Card>
               ))}
-              {resources.length === 0 && (
+              {resources.length === 0 && !(showInactiveResources && inactiveResources.length > 0) && (
                 <Card className="col-span-full p-8 text-center">
                   <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">{t('scheduling.noResources')}</h3>
@@ -575,6 +696,7 @@ export default function Scheduling() {
         contacts={contacts} employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
         defaultDate={defaultDate} defaultTitle={prefill.title} defaultClientId={prefill.clientId}
         companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
+      <FleetScheduleItemDialog item={fleetItem} boards={boards} onOpenChange={(open) => { if (!open) setFleetItem(null); }} />
       <ScheduleBoardDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} board={selectedBoard} onSave={handleSaveBoard} />
       <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={assignableUsers} allUsers={users} onSave={handleSaveResource} />
       <ScheduleSettingsDialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen} companyId={activeCompany?.id} />

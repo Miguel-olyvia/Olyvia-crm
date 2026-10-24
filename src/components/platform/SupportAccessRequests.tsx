@@ -169,7 +169,7 @@ function SysadminRequestsTable() {
                   <TableHead>Duração</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Tempo restante</TableHead>
-                  <TableHead className="text-right">Acções</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

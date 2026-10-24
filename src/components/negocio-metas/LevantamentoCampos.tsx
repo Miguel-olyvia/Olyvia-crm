@@ -1,0 +1,78 @@
+import { Info, Plus } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { DadosDoLevantamento } from "./DadosDoLevantamento";
+import { LinhaLevantamentoForm, MAX_OBSERVACOES } from "./LinhaLevantamentoForm";
+import { N, Rotulo } from "./PecasNovoNegocio";
+import { FOCO } from "./estilos";
+import type { ErrosNovoNegocio } from "./novoNegocio";
+import type { LevantamentoForm, LinhaForm } from "./levantamento";
+
+export interface AcoesLevantamento {
+  mudar: (parcial: Partial<LevantamentoForm>) => void;
+  adicionarLinha: () => void;
+  mudarLinha: (id: string, parcial: Partial<LinhaForm>) => void;
+  removerLinha: (id: string) => void;
+}
+
+interface Props {
+  id: string;
+  levantamento: LevantamentoForm;
+  erros: ErrosNovoNegocio;
+  acoes: AcoesLevantamento;
+}
+
+const SELECT = cn("min-h-11", FOCO);
+
+/** A lista de linhas, o total e o botão Adicionar linha. */
+function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
+  const { t } = useTranslation();
+  const n = levantamento.linhas.length;
+  return (
+    <section aria-labelledby={`${id}-linhas`} className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id={`${id}-linhas`} className="text-sm font-semibold text-foreground">{t(`${N}survey.lines`)}</h3>
+        <p aria-live="polite" className="text-sm tabular-nums text-muted-foreground">{t(`${N}survey.count${n === 1 ? ".one" : ""}`, { n })}</p>
+      </div>
+      {n === 0 && <p className="text-sm text-muted-foreground">{t(`${N}survey.empty`)}</p>}
+      {levantamento.linhas.map((linha, i) => (
+        <LinhaLevantamentoForm
+          key={linha.id} id={id} numero={i + 1} linha={linha} erros={erros.linhas?.[linha.id]}
+          aoMudar={(parcial) => acoes.mudarLinha(linha.id, parcial)} aoRemover={() => { acoes.removerLinha(linha.id); document.getElementById(`${id}-add`)?.focus(); }}
+        />
+      ))}
+      <Button id={`${id}-add`} type="button" variant="outline" onClick={acoes.adicionarLinha} className={cn("min-h-11 gap-2", FOCO)}>
+        <Plus className="h-4 w-4" aria-hidden="true" />
+        {t(`${N}survey.add`)}
+      </Button>
+    </section>
+  );
+}
+
+/**
+ * A secção Medidas da área: os dados do levantamento (data, estado e comercial: próprios sem visita ligada, herdados dela com visita), a ajuda, as
+ * linhas do levantamento e as observações gerais. `deVisita`: uma visita representa o levantamento.
+ */
+export function MedidasDaArea(props: Props & { deVisita?: boolean }) {
+  const { t } = useTranslation();
+  const { id, levantamento, acoes, deVisita = false, erros } = props;
+  return (
+    <div className="space-y-4">
+      <DadosDoLevantamento id={id} levantamento={levantamento} deVisita={deVisita} erro={erros.data} acoes={acoes} />
+      <p role="note" className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm text-foreground">
+        <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        {t(`${N}survey.help`)} {t(`${N}visit.measures.help`)}
+      </p>
+      <ListaLinhas {...props} />
+      <div className="space-y-1.5">
+        <Rotulo para={`${id}-obs`} texto={t(`${N}survey.generalNotes`)} />
+        <Input
+          id={`${id}-obs`} value={levantamento.observacoes} maxLength={MAX_OBSERVACOES} autoComplete="off" className={SELECT}
+          onChange={(e) => acoes.mudar({ observacoes: e.target.value })}
+        />
+      </div>
+    </div>
+  );
+}

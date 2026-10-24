@@ -33,7 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { useCompany } from "@/contexts/CompanyContext";
 import { ContratosDaEquipaDialog } from "@/components/hr/fimContrato/ContratosDaEquipaDialog";
-import { appendTimestamp, getNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { getNotificationRoute, openNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
 
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -278,7 +278,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     setNotificationsOpen(false);
     const route = await getNotificationRoute(notification);
     if (route) {
-      navigate(appendTimestamp(route), { replace: true });
+      openNotificationRoute(navigate, route);
     }
   };
 
@@ -290,7 +290,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
       const withAction = notification.action_type
         ? `${baseRoute}${baseRoute.includes("?") ? "&" : "?"}action=${notification.action_type}`
         : baseRoute;
-      navigate(appendTimestamp(withAction), { replace: true });
+      openNotificationRoute(navigate, withAction);
     }
   };
 
@@ -552,7 +552,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
                 const target = messageDialog.link || route;
                 setMessageDialog(null);
                 setNotificationsOpen(false);
-                if (target) navigate(appendTimestamp(target), { replace: true });
+                if (target) openNotificationRoute(navigate, target);
               }}
             >
               Ver documento

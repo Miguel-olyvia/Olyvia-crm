@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { BarraVoltar } from "@/components/pessoas-processo/BarraVoltar";
+import { AUTO_IMPORT_PARAM, readAutoImportParam } from "@/lib/quotes/dealQuoteLink";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
@@ -35,6 +37,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
+import { QuoteMoradasResumo } from "@/components/quote/QuoteMoradasResumo";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -82,7 +85,7 @@ import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialo
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
-import { getLineUnitPrice, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
+import { getLineUnitPrice, getLineUnitCost, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
 
 // Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
 const MIN_QUOTE_SEARCH_LENGTH = 2;
@@ -95,6 +98,8 @@ interface Quote {
   root_organization_id: string | null;
   deal_id: string | null;
   obra_endereco: string | null;
+  /** anew_addresses.id da morada de entrega escolhida (select *). */
+  site_address_id?: string | null;
   modelo_base: string;
   estado: string;
   created_at: string;
@@ -173,6 +178,7 @@ interface QuoteLine {
   margem_percent?: number;
   iva_percent?: number;
   total_sem_iva?: number;
+  total_com_iva?: number;
   seccao?: string | null;
 }
 
@@ -227,6 +233,8 @@ export default function Quotes() {
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null);
   const [builderInitialProposalId, setBuilderInitialProposalId] = useState<string | null>(null);
   const [builderInitialDealId, setBuilderInitialDealId] = useState<string | null>(null);
+  // Vindo do detalhe do pedido ("Criar orçamento"): importar logo as necessidades.
+  const [builderAutoImport, setBuilderAutoImport] = useState(false);
   
   const [deleteQuoteId, setDeleteQuoteId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(true);
@@ -235,6 +243,7 @@ export default function Quotes() {
   const [detailLines, setDetailLines] = useState<QuoteLine[]>([]);
   const [detailLineCosts, setDetailLineCosts] = useState<Record<string, number>>({});
   const [detailLineDetails, setDetailLineDetails] = useState<Record<string, LineResolution>>({});
+  const [detailFees, setDetailFees] = useState<Array<{ id: string; name: string; calculated_value: number; vat_rate: number; vat_amount: number }>>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('lista');
   const [linesAgg, setLinesAgg] = useState<Record<string, QuoteLinesAgg>>({});
   
@@ -349,6 +358,14 @@ export default function Quotes() {
   const applyQuoteFilters = useCallback(<T,>(query: T): T => {
     const { status, search, dateFromIso, dateToIso, comercial } = quoteFilters;
     let q = query as any;
+    // Orçamentos sintéticos (quotes.is_internal = true) nunca aparecem neste
+    // ecrã: são criados pela RPC de criação manual de Encomendas Clientes só
+    // para servirem de suporte às linhas do contrato, não são orçamentos que
+    // alguém tenha feito. Fica aqui, e não repetido em cada query, pelo mesmo
+    // motivo do resto do predicado (ver "UM filtro, UM sítio" acima): a lista,
+    // a contagem que decide a paginação e os gráficos do Dashboard passam
+    // todos por esta função, logo nenhum deles pode divergir.
+    q = q.eq("is_internal", false);
     if (status) q = q.eq("estado", status);
     const searchWords = search ? splitSearchWords(search) : [];
     if (searchWords.length > 0) q = applySearchTextFilter(q, searchWords);
@@ -493,6 +510,8 @@ export default function Quotes() {
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
   // Open builder automatically when navigated with ?new=1&proposal_id=...
+  // (ou ?new=1&deal_id=...&autoImport=1 a partir do detalhe do pedido — ver
+  // src/lib/quotes/dealQuoteLink.ts).
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       const proposalId = searchParams.get("proposal_id");
@@ -500,12 +519,14 @@ export default function Quotes() {
       setSelectedQuote(null);
       setBuilderInitialProposalId(proposalId);
       setBuilderInitialDealId(dealId);
+      setBuilderAutoImport(!!dealId && readAutoImportParam(searchParams));
       setShowBuilder(true);
       // Clear params so a refresh doesn't re-trigger
       const next = new URLSearchParams(searchParams);
       next.delete("new");
       next.delete("proposal_id");
       next.delete("deal_id");
+      next.delete(AUTO_IMPORT_PARAM);
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -672,8 +693,11 @@ export default function Quotes() {
 
             // (a) quotes they created
             const directQuotes = await fetchInBatches(userIds, async (chunk) => {
+              // is_internal: orçamentos sintéticos das Encomendas Clientes
+              // manuais ficam de fora já na resolução dos ids visíveis, para
+              // não entrarem sequer no `visible_ids` enviado aos KPIs.
               const { data, error } = await (supabase as any).from("quotes").select("id")
-                .eq("organization_id", activeCompany.id).in("created_by", chunk);
+                .eq("organization_id", activeCompany.id).eq("is_internal", false).in("created_by", chunk);
               if (error) throw error;
               return (data as any[]) || [];
             }, 30);
@@ -715,7 +739,7 @@ export default function Quotes() {
               const uniqueDealIds = Array.from(new Set(dealIds));
               const quotesViaDeals = await fetchInBatches(uniqueDealIds, async (chunk) => {
                 const { data, error } = await (supabase as any).from("quotes").select("id")
-                  .eq("organization_id", activeCompany.id).in("deal_id", chunk);
+                  .eq("organization_id", activeCompany.id).eq("is_internal", false).in("deal_id", chunk);
                 if (error) throw error;
                 return (data as any[]) || [];
               }, 30);
@@ -941,7 +965,12 @@ export default function Quotes() {
         }
         a.totalWithIva += base + ivaAmount;
 
-        const unitCost = detailsMap[line.id]?.unitCost || 0;
+        // O custo da margem é sempre o congelado na própria linha (custo_material_unit +
+        // custo_mao_obra_unit) — o mesmo que o editor já usa (getLineUnitCost). Reabrir e
+        // gravar o orçamento é que actualiza este valor; a listagem não o recalcula ao vivo
+        // a partir do catálogo, ou a margem de um orçamento já criado mudava sozinha sempre
+        // que um preço de compra (ou o de um componente de um kit) mudasse depois.
+        const unitCost = getLineUnitCost(line);
         if (unitCost > 0) {
           a.totalCost += unitCost * qty;
           a.totalValueWithCost += base;
@@ -1006,15 +1035,6 @@ export default function Quotes() {
     organizationId: activeCompany?.id,
     bulkDeleteRpc: "rpc_bulk_delete_quote",
   });
-
-  const getClientAddress = (quote: Quote) => {
-    if (quote.clients?.client_addresses?.length) {
-      const primaryAddress = quote.clients.client_addresses.find(addr => addr.is_primary) || quote.clients.client_addresses[0];
-      const parts = [primaryAddress.street, primaryAddress.number, primaryAddress.postal_code, primaryAddress.city].filter(Boolean);
-      if (parts.length > 0) return parts.join(", ");
-    }
-    return "—";
-  };
 
   const getEntityId = (quote: Quote): string | undefined => {
     return (quote as any).entity_id || quote.clients?.entity_id || (quote.deals as any)?.entity_id;
@@ -1266,9 +1286,25 @@ export default function Quotes() {
     setDetailLines(linesArr);
     const details = await resolveLineDetails(linesArr as any);
     setDetailLineDetails(details);
+    // Custo congelado na linha, não recalculado ao vivo — mesmo motivo do
+    // fetchLinesAgg acima. `details` continua a ser usado só para o IVA
+    // (vatRateShares), que é uma decisão separada da do custo/margem.
     const costs: Record<string, number> = {};
-    Object.keys(details).forEach((k) => { costs[k] = details[k].unitCost; });
+    linesArr.forEach((line: any) => { costs[line.id] = getLineUnitCost(line); });
     setDetailLineCosts(costs);
+
+    const { data: fees } = await supabase
+      .from('quote_fees')
+      .select('id, fee_type_id, calculated_value, vat_rate, vat_amount, service_fee_types(name)')
+      .eq('quote_id', quote.id);
+    setDetailFees(((fees as any[]) || []).map((f) => ({
+      id: f.id,
+      name: f.service_fee_types?.name || '—',
+      calculated_value: parseFloat(String(f.calculated_value || 0)),
+      vat_rate: parseFloat(String(f.vat_rate || 0)),
+      vat_amount: parseFloat(String(f.vat_amount || 0)),
+    })));
+
     setShowDetails(true);
   };
 
@@ -1523,12 +1559,14 @@ export default function Quotes() {
         quoteId={selectedQuote}
         initialProposalId={builderInitialProposalId}
         initialDealId={builderInitialDealId}
+        autoImportFromDeal={builderAutoImport}
         onClose={() => {
           const returnProposalId = builderInitialProposalId;
           setShowBuilder(false);
           setSelectedQuote(null);
           setBuilderInitialProposalId(null);
           setBuilderInitialDealId(null);
+          setBuilderAutoImport(false);
           if (returnProposalId) {
             navigate(`/proposals?open=${returnProposalId}`);
             return;
@@ -1542,6 +1580,7 @@ export default function Quotes() {
   return (
     <>
       <div className="flex flex-col h-[calc(100vh-4rem)]">
+        <BarraVoltar />
         {/* Header */}
         <div className="flex-shrink-0 p-4 md:p-6 border-b bg-background">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1570,7 +1609,7 @@ export default function Quotes() {
                   <FileText className="h-4 w-4 mr-2" />Templates
                 </Button>
               </PermissionGate>
-              <PermissionGate permission="quotes.manage">
+              <PermissionGate permission="quote_templates.view">
                 <Button variant="outline" size="sm" onClick={() => navigate("/quote-models")}>
                   <FileText className="h-4 w-4 mr-2" />Modelos Rápidos
                 </Button>
@@ -1975,7 +2014,7 @@ export default function Quotes() {
                                     marginVal >= 15 ? "bg-amber-500/20 text-amber-700 dark:text-amber-400" :
                                     "bg-red-500/20 text-red-700 dark:text-red-400"
                                   )}>
-                                    {marginVal.toFixed(0)}%
+                                    {marginVal.toFixed(1)}%
                                     {marginVal >= 30 ? " ✅" : marginVal >= 15 ? " ⚠" : " ❌"}
                                   </Badge>
                                 ) : <span className="text-xs text-muted-foreground">—</span>}
@@ -2124,7 +2163,7 @@ export default function Quotes() {
                                     <DropdownMenuSeparator />
 
                                     {/* ACÇÕES */}
-                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
+                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Ações</DropdownMenuLabel>
                                     {quote.estado !== 'aceite' && (
                                       <PermissionGate permission="quotes.edit">
                                         <DropdownMenuItem onClick={() => { setSelectedQuote(quote.id); setShowBuilder(true); }}>
@@ -2291,13 +2330,19 @@ export default function Quotes() {
                         <p className="font-medium">{getClientName(detailQuote).name}</p>
                       </div>
                       <div>
-                        <label className="text-xs font-medium text-muted-foreground">{t('quotes.columns.location')}</label>
-                        <p className="text-sm">{getClientAddress(detailQuote)}</p>
-                      </div>
-                      <div>
                         <label className="text-xs font-medium text-muted-foreground">Comercial</label>
                         <p className="text-sm">{detailQuote.assigned_to ? (comercialNamesMap[detailQuote.assigned_to] || "...") : "—"}</p>
                       </div>
+                    </div>
+                    {/* Morada fiscal (da entidade, lida pelo orçamento) e morada
+                        de entrega gravada no orçamento (obra_endereco). */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <QuoteMoradasResumo
+                        quoteId={detailQuote.id}
+                        obraEndereco={detailQuote.obra_endereco}
+                        entityId={getEntityId(detailQuote) ?? null}
+                        siteAddressId={detailQuote.site_address_id ?? null}
+                      />
                     </div>
                     <Separator />
                     <div className="grid grid-cols-3 gap-4">
@@ -2387,7 +2432,12 @@ export default function Quotes() {
                             </TableBody>
                           </Table>
                           {(() => {
-                            const subtotal = detailLines.reduce((sum, l) => sum + parseFloat(String(l.total_sem_iva || 0)), 0);
+                            // Subtotal, taxas e total vêm gravados no próprio orçamento —
+                            // não se recalculam aqui. `quotes.select('*')` já os traz;
+                            // só não estavam na interface Quote local.
+                            const q = detailQuote as any;
+                            const subtotal = parseFloat(String(q?.subtotal ?? 0)) || detailLines.reduce((sum, l) => sum + parseFloat(String(l.total_sem_iva || 0)), 0);
+                            const total = parseFloat(String(q?.total ?? 0));
                             const totalCost = detailLines.reduce((sum, l) => {
                               const qty = parseFloat(String(l.qt || 0));
                               const c = detailLineCosts[l.id] ?? 0;
@@ -2396,27 +2446,16 @@ export default function Quotes() {
                             const globalMargin = subtotal > 0 && totalCost > 0
                               ? ((subtotal - totalCost) / subtotal) * 100
                               : null;
-                            // Agrupar IVA por taxa real do catálogo (product_prices/service_prices).
-                            // Para bundles com componentes mistos, usa a distribuição calculada pelo resolver.
+                            // IVA por linha, só para mostrar a repartição por taxa — a
+                            // partir do que já foi gravado (total_com_iva - total_sem_iva),
+                            // não recalculado. O Total acima não depende desta soma.
                             const ivaByRate = new Map<number, number>();
                             detailLines.forEach((l) => {
-                              const base = parseFloat(String(l.total_sem_iva || 0));
-                              const shares = detailLineDetails[l.id]?.vatRateShares;
-                              if (shares && Object.keys(shares).length > 0) {
-                                Object.entries(shares).forEach(([rateStr, share]) => {
-                                  const rate = parseFloat(rateStr);
-                                  const amount = base * share * (rate / 100);
-                                  ivaByRate.set(rate, (ivaByRate.get(rate) || 0) + amount);
-                                });
-                              } else {
-                                const rate = parseFloat(String(l.iva_percent ?? 23));
-                                const amount = base * (rate / 100);
-                                ivaByRate.set(rate, (ivaByRate.get(rate) || 0) + amount);
-                              }
+                              const lineIva = parseFloat(String(l.total_com_iva || 0)) - parseFloat(String(l.total_sem_iva || 0));
+                              const rate = parseFloat(String(l.iva_percent ?? 23));
+                              ivaByRate.set(rate, (ivaByRate.get(rate) || 0) + lineIva);
                             });
                             const ivaRates = Array.from(ivaByRate.entries()).sort((a, b) => a[0] - b[0]);
-                            const ivaTotal = ivaRates.reduce((s, [, v]) => s + v, 0);
-                            const total = subtotal + ivaTotal;
                             const marginColor = globalMargin == null
                               ? ""
                               : globalMargin >= 30 ? "text-green-600 dark:text-green-400"
@@ -2432,10 +2471,22 @@ export default function Quotes() {
                                       <div className="flex justify-between"><span className="text-muted-foreground">Margem global</span><span className={`font-medium ${marginColor}`}>{globalMargin!.toFixed(1)}%</span></div>
                                     </>
                                   )}
+                                  {detailFees.map((f) => (
+                                    <div key={f.id} className="flex justify-between">
+                                      <span className="text-muted-foreground">{f.name}</span>
+                                      <span>{formatCurrency(f.calculated_value)}</span>
+                                    </div>
+                                  ))}
                                   {ivaRates.map(([rate, amount]) => (
                                     <div key={rate} className="flex justify-between">
                                       <span className="text-muted-foreground">IVA ({rate}%)</span>
                                       <span>{formatCurrency(amount)}</span>
+                                    </div>
+                                  ))}
+                                  {detailFees.filter(f => f.vat_amount > 0).map((f) => (
+                                    <div key={`${f.id}-vat`} className="flex justify-between">
+                                      <span className="text-muted-foreground">IVA ({f.vat_rate}%) — {f.name}</span>
+                                      <span>{formatCurrency(f.vat_amount)}</span>
                                     </div>
                                   ))}
                                   <Separator />
@@ -2556,7 +2607,7 @@ export default function Quotes() {
       <SensitiveExportDialog
         open={sensitiveExportOpen}
         onOpenChange={setSensitiveExportOpen}
-        sensitiveFields={["morada da obra"]}
+        sensitiveFields={["morada do serviço"]}
         loading={exporting}
         onConfirm={(includeSensitive) => void performExport(includeSensitive)}
       />

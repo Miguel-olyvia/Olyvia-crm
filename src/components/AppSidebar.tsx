@@ -7,12 +7,17 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useNegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";
+import { CounterPill } from "@/components/inventory/ui/CounterPill";
+import { ContadorDenuncias } from "./sidebar/ContadorDenuncias";
+import { itemAtivo, type ItemAtivavel } from "./sidebar/itemAtivo";
+import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
+import { DICA_CONTADOR_FROTA, TOM_CONTADOR_FROTA, useContadoresFrota } from "@/components/frota/useContadoresFrota";
 import olyviaMascot from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
 import {
   topLevelItems,
   menuSections,
-  bottomItem,
   MenuItem,
   TopLevelItem,
   MenuSection,
@@ -40,6 +45,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   const { openSectionId, setOpenSectionId, closeSubmenu, isManuallyClosedRef } = useSidebarExpand();
   const { activeCompany } = useCompany();
   const { sectionCounts } = useSidebarAlertCounts(activeCompany?.id);
+  // O interruptor só se lê para quem já tem as permissões carregadas e pode ver Pessoas.
+  const negocios = useNegociosAtivos({ habilitado: !permissionsLoading && hasPermission("pessoas.view") });
   
   // Show skeleton while loading permissions (first load only)
   const [showSkeleton, setShowSkeleton] = useState(true);
@@ -50,6 +57,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
 
   const canViewItem = useCallback(
     (item: MenuItem): boolean => {
+      // Falha fechada: a carregar, em erro ou sem interruptor, o item não aparece (antes do atalho das permissões).
+      if (item.requiresNegociosAtivos && (negocios.isLoading || !negocios.ativo)) return false;
       if (permissionsLoading) return true;
       // Páginas ainda não prontas para toda a gente: nem aparecem a quem não
       // pode entrar, em vez de aparecerem e negarem o acesso ao clique.
@@ -58,14 +67,16 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
         return false;
       }
       if (item.permissions && item.permissions.length > 0) {
-        return hasAnyPermission(item.permissions);
+        return item.requireAll
+          ? item.permissions.every((p) => hasPermission(p))
+          : hasAnyPermission(item.permissions);
       }
       if (item.permission) {
         return hasPermission(item.permission);
       }
       return true;
     },
-    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode]
+    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode, negocios.ativo, negocios.isLoading]
   );
 
   const canViewTopLevel = useCallback(
@@ -170,16 +181,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     // Keep submenu open - don't close on navigation
   };
 
-  const handleBottomClick = () => {
-    isManuallyClosedRef.current = false;
-    setOpenSectionId(null);
-    navigate(bottomItem.to);
-  };
-
   // Check if item is active
-  const isItemActive = (to: string) => {
-    return location.pathname === to || location.pathname.startsWith(to + "/");
-  };
+  const isItemActive = (item: ItemAtivavel) => itemAtivo(item, location.pathname, location.search);
 
   // Handle skeleton visibility - AFTER all hooks
   useEffect(() => {
@@ -218,10 +221,10 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-sidebar-accent scrollbar-track-transparent p-2">
           <TooltipProvider delayDuration={100}>
             <div className="flex flex-col gap-1">
-              {/* Top level items (Dashboard, Scheduling) */}
+              {/* Top level items (Hoje, Dashboard, Atividades, Operações) */}
               {visibleTopLevel.map((item) => {
                 const Icon = item.icon;
-                const isActive = isItemActive(item.to);
+                const isActive = isItemActive(item);
                 return (
                   <Tooltip key={item.id}>
                     <TooltipTrigger asChild>
@@ -294,34 +297,6 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
           </TooltipProvider>
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 p-2 border-t border-sidebar-border">
-          <TooltipProvider delayDuration={100}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleBottomClick}
-                  className={cn(
-                    "flex items-center justify-center w-full p-3 rounded-xl transition-all duration-200",
-                    "text-sidebar-foreground/80 hover:text-sidebar-foreground",
-                    "hover:bg-sidebar-accent",
-                    isItemActive(bottomItem.to) && "bg-primary text-primary-foreground shadow-md"
-                  )}
-                >
-                  <bottomItem.icon className="w-5 h-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent 
-                side="right" 
-                sideOffset={12}
-                className="bg-primary text-primary-foreground font-medium px-3 py-2 text-sm shadow-lg border-0"
-              >
-                {t(bottomItem.labelKey)}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
       </aside>
 
       {/* Flyout Panel - Shows when a section is open (no backdrop, content shifts) */}
@@ -349,7 +324,7 @@ interface FlyoutPanelProps {
   canViewItem: (item: MenuItem) => boolean;
   onItemClick: (to: string) => void;
   onClose: () => void;
-  isItemActive: (to: string) => boolean;
+  isItemActive: (item: ItemAtivavel) => boolean;
 }
 
 const FlyoutPanel = memo(function FlyoutPanel({
@@ -363,20 +338,43 @@ const FlyoutPanel = memo(function FlyoutPanel({
   const location = useLocation();
   const [expandedSubs, setExpandedSubs] = useState<Record<string, boolean>>({});
 
-  // Auto-expand subsection that contains active item
+  // Contadores do Inventário (pílulas): só pedidos com o painel do Inventário
+  // aberto e a quem tem alguma permissão de inventário — a RPC volta a
+  // verificar no servidor. Falha/ausência da RPC = sem pílulas.
+  // Mesma lógica dos separadores da área (InventoryAreaTabs).
+  const inventoryCounter = useInventoryCounters(section.id === "inventory");
+  // Contadores da Frota: lidos da BD (mesmas chaves react-query dos ecrãs), atualizam logo após cada ação.
+  const frotaCounter = useContadoresFrota();
+  const counterFor = (item: MenuItem): number | null =>
+    item.frotaCounterKey ? frotaCounter(item.frotaCounterKey) : inventoryCounter(item.counterKey);
+  const pillProps = (item: MenuItem) =>
+    item.frotaCounterKey ? { tone: TOM_CONTADOR_FROTA[item.frotaCounterKey], hint: DICA_CONTADOR_FROTA[item.frotaCounterKey] } : { counterKey: item.counterKey };
+
+  // Auto-expand subsection that contains active item (e as marcadas com
+  // defaultExpanded, só da primeira vez — se o utilizador as fechar, ficam
+  // fechadas).
   useEffect(() => {
     if (section.subSections) {
       const newExpanded: Record<string, boolean> = {};
       for (const sub of section.subSections) {
-        if (sub.items.some((item) => isItemActive(item.to))) {
+        if (sub.items.some((item) => isItemActive(item))) {
           newExpanded[sub.key] = true;
         }
       }
-      if (Object.keys(newExpanded).length > 0) {
-        setExpandedSubs((prev) => ({ ...prev, ...newExpanded }));
+      const defaults = section.subSections.filter((sub) => sub.defaultExpanded);
+      if (Object.keys(newExpanded).length > 0 || defaults.length > 0) {
+        setExpandedSubs((prev) => {
+          const next = { ...prev, ...newExpanded };
+          for (const sub of defaults) {
+            if (!(sub.key in next)) next[sub.key] = true;
+          }
+          return next;
+        });
       }
     }
-  }, [location.pathname, section.subSections]);
+    // `isItemActive` é recriada em cada render: o que ela lê do endereço (caminho e `?tab=`) é que entra nas dependências.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, location.search, section.subSections]);
 
   const toggleSub = useCallback((key: string) => {
     setExpandedSubs((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -433,7 +431,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
         {/* Main items */}
         {visibleItems.map((item) => {
           const Icon = item.icon;
-          const isActive = isItemActive(item.to);
+          const isActive = isItemActive(item);
           return (
             <button
               key={item.to}
@@ -448,6 +446,8 @@ const FlyoutPanel = memo(function FlyoutPanel({
             >
               <Icon className="w-4 h-4 flex-shrink-0" />
               <span className="truncate">{t(item.labelKey)}</span>
+              <CounterPill value={counterFor(item)} {...pillProps(item)} />
+              {item.textCounter === "rhDenunciasPorConfirmar" && <ContadorDenuncias />}
             </button>
           );
         })}
@@ -472,7 +472,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
               <div className="mt-1 ml-2 space-y-0.5">
                 {sub.items.map((item) => {
                   const Icon = item.icon;
-                  const isActive = isItemActive(item.to);
+                  const isActive = isItemActive(item);
                   return (
                     <button
                       key={item.to}
@@ -487,6 +487,7 @@ const FlyoutPanel = memo(function FlyoutPanel({
                     >
                       <Icon className="w-4 h-4 flex-shrink-0" />
                       <span className="truncate">{t(item.labelKey)}</span>
+                      <CounterPill value={counterFor(item)} {...pillProps(item)} />
                     </button>
                   );
                 })}
@@ -499,5 +500,8 @@ const FlyoutPanel = memo(function FlyoutPanel({
     </>
   );
 });
+
+// CounterPill (contadores do Inventário) vive em components/inventory/ui,
+// partilhada com os separadores da área.
 
 export default AppSidebar;
