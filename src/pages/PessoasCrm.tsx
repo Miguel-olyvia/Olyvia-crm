@@ -145,7 +145,7 @@ const PessoasExemplo = () => {
           </ListaAbas>
           <CabecalhoPagina
             subtitulo={subtitulo} titulo={t("pessoasPagina.title")} aviso={t("pessoasPagina.sample")}
-            pai={{ to: "/leads", texto: t("sidebar.crm") }}
+            pai={{ to: "/pessoas", texto: t("sidebar.crm") }}
             acoes={(
               <Button type="button" className={`min-h-11 gap-2 ${FOCO}`} onClick={() => setNovaLeadAberta(true)}>
                 <Plus className="h-4 w-4" aria-hidden="true" />

@@ -11,7 +11,7 @@ export interface QuoteMoradaFiscalProps {
   quoteId?: string | null;
   /**
    * Ficha onde se acrescenta a morada que falta (abre noutro separador:
-   * /clients?open=<id> ou /leads?open=<id>). Sem isto só se mostra o aviso.
+   * /pessoas?open=<id>). Sem isto só se mostra o aviso.
    */
   ficha?: { kind: "client" | "lead"; id: string } | null;
 }
@@ -60,7 +60,7 @@ export const QuoteMoradaFiscal = ({ entityId, quoteId, ficha }: QuoteMoradaFisca
 
   const texto = textoMoradaFiscal(morada);
   const fichaHref = ficha?.id
-    ? `${ficha.kind === "client" ? "/clients" : "/leads"}?open=${encodeURIComponent(ficha.id)}`
+    ? `/pessoas?open=${encodeURIComponent(ficha.id)}`
     : null;
 
   return (

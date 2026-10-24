@@ -42,12 +42,12 @@ const KEY_TO_ICON: Record<string, LucideIcon> = {
 };
 
 const KEY_TO_ROUTE: Record<string, string> = {
-  lead: "/leads",
+  lead: "/pessoas",
   deal: "/deals",
   proposal: "/proposals",
   quote: "/quotes",
   contract: "/client-contracts",
-  client: "/clients",
+  client: "/pessoas",
 };
 
 // Tabela de origem de cada passo, para os casos em que é preciso ir buscar a
@@ -141,7 +141,7 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
       if (configData?.modules && Array.isArray(configData.modules)) {
         const activeModules = configData.modules.filter((m: any) => m.enabled);
         const steps: PipelineStep[] = [
-          { key: "lead", label: "Lead", icon: Users, route: "/leads", id: resolved.lead || null },
+          { key: "lead", label: "Lead", icon: Users, route: "/pessoas", id: resolved.lead || null },
         ];
         for (const mod of activeModules) {
           const key = MODULE_ID_TO_KEY[mod.id];
@@ -162,12 +162,12 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
 
     const buildDefaultSteps = (resolved: Record<string, string | null>) => {
       setDynamicSteps([
-        { key: "lead", label: "Lead", icon: Users, route: "/leads", id: resolved.lead || null },
+        { key: "lead", label: "Lead", icon: Users, route: "/pessoas", id: resolved.lead || null },
         { key: "deal", label: "Pedido", icon: Target, route: "/deals", id: resolved.deal || null },
         { key: "quote", label: "Orçamento", icon: Calculator, route: "/quotes", id: resolved.quote || null },
         { key: "proposal", label: "Proposta", icon: FileText, route: "/proposals", id: resolved.proposal || null },
         { key: "contract", label: "Contrato", icon: FileSignature, route: "/client-contracts", id: resolved.contract || null },
-        { key: "client", label: "Cliente", icon: UserCheck, route: "/clients", id: resolved.client || null },
+        { key: "client", label: "Cliente", icon: UserCheck, route: "/pessoas", id: resolved.client || null },
       ]);
     };
 

@@ -89,8 +89,8 @@ const Home = lazy(() => import("./pages/Home"));
 const WelcomeGuide = lazy(() => import("./pages/WelcomeGuide"));
 
 
-const AnewLeads = lazy(() => import("./pages/AnewLeads"));
 const PessoasCrm = lazy(() => import("./pages/PessoasCrm"));
+const PessoasPipeline = lazy(() => import("./pages/PessoasPipeline"));
 const UtilizadoresPerfis = lazy(() => import("./pages/UtilizadoresPerfis"));
 const PessoasRh = lazy(() => import("./pages/rh-exemplo/PessoasRh"));
 const PessoaRhDetalhe = lazy(() => import("./pages/rh-exemplo/PessoaRhDetalhe"));
@@ -114,7 +114,6 @@ const RhMinhasDenuncias = lazy(() => import("./pages/rh-exemplo/RhMinhasDenuncia
 const RhDenuncias = lazy(() => import("./pages/rh-exemplo/RhDenuncias"));
 const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
 // AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
-const AnewClients = lazy(() => import("./pages/AnewClients"));
 const Gallery = lazy(() => import("./pages/Gallery"));
 const MarketingApi = lazy(() => import("./pages/MarketingApi"));
 const MarketingIntegration = lazy(() => import("./pages/MarketingIntegration"));
@@ -282,17 +281,18 @@ const App = () => (
                     <Route element={<LayoutRoute />}>
                       <Route path="/home" element={<Home />} />
                       <Route path="/dashboard" element={<Dashboard />} />
-                      <Route path="/anew-clients" element={<Navigate to="/clients" replace />} />
+                      <Route path="/anew-clients" element={<Navigate to="/pessoas" replace />} />
                       <Route path="/company-groups" element={<Navigate to="/organizations" replace />} />
-                      <Route path="/anew-contacts" element={<Navigate to="/leads" replace />} />
-                      <Route path="/anew-leads" element={<Navigate to="/leads" replace />} />
+                      <Route path="/anew-contacts" element={<Navigate to="/pessoas" replace />} />
+                      <Route path="/anew-leads" element={<Navigate to="/pessoas" replace />} />
                       <Route path="/calendar" element={<Navigate to="/scheduling" replace />} />
                       <Route path="/modelos-orcamento" element={<Navigate to="/quote-models" replace />} />
-                      <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
-                      <Route path="/contacts" element={<Navigate to="/leads" replace />} />
+                      <Route path="/clients" element={<Navigate to="/pessoas" replace />} />
+                      <Route path="/contacts" element={<Navigate to="/pessoas" replace />} />
                       <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view"><Atividades /></ProtectedRoute>} />
-                      <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
+                      <Route path="/leads" element={<Navigate to="/pessoas" replace />} />
                       <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
+                      <Route path="/pipeline" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasPipeline /></PessoasRota></ProtectedRoute>} />
                       <Route path="/utilizadores-perfis" element={<ProtectedRoute permission="users.view"><UtilizadoresPerfis /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/pessoas" element={<ProtectedRoute permission="users.view"><PessoasRh /></ProtectedRoute>} />
                       <Route path="/rh-exemplo/pessoas/:id" element={<ProtectedRoute permission="users.view"><PessoaRhDetalhe /></ProtectedRoute>} />

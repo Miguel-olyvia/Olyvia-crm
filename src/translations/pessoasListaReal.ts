@@ -90,6 +90,7 @@ const pt: Record<string, string> = {
   [`${R}loadMoreError`]: "Não foi possível carregar mais pessoas.",
   [`${R}routeError`]: "Não foi possível confirmar se esta página está disponível.",
   // O Quadro real. A coluna «Novo» é a que o protótipo chama «Por contactar» (só o texto, só em modo real).
+  [`${R}pipeline.title`]: "Pipeline",
   [`${R}board.colNew`]: "Novo",
   [`${R}board.subtitle`]: "cartões carregados: {n}",
   [`${R}board.loading`]: "A carregar o quadro...",
@@ -195,6 +196,7 @@ const en: Record<string, string> = {
   [`${R}loadMoreError`]: "More people could not be loaded.",
   [`${R}routeError`]: "Could not confirm that this page is available.",
   // The real board. The «New» column is what the prototype calls «To contact» (text only, real mode only).
+  [`${R}pipeline.title`]: "Pipeline",
   [`${R}board.colNew`]: "New",
   [`${R}board.subtitle`]: "cards loaded: {n}",
   [`${R}board.loading`]: "Loading the board...",

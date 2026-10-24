@@ -40,11 +40,11 @@ type HasPermission = (permission: string) => boolean;
  * senão o botão levava a um "sem acesso".
  */
 export function getAgendaItemAction(item: AgendaItem, hasPermission: HasPermission): TodayAction {
-  if (item.entity?.kind === "lead" && hasPermission("leads.view")) {
-    return { href: `/leads?open=${encodeURIComponent(item.entity.id)}`, labelKey: "today.action.openLead" };
+  if (item.entity?.kind === "lead" && hasPermission("pessoas.view")) {
+    return { href: `/pessoas?open=${encodeURIComponent(item.entity.id)}`, labelKey: "today.action.openLead" };
   }
-  if (item.entity?.kind === "client" && hasPermission("clients.view")) {
-    return { href: `/clients?open=${encodeURIComponent(item.entity.id)}`, labelKey: "today.action.openClient" };
+  if (item.entity?.kind === "client" && hasPermission("pessoas.view")) {
+    return { href: `/pessoas?open=${encodeURIComponent(item.entity.id)}`, labelKey: "today.action.openClient" };
   }
   if (item.deal_id && hasPermission("deals.view")) {
     return { href: `/deals?open=${encodeURIComponent(item.deal_id)}`, labelKey: "today.action.openDeal" };
@@ -75,8 +75,8 @@ export interface TodayAlertRow {
  * rota em `App.tsx`.
  */
 const ALERT_GROUPS: { id: string; entityTypes: string[]; labelKey: string; href: string; permission: string }[] = [
-  { id: "leads", entityTypes: ["lead", "contact"], labelKey: "today.alerts.leads", href: "/leads", permission: "leads.view" },
-  { id: "clients", entityTypes: ["client"], labelKey: "today.alerts.clients", href: "/clients", permission: "clients.view" },
+  { id: "leads", entityTypes: ["lead", "contact"], labelKey: "today.alerts.leads", href: "/pessoas", permission: "pessoas.view" },
+  { id: "clients", entityTypes: ["client"], labelKey: "today.alerts.clients", href: "/pessoas", permission: "pessoas.view" },
   { id: "quotes", entityTypes: ["quote"], labelKey: "today.alerts.quotes", href: "/quotes", permission: "quotes.view" },
   { id: "proposals", entityTypes: ["proposal"], labelKey: "today.alerts.proposals", href: "/proposals", permission: "proposals.view" },
   { id: "contracts", entityTypes: ["contract"], labelKey: "today.alerts.contracts", href: "/client-contracts", permission: "client_contracts.view" },

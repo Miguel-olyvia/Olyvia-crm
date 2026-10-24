@@ -97,8 +97,8 @@ export const QUICK_GROUPS: QuickGroup[] = [
     icon: Users,
     color: "bg-purple-500/10 text-purple-700 dark:text-purple-400",
     items: [
-      { id: "clients", to: "/clients", icon: Users, labelKey: "sidebar.clients", permission: "clients.view" },
-      { id: "leads", to: "/leads", icon: Inbox, labelKey: "sidebar.leads", permission: "leads.view" },
+      { id: "pessoas", to: "/pessoas", icon: Users, labelKey: "sidebar.people", permission: "pessoas.view" },
+      { id: "pipeline", to: "/pipeline", icon: Inbox, labelKey: "sidebar.pipeline", permission: "pessoas.view" },
     ],
   },
   {

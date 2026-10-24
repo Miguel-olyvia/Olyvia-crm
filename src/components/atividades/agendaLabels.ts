@@ -61,11 +61,10 @@ export function getStatusClass(status: string): string {
 
 /**
  * Rota da entidade associada. Ambas as listagens abrem o painel de detalhe a
- * partir do parâmetro `open` (AnewLeads.tsx:478, AnewClients.tsx:814), por isso
+ * partir do parâmetro `open` (em /pessoas, a Lista das Pessoas), por isso
  * a ligação aterra directamente na ficha e não numa lista qualquer.
  */
 export function getEntityHref(item: AgendaItem): string | null {
   if (!item.entity) return null;
-  const base = item.entity.kind === "lead" ? "/leads" : "/clients";
-  return `${base}?open=${encodeURIComponent(item.entity.id)}`;
+  return `/pessoas?open=${encodeURIComponent(item.entity.id)}`;
 }

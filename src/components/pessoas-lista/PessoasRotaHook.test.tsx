@@ -30,6 +30,7 @@ function montar() {
       <MemoryRouter initialEntries={["/pessoas"]}>
         <Routes>
           <Route path="/pessoas" element={<PessoasRota><Sonda /></PessoasRota>} />
+          <Route path="/" element={<p>INICIO</p>} />
           <Route path="/leads" element={<p>LEADS</p>} />
         </Routes>
       </MemoryRouter>
@@ -57,10 +58,10 @@ describe("PessoasRota com o hook real", () => {
     expect(await screen.findByText("PAGINA org-1")).toBeInTheDocument();
   });
 
-  it("sem linha de configuração: vai para /leads", async () => {
+  it("sem linha de configuração: vai para a página inicial", async () => {
     maybeSingleMock.mockResolvedValue({ data: null, error: null });
     montar();
-    expect(await screen.findByText("LEADS")).toBeInTheDocument();
+    expect(await screen.findByText("INICIO")).toBeInTheDocument();
   });
 
   it("erro na primeira leitura: alerta; «Tentar de novo» repete e monta a página", async () => {

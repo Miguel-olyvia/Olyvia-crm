@@ -58,8 +58,8 @@ export const getNotificationRoute = async (notification: NotificationLike): Prom
 
   if (actionConfig.proposal_id) return `/proposals?open=${actionConfig.proposal_id}`;
   if (actionConfig.contract_id) return `/client-contracts?open=${actionConfig.contract_id}`;
-  if (actionConfig.client_id) return `/clients?open=${actionConfig.client_id}`;
-  if (actionConfig.contact_id && !actionConfig.entity_id) return `/leads?open=${actionConfig.contact_id}`;
+  if (actionConfig.client_id) return `/pessoas?open=${actionConfig.client_id}`;
+  if (actionConfig.contact_id && !actionConfig.entity_id) return `/pessoas?open=${actionConfig.contact_id}`;
 
   if ((notification.type === "action_due_today" || notification.type === "action_overdue") && referenceId) {
     let clientQuery = supabase.from("anew_clients").select("id").or(`id.eq.${referenceId},entity_id.eq.${referenceId}`).neq("status", "inactive").limit(1);
@@ -74,17 +74,17 @@ export const getNotificationRoute = async (notification: NotificationLike): Prom
     const clientRecord = clientResult.data?.[0] ?? null;
     const contactRecord = contactResult.data?.[0] ?? null;
 
-    if (clientRecord) return `/clients?open=${clientRecord.id}`;
-    if (contactRecord) return `/leads?open=${contactRecord.id}`;
+    if (clientRecord) return `/pessoas?open=${clientRecord.id}`;
+    if (contactRecord) return `/pessoas?open=${contactRecord.id}`;
   }
 
   if (notification.entity_type && referenceId) {
     switch (notification.entity_type) {
       case "proposal": return `/proposals?open=${referenceId}`;
-      case "client": return `/clients?open=${referenceId}`;
-      case "contact": return `/leads?open=${referenceId}`;
+      case "client": return `/pessoas?open=${referenceId}`;
+      case "contact": return `/pessoas?open=${referenceId}`;
       case "contract": return `/client-contracts?open=${referenceId}`;
-      case "lead": return `/leads?open=${referenceId}`;
+      case "lead": return `/pessoas?open=${referenceId}`;
       case "quote": return `/quotes?open=${referenceId}`;
       case "email_tracking": return "/proposals";
       default: break;
@@ -94,10 +94,10 @@ export const getNotificationRoute = async (notification: NotificationLike): Prom
   if (notification.entity_type) {
     switch (notification.entity_type) {
       case "proposal": return "/proposals";
-      case "client": return "/clients";
-      case "contact": return "/leads";
+      case "client": return "/pessoas";
+      case "contact": return "/pessoas";
       case "contract": return "/client-contracts";
-      case "lead": return "/leads";
+      case "lead": return "/pessoas";
       case "quote": return "/quotes";
       default: break;
     }

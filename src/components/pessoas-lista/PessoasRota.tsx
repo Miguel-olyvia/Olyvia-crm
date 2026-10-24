@@ -17,7 +17,8 @@ const MOMENTOS: readonly MomentoGanho[] = ["manual", "proposta_aceite", "contrat
  * A guarda da rota /pessoas: só monta a página (em modo real) nas organizações com o interruptor ligado.
  * A carregar mostra o loader (num contentor status com texto); só bloqueia com erro (role alert, «Tentar de novo»)
  * quando nunca houve resposta válida, e nesse caso NÃO redireciona; com dados antigos a página mantém-se.
- * Sem interruptor (ou sem organização) vai para /leads.
+ * Sem interruptor (ou sem organização) vai para a página inicial: /leads e /clients redirecionam para /pessoas, por isso
+ * redirecionar para lá (ou para /leads) faria um ciclo.
  */
 export function PessoasRota({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
@@ -60,7 +61,7 @@ export function PessoasRota({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!negocios.ativo || !fonte) return <Navigate to="/leads" replace />;
+  if (!negocios.ativo || !fonte) return <Navigate to="/" replace />;
   // `key`: ao trocar de organização a página remonta e os filtros (formulário, «Só as minhas») voltam ao início, em vez de levarem
   // para a organização nova um id que é da anterior (a lista viria vazia).
   return <FontePessoasContext.Provider key={organizationId ?? ""} value={fonte}>{children}</FontePessoasContext.Provider>;

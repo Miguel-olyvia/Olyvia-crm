@@ -40,7 +40,17 @@ describe("getFirstName", () => {
 describe("getAgendaItemAction", () => {
   it("leva à ficha da lead quando há lead e permissão", () => {
     const action = getAgendaItemAction(item({ entity: { kind: "lead", id: "L1", name: "Ana" } }), all);
-    expect(action).toEqual({ href: "/leads?open=L1", labelKey: "today.action.openLead" });
+    expect(action).toEqual({ href: "/pessoas?open=L1", labelKey: "today.action.openLead" });
+  });
+
+  it("leva à ficha do cliente em /pessoas quando há pessoas.view", () => {
+    const action = getAgendaItemAction(item({ entity: { kind: "client", id: "C1", name: "X" } }), (p) => p === "pessoas.view");
+    expect(action).toEqual({ href: "/pessoas?open=C1", labelKey: "today.action.openClient" });
+  });
+
+  it("leads.view e clients.view sozinhos já não abrem a ficha", () => {
+    const so = (p: string) => p === "leads.view" || p === "clients.view";
+    expect(getAgendaItemAction(item({ entity: { kind: "lead", id: "L1", name: "X" }, deal_id: "D1" }), so).href).toBe("/scheduling");
   });
 
   it("leva ao negócio quando não há entidade", () => {
@@ -63,7 +73,8 @@ describe("buildAlertRows", () => {
       { lead: 2, contact: 1, quote: 3, proposal: 0 },
       (permission) => permission !== "quotes.view"
     );
-    expect(rows).toEqual([{ id: "leads", labelKey: "today.alerts.leads", count: 3, href: "/leads" }]);
+    expect(rows).toHaveLength(1);
+    expect(rows).toEqual([{ id: "leads", labelKey: "today.alerts.leads", count: 3, href: "/pessoas" }]);
   });
 });
 

@@ -104,10 +104,34 @@ describe("menu: o item «Pessoas»", () => {
     [{ ativo: false }],
     [{ ativo: false, isLoading: true }],
     [{ ativo: false, isError: true, erroSemResposta: true }],
-  ])("Leads e Clientes não são afetados (%j)", (negocios) => {
+  ])("sem interruptor nem Pessoas nem Pipeline, e Leads e Clientes já não existem (%j)", (negocios) => {
     preparar(TODAS, negocios);
-    expect(tem("Leads")).toBe(true);
-    expect(tem("Clientes")).toBe(true);
+    expect(tem("Pessoas")).toBe(false);
+    expect(tem("Pipeline")).toBe(false);
+    expect(tem("Leads")).toBe(false);
+    expect(tem("Clientes")).toBe(false);
+  });
+
+  it("com pessoas.view e o interruptor ligado aparecem Pessoas e Pipeline, sem Leads nem Clientes", () => {
+    preparar(TODAS, { ativo: true });
+    expect(tem("Pessoas")).toBe(true);
+    expect(tem("Pipeline")).toBe(true);
+    expect(tem("Leads")).toBe(false);
+    expect(tem("Clientes")).toBe(false);
+  });
+
+  it("sem o interruptor a fila de submissões continua com a permissão dela", () => {
+    preparar(["platform.pending_submissions.view"], { ativo: false });
+    expect(tem("Pessoas")).toBe(false);
+    expect(screen.queryAllByRole("button", { name: /submiss/i }).length).toBeGreaterThan(0);
+  });
+
+  it("leads.view e clients.view sozinhos não mostram nada do CRM", () => {
+    preparar(["leads.view", "clients.view"], { ativo: true });
+    expect(tem("Pessoas")).toBe(false);
+    expect(tem("Pipeline")).toBe(false);
+    expect(tem("Leads")).toBe(false);
+    expect(tem("Clientes")).toBe(false);
   });
 
   it("a leitura do interruptor só é pedida com as permissões carregadas e pessoas.view", () => {
@@ -121,8 +145,8 @@ describe("menu: o item «Pessoas»", () => {
     expect(ultimaOpcao()).toEqual({ habilitado: false });
   });
 
-  it("só o item /pessoas depende do interruptor", () => {
+  it("só os itens /pessoas e /pipeline dependem do interruptor", () => {
     const itens = menuSections.flatMap((s) => [...s.items, ...(s.subSections?.flatMap((x) => x.items) ?? [])]);
-    expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas"]);
+    expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas", "/pipeline"]);
   });
 });

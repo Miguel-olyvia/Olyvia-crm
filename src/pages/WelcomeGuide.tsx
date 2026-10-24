@@ -103,7 +103,7 @@ const WelcomeGuide = () => {
       color: "from-cyan-500 to-teal-600",
       gradient: "bg-gradient-to-br from-cyan-50 to-teal-100 dark:from-cyan-950/50 dark:to-teal-950/50",
       items: [
-        { icon: <Users className="w-4 h-4" />, label: "Clientes", path: "/clients" },
+        { icon: <Users className="w-4 h-4" />, label: "Pessoas", path: "/pessoas" },
         { icon: <Calendar className="w-4 h-4" />, label: "Calendário", path: "/calendar" },
         
         { icon: <Headphones className="w-4 h-4" />, label: "Call Center", path: "/call-center" },
@@ -132,7 +132,7 @@ const WelcomeGuide = () => {
       color: "from-emerald-500 to-green-600",
       gradient: "bg-gradient-to-br from-emerald-50 to-green-100 dark:from-emerald-950/50 dark:to-green-950/50",
       items: [
-        { icon: <Target className="w-4 h-4" />, label: "Leads", path: "/leads" },
+        { icon: <Target className="w-4 h-4" />, label: "Pipeline", path: "/pipeline" },
         { icon: <FileText className="w-4 h-4" />, label: "Pedidos Proposta", path: "/deals" },
         { icon: <FileText className="w-4 h-4" />, label: "Propostas", path: "/proposals" },
         { icon: <Receipt className="w-4 h-4" />, label: "Orçamentos", path: "/quotes" },

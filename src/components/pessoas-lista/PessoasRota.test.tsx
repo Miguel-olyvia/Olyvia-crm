@@ -32,6 +32,7 @@ const arvore = (n: number) => (
   <MemoryRouter initialEntries={["/pessoas"]}>
     <Routes>
       <Route path="/pessoas" element={<PessoasRota><Sonda n={n} /></PessoasRota>} />
+      <Route path="/" element={<p>INICIO</p>} />
       <Route path="/leads" element={<p>LEADS</p>} />
     </Routes>
   </MemoryRouter>
@@ -85,16 +86,18 @@ describe("PessoasRota", () => {
     expect(screen.getByText("PAGINA real:org-nike:null")).toBeInTheDocument();
   });
 
-  it("ativo sem organização ativa: não monta, vai para /leads", () => {
+  it("ativo sem organização ativa: não monta, vai para a página inicial", () => {
     empresa = null;
     desenhar({ ativo: true });
-    expect(screen.getByText("LEADS")).toBeInTheDocument();
+    expect(screen.getByText("INICIO")).toBeInTheDocument();
+    expect(screen.queryByText("LEADS")).toBeNull();
     expect(screen.queryByText(/PAGINA/)).toBeNull();
   });
 
-  it("inativo: navega para /leads sem montar a página", () => {
+  it("inativo: navega para a página inicial (nunca /leads) sem montar a página", () => {
     desenhar({ ativo: false });
-    expect(screen.getByText("LEADS")).toBeInTheDocument();
+    expect(screen.getByText("INICIO")).toBeInTheDocument();
+    expect(screen.queryByText("LEADS")).toBeNull();
     expect(screen.queryByText(/PAGINA/)).toBeNull();
   });
 

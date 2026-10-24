@@ -36,6 +36,8 @@ interface BarraListaRealProps {
   vista?: VistaPessoas;
   /** Só em modo real e com `pessoas.view`: sem isto não há seletor de vista (a Lista de sempre). */
   aoMudarVista?: (vista: VistaPessoas) => void;
+  /** No Pipeline não há chips de etapa: o quadro já as mostra como colunas. */
+  semEtapas?: boolean;
   /** Em modo real, o texto do filtro da primeira etapa («Novo»); sem isto mantém «Por contactar». */
   etapaNova?: string;
 }
@@ -94,7 +96,7 @@ export function BarraListaReal(p: BarraListaRealProps) {
       >
         {t(`${R}searchHint`)}
       </p>
-      {!(p.aoMudarVista && p.vista === "quadro") && (
+      {!p.semEtapas && !(p.aoMudarVista && p.vista === "quadro") && (
         <div role="group" aria-label={t(`${R}stageFilterLabel`)} className="flex flex-wrap gap-2">
           <button type="button" aria-pressed={p.etapa === null} className={chip(p.etapa === null)} onClick={() => p.aoMudarEtapa(null)}>
             <Marca ativo={p.etapa === null} />

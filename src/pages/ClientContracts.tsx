@@ -191,7 +191,7 @@ const ClientContracts = () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const verCliente = (c: any) => {
     const id: string | null | undefined = c?.client_id || c?.entity_id;
-    navigate(id ? `/clients?open=${encodeURIComponent(id)}` : "/clients");
+    navigate(id ? `/pessoas?open=${encodeURIComponent(id)}` : "/pessoas");
   };
   const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
