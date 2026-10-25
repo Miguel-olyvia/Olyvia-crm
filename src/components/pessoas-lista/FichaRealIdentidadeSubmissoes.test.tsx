@@ -14,7 +14,22 @@ import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFonte
 import { FichaReal } from "./FichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...args: unknown[]) => rpcMock(...args) } }));
+// O guardar da identidade é um UPDATE direto a anew_entities: `escritaEntidade` responde-lhe e `atualizacoes` guarda o que se escreveu.
+const escritaEntidade = vi.hoisted(() => vi.fn());
+const atualizacoes = vi.hoisted(() => ({ lista: [] as { dados: unknown; filtros: [string, unknown][] }[] }));
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    rpc: (...args: unknown[]) => rpcMock(...args),
+    from: () => {
+      const registo = { dados: undefined as unknown, filtros: [] as [string, unknown][] };
+      const c: Record<string, unknown> = {};
+      c.update = (dados: unknown) => { registo.dados = dados; atualizacoes.lista.push(registo); return c; };
+      c.eq = (coluna: string, valor: unknown) => { registo.filtros.push([coluna, valor]); return c; };
+      c.select = () => escritaEntidade();
+      return c;
+    },
+  },
+}));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }));
 const lerMock = vi.hoisted(() => vi.fn());
@@ -36,6 +51,8 @@ const params = (nome: string, n = 0) => chamadas(nome)[n][1] as Record<string, u
 
 beforeEach(() => {
   rpcMock.mockReset();
+  escritaEntidade.mockReset();
+  atualizacoes.lista = [];
   lerMock.mockReset();
   lerMock.mockResolvedValue([]);
   ficha = fichaCom();
@@ -178,14 +195,11 @@ describe("FichaReal: identidade", () => {
     expect(screen.queryByRole("button", { name: "Editar identidade" })).toBeNull();
   });
 
-  it("passar de pessoa singular a empresa chama a base com a assinatura exata, refaz a ficha e mostra o nome novo", async () => {
-    rpcMock.mockImplementation((nome: string) => {
-      if (nome === "neg_ficha_pessoa") return respostaOk(ficha);
-      if (nome === "neg_guardar_identidade_pessoa") {
-        ficha = fichaCom({ tipo: "organization", nome: "Lopes e Filhos", empresa_nome: "Lopes e Filhos" });
-        return respostaOk({ tipo: "organization", nome: "Lopes e Filhos", empresa_nome: "Lopes e Filhos", mudou: true });
-      }
-      return respostaOk({ mudou: true });
+  it("passar de pessoa singular a empresa escreve o tipo e o nome na entidade, refaz a ficha e mostra o nome novo", async () => {
+    rpcMock.mockImplementation((nome: string) => (nome === "neg_ficha_pessoa" ? respostaOk(ficha) : respostaOk({ mudou: true })));
+    escritaEntidade.mockImplementation(() => {
+      ficha = fichaCom({ tipo: "organization", nome: "Lopes e Filhos", empresa_nome: "Lopes e Filhos" });
+      return Promise.resolve({ data: [{ id: PESSOA_ID, type: "organization", display_name: "Lopes e Filhos" }], error: null });
     });
     desenhar();
     await aberta();
@@ -193,17 +207,17 @@ describe("FichaReal: identidade", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Empresa" }));
     fireEvent.change(screen.getByLabelText("Nome da empresa"), { target: { value: "Lopes e Filhos" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-    await waitFor(() => expect(chamadas("neg_guardar_identidade_pessoa")).toHaveLength(1));
-    expect(params("neg_guardar_identidade_pessoa")).toEqual({
-      p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_tipo: "organization", p_nome_empresa: "Lopes e Filhos", p_nome_proprio: null, p_apelido: null,
-    });
+    await waitFor(() => expect(atualizacoes.lista).toHaveLength(1));
+    expect(atualizacoes.lista[0].dados).toEqual({ type: "organization", display_name: "Lopes e Filhos", first_name: null, last_name: null });
+    expect(atualizacoes.lista[0].filtros).toEqual([["id", PESSOA_ID], ["organization_id", "org-1"]]);
     expect(await screen.findByRole("dialog", { name: "Lopes e Filhos" })).toBeInTheDocument();
     const seccao = screen.getByRole("region", { name: "Identidade" });
     expect(within(seccao).getByText("Empresa")).toBeInTheDocument();
   });
 
-  it("uma pessoa partilhada (NG003) mostra a mensagem traduzida e deixa o formulário aberto", async () => {
+  it("uma pessoa que não se pode editar (nenhuma linha atualizada, NG003) mostra a mensagem traduzida e deixa o formulário aberto", async () => {
     rpcMock.mockImplementation((nome: string) => (nome === "neg_ficha_pessoa" ? respostaOk(ficha) : respostaErro("NG003")));
+    escritaEntidade.mockResolvedValue({ data: [], error: null });
     desenhar();
     await aberta();
     fireEvent.click(await screen.findByRole("button", { name: "Editar identidade" }));
