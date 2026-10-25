@@ -32,6 +32,7 @@ import { BlocoFechoNegocio } from "./BlocoFechoNegocio";
 import { CondicoesDaProposta } from "./CondicoesDaProposta";
 import { EtiquetaFecho } from "./EtiquetaFecho";
 import { passoDoNegocio } from "./etapaPessoa";
+import { FaixaFasesNegocio } from "./FaixaFasesNegocio";
 import { fasesDoNegocio, type IdFase } from "./fasesDoNegocio";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
 import { estaAberto } from "./juntarPessoas";
@@ -177,7 +178,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
           </dl>
           {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
         </div>
-        <Seccao titulo={t(`${P}phases.title`)} nivel={4}><FasesDoNegocioLista fases={fases} /></Seccao>
+        <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
         {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
         <AlertasNegocio negocio={negocio} />
         {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. */}

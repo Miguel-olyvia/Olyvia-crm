@@ -40,18 +40,21 @@ const mostrar = (cartoes = CARTOES, aoAbrir = vi.fn(), chip: ChipPessoa = "todas
   return aoAbrir;
 };
 
-const coluna = (titulo: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
+// Abordagem: h3 de uma coluna solta. Sub-fase de negócio: h4 dentro do grupo «Negócios» (h3).
+const FASES = ["Levantamento", "Orçamento", "Proposta", "Contrato"];
+const coluna = (titulo: string) => screen.getByRole("heading", { level: FASES.includes(titulo) ? 4 : 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
 
 describe("QuadroPessoas", () => {
-  it("renderiza um só quadro com as 7 colunas pela ordem, cada uma com h3 e a contagem certa, sem títulos de partes", () => {
+  it("renderiza as 3 colunas de abordagem e UMA coluna «Negócios» (h3) com 4 sub-fases (h4), cada uma com a contagem certa", () => {
     mostrar();
     expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
     const titulos = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titulos).toEqual([
-      "Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão",
-      "Levantamento, 1 cartão", "Orçamento, 2 cartões", "Proposta, 0 cartões", "Contrato, 1 cartão",
-    ]);
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(titulos).toEqual(["Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão", "Negócios, 4 cartões"]);
+    const fases = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
+    expect(fases).toEqual(["Levantamento, 1 cartão", "Orçamento, 2 cartões", "Proposta, 0 cartões", "Contrato, 1 cartão"]);
+    // 3 colunas + o grupo + 4 sub-fases, todos com nome acessível.
+    expect(screen.getAllByRole("region")).toHaveLength(8);
+    expect(within(coluna("Negócios")).getAllByRole("region")).toHaveLength(4);
     expect(screen.getAllByRole("group", { name: "Pessoas por fase" })).toHaveLength(1);
   });
 
@@ -73,10 +76,11 @@ describe("QuadroPessoas", () => {
     const lev = within(coluna("Levantamento"));
     expect(lev.getByText("Janelas")).toBeInTheDocument();
     expect(lev.getByRole("button", { name: /Fazer o levantamento/ })).toBeInTheDocument();
-    expect(lev.getByText(formatarMeta("euro", 0))).toBeInTheDocument();
+    // O Levantamento não tem valor: nem na sub-fase nem no agregado.
+    expect(within(screen.getByRole("heading", { level: 4, name: /^Levantamento/ })).queryByText(/€/)).toBeNull();
   });
 
-  it("o quadro vazio mostra o estado vazio nas 7 colunas", () => {
+  it("o quadro vazio mostra o estado vazio nas 3 colunas da abordagem e nas 4 sub-fases (a fase vazia continua visível)", () => {
     mostrar([]);
     expect(screen.getAllByText("Nada nesta fase")).toHaveLength(7);
   });
@@ -88,6 +92,23 @@ describe("QuadroPessoas", () => {
     expect(within(coluna("Contrato")).getAllByText(formatarMeta("euro", 7000))).toHaveLength(2);
     expect(within(coluna("Proposta")).getByText(formatarMeta("euro", 0))).toBeInTheDocument();
     expect(within(coluna("Por contactar")).queryByText(/€/)).not.toBeInTheDocument();
+  });
+
+  it("o grupo «Negócios» soma as contagens e os valores das sub-fases, sem o Levantamento, e diz o total por texto", () => {
+    mostrar();
+    const grupo = coluna("Negócios");
+    // 9000 + 3000 + 0 + 7000; o Levantamento não conta.
+    const total = formatarMeta("euro", 19000);
+    const cab = grupo.querySelector("h3")!.parentElement!.parentElement!;
+    expect(within(cab as HTMLElement).getByText(total, { selector: "span[aria-hidden='true']" })).toBeInTheDocument();
+    expect(within(cab as HTMLElement).getByText(`Valor total: ${total}`)).toBeInTheDocument();
+    expect(grupo.querySelector("h3 .sr-only")?.textContent).toBe(", 4 cartões");
+  });
+
+  it("a faixa do grupo tem as cores das 4 fases e é decorativa", () => {
+    mostrar();
+    const faixa = coluna("Negócios").querySelector("[aria-hidden='true'].flex.h-1")!;
+    expect(faixa.children).toHaveLength(4);
   });
 
   it("o cartão mostra o rótulo Lead ou Cliente, o trabalho, o valor e o passo", () => {

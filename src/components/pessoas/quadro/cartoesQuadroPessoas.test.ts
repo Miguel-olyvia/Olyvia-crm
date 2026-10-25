@@ -13,7 +13,9 @@ import {
 } from "../fabricaTestes";
 import { juntarPessoas } from "../juntarPessoas";
 import type { NegocioPessoa, PapelPessoa, Pessoa, ResumoPessoa } from "../pessoasTipos";
-import { COLUNAS_QUADRO, cartoesDoQuadro, type ColunaQuadro } from "./cartoesQuadroPessoas";
+import {
+  COLUNAS_ABORDAGEM, COLUNAS_NEGOCIO, COLUNAS_QUADRO, FASES_DO_GRUPO_NEGOCIOS, cartoesDoQuadro, type ColunaQuadro,
+} from "./cartoesQuadroPessoas";
 
 const escolhido = (valor: number): NegocioMes["orcamentos"] => [{ id: "o", valor, escolhido: true }];
 
@@ -33,6 +35,21 @@ describe("COLUNAS_QUADRO", () => {
 
   it("só as colunas de negócio somam valor", () => {
     expect(COLUNAS_QUADRO.filter((c) => c.negocio).map((c) => c.id)).toEqual(["levantamento", "orcamento", "proposta", "contrato"]);
+  });
+});
+
+describe("o grupo Negócios do quadro", () => {
+  it("a lista única de sub-fases é levantamento, orçamento, proposta e contrato, por esta ordem", () => {
+    expect([...FASES_DO_GRUPO_NEGOCIOS]).toEqual(["levantamento", "orcamento", "proposta", "contrato"]);
+  });
+
+  it("COLUNAS_NEGOCIO deriva da lista única e COLUNAS_ABORDAGEM são as três colunas soltas", () => {
+    expect(COLUNAS_NEGOCIO.map((c) => c.id)).toEqual([...FASES_DO_GRUPO_NEGOCIOS]);
+    expect(COLUNAS_ABORDAGEM.map((c) => c.id)).toEqual(["porContactar", "contactado", "visita"]);
+  });
+
+  it("COLUNAS_QUADRO continua com as 7 colunas (o hook, o adaptador e o RPC dependem dele)", () => {
+    expect(COLUNAS_QUADRO).toHaveLength(7);
   });
 });
 

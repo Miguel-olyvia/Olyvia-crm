@@ -69,9 +69,11 @@ describe("QuadroReal: estados", () => {
 });
 
 describe("QuadroReal: colunas e cartões", () => {
-  it("as 7 colunas são regiões com nome; a primeira chama-se «Novo»", () => {
+  it("as 3 colunas da abordagem, a coluna Negócios e as suas 4 sub-fases são regiões com nome; a primeira chama-se «Novo»", () => {
     desenhar(quadroBase({}, CARTOES));
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(screen.getAllByRole("region")).toHaveLength(8);
+    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(4);
+    expect(screen.getAllByRole("heading", { level: 4 })).toHaveLength(4);
     expect(coluna(/^Novo/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /^Por contactar/ })).toBeNull();
     expect(within(coluna(/^Orçamento/)).getByText("Cozinha")).toBeInTheDocument();

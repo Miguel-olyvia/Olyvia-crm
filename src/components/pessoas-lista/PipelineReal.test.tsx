@@ -63,20 +63,25 @@ beforeEach(() => {
 });
 
 describe("PipelineReal: só o quadro", () => {
-  it("mostra as sete colunas, sem tabela nem seletor de vista, e o título Pipeline", () => {
+  it("mostra as 3 colunas da abordagem e a coluna Negócios com 4 sub-fases, sem tabela nem seletor de vista, e o título Pipeline", () => {
     desenhar();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByRole("button", { name: "Lista" })).toBeNull();
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    // 3 colunas de abordagem + a coluna agrupada Negócios + as suas 4 sub-fases.
+    expect(screen.getAllByRole("region")).toHaveLength(8);
     expect(screen.getByRole("heading", { name: "Pipeline" })).toBeInTheDocument();
   });
 
-  it("as colunas vêm por ordem: Novo, Contactado, Visita, levantamento, orçamento, proposta, contrato", () => {
+  it("as colunas vêm por ordem: Novo, Contactado, Visita, Negócios e, dentro dela, levantamento, orçamento, proposta, contrato", () => {
     desenhar();
     const nomes = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label") ?? r.textContent ?? "");
     expect(nomes[0]).toMatch(/^Novo/);
     expect(nomes[2]).toMatch(/^Visita/);
-    expect(nomes[4]).toMatch(/^Orçamento/);
+    expect(nomes[3]).toMatch(/^Negócios/);
+    expect(nomes[4]).toMatch(/^Levantamento/);
+    expect(nomes[5]).toMatch(/^Orçamento/);
+    expect(nomes[6]).toMatch(/^Proposta/);
+    expect(nomes[7]).toMatch(/^Contrato/);
   });
 
   it("usa useQuadroPessoas(filtros, true) e nunca a lista", () => {

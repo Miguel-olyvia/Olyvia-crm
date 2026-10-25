@@ -52,11 +52,11 @@ describe("SeparadorPessoas: Lista", () => {
 });
 
 describe("SeparadorPessoas: Quadro", () => {
-  it("trocar para Quadro mostra as 7 colunas numa só linha e tira a tabela", () => {
+  it("trocar para Quadro mostra as 3 colunas de abordagem e a coluna Negócios com 4 sub-fases e tira a tabela", () => {
     render(<Arnes />);
     abrirQuadro();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(screen.getAllByRole("region")).toHaveLength(8);
     expect(screen.getByRole("button", { name: "Quadro" })).toHaveAttribute("aria-pressed", "true");
     expect(botoesDeFicha().length).toBeGreaterThan(0);
   });
@@ -64,7 +64,7 @@ describe("SeparadorPessoas: Quadro", () => {
   it("abre na vista guardada", () => {
     window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ vista: "quadro" }));
     render(<Arnes />);
-    expect(screen.getAllByRole("region")).toHaveLength(7);
+    expect(screen.getAllByRole("region")).toHaveLength(8);
   });
 
   it("a pesquisa filtra o quadro: só ficam os cartões de quem coincide", () => {
@@ -95,7 +95,7 @@ describe("SeparadorPessoas: Quadro", () => {
     expect(screen.queryAllByText("Cliente")).toHaveLength(0);
   });
 
-  it("uma pesquisa sem resultados deixa as 7 colunas com 'Nada nesta fase'", () => {
+  it("uma pesquisa sem resultados deixa as 3 colunas e as 4 sub-fases com 'Nada nesta fase'", () => {
     render(<Arnes />);
     abrirQuadro();
     procurar("zzzz-ninguem");
@@ -143,7 +143,7 @@ describe("SeparadorPessoas: Quadro", () => {
     render(<Arnes />);
     expect(screen.getByRole("status")).toHaveTextContent("Vista Lista");
     abrirQuadro();
-    expect(screen.getByRole("status")).toHaveTextContent("Vista Quadro, 7 colunas");
+    expect(screen.getByRole("status")).toHaveTextContent("Vista Quadro, 4 colunas");
     fireEvent.click(screen.getByRole("button", { name: "Lista" }));
     expect(screen.getByRole("status")).toHaveTextContent("Vista Lista");
   });

@@ -9,7 +9,7 @@ import type { ChipPessoa, FiltrosPessoas, OrdemPessoa, ResumoPessoa, TipoPessoa,
 import { itensDaPessoa } from "./processo/itensProcesso";
 import { useExtrasProcesso } from "./processo/processoNegocios";
 import { QuadroPessoas } from "./quadro/QuadroPessoas";
-import { COLUNAS_QUADRO, cartoesDoQuadro } from "./quadro/cartoesQuadroPessoas";
+import { COLUNAS_ABORDAGEM, cartoesDoQuadro } from "./quadro/cartoesQuadroPessoas";
 import { TabelaPessoas } from "./TabelaPessoas";
 import { useAtalhosPessoas } from "./useAtalhosPessoas";
 
@@ -104,7 +104,7 @@ export function SeparadorPessoas(p: SeparadorPessoasProps) {
         aoMudarOrdem={p.aoMudarOrdem} aoMudarVista={p.aoMudarVista} aoLimpar={limparPopover}
       />
       <div role="status" className="sr-only">
-        {vista === "quadro" ? t("pessoasPagina.view.announce.board", { count: COLUNAS_QUADRO.length }) : t("pessoasPagina.view.announce.list")}
+        {vista === "quadro" ? t("pessoasPagina.view.announce.board", { count: COLUNAS_ABORDAGEM.length + 1 }) : t("pessoasPagina.view.announce.list")}
       </div>
       {vista === "quadro"
         ? <QuadroPessoas cartoes={cartoes} hoje={hoje} chip={chip} itens={itensDosCartoes} aoAbrir={p.aoAbrir} aoLimpar={limparTudo} />
