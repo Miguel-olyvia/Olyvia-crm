@@ -129,11 +129,11 @@ describe("Origem do foco", () => {
     const origem = document.createElement("button");
     document.body.appendChild(origem);
     const { rerender, props } = desenhar({ origemFoco: { current: origem } });
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(document.querySelector("[data-ficha-raiz]")).not.toBeNull();
     rerender(
       <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...props} pessoaId={null} origemFoco={{ current: origem }} /></MemoryRouter></FontePessoasContext.Provider>,
     );
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-ficha-raiz]")).toBeNull());
     await waitFor(() => expect(origem).toHaveFocus());
     origem.remove();
   });

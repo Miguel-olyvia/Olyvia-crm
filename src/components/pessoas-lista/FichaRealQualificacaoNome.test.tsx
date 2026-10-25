@@ -55,7 +55,7 @@ function desenhar() {
     </QueryClientProvider>,
   );
 }
-const aberta = () => screen.findByRole("dialog", { name: "Ana Lopes" });
+const aberta = () => screen.findByRole("region", { name: "Ana Lopes" });
 // A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, na primeira aba do diálogo de apoio (Mais > Registos e dados).
 const abrirDados = async () => {
   await screen.findByRole("button", { name: "Mais" });

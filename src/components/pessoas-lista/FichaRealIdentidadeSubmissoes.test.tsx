@@ -58,7 +58,7 @@ function desenhar() {
     </QueryClientProvider>,
   );
 }
-const aberta = () => screen.findByRole("dialog", { name: "Ana Lopes" });
+const aberta = () => screen.findByRole("region", { name: "Ana Lopes" });
 // A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, na primeira aba do diálogo de apoio (Mais > Registos e dados).
 const abrirDados = async () => {
   await screen.findByRole("button", { name: "Mais" });
@@ -208,7 +208,7 @@ describe("FichaReal: identidade", () => {
     expect(params("neg_guardar_identidade_pessoa")).toEqual({
       p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_tipo: "organization", p_nome_empresa: "Lopes e Filhos", p_nome_proprio: null, p_apelido: null,
     });
-    expect(await screen.findByRole("dialog", { name: "Lopes e Filhos" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Lopes e Filhos" })).toBeInTheDocument();
     const seccao = screen.getByRole("region", { name: "Identidade" });
     expect(within(seccao).getByText("Empresa")).toBeInTheDocument();
   });

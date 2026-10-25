@@ -153,7 +153,8 @@ describe("FichaReal: aberta com dados", () => {
 
   it("abre o painel com o nome da pessoa; com um negócio já não há passo de chamada: «Registar chamada» passa ao menu Mais", () => {
     desenhar();
-    expect(screen.getByRole("dialog", { name: "Ana Lopes" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Ana Lopes" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull(); // a ficha está na página, não num painel por cima
     expect(screen.queryByRole("button", { name: /^Registar chamada/ })).toBeNull();
     fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
     expect(screen.getByRole("menuitem", { name: "Registar chamada" })).toBeInTheDocument();
@@ -191,15 +192,15 @@ describe("FichaReal: aberta com dados", () => {
 
   it("Esc fecha o painel pedindo à página que feche", () => {
     const { props } = desenhar();
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.keyDown(document.body, { key: "Escape" });
     expect(props.aoFechar).toHaveBeenCalled();
   });
 
   it("fechar (pessoaId a null) esconde o painel", async () => {
     const { reenviar } = desenhar();
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(document.querySelector("[data-ficha-raiz]")).not.toBeNull();
     reenviar({ pessoaId: null });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-ficha-raiz]")).toBeNull());
   });
 
   it("a ficha adaptada traz o negócio aberto e os registos para o ecrã", () => {
@@ -215,11 +216,11 @@ describe("FichaReal: a trocar de pessoa", () => {
     const { reenviar, container } = desenhar({ idsVisiveis: [ID, OUTRO] });
     fichaMock.mockReturnValue(estadoHook());
     reenviar({ pessoaId: OUTRO, idsVisiveis: [ID, OUTRO] });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Ana Lopes" })).toBeNull();
     expect(screen.queryByText("Ana Lopes")).toBeNull();
     expect(screen.getAllByRole("status").some((s) => s.textContent === "A abrir a ficha…")).toBe(true);
     expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
-    expect(screen.getAllByText("A abrir a ficha…").length).toBe(2); // o anúncio (sr-only) e o indicador visível
+    expect(screen.getAllByText("A abrir a ficha…").length).toBe(3); // o anúncio (sr-only), o indicador visível e o bloco de espera na área da ficha
   });
 
   it("sem carregar, o contentor não está ocupado", () => {
@@ -231,7 +232,7 @@ describe("FichaReal: a trocar de pessoa", () => {
   it("uma ficha que não é a da pessoa aberta nunca se mostra, nem as ações trabalham sobre ela", () => {
     fichaMock.mockReturnValue(estadoHook({ ficha: FICHA, estado: "ok" })); // o hook devolve A para o id de B (não deve acontecer, mas não se mostra)
     desenhar({ pessoaId: OUTRO });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Ana Lopes" })).toBeNull();
     expect(acoesMock).not.toHaveBeenCalledWith(ID, FICHA);
   });
 
@@ -249,7 +250,7 @@ describe("FichaReal: a trocar de pessoa", () => {
     const outra = fichaDb({ pessoa: pessoaDb({ id: OUTRO, nome: "Bruno Reis" }) });
     fichaMock.mockReturnValue(estadoHook({ ficha: outra, estado: "ok" }));
     reenviar({ pessoaId: OUTRO, idsVisiveis: [ID, OUTRO] });
-    expect(screen.getByRole("dialog", { name: "Bruno Reis" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Bruno Reis" })).toBeInTheDocument();
   });
 });
 

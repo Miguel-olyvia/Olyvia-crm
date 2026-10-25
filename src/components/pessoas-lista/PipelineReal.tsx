@@ -34,7 +34,7 @@ export function PipelineReal() {
     textoEstadoQuadro(t, quadro),
     dicaPendente ? t(`${R}searchHint`) : "",
   ].filter(Boolean).join(". ");
-  return (
+  const conteudo = (
     <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
       <CabecalhoPagina
         subtitulo={contagem} titulo={t(`${R}pipeline.title`)} aviso={null} pai={{ to: "/pessoas", texto: t("sidebar.crm") }}
@@ -52,11 +52,16 @@ export function PipelineReal() {
         quadro={quadro} aoAbrir={aberta.aoAbrirQuadro} aoLimpar={f.limpar}
         temFiltros={f.filtros.papel !== null || f.filtros.pesquisa.trim().length >= MIN_PESQUISA}
       />
-      <FichaReal
-        pessoaId={aberta.abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
-        origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
-        voltaPara="pipeline"
-      />
     </div>
+  );
+  // Com uma pessoa aberta a ficha toma o lugar do quadro, na área de conteúdo (o quadro fica montado, escondido).
+  return (
+    <FichaReal
+      pessoaId={aberta.abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
+      origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
+      voltaPara="pipeline" tituloPagina={t(`${R}pipeline.title`)}
+    >
+      {conteudo}
+    </FichaReal>
   );
 }

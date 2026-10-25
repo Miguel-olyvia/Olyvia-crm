@@ -33,7 +33,7 @@ vi.mock("@/hooks/pessoas/useQuadroPessoas", () => ({ useQuadroPessoas: (...a: un
 vi.mock("@/hooks/pessoas/useFormulariosPessoas", () => ({ useFormulariosPessoas: () => ({ formularios: [], aCarregar: false, erro: false }) }));
 vi.mock("@/components/pessoas/AvatarPessoa", () => ({ AvatarPessoa: () => null }));
 vi.mock("./FichaReal", () => ({
-  FichaReal: (p: { pessoaId: string | null }) => { fichaMock(p); return null; },
+  FichaReal: (p: { pessoaId: string | null; children?: unknown }) => { fichaMock(p); return p.children; },
 }));
 
 const REAL: FontePessoas = { modo: "real", organizationId: "org-1", momentoGanho: null };

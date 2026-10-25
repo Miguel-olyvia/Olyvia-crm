@@ -108,7 +108,7 @@ describe("FichaReal com o negócio completo", () => {
 
   it("«Criar negócio» abre o painel, cria na base com a lead e abre o negócio novo", async () => {
     desenhar("manual", { negocioInicial: null });
-    await screen.findByRole("dialog", { name: "Ana Lopes" });
+    await screen.findByRole("region", { name: "Ana Lopes" });
     fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: /Criar negócio/ }));
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
@@ -134,7 +134,7 @@ describe("FichaReal com o negócio completo", () => {
 describe("FichaReal: o foco depois de criar um negócio", () => {
   it("vai para o título do negócio novo, e não para o botão «Mais»", async () => {
     desenhar("manual", { negocioInicial: null });
-    await screen.findByRole("dialog", { name: "Ana Lopes" });
+    await screen.findByRole("region", { name: "Ana Lopes" });
     fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: /Criar negócio/ }));
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
@@ -148,7 +148,7 @@ describe("FichaReal: o foco depois de criar um negócio", () => {
 
   it("cancelar o painel continua a devolver o foco ao botão «Mais»", async () => {
     desenhar("manual", { negocioInicial: null });
-    await screen.findByRole("dialog", { name: "Ana Lopes" });
+    await screen.findByRole("region", { name: "Ana Lopes" });
     fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
     fireEvent.click(await screen.findByRole("menuitem", { name: /Criar negócio/ }));
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });

@@ -2,6 +2,8 @@ import { useRef, type MutableRefObject } from "react";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { FichaInterior, type FichaInteriorProps } from "./FichaInterior";
+import { FichaNaPagina } from "./FichaNaPagina";
+import { focoDeRegresso } from "./focoDeRegresso";
 import { vizinhas } from "./navegacaoFicha";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { useTeclasFicha } from "./useTeclasFicha";
@@ -9,6 +11,7 @@ import { useTeclasFicha } from "./useTeclasFicha";
 export interface FichaPessoaProps extends Omit<FichaInteriorProps, "resumo" | "fecharPainel" | "vizinhas" | "aoIr"> {
   /** A pessoa da ficha: ao fechar, fica a última, para o painel não deslizar vazio. `null` antes de abrir a primeira. */
   resumo: ResumoPessoa | null;
+  /** Painel lateral: a ficha está aberta. Na página (`naPagina`): há uma pessoa aberta, mesmo que a ficha dela ainda não tenha chegado (`resumo` a null). */
   aberto: boolean;
   aoFechar: () => void;
   /** Os ids das pessoas visíveis na lista, pela ordem da lista. */
@@ -22,21 +25,19 @@ export interface FichaPessoaProps extends Omit<FichaInteriorProps, "resumo" | "f
   origemFoco?: MutableRefObject<HTMLElement | null>;
 }
 
-/** O foco depois de fechar: o elemento que abriu a ficha; se já não existe (abriu por ?open=, ou a ficha fechou-se a si própria), o separador ativo ou o título da página. */
-function focoDeRegresso(origem: HTMLElement | null): HTMLElement | null {
-  if (origem && origem.isConnected && origem !== document.body) return origem;
-  const titulo = document.querySelector<HTMLElement>("h1");
-  titulo?.setAttribute("tabindex", "-1");
-  return document.querySelector<HTMLElement>('[role="tab"][data-state="active"]') ?? titulo;
+/**
+ * A ficha da pessoa. Por omissão, num painel lateral (Sheet) que cobre metade do ecrã (no mínimo 640 px; em ecrã estreito, todo): cabeçalho
+ * com navegação, ações, percurso e abas. Com `naPagina` (a ficha real) é renderizada dentro da página, sem Sheet (ver `FichaNaPagina`), para a barra
+ * lateral e o topo ficarem à vista. O Esc fecha primeiro o painel de ação, se houver; o "X" por defeito do Sheet esconde-se por classe, porque a ficha
+ * tem o seu botão Fechar.
+ */
+export function FichaPessoa(props: FichaPessoaProps) {
+  const { naPagina, ...resto } = props;
+  if (naPagina) return <FichaNaPagina {...resto} />;
+  return <FichaNoSheet {...resto} />;
 }
 
-/**
- * A ficha da pessoa, num painel lateral (Sheet) que cobre metade do ecrã (no mínimo 640 px; em ecrã estreito, todo): cabeçalho
- * com navegação, ações, percurso e abas. Com o guia (a ficha real) o mesmo Sheet ocupa a página toda (o conteúdo vai numa coluna de 1120 px, em `FichaInterior`)
- * para caberem as três colunas do passo seguinte (lista da fase, passo e cliente). O Esc fecha primeiro o painel de ação, se houver; o "X" por defeito do Sheet
- * esconde-se por classe, porque a ficha tem o seu botão Fechar.
- */
-export function FichaPessoa({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara, origemFoco, ...resto }: FichaPessoaProps) {
+function FichaNoSheet({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara, origemFoco, ...resto }: Omit<FichaPessoaProps, "naPagina">) {
   const origem = useRef<HTMLElement | null>(null);
   const fecharPainel = useRef<(() => boolean) | null>(null);
   const viz = vizinhas(idsVisiveis, resumo?.pessoa.id ?? "");
@@ -44,16 +45,13 @@ export function FichaPessoa({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara, o
   return (
     <Sheet open={aberto && resumo !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
       <SheetContent
-        className={cn(
-          "flex w-full flex-col gap-0 p-0 motion-reduce:!animate-none [&>button:last-child]:hidden",
-          // Com o guia (a ficha real) é a página toda, sobre o quadro: o mesmo Sheet em ecrã inteiro, para não perder o foco preso, o Esc, o paginador e as teclas.
-          resto.comGuia ? "inset-0 h-full w-screen max-w-none border-0 sm:max-w-none" : "sm:min-w-[640px] sm:max-w-none sm:w-1/2",
-        )}
+        data-ficha-raiz=""
+        className={cn("flex w-full flex-col gap-0 p-0 motion-reduce:!animate-none [&>button:last-child]:hidden", "sm:min-w-[640px] sm:max-w-none sm:w-1/2")}
         onEscapeKeyDown={(e) => { if (fecharPainel.current?.()) e.preventDefault(); }}
         onOpenAutoFocus={(e) => {
           origem.current = origemFoco?.current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
           e.preventDefault();
-          document.querySelector<HTMLElement>('[role="dialog"] h2')?.focus();
+          (document.querySelector<HTMLElement>("[data-ficha-raiz] [data-ficha-nome]") ?? document.querySelector<HTMLElement>('[role="dialog"] h2'))?.focus();
         }}
         onCloseAutoFocus={(e) => {
           const alvo = focoDeRegresso(origem.current);

@@ -130,7 +130,7 @@ export function PessoasReal() {
     textoEstado(t, lista),
     dicaPendente ? t(`${R}searchHint`) : "",
   ].filter(Boolean).join(". ");
-  return (
+  const conteudo = (
     <div className="mx-auto w-full max-w-[1536px] space-y-5 px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
       <CabecalhoPagina
         subtitulo={contagem} titulo={t(`${R}title`)} aviso={null} pai={{ to: "/pessoas", texto: t("sidebar.crm") }}
@@ -160,13 +160,17 @@ export function PessoasReal() {
         colunas={colunas.visiveis} comDados={comFicha}
       />
       <RodapeListaReal lista={lista} botaoMaisRef={botaoMaisRef} repetirRef={repetirRef} aoPedirMais={aoPedirMais} />
-      {comFicha && (
-        <FichaReal
-          pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
-          origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
-          voltaPara="pessoas"
-        />
-      )}
     </div>
+  );
+  if (!comFicha) return conteudo;
+  // Com uma pessoa aberta a ficha toma o lugar da lista, na área de conteúdo (a lista fica montada, escondida).
+  return (
+    <FichaReal
+      pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
+      origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
+      voltaPara="pessoas" tituloPagina={t(`${R}title`)}
+    >
+      {conteudo}
+    </FichaReal>
   );
 }

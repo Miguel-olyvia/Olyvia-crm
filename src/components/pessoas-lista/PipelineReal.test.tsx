@@ -26,7 +26,7 @@ const fichaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (...a: unknown[]) => listaMock(...a) }));
 vi.mock("@/hooks/pessoas/useQuadroPessoas", () => ({ useQuadroPessoas: (f: FiltrosQuadro, ativo?: boolean) => quadroMock(f, ativo) }));
 vi.mock("./FichaReal", () => ({
-  FichaReal: (p: { pessoaId: string | null; idsVisiveis: string[]; negocioInicial: string | null }) => { fichaMock(p); return null; },
+  FichaReal: (p: { pessoaId: string | null; idsVisiveis: string[]; negocioInicial: string | null; children?: unknown }) => { fichaMock(p); return p.children; },
 }));
 
 const REAL: FontePessoas = { modo: "real", organizationId: "org-1", momentoGanho: null };

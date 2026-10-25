@@ -36,7 +36,7 @@ export function FichaApoioDialogo({ aberto, aoFechar, titulo, descricao, origem,
   return (
     <Dialog open={aberto} onOpenChange={(a) => { if (!a) aoFechar(); }}>
       {/*
-        O fundo e o conteúdo vão juntos no mesmo portal, ambos com o z-index do painel da ficha (Sheet, 610): depois dele no documento, por isso ficam POR CIMA
+        O fundo e o conteúdo vão juntos no mesmo portal, ambos com o z-index 610 (por cima do conteúdo da página, onde a ficha real vive, e do painel lateral da ficha, Sheet): depois dele no documento, por isso ficam POR CIMA
         dele, e o fundo escurece a ficha. O `DialogContent` partilhado deixava o fundo a 600, por baixo do painel. Os diálogos que abrem a partir daqui
         (resultado da visita, confirmações) montam depois e ficam por cima.
       */}

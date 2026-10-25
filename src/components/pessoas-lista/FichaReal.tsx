@@ -2,10 +2,13 @@
 // o `Pessoas.tsx` a alimenta com os stores. A base só entra por `@/hooks/pessoas/`; aqui não há consultas. Com a capacidade `negocios` (P3) a
 // ficha ganha o negócio completo (`NegociosDaFichaReal`); sem ela continua só de leitura.
 //
+// A ficha toma o lugar da página (o quadro ou a lista, `children`) na área de conteúdo do layout, sem Sheet: a página fica montada mas escondida (estado,
+// «Carregar mais» e rolagem preservados) e a barra lateral e o topo continuam à vista.
+//
 // Só se mostra a ficha da pessoa que está aberta (`?open=`): ao passar de A para B não se mostra a de A (nem as ações trabalham sobre ela)
 // enquanto B carrega; há um indicador visível e o anúncio. A última ficha só se guarda para o painel deslizar para fora com conteúdo
 // quando se fecha (`pessoaId` a null).
-import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from "react";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { adaptarFicha } from "@/hooks/pessoas/adaptarFicha";
@@ -25,6 +28,7 @@ import { IdentidadeFichaReal } from "./IdentidadeFichaReal";
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 import { QualificacaoManualFichaReal } from "./QualificacaoManualFichaReal";
 import { SubmissoesFichaReal } from "./SubmissoesFichaReal";
+import { useScrollAoVoltar } from "./useScrollAoVoltar";
 
 const F = "pessoasPagina.real.ficha.";
 
@@ -56,9 +60,13 @@ interface FichaRealProps {
   aoAbrirNegocio?: (negocioId: string, pessoaId: string) => void;
   /** O quadro de onde se abriu a ficha: dá o nome à ligação «← Pipeline» / «← Pessoas» no topo da página. */
   voltaPara?: "pipeline" | "pessoas";
+  /** O conteúdo da página (o quadro ou a lista): fica montado mas escondido enquanto a ficha está à vista. */
+  children?: ReactNode;
+  /** O título da página («Pipeline», «Pessoas»): um h1 só para leitores de ecrã, porque o h1 da página está escondido com a ficha aberta. */
+  tituloPagina?: string;
 }
 
-export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio, voltaPara }: FichaRealProps) {
+export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio, voltaPara, children, tituloPagina }: FichaRealProps) {
   const { t } = useTranslation();
   const lida = useFichaPessoa(pessoaId);
   const ultima = useRef<FichaDb | null>(null);
@@ -131,9 +139,16 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   ) : undefined;
 
   const aAbrir = pessoaId !== null && mostrada === null && lida.estado === "a-carregar";
+  // A ficha só toma o lugar da página quando a primeira chegou; nas trocas com [ e ] (a seguinte ainda a ler) a página não reaparece.
+  const jaViu = useRef(false);
+  if (pessoaId === null) jaViu.current = false;
+  else if (adaptada !== null) jaViu.current = true;
+  const fichaVisivel = pessoaId !== null && (adaptada !== null || jaViu.current);
+  const zonaFicha = useRef<HTMLDivElement>(null);
+  useScrollAoVoltar(fichaVisivel, zonaFicha);
   const ficha = (aoCriarNegocio?: () => void, negocioAbrir: string | null = null) => (
     <FichaPessoa
-      resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null && adaptada !== null} aoFechar={aoFechar} idsVisiveis={idsVisiveis}
+      resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null} naPagina aoFechar={aoFechar} idsVisiveis={idsVisiveis}
       aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={hojeDaFicha} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
       atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={mostrada?.pessoa.voltou_a_contactar === true}
       podeVerSubmissoes separadorSubmissoes={separadorSubmissoes} identidade={identidade} comGuia voltaPara={voltaPara}
@@ -142,19 +157,25 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
     />
   );
   return (
-    <div aria-busy={aAbrir}>
-      {/* Sempre montada: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
-      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{aAbrir ? t(`${F}opening`) : ""}</div>
-      {aAbrir && (
-        <div aria-hidden="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-border bg-background px-3 py-2 text-sm shadow-lg">
-          {t(`${F}opening`)}
+    <>
+      <div data-pagina-escondida="" hidden={fichaVisivel}>{children}</div>
+      <div aria-busy={aAbrir}>
+        {/* Sempre montada: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{aAbrir ? t(`${F}opening`) : ""}</div>
+        {aAbrir && (
+          <div aria-hidden="true" className="fixed bottom-4 right-4 z-50 rounded-md border border-border bg-background px-3 py-2 text-sm shadow-lg">
+            {t(`${F}opening`)}
+          </div>
+        )}
+        <div ref={zonaFicha} hidden={!fichaVisivel} className="mx-auto w-full max-w-[1536px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
+          {fichaVisivel && tituloPagina && <h1 className="sr-only">{tituloPagina}</h1>}
+          {acoes.capacidades?.negocios === false ? ficha() : (
+            <NegociosDaFichaReal ficha={mostrada} pessoaAberta={pessoaId} negocioDoEndereco={negocioInicial} aoAbrirNegocio={aoAbrirNegocio} aoFecharFicha={aoLimpar}>
+              {({ aoCriarNegocio, negocioInicial: aAbrir }) => ficha(aoCriarNegocio, aAbrir)}
+            </NegociosDaFichaReal>
+          )}
         </div>
-      )}
-      {acoes.capacidades?.negocios === false ? ficha() : (
-        <NegociosDaFichaReal ficha={mostrada} pessoaAberta={pessoaId} negocioDoEndereco={negocioInicial} aoAbrirNegocio={aoAbrirNegocio} aoFecharFicha={aoLimpar}>
-          {({ aoCriarNegocio, negocioInicial: aAbrir }) => ficha(aoCriarNegocio, aAbrir)}
-        </NegociosDaFichaReal>
-      )}
-    </div>
+      </div>
+    </>
   );
 }

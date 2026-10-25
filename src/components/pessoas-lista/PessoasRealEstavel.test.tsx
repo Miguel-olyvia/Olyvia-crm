@@ -24,7 +24,7 @@ const fichaProps = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: () => listaMock() }));
 vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());
 vi.mock("./TabelaListaReal", () => ({ TabelaListaReal: forwardRef((p: unknown, _ref) => { tabelaMock(p); return null; }) }));
-vi.mock("./FichaReal", () => ({ FichaReal: (p: unknown) => { fichaProps(p); return null; } }));
+vi.mock("./FichaReal", () => ({ FichaReal: (p: { children?: unknown }) => { fichaProps(p); return p.children; } }));
 
 const REAL: FontePessoas = { modo: "real", organizationId: "org-1", momentoGanho: null };
 const A = "11111111-1111-4111-8111-111111111111";

@@ -17,7 +17,7 @@ const semLeituras = vi.hoisted(() => new Map());
 vi.mock("@/hooks/pessoas/useContactosPessoas", () => ({ useContactosPessoas: () => semLeituras }));
 vi.mock("@/hooks/pessoas/useNomesResponsaveis", () => ({ useNomesResponsaveis: () => semLeituras }));
 vi.mock("@/components/pessoas/AvatarPessoa", () => ({ AvatarPessoa: () => null }));
-vi.mock("./FichaReal", () => ({ FichaReal: () => null }));
+vi.mock("./FichaReal", () => ({ FichaReal: (p: { children?: unknown }) => p.children }));
 const listaMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useListaPessoas", () => ({ useListaPessoas: (f: FiltrosLista) => listaMock(f) }));
 vi.mock("@/hooks/pessoas/useQuadroPessoas", async () => (await import("./fabricaQuadro")).moduloSemQuadro());

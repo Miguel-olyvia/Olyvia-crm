@@ -2,9 +2,9 @@ import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { SheetClose } from "@/components/ui/sheet";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
+import { usePecasFicha } from "./pecasFicha";
 
 interface BotoesNavegacaoProps {
   vizinhas: Vizinhas;
@@ -17,6 +17,7 @@ const BOTAO = cn("h-11 w-11 shrink-0 p-0", FOCO);
 /** Anterior, "n de N" e seguinte (44 px) e Fechar, à direita do cabeçalho. Os botões respondem também a [ e ]. */
 export function BotoesNavegacao({ vizinhas: v, aoIr }: BotoesNavegacaoProps) {
   const { t } = useTranslation();
+  const { Fechar } = usePecasFicha();
   return (
     <div role="group" aria-label={t("pessoasPagina.nav.label")} className="ml-auto flex shrink-0 items-center gap-1">
       <Button
@@ -36,11 +37,11 @@ export function BotoesNavegacao({ vizinhas: v, aoIr }: BotoesNavegacaoProps) {
       >
         <ChevronRight aria-hidden="true" />
       </Button>
-      <SheetClose asChild>
+      <Fechar asChild>
         <Button type="button" variant="ghost" className={BOTAO} aria-label={t("pessoasPagina.nav.close")}>
           <X aria-hidden="true" />
         </Button>
-      </SheetClose>
+      </Fechar>
     </div>
   );
 }

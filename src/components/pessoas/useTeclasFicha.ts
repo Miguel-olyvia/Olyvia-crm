@@ -21,10 +21,10 @@ function alvoDe(el: EventTarget | null): AlvoTecla {
 
 /** Procura o botão da ficha e dá-lhe o foco; se não puder (por exemplo, a última pessoa da lista), usa o outro ou o título. */
 function focarSeta(qual: TeclaNavegacao): void {
-  const ficha = document.querySelector<HTMLElement>('[role="dialog"]');
+  const ficha = document.querySelector<HTMLElement>("[data-ficha-raiz]");
   const alvo = ficha?.querySelector<HTMLElement>(`[data-seta="${qual}"]:not(:disabled)`)
     ?? ficha?.querySelector<HTMLElement>("[data-seta]:not(:disabled)")
-    ?? ficha?.querySelector<HTMLElement>("h2");
+    ?? ficha?.querySelector<HTMLElement>("[data-ficha-nome]");
   alvo?.focus();
 }
 
@@ -56,7 +56,8 @@ export function useTeclasFicha(ativo: boolean, vizinhas: Vizinhas, idPessoa: str
 
   useEffect(() => {
     const qual = qualUsado.current;
-    if (!qual) return;
+    // Sem pessoa (a ficha da seguinte ainda a ler) espera: o foco é da seta só quando a ficha nova chega.
+    if (!qual || idPessoa === undefined) return;
     qualUsado.current = null;
     focarSeta(qual);
   }, [idPessoa]);

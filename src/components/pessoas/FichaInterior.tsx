@@ -4,11 +4,9 @@
 // (só se existirem), as fases, o passo e o cartão do cliente; por baixo só vêm os painéis em linha abertos. Os registos, os dados da pessoa e as abas
 // Visitas, Negócios, Submissões e Atividade abrem a pedido, num diálogo por cima (`FichaApoioDialogo`), a partir do menu «Mais» ou dos atalhos do cabeçalho.
 import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { SheetClose } from "@/components/ui/sheet";
 import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { MaisItensFicha } from "./CarregarMais";
@@ -33,6 +31,7 @@ import { GuiaDaPessoa } from "./GuiaDaPessoa";
 import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { LigacaoVoltarFicha } from "./pecasFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
 import { itensDaPessoa } from "./processo/itensProcesso";
 import { passoDoItem } from "./processo/passosProcesso";
@@ -100,8 +99,13 @@ export interface FichaInteriorProps {
    * Sem isto (o exemplo) fica como estava.
    */
   comGuia?: boolean;
-  /** Com o guia: de onde se abriu a ficha, para a ligação «← Pipeline» / «← Pessoas» no topo (fecha a ficha e volta ao quadro). Sem isto não há ligação. */
+  /** Com o guia na página: de onde se abriu a ficha, para a ligação «← Pipeline» / «← Pessoas» no topo (fecha a ficha e volta ao quadro). Sem isto não há ligação. */
   voltaPara?: "pipeline" | "pessoas";
+  /**
+   * A ficha está NA PÁGINA (sem Sheet): quem rola é a área de conteúdo do layout e não este contentor, e a ligação «← Pipeline» / «← Pessoas» aparece no topo.
+   * Sem isto (o painel lateral, o exemplo) o contentor rola e não há ligação.
+   */
+  naPagina?: boolean;
 }
 
 /** O negócio aberto, no topo da ficha com o guia: o guia do negócio é o cabeçalho (o nome da pessoa, o serviço, as fases, o passo). */
@@ -264,23 +268,11 @@ export function FichaInterior(p: FichaInteriorProps) {
   );
   return (
     <AnuncioFichaContext.Provider value={anunciar}>
-      <div className={cn("flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto", p.comGuia && "bg-muted/30")}>
+      <div className={p.naPagina ? "rounded-xl bg-muted/30" : cn("flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto", p.comGuia && "bg-muted/30")}>
         {p.comGuia ? (
-          // A página toda: uma coluna centrada (até 1120 px) sobre o fundo suave, com a ligação de volta ao quadro no topo.
+          // Uma coluna centrada (até 1120 px) sobre o fundo suave; na página, com a ligação de volta ao quadro no topo.
           <div data-ficha-coluna className="mx-auto w-full max-w-[1120px] pb-6">
-            {p.voltaPara && (
-              <div className="px-4 pt-4 sm:px-6">
-                <SheetClose asChild>
-                  <Button
-                    type="button" variant="ghost" aria-label={t(`pessoasPagina.ficha.voltar.${p.voltaPara}.aria`)}
-                    className={cn("-ml-3 min-h-11 gap-2 px-3 text-sm text-muted-foreground hover:text-foreground", FOCO)}
-                  >
-                    <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-                    {t(`pessoasPagina.ficha.voltar.${p.voltaPara}`)}
-                  </Button>
-                </SheetClose>
-              </div>
-            )}
+            {p.naPagina && p.voltaPara && <LigacaoVoltarFicha voltaPara={p.voltaPara} />}
             <div className="px-4 empty:hidden sm:px-6"><ErroAcao chave={reabrir.erro} chaveExtra={reabrir.erroExtra} className="pb-3" /></div>
             {aviso && <div className="pt-3">{aviso}</div>}
             {/* O topo: o guia do negócio aberto, ou o da pessoa. É o único cabeçalho, a única barra de fases e o único cartão do cliente. */}
