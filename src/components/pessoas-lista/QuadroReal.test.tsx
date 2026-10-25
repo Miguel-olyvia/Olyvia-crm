@@ -69,14 +69,14 @@ describe("QuadroReal: estados", () => {
 });
 
 describe("QuadroReal: colunas e cartões", () => {
-  it("as 3 colunas da abordagem, a coluna Negócios e as suas 4 sub-fases são regiões com nome; a primeira chama-se «Novo»", () => {
+  it("as 3 colunas da abordagem e a coluna Negócio são regiões com nome (sem sub-fases); a primeira chama-se «Novo»", () => {
     desenhar(quadroBase({}, CARTOES));
-    expect(screen.getAllByRole("region")).toHaveLength(8);
+    expect(screen.getAllByRole("region")).toHaveLength(4);
     expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(4);
-    expect(screen.getAllByRole("heading", { level: 4 })).toHaveLength(4);
+    expect(screen.queryAllByRole("heading", { level: 4 })).toHaveLength(0);
     expect(coluna(/^Novo/)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /^Por contactar/ })).toBeNull();
-    expect(within(coluna(/^Orçamento/)).getByText("Cozinha")).toBeInTheDocument();
+    expect(within(coluna(/^Negócio/)).getByText("Cozinha")).toBeInTheDocument();
   });
 
   it("o nome de uma pessoa abre-a sem negócio; o de um negócio abre a pessoa com esse negócio", () => {
@@ -89,7 +89,7 @@ describe("QuadroReal: colunas e cartões", () => {
 
   it("o botão do passo (sem processo) abre a ficha, como o nome", () => {
     const { aoAbrir } = desenhar(quadroBase({}, CARTOES));
-    fireEvent.click(within(coluna(/^Orçamento/)).getAllByRole("button").find((b) => /abre a ficha/.test(b.getAttribute("aria-label") ?? ""))!);
+    fireEvent.click(within(coluna(/^Negócio/)).getAllByRole("button").find((b) => /abre a ficha/.test(b.getAttribute("aria-label") ?? ""))!);
     expect(aoAbrir).toHaveBeenLastCalledWith("dono-1", "neg-1");
   });
 
@@ -101,14 +101,14 @@ describe("QuadroReal: colunas e cartões", () => {
   it("«Carregar mais» de uma coluna chama carregarMais com essa coluna", () => {
     const carregarMais = vi.fn();
     desenhar(quadroBase({ carregarMais }, CARTOES, { orcamento: { total: 40, haMais: true } }));
-    fireEvent.click(within(coluna(/^Orçamento/)).getByRole("button", { name: /Carregar mais \(39 em falta\)/ }));
+    fireEvent.click(within(coluna(/^Negócio/)).getByRole("button", { name: /Carregar mais \(39 em falta\)/ }));
     expect(carregarMais).toHaveBeenCalledWith("orcamento");
   });
 
   it("enquanto mostra os cartões de um filtro anterior, «Carregar mais» fica desativado e não chama a base", () => {
     const carregarMais = vi.fn();
     desenhar(quadroBase({ carregarMais, aMostrarAnterior: true }, CARTOES, { orcamento: { total: 40, haMais: true } }));
-    const botao = within(coluna(/^Orçamento/)).getByRole("button", { name: /Carregar mais \(39 em falta\)/ });
+    const botao = within(coluna(/^Negócio/)).getByRole("button", { name: /Carregar mais \(39 em falta\)/ });
     expect(botao).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(botao);
     expect(carregarMais).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe("QuadroReal: colunas e cartões", () => {
   it("a coluna com erro ao carregar mais mostra o erro nessa coluna", () => {
     const erro = new ErroNeg(new Error("x"), null, "pessoasPagina.real.error");
     desenhar(quadroBase({ errosAoCarregarMais: { orcamento: erro } }, CARTOES, { orcamento: { total: 40, haMais: true } }));
-    expect(within(coluna(/^Orçamento/)).getByText("Não foi possível carregar mais cartões.")).toBeInTheDocument();
+    expect(within(coluna(/^Negócio/)).getByText("Não foi possível carregar mais cartões.")).toBeInTheDocument();
     expect(within(coluna(/^Visita/)).queryByText("Não foi possível carregar mais cartões.")).toBeNull();
   });
 });

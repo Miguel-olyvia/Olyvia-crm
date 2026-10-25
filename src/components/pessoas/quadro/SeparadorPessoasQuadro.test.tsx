@@ -52,11 +52,11 @@ describe("SeparadorPessoas: Lista", () => {
 });
 
 describe("SeparadorPessoas: Quadro", () => {
-  it("trocar para Quadro mostra as 3 colunas de abordagem e a coluna Negócios com 4 sub-fases e tira a tabela", () => {
+  it("trocar para Quadro mostra as 3 colunas de abordagem e a coluna Negócio (sem sub-fases) e tira a tabela", () => {
     render(<Arnes />);
     abrirQuadro();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("region")).toHaveLength(8);
+    expect(screen.getAllByRole("region")).toHaveLength(4);
     expect(screen.getByRole("button", { name: "Quadro" })).toHaveAttribute("aria-pressed", "true");
     expect(botoesDeFicha().length).toBeGreaterThan(0);
   });
@@ -64,7 +64,7 @@ describe("SeparadorPessoas: Quadro", () => {
   it("abre na vista guardada", () => {
     window.localStorage.setItem(CHAVE_PREFS_PESSOAS, JSON.stringify({ vista: "quadro" }));
     render(<Arnes />);
-    expect(screen.getAllByRole("region")).toHaveLength(8);
+    expect(screen.getAllByRole("region")).toHaveLength(4);
   });
 
   it("a pesquisa filtra o quadro: só ficam os cartões de quem coincide", () => {
@@ -95,12 +95,12 @@ describe("SeparadorPessoas: Quadro", () => {
     expect(screen.queryAllByText("Cliente")).toHaveLength(0);
   });
 
-  it("uma pesquisa sem resultados deixa as 3 colunas e as 4 sub-fases com 'Nada nesta fase'", () => {
+  it("uma pesquisa sem resultados deixa as 3 colunas e a coluna Negócio com 'Nada nesta fase'", () => {
     render(<Arnes />);
     abrirQuadro();
     procurar("zzzz-ninguem");
     expect(botoesDeFicha()).toHaveLength(0);
-    expect(screen.getAllByText("Nada nesta fase")).toHaveLength(7);
+    expect(screen.getAllByText("Nada nesta fase")).toHaveLength(4);
   });
 
   it("os atalhos j/k movem o foco entre os cartões pela ordem do DOM e o 'o' abre a ficha", () => {

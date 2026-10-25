@@ -9,60 +9,81 @@ vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoa
 const negocio = (id: string, coluna: CartaoQuadro["coluna"], valor: number | null): CartaoQuadro =>
   cartaoQuadro(id, { id, tipo: "negocio", coluna, trabalho: "Cozinha", valor, passo: "criarProposta" });
 
-const FASES = ["Levantamento", "Orçamento", "Proposta", "Contrato"];
-// Sub-fase de negócio: h4 dentro do grupo «Negócios»; as outras colunas, h3.
-const coluna = (titulo: string) => screen.getByRole("heading", { level: FASES.includes(titulo) ? 4 : 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
+// Cada coluna é um h3; os negócios de todas as fases vivem na coluna única «Negócio».
+const coluna = (titulo: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
 const mostrar = (extra: Partial<React.ComponentProps<typeof QuadroPessoas>> = {}) =>
   render(<QuadroPessoas cartoes={[negocio("n1", "orcamento", 100), negocio("n2", "orcamento", 50)]} hoje="2026-10-21" chip="todas" aoAbrir={vi.fn()} aoLimpar={vi.fn()} {...extra} />);
 
 describe("QuadroPessoas com totais da base", () => {
   it("a contagem e o valor da coluna são os da base, não os dos cartões carregados", () => {
     mostrar({ totais: { orcamento: { total: 30, valor: 4000.5, haMais: true } } });
-    const c = within(coluna("Orçamento"));
-    expect(c.getByRole("heading", { level: 4 })).toHaveTextContent("30 cartões");
+    const c = within(coluna("Negócio"));
+    expect(c.getByRole("heading", { level: 3 })).toHaveTextContent("30 cartões");
     expect(c.getByText(/4\D?000,50/, { selector: "span[aria-hidden='true']" })).toBeInTheDocument();
   });
 
-  it("uma coluna sem totais conta 0 e as de negócio com valor mostram 0 €; Levantamento nunca mostra soma", () => {
-    mostrar({ totais: { orcamento: { total: 2, valor: 150, haMais: false } } });
-    expect(within(coluna("Proposta")).getByRole("heading", { level: 4 })).toHaveTextContent("0 cartões");
-    expect(within(coluna("Levantamento")).queryByText(/€/)).toBeNull();
-    expect(within(coluna("Proposta")).getByText(/€/, { selector: "span[aria-hidden='true']" })).toBeInTheDocument();
+  it("sem totais de uma fase ela conta 0; o Levantamento nunca soma valor e uma coluna sem negócios mostra 0 €", () => {
+    mostrar({ cartoes: [], totais: { levantamento: { total: 4, valor: 999, haMais: false } } });
+    const c = within(coluna("Negócio"));
+    expect(c.getByRole("heading", { level: 3 })).toHaveTextContent("4 cartões");
+    expect(c.getByText(/0\D?€|€\D?0/, { selector: "span[aria-hidden='true']" })).toBeInTheDocument();
   });
 
-  it("«Carregar mais» só aparece nas colunas a que faltam cartões e pede essa coluna", () => {
+  it("UM só «Carregar mais» na coluna «Negócio», que pede cada fase a que faltam cartões e só essas", () => {
     const aoCarregarMais = vi.fn();
-    mostrar({ totais: { orcamento: { total: 30, valor: 0, haMais: true }, proposta: { total: 0, valor: 0, haMais: false } }, aoCarregarMais });
-    expect(screen.getAllByRole("button", { name: /Carregar mais/ })).toHaveLength(1);
-    fireEvent.click(within(coluna("Orçamento")).getByRole("button", { name: /Carregar mais \(28 em falta\)/ }));
+    mostrar({
+      totais: { orcamento: { total: 30, valor: 0, haMais: true }, proposta: { total: 9, valor: 0, haMais: true }, contrato: { total: 0, valor: 0, haMais: false } },
+      aoCarregarMais,
+    });
+    const botoes = within(coluna("Negócio")).getAllByRole("button", { name: /Carregar mais/ });
+    expect(botoes).toHaveLength(1);
+    expect(botoes[0]).toHaveAccessibleName(/Negócio/);
+    fireEvent.click(botoes[0]);
+    expect(aoCarregarMais).toHaveBeenCalledTimes(2);
     expect(aoCarregarMais).toHaveBeenCalledWith("orcamento");
+    expect(aoCarregarMais).toHaveBeenCalledWith("proposta");
   });
 
-  it("o grupo «Negócios» soma os totais da base das sub-fases (sem o valor do Levantamento) e cada sub-fase pagina à parte", () => {
+  it("a coluna «Negócio» soma os totais da base das fases (sem o valor do Levantamento)", () => {
     mostrar({
       totais: {
         levantamento: { total: 5, valor: 999, haMais: false }, orcamento: { total: 30, valor: 4000, haMais: true },
         proposta: { total: 3, valor: 500, haMais: false }, contrato: { total: 2, valor: 100, haMais: false },
       },
     });
-    const grupo = screen.getByRole("heading", { level: 3, name: /^Negócios/ });
+    const grupo = screen.getByRole("heading", { level: 3, name: /^Negócio/ });
     expect(grupo).toHaveTextContent("40 cartões");
     const cab = within(grupo.parentElement!.parentElement as HTMLElement);
     expect(cab.getByText(/4\D?600/, { selector: "span[aria-hidden='true']" })).toBeInTheDocument();
   });
 
-  it("marca a coluna a carregar e a coluna com erro", () => {
-    mostrar({
-      totais: { orcamento: { total: 30, valor: 0, haMais: true }, proposta: { total: 9, valor: 0, haMais: true } },
-      aCarregarMais: new Set(["orcamento"]), colunasComErro: new Set(["proposta"]), aoCarregarMais: vi.fn(),
-    });
-    expect(within(coluna("Orçamento")).getByRole("button", { name: /Carregar mais/ })).toHaveAttribute("aria-busy", "true");
-    expect(within(coluna("Proposta")).getByText("Não foi possível carregar mais cartões.")).toBeInTheDocument();
+  it("o estado a carregar de qualquer fase do grupo marca o botão único; o erro de qualquer fase mostra o erro e «Repetir»", () => {
+    const totais = { orcamento: { total: 30, valor: 0, haMais: true }, proposta: { total: 9, valor: 0, haMais: true } };
+    const ui = render(
+      <QuadroPessoas cartoes={[negocio("n1", "orcamento", 1)]} hoje="2026-10-21" chip="todas" aoAbrir={vi.fn()} aoLimpar={vi.fn()} totais={totais}
+        aCarregarMais={new Set(["orcamento"])} aoCarregarMais={vi.fn()} />,
+    );
+    expect(within(coluna("Negócio")).getByRole("button", { name: /Carregar mais/ })).toHaveAttribute("aria-busy", "true");
+    ui.rerender(
+      <QuadroPessoas cartoes={[negocio("n1", "orcamento", 1)]} hoje="2026-10-21" chip="todas" aoAbrir={vi.fn()} aoLimpar={vi.fn()} totais={totais}
+        colunasComErro={new Set(["proposta"])} aoCarregarMais={vi.fn()} />,
+    );
+    expect(within(coluna("Negócio")).getByText("Não foi possível carregar mais cartões.")).toBeInTheDocument();
+    expect(within(coluna("Negócio")).getByRole("button", { name: /Repetir/ })).toBeInTheDocument();
+  });
+
+  it("com «Carregar mais» desativado (cartões de um filtro anterior) o botão único não chama a base", () => {
+    const aoCarregarMais = vi.fn();
+    mostrar({ totais: { orcamento: { total: 30, valor: 0, haMais: true } }, aoCarregarMais, carregarMaisDesativado: true });
+    const botao = within(coluna("Negócio")).getByRole("button", { name: /Carregar mais/ });
+    expect(botao).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(botao);
+    expect(aoCarregarMais).not.toHaveBeenCalled();
   });
 
   it("sem as props novas faz o que fazia: conta os cartões, soma o valor e não tem «Carregar mais»", () => {
     mostrar();
-    expect(within(coluna("Orçamento")).getByRole("heading", { level: 4 })).toHaveTextContent("2 cartões");
+    expect(within(coluna("Negócio")).getByRole("heading", { level: 3 })).toHaveTextContent("2 cartões");
     expect(screen.queryByRole("button", { name: /Carregar mais/ })).toBeNull();
     expect(screen.getByText("Por contactar", { selector: "h3" })).toBeInTheDocument();
   });
@@ -83,13 +104,13 @@ describe("QuadroPessoas com totais da base", () => {
     const inicial = [negocio("n1", "orcamento", 1)];
     const props = { hoje: "2026-10-21", chip: "todas" as const, aoAbrir: vi.fn(), aoLimpar: vi.fn(), aoCarregarMais };
     const ui = render(<QuadroPessoas {...props} cartoes={inicial} totais={{ orcamento: { total: 2, valor: 0, haMais: true } }} />);
-    const botao = within(coluna("Orçamento")).getByRole("button", { name: /Carregar mais/ });
+    const botao = within(coluna("Negócio")).getByRole("button", { name: /Carregar mais/ });
     botao.focus();
     fireEvent.click(botao);
     expect(aoCarregarMais).toHaveBeenCalledTimes(1);
     // Mais tarde, por outro motivo (um refetch), a coluna cresce e o botão desaparece.
     ui.rerender(<QuadroPessoas {...props} cartoes={[...inicial, negocio("n2", "orcamento", 2)]} totais={{ orcamento: { total: 2, valor: 0, haMais: false } }} />);
-    const abrir = within(coluna("Orçamento")).getAllByRole("button", { name: /^Abrir/ });
+    const abrir = within(coluna("Negócio")).getAllByRole("button", { name: /^Abrir/ });
     expect(document.activeElement).not.toBe(abrir[1]);
   });
 
@@ -98,11 +119,11 @@ describe("QuadroPessoas com totais da base", () => {
     const inicial = [negocio("n1", "orcamento", 1)];
     const props = { hoje: "2026-10-21", chip: "todas" as const, aoAbrir: vi.fn(), aoLimpar: vi.fn(), aoCarregarMais };
     const ui = render(<QuadroPessoas {...props} cartoes={inicial} totais={{ orcamento: { total: 2, valor: 0, haMais: true } }} />);
-    const botao = within(coluna("Orçamento")).getByRole("button", { name: /Carregar mais/ });
+    const botao = within(coluna("Negócio")).getByRole("button", { name: /Carregar mais/ });
     botao.focus();
     fireEvent.click(botao);
     ui.rerender(<QuadroPessoas {...props} cartoes={[...inicial, negocio("n2", "orcamento", 2)]} totais={{ orcamento: { total: 2, valor: 0, haMais: false } }} />);
-    const abrir = within(coluna("Orçamento")).getAllByRole("button", { name: /^Abrir/ });
+    const abrir = within(coluna("Negócio")).getAllByRole("button", { name: /^Abrir/ });
     expect(document.activeElement).toBe(abrir[1]);
   });
 });

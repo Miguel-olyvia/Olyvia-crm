@@ -55,18 +55,28 @@ const abrirPrimeiroCartao = (titulo: string) => {
   const [cartao] = within(coluna(titulo)).getAllByRole("listitem");
   fireEvent.click(within(cartao).getAllByRole("button")[0]);
 };
+/**
+ * Os negócios vivem todos na coluna «Negócio» (a fase não se vê no quadro): o primeiro cartão cujo botão do passo diz o que se faz numa fase.
+ * Em Orçamento faz-se o orçamento (criar, verificar, enviar a proposta); em Proposta regista-se a resposta do cliente.
+ */
+const PASSOS_DA_FASE = { orcamento: /^(Criar o orçamento|Verificar o orçamento|Enviar a proposta):/, proposta: /^Registar a resposta do cliente:/ };
+const abrirPrimeiroNegocioEm = (fase: keyof typeof PASSOS_DA_FASE) => {
+  const cartao = within(coluna("Negócio")).getAllByRole("listitem").find((li) => within(li).queryByRole("button", { name: PASSOS_DA_FASE[fase] }));
+  if (!cartao) throw new Error(`Nenhum cartão de negócio em ${fase}`);
+  fireEvent.click(within(cartao).getAllByRole("button")[0]);
+};
 
 describe("Pessoas: abrir um negócio a partir do Quadro", () => {
   it("o cartão de um negócio em Proposta abre a ficha já com esse negócio aberto, com o percurso", async () => {
     abrirQuadro();
-    abrirPrimeiroCartao("Proposta");
+    abrirPrimeiroNegocioEm("proposta");
     expect(await screen.findByRole("button", { name: /voltar aos negócios/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 4, name: /percurso/i })).toBeInTheDocument();
   }, TEMPO);
 
   it("o negócio aberto mostra as fases (a atual e as que faltam) e o botão do passo seguinte, como no Quadro", async () => {
     abrirQuadro();
-    abrirPrimeiroCartao("Proposta");
+    abrirPrimeiroNegocioEm("proposta");
     await screen.findByRole("button", { name: /voltar aos negócios/i });
     const fases = screen.getByRole("heading", { level: 4, name: /fases do negócio/i }).closest("section")!;
     const itens = within(fases).getAllByRole("listitem").map((i) => i.textContent ?? "");
@@ -78,7 +88,7 @@ describe("Pessoas: abrir um negócio a partir do Quadro", () => {
 
   it("o cartão de um negócio em Orçamento também abre a ficha no negócio certo", async () => {
     abrirQuadro();
-    abrirPrimeiroCartao("Orçamento");
+    abrirPrimeiroNegocioEm("orcamento");
     expect(await screen.findByRole("button", { name: /voltar aos negócios/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 4, name: /percurso/i })).toBeInTheDocument();
   }, TEMPO);

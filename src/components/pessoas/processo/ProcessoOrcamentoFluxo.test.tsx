@@ -33,7 +33,7 @@ const juntar = async (dialogo: HTMLElement, servico: string) => {
 describe("do orçamento à proposta: um negócio em Orçamento percorre os três passos", () => {
   it("criar o orçamento → verificar (um preço abaixo do custo resolvido com 'Usar X €') → enviar a proposta; os dois quadros dizem o mesmo", async () => {
     render(<PaginaDeTeste negocio={negocioEmOrcamento()} />);
-    expect(colunaDe("quadro-pessoas", "Orçamento").getByRole("button", { name: "Criar o orçamento: Cozinha de a" })).toBeInTheDocument();
+    expect(colunaDe("quadro-pessoas", "Negócio").getByRole("button", { name: "Criar o orçamento: Cozinha de a" })).toBeInTheDocument();
 
     // 1. Criar o orçamento: 10 m² de pavimento a 17 € (abaixo do custo, que é de 18 €).
     fireEvent.click(botao("Criar o orçamento"));
@@ -73,9 +73,9 @@ describe("do orçamento à proposta: um negócio em Orçamento percorre os três
     expect(faseDoNegocio(negocioAtual())).toBe("proposta");
     expect(valorDoNegocio(negocioAtual())).toBeCloseTo(265, 9);
     expect(extrasAtuais().n1.condicoes).toEqual({ validade: 30, prazo: 5, inicio: "2026-11-16", pagamento: "metade", garantia: 2, notas: "" });
-    expect(colunaDe("quadro-pessoas", "Proposta").getAllByText("€265").length).toBeGreaterThan(0);
+    // O Quadro de Pessoas tem uma só coluna «Negócio» (a fase vê-se ao abrir o negócio): o cartão fica lá, com o valor da proposta.
+    expect(colunaDe("quadro-pessoas", "Negócio").getAllByText("€265").length).toBeGreaterThan(0);
     expect(colunaDe("quadro-negocios", "Proposta").getAllByText("€265").length).toBeGreaterThan(0);
-    expect(colunaDe("quadro-pessoas", "Orçamento").queryByText("€265")).not.toBeInTheDocument();
     expect(colunaDe("quadro-negocios", "Orçamento").queryByText("€265")).not.toBeInTheDocument();
     await waitFor(() => expect(aviso()).toHaveTextContent("Proposta enviada: a passa a Proposta."));
     expect(botao("Registar a resposta do cliente")).toBeInTheDocument();

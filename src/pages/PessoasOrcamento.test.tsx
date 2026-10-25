@@ -37,7 +37,7 @@ const textoLive = () => Array.from(document.querySelectorAll('[role="status"]'))
 describe("Pessoas: o orçamento e a proposta a partir do Quadro", () => {
   it("a Casa de banho do Vasco Pinto (Orçamento, sem orçamentos) percorre criar → verificar → enviar e passa a Proposta, gravada para o resto da app", async () => {
     abrirPagina();
-    expect(coluna("Orçamento").getByRole("button", { name: "Criar o orçamento: Casa de banho de Vasco Pinto" })).toBeInTheDocument();
+    expect(coluna("Negócio").getByRole("button", { name: "Criar o orçamento: Casa de banho de Vasco Pinto" })).toBeInTheDocument();
 
     fireEvent.click(botao("Criar o orçamento: Casa de banho de Vasco Pinto"));
     let dialogo = await screen.findByRole("dialog", { name: "Orçamento de Casa de banho" });
@@ -66,8 +66,9 @@ describe("Pessoas: o orçamento e a proposta a partir do Quadro", () => {
     expect(faseDoNegocio(negocio)).toBe("proposta");
     expect(valorDoNegocio(negocio)).toBeCloseTo(541.2, 9);
     expect(extrasAtuais().x3.condicoes).toMatchObject({ inicio: "2026-11-16", pagamento: "metade" });
-    expect(coluna("Proposta").getByRole("button", { name: "Registar a resposta do cliente: Casa de banho de Vasco Pinto" })).toBeInTheDocument();
-    expect(coluna("Orçamento").queryByRole("button", { name: /Casa de banho de Vasco Pinto/ })).not.toBeInTheDocument();
+    // O cartão fica na coluna «Negócio» (a fase não é uma coluna): o passo antigo desapareceu e o da proposta apareceu.
+    expect(coluna("Negócio").getByRole("button", { name: "Registar a resposta do cliente: Casa de banho de Vasco Pinto" })).toBeInTheDocument();
+    expect(coluna("Negócio").queryByRole("button", { name: "Criar o orçamento: Casa de banho de Vasco Pinto" })).not.toBeInTheDocument();
     await waitFor(() => expect(textoLive()).toContain("Proposta enviada: Vasco Pinto passa a Proposta."));
   }, TEMPO);
 

@@ -40,63 +40,80 @@ const mostrar = (cartoes = CARTOES, aoAbrir = vi.fn(), chip: ChipPessoa = "todas
   return aoAbrir;
 };
 
-// Abordagem: h3 de uma coluna solta. Sub-fase de negócio: h4 dentro do grupo «Negócios» (h3).
-const FASES = ["Levantamento", "Orçamento", "Proposta", "Contrato"];
-const coluna = (titulo: string) => screen.getByRole("heading", { level: FASES.includes(titulo) ? 4 : 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
+// Cada coluna é um h3: as 3 da abordagem e a coluna única «Negócio» (sem sub-fases).
+const coluna = (titulo: string) => screen.getByRole("heading", { level: 3, name: new RegExp(`^${titulo}`) }).closest("section")!;
 
 describe("QuadroPessoas", () => {
-  it("renderiza as 3 colunas de abordagem e UMA coluna «Negócios» (h3) com 4 sub-fases (h4), cada uma com a contagem certa", () => {
+  it("renderiza as 3 colunas de abordagem e UMA coluna «Negócio» (h3), sem sub-fases nem h4", () => {
     mostrar();
     expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
     const titulos = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titulos).toEqual(["Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão", "Negócios, 4 cartões"]);
-    const fases = screen.getAllByRole("heading", { level: 4 }).map((h) => h.textContent);
-    expect(fases).toEqual(["Levantamento, 1 cartão", "Orçamento, 2 cartões", "Proposta, 0 cartões", "Contrato, 1 cartão"]);
-    // 3 colunas + o grupo + 4 sub-fases, todos com nome acessível.
-    expect(screen.getAllByRole("region")).toHaveLength(8);
-    expect(within(coluna("Negócios")).getAllByRole("region")).toHaveLength(4);
+    expect(titulos).toEqual(["Por contactar, 2 cartões", "Contactado, 0 cartões", "Visita, 1 cartão", "Negócio, 4 cartões"]);
+    expect(screen.queryAllByRole("heading", { level: 4 })).toHaveLength(0);
+    // 3 colunas de abordagem + 1 de negócio, todas com nome acessível.
+    expect(screen.getAllByRole("region")).toHaveLength(4);
+    expect(within(coluna("Negócio")).queryAllByRole("region")).toHaveLength(0);
     expect(screen.getAllByRole("group", { name: "Pessoas por fase" })).toHaveLength(1);
+  });
+
+  it("nenhum título de fase (Levantamento, Orçamento, Proposta, Contrato) aparece como cabeçalho", () => {
+    mostrar();
+    for (const f of ["Levantamento", "Orçamento", "Proposta", "Contrato"]) expect(screen.queryByRole("heading", { name: new RegExp(`^${f}`) })).toBeNull();
+  });
+
+  it("a coluna «Negócio» é UMA lista com os cartões de todas as fases, por fase e, dentro dela, pela ordem de chegada", () => {
+    // Chegam fora de ordem: o contrato primeiro, depois um orçamento, o levantamento e outro orçamento.
+    mostrar([
+      deNegocio({ id: "c1", pessoaId: "p1", nome: "Rita Sá", coluna: "contrato", trabalho: "Telhado", valor: 1 }),
+      deNegocio({ id: "o1", pessoaId: "p2", nome: "Hugo Paz", coluna: "orcamento", trabalho: "Sala", valor: 2 }),
+      deNegocio({ id: "l1", pessoaId: "p3", nome: "Inês Vaz", coluna: "levantamento", trabalho: "Janelas", passo: "fazerLevantamento" }),
+      deNegocio({ id: "o2", pessoaId: "p4", nome: "Luís Gil", coluna: "orcamento", trabalho: "Cozinha", valor: 3 }),
+      deNegocio({ id: "r1", pessoaId: "p5", nome: "Tomás Rui", coluna: "proposta", trabalho: "Chão", valor: 4 }),
+    ]);
+    const lista = within(coluna("Negócio")).getByRole("list");
+    const nomes = within(lista).getAllByRole("button", { name: /^Abrir a ficha de/ }).map((b) => b.textContent);
+    expect(nomes).toEqual(["Inês Vaz", "Hugo Paz", "Luís Gil", "Tomás Rui", "Rita Sá"]);
+    expect(within(coluna("Negócio")).getAllByRole("list")).toHaveLength(1);
   });
 
   it("a pessoa em abordagem só está nas três primeiras colunas e o negócio nas outras: a mesma pessoa não está nas duas", () => {
     mostrar();
     for (const c of ["Por contactar", "Contactado", "Visita"]) expect(within(coluna(c)).queryByText("Duarte Melo")).not.toBeInTheDocument();
-    for (const c of ["Levantamento", "Orçamento", "Proposta", "Contrato"]) expect(within(coluna(c)).queryByText("Ana Lopes")).not.toBeInTheDocument();
+    expect(within(coluna("Negócio")).queryByText("Ana Lopes")).not.toBeInTheDocument();
   });
 
-  it("cada coluna sem nada diz 'Nada nesta fase'", () => {
+  it("uma coluna da abordagem sem cartões diz 'Nada nesta fase'; a de negócio com cartões não o diz", () => {
     mostrar();
     expect(within(coluna("Contactado")).getByText("Nada nesta fase")).toBeInTheDocument();
-    expect(within(coluna("Proposta")).getByText("Nada nesta fase")).toBeInTheDocument();
     expect(within(coluna("Visita")).queryByText("Nada nesta fase")).not.toBeInTheDocument();
+    expect(within(coluna("Negócio")).queryByText("Nada nesta fase")).not.toBeInTheDocument();
   });
 
-  it("um negócio em Levantamento mostra-se na coluna Levantamento, com o passo de fazer o levantamento e sem valor (ainda não há orçamento)", () => {
-    mostrar();
-    const lev = within(coluna("Levantamento"));
-    expect(lev.getByText("Janelas")).toBeInTheDocument();
-    expect(lev.getByRole("button", { name: /Fazer o levantamento/ })).toBeInTheDocument();
-    // O Levantamento não tem valor: nem na sub-fase nem no agregado.
-    expect(within(screen.getByRole("heading", { level: 4, name: /^Levantamento/ })).queryByText(/€/)).toBeNull();
+  it("um negócio em Levantamento mostra-se na coluna Negócio, com o passo de fazer o levantamento e sem valor (ainda não há orçamento)", () => {
+    mostrar([deNegocio({ id: "n0", pessoaId: "f", nome: "Filipa Reis", coluna: "levantamento", trabalho: "Janelas", passo: "fazerLevantamento" })]);
+    const neg = within(coluna("Negócio"));
+    expect(neg.getByText("Janelas")).toBeInTheDocument();
+    expect(neg.getByRole("button", { name: /Fazer o levantamento/ })).toBeInTheDocument();
+    // O Levantamento não tem valor: o cartão não mostra nenhum e o agregado da coluna fica em 0.
+    expect(neg.getAllByText(/€/, { selector: "span[aria-hidden='true']" })).toHaveLength(1);
+    expect(neg.getByText(formatarMeta("euro", 0), { selector: "span[aria-hidden='true']" })).toBeInTheDocument();
   });
 
-  it("o quadro vazio mostra o estado vazio nas 3 colunas da abordagem e nas 4 sub-fases (a fase vazia continua visível)", () => {
+  it("o quadro vazio mostra o estado vazio nas 3 colunas da abordagem e UMA só mensagem na coluna «Negócio»", () => {
     mostrar([]);
-    expect(screen.getAllByText("Nada nesta fase")).toHaveLength(7);
+    expect(screen.getAllByText("Nada nesta fase")).toHaveLength(4);
+    expect(within(coluna("Negócio")).getAllByText("Nada nesta fase")).toHaveLength(1);
   });
 
-  it("as colunas de negócio somam o valor; as da abordagem não mostram valor", () => {
+  it("a coluna de negócio mostra o valor de cada cartão; as da abordagem não mostram valor", () => {
     mostrar();
-    expect(within(coluna("Orçamento")).getByText(formatarMeta("euro", 12000))).toBeInTheDocument();
-    // Um só cartão de 7000: o valor aparece no cartão e na soma da coluna.
-    expect(within(coluna("Contrato")).getAllByText(formatarMeta("euro", 7000))).toHaveLength(2);
-    expect(within(coluna("Proposta")).getByText(formatarMeta("euro", 0))).toBeInTheDocument();
+    expect(within(coluna("Negócio")).getByText(formatarMeta("euro", 9000))).toBeInTheDocument();
     expect(within(coluna("Por contactar")).queryByText(/€/)).not.toBeInTheDocument();
   });
 
-  it("o grupo «Negócios» soma as contagens e os valores das sub-fases, sem o Levantamento, e diz o total por texto", () => {
+  it("a coluna «Negócio» soma as contagens e os valores das fases, sem o Levantamento, e diz o total por texto", () => {
     mostrar();
-    const grupo = coluna("Negócios");
+    const grupo = coluna("Negócio");
     // 9000 + 3000 + 0 + 7000; o Levantamento não conta.
     const total = formatarMeta("euro", 19000);
     const cab = grupo.querySelector("h3")!.parentElement!.parentElement!;
@@ -105,15 +122,15 @@ describe("QuadroPessoas", () => {
     expect(grupo.querySelector("h3 .sr-only")?.textContent).toBe(", 4 cartões");
   });
 
-  it("a faixa do grupo tem as cores das 4 fases e é decorativa", () => {
+  it("a faixa da coluna tem as cores das 4 fases e é decorativa", () => {
     mostrar();
-    const faixa = coluna("Negócios").querySelector("[aria-hidden='true'].flex.h-1")!;
+    const faixa = coluna("Negócio").querySelector("[aria-hidden='true'].flex.h-1")!;
     expect(faixa.children).toHaveLength(4);
   });
 
   it("o cartão mostra o rótulo Lead ou Cliente, o trabalho, o valor e o passo", () => {
     mostrar();
-    const orc = within(coluna("Orçamento"));
+    const orc = within(coluna("Negócio"));
     expect(orc.getAllByText("Cliente")).toHaveLength(2);
     expect(orc.getByText("Cozinha")).toBeInTheDocument();
     expect(orc.getByText(formatarMeta("euro", 9000))).toBeInTheDocument();
@@ -125,7 +142,7 @@ describe("QuadroPessoas", () => {
 
   it("um prazo ultrapassado diz-se por texto, não só por cor", () => {
     mostrar();
-    expect(within(coluna("Contrato")).getByText(/Prazo ultrapassado/)).toBeInTheDocument();
+    expect(within(coluna("Negócio")).getByText(/Prazo ultrapassado/)).toBeInTheDocument();
   });
 
   it("clicar no nome abre a ficha dessa pessoa", () => {
@@ -144,7 +161,7 @@ describe("QuadroPessoas", () => {
 
   it("o nome do botão do passo é '{passo}: {trabalho} de {nome}', como na Lista: distingue os cartões da mesma pessoa e começa pelo texto visível", () => {
     mostrar();
-    const duarte = within(coluna("Orçamento")).getAllByRole("button", { name: /de Duarte Melo \(abre a ficha\)$/ });
+    const duarte = within(coluna("Negócio")).getAllByRole("button", { name: /de Duarte Melo \(abre a ficha\)$/ });
     expect(duarte.map((b) => b.getAttribute("aria-label"))).toEqual([
       "Criar a proposta: Cozinha de Duarte Melo (abre a ficha)", "Enviar a proposta: Sala de Duarte Melo (abre a ficha)",
     ]);
@@ -157,7 +174,7 @@ describe("QuadroPessoas", () => {
 
   it("o texto do prazo ultrapassado não usa a cor destrutiva (só o ícone), por contraste", () => {
     mostrar();
-    const p = within(coluna("Contrato")).getByText(/Prazo ultrapassado/);
+    const p = within(coluna("Negócio")).getByText(/Prazo ultrapassado/);
     expect(p.className).not.toContain("text-destructive");
     expect(p.querySelector("svg")?.getAttribute("class")).toContain("text-destructive");
   });
@@ -202,8 +219,8 @@ describe("QuadroPessoas", () => {
 
   it("os cartões vivem numa lista e os botões levam a classe min-h-11 (não se mede o tamanho em px)", () => {
     mostrar();
-    const lista = within(coluna("Orçamento")).getByRole("list");
-    expect(within(lista).getAllByRole("listitem")).toHaveLength(2);
+    const lista = within(coluna("Negócio")).getByRole("list");
+    expect(within(lista).getAllByRole("listitem")).toHaveLength(4);
     for (const b of within(lista).getAllByRole("button")) expect(b.className).toContain("min-h-11");
   });
 });

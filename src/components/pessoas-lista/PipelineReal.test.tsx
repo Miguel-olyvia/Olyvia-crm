@@ -63,25 +63,22 @@ beforeEach(() => {
 });
 
 describe("PipelineReal: só o quadro", () => {
-  it("mostra as 3 colunas da abordagem e a coluna Negócios com 4 sub-fases, sem tabela nem seletor de vista, e o título Pipeline", () => {
+  it("mostra as 3 colunas da abordagem e a coluna Negócio (sem sub-fases), sem tabela nem seletor de vista, e o título Pipeline", () => {
     desenhar();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByRole("button", { name: "Lista" })).toBeNull();
-    // 3 colunas de abordagem + a coluna agrupada Negócios + as suas 4 sub-fases.
-    expect(screen.getAllByRole("region")).toHaveLength(8);
+    // 3 colunas de abordagem + a coluna única Negócio.
+    expect(screen.getAllByRole("region")).toHaveLength(4);
     expect(screen.getByRole("heading", { name: "Pipeline" })).toBeInTheDocument();
   });
 
-  it("as colunas vêm por ordem: Novo, Contactado, Visita, Negócios e, dentro dela, levantamento, orçamento, proposta, contrato", () => {
+  it("as colunas vêm por ordem: Novo, Contactado, Visita e Negócio", () => {
     desenhar();
     const nomes = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label") ?? r.textContent ?? "");
     expect(nomes[0]).toMatch(/^Novo/);
     expect(nomes[2]).toMatch(/^Visita/);
-    expect(nomes[3]).toMatch(/^Negócios/);
-    expect(nomes[4]).toMatch(/^Levantamento/);
-    expect(nomes[5]).toMatch(/^Orçamento/);
-    expect(nomes[6]).toMatch(/^Proposta/);
-    expect(nomes[7]).toMatch(/^Contrato/);
+    expect(nomes[3]).toMatch(/^Negócio/);
+    expect(nomes).toHaveLength(4);
   });
 
   it("usa useQuadroPessoas(filtros, true) e nunca a lista", () => {
@@ -125,8 +122,10 @@ describe("PipelineReal: só o quadro", () => {
 describe("PipelineReal: a ficha aberta a partir do quadro", () => {
   it("abre a pessoa pelo endereço, com o negócio, e passa à ficha os ids únicos pela ordem das colunas", () => {
     desenhar();
-    const coluna = screen.getByRole("region", { name: /^Orçamento/ });
-    fireEvent.click(within(coluna).getByRole("button", { name: "Abrir a ficha de Carla Dias" }));
+    const coluna = screen.getByRole("region", { name: /^Negócio/ });
+    // A mesma pessoa tem dois negócios na coluna: o botão do primeiro leva o id dele.
+    const botoes = within(coluna).getAllByRole("button", { name: "Abrir a ficha de Carla Dias" });
+    fireEvent.click(botoes.find((b) => b.getAttribute("data-negocio-id") === "neg-1")!);
     expect(url()).toBe("/pipeline?open=dono-1&negocio=neg-1");
     expect(ultima(fichaMock)[0].idsVisiveis).toEqual(["a", "b", "dono-1"]);
     expect(ultima(fichaMock)[0].pessoaId).toBe("dono-1");

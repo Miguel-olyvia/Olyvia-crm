@@ -207,7 +207,7 @@ describe("Quadro: da visita feita ao negócio", () => {
     expect(within(painel).getByRole("radio", { name: /Usar um que já existe/ })).toBeChecked();
     fireEvent.click(within(painel).getByRole("button", { name: "Criar negócio" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(within(coluna("Orçamento")).getByText("Rita Albuquerque")).toBeInTheDocument();
+    expect(within(coluna("Negócio")).getByText("Rita Albuquerque")).toBeInTheDocument();
     expect(within(coluna("Visita")).queryByText("Rita Albuquerque")).not.toBeInTheDocument();
     await waitFor(() => expect(avisos()).toContain("Negócio criado: Rita Albuquerque passa a Orçamento."));
     expect(negociosNovos()).toHaveLength(1);

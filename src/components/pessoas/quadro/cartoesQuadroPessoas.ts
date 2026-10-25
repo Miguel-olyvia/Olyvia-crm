@@ -30,15 +30,15 @@ export const COLUNAS_QUADRO: readonly DefColuna[] = [
 ];
 
 /**
- * As sub-fases da coluna «Negócios» do quadro, pela ordem do percurso. É o único sítio onde se decide o que entra no grupo: para tirar o
- * Levantamento (ou outra fase) basta tirá-la daqui. Só muda a apresentação; a paginação e os totais continuam por fase.
+ * As fases cujos cartões entram na coluna única «Negócio» do quadro, pela ordem do percurso. É o único sítio onde se decide o que entra no grupo: para tirar o
+ * Levantamento (ou outra fase) basta tirá-la daqui. Só muda a apresentação (uma só lista, sem sub-secções); a paginação e os totais continuam por fase.
  */
 export const FASES_DO_GRUPO_NEGOCIOS: readonly ColunaQuadro[] = ["levantamento", "orcamento", "proposta", "contrato"];
 
 /** As colunas da abordagem, soltas no quadro. */
 export const COLUNAS_ABORDAGEM: readonly DefColuna[] = COLUNAS_QUADRO.filter((c) => c.parte === "abordagem");
 
-/** As sub-fases do grupo Negócios, pela ordem de `FASES_DO_GRUPO_NEGOCIOS`. */
+/** As fases do grupo Negócio, pela ordem de `FASES_DO_GRUPO_NEGOCIOS`. */
 export const COLUNAS_NEGOCIO: readonly DefColuna[] = FASES_DO_GRUPO_NEGOCIOS.flatMap((id) => COLUNAS_QUADRO.filter((c) => c.id === id));
 
 export interface CartaoQuadro {

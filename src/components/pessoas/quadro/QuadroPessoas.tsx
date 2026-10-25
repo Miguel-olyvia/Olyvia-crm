@@ -95,8 +95,8 @@ function ValorColuna({ valor }: { valor: number }) {
   );
 }
 
-/** Os dados de uma fase (coluna ou sub-fase): cartões, totais, rótulo e estado do «Carregar mais». */
-interface FaseProps extends Pick<QuadroPessoasProps, "hoje" | "itens" | "aoAbrir" | "aoCarregarMais"> {
+/** Os dados de uma coluna: cartões, totais, rótulo e estado do «Carregar mais». */
+interface FaseProps extends Pick<QuadroPessoasProps, "hoje" | "itens" | "aoAbrir"> {
   desativado: boolean;
   def: DefColuna;
   cartoes: readonly CartaoQuadro[];
@@ -104,22 +104,26 @@ interface FaseProps extends Pick<QuadroPessoasProps, "hoje" | "itens" | "aoAbrir
   rotulo?: string;
   aCarregar: boolean;
   comErro: boolean;
+  /** Pede mais cartões; devolve `false` se o pedido não saiu. */
+  aoCarregarMais?: () => boolean | void;
 }
 
-/** O que cada fase tem por dentro: a lista de cartões, o «Nada nesta fase», o rodapé «Carregar mais» e o foco no primeiro cartão novo. */
+/** O que cada coluna tem por dentro: a lista de cartões, o aviso de vazia, o rodapé «Carregar mais» e o foco no primeiro cartão novo. */
 function CorpoFase({ def, cartoes, hoje, itens, aoAbrir, totais, rotulo, aCarregar, comErro, desativado, aoCarregarMais }: FaseProps) {
   const { t } = useTranslation();
   const corpo = useRef<HTMLDivElement>(null);
-  // Quantos cartões havia quando se pediu mais: se o botão desaparecer (já não falta nada), o foco vai para o primeiro cartão novo.
-  const pediuComCartoes = useRef<number | null>(null);
+  // Os cartões que havia quando se pediu mais: se o botão desaparecer (já não falta nada), o foco vai para o primeiro cartão novo, esteja onde estiver
+  // na lista (na coluna Negócio os novos podem entrar a meio, porque a lista é ordenada por fase).
+  const pediuComIds = useRef<Set<string> | null>(null);
   const { haMais } = totais ?? { haMais: false };
   useEffect(() => {
-    if (pediuComCartoes.current === null || aCarregar) return;
-    const antes = pediuComCartoes.current;
-    pediuComCartoes.current = null;
+    if (pediuComIds.current === null || aCarregar) return;
+    const antes = pediuComIds.current;
+    pediuComIds.current = null;
     const raiz = corpo.current;
     if (!raiz || raiz.contains(document.activeElement)) return;
-    raiz.querySelectorAll<HTMLElement>(`[${LINHA_PESSOA}]`)[antes]?.focus();
+    const primeiroNovo = cartoes.findIndex((c) => !antes.has(c.id));
+    if (primeiroNovo >= 0) raiz.querySelectorAll<HTMLElement>(`[${LINHA_PESSOA}]`)[primeiroNovo]?.focus();
   }, [cartoes.length, haMais, aCarregar, comErro]);
   return (
     <div ref={corpo} className="flex flex-1 flex-col">
@@ -133,7 +137,7 @@ function CorpoFase({ def, cartoes, hoje, itens, aoAbrir, totais, rotulo, aCarreg
           aCarregar={aCarregar} comErro={comErro} desativado={desativado}
           // Só se espera pelos cartões novos (e se lhes dá o foco) se o pedido saiu: sem cursor ou sem nada a pedir, nada chega e a marca ficava a roubar
           // o foco ao primeiro refetch.
-          aoCarregarMais={() => { pediuComCartoes.current = aoCarregarMais(def.id) === false ? null : cartoes.length; }}
+          aoCarregarMais={() => { pediuComIds.current = aoCarregarMais() === false ? null : new Set(cartoes.map((c) => c.id)); }}
         />
       )}
     </div>
@@ -164,47 +168,36 @@ function Coluna(props: FaseProps) {
   );
 }
 
-/** O valor de uma sub-fase: o da base, ou a soma dos cartões carregados. O Levantamento nunca tem valor (ainda não há orçamento). */
+/** O valor de uma fase: o da base, ou a soma dos cartões carregados. O Levantamento nunca tem valor (ainda não há orçamento). */
 const valorDaFase = (def: DefColuna, cartoes: readonly CartaoQuadro[], totais?: TotaisColuna): number | null =>
   def.id === "levantamento" ? null : totais ? totais.valor : cartoes.reduce((s, c) => s + (c.valor ?? 0), 0);
 
-/** Uma sub-fase dentro da coluna «Negócios»: ponto da cor da fase, nome (h4), contagem, valor, os cartões e o seu próprio «Carregar mais». */
-function SubFase(props: FaseProps) {
-  const { t } = useTranslation();
-  const { def, cartoes, totais, rotulo } = props;
-  const contagem = totais ? totais.total : cartoes.length;
-  const valor = valorDaFase(def, cartoes, totais);
-  return (
-    <section aria-labelledby={`quadro-pessoas-${def.id}`} className="flex flex-col rounded-md border border-border bg-background/60">
-      <div className="flex items-center gap-2 border-b border-border px-2 py-1.5">
-        <span aria-hidden="true" className={cn("h-2.5 w-2.5 shrink-0 rounded-full", COR_COLUNA[def.id])} />
-        <h4 id={`quadro-pessoas-${def.id}`} className="min-w-0 break-words text-xs font-semibold">
-          {rotulo ?? t(`pessoasPagina.board.col.${def.id}`)}
-          <TextoContagem contagem={contagem} />
-        </h4>
-        <Badge variant="secondary" className="h-4 px-1 text-[10px]" aria-hidden="true">{contagem}</Badge>
-        {valor !== null && <span className="ml-auto"><ValorColuna valor={valor} /></span>}
-      </div>
-      <CorpoFase {...props} />
-    </section>
-  );
-}
+/** Os cartões das fases do grupo numa só lista: por fase (pela ordem do grupo) e, dentro da fase, pela ordem em que chegam. */
+const cartoesDoGrupo = (cartoes: readonly CartaoQuadro[]): CartaoQuadro[] =>
+  COLUNAS_NEGOCIO.flatMap((def) => cartoes.filter((c) => c.coluna === def.id));
 
-/** A coluna «Negócios»: faixa com as cores das fases, contagem e valor agregados, e uma sub-fase por fase. Só apresentação: a paginação e os totais são por fase. */
-interface GrupoProps extends Pick<QuadroPessoasProps, "hoje" | "itens" | "aoAbrir" | "aoCarregarMais" | "aCarregarMais" | "carregarMaisDesativado" | "colunasComErro" | "rotulosColuna"> {
+/** A coluna «Negócio»: UMA lista com os negócios de todas as fases, sem sub-secções. A fase vê-se ao abrir o negócio. */
+interface GrupoProps extends Pick<QuadroPessoasProps, "hoje" | "itens" | "aoAbrir" | "aoCarregarMais" | "aCarregarMais" | "carregarMaisDesativado" | "colunasComErro"> {
   cartoes: readonly CartaoQuadro[];
   totais?: Partial<Record<ColunaQuadro, TotaisColuna>>;
 }
 
-function ColunaNegocios({ cartoes, totais, rotulosColuna, aCarregarMais, carregarMaisDesativado, colunasComErro, ...resto }: GrupoProps) {
+function ColunaNegocios({ cartoes, totais, aCarregarMais, carregarMaisDesativado, colunasComErro, aoCarregarMais, ...resto }: GrupoProps) {
   const { t } = useTranslation();
-  const fases = COLUNAS_NEGOCIO.map((def) => {
-    const doGrupo = cartoes.filter((c) => c.coluna === def.id);
-    const dosTotais = totais ? (totais[def.id] ?? { total: 0, valor: 0, haMais: false }) : undefined;
-    return { def, cartoes: doGrupo, totais: dosTotais };
-  });
+  const lista = cartoesDoGrupo(cartoes);
+  // Os totais são os da base, fase a fase. Cada fase mantém o seu cursor: o botão único pede todas as que têm mais.
+  const fases = COLUNAS_NEGOCIO.map((def) => ({
+    def, cartoes: cartoes.filter((c) => c.coluna === def.id), totais: totais ? (totais[def.id] ?? { total: 0, valor: 0, haMais: false }) : undefined,
+  }));
   const contagem = fases.reduce((s, f) => s + (f.totais ? f.totais.total : f.cartoes.length), 0);
   const valor = fases.reduce((s, f) => s + (valorDaFase(f.def, f.cartoes, f.totais) ?? 0), 0);
+  const comMais = fases.filter((f) => f.totais?.haMais);
+  const totaisDoGrupo = totais ? { total: contagem, valor, haMais: comMais.length > 0 } : undefined;
+  const pedir = () => {
+    const saidas = comMais.map((f) => aoCarregarMais?.(f.def.id));
+    return saidas.length > 0 && saidas.every((s) => s === false) ? false : undefined;
+  };
+  const rotulo = t("pessoasPagina.board.col.negocios");
   return (
     <section
       aria-labelledby="quadro-pessoas-negocios" className="flex flex-col overflow-hidden rounded-lg border border-border bg-muted/30 lg:min-w-[300px] lg:flex-[1.5]"
@@ -215,29 +208,26 @@ function ColunaNegocios({ cartoes, totais, rotulosColuna, aCarregarMais, carrega
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <h3 id="quadro-pessoas-negocios" className="break-words text-sm font-semibold">
-            {t("pessoasPagina.board.col.negocios")}
+            {rotulo}
             <TextoContagem contagem={contagem} />
           </h3>
           <Badge variant="secondary" className="h-5 px-1.5 text-xs" aria-hidden="true">{contagem}</Badge>
         </div>
         <ValorColuna valor={valor} />
       </div>
-      <div className="space-y-2 p-2">
-        {fases.map((f) => (
-          <SubFase
-            key={f.def.id} {...resto} def={f.def} cartoes={f.cartoes} totais={f.totais} rotulo={rotulosColuna?.[f.def.id]}
-            aCarregar={aCarregarMais?.has(f.def.id) ?? false} desativado={carregarMaisDesativado ?? false} comErro={colunasComErro?.has(f.def.id) ?? false}
-          />
-        ))}
-      </div>
+      <CorpoFase
+        {...resto} def={COLUNAS_NEGOCIO[0]} cartoes={lista} totais={totaisDoGrupo} rotulo={rotulo} aoCarregarMais={aoCarregarMais ? pedir : undefined}
+        aCarregar={fases.some((f) => aCarregarMais?.has(f.def.id))} desativado={carregarMaisDesativado ?? false}
+        comErro={fases.some((f) => colunasComErro?.has(f.def.id))}
+      />
     </section>
   );
 }
 
 /**
- * Um só quadro, uma só linha de colunas: Por contactar, Contactado e Visita (um cartão por pessoa em abordagem) e a coluna Negócios, que agrupa
- * Levantamento, Orçamento, Proposta e Contrato (um cartão por negócio) em sub-fases. Em ecrã largo as colunas rolam na horizontal; em ecrã estreito
- * empilham. Cada coluna tem um h3 (o h2 é o do separador, na página), cada sub-fase um h4, e os cartões são uma lista de botões.
+ * Um só quadro, uma só linha de colunas: Por contactar, Contactado e Visita (um cartão por pessoa em abordagem) e a coluna Negócio, que agrupa
+ * Levantamento, Orçamento, Proposta e Contrato (um cartão por negócio) numa só lista, sem sub-secções. Em ecrã largo as colunas rolam na horizontal;
+ * em ecrã estreito empilham. Cada coluna tem um h3 (o h2 é o do separador, na página) e os cartões são uma lista de botões.
  */
 export function QuadroPessoas({
   cartoes, hoje, chip, aoAbrir, aoLimpar, itens, totais, aoCarregarMais, aCarregarMais, carregarMaisDesativado, colunasComErro, rotulosColuna,
@@ -252,11 +242,11 @@ export function QuadroPessoas({
           <Coluna
             key={def.id} def={def} cartoes={cartoes.filter((c) => c.coluna === def.id)} hoje={hoje} itens={itens} aoAbrir={aoAbrir}
             totais={totais?.[def.id] ?? (totais ? { total: 0, valor: 0, haMais: false } : undefined)} rotulo={rotulosColuna?.[def.id]}
-            aCarregar={aCarregarMais?.has(def.id) ?? false} desativado={carregarMaisDesativado ?? false} comErro={colunasComErro?.has(def.id) ?? false} aoCarregarMais={aoCarregarMais}
+            aCarregar={aCarregarMais?.has(def.id) ?? false} desativado={carregarMaisDesativado ?? false} comErro={colunasComErro?.has(def.id) ?? false} aoCarregarMais={aoCarregarMais ? () => aoCarregarMais(def.id) : undefined}
           />
         ))}
         <ColunaNegocios
-          cartoes={cartoes} hoje={hoje} itens={itens} aoAbrir={aoAbrir} totais={totais} rotulosColuna={rotulosColuna} aoCarregarMais={aoCarregarMais}
+          cartoes={cartoes} hoje={hoje} itens={itens} aoAbrir={aoAbrir} totais={totais} aoCarregarMais={aoCarregarMais}
           aCarregarMais={aCarregarMais} carregarMaisDesativado={carregarMaisDesativado} colunasComErro={colunasComErro}
         />
       </div>
