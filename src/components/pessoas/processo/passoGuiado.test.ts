@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { passoDoItem } from "./passosProcesso";
 import {
-  calcularPassoGuiado, fasesDaPessoa, fasesDoNegocioParaGuia, type ContextoDoGuia, type DadosDoGuia,
+  calcularPassoGuiado, fasesDaPessoa, fasesDaPessoaSemPasso, fasesDoNegocioParaGuia, type ContextoDoGuia, type DadosDoGuia,
 } from "./passoGuiado";
 import { PASSOS_PROCESSO, type ItemProcesso, type PassoProcesso } from "./tiposProcesso";
 
@@ -246,5 +246,30 @@ describe("as fases da barra", () => {
       { id: "proposta", rotuloChave: "pessoasPagina.phases.proposta", estado: "atual" },
       { id: "contrato", rotuloChave: "pessoasPagina.phases.contrato", estado: "porFazer" },
     ]);
+  });
+});
+
+describe("fasesDaPessoaSemPasso: a barra de quem não tem passo de abordagem a fazer", () => {
+  const estados = (fs: { estado: string }[]) => fs.map((f) => f.estado);
+
+  it("um cliente (concluida) tem todas as fases feitas", () => {
+    expect(estados(fasesDaPessoaSemPasso(3, "concluida"))).toEqual(["feita", "feita", "feita", "feita"]);
+  });
+
+  it("quem já tem negócio está na fase Negócio, com as anteriores feitas", () => {
+    expect(estados(fasesDaPessoaSemPasso(3, "atual"))).toEqual(["feita", "feita", "feita", "atual"]);
+  });
+
+  it("uma perdida marca a fase onde ficou a vermelho, as anteriores feitas e as seguintes por fazer", () => {
+    expect(estados(fasesDaPessoaSemPasso(1, "perdida"))).toEqual(["feita", "perdida", "porFazer", "porFazer"]);
+  });
+
+  it("um índice fora do intervalo fica dentro das quatro fases", () => {
+    expect(estados(fasesDaPessoaSemPasso(9, "atual"))).toEqual(["feita", "feita", "feita", "atual"]);
+    expect(estados(fasesDaPessoaSemPasso(-2, "atual"))).toEqual(["atual", "porFazer", "porFazer", "porFazer"]);
+  });
+
+  it("usa as mesmas fases e rótulos que a barra do guia da pessoa", () => {
+    expect(fasesDaPessoaSemPasso(0, "atual").map((f) => f.id)).toEqual(fasesDaPessoa("porContactar").map((f) => f.id));
   });
 });

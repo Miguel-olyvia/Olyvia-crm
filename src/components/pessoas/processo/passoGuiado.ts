@@ -91,6 +91,19 @@ export function fasesDaPessoa(fase: string): FaseGuia[] {
   }));
 }
 
+/**
+ * A barra de fases de uma pessoa que não tem passo de abordagem a fazer (um cliente, uma perdida, uma encerrada, ou com um negócio aberto): as mesmas
+ * quatro fases, com `indice` (0 a 3) a dizer onde a pessoa está. `concluida` (um cliente) dá todas por feitas; `perdida` marca a fase onde ficou a vermelho.
+ */
+export function fasesDaPessoaSemPasso(indice: number, modo: "atual" | "perdida" | "concluida"): FaseGuia[] {
+  const fases = fasesDaPessoa("porContactar");
+  const i = Math.max(0, Math.min(indice, fases.length - 1));
+  return fases.map((f, n) => ({
+    ...f,
+    estado: modo === "concluida" || n < i ? "feita" : n === i ? (modo === "perdida" ? "perdida" : "atual") : "porFazer",
+  }));
+}
+
 /** As fases REAIS do negócio (as que o código tem: sem Financeiro nem Obra) para a barra. */
 export function fasesDoNegocioParaGuia(fases: readonly FaseDoNegocio[]): FaseGuia[] {
   return fases.map((f) => ({ id: f.id, rotuloChave: `pessoasPagina.phases.${f.id}`, estado: f.estado }));

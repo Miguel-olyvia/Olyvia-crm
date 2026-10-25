@@ -1,5 +1,7 @@
 // O interior da ficha da pessoa: cabeçalho, barra de ações, percurso, os painéis de ação (em linha) e as abas fixas. Tudo
 // vai num único contentor que rola, para o painel de chamada e o "Guardar" ficarem alcançáveis com zoom ou em ecrãs baixos.
+// Com o guia (`comGuia`, a ficha real) é UM só ecrã: o topo é o guia (da pessoa, ou do negócio aberto) com o cabeçalho, as fases, o passo e o cartão do
+// cliente; por baixo vêm os painéis em linha e a zona de apoio (alertas, secções recolhíveis e as abas Visitas, Negócios, Submissões e Atividade).
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -14,6 +16,7 @@ import { contarVisitasAtivas, visitasDaFicha } from "./proximaVisita";
 import { AvisoNegociosPerdidos } from "./AvisoNegociosPerdidos";
 import { BarraAcoesFicha } from "./BarraAcoesFicha";
 import { CabecalhoFicha } from "./CabecalhoFicha";
+import { useCabecalhoGuiaFicha } from "./CabecalhoGuiaFicha";
 import { DialogoResultadoVisita } from "./DialogoResultadoVisita";
 import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 import { ErroAcao } from "./ErroAcao";
@@ -27,8 +30,11 @@ import type { AcaoFicha, AcoesFicha } from "./PainelBase";
 import { FormChamada } from "./FormChamada";
 import { GuiaDaPessoa } from "./GuiaDaPessoa";
 import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
+import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
+import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import { PercursoPessoa } from "./PercursoPessoa";
 import { itensDaPessoa } from "./processo/itensProcesso";
+import { passoDoItem } from "./processo/passosProcesso";
 import { useExtrasProcesso } from "./processo/processoNegocios";
 import type { ItemAtividade, NotaPessoa, Pessoa, ResumoPessoa, Submissao } from "./pessoasTipos";
 import { ResumoFicha } from "./ResumoFicha";
@@ -111,9 +117,30 @@ interface AbasProps extends FichaInteriorProps {
   aoEncerrar?: (origem: HTMLElement | null) => void;
 }
 
-/** A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). */
+/** O negócio aberto, no topo da ficha com o guia: o guia do negócio é o cabeçalho (o nome da pessoa, o serviço, as fases, o passo). */
+function NegocioAbertoNoTopo(p: AbasProps & { cabecalhoFicha: PecasCabecalhoFicha; negocio: NegocioMes }) {
+  // O item do processo do negócio aberto (o mesmo do Quadro): dá ao passo seguinte o botão que o executa.
+  const extras = useExtrasProcesso();
+  const item = useMemo(
+    () => itensDaPessoa(p.resumo, p.hoje, extras).find((i) => i.id === p.negocio.id),
+    [p.resumo, p.hoje, extras, p.negocio.id],
+  );
+  return (
+    <DetalheNegocioFicha
+      negocio={p.negocio} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} pessoa={p.resumo.pessoa} atividade={p.atividade} comGuia
+      cabecalhoFicha={p.cabecalhoFicha} aoApagado={p.aoVoltarNegocio}
+    />
+  );
+}
+
+/**
+ * A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). Com o guia o negócio aberto vive no topo da ficha: a aba lista só os
+ * OUTROS e diz qual está aberto em cima (nunca o repete).
+ */
 function ConteudoNegocios(p: AbasProps) {
+  const { t } = useTranslation();
   const aberto = p.resumo.negocios.find((n) => n.id === p.negocioAberto);
+  const abertoEmCima = p.comGuia && aberto ? aberto : undefined;
   // Depois de mandar um negócio para o lixo o detalhe fecha-se e o foco perde-se: a lista que aparece leva-o para o filtro (só nesse caso).
   const [focarFiltro, setFocarFiltro] = useState(false);
   const focado = useCallback(() => setFocarFiltro(false), []);
@@ -124,24 +151,32 @@ function ConteudoNegocios(p: AbasProps) {
     [p.resumo, p.hoje, extras, p.negocioAberto],
   );
   // Sem a capacidade «negocios» (a ficha real, até ao P3) a lista só se lê: o detalhe e as ações do negócio ainda não existem na base.
-  if (!aberto) {
+  if (!aberto || abertoEmCima) {
+    const outros = abertoEmCima ? p.resumo.negocios.filter((n) => n.id !== abertoEmCima.id) : p.resumo.negocios;
     // A lista normal, com o filtro «Lixo» para quem pode restaurar (na ficha real; no exemplo é só a lista).
     return (
       <ListaNegociosComLixo
         pessoaId={p.resumo.pessoa.id} pessoaNome={p.resumo.pessoa.nome} focarAoEntrar={focarFiltro} aoFocado={focado}
-        lista={<FichaNegocios negocios={p.resumo.negocios} hoje={p.hoje} aoAbrir={p.acoes.capacidades?.negocios === false ? undefined : p.aoAbrirNegocio} />}
+        lista={(
+          <>
+            {abertoEmCima && <p className="mb-3 text-sm text-muted-foreground">{t("pessoasPagina.dealsList.openOnTop", { service: abertoEmCima.servico })}</p>}
+            {(!abertoEmCima || outros.length > 0) && (
+              <FichaNegocios negocios={outros} hoje={p.hoje} aoAbrir={p.acoes.capacidades?.negocios === false ? undefined : p.aoAbrirNegocio} />
+            )}
+          </>
+        )}
       />
     );
   }
   return (
     <DetalheNegocioFicha
-      negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} pessoa={p.resumo.pessoa} atividade={p.atividade} comGuia={p.comGuia}
+      negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} pessoa={p.resumo.pessoa} atividade={p.atividade}
       aoApagado={() => { setFocarFiltro(true); p.aoVoltarNegocio(); }}
     />
   );
 }
 
-/** As abas por esta ordem: Resumo, Visitas, Negócios, Submissões, Notas e Atividade. A lista de abas fica fixa no topo ao rolar. */
+/** As abas por esta ordem: Resumo, Visitas, Negócios, Submissões, Notas e Atividade (com o guia, sem o Resumo: o que sobrava dele vem antes das abas). A lista de abas fica fixa no topo ao rolar. */
 function AbasFicha(p: AbasProps) {
   const { t } = useTranslation();
   const { resumo, submissoes, notas, atividade } = p;
@@ -151,10 +186,20 @@ function AbasFicha(p: AbasProps) {
   const pendentes = real ? real.pendentes : submissoes.length;
   const nVisitas = contarVisitasAtivas(visitasDaFicha(resumo));
   const maisVisitas = p.maisItens?.visitas?.temMais === true;
+  const resumoFicha = (
+    <ResumoFicha
+      resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
+      aoVerSubmissoes={verSubmissoes} aoVerVisitas={() => p.aoMudar("visitas")} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
+      visitasNaBase={p.acoes.capacidades?.gerirVisitas === true} cancelarVisita={p.acoes.capacidades?.gerirVisitas === true ? p.acoes.cancelarVisita : undefined}
+      aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade} semBotaoDoPasso={p.comGuia === true} modoApoio={p.comGuia === true}
+    />
+  );
   return (
+    <>
+    {p.comGuia && <div className="px-6 pt-4">{resumoFicha}</div>}
     <Tabs value={p.aba} onValueChange={(v) => p.aoMudar(v as AbaFicha)} className="mt-2 flex flex-col">
       <ListaAbas aria-label={t("pessoasPagina.fichaTabs.label")} className="sticky top-0 z-10 shrink-0 bg-background px-6">
-        <Aba value="resumo" rotulo={t("pessoasPagina.fichaTabs.summary")} />
+        {!p.comGuia && <Aba value="resumo" rotulo={t("pessoasPagina.fichaTabs.summary")} />}
         <Aba
           value="visitas" rotulo={t("pessoasPagina.fichaTabs.visits")} contador={nVisitas} contadorMais={maisVisitas}
           contadorLeitor={maisVisitas ? t("pessoasPagina.fichaTabs.visits.more", { n: nVisitas }) : undefined}
@@ -171,23 +216,7 @@ function AbasFicha(p: AbasProps) {
         <Aba value="atividade" rotulo={t("pessoasPagina.fichaTabs.activity")} contador={atividade.length} />
       </ListaAbas>
       <div data-foco-ficha tabIndex={-1} className="px-6 pb-6 outline-none">
-        <TabsContent value="resumo" className="mt-0">
-          {/* A pessoa em abordagem tem o guia do passo seguinte no topo; com negócio aberto o guia vive no negócio. */}
-          {p.comGuia && (
-            <div className="pt-4 empty:hidden">
-              <GuiaDaPessoa
-                resumo={resumo} hoje={p.hoje} atividade={atividade} capacidades={p.acoes.capacidades} aoRegistarChamada={p.aoRegistarChamada}
-                aoCriarNegocio={p.aoCriarNegocio} aoEncerrar={p.aoEncerrar}
-              />
-            </div>
-          )}
-          <ResumoFicha
-            resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
-            aoVerSubmissoes={verSubmissoes} aoVerVisitas={() => p.aoMudar("visitas")} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
-            visitasNaBase={p.acoes.capacidades?.gerirVisitas === true} cancelarVisita={p.acoes.capacidades?.gerirVisitas === true ? p.acoes.cancelarVisita : undefined}
-            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade} semBotaoDoPasso={p.comGuia === true}
-          />
-        </TabsContent>
+        {!p.comGuia && <TabsContent value="resumo" className="mt-0">{resumoFicha}</TabsContent>}
         <TabsContent value="visitas" className="mt-0 pt-4">
           <AbaVisitasFicha
             resumo={resumo} hoje={p.hoje} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
@@ -211,6 +240,7 @@ function AbasFicha(p: AbasProps) {
         <TabsContent value="atividade" className="mt-0 pt-4"><AtividadeFicha itens={atividade} hoje={p.hoje} mais={p.maisItens?.atividade} /></TabsContent>
       </div>
     </Tabs>
+    </>
   );
 }
 
@@ -245,7 +275,8 @@ function useAbrirNegociosAoCriar(resumo: ResumoPessoa, esquecer: () => void, irP
 
 export function FichaInterior(p: FichaInteriorProps) {
   const { t } = useTranslation();
-  const [aba, setAba] = useState<AbaFicha>("resumo");
+  // Com o guia não há aba Resumo: a aba inicial é a dos negócios (a mais usada).
+  const [aba, setAba] = useState<AbaFicha>(p.comGuia ? "negocios" : "resumo");
   const negocio = useNegocioAberto();
   const painelId = useId();
   const { texto, anunciar } = useAnuncios(p.anuncioExterno);
@@ -273,45 +304,81 @@ export function FichaInterior(p: FichaInteriorProps) {
   const criarNegocio = p.aoCriarNegocio;
   // O mesmo critério do «Encerrar abordagem» do menu «Mais»: só uma lead, sem negócio aberto e com a abordagem ainda em curso.
   const podeEncerrar = p.acoes.capacidades?.encerrar !== false && p.resumo.papel === "lead" && !p.resumo.pessoa.encerrada && !p.resumo.pessoa.perdida && p.resumo.abertos.length === 0;
+  // Com o guia: o negócio aberto manda sobre a pessoa (o seu guia é o cabeçalho) e «Registar chamada» só vai para o «Mais» quando o botão do passo não é o da chamada.
+  const extras = useExtrasProcesso();
+  const itemPessoa = useMemo(() => (p.comGuia ? itensDaPessoa(p.resumo, p.hoje, extras).find((i) => i.tipo === "pessoa") : undefined), [p.comGuia, p.resumo, p.hoje, extras]);
+  const negocioDoTopo = p.comGuia ? p.resumo.negocios.find((n) => n.id === negocio.aberto) ?? null : null;
+  const cabecalhoFicha = useCabecalhoGuiaFicha({
+    resumo: p.resumo, vizinhas: p.vizinhas, aoIr: p.aoIr, aberta: acao, painelId, aoAbrir: abrir, aoReativar: reativar,
+    aoCriarNegocio: criarNegocio ? () => criarNegocio(p.resumo.pessoa) : undefined, capacidades: p.acoes.capacidades, aGuardar: reabrir.aGuardar,
+    comItemChamada: negocioDoTopo !== null || !itemPessoa || passoDoItem(itemPessoa).id !== "registarChamada",
+  });
+  const aviso = p.avisoAtualizacao && (
+    <div role="alert" className="mx-6 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+      <p>{t("pessoasPagina.real.ficha.staleWarn")}</p>
+      <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={p.avisoAtualizacao.aoRepetir}>
+        {t("pessoasPagina.real.retry")}
+      </Button>
+    </div>
+  );
+  const paineis = visitados.filter((a): a is AcaoPainel => a !== "chamada").map((a) => (
+    <PainelAcaoFicha
+      key={a} acao={a} id={`${painelId}-${a}`} ativo={a === acao} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes}
+      aoFechar={() => fechar(true)} aoMudarConteudo={mudarConteudo(a)}
+      aoConcluir={(mensagem) => { anunciar(mensagem); fechar(true); }}
+    />
+  ));
+  const abasProps = {
+    ...p, aba, aoMudar: (a: AbaFicha) => { if (!p.comGuia) negocio.esquecer(); setAba(a); }, negocioAberto: negocio.aberto,
+    aoAbrirNegocio: negocio.abrir, aoVoltarNegocio: negocio.voltar, aoRegistarResultado: setVisitaDoResultado,
+    aoRegistarChamada: (origem: HTMLElement | null) => abrir("chamada", origem),
+    aoEncerrar: podeEncerrar ? (origem: HTMLElement | null) => abrir("encerrar", origem) : undefined,
+  };
+  const formChamada = (
+    <FormChamada
+      id={`${painelId}-chamada`} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes} aoFechar={() => fechar(true)}
+      aoConcluir={(mensagem) => { anunciar(mensagem); negocio.esquecer(); if (!p.comGuia) setAba("resumo"); fechar(true); }}
+    />
+  );
   return (
     <AnuncioFichaContext.Provider value={anunciar}>
       <div className="flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto">
-        <CabecalhoFicha resumo={p.resumo} vizinhas={p.vizinhas} aoIr={p.aoIr} />
-        <BarraAcoesFicha
-          resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar}
-          aoCriarNegocio={criarNegocio ? () => criarNegocio(p.resumo.pessoa) : undefined} capacidades={p.acoes.capacidades}
-          aGuardar={reabrir.aGuardar}
-        />
-        <ErroAcao chave={reabrir.erro} chaveExtra={reabrir.erroExtra} className="px-6 pb-3" />
-        {p.avisoAtualizacao && (
-          <div role="alert" className="mx-6 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-            <p>{t("pessoasPagina.real.ficha.staleWarn")}</p>
-            <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={p.avisoAtualizacao.aoRepetir}>
-              {t("pessoasPagina.real.retry")}
-            </Button>
-          </div>
-        )}
-        <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
-        {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("encerrar", origem)} />}
-        {visitados.filter((a): a is AcaoPainel => a !== "chamada").map((a) => (
-          <PainelAcaoFicha
-            key={a} acao={a} id={`${painelId}-${a}`} ativo={a === acao} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes}
-            aoFechar={() => fechar(true)} aoMudarConteudo={mudarConteudo(a)}
-            aoConcluir={(mensagem) => { anunciar(mensagem); fechar(true); }}
-          />
-        ))}
-        {acao === "chamada" ? (
-          <FormChamada
-            id={`${painelId}-chamada`} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes} aoFechar={() => fechar(true)}
-            aoConcluir={(mensagem) => { anunciar(mensagem); negocio.esquecer(); setAba("resumo"); fechar(true); }}
-          />
+        {p.comGuia ? (
+          <>
+            <div className="px-6 empty:hidden"><ErroAcao chave={reabrir.erro} chaveExtra={reabrir.erroExtra} className="pb-3" /></div>
+            {aviso && <div className="pt-3">{aviso}</div>}
+            {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("encerrar", origem)} />}
+            {/* O topo: o guia do negócio aberto, ou o da pessoa. É o único cabeçalho, a única barra de fases e o único cartão do cliente. */}
+            <div className="px-6 pb-2 pt-6">
+              {negocioDoTopo ? (
+                <NegocioAbertoNoTopo key={negocioDoTopo.id} {...abasProps} negocio={negocioDoTopo} cabecalhoFicha={cabecalhoFicha} />
+              ) : (
+                <GuiaDaPessoa
+                  resumo={p.resumo} hoje={p.hoje} atividade={p.atividade} capacidades={p.acoes.capacidades} aoRegistarChamada={(origem) => abrir("chamada", origem)}
+                  aoCriarNegocio={p.aoCriarNegocio} aoEncerrar={podeEncerrar ? (origem) => abrir("encerrar", origem) : undefined}
+                  aoAdiar={(origem) => abrir("adiar", origem)} cabecalhoFicha={cabecalhoFicha}
+                />
+              )}
+            </div>
+            {paineis}
+            {/* A zona de apoio (alertas e abas) fica sempre por baixo do guia, com ou sem negócio aberto; a chamada substitui-a (o guia fica à vista). */}
+            {acao === "chamada" ? formChamada : <AbasFicha {...abasProps} />}
+          </>
         ) : (
-          <AbasFicha
-            {...p} aba={aba} aoMudar={(a) => { negocio.esquecer(); setAba(a); }} negocioAberto={negocio.aberto}
-            aoAbrirNegocio={negocio.abrir} aoVoltarNegocio={negocio.voltar} aoRegistarResultado={setVisitaDoResultado}
-            aoRegistarChamada={(origem) => abrir("chamada", origem)}
-            aoEncerrar={podeEncerrar ? (origem) => abrir("encerrar", origem) : undefined}
-          />
+          <>
+            <CabecalhoFicha resumo={p.resumo} vizinhas={p.vizinhas} aoIr={p.aoIr} />
+            <BarraAcoesFicha
+              resumo={p.resumo} aberta={acao} painelId={painelId} aoAbrir={abrir} aoReativar={reativar}
+              aoCriarNegocio={criarNegocio ? () => criarNegocio(p.resumo.pessoa) : undefined} capacidades={p.acoes.capacidades}
+              aGuardar={reabrir.aGuardar}
+            />
+            <ErroAcao chave={reabrir.erro} chaveExtra={reabrir.erroExtra} className="px-6 pb-3" />
+            {aviso}
+            <div className="mt-3 px-6"><PercursoPessoa resumo={p.resumo} /></div>
+            {todosNegociosPerdidos(p.resumo) && <AvisoNegociosPerdidos aoMarcar={(origem) => abrir("encerrar", origem)} />}
+            {paineis}
+            {acao === "chamada" ? formChamada : <AbasFicha {...abasProps} />}
+          </>
         )}
       </div>
       <DialogoResultadoVisita

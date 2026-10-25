@@ -35,7 +35,8 @@ import { passoDoNegocio } from "./etapaPessoa";
 import { FaixaFasesNegocio } from "./FaixaFasesNegocio";
 import { fasesDoNegocio, type IdFase } from "./fasesDoNegocio";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
-import { GuiaDoNegocio } from "./GuiaDoNegocio";
+import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
+import { DadosDoNegocio, GuiaDoNegocio } from "./GuiaDoNegocio";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import { estaAberto } from "./juntarPessoas";
 import { MudarFechoNegocio } from "./MudarFechoNegocio";
@@ -62,8 +63,13 @@ interface DetalheNegocioFichaProps {
   /** A pessoa e a atividade da ficha: o cartão do cliente e os últimos acontecimentos do guia do passo. Sem elas vale o que o negócio traz. */
   pessoa?: Pessoa;
   atividade?: readonly ItemAtividade[];
-  /** O guia do passo seguinte (a ficha real) em vez do texto do passo: as fases, o passo, o botão que o faz e «Perder negócio». Precisa do `item`. */
+  /**
+   * O guia do passo seguinte (a ficha real) em vez do bloco de título, da lista de fases e do texto do passo: é o ÚNICO cabeçalho do negócio (o nome da
+   * pessoa, o serviço como linha, as fases, o passo, o valor e o comercial, o botão que o faz e «Perder negócio»). Sem `item` (ganho ou perdido) fica sem passo.
+   */
   comGuia?: boolean;
+  /** O cabeçalho único da ficha (título, selos, paginador, Email e Mais), que o guia do negócio passa a ter; sem isto o guia desenha o nome da pessoa. */
+  cabecalhoFicha?: PecasCabecalhoFicha;
 }
 
 /**
@@ -124,7 +130,7 @@ function secaoAberta(fase: IdFase | undefined, terminado: boolean): SecaoDetalhe
   return "percurso";
 }
 
-export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
   const negocio = semContratosSeProposta(negocioDaFicha);
@@ -170,37 +176,50 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         {t(`${P}deal.back`)}
       </Button>
-      {/* O estado do negócio, num só bloco: o que é, em que fase está e o que fazer agora. */}
-      <div className="space-y-4 rounded-xl border border-border bg-card p-4">
-        <div className="space-y-3">
-          <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">{negocio.servico}</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{t(`${P}deals.kind.deal`)}</Badge>
-            {negocio.fecho && <EtiquetaFecho fecho={negocio.fecho} />}
-            {faseAtual && <Badge variant="secondary">{t(`${P}phases.${faseAtual}`)}</Badge>}
+      {/* O estado do negócio, num só bloco: o que é, em que fase está e o que fazer agora. Com o guia (a ficha real) o cabeçalho do guia é o único: o serviço
+          é a linha, o valor e o comercial vão no passo e a fase já está na barra; só o tipo de fecho continua à vista. */}
+      <div className={cn("space-y-4", !comGuia && "rounded-xl border border-border bg-card p-4")}>
+        {!comGuia && (
+          <div className="space-y-3">
+            <h3 ref={titulo} tabIndex={-1} className="text-lg font-semibold text-foreground outline-none">{negocio.servico}</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">{t(`${P}deals.kind.deal`)}</Badge>
+              {negocio.fecho && <EtiquetaFecho fecho={negocio.fecho} />}
+              {faseAtual && <Badge variant="secondary">{t(`${P}phases.${faseAtual}`)}</Badge>}
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[15px]">
+              <dt className="text-muted-foreground">{t(`${P}detail.value`)}</dt>
+              <dd className="font-semibold tabular-nums text-foreground">{valor}</dd>
+              <dt className="text-muted-foreground">{t(`${P}detail.rep`)}</dt>
+              <dd className="text-foreground">{negocio.comercial}</dd>
+            </dl>
+            {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
           </div>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[15px]">
-            <dt className="text-muted-foreground">{t(`${P}detail.value`)}</dt>
-            <dd className="font-semibold tabular-nums text-foreground">{valor}</dd>
-            <dt className="text-muted-foreground">{t(`${P}detail.rep`)}</dt>
-            <dd className="text-foreground">{negocio.comercial}</dd>
-          </dl>
-          {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
-        </div>
-        {/* Um negócio aberto com processo (a ficha real) tem o guia do passo seguinte: as fases, o passo, o botão que o faz e «Perder negócio». */}
-        {item && comGuia && comPasso ? (
-          <GuiaDoNegocio
-            negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
-            acaoPerder={podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" /> : undefined}
-          />
+        )}
+        {/* Um negócio com o guia (a ficha real): as fases, o passo, o botão que o faz e «Perder negócio»; fechado, só o cabeçalho, as fases e o cartão. */}
+        {comGuia ? (
+          <>
+            <GuiaDoNegocio
+              negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
+              cabecalhoFicha={cabecalhoFicha} tituloRef={titulo} semPasso={!comPasso}
+              acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" /> : undefined}
+            />
+            {(!comPasso || !item || negocio.fecho) && (
+              <div className="space-y-2">
+                {(!comPasso || !item) && <DadosDoNegocio negocio={negocio} />}
+                {negocio.fecho && <div className="flex flex-wrap items-center gap-2"><EtiquetaFecho fecho={negocio.fecho} /></div>}
+                {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
+              </div>
+            )}
+          </>
         ) : (
           <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
         )}
         {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
         <AlertasNegocio negocio={negocio} />
         {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. Sem processo (o exemplo) fica só o texto do passo. */}
-        {comPasso && !(item && comGuia) && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
-        {comPasso && !(item && comGuia) && podeEditar && (
+        {comPasso && !comGuia && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
+        {comPasso && !comGuia && podeEditar && (
           <div className="flex flex-wrap items-start gap-3">
             <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
           </div>

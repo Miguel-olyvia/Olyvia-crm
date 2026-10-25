@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { contactoBase, pessoaBase, registosBase, resumoBase, visitaPessoaBase } from "./fabricaTestes";
-import { SeccaoPasso } from "./SeccoesResumo";
+import { AvisoEstadoPessoa, SeccaoPasso } from "./SeccoesResumo";
 import type { Pessoa } from "./pessoasTipos";
 
 vi.mock("@/hooks/useTranslation", async () => {
@@ -53,5 +53,29 @@ describe("SeccaoPasso", () => {
     const fechado = { ...resumoBase(pessoaBase("a"), [], HOJE, "lead", registosBase()), parte: "nenhuma" as const, proximo: { id: "nenhum" as const, prazo: null } };
     render(<SeccaoPasso resumo={fechado} hoje={HOJE} />);
     expect(screen.getByText("Sem próximo passo")).toBeInTheDocument();
+  });
+});
+
+describe("AvisoEstadoPessoa (o resumo de perda e de encerramento, que antes vivia no «Próximo passo e prazo»)", () => {
+  it("uma abordagem encerrada diz o resultado, o motivo e o dia", () => {
+    const encerrada = { resultado: "semInteresse" as const, motivo: "preco" as const, data: "2026-10-10" };
+    render(<AvisoEstadoPessoa resumo={resumo({ encerrada })} />);
+    expect(screen.getByText(/Abordagem encerrada · Sem interesse · .+ · 10\/10\/2026/)).toBeInTheDocument();
+  });
+
+  it("o motivo «Outro» mostra o texto escrito", () => {
+    const encerrada = { resultado: "obraInviavel" as const, motivo: "outro" as const, motivoOutro: "Prédio em ruínas", data: "2026-10-10" };
+    render(<AvisoEstadoPessoa resumo={resumo({ encerrada })} />);
+    expect(screen.getByText(/Obra inviável · Prédio em ruínas/)).toBeInTheDocument();
+  });
+
+  it("uma perdida diz «Perdida», o motivo, a data e o passo", () => {
+    render(<AvisoEstadoPessoa resumo={resumo({ perdida: { motivo: "preco", data: "2026-10-01", passo: 1 } })} />);
+    expect(screen.getByText("Perdida")).toBeInTheDocument();
+  });
+
+  it("uma pessoa em abordagem não tem aviso", () => {
+    const { container } = render(<AvisoEstadoPessoa resumo={resumo()} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

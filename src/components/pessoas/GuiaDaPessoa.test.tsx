@@ -50,24 +50,25 @@ const comVisita = () => resumoBase(pessoa(), [], HOJE, "lead", registosBase({ co
 const visitaFeita = () => resumoBase(pessoa(), [], HOJE, "lead", registosBase({
   contactos: [contactoBase()], visitas: [visitaPessoaBase("v1", { data: "2026-10-10", estado: "feita" })],
 }));
-const titulo = (nome: string | RegExp) => screen.queryByRole("heading", { level: 2, name: nome });
+const titulo = (nome: string | RegExp) => screen.queryByRole("heading", { level: 3, name: nome });
 
 describe("o guia da pessoa em abordagem", () => {
   it("por contactar: «Está tudo. Registar a chamada.», o cartão do cliente e a barra com o nome certo", () => {
     montar(porContactar());
     expect(titulo("Está tudo. Registar a chamada.")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 4, name: "Cliente" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Cliente" })).toBeInTheDocument();
     expect(screen.getAllByText("pedro.lopes@exemplo.pt").length).toBeGreaterThan(0);
     const atual = within(screen.getByRole("list", { name: "Fases" })).getAllByRole("listitem").filter((li) => li.getAttribute("aria-current") === "step");
     expect(atual).toHaveLength(1);
     expect(atual[0]).toHaveTextContent("Por contactar");
   });
 
-  it("«Registar a chamada» abre o formulário da chamada dentro da ficha (sem sair da página)", () => {
+  it("«Registar a chamada» abre o formulário da chamada dentro da ficha (sem sair da página), e o guia fica à vista (só a zona de apoio é substituída)", () => {
     montar(porContactar());
     fireEvent.click(screen.getByRole("button", { name: /^Registar a chamada/ }));
     expect(screen.getByRole("heading", { name: "Registar chamada" })).toBeInTheDocument();
-    expect(titulo("Está tudo. Registar a chamada.")).toBeNull();
+    expect(titulo("Está tudo. Registar a chamada.")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 
   it("contactado: «Marcar a visita» abre o diálogo de marcar visita desta pessoa", () => {
@@ -133,11 +134,25 @@ describe("o guia da pessoa em abordagem", () => {
     expect(screen.getByText("06/10/2026")).toBeInTheDocument();
   });
 
-  it("com um negócio aberto o guia da pessoa não aparece (o guia vive no negócio)", () => {
+  it("com um negócio aberto (ainda por abrir) a pessoa não tem passo: fica o cabeçalho, a barra de fases e o cartão do cliente (o passo vive no negócio)", () => {
     const aberto = negocioBase("n1", { pessoaId: "a", servico: "Casa de banho" });
     montar(resumoBase(pessoa(), [aberto], HOJE, "lead", registosBase({ contactos: [contactoBase()] })));
-    expect(screen.queryByRole("list", { name: "Fases" })).toBeNull();
+    expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 3, name: "Cliente" })).toBeInTheDocument();
     expect(titulo(/Registar a chamada|Marcar a visita|Criar o negócio/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Registar a chamada|^Marcar a visita|^Criar o negócio/ })).toBeNull();
+  });
+
+  it("o prazo vê-se no passo, com «Alterar prazo» que abre o painel Adiar (o prazo que antes estava no «Próximo passo e prazo»)", () => {
+    montar(porContactar());
+    expect(screen.getByText("Sem prazo")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Alterar prazo" }));
+    expect(screen.getByRole("region", { name: /Adiar/i })).toBeInTheDocument();
+  });
+
+  it("com prazo, diz o dia (com a hora quando o prazo é o próximo contacto)", () => {
+    montar(resumoBase(pessoa({ proximoContacto: "2026-10-20", proximoHora: "14:30" }), [], HOJE, "lead", registosBase({ contactos: [contactoBase()] })));
+    expect(screen.getByText(/14:30/)).toBeInTheDocument();
   });
 
   it("sem a bandeira do guia (o exemplo) a ficha fica como estava: sem guia e com o botão do passo na secção da visita", () => {

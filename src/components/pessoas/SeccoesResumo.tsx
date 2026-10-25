@@ -39,6 +39,40 @@ export function Prazo({ prazo, hoje, hora }: { prazo: string | null; hoje: strin
 const textoDoMotivo = (t: ReturnType<typeof useTranslation>["t"], motivo: MotivoEncerramento, outro?: string): string =>
   motivo === "outro" ? outro ?? t(`${P}close.reason.other`) : t(`${P}lost.${motivo}`);
 
+/**
+ * O estado de uma pessoa que já não está em abordagem: numa abordagem encerrada, o resultado, o motivo e o dia; numa perdida (exemplo antigo), «Perdida» com
+ * motivo, data e passo. Sem nenhum dos dois não desenha nada. Vive no cabeçalho do guia (e, no ramo antigo, dentro de «Próximo passo e prazo»).
+ */
+export function AvisoEstadoPessoa({ resumo }: { resumo: ResumoPessoa }) {
+  const { t } = useTranslation();
+  const { pessoa } = resumo;
+  if (pessoa.encerrada) {
+    const e = pessoa.encerrada;
+    return (
+      <div className="space-y-0.5">
+        <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
+          <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {t(`${P}close.summary`, { result: t(`${P}close.result.${e.resultado}`), reason: textoDoMotivo(t, e.motivo, e.motivoOutro), date: textoDiaCompleto(e.data) })}
+        </p>
+      </div>
+    );
+  }
+  if (!pessoa.perdida) return null;
+  const detalhe = t(`${P}sum.lostDetail`, {
+    reason: t(`${P}lost.${pessoa.perdida.motivo}`), date: textoDiaCompleto(pessoa.perdida.data),
+    step: t(`${P}journey.step${passoDaPerdida(resumo)}`),
+  });
+  return (
+    <div className="space-y-0.5">
+      <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
+        <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+        {t(`${P}sum.lostState`)}
+      </p>
+      <p className="text-[15px] text-foreground">{detalhe}</p>
+    </div>
+  );
+}
+
 interface SeccaoPassoProps {
   resumo: ResumoPessoa;
   hoje: string;
@@ -62,30 +96,8 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false, proximaVisitaVisi
   const { pessoa } = resumo;
   const passo = proximoPasso(resumo);
   let conteudo;
-  if (pessoa.encerrada) {
-    const e = pessoa.encerrada;
-    conteudo = (
-      <div className="space-y-0.5">
-        <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
-          <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {t(`${P}close.summary`, { result: t(`${P}close.result.${e.resultado}`), reason: textoDoMotivo(t, e.motivo, e.motivoOutro), date: textoDiaCompleto(e.data) })}
-        </p>
-      </div>
-    );
-  } else if (pessoa.perdida) {
-    const detalhe = t(`${P}sum.lostDetail`, {
-      reason: t(`${P}lost.${pessoa.perdida.motivo}`), date: textoDiaCompleto(pessoa.perdida.data),
-      step: t(`${P}journey.step${passoDaPerdida(resumo)}`),
-    });
-    conteudo = (
-      <div className="space-y-0.5">
-        <p className="inline-flex items-center gap-1.5 text-[15px] font-medium text-foreground">
-          <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          {t(`${P}sum.lostState`)}
-        </p>
-        <p className="text-[15px] text-foreground">{detalhe}</p>
-      </div>
-    );
+  if (pessoa.encerrada || pessoa.perdida) {
+    conteudo = <AvisoEstadoPessoa resumo={resumo} />;
   } else if (passo.id === "nenhum") {
     conteudo = <p className="text-[15px] text-muted-foreground">{t(`${P}sum.noNext`)}</p>;
   } else if (comVisita && passo.id === "fecharLevantamento") {

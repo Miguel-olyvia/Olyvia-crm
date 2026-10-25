@@ -58,6 +58,8 @@ describe("Carregar mais", () => {
     const h = hook();
     fichaMock.mockReturnValue(h);
     desenhar();
+    // Os registos (contactos e levantamentos) vivem numa secção recolhível, fechada ao entrar.
+    fireEvent.click(screen.getByRole("button", { name: /^Registos/ }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais contactos" }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais levantamentos" }));
     // As visitas já não estão no Resumo (só a próxima): o «Carregar mais visitas» vive na aba Visitas.

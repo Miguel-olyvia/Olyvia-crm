@@ -30,15 +30,17 @@ interface BarraAcoesProps {
   capacidades?: CapacidadesFicha;
   /** Há uma ação do menu (reativar) à espera da base: o gatilho fica `aria-busy`. */
   aGuardar?: boolean;
+  /** «Registar chamada» entra no menu «Mais» (a pessoa não tem o botão do passo para a chamada: um cliente, uma perdida, uma encerrada). */
+  comItemChamada?: boolean;
 }
 
-/** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. */
-function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
+/** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. Com `semLigar` o telefone fica só na ligação do cabeçalho do guia. */
+function Ligacoes({ resumo, semLigar = false }: { resumo: ResumoPessoa; semLigar?: boolean }) {
   const { t } = useTranslation();
   const l = ligacoes(resumo.pessoa.contacto);
   return (
     <>
-      {l.telefone && (
+      {l.telefone && !semLigar && (
         <Button asChild variant="outline" className={BOTAO}>
           <a href={l.telefone}><Phone aria-hidden="true" />{t("pessoasPagina.bar.dial")}</a>
         </Button>
@@ -68,7 +70,7 @@ function Ligacoes({ resumo }: { resumo: ResumoPessoa }) {
  * qualquer fase, e liga registos existentes da pessoa: a lead tem "Criar negócio" e o cliente "Novo negócio". A visita e o levantamento
  * são opcionais.
  */
-function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aGuardar }: BarraAcoesProps) {
+function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aGuardar, comItemChamada = false }: BarraAcoesProps) {
   const { t } = useTranslation();
   const idExplicacao = useId();
   const processo = useProcesso();
@@ -80,11 +82,12 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
   const encerrarLigado = capacidades?.encerrar !== false;
   const podeEncerrar = encerrarLigado && papel === "lead" && !fechada && resumo.abertos.length === 0;
   const podeReativar = encerrarLigado && fechada;
+  const comChamada = comItemChamada && capacidades?.chamada !== false;
   const comNota = capacidades?.nota !== false;
   const comAdiar = capacidades?.adiar !== false;
   const comVisita = !!processo && !fechada && capacidades?.visita !== false && processo.comPainelVisita !== false;
   // Sem nenhum item (um cliente na ficha real) não há menu: um botão «Mais» vazio não faz nada.
-  if (!comNota && !comAdiar && !comVisita && !aoCriarNegocio && !podeEncerrar && !podeReativar) return null;
+  if (!comChamada && !comNota && !comAdiar && !comVisita && !aoCriarNegocio && !podeEncerrar && !podeReativar) return null;
   const criarNegocio = () => {
     escolhida.current = true;
     aoCriarNegocio?.();
@@ -109,6 +112,7 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
         align="start" className="min-w-48"
         onCloseAutoFocus={(e) => { if (escolhida.current) { e.preventDefault(); escolhida.current = false; } }}
       >
+        {comChamada && <DropdownMenuItem className="min-h-11" onSelect={() => abrir("chamada")}>{t("pessoasPagina.bar.call")}</DropdownMenuItem>}
         {comNota && <DropdownMenuItem className="min-h-11" onSelect={() => abrir("nota")}>{t("pessoasPagina.bar.note")}</DropdownMenuItem>}
         {/* Com o próximo contacto numa visita não há chamada a adiar: o item fica desativado e a explicação é texto, não só a cor. */}
         {comAdiar && (
@@ -145,6 +149,19 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * Só o que sobra da barra quando a ficha tem o guia do passo: Email, WhatsApp e «Mais». O botão «Registar chamada» é o do passo, e o telefone é a
+ * ligação do cabeçalho do guia; por isso não há «Ligar» nem «Registar chamada» soltos (a chamada entra no «Mais» só quando a pessoa não tem esse passo).
+ */
+export function AcoesSecundariasFicha(p: BarraAcoesProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Ligacoes resumo={p.resumo} semLigar />
+      <MenuMais {...p} />
+    </div>
   );
 }
 

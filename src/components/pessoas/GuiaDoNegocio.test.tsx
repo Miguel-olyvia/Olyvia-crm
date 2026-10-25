@@ -202,3 +202,34 @@ describe("o guia do negócio aberto", () => {
     expect(screen.getByRole("heading", { level: 2, name: "O contrato está assinado. Ganhar o negócio." })).toBeInTheDocument();
   });
 });
+
+describe("o negócio aberto com o guia é um só ecrã (sem o bloco de título de antes)", () => {
+  it("o serviço é a linha do cabeçalho do guia: já não há o título do negócio nem os selos «Negócio» e da fase", () => {
+    abrir(itemDe());
+    expect(screen.getAllByText("WC social")).not.toHaveLength(0);
+    expect(screen.queryByText("Negócio", { selector: "span" })).toBeNull();
+    expect(screen.getAllByRole("heading", { name: "Pedro Lopes" })).toHaveLength(1);
+    expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
+  });
+
+  it("o valor e o comercial vão numa linha de dados dentro do passo", () => {
+    abrir(itemDe());
+    const guia = screen.getByRole("region", { name: "Passo seguinte" });
+    expect(guia).toHaveTextContent("Comercial");
+    expect(guia).toHaveTextContent("Ana Ribeiro");
+  });
+
+  it("o foco inicial vai para o cabeçalho do guia (o título que antes era o do negócio)", () => {
+    abrir(itemDe());
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Pedro Lopes" }));
+  });
+
+  it("um negócio ganho fica com o cabeçalho, a barra de fases, o cartão do cliente e os dados, sem passo nem botão primário", () => {
+    abrir(itemDe(), processo(), { negocio: { ...negocio, estadoReal: "ganho" } });
+    expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 4, name: "Cliente" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Criar o orçamento." })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Criar o orçamento/ })).toBeNull();
+    expect(screen.getByText("Ana Ribeiro")).toBeInTheDocument();
+  });
+});

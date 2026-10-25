@@ -24,12 +24,20 @@ export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha
 }
 
 /** O cartão «Cliente» e a localidade do cabeçalho: a morada é a da pessoa (a ficha não tem uma «morada da obra» à parte). */
-export function clienteDoGuia(pessoa: Pick<Pessoa, "contacto" | "morada">, linha: string | null): { cliente: DadosClienteGuia; local: string | null } {
+export function clienteDoGuia(
+  pessoa: Pick<Pessoa, "contacto"> & Partial<Pick<Pessoa, "morada" | "distrito" | "nif" | "empresa">>, linha: string | null,
+): { cliente: DadosClienteGuia; local: string | null } {
   const m = pessoa.morada;
   const cidade = m ? [m.cp, m.localidade].filter(Boolean).join(" ") : "";
   const morada = m ? [m.linha, cidade].filter(Boolean).join(", ") : "";
+  // O que o contacto antigo da ficha tinha a mais (só os campos que a pessoa tem): fica no mesmo cartão, não num segundo conjunto de dados.
+  const extras = [
+    ["distrito", pessoa.distrito], ["nif", pessoa.nif], ["empresa", pessoa.empresa?.nome], ["nifEmpresa", pessoa.empresa?.nif], ["contacto", pessoa.empresa?.contacto],
+  ].flatMap(([chave, valor]) => (valor ? [{ chave: chave as string, valor: valor as string }] : []));
   return {
-    cliente: { telefone: pessoa.contacto.telefone, email: pessoa.contacto.email, morada: morada || null, linha: linha || null },
+    cliente: {
+      telefone: pessoa.contacto.telefone, email: pessoa.contacto.email, morada: morada || null, linha: linha || null, ...(extras.length > 0 ? { extras } : {}),
+    },
     local: m?.localidade || null,
   };
 }

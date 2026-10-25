@@ -150,10 +150,12 @@ describe("FichaReal: Nota e Adiar ligados (M8 aplicada)", () => {
 describe("FichaReal: aberta com dados", () => {
   beforeEach(() => fichaMock.mockReturnValue(estadoHook({ ficha: FICHA, estado: "ok" })));
 
-  it("abre o painel com o nome da pessoa e as ações de chamada", () => {
+  it("abre o painel com o nome da pessoa; com um negócio já não há passo de chamada: «Registar chamada» passa ao menu Mais", () => {
     desenhar();
     expect(screen.getByRole("dialog", { name: "Ana Lopes" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Registar chamada/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Registar chamada/ })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+    expect(screen.getByRole("menuitem", { name: "Registar chamada" })).toBeInTheDocument();
   });
 
   it("não mostra a marca «exemplo», a aba Notas, «Criar negócio» nem «Visita e levantamento»", () => {
@@ -161,8 +163,10 @@ describe("FichaReal: aberta com dados", () => {
     expect(screen.queryByText("exemplo")).toBeNull();
     expect(screen.queryByRole("tab", { name: /Notas/ })).toBeNull();
     expect(screen.getByRole("tab", { name: /Negócios/ })).toBeInTheDocument();
-    // Com um negócio aberto não há nada a oferecer no «Mais» (nem Nota, nem Adiar, nem Criar negócio): o botão nem existe.
-    expect(screen.queryByRole("button", { name: "Mais" })).toBeNull();
+    // Com um negócio aberto o «Mais» só oferece «Registar chamada» (já não há botão do passo para a chamada): nem Nota, nem Adiar, nem Criar negócio.
+    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+    expect(screen.getByRole("menuitem", { name: "Registar chamada" })).toBeInTheDocument();
+    for (const nome of [/^Nota$/, /Adiar/, /Criar negócio/, /Visita e levantamento/]) expect(screen.queryByRole("menuitem", { name: nome })).toBeNull();
   });
 
   it("sem negócios o «Mais» só oferece encerrar: nada de Nota, Adiar, Criar negócio nem Visita e levantamento", () => {

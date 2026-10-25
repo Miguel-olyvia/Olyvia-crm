@@ -55,6 +55,8 @@ function desenhar() {
   );
 }
 const aberta = () => screen.findByRole("dialog", { name: "Ana Lopes" });
+// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada ao entrar.
+const abrirDados = async () => { fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ })); };
 
 describe("FichaReal: classificação MQL/SQL à mão", () => {
   it("uma lead sem classificação oferece MQL e SQL; classificar grava por neg_classificar_lead e a ficha mostra o selo", async () => {
@@ -65,6 +67,7 @@ describe("FichaReal: classificação MQL/SQL à mão", () => {
     });
     desenhar();
     await aberta();
+    await abrirDados();
     fireEvent.click(await screen.findByRole("button", { name: "Classificar como MQL" }));
     await waitFor(() => expect(chamadas("neg_classificar_lead")).toHaveLength(1));
     expect(chamadas("neg_classificar_lead")[0][1]).toEqual({ p_organization_id: "org-1", p_lead_id: LEAD_ID, p_tipo: "mql" });
@@ -76,7 +79,10 @@ describe("FichaReal: classificação MQL/SQL à mão", () => {
     ficha = fichaCom({ qualificacao_tipo: "SQL" });
     desenhar();
     await aberta();
+    await abrirDados();
     expect(await screen.findByRole("button", { name: "Limpar classificação" })).toBeInTheDocument();
+    // A qualificação diz-se também na secção «Lead» (recolhível e fechada ao entrar).
+    fireEvent.click(screen.getByRole("button", { name: /^Lead/ }));
     expect(screen.getAllByText(/SQL - já falou com um comercial/).length).toBeGreaterThan(0);
   });
 
@@ -84,6 +90,7 @@ describe("FichaReal: classificação MQL/SQL à mão", () => {
     ficha = fichaCom({ lead_id: null }, { lead: null });
     desenhar();
     await aberta();
+    await abrirDados();
     await screen.findByRole("region", { name: "Identidade" });
     expect(screen.queryByRole("heading", { name: "Qualificação comercial" })).toBeNull();
   });
@@ -92,6 +99,7 @@ describe("FichaReal: classificação MQL/SQL à mão", () => {
     ficha = fichaCom({}, { permissoes: { editar: false, criar: true } });
     desenhar();
     await aberta();
+    await abrirDados();
     await screen.findByRole("region", { name: "Identidade" });
     expect(screen.queryByRole("heading", { name: "Qualificação comercial" })).toBeNull();
   });
@@ -101,6 +109,7 @@ describe("FichaReal: nome em duas partes", () => {
   it("abre o formulário com first_name e last_name (Ana Maria e Silva), sem partir o nome visível", async () => {
     ficha = fichaCom({ nome: "Ana Maria Silva", first_name: "Ana Maria", last_name: "Silva" });
     desenhar();
+    await abrirDados();
     fireEvent.click(await screen.findByRole("button", { name: "Editar identidade" }));
     expect(screen.getByLabelText("Nome próprio")).toHaveValue("Ana Maria");
     expect(screen.getByLabelText("Apelido")).toHaveValue("Silva");

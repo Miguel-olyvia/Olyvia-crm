@@ -1,7 +1,7 @@
 // A base dos painéis de ação da ficha, em linha entre o cabeçalho e as abas (sem popovers). O foco vai para o primeiro
 // campo; o Esc fecha só o painel (a ficha trata disso: ver `FichaPessoa`). Os painéis já abertos ficam montados (e
 // escondidos) enquanto a ficha está aberta, para não perderem o que se escreveu ao trocar de painel.
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { PedidoEncerrar } from "./acoesEncerrar";
 import type { DadosChamada } from "./acoesPessoa";
 import type { DadosResultadoVisita } from "./acoesVisitaPessoa";
@@ -54,8 +54,13 @@ export interface AcoesFicha {
 /** A moldura comum: título e conteúdo, ligados por `aria-labelledby`; escondida quando o painel não é o ativo. */
 export function MolduraPainel({ id, titulo, ativo, children }: { id: string; titulo: string; ativo: boolean; children: ReactNode }) {
   const idTitulo = useId();
+  const seccao = useRef<HTMLElement>(null);
+  // O painel abre-se abaixo do guia: quando passa a ativo traz-se à vista (o menu «Mais» e «Alterar prazo» ficam lá em cima).
+  useEffect(() => {
+    if (ativo) seccao.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [ativo]);
   return (
-    <section id={id} hidden={!ativo} aria-labelledby={idTitulo} className="mx-6 mb-4 space-y-3 rounded-xl border border-border bg-card p-4">
+    <section ref={seccao} id={id} hidden={!ativo} aria-labelledby={idTitulo} className="mx-6 mb-4 space-y-3 rounded-xl border border-border bg-card p-4">
       <h3 id={idTitulo} className="text-sm font-semibold text-foreground">{titulo}</h3>
       {children}
     </section>

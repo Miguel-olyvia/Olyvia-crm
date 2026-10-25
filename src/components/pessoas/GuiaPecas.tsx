@@ -4,6 +4,7 @@ import { useId } from "react";
 import { Check, Circle } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { ligacoes } from "@/components/ficha-comum/ligacoesContacto";
 import type { EstadoFase } from "./fasesDoNegocio";
 import type { FaseGuia, ItemChecklist } from "./processo/passoGuiado";
 
@@ -30,7 +31,7 @@ export function BarraFasesGuia({ fases }: { fases: readonly FaseGuia[] }) {
         {fases.map((f) => {
           const atual = f.estado === "atual" || f.estado === "perdida";
           return (
-            <li key={f.id} aria-current={f.estado === "atual" ? "step" : undefined} className="min-w-0 space-y-1">
+            <li key={f.id} aria-current={atual ? "step" : undefined} className="min-w-0 space-y-1">
               <div aria-hidden="true" className={cn("h-1.5 rounded-full", COR_SEGMENTO[f.estado])} />
               <span className={cn("block truncate text-xs", atual ? "font-semibold text-foreground" : "text-muted-foreground", !atual && "max-sm:sr-only")}>
                 {t(f.rotuloChave)}
@@ -69,11 +70,19 @@ export function ChecklistDoPasso({ itens, rotulo, id, className }: { itens: read
   );
 }
 
+/** Um dado da pessoa que o cartão não tem de série (distrito, NIF, empresa...): a chave dá o rótulo (`pessoasPagina.contact.label.<chave>`). */
+export interface ExtraClienteGuia {
+  chave: string;
+  valor: string;
+}
+
 export interface DadosClienteGuia {
   telefone: string | null;
   email: string | null;
   morada: string | null;
   linha: string | null;
+  /** O que o contacto antigo da ficha mostrava a mais (só se a pessoa o tem): um só conjunto de dados do cliente. */
+  extras?: readonly ExtraClienteGuia[];
 }
 
 export interface AcontecimentoGuia {
@@ -83,33 +92,40 @@ export interface AcontecimentoGuia {
   quando: string;
 }
 
-function Campo({ rotulo, valor }: { rotulo: string; valor: string | null }) {
+function Campo({ rotulo, valor, href }: { rotulo: string; valor: string | null; href?: string }) {
   const { t } = useTranslation();
   return (
     <div>
       <dt className="text-sm text-muted-foreground">{rotulo}</dt>
-      <dd className={cn("break-words text-[15px]", valor ? "font-medium text-foreground" : "text-muted-foreground")}>{valor ?? t(`${P}guia.cliente.vazio`)}</dd>
+      <dd className={cn("break-words text-[15px]", valor ? "font-medium text-foreground" : "text-muted-foreground")}>
+        {valor && href ? <a href={href} className="rounded-sm underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">{valor}</a> : valor ?? t(`${P}guia.cliente.vazio`)}
+      </dd>
     </div>
   );
 }
 
 /** O cartão «Cliente» (o que a ficha sabe) e os «Últimos acontecimentos» (os mais recentes que a ficha já carregou). */
-export function CartaoClienteGuia({ cliente, acontecimentos, comLinha }: { cliente: DadosClienteGuia; acontecimentos: readonly AcontecimentoGuia[]; comLinha: boolean }) {
+/** `nivel` é o dos títulos do cartão: h3 na ficha (o nome é o h2), h4 fora dela. */
+export function CartaoClienteGuia({ cliente, acontecimentos, comLinha, nivel = "h4" }: { cliente: DadosClienteGuia; acontecimentos: readonly AcontecimentoGuia[]; comLinha: boolean; nivel?: "h3" | "h4" }) {
+  const Titulo = nivel;
   const { t } = useTranslation();
   const id = useId();
+  const l = ligacoes({ telefone: cliente.telefone, email: cliente.email });
   return (
     <aside className="space-y-4 rounded-xl border border-border bg-background p-4">
       <section aria-labelledby={`${id}-cliente`} className="space-y-3">
-        <h4 id={`${id}-cliente`} className="text-base font-semibold text-foreground">{t(`${P}guia.cliente`)}</h4>
-        <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
-          <Campo rotulo={t(`${P}guia.cliente.telefone`)} valor={cliente.telefone} />
-          <Campo rotulo={t(`${P}guia.cliente.email`)} valor={cliente.email} />
+        <Titulo id={`${id}-cliente`} className="text-base font-semibold text-foreground">{t(`${P}guia.cliente`)}</Titulo>
+        {/* Larga: duas colunas; no ecrã de três colunas (o cartão fica à direita) uma só. */}
+        <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 min-[1800px]:grid-cols-1">
+          <Campo rotulo={t(`${P}guia.cliente.telefone`)} valor={cliente.telefone} href={l.telefone} />
+          <Campo rotulo={t(`${P}guia.cliente.email`)} valor={cliente.email} href={l.email} />
           <Campo rotulo={t(`${P}guia.cliente.morada`)} valor={cliente.morada} />
           {comLinha && <Campo rotulo={t(`${P}guia.cliente.linha`)} valor={cliente.linha} />}
+          {cliente.extras?.map((e) => <Campo key={e.chave} rotulo={t(`pessoasPagina.contact.label.${e.chave}`)} valor={e.valor} />)}
         </dl>
       </section>
       <section aria-labelledby={`${id}-acontecimentos`} className="space-y-2">
-        <h4 id={`${id}-acontecimentos`} className="text-base font-semibold text-foreground">{t(`${P}guia.acontecimentos`)}</h4>
+        <Titulo id={`${id}-acontecimentos`} className="text-base font-semibold text-foreground">{t(`${P}guia.acontecimentos`)}</Titulo>
         {acontecimentos.length === 0 ? (
           <p className="text-[15px] text-muted-foreground">{t(`${P}guia.acontecimentos.vazio`)}</p>
         ) : (

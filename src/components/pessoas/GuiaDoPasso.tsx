@@ -1,11 +1,14 @@
 // O guia do passo seguinte: o cabeçalho (nome, linha, telefone, morada e «Marcar como perdido»), a barra de fases, a lista da fase à esquerda, no
-// centro o título grande, o subtítulo, «Anterior» e UM botão primário, e em baixo o cartão do cliente com os últimos acontecimentos.
+// centro o título grande, o subtítulo, «Anterior» e UM botão primário, e o cartão do cliente com os últimos acontecimentos (por baixo; num ecrã muito
+// largo, à direita, como no desenho). Na ficha da pessoa é o ÚNICO cabeçalho: leva também o título da ficha (`nomeEl`), os selos, o aviso de estado,
+// a navegação entre pessoas e as ações secundárias (Email, Mais), todos passados pelo chamador.
 // Só apresentação: recebe o passo já calculado (`calcularPassoGuiado`) e os callbacks por props; não fala com a base. «Anterior» só lê a fase que
 // já passou (não existe forma de recuar uma fase) e o botão primário passa a ser «Voltar ao passo atual». No telemóvel o passo vem primeiro e a
 // lista da fase fica recolhida.
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone, Target } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { ligacoes } from "@/components/ficha-comum/ligacoesContacto";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
@@ -44,6 +47,20 @@ export interface GuiaDoPassoProps {
   extra?: ReactNode;
   /** O título (só para o leitor de ecrã) da secção do passo seguinte. */
   tituloSecao?: string;
+  /** O nome da pessoa como elemento (o título da ficha, com o foco inicial): sem ele o guia desenha o seu próprio nome (h3). */
+  nomeEl?: ReactNode;
+  /** A descrição da ficha («Lead · Por contactar»): vê-se por baixo do nome; com uma linha de negócio fica só para o leitor de ecrã. */
+  descricaoEl?: ReactNode;
+  /** Os selos «Empresa», «Perdida» e «Encerrada», por baixo do nome. */
+  selos?: ReactNode;
+  /** O estado de uma pessoa perdida ou encerrada (o que antes vivia no «Próximo passo e prazo»). */
+  aviso?: ReactNode;
+  /** O canto superior direito: o paginador «1 de N» e Fechar. */
+  navegacao?: ReactNode;
+  /** Junto de «Marcar como perdido»: Email, WhatsApp e o menu Mais. */
+  acoesSecundarias?: ReactNode;
+  /** O h3 da linha do negócio (o serviço) recebe o foco quando o negócio abre ou muda de estado. */
+  tituloRef?: Ref<HTMLHeadingElement>;
 }
 
 /** O ícone da fase atual, como no desenho (círculos concêntricos), num quadrado suave. */
@@ -55,23 +72,48 @@ function Selo() {
   );
 }
 
-function CabecalhoDoGuia({ cabecalho, acaoPerder }: Pick<GuiaDoPassoProps, "cabecalho" | "acaoPerder">) {
+type PecasCabecalho = Pick<GuiaDoPassoProps, "cabecalho" | "acaoPerder" | "nomeEl" | "descricaoEl" | "selos" | "aviso" | "navegacao" | "acoesSecundarias" | "tituloRef">;
+
+function CabecalhoDoGuia({ cabecalho, acaoPerder, nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef }: PecasCabecalho) {
+  const telefone = cabecalho.telefone ? ligacoes({ telefone: cabecalho.telefone, email: null }).telefone : undefined;
+  // Na ficha (navegação ou ações secundárias) o canto de cima é do paginador e «Marcar como perdido» desce para junto das ações; fora dela fica como estava.
+  const naFicha = navegacao !== undefined || acoesSecundarias !== undefined;
+  const comLinhaDeNegocio = nomeEl !== undefined && Boolean(cabecalho.linha);
   return (
     <header className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <Selo />
           <div className="min-w-0">
-            <h3 className="break-words text-xl font-semibold text-foreground">{cabecalho.nome}</h3>
-            {cabecalho.linha && <p className="break-words text-[15px] text-muted-foreground">{cabecalho.linha}</p>}
+            {nomeEl ?? (
+              <h3 ref={tituloRef} tabIndex={tituloRef ? -1 : undefined} className="break-words text-xl font-semibold text-foreground outline-none">{cabecalho.nome}</h3>
+            )}
+            {comLinhaDeNegocio ? (
+              <h3 ref={tituloRef} tabIndex={-1} className="break-words text-[15px] font-normal text-muted-foreground outline-none">{cabecalho.linha}</h3>
+            ) : cabecalho.linha && <p className="break-words text-[15px] text-muted-foreground">{cabecalho.linha}</p>}
+            {descricaoEl !== undefined && (comLinhaDeNegocio ? <div className="sr-only">{descricaoEl}</div> : <div className="text-[15px] text-muted-foreground">{descricaoEl}</div>)}
           </div>
         </div>
-        {acaoPerder}
+        {navegacao}
+        {!naFicha && acaoPerder}
       </div>
+      {selos && <div className="flex flex-wrap gap-1.5">{selos}</div>}
+      {aviso}
       {(cabecalho.telefone || cabecalho.local) && (
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-[15px] text-foreground">
-          {cabecalho.telefone && <span className="flex items-center gap-1.5"><Phone className="h-4 w-4 text-muted-foreground" aria-hidden="true" />{cabecalho.telefone}</span>}
+          {cabecalho.telefone && (
+            <span className="flex items-center gap-1.5">
+              <Phone className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              {telefone ? <a href={telefone} className={cn("rounded-sm underline-offset-2 hover:underline", FOCO)}>{cabecalho.telefone}</a> : cabecalho.telefone}
+            </span>
+          )}
           {cabecalho.local && <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-muted-foreground" aria-hidden="true" />{cabecalho.local}</span>}
+        </div>
+      )}
+      {naFicha && (acoesSecundarias || acaoPerder) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {acoesSecundarias}
+          {acaoPerder && <div className="ml-auto">{acaoPerder}</div>}
         </div>
       )}
     </header>
@@ -88,10 +130,13 @@ interface CentroProps {
   explicacao?: GuiaDoPassoProps["explicacao"];
   ocupado: boolean;
   extra?: ReactNode;
+  /** O nível do título do passo: h3 na ficha (o nome da pessoa é o h2), h2 fora dela. */
+  nivel: "h2" | "h3";
 }
 
 /** O centro: a fase, o título (h2, recebe o foco quando o passo muda), o subtítulo e o rodapé com «Anterior» e o botão primário. */
-function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, aoAcao, atributosAcao, explicacao, ocupado, extra }: CentroProps) {
+function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, aoAcao, atributosAcao, explicacao, ocupado, extra, nivel }: CentroProps) {
+  const Titulo = nivel;
   const { t } = useTranslation();
   const idRazao = useId();
   const titulo = useRef<HTMLHeadingElement>(null);
@@ -108,9 +153,9 @@ function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, ao
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">{t(vendoAnterior && anterior ? anterior.rotuloChave : passo.faseRotuloChave)}</p>
       <div aria-live="polite" className="space-y-1.5">
-        <h2 ref={titulo} tabIndex={-1} className="text-2xl font-semibold leading-tight text-foreground outline-none">
+        <Titulo ref={titulo} tabIndex={-1} className="text-2xl font-semibold leading-tight text-foreground outline-none">
           {vendoAnterior && anterior ? t(anterior.rotuloChave) : t(passo.tituloChave)}
-        </h2>
+        </Titulo>
         <p className="text-[15px] text-muted-foreground">
           {vendoAnterior && anterior ? t(`${P}guia.anterior.aviso`, { phase: t(anterior.rotuloChave) }) : t(passo.subtituloChave)}
         </p>
@@ -144,7 +189,10 @@ function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, ao
   );
 }
 
-export function GuiaDoPasso({ passo, fases, cabecalho, cliente, acontecimentos, aoAcao, atributosAcao, explicacao, ocupado = false, acaoPerder, extra, tituloSecao }: GuiaDoPassoProps) {
+export function GuiaDoPasso({
+  passo, fases, cabecalho, cliente, acontecimentos, aoAcao, atributosAcao, explicacao, ocupado = false, acaoPerder, extra, tituloSecao,
+  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef,
+}: GuiaDoPassoProps) {
   const { t } = useTranslation();
   const [vendoAnterior, setVendoAnterior] = useState(false);
   const [listaAberta, setListaAberta] = useState(false);
@@ -152,15 +200,28 @@ export function GuiaDoPasso({ passo, fases, cabecalho, cliente, acontecimentos, 
   // Quando o passo muda (a gravação avançou a fase), volta-se a ver o passo atual.
   useEffect(() => setVendoAnterior(false), [passo?.passo, passo?.faseId]);
   const faseAtual = fases.find((f) => f.estado === "atual" || f.estado === "perdida");
+  // Na ficha o nome da pessoa (o título do painel) é o h2: o resto desce um nível, sem saltos. Fora dela o guia é o ecrã.
+  const naFicha = nomeEl !== undefined;
+  const Seccao = naFicha ? "h3" : "h4";
   return (
     <section aria-label={t(`${P}guia.regiao`)} className="space-y-4 rounded-xl border border-border bg-card p-4">
-      <CabecalhoDoGuia cabecalho={cabecalho} acaoPerder={acaoPerder} />
-      <h4 className="sr-only">{t(`${P}phases.title`)}{faseAtual ? `: ${t(`${P}guia.faseAtual`, { phase: t(faseAtual.rotuloChave) })}` : ""}</h4>
+      <CabecalhoDoGuia
+        cabecalho={cabecalho} acaoPerder={acaoPerder} nomeEl={nomeEl} descricaoEl={descricaoEl} selos={selos} aviso={aviso}
+        navegacao={navegacao} acoesSecundarias={acoesSecundarias} tituloRef={tituloRef}
+      />
+      <Seccao className="sr-only">{t(`${P}phases.title`)}{faseAtual ? `: ${t(`${P}guia.faseAtual`, { phase: t(faseAtual.rotuloChave) })}` : ""}</Seccao>
       <BarraFasesGuia fases={fases} />
-      {passo && (
-        <>
-          {tituloSecao && <h4 className="sr-only">{tituloSecao}</h4>}
-          <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
+      {/* O passo (lista da fase e centro) e o cartão do cliente: empilhados; num ecrã muito largo o cartão passa para a terceira coluna, à direita. */}
+      {passo && tituloSecao && <Seccao className="sr-only">{tituloSecao}</Seccao>}
+      <div className={cn("grid gap-4", passo && "md:grid-cols-[200px_minmax(0,1fr)] min-[1800px]:grid-cols-[200px_minmax(0,1fr)_280px]")}>
+        {passo && (
+          <>
+            <div className="order-1 md:order-2">
+              <CentroDoGuia
+                passo={passo} vendoAnterior={vendoAnterior} aoVerAnterior={() => setVendoAnterior(true)} aoVoltarAoAtual={() => setVendoAnterior(false)}
+                aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"}
+              />
+            </div>
             <div className="order-2 md:order-1">
               <Button
                 type="button" variant="outline" className={cn("min-h-11 w-full justify-between md:hidden", FOCO)}
@@ -172,16 +233,12 @@ export function GuiaDoPasso({ passo, fases, cabecalho, cliente, acontecimentos, 
                 id={idLista} itens={passo.itens} rotulo={t(passo.faseRotuloChave)} className={cn("mt-3 md:mt-0", listaAberta ? "block" : "hidden md:block")}
               />
             </div>
-            <div className="order-1 md:order-2">
-              <CentroDoGuia
-                passo={passo} vendoAnterior={vendoAnterior} aoVerAnterior={() => setVendoAnterior(true)} aoVoltarAoAtual={() => setVendoAnterior(false)}
-                aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra}
-              />
-            </div>
-          </div>
-        </>
-      )}
-      <CartaoClienteGuia cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} />
+          </>
+        )}
+        <div className={cn("order-3", passo && "md:col-span-2 min-[1800px]:col-span-1 min-[1800px]:col-start-3 min-[1800px]:row-start-1")}>
+          <CartaoClienteGuia cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"} />
+        </div>
+      </div>
     </section>
   );
 }

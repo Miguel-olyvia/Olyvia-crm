@@ -58,6 +58,8 @@ function desenhar() {
   );
 }
 const aberta = () => screen.findByRole("dialog", { name: "Ana Lopes" });
+// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada ao entrar.
+const abrirDados = async () => { fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ })); };
 const AVISO = "Voltou a contactar";
 
 describe("FichaReal: aviso «Voltou a contactar»", () => {
@@ -95,7 +97,7 @@ describe("FichaReal: aviso «Voltou a contactar»", () => {
     desenhar();
     await aberta();
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Registar chamada/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Registar a chamada/ }));
     fireEvent.click(await screen.findByRole("radio", { name: /Não atendeu/ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(chamadas("neg_registar_contacto")).toHaveLength(1));
@@ -142,7 +144,7 @@ describe("FichaReal: separador Submissões", () => {
     fireEvent.mouseDown(aba, { button: 0 });
     fireEvent.click(aba);
     expect(await screen.findByText("Não foi possível carregar as submissões.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Registar chamada/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Registar a chamada/ })).toBeInTheDocument();
   });
 });
 
@@ -150,6 +152,7 @@ describe("FichaReal: identidade", () => {
   it("mostra o tipo e o nome de uma pessoa singular e oferece editar", async () => {
     desenhar();
     await aberta();
+    await abrirDados();
     const seccao = await screen.findByRole("region", { name: "Identidade" });
     expect(within(seccao).getByText("Pessoa singular")).toBeInTheDocument();
     expect(within(seccao).getByText("Ana Lopes")).toBeInTheDocument();
@@ -159,6 +162,7 @@ describe("FichaReal: identidade", () => {
   it("mostra o nome da empresa de uma empresa", async () => {
     ficha = fichaCom({ tipo: "organization", nome: "Obras Lda", empresa_nome: "Obras Lda" });
     desenhar();
+    await abrirDados();
     const seccao = await screen.findByRole("region", { name: "Identidade" });
     expect(within(seccao).getByText("Empresa")).toBeInTheDocument();
     expect(within(seccao).getByText("Nome da empresa")).toBeInTheDocument();
@@ -167,6 +171,7 @@ describe("FichaReal: identidade", () => {
   it("sem permissão para editar (permissoes.editar falso) não há botão", async () => {
     ficha = fichaCom({}, { permissoes: { editar: false, criar: true } });
     desenhar();
+    await abrirDados();
     await screen.findByRole("region", { name: "Identidade" });
     expect(screen.queryByRole("button", { name: "Editar identidade" })).toBeNull();
   });
@@ -174,6 +179,7 @@ describe("FichaReal: identidade", () => {
   it("numa leitura sem o tipo mostra o nome e não deixa editar", async () => {
     ficha = fichaCom({ tipo: null });
     desenhar();
+    await abrirDados();
     await screen.findByRole("region", { name: "Identidade" });
     expect(screen.queryByRole("button", { name: "Editar identidade" })).toBeNull();
   });
@@ -189,6 +195,7 @@ describe("FichaReal: identidade", () => {
     });
     desenhar();
     await aberta();
+    await abrirDados();
     fireEvent.click(await screen.findByRole("button", { name: "Editar identidade" }));
     fireEvent.click(screen.getByRole("radio", { name: "Empresa" }));
     fireEvent.change(screen.getByLabelText("Nome da empresa"), { target: { value: "Lopes e Filhos" } });
@@ -206,6 +213,7 @@ describe("FichaReal: identidade", () => {
     rpcMock.mockImplementation((nome: string) => (nome === "neg_ficha_pessoa" ? respostaOk(ficha) : respostaErro("NG003")));
     desenhar();
     await aberta();
+    await abrirDados();
     fireEvent.click(await screen.findByRole("button", { name: "Editar identidade" }));
     fireEvent.change(screen.getByLabelText("Apelido"), { target: { value: "Gomes" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
@@ -217,6 +225,7 @@ describe("FichaReal: identidade", () => {
   it("nunca pede nem mostra NIF", async () => {
     ficha = fichaCom({ tem_nif: true });
     desenhar();
+    await abrirDados();
     fireEvent.click(await screen.findByRole("button", { name: "Editar identidade" }));
     const seccao = screen.getByRole("region", { name: "Identidade" });
     expect(within(seccao).queryByText(/nif/i)).toBeNull();

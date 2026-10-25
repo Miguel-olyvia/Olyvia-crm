@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { contactoBase, negocioBase, pessoaBase, registosBase, resumoBase, visitaPessoaBase } from "./fabricaTestes";
-import { BarraAcoesFicha } from "./BarraAcoesFicha";
+import { AcoesSecundariasFicha, BarraAcoesFicha } from "./BarraAcoesFicha";
 import { ProcessoContext, type ProcessoValor } from "./processo/processoContexto";
 import type { PapelPessoa, Pessoa, ResumoPessoa } from "./pessoasTipos";
 
@@ -100,5 +100,57 @@ describe("BarraAcoesFicha: o menu «Mais»", () => {
   it("sem processo (fora do provider) não há «Visita e levantamento»", () => {
     abrirMenu(lead(), null);
     expect(screen.queryByRole("menuitem", { name: "Visita e levantamento" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AcoesSecundariasFicha: o Email e o Mais no cabeçalho do guia", () => {
+  const montar = (resumo: ResumoPessoa, comItemChamada = false) => {
+    const props = { aoAbrir: vi.fn(), aoReativar: vi.fn(), aoCriarNegocio: vi.fn() };
+    render(
+      <ProcessoContext.Provider value={{ executar: vi.fn(), abrirVisitaLevantamento: vi.fn() }}>
+        <AcoesSecundariasFicha resumo={resumo} aberta={null} painelId="p" comItemChamada={comItemChamada} {...props} />
+      </ProcessoContext.Provider>,
+    );
+    return props;
+  };
+  const comContacto = (extra: Partial<Pessoa> = {}) => lead({ contacto: { telefone: "927118300", email: "a@b.pt" }, ...extra });
+
+  it("tem Email e WhatsApp (só se existem), nunca «Ligar», e o menu Mais", () => {
+    montar(comContacto());
+    expect(screen.getByRole("link", { name: /Email/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /WhatsApp/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ligar" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mais" })).toBeInTheDocument();
+  });
+
+  it("sem email nem telefone não há ligações", () => {
+    montar(lead({ contacto: { telefone: null, email: null } }));
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("o botão «Registar chamada» solto não existe", () => {
+    montar(comContacto());
+    expect(screen.queryByRole("button", { name: /Registar chamada/ })).toBeNull();
+  });
+
+  it("o menu mantém todos os itens; «Registar chamada» só entra com comItemChamada", () => {
+    montar(comContacto(), true);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+    for (const nome of ["Nota", "Adiar", "Visita e levantamento", "Criar negócio", "Encerrar abordagem", "Registar chamada"]) {
+      expect(screen.getByRole("menuitem", { name: new RegExp(nome) })).toBeInTheDocument();
+    }
+  });
+
+  it("sem comItemChamada o menu não tem «Registar chamada»", () => {
+    montar(comContacto());
+    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+    expect(screen.queryByRole("menuitem", { name: "Registar chamada" })).toBeNull();
+  });
+
+  it("«Registar chamada» do menu abre o painel da chamada", () => {
+    const p = montar(comContacto(), true);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Registar chamada" }));
+    expect(p.aoAbrir).toHaveBeenCalledWith("chamada", expect.anything());
   });
 });

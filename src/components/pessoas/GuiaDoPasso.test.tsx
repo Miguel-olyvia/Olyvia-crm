@@ -149,3 +149,58 @@ describe("GuiaDoPasso: «Anterior» só lê", () => {
     expect(screen.getByRole("button", { name: /^Marcar a visita/ })).toBeInTheDocument();
   });
 });
+
+describe("GuiaDoPasso: o cabeçalho único da ficha", () => {
+  it("o nome vem do chamador (o título da ficha) e não se repete num h3; a linha do negócio passa a h3", () => {
+    guia({ cabecalho: { nome: "Pedro Lopes", linha: "WC social", telefone: null, local: null }, nomeEl: <h2 data-ficha-nome>Pedro Lopes</h2>, descricaoEl: <p>Lead · Por contactar</p> });
+    expect(screen.getAllByRole("heading", { name: "Pedro Lopes" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 3, name: "WC social" })).toBeInTheDocument();
+    expect(screen.getByText("Lead · Por contactar")).toBeInTheDocument();
+  });
+
+  it("sem linha de negócio a descrição vê-se por baixo do nome", () => {
+    guia({ cabecalho: { nome: "Pedro Lopes", telefone: null, local: null }, nomeEl: <h2>Pedro Lopes</h2>, descricaoEl: <p>Lead · Por contactar</p> });
+    // Sem linha de negócio não há h3 do serviço (os h3 que restam são o passo e as secções, um nível abaixo do nome).
+    expect(screen.queryByRole("heading", { level: 3, name: "Pedro Lopes" })).toBeNull();
+    expect(screen.getAllByRole("heading", { name: "Pedro Lopes" })).toHaveLength(1);
+    expect(screen.getByText("Lead · Por contactar")).toBeVisible();
+  });
+
+  it("leva os selos, o aviso de estado, a navegação e as ações secundárias", () => {
+    guia({
+      selos: <span>Empresa</span>, aviso: <p>Perdida em preço</p>, navegacao: <nav aria-label="Pessoas">1 de 8</nav>,
+      acoesSecundarias: <button type="button">Mais</button>, acaoPerder: <button type="button">Marcar como perdido</button>,
+    });
+    expect(screen.getByText("Empresa")).toBeInTheDocument();
+    expect(screen.getByText("Perdida em preço")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Pessoas" })).toHaveTextContent("1 de 8");
+    expect(screen.getByRole("button", { name: "Mais" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Marcar como perdido" })).toBeInTheDocument();
+  });
+
+  it("o telefone do cabeçalho é uma ligação tel:", () => {
+    guia();
+    expect(screen.getAllByRole("link", { name: /927 118 300/ })[0]).toHaveAttribute("href", "tel:927118300");
+  });
+
+  it("o cartão do cliente leva os campos que o contacto antigo tinha (NIF, distrito) e o email como ligação", () => {
+    guia({ cliente: { telefone: "927 118 300", email: "pedro.lopes@exemplo.pt", morada: null, linha: null, extras: [{ chave: "nif", valor: "123456789" }, { chave: "distrito", valor: "Lisboa" }] } });
+    expect(screen.getByText("123456789")).toBeInTheDocument();
+    expect(screen.getByText("Lisboa")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "pedro.lopes@exemplo.pt" })).toHaveAttribute("href", "mailto:pedro.lopes@exemplo.pt");
+  });
+
+  it("sem passo (cliente, perdida) mostra o cabeçalho, a barra e o cartão do cliente", () => {
+    guia({}, null);
+    expect(screen.getByRole("heading", { level: 4, name: "Cliente" })).toBeInTheDocument();
+  });
+});
+
+describe("GuiaDoPasso: a ordem do DOM é a visual", () => {
+  it("o passo (e o botão primário) vem antes do botão «Mostrar lista» no DOM, para o Tab e o leitor de ecrã", () => {
+    guia();
+    const primario = screen.getByRole("button", { name: /^Registar a chamada/ });
+    const lista = screen.getByRole("button", { name: /lista/i });
+    expect(primario.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
