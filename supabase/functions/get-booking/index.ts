@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { resolverPessoaDoItem } from '../_shared/bookingItem.ts';
 
 initSentry();
 
@@ -94,7 +95,7 @@ Deno.serve(async (req: Request) => {
     // 2. Load schedule item
     const { data: item } = await supabase
       .from('schedule_items')
-      .select('id, status, start_datetime, end_datetime, location, board_id, organization_id, metadata')
+      .select('id, status, start_datetime, end_datetime, location, board_id, organization_id, entity_id, metadata')
       .eq('id', tokenRow.schedule_item_id)
       .maybeSingle();
 
@@ -104,7 +105,6 @@ Deno.serve(async (req: Request) => {
 
     const metadata = (item.metadata && typeof item.metadata === 'object') ? item.metadata as Record<string, any> : {};
     const formId: string | null = metadata.form_id || null;
-    const leadId: string | null = metadata.lead_id || null;
 
     // 3. Resolve scheduling step number for the form (used by the reschedule picker)
     let stepNumber: number | null = null;
@@ -122,42 +122,31 @@ Deno.serve(async (req: Request) => {
 
     // 4. Resolve lead name (prefer field_values, fallback to entity display_name)
     //    and the current address the customer typed (keys vary across forms).
-    let leadName = '';
-    const address = { morada: '', codigo_postal: '', localidade: '' };
-    if (leadId) {
-      const { data: lead } = await supabase
-        .from('anew_leads')
-        .select('field_values, entity_id')
-        .eq('id', leadId)
-        .maybeSingle();
-      const fv = (lead?.field_values && typeof lead.field_values === 'object' && !Array.isArray(lead.field_values))
-        ? lead.field_values as Record<string, any>
-        : {};
-      const first = fv.first_name || fv.po_nome || fv.nome || '';
-      const last = fv.last_name || fv.po_apelido || fv.apelido || '';
-      leadName = [first, last].filter(Boolean).join(' ').trim();
-
-      // Pick the first matching key among the known variants for each address field.
-      const pick = (...keys: string[]): string => {
-        for (const k of keys) {
-          const v = fv[k];
-          if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
-        }
-        return '';
-      };
-      address.morada = pick('address', 'morada');
-      address.codigo_postal = pick('postal_code', 'codigo_postal');
-      address.localidade = pick('city', 'localidade', 'cidade');
-
-      if (!leadName && lead?.entity_id) {
-        const { data: entity } = await supabase
-          .from('anew_entities')
-          .select('display_name')
-          .eq('id', lead.entity_id)
-          .maybeSingle();
-        leadName = entity?.display_name || '';
-      }
+    //    A pessoa e a ENTIDADE da visita (dados da submissao). Leitura falhada:
+    //    503 RETRY, nunca nome e morada vazios a fingir que esta tudo bem.
+    const pessoa = await resolverPessoaDoItem(supabase, item);
+    if (pessoa.erro) {
+      console.error('[get-booking] pessoa da visita nao lida:', pessoa.erro);
+      await captureError(new Error(`get-booking: ${pessoa.erro}`), { function: "get-booking", schedule_item_id: item.id });
+      return json({ error: 'Não foi possível carregar o agendamento. Tente novamente.', code: 'RETRY' }, 503);
     }
+    const address = { morada: '', codigo_postal: '', localidade: '' };
+    const fv = pessoa.fieldValues;
+    const first = fv.first_name || fv.po_nome || fv.nome || '';
+    const last = fv.last_name || fv.po_apelido || fv.apelido || '';
+    const leadName = [first, last].filter(Boolean).join(' ').trim() || pessoa.displayName;
+
+    // Pick the first matching key among the known variants for each address field.
+    const pick = (...keys: string[]): string => {
+      for (const k of keys) {
+        const v = fv[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+      }
+      return '';
+    };
+    address.morada = pick('address', 'morada');
+    address.codigo_postal = pick('postal_code', 'codigo_postal');
+    address.localidade = pick('city', 'localidade', 'cidade');
 
     // 5. Resolve the assigned technician's name (schedule_item_assignees → schedule_resources → profiles)
     let technicianName = '';

@@ -8,6 +8,7 @@ import { requireServiceRole } from "../_shared/auth.ts";
 const _noInputSchema = z.object({});
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp.ts";
+import { checkIfShouldCancel } from "./cancelamento.ts";
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
@@ -166,43 +167,3 @@ serve(async (req) => {
     );
   }
 });
-
-async function checkIfShouldCancel(supabase: any, email: any): Promise<boolean> {
-  if (!email.template_id) return false;
-
-  const { data: template } = await supabase
-    .from("email_templates")
-    .select("trigger_phase, module")
-    .eq("id", email.template_id)
-    .maybeSingle();
-
-  if (!template || !template.trigger_phase) return false;
-
-  const { entity_type, entity_id } = email;
-
-  if (entity_type === "proposals") {
-    const { data: proposal } = await supabase.from("proposals").select("stage_id").eq("id", entity_id).maybeSingle();
-    if (!proposal) return true;
-    if (proposal.stage_id) {
-      const { data: stage } = await supabase.from("proposal_workflow_stages").select("name").eq("id", proposal.stage_id).maybeSingle();
-      if (stage?.name && stage.name !== template.trigger_phase) return true;
-    }
-  } else if (entity_type === "quotes") {
-    const { data: quote } = await supabase.from("quotes").select("estado").eq("id", entity_id).maybeSingle();
-    if (!quote) return true;
-    if (quote.estado !== template.trigger_phase) return true;
-  } else if (entity_type === "leads") {
-    const { data: lead } = await supabase.from("anew_leads").select("workflow_stage_id").eq("id", entity_id).maybeSingle();
-    if (!lead) return true;
-    if (lead.workflow_stage_id) {
-      const { data: stage } = await supabase.from("lead_workflow_stages").select("name").eq("id", lead.workflow_stage_id).maybeSingle();
-      if (stage?.name && stage.name !== template.trigger_phase) return true;
-    }
-  } else if (entity_type === "contracts") {
-    const { data: contract } = await supabase.from("client_contracts").select("status").eq("id", entity_id).maybeSingle();
-    if (!contract) return true;
-    if (contract.status !== template.trigger_phase) return true;
-  }
-
-  return false;
-}

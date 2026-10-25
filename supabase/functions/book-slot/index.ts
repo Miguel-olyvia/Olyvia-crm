@@ -3,7 +3,15 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { orderByLeastBusy } from "../_shared/leastBusy.ts";
-import { findLocalEntityForOrg } from "../_shared/entityScopedLookup.ts";
+import { captarEnvio } from "../_shared/formCaptacao.ts";
+import {
+  lerDefinicoesDoFormulario,
+  marcarVisitaNaEntidade,
+  montarItemAgenda,
+  pedirMarcacaoManual,
+  resolverPessoa,
+  tipoParaEmail,
+} from "./pessoa.ts";
 import {
   loadFormEmailConfig,
   loadTemplate,
@@ -53,7 +61,13 @@ const RATE_LIMIT_WINDOW_MINUTES = 5;
  * Book Slot API
  * 
  * PUBLIC endpoint (no auth) — Books a scheduling slot from a public form.
- * Creates lead + schedule_item + assignee + booking_token + scheduled reminders.
+ * Creates schedule_item + assignee + booking_token + scheduled reminders for the
+ * ENTITY behind the submission `lead_id` (or creates the entity, via
+ * fn_form_criar_entidade). Never reads or writes anew_leads / anew_clients.
+ *
+ * ATENCAO: depende da migration 20261229100000_form_criar_entidade.sql (so base
+ * de RH) e entra JUNTO com create-lead, update-lead, insert-lead, formEmails e
+ * formCaptacao. NAO publicar na base principal (Mudelar) sem autorizacao.
  *
  * POST /book-slot
  * Body: {
@@ -179,9 +193,9 @@ Deno.serve(async (req: Request) => {
     // dono, ninguem dava por isso. Com deduplicacao, a lead ja tem dono: dar a
     // visita a outro separa quem vende de quem visita, ou tira-lhe a lead.
     let ownerAnewUserId: string | null = null;
-    // A lead apanhada JA aqui: mais abaixo ela so e resolvida depois do ponto
-    // onde o pedido por marcar precisa dela.
-    let ownerLeadId: string | null = null;
+    // A pessoa (entidade) por detras da submissao `lead_id`, resolvida UMA vez:
+    // so conta se a submissao for desta organizacao e deste formulario.
+    let pessoa: Extract<Awaited<ReturnType<typeof resolverPessoa>>, { ok: true }> | null = null;
     // TODOS os recursos do comercial, nao um.
     // Um comercial pode ter mais do que um recurso activo -- na nike ha quem
     // tenha dois. Escolher `limit(1)` deixava ao acaso qual deles se olhava, e
@@ -189,24 +203,18 @@ Deno.serve(async (req: Request) => {
     // com o comercial disponivel no outro.
     let ownerResourceIds: string[] = [];
     {
-      const { data: sub } = lead_id
-        ? await supabase
-          .from('form_submissions')
-          .select('target_type, target_id')
-          .eq('id', lead_id)
-          .eq('organization_id', organizationId)
-          .maybeSingle()
-        : { data: null };
-
-      if (sub?.target_type === 'lead' && sub.target_id) {
-        ownerLeadId = sub.target_id as string;
-        const { data: l } = await supabase
-          .from('anew_leads').select('assigned_to, created_by').eq('id', sub.target_id).maybeSingle();
-        ownerAnewUserId = l?.assigned_to ?? l?.created_by ?? null;
-      } else if (sub?.target_type === 'client' && sub.target_id) {
-        const { data: cl } = await supabase
-          .from('anew_clients').select('assigned_to, created_by').eq('id', sub.target_id).maybeSingle();
-        ownerAnewUserId = cl?.assigned_to ?? cl?.created_by ?? null;
+      if (lead_id) {
+        const resolvida = await resolverPessoa({
+          supabase, organizationId, formId: form_id, submissionId: lead_id,
+        });
+        if (!resolvida.ok) {
+          return new Response(
+            JSON.stringify({ error: resolvida.error }),
+            { status: resolvida.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        pessoa = resolvida;
+        ownerAnewUserId = resolvida.ownerAnewUserId;
       }
 
       if (ownerAnewUserId) {
@@ -283,51 +291,26 @@ Deno.serve(async (req: Request) => {
     // Ao visitante responde-se com sucesso, como a toda a gente: de fora nao se
     // distingue quem ja e conhecido de quem e novo.
     if (!assignedResourceId && ownerResourceIds.length > 0 && lead_id) {
-      try {
-        const { data: sub } = await supabase
-          .from('form_submissions')
-          .select('field_values')
-          .eq('id', lead_id)
-          .eq('organization_id', organizationId)
-          .maybeSingle();
-
-        const fv = (sub?.field_values ?? {}) as Record<string, any>;
-        await supabase
-          .from('form_submissions')
-          .update({
-            field_values: {
-              ...fv,
-              _meta: {
-                ...(fv._meta ?? {}),
-                agendamento_pedido: {
-                  inicio: slot_start,
-                  fim: slot_end,
-                  board_id: boardId,
-                  form_id,
-                  distrito_id: district_id || null,
-                  pedido_em: new Date().toISOString(),
-                },
-              },
-            },
-          })
-          .eq('id', lead_id);
-      } catch (pedidoErr) {
-        console.error('[book-slot] nao foi possivel guardar a hora pedida:', pedidoErr);
-      }
-
-      // A lead fica marcada como "por agendar a mao". A fila le do
-      // `_meta.agendamento_pedido` e mostra o cartao na mesma, mas ha quem
-      // procure leads por esta coluna -- sem isto, esta ficava de fora dessa
-      // procura, e o estado dela dizia o contrario do que era.
-      if (ownerLeadId) {
-        try {
-          await supabase
-            .from('anew_leads')
-            .update({ needs_manual_scheduling: true })
-            .eq('id', ownerLeadId);
-        } catch (marcaErr) {
-          console.error('[book-slot] nao foi possivel marcar a lead como por agendar:', marcaErr);
-        }
+      // A submissao fica com a hora pedida no _meta e marcada por agendar a mao
+      // (needs_manual_scheduling), que e o que a fila do comercial le.
+      const pedido = await pedirMarcacaoManual({
+        supabase,
+        organizationId,
+        submissionId: lead_id,
+        boardId,
+        formId: form_id,
+        slotStart: slot_start,
+        slotEnd: slot_end,
+        districtId: district_id || null,
+      });
+      // Pedido nao guardado: nao se diz ao visitante que ficou guardado.
+      if (!pedido.ok) {
+        console.error('[book-slot] pedido de marcacao manual nao guardado', { submissao: lead_id, erro: pedido.error });
+        await captureError(new Error(`book-slot: pedido de marcacao manual nao guardado: ${pedido.error}`), { function: "book-slot" });
+        return new Response(
+          JSON.stringify({ error: 'Não foi possível guardar o seu pedido. Tente novamente.', code: 'RETRY' }),
+          { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
 
       console.log('[book-slot] comercial sem disponibilidade; pedido guardado para marcacao a mao', {
@@ -412,90 +395,21 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 6. Resolve existing lead + merged field values
-    let lead: { id: string; assigned_to?: string | null } | null = null;
-    let entityId: string | null = null;
-    let mergedFieldValues: Record<string, any> = field_values;
-
-    // A submissao pode estar ligada a um CLIENTE, nao a uma lead.
+    // 6. A pessoa (entidade) e os dados juntos.
     //
-    // Quem ja e cliente e volta a preencher o formulario recebe, como toda a
-    // gente, o id da submissao como chave de continuacao. Mas um cliente nao
-    // tem lead activa -- se esse id fosse procurado em `anew_leads`, dava
-    // "Lead not found" e a visita nao ficava marcada: o formulario parava no
-    // ultimo passo e o cliente nao conseguia marcar visita nenhuma. Medido ao
-    // vivo na nike, e a exposicao sao os clientes contactaveis das
-    // organizacoes com formularios de agendamento.
-    //
-    // O que deve acontecer e o que a invariante manda: a entidade nao tem lead,
-    // por isso nasce uma -- na MESMA entidade, reaproveitada da submissao, sem
-    // criar pessoa repetida. Deixa-se o `lead_id` cair e segue-se o caminho
-    // normal de criacao, mais abaixo.
-    let submissionEntityId: string | null = null;
-    let resolvedLeadIdFromSubmission: string | null = null;
-    // Quem ja e CLIENTE nao ganha lead: a visita fica no cliente, que a agenda
-    // sabe referenciar directamente (`schedule_items.client_id`).
-    let submissionClientId: string | null = null;
-    if (lead_id) {
-      const { data: submissionRow } = await supabase
-        .from('form_submissions')
-        .select('target_type, target_id, entity_id')
-        .eq('id', lead_id)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-      if (submissionRow) {
-        submissionEntityId = (submissionRow.entity_id as string) ?? null;
-        if (submissionRow.target_type === 'lead' && submissionRow.target_id) {
-          resolvedLeadIdFromSubmission = submissionRow.target_id as string;
-        } else if (submissionRow.target_type === 'client' && submissionRow.target_id) {
-          submissionClientId = submissionRow.target_id as string;
-        }
-      }
-    }
+    // Com `lead_id` a pessoa e a da submissao, ja resolvida acima (so conta se
+    // for desta organizacao e deste formulario). Sem `lead_id`, a entidade nasce
+    // agora -- so depois de haver hora livre -- pelo mesmo caminho do create-lead
+    // (procura, cria so a entidade, grava o toque). Nunca ha lead nem cliente
+    // por escrever: lead e a entidade sem client_since.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let entityId: string | null = pessoa?.entityId ?? null;
+    let submissionId: string | null = pessoa ? (lead_id ?? null) : null;
+    let isClient = pessoa?.isClient ?? false;
+    let mergedFieldValues: Record<string, any> = pessoa
+      ? { ...pessoa.submissionFieldValues, ...field_values }
+      : field_values;
 
-    // Uma submissao que nao aponta a uma lead (cliente) nao tem lead para onde
-    // ir: segue como se nao viesse `lead_id`.
-    const leadIdToUse = resolvedLeadIdFromSubmission
-      ?? (submissionEntityId ? null : lead_id);
-
-    if (leadIdToUse) {
-      const { data: existingLead, error: existingLeadError } = await supabase
-        .from('anew_leads')
-        .select('id, entity_id, field_values, root_organization_id, assigned_to')
-        .eq('id', leadIdToUse)
-        .eq('organization_id', organizationId)
-        .maybeSingle();
-
-      if (existingLeadError || !existingLead) {
-        return new Response(
-          JSON.stringify({ error: 'Lead not found for this form', details: existingLeadError?.message }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      lead = { id: existingLead.id, assigned_to: existingLead.assigned_to ?? null };
-      entityId = existingLead.entity_id;
-      rootOrganizationId = existingLead.root_organization_id || rootOrganizationId;
-
-      const existingFieldValues = existingLead.field_values && typeof existingLead.field_values === 'object' && !Array.isArray(existingLead.field_values)
-        ? existingLead.field_values as Record<string, any>
-        : {};
-
-      mergedFieldValues = {
-        ...existingFieldValues,
-        ...field_values,
-      };
-    }
-
-    // A entidade que a deteccao de duplicados JA escolheu manda sobre a que se
-    // encontraria aqui. Sao a mesma pessoa nos casos normais, mas a da
-    // submissao e a decidida com as regras completas (email e telefone, com
-    // conflitos resolvidos); a daqui compara tambem por NIF e escolhe uma.
-    if (!entityId && submissionEntityId) {
-      entityId = submissionEntityId;
-    }
-
-    // 7. Entity deduplication (same logic as insert-lead)
     const leadEmailRaw = mergedFieldValues.email || mergedFieldValues.po_email || mergedFieldValues.Email || null;
     const leadEmail = leadEmailRaw ? String(leadEmailRaw).toLowerCase().trim() : null;
     const leadPhone = mergedFieldValues.phone || mergedFieldValues.po_telefone || mergedFieldValues.telefone || null;
@@ -516,62 +430,55 @@ Deno.serve(async (req: Request) => {
       extractField(mergedFieldValues, 'city', 'localidade', 'cidade'),
     ].filter(Boolean).join(', ');
 
-    // Org-scoped dedup (same shared helper as create-lead/insert-lead) — the
-    // previous version matched by email against anew_entity_emails with NO
-    // organization filter, taking whichever entity happened to come back
-    // first across ALL orgs. Two real bugs from that: (1) it could silently
-    // reuse another organization's entity (the exact cross-org leak
-    // findLocalEntityForOrg is designed to prevent), and (2) when the true
-    // match belonged to a since-deactivated contact in a large org, an
-    // unrelated row from a different org — or no row at all if the query
-    // happened to miss it — could win, leaving this org with a second,
-    // duplicate entity that could never own the email at all (unique per
-    // org), silently breaking anything that needs it (e.g. resending portal
-    // credentials fails with "contacto não tem email").
-    if (leadEmail || leadPhone) {
-      const scopedHit = await findLocalEntityForOrg({
-        supabase,
-        organizationId,
-        email: leadEmail,
-        phone: leadPhone,
-      });
-      // `!entityId`: nunca por cima da que veio da submissao.
-      if (!entityId && scopedHit?.entityId) {
-        entityId = scopedHit.entityId;
-      }
-    }
-
     if (!entityId) {
-      const displayName = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
-      const entityInsert: Record<string, any> = {
-        display_name: displayName,
-        type: 'person',
-        status: 'active',
-      };
-      if (leadFirstName) entityInsert.first_name = leadFirstName;
-      if (leadLastName) entityInsert.last_name = leadLastName;
-
-      const { data: newEntity, error: entityError } = await supabase
-        .from('anew_entities')
-        .insert(entityInsert)
-        .select('id')
-        .single();
-
-      if (!entityError && newEntity) {
-        entityId = newEntity.id;
-
-        const promises: Promise<any>[] = [];
-        if (leadEmail) {
-          promises.push(supabase.from('anew_entity_emails').insert({
-            entity_id: entityId, email: leadEmail, is_primary: true,
-          }));
-        }
-        if (leadPhone) {
-          promises.push(supabase.from('anew_entity_phones').insert({
-            entity_id: entityId, phone_number: String(leadPhone), is_primary: true,
-          }));
-        }
-        await Promise.all(promises);
+      // Leitura falhada: 503 RETRY ANTES de qualquer escrita (a entidade nao
+      // nasce sem contacto, nem a pesquisa de duplicados corre as cegas).
+      const definicoes = await lerDefinicoesDoFormulario(supabase, form_id);
+      if (!definicoes.ok) {
+        console.error('[book-slot]', definicoes.error);
+        await captureError(new Error(`book-slot: ${definicoes.error}`), { function: "book-slot", form_id });
+        return new Response(
+          JSON.stringify({ error: 'Não foi possível processar o pedido. Tente novamente.', code: 'RETRY' }),
+          { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      const stepAtual = step_number || 1;
+      const { _meta: _clientMeta, ...camposDoPedido } = mergedFieldValues;
+      const envio = await captarEnvio({
+        supabase,
+        formId: form_id,
+        campaignId: campaign_id && UUID_RE.test(campaign_id) ? campaign_id : null,
+        originId: source_id && UUID_RE.test(source_id) ? source_id : null,
+        fieldValues: {
+          ...camposDoPedido,
+          _meta: {
+            current_step: stepAtual,
+            total_steps: stepAtual,
+            is_complete: true,
+            steps_completed: [stepAtual],
+            last_updated: new Date().toISOString(),
+          },
+        },
+        definitions: definicoes.definitions,
+        currentStep: stepAtual,
+        totalSteps: stepAtual,
+        isComplete: true,
+        locale: leadLocale,
+      });
+      if (!envio.ok) {
+        return new Response(
+          JSON.stringify({ error: envio.error }),
+          { status: envio.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      entityId = envio.entityId;
+      submissionId = envio.submissionId;
+      // Entidade que ja existia: pode ser cliente. Le-se pela submissao nova.
+      if (!envio.created) {
+        const existente = await resolverPessoa({
+          supabase, organizationId, formId: form_id, submissionId: envio.submissionId,
+        });
+        if (existente.ok) isClient = existente.isClient;
       }
     }
 
@@ -591,72 +498,33 @@ Deno.serve(async (req: Request) => {
       assignedToAnewId = assignedResource.user_id;
     }
 
-    // 8. Create lead when needed
-    //
-    // `!submissionClientId`: um cliente NAO ganha lead. Antes ganhava -- foi uma
-    // correcao feita para desbloquear o cliente que nao conseguia marcar de
-    // todo, e resolveu o bloqueio criando o problema errado: uma lead que nao
-    // devia existir, para uma pessoa que ja passou dessa fase.
-    if (!lead && !submissionClientId) {
-      const { data: newLead, error: leadError } = await supabase
-        .from('anew_leads')
-        .insert({
-          organization_id: organizationId,
-          root_organization_id: rootOrganizationId,
-          entity_id: entityId,
-          field_values: mergedFieldValues,
-          source: 'form',
-          source_id: source_id || null,
-          campaign_id: campaign_id || null,
-          status: 'scheduled',
-          created_by: assignedToAnewId || null,
-          assigned_to: assignedToAnewId || null,
-          callback_scheduled_at: slot_start,
-          lead_district_id: district_id || null,
-        })
-        .select('id')
-        .single();
-
-      if (leadError || !newLead) {
-        console.error('Error creating lead:', leadError);
-        return new Response(
-          JSON.stringify({ error: 'Failed to create lead', details: leadError?.message }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      lead = newLead;
+    if (!entityId || !submissionId) {
+      console.error('[book-slot] sem entidade ou submissao para a visita');
+      return new Response(
+        JSON.stringify({ error: 'Failed to resolve person for this booking' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
-    // 9. Create schedule_item
+    // 9. Create schedule_item (liga-se a pessoa por entity_id; as colunas
+    //    lead_id e client_id ja nao existem em schedule_items)
     const title = `Visita - ${[leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead'}`;
 
     const { data: scheduleItem, error: itemError } = await supabase
       .from('schedule_items')
-      .insert({
-        board_id: boardId,
+      .insert(montarItemAgenda({
+        boardId,
         title,
-        description: submissionClientId ? `Cliente: ${submissionClientId}` : `Lead: ${lead!.id}`,
-        // A agenda liga-se ao cliente por coluna propria; a lead vive na nota
-        // lateral, porque schedule_items nao tem coluna para ela.
-        client_id: submissionClientId,
-        status: 'scheduled',
-        origin: 'api',
-        start_datetime: slot_start,
-        end_datetime: slot_end,
-        // duration_minutes is a generated column, skip it
+        entityId,
+        submissionId,
+        formId: form_id,
+        slotStart: slot_start,
+        slotEnd: slot_end,
         location: fullLocation || null,
-        priority: 0,
-        metadata: {
-          ...(lead ? { lead_id: lead.id } : {}),
-          ...(submissionClientId ? { client_id: submissionClientId } : {}),
-          form_id,
-          postal_code: postal_code || field_values.postal_code,
-          booked_via: 'public_form',
-        },
-        organization_id: organizationId,
-        created_by: createdBy,
-      })
+        postalCode: postal_code || (field_values.postal_code as string | undefined),
+        organizationId,
+        createdBy,
+      }))
       .select('id')
       .single();
 
@@ -709,53 +577,28 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Tudo o que se segue e sobre a LEAD. Sendo cliente, nao ha lead nenhuma
-    // para actualizar -- a visita ja ficou ligada a ficha dele.
-    if (lead) {
-    // Update lead with scheduled_visit_id
-    const leadUpdate: Record<string, any> = {
-      scheduled_visit_id: scheduleItem.id,
-      callback_scheduled_at: slot_start,
-      status: 'scheduled',
-    };
-    if (district_id) {
-      leadUpdate.lead_district_id = district_id;
-    }
-    // NUNCA por cima de um dono que ja existe.
-    //
-    // Ate haver deduplicacao, a lead que chegava aqui era sempre nova e sem
-    // dono, por isso atribui-la ao tecnico da visita nao tirava nada a
-    // ninguem. Agora a visita pode cair numa lead que JA e de alguem -- e
-    // escrever por cima roubava-lha, sem aviso: quem a trabalhava deixava de a
-    // ver na sua lista de um momento para o outro.
-    //
-    // Sem dono, mantem-se o comportamento de sempre.
-    if (assignedToAnewId && !lead.assigned_to) {
-      leadUpdate.assigned_to = assignedToAnewId;
-    }
-    if (lead_id) {
-      leadUpdate.field_values = mergedFieldValues;
-      leadUpdate.entity_id = entityId;
-    }
-
-    const { error: leadUpdateError } = await supabase
-      .from('anew_leads')
-      .update(leadUpdate)
-      .eq('id', lead.id);
-
-    if (leadUpdateError) {
-      console.error('Error updating lead after booking:', leadUpdateError);
-    }
-
-    // If this lead had a pending "finish scheduling" invite (completed the form earlier
-    // without picking a slot), burn it and cancel its follow-up email now that a slot is
-    // booked — so the nudge never lands after the visit is already scheduled. Fail-soft.
-    try {
-      await supabase.from('scheduling_invites').update({ used_at: new Date().toISOString() }).eq('lead_id', lead.id).is('used_at', null);
-      await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
-    } catch (inviteBurnErr) {
-      console.error('[book-slot] failed to burn scheduling invite (non-fatal):', inviteBurnErr);
-    }
+    // Depois da marcacao: dono da entidade (so se estiver livre), carimbo,
+    // submissao sem marcacao pendente e convites de recuperacao queimados.
+    // Nunca se escreve em anew_leads nem anew_clients.
+    const falhasPosMarcacao = await marcarVisitaNaEntidade({
+      supabase,
+      organizationId,
+      entityId,
+      submissionId,
+      scheduleItemId: scheduleItem.id,
+      assignToAnewUserId: assignedToAnewId,
+      slotStart: slot_start,
+      slotEnd: slot_end,
+      boardId,
+      mergedFieldValues,
+    });
+    // A visita ja esta marcada e nao se desfaz; mas um passo posterior falhado
+    // (dono, submissao, convites) nao pode ficar so no log.
+    if (falhasPosMarcacao.length > 0) {
+      await captureError(
+        new Error(`book-slot: passos pos-marcacao falhados: ${falhasPosMarcacao.join(', ')}`),
+        { function: "book-slot", schedule_item_id: scheduleItem.id },
+      );
     }
 
     // 11. Create booking token for cancellation.
@@ -825,7 +668,7 @@ Deno.serve(async (req: Request) => {
                 link: '/scheduling',
                 entity_type: 'schedule_item',
                 entity_id: scheduleItem.id,
-                data: { schedule_item_id: scheduleItem.id, lead_id: lead?.id ?? null },
+                data: { schedule_item_id: scheduleItem.id, entity_id: entityId, submission_id: submissionId },
               });
             }
           }
@@ -834,19 +677,8 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // If this lead had a pending "finish scheduling" invite (completed the
-      // form earlier without picking a slot), burn it and cancel its
-      // follow-up nudge now that a slot IS booked — otherwise the visitor
-      // would get a confusing "you still need to book" email after already
-      // booking. Fail-soft.
-      try {
-        if (lead) {
-          await supabase.from('scheduling_invites').update({ used_at: new Date().toISOString() }).eq('lead_id', lead.id).is('used_at', null);
-          await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
-        }
-      } catch (inviteBurnErr) {
-        console.error('[book-slot] failed to burn scheduling invite (non-fatal):', inviteBurnErr);
-      }
+      // (Os convites de "terminar o agendamento" e o email de recuperacao ja
+      // foram queimados em marcarVisitaNaEntidade, pela entidade.)
 
       const { data: orgRow } = await supabase
         .from('anew_organizations')
@@ -944,7 +776,7 @@ Deno.serve(async (req: Request) => {
             await scheduleEmail(supabase, {
               organizationId, userId: createdBy, toEmail: t.email,
               subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
-              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
+              entityType: tipoParaEmail(isClient), entityId: entityId, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
             });
           }
         }
@@ -969,12 +801,13 @@ Deno.serve(async (req: Request) => {
       minute: '2-digit',
     });
 
-    console.log(`book-slot: lead=${lead?.id ?? '-'}, client=${submissionClientId ?? '-'}, item=${scheduleItem.id}, resource=${assignedResourceId}, slot=${slot_start}`);
+    console.log(`book-slot: entity=${entityId}, submission=${submissionId}, item=${scheduleItem.id}, resource=${assignedResourceId}, slot=${slot_start}`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        lead_id: lead?.id ?? null,
+        // lead_id mantem-se na resposta e e o id da submissao (chave do visitante).
+        lead_id: submissionId,
         schedule_item_id: scheduleItem.id,
         booking_ref: scheduleItem.id.slice(0, 8).toUpperCase(),
         scheduled_start: slot_start,

@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { cancelarConvite } from "../_shared/schedulingInvite.ts";
 
 initSentry();
 
@@ -50,27 +51,12 @@ Deno.serve(async (req: Request) => {
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const { token } = await req.json();
-    if (!token || typeof token !== 'string') return json({ error: 'Token inválido.', code: 'INVALID' });
 
-    const { data: invite } = await supabase
-      .from('scheduling_invites')
-      .select('token, lead_id, unsubscribed_at')
-      .eq('token', token)
-      .maybeSingle();
-
-    if (!invite) return json({ error: 'Link inválido.', code: 'INVALID' });
-
-    // Idempotent: mark the invite unsubscribed (if not already) and cancel every pending
-    // nudge for this lead so no further "finish scheduling" emails go out.
-    if (!invite.unsubscribed_at) {
-      await supabase.from('scheduling_invites').update({ unsubscribed_at: new Date().toISOString() }).eq('token', token);
-    }
-    await supabase
-      .from('scheduled_emails')
-      .update({ status: 'cancelled' })
-      .eq('entity_type', 'lead_scheduling_invite')
-      .eq('entity_id', invite.lead_id)
-      .eq('status', 'pending');
+    // Idempotente: marca o convite e cancela os emails pendentes da ENTIDADE
+    // do convite (na organizacao do convite).
+    const resultado = await cancelarConvite({ supabase, token });
+    // Falha de base de dados: 503 RETRY, nunca um "sucesso" que nao aconteceu.
+    if (!resultado.ok) return json({ error: resultado.error, code: resultado.code }, resultado.code === 'RETRY' ? 503 : 200);
 
     return json({ success: true });
   } catch (error: unknown) {

@@ -246,9 +246,9 @@ export async function scheduleEmail(
     templateId?: string | null;
     smtpId?: string | null;
   },
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await supabase.from("scheduled_emails").insert({
+    const { error } = await supabase.from("scheduled_emails").insert({
       template_id: row.templateId || null,
       entity_type: row.entityType || "leads",
       entity_id: row.entityId,
@@ -261,8 +261,15 @@ export async function scheduleEmail(
       status: "pending",
       smtp_id: row.smtpId || null,
     });
+    // O supabase-js nao lanca em erro de query: devolve-o. Quem chama decide o que fazer com a falha.
+    if (error) {
+      console.error("[formEmails] scheduleEmail failed:", error);
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error("[formEmails] scheduleEmail failed:", err);
+    return false;
   }
 }
 
@@ -409,7 +416,10 @@ export async function queueSchedulingInviteRecovery(
   params: {
     organizationId: string;
     formId: string;
-    leadId: string;
+    /** Entidade (anew_entities.id) a quem o convite se destina. */
+    entityId: string;
+    /** Submissao (form_submissions.id) que o convite retoma. */
+    submissionId: string;
     leadName: string;
     leadEmail: string;
     leadLocale?: string | null;
@@ -474,7 +484,8 @@ export async function queueSchedulingInviteRecovery(
     const { data: invite } = await supabase
       .from("scheduling_invites")
       .insert({
-        lead_id: params.leadId,
+        entity_id: params.entityId,
+        submission_id: params.submissionId,
         form_id: params.formId,
         step_number: schedStep.step_number,
         organization_id: params.organizationId,
@@ -518,12 +529,12 @@ export async function queueSchedulingInviteRecovery(
         bodyHtml: html,
         scheduledFor: new Date(Date.now() + hours * 3600000).toISOString(),
         entityType: "lead_scheduling_invite",
-        entityId: params.leadId,
+        entityId: params.entityId,
         smtpId: inviteCfg?.email_smtp_id || null,
       });
       queued++;
     }
-    console.log(`[formEmails] ${queued} scheduling invite(s) queued for lead ${params.leadId} (covered district)`);
+    console.log(`[formEmails] ${queued} scheduling invite(s) queued for entity ${params.entityId} (covered district)`);
   } catch (err) {
     console.error("[formEmails] queueSchedulingInviteRecovery failed (non-fatal):", err);
   }

@@ -14,6 +14,7 @@ import {
 } from '../_shared/formEmails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { atualizarVisitaDaSubmissao, cancelarLembretesDaPessoa, resolverPessoaDoItem, tipoLembrete } from '../_shared/bookingItem.ts';
 
 initSentry();
 
@@ -112,7 +113,7 @@ Deno.serve(async (req: Request) => {
     // 2. Load the schedule item
     const { data: item } = await supabase
       .from('schedule_items')
-      .select('id, status, board_id, organization_id, metadata, start_datetime, end_datetime, location')
+      .select('id, status, board_id, organization_id, entity_id, created_by, metadata, start_datetime, end_datetime, location')
       .eq('id', itemId)
       .maybeSingle();
 
@@ -124,18 +125,19 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (item.metadata && typeof item.metadata === 'object') ? item.metadata as Record<string, any> : {};
-    let leadId: string | null = metadata.lead_id || null;
     const formId: string | null = metadata.form_id || null;
     const organizationId: string = item.organization_id;
 
-    if (!leadId) {
-      const { data: leadByVisit } = await supabase
-        .from('anew_leads')
-        .select('id')
-        .eq('scheduled_visit_id', itemId)
-        .maybeSingle();
-      leadId = leadByVisit?.id || null;
+    // A pessoa da visita: a ENTIDADE (schedule_items.entity_id) e a submissao.
+    // Leitura falhada: 503 RETRY antes de escrever (sem pessoa nao ha lembrete
+    // novo nem email ao cliente).
+    const pessoa = await resolverPessoaDoItem(supabase, item);
+    if (pessoa.erro) {
+      console.error('[reschedule-booking] pessoa da visita nao lida:', pessoa.erro);
+      await captureError(new Error(`reschedule-booking: ${pessoa.erro}`), { function: "reschedule-booking", schedule_item_id: itemId });
+      return json({ error: 'Não foi possível reagendar agora. Tente novamente.', code: 'RETRY' }, 503);
     }
+    const submissionId = typeof metadata.submission_id === 'string' ? metadata.submission_id : null;
 
     // 3. Find the currently assigned resource — the reschedule must keep the same resource.
     const { data: assignee } = await supabase
@@ -213,15 +215,16 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Não foi possível reagendar. Tente novamente.', code: 'SLOT_TAKEN' });
     }
 
-    // Update the lead's callback time
-    if (leadId) {
-      const { error: leadError } = await supabase
-        .from('anew_leads')
-        .update({ callback_scheduled_at: slot_start, status: 'scheduled' })
-        .eq('id', leadId);
-      if (leadError) {
-        console.error('[reschedule-booking] failed to update lead:', leadError);
-      }
+    // O espelho da visita na submissao passa a hora nova (best-effort: a visita
+    // ja esta movida em schedule_items, que e a fonte de verdade).
+    const espelhoFalhas = await atualizarVisitaDaSubmissao(supabase, {
+      organizationId,
+      submissionId,
+      alteracao: { tipo: 'reagendada', inicio: slot_start, fim: effectiveEnd },
+    });
+    if (espelhoFalhas.length > 0) {
+      console.error('[reschedule-booking] failed to update submission visit:', espelhoFalhas);
+      await captureError(new Error(`reschedule-booking: ${espelhoFalhas.join('; ')}`), { function: "reschedule-booking", schedule_item_id: itemId });
     }
 
     const formattedWhen = new Date(slot_start).toLocaleString('pt-PT', {
@@ -235,16 +238,19 @@ Deno.serve(async (req: Request) => {
     });
 
     // Reschedule reminder emails: cancel existing pending, then re-insert
-    // a new reminder at (new start − reminder_hours_before). Fail-soft.
-    if (leadId) {
+    // a new reminder at (new start − reminder_hours_before). A reagendacao ja
+    // esta feita e nao se desfaz, mas uma falha aqui NAO fica so no log: vai
+    // para o Sentry (schedule_item_id e falhas) e a resposta leva
+    // `reminders_warning: true` (o lembrete antigo pode disparar a hora velha).
+    let lembretesFalhas: string[] = [];
+    if (pessoa.entityId) {
       try {
-        // Cancel existing pending reminders for this lead.
-        await supabase
-          .from('scheduled_emails')
-          .update({ status: 'cancelled' })
-          .eq('entity_type', 'leads')
-          .eq('entity_id', leadId)
-          .eq('status', 'pending');
+        // Cancel existing pending reminders for this person. Se falhar, nao se
+        // criam novos por cima (ficariam lembretes duplicados).
+        const lembreteFalhas = await cancelarLembretesDaPessoa(supabase, {
+          organizationId, entityId: pessoa.entityId,
+        });
+        if (lembreteFalhas.length > 0) throw new Error(lembreteFalhas.join('; '));
 
         const emailCfg = formId ? await loadFormEmailConfig(supabase, formId) : null;
 
@@ -256,23 +262,17 @@ Deno.serve(async (req: Request) => {
 
           if (remindAt.getTime() > Date.now()) {
             // Resolve lead email + name, technician email + name, and a user_id for the row.
-            const { data: lead } = await supabase
-              .from('anew_leads')
-              .select('field_values, entity_id, created_by, assigned_to')
-              .eq('id', leadId)
-              .maybeSingle();
-
-            const fv = (lead?.field_values && typeof lead.field_values === 'object' && !Array.isArray(lead.field_values))
-              ? lead.field_values as Record<string, any>
-              : {};
+            const fv = pessoa.fieldValues;
             const leadEmailRaw = fv.email || fv.po_email || fv.Email || null;
             const leadEmail = leadEmailRaw ? String(leadEmailRaw).toLowerCase().trim() : '';
             const leadName = [
               fv.first_name || fv.po_nome || fv.nome || '',
               fv.last_name || fv.po_apelido || fv.apelido || '',
-            ].filter(Boolean).join(' ').trim() || 'Cliente';
+            ].filter(Boolean).join(' ').trim() || pessoa.displayName || 'Cliente';
 
-            const userId = lead?.assigned_to || lead?.created_by || null;
+            // Dono da pessoa; senao quem criou a visita (a entidade do formulario
+            // nasce sem dono ate a visita lhe dar um).
+            const userId = pessoa.ownerId || item.created_by || null;
 
             // Technician email + name via the assigned resource.
             let technicianEmail = '';
@@ -335,9 +335,11 @@ Deno.serve(async (req: Request) => {
             if (technicianEmail) targets.push({ email: technicianEmail, kind: 'technician' });
 
             // scheduled_emails.user_id/entity_id are NOT NULL — only schedule when both resolve.
-            if (userId && leadId) {
+            const lembreteEntityId = pessoa.entityId;
+            const lembreteEntityType = tipoLembrete(pessoa.isClient);
+            if (userId && lembreteEntityId) {
               for (const t of targets) {
-                await scheduleEmail(supabase, {
+                const agendado = await scheduleEmail(supabase, {
                   organizationId,
                   userId,
                   smtpId: emailCfg.email_smtp_id,
@@ -345,16 +347,24 @@ Deno.serve(async (req: Request) => {
                   subject,
                   bodyHtml: htmlFor(t.kind),
                   scheduledFor: remindAt.toISOString(),
-                  entityType: 'leads',
-                  entityId: leadId,
+                  entityType: lembreteEntityType,
+                  entityId: lembreteEntityId,
                   templateId: reminderTemplateId || null,
                 });
+                if (!agendado) lembretesFalhas.push(`lembrete (${t.kind}) nao agendado`);
               }
             }
           }
         }
       } catch (emailErr) {
         console.error('[reschedule-booking] reminder reschedule failed (non-fatal):', emailErr);
+        lembretesFalhas = [emailErr instanceof Error ? emailErr.message : String(emailErr)];
+      }
+      if (lembretesFalhas.length > 0) {
+        await captureError(
+          new Error(`reschedule-booking: lembretes nao reagendados: ${lembretesFalhas.join('; ')}`),
+          { function: "reschedule-booking", schedule_item_id: itemId, falhas: lembretesFalhas },
+        );
       }
     }
 
@@ -366,26 +376,14 @@ Deno.serve(async (req: Request) => {
       const emailCfg = await loadFormEmailConfig(supabase, formId);
 
       // Resolve client email + name + phone from the lead's field_values.
-      let leadEmail = '';
-      let leadName = 'Cliente';
-      let leadPhone = '';
-      if (leadId) {
-        const { data: lead } = await supabase
-          .from('anew_leads')
-          .select('field_values')
-          .eq('id', leadId)
-          .maybeSingle();
-        const fv = (lead?.field_values && typeof lead.field_values === 'object' && !Array.isArray(lead.field_values))
-          ? lead.field_values as Record<string, any>
-          : {};
-        const leadEmailRaw = fv.email || fv.po_email || fv.Email || null;
-        leadEmail = leadEmailRaw ? String(leadEmailRaw).toLowerCase().trim() : '';
-        leadName = [
-          fv.first_name || fv.po_nome || fv.nome || '',
-          fv.last_name || fv.po_apelido || fv.apelido || '',
-        ].filter(Boolean).join(' ').trim() || 'Cliente';
-        leadPhone = String(fv.phone || fv.po_telefone || fv.telefone || '');
-      }
+      const pfv = pessoa.fieldValues;
+      const leadEmailRaw2 = pfv.email || pfv.po_email || pfv.Email || null;
+      const leadEmail = leadEmailRaw2 ? String(leadEmailRaw2).toLowerCase().trim() : '';
+      const leadName = [
+        pfv.first_name || pfv.po_nome || pfv.nome || '',
+        pfv.last_name || pfv.po_apelido || pfv.apelido || '',
+      ].filter(Boolean).join(' ').trim() || pessoa.displayName || 'Cliente';
+      const leadPhone = String(pfv.phone || pfv.po_telefone || pfv.telefone || '');
 
       // Resolve the assigned technician's name + email via the resource → anew_users.
       let technicianEmail = '';
@@ -479,6 +477,7 @@ Deno.serve(async (req: Request) => {
       new_start: slot_start,
       new_end: effectiveEnd,
       formatted_when: formattedWhen,
+      ...(lembretesFalhas.length > 0 ? { reminders_warning: true } : {}),
     });
   } catch (error: unknown) {
     console.error('Error in reschedule-booking:', error);

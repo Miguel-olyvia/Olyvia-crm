@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { carregarCampanha } from "./campanha.ts";
 
 initSentry();
 
@@ -172,79 +173,19 @@ Deno.serve(async (req: Request) => {
     const supabase = rateLimitClient;
 
     let form: any = null;
-    let resolvedFormId = formId;
-    let campaign: any = null;
 
-    let defaultSourceId: string | null = null;
-    
-    // If campaignId provided, get the form from the campaign
-    if (campaignId && !formId) {
-      const { data: campaignData, error: campaignError } = await supabase
-        .from("campaigns")
-        .select("id, name, description, organization_id, status, form_id, location_required")
-        .eq("id", campaignId)
-        .single();
-
-      if (campaignError || !campaignData) {
-        return new Response(
-          JSON.stringify({ error: "Campaign not found" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      if (campaignData.status !== "active") {
-        return new Response(
-          JSON.stringify({ error: "Campaign is not active", status: campaignData.status }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      campaign = campaignData;
-      resolvedFormId = campaignData.form_id;
-
-      if (!resolvedFormId) {
-        return new Response(
-          JSON.stringify({ error: "Campaign has no form associated" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Get default source for this campaign
-      const { data: defaultSource } = await supabase
-        .from("campaign_sources")
-        .select("source_id")
-        .eq("campaign_id", campaignId)
-        .eq("is_default", true)
-        .maybeSingle();
-      
-      if (defaultSource) {
-        defaultSourceId = defaultSource.source_id;
-      }
-    } else if (formId) {
-      // When loading by form_id directly, try to find a campaign that uses this form
-      // so we can resolve default source
-      const { data: campaignForForm } = await supabase
-        .from("campaigns")
-        .select("id, name, description, organization_id, status, form_id, location_required")
-        .eq("form_id", formId)
-        .eq("status", "active")
-        .maybeSingle();
-
-      if (campaignForForm) {
-        campaign = campaignForForm;
-
-        const { data: defaultSource } = await supabase
-          .from("campaign_sources")
-          .select("source_id")
-          .eq("campaign_id", campaignForForm.id)
-          .eq("is_default", true)
-          .maybeSingle();
-
-        if (defaultSource) {
-          defaultSourceId = defaultSource.source_id;
-        }
-      }
+    // A campanha e so atribuicao: pausada, fora de datas ou inexistente nao
+    // impede o formulario. Quem escolhe a campanha valida e a base (resolver).
+    // So ha 404 quando nao existe formulario nenhum a mostrar.
+    const carregado = await carregarCampanha(supabase, { formId, campaignId });
+    if (!carregado.ok) {
+      return new Response(
+        JSON.stringify({ error: carregado.error }),
+        { status: carregado.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
+    const resolvedFormId = carregado.formId;
+    const campaign = carregado.campanha;
 
     // Get form info
     const { data: formData, error: formError } = await supabase
@@ -296,51 +237,28 @@ Deno.serve(async (req: Request) => {
     const brandingI18n = i18nContent?.branding || null;
 
 
-    // Get allowed districts - prioritize campaign location rules over form
+    // Distritos permitidos: so os do formulario (a campanha ja nao decide).
     let allowedDistricts: { id: string; name: string; code: string }[] = [];
-    const locationRequired = campaign?.location_required || form.location_required;
-    
+    const locationRequired = !!form.location_required;
+
     if (locationRequired) {
-      // If campaign has location_required, use campaign_districts
-      if (campaign?.location_required) {
-        const { data: campaignDistricts } = await supabase
-          .from("campaign_districts")
-          .select("district_id")
-          .eq("campaign_id", campaign.id);
+      const { data: formDistricts } = await supabase
+        .from("form_districts")
+        .select("district_id")
+        .eq("form_id", form.id);
 
-        if (campaignDistricts && campaignDistricts.length > 0) {
-          const districtIds = campaignDistricts.map((cd: any) => cd.district_id);
-          const { data: districts } = await supabase
-            .from("administrative_divisions")
-            .select("id, name, code")
-            .in("id", districtIds);
-          
-          allowedDistricts = (districts || []).map((d: any) => ({
-            id: d.id,
-            name: d.name,
-            code: d.code
-          }));
-        }
-      } else if (form.location_required) {
-        // Otherwise use form_districts
-        const { data: formDistricts } = await supabase
-          .from("form_districts")
-          .select("district_id")
-          .eq("form_id", form.id);
+      if (formDistricts && formDistricts.length > 0) {
+        const districtIds = formDistricts.map((fd: any) => fd.district_id);
+        const { data: districts } = await supabase
+          .from("administrative_divisions")
+          .select("id, name, code")
+          .in("id", districtIds);
 
-        if (formDistricts && formDistricts.length > 0) {
-          const districtIds = formDistricts.map((fd: any) => fd.district_id);
-          const { data: districts } = await supabase
-            .from("administrative_divisions")
-            .select("id, name, code")
-            .in("id", districtIds);
-          
-          allowedDistricts = (districts || []).map((d: any) => ({
-            id: d.id,
-            name: d.name,
-            code: d.code
-          }));
-        }
+        allowedDistricts = (districts || []).map((d: any) => ({
+          id: d.id,
+          name: d.name,
+          code: d.code
+        }));
       }
     }
 
@@ -608,9 +526,9 @@ Deno.serve(async (req: Request) => {
 
     // Add campaign info if available
     if (campaign) {
-      response.campaign_id = campaign.id;
-      response.campaign_name = campaign.name;
-      response.default_source_id = defaultSourceId;
+      response.campaign_id = campaign.campaign_id;
+      response.campaign_name = campaign.campaign_name;
+      response.default_source_id = campaign.default_source_id;
     }
 
     // Add branding if exists

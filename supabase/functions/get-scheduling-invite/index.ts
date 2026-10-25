@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { resolverConvite } from "../_shared/schedulingInvite.ts";
 
 initSentry();
 
@@ -61,44 +62,24 @@ Deno.serve(async (req: Request) => {
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const { token } = await req.json();
-    if (!token || typeof token !== 'string') {
-      return json({ error: 'Token em falta ou inválido.', code: 'INVALID' });
+
+    // O convite aponta a entidade e a SUBMISSAO a retomar; `lead_id` na resposta
+    // e o id dessa submissao (a chave de continuacao que o formulario ja usa).
+    const convite = await resolverConvite({ supabase, token });
+    if (!convite.ok) {
+      return json({
+        error: convite.error,
+        code: convite.code,
+        ...(convite.already_booked ? { already_booked: true } : {}),
+      }, convite.code === 'RETRY' ? 503 : 200);
     }
-
-    const { data: invite } = await supabase
-      .from('scheduling_invites')
-      .select('token, lead_id, form_id, step_number, organization_id, expires_at, used_at')
-      .eq('token', token)
-      .maybeSingle();
-
-    if (!invite) return json({ error: 'Este link não é válido.', code: 'INVALID' });
-    if (invite.used_at) return json({ error: 'Este link já foi utilizado.', code: 'USED' });
-    if (new Date(invite.expires_at).getTime() <= Date.now()) {
-      return json({ error: 'Este link expirou.', code: 'EXPIRED' });
-    }
-
-    // If the lead already booked a visit in the meantime, there's nothing to resume.
-    const { data: lead } = await supabase
-      .from('anew_leads')
-      .select('field_values, scheduled_visit_id')
-      .eq('id', invite.lead_id)
-      .maybeSingle();
-
-    if (!lead) return json({ error: 'Este pedido já não existe.', code: 'INVALID' });
-    if (lead.scheduled_visit_id) {
-      return json({ error: 'A sua visita já está agendada.', code: 'BOOKED', already_booked: true });
-    }
-
-    const field_values = (lead.field_values && typeof lead.field_values === 'object' && !Array.isArray(lead.field_values))
-      ? lead.field_values
-      : {};
 
     return json({
-      form_id: invite.form_id,
-      step_number: invite.step_number,
-      lead_id: invite.lead_id,
-      organization_id: invite.organization_id,
-      field_values,
+      form_id: convite.form_id,
+      step_number: convite.step_number,
+      lead_id: convite.lead_id,
+      organization_id: convite.organization_id,
+      field_values: convite.field_values,
       already_booked: false,
     });
   } catch (error: unknown) {

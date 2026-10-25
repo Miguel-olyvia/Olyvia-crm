@@ -10,6 +10,7 @@ import {
 } from '../_shared/formEmails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { atualizarVisitaDaSubmissao, cancelarLembretesDaPessoa, resolverPessoaDoItem } from '../_shared/bookingItem.ts';
 
 initSentry();
 
@@ -37,8 +38,8 @@ const RATE_LIMIT_WINDOW_MINUTES = 1;
  * Steps (as atomic as possible with the JS client):
  *  - schedule_items.status = 'cancelled'
  *  - delete schedule_item_assignees (frees the resource slot)
- *  - anew_leads: status='cancelled', callback_scheduled_at=null, scheduled_visit_id=null
- *  - scheduled_emails (pending, this lead): status='cancelled'
+ *  - form_submissions._meta.visita (a da visita): estado='cancelada' (substitui o estado da lead)
+ *  - scheduled_emails (pending, da ENTIDADE da visita): status='cancelled'
  *  - booking_tokens.used_at = now()
  */
 Deno.serve(async (req: Request) => {
@@ -106,7 +107,7 @@ Deno.serve(async (req: Request) => {
     // 2. Load the schedule item (to find the linked lead)
     const { data: item } = await supabase
       .from('schedule_items')
-      .select('id, status, organization_id, metadata, start_datetime, end_datetime, location')
+      .select('id, status, organization_id, entity_id, metadata, start_datetime, end_datetime, location')
       .eq('id', itemId)
       .maybeSingle();
 
@@ -117,18 +118,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const metadata = (item.metadata && typeof item.metadata === 'object') ? item.metadata as Record<string, any> : {};
-    let leadId: string | null = metadata.lead_id || null;
     const formId: string | null = metadata.form_id || null;
     const organizationId: string = item.organization_id;
 
-    // Fallback: find the lead via scheduled_visit_id when metadata is missing.
-    if (!leadId) {
-      const { data: leadByVisit } = await supabase
-        .from('anew_leads')
-        .select('id')
-        .eq('scheduled_visit_id', itemId)
-        .maybeSingle();
-      leadId = leadByVisit?.id || null;
+    // A pessoa da visita: a ENTIDADE (schedule_items.entity_id) e a submissao
+    // da visita. Leitura falhada: 503 RETRY antes de escrever (nunca seguir com
+    // uma pessoa vazia: nao se cancelariam os lembretes nem se avisaria o cliente).
+    const pessoa = await resolverPessoaDoItem(supabase, item);
+    if (pessoa.erro) {
+      console.error('[cancel-booking] pessoa da visita nao lida:', pessoa.erro);
+      await captureError(new Error(`cancel-booking: ${pessoa.erro}`), { function: "cancel-booking", schedule_item_id: itemId });
+      return json({ error: 'Não foi possível cancelar agora. Tente novamente.', code: 'RETRY' }, 503);
     }
 
     // Resolve the assigned technician's name + email NOW, BEFORE step 4 deletes
@@ -188,32 +188,26 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Não foi possível cancelar agora. Tente novamente.', code: 'RETRY' }, 503);
     }
 
-    // 5. Update the lead
-    if (leadId) {
-      const { error: leadError } = await supabase
-        .from('anew_leads')
-        .update({
-          status: 'cancelled',
-          callback_scheduled_at: null,
-          scheduled_visit_id: null,
-        })
-        .eq('id', leadId);
-      if (leadError) {
-        console.error('[cancel-booking] failed to update lead:', leadError);
-      }
+    // 5. O espelho da visita na submissao fica 'cancelada' (best-effort: a
+    //    visita ja esta cancelada em schedule_items, que e a fonte de verdade).
+    const submissionId = typeof metadata.submission_id === 'string' ? metadata.submission_id : null;
+    const espelhoFalhas = await atualizarVisitaDaSubmissao(supabase, {
+      organizationId, submissionId, alteracao: { tipo: 'cancelada' },
+    });
+    if (espelhoFalhas.length > 0) {
+      console.error('[cancel-booking] failed to update submission visit:', espelhoFalhas);
+      await captureError(new Error(`cancel-booking: ${espelhoFalhas.join('; ')}`), { function: "cancel-booking", schedule_item_id: itemId });
     }
 
-    // 6. Cancel pending reminders for this lead
-    if (leadId) {
-      const { error: emailError } = await supabase
-        .from('scheduled_emails')
-        .update({ status: 'cancelled' })
-        .eq('entity_type', 'leads')
-        .eq('entity_id', leadId)
-        .eq('status', 'pending');
-      if (emailError) {
-        console.error('[cancel-booking] failed to cancel scheduled_emails:', emailError);
-      }
+    // 6. Cancel pending reminders for this person. Falhou: o token NAO se queima
+    //    (a repeticao e idempotente) e o cliente nao fica com um lembrete de uma
+    //    visita cancelada sem que ninguem saiba.
+    const lembreteFalhas = await cancelarLembretesDaPessoa(supabase, {
+      organizationId, entityId: pessoa.entityId,
+    });
+    if (lembreteFalhas.length > 0) {
+      console.error('[cancel-booking] failed to cancel scheduled_emails:', lembreteFalhas);
+      return json({ error: 'Não foi possível cancelar agora. Tente novamente.', code: 'RETRY' }, 503);
     }
 
     // 7. Burn the token (compare-and-swap: only if still unused)
@@ -235,25 +229,15 @@ Deno.serve(async (req: Request) => {
     try {
       const emailCfg = await loadFormEmailConfig(supabase, formId);
 
-      // Resolve client email + name from the lead's field_values.
-      let leadEmail = '';
-      let leadName = 'Cliente';
-      if (leadId) {
-        const { data: lead } = await supabase
-          .from('anew_leads')
-          .select('field_values')
-          .eq('id', leadId)
-          .maybeSingle();
-        const fv = (lead?.field_values && typeof lead.field_values === 'object' && !Array.isArray(lead.field_values))
-          ? lead.field_values as Record<string, any>
-          : {};
-        const leadEmailRaw = fv.email || fv.po_email || fv.Email || null;
-        leadEmail = leadEmailRaw ? String(leadEmailRaw).toLowerCase().trim() : '';
-        leadName = [
-          fv.first_name || fv.po_nome || fv.nome || '',
-          fv.last_name || fv.po_apelido || fv.apelido || '',
-        ].filter(Boolean).join(' ').trim() || 'Cliente';
-      }
+      // Resolve client email + name from the person's field_values (submissao
+      // da visita).
+      const fv = pessoa.fieldValues;
+      const leadEmailRaw = fv.email || fv.po_email || fv.Email || null;
+      const leadEmail = leadEmailRaw ? String(leadEmailRaw).toLowerCase().trim() : '';
+      const leadName = [
+        fv.first_name || fv.po_nome || fv.nome || '',
+        fv.last_name || fv.po_apelido || fv.apelido || '',
+      ].filter(Boolean).join(' ').trim() || pessoa.displayName || 'Cliente';
 
       const { data: orgRow } = await supabase
         .from('anew_organizations')

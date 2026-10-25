@@ -3,6 +3,7 @@ import { z } from "npm:zod";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { orderByLeastBusy, hasDailyCapacity } from "../_shared/leastBusy.ts";
+import { criadorDaEntidade, ligacaoDaVisita } from "./entidade.ts";
 
 initSentry();
 
@@ -31,8 +32,7 @@ const requestSchema = z.object({
   title: z.string(),
   board_id: z.string().optional(),
   description: z.string().optional(),
-  lead_id: z.string().optional(),
-  client_id: z.string().optional(),
+  entity_id: z.string().uuid().optional(),
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
   location: z.string().optional(),
@@ -132,8 +132,7 @@ interface ScheduleRequest {
   board_id?: string;
   title: string;
   description?: string;
-  lead_id?: string;
-  client_id?: string;
+  entity_id?: string;
   contact_id?: string;
   deal_id?: string;
   location?: string;
@@ -491,19 +490,19 @@ async function processScheduleRequest(
   // Machine-triggered calls (X-API-Key from ScheduleTestForm, or insert-lead's
   // internally-trusted call right after a public form submission) have no
   // plain-JWT userId and therefore no businessUserId yet. Inherit created_by
-  // from the lead this schedule request originated from — insert-lead already
-  // resolves a real org-admin anew_users.id as the lead's created_by when it
-  // creates the lead (no human caller there either), so this reuses that same
-  // resolved actor instead of requiring a JWT that these callers don't have.
+  // from the ENTITY this schedule request originated from (lead = entity
+  // without client_since) — insert-lead already resolves a real org-admin
+  // anew_users.id as the entity's created_by when it creates it (no human
+  // caller there either), so this reuses that same resolved actor instead of
+  // requiring a JWT that these callers don't have.
   // Mirrors pipeline-automation's resolveCreatedByForAction fallback pattern.
-  if (!businessUserId && request.lead_id) {
-    const { data: lead } = await supabase
-      .from('anew_leads')
-      .select('created_by')
-      .eq('id', request.lead_id)
-      .eq('organization_id', effectiveCompanyId)
-      .maybeSingle();
-    businessUserId = lead?.created_by || null;
+  if (!businessUserId && request.entity_id) {
+    const criador = await criadorDaEntidade(supabase, request.entity_id, effectiveCompanyId);
+    if (!criador.ok) {
+      console.error('[auto-schedule]', criador.error);
+      return { success: false, error: 'Failed to resolve the entity for scheduling' };
+    }
+    businessUserId = criador.userId;
   }
 
   if (!businessUserId) {
@@ -598,9 +597,7 @@ async function processScheduleRequest(
           origin: 'api',
           start_datetime: result.slot.start,
           end_datetime: result.slot.end,
-          client_id: request.client_id,
-          contact_id: request.contact_id,
-          deal_id: request.deal_id,
+          ...ligacaoDaVisita(request),
           location: request.location,
           priority: request.priority || 0,
           tags: request.tags,
@@ -706,9 +703,7 @@ async function processScheduleRequest(
         origin: 'api',
         start_datetime: slot.start,
         end_datetime: slot.end,
-        client_id: request.client_id,
-        contact_id: request.contact_id,
-        deal_id: request.deal_id,
+        ...ligacaoDaVisita(request),
         location: request.location,
         priority: request.priority || 0,
         tags: request.tags,
@@ -781,9 +776,7 @@ async function processScheduleRequest(
         origin: 'api',
         start_datetime: startDatetime,
         end_datetime: endDatetime,
-        client_id: request.client_id,
-        contact_id: request.contact_id,
-        deal_id: request.deal_id,
+        ...ligacaoDaVisita(request),
         location: request.location,
         priority: request.priority || 0,
         tags: request.tags,

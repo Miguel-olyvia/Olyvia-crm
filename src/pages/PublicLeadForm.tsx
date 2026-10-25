@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { sanitizeCSSValue, sanitizeCustomCss } from "@/lib/forms/sanitizeCssValue";
 import { validateStepFieldFormats } from "@/lib/forms/publicFormValidation";
 import { resolveSchedulingGeoValues, type SchedulingGeoStep } from "@/lib/forms/schedulingGeoInputs";
+import { buildCreateLeadBody, buildUpdateLeadBody } from "./publicLeadFormRequests";
 
 // Animation variants for step transitions
 const stepVariants = {
@@ -1373,35 +1374,19 @@ export default function PublicLeadForm() {
       // scheduling" recovery email instead of the normal confirmation.
       const needsManualScheduling = hasSchedulingStep && !schedulingSlot;
 
-      // Use form_id for new workflow, fallback to campaign_id
-      const requestBody: any = {
-        step_number: currentStep,
-        field_values: stepFieldValues,
-        source: "public_form",
-        source_id: resolvedSourceId || null,
-        needs_manual_scheduling: needsManualScheduling,
-      };
-      if (currentLocale) {
-        requestBody.lang = currentLocale;
-      }
-
-      if (formConfig.form_id) {
-        requestBody.form_id = formConfig.form_id;
-      }
-      if (formConfig.campaign_id) {
-        requestBody.campaign_id = formConfig.campaign_id;
-      } else if (campaignId) {
-        requestBody.campaign_id = campaignId;
-      }
-
-      // Optional, additive: only attach `tracking` when at least one whitelisted
-      // UTM/click-id is present. Keeps legacy bodies byte-identical otherwise.
-      if (tracking) {
-        requestBody.tracking = tracking;
-      }
-      if (embedKind) {
-        requestBody.embed = embedKind;
-      }
+      // A campanha e opcional (so atribuicao): sem ela o pedido segue so com
+      // form_id. `tracking` so entra quando ha UTM/click-id reconhecidos.
+      const requestBody = buildCreateLeadBody({
+        stepNumber: currentStep,
+        stepFieldValues,
+        sourceId: resolvedSourceId || null,
+        needsManualScheduling,
+        locale: currentLocale || null,
+        formId: formConfig.form_id || undefined,
+        campaignId: formConfig.campaign_id || campaignId || undefined,
+        tracking,
+        embedKind,
+      });
 
       if (!leadId) {
         const response = await fetch(`${SUPABASE_URL}/functions/v1/create-lead`, {
@@ -1461,18 +1446,19 @@ export default function PublicLeadForm() {
           safeSetCurrentStep(data.next_step, formConfig?.steps?.length);
         }
       } else {
-        const updateBody: any = {
-          target_type: targetType,
-          target_id: leadId,
-          lead_id: leadId,
-          campaign_id: formConfig?.campaign_id || campaignId,
-          step_number: currentStep,
-          field_values: stepFieldValues,
-          form_id: formConfig.form_id || undefined,
-          needs_manual_scheduling: needsManualScheduling,
-        };
-        if (currentLocale) updateBody.lang = currentLocale;
-        if (tracking) updateBody.tracking = tracking;
+        // Passo 2 em diante: a chave e o id da submissao; form_id vai sempre
+        // (e e ele que o servidor compara), campaign_id so se existir.
+        const updateBody = buildUpdateLeadBody({
+          targetType,
+          leadId,
+          formId: formConfig.form_id || undefined,
+          campaignId: formConfig?.campaign_id || campaignId || undefined,
+          stepNumber: currentStep,
+          stepFieldValues,
+          needsManualScheduling,
+          locale: currentLocale || null,
+          tracking,
+        });
         const response = await fetch(`${SUPABASE_URL}/functions/v1/update-lead`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -1,8 +1,24 @@
+// insert-lead: entrada de leads por API (token com ambito de organizacao).
+//
+// Usa o mesmo nucleo do formulario publico (`_shared/formCaptacao.ts`): cria
+// a ENTIDADE (sem negocio) e grava um toque em form_submissions. A organizacao
+// vem do token e e passada ao resolver: formulario/campanha de outra
+// organizacao abortam com 403 antes de qualquer escrita; campanha inexistente,
+// inativa ou fora de datas ja nao recusa, o envio segue sem campanha.
+//
+// ATENCAO: depende da migration 20261229100000_form_criar_entidade.sql (so
+// base de RH). Entra JUNTO com create-lead, update-lead, get-form-data,
+// book-slot e formCaptacao. NAO publicar na base principal sem autorizacao.
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
-import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
+import { normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { sanitizeFieldValues } from '../_shared/inputSanitizers.ts';
+import { validateLocationDistrict } from '../_shared/leadsValidation.ts';
+import { captarEnvio, resolverCaptacao } from '../_shared/formCaptacao.ts';
+import { montarPedidoAutoSchedule } from './agendamento.ts';
 
 initSentry();
 
@@ -29,248 +45,100 @@ const requestSchema = z.object({
   latitude: z.number().optional(),
   longitude: z.number().optional(),
 });
-import { sanitizeEmail, sanitizePhone, sanitizeFieldValues } from '../_shared/inputSanitizers.ts';
-import {
-  cleanupCreatedEntityArtifacts,
-  resolveRootOrganizationId,
-  validateInsertLeadCampaign,
-  validateLocationDistrict,
-} from '../_shared/leadsValidation.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-api-key',
 };
 
-interface LeadData {
-  first_name: string;
-  last_name: string;
-  email?: string;
-  phone?: string;
-  vat?: string;
-  position?: string;
-  organization_id?: string;
-  notes?: string;
-  source?: string;
-  source_id?: string;
-  campaign_id?: string;
-  status?: string;
-  custom_fields?: Record<string, string>;
-  auto_schedule?: boolean;
-  schedule_options?: {
-    board_id?: string;
-    title?: string;
-    description?: string;
-    duration_minutes?: number;
-    preferred_date?: string;
-    preferred_time_start?: string;
-    preferred_time_end?: string;
-    preferred_resource_ids?: string[];
-    priority?: number;
-    tags?: string[];
-    use_proximity?: boolean;
-  };
-  location?: string;
-  address?: string;
-  postal_code?: string;
-  city?: string;
-  latitude?: number;
-  longitude?: number;
-}
-
-interface AutoScheduleResult {
-  success: boolean;
-  item_id?: string;
-  scheduled_start?: string;
-  scheduled_end?: string;
-  assigned_resources?: string[];
-  resource_details?: {
-    id: string;
-    name: string;
-    distance_km?: number;
-    travel_time_minutes?: number;
-  }[];
-  message?: string;
-  error?: string;
-}
-
-// --- Rate limiting by API key (10 req/min), persistent (DB-backed) ---
 const RATE_LIMIT_BUCKET = 'insert-lead';
 const RATE_LIMIT_MAX_ATTEMPTS = 10;
 const RATE_LIMIT_WINDOW_MINUTES = 1;
+const MAX_FIELD_LENGTH = 10000;
+const DEFAULT_ORIGIN_TEXT = 'API';
 
-// --- Input validation ---
 function validateFieldValues(fields: Record<string, any>): string | null {
   for (const [key, value] of Object.entries(fields)) {
-    if (typeof value === 'string' && value.length > 10000) {
-      return `Field "${key}" exceeds max length (10000 chars)`;
+    if (typeof value === 'string' && value.length > MAX_FIELD_LENGTH) {
+      return `Field "${key}" exceeds max length (${MAX_FIELD_LENGTH} chars)`;
     }
   }
   return null;
 }
 
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   try {
     const apiKey = req.headers.get('x-api-key');
-    
-    if (!apiKey) {
-      return new Response(
-        JSON.stringify({ error: 'API key is required. Use X-API-Key header.' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    if (!apiKey) return json({ error: 'API key is required. Use X-API-Key header.' }, 401);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Rate limit by API key — persistent, DB-backed
     const rateLimit = await checkRateLimit(supabase, {
       bucket: RATE_LIMIT_BUCKET,
       identifier: apiKey,
       maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
       windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
     });
-    if (!rateLimit.allowed) {
-      return rateLimitResponse(rateLimit, corsHeaders);
-    }
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit, corsHeaders);
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, apiKey);
 
-    // Validate API token against scoped_api_tokens using organization_id
     const { data: scopedToken, error: scopedError } = await supabase
       .from('scoped_api_tokens')
       .select('id, organization_id, is_active, usage_count')
       .eq('token_key', apiKey)
       .eq('is_active', true)
       .single();
-
-    if (scopedError || !scopedToken) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or inactive API key' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    if (scopedError || !scopedToken) return json({ error: 'Invalid or inactive API key' }, 401);
 
     const organizationId = scopedToken.organization_id;
-    if (!organizationId) {
-      return new Response(
-        JSON.stringify({ error: 'API token has no organization_id configured' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    if (!organizationId) return json({ error: 'API token has no organization_id configured' }, 400);
 
-    // Update token usage
     await supabase
       .from('scoped_api_tokens')
       .update({ last_used_at: new Date().toISOString(), usage_count: (scopedToken.usage_count || 0) + 1 })
       .eq('id', scopedToken.id);
 
-    // Parse lead data
-    const rawBody = await req.json();
-    const parsedBody = requestSchema.safeParse(rawBody);
+    const parsedBody = requestSchema.safeParse(await req.json());
     if (!parsedBody.success) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid request', details: parsedBody.error.issues }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return json({ error: 'Invalid request', details: parsedBody.error.issues }, 400);
     }
-    const leadData: LeadData = parsedBody.data;
+    const leadData = parsedBody.data;
 
-    // Log metadata only — no PII (C28)
     console.log('Received insert-lead request:', JSON.stringify({
       source: leadData.source,
       campaign_id: leadData.campaign_id,
       organization_id: organizationId,
       has_schedule: !!leadData.auto_schedule,
-      has_custom_fields: !!leadData.custom_fields,
       field_count: leadData.custom_fields ? Object.keys(leadData.custom_fields).length : 0,
     }));
 
-    // Validate custom_fields size (C29)
     if (leadData.custom_fields) {
       const validationError = validateFieldValues(leadData.custom_fields);
-      if (validationError) {
-        return new Response(
-          JSON.stringify({ error: validationError }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+      if (validationError) return json({ error: validationError }, 400);
     }
 
-    let campaignLocationRequired = false;
-    let campaignFormId: string | null = null;
-    if (leadData.campaign_id) {
-      const { data: campaign, error: campaignError } = await supabase
-        .from('campaigns')
-        .select('id, organization_id, status, form_id, location_required')
-        .eq('id', leadData.campaign_id)
-        .maybeSingle();
+    // A organizacao do token manda: o resolver devolve NULL se a campanha for
+    // de outra organizacao ou se o token nao bater com o que se pediu.
+    const origemTexto = leadData.source?.trim() || DEFAULT_ORIGIN_TEXT;
+    const resolvido = await resolverCaptacao(supabase, {
+      campaignId: leadData.campaign_id ?? null,
+      tokenOrganizationId: organizationId,
+      origemTexto,
+      originId: leadData.source_id ?? null,
+    });
+    if (!resolvido.ok) return json({ error: resolvido.error }, resolvido.status);
 
-      if (campaignError && !campaign) {
-        return new Response(
-          JSON.stringify({ error: 'Campaign not found' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const campaignValidation = validateInsertLeadCampaign(organizationId, campaign);
-      if (!campaignValidation.ok) {
-        return new Response(
-          JSON.stringify({
-            error: campaignValidation.error,
-            ...(campaignValidation.details ? campaignValidation.details : {}),
-          }),
-          { status: campaignValidation.status || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      campaignLocationRequired = !!campaign?.location_required;
-      campaignFormId = campaign?.form_id ?? null;
-    }
-
-    const rootOrganizationId = await resolveRootOrganizationId(supabase, organizationId) || organizationId;
-
-    // Find an admin user for created_by via anew_memberships.
-    // anew_memberships has no FK constraints, so PostgREST cannot resolve an
-    // embedded `anew_roles!inner(code)` select/filter (PGRST200). Resolve the
-    // admin role ids first, then match memberships against them.
-    const adminRoleCodes = ['super_admin', 'admin', 'org_admin'];
-    const { data: adminRoleRows, error: adminRoleError } = await supabase
-      .from('anew_roles')
-      .select('id')
-      .in('code', adminRoleCodes);
-
-    if (adminRoleError) {
-      console.error('insert-lead: error fetching admin role ids:', adminRoleError);
-    }
-
-    const adminRoleIds = (adminRoleRows || []).map((r: { id: string }) => r.id);
-
-    let createdBy: string | null = null;
-    if (adminRoleIds.length > 0) {
-      const { data: adminMembership, error: adminMembershipError } = await supabase
-        .from('anew_memberships')
-        .select('user_id')
-        .eq('organization_id', rootOrganizationId)
-        .eq('status', 'active')
-        .in('role_id', adminRoleIds)
-        .limit(1)
-        .maybeSingle();
-
-      if (adminMembershipError) {
-        console.error('insert-lead: error fetching admin membership:', adminMembershipError);
-      }
-
-      createdBy = adminMembership?.user_id || null;
-    }
-
-    // Build field_values JSONB from lead data
-    // Normalize first/last name to defend against integrations that send the
-    // full name in BOTH fields (e.g. META Lead Ads).
     const normalizedNames = normalizeFirstLast(leadData.first_name, leadData.last_name);
     const fieldValues: Record<string, any> = {};
     if (normalizedNames.first) fieldValues.first_name = normalizedNames.first;
@@ -283,332 +151,94 @@ Deno.serve(async (req) => {
     if (leadData.postal_code) fieldValues.postal_code = leadData.postal_code;
     if (leadData.city) fieldValues.city = leadData.city;
     if (leadData.notes) fieldValues.notes = leadData.notes;
+    if (leadData.custom_fields) Object.assign(fieldValues, leadData.custom_fields);
 
-    // Merge custom fields into field_values
-    if (leadData.custom_fields) {
-      Object.entries(leadData.custom_fields).forEach(([key, value]) => {
-        fieldValues[key] = value;
-      });
-    }
-
-    // Validate merged field_values
     const mergedValidation = validateFieldValues(fieldValues);
-    if (mergedValidation) {
-      return new Response(
-        JSON.stringify({ error: mergedValidation }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    if (mergedValidation) return json({ error: mergedValidation }, 400);
 
-    // CRITICAL: server-side enforcement of location_required/allowed_districts.
-    // insert-lead is a scoped-API-key public-ish endpoint (no interactive form),
-    // but a caller can still pass a district value in custom_fields — validate
-    // it the same way create-lead/update-lead do, mirroring get-form-data.
-    if (leadData.campaign_id && (campaignLocationRequired || campaignFormId)) {
-      let locationDefs: Array<{ field_key?: string | null; field_type?: string | null; field_label?: string | null }> = [];
-      let insertFormLocationRequired = false;
-      if (campaignFormId) {
-        const { data: formLocationData } = await supabase
-          .from('forms')
-          .select('location_required')
-          .eq('id', campaignFormId)
-          .maybeSingle();
-        insertFormLocationRequired = !!formLocationData?.location_required;
-
-        const { data: formFieldDefs } = await supabase
-          .from('form_fields')
-          .select('field_key, field_type, field_label')
-          .eq('form_id', campaignFormId)
-          .eq('is_active', true);
-        locationDefs = formFieldDefs || [];
-      } else {
-        const { data: fieldDefs } = await supabase
-          .from('lead_field_definitions')
-          .select('field_key, field_type, field_label')
-          .eq('campaign_id', leadData.campaign_id)
-          .eq('is_active', true);
-        locationDefs = fieldDefs || [];
-      }
-
+    // Distrito (so se houver formulario resolvido pela campanha): server-side.
+    if (resolvido.formId) {
+      const { data: formRow } = await supabase
+        .from('forms')
+        .select('location_required')
+        .eq('id', resolvido.formId)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      const { data: formFieldDefs } = await supabase
+        .from('form_fields')
+        .select('field_key, field_type, field_label')
+        .eq('form_id', resolvido.formId)
+        .eq('is_active', true);
       const locationValidation = await validateLocationDistrict({
         supabase,
-        campaignId: leadData.campaign_id,
-        campaignLocationRequired,
-        formId: campaignFormId,
-        formLocationRequired: insertFormLocationRequired,
-        definitions: locationDefs,
+        campaignId: null,
+        campaignLocationRequired: false,
+        formId: resolvido.formId,
+        formLocationRequired: !!formRow?.location_required,
+        definitions: formFieldDefs || [],
         fieldValues,
       });
-      if (!locationValidation.ok) {
-        return new Response(
-          JSON.stringify({ error: locationValidation.error }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+      if (!locationValidation.ok) return json({ error: locationValidation.error }, 400);
     }
 
-    // --- Defensive sanitization. Rejects corrupted emails/phones, dedupes
-    // arrays, trims string fields. Runs after the static validateFieldValues
-    // size check so we don't mask oversized inputs.
-    const _sanitizeResult = sanitizeFieldValues(fieldValues);
-    Object.assign(fieldValues, _sanitizeResult.cleaned);
-    const sanitizeReport = _sanitizeResult.report;
+    const sanitizeResult = sanitizeFieldValues(fieldValues);
+    const sanitizeReport = sanitizeResult.report;
     if (sanitizeReport.email_rejected) {
       console.warn(`[insert-lead] rejected invalid email "${sanitizeReport.email_rejected}"`);
     }
     if (sanitizeReport.phone_rejected) {
       console.warn(`[insert-lead] rejected invalid phone "${sanitizeReport.phone_rejected}"`);
     }
+    const cleaned = { ...fieldValues, ...sanitizeResult.cleaned };
+    // Contactos lidos pelos nomes directos (nao ha mapeamento de formulario aqui).
+    const definitions = [
+      { field_key: 'first_name', contact_field_mapping: 'first_name' },
+      { field_key: 'last_name', contact_field_mapping: 'last_name' },
+      { field_key: 'email', contact_field_mapping: 'email' },
+      { field_key: 'phone', contact_field_mapping: 'phone' },
+      { field_key: 'address', contact_field_mapping: 'address' },
+      { field_key: 'postal_code', contact_field_mapping: 'postal_code' },
+      { field_key: 'city', contact_field_mapping: 'city' },
+    ];
+    const fieldValuesWithMeta = {
+      ...cleaned,
+      _meta: {
+        current_step: 1,
+        total_steps: 1,
+        is_complete: true,
+        steps_completed: [1],
+        last_updated: new Date().toISOString(),
+      },
+    };
 
-    // Build full location string
+    const envio = await captarEnvio({
+      supabase,
+      resolvido,
+      tokenOrganizationId: organizationId,
+      origemTexto,
+      originId: leadData.source_id ?? null,
+      fieldValues: fieldValuesWithMeta,
+      definitions,
+      currentStep: 1,
+      totalSteps: 1,
+      isComplete: true,
+      notes: leadData.notes ?? null,
+    });
+    if (!envio.ok) return json(envio.code ? { error: envio.error, code: envio.code } : { error: envio.error }, envio.status);
+
     const fullLocation = [leadData.address, leadData.postal_code, leadData.city]
       .filter(Boolean)
       .join(', ') || leadData.location;
 
-    // --- Entity deduplication: reuse existing entity if email matches ---
-    let entityId: string | null = null;
-    let entityWasCreated = false;
-    const rawEmail = leadData.email || fieldValues.email || null;
-    const rawPhone = leadData.phone || fieldValues.phone || null;
-    const leadEmail = sanitizeEmail(rawEmail);
-    const leadPhone = sanitizePhone(rawPhone);
-    const leadFirstName = normalizedNames.first || '';
-    const leadLastName = normalizedNames.last || '';
-
-    // Local-scoped lookup ONLY within organizationId — never silently shares cross-org identity.
-    const { findLocalEntityForOrg, classifyEntityInOrg, emitFormResubmissionAlert, mergeFieldValuesNonDestructive, ensureEntityOrgLinkSR } =
-      await import('../_shared/entityScopedLookup.ts');
-    const scopedHit = await findLocalEntityForOrg({
-      supabase, organizationId, email: leadEmail, phone: leadPhone, nif: null,
-    });
-    if (scopedHit?.entityId) {
-      entityId = scopedHit.entityId;
-      const summary = await classifyEntityInOrg({ supabase, entityId, organizationId });
-      if (summary.targetType && summary.targetId) {
-        const targetTable = summary.targetType === 'lead' ? 'anew_leads' : 'anew_clients';
-        const diff = await mergeFieldValuesNonDestructive({
-          supabase, table: targetTable as any, rowId: summary.targetId, newFieldValues: fieldValues,
-        });
-        const notificationId = await emitFormResubmissionAlert({
-          supabase, organizationId, entityId, summary,
-          campaignId: leadData.campaign_id || null, formId: null, fieldValuesDiff: diff,
-          displayName: composeDisplayName(leadFirstName, leadLastName) || null,
-        });
-        return new Response(JSON.stringify({
-          success: true, outcome: `alert_existing_${summary.targetType}`,
-          entity_id: entityId, target_type: summary.targetType, target_id: summary.targetId,
-          notification_id: notificationId, sanitized: sanitizeReport,
-        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
-      console.log('[insert-lead] reusing local entity', entityId);
-      if (leadFirstName || leadLastName) {
-        const { data: existingEntity } = await supabase.from('anew_entities').select('first_name, last_name').eq('id', entityId).single();
-        if (existingEntity && !existingEntity.first_name && !existingEntity.last_name) {
-          const nameUpdate: Record<string, any> = {};
-          if (leadFirstName) nameUpdate.first_name = leadFirstName;
-          if (leadLastName) nameUpdate.last_name = leadLastName;
-          await supabase.from('anew_entities').update(nameUpdate).eq('id', entityId);
-        }
-      }
-    }
-
-    if (!entityId) {
-      const displayName = composeDisplayName(leadFirstName, leadLastName) || 'Lead';
-      const emailsPayload: Array<Record<string, unknown>> = [];
-      if (leadEmail) {
-        emailsPayload.push({
-          email: leadEmail.toLowerCase().trim(),
-          email_type: 'personal',
-          is_primary: true,
-        });
-      }
-
-      const phonesPayload: Array<Record<string, unknown>> = [];
-      if (leadPhone) {
-        phonesPayload.push({
-          phone_number: leadPhone,
-          phone_type: 'mobile',
-          is_primary: true,
-        });
-      }
-
-      const addressesPayload: Array<Record<string, unknown>> = [];
-      const street = String(leadData.address || '').trim();
-      const postalCode = String(leadData.postal_code || '').trim();
-      const city = String(leadData.city || '').trim();
-      if (street && postalCode) {
-        addressesPayload.push({
-          street,
-          postal_code: postalCode,
-          city: city || '',
-          number: '',
-          country: 'PT',
-          address_type: 'primary',
-          is_primary: true,
-        });
-      }
-
-      const entityPayload: Record<string, unknown> = {
-        display_name: displayName,
-        type: 'person',
-        status: 'active',
-      };
-      if (leadFirstName) entityPayload.first_name = leadFirstName;
-      if (leadLastName) entityPayload.last_name = leadLastName;
-
-      const { data: rpcEntityId, error: entityError } = await supabase.rpc(
-        'create_entity_with_contacts_and_roles',
-        {
-          p_organization_id: organizationId,
-          p_entity: entityPayload,
-          p_emails: emailsPayload,
-          p_phones: phonesPayload,
-          p_addresses: addressesPayload,
-          p_roles: [{ role: 'lead', status: 'active', source_type: 'lead' }],
-          p_created_by: createdBy,
-        },
-      );
-
-      if (entityError || !rpcEntityId) {
-        console.error('Error creating entity via RPC:', entityError);
-        return new Response(
-          JSON.stringify({ error: 'Failed to create lead entity', details: entityError?.message }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      entityId = rpcEntityId as string;
-      entityWasCreated = true;
-      console.log('Created new entity (RPC):', entityId);
-    }
-
-    if (entityId) {
-      await ensureEntityOrgLinkSR({ supabase, entityId, organizationId, isPrimary: entityWasCreated });
-    }
-
-    // Check existing roles on entity
-    let existingRoles: string[] = [];
-    if (entityId) {
-      const { data: roles } = await supabase
-        .from('anew_entity_roles')
-        .select('role, status')
-        .eq('entity_id', entityId)
-        .eq('organization_id', organizationId)
-        .in('role', ['contact', 'client'])
-        .eq('status', 'active');
-      existingRoles = (roles || []).map((r: any) => r.role);
-      if (existingRoles.length > 0) {
-        console.log('Entity already has roles:', existingRoles);
-      }
-    }
-
-    // Insert into anew_leads
-    const { data: lead, error: insertError } = await supabase
-      .from('anew_leads')
-      .insert({
-        organization_id: organizationId,
-        root_organization_id: rootOrganizationId,
-        entity_id: entityId,
-        field_values: fieldValues,
-        source: leadData.source || 'API',
-        status: leadData.status || 'new',
-        campaign_id: leadData.campaign_id || null,
-        created_by: createdBy,
-        assigned_to: null,
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error('Error inserting lead:', insertError);
-      if (entityWasCreated && entityId) {
-        try {
-          await cleanupCreatedEntityArtifacts(supabase, entityId);
-          console.log('Compensation cleanup completed for entity:', entityId);
-        } catch (cleanupErr) {
-          console.error('Compensation cleanup failed (manual review needed):', cleanupErr, 'entity_id:', entityId);
-        }
-      }
-      return new Response(
-        JSON.stringify({ error: 'Failed to create lead', details: insertError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log('Lead created successfully:', lead.id);
-
-    // Handle auto-scheduling if enabled
-    let scheduleResult: AutoScheduleResult | null = null;
-    
-    if (leadData.auto_schedule) {
-      console.log('Auto-scheduling enabled, calling auto-schedule function...');
-      
-      const scheduleOptions = leadData.schedule_options || {};
-      
-      const scheduleRequest = {
-        title: scheduleOptions.title || `Visita - ${leadData.first_name} ${leadData.last_name}`,
-        description: scheduleOptions.description || leadData.notes,
-        lead_id: lead.id,
-        location: fullLocation,
-        postal_code: leadData.postal_code,
-        duration_minutes: scheduleOptions.duration_minutes || 60,
-        preferred_date: scheduleOptions.preferred_date,
-        preferred_time_start: scheduleOptions.preferred_time_start,
-        preferred_time_end: scheduleOptions.preferred_time_end,
-        preferred_resource_ids: scheduleOptions.preferred_resource_ids,
-        priority: scheduleOptions.priority,
-        tags: scheduleOptions.tags,
-        board_id: scheduleOptions.board_id,
-        organization_id: organizationId,
-        auto_assign: true,
-        use_proximity: scheduleOptions.use_proximity !== false && !!leadData.postal_code
-      };
-
-      try {
-        const scheduleResponse = await fetch(
-          `${supabaseUrl}/functions/v1/auto-schedule`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${supabaseServiceKey}`,
-              'x-internal-source': 'insert-lead'
-            },
-            body: JSON.stringify(scheduleRequest)
-          }
-        );
-
-        scheduleResult = await scheduleResponse.json();
-        console.log('Schedule result:', JSON.stringify({ success: scheduleResult?.success, item_id: scheduleResult?.item_id }));
-
-        if (scheduleResult?.success && scheduleResult.scheduled_start) {
-          await supabase
-            .from('anew_leads')
-            .update({
-              callback_scheduled_at: scheduleResult.scheduled_start,
-              status: 'scheduled',
-            })
-            .eq('id', lead.id);
-
-          console.log('Lead updated with scheduled visit');
-        }
-      } catch (scheduleError) {
-        console.error('Error calling auto-schedule:', scheduleError);
-        scheduleResult = {
-          success: false,
-          error: scheduleError instanceof Error ? scheduleError.message : 'Failed to auto-schedule'
-        };
-      }
-    }
-
-    // Build response
-    const response: any = { 
-      success: true, 
-      lead_id: lead.id,
-      entity_id: entityId,
-      existing_roles: existingRoles.length > 0 ? existingRoles : undefined,
-      message: 'Lead created successfully',
+    const response: Record<string, any> = {
+      success: true,
+      // lead_id mantem-se (integracoes) e passa a ser o id da submissao nova.
+      lead_id: envio.submissionId,
+      entity_id: envio.entityId,
+      message: envio.created ? 'Lead created successfully' : 'Submission recorded on an existing record',
       sanitized: sanitizeReport,
     };
+    if (!envio.created) response.outcome = 'existing_entity';
 
     if (fullLocation || leadData.postal_code) {
       response.location = {
@@ -617,30 +247,46 @@ Deno.serve(async (req) => {
         city: leadData.city,
         full_location: fullLocation,
         latitude: leadData.latitude,
-        longitude: leadData.longitude
+        longitude: leadData.longitude,
       };
     }
 
+    // Auto-schedule sobre a ENTIDADE (entity_id). A visita fica em
+    // schedule_items ligada a entidade; nao ha estado de lead para actualizar.
     if (leadData.auto_schedule) {
-      response.schedule = scheduleResult;
-      if (scheduleResult?.success) {
-        response.message = 'Lead created and visit scheduled successfully';
-      } else {
-        response.message = 'Lead created but scheduling failed: ' + (scheduleResult?.error || 'Unknown error');
+      let scheduleResult: Record<string, any> | null = null;
+      try {
+        const scheduleResponse = await fetch(`${supabaseUrl}/functions/v1/auto-schedule`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${supabaseServiceKey}`,
+            'x-internal-source': 'insert-lead',
+          },
+          body: JSON.stringify(montarPedidoAutoSchedule({
+            entityId: envio.entityId,
+            organizationId,
+            fullLocation,
+            lead: leadData,
+            options: leadData.schedule_options,
+          })),
+        });
+        scheduleResult = await scheduleResponse.json();
+      } catch (scheduleError) {
+        console.error('[insert-lead] erro a chamar auto-schedule:', scheduleError);
+        await captureError(scheduleError, { function: "insert-lead", entity_id: envio.entityId });
+        scheduleResult = { success: false, error: 'Failed to auto-schedule' };
       }
+      response.schedule = scheduleResult;
+      response.message += scheduleResult?.success
+        ? ' and visit scheduled successfully'
+        : ` but scheduling failed: ${scheduleResult?.error || 'Unknown error'}`;
     }
 
-    return new Response(
-      JSON.stringify(response),
-      { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-
+    return json(response, envio.created ? 201 : 200);
   } catch (error: any) {
     console.error('Error in insert-lead function:', error);
     await captureError(error, { function: "insert-lead" });
-    return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error.message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return json({ error: 'Internal server error' }, 500);
   }
 });
