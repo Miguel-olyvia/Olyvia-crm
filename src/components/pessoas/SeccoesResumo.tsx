@@ -123,9 +123,9 @@ export function SeccaoPasso({ resumo, hoje, comVisita = false, proximaVisitaVisi
   );
 }
 
-const ICONE_AVISO: Record<AvisoPessoa["tipo"], LucideIcon> = { voltou: Repeat, semContacto: TimerOff, negociosAbertosPerdida: XCircle };
+export const ICONE_AVISO: Record<AvisoPessoa["tipo"], LucideIcon> = { voltou: Repeat, semContacto: TimerOff, negociosAbertosPerdida: XCircle };
 
-function textosDoAviso(t: ReturnType<typeof useTranslation>["t"], a: AvisoPessoa): { titulo: string; dica: string } {
+export function textosDoAviso(t: ReturnType<typeof useTranslation>["t"], a: AvisoPessoa): { titulo: string; dica: string } {
   if (a.tipo === "voltou") return { titulo: t(`${P}alert.returned`), dica: t(`${P}alert.returnedHint`) };
   if (a.tipo === "semContacto") return { titulo: t(`${P}alert.stale`, { count: a.dias }), dica: t(`${P}alert.staleHint`) };
   return { titulo: t(`${P}alert.lostDeals`), dica: a.quantos === 1 ? t(`${P}alert.lostDealsHint.one`) : t(`${P}alert.lostDealsHint.many`, { count: a.quantos }) };

@@ -49,6 +49,8 @@ interface GuiaDoNegocioProps {
   tituloRef?: Ref<HTMLHeadingElement>;
   /** Sem passo a fazer (negócio fechado, ou terminado) mesmo que haja item. */
   semPasso?: boolean;
+  /** A faixa fina por baixo do cabeçalho (a perda, os avisos do negócio e os alertas da pessoa); sem isto vale a do cabeçalho da ficha. */
+  faixa?: ReactNode;
 }
 
 /** O valor e o comercial do negócio numa linha de dados (era o `dl` do bloco de título). */
@@ -71,7 +73,7 @@ function irParaFecho(): void {
   bloco?.focus();
 }
 
-export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, atividade, acaoPerder, cabecalhoFicha, tituloRef, semPasso = false }: GuiaDoNegocioProps) {
+export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, atividade, acaoPerder, cabecalhoFicha, tituloRef, semPasso = false, faixa }: GuiaDoNegocioProps) {
   const { t } = useTranslation();
   const fonte = useFontePessoas();
   const fechoV4 = useFechoV4();
@@ -102,7 +104,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
       passo={doPasso} fases={fasesDoNegocioParaGuia(fases)} aoAcao={aoAcao} atributosAcao={acao.atributos} acaoPerder={acaoPerder}
       explicacao={acao.bloqueio && acao.idBloqueio ? { id: acao.idBloqueio, texto: acao.bloqueio } : null}
       cabecalho={{ nome: pessoa?.nome ?? negocio.pessoa, linha: negocio.servico, telefone: cliente.telefone, local }} cliente={cliente} acontecimentos={acontecimentos}
-      tituloSecao={t("pessoasPagina.deal.next")} tituloRef={tituloRef} {...cabecalhoFicha}
+      tituloSecao={t("pessoasPagina.deal.next")} tituloRef={tituloRef} {...cabecalhoFicha} faixa={faixa ?? cabecalhoFicha?.faixa}
       extra={(
         <div className="space-y-2">
           <Prazo prazo={negocio.proximoPrazo} hoje={hoje} />

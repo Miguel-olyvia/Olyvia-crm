@@ -9,6 +9,7 @@ import { fichaDb, LEAD_ID, PESSOA_ID, pessoaDb } from "@/hooks/pessoas/fichaFabr
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { respostaOk, rpcMock } from "@/hooks/pessoas/fichaTestUtil";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { abrirApoio } from "./apoioFichaTeste";
 import { FichaReal } from "./FichaReal";
 
 const lerLead = vi.hoisted(() => vi.fn());
@@ -55,8 +56,12 @@ function desenhar() {
   );
 }
 const aberta = () => screen.findByRole("dialog", { name: "Ana Lopes" });
-// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada ao entrar.
-const abrirDados = async () => { fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ })); };
+// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, na primeira aba do diálogo de apoio (Mais > Registos e dados).
+const abrirDados = async () => {
+  await screen.findByRole("button", { name: "Mais" });
+  abrirApoio("Registos e dados");
+  fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ }));
+};
 
 describe("FichaReal: classificação MQL/SQL à mão", () => {
   it("uma lead sem classificação oferece MQL e SQL; classificar grava por neg_classificar_lead e a ficha mostra o selo", async () => {

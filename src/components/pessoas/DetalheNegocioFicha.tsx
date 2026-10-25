@@ -2,38 +2,33 @@
 // o percurso (contactos, visitas, levantamento), orçamentos e, se existirem, proposta e contrato. Tudo na página de Pessoas, sem
 // ir à de Negócio e metas: só reutiliza os seus painéis, com os detalhes de exemplo (ou nenhuns). Na ficha real (com `DadosNegocio` e as
 // mutações por contexto) lê os documentos da base, perde, anula a perda e dá como ganho contra a base, só com permissão de editar.
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, FilePlus2 } from "lucide-react";
+// Com o guia (a ficha real) por baixo do guia só ficam os elementos de decisão (perda, alertas, fecho); as secções recolhíveis e as ações de editar,
+// mandar para o lixo e mudar o fecho abrem a pedido nos «Detalhes do negócio» (um diálogo por cima, a partir do menu «Mais»).
+import { useEffect, useRef, type MutableRefObject } from "react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Seccao } from "@/components/ficha-comum/Seccao";
-import { registosDoNegocio, registosPorLigar, totalDeRegistos } from "@/components/negocio-metas/acoesRegistos";
 import { BotaoAnularPerda, BotaoPerderNegocio } from "@/components/negocio-metas/BotoesPerda";
-import { ContratoPainel } from "@/components/negocio-metas/ContratoPainel";
 import { useDadosNegocio } from "@/components/negocio-metas/costuraNegocio";
 import { semContratosSeProposta } from "@/components/negocio-metas/fechoNegocio";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
-import { NovoOrcamentoDialogo } from "@/components/negocio-metas/NovoOrcamentoDialogo";
-import { aceitaOrcamentos } from "@/components/negocio-metas/negocioAcoes";
-import { useAlteracoesNegocios, useDetalheDoNegocio } from "@/components/negocio-metas/negociosAlterados";
+import { useAlteracoesNegocios } from "@/components/negocio-metas/negociosAlterados";
 import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { OrcamentosPainel } from "@/components/negocio-metas/OrcamentosPainel";
-import { PercursoNegocio } from "@/components/negocio-metas/PercursoPainel";
-import { PropostaPainel } from "@/components/negocio-metas/PropostaPainel";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
-import { AbrirDocumento } from "./AbrirDocumento";
 import { AcoesEdicaoNegocio } from "./AcoesEdicaoNegocio";
+import { DetalhesRecolhiveis, secaoAberta } from "./ApoioNegocio";
 import { AlertasNegocio } from "./AlertasNegocio";
 import { BlocoFechoNegocio } from "./BlocoFechoNegocio";
-import { CondicoesDaProposta } from "./CondicoesDaProposta";
 import { EtiquetaFecho } from "./EtiquetaFecho";
 import { passoDoNegocio } from "./etapaPessoa";
 import { FaixaFasesNegocio } from "./FaixaFasesNegocio";
-import { fasesDoNegocio, type IdFase } from "./fasesDoNegocio";
+import { fasesDoNegocio } from "./fasesDoNegocio";
+import { FichaApoioDialogo } from "./FichaApoioDialogo";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import { DadosDoNegocio, GuiaDoNegocio } from "./GuiaDoNegocio";
@@ -46,11 +41,12 @@ import { passoDoItem } from "./processo/passosProcesso";
 import { useAcaoDoPasso } from "./processo/processoContexto";
 import type { ItemProcesso } from "./processo/tiposProcesso";
 import { trabalhoDoItem } from "./processo/trabalhoDoItem";
-import { RegistosLigadosNegocio } from "./RegistosLigadosNegocio";
-import { SeccaoRecolhivel } from "./SeccaoRecolhivel";
 import { Prazo } from "./SeccoesResumo";
 
 const P = "pessoasPagina.";
+
+/** Sem o ref da ficha (um uso fora dela) o diálogo deixa o foco por conta do Radix. */
+const SEM_ORIGEM: MutableRefObject<HTMLElement | null> = { current: null };
 
 interface DetalheNegocioFichaProps {
   negocio: NegocioMes;
@@ -70,6 +66,11 @@ interface DetalheNegocioFichaProps {
   comGuia?: boolean;
   /** O cabeçalho único da ficha (título, selos, paginador, Email e Mais), que o guia do negócio passa a ter; sem isto o guia desenha o nome da pessoa. */
   cabecalhoFicha?: PecasCabecalhoFicha;
+  /** Com o guia: o diálogo «Detalhes do negócio» está aberto (o estado vive na ficha, porque o menu «Mais» do cabeçalho é que o abre). */
+  apoioAberto?: boolean;
+  aoFecharApoio?: () => void;
+  /** O botão a que o foco regressa quando o diálogo fecha. */
+  origemApoio?: MutableRefObject<HTMLElement | null>;
 }
 
 /**
@@ -118,23 +119,13 @@ function PerdaDoNegocio({ negocio, fase, motivo, podeAnular }: { negocio: Negoci
   );
 }
 
-type SecaoDetalhe = "percurso" | "registos" | "orcamentos" | "proposta" | "contrato";
-
-/** A secção de detalhes que vem aberta: a da fase em que o negócio está; num negócio ganho ou perdido, o percurso. */
-function secaoAberta(fase: IdFase | undefined, terminado: boolean): SecaoDetalhe {
-  if (terminado) return "percurso";
-  if (fase === "orcamento") return "orcamentos";
-  if (fase === "proposta") return "proposta";
-  if (fase === "contrato") return "contrato";
-  if (fase === "levantamento") return "registos";
-  return "percurso";
-}
-
-export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha, apoioAberto = false, aoFecharApoio, origemApoio }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
   const negocio = semContratosSeProposta(negocioDaFicha);
   const titulo = useRef<HTMLHeadingElement>(null);
+  // O título do diálogo «Detalhes do negócio»: para onde vai o foco quando o botão de mudar o fecho desaparece lá dentro.
+  const tituloApoio = useRef<HTMLHeadingElement>(null);
   // Ao abrir o detalhe, o foco vai para o título (a lista de onde veio já não existe).
   useEffect(() => titulo.current?.focus(), []);
   const perda = useAlteracoesNegocios().perdidos[negocio.id];
@@ -150,11 +141,6 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
     situacaoAnterior.current = situacao;
     titulo.current?.focus();
   }, [situacao]);
-  const detalhe = useDetalheDoNegocio(negocio.id);
-  const [criando, setCriando] = useState(false);
-  // Só o exemplo tem «Criar orçamento»: o diálogo grava em memória. Na ficha real o orçamento cria-se pelo passo do processo (editor real).
-  const emExemplo = useDadosNegocio() === null;
-  const podeCriar = emExemplo && estaAberto(negocio) && aceitaOrcamentos(negocio);
   // As fases deste negócio (as da abordagem só aparecem quando existem) e a atual, que é a etiqueta do cabeçalho.
   const registos = useRegistosPessoa();
   const perdidoAntigo = (negocio as { resultado?: string }).resultado === "perdido";
@@ -164,18 +150,32 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
   const comPasso = estaAberto(negocio) && !acoes.fechado;
   // Os detalhes: só o da fase em que o negócio está vem aberto (num ganho ou perdido, o percurso); os outros ficam a uma linha de resumo.
   const aberta = secaoAberta(faseAtual, perda !== undefined || perdidoAntigo);
-  const ligados = totalDeRegistos(registosDoNegocio(registos, negocio.id));
-  const porLigar = totalDeRegistos(registosPorLigar(registos, negocio.pessoaId ?? ""));
-  const nOrcamentos = negocio.orcamentos.length;
   const valor = formatarMeta("euro", valorDoNegocio(negocio));
-  const resumoOrcamentos = nOrcamentos === 0 ? t(`${P}detail.quotes.none`) : nOrcamentos === 1 ? t(`${P}detail.quotes.one`, { value: valor }) : t(`${P}detail.quotes.many`, { count: nOrcamentos, value: valor });
-  const resumoLigados = estaAberto(negocio) ? t(`${P}detail.linkedSummary`, { linked: ligados, toLink: porLigar }) : t(`${P}detail.linkedSummaryClosed`, { linked: ligados });
+  // Com o guia, a perda e os avisos do negócio vão para a faixa fina logo por baixo do cabeçalho (junto dos alertas da pessoa), e só se existirem.
+  const faixaNegocio = comGuia ? (
+    <div className="space-y-2 empty:hidden">
+      {cabecalhoFicha?.faixa}
+      {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
+      <AlertasNegocio negocio={negocio} />
+    </div>
+  ) : undefined;
   return (
     <div className="space-y-4">
-      <Button type="button" variant="ghost" className={cn("-ml-3 min-h-11 gap-2", FOCO)} onClick={aoVoltar}>
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        {t(`${P}deal.back`)}
-      </Button>
+      {comGuia ? (
+        // Com o guia: uma ligação discreta por cima do cabeçalho. O nome visível («Negócios») está contido no nome acessível («Voltar aos negócios»).
+        <Button
+          type="button" variant="ghost" aria-label={t(`${P}deal.back`)}
+          className={cn("-ml-3 min-h-11 gap-2 px-3 text-sm text-muted-foreground hover:text-foreground", FOCO)} onClick={aoVoltar}
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          {t(`${P}deal.backShort`)}
+        </Button>
+      ) : (
+        <Button type="button" variant="ghost" className={cn("-ml-3 min-h-11 gap-2", FOCO)} onClick={aoVoltar}>
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          {t(`${P}deal.back`)}
+        </Button>
+      )}
       {/* O estado do negócio, num só bloco: o que é, em que fase está e o que fazer agora. Com o guia (a ficha real) o cabeçalho do guia é o único: o serviço
           é a linha, o valor e o comercial vão no passo e a fase já está na barra; só o tipo de fecho continua à vista. */}
       <div className={cn("space-y-4", !comGuia && "rounded-xl border border-border bg-card p-4")}>
@@ -201,7 +201,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
           <>
             <GuiaDoNegocio
               negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
-              cabecalhoFicha={cabecalhoFicha} tituloRef={titulo} semPasso={!comPasso}
+              cabecalhoFicha={cabecalhoFicha} faixa={faixaNegocio} tituloRef={titulo} semPasso={!comPasso}
               acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" /> : undefined}
             />
             {(!comPasso || !item || negocio.fecho) && (
@@ -215,8 +215,8 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
         ) : (
           <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
         )}
-        {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
-        <AlertasNegocio negocio={negocio} />
+        {!comGuia && perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
+        {!comGuia && <AlertasNegocio negocio={negocio} />}
         {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. Sem processo (o exemplo) fica só o texto do passo. */}
         {comPasso && !comGuia && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
         {comPasso && !comGuia && podeEditar && (
@@ -225,44 +225,23 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
           </div>
         )}
         <BlocoFechoNegocio negocio={negocio} />
-        {/* Mudar o tipo de fecho: só na ficha real, com permissão de editar e com o negócio aberto. */}
-        <MudarFechoNegocio negocio={negocio} aoSemBotao={() => titulo.current?.focus()} />
-        {/* Editar o título, as notas e o comercial, e mandar para o lixo: só na ficha real, com a permissão certa. */}
-        <AcoesEdicaoNegocio negocio={negocio} aoApagado={aoApagado ?? aoVoltar} />
+        {/* Mudar o tipo de fecho: só na ficha real, com permissão de editar e com o negócio aberto. Com o guia vive nos «Detalhes do negócio». */}
+        {!comGuia && <MudarFechoNegocio negocio={negocio} aoSemBotao={() => titulo.current?.focus()} />}
+        {/* Editar o título, as notas e o comercial, e mandar para o lixo: só na ficha real, com a permissão certa. Com o guia vive nos «Detalhes do negócio». */}
+        {!comGuia && <AcoesEdicaoNegocio negocio={negocio} aoApagado={aoApagado ?? aoVoltar} />}
       </div>
-      <div className="space-y-2">
-        <p className="text-sm font-semibold text-muted-foreground">{t(`${P}detail.more`)}</p>
-        <SeccaoRecolhivel titulo={t("businessGoals.journey.title")} resumo={t(`${P}detail.journeyHint`)} aberta={aberta === "percurso"}>
-          <PercursoNegocio negocio={negocio} detalhe={detalhe} />
-        </SeccaoRecolhivel>
-        <SeccaoRecolhivel titulo={t(`${P}linked.title`)} resumo={resumoLigados} aberta={aberta === "registos"}>
-          <RegistosLigadosNegocio negocio={negocio} aberto={estaAberto(negocio)} />
-        </SeccaoRecolhivel>
-        <SeccaoRecolhivel titulo={t(`${P}deal.quotes`)} resumo={resumoOrcamentos} aberta={aberta === "orcamentos"}>
-          {podeCriar && (
-            <Button type="button" variant="outline" className={cn("mb-3 min-h-11 gap-2", FOCO)} onClick={() => setCriando(true)}>
-              <FilePlus2 className="h-4 w-4" aria-hidden="true" />
-              {t("businessGoals.actions.createQuote")}
-            </Button>
-          )}
-          {nOrcamentos > 0 && <AbrirDocumento tipo="orcamento" negocioId={negocio.id} />}
-          <OrcamentosPainel negocio={negocio} detalhe={detalhe} />
-        </SeccaoRecolhivel>
-        {negocio.proposta && (
-          <SeccaoRecolhivel titulo={t(`${P}deal.proposal`)} resumo={t(`businessGoals.proposal.${negocio.proposta.estado}`)} aberta={aberta === "proposta"}>
-            <AbrirDocumento tipo="proposta" negocioId={negocio.id} />
-            <PropostaPainel negocio={negocio} detalhe={detalhe} hoje={hoje} />
-            <CondicoesDaProposta negocio={negocio} hoje={hoje} />
-          </SeccaoRecolhivel>
-        )}
-        {negocio.contrato && (
-          <SeccaoRecolhivel titulo={t(`${P}deal.contract`)} resumo={t(`businessGoals.contract.${negocio.contrato.estado}`)} aberta={aberta === "contrato"}>
-            <AbrirDocumento tipo="contrato" negocioId={negocio.id} />
-            <ContratoPainel negocio={negocio} detalhe={detalhe} />
-          </SeccaoRecolhivel>
-        )}
-      </div>
-      {emExemplo && <NovoOrcamentoDialogo negocio={criando ? negocio : null} hoje={hoje} aoFechar={() => setCriando(false)} />}
+      {comGuia ? (
+        <FichaApoioDialogo
+          aberto={apoioAberto} aoFechar={() => aoFecharApoio?.()} titulo={t("pessoasPagina.apoio.negocio.titulo")} descricao={negocio.servico}
+          origem={origemApoio ?? SEM_ORIGEM} tituloRef={tituloApoio}
+        >
+          <div className="space-y-4 p-4 sm:p-6">
+            <MudarFechoNegocio negocio={negocio} aoSemBotao={() => tituloApoio.current?.focus()} />
+            <AcoesEdicaoNegocio negocio={negocio} aoApagado={() => { aoFecharApoio?.(); (aoApagado ?? aoVoltar)(); }} />
+            <DetalhesRecolhiveis negocio={negocio} hoje={hoje} aberta={aberta} />
+          </div>
+        </FichaApoioDialogo>
+      ) : <DetalhesRecolhiveis negocio={negocio} hoje={hoje} aberta={aberta} />}
     </div>
   );
 }

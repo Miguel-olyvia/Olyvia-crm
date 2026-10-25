@@ -6,6 +6,7 @@ import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import { agregadosDb, contactoDb, fichaDb, negocioDb, pessoaDb, seccaoDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { abrirApoio } from "./apoioFichaTeste";
 import { FichaReal } from "./FichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
@@ -161,12 +162,15 @@ describe("FichaReal: aberta com dados", () => {
   it("não mostra a marca «exemplo», a aba Notas, «Criar negócio» nem «Visita e levantamento»", () => {
     desenhar();
     expect(screen.queryByText("exemplo")).toBeNull();
-    expect(screen.queryByRole("tab", { name: /Notas/ })).toBeNull();
-    expect(screen.getByRole("tab", { name: /Negócios/ })).toBeInTheDocument();
+    // As abas já não estão à vista: abrem a pedido, no diálogo de apoio (e a aba Notas não existe na ficha real).
+    expect(screen.queryByRole("tab")).toBeNull();
     // Com um negócio aberto o «Mais» só oferece «Registar chamada» (já não há botão do passo para a chamada): nem Nota, nem Adiar, nem Criar negócio.
     fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
     expect(screen.getByRole("menuitem", { name: "Registar chamada" })).toBeInTheDocument();
     for (const nome of [/^Nota$/, /Adiar/, /Criar negócio/, /Visita e levantamento/]) expect(screen.queryByRole("menuitem", { name: nome })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Negócios/ }));
+    expect(screen.getByRole("tab", { name: /Negócios/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /Notas/ })).toBeNull();
   });
 
   it("sem negócios o «Mais» só oferece encerrar: nada de Nota, Adiar, Criar negócio nem Visita e levantamento", () => {
@@ -200,8 +204,7 @@ describe("FichaReal: aberta com dados", () => {
 
   it("a ficha adaptada traz o negócio aberto e os registos para o ecrã", () => {
     desenhar();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: /Negócios/ }));
-    fireEvent.click(screen.getByRole("tab", { name: /Negócios/ }));
+    abrirApoio("Negócios");
     expect(screen.getByText("Casa de banho")).toBeInTheDocument();
   });
 });

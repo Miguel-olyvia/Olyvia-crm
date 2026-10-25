@@ -204,3 +204,71 @@ describe("GuiaDoPasso: a ordem do DOM é a visual", () => {
     expect(primario.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
+
+describe("GuiaDoPasso: a estrutura do desenho (cartão do cabeçalho, barra grossa, três colunas)", () => {
+  it("a barra de fases tem a fase atual preenchida num tom mais claro que as feitas (revisão: não só pela cor), as por fazer vazias, e a atual diz-se por aria-current e por texto", () => {
+    guia({ fases: fasesDaPessoa("contactado") }, passo(item({ fase: "contactado" })));
+    const itens = within(screen.getByRole("list", { name: "Fases" })).getAllByRole("listitem");
+    const segmento = (li: HTMLElement) => li.querySelector<HTMLElement>("div[aria-hidden]")!;
+    expect(segmento(itens[0]).className).toMatch(/(^|\s)bg-primary(\s|$)/);
+    expect(segmento(itens[1]).className).toMatch(/(^|\s)bg-primary\/60(\s|$)/);
+    expect(segmento(itens[2]).className).toMatch(/(^|\s)bg-muted(\s|$)/);
+    expect(itens[1]).toHaveAttribute("aria-current", "step");
+    expect(itens[1]).toHaveTextContent("atual");
+  });
+
+  it("a lista da fase é um cartão com círculos preenchidos nos feitos e vazios nos por fazer (e diz-se por texto)", () => {
+    guia({}, passo(item(), { dados: { ...DADOS, temContacto: false } }));
+    const feito = screen.getByText("Quem pede").closest("li")!;
+    const porFazer = screen.getByText("Contacto", { selector: "span:not(.sr-only)" }).closest("li")!;
+    expect(feito.querySelector("[aria-hidden]")!.className).toMatch(/(^|\s)bg-primary(\s|$)/);
+    expect(porFazer.querySelector("[aria-hidden]")!.className).toMatch(/border-2/);
+    expect(porFazer.querySelector("[aria-hidden]")!.className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
+    expect(feito).toHaveTextContent("feito");
+    expect(porFazer).toHaveTextContent("por fazer");
+    expect(feito.closest("div[class*='rounded-xl']")).not.toBeNull();
+  });
+
+  it("o título do passo é grande e a negrito, e o rótulo da fase (pequeno) vem por cima", () => {
+    guia();
+    const titulo = screen.getByRole("heading", { level: 2, name: "Está tudo. Registar a chamada." });
+    expect(titulo.className).toMatch(/font-bold/);
+    expect(titulo.className).toMatch(/text-2xl/);
+    const rotulo = screen.getAllByText("Por contactar", { selector: "p" })[0];
+    expect(rotulo.compareDocumentPosition(titulo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("a grelha do passo tem três colunas a partir de lg (lista | passo | cliente) e o cliente já não espera pelos ecrãs enormes", () => {
+    guia();
+    const grelha = screen.getByRole("heading", { level: 2, name: "Está tudo. Registar a chamada." }).closest("div[class*='grid']")!;
+    expect(grelha.className).toMatch(/lg:grid-cols-\[210px_minmax\(0,1fr\)_270px\]/);
+    expect(grelha.className).not.toMatch(/min-\[1800px\]/);
+  });
+
+  it("há um único botão primário e «Anterior» é discreto (ghost), à esquerda", () => {
+    guia();
+    const cheios = screen.getAllByRole("button").filter((b) => /(^|\s)bg-primary(\s|$)/.test(b.className));
+    expect(cheios).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Anterior" }).className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
+  });
+
+  it("a faixa de alertas vai logo por baixo do cabeçalho, antes da barra de fases; sem faixa não há nada", () => {
+    guia({ faixa: <p>Faixa de teste</p> });
+    const faixa = screen.getByText("Faixa de teste");
+    const fases = screen.getByRole("list", { name: "Fases" });
+    expect(faixa.compareDocumentPosition(fases) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+    guia();
+    expect(screen.queryByText("Faixa de teste")).toBeNull();
+  });
+
+  it("«Ver toda a atividade» no cartão do cliente só existe com o callback e chama-o", () => {
+    const aoVerAtividade = vi.fn();
+    guia({ aoVerAtividade });
+    fireEvent.click(screen.getByRole("button", { name: "Ver toda a atividade" }));
+    expect(aoVerAtividade).toHaveBeenCalledTimes(1);
+    cleanup();
+    guia();
+    expect(screen.queryByRole("button", { name: "Ver toda a atividade" })).toBeNull();
+  });
+});

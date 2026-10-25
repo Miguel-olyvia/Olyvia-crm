@@ -7,6 +7,7 @@ import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import { atividadeDb, contactoDb, fichaDb, levantamentoDb, seccaoDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { abrirApoio, irParaAba } from "./apoioFichaTeste";
 import { FichaReal } from "./FichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
@@ -46,10 +47,8 @@ function desenhar(extra: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const props = { pessoaId: ID as string | null, idsVisiveis: [ID], aoFechar: vi.fn(), aoIrPara: vi.fn(), aoLimpar: vi.fn(), ...extra };
   return { props, ...render(<FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...props} /></MemoryRouter></FontePessoasContext.Provider>) };
 }
-const irParaAtividade = () => {
-  fireEvent.mouseDown(screen.getByRole("tab", { name: /Atividade/ }));
-  fireEvent.click(screen.getByRole("tab", { name: /Atividade/ }));
-};
+// A atividade (e as visitas, os registos...) já não estão à vista: abrem a pedido, a partir do menu «Mais», num diálogo por cima.
+const irParaAtividade = () => abrirApoio("Atividade");
 
 beforeEach(() => fichaMock.mockReset());
 
@@ -58,16 +57,17 @@ describe("Carregar mais", () => {
     const h = hook();
     fichaMock.mockReturnValue(h);
     desenhar();
-    // Os registos (contactos e levantamentos) vivem numa secção recolhível, fechada ao entrar.
+    // Os registos (contactos e levantamentos) vivem numa secção recolhível, fechada ao entrar, na primeira aba do diálogo de apoio (Mais > Registos e dados).
+    expect(screen.queryByRole("button", { name: /Carregar mais/ })).toBeNull();
+    abrirApoio("Registos e dados");
     fireEvent.click(screen.getByRole("button", { name: /^Registos/ }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais contactos" }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais levantamentos" }));
     // As visitas já não estão no Resumo (só a próxima): o «Carregar mais visitas» vive na aba Visitas.
     expect(screen.queryByRole("button", { name: "Carregar mais visitas" })).toBeNull();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: /^Visitas/ }));
-    fireEvent.click(screen.getByRole("tab", { name: /^Visitas/ }));
+    irParaAba(/^Visitas/);
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais visitas" }));
-    irParaAtividade();
+    irParaAba(/^Atividade/);
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais atividade" }));
     expect(h.carregarMais.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["contactos", "levantamentos", "visitas", "atividade"]);
   });

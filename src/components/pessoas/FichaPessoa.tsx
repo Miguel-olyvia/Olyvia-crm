@@ -1,4 +1,5 @@
 import { useRef, type MutableRefObject } from "react";
+import { cn } from "@/lib/utils";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { FichaInterior, type FichaInteriorProps } from "./FichaInterior";
 import { vizinhas } from "./navegacaoFicha";
@@ -31,7 +32,8 @@ function focoDeRegresso(origem: HTMLElement | null): HTMLElement | null {
 
 /**
  * A ficha da pessoa, num painel lateral (Sheet) que cobre metade do ecrã (no mínimo 640 px; em ecrã estreito, todo): cabeçalho
- * com navegação, ações, percurso e abas. O Esc fecha primeiro o painel de ação, se houver; o "X" por defeito do Sheet
+ * com navegação, ações, percurso e abas. Com o guia (a ficha real) o painel é mais largo (até 1120 px, 94% do ecrã) para caberem as três colunas do
+ * passo seguinte (lista da fase, passo e cliente). O Esc fecha primeiro o painel de ação, se houver; o "X" por defeito do Sheet
  * esconde-se por classe, porque a ficha tem o seu botão Fechar.
  */
 export function FichaPessoa({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara, origemFoco, ...resto }: FichaPessoaProps) {
@@ -42,7 +44,10 @@ export function FichaPessoa({ resumo, aberto, aoFechar, idsVisiveis, aoIrPara, o
   return (
     <Sheet open={aberto && resumo !== null} onOpenChange={(aberto) => { if (!aberto) aoFechar(); }}>
       <SheetContent
-        className="flex w-full flex-col gap-0 p-0 sm:w-1/2 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden"
+        className={cn(
+          "flex w-full flex-col gap-0 p-0 sm:min-w-[640px] sm:max-w-none motion-reduce:!animate-none [&>button:last-child]:hidden",
+          resto.comGuia ? "sm:w-[min(1120px,94vw)]" : "sm:w-1/2",
+        )}
         onEscapeKeyDown={(e) => { if (fecharPainel.current?.()) e.preventDefault(); }}
         onOpenAutoFocus={(e) => {
           origem.current = origemFoco?.current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);

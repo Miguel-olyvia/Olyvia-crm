@@ -1,7 +1,8 @@
-// O guia do passo seguinte: o cabeçalho (nome, linha, telefone, morada e «Marcar como perdido»), a barra de fases, a lista da fase à esquerda, no
-// centro o título grande, o subtítulo, «Anterior» e UM botão primário, e o cartão do cliente com os últimos acontecimentos (por baixo; num ecrã muito
-// largo, à direita, como no desenho). Na ficha da pessoa é o ÚNICO cabeçalho: leva também o título da ficha (`nomeEl`), os selos, o aviso de estado,
-// a navegação entre pessoas e as ações secundárias (Email, Mais), todos passados pelo chamador.
+// O guia do passo seguinte, como no desenho: um cartão com o cabeçalho (nome, linha, telefone, morada e «Marcar como perdido») e a barra de fases; por
+// baixo, sobre o fundo suave, a lista da fase à esquerda (num cartão), no centro o título grande, o subtítulo, «Anterior» e UM botão primário, e o
+// cartão do cliente com os últimos acontecimentos à direita (a partir de 1024 px; abaixo disso, por baixo). Na ficha da pessoa é o ÚNICO cabeçalho: leva
+// também o título da ficha (`nomeEl`), os selos, o aviso de estado, a navegação entre pessoas, as ações secundárias (Email, Mais, atalhos) e a faixa
+// fina de alertas, todos passados pelo chamador.
 // Só apresentação: recebe o passo já calculado (`calcularPassoGuiado`) e os callbacks por props; não fala com a base. «Anterior» só lê a fase que
 // já passou (não existe forma de recuar uma fase) e o botão primário passa a ser «Voltar ao passo atual». No telemóvel o passo vem primeiro e a
 // lista da fase fica recolhida.
@@ -61,13 +62,17 @@ export interface GuiaDoPassoProps {
   acoesSecundarias?: ReactNode;
   /** O h3 da linha do negócio (o serviço) recebe o foco quando o negócio abre ou muda de estado. */
   tituloRef?: Ref<HTMLHeadingElement>;
+  /** A faixa fina de alertas, logo por baixo do cabeçalho (só existe quando há alertas). */
+  faixa?: ReactNode;
+  /** «Ver toda a atividade» no cartão do cliente; sem isto a ligação não existe. */
+  aoVerAtividade?: (origem: HTMLElement) => void;
 }
 
-/** O ícone da fase atual, como no desenho (círculos concêntricos), num quadrado suave. */
+/** O ícone da fase atual, como no desenho (círculos concêntricos), num quadrado suave na cor primária da Olyvia. */
 function Selo() {
   return (
-    <span aria-hidden="true" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-      <Target className="h-6 w-6" />
+    <span aria-hidden="true" className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <Target className="h-7 w-7" />
     </span>
   );
 }
@@ -86,12 +91,12 @@ function CabecalhoDoGuia({ cabecalho, acaoPerder, nomeEl, descricaoEl, selos, av
           <Selo />
           <div className="min-w-0">
             {nomeEl ?? (
-              <h3 ref={tituloRef} tabIndex={tituloRef ? -1 : undefined} className="break-words text-xl font-semibold text-foreground outline-none">{cabecalho.nome}</h3>
+              <h3 ref={tituloRef} tabIndex={tituloRef ? -1 : undefined} className="break-words text-2xl font-bold text-foreground outline-none">{cabecalho.nome}</h3>
             )}
             {comLinhaDeNegocio ? (
-              <h3 ref={tituloRef} tabIndex={-1} className="break-words text-[15px] font-normal text-muted-foreground outline-none">{cabecalho.linha}</h3>
-            ) : cabecalho.linha && <p className="break-words text-[15px] text-muted-foreground">{cabecalho.linha}</p>}
-            {descricaoEl !== undefined && (comLinhaDeNegocio ? <div className="sr-only">{descricaoEl}</div> : <div className="text-[15px] text-muted-foreground">{descricaoEl}</div>)}
+              <h3 ref={tituloRef} tabIndex={-1} data-negocio-titulo="" className="break-words text-base font-normal text-muted-foreground outline-none">{cabecalho.linha}</h3>
+            ) : cabecalho.linha && <p className="break-words text-base text-muted-foreground">{cabecalho.linha}</p>}
+            {descricaoEl !== undefined && (comLinhaDeNegocio ? <div className="sr-only">{descricaoEl}</div> : <div className="text-base text-muted-foreground">{descricaoEl}</div>)}
           </div>
         </div>
         {navegacao}
@@ -100,7 +105,7 @@ function CabecalhoDoGuia({ cabecalho, acaoPerder, nomeEl, descricaoEl, selos, av
       {selos && <div className="flex flex-wrap gap-1.5">{selos}</div>}
       {aviso}
       {(cabecalho.telefone || cabecalho.local) && (
-        <div className="flex flex-wrap gap-x-5 gap-y-1 text-[15px] text-foreground">
+        <div className="flex flex-wrap gap-x-6 gap-y-1 text-[15px] text-foreground">
           {cabecalho.telefone && (
             <span className="flex items-center gap-1.5">
               <Phone className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -150,31 +155,31 @@ function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, ao
   const razao = acao.estado === "desativada" && acao.razaoChave ? { id: idRazao, texto: t(acao.razaoChave) } : explicacao ?? null;
   const desativada = acao.estado === "desativada";
   return (
-    <div className="space-y-3">
+    <div className="space-y-4 py-1 md:px-2">
       <p className="text-sm text-muted-foreground">{t(vendoAnterior && anterior ? anterior.rotuloChave : passo.faseRotuloChave)}</p>
-      <div aria-live="polite" className="space-y-1.5">
-        <Titulo ref={titulo} tabIndex={-1} className="text-2xl font-semibold leading-tight text-foreground outline-none">
+      <div aria-live="polite" className="space-y-2">
+        <Titulo ref={titulo} tabIndex={-1} className="text-2xl font-bold leading-tight tracking-tight text-foreground outline-none md:text-[28px]">
           {vendoAnterior && anterior ? t(anterior.rotuloChave) : t(passo.tituloChave)}
         </Titulo>
-        <p className="text-[15px] text-muted-foreground">
+        <p className="text-base text-muted-foreground">
           {vendoAnterior && anterior ? t(`${P}guia.anterior.aviso`, { phase: t(anterior.rotuloChave) }) : t(passo.subtituloChave)}
         </p>
       </div>
-      {vendoAnterior && anterior && <ChecklistDoPasso itens={anterior.itens} rotulo={t(`${P}guia.checklist`)} />}
+      {vendoAnterior && anterior && <ChecklistDoPasso itens={anterior.itens} rotulo={t(`${P}guia.checklist`)} cartao={false} />}
       {!vendoAnterior && extra}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-        <Button type="button" variant="ghost" className={cn("min-h-11 gap-2", FOCO)} disabled={!anterior || vendoAnterior} onClick={aoVerAnterior}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
+        <Button type="button" variant="ghost" className={cn("min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground", FOCO)} disabled={!anterior || vendoAnterior} onClick={aoVerAnterior}>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           {t(`${P}guia.anterior`)}
         </Button>
         {vendoAnterior ? (
-          <Button type="button" className={cn("min-h-11 gap-2", FOCO)} onClick={aoVoltarAoAtual}>
+          <Button type="button" className={cn("min-h-11 gap-2 rounded-lg px-6 font-semibold", FOCO)} onClick={aoVoltarAoAtual}>
             {t(`${P}guia.anterior.voltar`)}
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           </Button>
         ) : acao.estado !== "semAcao" && (
           <Button
-            type="button" className={cn("min-h-11 gap-2 motion-reduce:transition-none", FOCO, desativada && "opacity-60")}
+            type="button" className={cn("min-h-11 gap-2 rounded-lg px-6 font-semibold motion-reduce:transition-none", FOCO, desativada && "opacity-60")}
             aria-disabled={desativada || ocupado || undefined} aria-busy={ocupado || undefined}
             aria-describedby={razao ? razao.id : undefined} {...atributosAcao}
             onClick={(e) => { if (!desativada && !ocupado) aoAcao?.(e); }}
@@ -191,7 +196,7 @@ function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, ao
 
 export function GuiaDoPasso({
   passo, fases, cabecalho, cliente, acontecimentos, aoAcao, atributosAcao, explicacao, ocupado = false, acaoPerder, extra, tituloSecao,
-  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef,
+  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, aoVerAtividade,
 }: GuiaDoPassoProps) {
   const { t } = useTranslation();
   const [vendoAnterior, setVendoAnterior] = useState(false);
@@ -204,16 +209,21 @@ export function GuiaDoPasso({
   const naFicha = nomeEl !== undefined;
   const Seccao = naFicha ? "h3" : "h4";
   return (
-    <section aria-label={t(`${P}guia.regiao`)} className="space-y-4 rounded-xl border border-border bg-card p-4">
-      <CabecalhoDoGuia
-        cabecalho={cabecalho} acaoPerder={acaoPerder} nomeEl={nomeEl} descricaoEl={descricaoEl} selos={selos} aviso={aviso}
-        navegacao={navegacao} acoesSecundarias={acoesSecundarias} tituloRef={tituloRef}
-      />
-      <Seccao className="sr-only">{t(`${P}phases.title`)}{faseAtual ? `: ${t(`${P}guia.faseAtual`, { phase: t(faseAtual.rotuloChave) })}` : ""}</Seccao>
-      <BarraFasesGuia fases={fases} />
-      {/* O passo (lista da fase e centro) e o cartão do cliente: empilhados; num ecrã muito largo o cartão passa para a terceira coluna, à direita. */}
+    <section aria-label={t(`${P}guia.regiao`)} className="space-y-4">
+      {/* O cartão do topo: o cabeçalho, a faixa fina de alertas (só quando existem) e a barra de fases. */}
+      <div className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm md:p-5">
+        <CabecalhoDoGuia
+          cabecalho={cabecalho} acaoPerder={acaoPerder} nomeEl={nomeEl} descricaoEl={descricaoEl} selos={selos} aviso={aviso}
+          navegacao={navegacao} acoesSecundarias={acoesSecundarias} tituloRef={tituloRef}
+        />
+        {faixa}
+        <Seccao className="sr-only">{t(`${P}phases.title`)}{faseAtual ? `: ${t(`${P}guia.faseAtual`, { phase: t(faseAtual.rotuloChave) })}` : ""}</Seccao>
+        <BarraFasesGuia fases={fases} />
+      </div>
+      {/* O passo (lista da fase e centro) e o cartão do cliente, sobre o fundo suave: empilhados no telemóvel, duas colunas a partir de 768 px (o cliente por
+          baixo, a toda a largura) e três a partir de 1024 px (lista | passo | cliente). */}
       {passo && tituloSecao && <Seccao className="sr-only">{tituloSecao}</Seccao>}
-      <div className={cn("grid gap-4", passo && "md:grid-cols-[200px_minmax(0,1fr)] min-[1800px]:grid-cols-[200px_minmax(0,1fr)_280px]")}>
+      <div className={cn("grid gap-4", passo && "md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)_270px]")}>
         {passo && (
           <>
             <div className="order-1 md:order-2">
@@ -222,7 +232,7 @@ export function GuiaDoPasso({
                 aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"}
               />
             </div>
-            <div className="order-2 md:order-1">
+            <div className="order-2 md:order-1 md:self-start">
               <Button
                 type="button" variant="outline" className={cn("min-h-11 w-full justify-between md:hidden", FOCO)}
                 aria-expanded={listaAberta} aria-controls={idLista} onClick={() => setListaAberta((a) => !a)}
@@ -235,8 +245,10 @@ export function GuiaDoPasso({
             </div>
           </>
         )}
-        <div className={cn("order-3", passo && "md:col-span-2 min-[1800px]:col-span-1 min-[1800px]:col-start-3 min-[1800px]:row-start-1")}>
-          <CartaoClienteGuia cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"} />
+        <div className={cn("order-3", passo && "md:col-span-2 md:self-start lg:col-span-1 lg:col-start-3 lg:row-start-1")}>
+          <CartaoClienteGuia
+            cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"} aoVerAtividade={aoVerAtividade}
+          />
         </div>
       </div>
     </section>

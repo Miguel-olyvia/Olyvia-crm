@@ -5,7 +5,8 @@ import { useEffect, useRef } from "react";
 import type { AlvoTecla } from "@/components/negocio-metas/atalhosQuadro";
 import { teclaNavegacao, type TeclaNavegacao, type Vizinhas } from "./navegacaoFicha";
 
-const BLOQUEIOS = '[role="menu"], [role="listbox"], [role="alertdialog"]';
+// `data-ficha-apoio` marca os diálogos de apoio abertos por cima da ficha: nelas [ e ] não passam à pessoa seguinte (perdia-se o diálogo).
+const BLOQUEIOS = '[role="menu"], [role="listbox"], [role="alertdialog"], [data-ficha-apoio]';
 
 function alvoDe(el: EventTarget | null): AlvoTecla {
   if (!(el instanceof HTMLElement)) return { tag: "BODY" };

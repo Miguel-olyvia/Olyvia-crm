@@ -41,11 +41,11 @@ interface ResumoFichaProps {
   /** O guia do passo seguinte já tem o botão do passo da pessoa: as secções das visitas não o repetem. */
   semBotaoDoPasso?: boolean;
   /**
-   * A ficha com o guia (ecrã único): o Resumo deixa de ser uma aba e fica só o que apoia o guia, sem repetir o que ele já mostra. Em cima, os alertas
-   * de ação (visitas por fechar, próxima visita, avisos); depois, em secções recolhíveis e fechadas, os registos, os dados da pessoa e a lead. Não
-   * desenha «Próximo passo e prazo» (vive no passo) nem o contacto (é o cartão do cliente do guia).
+   * A ficha com o guia (ecrã único): o Resumo deixa de ser uma aba e fica, no diálogo de apoio, só as secções recolhíveis e fechadas (os registos, os
+   * dados da pessoa e a lead). Os alertas (visitas por fechar, voltou a contactar, negócios perdidos) vivem na faixa fina do cabeçalho e a lista das
+   * visitas na aba Visitas; «Próximo passo e prazo» vive no passo e o contacto é o cartão do cliente do guia.
    */
-  modoApoio?: boolean;
+  modoApoio?: "detalhes";
 }
 
 /** Uma secção recolhível cujo conteúdo já tem o seu título: o título de dentro fica só para o leitor de ecrã (não se repete o botão). */
@@ -94,11 +94,9 @@ export function ResumoFicha(p: ResumoFichaProps) {
       aoVerSubmissoes={p.aoVerSubmissoes}
     />
   );
-  if (p.modoApoio) {
+  if (p.modoApoio === "detalhes") {
     return (
       <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
-        {alertas}
-        {avisos}
         <div className="space-y-2">
           <SeccaoRecolhivel titulo={t("pessoasPagina.reg.kind.records")}>
             <div className={SEM_TITULO_REPETIDO}>

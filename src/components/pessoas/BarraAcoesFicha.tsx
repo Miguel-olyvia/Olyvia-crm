@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ligacoes } from "./acoesPessoa";
+import type { AbaApoio, AbrirApoio, ContagensApoio } from "./apoioTipos";
 import type { AcaoFicha, CapacidadesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { useProcesso } from "./processo/processoContexto";
@@ -32,6 +33,26 @@ interface BarraAcoesProps {
   aGuardar?: boolean;
   /** «Registar chamada» entra no menu «Mais» (a pessoa não tem o botão do passo para a chamada: um cliente, uma perdida, uma encerrada). */
   comItemChamada?: boolean;
+  /**
+   * Abre a ficha antiga a pedido (a ficha real): o menu «Mais» ganha Registos e dados, Visitas, Negócios, Submissões e Atividade, e o cabeçalho os atalhos
+   * «N visitas», «N negócios» e «N submissões novas». Sem isto (o exemplo) o menu fica como estava.
+   */
+  aoAbrirApoio?: AbrirApoio;
+  /** Quantas coisas há em cada aba (os números do menu e os atalhos); sem isto não há números nem atalhos. */
+  contagens?: ContagensApoio;
+  /** Com um negócio aberto: abre os «Detalhes do negócio» (o percurso, os registos ligados, os documentos e as ações de editar). */
+  aoAbrirDetalhesNegocio?: (origem: HTMLElement | null) => void;
+}
+
+const ABAS_DO_MENU: readonly AbaApoio[] = ["registos", "visitas", "negocios", "submissoes", "atividade"];
+
+/** A contagem de cada aba para o menu; as que não têm número (registos, atividade) e as que estão a zero ficam sem ele. */
+function contagemDaAba(aba: AbaApoio, c?: ContagensApoio): number | undefined {
+  if (!c) return undefined;
+  if (aba === "visitas") return c.visitas;
+  if (aba === "negocios") return c.negocios;
+  if (aba === "submissoes") return c.submissoes ?? undefined;
+  return undefined;
 }
 
 /** Ligar, WhatsApp e Email: ligações em contorno, com ícone e texto, só para o contacto que existe. Com `semLigar` o telefone fica só na ligação do cabeçalho do guia. */
@@ -70,7 +91,7 @@ function Ligacoes({ resumo, semLigar = false }: { resumo: ResumoPessoa; semLigar
  * qualquer fase, e liga registos existentes da pessoa: a lead tem "Criar negócio" e o cliente "Novo negócio". A visita e o levantamento
  * são opcionais.
  */
-function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aGuardar, comItemChamada = false }: BarraAcoesProps) {
+function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aGuardar, comItemChamada = false, aoAbrirApoio, contagens, aoAbrirDetalhesNegocio }: BarraAcoesProps) {
   const { t } = useTranslation();
   const idExplicacao = useId();
   const processo = useProcesso();
@@ -86,8 +107,23 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
   const comNota = capacidades?.nota !== false;
   const comAdiar = capacidades?.adiar !== false;
   const comVisita = !!processo && !fechada && capacidades?.visita !== false && processo.comPainelVisita !== false;
-  // Sem nenhum item (um cliente na ficha real) não há menu: um botão «Mais» vazio não faz nada.
-  if (!comChamada && !comNota && !comAdiar && !comVisita && !aoCriarNegocio && !podeEncerrar && !podeReativar) return null;
+  const temAcoes = comChamada || comNota || comAdiar || comVisita || !!aoCriarNegocio;
+  // Sem nenhum item (um cliente no exemplo) não há menu: um botão «Mais» vazio não faz nada. Com o apoio a pedido há sempre menu.
+  if (!temAcoes && !aoAbrirApoio && !aoAbrirDetalhesNegocio && !podeEncerrar && !podeReativar) return null;
+  // As abas de apoio: a das submissões só existe para quem as pode ver (a contagem fica `undefined`).
+  const abasDoMenu = aoAbrirApoio ? ABAS_DO_MENU.filter((a) => a !== "submissoes" || contagens?.submissoes !== undefined) : [];
+  const rotuloDaAba = (aba: AbaApoio): string => {
+    const n = contagemDaAba(aba, contagens);
+    return n !== undefined && n > 0 ? `${t(`pessoasPagina.apoio.menu.${aba}`)} (${n})` : t(`pessoasPagina.apoio.menu.${aba}`);
+  };
+  const abrirApoio = (aba: AbaApoio) => {
+    escolhida.current = true;
+    aoAbrirApoio?.(aba, gatilho.current);
+  };
+  const abrirDetalhes = () => {
+    escolhida.current = true;
+    aoAbrirDetalhesNegocio?.(gatilho.current);
+  };
   const criarNegocio = () => {
     escolhida.current = true;
     aoCriarNegocio?.();
@@ -135,6 +171,17 @@ function MenuMais({ resumo, aoAbrir, aoReativar, aoCriarNegocio, capacidades, aG
             {t(papel === "cliente" ? "pessoasPagina.bar.newDeal" : "pessoasPagina.bar.createDeal")}
           </DropdownMenuItem>
         )}
+        {(aoAbrirApoio || aoAbrirDetalhesNegocio) && (
+          <>
+            {temAcoes && <DropdownMenuSeparator />}
+            {aoAbrirDetalhesNegocio && (
+              <DropdownMenuItem className="min-h-11" onSelect={abrirDetalhes}>{t("pessoasPagina.apoio.menu.detalhesNegocio")}</DropdownMenuItem>
+            )}
+            {abasDoMenu.map((aba) => (
+              <DropdownMenuItem key={aba} className="min-h-11" onSelect={() => abrirApoio(aba)}>{rotuloDaAba(aba)}</DropdownMenuItem>
+            ))}
+          </>
+        )}
         {(podeReativar || podeEncerrar) && (
           <>
             <DropdownMenuSeparator />
@@ -161,7 +208,35 @@ export function AcoesSecundariasFicha(p: BarraAcoesProps) {
     <div className="flex flex-wrap items-center gap-2">
       <Ligacoes resumo={p.resumo} semLigar />
       <MenuMais {...p} />
+      {p.aoAbrirApoio && p.contagens && <AtalhosApoio contagens={p.contagens} aoAbrirApoio={p.aoAbrirApoio} />}
     </div>
+  );
+}
+
+/** O texto de um atalho no singular ou no plural (`pessoasPagina.apoio.atalho.<tipo>.one|many`). */
+function textoAtalho(t: ReturnType<typeof useTranslation>["t"], tipo: "visitas" | "negocios" | "submissoes", n: number): string {
+  return t(`pessoasPagina.apoio.atalho.${tipo}.${n === 1 ? "one" : "many"}`, { count: n });
+}
+
+/** Os atalhos do cabeçalho: «N visitas», «N negócios» e «N submissões novas», cada um só se há o que contar, e cada um abre a aba certa do apoio. */
+function AtalhosApoio({ contagens: c, aoAbrirApoio }: { contagens: ContagensApoio; aoAbrirApoio: AbrirApoio }) {
+  const { t } = useTranslation();
+  const atalhos: { aba: AbaApoio; tipo: "visitas" | "negocios" | "submissoes"; n: number }[] = [
+    { aba: "visitas", tipo: "visitas", n: c.visitas },
+    { aba: "negocios", tipo: "negocios", n: c.negocios },
+    { aba: "submissoes", tipo: "submissoes", n: c.submissoes === undefined ? 0 : c.submissoesNovas },
+  ];
+  return (
+    <>
+      {atalhos.filter((a) => a.n > 0).map((a) => (
+        <Button
+          key={a.aba} type="button" variant="outline" className={cn("min-h-11 rounded-full px-4 text-sm", a.aba === "submissoes" && "border-primary/50 font-semibold", FOCO)}
+          onClick={(e) => aoAbrirApoio(a.aba, e.currentTarget)}
+        >
+          {textoAtalho(t, a.tipo, a.n)}
+        </Button>
+      ))}
+    </>
   );
 }
 

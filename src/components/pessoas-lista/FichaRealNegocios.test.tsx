@@ -95,7 +95,12 @@ describe("FichaReal com o negócio completo", () => {
   it("ligar um registo por ligar vai para a base com o tipo e o id", async () => {
     desenhar();
     await detalhe();
-    fireEvent.click(within(screen.getByRole("heading", { level: 4, name: /^Registos ligados/ })).getByRole("button"));
+    // Os registos ligados já não estão por baixo do guia: abrem nos «Detalhes do negócio» (Mais > Detalhes do negócio).
+    expect(screen.queryByRole("heading", { level: 4, name: /^Registos ligados/ })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Detalhes do negócio" }));
+    const detalhes = within(await screen.findByRole("dialog", { name: "Detalhes do negócio" }));
+    fireEvent.click(within(detalhes.getByRole("heading", { level: 4, name: /^Registos ligados/ })).getByRole("button"));
     fireEvent.click(await screen.findByRole("button", { name: /^Ligar a este negócio: Contacto de/ }));
     await waitFor(() => expect(chamadas("neg_ligar_registo")).toHaveLength(1));
     expect(params("neg_ligar_registo")).toEqual({ p_negocio_id: "n1", p_tipo: "contacto", p_registo_id: "c1" });

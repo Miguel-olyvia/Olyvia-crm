@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import type { AbrirApoio, ContagensApoio } from "./apoioTipos";
 import { AcoesSecundariasFicha } from "./BarraAcoesFicha";
 import { BotoesNavegacao } from "./BotoesNavegacao";
 import { textoLinhaCabecalho } from "./formatoPessoas";
@@ -21,6 +22,10 @@ export interface PecasCabecalhoFicha {
   aviso?: ReactNode;
   navegacao: ReactNode;
   acoesSecundarias: ReactNode;
+  /** A faixa fina de alertas, por baixo do cabeçalho (só quando existem alertas). */
+  faixa?: ReactNode;
+  /** «Ver toda a atividade» no cartão do cliente: abre a aba Atividade do apoio. */
+  aoVerAtividade?: (origem: HTMLElement) => void;
 }
 
 export interface CabecalhoGuiaFichaEntrada {
@@ -37,6 +42,13 @@ export interface CabecalhoGuiaFichaEntrada {
   aGuardar?: boolean;
   /** «Registar chamada» vai para o menu «Mais»: o botão do passo não é o da chamada (um cliente, uma perdida, um negócio aberto, ou o passo é a visita). */
   comItemChamada: boolean;
+  /** A ficha antiga a pedido: o menu «Mais» e os atalhos abrem o diálogo de apoio (ver `BarraAcoesFicha`). */
+  aoAbrirApoio?: AbrirApoio;
+  contagens?: ContagensApoio;
+  /** Com um negócio aberto: «Detalhes do negócio» no menu «Mais». */
+  aoAbrirDetalhesNegocio?: (origem: HTMLElement | null) => void;
+  /** A faixa fina de alertas (montada por quem tem os dados). */
+  faixa?: ReactNode;
 }
 
 /** Monta as peças do cabeçalho único da ficha. Tem de correr dentro do painel (o título e a descrição são os do diálogo). */
@@ -45,8 +57,8 @@ export function useCabecalhoGuiaFicha(p: CabecalhoGuiaFichaEntrada): PecasCabeca
   const { pessoa } = p.resumo;
   const comSelos = Boolean(pessoa.empresa || pessoa.perdida || pessoa.encerrada);
   return {
-    nomeEl: <SheetTitle tabIndex={-1} data-ficha-nome className="break-words text-xl outline-none">{pessoa.nome}</SheetTitle>,
-    descricaoEl: <SheetDescription className="text-[15px]">{textoLinhaCabecalho(t, p.resumo)}</SheetDescription>,
+    nomeEl: <SheetTitle tabIndex={-1} data-ficha-nome className="break-words text-2xl font-bold outline-none">{pessoa.nome}</SheetTitle>,
+    descricaoEl: <SheetDescription className="text-base">{textoLinhaCabecalho(t, p.resumo)}</SheetDescription>,
     selos: comSelos ? (
       <>
         {pessoa.empresa && <SeloEmpresa />}
@@ -60,7 +72,10 @@ export function useCabecalhoGuiaFicha(p: CabecalhoGuiaFichaEntrada): PecasCabeca
       <AcoesSecundariasFicha
         resumo={p.resumo} aberta={p.aberta} painelId={p.painelId} aoAbrir={p.aoAbrir} aoReativar={p.aoReativar}
         aoCriarNegocio={p.aoCriarNegocio} capacidades={p.capacidades} aGuardar={p.aGuardar} comItemChamada={p.comItemChamada}
+        aoAbrirApoio={p.aoAbrirApoio} contagens={p.contagens} aoAbrirDetalhesNegocio={p.aoAbrirDetalhesNegocio}
       />
     ),
+    faixa: p.faixa,
+    aoVerAtividade: p.aoAbrirApoio ? ((origem: HTMLElement) => p.aoAbrirApoio?.("atividade", origem)) : undefined,
   };
 }
