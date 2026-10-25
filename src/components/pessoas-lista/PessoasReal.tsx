@@ -164,6 +164,7 @@ export function PessoasReal() {
         <FichaReal
           pessoaId={abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
           origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
+          voltaPara="pessoas"
         />
       )}
     </div>

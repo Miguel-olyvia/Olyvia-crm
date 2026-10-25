@@ -55,6 +55,7 @@ export function PipelineReal() {
       <FichaReal
         pessoaId={aberta.abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
         origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
+        voltaPara="pipeline"
       />
     </div>
   );

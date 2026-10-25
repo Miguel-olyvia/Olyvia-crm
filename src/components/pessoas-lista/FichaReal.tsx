@@ -54,9 +54,11 @@ interface FichaRealProps {
   negocioInicial?: string | null;
   /** Depois de criar um negócio: leva-o ao endereço (`?negocio=`), para a ligação se poder partilhar e recarregar. */
   aoAbrirNegocio?: (negocioId: string, pessoaId: string) => void;
+  /** O quadro de onde se abriu a ficha: dá o nome à ligação «← Pipeline» / «← Pessoas» no topo da página. */
+  voltaPara?: "pipeline" | "pessoas";
 }
 
-export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio }: FichaRealProps) {
+export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio, voltaPara }: FichaRealProps) {
   const { t } = useTranslation();
   const lida = useFichaPessoa(pessoaId);
   const ultima = useRef<FichaDb | null>(null);
@@ -134,7 +136,7 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
       resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null && adaptada !== null} aoFechar={aoFechar} idsVisiveis={idsVisiveis}
       aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={hojeDaFicha} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
       atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={mostrada?.pessoa.voltou_a_contactar === true}
-      podeVerSubmissoes separadorSubmissoes={separadorSubmissoes} identidade={identidade} comGuia
+      podeVerSubmissoes separadorSubmissoes={separadorSubmissoes} identidade={identidade} comGuia voltaPara={voltaPara}
       acoes={acoes} aoPedir={NADA} aoVerTodasSubmissoes={NADA} comNotas={false} maisItens={maisItens} avisoAtualizacao={avisoAtualizacao}
       aoCriarNegocio={aoCriarNegocio} negocioInicial={negocioAbrir}
     />

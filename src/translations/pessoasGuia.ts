@@ -121,6 +121,10 @@ export const pessoasGuiaTranslations: Record<"en" | "pt", Record<string, string>
     'pessoasPagina.faixa.porFechar.many': '{count} visits to close',
     'pessoasPagina.faixa.verVisitas': 'See visits',
     'pessoasPagina.deal.backShort': 'Deals',
+    'pessoasPagina.ficha.voltar.pipeline': 'Pipeline',
+    'pessoasPagina.ficha.voltar.pipeline.aria': 'Back to the Pipeline',
+    'pessoasPagina.ficha.voltar.pessoas': 'People',
+    'pessoasPagina.ficha.voltar.pessoas.aria': 'Back to People',
   },
   pt: {
     'pessoasPagina.guia.regiao': 'Passo seguinte',
@@ -241,5 +245,9 @@ export const pessoasGuiaTranslations: Record<"en" | "pt", Record<string, string>
     'pessoasPagina.faixa.porFechar.many': '{count} visitas por fechar',
     'pessoasPagina.faixa.verVisitas': 'Ver visitas',
     'pessoasPagina.deal.backShort': 'Negócios',
+    'pessoasPagina.ficha.voltar.pipeline': 'Pipeline',
+    'pessoasPagina.ficha.voltar.pipeline.aria': 'Voltar ao Pipeline',
+    'pessoasPagina.ficha.voltar.pessoas': 'Pessoas',
+    'pessoasPagina.ficha.voltar.pessoas.aria': 'Voltar às Pessoas',
   },
 };
