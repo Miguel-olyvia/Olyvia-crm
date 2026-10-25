@@ -1,22 +1,19 @@
 // Guardar a identidade só termina quando a ficha e as listas foram refeitas: senão o formulário fecha e o ecrã mostra o nome antigo.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "@testing-library/react";
-import { montarHook } from "./fichaTestUtil";
+import { montarHook, respostaOk, rpcMock } from "./fichaTestUtil";
 import { PESSOA_ID } from "./fichaFabrica";
 import { useGuardarIdentidadePessoa } from "./useGuardarIdentidadePessoa";
 
 const invalidarMock = vi.hoisted(() => vi.fn());
 vi.mock("./invalidarPessoas", () => ({ invalidarPessoas: (...args: unknown[]) => invalidarMock(...args) }));
-const selectMock = vi.hoisted(() => vi.fn());
-vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { from: () => { const c: Record<string, unknown> = {}; c.update = () => c; c.eq = () => c; c.select = (...a: unknown[]) => selectMock(...a); return c; } },
-}));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...args: unknown[]) => rpcMock(...args) } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
 beforeEach(() => {
-  selectMock.mockReset();
+  rpcMock.mockReset();
   invalidarMock.mockReset();
-  selectMock.mockReturnValue(Promise.resolve({ data: [{ id: PESSOA_ID, type: "person", display_name: "Ana Novo" }], error: null }));
+  rpcMock.mockReturnValue(respostaOk({ tipo: "person", nome: "Ana Novo", empresa_nome: null, mudou: true }));
 });
 
 describe("useGuardarIdentidadePessoa: espera pela releitura", () => {
@@ -53,7 +50,7 @@ describe("useGuardarIdentidadePessoa: espera pela releitura", () => {
   });
 
   it("se a base falhar, não refaz nada", async () => {
-    selectMock.mockReturnValue(Promise.resolve({ data: null, error: { code: "NG003", message: "x" } }));
+    rpcMock.mockReturnValue(Promise.resolve({ data: null, error: { code: "NG003", message: "x" } }));
     const { result } = montarHook((id: string) => useGuardarIdentidadePessoa(id), PESSOA_ID);
     await act(async () => { await result.current.guardar({ tipo: "person", nomeProprio: "Ana", apelido: "Novo" }).catch(() => undefined); });
     expect(invalidarMock).not.toHaveBeenCalled();
