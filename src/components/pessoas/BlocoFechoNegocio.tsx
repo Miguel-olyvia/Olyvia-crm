@@ -43,7 +43,7 @@ export function BlocoFechoNegocio({ negocio }: { negocio: NegocioMes }) {
   const reabrirNoAviso = aviso === "recusa_depois_aceite" && negocio.estadoReal === "ganho";
   if (fecharNoAviso) return null;
   return (
-    <div role="group" aria-label={t(`${N}group`)} className="space-y-3">
+    <div role="group" aria-label={t(`${N}group`)} data-bloco-fecho="" tabIndex={-1} className="space-y-3">
       <OrigemDaDecisao negocio={negocio} />
       <div className="flex flex-wrap items-start gap-3">
         <BotaoFecharAgora negocio={negocio} />

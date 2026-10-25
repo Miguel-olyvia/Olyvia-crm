@@ -35,6 +35,8 @@ import { passoDoNegocio } from "./etapaPessoa";
 import { FaixaFasesNegocio } from "./FaixaFasesNegocio";
 import { fasesDoNegocio, type IdFase } from "./fasesDoNegocio";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
+import { GuiaDoNegocio } from "./GuiaDoNegocio";
+import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import { estaAberto } from "./juntarPessoas";
 import { MudarFechoNegocio } from "./MudarFechoNegocio";
 import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
@@ -57,6 +59,11 @@ interface DetalheNegocioFichaProps {
   item?: ItemProcesso;
   /** O negócio foi para o lixo: quem abre a lista pode querer dar o foco ao filtro. Sem isto, volta-se à lista como em «Voltar». */
   aoApagado?: () => void;
+  /** A pessoa e a atividade da ficha: o cartão do cliente e os últimos acontecimentos do guia do passo. Sem elas vale o que o negócio traz. */
+  pessoa?: Pessoa;
+  atividade?: readonly ItemAtividade[];
+  /** O guia do passo seguinte (a ficha real) em vez do texto do passo: as fases, o passo, o botão que o faz e «Perder negócio». Precisa do `item`. */
+  comGuia?: boolean;
 }
 
 /**
@@ -117,7 +124,7 @@ function secaoAberta(fase: IdFase | undefined, terminado: boolean): SecaoDetalhe
   return "percurso";
 }
 
-export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
   const negocio = semContratosSeProposta(negocioDaFicha);
@@ -147,6 +154,8 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
   const perdidoAntigo = (negocio as { resultado?: string }).resultado === "perdido";
   const fases = fasesDoNegocio(negocio, registos, perda, perdidoAntigo);
   const faseAtual = (fases.find((f) => f.estado === "atual" || f.estado === "perdida") ?? fases[fases.length - 1])?.id;
+  // O passo seguinte só existe num negócio aberto: num ganho ou perdido reabre-se primeiro.
+  const comPasso = estaAberto(negocio) && !acoes.fechado;
   // Os detalhes: só o da fase em que o negócio está vem aberto (num ganho ou perdido, o percurso); os outros ficam a uma linha de resumo.
   const aberta = secaoAberta(faseAtual, perda !== undefined || perdidoAntigo);
   const ligados = totalDeRegistos(registosDoNegocio(registos, negocio.id));
@@ -178,12 +187,20 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
           </dl>
           {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
         </div>
-        <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
+        {/* Um negócio aberto com processo (a ficha real) tem o guia do passo seguinte: as fases, o passo, o botão que o faz e «Perder negócio». */}
+        {item && comGuia && comPasso ? (
+          <GuiaDoNegocio
+            negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
+            acaoPerder={podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" /> : undefined}
+          />
+        ) : (
+          <Seccao titulo={t(`${P}phases.title`)} nivel={4}><div className="space-y-3"><FaixaFasesNegocio fases={fases} /><FasesDoNegocioLista fases={fases} /></div></Seccao>
+        )}
         {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
         <AlertasNegocio negocio={negocio} />
-        {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. */}
-        {estaAberto(negocio) && !acoes.fechado && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
-        {estaAberto(negocio) && !acoes.fechado && podeEditar && (
+        {/* Um negócio ganho ou perdido não tem passo a fazer (criar documentos incluído): reabre-se primeiro. Sem processo (o exemplo) fica só o texto do passo. */}
+        {comPasso && !(item && comGuia) && <PassoDoNegocio negocio={negocio} hoje={hoje} item={item} />}
+        {comPasso && !(item && comGuia) && podeEditar && (
           <div className="flex flex-wrap items-start gap-3">
             <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
           </div>

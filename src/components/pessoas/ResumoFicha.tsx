@@ -37,6 +37,8 @@ interface ResumoFichaProps {
   maisItens?: MaisItensFicha;
   /** A identidade da pessoa (a ficha real), logo antes do contacto. */
   identidade?: ReactNode;
+  /** O guia do passo seguinte já tem o botão do passo da pessoa: as secções das visitas não o repetem. */
+  semBotaoDoPasso?: boolean;
 }
 
 export function ResumoFicha(p: ResumoFichaProps) {
@@ -60,7 +62,7 @@ export function ResumoFicha(p: ResumoFichaProps) {
   const proxima = proximaVisitaDaPessoa(visitas, p.hoje);
   const porFechar = visitasPorFechar(visitas, p.hoje);
   const temPorFechar = porFechar.length > 0;
-  const item = itensDaPessoa(resumo, p.hoje, extras).find((i) => i.tipo === "pessoa");
+  const item = p.semBotaoDoPasso ? undefined : itensDaPessoa(resumo, p.hoje, extras).find((i) => i.tipo === "pessoa");
   const acaoDoPasso = item && comVisitas ? <AcaoDoPassoPessoa item={item} nome={resumo.pessoa.nome} feita={temVisitaFeitaPorLigar(visitas)} /> : undefined;
   return (
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">

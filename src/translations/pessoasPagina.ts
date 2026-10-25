@@ -7,6 +7,7 @@ import { pessoasFichaTranslations } from "./pessoasFicha";
 import { pessoasFechoTranslations } from "./pessoasFecho";
 import { pessoasFechoEcraTranslations } from "./pessoasFechoEcra";
 import { pessoasFichaRealTranslations } from "./pessoasFichaReal";
+import { pessoasGuiaTranslations } from "./pessoasGuia";
 import { pessoasNegocioTranslations } from "./pessoasNegocio";
 import { pessoasNegocioEdicaoTranslations } from "./pessoasNegocioEdicao";
 import { pessoasNovaLeadTranslations } from "./pessoasNovaLead";
@@ -138,6 +139,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasVisitaErrosTranslations.en,
     ...pessoasVisitaDialogosTranslations.en,
     ...pessoasProcessoTranslations.en,
+    ...pessoasGuiaTranslations.en,
     ...pessoasEncerrarTranslations.en,
     ...pessoasRegistosTranslations.en,
     ...pessoasRegistosGravarTranslations.en,
@@ -265,6 +267,7 @@ export const pessoasPaginaTranslations: Record<"en" | "pt", Record<string, strin
     ...pessoasVisitaErrosTranslations.pt,
     ...pessoasVisitaDialogosTranslations.pt,
     ...pessoasProcessoTranslations.pt,
+    ...pessoasGuiaTranslations.pt,
     ...pessoasEncerrarTranslations.pt,
     ...pessoasRegistosTranslations.pt,
     ...pessoasRegistosGravarTranslations.pt,

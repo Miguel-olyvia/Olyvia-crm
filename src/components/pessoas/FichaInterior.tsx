@@ -25,6 +25,7 @@ import { textoPendentes } from "./formatoPessoas";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
 import type { AcaoFicha, AcoesFicha } from "./PainelBase";
 import { FormChamada } from "./FormChamada";
+import { GuiaDaPessoa } from "./GuiaDaPessoa";
 import { PainelAcaoFicha, type AcaoPainel } from "./PainelAcaoFicha";
 import { PercursoPessoa } from "./PercursoPessoa";
 import { itensDaPessoa } from "./processo/itensProcesso";
@@ -89,6 +90,11 @@ export interface FichaInteriorProps {
   separadorSubmissoes?: SeparadorSubmissoesReal;
   /** A identidade da pessoa (a ficha real: empresa ou pessoa singular, com edição), no Resumo antes do contacto. */
   identidade?: ReactNode;
+  /**
+   * O guia do passo seguinte (a ficha real): no topo do Resumo da pessoa em abordagem e no negócio aberto, com um só botão primário que faz o passo no
+   * próprio ecrã. Ligado, os botões soltos do passo nas secções das visitas saem (era o mesmo passo duas vezes). Sem isto (o exemplo) fica como estava.
+   */
+  comGuia?: boolean;
 }
 
 interface AbasProps extends FichaInteriorProps {
@@ -99,6 +105,10 @@ interface AbasProps extends FichaInteriorProps {
   aoVoltarNegocio: () => void;
   /** Abre o diálogo do resultado de uma visita. */
   aoRegistarResultado: (visitaId: string) => void;
+  /** O guia do passo seguinte da pessoa em abordagem abre daqui o formulário «Registar chamada» da ficha. */
+  aoRegistarChamada: (origem: HTMLElement | null) => void;
+  /** O «Marcar como perdido» do guia (encerrar a abordagem de uma lead); ausente quando a pessoa não se encerra. */
+  aoEncerrar?: (origem: HTMLElement | null) => void;
 }
 
 /** A aba Negócios: a lista, ou o negócio aberto (com "Voltar aos negócios"). */
@@ -125,7 +135,7 @@ function ConteudoNegocios(p: AbasProps) {
   }
   return (
     <DetalheNegocioFicha
-      negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item}
+      negocio={aberto} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} pessoa={p.resumo.pessoa} atividade={p.atividade} comGuia={p.comGuia}
       aoApagado={() => { setFocarFiltro(true); p.aoVoltarNegocio(); }}
     />
   );
@@ -162,11 +172,20 @@ function AbasFicha(p: AbasProps) {
       </ListaAbas>
       <div data-foco-ficha tabIndex={-1} className="px-6 pb-6 outline-none">
         <TabsContent value="resumo" className="mt-0">
+          {/* A pessoa em abordagem tem o guia do passo seguinte no topo; com negócio aberto o guia vive no negócio. */}
+          {p.comGuia && (
+            <div className="pt-4 empty:hidden">
+              <GuiaDaPessoa
+                resumo={resumo} hoje={p.hoje} atividade={atividade} capacidades={p.acoes.capacidades} aoRegistarChamada={p.aoRegistarChamada}
+                aoCriarNegocio={p.aoCriarNegocio} aoEncerrar={p.aoEncerrar}
+              />
+            </div>
+          )}
           <ResumoFicha
             resumo={resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
             aoVerSubmissoes={verSubmissoes} aoVerVisitas={() => p.aoMudar("visitas")} alterarVisita={p.acoes.capacidades?.visita === false ? undefined : p.acoes.alterarVisita}
             visitasNaBase={p.acoes.capacidades?.gerirVisitas === true} cancelarVisita={p.acoes.capacidades?.gerirVisitas === true ? p.acoes.cancelarVisita : undefined}
-            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade}
+            aoRegistarResultado={p.aoRegistarResultado} maisItens={p.maisItens} identidade={p.identidade} semBotaoDoPasso={p.comGuia === true}
           />
         </TabsContent>
         <TabsContent value="visitas" className="mt-0 pt-4">
@@ -252,6 +271,8 @@ export function FichaInterior(p: FichaInteriorProps) {
     reabrir.executar(() => p.acoes.reativar(p.resumo.pessoa.id), () => anunciar(mensagem), mensagem);
   };
   const criarNegocio = p.aoCriarNegocio;
+  // O mesmo critério do «Encerrar abordagem» do menu «Mais»: só uma lead, sem negócio aberto e com a abordagem ainda em curso.
+  const podeEncerrar = p.acoes.capacidades?.encerrar !== false && p.resumo.papel === "lead" && !p.resumo.pessoa.encerrada && !p.resumo.pessoa.perdida && p.resumo.abertos.length === 0;
   return (
     <AnuncioFichaContext.Provider value={anunciar}>
       <div className="flex min-h-0 flex-1 scroll-pt-14 flex-col overflow-y-auto">
@@ -288,6 +309,8 @@ export function FichaInterior(p: FichaInteriorProps) {
           <AbasFicha
             {...p} aba={aba} aoMudar={(a) => { negocio.esquecer(); setAba(a); }} negocioAberto={negocio.aberto}
             aoAbrirNegocio={negocio.abrir} aoVoltarNegocio={negocio.voltar} aoRegistarResultado={setVisitaDoResultado}
+            aoRegistarChamada={(origem) => abrir("chamada", origem)}
+            aoEncerrar={podeEncerrar ? (origem) => abrir("encerrar", origem) : undefined}
           />
         )}
       </div>

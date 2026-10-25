@@ -31,11 +31,16 @@ interface PainelProps {
   aoMudarAberto: (aberto: boolean) => void;
   /** Devolve o foco a quem abriu o painel; diz se o fez. */
   aoDevolverFoco: () => boolean;
+  /**
+   * O negócio a que o painel grava (o «Fazer o levantamento» de um negócio): as visitas novas e o levantamento ficam ligados a ele, o levantamento é
+   * sempre um novo (o que a pessoa já tinha por ligar não se reescreve) e o painel abre sem ele. Sem isto (o menu «Mais») grava na pessoa.
+   */
+  negocioId?: string | null;
 }
 
-function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco }: Omit<PainelProps, "abertura">) {
+function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioId = null }: Omit<PainelProps, "abertura">) {
   const { t } = useTranslation();
-  const registos = useGuardarRegistos(ficha, { negocioId: null });
+  const registos = useGuardarRegistos(ficha, negocioId ? { negocioId, ignorarLevantamentoLivre: true } : { negocioId: null });
   const [motivo, setMotivo] = useState<string | null>(null);
   // O painel está à vista? Trocar de pessoa a meio da gravação fecha-o (por prop, ou desmonta-o), e uma falha de depois já não tem onde se dizer
   // dentro dele: diz-se num toast.
@@ -59,9 +64,11 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco }: Omit<P
   // O que o painel mostra ao abrir é o retrato de agora (as visitas e o levantamento da pessoa), e não muda enquanto está aberto.
   const [aoAbrir] = useState(() => {
     const pessoa = adaptarPessoa(ficha, hojeLisboa());
+    const valores = valoresIniciaisDosRegistos(pessoa, adaptarRegistos(ficha));
     return {
       opcao: [paraOpcao(pessoa)] as readonly PessoaOpcao[], nome: pessoa.nome, id: pessoa.id,
-      valores: valoresIniciaisDosRegistos(pessoa, adaptarRegistos(ficha)),
+      // Para um negócio o levantamento é novo: não se abre sobre o que a pessoa já tinha por ligar.
+      valores: negocioId ? { pessoaId: valores.pessoaId, comercial: valores.comercial, visitas: valores.visitas } : valores,
     };
   });
   // As visitas da ficha de agora: as que já existem na base (não se removem, cancelam-se).
@@ -102,11 +109,14 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco }: Omit<P
   );
 }
 
-export function PainelVisitaLevantamentoReal({ ficha, aberto, abertura, aoMudarAberto, aoDevolverFoco }: PainelProps) {
+export function PainelVisitaLevantamentoReal({ ficha, aberto, abertura, aoMudarAberto, aoDevolverFoco, negocioId = null }: PainelProps) {
   const livre = useMemo(() => levantamentoLivreDaFicha(ficha), [ficha]);
   return (
-    <QuestionarioFormularioProvider gravadas={livre?.rascunho.gravadas}>
-      <PainelInterior key={`${abertura}-${ficha.pessoa.id}`} ficha={ficha} aberto={aberto} aoMudarAberto={aoMudarAberto} aoDevolverFoco={aoDevolverFoco} />
+    <QuestionarioFormularioProvider gravadas={negocioId ? undefined : livre?.rascunho.gravadas}>
+      <PainelInterior
+        key={`${abertura}-${ficha.pessoa.id}-${negocioId ?? ""}`} ficha={ficha} aberto={aberto} aoMudarAberto={aoMudarAberto}
+        aoDevolverFoco={aoDevolverFoco} negocioId={negocioId}
+      />
     </QuestionarioFormularioProvider>
   );
 }

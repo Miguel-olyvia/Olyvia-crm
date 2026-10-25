@@ -14,6 +14,8 @@ import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
 import { DadosNegocioContext } from "@/components/negocio-metas/costuraNegocio";
 import { MutacoesNegocioContext } from "@/components/negocio-metas/mutacoesNegocio";
 import { NovoNegocioReal } from "@/components/pessoas/NovoNegocioReal";
+import { DocumentosDoNegocioProvider } from "@/components/pessoas-processo/DocumentosDoNegocioReal";
+import { LevantamentoDoNegocioProvider } from "@/components/pessoas-processo/LevantamentoDoNegocioReal";
 import { ProcessoProviderReal } from "@/components/pessoas-processo/ProcessoProviderReal";
 
 interface ParaOFilho {
@@ -119,10 +121,16 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
     <DadosNegocioContext.Provider value={dados}>
       <MutacoesNegocioContext.Provider value={mutacoes}>
         <ProcessoProviderReal ficha={ficha}>
-          {children({
-            aoCriarNegocio: dados?.podeCriar && pessoaAberta ? () => setCriandoPara(pessoaAberta) : undefined,
-            negocioInicial: negocioCriado ?? negocioDoEndereco,
-          })}
+          {/* O levantamento de um negócio faz-se aqui dentro (o guia do passo), ligado ao negócio e à pessoa. */}
+          <LevantamentoDoNegocioProvider ficha={ficha}>
+            {/* Enviar a proposta, a resposta do cliente, criar o contrato e a assinatura também (diálogos por cima do guia, sem sair da ficha). */}
+            <DocumentosDoNegocioProvider ficha={ficha}>
+              {children({
+                aoCriarNegocio: dados?.podeCriar && pessoaAberta ? () => setCriandoPara(pessoaAberta) : undefined,
+                negocioInicial: negocioCriado ?? negocioDoEndereco,
+              })}
+            </DocumentosDoNegocioProvider>
+          </LevantamentoDoNegocioProvider>
         </ProcessoProviderReal>
         {ficha && pessoaAberta === pessoaId && (
           <NovoNegocioReal
