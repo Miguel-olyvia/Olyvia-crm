@@ -232,6 +232,43 @@ describe("calcularPassoGuiado: a fase anterior (so leitura)", () => {
   });
 });
 
+describe("calcularPassoGuiado: as fases feitas e o que ficou registado em cada passo", () => {
+  it("sem fases feitas a lista e vazia", () => {
+    expect(calcularPassoGuiado(item(), contexto()).feitas).toEqual([]);
+  });
+
+  it("devolve TODAS as fases feitas, pela ordem, cada uma com a sua lista", () => {
+    const i = item({ fase: "visita" });
+    const p = calcularPassoGuiado(i, contexto({}, i));
+    expect(p.feitas.map((f) => f.id)).toEqual(["porContactar", "contactado"]);
+    expect(p.feitas[0]).toMatchObject({ rotuloChave: "pessoasPagina.board.col.porContactar" });
+    expect(p.feitas[0].itens.map((c) => c.id)).toEqual(["quemPede", "contacto", "origem"]);
+    expect(p.feitas[1].itens.map((c) => c.id)).toEqual(["chamada", "visitaMarcada"]);
+    expect(p.feitas[1].itens.every((c) => c.feito)).toBe(true);
+    expect(p.anterior?.id).toBe("contactado");
+  });
+
+  it("o detalhe de cada item vem so dos factos que o ecra deu (nada se inventa)", () => {
+    const i = item({ fase: "contactado" });
+    const detalhes = { quemPede: "Paulo Nogueira", contacto: "912 000 000 · p@x.pt" };
+    const p = calcularPassoGuiado(i, contexto({ dados: dados({ detalhes }) }, i));
+    const porId = Object.fromEntries(p.feitas[0].itens.map((c) => [c.id, c.detalhe]));
+    expect(porId).toEqual({ quemPede: "Paulo Nogueira", contacto: "912 000 000 · p@x.pt", origem: undefined });
+  });
+
+  it("sem detalhes nos dados nenhum item tem detalhe", () => {
+    const i = item({ fase: "contactado" });
+    const p = calcularPassoGuiado(i, contexto({}, i));
+    expect(p.feitas[0].itens.every((c) => c.detalhe === undefined)).toBe(true);
+    expect(p.itens.every((c) => c.detalhe === undefined)).toBe(true);
+  });
+
+  it("os itens da fase atual tambem levam o detalhe (para ler o que ja ha)", () => {
+    const p = calcularPassoGuiado(item(), contexto({ dados: dados({ detalhes: { origem: "Campanha Verao" } }) }));
+    expect(p.itens.find((c) => c.id === "origem")?.detalhe).toBe("Campanha Verao");
+  });
+});
+
 describe("as fases da barra", () => {
   it("a pessoa em abordagem ve as colunas do quadro e «Negocio», sem Financeiro nem Obra", () => {
     const fases = fasesDaPessoa("contactado");

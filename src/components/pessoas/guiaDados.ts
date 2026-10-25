@@ -11,8 +11,48 @@ const MAXIMO_ACONTECIMENTOS = 5;
 
 type RegistosDoGuia = Pick<EstadoRegistos, "contactos" | "visitas" | "levantamentos">;
 
-/** Os factos da lista da fase: quem pede, contacto, origem e o que há de chamadas, visitas e levantamentos (os registos dados, p. ex. os do negócio). */
-export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha" | "formulario">, registos: RegistosDoGuia): DadosDoGuia {
+const SEPARADOR = " · ";
+
+const juntar = (...partes: (string | null | undefined)[]): string => partes.filter(Boolean).join(SEPARADOR);
+
+/** O dia e a hora mais recentes primeiro (AAAA-MM-DD e HH:MM, que ordenam como texto). */
+const maisRecente = <T extends { data: string; hora?: string }>(registos: readonly T[]): T | undefined =>
+  [...registos].sort((a, b) => `${b.data} ${b.hora ?? ""}`.localeCompare(`${a.data} ${a.hora ?? ""}`))[0];
+
+/** O dia e a hora mais próximos primeiro. */
+const maisProxima = <T extends { data: string; hora?: string }>(registos: readonly T[]): T | undefined =>
+  [...registos].sort((a, b) => `${a.data} ${a.hora ?? ""}`.localeCompare(`${b.data} ${b.hora ?? ""}`))[0];
+
+/**
+ * O que ficou registado em cada item da lista da fase, em texto, só do que a ficha já tem: quem pede, o contacto, a origem, a última chamada, a visita
+ * marcada, a visita feita e o levantamento. O que a ficha não sabe não aparece (o ecrã diz «Sem registo»).
+ */
+export function detalhesDoGuia(
+  t: Traduzir, pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha" | "formulario">, registos: RegistosDoGuia,
+): Record<string, string> {
+  const detalhes: Record<string, string> = {};
+  const definir = (id: string, texto: string): void => { if (texto) detalhes[id] = texto; };
+  definir("quemPede", pessoa.nome.trim());
+  definir("contacto", juntar(pessoa.contacto.telefone, pessoa.contacto.email));
+  definir("origem", juntar(pessoa.campanha, pessoa.formulario));
+  const chamada = maisRecente(registos.contactos);
+  if (chamada) definir("chamada", juntar(chamada.resultado ? t(`pessoasPagina.result.${chamada.resultado}`) : null, textoDiaCompleto(chamada.data)));
+  // A marcada e a visita por fazer mais proxima; so se nao houver nenhuma, a mais recente das nao canceladas (uma visita ja feita).
+  const naoCanceladas = registos.visitas.filter((v) => v.estado !== "cancelada");
+  const marcada = maisProxima(naoCanceladas.filter((v) => v.estado !== "feita")) ?? maisRecente(naoCanceladas);
+  if (marcada) definir("visitaMarcada", juntar(textoDiaCompleto(marcada.data), marcada.hora));
+  const feita = maisRecente(registos.visitas.filter((v) => v.estado === "feita"));
+  if (feita) definir("visitaFeita", textoDiaCompleto(feita.data));
+  const levantamento = maisRecente(registos.levantamentos);
+  if (levantamento) definir("levantamento", textoDiaCompleto(levantamento.data));
+  return detalhes;
+}
+
+/**
+ * Os factos da lista da fase: quem pede, contacto, origem e o que há de chamadas, visitas e levantamentos (os registos dados, p. ex. os do negócio).
+ * Com o tradutor `t` leva também o que ficou registado em cada passo (`detalhes`).
+ */
+export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha" | "formulario">, registos: RegistosDoGuia, t?: Traduzir): DadosDoGuia {
   return {
     nome: pessoa.nome,
     temContacto: Boolean(pessoa.contacto.telefone || pessoa.contacto.email),
@@ -20,6 +60,7 @@ export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha
     chamadas: registos.contactos.length,
     visitasAtivas: registos.visitas.filter((v) => v.estado !== "cancelada").length,
     levantamentos: registos.levantamentos.length,
+    ...(t ? { detalhes: detalhesDoGuia(t, pessoa, registos) } : {}),
   };
 }
 

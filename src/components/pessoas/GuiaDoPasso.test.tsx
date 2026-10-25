@@ -1,5 +1,5 @@
 // O guia do passo seguinte (só apresentação): um só botão primário, o título é um h2, a fase atual leva aria-current, a razão de um botão desativado
-// está ligada a ele, «Anterior» só lê e o clique chama o callback certo. Os callbacks são simulados: nada fala com a base.
+// está ligada a ele, a coluna da esquerda mostra a fase que se vê (e as fases feitas, só leitura) e o clique chama o callback certo. Os callbacks são simulados: nada fala com a base.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { GuiaDoPasso, type GuiaDoPassoProps } from "./GuiaDoPasso";
@@ -130,23 +130,109 @@ describe("GuiaDoPasso: o botão desativado, sem passo e sem ação", () => {
   });
 });
 
-describe("GuiaDoPasso: «Anterior» só lê", () => {
-  it("na primeira fase «Anterior» está desativado", () => {
+describe("GuiaDoPasso: a coluna da esquerda mostra a fase que se vê, e as fases feitas", () => {
+  const DETALHES = { quemPede: "Paulo Nogueira", contacto: "912 000 000 · p@x.pt", chamada: "Atendeu · interessado · 25/10/2026" };
+  const emContactado = (extra: Partial<GuiaDoPassoProps> = {}) => {
+    const i = item({ fase: "contactado" });
+    return guia({ fases: fasesDaPessoa("contactado"), ...extra }, passo(i, { dados: { ...DADOS, detalhes: DETALHES } }));
+  };
+  const coluna = () => screen.getByRole("navigation", { name: "Passos da fase" });
+  const fasesFeitas = () => screen.getByRole("navigation", { name: "Fases feitas" });
+
+  it("na primeira fase «Anterior» está desativado e não há «Fases feitas»", () => {
     guia();
     expect(screen.getByRole("button", { name: "Anterior" })).toBeDisabled();
+    expect(screen.queryByRole("navigation", { name: "Fases feitas" })).toBeNull();
+    expect(within(coluna()).getAllByRole("button")).toHaveLength(3);
   });
 
-  it("noutra fase mostra a fase anterior, o aviso de que nada se grava e um botão para voltar; não chama o callback do passo", () => {
-    const i = item({ fase: "contactado" });
-    const p = guia({ fases: fasesDaPessoa("contactado") }, passo(i));
-    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
-    expect(screen.getByRole("heading", { level: 2, name: "Por contactar" })).toBeInTheDocument();
-    expect(screen.getByText(/aqui não se grava nada/)).toBeInTheDocument();
+  it("na fase atual a coluna lista os passos da fase atual e, depois de uma separação, as fases feitas", () => {
+    emContactado();
+    expect(within(coluna()).getByText("Contactado")).toBeInTheDocument();
+    expect(within(coluna()).getByRole("button", { name: /^Chamada registada/ })).toBeInTheDocument();
+    expect(within(coluna()).getByRole("button", { name: /^Visita marcada/ })).toBeInTheDocument();
+    expect(within(fasesFeitas()).getAllByRole("button")).toHaveLength(1);
+    expect(within(fasesFeitas()).getByRole("button", { name: /^Por contactar/ })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    // O centro continua a ser o passo seguinte, com o botão primário.
+    expect(screen.getByRole("heading", { level: 2, name: "Marcar a visita." })).toBeInTheDocument();
+  });
+
+  it("escolher uma fase feita troca a coluna para os passos dessa fase e o centro mostra o que ficou registado, sem o aviso antigo nem lista repetida", () => {
+    const p = emContactado();
+    fireEvent.click(within(fasesFeitas()).getByRole("button", { name: /^Por contactar/ }));
+    expect(within(fasesFeitas()).getByRole("button", { name: /^Por contactar/ })).toHaveAttribute("aria-current", "true");
+    expect(within(coluna()).getByText("Por contactar")).toBeInTheDocument();
+    const botoes = within(coluna()).getAllByRole("button");
+    expect(botoes.map((b) => b.textContent)).toEqual([expect.stringMatching(/^Quem pede/), expect.stringMatching(/^Contacto/), expect.stringMatching(/^Origem/)]);
+    expect(botoes[0]).toHaveAttribute("aria-pressed", "true");
+    expect(botoes[1]).toHaveAttribute("aria-pressed", "false");
+    // O centro: a fase, o passo e o que ficou registado.
+    expect(screen.getByRole("heading", { level: 2, name: "Quem pede" })).toBeInTheDocument();
+    expect(screen.getByText("Paulo Nogueira")).toBeInTheDocument();
+    expect(screen.queryByText(/aqui não se grava nada/)).toBeNull();
+    expect(screen.queryByText("Lista da fase")).toBeNull();
+    expect(screen.getAllByRole("navigation", { name: "Passos da fase" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: /^Marcar a visita/ })).toBeNull();
     expect(p.aoAcao).not.toHaveBeenCalled();
+  });
+
+  it("escolher outro passo da fase feita mostra o seu registo; um passo sem registo diz «Sem registo»", () => {
+    emContactado();
+    fireEvent.click(within(fasesFeitas()).getByRole("button", { name: /^Por contactar/ }));
+    fireEvent.click(within(coluna()).getByRole("button", { name: /^Contacto/ }));
+    expect(within(coluna()).getByRole("button", { name: /^Contacto/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { level: 2, name: "Contacto" })).toBeInTheDocument();
+    expect(screen.getByText("912 000 000 · p@x.pt")).toBeInTheDocument();
+    fireEvent.click(within(coluna()).getByRole("button", { name: /^Origem/ }));
+    expect(screen.getByRole("heading", { level: 2, name: "Origem" })).toBeInTheDocument();
+    expect(screen.getByText("Sem registo")).toBeInTheDocument();
+  });
+
+  it("«Anterior» recua uma fase de cada vez e «Voltar ao passo atual» regressa ao passo com o botão primário", () => {
+    const i = item({ fase: "visita" });
+    const p = guia({ fases: fasesDaPessoa("visita") }, passo(i));
+    expect(within(fasesFeitas()).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
+    expect(within(fasesFeitas()).getByRole("button", { name: /^Contactado/ })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
+    expect(within(fasesFeitas()).getByRole("button", { name: /^Por contactar/ })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "Anterior" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Voltar ao passo atual" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Marcar a visita como feita." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Marcar a visita como feita/ })).toBeInTheDocument();
+    expect(within(fasesFeitas()).getByRole("button", { name: /^Contactado/ })).not.toHaveAttribute("aria-current");
+    expect(p.aoAcao).not.toHaveBeenCalled();
+  });
+
+  it("na fase atual, escolher um passo mostra o que já há registado dele sem tirar o botão primário; escolher outra vez esconde-o", () => {
+    emContactado();
+    const chamada = within(coluna()).getByRole("button", { name: /^Chamada registada/ });
+    expect(chamada).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(chamada);
+    expect(chamada).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Atendeu · interessado · 25/10/2026")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 2, name: "Marcar a visita." })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Marcar a visita/ })).toBeInTheDocument();
+    fireEvent.click(chamada);
+    expect(chamada).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByText("Atendeu · interessado · 25/10/2026")).toBeNull();
+  });
+
+  it("mudar de fase volta a escolher o primeiro passo dessa fase", () => {
+    const i = item({ fase: "visita" });
+    guia({ fases: fasesDaPessoa("visita") }, passo(i));
+    fireEvent.click(within(fasesFeitas()).getByRole("button", { name: /^Contactado/ }));
+    fireEvent.click(within(coluna()).getByRole("button", { name: /^Visita marcada/ }));
+    fireEvent.click(within(fasesFeitas()).getByRole("button", { name: /^Por contactar/ }));
+    expect(within(coluna()).getAllByRole("button")[0]).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("a coluna vem antes do centro no DOM (no telemóvel empilha por cima do passo) e já não há botão «lista» a recolher", () => {
+    guia();
+    const primario = screen.getByRole("button", { name: /^Registar a chamada/ });
+    expect(coluna().compareDocumentPosition(primario) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /lista da fase/i })).toBeNull();
   });
 });
 
@@ -193,15 +279,6 @@ describe("GuiaDoPasso: o cabeçalho único da ficha", () => {
   it("sem passo (cliente, perdida) mostra o cabeçalho, a barra e o cartão do cliente", () => {
     guia({}, null);
     expect(screen.getByRole("heading", { level: 4, name: "Cliente" })).toBeInTheDocument();
-  });
-});
-
-describe("GuiaDoPasso: a ordem do DOM é a visual", () => {
-  it("o passo (e o botão primário) vem antes do botão «Mostrar lista» no DOM, para o Tab e o leitor de ecrã", () => {
-    guia();
-    const primario = screen.getByRole("button", { name: /^Registar a chamada/ });
-    const lista = screen.getByRole("button", { name: /lista/i });
-    expect(primario.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

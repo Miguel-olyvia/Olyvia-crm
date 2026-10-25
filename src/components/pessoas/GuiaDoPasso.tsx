@@ -3,9 +3,10 @@
 // cartão do cliente com os últimos acontecimentos à direita (a partir de 1024 px; abaixo disso, por baixo). Na ficha da pessoa é o ÚNICO cabeçalho: leva
 // também o título da ficha (`nomeEl`), os selos, o aviso de estado, a navegação entre pessoas, as ações secundárias (Email, Mais, atalhos) e a faixa
 // fina de alertas, todos passados pelo chamador.
-// Só apresentação: recebe o passo já calculado (`calcularPassoGuiado`) e os callbacks por props; não fala com a base. «Anterior» só lê a fase que
-// já passou (não existe forma de recuar uma fase) e o botão primário passa a ser «Voltar ao passo atual». No telemóvel o passo vem primeiro e a
-// lista da fase fica recolhida.
+// Só apresentação: recebe o passo já calculado (`calcularPassoGuiado`) e os callbacks por props; não fala com a base. A coluna da esquerda mostra
+// sempre os passos da fase que se VÊ (a atual, ou uma feita escolhida em «Fases feitas»), e o centro, numa fase feita, lê o que ficou REGISTADO no
+// passo escolhido (nada se grava). «Anterior» recua uma fase e o botão primário passa a ser «Voltar ao passo atual». No telemóvel a coluna empilha
+// por cima do centro.
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode, type Ref } from "react";
 import { ArrowLeft, ArrowRight, Loader2, MapPin, Phone, Target } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -13,8 +14,9 @@ import { ligacoes } from "@/components/ficha-comum/ligacoesContacto";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import { BarraFasesGuia, CartaoClienteGuia, ChecklistDoPasso, type AcontecimentoGuia, type DadosClienteGuia } from "./GuiaPecas";
-import type { FaseGuia, PassoGuiado } from "./processo/passoGuiado";
+import { BarraFasesGuia, CartaoClienteGuia, type AcontecimentoGuia, type DadosClienteGuia } from "./GuiaPecas";
+import { ColunaDoGuia, RegistoDoItem } from "./GuiaColuna";
+import type { FaseFeita, FaseGuia, ItemChecklist, PassoGuiado } from "./processo/passoGuiado";
 import { ExplicacaoDoPasso } from "./processo/ExplicacaoDoPasso";
 
 const P = "pessoasPagina.";
@@ -127,7 +129,13 @@ function CabecalhoDoGuia({ cabecalho, acaoPerder, nomeEl, descricaoEl, selos, av
 
 interface CentroProps {
   passo: PassoGuiado;
-  vendoAnterior: boolean;
+  /** A fase feita que se vê; `null` quando se vê a atual. */
+  vista: FaseFeita | null;
+  /** O passo escolhido na coluna (da fase vista), quando há. */
+  itemEscolhido: ItemChecklist | null;
+  /** Muda de cada vez que um botão do centro (Anterior, Voltar) troca a vista: o foco vai para o título. */
+  pedidoFoco: number;
+  podeRecuar: boolean;
   aoVerAnterior: () => void;
   aoVoltarAoAtual: () => void;
   aoAcao?: (e: MouseEvent<HTMLElement>) => void;
@@ -140,35 +148,36 @@ interface CentroProps {
 }
 
 /** O centro: a fase, o título (h2, recebe o foco quando o passo muda), o subtítulo e o rodapé com «Anterior» e o botão primário. */
-function CentroDoGuia({ passo, vendoAnterior, aoVerAnterior, aoVoltarAoAtual, aoAcao, atributosAcao, explicacao, ocupado, extra, nivel }: CentroProps) {
+function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoVerAnterior, aoVoltarAoAtual, aoAcao, atributosAcao, explicacao, ocupado, extra, nivel }: CentroProps) {
   const Titulo = nivel;
   const { t } = useTranslation();
   const idRazao = useId();
   const titulo = useRef<HTMLHeadingElement>(null);
   const primeira = useRef(true);
-  // O foco só vai para o título quando o passo (ou a vista) muda de verdade, e nunca à entrada: quem abre a ficha tem o foco no seu sítio.
+  const vendoAnterior = vista !== null;
+  // O foco só vai para o título quando o passo muda de verdade ou quando Anterior/Voltar trocam a vista, e nunca à entrada: quem abre a ficha tem o
+  // foco no seu sítio. Escolher passos ou fases na coluna não lhe tira o foco do botão em que está.
   useEffect(() => {
     if (primeira.current) { primeira.current = false; return; }
     titulo.current?.focus();
-  }, [passo.passo, passo.faseId, vendoAnterior]);
-  const { acao, anterior } = passo;
+  }, [passo.passo, passo.faseId, pedidoFoco]);
+  const { acao } = passo;
   const razao = acao.estado === "desativada" && acao.razaoChave ? { id: idRazao, texto: t(acao.razaoChave) } : explicacao ?? null;
   const desativada = acao.estado === "desativada";
   return (
     <div className="space-y-4 py-1 md:px-2">
-      <p className="text-sm text-muted-foreground">{t(vendoAnterior && anterior ? anterior.rotuloChave : passo.faseRotuloChave)}</p>
+      <p className="text-sm text-muted-foreground">{t(vista ? vista.rotuloChave : passo.faseRotuloChave)}</p>
       <div aria-live="polite" className="space-y-2">
         <Titulo ref={titulo} tabIndex={-1} className="text-2xl font-bold leading-tight tracking-tight text-foreground outline-none md:text-[28px]">
-          {vendoAnterior && anterior ? t(anterior.rotuloChave) : t(passo.tituloChave)}
+          {vista ? t(itemEscolhido ? itemEscolhido.rotuloChave : vista.rotuloChave) : t(passo.tituloChave)}
         </Titulo>
-        <p className="text-base text-muted-foreground">
-          {vendoAnterior && anterior ? t(`${P}guia.anterior.aviso`, { phase: t(anterior.rotuloChave) }) : t(passo.subtituloChave)}
-        </p>
+        {!vista && <p className="text-base text-muted-foreground">{t(passo.subtituloChave)}</p>}
       </div>
-      {vendoAnterior && anterior && <ChecklistDoPasso itens={anterior.itens} rotulo={t(`${P}guia.checklist`)} cartao={false} />}
+      {vista && <RegistoDoItem item={itemEscolhido} comTitulo={false} />}
+      {!vista && itemEscolhido && <RegistoDoItem item={itemEscolhido} />}
       {!vendoAnterior && extra}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
-        <Button type="button" variant="ghost" className={cn("min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground", FOCO)} disabled={!anterior || vendoAnterior} onClick={aoVerAnterior}>
+        <Button type="button" variant="ghost" className={cn("min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground", FOCO)} disabled={!podeRecuar} onClick={aoVerAnterior}>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           {t(`${P}guia.anterior`)}
         </Button>
@@ -199,11 +208,22 @@ export function GuiaDoPasso({
   nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, aoVerAtividade,
 }: GuiaDoPassoProps) {
   const { t } = useTranslation();
-  const [vendoAnterior, setVendoAnterior] = useState(false);
-  const [listaAberta, setListaAberta] = useState(false);
-  const idLista = useId();
+  // A fase que se vê: `null` é a atual; senão o id de uma fase feita (só leitura). O passo escolhido na coluna é próprio de cada fase.
+  const [faseVista, setFaseVista] = useState<string | null>(null);
+  const [escolhido, setEscolhido] = useState<string | null>(null);
+  const [pedidoFoco, setPedidoFoco] = useState(0);
   // Quando o passo muda (a gravação avançou a fase), volta-se a ver o passo atual.
-  useEffect(() => setVendoAnterior(false), [passo?.passo, passo?.faseId]);
+  useEffect(() => { setFaseVista(null); setEscolhido(null); }, [passo?.passo, passo?.faseId]);
+  const feitas = passo?.feitas ?? [];
+  const vista = feitas.find((f) => f.id === faseVista) ?? null;
+  const itensVistos: readonly ItemChecklist[] = vista ? vista.itens : passo?.itens ?? [];
+  // Numa fase feita há sempre um passo escolhido (o primeiro, por omissão); na atual só se o utilizador o escolher.
+  const idEscolhido = itensVistos.some((i) => i.id === escolhido) ? escolhido : vista ? itensVistos[0]?.id ?? null : null;
+  const itemEscolhido = itensVistos.find((i) => i.id === idEscolhido) ?? null;
+  const indiceVista = vista ? feitas.indexOf(vista) : feitas.length;
+  const verFase = (id: string | null): void => { setFaseVista(id); setEscolhido(null); };
+  const trocarVista = (id: string | null): void => { verFase(id); setPedidoFoco((n) => n + 1); };
+  const escolherPasso = (id: string): void => setEscolhido((atual) => (!vista && atual === id ? null : id));
   const faseAtual = fases.find((f) => f.estado === "atual" || f.estado === "perdida");
   // Na ficha o nome da pessoa (o título do painel) é o h2: o resto desce um nível, sem saltos. Fora dela o guia é o ecrã.
   const naFicha = nomeEl !== undefined;
@@ -220,32 +240,28 @@ export function GuiaDoPasso({
         <Seccao className="sr-only">{t(`${P}phases.title`)}{faseAtual ? `: ${t(`${P}guia.faseAtual`, { phase: t(faseAtual.rotuloChave) })}` : ""}</Seccao>
         <BarraFasesGuia fases={fases} />
       </div>
-      {/* O passo (lista da fase e centro) e o cartão do cliente, sobre o fundo suave: empilhados no telemóvel, duas colunas a partir de 768 px (o cliente por
-          baixo, a toda a largura) e três a partir de 1024 px (lista | passo | cliente). */}
+      {/* O passo (a coluna da fase que se vê e o centro) e o cartão do cliente, sobre o fundo suave: empilhados no telemóvel (a coluna por cima do centro),
+          duas colunas a partir de 768 px (o cliente por baixo, a toda a largura) e três a partir de 1024 px (coluna | passo | cliente). A ordem do DOM é a visual. */}
       {passo && tituloSecao && <Seccao className="sr-only">{tituloSecao}</Seccao>}
       <div className={cn("grid gap-4", passo && "md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)_270px]")}>
         {passo && (
           <>
-            <div className="order-1 md:order-2">
-              <CentroDoGuia
-                passo={passo} vendoAnterior={vendoAnterior} aoVerAnterior={() => setVendoAnterior(true)} aoVoltarAoAtual={() => setVendoAnterior(false)}
-                aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"}
+            <div className="md:self-start">
+              <ColunaDoGuia
+                faseRotuloChave={vista ? vista.rotuloChave : passo.faseRotuloChave} itens={itensVistos} escolhido={idEscolhido} aoEscolherPasso={escolherPasso}
+                feitas={feitas} faseVista={faseVista} aoVerFase={verFase}
               />
             </div>
-            <div className="order-2 md:order-1 md:self-start">
-              <Button
-                type="button" variant="outline" className={cn("min-h-11 w-full justify-between md:hidden", FOCO)}
-                aria-expanded={listaAberta} aria-controls={idLista} onClick={() => setListaAberta((a) => !a)}
-              >
-                {t(`${P}guia.checklist.${listaAberta ? "esconder" : "mostrar"}`)}
-              </Button>
-              <ChecklistDoPasso
-                id={idLista} itens={passo.itens} rotulo={t(passo.faseRotuloChave)} className={cn("mt-3 md:mt-0", listaAberta ? "block" : "hidden md:block")}
+            <div>
+              <CentroDoGuia
+                passo={passo} vista={vista} itemEscolhido={itemEscolhido} pedidoFoco={pedidoFoco} podeRecuar={indiceVista > 0}
+                aoVerAnterior={() => trocarVista(feitas[indiceVista - 1]?.id ?? null)} aoVoltarAoAtual={() => trocarVista(null)}
+                aoAcao={aoAcao} atributosAcao={atributosAcao} explicacao={explicacao} ocupado={ocupado} extra={extra} nivel={naFicha ? "h3" : "h2"}
               />
             </div>
           </>
         )}
-        <div className={cn("order-3", passo && "md:col-span-2 md:self-start lg:col-span-1 lg:col-start-3 lg:row-start-1")}>
+        <div className={cn(passo && "md:col-span-2 md:self-start lg:col-span-1 lg:col-start-3 lg:row-start-1")}>
           <CartaoClienteGuia
             cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"} aoVerAtividade={aoVerAtividade}
           />

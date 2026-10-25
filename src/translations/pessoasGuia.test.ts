@@ -26,6 +26,20 @@ describe("textos do guia do passo", () => {
     expect(pt["pessoasPagina.guia.titulo.registarChamada.pronto"]).toBe("Está tudo. Registar a chamada.");
   });
 
+  it("a coluna do passo tem os textos dos passos, das fases feitas e do registo, e já não tem os do aviso nem do botão de recolher", () => {
+    for (const chave of ["guia.passos", "guia.fasesFeitas", "guia.semRegisto", "guia.registo.feita", "guia.registo.porFazer"]) {
+      expect(pt[`pessoasPagina.${chave}`], chave).toBeTruthy();
+      expect(en[`pessoasPagina.${chave}`], chave).toBeTruthy();
+    }
+    expect(pt["pessoasPagina.guia.fasesFeitas"]).toBe("Fases feitas");
+    expect(pt["pessoasPagina.guia.passos"]).toBe("Passos da fase");
+    expect(pt["pessoasPagina.guia.semRegisto"]).toBe("Sem registo");
+    for (const chave of ["guia.anterior.aviso", "guia.checklist", "guia.checklist.mostrar", "guia.checklist.esconder"]) {
+      expect(pt[`pessoasPagina.${chave}`], chave).toBeUndefined();
+      expect(en[`pessoasPagina.${chave}`], chave).toBeUndefined();
+    }
+  });
+
   it("estão juntos nos textos da página e nenhuma chave colide com outro módulo", () => {
     for (const chave of Object.keys(pt)) expect(pessoasPaginaTranslations.pt[chave], chave).toBe(pt[chave]);
     for (const chave of Object.keys(en)) expect(pessoasPaginaTranslations.en[chave], chave).toBe(en[chave]);

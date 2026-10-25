@@ -25,6 +25,72 @@ describe("dadosDoGuia", () => {
   });
 });
 
+describe("dadosDoGuia: o que ficou registado em cada passo (so factos do ecra)", () => {
+  const tr = (chave: string): string => ({ "pessoasPagina.result.atendeuInteressado": "Atendeu · interessado" })[chave] ?? chave;
+  const vazios = { contactos: [], visitas: [], levantamentos: [] };
+
+  it("sem tradutor nao ha detalhes", () => {
+    expect(dadosDoGuia(pessoaBase("a", { nome: "Paulo" }), vazios).detalhes).toBeUndefined();
+  });
+
+  it("quem pede, contacto e origem saem da ficha; o que falta nao aparece", () => {
+    const d = dadosDoGuia(pessoaBase("a", { nome: "Paulo Nogueira", contacto: { telefone: "912 000 000", email: "p@x.pt" }, campanha: "Verão", formulario: "Site" }), vazios, tr);
+    expect(d.detalhes).toEqual({ quemPede: "Paulo Nogueira", contacto: "912 000 000 · p@x.pt", origem: "Verão · Site" });
+    const so = dadosDoGuia(pessoaBase("a", { nome: "Ana", contacto: { telefone: null, email: "a@b.pt" } }), vazios, tr);
+    expect(so.detalhes).toEqual({ quemPede: "Ana", contacto: "a@b.pt" });
+  });
+
+  it("a chamada e a mais recente, com o resultado e o dia", () => {
+    const d = dadosDoGuia(pessoaBase("a"), {
+      ...vazios,
+      contactos: [contactoBase("c1", { data: "2026-10-10", resultado: "naoAtendeu" }), contactoBase("c2", { data: "2026-10-25", resultado: "atendeuInteressado" })],
+    }, tr);
+    expect(d.detalhes?.chamada).toBe("Atendeu · interessado · 25/10/2026");
+  });
+
+  it("uma chamada sem resultado conhecido mostra so o dia", () => {
+    const d = dadosDoGuia(pessoaBase("a"), { ...vazios, contactos: [contactoBase("c1", { data: "2026-10-25", resultado: null })] }, tr);
+    expect(d.detalhes?.chamada).toBe("25/10/2026");
+  });
+
+  it("a visita marcada e a mais proxima nao cancelada, com o dia e a hora; as canceladas nao contam", () => {
+    const d = dadosDoGuia(pessoaBase("a"), {
+      ...vazios,
+      visitas: [visitaPessoaBase("v1", { data: "2026-10-30", hora: "14:30" }), visitaPessoaBase("v2", { data: "2026-11-02", estado: "cancelada" })],
+    }, tr);
+    expect(d.detalhes?.visitaMarcada).toBe("30/10/2026 · 14:30");
+    const semHora = dadosDoGuia(pessoaBase("a"), { ...vazios, visitas: [visitaPessoaBase("v1", { data: "2026-10-30", hora: "" })] }, tr);
+    expect(semHora.detalhes?.visitaMarcada).toBe("30/10/2026");
+    const canceladas = dadosDoGuia(pessoaBase("a"), { ...vazios, visitas: [visitaPessoaBase("v2", { estado: "cancelada" })] }, tr);
+    expect(canceladas.detalhes?.visitaMarcada).toBeUndefined();
+  });
+
+  it("com uma visita ja feita e outra por fazer, a marcada e a que esta por fazer e nao a mais antiga", () => {
+    const d = dadosDoGuia(pessoaBase("a"), {
+      ...vazios,
+      visitas: [
+        visitaPessoaBase("v1", { data: "2026-10-20", hora: "10:00", estado: "feita" }),
+        visitaPessoaBase("v2", { data: "2026-10-30", hora: "14:30" }),
+        visitaPessoaBase("v3", { data: "2026-11-05", hora: "09:00" }),
+      ],
+    }, tr);
+    expect(d.detalhes?.visitaMarcada).toBe("30/10/2026 · 14:30");
+    expect(d.detalhes?.visitaFeita).toBe("20/10/2026");
+    const soFeita = dadosDoGuia(pessoaBase("a"), { ...vazios, visitas: [visitaPessoaBase("v1", { data: "2026-10-20", estado: "feita" })] }, tr);
+    expect(soFeita.detalhes?.visitaMarcada).toBe("20/10/2026 · 10:00");
+  });
+
+  it("a visita feita e o levantamento levam o dia", () => {
+    const d = dadosDoGuia(pessoaBase("a"), {
+      ...vazios,
+      visitas: [visitaPessoaBase("v1", { data: "2026-10-20", estado: "feita" })],
+      levantamentos: [levantamentoBase("l1", { data: "2026-10-21" })],
+    }, tr);
+    expect(d.detalhes?.visitaFeita).toBe("20/10/2026");
+    expect(d.detalhes?.levantamento).toBe("21/10/2026");
+  });
+});
+
 describe("clienteDoGuia", () => {
   it("usa a morada da pessoa (rua, codigo postal e localidade) e a localidade para o cabecalho", () => {
     const c = clienteDoGuia(pessoaBase("a", { contacto: { telefone: "927 118 300", email: "p@x.pt" }, morada: { linha: "Rua A 1", cp: "2700-001", localidade: "Amadora" } }), "WC social");

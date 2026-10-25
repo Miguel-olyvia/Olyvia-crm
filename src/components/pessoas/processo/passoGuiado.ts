@@ -17,6 +17,8 @@ export interface ItemChecklist {
   id: string;
   rotuloChave: string;
   feito: boolean;
+  /** O que ficou registado neste passo, já em texto («Atendeu · interessado · 25/10/2026»); só existe quando o ecrã sabe o facto. */
+  detalhe?: string;
 }
 
 /** O que o ecrã sabe da pessoa e dos seus registos: só factos, para a lista de verificação (nada se inventa). */
@@ -31,6 +33,8 @@ export interface DadosDoGuia {
   visitasAtivas: number;
   /** Levantamentos ligados ao negócio (ou, numa pessoa, os que tem). */
   levantamentos: number;
+  /** O que ficou registado em cada item da lista, por id do item (`quemPede`, `chamada`...), já em texto; falta o que o ecrã não sabe. */
+  detalhes?: Readonly<Record<string, string>>;
 }
 
 export type EstadoAcaoGuia = "pronta" | "desativada" | "semAcao";
@@ -49,6 +53,11 @@ export interface FaseAnterior {
   itens: ItemChecklist[];
 }
 
+/** Uma fase já feita, para ler: a lista dos seus passos com o que ficou registado em cada um. */
+export interface FaseFeita extends FaseAnterior {
+  estado: "feita";
+}
+
 export interface PassoGuiado {
   passo: PassoProcesso;
   faseId: string;
@@ -58,6 +67,8 @@ export interface PassoGuiado {
   itens: ItemChecklist[];
   acao: AcaoGuiada;
   anterior: FaseAnterior | null;
+  /** TODAS as fases já feitas, pela ordem da barra (a última é a `anterior`): é o que a coluna da esquerda deixa escolher. */
+  feitas: FaseFeita[];
 }
 
 export interface ContextoDoGuia {
@@ -109,8 +120,6 @@ export function fasesDoNegocioParaGuia(fases: readonly FaseDoNegocio[]): FaseGui
   return fases.map((f) => ({ id: f.id, rotuloChave: `pessoasPagina.phases.${f.id}`, estado: f.estado }));
 }
 
-const feito = (id: string, ok: boolean): ItemChecklist => ({ id, rotuloChave: chave(`check.${id}`), feito: ok });
-
 interface EntradaChecklist {
   item: ItemProcesso;
   dados: DadosDoGuia;
@@ -120,6 +129,10 @@ interface EntradaChecklist {
 
 /** A lista de verificação de uma fase, só de dados reais. Uma fase que não se conhece não tem lista. */
 function checklistDaFase(fase: string, { item, dados, passada }: EntradaChecklist): ItemChecklist[] {
+  const feito = (id: string, ok: boolean): ItemChecklist => {
+    const detalhe = dados.detalhes?.[id];
+    return { id, rotuloChave: chave(`check.${id}`), feito: ok, ...(detalhe ? { detalhe } : {}) };
+  };
   switch (fase) {
     case "porContactar":
       return [feito("quemPede", dados.nome.trim() !== ""), feito("contacto", dados.temContacto), feito("origem", dados.temOrigem)];
@@ -187,6 +200,13 @@ function faseAnterior(c: ContextoDoGuia, item: ItemProcesso): FaseAnterior | nul
   return { id: anterior.id, rotuloChave: anterior.rotuloChave, itens: checklistDaFase(anterior.id, { item, dados: c.dados, passada: true }) };
 }
 
+/** Todas as fases já feitas, cada uma com a sua lista lida como feita e o que ficou registado. */
+function fasesFeitas(c: ContextoDoGuia, item: ItemProcesso): FaseFeita[] {
+  return c.fases
+    .filter((f) => f.estado === "feita")
+    .map((f) => ({ id: f.id, rotuloChave: f.rotuloChave, estado: "feita" as const, itens: checklistDaFase(f.id, { item, dados: c.dados, passada: true }) }));
+}
+
 /** O título do passo: «Está tudo. Registar a chamada.» quando a lista da fase está completa, senão o título simples. */
 function tituloDoPasso(passo: PassoProcesso, itens: readonly ItemChecklist[]): string {
   const pronto = passo === "registarChamada" && itens.length > 0 && itens.every((i) => i.feito);
@@ -206,5 +226,6 @@ export function calcularPassoGuiado(item: ItemProcesso, contexto: ContextoDoGuia
     itens,
     acao: acaoDoPasso(passo, contexto),
     anterior: faseAnterior(contexto, item),
+    feitas: fasesFeitas(contexto, item),
   };
 }

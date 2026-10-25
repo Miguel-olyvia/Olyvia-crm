@@ -67,7 +67,7 @@ export function GuiaDaPessoa({ resumo, hoje, atividade, capacidades, aoRegistarC
   const fases = item ? fasesDaPessoa(item.fase) : fasesSemPasso(resumo);
   const passo = item
     ? calcularPassoGuiado(item, {
-      dados: dadosDoGuia(pessoa, resumo.registos), fases, podeEditar: podeEscrever,
+      dados: dadosDoGuia(pessoa, resumo.registos, t), fases, podeEditar: podeEscrever,
       podeCriar: aoCriarNegocio !== undefined, pessoaFechada: false, ligados,
     })
     : null;

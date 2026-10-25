@@ -50,28 +50,53 @@ export function BarraFasesGuia({ fases }: { fases: readonly FaseGuia[] }) {
   );
 }
 
+/** O círculo de um passo: preenchido com visto nos feitos, vazio nos por fazer. */
+function CirculoDoPasso({ feito }: { feito: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full", feito ? "bg-primary text-primary-foreground" : "border-2 border-muted-foreground")}
+    >
+      {feito && <Check className="h-3.5 w-3.5" />}
+    </span>
+  );
+}
+
 /**
  * A lista da fase, num cartão: um círculo preenchido com visto nos feitos e um círculo vazio nos por fazer, mais o texto, e «feito» ou «por fazer» para o
- * leitor de ecrã. `cartao` falso (a fase anterior, lida no centro) tira a moldura.
+ * leitor de ecrã. `cartao` falso tira a moldura. Com `aoSelecionar` cada passo é um botão (`aria-pressed`) que o escolhe, e o escolhido vai realçado
+ * (também a negrito: não só pela cor).
  */
-export function ChecklistDoPasso({ itens, rotulo, id, className, cartao = true }: { itens: readonly ItemChecklist[]; rotulo: string; id?: string; className?: string; cartao?: boolean }) {
+export function ChecklistDoPasso({ itens, rotulo, id, className, cartao = true, selecionado = null, aoSelecionar }: {
+  itens: readonly ItemChecklist[]; rotulo: string; id?: string; className?: string; cartao?: boolean;
+  selecionado?: string | null; aoSelecionar?: (id: string) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div id={id} className={cn(cartao && "rounded-xl border border-border bg-card p-4 shadow-sm", className)}>
       <p className="mb-2 text-sm text-muted-foreground">{rotulo}</p>
       <ul className="list-none space-y-1 p-0">
-        {itens.map((c) => (
-          <li key={c.id} className="flex min-h-11 items-center gap-3 text-[15px] text-foreground">
-            <span
-              aria-hidden="true"
-              className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded-full", c.feito ? "bg-primary text-primary-foreground" : "border-2 border-muted-foreground")}
-            >
-              {c.feito && <Check className="h-3.5 w-3.5" />}
-            </span>
-            <span>{t(c.rotuloChave)}</span>
-            <span className="sr-only">, {t(`${P}guia.check.${c.feito ? "feito" : "porFazer"}`)}</span>
-          </li>
-        ))}
+        {itens.map((c) => {
+          const conteudo = (
+            <>
+              <CirculoDoPasso feito={c.feito} />
+              <span>{t(c.rotuloChave)}</span>
+              <span className="sr-only">, {t(`${P}guia.check.${c.feito ? "feito" : "porFazer"}`)}</span>
+            </>
+          );
+          return aoSelecionar ? (
+            <li key={c.id}>
+              <button
+                type="button" aria-pressed={selecionado === c.id} onClick={() => aoSelecionar(c.id)}
+                className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-left text-[15px] text-foreground hover:bg-muted motion-reduce:transition-none", FOCO, selecionado === c.id && "bg-primary/10 font-semibold")}
+              >
+                {conteudo}
+              </button>
+            </li>
+          ) : (
+            <li key={c.id} className="flex min-h-11 items-center gap-3 text-[15px] text-foreground">{conteudo}</li>
+          );
+        })}
       </ul>
     </div>
   );

@@ -85,7 +85,7 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
   const passoAtual = item ? passoDoItem(item).id : null;
   const comDocumento = passoAtual !== null && ehPassoDeDocumento(passoAtual) && documentos?.pode(passoAtual, negocio.id) === true;
   const doPasso = item && !semPasso ? calcularPassoGuiado(item, {
-    dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, registosDoNegocio(registos, negocio.id)),
+    dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, registosDoNegocio(registos, negocio.id), t),
     fases: fasesDoNegocioParaGuia(fases),
     podeEditar, podeCriar: false, permissoesFecho, pessoaFechada: false,
     ligados: ligadosDoNegocio(item, acao.executa, levantamento?.pode === true, fechoV4 && negocio.prontoAGanhar === true, comDocumento),
