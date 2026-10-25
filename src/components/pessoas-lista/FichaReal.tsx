@@ -64,9 +64,11 @@ interface FichaRealProps {
   children?: ReactNode;
   /** O título da página («Pipeline», «Pessoas»): um h1 só para leitores de ecrã, porque o h1 da página está escondido com a ficha aberta. */
   tituloPagina?: string;
+  /** O ecrã guiado fase a fase (só o Pipeline). Sem ele, a ficha completa de sempre: cabeçalho, ações, percurso e abas (a página de Pessoas). */
+  comGuia?: boolean;
 }
 
-export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio, voltaPara, children, tituloPagina }: FichaRealProps) {
+export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar, origemFoco, negocioInicial = null, aoAbrirNegocio, voltaPara, children, tituloPagina, comGuia = false }: FichaRealProps) {
   const { t } = useTranslation();
   const lida = useFichaPessoa(pessoaId);
   const ultima = useRef<FichaDb | null>(null);
@@ -144,21 +146,23 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   if (pessoaId === null) jaViu.current = false;
   else if (adaptada !== null) jaViu.current = true;
   const fichaVisivel = pessoaId !== null && (adaptada !== null || jaViu.current);
+  // Só o ecrã guiado toma o lugar da página; a ficha completa abre num painel lateral e a lista fica à vista.
+  const fichaNaPagina = comGuia && fichaVisivel;
   const zonaFicha = useRef<HTMLDivElement>(null);
-  useScrollAoVoltar(fichaVisivel, zonaFicha);
+  useScrollAoVoltar(fichaNaPagina, zonaFicha);
   const ficha = (aoCriarNegocio?: () => void, negocioAbrir: string | null = null) => (
     <FichaPessoa
-      resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null} naPagina aoFechar={aoFechar} idsVisiveis={idsVisiveis}
+      resumo={adaptada?.resumo ?? null} aberto={pessoaId !== null} naPagina={comGuia} aoFechar={aoFechar} idsVisiveis={idsVisiveis}
       aoIrPara={aoIrPara} origemFoco={origemFoco} hoje={hojeDaFicha} submissoes={SEM_SUBMISSOES} notas={SEM_NOTAS}
       atividade={adaptada?.atividade ?? SEM_ATIVIDADE} pessoas={adaptada?.pessoas ?? SEM_PESSOAS} voltou={mostrada?.pessoa.voltou_a_contactar === true}
-      podeVerSubmissoes separadorSubmissoes={separadorSubmissoes} identidade={identidade} comGuia voltaPara={voltaPara}
+      podeVerSubmissoes separadorSubmissoes={separadorSubmissoes} identidade={identidade} comGuia={comGuia} voltaPara={voltaPara}
       acoes={acoes} aoPedir={NADA} aoVerTodasSubmissoes={NADA} comNotas={false} maisItens={maisItens} avisoAtualizacao={avisoAtualizacao}
       aoCriarNegocio={aoCriarNegocio} negocioInicial={negocioAbrir}
     />
   );
   return (
     <>
-      <div data-pagina-escondida="" hidden={fichaVisivel}>{children}</div>
+      <div data-pagina-escondida="" hidden={fichaNaPagina}>{children}</div>
       <div aria-busy={aAbrir}>
         {/* Sempre montada: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}
         <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">{aAbrir ? t(`${F}opening`) : ""}</div>
@@ -167,8 +171,8 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
             {t(`${F}opening`)}
           </div>
         )}
-        <div ref={zonaFicha} hidden={!fichaVisivel} className="mx-auto w-full max-w-[1536px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6">
-          {fichaVisivel && tituloPagina && <h1 className="sr-only">{tituloPagina}</h1>}
+        <div ref={zonaFicha} hidden={!fichaNaPagina && comGuia} className={comGuia ? "mx-auto w-full max-w-[1536px] px-4 pb-10 pt-4 sm:px-6 sm:pt-6" : undefined}>
+          {fichaNaPagina && tituloPagina && <h1 className="sr-only">{tituloPagina}</h1>}
           {acoes.capacidades?.negocios === false ? ficha() : (
             <NegociosDaFichaReal ficha={mostrada} pessoaAberta={pessoaId} negocioDoEndereco={negocioInicial} aoAbrirNegocio={aoAbrirNegocio} aoFecharFicha={aoLimpar}>
               {({ aoCriarNegocio, negocioInicial: aAbrir }) => ficha(aoCriarNegocio, aAbrir)}

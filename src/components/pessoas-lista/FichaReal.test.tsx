@@ -46,7 +46,7 @@ const FICHA = fichaDb({
 function desenhar(sobre: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const props = { pessoaId: ID as string | null, idsVisiveis: [ID], aoFechar: vi.fn(), aoIrPara: vi.fn(), aoLimpar: vi.fn(), ...sobre };
   const ui = (p: typeof props) => (
-    <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...p} /></MemoryRouter></FontePessoasContext.Provider>
+    <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...p} /></MemoryRouter></FontePessoasContext.Provider>
   );
   const r = render(ui(props));
   return { props, ...r, reenviar: (nova: Partial<typeof props>) => r.rerender(ui({ ...props, ...nova })) };

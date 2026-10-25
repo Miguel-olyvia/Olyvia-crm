@@ -56,7 +56,7 @@ function desenhar(momento: MomentoGanho | null = "manual", sobre: Partial<Parame
     <QueryClientProvider client={cliente}>
       <FontePessoasContext.Provider value={fonte(momento)}>
         <MemoryRouter>
-          <FichaReal pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} negocioInicial="n1" {...sobre} />
+          <FichaReal comGuia pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} negocioInicial="n1" {...sobre} />
         </MemoryRouter>
       </FontePessoasContext.Provider>
     </QueryClientProvider>,

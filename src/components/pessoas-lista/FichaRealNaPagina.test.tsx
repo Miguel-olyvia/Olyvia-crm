@@ -55,7 +55,7 @@ function desenhar(sobre: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const ui = (p: typeof props) => (
     <FontePessoasContext.Provider value={REAL}>
       <MemoryRouter>
-        <main data-testid="main"><FichaReal {...p}><Quadro /></FichaReal></main>
+        <main data-testid="main"><FichaReal comGuia {...p}><Quadro /></FichaReal></main>
       </MemoryRouter>
     </FontePessoasContext.Provider>
   );

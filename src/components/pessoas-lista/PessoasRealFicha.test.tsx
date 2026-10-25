@@ -55,7 +55,7 @@ function Atras() {
   return <button type="button" onClick={() => navegar(-1)}>atrás do browser</button>;
 }
 const url = () => screen.getByTestId("url").textContent;
-const ficha = (nome: string) => screen.queryByRole("region", { name: nome });
+const ficha = (nome: string) => screen.queryByRole("dialog", { name: nome });
 const listaEscondida = () => document.querySelector("[data-pagina-escondida]")?.hasAttribute("hidden");
 
 function desenhar(inicial = "/pessoas", fonte: FontePessoas = REAL) {
@@ -92,7 +92,6 @@ describe("PessoasReal com a ficha", () => {
     fireEvent.click(screen.getByRole("button", { name: "Bruno Reis" }));
     expect(url()).toBe(`/pessoas?open=${B}`);
     expect(ficha("Bruno Reis")).not.toBeNull();
-    expect(screen.queryByRole("dialog")).toBeNull();
     expect(fichaMock).toHaveBeenCalledWith(B);
   });
 
@@ -112,35 +111,42 @@ describe("PessoasReal com a ficha", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Ana Lopes" })).toHaveFocus());
   });
 
-  it("com a ficha aberta a lista fica montada mas escondida; «← Pessoas» repõe-a (o mesmo elemento) e o foco volta ao nome", async () => {
+  it("com a ficha aberta a lista continua visível: a ficha completa abre num painel lateral e Esc devolve o foco ao nome", async () => {
     desenhar();
-    const lista = document.querySelector("[data-pagina-escondida]");
     const botao = screen.getByRole("button", { name: "Ana Lopes" });
     botao.focus();
     fireEvent.click(botao);
-    expect(listaEscondida()).toBe(true);
-    expect(document.querySelector("[data-pagina-escondida]")).toBe(lista);
-    fireEvent.click(screen.getByRole("button", { name: "Voltar às Pessoas" }));
+    expect(ficha("Ana Lopes")).not.toBeNull();
+    expect(listaEscondida()).toBeFalsy();
+    expect(screen.queryByRole("button", { name: "Voltar às Pessoas" })).toBeNull();
+    fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(url()).toBe("/pessoas"));
-    expect(listaEscondida()).toBe(false);
     await waitFor(() => expect(screen.getByRole("button", { name: "Ana Lopes" })).toHaveFocus());
+  });
+
+  it("a ficha das Pessoas é a completa de sempre (abas Resumo e Registos), não o ecrã guiado do Pipeline", () => {
+    desenhar(`/pessoas?open=${A}`);
+    expect(ficha("Ana Lopes")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "Resumo" })).toBeInTheDocument();
+    expect(document.querySelector("[data-ficha-coluna]")).toBeNull();
   });
 
   it("o botão «atrás» do browser fecha a ficha e deixa a lista visível", async () => {
     desenhar();
     fireEvent.click(screen.getByRole("button", { name: "Ana Lopes" }));
-    expect(listaEscondida()).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "atrás do browser", hidden: true }));
+    expect(ficha("Ana Lopes")).not.toBeNull();
+    fireEvent.click(screen.getByText("atrás do browser"));
     await waitFor(() => expect(url()).toBe("/pessoas"));
-    expect(listaEscondida()).toBe(false);
+    await waitFor(() => expect(ficha("Ana Lopes")).toBeNull());
+    expect(listaEscondida()).toBeFalsy();
   });
 
-  it("um ?open= vindo de fora abre a ficha na página e a ligação «← Pessoas» limpa-o", async () => {
+  it("um ?open= vindo de fora abre a ficha e fechá-la limpa o endereço", async () => {
     desenhar(`/pessoas?open=${A}`);
     expect(ficha("Ana Lopes")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Voltar às Pessoas" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(url()).toBe("/pessoas"));
-    expect(ficha("Ana Lopes")).toBeNull();
+    await waitFor(() => expect(ficha("Ana Lopes")).toBeNull());
   });
 
   it("abrir e fechar não perde os filtros", async () => {

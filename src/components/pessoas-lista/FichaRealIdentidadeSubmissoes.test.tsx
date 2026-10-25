@@ -52,7 +52,7 @@ function desenhar() {
     <QueryClientProvider client={cliente}>
       <FontePessoasContext.Provider value={REAL}>
         <MemoryRouter>
-          <FichaReal pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
+          <FichaReal comGuia pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
         </MemoryRouter>
       </FontePessoasContext.Provider>
     </QueryClientProvider>,

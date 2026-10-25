@@ -45,7 +45,7 @@ const hook = (sobre: Record<string, unknown> = {}) => ({
 
 function desenhar(extra: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const props = { pessoaId: ID as string | null, idsVisiveis: [ID], aoFechar: vi.fn(), aoIrPara: vi.fn(), aoLimpar: vi.fn(), ...extra };
-  return { props, ...render(<FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...props} /></MemoryRouter></FontePessoasContext.Provider>) };
+  return { props, ...render(<FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...props} /></MemoryRouter></FontePessoasContext.Provider>) };
 }
 // A atividade (e as visitas, os registos...) já não estão à vista: abrem a pedido, a partir do menu «Mais», num diálogo por cima.
 const irParaAtividade = () => abrirApoio("Atividade");
@@ -131,7 +131,7 @@ describe("Origem do foco", () => {
     const { rerender, props } = desenhar({ origemFoco: { current: origem } });
     expect(document.querySelector("[data-ficha-raiz]")).not.toBeNull();
     rerender(
-      <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...props} pessoaId={null} origemFoco={{ current: origem }} /></MemoryRouter></FontePessoasContext.Provider>,
+      <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...props} pessoaId={null} origemFoco={{ current: origem }} /></MemoryRouter></FontePessoasContext.Provider>,
     );
     await waitFor(() => expect(document.querySelector("[data-ficha-raiz]")).toBeNull());
     await waitFor(() => expect(origem).toHaveFocus());
