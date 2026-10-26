@@ -236,7 +236,8 @@ const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 
 /**
  * Custo unitário do produto a partir do preço do catálogo. Com units_per_pack
- * > 1 o preço é o da embalagem: divide-se (como unitCostFromPackPrice).
+ * > 1 o preço é o da embalagem: divide-se (como unitCostFromPackPrice e como a
+ * BD em rpc_catalog_link / fn_price_change_cost_plan: round(preço / N, 2)).
  */
 export function catalogUnitCost(item: Pick<CrmCatalogItem, "base_price" | "units_per_pack"> | null | undefined): number | null {
   if (!item || item.base_price == null) return null;
@@ -251,26 +252,39 @@ export function catalogCurrency(item: Pick<CrmCatalogItem, "currency"> | null | 
 }
 
 /**
+ * O preço do catálogo de uma embalagem passa para a unidade? Só com
+ * units_per_pack inteiro (como rpc_catalog_link/fn_price_change_cost_plan:
+ * com N não inteiro a BD não converte e a ligação fica sem preço). Sem
+ * embalagem (N ≤ 1) não há nada a converter.
+ */
+export function catalogPackConvertible(item: Pick<CrmCatalogItem, "units_per_pack"> | null | undefined): boolean {
+  const n = Number(item?.units_per_pack ?? 0);
+  return !(n > 1) || Number.isInteger(n);
+}
+
+/**
  * Usar o preço do catálogo na ligação ao fornecedor? Só com can_view_pricing,
  * com can_manage_prices (F3.4b: rpc_catalog_link exige products.manage_prices
  * para usar o preço, senão recusa com no_price_permission e o produto ficava
- * criado sem ligação) e quando o artigo não é uma embalagem: rpc_catalog_link
- * grava base_price na linha item_suppliers na unidade do produto, e um preço de
- * caixa de 12 numa linha à unidade ficaria 12× acima.
+ * criado sem ligação) e quando o preço passa para a unidade: num artigo em
+ * embalagem de N ligado à unidade do produto, rpc_catalog_link grava na
+ * ligação round(base_price / N, 2) (e o custo do produto = esse valor). Com N
+ * não inteiro a BD não converte: liga-se sem preço.
  */
 export function applyCatalogPriceOnLink(
   item: Pick<CrmCatalogItem, "units_per_pack"> | null | undefined,
   canViewPricing: boolean,
   canManagePrices = false,
 ): boolean {
-  return !!item && canViewPricing && canManagePrices && !((item.units_per_pack ?? 0) > 1);
+  return !!item && canViewPricing && canManagePrices && catalogPackConvertible(item);
 }
 
 /**
  * F3.4b: com o preço do catálogo, a ligação (a primeira do produto novo, logo
- * a preferencial) também grava o custo do produto = preço do catálogo. Só se
- * usa quando o preço de compra escrito é esse mesmo valor — senão a ligação
- * substituía o custo que o utilizador acabou de escrever.
+ * a preferencial) também grava o custo do produto = preço do catálogo por
+ * unidade (÷ N nas embalagens, catalogUnitCost — o mesmo valor que a BD grava).
+ * Só se usa quando o preço de compra escrito é esse mesmo valor — senão a
+ * ligação substituía o custo que o utilizador acabou de escrever.
  */
 export function linkPriceKeepsWrittenCost(
   item: Pick<CrmCatalogItem, "base_price" | "units_per_pack">,

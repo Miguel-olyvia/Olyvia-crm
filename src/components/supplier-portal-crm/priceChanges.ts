@@ -20,7 +20,12 @@ export interface PriceChangeCostPlan {
   message: string | null;
   is_preferred: boolean | null;
   preferred_supplier_name: string | null;
+  /** Embalagem do catálogo numa ligação à unidade: N (o preço do catálogo divide-se por N). */
   units_per_purchase_uom: number | null;
+  catalog_units_per_pack?: number | null;
+  catalog_pack_units?: number | null;
+  /** units_per_pack > 1 não inteiro: não se converte (reason 'pack_not_integer'). */
+  catalog_pack_not_integer?: boolean;
   new_unit_cost: number | null;
   current_unit_cost: number | null;
   current_cost_currency: string | null;

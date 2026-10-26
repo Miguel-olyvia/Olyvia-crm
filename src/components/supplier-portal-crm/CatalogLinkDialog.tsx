@@ -181,6 +181,7 @@ export default function CatalogLinkDialog({
           ctx: priceCtx,
           targetRowId,
           targetUomId,
+          unitsPerPack: item.units_per_pack,
         })
       : null;
 

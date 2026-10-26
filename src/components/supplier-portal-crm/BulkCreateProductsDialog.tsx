@@ -237,7 +237,7 @@ export default function BulkCreateProductsDialog({
             {canViewPricing ? " O preço de compra é o do catálogo (por unidade)." : ""}
             {canViewPricing
               ? canManagePrices
-                ? " A ligação ao fornecedor fica com o preço do catálogo (exceto embalagens)."
+                ? " A ligação ao fornecedor fica com o preço do catálogo por unidade (embalagens: preço ÷ unidades da embalagem)."
                 : " Sem permissão para gerir preços: a ligação ao fornecedor fica sem preço."
               : ""}{" "}
             Sem preço de venda.

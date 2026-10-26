@@ -67,6 +67,9 @@ export const GENERIC_PRICE_EFFECT =
  * targetRowId: linha item_suppliers que a ligação reaproveita; null = cria
  * uma nova; undefined = ainda não se sabe.
  * targetUomId: unidade da ligação nova (só quando targetRowId é null).
+ * unitsPerPack: units_per_pack do artigo. Com N > 1 numa ligação à unidade do
+ * produto o preço do catálogo é da embalagem: a ligação e o custo ficam com
+ * round(preço / N, 2); com N não inteiro a BD não converte e nada muda.
  */
 export function describeCatalogPriceEffect(args: {
   basePrice: number;
@@ -74,6 +77,7 @@ export function describeCatalogPriceEffect(args: {
   ctx: LinkPriceContext | null;
   targetRowId: string | null | undefined;
   targetUomId?: string | null;
+  unitsPerPack?: number | null;
 }): string {
   const { basePrice, ctx, targetRowId } = args;
   const currency = args.currency ?? "EUR";
@@ -92,24 +96,31 @@ export function describeCatalogPriceEffect(args: {
     uomId = row.uomId;
   }
 
+  // Unidade da ligação = unidade do produto (ou nenhuma): fator 1, dá para prever.
+  const sameUnit = uomId === undefined ? false : !uomId || uomId === ctx.productUomId;
+  const pack = Number(args.unitsPerPack ?? 0);
+  const isPack = sameUnit && pack > 1;
+  if (isPack && !Number.isInteger(pack)) {
+    return `O fornecedor vende em embalagens de ${pack.toLocaleString("pt-PT")} unidades (não inteiro): o preço não passa para a unidade e nenhum preço muda.`;
+  }
+  const next = isPack ? round2(basePrice / pack) : round2(basePrice);
+  const packNote = isPack ? ` (preço da embalagem ${money2(basePrice)} ÷ ${pack})` : "";
+
   if (!willBePreferred) {
     const pref = ctx.rows.find((r) => r.isPreferred && r.id !== targetRowId);
     return pref?.supplierName
-      ? `Atualiza só o preço deste fornecedor; o custo do produto vem do fornecedor preferencial (${pref.supplierName}) e não muda.`
-      : "Atualiza só o preço deste fornecedor; o custo do produto não muda (este fornecedor não é o preferencial).";
+      ? `Atualiza só o preço deste fornecedor${isPack ? ` para ${money2(next)} ${currency} por unidade${packNote}` : ""}; o custo do produto vem do fornecedor preferencial (${pref.supplierName}) e não muda.`
+      : `Atualiza só o preço deste fornecedor${isPack ? ` para ${money2(next)} ${currency} por unidade${packNote}` : ""}; o custo do produto não muda (este fornecedor não é o preferencial).`;
   }
   if (ctx.cost && ctx.cost.currency !== currency) {
     return `Atualiza o preço deste fornecedor; o custo do produto está noutra moeda (${ctx.cost.currency}) e não muda.`;
   }
-  // Unidade da ligação = unidade do produto (ou nenhuma): fator 1, dá para prever.
-  const sameUnit = uomId === undefined ? false : !uomId || uomId === ctx.productUomId;
   if (!sameUnit) {
     return "Atualiza o preço deste fornecedor e o custo do produto (convertido para a unidade do produto).";
   }
-  const next = round2(basePrice);
-  if (!ctx.cost) return `Atualiza o preço deste fornecedor e o custo do produto (passa a ${money2(next)} ${currency}).`;
+  if (!ctx.cost) return `Atualiza o preço deste fornecedor e o custo do produto (passa a ${money2(next)} ${currency}${packNote}).`;
   if (round2(ctx.cost.price) === next) {
-    return `Atualiza o preço deste fornecedor; o custo do produto já é ${money2(next)} ${currency}.`;
+    return `Atualiza o preço deste fornecedor; o custo do produto já é ${money2(next)} ${currency}${packNote}.`;
   }
-  return `Atualiza o preço deste fornecedor e o custo do produto (${money2(ctx.cost.price)} → ${money2(next)} ${currency}).`;
+  return `Atualiza o preço deste fornecedor e o custo do produto (${money2(ctx.cost.price)} → ${money2(next)} ${currency}${packNote}).`;
 }

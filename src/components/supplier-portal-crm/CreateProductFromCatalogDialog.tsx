@@ -14,6 +14,7 @@ import {
   SKU_MAX,
   applyCatalogPriceOnLink,
   catalogCurrency,
+  catalogPackConvertible,
   catalogUnitCost,
   createProductFromCatalog,
   linkPriceKeepsWrittenCost,
@@ -195,6 +196,7 @@ export default function CreateProductFromCatalogDialog({
   );
 
   const isPack = (current?.units_per_pack ?? 0) > 1;
+  const packConvertible = catalogPackConvertible(current);
   const applyPrice = current ? applyCatalogPriceOnLink(current, canViewPricing, canManagePrices) : false;
   // O preço escrito é o do catálogo? Só então a ligação leva o preço (e grava
   // o mesmo custo); senão liga sem preço para não substituir o custo escrito.
@@ -478,17 +480,19 @@ export default function CreateProductFromCatalogDialog({
                 {fieldError("vatRate")}
               </div>
             </div>
-            {canViewPricing && isPack && (
+            {canViewPricing && isPack && !packConvertible && (
               <p className="text-xs text-muted-foreground">
-                Artigo vendido em embalagem: a ligação ao fornecedor fica sem preço de compra (o preço do catálogo é da embalagem).
+                Artigo vendido em embalagem de {current.units_per_pack} (não inteiro): a ligação ao fornecedor fica sem preço de compra.
               </p>
             )}
-            {canViewPricing && !isPack && current.base_price != null && (
+            {canViewPricing && packConvertible && current.base_price != null && (
               <p className="text-xs text-muted-foreground" aria-live="polite">
                 {!canManagePrices
                   ? "Sem permissão para gerir preços: a ligação ao fornecedor fica sem preço; o custo do produto é o preço de compra acima."
                   : linkTakesPrice
-                    ? `A ligação ao fornecedor fica com o preço do catálogo (${formatMoney(current.base_price, current.currency)}), igual ao custo do produto.`
+                    ? isPack
+                      ? `A ligação ao fornecedor fica com o preço por unidade (${formatMoney(current.base_price, current.currency)} ÷ ${current.units_per_pack} = ${formatMoney(catalogUnitCost(current), current.currency)}), igual ao custo do produto.`
+                      : `A ligação ao fornecedor fica com o preço do catálogo (${formatMoney(current.base_price, current.currency)}), igual ao custo do produto.`
                     : "O preço de compra é diferente do catálogo: a ligação ao fornecedor fica sem preço, para não mudar o custo que escreveste."}
               </p>
             )}

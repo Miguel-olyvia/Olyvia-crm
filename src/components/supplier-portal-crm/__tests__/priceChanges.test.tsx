@@ -27,7 +27,13 @@ import {
   type PriceChangeItem,
 } from "../priceChanges";
 import { describeCatalogPriceEffect, GENERIC_PRICE_EFFECT, type LinkPriceContext } from "../linkPricePreview";
-import { applyCatalogPriceOnLink, createProductFromCatalog, linkPriceKeepsWrittenCost } from "../catalogProductCreate";
+import {
+  applyCatalogPriceOnLink,
+  catalogPackConvertible,
+  catalogUnitCost,
+  createProductFromCatalog,
+  linkPriceKeepsWrittenCost,
+} from "../catalogProductCreate";
 import { describeLinkPriceOutcome, type CrmCatalogItem } from "../types";
 import PriceChangeDecisionDialog, { type PriceDecisionRequest } from "../PriceChangeDecisionDialog";
 import SupplierPriceChangesSection from "../SupplierPriceChangesSection";
@@ -189,6 +195,15 @@ describe("linkPricePreview — texto da opção", () => {
     expect(describeCatalogPriceEffect({ basePrice: 13, currency: "EUR", ctx, targetRowId: undefined })).toBe(GENERIC_PRICE_EFFECT);
   });
 
+  it("embalagem ligada à unidade: prevê o preço por unidade (÷ N)", () => {
+    expect(describeCatalogPriceEffect({ basePrice: 987654, currency: "EUR", ctx, targetRowId: "is-pref", unitsPerPack: 34 }))
+      .toContain("10,00 → 29 048,65 EUR (preço da embalagem 987 654,00 ÷ 34)");
+    expect(describeCatalogPriceEffect({ basePrice: 120, currency: "EUR", ctx, targetRowId: "is-other", unitsPerPack: 12 }))
+      .toContain("para 10,00 EUR por unidade");
+    expect(describeCatalogPriceEffect({ basePrice: 100, currency: "EUR", ctx, targetRowId: "is-pref", unitsPerPack: 2.5 }))
+      .toContain("não inteiro");
+  });
+
   it("primeira ligação do produto: fica preferencial", () => {
     expect(describeCatalogPriceEffect({
       basePrice: 4.5,
@@ -204,13 +219,28 @@ describe("criar produto a partir do catálogo — preço na ligação", () => {
   it("sem can_manage_prices nunca usa o preço do catálogo", () => {
     expect(applyCatalogPriceOnLink(CATALOG_ITEM, true, false)).toBe(false);
     expect(applyCatalogPriceOnLink(CATALOG_ITEM, true, true)).toBe(true);
-    expect(applyCatalogPriceOnLink({ ...CATALOG_ITEM, units_per_pack: 12 }, true, true)).toBe(false);
+    expect(applyCatalogPriceOnLink({ ...CATALOG_ITEM, units_per_pack: 12 }, true, false)).toBe(false);
+  });
+
+  it("embalagem inteira: a ligação leva o preço por unidade; não inteira: sem preço", () => {
+    // A BD (rpc_catalog_link) grava round(base_price / N, 2) numa ligação à unidade.
+    expect(applyCatalogPriceOnLink({ ...CATALOG_ITEM, units_per_pack: 12 }, true, true)).toBe(true);
+    expect(applyCatalogPriceOnLink({ ...CATALOG_ITEM, units_per_pack: 2.5 }, true, true)).toBe(false);
+    expect(catalogPackConvertible({ units_per_pack: 34 })).toBe(true);
+    expect(catalogPackConvertible({ units_per_pack: 1 })).toBe(true);
+    expect(catalogPackConvertible({ units_per_pack: null })).toBe(true);
+    expect(catalogPackConvertible({ units_per_pack: 2.5 })).toBe(false);
   });
 
   it("só leva o preço se o custo escrito for o do catálogo", () => {
     expect(linkPriceKeepsWrittenCost(CATALOG_ITEM, 12.5)).toBe(true);
     expect(linkPriceKeepsWrittenCost(CATALOG_ITEM, 11)).toBe(false);
     expect(linkPriceKeepsWrittenCost(CATALOG_ITEM, null)).toBe(false);
+    // Embalagem de 34 a 987 654: custo por unidade = 29 048,65 (como a BD).
+    const pack = { ...CATALOG_ITEM, base_price: 987654, units_per_pack: 34 };
+    expect(catalogUnitCost(pack)).toBe(29048.65);
+    expect(linkPriceKeepsWrittenCost(pack, 29048.65)).toBe(true);
+    expect(linkPriceKeepsWrittenCost(pack, 987654)).toBe(false);
   });
 
   const chain = (result: unknown) => {
@@ -272,6 +302,35 @@ describe("criar produto a partir do catálogo — preço na ligação", () => {
     expect(linkCalls).toHaveLength(1);
     expect((linkCalls[0][1] as { p_apply_catalog_price: boolean }).p_apply_catalog_price).toBe(false);
     expect(out.status === "linked" && out.priceNotApplied).toBeTruthy();
+  });
+
+  it("embalagem: com o custo por unidade do catálogo, liga com o preço (sem aviso de 'sem preço')", async () => {
+    fromImpl.mockImplementation(() => chain({ data: [], error: null }));
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "rpc_create_product"
+        ? { data: "prod-1", error: null }
+        : {
+            data: {
+              item_supplier_id: "is-1", created: true, already_linked: false, codes: [], warnings: [],
+              item_supplier_price_updated: true, product_cost_updated: false, new_unit_cost: null, units_per_purchase_uom: 34,
+            },
+            error: null,
+          },
+    );
+    const packItem = { ...CATALOG_ITEM, base_price: 987654, units_per_pack: 34 };
+    const out = await createProductFromCatalog({
+      ...input,
+      item: packItem,
+      purchasePrice: catalogUnitCost(packItem),
+      applyCatalogPrice: applyCatalogPriceOnLink(packItem, true, true),
+    });
+    const linkCalls = rpc.mock.calls.filter((c) => c[0] === "rpc_catalog_link");
+    expect(linkCalls).toHaveLength(1);
+    expect((linkCalls[0][1] as { p_apply_catalog_price: boolean }).p_apply_catalog_price).toBe(true);
+    expect(out.status).toBe("linked");
+    expect(out.status === "linked" && out.priceNotApplied).toBeFalsy();
+    const create = rpc.mock.calls.find((c) => c[0] === "rpc_create_product");
+    expect((create?.[1] as { p_prices: { price: number }[] }).p_prices[0].price).toBe(29048.65);
   });
 });
 
