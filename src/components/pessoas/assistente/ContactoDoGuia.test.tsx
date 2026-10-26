@@ -22,6 +22,8 @@ vi.mock("@/hooks/pessoas/useGuardarQualificacao", async (original) => ({
   useGuardarQualificacao: () => ({ guardar: estado.guardarQual, aGuardar: false, pronto: true }),
 }));
 vi.mock("@/hooks/pessoas/useSubstituirContactoPessoa", () => ({ useSubstituirContactoPessoa: () => ({ guardar: estado.substituir }) }));
+vi.mock("@/hooks/pessoas/useGuardarNifPessoa", () => ({ useGuardarNifPessoa: () => ({ guardar: vi.fn() }) }));
+vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: vi.fn() }) }));
 vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", async (original) => ({
   ...(await original<object>()),
   useGuardarContactoPessoa: () => ({ guardar: estado.preferencias }),

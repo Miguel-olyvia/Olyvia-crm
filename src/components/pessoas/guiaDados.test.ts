@@ -94,14 +94,31 @@ describe("dadosDoGuia: o que ficou registado em cada passo (so factos do ecra)",
 describe("clienteDoGuia", () => {
   it("usa a morada da pessoa (rua, codigo postal e localidade) e a localidade para o cabecalho", () => {
     const c = clienteDoGuia(pessoaBase("a", { contacto: { telefone: "927 118 300", email: "p@x.pt" }, morada: { linha: "Rua A 1", cp: "2700-001", localidade: "Amadora" } }), "WC social");
-    expect(c.cliente).toEqual({ telefone: "927 118 300", email: "p@x.pt", morada: "Rua A 1, 2700-001 Amadora", linha: "WC social" });
+    expect(c.cliente).toEqual({ telefone: "927 118 300", email: "p@x.pt", morada: "Rua A 1, 2700-001 Amadora", linha: "WC social", nif: null, nifUltimos3: null, nifRegistado: false });
     expect(c.local).toBe("Amadora");
   });
 
   it("sem morada ou servico fica a null (o cartao diz «Por preencher»)", () => {
     const c = clienteDoGuia(pessoaBase("a"), null);
-    expect(c.cliente).toEqual({ telefone: null, email: null, morada: null, linha: null });
+    expect(c.cliente).toEqual({ telefone: null, email: null, morada: null, linha: null, nif: null, nifUltimos3: null, nifRegistado: false });
     expect(c.local).toBeNull();
+  });
+
+  it("o NIF é sempre um campo do cartão: sem NIF vai a null (o cartão diz «Por preencher») e nunca entra nos extras", () => {
+    const c = clienteDoGuia(pessoaBase("a", { distrito: "Lisboa" }), null);
+    expect(c.cliente.nif).toBeNull();
+    expect(c.cliente.extras?.map((e) => e.chave)).toEqual(["distrito"]);
+  });
+
+  it("com NIF leva-o; só com os últimos 3 dígitos leva só esses; só com «tem NIF» diz que há um registado", () => {
+    expect(clienteDoGuia(pessoaBase("a", { nif: "123456789" }), null).cliente).toMatchObject({ nif: "123456789", nifUltimos3: null });
+    expect(clienteDoGuia(pessoaBase("a", { nifUltimos3: "789" }), null).cliente).toMatchObject({ nif: null, nifUltimos3: "789", nifRegistado: true });
+    expect(clienteDoGuia(pessoaBase("a", { temNif: true }), null).cliente).toMatchObject({ nif: null, nifUltimos3: null, nifRegistado: true });
+  });
+
+  it("o NIF da empresa continua nos extras", () => {
+    const c = clienteDoGuia(pessoaBase("a", { empresa: { nome: "Obras Lda", nif: "500000000" } }), null);
+    expect(c.cliente.extras).toEqual([{ chave: "empresa", valor: "Obras Lda" }, { chave: "nifEmpresa", valor: "500000000" }]);
   });
 });
 

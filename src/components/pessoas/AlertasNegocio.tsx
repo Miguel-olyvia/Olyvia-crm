@@ -32,10 +32,12 @@ function Acao({ negocio, codigo }: { negocio: NegocioMes; codigo: string | null 
   }
 }
 
-export function AlertasNegocio({ negocio }: { negocio: NegocioMes }) {
+/** `semFecharAgora` (o Pipeline): o aviso «sem prova» só mandava para «Fechar agora», que lá não existe; não se mostra. */
+export function AlertasNegocio({ negocio, semFecharAgora = false }: { negocio: NegocioMes; semFecharAgora?: boolean }) {
   const { t } = useTranslation();
   const ligada = useFechoV4();
   if (!ligada || !negocio.alerta) return null;
+  if (semFecharAgora && negocio.alerta.codigo === "sem_prova") return null;
   const codigo = negocio.alerta.codigo !== null && CODIGOS_CONHECIDOS.includes(negocio.alerta.codigo) ? negocio.alerta.codigo : null;
   return (
     <section aria-label={t(`${N}title`)} className="space-y-2 rounded-md border border-border bg-muted/40 p-3">

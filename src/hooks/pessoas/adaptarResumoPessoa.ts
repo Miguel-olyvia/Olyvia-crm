@@ -75,6 +75,7 @@ function resultadoDe(valor: string | null | undefined): ResultadoContacto | "out
 }
 
 export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista {
+  const etapa = escolher(linha.etapa, ETAPAS) ?? "nova";
   const encerrada = escolher(linha.closure_result, ENCERRAMENTOS);
   const faseEtapa = escolher(linha.fase_mais_avancada, FASES);
   const porLigarContactos = numero(linha.por_ligar_contactos);
@@ -88,7 +89,7 @@ export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista
     leadId: linha.lead_id,
     clienteId: linha.client_id,
     responsavelId: linha.assigned_to,
-    etapa: escolher(linha.etapa, ETAPAS) ?? "nova",
+    etapa,
     faseEtapa,
     encerrada,
     abertos: linha.negocios_abertos,
@@ -108,7 +109,7 @@ export function adaptarResumo(linha: LinhaResumoDb, hoje: string): PessoaDaLista
     passo: passoDaLista({
       encerrada, abertos: linha.negocios_abertos, ganhos: linha.negocios_ganhos, perdidos: linha.negocios_perdidos, faseEtapa,
       prontoAGanhar: linha.pronto_a_ganhar, ultimaVisitaFeitaEm: linha.ultima_visita_feita_em ?? null,
-      ultimoNegocioEm: linha.ultimo_negocio_em ?? null, porLigarContactos, porLigarVisitas, porLigarLevantamentos,
+      ultimoNegocioEm: linha.ultimo_negocio_em ?? null, porLigarContactos, porLigarVisitas, porLigarLevantamentos, etapa,
     }),
     criadoEm: linha.criado_em ?? null,
     qualificacao: qualificacaoDe(linha.qualificacao_tipo),

@@ -1,15 +1,14 @@
 // O guia do passo seguinte de um NEGÓCIO aberto: liga o ecrã de apresentação (`GuiaDoPasso`) ao que o negócio já tem. O botão primário faz o passo
 // no próprio ecrã: criar o orçamento abre o editor real (o mesmo executor do Quadro e da Lista), «Fazer o levantamento» abre o painel «Visita e
-// levantamento» ligado ao negócio e à pessoa, e «Ganhar o negócio» leva ao bloco de fecho que já existe. Enviar a proposta, a resposta do cliente,
+// levantamento» ligado ao negócio e à pessoa; no Pipeline não há «Ganhar o negócio» nem «Fechar agora». Enviar a proposta, a resposta do cliente,
 // criar o contrato e a assinatura abrem o seu diálogo por cima do guia (`DocumentosDoNegocioReal`), sem navegar. Nada se grava aqui: o guia só
 // escolhe qual painel abrir. Com `cabecalhoFicha` é o ÚNICO cabeçalho da ficha com o negócio aberto: o nome da pessoa e o serviço (a linha), o valor e o
 // comercial no passo, e o paginador e as ações da pessoa (Email, Mais) no cabeçalho.
 import { useMemo, type MouseEvent, type ReactNode, type Ref } from "react";
-import { useFechoV4 } from "@/components/negocio-metas/bandeiraFecho";
 import { useRegistosPessoa } from "@/components/negocio-metas/registosPessoa";
 import { registosDoNegocio } from "@/components/negocio-metas/acoesRegistos";
-import { valorDoNegocio, type NegocioMes } from "@/components/negocio-metas/negocioMetas";
-import { formatarMeta } from "@/components/negocio-metas/formatoMetas";
+import type { NegocioMes } from "@/components/negocio-metas/negocioMetas";
+import { saudeDoNegocio } from "@/components/negocio-metas/saudeNegocio";
 import { SaudeTag } from "@/components/negocio-metas/SaudeTag";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -31,8 +30,6 @@ import { passoDoItem } from "./processo/passosProcesso";
 import { useAcaoDoPasso } from "./processo/processoContexto";
 import type { ItemProcesso, PassoProcesso } from "./processo/tiposProcesso";
 import { Prazo } from "./SeccoesResumo";
-
-export const ATRIBUTO_BLOCO_FECHO = "data-bloco-fecho";
 
 interface GuiaDoNegocioProps {
   negocio: NegocioMes;
@@ -60,30 +57,9 @@ interface GuiaDoNegocioProps {
   aoRegistarChamada?: (origem: HTMLElement | null) => void;
 }
 
-/** O valor e o comercial do negócio numa linha de dados (era o `dl` do bloco de título). */
-export function DadosDoNegocio({ negocio }: { negocio: NegocioMes }) {
-  const { t } = useTranslation();
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[15px]">
-      <dt className="text-muted-foreground">{t("pessoasPagina.detail.value")}</dt>
-      <dd className="font-semibold tabular-nums text-foreground">{formatarMeta("euro", valorDoNegocio(negocio))}</dd>
-      <dt className="text-muted-foreground">{t("pessoasPagina.detail.rep")}</dt>
-      <dd className="text-foreground">{negocio.comercial}</dd>
-    </dl>
-  );
-}
-
-/** Leva o foco ao bloco de fecho do negócio (onde se dá como ganho), no mesmo ecrã. */
-function irParaFecho(): void {
-  const bloco = document.querySelector<HTMLElement>(`[${ATRIBUTO_BLOCO_FECHO}]`);
-  bloco?.scrollIntoView?.({ block: "center" });
-  bloco?.focus();
-}
-
 export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, atividade, acaoPerder, cabecalhoFicha, tituloRef, semPasso = false, faixa, aoRegistarChamada }: GuiaDoNegocioProps) {
   const { t } = useTranslation();
   const fonte = useFontePessoas();
-  const fechoV4 = useFechoV4();
   const registos = useRegistosPessoa();
   const levantamento = useLevantamentoDoNegocio();
   const documentos = useDocumentosDoNegocio();
@@ -105,15 +81,14 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
     dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, doNegocio, t),
     fases: fasesDoGuia,
     podeEditar, podeCriar: false, permissoesFecho, pessoaFechada: false,
-    ligados: ligadosDoNegocio(itemGuia, acao.executa, levantamento?.pode === true && pessoa !== undefined, fechoV4 && negocio.prontoAGanhar === true, comDocumento, aoRegistarChamada !== undefined),
+    ligados: ligadosDoNegocio(itemGuia, acao.executa, levantamento?.pode === true && pessoa !== undefined, comDocumento, aoRegistarChamada !== undefined),
   }) : null;
   const aoAcao = (e: MouseEvent<HTMLElement>): void => {
     if (!doPasso) return;
     // O levantamento faz-se no assistente de passos (sem botão do passo): sem o assistente não há nada a abrir.
     if (doPasso.passo === "fazerLevantamento") return;
     if (doPasso.passo === "registarChamada") { aoRegistarChamada?.(e.currentTarget); return; }
-    if (doPasso.passo === "ganharNegocio") irParaFecho();
-    else if (ehPassoDeDocumento(doPasso.passo)) documentos?.abrir(doPasso.passo, negocio.id);
+    if (ehPassoDeDocumento(doPasso.passo)) documentos?.abrir(doPasso.passo, negocio.id);
     else acao.aoClicar(e);
   };
   const { cliente, local } = clienteDoGuia(pessoa ?? { contacto: negocio.contacto }, negocio.servico);
@@ -156,8 +131,8 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
       extra={(
         <div className="space-y-2">
           <Prazo prazo={negocio.proximoPrazo} hoje={hoje} />
-          <SaudeTag negocio={negocio} hoje={hoje} />
-          <DadosDoNegocio negocio={negocio} />
+          {/* «Sem orçamento escolhido» é o normal de um negócio ainda na abordagem: não é um alerta a mostrar no guia. */}
+          {saudeDoNegocio(negocio, hoje) !== "semOrcamento" && <SaudeTag negocio={negocio} hoje={hoje} />}
         </div>
       )}
     />
@@ -165,16 +140,15 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
 }
 
 /**
- * Os passos que este ecrã sabe fazer: os que o processo executa, o levantamento (com o painel ligado ao negócio), ganhar (leva ao bloco de fecho) e os
+ * Os passos que este ecrã sabe fazer: os que o processo executa, o levantamento (com o painel ligado ao negócio) e os
  * de documento (diálogo por cima do guia, quando o negócio tem o documento). O levantamento, o ganho e os documentos têm o seu caminho: o executor do
  * processo não conta para eles (e, para os documentos, é ele que levava a /proposals e /client-contracts).
  */
-function ligadosDoNegocio(item: ItemProcesso, executa: boolean, levantamento: boolean, ganhar: boolean, documento: boolean, chamada: boolean): ReadonlySet<PassoProcesso> {
+function ligadosDoNegocio(item: ItemProcesso, executa: boolean, levantamento: boolean, documento: boolean, chamada: boolean): ReadonlySet<PassoProcesso> {
   const ligados = new Set<PassoProcesso>();
   const passo = passoDoItem(item).id;
   if (executa && passo !== "fazerLevantamento" && passo !== "ganharNegocio" && !ehPassoDeDocumento(passo)) ligados.add(passo);
   if (levantamento) ligados.add("fazerLevantamento");
-  if (ganhar) ligados.add("ganharNegocio");
   if (documento) ligados.add(passo);
   // «Registar a chamada» de um negócio por contactar abre o registo da ficha (o executor do processo não o conhece no Pipeline).
   if (chamada && passo === "registarChamada") ligados.add(passo);

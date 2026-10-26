@@ -86,7 +86,7 @@ describe("FichaReal com o negócio completo", () => {
   it("abre já no negócio pedido e oferece perder, sem o «Dar como ganho» antigo", async () => {
     desenhar();
     await detalhe();
-    expect(screen.getByRole("button", { name: "Perder negócio" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Marcar como perdido" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Dar como ganho" })).toBeNull();
   });
 
@@ -103,7 +103,7 @@ describe("FichaReal com o negócio completo", () => {
   it("perder vai para a base com a fase e o motivo", async () => {
     desenhar();
     await detalhe();
-    fireEvent.click(screen.getByRole("button", { name: "Perder negócio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como perdido" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Motivo da perda" }), { target: { value: "Preço" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirmar a perda" }));
     await waitFor(() => expect(chamadas("neg_perder_negocio")).toHaveLength(1));
@@ -144,7 +144,7 @@ describe("FichaReal com o negócio completo", () => {
     ficha = fichaDb({ ...FICHA_BASE, permissoes: { editar: false, criar: false } });
     desenhar();
     await detalhe();
-    expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Marcar como perdido" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /Criar negócio/ })).toBeNull();
   });
 });

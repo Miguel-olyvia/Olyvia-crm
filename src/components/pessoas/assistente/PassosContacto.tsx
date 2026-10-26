@@ -22,6 +22,7 @@ import { contarRespostas } from "@/components/negocio-metas/respostasVisita";
 import { CONTACTOS_PREFERIDOS, HORAS_PREFERIDAS, opcoesDeLingua, LINGUAS_GRAVAVEIS } from "@/hooks/pessoas/useGuardarContactoPessoa";
 import type { FormularioContacto } from "@/components/pessoas-lista/contactoFormulario";
 import type { ContactoPreferido, HoraPreferida } from "../pessoasTipos";
+import { GrupoQuemPede, type CampoQuemPede, type QuemPedeProps } from "./GrupoQuemPede";
 import { DURACOES_PREPARAR, QUEM_VAI_ESTAR, type PrepararVisita } from "./rascunhoAssistente";
 
 const A = "pessoasPagina.assistente.";
@@ -57,12 +58,14 @@ interface CorpoChamadaProps {
   aoMudar: (parcial: Partial<FormularioContacto>) => void;
   podeEditar: boolean;
   /** O campo com erro (o formato, ou um contacto repetido), ligado por aria-invalid. */
-  erroCampo: "email" | "telefone" | null;
+  erroCampo: "email" | "telefone" | CampoQuemPede | null;
   aoRegistar: (origem: HTMLElement) => void;
   podeRegistar: boolean;
+  /** O grupo «Quem pede» (tipo de cliente e NIF) por baixo do contacto; sem isto não aparece. */
+  quemPede?: Omit<QuemPedeProps, "podeEditar" | "erroCampo">;
 }
 
-export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, aoRegistar, podeRegistar }: CorpoChamadaProps) {
+export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, aoRegistar, podeRegistar, quemPede }: CorpoChamadaProps) {
   const { t } = useTranslation();
   const id = useId();
   const linguas = opcoesDeLingua(form.lingua);
@@ -94,6 +97,7 @@ export function CorpoChamada({ chamadas, form, aoMudar, podeEditar, erroCampo, a
         </div>
       </div>
       <p className="text-sm text-muted-foreground">{t(`${C}hint`)}</p>
+      {quemPede && <GrupoQuemPede {...quemPede} podeEditar={podeEditar} erroCampo={erroCampo} />}
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-preferido`}>{t(`${C}preferred`)}</Label>

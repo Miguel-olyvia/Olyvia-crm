@@ -87,6 +87,12 @@ function tipoClienteDe(p: FichaDb["pessoa"]): TipoCliente | undefined {
   return undefined;
 }
 
+/** Os últimos 3 dígitos do NIF: só se forem exatamente três dígitos (nada de mostrar mais). */
+function ultimos3De(valor: string | null | undefined): string | undefined {
+  const texto = textoOuNull(valor);
+  return texto !== null && /^[0-9]{3}$/.test(texto) ? texto : undefined;
+}
+
 /** A pessoa da ficha. `hoje` é o dia de Lisboa (AAAA-MM-DD). */
 export function adaptarPessoa(ficha: FichaDb, hoje: string): Pessoa {
   const { pessoa, agregados } = ficha;
@@ -111,6 +117,8 @@ export function adaptarPessoa(ficha: FichaDb, hoje: string): Pessoa {
     campanha: textoOuNull(pessoa.origem?.campanha) ?? undefined,
     formulario: textoOuNull(pessoa.origem?.formulario) ?? undefined,
     nif: textoOuNull(pessoa.nif) ?? undefined,
+    nifUltimos3: ultimos3De(pessoa.nif_ultimos3),
+    temNif: pessoa.tem_nif === true ? true : undefined,
     empresa: empresaDe(pessoa.empresa),
     resultadoContacto: (escolher(agregados.ultimo_resultado, RESULTADOS_CONTACTO as readonly ResultadoContacto[]) ?? undefined),
     proximoContacto: diaLisboa(proximo),

@@ -245,7 +245,7 @@ export function FichaInterior(p: FichaInteriorProps) {
   const formChamada = (
     <FormChamada
       id={`${painelId}-chamada`} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes} aoFechar={() => fechar(true)}
-      negocioId={p.comGuia ? negocio.aberto ?? undefined : undefined}
+      negocioId={p.comGuia ? negocio.aberto ?? undefined : undefined} exigirNegocio={!!p.comGuia}
       // No Pipeline (com guia) o negócio fica aberto: a chamada liga-se a ele e a ficha continua nele (passa a Contactado). Só a ficha antiga o fecha.
       aoConcluir={(mensagem) => { anunciar(mensagem); if (!p.comGuia) { negocio.esquecer(); setAba("resumo"); } fechar(true); }}
     />

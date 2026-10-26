@@ -8,6 +8,9 @@ import { QuestionarioFormularioProvider } from "@/hooks/pessoas/QuestionarioForm
 import { useGuardarQualificacao } from "@/hooks/pessoas/useGuardarQualificacao";
 import { useGuardarContactoPessoa } from "@/hooks/pessoas/useGuardarContactoPessoa";
 import { useSubstituirContactoPessoa } from "@/hooks/pessoas/useSubstituirContactoPessoa";
+import { useGuardarNifPessoa } from "@/hooks/pessoas/useGuardarNifPessoa";
+import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
+import { compactar, formularioInicial, pedidoDeIdentidade, type FormularioIdentidade, type IdentidadeAtual } from "@/components/pessoas-lista/identidadeFormulario";
 import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
 import { MORADA_VAZIA, validarCodigoPostal, type ChaveMorada, type MoradaObraForm, type OrigemMoradaObra } from "@/components/negocio-metas/moradaObra";
 import { blocosDaQualificacao } from "@/components/negocio-metas/questionarioForm";
@@ -21,7 +24,11 @@ import type { AberturaVisita } from "../marcarVisitaContexto";
 import type { Pessoa, ResultadoContacto } from "../pessoasTipos";
 import type { FaseFeita } from "../processo/passoGuiado";
 import { AssistenteDoGuia } from "./AssistenteDoGuia";
+import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
+import { comAvisoDeParcial } from "./comAvisoDeParcial";
 import { guardarContactoDaPessoa } from "./guardarContactoDaPessoa";
+import type { CampoQuemPede } from "./GrupoQuemPede";
+import { pedidoDeNif, tipoIdentidadeDe } from "./quemPedeFormulario";
 import { passosDoContacto } from "./modeloAssistente";
 import { CorpoChamada, CorpoMarcar, CorpoMorada, CorpoPreparar, CorpoQualificacao, SemNegocio } from "./PassosContacto";
 import type { PassoAssistente } from "./tiposAssistente";
@@ -29,6 +36,9 @@ import { useAssistente } from "./useAssistente";
 import { useRascunhoAssistente } from "./useRascunhoAssistente";
 
 const C = "pessoasPagina.real.ficha.contact.";
+const I = "pessoasPagina.real.ficha.identity.";
+const Q = "pessoasPagina.assistente.quemPede.";
+const CODIGO_NIF_REPETIDO = "NG030";
 
 /** O negócio a que o assistente grava: o que a Qualificação precisa de saber dele. */
 export interface NegocioDoAssistente {
@@ -88,7 +98,31 @@ function ContactoInterior({
     telefone: pessoa.contacto.telefone, email: pessoa.contacto.email, contacto: pessoa.contactoPreferido, hora: pessoa.horaPreferida, lingua: pessoa.lingua,
   }), [pessoa.contacto.telefone, pessoa.contacto.email, pessoa.contactoPreferido, pessoa.horaPreferida, pessoa.lingua]);
   const [contacto, setContacto] = useState<FormularioContacto>(() => formularioDeContacto(atualContacto));
-  const [erroCampo, setErroCampo] = useState<"email" | "telefone" | null>(null);
+  const [erroCampo, setErroCampo] = useState<"email" | "telefone" | CampoQuemPede | null>(null);
+
+  // Quem pede: o tipo de cliente e o NIF, gravados pelos hooks próprios. O NIF abre vazio (nunca se lê da base) e só se grava o que se tocou.
+  const { guardar: guardarNif } = useGuardarNifPessoa(pessoa.id);
+  const { guardar: guardarIdentidade } = useGuardarIdentidadePessoa(pessoa.id, pessoa.tipoCliente);
+  const tipoAtual = tipoIdentidadeDe(pessoa.tipoCliente);
+  const empresaNome = pessoa.empresa?.nome ?? null;
+  const identidadeAtual = useMemo<IdentidadeAtual | null>(
+    () => (tipoAtual ? { nome: pessoa.nome, tipo: tipoAtual, empresaNome } : null), [tipoAtual, pessoa.nome, empresaNome],
+  );
+  const [quemPede, setQuemPede] = useState<FormularioIdentidade>(() => formularioInicial(identidadeAtual ?? { nome: pessoa.nome, tipo: "person", empresaNome: null }));
+  // O formulário só parte do que a base tem quando o tipo passa de desconhecido a conhecido (a ficha acabou de carregar) ou depois de uma gravação própria
+  // do tipo; uma ficha que se refaz por outra razão (outro ecrã, outra gravação) não pisa o que se está a escrever.
+  const tipoConhecido = useRef(identidadeAtual !== null);
+  const reporAposGravar = useRef(false);
+  useEffect(() => {
+    const jaConhecido = tipoConhecido.current;
+    tipoConhecido.current = identidadeAtual !== null;
+    if (!identidadeAtual) return;
+    if (jaConhecido && !reporAposGravar.current) return;
+    reporAposGravar.current = false;
+    setQuemPede(formularioInicial(identidadeAtual));
+  }, [identidadeAtual]);
+  const [nif, setNif] = useState("");
+  const [nifTocado, setNifTocado] = useState(false);
 
   // Qualificação: o que o negócio já tem, e o que se escreve agora. `gravado` é o que está na base (para só mandar o que mudou).
   const gravadasDoNegocio = negocio?.qualificacaoGravada ?? [];
@@ -124,18 +158,55 @@ function ContactoInterior({
   const preencherMorada = (morada: MoradaObraForm, origem: OrigemMoradaObra): void => atualizar({ morada: { ...morada }, moradaOrigem: origem });
   const erroCodigoPostal = validarCodigoPostal(rascunho.morada.codigoPostal) !== null;
 
-  async function gravarContacto(): Promise<string | null> {
+  /** Valida o que se escreveu em «Quem pede» antes de gravar fosse o que fosse: o campo em falta e a mensagem, ou os pedidos a fazer. */
+  function validarQuemPede() {
+    const tipo = identidadeAtual && podeEditar ? pedidoDeIdentidade(quemPede, identidadeAtual) : null;
+    if (tipo?.estado === "falta") {
+      const campo: CampoQuemPede = tipo.chaveErro === "errorCompany" ? "empresa" : compactar(quemPede.nomeProprio) === "" ? "nomeProprio" : "apelido";
+      return { falta: { campo, texto: t(`${I}${tipo.chaveErro}`) } } as const;
+    }
+    const nifPedido = podeEditar ? pedidoDeNif(nif, nifTocado, pessoa) : ({ estado: "semAlteracao" } as const);
+    if (nifPedido.estado === "invalido") return { falta: { campo: "nif" as CampoQuemPede, texto: t(`${Q}nifInvalido`) } } as const;
+    return { tipo: tipo?.estado === "guardar" ? tipo.dados : null, nif: nifPedido } as const;
+  }
+
+  async function gravarChamada(): Promise<string | null> {
     const pedidoContacto = pedidoDeContacto(contacto, atualContacto);
     if (pedidoContacto.estado === "falta") {
       setErroCampo(pedidoContacto.campo);
       return t(`${C}${pedidoContacto.chaveErro}`);
     }
+    const quem = validarQuemPede();
+    if ("falta" in quem) {
+      setErroCampo(quem.falta.campo);
+      return quem.falta.texto;
+    }
     setErroCampo(null);
-    if (pedidoContacto.estado === "semAlteracao") return null;
     try {
-      await guardarContactoDaPessoa(pedidoContacto.dados, { substituir, preferencias });
+      let gravou = false;
+      if (pedidoContacto.estado === "guardar") {
+        await guardarContactoDaPessoa(pedidoContacto.dados, { substituir, preferencias });
+        gravou = true;
+      }
+      const { tipo, nif: pedidoNif } = quem;
+      if (tipo) {
+        reporAposGravar.current = true;
+        try {
+          await comAvisoDeParcial(gravou, pedidoNif.estado === "semAlteracao" ? `${Q}parcialSoTipo` : `${Q}parcialTipo`, () => guardarIdentidade(tipo));
+        } catch (erro) {
+          reporAposGravar.current = false;
+          throw erro;
+        }
+        gravou = true;
+      }
+      if (pedidoNif.estado === "guardar" || pedidoNif.estado === "limpar") {
+        await comAvisoDeParcial(gravou, `${Q}parcialNif`, () => guardarNif(pedidoNif.estado === "guardar" ? pedidoNif.nif : ""));
+        setNifTocado(false);
+        setNif("");
+      }
       return null;
     } catch (erro) {
+      if (erro instanceof ErroNeg && erro.codigo === CODIGO_NIF_REPETIDO) setErroCampo("nif");
       return textoDoErroGravar(erro, t);
     }
   }
@@ -157,7 +228,7 @@ function ContactoInterior({
   }
 
   const aoContinuar = (passo: PassoAssistente): Promise<string | null> | string | null => {
-    if (passo.id === "chamada") return gravarContacto();
+    if (passo.id === "chamada") return gravarChamada();
     if (passo.id === "qualificacao") return podeEditar ? gravarQualificacao() : null;
     if (passo.id === "morada" && negocio && erroCodigoPostal) return t("businessGoals.new.error.postal.invalido");
     return null;
@@ -176,6 +247,11 @@ function ContactoInterior({
           <CorpoChamada
             chamadas={chamadas} form={contacto} aoMudar={(parcial) => { setErroCampo(null); setContacto((f) => ({ ...f, ...parcial })); }}
             podeEditar={podeEditar} erroCampo={erroCampo} aoRegistar={aoRegistarChamada} podeRegistar={podeRegistarChamada}
+            quemPede={{
+              form: quemPede, tipoAtual, nif, nifUltimos3: pessoa.nifUltimos3 ?? null, nifRegistado: Boolean(pessoa.nifUltimos3 || pessoa.temNif),
+              aoMudarForm: (parcial) => { setErroCampo(null); reporAposGravar.current = false; setQuemPede((f) => ({ ...f, ...parcial })); },
+              aoMudarNif: (valor) => { setErroCampo(null); setNifTocado(true); setNif(valor); },
+            }}
           />
         );
       case "qualificacao":

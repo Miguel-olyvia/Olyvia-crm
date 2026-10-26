@@ -46,6 +46,8 @@ export interface PessoaFichaDb {
   last_name?: string | null;
   /** Há uma ligação fiscal principal (só se lê: o NIF nunca sai da função). */
   tem_nif?: boolean | null;
+  /** Os últimos 3 dígitos do NIF (anew_entities.nif_last3), só quando a função os devolver; nunca o NIF inteiro. */
+  nif_ultimos3?: string | null;
   /** «Voltou a contactar»: a atividade da lead é posterior ao último contacto (a chamada registada em Pessoas conta como contacto). */
   voltou_a_contactar?: boolean | null;
   /** Migration 20261231100000: preferências de contacto e tipo de cliente. Ausentes numa leitura anterior. */

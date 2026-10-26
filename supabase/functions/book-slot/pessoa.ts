@@ -23,7 +23,10 @@ export type PessoaResolvida =
     /** Negocio aberto desta submissao, confirmado em `negocios`; null se nao houver. */
     negocioId: string | null;
   }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: 'RETRY' };
+
+/** Regista uma falha no Sentry (o index passa o captureError de sentry.ts; este modulo nao importa nada remoto). */
+export type RegistarErro = (error: unknown, context?: Record<string, unknown>) => Promise<void> | void;
 
 /** Dono da visita: quem trata da entidade (`assigned_to`), senao quem a criou. */
 export function donoDaEntidade(
@@ -40,9 +43,18 @@ export function tipoParaEmail(isClient: boolean): 'clients' | 'leads' {
 const naoEncontrada = (): PessoaResolvida => ({ ok: false, status: 404, error: 'Submission not found for this form' });
 
 /** Erro de leitura nao e "nao existe": 503 RETRY para o visitante tentar de novo. */
-function falhaDeLeitura(contexto: string, error: { message?: string }): PessoaResolvida {
+async function falhaDeLeitura(
+  contexto: string,
+  error: { message?: string },
+  captureError?: RegistarErro,
+): Promise<PessoaResolvida> {
   console.error(`[book-slot] ${contexto}:`, error?.message);
-  return { ok: false, status: 503, error: 'RETRY' };
+  try {
+    await captureError?.(new Error(`book-slot: ${contexto}: ${error?.message ?? 'sem mensagem'}`), { function: 'book-slot', stage: 'resolverPessoa' });
+  } catch (e) {
+    console.error('[book-slot] captureError falhou:', e);
+  }
+  return { ok: false, status: 503, error: 'RETRY', code: 'RETRY' };
 }
 
 /**
@@ -54,8 +66,9 @@ export async function resolverPessoa(params: {
   organizationId: string;
   formId: string;
   submissionId: string;
+  captureError?: RegistarErro;
 }): Promise<PessoaResolvida> {
-  const { supabase, organizationId, formId, submissionId } = params;
+  const { supabase, organizationId, formId, submissionId, captureError } = params;
   const { data: sub, error: subError } = await supabase
     .from('form_submissions')
     .select('id, entity_id, negocio_id, field_values')
@@ -63,7 +76,7 @@ export async function resolverPessoa(params: {
     .eq('organization_id', organizationId)
     .eq('form_id', formId)
     .maybeSingle();
-  if (subError) return falhaDeLeitura('leitura da submissao falhou', subError);
+  if (subError) return await falhaDeLeitura('leitura da submissao falhou', subError, captureError);
   if (!sub?.entity_id) return naoEncontrada();
 
   const { data: entity, error: entityError } = await supabase
@@ -73,7 +86,7 @@ export async function resolverPessoa(params: {
     .eq('organization_id', organizationId)
     .is('deleted_at', null)
     .maybeSingle();
-  if (entityError) return falhaDeLeitura('leitura da entidade falhou', entityError);
+  if (entityError) return await falhaDeLeitura('leitura da entidade falhou', entityError, captureError);
   if (!entity?.id) return naoEncontrada();
 
   const fv = sub.field_values && typeof sub.field_values === 'object' && !Array.isArray(sub.field_values)

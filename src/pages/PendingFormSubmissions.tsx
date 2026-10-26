@@ -309,6 +309,12 @@ function ConflictCandidates({ candidates, linkedEntityId, submissionName, unread
  * quem já conhecemos espera aqui por uma decisão humana: ligar à pessoa (fica como nota), criar um negócio ou ignorar como duplicado.
  * Os valores enviados nunca entram na ficha sozinhos e não estão verificados.
  */
+/** A segunda pessoa de um conflito: a coluna, ou o fallback que o servidor grava em _meta.dedup.conflito quando a coluna falhou. */
+function conflictoDe(s: any): string | null {
+  const meta = s?.field_values?._meta?.dedup?.conflito;
+  return s?.conflicting_entity_id || (typeof meta === "string" && meta ? meta : null);
+}
+
 export default function PendingFormSubmissions() {
   const navigate = useNavigate();
   const { t, language } = useTranslation();
@@ -342,8 +348,8 @@ export default function PendingFormSubmissions() {
       const candidateIds = Array.from(
         new Set(
           submissions
-            .filter((s: any) => s.conflicting_entity_id)
-            .flatMap((s: any) => [s.entity_id, s.conflicting_entity_id])
+            .filter((s: any) => conflictoDe(s))
+            .flatMap((s: any) => [s.entity_id, conflictoDe(s)])
             .filter(Boolean),
         ),
       ) as string[];
@@ -403,7 +409,7 @@ export default function PendingFormSubmissions() {
           : definitionsByCampaign["__org__"] || [];
         const fieldLabels = Object.fromEntries(definitions.map((d) => [d.field_key, d.field_label]));
 
-        const conflictingEntityId = s.conflicting_entity_id || null;
+        const conflictingEntityId = conflictoDe(s);
         // A deteccao de duplicados grava aqui o que coincidiu, no momento em que a submissao entrou. Submissoes anteriores vem sem nada.
         const dedupMeta = (s.field_values as any)?._meta?.dedup ?? null;
         // O book-slot grava aqui a hora que ficou por marcar (só quando houve um pedido de visita sem agenda livre).

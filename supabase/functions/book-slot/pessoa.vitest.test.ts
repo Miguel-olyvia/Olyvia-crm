@@ -69,7 +69,7 @@ describe('resolverPessoa', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const s = makeSupabase(dados(), { 'form_submissions:select': { message: 'timeout' } });
     const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB });
-    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY' });
+    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY', code: 'RETRY' });
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
@@ -78,8 +78,31 @@ describe('resolverPessoa', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const s = makeSupabase(dados(), { 'anew_entities:select': { message: 'timeout' } });
     const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB });
-    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY' });
+    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY', code: 'RETRY' });
     expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it.each([
+    ['submissao', 'form_submissions:select'],
+    ['entidade', 'anew_entities:select'],
+  ])('erro a ler a %s: passa a captureError recebido (Sentry) com a funcao e a fase', async (_n, chave) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const captureError = vi.fn(async () => undefined);
+    const s = makeSupabase(dados(), { [chave]: { message: 'timeout' } });
+    const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB, captureError });
+    expect(r).toMatchObject({ ok: false, status: 503, code: 'RETRY' });
+    expect(captureError).toHaveBeenCalledTimes(1);
+    expect(captureError.mock.calls[0][1]).toMatchObject({ function: 'book-slot' });
+    spy.mockRestore();
+  });
+
+  it('um captureError que rebenta nao parte a resposta RETRY', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const captureError = vi.fn(async () => { throw new Error('sentry em baixo'); });
+    const s = makeSupabase(dados(), { 'form_submissions:select': { message: 'timeout' } });
+    const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB, captureError });
+    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY', code: 'RETRY' });
     spy.mockRestore();
   });
 

@@ -33,6 +33,8 @@ export type PropsFormChamada = Pick<PropsPainel, "id" | "pessoa" | "resumo" | "h
   idTitulo?: string;
   /** Só o Pipeline: o negócio do cartão. A chamada (e a visita que ela marque) fica ligada a ele; sem isto, é só da pessoa. */
   negocioId?: string;
+  /** Só o Pipeline: a chamada não se grava só na pessoa. Sem `negocioId` não grava e avisa para abrir primeiro o negócio. */
+  exigirNegocio?: boolean;
 };
 
 /** A frase para o leitor de ecrã: a chamada e, se houve, a visita, a chamada agendada ou a abordagem encerrada. */
@@ -63,11 +65,12 @@ export function FormChamada(props: PropsFormChamada) {
 }
 
 /** O corpo do formulário; com `agendaReal` (a ficha real) o passo «marcar visita» usa a agenda da base. */
-export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora, negocioId, agendaReal }: PropsFormChamada & { agendaReal: FormAgenda | null }) {
+export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora, negocioId, exigirNegocio = false, agendaReal }: PropsFormChamada & { agendaReal: FormAgenda | null }) {
   const { t } = useTranslation();
   const f = useFormChamada(resumo, hoje, acoes.capacidades?.visita === false, agendaReal !== null);
   // A agenda da base só mostra os seus erros depois de tentar guardar (como o resto do formulário).
   const [tentouAgenda, setTentouAgenda] = useState(false);
+  const [semNegocio, setSemNegocio] = useState(false);
   const comAgenda = agendaReal !== null && f.campos.passo === "marcarVisita";
   const erroAgenda = comAgenda && tentouAgenda && agendaReal ? validarAgenda(agendaReal.valor, hoje) : null;
   const acao = useExecutarAcao();
@@ -96,6 +99,11 @@ export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConc
     return { ...dados, data: valor.data, hora: valor.hora, visita };
   };
   const guardar = () => {
+    if (exigirNegocio && !negocioId) {
+      setSemNegocio(true);
+      return;
+    }
+    setSemNegocio(false);
     if (comAgenda) setTentouAgenda(true);
     const preparados = f.preparar();
     const comDados = preparados && comVisita(preparados);
@@ -130,6 +138,7 @@ export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConc
         />
       </div>
       <div className="sticky bottom-0 z-10 -mx-6 border-t border-border bg-background px-6 py-3">
+        {semNegocio && <p role="alert" className="mb-2 text-sm font-medium text-destructive">{t("pessoasPagina.call.openDealFirst")}</p>}
         <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} className="mb-2" />
         <BotoesPainel
           guardar={guardar} aoCancelar={aoFechar} desativado={f.campos.resultado === null} dica={t("pessoasPagina.panel.hintResult")}

@@ -27,7 +27,8 @@ export function OrigemDaDecisao({ negocio }: { negocio: NegocioMes }) {
   return <p className="text-sm text-muted-foreground">{texto}</p>;
 }
 
-export function BlocoFechoNegocio({ negocio }: { negocio: NegocioMes }) {
+/** `semFecharAgora` (o Pipeline): num negócio aberto não há nada a mostrar (era só «Fechar agora»); o ganho e o perdido ficam como estavam. */
+export function BlocoFechoNegocio({ negocio, semFecharAgora = false }: { negocio: NegocioMes; semFecharAgora?: boolean }) {
   const { t } = useTranslation();
   const ligada = useFechoV4();
   const dados = useDadosNegocio();
@@ -35,7 +36,7 @@ export function BlocoFechoNegocio({ negocio }: { negocio: NegocioMes }) {
   if (!ligada || !dados || !mutacoes) return null;
   // Aberto sem nada decisivo: nada a mostrar (o grupo ficaria vazio). Perdido: só a origem; «Manter perdido» vem no aviso.
   if (negocio.estadoReal === "perdido") return <OrigemDaDecisao negocio={negocio} />;
-  if (negocio.estadoReal === "aberto" && negocio.prontoAGanhar !== true) return null;
+  if (negocio.estadoReal === "aberto" && (semFecharAgora || negocio.prontoAGanhar !== true)) return null;
   // O aviso em aberto já traz a ação que o resolve: aqui não se repete (duas ações com o mesmo nome e estados de envio separados).
   const aviso = negocio.alerta?.codigo ?? null;
   const fecharNoAviso = aviso === "sem_prova" && negocio.estadoReal === "aberto";

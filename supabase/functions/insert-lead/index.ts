@@ -23,8 +23,11 @@ import {
   HONEYPOT_CAMPO,
   LIMITE_IMPRESSAO_COM_TOKEN,
   NOME_MAX,
+  PEDIDO_INVALIDO,
+  avisosDeRejeicao,
   honeypotPreenchido,
   impressaoDigital,
+  lerCorpoJson,
   validarContactosPublicos,
   verificarLimitesCaptacao,
 } from '../_shared/captacaoPublica.ts';
@@ -121,10 +124,11 @@ Deno.serve(async (req) => {
       .update({ last_used_at: new Date().toISOString(), usage_count: (scopedToken.usage_count || 0) + 1 })
       .eq('id', scopedToken.id);
 
-    const parsedBody = requestSchema.safeParse(await req.json());
-    if (!parsedBody.success) {
-      return json({ error: 'Invalid request', details: parsedBody.error.issues }, 400);
-    }
+    // Corpo ilegivel ou fora do schema: 400 generico, sem eco de issues ao visitante.
+    const corpo = await lerCorpoJson(req);
+    if (!corpo.ok) return json(PEDIDO_INVALIDO, 400);
+    const parsedBody = requestSchema.safeParse(corpo.body);
+    if (!parsedBody.success) return json(PEDIDO_INVALIDO, 400);
     const leadData = parsedBody.data;
 
     // Honeypot: preenchido = bot. 200 falso, sem escrever nada.
@@ -132,7 +136,6 @@ Deno.serve(async (req) => {
       return json({
         success: true,
         lead_id: crypto.randomUUID(),
-        entity_id: crypto.randomUUID(),
         message: 'Lead created successfully',
         sanitized: {},
       }, 200);
@@ -206,12 +209,7 @@ Deno.serve(async (req) => {
 
     const sanitizeResult = sanitizeFieldValues(fieldValues);
     const sanitizeReport = sanitizeResult.report;
-    if (sanitizeReport.email_rejected) {
-      console.warn(`[insert-lead] rejected invalid email "${sanitizeReport.email_rejected}"`);
-    }
-    if (sanitizeReport.phone_rejected) {
-      console.warn(`[insert-lead] rejected invalid phone "${sanitizeReport.phone_rejected}"`);
-    }
+    for (const aviso of avisosDeRejeicao(sanitizeReport, 'insert-lead')) console.warn(aviso);
     const cleaned = { ...fieldValues, ...sanitizeResult.cleaned };
     // Contactos lidos pelos nomes directos (nao ha mapeamento de formulario aqui).
     const definitions = [
@@ -282,7 +280,6 @@ Deno.serve(async (req) => {
       success: true,
       // lead_id mantem-se (integracoes) e passa a ser o id da submissao nova.
       lead_id: envio.submissionId,
-      entity_id: envio.entityId,
       // Igual para pessoa nova e conhecida: nada denuncia se a pessoa ja existia.
       message: 'Lead created successfully',
       sanitized: sanitizeReport,

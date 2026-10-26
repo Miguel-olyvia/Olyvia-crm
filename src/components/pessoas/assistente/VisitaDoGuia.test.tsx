@@ -201,6 +201,18 @@ describe("Fechar levantamento", () => {
     expect(await screen.findByText("O levantamento está guardado.")).toBeInTheDocument();
   });
 
+  it("se não havia nada para gravar não diz «guardado» nem apaga o rascunho: diz «Nada novo para guardar»", async () => {
+    estado.guardar.mockResolvedValue({ feitos: [], levantamento: null });
+    guardarRascunho("n1", { ...RASCUNHO_VAZIO, morada: { rua: "Rua Nova 3", codigoPostal: "4000-001", localidade: "Porto", andar: "" }, moradaOrigem: "manual" });
+    montar();
+    irPara(/^Fechar levantamento/);
+    fireEvent.click(screen.getByRole("button", { name: "Guardar o levantamento" }));
+    expect(await screen.findByText("Nada novo para guardar.")).toBeInTheDocument();
+    expect(screen.queryByText("O levantamento está guardado.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar o levantamento" })).toBeInTheDocument();
+    expect(lerRascunho("n1").morada.rua).toBe("Rua Nova 3");
+  });
+
   it("não marca a visita como feita (continua manual)", async () => {
     montar();
     irPara(/^Fechar levantamento/);

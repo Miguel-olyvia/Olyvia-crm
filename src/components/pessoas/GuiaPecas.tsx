@@ -112,6 +112,12 @@ export interface DadosClienteGuia {
   email: string | null;
   morada: string | null;
   linha: string | null;
+  /** O NIF que se pode mostrar (`null` ou ausente: «Por preencher»). Um campo fixo do cartão, como o telefone. */
+  nif?: string | null;
+  /** Só os últimos 3 dígitos (o máximo que a base deixa mostrar): «Terminado em 789». */
+  nifUltimos3?: string | null;
+  /** A pessoa tem NIF registado mas a ficha não o pode mostrar: «Registado», em vez de «Por preencher». */
+  nifRegistado?: boolean;
   /** O que o contacto antigo da ficha mostrava a mais (só se a pessoa o tem): um só conjunto de dados do cliente. */
   extras?: readonly ExtraClienteGuia[];
 }
@@ -121,6 +127,13 @@ export interface AcontecimentoGuia {
   texto: string;
   /** Já formatado para mostrar (o dia). */
   quando: string;
+}
+
+/** O que o cartão diz do NIF: o NIF, os últimos 3 dígitos, «Registado», ou `null` (o campo diz «Por preencher»). */
+function textoDoNif(c: DadosClienteGuia, t: (chave: string, params?: Record<string, string | number>) => string): string | null {
+  if (c.nif) return c.nif;
+  if (c.nifUltimos3) return t(`${P}guia.cliente.nifTerminado`, { n: c.nifUltimos3 });
+  return c.nifRegistado ? t(`${P}guia.cliente.nifRegistado`) : null;
 }
 
 function Campo({ rotulo, valor, href }: { rotulo: string; valor: string | null; href?: string }) {
@@ -154,6 +167,7 @@ export function CartaoClienteGuia({ cliente, acontecimentos, comLinha, nivel = "
           <Campo rotulo={t(`${P}guia.cliente.email`)} valor={cliente.email} href={l.email} />
           <Campo rotulo={t(`${P}guia.cliente.morada`)} valor={cliente.morada} />
           {comLinha && <Campo rotulo={t(`${P}guia.cliente.linha`)} valor={cliente.linha} />}
+          <Campo rotulo={t("pessoasPagina.contact.label.nif")} valor={textoDoNif(cliente, t)} />
           {cliente.extras?.map((e) => <Campo key={e.chave} rotulo={t(`pessoasPagina.contact.label.${e.chave}`)} valor={e.valor} />)}
         </dl>
       </section>

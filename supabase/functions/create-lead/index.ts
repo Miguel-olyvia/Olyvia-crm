@@ -25,7 +25,6 @@ import {
   normalizarNomesNosCampos,
   pickOrigemTexto,
   resolverCaptacao,
-  verificarCamposUnicos,
 } from '../_shared/formCaptacao.ts';
 import { lerConfiguracaoFormulario } from '../_shared/formConfig.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
@@ -256,17 +255,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Campos unicos: contra os envios (form_submissions) do mesmo formulario e organizacao.
-    const duplicado = await verificarCamposUnicos({
-      supabase, organizationId, formId, definitions, fieldValues: cleanedValues,
-    });
-    if (duplicado) {
-      return json({
-        error: `A lead with this ${duplicado.fieldLabel} already exists`,
-        duplicate_field: duplicado.fieldKey,
-        duplicate_value: duplicado.value,
-      }, 409);
-    }
+    // Decisao de produto: a submissao entra sempre e vai para a fila. Sem aviso de duplicado
+    // (a resposta e igual para pessoa nova e conhecida).
 
     // Distrito: server-side, so por form_districts (a campanha ja nao decide).
     const locationValidation = await validateLocationDistrict({
@@ -339,9 +329,12 @@ Deno.serve(async (req) => {
     const { rawVat } = lerCamposContacto(cleanedValues, definitions);
     if (rawVat) {
       try {
-        nifHash = await hashNif(rawVat, deriveKeyFromEnv('NIF_HMAC_KEY', 'HMAC'));
+        // Mesma chave HMAC ja derivada acima para a impressao digital.
+        nifHash = await hashNif(rawVat, impressaoKey);
       } catch (hashError) {
+        // Best-effort (a pesquisa segue por email e telefone), mas regista: sem hash a deduplicacao por NIF deixa de funcionar.
         console.error('[create-lead] failed to hash NIF for entity lookup:', hashError instanceof Error ? hashError.message : hashError);
+        await captureError(hashError, { function: 'create-lead', stage: 'nif_hash' });
       }
     }
 

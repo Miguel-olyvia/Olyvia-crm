@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG, codigoDoErro, chaveDoErro } from "./errosNeg";
 
 // NG026 é da migration de recusa do orçamento (20261226210000, ainda sem ecrã); NG027 é a pessoa da lead fora do âmbito (classificar).
-const CODIGOS = [...Array.from({ length: 25 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`), "NG027", "NG028"];
+const CODIGOS = [...Array.from({ length: 25 }, (_, i) => `NG${String(i + 1).padStart(3, "0")}`), "NG027", "NG028", "NG030", "NG031"];
 
 describe("errosNeg", () => {
-  it("há uma chave própria para cada código NG001 a NG025, NG027, NG028 e para 42501", () => {
+  it("há uma chave própria para cada código NG001 a NG025, NG027, NG028, NG030, NG031 e para 42501", () => {
     for (const codigo of [...CODIGOS, "42501"]) expect(CHAVES_ERRO_NEG[codigo], codigo).toMatch(/^pessoasPagina\.erroNeg\./);
     const chaves = Object.values(CHAVES_ERRO_NEG);
     expect(new Set(chaves).size).toBe(chaves.length);
-    expect(chaves).toHaveLength(28);
+    expect(chaves).toHaveLength(30);
   });
 
   it("lê o código de error.code", () => {
@@ -116,6 +116,25 @@ describe("errosNeg: NG028 (um negócio ganho ou perdido não muda título, notas
     expect(codigoDoErro({ message: "NG0281 x" })).toBeNull();
     expect(codigoDoErro({ message: "xNG028" })).toBeNull();
     expect(codigoDoErro({ message: "NG029 x" })).toBeNull();
+  });
+});
+
+describe("errosNeg: NG031 (recusa genérica do NIF)", () => {
+  it("lê-se de error.code e do texto, com a sua chave; não confunde NG0311", () => {
+    expect(codigoDoErro({ code: "NG031", message: "x" })).toBe("NG031");
+    expect(codigoDoErro({ message: "falhou [NG031]" })).toBe("NG031");
+    expect(chaveDoErro({ code: "NG031", message: "x" })).toBe("pessoasPagina.erroNeg.ng031");
+    expect(codigoDoErro({ message: "NG0311 x" })).toBeNull();
+  });
+});
+
+describe("errosNeg: NG030 (o NIF já pertence a outra pessoa da organização)", () => {
+  it("lê-se de error.code e do texto, com a sua chave; não confunde NG0301 nem xNG030", () => {
+    expect(codigoDoErro({ code: "NG030", message: "x" })).toBe("NG030");
+    expect(codigoDoErro({ message: "falhou [NG030]" })).toBe("NG030");
+    expect(chaveDoErro({ code: "NG030", message: "x" })).toBe("pessoasPagina.erroNeg.ng030");
+    expect(codigoDoErro({ message: "NG0301 x" })).toBeNull();
+    expect(codigoDoErro({ message: "xNG030" })).toBeNull();
   });
 });
 

@@ -256,6 +256,8 @@ export type CaptarEnvioResultado =
     firstName: string | null;
     lastName: string | null;
     email: string | null;
+    /** Verdadeiro se a 2.a pesquisa falhou: o toque esta gravado, mas sem alerta nem notificacao de duplicado. */
+    degradado?: boolean;
   };
 
 type Candidato = {
@@ -501,6 +503,8 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
   let submissionId: string | null = null;
   let created = false;
   let jaGravado = false;
+  // Verdadeiro quando a 2.a pesquisa falhou: o toque esta gravado mas o destino dos avisos e desconhecido.
+  let degradado = false;
 
   // 3) Entidade nova: uma transacao na base (entidade, contactos, morada, toque).
   if (!entityId) {
@@ -553,6 +557,11 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
     // Corrida: outro envio criou a ficha primeiro. Segue como conhecida.
     // O toque ja esta gravado; se esta segunda pesquisa falhar, segue-se com a entidade devolvida.
     const pesquisa2 = await acharCandidatos(supabase, organizationId, contactos, p.nifHash ?? null);
+    if (!pesquisa2.ok) {
+      // Sem candidatos nao se sabe se a ficha e lead ou cliente nem de quem e: um aviso iria para um destino errado.
+      degradado = true;
+      await registar(new Error('2.a pesquisa de entidades falhou (toque ja gravado, resultado degradado)'), 'pesquisa2');
+    }
     const outra = pesquisa2.ok ? pesquisa2.candidatos : [];
     // O toque ja esta gravado: se esta classificacao falhar, regista e segue como sucesso
     // (um 500 faria o visitante repetir e duplicar o toque).
@@ -636,6 +645,13 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
   }
 
   const nomeVisivel = composeDisplayName(campos.firstName, campos.lastName) || null;
+  if (degradado) {
+    return {
+      ok: true, submissionId: submissionId as string, entityId: finalEntityId, created: false, negocioId: null, outcome,
+      organizationId, formId, campaignId, contactos,
+      firstName: campos.firstName, lastName: campos.lastName, email: contactos.email, degradado: true,
+    };
+  }
   try {
     await emitAlert({
       supabase,

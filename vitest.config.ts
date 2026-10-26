@@ -18,6 +18,11 @@ export default defineConfig({
     ],
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+      // Specifiers do Deno das Edge Functions: so para os testes de handler (vitest), que os simulam com vi.mock.
+      "npm:zod": "zod",
+      "https://esm.sh/@supabase/supabase-js@2.80.0": "@supabase/supabase-js",
+    },
   },
 });

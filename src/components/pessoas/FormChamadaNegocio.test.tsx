@@ -24,14 +24,14 @@ import type { AcoesFicha } from "./PainelBase";
 
 beforeAll(prepararRadixNoJsdom);
 
-function montar(negocioId?: string) {
+function montar(negocioId?: string, exigirNegocio = false) {
   const pessoa = pessoaBase("a", { nome: "Ana Lopes" });
   const registarChamada = vi.fn().mockResolvedValue(undefined);
   const acoes = { registarChamada, capacidades: { chamada: true, encerrar: true, adiar: true, nota: true, visita: false, negocios: true } } as unknown as AcoesFicha;
   render(
     <FormChamada
       id="c" pessoa={pessoa} resumo={resumoBase(pessoa, [], "2026-10-20", "lead")} hoje="2026-10-20" acoes={acoes}
-      aoFechar={vi.fn()} aoConcluir={vi.fn()} negocioId={negocioId}
+      aoFechar={vi.fn()} aoConcluir={vi.fn()} negocioId={negocioId} exigirNegocio={exigirNegocio}
     />,
   );
   return { registarChamada };
@@ -55,5 +55,19 @@ describe("FormChamada: o negócio do cartão", () => {
     await guardarNaoAtendeu();
     expect(registarChamada).toHaveBeenCalledTimes(1);
     expect(registarChamada.mock.calls[0][1]).not.toHaveProperty("negocioId");
+  });
+
+  it("no Pipeline (negócio exigido) sem negócio aberto não grava só na pessoa: avisa «Abra primeiro o negócio»", async () => {
+    const { registarChamada } = montar(undefined, true);
+    await guardarNaoAtendeu();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Abra primeiro o negócio.");
+    expect(registarChamada).not.toHaveBeenCalled();
+  });
+
+  it("no Pipeline com o negócio aberto grava ligado a ele", async () => {
+    const { registarChamada } = montar("neg-1", true);
+    await guardarNaoAtendeu();
+    expect(registarChamada).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Abra primeiro o negócio.")).not.toBeInTheDocument();
   });
 });

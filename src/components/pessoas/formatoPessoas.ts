@@ -15,7 +15,7 @@ export function textoUltimoContacto(t: Traduzir, dias: number | null): string {
 
 /** "Por contactar", "Negócio · Proposta" ou "Cliente" (a etapa, sem contar com a perda). */
 export function textoEtapaBase(t: Traduzir, r: ResumoPessoa): string {
-  if (r.etapa === "qualificada" && r.faseEtapa) return t(`${P}stage.qualificada`, { phase: t(`businessGoals.phase.${r.faseEtapa}`) });
+  if (r.etapa === "qualificada") return r.faseEtapa ? t(`${P}stage.qualificada`, { phase: t(`businessGoals.phase.${r.faseEtapa}`) }) : t(`${P}journey.step3`);
   return t(`${P}stage.${r.etapa}`);
 }
 

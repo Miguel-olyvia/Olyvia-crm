@@ -193,9 +193,10 @@ describe("com um negócio aberto", () => {
     expect(within(guia()).getByRole("button", { name: "Mais" })).toBeInTheDocument();
   });
 
-  it("o valor e o comercial estão no passo, e já não há os selos «Negócio» nem o da fase", () => {
+  it("o guia já não tem o valor nem o comercial, e já não há os selos «Negócio» nem o da fase", () => {
     montar(resumoComNegocio(), { negocioInicial: "n1" });
-    expect(within(guia()).getByText("Ana Ribeiro")).toBeInTheDocument();
+    expect(within(guia()).queryByText("Comercial")).toBeNull();
+    expect(within(guia()).queryByText("Valor")).toBeNull();
     expect(screen.queryByText("Negócio", { selector: "[data-slot=badge], .inline-flex" })).toBeNull();
   });
 

@@ -62,6 +62,10 @@ export interface Pessoa {
   moradaCampos?: { rua: string; codigoPostal: string; localidade: string; andar: string };
   distrito?: string;
   nif?: string;
+  /** Os últimos 3 dígitos do NIF, o máximo que a base deixa mostrar; a ficha só os traz quando a função os devolve. */
+  nifUltimos3?: string;
+  /** A pessoa tem NIF registado (mesmo que a ficha não mostre dígitos). */
+  temNif?: boolean;
   qualificacao?: QualificacaoPessoa;
   /** Preferências de contacto (migration 20261231100000); ausentes numa ficha anterior ou sem preferência. */
   contactoPreferido?: ContactoPreferido;

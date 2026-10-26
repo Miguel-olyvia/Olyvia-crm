@@ -31,7 +31,7 @@ import { fasesDoNegocio } from "./fasesDoNegocio";
 import { FichaApoioDialogo } from "./FichaApoioDialogo";
 import { FasesDoNegocioLista } from "./FasesDoNegocioLista";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
-import { DadosDoNegocio, GuiaDoNegocio } from "./GuiaDoNegocio";
+import { GuiaDoNegocio } from "./GuiaDoNegocio";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import { estaAberto } from "./juntarPessoas";
 import { MudarFechoNegocio } from "./MudarFechoNegocio";
@@ -158,7 +158,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
     <div className="space-y-2 empty:hidden">
       {cabecalhoFicha?.faixa}
       {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
-      <AlertasNegocio negocio={negocio} />
+      <AlertasNegocio negocio={negocio} semFecharAgora />
     </div>
   ) : undefined;
   return (
@@ -204,13 +204,13 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             <GuiaDoNegocio
               negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
               cabecalhoFicha={cabecalhoFicha} faixa={faixaNegocio} tituloRef={titulo} semPasso={!comPasso} aoRegistarChamada={aoRegistarChamada}
-              acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" /> : undefined}
+              acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" rotuloChave="pessoasPagina.guia.perder" /> : undefined}
             />
-            {(!comPasso || !item || negocio.fecho) && (
+            {/* Só a venda directa (fecho na proposta) leva selo e nota: «Fecha no contrato» é a omissão. */}
+            {negocio.fecho === "proposta" && (
               <div className="space-y-2">
-                {(!comPasso || !item) && <DadosDoNegocio negocio={negocio} />}
-                {negocio.fecho && <div className="flex flex-wrap items-center gap-2"><EtiquetaFecho fecho={negocio.fecho} /></div>}
-                {negocio.fecho === "proposta" && <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>}
+                <div className="flex flex-wrap items-center gap-2"><EtiquetaFecho fecho={negocio.fecho} /></div>
+                <p className="text-sm text-muted-foreground">{t("pessoasPagina.neg.fecho.note.proposta")}</p>
               </div>
             )}
           </>
@@ -226,7 +226,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" />
           </div>
         )}
-        <BlocoFechoNegocio negocio={negocio} />
+        <BlocoFechoNegocio negocio={negocio} semFecharAgora={comGuia} />
         {/* Mudar o tipo de fecho: só na ficha real, com permissão de editar e com o negócio aberto. Com o guia vive nos «Detalhes do negócio». */}
         {!comGuia && <MudarFechoNegocio negocio={negocio} aoSemBotao={() => titulo.current?.focus()} />}
         {/* Editar o título, as notas e o comercial, e mandar para o lixo: só na ficha real, com a permissão certa. Com o guia vive nos «Detalhes do negócio». */}

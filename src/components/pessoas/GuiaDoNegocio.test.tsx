@@ -190,17 +190,32 @@ describe("o guia do negócio aberto", () => {
     expect(screen.getByText("Não tem permissão para fazer este passo.")).toBeInTheDocument();
   });
 
-  it("«Perder negócio» continua ao alcance, dentro do guia", () => {
+  it("o botão de perder continua ao alcance, dentro do guia, e diz «Marcar como perdido»", () => {
     abrir(itemDe());
-    expect(screen.getByRole("button", { name: "Perder negócio" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Marcar como perdido" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Perder negócio" })).toBeNull();
   });
 
-  it("no passo de ganhar o botão «Ganhar o negócio» leva o foco ao bloco de fecho que já existe, sem executar nada do processo", () => {
+  it("«Marcar como perdido» abre o mesmo diálogo do motivo da perda", () => {
+    abrir(itemDe());
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como perdido" }));
+    expect(screen.getByRole("combobox", { name: "Motivo da perda" })).toBeInTheDocument();
+  });
+
+  it("no Pipeline não há «Fechar agora», nem «Ganhar o negócio» sem nada para onde levar: só o texto do passo", () => {
     const p = processo({ podeExecutar: () => false });
     abrir(itemDe({ fase: "contrato", prontoAGanhar: true }), p, { negocio: { ...negocio, prontoAGanhar: true } });
-    fireEvent.click(screen.getByRole("button", { name: "Ganhar o negócio" }));
-    expect(document.activeElement).toBe(document.querySelector("[data-bloco-fecho]"));
-    expect(p.executar).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Fechar agora" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ganhar o negócio" })).toBeNull();
+    expect(document.querySelector("[data-bloco-fecho]")).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "O contrato está assinado. Ganhar o negócio." })).toBeInTheDocument();
+  });
+
+  it("o aviso «sem prova» (que só mandava para «Fechar agora») também não aparece no Pipeline", () => {
+    const comAviso = { ...negocio, prontoAGanhar: true, alerta: { codigo: "sem_prova" as const } } as unknown as typeof negocio;
+    abrir(itemDe({ fase: "contrato", prontoAGanhar: true }), processo({ podeExecutar: () => false }), { negocio: comAviso });
+    expect(screen.queryByText(/sem prova de que o cliente decidiu/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fechar agora" })).toBeNull();
   });
 
   it("sem o bloco de fecho (o negócio não está pronto a ganhar) não há botão morto: só o texto do passo", () => {
@@ -219,11 +234,26 @@ describe("o negócio aberto com o guia é um só ecrã (sem o bloco de título d
     expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
   });
 
-  it("o valor e o comercial vão numa linha de dados dentro do passo", () => {
+  it("o guia do Pipeline já não tem as linhas «Valor» e «Comercial», nem o alerta «Sem orçamento escolhido»", () => {
     abrir(itemDe());
     const guia = screen.getByRole("region", { name: "Passo seguinte" });
-    expect(guia).toHaveTextContent("Comercial");
-    expect(guia).toHaveTextContent("Ana Ribeiro");
+    expect(within(guia).queryByText("Valor")).toBeNull();
+    expect(within(guia).queryByText("Comercial")).toBeNull();
+    expect(screen.queryByText("Sem orçamento escolhido")).toBeNull();
+  });
+
+  it("o selo «Fecha no contrato» (a omissão) não aparece no Pipeline; a venda directa continua dita", () => {
+    abrir(itemDe(), processo(), { negocio: { ...negocioComLevantamento, fecho: "contrato" } as typeof negocio });
+    expect(screen.queryByText("Fecha no contrato")).toBeNull();
+    cleanup();
+    abrir(itemDe(), processo(), { negocio: { ...negocioComLevantamento, fecho: "proposta" } as typeof negocio });
+    expect(screen.getByText("Fecha na proposta (venda directa)")).toBeInTheDocument();
+  });
+
+  it("um negócio ganho também fica sem as linhas «Valor» e «Comercial»", () => {
+    abrir(itemDe(), processo(), { negocio: { ...negocio, estadoReal: "ganho" } });
+    expect(screen.queryByText("Valor")).toBeNull();
+    expect(screen.queryByText("Comercial")).toBeNull();
   });
 
   it("o foco inicial vai para o cabeçalho do guia (o título que antes era o do negócio)", () => {
@@ -231,12 +261,11 @@ describe("o negócio aberto com o guia é um só ecrã (sem o bloco de título d
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Pedro Lopes" }));
   });
 
-  it("um negócio ganho fica com o cabeçalho, a barra de fases, o cartão do cliente e os dados, sem passo nem botão primário", () => {
+  it("um negócio ganho fica com o cabeçalho, a barra de fases, o cartão do cliente, sem passo nem botão primário", () => {
     abrir(itemDe(), processo(), { negocio: { ...negocio, estadoReal: "ganho" } });
     expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 4, name: "Cliente" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2, name: "Criar o orçamento." })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Criar o orçamento/ })).toBeNull();
-    expect(screen.getByText("Ana Ribeiro")).toBeInTheDocument();
   });
 });

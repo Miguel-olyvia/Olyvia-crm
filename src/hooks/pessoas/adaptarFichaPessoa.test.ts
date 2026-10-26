@@ -51,6 +51,22 @@ describe("adaptarPessoa: origem, NIF e empresa do contrato", () => {
   });
 });
 
+describe("adaptarPessoa: o NIF que a base deixa mostrar", () => {
+  it("lê os últimos 3 dígitos e se há NIF registado; sem eles ficam por definir", () => {
+    const p = adaptar({ pessoa: pessoaDb({ nif_ultimos3: " 789 ", tem_nif: true }) });
+    expect(p.nifUltimos3).toBe("789");
+    expect(p.temNif).toBe(true);
+    const vazio = adaptar({ pessoa: pessoaDb({ nif_ultimos3: "", tem_nif: false }) });
+    expect(vazio.nifUltimos3).toBeUndefined();
+    expect(vazio.temNif).toBeUndefined();
+  });
+
+  it("recusa o que não são exatamente 3 dígitos", () => {
+    expect(adaptar({ pessoa: pessoaDb({ nif_ultimos3: "123456789" }) }).nifUltimos3).toBeUndefined();
+    expect(adaptar({ pessoa: pessoaDb({ nif_ultimos3: "ab9" }) }).nifUltimos3).toBeUndefined();
+  });
+});
+
 describe("adaptarPessoa: contacto, morada e distrito", () => {
   it("contacto nulo ou vazio fica sem telefone nem email", () => {
     expect(adaptar({ pessoa: pessoaDb({ contacto: null }) }).contacto).toEqual({ telefone: null, email: null });

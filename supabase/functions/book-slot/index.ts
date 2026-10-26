@@ -205,11 +205,11 @@ Deno.serve(async (req: Request) => {
     {
       if (lead_id) {
         const resolvida = await resolverPessoa({
-          supabase, organizationId, formId: form_id, submissionId: lead_id,
+          supabase, organizationId, formId: form_id, submissionId: lead_id, captureError,
         });
         if (!resolvida.ok) {
           return new Response(
-            JSON.stringify({ error: resolvida.error }),
+            JSON.stringify(resolvida.code ? { error: resolvida.error, code: resolvida.code } : { error: resolvida.error }),
             { status: resolvida.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
@@ -478,12 +478,23 @@ Deno.serve(async (req: Request) => {
       // Pessoa nova: o negocio nasceu com ela. Pessoa que ja existia: pode ser
       // cliente. Em ambos os casos le-se pela submissao nova, na base.
       const lida = await resolverPessoa({
-        supabase, organizationId, formId: form_id, submissionId: envio.submissionId,
+        supabase, organizationId, formId: form_id, submissionId: envio.submissionId, captureError,
       });
-      if (lida.ok) {
-        isClient = lida.isClient;
-        negocioId = lida.negocioId;
+      if (!lida.ok) {
+        // Sem esta leitura nao se sabe se e cliente nem qual o negocio: a visita sairia ligada a pessoa errada.
+        // O captureError ja foi chamado dentro de resolverPessoa; antes de qualquer escrita da visita, 503 RETRY.
+        console.error('[book-slot] 2.a resolverPessoa falhou (pessoa ja captada):', lida.status, lida.error);
+        if (lida.code !== 'RETRY') {
+          // Ex.: 404 (submissao ou entidade nao encontrada logo a seguir a captar): ainda nao foi registado.
+          await captureError(new Error(`book-slot: 2.a resolverPessoa: ${lida.status} ${lida.error}`), { function: "book-slot", form_id });
+        }
+        return new Response(
+          JSON.stringify({ error: 'Não foi possível processar o pedido. Tente novamente.', code: 'RETRY' }),
+          { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
+      isClient = lida.isClient;
+      negocioId = lida.negocioId;
     }
 
     // P5: Resolve resource user_id BEFORE lead creation

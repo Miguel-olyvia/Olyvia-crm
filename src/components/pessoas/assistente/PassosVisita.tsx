@@ -253,9 +253,11 @@ interface CorpoFecharProps {
   razao?: string;
   /** O erro da última tentativa de guardar, já em texto. */
   erro?: string | null;
+  /** A última tentativa não tinha nada novo para gravar. */
+  nadaNovo?: boolean;
 }
 
-export function CorpoFechar({ guardado, aGuardar, podeGuardar, aoGuardar, razao, erro }: CorpoFecharProps) {
+export function CorpoFechar({ guardado, aGuardar, podeGuardar, aoGuardar, razao, erro, nadaNovo = false }: CorpoFecharProps) {
   const { t } = useTranslation();
   const idRazao = useId();
   const desativado = !podeGuardar || aGuardar;
@@ -273,6 +275,7 @@ export function CorpoFechar({ guardado, aGuardar, podeGuardar, aoGuardar, razao,
             {t(`${A}fechar.guardar`)}
           </Button>
           {razao && <p id={idRazao} className="text-sm text-muted-foreground">{razao}</p>}
+          {nadaNovo && !erro && <p role="status" className="text-sm text-muted-foreground">{t(`${A}fechar.nadaNovo`)}</p>}
           {erro && <p role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground">{erro}</p>}
         </>
       )}

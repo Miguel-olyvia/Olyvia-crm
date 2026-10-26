@@ -624,6 +624,23 @@ describe('captarEnvio - falhas de classificacao e de gravacao do conflito', () =
     expect(c.captureError).toHaveBeenCalledTimes(1);
   });
 
+  it('2.a pesquisa a falhar depois do toque gravado: sucesso degradado, regista e nao avisa ninguem (destino desconhecido)', async () => {
+    const s = makeSupabase({
+      fn_form_resolver_captacao: resolverOk(),
+      fn_form_achar_entidades: (() => {
+        let n = 0;
+        return () => (n++ === 0 ? { data: [] } : { data: null, error: { message: 'pesquisa caiu' } });
+      })(),
+      fn_form_criar_entidade: criarOk(false, ENT, SUB_NEW),
+    });
+    const c = comCaptura();
+    const r = await captarEnvio({ supabase: s.client, ...baseParams({ deps: c.deps }) });
+    expect(r).toMatchObject({ ok: true, created: false, entityId: ENT, submissionId: SUB_NEW, degradado: true });
+    expect(c.captureError).toHaveBeenCalledTimes(1);
+    expect(c.deps.emitAlert).not.toHaveBeenCalled();
+    expect(c.deps.emitNotification).not.toHaveBeenCalled();
+  });
+
   it('falha ao gravar conflicting_entity_id: regista, e o conflito vai tambem em _meta.dedup.conflito no mesmo upsert', async () => {
     const s = makeSupabase({
       fn_form_resolver_captacao: resolverOk(),

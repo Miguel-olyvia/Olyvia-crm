@@ -75,6 +75,7 @@ function VisitaInterior({
   const [aGuardar, setAGuardar] = useState(false);
   const [erroGuardar, setErroGuardar] = useState<string | null>(null);
   const [guardadoAgora, setGuardadoAgora] = useState(false);
+  const [nadaNovo, setNadaNovo] = useState(false);
   const guardado = levantamentoGuardado || guardadoAgora;
 
   const blocos = useMemo(() => todosOsBlocos(questionario), [questionario]);
@@ -105,6 +106,7 @@ function VisitaInterior({
   async function guardar(): Promise<void> {
     setTentou(true);
     setErroGuardar(null);
+    setNadaNovo(false);
     if (Object.keys(errosRespostas).length > 0) { setErroGuardar(t("businessGoals.new.qform.invalid")); return; }
     if (errosMedidas.linhas) { setErroGuardar(t(`${A}fechar.medidasPorCorrigir`)); return; }
     // A morada da obra escrita no passo «Morada da obra» segue com o levantamento (é onde a base a guarda).
@@ -114,7 +116,9 @@ function VisitaInterior({
     };
     setAGuardar(true);
     try {
-      await registos.guardar([], levantamento, "");
+      const resultado = await registos.guardar([], levantamento, "");
+      // Sem nada gravado (plano vazio) não se diz «guardado» e o rascunho fica: não houve nada que o substituísse.
+      if (resultado.feitos.length === 0) { setNadaNovo(true); return; }
       setGuardadoAgora(true);
       // A base é que guarda agora: o rascunho do navegador já não serve (e não deve voltar a aparecer depois de recarregar).
       apagarRascunho(chaveRascunho);
@@ -155,7 +159,7 @@ function VisitaInterior({
     if (passo.id === "fechar") {
       return corpoQueGrava(
         <CorpoFechar
-          guardado={guardado} aGuardar={aGuardar} podeGuardar={razaoDeNaoGuardar === undefined} razao={razaoDeNaoGuardar} erro={erroGuardar}
+          guardado={guardado} aGuardar={aGuardar} podeGuardar={razaoDeNaoGuardar === undefined} razao={razaoDeNaoGuardar} erro={erroGuardar} nadaNovo={nadaNovo}
           aoGuardar={() => { void guardar(); }}
         />,
       );

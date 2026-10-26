@@ -31,6 +31,31 @@ describe("passoDaLista: com negócio aberto", () => {
   });
 });
 
+describe("passoDaLista: o próximo passo sai da etapa que a base devolve (negócio aberto)", () => {
+  // A etapa vem da base (migration 20261231400000): o frontend não a calcula. Com um negócio aberto na abordagem, manda ela.
+  it("nova: registar a chamada (nada ligado ao negócio)", () => {
+    expect(passoDaLista(com({ abertos: 1, etapa: "nova" }))).toBe("registarChamada");
+  });
+  it("emContacto: marcar a visita", () => {
+    expect(passoDaLista(com({ abertos: 1, etapa: "emContacto" }))).toBe("marcarVisita");
+  });
+  it("visitaMarcada: marcar a visita como feita", () => {
+    expect(passoDaLista(com({ abertos: 1, etapa: "visitaMarcada" }))).toBe("fecharLevantamento");
+  });
+  it("qualificada: fazer o levantamento (sem documentos); com documentos continua a regra da fase", () => {
+    expect(passoDaLista(com({ abertos: 1, etapa: "qualificada", faseEtapa: null }))).toBe("fazerLevantamento");
+    expect(passoDaLista(com({ abertos: 1, etapa: "qualificada", faseEtapa: "orcamento" }))).toBe("criarProposta");
+    expect(passoDaLista(com({ abertos: 1, etapa: "qualificada", faseEtapa: "contrato" }))).toBe("recolherAssinatura");
+    expect(passoDaLista(com({ abertos: 1, etapa: "qualificada", prontoAGanhar: true, faseEtapa: "contrato" }))).toBe("ganharNegocio");
+  });
+  it("sem a etapa (antes da migration) fica a regra de sempre", () => {
+    expect(passoDaLista(com({ abertos: 1, faseEtapa: null }))).toBe("fazerLevantamento");
+  });
+  it("sem negócio aberto a etapa não manda: contam os registos", () => {
+    expect(passoDaLista(com({ etapa: "visitaMarcada" }))).toBe("registarChamada");
+  });
+});
+
 describe("passoDaLista: sem negócios abertos", () => {
   // ALTERADO: antes dizia «nenhum» (definitivo). Mas a ficha pode dar um passo a quem só tem negócios terminados (voltouAAbordagem: uma
   // submissão resolvida depois do último negócio) e a lista não tem essa fonte (coluna voltou_a_contactar): não se sabe, e não se afirma.

@@ -35,6 +35,16 @@ function linha(sobre: Partial<LinhaResumoDb> = {}): LinhaResumoDb {
   };
 }
 
+describe("adaptarResumo: o passo sai da etapa que a base devolve", () => {
+  const passo = (etapa: string) => adaptarResumo(linha({ etapa, negocios_abertos: 1, negocios_ganhos: 0, negocios_perdidos: 0, fase_mais_avancada: null, pronto_a_ganhar: false }), HOJE).passo;
+  it("nova, emContacto, visitaMarcada e qualificada dão o passo da etapa", () => {
+    expect(passo("nova")).toBe("registarChamada");
+    expect(passo("emContacto")).toBe("marcarVisita");
+    expect(passo("visitaMarcada")).toBe("fecharLevantamento");
+    expect(passo("qualificada")).toBe("fazerLevantamento");
+  });
+});
+
 describe("hojeLisboa", () => {
   it("usa o dia de Lisboa, não o de UTC (verão: 23:30 UTC já é o dia seguinte)", () => {
     expect(hojeLisboa(new Date("2026-07-15T23:30:00Z"))).toBe("2026-07-16");

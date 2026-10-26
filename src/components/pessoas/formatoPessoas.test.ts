@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pessoasPaginaTranslations } from "@/translations/pessoasPagina";
 import { pessoaBase, registosBase, resumoBase } from "./fabricaTestes";
-import { diaDaSemana, faixaSaude, textoDataCompleta, textoEtapa, textoHaQuanto, textoPrazoPasso } from "./formatoPessoas";
+import { diaDaSemana, faixaSaude, textoDataCompleta, textoEtapa, textoEtapaBase, textoHaQuanto, textoPrazoPasso } from "./formatoPessoas";
 
 const textos = pessoasPaginaTranslations.pt;
 const t = (chave: string, params?: Record<string, string | number>) =>
@@ -19,6 +19,17 @@ describe("textoEtapa: uma abordagem encerrada", () => {
 
   it("uma pessoa que não está encerrada continua a dizer a etapa", () => {
     expect(textoEtapa(t, resumoBase(pessoaBase("a"), [], HOJE, "lead", registosBase()))).toBe("Por contactar");
+  });
+});
+
+describe("textoEtapaBase: a coluna Etapa da lista", () => {
+  const rotulo = (etapa: "nova" | "emContacto" | "visitaMarcada" | "qualificada") =>
+    textoEtapaBase(t, { ...resumoBase(pessoaBase("a"), [], HOJE, "lead", registosBase()), etapa, faseEtapa: null });
+  it("Por contactar, Contactada, Com visita e Negócio (só a qualificada diz Negócio)", () => {
+    expect(rotulo("nova")).toBe("Por contactar");
+    expect(rotulo("emContacto")).toBe("Contactada");
+    expect(rotulo("visitaMarcada")).toBe("Com visita");
+    expect(rotulo("qualificada")).toBe("Negócio");
   });
 });
 

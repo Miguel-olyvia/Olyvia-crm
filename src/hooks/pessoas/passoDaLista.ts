@@ -3,7 +3,7 @@
 // `null` quer dizer «não se sabe» (a UI mostra «—» e remete para a ficha): nunca se inventa um passo.
 import type { FaseNegocio } from "@/components/negocio-metas/negocioMetas";
 import type { IdPasso } from "@/components/pessoas/etapaPessoa";
-import type { ResultadoEncerramento } from "@/components/pessoas/pessoasTipos";
+import type { EtapaPessoa, ResultadoEncerramento } from "@/components/pessoas/pessoasTipos";
 import { diaLisboa } from "./tempoLisboa";
 
 export interface EntradaPasso {
@@ -18,7 +18,12 @@ export interface EntradaPasso {
   porLigarContactos: number;
   porLigarVisitas: number;
   porLigarLevantamentos: number;
+  /** A etapa que a base devolve (nunca calculada aqui). Com um negócio aberto na abordagem, o passo sai dela. */
+  etapa?: EtapaPessoa;
 }
+
+/** O passo de cada etapa da abordagem de um negócio aberto: nova, em contacto e com visita marcada. */
+const PASSO_DA_ETAPA: Partial<Record<EtapaPessoa, IdPasso>> = { nova: "registarChamada", emContacto: "marcarVisita", visitaMarcada: "fecharLevantamento" };
 
 /**
  * Há uma visita feita por ligar a um negócio. Sem negócios terminados é exato (qualquer visita feita conta). Com negócios
@@ -39,6 +44,8 @@ function visitaFeitaPorLigar(p: EntradaPasso): boolean {
  * em `quotes`; sem nenhum documento a fase é nula), por isso «criar a proposta» é exato, e não uma suposição.
  */
 function passoComNegocioAberto(p: EntradaPasso): IdPasso | null {
+  const daEtapa = p.etapa ? PASSO_DA_ETAPA[p.etapa] : undefined;
+  if (daEtapa) return daEtapa;
   if (p.prontoAGanhar) return "ganharNegocio";
   if (p.faseEtapa === "contrato") return "recolherAssinatura";
   if (p.faseEtapa === "orcamento") return "criarProposta";

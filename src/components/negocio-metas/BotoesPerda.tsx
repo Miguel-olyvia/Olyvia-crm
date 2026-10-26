@@ -24,9 +24,11 @@ interface BotaoPerderNegocioProps {
   /** Depois de perder: o texto para o leitor de ecrã. Sem ele, um toast. */
   aoPerder?: (anuncio: string) => void;
   className?: string;
+  /** A chave do texto do botão (o Pipeline diz «Marcar como perdido»); sem ela, «Perder negócio». A ação é a mesma. */
+  rotuloChave?: string;
 }
 
-export function BotaoPerderNegocio({ negocio, hoje, aoPerder, className }: BotaoPerderNegocioProps) {
+export function BotaoPerderNegocio({ negocio, hoje, aoPerder, className, rotuloChave }: BotaoPerderNegocioProps) {
   const { t } = useTranslation();
   const config = useConfigWorkflow();
   const avisar = useAvisarNegocio();
@@ -36,7 +38,7 @@ export function BotaoPerderNegocio({ negocio, hoje, aoPerder, className }: Botao
     <>
       <Button ref={botao} type="button" variant="outline" className={cn("min-h-11 gap-2", FOCO, className)} onClick={() => setAberto(true)}>
         <Ban className="h-4 w-4" aria-hidden="true" />
-        {t(`${L}button`)}
+        {t(rotuloChave ?? `${L}button`)}
       </Button>
       <PerderNegocioDialogo
         negocio={aberto ? negocio : null} hoje={hoje} motivos={config.motivosPerda} aoFechar={() => setAberto(false)}

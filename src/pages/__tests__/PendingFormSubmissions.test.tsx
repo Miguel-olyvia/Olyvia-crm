@@ -249,4 +249,17 @@ describe("Envios de formulário: conflito entre duas pessoas", () => {
     await waitFor(() => expect(estado.rpc).toHaveBeenCalledTimes(1));
     expect(rpcCalls()[0][1]).toEqual({ p_submission_id: "sub-2", p_action: "ignorar" });
   });
+
+  it("sem conflicting_entity_id (gravação falhou) lê o fallback _meta.dedup.conflito e mostra as duas candidatas", async () => {
+    const semColuna = {
+      ...SUBMISSAO, id: "sub-3", conflicting_entity_id: null,
+      field_values: { ...SUBMISSAO.field_values, _meta: { dedup: { por: "conflito", conflito: "ent-2" } } },
+    };
+    await desenhar([semColuna]);
+    expect(screen.getByText("Beatriz Campos")).toBeInTheDocument();
+    fireEvent.click(botao(/Ligar a Beatriz Campos/));
+    confirmar();
+    await waitFor(() => expect(estado.rpc).toHaveBeenCalledTimes(1));
+    expect(rpcCalls()[0][1]).toEqual({ p_submission_id: "sub-3", p_action: "ligar", p_entity_id: "ent-2" });
+  });
 });

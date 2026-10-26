@@ -23,6 +23,7 @@ export const ALLOWED_RPCS = [
   "rpc_update_organization",
   "rpc_create_organization_with_hierarchy",
   "rpc_update_user",
+  "neg_guardar_nif_pessoa",
 ] as const;
 
 export type AllowedRpc = (typeof ALLOWED_RPCS)[number];
@@ -114,6 +115,11 @@ function sanitizeClientParams(
     delete sanitized[key];
   }
   return sanitized;
+}
+
+/** Replaces any occurrence of the plaintext NIF in a message. */
+function redactNif(message: string, nif: string): string {
+  return nif === "" ? message : message.split(nif).join("***");
 }
 
 /**
@@ -265,6 +271,20 @@ export async function handleNifWriteProxyRequest(
     }
   }
 
+  // neg_guardar_nif_pessoa: p_nif e SEMPRE o NIF aparado que o proxy cifrou (a RPC confere o
+  // tamanho da cifra contra ele), e um NIF vazio limpa: hash, cifra e tokens a NULL explicitos.
+  if (rpc === "neg_guardar_nif_pessoa") {
+    finalParams = nifProvided
+      ? { ...finalParams, p_nif: trimmedNif }
+      : {
+        ...finalParams,
+        p_nif: "",
+        p_nif_hash: null,
+        p_nif_encrypted: null,
+        p_nif_tokens: null,
+      };
+  }
+
   const userClient = deps.createUserClient(authHeader);
 
   // Transient connection failures (pool exhaustion, 502/503/504) are retried
@@ -273,11 +293,13 @@ export async function handleNifWriteProxyRequest(
   const { data, error } = await withRetryResult(() => userClient.rpc(rpc, finalParams));
 
   if (error) {
-    console.error(`nif-write-proxy: rpc "${rpc}" failed:`, error.message);
+    // O NIF nunca vai a log nem a erro devolvido, mesmo que a RPC o ecoe.
+    const safeMessage = redactNif(String(error.message ?? "RPC failed"), trimmedNif);
+    console.error(`nif-write-proxy: rpc "${rpc}" failed:`, safeMessage);
     const status = typeof error.status === "number" ? error.status : 400;
     return jsonResponse(
       req,
-      { error: stripSensitiveFields(error.message ?? "RPC failed") },
+      { error: safeMessage },
       status,
     );
   }

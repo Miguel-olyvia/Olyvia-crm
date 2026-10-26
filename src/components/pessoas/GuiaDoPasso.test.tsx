@@ -279,10 +279,27 @@ describe("GuiaDoPasso: o cabeçalho único da ficha", () => {
   });
 
   it("o cartão do cliente leva os campos que o contacto antigo tinha (NIF, distrito) e o email como ligação", () => {
-    guia({ cliente: { telefone: "927 118 300", email: "pedro.lopes@exemplo.pt", morada: null, linha: null, extras: [{ chave: "nif", valor: "123456789" }, { chave: "distrito", valor: "Lisboa" }] } });
+    guia({ cliente: { telefone: "927 118 300", email: "pedro.lopes@exemplo.pt", morada: null, linha: null, nif: "123456789", extras: [{ chave: "distrito", valor: "Lisboa" }] } });
     expect(screen.getByText("123456789")).toBeInTheDocument();
     expect(screen.getByText("Lisboa")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "pedro.lopes@exemplo.pt" })).toHaveAttribute("href", "mailto:pedro.lopes@exemplo.pt");
+  });
+
+  it("o NIF aparece sempre no cartão: sem NIF diz «Por preencher»", () => {
+    guia();
+    const rotulo = screen.getByText("NIF");
+    expect(rotulo.tagName).toBe("DT");
+    expect(rotulo.nextElementSibling).toHaveTextContent("Por preencher");
+  });
+
+  it("só com os últimos 3 dígitos diz «Terminado em 789» e nunca mostra mais", () => {
+    guia({ cliente: { telefone: null, email: null, morada: null, linha: null, nif: null, nifUltimos3: "789", nifRegistado: true } });
+    expect(screen.getByText("NIF").nextElementSibling).toHaveTextContent("Terminado em 789");
+  });
+
+  it("com NIF registado mas sem dígitos para mostrar diz «Registado», não «Por preencher»", () => {
+    guia({ cliente: { telefone: null, email: null, morada: null, linha: null, nif: null, nifUltimos3: null, nifRegistado: true } });
+    expect(screen.getByText("NIF").nextElementSibling).toHaveTextContent("Registado");
   });
 
   it("sem passo (cliente, perdida) mostra o cabeçalho, a barra e o cartão do cliente", () => {
