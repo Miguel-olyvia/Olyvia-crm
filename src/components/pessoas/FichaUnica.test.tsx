@@ -290,8 +290,8 @@ describe("a hierarquia de títulos da ficha não salta níveis", () => {
   it("pessoa: o nome é o único h2, o título do passo é h3 e não há h4 sem h3 antes", () => {
     montar(lead());
     expect(niveis().filter((n) => n === 2)).toHaveLength(1);
-    // Em Por contactar o guia é o assistente de passos: o título do passo atual (Chamada) é h3.
-    expect(screen.getByRole("heading", { level: 3, name: "Chamada" })).toBeInTheDocument();
+    // Em Por contactar o guia é o de sempre (um só passo): tem pelo menos um título h3, sem saltos de nível.
+    expect(niveis().filter((n) => n === 3).length).toBeGreaterThan(0);
     expect(semSaltos(niveis())).toBe(true);
   });
 

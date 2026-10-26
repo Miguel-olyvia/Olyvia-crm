@@ -26,8 +26,8 @@ import { useExtrasProcesso } from "./processo/processoNegocios";
 import type { PassoProcesso } from "./processo/tiposProcesso";
 import { Prazo } from "./SeccoesResumo";
 
-/** As fases da abordagem em que o guia é o assistente de passos: Por contactar e Contactado (fase Contacto) e Visita. */
-const FASES_COM_ASSISTENTE: readonly string[] = ["porContactar", "contactado", "visita"];
+/** As fases da abordagem em que o guia é o assistente de passos: Contactado (fase Contacto) e Visita. Por contactar mantém o guia de sempre («Registar a chamada»). */
+const FASES_COM_ASSISTENTE: readonly string[] = ["contactado", "visita"];
 
 interface GuiaDaPessoaProps {
   resumo: ResumoPessoa;

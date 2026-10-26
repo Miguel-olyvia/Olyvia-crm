@@ -59,11 +59,10 @@ const coluna = () => within(screen.getByRole("navigation", { name: "Passos da fa
 const irPara = (nome: RegExp) => fireEvent.click(coluna().getByRole("button", { name: nome }));
 
 describe("o guia da pessoa em abordagem", () => {
-  it("por contactar: o assistente da fase Contacto (5 passos, abre na Chamada), o cartão do cliente e a barra com o nome certo", () => {
+  it("por contactar: o guia de sempre («Registar a chamada»), sem o assistente de 5 passos, com o cartão do cliente e a barra com o nome certo", () => {
     montar(porContactar());
-    expect(titulo("Chamada")).toBeInTheDocument();
-    expect(screen.getByText(/^Passo 1 de 5/)).toBeInTheDocument();
-    expect(coluna().getAllByRole("button")).toHaveLength(5);
+    expect(screen.getByRole("button", { name: /^Registar a chamada/ })).toBeInTheDocument();
+    expect(screen.queryByText(/^Passo \d de 5/)).toBeNull();
     expect(screen.getByRole("heading", { level: 3, name: "Cliente" })).toBeInTheDocument();
     expect(screen.getAllByText("pedro.lopes@exemplo.pt").length).toBeGreaterThan(0);
     const atual = within(screen.getByRole("list", { name: "Fases" })).getAllByRole("listitem").filter((li) => li.getAttribute("aria-current") === "step");
@@ -73,9 +72,9 @@ describe("o guia da pessoa em abordagem", () => {
 
   it("«Registar a chamada» abre o formulário da chamada dentro da ficha (sem sair da página), e o guia fica à vista (só a zona de apoio é substituída)", () => {
     montar(porContactar());
-    fireEvent.click(screen.getByRole("button", { name: "Registar a chamada" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Registar a chamada/ }));
     expect(screen.getByRole("heading", { name: "Registar chamada" })).toBeInTheDocument();
-    expect(titulo("Chamada")).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Fases" })).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).toBeNull();
   });
 
