@@ -45,7 +45,7 @@ describe("adaptarResumo: campos que a lista deitava fora", () => {
     expect(adaptarResumo(linha({ closure_result: "obraInviavel", por_ligar_contactos: 1 }), HOJE).passo).toBe("nenhum");
   });
 
-  it("uma proposta por fechar dá passo desconhecido (null): a lista não inventa", () => {
-    expect(adaptarResumo(linha({ negocios_abertos: 1, fase_mais_avancada: "proposta" }), HOJE).passo).toBeNull();
+  it("uma proposta por fechar com etapa nova dá registarChamada (a etapa determina o passo)", () => {
+    expect(adaptarResumo(linha({ negocios_abertos: 1, fase_mais_avancada: "proposta" }), HOJE).passo).toBe("registarChamada");
   });
 });

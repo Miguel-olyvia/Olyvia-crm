@@ -1,21 +1,33 @@
 /**
- * A "organização activa" da apresentação: uma só, fixa, com um nome de exemplo.
- * Mesmo desenho de `useCompany` do módulo real (só os campos que os ecrãs de RH lêem).
+ * A organizacao activa, delegando ao hook real do contexto de empresa.
+ * Mantém a mesma interface que os componentes de /rh-exemplo consomem.
+ *
+ * A interface original devolvia `activeCompany` sempre preenchida (nunca null).
+ * Para manter a compatibilidade de tipos com os consumidores existentes, quando
+ * nao ha empresa activa devolve-se um objecto vazio com `id = ""` -- os hooks
+ * reais protegem-se contra isso com `if (!activeCompany?.id)`.
  */
-import { ORGANIZACAO_EXEMPLO_ID, ORGANIZACAO_EXEMPLO_NOME } from "@/components/rh-exemplo/dados/constantes";
+import { useCompany as useCompanyReal } from "@/contexts/CompanyContext";
 
 export interface EmpresaExemplo {
   id: string;
   name: string;
 }
 
-const EMPRESA: EmpresaExemplo = { id: ORGANIZACAO_EXEMPLO_ID, name: ORGANIZACAO_EXEMPLO_NOME };
-const EMPRESAS: EmpresaExemplo[] = [EMPRESA];
+const SEM_EMPRESA: EmpresaExemplo = { id: "", name: "" };
 
 export function useCompany(): {
   activeCompany: EmpresaExemplo;
   companies: EmpresaExemplo[];
   isLoading: boolean;
 } {
-  return { activeCompany: EMPRESA, companies: EMPRESAS, isLoading: false };
+  const real = useCompanyReal();
+  const activeCompany: EmpresaExemplo = real.activeCompany
+    ? { id: real.activeCompany.id, name: (real.activeCompany as any).name ?? "" }
+    : SEM_EMPRESA;
+  return {
+    activeCompany,
+    companies: (real as any).companies?.map((c: any) => ({ id: c.id, name: c.name ?? "" })) ?? [],
+    isLoading: real.isLoading ?? false,
+  };
 }
