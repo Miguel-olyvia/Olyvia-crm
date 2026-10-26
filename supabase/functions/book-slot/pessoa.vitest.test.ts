@@ -1,6 +1,6 @@
 // book-slot: pessoa, dono e escritas depois da marcacao (modelo de entidade).
 // Supabase simulado; nada toca na base.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { makeSupabase as makeSharedSupabase } from '../_shared/__tests__/supabaseSimulado.ts';
 import {
   donoDaEntidade,
@@ -65,6 +65,24 @@ const dados = () => ({
 });
 
 describe('resolverPessoa', () => {
+  it('erro a ler a submissao: 503 RETRY (nunca 404) e regista', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const s = makeSupabase(dados(), { 'form_submissions:select': { message: 'timeout' } });
+    const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB });
+    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY' });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('erro a ler a entidade: 503 RETRY (nunca 404) e regista', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const s = makeSupabase(dados(), { 'anew_entities:select': { message: 'timeout' } });
+    const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB });
+    expect(r).toEqual({ ok: false, status: 503, error: 'RETRY' });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it('submissao de entidade (sem lead nenhuma) devolve a entidade e o dono', async () => {
     const s = makeSupabase(dados());
     const r = await resolverPessoa({ supabase: s.client, organizationId: ORG, formId: FORM, submissionId: SUB });

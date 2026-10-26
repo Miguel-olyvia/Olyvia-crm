@@ -33,6 +33,7 @@ import { sanitizeCSSValue, sanitizeCustomCss } from "@/lib/forms/sanitizeCssValu
 import { validateStepFieldFormats } from "@/lib/forms/publicFormValidation";
 import { resolveSchedulingGeoValues, type SchedulingGeoStep } from "@/lib/forms/schedulingGeoInputs";
 import { buildCreateLeadBody, buildUpdateLeadBody } from "./publicLeadFormRequests";
+import { HoneypotField } from "@/components/forms/HoneypotField";
 
 // Animation variants for step transitions
 const stepVariants = {
@@ -747,6 +748,8 @@ export default function PublicLeadForm() {
     setCurrentStep(num);
   };
   const [formValues, setFormValues] = useState<Record<string, any>>({});
+  // Honeypot: fica vazio para qualquer pessoa; so um bot o preenche.
+  const [honeypot, setHoneypot] = useState("");
   // Every field across every step, so the success copy can resolve its
   // placeholders through contact_field_mapping regardless of which step the
   // name or email was answered on.
@@ -1386,6 +1389,7 @@ export default function PublicLeadForm() {
         campaignId: formConfig.campaign_id || campaignId || undefined,
         tracking,
         embedKind,
+        honeypot,
       });
 
       if (!leadId) {
@@ -2620,6 +2624,7 @@ export default function PublicLeadForm() {
                   />
                 ) : (
                 <>
+                <HoneypotField value={honeypot} onChange={setHoneypot} />
                 {/* Render fields - grouped by sections or not */}
 
                 {(() => {

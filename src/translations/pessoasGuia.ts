@@ -170,6 +170,8 @@ export const pessoasGuiaTranslations: Record<"en" | "pt", Record<string, string>
     'pessoasPagina.assistente.fechar.aCarregar': 'The questions are still loading.',
     'pessoasPagina.assistente.visitas.marcarFeita': 'Mark as done',
     'pessoasPagina.assistente.erroGenerico': 'Could not save this step. Try again.',
+    'pessoasPagina.assistente.aGuardar': 'Saving...',
+    'pessoasPagina.assistente.preparar.contador': '{n} of {max} characters',
   },
   pt: {
     'pessoasPagina.guia.regiao': 'Passo seguinte',
@@ -339,5 +341,7 @@ export const pessoasGuiaTranslations: Record<"en" | "pt", Record<string, string>
     'pessoasPagina.assistente.fechar.aCarregar': 'As perguntas ainda estão a carregar.',
     'pessoasPagina.assistente.visitas.marcarFeita': 'Marcar como feita',
     'pessoasPagina.assistente.erroGenerico': 'Não foi possível guardar este passo. Tente outra vez.',
+    'pessoasPagina.assistente.aGuardar': 'A guardar...',
+    'pessoasPagina.assistente.preparar.contador': '{n} de {max} caracteres',
   },
 };

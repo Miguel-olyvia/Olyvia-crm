@@ -121,7 +121,7 @@ function NegocioAbertoNoTopo(
   return (
     <DetalheNegocioFicha
       negocio={p.negocio} hoje={p.hoje} aoVoltar={p.aoVoltarNegocio} item={item} pessoa={p.resumo.pessoa} atividade={p.atividade} comGuia
-      cabecalhoFicha={p.cabecalhoFicha} aoApagado={p.aoVoltarNegocio}
+      cabecalhoFicha={p.cabecalhoFicha} aoApagado={p.aoVoltarNegocio} aoRegistarChamada={p.aoRegistarChamada}
       apoioAberto={p.detalhesAbertos} aoFecharApoio={p.aoFecharDetalhes} origemApoio={p.origemApoio}
     />
   );
@@ -245,6 +245,7 @@ export function FichaInterior(p: FichaInteriorProps) {
   const formChamada = (
     <FormChamada
       id={`${painelId}-chamada`} pessoa={p.resumo.pessoa} resumo={p.resumo} hoje={p.hoje} acoes={p.acoes} aoFechar={() => fechar(true)}
+      negocioId={p.comGuia ? negocio.aberto ?? undefined : undefined}
       aoConcluir={(mensagem) => { anunciar(mensagem); negocio.esquecer(); if (!p.comGuia) setAba("resumo"); fechar(true); }}
     />
   );

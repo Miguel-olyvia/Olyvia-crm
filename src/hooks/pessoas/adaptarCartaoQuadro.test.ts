@@ -5,54 +5,46 @@ import { linhaNegocio, linhaQuadro } from "./quadroPessoasTestUtil";
 const HOJE = "2026-10-21";
 const cartao = (l: Parameters<typeof adaptarLinhaQuadro>[0], hoje = HOJE) => adaptarLinhaQuadro(l, hoje)?.cartao ?? null;
 
-describe("adaptarLinhaQuadro: pessoas em abordagem", () => {
-  it("visitas feitas por ligar dão criarNegocio, mesmo com outras coisas por ligar", () => {
-    const c = cartao(linhaQuadro("a", { coluna: "visita", por_ligar_visitas: 2, por_ligar_visitas_feitas: 1, por_ligar_contactos: 3 }));
-    expect(c?.passo).toBe("criarNegocio");
+describe("adaptarLinhaQuadro: negócios nas três primeiras colunas (o quadro só tem negócios)", () => {
+  it("porContactar dá registarChamada, contactado dá marcarVisita e visita dá fazerLevantamento", () => {
+    expect(cartao(linhaNegocio("a", "porContactar"))?.passo).toBe("registarChamada");
+    expect(cartao(linhaNegocio("a", "contactado"))?.passo).toBe("marcarVisita");
+    expect(cartao(linhaNegocio("a", "visita"))?.passo).toBe("fazerLevantamento");
   });
 
-  it("visitas por fazer dão fecharLevantamento", () => {
-    expect(cartao(linhaQuadro("a", { coluna: "visita", por_ligar_visitas: 1 }))?.passo).toBe("fecharLevantamento");
+  it("os contadores por ligar já não decidem o passo", () => {
+    const c = cartao(linhaNegocio("a", "contactado", { por_ligar_visitas: 2, por_ligar_visitas_feitas: 1, por_ligar_contactos: 3 }));
+    expect(c?.passo).toBe("marcarVisita");
   });
 
-  it("só contactos por ligar dão marcarVisita", () => {
-    expect(cartao(linhaQuadro("a", { coluna: "contactado", por_ligar_contactos: 1 }))?.passo).toBe("marcarVisita");
-  });
-
-  it("nada por ligar dá registarChamada", () => {
-    expect(cartao(linhaQuadro("a"))?.passo).toBe("registarChamada");
-  });
-
-  it("o cartão da pessoa leva o prefixo no id, o entity_id em pessoaId e nenhum valor nem trabalho", () => {
-    const c = cartao(linhaQuadro("a", { valor: 500, titulo: "x", papel: "cliente" }));
+  it("o cartão é de negócio: id do negócio, entity_id em pessoaId, título como trabalho e sem valor nestas colunas", () => {
+    const c = cartao(linhaNegocio("a", "porContactar", { valor: 500, papel: "cliente" }));
     expect(c).toMatchObject({
-      id: "pessoa-a", tipo: "pessoa", pessoaId: "a", nome: "Pessoa a", papel: "cliente", coluna: "porContactar", trabalho: null, valor: null,
+      id: "a", tipo: "negocio", pessoaId: "pessoa-de-a", nome: "Pessoa a", papel: "cliente", coluna: "porContactar", trabalho: "Trabalho a", valor: null,
     });
   });
 
-  it("o prazo é o dia de Lisboa e atrasa quando é anterior a hoje", () => {
-    const c = cartao(linhaQuadro("a", { proximo_prazo_em: "2026-10-20T10:00:00Z" }));
+  it("nas três primeiras colunas o prazo é o dia de Lisboa e atrasa quando é anterior a hoje", () => {
+    const c = cartao(linhaNegocio("a", "porContactar", { proximo_prazo_em: "2026-10-20T10:00:00Z" }));
     expect(c).toMatchObject({ prazo: "2026-10-20", atrasado: true });
-    expect(cartao(linhaQuadro("b", { proximo_prazo_em: "2026-10-21T10:00:00Z" }))).toMatchObject({ prazo: "2026-10-21", atrasado: false });
+    expect(cartao(linhaNegocio("b", "visita", { proximo_prazo_em: "2026-10-21T10:00:00Z" }))).toMatchObject({ prazo: "2026-10-21", atrasado: false });
   });
 
-  it("sem prazo não atrasa", () => {
-    expect(cartao(linhaQuadro("a"))).toMatchObject({ prazo: null, atrasado: false });
+  it("sem prazo, ou com prazo ilegível, não atrasa", () => {
+    expect(cartao(linhaNegocio("a", "contactado"))).toMatchObject({ prazo: null, atrasado: false });
+    expect(cartao(linhaNegocio("a", "contactado", { proximo_prazo_em: "lixo" }))).toMatchObject({ prazo: null, atrasado: false });
   });
 
   it("fronteira da meia-noite de Lisboa nas mudanças de hora de 2026 (29/03 e 25/10)", () => {
-    // 24/10: ainda hora de verão (UTC+1): 23:30Z já é 00:30 do dia 25.
-    expect(cartao(linhaQuadro("a", { proximo_prazo_em: "2026-10-24T23:30:00Z" }), "2026-10-25")).toMatchObject({ prazo: "2026-10-25", atrasado: false });
-    // 25/10: a hora de verão acabou de madrugada (UTC+0): 23:30Z ainda é dia 25, e atrasa em relação ao dia 26.
-    expect(cartao(linhaQuadro("b", { proximo_prazo_em: "2026-10-25T23:30:00Z" }), "2026-10-26")).toMatchObject({ prazo: "2026-10-25", atrasado: true });
-    // 28/03: ainda inverno (UTC+0): 23:30Z é dia 28.
-    expect(cartao(linhaQuadro("c", { proximo_prazo_em: "2026-03-28T23:30:00Z" }), "2026-03-29")).toMatchObject({ prazo: "2026-03-28", atrasado: true });
-    // 29/03: a hora de verão começou de madrugada (UTC+1): 23:30Z já é 00:30 do dia 30.
-    expect(cartao(linhaQuadro("d", { proximo_prazo_em: "2026-03-29T23:30:00Z" }), "2026-03-30")).toMatchObject({ prazo: "2026-03-30", atrasado: false });
+    const prazo = (em: string, hoje: string) => cartao(linhaNegocio("a", "porContactar", { proximo_prazo_em: em }), hoje);
+    expect(prazo("2026-10-24T23:30:00Z", "2026-10-25")).toMatchObject({ prazo: "2026-10-25", atrasado: false });
+    expect(prazo("2026-10-25T23:30:00Z", "2026-10-26")).toMatchObject({ prazo: "2026-10-25", atrasado: true });
+    expect(prazo("2026-03-28T23:30:00Z", "2026-03-29")).toMatchObject({ prazo: "2026-03-28", atrasado: true });
+    expect(prazo("2026-03-29T23:30:00Z", "2026-03-30")).toMatchObject({ prazo: "2026-03-30", atrasado: false });
   });
 
-  it("um prazo ilegível conta como sem prazo", () => {
-    expect(cartao(linhaQuadro("a", { proximo_prazo_em: "lixo" }))).toMatchObject({ prazo: null, atrasado: false });
+  it("uma linha de pessoa (tipo antigo) é descartada: já não há cartões de pessoa", () => {
+    expect(adaptarLinhaQuadro(linhaQuadro("a", { tipo: "pessoa" }), HOJE)).toBeNull();
   });
 });
 
@@ -122,9 +114,9 @@ describe("adaptarLinhaQuadro: negócios", () => {
 });
 
 describe("adaptarLinhaQuadro: o cursor e os casos de borda", () => {
-  it("o cursor é a chave tal como veio e o cartao_id CRU (sem prefixo, também na pessoa)", () => {
+  it("o cursor é a chave tal como veio e o cartao_id CRU", () => {
     const r = adaptarLinhaQuadro(linhaQuadro("a", { chave_ordem: "2026-10-20T10:00:00.123456Z" }), HOJE);
-    expect(r?.cartao.id).toBe("pessoa-a");
+    expect(r?.cartao.id).toBe("a");
     expect(r?.cursor).toEqual({ chave: "2026-10-20T10:00:00.123456Z", id: "a" });
     expect(adaptarLinhaQuadro(linhaNegocio("n", "contrato", { chave_ordem: "k" }), HOJE)?.cursor).toEqual({ chave: "k", id: "n" });
   });

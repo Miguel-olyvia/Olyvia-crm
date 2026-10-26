@@ -14,8 +14,8 @@ interface QuadroRealProps {
   quadro: QuadroPessoasEstado;
   /** Há pesquisa ou tipo escolhidos: um quadro vazio diz que nada corresponde e oferece limpar. */
   temFiltros: boolean;
-  /** Abre a ficha da pessoa; com `negocioId`, já nesse negócio. */
-  aoAbrir: (pessoaId: string, negocioId?: string) => void;
+  /** Abre a ficha da pessoa JÁ no negócio do cartão: o quadro só tem negócios, por isso o negócio vai sempre. */
+  aoAbrir: (pessoaId: string, negocioId: string) => void;
   aoLimpar: () => void;
 }
 
@@ -66,7 +66,7 @@ function useAnuncioCarregarMais(quadro: QuadroPessoasEstado, nomeDe: (c: ColunaQ
 }
 
 /**
- * O Quadro real das Pessoas: 7 colunas por etapa com os cartões, a contagem e o valor de cada coluna, «Carregar mais» por coluna e os
+ * O Quadro real das Pessoas: 7 colunas por etapa com os cartões (todos de negócio), a contagem e o valor de cada coluna, «Carregar mais» por coluna e os
  * estados de carregamento, vazio e erro. Não se arrastam cartões (a coluna deriva dos documentos do negócio); o nome e o botão do passo
  * abrem a ficha. Atalhos j/k/setas, `o` e `/` como na Lista do exemplo. Os dados vêm de `useQuadroPessoas`.
  */
@@ -75,10 +75,14 @@ export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar }: QuadroReal
   const raiz = useRef<HTMLDivElement>(null);
   const nomeDe = (c: ColunaQuadro): string => t(c === "porContactar" ? `${R}board.colNew` : `pessoasPagina.board.col.${c}`);
   const anuncio = useAnuncioCarregarMais(quadro, nomeDe);
+  // Sem negócio não se abre nada: o ecrã guiado trabalha sempre sobre um negócio, nunca só sobre a pessoa.
+  const abrirNegocio = (pessoaId: string, negocioId?: string): void => {
+    if (negocioId) aoAbrir(pessoaId, negocioId);
+  };
   const aoTeclar = useAtalhosPessoas(raiz, {
     pesquisa: () => document.querySelector<HTMLInputElement>('input[type="search"]')?.focus(),
     ajuda: () => undefined,
-    abrir: (id) => aoAbrir(id, document.activeElement?.getAttribute(ATRIBUTO_NEGOCIO) ?? undefined),
+    abrir: (id) => abrirNegocio(id, document.activeElement?.getAttribute(ATRIBUTO_NEGOCIO) ?? undefined),
   });
   const semNome = t(`${R}noName`);
   const cartoes = useMemo(() => quadro.cartoes.map((c) => (c.nome ? c : { ...c, nome: semNome })), [quadro.cartoes, semNome]);
@@ -123,7 +127,7 @@ export function QuadroReal({ quadro, temFiltros, aoAbrir, aoLimpar }: QuadroReal
         </div>
       )}
       <QuadroPessoas
-        cartoes={cartoes} hoje={hojeLisboa()} chip="todas" aoAbrir={aoAbrir} aoLimpar={aoLimpar} semAvisoVazio
+        cartoes={cartoes} hoje={hojeLisboa()} chip="todas" aoAbrir={abrirNegocio} aoLimpar={aoLimpar} semAvisoVazio
         totais={totais} aoCarregarMais={quadro.carregarMais} aCarregarMais={quadro.aCarregarMais} carregarMaisDesativado={quadro.aMostrarAnterior}
         colunasComErro={comErro} rotulosColuna={rotulos}
       />

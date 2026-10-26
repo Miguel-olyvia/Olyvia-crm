@@ -29,9 +29,23 @@ export interface RascunhoAssistente {
   observacoes: string;
 }
 
-export const RASCUNHO_VAZIO: RascunhoAssistente = {
-  preparar: { duracao: "", quem: "", nota: "" }, morada: MORADA_VAZIA, moradaOrigem: null, respostas: {}, linhas: [], observacoes: "",
-};
+/** Um rascunho vazio NOVO: nada se partilha entre leituras, por isso um passo que o mude não estraga o vazio das outras. */
+export const rascunhoVazio = (): RascunhoAssistente => ({
+  preparar: { duracao: "", quem: "", nota: "" }, morada: { ...MORADA_VAZIA }, moradaOrigem: null, respostas: {}, linhas: [], observacoes: "",
+});
+
+/** Só para comparar com o vazio (testes): quem precisa de um objeto seu usa `rascunhoVazio()`. */
+export const RASCUNHO_VAZIO: Readonly<RascunhoAssistente> = rascunhoVazio();
+
+let contadorLocal = 0;
+
+/** O id de uma linha de medidas: `crypto.randomUUID` só existe em contexto seguro (https), por isso há uma alternativa local para o resto. */
+export function novoIdLocal(): string {
+  const c = typeof crypto === "undefined" ? undefined : crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  contadorLocal += 1;
+  return `l-${Date.now().toString(36)}-${contadorLocal.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export const chaveDoRascunho = (id: string): string => `olyvia.assistente:${id}`;
 
@@ -59,9 +73,9 @@ export function lerRascunho(id: string): RascunhoAssistente {
   try {
     cru = JSON.parse(window.sessionStorage.getItem(chaveDoRascunho(id)) ?? "null");
   } catch {
-    return RASCUNHO_VAZIO;
+    return rascunhoVazio();
   }
-  if (!ehObjeto(cru)) return RASCUNHO_VAZIO;
+  if (!ehObjeto(cru)) return rascunhoVazio();
   const p = ehObjeto(cru.preparar) ? cru.preparar : {};
   const m = ehObjeto(cru.morada) ? cru.morada : {};
   const morada = Object.fromEntries(CHAVES_MORADA.map((c) => [c, texto(m[c])])) as unknown as MoradaObraForm;
@@ -81,6 +95,27 @@ export function guardarRascunho(id: string, rascunho: RascunhoAssistente): void 
     window.sessionStorage.setItem(chaveDoRascunho(id), JSON.stringify(rascunho));
   } catch {
     // Sem armazenamento: o rascunho vive só enquanto o ecrã estiver aberto.
+  }
+}
+
+export function existeRascunho(id: string): boolean {
+  try {
+    return window.sessionStorage.getItem(chaveDoRascunho(id)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** Leva o rascunho da chave antiga para a nova (a pessoa passou a ter negócio) e apaga a antiga. Um rascunho que a chave nova já tinha não se pisa. */
+export function migrarRascunho(de: string, para: string): void {
+  if (de === para) return;
+  try {
+    const antigo = window.sessionStorage.getItem(chaveDoRascunho(de));
+    if (antigo === null) return;
+    if (window.sessionStorage.getItem(chaveDoRascunho(para)) === null) window.sessionStorage.setItem(chaveDoRascunho(para), antigo);
+    window.sessionStorage.removeItem(chaveDoRascunho(de));
+  } catch {
+    // Sem armazenamento: o rascunho continua em memória (o hook leva-o consigo).
   }
 }
 

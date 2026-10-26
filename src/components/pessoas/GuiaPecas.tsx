@@ -145,7 +145,7 @@ export function CartaoClienteGuia({ cliente, acontecimentos, comLinha, nivel = "
   const id = useId();
   const l = ligacoes({ telefone: cliente.telefone, email: cliente.email });
   return (
-    <aside className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm md:p-5">
+    <aside aria-label={t(`${P}guia.cliente`)} className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm md:p-5">
       <section aria-labelledby={`${id}-cliente`} className="space-y-3">
         <Titulo id={`${id}-cliente`} className="text-base font-semibold text-foreground">{t(`${P}guia.cliente`)}</Titulo>
         {/* Larga: duas colunas; no ecrã de três colunas (o cartão fica à direita) uma só. */}

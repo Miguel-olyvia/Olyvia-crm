@@ -406,6 +406,8 @@ Deno.serve(async (req: Request) => {
     let entityId: string | null = pessoa?.entityId ?? null;
     let submissionId: string | null = pessoa ? (lead_id ?? null) : null;
     let isClient = pessoa?.isClient ?? false;
+    // Negocio da visita: lido na base (resolverPessoa), nunca do corpo do pedido.
+    let negocioId: string | null = pessoa?.negocioId ?? null;
     let mergedFieldValues: Record<string, any> = pessoa
       ? { ...pessoa.submissionFieldValues, ...field_values }
       : field_values;
@@ -473,12 +475,14 @@ Deno.serve(async (req: Request) => {
       }
       entityId = envio.entityId;
       submissionId = envio.submissionId;
-      // Entidade que ja existia: pode ser cliente. Le-se pela submissao nova.
-      if (!envio.created) {
-        const existente = await resolverPessoa({
-          supabase, organizationId, formId: form_id, submissionId: envio.submissionId,
-        });
-        if (existente.ok) isClient = existente.isClient;
+      // Pessoa nova: o negocio nasceu com ela. Pessoa que ja existia: pode ser
+      // cliente. Em ambos os casos le-se pela submissao nova, na base.
+      const lida = await resolverPessoa({
+        supabase, organizationId, formId: form_id, submissionId: envio.submissionId,
+      });
+      if (lida.ok) {
+        isClient = lida.isClient;
+        negocioId = lida.negocioId;
       }
     }
 
@@ -524,6 +528,7 @@ Deno.serve(async (req: Request) => {
         postalCode: postal_code || (field_values.postal_code as string | undefined),
         organizationId,
         createdBy,
+        negocioId,
       }))
       .select('id')
       .single();
@@ -591,6 +596,7 @@ Deno.serve(async (req: Request) => {
       slotEnd: slot_end,
       boardId,
       mergedFieldValues,
+      negocioId,
     });
     // A visita ja esta marcada e nao se desfaz; mas um passo posterior falhado
     // (dono, submissao, convites) nao pode ficar so no log.

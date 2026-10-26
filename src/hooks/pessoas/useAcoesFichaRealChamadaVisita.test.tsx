@@ -40,6 +40,15 @@ describe("registarChamada com o passo «marcar visita»", () => {
     expect(invalidadas(client)).toEqual([true, true]);
   });
 
+  it("com negocioId, o contacto e a visita ficam ligados a esse negócio", async () => {
+    rpcMock.mockReturnValueOnce(respostaOk({ mudou: true })).mockReturnValueOnce(respostaOk({ visita_id: "v-nova", mudou: true }));
+    const { result, client } = montar();
+    semear(client);
+    await act(async () => { await result.current.registarChamada(PESSOA_ID, dados({ negocioId: "neg-9" })); });
+    expect(parametros(0).p_negocio_id).toBe("neg-9");
+    expect(parametros(1).p_negocio_id).toBe("neg-9");
+  });
+
   it("sem a agenda da visita (nada para marcar) recusa antes de chamar a base", async () => {
     const { result } = montar();
     const erro = await erroDe(act(async () => { await result.current.registarChamada(PESSOA_ID, dados({ visita: undefined })); }));

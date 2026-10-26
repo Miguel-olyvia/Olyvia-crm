@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
-import { contactoDb, fichaDb, LEAD_ID, negocioDb, PESSOA_ID, seccaoDb } from "@/hooks/pessoas/fichaFabrica";
+import { contactoDb, fichaDb, LEAD_ID, negocioDb, PESSOA_ID, seccaoDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { respostaOk, rpcMock } from "@/hooks/pessoas/fichaTestUtil";
 import { FontePessoasContext, type FontePessoas, type MomentoGanho } from "@/hooks/pessoas/useFontePessoas";
@@ -27,8 +27,11 @@ const FICHA_BASE = fichaDb({
   contactos: seccaoDb([contactoDb({ id: "c1", em: "2026-10-12T09:30:00Z" })]),
 });
 
-// A lead ainda sem negócio: o guia é o assistente da fase Contacto e o «Criar o negócio» está nos passos que gravam no negócio.
-const SEM_NEGOCIO = fichaDb({ ...FICHA_BASE, negocios: { total: 0, itens: [] } });
+// A lead ainda sem negócio (o Pipeline só tem negócios, por isso é uma ficha aberta sem cartão): com a visita feita o passo do guia simples é «Criar o negócio».
+const SEM_NEGOCIO = fichaDb({
+  ...FICHA_BASE, negocios: { total: 0, itens: [] },
+  visitas: seccaoDb([visitaDb({ id: "v1", status: "completed", inicio: "2026-10-10T09:00:00Z", fim: "2026-10-10T10:00:00Z" })]),
+});
 
 let ficha: FichaDb;
 const chamadas = (nome: string) => rpcMock.mock.calls.filter((c) => c[0] === nome);
@@ -65,12 +68,19 @@ function desenhar(momento: MomentoGanho | null = "manual", sobre: Partial<Parame
     </QueryClientProvider>,
   );
 }
-/** O «Criar o negócio» do assistente (a ponte temporária): uma lead sem negócio e já contactada abre no passo «Morada da obra», que grava no negócio. */
+/** O «Criar o negócio» do guia simples da pessoa (a ponte, só para quem ainda não tem negócio): com a visita feita é o botão do passo. */
 const botaoCriarNegocio = async () => {
   await screen.findByRole("region", { name: "Ana Lopes" });
-  return screen.findByRole("button", { name: "Criar o negócio" });
+  return screen.findByRole("button", { name: /^Criar o negócio/ });
 };
-const detalhe = () => screen.findByRole("heading", { level: 3, name: "Casa de banho" });
+// A «linha» do negócio (serviço) já não é um título h3 (era uma descrição): encontra-se pelo marcador que recebe o foco.
+const tituloDoNegocio = (texto: string) => waitFor(() => {
+  const e = document.querySelector<HTMLElement>("[data-negocio-titulo]");
+  expect(e).not.toBeNull();
+  expect(e).toHaveTextContent(texto);
+  return e as HTMLElement;
+});
+const detalhe = () => tituloDoNegocio("Casa de banho");
 
 describe("FichaReal com o negócio completo", () => {
   it("abre já no negócio pedido e oferece perder, sem o «Dar como ganho» antigo", async () => {
@@ -114,7 +124,7 @@ describe("FichaReal com o negócio completo", () => {
     expect(params("neg_ligar_registo")).toEqual({ p_negocio_id: "n1", p_tipo: "contacto", p_registo_id: "c1" });
   });
 
-  it("«Criar o negócio» (do assistente) abre o painel, cria na base com a lead e abre o negócio novo", async () => {
+  it("«Criar o negócio» (do guia da pessoa) abre o painel, cria na base com a lead e abre o negócio novo", async () => {
     ficha = SEM_NEGOCIO;
     desenhar("manual", { negocioInicial: null });
     await screen.findByRole("region", { name: "Ana Lopes" });
@@ -126,7 +136,7 @@ describe("FichaReal com o negócio completo", () => {
     expect(params("neg_criar_negocio")).toMatchObject({
       p_id: "novo-1", p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_titulo: "Quarto", p_lead_id: LEAD_ID, p_reabrir_abordagem: false, p_fecho: "contrato",
     });
-    expect(await screen.findByRole("heading", { level: 3, name: "Quarto" })).toBeInTheDocument();
+    expect(await tituloDoNegocio("Quarto")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Novo negócio" })).toBeNull());
   });
 
@@ -148,7 +158,7 @@ describe("FichaReal: o foco depois de criar um negócio", () => {
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
     fireEvent.change(within(painel).getByRole("textbox", { name: /^Título do negócio/ }), { target: { value: "Quarto" } });
     fireEvent.click(within(painel).getByRole("button", { name: "Criar o negócio" }));
-    const titulo = await screen.findByRole("heading", { level: 3, name: "Quarto" });
+    const titulo = await tituloDoNegocio("Quarto");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Novo negócio" })).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(titulo));
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Mais" }));

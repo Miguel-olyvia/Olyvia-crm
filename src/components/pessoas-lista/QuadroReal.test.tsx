@@ -12,7 +12,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 const CARTOES = [
   cartaoQuadro("a", { nome: "Ana Lopes" }),
   cartaoQuadro("b", { nome: "Bruno Reis", coluna: "visita", passo: "fecharLevantamento" }),
-  cartaoQuadro("n1", { id: "neg-1", tipo: "negocio", pessoaId: "dono-1", nome: "Carla Dias", coluna: "orcamento", trabalho: "Cozinha", valor: 900, passo: "criarProposta" }),
+  cartaoQuadro("n1", { id: "neg-1", pessoaId: "dono-1", nome: "Carla Dias", coluna: "orcamento", trabalho: "Cozinha", valor: 900, passo: "criarProposta" }),
 ];
 
 function desenhar(quadro: QuadroPessoasEstado, extra: { temFiltros?: boolean; aoAbrir?: () => void; aoLimpar?: () => void } = {}) {
@@ -79,10 +79,10 @@ describe("QuadroReal: colunas e cartões", () => {
     expect(within(coluna(/^Negócio/)).getByText("Cozinha")).toBeInTheDocument();
   });
 
-  it("o nome de uma pessoa abre-a sem negócio; o de um negócio abre a pessoa com esse negócio", () => {
+  it("o nome de qualquer cartão (também na abordagem) abre a pessoa com o negócio dele", () => {
     const { aoAbrir } = desenhar(quadroBase({}, CARTOES));
     fireEvent.click(screen.getByRole("button", { name: "Abrir a ficha de Ana Lopes" }));
-    expect(aoAbrir).toHaveBeenLastCalledWith("a", undefined);
+    expect(aoAbrir).toHaveBeenLastCalledWith("a", "neg-a");
     fireEvent.click(screen.getByRole("button", { name: "Abrir a ficha de Carla Dias" }));
     expect(aoAbrir).toHaveBeenLastCalledWith("dono-1", "neg-1");
   });
@@ -91,6 +91,18 @@ describe("QuadroReal: colunas e cartões", () => {
     const { aoAbrir } = desenhar(quadroBase({}, CARTOES));
     fireEvent.click(within(coluna(/^Negócio/)).getAllByRole("button").find((b) => /abre a ficha/.test(b.getAttribute("aria-label") ?? ""))!);
     expect(aoAbrir).toHaveBeenLastCalledWith("dono-1", "neg-1");
+  });
+
+  it("o botão do passo de um cartão da abordagem também abre a pessoa com o negócio", () => {
+    const { aoAbrir } = desenhar(quadroBase({}, CARTOES));
+    fireEvent.click(within(coluna(/^Novo/)).getAllByRole("button").find((b) => /abre a ficha/.test(b.getAttribute("aria-label") ?? ""))!);
+    expect(aoAbrir).toHaveBeenLastCalledWith("a", "neg-a");
+  });
+
+  it("um cartão sem negócio (tipo pessoa, que a base já não devolve) não abre nada: o assistente nunca recebe só a pessoa", () => {
+    const { aoAbrir } = desenhar(quadroBase({}, [cartaoQuadro("z", { nome: "Zé Antigo", tipo: "pessoa", id: "pessoa-z", trabalho: null })]));
+    fireEvent.click(screen.getByRole("button", { name: "Abrir a ficha de Zé Antigo" }));
+    expect(aoAbrir).not.toHaveBeenCalled();
   });
 
   it("um cartão sem nome mostra «Sem nome»", () => {
@@ -134,7 +146,7 @@ describe("QuadroReal: teclado e anúncios", () => {
     fireEvent.keyDown(document.activeElement!, { key: "k" });
     expect(screen.getByRole("button", { name: "Abrir a ficha de Bruno Reis" })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "o" });
-    expect(aoAbrir).toHaveBeenLastCalledWith("b", undefined);
+    expect(aoAbrir).toHaveBeenLastCalledWith("b", "neg-b");
   });
 
   it("a região live anuncia que está a carregar mais numa coluna e, depois, quantos chegaram", () => {
@@ -144,7 +156,7 @@ describe("QuadroReal: teclado e anúncios", () => {
     expect(viva()).toBeEmptyDOMElement();
     ui.reenviar({ ...base, aCarregarMais: new Set(["orcamento"]) });
     expect(viva()).toHaveTextContent("A carregar mais cartões em Orçamento...");
-    const mais = [...CARTOES, cartaoQuadro("n2", { id: "neg-2", tipo: "negocio", coluna: "orcamento", trabalho: "Sala", valor: 1 })];
+    const mais = [...CARTOES, cartaoQuadro("n2", { id: "neg-2", coluna: "orcamento", trabalho: "Sala", valor: 1 })];
     ui.reenviar(quadroBase({}, mais, { orcamento: { total: 40, haMais: true } }));
     expect(viva()).toHaveTextContent("Carregados mais 1 em Orçamento. A mostrar 2 de 40.");
   });

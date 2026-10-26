@@ -6,7 +6,7 @@ import type { QuadroPessoasEstado } from "@/hooks/pessoas/useQuadroPessoas";
 
 export function cartaoQuadro(id: string, sobre: Partial<CartaoQuadro> = {}): CartaoQuadro {
   return {
-    id: `pessoa-${id}`, tipo: "pessoa", pessoaId: id, nome: `Pessoa ${id}`, papel: "lead", coluna: "porContactar", trabalho: null,
+    id: `neg-${id}`, tipo: "negocio", pessoaId: id, nome: `Pessoa ${id}`, papel: "lead", coluna: "porContactar", trabalho: `Trabalho ${id}`,
     valor: null, passo: "registarChamada", prazo: null, atrasado: false, ...sobre,
   };
 }

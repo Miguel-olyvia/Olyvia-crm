@@ -31,6 +31,8 @@ export type PropsFormChamada = Pick<PropsPainel, "id" | "pessoa" | "resumo" | "h
   aoConcluir: (mensagem: string, passo?: PassoChamada) => void;
   /** O id do título visível: um diálogo à volta do formulário liga-se a ele com `aria-labelledby`. Sem isto, o formulário gera um. */
   idTitulo?: string;
+  /** Só o Pipeline: o negócio do cartão. A chamada (e a visita que ela marque) fica ligada a ele; sem isto, é só da pessoa. */
+  negocioId?: string;
 };
 
 /** A frase para o leitor de ecrã: a chamada e, se houve, a visita, a chamada agendada ou a abordagem encerrada. */
@@ -61,7 +63,7 @@ export function FormChamada(props: PropsFormChamada) {
 }
 
 /** O corpo do formulário; com `agendaReal` (a ficha real) o passo «marcar visita» usa a agenda da base. */
-export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora, agendaReal }: PropsFormChamada & { agendaReal: FormAgenda | null }) {
+export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConcluir, semVoltar = false, idTitulo: idDeFora, negocioId, agendaReal }: PropsFormChamada & { agendaReal: FormAgenda | null }) {
   const { t } = useTranslation();
   const f = useFormChamada(resumo, hoje, acoes.capacidades?.visita === false, agendaReal !== null);
   // A agenda da base só mostra os seus erros depois de tentar guardar (como o resto do formulário).
@@ -96,8 +98,9 @@ export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConc
   const guardar = () => {
     if (comAgenda) setTentouAgenda(true);
     const preparados = f.preparar();
-    const dados = preparados && comVisita(preparados);
-    if (!dados) return;
+    const comDados = preparados && comVisita(preparados);
+    if (!comDados) return;
+    const dados = negocioId ? { ...comDados, negocioId } : comDados;
     // O aviso de sucesso e a conclusão só chegam depois de a ação terminar (na base pode demorar ou falhar).
     const mensagem = mensagemChamada(t, pessoa.nome, dados);
     acao.executar(() => acoes.registarChamada(pessoa.id, dados), () => {

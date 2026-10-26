@@ -2,7 +2,7 @@
 // questionário e o pedido do cliente, no negócio), Morada da obra e Preparar a visita (rascunho do assistente, que sobrevive a recarregar) e Marcar a
 // visita (a agenda existente, com o que se preparou). Os passos que gravam no negócio, sem negócio, mostram a razão e «Criar o negócio». Só se
 // reaproveita a GRAVAÇÃO (hooks e funções que já existem); o desenho é o do assistente.
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuestionarioFormularioProvider } from "@/hooks/pessoas/QuestionarioFormularioProvider";
 import { useGuardarQualificacao } from "@/hooks/pessoas/useGuardarQualificacao";
@@ -64,7 +64,8 @@ export function ContactoDoGuia(props: ContactoDoGuiaProps) {
   // As respostas gravadas do negócio aparecem com o texto que a pessoa viu (o questionário pode ter mudado entretanto).
   return (
     <QuestionarioFormularioProvider gravadas={props.negocio?.qualificacaoGravada ? [...props.negocio.qualificacaoGravada] : undefined}>
-      <ContactoInterior key={`${props.pessoa.id}-${props.negocio?.id ?? ""}`} {...props} />
+      {/* A chave é só a pessoa: criar o negócio a meio não remonta o assistente (perdia o que se escreveu); o rascunho migra para a chave do negócio. */}
+      <ContactoInterior key={props.pessoa.id} {...props} />
     </QuestionarioFormularioProvider>
   );
 }
@@ -80,6 +81,7 @@ function ContactoInterior({
   const { guardar: substituir } = useSubstituirContactoPessoa(pessoa.id);
   const { guardar: preferencias } = useGuardarContactoPessoa(pessoa.id);
   const [rascunho, atualizar] = useRascunhoAssistente(negocio?.id ?? `pessoa-${pessoa.id}`);
+  const idDoNegocio = negocio?.id ?? null;
 
   // Chamada: o formulário parte do que a pessoa tem; depois de gravar, a ficha refaz-se e o «atual» acompanha.
   const atualContacto = useMemo(() => ({
@@ -93,15 +95,30 @@ function ContactoInterior({
   const [respostas, setRespostas] = useState<Respostas>(() => respostasDeGravadas(gravadasDoNegocio));
   const [pedido, setPedido] = useState(negocio?.pedidoCliente ?? "");
   const gravado = useRef({ respostas, pedido });
+  // Quando o negócio aparece depois de montar (a pessoa acabou de o criar) o que ele já tem passa para o ecrã; sem negócio a Qualificação estava escondida,
+  // por isso não havia nada escrito que se possa perder. Só corre quando o id muda: uma gravação que refaz a ficha não pisa o que se está a escrever.
+  const negocioAgora = useRef(negocio);
+  negocioAgora.current = negocio;
+  const negocioVisto = useRef(idDoNegocio);
+  useEffect(() => {
+    if (negocioVisto.current === idDoNegocio) return;
+    negocioVisto.current = idDoNegocio;
+    const novas = respostasDeGravadas(negocioAgora.current?.qualificacaoGravada ?? []);
+    const novoPedido = negocioAgora.current?.pedidoCliente ?? "";
+    gravado.current = { respostas: novas, pedido: novoPedido };
+    setRespostas(novas);
+    setPedido(novoPedido);
+  }, [idDoNegocio]);
   const blocos = useMemo(() => blocosDaQualificacao(questionario), [questionario]);
-  const contagem = contarRespostas(blocos, respostas);
+  const contagem = useMemo(() => contarRespostas(blocos, respostas), [blocos, respostas]);
   const errosRespostas = useMemo(() => validarRespostas(questionario, respostas, "qualificacao"), [questionario, respostas]);
 
   const passos = useMemo(() => passosDoContacto({
     chamadas, visitaMarcada, perguntas: contagem,
     morada: rascunho.morada, preparar: { duracao: rascunho.preparar.duracao, quem: rascunho.preparar.quem },
   }), [chamadas, visitaMarcada, contagem, rascunho.morada, rascunho.preparar.duracao, rascunho.preparar.quem]);
-  const assistente = useAssistente(passos);
+  // Com o questionário a carregar não há perguntas (a Qualificação contava como completa): o passo inicial espera por ele.
+  const assistente = useAssistente(passos, { pronto: estado === "pronto" });
 
   const mudarMorada = (chave: ChaveMorada, valor: string): void => atualizar({ morada: { ...rascunho.morada, [chave]: valor }, moradaOrigem: "manual" });
   const preencherMorada = (morada: MoradaObraForm, origem: OrigemMoradaObra): void => atualizar({ morada: { ...morada }, moradaOrigem: origem });

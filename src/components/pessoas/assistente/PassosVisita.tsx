@@ -19,6 +19,7 @@ import type { Respostas, SeccaoDef } from "@/components/negocio-metas/perguntasT
 import type { VisitaPessoa } from "@/components/negocio-metas/registosTipos";
 import type { ErroResposta } from "@/components/negocio-metas/respostasQuestionario";
 import { contarSeccao } from "@/components/negocio-metas/respostasVisita";
+import { ConfirmarCancelarVisita } from "../ConfirmarCancelarVisita";
 import { textoDiaCompleto } from "../formatoPessoas";
 
 const A = "pessoasPagina.assistente.";
@@ -40,11 +41,15 @@ function Nota({ children }: { children: ReactNode }) {
 /** Dar a visita como feita é manual: grava a visita e devolve `null`, ou o erro já em texto. */
 type MarcarFeita = (visita: VisitaPessoa) => Promise<string | null>;
 
-function CartaoDeVisita({ visita, numero, aberta, aoAlternar, aoMarcarFeita }: {
-  visita: VisitaPessoa; numero: number; aberta: boolean; aoAlternar: () => void; aoMarcarFeita?: MarcarFeita;
+/** Cancelar a visita na base (a ação que já existe); lança se falhar, e o erro fica dentro da confirmação. */
+type CancelarVisita = (visitaId: string) => Promise<unknown>;
+
+function CartaoDeVisita({ visita, numero, aberta, aoAlternar, aoMarcarFeita, aoCancelar, nomePessoa }: {
+  visita: VisitaPessoa; numero: number; aberta: boolean; aoAlternar: () => void; aoMarcarFeita?: MarcarFeita; aoCancelar?: CancelarVisita; nomePessoa: string;
 }) {
   const { t } = useTranslation();
   const id = useId();
+  const [aCancelar, setACancelar] = useState(false);
   const [aMarcar, setAMarcar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const marcarFeita = async (): Promise<void> => {
@@ -60,6 +65,8 @@ function CartaoDeVisita({ visita, numero, aberta, aoAlternar, aoMarcarFeita }: {
   const tipo = visita.tipo ? t(`pessoasPagina.real.visit.kind.${visita.tipo}`) : t(`${A}visitas.semTipo`);
   const titulo = t(`${A}visitas.titulo`, { n: numero, tipo });
   const resumo = [textoDiaCompleto(visita.data), visita.hora, visita.feitoPor].filter(Boolean).join(" · ");
+  // Uma visita feita, cancelada ou com resultado já não se cancela (a mesma regra da linha da visita na ficha antiga).
+  const podeCancelar = aoCancelar !== undefined && visita.estado === "porFazer" && visita.resultado === undefined;
   const linhas: [string, string][] = [
     ...(visita.duracao ? [[t(`${V}duration`), t(`${V}duration.${visita.duracao}`)] as [string, string]] : []),
     ...(visita.quemVaiEstar ? [[t(`${V}present`), t(`${V}present.${visita.quemVaiEstar}`)] as [string, string]] : []),
@@ -99,8 +106,20 @@ function CartaoDeVisita({ visita, numero, aberta, aoAlternar, aoMarcarFeita }: {
               {t(`${A}visitas.marcarFeita`)}
             </Button>
           )}
+          {podeCancelar && (
+            <Button type="button" variant="outline" className={cn("ml-2 mt-3 min-h-11", FOCO)} onClick={() => setACancelar(true)}>
+              {t("pessoasPagina.real.visit.cancelar.button")}
+            </Button>
+          )}
           {erro && <p role="alert" className="mt-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground">{erro}</p>}
         </div>
+      )}
+      {/* Fora do bloco aberto: depois de cancelada a visita o botão desaparece, mas a confirmação tem de continuar montada até fechar. */}
+      {aoCancelar !== undefined && (
+        <ConfirmarCancelarVisita
+          pedido={aCancelar ? { visitaId: visita.id, nome: nomePessoa, quando: resumo } : null} aoCancelar={(visitaId) => aoCancelar(visitaId).then(() => undefined)}
+          aoFechar={() => setACancelar(false)}
+        />
       )}
     </li>
   );
@@ -112,9 +131,13 @@ interface CorpoVisitasProps {
   podeMarcar: boolean;
   /** «Marcar como feita» nas visitas marcadas; sem isto (sem permissão) o botão não existe. */
   aoMarcarFeita?: MarcarFeita;
+  /** «Cancelar visita» nas visitas marcadas (com confirmação); sem isto (sem permissão) o botão não existe. */
+  aoCancelar?: CancelarVisita;
+  /** O nome da pessoa, para a confirmação de cancelar dizer de quem é a visita. */
+  nomePessoa?: string;
 }
 
-export function CorpoVisitas({ visitas, aoMarcarOutra, podeMarcar, aoMarcarFeita }: CorpoVisitasProps) {
+export function CorpoVisitas({ visitas, aoMarcarOutra, podeMarcar, aoMarcarFeita, aoCancelar, nomePessoa = "" }: CorpoVisitasProps) {
   const { t } = useTranslation();
   // Abre por omissão a última visita que ainda está marcada (por fazer); as outras ficam fechadas.
   const [abertas, setAbertas] = useState<ReadonlySet<string>>(() => {
@@ -133,7 +156,9 @@ export function CorpoVisitas({ visitas, aoMarcarOutra, podeMarcar, aoMarcarFeita
       {visitas.length === 0 ? <p className="text-base text-foreground">{t(`${A}visitas.vazio`)}</p> : (
         <ul className="list-none space-y-2 p-0">
           {visitas.map((v, i) => (
-            <CartaoDeVisita key={v.id} visita={v} numero={i + 1} aberta={abertas.has(v.id)} aoAlternar={() => alternar(v.id)} aoMarcarFeita={aoMarcarFeita} />
+            <CartaoDeVisita key={v.id} visita={v} numero={i + 1} aberta={abertas.has(v.id)} aoAlternar={() => alternar(v.id)} aoMarcarFeita={aoMarcarFeita}
+              aoCancelar={aoCancelar} nomePessoa={nomePessoa}
+            />
           ))}
         </ul>
       )}

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
-// A fila de submissoes pendentes so faz duas coisas: escreve uma nota na ficha
-// que ja existe, e leva a pessoa aos Agendamentos. Nao cria leads nem as edita.
+// A fila de submissoes pendentes resolve envios (ligar, criar negocio, ignorar)
+// e leva a pessoa aos Agendamentos. Nao cria leads nem as edita.
 // Exigir `leads.create` / `leads.edit` para mostrar os botoes punha gente numa
-// fila que nao podia despachar. Quem chega aqui ja passou por
+// fila que nao podia despachar: a permissao de cada acao decide-a a base (42501). Quem chega aqui ja passou por
 // `platform.pending_submissions.view`, e as linhas que ve ja vem filtradas pelo
 // ambito do servidor -- nao ha nada para uma segunda permissao decidir.
 
@@ -57,6 +57,8 @@ vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 
 vi.mock("react-router-dom", () => ({ useNavigate: () => navigate }));
 
+vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
+
 vi.mock("@/lib/leads/fieldDefinitions", () => ({
   resolveLeadDialogFieldDefinitions: () => Promise.resolve([]),
   createSupabaseLeadDialogFieldDefinitionResolverClient: () => ({}),
@@ -73,13 +75,15 @@ describe("Submissoes pendentes: quem chega a pagina consegue despachar", () => {
     hasPermission.mockClear();
   });
 
-  it("mostra o botao de registar na ficha sem leads.create nem leads.edit", async () => {
+  it("mostra as tres acoes sem leads.create nem leads.edit", async () => {
     const { default: PendingFormSubmissions } = await import("../PendingFormSubmissions");
     render(<PendingFormSubmissions />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Registar na ficha como nota/i)).toBeTruthy();
+      expect(screen.getByText(/Ligar à pessoa/)).toBeTruthy();
     });
+    expect(screen.getByText(/Criar negócio/)).toBeTruthy();
+    expect(screen.getByText(/Ignorar como duplicado/)).toBeTruthy();
   });
 
   it("nao pergunta por permissoes de leads para decidir o que mostrar", async () => {
@@ -87,7 +91,7 @@ describe("Submissoes pendentes: quem chega a pagina consegue despachar", () => {
     render(<PendingFormSubmissions />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Registar na ficha como nota/i)).toBeTruthy();
+      expect(screen.getByText(/Ligar à pessoa/)).toBeTruthy();
     });
 
     const pedidas = hasPermission.mock.calls.map((c: any[]) => c[0]);

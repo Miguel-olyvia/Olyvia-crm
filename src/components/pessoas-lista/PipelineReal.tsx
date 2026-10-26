@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { MIN_PESQUISA } from "@/hooks/pessoas/listaPessoasTipos";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
@@ -14,7 +14,7 @@ import { usePessoaAberta } from "./usePessoaAberta";
 const R = "pessoasPagina.real.";
 
 /**
- * O Pipeline real (/pipeline): só o Quadro, com pesquisa, tipo e ordem (o Quadro ignora a etapa e os filtros extra, por isso não se
+ * O Pipeline real (/pipeline): só o Quadro, de cartões de negócio (clicar abre a pessoa já no negócio), com pesquisa, tipo e ordem (o Quadro ignora a etapa e os filtros extra, por isso não se
  * mostram). A ficha, «Nova lead» e «Workflow» são os da Lista (usePessoaAberta e AcoesCabecalhoPessoas). Só se monta em modo real.
  */
 export function PipelineReal() {
@@ -26,6 +26,12 @@ export function PipelineReal() {
   const aberta = usePessoaAberta();
   // As setas da ficha seguem as pessoas únicas pela ordem das colunas (só as carregadas).
   const idsVisiveis = useMemo(() => [...new Set(quadro.cartoes.map((c) => c.pessoaId))], [quadro.cartoes]);
+  // O quadro só tem negócios: passar à pessoa seguinte (`[` e `]`) abre o primeiro negócio dela que está no quadro, nunca só a pessoa.
+  const { aoIrPara } = aberta;
+  const irParaPessoa = useCallback(
+    (id: string) => aoIrPara(id, quadro.cartoes.find((c) => c.pessoaId === id)?.id),
+    [aoIrPara, quadro.cartoes],
+  );
   const contagem = t(`${R}board.subtitle`, { n: quadro.cartoes.length });
   const dicaPendente = f.pesquisa.trim().length > 0 && f.pesquisa.trim().length < MIN_PESQUISA;
   const anuncio = [
@@ -57,7 +63,7 @@ export function PipelineReal() {
   // Com uma pessoa aberta a ficha toma o lugar do quadro, na área de conteúdo (o quadro fica montado, escondido).
   return (
     <FichaReal
-      pessoaId={aberta.abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={aberta.aoIrPara} aoLimpar={aberta.limpar}
+      pessoaId={aberta.abertaId} idsVisiveis={idsVisiveis} aoFechar={aberta.fechar} aoIrPara={irParaPessoa} aoLimpar={aberta.limpar}
       origemFoco={aberta.origemFoco} negocioInicial={aberta.negocioId} aoAbrirNegocio={aberta.aoAbrirNegocio}
       voltaPara="pipeline" tituloPagina={t(`${R}pipeline.title`)} comGuia
     >

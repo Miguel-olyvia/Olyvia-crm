@@ -33,6 +33,8 @@ export interface DadosChamada {
   motivoOutro?: string;
   /** A pessoa tem um negócio aberto: não há abordagem a encerrar (quem chama conhece os negócios). */
   temNegocioAberto?: boolean;
+  /** Só o Pipeline: o negócio do cartão de onde se registou a chamada; o contacto (e a visita) ficam ligados a ele. */
+  negocioId?: string;
 }
 
 const MS_DIA = 86_400_000;

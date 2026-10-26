@@ -20,6 +20,7 @@ import { sanitizeFieldValues } from '../_shared/inputSanitizers.ts';
 import { validateLocationDistrict } from '../_shared/leadsValidation.ts';
 import {
   captarEnvio,
+  collectContactos,
   lerCamposContacto,
   normalizarNomesNosCampos,
   pickOrigemTexto,
@@ -29,6 +30,18 @@ import {
 import { lerConfiguracaoFormulario } from '../_shared/formConfig.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import {
+  HONEYPOT_CAMPO,
+  PEDIDO_INVALIDO,
+  avisosDeRejeicao,
+  honeypotPreenchido,
+  impressaoDigital,
+  lerCorpoJson,
+  montarRespostaHoneypot,
+  montarRespostaPublica,
+  validarContactosPublicos,
+  verificarLimitesCaptacao,
+} from "../_shared/captacaoPublica.ts";
 
 initSentry();
 
@@ -51,6 +64,9 @@ const requestSchema = z.object({
   embed: z.string().optional(),
   needs_manual_scheduling: z.boolean().optional(),
   lang: z.string().optional(),
+  // Honeypot: campo escondido no formulario. Aceita qualquer tipo para que um
+  // bot nunca receba um 400 diferente do sucesso falso.
+  [HONEYPOT_CAMPO]: z.unknown().optional(),
 });
 
 const corsHeaders = {
@@ -60,7 +76,7 @@ const corsHeaders = {
 };
 
 const RATE_LIMIT_BUCKET = 'create-lead';
-const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const RATE_LIMIT_MAX_ATTEMPTS = 10; // por IP; os limites por formulario e por pessoa estao em captacaoPublica.ts
 const RATE_LIMIT_WINDOW_MINUTES = 1;
 const MAX_FIELD_VALUE_LENGTH = 10_000;
 const ALLOWED_EMBED_KINDS = new Set(['popup', 'inline', 'widget', 'utm', 'chat', '']);
@@ -110,9 +126,17 @@ Deno.serve(async (req) => {
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit, corsHeaders);
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
-    const parsedBody = requestSchema.safeParse(await req.json());
-    if (!parsedBody.success) {
-      return json({ error: 'Invalid request', details: parsedBody.error.issues }, 400);
+    const corpo = await lerCorpoJson(req);
+    if (!corpo.ok) return json(PEDIDO_INVALIDO, 400);
+    const parsedBody = requestSchema.safeParse(corpo.body);
+    // Visitante anonimo: mensagem generica, sem as issues do schema.
+    if (!parsedBody.success) return json(PEDIDO_INVALIDO, 400);
+    // Honeypot: preenchido = bot. 200 falso, sem ler nem escrever mais nada.
+    if (honeypotPreenchido(parsedBody.data[HONEYPOT_CAMPO])) {
+      return json(montarRespostaHoneypot({
+        currentStep: parsedBody.data.step_number || 1,
+        totalSteps: parsedBody.data.step_number || 1,
+      }), 200);
     }
     // SEGURANCA: a organizacao nunca vem do corpo; vem do formulario/campanha na base.
     const {
@@ -193,6 +217,10 @@ Deno.serve(async (req) => {
       definitions = fieldDefs || [];
     }
 
+    // Email, telefone e nome (ate 200) validados com zod antes de qualquer escrita.
+    const contactosValidos = validarContactosPublicos(z, field_values, definitions);
+    if (!contactosValidos.ok) return json({ error: contactosValidos.error }, 400);
+
     // Sanitizacao defensiva ANTES de qualquer persistencia ou validacao.
     const contactMap: Record<string, string> = {};
     for (const def of definitions) {
@@ -200,12 +228,7 @@ Deno.serve(async (req) => {
     }
     const sanitizeResult = sanitizeFieldValues(field_values, contactMap);
     const sanitizeReport = sanitizeResult.report;
-    if (sanitizeReport.email_rejected) {
-      console.warn(`[create-lead] rejected invalid email "${sanitizeReport.email_rejected}"`);
-    }
-    if (sanitizeReport.phone_rejected) {
-      console.warn(`[create-lead] rejected invalid phone "${sanitizeReport.phone_rejected}"`);
-    }
+    for (const aviso of avisosDeRejeicao(sanitizeReport, 'create-lead')) console.warn(aviso);
     const cleanedValues = normalizarNomesNosCampos({ ...field_values, ...sanitizeResult.cleaned }, definitions);
 
     let currentStep = step_number || 1;
@@ -288,6 +311,29 @@ Deno.serve(async (req) => {
       },
     };
 
+    // Limites por formulario (organizacao + formulario) e por pessoa (impressao
+    // digital de email e telefone, nunca em claro). Depois das validacoes, para
+    // que um pedido recusado por dados invalidos nao gaste a quota.
+    const contactosDoPedido = lerCamposContacto(cleanedValues, definitions);
+    const contactosNormalizados = collectContactos(contactosDoPedido.rawEmail, contactosDoPedido.rawPhone);
+    // Impressao digital = HMAC com a chave de servidor. Sem chave falha em fechado: nada se envia.
+    let impressaoKey: Uint8Array;
+    try {
+      impressaoKey = deriveKeyFromEnv('NIF_HMAC_KEY', 'HMAC');
+    } catch (keyError) {
+      console.error('[create-lead] NIF_HMAC_KEY em falta ou invalida; pedido recusado');
+      await captureError(keyError, { function: 'create-lead', stage: 'impressao_digital_key' });
+      return json({ error: 'Service temporarily unavailable', code: 'RETRY' }, 503);
+    }
+    const limites = await verificarLimitesCaptacao({
+      supabase,
+      organizationId,
+      formKey: formId ?? campaignId ?? 'sem-formulario',
+      fingerprint: await impressaoDigital(contactosNormalizados.email, contactosNormalizados.phone, impressaoKey),
+      bucketPrefix: RATE_LIMIT_BUCKET,
+    });
+    if (!limites.allowed) return rateLimitResponse(limites.result, corsHeaders);
+
     // Hash do NIF (best-effort): o NIF em claro nunca chega a pesquisa.
     let nifHash: string | null = null;
     const { rawVat } = lerCamposContacto(cleanedValues, definitions);
@@ -316,6 +362,7 @@ Deno.serve(async (req) => {
       needsManualScheduling: !!needs_manual_scheduling,
       formName,
       nifHash,
+      deps: { captureError },
     });
     if (!envio.ok) return json(envio.code ? { error: envio.error, code: envio.code } : { error: envio.error }, envio.status);
 
@@ -358,18 +405,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({
-      success: true,
-      lead_id: envio.submissionId,
-      target_type: 'lead',
-      target_id: envio.submissionId,
-      current_step: currentStep,
-      total_steps: totalSteps,
-      is_complete: isComplete,
-      next_step: isComplete ? null : currentStep + 1,
-      sanitized: sanitizeReport,
-      message: isComplete ? 'Lead created successfully' : `Step ${currentStep} completed. Continue with update-lead API.`,
-    }, 201);
+    // Igual para pessoa nova e conhecida: nunca devolve negocioId, entity_id nem created.
+    return json(montarRespostaPublica({
+      submissionId: envio.submissionId,
+      currentStep,
+      totalSteps,
+      isComplete,
+      sanitized: sanitizeReport as Record<string, unknown>,
+    }), 201);
   } catch (error: any) {
     console.error('Error in create-lead:', error);
     await captureError(error, { function: "create-lead" });

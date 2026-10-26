@@ -109,7 +109,14 @@ describe("useQuadroPessoas: a primeira chamada", () => {
     rpcMock.mockReturnValue(ok([linhaQuadro("x", { coluna: "arquivo" }), linhaQuadro("y")]));
     const { result } = montar();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.cartoes.map((c) => c.id)).toEqual(["pessoa-y"]);
+    expect(result.current.cartoes.map((c) => c.id)).toEqual(["y"]);
+  });
+
+  it("descarta uma linha de pessoa: o quadro só tem negócios", async () => {
+    rpcMock.mockReturnValue(ok([linhaQuadro("p", { tipo: "pessoa" }), linhaQuadro("n")]));
+    const { result } = montar();
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.cartoes.map((c) => [c.id, c.tipo])).toEqual([["n", "negocio"]]);
   });
 });
 
@@ -318,6 +325,6 @@ describe("useQuadroPessoas: troca de organização e de filtros", () => {
     expect(result.current.cartoes).toHaveLength(1);
     await act(async () => { resolver({ data: [linhaQuadro("b", { papel: "cliente" })], error: null }); });
     await waitFor(() => expect(result.current.aMostrarAnterior).toBe(false));
-    expect(result.current.cartoes.map((c) => c.id)).toEqual(["pessoa-b"]);
+    expect(result.current.cartoes.map((c) => c.id)).toEqual(["b"]);
   });
 });

@@ -2,7 +2,7 @@
 // o atual realçado e com aria-current) e «Fases feitas»; ao centro o cabeçalho «Passo N de M · faltam X respostas · tempo», o título com ícone, o corpo
 // do passo e o rodapé «Anterior», «Ir para "..."» e «Continuar». Só apresentação: o estado vem de `useAssistente`, o corpo de cada passo de `renderCorpo` e
 // gravar ao continuar é do chamador (`aoContinuar`). Devolve os dois blocos da grelha do guia (a coluna e o centro). No telemóvel a lista passa a bolinhas.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft, ArrowRight, CalendarDays, CalendarPlus, Check, ClipboardList, ListChecks, Loader2, MapPin, Phone, Save, type LucideIcon,
 } from "lucide-react";
@@ -53,7 +53,7 @@ function Circulo({ estado, numero }: { estado: EstadoDoPasso; numero: number }) 
         estado !== "feito" && estado !== "comFalta" && "border-2 border-muted-foreground text-muted-foreground",
       )}
     >
-      {estado === "feito" ? <Check className="h-3.5 w-3.5" /> : estado === "comFalta" ? "!" : <span className="md:hidden">{numero}</span>}
+      {estado === "feito" ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : estado === "comFalta" ? "!" : <span className="md:hidden">{numero}</span>}
     </span>
   );
 }
@@ -105,17 +105,40 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
   const { t } = useTranslation();
   const Titulo = nivel;
   const { indice, passo } = assistente;
+  const idBase = useId();
+  const idCabecalho = `${idBase}-cabecalho`;
+  const idErro = `${idBase}-erro`;
   const titulo = useRef<HTMLHeadingElement>(null);
-  const primeira = useRef(true);
+  const corpo = useRef<HTMLDivElement>(null);
   const [ocupado, setOcupado] = useState(false);
   const aGravar = useRef(false);
-  const [erro, setErro] = useState<string | null>(null);
-  // O foco vai para o título quando o passo muda, e nunca à entrada: quem abre a ficha tem o foco no seu sítio.
+  // O erro é do passo em que aconteceu: deriva-se na leitura, sem efeito que o limpe ao mudar de passo.
+  // `pedido` é o pedido de foco de quando se carregou em Continuar: se o passo mudou desde então, o erro já não se mostra (nem ao voltar a este passo).
+  const [falha, setFalha] = useState<{ passoId: string; texto: string; pedido: number } | null>(null);
+  const erro = falha !== null && falha.passoId === passo?.id && falha.pedido === assistente.pedidoFoco ? falha.texto : null;
+  // O passo de agora, para depois de gravar só se avançar se a pessoa ainda estiver nele.
+  const passoAgora = useRef<string | null>(passo?.id ?? null);
+  passoAgora.current = passo?.id ?? null;
+  // O foco vai para o título quando o passo muda, e nunca à entrada: o pedido só cresce quando se muda de passo (sem flag que o StrictMode estrague).
   useEffect(() => {
-    if (primeira.current) { primeira.current = false; return; }
+    if (assistente.pedidoFoco === 0) return;
     titulo.current?.focus();
   }, [assistente.pedidoFoco]);
-  useEffect(() => { setErro(null); }, [passo?.id]);
+  // O erro liga-se ao campo em falta e o foco vai para o primeiro campo inválido do passo.
+  useEffect(() => {
+    if (!erro) return;
+    const campo = corpo.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    if (!campo) return;
+    const antes = campo.getAttribute("aria-describedby");
+    const antesErro = campo.getAttribute("aria-errormessage");
+    campo.setAttribute("aria-describedby", [antes, idErro].filter(Boolean).join(" "));
+    campo.setAttribute("aria-errormessage", idErro);
+    campo.focus();
+    return () => {
+      if (antes === null) campo.removeAttribute("aria-describedby"); else campo.setAttribute("aria-describedby", antes);
+      if (antesErro === null) campo.removeAttribute("aria-errormessage"); else campo.setAttribute("aria-errormessage", antesErro);
+    };
+  }, [erro, idErro]);
   if (!passo) return null;
   const Icone = ICONES[passo.icone];
   const salto = proximoRelevante(passos, indice);
@@ -124,14 +147,18 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
     if (aGravar.current) return;
     aGravar.current = true;
     setOcupado(true);
-    setErro(null);
+    setFalha(null);
+    // O id do passo guarda-se antes do await: depois dele o índice do render do clique pode estar velho (a lista muda com as respostas).
+    const idDoPasso = passo.id;
+    const pedido = assistente.pedidoFoco;
     try {
-      const falha = aoContinuar ? await aoContinuar(passo) : null;
-      if (falha === null) assistente.avancar();
-      else setErro(falha);
+      const texto = aoContinuar ? await aoContinuar(passo) : null;
+      if (texto === null) {
+        if (passoAgora.current === idDoPasso) assistente.avancarDe(idDoPasso);
+      } else setFalha({ passoId: idDoPasso, texto, pedido });
     } catch {
       // Quem grava devolve o erro em texto; se rebentar em vez disso, diz-se em geral e o passo não avança.
-      setErro(t(`${A}erroGenerico`));
+      setFalha({ passoId: idDoPasso, texto: t(`${A}erroGenerico`), pedido });
     } finally {
       aGravar.current = false;
       setOcupado(false);
@@ -144,17 +171,17 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
       </div>
       <div>
         <div className="space-y-4 py-1 md:px-2">
-          <p className={cn("text-sm", completo(passo) ? "text-primary" : "text-muted-foreground")}>{textoDoCabecalho(passo, indice + 1, passos.length, t)}</p>
+          <p id={idCabecalho} className={cn("text-sm", completo(passo) ? "text-primary" : "text-muted-foreground")}>{textoDoCabecalho(passo, indice + 1, passos.length, t)}</p>
           <div className="flex items-center gap-3">
             <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Icone className="h-5 w-5" />
             </span>
-            <Titulo ref={titulo} tabIndex={-1} className="text-2xl font-bold leading-tight tracking-tight text-foreground outline-none md:text-[28px]">
+            <Titulo ref={titulo} tabIndex={-1} aria-describedby={idCabecalho} className="text-2xl font-bold leading-tight tracking-tight text-foreground outline-none md:text-[28px]">
               {nomeDoPasso(passo, t)}
             </Titulo>
           </div>
-          <div className="space-y-4">{renderCorpo(passo)}</div>
-          {erro && <p role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground">{erro}</p>}
+          <div ref={corpo} className="space-y-4">{renderCorpo(passo)}</div>
+          {erro && <p id={idErro} role="alert" className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground">{erro}</p>}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
             <Button type="button" variant="ghost" className={cn("min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground", FOCO)} disabled={indice === 0} onClick={assistente.recuar}>
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -176,6 +203,8 @@ export function AssistenteDoGuia({ faseRotuloChave, passos, assistente, renderCo
                 </Button>
               </div>
             )}
+            {/* O estado existe sempre (vazio) para o leitor de ecrã anunciar quando passa a «A guardar...». */}
+            <span role="status" className="sr-only">{ocupado ? t(`${A}aGuardar`) : ""}</span>
           </div>
           {extra}
         </div>

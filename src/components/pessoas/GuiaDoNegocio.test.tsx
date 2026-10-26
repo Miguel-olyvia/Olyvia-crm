@@ -38,6 +38,8 @@ afterEach(() => {
 
 const HOJE = "2026-10-19";
 const negocio = { ...negocioBase("n1", { pessoa: "Pedro Lopes", servico: "WC social", estadoReal: "aberto", contacto: { telefone: "927 118 300", email: null } }), notas: "", comercialId: "u1" };
+// O negócio já tem o levantamento escrito: está para lá da abordagem (sem isto um negócio sem orçamento recua para Por contactar, Contactado ou Visita; ver GuiaDoNegocioAssistente.test.tsx).
+const negocioComLevantamento = { ...negocio, levantamento: { data: "2026-10-10", feitoPor: "Ana Ribeiro", estado: "feito" as const, linhas: [], observacoes: "" } };
 const itemDe = (extra: Partial<ItemProcesso> = {}): ItemProcesso => ({
   id: "n1", pessoaId: "a", tipo: "negocio", fase: "orcamento", trabalho: "WC social", valor: null, prazo: null, atrasado: false, orcamentos: 0,
   verificacao: "semDetalhe", propostaRascunho: false, visitaFeita: false, ...extra,
@@ -57,7 +59,7 @@ function abrir(item: ItemProcesso, p: ProcessoValor | null = processo(), opcoes:
       <FontePessoasContext.Provider value={opcoes.fonte ?? REAL}>
         <ProcessoContext.Provider value={p}>
           <ComCostura mutacoes={mutacoesFalsas()} dados={dadosFalsos({ podeEditar: opcoes.podeEditar ?? true })}>
-            <DetalheNegocioFicha negocio={opcoes.negocio ?? negocio} hoje={HOJE} aoVoltar={vi.fn()} item={item} pessoa={pessoaBase("a", { nome: "Pedro Lopes", contacto: { telefone: "927 118 300", email: "pedro@x.pt" } })} atividade={[]} comGuia />
+            <DetalheNegocioFicha negocio={opcoes.negocio ?? (item.fase === "levantamento" ? negocio : negocioComLevantamento)} hoje={HOJE} aoVoltar={vi.fn()} item={item} pessoa={pessoaBase("a", { nome: "Pedro Lopes", contacto: { telefone: "927 118 300", email: "pedro@x.pt" } })} atividade={[]} comGuia />
           </ComCostura>
         </ProcessoContext.Provider>
       </FontePessoasContext.Provider>

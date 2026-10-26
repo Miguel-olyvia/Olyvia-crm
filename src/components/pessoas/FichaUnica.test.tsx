@@ -185,7 +185,10 @@ describe("com um negócio aberto", () => {
   it("há um só cabeçalho (o nome da pessoa e o serviço como linha) e uma só barra de fases", () => {
     montar(resumoComNegocio(), { negocioInicial: "n1" });
     expect(screen.getAllByRole("heading", { name: /Pedro Lopes/ })).toHaveLength(1);
-    expect(screen.getAllByRole("heading", { name: "WC social" })).toHaveLength(1);
+    // A «linha» (o serviço) já não é um título (era uma descrição): um só elemento, o que recebe o foco, e nenhum h3 com esse nome.
+    expect(document.querySelectorAll("[data-negocio-titulo]")).toHaveLength(1);
+    expect(document.querySelector("[data-negocio-titulo]")).toHaveTextContent("WC social");
+    expect(screen.queryByRole("heading", { name: "WC social" })).toBeNull();
     expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
     expect(within(guia()).getByRole("button", { name: "Mais" })).toBeInTheDocument();
   });

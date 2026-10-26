@@ -7,8 +7,10 @@
 //
 // DEPENDE de objetos que so existem na base de RH (migration
 // 20261229100000_form_criar_entidade.sql): fn_form_resolver_captacao,
-// fn_form_achar_entidades, fn_form_criar_entidade. NAO publicar sem a
-// migration aplicada e sem autorizacao.
+// fn_form_achar_entidades, fn_form_criar_entidade. A migration
+// 20261231200000_negocio_desde_o_inicio.sql acrescenta a 4.a coluna
+// negocio_id a fn_form_criar_entidade (pessoa nova nasce com negocio).
+// NAO publicar sem as migrations aplicadas e sem autorizacao.
 
 import { classifyDedupOutcome, type DedupCandidate, type DedupOutcome } from './leadDedup.ts';
 import { composeDisplayName, normalizeFirstLast } from './composeDisplayName.ts';
@@ -210,6 +212,8 @@ export async function verificarCamposUnicos(params: {
 export type CaptacaoDeps = {
   emitAlert?: typeof emitFormResubmissionAlert;
   emitNotification?: typeof emitDedupSubmissionNotification;
+  /** Regista falhas no Sentry (as funcoes passam o captureError de sentry.ts). Omissao: so o log. */
+  captureError?: (error: unknown, context?: Record<string, unknown>) => Promise<void> | void;
 };
 
 export type CaptarEnvioParams = {
@@ -242,6 +246,8 @@ export type CaptarEnvioResultado =
     submissionId: string;
     entityId: string;
     created: boolean;
+    /** Negocio aberto criado com a pessoa nova; null para pessoa conhecida ou se nao foi criado. */
+    negocioId: string | null;
     outcome: DedupOutcome | null;
     organizationId: string;
     formId: string | null;
@@ -310,7 +316,7 @@ function dedupPor(outcome: DedupOutcome | null, nif: boolean): string | null {
   }
 }
 
-function montarDedupMeta(outcome: DedupOutcome | null, por: string | null, c: Contactos, registo: string) {
+function montarDedupMeta(outcome: DedupOutcome | null, por: string | null, c: Contactos, registo: string, conflito: string | null = null) {
   if (!outcome || !por) return null;
   return {
     kind: outcome.kind,
@@ -320,6 +326,7 @@ function montarDedupMeta(outcome: DedupOutcome | null, por: string | null, c: Co
     ...(por === 'ambos' || por === 'telefone' || por === 'conflito' ? { telefone_igual: c.phone } : {}),
     ...(outcome.kind === 'MATCH_EMAIL' && outcome.novoTelefone ? { novo_telefone: outcome.novoTelefone } : {}),
     ...(outcome.kind === 'MATCH_TELEFONE' && outcome.novoEmail ? { novo_email: outcome.novoEmail } : {}),
+    ...(conflito ? { conflito } : {}),
   };
 }
 
@@ -431,6 +438,13 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
   const { supabase } = p;
   const emitAlert = p.deps?.emitAlert ?? emitFormResubmissionAlert;
   const emitNotification = p.deps?.emitNotification ?? emitDedupSubmissionNotification;
+  const registar = async (error: unknown, stage: string): Promise<void> => {
+    try {
+      await p.deps?.captureError?.(error, { function: 'formCaptacao', stage });
+    } catch (e) {
+      console.error('[formCaptacao] captureError falhou:', e);
+    }
+  };
 
   // 1) Resolver: a organizacao vem da base, nunca do cliente.
   const resolvido = p.resolvido
@@ -459,7 +473,10 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
   try {
     outcome = classifyDedupOutcome(paraDedup(candidatos), { email: contactos.email, phone: contactos.phone });
   } catch (e) {
-    console.error('[formCaptacao] classificacao falhou (a continuar):', e);
+    // Sem classificar nao se sabe se a pessoa ja existe: criar seria duplicar. Igual a pesquisa falhada.
+    console.error('[formCaptacao] classificacao falhou:', e);
+    await registar(e, 'classificacao');
+    return falha(503, 'Não foi possível processar o pedido. Tente novamente.', 'RETRY');
   }
   let entityId = entidadeDoOutcome(outcome);
   let porNif = false;
@@ -525,8 +542,10 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
     created = row.created !== false;
     jaGravado = true;
     if (created) {
+      // Base sem a 4.a coluna (antes da migration): sem negocio, nunca undefined.
+      const negocioId = typeof row.negocio_id === 'string' && row.negocio_id ? row.negocio_id : null;
       return {
-        ok: true, submissionId, entityId, created: true, outcome: null,
+        ok: true, submissionId, entityId, created: true, negocioId, outcome: null,
         organizationId, formId, campaignId, contactos,
         firstName: campos.firstName, lastName: campos.lastName, email: contactos.email,
       };
@@ -535,13 +554,21 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
     // O toque ja esta gravado; se esta segunda pesquisa falhar, segue-se com a entidade devolvida.
     const pesquisa2 = await acharCandidatos(supabase, organizationId, contactos, p.nifHash ?? null);
     const outra = pesquisa2.ok ? pesquisa2.candidatos : [];
-    const reclass = classifyDedupOutcome(paraDedup(outra), { email: contactos.email, phone: contactos.phone });
-    candidatos.splice(0, candidatos.length, ...outra);
-    outcome = entidadeDoOutcome(reclass) ? reclass : {
+    // O toque ja esta gravado: se esta classificacao falhar, regista e segue como sucesso
+    // (um 500 faria o visitante repetir e duplicar o toque).
+    let reclass: DedupOutcome | null = null;
+    try {
+      reclass = classifyDedupOutcome(paraDedup(outra), { email: contactos.email, phone: contactos.phone });
+      candidatos.splice(0, candidatos.length, ...outra);
+    } catch (e) {
+      console.error('[formCaptacao] 2.a classificacao falhou (toque ja gravado, a continuar):', e);
+      await registar(e, 'reclassificacao');
+    }
+    outcome = reclass && entidadeDoOutcome(reclass) ? reclass : {
       kind: contactos.email ? 'MATCH_EMAIL' : contactos.phone ? 'MATCH_TELEFONE' : 'MATCH_FORTE',
       entityId,
     } as DedupOutcome;
-    if (entidadeDoOutcome(reclass)) entityId = entidadeDoOutcome(reclass);
+    if (reclass && entidadeDoOutcome(reclass)) entityId = entidadeDoOutcome(reclass);
   }
 
   // 4) Ficha conhecida: so o toque novo guarda os dados; a ficha nao e escrita.
@@ -553,7 +580,7 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
 
   if (!jaGravado) {
     const rootOrgId = (await resolveRootOrganizationId(supabase, organizationId)) || organizationId;
-    const dedupMeta = montarDedupMeta(outcome, por, contactos, alvo.targetType);
+    const dedupMeta = montarDedupMeta(outcome, por, contactos, alvo.targetType, conflitoId);
     const fieldValues = dedupMeta
       ? { ...p.fieldValues, _meta: { ...(p.fieldValues._meta ?? {}), dedup: dedupMeta } }
       : p.fieldValues;
@@ -588,7 +615,11 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
         .update({ conflicting_entity_id: conflitoId })
         .eq('id', submissionId)
         .eq('organization_id', organizationId);
-      if (confErr) console.error('[formCaptacao] conflicting_entity_id nao gravado:', confErr.message);
+      if (confErr) {
+        // O conflito segue tambem em _meta.dedup.conflito (mesmo upsert), para a fila o mostrar.
+        console.error('[formCaptacao] conflicting_entity_id nao gravado:', confErr.message);
+        await registar(confErr, 'conflicting_entity_id');
+      }
     }
   }
 
@@ -642,7 +673,7 @@ export async function captarEnvio(p: CaptarEnvioParams): Promise<CaptarEnvioResu
   }
 
   return {
-    ok: true, submissionId: submissionId as string, entityId: finalEntityId, created: false, outcome,
+    ok: true, submissionId: submissionId as string, entityId: finalEntityId, created: false, negocioId: null, outcome,
     organizationId, formId, campaignId, contactos,
     firstName: campos.firstName, lastName: campos.lastName, email: contactos.email,
   };

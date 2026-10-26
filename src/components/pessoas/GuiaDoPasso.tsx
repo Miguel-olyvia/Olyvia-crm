@@ -62,7 +62,7 @@ export interface GuiaDoPassoProps {
   navegacao?: ReactNode;
   /** Junto de «Marcar como perdido»: Email, WhatsApp e o menu Mais. */
   acoesSecundarias?: ReactNode;
-  /** O h3 da linha do negócio (o serviço) recebe o foco quando o negócio abre ou muda de estado. */
+  /** O título da linha do negócio (o serviço, um parágrafo com tabIndex -1) recebe o foco quando o negócio abre ou muda de estado. */
   tituloRef?: Ref<HTMLHeadingElement>;
   /** A faixa fina de alertas, logo por baixo do cabeçalho (só existe quando há alertas). */
   faixa?: ReactNode;
@@ -99,7 +99,7 @@ function CabecalhoDoGuia({ cabecalho, acaoPerder, nomeEl, descricaoEl, selos, av
               <h3 ref={tituloRef} tabIndex={tituloRef ? -1 : undefined} className="break-words text-2xl font-bold text-foreground outline-none">{cabecalho.nome}</h3>
             )}
             {comLinhaDeNegocio ? (
-              <h3 ref={tituloRef} tabIndex={-1} data-negocio-titulo="" className="break-words text-base font-normal text-muted-foreground outline-none">{cabecalho.linha}</h3>
+              <p ref={tituloRef as Ref<HTMLParagraphElement>} tabIndex={-1} data-negocio-titulo="" className="break-words text-base font-normal text-muted-foreground outline-none">{cabecalho.linha}</p>
             ) : cabecalho.linha && <p className="break-words text-base text-muted-foreground">{cabecalho.linha}</p>}
             {descricaoEl !== undefined && (comLinhaDeNegocio ? <div className="sr-only">{descricaoEl}</div> : <div className="text-base text-muted-foreground">{descricaoEl}</div>)}
           </div>

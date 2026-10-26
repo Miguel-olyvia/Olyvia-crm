@@ -82,7 +82,7 @@ describe("PipelineReal: a ficha toma o lugar do quadro", () => {
     const cartao = screen.getByRole("button", { name: "Abrir a ficha de Ana Lopes" });
     cartao.focus();
     fireEvent.click(cartao);
-    expect(url()).toBe(`/pipeline?open=${A}`);
+    expect(url()).toBe(`/pipeline?open=${A}&negocio=neg-${A}`);
     expect(quadroEscondido()).toBe(true);
     expect(document.querySelector("[data-pagina-escondida]")).toBe(quadro); // o mesmo elemento: nada foi desmontado
     expect(ficha("Ana Lopes")).not.toBeNull();
@@ -100,7 +100,7 @@ describe("PipelineReal: a ficha toma o lugar do quadro", () => {
     const foco = document.activeElement;
     for (const key of ["j", "k", "ArrowDown", "ArrowRight", "o", "/"]) fireEvent.keyDown(document.body, { key });
     expect(document.activeElement).toBe(foco);
-    expect(url()).toBe(`/pipeline?open=${A}`);
+    expect(url()).toBe(`/pipeline?open=${A}&negocio=neg-${A}`);
   });
 
   it("o botão «atrás» do browser fecha a ficha e deixa o quadro visível", async () => {
@@ -126,7 +126,7 @@ describe("PipelineReal: a ficha toma o lugar do quadro", () => {
     desenhar();
     fireEvent.click(screen.getByRole("button", { name: "Abrir a ficha de Ana Lopes" }));
     fireEvent.keyDown(document.body, { key: "]" });
-    await waitFor(() => expect(url()).toBe(`/pipeline?open=${B}`));
+    await waitFor(() => expect(url()).toBe(`/pipeline?open=${B}&negocio=neg-${B}`));
     expect(await screen.findByRole("region", { name: "Bruno Reis" })).toBeInTheDocument();
     expect(quadroEscondido()).toBe(true);
   });

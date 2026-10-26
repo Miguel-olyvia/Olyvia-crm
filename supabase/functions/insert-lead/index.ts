@@ -18,15 +18,25 @@ import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_s
 import { sanitizeFieldValues } from '../_shared/inputSanitizers.ts';
 import { validateLocationDistrict } from '../_shared/leadsValidation.ts';
 import { captarEnvio, resolverCaptacao } from '../_shared/formCaptacao.ts';
+import { deriveKeyFromEnv } from '../_shared/nifCrypto.ts';
+import {
+  HONEYPOT_CAMPO,
+  LIMITE_IMPRESSAO_COM_TOKEN,
+  NOME_MAX,
+  honeypotPreenchido,
+  impressaoDigital,
+  validarContactosPublicos,
+  verificarLimitesCaptacao,
+} from '../_shared/captacaoPublica.ts';
 import { montarPedidoAutoSchedule } from './agendamento.ts';
 
 initSentry();
 
 const requestSchema = z.object({
-  first_name: z.string(),
-  last_name: z.string(),
-  email: z.string().email().optional(),
-  phone: z.string().optional(),
+  first_name: z.string().max(NOME_MAX),
+  last_name: z.string().max(NOME_MAX),
+  email: z.string().email().max(254).optional(),
+  phone: z.string().max(50).optional(),
   vat: z.string().optional(),
   position: z.string().optional(),
   organization_id: z.string().optional(),
@@ -44,6 +54,8 @@ const requestSchema = z.object({
   city: z.string().optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
+  // Honeypot (aceita qualquer tipo; um valor = bot).
+  [HONEYPOT_CAMPO]: z.unknown().optional(),
 });
 
 const corsHeaders = {
@@ -114,6 +126,17 @@ Deno.serve(async (req) => {
       return json({ error: 'Invalid request', details: parsedBody.error.issues }, 400);
     }
     const leadData = parsedBody.data;
+
+    // Honeypot: preenchido = bot. 200 falso, sem escrever nada.
+    if (honeypotPreenchido(leadData[HONEYPOT_CAMPO])) {
+      return json({
+        success: true,
+        lead_id: crypto.randomUUID(),
+        entity_id: crypto.randomUUID(),
+        message: 'Lead created successfully',
+        sanitized: {},
+      }, 200);
+    }
 
     console.log('Received insert-lead request:', JSON.stringify({
       source: leadData.source,
@@ -200,6 +223,30 @@ Deno.serve(async (req) => {
       { field_key: 'postal_code', contact_field_mapping: 'postal_code' },
       { field_key: 'city', contact_field_mapping: 'city' },
     ];
+    // Email, telefone e nome validados com zod antes de qualquer escrita.
+    const contactosValidos = validarContactosPublicos(z, fieldValues, definitions);
+    if (!contactosValidos.ok) return json({ error: contactosValidos.error }, 400);
+
+    // Limites por campanha (organizacao do token) e por pessoa (impressao digital).
+    // Impressao digital = HMAC com a chave de servidor. Sem chave falha em fechado: nada se envia.
+    let impressaoKey: Uint8Array;
+    try {
+      impressaoKey = deriveKeyFromEnv('NIF_HMAC_KEY', 'HMAC');
+    } catch (keyError) {
+      console.error('[insert-lead] NIF_HMAC_KEY em falta ou invalida; pedido recusado');
+      await captureError(keyError, { function: 'insert-lead', stage: 'impressao_digital_key' });
+      return json({ error: 'Service temporarily unavailable', code: 'RETRY' }, 503);
+    }
+    const limites = await verificarLimitesCaptacao({
+      supabase,
+      organizationId,
+      formKey: resolvido.campaignId ?? resolvido.formId ?? 'api',
+      fingerprint: await impressaoDigital(leadData.email, leadData.phone, impressaoKey),
+      limiteImpressao: LIMITE_IMPRESSAO_COM_TOKEN,
+      bucketPrefix: RATE_LIMIT_BUCKET,
+    });
+    if (!limites.allowed) return rateLimitResponse(limites.result, corsHeaders);
+
     const fieldValuesWithMeta = {
       ...cleaned,
       _meta: {
@@ -223,6 +270,7 @@ Deno.serve(async (req) => {
       totalSteps: 1,
       isComplete: true,
       notes: leadData.notes ?? null,
+      deps: { captureError },
     });
     if (!envio.ok) return json(envio.code ? { error: envio.error, code: envio.code } : { error: envio.error }, envio.status);
 
@@ -235,10 +283,10 @@ Deno.serve(async (req) => {
       // lead_id mantem-se (integracoes) e passa a ser o id da submissao nova.
       lead_id: envio.submissionId,
       entity_id: envio.entityId,
-      message: envio.created ? 'Lead created successfully' : 'Submission recorded on an existing record',
+      // Igual para pessoa nova e conhecida: nada denuncia se a pessoa ja existia.
+      message: 'Lead created successfully',
       sanitized: sanitizeReport,
     };
-    if (!envio.created) response.outcome = 'existing_entity';
 
     if (fullLocation || leadData.postal_code) {
       response.location = {
@@ -283,7 +331,7 @@ Deno.serve(async (req) => {
         : ` but scheduling failed: ${scheduleResult?.error || 'Unknown error'}`;
     }
 
-    return json(response, envio.created ? 201 : 200);
+    return json(response, 201);
   } catch (error: any) {
     console.error('Error in insert-lead function:', error);
     await captureError(error, { function: "insert-lead" });

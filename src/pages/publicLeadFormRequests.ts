@@ -16,6 +16,8 @@ interface CreateLeadBodyInput {
   campaignId?: string;
   tracking?: Record<string, unknown> | null;
   embedKind?: string | null;
+  /** Campo armadilha (honeypot): so vai se alguem o preencheu, ou seja, um bot. */
+  honeypot?: string | null;
 }
 
 export function buildCreateLeadBody(input: CreateLeadBodyInput): Record<string, unknown> {
@@ -31,6 +33,7 @@ export function buildCreateLeadBody(input: CreateLeadBodyInput): Record<string, 
   if (input.campaignId) body.campaign_id = input.campaignId;
   if (input.tracking) body.tracking = input.tracking;
   if (input.embedKind) body.embed = input.embedKind;
+  if (input.honeypot && input.honeypot.trim()) body.website = input.honeypot;
   return body;
 }
 

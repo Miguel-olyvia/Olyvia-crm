@@ -237,11 +237,20 @@ describe("GuiaDoPasso: a coluna da esquerda mostra a fase que se vê, e as fases
 });
 
 describe("GuiaDoPasso: o cabeçalho único da ficha", () => {
-  it("o nome vem do chamador (o título da ficha) e não se repete num h3; a linha do negócio passa a h3", () => {
+  it("o nome vem do chamador (o título da ficha) e não se repete num h3; a linha do negócio é um parágrafo, não um título", () => {
     guia({ cabecalho: { nome: "Pedro Lopes", linha: "WC social", telefone: null, local: null }, nomeEl: <h2 data-ficha-nome>Pedro Lopes</h2>, descricaoEl: <p>Lead · Por contactar</p> });
     expect(screen.getAllByRole("heading", { name: "Pedro Lopes" })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 3, name: "WC social" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "WC social" })).toBeNull();
+    const linha = document.querySelector("[data-negocio-titulo]");
+    expect(linha?.tagName).toBe("P");
+    expect(linha).toHaveTextContent("WC social");
     expect(screen.getByText("Lead · Por contactar")).toBeInTheDocument();
+  });
+
+  it("a coluna do cliente é uma região complementar com o nome «Cliente»", () => {
+    guia();
+    const lateral = screen.getByRole("complementary", { name: "Cliente" });
+    expect(lateral).toHaveTextContent("Cliente");
   });
 
   it("sem linha de negócio a descrição vê-se por baixo do nome", () => {

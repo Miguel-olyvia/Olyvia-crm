@@ -71,6 +71,8 @@ interface DetalheNegocioFichaProps {
   aoFecharApoio?: () => void;
   /** O botão a que o foco regressa quando o diálogo fecha. */
   origemApoio?: MutableRefObject<HTMLElement | null>;
+  /** Com o guia: abre o registo da chamada da ficha (um negócio por contactar, e o passo Chamada do assistente). */
+  aoRegistarChamada?: (origem: HTMLElement | null) => void;
 }
 
 /**
@@ -119,7 +121,7 @@ function PerdaDoNegocio({ negocio, fase, motivo, podeAnular }: { negocio: Negoci
   );
 }
 
-export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha, apoioAberto = false, aoFecharApoio, origemApoio }: DetalheNegocioFichaProps) {
+export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, item, aoApagado, pessoa, atividade, comGuia, cabecalhoFicha, apoioAberto = false, aoFecharApoio, origemApoio, aoRegistarChamada }: DetalheNegocioFichaProps) {
   const { t } = useTranslation();
   // Fecho na proposta: os contratos são ignorados, por isso o ecrã vê o negócio sem contrato (sem secção, sem fase, sem passo de contrato).
   const negocio = semContratosSeProposta(negocioDaFicha);
@@ -201,7 +203,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
           <>
             <GuiaDoNegocio
               negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
-              cabecalhoFicha={cabecalhoFicha} faixa={faixaNegocio} tituloRef={titulo} semPasso={!comPasso}
+              cabecalhoFicha={cabecalhoFicha} faixa={faixaNegocio} tituloRef={titulo} semPasso={!comPasso} aoRegistarChamada={aoRegistarChamada}
               acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" /> : undefined}
             />
             {(!comPasso || !item || negocio.fecho) && (

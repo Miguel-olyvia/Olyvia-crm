@@ -20,6 +20,8 @@ export type PessoaResolvida =
     ownerAnewUserId: string | null;
     assignedTo: string | null;
     isClient: boolean;
+    /** Negocio aberto desta submissao, confirmado em `negocios`; null se nao houver. */
+    negocioId: string | null;
   }
   | { ok: false; status: number; error: string };
 
@@ -37,6 +39,12 @@ export function tipoParaEmail(isClient: boolean): 'clients' | 'leads' {
 
 const naoEncontrada = (): PessoaResolvida => ({ ok: false, status: 404, error: 'Submission not found for this form' });
 
+/** Erro de leitura nao e "nao existe": 503 RETRY para o visitante tentar de novo. */
+function falhaDeLeitura(contexto: string, error: { message?: string }): PessoaResolvida {
+  console.error(`[book-slot] ${contexto}:`, error?.message);
+  return { ok: false, status: 503, error: 'RETRY' };
+}
+
 /**
  * A pessoa por detras de uma submissao: so conta se a submissao for desta
  * organizacao E deste formulario, e a entidade estiver viva na organizacao.
@@ -48,22 +56,24 @@ export async function resolverPessoa(params: {
   submissionId: string;
 }): Promise<PessoaResolvida> {
   const { supabase, organizationId, formId, submissionId } = params;
-  const { data: sub } = await supabase
+  const { data: sub, error: subError } = await supabase
     .from('form_submissions')
-    .select('id, entity_id, field_values')
+    .select('id, entity_id, negocio_id, field_values')
     .eq('id', submissionId)
     .eq('organization_id', organizationId)
     .eq('form_id', formId)
     .maybeSingle();
+  if (subError) return falhaDeLeitura('leitura da submissao falhou', subError);
   if (!sub?.entity_id) return naoEncontrada();
 
-  const { data: entity } = await supabase
+  const { data: entity, error: entityError } = await supabase
     .from('anew_entities')
     .select('id, assigned_to, created_by, client_since')
     .eq('id', sub.entity_id)
     .eq('organization_id', organizationId)
     .is('deleted_at', null)
     .maybeSingle();
+  if (entityError) return falhaDeLeitura('leitura da entidade falhou', entityError);
   if (!entity?.id) return naoEncontrada();
 
   const fv = sub.field_values && typeof sub.field_values === 'object' && !Array.isArray(sub.field_values)
@@ -76,7 +86,37 @@ export async function resolverPessoa(params: {
     ownerAnewUserId: donoDaEntidade(entity),
     assignedTo: entity.assigned_to ?? null,
     isClient: !!entity.client_since,
+    negocioId: await confirmarNegocio(supabase, organizationId, entity.id, sub.negocio_id),
   };
+}
+
+/**
+ * O negocio que a submissao diz ter so conta se existir em `negocios` na mesma
+ * organizacao e entidade, aberto e vivo. Lido sempre da base, nunca do corpo do
+ * pedido. Qualquer duvida (erro de leitura incluido) devolve null: sem negocio,
+ * a visita segue ligada so a pessoa.
+ */
+async function confirmarNegocio(
+  supabase: SupabaseLike,
+  organizationId: string,
+  entityId: string,
+  negocioId: unknown,
+): Promise<string | null> {
+  if (typeof negocioId !== 'string' || !negocioId) return null;
+  const { data, error } = await supabase
+    .from('negocios')
+    .select('id')
+    .eq('id', negocioId)
+    .eq('organization_id', organizationId)
+    .eq('entity_id', entityId)
+    .eq('estado', 'aberto')
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (error) {
+    console.error('[book-slot] leitura do negocio falhou (a continuar sem negocio):', error.message);
+    return null;
+  }
+  return data?.id ?? null;
 }
 
 /** Linha de schedule_items: entity_id (as colunas lead_id e client_id ja nao existem). */
@@ -92,8 +132,11 @@ export function montarItemAgenda(p: {
   postalCode: string | null | undefined;
   organizationId: string;
   createdBy: string;
+  /** Negocio confirmado no servidor (resolverPessoa); omitido = sem negocio. */
+  negocioId?: string | null;
 }): AnyRecord {
   return {
+    ...(p.negocioId ? { negocio_id: p.negocioId } : {}),
     board_id: p.boardId,
     title: p.title,
     description: `Entidade: ${p.entityId} | Submissao: ${p.submissionId}`,
@@ -181,6 +224,8 @@ export async function marcarVisitaNaEntidade(p: {
   slotEnd: string;
   boardId: string;
   mergedFieldValues: AnyRecord;
+  /** Negocio confirmado no servidor; recebe o dono da visita se ainda nao tem. */
+  negocioId?: string | null;
 }): Promise<string[]> {
   const { supabase, organizationId, entityId, submissionId } = p;
   const falhas: string[] = [];
@@ -205,6 +250,21 @@ export async function marcarVisitaNaEntidade(p: {
         .update({ assigned_to: p.assignToAnewUserId })
         .eq('id', entityId)
         .eq('organization_id', organizationId)
+        .is('assigned_to', null));
+  }
+
+  // O negocio da pessoa nova nasce sem dono: o dono da visita fica tambem
+  // com ele, mas NUNCA por cima de um dono que ja la esteja.
+  if (p.assignToAnewUserId && p.negocioId) {
+    await passo('atribuir dono do negocio', () =>
+      supabase
+        .from('negocios')
+        .update({ assigned_to: p.assignToAnewUserId })
+        .eq('id', p.negocioId)
+        .eq('organization_id', organizationId)
+        .eq('entity_id', entityId)
+        .eq('estado', 'aberto')
+        .is('deleted_at', null)
         .is('assigned_to', null));
   }
 

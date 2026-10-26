@@ -30,6 +30,10 @@ function passoDaPessoa(item: ItemProcesso): PassoProcesso {
  * Sem detalhe (os negócios de exemplo) o passo é o da coluna.
  */
 function passoDoNegocio(item: ItemProcesso): PassoProcesso {
+  // A abordagem DO NEGÓCIO (o Pipeline só tem negócios): ligar, marcar a visita, fazer o levantamento (os mesmos passos que o quadro da base).
+  if (item.fase === "porContactar") return "registarChamada";
+  if (item.fase === "contactado") return "marcarVisita";
+  if (item.fase === "visita") return "fazerLevantamento";
   if (item.prontoAGanhar && item.fase === "contrato") return "ganharNegocio";
   if (item.propostaAceite && item.fase === "proposta") return "criarContrato";
   if (item.fase === "levantamento") return "fazerLevantamento";

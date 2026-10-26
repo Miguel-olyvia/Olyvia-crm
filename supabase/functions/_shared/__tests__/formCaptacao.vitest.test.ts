@@ -1,6 +1,6 @@
 // Testes do nucleo de captacao do formulario (create-lead e insert-lead).
 // Supabase simulado: regista cada rpc e cada escrita em tabela. Nada toca na base.
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   captarEnvio,
   collectContactos,
@@ -10,6 +10,20 @@ import {
   pickOrigemTexto,
   verificarCamposUnicos,
 } from '../formCaptacao.ts';
+
+// Permite fazer falhar a N-esima chamada a classifyDedupOutcome (1-based); 0 = nunca.
+const classif = vi.hoisted(() => ({ calls: 0, throwAt: 0 }));
+vi.mock('../leadDedup.ts', async (importOriginal) => {
+  const m = await importOriginal<typeof import('../leadDedup.ts')>();
+  return {
+    ...m,
+    classifyDedupOutcome: (...a: Parameters<typeof m.classifyDedupOutcome>) => {
+      classif.calls += 1;
+      if (classif.throwAt === classif.calls) throw new Error('classificacao rebentou');
+      return m.classifyDedupOutcome(...a);
+    },
+  };
+});
 
 const ORG = 'aaaaaaaa-0000-4000-8000-000000000001';
 const OTHER_ORG = 'bbbbbbbb-0000-4000-8000-000000000002';
@@ -561,5 +575,81 @@ describe('verificarCamposUnicos (is_unique sobre form_submissions)', () => {
       fieldValues: { a: '', b: 'x' },
     });
     expect(dup).toBeNull();
+  });
+});
+
+describe('captarEnvio - falhas de classificacao e de gravacao do conflito', () => {
+  const cand = (over: Record<string, unknown> = {}) => ({
+    entity_id: ENT, matched_by: ['email'], email: 'ana@exemplo.pt', phone: null,
+    client_since: null, assigned_to: 'user-1', created_by: null, ...over,
+  });
+  const comCaptura = () => {
+    const captureError = vi.fn(async () => undefined);
+    return { captureError, deps: { emitAlert: vi.fn(async () => null), emitNotification: vi.fn(async () => []), captureError } };
+  };
+  beforeEach(() => { classif.calls = 0; classif.throwAt = 0; });
+
+  it('1.a classificacao a falhar: 503 RETRY, nada criado nem escrito, e regista', async () => {
+    classif.throwAt = 1;
+    const s = makeSupabase({
+      fn_form_resolver_captacao: resolverOk(),
+      fn_form_achar_entidades: () => ({ data: [cand()] }),
+      fn_form_criar_entidade: criarOk(),
+      upsert_form_submission: () => ({ data: SUB_NEW }),
+    });
+    const c = comCaptura();
+    const r = await captarEnvio({ supabase: s.client, ...baseParams({ deps: c.deps }) });
+    expect(r).toMatchObject({ ok: false, status: 503, code: 'RETRY' });
+    const names = s.rpcCalls.map((x) => x.name);
+    expect(names).not.toContain('fn_form_criar_entidade');
+    expect(names).not.toContain('upsert_form_submission');
+    expect(s.writes).toHaveLength(0);
+    expect(c.captureError).toHaveBeenCalledTimes(1);
+  });
+
+  it('2.a classificacao a falhar depois do toque gravado: sucesso, sem 500 e regista', async () => {
+    classif.throwAt = 2;
+    const s = makeSupabase({
+      fn_form_resolver_captacao: resolverOk(),
+      fn_form_achar_entidades: (() => {
+        let n = 0;
+        return () => ({ data: n++ === 0 ? [] : [cand()] });
+      })(),
+      fn_form_criar_entidade: criarOk(false, ENT, SUB_NEW),
+    });
+    const c = comCaptura();
+    const r = await captarEnvio({ supabase: s.client, ...baseParams({ deps: c.deps }) });
+    expect(r).toMatchObject({ ok: true, created: false, entityId: ENT, submissionId: SUB_NEW });
+    expect(s.rpcCalls.map((x) => x.name)).not.toContain('upsert_form_submission');
+    expect(c.captureError).toHaveBeenCalledTimes(1);
+  });
+
+  it('falha ao gravar conflicting_entity_id: regista, e o conflito vai tambem em _meta.dedup.conflito no mesmo upsert', async () => {
+    const s = makeSupabase({
+      fn_form_resolver_captacao: resolverOk(),
+      fn_form_achar_entidades: () => ({ data: [
+        cand({ entity_id: ENT, matched_by: ['email'], email: 'ana@exemplo.pt', phone: null }),
+        cand({ entity_id: ENT2, matched_by: ['phone'], email: null, phone: '912345678' }),
+      ] }),
+      upsert_form_submission: () => ({ data: SUB_NEW }),
+      resolve_root_organization_id: () => ({ data: ORG }),
+    });
+    const from = s.client.from;
+    const client = {
+      ...s.client,
+      from: (t: string) => {
+        const b: any = from(t);
+        if (t !== 'form_submissions') return b;
+        const upd = b.update;
+        b.update = (pl: any) => { upd(pl); b.then = (res: any) => Promise.resolve({ data: null, error: { message: 'falhou' } }).then(res); return b; };
+        return b;
+      },
+    };
+    const c = comCaptura();
+    const r = await captarEnvio({ supabase: client, ...baseParams({ deps: c.deps }) });
+    expect(r.ok).toBe(true);
+    expect(c.captureError).toHaveBeenCalledTimes(1);
+    const up = s.rpcCalls.find((x) => x.name === 'upsert_form_submission')!.args;
+    expect(up.p_field_values._meta.dedup.conflito).toBe(ENT2);
   });
 });

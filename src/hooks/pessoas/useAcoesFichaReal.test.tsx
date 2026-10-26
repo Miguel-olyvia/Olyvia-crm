@@ -114,6 +114,21 @@ describe("registarChamada", () => {
     });
   });
 
+  it("com negocioId (o cartão do Pipeline) o contacto fica ligado a esse negócio", async () => {
+    rpcMock.mockReturnValue(respostaOk({ mudou: true }));
+    const { result } = montar();
+    await act(async () => { await result.current.registarChamada(PESSOA_ID, dados({ negocioId: "neg-9" })); });
+    expect(parametros(0).p_negocio_id).toBe("neg-9");
+  });
+
+  it("o mesmo pedido para negócios diferentes não partilha o id (são contactos diferentes)", async () => {
+    rpcMock.mockReturnValue(respostaOk({}));
+    const { result } = montar();
+    await act(async () => { await result.current.registarChamada(PESSOA_ID, dados({ negocioId: "neg-1" })); });
+    await act(async () => { await result.current.registarChamada(PESSOA_ID, dados({ negocioId: "neg-2" })); });
+    expect(parametros(0).p_id).not.toBe(parametros(1).p_id);
+  });
+
   it("uma nota vazia ou só de espaços vai como null", async () => {
     rpcMock.mockReturnValue(respostaOk({}));
     const { result } = montar();

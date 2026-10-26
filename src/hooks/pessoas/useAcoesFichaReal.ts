@@ -136,17 +136,19 @@ function criarAcoes(c: Contexto): AcoesFichaReal {
 
   async function registarChamada(id: string, d: DadosChamadaForm): Promise<void> {
     const o = org(id);
-    const visitaAMarcar = d.passo === "marcarVisita" ? visitaDoPasso(o, id, d) : null;
+    const negocioId = d.negocioId ?? null;
+    const visitaDoNegocio = d.passo === "marcarVisita" ? visitaDoPasso(o, id, d) : null;
+    const visitaAMarcar = visitaDoNegocio && negocioId ? { ...visitaDoNegocio, negocioId } : visitaDoNegocio;
     const proxima = proximaAcaoDoPasso(d, hojeLisboa());
     // O dia entra na assinatura: um pedido repetido no dia seguinte já não é «o mesmo» (o id de ontem não se reutiliza).
     // A data e a hora só entram quando decidem a próxima ação («ligar numa data»): no passo «marcar visita» são as da visita, e mudá-las ao repetir
     // depois de uma falha (a hora estava ocupada) não pode dar outro id, senão o contacto gravava-se duas vezes.
     const quando = d.passo === "ligarData" ? [d.data ?? null, d.hora ?? null] : [null, null];
-    const assinatura = `chamada:${id}:${hojeLisboa()}:${JSON.stringify([d.resultado, d.nota.trim(), d.passo, ...quando, d.motivo ?? null, d.motivoOutro ?? null])}`;
+    const assinatura = `chamada:${id}:${hojeLisboa()}:${JSON.stringify([d.resultado, d.nota.trim(), d.passo, ...quando, d.motivo ?? null, d.motivoOutro ?? null, negocioId])}`;
     const pId = idEstavel(assinatura);
     await chamarNeg("neg_registar_contacto", {
       p_id: pId, p_organization_id: o, p_entity_id: id, p_resultado: d.resultado, p_nota: textoOuNull(d.nota),
-      p_quando: new Date().toISOString(), p_proxima_acao_em: proxima, p_negocio_id: null,
+      p_quando: new Date().toISOString(), p_proxima_acao_em: proxima, p_negocio_id: negocioId,
     });
     if (d.passo === "perder") {
       try {

@@ -25,6 +25,7 @@ import { SemNegocio } from "./PassosContacto";
 import { CorpoFechar, CorpoSeccao, CorpoVisitas } from "./PassosVisita";
 import type { PassoAssistente } from "./tiposAssistente";
 import { useAssistente } from "./useAssistente";
+import { apagarRascunho, novoIdLocal } from "./rascunhoAssistente";
 import { useRascunhoAssistente } from "./useRascunhoAssistente";
 
 const A = "pessoasPagina.assistente.";
@@ -54,7 +55,8 @@ export interface VisitaDoGuiaProps {
 export function VisitaDoGuia(props: VisitaDoGuiaProps) {
   return (
     <QuestionarioFormularioProvider>
-      <VisitaInterior key={`${props.pessoa.id}-${props.negocio?.id ?? ""}`} {...props} />
+      {/* A chave é só a pessoa: criar o negócio a meio não remonta o assistente (perdia o que se escreveu); o rascunho migra para a chave do negócio. */}
+      <VisitaInterior key={props.pessoa.id} {...props} />
     </QuestionarioFormularioProvider>
   );
 }
@@ -67,7 +69,8 @@ function VisitaInterior({
   // As visitas novas e o levantamento ficam ligados ao negócio, e o levantamento é sempre um novo (o que a pessoa tinha por ligar não se reescreve).
   const registos = useGuardarRegistos(ficha, { negocioId: negocio?.id ?? null, ignorarLevantamentoLivre: true });
   const acoesVisita = useAcoesVisita(pessoa.id, ficha);
-  const [rascunho, atualizar] = useRascunhoAssistente(negocio?.id ?? `pessoa-${pessoa.id}`);
+  const chaveRascunho = negocio?.id ?? `pessoa-${pessoa.id}`;
+  const [rascunho, atualizar] = useRascunhoAssistente(chaveRascunho);
   const [tentou, setTentou] = useState(false);
   const [aGuardar, setAGuardar] = useState(false);
   const [erroGuardar, setErroGuardar] = useState<string | null>(null);
@@ -76,11 +79,11 @@ function VisitaInterior({
 
   const blocos = useMemo(() => todosOsBlocos(questionario), [questionario]);
   const seccoes = useMemo(() => seccoesDoAssistente(questionario, rascunho.respostas, rascunho.linhas.length), [questionario, rascunho.respostas, rascunho.linhas.length]);
-  const passos = useMemo(
-    () => passosDaVisita({ visitas: visitas.filter((v) => v.estado !== "cancelada").length, seccoes, guardado }),
-    [visitas, seccoes, guardado],
-  );
-  const assistente = useAssistente(passos);
+  // Conta-se fora do memo: `visitas` pode ser um array novo em cada render, e o número é que interessa.
+  const visitasMarcadas = visitas.filter((v) => v.estado !== "cancelada").length;
+  const passos = useMemo(() => passosDaVisita({ visitas: visitasMarcadas, seccoes, guardado }), [visitasMarcadas, seccoes, guardado]);
+  // Com o questionário a carregar não há secções: o passo inicial espera por ele (senão abria em «Fechar levantamento»).
+  const assistente = useAssistente(passos, { pronto: estado === "pronto" });
   const errosRespostas = useMemo(() => validarRespostas(questionario, rascunho.respostas, "visita"), [questionario, rascunho.respostas]);
   const errosMedidas = useMemo(() => validarLevantamento({ ...levantamentoVazio("", ""), linhas: rascunho.linhas }), [rascunho.linhas]);
 
@@ -88,7 +91,7 @@ function VisitaInterior({
   const medidas = {
     linhas: rascunho.linhas, observacoes: rascunho.observacoes, erros: tentou ? { linhas: errosMedidas.linhas } : {},
     acoes: {
-      adicionarLinha: () => mudarLinhas([...rascunho.linhas, novaLinha(crypto.randomUUID())]),
+      adicionarLinha: () => mudarLinhas([...rascunho.linhas, novaLinha(novoIdLocal())]),
       mudarLinha: (id: string, parcial: Partial<LinhaForm>) => mudarLinhas(rascunho.linhas.map((l) => {
         if (l.id !== id) return l;
         const nova = { ...l, ...parcial };
@@ -113,6 +116,8 @@ function VisitaInterior({
     try {
       await registos.guardar([], levantamento, "");
       setGuardadoAgora(true);
+      // A base é que guarda agora: o rascunho do navegador já não serve (e não deve voltar a aparecer depois de recarregar).
+      apagarRascunho(chaveRascunho);
     } catch (erro) {
       setErroGuardar(textoDoErroGravar(erro, t));
     } finally {
@@ -143,6 +148,7 @@ function VisitaInterior({
         <CorpoVisitas
           visitas={visitas} aoMarcarOutra={(origem) => aoMarcarOutra?.(origem)} podeMarcar={aoMarcarOutra !== undefined && podeEditar}
           aoMarcarFeita={podeEditar && ficha !== null ? marcarFeita : undefined}
+          aoCancelar={podeEditar && ficha !== null ? (visitaId) => acoesVisita.cancelar(visitaId) : undefined} nomePessoa={pessoa.nome}
         />
       );
     }

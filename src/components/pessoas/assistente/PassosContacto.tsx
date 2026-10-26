@@ -28,6 +28,8 @@ const A = "pessoasPagina.assistente.";
 const C = "pessoasPagina.real.ficha.contact.";
 const V = "pessoasPagina.real.visit.agenda.";
 const N = "businessGoals.new.";
+/** O limite da nota para a visita (o da agenda). */
+const MAX_NOTA = 140;
 const CAMPO = cn("min-h-11 w-full rounded-md border border-input bg-background px-3 text-[15px] text-foreground", FOCO);
 
 function Ajuda({ children }: { children: ReactNode }) {
@@ -226,7 +228,13 @@ export function CorpoPreparar({ valor, aoMudar }: { valor: PrepararVisita; aoMud
       />
       <div className="space-y-1.5">
         <Label htmlFor={`${id}-nota`}>{t(`${A}preparar.nota`)}</Label>
-        <Textarea id={`${id}-nota`} value={valor.nota} rows={3} maxLength={140} className={cn("min-h-20", FOCO)} onChange={(e) => aoMudar({ nota: e.target.value })} />
+        <Textarea
+          id={`${id}-nota`} value={valor.nota} rows={3} maxLength={MAX_NOTA} aria-describedby={`${id}-nota-contador`} className={cn("min-h-20", FOCO)}
+          onChange={(e) => aoMudar({ nota: e.target.value })}
+        />
+        <p id={`${id}-nota-contador`} className="text-right text-sm tabular-nums text-muted-foreground">
+          {t(`${A}preparar.contador`, { n: valor.nota.length, max: MAX_NOTA })}
+        </p>
       </div>
     </div>
   );

@@ -43,15 +43,16 @@ export interface RateLimitResult {
 }
 
 /**
- * Extracts the caller's IP from standard proxy headers. Falls back to
- * "unknown" (still rate-limited as a shared bucket) when absent, matching
- * the existing pattern used by portal-login and the in-memory limiters.
+ * Extracts the caller's IP from standard proxy headers. Headers set by the
+ * trusted proxy (cf-connecting-ip, then x-real-ip) win over the first hop of
+ * x-forwarded-for, which the client can forge by sending its own header. Falls
+ * back to "unknown" (still rate-limited as a shared bucket) when absent.
  */
 export function getClientIp(req: Request): string {
   return (
+    req.headers.get("cf-connecting-ip")?.trim() ||
+    req.headers.get("x-real-ip")?.trim() ||
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers.get("x-real-ip") ||
-    req.headers.get("cf-connecting-ip") ||
     "unknown"
   );
 }

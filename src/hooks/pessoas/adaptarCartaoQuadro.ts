@@ -1,9 +1,10 @@
-// Passa uma linha de neg_resumo_quadro para o cartão do Quadro (puro, sem rede). Nunca rebenta com um valor que a base acrescente:
-// uma coluna ou um tipo desconhecidos descartam o cartão, um estado de proposta desconhecido cai em «esperarCliente».
+// Passa uma linha de neg_resumo_quadro para o cartão do Quadro (puro, sem rede). O quadro só tem cartões de NEGÓCIO (negócio desde o início):
+// uma linha de pessoa já não existe. Nunca rebenta com um valor que a base acrescente: uma coluna ou um tipo desconhecidos descartam o cartão,
+// um estado de proposta desconhecido cai em «esperarCliente».
 import { LIMITE_PARADOS } from "@/components/negocio-metas/saudeNegocio";
 import type { IdPasso } from "@/components/pessoas/etapaPessoa";
 import type { PapelPessoa } from "@/components/pessoas/pessoasTipos";
-import { COLUNAS_QUADRO, idCartaoPessoa, type CartaoQuadro, type ColunaQuadro } from "@/components/pessoas/quadro/cartoesQuadroPessoas";
+import { COLUNAS_QUADRO, type CartaoQuadro, type ColunaQuadro } from "@/components/pessoas/quadro/cartoesQuadroPessoas";
 import { diasEntre } from "./adaptarResumoPessoa";
 import type { CartaoComCursor, LinhaQuadroDb } from "./quadroPessoasTipos";
 import { diaLisboa } from "./tempoLisboa";
@@ -25,13 +26,6 @@ function valorDoCartao(valor: number | string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function passoDaPessoa(l: LinhaQuadroDb): IdPasso {
-  if (positivo(l.por_ligar_visitas_feitas)) return "criarNegocio";
-  if (positivo(l.por_ligar_visitas)) return "fecharLevantamento";
-  if (positivo(l.por_ligar_contactos)) return "marcarVisita";
-  return "registarChamada";
-}
-
 /**
  * O passo de um negócio. Decide-se pela COLUNA (a base não diz se há levantamento): um negócio em «orcamento» sem orçamentos já tem o
  * levantamento feito, por isso não diz «fazerLevantamento»; o passo de criar o orçamento não existe no motor (decisão por tomar), logo «nenhum».
@@ -44,8 +38,13 @@ function passoDoNegocio(l: LinhaQuadroDb, coluna: ColunaQuadro): IdPasso {
     return l.proposta_status === "draft" ? "enviarProposta" : "esperarCliente";
   }
   if (coluna === "orcamento") return positivo(l.n_orcamentos) ? "criarProposta" : "nenhum";
+  // As três primeiras colunas são a abordagem DO NEGÓCIO: ligar, marcar a visita, fazer o levantamento.
+  if (coluna === "porContactar") return "registarChamada";
+  if (coluna === "contactado") return "marcarVisita";
   return "fazerLevantamento";
 }
+
+const COM_PRAZO: readonly ColunaQuadro[] = ["porContactar", "contactado", "visita"];
 
 const papelDe = (papel: string): PapelPessoa => (papel === "cliente" ? "cliente" : "lead");
 
@@ -58,24 +57,16 @@ function paradoDe(l: LinhaQuadroDb, coluna: ColunaQuadro, hoje: string): number 
 /** `hoje` é o dia de Lisboa (AAAA-MM-DD). `null`: a linha não é um cartão que o ecrã conheça. */
 export function adaptarLinhaQuadro(l: LinhaQuadroDb, hoje: string): CartaoComCursor | null {
   if (!COLUNAS.includes(l.coluna)) return null;
-  if (l.tipo !== "pessoa" && l.tipo !== "negocio") return null;
+  if (l.tipo !== "negocio") return null;
   const coluna = l.coluna as ColunaQuadro;
-  // O cursor leva o cartao_id CRU (o de uma pessoa não tem o prefixo `pessoa-`) e a chave tal como veio.
+  // O cursor leva o cartao_id CRU e a chave tal como veio.
   const cursor = l.chave_ordem === null ? null : { chave: l.chave_ordem, id: l.cartao_id };
   const base = { pessoaId: l.entity_id, nome: l.nome ?? "", papel: papelDe(l.papel), coluna };
-  if (l.tipo === "pessoa") {
-    const prazo = diaLisboa(l.proximo_prazo_em);
-    return {
-      cartao: {
-        ...base, id: idCartaoPessoa(l.entity_id), tipo: "pessoa", trabalho: null, valor: null, passo: passoDaPessoa(l),
-        prazo, atrasado: prazo !== null && prazo < hoje,
-      },
-      cursor,
-    };
-  }
+  // Só a abordagem tem prazo (a próxima visita ou o próximo contacto); os negócios mais adiantados têm o seu ritmo (parados).
+  const prazo = COM_PRAZO.includes(coluna) ? diaLisboa(l.proximo_prazo_em) : null;
   const cartao: CartaoQuadro = {
-    ...base, id: l.cartao_id, tipo: "negocio", trabalho: l.titulo, valor: coluna === "levantamento" ? null : valorDoCartao(l.valor),
-    passo: passoDoNegocio(l, coluna), prazo: null, atrasado: false,
+    ...base, id: l.cartao_id, tipo: "negocio", trabalho: l.titulo, valor: coluna === "levantamento" || COM_PRAZO.includes(coluna) ? null : valorDoCartao(l.valor),
+    passo: passoDoNegocio(l, coluna), prazo, atrasado: prazo !== null && prazo < hoje,
   };
   const paradoDias = paradoDe(l, coluna, hoje);
   if (paradoDias !== undefined) cartao.paradoDias = paradoDias;

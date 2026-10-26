@@ -30627,6 +30627,7 @@ export type Database = {
       rpc_resolve_form_submission: {
         Args: {
           p_action: string
+          p_confirmar_negocio_aberto?: boolean
           p_entity_id?: string
           p_field_overrides?: Json
           p_submission_id: string

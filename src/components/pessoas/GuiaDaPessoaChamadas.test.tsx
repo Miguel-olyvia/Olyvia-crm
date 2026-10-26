@@ -1,6 +1,6 @@
-// Contactado: outra chamada/tentativa regista-se SEMPRE; «Sem interesse» e «Número errado» avisam e bloqueiam só «Marcar a visita».
+// Contactado (o guia simples da pessoa): outra chamada/tentativa regista-se SEMPRE; «Sem interesse» e «Número errado» avisam e bloqueiam só «Marcar a visita».
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { contactoBase, pessoaBase, registosBase, resumoBase } from "./fabricaTestes";
@@ -39,8 +39,8 @@ function montar(resumo: ResumoPessoa, acoes: AcoesFicha = acoesBase()) {
   return { marcar };
 }
 
-/** Em Contactado o assistente abre no primeiro passo que falta; «Marcar a visita» é o 5.º passo. */
-const irParaMarcar = (): void => fireEvent.click(within(screen.getByRole("navigation", { name: "Passos da fase" })).getByRole("button", { name: /^Marcar a visita/ }));
+/** O guia simples da pessoa: «Marcar a visita» é o botão do passo (o assistente é do negócio), por isso não há nada a escolher antes. */
+const irParaMarcar = (): void => undefined;
 
 const pessoa = (extra: Partial<Pessoa> = {}) => pessoaBase("a", { nome: "Pedro Lopes", contacto: { telefone: "927 118 300", email: "pedro.lopes@exemplo.pt" }, ...extra });
 const comResultado = (resultado: "semInteresse" | "numeroErrado" | "atendeuInteressado") =>

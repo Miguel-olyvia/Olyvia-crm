@@ -131,10 +131,11 @@ describe("PipelineReal: a ficha aberta a partir do quadro", () => {
     expect(ultima(fichaMock)[0].pessoaId).toBe("dono-1");
   });
 
-  it("abrir uma pessoa em abordagem põe só ?open=", () => {
+  it("abrir um cartão da abordagem põe ?open= e ?negocio=: o assistente recebe sempre o negócio", () => {
     desenhar();
     fireEvent.click(screen.getByRole("button", { name: "Abrir a ficha de Ana Lopes" }));
-    expect(url()).toBe("/pipeline?open=a");
+    expect(url()).toBe("/pipeline?open=a&negocio=neg-a");
+    expect(ultima(fichaMock)[0].negocioInicial).toBe("neg-a");
   });
 });
 
