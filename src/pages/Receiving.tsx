@@ -50,6 +50,7 @@ import {
   type ReceivingNotesFilter,
 } from "@/components/inventory/ui";
 import { DeliveryNotesPanel, deliveryNotesPanelQueryKey } from "@/components/receiving/DeliveryNotesPanel";
+import { inventoryTodayQueryKey } from "@/hooks/useInventoryToday";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useToast } from "@/hooks/use-toast";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -76,10 +77,29 @@ import {
   type LearnCodeResult,
 } from "@/components/receiving/productCodes";
 import { ToastAction } from "@/components/ui/toast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// Vista lista (protótipo da Receção com dados reais): Por receber | Recebidas | Guias e o painel "Dar entrada".
+import { todayIsoLocal } from "@/components/purchase-orders/poListUtils";
+import { FILTROS_REC, lineUnitLabel, poRecebivel, type FiltrosRec, type ReceivableLine, type ReceivablePo } from "@/components/receiving/porReceber";
+import { resolveReceivingCode, type NoteMatch } from "@/components/receiving/resolveReceivingCode";
+import {
+  openNotesCountQueryKey,
+  receivablePosQueryKey,
+  receivingReceiptsQueryKey,
+  useOpenNotesCount,
+  useReceivablePos,
+  useReceivingReceipts,
+} from "@/components/receiving/useReceivablePos";
+import { ReceivingReadBar, type ReceivingReadBarHandle } from "@/components/receiving/ReceivingReadBar";
+import { PorReceberList } from "@/components/receiving/PorReceberList";
+import { RecebidasList } from "@/components/receiving/RecebidasList";
+import { PoReceivePanel } from "@/components/receiving/PoReceivePanel";
+import type { PoRunPhase, PoRunView } from "@/components/receiving/poRun";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { CameraScannerProps } from "@/components/scanner/CameraScanner";
 import {
   AlertTriangle,
+  ArrowLeft,
   Camera,
   CheckCircle2,
   FileText,
@@ -92,6 +112,7 @@ import {
   RefreshCw,
   RotateCcw,
   ScanBarcode,
+  ScanLine,
   Search,
   ShoppingCart,
   Tag,
@@ -425,6 +446,46 @@ interface PendingReceipt {
   /** inflight = pedido enviado sem resposta ainda; unknown = sem resposta (rede). */
   state: "inflight" | "unknown";
   lastError?: string;
+}
+
+/** Resultado por entrada de um envio do cesto (o painel "Dar entrada" diz como correu cada linha). */
+interface SubmitOutcome {
+  ok: Record<string, { result: Partial<ReceiveResult>; replayed: boolean }>;
+  failed: Record<string, { message: string; uncertain: boolean }>;
+  /** Pré-visualização feita com outra guia: não foram (estão a ser recalculadas). */
+  stale: string[];
+  /** Pedidas mas não enviadas, com o motivo (nada foi recebido com elas). */
+  skipped: Record<string, string>;
+}
+
+const emptyOutcome = (): SubmitOutcome => ({ ok: {}, failed: {}, stale: [], skipped: {} });
+
+/**
+ * "Dar entrada" de uma PO a partir do painel (vista lista): uma entrada do cesto
+ * por linha, presa à linha (poItemId), enviada pelo mesmo submitEntries.
+ */
+interface PoRunState {
+  key: number;
+  poId: string;
+  /** A PO tal como estava ao dar entrada (o painel continua a mostrá-la se sair de "Por receber"). */
+  po: ReceivablePo;
+  /** Todas as entradas criadas (ordem das linhas). */
+  entryIds: string[];
+  /** Ainda por enviar. */
+  pendingIds: string[];
+  phase: PoRunPhase;
+  offline?: boolean;
+  error?: string | null;
+  meta: Record<string, { poItemId: string; name: string; quantity: number; unitLabel: string }>;
+  outcome: SubmitOutcome;
+  /** Recusadas na pré-visualização (nada foi enviado). */
+  failedPreview: Record<string, string>;
+  notSent: string[];
+  /** Motivo de cada linha que não foi enviada. */
+  skipped: Record<string, string>;
+  warehouseName: string | null;
+  /** Fim do envio (Date.now()): até a lista recarregar depois disto, a falta é calculada aqui. */
+  finishedAt?: number;
 }
 
 interface QtyEditState {
@@ -1382,7 +1443,7 @@ export default function Receiving() {
   const [warehouseId, setWarehouseId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   // Guia do fornecedor ("" = sem guia).
-  const { hasPermission } = usePermissions();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
   // Permissões próprias da receção (migration 20261210130000).
   const canEditNotes = hasPermission("receiving.manage_delivery_notes");
   const canDownloadProof = hasPermission("receiving.download_proof");
@@ -1407,20 +1468,43 @@ export default function Receiving() {
   const poListGate = permissionGate("purchase_orders.view");
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { guia: guiaParam, notes: notesFilter } = parseReceivingParams(searchParams);
-  const setUrlParam = useCallback(
-    (key: "guia" | "notes", value: string | null) => {
+  const {
+    guia: guiaParam,
+    notes: notesFilter,
+    vistaParam,
+    tab: listTab,
+    po: poParam,
+  } = parseReceivingParams(searchParams);
+  // Sem purchase_orders.view a lista não mostra nada: o ecrã abre no leitor (salvo ?vista= explícito).
+  const defaultVista: "lista" | "leitor" = permissionsLoading || poListGate.allowed ? "lista" : "leitor";
+  const vista = vistaParam ?? defaultVista;
+  const hasNotesParam = searchParams.get("notes") !== null;
+  /** Valor de ?tab= que mantém o separador pedido (com ?notes= sem tab o URL leva às Guias). */
+  const tabUrl = (t: "receber" | "recebidas" | "guias"): string | null => (t === "receber" && !hasNotesParam ? null : t);
+  /** Vista atual para o apanhador de rajadas do leitor (só lê para o cesto na vista "leitor"). */
+  const vistaRef = useRef(vista);
+  vistaRef.current = vista;
+  /** Barra de leitura da vista lista: recebe as leituras da pistola feitas fora de um campo. */
+  const readBarRef = useRef<ReceivingReadBarHandle | null>(null);
+  const setUrlParams = useCallback(
+    (patch: Partial<Record<"guia" | "notes" | "vista" | "tab" | "po", string | null>>) => {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          if (value) next.set(key, value);
-          else next.delete(key);
+          for (const [key, value] of Object.entries(patch)) {
+            if (value) next.set(key, value);
+            else next.delete(key);
+          }
           return next;
         },
         { replace: true },
       );
     },
     [setSearchParams],
+  );
+  const setUrlParam = useCallback(
+    (key: "guia" | "notes" | "vista" | "tab" | "po", value: string | null) => setUrlParams({ [key]: value }),
+    [setUrlParams],
   );
   const orgRefForPanel = useRef(orgId);
   orgRefForPanel.current = orgId;
@@ -1554,6 +1638,23 @@ export default function Receiving() {
   const qtyEditRef = useRef<QtyEditState | null>(null);
   /** "Voltar ao cesto" em curso (a verificação da guia é assíncrona): uma de cada vez. */
   const restoringRef = useRef(false);
+  /** "Dar entrada" de uma PO (painel da vista lista) em curso. */
+  const [poRun, setPoRun] = useState<PoRunState | null>(null);
+  const poRunSeqRef = useRef(0);
+  /**
+   * Entradas do "Dar entrada" já entregues ao submitEntries. Guarda síncrona: um
+   * render intermédio (flushSync do envio) pode ainda ver o run em "preparing" —
+   * nunca se envia a mesma entrada duas vezes por causa disso.
+   */
+  const poRunSentRef = useRef(new Set<string>());
+  /**
+   * Há um "Dar entrada" ativo (preparing/review/submitting). Fica true logo no
+   * startPoReceive (antes do render), contra dois arranques seguidos.
+   */
+  const poRunActiveRef = useRef(false);
+  /** Entradas de um "Dar entrada" ainda por enviar: uma leitura nunca soma a elas. */
+  const poRunIdsRef = useRef<Set<string>>(new Set());
+  poRunIdsRef.current = new Set(poRun && poRun.phase !== "done" && poRun.phase !== "failed" ? poRun.pendingIds : []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -2550,11 +2651,16 @@ export default function Receiving() {
     const key = entryKey(c.product_id, c.uom_id);
     // Só soma a uma entrada livre; se a do produto estiver a confirmar ou com
     // resultado incerto, a leitura vai para uma entrada nova (nunca se perde
-    // nem entra numa receção já enviada).
-    const open = basketRef.current.find((e) => e.key === key && !isLocked(e));
+    // nem entra numa receção já enviada). Prefere a entrada sem linha de PO
+    // escolhida e nunca soma a uma do "Dar entrada" do painel ainda por enviar.
+    const pickFree = (list: BasketEntry[]) => {
+      const free = list.filter((e) => e.key === key && !isLocked(e) && !poRunIdsRef.current.has(e.id));
+      return free.find((e) => !e.poItemId) ?? free[0];
+    };
+    const open = pickFree(basketRef.current);
     const nextQty = open ? open.quantity + 1 : 1;
     setBasket((prev) => {
-      const found = prev.find((e) => e.key === key && !isLocked(e));
+      const found = pickFree(prev);
       if (found) {
         const q = found.quantity + 1;
         const stillValid =
@@ -2850,7 +2956,9 @@ export default function Receiving() {
           const value = chars.trim();
           reset();
           cancelSelect(); // a rajada era uma leitura: nada de type-ahead
-          if (value) enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
+          // Na vista lista o leitor está escondido: a leitura vai para a barra de leitura (nunca para o cesto).
+          if (value && vistaRef.current !== "leitor") readBarRef.current?.read(value);
+          else if (value) enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
           focusScan();
         } else {
           reset();
@@ -3207,8 +3315,23 @@ export default function Receiving() {
       : msg;
   };
 
-  const submitEntries = async (onlyId?: string) => {
-    if (submittingRef.current) return; // duplo clique / duplo toque
+  /**
+   * Envia as entradas do cesto (todas, ou só `only`). `out`, se vier, recebe o
+   * resultado de cada entrada (usado pelo "Dar entrada" do painel).
+   */
+  const submitEntries = async (only?: string | string[], out?: SubmitOutcome) => {
+    const onlyIds = only === undefined ? null : Array.isArray(only) ? only : [only];
+    /** Regista o motivo das pedidas que não chegaram a ir (só a primeira razão conta). */
+    const skip = (reason: string, which: readonly string[] | null = onlyIds) => {
+      if (!out || !which) return;
+      for (const id of which) {
+        if (!out.ok[id] && !out.failed[id] && !out.stale.includes(id) && !out.skipped[id]) out.skipped[id] = reason;
+      }
+    };
+    if (submittingRef.current) {
+      skip("Havia outra receção do cesto a ser enviada.");
+      return; // duplo clique / duplo toque
+    }
     const wh = warehouseRef.current;
     const sup = supplierRef.current;
     const dn = deliveryNoteRef.current;
@@ -3216,7 +3339,10 @@ export default function Receiving() {
     const org = orgRef.current;
     const orgName = orgNameRef.current;
     const epoch = orgEpochRef.current;
-    if (!wh || !org) return;
+    if (!wh || !org) {
+      skip("Sem armazém escolhido.");
+      return;
+    }
     submittingRef.current = true;
     setConfirming(true);
 
@@ -3247,6 +3373,7 @@ export default function Receiving() {
             variant: "destructive",
           });
         }
+        skip("Sessão não encontrada — volte a entrar.");
         return;
       }
       if (!isCurrent(epoch, org)) return;
@@ -3268,7 +3395,12 @@ export default function Receiving() {
             snapped = true;
             // Entradas livres com avisos da guia por confirmar não vão (o botão já está bloqueado).
             const picked = prev.filter((e) => {
-              if (!((!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting && !needsAck(e))) return false;
+              if (onlyIds && onlyIds.includes(e.id)) {
+                if (!qtyValid(e)) skip("Quantidade inválida.", [e.id]);
+                else if (e.submitting) skip("Já estava a ser enviada.", [e.id]);
+                else if (needsAck(e)) skip("Avisos da guia por confirmar.", [e.id]);
+              }
+              if (!((!onlyIds || onlyIds.includes(e.id)) && qtyValid(e) && !e.submitting && !needsAck(e))) return false;
               if (!previewMatchesNote(e, dn)) {
                 stale.push(e.id);
                 return false;
@@ -3285,6 +3417,7 @@ export default function Receiving() {
         });
       });
       if (stale.length > 0) {
+        out?.stale.push(...stale);
         for (const id of stale) recalcPreview(id, true);
         toast({
           title: stale.length === 1 ? "1 entrada não foi enviada" : `${stale.length} entradas não foram enviadas`,
@@ -3353,6 +3486,7 @@ export default function Receiving() {
           removePending(requestId);
           ok += 1;
           if (replayed) replayedCount += 1;
+          if (out) out.ok[e.id] = { result, replayed };
           toOrder += Number(result.units_to_order_total) || 0;
           toStock += Number(result.units_to_stock_total) || 0;
           if (here) {
@@ -3379,6 +3513,7 @@ export default function Receiving() {
         } else {
           failed += 1;
           const msg = uncertain ? uncertainMessage(err) : errorMessage(err, "receive");
+          if (out) out.failed[e.id] = { message: msg, uncertain };
           if (uncertain) {
             patchPending(requestId, { state: "unknown", lastError: msg });
           } else {
@@ -3407,6 +3542,7 @@ export default function Receiving() {
         }
       }
     } finally {
+      skip(stopAt >= 0 ? "Não foi enviada: o ecrã mudou de empresa a meio." : "Não foi enviada (já não estava no cesto ou o ecrã mudou).");
       submittingRef.current = false;
       if (mountedRef.current) {
         setConfirming(false);
@@ -3680,6 +3816,431 @@ export default function Receiving() {
     if (receivedCount > 0) refreshNotesPanel();
   }, [receivedCount, refreshNotesPanel]);
 
+  // ── Vista lista: Por receber | Recebidas | Guias e o painel "Dar entrada" ──
+  // Só leituras (RLS existente). Receber passa SEMPRE pelo cesto acima (submitEntries).
+  // Mesma regra do servidor (rpc_receive_by_code / can_receive): as três permissões.
+  const receiveGate = permissionGate(["receiving.receive", "purchase_orders.receive", "inventory.edit"], true);
+  // rpc_cancel_po_line_remainder / rpc_cancel_po_remainder: purchase_orders.receive + inventory.edit.
+  const cancelGate = permissionGate(["purchase_orders.receive", "inventory.edit"], true);
+  const listOn = vista === "lista";
+  const receivableQuery = useReceivablePos(orgId, poListGate.allowed && listOn);
+  const receiptsQuery = useReceivingReceipts(orgId, poListGate.allowed && listOn);
+  const openNotesQuery = useOpenNotesCount(orgId, canSeeNotesPanel && listOn);
+  const receivablePos = receivableQuery.data ?? [];
+  const today = todayIsoLocal();
+  const [listFilters, setListFilters] = useState<FiltrosRec>(FILTROS_REC);
+  /** Guia lida na barra (fica escolhida no painel) e artigo lido (linha destacada). */
+  const [readNoteId, setReadNoteId] = useState<string | null>(null);
+  const [highlightProductId, setHighlightProductId] = useState<string | null>(null);
+  useEffect(() => {
+    setListFilters(FILTROS_REC);
+    setReadNoteId(null);
+    setHighlightProductId(null);
+    setPoRun(null);
+  }, [orgId]);
+
+  const refreshLists = useCallback(() => {
+    const org = orgRef.current;
+    void queryClient.invalidateQueries({ queryKey: receivablePosQueryKey(org) });
+    void queryClient.invalidateQueries({ queryKey: receivingReceiptsQueryKey(org) });
+    void queryClient.invalidateQueries({ queryKey: openNotesCountQueryKey(org) });
+    void queryClient.invalidateQueries({ queryKey: deliveryNotesPanelQueryKey(org) });
+    void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(org) });
+  }, [queryClient]);
+  // O "Dar entrada" deixa de estar ativo quando acaba ou é largado.
+  useEffect(() => {
+    if (!poRun || poRun.phase === "done" || poRun.phase === "failed") poRunActiveRef.current = false;
+  }, [poRun]);
+  // Receções feitas no leitor também mudam "Por receber" e "Recebidas".
+  useEffect(() => {
+    if (receivedCount > 0) refreshLists();
+  }, [receivedCount, refreshLists]);
+
+  const switchView = (v: "lista" | "leitor") => {
+    // Para o leitor: um "Dar entrada" ainda não enviado fica como entradas normais do cesto (vê-se e confirma-se lá).
+    if (v === "leitor" && poRun && poRun.phase !== "submitting") setPoRun(null);
+    setUrlParams({ vista: v === defaultVista ? null : v, po: v === "leitor" ? null : poParam });
+  };
+  useEffect(() => {
+    if (vista === "leitor") focusScan();
+  }, [vista, focusScan]);
+
+  /** Mete no cesto uma entrada por linha da PO (presa à linha) e arranca o envio. Devolve o motivo se recusar. */
+  const startPoReceive = (po: ReceivablePo, items: { line: ReceivableLine; qty: number }[], noteId: string): string | null => {
+    if (!receiveGate.allowed) return receiveGate.reason ?? "Sem permissão para receber.";
+    if (submittingRef.current || confirming) return "Há uma receção do cesto a decorrer — espere que termine.";
+    if (poRunActiveRef.current || (poRun && (poRun.phase === "preparing" || poRun.phase === "review" || poRun.phase === "submitting"))) {
+      return "Já há uma entrada a decorrer.";
+    }
+    if (!scanGateOpen()) return "O ecrã ainda está a preparar o cesto — tente de novo daqui a um instante.";
+    const wh = warehouseRef.current;
+    if (!wh) return "Escolha o armazém onde entra.";
+    if (items.length === 0) return "Indique pelo menos uma quantidade a receber.";
+    const sup = po.supplierId ?? "";
+    const cur = basketRef.current;
+    if (cur.length > 0) {
+      if (supplierRef.current !== sup || deliveryNoteRef.current !== noteId) {
+        return "O cesto do leitor tem entradas de outro fornecedor ou com outra guia: confirme-as ou esvazie-o primeiro (Ler artigo a artigo).";
+      }
+      const ids = new Set(items.map((x) => x.line.id));
+      if (cur.some((e) => e.poItemId && ids.has(e.poItemId))) {
+        return "Esta encomenda já tem linhas no cesto do leitor: confirme-as ou retire-as primeiro (Ler artigo a artigo).";
+      }
+    } else {
+      // Cesto vazio: o ecrã passa para o fornecedor e a guia desta PO (como escolher a guia no leitor).
+      setSupplierId(sup);
+      supplierRef.current = sup;
+      setDeliveryNoteId(noteId);
+      deliveryNoteRef.current = noteId;
+      setUnsentConfirm(null);
+      setPanel({ kind: "none" });
+    }
+    const entries: BasketEntry[] = items.map(({ line, qty }) => ({
+      id: newRequestId(),
+      key: entryKey(line.productId, line.uomId),
+      productId: line.productId,
+      name: line.name,
+      sku: line.sku,
+      uomId: line.uomId,
+      uomCode: line.uomCode,
+      unitsPerUom: line.unitsPerUom || 1,
+      code: "",
+      openLines: [
+        {
+          purchase_order_id: po.id,
+          order_number: po.orderNumber,
+          po_status: po.status,
+          confirmed: po.status !== "pending",
+          supplier_id: po.supplierId,
+          supplier_name: po.supplierName,
+          expected_delivery: po.expectedDelivery,
+          purchase_order_item_id: line.id,
+          description: line.name,
+          quantity: line.quantity,
+          received_quantity: line.received,
+          open_quantity: line.open,
+          uom_id: line.uomId,
+          units_per_uom: line.unitsPerUom || 1,
+          same_unit: true,
+          contract_id: po.contractId,
+          contract_order_number: po.origin?.number ?? null,
+          contract_active: !!po.contractId,
+          allocation_rank: null,
+        },
+      ],
+      quantity: qty,
+      qtyText: String(qty),
+      poItemId: line.id,
+      showAdvanced: true,
+    }));
+    poRunActiveRef.current = true;
+    setBasket((prev) => [...entries, ...prev]);
+    for (const e of entries) recalcPreview(e.id, true);
+    const ids = entries.map((e) => e.id);
+    setPoRun({
+      key: ++poRunSeqRef.current,
+      poId: po.id,
+      po,
+      entryIds: ids,
+      pendingIds: ids,
+      phase: "preparing",
+      meta: Object.fromEntries(
+        entries.map((e, i) => [
+          e.id,
+          { poItemId: items[i].line.id, name: e.name, quantity: e.quantity, unitLabel: lineUnitLabel(items[i].line) },
+        ]),
+      ),
+      outcome: emptyOutcome(),
+      failedPreview: {},
+      notSent: [],
+      skipped: {},
+      warehouseName: warehouses.find((w) => w.id === wh)?.name ?? null,
+    });
+    setAnnouncement(`${po.orderNumber}: ${entries.length} ${entries.length === 1 ? "linha" : "linhas"} no cesto — a preparar a entrada.`);
+    return null;
+  };
+
+  /** Retira do cesto as entradas livres do "Dar entrada" (nada foi enviado com elas). */
+  const removeRunEntries = (ids: readonly string[]) => {
+    if (ids.length === 0) return;
+    setBasket((prev) => prev.filter((x) => !ids.includes(x.id) || isLocked(x)));
+  };
+
+  // O "Dar entrada" avança com o cesto: espera a pré-visualização (dry-run) de cada
+  // linha; avisos da guia → o painel pede confirmação; recusa → nada é enviado;
+  // tudo certo → submitEntries só destas entradas (o caminho de sempre).
+  useEffect(() => {
+    const run = poRun;
+    if (!run || run.phase !== "preparing") return;
+    if (submittingRef.current || confirming) return;
+    if (run.pendingIds.some((id) => poRunSentRef.current.has(id))) return;
+    const found = run.pendingIds.map((id) => basket.find((e) => e.id === id));
+    if (found.some((e) => !e)) {
+      removeRunEntries(run.pendingIds);
+      setPoRun({
+        ...run,
+        phase: Object.keys(run.outcome.ok).length ? "done" : "failed",
+        error: "Uma linha foi retirada do cesto entretanto — as restantes não foram enviadas.",
+        notSent: [...run.notSent, ...run.pendingIds.filter((id) => !run.outcome.ok[id])],
+        pendingIds: [],
+      });
+      return;
+    }
+    const list = found as BasketEntry[];
+    const errs = list.filter(hasPreviewError);
+    if (errs.length > 0) {
+      removeRunEntries(run.pendingIds);
+      setPoRun({
+        ...run,
+        phase: Object.keys(run.outcome.ok).length ? "done" : "failed",
+        error: "O servidor recusou a pré-visualização: nada foi enviado. Corrija e tente de novo.",
+        failedPreview: { ...run.failedPreview, ...Object.fromEntries(errs.map((e) => [e.id, previewFor(e)?.error ?? "Recusada."])) },
+        notSent: [...run.notSent, ...run.pendingIds],
+        pendingIds: [],
+      });
+      return;
+    }
+    const waiting = list.filter(isPreviewPending);
+    if (waiting.length > 0) {
+      const gaveUp = waiting.some((e) => {
+        const r = previewRetries.current.get(e.id);
+        return !!r && r.sig === previewFor(e)?.sig && r.n > PREVIEW_AUTO_RETRIES;
+      });
+      if (gaveUp) setPoRun({ ...run, phase: "review", offline: true });
+      return;
+    }
+    if (list.some(needsAck)) {
+      setPoRun({ ...run, phase: "review", offline: false });
+      return;
+    }
+    const out = emptyOutcome();
+    for (const id of run.pendingIds) poRunSentRef.current.add(id);
+    setPoRun({ ...run, phase: "submitting", offline: false });
+    const merge = (cur: PoRunState): SubmitOutcome => ({
+      ok: { ...cur.outcome.ok, ...out.ok },
+      failed: { ...cur.outcome.failed, ...out.failed },
+      stale: out.stale,
+      skipped: { ...cur.outcome.skipped, ...out.skipped },
+    });
+    void submitEntries(run.pendingIds, out)
+      .then(() => {
+        // As que não foram (pré-visualização com outra guia) podem voltar a ir depois de recalcular.
+        for (const id of out.stale) poRunSentRef.current.delete(id);
+        if (!mountedRef.current) return;
+        setPoRun((cur) => {
+          if (!cur || cur.key !== run.key) return cur;
+          const outcome = merge(cur);
+          const handled = new Set([...Object.keys(out.ok), ...Object.keys(out.failed)]);
+          const again = out.stale.filter((id) => basketRef.current.some((e) => e.id === id));
+          const notSent = run.pendingIds.filter((id) => !handled.has(id) && !again.includes(id));
+          const skipped = { ...cur.skipped, ...out.skipped };
+          if (again.length > 0) {
+            return { ...cur, outcome, skipped, notSent: [...cur.notSent, ...notSent], pendingIds: again, phase: "preparing" };
+          }
+          return { ...cur, outcome, skipped, notSent: [...cur.notSent, ...notSent], pendingIds: [], phase: "done", finishedAt: Date.now() };
+        });
+      })
+      .catch((err: unknown) => {
+        // Exceção inesperada no envio: o painel nunca fica preso em "A receber…". O que já
+        // tinha resposta fica como está (as pendentes/incertas continuam no cesto e no localStorage).
+        if (!mountedRef.current) return;
+        const msg = `Erro inesperado no envio: ${err instanceof Error ? err.message : String(err)}`;
+        setPoRun((cur) => {
+          if (!cur || cur.key !== run.key) return cur;
+          const outcome = merge(cur);
+          const missing = run.pendingIds.filter((id) => !outcome.ok[id] && !outcome.failed[id]);
+          const skipped = { ...cur.skipped, ...outcome.skipped };
+          for (const id of missing) skipped[id] = skipped[id] ?? msg;
+          return {
+            ...cur,
+            outcome,
+            skipped,
+            error: msg,
+            notSent: [...cur.notSent, ...missing],
+            pendingIds: [],
+            phase: Object.keys(outcome.ok).length ? "done" : "failed",
+            finishedAt: Date.now(),
+          };
+        });
+      })
+      .finally(() => {
+        refreshLists();
+      });
+    // As funções do cesto (previewFor, needsAck, …) leem o estado deste render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poRun, basket, confirming]);
+
+  const ackRunEntry = (entryId: string, acked: boolean) => {
+    const e = basketRef.current.find((x) => x.id === entryId);
+    if (!e || isLocked(e)) return;
+    const k = ackKeyOf(e);
+    editEntry(entryId, { ackKey: acked && k ? k : undefined });
+  };
+  const confirmRunReview = () => setPoRun((cur) => (cur && cur.phase === "review" ? { ...cur, phase: "preparing", offline: false } : cur));
+  const recalcRun = () => {
+    const run = poRun;
+    if (!run) return;
+    for (const id of run.pendingIds) recalcPreview(id, true);
+    setPoRun({ ...run, phase: "preparing", offline: false });
+  };
+  const cancelRun = () => {
+    const run = poRun;
+    if (run && (run.phase === "preparing" || run.phase === "review")) removeRunEntries(run.pendingIds);
+    if (run && run.phase === "submitting") return; // continua no cesto; o painel mostra o fim
+    setPoRun(null);
+  };
+
+  const openPoPanel = (id: string, opts: { productId?: string; noteId?: string } = {}) => {
+    if (poRun && poRun.poId !== id && (poRun.phase === "done" || poRun.phase === "failed")) setPoRun(null);
+    setHighlightProductId(opts.productId ?? null);
+    if (opts.noteId !== undefined) setReadNoteId(opts.noteId);
+    setUrlParams({ po: id, tab: tabUrl("receber"), vista: defaultVista === "lista" ? null : "lista" });
+  };
+  const closePoPanel = () => {
+    cancelRun();
+    setHighlightProductId(null);
+    setUrlParam("po", null);
+  };
+
+  const resolveRead = (text: string) => {
+    const org = orgRef.current;
+    const variants = Array.from(new Set([text.trim(), text.trim().toUpperCase()]));
+    return resolveReceivingCode(text, {
+      pos: receivablePos,
+      listState: permissionsLoading
+        ? "loading"
+        : !poListGate.allowed
+          ? "no_permission"
+          : receivableQuery.isLoading
+            ? "loading"
+            : receivableQuery.isError
+              ? "error"
+              : "ready",
+      suppliers,
+      findPoByNumber: async () => {
+        if (!org) return null;
+        const { data } = await supabase
+          .from("purchase_orders")
+          .select("order_number")
+          .eq("organization_id", org)
+          .is("deleted_at", null)
+          .in("order_number", variants)
+          .limit(1);
+        const row = (data ?? [])[0] as { order_number: string } | undefined;
+        return row ? { orderNumber: row.order_number } : null;
+      },
+      findNote: async (): Promise<NoteMatch | null> => {
+        if (!org) return null;
+        const { data } = await supabase
+          .from("supplier_delivery_notes")
+          .select("id, note_number, status, supplier_id, suppliers(name), supplier_delivery_note_orders(purchase_order_id)")
+          .eq("organization_id", org)
+          .in("note_number", variants)
+          .limit(10);
+        const rows = (data ?? []) as unknown as {
+          id: string;
+          note_number: string;
+          status: string;
+          supplier_id: string;
+          suppliers: { name: string | null } | null;
+          supplier_delivery_note_orders: { purchase_order_id: string }[] | null;
+        }[];
+        const r = rows.find((x) => x.status === "open") ?? rows[0];
+        if (!r) return null;
+        return {
+          id: r.id,
+          noteNumber: r.note_number,
+          status: r.status,
+          supplierId: r.supplier_id,
+          supplierName: r.suppliers?.name ?? "o fornecedor",
+          poIds: (r.supplier_delivery_note_orders ?? []).map((o) => o.purchase_order_id),
+        };
+      },
+      lookupProduct: async (code) => {
+        const wh = warehouseRef.current;
+        if (!wh) return { error: "Escolha o armazém (em Ler artigo a artigo) para procurar artigos." };
+        const { data, error } = await supabase.rpc("rpc_receiving_lookup", { p_warehouse_id: wh, p_code: code });
+        if (error) return { error: errorMessage(error, "lookup") };
+        const r = (data ?? {}) as unknown as LookupResult;
+        return (r.candidates ?? []).map((c) => ({ productId: c.product_id, name: c.name }));
+      },
+    });
+  };
+
+  const poRunView: PoRunView | null = poRun
+    ? {
+        poId: poRun.poId,
+        phase: poRun.phase,
+        error: poRun.error,
+        offline: poRun.offline,
+        warehouseName: poRun.warehouseName,
+        lines: poRun.entryIds.map((id) => {
+          const meta = poRun.meta[id];
+          const e = basket.find((x) => x.id === id);
+          const okRes = poRun.outcome.ok[id];
+          const fail = poRun.outcome.failed[id];
+          const pv = e && !isLocked(e) ? previewFor(e) : undefined;
+          const ack = e && !isLocked(e) ? ackKeyOf(e) : null;
+          const ecs = new Set<string>();
+          (okRes?.result.allocations ?? []).forEach((a) =>
+            (a.lines ?? []).forEach((l) => {
+              if (Number(l.units_to_order) > 0 && l.contract_order_number) ecs.add(l.contract_order_number);
+            }),
+          );
+          const notSent = poRun.notSent.includes(id) && !okRes && !fail;
+          return {
+            entryId: id,
+            poItemId: meta.poItemId,
+            name: meta.name,
+            quantity: e?.quantity ?? meta.quantity,
+            unitLabel: meta.unitLabel,
+            previewStatus: pv ? pv.status : e && !isLocked(e) ? "loading" : "none",
+            previewText:
+              pv?.status === "ok" && pv.result
+                ? `${fmt(pv.result.units_to_order_total)} un para EC · ${fmt(pv.result.units_to_stock_total)} un para stock`
+                : undefined,
+            previewError: poRun.failedPreview[id] ?? (pv && (pv.status === "error" || pv.status === "transient") ? pv.error : undefined),
+            noteChecks: ack ? noteChecksOf(pv?.result).map((c) => NOTE_CHECK_LABEL[c] ?? c) : [],
+            acked: !!ack && e?.ackKey === ack,
+            outcome: okRes ? "ok" : fail ? (fail.uncertain ? "uncertain" : "failed") : notSent ? "not_sent" : undefined,
+            message:
+              fail?.message ??
+              (notSent ? (poRun.failedPreview[id] ?? poRun.skipped[id] ?? "não foi enviada.") : undefined),
+            unitsToOrder: okRes ? Number(okRes.result.units_to_order_total) || 0 : undefined,
+            unitsToStock: okRes ? Number(okRes.result.units_to_stock_total) || 0 : undefined,
+            contractNumbers: [...ecs],
+            replayed: okRes?.replayed,
+          };
+        }),
+      }
+    : null;
+  const listedPo = poParam ? (receivablePos.find((p) => p.id === poParam) ?? null) : null;
+  const runForPanel = poParam && poRun?.poId === poParam ? poRun : null;
+  // Logo depois de receber, a lista ainda é a de antes: até chegar dado lido depois do fim do envio, a
+  // falta é a da lista menos o que entrou agora (nunca "Ainda falta" com as quantidades velhas).
+  const staleAfterRun =
+    !!runForPanel && runForPanel.finishedAt !== undefined && receivableQuery.dataUpdatedAt <= runForPanel.finishedAt;
+  const abateRun = (po: ReceivablePo, run: PoRunState): ReceivablePo => {
+    const got = new Map<string, number>();
+    for (const id of Object.keys(run.outcome.ok)) {
+      const m = run.meta[id];
+      if (m) got.set(m.poItemId, (got.get(m.poItemId) ?? 0) + m.quantity);
+    }
+    return { ...po, lines: po.lines.map((l) => ({ ...l, open: Math.max(0, l.open - (got.get(l.id) ?? 0)) })) };
+  };
+  const panelPo =
+    runForPanel && staleAfterRun
+      ? abateRun(listedPo ?? runForPanel.po, runForPanel)
+      : (listedPo ??
+        // Depois de receber tudo a PO sai de "Por receber": o painel continua com a fotografia (sem nada em falta).
+        (runForPanel && !receivableQuery.isFetching
+          ? { ...runForPanel.po, lines: runForPanel.po.lines.map((l) => ({ ...l, open: 0 })) }
+          : runForPanel
+            ? runForPanel.po
+            : null));
+  const panelMissing: "loading" | "gone" | null =
+    poParam && !panelPo ? (poListGate.allowed && receivableQuery.isLoading ? "loading" : "gone") : null;
+
   /** "Nova guia" do cabeçalho: mesma regra do "Criar guia" da lista de guias (só com o cesto vazio). */
   const openNewNote = () => {
     if (basketRef.current.length > 0 || submittingRef.current) {
@@ -3695,6 +4256,17 @@ export default function Receiving() {
 
   const pageActions = (
     <>
+      {listOn ? (
+        <Button type="button" variant="outline" onClick={() => switchView("leitor")}>
+          <ScanLine className="mr-2 h-4 w-4" aria-hidden />
+          Ler artigo a artigo
+        </Button>
+      ) : (
+        <Button type="button" variant="outline" onClick={() => switchView("lista")}>
+          <ArrowLeft className="mr-2 h-4 w-4" aria-hidden />
+          Encomendas por receber
+        </Button>
+      )}
       <Button
         type="button"
         variant="outline"
@@ -3708,7 +4280,7 @@ export default function Receiving() {
         <Plus className="mr-2 h-4 w-4" aria-hidden />
         Nova guia
       </Button>
-      {poListGate.allowed ? (
+      {listOn ? null : poListGate.allowed ? (
         <Button asChild variant="outline">
           <Link to={purchaseOrdersLink({ status: "ordered" })}>
             <ShoppingCart className="mr-2 h-4 w-4" aria-hidden />
@@ -3727,7 +4299,11 @@ export default function Receiving() {
     <InventoryPageHeader
       area="warehouse"
       title="Receção"
-      description="Receber mercadoria por código no telemóvel ou manualmente na encomenda. A receção fecha o fluxo: a parte para EC serve a encomenda de cliente; a parte para stock entra livre e atualiza o custo médio."
+      description={
+        listOn
+          ? "Aqui dá entrada no armazém a mercadoria que chega dos fornecedores."
+          : "Receber mercadoria por código no telemóvel ou manualmente na encomenda. A receção fecha o fluxo: a parte para EC serve a encomenda de cliente; a parte para stock entra livre e atualiza o custo médio."
+      }
       actions={pageActions}
     />
   );
@@ -3755,32 +4331,9 @@ export default function Receiving() {
   const selectorsLocked = basket.length > 0 || confirming;
   const scanDisabled = optionsLoading || !warehouseId;
 
-  return (
-    <div className={cn("mx-auto w-full space-y-4", framed ? "max-w-[1400px]" : "max-w-6xl")}>
-      {pageHeader}
-
-      <div
-        className={cn(
-          "grid grid-cols-1 items-start gap-5",
-          framed && "xl:grid-cols-[400px_minmax(0,1fr)]",
-        )}
-      >
-      {/*
-        Leitor (o que o ecrã sempre mostrou). Em ecrã largo, com o painel das
-        guias ao lado, fica numa moldura de telemóvel (.phone do protótipo) com
-        scroll próprio: o campo de leitura e a barra de confirmar continuam
-        fixos (sticky) dentro da moldura.
-      */}
-      <div
-        className={cn(
-          "min-w-0 space-y-4",
-          framed &&
-            "xl:mx-auto xl:h-[780px] xl:w-full xl:max-w-[400px] xl:overflow-y-auto xl:overflow-x-hidden xl:rounded-[34px] xl:border-[10px] xl:border-[#1d1534] xl:bg-background xl:px-3 xl:pt-3 xl:shadow-lg",
-        )}
-      >
-
-      {/* Receções sem resposta do servidor (visita anterior, outra empresa, F5) */}
-      {recoveryItems.length > 0 && (
+  /** Receções sem resposta do servidor: visíveis nas duas vistas (lista e leitor). */
+  const recoveryCard =
+    recoveryItems.length > 0 ? (
         <Card className="border-amber-500/60">
           <CardHeader className="p-4 pb-2">
             <CardTitle className="text-base">Receção por confirmar ({recoveryItems.length})</CardTitle>
@@ -3846,7 +4399,124 @@ export default function Receiving() {
             })}
           </CardContent>
         </Card>
+    ) : null;
+
+  const nPorReceber = receivablePos.filter(poRecebivel).length;
+  const nRecebidas = (receiptsQuery.data ?? []).filter((x) => !x.reverted).length;
+  const nGuias = openNotesQuery.data ?? 0;
+  const listView = listOn ? (
+    <div className="space-y-4">
+      {recoveryCard}
+      {basket.length > 0 && (
+        <Notice
+          tone={uncertainCount > 0 ? "error" : "warning"}
+          action={
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => switchView("leitor")}>
+              Abrir o leitor
+            </Button>
+          }
+        >
+          {`O cesto do leitor tem ${basket.length} ${basket.length === 1 ? "entrada" : "entradas"} por confirmar (${fmt(basketUnits)} un)`}
+          {uncertainCount > 0 ? ` — ${uncertainCount} sem resposta do servidor (use "Tentar de novo").` : "."}
+        </Notice>
       )}
+      <ReceivingReadBar
+        ref={readBarRef}
+        pos={receivablePos}
+        resolve={resolveRead}
+        onOpenPo={openPoPanel}
+        onFilter={(f, noteId) => {
+          setReadNoteId(noteId ?? null);
+          setListFilters({ ...FILTROS_REC, ...f });
+          setUrlParams({ tab: tabUrl("receber"), po: null });
+        }}
+        onArticleMode={() => switchView("leitor")}
+        camera={CameraScanner}
+        disabled={!orgId}
+      />
+      <Tabs value={listTab} onValueChange={(v) => setUrlParam("tab", tabUrl(v as "receber" | "recebidas" | "guias"))}>
+        <TabsList aria-label="Receção">
+          <TabsTrigger value="receber">Por receber{poListGate.allowed && !receivableQuery.isLoading ? ` (${nPorReceber})` : ""}</TabsTrigger>
+          <TabsTrigger value="recebidas">Recebidas{poListGate.allowed && receiptsQuery.data ? ` (${nRecebidas})` : ""}</TabsTrigger>
+          <TabsTrigger value="guias">Guias{nGuias ? ` (${nGuias} ${nGuias === 1 ? "aberta" : "abertas"})` : ""}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="receber" className="mt-3">
+          <PorReceberList
+            pos={receivablePos}
+            loading={permissionsLoading || (poListGate.allowed && receivableQuery.isLoading)}
+            error={receivableQuery.error ? ((receivableQuery.error as { message?: string }).message ?? "Erro inesperado.") : null}
+            noPermission={!permissionsLoading && !poListGate.allowed}
+            today={today}
+            f={listFilters}
+            setF={setListFilters}
+            canReceive={receiveGate.allowed}
+            receiveReason={receiveGate.reason}
+            onOpenPo={(id) => openPoPanel(id, { noteId: readNoteId ?? undefined })}
+            activeId={poParam}
+            onRetry={() => void receivableQuery.refetch()}
+          />
+        </TabsContent>
+        <TabsContent value="recebidas" className="mt-3">
+          <RecebidasList
+            items={receiptsQuery.data ?? []}
+            loading={poListGate.allowed && receiptsQuery.isLoading}
+            error={receiptsQuery.error ? ((receiptsQuery.error as { message?: string }).message ?? "Erro inesperado.") : null}
+            noPermission={!permissionsLoading && !poListGate.allowed}
+            canOpenPo={poListGate.allowed}
+            openPoReason={poListGate.reason}
+            onRetry={() => void receiptsQuery.refetch()}
+          />
+        </TabsContent>
+        <TabsContent value="guias" className="mt-3">
+          {canSeeNotesPanel ? (
+            <DeliveryNotesPanel
+              orgId={orgId}
+              filter={notesFilter}
+              onFilterChange={(f: ReceivingNotesFilter) => setUrlParam("notes", f === "all" ? null : f)}
+              onOpen={(id) => {
+                setUrlParam("guia", id);
+                setDetailNoteId(id);
+              }}
+              currentNoteId={deliveryNoteId || null}
+            />
+          ) : (
+            <Notice tone="info">Ver as guias requer a permissão purchase_orders.view ou purchase_orders.receive.</Notice>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  ) : null;
+
+  return (
+    <div className={cn("mx-auto w-full space-y-4", framed ? "max-w-[1400px]" : "max-w-6xl")}>
+      {pageHeader}
+
+      {listView}
+
+      {/* Leitor: fica sempre montado (fila, cesto, pendentes, beforeunload); na vista lista só se esconde. */}
+      <div
+        className={cn(
+          "grid grid-cols-1 items-start gap-5",
+          framed && "xl:grid-cols-[400px_minmax(0,1fr)]",
+          listOn && "hidden",
+        )}
+      >
+      {/*
+        Leitor (o que o ecrã sempre mostrou). Em ecrã largo, com o painel das
+        guias ao lado, fica numa moldura de telemóvel (.phone do protótipo) com
+        scroll próprio: o campo de leitura e a barra de confirmar continuam
+        fixos (sticky) dentro da moldura.
+      */}
+      <div
+        className={cn(
+          "min-w-0 space-y-4",
+          framed &&
+            "xl:mx-auto xl:h-[780px] xl:w-full xl:max-w-[400px] xl:overflow-y-auto xl:overflow-x-hidden xl:rounded-[34px] xl:border-[10px] xl:border-[#1d1534] xl:bg-background xl:px-3 xl:pt-3 xl:shadow-lg",
+        )}
+      >
+
+      {/* Receções sem resposta do servidor (visita anterior, outra empresa, F5) */}
+      {!listOn && recoveryCard}
 
       {/* Armazém, guia do fornecedor e fornecedor */}
       <Card>
@@ -4423,7 +5093,7 @@ export default function Receiving() {
       </div>
 
       {/* Painel das guias (à direita em ecrã largo, por baixo do leitor nos outros) */}
-      {canSeeNotesPanel && (
+      {canSeeNotesPanel && !listOn && (
         <DeliveryNotesPanel
           orgId={orgId}
           filter={notesFilter}
@@ -4590,11 +5260,50 @@ export default function Receiving() {
                 selectNote(n);
                 setNoteInfo(n);
                 setDetailNoteId(null);
-                if (guiaParam) setUrlParam("guia", null);
+                // Na vista lista, "Usar" leva ao leitor com a guia escolhida.
+                if (listOn) setUrlParams({ guia: null, vista: "leitor", po: null });
+                else if (guiaParam) setUrlParam("guia", null);
               }
             : undefined
         }
       />
+      {/* "Dar entrada" de uma PO (vista lista): recebe pelo cesto acima. */}
+      {listOn && (
+        <PoReceivePanel
+          po={panelPo}
+          missing={panelMissing}
+          onClose={closePoPanel}
+          orgId={orgId}
+          today={today}
+          warehouses={warehouses}
+          warehouseId={warehouseId}
+          onWarehouseChange={handleWarehouseChange}
+          warehouseLocked={selectorsLocked}
+          suppliers={suppliers}
+          canReceive={receiveGate.allowed}
+          receiveReason={receiveGate.reason}
+          canCancel={cancelGate.allowed}
+          cancelReason={cancelGate.reason}
+          canCreateNote={canEditNotes}
+          highlightProductId={highlightProductId}
+          initialNoteId={readNoteId}
+          otherPos={receivablePos}
+          run={poRunView}
+          onReceive={startPoReceive}
+          onAck={ackRunEntry}
+          onConfirmReview={confirmRunReview}
+          onCancelRun={cancelRun}
+          onRecalcRun={recalcRun}
+          onResetRun={() => setPoRun(null)}
+          onOpenPo={(id) => openPoPanel(id)}
+          onArticleMode={() => switchView("leitor")}
+          onNotesChanged={refreshLists}
+          onCancelled={(message) => {
+            refreshLists();
+            setAnnouncement(message);
+          }}
+        />
+      )}
     </div>
   );
 }

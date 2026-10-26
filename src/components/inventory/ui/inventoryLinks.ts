@@ -5,7 +5,7 @@
 //   /suppliers?filter=&open=&tab=(&prices=pending) suppliersLink / parseSuppliersParams
 //   /client-orders?status=&ready=1&open=           clientOrdersLink / parseClientOrdersParams
 //   /stock-counts?status=&stalled=1&open=          stockCountsLink / parseStockCountsParams
-//   /receiving?guia=&notes=                        receivingLink / parseReceivingParams
+//   /receiving?guia=&notes=&tab=&po=&vista=        receivingLink / parseReceivingParams
 //   /stocks?status=&warehouse=                     stocksLink / parseStocksParams
 //   /stock-movements?product=&warehouse=&doc=      stockMovementsLink / parseStockMovementsParams
 //
@@ -189,20 +189,44 @@ export function parseStockCountsParams(input: ParamsInput) {
 export const RECEIVING_NOTES_FILTERS = ["all", "open", "closed", "cancelled", "divergent"] as const;
 export type ReceivingNotesFilter = (typeof RECEIVING_NOTES_FILTERS)[number];
 
+/** Separador da vista lista da Receção: Por receber | Recebidas | Guias. */
+export const RECEIVING_TABS = ["receber", "recebidas", "guias"] as const;
+export type ReceivingTab = (typeof RECEIVING_TABS)[number];
+/** lista = encomendas por receber (por omissão); leitor = "Ler artigo a artigo" (cesto por código). */
+export const RECEIVING_VIEWS = ["lista", "leitor"] as const;
+export type ReceivingView = (typeof RECEIVING_VIEWS)[number];
+
 export interface ReceivingLinkParams {
   /** supplier_delivery_notes.id — abre/fixa essa guia. */
   guia?: string | null;
   notes?: ReceivingNotesFilter;
+  tab?: ReceivingTab;
+  /** purchase_orders.id — abre o painel "Dar entrada" dessa encomenda. */
+  po?: string | null;
+  vista?: ReceivingView;
 }
 
 export const receivingLink = (p: ReceivingLinkParams = {}): string =>
-  build(INVENTORY_PATHS.receiving, { guia: p.guia, notes: p.notes }, { notes: "all" });
+  build(
+    INVENTORY_PATHS.receiving,
+    { guia: p.guia, notes: p.notes, tab: p.tab, po: p.po, vista: p.vista },
+    { notes: "all", tab: "receber", vista: "lista" },
+  );
 
 export function parseReceivingParams(input: ParamsInput) {
   const sp = toParams(input);
+  const notes = oneOf(RECEIVING_NOTES_FILTERS, sp.get("notes"), "all");
+  const rawTab = sp.get("tab");
+  const rawVista = sp.get("vista");
   return {
     guia: str(sp, "guia"),
-    notes: oneOf(RECEIVING_NOTES_FILTERS, sp.get("notes"), "all"),
+    notes,
+    // Links antigos só com ?notes= (Hoje do Inventário) querem a lista das guias.
+    tab: rawTab === null && sp.get("notes") !== null ? ("guias" as ReceivingTab) : oneOf(RECEIVING_TABS, rawTab, "receber"),
+    po: str(sp, "po"),
+    vista: oneOf(RECEIVING_VIEWS, rawVista, "lista"),
+    /** A vista pedida no URL (null = a do ecrã por omissão, que depende das permissões). */
+    vistaParam: rawVista !== null && (RECEIVING_VIEWS as readonly string[]).includes(rawVista) ? (rawVista as ReceivingView) : null,
   };
 }
 
