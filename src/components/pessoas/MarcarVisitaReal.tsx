@@ -84,7 +84,7 @@ export function FormVisitaReal({ pessoa, hoje, revisita, aoOcupado, aoMarcada, a
       <CamposAgendaVisita
         id={id} hoje={hoje} agenda={form.agenda} valor={form.valor} aoMudar={form.mudar} erro={ehErroAgenda(visto) ? visto : null}
         conflito={form.conflito} recursoOcupado={form.recusado} moradaLead={pessoa.moradaLead} destino={destino} aoMudarDestino={setDestino}
-        erroMorada={ehErroMorada(visto) ? visto : null} campoData={campoData} grupoRecursos={grupoRecursos} desativado={envio.aGuardar}
+        erroMorada={ehErroMorada(visto) ? visto : null} comQuemVaiEstar campoData={campoData} grupoRecursos={grupoRecursos} desativado={envio.aGuardar}
       />
       <div className="space-y-1.5">
         <Label htmlFor={`${id}-nota`}>{t(`${V}note`)}</Label>

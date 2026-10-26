@@ -7,15 +7,16 @@ import { SheetClose, SheetFooter } from "@/components/ui/sheet";
 import { AbaGeralNovoNegocio, type AcoesGeral, type ValoresGeral } from "./AbaGeralNovoNegocio";
 import { AbaNovo, ListaAbasNovo, Tabs, TabsContent } from "./AbasNovoNegocio";
 import { AbaQualificacao, type AcoesQualificacao } from "./AbaQualificacao";
+import type { AtalhosMoradaReal } from "./CamposMoradaObra";
 import { AbaVisita } from "./AbaVisita";
 import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { N } from "./PecasNovoNegocio";
 import { useQuestionario } from "./QuestionarioContexto";
 import { FOCO, PISTA_DESATIVADO } from "./estilos";
 import { validarLevantamento, type LevantamentoForm } from "./levantamento";
-import { validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
+import { validarCodigoPostal, type MoradaObraForm, type OrigemMoradaObra } from "./moradaObra";
 import {
-  abasComErros, primeiroErro, type AbaNovoNegocio, type ErrosNovoNegocio, type PessoaOpcao, type RascunhoLevantamento, type ValoresIniciaisNegocio,
+  abasComErros, primeiroErro, type AbaNovoNegocio, type ContextoRealRegistos, type ErrosNovoNegocio, type PessoaOpcao, type RascunhoLevantamento, type ValoresIniciaisNegocio,
 } from "./novoNegocio";
 import type { Respostas } from "./perguntasTipos";
 import { blocosDaQualificacao, seccoesDaVisita } from "./questionarioForm";
@@ -63,6 +64,11 @@ interface CorpoProps {
   visitasGravadas?: ReadonlySet<string>;
   /** Os ids das visitas com o código postal fora do formato (só depois de tentar guardar). */
   visitasComCodigoPostalInvalido: readonly string[];
+  /** A ficha real: os atalhos da morada, o pedido do cliente (com negócio) e a origem da morada. */
+  atalhosMorada?: AtalhosMoradaReal;
+  origemObra: OrigemMoradaObra | null;
+  pedido?: { valor: string; aoMudar: (valor: string) => void };
+  semNegocio: boolean;
 }
 
 /** As três abas sublinhadas e o conteúdo de cada uma (a zona que rola); a aba com erros leva o aviso. */
@@ -101,6 +107,7 @@ function CorpoAbas(p: CorpoProps) {
           <AbaQualificacao
             id={p.id} respostas={p.respostas} morada={p.morada} erroCodigoPostal={!!p.erros.codigoPostal} origemMorada={p.origemMorada}
             moradaContacto={p.valores.contacto.morada} acoes={p.acoesQualificacao} errosRespostas={p.errosRespostas}
+            atalhosMorada={p.atalhosMorada} origemObra={p.origemObra} pedido={p.pedido} semNegocio={p.semNegocio}
           />
         </TabsContent>
         <TabsContent value="visita" className={CONTEUDO}>
@@ -173,10 +180,15 @@ export function FormularioRegistos({
   const lev = useLevantamentoForm(hoje, aoSujar, valores.comercial, valoresIniciais?.levantamento);
   const vis = useVisitasForm(hoje, aoSujar, valores.comercial, valoresIniciais?.visitas);
   const resp = useRespostasForm(aoSujar, valoresIniciais?.levantamento?.respostas);
-  // A morada da obra sem escrever acompanha as visitas de agora (como em «Novo negócio»): corrigir o código postal da visita corrige-o na obra.
+  // Na ficha real (`real`) a morada da obra começa vazia e é uma escolha (entidade, local ou à mão); no exemplo acompanha as visitas de agora
+  // (como em «Novo negócio»): corrigir o código postal da visita corrige-o na obra.
+  const real: ContextoRealRegistos | undefined = valoresIniciais?.real;
   const morada = useMoradaForm(aoSujar, {
     visitas: vis.visitas, moradaObra: valoresIniciais?.moradaObra ?? valoresIniciais?.levantamento?.moradaObra,
+    origemObra: valoresIniciais?.levantamento?.moradaOrigem ?? null, semVisitas: real !== undefined,
   });
+  const [pedidoCliente, setPedidoCliente] = useState(real?.negocio?.pedidoCliente ?? "");
+  const atalhosMorada: AtalhosMoradaReal | undefined = real && { moradaEntidade: real.moradaEntidade, aoPreencherDe: morada.preencherDe };
   const [seccao, setSeccao] = useState(seccaoInicial ?? (abaInicial === "visita" ? SECCAO_DO_LEVANTAMENTO : SECCAO_DAS_VISITAS));
   // Guardar só com as perguntas carregadas (as da base) e as respostas certas: o botão diz porquê, e o envio (Enter incluído) recusa.
   const { questionario, podeGuardar } = useQuestionario();
@@ -244,6 +256,7 @@ export function FormularioRegistos({
     guardarLevantamento.aoGuardar(
       {
         linhas: lev.levantamento.linhas, observacoes: lev.levantamento.observacoes, respostas: resp.respostas, moradaObra: morada.morada,
+        ...(real ? { moradaOrigem: morada.origemObra } : {}), ...(real?.negocio ? { pedidoCliente } : {}),
         ...(deVisita ? {} : { dados: { data: levantamento.data, estado: levantamento.estado, feitoPor: levantamento.feitoPor } }),
       },
       visitasParaGuardar(vis.visitas), valores.comercial,
@@ -259,7 +272,8 @@ export function FormularioRegistos({
         acoesGeral={acoes} pessoaBloqueada={!!pessoaInicialId && !!pessoa} acoesLevantamento={lev.acoes} visitas={vis.visitas} visitaAberta={vis.aberta} acoesVisitas={vis.acoes}
         visitasGravadas={visitasGravadas} visitasComCodigoPostalInvalido={tentou ? cpDasVisitas : []}
         acoesQualificacao={{ escolher: resp.escolher, escrever: resp.escrever, morada: morada.mudar, preencherMorada: morada.preencher }}
-        errosRespostas={errosRespostas}
+        errosRespostas={errosRespostas} atalhosMorada={atalhosMorada} origemObra={real ? morada.origemObra : null}
+        pedido={real?.negocio ? { valor: pedidoCliente, aoMudar: (v) => { aoSujar(); setPedidoCliente(v); } } : undefined} semNegocio={real !== undefined && !real.negocio}
       />
       {alertaVisivel && (
         // O passo recusou guardar: o motivo diz-se aqui, dentro do painel, porque o toast e a região live da página ficam fora do modal.

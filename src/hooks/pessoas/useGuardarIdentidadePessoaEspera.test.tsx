@@ -38,7 +38,7 @@ describe("useGuardarIdentidadePessoa: espera pela releitura", () => {
     const { result } = montarHook((id: string) => useGuardarIdentidadePessoa(id), PESSOA_ID);
     let r;
     await act(async () => { r = await result.current.guardar({ tipo: "person", nomeProprio: "Ana", apelido: "Novo" }); });
-    expect(r).toEqual({ tipo: "person", nome: "Ana Novo", empresaNome: null, mudou: true });
+    expect(r).toEqual({ tipo: "person", nome: "Ana Novo", empresaNome: null, organizationKind: null, tipoCliente: null, mudou: true });
   });
 
   it("se a releitura falhar, o guardar continua a valer (a base já gravou): não lança", async () => {

@@ -9,6 +9,8 @@ export interface MoradaFichaDb {
   localidade: string | null;
   andar: string | null;
   distrito?: string | null;
+  /** De onde veio a morada de um levantamento (entidade, manual ou localizacao); ausente nas outras moradas e numa leitura anterior. */
+  origem?: string | null;
 }
 
 export interface PessoaFichaDb {
@@ -46,6 +48,12 @@ export interface PessoaFichaDb {
   tem_nif?: boolean | null;
   /** «Voltou a contactar»: a atividade da lead é posterior ao último contacto (a chamada registada em Pessoas conta como contacto). */
   voltou_a_contactar?: boolean | null;
+  /** Migration 20261231100000: preferências de contacto e tipo de cliente. Ausentes numa leitura anterior. */
+  preferred_contact?: string | null;
+  preferred_time?: string | null;
+  locale?: string | null;
+  organization_kind?: string | null;
+  tipo_cliente?: string | null;
 }
 
 export interface EncerramentoDb {
@@ -159,6 +167,10 @@ export interface NegocioFichaDb {
   propostas: PropostaDb[];
   contratos: ContratoDb[];
   eventos: EventoNegocioDb[];
+  /** Migration 20261231100000: o que o cliente pediu, a versão do questionário da qualificação e as respostas (com snapshot: ver `lerRespostasGravadas`). */
+  pedido_cliente?: string | null;
+  versao_questionario?: number | null;
+  qualificacao?: unknown;
 }
 
 /** O cursor de uma secção paginada: o instante e o id do último item já recebido. */

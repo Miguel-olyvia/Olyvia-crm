@@ -2,6 +2,7 @@
 // está, o título e o subtítulo do passo, a lista de verificação da fase, o que o botão primário faz (ou porque não pode) e a fase anterior, só para
 // ler. Funções puras, sem JSX nem hooks: nada aqui grava. O passo vem de `passoDoItem` (a regra não se duplica) e os textos são chaves de tradução.
 import type { EstadoFase, FaseDoNegocio } from "../fasesDoNegocio";
+import type { ResultadoContacto } from "../pessoasTipos";
 import { passoDoItem } from "./passosProcesso";
 import type { ItemProcesso, PassoProcesso } from "./tiposProcesso";
 
@@ -33,6 +34,8 @@ export interface DadosDoGuia {
   visitasAtivas: number;
   /** Levantamentos ligados ao negócio (ou, numa pessoa, os que tem). */
   levantamentos: number;
+  /** O resultado da chamada mais recente (`null`/ausente: nao ha chamadas, ou o resultado nao se conhece). */
+  ultimoResultado?: ResultadoContacto | null;
   /** O que ficou registado em cada item da lista, por id do item (`quemPede`, `chamada`...), já em texto; falta o que o ecrã não sabe. */
   detalhes?: Readonly<Record<string, string>>;
 }
@@ -181,6 +184,9 @@ function acaoDoPasso(passo: PassoProcesso, c: ContextoDoGuia): AcaoGuiada {
   const base: AcaoGuiada = { passo, estado: "pronta", rotuloChave: rotuloDaAcao(passo) };
   if (!PASSOS_DO_GUIA.has(passo)) return c.ligados.has(passo) ? base : { ...base, estado: "semAcao" };
   if (c.pessoaFechada) return { passo, estado: "desativada", rotuloChave: rotuloDaAcao(passo), razaoChave: "pessoasPagina.gate.pessoaPerdida" };
+  // Sem interesse ou numero errado: avisa-se e a visita nao se marca; novo contacto continua sempre possivel (nao e este botao).
+  const ultimo = c.dados.ultimoResultado;
+  if (passo === "marcarVisita" && (ultimo === "semInteresse" || ultimo === "numeroErrado")) return desativada(passo, ultimo);
   if (passo === "criarNegocio") {
     if (!c.podeCriar) return desativada(passo, "semPermissaoCriar");
   } else if (passo !== "registarChamada" && !c.podeEditar) {

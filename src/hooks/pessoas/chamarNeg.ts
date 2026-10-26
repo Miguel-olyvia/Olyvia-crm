@@ -30,6 +30,8 @@ export type NomeNeg =
   | "neg_registar_nota"
   | "neg_adiar_contacto"
   | "neg_guardar_identidade_pessoa"
+  | "neg_guardar_qualificacao"
+  | "neg_guardar_contacto_pessoa"
   | "neg_procurar_duplicados"
   | "neg_substituir_contacto"
   | "neg_atribuir_pessoa"

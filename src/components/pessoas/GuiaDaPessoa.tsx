@@ -85,9 +85,16 @@ export function GuiaDaPessoa({ resumo, hoje, atividade, capacidades, aoRegistarC
   // O prazo do passo (o que antes vivia no «Próximo passo e prazo»), com a hora quando o prazo é o próximo contacto.
   const prazo = resumo.proximo.prazo;
   const podeAdiar = aoAdiar !== undefined && capacidades?.adiar !== false && !resumo.proximoDeVisita;
+  // Outra chamada ou tentativa regista-se sempre, em qualquer fase da abordagem; no passo de registar a chamada o botao principal ja o faz.
+  const podeOutraChamada = passo !== null && passo.passo !== "registarChamada" && capacidades?.chamada !== false;
   const extra: ReactNode = passo ? (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <Prazo prazo={prazo} hoje={hoje} hora={prazo !== null && prazo === resumo.proximoContacto ? resumo.proximoHora : undefined} />
+      {podeOutraChamada && (
+        <Button type="button" variant="outline" className={cn("min-h-11", FOCO)} onClick={(e) => aoRegistarChamada(e.currentTarget)}>
+          {t("pessoasPagina.guia.outraChamada")}
+        </Button>
+      )}
       {podeAdiar && (
         <Button type="button" variant="ghost" className={cn("min-h-11", FOCO)} onClick={(e) => aoAdiar?.(e.currentTarget)}>
           {t("pessoasPagina.guia.alterarPrazo")}

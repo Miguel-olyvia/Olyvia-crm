@@ -45,7 +45,7 @@ export function DetalhesPasso({ campos, erros, moradaLead, erroMorada, hoje, aoM
         <CamposAgendaVisita
           id={id} hoje={hoje} agenda={form.agenda} valor={form.valor} aoMudar={form.mudar} erro={agendaReal.erro} conflito={form.conflito}
           recursoOcupado={form.recusado} moradaLead={moradaLead} destino={campos.destino} aoMudarDestino={(destino) => aoMudar({ destino })}
-          erroMorada={erroMorada} desativado={agendaReal.desativado}
+          erroMorada={erroMorada} desativado={agendaReal.desativado} comQuemVaiEstar
         />
       </div>
     );

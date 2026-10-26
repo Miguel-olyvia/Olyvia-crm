@@ -37,10 +37,13 @@ describe("paramsGuardarLevantamento", () => {
       p_id: "lev-1", p_organization_id: "org-1", p_entity_id: "ent-1",
       p_dados: { data_levantamento: "2026-10-20", estado: "feito", notas: "n", versao_questionario: 7 },
       p_linhas: ENTRADA.linhas,
-      p_respostas: {
-        acesso: { escolhas: ["dificil"] }, imovel: { escolhas: ["apartamento", "moradia"] }, notas: { texto: "portão" }, orcCliente: { numero: 12.5 },
-      },
+      p_respostas: { acesso: { escolhas: ["dificil"] }, notas: { texto: "portão" } },
     });
+  });
+
+  it("as respostas da Qualificação (imovel, orcCliente) NÃO seguem: a base recusaria com NG009; uma Qualificação inválida não bloqueia o levantamento", () => {
+    const p = paramsGuardarLevantamento({ ...ENTRADA, respostas: { ...ENTRADA.respostas, orcCliente: "abc" } }, QUESTIONARIO);
+    expect(Object.keys(p.p_respostas as object).sort()).toEqual(["acesso", "notas"]);
   });
 
   it("o negócio só vai se houver (a base tem o seu valor por omissão)", () => {
@@ -65,7 +68,7 @@ describe("paramsGuardarLevantamento", () => {
       try { paramsGuardarLevantamento({ ...ENTRADA, respostas }, QUESTIONARIO); } catch (e) { return e; }
       return null;
     };
-    for (const respostas of [{ orcCliente: "abc" }, { orcCliente: "100001" }, { orcCliente: "1,234" }, { notas: "x".repeat(2001) }]) {
+    for (const respostas of [{ notas: "x".repeat(2001) }]) {
       const e = erro(respostas);
       expect(e).toBeInstanceOf(ErroNeg);
       expect((e as ErroNeg).chave).toBe("businessGoals.new.qform.invalid");
@@ -105,11 +108,11 @@ describe("useGuardarLevantamento", () => {
     expect(avisar).not.toHaveBeenCalled();
   });
 
-  it("NÃO grava respostas inválidas (número fora dos limites): recusa sem chamar a base de gravação", async () => {
+  it("NÃO grava respostas inválidas da Visita (texto acima do limite): recusa sem chamar a base de gravação", async () => {
     const h = montar();
     await pronto(h);
     let erro: unknown;
-    await act(async () => { erro = await h.result.current.guardar({ ...ENTRADA, respostas: { orcCliente: "abc" } }).catch((e: unknown) => e); });
+    await act(async () => { erro = await h.result.current.guardar({ ...ENTRADA, respostas: { notas: "x".repeat(2001) } }).catch((e: unknown) => e); });
     expect(erro).toBeInstanceOf(ErroNeg);
     expect((erro as ErroNeg).chave).toBe("businessGoals.new.qform.invalid");
     expect(chamadasDe("neg_guardar_levantamento")).toHaveLength(0);

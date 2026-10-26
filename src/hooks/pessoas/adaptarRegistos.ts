@@ -7,6 +7,7 @@ import {
 } from "@/components/negocio-metas/registosTipos";
 import { respostasDeGravadas } from "@/components/negocio-metas/respostasQuestionario";
 import { RESULTADOS_CONTACTO } from "@/components/pessoas/opcoesPessoa";
+import type { OrigemMorada } from "@/components/pessoas/pessoasTipos";
 import { escolher, textoOuNull } from "./adaptarComum";
 import type { ContactoFichaDb, FichaDb, LevantamentoFichaDb, LinhaLevantamentoDb, VisitaFichaDb } from "./fichaTipos";
 import { lerRespostasGravadas } from "./respostasGravadas";
@@ -97,6 +98,11 @@ function linhasDoLevantamento(l: LevantamentoFichaDb): LevantamentoPessoa["rascu
   return [...dadas, ...vazias];
 }
 
+const ORIGENS_MORADA: readonly OrigemMorada[] = ["entidade", "manual", "localizacao"];
+
+/** A origem da morada de um levantamento; fora da lista, ou em falta, `null`. */
+export const origemDaMorada = (origem: string | null | undefined): OrigemMorada | null => escolher(origem, ORIGENS_MORADA);
+
 function adaptarLevantamento(l: LevantamentoFichaDb, pessoaId: string): LevantamentoPessoa {
   const gravadas = lerRespostasGravadas(l.respostas);
   return {
@@ -111,6 +117,7 @@ function adaptarLevantamento(l: LevantamentoFichaDb, pessoaId: string): Levantam
       ...(gravadas.length > 0 ? { gravadas } : {}),
     },
     negocioId: l.negocio_id,
+    moradaOrigem: origemDaMorada(l.morada?.origem),
   };
 }
 

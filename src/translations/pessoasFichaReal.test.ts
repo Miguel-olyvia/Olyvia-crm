@@ -14,6 +14,8 @@ const CHAVES_USADAS = [
   // A identidade (IdentidadeFichaReal) e o separador Submissões (SubmissoesFichaReal).
   "identity.title", "identity.type", "identity.typeLegend", "identity.person", "identity.company", "identity.name", "identity.companyName",
   "identity.firstName", "identity.lastName", "identity.edit", "identity.save", "identity.cancel", "identity.errorCompany", "identity.errorPerson",
+  // A identidade com condomínio e o contacto editável (ContactoFichaReal).
+  "identity.condominio", "identity.condominioName", "contact.title", "contact.phone", "contact.email", "contact.preferred", "contact.preferred.none", "contact.preferred.telefone", "contact.preferred.whatsapp", "contact.preferred.email", "contact.preferred.sms", "contact.time", "contact.time.none", "contact.time.manha", "contact.time.tarde", "contact.time.fim_do_dia", "contact.language", "contact.language.pt", "contact.language.en", "contact.language.fr", "contact.notSet", "contact.edit", "contact.save", "contact.cancel", "contact.saved", "contact.hint", "contact.errorEmail", "contact.errorPhone",
   "identity.saved",
   // A classificação MQL/SQL à mão (QualificacaoManualFichaReal).
   "qualify.title", "qualify.hint", "qualify.mql", "qualify.sql", "qualify.mqlDescription", "qualify.sqlDescription", "qualify.setMql", "qualify.setSql",

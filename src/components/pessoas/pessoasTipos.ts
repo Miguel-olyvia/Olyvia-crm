@@ -5,6 +5,7 @@
 import type { FaseNegocio, NegocioMes } from "@/components/negocio-metas/negocioMetas";
 import type { SaudeNegocio } from "@/components/negocio-metas/saudeNegocio";
 import type { RegistosDaPessoa } from "@/components/negocio-metas/registosTipos";
+import type { RespostaGravada } from "@/components/negocio-metas/respostasQuestionario";
 import type { ColunaAbordagem, ProximoPasso } from "./etapaPessoa";
 
 export type PapelPessoa = "lead" | "cliente";
@@ -29,6 +30,15 @@ export interface MoradaVisita {
   andar: string;
 }
 
+/** Como a pessoa prefere ser contactada (neg_guardar_contacto_pessoa). */
+export type ContactoPreferido = "telefone" | "email" | "whatsapp" | "sms";
+/** A hora do dia em que prefere ser contactada. */
+export type HoraPreferida = "manha" | "tarde" | "fim_do_dia";
+/** O tipo de cliente: derivado do tipo da entidade e do `organization_kind`. */
+export type TipoCliente = "particular" | "empresa" | "condominio";
+/** De onde veio a morada de um levantamento. */
+export type OrigemMorada = "entidade" | "manual" | "localizacao";
+
 export interface Pessoa {
   id: string;
   nome: string;
@@ -48,9 +58,19 @@ export interface Pessoa {
   /** Campos de exemplo da ficha (todos opcionais): a empresa, a morada, o NIF e o resto. */
   empresa?: { nome: string; contacto?: string; nif?: string };
   morada?: { linha: string; cp: string; localidade: string };
+  /** A morada da entidade nos quatro campos separados (a `morada` junta o andar à rua); só a base a traz. */
+  moradaCampos?: { rua: string; codigoPostal: string; localidade: string; andar: string };
   distrito?: string;
   nif?: string;
   qualificacao?: QualificacaoPessoa;
+  /** Preferências de contacto (migration 20261231100000); ausentes numa ficha anterior ou sem preferência. */
+  contactoPreferido?: ContactoPreferido;
+  horaPreferida?: HoraPreferida;
+  /** Código da língua tal como a base o guarda (pt, en, fr ou outro, como es): o seletor tem de mostrar o valor atual mesmo fora da lista. */
+  lingua?: string;
+  tipoCliente?: TipoCliente;
+  /** As respostas da Qualificação do negócio vivo mais recente com respostas, com o snapshot. */
+  qualificacaoGravada?: RespostaGravada[];
   /** O resultado da última chamada (ver `opcoesPessoa.ts`); vale para lead e cliente. */
   resultadoContacto?: ResultadoContacto;
   /** AAAA-MM-DD. */

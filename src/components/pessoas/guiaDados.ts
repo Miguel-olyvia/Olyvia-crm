@@ -60,6 +60,7 @@ export function dadosDoGuia(pessoa: Pick<Pessoa, "nome" | "contacto" | "campanha
     chamadas: registos.contactos.length,
     visitasAtivas: registos.visitas.filter((v) => v.estado !== "cancelada").length,
     levantamentos: registos.levantamentos.length,
+    ultimoResultado: maisRecente(registos.contactos)?.resultado ?? null,
     ...(t ? { detalhes: detalhesDoGuia(t, pessoa, registos) } : {}),
   };
 }

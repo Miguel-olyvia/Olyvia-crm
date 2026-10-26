@@ -6,6 +6,10 @@ export const CHAVE_ERRO_GENERICO = `${P}generico`;
 /** Dois comerciais da organização com o mesmo nome: o nome escolhido no levantamento não diz qual é (erro do ecrã, não vem da base). */
 export const CHAVE_COMERCIAL_AMBIGUO = `${P}comercialAmbiguo`;
 
+/** O email ou o telefone já pertence a outra pessoa da organização (23505 de uq_anew_entities_org_email / uq_anew_entities_org_phone9). */
+export const CHAVE_EMAIL_DUPLICADO = `${P}emailDuplicado`;
+export const CHAVE_TELEFONE_DUPLICADO = `${P}telefoneDuplicado`;
+
 export const CHAVES_ERRO_NEG: Readonly<Record<string, string>> = {
   NG001: `${P}ng001`,
   NG002: `${P}ng002`,
@@ -45,6 +49,23 @@ function texto(valor: unknown): string | null {
   return typeof valor === "string" ? valor : null;
 }
 
+const CONSTRAINT_EMAIL = "uq_anew_entities_org_email";
+const CONSTRAINT_TELEFONE = "uq_anew_entities_org_phone9";
+
+/**
+ * Um 23505 de email ou telefone repetido na organização: qual dos dois, ou null. A constraint lê-se de `message`, `details` ou `constraint`.
+ * Este erro é esperado (a UI diz o que se passa); a ficha que já tem o valor não vem no erro, por isso não há atalho para a abrir a partir daqui.
+ */
+export function duplicadoDoErro(erro: unknown): "email" | "telefone" | null {
+  if (typeof erro !== "object" || erro === null) return null;
+  const campos = erro as { code?: unknown; message?: unknown; details?: unknown; constraint?: unknown };
+  if (campos.code !== "23505") return null;
+  const juntos = [campos.message, campos.details, campos.constraint].map((v) => texto(v) ?? "").join(" ");
+  if (juntos.includes(CONSTRAINT_EMAIL)) return "email";
+  if (juntos.includes(CONSTRAINT_TELEFONE)) return "telefone";
+  return null;
+}
+
 /**
  * O código conhecido de um erro do PostgREST, ou null.
  * Provisório: a procura em `message`/`details` só corre quando `code` não é
@@ -53,6 +74,7 @@ function texto(valor: unknown): string | null {
  */
 export function codigoDoErro(erro: unknown): string | null {
   if (typeof erro !== "object" || erro === null) return null;
+  if (duplicadoDoErro(erro)) return "23505";
   const campos = erro as { code?: unknown; message?: unknown; details?: unknown };
   const code = texto(campos.code);
   if (code) {
@@ -67,6 +89,8 @@ export function codigoDoErro(erro: unknown): string | null {
 
 /** A chave de tradução do erro; código desconhecido dá a mensagem genérica. */
 export function chaveDoErro(erro: unknown): string {
+  const duplicado = duplicadoDoErro(erro);
+  if (duplicado) return duplicado === "email" ? CHAVE_EMAIL_DUPLICADO : CHAVE_TELEFONE_DUPLICADO;
   const codigo = codigoDoErro(erro);
   return codigo ? CHAVES_ERRO_NEG[codigo] : CHAVE_ERRO_GENERICO;
 }

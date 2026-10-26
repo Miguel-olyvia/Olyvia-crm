@@ -7,6 +7,7 @@ import type { NegocioHistorico, NegocioPessoa } from "@/components/pessoas/pesso
 import { maisRecentePrimeiro, numero } from "./adaptarComum";
 import { diasEntre } from "./adaptarResumoPessoa";
 import type { ContratoDb, FichaDb, NegocioFichaDb, PropostaDb } from "./fichaTipos";
+import { lerRespostasGravadas } from "./respostasGravadas";
 import { propostaRecusada, propostaViva } from "./propostaViva";
 import type { MomentoGanho } from "./useFontePessoas";
 import { diaLisboa } from "./tempoLisboa";
@@ -81,6 +82,18 @@ function adaptarNegocio(n: NegocioFichaDb, ficha: FichaDb, hoje: string, momento
     notas: n.notas ?? "",
     comercialId: n.responsavel_id ?? null,
     ...camposDoFecho(n, estadoReal),
+    ...camposDaQualificacao(n),
+  };
+}
+
+/** Migration 20261231100000: o pedido do cliente, a versão do questionário e as respostas da qualificação do negócio. Só o que a base devolveu. */
+function camposDaQualificacao(n: NegocioFichaDb): Partial<NegocioMes> {
+  const pedido = typeof n.pedido_cliente === "string" ? n.pedido_cliente.trim() : "";
+  const gravadas = lerRespostasGravadas(n.qualificacao);
+  return {
+    ...(pedido !== "" ? { pedidoCliente: pedido } : {}),
+    ...(typeof n.versao_questionario === "number" ? { versaoQuestionario: n.versao_questionario } : {}),
+    ...(gravadas.length > 0 ? { qualificacaoGravada: gravadas } : {}),
   };
 }
 

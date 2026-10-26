@@ -8,7 +8,7 @@
 // Só se mostra a ficha da pessoa que está aberta (`?open=`): ao passar de A para B não se mostra a de A (nem as ações trabalham sobre ela)
 // enquanto B carrega; há um indicador visível e o anúncio. A última ficha só se guarda para o painel deslizar para fora com conteúdo
 // quando se fecha (`pessoaId` a null).
-import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from "react";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { adaptarFicha } from "@/hooks/pessoas/adaptarFicha";
@@ -17,13 +17,17 @@ import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useAcoesFichaReal } from "@/hooks/pessoas/useAcoesFichaReal";
 import { useFichaPessoa } from "@/hooks/pessoas/useFichaPessoa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { useGuardarContactoPessoa } from "@/hooks/pessoas/useGuardarContactoPessoa";
 import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
+import { useSubstituirContactoPessoa } from "@/hooks/pessoas/useSubstituirContactoPessoa";
 import { useQualificarLeadPessoa } from "@/hooks/pessoas/useQualificarLeadPessoa";
 import { useSubmissoesPessoa } from "@/hooks/pessoas/useSubmissoesPessoa";
 import type { MaisItensFicha } from "@/components/pessoas/CarregarMais";
 import { FichaPessoa } from "@/components/pessoas/FichaPessoa";
 import type { SeparadorSubmissoesReal } from "@/components/pessoas/FichaInterior";
 import type { ItemAtividade, NotaPessoa, Pessoa, Submissao } from "@/components/pessoas/pessoasTipos";
+import { type DadosContactoFormulario } from "./contactoFormulario";
+import { ContactoFichaReal } from "./ContactoFichaReal";
 import { IdentidadeFichaReal } from "./IdentidadeFichaReal";
 import { NegociosDaFichaReal } from "./NegociosDaFichaReal";
 import { QualificacaoManualFichaReal } from "./QualificacaoManualFichaReal";
@@ -123,14 +127,29 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
       campanhaDaLead={campanhaDaLead} aoTentarDeNovo={recarregarSubmissoes}
     />,
   }), [submissoes.estado, submissoes.submissoes, submissoes.desatualizado, submissoes.pendentes, hojeDaFicha, campanhaDaLead, recarregarSubmissoes]);
-  const { guardar: guardarIdentidade } = useGuardarIdentidadePessoa(mostrada?.pessoa.id ?? "");
+  const pessoaAdaptada = adaptada?.resumo.pessoa;
+  const pessoaIdMostrada = mostrada?.pessoa.id ?? "";
+  const { guardar: guardarIdentidade } = useGuardarIdentidadePessoa(pessoaIdMostrada, pessoaAdaptada?.tipoCliente);
+  const { guardar: substituirContacto } = useSubstituirContactoPessoa(pessoaIdMostrada);
+  const { guardar: guardarPreferencias } = useGuardarContactoPessoa(pessoaIdMostrada);
+  // O telefone e o email substituem-se primeiro; se isso falhar as preferências não se tocam. Se as preferências falharem a seguir, o telefone
+  // e o email já ficaram (a ficha refaz-se) e o formulário só volta a mandar o que ainda falta.
+  const guardarContacto = useCallback(async ({ email, telefone, contacto, hora, lingua }: DadosContactoFormulario): Promise<void> => {
+    if (email !== undefined || telefone !== undefined) await substituirContacto({ email, telefone });
+    if (contacto !== undefined || hora !== undefined || lingua !== undefined) await guardarPreferencias({ contacto, hora, lingua });
+  }, [substituirContacto, guardarPreferencias]);
   const { classificar } = useQualificarLeadPessoa(mostrada?.pessoa.id ?? "", mostrada?.pessoa.lead_id ?? "");
   const identidade = mostrada ? (
     <>
       <IdentidadeFichaReal
         nome={mostrada.pessoa.nome?.trim() ?? ""} tipo={tipoDeIdentidade(mostrada.pessoa.tipo)} empresaNome={mostrada.pessoa.empresa_nome ?? null}
         nomeProprio={mostrada.pessoa.first_name ?? null} apelido={mostrada.pessoa.last_name ?? null}
-        podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarIdentidade}
+        tipoCliente={pessoaAdaptada?.tipoCliente} podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarIdentidade}
+      />
+      <ContactoFichaReal
+        key={`contacto-${mostrada.pessoa.id}`} telefone={pessoaAdaptada?.contacto.telefone ?? null} email={pessoaAdaptada?.contacto.email ?? null}
+        contactoPreferido={pessoaAdaptada?.contactoPreferido} horaPreferida={pessoaAdaptada?.horaPreferida} lingua={pessoaAdaptada?.lingua}
+        podeEditar={mostrada.permissoes?.editar === true} aoGuardar={guardarContacto}
       />
       {/* O selo MQL/SQL classifica-se à mão (como em Leads); as regras do Workflow não o acendem. */}
       <QualificacaoManualFichaReal

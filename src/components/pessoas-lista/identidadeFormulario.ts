@@ -3,7 +3,8 @@
 // (neg_guardar_identidade_pessoa): uma empresa tem só o nome da empresa; uma pessoa tem nome próprio e apelido, os dois (ou nenhum, para manter).
 import type { DadosIdentidade } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
 
-export type TipoIdentidade = "person" | "organization";
+/** `condominio` é uma organização que a base trata como condomínio (tipo de cliente «condominio»). */
+export type TipoIdentidade = "person" | "organization" | "condominio";
 
 export interface IdentidadeAtual {
   nome: string;
@@ -60,15 +61,15 @@ function partesDe(atual: IdentidadeAtual): { nomeProprio: string; apelido: strin
 /** Os valores com que o formulário abre: os da base (uma empresa abre sem nome próprio nem apelido: o nome dela não é de uma pessoa). */
 export function formularioInicial(atual: IdentidadeAtual): FormularioIdentidade {
   const pessoa = atual.tipo === "person" ? partesDe(atual) : { nomeProprio: "", apelido: "" };
-  return { tipo: atual.tipo, nomeEmpresa: atual.tipo === "organization" ? atual.empresaNome ?? atual.nome : "", ...pessoa };
+  return { tipo: atual.tipo, nomeEmpresa: atual.tipo !== "person" ? atual.empresaNome ?? atual.nome : "", ...pessoa };
 }
 
 export function pedidoDeIdentidade(form: FormularioIdentidade, atual: IdentidadeAtual): PedidoIdentidade {
-  if (form.tipo === "organization") {
+  if (form.tipo !== "person") {
     const nome = compactar(form.nomeEmpresa);
     if (nome === "") return { estado: "falta", chaveErro: "errorCompany" };
-    if (atual.tipo === "organization" && nome === compactar(atual.empresaNome ?? atual.nome)) return { estado: "semAlteracao" };
-    return { estado: "guardar", dados: { tipo: "organization", nomeEmpresa: nome } };
+    if (atual.tipo === form.tipo && nome === compactar(atual.empresaNome ?? atual.nome)) return { estado: "semAlteracao" };
+    return { estado: "guardar", dados: { tipo: form.tipo, nomeEmpresa: nome } };
   }
   const nomeProprio = compactar(form.nomeProprio);
   const apelido = compactar(form.apelido);

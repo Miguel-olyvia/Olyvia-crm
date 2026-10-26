@@ -214,6 +214,56 @@ describe("IdentidadeFichaReal: guardar, erros e foco", () => {
   });
 });
 
+describe("IdentidadeFichaReal: tipo de cliente com condomínio", () => {
+  const condominio = { nome: "Edifício Sol", tipo: "organization" as const, empresaNome: "Edifício Sol", tipoCliente: "condominio" as const };
+
+  it("um condomínio mostra o tipo «Condomínio» e o nome do condomínio", () => {
+    desenhar(condominio);
+    expect(screen.getByText("Condomínio")).toBeInTheDocument();
+    expect(screen.getByText("Nome do condomínio")).toBeInTheDocument();
+  });
+
+  it("oferece Particular, Empresa e Condomínio ao editar uma pessoa singular", () => {
+    desenhar();
+    abrir();
+    expect(screen.getByRole("radio", { name: "Pessoa singular" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Empresa" })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Condomínio" })).not.toBeChecked();
+  });
+
+  it("passar uma pessoa a condomínio exige o nome e guarda tipo condominio", async () => {
+    const { aoGuardar } = desenhar();
+    abrir();
+    fireEvent.click(screen.getByRole("radio", { name: "Condomínio" }));
+    guardar();
+    expect(screen.getByRole("alert")).toHaveTextContent("Indique o nome da empresa.");
+    escrever("Nome do condomínio", "Edifício Mar");
+    guardar();
+    await waitFor(() => expect(aoGuardar).toHaveBeenCalledExactlyOnceWith({ tipo: "condominio", nomeEmpresa: "Edifício Mar" }));
+  });
+
+  it("editar o nome de um condomínio guarda como condomínio, nunca como empresa", async () => {
+    const { aoGuardar } = desenhar(condominio);
+    abrir();
+    expect(screen.getByRole("radio", { name: "Condomínio" })).toBeChecked();
+    escrever("Nome do condomínio", "Edifício Lua");
+    guardar();
+    await waitFor(() => expect(aoGuardar).toHaveBeenCalledExactlyOnceWith({ tipo: "condominio", nomeEmpresa: "Edifício Lua" }));
+  });
+
+  it("um condomínio não oferece passar a empresa (não há caminho para o despromover)", () => {
+    desenhar(condominio);
+    abrir();
+    expect(screen.queryByRole("radio", { name: "Empresa" })).toBeNull();
+  });
+
+  it("uma empresa que não é condomínio continua a poder escolher Empresa", () => {
+    desenhar({ nome: "Obras Lda", tipo: "organization", empresaNome: "Obras Lda", tipoCliente: "empresa" });
+    abrir();
+    expect(screen.getByRole("radio", { name: "Empresa" })).toBeChecked();
+  });
+});
+
 describe("IdentidadeFichaReal: nome em duas partes da base", () => {
   it("abre com first_name e last_name (Ana Maria + Silva) e sem o aviso de palpite", () => {
     desenhar({ nome: "Ana Maria Silva", nomeProprio: "Ana Maria", apelido: "Silva" });

@@ -31,6 +31,14 @@ const CASAS_OMISSAO = 3;
 /** O maior número que a coluna guarda (numeric(14,3)). */
 const NUMERO_MAXIMO = 99_999_999_999.999;
 
+export type AbaQuestionario = "visita" | "qualificacao";
+
+/** As chaves das perguntas das secções de uma aba (uma secção sem aba é da Visita). */
+export function chavesDaAba(q: QuestionarioForm, aba: AbaQuestionario): Set<string> {
+  const chaves = q.seccoes.filter((s) => (s.aba ?? "visita") === aba).flatMap((s) => s.blocos.flatMap((b) => b.perguntas.map((p) => p.id)));
+  return new Set(chaves);
+}
+
 function respostaBase(p: PerguntaDef, valor: string): RespostaBase {
   switch (tipoDaPergunta(p)) {
     case "texto": return { texto: valor.trim() };
@@ -45,9 +53,11 @@ function respostaBase(p: PerguntaDef, valor: string): RespostaBase {
  * As respostas no formato novo de p_respostas: a chave da pergunta → escolhas, texto ou número. Só as perguntas visíveis e respondidas (a
  * visibilidade só se impõe no ecrã, D9, por isso a que ficou escondida não segue). Uma chave que já não é opção, ou um número que não é número, não segue.
  */
-export function respostasParaBase(q: QuestionarioForm, respostas: Respostas): Record<string, RespostaBase> {
+export function respostasParaBase(q: QuestionarioForm, respostas: Respostas, aba?: AbaQuestionario): Record<string, RespostaBase> {
   const saida: Record<string, RespostaBase> = {};
+  const daAba = aba ? chavesDaAba(q, aba) : null;
   for (const p of perguntasVisiveis(todosOsBlocos(q), respostas)) {
+    if (daAba && !daAba.has(p.id)) continue;
     const valor = respostas[p.id];
     if (perguntaRespondida(p, valor)) saida[p.id] = respostaBase(p, valor);
   }
@@ -68,9 +78,11 @@ function erroDoNumero(p: PerguntaDef, valor: string): ErroResposta | null {
 }
 
 /** Os erros das respostas que se veem (só texto e número têm: as escolhas só se fazem entre as opções). A chave é a pergunta. */
-export function validarRespostas(q: QuestionarioForm, respostas: Respostas): Record<string, ErroResposta> {
+export function validarRespostas(q: QuestionarioForm, respostas: Respostas, aba?: AbaQuestionario): Record<string, ErroResposta> {
   const erros: Record<string, ErroResposta> = {};
+  const daAba = aba ? chavesDaAba(q, aba) : null;
   for (const p of perguntasVisiveis(todosOsBlocos(q), respostas)) {
+    if (daAba && !daAba.has(p.id)) continue;
     const valor = respostas[p.id];
     if (valor === undefined || valor.trim() === "") continue;
     const tipo = tipoDaPergunta(p);

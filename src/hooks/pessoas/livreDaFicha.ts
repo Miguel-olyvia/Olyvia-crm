@@ -1,5 +1,5 @@
 // O levantamento livre da ficha (o que o painel «Visita e levantamento» edita), no formato que o plano de gravação compara.
-import { adaptarRegistos } from "./adaptarRegistos";
+import { adaptarRegistos, origemDaMorada } from "./adaptarRegistos";
 import type { FichaDb } from "./fichaTipos";
 import type { LevantamentoLivre } from "./planoLevantamento";
 
@@ -15,5 +15,6 @@ export function levantamentoLivreDaFicha(ficha: FichaDb): LevantamentoLivre | nu
   return {
     id: livre.id, rascunho: livre.rascunho, visitaId: livre.visitaId, data: livre.data, estado: bruto?.estado ?? null, feitoPorId: bruto?.feito_por_id ?? null,
     morada: m ? { rua: m.rua ?? "", codigoPostal: m.codigo_postal ?? "", localidade: m.localidade ?? "", andar: m.andar ?? "" } : null,
+    moradaOrigem: origemDaMorada(m?.origem),
   };
 }

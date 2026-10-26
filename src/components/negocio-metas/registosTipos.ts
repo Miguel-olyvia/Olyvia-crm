@@ -60,6 +60,8 @@ export interface LevantamentoPessoa {
   estado?: EstadoLevantamento;
   rascunho: RascunhoLevantamento;
   negocioId: string | null;
+  /** De onde veio a morada do levantamento; `null` sem morada ou sem a informação. */
+  moradaOrigem?: "entidade" | "manual" | "localizacao" | null;
 }
 
 export type TipoRegisto = "contacto" | "visita" | "levantamento";

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { copiarBruto, QUESTIONARIO_BRUTO } from "@/hooks/pessoas/workflow/questionarioTestUtil";
 import { lerQuestionarioForm, todasAsPerguntas } from "./questionarioForm";
 import {
-  aplicarGravadas, respostasDeGravadas, respostasParaBase, validarRespostas, type RespostaGravada,
+  aplicarGravadas, chavesDaAba, respostasDeGravadas, respostasParaBase, validarRespostas, type RespostaGravada,
 } from "./respostasQuestionario";
 
 const q = () => lerQuestionarioForm(QUESTIONARIO_BRUTO)!;
@@ -39,6 +39,34 @@ describe("respostasParaBase (o formato novo: refs e escolhas)", () => {
 
   it("sem respostas, objeto vazio (a base apaga o que deixou de vir)", () => {
     expect(respostasParaBase(q(), {})).toEqual({});
+  });
+});
+
+describe("respostasParaBase por aba (a Qualificação grava-se no negócio, não no levantamento)", () => {
+  const tudo = { acesso: "dificil", notas: "portão", imovel: "moradia", orcCliente: "12,5" };
+
+  it("aba visita: só as perguntas das secções da Visita", () => {
+    expect(respostasParaBase(q(), tudo, "visita")).toEqual({ acesso: { escolhas: ["dificil"] }, notas: { texto: "portão" } });
+  });
+
+  it("aba qualificacao: só as perguntas da secção Qualificação", () => {
+    expect(respostasParaBase(q(), tudo, "qualificacao")).toEqual({ imovel: { escolhas: ["moradia"] }, orcCliente: { numero: 12.5 } });
+  });
+
+  it("sem aba continua a dar todas (comportamento anterior)", () => {
+    expect(Object.keys(respostasParaBase(q(), tudo)).sort()).toEqual(["acesso", "imovel", "notas", "orcCliente"]);
+  });
+
+  it("validarRespostas por aba: um erro na Qualificação não bloqueia o levantamento, e vice-versa", () => {
+    expect(validarRespostas(q(), { orcCliente: "abc" }, "visita")).toEqual({});
+    expect(validarRespostas(q(), { orcCliente: "abc" }, "qualificacao")).toEqual({ orcCliente: "invalido" });
+    expect(validarRespostas(q(), { notas: "x".repeat(2001) }, "qualificacao")).toEqual({});
+    expect(validarRespostas(q(), { notas: "x".repeat(2001) }, "visita")).toEqual({ notas: "comprido" });
+  });
+
+  it("chavesDaAba devolve as chaves das perguntas dessa aba", () => {
+    expect([...chavesDaAba(q(), "qualificacao")].sort()).toEqual(["imovel", "orcCliente"]);
+    expect([...chavesDaAba(q(), "visita")].sort()).toEqual(["acesso", "impactoPreco", "notas"]);
   });
 });
 

@@ -33,6 +33,9 @@ export const pessoasGuiaTranslations: Record<"en" | "pt", Record<string, string>
     'pessoasPagina.guia.razao.aCarregarPermissoes': 'Loading your permissions. If this stays, reload the page.',
     'pessoasPagina.guia.razao.indisponivel': 'This step is not available on this screen yet.',
     'pessoasPagina.guia.razao.semDocumento': 'The document for this step is not on the deal yet.',
+    'pessoasPagina.guia.razao.semInteresse': 'The last call was "Not interested": confirm with the client before booking a visit. You can still log another call.',
+    'pessoasPagina.guia.razao.numeroErrado': 'The last call was "Wrong number": fix the contact before booking a visit. You can still log another call.',
+    'pessoasPagina.guia.outraChamada': 'Log another call',
 
     'pessoasPagina.guia.doc.resposta.titulo': 'Client reply',
     'pessoasPagina.guia.doc.resposta.descricao': 'The proposal {proposta} is out. What did the client answer?',
@@ -158,6 +161,9 @@ export const pessoasGuiaTranslations: Record<"en" | "pt", Record<string, string>
     'pessoasPagina.guia.razao.aCarregarPermissoes': 'A carregar as suas permissões. Se isto persistir, recarregue a página.',
     'pessoasPagina.guia.razao.indisponivel': 'Este passo ainda não está disponível neste ecrã.',
     'pessoasPagina.guia.razao.semDocumento': 'O documento deste passo ainda não está no negócio.',
+    'pessoasPagina.guia.razao.semInteresse': 'A última chamada foi «Sem interesse»: confirme com o cliente antes de marcar a visita. Pode registar outra chamada.',
+    'pessoasPagina.guia.razao.numeroErrado': 'A última chamada foi «Número errado»: corrija o contacto antes de marcar a visita. Pode registar outra chamada.',
+    'pessoasPagina.guia.outraChamada': 'Registar outra chamada',
 
     'pessoasPagina.guia.doc.resposta.titulo': 'Resposta do cliente',
     'pessoasPagina.guia.doc.resposta.descricao': 'A proposta {proposta} já seguiu. O que respondeu o cliente?',

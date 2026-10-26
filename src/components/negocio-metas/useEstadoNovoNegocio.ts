@@ -8,7 +8,7 @@ import { useDadosNegocio } from "./costuraNegocio";
 import { ligarInicial, type LigarRegistos } from "./ligarNegocio";
 import type { AcoesLevantamento } from "./LevantamentoCampos";
 import { adaptarLinhaADivisao, levantamentoVazio, novaLinha, type LevantamentoForm, type LinhaForm } from "./levantamento";
-import { MORADA_VAZIA, type ChaveMorada, type MoradaObraForm } from "./moradaObra";
+import { MORADA_VAZIA, temMorada, type ChaveMorada, type MoradaObraForm, type OrigemMoradaObra } from "./moradaObra";
 import type { Respostas } from "./perguntasTipos";
 import { useQuestionario } from "./QuestionarioContexto";
 import { todosOsBlocos } from "./questionarioForm";
@@ -184,20 +184,41 @@ const origemDaVisita = (igualALead: boolean | null): OrigemMorada => (igualALead
 export interface PartidaMorada {
   visitas?: readonly VisitaNegocio[];
   moradaObra?: MoradaObraForm;
+  /** A origem da morada já guardada (entidade, manual ou localizacao); sem ela, `null`. */
+  origemObra?: OrigemMoradaObra | null;
+  /** A morada começa vazia e NÃO acompanha as visitas (o negócio real: a morada da obra é uma escolha, não uma herança). */
+  semVisitas?: boolean;
 }
 
 /**
  * A morada da obra; "preencher" traz rua, código postal e localidade e deixa o andar como estava. Parte da guardada no pedido ou, sem
- * ela, da visita que representa o levantamento. Vinda da visita, guarda a origem para a dizer; ao escrever ou ao usar a morada do
- * contacto, deixa de ser "da visita".
+ * ela, da visita que representa o levantamento (a menos que `semVisitas`: então começa vazia). Vinda da visita, guarda a origem para a dizer; ao
+ * escrever ou ao usar a morada do contacto, deixa de ser "da visita". `origemObra` diz de onde veio a morada: `preencherDe` marca a origem
+ * (entidade copia os quatro campos; localizacao deixa o andar), escrever marca 'manual', e sem morada não há origem.
  */
 export function useMoradaForm(aoSujar: () => void, partida?: PartidaMorada) {
-  const dasVisitas = partida?.visitas ? moradaDasVisitas(partida.visitas) : undefined;
+  const dasVisitas = partida?.visitas && !partida.semVisitas ? moradaDasVisitas(partida.visitas) : undefined;
   // A morada deriva das visitas de agora (as marcadas, no painel «Novo negócio»): enquanto ninguém a escreveu, acompanha-as; escrita à mão, manda.
   const [escrita, setEscrita] = useState<MoradaObraForm | null>(null);
+  const [origemEscolhida, setOrigemEscolhida] = useState<OrigemMoradaObra | null>(null);
   const morada = escrita ?? partida?.moradaObra ?? dasVisitas?.moradaObra ?? MORADA_VAZIA;
   const origem: OrigemMorada = escrita || partida?.moradaObra || !dasVisitas ? null : origemDaVisita(dasVisitas.igualALead);
-  const mudar = (chave: ChaveMorada, valor: string) => { aoSujar(); setEscrita({ ...morada, [chave]: valor }); };
-  const preencher = (nova: MoradaObraForm) => { aoSujar(); setEscrita({ ...nova, andar: morada.andar }); };
-  return { morada, origem, mudar, preencher };
+  const origemObra: OrigemMoradaObra | null = !temMorada(morada) ? null : (escrita ? origemEscolhida : (partida?.moradaObra ? partida.origemObra ?? null : null));
+  const mudar = (chave: ChaveMorada, valor: string) => {
+    aoSujar();
+    setEscrita((antes) => ({ ...(antes ?? morada), [chave]: valor }));
+    setOrigemEscolhida("manual");
+  };
+  const preencher = (nova: MoradaObraForm) => {
+    aoSujar();
+    setEscrita((antes) => ({ ...nova, andar: (antes ?? morada).andar }));
+    setOrigemEscolhida("manual");
+  };
+  /** Preenche com a morada de uma origem: a entidade copia os quatro campos; a localização traz rua, código postal e localidade e deixa o andar. */
+  const preencherDe = (nova: MoradaObraForm, de: OrigemMoradaObra) => {
+    aoSujar();
+    setEscrita((antes) => (de === "entidade" ? { ...nova } : { ...nova, andar: (antes ?? morada).andar }));
+    setOrigemEscolhida(de);
+  };
+  return { morada, origem, origemObra, mudar, preencher, preencherDe };
 }

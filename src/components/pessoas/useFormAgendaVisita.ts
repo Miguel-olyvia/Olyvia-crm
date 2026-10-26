@@ -39,6 +39,7 @@ export function useFormAgendaVisita({ responsavelUserId, inicial, excluirId = nu
     hora: escolhas.hora ?? "",
     duracao: escolhas.duracao ?? DURACAO_POR_OMISSAO,
     duracaoMinutos: escolhas.duracaoMinutos,
+    quemVaiEstar: escolhas.quemVaiEstar,
   };
   const intervalo = intervaloDaVisita(valor);
   const conflito = useConflitoVisita(valor.recursos, intervalo?.inicio ?? null, intervalo?.fim ?? null, excluirId);

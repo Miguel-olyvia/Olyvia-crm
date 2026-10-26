@@ -12,8 +12,8 @@ describe("traduções dos erros das funções neg_*", () => {
     for (const chave of Object.keys(pt)) expect(marcas(en[chave]), chave).toEqual(marcas(pt[chave]));
   });
 
-  it("têm 28 mensagens por código, o comercial repetido e a genérica, com prefixo da página e sem texto vazio", () => {
-    expect(Object.keys(pt)).toHaveLength(30);
+  it("têm 28 mensagens por código, o comercial repetido, o email e o telefone repetidos e a genérica, com prefixo da página e sem texto vazio", () => {
+    expect(Object.keys(pt)).toHaveLength(32);
     for (const [chave, texto] of [...Object.entries(pt), ...Object.entries(en)]) {
       expect(chave).toMatch(/^pessoasPagina\.erroNeg\./);
       expect(texto.trim(), chave).not.toBe("");
@@ -41,10 +41,10 @@ describe("traduções dos erros das funções neg_*", () => {
 
   it("NG028 diz que o negócio está fechado e que se reabre primeiro", () => {
     expect(pt["pessoasPagina.erroNeg.ng028"]).toBe(
-      "Este negócio está fechado (ganho ou perdido): o título, as notas e o comercial já não se alteram. Reabra-o primeiro.",
+      "Este negócio está fechado (ganho ou perdido): o título, as notas, o comercial e o pedido do cliente já não se alteram. Reabra-o primeiro.",
     );
     expect(en["pessoasPagina.erroNeg.ng028"]).toBe(
-      "This deal is closed (won or lost): its title, notes and sales rep can no longer be changed. Reopen it first.",
+      "This deal is closed (won or lost): its title, notes, sales rep and customer request can no longer be changed. Reopen it first.",
     );
   });
 

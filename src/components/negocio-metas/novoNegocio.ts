@@ -1,7 +1,7 @@
 // Lógica pura do botão "Novo negócio": o que o formulário pede, a validação e o negócio de exemplo que sai dele. Nada
 // aqui grava nem lê o relógio: o dia de hoje e o número de série chegam por parâmetro.
 import type { DadosContactoNegocio, EstadoLevantamento, MoradaObraNegocio, NegocioMes, RespostaNegocio, VisitaNegocio } from "./negocioMetas";
-import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm } from "./moradaObra";
+import { moradaAparada, temMorada, validarCodigoPostal, type MoradaObraForm, type OrigemMoradaObra } from "./moradaObra";
 import { DADOS_EXEMPLO } from "./negocioMetasExemplo";
 import { validarLevantamento, type ErrosLevantamento, type LevantamentoForm } from "./levantamento";
 import { decisaoDaEscolha, type LigarRegistos } from "./ligarNegocio";
@@ -16,6 +16,8 @@ export interface PessoaOpcao {
   /** Os dados da ficha, para pré-preencher a secção Contacto (todos opcionais). */
   email?: string;
   morada?: string;
+  /** A morada da entidade nos quatro campos (para o atalho da morada da obra); só a ficha real a traz. */
+  moradaEntidade?: MoradaObraForm;
   distrito?: string;
   nif?: string;
   empresa?: string;
@@ -79,6 +81,21 @@ export interface RascunhoLevantamento {
   dados?: DadosProprios;
   /** As respostas já gravadas na base, com o snapshot do que a pessoa viu (a ficha real): o fornecedor do questionário mostra esse texto (D5). Falta no exemplo. */
   gravadas?: readonly RespostaGravada[];
+  /** O pedido do cliente («o que o cliente pediu»), só quando o painel grava num negócio; `""` limpa-o. Falta no exemplo e sem negócio. */
+  pedidoCliente?: string;
+  /** De onde veio a morada da obra (entidade, manual ou localizacao); falta se não há morada ou no exemplo. */
+  moradaOrigem?: OrigemMoradaObra | null;
+}
+
+/**
+ * O painel «Visita e levantamento» na ficha REAL. Muda a aba Qualificação: a morada da obra começa vazia (não herda das visitas) e tem os atalhos da
+ * entidade e do local; com `negocio` há «o que o cliente pediu» e as perguntas (gravam-se no negócio); sem `negocio` a Qualificação diz que se faz no negócio.
+ */
+export interface ContextoRealRegistos {
+  /** A morada da entidade (os quatro campos) para o atalho; `null` se não tem. */
+  moradaEntidade: MoradaObraForm | null;
+  /** O painel grava num negócio: o pedido que ele já tem. Ausente: ainda não há negócio. */
+  negocio?: { pedidoCliente: string };
 }
 
 /**
@@ -94,6 +111,8 @@ export interface ValoresIniciaisNegocio {
   visitas?: VisitaNegocio[];
   /** A morada da obra já guardada no pedido; sem ela vale a das visitas. */
   moradaObra?: MoradaObraForm;
+  /** Só a ficha real: ver `ContextoRealRegistos`. */
+  real?: ContextoRealRegistos;
 }
 
 /** O que o formulário preenche. */

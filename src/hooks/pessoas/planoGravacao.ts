@@ -53,6 +53,8 @@ export interface EntradaPlano {
   rascunho: RascunhoLevantamento;
   levantamentoLivre: LevantamentoLivre | null;
   novoIdLevantamento: () => string;
+  /** As chaves das perguntas da Qualificação: o levantamento não as leva (ver `passoLevantamento`). */
+  chavesQualificacao?: ReadonlySet<string>;
 }
 
 const igualTexto = (a: string, b: string): boolean => a.trim() === b.trim();
@@ -168,6 +170,7 @@ export function planoGravacao(e: EntradaPlano): Plano {
   const levantamento = passoLevantamento({
     rascunho: e.rascunho, vivas: e.visitas.filter((v) => v.estado !== "cancelada"), todas: e.visitas, hoje: e.hoje, comercial: e.comercial, negocioId: e.negocioId, livre: e.levantamentoLivre,
     idRealDe: (id) => e.base.get(id)?.idReal, novoId: e.novoIdLevantamento,
+    chavesQualificacao: e.chavesQualificacao,
   });
   return { ok: true, passos: [...a.criar, ...a.alterar, ...a.concluir, ...a.cancelar, ...(levantamento ? [levantamento] : [])] };
 }

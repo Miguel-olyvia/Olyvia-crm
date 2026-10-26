@@ -5,6 +5,9 @@ import type { MoradaObraNegocio } from "./negocioMetas";
 export type MoradaObraForm = MoradaObraNegocio;
 export type ChaveMorada = keyof MoradaObraForm;
 
+/** De onde veio a morada da obra: copiada da entidade, escrita a mao ou preenchida pela localizacao do dispositivo (a base guarda-o em `morada_origem`). */
+export type OrigemMoradaObra = "entidade" | "manual" | "localizacao";
+
 /** Os limites da base nos textos da morada (rua, localidade e andar). */
 export const MAX_RUA = 300;
 export const MAX_LOCALIDADE = 120;

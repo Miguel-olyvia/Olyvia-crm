@@ -33,7 +33,7 @@ describe("useGuardarIdentidadePessoa: parâmetros", () => {
     expect(parametros(0)).toEqual({
       p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_tipo: "organization", p_nome_empresa: "Obras Lda", p_nome_proprio: null, p_apelido: null,
     });
-    expect(r).toEqual({ tipo: "organization", nome: "Obras Lda", empresaNome: "Obras Lda", mudou: true });
+    expect(r).toEqual({ tipo: "organization", nome: "Obras Lda", empresaNome: "Obras Lda", organizationKind: null, tipoCliente: null, mudou: true });
   });
 
   it("pessoa singular com nome: manda tipo, nome próprio e apelido apanhados, sem nome de empresa", async () => {
@@ -71,7 +71,7 @@ describe("useGuardarIdentidadePessoa: parâmetros", () => {
     const { result } = montar();
     let r;
     await act(async () => { r = await result.current.guardar({ tipo: "organization", nomeEmpresa: "A" }); });
-    expect(r).toEqual({ tipo: null, nome: null, empresaNome: null, mudou: false });
+    expect(r).toEqual({ tipo: null, nome: null, empresaNome: null, organizationKind: null, tipoCliente: null, mudou: false });
   });
 });
 

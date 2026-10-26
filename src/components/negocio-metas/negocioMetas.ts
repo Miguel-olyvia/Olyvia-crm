@@ -4,6 +4,7 @@
 
 import type { FechoNegocio } from "./fechoNegocio";
 import type { DecisaoLevantamento } from "./registosTipos";
+import type { RespostaGravada } from "./respostasQuestionario";
 
 export type FaseNegocio = "orcamento" | "proposta" | "contrato" | "ganho";
 export type EstadoProposta = "rascunho" | "enviada" | "aceite";
@@ -94,6 +95,12 @@ export interface VisitaNegocio {
 
 export interface NegocioMes {
   id: string;
+  /** O que o cliente pediu (`negocios.pedido_cliente`); falta sem texto ou numa ficha anterior à migration 20261231100000. */
+  pedidoCliente?: string;
+  /** A versão do questionário contra a qual a qualificação foi gravada. */
+  versaoQuestionario?: number;
+  /** As respostas da Qualificação gravadas no negócio, com o snapshot (não confundir com `qualificacao`, do protótipo). */
+  qualificacaoGravada?: RespostaGravada[];
   /** A pessoa (lead/cliente) a que o negócio pertence; serve para a abrir. */
   pessoaId: string;
   pessoa: string;

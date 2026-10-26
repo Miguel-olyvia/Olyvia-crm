@@ -13,6 +13,7 @@ import { LinhaCampo, ListaCampos } from "@/components/ficha-comum/ListaCampos";
 import { Seccao } from "@/components/ficha-comum/Seccao";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ErroAcao } from "@/components/pessoas/ErroAcao";
+import type { TipoCliente } from "@/components/pessoas/pessoasTipos";
 import { useExecutarAcao } from "@/components/pessoas/useExecutarAcao";
 import type { DadosIdentidade } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
 import { CHAVES_ERRO_NEG } from "@/hooks/pessoas/errosNeg";
@@ -30,6 +31,8 @@ interface IdentidadeFichaRealProps {
   /** `first_name` e `last_name` da base: quando existem, o formulário abre com eles em vez de partir o nome. */
   nomeProprio?: string | null;
   apelido?: string | null;
+  /** O tipo de cliente da base: `condominio` faz de uma organização um condomínio (que nunca se despromove a empresa aqui). */
+  tipoCliente?: TipoCliente;
   podeEditar: boolean;
   aoGuardar: (dados: DadosIdentidade) => Promise<unknown>;
 }
@@ -43,7 +46,8 @@ function OpcaoTipo({ valor, rotulo, id }: { valor: TipoIdentidade; rotulo: strin
   );
 }
 
-export function IdentidadeFichaReal({ nome, tipo, empresaNome, nomeProprio, apelido, podeEditar, aoGuardar }: IdentidadeFichaRealProps) {
+export function IdentidadeFichaReal({ nome, tipo: tipoDaBase, empresaNome, nomeProprio, apelido, tipoCliente, podeEditar, aoGuardar }: IdentidadeFichaRealProps) {
+  const tipo: TipoIdentidade | null = tipoDaBase === "organization" && tipoCliente === "condominio" ? "condominio" : tipoDaBase;
   const { t } = useTranslation();
   const anunciar = useAnunciar();
   const id = useId();
@@ -83,7 +87,7 @@ export function IdentidadeFichaReal({ nome, tipo, empresaNome, nomeProprio, apel
     const pedido = pedidoDeIdentidade(form, atual);
     if (pedido.estado === "falta") {
       // O erro diz-se, marca o campo em falta e leva-lhe o foco (quem usa o teclado ou o leitor de ecrã sabe qual corrigir).
-      const marcas = form.tipo === "organization"
+      const marcas = form.tipo !== "person"
         ? { empresa: true, nomeProprio: false, apelido: false }
         : { empresa: false, nomeProprio: compactar(form.nomeProprio) === "", apelido: compactar(form.apelido) === "" };
       setFaltaChave(`${I}${pedido.chaveErro}`);
@@ -96,7 +100,9 @@ export function IdentidadeFichaReal({ nome, tipo, empresaNome, nomeProprio, apel
     executar.executar(() => aoGuardar(pedido.dados).then(() => undefined), () => { fechar(); anunciar(mensagem); }, mensagem);
   };
 
-  const ehEmpresa = tipo === "organization";
+  const ehEmpresa = tipo === "organization" || tipo === "condominio";
+  const chaveTipo = tipo === "condominio" ? "condominio" : ehEmpresa ? "company" : "person";
+  const chaveNomeEmpresa = form?.tipo === "condominio" ? "condominioName" : "companyName";
   // A pessoa que o servidor recusa por NG003 (indisponível, partilhada, utilizador do sistema): aqui diz-se o que isso significa para a edição.
   const chaveErro = executar.erro === CHAVES_ERRO_NEG.NG003 ? `${I}errorUnavailable` : executar.erro;
   const idErro = `${id}-erro`;
@@ -111,8 +117,8 @@ export function IdentidadeFichaReal({ nome, tipo, empresaNome, nomeProprio, apel
       {!aberto || !form ? (
         <>
           <ListaCampos>
-            {tipo !== null && <LinhaCampo rotulo={t(`${I}type`)}>{t(`${I}${ehEmpresa ? "company" : "person"}`)}</LinhaCampo>}
-            <LinhaCampo rotulo={t(`${I}${ehEmpresa ? "companyName" : "name"}`)}>{ehEmpresa ? empresaNome ?? nome : nome}</LinhaCampo>
+            {tipo !== null && <LinhaCampo rotulo={t(`${I}type`)}>{t(`${I}${chaveTipo}`)}</LinhaCampo>}
+            <LinhaCampo rotulo={t(`${I}${tipo === "condominio" ? "condominioName" : ehEmpresa ? "companyName" : "name"}`)}>{ehEmpresa ? empresaNome ?? nome : nome}</LinhaCampo>
           </ListaCampos>
           {podeEditar && tipo !== null && (
             <Button ref={botaoEditar} type="button" variant="outline" className={cn("mt-3 min-h-11", FOCO)} onClick={abrir}>{t(`${I}edit`)}</Button>
@@ -122,11 +128,13 @@ export function IdentidadeFichaReal({ nome, tipo, empresaNome, nomeProprio, apel
         <div className="space-y-3">
           <RadioGroup value={form.tipo} onValueChange={(v) => mudar({ tipo: v as TipoIdentidade })} aria-label={t(`${I}typeLegend`)} className="gap-0">
             <OpcaoTipo id={`${id}-pessoa`} valor="person" rotulo={t(`${I}person`)} />
-            <OpcaoTipo id={`${id}-empresa`} valor="organization" rotulo={t(`${I}company`)} />
+            {/* Um condomínio não se passa a empresa aqui: a base despromoveria o tipo de cliente. */}
+            {tipo !== "condominio" && <OpcaoTipo id={`${id}-empresa`} valor="organization" rotulo={t(`${I}company`)} />}
+            <OpcaoTipo id={`${id}-condominio`} valor="condominio" rotulo={t(`${I}condominio`)} />
           </RadioGroup>
-          {form.tipo === "organization" ? (
+          {form.tipo !== "person" ? (
             <div className="space-y-1.5">
-              <Label htmlFor={`${id}-nome-empresa`}>{t(`${I}companyName`)}</Label>
+              <Label htmlFor={`${id}-nome-empresa`}>{t(`${I}${chaveNomeEmpresa}`)}</Label>
               <Input
                 id={`${id}-nome-empresa`} ref={primeiroCampo} className="min-h-11" maxLength={200} value={form.nomeEmpresa}
                 onChange={(e) => mudar({ nomeEmpresa: e.target.value })} {...ligar(invalidos.empresa, false)}

@@ -5,8 +5,9 @@
 // Uma lead legada (perdida, rejeitada, cancelada) aparece como abordagem normal: `perdida` nunca se preenche.
 import { MOTIVOS_PERDA, RESULTADOS_CONTACTO } from "@/components/pessoas/opcoesPessoa";
 import type {
-  EncerramentoPessoa, MotivoEncerramento, Pessoa, QualificacaoPessoa, ResultadoContacto, ResultadoEncerramento,
+  ContactoPreferido, EncerramentoPessoa, HoraPreferida, MotivoEncerramento, TipoCliente, Pessoa, QualificacaoPessoa, ResultadoContacto, ResultadoEncerramento,
 } from "@/components/pessoas/pessoasTipos";
+import { lerRespostasGravadas } from "./respostasGravadas";
 import { diasEntre } from "./adaptarResumoPessoa";
 import { escolher, textoOuNull } from "./adaptarComum";
 import type { FichaDb, MoradaFichaDb } from "./fichaTipos";
@@ -24,6 +25,13 @@ function adaptarMorada(m: MoradaFichaDb | null): Pessoa["morada"] {
   const localidade = textoOuNull(m.localidade) ?? "";
   if (!rua && !cp && !localidade) return undefined;
   return { linha: [rua, andar].filter(Boolean).join(", "), cp, localidade };
+}
+
+/** Os quatro campos da morada da entidade, aparados; `undefined` sem rua, código postal nem localidade. */
+function moradaEmCampos(m: MoradaFichaDb | null): Pessoa["moradaCampos"] {
+  if (!m) return undefined;
+  const campos = { rua: textoOuNull(m.rua) ?? "", codigoPostal: textoOuNull(m.codigo_postal) ?? "", localidade: textoOuNull(m.localidade) ?? "", andar: textoOuNull(m.andar) ?? "" };
+  return campos.rua || campos.codigoPostal || campos.localidade ? campos : undefined;
 }
 
 const empresaDe = (nome: string | null): Pessoa["empresa"] => {
@@ -67,11 +75,24 @@ function qualificacaoDe(pessoa: FichaDb["pessoa"]): QualificacaoPessoa | undefin
   return QUALIFICACOES_TEXTO(pessoa.qualificacao_tipo) ?? QUALIFICACOES_TEXTO(pessoa.qualificacao);
 }
 
+const CONTACTOS: readonly ContactoPreferido[] = ["telefone", "email", "whatsapp", "sms"];
+const HORAS: readonly HoraPreferida[] = ["manha", "tarde", "fim_do_dia"];
+const TIPOS_CLIENTE: readonly TipoCliente[] = ["particular", "empresa", "condominio"];
+
+/** O tipo de cliente que a base diz; sem ele deduz-se do tipo da entidade e do `organization_kind`; sem nenhum dos dois, não se sabe. */
+function tipoClienteDe(p: FichaDb["pessoa"]): TipoCliente | undefined {
+  if (p.tipo_cliente != null) return escolher(p.tipo_cliente, TIPOS_CLIENTE) ?? undefined;
+  if (p.tipo === "person") return "particular";
+  if (p.tipo === "organization") return p.organization_kind === "condominio" ? "condominio" : "empresa";
+  return undefined;
+}
+
 /** A pessoa da ficha. `hoje` é o dia de Lisboa (AAAA-MM-DD). */
 export function adaptarPessoa(ficha: FichaDb, hoje: string): Pessoa {
   const { pessoa, agregados } = ficha;
   const morada = adaptarMorada(pessoa.morada);
   const proximo = agregados.proximo_contacto_em;
+  const qualificacaoGravada = lerRespostasGravadas(pessoa.qualificacao_respostas);
   return {
     id: pessoa.id,
     nome: pessoa.nome?.trim() ?? "",
@@ -79,8 +100,14 @@ export function adaptarPessoa(ficha: FichaDb, hoje: string): Pessoa {
     comercial: pessoa.responsavel_nome?.trim() ?? "",
     ultimoContactoDias: diasEntre(agregados.ultimo_contacto_em, hoje),
     morada,
+    moradaCampos: moradaEmCampos(pessoa.morada),
     distrito: textoOuNull(pessoa.morada?.distrito) ?? undefined,
     qualificacao: qualificacaoDe(pessoa),
+    contactoPreferido: escolher(pessoa.preferred_contact, CONTACTOS) ?? undefined,
+    horaPreferida: escolher(pessoa.preferred_time, HORAS) ?? undefined,
+    lingua: textoOuNull(pessoa.locale) ?? undefined,
+    tipoCliente: tipoClienteDe(pessoa),
+    ...(qualificacaoGravada.length > 0 ? { qualificacaoGravada } : {}),
     campanha: textoOuNull(pessoa.origem?.campanha) ?? undefined,
     formulario: textoOuNull(pessoa.origem?.formulario) ?? undefined,
     nif: textoOuNull(pessoa.nif) ?? undefined,

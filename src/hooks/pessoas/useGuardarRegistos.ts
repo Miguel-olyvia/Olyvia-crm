@@ -7,6 +7,7 @@ import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto
 import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import type { RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 import type { VisitaPessoa } from "@/components/negocio-metas/registosTipos";
+import { chavesDaAba } from "@/components/negocio-metas/respostasQuestionario";
 import { useTranslation } from "@/hooks/useTranslation";
 import { adaptarRegistos } from "./adaptarRegistos";
 import { ErroNeg } from "./chamarNeg";
@@ -205,6 +206,7 @@ export function useGuardarRegistos(ficha: FichaDb | null, opcoes: OpcoesGuardarR
       organizationId, pessoaId: ficha.pessoa.id, nome: ficha.pessoa.nome ?? "", visitas, base, sessao: new Set(sessao.criadas.keys()), omissao,
       tituloDoTipo: (tipo) => (tipo ? t(`pessoasPagina.real.visit.kind.${tipo}`) : ""), agora: Date.now(), hoje: hojeLisboa(), comercial, negocioId,
       rascunho: comId, levantamentoLivre: ignorarLivre ? null : levantamentoLivreDaFicha(ficha), novoIdLevantamento: () => (sessao.idLevantamento ??= crypto.randomUUID()),
+      chavesQualificacao: chavesDaAba(questionario, "qualificacao"),
     });
     if (!plano.ok) throw new ErroNeg(null, null, CHAVE_DA_FALTA[plano.falta]);
     const comLevantamento = plano.passos.find((p): p is PassoLevantamento => p.tipo === "levantamento");

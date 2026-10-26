@@ -1,7 +1,8 @@
 // Os campos da agenda de uma visita ligada à base: o quadro, quem vai (chips), o dia e a hora (obrigatória), a duração, o aviso de conflito de
 // horário e a morada da visita. É controlado: quem o usa (Marcar e Alterar) guarda os valores, valida e grava. O aviso de conflito é só um
 // pré-aviso de leitura (falha aberto e nunca diz «disponível»); a recusa verdadeira vem da base ao gravar.
-import type { Ref } from "react";
+import { useId, type Ref } from "react";
+import { Check } from "lucide-react";
 import type { AgendaVisitaLida } from "@/hooks/pessoas/useAgendaVisita";
 import type { ConflitoVisita } from "@/hooks/pessoas/useConflitoVisita";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -41,6 +42,8 @@ interface CamposAgendaVisitaProps {
   grupoRecursos?: Ref<HTMLFieldSetElement>;
   /** A guardar: nada se edita (os campos só se leem; a lista de quadro e a duração desativam-se). */
   desativado?: boolean;
+  /** Mostra «Quem vai estar» (marcar a visita); sem isto o campo nao existe e a visita segue como estava. */
+  comQuemVaiEstar?: boolean;
 }
 
 function EstadoDaAgenda({ agenda }: { agenda: CamposAgendaVisitaProps["agenda"] }) {
@@ -112,6 +115,39 @@ function Duracao({ id, valor, aoMudar, desativado }: Pick<CamposAgendaVisitaProp
   );
 }
 
+const PRESENTES = ["cliente", "casal", "familia", "outra"] as const;
+
+/** Quem vai estar na visita: uma so opcao, opcional (clicar na escolhida desfaz). */
+function QuemVaiEstar({ valor, aoMudar, desativado }: Pick<CamposAgendaVisitaProps, "valor" | "aoMudar" | "desativado">) {
+  const { t } = useTranslation();
+  const escolhido = valor.quemVaiEstar ?? "";
+  const rotulo = useId();
+  return (
+    <div className="space-y-2">
+      <p id={rotulo} className="text-sm font-semibold text-foreground">{t(`${A}present`)}</p>
+      <div role="group" aria-labelledby={rotulo} className="flex flex-wrap gap-2">
+        {PRESENTES.map((chave) => {
+          const ligado = escolhido === chave;
+          return (
+            <button
+              key={chave} type="button" aria-pressed={ligado} aria-disabled={desativado || undefined}
+              onClick={() => { if (!desativado) aoMudar({ quemVaiEstar: ligado ? "" : chave }); }}
+              className={cn(
+                "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-2 text-sm transition-colors motion-reduce:transition-none", FOCO,
+                desativado && "cursor-not-allowed opacity-70",
+                ligado ? "border-primary bg-primary/10 font-medium text-foreground ring-1 ring-primary" : "border-input bg-background text-foreground hover:bg-accent",
+              )}
+            >
+              {ligado && <Check className="h-4 w-4 shrink-0" aria-hidden="true" />}
+              {t(`${A}present.${chave}`)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** O aviso de conflito: sempre presente (uma região de estado só se anuncia se já existia), vazia quando não há nada a dizer. */
 function AvisoConflito({ conflito, nomes, semVerificar }: { conflito: ConflitoVisita; nomes: string[]; semVerificar: string[] }) {
   const { t } = useTranslation();
@@ -158,6 +194,7 @@ export function CamposAgendaVisita(p: CamposAgendaVisitaProps) {
         erroData={erroData} erroHora={erroHora} somenteLeitura={p.desativado} aoMudar={p.aoMudar}
       />
       <Duracao id={p.id} valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />
+      {p.comQuemVaiEstar && <QuemVaiEstar valor={p.valor} aoMudar={p.aoMudar} desativado={p.desativado} />}
       <AvisoConflito conflito={p.conflito} nomes={nomes} semVerificar={semVerificar} />
       <MoradaVisitaCampos id={`${p.id}-morada`} moradaLead={p.moradaLead} valor={p.destino} erro={p.erroMorada} aoMudar={p.aoMudarDestino} />
     </div>

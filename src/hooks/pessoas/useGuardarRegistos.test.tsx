@@ -213,7 +213,7 @@ describe("recusas antes de escrever", () => {
 
   it("respostas por corrigir também se recusam antes de escrever as visitas", async () => {
     const { result } = await montar();
-    const e = await falhar(result.current.guardar([visita("nova")], { ...COM_NOTA, respostas: { orcCliente: "abc" } }, "Rita"));
+    const e = await falhar(result.current.guardar([visita("nova")], { ...COM_NOTA, respostas: { notas: "x".repeat(2001) } }, "Rita"));
     expect((e as ErroNeg).chave).toBe("businessGoals.new.qform.invalid");
     expect(chamadas()).toEqual([]);
   });

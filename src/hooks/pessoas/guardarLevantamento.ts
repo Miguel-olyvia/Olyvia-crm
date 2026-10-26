@@ -37,14 +37,14 @@ export interface EntradaGuardarLevantamento {
  * é do ecrã; esta é a que impede gravar mesmo que alguém chame `guardar` sem passar por ele.
  */
 export function paramsGuardarLevantamento(e: EntradaGuardarLevantamento, q: QuestionarioForm): Record<string, unknown> {
-  if (Object.keys(validarRespostas(q, e.respostas)).length > 0) throw new ErroNeg(null, null, CHAVE_INVALIDAS);
+  if (Object.keys(validarRespostas(q, e.respostas, "visita")).length > 0) throw new ErroNeg(null, null, CHAVE_INVALIDAS);
   return {
     p_id: e.id,
     p_organization_id: e.organizationId,
     p_entity_id: e.entityId,
     p_dados: q.versao === null ? e.dados : { ...e.dados, versao_questionario: q.versao },
     p_linhas: e.linhas,
-    p_respostas: respostasParaBase(q, e.respostas),
+    p_respostas: respostasParaBase(q, e.respostas, "visita"),
     ...(e.negocioId ? { p_negocio_id: e.negocioId } : {}),
   };
 }

@@ -18,6 +18,7 @@ export function valoresIniciaisDosRegistos(pessoa: Pick<Pessoa, "id" | "comercia
       levantamento: {
         ...livre.rascunho,
         dados: { data: livre.data, estado: livre.estado ?? "porFazer", feitoPor: livre.feitoPor },
+        ...(livre.moradaOrigem ? { moradaOrigem: livre.moradaOrigem } : {}),
       },
     } : {}),
   };

@@ -8,6 +8,7 @@ export function paraOpcao(p: Pessoa): PessoaOpcao {
   return {
     id: p.id, nome: p.nome, contacto: p.contacto, email: p.contacto.email ?? undefined,
     morada: p.morada ? textoMorada(p.morada) : undefined,
+    ...(p.moradaCampos ? { moradaEntidade: { ...p.moradaCampos } } : {}),
     distrito: p.distrito, nif: p.nif, empresa: p.empresa?.nome, nifEmpresa: p.empresa?.nif,
   };
 }

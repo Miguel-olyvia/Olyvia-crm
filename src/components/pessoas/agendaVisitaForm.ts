@@ -25,6 +25,8 @@ export interface ValorAgenda {
   /** A chave da duração (`m30`, `h1`, `h1m30`, `h2`); vazia com `duracaoMinutos` é uma duração da base. */
   duracao: string;
   duracaoMinutos?: number;
+  /** Quem vai estar na visita (`cliente`, `casal`, `familia` ou `outra`); ausente ou vazio = nao se disse. */
+  quemVaiEstar?: string;
 }
 
 export type ErroAgenda = "quadroEmFalta" | "recursoEmFalta" | "dataVazia" | "dataPassada" | "horaVazia" | "horaInvalida";
@@ -117,7 +119,7 @@ export function entradaDaVisita(d: DadosEntrada): EntradaVisita {
     nota: juntarNotas(d.nota, d.destino.notaAcesso),
     morada: onde.moradaVisita,
     igualALead: onde.igualALead,
-    quemVaiEstar: d.quemVaiEstar,
+    quemVaiEstar: d.agenda.quemVaiEstar ?? d.quemVaiEstar,
     ...(d.negocioId !== undefined ? { negocioId: d.negocioId } : {}),
   };
 }

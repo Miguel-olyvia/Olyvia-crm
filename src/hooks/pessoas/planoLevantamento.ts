@@ -38,6 +38,8 @@ export interface LevantamentoLivre {
   /** O comercial que fez (`feito_por`), quando se conhece. */
   feitoPorId?: string | null;
   morada: MoradaObraNegocio | null;
+  /** De onde veio a morada gravada (entidade, manual ou localizacao); `null` se não se sabe. */
+  moradaOrigem?: "entidade" | "manual" | "localizacao" | null;
 }
 
 export interface PassoLevantamento {
@@ -77,6 +79,15 @@ function moradaParaBase(m: MoradaObraNegocio | undefined): Record<string, string
   };
 }
 
+/**
+ * `morada_origem` quando o ecrã a conhece (a ficha real) e a morada tem pelo menos um campo que a base aceita: a base exige origem exatamente quando
+ * há morada. Sem origem do ecrã (o exemplo) nada se envia e a base deriva-a.
+ */
+function origemParaBase(r: RascunhoLevantamento): Record<string, string> {
+  if (!r.moradaOrigem || Object.keys(moradaParaBase(r.moradaObra)).length === 0) return {};
+  return { morada_origem: r.moradaOrigem };
+}
+
 const mesmaMorada = (a: MoradaObraNegocio | null | undefined, b: MoradaObraNegocio | null | undefined): boolean => {
   const x = moradaAparada(a ?? MORADA_VAZIA);
   const y = moradaAparada(b ?? MORADA_VAZIA);
@@ -87,7 +98,8 @@ const respostasEmTexto = (r: Respostas): string => JSON.stringify(Object.entries
 
 /** Há alguma coisa escrita que valha um levantamento novo: linhas, observações, respostas, ou uma morada que não é só a que as visitas sugerem. */
 function moradaEscrita(r: RascunhoLevantamento, todas: readonly VisitaNegocio[]): boolean {
-  return temMorada(r.moradaObra) && !mesmaMorada(r.moradaObra, moradaDasVisitas(todas)?.moradaObra);
+  // Com origem (a ficha real) a morada é uma escolha, copiada da entidade ou do local: nunca é a sugestão das visitas.
+  return temMorada(r.moradaObra) && (r.moradaOrigem != null || !mesmaMorada(r.moradaObra, moradaDasVisitas(todas)?.moradaObra));
 }
 
 interface Contexto {
@@ -104,6 +116,13 @@ interface Contexto {
   /** O uuid da base de uma visita do painel que já existe (ou foi criada nesta sessão); `undefined` se ainda não existe. */
   idRealDe: (idNoPainel: string) => string | undefined;
   novoId: () => string;
+  /** As chaves das perguntas da aba Qualificação: essas respostas gravam-se no negócio (neg_guardar_qualificacao), não no levantamento. Sem isto, todas seguem. */
+  chavesQualificacao?: ReadonlySet<string>;
+}
+
+function semQualificacao(r: RascunhoLevantamento, chaves: ReadonlySet<string> | undefined): RascunhoLevantamento {
+  if (!chaves || chaves.size === 0) return r;
+  return { ...r, respostas: Object.fromEntries(Object.entries(r.respostas).filter(([chave]) => !chaves.has(chave))) };
 }
 
 const estadoParaBase = (estado: "porFazer" | "feito"): string => (estado === "feito" ? "feito" : "por_fazer");
@@ -125,6 +144,7 @@ function mudouFace(livre: LevantamentoLivre, c: Contexto, principal: VisitaNegoc
   if (JSON.stringify(linhasParaBase(r.linhas)) !== JSON.stringify(linhasParaBase(antes.linhas))) return true;
   if (r.observacoes.trim() !== antes.observacoes.trim() || respostasEmTexto(r.respostas) !== respostasEmTexto(antes.respostas)) return true;
   if (moradaEscrita(r, c.todas) && !mesmaMorada(r.moradaObra, livre.morada)) return true;
+  if (r.moradaOrigem != null && temMorada(r.moradaObra) && r.moradaOrigem !== (livre.moradaOrigem ?? null)) return true;
   if (!principal) return mudouDadosProprios(livre, r.dados, c.comercial);
   return (c.idRealDe(principal.id) ?? null) !== livre.visitaId || principal.data !== livre.data || (principal.estado === "feita" && livre.estado !== "feito");
 }
@@ -133,7 +153,12 @@ function mudouFace(livre: LevantamentoLivre, c: Contexto, principal: VisitaNegoc
  * O passo do levantamento, ou `null` se não há nada a gravar: sem levantamento livre e sem conteúdo não se cria um (marcar uma visita não cria um
  * levantamento); com um que já existe, só se grava se algo mudou (não se reescreve o que a pessoa não mexeu).
  */
-export function passoLevantamento(c: Contexto): PassoLevantamento | null {
+export function passoLevantamento(contexto: Contexto): PassoLevantamento | null {
+  const chaves = contexto.chavesQualificacao;
+  const c: Contexto = {
+    ...contexto, rascunho: semQualificacao(contexto.rascunho, chaves),
+    livre: contexto.livre ? { ...contexto.livre, rascunho: semQualificacao(contexto.livre.rascunho, chaves) } : null,
+  };
   const { livre, rascunho } = c;
   const principal = visitaDoLevantamento(c.vivas);
   const comConteudo = rascunho.linhas.length > 0 || rascunho.observacoes.trim() !== "" || Object.keys(rascunho.respostas).length > 0 || moradaEscrita(rascunho, c.todas);
@@ -149,6 +174,7 @@ export function passoLevantamento(c: Contexto): PassoLevantamento | null {
     ...(!principal && livre?.visitaId ? { visita_id: livre.visitaId } : {}),
     ...(notas ? { notas } : {}),
     ...moradaParaBase(rascunho.moradaObra),
+    ...origemParaBase(rascunho),
   };
   return {
     tipo: "levantamento", levantamentoId: livre?.id ?? c.novoId(), negocioId: c.negocioId, visitaPainelId: principal?.id ?? null,
