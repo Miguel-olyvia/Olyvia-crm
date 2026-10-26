@@ -2,7 +2,7 @@
 // cabeçalho e das abas de fases antigos). Os registos, os dados da pessoa e as abas Visitas, Negócios, Submissões e Atividade NÃO existem neste modo
 // (ver FichaGuiaSemApoio.test.tsx): o Pipeline faz tudo no assistente de passos.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ComCostura, dadosFalsos, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
 import { repor } from "@/components/negocio-metas/negociosAlterados";
@@ -205,6 +205,16 @@ describe("com um negócio aberto", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Registar chamada" }));
     expect(screen.getByRole("heading", { name: "Registar chamada" })).toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Fases" })).toBeInTheDocument();
+  });
+
+  it("depois de registar a chamada o negócio fica aberto: a ficha continua nele (a chamada liga-se a ele) e não volta ao guia da pessoa", async () => {
+    montar(resumoComNegocio(), { negocioInicial: "n1" });
+    abrirMais();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Registar chamada" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Não atendeu/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Guardar/ }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Registar chamada" })).toBeNull());
+    expect(document.querySelector("[data-negocio-titulo]")).toHaveTextContent("WC social");
   });
 
   it("«← Negócios» (discreto, por cima do cabeçalho) devolve o guia da pessoa, sem abas nem lista por baixo", () => {
