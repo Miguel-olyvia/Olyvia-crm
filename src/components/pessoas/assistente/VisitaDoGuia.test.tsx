@@ -1,6 +1,7 @@
 // A fase Visita do assistente, ligada à gravação que já existe (os hooks da base estão simulados): a lista de visitas do negócio, um passo por secção do
 // levantamento vinda do questionário da base (sem Necessidades), e «Fechar levantamento», que só guarda. O levantamento é um por negócio.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { QuestionarioForm } from "@/components/negocio-metas/questionarioForm";

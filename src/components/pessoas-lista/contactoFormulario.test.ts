@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { formularioDeContacto, pedidoDeContacto, type ContactoAtual } from "./contactoFormulario";
 
 const atual: ContactoAtual = { telefone: "912345678", email: "ana@x.pt", contacto: "email", hora: "tarde", lingua: "pt" };

@@ -1,5 +1,6 @@
 // O grupo «Quem pede» do passo Chamada: o tipo de cliente e o NIF, gravados pelos hooks próprios (simulados aqui) com a ordem contacto, tipo, NIF.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { ErroNeg } from "@/hooks/pessoas/chamarNeg";

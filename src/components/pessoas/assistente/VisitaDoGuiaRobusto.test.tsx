@@ -2,6 +2,7 @@
 // migra da chave da pessoa para a do negócio), gravar com sucesso apaga o rascunho, o passo inicial espera pelo questionário, e «Cancelar visita» usa a
 // ação que já existe.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { QuestionarioForm } from "@/components/negocio-metas/questionarioForm";

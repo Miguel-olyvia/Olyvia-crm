@@ -1,6 +1,7 @@
 // A fase Contacto do assistente, os casos que só se veem a mexer no tempo: criar o negócio a meio não remonta o ecrã nem perde o escrito, o rascunho
 // migra da chave da pessoa para a do negócio, o que o negócio já tinha chega ao ecrã quando ele aparece, e o passo inicial espera pelo questionário.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { QuestionarioForm } from "@/components/negocio-metas/questionarioForm";

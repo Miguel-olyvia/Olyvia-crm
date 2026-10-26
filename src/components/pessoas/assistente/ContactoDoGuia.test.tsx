@@ -1,6 +1,7 @@
 // A fase Contacto do assistente, ligada à gravação que já existe (os hooks da base estão simulados): os 5 passos, o que cada «Continuar» grava, o que fica em
 // rascunho (morada da obra e Preparar a visita), e o que acontece quando a pessoa ainda não tem negócio.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { QuestionarioForm } from "@/components/negocio-metas/questionarioForm";

@@ -1,6 +1,7 @@
 // O conteúdo dos passos da fase Contacto (só apresentação): Chamada (telefone, email e preferências da pessoa), Qualificação (as perguntas do questionário e
 // «o que o cliente pediu» à parte), Morada da obra (vazia ao início), Preparar a visita (nada escolhido ao início) e Marcar a visita.
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CorpoChamada, CorpoMarcar, CorpoMorada, CorpoPreparar, CorpoQualificacao, SemNegocio } from "./PassosContacto";
 import type { BlocoDef } from "@/components/negocio-metas/perguntasTipos";

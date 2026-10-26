@@ -1,5 +1,6 @@
 // A nota para a visita (Preparar a visita) tem o limite de 140 caracteres dito em texto, com um contador visível ligado ao campo.
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { CorpoPreparar } from "./PassosContacto";
