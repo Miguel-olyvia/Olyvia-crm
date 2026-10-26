@@ -137,6 +137,30 @@ serve(async (req) => {
       return { entityId, orgId };
     }
 
+    // ── Nome de quem assina: a ficha atual do documento, não a conta do portal ──
+    // O full_name da conta do portal é gravado quando a conta é criada e nunca
+    // mais é atualizado. Se a ficha (anew_entities) muda de nome depois disso,
+    // o "assinado por" ficava com o nome antigo. Usa-se o display_name atual da
+    // ficha ligada ao documento; o nome da conta só entra se a ficha não tiver
+    // nome. Só é chamado depois de assertOwnership + OTP, não autoriza nada.
+    async function resolveSignerName(
+      column: "proposal_id" | "contract_id",
+      id: string,
+    ): Promise<string> {
+      try {
+        const { entityId } = await resolveDocEntity(column, id);
+        if (entityId) {
+          const { data: ent } = await supabase.from("anew_entities")
+            .select("display_name").eq("id", entityId).maybeSingle();
+          const name = ((ent as any)?.display_name || "").trim();
+          if (name) return name;
+        }
+      } catch (e) {
+        console.error("[client-portal-action] resolveSignerName error:", e);
+      }
+      return clientName;
+    }
+
     // ── IDOR GUARD: direct portal-user row match, with entity_id fallback ──
     async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: string): Promise<boolean> {
       if (!id) return false;
@@ -723,9 +747,10 @@ serve(async (req) => {
 
         const { data: propData } = await supabase.from("proposals").select("proposal_number, title").eq("id", proposal_id).maybeSingle();
         const contractNote = createdContractId ? " Um contrato foi gerado automaticamente." : "";
+        const proposalSignerName = await resolveSignerName("proposal_id", proposal_id);
         await maybeNotify("client_signed_proposal", {
           title: "🎉 Proposta assinada no portal!",
-          message: `O cliente ${clientName} assinou a proposta ${propData?.proposal_number || propData?.title || ""}!${contractNote}`,
+          message: `O cliente ${proposalSignerName} assinou a proposta ${propData?.proposal_number || propData?.title || ""}!${contractNote}`,
           priority: "urgent",
           link: createdContractId ? `/client-contracts` : `/proposals`,
         }, { column: "proposal_id", id: proposal_id });
@@ -807,6 +832,7 @@ serve(async (req) => {
         }
 
         const now = new Date().toISOString();
+        const contractSignerName = await resolveSignerName("contract_id", contract_id);
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("client_contracts").update({
           status: "signed",
@@ -814,7 +840,7 @@ serve(async (req) => {
           signature_date: now,
           signature_ip: detectedIp,
           accepted_at: now,
-          signed_by_name: clientName,
+          signed_by_name: contractSignerName,
           // Assinar muda o documento: a assinatura passa a fazer parte dele.
           // Qualquer copia congelada anterior fica desactualizada, por isso e
           // limpa -- a proxima leitura reconstroi o documento ja assinado e
@@ -867,7 +893,7 @@ serve(async (req) => {
         const { data: signedContract } = await supabase.from("client_contracts").select("contract_number").eq("id", contract_id).maybeSingle();
         await maybeNotify("client_signed_contract", {
           title: "🎉 Contrato assinado no portal!",
-          message: `O cliente ${clientName} assinou o contrato ${signedContract?.contract_number || ""}!`,
+          message: `O cliente ${contractSignerName} assinou o contrato ${signedContract?.contract_number || ""}!`,
           priority: "urgent",
           link: `/client-contracts`,
         }, { column: "contract_id", id: contract_id });

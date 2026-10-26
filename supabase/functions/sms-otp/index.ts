@@ -100,6 +100,11 @@ serve(async (req) => {
           .select("phone_number, country_code")
           .eq("entity_id", anewUser.entity_id)
           .eq("is_primary", true)
+          // Pode haver vários is_primary=true (editar a ficha não desmarca os
+          // antigos); sem ordenação o Postgres devolvia um qualquer. Fica o
+          // principal mais recente. A tabela não tem updated_at.
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .limit(1)
           .maybeSingle();
         if (ep) {
@@ -230,6 +235,10 @@ serve(async (req) => {
           .select("phone_number, country_code")
           .eq("entity_id", portalUser.entity_id)
           .eq("is_primary", true)
+          // Principal mais recente (ver nota em resolveAnewUserPhone): com
+          // vários is_primary=true o SMS ia para um número antigo.
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .limit(1)
           .maybeSingle();
 
