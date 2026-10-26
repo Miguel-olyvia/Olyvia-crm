@@ -1,11 +1,12 @@
 // Gravar a «Nova lead» de Pessoas: a lead é a própria entidade. Insere UMA linha em anew_entities (organização, nome, contacto, extra,
 // origem e campanha) e, se se escolheu um comercial, atribui-o com neg_atribuir_pessoa (o responsável não se escreve diretamente).
-// Afasta-se de Leads em três pontos, de propósito: não reutiliza uma pessoa existente (em Pessoas uma pessoa que já existe bloqueia e
+// Depois cria o negócio (neg_criar_negocio). Afasta-se de Leads em três pontos, de propósito: não reutiliza uma pessoa existente (em Pessoas uma pessoa que já existe bloqueia e
 // nunca se reaproveita); não usa «Criar mesmo assim» (rpc_create_lead_duplicate_override) nem «Partilhar» (link_entity_to_org); já não
 // passa por anew_leads nem pelos satélites de email e telefone. A pessoa criada nesta ação desfaz-se se a atribuição falhar.
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { chamarNeg } from "../chamarNeg";
+import { criarNegocioNovaLead, novoIdNegocio } from "./criarNegocioNovaLead";
 import type { DadosLead } from "./fluxoNovaLead";
 
 export interface PedidoGravar {
@@ -24,6 +25,22 @@ export interface LeadGravada {
   entityId: string;
   /** A lead é a própria entidade: igual a `entityId`. */
   leadId: string | null;
+  /** O negócio criado com a pessoa (o ecrã abre a pessoa já nele). */
+  negocioId: string;
+}
+
+/** A pessoa ficou criada (e atribuída) mas o negócio não: repetir só o negócio, com este id, nunca a pessoa. */
+export class NegocioNaoCriado extends Error {
+  readonly causa: unknown;
+  readonly entityId: string;
+  readonly negocioId: string;
+  constructor(causa: unknown, entityId: string, negocioId: string) {
+    super("A pessoa foi criada mas o negócio não.");
+    this.name = "NegocioNaoCriado";
+    this.causa = causa;
+    this.entityId = entityId;
+    this.negocioId = negocioId;
+  }
 }
 
 /** A gravação falhou. `limpezaFalhou`: a pessoa criada nesta ação não se conseguiu desfazer (quem chama diz-o ao utilizador). */
@@ -89,5 +106,12 @@ export async function gravarNovaLead(p: PedidoGravar): Promise<LeadGravada> {
       throw new FalhaGravar(causa, await desfazerPessoa(entityId));
     }
   }
-  return { entityId, leadId: entityId };
+  const negocioId = novoIdNegocio();
+  try {
+    await criarNegocioNovaLead({ organizationId: p.organizationId, entityId, negocioId, titulo: p.dados.displayName });
+  } catch (causa) {
+    // A pessoa fica (já está atribuída e pode ter o seu negócio criado depois): não se desfaz.
+    throw new NegocioNaoCriado(causa, entityId, negocioId);
+  }
+  return { entityId, leadId: entityId, negocioId };
 }

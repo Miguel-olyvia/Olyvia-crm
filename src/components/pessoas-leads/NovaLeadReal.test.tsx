@@ -156,8 +156,11 @@ describe("NovaLeadReal: criar", () => {
     await screen.findByRole("dialog");
     preencherValido();
     criar();
-    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", screen.getByRole("button", { name: "Nova lead" })));
-    expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
+    // a ficha abre já com o negócio criado (?open=<pessoa>&negocio=<negócio>)
+    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", screen.getByRole("button", { name: "Nova lead" }), expect.stringMatching(/^[0-9a-f-]{36}$/i)));
+    expect(nomesRpc()).toEqual(["neg_procurar_duplicados", "neg_criar_negocio"]);
+    const idNegocio = (supabaseFalso.rpc.mock.calls.find((c) => c[0] === "neg_criar_negocio")![1] as { p_id: string }).p_id;
+    expect(aoAbrirPessoa.mock.calls[0][2]).toBe(idNegocio);
     const inserts = supabaseFalso.chamadasA("anew_entities", "insert");
     expect(inserts).toHaveLength(1);
     expect(inserts[0].dados).toMatchObject({ organization_id: ORG, type: "person", email: "ana@x.pt", phone: "+351912345678" });
@@ -190,7 +193,25 @@ describe("NovaLeadReal: criar", () => {
     expect(aoAbrirPessoa).not.toHaveBeenCalled();
     rpc();
     fireEvent.click(within(alerta).getByRole("button", { name: "Tentar de novo" }));
-    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", expect.anything()));
+    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", expect.anything(), expect.any(String)));
+  });
+
+  it("a pessoa criada mas o negócio não: diz-o no diálogo, não abre a ficha, e «Tentar de novo» cria só o negócio", async () => {
+    rpc({ neg_criar_negocio: { data: null, error: { code: "42501", message: "sem permissão" } } });
+    desenhar();
+    abrir();
+    await screen.findByRole("dialog");
+    preencherValido();
+    criar();
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("A pessoa foi criada mas o negócio não.");
+    expect(aoAbrirPessoa).not.toHaveBeenCalled();
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
+    rpc();
+    fireEvent.click(within(alerta).getByRole("button", { name: "Tentar de novo" }));
+    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", expect.anything(), expect.any(String)));
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
+    expect(nomesRpc().filter((n) => n === "neg_criar_negocio")).toHaveLength(2);
   });
 });
 
@@ -238,7 +259,9 @@ describe("NovaLeadReal: duplicados", () => {
     expect(screen.getByRole("button", { name: "Voltar" })).toHaveFocus();
     expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
     fireEvent.click(screen.getByRole("button", { name: "Confirmar e atualizar" }));
-    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("p1", expect.anything()));
+    // a pessoa existente ganha um negócio novo e a ficha abre já nele
+    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("p1", expect.anything(), expect.any(String)));
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", expect.objectContaining({ p_entity_id: "p1", p_titulo: "Ana Lopes", p_fecho: "contrato" }));
     const contacto = supabaseFalso.chamadasA("anew_entities", "update")[0];
     expect(contacto.dados).toEqual({ phone: "+351912345678" });
     expect(contacto.filtros).toContainEqual(["eq", ["id", "p1"]]);

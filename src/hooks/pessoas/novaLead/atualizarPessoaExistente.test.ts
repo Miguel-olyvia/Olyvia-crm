@@ -120,6 +120,43 @@ describe("atualizarPessoaExistente: reabrir", () => {
   });
 });
 
+describe("atualizarPessoaExistente: o negócio novo da pessoa existente", () => {
+  const NEGOCIO = { id: "neg-1", titulo: "Ana Lopes" };
+
+  it("depois da lead cria um negócio novo com neg_criar_negocio (título = nome da pessoa, fecho contrato, sem reabrir) e é o último passo", async () => {
+    const r = await atualizarPessoaExistente({ organizationId: ORG, entityId: "p1", escrito: ESCRITO, valores: VALORES, plano: PLANO, negocio: NEGOCIO });
+    expect(r).toEqual({ tipo: "atualizada", feito: ["contacto", "lead", "negocio"] });
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", {
+      p_id: "neg-1", p_organization_id: ORG, p_entity_id: "p1", p_titulo: "Ana Lopes", p_fecho: "contrato", p_reabrir_abordagem: false,
+    });
+    expect(chamadasRpc()).not.toContain("neg_criar_lead");
+  });
+
+  it("vem depois de reabrir a abordagem", async () => {
+    await atualizarPessoaExistente({
+      organizationId: ORG, entityId: "p1", escrito: ESCRITO, valores: VALORES, plano: { ...PLANO, reabrirAbordagem: true }, negocio: NEGOCIO,
+    });
+    expect(chamadasRpc()).toEqual(["neg_procurar_duplicados", "neg_reabrir_abordagem", "neg_criar_negocio"]);
+  });
+
+  it("o negócio falha: aviso parcial com o que ficou feito e falhou «negocio» (repetir reusa o mesmo id)", async () => {
+    rpcPadrao({ neg_criar_negocio: { data: null, error: { code: "NG003", message: "x" } } });
+    const erro = await atualizarPessoaExistente({ organizationId: ORG, entityId: "p1", escrito: ESCRITO, valores: VALORES, plano: PLANO, negocio: NEGOCIO }).catch((e) => e);
+    expect(erro).toBeInstanceOf(AtualizacaoParcial);
+    expect(erro.feito).toEqual(["contacto", "lead"]);
+    expect(erro.falhou).toBe("negocio");
+    expect(erro.erro.codigo).toBe("NG003");
+  });
+
+  it("conflito de duplicados: nenhum negócio se cria", async () => {
+    rpcPadrao({
+      neg_procurar_duplicados: { data: [{ pessoa: 1, campo: "telefone", ambito: "organizacao", entity_id: "p2", nome: "Bea", visivel: true }], error: null },
+    });
+    await atualizarPessoaExistente({ organizationId: ORG, entityId: "p1", escrito: ESCRITO, valores: VALORES, plano: PLANO, negocio: NEGOCIO });
+    expect(chamadasRpc()).not.toContain("neg_criar_negocio");
+  });
+});
+
 describe("atualizarPessoaExistente: falhas", () => {
   it("caso 14: o contacto novo é de outra pessoa: devolve o conflito e não grava nada", async () => {
     rpcPadrao({

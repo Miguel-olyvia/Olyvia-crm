@@ -2,8 +2,9 @@
 // exatos de cada função da base; nunca se chama rpc_create_lead_duplicate_override nem link_entity_to_org nem se reutiliza uma pessoa.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { supabaseFalso } from "./supabaseFalso";
+import { criarNegocioNovaLead } from "./criarNegocioNovaLead";
 import { extrairDados, prepararLead, camposBase, type DefinicaoCampo } from "./fluxoNovaLead";
-import { gravarNovaLead, FalhaGravar, type PedidoGravar } from "./gravarNovaLead";
+import { gravarNovaLead, FalhaGravar, NegocioNaoCriado, type PedidoGravar } from "./gravarNovaLead";
 
 vi.mock("@/integrations/supabase/client", async () => ({ supabase: (await import("./supabaseFalso")).supabaseFalso }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -78,6 +79,7 @@ const PEDIDO: PedidoGravar = {
   campanhaId: null,
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const inseridas = () => supabaseFalso.chamadasA("anew_entities", "insert");
 const nomesRpc = () => supabaseFalso.rpc.mock.calls.map((c) => c[0] as string);
 
@@ -90,7 +92,7 @@ beforeEach(() => {
 describe("gravarNovaLead: pessoa nova (a lead é a própria entidade)", () => {
   it("insere UMA linha em anew_entities com a organização, o nome, o contacto, o extra, a origem e a campanha", async () => {
     const r = await gravarNovaLead({ ...PEDIDO, origemId: "src-1", origemNome: "Feira", campanhaId: "camp-1" });
-    expect(r).toEqual({ entityId: "ent-1", leadId: "ent-1" });
+    expect(r).toEqual({ entityId: "ent-1", leadId: "ent-1", negocioId: expect.stringMatching(UUID) });
     expect(inseridas()).toHaveLength(1);
     expect(inseridas()[0].dados).toEqual({
       organization_id: "org-nike", type: "person", display_name: "Ana Lopes", first_name: "Ana", last_name: "Lopes",
@@ -102,17 +104,32 @@ describe("gravarNovaLead: pessoa nova (a lead é a própria entidade)", () => {
 
   it("o comercial escolhido atribui-se pela função da base, depois do insert; _assigned_to nunca vai para o extra nem para uma coluna", async () => {
     await gravarNovaLead(PEDIDO);
-    expect(nomesRpc()).toEqual(["neg_atribuir_pessoa"]);
+    expect(nomesRpc()).toEqual(["neg_atribuir_pessoa", "neg_criar_negocio"]);
     expect(supabaseFalso.rpc).toHaveBeenCalledWith("neg_atribuir_pessoa", { p_organization_id: "org-nike", p_entity_id: "ent-1", p_assigned_to: "u1" });
     const dados = inseridas()[0].dados as Record<string, unknown>;
     expect(dados).not.toHaveProperty("assigned_to");
     expect(dados.extra).not.toHaveProperty("_assigned_to");
   });
 
-  it("sem comercial, sem email nem telefone, sem origem nem campanha: colunas a null e nenhuma função da base", async () => {
+  it("sem comercial, sem email nem telefone, sem origem nem campanha: colunas a null e só o negócio como função da base", async () => {
     await gravarNovaLead({ ...PEDIDO, dados: { ...PEDIDO.dados, email: "", telefone: "" }, valores: { first_name: "Ana" } });
     expect(inseridas()[0].dados).toMatchObject({ email: null, phone: null, origin_id: null, campaign_id: null, extra: { first_name: "Ana" } });
-    expect(supabaseFalso.rpc).not.toHaveBeenCalled();
+    expect(nomesRpc()).toEqual(["neg_criar_negocio"]);
+  });
+
+  it("depois da pessoa (e da atribuição) cria o negócio com neg_criar_negocio: título = nome da pessoa, fecho contrato, sem reabrir", async () => {
+    const r = await gravarNovaLead(PEDIDO);
+    expect(nomesRpc()).toEqual(["neg_atribuir_pessoa", "neg_criar_negocio"]);
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", {
+      p_id: r.negocioId, p_organization_id: "org-nike", p_entity_id: "ent-1", p_titulo: "Ana Lopes", p_fecho: "contrato", p_reabrir_abordagem: false,
+    });
+    expect(r.negocioId).toMatch(UUID);
+  });
+
+  it("neg_criar_lead continua proibida (a lead é a pessoa; o negócio nasce por neg_criar_negocio)", async () => {
+    await gravarNovaLead(PEDIDO);
+    expect(nomesRpc()).not.toContain("neg_criar_lead");
+    expect(nomesRpc()).toContain("neg_criar_negocio");
   });
 
   it("nunca usa as funções nem as tabelas antigas (create_lead_entity_for_org, rpc_create_lead_manual, ensure_entity_org_link, satélites, leads)", async () => {
@@ -152,6 +169,29 @@ describe("gravarNovaLead: falhas e limpeza", () => {
     const apagar = supabaseFalso.chamadasA("anew_entities", "delete");
     expect(apagar).toHaveLength(1);
     expect(apagar[0].filtros).toContainEqual(["eq", ["id", "ent-1"]]);
+  });
+
+  it("o negócio falha depois de a pessoa criada: lança NegocioNaoCriado com a pessoa e o id do negócio, e NÃO apaga a pessoa", async () => {
+    supabaseFalso.rpc.mockImplementation(async (nome: string) => (nome === "neg_criar_negocio"
+      ? { data: null, error: { code: "42501", message: "sem permissão" } } : { data: { mudou: true }, error: null }));
+    const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
+    expect(erro).toBeInstanceOf(NegocioNaoCriado);
+    expect(erro.entityId).toBe("ent-1");
+    expect(erro.negocioId).toMatch(UUID);
+    expect(supabaseFalso.chamadasA("anew_entities", "delete")).toEqual([]);
+    expect(inseridas()).toHaveLength(1);
+  });
+
+  it("repetir só o negócio (criarNegocioNovaLead) reusa o mesmo id e nunca insere outra pessoa", async () => {
+    supabaseFalso.rpc.mockImplementationOnce(async () => ({ data: { mudou: true }, error: null }));
+    supabaseFalso.rpc.mockImplementationOnce(async () => ({ data: null, error: { message: "boom" } }));
+    const erro = await gravarNovaLead(PEDIDO).catch((e) => e);
+    expect(erro).toBeInstanceOf(NegocioNaoCriado);
+    await criarNegocioNovaLead({ organizationId: "org-nike", entityId: erro.entityId, negocioId: erro.negocioId, titulo: "Ana Lopes" });
+    const criar = supabaseFalso.rpc.mock.calls.filter((c) => c[0] === "neg_criar_negocio");
+    expect(criar).toHaveLength(2);
+    expect(criar[1][1]).toEqual(criar[0][1]);
+    expect(inseridas()).toHaveLength(1);
   });
 
   it("se a limpeza também falha, diz-se (limpezaFalhou)", async () => {

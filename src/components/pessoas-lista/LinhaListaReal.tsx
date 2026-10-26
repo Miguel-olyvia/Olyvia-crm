@@ -7,7 +7,7 @@ import { COLUNAS_POR_OMISSAO } from "./colunasPessoas";
 import { vistaDaLista } from "./vistaDaLista";
 
 /** Abre a ficha de uma pessoa; `origem` é o botão clicado (a ficha devolve-lhe o foco ao fechar). */
-export type AoAbrirPessoa = (pessoaId: string, origem?: HTMLElement) => void;
+export type AoAbrirPessoa = (pessoaId: string, origem?: HTMLElement, negocioId?: string) => void;
 
 interface LinhaListaRealProps {
   pessoa: PessoaDaLista;

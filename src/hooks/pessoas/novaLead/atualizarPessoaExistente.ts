@@ -3,16 +3,18 @@
 //   2. substitui o email e/ou o telefone da própria entidade (UPDATE direto em anew_entities; nunca se acrescenta um segundo);
 //   3. junta os campos do formulário ao `extra` da entidade (a lead é a entidade) e, se se escolheu um comercial, muda o responsável com
 //      neg_atribuir_pessoa (o responsável não se escreve diretamente);
-//   4. se a abordagem está encerrada, neg_reabrir_abordagem com a entidade.
-// Os passos 2 a 4 não são atómicos: uma falha a meio lança AtualizacaoParcial, com o que ficou feito e o que falhou. Repetir é seguro.
+//   4. se a abordagem está encerrada, neg_reabrir_abordagem com a entidade;
+//   5. cria um negócio novo (neg_criar_negocio): quem escolhe uma pessoa que já existe quer outro negócio para ela.
+// Os passos 2 a 5 não são atómicos: uma falha a meio lança AtualizacaoParcial, com o que ficou feito e o que falhou. Repetir é seguro.
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { chamarNeg, ErroNeg } from "../chamarNeg";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG } from "../errosNeg";
+import { criarNegocioNovaLead } from "./criarNegocioNovaLead";
 import { revalidarAntesDeAtualizar } from "./revalidarNovaLead";
 import type { DecisaoDuplicados, Escrito, PlanoAtualizar } from "./tiposNovaLead";
 
-export type PassoAtualizar = "contacto" | "lead" | "abordagem";
+export type PassoAtualizar = "contacto" | "lead" | "abordagem" | "negocio";
 
 /** Falha a meio: o que já ficou gravado e o passo que falhou, com o erro (traduzível) desse passo. */
 export class AtualizacaoParcial extends Error {
@@ -35,6 +37,8 @@ export interface PedidoAtualizar {
   /** Os valores do formulário (com `_assigned_to` se se escolheu um comercial). */
   valores: Readonly<Record<string, unknown>>;
   plano: PlanoAtualizar;
+  /** O negócio novo da pessoa existente (id escolhido por quem chama e reusado ao repetir; título = nome da pessoa). Último passo. */
+  negocio?: { id: string; titulo: string };
 }
 
 export type ResultadoAtualizar =
@@ -106,6 +110,10 @@ export async function atualizarPessoaExistente(p: PedidoAtualizar): Promise<Resu
     await passo("abordagem", () => chamarNeg("neg_reabrir_abordagem", {
       p_organization_id: p.organizationId, p_entity_id: p.entityId, p_motivo: null, p_lead_id: p.plano.leadId,
     }));
+  }
+  const negocio = p.negocio;
+  if (negocio) {
+    await passo("negocio", () => criarNegocioNovaLead({ organizationId: p.organizationId, entityId: p.entityId, negocioId: negocio.id, titulo: negocio.titulo }));
   }
   return { tipo: "atualizada", feito };
 }

@@ -38,6 +38,8 @@ function rpc(sobre: Record<string, unknown> = {}) {
     return { data: null, error: null };
   });
 }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const idDoNegocio = (): string => (supabaseFalso.rpc.mock.calls.find((c) => c[0] === "neg_criar_negocio")![1] as { p_id: string }).p_id;
 const nomesRpc = () => supabaseFalso.rpc.mock.calls.map((c) => c[0] as string);
 
 const aoConcluir = vi.fn();
@@ -71,9 +73,13 @@ describe("useNovaLead: criar", () => {
   it("sem duplicados cria a pessoa (a lead é a entidade), invalida lista e ficha e entrega o id da pessoa nova", async () => {
     const { result, invalidadas } = montar();
     await act(async () => { await result.current.submeter(ENTRADA); });
-    expect(nomesRpc()).toEqual(["neg_procurar_duplicados"]);
+    expect(nomesRpc()).toEqual(["neg_procurar_duplicados", "neg_criar_negocio"]);
     expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
-    expect(aoConcluir).toHaveBeenCalledWith({ entityId: "ent-novo", mensagem: "Lead criada: Ana Lopes." });
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", {
+      p_id: expect.stringMatching(UUID), p_organization_id: ORG, p_entity_id: "ent-novo", p_titulo: "Ana Lopes", p_fecho: "contrato", p_reabrir_abordagem: false,
+    });
+    // a ficha abre já no negócio criado (?open=<pessoa>&negocio=<negocio>)
+    expect(aoConcluir).toHaveBeenCalledWith({ entityId: "ent-novo", negocioId: idDoNegocio(), mensagem: "Lead criada: Ana Lopes." });
     expect(invalidadas()).toEqual([true, true]);
     expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Lead criada com sucesso" }));
     expect(result.current.aCriar).toBe(false);
@@ -168,12 +174,50 @@ describe("useNovaLead: bloqueios e falhas (nada se cria, nada se invalida)", () 
     expect(result.current.aCriar).toBe(false);
   });
 
+  it("o negócio falha depois da pessoa criada: diz-o no diálogo, não conclui, refaz a lista e deixa tentar de novo sem duplicar a pessoa", async () => {
+    rpc({ neg_criar_negocio: { data: null, error: { code: "42501", message: "sem permissão" } } });
+    const { result, invalidadas } = montar();
+    await act(async () => { await result.current.submeter(ENTRADA); });
+    expect(result.current.erro).toEqual({ tipo: "negocio", chave: "pessoasPagina.real.newLead.error.negocioFailed" });
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
+    expect(supabaseFalso.chamadasA("anew_entities", "delete")).toEqual([]);
+    expect(aoConcluir).not.toHaveBeenCalled();
+    expect(invalidadas()).toEqual([true, true]);
+    expect(result.current.aCriar).toBe(false);
+    const idAntes = idDoNegocio();
+    // «Tentar de novo»: só o negócio, com o mesmo id, na mesma pessoa; nem outra pessoa nem outra procura de duplicados
+    rpc();
+    await act(async () => { await result.current.tentarDeNovo(ENTRADA); });
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
+    expect(nomesRpc().filter((n) => n === "neg_procurar_duplicados")).toHaveLength(1);
+    expect(nomesRpc().filter((n) => n === "neg_criar_negocio")).toHaveLength(2);
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", expect.objectContaining({ p_id: idAntes, p_entity_id: "ent-novo" }));
+    expect(result.current.erro).toBeNull();
+    expect(aoConcluir).toHaveBeenCalledWith({ entityId: "ent-novo", negocioId: idAntes, mensagem: "Lead criada: Ana Lopes." });
+  });
+
+  it("o negócio volta a falhar ao repetir: continua o erro, uma só pessoa, e fechar o diálogo (reiniciar) esquece o pendente", async () => {
+    rpc({ neg_criar_negocio: { data: null, error: { message: "boom" } } });
+    const { result } = montar();
+    await act(async () => { await result.current.submeter(ENTRADA); });
+    await act(async () => { await result.current.tentarDeNovo(ENTRADA); });
+    expect(result.current.erro).toMatchObject({ tipo: "negocio" });
+    expect(supabaseFalso.chamadasA("anew_entities", "insert")).toHaveLength(1);
+    expect(aoConcluir).not.toHaveBeenCalled();
+    act(() => result.current.reiniciar());
+    expect(result.current.erro).toBeNull();
+    rpc();
+    await act(async () => { await result.current.tentarDeNovo(ENTRADA); });
+    expect(nomesRpc().filter((n) => n === "neg_criar_negocio")).toHaveLength(2);
+  });
+
   it("a atribuição do comercial falha: toast de erro, pessoa desfeita e nada se invalida", async () => {
     rpc({ neg_atribuir_pessoa: { data: null, error: { message: "boom" } } });
     const { result, invalidadas } = montar();
     await act(async () => { await result.current.submeter({ ...ENTRADA, valores: { ...ENTRADA.valores, _assigned_to: "u1" } }); });
     expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({ title: "Erro ao criar a lead", description: "mensagem amigável", variant: "destructive" }));
     expect(supabaseFalso.chamadasA("anew_entities", "delete")).toHaveLength(1);
+    expect(nomesRpc()).not.toContain("neg_criar_negocio");
     expect(aoConcluir).not.toHaveBeenCalled();
     expect(invalidadas()).toEqual([false, false]);
     expect(result.current.aCriar).toBe(false);
@@ -239,8 +283,27 @@ describe("useNovaLead: o diálogo de duplicados", () => {
     await act(async () => { await result.current.confirmarAtualizar(); });
     expect(supabaseFalso.chamadasA("anew_entities", "update").length).toBeGreaterThanOrEqual(1);
     expect(supabaseFalso.chamadasA("anew_entities", "insert")).toEqual([]);
-    expect(aoConcluir).toHaveBeenCalledWith({ entityId: PESSOA_ID, mensagem: "Dados de Ana Lopes atualizados." });
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", {
+      p_id: expect.stringMatching(UUID), p_organization_id: ORG, p_entity_id: PESSOA_ID, p_titulo: "Ana Lopes", p_fecho: "contrato", p_reabrir_abordagem: false,
+    });
+    expect(aoConcluir).toHaveBeenCalledWith({ entityId: PESSOA_ID, negocioId: idDoNegocio(), mensagem: "Dados de Ana Lopes atualizados." });
     expect(client.getQueryState(["neg-ficha-pessoa", ORG, PESSOA_ID])?.isInvalidated).toBe(true);
+  });
+
+  it("confirmar: o negócio novo falha: parcial com falhou «negocio», sem concluir; repetir reusa o mesmo id do negócio", async () => {
+    rpc({ neg_procurar_duplicados: { data: [linha()], error: null } });
+    const { result } = montar();
+    await act(async () => { await result.current.submeter(ENTRADA); });
+    act(() => result.current.atualizar(result.current.duplicados!.pessoas[0]));
+    rpc({ neg_procurar_duplicados: { data: [linha()], error: null }, neg_criar_negocio: { data: null, error: { code: "NG003", message: "x" } } });
+    await act(async () => { await result.current.confirmarAtualizar(); });
+    expect(result.current.parcial).toMatchObject({ feito: ["contacto", "lead"], falhou: "negocio" });
+    expect(aoConcluir).not.toHaveBeenCalled();
+    const idAntes = idDoNegocio();
+    rpc({ neg_procurar_duplicados: { data: [linha()], error: null } });
+    await act(async () => { await result.current.tentarDeNovo(); });
+    expect(supabaseFalso.rpc).toHaveBeenLastCalledWith("neg_criar_negocio", expect.objectContaining({ p_id: idAntes, p_entity_id: PESSOA_ID }));
+    expect(aoConcluir).toHaveBeenCalledWith(expect.objectContaining({ entityId: PESSOA_ID, negocioId: idAntes }));
   });
 
   it("caso 14: ao confirmar, aparece outra pessoa dona do contacto: volta ao diálogo, sem gravar", async () => {

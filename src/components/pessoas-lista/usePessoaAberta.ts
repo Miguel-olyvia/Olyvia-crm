@@ -9,7 +9,8 @@ export interface PessoaAberta {
   limpar: () => void;
   /** O botão que abriu a ficha: o foco volta para ele ao fechar. Guardado no clique (a ficha só abre quando os dados chegam). */
   origemFoco: MutableRefObject<HTMLElement | null>;
-  aoAbrir: (id: string, origem?: HTMLElement) => void;
+  /** Com `negocioId` (a «Nova lead»), a ficha abre já nesse negócio. */
+  aoAbrir: (id: string, origem?: HTMLElement, negocioId?: string) => void;
   /** Com `negocioId`, já nesse negócio (o Pipeline vai sempre para um negócio). */
   aoIrPara: (id: string, negocioId?: string) => void;
   /** No Quadro o foco volta ao botão que abriu a ficha (o do nome ou o do passo). */
@@ -36,9 +37,10 @@ export function usePessoaAberta(): PessoaAberta {
     abertaRef.current = abertaId;
   });
   const origemFoco = useRef<HTMLElement | null>(null);
-  const aoAbrir = useCallback((id: string, origem?: HTMLElement) => {
+  const aoAbrir = useCallback((id: string, origem?: HTMLElement, negocioId?: string) => {
     origemFoco.current = origem ?? null;
-    abrirRef.current(id);
+    if (negocioId) abrirRef.current(id, negocioId);
+    else abrirRef.current(id);
   }, []);
   const aoIrPara = useCallback((id: string, negocioId?: string) => abrirRef.current(id, negocioId), []);
   const aoAbrirQuadro = useCallback((pessoaId: string, negocioId?: string) => {

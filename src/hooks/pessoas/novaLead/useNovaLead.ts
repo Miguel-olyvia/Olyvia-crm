@@ -15,7 +15,8 @@ import { AtualizacaoParcial, atualizarPessoaExistente, type PassoAtualizar } fro
 import { resolverOrgRaiz } from "./comerciaisNovaLead";
 import { depoisDeGravar } from "./depoisNovaLead";
 import { prepararLead, type DefinicaoCampo, type LeadPreparada } from "./fluxoNovaLead";
-import { FalhaGravar, gravarNovaLead } from "./gravarNovaLead";
+import { criarNegocioNovaLead, novoIdNegocio } from "./criarNegocioNovaLead";
+import { FalhaGravar, gravarNovaLead, NegocioNaoCriado } from "./gravarNovaLead";
 import { revalidarAntesDeCriar } from "./revalidarNovaLead";
 import type { DecisaoDuplicados, PessoaBloqueio } from "./tiposNovaLead";
 
@@ -34,13 +35,16 @@ export interface EntradaNovaLead {
 /** O que o hospedeiro faz quando acaba: fecha o diálogo, abre a ficha da pessoa e anuncia a mensagem. */
 export interface ConclusaoNovaLead {
   entityId: string;
+  /** O negócio criado com a pessoa: a ficha abre já nele (`?open=<pessoa>&negocio=<negócio>`). Ausente ao «Abrir existente». */
+  negocioId?: string;
   mensagem: string;
 }
 
 export type Bloqueio = Extract<DecisaoDuplicados, { tipo: "bloquear" }>;
 /** Um erro a mostrar dentro do diálogo (role=alert), com a chave traduzida e o que «Tentar de novo» repete. */
 export interface ErroDialogo {
-  tipo: "verificar" | "atualizar";
+  /** «negocio»: a pessoa foi criada mas o negócio não; «Tentar de novo» repete só o negócio. */
+  tipo: "verificar" | "atualizar" | "negocio";
   chave: string;
 }
 export interface Parcial {
@@ -74,6 +78,15 @@ interface Pendente {
   preparada: LeadPreparada;
 }
 
+/** A pessoa já criada cujo negócio falhou: o que falta para o repetir e concluir sem criar a pessoa outra vez. */
+interface NegocioPendente {
+  entityId: string;
+  negocioId: string;
+  preparada: LeadPreparada;
+  createdBy: string;
+  avisoGrupo: string | undefined;
+}
+
 export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void): UseNovaLead {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -91,7 +104,10 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
   // Um clique duplo (ou Enter e clique) não pode dar duas criações: a guarda é um ref, que não espera por um novo render.
   const emCurso = useRef(false);
   const pendente = useRef<Pendente | null>(null);
-  const ultima = useRef<"criar" | "atualizar" | null>(null);
+  const ultima = useRef<"criar" | "atualizar" | "negocio" | null>(null);
+  const negocioPendente = useRef<NegocioPendente | null>(null);
+  // O id do negócio da pessoa existente: guarda-se com a pessoa a que pertence, para repetir com o mesmo id (nunca com o de outra pessoa).
+  const negocioAtualizar = useRef<{ entityId: string; negocioId: string } | null>(null);
   const raizes = useRef(new Map<string, string>());
 
   const reiniciar = useCallback(() => {
@@ -102,6 +118,8 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
     setErrosCampo({});
     setACriar(false);
     pendente.current = null;
+    negocioPendente.current = null;
+    negocioAtualizar.current = null;
     ultima.current = null;
   }, []);
 
@@ -116,6 +134,30 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
   const falha = useCallback(async (titulo: string, causa: unknown) => {
     toast({ title: titulo, description: await getFriendlyErrorMessage(causa), variant: "destructive" });
   }, [toast]);
+
+  /** A pessoa e o negócio estão criados: morada, aviso, refazer as listas e entregar a pessoa já com o negócio. */
+  const concluirCriada = useCallback(async (c: NegocioPendente, org: string): Promise<void> => {
+    const depois = await depoisDeGravar({ entityId: c.entityId, organizationId: org, actorId: c.createdBy, valores: c.preparada.valores });
+    // Um só toast: o `use-toast` guarda um de cada vez e o seguinte apagava o anterior (a falha da morada nunca se via). O motivo em bruto
+    // da falha fica no captureFlowError (depoisDeGravar); nunca vai para o ecrã.
+    toast({
+      title: t(depois.moradaFalhou ? `${N}toast.addressSyncFailed` : `${N}toast.createSuccess`),
+      description: c.avisoGrupo,
+      duration: depois.moradaFalhou || c.avisoGrupo ? 10000 : undefined,
+    });
+    void invalidarPessoas(client, org, c.entityId);
+    const criada = t(`${N}announce.created`, { name: c.preparada.dados.displayName });
+    // A morada que falhou também se anuncia na região viva da página (o toast pode não ser lido).
+    aoConcluir({ entityId: c.entityId, negocioId: c.negocioId, mensagem: depois.moradaFalhou ? `${criada} ${t(`${N}announce.addressSyncFailed`)}` : criada });
+  }, [t, toast, client, aoConcluir]);
+
+  /** A pessoa existe mas o negócio não: refaz a lista (a pessoa já lá está) e deixa «Tentar de novo» repetir só o negócio. */
+  const negocioFalhou = useCallback((pendenteNovo: NegocioPendente, org: string) => {
+    negocioPendente.current = pendenteNovo;
+    ultima.current = "negocio";
+    void invalidarPessoas(client, org, pendenteNovo.entityId);
+    setErro({ tipo: "negocio", chave: `${N}error.negocioFailed` });
+  }, [client]);
 
   const submeter = useCallback(async (entrada: EntradaNovaLead): Promise<void> => {
     if (emCurso.current) return;
@@ -140,6 +182,9 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
     setErrosCampo({});
     ultima.current = "criar";
     pendente.current = { entrada, preparada };
+    negocioPendente.current = null;
+    negocioAtualizar.current = null;
+    let avisoGrupo: string | undefined;
     try {
       // A verificação e a escrita seguem-se sem espera: esta é também a revalidação imediatamente antes de gravar (fail-closed).
       const decisao = await revalidarAntesDeCriar(organizationId, preparada.escrito);
@@ -147,6 +192,9 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
         setDuplicados(decisao);
         return;
       }
+      avisoGrupo = decisao.grupo.length > 0
+        ? t(`${N}groupInfo`, { org: decisao.grupo.map((g) => g.nome).filter(Boolean).join(", ") })
+        : undefined;
       const gravada = await gravarNovaLead({
         organizationId,
         rootOrganizationId: await raizDe(organizationId),
@@ -156,23 +204,11 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
         origemNome: entrada.origemNome,
         campanhaId: entrada.campanhaId,
       });
-      const depois = await depoisDeGravar({ entityId: gravada.entityId, organizationId, actorId: createdBy, valores: preparada.valores });
-      // Um só toast: o `use-toast` guarda um de cada vez e o seguinte apagava o anterior (a falha da morada nunca se via). O motivo em bruto
-      // da falha fica no captureFlowError (depoisDeGravar); nunca vai para o ecrã.
-      const avisoGrupo = decisao.grupo.length > 0
-        ? t(`${N}groupInfo`, { org: decisao.grupo.map((g) => g.nome).filter(Boolean).join(", ") })
-        : undefined;
-      toast({
-        title: t(depois.moradaFalhou ? `${N}toast.addressSyncFailed` : `${N}toast.createSuccess`),
-        description: avisoGrupo,
-        duration: depois.moradaFalhou || avisoGrupo ? 10000 : undefined,
-      });
-      void invalidarPessoas(client, organizationId, gravada.entityId);
-      const criada = t(`${N}announce.created`, { name: preparada.dados.displayName });
-      // A morada que falhou também se anuncia na região viva da página (o toast pode não ser lido).
-      aoConcluir({ entityId: gravada.entityId, mensagem: depois.moradaFalhou ? `${criada} ${t(`${N}announce.addressSyncFailed`)}` : criada });
+      await concluirCriada({ entityId: gravada.entityId, negocioId: gravada.negocioId, preparada, createdBy, avisoGrupo }, organizationId);
     } catch (causa) {
-      if (causa instanceof ErroNeg) {
+      if (causa instanceof NegocioNaoCriado) {
+        negocioFalhou({ entityId: causa.entityId, negocioId: causa.negocioId, preparada, createdBy, avisoGrupo }, organizationId);
+      } else if (causa instanceof ErroNeg) {
         // Não se conseguiu verificar: não se cria nada. A mensagem genérica passa a dizer o que aconteceu de verdade.
         setErro({ tipo: "verificar", chave: causa.chave === CHAVE_ERRO_GENERICO ? `${N}error.checkFailed` : causa.chave });
       } else if (causa instanceof FalhaGravar) {
@@ -185,7 +221,29 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
       emCurso.current = false;
       setACriar(false);
     }
-  }, [organizationId, anewUserId, authUserId, t, toast, client, aoConcluir, raizDe, falha]);
+  }, [organizationId, anewUserId, authUserId, t, toast, raizDe, falha, concluirCriada, negocioFalhou]);
+
+  /** «Tentar de novo» depois de «a pessoa foi criada mas o negócio não»: só o negócio, com o mesmo id; nunca outra pessoa. */
+  const repetirNegocio = useCallback(async (): Promise<void> => {
+    const pendenteNegocio = negocioPendente.current;
+    if (emCurso.current || !pendenteNegocio || !organizationId) return;
+    emCurso.current = true;
+    setACriar(true);
+    setErro(null);
+    try {
+      await criarNegocioNovaLead({
+        organizationId, entityId: pendenteNegocio.entityId, negocioId: pendenteNegocio.negocioId, titulo: pendenteNegocio.preparada.dados.displayName,
+      });
+      negocioPendente.current = null;
+      await concluirCriada(pendenteNegocio, organizationId);
+    } catch (causa) {
+      if (causa instanceof ErroNeg) negocioFalhou(pendenteNegocio, organizationId);
+      else await falha(t(`${N}toast.createError`), causa);
+    } finally {
+      emCurso.current = false;
+      setACriar(false);
+    }
+  }, [organizationId, concluirCriada, negocioFalhou, falha, t]);
 
   const atualizar = useCallback((pessoa: PessoaBloqueio) => {
     if (!pessoa.atualizar) return;
@@ -209,9 +267,13 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
     setErro(null);
     setParcial(null);
     ultima.current = "atualizar";
+    const guardado = negocioAtualizar.current;
+    const negocioId = guardado && guardado.entityId === pessoa.entityId ? guardado.negocioId : novoIdNegocio();
+    negocioAtualizar.current = { entityId: pessoa.entityId, negocioId };
     try {
       const r = await atualizarPessoaExistente({
         organizationId, entityId: pessoa.entityId, escrito: dados.preparada.escrito, valores: dados.preparada.valores, plano: pessoa.atualizar,
+        negocio: { id: negocioId, titulo: pessoa.nome },
       });
       if (r.tipo === "conflito") {
         // Apareceu outra pessoa dona do contacto: volta ao diálogo, com ela. Nada se gravou.
@@ -221,7 +283,8 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
       }
       toast({ title: t(`${N}dup.updated`, { name: pessoa.nome }) });
       void invalidarPessoas(client, organizationId, pessoa.entityId);
-      aoConcluir({ entityId: pessoa.entityId, mensagem: t(`${N}announce.updated`, { name: pessoa.nome }) });
+      negocioAtualizar.current = null;
+      aoConcluir({ entityId: pessoa.entityId, negocioId, mensagem: t(`${N}announce.updated`, { name: pessoa.nome }) });
     } catch (causa) {
       if (causa instanceof AtualizacaoParcial) {
         // Alguma coisa ficou gravada: refaz o que se vê. Repetir é seguro.
@@ -253,8 +316,9 @@ export function useNovaLead(aoConcluir: (conclusao: ConclusaoNovaLead) => void):
     const antes = ultima.current;
     setErro(null);
     if (antes === "atualizar") await confirmarAtualizar();
+    else if (antes === "negocio") await repetirNegocio();
     else if (antes === "criar" && pendente.current) await submeter(entradaAtual ?? pendente.current.entrada);
-  }, [confirmarAtualizar, submeter]);
+  }, [confirmarAtualizar, repetirNegocio, submeter]);
 
   return { aCriar, duplicados, confirmar, erro, parcial, errosCampo, submeter, atualizar, confirmarAtualizar, voltarDaConfirmacao, abrirExistente, cancelarDuplicados, tentarDeNovo, reiniciar };
 }

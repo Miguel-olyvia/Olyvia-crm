@@ -95,7 +95,7 @@ describe("NovaLeadReal: fechar a meio de uma criação", () => {
     expect(campos).toHaveAttribute("aria-busy", "true");
     expect(screen.getByLabelText(/Nome próprio/)).toBeDisabled();
     terminarVerificacao({ data: [], error: null });
-    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", expect.anything()));
+    await waitFor(() => expect(aoAbrirPessoa).toHaveBeenCalledWith("ent-novo", expect.anything(), expect.any(String)));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

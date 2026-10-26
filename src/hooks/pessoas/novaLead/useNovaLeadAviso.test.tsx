@@ -83,7 +83,7 @@ describe("useNovaLead: um só toast com tudo o que o utilizador precisa de ver",
     expect(visiveis).toHaveLength(1);
     expect(visiveis[0].title).toBe("Lead criada com sucesso");
     expect(visiveis[0].description).toBeUndefined();
-    expect(aoConcluir).toHaveBeenCalledWith({ entityId: "ent-novo", mensagem: "Lead criada: Ana Lopes." });
+    expect(aoConcluir).toHaveBeenCalledWith({ entityId: "ent-novo", negocioId: expect.any(String), mensagem: "Lead criada: Ana Lopes." });
   });
 
   it("só grupo: o sucesso leva o aviso do grupo na descrição", async () => {

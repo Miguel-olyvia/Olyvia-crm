@@ -17,7 +17,7 @@ const N = "pessoasPagina.real.newLead.";
 
 interface NovaLeadRealProps {
   /** Abre a ficha da pessoa em Pessoas (`?open=<id>`); o foco volta ao botão «Nova lead» quando a ficha fecha. */
-  aoAbrirPessoa: (id: string, origem?: HTMLElement) => void;
+  aoAbrirPessoa: (id: string, origem?: HTMLElement, negocioId?: string) => void;
   /** Anuncia uma mensagem na região viva da página. */
   aoAnunciar: (mensagem: string) => void;
 }
@@ -52,7 +52,9 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
     setCampanhaId("");
     setOrigemId("");
     setOrgFiltro("all");
-    aoAbrirPessoa(c.entityId, botao.current ?? undefined);
+    // Com negócio (a «Nova lead» cria pessoa e negócio) a ficha abre já nele; «Abrir existente» só abre a pessoa.
+    if (c.negocioId) aoAbrirPessoa(c.entityId, botao.current ?? undefined, c.negocioId);
+    else aoAbrirPessoa(c.entityId, botao.current ?? undefined);
     if (c.mensagem) aoAnunciar(c.mensagem);
   }, [aoAbrirPessoa, aoAnunciar]);
   const nova = useNovaLead(concluir);
@@ -102,7 +104,7 @@ export function NovaLeadReal({ aoAbrirPessoa, aoAnunciar }: NovaLeadRealProps) {
         valores={valores} errosCampo={nova.errosCampo} aoMudarValor={mudarValor} campanhas={dados.campanhas} campanhaId={campanhaId}
         aoMudarCampanha={setCampanhaId} formularioNome={formularioNome} temFormulario={dados.formularioId !== ""} origens={dados.origens}
         origemId={origemId} aoMudarOrigem={setOrigemId} comerciais={dados.comerciais} arvore={dados.arvore} orgFiltro={orgFiltro}
-        aoMudarOrgFiltro={setOrgFiltro} aCriar={nova.aCriar && nova.duplicados === null} erro={nova.erro?.tipo === "verificar" ? nova.erro : null}
+        aoMudarOrgFiltro={setOrgFiltro} aCriar={nova.aCriar && nova.duplicados === null} erro={nova.erro?.tipo === "verificar" || nova.erro?.tipo === "negocio" ? nova.erro : null}
         aoCriar={criar} aoCriarFormulario={irParaFormularios} aoTentarDeNovo={repetir}
         aoFocarOrigem={() => botao.current?.focus()} camposACarregar={dados.camposACarregar} camposErro={dados.camposErro}
         erroApoio={dados.erroApoio} aoRepetirDados={dados.repetir}
