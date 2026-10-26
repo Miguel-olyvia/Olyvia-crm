@@ -1,12 +1,38 @@
 // «Estou no local»: a morada da obra a partir da localização do dispositivo, pela mesma via do protótipo (OpenStreetMap/Nominatim, reverse).
 // Só devolve rua, código postal e localidade; as coordenadas nunca saem daqui (não se guardam). Rede e geolocalização são simuladas.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { moradaDaPosicao, obterMoradaDoLocal, ErroLocalizacao, URL_MORADAS } from "./localizacaoMorada";
 
 const resposta = (json: unknown, ok = true, status = 200) => ({ ok, status, json: async () => json }) as unknown as Response;
 
+vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.mocked(captureFlowError).mockClear();
+});
+
+describe("moradaDaPosicao: tempo limite e registo", () => {
+  it("o pedido leva um AbortSignal de 10 s", async () => {
+    const espiar = vi.spyOn(AbortSignal, "timeout");
+    const pedido = vi.fn().mockResolvedValue(resposta({ address: { road: "Rua A", city: "Lisboa" } }));
+    await moradaDaPosicao(1, 2, pedido);
+    expect(espiar).toHaveBeenCalledWith(10000);
+    expect((pedido.mock.calls[0][1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
+    espiar.mockRestore();
+  });
+
+  it("o tempo esgotado (TimeoutError) é 'servico' e o erro original fica registado", async () => {
+    const original = new DOMException("timeout", "TimeoutError");
+    await expect(moradaDaPosicao(1, 2, vi.fn().mockRejectedValue(original))).rejects.toMatchObject({ motivo: "servico" });
+    expect(captureFlowError).toHaveBeenCalledWith(original, "pessoas-neg");
+  });
+
+  it("HTTP recusado também regista", async () => {
+    await expect(moradaDaPosicao(1, 2, vi.fn().mockResolvedValue(resposta({}, false, 503)))).rejects.toMatchObject({ motivo: "servico" });
+    expect(captureFlowError).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("moradaDaPosicao", () => {
@@ -65,7 +91,7 @@ describe("obterMoradaDoLocal", () => {
     const r = await obterMoradaDoLocal(pedido);
     expect(r).toEqual({ morada: { rua: "Rua B", codigoPostal: "1000-002", localidade: "Lisboa" }, precisaoMetros: 12 });
     expect(Object.keys(r)).not.toContain("latitude");
-    expect(pos.mock.calls[0][2]).toMatchObject({ enableHighAccuracy: true });
+    expect(pos.mock.calls[0][2]).toMatchObject({ enableHighAccuracy: true, maximumAge: 0 });
   });
 
   it("sem geolocalização no dispositivo é 'semSuporte'", async () => {

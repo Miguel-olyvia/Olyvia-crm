@@ -95,6 +95,7 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioI
     if (emCurso.current) return emCurso.current;
     setMotivo(null);
     // A Qualificação grava-se primeiro: é a que se repete sem criar nada (substitui); se falhar, o levantamento nem começa.
+    let qualificacaoGravada = false;
     const gravar = async (): Promise<boolean> => {
       const entrada = negocioId
         ? entradaQualificacao({
@@ -102,13 +103,18 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioI
         })
         : null;
       const q = entrada ? await qualificacao.guardar(entrada) : null;
+      qualificacaoGravada = q !== null;
       const r = await registos.guardar(visitas, rascunho, comercial);
       // Gravou, mas as perguntas mudaram: o painel fica aberto, com as respostas escritas, para as conferir.
       if (r.levantamento?.questionarioMudou || q?.questionarioMudou) return recusar(t(AVISO_QUESTIONARIO_MUDOU));
       toast.success(r.feitos.length > 0 || q?.mudou ? t(`${R}saved`, { name: aoAbrir.nome }) : t(`${R}nothing`));
       return true;
     };
-    const pedido = gravar().catch((erro: unknown) => recusar(textoDoErroGravar(erro, t))).finally(() => { emCurso.current = null; });
+    const pedido = gravar().catch((erro: unknown) => {
+      // Se a Qualificação já gravou e o resto falhou, diz-se: quem lê o erro não deve achar que se perdeu tudo.
+      const texto = textoDoErroGravar(erro, t);
+      return recusar(qualificacaoGravada ? `${t(`${R}qualSavedNote`)} ${texto}` : texto);
+    }).finally(() => { emCurso.current = null; });
     emCurso.current = pedido;
     return pedido;
   };

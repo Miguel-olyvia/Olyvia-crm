@@ -17,7 +17,7 @@ const montar = (sobre: Parameters<typeof montarHook>[2] = {}) => {
   const client = sobre.client ?? criarCliente();
   client.setQueryData(["neg-ficha-pessoa", "org-1", PESSOA_ID], { x: 1 });
   client.setQueryData(["neg-resumo-pessoas", "org-1", { papel: null }], { x: 2 });
-  const r = montarHook((id: string) => useGuardarIdentidadePessoa(id), PESSOA_ID, { ...sobre, client });
+  const r = montarHook((id: string) => useGuardarIdentidadePessoa(id, "particular"), PESSOA_ID, { ...sobre, client });
   const invalidadas = () => [client.getQueryState(["neg-ficha-pessoa", "org-1", PESSOA_ID])?.isInvalidated, client.getQueryState(["neg-resumo-pessoas", "org-1", { papel: null }])?.isInvalidated];
   return { ...r, client, invalidadas };
 };
@@ -107,7 +107,7 @@ describe("useGuardarIdentidadePessoa: invalidação e erros", () => {
   });
 
   it("sem pessoa (id vazio) recusa sem chamar a base", async () => {
-    const r = montarHook((id: string) => useGuardarIdentidadePessoa(id), "", { fonte: fonteReal() });
+    const r = montarHook((id: string) => useGuardarIdentidadePessoa(id, "particular"), "", { fonte: fonteReal() });
     const erro = await erroDe(act(async () => { await r.result.current.guardar({ tipo: "organization", nomeEmpresa: "A" }); }));
     expect(erro.chave).toBe("pessoasPagina.erroNeg.generico");
     expect(rpcMock).not.toHaveBeenCalled();

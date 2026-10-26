@@ -14,11 +14,28 @@ import { FOCO } from "@/components/negocio-metas/estilos";
 import { ErroAcao } from "@/components/pessoas/ErroAcao";
 import type { ContactoPreferido, HoraPreferida } from "@/components/pessoas/pessoasTipos";
 import { useExecutarAcao } from "@/components/pessoas/useExecutarAcao";
-import { CONTACTOS_PREFERIDOS, HORAS_PREFERIDAS, opcoesDeLingua } from "@/hooks/pessoas/useGuardarContactoPessoa";
+import { CHAVE_EMAIL_DUPLICADO, CHAVE_TELEFONE_DUPLICADO, CHAVES_ERRO_NEG } from "@/hooks/pessoas/errosNeg";
+import { CONTACTOS_PREFERIDOS, HORAS_PREFERIDAS, LINGUAS_GRAVAVEIS, opcoesDeLingua } from "@/hooks/pessoas/useGuardarContactoPessoa";
 import { formularioDeContacto, pedidoDeContacto, type DadosContactoFormulario, type FormularioContacto } from "./contactoFormulario";
 
 const C = "pessoasPagina.real.ficha.contact.";
-const LINGUAS_COM_NOME = ["pt", "en", "fr"];
+
+/** O campo a que um erro de contacto repetido se refere: pela chave (23505) ou, no NG019, pelo que se enviou (o primeiro, se foram os dois). */
+function campoDoErroRepetido(chave: string | null, enviado: DadosContactoFormulario | null): "email" | "telefone" | null {
+  if (chave === CHAVE_EMAIL_DUPLICADO) return "email";
+  if (chave === CHAVE_TELEFONE_DUPLICADO) return "telefone";
+  if (chave !== CHAVES_ERRO_NEG.NG019 || !enviado) return null;
+  return enviado.email !== undefined ? "email" : enviado.telefone !== undefined ? "telefone" : null;
+}
+
+/** O nome do idioma na língua do ecrã; se o código não se reconhece, o próprio código. */
+function nomeDeIdioma(codigo: string, ecra: string): string {
+  try {
+    return new Intl.DisplayNames([ecra], { type: "language" }).of(codigo) ?? codigo;
+  } catch {
+    return codigo;
+  }
+}
 const CLASSE_SELECT = "min-h-11 w-full rounded-md border border-input bg-background px-3 text-[15px] text-foreground";
 
 interface ContactoFichaRealProps {
@@ -42,7 +59,7 @@ function Campo({ id, rotulo, children }: { id: string; rotulo: string; children:
 }
 
 export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPreferida, lingua, podeEditar, aoGuardar }: ContactoFichaRealProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const anunciar = useAnunciar();
   const id = useId();
   const [aberto, setAberto] = useState(false);
@@ -54,12 +71,21 @@ export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPref
   const campoTelefone = useRef<HTMLInputElement>(null);
   const campoEmail = useRef<HTMLInputElement>(null);
   const jaAbriu = useRef(false);
+  const enviado = useRef<DadosContactoFormulario | null>(null);
   const atual = { telefone, email, contacto: contactoPreferido, hora: horaPreferida, lingua };
 
   // O foco vai para o primeiro campo ao abrir e volta ao botão de editar ao fechar.
   useEffect(() => {
     if (aberto) { jaAbriu.current = true; campoTelefone.current?.focus(); } else if (jaAbriu.current) botaoEditar.current?.focus();
   }, [aberto]);
+
+  // Um email ou telefone que a base diz ser de outra pessoa marca o campo e leva-lhe o foco.
+  useEffect(() => {
+    const campo = campoDoErroRepetido(executar.erro, enviado.current);
+    if (!campo) return;
+    setInvalido(campo);
+    (campo === "email" ? campoEmail : campoTelefone).current?.focus();
+  }, [executar.erro]);
 
   const abrir = () => { setForm(formularioDeContacto(atual)); setFaltaChave(null); setInvalido(null); setAberto(true); };
   const mudar = (parte: Partial<FormularioContacto>) => { setFaltaChave(null); setInvalido(null); setForm((f) => (f ? { ...f, ...parte } : f)); };
@@ -76,17 +102,19 @@ export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPref
     }
     if (pedido.estado === "semAlteracao") { fechar(); return; }
     const mensagem = t(`${C}saved`);
+    enviado.current = pedido.dados;
     executar.executar(() => aoGuardar(pedido.dados).then(() => undefined), () => { fechar(); anunciar(mensagem); }, mensagem);
   };
 
   const idErro = `${id}-erro`;
   const idDica = `${id}-dica`;
+  const idErroBase = `${id}-erro-base`;
   const ligar = (campo: "email" | "telefone") => {
-    const ids = [invalido === campo && faltaChave ? idErro : null, idDica].filter(Boolean).join(" ");
+    const ids = [invalido === campo && faltaChave ? idErro : null, invalido === campo && executar.erro ? idErroBase : null, idDica].filter(Boolean).join(" ");
     return { "aria-invalid": invalido === campo ? (true as const) : undefined, "aria-describedby": ids };
   };
   const semIndicacao = t(`${C}notSet`);
-  const nomeLingua = (l: string): string => (LINGUAS_COM_NOME.includes(l) ? t(`${C}language.${l}`) : l);
+  const nomeLingua = (l: string): string => (LINGUAS_GRAVAVEIS.includes(l) ? t(`${C}language.${l}`) : nomeDeIdioma(l, language));
   const linguaAtual = lingua?.trim() || "";
   return (
     <Seccao titulo={t(`${C}title`)}>
@@ -104,7 +132,7 @@ export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPref
           )}
         </>
       ) : (
-        <div className="space-y-3">
+        <form className="space-y-3" noValidate onSubmit={(e) => { e.preventDefault(); if (!executar.aGuardar) guardar(); }}>
           <div className="grid gap-3 sm:grid-cols-2">
             <Campo id={`${id}-telefone`} rotulo={t(`${C}phone`)}>
               <Input
@@ -141,15 +169,16 @@ export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPref
             </Campo>
             <Campo id={`${id}-lingua`} rotulo={t(`${C}language`)}>
               <select id={`${id}-lingua`} className={cn(CLASSE_SELECT, FOCO)} value={form.lingua} onChange={(e) => mudar({ lingua: e.target.value })}>
+                {linguaAtual === "" && <option value="">{semIndicacao}</option>}
                 {opcoesDeLingua(linguaAtual).map((l) => <option key={l} value={l}>{nomeLingua(l)}</option>)}
               </select>
             </Campo>
           </div>
           {faltaChave && <p id={idErro} role="alert" className="text-sm font-medium text-destructive">{t(faltaChave)}</p>}
-          <ErroAcao chave={executar.erro} chaveExtra={executar.erroExtra} />
+          <ErroAcao id={idErroBase} chave={executar.erro} chaveExtra={executar.erroExtra} />
           <div className="flex flex-wrap gap-2">
             <Button
-              type="button" className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)} onClick={() => { if (!executar.aGuardar) guardar(); }}
+              type="submit" className={cn("min-h-11 aria-disabled:cursor-not-allowed aria-disabled:opacity-50", FOCO)}
               aria-disabled={executar.aGuardar || undefined} aria-busy={executar.aGuardar || undefined}
             >
               {t(executar.aGuardar ? "pessoasPagina.real.ficha.saving" : `${C}save`)}
@@ -161,7 +190,7 @@ export function ContactoFichaReal({ telefone, email, contactoPreferido, horaPref
               {t(`${C}cancel`)}
             </Button>
           </div>
-        </div>
+        </form>
       )}
     </Seccao>
   );

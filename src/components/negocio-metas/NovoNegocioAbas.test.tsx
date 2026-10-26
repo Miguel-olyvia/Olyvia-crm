@@ -118,7 +118,8 @@ describe("aba Qualificação", () => {
     criar(dialogo);
     const cp = within(dialogo).getByLabelText("Código postal");
     expect(cp).toHaveAttribute("aria-invalid", "true");
-    expect(cp).toHaveAccessibleDescription("O código postal tem o formato 0000-000, por exemplo 1000-001.");
+    // A descrição leva a ajuda do formato (sempre à vista) e, a seguir, o erro.
+    expect(cp).toHaveAccessibleDescription(/Formato: 4 dígitos.* O código postal tem o formato 0000-000, por exemplo 1000-001\.$/);
     expect(within(dialogo).getByRole("tab", { name: /^Qualificação.*com erros/ })).toBeInTheDocument();
     await waitFor(() => expect(cp).toHaveFocus());
     expect(aoCriar).not.toHaveBeenCalled();

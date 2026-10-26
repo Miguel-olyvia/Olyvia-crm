@@ -3,7 +3,6 @@
 import type { ContactoPreferido, HoraPreferida } from "@/components/pessoas/pessoasTipos";
 import { linguaParaEnviar } from "@/hooks/pessoas/useGuardarContactoPessoa";
 
-const LINGUA_OMISSAO = "pt";
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const TELEFONE = /^\+?[0-9 ().-]+$/;
 const MAX_EMAIL = 254;
@@ -43,7 +42,8 @@ export type PedidoContacto =
 export function formularioDeContacto(atual: ContactoAtual): FormularioContacto {
   return {
     telefone: atual.telefone ?? "", email: atual.email ?? "", contacto: atual.contacto ?? "", hora: atual.hora ?? "",
-    lingua: atual.lingua?.trim() || LINGUA_OMISSAO,
+    // Sem língua na base fica vazio («Sem indicação»): escolher pt é então uma alteração que se manda.
+    lingua: atual.lingua?.trim() ?? "",
   };
 }
 
@@ -68,7 +68,7 @@ export function pedidoDeContacto(form: FormularioContacto, atual: ContactoAtual)
   }
   if (form.contacto !== (atual.contacto ?? "")) dados.contacto = form.contacto;
   if (form.hora !== (atual.hora ?? "")) dados.hora = form.hora;
-  const lingua = linguaParaEnviar(atual.lingua?.trim() || LINGUA_OMISSAO, form.lingua);
+  const lingua = linguaParaEnviar(atual.lingua?.trim() ?? "", form.lingua);
   if (lingua !== null) dados.lingua = lingua;
   return Object.keys(dados).length === 0 ? { estado: "semAlteracao" } : { estado: "guardar", dados };
 }

@@ -5,12 +5,14 @@ interface ErroAcaoProps {
   /** Uma segunda mensagem a seguir à principal (numa falha parcial, a do código que falhou). */
   chaveExtra?: string | null;
   className?: string;
+  /** Para o campo em erro apontar para a mensagem (aria-describedby). */
+  id?: string;
 }
 
 /** O erro de uma ação da ficha, traduzido pela chave (nunca o texto cru), numa região de alerta. Sem erro não desenha nada. */
-export function ErroAcao({ chave, chaveExtra = null, className = "" }: ErroAcaoProps) {
+export function ErroAcao({ chave, chaveExtra = null, className = "", id }: ErroAcaoProps) {
   const { t } = useTranslation();
   if (chave === null) return null;
   const texto = chaveExtra ? `${t(chave)} ${t(chaveExtra)}` : t(chave);
-  return <p role="alert" className={`text-sm font-medium text-destructive ${className}`.trim()}>{texto}</p>;
+  return <p id={id} role="alert" className={`text-sm font-medium text-destructive ${className}`.trim()}>{texto}</p>;
 }

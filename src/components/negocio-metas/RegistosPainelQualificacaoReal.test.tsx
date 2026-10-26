@@ -124,3 +124,11 @@ describe("Sem o contexto real (o exemplo)", () => {
     expect(within(dialogo).getByLabelText("Rua e número")).toHaveValue("Rua da Visita 9");
   });
 });
+
+describe("aba Qualificação: acessibilidade", () => {
+  it("a contagem «X de Y respondidas» não é uma região aria-live (não interrompe quem escreve)", () => {
+    const { dialogo } = abrir(comNegocio());
+    const conta = within(dialogo).getByText(/\d+ de \d+ respondidas/);
+    expect(conta).not.toHaveAttribute("aria-live");
+  });
+});

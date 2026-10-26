@@ -17,6 +17,7 @@ import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
 import { useAcoesFichaReal } from "@/hooks/pessoas/useAcoesFichaReal";
 import { useFichaPessoa } from "@/hooks/pessoas/useFichaPessoa";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import { useGuardarContactoPessoa } from "@/hooks/pessoas/useGuardarContactoPessoa";
 import { useGuardarIdentidadePessoa } from "@/hooks/pessoas/useGuardarIdentidadePessoa";
 import { useSubstituirContactoPessoa } from "@/hooks/pessoas/useSubstituirContactoPessoa";
@@ -35,6 +36,7 @@ import { SubmissoesFichaReal } from "./SubmissoesFichaReal";
 import { useScrollAoVoltar } from "./useScrollAoVoltar";
 
 const F = "pessoasPagina.real.ficha.";
+const CHAVE_CONTACTO_PARCIAL = `${F}contact.partial`;
 
 // Sem a aba Notas na ficha real; as submissões têm o seu separador (só leitura, `SubmissoesFichaReal`). Referências fixas para não redesenhar à toa.
 const SEM_SUBMISSOES: Submissao[] = [];
@@ -135,8 +137,16 @@ export function FichaReal({ pessoaId, idsVisiveis, aoFechar, aoIrPara, aoLimpar,
   // O telefone e o email substituem-se primeiro; se isso falhar as preferências não se tocam. Se as preferências falharem a seguir, o telefone
   // e o email já ficaram (a ficha refaz-se) e o formulário só volta a mandar o que ainda falta.
   const guardarContacto = useCallback(async ({ email, telefone, contacto, hora, lingua }: DadosContactoFormulario): Promise<void> => {
-    if (email !== undefined || telefone !== undefined) await substituirContacto({ email, telefone });
-    if (contacto !== undefined || hora !== undefined || lingua !== undefined) await guardarPreferencias({ contacto, hora, lingua });
+    const substituiu = email !== undefined || telefone !== undefined;
+    if (substituiu) await substituirContacto({ email, telefone });
+    if (contacto === undefined && hora === undefined && lingua === undefined) return;
+    try {
+      await guardarPreferencias({ contacto, hora, lingua });
+    } catch (erro) {
+      // Já gravou o telefone/email: o erro principal diz isso e a mensagem do que falhou segue-se (chaveExtra).
+      if (substituiu && erro instanceof ErroNeg) throw new ErroNeg(erro, erro.codigo, CHAVE_CONTACTO_PARCIAL, erro.chave);
+      throw erro;
+    }
   }, [substituirContacto, guardarPreferencias]);
   const { classificar } = useQualificarLeadPessoa(mostrada?.pessoa.id ?? "", mostrada?.pessoa.lead_id ?? "");
   const identidade = mostrada ? (

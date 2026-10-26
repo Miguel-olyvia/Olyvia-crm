@@ -8,8 +8,8 @@ describe("pedidoDeContacto", () => {
     expect(pedidoDeContacto(formularioDeContacto(atual), atual)).toEqual({ estado: "semAlteracao" });
   });
 
-  it("uma pessoa sem nada abre com campos vazios e língua pt", () => {
-    expect(formularioDeContacto({ telefone: null, email: null })).toEqual({ telefone: "", email: "", contacto: "", hora: "", lingua: "pt" });
+  it("uma pessoa sem nada abre com campos vazios e língua vazia", () => {
+    expect(formularioDeContacto({ telefone: null, email: null })).toEqual({ telefone: "", email: "", contacto: "", hora: "", lingua: "" });
   });
 
   it("manda só o que mudou, com o email e o telefone aparados", () => {
@@ -43,5 +43,11 @@ describe("pedidoDeContacto", () => {
     expect(formularioDeContacto(es).lingua).toBe("es");
     expect(pedidoDeContacto(formularioDeContacto(es), es)).toEqual({ estado: "semAlteracao" });
     expect(pedidoDeContacto({ ...formularioDeContacto(es), lingua: "fr" }, es)).toEqual({ estado: "guardar", dados: { lingua: "fr" } });
+  });
+  it("sem língua na base o formulário abre vazio, e escolher pt é uma alteração que se manda (não há omissão silenciosa)", () => {
+    const sem: ContactoAtual = { ...atual, lingua: undefined };
+    expect(formularioDeContacto(sem).lingua).toBe("");
+    expect(pedidoDeContacto(formularioDeContacto(sem), sem)).toEqual({ estado: "semAlteracao" });
+    expect(pedidoDeContacto({ ...formularioDeContacto(sem), lingua: "pt" }, sem)).toEqual({ estado: "guardar", dados: { lingua: "pt" } });
   });
 });

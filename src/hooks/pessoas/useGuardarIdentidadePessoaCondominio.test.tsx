@@ -2,6 +2,7 @@
 // nome de um condomínio nunca o despromove a empresa.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "@testing-library/react";
+import { ErroNeg } from "./chamarNeg";
 import { PESSOA_ID } from "./fichaFabrica";
 import { captureMock, montarHook, parametros, respostaOk, rpcMock } from "./fichaTestUtil";
 import { useGuardarIdentidadePessoa } from "./useGuardarIdentidadePessoa";
@@ -13,7 +14,7 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: (...a
 beforeEach(() => { rpcMock.mockReset(); captureMock.mockReset(); });
 afterEach(() => vi.clearAllMocks());
 
-const montar = (atual?: TipoCliente) => montarHook(({ id, tipo }: { id: string; tipo?: TipoCliente }) => useGuardarIdentidadePessoa(id, tipo), { id: PESSOA_ID, tipo: atual });
+const montar = (atual: TipoCliente | undefined = "condominio") => montarHook(({ id, tipo }: { id: string; tipo?: TipoCliente }) => useGuardarIdentidadePessoa(id, tipo), { id: PESSOA_ID, tipo: atual });
 const CONDOMINIO = { tipo: "organization", nome: "Cond. Sol", empresa_nome: "Cond. Sol", organization_kind: "condominio", tipo_cliente: "condominio", mudou: true };
 
 describe("useGuardarIdentidadePessoa: condomínio", () => {
@@ -24,6 +25,14 @@ describe("useGuardarIdentidadePessoa: condomínio", () => {
     expect(parametros(0)).toEqual({
       p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_tipo: "condominio", p_nome_empresa: "Cond. Sol", p_nome_proprio: null, p_apelido: null,
     });
+  });
+
+  it("sem o tipo atual (a ficha ainda não carregou) recusa gravar o nome, sem chamar a base: nunca despromove um condomínio", async () => {
+    const { result } = montarHook(({ id, tipo }: { id: string; tipo: TipoCliente | undefined }) => useGuardarIdentidadePessoa(id, tipo), { id: PESSOA_ID, tipo: undefined });
+    let erro: unknown;
+    await act(async () => { erro = await result.current.guardar({ tipo: "organization", nomeEmpresa: "X" }).then(() => null, (e: unknown) => e); });
+    expect(erro).toBeInstanceOf(ErroNeg);
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 
   it("lê organization_kind e tipo_cliente da resposta", async () => {

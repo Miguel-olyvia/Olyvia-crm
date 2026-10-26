@@ -48,15 +48,16 @@ function lerResultado(dados: unknown): ResultadoIdentidade {
  * (a ficha traduz-lhe a chave: NG003 cobre a pessoa partilhada, NG009 um valor inválido). Depois de um sucesso refaz a ficha e as listas (e só termina quando elas foram refeitas);
  * depois de uma falha não toca em nada.
  *
- * `tipoClienteAtual` (o da ficha) protege o condomínio: gravar o nome de um condomínio como `organization` faria a base passá-lo a empresa, por
+ * `tipoClienteAtual` (o da ficha; obrigatório: `undefined` = ficha por carregar, e recusa gravar) protege o condomínio: gravar o nome de um condomínio como `organization` faria a base passá-lo a empresa, por
  * isso, sendo condomínio, o tipo vai sempre como `condominio`. Para o passar a empresa de propósito não há caminho aqui (decisão de produto por tomar).
  */
-export function useGuardarIdentidadePessoa(pessoaId: string, tipoClienteAtual?: TipoCliente): GuardarIdentidade {
+export function useGuardarIdentidadePessoa(pessoaId: string, tipoClienteAtual: TipoCliente | undefined): GuardarIdentidade {
   const fonte = useFontePessoas();
   const client = useQueryClient();
   const organizationId = fonte.modo === "real" ? fonte.organizationId : null;
   const guardar = useCallback(async (dados: DadosIdentidade): Promise<ResultadoIdentidade> => {
-    if (!organizationId || !pessoaId) throw new ErroNeg(null, null, CHAVE_ERRO_GENERICO);
+    // Sem o tipo atual (a ficha ainda não carregou) não se grava: um condomínio gravado como `organization` seria despromovido a empresa.
+    if (!organizationId || !pessoaId || !tipoClienteAtual) throw new ErroNeg(null, null, CHAVE_ERRO_GENERICO);
     const tipo = dados.tipo === "organization" && tipoClienteAtual === "condominio" ? "condominio" : dados.tipo;
     const resposta = await chamarNeg<unknown>("neg_guardar_identidade_pessoa", {
       p_organization_id: organizationId,

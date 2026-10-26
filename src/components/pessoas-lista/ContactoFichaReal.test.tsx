@@ -36,9 +36,10 @@ describe("ContactoFichaReal: o que mostra", () => {
     expect(screen.getAllByText("Sem indicação").length).toBeGreaterThanOrEqual(4);
   });
 
-  it("uma língua desconhecida mostra-se tal como está", () => {
+  it("uma língua desconhecida mostra-se pelo nome (Intl.DisplayNames), não pelo código", () => {
     desenhar({ lingua: "es" });
-    expect(screen.getByText("es")).toBeInTheDocument();
+    expect(screen.getByText(/espanhol/i)).toBeInTheDocument();
+    expect(screen.queryByText("es")).toBeNull();
   });
 
   it("sem permissão para editar não há botão", () => {
@@ -87,6 +88,31 @@ describe("ContactoFichaReal: editar", () => {
     await waitFor(() => expect(aoGuardar).toHaveBeenCalledExactlyOnceWith({ contacto: "email" }));
   });
 
+  it("sem língua na base o seletor tem a opção vazia «Sem indicação» escolhida, e depois pt, en, fr", () => {
+    desenhar({ lingua: undefined });
+    abrir();
+    const opcoes = Array.from(screen.getByLabelText("Idioma").querySelectorAll("option"));
+    expect(opcoes.map((o) => o.value)).toEqual(["", "pt", "en", "fr"]);
+    expect(opcoes[0]).toHaveTextContent("Sem indicação");
+    expect(screen.getByLabelText("Idioma")).toHaveValue("");
+  });
+
+  it("com língua na base não há opção vazia", () => {
+    desenhar({ lingua: "pt" });
+    abrir();
+    expect(Array.from(screen.getByLabelText("Idioma").querySelectorAll("option")).map((o) => o.value)).toEqual(["pt", "en", "fr"]);
+  });
+
+  it("Enter num campo (submeter o formulário) guarda", async () => {
+    const { aoGuardar } = desenhar();
+    abrir();
+    escrever("Email", "nova@x.pt");
+    const form = screen.getByLabelText("Email").closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+    await waitFor(() => expect(aoGuardar).toHaveBeenCalledExactlyOnceWith({ email: "nova@x.pt" }));
+  });
+
   it("sem alterações fecha sem chamar a base", () => {
     const { aoGuardar } = desenhar();
     abrir();
@@ -123,6 +149,37 @@ describe("ContactoFichaReal: editar", () => {
     guardar();
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Este email já existe nesta organização"));
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["email repetido (23505)", "pessoasPagina.erroNeg.emailDuplicado", "23505", { email: "outra@x.pt" }, "Email"],
+    ["telefone repetido (23505)", "pessoasPagina.erroNeg.telefoneDuplicado", "23505", { telefone: "913333333" }, "Telefone"],
+    ["NG019 só com o telefone enviado", "pessoasPagina.erroNeg.ng019", "NG019", { telefone: "913333333" }, "Telefone"],
+    ["NG019 só com o email enviado", "pessoasPagina.erroNeg.ng019", "NG019", { email: "outra@x.pt" }, "Email"],
+  ])("%s marca o campo (aria-invalid), liga-o ao erro e dá-lhe o foco", async (_nome, chave, codigo, escrito, rotulo) => {
+    const aoGuardar = vi.fn().mockRejectedValue(new ErroNeg(null, codigo, chave));
+    desenhar({ aoGuardar });
+    abrir();
+    if ("email" in escrito) escrever("Email", escrito.email as string);
+    if ("telefone" in escrito) escrever("Telefone", escrito.telefone as string);
+    guardar();
+    const alerta = await screen.findByRole("alert");
+    const campo = screen.getByLabelText(rotulo);
+    await waitFor(() => expect(campo).toHaveAttribute("aria-invalid", "true"));
+    expect(campo).toHaveFocus();
+    expect((campo.getAttribute("aria-describedby") ?? "").split(" ")).toContain(alerta.id);
+    const outro = screen.getByLabelText(rotulo === "Email" ? "Telefone" : "Email");
+    expect(outro).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("escrever no campo marcado tira a marca", async () => {
+    desenhar({ aoGuardar: vi.fn().mockRejectedValue(new ErroNeg(null, "23505", "pessoasPagina.erroNeg.emailDuplicado")) });
+    abrir();
+    escrever("Email", "outra@x.pt");
+    guardar();
+    await waitFor(() => expect(screen.getByLabelText("Email")).toHaveAttribute("aria-invalid", "true"));
+    escrever("Email", "outra2@x.pt");
+    expect(screen.getByLabelText("Email")).not.toHaveAttribute("aria-invalid");
   });
 
   it("cancelar fecha sem guardar", () => {

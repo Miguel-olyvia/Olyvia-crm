@@ -65,7 +65,7 @@ describe("FichaReal: contacto editável", () => {
     expect(within(seccao).getByText("912345678")).toBeInTheDocument();
     expect(within(seccao).getByText("ana@exemplo.pt")).toBeInTheDocument();
     expect(within(seccao).getByText("Tarde")).toBeInTheDocument();
-    expect(within(seccao).getByText("es")).toBeInTheDocument();
+    expect(within(seccao).getByText(/espanhol/i)).toBeInTheDocument();
   });
 
   it("mudar o email chama neg_substituir_contacto e mais nada (as preferências não se tocam)", async () => {
@@ -107,6 +107,38 @@ describe("FichaReal: contacto editável", () => {
     expect(await within(seccao).findByRole("alert")).toHaveTextContent("já pertence a outra pessoa");
     expect(chamadas("neg_guardar_contacto_pessoa")).toHaveLength(0);
     expect(screen.getByLabelText("Email")).toHaveValue("outra@exemplo.pt");
+  });
+
+  it("se o email grava e as preferências falham, o erro diz que o telefone e o email ficaram gravados (e o motivo)", async () => {
+    rpcMock.mockImplementation((nome: string) => {
+      if (nome === "neg_ficha_pessoa") return respostaOk(ficha);
+      return nome === "neg_guardar_contacto_pessoa" ? respostaErro("NG003") : respostaOk({ mudou: true });
+    });
+    desenhar();
+    const seccao = await abrirDados();
+    fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "nova@exemplo.pt" } });
+    fireEvent.change(screen.getByLabelText("Melhor hora"), { target: { value: "manha" } });
+    fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
+    const alerta = await within(seccao).findByRole("alert");
+    expect(alerta).toHaveTextContent(/telefone e o email ficaram gravados/i);
+    expect(alerta).toHaveTextContent(/preferências/i);
+    expect(chamadas("neg_substituir_contacto")).toHaveLength(1);
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+  });
+
+  it("se só as preferências falham (nada foi substituído), o erro NÃO diz que o email ficou gravado", async () => {
+    rpcMock.mockImplementation((nome: string) => {
+      if (nome === "neg_ficha_pessoa") return respostaOk(ficha);
+      return nome === "neg_guardar_contacto_pessoa" ? respostaErro("NG003") : respostaOk({ mudou: true });
+    });
+    desenhar();
+    const seccao = await abrirDados();
+    fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
+    fireEvent.change(screen.getByLabelText("Melhor hora"), { target: { value: "manha" } });
+    fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
+    const alerta = await within(seccao).findByRole("alert");
+    expect(alerta).not.toHaveTextContent(/ficaram gravados/i);
   });
 
   it("sem permissão para editar não há botão", async () => {

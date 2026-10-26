@@ -93,7 +93,7 @@ export function AbaQualificacao({ id, respostas, morada, erroCodigoPostal, orige
         <section aria-labelledby={`${id}-qualificacao`} className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 id={`${id}-qualificacao`} className="text-sm font-semibold text-foreground">{titulo}</h3>
-            <p aria-live="polite" className="text-sm tabular-nums text-muted-foreground">{t(`${N}answered`, { n: respondidas, m: total })}</p>
+            <p className="text-sm tabular-nums text-muted-foreground">{t(`${N}answered`, { n: respondidas, m: total })}</p>
           </div>
           <BlocosPerguntas
             blocos={blocos} respostas={respostas} aoEscolher={acoes.escolher} aoEscrever={acoes.escrever}

@@ -13,6 +13,7 @@ import { useFontePessoas } from "./useFontePessoas";
 // A base recusa estes dois porque o levantamento já está ligado (NG005) ou o negócio já tem um (NG013): a ficha que se vê está desatualizada.
 const RECUSAS_DE_FICHA_DESATUALIZADA = ["NG005", "NG013"];
 export const CHAVE_NAO_PRONTO ="businessGoals.new.qform.notReady";
+export const CHAVE_JA_A_GUARDAR = "businessGoals.new.qform.alreadySaving";
 const CHAVE_INVALIDAS = "businessGoals.new.qform.invalid";
 const CHAVE_MUDOU = "businessGoals.new.qform.changed";
 const CHAVE_MUDOU_SEM_RECARGA = "businessGoals.new.qform.changedReloadFailed";
@@ -94,10 +95,12 @@ export function useGuardarLevantamento(): GuardarLevantamentoHook {
   const { t } = useTranslation();
   const [aGuardar, setAGuardar] = useState(false);
   // O estado só muda no render seguinte: a referência é o que impede dois pedidos num duplo clique.
-  const emCurso = useRef<Promise<ResultadoGuardarLevantamento> | null>(null);
+  const emCurso = useRef<{ voo: Promise<ResultadoGuardarLevantamento>; assinatura: string } | null>(null);
 
   const guardar = useCallback((entrada: EntradaGuardarLevantamento): Promise<ResultadoGuardarLevantamento> => {
-    if (emCurso.current) return emCurso.current;
+    // Só um pedido equivalente partilha o que está em curso (duplo clique); um diferente não pode receber o resultado de outro.
+    const assinatura = JSON.stringify(entrada);
+    if (emCurso.current) return emCurso.current.assinatura === assinatura ? emCurso.current.voo : Promise.reject(new ErroNeg(null, null, CHAVE_JA_A_GUARDAR));
     if (!podeGuardar) return Promise.reject(new ErroNeg(null, null, CHAVE_NAO_PRONTO));
     setAGuardar(true);
     const voo = (async (): Promise<ResultadoGuardarLevantamento> => {
@@ -114,8 +117,8 @@ export function useGuardarLevantamento(): GuardarLevantamentoHook {
         // Depois de escrever: a ficha e as listas refazem-se (o levantamento aparece em todo o lado sem recarregar a página).
         void invalidarPessoas(client, organizationId, entrada.entityId);
         if (resultado.questionarioMudou) {
-          const recarregado = await recarregar();
-          // Se a releitura falhou, as perguntas no ecrã continuam as antigas: não se diz que foram recarregadas.
+          // Se a releitura falhou (ou rejeitou), as perguntas no ecrã continuam as antigas: não se diz que foram recarregadas, e o guardar não falha.
+          const recarregado = await recarregar().catch(() => null);
           toast.info(t(recarregado ? CHAVE_MUDOU : CHAVE_MUDOU_SEM_RECARGA));
         }
         return resultado;
@@ -124,7 +127,7 @@ export function useGuardarLevantamento(): GuardarLevantamentoHook {
         setAGuardar(false);
       }
     })();
-    emCurso.current = voo;
+    emCurso.current = { voo, assinatura };
     return voo;
   }, [podeGuardar, questionario, recarregar, t, client, organizationId]);
 

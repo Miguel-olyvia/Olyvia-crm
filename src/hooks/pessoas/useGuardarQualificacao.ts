@@ -9,7 +9,7 @@ import { toast } from "@/lib/toast";
 import { chamarNeg, ErroNeg } from "./chamarNeg";
 import { CHAVE_ERRO_GENERICO, CHAVES_ERRO_NEG } from "./errosNeg";
 import { invalidarPessoas } from "./invalidarPessoas";
-import { CHAVE_NAO_PRONTO } from "./guardarLevantamento";
+import { CHAVE_JA_A_GUARDAR, CHAVE_NAO_PRONTO } from "./guardarLevantamento";
 import { useFontePessoas } from "./useFontePessoas";
 
 const CHAVE_INVALIDAS = "businessGoals.new.qform.invalid";
@@ -74,7 +74,7 @@ function lerResultado(cru: unknown): ResultadoGuardarQualificacao {
 }
 
 export interface GuardarQualificacaoHook {
-  /** Grava. Lança `ErroNeg` se falhar (NG001 negócio indisponível, NG002 não aberto, NG028 fechado, NG009 valor inválido...). Um pedido durante outro devolve o que está em curso. */
+  /** Grava. Lança `ErroNeg` se falhar (NG001 negócio indisponível, NG002 não aberto, NG028 fechado, NG009 valor inválido...). Um pedido equivalente durante outro devolve o que está em curso; um diferente é recusado («já a guardar»). */
   guardar: (entrada: EntradaGuardarQualificacao) => Promise<ResultadoGuardarQualificacao>;
   aGuardar: boolean;
   /** O questionário está carregado e pode gravar-se. */
@@ -95,10 +95,12 @@ export function useGuardarQualificacao(): GuardarQualificacaoHook {
   const podeGuardar = contextoPodeGuardar && modoReal && !questionario.semBase;
   const { t } = useTranslation();
   const [aGuardar, setAGuardar] = useState(false);
-  const emCurso = useRef<Promise<ResultadoGuardarQualificacao> | null>(null);
+  const emCurso = useRef<{ voo: Promise<ResultadoGuardarQualificacao>; assinatura: string } | null>(null);
 
   const guardar = useCallback((entrada: EntradaGuardarQualificacao): Promise<ResultadoGuardarQualificacao> => {
-    if (emCurso.current) return emCurso.current;
+    // Só um pedido equivalente partilha o que está em curso (duplo clique); um diferente não pode receber o resultado de outro.
+    const assinatura = JSON.stringify(entrada);
+    if (emCurso.current) return emCurso.current.assinatura === assinatura ? emCurso.current.voo : Promise.reject(new ErroNeg(null, null, CHAVE_JA_A_GUARDAR));
     if (!podeGuardar) return Promise.reject(new ErroNeg(null, null, modoReal ? CHAVE_NAO_PRONTO : CHAVE_ERRO_GENERICO));
     setAGuardar(true);
     const voo = (async (): Promise<ResultadoGuardarQualificacao> => {
@@ -106,7 +108,8 @@ export function useGuardarQualificacao(): GuardarQualificacaoHook {
         const resultado = lerResultado(await chamarNeg<unknown>("neg_guardar_qualificacao", paramsGuardarQualificacao(entrada, questionario)));
         void invalidarPessoas(client, organizationId, entrada.entityId);
         if (resultado.questionarioMudou) {
-          const recarregado = await recarregar();
+          // Já gravou: se a releitura rejeitar, o guardar não falha (avisa que as perguntas não foram recarregadas).
+          const recarregado = await recarregar().catch(() => null);
           toast.info(t(recarregado ? CHAVE_MUDOU : CHAVE_MUDOU_SEM_RECARGA));
         }
         return resultado;
@@ -115,7 +118,7 @@ export function useGuardarQualificacao(): GuardarQualificacaoHook {
         setAGuardar(false);
       }
     })();
-    emCurso.current = voo;
+    emCurso.current = { voo, assinatura };
     return voo;
   }, [podeGuardar, modoReal, questionario, recarregar, t, client, organizationId]);
 

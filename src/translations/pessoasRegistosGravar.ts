@@ -16,6 +16,7 @@ const pt: Record<string, string> = {
   [`${P}err.noAgenda`]: "Não foi possível escolher por si o quadro da agenda e quem vai à visita. Espere um instante e tente de novo, ou marque a visita pelo botão «Marcar visita», que deixa escolher.",
   [`${P}saved`]: "Visita e levantamento de {name} guardados.",
   [`${P}nothing`]: "Não havia alterações a guardar.",
+  [`${P}qualSavedNote`]: "A Qualificação e o pedido do cliente ficaram gravados.",
 };
 
 const en: Record<string, string> = {
@@ -32,6 +33,7 @@ const en: Record<string, string> = {
   [`${P}err.noAgenda`]: "The calendar board and who goes to the visit could not be chosen for you. Wait a moment and try again, or book the visit with the \"Book visit\" button, which lets you choose.",
   [`${P}saved`]: "Visit and survey for {name} saved.",
   [`${P}nothing`]: "There were no changes to save.",
+  [`${P}qualSavedNote`]: "The qualification and the customer request were saved.",
 };
 
 export const pessoasRegistosGravarTranslations: Record<"en" | "pt", Record<string, string>> = { en, pt };

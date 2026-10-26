@@ -2,10 +2,13 @@
 // o browser dá a posição e o OpenStreetMap (Nominatim, pesquisa inversa) dá a morada. Só se devolve rua, código postal e localidade; as coordenadas
 // ficam aqui dentro e nunca se guardam. Vive em @/hooks/pessoas porque é a única via das páginas de Pessoas e Negócio para o exterior (ver semBase.test.ts). ATENÇÃO: a CSP (`connect-src`) e a `Permissions-Policy: geolocation=()` do vercel.json bloqueiam as duas
 // coisas em produção; este módulo falha com um motivo claro (`semSuporte`, `negada`, `servico`) em vez de inventar outra via.
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import type { MoradaObraForm } from "@/components/negocio-metas/moradaObra";
 
 export const URL_MORADAS = "https://nominatim.openstreetmap.org/reverse";
 
+/** Tempo máximo do pedido ao serviço de moradas; passado isto é «serviço indisponível». */
+const TEMPO_LIMITE_MS = 10_000;
 const CODIGO_POSTAL = /^\d{4}-\d{3}$/;
 
 /** Os motivos pelos quais «Estou no local» falha; cada um tem o seu texto (`address.here.err.<motivo>`). */
@@ -29,15 +32,21 @@ export async function moradaDaPosicao(latitude: number, longitude: number, pedir
   const url = `${URL_MORADAS}?format=jsonv2&addressdetails=1&zoom=18&accept-language=pt&lat=${latitude}&lon=${longitude}`;
   let resposta: Response;
   try {
-    resposta = await pedir(url, { headers: { Accept: "application/json" } });
-  } catch {
+    resposta = await pedir(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(TEMPO_LIMITE_MS) });
+  } catch (erro) {
+    // Rede, CSP ou tempo esgotado: a pessoa vê «serviço», o erro original vai para a observabilidade.
+    captureFlowError(erro, "pessoas-neg");
     throw new ErroLocalizacao("servico");
   }
-  if (!resposta.ok) throw new ErroLocalizacao("servico");
+  if (!resposta.ok) {
+    captureFlowError(new Error(`moradaDaPosicao: HTTP ${resposta.status}`), "pessoas-neg");
+    throw new ErroLocalizacao("servico");
+  }
   let corpo: unknown;
   try {
     corpo = await resposta.json();
-  } catch {
+  } catch (erro) {
+    captureFlowError(erro, "pessoas-neg");
     throw new ErroLocalizacao("servico");
   }
   const a = (typeof corpo === "object" && corpo !== null && "address" in corpo ? (corpo as { address: unknown }).address : null) as Record<string, unknown> | null;
@@ -52,7 +61,7 @@ export async function moradaDaPosicao(latitude: number, longitude: number, pedir
 }
 
 const PERMISSAO_NEGADA = 1;
-const OPCOES_POSICAO: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 };
+const OPCOES_POSICAO: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
 
 function posicaoDoDispositivo(): Promise<GeolocationCoordinates> {
   return new Promise((resolve, reject) => {

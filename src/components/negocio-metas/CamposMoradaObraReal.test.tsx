@@ -53,7 +53,35 @@ describe("Morada da obra: preencher com os dados da entidade", () => {
     const { aoPreencherDe } = montar({ moradaEntidade: null });
     fireEvent.click(screen.getByRole("button", { name: "Preencher com os dados da entidade" }));
     expect(aoPreencherDe).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith("A entidade ainda não tem morada.");
+    // Diz-se na região aria-live que já existe, e não num toast (que um leitor de ecrã pode não anunciar).
+    expect(document.getElementById("m-local")).toHaveTextContent("A entidade ainda não tem morada.");
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  it("depois de copiar, a confirmação vai para a região aria-live (não para um toast)", () => {
+    montar();
+    fireEvent.click(screen.getByRole("button", { name: "Preencher com os dados da entidade" }));
+    const regiao = document.getElementById("m-local");
+    expect(regiao).toHaveAttribute("aria-live", "polite");
+    expect(regiao).toHaveTextContent("Morada da entidade copiada.");
+    expect(info).not.toHaveBeenCalled();
+  });
+});
+
+describe("Morada da obra: campos", () => {
+  it("os quatro campos têm autoComplete off (é a morada da obra, não a de quem preenche)", () => {
+    montar();
+    for (const sufixo of ["rua", "cp", "localidade", "andar"]) {
+      expect(document.getElementById(`m-${sufixo}`), sufixo).toHaveAttribute("autocomplete", "off");
+    }
+  });
+
+  it("o formato do código postal está escrito à vista e ligado ao campo por aria-describedby", () => {
+    montar();
+    const campo = document.getElementById("m-cp") as HTMLElement;
+    const ids = (campo.getAttribute("aria-describedby") ?? "").split(" ");
+    const textos = ids.map((i) => document.getElementById(i)?.textContent ?? "");
+    expect(textos.some((x) => /0000-000|4 dígitos/.test(x) && x.length > 9)).toBe(true);
   });
 });
 

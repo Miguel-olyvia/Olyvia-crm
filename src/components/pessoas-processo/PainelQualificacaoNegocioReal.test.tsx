@@ -158,6 +158,30 @@ describe("a Qualificação do negócio no painel", () => {
     expect(qualificacoes()).toHaveLength(0);
   });
 
+  it("se a Qualificação grava e o levantamento falha, o erro diz que a Qualificação e o pedido ficaram gravados", async () => {
+    responder({ neg_guardar_levantamento: () => respostaErro("NG002") });
+    montar();
+    const d = await abrir();
+    fireEvent.change(within(d).getByLabelText(/O que o cliente pediu/), { target: { value: "Outro pedido" } });
+    fireEvent.mouseDown(within(d).getByRole("tab", { name: /^Visita/ }));
+    fireEvent.click(within(d).getByRole("button", { name: /^Medidas/ }));
+    fireEvent.change(await within(d).findByLabelText(/Observações/), { target: { value: "obs" } });
+    guardar(d);
+    const alerta = await within(d).findByRole("alert");
+    expect(alerta).toHaveTextContent(/Qualificação e o pedido do cliente ficaram gravados/);
+    expect(qualificacoes()).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: TITULO })).toBeInTheDocument();
+  });
+
+  it("se a Qualificação falha, o erro NÃO diz que ficou gravada", async () => {
+    responder({ neg_guardar_qualificacao: () => respostaErro("NG002") });
+    montar();
+    const d = await abrir();
+    fireEvent.change(within(d).getByLabelText(/O que o cliente pediu/), { target: { value: "X" } });
+    guardar(d);
+    expect(await within(d).findByRole("alert")).not.toHaveTextContent(/ficaram gravados/);
+  });
+
   it("se a Qualificação falha, o painel fica aberto com o erro, nada do levantamento se grava e o que se escreveu não se perde", async () => {
     responder({ neg_guardar_qualificacao: () => respostaErro("NG002") });
     montar();

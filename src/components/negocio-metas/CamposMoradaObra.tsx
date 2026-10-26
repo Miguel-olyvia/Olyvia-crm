@@ -40,7 +40,7 @@ export interface AtalhosMoradaReal {
 /** A precisão (em metros) a partir da qual se avisa para confirmar a rua e o número. */
 const PRECISAO_FRACA = 100;
 
-type EstadoLocal = { k: "parado" } | { k: "procura" } | { k: "ok"; metros: number; fraca: boolean } | { k: "erro"; motivo: string };
+type EstadoLocal = { k: "parado" } | { k: "entidade"; vazia: boolean } | { k: "procura" } | { k: "ok"; metros: number; fraca: boolean } | { k: "erro"; motivo: string };
 
 /** Os dois atalhos do negócio real. «Estou no local» pede a localização; as coordenadas nunca chegam aqui nem se guardam. */
 function AtalhosReais({ id, real, moradaAtual }: { id: string; real: AtalhosMoradaReal; moradaAtual: MoradaObraForm }) {
@@ -48,12 +48,13 @@ function AtalhosReais({ id, real, moradaAtual }: { id: string; real: AtalhosMora
   const [estado, setEstado] = useState<EstadoLocal>({ k: "parado" });
   const emCurso = useRef(false);
   const copiarEntidade = () => {
+    // O feedback vai para a região aria-live que existe sempre (um toast pode não ser anunciado).
     if (!real.moradaEntidade) {
-      toast.info(t(`${N}address.fromEntity.empty`));
+      setEstado({ k: "entidade", vazia: true });
       return;
     }
     real.aoPreencherDe({ ...real.moradaEntidade }, "entidade");
-    toast.info(t(`${N}address.fromEntity.done`));
+    setEstado({ k: "entidade", vazia: false });
   };
   const estouNoLocal = async () => {
     if (emCurso.current) return;
@@ -70,7 +71,8 @@ function AtalhosReais({ id, real, moradaAtual }: { id: string; real: AtalhosMora
     }
   };
   const procura = estado.k === "procura";
-  const mensagem = estado.k === "ok" ? t(`${N}address.here.${estado.fraca ? "weak" : "done"}`, { m: estado.metros })
+  const mensagem = estado.k === "entidade" ? t(`${N}address.fromEntity.${estado.vazia ? "empty" : "done"}`)
+    : estado.k === "ok" ? t(`${N}address.here.${estado.fraca ? "weak" : "done"}`, { m: estado.metros })
     : estado.k === "erro" ? t(`${N}address.here.err.${estado.motivo}`) : "";
   return (
     <>
@@ -127,21 +129,22 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, orig
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
           <Rotulo para={`${id}-rua`} texto={t(`${N}address.street`)} />
-          <Input id={`${id}-rua`} value={valores.rua} maxLength={MAX_RUA} autoComplete="street-address" className={CAMPO} onChange={(e) => aoMudar("rua", e.target.value)} />
+          <Input id={`${id}-rua`} value={valores.rua} maxLength={MAX_RUA} autoComplete="off" className={CAMPO} onChange={(e) => aoMudar("rua", e.target.value)} />
         </div>
         <div className="space-y-1.5">
           <Rotulo para={`${id}-cp`} texto={t(`${N}address.postal`)} />
           <Input
-            id={`${id}-cp`} value={valores.codigoPostal} inputMode="numeric" autoComplete="postal-code" maxLength={8}
+            id={`${id}-cp`} value={valores.codigoPostal} inputMode="numeric" autoComplete="off" maxLength={8}
             placeholder={t(`${N}address.postal.placeholder`)} aria-invalid={erroCodigoPostal ? true : undefined}
-            aria-describedby={erroCodigoPostal ? `${id}-cp-erro` : undefined} className={cn(CAMPO, erroCodigoPostal && "border-destructive")}
+            aria-describedby={erroCodigoPostal ? `${id}-cp-ajuda ${id}-cp-erro` : `${id}-cp-ajuda`} className={cn(CAMPO, erroCodigoPostal && "border-destructive")}
             onChange={(e) => aoMudar("codigoPostal", e.target.value)}
           />
+          <p id={`${id}-cp-ajuda`} className="text-sm text-muted-foreground">{t(`${N}address.postal.hint`)}</p>
           <ErroDoCampo id={`${id}-cp-erro`} chave={erroCodigoPostal ? "error.postal.invalido" : undefined} />
         </div>
         <div className="space-y-1.5">
           <Rotulo para={`${id}-localidade`} texto={t(`${N}address.city`)} />
-          <Input id={`${id}-localidade`} value={valores.localidade} maxLength={MAX_LOCALIDADE} autoComplete="address-level2" className={CAMPO} onChange={(e) => aoMudar("localidade", e.target.value)} />
+          <Input id={`${id}-localidade`} value={valores.localidade} maxLength={MAX_LOCALIDADE} autoComplete="off" className={CAMPO} onChange={(e) => aoMudar("localidade", e.target.value)} />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Rotulo para={`${id}-andar`} texto={t(`${N}address.unit`)} />
