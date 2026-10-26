@@ -27,7 +27,7 @@ interface Props {
 const SELECT = cn("min-h-11", FOCO);
 
 /** A lista de linhas, o total e o botão Adicionar linha. */
-function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
+export function ListaLinhas({ id, levantamento, erros, acoes }: Props) {
   const { t } = useTranslation();
   const n = levantamento.linhas.length;
   return (

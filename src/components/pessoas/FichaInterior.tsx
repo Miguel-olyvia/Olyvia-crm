@@ -1,8 +1,8 @@
 // O interior da ficha da pessoa: cabeçalho, barra de ações, percurso, os painéis de ação (em linha) e as abas fixas. Tudo
 // vai num único contentor que rola, para o painel de chamada e o "Guardar" ficarem alcançáveis com zoom ou em ecrãs baixos.
 // Com o guia (`comGuia`, a ficha real) é UM só ecrã e mais nada: o topo é o guia (da pessoa, ou do negócio aberto) com o cabeçalho, a faixa fina de alertas
-// (só se existirem), as fases, o passo e o cartão do cliente; por baixo só vêm os painéis em linha abertos. Os registos, os dados da pessoa e as abas
-// Visitas, Negócios, Submissões e Atividade abrem a pedido, num diálogo por cima (`FichaApoioDialogo`), a partir do menu «Mais» ou dos atalhos do cabeçalho.
+// (só se existirem), as fases, o passo e o cartão do cliente; por baixo só vêm os painéis em linha abertos. A ficha antiga (registos, dados da pessoa,
+// visitas, negócios, submissões, atividade) NÃO existe neste modo: o Pipeline faz tudo no assistente de passos. Só os «Detalhes do negócio» abrem num diálogo.
 import { useEffect, useId, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -11,8 +11,6 @@ import { AnuncioFichaContext } from "@/components/ficha-comum/anuncioFicha";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import type { MaisItensFicha } from "./CarregarMais";
 import { AbasFicha, type AbaFicha, type AbasProps } from "./ApoioFicha";
-import type { AbaApoio, AbrirApoio, ContagensApoio } from "./apoioTipos";
-import { contarVisitasAtivas, visitasDaFicha } from "./proximaVisita";
 import { AvisoNegociosPerdidos } from "./AvisoNegociosPerdidos";
 import { BarraAcoesFicha } from "./BarraAcoesFicha";
 import { CabecalhoFicha } from "./CabecalhoFicha";
@@ -22,7 +20,6 @@ import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 import { ErroAcao } from "./ErroAcao";
 import { todosNegociosPerdidos } from "./etapaPessoa";
 import { FaixaAlertasFicha } from "./FaixaAlertasFicha";
-import { FichaApoioDialogo } from "./FichaApoioDialogo";
 import { LINHA_NEGOCIO } from "./FichaNegocios";
 import type { TeclaNavegacao, Vizinhas } from "./navegacaoFicha";
 import type { AcaoFicha, AcoesFicha } from "./PainelBase";
@@ -94,8 +91,8 @@ export interface FichaInteriorProps {
   /** A identidade da pessoa (a ficha real: empresa ou pessoa singular, com edição), nos «Dados da pessoa» do apoio. */
   identidade?: ReactNode;
   /**
-   * O guia do passo seguinte (a ficha real): no topo da ficha da pessoa em abordagem e do negócio aberto, com um só botão primário que faz o passo no
-   * próprio ecrã. Ligado, a ficha é só o guia: o resto (registos, dados, visitas, negócios, submissões, atividade) abre a pedido num diálogo por cima.
+   * O guia do passo seguinte (a ficha real do Pipeline): no topo da ficha da pessoa em abordagem e do negócio aberto, com o assistente de passos que faz
+   * cada passo no próprio ecrã. Ligado, a ficha é só o guia: não há ficha antiga por cima (registos, dados, visitas, negócios, submissões, atividade).
    * Sem isto (o exemplo) fica como estava.
    */
   comGuia?: boolean;
@@ -169,15 +166,11 @@ function useAoCriarNegocio(resumo: ResumoPessoa, aoCriados: (novos: string[]) =>
 
 export function FichaInterior(p: FichaInteriorProps) {
   const { t } = useTranslation();
-  // Com o guia a aba é a do diálogo de apoio (a primeira, «Registos e dados»); o exemplo começa no Resumo.
-  const [aba, setAba] = useState<AbaFicha>(p.comGuia ? "registos" : "resumo");
-  // O diálogo de apoio (a ficha antiga, a pedido) e os detalhes do negócio aberto: só existem com o guia. `origemApoio` é o botão a que o foco volta.
-  const [apoioAberto, setApoioAberto] = useState(false);
+  const [aba, setAba] = useState<AbaFicha>("resumo");
+  // Os detalhes do negócio aberto: só existem com o guia. `origemApoio` é o botão a que o foco volta.
   const [detalhesAbertos, setDetalhesAbertos] = useState(false);
   const origemApoio = useRef<HTMLElement | null>(null);
   const negocio = useNegocioAberto(!!p.comGuia);
-  // Abrir um negócio a partir da aba Negócios fecha o diálogo: o título do negócio novo é o único dono do foco (o diálogo não o devolve ao botão antigo).
-  const focoNoNegocio = useRef(false);
   const painelId = useId();
   const { texto, anunciar } = useAnuncios(p.anuncioExterno);
   // A visita a que se regista o resultado (o diálogo vive aqui, dentro da ficha, para o aviso sair na região da ficha).
@@ -212,28 +205,18 @@ export function FichaInterior(p: FichaInteriorProps) {
   const extras = useExtrasProcesso();
   const itemPessoa = useMemo(() => (p.comGuia ? itensDaPessoa(p.resumo, p.hoje, extras).find((i) => i.tipo === "pessoa") : undefined), [p.comGuia, p.resumo, p.hoje, extras]);
   const negocioDoTopo = p.comGuia ? p.resumo.negocios.find((n) => n.id === negocio.aberto) ?? null : null;
-  // O apoio a pedido: abre o diálogo na aba pedida e guarda o botão a que o foco volta ao fechar.
-  const abrirApoio: AbrirApoio = (alvo: AbaApoio, origem) => { origemApoio.current = origem; setAba(alvo); setApoioAberto(true); };
   const abrirDetalhes = (origem: HTMLElement | null) => { origemApoio.current = origem; setDetalhesAbertos(true); };
-  const real = p.separadorSubmissoes;
-  const pendentes = real ? real.pendentes : p.submissoes.length;
-  const contagens: ContagensApoio | undefined = p.comGuia ? {
-    visitas: contarVisitasAtivas(visitasDaFicha(p.resumo)),
-    negocios: p.resumo.negocios.length,
-    submissoes: !p.podeVerSubmissoes ? undefined : real ? real.total : p.submissoes.length,
-    submissoesNovas: p.podeVerSubmissoes ? pendentes : 0,
-  } : undefined;
   const faixa = p.comGuia ? (
     <FaixaAlertasFicha
-      resumo={p.resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes} pendentes={pendentes}
-      aoAbrirApoio={abrirApoio} aoEncerrar={(origem) => abrir("encerrar", origem)}
+      resumo={p.resumo} hoje={p.hoje} voltou={p.voltou} podeVerSubmissoes={p.podeVerSubmissoes}
+      aoEncerrar={(origem) => abrir("encerrar", origem)}
     />
   ) : undefined;
   const cabecalhoFicha = useCabecalhoGuiaFicha({
     resumo: p.resumo, vizinhas: p.vizinhas, aoIr: p.aoIr, aberta: acao, painelId, aoAbrir: abrir, aoReativar: reativar,
-    aoCriarNegocio: criarNegocio ? () => criarNegocio(p.resumo.pessoa) : undefined, capacidades: p.acoes.capacidades, aGuardar: reabrir.aGuardar,
+    capacidades: p.acoes.capacidades, aGuardar: reabrir.aGuardar,
     comItemChamada: negocioDoTopo !== null || !itemPessoa || passoDoItem(itemPessoa).id !== "registarChamada",
-    aoAbrirApoio: p.comGuia ? abrirApoio : undefined, contagens, aoAbrirDetalhesNegocio: negocioDoTopo ? abrirDetalhes : undefined, faixa,
+    aoAbrirDetalhesNegocio: negocioDoTopo ? abrirDetalhes : undefined, faixa,
   });
   const aviso = p.avisoAtualizacao && (
     <div role="alert" className="mx-6 mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
@@ -254,8 +237,7 @@ export function FichaInterior(p: FichaInteriorProps) {
     ...p, aba,
     aoMudar: (a: AbaFicha) => { if (!p.comGuia) negocio.esquecer(); setAba(a); },
     negocioAberto: negocio.aberto,
-    // Com o guia, abrir um negócio da lista do apoio fecha o diálogo e mostra-o no topo da ficha.
-    aoAbrirNegocio: (id: string) => { negocio.abrir(id); if (p.comGuia) { focoNoNegocio.current = true; setApoioAberto(false); } },
+    aoAbrirNegocio: (id: string) => negocio.abrir(id),
     aoVoltarNegocio: negocio.voltar, aoRegistarResultado: setVisitaDoResultado,
     aoRegistarChamada: (origem: HTMLElement | null) => abrir("chamada", origem),
     aoEncerrar: podeEncerrar ? (origem: HTMLElement | null) => abrir("encerrar", origem) : undefined,
@@ -311,18 +293,6 @@ export function FichaInterior(p: FichaInteriorProps) {
           </>
         )}
       </div>
-      {p.comGuia && (
-        <FichaApoioDialogo
-          aberto={apoioAberto} aoFechar={() => setApoioAberto(false)} titulo={t("pessoasPagina.apoio.titulo")} descricao={p.resumo.pessoa.nome} origem={origemApoio}
-          destinoFoco={() => {
-            if (!focoNoNegocio.current) return null;
-            focoNoNegocio.current = false;
-            return document.querySelector<HTMLElement>("[data-negocio-titulo]");
-          }}
-        >
-          {apoioAberto && <AbasFicha {...abasProps} />}
-        </FichaApoioDialogo>
-      )}
       <DialogoResultadoVisita
         visita={visitaAberta} pessoa={p.resumo.pessoa} comNegocioAberto={p.resumo.abertos.length > 0} aoGuardar={p.acoes.registarResultadoVisita}
         aoFechar={() => setVisitaDoResultado(null)} aoAnunciar={anunciar}

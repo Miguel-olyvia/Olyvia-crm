@@ -41,8 +41,16 @@ export function FormVisitaReal({ pessoa, hoje, revisita, aoOcupado, aoMarcada, a
   const { t } = useTranslation();
   const id = useId();
   const acoes = useAcoesVisita(pessoa.pessoaId, null);
-  const form = useFormAgendaVisita({ responsavelUserId: pessoa.responsavelUserId ?? null });
-  const [nota, setNota] = useState("");
+  // O que se preparou no assistente vai como escolha inicial (só o que tem valor: o resto fica por omissão).
+  const preparado = pessoa.preparar;
+  const form = useFormAgendaVisita({
+    responsavelUserId: pessoa.responsavelUserId ?? null,
+    inicial: {
+      ...(preparado?.duracao ? { duracao: preparado.duracao } : {}),
+      ...(preparado?.quemVaiEstar ? { quemVaiEstar: preparado.quemVaiEstar } : {}),
+    },
+  });
+  const [nota, setNota] = useState(preparado?.nota ?? "");
   const [destino, setDestino] = useState<DestinoVisita>(() => destinoInicial(pessoa.moradaLead));
   const [tentou, setTentou] = useState(false);
   const formulario = useRef<HTMLFormElement>(null);

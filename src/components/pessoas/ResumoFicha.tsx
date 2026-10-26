@@ -9,7 +9,6 @@ import type { AcoesFicha } from "./PainelBase";
 import type { ResumoPessoa } from "./pessoasTipos";
 import { itensDaPessoa } from "./processo/itensProcesso";
 import { useExtrasProcesso } from "./processo/processoNegocios";
-import { SeccaoRecolhivel } from "./SeccaoRecolhivel";
 import { SeccaoRegistos } from "./SeccaoRegistos";
 import { SeccaoAvisos, SeccaoLead, SeccaoPasso } from "./SeccoesResumo";
 import { proximaVisitaDaPessoa, contarVisitasAtivas, visitasDaFicha, visitasPorFechar } from "./proximaVisita";
@@ -38,18 +37,7 @@ interface ResumoFichaProps {
   maisItens?: MaisItensFicha;
   /** A identidade da pessoa (a ficha real), logo antes do contacto. */
   identidade?: ReactNode;
-  /** O guia do passo seguinte já tem o botão do passo da pessoa: as secções das visitas não o repetem. */
-  semBotaoDoPasso?: boolean;
-  /**
-   * A ficha com o guia (ecrã único): o Resumo deixa de ser uma aba e fica, no diálogo de apoio, só as secções recolhíveis e fechadas (os registos, os
-   * dados da pessoa e a lead). Os alertas (visitas por fechar, voltou a contactar, negócios perdidos) vivem na faixa fina do cabeçalho e a lista das
-   * visitas na aba Visitas; «Próximo passo e prazo» vive no passo e o contacto é o cartão do cliente do guia.
-   */
-  modoApoio?: "detalhes";
 }
-
-/** Uma secção recolhível cujo conteúdo já tem o seu título: o título de dentro fica só para o leitor de ecrã (não se repete o botão). */
-const SEM_TITULO_REPETIDO = "[&>section]:border-t-0 [&>section]:pt-0 [&>section>div:first-child]:sr-only";
 
 export function ResumoFicha(p: ResumoFichaProps) {
   const { t } = useTranslation();
@@ -72,7 +60,7 @@ export function ResumoFicha(p: ResumoFichaProps) {
   const proxima = proximaVisitaDaPessoa(visitas, p.hoje);
   const porFechar = visitasPorFechar(visitas, p.hoje);
   const temPorFechar = porFechar.length > 0;
-  const item = p.semBotaoDoPasso ? undefined : itensDaPessoa(resumo, p.hoje, extras).find((i) => i.tipo === "pessoa");
+  const item = itensDaPessoa(resumo, p.hoje, extras).find((i) => i.tipo === "pessoa");
   const acaoDoPasso = item && comVisitas ? <AcaoDoPassoPessoa item={item} nome={resumo.pessoa.nome} feita={temVisitaFeitaPorLigar(visitas)} /> : undefined;
   const alertas = (
     <>
@@ -94,26 +82,6 @@ export function ResumoFicha(p: ResumoFichaProps) {
       aoVerSubmissoes={p.aoVerSubmissoes}
     />
   );
-  if (p.modoApoio === "detalhes") {
-    return (
-      <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-0">
-        <div className="space-y-2">
-          <SeccaoRecolhivel titulo={t("pessoasPagina.reg.kind.records")}>
-            <div className={SEM_TITULO_REPETIDO}>
-              <SeccaoRegistos
-                contactos={resumo.registos.contactos} levantamentos={resumo.registos.levantamentos} negocios={negocios}
-                maisContactos={p.maisItens?.contactos} maisLevantamentos={p.maisItens?.levantamentos}
-              />
-            </div>
-          </SeccaoRecolhivel>
-          {p.identidade && <SeccaoRecolhivel titulo={t("pessoasPagina.guia.secao.dados")}><div className="space-y-4">{p.identidade}</div></SeccaoRecolhivel>}
-          <SeccaoRecolhivel titulo={t("pessoasPagina.sum.lead")}>
-            <div className={SEM_TITULO_REPETIDO}><SeccaoLead resumo={resumo} hoje={p.hoje} /></div>
-          </SeccaoRecolhivel>
-        </div>
-      </div>
-    );
-  }
   return (
     <div className="space-y-4 [&>section:first-child]:border-t-0 [&>section:first-child]:pt-4">
       {alertas}

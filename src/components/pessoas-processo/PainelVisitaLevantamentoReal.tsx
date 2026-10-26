@@ -5,24 +5,19 @@
 // fica aberto para conferir as respostas. Marcar uma visita aqui NÃO grava nota nem conta como contacto.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { adaptarPessoa } from "@/hooks/pessoas/adaptarFichaPessoa";
-import { adaptarNegocios } from "@/hooks/pessoas/adaptarNegociosFicha";
 import { adaptarRegistos } from "@/hooks/pessoas/adaptarRegistos";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { levantamentoLivreDaFicha } from "@/hooks/pessoas/livreDaFicha";
 import { QuestionarioFormularioProvider } from "@/hooks/pessoas/QuestionarioFormularioProvider";
 import { hojeLisboa } from "@/hooks/pessoas/tempoLisboa";
-import { useGuardarQualificacao } from "@/hooks/pessoas/useGuardarQualificacao";
 import { useGuardarRegistos } from "@/hooks/pessoas/useGuardarRegistos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { NovoNegocioDialogo } from "@/components/negocio-metas/NovoNegocioDialogo";
-import { useQuestionario } from "@/components/negocio-metas/QuestionarioContexto";
-import { chavesDaAba, respostasDeGravadas } from "@/components/negocio-metas/respostasQuestionario";
 import type { PessoaOpcao, RascunhoLevantamento } from "@/components/negocio-metas/novoNegocio";
 import type { VisitaNegocio } from "@/components/negocio-metas/negocioMetas";
 import { paraOpcao } from "@/components/pessoas/pessoaOpcao";
 import { valoresIniciaisDosRegistos } from "@/components/pessoas/valoresRegistos";
-import { entradaQualificacao } from "./entradaQualificacao";
 import { textoDoErroGravar } from "./textoDoErroGravar";
 
 const R = "pessoasPagina.real.records.";
@@ -36,18 +31,11 @@ interface PainelProps {
   aoMudarAberto: (aberto: boolean) => void;
   /** Devolve o foco a quem abriu o painel; diz se o fez. */
   aoDevolverFoco: () => boolean;
-  /**
-   * O negócio a que o painel grava (o «Fazer o levantamento» de um negócio): as visitas novas e o levantamento ficam ligados a ele, o levantamento é
-   * sempre um novo (o que a pessoa já tinha por ligar não se reescreve) e o painel abre sem ele. Sem isto (o menu «Mais») grava na pessoa.
-   */
-  negocioId?: string | null;
 }
 
-function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioId = null }: Omit<PainelProps, "abertura">) {
+function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco }: Omit<PainelProps, "abertura">) {
   const { t } = useTranslation();
-  const registos = useGuardarRegistos(ficha, negocioId ? { negocioId, ignorarLevantamentoLivre: true } : { negocioId: null });
-  const qualificacao = useGuardarQualificacao();
-  const { questionario } = useQuestionario();
+  const registos = useGuardarRegistos(ficha, { negocioId: null });
   const [motivo, setMotivo] = useState<string | null>(null);
   // O painel está à vista? Trocar de pessoa a meio da gravação fecha-o (por prop, ou desmonta-o), e uma falha de depois já não tem onde se dizer
   // dentro dele: diz-se num toast.
@@ -73,20 +61,7 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioI
     const pessoa = adaptarPessoa(ficha, hojeLisboa());
     const valores = valoresIniciaisDosRegistos(pessoa, adaptarRegistos(ficha));
     const moradaEntidade = pessoa.moradaCampos ? { ...pessoa.moradaCampos } : null;
-    // A Qualificação vive no negócio: abre com o pedido e as respostas que ele já tem (um negócio que a ficha não traz abre vazio).
-    const negocio = negocioId ? adaptarNegocios(ficha, hojeLisboa()).find((n) => n.id === negocioId) : undefined;
-    const gravadas = negocio?.qualificacaoGravada ?? [];
-    const inicial = { respostas: respostasDeGravadas(gravadas), pedido: negocio?.pedidoCliente ?? "" };
-    return {
-      opcao: [paraOpcao(pessoa)] as readonly PessoaOpcao[], nome: pessoa.nome, id: pessoa.id, inicial, gravadas,
-      // Para um negócio o levantamento é novo: não se abre sobre o que a pessoa já tinha por ligar (só sobre a qualificação do negócio).
-      valores: negocioId
-        ? {
-          pessoaId: valores.pessoaId, comercial: valores.comercial, visitas: valores.visitas,
-          levantamento: { linhas: [], observacoes: "", respostas: inicial.respostas }, real: { moradaEntidade, negocio: { pedidoCliente: inicial.pedido } },
-        }
-        : { ...valores, real: { moradaEntidade } },
-    };
+    return { opcao: [paraOpcao(pessoa)] as readonly PessoaOpcao[], nome: pessoa.nome, id: pessoa.id, valores: { ...valores, real: { moradaEntidade } } };
   });
   // As visitas da ficha de agora: as que já existem na base (não se removem, cancelam-se).
   const gravadas = useMemo(() => new Set((ficha.visitas?.itens ?? []).map((v) => v.id)), [ficha]);
@@ -94,27 +69,14 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioI
   const guardar = (rascunho: RascunhoLevantamento, visitas: VisitaNegocio[], comercial: string): Promise<boolean> => {
     if (emCurso.current) return emCurso.current;
     setMotivo(null);
-    // A Qualificação grava-se primeiro: é a que se repete sem criar nada (substitui); se falhar, o levantamento nem começa.
-    let qualificacaoGravada = false;
     const gravar = async (): Promise<boolean> => {
-      const entrada = negocioId
-        ? entradaQualificacao({
-          negocioId, entityId: ficha.pessoa.id, chavesQualificacao: chavesDaAba(questionario, "qualificacao"), inicial: aoAbrir.inicial, rascunho,
-        })
-        : null;
-      const q = entrada ? await qualificacao.guardar(entrada) : null;
-      qualificacaoGravada = q !== null;
       const r = await registos.guardar(visitas, rascunho, comercial);
       // Gravou, mas as perguntas mudaram: o painel fica aberto, com as respostas escritas, para as conferir.
-      if (r.levantamento?.questionarioMudou || q?.questionarioMudou) return recusar(t(AVISO_QUESTIONARIO_MUDOU));
-      toast.success(r.feitos.length > 0 || q?.mudou ? t(`${R}saved`, { name: aoAbrir.nome }) : t(`${R}nothing`));
+      if (r.levantamento?.questionarioMudou) return recusar(t(AVISO_QUESTIONARIO_MUDOU));
+      toast.success(r.feitos.length > 0 ? t(`${R}saved`, { name: aoAbrir.nome }) : t(`${R}nothing`));
       return true;
     };
-    const pedido = gravar().catch((erro: unknown) => {
-      // Se a Qualificação já gravou e o resto falhou, diz-se: quem lê o erro não deve achar que se perdeu tudo.
-      const texto = textoDoErroGravar(erro, t);
-      return recusar(qualificacaoGravada ? `${t(`${R}qualSavedNote`)} ${texto}` : texto);
-    }).finally(() => { emCurso.current = null; });
+    const pedido = gravar().catch((erro: unknown) => recusar(textoDoErroGravar(erro, t))).finally(() => { emCurso.current = null; });
     emCurso.current = pedido;
     return pedido;
   };
@@ -132,23 +94,18 @@ function PainelInterior({ ficha, aberto, aoMudarAberto, aoDevolverFoco, negocioI
         aoMudarAberto(abre);
       }}
       guardarLevantamento={{
-        texto: t("pessoasPagina.process.visitSurvey.save"), aoGuardar: guardar, motivo, tentativa, pronto: registos.pronto && (!negocioId || qualificacao.pronto),
+        texto: t("pessoasPagina.process.visitSurvey.save"), aoGuardar: guardar, motivo, tentativa, pronto: registos.pronto,
       }}
     />
   );
 }
 
-export function PainelVisitaLevantamentoReal({ ficha, aberto, abertura, aoMudarAberto, aoDevolverFoco, negocioId = null }: PainelProps) {
+export function PainelVisitaLevantamentoReal({ ficha, aberto, abertura, aoMudarAberto, aoDevolverFoco }: PainelProps) {
   const livre = useMemo(() => levantamentoLivreDaFicha(ficha), [ficha]);
-  const gravadasDoNegocio = useMemo(
-    () => (negocioId ? adaptarNegocios(ficha, hojeLisboa()).find((n) => n.id === negocioId)?.qualificacaoGravada : undefined),
-    [ficha, negocioId],
-  );
   return (
-    <QuestionarioFormularioProvider gravadas={negocioId ? gravadasDoNegocio : livre?.rascunho.gravadas}>
+    <QuestionarioFormularioProvider gravadas={livre?.rascunho.gravadas}>
       <PainelInterior
-        key={`${abertura}-${ficha.pessoa.id}-${negocioId ?? ""}`} ficha={ficha} aberto={aberto} aoMudarAberto={aoMudarAberto}
-        aoDevolverFoco={aoDevolverFoco} negocioId={negocioId}
+        key={`${abertura}-${ficha.pessoa.id}`} ficha={ficha} aberto={aberto} aoMudarAberto={aoMudarAberto} aoDevolverFoco={aoDevolverFoco}
       />
     </QuestionarioFormularioProvider>
   );

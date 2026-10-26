@@ -1,5 +1,5 @@
-// A ficha real é um só ecrã e a ficha antiga abre a pedido num diálogo por cima. Aqui: para onde vai o foco quando um negócio aberto no topo fecha
-// (a linha da lista só existia dentro do diálogo, já fechado), quem manda no foco ao abrir um negócio a partir do diálogo, e o fundo escurecido do diálogo.
+// A ficha real do Pipeline é um só ecrã; só os «Detalhes do negócio» abrem num diálogo por cima. Aqui: para onde vai o foco quando um negócio aberto no
+// topo fecha, e o foco e o fundo escurecido desse diálogo.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -21,7 +21,7 @@ vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success:
 vi.mock("@/hooks/pessoas/useComerciaisNegocio", () => ({
   useComerciaisNegocio: () => ({ comerciais: [], isLoading: false, isError: false, repetir: vi.fn() }),
 }));
-vi.mock("@/components/pessoas-processo/LevantamentoDoNegocioReal", () => ({ useLevantamentoDoNegocio: () => ({ pode: true, abrir: vi.fn() }) }));
+vi.mock("@/components/pessoas-processo/LevantamentoDoNegocioReal", () => ({ useLevantamentoDoNegocio: () => ({ pode: true }) }));
 vi.mock("@/components/pessoas-processo/DocumentosDoNegocioReal", () => ({ useDocumentosDoNegocio: () => null }));
 
 beforeAll(prepararRadixNoJsdom);
@@ -70,7 +70,7 @@ const nomeDaPessoa = () => screen.getByRole("heading", { level: 2, name: /Pedro 
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("o foco ao voltar de um negócio aberto no topo", () => {
-  it("«← Negócios» leva o foco para o nome da pessoa (a linha da lista só existe no diálogo, já fechado)", async () => {
+  it("«← Negócios» leva o foco para o nome da pessoa (já não há lista de negócios na ficha)", async () => {
     montar(comUm(), { negocioInicial: "n1" });
     fireEvent.click(screen.getByRole("button", { name: /Voltar aos negócios/ }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "WC social" })).toBeNull());
@@ -92,49 +92,36 @@ describe("o foco ao voltar de um negócio aberto no topo", () => {
   });
 });
 
-describe("abrir um negócio a partir da aba Negócios do diálogo", () => {
-  it("o foco fica no título do negócio aberto (e o diálogo, ao fechar, não o leva para outro lado)", async () => {
-    montar(comDois(), { negocioInicial: "n1" });
-    abrirItem(/^Negócios/);
-    const apoio = screen.getByRole("dialog", { name: "Mais sobre a pessoa" });
-    fireEvent.click(within(within(apoio).getByRole("tabpanel")).getByRole("button", { name: /Cozinha nova/ }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Mais sobre a pessoa" })).toBeNull());
-    const titulo = screen.getByRole("heading", { level: 3, name: "Cozinha nova" });
-    await waitFor(() => expect(titulo).toHaveFocus());
-    await esperar(50);
-    expect(titulo).toHaveFocus();
-  });
+describe("o diálogo «Detalhes do negócio»", () => {
+  const NOME = "Detalhes do negócio";
 
-  it("fechar o diálogo de outra maneira (Esc) continua a devolver o foco ao botão que o abriu", async () => {
-    montar(comDois(), { negocioInicial: "n1" });
-    abrirItem(/^Negócios/);
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Mais sobre a pessoa" }), { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Mais sobre a pessoa" })).toBeNull());
+  it("fechar com Esc devolve o foco ao botão «Mais» que o abriu", async () => {
+    montar(comUm(), { negocioInicial: "n1" });
+    abrirItem(/^Detalhes do negócio/);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: NOME }), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: NOME })).toBeNull());
     await waitFor(() => expect(within(guia()).getByRole("button", { name: "Mais" })).toHaveFocus());
   });
-});
 
-describe("o fundo do diálogo de apoio", () => {
   it("escurece a ficha: o fundo fica por cima do painel da ficha e por baixo do diálogo", () => {
-    montar(comUm());
-    abrirItem(/^Registos e dados/);
-    const apoio = screen.getByRole("dialog", { name: "Mais sobre a pessoa" });
+    montar(comUm(), { negocioInicial: "n1" });
+    abrirItem(/^Detalhes do negócio/);
+    const detalhes = screen.getByRole("dialog", { name: NOME });
     const fundo = document.querySelector<HTMLElement>("[data-ficha-apoio-fundo]");
     expect(fundo).not.toBeNull();
     const painel = screen.getByRole("heading", { level: 2, name: /Pedro Lopes/, hidden: true }).closest<HTMLElement>("[role='dialog']") as HTMLElement;
-    expect(painel).not.toBe(apoio);
+    expect(painel).not.toBe(detalhes);
     // No mesmo z-index vale a ordem no documento: o painel da ficha, depois o fundo, depois o diálogo.
     expect(painel.compareDocumentPosition(fundo as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect((fundo as HTMLElement).compareDocumentPosition(apoio) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect((fundo as HTMLElement).compareDocumentPosition(detalhes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const z = (el: HTMLElement) => /z-\[(\d+)\]/.exec(el.className)?.[1];
     expect(Number(z(fundo as HTMLElement))).toBeGreaterThanOrEqual(Number(z(painel)));
-    expect(Number(z(apoio))).toBeGreaterThanOrEqual(Number(z(fundo as HTMLElement)));
+    expect(Number(z(detalhes))).toBeGreaterThanOrEqual(Number(z(fundo as HTMLElement)));
   });
 
-  it("o foco fica preso no diálogo: o painel da ficha fica inerte para o leitor de ecrã", () => {
-    montar(comUm());
-    abrirItem(/^Registos e dados/);
-    expect(document.activeElement).toBe(within(screen.getByRole("dialog", { name: "Mais sobre a pessoa" })).getByRole("heading", { name: "Mais sobre a pessoa" }));
-    expect(screen.queryByRole("region", { name: "Passo seguinte" })).toBeNull();
+  it("o foco vai para o título do diálogo ao abrir", () => {
+    montar(comUm(), { negocioInicial: "n1" });
+    abrirItem(/^Detalhes do negócio/);
+    expect(document.activeElement).toBe(within(screen.getByRole("dialog", { name: NOME })).getByRole("heading", { name: NOME }));
   });
 });

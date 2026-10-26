@@ -49,18 +49,17 @@ function desenhar() {
     <QueryClientProvider client={cliente}>
       <FontePessoasContext.Provider value={REAL}>
         <MemoryRouter>
-          <FichaReal comGuia pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
+          <FichaReal pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
         </MemoryRouter>
       </FontePessoasContext.Provider>
     </QueryClientProvider>,
   );
 }
-const aberta = () => screen.findByRole("region", { name: "Ana Lopes" });
-// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, na primeira aba do diálogo de apoio (Mais > Registos e dados).
+const aberta = () => screen.findByRole("tab", { name: /^Resumo/ });
+// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, no Resumo da ficha (sem o guia do Pipeline).
 const abrirDados = async () => {
-  await screen.findByRole("button", { name: "Mais" });
+  await screen.findByRole("tab", { name: /^Resumo/ });
   abrirApoio("Registos e dados");
-  fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ }));
 };
 
 describe("FichaReal: classificação MQL/SQL à mão", () => {
@@ -86,8 +85,7 @@ describe("FichaReal: classificação MQL/SQL à mão", () => {
     await aberta();
     await abrirDados();
     expect(await screen.findByRole("button", { name: "Limpar classificação" })).toBeInTheDocument();
-    // A qualificação diz-se também na secção «Lead» (recolhível e fechada ao entrar).
-    fireEvent.click(screen.getByRole("button", { name: /^Lead/ }));
+    // A qualificação diz-se também na secção «Lead».
     expect(screen.getAllByText(/SQL - já falou com um comercial/).length).toBeGreaterThan(0);
   });
 

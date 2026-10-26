@@ -7,6 +7,7 @@ import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { fichaDb, pessoaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FiltrosQuadro } from "@/hooks/pessoas/quadroPessoasTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { cartaoQuadro, quadroBase } from "./fabricaQuadro";
 import { PipelineReal } from "./PipelineReal";
 
@@ -29,7 +30,7 @@ vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
 }));
 vi.mock("@/hooks/pessoas/useSubmissoesPessoa", () => ({ useSubmissoesPessoa: () => ({ submissoes: [], pendentes: 0, estado: "ok", recarregar: () => undefined }) }));
 vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: async () => ({}) }) }));
-vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", () => ({ useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
+vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", async (original) => ({ ...(await original<object>()), useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useSubstituirContactoPessoa", () => ({ useSubstituirContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useQualificarLeadPessoa", () => ({ useQualificarLeadPessoa: () => ({ classificar: async () => ({}) }) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }));
@@ -62,9 +63,9 @@ const quadroEscondido = () => document.querySelector("[data-pagina-escondida]")?
 
 function desenhar(inicial = "/pipeline") {
   return render(
-    <FontePessoasContext.Provider value={REAL}>
+    <ComClienteQuery><FontePessoasContext.Provider value={REAL}>
       <MemoryRouter initialEntries={[inicial]}><main data-testid="main"><PipelineReal /></main><Local /><Atras /></MemoryRouter>
-    </FontePessoasContext.Provider>,
+    </FontePessoasContext.Provider></ComClienteQuery>,
   );
 }
 

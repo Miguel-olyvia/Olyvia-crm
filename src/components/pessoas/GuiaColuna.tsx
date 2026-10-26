@@ -24,6 +24,38 @@ interface ColunaProps {
   id?: string;
 }
 
+/** «Fases feitas»: uma linha de separação e cada fase já feita, que se escolhe para a ver (só leitura). Sem fases feitas não desenha nada. */
+export function FasesFeitasNav({ feitas, faseVista, aoVerFase }: Pick<ColunaProps, "feitas" | "faseVista" | "aoVerFase">) {
+  const { t } = useTranslation();
+  if (feitas.length === 0) return null;
+  return (
+    <>
+      <hr className="my-3 border-border/60" />
+      <nav aria-label={t(`${P}guia.fasesFeitas`)}>
+        <p className="mb-2 text-sm text-muted-foreground">{t(`${P}guia.fasesFeitas`)}</p>
+        <ul className="list-none space-y-1 p-0">
+          {feitas.map((f) => {
+            const vista = f.id === faseVista;
+            return (
+              <li key={f.id}>
+                <button
+                  type="button" aria-current={vista ? "true" : undefined} onClick={() => aoVerFase(f.id)}
+                  className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-left text-[15px] text-foreground hover:bg-muted motion-reduce:transition-none", FOCO, vista && "bg-primary/10 font-semibold")}
+                >
+                  <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                  <span>{t(f.rotuloChave)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+    </>
+  );
+}
+
 export function ColunaDoGuia({ faseRotuloChave, itens, escolhido, aoEscolherPasso, feitas, faseVista, aoVerFase, id }: ColunaProps) {
   const { t } = useTranslation();
   return (
@@ -31,32 +63,7 @@ export function ColunaDoGuia({ faseRotuloChave, itens, escolhido, aoEscolherPass
       <nav aria-label={t(`${P}guia.passos`)}>
         <ChecklistDoPasso itens={itens} rotulo={t(faseRotuloChave)} cartao={false} selecionado={escolhido} aoSelecionar={aoEscolherPasso} />
       </nav>
-      {feitas.length > 0 && (
-        <>
-          <hr className="my-3 border-border/60" />
-          <nav aria-label={t(`${P}guia.fasesFeitas`)}>
-            <p className="mb-2 text-sm text-muted-foreground">{t(`${P}guia.fasesFeitas`)}</p>
-            <ul className="list-none space-y-1 p-0">
-              {feitas.map((f) => {
-                const vista = f.id === faseVista;
-                return (
-                  <li key={f.id}>
-                    <button
-                      type="button" aria-current={vista ? "true" : undefined} onClick={() => aoVerFase(f.id)}
-                      className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-left text-[15px] text-foreground hover:bg-muted motion-reduce:transition-none", FOCO, vista && "bg-primary/10 font-semibold")}
-                    >
-                      <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                        <Check className="h-3.5 w-3.5" />
-                      </span>
-                      <span>{t(f.rotuloChave)}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </nav>
-        </>
-      )}
+      <FasesFeitasNav feitas={feitas} faseVista={faseVista} aoVerFase={aoVerFase} />
     </div>
   );
 }

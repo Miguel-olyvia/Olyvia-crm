@@ -25,11 +25,11 @@ describe("invalidarPessoas", () => {
     expect(invalida(["negocio-workflow-config", "org-1"])).toBe(false);
   });
 
-  it("se refazer as queries rejeitar, não rejeita (a escrita já aconteceu) e regista o erro", async () => {
+  it("se refazer as queries rejeitar, não rejeita (a escrita já aconteceu) nem regista: é uma falha benigna", async () => {
     const client = new QueryClient();
     vi.spyOn(client, "invalidateQueries").mockRejectedValue(new Error("falhou"));
     await expect(invalidarPessoas(client, "org-1", "p1")).resolves.toBeUndefined();
-    expect(captureFlowError).toHaveBeenCalledTimes(1);
+    expect(captureFlowError).not.toHaveBeenCalled();
   });
 
   it("sem organização não invalida nada", async () => {

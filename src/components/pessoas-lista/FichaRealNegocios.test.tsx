@@ -27,6 +27,9 @@ const FICHA_BASE = fichaDb({
   contactos: seccaoDb([contactoDb({ id: "c1", em: "2026-10-12T09:30:00Z" })]),
 });
 
+// A lead ainda sem negócio: o guia é o assistente da fase Contacto e o «Criar o negócio» está nos passos que gravam no negócio.
+const SEM_NEGOCIO = fichaDb({ ...FICHA_BASE, negocios: { total: 0, itens: [] } });
+
 let ficha: FichaDb;
 const chamadas = (nome: string) => rpcMock.mock.calls.filter((c) => c[0] === nome);
 const params = (nome: string, n = 0) => chamadas(nome)[n][1] as Record<string, unknown>;
@@ -62,6 +65,11 @@ function desenhar(momento: MomentoGanho | null = "manual", sobre: Partial<Parame
     </QueryClientProvider>,
   );
 }
+/** O «Criar o negócio» do assistente (a ponte temporária): uma lead sem negócio e já contactada abre no passo «Morada da obra», que grava no negócio. */
+const botaoCriarNegocio = async () => {
+  await screen.findByRole("region", { name: "Ana Lopes" });
+  return screen.findByRole("button", { name: "Criar o negócio" });
+};
 const detalhe = () => screen.findByRole("heading", { level: 3, name: "Casa de banho" });
 
 describe("FichaReal com o negócio completo", () => {
@@ -106,11 +114,11 @@ describe("FichaReal com o negócio completo", () => {
     expect(params("neg_ligar_registo")).toEqual({ p_negocio_id: "n1", p_tipo: "contacto", p_registo_id: "c1" });
   });
 
-  it("«Criar negócio» abre o painel, cria na base com a lead e abre o negócio novo", async () => {
+  it("«Criar o negócio» (do assistente) abre o painel, cria na base com a lead e abre o negócio novo", async () => {
+    ficha = SEM_NEGOCIO;
     desenhar("manual", { negocioInicial: null });
     await screen.findByRole("region", { name: "Ana Lopes" });
-    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Criar negócio/ }));
+    fireEvent.click(await botaoCriarNegocio());
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
     fireEvent.change(within(painel).getByRole("textbox", { name: /^Título do negócio/ }), { target: { value: "Quarto" } });
     fireEvent.click(within(painel).getByRole("button", { name: "Criar o negócio" }));
@@ -132,11 +140,11 @@ describe("FichaReal com o negócio completo", () => {
 });
 
 describe("FichaReal: o foco depois de criar um negócio", () => {
-  it("vai para o título do negócio novo, e não para o botão «Mais»", async () => {
+  it("vai para o título do negócio novo, e não para o botão que abriu o painel", async () => {
+    ficha = SEM_NEGOCIO;
     desenhar("manual", { negocioInicial: null });
     await screen.findByRole("region", { name: "Ana Lopes" });
-    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Criar negócio/ }));
+    fireEvent.click(await botaoCriarNegocio());
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
     fireEvent.change(within(painel).getByRole("textbox", { name: /^Título do negócio/ }), { target: { value: "Quarto" } });
     fireEvent.click(within(painel).getByRole("button", { name: "Criar o negócio" }));
@@ -146,14 +154,16 @@ describe("FichaReal: o foco depois de criar um negócio", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Mais" }));
   });
 
-  it("cancelar o painel continua a devolver o foco ao botão «Mais»", async () => {
+  it("cancelar o painel devolve o foco ao botão «Criar o negócio» que o abriu", async () => {
+    ficha = SEM_NEGOCIO;
     desenhar("manual", { negocioInicial: null });
     await screen.findByRole("region", { name: "Ana Lopes" });
-    fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: /Criar negócio/ }));
+    const abrir = await botaoCriarNegocio();
+    abrir.focus(); // um clique real põe o foco no botão (o jsdom não o faz com fireEvent.click)
+    fireEvent.click(abrir);
     const painel = await screen.findByRole("dialog", { name: "Novo negócio" });
     fireEvent.click(within(painel).getByRole("button", { name: "Cancelar" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Novo negócio" })).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Mais" })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Criar o negócio" })));
   });
 });

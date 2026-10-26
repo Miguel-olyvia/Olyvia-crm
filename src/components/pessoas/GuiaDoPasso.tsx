@@ -66,8 +66,11 @@ export interface GuiaDoPassoProps {
   tituloRef?: Ref<HTMLHeadingElement>;
   /** A faixa fina de alertas, logo por baixo do cabeçalho (só existe quando há alertas). */
   faixa?: ReactNode;
-  /** «Ver toda a atividade» no cartão do cliente; sem isto a ligação não existe. */
-  aoVerAtividade?: (origem: HTMLElement) => void;
+  /**
+   * O assistente de passos (o Pipeline): no lugar da coluna e do centro quando se vê a fase atual. Recebe o que só o guia sabe, abrir uma fase feita
+   * (que passa a ver-se em leitura, como sempre). Sem isto o guia desenha o «passo seguinte» de sempre.
+   */
+  assistente?: (guia: { aoVerFase: (id: string) => void; extra?: ReactNode }) => ReactNode;
 }
 
 /** O ícone da fase atual, como no desenho (círculos concêntricos), num quadrado suave na cor primária da Olyvia. */
@@ -205,7 +208,7 @@ function CentroDoGuia({ passo, vista, itemEscolhido, pedidoFoco, podeRecuar, aoV
 
 export function GuiaDoPasso({
   passo, fases, cabecalho, cliente, acontecimentos, aoAcao, atributosAcao, explicacao, ocupado = false, acaoPerder, extra, tituloSecao,
-  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, aoVerAtividade,
+  nomeEl, descricaoEl, selos, aviso, navegacao, acoesSecundarias, tituloRef, faixa, assistente,
 }: GuiaDoPassoProps) {
   const { t } = useTranslation();
   // A fase que se vê: `null` é a atual; senão o id de uma fase feita (só leitura). O passo escolhido na coluna é próprio de cada fase.
@@ -244,7 +247,8 @@ export function GuiaDoPasso({
           duas colunas a partir de 768 px (o cliente por baixo, a toda a largura) e três a partir de 1024 px (coluna | passo | cliente). A ordem do DOM é a visual. */}
       {passo && tituloSecao && <Seccao className="sr-only">{tituloSecao}</Seccao>}
       <div className={cn("grid gap-4", passo && "md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[210px_minmax(0,1fr)_270px]")}>
-        {passo && (
+        {passo && assistente && vista === null && assistente({ aoVerFase: verFase, extra })}
+        {passo && !(assistente && vista === null) && (
           <>
             <div className="md:self-start">
               <ColunaDoGuia
@@ -263,7 +267,7 @@ export function GuiaDoPasso({
         )}
         <div className={cn(passo && "md:col-span-2 md:self-start lg:col-span-1 lg:col-start-3 lg:row-start-1")}>
           <CartaoClienteGuia
-            cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"} aoVerAtividade={aoVerAtividade}
+            cliente={cliente} acontecimentos={acontecimentos} comLinha={cliente.linha !== null} nivel={naFicha ? "h3" : "h4"}
           />
         </div>
       </div>

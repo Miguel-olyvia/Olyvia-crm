@@ -84,6 +84,8 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
   );
   // O painel e o negócio criado guardam a pessoa a que pertencem: trocar de pessoa (ou fechar a ficha) deixa-os de valer.
   const [criandoPara, setCriandoPara] = useState<string | null>(null);
+  // O botão que abriu o painel (o «Criar o negócio» do assistente): é para ele que o foco volta se o painel for cancelado.
+  const origemCriar = useRef<HTMLElement | null>(null);
   // `endereco` é o `?negocio=` do momento em que se criou: o negócio criado só manda enquanto o endereço não passa para outro negócio.
   const [criado, setCriado] = useState<{ pessoa: string; negocio: string; endereco: string | null } | null>(null);
   useEffect(() => {
@@ -126,7 +128,9 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
             {/* Enviar a proposta, a resposta do cliente, criar o contrato e a assinatura também (diálogos por cima do guia, sem sair da ficha). */}
             <DocumentosDoNegocioProvider ficha={ficha}>
               {children({
-                aoCriarNegocio: dados?.podeCriar && pessoaAberta ? () => setCriandoPara(pessoaAberta) : undefined,
+                aoCriarNegocio: dados?.podeCriar && pessoaAberta
+                  ? () => { origemCriar.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setCriandoPara(pessoaAberta); }
+                  : undefined,
                 negocioInicial: negocioCriado ?? negocioDoEndereco,
               })}
             </DocumentosDoNegocioProvider>
@@ -136,7 +140,7 @@ export function NegociosDaFichaReal({ ficha, pessoaAberta, negocioDoEndereco, ao
           <NovoNegocioReal
             pessoaId={pessoaId} pessoaNome={ficha.pessoa.nome ?? ""} ficha={ficha} aberto={criandoPara === pessoaId}
             aoMudarAberto={(aberto) => setCriandoPara(aberto ? pessoaId : null)}
-            aoCriado={(negocio) => aoCriado(pessoaId, negocio)}
+            aoCriado={(negocio) => aoCriado(pessoaId, negocio)} origemFoco={origemCriar}
           />
         )}
         {/* Sempre montada: as regiões live que nascem já com texto não são anunciadas de forma fiável. */}

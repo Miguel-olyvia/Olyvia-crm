@@ -7,6 +7,7 @@ import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import { atividadeDb, contactoDb, fichaDb, levantamentoDb, seccaoDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { abrirApoio, irParaAba } from "./apoioFichaTeste";
 import { FichaReal } from "./FichaReal";
 
@@ -23,7 +24,7 @@ vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
 }));
 vi.mock("@/hooks/pessoas/useSubmissoesPessoa", () => ({ useSubmissoesPessoa: () => ({ submissoes: [], pendentes: 0, estado: "ok", recarregar: () => undefined }) }));
 vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: async () => ({}) }) }));
-vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", () => ({ useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
+vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", async (original) => ({ ...(await original<object>()), useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useSubstituirContactoPessoa", () => ({ useSubstituirContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useQualificarLeadPessoa", () => ({ useQualificarLeadPessoa: () => ({ classificar: async () => ({}) }) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }));
@@ -47,7 +48,7 @@ const hook = (sobre: Record<string, unknown> = {}) => ({
 
 function desenhar(extra: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const props = { pessoaId: ID as string | null, idsVisiveis: [ID], aoFechar: vi.fn(), aoIrPara: vi.fn(), aoLimpar: vi.fn(), ...extra };
-  return { props, ...render(<FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...props} /></MemoryRouter></FontePessoasContext.Provider>) };
+  return { props, ...render(<ComClienteQuery><FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...props} /></MemoryRouter></FontePessoasContext.Provider></ComClienteQuery>) };
 }
 // A atividade (e as visitas, os registos...) já não estão à vista: abrem a pedido, a partir do menu «Mais», num diálogo por cima.
 const irParaAtividade = () => abrirApoio("Atividade");
@@ -59,10 +60,8 @@ describe("Carregar mais", () => {
     const h = hook();
     fichaMock.mockReturnValue(h);
     desenhar();
-    // Os registos (contactos e levantamentos) vivem numa secção recolhível, fechada ao entrar, na primeira aba do diálogo de apoio (Mais > Registos e dados).
-    expect(screen.queryByRole("button", { name: /Carregar mais/ })).toBeNull();
+    // Os registos (contactos e levantamentos) vivem no Resumo da ficha (sem o guia do Pipeline).
     abrirApoio("Registos e dados");
-    fireEvent.click(screen.getByRole("button", { name: /^Registos/ }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais contactos" }));
     fireEvent.click(screen.getByRole("button", { name: "Carregar mais levantamentos" }));
     // As visitas já não estão no Resumo (só a próxima): o «Carregar mais visitas» vive na aba Visitas.
@@ -133,7 +132,7 @@ describe("Origem do foco", () => {
     const { rerender, props } = desenhar({ origemFoco: { current: origem } });
     expect(document.querySelector("[data-ficha-raiz]")).not.toBeNull();
     rerender(
-      <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...props} pessoaId={null} origemFoco={{ current: origem }} /></MemoryRouter></FontePessoasContext.Provider>,
+      <ComClienteQuery><FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal {...props} pessoaId={null} origemFoco={{ current: origem }} /></MemoryRouter></FontePessoasContext.Provider></ComClienteQuery>,
     );
     await waitFor(() => expect(document.querySelector("[data-ficha-raiz]")).toBeNull());
     await waitFor(() => expect(origem).toHaveFocus());

@@ -12,6 +12,8 @@ export interface AberturaVisita {
   responsavelUserId?: string | null;
   /** O negócio aberto de que se marca a visita: a visita nasce ligada a ele. Sem isto nasce por ligar. */
   negocioId?: string | null;
+  /** O que se preparou no passo «Preparar a visita» do assistente: já vai escolhido no diálogo (e pode mudar-se). Sem isto o diálogo abre como sempre. */
+  preparar?: { duracao: string; quemVaiEstar: string; nota: string };
   /** Chamada depois de marcar (só o exemplo): `ligada` diz se a visita ficou onde se pediu (ligada ao negócio, ou por ligar se não se pediu negócio). */
   aoMarcada?: (ligada: boolean) => void;
 }

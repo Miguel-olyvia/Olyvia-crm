@@ -25,15 +25,18 @@ interface NovoNegocioRealProps {
   aoMudarAberto: (aberto: boolean) => void;
   /** O negócio foi criado (ou já existia, num reenvio): quem monta abre-o. */
   aoCriado: (negocioId: string) => void;
+  /** O botão que abriu o painel (o «Criar o negócio» do assistente): o foco volta a ele ao cancelar. Sem ele (ou desligado do ecrã) volta ao botão «Mais». */
+  origemFoco?: { current: HTMLElement | null };
 }
 
-/** O foco, depois de cancelar, volta ao botão «Mais» da ficha (o que abriu o painel). */
-const focarMais = (): boolean => {
-  document.querySelector<HTMLElement>("[data-ficha-mais]")?.focus();
+/** O foco, depois de cancelar, volta ao botão que abriu o painel e, não havendo, ao botão «Mais» da ficha. */
+const devolverFoco = (origem?: HTMLElement | null): boolean => {
+  const alvo = origem && origem.isConnected && origem !== document.body ? origem : document.querySelector<HTMLElement>("[data-ficha-mais]");
+  alvo?.focus();
   return true;
 };
 
-export function NovoNegocioReal({ pessoaId, pessoaNome, ficha, aberto, aoMudarAberto, aoCriado }: NovoNegocioRealProps) {
+export function NovoNegocioReal({ pessoaId, pessoaNome, ficha, aberto, aoMudarAberto, aoCriado, origemFoco }: NovoNegocioRealProps) {
   const { t } = useTranslation();
   const mutacoes = useMutacoesDaFicha();
   const dados = useDadosNegocio();
@@ -62,7 +65,7 @@ export function NovoNegocioReal({ pessoaId, pessoaNome, ficha, aberto, aoMudarAb
     <NovoNegocioDialogo
       pessoas={SEM_PESSOAS} semBotao aberto={aberto} aoMudarAberto={(a) => { if (a || !aGuardar) aoMudarAberto(a); }}
       aGuardar={aGuardar} titulo={t("businessGoals.new.title")} descricao={t(`${C}description`, { name: pessoaNome })} selo={null}
-      aoDevolverFoco={(criou) => (criou ? true : focarMais())}
+      aoDevolverFoco={(criou) => (criou ? true : devolverFoco(origemFoco?.current))}
       corpo={({ aoSujar, aoCriou }) => {
         const formulario = (
           <FormularioNovoNegocioReal

@@ -3,7 +3,6 @@
 // de antes; agora entra no cabeçalho do guia (`GuiaDoPasso`), passado como elementos para o guia não depender do painel (Sheet) nos seus testes. O título e a descrição vêm de `usePecasFicha`: os do diálogo no painel lateral, os da página na ficha real.
 import type { ReactNode } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { AbrirApoio, ContagensApoio } from "./apoioTipos";
 import { AcoesSecundariasFicha } from "./BarraAcoesFicha";
 import { BotoesNavegacao } from "./BotoesNavegacao";
 import { textoLinhaCabecalho } from "./formatoPessoas";
@@ -24,8 +23,6 @@ export interface PecasCabecalhoFicha {
   acoesSecundarias: ReactNode;
   /** A faixa fina de alertas, por baixo do cabeçalho (só quando existem alertas). */
   faixa?: ReactNode;
-  /** «Ver toda a atividade» no cartão do cliente: abre a aba Atividade do apoio. */
-  aoVerAtividade?: (origem: HTMLElement) => void;
 }
 
 export interface CabecalhoGuiaFichaEntrada {
@@ -37,14 +34,10 @@ export interface CabecalhoGuiaFichaEntrada {
   painelId: string;
   aoAbrir: (acao: AcaoFicha, origem: HTMLElement | null) => void;
   aoReativar: () => void;
-  aoCriarNegocio?: () => void;
   capacidades?: CapacidadesFicha;
   aGuardar?: boolean;
   /** «Registar chamada» vai para o menu «Mais»: o botão do passo não é o da chamada (um cliente, uma perdida, um negócio aberto, ou o passo é a visita). */
   comItemChamada: boolean;
-  /** A ficha antiga a pedido: o menu «Mais» e os atalhos abrem o diálogo de apoio (ver `BarraAcoesFicha`). */
-  aoAbrirApoio?: AbrirApoio;
-  contagens?: ContagensApoio;
   /** Com um negócio aberto: «Detalhes do negócio» no menu «Mais». */
   aoAbrirDetalhesNegocio?: (origem: HTMLElement | null) => void;
   /** A faixa fina de alertas (montada por quem tem os dados). */
@@ -72,11 +65,9 @@ export function useCabecalhoGuiaFicha(p: CabecalhoGuiaFichaEntrada): PecasCabeca
     acoesSecundarias: (
       <AcoesSecundariasFicha
         resumo={p.resumo} aberta={p.aberta} painelId={p.painelId} aoAbrir={p.aoAbrir} aoReativar={p.aoReativar}
-        aoCriarNegocio={p.aoCriarNegocio} capacidades={p.capacidades} aGuardar={p.aGuardar} comItemChamada={p.comItemChamada}
-        aoAbrirApoio={p.aoAbrirApoio} contagens={p.contagens} aoAbrirDetalhesNegocio={p.aoAbrirDetalhesNegocio}
+        capacidades={p.capacidades} aGuardar={p.aGuardar} comItemChamada={p.comItemChamada} aoAbrirDetalhesNegocio={p.aoAbrirDetalhesNegocio}
       />
     ),
     faixa: p.faixa,
-    aoVerAtividade: p.aoAbrirApoio ? ((origem: HTMLElement) => p.aoAbrirApoio?.("atividade", origem)) : undefined,
   };
 }

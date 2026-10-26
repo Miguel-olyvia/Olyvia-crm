@@ -16,10 +16,13 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useDocumentosDoNegocio } from "@/components/pessoas-processo/DocumentosDoNegocioReal";
 import { ehPassoDeDocumento } from "@/components/pessoas-processo/documentosGuia";
 import { useLevantamentoDoNegocio } from "@/components/pessoas-processo/LevantamentoDoNegocioReal";
+import { VisitaDoGuia } from "./assistente/VisitaDoGuia";
 import type { PecasCabecalhoFicha } from "./CabecalhoGuiaFicha";
 import type { FaseDoNegocio } from "./fasesDoNegocio";
 import { GuiaDoPasso } from "./GuiaDoPasso";
 import { acontecimentosDoGuia, clienteDoGuia, dadosDoGuia } from "./guiaDados";
+import { useMarcarVisita } from "./marcarVisitaContexto";
+import { moradaDaLead } from "./moradaVisita";
 import type { ItemAtividade, Pessoa } from "./pessoasTipos";
 import { calcularPassoGuiado, fasesDoNegocioParaGuia } from "./processo/passoGuiado";
 import { passoDoItem } from "./processo/passosProcesso";
@@ -88,20 +91,35 @@ export function GuiaDoNegocio({ negocio, hoje, item, fases, podeEditar, pessoa, 
     dados: dadosDoGuia(pessoa ?? { nome: negocio.pessoa, contacto: negocio.contacto }, registosDoNegocio(registos, negocio.id), t),
     fases: fasesDoNegocioParaGuia(fases),
     podeEditar, podeCriar: false, permissoesFecho, pessoaFechada: false,
-    ligados: ligadosDoNegocio(item, acao.executa, levantamento?.pode === true, fechoV4 && negocio.prontoAGanhar === true, comDocumento),
+    ligados: ligadosDoNegocio(item, acao.executa, levantamento?.pode === true && pessoa !== undefined, fechoV4 && negocio.prontoAGanhar === true, comDocumento),
   }) : null;
   const aoAcao = (e: MouseEvent<HTMLElement>): void => {
     if (!doPasso) return;
-    if (doPasso.passo === "fazerLevantamento") levantamento?.abrir(negocio.id, e.currentTarget);
-    else if (doPasso.passo === "ganharNegocio") irParaFecho();
+    // O levantamento faz-se no assistente de passos (sem botão do passo): sem o assistente não há nada a abrir.
+    if (doPasso.passo === "fazerLevantamento") return;
+    if (doPasso.passo === "ganharNegocio") irParaFecho();
     else if (ehPassoDeDocumento(doPasso.passo)) documentos?.abrir(doPasso.passo, negocio.id);
     else acao.aoClicar(e);
   };
   const { cliente, local } = clienteDoGuia(pessoa ?? { contacto: negocio.contacto }, negocio.servico);
   const acontecimentos = useMemo(() => acontecimentosDoGuia(t, atividade ?? []), [t, atividade]);
+  // O assistente de passos da fase Visita: no negócio em Levantamento, no lugar do «Fazer o levantamento» único. Os passos da secção e o último gravam
+  // o levantamento do negócio (um por negócio) sem abrir o painel «Visita e levantamento».
+  const marcar = useMarcarVisita();
+  const doNegocio = registosDoNegocio(registos, negocio.id);
+  const assistente = doPasso && pessoa && doPasso.passo === "fazerLevantamento"
+    ? ({ aoVerFase, extra: extraDoGuia }: { aoVerFase: (id: string) => void; extra?: ReactNode }) => (
+      <VisitaDoGuia
+        pessoa={pessoa} negocio={{ id: negocio.id }} visitas={doNegocio.visitas} levantamentoGuardado={doNegocio.levantamentos.length > 0 || Boolean(negocio.levantamento)}
+        ficha={levantamento?.ficha ?? null} podeEditar={podeEditar}
+        aoMarcarOutra={marcar && podeEditar ? () => marcar.pedir({ pessoaId: pessoa.id, nome: pessoa.nome, moradaLead: moradaDaLead(pessoa), negocioId: negocio.id }) : undefined}
+        faseRotuloChave={doPasso.faseRotuloChave} feitas={doPasso.feitas} aoVerFase={aoVerFase} nivel={cabecalhoFicha?.nomeEl !== undefined ? "h3" : "h2"} extra={extraDoGuia}
+      />
+    )
+    : undefined;
   return (
     <GuiaDoPasso
-      passo={doPasso} fases={fasesDoNegocioParaGuia(fases)} aoAcao={aoAcao} atributosAcao={acao.atributos} acaoPerder={acaoPerder}
+      passo={doPasso} fases={fasesDoNegocioParaGuia(fases)} aoAcao={aoAcao} atributosAcao={acao.atributos} acaoPerder={acaoPerder} assistente={assistente}
       explicacao={acao.bloqueio && acao.idBloqueio ? { id: acao.idBloqueio, texto: acao.bloqueio } : null}
       cabecalho={{ nome: pessoa?.nome ?? negocio.pessoa, linha: negocio.servico, telefone: cliente.telefone, local }} cliente={cliente} acontecimentos={acontecimentos}
       tituloSecao={t("pessoasPagina.deal.next")} tituloRef={tituloRef} {...cabecalhoFicha} faixa={faixa ?? cabecalhoFicha?.faixa}

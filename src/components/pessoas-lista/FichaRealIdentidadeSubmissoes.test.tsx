@@ -52,18 +52,17 @@ function desenhar() {
     <QueryClientProvider client={cliente}>
       <FontePessoasContext.Provider value={REAL}>
         <MemoryRouter>
-          <FichaReal comGuia pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
+          <FichaReal pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
         </MemoryRouter>
       </FontePessoasContext.Provider>
     </QueryClientProvider>,
   );
 }
-const aberta = () => screen.findByRole("region", { name: "Ana Lopes" });
-// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, na primeira aba do diálogo de apoio (Mais > Registos e dados).
+const aberta = () => screen.findByRole("tab", { name: /^Resumo/ });
+// A identidade e a qualificação vivem em «Dados da pessoa», uma secção recolhível e fechada, no Resumo da ficha (sem o guia do Pipeline).
 const abrirDados = async () => {
-  await screen.findByRole("button", { name: "Mais" });
+  await screen.findByRole("tab", { name: /^Resumo/ });
   abrirApoio("Registos e dados");
-  fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ }));
 };
 const AVISO = "Voltou a contactar";
 
@@ -102,7 +101,7 @@ describe("FichaReal: aviso «Voltou a contactar»", () => {
     desenhar();
     await aberta();
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Registar a chamada/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Registar chamada/ }));
     fireEvent.click(await screen.findByRole("radio", { name: /Não atendeu/ }));
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(chamadas("neg_registar_contacto")).toHaveLength(1));
@@ -115,7 +114,7 @@ describe("FichaReal: separador Submissões", () => {
     lerMock.mockResolvedValue([cartao(), cartao({ chave: "lead:l1", tipo: "lead", id: "l1", revisao: null, etapa: "novo", campos: [{ chave: "x", rotulo: "Outro", valor: "Valor" }] })]);
     desenhar();
     await aberta();
-    await screen.findByRole("button", { name: "Mais" });
+    await screen.findByRole("tab", { name: /^Resumo/ });
     abrirApoio("Submissões");
     await screen.findByRole("tab", { name: /Submissões.*2/ });
     expect(await screen.findByText("Cozinha")).toBeInTheDocument();
@@ -128,7 +127,7 @@ describe("FichaReal: separador Submissões", () => {
   it("sem submissões diz-o; a aba Notas continua escondida", async () => {
     desenhar();
     await aberta();
-    await screen.findByRole("button", { name: "Mais" });
+    await screen.findByRole("tab", { name: /^Resumo/ });
     abrirApoio("Submissões");
     expect(await screen.findByText("Sem submissões de formulário associadas a esta pessoa.")).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Notas/ })).toBeNull();
@@ -144,11 +143,11 @@ describe("FichaReal: separador Submissões", () => {
     lerMock.mockRejectedValue({ code: "42501" });
     desenhar();
     await aberta();
-    await screen.findByRole("button", { name: "Mais" });
+    await screen.findByRole("tab", { name: /^Resumo/ });
     abrirApoio("Submissões");
     expect(await screen.findByText("Não foi possível carregar as submissões.")).toBeInTheDocument();
-    // O resto da ficha continua lá por baixo do diálogo (escondida do leitor de ecrã enquanto ele está aberto).
-    expect(screen.getByRole("button", { name: /^Registar a chamada/, hidden: true })).toBeInTheDocument();
+    // O resto da ficha continua lá.
+    expect(screen.getByRole("button", { name: /^Registar chamada/ })).toBeInTheDocument();
   });
 });
 
@@ -208,7 +207,8 @@ describe("FichaReal: identidade", () => {
     expect(params("neg_guardar_identidade_pessoa")).toEqual({
       p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_tipo: "organization", p_nome_empresa: "Lopes e Filhos", p_nome_proprio: null, p_apelido: null,
     });
-    expect(await screen.findByRole("region", { name: "Lopes e Filhos" })).toBeInTheDocument();
+    // O nome novo vê-se no título do painel da ficha.
+    await waitFor(() => expect(screen.getByRole("dialog", { name: /Lopes e Filhos/ })).toBeInTheDocument());
     const seccao = screen.getByRole("region", { name: "Identidade" });
     expect(within(seccao).getByText("Empresa")).toBeInTheDocument();
   });

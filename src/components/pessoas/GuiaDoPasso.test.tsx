@@ -338,14 +338,4 @@ describe("GuiaDoPasso: a estrutura do desenho (cartão do cabeçalho, barra gros
     guia();
     expect(screen.queryByText("Faixa de teste")).toBeNull();
   });
-
-  it("«Ver toda a atividade» no cartão do cliente só existe com o callback e chama-o", () => {
-    const aoVerAtividade = vi.fn();
-    guia({ aoVerAtividade });
-    fireEvent.click(screen.getByRole("button", { name: "Ver toda a atividade" }));
-    expect(aoVerAtividade).toHaveBeenCalledTimes(1);
-    cleanup();
-    guia();
-    expect(screen.queryByRole("button", { name: "Ver toda a atividade" })).toBeNull();
-  });
 });

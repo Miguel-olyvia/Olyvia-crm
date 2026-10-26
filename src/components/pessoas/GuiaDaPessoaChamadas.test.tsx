@@ -1,7 +1,8 @@
 // Contactado: outra chamada/tentativa regista-se SEMPRE; «Sem interesse» e «Número errado» avisam e bloqueiam só «Marcar a visita».
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { contactoBase, pessoaBase, registosBase, resumoBase } from "./fabricaTestes";
 import { FichaPessoa, type FichaPessoaProps } from "./FichaPessoa";
 import { MarcarVisitaContext, type MarcarVisitaValor } from "./marcarVisitaContexto";
@@ -29,12 +30,17 @@ function montar(resumo: ResumoPessoa, acoes: AcoesFicha = acoesBase()) {
     aoPedir: vi.fn(), aoVerTodasSubmissoes: vi.fn(), aoCriarNegocio: vi.fn(), comGuia: true,
   };
   render(
-    <ProcessoContext.Provider value={processo}>
-      <MarcarVisitaContext.Provider value={marcar}><FichaPessoa {...props} /></MarcarVisitaContext.Provider>
-    </ProcessoContext.Provider>,
+    <ComClienteQuery>
+      <ProcessoContext.Provider value={processo}>
+        <MarcarVisitaContext.Provider value={marcar}><FichaPessoa {...props} /></MarcarVisitaContext.Provider>
+      </ProcessoContext.Provider>
+    </ComClienteQuery>,
   );
   return { marcar };
 }
+
+/** Em Contactado o assistente abre no primeiro passo que falta; «Marcar a visita» é o 5.º passo. */
+const irParaMarcar = (): void => fireEvent.click(within(screen.getByRole("navigation", { name: "Passos da fase" })).getByRole("button", { name: /^Marcar a visita/ }));
 
 const pessoa = (extra: Partial<Pessoa> = {}) => pessoaBase("a", { nome: "Pedro Lopes", contacto: { telefone: "927 118 300", email: "pedro.lopes@exemplo.pt" }, ...extra });
 const comResultado = (resultado: "semInteresse" | "numeroErrado" | "atendeuInteressado") =>
@@ -43,7 +49,8 @@ const comResultado = (resultado: "semInteresse" | "numeroErrado" | "atendeuInter
 describe("contactado: outra chamada e o aviso de «Marcar a visita»", () => {
   it.each([["semInteresse", "Sem interesse"], ["numeroErrado", "Número errado"]] as const)("%s: avisa, bloqueia a visita e não a marca", (resultado, texto) => {
     const { marcar } = montar(comResultado(resultado));
-    const botao = screen.getByRole("button", { name: /^Marcar a visita/ });
+    irParaMarcar();
+    const botao = screen.getByRole("button", { name: "Marcar a visita" });
     expect(botao).toHaveAttribute("aria-disabled", "true");
     expect(screen.getAllByText(new RegExp(texto)).length).toBeGreaterThan(0);
     fireEvent.click(botao);
@@ -58,7 +65,8 @@ describe("contactado: outra chamada e o aviso de «Marcar a visita»", () => {
 
   it("com interesse a visita marca-se normalmente", () => {
     const { marcar } = montar(comResultado("atendeuInteressado"));
-    const botao = screen.getByRole("button", { name: /^Marcar a visita/ });
+    irParaMarcar();
+    const botao = screen.getByRole("button", { name: "Marcar a visita" });
     expect(botao).not.toHaveAttribute("aria-disabled");
     fireEvent.click(botao);
     expect(marcar.pedir).toHaveBeenCalledTimes(1);

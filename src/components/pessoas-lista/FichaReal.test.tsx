@@ -6,7 +6,7 @@ import { ErroNeg } from "@/hooks/pessoas/chamarNeg";
 import { agregadosDb, contactoDb, fichaDb, negocioDb, pessoaDb, seccaoDb, visitaDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
-import { abrirApoio } from "./apoioFichaTeste";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { FichaReal } from "./FichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
@@ -19,7 +19,7 @@ vi.mock("@/hooks/pessoas/useFichaPessoa", () => ({ useFichaPessoa: (id: string |
 vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({ useAcoesFichaReal: (...args: unknown[]) => acoesMock(...args) }));
 vi.mock("@/hooks/pessoas/useSubmissoesPessoa", () => ({ useSubmissoesPessoa: () => ({ submissoes: [], pendentes: 0, estado: "ok", recarregar: () => undefined }) }));
 vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: async () => ({}) }) }));
-vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", () => ({ useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
+vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", async (original) => ({ ...(await original<object>()), useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useSubstituirContactoPessoa", () => ({ useSubstituirContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useQualificarLeadPessoa", () => ({ useQualificarLeadPessoa: () => ({ classificar: async () => ({}) }) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: erroToast } }));
@@ -48,7 +48,7 @@ const FICHA = fichaDb({
 function desenhar(sobre: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const props = { pessoaId: ID as string | null, idsVisiveis: [ID], aoFechar: vi.fn(), aoIrPara: vi.fn(), aoLimpar: vi.fn(), ...sobre };
   const ui = (p: typeof props) => (
-    <FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...p} /></MemoryRouter></FontePessoasContext.Provider>
+    <ComClienteQuery><FontePessoasContext.Provider value={REAL}><MemoryRouter><FichaReal comGuia {...p} /></MemoryRouter></FontePessoasContext.Provider></ComClienteQuery>
   );
   const r = render(ui(props));
   return { props, ...r, reenviar: (nova: Partial<typeof props>) => r.rerender(ui({ ...props, ...nova })) };
@@ -165,14 +165,14 @@ describe("FichaReal: aberta com dados", () => {
   it("não mostra a marca «exemplo», a aba Notas, «Criar negócio» nem «Visita e levantamento»", () => {
     desenhar();
     expect(screen.queryByText("exemplo")).toBeNull();
-    // As abas já não estão à vista: abrem a pedido, no diálogo de apoio (e a aba Notas não existe na ficha real).
+    // Não há abas: a ficha antiga não existe no Pipeline (e a aba Notas não existe na ficha real).
     expect(screen.queryByRole("tab")).toBeNull();
     // Com um negócio aberto o «Mais» só oferece «Registar chamada» (já não há botão do passo para a chamada): nem Nota, nem Adiar, nem Criar negócio.
     fireEvent.keyDown(screen.getByRole("button", { name: "Mais" }), { key: "Enter" });
     expect(screen.getByRole("menuitem", { name: "Registar chamada" })).toBeInTheDocument();
-    for (const nome of [/^Nota$/, /Adiar/, /Criar negócio/, /Visita e levantamento/]) expect(screen.queryByRole("menuitem", { name: nome })).toBeNull();
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Negócios/ }));
-    expect(screen.getByRole("tab", { name: /Negócios/ })).toBeInTheDocument();
+    for (const nome of [/^Nota$/, /Adiar/, /Criar negócio/, /Visita e levantamento/, /^Registos e dados/, /^Visitas/, /^Negócios/, /^Submissões/, /^Atividade/]) {
+      expect(screen.queryByRole("menuitem", { name: nome })).toBeNull();
+    }
     expect(screen.queryByRole("tab", { name: /Notas/ })).toBeNull();
   });
 
@@ -203,12 +203,6 @@ describe("FichaReal: aberta com dados", () => {
     expect(document.querySelector("[data-ficha-raiz]")).not.toBeNull();
     reenviar({ pessoaId: null });
     await waitFor(() => expect(document.querySelector("[data-ficha-raiz]")).toBeNull());
-  });
-
-  it("a ficha adaptada traz o negócio aberto e os registos para o ecrã", () => {
-    desenhar();
-    abrirApoio("Negócios");
-    expect(screen.getByText("Casa de banho")).toBeInTheDocument();
   });
 });
 

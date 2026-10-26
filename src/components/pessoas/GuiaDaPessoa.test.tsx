@@ -1,8 +1,10 @@
-// O guia do passo seguinte no topo do Resumo da ficha de uma pessoa em abordagem: cada passo faz-se no próprio ecrã (formulário da chamada, diálogo de
-// marcar visita, painel de visita e levantamento, novo negócio), e uma pessoa com negócio aberto não o tem (o guia vive no negócio).
+// O guia no topo da ficha de uma pessoa em abordagem. Em Por contactar, Contactado e Visita é o assistente de passos (a fase Contacto com 5 passos e a fase
+// Visita): cada passo faz-se no próprio ecrã (formulário da chamada, diálogo de marcar visita, novo negócio). Uma pessoa com negócio aberto não o tem (o guia
+// vive no negócio). A gravação de cada passo está testada em `assistente/`; aqui vê-se a ligação à ficha.
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { contactoBase, negocioBase, pessoaBase, registosBase, resumoBase, visitaPessoaBase } from "./fabricaTestes";
 import { FichaPessoa, type FichaPessoaProps } from "./FichaPessoa";
 import { MarcarVisitaContext, type MarcarVisitaValor } from "./marcarVisitaContexto";
@@ -36,9 +38,11 @@ function montar(resumo: ResumoPessoa, a: Ambiente = {}) {
     aoPedir: vi.fn(), aoVerTodasSubmissoes: vi.fn(), aoCriarNegocio: vi.fn(), comGuia: true, ...a.ficha,
   };
   render(
-    <ProcessoContext.Provider value={processo}>
-      <MarcarVisitaContext.Provider value={marcar}><FichaPessoa {...props} /></MarcarVisitaContext.Provider>
-    </ProcessoContext.Provider>,
+    <ComClienteQuery>
+      <ProcessoContext.Provider value={processo}>
+        <MarcarVisitaContext.Provider value={marcar}><FichaPessoa {...props} /></MarcarVisitaContext.Provider>
+      </ProcessoContext.Provider>
+    </ComClienteQuery>,
   );
   return { props, processo, marcar };
 }
@@ -51,11 +55,15 @@ const visitaFeita = () => resumoBase(pessoa(), [], HOJE, "lead", registosBase({
   contactos: [contactoBase()], visitas: [visitaPessoaBase("v1", { data: "2026-10-10", estado: "feita" })],
 }));
 const titulo = (nome: string | RegExp) => screen.queryByRole("heading", { level: 3, name: nome });
+const coluna = () => within(screen.getByRole("navigation", { name: "Passos da fase" }));
+const irPara = (nome: RegExp) => fireEvent.click(coluna().getByRole("button", { name: nome }));
 
 describe("o guia da pessoa em abordagem", () => {
-  it("por contactar: «Está tudo. Registar a chamada.», o cartão do cliente e a barra com o nome certo", () => {
+  it("por contactar: o assistente da fase Contacto (5 passos, abre na Chamada), o cartão do cliente e a barra com o nome certo", () => {
     montar(porContactar());
-    expect(titulo("Está tudo. Registar a chamada.")).toBeInTheDocument();
+    expect(titulo("Chamada")).toBeInTheDocument();
+    expect(screen.getByText(/^Passo 1 de 5/)).toBeInTheDocument();
+    expect(coluna().getAllByRole("button")).toHaveLength(5);
     expect(screen.getByRole("heading", { level: 3, name: "Cliente" })).toBeInTheDocument();
     expect(screen.getAllByText("pedro.lopes@exemplo.pt").length).toBeGreaterThan(0);
     const atual = within(screen.getByRole("list", { name: "Fases" })).getAllByRole("listitem").filter((li) => li.getAttribute("aria-current") === "step");
@@ -65,55 +73,67 @@ describe("o guia da pessoa em abordagem", () => {
 
   it("«Registar a chamada» abre o formulário da chamada dentro da ficha (sem sair da página), e o guia fica à vista (só a zona de apoio é substituída)", () => {
     montar(porContactar());
-    fireEvent.click(screen.getByRole("button", { name: /^Registar a chamada/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Registar a chamada" }));
     expect(screen.getByRole("heading", { name: "Registar chamada" })).toBeInTheDocument();
-    expect(titulo("Está tudo. Registar a chamada.")).toBeInTheDocument();
+    expect(titulo("Chamada")).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).toBeNull();
   });
 
-  it("contactado: «Marcar a visita» abre o diálogo de marcar visita desta pessoa", () => {
+  it("contactado: com a chamada feita abre na Qualificação, e «Marcar a visita» abre o diálogo de marcar visita desta pessoa", () => {
     const { marcar } = montar(contactada());
-    expect(titulo("Marcar a visita.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Marcar a visita/ }));
+    expect(titulo("Qualificação")).toBeInTheDocument();
+    irPara(/^Marcar a visita/);
+    fireEvent.click(screen.getByRole("button", { name: "Marcar a visita" }));
     expect(marcar?.pedir).toHaveBeenCalledTimes(1);
     expect(vi.mocked(marcar!.pedir).mock.calls[0][0]).toMatchObject({ pessoaId: "a", nome: "Pedro Lopes" });
   });
 
-  it("visita por fazer: «Marcar a visita como feita» abre o painel «Visita e levantamento» desta pessoa", () => {
-    const { processo } = montar(comVisita());
-    expect(titulo("Marcar a visita como feita.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Marcar a visita como feita/ }));
-    expect(processo?.abrirVisitaLevantamento).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(processo!.abrirVisitaLevantamento).mock.calls[0][0]).toBe("a");
-  });
-
-  it("visita feita: «Criar o negócio» abre «Novo negócio» para esta pessoa", () => {
-    const { props } = montar(visitaFeita());
-    expect(titulo("A visita está feita. Criar o negócio.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Criar o negócio/ }));
+  it("sem negócio, Qualificação, Morada da obra e Preparar a visita dizem a razão e oferecem «Criar o negócio»", () => {
+    const { props } = montar(contactada());
+    for (const passo of [/^Qualificação/, /^Morada da obra/, /^Preparar a visita/]) {
+      irPara(passo);
+      expect(screen.getByText(/ainda não tem um negócio/)).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Criar o negócio" }));
     expect(props.aoCriarNegocio).toHaveBeenCalledTimes(1);
     expect(vi.mocked(props.aoCriarNegocio!).mock.calls[0][0]).toMatchObject({ id: "a" });
   });
 
-  it("sem permissão de criar negócios, «Criar o negócio» fica desativado com a razão", () => {
-    montar(visitaFeita(), { ficha: { aoCriarNegocio: undefined } });
-    expect(screen.getByRole("button", { name: /^Criar o negócio/ })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Não tem permissão para criar negócios.")).toBeInTheDocument();
+  it("visita marcada: o assistente da fase Visita lista as visitas e «Marcar outra visita» abre o diálogo de marcar", () => {
+    const { marcar } = montar(comVisita());
+    irPara(/^Visitas/);
+    expect(screen.getByText(/^Visita 1 ·/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Marcar outra visita" }));
+    expect(marcar?.pedir).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(marcar!.pedir).mock.calls[0][0]).toMatchObject({ pessoaId: "a" });
   });
 
-  it("sem permissão de escrever na pessoa (comPainelVisita falso), marcar a visita fica desativado com a razão e não abre nada", () => {
+  it("visita feita: o levantamento é do negócio, por isso as secções e «Fechar levantamento» oferecem «Criar o negócio»", () => {
+    const { props } = montar(visitaFeita());
+    irPara(/^Fechar levantamento/);
+    expect(screen.getByText(/ainda não tem um negócio/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Criar o negócio" }));
+    expect(props.aoCriarNegocio).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem permissão de criar negócios a razão diz-se mas não há botão «Criar o negócio»", () => {
+    montar(visitaFeita(), { ficha: { aoCriarNegocio: undefined } });
+    irPara(/^Fechar levantamento/);
+    expect(screen.getByText(/ainda não tem um negócio/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Criar o negócio" })).toBeNull();
+  });
+
+  it("sem permissão de escrever na pessoa (comPainelVisita falso), «Marcar a visita» não se oferece e não abre nada", () => {
     const { marcar } = montar(contactada(), { processo: { comPainelVisita: false } });
-    const botao = screen.getByRole("button", { name: /^Marcar a visita/ });
-    expect(botao).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Não tem permissão para fazer este passo.")).toBeInTheDocument();
-    fireEvent.click(botao);
+    irPara(/^Marcar a visita/);
+    expect(screen.queryByRole("button", { name: "Marcar a visita" })).toBeNull();
     expect(marcar?.pedir).not.toHaveBeenCalled();
   });
 
-  it("sem o diálogo de marcar visita nesta página o passo fica desativado («indisponível»), não desaparece", () => {
+  it("sem o diálogo de marcar visita nesta página não há botão de marcar", () => {
     montar(contactada(), { marcar: null });
-    expect(screen.getByRole("button", { name: /^Marcar a visita/ })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Este passo ainda não está disponível neste ecrã.")).toBeInTheDocument();
+    irPara(/^Marcar a visita/);
+    expect(screen.queryByRole("button", { name: "Marcar a visita" })).toBeNull();
   });
 
   it("«Marcar como perdido» abre o painel de encerrar a abordagem", () => {
@@ -139,7 +159,7 @@ describe("o guia da pessoa em abordagem", () => {
     montar(resumoBase(pessoa(), [aberto], HOJE, "lead", registosBase({ contactos: [contactoBase()] })));
     expect(screen.getAllByRole("list", { name: "Fases" })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 3, name: "Cliente" })).toBeInTheDocument();
-    expect(titulo(/Registar a chamada|Marcar a visita|Criar o negócio/)).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Passos da fase" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Registar a chamada|^Marcar a visita|^Criar o negócio/ })).toBeNull();
   });
 
@@ -161,8 +181,8 @@ describe("o guia da pessoa em abordagem", () => {
     expect(screen.getAllByRole("button", { name: /Marcar a visita como feita/ })).toHaveLength(1);
   });
 
-  it("com o guia, o passo da pessoa tem um só botão (a secção da visita não o repete)", () => {
+  it("com o guia o botão antigo «Marcar a visita como feita» já não existe: a visita marca-se como feita na lista de visitas do assistente", () => {
     montar(comVisita());
-    expect(screen.getAllByRole("button", { name: /Marcar a visita como feita/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Marcar a visita como feita/ })).toBeNull();
   });
 });

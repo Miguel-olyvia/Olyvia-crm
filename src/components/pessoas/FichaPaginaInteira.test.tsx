@@ -20,7 +20,7 @@ vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success:
 vi.mock("@/hooks/pessoas/useComerciaisNegocio", () => ({
   useComerciaisNegocio: () => ({ comerciais: [], isLoading: false, isError: false, repetir: vi.fn() }),
 }));
-vi.mock("@/components/pessoas-processo/LevantamentoDoNegocioReal", () => ({ useLevantamentoDoNegocio: () => ({ pode: true, abrir: vi.fn() }) }));
+vi.mock("@/components/pessoas-processo/LevantamentoDoNegocioReal", () => ({ useLevantamentoDoNegocio: () => ({ pode: true }) }));
 vi.mock("@/components/pessoas-processo/DocumentosDoNegocioReal", () => ({ useDocumentosDoNegocio: () => null }));
 
 beforeAll(prepararRadixNoJsdom);
@@ -160,17 +160,6 @@ describe("o Esc", () => {
     expect(props.aoFechar).not.toHaveBeenCalled();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(props.aoFechar).toHaveBeenCalledTimes(1);
-  });
-
-  it("com o diálogo «Mais sobre a pessoa» aberto fecha o diálogo e não a ficha", async () => {
-    const props = montar();
-    abrirMais();
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Visitas/ }));
-    const apoio = await screen.findByRole("dialog", { name: "Mais sobre a pessoa" });
-    fireEvent.keyDown(apoio, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Mais sobre a pessoa" })).toBeNull());
-    expect(props.aoFechar).not.toHaveBeenCalled();
-    expect(raiz()).not.toBeNull();
   });
 
   it("outras teclas não fecham a ficha", () => {

@@ -4,7 +4,6 @@ import { useId } from "react";
 import { Check } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { ligacoes } from "@/components/ficha-comum/ligacoesContacto";
 import type { EstadoFase } from "./fasesDoNegocio";
@@ -138,10 +137,8 @@ function Campo({ rotulo, valor, href }: { rotulo: string; valor: string | null; 
 
 /** O cartão «Cliente» (o que a ficha sabe) e os «Últimos acontecimentos» (os mais recentes que a ficha já carregou). */
 /** `nivel` é o dos títulos do cartão: h3 na ficha (o nome é o h2), h4 fora dela. */
-export function CartaoClienteGuia({ cliente, acontecimentos, comLinha, nivel = "h4", aoVerAtividade }: {
+export function CartaoClienteGuia({ cliente, acontecimentos, comLinha, nivel = "h4" }: {
   cliente: DadosClienteGuia; acontecimentos: readonly AcontecimentoGuia[]; comLinha: boolean; nivel?: "h3" | "h4";
-  /** «Ver toda a atividade» por baixo dos últimos acontecimentos (a ficha real abre a aba Atividade); sem isto a ligação não existe. */
-  aoVerAtividade?: (origem: HTMLElement) => void;
 }) {
   const Titulo = nivel;
   const { t } = useTranslation();
@@ -173,11 +170,6 @@ export function CartaoClienteGuia({ cliente, acontecimentos, comLinha, nivel = "
               </li>
             ))}
           </ul>
-        )}
-        {aoVerAtividade && (
-          <Button type="button" variant="link" className={cn("h-auto min-h-11 justify-start px-0 text-sm", FOCO)} onClick={(e) => aoVerAtividade(e.currentTarget)}>
-            {t(`${P}guia.cliente.verAtividade`)}
-          </Button>
         )}
       </section>
     </aside>

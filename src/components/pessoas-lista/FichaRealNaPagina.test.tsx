@@ -7,6 +7,7 @@ import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
 import { agregadosDb, contactoDb, fichaDb, seccaoDb } from "@/hooks/pessoas/fichaFabrica";
 import type { FichaDb } from "@/hooks/pessoas/fichaTipos";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { FichaReal } from "./FichaReal";
 
 vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).moduloTraducao());
@@ -22,7 +23,7 @@ vi.mock("@/hooks/pessoas/useAcoesFichaReal", () => ({
 }));
 vi.mock("@/hooks/pessoas/useSubmissoesPessoa", () => ({ useSubmissoesPessoa: () => ({ submissoes: [], pendentes: 0, estado: "ok", recarregar: () => undefined }) }));
 vi.mock("@/hooks/pessoas/useGuardarIdentidadePessoa", () => ({ useGuardarIdentidadePessoa: () => ({ guardar: async () => ({}) }) }));
-vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", () => ({ useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
+vi.mock("@/hooks/pessoas/useGuardarContactoPessoa", async (original) => ({ ...(await original<object>()), useGuardarContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useSubstituirContactoPessoa", () => ({ useSubstituirContactoPessoa: () => ({ guardar: async () => ({}) }) }));
 vi.mock("@/hooks/pessoas/useQualificarLeadPessoa", () => ({ useQualificarLeadPessoa: () => ({ classificar: async () => ({}) }) }));
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() } }));
@@ -55,11 +56,11 @@ function Quadro() {
 function desenhar(sobre: Partial<Parameters<typeof FichaReal>[0]> = {}) {
   const props = { pessoaId: A as string | null, idsVisiveis: [A, B], aoFechar: vi.fn(), aoIrPara: vi.fn(), aoLimpar: vi.fn(), voltaPara: "pipeline" as const, tituloPagina: "Pipeline", ...sobre };
   const ui = (p: typeof props) => (
-    <FontePessoasContext.Provider value={REAL}>
+    <ComClienteQuery><FontePessoasContext.Provider value={REAL}>
       <MemoryRouter>
         <main data-testid="main"><FichaReal comGuia {...p}><Quadro /></FichaReal></main>
       </MemoryRouter>
-    </FontePessoasContext.Provider>
+    </FontePessoasContext.Provider></ComClienteQuery>
   );
   const r = render(ui(props));
   return { props, ...r, reenviar: (nova: Partial<typeof props>) => r.rerender(ui({ ...props, ...nova })) };

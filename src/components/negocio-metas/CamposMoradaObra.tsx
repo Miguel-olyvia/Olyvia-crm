@@ -27,6 +27,8 @@ interface Props {
   origemObra?: OrigemMoradaObra | null;
   /** O negócio real: os atalhos «Preencher com os dados da entidade» e «Estou no local» no lugar de «Usar a morada do contacto». Sem isto, fica o atalho antigo. */
   real?: AtalhosMoradaReal;
+  /** O título «Morada da obra» já está noutro sítio (o título do passo do assistente): a secção fica nomeada por aria-label e não repete o título. */
+  semTitulo?: boolean;
 }
 
 export interface AtalhosMoradaReal {
@@ -97,7 +99,7 @@ function AtalhosReais({ id, real, moradaAtual }: { id: string; real: AtalhosMora
 const CAMPO = cn("min-h-11", FOCO);
 
 /** A morada da obra (fica no negócio, não na pessoa): rua, código postal 0000-000, localidade e andar, com o atalho de usar a morada do contacto. */
-export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, origem = null, aoMudar, aoPreencher, origemObra = null, real }: Props) {
+export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, origem = null, aoMudar, aoPreencher, origemObra = null, real, semTitulo = false }: Props) {
   const { t } = useTranslation();
   const usarContacto = () => {
     if (moradaContacto.trim() === "") {
@@ -108,8 +110,8 @@ export function MoradaObra({ id, valores, erroCodigoPostal, moradaContacto, orig
     toast.info(t(`${N}address.useContact.done`));
   };
   return (
-    <section aria-labelledby={`${id}-morada`} className="space-y-3">
-      <h3 id={`${id}-morada`} className="text-sm font-semibold text-foreground">{t(`${N}address.title`)}</h3>
+    <section {...(semTitulo ? { "aria-label": t(`${N}address.title`) } : { "aria-labelledby": `${id}-morada` })} className="space-y-3">
+      {!semTitulo && <h3 id={`${id}-morada`} className="text-sm font-semibold text-foreground">{t(`${N}address.title`)}</h3>}
       <p className="text-sm text-muted-foreground">{t(`${N}address.note`)}</p>
       {origem && (
         <p role="note" className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-2 text-sm text-foreground">

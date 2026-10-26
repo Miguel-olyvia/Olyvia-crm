@@ -1,5 +1,4 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { fichaPessoaQueryKey } from "./useFichaPessoa";
 import { listaPessoasQueryKey } from "./useListaPessoas";
 
@@ -14,8 +13,8 @@ export async function invalidarPessoas(client: QueryClient, organizationId: stri
       client.invalidateQueries({ queryKey: fichaPessoaQueryKey(organizationId, pessoaId) }),
       client.invalidateQueries({ queryKey: listaPessoasQueryKey(organizationId) }),
     ]);
-  } catch (erro) {
-    // A escrita já aconteceu; refazer a ficha é um extra. Falhar aqui não pode virar rejeição por tratar (nem fazer falhar um guardar que gravou).
-    captureFlowError(erro, "pessoas-neg");
+  } catch {
+    // A escrita já aconteceu; refazer a ficha é um extra e a próxima leitura trá-la de novo. Falhar aqui não pode virar rejeição por tratar
+    // (nem fazer falhar um guardar que gravou) e não se regista: é uma falha benigna, como o useQualificarLeadPessoa já assume.
   }
 }

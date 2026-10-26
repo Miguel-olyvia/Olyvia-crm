@@ -44,17 +44,16 @@ function desenhar() {
     <QueryClientProvider client={cliente}>
       <FontePessoasContext.Provider value={REAL}>
         <MemoryRouter>
-          <FichaReal comGuia pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
+          <FichaReal pessoaId={PESSOA_ID} idsVisiveis={[PESSOA_ID]} aoFechar={vi.fn()} aoIrPara={vi.fn()} aoLimpar={vi.fn()} />
         </MemoryRouter>
       </FontePessoasContext.Provider>
     </QueryClientProvider>,
   );
 }
 const abrirDados = async () => {
-  await screen.findByRole("region", { name: "Ana Lopes" });
-  await screen.findByRole("button", { name: "Mais" });
+  await screen.findByRole("tab", { name: /^Resumo/ });
+  await screen.findByRole("tab", { name: /^Resumo/ });
   abrirApoio("Registos e dados");
-  fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ }));
   return screen.findByRole("region", { name: "Contacto e preferências" });
 };
 
@@ -72,7 +71,7 @@ describe("FichaReal: contacto editável", () => {
     desenhar();
     const seccao = await abrirDados();
     fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "nova@exemplo.pt" } });
+    fireEvent.change(within(seccao).getByLabelText("Email"), { target: { value: "nova@exemplo.pt" } });
     fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(chamadas("neg_substituir_contacto")).toHaveLength(1));
     expect(params("neg_substituir_contacto")).toEqual({ p_organization_id: "org-1", p_entity_id: PESSOA_ID, p_email: "nova@exemplo.pt", p_telefone: null });
@@ -83,8 +82,8 @@ describe("FichaReal: contacto editável", () => {
     desenhar();
     const seccao = await abrirDados();
     fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
-    fireEvent.change(screen.getByLabelText("Melhor hora"), { target: { value: "manha" } });
-    fireEvent.change(screen.getByLabelText("Prefere ser contactado"), { target: { value: "whatsapp" } });
+    fireEvent.change(within(seccao).getByLabelText("Melhor hora"), { target: { value: "manha" } });
+    fireEvent.change(within(seccao).getByLabelText("Prefere ser contactado"), { target: { value: "whatsapp" } });
     fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(chamadas("neg_guardar_contacto_pessoa")).toHaveLength(1));
     expect(params("neg_guardar_contacto_pessoa")).toEqual({
@@ -101,12 +100,12 @@ describe("FichaReal: contacto editável", () => {
     desenhar();
     const seccao = await abrirDados();
     fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "outra@exemplo.pt" } });
-    fireEvent.change(screen.getByLabelText("Melhor hora"), { target: { value: "manha" } });
+    fireEvent.change(within(seccao).getByLabelText("Email"), { target: { value: "outra@exemplo.pt" } });
+    fireEvent.change(within(seccao).getByLabelText("Melhor hora"), { target: { value: "manha" } });
     fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
     expect(await within(seccao).findByRole("alert")).toHaveTextContent("já pertence a outra pessoa");
     expect(chamadas("neg_guardar_contacto_pessoa")).toHaveLength(0);
-    expect(screen.getByLabelText("Email")).toHaveValue("outra@exemplo.pt");
+    expect(within(seccao).getByLabelText("Email")).toHaveValue("outra@exemplo.pt");
   });
 
   it("se o email grava e as preferências falham, o erro diz que o telefone e o email ficaram gravados (e o motivo)", async () => {
@@ -117,14 +116,14 @@ describe("FichaReal: contacto editável", () => {
     desenhar();
     const seccao = await abrirDados();
     fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
-    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "nova@exemplo.pt" } });
-    fireEvent.change(screen.getByLabelText("Melhor hora"), { target: { value: "manha" } });
+    fireEvent.change(within(seccao).getByLabelText("Email"), { target: { value: "nova@exemplo.pt" } });
+    fireEvent.change(within(seccao).getByLabelText("Melhor hora"), { target: { value: "manha" } });
     fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
     const alerta = await within(seccao).findByRole("alert");
     expect(alerta).toHaveTextContent(/telefone e o email ficaram gravados/i);
     expect(alerta).toHaveTextContent(/preferências/i);
     expect(chamadas("neg_substituir_contacto")).toHaveLength(1);
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(within(seccao).getByLabelText("Email")).toBeInTheDocument();
   });
 
   it("se só as preferências falham (nada foi substituído), o erro NÃO diz que o email ficou gravado", async () => {
@@ -135,7 +134,7 @@ describe("FichaReal: contacto editável", () => {
     desenhar();
     const seccao = await abrirDados();
     fireEvent.click(within(seccao).getByRole("button", { name: "Editar contacto" }));
-    fireEvent.change(screen.getByLabelText("Melhor hora"), { target: { value: "manha" } });
+    fireEvent.change(within(seccao).getByLabelText("Melhor hora"), { target: { value: "manha" } });
     fireEvent.click(within(seccao).getByRole("button", { name: "Guardar" }));
     const alerta = await within(seccao).findByRole("alert");
     expect(alerta).not.toHaveTextContent(/ficaram gravados/i);
@@ -153,9 +152,8 @@ describe("FichaReal: tipo de cliente", () => {
   it("um condomínio mostra «Condomínio» e editar o nome manda p_tipo condominio", async () => {
     ficha = fichaCom({ tipo: "organization", nome: "Edifício Sol", empresa_nome: "Edifício Sol", organization_kind: "condominio", tipo_cliente: "condominio" });
     desenhar();
-    await screen.findByRole("button", { name: "Mais" });
+    await screen.findByRole("tab", { name: /^Resumo/ });
     abrirApoio("Registos e dados");
-    fireEvent.click(await screen.findByRole("button", { name: /^Dados da pessoa/ }));
     const identidade = await screen.findByRole("region", { name: "Identidade" });
     expect(within(identidade).getByText("Condomínio")).toBeInTheDocument();
     fireEvent.click(within(identidade).getByRole("button", { name: "Editar identidade" }));

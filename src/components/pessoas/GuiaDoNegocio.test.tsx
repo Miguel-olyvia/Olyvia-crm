@@ -2,19 +2,20 @@
 // executor do Quadro (`ProcessoContext`), «Fazer o levantamento» abre o painel ligado ao negócio, sem permissão o passo fica desativado com a razão,
 // e perder o negócio continua ao alcance. Os painéis e a base estão simulados.
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ComCostura, dadosFalsos, mutacoesFalsas } from "@/components/negocio-metas/costuraTestUtil";
 import { repor } from "@/components/negocio-metas/negociosAlterados";
 import { repor as reporRegistos } from "@/components/negocio-metas/registosPessoa";
 import { FontePessoasContext, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import { prepararRadixNoJsdom } from "@/test/radixJsdomTeste";
+import { ComClienteQuery } from "@/test/clienteQueryTeste";
 import { DetalheNegocioFicha } from "./DetalheNegocioFicha";
 import { negocioBase, pessoaBase } from "./fabricaTestes";
 import { ProcessoContext, type ProcessoValor } from "./processo/processoContexto";
 import type { ItemProcesso } from "./processo/tiposProcesso";
 
-const { abrirLevantamento, levantamentoPode } = vi.hoisted(() => ({ abrirLevantamento: vi.fn(), levantamentoPode: { valor: true } }));
+const { levantamentoPode } = vi.hoisted(() => ({ levantamentoPode: { valor: true } }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/hooks/useTranslation", async () => (await import("@/components/pessoas-lista/traducaoTeste")).moduloTraducao());
 vi.mock("@/lib/toast", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
@@ -22,7 +23,7 @@ vi.mock("@/hooks/pessoas/useComerciaisNegocio", () => ({
   useComerciaisNegocio: () => ({ comerciais: [], isLoading: false, isError: false, repetir: vi.fn() }),
 }));
 vi.mock("@/components/pessoas-processo/LevantamentoDoNegocioReal", () => ({
-  useLevantamentoDoNegocio: () => ({ pode: levantamentoPode.valor, abrir: abrirLevantamento }),
+  useLevantamentoDoNegocio: () => ({ pode: levantamentoPode.valor, ficha: null }),
 }));
 const { abrirDocumento, documentos } = vi.hoisted(() => ({ abrirDocumento: vi.fn(), documentos: { pode: true, semProvider: false } }));
 vi.mock("@/components/pessoas-processo/DocumentosDoNegocioReal", () => ({
@@ -31,7 +32,7 @@ vi.mock("@/components/pessoas-processo/DocumentosDoNegocioReal", () => ({
 
 beforeAll(prepararRadixNoJsdom);
 afterEach(() => {
-  cleanup(); repor(); reporRegistos(); abrirLevantamento.mockReset(); levantamentoPode.valor = true;
+  cleanup(); repor(); reporRegistos(); levantamentoPode.valor = true;
   abrirDocumento.mockReset(); documentos.pode = true; documentos.semProvider = false;
 });
 
@@ -52,7 +53,7 @@ function processo(extra: Partial<ProcessoValor> = {}): ProcessoValor {
 
 function abrir(item: ItemProcesso, p: ProcessoValor | null = processo(), opcoes: { podeEditar?: boolean; fonte?: FontePessoas; negocio?: typeof negocio } = {}) {
   render(
-    <MemoryRouter>
+    <ComClienteQuery><MemoryRouter>
       <FontePessoasContext.Provider value={opcoes.fonte ?? REAL}>
         <ProcessoContext.Provider value={p}>
           <ComCostura mutacoes={mutacoesFalsas()} dados={dadosFalsos({ podeEditar: opcoes.podeEditar ?? true })}>
@@ -60,7 +61,7 @@ function abrir(item: ItemProcesso, p: ProcessoValor | null = processo(), opcoes:
           </ComCostura>
         </ProcessoContext.Provider>
       </FontePessoasContext.Provider>
-    </MemoryRouter>,
+    </MemoryRouter></ComClienteQuery>,
   );
 }
 
@@ -95,29 +96,33 @@ describe("o guia do negócio aberto", () => {
     expect((p.executar as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({ id: "n1", fase: "orcamento" });
   });
 
-  it("«Fazer o levantamento» abre o painel ligado ao NEGÓCIO (e não executa nada do processo)", () => {
-    const p = processo({ podeExecutar: () => false });
-    abrir(itemDe({ fase: "levantamento" }), p);
-    fireEvent.click(screen.getByRole("button", { name: /^Fazer o levantamento/ }));
-    expect(abrirLevantamento).toHaveBeenCalledTimes(1);
-    expect(abrirLevantamento.mock.calls[0][0]).toBe("n1");
-    expect(p.executar).not.toHaveBeenCalled();
-  });
+  describe("em Levantamento o guia é o assistente da fase Visita", () => {
+    const coluna = () => within(screen.getByRole("navigation", { name: "Passos da fase" }));
 
-  it("sem o painel do levantamento disponível, o passo fica desativado com a razão (não desaparece nem finge)", () => {
-    levantamentoPode.valor = false;
-    abrir(itemDe({ fase: "levantamento" }));
-    const botao = screen.getByRole("button", { name: /^Fazer o levantamento/ });
-    expect(botao).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Este passo ainda não está disponível neste ecrã.")).toBeInTheDocument();
-    fireEvent.click(botao);
-    expect(abrirLevantamento).not.toHaveBeenCalled();
-  });
+    it("mostra os passos da fase (Visitas e Fechar levantamento) em vez do botão único «Fazer o levantamento», e não abre o painel antigo", () => {
+      const p = processo({ podeExecutar: () => false });
+      abrir(itemDe({ fase: "levantamento" }), p);
+      expect(screen.queryByRole("button", { name: /^Fazer o levantamento/ })).toBeNull();
+      const nomes = coluna().getAllByRole("button").map((b) => b.textContent?.replace(/^\d+/, "").replace(/, .*$/, ""));
+      expect(nomes[0]).toBe("Visitas");
+      expect(nomes.at(-1)).toBe("Fechar levantamento");
+      expect(screen.getByText(/^Passo 1 de \d+/)).toBeInTheDocument();
+      expect(p.executar).not.toHaveBeenCalled();
+    });
 
-  it("sem permissão de editar o passo fica desativado com a razão", () => {
-    abrir(itemDe({ fase: "levantamento" }), processo(), { podeEditar: false });
-    expect(screen.getByRole("button", { name: /^Fazer o levantamento/ })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Não tem permissão para fazer este passo.")).toBeInTheDocument();
+    it("o levantamento é do negócio: os passos que gravam dizem que sem permissão não se pode", () => {
+      abrir(itemDe({ fase: "levantamento" }), processo(), { podeEditar: false });
+      fireEvent.click(coluna().getByRole("button", { name: /^Fechar levantamento/ }));
+      expect(screen.getByText("Não tem permissão para fazer este passo.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Guardar o levantamento" })).toBeNull();
+    });
+
+    it("sem a ficha da base (o painel do levantamento indisponível) não se pode guardar e diz porquê", () => {
+      abrir(itemDe({ fase: "levantamento" }));
+      fireEvent.click(coluna().getByRole("button", { name: /^Fechar levantamento/ }));
+      expect(screen.getByRole("button", { name: "Guardar o levantamento" })).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByText("Só se pode guardar com a ficha da base aberta.")).toBeInTheDocument();
+    });
   });
 
   it("sem quotes.create o orçamento não se cria: desativado com a razão, e o executor não é chamado", () => {

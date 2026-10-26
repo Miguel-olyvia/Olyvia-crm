@@ -49,7 +49,7 @@ interface Props {
 }
 
 /** «O que o cliente pediu»: um campo próprio, com o limite à vista. */
-function PedidoDoCliente({ id, valor, aoMudar }: { id: string; valor: string; aoMudar: (valor: string) => void }) {
+export function PedidoDoCliente({ id, valor, aoMudar }: { id: string; valor: string; aoMudar: (valor: string) => void }) {
   const { t } = useTranslation();
   const n = Array.from(valor).length;
   return (
