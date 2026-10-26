@@ -71,6 +71,7 @@ export function CorpoChamada({ id, pessoa, resumo, hoje, acoes, aoFechar, aoConc
   // A agenda da base só mostra os seus erros depois de tentar guardar (como o resto do formulário).
   const [tentouAgenda, setTentouAgenda] = useState(false);
   const [semNegocio, setSemNegocio] = useState(false);
+  useEffect(() => { if (negocioId) setSemNegocio(false); }, [negocioId]);
   const comAgenda = agendaReal !== null && f.campos.passo === "marcarVisita";
   const erroAgenda = comAgenda && tentouAgenda && agendaReal ? validarAgenda(agendaReal.valor, hoje) : null;
   const acao = useExecutarAcao();

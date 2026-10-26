@@ -50,6 +50,8 @@ export function GrupoQuemPede({ form, tipoAtual, aoMudarForm, nif, aoMudarNif, n
   const pedePessoa = mudou && form.tipo === "person";
   const idNif = `${id}-nif`;
   const idAjudaNif = `${id}-nif-ajuda`;
+  const idErroNif = `${id}-nif-erro`;
+  const nifInvalido = erroCampo === "nif";
   const ajudaNif = nifUltimos3 ? t(`${A}nifTem`, { n: nifUltimos3 }) : nifRegistado ? t(`${A}nifTemSemDigitos`) : t(`${A}nifSem`);
   const invalido = (campo: CampoQuemPede) => (erroCampo === campo ? true : undefined);
   return (
@@ -97,8 +99,9 @@ export function GrupoQuemPede({ form, tipoAtual, aoMudarForm, nif, aoMudarNif, n
         <Label htmlFor={idNif}>{t(`${A}nif`)}</Label>
         <Input
           id={idNif} type="text" inputMode="numeric" autoComplete="off" maxLength={20} className={cn("min-h-11 sm:max-w-xs", FOCO)} value={nif}
-          readOnly={!podeEditar} aria-invalid={invalido("nif")} aria-describedby={idAjudaNif} onChange={(e) => aoMudarNif(e.target.value)}
+          readOnly={!podeEditar} aria-invalid={invalido("nif")} aria-describedby={nifInvalido ? `${idErroNif} ${idAjudaNif}` : idAjudaNif} onChange={(e) => aoMudarNif(e.target.value)}
         />
+        {nifInvalido && <p id={idErroNif} className="text-sm font-medium text-destructive">{t(`${A}nifErro`)}</p>}
         <p id={idAjudaNif} className="text-sm text-muted-foreground">{ajudaNif}</p>
       </div>
     </fieldset>

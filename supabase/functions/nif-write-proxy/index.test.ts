@@ -253,7 +253,7 @@ Deno.test("nif explicitly null => final rpc call does not include the 3 nif-deri
   assertEquals(params, { p_id: "c-1" });
 });
 
-Deno.test("nif provided but blank after trim => 400", async () => {
+Deno.test("nif provided but blank after trim => treated as no-NIF, RPC called without nif-derived fields", async () => {
   const { createUserClient, rpcCalls } = makeMockUserClientFactory();
   const deps = baseDeps({ createUserClient });
 
@@ -263,8 +263,12 @@ Deno.test("nif provided but blank after trim => 400", async () => {
   );
   const res = await handleNifWriteProxyRequest(req, deps);
 
-  assertEquals(res.status, 400);
-  assertEquals(rpcCalls.length, 0);
+  assertEquals(res.status, 200);
+  assertEquals(rpcCalls.length, 1);
+  const { params } = rpcCalls[0];
+  assertEquals("p_nif_encrypted" in params, false);
+  assertEquals("p_nif_hash" in params, false);
+  assertEquals("p_nif_tokens" in params, false);
 });
 
 Deno.test("client-injected p_nif_hash is discarded; final call uses the internally computed hash", async () => {

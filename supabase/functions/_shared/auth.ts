@@ -208,6 +208,16 @@ export async function requireAdminRole(
 }
 
 /**
+ * Returns the SUPABASE_SERVICE_ROLE_KEY from the environment.
+ * Centralised so every function reads the same env var name.
+ */
+export function getServiceRoleKey(): string {
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not set");
+  return key;
+}
+
+/**
  * Validates that a SERVICE_ROLE key is being used (for CRON/internal functions).
  */
 export function requireServiceRole(req: Request): boolean {

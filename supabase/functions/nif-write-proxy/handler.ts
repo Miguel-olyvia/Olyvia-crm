@@ -117,9 +117,13 @@ function sanitizeClientParams(
   return sanitized;
 }
 
-/** Replaces any occurrence of the plaintext NIF in a message. */
+/** Replaces any occurrence of the plaintext NIF (with and without separators) in a message. */
 function redactNif(message: string, nif: string): string {
-  return nif === "" ? message : message.split(nif).join("***");
+  if (nif === "") return message;
+  let result = message.split(nif).join("***");
+  const digits = nif.replace(/\D/g, "");
+  if (digits !== nif && digits !== "") result = result.split(digits).join("***");
+  return result;
 }
 
 /**
