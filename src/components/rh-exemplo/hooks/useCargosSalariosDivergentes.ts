@@ -1,16 +1,12 @@
-/** Na apresentação os salários dos cargos e das pessoas estão alinhados: nada diverge. */
-export interface CargoSalarioDivergente {
-  cargo: string;
-  pessoa_id: string;
-  pessoa_nome: string;
-  valor_base: number;
-  periodicidade: string;
-}
+/**
+ * Os cargos com mais do que um salário activo hoje, delegando ao hook real que
+ * lê em Supabase.
+ * Mantém a mesma interface que os componentes de /rh-exemplo consomem.
+ */
+import { useCargosSalariosDivergentes as useCargosSalariosDivergentesReal } from "@/hooks/useCargosSalariosDivergentes";
 
-export function useCargosSalariosDivergentes(): {
-  divergencias: CargoSalarioDivergente[];
-  isLoading: boolean;
-  error: Error | null;
-} {
-  return { divergencias: [], isLoading: false, error: null };
+export type { CargoSalarioDivergente } from "@/hooks/useCargosSalariosDivergentes";
+
+export function useCargosSalariosDivergentes() {
+  return useCargosSalariosDivergentesReal();
 }

@@ -1,4 +1,10 @@
-/** O nome que a marca de água dos anexos mostra: na apresentação, um utilizador de exemplo. */
+/**
+ * O nome de quem está a ver um documento sensível, para a marca de água,
+ * delegando ao hook real que lê a sessão Supabase.
+ * Mantém a mesma interface que os componentes de /rh-exemplo consomem.
+ */
+import { useNomeParaMarcaDagua as useNomeParaMarcaDaguaReal } from "@/hooks/useNomeParaMarcaDagua";
+
 export function useNomeParaMarcaDagua(): string {
-  return "Utilizador de exemplo";
+  return useNomeParaMarcaDaguaReal();
 }

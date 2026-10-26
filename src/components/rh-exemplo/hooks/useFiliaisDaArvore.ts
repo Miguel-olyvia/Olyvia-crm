@@ -1,12 +1,12 @@
-/** As filiais do organograma de exemplo. */
-import { useEstadoRh } from "@/components/rh-exemplo/dados/loja";
+/**
+ * As filiais do organograma disponíveis para escolha, delegando ao hook real
+ * que lê em Supabase.
+ * Mantém a mesma interface que os componentes de /rh-exemplo consomem.
+ */
+import { useFiliaisDaArvore as useFiliaisDaArvoreReal } from "@/hooks/useFiliaisDaArvore";
 
-export interface FilialOpcao {
-  id: string;
-  name: string;
-}
+export type { FilialOpcao } from "@/hooks/useFiliaisDaArvore";
 
-export function useFiliaisDaArvore(): { filiais: FilialOpcao[]; loading: boolean } {
-  const filiais = useEstadoRh((e) => e.filiais);
-  return { filiais, loading: false };
+export function useFiliaisDaArvore() {
+  return useFiliaisDaArvoreReal();
 }

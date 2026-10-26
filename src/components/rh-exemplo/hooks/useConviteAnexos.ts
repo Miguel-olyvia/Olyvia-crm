@@ -1,85 +1,21 @@
 /**
- * Os ficheiros anexados ao convite de admissão, em memória: valida o ficheiro como o ecrã real (formato, tamanho,
- * limites de contagem) e fica com ele só enquanto a página estiver aberta. Nada é enviado.
+ * Os ficheiros anexados ao convite de admissão, delegando ao hook real que
+ * comunica com Supabase via Edge Function.
+ * Mantém a mesma interface que os componentes de /rh-exemplo consomem.
  */
-import { useCallback, useMemo, useRef, useState } from "react";
-import {
-  contarPorTipo,
-  validarFicheiroLocal,
-  verificarLimitesDeContagem,
-  type AnexoConvite,
-  type ContagemPorTipo,
-  type TipoAnexoConvite,
-} from "@/components/rh-exemplo/lib/conviteAnexos";
+import { useConviteAnexos as useConviteAnexosReal } from "@/hooks/useConviteAnexos";
+import type { AnexoConvite } from "@/lib/hr/conviteAnexos";
 
-export type FaseEnvio = "a_enviar" | "a_verificar" | "erro";
-
-export interface EnvioAnexo {
-  tipo: TipoAnexoConvite;
-  nome: string;
-  fase: FaseEnvio;
-  progresso: number;
-  codigoErro: string | null;
-}
-
-export interface ContagemAnexos {
-  total: number;
-  porTipo: ContagemPorTipo;
-}
-
-export interface ResultadoConviteAnexos {
-  anexos: AnexoConvite[];
-  envios: Record<string, EnvioAnexo>;
-  emCurso: boolean;
-  removendo: ReadonlySet<string>;
-  contagem: ContagemAnexos;
-  erroConvite: string | null;
-  adicionar: (tipo: TipoAnexoConvite, file: File) => Promise<void>;
-  remover: (id: string) => Promise<void>;
-}
-
-const SEM_REMOCOES: ReadonlySet<string> = new Set();
+export type {
+  FaseEnvio,
+  EnvioAnexo,
+  ContagemAnexos,
+  ResultadoConviteAnexos,
+} from "@/hooks/useConviteAnexos";
 
 export function useConviteAnexos(
-  _token: string | undefined,
+  token: string | undefined,
   iniciais?: AnexoConvite[],
-): ResultadoConviteAnexos {
-  const [anexos, setAnexos] = useState<AnexoConvite[]>(() => (iniciais ? [...iniciais] : []));
-  const [envios, setEnvios] = useState<Record<string, EnvioAnexo>>({});
-  const contador = useRef(0);
-
-  const adicionar = useCallback(
-    async (tipo: TipoAnexoConvite, file: File): Promise<void> => {
-      contador.current += 1;
-      const numero = contador.current;
-      const semErrosDoTipo = Object.fromEntries(
-        Object.entries(envios).filter(([, e]) => !(e.tipo === tipo && e.fase === "erro")),
-      );
-      const recusa = validarFicheiroLocal(tipo, file) ?? verificarLimitesDeContagem(tipo, contarPorTipo(anexos));
-      if (recusa) {
-        setEnvios({
-          ...semErrosDoTipo,
-          [`envio-${numero}`]: { tipo, nome: file.name, fase: "erro", progresso: 0, codigoErro: recusa },
-        });
-        return;
-      }
-      setEnvios(semErrosDoTipo);
-      setAnexos((actuais) => [
-        ...actuais,
-        { id: `anexo-${numero}`, tipo, nome_original: file.name, tamanho_bytes: file.size, mime_type: file.type },
-      ]);
-    },
-    [anexos, envios],
-  );
-
-  const remover = useCallback(async (id: string): Promise<void> => {
-    setAnexos((actuais) => actuais.filter((a) => a.id !== id));
-  }, []);
-
-  const contagem = useMemo<ContagemAnexos>(
-    () => ({ total: anexos.length, porTipo: contarPorTipo(anexos) }),
-    [anexos],
-  );
-
-  return { anexos, envios, emCurso: false, removendo: SEM_REMOCOES, contagem, erroConvite: null, adicionar, remover };
+) {
+  return useConviteAnexosReal(token, iniciais);
 }

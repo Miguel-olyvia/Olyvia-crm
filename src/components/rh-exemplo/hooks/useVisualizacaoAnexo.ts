@@ -1,45 +1,21 @@
-/** Ver um anexo sensivel, na apresentacao: a "folha" de exemplo aparece logo, sem pedir nada a ninguem. */
-import { useEffect, useState } from "react";
-import type { UrlAnexo } from "@/components/rh-exemplo/lib/anexoUrl";
+/**
+ * A visualização de um anexo sensível dentro da página, delegando ao hook real
+ * que carrega via URL assinado do Supabase.
+ * Mantém a mesma interface que os componentes de /rh-exemplo consomem.
+ */
+import { useVisualizacaoAnexo as useVisualizacaoAnexoReal } from "@/hooks/useVisualizacaoAnexo";
 
-export const DURACAO_VISUALIZACAO_MS = 120_000;
+export type { EstadoVisualizacao } from "@/hooks/useVisualizacaoAnexo";
+export { DURACAO_VISUALIZACAO_MS } from "@/hooks/useVisualizacaoAnexo";
 
-export type EstadoVisualizacao =
-  | { fase: "inactivo" }
-  | { fase: "a_carregar" }
-  | { fase: "erro" }
-  | { fase: "pronto"; url: string; mime: string };
+import type { UrlAnexo } from "@/lib/hr/anexoUrl";
 
 interface Opcoes {
-  /** O anexo a ver; `null` = nada aberto. */
   anexoId: string | null;
   obterUrl: (anexoId: string) => Promise<UrlAnexo>;
   aoExpirar: () => void;
 }
 
-export function useVisualizacaoAnexo({ anexoId, obterUrl, aoExpirar }: Opcoes): EstadoVisualizacao {
-  const [estado, setEstado] = useState<EstadoVisualizacao>({ fase: "inactivo" });
-
-  useEffect(() => {
-    if (!anexoId) {
-      setEstado({ fase: "inactivo" });
-      return;
-    }
-    let cancelado = false;
-    setEstado({ fase: "a_carregar" });
-    obterUrl(anexoId)
-      .then((resposta) => {
-        if (!cancelado) setEstado({ fase: "pronto", url: resposta.url, mime: resposta.mime_type ?? "image/svg+xml" });
-      })
-      .catch(() => {
-        if (!cancelado) setEstado({ fase: "erro" });
-      });
-    const temporizador = setTimeout(aoExpirar, DURACAO_VISUALIZACAO_MS);
-    return () => {
-      cancelado = true;
-      clearTimeout(temporizador);
-    };
-  }, [anexoId, obterUrl, aoExpirar]);
-
-  return estado;
+export function useVisualizacaoAnexo(opcoes: Opcoes) {
+  return useVisualizacaoAnexoReal(opcoes);
 }
